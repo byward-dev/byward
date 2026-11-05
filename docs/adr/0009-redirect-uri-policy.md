@@ -44,6 +44,12 @@ babs allows custom schemes as an opt-in.
 
 ## Consequences
 
+- _Amended by ADR-0010:_ **deliberate deviation.** The MCP security best practices say redirect
+  URIs "Use exact string matching (not pattern matching or wildcards)". Rule 2 ignores the port on
+  loopback because RFC 8252 §7.3 ("MUST allow any port … for loopback IP redirect URIs") and
+  RFC 9700 §4.1.3 require it, and Claude Code registers loopback URIs without a port. Everything
+  else is matched exactly.
+
 - Clients that only offer custom schemes are unsupported, as the spec requires.
 - ChatGPT's stable redirect URI depends on RFC 9207 `iss` (F16).
 - Our consent page is the only place a user sees the redirect host — the IdP's consent names only
