@@ -5,11 +5,17 @@ Sources checked 2026-11-05; `[unverified]` = no primary source.
 
 ## How to use it
 
-1. Name the **primary persona** and the job: "When I …, I want …, so I can …".
-2. Walk the lenses the [feature × lens map](#feature--lens-map) marks; skim the rest.
-3. Answer each question or mark it `n/a` with a reason.
-4. Write measurable answers as quality scenarios: context / trigger / acceptance criteria (arc42 §10).
-5. Record answers, budgets and matrix cells in the ADR's **Consequences**.
+Name the feature's **primary persona** and its job: "When I …, I want …, so I can …". Write
+measurable answers as quality scenarios: context / trigger / acceptance criteria (arc42 §10).
+
+### Research procedure (per feature question)
+
+1. Verify every claim the recommendation rests on against a primary source: spec text, competitor source at a named commit, or official vendor docs. Quote it with a link or `file:line`.
+2. Build a competitor table from source: what each comparable project does for this question.
+3. Look for what competitors missed: options none of them chose (other designs, tools, standards). Evaluate those too — the best answer may be one nobody ships yet.
+4. Walk every lens in this document (start with those the [feature × lens map](#feature--lens-map) marks). Answer each question or mark it `n/a` with a reason; list each gap and the change it requires.
+5. State confidence (high / medium / low), what remains unverified, and what evidence would raise it. If nothing more could change the decision, say so.
+6. Record the decision as an ADR. Lens answers, budgets and matrix cells go in **Consequences**. Update `CONTEXT.md` for any resolved term.
 
 ## Personas
 
