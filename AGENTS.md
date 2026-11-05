@@ -47,3 +47,17 @@ All tools are pinned in `mise.toml`; `mise run` resolves them, no shell activati
 - Never commit to `main`. Feature branch → PR (`gh pr create`) → squash merge.
 - Do not merge PRs or push to `main` yourself; the maintainer reviews and merges.
 - Commit messages: Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, `test:`).
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `corker/mcp-authproxy` via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
