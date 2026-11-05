@@ -13,8 +13,8 @@ Suggested grill order follows dependencies (earlier rows constrain later ones).
 
 | # | Issue | Feature | Area | Depends on | Status |
 |---|---|---|---|---|---|
-| F1 | [#2](https://github.com/corker/mcp-authproxy/issues/2) | Upstream kinds | `area:upstream` | — | proposed |
-| F2 | [#3](https://github.com/corker/mcp-authproxy/issues/3) | Spec revision support | `area:upstream` | [F1](https://github.com/corker/mcp-authproxy/issues/2) | open |
+| F1 | [#2](https://github.com/corker/mcp-authproxy/issues/2) | Upstream kinds | `area:upstream` | — | decided: [ADR-0003](adr/0003-upstream-kinds.md) |
+| F2 | [#3](https://github.com/corker/mcp-authproxy/issues/3) | Spec revision support | `area:upstream` | [F1](https://github.com/corker/mcp-authproxy/issues/2) | decided: [ADR-0004](adr/0004-spec-revisions-pass-through.md) |
 | F3 | [#4](https://github.com/corker/mcp-authproxy/issues/4) | Auth modes | `area:broker` | — | open |
 | F4 | [#5](https://github.com/corker/mcp-authproxy/issues/5) | Token model | `area:broker` | [F3](https://github.com/corker/mcp-authproxy/issues/4) | open |
 | F5 | [#6](https://github.com/corker/mcp-authproxy/issues/6) | State & storage | `area:storage` | [F4](https://github.com/corker/mcp-authproxy/issues/5) | open |
