@@ -14,6 +14,10 @@ _Avoid_: client (alone), agent, consumer
 How an **MCP client** obtains a client identity at the **broker**: Dynamic Client Registration (DCR, RFC 7591), a Client ID Metadata Document (CIMD), or a static pre-registered client.
 _Avoid_: DCR (when meaning any of the three), app registration
 
+**Client trust level**:
+How far the **broker** vouches for an **MCP client**'s identity on the **consent** page: verified (CIMD host trusted by the **operator**), domain (any other CIMD host, shown as-is) or not verified (DCR).
+_Avoid_: verified app, trusted client (alone)
+
 **IdP**:
 The external identity provider that authenticates the **user** (Entra ID, Keycloak, Okta, Google, …). Always the IdP — never "upstream".
 _Avoid_: upstream, auth server (ambiguous), provider (alone, except in code as `idp.Provider`)
