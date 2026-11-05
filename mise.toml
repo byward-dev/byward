@@ -1,0 +1,30 @@
+[tools]
+go = "1.26"
+golangci-lint = "2.12.2"
+"go:golang.org/x/tools/cmd/goimports" = "0.52.0"
+
+[tasks.fmt]
+description = "Format all Go files (writes)"
+run = ["gofmt -s -w .", "goimports -w ."]
+
+[tasks."fmt:check"]
+description = "Fail if any Go file is not formatted"
+run = 'test -z "$(gofmt -s -l .)$(goimports -l .)" || { gofmt -s -l .; goimports -l .; exit 1; }'
+
+[tasks.vet]
+run = "go vet ./..."
+
+[tasks.lint]
+run = "golangci-lint run"
+
+[tasks.test]
+description = "Unit tests"
+run = "go test ./..."
+
+[tasks."test:integration"]
+description = "Integration tests (needs Docker)"
+run = "go test -tags=integration ./..."
+
+[tasks.check]
+description = "Everything CI runs"
+depends = ["fmt:check", "vet", "lint", "test"]

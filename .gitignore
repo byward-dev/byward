@@ -1,0 +1,21 @@
+# Binaries
+/mcp-authproxy
+/dist/
+bin/
+
+# Go build artefacts
+*.exe
+*.test
+*.out
+coverage.txt
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local overrides
+.env
+.env.local
+.claude/settings.local.json

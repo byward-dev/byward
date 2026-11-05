@@ -1,0 +1,35 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - revive
+    - gosec
+  settings:
+    revive:
+      rules:
+        - name: package-comments
+        - name: exported
+          disabled: true
+  exclusions:
+    rules:
+      # Test fixtures use credential-shaped literals (client ids, signing keys)
+      # that are not real secrets; gosec's G101 heuristic flags them as hardcoded
+      # credentials. Scope the exclusion to test files only.
+      - path: _test\.go
+        linters:
+          - gosec
+        text: "G101"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+run:
+  timeout: 5m
