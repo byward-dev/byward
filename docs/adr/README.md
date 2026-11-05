@@ -21,6 +21,7 @@ each feature (F1–F22) is a GitHub issue and gets an ADR once grilled with the 
 | [0013](0013-discovery-and-errors.md) | Discovery and errors: both well-known paths, one issuer, `iss` everywhere | F16 | — |
 | [0014](0014-token-validation.md) | Token validation: header only, sealed checks, no store on the request path | F11 | — |
 | [0015](0015-access-gate.md) | Authorization: an access gate at login and refresh, no per-request denials | F12 | — |
+| [0016](0016-identity-propagation.md) | Identity propagation: an RFC 9068 assertion for the upstream, strip then inject | F13 | — |
 
 ## Writing a new ADR
 
