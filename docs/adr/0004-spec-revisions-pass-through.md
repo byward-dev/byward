@@ -14,9 +14,13 @@ no fall-forward mechanism". No surveyed project translates between revisions; ag
 so explicitly. Translation would mean synthesising `initialize`, mapping MRTR to server-initiated
 requests and `subscriptions/listen` to GET streams — a protocol gateway (ADR-0001 non-goal).
 
-MRTR `requestState` must be bound to a principal: servers "**SHOULD** include … the
-authenticated principal, rejecting state presented by a different principal". An HTTP upstream
-can only do that if it knows who the user is.
+Two spec rules need the upstream to know who the user is. In URL-mode elicitation, "The MCP
+Server **MUST** verify the identity of the user who opens the URL before accepting information"
+(`client/elicitation`). And for MRTR, servers "**SHOULD** include … the authenticated principal,
+rejecting state presented by a different principal" in `requestState` (`basic/patterns/mrtr`).
+Behind the proxy, an HTTP upstream can only do either if the proxy tells it who the user is.
+The spec defines no mechanism for that, and the `io.modelcontextprotocol/` `_meta` prefix is
+reserved, so it is the proxy's design choice (F13).
 
 ## Decision
 
@@ -29,8 +33,9 @@ can only do that if it knows who the user is.
    (it enforces no policy on mirrored headers).
 4. **Every request is authenticated, `server/discover` included** (as the MCP conformance suite
    does).
-5. **Identity propagation (F13) is a v1 requirement for HTTP upstreams**, so they can bind
-   `requestState` and session state to the user. stdio upstreams are covered by ADR-0003's
+5. **Identity propagation (F13) is a v1 requirement for HTTP upstreams**, so they can verify
+   the user in URL-mode elicitation (MUST) and bind `requestState` and session state to the user
+   (SHOULD). stdio upstreams are covered by ADR-0003's
    one-user-per-process invariant.
 
 ## Consequences
