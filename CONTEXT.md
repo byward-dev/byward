@@ -26,6 +26,10 @@ _Avoid_: upstream, auth server (ambiguous), provider (alone, except in code as `
 Our own static OAuth client registration at the **IdP** (e.g. an Entra app registration), configured by the **operator**.
 _Avoid_: client, app (alone)
 
+**IdP preset**:
+A named set of defaults for the generic OIDC **IdP** adapter (`google`, `okta`, `auth0`, `keycloak`); data, not code. Entra is an adapter of its own, not a preset.
+_Avoid_: provider type, connector
+
 **Upstream**:
 The MCP server behind the proxy — reached over HTTP or spawned as a stdio process. Always the MCP server.
 _Avoid_: backend, target, origin, downstream
