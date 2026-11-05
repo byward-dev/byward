@@ -63,8 +63,9 @@ server.
 
 - A user disabled at the IdP keeps access for at most one access-token lifetime (1 h), comparable
   to Entra's own 60–90 min tokens. Revocations in the proxy apply within the 30 s sync bound.
-- Losing the sealing key only forces refreshes. Restoring an old store resurrects revoked grants:
-  the runbook rotates the sealing key after any restore.
+- Losing the sealing key only forces refreshes. Restoring an old store resurrects revoked grants
+  and rotated refresh tokens: the runbook rotates the sealing key after any restore, and
+  _amended by ADR-0007_, a store epoch refuses refresh tokens from before the restore.
 - Constraint on F6: DCR client registrations must outlive the 30-day absolute refresh lifetime.
 - Claude Code users running several sessions may be asked to sign in again (#91641) — documented
   limitation.
