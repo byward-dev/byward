@@ -17,7 +17,7 @@ Suggested grill order follows dependencies (earlier rows constrain later ones).
 | F2 | [#3](https://github.com/corker/mcp-authproxy/issues/3) | Spec revision support | `area:upstream` | [F1](https://github.com/corker/mcp-authproxy/issues/2) | decided: [ADR-0004](adr/0004-spec-revisions-pass-through.md) |
 | F3 | [#4](https://github.com/corker/mcp-authproxy/issues/4) | Auth modes | `area:broker` | — | decided: [ADR-0005](adr/0005-auth-modes-broker-only.md) |
 | F4 | [#5](https://github.com/corker/mcp-authproxy/issues/5) | Token model | `area:broker` | [F3](https://github.com/corker/mcp-authproxy/issues/4) | decided: [ADR-0006](adr/0006-token-model.md) |
-| F5 | [#6](https://github.com/corker/mcp-authproxy/issues/6) | State & storage | `area:storage` | [F4](https://github.com/corker/mcp-authproxy/issues/5) | open |
+| F5 | [#6](https://github.com/corker/mcp-authproxy/issues/6) | State & storage | `area:storage` | [F4](https://github.com/corker/mcp-authproxy/issues/5) | decided: [ADR-0007](adr/0007-state-and-storage.md) |
 | F6 | [#7](https://github.com/corker/mcp-authproxy/issues/7) | Client registration | `area:broker` | [F3](https://github.com/corker/mcp-authproxy/issues/4), [F5](https://github.com/corker/mcp-authproxy/issues/6) | open |
 | F7 | [#8](https://github.com/corker/mcp-authproxy/issues/8) | Consent screen | `area:broker` | [F5](https://github.com/corker/mcp-authproxy/issues/6), [F6](https://github.com/corker/mcp-authproxy/issues/7) | open |
 | F8 | [#9](https://github.com/corker/mcp-authproxy/issues/9) | Redirect URI policy | `area:broker` | [F6](https://github.com/corker/mcp-authproxy/issues/7) | open |

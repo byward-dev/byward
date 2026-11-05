@@ -26,9 +26,12 @@ reserved, so it is the proxy's design choice (F13).
 
 1. **One endpoint serves both eras.** The proxy recognises the era per request only to do auth
    work; it never translates between revisions. Client and upstream negotiate through the proxy.
-2. **Legacy era:** the proxy records the `Mcp-Session-Id` the upstream issues on `initialize`
-   and binds it to the authenticated user; a request presenting another user's session is
-   rejected. GET and DELETE are forwarded, not answered by the proxy.
+2. **Legacy era:** the proxy binds the `Mcp-Session-Id` the upstream issues on `initialize`
+   to the authenticated user; a request presenting another user's session is rejected. GET and
+   DELETE are forwarded, not answered by the proxy. _Amended by ADR-0007:_ the binding is
+   stateless — the proxy replaces the upstream's session ID with a sealed one carrying the
+   upstream ID and the user (as agentgateway wraps upstream session IDs), so any replica can
+   check it. "Byte-transparent" means the message body; this header is rewritten.
 3. **Modern era:** forwarded unchanged. The proxy does not validate `Mcp-Method`/`Mcp-Name`
    (it enforces no policy on mirrored headers).
 4. **Every request is authenticated, `server/discover` included** (as the MCP conformance suite
