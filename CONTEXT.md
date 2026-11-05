@@ -66,6 +66,10 @@ _Avoid_: session, authorization (alone)
 An API the **upstream** calls on the **user**'s behalf (e.g. Microsoft Graph); the MCP spec calls it an "upstream API".
 _Avoid_: upstream API, backend
 
+**Access gate**:
+The **operator**'s rule for which **users** may use the proxy at all (tenant, app roles, groups, email domain), checked when a **grant** is created and at every refresh — never per MCP request.
+_Avoid_: policy, ACL, authorization rules (alone)
+
 **Consent**:
 The **user**'s explicit, per-**MCP client** approval recorded by the **broker** before it forwards an authorization request to the **IdP** (required by the MCP security best practices against the confused-deputy problem).
 _Avoid_: approval, authorization (alone)
