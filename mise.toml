@@ -2,6 +2,9 @@
 go = "1.26"
 golangci-lint = "2.12.2"
 "go:golang.org/x/tools/cmd/goimports" = "0.52.0"
+# Operator/dev tool (Entra app setup, real-tenant tests); not needed by `mise run check`, not installed in CI.
+# azure-cli 2.92.0 pins a pre-release dependency (azure-appconfiguration 1.10.0b1); uv needs this to resolve it.
+"pipx:azure-cli" = { version = "2.92.0", uvx_args = "--prerelease=allow" }
 
 [tasks.fmt]
 description = "Format all Go files (writes)"
