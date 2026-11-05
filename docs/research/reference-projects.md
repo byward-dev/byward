@@ -84,7 +84,7 @@ Details and sources: F6 client matrix (research notes, 2026-11-05).
 | Client | Registration | Quirks |
 |---|---|---|
 | Claude.ai / Desktop | CIMD only if AS advertises the flag **and** `none`; else DCR | Registers a new client on every fresh connection (claude.com authentication.md:97); in chat, opens a new 2025-11-25 MCP session per tool call (claude-ai-mcp#583) |
-| Claude Code | CIMD (port-less loopback `redirect_uris`), DCR, `--client-id` | Omits `resource` (claude-code#90497, closed not planned); re-registers on `invalid_client` *[unverified]* |
+| Claude Code | CIMD (port-less loopback `redirect_uris`), DCR, `--client-id` | Omits `resource` (claude-code#90497, closed not planned); re-registers on `invalid_client` (inferred from the minified Claude Code 2.1.318 binary) |
 | VS Code | CIMD on the flag alone, DCR, prompt | 2025-11-25 only (ADR-0003); re-registers on `invalid_client` (extHostAuthentication.ts:872-875) |
 | Cursor | DCR public client, static `CLIENT_ID` | CIMD *[unverified]*; refuses AS metadata without `code_challenge_methods_supported` |
 | ChatGPT | CIMD preferred (`private_key_jwt` default), DCR | Requires RFC 9207 `iss` |
