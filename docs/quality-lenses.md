@@ -192,6 +192,12 @@ Sources: [OpenSSF Best Practices (Silver)](https://www.bestpractices.dev/en/crit
 13. Legacy MCP sessions are bound to the user (ADR-0004); an upstream process never serves more than one user (ADR-0003).
 14. Size, time and count limits on registration, CIMD and the store.
 15. Errors never echo secrets or upstream internals.
+16. The reverse proxy uses `httputil.ReverseProxy.Rewrite`, never `Director`; identity, forwarding,
+    authorization and downstream-token headers are stripped before ours are set (ADR-0016, ADR-0018).
+17. The MCP endpoint checks `Origin` (403) and `Host` (421) before authentication; the default bind is
+    `127.0.0.1` (ADR-0018).
+18. Every `http.Server` timeout and `MaxHeaderBytes` is set; builds use the latest Go patch release;
+    `govulncheck` is green (ADR-0018).
 
 ## Known pitfalls
 

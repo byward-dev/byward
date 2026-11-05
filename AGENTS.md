@@ -42,6 +42,7 @@ All tools are pinned in `mise.toml`; `mise run` resolves them, no shell activati
 - Never log tokens, secrets, authorization codes, or PKCE verifiers.
 - Named IdP endpoints are derived from config, never overridable to arbitrary URLs.
 - Outbound fetches of client-supplied URLs (CIMD, metadata) go through the SSRF guard.
+- Every change keeps the security invariants in `docs/quality-lenses.md` (section "Invariants").
 
 ## Branching & merging
 
