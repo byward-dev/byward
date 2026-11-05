@@ -50,6 +50,14 @@ _Avoid_: upstream token, access token (alone)
 A token issued by the **broker** to an **MCP client**, audience-bound to this proxy's resource URL.
 _Avoid_: access token (alone), session token
 
+**Grant**:
+One **user**'s authorization of one **MCP client** at the **broker**; it owns the refresh-token family and the stored **IdP tokens**, and revoking it ends every **proxy token** issued under it.
+_Avoid_: session, authorization (alone)
+
+**Downstream API**:
+An API the **upstream** calls on the **user**'s behalf (e.g. Microsoft Graph); the MCP spec calls it an "upstream API".
+_Avoid_: upstream API, backend
+
 **Consent**:
 The **user**'s explicit, per-**MCP client** approval recorded by the **broker** before it forwards an authorization request to the **IdP** (required by the MCP security best practices against the confused-deputy problem).
 _Avoid_: approval, authorization (alone)
@@ -61,3 +69,9 @@ _Avoid_: client, operator
 **Operator**:
 The person who deploys and configures the proxy (IdP app, upstream, policy).
 _Avoid_: user, admin
+
+## Flagged ambiguities
+
+- The MCP spec says "upstream API" (security considerations, token passthrough) for what we call a
+  **downstream API**; in this repo **upstream** is always the MCP server behind the proxy. When
+  quoting the spec, keep its words and add the mapping.
