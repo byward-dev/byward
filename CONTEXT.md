@@ -26,6 +26,18 @@ _Avoid_: client, app (alone)
 The MCP server behind the proxy — reached over HTTP or spawned as a stdio process. Always the MCP server.
 _Avoid_: backend, target, origin, downstream
 
+**Upstream process**:
+The OS process of a stdio **upstream**; it never serves more than one **user** (ADR-0003).
+_Avoid_: child, backend process, worker
+
+**Era**:
+The family of MCP spec revisions a request belongs to: legacy (`initialize` handshake, 2025-11-25 and earlier) or modern (stateless, 2026-07-28 and later).
+_Avoid_: protocol mode, version (when meaning the family)
+
+**MCP session**:
+A legacy-era session between an **MCP client** and an **upstream**, identified by `Mcp-Session-Id` and bound to one **user**.
+_Avoid_: session (alone — ambiguous with login/browser sessions), connection
+
 **Broker**:
 The proxy's authorization-server role toward **MCP clients**: it serves AS metadata, handles **client registration**, consent, `/authorize`, `/token`, and itself acts as an OAuth client of the **IdP** using the **IdP app**.
 _Avoid_: proxy AS, OAuth proxy, authorization server (alone)
