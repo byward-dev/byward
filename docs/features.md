@@ -21,8 +21,8 @@ Suggested grill order follows dependencies (earlier rows constrain later ones).
 | F6 | [#7](https://github.com/corker/mcp-authproxy/issues/7) | Client registration | `area:broker` | [F3](https://github.com/corker/mcp-authproxy/issues/4), [F5](https://github.com/corker/mcp-authproxy/issues/6) | decided: [ADR-0008](adr/0008-client-registration.md) |
 | F7 | [#8](https://github.com/corker/mcp-authproxy/issues/8) | Consent screen | `area:broker` | [F5](https://github.com/corker/mcp-authproxy/issues/6), [F6](https://github.com/corker/mcp-authproxy/issues/7) | decided: [ADR-0010](adr/0010-consent-screen.md) |
 | F8 | [#9](https://github.com/corker/mcp-authproxy/issues/9) | Redirect URI policy | `area:broker` | [F6](https://github.com/corker/mcp-authproxy/issues/7) | decided: [ADR-0009](adr/0009-redirect-uri-policy.md) |
-| F9 | [#10](https://github.com/corker/mcp-authproxy/issues/10) | IdP adapters | `area:idp` | [F3](https://github.com/corker/mcp-authproxy/issues/4) | open |
-| F10 | [#11](https://github.com/corker/mcp-authproxy/issues/11) | Entra specifics | `area:idp` | [F9](https://github.com/corker/mcp-authproxy/issues/10) | open |
+| F9 | [#10](https://github.com/corker/mcp-authproxy/issues/10) | IdP adapters | `area:idp` | [F3](https://github.com/corker/mcp-authproxy/issues/4) | decided: [ADR-0011](adr/0011-idp-adapters.md) |
+| F10 | [#11](https://github.com/corker/mcp-authproxy/issues/11) | Entra specifics | `area:idp` | [F9](https://github.com/corker/mcp-authproxy/issues/10) | decided: [ADR-0012](adr/0012-entra-specifics.md) |
 | F11 | [#12](https://github.com/corker/mcp-authproxy/issues/12) | Token validation | `area:authz` | [F4](https://github.com/corker/mcp-authproxy/issues/5), [F9](https://github.com/corker/mcp-authproxy/issues/10) | open |
 | F12 | [#13](https://github.com/corker/mcp-authproxy/issues/13) | Authorization rules | `area:authz` | [F11](https://github.com/corker/mcp-authproxy/issues/12) | open |
 | F13 | [#14](https://github.com/corker/mcp-authproxy/issues/14) | Identity propagation | `area:upstream` | [F1](https://github.com/corker/mcp-authproxy/issues/2), [F4](https://github.com/corker/mcp-authproxy/issues/5) | open |
