@@ -10,12 +10,30 @@ measurable answers as quality scenarios: context / trigger / acceptance criteria
 
 ### Research procedure (per feature question)
 
-1. Verify every claim the recommendation rests on against a primary source: spec text, competitor source at a named commit, or official vendor docs. Quote it with a link or `file:line`.
-2. Build a competitor table from source: what each comparable project does for this question.
-3. Look for what competitors missed: options none of them chose (other designs, tools, standards). Evaluate those too — the best answer may be one nobody ships yet.
-4. Walk every lens in this document (start with those the [feature × lens map](#feature--lens-map) marks). Answer each question or mark it `n/a` with a reason; list each gap and the change it requires.
-5. State confidence (high / medium / low), what remains unverified, and what evidence would raise it. If nothing more could change the decision, say so.
-6. Record the decision as an ADR. Lens answers, budgets and matrix cells go in **Consequences**. Update `CONTEXT.md` for any resolved term.
+Look at every question from all of these angles before asking for a decision. Independent
+angles can be researched in parallel (one helper or agent per angle).
+
+1. **Standards.** Verify every claim the recommendation rests on against a primary source: MCP
+   spec and security best practices, RFCs and drafts, OWASP ASVS, WCAG, browser specs. Quote it
+   with a link or `file:line`. Note where sources conflict and which one you follow.
+2. **Competitors.** Build a table from source at a named commit: what each comparable project
+   (`docs/research/reference-projects.md`) does for this question, including their bugs and issues.
+3. **What competitors missed.** Options none of them ship: other standards, designs, tools, and
+   product/UX/operational ideas. Evaluate those too — the best answer may be one nobody ships yet.
+4. **MCP clients.** How each client (Claude, Claude Code, VS Code, Cursor, ChatGPT, MCP Inspector,
+   Gemini CLI, …) actually behaves for this question, from source, binaries or official docs —
+   not from what the spec says they should do.
+5. **IdPs.** How the IdPs behind us (Entra first, then Keycloak, Okta, Google, Auth0) behave, from
+   their official docs — including what operators and users see there.
+6. **Lenses and personas.** Walk every lens in this document (start with those the
+   [feature × lens map](#feature--lens-map) marks) and every persona, **against the final design**,
+   not the first draft. Answer each question or mark it `n/a` with a reason; list each gap and
+   the change it requires.
+7. **Confidence.** State high / medium / low, what remains unverified, and what evidence would
+   raise it. Settle cheap unknowns before asking; if nothing more could change the decision, say so.
+8. **Record.** Write the decision as an ADR. Lens answers, budgets and matrix cells go in
+   **Consequences**; note deliberate deviations from a standard and why. Update `CONTEXT.md` for
+   any resolved term.
 
 ## Personas
 
