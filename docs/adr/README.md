@@ -1,0 +1,32 @@
+# Architecture decision records
+
+Decisions for mcp-authproxy, one file each. The backlog index is [`docs/features.md`](../features.md);
+each feature (F1–F22) is a GitHub issue and gets an ADR once grilled with the research procedure in
+[`docs/quality-lenses.md`](../quality-lenses.md).
+
+| ADR | Decision | Feature | Amended by |
+|---|---|---|---|
+| [0001](0001-scope-auth-only-proxy-entra-first-class.md) | Scope: auth-only proxy, public OSS, Entra first-class | — | — |
+| [0002](0002-repo-structure-for-agents.md) | Repository structure optimised for coding agents | — | — |
+| [0003](0003-upstream-kinds.md) | Upstream kinds: HTTP relay; stdio processes never shared between users | F1 | — |
+| [0004](0004-spec-revisions-pass-through.md) | Spec revisions: serve both eras, pass through, never translate | F2 | 0007 |
+| [0005](0005-auth-modes-broker-only.md) | Auth modes: broker only in v0.1 | F3 | — |
+| [0006](0006-token-model.md) | Token model: minted, sealed proxy tokens with a revocation deny list | F4 | 0007 |
+| [0007](0007-state-and-storage.md) | State and storage: one store interface, embedded SQLite by default | F5 | — |
+| [0008](0008-client-registration.md) | Client registration: static, CIMD and DCR, strictly validated | F6 | — |
+| [0009](0009-redirect-uri-policy.md) | Redirect URI policy: exact HTTPS, any-port loopback, re-checked at /token | F8 | 0010 |
+| [0010](0010-consent-screen.md) | Consent screen: before the IdP, per client, remembered only for trusted clients | F7 | — |
+| [0011](0011-idp-adapters.md) | IdP adapters: small interface, generic OIDC with presets, Entra on top | F9 | — |
+| [0012](0012-entra-specifics.md) | Entra specifics: v2, tid+oid, own API scope at login, certificate credentials | F10 | — |
+| [0013](0013-discovery-and-errors.md) | Discovery and errors: both well-known paths, one issuer, `iss` everywhere | F16 | — |
+| [0014](0014-token-validation.md) | Token validation: header only, sealed checks, no store on the request path | F11 | — |
+| [0015](0015-access-gate.md) | Authorization: an access gate at login and refresh, no per-request denials | F12 | — |
+
+## Writing a new ADR
+
+- Next number: one above the highest in this table; file `NNNN-short-slug.md`.
+- Header: title, `Status`, `Date`, `Issue`. Then Context, Decision, Consequences, and Considered
+  options when the rejected alternatives are worth remembering.
+- An ADR is not rewritten after acceptance. A later ADR that changes it adds an
+  "_Amended by ADR-NNNN_" note at the affected line and a row update here.
+- Add the row to this table and link the ADR from `docs/features.md` in the same PR.
