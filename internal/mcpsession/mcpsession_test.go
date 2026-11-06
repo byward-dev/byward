@@ -24,6 +24,7 @@ const (
 	upstreamSession = "upstream-session-1"
 	alice           = "tid:alice"
 	bob             = "tid:bob"
+	lifetime        = 30 * 24 * time.Hour
 )
 
 var t0 = time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
@@ -74,23 +75,24 @@ func (u *upstream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// proxy is one replica: Bind around up, with the user taken from the X-Test-User header the test
-// sets in place of Guard.
-type proxy struct {
-	h     http.Handler
-	audit *bytes.Buffer
+// testUser stands in for Guard: the user is the X-Test-User header.
+func testUser(r *http.Request) (string, bool) {
+	u := r.Header.Get("X-Test-User")
+	return u, u != ""
 }
 
-func newProxy(b Box, upstreamID string, now *time.Time, up http.Handler) proxy {
-	var buf bytes.Buffer
-	log := slog.New(slog.DiscardHandler)
-	h := Bind(Config{Box: b, Upstream: upstreamID, Lifetime: 30 * 24 * time.Hour, Now: func() time.Time { return *now },
-		User: func(r *http.Request) (string, bool) {
-			u := r.Header.Get("X-Test-User")
-			return u, u != ""
-		},
-		Audit: audit.New(logging.New(&buf, "json"), nil, func() time.Time { return *now }), Log: log}, up)
-	return proxy{h: h, audit: &buf}
+// proxy is one replica: Bind around an upstream, with its audit and operator logs.
+type proxy struct {
+	h          http.Handler
+	audit, log *bytes.Buffer
+}
+
+func newProxy(b *token.Box, upstreamID string, now *time.Time, life time.Duration, up http.Handler) proxy {
+	p := proxy{audit: &bytes.Buffer{}, log: &bytes.Buffer{}}
+	p.h = Bind(Config{Box: b, Upstream: upstreamID, Lifetime: life, Now: func() time.Time { return *now }, User: testUser,
+		Audit: audit.New(logging.New(p.audit, "json"), nil, func() time.Time { return *now }),
+		Log:   slog.New(slog.NewJSONHandler(p.log, nil))}, up)
+	return p
 }
 
 func (p proxy) do(t *testing.T, method, user, session string) *httptest.ResponseRecorder {
@@ -118,10 +120,30 @@ func (p proxy) initialize(t *testing.T, user string) string {
 	return id
 }
 
+// env is one replica on a fresh key directory and clock; up is the recording upstream unless the
+// test passes its own handler.
+type env struct {
+	dir string
+	now time.Time
+	box *token.Box
+	up  *upstream
+	p   proxy
+}
+
+func newEnv(t *testing.T, handler http.Handler) *env {
+	t.Helper()
+	e := &env{dir: keyDir(t, "k1"), now: t0, up: &upstream{}}
+	e.box = box(t, e.dir, "mcp-session", &e.now)
+	if handler == nil {
+		handler = e.up
+	}
+	e.p = newProxy(e.box, upstreamURL, &e.now, lifetime, handler)
+	return e
+}
+
 func TestTheClientGetsASealedSessionIDNeverTheUpstreams(t *testing.T) {
-	now := t0
-	p := newProxy(box(t, keyDir(t, "k1"), "mcp-session", &now), upstreamURL, &now, &upstream{})
-	id := p.initialize(t, alice)
+	e := newEnv(t, nil)
+	id := e.p.initialize(t, alice)
 	if !strings.HasPrefix(id, Prefix) || strings.Contains(id, upstreamSession) {
 		t.Fatalf("client session ID %q: want a %s value that does not contain the upstream's", id, Prefix)
 	}
@@ -132,61 +154,97 @@ func TestTheClientGetsASealedSessionIDNeverTheUpstreams(t *testing.T) {
 	}
 }
 
+// Informational responses (here 103 Early Hints) come before the final one; the final response's
+// session ID must still be sealed.
+func TestTheSessionIDIsSealedAfterAnInformationalResponse(t *testing.T) {
+	e := newEnv(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Link", "</style.css>; rel=preload")
+		w.WriteHeader(http.StatusEarlyHints)
+		w.Header().Set(Header, upstreamSession)
+		w.WriteHeader(http.StatusOK)
+	}))
+	srv := httptest.NewServer(e.p.h)
+	t.Cleanup(srv.Close)
+	r, _ := http.NewRequest(http.MethodPost, srv.URL+"/mcp", nil)
+	r.Header.Set("X-Test-User", alice)
+	res, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if id := res.Header.Get(Header); res.StatusCode != http.StatusOK || !strings.HasPrefix(id, Prefix) || strings.Contains(id, upstreamSession) {
+		t.Fatalf("final response %d with session %q: want a sealed %s value", res.StatusCode, id, Prefix)
+	}
+}
+
 // Every legacy-era request carries the session: POST, the GET stream and DELETE (ADR-0004 §2).
 func TestTheOwnersSessionReachesTheUpstreamUnsealed(t *testing.T) {
 	for _, method := range []string{http.MethodPost, http.MethodGet, http.MethodDelete} {
 		t.Run(method, func(t *testing.T) {
-			now := t0
-			up := &upstream{}
-			p := newProxy(box(t, keyDir(t, "k1"), "mcp-session", &now), upstreamURL, &now, up)
-			id := p.initialize(t, alice)
-			if w := p.do(t, method, alice, id); w.Code != http.StatusOK {
+			e := newEnv(t, nil)
+			id := e.p.initialize(t, alice)
+			if w := e.p.do(t, method, alice, id); w.Code != http.StatusOK {
 				t.Fatalf("%s with the owner's session: %d", method, w.Code)
 			}
-			if got := up.got[len(up.got)-1]; got != upstreamSession {
+			if got := e.up.got[len(e.up.got)-1]; got != upstreamSession {
 				t.Fatalf("upstream got session %q, want its own %q", got, upstreamSession)
 			}
 		})
 	}
 }
 
+func TestASessionIsAcceptedUntilItsLifetimeEnds(t *testing.T) {
+	e := newEnv(t, nil)
+	id := e.p.initialize(t, alice)
+	e.now = e.now.Add(lifetime - time.Second)
+	if w := e.p.do(t, http.MethodPost, alice, id); w.Code != http.StatusOK {
+		t.Fatalf("a second before the lifetime ends: %d, want 200", w.Code)
+	}
+}
+
+// sealedFor seals a binding the proxy would never issue itself, with box b.
+func sealedFor(t *testing.T, b *token.Box, now time.Time, bind binding) string {
+	t.Helper()
+	plain, _ := json.Marshal(bind)
+	s, err := b.Seal(plain, now.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Prefix + s
+}
+
 // A session ID that is not the caller's never reaches the upstream: 404, so the client starts a
 // new session (MCP 2025-11-25 Session Management rules 3 and 4), and an audit record.
 func TestASessionThatIsNotTheCallersGets404AndNeverReachesTheUpstream(t *testing.T) {
 	cases := []struct {
-		name   string
-		id     func(t *testing.T, e *env) string
-		reason string
+		name    string
+		id      func(t *testing.T, e *env) string
+		advance time.Duration // clock moves after the ID is made
+		reason  string
 	}{
-		{"another user's session", func(t *testing.T, e *env) string { return e.p.initialize(t, bob) }, reasonOtherUser},
+		{"another user's session", func(t *testing.T, e *env) string { return e.p.initialize(t, bob) }, 0, reasonOtherUser},
 		{"another upstream's session", func(t *testing.T, e *env) string {
-			return newProxy(e.box, "http://other:9000/mcp", &e.now, &upstream{}).initialize(t, alice)
-		}, reasonOtherUpstream},
+			return newProxy(e.box, "http://other:9000/mcp", &e.now, lifetime, &upstream{}).initialize(t, alice)
+		}, 0, reasonOtherUpstream},
 		{"tampered", func(t *testing.T, e *env) string {
 			id := []byte(e.p.initialize(t, alice))
 			id[len(id)-3] ^= 1
 			return string(id)
-		}, reasonInvalid},
-		{"the upstream's own ID", func(*testing.T, *env) string { return upstreamSession }, reasonInvalid},
+		}, 0, reasonInvalid},
+		{"the upstream's own ID", func(*testing.T, *env) string { return upstreamSession }, 0, reasonInvalid},
 		{"sealed for another purpose", func(t *testing.T, e *env) string {
-			other := box(t, e.dir, "consent", &e.now)
-			plain, _ := json.Marshal(binding{Session: upstreamSession, User: alice, Upstream: upstreamURL})
-			s, err := other.Seal(plain, e.now.Add(time.Hour))
-			if err != nil {
-				t.Fatal(err)
-			}
-			return Prefix + s
-		}, reasonInvalid},
-		{"expired", func(t *testing.T, e *env) string {
-			id := e.p.initialize(t, alice)
-			e.now = e.now.Add(30*24*time.Hour + time.Second)
-			return id
-		}, reasonInvalid},
+			return sealedFor(t, box(t, e.dir, "consent", &e.now), e.now, binding{Session: upstreamSession, User: alice, Upstream: upstreamURL})
+		}, 0, reasonInvalid},
+		{"sealed without a session", func(t *testing.T, e *env) string {
+			return sealedFor(t, e.box, e.now, binding{User: alice, Upstream: upstreamURL})
+		}, 0, reasonInvalid},
+		{"expired", func(t *testing.T, e *env) string { return e.p.initialize(t, alice) }, lifetime + time.Second, reasonInvalid},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			e := newEnv(t)
+			e := newEnv(t, nil)
 			id := tc.id(t, e)
+			e.now = e.now.Add(tc.advance)
 			calls := e.up.calls
 			w := e.p.do(t, http.MethodPost, alice, id)
 			if w.Code != http.StatusNotFound {
@@ -208,34 +266,30 @@ func TestASessionThatIsNotTheCallersGets404AndNeverReachesTheUpstream(t *testing
 	}
 }
 
-type env struct {
-	dir string
-	now time.Time
-	box *token.Box
-	up  *upstream
-	p   proxy
-}
-
-func newEnv(t *testing.T) *env {
-	e := &env{dir: keyDir(t, "k1"), now: t0, up: &upstream{}}
-	e.box = box(t, e.dir, "mcp-session", &e.now)
-	e.p = newProxy(e.box, upstreamURL, &e.now, e.up)
-	return e
+// If the binding cannot be sealed, the client gets no session ID at all, never the upstream's.
+func TestAFailedSealNeverPassesTheUpstreamsSessionOn(t *testing.T) {
+	e := newEnv(t, nil)
+	p := newProxy(e.box, upstreamURL, &e.now, 0, e.up) // a box refuses to seal what expires at once
+	w := p.do(t, http.MethodPost, alice, "")
+	if got := w.Header().Values(Header); len(got) != 0 {
+		t.Fatalf("client got session %q after a failed seal, want none", got)
+	}
+	if !strings.Contains(p.log.String(), "sealing the MCP session ID failed") {
+		t.Fatalf("operator log %q: want the failure logged", p.log.String())
+	}
 }
 
 func TestRequestsWithoutASessionPassThrough(t *testing.T) {
-	now := t0
 	var got []string
-	up := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got = r.Header.Values(Header) })
-	p := newProxy(box(t, keyDir(t, "k1"), "mcp-session", &now), upstreamURL, &now, up)
-	w := p.do(t, http.MethodPost, alice, "")
+	e := newEnv(t, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got = r.Header.Values(Header) }))
+	w := e.p.do(t, http.MethodPost, alice, "")
 	if w.Code != http.StatusOK || len(got) != 0 || w.Header().Get(Header) != "" {
 		t.Fatalf("status %d, upstream saw %q, client got %q; want it passed through untouched", w.Code, got, w.Header().Get(Header))
 	}
 }
 
 func TestTwoSessionHeadersAreRefused(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, nil)
 	id := e.p.initialize(t, alice)
 	r := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 	r.Header.Set("X-Test-User", alice)
@@ -254,10 +308,10 @@ func TestTwoSessionHeadersAreRefused(t *testing.T) {
 func TestASessionWorksOnAnotherReplicaAndAfterAKeyRotation(t *testing.T) {
 	dir := keyDir(t, "2026-11-01")
 	now := t0
-	id := newProxy(box(t, dir, "mcp-session", &now), upstreamURL, &now, &upstream{}).initialize(t, alice)
+	id := newProxy(box(t, dir, "mcp-session", &now), upstreamURL, &now, lifetime, &upstream{}).initialize(t, alice)
 	addKey(t, dir, "2026-11-06") // sorts last: the new signing key
 	up := &upstream{}
-	other := newProxy(box(t, dir, "mcp-session", &now), upstreamURL, &now, up)
+	other := newProxy(box(t, dir, "mcp-session", &now), upstreamURL, &now, lifetime, up)
 	if w := other.do(t, http.MethodPost, alice, id); w.Code != http.StatusOK || up.got[0] != upstreamSession {
 		t.Fatalf("on another replica after a rotation: %d, upstream got %q", w.Code, up.got)
 	}
@@ -265,22 +319,20 @@ func TestASessionWorksOnAnotherReplicaAndAfterAKeyRotation(t *testing.T) {
 
 // Responses stream: the wrapper must let the relay flush through it.
 func TestStreamingResponsesCanFlushThroughTheBinding(t *testing.T) {
-	now := t0
 	var flushErr error
-	up := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	e := newEnv(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set(Header, upstreamSession)
 		_, _ = w.Write([]byte("event: message\n\n"))
 		flushErr = http.NewResponseController(w).Flush()
-	})
-	p := newProxy(box(t, keyDir(t, "k1"), "mcp-session", &now), upstreamURL, &now, up)
-	w := p.do(t, http.MethodGet, alice, "")
+	}))
+	w := e.p.do(t, http.MethodGet, alice, "")
 	if flushErr != nil || !w.Flushed || !strings.HasPrefix(w.Header().Get(Header), Prefix) {
 		t.Fatalf("flush error %v, flushed %v, session %q", flushErr, w.Flushed, w.Header().Get(Header))
 	}
 }
 
 func TestAnUnauthenticatedRequestNeverReachesTheUpstream(t *testing.T) {
-	e := newEnv(t)
+	e := newEnv(t, nil)
 	if w := e.p.do(t, http.MethodPost, "", ""); w.Code != http.StatusUnauthorized || e.up.calls != 0 {
 		t.Fatalf("status %d, upstream calls %d", w.Code, e.up.calls)
 	}

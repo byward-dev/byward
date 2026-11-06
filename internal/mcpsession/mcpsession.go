@@ -17,6 +17,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/token"
 )
 
 // Header is the MCP session header (MCP 2025-11-25 transports, Session Management).
@@ -25,15 +26,10 @@ const Header = "Mcp-Session-Id"
 // Prefix marks a sealed session ID, like the proxy's token prefixes.
 const Prefix = "byw_ms_"
 
-// Box seals and opens the session binding; token.Box with its own purpose implements it.
-type Box interface {
-	Seal(plain []byte, expiresAt time.Time) (string, error)
-	Open(sealed string) ([]byte, error)
-}
-
 // Config is what Bind needs.
 type Config struct {
-	Box Box
+	// Box seals the binding; give it a purpose of its own ("mcp-session").
+	Box *token.Box
 	// Upstream identifies the upstream the sessions belong to, so a session ID cannot be replayed
 	// against another upstream.
 	Upstream string
@@ -122,6 +118,13 @@ type sealer struct {
 }
 
 func (s *sealer) WriteHeader(code int) {
+	if code >= 100 && code < 200 && code != http.StatusSwitchingProtocols {
+		// Informational responses (100 Continue, 103 Early Hints) come before the final one, each
+		// with its own headers: seal those too, and keep the final response's sealing to come.
+		s.seal()
+		s.ResponseWriter.WriteHeader(code)
+		return
+	}
 	if !s.written {
 		s.written = true
 		s.seal()
