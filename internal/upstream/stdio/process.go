@@ -27,6 +27,8 @@ var (
 	errMessageTooLarge = errors.New("stdio: upstream message over the size limit")
 )
 
+var newline = []byte{'\n'}
+
 // Process is one upstream process: newline-delimited JSON-RPC in on stdin and out on stdout,
 // relayed as bytes. Create it with Manager.Get.
 type Process struct {
@@ -115,10 +117,12 @@ func (p *Process) Send(ctx context.Context, msg []byte) error {
 		return err
 	}
 	cancelled := context.AfterFunc(ctx, func() { _ = p.stdin.SetWriteDeadline(time.Unix(1, 0)) })
-	buf := make([]byte, len(msg)+1)
-	copy(buf, msg)
-	buf[len(msg)] = '\n'
-	n, err := p.stdin.Write(buf)
+	n, err := p.stdin.Write(msg) // then the newline: no copy of a message up to the body limit
+	if err == nil {
+		var m int
+		m, err = p.stdin.Write(newline)
+		n += m
+	}
 	if !cancelled() {
 		_ = p.stdin.SetWriteDeadline(time.Time{})
 	}

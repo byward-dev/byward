@@ -3,13 +3,13 @@
 package config
 
 import (
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -87,6 +87,8 @@ func errorf(format string, a ...any) error { return &configError{msg: fmt.Sprint
 type Values struct {
 	order []string
 	byKey map[string]Value
+	// command is the stdio upstream's argv given after --; its Value shows it for display only.
+	command []string
 }
 
 // get returns the raw value of a setting.
@@ -192,9 +194,14 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 		if len(command) == 0 {
 			return nil, errorf("no command after --")
 		}
-		raw, _ := json.Marshal(command)
-		v.Raw, v.Source = string(raw), SourceFlag
+		// Kept as argv, not re-encoded: shown quoted, word by word.
+		quoted := make([]string, len(command))
+		for i, a := range command {
+			quoted[i] = strconv.Quote(a)
+		}
+		v.Raw, v.Source = strings.Join(quoted, " "), SourceFlag
 		vals.byKey[commandSetting] = v
+		vals.command = command
 	}
 	return vals, nil
 }

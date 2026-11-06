@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+var (
+	eventPrefix = []byte("event: message\ndata: ")
+	eventEnd    = []byte("\n\n")
+)
+
 // sse writes server-sent events, each flushed and bounded by writeTimeout.
 type sse struct {
 	w  http.ResponseWriter
@@ -35,11 +40,10 @@ func (s sse) write(msg []byte) error {
 		}
 	}
 	_ = s.rc.SetWriteDeadline(time.Now().Add(writeTimeout))
-	buf := make([]byte, 0, len(msg)+22)
-	buf = append(buf, "event: message\ndata: "...)
-	buf = append(append(buf, msg...), "\n\n"...)
-	if _, err := s.w.Write(buf); err != nil {
-		return err
+	for _, part := range [][]byte{eventPrefix, msg, eventEnd} { // buffered by net/http; no copy of msg
+		if _, err := s.w.Write(part); err != nil {
+			return err
+		}
 	}
 	return s.rc.Flush()
 }

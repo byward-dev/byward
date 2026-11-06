@@ -337,7 +337,12 @@ func (c *Config) upstream(v *Values) []error {
 	if v.get("upstream-url") != "" {
 		errs = append(errs, errorf("%s and %s are both set: an upstream is either HTTP or stdio", urlEnv, cmdEnv))
 	}
-	if err := json.Unmarshal([]byte(raw), &c.UpstreamCommand); err != nil || len(c.UpstreamCommand) == 0 || c.UpstreamCommand[0] == "" {
+	if v.command != nil {
+		c.UpstreamCommand = append([]string(nil), v.command...)
+	} else if err := json.Unmarshal([]byte(raw), &c.UpstreamCommand); err != nil {
+		c.UpstreamCommand = nil
+	}
+	if len(c.UpstreamCommand) == 0 || c.UpstreamCommand[0] == "" {
 		errs = append(errs, errorf("%s: want a JSON array of strings whose first element is the program, e.g. [\"/usr/local/bin/server\",\"--flag\"], got %q", cmdEnv, raw))
 	}
 	env, err := parseEnvLines(v.get("upstream-env"))
