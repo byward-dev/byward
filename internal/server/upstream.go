@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -9,8 +10,8 @@ import (
 
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/doctor"
 	"github.com/byward-dev/byward/internal/resource"
-	"github.com/byward-dev/byward/internal/secretfile"
 	"github.com/byward-dev/byward/internal/tracing"
 	"github.com/byward-dev/byward/internal/upstream/relay"
 	"github.com/byward-dev/byward/internal/upstream/stdio"
@@ -32,26 +33,57 @@ func newUpstream(cfg *config.Config, log *slog.Logger, o Observability) (*upstre
 	if cfg.UpstreamCommand == nil {
 		return &upstream{handler: httpUpstream(cfg, log)}, nil
 	}
-	if cfg.NoAuth && !cfg.Dev {
+	if cfg.NoAuth {
 		// With authentication, buildAuth checks every secret file; without it, this is the only one.
-		for _, f := range cfg.Values.SecretFiles() {
-			if err := secretfile.Check(f.Path); err != nil {
-				return nil, fmt.Errorf("%s: %w", f.From, err)
-			}
+		if err := errors.Join(looseSecretFiles(cfg)...); err != nil {
+			return nil, err
 		}
 	}
 	name := stdioName(cfg)
-	m, err := stdio.New(stdio.Config{Name: name, Command: cfg.UpstreamCommand, Env: cfg.UpstreamEnv,
+	m, err := newStdioManager(cfg, stdio.Config{Name: name, Command: cfg.UpstreamCommand, Env: cfg.UpstreamEnv,
 		MaxProcesses: cfg.StdioMaxProcesses, MaxPerUser: cfg.StdioMaxPerUser, Log: log,
 		Evicted: func(id stdio.Identity, reason string) {
 			o.Audit.Record(nil, audit.Event{Name: audit.ProcessEvicted, Outcome: audit.Success, Reason: reason, UserKey: id.Subject})
 		}})
 	if err != nil {
-		return nil, fmt.Errorf("stdio upstream (BYWARD_UPSTREAM_COMMAND, BYWARD_UPSTREAM_ENV_FILE): %w", err)
+		return nil, err
 	}
 	o.Metrics.StdioProcesses(m.Len)
 	b := stdio.NewBridge(stdio.BridgeConfig{Manager: m, Identity: stdioIdentity(cfg), Log: log.With("upstream", name)})
 	return &upstream{handler: b, shutdown: m.Shutdown}, nil
+}
+
+// newStdioManager is stdio.New with the settings named in its error. It finds the command and
+// starts nothing; processes start per user (ADR-0003).
+func newStdioManager(cfg *config.Config, sc stdio.Config) (*stdio.Manager, error) {
+	m, err := stdio.New(sc)
+	if err != nil {
+		return nil, fmt.Errorf("stdio upstream (BYWARD_UPSTREAM_COMMAND, BYWARD_UPSTREAM_ENV_FILE): %w", err)
+	}
+	return m, nil
+}
+
+// checkUpstream is what check --offline and doctor ask of the upstream without reaching it: a stdio
+// command that can be found, with the same check startup makes. An HTTP upstream has nothing to
+// check offline.
+func checkUpstream(cfg *config.Config) error {
+	if cfg.UpstreamCommand == nil {
+		return nil
+	}
+	_, err := newStdioManager(cfg, stdio.Config{Name: stdioName(cfg), Command: cfg.UpstreamCommand, Env: cfg.UpstreamEnv})
+	return err
+}
+
+// upstreamResult tells doctor's reader which upstream is configured; doctor checks the proxy in front
+// of it and never reaches the upstream itself.
+func upstreamResult(cfg *config.Config) doctor.Result {
+	r := doctor.Result{Class: doctor.ClassProxy, Name: "upstream", Status: doctor.Pass}
+	if cfg.UpstreamCommand == nil {
+		r.Message = "HTTP upstream " + cfg.UpstreamURL.String() + "; doctor checks the proxy in front of it, not the upstream itself"
+		return r
+	}
+	r.Message = "stdio upstream " + stdioName(cfg) + ": the command was found; doctor does not start it (a process starts per user at their first MCP request)"
+	return r
 }
 
 // upstreamID names the upstream in sealed session IDs, so one cannot be replayed against another.

@@ -70,6 +70,9 @@ func (p *IdP) jwks(w http.ResponseWriter, r *http.Request) {
 	}
 	keys := make([]map[string]any, 0, len(p.keys))
 	for _, k := range p.keys {
+		if p.cfg.jwksEmpty {
+			break
+		}
 		keys = append(keys, k.jwk(issuer))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"keys": keys})
@@ -78,7 +81,8 @@ func (p *IdP) jwks(w http.ResponseWriter, r *http.Request) {
 // tenantSegment validates the Entra tenant path segment. Caller holds p.mu.
 func (p *IdP) tenantSegment(w http.ResponseWriter, r *http.Request) (string, bool) {
 	t := r.PathValue("tenant")
-	if isGUID(t) || t == "organizations" || t == "common" {
+	known := !p.cfg.strictTenants || strings.EqualFold(t, p.cfg.tenantID)
+	if (isGUID(t) && known) || t == "organizations" || t == "common" {
 		return strings.ToLower(t), true
 	}
 	p.tokenError(w, r, Failure{Error: "invalid_tenant", Code: 90002, Description: "Tenant not found."})

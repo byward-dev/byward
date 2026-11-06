@@ -115,8 +115,9 @@ Background: [ADR-0012](../adr/0012-entra-specifics.md), [ADR-0015](../adr/0015-a
       Entra after ours (ADR-0012 §12).
 - [ ] **Client secret expiry.**
       - Entra limits client secrets to two years.
-      - The proxy has no expiry warning yet (`IDP_SECRET_EXPIRES_AT` with `doctor`, **planned**,
-        #66). Put the date in your own calendar or monitoring.
+      - Set `BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT` to the secret's end date: the proxy then warns at
+        every start, and `byward doctor` from 30 days before
+        ([commands](../reference/commands.md#byward-doctor)). Put the date in your monitoring too.
       - An expired or wrong secret makes sign-ins fail, and refreshes answer `503` instead of signing
         users out. Alert on
         `byward_idp_request_duration_seconds_count{outcome="unavailable"}`

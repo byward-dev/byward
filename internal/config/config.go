@@ -40,6 +40,7 @@ var registry = []Setting{
 	{Name: "entra-tenant", Auth: true, Help: "Entra tenant ID (a GUID) of the IdP app"},
 	{Name: "entra-client-id", Auth: true, Help: "application (client) ID of the IdP app registration"},
 	{Name: "entra-client-secret", Auth: true, Secret: true, Help: "client secret of the IdP app"},
+	{Name: "entra-client-secret-expires-at", Auth: true, Help: "when the client secret expires, as a date (2027-11-06) or an RFC 3339 time; the proxy warns at startup and doctor warns from 30 days before (ADR-0012 §10)"},
 	{Name: "data-dir", Auth: true, Default: "/var/lib/byward", Help: "data directory, an absolute path; the keys, clients and store settings default to paths in it (ADR-0007 §6, docs/how-to/state.md)"},
 	{Name: "keys-dir", Auth: true, Help: "directory of sealing keys; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md)"},
 	{Name: "static-clients-file", Auth: true, Help: "JSON file of pre-registered MCP clients; default: clients.json in the data directory (docs/reference/static-clients.md)"},
@@ -91,8 +92,10 @@ type Config struct {
 	EntraTenant       string
 	EntraClientID     string
 	EntraClientSecret string
-	KeysDir           string
-	StaticClientsFile string
+	// EntraClientSecretExpiresAt is zero when the operator did not say.
+	EntraClientSecretExpiresAt time.Time
+	KeysDir                    string
+	StaticClientsFile          string
 	// The access gate (slice 1.5, ADR-0015); validated by gate.New when the broker is wired.
 	GateTenants, GateRoles, GateGroups, GateEmailDomains, GateHostedDomains []string
 	GateAllowEmpty                                                          bool
@@ -174,23 +177,12 @@ func validate(v *Values, container bool) (*Config, error) {
 		c.Relaxations = append(c.Relaxations, relaxed)
 	}
 
-	c.PublicURL, err = parseURL("public-url", v.get("public-url"))
+	c.PublicURL, err = ParsePublicURL(v.get("public-url"))
 	if err != nil {
 		errs = append(errs, err)
 	} else {
-		if err := asciiHost(c.PublicURL.Hostname()); err != nil {
-			errs = append(errs, errorf("BYWARD_PUBLIC_URL: %v", err))
-		}
-		if c.PublicURL.Path == "" || strings.HasSuffix(c.PublicURL.Path, "/") {
-			errs = append(errs, errorf("BYWARD_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://%s/mcp", c.PublicURL.Host))
-		}
-		if c.PublicURL.RawQuery != "" || c.PublicURL.Fragment != "" {
-			errs = append(errs, errorf("BYWARD_PUBLIC_URL: must not have a query or fragment"))
-		}
 		if c.PublicURL.Scheme == "http" {
 			switch {
-			case !isLoopback(c.PublicURL.Hostname()):
-				errs = append(errs, errorf("BYWARD_PUBLIC_URL: must use https (http is allowed only for loopback hosts with --dev)"))
 			case !c.Dev && !c.NoAuth:
 				errs = append(errs, errorf("BYWARD_PUBLIC_URL: http on loopback needs --dev"))
 			default:
@@ -317,6 +309,7 @@ func validate(v *Values, container bool) (*Config, error) {
 				(*s.dst)[i] = strings.ToLower(h)
 			}
 		}
+		errs = append(errs, c.secretExpiry(v)...)
 		if t := c.EntraTenant; t != "" && !isGUID(t) {
 			errs = append(errs, errorf("BYWARD_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000, got %q", t))
 		}
@@ -478,6 +471,22 @@ func parseHeaderTimeout(raw string) (time.Duration, error) {
 	return d, nil
 }
 
+// secretExpiry parses the client secret's end date: a date (midnight UTC) or an RFC 3339 time,
+// such as the endDateTime that `az ad app credential list` prints.
+func (c *Config) secretExpiry(v *Values) []error {
+	raw := v.get("entra-client-secret-expires-at")
+	if raw == "" {
+		return nil
+	}
+	for _, layout := range []string{time.DateOnly, time.RFC3339} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			c.EntraClientSecretExpiresAt = t.UTC()
+			return nil
+		}
+	}
+	return []error{errorf("%s: want a date such as 2027-11-06 or an RFC 3339 time, got %q", Setting{Name: "entra-client-secret-expires-at"}.Env(), raw)}
+}
+
 // refreshGrace parses the refresh-token grace window (ADR-0006 §4: 0 to 60 s).
 func (c *Config) refreshGrace(v *Values) []error {
 	grace, err := time.ParseDuration(v.get("refresh-grace"))
@@ -625,6 +634,38 @@ func checkInlineSecrets(v *Values, dev bool) (relaxation string, err error) {
 	default:
 		return "inline secrets accepted: " + strings.Join(secrets, ", "), nil
 	}
+}
+
+// ParsePublicURL validates the public URL of the MCP endpoint, as `byward init entra` also needs it:
+// absolute, an ASCII host, a path without a trailing slash, no query or fragment, and https unless
+// the host is loopback (which the proxy itself accepts only with --dev).
+func ParsePublicURL(raw string) (*url.URL, error) {
+	u, err := parseURL("public-url", raw)
+	if err != nil {
+		return nil, err
+	}
+	var errs []string
+	if err := asciiHost(u.Hostname()); err != nil {
+		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: %v", err))
+	}
+	if u.Path == "" || strings.HasSuffix(u.Path, "/") {
+		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://%s/mcp", u.Host))
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		errs = append(errs, "BYWARD_PUBLIC_URL: must not have a query or fragment")
+	}
+	if u.Scheme == "http" && !isLoopback(u.Hostname()) {
+		errs = append(errs, "BYWARD_PUBLIC_URL: must use https (http is allowed only for loopback hosts with --dev)")
+	}
+	if len(errs) > 0 {
+		return nil, &configError{msg: strings.Join(errs, "; ")}
+	}
+	return u, nil
+}
+
+// RedirectURL is the IdP callback the proxy registers for idpName under publicURL.
+func RedirectURL(publicURL *url.URL, idpName string) string {
+	return (&Config{PublicURL: publicURL}).Issuer() + "/callback/" + idpName
 }
 
 func parseURL(name, raw string) (*url.URL, error) {
@@ -779,7 +820,8 @@ func reference() string {
 		}
 		fmt.Fprintf(&b, "| `%s` | `%s` | %s | %s |\n", flagName, env, def, s.Help)
 	}
-	b.WriteString("\nActions: `--version [--json]`, `--print-config`, `--help`.\n\n")
-	b.WriteString("Exit codes: 0 success, 1 runtime error, 2 configuration error.\n")
+	b.WriteString("\nActions: `--version [--json]`, `--print-config`, `--help`.\n")
+	b.WriteString("Commands (`check --offline`, `doctor`, `init entra`): [commands reference](commands.md).\n\n")
+	b.WriteString("Exit codes: 0 success, 1 runtime error, 2 configuration error; `doctor` adds 4, 8 and 12.\n")
 	return b.String()
 }

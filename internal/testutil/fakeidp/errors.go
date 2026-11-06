@@ -72,6 +72,10 @@ var (
 		Description: "Assertion failed signature validation."}
 	AppNotAssigned = Failure{Error: "invalid_grant", Code: 501051,
 		Description: "Application is not assigned to a role for the application."}
+	// ResourceNotFound's error value is the one public reports of AADSTS500011 show; not observed
+	// in this project's real-tenant tests.
+	ResourceNotFound = Failure{Error: "invalid_resource", Code: 500011,
+		Description: "The resource principal was not found in the tenant."}
 	UnsupportedGrantType = Failure{Error: "unsupported_grant_type", Code: 70003,
 		Description: "The app returned an unsupported grant type."}
 	UserNotAssigned = Failure{Error: "access_denied", Code: 50105,

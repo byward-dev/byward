@@ -27,6 +27,7 @@ Precedence: flag > environment > default. Secrets are read only from files.
 | `--entra-tenant` | `BYWARD_ENTRA_TENANT` | — | Entra tenant ID (a GUID) of the IdP app |
 | `--entra-client-id` | `BYWARD_ENTRA_CLIENT_ID` | — | application (client) ID of the IdP app registration |
 | `--entra-client-secret-file` | `BYWARD_ENTRA_CLIENT_SECRET_FILE` | — | client secret of the IdP app |
+| `--entra-client-secret-expires-at` | `BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT` | — | when the client secret expires, as a date (2027-11-06) or an RFC 3339 time; the proxy warns at startup and doctor warns from 30 days before (ADR-0012 §10) |
 | `--data-dir` | `BYWARD_DATA_DIR` | /var/lib/byward | data directory, an absolute path; the keys, clients and store settings default to paths in it (ADR-0007 §6, docs/how-to/state.md) |
 | `--keys-dir` | `BYWARD_KEYS_DIR` | — | directory of sealing keys; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md) |
 | `--static-clients-file` | `BYWARD_STATIC_CLIENTS_FILE` | — | JSON file of pre-registered MCP clients; default: clients.json in the data directory (docs/reference/static-clients.md) |
@@ -50,5 +51,6 @@ Precedence: flag > environment > default. Secrets are read only from files.
 | `--dev` | `BYWARD_DEV` | false | development mode: enables the relaxations it logs at startup |
 
 Actions: `--version [--json]`, `--print-config`, `--help`.
+Commands (`check --offline`, `doctor`, `init entra`): [commands reference](commands.md).
 
-Exit codes: 0 success, 1 runtime error, 2 configuration error.
+Exit codes: 0 success, 1 runtime error, 2 configuration error; `doctor` adds 4, 8 and 12.

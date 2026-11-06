@@ -36,6 +36,12 @@ Background: [ADR-0012](../adr/0012-entra-specifics.md) (Entra), [ADR-0008](../ad
 
 ## 1. Register the Entra app
 
+**Shortcut:** `byward init entra --tenant <tenant-id> --public-url https://mcp.example.com/mcp >
+byward-entra.sh` prints this whole step as a script, plus assignment required and the app roles
+app-only callers need, and an env file for step 4. byward runs none of it; review it and run it
+with `sh byward-entra.sh` ([commands reference](../reference/commands.md#byward-init-entra)). The
+steps below explain each command.
+
 The proxy is a confidential client of Entra. It needs one **single-tenant** app registration with:
 
 | Property | Value | Why |
@@ -126,6 +132,8 @@ credentials (without it the command removes them). The trailing newline is ignor
   new secret with the same command, restart the proxy with it, then delete the old one with
   `az ad app credential delete`. An expired secret makes every sign-in and refresh fail
   (AADSTS7000222, see [Troubleshooting](#troubleshooting)).
+- Optional: set `BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT` to the end date (one year from today here,
+  e.g. `2027-11-06`). The proxy then warns at every start, and `byward doctor` from 30 days before.
 - A client secret suits development and small setups. ADR-0012 §5 recommends a certificate for
   production; there is no setting for a certificate credential yet.
 
@@ -243,6 +251,11 @@ naming the path and the setting that moves it. `BYWARD_UPSTREAM_URL` must be rea
 byward runs (from inside the container, `127.0.0.1` is the container itself). Put your TLS
 terminator (reverse proxy or load balancer) in front of `:8080` so that `https://mcp.example.com`
 reaches it. All settings: [settings reference](../reference/settings.md).
+
+To check the setup: `byward check --offline` with the same settings validates them, the key and the
+clients file without network access. Once the proxy runs, `byward doctor` fetches its discovery
+documents the way MCP clients do and checks the Entra tenant, the client ID and the secret; each
+problem comes with its fix ([commands reference](../reference/commands.md#byward-doctor)).
 
 ## 5. Connect Claude Code
 
