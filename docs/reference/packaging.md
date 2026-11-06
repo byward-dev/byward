@@ -7,7 +7,7 @@ Decisions: [ADR-0019](../adr/0019-packaging.md). Config: [`.goreleaser.yaml`](..
 | Artifact | Platforms | Notes |
 |---|---|---|
 | Container image `ghcr.io/corker/mcp-authproxy:vX.Y.Z` and `:latest` | linux/amd64, linux/arm64 | Multi-arch index on `gcr.io/distroless/static-debian13:nonroot` (pinned by digest); cosign keyless signature; buildx SBOM and provenance (`mode=max`); GitHub build-provenance attestation |
-| `mcp-authproxy_<version>_<os>_<arch>.tar.gz` | linux amd64/arm64 (supported), darwin amd64/arm64 (development only) | Binary, `LICENSE`, `NOTICE`, `README.md`, `third_party/` licence texts; a syft SBOM (`.sbom.json`) per archive |
+| `mcp-authproxy_<version>_<os>_<arch>.tar.gz` | linux amd64/arm64 (supported), darwin amd64/arm64 (development only) | Binary, `LICENSE`, `README.md`, `third_party/` licence texts; a syft SBOM (`.sbom.json`) per archive |
 | `checksums.txt` | — | sha256 of every archive and SBOM; cosign bundle `checksums.txt.sigstore.json`; GitHub build-provenance attestation |
 
 No Windows build in v0.1.
@@ -19,7 +19,7 @@ No Windows build in v0.1.
 | Binary | `/usr/local/bin/mcp-authproxy` (entrypoint) |
 | State directory | `/var/lib/mcp-authproxy` (working directory, owned by 65532) |
 | User | `65532:65532` |
-| Licences | `/usr/share/doc/mcp-authproxy/{LICENSE,NOTICE,third_party/}` |
+| Licences | `/usr/share/doc/mcp-authproxy/{LICENSE,third_party/}` |
 
 Changing any of these is a breaking change (ADR-0023).
 
@@ -39,7 +39,8 @@ Needs Docker with buildx, and `mise install`.
 | `mise run release:reproducible` | Builds twice (the second time in another directory with an empty Go cache) and compares the sha256 of the binaries and archives |
 
 Builds use `-trimpath -buildvcs=true` and the commit time for file timestamps, so a rebuild with the same
-Go version from the same commit gives the same bytes. `go version -m mcp-authproxy` prints the Go version and
+Go version from the same commit gives the same bytes. The Go patch is pinned in `mise.toml`, and a weekly
+workflow (`go-version.yml`, `scripts/go-version-check.sh`) fails when go.dev lists a newer patch or minor. `go version -m mcp-authproxy` prints the Go version and
 commit that built a binary.
 
 ## Verifying a release

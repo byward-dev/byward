@@ -9,7 +9,7 @@ for target in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
   [ -f "$1" ] || fail "no archive for $target"
   archive=$1
   contents=$(tar -tzf "$archive")
-  for f in mcp-authproxy LICENSE NOTICE README.md third_party/go.dev/LICENSE; do
+  for f in mcp-authproxy LICENSE README.md third_party/go.dev/LICENSE; do
     printf '%s\n' "$contents" | grep -qx "$f" || fail "$archive lacks $f"
   done
   [ -s "$archive.sbom.json" ] || fail "$archive has no SBOM ($archive.sbom.json)"

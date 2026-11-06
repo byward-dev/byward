@@ -35,7 +35,7 @@ grep -Eq '^-r-xr-xr-x .* usr/local/bin/mcp-authproxy$' "$listing" \
   || fail "/usr/local/bin/mcp-authproxy must exist with mode r-xr-xr-x (not writable)"
 grep -Eq '^drwx.* 65532[ /]+65532 .* var/lib/mcp-authproxy/?$' "$listing" \
   || fail "/var/lib/mcp-authproxy must be a directory owned by 65532:65532"
-for f in LICENSE NOTICE third_party/go.dev/LICENSE; do
+for f in LICENSE third_party/go.dev/LICENSE; do
   rm -f "$tmp/licence"
   docker cp "$ctr:/usr/share/doc/mcp-authproxy/$f" "$tmp/licence" >/dev/null 2>&1 || true
   [ -f "$tmp/licence" ] && [ -s "$tmp/licence" ] \

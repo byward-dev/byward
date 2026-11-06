@@ -34,8 +34,6 @@ archives:
     files:
       - src: LICENSE
         info: *fileinfo
-      - src: NOTICE
-        info: *fileinfo
       - src: README.md
         info: *fileinfo
       - src: build/licenses
@@ -69,7 +67,7 @@ dockers_v2:
       - "{{ if .IsSnapshot }}snapshot{{ else }}v{{ .Version }}{{ end }}"
       - "{{ if not .IsSnapshot }}latest{{ end }}"
     platforms: [linux/amd64, linux/arm64]
-    extra_files: [LICENSE, NOTICE, build/licenses]
+    extra_files: [LICENSE, build/licenses]
     build_args:
       SOURCE_DATE_EPOCH: "{{ .CommitTimestamp }}"
     labels:

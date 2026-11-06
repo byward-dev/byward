@@ -1,5 +1,7 @@
 # mcp-authproxy
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/corker/mcp-authproxy/badge)](https://scorecard.dev/viewer/?uri=github.com/corker/mcp-authproxy)
+
 > **Status: design phase.** Nothing to run yet.
 
 An auth-only proxy that puts any [MCP](https://modelcontextprotocol.io) server — stdio or

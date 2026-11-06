@@ -1,6 +1,0 @@
-mcp-authproxy
-Copyright 2026 The mcp-authproxy Authors
-
-This product is licensed under the Apache License, Version 2.0 (see LICENSE).
-Licence texts of third-party components compiled into the binary are in
-third_party/ (archives) or /usr/share/doc/mcp-authproxy/third_party/ (image).
