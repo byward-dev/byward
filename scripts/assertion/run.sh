@@ -25,8 +25,13 @@ mkdir -p "$work/home"
 work_abs=$(cd "$work" && pwd)
 arch=$(docker version --format '{{.Server.Arch}}')
 
-# 1. Fixture: the JWKS and the assertions, from the proxy's own code.
-go run ./internal/testutil/assertionfixture "$work/fixture" || fail "writing the fixture"
+# 1. Fixture: the JWKS and the assertions, from the proxy's own code. The "valid" assertion lives
+# 60 s, so it is minted right before each verifier runs, after the pulls and installs.
+go build -o "$work/assertionfixture" ./internal/testutil/assertionfixture || fail "building the fixture tool"
+fixture() {
+  rm -rf "$work/fixture"
+  "$work/assertionfixture" "$work/fixture" || fail "writing the fixture"
+}
 
 pull() {
   for try in 1 2 3; do
@@ -56,6 +61,7 @@ pull "$node_image"
 in_container bridge "$node_image" sh -c 'cd ts && npm ci --ignore-scripts --no-audit --no-fund --loglevel=error' ||
   fail "npm ci (scripts/assertion/ts/package-lock.json)"
 echo "TypeScript SDK (requireBearerAuth):"
+fixture
 verify "$node_image" sh -c 'cd ts && node verify.mjs /work/fixture' || fail "the TypeScript SDK verifier"
 
 # 3. FastMCP: install into a venv, every package's hash checked.
@@ -64,6 +70,7 @@ pull "$py_image"
 in_container bridge "$py_image" sh -c 'python -m venv /work/py/venv && /work/py/venv/bin/pip install -q --require-hashes --no-deps -r py/requirements.txt' ||
   fail "pip install (scripts/assertion/py/requirements.txt)"
 echo "FastMCP (JWTVerifier):"
+fixture
 verify "$py_image" /work/py/venv/bin/python py/verify.py /work/fixture || fail "the FastMCP verifier"
 
 echo "assertion contract: ok"

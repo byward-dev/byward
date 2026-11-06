@@ -182,7 +182,13 @@ func TestAnAssertionVerifiesWithThePublishedJWKS(t *testing.T) {
 
 func TestMintRefusesAnIdentityWithoutSubjectOrClient(t *testing.T) {
 	k, _ := keys(t)
-	m, _ := NewMinter(k, issuer, audience, nil)
+	m, err := NewMinter(k, issuer, audience, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Mint(resource.Identity{Subject: "s", ClientID: "c"}); err != nil {
+		t.Fatalf("the same minter refuses a full identity: %v", err)
+	}
 	for _, id := range []resource.Identity{{ClientID: "c"}, {Subject: "s"}} {
 		if _, err := m.Mint(id); err == nil {
 			t.Errorf("minted for %+v", id)
@@ -195,7 +201,7 @@ func TestMintRefusesAnIdentityWithoutSubjectOrClient(t *testing.T) {
 
 // The claims contract is public interface (ADR-0016 Consequences): RFC 9068 claims are fixed and
 // ours are only ever added. The golden file pins the decoded header and claims; jti is random.
-func TestAssertionClaimsGolden(t *testing.T) {
+func TestAnAssertionCarriesExactlyTheDocumentedHeaderAndClaims(t *testing.T) {
 	k, _ := keys(t)
 	m, _ := NewMinter(k, issuer, audience, func() time.Time { return t0 })
 	raw, err := m.Mint(resource.Identity{Subject: "00000000-0000-0000-0000-000000000001:11111111-1111-1111-1111-111111111111",

@@ -3,9 +3,7 @@ package assertion
 import (
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
-	"net/http"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
@@ -26,7 +24,6 @@ const Type = "at+jwt"
 
 // Minter signs identity assertions for one upstream.
 type Minter struct {
-	keys     *Keys
 	signer   jose.Signer
 	issuer   string
 	audience string
@@ -47,7 +44,7 @@ func NewMinter(keys *Keys, issuer, audience string, now func() time.Time) (*Mint
 	if err != nil {
 		return nil, err
 	}
-	return &Minter{keys: keys, signer: signer, issuer: issuer, audience: audience, now: now}, nil
+	return &Minter{signer: signer, issuer: issuer, audience: audience, now: now}, nil
 }
 
 // claims is the assertion's payload: the RFC 9068 claims, then ours (only ever added to).
@@ -83,27 +80,4 @@ func (m *Minter) Mint(id resource.Identity) (string, error) {
 		ID:    base64.RawURLEncoding.EncodeToString(jti[:]),
 		Roles: id.Roles, Groups: id.Groups, Email: id.Email, Name: id.Name,
 	}).Serialize()
-}
-
-// JWKS is the public half of every key, for verifiers.
-func (k *Keys) JWKS() jose.JSONWebKeySet {
-	set := jose.JSONWebKeySet{Keys: make([]jose.JSONWebKey, 0, len(k.all))}
-	for _, s := range k.all {
-		set.Keys = append(set.Keys, jose.JSONWebKey{Key: &s.key.PublicKey, KeyID: s.id, Algorithm: string(jose.ES256), Use: "sig"})
-	}
-	return set
-}
-
-// JWKSHandler serves the JWKS at /.well-known/jwks.json (ADR-0016 §3).
-func (k *Keys) JWKSHandler() http.Handler {
-	body, err := json.Marshal(k.JWKS())
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "public, max-age=300")
-		_, _ = w.Write(body)
-	})
 }

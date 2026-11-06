@@ -205,11 +205,28 @@ func TestJWKSPrintsThePublicKeysOnly(t *testing.T) {
 	if _, private := set.Keys[0]["d"]; private {
 		t.Fatal("the JWKS carries the private key")
 	}
-	code, _, stderr = runWith([]string{"jwks"}, append(env, "BYWARD_ASSERTION_KEYS_DIR="+t.TempDir())...)
-	if code != exitConfig || !strings.Contains(stderr, "BYWARD_ASSERTION_KEYS_DIR") {
-		t.Fatalf("no keys: code %d stderr %q", code, stderr)
-	}
-	if code, _, stderr = runWith([]string{"jwks", "--out", "x"}, env...); code != exitConfig || !strings.Contains(stderr, "usage: byward jwks") {
-		t.Fatalf("extra argument: code %d stderr %q", code, stderr)
+}
+
+// `byward jwks` with no key, or with an argument it does not take, prints nothing and exits 2.
+func TestJWKSRefusesNoKeysOrAnExtraArgument(t *testing.T) {
+	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		env      []string
+		inStderr []string
+	}{
+		{"no keys", []string{"jwks"}, append(env, "BYWARD_ASSERTION_KEYS_DIR="+t.TempDir()), []string{"BYWARD_ASSERTION_KEYS_DIR", "has no key files"}},
+		{"extra argument", []string{"jwks", "--out", "x"}, env, []string{"usage: byward jwks"}},
+	} {
+		code, stdout, stderr := runWith(tc.args, tc.env...)
+		if code != exitConfig || stdout != "" {
+			t.Errorf("%s: code %d stdout %q", tc.name, code, stdout)
+		}
+		for _, want := range tc.inStderr {
+			if !strings.Contains(stderr, want) {
+				t.Errorf("%s: stderr %q lacks %q", tc.name, stderr, want)
+			}
+		}
 	}
 }

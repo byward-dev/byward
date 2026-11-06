@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -133,11 +134,6 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 			return nil, err
 		}
 		a.jwks = k.JWKSHandler()
-		register := a.register
-		a.register = func(mux *http.ServeMux) {
-			register(mux)
-			mux.Handle("GET "+jwksPath, a.jwks)
-		}
 		log.Info("identity assertion", "reason", "signing with key "+k.SigningKeyID()+", keys "+strings.Join(k.KeyIDs(), " "),
 			"setting", "BYWARD_ASSERTION_HEADER", "value", cfg.AssertionHeader)
 	}
@@ -146,6 +142,17 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 
 // jwksPath serves the assertion keys (ADR-0016 §3).
 const jwksPath = "/.well-known/jwks.json"
+
+// ExportJWKS is `byward jwks`: the public keys of BYWARD_ASSERTION_KEYS_DIR as a JWKS, for an
+// upstream that loads them from a file instead of fetching them (ADR-0016 §3). Run it again after
+// every key rotation.
+func ExportJWKS(cfg *config.Config) ([]byte, error) {
+	keys, err := assertion.LoadKeys(cfg.AssertionKeysDir, secretCheck(cfg))
+	if err != nil {
+		return nil, fmt.Errorf("BYWARD_ASSERTION_KEYS_DIR: %s: %w (see docs/how-to/identity-assertion.md)", cfg.AssertionKeysDir, err)
+	}
+	return json.MarshalIndent(keys.JWKS(), "", "  ")
+}
 
 // assertedClaims maps BYWARD_ASSERTION_CLAIMS to the claims the broker seals into access tokens.
 func assertedClaims(cfg *config.Config) broker.Asserted {
@@ -160,6 +167,8 @@ func assertedClaims(cfg *config.Config) broker.Asserted {
 			a.Email = true
 		case "name":
 			a.Name = true
+		default: // config.AssertionClaimNames and this switch must list the same names
+			panic("server: unhandled assertion claim " + c)
 		}
 	}
 	return a

@@ -1,12 +1,16 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +18,13 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 
+	"github.com/byward-dev/byward/internal/assertion"
+	"github.com/byward-dev/byward/internal/audit"
+	"github.com/byward-dev/byward/internal/broker"
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/store"
+	"github.com/byward-dev/byward/internal/store/sqlite"
+	"github.com/byward-dev/byward/internal/testutil/assertionkey"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 	"github.com/byward-dev/byward/internal/token"
 )
@@ -131,7 +141,8 @@ func TestTheUpstreamGetsAnAssertionItCanVerifyInsteadOfTheClientsToken(t *testin
 		t.Fatalf("upstream Authorization %q", got.Header.Get("Authorization"))
 	}
 	c := verified(t, jwks(t, a.public, "mcp.example.com"), raw, a.cfg.UpstreamURL.String())
-	if c["sub"] != "tid:oid" || c["client_id"] != "claude-code" || c["iss"] != "https://mcp.example.com" || len(c["roles"].([]any)) != 1 {
+	if c["sub"] != "tid:oid" || c["client_id"] != "claude-code" || c["iss"] != "https://mcp.example.com" ||
+		!reflect.DeepEqual(c["roles"], []any{"byward.user"}) {
 		t.Fatalf("claims %v", c)
 	}
 	internal := jwks(t, a.internal, "127.0.0.1")
@@ -140,17 +151,13 @@ func TestTheUpstreamGetsAnAssertionItCanVerifyInsteadOfTheClientsToken(t *testin
 	}
 }
 
-// With its own header the assertion still replaces whatever the client sent there, in any
-// spelling, and the client's token still never reaches the upstream (ADR-0016 §2, §4).
+// With its own header the assertion still replaces whatever the client sent there, and the client's token still never reaches the upstream (ADR-0016 §2, §4).
 func TestAClientCannotSupplyTheAssertionHeader(t *testing.T) {
 	a := newAsserting(t, "BYWARD_ASSERTION_HEADER=X-Byward-Identity")
 	got := a.call(t, token.Claims{GrantID: "g1", Subject: "tid:oid", ClientID: "c"},
-		http.Header{"X_byward_identity": {"Bearer forged"}, "X-Byward-Identity": {"Bearer forged"}})
+		http.Header{"X-Byward-Identity": {"Bearer forged"}}) // other spellings: the relay's test
 	if vals := got.Header.Values("X-Byward-Identity"); len(vals) != 1 || strings.Contains(vals[0], "forged") {
 		t.Fatalf("assertion header %q", vals)
-	}
-	if _, ok := got.Header["X_byward_identity"]; ok {
-		t.Fatal("the underscore spelling reached the upstream")
 	}
 	if auth := got.Header.Get("Authorization"); auth != "" {
 		t.Fatalf("the client's token reached the upstream: %q", auth)
@@ -162,10 +169,103 @@ func TestAClientCannotSupplyTheAssertionHeader(t *testing.T) {
 // Without an assertion key the proxy does not start (ADR-0016 §10), naming the setting.
 func TestAnHTTPUpstreamWithoutAnAssertionKeyRefusesToStart(t *testing.T) {
 	cfg := loadConfig(t, "https://mcp.example.com/mcp", "BYWARD_ASSERTION_KEYS_DIR="+t.TempDir())
-	if _, err := New(cfg, slog.New(slog.DiscardHandler)); err == nil || !strings.Contains(err.Error(), "BYWARD_ASSERTION_KEYS_DIR") {
+	noKey := func(err error) bool {
+		return err != nil && strings.Contains(err.Error(), "BYWARD_ASSERTION_KEYS_DIR") && strings.Contains(err.Error(), "has no key files")
+	}
+	if _, err := New(cfg, slog.New(slog.DiscardHandler)); !noKey(err) {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := CheckOffline(cfg); err == nil || !strings.Contains(err.Error(), "BYWARD_ASSERTION_KEYS_DIR") {
+	if _, err := CheckOffline(cfg); !noKey(err) {
 		t.Fatalf("check --offline: err = %v", err)
+	}
+}
+
+// A request with no identity to assert is refused and never reaches the upstream without its
+// assertion (ADR-0016 §2); Mint's own refusals are the assertion package's tests.
+func TestARequestWithoutAnIdentityNeverReachesTheUpstream(t *testing.T) {
+	k, err := assertion.LoadKeys(assertionkey.Dir(t), func(string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := assertion.NewMinter(k, "https://mcp.example.com", "http://u/mcp", time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reached := false
+	h := withAssertion(m, slog.New(slog.DiscardHandler), http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true }))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/mcp", nil))
+	if rec.Code != http.StatusInternalServerError || reached {
+		t.Fatalf("status %d, reached the upstream: %v", rec.Code, reached)
+	}
+}
+
+// BYWARD_ASSERTION_CLAIMS selects exactly the claims the broker seals, each name its own claim.
+func TestEachAssertionClaimNameSelectsItsOwnClaim(t *testing.T) {
+	for _, tc := range []struct {
+		claims string
+		want   broker.Asserted
+	}{
+		{"none", broker.Asserted{}},
+		{"roles", broker.Asserted{Roles: true}},
+		{"groups,email,name", broker.Asserted{Groups: true, Email: true, Name: true}},
+	} {
+		cfg := loadConfig(t, "https://mcp.example.com/mcp", "BYWARD_ASSERTION_CLAIMS="+tc.claims)
+		if got := assertedClaims(cfg); got != tc.want {
+			t.Errorf("%s: %+v, want %+v", tc.claims, got, tc.want)
+		}
+	}
+}
+
+// stdioAuthConfig is authenticated mode in front of a stdio upstream, with an empty assertion key
+// directory: a stdio upstream gets its identity at spawn, not as an assertion (ADR-0016 §6).
+func stdioAuthConfig(t *testing.T, command string) *config.Config {
+	t.Helper()
+	cfg, _, err := config.Load([]string{"--", command}, append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp",
+		"BYWARD_INTERNAL_LISTEN=127.0.0.1:0", "BYWARD_ASSERTION_KEYS_DIR="+t.TempDir()), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+// A stdio upstream needs no assertion key, and the proxy serves no JWKS for it.
+func TestAStdioUpstreamStartsWithoutAssertionKeysAndServesNoJWKS(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	s, err := New(stdioAuthConfig(t, sh), slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.closeStore() })
+	for host, h := range map[string]http.Handler{"mcp.example.com": s.Public.Handler, "127.0.0.1": s.Internal.Handler} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://"+host+"/.well-known/jwks.json", nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("JWKS on %s: %d, want 404", host, rec.Code)
+		}
+	}
+}
+
+// The store is opened before the upstream is built, so a failing upstream must close it again.
+func TestAnUpstreamThatFailsToStartClosesTheStore(t *testing.T) {
+	var st *sqlite.Store
+	orig := wireStore
+	t.Cleanup(func() { wireStore = orig })
+	wireStore = func(cfg *config.Config, log *slog.Logger, rec *audit.Log) (*sqlite.Store, error) {
+		s, err := orig(cfg, log, rec)
+		st = s
+		return s, err
+	}
+	if _, err := New(stdioAuthConfig(t, "byward-no-such-command"), slog.New(slog.DiscardHandler)); err == nil || !strings.Contains(err.Error(), "BYWARD_UPSTREAM_COMMAND") {
+		t.Fatalf("New = %v, want the missing command", err)
+	}
+	if st == nil {
+		t.Fatal("the store was never opened")
+	}
+	if _, err := st.Grant(context.Background(), "g"); err == nil || errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the store still answers after New failed: %v", err)
 	}
 }

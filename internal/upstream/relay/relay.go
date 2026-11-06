@@ -37,15 +37,10 @@ type options struct {
 	headerTimeout time.Duration
 }
 
-// WithTraceContext sets how the relay writes trace context onto the upstream request (the
-// server wires the tracing package's propagator). Without it nothing is written, and an inbound
-// `traceparent` passes unchanged.
-func WithTraceContext(inject func(context.Context, http.Header)) Option {
-	return WithInject(inject)
-}
-
 // WithInject adds a function that sets headers on every upstream request, after the inbound
-// request's credentials and forwarding headers are gone (invariant 16), in the order given.
+// request's credentials and forwarding headers are gone (invariant 16), in the order given: the
+// tracing propagator and the identity assertion. Without one, an inbound `traceparent` passes
+// unchanged.
 func WithInject(inject func(context.Context, http.Header)) Option {
 	return func(o *options) { o.inject = append(o.inject, inject) }
 }

@@ -326,7 +326,7 @@ func TestNewSealerNeedsARingAndAResource(t *testing.T) {
 
 // Version 2 seals the client ID and the asserted claims; a version 1 token is refused, so a client
 // refreshes once after an upgrade (ADR-0016 §1).
-func TestAccessTokensCarryTheAssertedClaimsAndVersion1IsRefused(t *testing.T) {
+func TestAccessTokensRoundTripTheAssertedClaims(t *testing.T) {
 	s := newSealer(t)
 	c := claims()
 	c.Roles, c.Groups, c.Email, c.Name = []string{"byward.user"}, []string{"g1", "g2"}, "a@contoso.example", "Alex"
@@ -338,12 +338,25 @@ func TestAccessTokensCarryTheAssertedClaimsAndVersion1IsRefused(t *testing.T) {
 	if !reflect.DeepEqual(got, c) {
 		t.Fatalf("round trip: %+v; want %+v", got, c)
 	}
+}
+
+// Tokens sealed before format 2 carry no client or claims: they are refused, and the client
+// refreshes once (ADR-0016 §1).
+func TestAVersion1AccessTokenIsRefused(t *testing.T) {
+	s := newSealer(t)
 	k := s.ring.signing
 	v1 := []byte{1, byte(len(k.id))}                                                                                    //nolint:gosec // G115: key IDs are at most 64 bytes (keyIDPattern)
 	v1 = k.aead.Seal(append(v1, k.id...), nil, []byte(`{"gid":"g","sub":"u","iat":100,"exp":200}`), s.ad(Access, k.id)) //nolint:gosec // G407: random-nonce AEAD; nil is required
 	if _, err := s.Open(Access, AccessPrefix+base64.RawURLEncoding.EncodeToString(v1)); !errors.Is(err, errVersion) {
 		t.Fatalf("a version 1 token: %v, want errVersion", err)
 	}
+}
+
+// The upstream's assertion needs the client, so an access token is never sealed without one (the
+// "no client ID" case of TestSealedButInvalidClaimsAreRejected is the same rule on Open).
+func TestAnAccessTokenWithoutAClientIsNotSealed(t *testing.T) {
+	s := newSealer(t)
+	c := claims()
 	c.ClientID = ""
 	if _, err := s.Seal(Access, c); !errors.Is(err, errClaims) {
 		t.Fatalf("an access token without a client ID: %v, want errClaims", err)
@@ -352,7 +365,7 @@ func TestAccessTokensCarryTheAssertedClaimsAndVersion1IsRefused(t *testing.T) {
 
 // Sizes the operator sees: with roles only a token stays well under any header limit (8 KiB is
 // the smallest common one); with 200 groups opted in (Entra's overage limit) it still fits MaxLen.
-func TestAccessTokenSizeWithRolesAndWithGroups(t *testing.T) {
+func TestAccessTokensFit200GroupsAndRefuse400(t *testing.T) {
 	s := newSealer(t)
 	c := claims()
 	c.Subject = "00000000-0000-0000-0000-000000000000:11111111-1111-1111-1111-111111111111"

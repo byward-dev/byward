@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -96,17 +95,6 @@ func upstreamResult(cfg *config.Config) doctor.Result {
 	return r
 }
 
-// ExportJWKS is `byward jwks`: the public keys of BYWARD_ASSERTION_KEYS_DIR as a JWKS, for an
-// upstream that loads them from a file instead of fetching them (ADR-0016 §3). Run it again after
-// every key rotation.
-func ExportJWKS(cfg *config.Config) ([]byte, error) {
-	keys, err := assertion.LoadKeys(cfg.AssertionKeysDir, secretCheck(cfg))
-	if err != nil {
-		return nil, fmt.Errorf("BYWARD_ASSERTION_KEYS_DIR: %s: %w (see docs/how-to/identity-assertion.md)", cfg.AssertionKeysDir, err)
-	}
-	return json.MarshalIndent(keys.JWKS(), "", "  ")
-}
-
 // upstreamID names the upstream in sealed session IDs, so one cannot be replayed against another.
 func upstreamID(cfg *config.Config) string {
 	if cfg.UpstreamCommand != nil {
@@ -121,7 +109,7 @@ func stdioName(cfg *config.Config) string { return filepath.Base(cfg.UpstreamCom
 // httpUpstream is the relay to the HTTP upstream. The assertion's header is stripped from every
 // inbound request even when nothing is asserted, so a client can never supply one.
 func httpUpstream(cfg *config.Config, log *slog.Logger, opts ...relay.Option) http.Handler {
-	return relay.New(log, cfg.UpstreamURL, append([]relay.Option{relay.WithTraceContext(tracing.Inject),
+	return relay.New(log, cfg.UpstreamURL, append([]relay.Option{relay.WithInject(tracing.Inject),
 		relay.WithResponseHeaderTimeout(cfg.UpstreamHeaderTimeout), relay.WithStripped(cfg.AssertionHeader)}, opts...)...)
 }
 

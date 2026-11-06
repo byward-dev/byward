@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -30,23 +31,23 @@ func withAssert(a Asserted) func(*Config) { return func(c *Config) { c.Assert = 
 func TestAccessTokensCarryTheClientAndOnlyTheOptedInClaims(t *testing.T) {
 	user := fakeidp.User{Roles: []string{"byward.user"}, Groups: []string{fakeidp.NewGUID()}, Email: "alex@contoso.example", Name: "Alex"}
 	cases := []struct {
-		name   string
-		assert Asserted
-		want   func(u fakeidp.User) (roles, groups []string, email, name string)
+		name                string
+		assert              Asserted
+		wantRoles, wantGrps []string
+		wantEmail, wantName string
 	}{
-		{"nothing opted in", Asserted{}, func(fakeidp.User) ([]string, []string, string, string) { return nil, nil, "", "" }},
-		{"roles (the default)", Asserted{Roles: true}, func(u fakeidp.User) ([]string, []string, string, string) { return u.Roles, nil, "", "" }},
-		{"everything", Asserted{Roles: true, Groups: true, Email: true, Name: true}, func(u fakeidp.User) ([]string, []string, string, string) {
-			return u.Roles, u.Groups, u.Email, u.Name
-		}},
+		{name: "nothing opted in"},
+		{name: "roles (the default)", assert: Asserted{Roles: true}, wantRoles: user.Roles},
+		{name: "everything", assert: Asserted{Roles: true, Groups: true, Email: true, Name: true},
+			wantRoles: user.Roles, wantGrps: user.Groups, wantEmail: user.Email, wantName: user.Name},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t, withAssert(tc.assert))
 			e.fake.Set(fakeidp.WithUser(user))
 			c := e.opened(t, e.offline(t))
-			roles, groups, email, name := tc.want(user)
-			if c.ClientID != clientID || !reflect.DeepEqual(c.Roles, roles) || !reflect.DeepEqual(c.Groups, groups) || c.Email != email || c.Name != name {
+			if c.ClientID != clientID || !reflect.DeepEqual(c.Roles, tc.wantRoles) || !reflect.DeepEqual(c.Groups, tc.wantGrps) ||
+				c.Email != tc.wantEmail || c.Name != tc.wantName {
 				t.Fatalf("claims %+v", c)
 			}
 		})
@@ -75,22 +76,14 @@ func TestRefreshAssertsTheRolesTheIdPReturnsNow(t *testing.T) {
 func TestAGrantSealedWithoutClaimsStillWorks(t *testing.T) {
 	e := newEnv(t, withAssert(Asserted{Roles: true}))
 	e.fake.Set(fakeidp.WithUser(fakeidp.User{Roles: []string{"byward.user"}}))
-	e.st.rewriteBlob = func(blob []byte) []byte {
-		plain, err := e.idpBox.Open(string(blob))
-		if err != nil {
-			t.Fatal(err)
-		}
+	e.resealBlob(t, func(plain []byte) []byte {
 		s, err := unmarshalSecrets(plain)
 		if err != nil {
 			t.Fatal(err)
 		}
-		legacy, _ := json.Marshal(s.Tokens) //nolint:gosec // G117: re-sealed below, as the broker sealed it before
-		sealed, err := e.idpBox.Seal(legacy, e.now.Add(GrantLifetime))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return []byte(sealed)
-	}
+		legacy, _ := json.Marshal(s.Tokens) //nolint:gosec // G117: re-sealed, as the broker sealed it before
+		return legacy
+	})
 	body := e.offline(t)
 	if c := e.opened(t, body); c.Roles != nil || c.ClientID != clientID {
 		t.Fatalf("first token of a legacy grant %+v", c)
@@ -119,32 +112,43 @@ func TestGroupsThatDoNotFitAreLeftOutWithAWarning(t *testing.T) {
 	}
 }
 
-// Groups the IdP left out (Entra overage) are never asserted as an incomplete list.
+// Groups the IdP left out (Entra overage) are never asserted as an incomplete list, even when it
+// still sent some.
 func TestGroupsOverageAssertsNoGroups(t *testing.T) {
-	e := newEnv(t, withAssert(Asserted{Groups: true}))
-	e.fake.Set(fakeidp.WithUser(fakeidp.User{GroupsOverage: true}))
-	if c := e.opened(t, e.offline(t)); c.Groups != nil {
-		t.Fatalf("groups %v", c.Groups)
+	c := Asserted{Roles: true, Groups: true}.claimsOf(idp.Identity{Roles: []string{"r"}, Groups: []string{"g"}, GroupsUnavailable: true})
+	if c.Groups != nil || !reflect.DeepEqual(c.Roles, []string{"r"}) {
+		t.Fatalf("claims %+v", c)
 	}
 }
 
-func TestGrantSecretsReadBothLayouts(t *testing.T) {
-	toks := idp.Tokens{IDToken: "a.b.c", RefreshToken: "rt"}
-	legacy, _ := json.Marshal(toks) //nolint:gosec // G117: test data
-	for name, tc := range map[string]struct {
-		plain []byte
-		want  grantSecrets
-		ok    bool
-	}{
-		"current":        {marshalSecrets(toks, assertedClaims{Roles: []string{"r"}}), grantSecrets{Version: 1, Tokens: toks, Claims: assertedClaims{Roles: []string{"r"}}}, true},
-		"legacy":         {legacy, grantSecrets{Tokens: toks}, true},
-		"future version": {[]byte(`{"v":2,"t":{}}`), grantSecrets{}, false},
-		"not JSON":       {[]byte("x"), grantSecrets{}, false},
-	} {
+// resealBlob makes every new grant's sealed IdP-token blob hold rewrite(plain) instead, as an
+// older or newer proxy, or a damaged store, would have left it.
+func (e *env) resealBlob(t *testing.T, rewrite func(plain []byte) []byte) {
+	e.st.rewriteBlob = func(blob []byte) []byte {
+		plain, err := e.idpBox.Open(string(blob))
+		if err != nil {
+			t.Fatal(err)
+		}
+		sealed, err := e.idpBox.Seal(rewrite(plain), e.now.Add(GrantLifetime))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return []byte(sealed)
+	}
+}
+
+// A grant whose IdP-token blob this proxy cannot read (written by a newer version before a
+// rollback, or damaged) issues no token: the client gets a server error, never a token without
+// the user's claims.
+func TestAGrantWithAnUnreadableBlobIssuesNoToken(t *testing.T) {
+	for name, plain := range map[string]string{"a newer layout": `{"v":2,"t":{}}`, "not JSON": "x"} {
 		t.Run(name, func(t *testing.T) {
-			got, err := unmarshalSecrets(tc.plain)
-			if (err == nil) != tc.ok || !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("got %+v, %v", got, err)
+			e := newEnv(t, withAssert(Asserted{Roles: true}))
+			e.resealBlob(t, func([]byte) []byte { return []byte(plain) })
+			code := e.signIn(t, url.Values{"scope": {"mcp offline_access"}}).Query().Get("code")
+			res, body := e.redeem(t, code, nil)
+			if res.StatusCode != http.StatusInternalServerError || body["error"] != "server_error" || body["access_token"] != nil {
+				t.Fatalf("redeem: %d %v", res.StatusCode, body)
 			}
 		})
 	}

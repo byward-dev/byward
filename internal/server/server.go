@@ -123,7 +123,14 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 	if a == nil {
 		h = Handler(cfg, log, up.handler, resource.NoTokens{}, nil, nil, o)
 	} else {
-		h = Handler(cfg, log, up.handler, a.validator, a.register, a.sessions, o)
+		register := a.register
+		if a.jwks != nil { // on both listeners: some upstreams reach only the internal one
+			register = func(mux *http.ServeMux) {
+				a.register(mux)
+				mux.Handle("GET "+jwksPath, a.jwks)
+			}
+		}
+		h = Handler(cfg, log, up.handler, a.validator, register, a.sessions, o)
 		checks = a.checks
 		background, closeStore = a.background, a.closeStore
 	}
@@ -133,7 +140,7 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 		mux := http.NewServeMux()
 		mux.Handle("GET /metrics", m.Handler())
 		if a != nil && a.jwks != nil {
-			mux.Handle("GET "+jwksPath, a.jwks) // for an upstream that reaches only the internal listener
+			mux.Handle("GET "+jwksPath, a.jwks)
 		}
 		s.Health.Register(mux)
 		s.Internal = hardened(cfg.InternalListen, origin.InternalHosts(o.Audit, cfg.AllowedHosts, mux), log)
