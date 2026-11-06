@@ -27,7 +27,7 @@ func TestEveryBYWARDNameInTheCodeIsASetting(t *testing.T) {
 			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 				return err
 			}
-			src, err := os.ReadFile(path)
+			src, err := os.ReadFile(path) //nolint:gosec // G304: walks this repository's own source tree
 			if err != nil {
 				return err
 			}
