@@ -1,0 +1,26 @@
+package sqlite
+
+import (
+	"context"
+	"path/filepath"
+	"testing"
+
+	"github.com/corker/mcp-authproxy/internal/store"
+	"github.com/corker/mcp-authproxy/internal/store/storetest"
+)
+
+// openTemp opens a store in a fresh directory, with the counter file in another one (as it would
+// sit next to the keys).
+func openTemp(t *testing.T) *Store {
+	t.Helper()
+	s, err := Open(context.Background(), Options{Dir: t.TempDir(), CounterFile: filepath.Join(t.TempDir(), "store-writes")})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s
+}
+
+func TestConformance(t *testing.T) {
+	storetest.Run(t, func(t *testing.T) store.Store { return openTemp(t) })
+}
