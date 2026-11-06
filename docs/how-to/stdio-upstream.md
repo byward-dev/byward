@@ -114,6 +114,8 @@ so per-user processes pile up until the idle timeout or the per-user limit recla
 | A 2026-07-28 request, and the server does not answer `server/discover` | The same `400`; byward asks again after 10 minutes |
 | A 2026-07-28 request with a repeated key, or an id or progress token that is not a string or an integer | `400`: the proxy does not guess which value is meant |
 | A 2026-07-28 request whose client closes its stream | The upstream gets `notifications/cancelled` for it |
+| A 2026-07-28 request whose `MCP-Protocol-Version`, `Mcp-Method` or `Mcp-Name` header is missing or does not match its body | `400` with `HeaderMismatch` (`-32020`): byward checks these for the server, which never sees headers |
+| `subscriptions/listen` | Its stream carries the acknowledgement and the notifications the client asked for, under the client's own request id; it ends when the client closes it (the upstream gets `notifications/cancelled`), when the upstream answers it, or when the upstream tears it down |
 | `GET` or `DELETE` without a session | `405`: only a 2025-11-25 MCP session has them |
 | A session that ended, or another user's | `404`; the client starts a new session |
 | The upstream process crashes, exits or closes its stdout | Open requests get a JSON-RPC error (`-32603`, `upstream process exited`), later ones `404`. The process is not restarted; one that closed stdout but keeps running is stopped after 5 s |

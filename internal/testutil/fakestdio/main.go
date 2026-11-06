@@ -345,6 +345,10 @@ func serveMCP() {
 //	strayresponse  a response with an id nobody sent, then the result
 //	strayprogress  a progress notification for a token nobody sent, then the result
 //	answerexit  the result, then exits at once
+//	subscriptions/listen  notifications/subscriptions/acknowledged for it, then no answer
+//	notify      a notifications/tools/list_changed on every open listen, then the result
+//	endlistens  a completion result for every open listen, then its own result
+//	teardown    a notifications/cancelled for every open listen, then the result
 func serveModern() {
 	out := bufio.NewWriter(os.Stdout)
 	var mu sync.Mutex
@@ -362,6 +366,17 @@ func serveModern() {
 	}
 	var cmu sync.Mutex
 	cancelled := []json.RawMessage{}
+	var listens []json.RawMessage
+	takeListens := func() []json.RawMessage {
+		cmu.Lock()
+		defer cmu.Unlock()
+		l := listens
+		listens = nil
+		return l
+	}
+	sub := func(id json.RawMessage) string {
+		return `"_meta":{"io.modelcontextprotocol/subscriptionId":` + string(id) + `}`
+	}
 	answers := map[string]chan json.RawMessage{}
 	type params struct {
 		Tag  string `json:"tag"`
@@ -455,6 +470,29 @@ func serveModern() {
 				result(id, "ok")
 			case "strayprogress":
 				write(message{Method: "notifications/progress", Params: json.RawMessage(`{"progressToken":"nobody","progress":1}`)})
+				result(id, "ok")
+			case "subscriptions/listen":
+				cmu.Lock()
+				listens = append(listens, id)
+				cmu.Unlock()
+				write(message{Method: "notifications/subscriptions/acknowledged", Params: json.RawMessage(`{` + sub(id) + `,"notifications":{"toolsListChanged":true}}`)})
+			case "notify":
+				cmu.Lock()
+				l := append([]json.RawMessage(nil), listens...)
+				cmu.Unlock()
+				for _, lid := range l {
+					write(message{Method: "notifications/tools/list_changed", Params: json.RawMessage(`{` + sub(lid) + `}`)})
+				}
+				result(id, len(l))
+			case "endlistens":
+				for _, lid := range takeListens() {
+					write(message{ID: lid, Result: json.RawMessage(`{"resultType":"complete",` + sub(lid) + `}`)})
+				}
+				result(id, "ok")
+			case "teardown":
+				for _, lid := range takeListens() {
+					write(message{Method: "notifications/cancelled", Params: json.RawMessage(`{"requestId":` + string(lid) + `}`)})
+				}
 				result(id, "ok")
 			case "answerexit":
 				mu.Lock()

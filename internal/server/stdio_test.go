@@ -96,7 +96,7 @@ func stdioProxyRunning(t *testing.T, flags []string, env ...string) (*httptest.S
 }
 
 // mcpPost sends one JSON-RPC message and returns the response and its SSE data lines.
-func mcpPost(t *testing.T, srv *httptest.Server, token, session, body string) (*http.Response, []string) {
+func mcpPost(t *testing.T, srv *httptest.Server, token, session, body string, header ...string) (*http.Response, []string) {
 	t.Helper()
 	r, _ := http.NewRequest(http.MethodPost, srv.URL+"/mcp", strings.NewReader(body))
 	r.Host = "mcp.example.com"
@@ -105,6 +105,9 @@ func mcpPost(t *testing.T, srv *httptest.Server, token, session, body string) (*
 	r.Header.Set("Accept", "application/json, text/event-stream")
 	if session != "" {
 		r.Header.Set(mcpsession.Header, session)
+	}
+	for i := 0; i+1 < len(header); i += 2 {
+		r.Header.Set(header[i], header[i+1])
 	}
 	res, err := http.DefaultClient.Do(r)
 	if err != nil {
@@ -359,7 +362,7 @@ func TestModernEraRequestsRunInTheUsersOwnUpstreamProcessWithNoToken(t *testing.
 	srv, _, _ := stdioProxyRunning(t, []string{"-modern"})
 	env := func(token string) []string {
 		body := `{"jsonrpc":"2.0","id":1,"method":"env","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`
-		res, events := mcpPost(t, srv, token, "", body)
+		res, events := mcpPost(t, srv, token, "", body, "MCP-Protocol-Version", "2026-07-28", "Mcp-Method", "env")
 		var m struct{ Result []string }
 		if res.StatusCode != http.StatusOK || len(events) != 1 || json.Unmarshal([]byte(events[0]), &m) != nil {
 			t.Fatalf("modern env: status %d, events %q", res.StatusCode, events)

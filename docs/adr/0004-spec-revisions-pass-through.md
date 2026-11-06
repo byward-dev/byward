@@ -34,6 +34,13 @@ reserved, so it is the proxy's design choice (F13).
    check it. "Byte-transparent" means the message body; this header is rewritten.
 3. **Modern era:** forwarded unchanged. The proxy does not validate `Mcp-Method`/`Mcp-Name`
    (it enforces no policy on mirrored headers).
+   _Amended 2026-11-06 (#61):_ for a **stdio** upstream the bridge is the server, and the upstream
+   never sees HTTP headers, so the bridge enforces the transport's header rules for 2026-07-28
+   requests: `MCP-Protocol-Version`, `Mcp-Method` and, for `tools/call`, `resources/read` and
+   `prompts/get`, `Mcp-Name` must be present and equal the body's values (case-sensitive, after
+   decoding a Base64 sentinel); otherwise `400` with `HeaderMismatch` (`-32020`). Notification
+   POSTs carry no header requirements in that revision and are not checked. HTTP upstreams are
+   unchanged: they validate their own headers.
 4. **Every request is authenticated, `server/discover` included** (as the MCP conformance suite
    does).
 5. **Identity propagation (F13) is a v1 requirement for HTTP upstreams**, so they can verify
