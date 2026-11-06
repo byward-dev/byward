@@ -15,7 +15,6 @@ type authCode struct {
 	nonce       string
 	challenge   string
 	user        User
-	tenant      string // tenant the user signed into (Entra: always the user's tid)
 	authTime    time.Time
 	expires     time.Time
 	used        bool
@@ -96,7 +95,6 @@ func (p *IdP) authorize(w http.ResponseWriter, r *http.Request) {
 		nonce:       q.Get("nonce"),
 		challenge:   challenge,
 		user:        u,
-		tenant:      u.TenantID,
 		authTime:    now,
 		expires:     now.Add(p.cfg.codeLifetime),
 	}

@@ -4,8 +4,6 @@ import (
 	"crypto/subtle"
 	"net/http"
 	"net/url"
-	"slices"
-	"time"
 )
 
 const clientAssertionType = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
@@ -153,26 +151,4 @@ func findCert(c Client, thumb func(*Certificate) string, want string) *Certifica
 		}
 	}
 	return nil
-}
-
-func audContains(aud any, want ...string) bool {
-	switch v := aud.(type) {
-	case string:
-		return slices.Contains(want, v)
-	case []any:
-		for _, a := range v {
-			if s, ok := a.(string); ok && slices.Contains(want, s) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func numericDate(v any) (time.Time, bool) {
-	f, ok := v.(float64)
-	if !ok {
-		return time.Time{}, false
-	}
-	return time.Unix(int64(f), 0), true
 }

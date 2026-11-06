@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -235,3 +236,25 @@ func isGUID(s string) bool {
 }
 
 func randomToken() string { return rand.Text() + rand.Text() }
+
+func audContains(aud any, want ...string) bool {
+	switch v := aud.(type) {
+	case string:
+		return slices.Contains(want, v)
+	case []any:
+		for _, a := range v {
+			if s, ok := a.(string); ok && slices.Contains(want, s) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func numericDate(v any) (time.Time, bool) {
+	f, ok := v.(float64)
+	if !ok {
+		return time.Time{}, false
+	}
+	return time.Unix(int64(f), 0), true
+}

@@ -270,12 +270,3 @@ func (p *IdP) oboUser(assertion, clientID string) (User, *Failure) {
 	u.PreferredUsername, _ = j.claims["preferred_username"].(string)
 	return u, nil
 }
-
-func (p *IdP) keyByID(kid string) *signingKey {
-	for _, k := range p.keys {
-		if k.kid == kid {
-			return k
-		}
-	}
-	return nil
-}

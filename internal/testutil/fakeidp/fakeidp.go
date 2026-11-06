@@ -414,3 +414,12 @@ func (p *IdP) routes() http.Handler {
 	mux.HandleFunc("POST /{tenant}/oauth2/v2.0/token", p.token)
 	return mux
 }
+
+func (p *IdP) keyByID(kid string) *signingKey {
+	for _, k := range p.keys {
+		if k.kid == kid {
+			return k
+		}
+	}
+	return nil
+}
