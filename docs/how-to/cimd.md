@@ -59,5 +59,5 @@ keys. `byward_cimd_fetches_total` counts fetches by outcome
 ## App notes
 
 **VS Code** may ask you to sign in twice when you add the server. If the server stays at
-"Starting", sign in again from the Accounts menu. Both were observed against Entra on 2026-11-06;
-the cause is not known.
+"Starting", sign in again from VS Code (the run re-authenticated through VS Code's UI). Both were
+observed against Entra on 2026-11-06; the cause is not known.
