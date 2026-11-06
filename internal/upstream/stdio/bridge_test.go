@@ -210,16 +210,19 @@ func TestMalformedPostsAre400AndStartNothing(t *testing.T) {
 		body string
 		code int
 	}{
-		"batch":            {`[` + initialize + `]`, codeInvalidRequest},
-		"not JSON":         {`{"jsonrpc":`, codeParseError},
-		"not object":       {`"initialize"`, codeParseError},
-		"empty":            {``, codeParseError},
-		"no method":        {`{"jsonrpc":"2.0","id":1}`, codeInvalidRequest},
-		"null response id": {`{"jsonrpc":"2.0","id":null,"result":{}}`, codeInvalidRequest},
-		"null request id":  {`{"jsonrpc":"2.0","id":null,"method":"initialize"}`, codeInvalidRequest},
-		"boolean id":       {`{"jsonrpc":"2.0","id":true,"method":"initialize"}`, codeInvalidRequest},
-		"fractional id":    {`{"jsonrpc":"2.0","id":1.5,"method":"initialize"}`, codeInvalidRequest},
-		"object id":        {`{"jsonrpc":"2.0","id":{},"method":"initialize"}`, codeInvalidRequest},
+		"batch":                            {`[` + initialize + `]`, codeInvalidRequest},
+		"not JSON":                         {`{"jsonrpc":`, codeParseError},
+		"not object":                       {`"initialize"`, codeParseError},
+		"empty":                            {``, codeParseError},
+		"no method":                        {`{"jsonrpc":"2.0","id":1}`, codeInvalidRequest},
+		"null response id":                 {`{"jsonrpc":"2.0","id":null,"result":{}}`, codeInvalidRequest},
+		"null request id":                  {`{"jsonrpc":"2.0","id":null,"method":"initialize"}`, codeInvalidRequest},
+		"boolean id":                       {`{"jsonrpc":"2.0","id":true,"method":"initialize"}`, codeInvalidRequest},
+		"fractional id":                    {`{"jsonrpc":"2.0","id":1.5,"method":"initialize"}`, codeInvalidRequest},
+		"object id":                        {`{"jsonrpc":"2.0","id":{},"method":"initialize"}`, codeInvalidRequest},
+		"method repeated, initialize last": {`{"jsonrpc":"2.0","id":1,"method":"tools/call","method":"initialize"}`, codeInvalidRequest},
+		"method in another case, initialize last": {`{"jsonrpc":"2.0","id":1,"method":"tools/call","METHOD":"initialize"}`, codeInvalidRequest},
+		"another top-level key repeated":          {`{"jsonrpc":"2.0","jsonrpc":"2.0","id":1,"method":"initialize"}`, codeInvalidRequest},
 	} {
 		t.Run(name, func(t *testing.T) {
 			res := b.post(t, "alice", "", tc.body)

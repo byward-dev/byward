@@ -77,9 +77,7 @@ type requestMeta struct {
 // readMeta locates a message's id, progress token, log level and protocol version. Ambiguous JSON
 // is refused: the ids are rewritten, and a wrong guess would route one client's answer to another.
 func readMeta(msg []byte) (requestMeta, error) {
-	// The method is located only so that a repeated or case-folded "method" key is refused: the
-	// proxy and the upstream could read different methods from it.
-	at, err := locate(msg, pathID, pathToken, pathLogLevel, pathVersion, pathMethod)
+	at, err := locate(msg, pathID, pathToken, pathLogLevel, pathVersion) // the method: parseMessage
 	if err != nil {
 		return requestMeta{}, err
 	}

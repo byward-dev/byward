@@ -87,6 +87,12 @@ func parseMessage(body []byte) ([]byte, envelope, *rpcFault) {
 	if env.kind() == kindInvalid {
 		return nil, envelope{}, &rpcFault{codeInvalidRequest, "Invalid Request: not a JSON-RPC request, notification or response"}
 	}
+	// env.Method is encoding/json's reading: any case, last key wins. An upstream may read the exact
+	// key, or the first, so a repeated top-level key or a method in another case is refused before
+	// the method decides anything (initialize or not, which era, which header rules).
+	if _, err := locate(body, pathMethod); err != nil {
+		return nil, envelope{}, &rpcFault{codeInvalidRequest, "Invalid Request: the message is ambiguous: a top-level key is repeated, or the method is given in another case"}
+	}
 	if bytes.ContainsAny(body, "\r\n") {
 		var b bytes.Buffer
 		if err := json.Compact(&b, body); err != nil {

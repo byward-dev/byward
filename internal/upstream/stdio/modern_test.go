@@ -257,11 +257,13 @@ func TestAmbiguousModernRequestsAreRefusedBeforeAnyProcessStarts(t *testing.T) {
 	// Which messages are ambiguous is locate's business (rewrite_test.go); this checks the wiring.
 	b := newModernBridge(t, nil)
 	for name, body := range map[string]string{
-		"duplicate id":               `{"jsonrpc":"2.0","id":1,"id":2,"method":"echo","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
-		"id in another case":         `{"jsonrpc":"2.0","ID":1,"method":"echo","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
-		"object progressToken":       modernBody(`1`, "echo", `"progressToken":{"a":1}`, ""),
-		"method in another case too": `{"jsonrpc":"2.0","id":1,"method":"subscriptions/listen","METHOD":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
-		"duplicate method":           `{"jsonrpc":"2.0","id":1,"method":"subscriptions/listen","method":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
+		"duplicate id":                                 `{"jsonrpc":"2.0","id":1,"id":2,"method":"echo","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
+		"id in another case":                           `{"jsonrpc":"2.0","ID":1,"method":"echo","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
+		"object progressToken":                         modernBody(`1`, "echo", `"progressToken":{"a":1}`, ""),
+		"method also in another case":                  `{"jsonrpc":"2.0","id":1,"method":"subscriptions/listen","METHOD":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
+		"method also in another case, initialize last": `{"jsonrpc":"2.0","id":1,"method":"tools/call","METHOD":"initialize","params":{"name":"evil","_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
+		"method repeated, initialize last":             `{"jsonrpc":"2.0","id":1,"method":"tools/call","method":"initialize","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
+		"duplicate method":                             `{"jsonrpc":"2.0","id":1,"method":"subscriptions/listen","method":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			res := b.post(t, "alice", "", body)
@@ -735,39 +737,30 @@ func TestSubscriptionNotificationsReachOnlyTheirOwnListenStreamUnderTheClientsID
 	}
 }
 
-func TestAGracefullyEndedSubscriptionAnswersUnderTheClientsID(t *testing.T) {
-	for name, method := range map[string]string{"naming its own subscription": "endlistens", "naming another id": "endforeign"} {
+func TestAListensFinalAnswerReachesItsStreamUnderTheClientsIDOnly(t *testing.T) {
+	for name, tc := range map[string]struct {
+		method string
+		want   []string
+	}{
+		"graceful end naming its own subscription": {"endlistens", []string{`"resultType":"complete"`, `"io.modelcontextprotocol/subscriptionId":"L"`}},
+		"graceful end naming another id":           {"endforeign", []string{`"resultType":"complete"`, `"io.modelcontextprotocol/subscriptionId":"L"`}},
+		// An error answer has no result._meta to rewrite; it is still the upstream's own answer.
+		"the upstream refuses the listen":        {"refuselisten", []string{`"code":-32602`}},
+		"the end's subscription id is ambiguous": {"endrepeated", []string{`"code":-32603`}},
+	} {
 		t.Run(name, func(t *testing.T) {
 			b := newModernBridge(t, nil)
 			ev := b.listenModern(t, context.Background(), `"L"`)
-			readEvents(t, b.modern(t, "alice", modernBody(`1`, method, "", "")))
+			readEvents(t, b.modern(t, "alice", modernBody(`1`, tc.method, "", "")))
 			got := ev.all()
-			if len(got) != 1 || !strings.Contains(got[0], `"id":"L"`) || !strings.Contains(got[0], `"resultType":"complete"`) ||
-				!strings.Contains(got[0], `"io.modelcontextprotocol/subscriptionId":"L"`) || strings.Contains(got[0], "byw-") {
-				t.Fatalf("events %q, want the completion with the client's id in both places and no proxy id", got)
+			ok := len(got) == 1 && strings.Contains(got[0], `"id":"L"`) && !strings.Contains(got[0], "byw-")
+			for _, w := range tc.want {
+				ok = ok && strings.Contains(got[0], w)
+			}
+			if !ok {
+				t.Fatalf("events %q, want one answer under the client's id with %q and no proxy id", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestAListenTheUpstreamRefusesGetsItsErrorUnderTheClientsID(t *testing.T) {
-	// An error answer has no result._meta to rewrite; it is still the upstream's own answer.
-	b := newModernBridge(t, nil)
-	ev := b.listenModern(t, context.Background(), `"L"`)
-	readEvents(t, b.modern(t, "alice", modernBody(`1`, "refuselisten", "", "")))
-	got := ev.all()
-	if len(got) != 1 || !strings.Contains(got[0], `"id":"L"`) || !strings.Contains(got[0], `"code":-32602`) || strings.Contains(got[0], "byw-") {
-		t.Fatalf("events %q, want the upstream's -32602 under the client's id and no proxy id", got)
-	}
-}
-
-func TestASubscriptionEndWhoseSubscriptionIDIsAmbiguousAnswersAnErrorUnderTheClientsID(t *testing.T) {
-	b := newModernBridge(t, nil)
-	ev := b.listenModern(t, context.Background(), `"L"`)
-	readEvents(t, b.modern(t, "alice", modernBody(`1`, "endrepeated", "", "")))
-	got := ev.all()
-	if len(got) != 1 || !strings.Contains(got[0], `"id":"L"`) || !strings.Contains(got[0], `"code":-32603`) || strings.Contains(got[0], "byw-") {
-		t.Fatalf("events %q, want an internal error under the client's id and no proxy id", got)
 	}
 }
 
