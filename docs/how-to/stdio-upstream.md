@@ -1,12 +1,17 @@
 # Put a stdio MCP server behind byward
 
 byward can run a stdio MCP server itself and serve it over Streamable HTTP, behind the same
-sign-in as an HTTP upstream. Each MCP session gets its own upstream process, which acts for one
-signed-in user only ([ADR-0003](../adr/0003-upstream-kinds.md)).
+sign-in as an HTTP upstream. An upstream process only ever acts for one signed-in user
+([ADR-0003](../adr/0003-upstream-kinds.md)):
 
-**Support today:** clients that speak MCP 2025-11-25 (VS Code, Cursor, MCP Inspector, and dual-era
-clients such as Claude Code and claude.ai, which fall back to it). The 2026-07-28 era for stdio
-upstreams (one process per user) is planned (#61). Linux and macOS only, one replica.
+- **MCP 2025-11-25** (VS Code, Cursor, MCP Inspector, and dual-era clients that fall back to it):
+  each MCP session gets its own upstream process.
+- **MCP 2026-07-28**, if your server speaks it: all of a user's requests, from all their MCP
+  clients, share one upstream process for that user. byward asks the server `server/discover` on
+  its first 2026-07-28 request. A server that does not answer it is treated as 2025-11-25 only,
+  and clients fall back to that.
+
+Linux and macOS only, one replica.
 
 ## 1. Give the command
 
@@ -78,12 +83,21 @@ Browser servers need `--isolated` or `--user-data-dir={session_dir}`.
 | `BYWARD_STDIO_MAX_PROCESSES` | 64 | The least recently used idle process (any user's) is stopped so a new session can start |
 | `BYWARD_STDIO_MAX_PROCESSES_PER_USER` | 8 | That user's own least recently used idle process is stopped; other users' processes are never touched |
 
-A process is idle when no request or GET stream of its session is open. If nothing is idle, the new
-session gets `503` with `Retry-After: 10`. Each stop under a limit writes a `process_evicted`
+A process is idle when no request or stream of its own is open: a GET stream of its MCP session,
+or any 2026-07-28 request of its user. If nothing is idle, the new session or request gets `503`
+with `Retry-After: 10`, and the proxy logs `stdio process cap full: every process is in use`. Each stop under a limit writes a `process_evicted`
 audit record; the evicted session's client gets `404` and starts a new session. A process that is
 stopping still counts until it has exited.
 
-A process also stops after 30 minutes without traffic. Size the limits by memory: a Node or Python
+A process also stops after 30 minutes without traffic, counted from when its last request or
+stream ended; a process in use never idles out, even with no traffic.
+
+**Long-lived streams hold slots.** An open GET stream or a long 2026-07-28 request keeps its
+process in use for as long as the client keeps it open, and a process in use is never evicted. So
+one user can hold up to `BYWARD_STDIO_MAX_PROCESSES_PER_USER` slots indefinitely, and that many
+users together can fill `BYWARD_STDIO_MAX_PROCESSES`, after which everyone else gets `503`. With the
+defaults (8 and 64) that is 8 users. If your users keep streams open, raise the upstream limit or
+lower the per-user one; watch `byward_stdio_processes` and the log line above. Size the limits by memory: a Node or Python
 server is 120–240 MB per process, about 40 % of it the `npx`/`uvx` launcher. Install the server in
 the image and run it directly where you can.
 
@@ -95,7 +109,12 @@ so per-user processes pile up until the idle timeout or the per-user limit recla
 | Situation | Client gets |
 |---|---|
 | `initialize` without a session | A new process and an `Mcp-Session-Id` (sealed to the user when authentication is on) |
-| Any other request without a session, including a 2026-07-28 request | `400` with a JSON-RPC error; dual-era clients fall back to `initialize` |
+| Any other request without a session | `400` with a JSON-RPC error; dual-era clients fall back to `initialize` |
+| A 2026-07-28 request, and the server answers `server/discover` | Served by the user's upstream process; the client's request ids and progress tokens are mapped to the proxy's own on the way in and back on the way out, so the user's clients never see each other's answers |
+| A 2026-07-28 request, and the server does not answer `server/discover` | The same `400`; byward asks again after 10 minutes |
+| A 2026-07-28 request with a repeated key, or an id or progress token that is not a string or an integer | `400`: the proxy does not guess which value is meant |
+| A 2026-07-28 request whose client closes its stream | The upstream gets `notifications/cancelled` for it |
+| `GET` or `DELETE` without a session | `405`: only a 2025-11-25 MCP session has them |
 | A session that ended, or another user's | `404`; the client starts a new session |
 | The upstream process crashes, exits or closes its stdout | Open requests get a JSON-RPC error (`-32603`, `upstream process exited`), later ones `404`. The process is not restarted; one that closed stdout but keeps running is stopped after 5 s |
 | The upstream asks the client something (sampling, elicitation, roots) while no stream is open | The proxy answers the upstream with a JSON-RPC error (`-32603`, `client not connected`) |

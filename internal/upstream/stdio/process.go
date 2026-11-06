@@ -47,6 +47,7 @@ type Process struct {
 
 	mu       sync.Mutex
 	idle     Timer
+	held     int // open leases; the idle timer does not run while any is held
 	timers   []Timer
 	stopping bool
 	exited   bool
@@ -72,7 +73,14 @@ func startProcess(cmd *exec.Cmd, stdin, stdout, stderr *os.File, sessionDir stri
 		stdin: stdin, messages: make(chan []byte, 16), abandon: make(chan struct{}), done: make(chan struct{}),
 	}
 	p.mu.Lock() // the timer may fire before the assignment completes; stop reads p.idle under p.mu
-	p.idle = o.clock.AfterFunc(o.idleFor, func() { p.stop("idle") })
+	p.idle = o.clock.AfterFunc(o.idleFor, func() {
+		p.mu.Lock()
+		held := p.held
+		p.mu.Unlock()
+		if held == 0 { // a lease taken as the timer fired keeps the process
+			p.stop("idle")
+		}
+	})
 	p.mu.Unlock()
 	p.readers.Add(2)
 	go p.readStdout(stdout)
@@ -145,11 +153,32 @@ func (p *Process) isStopping() bool {
 	return p.stopping || p.exited
 }
 
-// touch restarts the idle timer.
+// touch restarts the idle timer, unless the process is held.
 func (p *Process) touch() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if !p.stopping && !p.exited {
+	if !p.stopping && !p.exited && p.held == 0 {
+		p.idle.Reset(p.idleFor)
+	}
+}
+
+// hold marks the process in use: an open request or stream, however quiet, keeps it from idling
+// out (a subscription may see no traffic for longer than the idle timeout).
+func (p *Process) hold() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.held++
+	if p.held == 1 && !p.stopping && !p.exited {
+		p.idle.Stop()
+	}
+}
+
+// unhold ends one hold; the idle timeout counts from the last one.
+func (p *Process) unhold() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.held--
+	if p.held == 0 && !p.stopping && !p.exited {
 		p.idle.Reset(p.idleFor)
 	}
 }

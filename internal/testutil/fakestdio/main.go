@@ -10,7 +10,8 @@
 //	block         print "blocking", then never read stdin again
 //	crash         exit with status 3
 //
-// Flag -mcp makes it a JSON-RPC server instead (see serveMCP); with -stubborn as well, it then
+// Flag -modern makes it a 2026-07-28 server (see serveModern). Flag -mcp makes it a 2025-11-25
+// JSON-RPC server instead (see serveMCP); with -stubborn as well, it then
 // keeps running after stdin closes, ignoring SIGTERM. Flag -init=error, -init=exit or -init=hold
 // makes initialize fail with a JSON-RPC error, exit the process, or never be answered;
 // -init=lognerror sends a notifications/message first, then the error; -init=lognhold sends the
@@ -55,6 +56,9 @@ func main() {
 			stubborn = true
 		case "-mcp":
 			mcp = true
+		case "-modern":
+			serveModern()
+			return
 		}
 	}
 	if mcp {
@@ -308,5 +312,121 @@ func serveMCP() {
 		default:
 			write(message{ID: m.ID, Error: json.RawMessage(`{"code":-32601,"message":"Method not found"}`)})
 		}
+	}
+}
+
+// serveModern is a 2026-07-28 server: it answers server/discover and handles each request in its
+// own goroutine, so answers and notifications for concurrent requests interleave. Methods:
+//
+//	echo        its params as the result
+//	progress    three notifications/progress for params._meta.progressToken, each with
+//	            message = params.tag, then the result {"tag": params.tag}
+//	log         a notifications/message if params._meta carries io.modelcontextprotocol/logLevel,
+//	            then the result {"tag": params.tag}
+//	hold        no answer; a notifications/cancelled for it is recorded
+//	cancelled   the request ids notifications/cancelled has named so far
+//	ask         writes a JSON-RPC request to stdout (which a modern server must not), then waits
+//	            for the answer and returns it as the result
+//	stray       writes a notification unrelated to any request, then the result
+//	crash       exits with status 3
+//	env         the environment as the result
+func serveModern() {
+	out := bufio.NewWriter(os.Stdout)
+	var mu sync.Mutex
+	write := func(m message) {
+		m.JSONRPC = "2.0"
+		b, _ := json.Marshal(m)
+		mu.Lock()
+		defer mu.Unlock()
+		_, _ = out.Write(append(b, '\n'))
+		_ = out.Flush()
+	}
+	result := func(id json.RawMessage, v any) {
+		b, _ := json.Marshal(v)
+		write(message{ID: id, Result: b})
+	}
+	var cmu sync.Mutex
+	cancelled := []json.RawMessage{}
+	answers := map[string]chan json.RawMessage{}
+	type params struct {
+		Tag  string `json:"tag"`
+		Meta struct {
+			ProgressToken json.RawMessage `json:"progressToken"`
+			LogLevel      string          `json:"io.modelcontextprotocol/logLevel"`
+		} `json:"_meta"`
+		RequestID json.RawMessage `json:"requestId"`
+	}
+	sc := bufio.NewScanner(os.Stdin)
+	sc.Buffer(make([]byte, 1<<20), 1<<20)
+	n := 0
+	for sc.Scan() {
+		var m message
+		if json.Unmarshal(sc.Bytes(), &m) != nil {
+			continue
+		}
+		var p params
+		_ = json.Unmarshal(m.Params, &p)
+		if m.Method == "" { // an answer to "ask"
+			cmu.Lock()
+			if ch, ok := answers[string(m.ID)]; ok {
+				ch <- append(json.RawMessage(nil), sc.Bytes()...)
+			}
+			cmu.Unlock()
+			continue
+		}
+		if m.ID == nil {
+			if m.Method == "notifications/cancelled" {
+				cmu.Lock()
+				cancelled = append(cancelled, p.RequestID)
+				cmu.Unlock()
+			}
+			continue
+		}
+		n++
+		id, k := m.ID, n
+		go func() {
+			switch m.Method {
+			case "server/discover":
+				result(id, map[string]any{"resultType": "complete", "supportedVersions": []string{"2026-07-28"},
+					"capabilities": map[string]any{}, "ttlMs": 0, "cacheScope": "public"})
+			case "echo":
+				write(message{ID: id, Result: m.Params})
+			case "progress":
+				for i := range 3 {
+					time.Sleep(time.Duration(1+k%3) * time.Millisecond)
+					write(message{Method: "notifications/progress", Params: json.RawMessage(fmt.Sprintf(
+						`{"progressToken":%s,"progress":%d,"message":%q}`, p.Meta.ProgressToken, i+1, p.Tag))})
+				}
+				result(id, map[string]string{"tag": p.Tag})
+			case "log":
+				if p.Meta.LogLevel != "" {
+					write(message{Method: "notifications/message", Params: json.RawMessage(fmt.Sprintf(`{"level":"info","data":%q}`, p.Tag))})
+				}
+				result(id, map[string]string{"tag": p.Tag})
+			case "hold":
+			case "cancelled":
+				cmu.Lock()
+				ids := append([]json.RawMessage(nil), cancelled...)
+				cmu.Unlock()
+				result(id, ids)
+			case "ask":
+				ask := json.RawMessage(fmt.Sprintf(`"ask-%d"`, k))
+				ch := make(chan json.RawMessage, 1)
+				cmu.Lock()
+				answers[string(ask)] = ch
+				cmu.Unlock()
+				write(message{ID: ask, Method: "roots/list", Params: json.RawMessage(`{}`)})
+				write(message{ID: id, Result: <-ch})
+			case "crash":
+				os.Exit(3)
+			case "env":
+				result(id, os.Environ())
+			case "stray":
+				write(message{Method: "notifications/tools/list_changed"})
+				result(id, "ok")
+			default:
+				write(message{ID: id, Error: json.RawMessage(`{"code":-32601,"message":"Method not found"}`)})
+			}
+		}()
 	}
 }

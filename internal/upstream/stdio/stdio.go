@@ -168,6 +168,7 @@ func (m *Manager) Get(ctx context.Context, key string, id Identity) (p *Process,
 				m.forget(key, e)
 				return nil, nil, e.err
 			}
+			e.p.hold() // the spawning Get holds the first lease
 			return e.p, m.releaser(e), nil
 		}
 		m.mu.Unlock()
@@ -227,7 +228,7 @@ func (m *Manager) lease(ctx context.Context, key string, e *entry) (*Process, fu
 	}
 	e.leases++
 	m.mu.Unlock()
-	e.p.touch()
+	e.p.hold()
 	return e.p, m.releaser(e), nil
 }
 
@@ -236,9 +237,10 @@ func (m *Manager) releaser(e *entry) func() {
 	return func() {
 		once.Do(func() {
 			m.mu.Lock()
-			defer m.mu.Unlock()
 			e.leases--
 			e.lastUsed = m.cfg.Clock.Now()
+			m.mu.Unlock()
+			e.p.unhold()
 		})
 	}
 }

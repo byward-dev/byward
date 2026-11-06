@@ -182,7 +182,7 @@ func TestPostWithoutAnMCPSessionOtherThanInitializeIs400AndStartsNoUpstreamProce
 	b := newBridge(t, nil)
 	for name, body := range map[string]string{
 		"legacy request":               `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
-		"modern request":               `{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
+		"older protocol version":       `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2025-06-18"}}}`,
 		"notification":                 `{"jsonrpc":"2.0","method":"notifications/initialized"}`,
 		"initialize as a notification": `{"jsonrpc":"2.0","method":"initialize"}`,
 	} {
@@ -625,8 +625,8 @@ func TestMissingOrDuplicateMCPSessionHeadersAndUnsupportedMethodsStartNoProcess(
 		allow    string // the Allow header expected; only a 405 lists the methods
 	}{
 		"two session headers":    {http.MethodPost, []string{s, s}, http.StatusBadRequest, ""},
-		"GET without session":    {http.MethodGet, nil, http.StatusBadRequest, ""},
-		"DELETE without session": {http.MethodDelete, nil, http.StatusBadRequest, ""},
+		"GET without session":    {http.MethodGet, nil, http.StatusMethodNotAllowed, "POST"},
+		"DELETE without session": {http.MethodDelete, nil, http.StatusMethodNotAllowed, "POST"},
 		"PUT":                    {http.MethodPut, []string{s}, http.StatusMethodNotAllowed, "GET, POST, DELETE"},
 	} {
 		t.Run(name, func(t *testing.T) {

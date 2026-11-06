@@ -547,3 +547,19 @@ func TestCrashIsNotLoggedAsAStdoutStop(t *testing.T) {
 		t.Fatal("a crash must be logged as an unexpected exit, not as a stop")
 	}
 }
+
+func TestProcessInUseNeverIdlesOutAndIdlesFromItsLastRelease(t *testing.T) {
+	h := newHarness(t, nil)
+	p, release := h.lease(t, "s1", alice)
+	h.clk.Advance(2 * DefaultIdleTimeout) // a quiet open stream, e.g. a subscription
+	if isDone(p) {
+		t.Fatal("a process in use was stopped as idle")
+	}
+	release()
+	h.clk.Advance(DefaultIdleTimeout - time.Second)
+	if isDone(p) {
+		t.Fatal("stopped before the idle timeout counted from the release")
+	}
+	h.clk.Advance(time.Second)
+	waitDone(t, p)
+}

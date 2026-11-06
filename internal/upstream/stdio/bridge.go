@@ -48,7 +48,9 @@ type Bridge struct {
 	c BridgeConfig
 
 	mu       sync.Mutex
-	sessions map[string]*session
+	sessions map[string]*session  // legacy era, by session ID
+	users    map[string]*userConn // modern era, by user
+	cap      capability           // whether the upstream speaks the modern era
 }
 
 // NewBridge returns the bridge for c.Manager's upstream.
@@ -56,7 +58,7 @@ func NewBridge(c BridgeConfig) *Bridge {
 	if c.Log == nil {
 		c.Log = slog.New(slog.DiscardHandler)
 	}
-	return &Bridge{c: c, sessions: map[string]*session{}}
+	return &Bridge{c: c, sessions: map[string]*session{}, users: map[string]*userConn{}}
 }
 
 // newSessionID is 32 random bytes, base64url: visible ASCII, as the transport requires.
@@ -113,6 +115,10 @@ func (b *Bridge) post(w http.ResponseWriter, r *http.Request, id Identity, key s
 	}
 	var s *session
 	var release func()
+	if key == "" && env.Method != "initialize" && isModern(msg) {
+		b.modernPost(w, r, id, msg, env)
+		return
+	}
 	if key == "" {
 		if env.Method != "initialize" || env.kind() != kindRequest {
 			// Also what a modern-era request gets: the body is no modern error, so a dual-era client
@@ -142,7 +148,10 @@ func (b *Bridge) post(w http.ResponseWriter, r *http.Request, id Identity, key s
 
 func (b *Bridge) get(w http.ResponseWriter, r *http.Request, id Identity, key string) {
 	if key == "" {
-		http.Error(w, sessionHeader+" required", http.StatusBadRequest)
+		// Only a legacy MCP session has a GET stream or a DELETE; the modern era has neither
+		// (2026-07-28 transports).
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed without "+sessionHeader, http.StatusMethodNotAllowed)
 		return
 	}
 	s, release := b.session(w, r, id, key)
@@ -155,7 +164,10 @@ func (b *Bridge) get(w http.ResponseWriter, r *http.Request, id Identity, key st
 
 func (b *Bridge) delete(w http.ResponseWriter, r *http.Request, id Identity, key string) {
 	if key == "" {
-		http.Error(w, sessionHeader+" required", http.StatusBadRequest)
+		// Only a legacy MCP session has a GET stream or a DELETE; the modern era has neither
+		// (2026-07-28 transports).
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed without "+sessionHeader, http.StatusMethodNotAllowed)
 		return
 	}
 	s, release := b.session(w, r, id, key)
@@ -178,16 +190,8 @@ func (b *Bridge) start(w http.ResponseWriter, r *http.Request, id Identity) (*se
 		return nil, nil
 	}
 	p, release, err := b.c.Manager.Get(r.Context(), key, id)
-	switch {
-	case errors.Is(err, errBusy):
-		b.c.Log.WarnContext(r.Context(), "stdio process cap full", "request_id", logging.RequestID(r.Context()),
-			"reason", "process_cap", "user_key", id.Subject)
-		w.Header().Set("Retry-After", busyRetryAfter)
-		http.Error(w, "upstream busy", http.StatusServiceUnavailable)
-		return nil, nil
-	case err != nil:
-		b.c.Log.WarnContext(r.Context(), "cannot start the upstream process", "request_id", logging.RequestID(r.Context()), "error", err)
-		http.Error(w, "upstream unavailable", http.StatusBadGateway)
+	if err != nil {
+		b.startFailed(w, r, id, err)
 		return nil, nil
 	}
 	s := &session{key: key, p: p, log: b.c.Log.With("process", p.PID(), "user_key", id.Subject), byID: map[string]*stream{}}
