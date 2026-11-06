@@ -787,8 +787,8 @@ func TestCallbackRejectsALoginItCannotTrust(t *testing.T) {
 			if firstGrant(e.st) != "" {
 				t.Fatal("a grant was created")
 			}
-			// A login cookie that was sent is spent whether or not it opens; a browser deletes it only
-			// for the same name and path.
+			// A login cookie the state names is spent whether or not it opens (a state too short to name
+			// one leaves the cookie alone); a browser deletes it only for the same name and path.
 			if c.spent {
 				var spent bool
 				for _, set := range res.Cookies() {
