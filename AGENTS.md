@@ -49,6 +49,7 @@ All tools are pinned in `mise.toml`; `mise run` resolves them, no shell activati
 - Never commit to `main`. Feature branch → PR (`gh pr create`) → squash merge.
 - Do not merge PRs or push to `main` yourself; the maintainer reviews and merges.
 - Commit messages: Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, `test:`).
+- Disclose AI help with the `Co-Authored-By` trailer. Agents never add `Signed-off-by` (ADR-0023).
 
 ## Agent skills
 
