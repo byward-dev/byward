@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -32,7 +31,6 @@ var (
 // relayed as bytes. Create it with Manager.Get.
 type Process struct {
 	pid      int
-	subject  string
 	log      *slog.Logger
 	clock    Clock
 	idleFor  time.Duration
@@ -53,7 +51,36 @@ type Process struct {
 
 	stopOnce, stdinOnce, abandonOnce sync.Once
 	waitErr                          error
-	forced                           atomic.Bool // read ends closed before EOF (testing aid)
+}
+
+// processOptions are the per-upstream settings a Process needs.
+type processOptions struct {
+	log     *slog.Logger // already tagged with upstream, process and user key
+	clock   Clock
+	idleFor time.Duration
+	grace   time.Duration
+	maxMsg  int
+}
+
+// startProcess takes over a started cmd and our ends of its pipes: it arms the idle timer and
+// starts the stdout reader, the stderr drain and the reaper. onExit runs once the process is gone.
+func startProcess(cmd *exec.Cmd, stdin, stdout, stderr *os.File, sessionDir string, o processOptions, onExit func()) *Process {
+	p := &Process{
+		pid: cmd.Process.Pid, log: o.log, clock: o.clock, idleFor: o.idleFor, grace: o.grace, maxMsg: o.maxMsg,
+		stdin: stdin, messages: make(chan []byte, 16), abandon: make(chan struct{}), done: make(chan struct{}),
+	}
+	p.mu.Lock() // the timer may fire before the assignment completes; stop reads p.idle under p.mu
+	p.idle = o.clock.AfterFunc(o.idleFor, func() { p.stop("idle") })
+	p.mu.Unlock()
+	p.readers.Add(2)
+	go p.readStdout(stdout)
+	go func() {
+		defer p.readers.Done()
+		drainStderr(stderr, o.log, o.clock.Now)
+	}()
+	go p.wait(cmd, stdout, stderr, sessionDir, onExit)
+	o.log.Info("upstream process started")
+	return p
 }
 
 // PID is the upstream process ID, which is also its process group ID.
@@ -234,7 +261,7 @@ func (p *Process) wait(cmd *exec.Cmd, stdout, stderr *os.File, sessionDir string
 	readersDone := make(chan struct{})
 	go func() { p.readers.Wait(); close(readersDone) }()
 	fallback := p.clock.AfterFunc(p.grace, func() {
-		p.forced.Store(true)
+		p.log.Warn("upstream pipes force-closed", "reason", "pipes_open_after_exit")
 		p.giveUp()
 		_ = stdout.Close()
 		_ = stderr.Close()

@@ -43,6 +43,9 @@ type Identity struct {
 	Email   string
 }
 
+// user identifies the user across IdPs: a subject is unique only within its issuer.
+func (id Identity) user() string { return id.Issuer + "\x00" + id.Subject }
+
 func (id Identity) validate() error {
 	if id.Subject == "" || id.Issuer == "" {
 		return errors.New("stdio: identity needs a subject and an issuer")
@@ -57,8 +60,9 @@ func (id Identity) validate() error {
 
 // command is a validated upstream command line.
 type command struct {
-	path string // resolved executable
-	args []string
+	name string            // argv[0] as configured
+	path string            // resolved executable
+	args []string          // after argv[0]
 	env  map[string]string // operator env
 }
 
@@ -81,7 +85,7 @@ func newCommand(argv []string, operatorEnv map[string]string, proxyEnv func(stri
 			return command{}, errors.New("stdio: argument contains a NUL byte")
 		}
 	}
-	c := command{args: argv[1:], env: operatorEnv}
+	c := command{name: argv[0], args: argv[1:], env: operatorEnv}
 	p, err := lookPath(argv[0], c.childPath(proxyEnv))
 	if err != nil {
 		return command{}, err
@@ -115,11 +119,11 @@ func (c command) usesSessionDir() bool {
 	return false
 }
 
-// argv returns the arguments with placeholders replaced.
+// argv returns the full argument vector, argv[0] included, with placeholders replaced.
 func (c command) argv(sessionDir string) []string {
-	out := make([]string, len(c.args))
-	for i, a := range c.args {
-		out[i] = strings.ReplaceAll(a, SessionDirPlaceholder, sessionDir)
+	out := []string{c.name}
+	for _, a := range c.args {
+		out = append(out, strings.ReplaceAll(a, SessionDirPlaceholder, sessionDir))
 	}
 	return out
 }

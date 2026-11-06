@@ -64,10 +64,10 @@ type Manager struct {
 }
 
 type entry struct {
-	subject string
-	ready   chan struct{} // closed when the spawn finished
-	p       *Process
-	err     error
+	user  string        // issuer and subject: subjects are unique only per issuer
+	ready chan struct{} // closed when the spawn finished
+	p     *Process
+	err   error
 }
 
 // New validates cfg, including that the command exists, and returns a Manager.
@@ -114,7 +114,7 @@ func (m *Manager) Get(ctx context.Context, key string, id Identity) (*Process, e
 		}
 		e, ok := m.procs[key]
 		if !ok {
-			e = &entry{subject: id.Subject, ready: make(chan struct{})}
+			e = &entry{user: id.user(), ready: make(chan struct{})}
 			m.procs[key] = e
 			m.mu.Unlock()
 			e.p, e.err = m.spawn(ctx, key, id, e)
@@ -125,7 +125,7 @@ func (m *Manager) Get(ctx context.Context, key string, id Identity) (*Process, e
 			return e.p, e.err
 		}
 		m.mu.Unlock()
-		if e.subject != id.Subject {
+		if e.user != id.user() {
 			return nil, ErrUserMismatch
 		}
 		select {
@@ -256,7 +256,7 @@ func (m *Manager) spawn(ctx context.Context, key string, id Identity, e *entry) 
 
 	cmd := &exec.Cmd{
 		Path:        m.cmd.path,
-		Args:        append([]string{m.cfg.Command[0]}, m.cmd.argv(dir)...),
+		Args:        m.cmd.argv(dir),
 		Env:         m.cmd.environ(m.cfg.LookupEnv, id, dir),
 		Stdin:       inR,
 		Stdout:      outW,
@@ -264,7 +264,7 @@ func (m *Manager) spawn(ctx context.Context, key string, id Identity, e *entry) 
 		SysProcAttr: &syscall.SysProcAttr{Setpgid: true},
 	}
 	if err = cmd.Start(); err != nil {
-		return nil, fmt.Errorf("stdio: start %s: %w", m.cfg.Command[0], err)
+		return nil, fmt.Errorf("stdio: start %s: %w", m.cmd.name, err)
 	}
 	_ = inR.Close()
 	_ = outW.Close()
@@ -275,22 +275,9 @@ func (m *Manager) spawn(ctx context.Context, key string, id Identity, e *entry) 
 		return nil, fmt.Errorf("stdio: spawn timeout: %w", err)
 	}
 
-	log := m.log.With("process", cmd.Process.Pid, "user_key", id.Subject)
-	p := &Process{
-		pid: cmd.Process.Pid, subject: id.Subject, log: log, clock: m.cfg.Clock,
+	opts := processOptions{
+		log: m.log.With("process", cmd.Process.Pid, "user_key", id.Subject), clock: m.cfg.Clock,
 		idleFor: m.cfg.IdleTimeout, grace: m.cfg.KillGrace, maxMsg: m.cfg.MaxMessageBytes,
-		stdin: inW, messages: make(chan []byte, 16), abandon: make(chan struct{}), done: make(chan struct{}),
 	}
-	p.mu.Lock() // the timer may fire before the assignment completes; stop reads p.idle under p.mu
-	p.idle = m.cfg.Clock.AfterFunc(m.cfg.IdleTimeout, func() { p.stop("idle") })
-	p.mu.Unlock()
-	p.readers.Add(2)
-	go p.readStdout(outR)
-	go func() {
-		defer p.readers.Done()
-		drainStderr(errR, log, m.cfg.Clock.Now)
-	}()
-	go p.wait(cmd, outR, errR, dir, func() { m.remove(key, e) })
-	log.Info("upstream process started")
-	return p, nil
+	return startProcess(cmd, inW, outR, errR, dir, opts, func() { m.remove(key, e) }), nil
 }
