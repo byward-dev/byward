@@ -130,7 +130,7 @@ func (noRevocations) Revocations(context.Context) ([]store.Revocation, error) { 
 
 // The background work returns only after a collection in progress has finished, so Run never
 // closes the store under it; a collection cut short by shutdown is not logged as an error.
-func TestBackgroundWorkWaitsForACollectionInProgress(t *testing.T) {
+func TestShutdownLetsACollectionInProgressFinishWithoutLoggingAFailure(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var logs syncBuffer
 		c := &flakyCollector{entered: make(chan struct{}), release: make(chan struct{})}
