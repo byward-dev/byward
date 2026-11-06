@@ -57,7 +57,7 @@ Clients (runtime, 2026-11-06): Node `fetch` and MCP Inspector CLI 2.14.0 (TypeSc
 
 ## Amendment 2026-11-06 (OAuth rate limits built)
 
-- §8 budgets add `/consent` 60/min (a GET and a POST per sign-in) and the IdP callback 30/min. Each is a token bucket
+- §8 budgets add `/consent` 60/min (the consent answer; the page itself is served by `/authorize`, and a user may retry an answer) and the IdP callback 30/min. Each is a token bucket
   per endpoint and client address, with a burst of the per-minute budget. Values are 1–10,000 per minute through
   `MCP_AUTHPROXY_OAUTH_RATE_LIMITS`, with no off switch.
 - §6 is implemented as `MCP_AUTHPROXY_TRUSTED_PROXIES` (CIDRs or addresses, none by default). The client address is

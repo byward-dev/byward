@@ -12,6 +12,7 @@ import (
 
 	"github.com/corker/mcp-authproxy/internal/audit"
 	"github.com/corker/mcp-authproxy/internal/logging"
+	"github.com/corker/mcp-authproxy/internal/ratelimit"
 	"github.com/corker/mcp-authproxy/internal/registration"
 )
 
@@ -82,6 +83,10 @@ func (b *Broker) showConsent(w http.ResponseWriter, r *http.Request, client regi
 
 // consent handles the page's answer.
 func (b *Broker) consent(w http.ResponseWriter, r *http.Request) {
+	if retry, limited := b.throttled(w, r, ratelimit.Consent); limited {
+		b.page(w, r, http.StatusTooManyRequests, tooManyTitle, tooManyHint(retry))
+		return
+	}
 	ctx := r.Context()
 	f, sealed, allow, ok := b.readAnswer(w, r)
 	if !ok {

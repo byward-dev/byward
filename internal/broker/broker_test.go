@@ -1009,15 +1009,6 @@ func (l stubLimiter) Allow(endpoint, ip string) (bool, time.Duration) {
 	return true, 0
 }
 
-func authorizeQuery(override url.Values) url.Values {
-	q := url.Values{"client_id": {clientID}, "redirect_uri": {clientCB}, "response_type": {"code"},
-		"code_challenge": {challenge()}, "code_challenge_method": {"S256"}, "state": {"client-state"}}
-	for k, v := range override {
-		q[k] = v
-	}
-	return q
-}
-
 // RFC 6749 §4.1.2.1: a throttled /authorize with a trusted client and redirect tells the MCP client
 // at once; RFC 6585: Retry-After in whole seconds, rounded up.
 func TestThrottledAuthorizeRedirectsTemporarilyUnavailableToAValidClient(t *testing.T) {
@@ -1132,13 +1123,54 @@ func TestThrottledTokenAnswers429JSONAndLeavesTheCodeUnused(t *testing.T) {
 	}
 }
 
-func TestAuthorizeCallbackAndTokenAskTheLimiterByClientAddress(t *testing.T) {
+func TestEveryOAuthEndpointAsksTheLimiterByClientAddress(t *testing.T) {
 	e := newEnv(t)
 	var seen []string
 	e.b.cfg.Limiter = stubLimiter{seenIPs: &seen}
 	code := e.signIn(t, nil).Query().Get("code")
-	e.redeem(t, code, nil)
-	if want := []string{"authorize 127.0.0.1", "callback 127.0.0.1", "token 127.0.0.1"}; fmt.Sprint(seen) != fmt.Sprint(want) {
+	_, body := e.redeem(t, code, nil)
+	e.revokeToken(t, fmt.Sprint(body["access_token"]), clientID)
+	want := []string{"authorize 127.0.0.1", "consent 127.0.0.1", "callback 127.0.0.1", "token 127.0.0.1", "revoke 127.0.0.1"}
+	if fmt.Sprint(seen) != fmt.Sprint(want) {
 		t.Fatalf("limiter asked %q, want %q (each endpoint once, by client address)", seen, want)
 	}
+}
+
+// A throttled consent answer is neither read nor recorded: the user starts again after Retry-After.
+func TestThrottledConsentShowsThe429PageWithoutReadingTheAnswer(t *testing.T) {
+	e := newEnv(t)
+	p := e.showConsent(t, nil)
+	e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"consent": true}}
+	res := e.answer(t, p, "allow", nil)
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusTooManyRequests || res.Header.Get("Retry-After") != "2" || !bytes.Contains(body, []byte("Too many sign-in attempts")) {
+		t.Fatalf("throttled consent = %d, Retry-After %q; want 429, 2 and the throttle page: %s", res.StatusCode, res.Header.Get("Retry-After"), body)
+	}
+	e.noAuditEvent(t, "consent_granted")
+	e.noAuditEvent(t, "consent_denied")
+	if firstGrant(e.st) != "" {
+		t.Error("a throttled consent answer led to a grant")
+	}
+	e.oneAuditEvent(t, "rate_limited", map[string]any{"outcome": "failure", "reason": "consent"})
+}
+
+// The user's decision: /revoke answers as /token does, 429 + Retry-After + no-store + JSON
+// temporarily_unavailable, before the body is read.
+func TestThrottledRevokeIsRefusedBeforeItsBodyIsRead(t *testing.T) {
+	e := newEnv(t)
+	e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"revoke": true}}
+	r, _ := http.NewRequest("POST", e.srv.URL+"/revoke", strings.NewReader("token=%zz"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	res := e.send(t, r)
+	var body map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&body)
+	if res.StatusCode != http.StatusTooManyRequests || res.Header.Get("Retry-After") != "2" || res.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("throttled revoke = %d, Retry-After %q, Cache-Control %q; want 429, 2, no-store (and the body unread)",
+			res.StatusCode, res.Header.Get("Retry-After"), res.Header.Get("Cache-Control"))
+	}
+	if body["error"] != "temporarily_unavailable" {
+		t.Errorf("throttled revoke body = %v, want temporarily_unavailable", body)
+	}
+	e.noAuditEvent(t, "token_rejected")
+	e.oneAuditEvent(t, "rate_limited", map[string]any{"outcome": "failure", "reason": "revoke"})
 }

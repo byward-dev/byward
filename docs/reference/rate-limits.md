@@ -11,15 +11,15 @@ at once, then it refills evenly (30/min means one more request every 2 s).
 | Endpoint | Default | Response when over |
 |---|---|---|
 | `/authorize` | 30 | a redirect to the MCP client with `error=temporarily_unavailable`, `state` and `iss` (RFC 6749 §4.1.2.1) when the client and redirect URI are valid; otherwise a 429 page |
-| `/consent` | 60 (a GET and a POST per sign-in) | 429 page |
+| `/consent` | 60 (the consent answer; the page is shown by `/authorize`) | 429 page; the answer is not read |
 | `/callback/{idp}` | 30 | 429 page; the IdP is not called |
 | `/token` | 60 | 429 with JSON `{"error":"temporarily_unavailable",…}` and `Cache-Control: no-store`; the body is not read |
 | `/revoke` | 30 | as `/token` |
 | `/register` | 30 | as `/token` |
 
 Every refusal carries `Retry-After` in whole seconds (RFC 6585 §4), is counted in `mcp_authproxy_rate_limited_total`,
-and is audited as `rate_limited` ([observability](observability.md)). `/consent`, `/revoke` and `/register` apply
-from the slices that add them. Metadata and JWKS are not limited.
+and is audited as `rate_limited` ([observability](observability.md)). `/register` applies from the slice that adds
+it (DCR). Metadata and JWKS are not limited.
 
 Raise a budget with `MCP_AUTHPROXY_OAUTH_RATE_LIMITS`, for example `authorize=120,callback=120`. Each value is 1 to
 10,000 per minute. There is no way to turn the limits off.

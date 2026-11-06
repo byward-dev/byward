@@ -24,7 +24,7 @@ const (
 var Endpoints = []string{Authorize, Consent, Callback, Token, Revoke, Register}
 
 // Defaults returns the per-minute budgets of ADR-0018 §8 and its 2026-11-06 amendment: /consent
-// serves a GET and a POST per sign-in, the IdP callback one per sign-in.
+// takes the consent answer (with room for a retried answer), the IdP callback one per sign-in.
 func Defaults() map[string]int {
 	return map[string]int{Authorize: 30, Consent: 60, Callback: 30, Token: 60, Revoke: 30, Register: 30}
 }
