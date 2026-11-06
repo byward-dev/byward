@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest a new capability or a change in behaviour.
+labels: [enhancement, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        mcp-authproxy is an auth-only proxy: it does not route, filter or rewrite MCP traffic. Check the
+        scope and non-goals in [ADR-0001](https://github.com/corker/mcp-authproxy/blob/main/docs/adr/0001-scope-auth-only-proxy-entra-first-class.md) first.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what stops you today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Including how other proxies or gateways solve it, if you know.
+  - type: textarea
+    id: standards
+    attributes:
+      label: Relevant standards
+      description: MCP spec sections, RFCs or IdP documentation, with links.

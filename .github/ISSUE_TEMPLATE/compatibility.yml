@@ -1,0 +1,55 @@
+name: IdP or client compatibility
+description: An identity provider or MCP client does not work with mcp-authproxy, or you verified one that does.
+labels: [needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for interoperability reports, both failures and successes. Never paste tokens,
+        secrets, authorization codes or real tenant IDs; redact them.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What is this about?
+      options: [MCP client, Identity provider (IdP), Both]
+    validations:
+      required: true
+  - type: input
+    id: product
+    attributes:
+      label: Product and version
+      placeholder: e.g. Cursor 1.x, Okta (tenant type), Keycloak 26.x
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: mcp-authproxy version
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options: [Does not work, Works with a workaround, Works]
+    validations:
+      required: true
+  - type: dropdown
+    id: step
+    attributes:
+      label: Where does it fail?
+      options:
+        - Not applicable (it works)
+        - Discovery (protected-resource or authorization-server metadata)
+        - Client registration (CIMD, pre-registered client)
+        - Authorization / consent / redirect
+        - Token request or refresh
+        - MCP request with the token
+        - Other
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: What the client or IdP showed, the proxy log lines (redacted), and any workaround.
+    validations:
+      required: true

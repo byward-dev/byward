@@ -1,0 +1,55 @@
+name: Bug report
+description: Something in mcp-authproxy does not work as documented.
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security vulnerability?** Do not file it here; use [private reporting](https://github.com/corker/mcp-authproxy/security/advisories/new).
+        Never paste tokens, secrets, authorization codes or real tenant IDs; redact them.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `mcp-authproxy --version`, or the commit.
+    validations:
+      required: true
+  - type: dropdown
+    id: idp
+    attributes:
+      label: Identity provider (IdP)
+      options: [Microsoft Entra ID, Okta, Auth0, Keycloak, Google, Other OIDC]
+    validations:
+      required: true
+  - type: dropdown
+    id: upstream
+    attributes:
+      label: Upstream kind
+      description: The MCP server behind the proxy.
+      options: [stdio, HTTP]
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: MCP client and version
+      placeholder: e.g. Claude Code 2.1.x, VS Code 1.x, Cursor
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include the configuration (secrets redacted).
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant proxy log lines, redacted.
+      render: text

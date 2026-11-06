@@ -24,6 +24,11 @@ mise run check
 Release artifacts (image, archives, SBOMs) and how to verify them:
 [docs/reference/packaging.md](docs/reference/packaging.md).
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) (including the AI-assistance policy) and the
+[Code of Conduct](CODE_OF_CONDUCT.md). Report vulnerabilities privately: [SECURITY.md](SECURITY.md).
+
 ## License
 
 [Apache-2.0](LICENSE)
