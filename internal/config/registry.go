@@ -7,13 +7,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"sort"
 	"strings"
 )
 
 // EnvPrefix starts every environment variable the proxy reads.
-const EnvPrefix = "MCP_AUTHPROXY_"
+const envPrefix = "MCP_AUTHPROXY_"
 
 // Setting is one registry entry. Every setting has a flag and an env name.
 type Setting struct {
@@ -26,7 +25,7 @@ type Setting struct {
 
 // Env is the setting's environment variable name.
 func (s Setting) Env() string {
-	return EnvPrefix + strings.ToUpper(strings.ReplaceAll(s.Name, "-", "_"))
+	return envPrefix + strings.ToUpper(strings.ReplaceAll(s.Name, "-", "_"))
 }
 
 // Source tells where a value came from.
@@ -55,16 +54,16 @@ func (v Value) Display() string {
 	return v.Raw
 }
 
-// Error is a configuration error; the process exits with its own code for these.
-type Error struct{ Msg string }
+// configError is a configuration error; the process exits with its own code for these.
+type configError struct{ msg string }
 
-func (e *Error) Error() string { return e.Msg }
+func (e *configError) Error() string { return e.msg }
 
-func errorf(format string, a ...any) error { return &Error{Msg: fmt.Sprintf(format, a...)} }
+func errorf(format string, a ...any) error { return &configError{msg: fmt.Sprintf(format, a...)} }
 
-// IsConfigError reports whether err is a configuration error.
-func IsConfigError(err error) bool {
-	var ce *Error
+// isConfigError reports whether err is a configuration error.
+func isConfigError(err error) bool {
+	var ce *configError
 	return errors.As(err, &ce)
 }
 
@@ -74,8 +73,8 @@ type Values struct {
 	byKey map[string]Value
 }
 
-// Get returns the raw value of a setting.
-func (v *Values) Get(name string) string { return v.byKey[name].Raw }
+// get returns the raw value of a setting.
+func (v *Values) get(name string) string { return v.byKey[name].Raw }
 
 // Effective lists every setting with its source, in registry order.
 func (v *Values) Effective() []Value {
@@ -86,13 +85,13 @@ func (v *Values) Effective() []Value {
 	return out
 }
 
-// ReadFileFunc reads a secret file.
-type ReadFileFunc func(path string) ([]byte, error)
+// readFileFunc reads a secret file; main passes os.ReadFile.
+type readFileFunc = func(path string) ([]byte, error)
 
-// Resolve applies flags > env > defaults over a registry. extraFlags registers command-line-only
+// resolve applies flags > env > defaults over a registry. extraFlags registers command-line-only
 // flags (actions such as --version) on the same flag set. Inline secrets are rejected unless
 // allowInlineSecrets is set (development mode).
-func Resolve(reg []Setting, args, environ []string, readFile ReadFileFunc, extraFlags func(*flag.FlagSet)) (*Values, error) {
+func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extraFlags func(*flag.FlagSet)) (*Values, error) {
 	fs := flag.NewFlagSet("mcp-authproxy", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	flagVals := map[string]*string{}
@@ -127,7 +126,7 @@ func Resolve(reg []Setting, args, environ []string, readFile ReadFileFunc, extra
 	env := map[string]string{}
 	for _, kv := range environ {
 		k, val, ok := strings.Cut(kv, "=")
-		if ok && strings.HasPrefix(k, EnvPrefix) {
+		if ok && strings.HasPrefix(k, envPrefix) {
 			env[k] = val
 		}
 	}
@@ -164,8 +163,8 @@ func Resolve(reg []Setting, args, environ []string, readFile ReadFileFunc, extra
 	return vals, nil
 }
 
-// InlineSecrets lists secret settings given directly in env instead of through a file.
-func (v *Values) InlineSecrets() []string {
+// inlineSecrets lists secret settings given directly in env instead of through a file.
+func (v *Values) inlineSecrets() []string {
 	var out []string
 	for _, val := range v.Effective() {
 		if val.Setting.Secret && val.Source == SourceEnv {
@@ -182,9 +181,9 @@ func (b *boolValue) String() string     { return string(*b) }
 func (b *boolValue) Set(s string) error { *b = boolValue(s); return nil }
 func (b *boolValue) IsBoolFlag() bool   { return true }
 
-func readSecret(readFile ReadFileFunc, path, from string) (string, error) {
+func readSecret(readFile readFileFunc, path, from string) (string, error) {
 	if readFile == nil {
-		readFile = os.ReadFile
+		return "", errorf("%s: secret files are not available", from)
 	}
 	b, err := readFile(path)
 	if err != nil {

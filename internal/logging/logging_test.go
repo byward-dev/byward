@@ -84,3 +84,15 @@ func TestMiddlewareLogsRequestWithoutQueryOrHeaders(t *testing.T) {
 		t.Fatalf("missing fields: %s", out)
 	}
 }
+
+func TestInformationalStatusIsNotLoggedAsFinal(t *testing.T) {
+	var buf bytes.Buffer
+	h := Middleware(New(&buf, "json"), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusEarlyHints)
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+	if !strings.Contains(buf.String(), `"status":502`) {
+		t.Fatalf("logged %s", buf.String())
+	}
+}

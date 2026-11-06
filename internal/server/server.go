@@ -26,6 +26,10 @@ const (
 	MaxHeaderBytes    = 64 << 10
 	MaxMCPBody        = 8 << 20
 	ShutdownTimeout   = 25 * time.Second
+	// MaxInFlight and MaxStreams cap concurrent requests to the upstream (ADR-0018 §7). Long-lived
+	// GET streams have their own cap so idle legacy-era streams can never use up tool-call slots.
+	MaxInFlight = 64
+	MaxStreams  = 256
 )
 
 // Handler builds every route behind the Host check, request logging and panic recovery.
@@ -39,18 +43,19 @@ func Handler(cfg *config.Config, log *slog.Logger, v resource.Validator) http.Ha
 	}
 	up := relay.New(log, cfg.UpstreamURL)
 	mux.Handle(cfg.PublicURL.Path, origin.Origins(log, cfg.AllowedOrigins,
-		resource.Guard(meta, v, limitBody(MaxMCPBody, up))))
+		resource.Guard(meta, v, limitBody(MaxMCPBody, admit(MaxInFlight, MaxStreams, up)))))
 
 	hosts := append([]string{cfg.PublicURL.Host}, cfg.AllowedHosts...)
 	return recoverer(log, logging.Middleware(log, origin.Hosts(log, hosts, mux)))
 }
 
 // New returns the hardened server. WriteTimeout stays 0 so streams can run; per-request
-// deadlines are set where needed through http.ResponseController.
-func New(cfg *config.Config, log *slog.Logger, v resource.Validator) *http.Server {
+// deadlines are set where needed through http.ResponseController. Until the broker issues proxy
+// tokens (slice 1.2), every token is rejected.
+func New(cfg *config.Config, log *slog.Logger) *http.Server {
 	return &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           Handler(cfg, log, v),
+		Handler:           Handler(cfg, log, resource.NoTokens{}),
 		ReadHeaderTimeout: ReadHeaderTimeout,
 		ReadTimeout:       ReadTimeout,
 		IdleTimeout:       IdleTimeout,
@@ -97,6 +102,27 @@ func limitBody(n int64, next http.Handler) http.Handler {
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, n)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// admit caps concurrent requests: GET streams against maxStreams, everything else against
+// maxRequests; over a cap the answer is 503 with Retry-After.
+func admit(maxRequests, maxStreams int, next http.Handler) http.Handler {
+	requests, streams := make(chan struct{}, maxRequests), make(chan struct{}, maxStreams)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sem := requests
+		if r.Method == http.MethodGet {
+			sem = streams
+		}
+		select {
+		case sem <- struct{}{}:
+			defer func() { <-sem }()
+		default:
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "upstream busy", http.StatusServiceUnavailable)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }

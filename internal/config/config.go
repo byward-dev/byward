@@ -10,8 +10,8 @@ import (
 	"strings"
 )
 
-// Registry is every setting the proxy reads, in the order the effective configuration is printed.
-var Registry = []Setting{
+// registry is every setting the proxy reads, in the order the effective configuration is printed.
+var registry = []Setting{
 	{Name: "public-url", Help: "public URL of the MCP endpoint exactly as users enter it, e.g. https://mcp.example.com/mcp"},
 	{Name: "upstream-url", Help: "URL of the HTTP upstream MCP server"},
 	{Name: "listen", Default: "127.0.0.1:8080", Help: "address to listen on; public addresses only when configured"},
@@ -49,13 +49,13 @@ type Actions struct {
 	PrintConfig bool
 }
 
-// ErrHelp is returned for -h/--help.
-var ErrHelp = flag.ErrHelp
+// errHelp is returned for -h/--help.
+var errHelp = flag.ErrHelp
 
 // Load resolves and validates the configuration.
-func Load(args, environ []string, readFile ReadFileFunc) (*Config, Actions, error) {
+func Load(args, environ []string, readFile readFileFunc) (*Config, Actions, error) {
 	var act Actions
-	vals, err := Resolve(Registry, args, environ, readFile, func(fs *flag.FlagSet) {
+	vals, err := resolve(registry, args, environ, readFile, func(fs *flag.FlagSet) {
 		fs.BoolVar(&act.Version, "version", false, "print version and build information")
 		fs.BoolVar(&act.JSON, "json", false, "with --version: print JSON")
 		fs.BoolVar(&act.PrintConfig, "print-config", false, "print the effective configuration and exit")
@@ -71,17 +71,17 @@ func Load(args, environ []string, readFile ReadFileFunc) (*Config, Actions, erro
 }
 
 func validate(v *Values) (*Config, error) {
-	c := &Config{Values: v, Listen: v.Get("listen"), Scope: v.Get("scope"),
-		ResourceName: v.Get("resource-name"), ResourceDocumentation: v.Get("resource-documentation"),
-		LogFormat: v.Get("log-format")}
+	c := &Config{Values: v, Listen: v.get("listen"), Scope: v.get("scope"),
+		ResourceName: v.get("resource-name"), ResourceDocumentation: v.get("resource-documentation"),
+		LogFormat: v.get("log-format")}
 	var errs []error
-	dev, err := strconv.ParseBool(v.Get("dev"))
+	dev, err := strconv.ParseBool(v.get("dev"))
 	if err != nil {
-		errs = append(errs, errorf("%s: want true or false, got %q", Registry[len(Registry)-1].Env(), v.Get("dev")))
+		errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "dev"}.Env(), v.get("dev")))
 	}
 	c.Dev = dev
 
-	if secrets := v.InlineSecrets(); len(secrets) > 0 {
+	if secrets := v.inlineSecrets(); len(secrets) > 0 {
 		if !c.Dev {
 			errs = append(errs, errorf("%s: secrets must come from a file (%s_FILE)", strings.Join(secrets, ", "), secrets[0]))
 		} else {
@@ -89,7 +89,7 @@ func validate(v *Values) (*Config, error) {
 		}
 	}
 
-	c.PublicURL, err = parseURL("public-url", v.Get("public-url"))
+	c.PublicURL, err = parseURL("public-url", v.get("public-url"))
 	if err != nil {
 		errs = append(errs, err)
 	} else {
@@ -110,7 +110,7 @@ func validate(v *Values) (*Config, error) {
 			}
 		}
 	}
-	c.UpstreamURL, err = parseURL("upstream-url", v.Get("upstream-url"))
+	c.UpstreamURL, err = parseURL("upstream-url", v.get("upstream-url"))
 	if err != nil {
 		errs = append(errs, err)
 	}
@@ -118,7 +118,7 @@ func validate(v *Values) (*Config, error) {
 	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
 		errs = append(errs, errorf("MCP_AUTHPROXY_LISTEN: want host:port, got %q", c.Listen))
 	}
-	for _, o := range splitList(v.Get("allowed-origins")) {
+	for _, o := range splitList(v.get("allowed-origins")) {
 		n, err := normalizeOrigin(o)
 		if err != nil {
 			errs = append(errs, errorf("MCP_AUTHPROXY_ALLOWED_ORIGINS: %v", err))
@@ -126,7 +126,7 @@ func validate(v *Values) (*Config, error) {
 		}
 		c.AllowedOrigins = append(c.AllowedOrigins, n)
 	}
-	for _, h := range splitList(v.Get("allowed-hosts")) {
+	for _, h := range splitList(v.get("allowed-hosts")) {
 		if strings.ContainsAny(h, "/ ") {
 			errs = append(errs, errorf("MCP_AUTHPROXY_ALLOWED_HOSTS: %q is not a host[:port]", h))
 			continue
@@ -149,7 +149,7 @@ func validate(v *Values) (*Config, error) {
 		for _, e := range errs {
 			msgs = append(msgs, e.Error())
 		}
-		return nil, &Error{Msg: strings.Join(msgs, "; ")}
+		return nil, &configError{msg: strings.Join(msgs, "; ")}
 	}
 	return c, nil
 }
@@ -197,13 +197,13 @@ func isLoopback(host string) bool {
 func (c *Config) Issuer() string { return c.PublicURL.Scheme + "://" + c.PublicURL.Host }
 
 // IsHelp reports whether err asks for usage.
-func IsHelp(err error) bool { return errors.Is(err, ErrHelp) }
+func IsHelp(err error) bool { return errors.Is(err, errHelp) }
 
 // Usage writes the generated settings reference.
 func Usage() string {
 	var b strings.Builder
 	b.WriteString("Usage: mcp-authproxy [flags]\n\nSettings (flag / env, default):\n")
-	for _, s := range Registry {
+	for _, s := range registry {
 		flagName := "--" + s.Name
 		env := s.Env()
 		if s.Secret {
@@ -222,13 +222,13 @@ func Usage() string {
 
 // Reference renders the settings reference in Markdown; docs/reference/settings.md is generated
 // from it and a test keeps the file current.
-func Reference() string {
+func reference() string {
 	var b strings.Builder
 	b.WriteString("# Settings reference\n\nGenerated from the settings registry (`internal/config`); do not edit by hand.\n")
 	b.WriteString("Run `MCP_AUTHPROXY_UPDATE_REFERENCE=1 go test ./internal/config/` after changing a setting.\n\n")
 	b.WriteString("Precedence: flag > environment > default. Secrets are read only from files.\n\n")
 	b.WriteString("| Flag | Environment | Default | Description |\n|---|---|---|---|\n")
-	for _, s := range Registry {
+	for _, s := range registry {
 		flagName, env := "--"+s.Name, s.Env()
 		if s.Secret {
 			flagName += "-file"

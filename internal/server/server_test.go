@@ -194,7 +194,7 @@ func TestServerTimeoutsAreSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), resource.NoTokens{})
+	s := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if s.ReadHeaderTimeout == 0 || s.ReadTimeout == 0 || s.IdleTimeout == 0 || s.MaxHeaderBytes == 0 {
 		t.Fatalf("a limit is unset: %+v", s)
 	}
@@ -223,7 +223,7 @@ func TestRunShutsDownOnCancel(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Run(ctx, New(cfg, log, resource.NoTokens{}), log) }()
+	go func() { done <- Run(ctx, New(cfg, log), log) }()
 	cancel()
 	select {
 	case err := <-done:
@@ -232,5 +232,57 @@ func TestRunShutsDownOnCancel(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not return after cancel")
+	}
+}
+
+func TestAdmitCapsRequestsAndStreamsSeparately(t *testing.T) {
+	release := make(chan struct{})
+	entered := make(chan struct{}, 4)
+	h := admit(1, 1, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		entered <- struct{}{}
+		<-release
+	}))
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) })
+	call := func(method string) {
+		go func() {
+			r, _ := http.NewRequest(method, srv.URL, nil)
+			if res, err := http.DefaultClient.Do(r); err == nil {
+				_ = res.Body.Close()
+			}
+		}()
+		<-entered
+	}
+	call("GET")  // holds the only stream slot
+	call("POST") // a POST still gets in: streams do not use request slots
+	for _, m := range []string{"GET", "POST"} {
+		r, _ := http.NewRequest(m, srv.URL, nil)
+		res, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+		if res.StatusCode != http.StatusServiceUnavailable || res.Header.Get("Retry-After") == "" {
+			t.Fatalf("%s over its cap: got %d", m, res.StatusCode)
+		}
+	}
+}
+
+func TestServerSentEventsStreamThroughTheWholeChain(t *testing.T) {
+	e := start(t)
+	next := make(chan struct{})
+	e.up.Handler = func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: one\n\n")
+		w.(http.Flusher).Flush()
+		<-next
+	}
+	t.Cleanup(func() { close(next) })
+	res := e.do(t, "GET", "/mcp", nil, map[string]string{"Authorization": "Bearer good", "Accept": "text/event-stream"})
+	buf := make([]byte, 64)
+	n, err := res.Body.Read(buf)
+	if err != nil || string(buf[:n]) != "data: one\n\n" {
+		t.Fatalf("first event not flushed through the middleware chain: %q %v", buf[:n], err)
 	}
 }

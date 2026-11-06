@@ -13,7 +13,6 @@ import (
 
 	"github.com/corker/mcp-authproxy/internal/config"
 	"github.com/corker/mcp-authproxy/internal/logging"
-	"github.com/corker/mcp-authproxy/internal/resource"
 	"github.com/corker/mcp-authproxy/internal/server"
 )
 
@@ -32,7 +31,7 @@ func main() {
 }
 
 func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer) int {
-	cfg, act, err := config.Load(args, environ, nil)
+	cfg, act, err := config.Load(args, environ, os.ReadFile)
 	switch {
 	case config.IsHelp(err):
 		_, _ = io.WriteString(stdout, config.Usage())
@@ -58,8 +57,7 @@ func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer) 
 	for _, r := range cfg.Relaxations {
 		log.Warn("development mode relaxation", "relaxation", r)
 	}
-	// Until the broker issues proxy tokens (slice 1.2), every token is rejected.
-	if err := server.Run(ctx, server.New(cfg, log, resource.NoTokens{}), log); err != nil {
+	if err := server.Run(ctx, server.New(cfg, log), log); err != nil {
 		log.Error("stopped", "error", err)
 		return exitRuntime
 	}

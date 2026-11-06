@@ -15,7 +15,7 @@ import (
 )
 
 // Redacted replaces a value that must never be logged.
-const Redacted = "[REDACTED]"
+const redacted = "[REDACTED]"
 
 // allowed lists every attribute key the proxy may log. Anything else is dropped, so a new field
 // has to be added here on purpose (invariant: never log tokens, secrets, codes or verifiers).
@@ -50,7 +50,7 @@ func replace(groups []string, a slog.Attr) slog.Attr {
 	switch a.Value.Kind() {
 	case slog.KindString:
 		if looksSecret(a.Value.String()) {
-			return slog.String(a.Key, Redacted)
+			return slog.String(a.Key, redacted)
 		}
 	case slog.KindAny, slog.KindLogValuer:
 		// Structured values (header maps, requests) could carry credentials: only errors and
@@ -65,7 +65,7 @@ func replace(groups []string, a slog.Attr) slog.Attr {
 			return slog.Attr{}
 		}
 		if looksSecret(s) {
-			s = Redacted
+			s = redacted
 		}
 		return slog.String(a.Key, s)
 	}
@@ -86,12 +86,12 @@ func RequestID(ctx context.Context) string {
 }
 
 // WithRequestID stores id in ctx.
-func WithRequestID(ctx context.Context, id string) context.Context {
+func withRequestID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, ctxKey{}, id)
 }
 
 // NewRequestID returns 16 random bytes in hex.
-func NewRequestID() string {
+func newRequestID() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
@@ -102,8 +102,8 @@ func NewRequestID() string {
 func Middleware(log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		id := NewRequestID()
-		r = r.WithContext(WithRequestID(r.Context(), id))
+		id := newRequestID()
+		r = r.WithContext(withRequestID(r.Context(), id))
 		// Echoed so users and operators can quote it; inbound IDs are not trusted (no trusted proxies yet).
 		w.Header().Set("X-Request-Id", id)
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
@@ -134,7 +134,8 @@ type statusRecorder struct {
 }
 
 func (s *statusRecorder) WriteHeader(code int) {
-	if !s.wroteHeader {
+	// 1xx informational responses (other than 101) precede the final status.
+	if !s.wroteHeader && (code < 100 || code > 199 || code == http.StatusSwitchingProtocols) {
 		s.status, s.wroteHeader = code, true
 	}
 	s.ResponseWriter.WriteHeader(code)

@@ -50,14 +50,14 @@ func TestFlagBeatsEnvBeatsDefault(t *testing.T) {
 
 func TestUnknownEnvSuggestsSetting(t *testing.T) {
 	_, err := load(t, nil, "MCP_AUTHPROXY_PUBLC_URL=x")
-	if !IsConfigError(err) || !strings.Contains(err.Error(), "did you mean MCP_AUTHPROXY_PUBLIC_URL?") {
+	if !isConfigError(err) || !strings.Contains(err.Error(), "did you mean MCP_AUTHPROXY_PUBLIC_URL?") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestUnknownEnvFarFromAnySettingHasNoSuggestion(t *testing.T) {
 	_, err := load(t, nil, "MCP_AUTHPROXY_ZZZZZZZZZZZZZZ=x")
-	if !IsConfigError(err) || strings.Contains(err.Error(), "did you mean") {
+	if !isConfigError(err) || strings.Contains(err.Error(), "did you mean") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -78,7 +78,7 @@ func TestValidationErrors(t *testing.T) {
 	}
 	for name, env := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := load(t, nil, env...); !IsConfigError(err) {
+			if _, err := load(t, nil, env...); !isConfigError(err) {
 				t.Fatalf("want config error, got %v", err)
 			}
 		})
@@ -109,7 +109,7 @@ func TestHelpAndUnexpectedArgs(t *testing.T) {
 	if _, _, err := Load([]string{"-h"}, base, nil); !IsHelp(err) {
 		t.Fatalf("want help, got %v", err)
 	}
-	if _, _, err := Load([]string{"extra"}, base, nil); !IsConfigError(err) {
+	if _, _, err := Load([]string{"extra"}, base, nil); !isConfigError(err) {
 		t.Fatalf("want config error, got %v", err)
 	}
 	if !strings.Contains(Usage(), "MCP_AUTHPROXY_PUBLIC_URL") {
@@ -127,7 +127,7 @@ func TestVersionNeedsNoOtherSettings(t *testing.T) {
 // Secrets are exercised with a test registry: slice 1.1 has no secret settings yet.
 var secretReg = []Setting{{Name: "client-secret", Secret: true, Help: "secret"}}
 
-func files(m map[string]string) ReadFileFunc {
+func files(m map[string]string) readFileFunc {
 	return func(p string) ([]byte, error) {
 		if v, ok := m[p]; ok {
 			return []byte(v), nil
@@ -137,7 +137,7 @@ func files(m map[string]string) ReadFileFunc {
 }
 
 func TestSecretFromEnvFile(t *testing.T) {
-	v, err := Resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET_FILE=/run/secrets/x"}, files(map[string]string{"/run/secrets/x": "s3cret\n"}), nil)
+	v, err := resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET_FILE=/run/secrets/x"}, files(map[string]string{"/run/secrets/x": "s3cret\n"}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,25 +148,25 @@ func TestSecretFromEnvFile(t *testing.T) {
 }
 
 func TestSecretFromFlagFileBeatsEnvFile(t *testing.T) {
-	v, err := Resolve(secretReg, []string{"--client-secret-file", "/a"}, []string{"MCP_AUTHPROXY_CLIENT_SECRET_FILE=/b"}, files(map[string]string{"/a": "A", "/b": "B"}), nil)
-	if err != nil || v.Get("client-secret") != "A" {
-		t.Fatalf("got %q err=%v", v.Get("client-secret"), err)
+	v, err := resolve(secretReg, []string{"--client-secret-file", "/a"}, []string{"MCP_AUTHPROXY_CLIENT_SECRET_FILE=/b"}, files(map[string]string{"/a": "A", "/b": "B"}), nil)
+	if err != nil || v.get("client-secret") != "A" {
+		t.Fatalf("got %q err=%v", v.get("client-secret"), err)
 	}
 }
 
 func TestSecretFileMissingIsConfigError(t *testing.T) {
-	_, err := Resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET_FILE=/nope"}, files(nil), nil)
-	if !IsConfigError(err) || strings.Contains(err.Error(), "s3cret") {
+	_, err := resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET_FILE=/nope"}, files(nil), nil)
+	if !isConfigError(err) || strings.Contains(err.Error(), "s3cret") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestInlineSecretIsReported(t *testing.T) {
-	v, err := Resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET=inline"}, nil, nil)
+	v, err := resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET=inline"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := v.InlineSecrets(); len(got) != 1 || got[0] != "MCP_AUTHPROXY_CLIENT_SECRET" {
+	if got := v.inlineSecrets(); len(got) != 1 || got[0] != "MCP_AUTHPROXY_CLIENT_SECRET" {
 		t.Fatalf("inline = %v", got)
 	}
 	if v.Effective()[0].Display() != "<redacted>" {
@@ -175,14 +175,14 @@ func TestInlineSecretIsReported(t *testing.T) {
 }
 
 func TestSecretHasNoInlineFlag(t *testing.T) {
-	_, err := Resolve(secretReg, []string{"--client-secret", "x"}, nil, nil, nil)
-	if !IsConfigError(err) {
+	_, err := resolve(secretReg, []string{"--client-secret", "x"}, nil, nil, nil)
+	if !isConfigError(err) {
 		t.Fatalf("want config error, got %v", err)
 	}
 }
 
 func TestIsConfigErrorWrapped(t *testing.T) {
-	if !IsConfigError(errors.Join(errors.New("x"), &Error{Msg: "y"})) {
+	if !isConfigError(errors.Join(errors.New("x"), &configError{msg: "y"})) {
 		t.Fatal("wrapped config error not detected")
 	}
 }

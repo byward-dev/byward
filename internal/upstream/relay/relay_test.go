@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/corker/mcp-authproxy/internal/testutil/fakeupstream"
@@ -66,76 +65,6 @@ func TestRelayHidesUpstreamErrors(t *testing.T) {
 	New(quiet(), u).ServeHTTP(w, httptest.NewRequest("POST", "/mcp", nil))
 	if w.Code != http.StatusBadGateway || strings.Contains(w.Body.String(), "127.0.0.1") {
 		t.Fatalf("code=%d body=%q", w.Code, w.Body)
-	}
-}
-
-func TestRelayInFlightCap(t *testing.T) {
-	up := fakeupstream.New()
-	t.Cleanup(up.Close)
-	release := make(chan struct{})
-	var started sync.WaitGroup
-	started.Add(MaxInFlight)
-	up.Handler = func(w http.ResponseWriter, _ *http.Request) { started.Done(); <-release }
-	h := relayTo(t, up, "/mcp")
-	srv := httptest.NewServer(h)
-	t.Cleanup(srv.Close)
-
-	var done sync.WaitGroup
-	for range MaxInFlight {
-		done.Add(1)
-		go func() {
-			defer done.Done()
-			if res, err := http.Post(srv.URL, "application/json", nil); err == nil {
-				_ = res.Body.Close()
-			}
-		}()
-	}
-	started.Wait()
-	res, err := http.Post(srv.URL, "application/json", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = res.Body.Close()
-	close(release)
-	done.Wait()
-	if res.StatusCode != http.StatusServiceUnavailable || res.Header.Get("Retry-After") == "" {
-		t.Fatalf("over the cap: got %d", res.StatusCode)
-	}
-}
-
-func TestOpenStreamsDoNotUseRequestSlots(t *testing.T) {
-	up := fakeupstream.New()
-	t.Cleanup(up.Close)
-	release := make(chan struct{})
-	var streaming sync.WaitGroup
-	streaming.Add(MaxInFlight)
-	up.Handler = func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			w.Header().Set("Content-Type", "text/event-stream")
-			w.(http.Flusher).Flush()
-			streaming.Done()
-			<-release
-		}
-	}
-	srv := httptest.NewServer(relayTo(t, up, "/mcp"))
-	t.Cleanup(srv.Close)
-	t.Cleanup(func() { close(release) })
-	for range MaxInFlight {
-		go func() {
-			if res, err := http.Get(srv.URL); err == nil {
-				defer func() { _ = res.Body.Close() }()
-				_, _ = io.Copy(io.Discard, res.Body)
-			}
-		}()
-	}
-	streaming.Wait()
-	res, err := http.Post(srv.URL, "application/json", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		t.Fatalf("POST with %d open streams: got %d", MaxInFlight, res.StatusCode)
 	}
 }
 
