@@ -77,7 +77,7 @@ func TestRunStopsOnCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var out, errb bytes.Buffer
-	code := run(ctx, nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0"), &out, &errb)
+	code := run(ctx, nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0", "MCP_AUTHPROXY_INTERNAL_LISTEN=127.0.0.1:0"), &out, &errb)
 	if code != exitOK || !strings.Contains(errb.String(), `"msg":"starting"`) {
 		t.Fatalf("code=%d logs=%s", code, errb.String())
 	}
@@ -87,7 +87,7 @@ func TestDevModeLogsEachRelaxation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var out, errb bytes.Buffer
-	code := run(ctx, []string{"--dev"}, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=http://127.0.0.1:8080/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0"), &out, &errb)
+	code := run(ctx, []string{"--dev"}, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=http://127.0.0.1:8080/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0", "MCP_AUTHPROXY_INTERNAL_LISTEN=127.0.0.1:0"), &out, &errb)
 	if code != exitOK || !strings.Contains(errb.String(), "development mode relaxation") || !strings.Contains(errb.String(), "http public URL on loopback") {
 		t.Fatalf("code=%d logs=%s", code, errb.String())
 	}
@@ -99,7 +99,7 @@ func TestListenFailureIsARuntimeError(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = ln.Close() }()
-	code, _, stderr := runWith(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN="+ln.Addr().String())...)
+	code, _, stderr := runWith(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN="+ln.Addr().String(), "MCP_AUTHPROXY_INTERNAL_LISTEN=127.0.0.1:0")...)
 	if code != exitRuntime || !strings.Contains(stderr, "address already in use") {
 		t.Fatalf("code=%d stderr=%s", code, stderr)
 	}
@@ -109,7 +109,7 @@ func TestNoAuthLogsThatAuthIsOffAndTheNextStep(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var out, errb bytes.Buffer
-	code := run(ctx, nil, []string{"MCP_AUTHPROXY_INSECURE_NO_AUTH=true", "MCP_AUTHPROXY_PUBLIC_URL=http://localhost:8080/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0"}, &out, &errb)
+	code := run(ctx, nil, []string{"MCP_AUTHPROXY_INSECURE_NO_AUTH=true", "MCP_AUTHPROXY_PUBLIC_URL=http://localhost:8080/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0", "MCP_AUTHPROXY_INTERNAL_LISTEN=127.0.0.1:0"}, &out, &errb)
 	logs := errb.String()
 	if code != exitOK || !strings.Contains(logs, `"level":"WARN","msg":"development mode relaxation","relaxation":"AUTHENTICATION IS OFF: anyone who can reach http://localhost:8080/mcp`) || !strings.Contains(logs, "to require sign-in") {
 		t.Fatalf("code=%d logs=%s", code, logs)
