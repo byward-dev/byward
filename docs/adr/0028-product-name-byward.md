@@ -43,8 +43,9 @@ gate and guard words are already used by agent-security projects.
 
 ## Consequences
 
-- Trademark databases (USPTO, EUIPO; classes 9 and 42) are to be checked by the maintainer before
-  the public launch.
+- Trademark databases were checked by the maintainer on 2026-11-06 (USPTO, and TMview for the EU
+  and national offices; Nice classes 9 and 42). No live BYWARD mark in either class was found; the
+  only hit in them had expired. This was a knock-out search, not a legal clearance opinion.
 - No compatibility shims: nothing was released under the old name.
 - The repository moves from `corker/mcp-authproxy` to `byward-dev/byward`. GitHub redirects the
   web and git URLs, but not the Go module path or image path, which is why both changed at once.
