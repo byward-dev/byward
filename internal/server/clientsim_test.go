@@ -143,7 +143,7 @@ func newSimProxy(t *testing.T, p clientsim.Profile) (clientsim.Env, clientsim.Cr
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { stop(t, a) })
-	srv := httptest.NewServer(Handler(cfg, discard, a.validator, a.register, a.sessions, Observability{}))
+	srv := httptest.NewServer(Handler(cfg, discard, httpUpstream(cfg, discard), a.validator, a.register, a.sessions, Observability{}))
 	t.Cleanup(srv.Close)
 	target := strings.TrimPrefix(srv.URL, "http://")
 	return clientsim.Env{
