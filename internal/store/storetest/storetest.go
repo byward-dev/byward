@@ -28,6 +28,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		{"CreateGrantSetsEpochAndRoundTrips", createGrantSetsEpochAndRoundTrips},
 		{"GrantIDsAreUnique", grantIDsAreUnique},
 		{"UnknownGrantIsNotFound", unknownGrantIsNotFound},
+		{"IncompleteGrantsAndCutOffsAreInvalid", incompleteGrantsAndCutOffsAreInvalid},
 		{"StoredValuesAreCopies", storedValuesAreCopies},
 		{"CodeIsConsumedOnce", codeIsConsumedOnce},
 		{"ConcurrentConsumeHasOneWinner", concurrentConsumeHasOneWinner},
@@ -142,6 +143,25 @@ func grantIDsAreUnique(t *testing.T, s store.Store) {
 func unknownGrantIsNotFound(t *testing.T, s store.Store) {
 	_, err := s.Grant(ctx, "nope")
 	wantErr(t, "Grant", err, store.ErrNotFound)
+}
+
+func incompleteGrantsAndCutOffsAreInvalid(t *testing.T, s store.Store) {
+	for name, edit := range map[string]func(*store.Grant){
+		"no ID":                func(g *store.Grant) { g.ID = "" },
+		"no client":            func(g *store.Grant) { g.ClientID = "" },
+		"no subject":           func(g *store.Grant) { g.Subject = "" },
+		"no lifetime":          func(g *store.Grant) { g.ExpiresAt = time.Time{} },
+		"expires when created": func(g *store.Grant) { g.ExpiresAt = g.CreatedAt },
+	} {
+		g := grant("g1", "tid:alice")
+		edit(&g)
+		_, err := s.CreateGrant(ctx, g)
+		wantErr(t, "CreateGrant with "+name, err, store.ErrInvalid)
+	}
+	wantErr(t, "RevokeSubject without a subject", s.RevokeSubject(ctx, "", t0, t0), store.ErrInvalid)
+	if revs, err := s.RevocationsSince(ctx, time.Time{}); err != nil || len(revs) != 0 {
+		t.Fatalf("revocations = %+v, %v; want none", revs, err)
+	}
 }
 
 func storedValuesAreCopies(t *testing.T, s store.Store) {

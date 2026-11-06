@@ -18,6 +18,9 @@ var (
 	ErrConsumed = errors.New("store: already consumed")
 	// ErrExists: a grant ID, a grant's code or a refresh-token hash is already stored.
 	ErrExists = errors.New("store: already exists")
+	// ErrInvalid: a grant without an ID, client, subject or a lifetime, or a subject cut-off
+	// without a subject. An empty subject in a Revocation must never reach the deny list.
+	ErrInvalid = errors.New("store: invalid argument")
 )
 
 // RevocationRetention is how long revocations are kept: the longest access-token lifetime
@@ -63,7 +66,8 @@ type Grant struct {
 
 // Grants stores grants.
 type Grants interface {
-	// CreateGrant stores g and returns it with Epoch set. An existing ID is ErrExists.
+	// CreateGrant stores g and returns it with Epoch set. An existing ID is ErrExists; an empty ID,
+	// ClientID or Subject, or an ExpiresAt not after CreatedAt, is ErrInvalid.
 	CreateGrant(ctx context.Context, g Grant) (Grant, error)
 	// Grant returns the grant, or ErrNotFound. It does not check ExpiresAt.
 	Grant(ctx context.Context, id string) (Grant, error)
@@ -73,7 +77,8 @@ type Grants interface {
 	RevokeGrant(ctx context.Context, id string, at time.Time) error
 	// RevokeSubject is revoke-user (ADR-0006 §9): it records Revocation{Subject: subject, Before:
 	// before, At: at} and deletes the subject's grants created before `before`, with their codes,
-	// refresh tokens and IdP tokens. It records the cut-off even when the subject has no grants.
+	// refresh tokens and IdP tokens. It records the cut-off even when the subject has no grants. An
+	// empty subject is ErrInvalid.
 	RevokeSubject(ctx context.Context, subject string, before, at time.Time) error
 }
 

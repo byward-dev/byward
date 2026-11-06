@@ -44,6 +44,9 @@ func New() *Store {
 
 // CreateGrant implements store.Grants.
 func (s *Store) CreateGrant(_ context.Context, g store.Grant) (store.Grant, error) {
+	if g.ID == "" || g.ClientID == "" || g.Subject == "" || !g.ExpiresAt.After(g.CreatedAt) {
+		return store.Grant{}, store.ErrInvalid
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.grants[g.ID]; ok {
@@ -80,6 +83,9 @@ func (s *Store) RevokeGrant(_ context.Context, id string, at time.Time) error {
 
 // RevokeSubject implements store.Grants.
 func (s *Store) RevokeSubject(_ context.Context, subject string, before, at time.Time) error {
+	if subject == "" {
+		return store.ErrInvalid
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for id, g := range s.grants {
