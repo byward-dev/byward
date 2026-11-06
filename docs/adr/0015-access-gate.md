@@ -38,6 +38,9 @@ Nobody ships 403 step-up.
    denial; with a single scope in v0.1 there is no step-up either.
    _Clarified 2026-11-06 (slice 1.5):_ no MCP response uses 403 for a denial; the browser denial
    page is 403, since MCP clients never parse it and the reasoning above is about MCP responses.
+   _Clarified 2026-11-07 (#126):_ a `prompt=none` sign-in gets no page, since its browser may show
+   nothing to anyone: a denial there redirects `access_denied` with `state` and `iss` and a generic
+   description that names no rule, role or group. It is audited as every denial is.
 3. **Empty gate:** for single-tenant Entra it allows every user of the tenant, with a warning at every
    startup and in `doctor` ("all users of tenant X can sign in; guests too unless restricted"). For
    Google and multi-tenant IdPs an empty gate refuses to start unless an explicit flag allows it,

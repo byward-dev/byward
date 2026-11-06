@@ -16,9 +16,6 @@ import (
 // with its own prompt=none. Without a hint the user is unknown before the IdP, and nothing goes to
 // the IdP before consent is established (ADR-0010 §1), so the answer is login_required.
 
-// ConsentOutcomeSilentRefused counts a prompt=none request answered with an error.
-const ConsentOutcomeSilentRefused = "silent_refused"
-
 // silentIdPErrors are the IdP's answers to its own prompt=none that are passed to the client as
 // they are (OIDC Core 1.0 §3.1.2.6).
 var silentIdPErrors = []string{"login_required", "interaction_required", "consent_required", "account_selection_required"}
@@ -32,23 +29,23 @@ func wantsSilent(prompt string) bool { return slices.Contains(promptValues(promp
 // authorizeSilently handles prompt=none once the request is valid: it starts a silent IdP sign-in
 // on a remembered consent, or answers the error that says why it cannot.
 func (b *Broker) authorizeSilently(w http.ResponseWriter, r *http.Request, client registration.Client, l login) {
-	if !b.remembers(client) { // a client asked every time (ASVS 5.0.0 10.7.1)
-		b.refuseSilently(w, r, client, l, "consent_required", "this client must be approved by the user each time")
+	if !b.remembers(client) { // a client asked every time (ASVS 5.0.0 10.7.1); before the hint, so it learns nothing about it
+		b.refuseSilently(w, r, client.Trust(), l, "consent_required", "this client must be approved by the user each time")
 		return
 	}
 	h, ok := b.readHint(r)
 	if !ok {
-		b.refuseSilently(w, r, client, l, "login_required", "the user must sign in")
+		b.refuseSilently(w, r, client.Trust(), l, "login_required", "the user must sign in")
 		return
 	}
 	ok, err := b.remembered(r.Context(), h, l, b.cfg.Now())
 	switch {
 	case err != nil:
 		b.cfg.Log.WarnContext(r.Context(), "checking remembered consent failed", "request_id", logging.RequestID(r.Context()), "error", err.Error())
-		b.refuseSilently(w, r, client, l, "temporarily_unavailable", "the proxy could not check the consent; try again")
+		b.refuseSilently(w, r, client.Trust(), l, "temporarily_unavailable", "the proxy could not check the consent; try again")
 		return
 	case !ok:
-		b.refuseSilently(w, r, client, l, "consent_required", "the user has not approved this request")
+		b.refuseSilently(w, r, client.Trust(), l, "consent_required", "the user has not approved this request")
 		return
 	}
 	l.Hint, l.Silent = &h, true
@@ -56,15 +53,10 @@ func (b *Broker) authorizeSilently(w http.ResponseWriter, r *http.Request, clien
 }
 
 // refuseSilently answers a prompt=none request with code at its validated redirect URI, audited
-// and counted. client may be nil after the callback, when the request's client is not re-read.
-func (b *Broker) refuseSilently(w http.ResponseWriter, r *http.Request, client registration.Client, l login, code, desc string) {
-	ev := audit.Event{Name: audit.ConsentSilent, Outcome: audit.Failure, Reason: code, ClientID: l.ClientID, IdP: b.cfg.IdPName}
-	trust := registration.TrustLevel("")
-	if client != nil {
-		trust = client.Trust()
-		ev.ClientTrust = string(trust)
-	}
-	b.cfg.Audit.Record(r, ev)
+// and counted. trust is empty after the callback, where the request's client is not re-read.
+func (b *Broker) refuseSilently(w http.ResponseWriter, r *http.Request, trust registration.TrustLevel, l login, code, desc string) {
+	b.cfg.Audit.Record(r, audit.Event{Name: audit.ConsentSilent, Outcome: audit.Failure, Reason: code, ClientID: l.ClientID,
+		ClientTrust: string(trust), IdP: b.cfg.IdPName})
 	b.observeConsent(trust, ConsentOutcomeSilentRefused)
 	b.redirectError(w, r, l.RedirectURI, l.State, code, desc)
 }

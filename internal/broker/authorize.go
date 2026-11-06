@@ -146,6 +146,9 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 	case !validState(q.Get("state")):
 		fail("invalid_request", "state may only contain visible ASCII characters and spaces (RFC 6749 Appendix A.5)")
 		return
+	case len(q["prompt"]) > 1: // RFC 6749 §3.1: no parameter more than once; prompt=none&prompt=consent must not run silently
+		fail("invalid_request", "prompt must be sent once")
+		return
 	case wantsSilent(q.Get("prompt")) && len(promptValues(q.Get("prompt"))) > 1:
 		fail("invalid_request", "prompt=none cannot be combined with other prompt values (OIDC Core 1.0 §3.1.2.1)")
 		return
@@ -207,19 +210,32 @@ func (b *Broker) loadClient(w http.ResponseWriter, r *http.Request, clientID, re
 // startLogin sends the browser to the IdP for l, keeping l in the login cookie until the callback.
 func (b *Broker) startLogin(w http.ResponseWriter, r *http.Request, l login, now time.Time) {
 	ctx := r.Context()
+	failed := func(err error) { // a page, or an OAuth answer for prompt=none (the redirect URI is validated)
+		if !l.Silent {
+			b.serverError(w, r, err)
+			return
+		}
+		b.cfg.Log.ErrorContext(ctx, "broker error", "request_id", logging.RequestID(ctx), "error", err)
+		b.refuseSilently(w, r, "", l, "server_error", "the proxy could not start the sign-in; try again")
+	}
 	plain, err := encodeLogin(l)
 	if err != nil {
-		b.serverError(w, r, err)
+		failed(err)
 		return
 	}
 	sealed, err := b.cfg.LoginBox.Seal(plain, now.Add(LoginLifetime))
 	if err != nil {
-		b.serverError(w, r, err)
+		failed(err)
 		return
 	}
 	start := time.Now()
 	target, err := b.cfg.IdP.AuthCodeURL(idp.WithRequestID(ctx, logging.RequestID(ctx)), idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier, Silent: l.Silent})
 	b.cfg.ObserveIdP("authorize", idpOutcome(err), time.Since(start))
+	if err != nil && l.Silent { // the IdP is not ready (discovery or keys down)
+		b.noteIdPFailure(r, l.ClientID, err)
+		b.refuseSilently(w, r, "", l, "temporarily_unavailable", "the identity provider is not reachable; try again")
+		return
+	}
 	if err != nil {
 		b.idpFailure(w, r, l.ClientID, err)
 		return
@@ -331,7 +347,16 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var ie *idp.Error
 		if l.Silent && errors.As(err, &ie) && slices.Contains(silentIdPErrors, ie.OAuth) { // the IdP's own prompt=none needs the user
-			b.refuseSilently(w, r, nil, l, ie.OAuth, "the identity provider needs the user")
+			b.refuseSilently(w, r, "", l, ie.OAuth, "the identity provider needs the user")
+			return
+		}
+		if l.Silent { // any other IdP failure: logged and audited as always, then an OAuth answer, not a page
+			b.noteIdPFailure(r, l.ClientID, err)
+			code := "server_error"
+			if errors.As(err, &ie) && ie.Class == idp.Unavailable {
+				code = "temporarily_unavailable"
+			}
+			b.refuseSilently(w, r, "", l, code, "the sign-in failed; try again")
 			return
 		}
 		if errors.As(err, &ie) && ie.OAuth == "access_denied" {
@@ -342,15 +367,28 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 		b.idpFailure(w, r, l.ClientID, err)
 		return
 	}
+	// failed is a broker failure after the IdP: a page, or an OAuth answer for prompt=none.
+	failed := func(err error) {
+		if !l.Silent {
+			b.serverError(w, r, err)
+			return
+		}
+		b.cfg.Log.ErrorContext(ctx, "broker error", "request_id", logging.RequestID(ctx), "error", err)
+		b.refuseSilently(w, r, "", l, "server_error", "the proxy could not finish the sign-in; try again")
+	}
 	if err := b.cfg.Gate.Allow(ctx, id); err != nil {
 		var d Denial
 		if !errors.As(err, &d) {
-			b.serverError(w, r, err)
+			failed(err)
 			return
 		}
 		// Every denial is audited (ADR-0015 §5): the rule and pseudonymous keys only, no email or name.
 		b.cfg.Audit.Record(r, audit.Event{Name: audit.AccessDenied, Outcome: audit.Failure, Reason: d.DeniedRule(),
 			ClientID: l.ClientID, UserKey: id.Subject, IdP: b.cfg.IdPName})
+		if l.Silent { // a silent sign-in's browser shows no page to anyone (ADR-0015 §2, clarified for #126); never name the rule
+			b.redirectError(w, r, l.RedirectURI, l.State, "access_denied", "access denied by the operator's policy")
+			return
+		}
 		// A browser page the MCP client never parses, so 403 is right here (ADR-0015 §2).
 		b.page(w, r, http.StatusForbidden, "You don't have access to this server.", "Ask your operator for access.")
 		return
@@ -358,16 +396,9 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	// A login that skipped the page holds only if the registry agrees for the user who signed in.
 	var remembered registration.Client
 	if l.Hint != nil {
-		c, reason := b.confirmRemembered(ctx, l, id)
-		switch {
-		case reason != "" && l.Silent: // no page for prompt=none: nothing is issued, and the hint is forgotten
-			b.cfg.Audit.Record(r, audit.Event{Name: audit.ConsentRemembered, Outcome: audit.Failure, Reason: reason, ClientID: l.ClientID,
-				UserKey: id.Subject, IdP: b.cfg.IdPName})
-			b.clearHint(w)
-			b.refuseSilently(w, r, nil, l, "consent_required", "the user has not approved this request")
-			return
-		case reason != "":
-			b.askAfterMismatch(w, r, l, id, reason)
+		c, reason, lookupErr := b.confirmRemembered(ctx, l, id)
+		if reason != "" {
+			b.askAfterMismatch(w, r, l, id, reason, lookupErr)
 			return
 		}
 		remembered = c
@@ -375,7 +406,7 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	now := b.cfg.Now()
 	sealedTokens, err := b.cfg.IdPTokenBox.Seal(marshalSecrets(toks, b.cfg.Assert.claimsOf(id)), now.Add(GrantLifetime))
 	if err != nil {
-		b.serverError(w, r, err)
+		failed(err)
 		return
 	}
 	g, err := b.cfg.Store.CreateGrant(ctx, store.Grant{ID: randomID(), ClientID: l.ClientID, Subject: id.Subject, Issuer: id.Issuer,
@@ -383,17 +414,17 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 		// not leave a 30-day grant holding IdP tokens.
 		Resource: b.cfg.Resource.String(), Scopes: l.Scopes, IdPTokens: []byte(sealedTokens), CreatedAt: now, ExpiresAt: now.Add(LoginLifetime)})
 	if err != nil {
-		b.serverError(w, r, err)
+		failed(err)
 		return
 	}
 	if err := b.cfg.Store.PutCode(ctx, store.PendingCode{GrantID: g.ID, ClientID: l.ClientID, RedirectURI: l.RedirectURI,
 		CodeChallenge: l.Challenge, Scopes: l.Scopes, ExpiresAt: now.Add(CodeLifetime)}); err != nil {
-		b.serverError(w, r, err)
+		failed(err)
 		return
 	}
 	code, err := b.cfg.Sealer.Seal(token.Code, token.Claims{GrantID: g.ID, Subject: id.Subject, IssuedAt: now, ExpiresAt: now.Add(CodeLifetime)})
 	if err != nil {
-		b.serverError(w, r, err)
+		failed(err)
 		return
 	}
 	b.cfg.Audit.Record(r, audit.Event{Name: audit.Login, Outcome: audit.Success, ClientID: l.ClientID, UserKey: id.Subject, GrantID: g.ID, IdP: b.cfg.IdPName})
@@ -425,12 +456,12 @@ func (b *Broker) redirectError(w http.ResponseWriter, r *http.Request, redirect,
 	http.Redirect(w, r, withQuery(redirect, v), http.StatusFound) //nolint:gosec // G710: validated redirect URI
 }
 
-// idpFailure explains an IdP error on a page; the operator hint and the IdP's error code, trace ID
-// and correlation ID go to the log (ADR-0021 §7), the failure to the audit stream.
-func (b *Broker) idpFailure(w http.ResponseWriter, r *http.Request, clientID string, err error) {
+// noteIdPFailure logs and audits a failed IdP sign-in: the operator hint and the IdP's error code,
+// trace ID and correlation ID go to the log, never to the user. It returns the user's message.
+func (b *Broker) noteIdPFailure(r *http.Request, clientID string, err error) string {
 	ctx := r.Context()
 	var ie *idp.Error
-	msg, hint := "Signing in failed.", "Try again; if it keeps failing, tell your operator the reference below."
+	msg := "Signing in failed."
 	reason := "the IdP sign-in failed"
 	if errors.As(err, &ie) {
 		if ie.UserMessage != "" {
@@ -452,7 +483,14 @@ func (b *Broker) idpFailure(w http.ResponseWriter, r *http.Request, clientID str
 		b.cfg.Log.ErrorContext(ctx, "IdP sign-in failed", "request_id", logging.RequestID(ctx), "error", err)
 	}
 	b.cfg.Audit.Record(r, audit.Event{Name: audit.Login, Outcome: audit.Failure, Reason: reason, ClientID: clientID, IdP: b.cfg.IdPName})
-	b.page(w, r, http.StatusBadGateway, msg, hint)
+	return msg
+}
+
+// idpFailure explains an IdP error on a page; the operator hint and the IdP's error code, trace ID
+// and correlation ID go to the log (ADR-0021 §7), the failure to the audit stream.
+func (b *Broker) idpFailure(w http.ResponseWriter, r *http.Request, clientID string, err error) {
+	msg := b.noteIdPFailure(r, clientID, err)
+	b.page(w, r, http.StatusBadGateway, msg, "Try again; if it keeps failing, tell your operator the reference below.")
 }
 
 // idpOutcome classifies an IdP call for metrics: success, unavailable (try later) or rejected.

@@ -64,6 +64,7 @@ type memStore struct {
 	// rewriteBlob, when set, replaces a new grant's sealed IdP-token blob, e.g. with the layout an
 	// older proxy wrote.
 	rewriteBlob func([]byte) []byte
+	createDown  atomic.Bool // CreateGrant fails
 }
 
 var errStoreDown = errors.New("store down")
@@ -124,6 +125,9 @@ func (m *memStore) SetIdPTokens(ctx context.Context, id string, sealed []byte) e
 func newMemStore() *memStore { return &memStore{Store: memory.New()} }
 
 func (m *memStore) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, error) {
+	if m.createDown.Load() {
+		return store.Grant{}, errStoreDown
+	}
 	if m.rewriteBlob != nil {
 		g.IdPTokens = m.rewriteBlob(g.IdPTokens)
 	}

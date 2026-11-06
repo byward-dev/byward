@@ -29,6 +29,11 @@ func answerOf(t *testing.T, res *http.Response) silentAnswer {
 	return silentAnswer{error: q.Get("error"), state: q.Get("state"), iss: q.Get("iss"), code: q.Get("code")}
 }
 
+// refused is the answer a refused prompt=none request must get: the error, with state and iss.
+func refused(e *env, code string) silentAnswer {
+	return silentAnswer{error: code, state: "client-state", iss: e.b.cfg.Issuer}
+}
+
 func silent(extra url.Values) url.Values {
 	q := url.Values{"prompt": {"none"}}
 	for k, v := range extra {
@@ -37,19 +42,22 @@ func silent(extra url.Values) url.Values {
 	return q
 }
 
-// prompt=none never shows the consent page: a request that cannot finish without the user gets an
-// OAuth error at its validated redirect URI, with state and iss, before anything goes to the IdP.
-// Without a hint the user is unknown before the IdP, so it is login_required (ADR-0010 §1).
-func TestPromptNoneThatNeedsTheUserIsAnsweredWithoutAPage(t *testing.T) {
+// prompt=none never shows the consent page: a request that cannot finish silently gets an OAuth
+// error at its validated redirect URI, with state and iss, before anything goes to the IdP.
+// Without a hint the user is unknown before the IdP, so it is login_required (ADR-0010 §1). A
+// client asked every time gets consent_required before the hint is even read, so it learns
+// nothing about it.
+func TestPromptNoneThatCannotFinishSilentlyIsAnsweredWithoutAPage(t *testing.T) {
 	for _, tc := range []struct {
 		name, want, trust string
 		extra             url.Values
 		hint              bool
 		storeDown         bool
-		detrusted         bool // a consent was remembered while the client was trusted
+		unverified        bool // a consent was remembered while the client was verified
 	}{
 		{"a client asked every time is refused with consent_required", "consent_required", "not-verified", url.Values{"client_id": {unverifiedID}}, true, false, false},
-		{"a client no longer trusted is refused with consent_required, whatever is remembered", "consent_required", "not-verified", url.Values{"client_id": {unverifiedID}}, true, false, true},
+		{"a client asked every time without a hint is refused with consent_required, not login_required", "consent_required", "not-verified", url.Values{"client_id": {unverifiedID}}, false, false, false},
+		{"a client no longer verified is refused with consent_required, whatever is remembered", "consent_required", "not-verified", url.Values{"client_id": {unverifiedID}}, true, false, true},
 		{"no hint cookie is refused with login_required", "login_required", "verified", nil, false, false, false},
 		{"a hint without a consent covering the request is refused with consent_required", "consent_required", "verified", url.Values{"scope": {"mcp offline_access"}}, true, false, false},
 		{"a store failure is answered with temporarily_unavailable", "temporarily_unavailable", "verified", nil, true, true, false},
@@ -61,7 +69,7 @@ func TestPromptNoneThatNeedsTheUserIsAnsweredWithoutAPage(t *testing.T) {
 			if tc.hint {
 				h = e.remember(t, url.Values{"scope": {"mcp"}})
 			}
-			if tc.detrusted {
+			if tc.unverified {
 				g := user(e)
 				if err := e.st.RememberConsent(context.Background(), store.Consent{Key: store.ConsentKey{Issuer: g.Issuer, Subject: g.Subject,
 					ClientID: unverifiedID, Redirect: registration.RedirectKey(clientCB), Resource: resourceID}, Scopes: []string{"mcp"},
@@ -71,8 +79,7 @@ func TestPromptNoneThatNeedsTheUserIsAnsweredWithoutAPage(t *testing.T) {
 			}
 			e.st.down.Store(tc.storeDown)
 			before := counted.list()
-			res := e.authorizeWith(t, silent(tc.extra), h)
-			if got := answerOf(t, res); got != (silentAnswer{error: tc.want, state: "client-state", iss: e.b.cfg.Issuer}) {
+			if got := answerOf(t, e.authorizeWith(t, silent(tc.extra), h)); got != refused(e, tc.want) {
 				t.Fatalf("answer %+v, want error %s with state and iss", got, tc.want)
 			}
 			e.oneAuditEvent(t, "consent_silent", map[string]any{"outcome": "failure", "reason": tc.want, "client_id": "*", "client_trust": tc.trust})
@@ -83,11 +90,16 @@ func TestPromptNoneThatNeedsTheUserIsAnsweredWithoutAPage(t *testing.T) {
 	}
 }
 
-// prompt=none goes with no other prompt value (OIDC Core 1.0 §3.1.2.1).
+// prompt=none goes with no other prompt value, in any order, and prompt is sent once (OIDC Core
+// 1.0 §3.1.2.1; RFC 6749 §3.1), so a request carrying it with consent can never reach the page.
 func TestPromptNoneWithAnotherValueIsAnInvalidRequest(t *testing.T) {
-	e := newEnv(t, withRemember(t, nil))
-	if got := answerOf(t, e.authorizeWith(t, url.Values{"prompt": {"none consent"}}, nil)); got.error != "invalid_request" {
-		t.Fatalf("answer %+v, want invalid_request", got)
+	for _, prompt := range [][]string{{"none consent"}, {"consent none"}, {"login none"}, {"none select_account"}, {"none", "consent"}, {"consent", "none"}} {
+		t.Run(strings.Join(prompt, "&"), func(t *testing.T) {
+			e := newEnv(t, withRemember(t, nil))
+			if got := answerOf(t, e.authorizeWith(t, url.Values{"prompt": prompt}, nil)); got != refused(e, "invalid_request") {
+				t.Fatalf("answer %+v, want invalid_request with state and iss", got)
+			}
+		})
 	}
 }
 
@@ -107,55 +119,142 @@ func TestPromptNoneOnARememberedConsentSignsInSilently(t *testing.T) {
 	}
 }
 
-// When the IdP's own prompt=none needs the user, the client gets the IdP's answer as it is and
-// nothing is issued. The fake answers login_required unless told otherwise (it fails closed).
-func TestPromptNonePassesTheIdPsSilentAnswerThrough(t *testing.T) {
+// When the IdP's own prompt=none needs the user, the client gets the IdP's answer as it is; any
+// other IdP failure becomes server_error, or temporarily_unavailable when the IdP is unavailable.
+// Nothing is issued, and nothing is a page. The fake answers login_required unless told otherwise
+// (it fails closed).
+func TestPromptNoneAnswersTheIdPsFailureAtTheRedirect(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		idp  fakeidp.Option
 		want string
 	}{
-		{"no IdP session", nil, "login_required"},
-		{"the IdP needs interaction", fakeidp.WithSilentError("interaction_required"), "interaction_required"},
-		{"the IdP needs an account choice", fakeidp.WithSilentError("account_selection_required"), "account_selection_required"},
-		{"the IdP needs its own consent", fakeidp.WithSilentError("consent_required"), "consent_required"},
+		{"no IdP session passes login_required through", nil, "login_required"},
+		{"the IdP needing interaction passes interaction_required through", fakeidp.WithSilentError("interaction_required"), "interaction_required"},
+		{"the IdP needing an account choice passes account_selection_required through", fakeidp.WithSilentError("account_selection_required"), "account_selection_required"},
+		{"the IdP needing its own consent passes consent_required through", fakeidp.WithSilentError("consent_required"), "consent_required"},
+		{"the IdP being unavailable is temporarily_unavailable", fakeidp.WithSilentError("temporarily_unavailable"), "temporarily_unavailable"},
+		{"any other IdP error is server_error", fakeidp.WithSilentError("invalid_request"), "server_error"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			e := newEnv(t, withRemember(t, nil))
+			counted := &consentOutcomes{}
+			e := newEnv(t, withRemember(t, counted))
 			h := e.remember(t, nil)
 			if tc.idp != nil {
 				e.fake.Set(tc.idp)
 			}
-			grants := len(e.st.ids)
-			res := e.authorizeWith(t, silent(nil), h)
-			if got := answerOf(t, e.finish(t, res)); got != (silentAnswer{error: tc.want, state: "client-state", iss: e.b.cfg.Issuer}) {
+			grants, before := len(e.st.ids), counted.list()
+			if got := answerOf(t, e.finish(t, e.authorizeWith(t, silent(nil), h))); got != refused(e, tc.want) {
 				t.Fatalf("answer %+v, want %s with state and iss", got, tc.want)
 			}
 			if len(e.st.ids) != grants {
 				t.Fatal("a grant was created")
 			}
 			e.oneAuditEvent(t, "consent_silent", map[string]any{"outcome": "failure", "reason": tc.want, "client_id": clientID})
+			if got := counted.list()[len(before):]; !slices.Equal(got, []string{" silent_refused"}) {
+				t.Fatalf("consent outcomes %v, want only a silent refusal with no trust", got)
+			}
 		})
 	}
 }
 
-// Someone else signing in silently behind a stale hint gets consent_required and no code, never the
-// page; the hint is cleared and the mismatch audited as for an interactive sign-in.
-func TestPromptNoneForAnotherUserBehindAStaleHintGetsConsentRequired(t *testing.T) {
+// An interactive sign-in whose IdP answers interaction_required keeps the interactive handling
+// (the IdP failure page); it is not a silent refusal.
+func TestAnInteractiveSignInIsNeverRefusedSilently(t *testing.T) {
+	counted := &consentOutcomes{}
+	e := newEnv(t, withRemember(t, counted))
+	e.fake.Set(fakeidp.FailAuthorize(&fakeidp.Failure{Error: "interaction_required"}))
+	c, cb := e.startLogin(t, nil)
+	if res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{c}); res.StatusCode != http.StatusBadGateway {
+		t.Fatalf("callback: %d, want the IdP failure page", res.StatusCode)
+	}
+	if n := len(e.auditEvents(t, "consent_silent")); n != 0 || slices.ContainsFunc(counted.list(), func(s string) bool { return strings.HasSuffix(s, "silent_refused") }) {
+		t.Fatalf("an interactive sign-in was refused silently: %d consent_silent records, outcomes %v", n, counted.list())
+	}
+}
+
+// After the IdP, a silent sign-in whose remembered consent no longer holds gets consent_required
+// and no code, never the page: someone else signed in behind a stale hint, or the consent went
+// between /authorize and the callback. The hint is cleared and the mismatch audited as for an
+// interactive sign-in. A store failure while checking is temporarily_unavailable and keeps the hint.
+func TestPromptNoneWhoseConsentDoesNotHoldAfterTheIdPGetsNoCodeAndNoPage(t *testing.T) {
+	for _, tc := range []struct {
+		name, want, reason string
+		between            func(t *testing.T, e *env) // after /authorize, before the callback
+		hintCleared        bool
+	}{
+		{"another user behind a stale hint gets consent_required", "consent_required", hintUserMismatch, func(t *testing.T, e *env) {
+			e.fake.Set(fakeidp.WithUser(fakeidp.User{OID: fakeidp.NewGUID(), Name: "Mallory"}))
+		}, true},
+		{"a consent forgotten in between gets consent_required", "consent_required", hintNotRemembered, func(t *testing.T, e *env) {
+			if err := e.st.RevokeGrant(context.Background(), firstGrant(e.st), e.now); err != nil { // every revocation forgets
+				t.Fatal(err)
+			}
+		}, true},
+		{"a store failure while checking gets temporarily_unavailable", "temporarily_unavailable", hintNotRemembered, func(t *testing.T, e *env) {
+			e.st.down.Store(true)
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			counted := &consentOutcomes{}
+			e := newEnv(t, withRemember(t, counted))
+			h := e.remember(t, nil)
+			e.fake.Set(fakeidp.WithSilentSession())
+			res := e.authorizeWith(t, silent(nil), h)
+			tc.between(t, e)
+			grants, before := len(e.st.ids), counted.list()
+			back := e.finish(t, res)
+			if got := answerOf(t, back); got != refused(e, tc.want) {
+				t.Fatalf("answer %+v, want %s and no code", got, tc.want)
+			}
+			if c := hintIn(e, back); (c != nil && c.MaxAge < 0) != tc.hintCleared {
+				t.Fatalf("hint cookie %+v, want cleared %v", c, tc.hintCleared)
+			}
+			if len(e.st.ids) != grants {
+				t.Fatal("a grant was created")
+			}
+			e.oneAuditEvent(t, "consent_remembered", map[string]any{"outcome": "failure", "reason": tc.reason, "client_id": clientID, "user_key": "*"})
+			e.oneAuditEvent(t, "consent_silent", map[string]any{"outcome": "failure", "reason": tc.want, "client_id": clientID})
+			if got := counted.list()[len(before):]; !slices.Equal(got, []string{" silent_refused"}) {
+				t.Fatalf("consent outcomes %v, want only a silent refusal with no trust", got)
+			}
+		})
+	}
+}
+
+// A broker failure after the IdP is server_error at the redirect for a silent sign-in, not a page.
+func TestPromptNoneWhoseGrantCannotBeStoredIsAServerError(t *testing.T) {
 	e := newEnv(t, withRemember(t, nil))
 	h := e.remember(t, nil)
-	grants := len(e.st.ids)
-	e.fake.Set(fakeidp.WithUser(fakeidp.User{OID: fakeidp.NewGUID(), Name: "Mallory"}), fakeidp.WithSilentSession())
+	e.fake.Set(fakeidp.WithSilentSession())
+	res := e.authorizeWith(t, silent(nil), h)
+	e.st.createDown.Store(true)
+	if got := answerOf(t, e.finish(t, res)); got != refused(e, "server_error") {
+		t.Fatalf("answer %+v, want server_error", got)
+	}
+}
+
+// A user the access gate refuses gets access_denied at the redirect on a silent sign-in, audited
+// as every denial is, and the description never names the rule, role or group that refused them
+// (ADR-0015 §2, clarified for #126).
+func TestPromptNoneForAUserTheGateRefusesIsAccessDeniedNamingNoRule(t *testing.T) {
+	e := newEnv(t, withRemember(t, nil))
+	h := e.remember(t, nil)
+	e.b.cfg.Gate = roleGate{role: "mcp-admins"}
+	e.fake.Set(fakeidp.WithSilentSession())
 	back := e.finish(t, e.authorizeWith(t, silent(nil), h))
-	if got := answerOf(t, back); got.error != "consent_required" || got.code != "" {
-		t.Fatalf("answer %+v, want consent_required and no code", got)
+	if got := answerOf(t, back); got != refused(e, "access_denied") {
+		t.Fatalf("answer %+v, want access_denied", got)
 	}
-	if c := hintIn(e, back); c == nil || c.MaxAge >= 0 {
-		t.Fatalf("hint not cleared: %+v", c)
+	loc, _ := url.Parse(back.Header.Get("Location"))
+	desc := strings.ToLower(loc.Query().Get("error_description"))
+	for _, secret := range []string{"role", "mcp-admins", "group", "tenant", "domain"} {
+		if strings.Contains(desc, secret) {
+			t.Fatalf("error_description %q names %q", desc, secret)
+		}
 	}
-	if len(e.st.ids) != grants {
-		t.Fatal("a grant was created for the user behind a stale hint")
+	e.oneAuditEvent(t, "access_denied", map[string]any{"outcome": "failure", "reason": "role", "client_id": clientID})
+	if n := len(e.auditEvents(t, "consent_silent")); n != 0 {
+		t.Fatalf("%d consent_silent records; a denial is audited as access_denied only", n)
 	}
-	e.oneAuditEvent(t, "consent_remembered", map[string]any{"outcome": "failure", "reason": hintUserMismatch, "client_id": clientID, "user_key": "*"})
-	e.oneAuditEvent(t, "consent_silent", map[string]any{"outcome": "failure", "reason": "consent_required", "client_id": clientID})
 }

@@ -28,6 +28,8 @@ const (
 	ConsentOutcomeGranted    = "granted"
 	ConsentOutcomeDenied     = "denied"
 	ConsentOutcomeRemembered = "remembered"
+	// ConsentOutcomeSilentRefused is a prompt=none request answered with an error (#126).
+	ConsentOutcomeSilentRefused = "silent_refused"
 )
 
 const (

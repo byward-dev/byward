@@ -197,12 +197,18 @@ the client and redirect URI again. This is accepted behaviour, not a gap: no tok
   `account_selection_required` as it sent them; and `consent_required` when someone else signs in
   behind the hint (nothing issued, the hint cleared). Every refusal is audited (`consent_silent`).
   - The different answers for "no hint" and "a hint but no consent" are not an oracle: the
-    request runs in the user's own browser with the user's own hint cookie, and the answer goes
-    only to a redirect URI the client registered. Only the client learns it, and only that this
-    browser's user has not approved it, which a page would have shown it too. A third-party site
+    request runs in the user's own browser with the user's own hint cookie (`SameSite=Lax`, so a
+    cross-site frame never carries it), and the answer goes only to a redirect URI the client
+    registered. Only the client learns it, or, for a loopback client, any local process (see the
+    accepted local-process item below), and only that this browser's user has not approved it,
+    which a page would have shown it too. A third-party site
     can start the request but cannot read where it ends. A client asked every time always gets
     `consent_required`, whatever is remembered. `/authorize`'s rate limit applies before any of
     this.
+  - After the IdP, a silent sign-in never ends on a page either: an access-gate denial is
+    `access_denied` naming no rule (still audited as `access_denied`), any other IdP failure is
+    `server_error` or `temporarily_unavailable`, and a store failure while re-checking the consent
+    is `temporarily_unavailable` and keeps the hint.
   - A silent IdP round trip without a hint (for browsers that lost the cookie) is not built; it
     would send the user to the IdP before consent is known. Later, if a real client needs it.
 - **Accepted: a local process can reuse a remembered loopback client.** A loopback redirect URI is
@@ -212,6 +218,8 @@ the client and redirect URI again. This is accepted behaviour, not a gap: no tok
   PKCE does not help, because that process chooses the verifier. Without remembered consent the
   page would at least show "Claude Code wants…" to a user who did not start it. This is accepted:
   local malware is outside the threat model, and it could read the client's own token store anyway.
+  With `prompt=none` such a process also learns, without any page, whether the user has a
+  remembered consent for that client (a page used to show when they had not).
   Operators who want the page every time for such clients can leave their CIMD host off
   `BYWARD_CIMD_TRUSTED_HOSTS`; a static client is always remembered.
 
