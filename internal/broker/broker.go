@@ -70,13 +70,15 @@ func (AllowAll) Allow(context.Context, idp.Identity) error { return nil }
 
 // Config wires a Broker.
 type Config struct {
-	Issuer      string   // derived once from the public URL (ADR-0013 §2)
-	Origin      string   // the public URL's origin; consent answers must carry exactly this Origin
-	Resource    *url.URL // the public MCP URL
-	Scope       string
-	IdPName     string // "entra": the callback path is /callback/{IdPName}
-	IdPLabel    string // "Microsoft Entra", for pages
-	IdPScopes   string // the scopes asked of the IdP, listed on the consent page
+	Issuer    string   // derived once from the public URL (ADR-0013 §2)
+	Origin    string   // the public URL's origin; consent answers must carry exactly this Origin
+	Resource  *url.URL // the public MCP URL
+	Scope     string
+	IdPName   string // "entra": the callback path is /callback/{IdPName}
+	IdPLabel  string // "Microsoft Entra", for pages
+	IdPScopes string // the scopes asked of the IdP, listed on the consent page
+	// CIMD advertises client_id_metadata_document_supported; Clients then resolves CIMD URLs.
+	CIMD        bool
 	IdP         IdP
 	Clients     registration.Registry
 	Store       store.Store

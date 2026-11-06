@@ -113,10 +113,14 @@ type staticClient struct {
 	trust              registration.TrustLevel
 }
 
-func (c staticClient) ID() string                        { return c.id }
-func (c staticClient) Name() string                      { return c.name }
-func (c staticClient) Trust() registration.TrustLevel    { return c.trust }
-func (staticClient) AuthMethod() registration.AuthMethod { return registration.None }
+func (c staticClient) ID() string                     { return c.id }
+func (c staticClient) Name() string                   { return c.name }
+func (c staticClient) Trust() registration.TrustLevel { return c.trust }
+func (staticClient) AllowsRefresh() bool              { return true }
+
+func (staticClient) AuthMethods() []registration.AuthMethod {
+	return []registration.AuthMethod{registration.None}
+}
 func (c staticClient) RedirectAllowed(u string) error {
 	if u != c.redirect {
 		return errors.New("registered " + c.redirect + ", sent " + u)

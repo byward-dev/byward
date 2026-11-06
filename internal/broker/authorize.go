@@ -2,6 +2,7 @@ package broker
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -38,7 +39,7 @@ func (b *Broker) metadataHandler() http.Handler {
 		// offline_access: the TS SDK asks for refresh tokens only when it is listed (comment on #49).
 		"scopes_supported": []string{b.cfg.Scope, "offline_access"},
 		"authorization_response_iss_parameter_supported": true,
-		"client_id_metadata_document_supported":          false, // slice 2.1
+		"client_id_metadata_document_supported":          b.cfg.CIMD, // ADR-0008 §1
 	})
 	if err != nil {
 		panic(err)
@@ -116,9 +117,16 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client, err := b.cfg.Clients.Client(ctx, q.Get("client_id"))
+	// Never a redirect: the redirect URI is not verified yet (draft-ietf-oauth-client-id-metadata-document-03 §6.1).
+	if err != nil {
+		b.clientLookupFailed(ctx, q.Get("client_id"), err)
+	}
 	switch {
 	case errors.Is(err, registration.ErrUnknownClient):
 		b.page(w, r, http.StatusBadRequest, "This app is not registered with the proxy.", "Ask your operator to register the app, or check its client ID.")
+		return
+	case errors.Is(err, registration.ErrUnavailable):
+		b.page(w, r, http.StatusServiceUnavailable, "The proxy could not load this app's details.", "Try again in a minute.")
 		return
 	case err != nil:
 		b.serverError(w, r, err)
@@ -411,4 +419,24 @@ func (b *Broker) serverError(w http.ResponseWriter, r *http.Request, err error) 
 	ctx := r.Context()
 	b.cfg.Log.ErrorContext(ctx, "broker error", "request_id", logging.RequestID(ctx), "error", err)
 	b.page(w, r, http.StatusInternalServerError, "Something went wrong on the proxy.", "Try again; if it keeps failing, tell your operator the reference below.")
+}
+
+// Operator log messages for a CIMD client that was refused, and one whose metadata or keys could
+// not be fetched for now.
+const (
+	metadataRefused     = "client metadata refused"
+	metadataUnavailable = "client metadata unavailable"
+)
+
+// clientLookupFailed tells the operator why a Client ID Metadata Document client was refused; the
+// client itself only sees invalid_client or the error page. Static client IDs are not logged.
+func (b *Broker) clientLookupFailed(ctx context.Context, clientID string, err error) {
+	if !registration.IsCIMDURL(clientID) {
+		return
+	}
+	msg := metadataRefused
+	if errors.Is(err, registration.ErrUnavailable) {
+		msg = metadataUnavailable
+	}
+	b.cfg.Log.WarnContext(ctx, msg, "request_id", logging.RequestID(ctx), "error", err.Error())
 }

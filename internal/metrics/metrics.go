@@ -28,6 +28,7 @@ type Metrics struct {
 	busy        *prometheus.CounterVec
 	auditEvents *prometheus.CounterVec
 	rateLimited *prometheus.CounterVec
+	cimdFetches *prometheus.CounterVec
 }
 
 // New registers every metric; the build-info gauge is labelled from the binary's build info.
@@ -53,11 +54,14 @@ func New() *Metrics {
 		rateLimited: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_rate_limited_total",
 			Help: "OAuth endpoint requests refused with 429 because the client address was over its budget, by endpoint."},
 			[]string{"endpoint"}),
+		cimdFetches: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_cimd_fetches_total",
+			Help: "Client ID Metadata Document fetches by outcome (ok, invalid, refused, unavailable, rate_limited, busy)."},
+			[]string{"outcome"}),
 	}
 	build := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "byward_build_info",
 		Help: "Always 1; labelled with the proxy and Go versions."}, []string{"version", "go_version"})
 	build.WithLabelValues(version, goVersion).Set(1)
-	m.reg.MustRegister(m.requests, m.idp, m.inFlight, m.busy, m.auditEvents, m.rateLimited, build,
+	m.reg.MustRegister(m.requests, m.idp, m.inFlight, m.busy, m.auditEvents, m.rateLimited, m.cimdFetches, build,
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	return m
 }
@@ -118,4 +122,13 @@ func (m *Metrics) AuditEvent(event, outcome string) {
 		return
 	}
 	m.auditEvents.WithLabelValues(event, outcome).Inc()
+}
+
+// CIMDFetch counts a Client ID Metadata Document fetch by outcome; it has the signature of
+// registration.CIMDConfig.Observe.
+func (m *Metrics) CIMDFetch(outcome string) {
+	if m == nil {
+		return
+	}
+	m.cimdFetches.WithLabelValues(outcome).Inc()
 }

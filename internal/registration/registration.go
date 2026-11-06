@@ -41,7 +41,11 @@ type Client interface {
 	ID() string
 	Name() string
 	Trust() TrustLevel
-	AuthMethod() AuthMethod
+	// AuthMethods lists the methods the client may use at /token.
+	AuthMethods() []AuthMethod
+	// AllowsRefresh reports whether the client registered the refresh_token grant; without it the
+	// broker issues no refresh tokens (draft-ietf-oauth-client-id-metadata-document-03 §6).
+	AllowsRefresh() bool
 	// RedirectAllowed applies ADR-0009 to a redirect URI sent at /authorize or /token. The error
 	// says "registered X, sent Y" and is safe to show on the error page.
 	RedirectAllowed(redirectURI string) error

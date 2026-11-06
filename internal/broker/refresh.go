@@ -22,8 +22,12 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	f := r.PostForm
 	now := b.cfg.Now()
-	client, ok := b.authenticateClient(w, r, now)
+	client, ok := b.authenticateClient(w, r, now, b.revokeForRefusedMetadata)
 	if !ok {
+		return
+	}
+	if !client.AllowsRefresh() {
+		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "unauthorized_client", "this client did not register the refresh_token grant"})
 		return
 	}
 	if res := f.Get("resource"); res != "" && res != b.cfg.Resource.String() {
@@ -182,4 +186,22 @@ func narrowScopes(requested string, granted []string) ([]string, bool) {
 		}
 	}
 	return want, true
+}
+
+// revokeForRefusedMetadata applies draft-ietf-oauth-client-id-metadata-document-03 §6.1: when a CIMD
+// client's metadata is now definitely refused (its document mismatches, is invalid or gone), the
+// grant behind the refresh token it presents is revoked, so restoring the document cannot revive
+// it. Only a terminal failure gets here; a transient fetch failure never revokes.
+func (b *Broker) revokeForRefusedMetadata(r *http.Request, clientID string, now time.Time) {
+	hash, ok := token.HashRefreshToken(r.PostForm.Get("refresh_token"))
+	if !ok {
+		return
+	}
+	rt, err := b.cfg.Store.RefreshToken(r.Context(), hash, now)
+	if err != nil || rt.ClientID != clientID {
+		return
+	}
+	unlock := b.lockGrant(rt.GrantID)
+	defer unlock()
+	b.revoke(r, clientID, rt.GrantID, now, "client metadata no longer valid")
 }

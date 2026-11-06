@@ -42,6 +42,9 @@ var registry = []Setting{
 	{Name: "gate-groups", Auth: true, Help: "access gate: comma-separated group IDs; users need one, and groups overage denies (docs/how-to/access-gate.md)"},
 	{Name: "gate-email-domains", Auth: true, Help: "access gate: comma-separated domains of a verified email; generic OIDC IdPs only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md)"},
 	{Name: "gate-hosted-domains", Auth: true, Help: "access gate: comma-separated Google Workspace domains (hd claim); Google only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md)"},
+	{Name: "cimd", Auth: true, Bool: true, Default: "true", Help: "accept MCP clients identified by a Client ID Metadata Document URL (Claude, VS Code) and advertise it; false turns it off (docs/how-to/cimd.md)"},
+	{Name: "cimd-trusted-hosts", Auth: true, Help: "comma-separated hosts whose client metadata documents you vouch for: their apps show as trusted by you on the consent page (docs/how-to/cimd.md)"},
+	{Name: "cimd-allowed-hosts", Auth: true, Help: "comma-separated hosts allowed to publish client metadata documents besides the trusted ones; empty allows any host (docs/how-to/cimd.md)"},
 	{Name: "gate-allow-empty", Auth: true, Bool: true, Default: "false", Help: "allow an empty access gate for a Google or generic OIDC IdP (anyone with an account can sign in); no effect with Entra (docs/how-to/access-gate.md)"},
 	{Name: "operator-name", Auth: true, Help: "who runs this proxy, shown on the consent page, e.g. Contoso IT"},
 	{Name: "scope-description", Auth: true, Help: "what the scope lets an app do, in plain words for the consent page, e.g. Read and query your team's dashboards"},
@@ -88,6 +91,9 @@ type Config struct {
 	StoreDir         string
 	StoreCounterFile string
 	RefreshGrace     time.Duration
+	// Client ID Metadata Documents (slice 2.1, ADR-0008 §4, §8).
+	CIMD                               bool
+	CIMDTrustedHosts, CIMDAllowedHosts []string
 	// InContainer is set when the proxy runs in a container (/.dockerenv or /run/.containerenv)
 	// with its own network namespace; host networking does not count (see ownNetwork).
 	InContainer bool
@@ -254,6 +260,30 @@ func validate(v *Values, container bool) (*Config, error) {
 		}
 		errs = append(errs, c.paths(v)...)
 		errs = append(errs, c.refreshGrace(v)...)
+		if c.CIMD, err = strconv.ParseBool(v.get("cimd")); err != nil {
+			errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "cimd"}.Env(), v.get("cimd")))
+		}
+		for _, s := range []struct {
+			name string
+			dst  *[]string
+		}{{"cimd-trusted-hosts", &c.CIMDTrustedHosts}, {"cimd-allowed-hosts", &c.CIMDAllowedHosts}} {
+			env, raw := Setting{Name: s.name}.Env(), v.get(s.name)
+			*s.dst = splitList(raw)
+			switch {
+			case raw != "" && len(*s.dst) == 0:
+				errs = append(errs, errorf("%s is set but lists nothing; remove it or give at least one host", env))
+			case raw != "" && !c.CIMD:
+				errs = append(errs, errorf("%s has no effect while BYWARD_CIMD is false; remove one of them", env))
+			}
+			for i, h := range *s.dst {
+				if err := asciiHost(h); err != nil {
+					errs = append(errs, errorf("%s: %v", env, err))
+				} else if strings.ContainsAny(h, "/:*@ ") || !strings.Contains(h, ".") {
+					errs = append(errs, errorf("%s: %q is not a host name such as claude.ai (no scheme, port, path or wildcard)", env, h))
+				}
+				(*s.dst)[i] = strings.ToLower(h)
+			}
+		}
 		if t := c.EntraTenant; t != "" && !isGUID(t) {
 			errs = append(errs, errorf("BYWARD_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000, got %q", t))
 		}

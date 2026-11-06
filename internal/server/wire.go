@@ -21,6 +21,7 @@ import (
 	"github.com/byward-dev/byward/internal/ratelimit"
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/resource"
+	"github.com/byward-dev/byward/internal/ssrfguard"
 	"github.com/byward-dev/byward/internal/store/sqlite"
 	"github.com/byward-dev/byward/internal/token"
 )
@@ -81,11 +82,18 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	if err != nil {
 		return nil, err
 	}
-	clients, err := registration.LoadStatic(cfg.StaticClientsFile, os.ReadFile, registration.NewMemoryJTICache(time.Now, maxJTIs))
+	jti := registration.NewMemoryJTICache(time.Now, maxJTIs)
+	static, err := registration.LoadStatic(cfg.StaticClientsFile, os.ReadFile, jti)
 	if err != nil {
 		return nil, fmt.Errorf("BYWARD_STATIC_CLIENTS_FILE: %s: %w (see docs/reference/static-clients.md)", cfg.StaticClientsFile, err)
 	}
-	auditStartup(o.Audit, ring, clients.IDs())
+	auditStartup(o.Audit, ring, static.IDs())
+	var clients registration.Registry = static
+	if cfg.CIMD {
+		guard := ssrfguard.New(ssrfguard.Config{})
+		clients = registration.Chain{static, newCIMDRegistry(registration.CIMDConfig{Fetch: guard, KeysClient: guard.HTTPClient(),
+			TrustedHosts: cfg.CIMDTrustedHosts, AllowedHosts: cfg.CIMDAllowedHosts, JTI: jti, Now: time.Now, Observe: o.Metrics.CIMDFetch})}
+	}
 	provider, err := entra.New(entra.Config{Tenant: cfg.EntraTenant, ClientID: cfg.EntraClientID,
 		ClientAuth: idp.ClientSecret(cfg.EntraClientSecret), RedirectURL: cfg.Issuer() + "/callback/" + idpName})
 	if err != nil {
@@ -110,7 +118,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 		}
 	}()
 	b, err := newBroker(broker.Config{Issuer: cfg.Issuer(), Origin: cfg.Origin(), Resource: cfg.PublicURL, Scope: cfg.Scope,
-		IdPName: idpName, IdPLabel: "Microsoft Entra", IdPScopes: provider.Scope(), IdP: provider, Clients: clients,
+		IdPName: idpName, IdPLabel: "Microsoft Entra", IdPScopes: provider.Scope(), IdP: provider, Clients: clients, CIMD: cfg.CIMD,
 		Store: st, Sealer: sealer, LoginBox: loginBox, IdPTokenBox: idpBox, ConsentBox: consentBox, Gate: g,
 		UpstreamName: cfg.ResourceName, ScopeText: cfg.ScopeDescription, OperatorName: cfg.OperatorName,
 		SecureCookies: cfg.PublicURL.Scheme == "https", Log: log,
@@ -174,6 +182,9 @@ func signedInUser(r *http.Request) (string, bool) {
 	id, ok := resource.IdentityFrom(r.Context())
 	return id.Subject, ok && id.Subject != ""
 }
+
+// newCIMDRegistry is registration.NewCIMDRegistry; tests replace it to see the wired host lists.
+var newCIMDRegistry = registration.NewCIMDRegistry
 
 // newBroker is broker.New; tests replace it to see the wired configuration.
 var newBroker = broker.New

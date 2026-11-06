@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -154,7 +155,7 @@ func buildClient(e staticEntry, dir string, readFile func(string) ([]byte, error
 		return nil, err
 	}
 	c := &staticClient{name: name, redirects: e.RedirectURIs,
-		clientAuth: clientAuth{id: e.ClientID, method: e.AuthMethod, jti: jti}}
+		clientAuth: clientAuth{id: e.ClientID, methods: []AuthMethod{e.AuthMethod}, jti: jti}}
 	secretMethod := e.AuthMethod == ClientSecretBasic || e.AuthMethod == ClientSecretPost
 	switch {
 	case e.AuthMethod != None && e.AuthMethod != PrivateKeyJWT && !secretMethod:
@@ -215,10 +216,13 @@ type staticClient struct {
 	redirects []string
 }
 
-func (c *staticClient) ID() string             { return c.id }
-func (c *staticClient) Name() string           { return c.name }
-func (c *staticClient) Trust() TrustLevel      { return Verified }
-func (c *staticClient) AuthMethod() AuthMethod { return c.method }
+func (c *staticClient) ID() string                { return c.id }
+func (c *staticClient) Name() string              { return c.name }
+func (c *staticClient) Trust() TrustLevel         { return Verified }
+func (c *staticClient) AuthMethods() []AuthMethod { return slices.Clone(c.methods) }
+
+// AllowsRefresh is true: static clients are configured by the operator, who controls offline_access.
+func (c *staticClient) AllowsRefresh() bool { return true }
 
 // RedirectAllowed applies ADR-0009 against the registered redirect URIs.
 func (c *staticClient) RedirectAllowed(redirectURI string) error {
@@ -227,7 +231,7 @@ func (c *staticClient) RedirectAllowed(redirectURI string) error {
 
 // String never shows the secret.
 func (c *staticClient) String() string {
-	return fmt.Sprintf("registration.staticClient{id:%s method:%s}", c.id, c.method)
+	return fmt.Sprintf("registration.staticClient{id:%s methods:%v}", c.id, c.methods)
 }
 
 // GoString never shows the secret.
