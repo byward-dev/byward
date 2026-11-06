@@ -7,7 +7,7 @@ Precedence: flag > environment > default. Secrets are read only from files.
 
 | Flag | Environment | Default | Description |
 |---|---|---|---|
-| `--public-url` | `MCP_AUTHPROXY_PUBLIC_URL` | — | public URL of the MCP endpoint exactly as users enter it, e.g. https://mcp.example.com/mcp |
+| `--public-url` | `MCP_AUTHPROXY_PUBLIC_URL` | — | public URL of the MCP endpoint exactly as users enter it, e.g. https://mcp.example.com/mcp; an internationalized host in its ASCII (xn--) form |
 | `--upstream-url` | `MCP_AUTHPROXY_UPSTREAM_URL` | — | URL of the HTTP upstream MCP server |
 | `--listen` | `MCP_AUTHPROXY_LISTEN` | 127.0.0.1:8080 | address to listen on; public addresses only when configured |
 | `--allowed-origins` | `MCP_AUTHPROXY_ALLOWED_ORIGINS` | — | comma-separated Origin values allowed on the MCP endpoint (scheme://host[:port]) |

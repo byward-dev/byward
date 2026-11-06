@@ -91,6 +91,11 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"fragment", "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp#f", "must not have a query or fragment"},
 		{"http public", "MCP_AUTHPROXY_PUBLIC_URL=http://mcp.example.com/mcp", "must use https"},
 		{"http loopback without dev", "MCP_AUTHPROXY_PUBLIC_URL=http://127.0.0.1:8080/mcp", "needs --dev"},
+		// Browsers and MCP clients send IDN hosts in ASCII (xn--) form, so a Unicode host never matches.
+		{"unicode public host", "MCP_AUTHPROXY_PUBLIC_URL=https://bücher.example/mcp", `MCP_AUTHPROXY_PUBLIC_URL: the host "bücher.example" is not ASCII`},
+		{"escaped unicode public host", "MCP_AUTHPROXY_PUBLIC_URL=https://b%C3%BCcher.example/mcp", `MCP_AUTHPROXY_PUBLIC_URL: the host "bücher.example" is not ASCII`},
+		{"unicode allowed origin", "MCP_AUTHPROXY_ALLOWED_ORIGINS=https://bücher.example", `MCP_AUTHPROXY_ALLOWED_ORIGINS: the host "bücher.example" is not ASCII`},
+		{"unicode allowed host", "MCP_AUTHPROXY_ALLOWED_HOSTS=bücher.example:8443", `MCP_AUTHPROXY_ALLOWED_HOSTS: the host "bücher.example:8443" is not ASCII`},
 		{"credentials", "MCP_AUTHPROXY_UPSTREAM_URL=http://u:p@upstream/mcp", "MCP_AUTHPROXY_UPSTREAM_URL"},
 		{"origin with path", "MCP_AUTHPROXY_ALLOWED_ORIGINS=https://a.example/path", "MCP_AUTHPROXY_ALLOWED_ORIGINS"},
 		{"host with path", "MCP_AUTHPROXY_ALLOWED_HOSTS=a.example/x", "MCP_AUTHPROXY_ALLOWED_HOSTS"},
