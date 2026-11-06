@@ -7,6 +7,10 @@ goreleaser = "2.19.0"
 syft = "1.55.0"
 cosign = "3.1.4"
 "go:github.com/google/go-licenses/v2" = "2.0.1"
+# Workflow and shell linters (`lint:workflows`, part of `check`); offline, no GitHub token.
+actionlint = "1.7.12"
+zizmor = "1.31.1"
+shellcheck = "0.11.0"
 # Operator/dev tool (Entra app setup, real-tenant tests); not needed by `mise run check`, not installed in CI.
 # azure-cli 2.92.0 pins a pre-release dependency (azure-appconfiguration 1.10.0b1); uv needs this to resolve it.
 "pipx:azure-cli" = { version = "2.92.0", uvx_args = "--prerelease=allow" }
@@ -25,6 +29,10 @@ run = "go vet ./..."
 [tasks.lint]
 run = "golangci-lint run"
 
+[tasks."lint:workflows"]
+description = "Lint GitHub workflows (actionlint with shellcheck, zizmor offline) and shell scripts"
+run = ["actionlint", "zizmor --offline --no-progress .github/workflows", "shellcheck scripts/*.sh"]
+
 [tasks.test]
 description = "Unit tests (with the race detector)"
 run = "go test -race ./..."
@@ -35,7 +43,7 @@ run = "go test -tags=integration ./..."
 
 [tasks.check]
 description = "Everything CI runs"
-depends = ["fmt:check", "vet", "lint", "test"]
+depends = ["fmt:check", "vet", "lint", "lint:workflows", "test"]
 
 [tasks.licenses]
 description = "Fail on a disallowed dependency licence; collect third-party licence texts into build/licenses"

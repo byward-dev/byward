@@ -18,8 +18,8 @@ jobs:
       contents: write # draft GitHub release and its assets
       packages: write # push to ghcr.io
       id-token: write # cosign keyless signing and attestations
-      attestations: write
-      artifact-metadata: write
+      attestations: write # store provenance attestations
+      artifact-metadata: write # artifact storage record for actions/attest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -27,6 +27,7 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
+          cache: false # never restore a cache into a release build
           install_args: go goreleaser syft cosign go:github.com/google/go-licenses/v2
       # Multi-platform manifests with attestations need the docker-container driver.
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
