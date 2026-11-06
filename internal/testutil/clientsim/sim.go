@@ -34,9 +34,10 @@ type Env struct {
 // Credentials are what the client registered with.
 type Credentials struct {
 	ClientID string // the static client's ID, or the CIMD document's URL
-	// Signer signs the client's RS256 assertion when it authenticates with private_key_jwt (the key
-	// the client's jwks_uri publishes).
-	Signer *fakeidp.Certificate
+	// Signer, KeyID and Alg sign the client's assertion when it authenticates with private_key_jwt:
+	// the key its jwks_uri publishes, and the algorithm its document names.
+	Signer     *fakeidp.Certificate
+	KeyID, Alg string
 }
 
 // Session is what a signed-in client holds.
@@ -76,12 +77,9 @@ func discover(t *testing.T, e Env, p Profile) metadata {
 	m.scope = param(challenge, "scope")
 	var tried []string
 	paths := p.Discovery
-	if p.UsesChallenge {
-		u := param(challenge, "resource_metadata")
-		if u == "" {
-			t.Fatalf("%s: the 401 has no resource_metadata to follow: %q", p.Client, challenge)
-		}
-		paths = append([]string{pathOf(t, u)}, paths...) // the challenge's URL first, the client's defaults after
+	followed := false
+	if u := param(challenge, "resource_metadata"); p.UsesChallenge && u != "" {
+		paths, followed = []string{e.onProxy(t, u)}, true // the challenge's URL; Discovery only without one (MCP authorization)
 	}
 	for _, path := range paths {
 		if strings.HasSuffix(path, "/") {
@@ -94,7 +92,7 @@ func discover(t *testing.T, e Env, p Profile) metadata {
 			break
 		}
 		_ = res.Body.Close()
-		if p.UsesChallenge && len(tried) == 1 {
+		if followed {
 			t.Fatalf("%s: the challenge's resource_metadata does not answer: %v", p.Client, tried)
 		}
 	}
@@ -112,6 +110,12 @@ func discover(t *testing.T, e Env, p Profile) metadata {
 	m.asm = authServerMetadata(t, e, p, issuer)
 	if m.asm["issuer"] != issuer { // RFC 8414 §3.3; OpenAI requires the exact string
 		t.Fatalf("%s: authorization server metadata issuer %v is not the PRM's %q", p.Client, m.asm["issuer"], issuer)
+	}
+	if !slices.Contains(strs(m.asm["code_challenge_methods_supported"]), "S256") { // MCP authorization: clients MUST refuse otherwise
+		t.Fatalf("%s: the metadata does not list S256 in code_challenge_methods_supported: %v", p.Client, m.asm["code_challenge_methods_supported"])
+	}
+	if p.NeedsIssSupported && m.asm["authorization_response_iss_parameter_supported"] != true {
+		t.Fatalf("%s: the metadata does not advertise authorization_response_iss_parameter_supported; the client would not use its stable client ID", p.Client)
 	}
 	if p.Registration == CIMD {
 		if m.asm["client_id_metadata_document_supported"] != true || (p.CIMDNeedsNone && !slices.Contains(methods(m.asm), "none")) {
@@ -150,13 +154,16 @@ func authorize(t *testing.T, e Env, p Profile, c Credentials, m metadata, verifi
 	if s := scope(p, m); s != "" {
 		q.Set("scope", s)
 	}
-	if p.AddsOfflineAccess && slices.Contains(strs(m.asm["scopes_supported"]), "offline_access") {
+	if p.AddsOfflineAccess {
+		if !slices.Contains(strs(m.asm["scopes_supported"]), "offline_access") {
+			t.Fatalf("%s: the metadata does not list offline_access; the client gets no refresh token and the user signs in again every hour", p.Client)
+		}
 		q.Set("scope", strings.TrimSpace(q.Get("scope")+" offline_access"))
 	}
 	if p.SendsResource {
 		q.Set("resource", e.Public+e.MCPPath)
 	}
-	page := e.send(t, get(e, pathOf(t, m.asm["authorization_endpoint"])+"?"+q.Encode()))
+	page := e.send(t, get(e, e.onProxy(t, m.asm["authorization_endpoint"])+"?"+q.Encode()))
 	body := readAll(t, page)
 	flow := regexp.MustCompile(`name="flow" value="([^"]+)"`).FindStringSubmatch(body)
 	if page.StatusCode != http.StatusOK || flow == nil {
@@ -187,7 +194,7 @@ func authorize(t *testing.T, e Env, p Profile, c Credentials, m metadata, verifi
 	switch {
 	case ret.Query().Get("state") != state: // every client rejects a callback with another state
 		t.Fatalf("%s: the redirect's state %q is not the one sent", p.Client, ret.Query().Get("state"))
-	case ret.Query().Get("iss") != m.asm["issuer"]: // RFC 9207: clients that check iss reject anything else
+	case p.ChecksIss && ret.Query().Get("iss") != m.asm["issuer"]: // RFC 9207
 		t.Fatalf("%s: the redirect's iss %q is not the metadata issuer %v", p.Client, ret.Query().Get("iss"), m.asm["issuer"])
 	}
 	return ret.Query().Get("code")
@@ -204,8 +211,11 @@ func redeem(t *testing.T, e Env, p Profile, c Credentials, m metadata, code, ver
 	}
 	// A client preferring private_key_jwt uses it when the server offers it (OpenAI: the intersection).
 	if p.PrivateKeyJWT && slices.Contains(methods(m.asm), "private_key_jwt") {
+		if c.Signer == nil {
+			t.Fatalf("%s: private_key_jwt needs Credentials.Signer", p.Client)
+		}
 		now := time.Now()
-		assertion, err := c.Signer.SignJWT("RS256", map[string]any{"kid": "sim"}, map[string]any{
+		assertion, err := c.Signer.SignJWT(c.Alg, map[string]any{"kid": c.KeyID}, map[string]any{
 			"iss": c.ClientID, "sub": c.ClientID, "aud": endpoint, "jti": randomString(t), "iat": now.Unix(), "exp": now.Add(time.Minute).Unix()})
 		if err != nil {
 			t.Fatal(err)
@@ -213,17 +223,21 @@ func redeem(t *testing.T, e Env, p Profile, c Credentials, m metadata, code, ver
 		tq.Set("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer")
 		tq.Set("client_assertion", assertion)
 	}
-	tok := e.form(t, pathOf(t, endpoint), tq, nil, nil)
+	tok := e.form(t, e.onProxy(t, endpoint), tq, nil, nil)
 	defer func() { _ = tok.Body.Close() }()
 	var tokens struct {
-		AccessToken string `json:"access_token"`
-		TokenType   string `json:"token_type"`
+		AccessToken  string `json:"access_token"`
+		TokenType    string `json:"token_type"`
+		RefreshToken string `json:"refresh_token"`
 	}
 	if err := json.NewDecoder(tok.Body).Decode(&tokens); err != nil || tok.StatusCode != http.StatusOK || tokens.AccessToken == "" {
 		t.Fatalf("%s: /token answered %d (%v)", p.Client, tok.StatusCode, err)
 	}
 	if !strings.EqualFold(tokens.TokenType, "Bearer") { // RFC 6749 §5.1; OAuth libraries validate it
 		t.Fatalf("%s: token_type %q, want Bearer", p.Client, tokens.TokenType)
+	}
+	if p.AddsOfflineAccess && tokens.RefreshToken == "" { // it asked for offline_access
+		t.Fatalf("%s: no refresh_token for an offline_access request; the user would sign in again every hour", p.Client)
 	}
 	return tokens.AccessToken
 }
@@ -334,12 +348,14 @@ func firstString(vs []any) (string, bool) {
 	return s, ok
 }
 
-func pathOf(t *testing.T, v any) string {
+// onProxy returns the path of an advertised URL, which must be on the proxy's public origin: the
+// client goes wherever the URL says, so another host or scheme would not reach the proxy.
+func (e Env) onProxy(t *testing.T, v any) string {
 	t.Helper()
 	s, _ := v.(string)
 	u, err := url.Parse(s)
-	if err != nil || s == "" {
-		t.Fatalf("metadata URL %v", v)
+	if err != nil || s == "" || u.Scheme+"://"+u.Host != e.Public {
+		t.Fatalf("advertised URL %v is not on the proxy's origin %s", v, e.Public)
 	}
 	return u.Path
 }

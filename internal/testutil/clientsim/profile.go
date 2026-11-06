@@ -56,8 +56,15 @@ type Profile struct {
 	// endpoint auth method.
 	CIMDNeedsNone bool
 	// PrivateKeyJWT: the client authenticates at /token with a signed client assertion (RFC 7523)
-	// instead of as a public client.
+	// when the server offers it, instead of as a public client. The server test supports it for
+	// CIMD clients, whose document names the jwks_uri.
 	PrivateKeyJWT bool
+	// ChecksIss: the client rejects an authorization response whose iss is not the metadata issuer
+	// (RFC 9207).
+	ChecksIss bool
+	// NeedsIssSupported: the client uses its client ID only if the metadata sets
+	// authorization_response_iss_parameter_supported (RFC 9207 §3).
+	NeedsIssSupported bool
 	// SendsResource: the client sends the RFC 8707 resource parameter on /authorize and /token.
 	SendsResource bool
 	// ScopeFromServer: the client sends the challenge's scope, else the PRM's scopes_supported.

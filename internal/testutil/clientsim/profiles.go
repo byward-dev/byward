@@ -9,18 +9,20 @@ var (
 		Registration: Static, ClientID: "claude-code", RedirectURI: "http://localhost:45813/callback",
 		ProtocolVersion: "2025-11-25",
 		Discovery:       []string{"/.well-known/oauth-protected-resource"}, ASMetadata: []string{"oauth-authorization-server", "openid-configuration"},
-		UsesChallenge: false, SendsResource: false, Scope: "",
+		UsesChallenge: false, SendsResource: false, ScopeFromServer: true, ChecksIss: true,
 		Treats403AsAuthFailure: true, HeadersHelperOn401: true,
 		Facts: []Fact{
 			{"checks /.well-known/oauth-protected-resource first; the path-inserted form is not documented", "https://code.claude.com/docs/en/mcp"},
 			{"static client: --client-id, --client-secret, --callback-port; redirect http://localhost:<port>/callback", "https://code.claude.com/docs/en/mcp"},
 			{"does not send the RFC 8707 resource parameter", "anthropics/claude-code#90497 (closed not planned, 2026-10-31)"},
-			{"sends no scope when neither PRM nor the challenge names one", "anthropics/claude-code#103778 (open)"},
+			{"requests the scope the challenge or the PRM names, none when neither does (oauth.scopes overrides)", "anthropics/claude-code#103778 (open); https://code.claude.com/docs/en/mcp"},
+			{"fails a sign-in whose authorization response names an unexpected issuer", "https://code.claude.com/docs/en/mcp"},
 			{"marks the server as needing authentication on 401 or 403", "https://code.claude.com/docs/en/mcp"},
 			{"re-runs headersHelper on 401/403 (10 s timeout, no caching)", "https://code.claude.com/docs/en/mcp"},
 			{"a refused tools/call: one call, no retry, no discovery; the model sees the body text", "runtime test, Claude Code 2.1.142, 2026-11-06"},
 			{"authorization server metadata path order", Assumed},
 			{"sends MCP revision 2025-11-25 in initialize", Assumed},
+			{"refuses an authorization server whose code_challenge_methods_supported lacks S256 (MCP authorization MUST)", Assumed},
 		},
 	}
 
@@ -41,8 +43,10 @@ var (
 			{"sends resource", Assumed},
 			{"requests the challenge's scope, else the PRM's scopes_supported, and appends offline_access when the authorization server lists it", "https://claude.com/docs/connectors/building/authentication"},
 			{"403 and insufficient_scope handling", Assumed},
+			{"checks the redirect's iss (RFC 9207)", Assumed},
 			{"authorization server metadata path order", Assumed},
 			{"sends MCP revision 2025-11-25 in initialize", Assumed},
+			{"refuses an authorization server whose code_challenge_methods_supported lacks S256 (MCP authorization MUST)", Assumed},
 		},
 	}
 
@@ -60,7 +64,9 @@ var (
 			{"treats 401 and 403 as auth errors: new token, then a forced new registration, up to 3 sends", "microsoft/vscode 1.145.2 extHostMcp.ts:871,883-888,1038-1039"},
 			{"redirect http://127.0.0.1:33418/ (desktop)", "https://vscode.dev/oauth/client-metadata.json"},
 			{"PRM and authorization server metadata path order", Assumed},
+			{"checks the redirect's iss (RFC 9207)", Assumed},
 			{"sends MCP revision 2025-11-25 in initialize", Assumed},
+			{"refuses an authorization server whose code_challenge_methods_supported lacks S256 (MCP authorization MUST)", Assumed},
 		},
 	}
 )
@@ -71,7 +77,7 @@ var ChatGPT = Profile{
 	Client: "ChatGPT", Version: "docs read 2026-11-06", Cell: "ChatGPT × CIMD",
 	Registration: CIMD, Document: "chatgpt", RedirectURI: "https://chatgpt.com/connector_platform_oauth_redirect", ProtocolVersion: "2025-11-25",
 	Discovery: []string{"/.well-known/oauth-protected-resource"}, ASMetadata: []string{"oauth-authorization-server", "openid-configuration"},
-	UsesChallenge: true, PrivateKeyJWT: true, SendsResource: true, ScopeFromServer: true,
+	UsesChallenge: true, PrivateKeyJWT: true, ChecksIss: true, NeedsIssSupported: true, SendsResource: true, ScopeFromServer: true,
 	Facts: []Fact{
 		{"prefers CIMD; the stable client ID https://chatgpt.com/oauth/client.json needs iss support and an issuer equal to the PRM's authorization_servers entry", "https://developers.openai.com/plugins/build/auth"},
 		{"its document's legacy token_endpoint_auth_method prefers private_key_jwt (RS256, jwks_uri https://chatgpt.com/oauth/jwks.json); ChatGPT picks from the intersection with the server's methods", "https://developers.openai.com/plugins/build/auth; https://chatgpt.com/oauth/client.json"},
@@ -81,9 +87,10 @@ var ChatGPT = Profile{
 		{"rejects an authorization response without the advertised iss", "https://developers.openai.com/plugins/build/auth"},
 		{"order of the two authorization server metadata paths", Assumed},
 		{"requests offline_access", Assumed},
-		{"requests the scope the server advertises (scopes_supported \"helps ChatGPT explain the permissions\")", "https://developers.openai.com/plugins/build/auth"},
+		{"requests the challenge's scope, else the PRM's scopes_supported", Assumed},
 		{"sends MCP revision 2025-11-25 in initialize", Assumed},
 		{"403 and insufficient_scope handling", Assumed},
+		{"refuses an authorization server whose code_challenge_methods_supported lacks S256 (MCP authorization MUST)", Assumed},
 		{"the simulator signs the assertion with a test key served at the document's jwks_uri; the document itself is the captured one", "test setup"},
 	},
 }

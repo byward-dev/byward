@@ -83,12 +83,13 @@ func newSimProxy(t *testing.T, p clientsim.Profile) (clientsim.Env, clientsim.Cr
 		if p.PrivateKeyJWT { // only the client holds its private key: serve a test key at the document's jwks_uri
 			var published struct {
 				JWKSURI string `json:"jwks_uri"`
+				Alg     string `json:"token_endpoint_auth_signing_alg"`
 			}
-			if err := json.Unmarshal(doc.Body, &published); err != nil || published.JWKSURI == "" {
-				t.Fatalf("%s's document has no jwks_uri: %v", p.Client, err)
+			if err := json.Unmarshal(doc.Body, &published); err != nil || published.JWKSURI == "" || published.Alg == "" {
+				t.Fatalf("%s's document has no jwks_uri or signing alg: %v", p.Client, err)
 			}
-			creds.Signer = fakeidp.NewCertificate(t)
-			jwks, err := json.Marshal(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &creds.Signer.Key.PublicKey, KeyID: "sim", Algorithm: "RS256", Use: "sig"}}})
+			creds.Signer, creds.KeyID, creds.Alg = fakeidp.NewCertificate(t), "sim", published.Alg
+			jwks, err := json.Marshal(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &creds.Signer.Key.PublicKey, KeyID: creds.KeyID, Algorithm: creds.Alg, Use: "sig"}}})
 			if err != nil {
 				t.Fatal(err)
 			}
