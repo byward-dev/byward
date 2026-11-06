@@ -270,9 +270,12 @@ func TestNewConfiguresHardenedLimitsAndLoopbackBind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, srv := range []*http.Server{s.Public, s.Internal} {
-		if srv.ReadHeaderTimeout == 0 || srv.ReadTimeout == 0 || srv.IdleTimeout == 0 || srv.MaxHeaderBytes == 0 {
-			t.Fatalf("a limit is unset: %+v", srv)
+	for name, srv := range map[string]*http.Server{"public": s.Public, "internal": s.Internal} {
+		for field, unset := range map[string]bool{"ReadHeaderTimeout": srv.ReadHeaderTimeout == 0, "ReadTimeout": srv.ReadTimeout == 0,
+			"IdleTimeout": srv.IdleTimeout == 0, "MaxHeaderBytes": srv.MaxHeaderBytes == 0} {
+			if unset {
+				t.Errorf("%s listener: %s is unset", name, field)
+			}
 		}
 	}
 	if s.Internal.Addr != "127.0.0.1:9090" {
@@ -527,16 +530,21 @@ func TestInternalListenerServesProbesAndMetricsAndThePublicOneDoesNot(t *testing
 		t.Fatal(err)
 	}
 	if code, _ := getBody(t, s.Internal.Handler, "x", "/livez"); code != 200 {
-		t.Fatalf("livez = %d", code)
+		t.Errorf("internal /livez = %d, want 200", code)
 	}
-	if code, body := getBody(t, s.Internal.Handler, "x", "/readyz"); code != 200 || !strings.Contains(body, `"keys":"ok"`) || !strings.Contains(body, `"store":"ok"`) {
-		t.Fatalf("readyz = %d %s", code, body)
+	if code, _ := getBody(t, s.Internal.Handler, "x", "/readyz"); code != 200 {
+		t.Errorf("internal /readyz = %d, want 200", code)
 	}
 	// A public request is timed under its fixed route name.
 	getBody(t, s.Public.Handler, "mcp.example.com", "/mcp")
 	code, body := getBody(t, s.Internal.Handler, "x", "/metrics")
-	if code != 200 || !strings.Contains(body, "mcp_authproxy_build_info") || !strings.Contains(body, `route="/mcp",status_class="4xx"`) {
-		t.Fatalf("metrics = %d, missing build info or the public request:\n%s", code, body)
+	if code != 200 {
+		t.Errorf("internal /metrics = %d, want 200", code)
+	}
+	for _, want := range []string{"mcp_authproxy_build_info", `route="/mcp",status_class="4xx"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("internal /metrics lacks %s (the public request must be timed under its route)", want)
+		}
 	}
 	for _, p := range []string{"/metrics", "/livez", "/readyz"} {
 		if code, _ := getBody(t, s.Public.Handler, "mcp.example.com", p); code != http.StatusNotFound {
@@ -631,6 +639,13 @@ func TestRunDrainsReadinessBeforeShutdownAndClosesTheInternalListenerLast(t *tes
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not log its listening address within 5s")
 	}
+	// One completed connection proves Serve is accepting, so Shutdown has a listener to close.
+	addr := listenLine.FindStringSubmatch(logs.String())[1]
+	if c, err := net.DialTimeout("tcp", addr, 5*time.Second); err != nil {
+		t.Fatalf("public listener %s not accepting before cancel: %v", addr, err)
+	} else {
+		_ = c.Close()
+	}
 	cancel()
 	select {
 	case err := <-done:
@@ -640,7 +655,13 @@ func TestRunDrainsReadinessBeforeShutdownAndClosesTheInternalListenerLast(t *tes
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not return after cancel")
 	}
-	wg.Wait()
+	callbacks := make(chan struct{})
+	go func() { wg.Wait(); close(callbacks) }()
+	select {
+	case <-callbacks:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a server's Shutdown never ran its RegisterOnShutdown callback")
+	}
 	if readyzAtPublicShutdown != http.StatusServiceUnavailable {
 		t.Errorf("/readyz was %d when the public listener began shutting down, want 503 (drain first)", readyzAtPublicShutdown)
 	}

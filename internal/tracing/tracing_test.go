@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -59,7 +60,8 @@ func TestNoTelemetryConnectionWhenOTELIsUnset(t *testing.T) {
 	if err != nil || enabled {
 		t.Fatalf("Setup with OTEL_* unset: enabled=%v err=%v, want off and no error", enabled, err)
 	}
-	if otel.GetTracerProvider() != tp || otel.GetTextMapPropagator() != prop {
+	// Propagators may be uncomparable (composites are slices), so compare the headers they write.
+	if otel.GetTracerProvider() != tp || !slices.Equal(otel.GetTextMapPropagator().Fields(), prop.Fields()) {
 		t.Fatal("Setup with OTEL_* unset replaced the global tracer provider or propagator")
 	}
 	if got := forwarded(t); got != inbound {
