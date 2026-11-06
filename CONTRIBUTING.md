@@ -38,7 +38,18 @@ Only submit work you have the right to contribute under Apache-2.0.
 5. Commit with a [Conventional Commit](https://www.conventionalcommits.org/en/v1.0.0/) message:
    `feat:`, `fix:`, `docs:`, `chore:`, `test:`. Mark breaking changes with `!` or a
    `BREAKING CHANGE:` footer.
-6. Open a pull request and fill in the template. The PR title is the squash-commit message, so it
+6. **Review your own diff** against `origin/main` before asking for review, three ways, and repeat
+   each until it finds nothing:
+   - **runtime:** run the changed code yourself, including edge cases (empty input, limits, errors);
+   - **structure:** check the SOLID structure (one responsibility per type, dependencies on
+     interfaces);
+   - **tests:** check test quality (behaviour not implementation, names, determinism, coverage of
+     the change).
+
+   Coding agents do this with the `/sweep-runtime`, `/sweep-solid` and `/sweep-tests` skills; humans
+   without them do the equivalent review by hand. List what each review found and fixed (or "no
+   findings") in the pull request.
+7. Open a pull request and fill in the template. The PR title is the squash-commit message, so it
    must be a Conventional Commit too.
 
 ## Test policy

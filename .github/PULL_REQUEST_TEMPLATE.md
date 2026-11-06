@@ -21,6 +21,14 @@
 - [ ] Public interface (config keys, assertion claims, audit schema, metrics, log fields, image paths) is unchanged, **or** the change is listed as breaking or deprecated
 - [ ] Docs are updated for anything an operator, user or upstream author sees
 
+### Sweeps (on the diff against `origin/main`, each repeated until clean)
+
+- [ ] Runtime: changed code run directly, including edge cases (`/sweep-runtime`)
+- [ ] SOLID structure (`/sweep-solid`)
+- [ ] Test quality (`/sweep-tests`)
+
+Findings and fixes per sweep (or "no findings"):
+
 ### AI assistance
 
 - [ ] AI help is disclosed with `Co-Authored-By` trailers, and I understand and can defend every line (CONTRIBUTING.md)
