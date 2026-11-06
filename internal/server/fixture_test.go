@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/corker/mcp-authproxy/internal/config"
+	"github.com/byward-dev/byward/internal/config"
 )
 
 // fixtureTenant is the Entra tenant authEnv configures.
@@ -33,19 +33,19 @@ func authEnv(t testing.TB) []string {
 	write(filepath.Join(dir, "clients.json"), `{"clients":[{"client_id":"test-app","client_name":"Test app","token_endpoint_auth_method":"none","redirect_uris":["http://127.0.0.1/callback"]}]}`)
 	write(filepath.Join(dir, "secret"), "s3cret-entra")
 	return []string{
-		"MCP_AUTHPROXY_ENTRA_TENANT=" + fixtureTenant,
-		"MCP_AUTHPROXY_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002",
-		"MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE=" + filepath.Join(dir, "secret"),
-		"MCP_AUTHPROXY_KEYS_DIR=" + keys,
-		"MCP_AUTHPROXY_STATIC_CLIENTS_FILE=" + filepath.Join(dir, "clients.json"),
-		"MCP_AUTHPROXY_STORE_DIR=" + filepath.Join(dir, "state"), // the counter file defaults to dir/store-writes
+		"BYWARD_ENTRA_TENANT=" + fixtureTenant,
+		"BYWARD_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002",
+		"BYWARD_ENTRA_CLIENT_SECRET_FILE=" + filepath.Join(dir, "secret"),
+		"BYWARD_KEYS_DIR=" + keys,
+		"BYWARD_STATIC_CLIENTS_FILE=" + filepath.Join(dir, "clients.json"),
+		"BYWARD_STORE_DIR=" + filepath.Join(dir, "state"), // the counter file defaults to dir/store-writes
 	}
 }
 
 // loadConfig loads authenticated-mode settings for publicURL plus extra env entries.
 func loadConfig(t testing.TB, publicURL string, extra ...string) *config.Config {
 	t.Helper()
-	env := append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL="+publicURL, "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp")
+	env := append(authEnv(t), "BYWARD_PUBLIC_URL="+publicURL, "BYWARD_UPSTREAM_URL=http://u/mcp")
 	cfg, _, err := config.Load(nil, append(env, extra...), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)

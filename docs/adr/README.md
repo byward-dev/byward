@@ -1,6 +1,6 @@
 # Architecture decision records
 
-Decisions for mcp-authproxy, one file each. The backlog index is [`docs/features.md`](../features.md);
+Decisions for byward, one file each. The backlog index is [`docs/features.md`](../features.md);
 each feature (F1–F22) is a GitHub issue and gets an ADR once grilled with the research procedure in
 [`docs/quality-lenses.md`](../quality-lenses.md).
 
@@ -33,6 +33,7 @@ each feature (F1–F22) is a GitHub issue and gets an ADR once grilled with the 
 | [0025](0025-upstream-refusal.md) | Upstream refusals are answered as JSON-RPC responses | F1 | — |
 | [0026](0026-idp-adapters-go-jose-only.md) | IdP adapters depend only on go-jose | F9 | — |
 | [0027](0027-insecure-no-auth.md) | `--insecure-no-auth`, a loopback-only mode without authentication | F3 | — |
+| [0028](0028-product-name-byward.md) | The product is named byward | — | — |
 
 ## Writing a new ADR
 

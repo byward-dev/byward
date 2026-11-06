@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/corker/mcp-authproxy/internal/testutil/fakeupstream"
+	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 )
 
 const toolsCall = `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"ping"}}`

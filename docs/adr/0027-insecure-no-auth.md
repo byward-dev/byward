@@ -40,7 +40,7 @@ Evidence (research ANON-mode.md; runtime 2026-11-06):
 
 ## Decision
 
-1. **`--insecure-no-auth`** (`MCP_AUTHPROXY_INSECURE_NO_AUTH`) serves the upstream with no
+1. **`--insecure-no-auth`** (`BYWARD_INSECURE_NO_AUTH`) serves the upstream with no
    authentication: no token check, no protected-resource metadata, no 401 challenge, no broker
    endpoints.
 2. **Startup refuses** unless:
@@ -65,7 +65,7 @@ Evidence (research ANON-mode.md; runtime 2026-11-06):
    - inside a container, the `docker run -p 127.0.0.1:PORT:PORT …` command;
    - the next step towards sign-in.
 5. **`http` is allowed for the loopback public URL** without `--dev`.
-6. **The `Origin` 403 body names the fix** (`MCP_AUTHPROXY_ALLOWED_ORIGINS`), since clients read a
+6. **The `Origin` 403 body names the fix** (`BYWARD_ALLOWED_ORIGINS`), since clients read a
    403 as "needs auth".
 7. _Amends ADR-0005 §2:_ an "off" mode exists only inside these fences.
 8. _Amends ADR-0024 §4a:_ MCP conformance `server` runs against the binary in this mode at

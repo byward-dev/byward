@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/store"
+	"github.com/byward-dev/byward/internal/store"
 )
 
 // t0 is a fixed instant; every time in the suite is relative to it.

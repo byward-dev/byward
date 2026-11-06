@@ -46,10 +46,10 @@ var (
 // proxyEnv is the proxy's own environment as the tests see it: two allowlisted variables and
 // two that must never reach an upstream process.
 var proxyEnv = map[string]string{
-	"PATH":                      "/usr/bin:/bin",
-	"LANG":                      "C.UTF-8",
-	"MCP_AUTHPROXY_SIGNING_KEY": "proxy-secret",
-	"AWS_SECRET_ACCESS_KEY":     "cloud-secret",
+	"PATH":                  "/usr/bin:/bin",
+	"LANG":                  "C.UTF-8",
+	"BYWARD_SIGNING_KEY":    "proxy-secret",
+	"AWS_SECRET_ACCESS_KEY": "cloud-secret",
 }
 
 func lookup(env map[string]string) func(string) (string, bool) {

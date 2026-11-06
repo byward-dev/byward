@@ -14,7 +14,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/corker/mcp-authproxy/internal/ratelimit"
+	"github.com/byward-dev/byward/internal/ratelimit"
 )
 
 // registry is every setting the proxy reads, in the order the effective configuration is printed.
@@ -34,7 +34,7 @@ var registry = []Setting{
 	{Name: "entra-tenant", Auth: true, Help: "Entra tenant ID (a GUID) of the IdP app"},
 	{Name: "entra-client-id", Auth: true, Help: "application (client) ID of the IdP app registration"},
 	{Name: "entra-client-secret", Auth: true, Secret: true, Help: "client secret of the IdP app"},
-	{Name: "data-dir", Auth: true, Default: "/var/lib/mcp-authproxy", Help: "data directory, an absolute path; the keys, clients and store settings default to paths in it (ADR-0007 §6, docs/how-to/state.md)"},
+	{Name: "data-dir", Auth: true, Default: "/var/lib/byward", Help: "data directory, an absolute path; the keys, clients and store settings default to paths in it (ADR-0007 §6, docs/how-to/state.md)"},
 	{Name: "keys-dir", Auth: true, Help: "directory of sealing keys; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md)"},
 	{Name: "static-clients-file", Auth: true, Help: "JSON file of pre-registered MCP clients; default: clients.json in the data directory (docs/reference/static-clients.md)"},
 	{Name: "gate-tenants", Auth: true, Help: "access gate: comma-separated Entra tenant IDs allowed to sign in (docs/how-to/access-gate.md)"},
@@ -152,20 +152,20 @@ func validate(v *Values, container bool) (*Config, error) {
 		errs = append(errs, err)
 	} else {
 		if err := asciiHost(c.PublicURL.Hostname()); err != nil {
-			errs = append(errs, errorf("MCP_AUTHPROXY_PUBLIC_URL: %v", err))
+			errs = append(errs, errorf("BYWARD_PUBLIC_URL: %v", err))
 		}
 		if c.PublicURL.Path == "" || strings.HasSuffix(c.PublicURL.Path, "/") {
-			errs = append(errs, errorf("MCP_AUTHPROXY_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://%s/mcp", c.PublicURL.Host))
+			errs = append(errs, errorf("BYWARD_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://%s/mcp", c.PublicURL.Host))
 		}
 		if c.PublicURL.RawQuery != "" || c.PublicURL.Fragment != "" {
-			errs = append(errs, errorf("MCP_AUTHPROXY_PUBLIC_URL: must not have a query or fragment"))
+			errs = append(errs, errorf("BYWARD_PUBLIC_URL: must not have a query or fragment"))
 		}
 		if c.PublicURL.Scheme == "http" {
 			switch {
 			case !isLoopback(c.PublicURL.Hostname()):
-				errs = append(errs, errorf("MCP_AUTHPROXY_PUBLIC_URL: must use https (http is allowed only for loopback hosts with --dev)"))
+				errs = append(errs, errorf("BYWARD_PUBLIC_URL: must use https (http is allowed only for loopback hosts with --dev)"))
 			case !c.Dev && !c.NoAuth:
-				errs = append(errs, errorf("MCP_AUTHPROXY_PUBLIC_URL: http on loopback needs --dev"))
+				errs = append(errs, errorf("BYWARD_PUBLIC_URL: http on loopback needs --dev"))
 			default:
 				c.Relaxations = append(c.Relaxations, "http public URL on loopback")
 			}
@@ -177,19 +177,19 @@ func validate(v *Values, container bool) (*Config, error) {
 	}
 
 	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
-		errs = append(errs, errorf("MCP_AUTHPROXY_LISTEN: want host:port, got %q", c.Listen))
+		errs = append(errs, errorf("BYWARD_LISTEN: want host:port, got %q", c.Listen))
 	}
 	if c.InternalListen != "" {
 		if _, _, err := net.SplitHostPort(c.InternalListen); err != nil {
-			errs = append(errs, errorf("MCP_AUTHPROXY_INTERNAL_LISTEN: want host:port or empty, got %q", c.InternalListen))
+			errs = append(errs, errorf("BYWARD_INTERNAL_LISTEN: want host:port or empty, got %q", c.InternalListen))
 		} else if c.InternalListen == c.Listen && !strings.HasSuffix(c.Listen, ":0") {
-			errs = append(errs, errorf("MCP_AUTHPROXY_INTERNAL_LISTEN: must differ from MCP_AUTHPROXY_LISTEN; metrics and probes never share the public listener"))
+			errs = append(errs, errorf("BYWARD_INTERNAL_LISTEN: must differ from BYWARD_LISTEN; metrics and probes never share the public listener"))
 		}
 	}
 	for _, o := range splitList(v.get("allowed-origins")) {
 		n, err := normalizeOrigin(o)
 		if err != nil {
-			errs = append(errs, errorf("MCP_AUTHPROXY_ALLOWED_ORIGINS: %v", err))
+			errs = append(errs, errorf("BYWARD_ALLOWED_ORIGINS: %v", err))
 			continue
 		}
 		c.AllowedOrigins = append(c.AllowedOrigins, n)
@@ -204,20 +204,20 @@ func validate(v *Values, container bool) (*Config, error) {
 	}
 	for _, h := range splitList(v.get("allowed-hosts")) {
 		if strings.ContainsAny(h, "/ ") {
-			errs = append(errs, errorf("MCP_AUTHPROXY_ALLOWED_HOSTS: %q is not a host[:port]", h))
+			errs = append(errs, errorf("BYWARD_ALLOWED_HOSTS: %q is not a host[:port]", h))
 			continue
 		}
 		if err := asciiHost(h); err != nil {
-			errs = append(errs, errorf("MCP_AUTHPROXY_ALLOWED_HOSTS: %v", err))
+			errs = append(errs, errorf("BYWARD_ALLOWED_HOSTS: %v", err))
 			continue
 		}
 		c.AllowedHosts = append(c.AllowedHosts, strings.ToLower(h))
 	}
 	if c.LogFormat != "json" && c.LogFormat != "text" {
-		errs = append(errs, errorf("MCP_AUTHPROXY_LOG_FORMAT: want json or text, got %q", c.LogFormat))
+		errs = append(errs, errorf("BYWARD_LOG_FORMAT: want json or text, got %q", c.LogFormat))
 	}
 	if c.Scope == "" || strings.ContainsAny(c.Scope, " \"\\") {
-		errs = append(errs, errorf("MCP_AUTHPROXY_SCOPE: want one scope token, got %q", c.Scope))
+		errs = append(errs, errorf("BYWARD_SCOPE: want one scope token, got %q", c.Scope))
 	}
 	if d := c.ResourceDocumentation; d != "" {
 		if _, err := parseURL("resource-documentation", d); err != nil {
@@ -238,7 +238,7 @@ func validate(v *Values, container bool) (*Config, error) {
 				if s == "entra-client-secret" {
 					env += "_FILE"
 				}
-				errs = append(errs, errorf("%s is required (or set MCP_AUTHPROXY_INSECURE_NO_AUTH to try the proxy without sign-in)", env))
+				errs = append(errs, errorf("%s is required (or set BYWARD_INSECURE_NO_AUTH to try the proxy without sign-in)", env))
 			}
 		}
 		c.GateTenants, c.GateRoles, c.GateGroups = splitList(v.get("gate-tenants")), splitList(v.get("gate-roles")), splitList(v.get("gate-groups"))
@@ -255,7 +255,7 @@ func validate(v *Values, container bool) (*Config, error) {
 		errs = append(errs, c.paths(v)...)
 		errs = append(errs, c.refreshGrace(v)...)
 		if t := c.EntraTenant; t != "" && !isGUID(t) {
-			errs = append(errs, errorf("MCP_AUTHPROXY_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000, got %q", t))
+			errs = append(errs, errorf("BYWARD_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000, got %q", t))
 		}
 	}
 	if len(errs) > 0 {
@@ -296,7 +296,7 @@ func (c *Config) paths(v *Values) []error {
 	var errs []error
 	c.DataDir = v.get("data-dir")
 	if !filepath.IsAbs(c.DataDir) {
-		return []error{errorf("MCP_AUTHPROXY_DATA_DIR: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got %q", c.DataDir)}
+		return []error{errorf("BYWARD_DATA_DIR: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got %q", c.DataDir)}
 	}
 	or := func(name, def string) string {
 		if p := v.get(name); p != "" {
@@ -306,7 +306,7 @@ func (c *Config) paths(v *Values) []error {
 	}
 	c.KeysDir, c.StaticClientsFile, c.StoreDir = or("keys-dir", "keys"), or("static-clients-file", "clients.json"), or("store-dir", "state")
 	if !filepath.IsAbs(c.StoreDir) {
-		errs = append(errs, errorf("MCP_AUTHPROXY_STORE_DIR: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got %q", c.StoreDir))
+		errs = append(errs, errorf("BYWARD_STORE_DIR: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got %q", c.StoreDir))
 	}
 	c.StoreCounterFile = v.get("store-counter-file")
 	if c.StoreCounterFile == "" {
@@ -315,9 +315,9 @@ func (c *Config) paths(v *Values) []error {
 	}
 	switch {
 	case !filepath.IsAbs(c.StoreCounterFile):
-		errs = append(errs, errorf("MCP_AUTHPROXY_STORE_COUNTER_FILE: want an absolute path, got %q (the default is derived from MCP_AUTHPROXY_KEYS_DIR, so set an absolute keys directory or this setting)", c.StoreCounterFile))
+		errs = append(errs, errorf("BYWARD_STORE_COUNTER_FILE: want an absolute path, got %q (the default is derived from BYWARD_KEYS_DIR, so set an absolute keys directory or this setting)", c.StoreCounterFile))
 	case filepath.IsAbs(c.StoreDir) && within(c.StoreDir, c.StoreCounterFile):
-		errs = append(errs, errorf("MCP_AUTHPROXY_STORE_COUNTER_FILE: %s is inside MCP_AUTHPROXY_STORE_DIR %s, so a restored backup of the state directory would restore it too and go undetected; keep the keys directory outside the state directory, or set this to a path outside it", c.StoreCounterFile, c.StoreDir))
+		errs = append(errs, errorf("BYWARD_STORE_COUNTER_FILE: %s is inside BYWARD_STORE_DIR %s, so a restored backup of the state directory would restore it too and go undetected; keep the keys directory outside the state directory, or set this to a path outside it", c.StoreCounterFile, c.StoreDir))
 	}
 	return errs
 }
@@ -327,9 +327,9 @@ func (c *Config) refreshGrace(v *Values) []error {
 	grace, err := time.ParseDuration(v.get("refresh-grace"))
 	switch {
 	case err != nil:
-		return []error{errorf("MCP_AUTHPROXY_REFRESH_GRACE: want a duration such as 30s, got %q", v.get("refresh-grace"))}
+		return []error{errorf("BYWARD_REFRESH_GRACE: want a duration such as 30s, got %q", v.get("refresh-grace"))}
 	case grace < 0 || grace > maxRefreshGrace:
-		return []error{errorf("MCP_AUTHPROXY_REFRESH_GRACE: want 0s to 60s, got %s", grace)}
+		return []error{errorf("BYWARD_REFRESH_GRACE: want 0s to 60s, got %s", grace)}
 	}
 	c.RefreshGrace = grace
 	return nil
@@ -415,15 +415,15 @@ func virtual(readFile readFileFunc, name string) bool {
 // address is loopback unless the proxy runs in a container, the Host and Origin allowlists stay
 // loopback-only, and no authentication setting is present.
 func checkNoAuth(c *Config, v *Values) []error {
-	const env = "MCP_AUTHPROXY_INSECURE_NO_AUTH"
+	const env = "BYWARD_INSECURE_NO_AUTH"
 	var errs []error
 	if !isLoopback(c.PublicURL.Hostname()) {
-		errs = append(errs, errorf("%s: MCP_AUTHPROXY_PUBLIC_URL must be a loopback URL, e.g. http://localhost:8080/mcp", env))
+		errs = append(errs, errorf("%s: BYWARD_PUBLIC_URL must be a loopback URL, e.g. http://localhost:8080/mcp", env))
 	}
 	host, port, err := net.SplitHostPort(c.Listen)
 	switch {
 	case err != nil:
-		errs = append(errs, errorf("%s: MCP_AUTHPROXY_LISTEN must be a loopback host:port such as 127.0.0.1:8080", env))
+		errs = append(errs, errorf("%s: BYWARD_LISTEN must be a loopback host:port such as 127.0.0.1:8080", env))
 	case isLoopback(host):
 	case c.InContainer:
 		// The host port is the public URL's; the container port is the listen address's.
@@ -434,16 +434,16 @@ func checkNoAuth(c *Config, v *Values) []error {
 		c.Relaxations = append(c.Relaxations, fmt.Sprintf(
 			"listening on %s inside a container: publish the port on loopback only, e.g. docker run -p 127.0.0.1:%s:%s; anyone who can reach the published port can use the upstream", c.Listen, hostPort, port))
 	default:
-		errs = append(errs, errorf("%s: MCP_AUTHPROXY_LISTEN must be a loopback address such as 127.0.0.1:8080 (non-loopback only inside a container with its own network, not --network host)", env))
+		errs = append(errs, errorf("%s: BYWARD_LISTEN must be a loopback address such as 127.0.0.1:8080 (non-loopback only inside a container with its own network, not --network host)", env))
 	}
 	for _, h := range c.AllowedHosts {
 		if hn, _, err := net.SplitHostPort(h); !isLoopback(strings.Trim(h, "[]")) && (err != nil || !isLoopback(hn)) {
-			errs = append(errs, errorf("%s: MCP_AUTHPROXY_ALLOWED_HOSTS may only list loopback hosts, got %q", env, h))
+			errs = append(errs, errorf("%s: BYWARD_ALLOWED_HOSTS may only list loopback hosts, got %q", env, h))
 		}
 	}
 	for _, o := range c.AllowedOrigins {
 		if u, err := url.Parse(o); err != nil || !isLoopback(u.Hostname()) {
-			errs = append(errs, errorf("%s: MCP_AUTHPROXY_ALLOWED_ORIGINS may only list loopback origins, got %q", env, o))
+			errs = append(errs, errorf("%s: BYWARD_ALLOWED_ORIGINS may only list loopback origins, got %q", env, o))
 		}
 	}
 	for _, val := range v.Effective() {
@@ -496,11 +496,11 @@ func parseRateLimits(raw string) (map[string]int, error) {
 		name, val, ok := strings.Cut(item, "=")
 		name = strings.TrimSpace(name)
 		if _, known := out[name]; !ok || !known {
-			return nil, errorf("MCP_AUTHPROXY_OAUTH_RATE_LIMITS: %q is not endpoint=per-minute for one of %s", item, strings.Join(ratelimit.Endpoints, ", "))
+			return nil, errorf("BYWARD_OAUTH_RATE_LIMITS: %q is not endpoint=per-minute for one of %s", item, strings.Join(ratelimit.Endpoints, ", "))
 		}
 		n, err := strconv.Atoi(strings.TrimSpace(val))
 		if err != nil || n < minRateLimit || n > maxRateLimit {
-			return nil, errorf("MCP_AUTHPROXY_OAUTH_RATE_LIMITS: %s must be a whole number from %d to %d per minute, got %q", name, minRateLimit, maxRateLimit, val)
+			return nil, errorf("BYWARD_OAUTH_RATE_LIMITS: %s must be a whole number from %d to %d per minute, got %q", name, minRateLimit, maxRateLimit, val)
 		}
 		out[name] = n
 	}
@@ -514,7 +514,7 @@ func parseProxies(raw string) ([]netip.Prefix, error) {
 		if err != nil {
 			a, aerr := netip.ParseAddr(item)
 			if aerr != nil {
-				return nil, errorf("MCP_AUTHPROXY_TRUSTED_PROXIES: %q is not a CIDR or an IP address", item)
+				return nil, errorf("BYWARD_TRUSTED_PROXIES: %q is not a CIDR or an IP address", item)
 			}
 			p = netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen())
 		}
@@ -585,7 +585,7 @@ func IsHelp(err error) bool { return errors.Is(err, errHelp) }
 // Usage writes the generated settings reference.
 func Usage() string {
 	var b strings.Builder
-	b.WriteString("Usage: mcp-authproxy [flags]\n\nSettings (flag / env, default):\n")
+	b.WriteString("Usage: byward [flags]\n\nSettings (flag / env, default):\n")
 	for _, s := range registry {
 		flagName := "--" + s.Name
 		env := s.Env()
@@ -608,7 +608,7 @@ func Usage() string {
 func reference() string {
 	var b strings.Builder
 	b.WriteString("# Settings reference\n\nGenerated from the settings registry (`internal/config`); do not edit by hand.\n")
-	b.WriteString("Run `MCP_AUTHPROXY_UPDATE_REFERENCE=1 go test ./internal/config/` after changing a setting.\n\n")
+	b.WriteString("Run `BYWARD_UPDATE_REFERENCE=1 go test ./internal/config/` after changing a setting.\n\n")
 	b.WriteString("Precedence: flag > environment > default. Secrets are read only from files.\n\n")
 	b.WriteString("| Flag | Environment | Default | Description |\n|---|---|---|---|\n")
 	for _, s := range registry {

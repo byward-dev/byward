@@ -41,12 +41,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MISE_TASK_RUN_AUTO_INSTALL: "false"
       - id: image
-        run: echo "digest=$(sh scripts/image-digest.sh "ghcr.io/corker/mcp-authproxy:${GITHUB_REF_NAME}")" >> "$GITHUB_OUTPUT"
+        run: echo "digest=$(sh scripts/image-digest.sh "ghcr.io/byward-dev/byward:${GITHUB_REF_NAME}")" >> "$GITHUB_OUTPUT"
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-checksums: dist/checksums.txt
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-name: ghcr.io/corker/mcp-authproxy
+          subject-name: ghcr.io/byward-dev/byward
           subject-digest: ${{ steps.image.outputs.digest }}
           push-to-registry: true

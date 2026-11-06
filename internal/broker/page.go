@@ -5,7 +5,7 @@ import (
 	"html/template"
 	"net/http"
 
-	"github.com/corker/mcp-authproxy/internal/logging"
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // The broker's HTML pages: shared headers, the stylesheet, and the error page.

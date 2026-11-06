@@ -16,8 +16,8 @@ import (
 // serveEnv is what a test run that serves needs besides auth: the URLs, the public listener and an
 // ephemeral internal listener (the default 127.0.0.1:9090 may be taken on the test host).
 func serveEnv(publicURL, listen string) []string {
-	return []string{"MCP_AUTHPROXY_PUBLIC_URL=" + publicURL, "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp",
-		"MCP_AUTHPROXY_LISTEN=" + listen, "MCP_AUTHPROXY_INTERNAL_LISTEN=127.0.0.1:0"}
+	return []string{"BYWARD_PUBLIC_URL=" + publicURL, "BYWARD_UPSTREAM_URL=http://u/mcp",
+		"BYWARD_LISTEN=" + listen, "BYWARD_INTERNAL_LISTEN=127.0.0.1:0"}
 }
 
 func runWith(args []string, env ...string) (int, string, string) {
@@ -43,22 +43,22 @@ func authEnv(t *testing.T) []string {
 			t.Fatal(err)
 		}
 	}
-	return []string{"MCP_AUTHPROXY_ENTRA_TENANT=00000000-0000-0000-0000-000000000001", "MCP_AUTHPROXY_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002",
-		"MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE=" + filepath.Join(dir, "secret"), "MCP_AUTHPROXY_KEYS_DIR=" + keys,
-		"MCP_AUTHPROXY_STATIC_CLIENTS_FILE=" + filepath.Join(dir, "clients.json"),
-		"MCP_AUTHPROXY_STORE_DIR=" + filepath.Join(dir, "state")}
+	return []string{"BYWARD_ENTRA_TENANT=00000000-0000-0000-0000-000000000001", "BYWARD_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002",
+		"BYWARD_ENTRA_CLIENT_SECRET_FILE=" + filepath.Join(dir, "secret"), "BYWARD_KEYS_DIR=" + keys,
+		"BYWARD_STATIC_CLIENTS_FILE=" + filepath.Join(dir, "clients.json"),
+		"BYWARD_STORE_DIR=" + filepath.Join(dir, "state")}
 }
 
 func TestConfigErrorExitCode(t *testing.T) {
-	code, _, stderr := runWith(nil, "MCP_AUTHPROXY_PUBLC_URL=x")
-	if code != exitConfig || !strings.Contains(stderr, "did you mean MCP_AUTHPROXY_PUBLIC_URL?") {
+	code, _, stderr := runWith(nil, "BYWARD_PUBLC_URL=x")
+	if code != exitConfig || !strings.Contains(stderr, "did you mean BYWARD_PUBLIC_URL?") {
 		t.Fatalf("code=%d stderr=%q", code, stderr)
 	}
 }
 
 func TestHelp(t *testing.T) {
 	code, stdout, _ := runWith([]string{"--help"})
-	if code != exitOK || !strings.Contains(stdout, "MCP_AUTHPROXY_UPSTREAM_URL") {
+	if code != exitOK || !strings.Contains(stdout, "BYWARD_UPSTREAM_URL") {
 		t.Fatalf("code=%d stdout=%q", code, stdout)
 	}
 }
@@ -73,8 +73,8 @@ func TestVersionJSON(t *testing.T) {
 
 func TestPrintConfigShowsSources(t *testing.T) {
 	code, stdout, _ := runWith([]string{"--print-config", "--listen", "127.0.0.1:9"},
-		append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp")...)
-	for _, want := range []string{"MCP_AUTHPROXY_LISTEN=127.0.0.1:9 (flag)", "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp (env)", "MCP_AUTHPROXY_SCOPE=mcp (default)"} {
+		append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")...)
+	for _, want := range []string{"BYWARD_LISTEN=127.0.0.1:9 (flag)", "BYWARD_PUBLIC_URL=https://m.example/mcp (env)", "BYWARD_SCOPE=mcp (default)"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("code=%d missing %q in %q", code, want, stdout)
 		}
@@ -117,7 +117,7 @@ func TestNoAuthLogsThatAuthIsOffAndTheNextStep(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var out, errb bytes.Buffer
-	code := run(ctx, nil, append([]string{"MCP_AUTHPROXY_INSECURE_NO_AUTH=true"}, serveEnv("http://localhost:8080/mcp", "127.0.0.1:0")...), &out, &errb)
+	code := run(ctx, nil, append([]string{"BYWARD_INSECURE_NO_AUTH=true"}, serveEnv("http://localhost:8080/mcp", "127.0.0.1:0")...), &out, &errb)
 	logs := errb.String()
 	if code != exitOK || !strings.Contains(logs, `"level":"WARN","msg":"development mode relaxation","relaxation":"AUTHENTICATION IS OFF: anyone who can reach http://localhost:8080/mcp`) || !strings.Contains(logs, "to require sign-in") {
 		t.Fatalf("code=%d logs=%s", code, logs)

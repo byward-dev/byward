@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/store"
+	"github.com/byward-dev/byward/internal/store"
 )
 
 var (

@@ -1,5 +1,5 @@
 name: IdP or client compatibility
-description: An identity provider or MCP client does not work with mcp-authproxy, or you verified one that does.
+description: An identity provider or MCP client does not work with byward, or you verified one that does.
 labels: [needs-triage]
 body:
   - type: markdown
@@ -24,7 +24,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: mcp-authproxy version
+      label: byward version
     validations:
       required: true
   - type: dropdown

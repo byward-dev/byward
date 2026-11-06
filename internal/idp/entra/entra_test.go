@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/idp"
-	"github.com/corker/mcp-authproxy/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
 const (

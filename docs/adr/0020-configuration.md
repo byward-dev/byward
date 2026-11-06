@@ -25,7 +25,7 @@ variables.
 
 ## Decision
 
-1. **Sources: flags > `MCP_AUTHPROXY_*` env > defaults.** Every setting has both a flag and an env
+1. **Sources: flags > `BYWARD_*` env > defaults.** Every setting has both a flag and an env
    name. No general config file; lists are comma-separated.
 2. **Secrets only from files:** `*_FILE` env or `--*-file` flags. An inline secret is accepted only
    with `--dev` and logs a warning.
@@ -38,7 +38,7 @@ variables.
    introduced, deprecation. It generates the docs reference, `--help` and `--help-config <KEY>`, and
    drives validation and redaction.
 5. **Strict startup:**
-   - an unknown `MCP_AUTHPROXY_*` variable is an error with a "did you mean" suggestion;
+   - an unknown `BYWARD_*` variable is an error with a "did you mean" suggestion;
    - a removed key is an error with a docs link;
    - a deprecated key works with a warning for at least one minor release;
    - configuration errors exit with their own code, distinct from runtime failures.
@@ -46,7 +46,7 @@ variables.
    (`default|env|flag|file`), secrets as `<redacted>`; `--print-config` prints it and exits.
 7. **`check --offline`** validates the configuration without network access; `doctor` adds the network
    checks (F20).
-8. **IdP presets by name** (`MCP_AUTHPROXY_IDP=entra`). A test keeps the Entra quickstart at five or
+8. **IdP presets by name** (`BYWARD_IDP=entra`). A test keeps the Entra quickstart at five or
    fewer required keys. `init entra` prints the `az` commands and a minimal env file; it never runs
    `az` (ADR-0012).
 9. **No hot reload;** a restart applies changes.

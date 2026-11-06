@@ -2,7 +2,7 @@
 # Dependency licence check and third-party licence texts (ADR-0019).
 # Usage: licenses.sh check | save. Runs per release GOOS, since build constraints change the dependency set.
 set -eu
-self=github.com/corker/mcp-authproxy
+self=github.com/byward-dev/byward
 allowed=Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT,ISC
 oses="linux darwin" # keep in sync with builds.goos in .goreleaser.yaml
 

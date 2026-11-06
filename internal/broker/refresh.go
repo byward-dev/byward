@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/audit"
-	"github.com/corker/mcp-authproxy/internal/idp"
-	"github.com/corker/mcp-authproxy/internal/logging"
-	"github.com/corker/mcp-authproxy/internal/store"
-	"github.com/corker/mcp-authproxy/internal/token"
+	"github.com/byward-dev/byward/internal/audit"
+	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/store"
+	"github.com/byward-dev/byward/internal/token"
 )
 
 // refresh is grant_type=refresh_token (ADR-0006 §4–6). Every refresh also refreshes the IdP tokens,

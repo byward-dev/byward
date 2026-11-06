@@ -5,8 +5,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        mcp-authproxy is an auth-only proxy: it does not route, filter or rewrite MCP traffic. Check the
-        scope and non-goals in [ADR-0001](https://github.com/corker/mcp-authproxy/blob/main/docs/adr/0001-scope-auth-only-proxy-entra-first-class.md) first.
+        byward is an auth-only proxy: it does not route, filter or rewrite MCP traffic. Check the
+        scope and non-goals in [ADR-0001](https://github.com/byward-dev/byward/blob/main/docs/adr/0001-scope-auth-only-proxy-entra-first-class.md) first.
   - type: textarea
     id: problem
     attributes:

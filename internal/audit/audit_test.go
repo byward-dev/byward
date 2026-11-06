@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/logging"
+	"github.com/byward-dev/byward/internal/logging"
 )
 
-// Set MCP_AUTHPROXY_UPDATE_GOLDEN=1 to rewrite testdata/events.golden.jsonl after an intended
+// Set BYWARD_UPDATE_GOLDEN=1 to rewrite testdata/events.golden.jsonl after an intended
 // schema change (and bump SchemaVersion if the change is incompatible).
 const golden = "testdata/events.golden.jsonl"
 
@@ -60,7 +60,7 @@ func render(t *testing.T) string {
 
 func TestAuditRecordsMatchTheGoldenSchema(t *testing.T) {
 	got := render(t)
-	if os.Getenv("MCP_AUTHPROXY_UPDATE_GOLDEN") == "1" {
+	if os.Getenv("BYWARD_UPDATE_GOLDEN") == "1" {
 		if err := os.WriteFile(golden, []byte(got), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -70,7 +70,7 @@ func TestAuditRecordsMatchTheGoldenSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got != string(want) {
-		t.Fatalf("audit records changed (public interface, ADR-0023); if intended, rerun with MCP_AUTHPROXY_UPDATE_GOLDEN=1 and update docs/reference/observability.md\ngot:\n%s\nwant:\n%s", got, want)
+		t.Fatalf("audit records changed (public interface, ADR-0023); if intended, rerun with BYWARD_UPDATE_GOLDEN=1 and update docs/reference/observability.md\ngot:\n%s\nwant:\n%s", got, want)
 	}
 	for _, line := range strings.Split(strings.TrimSpace(got), "\n") {
 		var rec map[string]any

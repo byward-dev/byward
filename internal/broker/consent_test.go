@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/idp"
-	"github.com/corker/mcp-authproxy/internal/registration"
+	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/registration"
 )
 
 var tagRE = regexp.MustCompile(`<[^>]*>`)
@@ -93,7 +93,7 @@ func TestConsentPageLifetimeFollowsWhatTheGrantWillLast(t *testing.T) {
 func TestConsentBindsThePageToTheBrowserWithAHostOnlyCookie(t *testing.T) {
 	c := newEnv(t).showConsent(t, nil).binding
 	// A browser drops a __Host- cookie that carries a Domain.
-	if !strings.HasPrefix(c.Name, "__Host-mcpap_consent_") || !c.HttpOnly || !c.Secure || c.SameSite != http.SameSiteLaxMode || c.Path != "/" ||
+	if !strings.HasPrefix(c.Name, "__Host-byw_consent_") || !c.HttpOnly || !c.Secure || c.SameSite != http.SameSiteLaxMode || c.Path != "/" ||
 		c.Domain != "" || c.MaxAge != int(FlowLifetime.Seconds()) {
 		t.Fatalf("binding cookie %+v: want __Host- prefix, HttpOnly, Secure, SameSite=Lax, Path=/, lasting the flow's lifetime", c)
 	}
@@ -123,12 +123,12 @@ func TestAProxyOnAnotherPortOfTheSameHostIgnoresThisOnesBindingCookie(t *testing
 func TestDevelopmentModeCookiesWorkOverLoopbackHTTP(t *testing.T) {
 	e := newEnv(t, func(c *Config) { c.SecureCookies = false })
 	p := e.showConsent(t, nil)
-	if c := p.binding; !strings.HasPrefix(c.Name, "mcpap_consent_") || c.Secure {
+	if c := p.binding; !strings.HasPrefix(c.Name, "byw_consent_") || c.Secure {
 		t.Fatalf("binding cookie %+v: want no prefix and not Secure", c)
 	}
 	e.now = e.now.Add(ConsentDelay)
 	res := e.answer(t, p, "allow", nil)
-	if got := res.Cookies(); res.StatusCode != http.StatusSeeOther || len(got) != 1 || !strings.HasPrefix(got[0].Name, "mcpap_login_") || got[0].Secure {
+	if got := res.Cookies(); res.StatusCode != http.StatusSeeOther || len(got) != 1 || !strings.HasPrefix(got[0].Name, "byw_login_") || got[0].Secure {
 		t.Fatalf("allow: %d, cookies %+v", res.StatusCode, got)
 	}
 }

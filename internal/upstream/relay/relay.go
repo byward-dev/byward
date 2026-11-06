@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/logging"
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // stripped are removed from every inbound request before anything of ours is set (invariant 16):

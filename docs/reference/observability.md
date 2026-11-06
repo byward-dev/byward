@@ -7,11 +7,11 @@ interface; they change only through deprecation ([ADR-0023](../adr/0023-project-
 
 | What | Where | Setting |
 |---|---|---|
-| Logs and the audit stream | stdout, JSON (`text` for development), UTC | `MCP_AUTHPROXY_LOG_FORMAT` |
-| `/metrics`, `/livez`, `/readyz` | the **internal listener**, never the public one | `MCP_AUTHPROXY_INTERNAL_LISTEN` (default `127.0.0.1:9090`; empty turns it off) |
+| Logs and the audit stream | stdout, JSON (`text` for development), UTC | `BYWARD_LOG_FORMAT` |
+| `/metrics`, `/livez`, `/readyz` | the **internal listener**, never the public one | `BYWARD_INTERNAL_LISTEN` (default `127.0.0.1:9090`; empty turns it off) |
 | Traces | an OTLP collector you name; **off** unless `OTEL_TRACES_EXPORTER` is set | `OTEL_*` |
 
-In Kubernetes set `MCP_AUTHPROXY_INTERNAL_LISTEN=:9090` so the kubelet and Prometheus can reach it, and keep the port
+In Kubernetes set `BYWARD_INTERNAL_LISTEN=:9090` so the kubelet and Prometheus can reach it, and keep the port
 out of the Service that fronts the proxy. Ship the audit stream to a separate system (OWASP ASVS 16.4.3); retention is
 yours.
 
@@ -25,7 +25,7 @@ or the IdP's `error_description`.
 | Field | Meaning |
 |---|---|
 | `request_id` | The request ID: on error pages, in `/token` error descriptions, in `X-Request-Id`, and sent to Entra as `client-request-id` (Entra's `correlation_id`) |
-| `remote_ip` | The client address: the TCP peer, or, when the peer is in `MCP_AUTHPROXY_TRUSTED_PROXIES`, the rightmost `X-Forwarded-For` entry that is not a trusted proxy. The request log and the rate limits use the same address |
+| `remote_ip` | The client address: the TCP peer, or, when the peer is in `BYWARD_TRUSTED_PROXIES`, the rightmost `X-Forwarded-For` entry that is not a trusted proxy. The request log and the rate limits use the same address |
 | `client_id` | The MCP client |
 | `client_trust` | The client's trust level on the consent page: `verified`, `domain` or `not-verified` (ADR-0008 §8) |
 | `user_key` | The IdP user key (`tid:oid` for Entra). Personal data (GDPR Recital 26) |
@@ -77,13 +77,13 @@ Prometheus text format at `/metrics` on the internal listener. Histogram buckets
 
 | Metric | Type | Labels |
 |---|---|---|
-| `mcp_authproxy_http_request_duration_seconds` | histogram | `route`: the matched route pattern (`/mcp` or your public path, `/authorize`, `/consent`, `/assets/page.css`, `/callback/entra`, `/token`, `/revoke`, the `/.well-known/…` metadata paths) or `other`; `status_class` (`2xx` …) |
-| `mcp_authproxy_idp_request_duration_seconds` | histogram | `idp`, `operation` (`authorize`, `callback`, `refresh`), `outcome` (`success`, `rejected`, `unavailable`) |
-| `mcp_authproxy_upstream_in_flight` | gauge | `kind` (`request`, `stream`) |
-| `mcp_authproxy_upstream_busy_total` | counter | `kind`: requests refused with 503 because an admission cap was full |
-| `mcp_authproxy_audit_events_total` | counter | `event`, `outcome`: every audit event, including rate-limited ones |
-| `mcp_authproxy_rate_limited_total` | counter | `endpoint`: OAuth requests refused with 429 (or a `temporarily_unavailable` redirect) over a client address's budget |
-| `mcp_authproxy_build_info` | gauge | `version`, `go_version`; always 1 |
+| `byward_http_request_duration_seconds` | histogram | `route`: the matched route pattern (`/mcp` or your public path, `/authorize`, `/consent`, `/assets/page.css`, `/callback/entra`, `/token`, `/revoke`, the `/.well-known/…` metadata paths) or `other`; `status_class` (`2xx` …) |
+| `byward_idp_request_duration_seconds` | histogram | `idp`, `operation` (`authorize`, `callback`, `refresh`), `outcome` (`success`, `rejected`, `unavailable`) |
+| `byward_upstream_in_flight` | gauge | `kind` (`request`, `stream`) |
+| `byward_upstream_busy_total` | counter | `kind`: requests refused with 503 because an admission cap was full |
+| `byward_audit_events_total` | counter | `event`, `outcome`: every audit event, including rate-limited ones |
+| `byward_rate_limited_total` | counter | `endpoint`: OAuth requests refused with 429 (or a `temporarily_unavailable` redirect) over a client address's budget |
+| `byward_build_info` | gauge | `version`, `go_version`; always 1 |
 
 Plus the standard `go_*` and `process_*` collectors. Live stdio processes, deny-list sync age and store errors arrive
 with their slices.
@@ -92,16 +92,16 @@ Example alert rules:
 
 ```yaml
 groups:
-  - name: mcp-authproxy
+  - name: byward
     rules:
-      - alert: MCPAuthproxyIdPUnavailable
-        expr: sum(rate(mcp_authproxy_idp_request_duration_seconds_count{outcome="unavailable"}[5m])) > 0
+      - alert: BywardIdPUnavailable
+        expr: sum(rate(byward_idp_request_duration_seconds_count{outcome="unavailable"}[5m])) > 0
         for: 10m
-      - alert: MCPAuthproxyRejectedTokenSpike
-        expr: sum(rate(mcp_authproxy_audit_events_total{event="access_token_rejected"}[5m])) > 1
+      - alert: BywardRejectedTokenSpike
+        expr: sum(rate(byward_audit_events_total{event="access_token_rejected"}[5m])) > 1
         for: 10m
-      - alert: MCPAuthproxyUpstreamBusy
-        expr: sum(rate(mcp_authproxy_upstream_busy_total[5m])) > 0
+      - alert: BywardUpstreamBusy
+        expr: sum(rate(byward_upstream_busy_total[5m])) > 0
         for: 5m
 ```
 
@@ -114,7 +114,7 @@ groups:
 
 The body is JSON, e.g. `{"status":"ok","checks":{"keys":"ok","store":"ok"}}`. Check errors go to the log, not the body.
 **The IdP is not part of readiness:** MCP requests are validated locally, so an IdP outage must not take every replica
-out of service. Watch IdP health in `mcp_authproxy_idp_request_duration_seconds{outcome="unavailable"}`.
+out of service. Watch IdP health in `byward_idp_request_duration_seconds{outcome="unavailable"}`.
 
 ## Traces
 

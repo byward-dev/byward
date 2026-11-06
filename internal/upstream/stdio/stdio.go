@@ -216,7 +216,7 @@ func (m *Manager) spawn(ctx context.Context, id Identity, onExit func()) (_ *Pro
 
 	var dir string
 	if m.cmd.usesSessionDir() {
-		if dir, err = os.MkdirTemp(m.cfg.TempDir, "mcp-authproxy-session-"); err != nil {
+		if dir, err = os.MkdirTemp(m.cfg.TempDir, "byward-session-"); err != nil {
 			return nil, fmt.Errorf("stdio: session directory: %w", err)
 		}
 	}

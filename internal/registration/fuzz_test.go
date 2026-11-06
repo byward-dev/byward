@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
 // loopRe is an independent, string-level reading of a loopback redirect URI: host literal, then

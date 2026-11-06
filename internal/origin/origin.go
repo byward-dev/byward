@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/corker/mcp-authproxy/internal/audit"
+	"github.com/byward-dev/byward/internal/audit"
 )
 
 // Hosts allows only the given hosts (host[:port], compared case-insensitively; default ports
@@ -65,7 +65,7 @@ func Origins(rec *audit.Log, allowed []string, next http.Handler) http.Handler {
 			}
 			rec.RecordUnauthenticated(r, audit.Event{Name: audit.OriginRejected, Outcome: audit.Failure, Origin: o})
 			// Claude Code and VS Code treat any 403 as "needs auth", so the body names the real fix.
-			http.Error(w, "origin "+o+" is not allowed; the operator can add it to MCP_AUTHPROXY_ALLOWED_ORIGINS", http.StatusForbidden)
+			http.Error(w, "origin "+o+" is not allowed; the operator can add it to BYWARD_ALLOWED_ORIGINS", http.StatusForbidden)
 			return
 		}
 		h := w.Header()

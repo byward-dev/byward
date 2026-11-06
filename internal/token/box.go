@@ -21,7 +21,7 @@ type Box struct {
 	now     func() time.Time
 }
 
-const boxLabel = "mcp-authproxy box\x00"
+const boxLabel = "byward box\x00"
 
 var errBoxExpired = errors.New("token: box expired")
 

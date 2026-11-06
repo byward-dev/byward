@@ -12,7 +12,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/corker/mcp-authproxy/internal/idp"
+	"github.com/byward-dev/byward/internal/idp"
 )
 
 // Static-client file limits.

@@ -59,8 +59,8 @@ Clients (runtime, 2026-11-06): Node `fetch` and MCP Inspector CLI 2.14.0 (TypeSc
 
 - §8 budgets add `/consent` 60/min (the consent answer; the page itself is served by `/authorize`, and a user may retry an answer) and the IdP callback 30/min. Each is a token bucket
   per endpoint and client address, with a burst of the per-minute budget. Values are 1–10,000 per minute through
-  `MCP_AUTHPROXY_OAUTH_RATE_LIMITS`, with no off switch.
-- §6 is implemented as `MCP_AUTHPROXY_TRUSTED_PROXIES` (CIDRs or addresses, none by default). The client address is
+  `BYWARD_OAUTH_RATE_LIMITS`, with no off switch.
+- §6 is implemented as `BYWARD_TRUSTED_PROXIES` (CIDRs or addresses, none by default). The client address is
   the rightmost `X-Forwarded-For` entry that is not a trusted proxy, and it is shared by the request log, the audit
   stream and the limits.
 - Over-budget responses:

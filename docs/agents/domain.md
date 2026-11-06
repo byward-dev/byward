@@ -20,7 +20,7 @@ Single-context repo:
 ├── docs/adr/
 │   ├── 0001-scope-auth-only-proxy-entra-first-class.md
 │   └── 0002-repo-structure-for-agents.md
-├── cmd/mcp-authproxy/
+├── cmd/byward/
 └── internal/
 ```
 

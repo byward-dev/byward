@@ -1,5 +1,5 @@
 #!/bin/sh
-# Runs inside the node container with --network none: the reference server, mcp-authproxy and the
+# Runs inside the node container with --network none: the reference server, byward and the
 # conformance CLI share one loopback, so the CLI targets http://127.0.0.1:PORT/mcp (the
 # dns-rebinding scenario needs a localhost URL). Usage: inside.sh <revision>...
 set -eu
@@ -16,11 +16,11 @@ trap stop_all EXIT
 (cd src/examples/servers/typescript && PORT=$ref_port exec node_modules/.bin/tsx everything-server.ts) \
   > reference.log 2>&1 &
 pids="$pids $!"
-MCP_AUTHPROXY_INSECURE_NO_AUTH=true \
-MCP_AUTHPROXY_PUBLIC_URL="$proxy_url" \
-MCP_AUTHPROXY_LISTEN="127.0.0.1:$proxy_port" \
-MCP_AUTHPROXY_UPSTREAM_URL="$ref_url" \
-  ./mcp-authproxy > proxy.log 2>&1 &
+BYWARD_INSECURE_NO_AUTH=true \
+BYWARD_PUBLIC_URL="$proxy_url" \
+BYWARD_LISTEN="127.0.0.1:$proxy_port" \
+BYWARD_UPSTREAM_URL="$ref_url" \
+  ./byward > proxy.log 2>&1 &
 pids="$pids $!"
 
 # Wait until something answers on the port (no curl in the image; node is).
@@ -36,7 +36,7 @@ wait_up() {
     })();' "$1" "$2"
 }
 wait_up "$ref_port" "reference server (see reference.log)"
-wait_up "$proxy_port" "mcp-authproxy (see proxy.log)"
+wait_up "$proxy_port" "byward (see proxy.log)"
 
 rm -rf results && mkdir results
 for rev in "$@"; do

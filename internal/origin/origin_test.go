@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/corker/mcp-authproxy/internal/audit"
+	"github.com/byward-dev/byward/internal/audit"
 )
 
 var ok = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
@@ -119,7 +119,7 @@ func TestOriginRejectionNamesTheFix(t *testing.T) {
 	r.Header.Set("Origin", "https://evil.example")
 	w := httptest.NewRecorder()
 	Origins(quiet(), nil, ok).ServeHTTP(w, r)
-	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "MCP_AUTHPROXY_ALLOWED_ORIGINS") {
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "BYWARD_ALLOWED_ORIGINS") {
 		t.Fatalf("got %d %q", w.Code, w.Body)
 	}
 }

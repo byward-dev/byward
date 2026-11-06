@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/store"
+	"github.com/byward-dev/byward/internal/store"
 )
 
 // epoch is constant: an in-memory store is never restored from a backup (ADR-0007 §9).

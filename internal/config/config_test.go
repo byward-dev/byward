@@ -12,11 +12,11 @@ import (
 
 // base is the Entra quickstart: the only settings an operator must set (ADR-0020 §8).
 var base = []string{
-	"MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp",
-	"MCP_AUTHPROXY_UPSTREAM_URL=http://upstream:9000/mcp",
-	"MCP_AUTHPROXY_ENTRA_TENANT=00000000-0000-0000-0000-000000000001",
-	"MCP_AUTHPROXY_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002",
-	"MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE=/run/secrets/entra",
+	"BYWARD_PUBLIC_URL=https://mcp.example.com/mcp",
+	"BYWARD_UPSTREAM_URL=http://upstream:9000/mcp",
+	"BYWARD_ENTRA_TENANT=00000000-0000-0000-0000-000000000001",
+	"BYWARD_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002",
+	"BYWARD_ENTRA_CLIENT_SECRET_FILE=/run/secrets/entra",
 }
 
 // baseFiles serves the secret file named in base.
@@ -52,7 +52,7 @@ func TestDefaults(t *testing.T) {
 }
 
 func TestFlagBeatsEnvBeatsDefault(t *testing.T) {
-	c, err := load(t, []string{"--listen", "0.0.0.0:9"}, "MCP_AUTHPROXY_LISTEN=127.0.0.1:7", "MCP_AUTHPROXY_LOG_FORMAT=text")
+	c, err := load(t, []string{"--listen", "0.0.0.0:9"}, "BYWARD_LISTEN=127.0.0.1:7", "BYWARD_LOG_FORMAT=text")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,14 +69,14 @@ func TestFlagBeatsEnvBeatsDefault(t *testing.T) {
 }
 
 func TestUnknownEnvSuggestsSetting(t *testing.T) {
-	_, err := load(t, nil, "MCP_AUTHPROXY_PUBLC_URL=x")
-	if !isConfigError(err) || !strings.Contains(err.Error(), "did you mean MCP_AUTHPROXY_PUBLIC_URL?") {
+	_, err := load(t, nil, "BYWARD_PUBLC_URL=x")
+	if !isConfigError(err) || !strings.Contains(err.Error(), "did you mean BYWARD_PUBLIC_URL?") {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestUnknownEnvFarFromAnySettingHasNoSuggestion(t *testing.T) {
-	_, err := load(t, nil, "MCP_AUTHPROXY_ZZZZZZZZZZZZZZ=x")
+	_, err := load(t, nil, "BYWARD_ZZZZZZZZZZZZZZ=x")
 	if !isConfigError(err) || strings.Contains(err.Error(), "did you mean") {
 		t.Fatalf("err = %v", err)
 	}
@@ -86,38 +86,38 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 	cases := []struct {
 		name, env, want string
 	}{
-		{"required", "MCP_AUTHPROXY_PUBLIC_URL=", "MCP_AUTHPROXY_PUBLIC_URL is required"},
-		{"trailing slash", "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp/", "MCP_AUTHPROXY_PUBLIC_URL"},
-		{"no path", "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com", "MCP_AUTHPROXY_PUBLIC_URL"},
-		{"query", "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp?x=1", "must not have a query or fragment"},
-		{"fragment", "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp#f", "must not have a query or fragment"},
-		{"http public", "MCP_AUTHPROXY_PUBLIC_URL=http://mcp.example.com/mcp", "must use https"},
-		{"http loopback without dev", "MCP_AUTHPROXY_PUBLIC_URL=http://127.0.0.1:8080/mcp", "needs --dev"},
+		{"required", "BYWARD_PUBLIC_URL=", "BYWARD_PUBLIC_URL is required"},
+		{"trailing slash", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp/", "BYWARD_PUBLIC_URL"},
+		{"no path", "BYWARD_PUBLIC_URL=https://mcp.example.com", "BYWARD_PUBLIC_URL"},
+		{"query", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp?x=1", "must not have a query or fragment"},
+		{"fragment", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp#f", "must not have a query or fragment"},
+		{"http public", "BYWARD_PUBLIC_URL=http://mcp.example.com/mcp", "must use https"},
+		{"http loopback without dev", "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "needs --dev"},
 		// Browsers and MCP clients send IDN hosts in ASCII (xn--) form, so a Unicode host never matches.
-		{"unicode public host", "MCP_AUTHPROXY_PUBLIC_URL=https://bücher.example/mcp", `MCP_AUTHPROXY_PUBLIC_URL: the host "bücher.example" is not ASCII`},
-		{"escaped unicode public host", "MCP_AUTHPROXY_PUBLIC_URL=https://b%C3%BCcher.example/mcp", `MCP_AUTHPROXY_PUBLIC_URL: the host "bücher.example" is not ASCII`},
-		{"unicode allowed origin", "MCP_AUTHPROXY_ALLOWED_ORIGINS=https://bücher.example", `MCP_AUTHPROXY_ALLOWED_ORIGINS: the host "bücher.example" is not ASCII`},
-		{"unicode allowed host", "MCP_AUTHPROXY_ALLOWED_HOSTS=bücher.example:8443", `MCP_AUTHPROXY_ALLOWED_HOSTS: the host "bücher.example:8443" is not ASCII`},
-		{"credentials", "MCP_AUTHPROXY_UPSTREAM_URL=http://u:p@upstream/mcp", "MCP_AUTHPROXY_UPSTREAM_URL"},
-		{"origin with path", "MCP_AUTHPROXY_ALLOWED_ORIGINS=https://a.example/path", "MCP_AUTHPROXY_ALLOWED_ORIGINS"},
-		{"host with path", "MCP_AUTHPROXY_ALLOWED_HOSTS=a.example/x", "MCP_AUTHPROXY_ALLOWED_HOSTS"},
-		{"host with space", "MCP_AUTHPROXY_ALLOWED_HOSTS=a b", "MCP_AUTHPROXY_ALLOWED_HOSTS"},
-		{"listen without port", "MCP_AUTHPROXY_LISTEN=8080", "MCP_AUTHPROXY_LISTEN"},
-		{"log format", "MCP_AUTHPROXY_LOG_FORMAT=xml", "MCP_AUTHPROXY_LOG_FORMAT"},
-		{"two scopes", "MCP_AUTHPROXY_SCOPE=a b", "MCP_AUTHPROXY_SCOPE"},
-		{"dev not a bool", "MCP_AUTHPROXY_DEV=maybe", "MCP_AUTHPROXY_DEV"},
-		{"documentation not a URL", "MCP_AUTHPROXY_RESOURCE_DOCUMENTATION=javascript:x", "MCP_AUTHPROXY_RESOURCE_DOCUMENTATION"},
-		{"gate allow-empty not a bool", "MCP_AUTHPROXY_GATE_ALLOW_EMPTY=yes", "MCP_AUTHPROXY_GATE_ALLOW_EMPTY: want true or false"},
-		{"gate tenants blank", "MCP_AUTHPROXY_GATE_TENANTS=,", "MCP_AUTHPROXY_GATE_TENANTS is set but lists nothing"},
-		{"gate roles blank", "MCP_AUTHPROXY_GATE_ROLES= ,,", "MCP_AUTHPROXY_GATE_ROLES is set but lists nothing"},
-		{"gate groups blank", "MCP_AUTHPROXY_GATE_GROUPS= ", "MCP_AUTHPROXY_GATE_GROUPS is set but lists nothing"},
-		{"gate email domains blank", "MCP_AUTHPROXY_GATE_EMAIL_DOMAINS=,", "MCP_AUTHPROXY_GATE_EMAIL_DOMAINS is set but lists nothing"},
-		{"gate hosted domains blank", "MCP_AUTHPROXY_GATE_HOSTED_DOMAINS=,", "MCP_AUTHPROXY_GATE_HOSTED_DOMAINS is set but lists nothing"},
-		{"operator name too long", "MCP_AUTHPROXY_OPERATOR_NAME=" + strings.Repeat("é", 81), "MCP_AUTHPROXY_OPERATOR_NAME: at most 80 characters, got 81"},
-		{"operator name with a newline", "MCP_AUTHPROXY_OPERATOR_NAME=a\nb", "MCP_AUTHPROXY_OPERATOR_NAME: must not contain control or formatting characters"},
-		{"operator name with a bidi override", "MCP_AUTHPROXY_OPERATOR_NAME=Evil \u202eTI", "MCP_AUTHPROXY_OPERATOR_NAME: must not contain control or formatting characters"},
-		{"scope description with a bidi override", "MCP_AUTHPROXY_SCOPE_DESCRIPTION=Read \u202edashboards", "MCP_AUTHPROXY_SCOPE_DESCRIPTION: must not contain control or formatting characters"},
-		{"scope description too long", "MCP_AUTHPROXY_SCOPE_DESCRIPTION=" + strings.Repeat("x", 201), "MCP_AUTHPROXY_SCOPE_DESCRIPTION: at most 200 characters"},
+		{"unicode public host", "BYWARD_PUBLIC_URL=https://bücher.example/mcp", `BYWARD_PUBLIC_URL: the host "bücher.example" is not ASCII`},
+		{"escaped unicode public host", "BYWARD_PUBLIC_URL=https://b%C3%BCcher.example/mcp", `BYWARD_PUBLIC_URL: the host "bücher.example" is not ASCII`},
+		{"unicode allowed origin", "BYWARD_ALLOWED_ORIGINS=https://bücher.example", `BYWARD_ALLOWED_ORIGINS: the host "bücher.example" is not ASCII`},
+		{"unicode allowed host", "BYWARD_ALLOWED_HOSTS=bücher.example:8443", `BYWARD_ALLOWED_HOSTS: the host "bücher.example:8443" is not ASCII`},
+		{"credentials", "BYWARD_UPSTREAM_URL=http://u:p@upstream/mcp", "BYWARD_UPSTREAM_URL"},
+		{"origin with path", "BYWARD_ALLOWED_ORIGINS=https://a.example/path", "BYWARD_ALLOWED_ORIGINS"},
+		{"host with path", "BYWARD_ALLOWED_HOSTS=a.example/x", "BYWARD_ALLOWED_HOSTS"},
+		{"host with space", "BYWARD_ALLOWED_HOSTS=a b", "BYWARD_ALLOWED_HOSTS"},
+		{"listen without port", "BYWARD_LISTEN=8080", "BYWARD_LISTEN"},
+		{"log format", "BYWARD_LOG_FORMAT=xml", "BYWARD_LOG_FORMAT"},
+		{"two scopes", "BYWARD_SCOPE=a b", "BYWARD_SCOPE"},
+		{"dev not a bool", "BYWARD_DEV=maybe", "BYWARD_DEV"},
+		{"documentation not a URL", "BYWARD_RESOURCE_DOCUMENTATION=javascript:x", "BYWARD_RESOURCE_DOCUMENTATION"},
+		{"gate allow-empty not a bool", "BYWARD_GATE_ALLOW_EMPTY=yes", "BYWARD_GATE_ALLOW_EMPTY: want true or false"},
+		{"gate tenants blank", "BYWARD_GATE_TENANTS=,", "BYWARD_GATE_TENANTS is set but lists nothing"},
+		{"gate roles blank", "BYWARD_GATE_ROLES= ,,", "BYWARD_GATE_ROLES is set but lists nothing"},
+		{"gate groups blank", "BYWARD_GATE_GROUPS= ", "BYWARD_GATE_GROUPS is set but lists nothing"},
+		{"gate email domains blank", "BYWARD_GATE_EMAIL_DOMAINS=,", "BYWARD_GATE_EMAIL_DOMAINS is set but lists nothing"},
+		{"gate hosted domains blank", "BYWARD_GATE_HOSTED_DOMAINS=,", "BYWARD_GATE_HOSTED_DOMAINS is set but lists nothing"},
+		{"operator name too long", "BYWARD_OPERATOR_NAME=" + strings.Repeat("é", 81), "BYWARD_OPERATOR_NAME: at most 80 characters, got 81"},
+		{"operator name with a newline", "BYWARD_OPERATOR_NAME=a\nb", "BYWARD_OPERATOR_NAME: must not contain control or formatting characters"},
+		{"operator name with a bidi override", "BYWARD_OPERATOR_NAME=Evil \u202eTI", "BYWARD_OPERATOR_NAME: must not contain control or formatting characters"},
+		{"scope description with a bidi override", "BYWARD_SCOPE_DESCRIPTION=Read \u202edashboards", "BYWARD_SCOPE_DESCRIPTION: must not contain control or formatting characters"},
+		{"scope description too long", "BYWARD_SCOPE_DESCRIPTION=" + strings.Repeat("x", 201), "BYWARD_SCOPE_DESCRIPTION: at most 200 characters"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -130,7 +130,7 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 }
 
 func TestConsentWordingLoadsUpToItsLimitCountedAsCharacters(t *testing.T) {
-	c, err := load(t, nil, "MCP_AUTHPROXY_OPERATOR_NAME="+strings.Repeat("é", 80), "MCP_AUTHPROXY_SCOPE_DESCRIPTION="+strings.Repeat("é", 200))
+	c, err := load(t, nil, "BYWARD_OPERATOR_NAME="+strings.Repeat("é", 80), "BYWARD_SCOPE_DESCRIPTION="+strings.Repeat("é", 200))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestBaseSettingsAreValid(t *testing.T) {
 }
 
 func TestDevAllowsLoopbackHTTPAndRecordsIt(t *testing.T) {
-	c, err := load(t, []string{"--dev"}, "MCP_AUTHPROXY_PUBLIC_URL=http://localhost:8080/mcp")
+	c, err := load(t, []string{"--dev"}, "BYWARD_PUBLIC_URL=http://localhost:8080/mcp")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func TestDevAllowsLoopbackHTTPAndRecordsIt(t *testing.T) {
 }
 
 func TestListsAreNormalized(t *testing.T) {
-	c, err := load(t, nil, "MCP_AUTHPROXY_ALLOWED_ORIGINS= https://App.Example ,http://localhost:3000", "MCP_AUTHPROXY_ALLOWED_HOSTS=Internal:8080")
+	c, err := load(t, nil, "BYWARD_ALLOWED_ORIGINS= https://App.Example ,http://localhost:3000", "BYWARD_ALLOWED_HOSTS=Internal:8080")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestHelpFlagAsksForUsageListingEnvNames(t *testing.T) {
 	if _, _, err := Load([]string{"-h"}, base, baseFiles); !IsHelp(err) {
 		t.Fatalf("want help, got %v", err)
 	}
-	if !strings.Contains(Usage(), "MCP_AUTHPROXY_PUBLIC_URL") {
+	if !strings.Contains(Usage(), "BYWARD_PUBLIC_URL") {
 		t.Fatal("usage lacks env names")
 	}
 }
@@ -200,7 +200,7 @@ func files(m map[string]string) readFileFunc {
 }
 
 func TestSecretFromEnvFile(t *testing.T) {
-	v, err := resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET_FILE=/run/secrets/x"}, files(map[string]string{"/run/secrets/x": "s3cret\n"}), nil)
+	v, err := resolve(secretReg, nil, []string{"BYWARD_CLIENT_SECRET_FILE=/run/secrets/x"}, files(map[string]string{"/run/secrets/x": "s3cret\n"}), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,25 +211,25 @@ func TestSecretFromEnvFile(t *testing.T) {
 }
 
 func TestSecretFromFlagFileBeatsEnvFile(t *testing.T) {
-	v, err := resolve(secretReg, []string{"--client-secret-file", "/a"}, []string{"MCP_AUTHPROXY_CLIENT_SECRET_FILE=/b"}, files(map[string]string{"/a": "A", "/b": "B"}), nil)
+	v, err := resolve(secretReg, []string{"--client-secret-file", "/a"}, []string{"BYWARD_CLIENT_SECRET_FILE=/b"}, files(map[string]string{"/a": "A", "/b": "B"}), nil)
 	if err != nil || v.get("client-secret") != "A" {
 		t.Fatalf("got %q err=%v", v.get("client-secret"), err)
 	}
 }
 
 func TestSecretFileMissingIsConfigError(t *testing.T) {
-	_, err := resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET_FILE=/nope"}, files(nil), nil)
-	if !isConfigError(err) || !strings.Contains(err.Error(), "MCP_AUTHPROXY_CLIENT_SECRET_FILE") {
+	_, err := resolve(secretReg, nil, []string{"BYWARD_CLIENT_SECRET_FILE=/nope"}, files(nil), nil)
+	if !isConfigError(err) || !strings.Contains(err.Error(), "BYWARD_CLIENT_SECRET_FILE") {
 		t.Fatalf("want a config error naming the setting, got %v", err)
 	}
 }
 
 func TestInlineSecretIsReported(t *testing.T) {
-	v, err := resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET=inline"}, nil, nil)
+	v, err := resolve(secretReg, nil, []string{"BYWARD_CLIENT_SECRET=inline"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := v.inlineSecrets(); len(got) != 1 || got[0] != "MCP_AUTHPROXY_CLIENT_SECRET" {
+	if got := v.inlineSecrets(); len(got) != 1 || got[0] != "BYWARD_CLIENT_SECRET" {
 		t.Fatalf("inline = %v", got)
 	}
 	if v.Effective()[0].Display() != "<redacted>" {
@@ -245,21 +245,21 @@ func TestSecretHasNoInlineFlag(t *testing.T) {
 }
 
 func TestInlineSecretRejectedOutsideDevMode(t *testing.T) {
-	v, err := resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET=inline"}, nil, nil)
+	v, err := resolve(secretReg, nil, []string{"BYWARD_CLIENT_SECRET=inline"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := checkInlineSecrets(v, false); !isConfigError(err) || !strings.Contains(err.Error(), "MCP_AUTHPROXY_CLIENT_SECRET_FILE") {
+	if _, err := checkInlineSecrets(v, false); !isConfigError(err) || !strings.Contains(err.Error(), "BYWARD_CLIENT_SECRET_FILE") {
 		t.Fatalf("without dev: want error pointing at the _FILE variable, got %v", err)
 	}
 	relaxed, err := checkInlineSecrets(v, true)
-	if err != nil || !strings.Contains(relaxed, "MCP_AUTHPROXY_CLIENT_SECRET") {
+	if err != nil || !strings.Contains(relaxed, "BYWARD_CLIENT_SECRET") {
 		t.Fatalf("with dev: relaxation=%q err=%v", relaxed, err)
 	}
 }
 
 func TestSecretFileNeedsAFileReader(t *testing.T) {
-	_, err := resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET_FILE=/run/secrets/x"}, nil, nil)
+	_, err := resolve(secretReg, nil, []string{"BYWARD_CLIENT_SECRET_FILE=/run/secrets/x"}, nil, nil)
 	if !isConfigError(err) || !strings.Contains(err.Error(), "not available") {
 		t.Fatalf("got %v", err)
 	}
@@ -282,15 +282,15 @@ func TestEntraQuickstartNeedsFiveSettings(t *testing.T) {
 }
 
 func TestBrokerSettingsAreRequired(t *testing.T) {
-	for _, name := range []string{"MCP_AUTHPROXY_ENTRA_TENANT", "MCP_AUTHPROXY_ENTRA_CLIENT_ID"} {
+	for _, name := range []string{"BYWARD_ENTRA_TENANT", "BYWARD_ENTRA_CLIENT_ID"} {
 		if _, err := load(t, nil, name+"="); !isConfigError(err) || !strings.Contains(err.Error(), name+" is required") {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	if _, err := load(t, nil, "MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE="); !isConfigError(err) || !strings.Contains(err.Error(), "MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE is required") {
+	if _, err := load(t, nil, "BYWARD_ENTRA_CLIENT_SECRET_FILE="); !isConfigError(err) || !strings.Contains(err.Error(), "BYWARD_ENTRA_CLIENT_SECRET_FILE is required") {
 		t.Errorf("secret: %v", err)
 	}
-	if _, err := load(t, nil, "MCP_AUTHPROXY_ENTRA_TENANT=contoso.onmicrosoft.com"); !isConfigError(err) || !strings.Contains(err.Error(), "want the tenant ID, a GUID") {
+	if _, err := load(t, nil, "BYWARD_ENTRA_TENANT=contoso.onmicrosoft.com"); !isConfigError(err) || !strings.Contains(err.Error(), "want the tenant ID, a GUID") {
 		t.Errorf("tenant: %v", err)
 	}
 	c, err := load(t, nil)
@@ -300,7 +300,7 @@ func TestBrokerSettingsAreRequired(t *testing.T) {
 }
 
 func TestInternalListenDefaultsToLoopbackAndMustDifferFromListen(t *testing.T) {
-	base := []string{"MCP_AUTHPROXY_INSECURE_NO_AUTH=true", "MCP_AUTHPROXY_PUBLIC_URL=http://127.0.0.1:8080/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"}
+	base := []string{"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp"}
 	cfg, _, err := Load(nil, base, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -308,22 +308,22 @@ func TestInternalListenDefaultsToLoopbackAndMustDifferFromListen(t *testing.T) {
 	if cfg.InternalListen != "127.0.0.1:9090" {
 		t.Fatalf("default internal listener = %q, want 127.0.0.1:9090", cfg.InternalListen)
 	}
-	cfg, _, err = Load(nil, append(base, "MCP_AUTHPROXY_INTERNAL_LISTEN="), nil)
+	cfg, _, err = Load(nil, append(base, "BYWARD_INTERNAL_LISTEN="), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.InternalListen != "" {
-		t.Fatalf("MCP_AUTHPROXY_INTERNAL_LISTEN= must turn the internal listener off, got %q", cfg.InternalListen)
+		t.Fatalf("BYWARD_INTERNAL_LISTEN= must turn the internal listener off, got %q", cfg.InternalListen)
 	}
 	for _, bad := range []string{"9090", "127.0.0.1:8080"} {
-		if _, _, err := Load(nil, append(base, "MCP_AUTHPROXY_INTERNAL_LISTEN="+bad), nil); err == nil || !strings.Contains(err.Error(), "MCP_AUTHPROXY_INTERNAL_LISTEN") {
-			t.Errorf("MCP_AUTHPROXY_INTERNAL_LISTEN=%q: want an error naming the setting, got %v", bad, err)
+		if _, _, err := Load(nil, append(base, "BYWARD_INTERNAL_LISTEN="+bad), nil); err == nil || !strings.Contains(err.Error(), "BYWARD_INTERNAL_LISTEN") {
+			t.Errorf("BYWARD_INTERNAL_LISTEN=%q: want an error naming the setting, got %v", bad, err)
 		}
 	}
 }
 
 func noAuthEnv(extra ...string) []string {
-	return append([]string{"MCP_AUTHPROXY_INSECURE_NO_AUTH=true", "MCP_AUTHPROXY_PUBLIC_URL=http://127.0.0.1:8080/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"}, extra...)
+	return append([]string{"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp"}, extra...)
 }
 
 func TestOAuthRateLimitsDefaultToADR0018AndCanBeRaisedWithinBounds(t *testing.T) {
@@ -337,7 +337,7 @@ func TestOAuthRateLimitsDefaultToADR0018AndCanBeRaisedWithinBounds(t *testing.T)
 			t.Errorf("default %s = %d/min, want %d", ep, cfg.OAuthRateLimits[ep], n)
 		}
 	}
-	cfg, _, err = Load(nil, noAuthEnv("MCP_AUTHPROXY_OAUTH_RATE_LIMITS=authorize=120, token=600"), nil)
+	cfg, _, err = Load(nil, noAuthEnv("BYWARD_OAUTH_RATE_LIMITS=authorize=120, token=600"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,14 +345,14 @@ func TestOAuthRateLimitsDefaultToADR0018AndCanBeRaisedWithinBounds(t *testing.T)
 		t.Errorf("overrides = %v, want authorize 120, token 600 and the other defaults", cfg.OAuthRateLimits)
 	}
 	for _, bad := range []string{"metadata=10", "authorize", "authorize=0", "authorize=10001", "authorize=fast", "authorize=-5"} {
-		if _, _, err := Load(nil, noAuthEnv("MCP_AUTHPROXY_OAUTH_RATE_LIMITS="+bad), nil); err == nil || !strings.Contains(err.Error(), "MCP_AUTHPROXY_OAUTH_RATE_LIMITS") {
-			t.Errorf("MCP_AUTHPROXY_OAUTH_RATE_LIMITS=%q: want an error naming the setting, got %v", bad, err)
+		if _, _, err := Load(nil, noAuthEnv("BYWARD_OAUTH_RATE_LIMITS="+bad), nil); err == nil || !strings.Contains(err.Error(), "BYWARD_OAUTH_RATE_LIMITS") {
+			t.Errorf("BYWARD_OAUTH_RATE_LIMITS=%q: want an error naming the setting, got %v", bad, err)
 		}
 	}
 }
 
 func TestTrustedProxiesTakeCIDRsAndAddresses(t *testing.T) {
-	cfg, _, err := Load(nil, noAuthEnv("MCP_AUTHPROXY_TRUSTED_PROXIES=10.0.0.0/8, 192.0.2.7, 2001:db8::/32, 10.1.2.3/8"), nil)
+	cfg, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES=10.0.0.0/8, 192.0.2.7, 2001:db8::/32, 10.1.2.3/8"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +363,7 @@ func TestTrustedProxiesTakeCIDRsAndAddresses(t *testing.T) {
 	if cfg, _, err := Load(nil, noAuthEnv(), nil); err != nil || len(cfg.TrustedProxies) != 0 {
 		t.Errorf("default trusted proxies = %v (err %v), want none", cfg.TrustedProxies, err)
 	}
-	if _, _, err := Load(nil, noAuthEnv("MCP_AUTHPROXY_TRUSTED_PROXIES=proxy.internal"), nil); err == nil || !strings.Contains(err.Error(), "MCP_AUTHPROXY_TRUSTED_PROXIES") {
+	if _, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES=proxy.internal"), nil); err == nil || !strings.Contains(err.Error(), "BYWARD_TRUSTED_PROXIES") {
 		t.Errorf("a hostname must be rejected with the setting named, got %v", err)
 	}
 }
@@ -376,21 +376,21 @@ func TestPathsDefaultIntoTheDataDirectory(t *testing.T) {
 		env                                 []string
 		data, keys, clients, store, counter string
 	}{
-		{"defaults", nil, "/var/lib/mcp-authproxy", "/var/lib/mcp-authproxy/keys", "/var/lib/mcp-authproxy/clients.json",
-			"/var/lib/mcp-authproxy/state", "/var/lib/mcp-authproxy/store-writes"},
-		{"another data directory", []string{"MCP_AUTHPROXY_DATA_DIR=/srv/proxy"}, "/srv/proxy", "/srv/proxy/keys", "/srv/proxy/clients.json",
+		{"defaults", nil, "/var/lib/byward", "/var/lib/byward/keys", "/var/lib/byward/clients.json",
+			"/var/lib/byward/state", "/var/lib/byward/store-writes"},
+		{"another data directory", []string{"BYWARD_DATA_DIR=/srv/proxy"}, "/srv/proxy", "/srv/proxy/keys", "/srv/proxy/clients.json",
 			"/srv/proxy/state", "/srv/proxy/store-writes"},
-		{"explicit paths", []string{"MCP_AUTHPROXY_KEYS_DIR=/etc/mcp-authproxy/keys", "MCP_AUTHPROXY_STATIC_CLIENTS_FILE=/etc/mcp-authproxy/clients.json",
-			"MCP_AUTHPROXY_STORE_DIR=/data/state"}, "/var/lib/mcp-authproxy", "/etc/mcp-authproxy/keys", "/etc/mcp-authproxy/clients.json",
-			"/data/state", "/etc/mcp-authproxy/store-writes"},
-		{"keys directory with a trailing slash", []string{"MCP_AUTHPROXY_KEYS_DIR=/etc/mcp-authproxy/keys/"}, "/var/lib/mcp-authproxy",
-			"/etc/mcp-authproxy/keys/", "/var/lib/mcp-authproxy/clients.json", "/var/lib/mcp-authproxy/state", "/etc/mcp-authproxy/store-writes"},
-		{"explicit counter file", []string{"MCP_AUTHPROXY_STORE_COUNTER_FILE=/data/counter/writes"}, "/var/lib/mcp-authproxy",
-			"/var/lib/mcp-authproxy/keys", "/var/lib/mcp-authproxy/clients.json", "/var/lib/mcp-authproxy/state", "/data/counter/writes"},
-		// "/var/lib/mcp-authproxy/state-counter" shares a name prefix with the state directory but is not inside it.
-		{"counter beside the state directory with a shared prefix", []string{"MCP_AUTHPROXY_STORE_COUNTER_FILE=/var/lib/mcp-authproxy/state-counter/writes"},
-			"/var/lib/mcp-authproxy", "/var/lib/mcp-authproxy/keys", "/var/lib/mcp-authproxy/clients.json", "/var/lib/mcp-authproxy/state",
-			"/var/lib/mcp-authproxy/state-counter/writes"},
+		{"explicit paths", []string{"BYWARD_KEYS_DIR=/etc/byward/keys", "BYWARD_STATIC_CLIENTS_FILE=/etc/byward/clients.json",
+			"BYWARD_STORE_DIR=/data/state"}, "/var/lib/byward", "/etc/byward/keys", "/etc/byward/clients.json",
+			"/data/state", "/etc/byward/store-writes"},
+		{"keys directory with a trailing slash", []string{"BYWARD_KEYS_DIR=/etc/byward/keys/"}, "/var/lib/byward",
+			"/etc/byward/keys/", "/var/lib/byward/clients.json", "/var/lib/byward/state", "/etc/byward/store-writes"},
+		{"explicit counter file", []string{"BYWARD_STORE_COUNTER_FILE=/data/counter/writes"}, "/var/lib/byward",
+			"/var/lib/byward/keys", "/var/lib/byward/clients.json", "/var/lib/byward/state", "/data/counter/writes"},
+		// "/var/lib/byward/state-counter" shares a name prefix with the state directory but is not inside it.
+		{"counter beside the state directory with a shared prefix", []string{"BYWARD_STORE_COUNTER_FILE=/var/lib/byward/state-counter/writes"},
+			"/var/lib/byward", "/var/lib/byward/keys", "/var/lib/byward/clients.json", "/var/lib/byward/state",
+			"/var/lib/byward/state-counter/writes"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -413,8 +413,8 @@ func TestRefreshGraceDefaultsTo30sAndAcceptsItsBounds(t *testing.T) {
 		want time.Duration
 	}{
 		{"default", nil, 30 * time.Second},
-		{"lower bound", []string{"MCP_AUTHPROXY_REFRESH_GRACE=0s"}, 0},
-		{"upper bound", []string{"MCP_AUTHPROXY_REFRESH_GRACE=60s"}, time.Minute},
+		{"lower bound", []string{"BYWARD_REFRESH_GRACE=0s"}, 0},
+		{"upper bound", []string{"BYWARD_REFRESH_GRACE=60s"}, time.Minute},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, err := load(t, nil, tc.env...)
@@ -434,15 +434,15 @@ func TestInvalidStoreSettingsAreRejected(t *testing.T) {
 		env  []string
 		want string
 	}{
-		{"relative data directory", []string{"MCP_AUTHPROXY_DATA_DIR=data"}, "MCP_AUTHPROXY_DATA_DIR: want an absolute path"},
-		{"relative state directory", []string{"MCP_AUTHPROXY_STORE_DIR=state"}, "MCP_AUTHPROXY_STORE_DIR: want an absolute path"},
-		{"relative counter file", []string{"MCP_AUTHPROXY_STORE_COUNTER_FILE=writes"}, "MCP_AUTHPROXY_STORE_COUNTER_FILE: want an absolute path"},
-		{"relative keys directory makes a relative default", []string{"MCP_AUTHPROXY_KEYS_DIR=keys"}, "derived from MCP_AUTHPROXY_KEYS_DIR"},
-		{"counter inside the state directory", []string{"MCP_AUTHPROXY_STORE_COUNTER_FILE=/var/lib/mcp-authproxy/state/writes"}, "is inside MCP_AUTHPROXY_STORE_DIR"},
-		{"keys inside the state directory", []string{"MCP_AUTHPROXY_KEYS_DIR=/var/lib/mcp-authproxy/state/keys"}, "keep the keys directory outside the state directory"},
-		{"grace not a duration", []string{"MCP_AUTHPROXY_REFRESH_GRACE=soon"}, "MCP_AUTHPROXY_REFRESH_GRACE: want a duration"},
-		{"grace negative", []string{"MCP_AUTHPROXY_REFRESH_GRACE=-1s"}, "want 0s to 60s"},
-		{"grace over a minute", []string{"MCP_AUTHPROXY_REFRESH_GRACE=61s"}, "want 0s to 60s"},
+		{"relative data directory", []string{"BYWARD_DATA_DIR=data"}, "BYWARD_DATA_DIR: want an absolute path"},
+		{"relative state directory", []string{"BYWARD_STORE_DIR=state"}, "BYWARD_STORE_DIR: want an absolute path"},
+		{"relative counter file", []string{"BYWARD_STORE_COUNTER_FILE=writes"}, "BYWARD_STORE_COUNTER_FILE: want an absolute path"},
+		{"relative keys directory makes a relative default", []string{"BYWARD_KEYS_DIR=keys"}, "derived from BYWARD_KEYS_DIR"},
+		{"counter inside the state directory", []string{"BYWARD_STORE_COUNTER_FILE=/var/lib/byward/state/writes"}, "is inside BYWARD_STORE_DIR"},
+		{"keys inside the state directory", []string{"BYWARD_KEYS_DIR=/var/lib/byward/state/keys"}, "keep the keys directory outside the state directory"},
+		{"grace not a duration", []string{"BYWARD_REFRESH_GRACE=soon"}, "BYWARD_REFRESH_GRACE: want a duration"},
+		{"grace negative", []string{"BYWARD_REFRESH_GRACE=-1s"}, "want 0s to 60s"},
+		{"grace over a minute", []string{"BYWARD_REFRESH_GRACE=61s"}, "want 0s to 60s"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/corker/mcp-authproxy/internal/logging"
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // The stderr records must survive the proxy's logging allowlist, and a credential-shaped line from

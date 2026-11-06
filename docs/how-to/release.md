@@ -9,7 +9,7 @@ Written so that any maintainer can cut a release without the original author. De
 
 ## What a release contains
 
-- Container image `ghcr.io/corker/mcp-authproxy`, multi-arch (linux/amd64, linux/arm64), tags `vX.Y.Z`
+- Container image `ghcr.io/byward-dev/byward`, multi-arch (linux/amd64, linux/arm64), tags `vX.Y.Z`
   and `latest`, cosign keyless signature by digest, buildx provenance and SBOM.
 - goreleaser archives: linux amd64/arm64 (supported), darwin amd64/arm64 (development only), with
   checksums, syft SBOM, cosign bundles and build provenance.

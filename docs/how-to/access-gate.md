@@ -12,30 +12,30 @@ one entry is enough.
 
 | Setting | Matches | Notes |
 |---|---|---|
-| `MCP_AUTHPROXY_GATE_TENANTS` | Entra `tid` | Tenant GUIDs. In single-tenant mode it must include your tenant; a multi-tenant (`organizations`) app always needs it (ADR-0012 §2). |
-| `MCP_AUTHPROXY_GATE_ROLES` | `roles` | App role values, case-sensitive. The user needs at least one. |
-| `MCP_AUTHPROXY_GATE_GROUPS` | `groups` | Entra group object IDs. If Entra leaves the groups out because the user is in too many (over 200), the user is denied. |
-| `MCP_AUTHPROXY_GATE_EMAIL_DOMAINS` | email domain | Only verified emails, exact domain (no subdomains). Generic OIDC IdPs only: not available with Entra, whose `email` is not verified, and Entra is the only IdP the proxy supports so far. |
-| `MCP_AUTHPROXY_GATE_HOSTED_DOMAINS` | Google `hd` | Google Workspace domains. Google only, which the proxy does not support yet. |
-| `MCP_AUTHPROXY_GATE_ALLOW_EMPTY` | — | Allows an empty gate where the proxy otherwise refuses to start (see below). |
+| `BYWARD_GATE_TENANTS` | Entra `tid` | Tenant GUIDs. In single-tenant mode it must include your tenant; a multi-tenant (`organizations`) app always needs it (ADR-0012 §2). |
+| `BYWARD_GATE_ROLES` | `roles` | App role values, case-sensitive. The user needs at least one. |
+| `BYWARD_GATE_GROUPS` | `groups` | Entra group object IDs. If Entra leaves the groups out because the user is in too many (over 200), the user is denied. |
+| `BYWARD_GATE_EMAIL_DOMAINS` | email domain | Only verified emails, exact domain (no subdomains). Generic OIDC IdPs only: not available with Entra, whose `email` is not verified, and Entra is the only IdP the proxy supports so far. |
+| `BYWARD_GATE_HOSTED_DOMAINS` | Google `hd` | Google Workspace domains. Google only, which the proxy does not support yet. |
+| `BYWARD_GATE_ALLOW_EMPTY` | — | Allows an empty gate where the proxy otherwise refuses to start (see below). |
 
 All lists are comma-separated. An invalid entry, such as a tenant that is not a GUID or an email
 domain with Entra, or a list that is set but names nothing, stops the proxy at startup with a
-message naming the setting, for example `MCP_AUTHPROXY_GATE_TENANTS: "contoso" is not a GUID`.
+message naming the setting, for example `BYWARD_GATE_TENANTS: "contoso" is not a GUID`.
 
 ## Empty gate
 
 - **Single-tenant Entra:** every user of your tenant can sign in, including guests unless you
   restrict them. The proxy starts, and logs a warning at every start.
 - **Google or generic OIDC** (not supported yet; listed so the rule is known): anyone with an account could sign in, so the proxy refuses to start
-  unless `MCP_AUTHPROXY_GATE_ALLOW_EMPTY=true`. With that setting it logs a warning at every start.
+  unless `BYWARD_GATE_ALLOW_EMPTY=true`. With that setting it logs a warning at every start.
 
 ## Entra: recommended setup
 
 1. In the enterprise application, set **Assignment required** to **Yes**. Users who are not
    assigned are then stopped by Entra itself (AADSTS50105).
 2. Define an app role, for example `MCP.User`, assign it to the users or groups who should have
-   access, and set `MCP_AUTHPROXY_GATE_ROLES=MCP.User`.
+   access, and set `BYWARD_GATE_ROLES=MCP.User`.
 3. Know the two gaps:
    - Global Administrators can sign in regardless of **Assignment required**. The role gate still
      applies to them.

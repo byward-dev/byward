@@ -48,7 +48,7 @@ Runtime (2026-11-06):
 ## Decision
 
 1. **The MCP endpoint accepts Entra app-only tokens**, off by default
-   (`MCP_AUTHPROXY_APP_TOKENS=entra`), Entra only.
+   (`BYWARD_APP_TOKENS=entra`), Entra only.
 2. **The validator is chosen by token format, never by fallback:** our type prefix → sealed path
    (ADR-0014); a three-part JWT → the app-only path, only when enabled; anything else → 401.
 3. **App-only path checks:** signature from the tenant's JWKS; `alg` `RS256` and `typ` `JWT` pinned;

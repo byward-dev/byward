@@ -13,17 +13,17 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/config"
-	"github.com/corker/mcp-authproxy/internal/denylist"
-	"github.com/corker/mcp-authproxy/internal/health"
-	"github.com/corker/mcp-authproxy/internal/token"
+	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/denylist"
+	"github.com/byward-dev/byward/internal/health"
+	"github.com/byward-dev/byward/internal/token"
 )
 
 // The deny list refuses every token once it is older than denylist.MaxStaleness, so the wiring
 // must sync it before serving and keep it fresh in the background (ADR-0006 §3).
 func TestRevocationListStaysFreshWhileTheServerRuns(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		env := append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp")
+		env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
 		cfg, _, err := config.Load(nil, env, os.ReadFile)
 		if err != nil {
 			t.Fatal(err)
@@ -60,7 +60,7 @@ func sealAccess(t *testing.T, cfg *config.Config, env []string, grantID string) 
 	t.Helper()
 	var keysDir string
 	for _, kv := range env {
-		if v, ok := strings.CutPrefix(kv, "MCP_AUTHPROXY_KEYS_DIR="); ok {
+		if v, ok := strings.CutPrefix(kv, "BYWARD_KEYS_DIR="); ok {
 			keysDir = v
 		}
 	}

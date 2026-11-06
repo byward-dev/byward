@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Issues and PRDs for this repo live as GitHub issues on `corker/mcp-authproxy`. Use the `gh`
+Issues and PRDs for this repo live as GitHub issues on `byward-dev/byward`. Use the `gh`
 CLI for all operations.
 
 ## Conventions

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/resource"
+	"github.com/byward-dev/byward/internal/resource"
 )
 
 // Leeway is the clock skew allowed on `iat` and `exp` (ADR-0014 §2).

@@ -1,17 +1,17 @@
 name: Bug report
-description: Something in mcp-authproxy does not work as documented.
+description: Something in byward does not work as documented.
 labels: [bug, needs-triage]
 body:
   - type: markdown
     attributes:
       value: |
-        **Security vulnerability?** Do not file it here; use [private reporting](https://github.com/corker/mcp-authproxy/security/advisories/new).
+        **Security vulnerability?** Do not file it here; use [private reporting](https://github.com/byward-dev/byward/security/advisories/new).
         Never paste tokens, secrets, authorization codes or real tenant IDs; redact them.
   - type: input
     id: version
     attributes:
       label: Version
-      description: Output of `mcp-authproxy --version`, or the commit.
+      description: Output of `byward --version`, or the commit.
     validations:
       required: true
   - type: dropdown

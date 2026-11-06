@@ -3,9 +3,9 @@ package memory_test
 import (
 	"testing"
 
-	"github.com/corker/mcp-authproxy/internal/store"
-	"github.com/corker/mcp-authproxy/internal/store/memory"
-	"github.com/corker/mcp-authproxy/internal/store/storetest"
+	"github.com/byward-dev/byward/internal/store"
+	"github.com/byward-dev/byward/internal/store/memory"
+	"github.com/byward-dev/byward/internal/store/storetest"
 )
 
 func TestConformance(t *testing.T) {

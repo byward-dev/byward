@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/audit"
-	"github.com/corker/mcp-authproxy/internal/logging"
-	"github.com/corker/mcp-authproxy/internal/ratelimit"
-	"github.com/corker/mcp-authproxy/internal/registration"
+	"github.com/byward-dev/byward/internal/audit"
+	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/ratelimit"
+	"github.com/byward-dev/byward/internal/registration"
 )
 
 // Consent (ADR-0010). /authorize validates the request and shows the consent page; the page posts
@@ -45,7 +45,7 @@ type flow struct {
 // two proxies on one host never read each other's cookie.
 func (b *Broker) bindingCookie() string {
 	sum := sha256.Sum256([]byte(b.cfg.Issuer))
-	name := "mcpap_consent_" + hex.EncodeToString(sum[:4])
+	name := "byw_consent_" + hex.EncodeToString(sum[:4])
 	if b.cfg.SecureCookies {
 		return "__Host-" + name
 	}
@@ -53,7 +53,7 @@ func (b *Broker) bindingCookie() string {
 }
 
 func bindingHash(v string) string {
-	sum := sha256.Sum256([]byte("mcp-authproxy consent binding\x00" + v))
+	sum := sha256.Sum256([]byte("byward consent binding\x00" + v))
 	return hex.EncodeToString(sum[:])
 }
 
