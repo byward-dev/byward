@@ -22,7 +22,7 @@ each feature (F1–F22) is a GitHub issue and gets an ADR once grilled with the 
 | [0014](0014-token-validation.md) | Token validation: header only, sealed checks, no store on the request path | F11 | 0022 |
 | [0015](0015-access-gate.md) | Authorization: an access gate at login and refresh, no per-request denials | F12 | — |
 | [0016](0016-identity-propagation.md) | Identity propagation: an RFC 9068 assertion for the upstream, strip then inject | F13 | — |
-| [0017](0017-delegation-obo.md) | Delegation: proxy-side Entra On-Behalf-Of in v0.1 | F14 | — |
+| [0017](0017-delegation-obo.md) | Delegation: proxy-side Entra On-Behalf-Of (v0.2, amended) | F14 | — |
 | [0018](0018-hardening.md) | Hardening: Origin and Host checks, bounded HTTP, Rewrite-only proxying | F17 | — |
 | [0019](0019-packaging.md) | Packaging: a signed container image and Linux binaries for servers | F19 | — |
 | [0020](0020-configuration.md) | Configuration: flags and env, secrets from files, one registry | F18 | — |

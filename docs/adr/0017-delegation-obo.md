@@ -50,3 +50,10 @@ tested.
   ID P1 for testing.
 - Upstream authors read the downstream token from one header; MCP clients see a plain error on
   consent problems, never a re-login loop.
+
+## Amendment 2026-11-06 (release)
+
+On-Behalf-Of ships in v0.2, not v0.1 (slice 4.2, #63). The first release is gated on the clients
+connecting without manual setup: CIMD, dynamic registration and stdio upstreams. On-Behalf-Of builds
+on a working v0.1 and is not needed for that. The design in this ADR is unchanged; read "v0.1" in
+Decisions 1 and 5 as "v0.2".
