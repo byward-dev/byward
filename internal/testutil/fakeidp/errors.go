@@ -11,9 +11,10 @@ import (
 // error_codes and as the "AADSTSnnn:" prefix of error_description. The generic profile ignores
 // Code and returns a plain RFC 6749 error.
 //
-// Entra documents the AADSTS descriptions but not which `error` value each code comes with; the
-// values below follow the real-tenant test where one was observed (ADR-0012) and are otherwise
-// the closest RFC 6749 value.
+// Entra documents the AADSTS descriptions but not which `error` value each code comes with. The
+// values below follow the real-tenant runtime tests (2026-11-05 and 2026-11-06) where one was
+// observed — 65001, 9002313 (bad code) and 501051 → invalid_grant; 7000215, 5002723 and 700027 →
+// 401 invalid_client — and are otherwise the closest RFC 6749 value.
 type Failure struct {
 	// Status is the HTTP status of a token-endpoint error; 0 means 400.
 	Status      int
@@ -97,8 +98,9 @@ func (p *IdP) description(f Failure, trace, corr, ts string) string {
 	return fmt.Sprintf("%s\r\nTrace ID: %s\r\nCorrelation ID: %s\r\nTimestamp: %s", d, trace, corr, ts)
 }
 
-// correlation returns the trace and correlation IDs of an Entra request; the correlation ID echoes a
-// GUID-shaped client-request-id header, which is also echoed as a response header.
+// correlation returns the trace and correlation IDs of an Entra request. As observed in the
+// real-tenant runtime test (2026-11-06), a client-request-id GUID comes back both as the
+// client-request-id response header and as correlation_id, and x-ms-request-id equals trace_id.
 func (p *IdP) correlation(w http.ResponseWriter, r *http.Request) (trace, corr string) {
 	if p.profile != Entra {
 		return "", ""
