@@ -75,6 +75,31 @@ func TestTokensHaveTheirTypePrefixAndAreUnique(t *testing.T) {
 	}
 }
 
+// The prefixes are public: secret scanners match them (ADR-0006 §8, ADR-0028). Literals, not the
+// constants, so a change to the wire format fails here.
+func TestIssuedTokensCarryTheBywPrefixesScannersMatch(t *testing.T) {
+	s := newSealer(t)
+	refresh, _ := NewRefreshToken()
+	for want, tok := range map[string]string{
+		"byw_at_": mustSeal(t, s, Access, claims()),
+		"byw_ac_": mustSeal(t, s, Code, claims()),
+		"byw_rt_": refresh,
+	} {
+		if !strings.HasPrefix(tok, want) {
+			t.Errorf("token %.12q... does not start with %q", tok, want)
+		}
+	}
+}
+
+// The domain-separation labels are part of every sealed value: changing one makes every token,
+// sealed store row and login cookie issued before unreadable. They change only with a format
+// version bump.
+func TestDomainSeparationLabelsAreStable(t *testing.T) {
+	if adLabel != "byward token\x00" || boxLabel != "byward box\x00" {
+		t.Fatalf("adLabel %q, boxLabel %q changed: bump the token format version instead", adLabel, boxLabel)
+	}
+}
+
 func TestAnyTamperedByteIsRejected(t *testing.T) {
 	s := newSealer(t)
 	tok := mustSeal(t, s, Access, claims())

@@ -35,13 +35,25 @@ func exercise(m *Metrics) {
 	m.RateLimited("authorize")
 }
 
-var proxyMetric = regexp.MustCompile(`(?m)^# TYPE (byward_\S+) (\S+)$`)
+// Every family except the Go runtime's own collectors: a metric with the wrong prefix must reach the
+// golden file, not be filtered out by the prefix it should carry.
+var proxyMetric = regexp.MustCompile(`(?m)^# TYPE ((?:[a-z][a-z0-9]*)_\S+) (\S+)$`)
+
+func isRuntimeMetric(name string) bool {
+	return strings.HasPrefix(name, "go_") || strings.HasPrefix(name, "process_") || strings.HasPrefix(name, "promhttp_")
+}
 
 func TestMetricNamesMatchTheGoldenFile(t *testing.T) {
 	m := New()
 	exercise(m)
 	var lines []string
 	for _, g := range proxyMetric.FindAllStringSubmatch(scrape(t, m), -1) {
+		if isRuntimeMetric(g[1]) {
+			continue
+		}
+		if !strings.HasPrefix(g[1], "byward_") {
+			t.Errorf("metric %s lacks the byward_ prefix (ADR-0028)", g[1])
+		}
 		lines = append(lines, g[1]+" "+g[2])
 	}
 	sort.Strings(lines)
