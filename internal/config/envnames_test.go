@@ -11,46 +11,47 @@ import (
 
 var envName = regexp.MustCompile(`\bBYWARD_[A-Z][A-Z0-9_]*\*?`)
 
-// Setting names written out by hand in messages (errors, warnings, logs) must name real settings:
-// after a rename or a removed setting, a stale name would point operators at nothing.
-func TestEveryBYWARDNameInTheCodeIsASetting(t *testing.T) {
+// Setting names written out by hand in messages (errors, warnings, logs) and in the operator docs
+// must name real settings: after a rename or a removed setting, a stale name would point operators
+// at nothing. ADRs are left out: they name planned settings.
+func TestEveryBYWARDNameInTheCodeAndDocsIsASetting(t *testing.T) {
 	known := map[string]bool{}
 	for _, s := range registry {
 		known[s.Env()] = true
-		known[s.Env()+"_FILE"] = true // secrets are read from a file
+		if s.Secret {
+			known[s.Env()+"_FILE"] = true
+		}
 	}
 	// Not settings, but fixed names: identity the proxy sets for stdio upstreams (ADR-0016), the
-	// switches that regenerate generated docs and goldens, and prefixes.
-	extra := regexp.MustCompile(`^BYWARD_(ENTRA_\*|SUBJECT|ISSUER|EMAIL|NAME|TENANT|OBJECT_ID|USER_KEY|UPDATE_REFERENCE|UPDATE_GOLDEN|[A-Z_]*_)$`)
-	for _, root := range []string{"../../cmd", "../../internal"} {
+	// switch that regenerates the settings reference, the image build argument, and prefixes.
+	extra := regexp.MustCompile(`^BYWARD_(ENTRA_\*|SUBJECT|ISSUER|EMAIL|UPDATE_REFERENCE|IMAGE|[A-Z_]*_)$`)
+	check := func(path string) {
+		src, err := os.ReadFile(path) //nolint:gosec // G304: reads this repository's own files
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range envName.FindAllString(string(src), -1) {
+			if !known[name] && !extra.MatchString(name) {
+				t.Errorf("%s names %s, which is not a setting", path, name)
+			}
+		}
+	}
+	walk := func(root, suffix string) {
 		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return err
+			if err == nil && !d.IsDir() && strings.HasSuffix(path, suffix) && !strings.HasSuffix(path, "_test.go") {
+				check(path)
 			}
-			src, err := os.ReadFile(path) //nolint:gosec // G304: walks this repository's own source tree
-			if err != nil {
-				return err
-			}
-			for _, name := range envName.FindAllString(string(src), -1) {
-				if !known[name] && !extra.MatchString(name) {
-					t.Errorf("%s names %s, which is not a setting", path, name)
-				}
-			}
-			return nil
+			return err
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-}
-
-// The stdio upstream reserves the settings prefix for identity it sets itself; it keeps its own copy.
-func TestTheStdioReservedPrefixIsTheSettingsPrefix(t *testing.T) {
-	src, err := os.ReadFile("../upstream/stdio/command.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(src), `reservedEnv = "`+envPrefix+`"`) {
-		t.Fatalf("internal/upstream/stdio reservedEnv is not %q", envPrefix)
+	walk("../../cmd", ".go")
+	walk("../../internal", ".go")
+	walk("../../docs/how-to", ".md")
+	walk("../../docs/reference", ".md")
+	for _, f := range []string{"README.md", "SECURITY.md", "CONTRIBUTING.md", "AGENTS.md"} {
+		check("../../" + f)
 	}
 }

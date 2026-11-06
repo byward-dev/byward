@@ -126,7 +126,8 @@ func TestRevokeSubjectRacingCreateGrantAcrossProcessesLeavesNoCoveredGrant(t *te
 }
 
 func TestDatabaseFilesAreOwnerOnly(t *testing.T) {
-	files := []string{fileName, fileName + "-wal", fileName + "-shm"}
+	// The file name is operator-facing (docs/how-to/state.md says to back it up by name): a literal.
+	files := []string{"byward.db", "byward.db-wal", "byward.db-shm"}
 	cases := []struct {
 		name  string
 		setup func(t *testing.T, dir string)
