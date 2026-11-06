@@ -41,10 +41,15 @@ sorts before `k9`, and a new `k10` would never seal.
    updated secret volume) before restarting any of them. A replica that seals with a key the others
    do not have yet issues tokens they reject.
 3. Restart. New tokens use the new key; tokens sealed with the old key keep working.
-4. After the longest token lifetime (access tokens: at most 1 h) remove the old file and restart.
+4. Remove the old file and restart once nothing sealed with it is still needed:
+   - access tokens live at most 1 h;
+   - the IdP tokens kept in each grant are sealed too, and stay sealed with the key in use at their
+     last refresh. A grant whose IdP tokens were sealed with a removed key is revoked at its next
+     refresh, and its user signs in again. To avoid that, keep the old key for the grant lifetime
+     (30 days), or accept the extra sign-ins (#104 tracks re-sealing so this is no longer needed).
 
-**Removing a key invalidates every token it sealed.** Clients then get `401 invalid_token` and sign
-in again (or refresh: refresh tokens are not sealed and survive a key change).
+**Removing a key invalidates every access token it sealed.** Clients then get `401 invalid_token`
+and refresh; refresh tokens themselves are stored as hashes, not sealed.
 
 ## Limits
 

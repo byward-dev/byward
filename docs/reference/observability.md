@@ -7,7 +7,7 @@ interface; they change only through deprecation ([ADR-0023](../adr/0023-project-
 
 | What | Where | Setting |
 |---|---|---|
-| Logs and the audit stream | stdout, JSON (`text` for development), UTC | `BYWARD_LOG_FORMAT` |
+| Logs and the audit stream | standard error, JSON (`text` for development), UTC; standard output carries only command output such as `--print-config` | `BYWARD_LOG_FORMAT` |
 | `/metrics`, `/livez`, `/readyz` | the **internal listener**, never the public one | `BYWARD_INTERNAL_LISTEN` (default `127.0.0.1:9090`; empty turns it off) |
 | Traces | an OTLP collector you name; **off** unless `OTEL_TRACES_EXPORTER` is set | `OTEL_*` |
 

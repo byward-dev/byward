@@ -1,6 +1,6 @@
 # Security posture
 
-For security reviewers. What mcp-authproxy guarantees, what it does not, and where each claim is
+For security reviewers. What byward guarantees, what it does not, and where each claim is
 enforced and tested. This page describes `main` as of 2026-11-06 (pre-release, 0.y.z). Items marked
 **planned** are not built yet. Terms follow [CONTEXT.md](../CONTEXT.md). To deploy it, see
 [Harden a deployment](how-to/harden-a-deployment.md).
@@ -72,7 +72,7 @@ keep them (AGENTS.md). Status on `main`:
 | 9 | Codes single-use and short-lived; `/token` re-checks client, redirect URI and PKCE | `internal/broker/token.go` (`redeemCode`); 60 s lifetime | `TestReusedCodeRevokesTheGrant`, `TestTokenEndpointRechecks`, `TestFailedBindingAfterConsumeRevokesTheGrant`, `TestExpiredCodeIsRejected` |
 | 10 | Exact redirect matching, only the loopback port varies | `internal/registration/redirect.go` | `TestMatchRedirect`, `FuzzMatchRedirect` |
 | 11 | Keys from the operator, never derived or ephemeral; rotation keeps verify-only keys | `internal/token/keyring.go` (directory of key files; startup fails without one) | `TestMissingOrEmptyKeyDirectoryRefusesToStart`, `TestRotationKeepsOldTokensUntilTheirKeyIsRemoved` |
-| 12 | Every relaxation is an explicit flag, logged at startup | `internal/config/config.go` (`Relaxations`), `cmd/mcp-authproxy/main.go` | `TestDevModeLogsEachRelaxation`, `TestNoAuthLogsThatAuthIsOffAndTheNextStep` |
+| 12 | Every relaxation is an explicit flag, logged at startup | `internal/config/config.go` (`Relaxations`), `cmd/byward/main.go` | `TestDevModeLogsEachRelaxation`, `TestNoAuthLogsThatAuthIsOffAndTheNextStep` |
 | 13 | Legacy MCP sessions bound to the user; one upstream process per user | **Not met for HTTP upstreams:** `Mcp-Session-Id` is relayed unchanged (see [Known gaps](#known-gaps)). stdio is not wired yet (#60, #61) | — |
 | 14 | Size, time and count limits | Static clients file (1000 clients, 1 MiB); body limits; token length 2 KiB; consent answer table 10,000 | `TestLoadStaticRejects`, `TestBodyOverLimitIs413AndAtLimitPasses` |
 | 15 | Errors never echo secrets or upstream internals | Fixed error strings (`internal/broker/token.go`); upstream errors become 502 `upstream unavailable` (`relay.go`); panics give a bare 500 | `TestRelayHidesUpstreamErrors`, `TestRecovererHidesPanicDetails`, `TestErrorPageEscapesInputAndIsLockedDown` |
@@ -83,8 +83,8 @@ keep them (AGENTS.md). Status on `main`:
 
 ## Secure defaults
 
-- **Authentication is on.** Without the Entra settings, `MCP_AUTHPROXY_KEYS_DIR` and
-  `MCP_AUTHPROXY_STATIC_CLIENTS_FILE`, the proxy refuses to start (exit 2). It never silently runs
+- **Authentication is on.** Without the Entra settings, `BYWARD_KEYS_DIR` and
+  `BYWARD_STATIC_CLIENTS_FILE`, the proxy refuses to start (exit 2). It never silently runs
   without auth.
 - Both listeners bind to loopback: public on `127.0.0.1:8080`, internal (metrics and probes) on
   `127.0.0.1:9090`. The two must differ.
@@ -94,9 +94,9 @@ keep them (AGENTS.md). Status on `main`:
   unless `--dev` is set.
 - The `Origin` allowlist on the MCP endpoint is empty: only the proxy's own origin and clients that
   send no `Origin` pass. No `X-Forwarded-For` is trusted until you set
-  `MCP_AUTHPROXY_TRUSTED_PROXIES`.
+  `BYWARD_TRUSTED_PROXIES`.
 - Cookies are `__Host-`, `Secure`, `HttpOnly` and `SameSite=Lax` whenever the public URL is https.
-- Unknown `MCP_AUTHPROXY_*` variables, positional arguments, and a gate list that is set but empty
+- Unknown `BYWARD_*` variables, positional arguments, and a gate list that is set but empty
   all refuse to start.
 - There is no telemetry or update check. Traces are off unless `OTEL_TRACES_EXPORTER` is set.
 - The image runs as uid 65532 on distroless `static-debian13:nonroot`, pinned by digest
@@ -110,9 +110,9 @@ setting, with secrets shown as `<redacted>`.
 
 | Mode | What it relaxes | Fences |
 |---|---|---|
-| `--dev` (`MCP_AUTHPROXY_DEV`) | Accepts an `http` public URL on a loopback host. Over http, cookies drop `__Host-` and `Secure`. Accepts inline secrets from the environment. | `http` only on a loopback host; each relaxation is logged by name |
-| `--insecure-no-auth` (`MCP_AUTHPROXY_INSECURE_NO_AUTH`) | No authentication at all: no token check, no metadata, no broker routes | Public URL must be loopback. Listen address must be loopback, or inside a container with its own network namespace (host networking is detected and refused). Allowed hosts and origins must be loopback. It refuses to start alongside any authentication setting. Host and Origin checks, header stripping and body limits stay on. Logs `AUTHENTICATION IS OFF` and the next step ([ADR-0027](adr/0027-insecure-no-auth.md)). |
-| `MCP_AUTHPROXY_GATE_ALLOW_EMPTY` | Allows an empty gate for Google or generic OIDC. It has **no effect with Entra**, the only IdP today. | Logged as a warning at every start |
+| `--dev` (`BYWARD_DEV`) | Accepts an `http` public URL on a loopback host. Over http, cookies drop `__Host-` and `Secure`. Accepts inline secrets from the environment. | `http` only on a loopback host; each relaxation is logged by name |
+| `--insecure-no-auth` (`BYWARD_INSECURE_NO_AUTH`) | No authentication at all: no token check, no metadata, no broker routes | Public URL must be loopback. Listen address must be loopback, or inside a container with its own network namespace (host networking is detected and refused). Allowed hosts and origins must be loopback. It refuses to start alongside any authentication setting. Host and Origin checks, header stripping and body limits stay on. Logs `AUTHENTICATION IS OFF` and the next step ([ADR-0027](adr/0027-insecure-no-auth.md)). |
+| `BYWARD_GATE_ALLOW_EMPTY` | Allows an empty gate for Google or generic OIDC. It has **no effect with Entra**, the only IdP today. | Logged as a warning at every start |
 
 An empty access gate with single-tenant Entra is allowed: every user of the tenant can sign in. It
 is logged as a warning at every start.
@@ -121,9 +121,9 @@ is logged as a warning at every start.
 
 | Artifact | Form | Lifetime | Notes |
 |---|---|---|---|
-| Access token (`mcpap_at_…`) | Sealed AES-256-GCM, random 96-bit nonce; claims: grant ID, subject, `iat`, `exp`; key ID and format version in the header | 1 h, capped at the grant's expiry; 30 s clock leeway | Validated without a store read: open → time → deny list |
-| Authorization code (`mcpap_ac_…`) | Sealed as above, plus a single-use row in the store | 60 s | Reuse, or redemption with the wrong client, redirect URI or verifier, revokes the grant |
-| Refresh token (`mcpap_rt_…`) | 32 random bytes; only the SHA-256 hash is stored | 30 days absolute, 14 days idle | Issued only with `offline_access`. Rotated on every use. The previous token is accepted again within 30 s; any other reuse revokes the grant. Every refresh also refreshes the IdP tokens and re-runs the gate. |
+| Access token (`byw_at_…`) | Sealed AES-256-GCM, random 96-bit nonce; claims: grant ID, subject, `iat`, `exp`; key ID and format version in the header | 1 h, capped at the grant's expiry; 30 s clock leeway | Validated without a store read: open → time → deny list |
+| Authorization code (`byw_ac_…`) | Sealed as above, plus a single-use row in the store | 60 s | Reuse, or redemption with the wrong client, redirect URI or verifier, revokes the grant |
+| Refresh token (`byw_rt_…`) | 32 random bytes; only the SHA-256 hash is stored | 30 days absolute, 14 days idle | Issued only with `offline_access`. Rotated on every use. The previous token is accepted again within 30 s; any other reuse revokes the grant. Every refresh also refreshes the IdP tokens and re-runs the gate. |
 | IdP tokens | Sealed with the same key ring, purpose `idp-tokens` as associated data | Up to the grant's expiry | Deleted with the grant. Never sent to the client. |
 | Login and consent state | Sealed cookie and sealed form field | 10 min | `state` goes to the IdP only after Allow |
 
@@ -141,7 +141,7 @@ bounds, but there are no settings for that yet.
 
 **Keys:**
 
-- Keys come from `MCP_AUTHPROXY_KEYS_DIR`. The file that sorts last seals; every file opens.
+- Keys come from `BYWARD_KEYS_DIR`. The file that sorts last seals; every file opens.
   World-writable files are refused.
 - One key ring seals access tokens, codes, IdP tokens, login cookies and consent flows. The purpose
   or token type is bound as associated data. ADR-0006 §8 asks for a separate key per purpose; that
@@ -152,17 +152,17 @@ bounds, but there are no settings for that yet.
 
 | Gap | Effect | Tracking |
 |---|---|---|
-| **State is in memory.** SQLite exists (`internal/store/sqlite`) but is not wired (`internal/server/wire.go:93`). | A restart signs every user out: grants, refresh tokens and revocations are lost. **An access token revoked before a restart is accepted again after it, until its `exp` (≤ 1 h).** The validator checks only the deny list, and the list is rebuilt from the empty store. | #50 |
-| **No operator revoke commands.** `revoke-user` and `revoke-all` (ADR-0006 §9, ADR-0010 §11) are not built; `store.RevokeSubject` has no caller. | Revocation is client-initiated (`/revoke`) or automatic (reuse, gate, IdP). An operator can end all access at once by replacing every sealing key and restarting. Cutting off one user takes up to 1 h: block them at Entra or in the gate, and the next refresh fails. | No issue found |
+| **No operator revoke commands.** `revoke-user` and `revoke-all` (ADR-0006 §9, ADR-0010 §11) are not built; `store.RevokeSubject` has no caller. | Revocation is client-initiated (`/revoke`) or automatic (reuse, gate, IdP). An operator can end all access at once by replacing every sealing key and restarting. Cutting off one user takes up to 1 h: block them at Entra or in the gate, and the next refresh fails. | #101 |
 | ASVS 5.0.0 10.7.3 (user review and revocation of granted access) | Not met for users. The design leaves it to the operator until a v0.2 "connected apps" page, and the operator commands above are missing too. | ADR-0010 §11; v0.2 |
 | Remembered consent | Not built: every client is asked every time. That is stricter than ADR-0010 §2–3. | #90 |
 | Consent answer table is per replica, in memory, capped at 10,000 | Double-submit protection holds within one process. A full table forgets the newest flow. It matters only with several replicas, which need v0.2's PostgreSQL. | No issue (`internal/broker/answers.go`) |
-| Restore detection and restore drill | The SQLite store detects a restore (`Startup().Restored`), but nothing acts on it while SQLite is unwired. There is no backup to restore today. | #53, #50 |
+| Restore drill | Restore detection works (a restored store starts a new epoch, refuses refresh tokens from before the restore, logs it and writes a `store_restored` audit record), but no automated test restores a real backup yet. | #53 |
 | Refresh drops the IdP's new tokens when a later step fails | Fails closed: an unneeded sign-in with IdPs that revoke rotated refresh tokens. Entra is not affected. | #92 |
-| **Legacy MCP session binding (invariant 13) for HTTP upstreams** | `Mcp-Session-Id` is relayed unchanged. A user with a valid token who learns another user's session ID can use that session, and the upstream cannot tell, because it receives no identity. | ADR-0004 §2; #60 covers stdio only |
-| **`govulncheck` is not in CI** (invariant 18, ADR-0018 §12, ADR-0026 §3) | Known-vulnerable dependencies are not caught automatically. Dependabot (14-day cooldown) and the weekly Go-patch check still run. | No issue found |
-| No response-header timeout toward the upstream (ADR-0018 §7) | An upstream that accepts but never answers holds an in-flight slot until the client disconnects | No issue found (`internal/upstream/relay/relay.go`) |
-| Login cookie can exceed 4 KB with a hostile `state` | The sign-in fails at the callback. Fails closed. | #94 (fix in PR #95) |
+| **Legacy MCP session binding (invariant 13) for HTTP upstreams** | `Mcp-Session-Id` is relayed unchanged. A user with a valid token who learns another user's session ID can use that session, and the upstream cannot tell, because it receives no identity. | #100 (ADR-0004 §2) |
+| **`govulncheck` is not in CI** (invariant 18, ADR-0018 §12, ADR-0026 §3) | Known-vulnerable dependencies are not caught automatically. Dependabot alerts and security updates and the weekly Go-patch check still run. | #102 |
+| No response-header timeout toward the upstream (ADR-0018 §7) | An upstream that accepts but never answers holds an in-flight slot until the client disconnects | #103 |
+| Removing a sealing key ends grants whose IdP tokens it sealed | Those users sign in again at their next refresh | #104 |
+| Internal listener has no Host check; secret files get no permission check | Defence in depth only: the internal listener should be on loopback or a private network | #105 |
 | Entra certificate credential | `private_key_jwt` exists in `internal/idp`, but no setting selects it; only a client secret is configurable | ADR-0012 §5 |
 
 ## Dependencies and supply chain
@@ -173,7 +173,7 @@ Direct modules (`go.mod`):
 |---|---|---|
 | `github.com/go-jose/go-jose/v4` | v4.1.6 | Verifying IdP ID tokens, client assertions and the JWKS. The only JOSE/OIDC library: no go-oidc, no x/oauth2 ([ADR-0026](adr/0026-idp-adapters-go-jose-only.md)). |
 | `golang.org/x/net` | v0.62.0 | `idna`: shows punycode on the consent page |
-| `modernc.org/sqlite` | v1.61.0 | The pure-Go SQLite store. **Not linked into the binary yet** (#50). |
+| `modernc.org/sqlite` | v1.61.0 | The pure-Go SQLite store (the default store). |
 | `github.com/prometheus/client_golang` | v1.25.0 | `/metrics` |
 | `go.opentelemetry.io/otel`, `…/sdk`, `…/trace`, `contrib/exporters/autoexport` | v1.47.0 / v0.72.0 | Traces, used only when `OTEL_TRACES_EXPORTER` is set |
 
@@ -200,6 +200,6 @@ has been published yet (#67).
 ## Reporting a vulnerability
 
 Report privately through GitHub's
-[Report a vulnerability](https://github.com/corker/mcp-authproxy/security/advisories/new). Never
+[Report a vulnerability](https://github.com/byward-dev/byward/security/advisories/new). Never
 open a public issue. The first response comes within 14 days. Details, scope and supported versions
 are in [SECURITY.md](../SECURITY.md).
