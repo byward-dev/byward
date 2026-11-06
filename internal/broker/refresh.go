@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -83,6 +84,9 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	sealed, e, ok := b.refreshIdP(r, g, now)
 	if !ok {
+		if sealed != nil {
+			b.keepIdPTokens(r, g.ID, sealed)
+		}
 		b.tokenFail(w, r, e)
 		return
 	}
@@ -101,6 +105,7 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 		b.tokenFail(w, r, invalid)
 		return
 	case err != nil:
+		b.keepIdPTokens(r, g.ID, sealed) // the IdP may have revoked the tokens the grant holds
 		b.unavailable(w, r, "rotating a refresh token failed", err)
 		return
 	}
@@ -110,7 +115,8 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 
 // refreshIdP renews the grant's IdP tokens and re-checks the user (ADR-0006 §6, ADR-0012). It
 // returns the new sealed IdP tokens, or the error to send; when the IdP says the user must sign in
-// again, or the identity no longer matches or passes the gate, the grant is revoked.
+// again, or the identity no longer matches or passes the gate, the grant is revoked. When the gate
+// cannot decide, it returns the error together with the sealed new tokens, for the caller to keep.
 func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]byte, tokenError, bool) {
 	ctx := r.Context()
 	signInAgain := tokenError{http.StatusBadRequest, "invalid_grant", "sign in again"}
@@ -149,29 +155,59 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 	case id.Subject != g.Subject || id.Issuer != g.Issuer:
 		return end("the IdP returned another user on refresh; grant revoked", "OIDC Core §12.2: sub and iss must not change")
 	}
+	if fresh.RefreshToken == "" {
+		fresh.RefreshToken = old.RefreshToken // the IdP kept its refresh token (idp.Refresher)
+	}
+	failed := tokenError{http.StatusInternalServerError, "server_error", "the proxy could not refresh the sign-in"}
 	if err := b.cfg.Gate.Allow(ctx, *id); err != nil {
 		var d Denial
 		if !errors.As(err, &d) {
 			// A failure to decide is not a denial (the Gate contract): keep the grant and our refresh
-			// token. The IdP's new tokens are dropped, so with an IdP whose refresh tokens are single
-			// use the next refresh fails and the user signs in again.
+			// token, and the IdP's new tokens, since the IdP may have revoked the ones the grant holds.
+			// That grants nothing: only a refresh reads them, and it runs the gate again.
 			b.cfg.Log.ErrorContext(ctx, "the access gate could not decide on refresh", "request_id", logging.RequestID(ctx), "error", err)
-			return nil, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not refresh the sign-in"}, false
+			sealed, _ := b.sealIdPTokens(ctx, g, fresh) // nil when sealing fails: nothing to keep
+			return sealed, failed, false
 		}
 		b.cfg.Audit.Record(r, audit.Event{Name: audit.AccessDenied, Outcome: audit.Failure, Reason: d.DeniedRule(),
 			ClientID: g.ClientID, UserKey: id.Subject, IdP: b.cfg.IdPName, GrantID: g.ID})
 		return end("the access gate refused the user on refresh; grant revoked", "")
 	}
-	if fresh.RefreshToken == "" {
-		fresh.RefreshToken = old.RefreshToken // the IdP kept its refresh token (idp.Refresher)
+	sealed, err := b.sealIdPTokens(ctx, g, fresh)
+	if err != nil {
+		// The IdP's new tokens are lost: nothing safe is left to store. With an IdP whose refresh
+		// tokens are single use, the next refresh fails and the user signs in again (#92).
+		return nil, failed, false
 	}
-	tokJSON, _ := json.Marshal(fresh) //nolint:gosec // G117: marshalled only to be sealed below
+	return sealed, tokenError{}, true
+}
+
+// sealIdPTokens seals the grant's IdP tokens for the store (ADR-0006 §8), logging a failure.
+func (b *Broker) sealIdPTokens(ctx context.Context, g store.Grant, t idp.Tokens) ([]byte, error) {
+	tokJSON, _ := json.Marshal(t) //nolint:gosec // G117: marshalled only to be sealed below
 	sealed, err := b.cfg.IdPTokenBox.Seal(tokJSON, g.ExpiresAt)
 	if err != nil {
 		b.cfg.Log.ErrorContext(ctx, "sealing IdP tokens failed", "request_id", logging.RequestID(ctx), "error", err)
-		return nil, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not refresh the sign-in"}, false
+		return nil, err
 	}
-	return []byte(sealed), tokenError{}, true
+	return []byte(sealed), nil
+}
+
+// keepIdPTokensTimeout bounds the detached store write in keepIdPTokens.
+const keepIdPTokensTimeout = 5 * time.Second
+
+// keepIdPTokens stores the IdP's new tokens for a refresh that renewed them but failed afterwards,
+// so an IdP that revoked the old refresh token does not force a new sign-in (#92). It is best
+// effort: the refresh fails either way, and a grant revoked meanwhile stays revoked.
+func (b *Broker) keepIdPTokens(r *http.Request, grantID string, sealed []byte) {
+	ctx := r.Context()
+	// Detached from cancellation: a client that gave up is a common reason the refresh failed, and
+	// the IdP has already spent the old token either way.
+	keep, cancel := context.WithTimeout(context.WithoutCancel(ctx), keepIdPTokensTimeout)
+	defer cancel()
+	if err := b.cfg.Store.SetIdPTokens(keep, grantID, sealed); err != nil && !errors.Is(err, store.ErrNotFound) {
+		b.cfg.Log.WarnContext(ctx, "keeping the IdP's new tokens failed", "request_id", logging.RequestID(ctx), "error", err)
+	}
 }
 
 // narrowScopes returns the requested scopes when they are a subset of the grant's (RFC 6749 §6),

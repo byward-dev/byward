@@ -47,6 +47,8 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		{"RefreshTokenNeedsAGrantAndAUniqueHash", refreshTokenNeedsAGrantAndAUniqueHash},
 		{"RevokeGrantDeletesItsRowsAndRecordsARevocation", revokeGrantDeletesItsRowsAndRecordsARevocation},
 		{"UpdateGrantSetsExpiryAndRefusesBadInput", updateGrantSetsExpiryAndRefusesBadInput},
+		{"SetIdPTokensReplacesALiveGrantsTokensOnly", setIdPTokensReplacesALiveGrantsTokensOnly},
+		{"SetIdPTokensAndRevokeSubjectNeverRestoreAGrant", setIdPTokensAndRevokeSubjectNeverRestoreAGrant},
 		{"RotateMakesTheNextTokenCurrent", rotateMakesTheNextTokenCurrent},
 		{"RetryWithinGraceRotatesTheSuccessor", retryWithinGraceRotatesTheSuccessor},
 		{"ReuseRevokesTheGrant", reuseRevokesTheGrant},
@@ -702,6 +704,61 @@ func updateGrantSetsExpiryAndRefusesBadInput(t *testing.T, s store.Store) {
 	}
 	wantErr(t, "UpdateGrant of an unknown grant", s.UpdateGrant(ctx, "nope", later), store.ErrNotFound)
 	wantErr(t, "UpdateGrant to CreatedAt", s.UpdateGrant(ctx, "g1", g.CreatedAt), store.ErrInvalid)
+}
+
+// SetIdPTokens replaces a live grant's sealed IdP tokens with a copy; an unknown or revoked grant is
+// ErrNotFound and nothing is written; empty tokens are ErrInvalid.
+func setIdPTokensReplacesALiveGrantsTokensOnly(t *testing.T, s store.Store) {
+	mustCreate(t, s, grant("g1", "tid:alice"))
+	fresh := []byte("refreshed-idp-tokens")
+	must(t, s.SetIdPTokens(ctx, "g1", fresh))
+	fresh[0] = 'X'
+	if got, _ := s.Grant(ctx, "g1"); string(got.IdPTokens) != "refreshed-idp-tokens" {
+		t.Fatalf("IdPTokens = %q, want the replacement, as a copy", got.IdPTokens)
+	}
+	wantErr(t, "SetIdPTokens without tokens", s.SetIdPTokens(ctx, "g1", nil), store.ErrInvalid)
+	wantErr(t, "SetIdPTokens of an unknown grant", s.SetIdPTokens(ctx, "nope", []byte("t")), store.ErrNotFound)
+	must(t, s.RevokeGrant(ctx, "g1", t0.Add(time.Minute)))
+	wantErr(t, "SetIdPTokens of a revoked grant", s.SetIdPTokens(ctx, "g1", []byte("t")), store.ErrNotFound)
+	wantErr(t, "the revoked grant after SetIdPTokens", func() error { _, err := s.Grant(ctx, "g1"); return err }(), store.ErrNotFound)
+}
+
+// Whatever the interleaving, SetIdPTokens never brings back a grant RevokeSubject deletes: it
+// either lands first and the grant is then deleted, or it finds the grant gone (ErrNotFound).
+// A probabilistic smoke test for check-then-act across lock sections; the guarantee is the
+// sequential ErrNotFound case in setIdPTokensReplacesALiveGrantsTokensOnly.
+func setIdPTokensAndRevokeSubjectNeverRestoreAGrant(t *testing.T, s store.Store) {
+	const rounds = 50
+	before := t0.Add(time.Hour)
+	for i := range rounds {
+		id := fmt.Sprintf("tid:user-%d", i)
+		mustCreate(t, s, grant(id, id))
+	}
+	var wg sync.WaitGroup
+	for i := range rounds {
+		id := fmt.Sprintf("tid:user-%d", i)
+		start := make(chan struct{})
+		wg.Go(func() {
+			<-start
+			if err := s.SetIdPTokens(ctx, id, []byte("refreshed")); err != nil && !errors.Is(err, store.ErrNotFound) {
+				t.Errorf("SetIdPTokens %s: %v", id, err)
+			}
+		})
+		wg.Go(func() {
+			<-start
+			if err := s.RevokeSubject(ctx, id, before, before); err != nil {
+				t.Errorf("RevokeSubject %s: %v", id, err)
+			}
+		})
+		close(start)
+	}
+	wg.Wait()
+	for i := range rounds {
+		id := fmt.Sprintf("tid:user-%d", i)
+		if _, err := s.Grant(ctx, id); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("grant %s survived its subject's revocation: %v", id, err)
+		}
+	}
 }
 
 func rotateMakesTheNextTokenCurrent(t *testing.T, s store.Store) {

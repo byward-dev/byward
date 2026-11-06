@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -305,6 +306,65 @@ func TestIdPOutageAnswers503AndKeepsTheRefreshToken(t *testing.T) {
 	e.fake.Set(fakeidp.FailToken("refresh_token", nil))
 	if res, body := e.refresh(t, rt, ""); res.StatusCode != http.StatusOK {
 		t.Fatalf("after the outage the refresh token was spent: %d %v", res.StatusCode, body)
+	}
+}
+
+// A refresh that renewed the IdP tokens but could not rotate ours keeps the IdP's new tokens, so
+// an IdP that revokes a redeemed refresh token does not force a new sign-in on the retry (#92).
+func TestARotationFailureKeepsTheIdPsNewTokens(t *testing.T) {
+	e := newEnv(t)
+	e.fake.Set(fakeidp.WithSingleUseRefreshTokens(true))
+	rt := e.offline(t)["refresh_token"].(string)
+	e.st.rotateDown.Store(true)
+	res, body := e.refresh(t, rt, "")
+	wantOAuthError(t, res, body, http.StatusServiceUnavailable, "temporarily_unavailable")
+	e.st.rotateDown.Store(false)
+	if res, body := e.refresh(t, rt, ""); res.StatusCode != http.StatusOK {
+		t.Fatalf("the retry after the store recovered: %d %v, want 200 without a new sign-in", res.StatusCode, body)
+	}
+}
+
+// A client that gives up mid-refresh is a common reason a refresh fails after the IdP renewed its
+// tokens: they are kept anyway, so the retry works without a new sign-in (#92).
+func TestAClientThatGivesUpMidRefreshKeepsTheIdPsNewTokens(t *testing.T) {
+	var hang atomic.Bool
+	entered := make(chan struct{}, 1)
+	e := newEnv(t, func(c *Config) {
+		c.Gate = gateFunc(func(ctx context.Context, _ idp.Identity) error {
+			if !hang.Load() {
+				return nil
+			}
+			entered <- struct{}{}
+			select { // the gate is still deciding when the client leaves
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(10 * time.Second):
+				t.Error("the client's cancellation never reached the gate")
+				return errors.New("the client never left")
+			}
+		})
+	})
+	e.fake.Set(fakeidp.WithSingleUseRefreshTokens(true))
+	rt := e.offline(t)["refresh_token"].(string)
+	hang.Store(true)
+	ctx, cancel := context.WithCancel(context.Background())
+	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {rt}, "client_id": {clientID}}
+	r, _ := http.NewRequestWithContext(ctx, http.MethodPost, e.srv.URL+"/token", strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	gone := make(chan struct{})
+	go func() {
+		defer close(gone)
+		if res, err := e.srv.Client().Do(r); err == nil {
+			_ = res.Body.Close()
+		}
+	}()
+	<-entered
+	cancel()
+	<-gone
+	hang.Store(false)
+	// The abandoned refresh holds the grant's lock until it has kept the tokens, so this one waits.
+	if res, body := e.refresh(t, rt, ""); res.StatusCode != http.StatusOK {
+		t.Fatalf("the retry after the client gave up: %d %v, want 200 without a new sign-in", res.StatusCode, body)
 	}
 }
 
@@ -638,23 +698,23 @@ func TestClientRevocationIsAudited(t *testing.T) {
 }
 
 // A gate that cannot decide (not a Denial) is a server error on refresh, as at sign-in: the grant
-// and our refresh token survive, and nothing is audited as a denial. The IdP's new tokens are
-// dropped, so an IdP with single-use refresh tokens makes the next refresh a sign-in again.
-func TestGateFailureOnRefreshKeepsTheGrant(t *testing.T) {
+// and our refresh token survive, and nothing is audited as a denial. The IdP's new tokens are kept
+// (#92), so the refresh after the gate recovers works without a new sign-in, whatever the IdP does
+// with its refresh tokens.
+func TestGateFailureOnRefreshKeepsTheGrantAndTheIdPsNewTokens(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		singleUse bool
-		next      int
+		name string
+		idp  fakeidp.Option
 	}{
-		{"IdP refresh token reusable", false, http.StatusOK},
-		{"IdP refresh token single use", true, http.StatusBadRequest},
+		{"IdP refresh token single use", fakeidp.WithSingleUseRefreshTokens(true)}, // the IdP revoked the token the grant held
+		{"IdP keeps its refresh token", fakeidp.WithRefreshTokenRotation(false)},   // the kept tokens reuse the old one
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var gateErr error
 			e := newEnv(t, func(c *Config) {
 				c.Gate = gateFunc(func(context.Context, idp.Identity) error { return gateErr })
 			})
-			e.fake.Set(fakeidp.WithSingleUseRefreshTokens(tc.singleUse))
+			e.fake.Set(tc.idp)
 			rt := e.offline(t)["refresh_token"].(string)
 			gateErr = errors.New("directory lookup failed")
 			res, body := e.refresh(t, rt, "")
@@ -667,11 +727,8 @@ func TestGateFailureOnRefreshKeepsTheGrant(t *testing.T) {
 			}
 			gateErr = nil
 			res, body = e.refresh(t, rt, "")
-			if res.StatusCode != tc.next {
-				t.Fatalf("refresh after the gate recovered: %d %v, want %d", res.StatusCode, body, tc.next)
-			}
-			if tc.singleUse && (body["error"] != "invalid_grant" || !e.grantGone(t, firstGrant(e.st))) {
-				t.Fatalf("with a spent IdP refresh token: %v, want invalid_grant and the grant revoked (sign in again)", body)
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("refresh after the gate recovered: %d %v, want 200 without a new sign-in", res.StatusCode, body)
 			}
 		})
 	}

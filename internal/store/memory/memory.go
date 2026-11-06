@@ -110,6 +110,22 @@ func (s *Store) UpdateGrant(_ context.Context, id string, expiresAt time.Time) e
 	return nil
 }
 
+// SetIdPTokens implements store.Grants.
+func (s *Store) SetIdPTokens(_ context.Context, id string, sealed []byte) error {
+	if len(sealed) == 0 {
+		return store.ErrInvalid
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	g, ok := s.grants[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	g.IdPTokens = slices.Clone(sealed)
+	s.grants[id] = g
+	return nil
+}
+
 // RevokeSubject implements store.Grants.
 func (s *Store) RevokeSubject(_ context.Context, subject string, before, at time.Time) error {
 	if subject == "" {
