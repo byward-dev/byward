@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Contract test: the TypeScript SDK's requireBearerAuth with the verifier docs/reference/identity-assertion.md shows (scripts/assertion/run.sh).",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.32.1",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "jose": "6.2.13"
   }
 }
