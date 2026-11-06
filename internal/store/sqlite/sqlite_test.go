@@ -630,3 +630,14 @@ func pathIn(msg string) string {
 	}
 	return ""
 }
+
+func TestPingAnswersWhileOpenAndFailsAfterClose(t *testing.T) {
+	s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
+	if err := s.Ping(ctx); err != nil {
+		t.Fatalf("Ping on an open store: %v", err)
+	}
+	must(t, s.Close())
+	if err := s.Ping(ctx); err == nil {
+		t.Fatal("Ping succeeded on a closed store")
+	}
+}

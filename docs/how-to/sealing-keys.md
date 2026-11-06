@@ -4,18 +4,19 @@ The broker seals its access tokens and authorization codes with keys you provide
 ([ADR-0006](../adr/0006-token-model.md), [ADR-0007](../adr/0007-state-and-storage.md) §5). Keys never
 live in the store, and the proxy never generates them outside the single-node development mode.
 
-> **Status:** the package that reads keys exists (`internal/token`); the setting that points the
-> proxy at the key directory is added with the broker.
-
 ## The key directory
+
+The proxy reads keys from `MCP_AUTHPROXY_KEYS_DIR`, by default `keys` in the data directory:
+`/var/lib/mcp-authproxy/keys` with the default `MCP_AUTHPROXY_DATA_DIR`. Create it and the first key
+before the first start; a missing or empty directory stops startup with an error naming the path.
 
 - One file per key. **The file name is the key ID**: letters, digits, `.`, `_` and `-`, at most 64
   characters.
 - The content is the standard base64 encoding of 32 random bytes:
 
   ```sh
-  install -d -m 0700 keys
-  (umask 077; openssl rand -base64 32 > "keys/$(date -u +%Y-%m-%d)")
+  install -d -m 0700 /var/lib/mcp-authproxy/keys
+  (umask 077; openssl rand -base64 32 > "/var/lib/mcp-authproxy/keys/$(date -u +%Y-%m-%d)")
   ```
 
 - Files and directories starting with `.` are ignored (Kubernetes secret volumes keep `..data`

@@ -23,7 +23,7 @@ var allowed = map[string]bool{
 	"request_id": true, "method": true, "path": true, "status": true, "duration_ms": true,
 	"mcp_method": true, "remote_ip": true, "host": true, "origin": true, "reason": true,
 	"error": true, "listen": true, "version": true, "relaxation": true,
-	"setting": true, "value": true, "source": true, "panic": true,
+	"setting": true, "value": true, "source": true, "panic": true, "epoch": true,
 	// stdio upstream processes (ADR-0003 §5, ADR-0021 §6): stderr lines are upstream-controlled text
 	// and still pass the bearer-shaped redaction.
 	"upstream": true, "process": true, "user_key": true, "line": true, "truncated": true,

@@ -103,6 +103,16 @@ func Open(ctx context.Context, opts Options) (*Store, error) {
 	return s, nil
 }
 
+// Ping checks that the database answers, for the readiness probe (ADR-0021 §10). It waits for the
+// one connection, so a long write delays it; give it a deadline.
+func (s *Store) Ping(ctx context.Context) error {
+	var one int
+	if err := s.db.QueryRowContext(ctx, "SELECT 1").Scan(&one); err != nil {
+		return fmt.Errorf("sqlite store: ping: %w", err)
+	}
+	return nil
+}
+
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }
 

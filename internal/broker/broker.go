@@ -36,9 +36,9 @@ const (
 	LoginLifetime  = 10 * time.Minute
 	// RefreshIdleLifetime: a refresh token unused for this long expires (ADR-0006 §5).
 	RefreshIdleLifetime = 14 * 24 * time.Hour
-	// DefaultRefreshGrace and MaxRefreshGrace bound the reuse grace window (ADR-0006 §4).
-	DefaultRefreshGrace = 30 * time.Second
-	MaxRefreshGrace     = 60 * time.Second
+	// MaxRefreshGrace bounds the reuse grace window (ADR-0006 §4); its default is the
+	// refresh-grace setting's.
+	MaxRefreshGrace = 60 * time.Second
 )
 
 // IdP is what the broker needs from the IdP adapter: sign-in, and refresh on every token refresh

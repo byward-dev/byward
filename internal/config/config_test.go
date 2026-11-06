@@ -4,18 +4,19 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
+// base is the Entra quickstart: the only settings an operator must set (ADR-0020 §8).
 var base = []string{
 	"MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp",
 	"MCP_AUTHPROXY_UPSTREAM_URL=http://upstream:9000/mcp",
 	"MCP_AUTHPROXY_ENTRA_TENANT=00000000-0000-0000-0000-000000000001",
 	"MCP_AUTHPROXY_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002",
 	"MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE=/run/secrets/entra",
-	"MCP_AUTHPROXY_KEYS_DIR=/var/lib/mcp-authproxy/keys",
-	"MCP_AUTHPROXY_STATIC_CLIENTS_FILE=/etc/mcp-authproxy/clients.json",
 }
 
 // baseFiles serves the secret file named in base.
@@ -264,8 +265,24 @@ func TestSecretFileNeedsAFileReader(t *testing.T) {
 	}
 }
 
+// ADR-0020 §8: the Entra quickstart needs at most five settings, and each of them is required.
+func TestEntraQuickstartNeedsFiveSettings(t *testing.T) {
+	if len(base) > 5 {
+		t.Fatalf("the quickstart has %d settings, want at most 5: %v", len(base), base)
+	}
+	if _, err := load(t, nil); err != nil {
+		t.Fatalf("the quickstart does not load: %v", err)
+	}
+	for i := range base {
+		without := append(append([]string{}, base[:i]...), base[i+1:]...)
+		if _, _, err := Load(nil, without, baseFiles); !isConfigError(err) {
+			t.Errorf("without %s: %v, want a configuration error (it is required)", strings.SplitN(base[i], "=", 2)[0], err)
+		}
+	}
+}
+
 func TestBrokerSettingsAreRequired(t *testing.T) {
-	for _, name := range []string{"MCP_AUTHPROXY_ENTRA_TENANT", "MCP_AUTHPROXY_ENTRA_CLIENT_ID", "MCP_AUTHPROXY_KEYS_DIR", "MCP_AUTHPROXY_STATIC_CLIENTS_FILE"} {
+	for _, name := range []string{"MCP_AUTHPROXY_ENTRA_TENANT", "MCP_AUTHPROXY_ENTRA_CLIENT_ID"} {
 		if _, err := load(t, nil, name+"="); !isConfigError(err) || !strings.Contains(err.Error(), name+" is required") {
 			t.Errorf("%s: %v", name, err)
 		}
@@ -348,5 +365,91 @@ func TestTrustedProxiesTakeCIDRsAndAddresses(t *testing.T) {
 	}
 	if _, _, err := Load(nil, noAuthEnv("MCP_AUTHPROXY_TRUSTED_PROXIES=proxy.internal"), nil); err == nil || !strings.Contains(err.Error(), "MCP_AUTHPROXY_TRUSTED_PROXIES") {
 		t.Errorf("a hostname must be rejected with the setting named, got %v", err)
+	}
+}
+
+// The key, client and store paths default into the data directory; the restore counter sits next to
+// the keys, outside the state directory (ADR-0007 §6, §9).
+func TestPathsDefaultIntoTheDataDirectory(t *testing.T) {
+	cases := []struct {
+		name                                string
+		env                                 []string
+		data, keys, clients, store, counter string
+	}{
+		{"defaults", nil, "/var/lib/mcp-authproxy", "/var/lib/mcp-authproxy/keys", "/var/lib/mcp-authproxy/clients.json",
+			"/var/lib/mcp-authproxy/state", "/var/lib/mcp-authproxy/store-writes"},
+		{"another data directory", []string{"MCP_AUTHPROXY_DATA_DIR=/srv/proxy"}, "/srv/proxy", "/srv/proxy/keys", "/srv/proxy/clients.json",
+			"/srv/proxy/state", "/srv/proxy/store-writes"},
+		{"explicit paths", []string{"MCP_AUTHPROXY_KEYS_DIR=/etc/mcp-authproxy/keys", "MCP_AUTHPROXY_STATIC_CLIENTS_FILE=/etc/mcp-authproxy/clients.json",
+			"MCP_AUTHPROXY_STORE_DIR=/data/state"}, "/var/lib/mcp-authproxy", "/etc/mcp-authproxy/keys", "/etc/mcp-authproxy/clients.json",
+			"/data/state", "/etc/mcp-authproxy/store-writes"},
+		{"keys directory with a trailing slash", []string{"MCP_AUTHPROXY_KEYS_DIR=/etc/mcp-authproxy/keys/"}, "/var/lib/mcp-authproxy",
+			"/etc/mcp-authproxy/keys/", "/var/lib/mcp-authproxy/clients.json", "/var/lib/mcp-authproxy/state", "/etc/mcp-authproxy/store-writes"},
+		{"explicit counter file", []string{"MCP_AUTHPROXY_STORE_COUNTER_FILE=/data/counter/writes"}, "/var/lib/mcp-authproxy",
+			"/var/lib/mcp-authproxy/keys", "/var/lib/mcp-authproxy/clients.json", "/var/lib/mcp-authproxy/state", "/data/counter/writes"},
+		// "/var/lib/mcp-authproxy/state-counter" shares a name prefix with the state directory but is not inside it.
+		{"counter beside the state directory with a shared prefix", []string{"MCP_AUTHPROXY_STORE_COUNTER_FILE=/var/lib/mcp-authproxy/state-counter/writes"},
+			"/var/lib/mcp-authproxy", "/var/lib/mcp-authproxy/keys", "/var/lib/mcp-authproxy/clients.json", "/var/lib/mcp-authproxy/state",
+			"/var/lib/mcp-authproxy/state-counter/writes"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := load(t, nil, tc.env...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := []string{c.DataDir, c.KeysDir, c.StaticClientsFile, c.StoreDir, c.StoreCounterFile}
+			if want := []string{tc.data, tc.keys, tc.clients, tc.store, tc.counter}; !slices.Equal(got, want) {
+				t.Fatalf("data, keys, clients, store, counter = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestRefreshGraceDefaultsTo30sAndAcceptsItsBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  []string
+		want time.Duration
+	}{
+		{"default", nil, 30 * time.Second},
+		{"lower bound", []string{"MCP_AUTHPROXY_REFRESH_GRACE=0s"}, 0},
+		{"upper bound", []string{"MCP_AUTHPROXY_REFRESH_GRACE=60s"}, time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := load(t, nil, tc.env...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.RefreshGrace != tc.want {
+				t.Fatalf("grace %v, want %v", c.RefreshGrace, tc.want)
+			}
+		})
+	}
+}
+
+func TestInvalidStoreSettingsAreRejected(t *testing.T) {
+	cases := []struct {
+		name string
+		env  []string
+		want string
+	}{
+		{"relative data directory", []string{"MCP_AUTHPROXY_DATA_DIR=data"}, "MCP_AUTHPROXY_DATA_DIR: want an absolute path"},
+		{"relative state directory", []string{"MCP_AUTHPROXY_STORE_DIR=state"}, "MCP_AUTHPROXY_STORE_DIR: want an absolute path"},
+		{"relative counter file", []string{"MCP_AUTHPROXY_STORE_COUNTER_FILE=writes"}, "MCP_AUTHPROXY_STORE_COUNTER_FILE: want an absolute path"},
+		{"relative keys directory makes a relative default", []string{"MCP_AUTHPROXY_KEYS_DIR=keys"}, "derived from MCP_AUTHPROXY_KEYS_DIR"},
+		{"counter inside the state directory", []string{"MCP_AUTHPROXY_STORE_COUNTER_FILE=/var/lib/mcp-authproxy/state/writes"}, "is inside MCP_AUTHPROXY_STORE_DIR"},
+		{"keys inside the state directory", []string{"MCP_AUTHPROXY_KEYS_DIR=/var/lib/mcp-authproxy/state/keys"}, "keep the keys directory outside the state directory"},
+		{"grace not a duration", []string{"MCP_AUTHPROXY_REFRESH_GRACE=soon"}, "MCP_AUTHPROXY_REFRESH_GRACE: want a duration"},
+		{"grace negative", []string{"MCP_AUTHPROXY_REFRESH_GRACE=-1s"}, "want 0s to 60s"},
+		{"grace over a minute", []string{"MCP_AUTHPROXY_REFRESH_GRACE=61s"}, "want 0s to 60s"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := load(t, nil, tc.env...)
+			if !isConfigError(err) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want a config error containing %q, got %v", tc.want, err)
+			}
+		})
 	}
 }

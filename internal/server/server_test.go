@@ -26,8 +26,6 @@ import (
 	"github.com/corker/mcp-authproxy/internal/health"
 	"github.com/corker/mcp-authproxy/internal/logging"
 	"github.com/corker/mcp-authproxy/internal/resource"
-	"github.com/corker/mcp-authproxy/internal/store"
-	"github.com/corker/mcp-authproxy/internal/store/memory"
 	"github.com/corker/mcp-authproxy/internal/testutil/fakeupstream"
 	"github.com/corker/mcp-authproxy/internal/token"
 )
@@ -451,11 +449,11 @@ func TestOwnOriginIsAlwaysAllowed(t *testing.T) {
 
 func TestNewNamesTheSettingAtFault(t *testing.T) {
 	cases := []struct {
-		name, setting string
-		value         func(t *testing.T) string
+		name, setting, doc string
+		value              func(t *testing.T) string
 	}{
-		{"empty keys dir", "MCP_AUTHPROXY_KEYS_DIR", func(t *testing.T) string { return t.TempDir() }},
-		{"malformed clients file", "MCP_AUTHPROXY_STATIC_CLIENTS_FILE", func(t *testing.T) string {
+		{"empty keys dir", "MCP_AUTHPROXY_KEYS_DIR", "docs/how-to/sealing-keys.md", func(t *testing.T) string { return t.TempDir() }},
+		{"malformed clients file", "MCP_AUTHPROXY_STATIC_CLIENTS_FILE", "docs/reference/static-clients.md", func(t *testing.T) string {
 			p := filepath.Join(t.TempDir(), "clients.json")
 			if err := os.WriteFile(p, []byte(`{"clients":`), 0o600); err != nil {
 				t.Fatal(err)
@@ -466,17 +464,19 @@ func TestNewNamesTheSettingAtFault(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			environ := append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp")
+			path := c.value(t)
 			for i, kv := range environ {
 				if strings.HasPrefix(kv, c.setting+"=") {
-					environ[i] = c.setting + "=" + c.value(t)
+					environ[i] = c.setting + "=" + path
 				}
 			}
 			cfg, _, err := config.Load(nil, environ, os.ReadFile)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))); err == nil || !strings.HasPrefix(err.Error(), c.setting+":") {
-				t.Fatalf("err = %v, want it to start with %q", err, c.setting+":")
+			_, err = New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			if err == nil || !strings.HasPrefix(err.Error(), c.setting+":") || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), c.doc) {
+				t.Fatalf("err = %v, want it to start with %q and name %s and %s", err, c.setting+":", path, c.doc)
 			}
 		})
 	}
@@ -732,10 +732,7 @@ func TestRouteLabelsNeverCarryRequestDetails(t *testing.T) {
 	}
 }
 
-type pingStore struct {
-	store.Store
-	err error
-}
+type pingStore struct{ err error }
 
 func (p pingStore) Ping(context.Context) error { return p.err }
 
@@ -748,13 +745,12 @@ func TestReadinessIsKeysAndStoreOnly(t *testing.T) {
 	}
 	for _, c := range []struct {
 		name     string
-		st       store.Store
+		st       pinger
 		wantCode int
 		wantBody string
 	}{
-		{"memory store", memory.New(), 200, `{"checks":{"keys":"ok","store":"ok"},"status":"ok"}`},
-		{"store reachable", pingStore{memory.New(), nil}, 200, `{"checks":{"keys":"ok","store":"ok"},"status":"ok"}`},
-		{"store down", pingStore{memory.New(), errors.New("dial /var/lib/db: refused")}, 503, `{"checks":{"keys":"ok","store":"fail"},"status":"unavailable"}`},
+		{"store reachable", pingStore{nil}, 200, `{"checks":{"keys":"ok","store":"ok"},"status":"ok"}`},
+		{"store down", pingStore{errors.New("dial /var/lib/db: refused")}, 503, `{"checks":{"keys":"ok","store":"fail"},"status":"unavailable"}`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			mux := http.NewServeMux()

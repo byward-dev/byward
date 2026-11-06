@@ -38,6 +38,7 @@ func authEnv(t testing.TB) []string {
 		"MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE=" + filepath.Join(dir, "secret"),
 		"MCP_AUTHPROXY_KEYS_DIR=" + keys,
 		"MCP_AUTHPROXY_STATIC_CLIENTS_FILE=" + filepath.Join(dir, "clients.json"),
+		"MCP_AUTHPROXY_STORE_DIR=" + filepath.Join(dir, "state"), // the counter file defaults to dir/store-writes
 	}
 }
 

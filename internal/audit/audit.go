@@ -31,6 +31,7 @@ const (
 	ConsentGranted      = "consent_granted"       // the user allowed the client on the consent page
 	ConsentDenied       = "consent_denied"        // the user denied the client on the consent page
 	RateLimited         = "rate_limited"          // an OAuth endpoint refused a request over its per-address budget
+	StoreRestored       = "store_restored"        // startup found the store restored from an older copy; a new epoch began (ADR-0007 §9)
 )
 
 // Outcomes.
@@ -53,6 +54,7 @@ type Event struct {
 	IdP         string // the IdP adapter name, e.g. "entra"
 	Host        string
 	Origin      string
+	Epoch       int64 // the store epoch (store_restored); 0 means not set
 }
 
 // Observer is told about every event, including suppressed ones (metrics count them all).
@@ -122,6 +124,9 @@ func (l *Log) write(ctx context.Context, e Event, ip string, suppressed int) {
 		if f.v != "" {
 			attrs = append(attrs, slog.String(f.k, f.v))
 		}
+	}
+	if e.Epoch > 0 {
+		attrs = append(attrs, slog.Int64("epoch", e.Epoch))
 	}
 	if suppressed > 0 {
 		attrs = append(attrs, slog.Int("suppressed", suppressed))
