@@ -56,7 +56,7 @@ func TestEveryInvalidGateListIsReported(t *testing.T) {
 	}
 }
 
-func TestEmptyGateWarnsAtStartup(t *testing.T) {
+func TestOnlyAnEmptyGateWarnsAtStartup(t *testing.T) {
 	for name, tc := range map[string]struct {
 		extra []string
 		warn  bool
