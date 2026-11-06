@@ -27,7 +27,8 @@ Hub), resource-server-only (Envoy Agent Router, Azure APIM, Kong), language-boun
    `aud`, v1/v2 issuers, no DCR/CIMD, exact App ID URI matching for `resource`) and
    On-Behalf-Of to downstream APIs.
 4. **Permanent non-goals:** routing/aggregation of multiple upstreams, a policy language,
-   rate limiting, credential vaulting for arbitrary third-party SaaS. These belong to gateways.
+   rate limiting of MCP traffic, credential vaulting for arbitrary third-party SaaS. These belong
+   to gateways.
 
 ## Consequences
 
@@ -44,3 +45,11 @@ Hub), resource-server-only (Envoy Agent Router, Azure APIM, Kong), language-boun
   already compete there.
 - **Adopt agentgateway instead of building** — rejected for the wedge: it is a full gateway
   (YAML, CEL, multiplexing) in Rust; the gap is a minimal Go auth-only binary.
+
+## Amendment 2026-11-06 (rate limiting)
+
+The rate-limiting non-goal in Decision 4 means rate limiting of MCP traffic, which is a gateway
+concern. The proxy's own OAuth endpoints (`/authorize`, `/consent`, `/callback/<idp>`, `/token`,
+`/register`, `/revoke`) are rate-limited per client address as abuse protection
+([ADR-0018](0018-hardening.md) §8). That protects the authorization server itself and is part of
+the auth scope.
