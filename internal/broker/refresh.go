@@ -84,6 +84,9 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	sealed, e, ok := b.refreshIdP(r, g, now)
 	if !ok {
+		if sealed != nil {
+			b.keepIdPTokens(r, g.ID, sealed)
+		}
 		b.tokenFail(w, r, e)
 		return
 	}
@@ -112,7 +115,8 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 
 // refreshIdP renews the grant's IdP tokens and re-checks the user (ADR-0006 §6, ADR-0012). It
 // returns the new sealed IdP tokens, or the error to send; when the IdP says the user must sign in
-// again, or the identity no longer matches or passes the gate, the grant is revoked.
+// again, or the identity no longer matches or passes the gate, the grant is revoked. When the gate
+// cannot decide, it returns the error together with the sealed new tokens, for the caller to keep.
 func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]byte, tokenError, bool) {
 	ctx := r.Context()
 	signInAgain := tokenError{http.StatusBadRequest, "invalid_grant", "sign in again"}
@@ -162,10 +166,8 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 			// token, and the IdP's new tokens, since the IdP may have revoked the ones the grant holds.
 			// That grants nothing: only a refresh reads them, and it runs the gate again.
 			b.cfg.Log.ErrorContext(ctx, "the access gate could not decide on refresh", "request_id", logging.RequestID(ctx), "error", err)
-			if sealed, err := b.sealIdPTokens(ctx, g, fresh); err == nil {
-				b.keepIdPTokens(r, g.ID, sealed)
-			}
-			return nil, failed, false
+			sealed, _ := b.sealIdPTokens(ctx, g, fresh) // nil when sealing fails: nothing to keep
+			return sealed, failed, false
 		}
 		b.cfg.Audit.Record(r, audit.Event{Name: audit.AccessDenied, Outcome: audit.Failure, Reason: d.DeniedRule(),
 			ClientID: g.ClientID, UserKey: id.Subject, IdP: b.cfg.IdPName, GrantID: g.ID})
@@ -191,12 +193,19 @@ func (b *Broker) sealIdPTokens(ctx context.Context, g store.Grant, t idp.Tokens)
 	return []byte(sealed), nil
 }
 
+// keepIdPTokensTimeout bounds the detached store write in keepIdPTokens.
+const keepIdPTokensTimeout = 5 * time.Second
+
 // keepIdPTokens stores the IdP's new tokens for a refresh that renewed them but failed afterwards,
 // so an IdP that revoked the old refresh token does not force a new sign-in (#92). It is best
 // effort: the refresh fails either way, and a grant revoked meanwhile stays revoked.
 func (b *Broker) keepIdPTokens(r *http.Request, grantID string, sealed []byte) {
 	ctx := r.Context()
-	if err := b.cfg.Store.SetIdPTokens(ctx, grantID, sealed); err != nil && !errors.Is(err, store.ErrNotFound) {
+	// Detached from cancellation: a client that gave up is a common reason the refresh failed, and
+	// the IdP has already spent the old token either way.
+	keep, cancel := context.WithTimeout(context.WithoutCancel(ctx), keepIdPTokensTimeout)
+	defer cancel()
+	if err := b.cfg.Store.SetIdPTokens(keep, grantID, sealed); err != nil && !errors.Is(err, store.ErrNotFound) {
 		b.cfg.Log.WarnContext(ctx, "keeping the IdP's new tokens failed", "request_id", logging.RequestID(ctx), "error", err)
 	}
 }

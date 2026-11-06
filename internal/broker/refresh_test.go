@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -320,6 +321,49 @@ func TestARotationFailureKeepsTheIdPsNewTokens(t *testing.T) {
 	e.st.rotateDown.Store(false)
 	if res, body := e.refresh(t, rt, ""); res.StatusCode != http.StatusOK {
 		t.Fatalf("the retry after the store recovered: %d %v, want 200 without a new sign-in", res.StatusCode, body)
+	}
+}
+
+// A client that gives up mid-refresh is a common reason a refresh fails after the IdP renewed its
+// tokens: they are kept anyway, so the retry works without a new sign-in (#92).
+func TestAClientThatGivesUpMidRefreshKeepsTheIdPsNewTokens(t *testing.T) {
+	var hang atomic.Bool
+	entered := make(chan struct{}, 1)
+	e := newEnv(t, func(c *Config) {
+		c.Gate = gateFunc(func(ctx context.Context, _ idp.Identity) error {
+			if !hang.Load() {
+				return nil
+			}
+			entered <- struct{}{}
+			select { // the gate is still deciding when the client leaves
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(10 * time.Second):
+				return errors.New("the client never left")
+			}
+		})
+	})
+	e.fake.Set(fakeidp.WithSingleUseRefreshTokens(true))
+	rt := e.offline(t)["refresh_token"].(string)
+	hang.Store(true)
+	ctx, cancel := context.WithCancel(context.Background())
+	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {rt}, "client_id": {clientID}}
+	r, _ := http.NewRequestWithContext(ctx, http.MethodPost, e.srv.URL+"/token", strings.NewReader(form.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	gone := make(chan struct{})
+	go func() {
+		defer close(gone)
+		if res, err := e.srv.Client().Do(r); err == nil {
+			_ = res.Body.Close()
+		}
+	}()
+	<-entered
+	cancel()
+	<-gone
+	hang.Store(false)
+	// The abandoned refresh holds the grant's lock until it has kept the tokens, so this one waits.
+	if res, body := e.refresh(t, rt, ""); res.StatusCode != http.StatusOK {
+		t.Fatalf("the retry after the client gave up: %d %v, want 200 without a new sign-in", res.StatusCode, body)
 	}
 }
 

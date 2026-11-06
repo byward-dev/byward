@@ -93,6 +93,14 @@ func (m *memStore) RotateRefreshToken(ctx context.Context, r store.RotateRequest
 	return m.Store.RotateRefreshToken(ctx, r)
 }
 
+// SetIdPTokens fails on a cancelled context, as the SQL store does.
+func (m *memStore) SetIdPTokens(ctx context.Context, id string, sealed []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return m.Store.SetIdPTokens(ctx, id, sealed)
+}
+
 func newMemStore() *memStore { return &memStore{Store: memory.New()} }
 
 func (m *memStore) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, error) {
