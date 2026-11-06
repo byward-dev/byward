@@ -37,13 +37,24 @@ func Handler(cfg *config.Config, log *slog.Logger, v resource.Validator) http.Ha
 	meta := resource.Metadata{Resource: cfg.PublicURL, Issuer: cfg.Issuer(), Scope: cfg.Scope,
 		Name: cfg.ResourceName, Documentation: cfg.ResourceDocumentation}
 	mux := http.NewServeMux()
-	md := resource.MetadataHandler(meta)
-	for _, p := range meta.Paths() {
-		mux.Handle(p, md)
+	// Without authentication there is no protected-resource metadata and no challenge: clients
+	// that find either start an OAuth flow that cannot succeed (ADR-0027).
+	guard := func(next http.Handler) http.Handler { return resource.Guard(meta, v, next) }
+	if cfg.NoAuth {
+		guard = func(next http.Handler) http.Handler { return next }
+	} else {
+		md := resource.MetadataHandler(meta)
+		for _, p := range meta.Paths() {
+			mux.Handle(p, md)
+		}
 	}
 	up := relay.New(log, cfg.UpstreamURL)
-	mux.Handle(cfg.PublicURL.Path, origin.Origins(log, cfg.AllowedOrigins,
-		mcpMethods(resource.Guard(meta, v, limitBody(MaxMCPBody, admit(MaxInFlight, MaxStreams, up))))))
+	// The proxy's own origin is same-origin and cannot be forged by another site (a DNS-rebinding
+	// page sends its own origin), so it is always allowed; the MCP conformance rebinding scenario
+	// expects it to be accepted.
+	origins := append([]string{cfg.Origin()}, cfg.AllowedOrigins...)
+	mux.Handle(cfg.PublicURL.Path, origin.Origins(log, origins,
+		mcpMethods(guard(limitBody(MaxMCPBody, admit(MaxInFlight, MaxStreams, up))))))
 
 	hosts := append([]string{cfg.PublicURL.Host}, cfg.AllowedHosts...)
 	return recoverer(log, logging.Middleware(log, origin.Hosts(log, hosts, mux)))

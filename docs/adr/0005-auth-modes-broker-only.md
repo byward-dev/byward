@@ -25,7 +25,8 @@ oauth2-proxy #3167, asks for MCP auth in front of Keycloak — which a broker al
 
 1. **v0.1 ships broker mode only.** It is the only mode that works for Entra with MCP clients
    that register themselves (ADR-0001's differentiator).
-2. **No "off" mode.** An auth proxy with auth off is a foot-gun; tests use the fake IdP.
+2. **No "off" mode.** An auth proxy with auth off is a foot-gun; tests use the fake IdP. _Amended by
+   ADR-0027:_ a loopback-only `--insecure-no-auth` exists for trying the proxy out and for tests.
 3. **Resource-server mode may be added later (v0.2+)**, kept additive by three v0.1 seams:
    inbound token validation behind one interface; `authorization_servers` in protected resource
    metadata is a parameter; 401 `scope=` and 403 `insufficient_scope` live in shared middleware.

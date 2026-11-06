@@ -38,6 +38,8 @@ func New(log *slog.Logger, target *url.URL) http.Handler {
 			pr.Out.URL.Path, pr.Out.URL.RawPath = t.Path, t.RawPath
 			pr.Out.Host = ""
 			strip(pr.Out.Header)
+			// A token in the query never reaches the upstream, with or without authentication.
+			pr.Out.URL.RawQuery = withoutAccessToken(pr.Out.URL.RawQuery)
 		},
 		Transport: &http.Transport{
 			Proxy:                 http.ProxyFromEnvironment,
@@ -100,6 +102,24 @@ func New(log *slog.Logger, target *url.URL) http.Handler {
 		}
 		rp.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), captureKey{}, c)))
 	})
+}
+
+// withoutAccessToken drops every access_token parameter and keeps every other byte of the query in
+// its original order: url.Values.Encode would sort and re-escape it (ADR-0003, byte-transparent).
+func withoutAccessToken(raw string) string {
+	if !strings.Contains(raw, "access_token") && !strings.Contains(raw, "%") {
+		return raw
+	}
+	parts := strings.Split(raw, "&")
+	kept := parts[:0]
+	for _, p := range parts {
+		key, _, _ := strings.Cut(p, "=")
+		if k, err := url.QueryUnescape(key); err == nil && k == "access_token" {
+			continue
+		}
+		kept = append(kept, p)
+	}
+	return strings.Join(kept, "&")
 }
 
 func strip(h http.Header) {

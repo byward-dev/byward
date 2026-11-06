@@ -57,6 +57,9 @@ func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer) 
 	for _, r := range cfg.Relaxations {
 		log.Warn("development mode relaxation", "relaxation", r)
 	}
+	if cfg.NoAuth {
+		log.Warn("to require sign-in, remove MCP_AUTHPROXY_INSECURE_NO_AUTH and configure an IdP; see docs/reference/settings.md", "relaxation", "next step")
+	}
 	if err := server.Run(ctx, server.New(cfg, log), log); err != nil {
 		log.Error("stopped", "error", err)
 		return exitRuntime

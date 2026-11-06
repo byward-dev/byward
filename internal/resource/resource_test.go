@@ -109,6 +109,7 @@ func TestGuardBadTokens(t *testing.T) {
 	}
 }
 
+// The relay strips access_token for every mode; Guard only ignores it and keeps the query intact.
 func TestGuardIgnoresTokenInQuery(t *testing.T) {
 	w := serve(Guard(meta(), fakeValidator{}, reached), httptest.NewRequest("POST", "/mcp?x=1&access_token=q", nil))
 	if w.Code != 401 {

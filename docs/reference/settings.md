@@ -16,6 +16,7 @@ Precedence: flag > environment > default. Secrets are read only from files.
 | `--resource-name` | `MCP_AUTHPROXY_RESOURCE_NAME` | — | human-readable resource name in protected resource metadata |
 | `--resource-documentation` | `MCP_AUTHPROXY_RESOURCE_DOCUMENTATION` | — | documentation URL in protected resource metadata |
 | `--log-format` | `MCP_AUTHPROXY_LOG_FORMAT` | json | log format: json or text |
+| `--insecure-no-auth` | `MCP_AUTHPROXY_INSECURE_NO_AUTH` | false | no authentication at all, for trying the proxy out and for tests; loopback only (ADR-0027) |
 | `--dev` | `MCP_AUTHPROXY_DEV` | false | development mode: enables the relaxations it logs at startup |
 
 Actions: `--version [--json]`, `--print-config`, `--help`.

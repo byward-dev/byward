@@ -28,7 +28,7 @@ func TestRelayForwardsBodyVerbatimAndStripsProxyHeaders(t *testing.T) {
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
 	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"_meta":{"traceparent":"00-abc-def-01"}}}`)
-	r := httptest.NewRequest("POST", "https://mcp.example.com/mcp?x=1", bytes.NewReader(body))
+	r := httptest.NewRequest("POST", "https://mcp.example.com/mcp?x=1&access_token=leak", bytes.NewReader(body))
 	r.Header.Set("Authorization", "Bearer secret")
 	r.Header.Set("Forwarded", "for=1.2.3.4")
 	r.Header.Set("X-Forwarded-For", "1.2.3.4")
@@ -111,5 +111,18 @@ func TestRelayDropsUpstreamCORS(t *testing.T) {
 	relayTo(t, up, "/mcp").ServeHTTP(w, httptest.NewRequest("POST", "/mcp", nil))
 	if w.Header().Get("Access-Control-Allow-Origin") != "" || w.Header().Get("Access-Control-Allow-Credentials") != "" || w.Header().Get("Mcp-Session-Id") != "s1" {
 		t.Fatalf("headers = %v", w.Header())
+	}
+}
+func TestAccessTokenIsRemovedWithoutTouchingTheRestOfTheQuery(t *testing.T) {
+	for raw, want := range map[string]string{
+		"b=1&a=%7E&access_token=x":                  "b=1&a=%7E",
+		"access_token=x":                            "",
+		"x=1&access%5Ftoken=y&access_token=z&z=%20": "x=1&z=%20",
+		"q=access_token":                            "q=access_token",
+		"plain=1&b=2":                               "plain=1&b=2",
+	} {
+		if got := withoutAccessToken(raw); got != want {
+			t.Errorf("%q: got %q want %q", raw, got, want)
+		}
 	}
 }

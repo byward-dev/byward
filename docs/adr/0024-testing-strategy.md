@@ -54,7 +54,8 @@ direct one; opening a sealed token took 0.3 µs, signing the ES256 assertion 17 
 4. **MCP conformance, pinned (`0.2.0-alpha.12` until a stable release has the 2026-07-28
    requirements):**
    - **(a)** `server` for both eras against the reference server behind our proxy and a test-only
-     token injector, proving byte-transparency;
+     token injector, proving byte-transparency; _Amended by ADR-0027:_ run against the binary in
+     `--insecure-no-auth` mode; no token injector is needed for this lane.
    - **(b)** `authorization` against the broker, driven by fake-IdP auto-login and a scripted consent
      POST;
    - **(c)** resource-server behaviour (401 shapes, protected-resource metadata, `resource`) in our own
