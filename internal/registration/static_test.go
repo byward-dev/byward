@@ -99,7 +99,8 @@ func TestLoadStaticRejects(t *testing.T) {
 		extra   files
 		wantErr string
 	}{
-		"not JSON":             {file: `{`, wantErr: "unexpected EOF"},
+		"not JSON":             {file: `{`, wantErr: "unexpected end of input"},
+		"wrong type":           {file: `{"clients":[{"client_id":7}]}`, wantErr: "wrong JSON type for field clients.0.client_id at byte"},
 		"trailing data":        {file: entry(ok) + `{}`, wantErr: "unexpected data"},
 		"unknown field":        {file: entry(ok + `,"scope":"x"`), wantErr: "unknown field"},
 		"unknown top field":    {file: `{"clients":[{` + ok + `}],"extra":1}`, wantErr: "unknown field"},
@@ -172,4 +173,33 @@ func weakJWKS(t *testing.T) string {
 	}
 	b, _ := json.Marshal(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &k.PublicKey, KeyID: "w", Use: "sig"}}})
 	return string(b)
+}
+
+// A secret-looking file in any JSON setting must never be echoed into the error (invariant 2).
+func TestJSONErrorsNeverQuoteTheInput(t *testing.T) {
+	const secretish = "dGhpcy1pcy1hLXNlY3JldC12YWx1ZQ"
+	jwtClient := func(field string) string {
+		return `{"clients":[{"client_id":"c","token_endpoint_auth_method":"private_key_jwt","redirect_uris":["https://a.example/cb"],` + field + `}]}`
+	}
+	for name, fs := range map[string]files{
+		"static file is a secret":  {"/etc/mcp/clients.json": secretish + "\n"},
+		"static file starts JSON":  {"/etc/mcp/clients.json": `{"clients":[` + secretish},
+		"unknown field from input": {"/etc/mcp/clients.json": `{"` + secretish + `":1}`},
+		"jwks_file is a secret":    {"/etc/mcp/clients.json": jwtClient(`"jwks_file":"j"`), "/etc/mcp/j": secretish},
+		"jwks_file half JSON":      {"/etc/mcp/clients.json": jwtClient(`"jwks_file":"j"`), "/etc/mcp/j": `{"keys":` + secretish},
+		"inline jwks wrong type":   {"/etc/mcp/clients.json": jwtClient(`"jwks":{"keys":"` + secretish + `"}`)},
+		"secret file is JSON-ish":  {"/etc/mcp/clients.json": `{"clients":[{"client_id":"c","token_endpoint_auth_method":"client_secret_post","redirect_uris":["https://a.example/cb"],"client_secret_file":"s"}]}`, "/etc/mcp/s": "{" + secretish[:8]},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := load(t, fs)
+			if err == nil {
+				t.Fatal("accepted")
+			}
+			for _, leak := range []string{secretish[:4], "'d'", "invalid character"} {
+				if strings.Contains(err.Error(), leak) {
+					t.Fatalf("error %q leaks %q", err, leak)
+				}
+			}
+		})
+	}
 }

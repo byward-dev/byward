@@ -68,6 +68,12 @@ func FuzzLoadStatic(f *testing.F) {
 			if strings.Contains(err.Error(), goodSecret) {
 				t.Fatal("error leaks the secret")
 			}
+			// encoding/json messages quote the input; none may reach the error (invariant 2).
+			for _, m := range []string{"invalid character", "looking for beginning", "json: "} {
+				if strings.Contains(err.Error(), m) {
+					t.Fatalf("decoder message in error: %v", err)
+				}
+			}
 			return
 		}
 		sr := reg.(*StaticRegistry)
