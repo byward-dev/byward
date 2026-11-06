@@ -12,11 +12,11 @@ import (
 
 // registry is every setting the proxy reads, in the order the effective configuration is printed.
 var registry = []Setting{
-	{Name: "public-url", Help: "public URL of the MCP endpoint exactly as users enter it, e.g. https://mcp.example.com/mcp"},
+	{Name: "public-url", Help: "public URL of the MCP endpoint exactly as users enter it, e.g. https://mcp.example.com/mcp; an internationalized host in its ASCII (xn--) form"},
 	{Name: "upstream-url", Help: "URL of the HTTP upstream MCP server"},
 	{Name: "listen", Default: "127.0.0.1:8080", Help: "address to listen on; public addresses only when configured"},
-	{Name: "allowed-origins", Help: "comma-separated Origin values allowed on the MCP endpoint (scheme://host[:port])"},
-	{Name: "allowed-hosts", Help: "comma-separated extra Host values accepted besides the public URL's host"},
+	{Name: "allowed-origins", Help: "comma-separated Origin values allowed on the MCP endpoint (scheme://host[:port]); an internationalized host in its ASCII (xn--) form"},
+	{Name: "allowed-hosts", Help: "comma-separated extra Host values accepted besides the public URL's host; an internationalized host in its ASCII (xn--) form"},
 	{Name: "scope", Default: "mcp", Help: "the scope advertised in protected resource metadata and 401 challenges"},
 	{Name: "resource-name", Help: "human-readable resource name in protected resource metadata"},
 	{Name: "resource-documentation", Help: "documentation URL in protected resource metadata"},
@@ -124,6 +124,9 @@ func validate(v *Values, container bool) (*Config, error) {
 	if err != nil {
 		errs = append(errs, err)
 	} else {
+		if err := asciiHost(c.PublicURL.Hostname()); err != nil {
+			errs = append(errs, errorf("MCP_AUTHPROXY_PUBLIC_URL: %v", err))
+		}
 		if c.PublicURL.Path == "" || strings.HasSuffix(c.PublicURL.Path, "/") {
 			errs = append(errs, errorf("MCP_AUTHPROXY_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://%s/mcp", c.PublicURL.Host))
 		}
@@ -167,6 +170,10 @@ func validate(v *Values, container bool) (*Config, error) {
 	for _, h := range splitList(v.get("allowed-hosts")) {
 		if strings.ContainsAny(h, "/ ") {
 			errs = append(errs, errorf("MCP_AUTHPROXY_ALLOWED_HOSTS: %q is not a host[:port]", h))
+			continue
+		}
+		if err := asciiHost(h); err != nil {
+			errs = append(errs, errorf("MCP_AUTHPROXY_ALLOWED_HOSTS: %v", err))
 			continue
 		}
 		c.AllowedHosts = append(c.AllowedHosts, strings.ToLower(h))
@@ -386,7 +393,20 @@ func normalizeOrigin(o string) (string, error) {
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.User != nil {
 		return "", fmt.Errorf("%q is not an origin (scheme://host[:port])", o)
 	}
+	if err := asciiHost(u.Hostname()); err != nil {
+		return "", err
+	}
 	return strings.ToLower(u.Scheme + "://" + u.Host), nil
+}
+
+// asciiHost refuses a host with non-ASCII characters. Browsers and MCP clients send an
+// internationalized host in its ASCII (xn--) form in Host, Origin and every URL they compare
+// (WHATWG URL "domain to ASCII", RFC 6454 §7.3), so a Unicode host here could never match them.
+func asciiHost(host string) error {
+	if strings.ContainsFunc(host, func(r rune) bool { return r >= 0x80 }) {
+		return fmt.Errorf("the host %q is not ASCII; give its ASCII (xn--) form, which is what browsers and MCP clients send", host)
+	}
+	return nil
 }
 
 func isLoopback(host string) bool {
