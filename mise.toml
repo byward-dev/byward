@@ -21,8 +21,8 @@ run = "go vet ./..."
 run = "golangci-lint run"
 
 [tasks.test]
-description = "Unit tests"
-run = "go test ./..."
+description = "Unit tests (with the race detector)"
+run = "go test -race ./..."
 
 [tasks."test:integration"]
 description = "Integration tests (needs Docker)"

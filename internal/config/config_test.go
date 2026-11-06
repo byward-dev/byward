@@ -1,0 +1,225 @@
+package config
+
+import (
+	"errors"
+	"os"
+	"strings"
+	"testing"
+)
+
+var base = []string{
+	"MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp",
+	"MCP_AUTHPROXY_UPSTREAM_URL=http://upstream:9000/mcp",
+}
+
+func isConfigError(err error) bool {
+	var ce *configError
+	return errors.As(err, &ce)
+}
+
+func load(t *testing.T, args []string, env ...string) (*Config, error) {
+	t.Helper()
+	c, _, err := Load(args, append(append([]string{}, base...), env...), nil)
+	return c, err
+}
+
+func TestDefaults(t *testing.T) {
+	c, err := load(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Listen != "127.0.0.1:8080" || c.LogFormat != "json" || c.Scope != "mcp" || c.Dev {
+		t.Fatalf("unexpected defaults: %+v", c)
+	}
+	if c.Issuer() != "https://mcp.example.com" {
+		t.Fatalf("issuer = %q", c.Issuer())
+	}
+}
+
+func TestFlagBeatsEnvBeatsDefault(t *testing.T) {
+	c, err := load(t, []string{"--listen", "0.0.0.0:9"}, "MCP_AUTHPROXY_LISTEN=127.0.0.1:7", "MCP_AUTHPROXY_LOG_FORMAT=text")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Listen != "0.0.0.0:9" || c.LogFormat != "text" {
+		t.Fatalf("listen=%q log=%q", c.Listen, c.LogFormat)
+	}
+	src := map[string]Source{}
+	for _, v := range c.Values.Effective() {
+		src[v.Setting.Name] = v.Source
+	}
+	if src["listen"] != SourceFlag || src["log-format"] != SourceEnv || src["scope"] != SourceDefault || src["public-url"] != SourceEnv {
+		t.Fatalf("sources: %v", src)
+	}
+}
+
+func TestUnknownEnvSuggestsSetting(t *testing.T) {
+	_, err := load(t, nil, "MCP_AUTHPROXY_PUBLC_URL=x")
+	if !isConfigError(err) || !strings.Contains(err.Error(), "did you mean MCP_AUTHPROXY_PUBLIC_URL?") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestUnknownEnvFarFromAnySettingHasNoSuggestion(t *testing.T) {
+	_, err := load(t, nil, "MCP_AUTHPROXY_ZZZZZZZZZZZZZZ=x")
+	if !isConfigError(err) || strings.Contains(err.Error(), "did you mean") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
+	cases := []struct {
+		name, env, want string
+	}{
+		{"required", "MCP_AUTHPROXY_PUBLIC_URL=", "MCP_AUTHPROXY_PUBLIC_URL is required"},
+		{"trailing slash", "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp/", "MCP_AUTHPROXY_PUBLIC_URL"},
+		{"no path", "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com", "MCP_AUTHPROXY_PUBLIC_URL"},
+		{"query", "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp?x=1", "must not have a query or fragment"},
+		{"fragment", "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp#f", "must not have a query or fragment"},
+		{"http public", "MCP_AUTHPROXY_PUBLIC_URL=http://mcp.example.com/mcp", "must use https"},
+		{"http loopback without dev", "MCP_AUTHPROXY_PUBLIC_URL=http://127.0.0.1:8080/mcp", "needs --dev"},
+		{"credentials", "MCP_AUTHPROXY_UPSTREAM_URL=http://u:p@upstream/mcp", "MCP_AUTHPROXY_UPSTREAM_URL"},
+		{"origin with path", "MCP_AUTHPROXY_ALLOWED_ORIGINS=https://a.example/path", "MCP_AUTHPROXY_ALLOWED_ORIGINS"},
+		{"host with path", "MCP_AUTHPROXY_ALLOWED_HOSTS=a.example/x", "MCP_AUTHPROXY_ALLOWED_HOSTS"},
+		{"host with space", "MCP_AUTHPROXY_ALLOWED_HOSTS=a b", "MCP_AUTHPROXY_ALLOWED_HOSTS"},
+		{"listen without port", "MCP_AUTHPROXY_LISTEN=8080", "MCP_AUTHPROXY_LISTEN"},
+		{"log format", "MCP_AUTHPROXY_LOG_FORMAT=xml", "MCP_AUTHPROXY_LOG_FORMAT"},
+		{"two scopes", "MCP_AUTHPROXY_SCOPE=a b", "MCP_AUTHPROXY_SCOPE"},
+		{"dev not a bool", "MCP_AUTHPROXY_DEV=maybe", "MCP_AUTHPROXY_DEV"},
+		{"documentation not a URL", "MCP_AUTHPROXY_RESOURCE_DOCUMENTATION=javascript:x", "MCP_AUTHPROXY_RESOURCE_DOCUMENTATION"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := load(t, nil, c.env)
+			if !isConfigError(err) || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("want a config error containing %q, got %v", c.want, err)
+			}
+		})
+	}
+}
+
+func TestBaseSettingsAreValid(t *testing.T) {
+	if _, err := load(t, nil); err != nil {
+		t.Fatalf("the base settings the rejection cases build on must load: %v", err)
+	}
+}
+
+func TestDevAllowsLoopbackHTTPAndRecordsIt(t *testing.T) {
+	c, err := load(t, []string{"--dev"}, "MCP_AUTHPROXY_PUBLIC_URL=http://localhost:8080/mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Dev || len(c.Relaxations) != 1 || c.Relaxations[0] != "http public URL on loopback" {
+		t.Fatalf("dev=%v relaxations=%v", c.Dev, c.Relaxations)
+	}
+}
+
+func TestListsAreNormalized(t *testing.T) {
+	c, err := load(t, nil, "MCP_AUTHPROXY_ALLOWED_ORIGINS= https://App.Example ,http://localhost:3000", "MCP_AUTHPROXY_ALLOWED_HOSTS=Internal:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(c.AllowedOrigins, ",") != "https://app.example,http://localhost:3000" || c.AllowedHosts[0] != "internal:8080" {
+		t.Fatalf("origins=%v hosts=%v", c.AllowedOrigins, c.AllowedHosts)
+	}
+}
+
+func TestHelpFlagAsksForUsageListingEnvNames(t *testing.T) {
+	if _, _, err := Load([]string{"-h"}, base, nil); !IsHelp(err) {
+		t.Fatalf("want help, got %v", err)
+	}
+	if !strings.Contains(Usage(), "MCP_AUTHPROXY_PUBLIC_URL") {
+		t.Fatal("usage lacks env names")
+	}
+}
+
+func TestPositionalArgumentIsAConfigError(t *testing.T) {
+	if _, _, err := Load([]string{"extra"}, base, nil); !isConfigError(err) || !strings.Contains(err.Error(), "extra") {
+		t.Fatalf("want config error naming the argument, got %v", err)
+	}
+}
+
+func TestVersionNeedsNoOtherSettings(t *testing.T) {
+	_, act, err := Load([]string{"--version", "--json"}, nil, nil)
+	if err != nil || !act.Version || !act.JSON {
+		t.Fatalf("act=%+v err=%v", act, err)
+	}
+}
+
+// Secrets are exercised with a test registry: slice 1.1 has no secret settings yet.
+var secretReg = []Setting{{Name: "client-secret", Secret: true, Help: "secret"}}
+
+func files(m map[string]string) readFileFunc {
+	return func(p string) ([]byte, error) {
+		if v, ok := m[p]; ok {
+			return []byte(v), nil
+		}
+		return nil, os.ErrNotExist
+	}
+}
+
+func TestSecretFromEnvFile(t *testing.T) {
+	v, err := resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET_FILE=/run/secrets/x"}, files(map[string]string{"/run/secrets/x": "s3cret\n"}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := v.Effective()[0]
+	if got.Raw != "s3cret" || got.Source != SourceFile || got.Display() != "<redacted>" {
+		t.Fatalf("got %+v display=%q", got, got.Display())
+	}
+}
+
+func TestSecretFromFlagFileBeatsEnvFile(t *testing.T) {
+	v, err := resolve(secretReg, []string{"--client-secret-file", "/a"}, []string{"MCP_AUTHPROXY_CLIENT_SECRET_FILE=/b"}, files(map[string]string{"/a": "A", "/b": "B"}), nil)
+	if err != nil || v.get("client-secret") != "A" {
+		t.Fatalf("got %q err=%v", v.get("client-secret"), err)
+	}
+}
+
+func TestSecretFileMissingIsConfigError(t *testing.T) {
+	_, err := resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET_FILE=/nope"}, files(nil), nil)
+	if !isConfigError(err) || !strings.Contains(err.Error(), "MCP_AUTHPROXY_CLIENT_SECRET_FILE") {
+		t.Fatalf("want a config error naming the setting, got %v", err)
+	}
+}
+
+func TestInlineSecretIsReported(t *testing.T) {
+	v, err := resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET=inline"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := v.inlineSecrets(); len(got) != 1 || got[0] != "MCP_AUTHPROXY_CLIENT_SECRET" {
+		t.Fatalf("inline = %v", got)
+	}
+	if v.Effective()[0].Display() != "<redacted>" {
+		t.Fatal("inline secret not redacted")
+	}
+}
+
+func TestSecretHasNoInlineFlag(t *testing.T) {
+	_, err := resolve(secretReg, []string{"--client-secret", "x"}, nil, nil, nil)
+	if !isConfigError(err) {
+		t.Fatalf("want config error, got %v", err)
+	}
+}
+
+func TestInlineSecretRejectedOutsideDevMode(t *testing.T) {
+	v, err := resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET=inline"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := checkInlineSecrets(v, false); !isConfigError(err) || !strings.Contains(err.Error(), "MCP_AUTHPROXY_CLIENT_SECRET_FILE") {
+		t.Fatalf("without dev: want error pointing at the _FILE variable, got %v", err)
+	}
+	relaxed, err := checkInlineSecrets(v, true)
+	if err != nil || !strings.Contains(relaxed, "MCP_AUTHPROXY_CLIENT_SECRET") {
+		t.Fatalf("with dev: relaxation=%q err=%v", relaxed, err)
+	}
+}
+
+func TestSecretFileNeedsAFileReader(t *testing.T) {
+	_, err := resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET_FILE=/run/secrets/x"}, nil, nil)
+	if !isConfigError(err) || !strings.Contains(err.Error(), "not available") {
+		t.Fatalf("got %v", err)
+	}
+}

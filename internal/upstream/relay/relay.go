@@ -1,0 +1,92 @@
+// Package relay is the HTTP upstream: a byte-transparent reverse proxy built on
+// `httputil.ReverseProxy.Rewrite`, never `Director` (ADR-0003, ADR-0018 §6–7).
+package relay
+
+import (
+	"errors"
+	"log/slog"
+	"net"
+	"net/http"
+	"net/http/httputil"
+	"net/textproto"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/corker/mcp-authproxy/internal/logging"
+)
+
+// stripped are removed from every inbound request before anything of ours is set (invariant 16):
+// credentials, forwarding headers (any `X-Forwarded-*`), and the browser headers the proxy has
+// already checked. `Origin` and `Sec-Fetch-*` would make SDK servers with their own cross-origin
+// protection reject requests the proxy allowed (TS `createMcpExpressApp`, Go
+// `http.CrossOriginProtection`). Names are compared with `_` read as `-`, because some upstream
+// frameworks treat the two alike (the oauth2-proxy CVE-2025-64484 bypass).
+var stripped = map[string]bool{"Authorization": true, "Forwarded": true, "Origin": true}
+
+var errUpstreamUnauthorized = errors.New("upstream answered 401")
+
+// New returns a handler relaying each request to target, the upstream's MCP endpoint URL: the
+// request path is replaced by target's path; the query is kept.
+func New(log *slog.Logger, target *url.URL) http.Handler {
+	t := *target
+	rp := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.Out.URL.Scheme, pr.Out.URL.Host = t.Scheme, t.Host
+			pr.Out.URL.Path, pr.Out.URL.RawPath = t.Path, t.RawPath
+			pr.Out.Host = ""
+			strip(pr.Out.Header)
+		},
+		Transport: &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConnsPerHost:   64,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: time.Second,
+		},
+		FlushInterval: -1, // MCP responses may stream; never hold bytes back
+		// The proxy owns CORS and the auth challenge on the MCP endpoint. An upstream's CORS headers
+		// would duplicate Access-Control-Allow-Origin (browsers reject that), and its
+		// WWW-Authenticate would send clients to an authorization server that is not ours. An
+		// upstream 401 can only mean the proxy's own credential to it failed, so it becomes a 502.
+		ModifyResponse: func(res *http.Response) error {
+			for k := range res.Header {
+				if strings.HasPrefix(k, "Access-Control-") {
+					delete(res.Header, k)
+				}
+			}
+			res.Header.Del("WWW-Authenticate")
+			if res.StatusCode == http.StatusUnauthorized {
+				return errUpstreamUnauthorized
+			}
+			return nil
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			// A chunked body over the limit only fails while it is being relayed.
+			if mbe := (*http.MaxBytesError)(nil); errors.As(err, &mbe) {
+				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+				return
+			}
+			if errors.Is(err, errUpstreamUnauthorized) {
+				log.ErrorContext(r.Context(), "upstream rejected the proxy", "request_id", logging.RequestID(r.Context()), "reason", "upstream answered 401; check the upstream credential")
+				http.Error(w, "upstream rejected the proxy", http.StatusBadGateway)
+				return
+			}
+			log.WarnContext(r.Context(), "upstream error", "request_id", logging.RequestID(r.Context()), "error", err)
+			// Never echo upstream internals (invariant 15).
+			http.Error(w, "upstream unavailable", http.StatusBadGateway)
+		},
+	}
+	return rp
+}
+
+func strip(h http.Header) {
+	for k := range h {
+		n := textproto.CanonicalMIMEHeaderKey(strings.ReplaceAll(k, "_", "-"))
+		if stripped[n] || strings.HasPrefix(n, "X-Forwarded-") || strings.HasPrefix(n, "Sec-Fetch-") {
+			delete(h, k)
+		}
+	}
+}
