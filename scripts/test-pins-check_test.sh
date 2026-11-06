@@ -1,6 +1,8 @@
 #!/bin/sh
 # Table test for test-pins-check.sh against fixture registry responses (no network).
 set -eu
+# A developer's CDPATH makes cd print the directory, which $(cd ... && pwd) would capture.
+unset CDPATH
 here="$(cd "$(dirname "$0")" && pwd)"
 script="$here/test-pins-check.sh"
 tmp=$(mktemp -d)
