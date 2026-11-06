@@ -22,7 +22,7 @@ Decisions: [ADR-0020](../adr/0020-configuration.md) §7–8, [ADR-0021](../adr/0
 Checks everything the proxy checks at startup that needs no network and writes nothing:
 
 - the settings (unknown names, values, required settings);
-- the sealing keys and the static clients file;
+- the sealing keys and the static clients file (optional while CIMD or DCR is on);
 - the Entra settings and the access gate;
 - the secret files' permissions, as at startup (relaxed with `--dev`);
 - a stdio upstream's command (`BYWARD_UPSTREAM_COMMAND` or the command after `--`): it must be found

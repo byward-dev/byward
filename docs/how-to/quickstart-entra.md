@@ -1,13 +1,16 @@
 # Quickstart: Microsoft Entra ID and Claude Code
 
 This guide puts an HTTP MCP server behind byward, with users signing in through your
-Microsoft Entra tenant and Claude Code as the MCP client. It takes five steps:
+Microsoft Entra tenant and Claude Code as the MCP client. It takes four steps:
 
 1. [Register the Entra app](#1-register-the-entra-app) (Azure CLI)
 2. [Create a sealing key](#2-create-a-sealing-key)
-3. [Register Claude Code as a static client](#3-register-claude-code-as-a-static-client)
-4. [Settings](#4-settings-filled-in-when-the-data-directory-defaults-land)
-5. [Connect Claude Code](#5-connect-claude-code)
+3. [Run byward](#3-run-byward)
+4. [Connect Claude Code](#4-connect-claude-code)
+
+Claude Code needs no registration: it identifies itself with its client metadata document (CIMD).
+To give it a fixed client ID instead, see [Optional: Claude Code as a static
+client](#optional-claude-code-as-a-static-client).
 
 [Troubleshooting](#troubleshooting) lists the Entra errors the proxy recognises and what to fix.
 Background: [ADR-0012](../adr/0012-entra-specifics.md) (Entra), [ADR-0008](../adr/0008-client-registration.md)
@@ -38,7 +41,7 @@ Background: [ADR-0012](../adr/0012-entra-specifics.md) (Entra), [ADR-0008](../ad
 
 **Shortcut:** `byward init entra --tenant <tenant-id> --public-url https://mcp.example.com/mcp >
 byward-entra.sh` prints this whole step as a script, plus assignment required and the app roles
-app-only callers need, and an env file for step 4. byward runs none of it; review it and run it
+app-only callers need, and an env file for step 3. byward runs none of it; review it and run it
 with `sh byward-entra.sh` ([commands reference](../reference/commands.md#byward-init-entra)). The
 steps below explain each command.
 
@@ -178,17 +181,81 @@ seals its tokens with keys you provide; create the first one (details and rotati
 install -d -m 0700 byward-data/keys && (umask 077; openssl rand -base64 32 > "byward-data/keys/$(date -u +%Y-%m-%d)")
 ```
 
-## 3. Register Claude Code as a static client
+## 3. Run byward
 
-> **Claude Code does not have to be in this file.** Without `--client-id`, Claude Code signs in
-> with its client metadata document (CIMD, [how-to](cimd.md)); this was verified against Entra on
-> 2026-11-06. To use that, add the server in step 5 with
-> `claude mcp add --transport http my-mcp https://mcp.example.com/mcp`. The static clients file
-> is still required: byward does not start without it, or with an empty `clients` list. Register
-> Claude Code here when you want a fixed client ID, or when you run with `BYWARD_CIMD=false`.
+Five settings ([ADR-0020](../adr/0020-configuration.md) §8); everything else has a default:
 
-Claude Code is a public client: it has no secret and authenticates with PKCE. Register it in the
-static clients file, `byward-data/clients.json`:
+| Setting | Value |
+|---|---|
+| `BYWARD_PUBLIC_URL` | `https://mcp.example.com/mcp`: the URL users enter, behind your TLS terminator |
+| `BYWARD_UPSTREAM_URL` | your HTTP MCP server, e.g. `http://127.0.0.1:3001/mcp` for the reference server |
+| `BYWARD_ENTRA_TENANT` | `$TENANT_ID` from step 1.1 |
+| `BYWARD_ENTRA_CLIENT_ID` | `$APP_ID` from step 1.1 |
+| `BYWARD_ENTRA_CLIENT_SECRET_FILE` | the `entra-client-secret` file from step 1.4 |
+
+The data directory then holds:
+
+```text
+byward-data/
+├── keys/             sealing keys (step 2)
+├── clients.json      static clients, optional (see the end of this guide)
+├── state/            the SQLite store, created on first start; back this up (state.md)
+└── store-writes      restore-detection counter, kept outside state/
+```
+
+With the container image. It runs as uid 65532 by default; `--user` makes it run as you, so it can
+write the data directory you created:
+
+```sh
+docker run --rm -p 8080:8080 --user "$(id -u):$(id -g)" \
+  -v "$PWD/byward-data:/var/lib/byward" \
+  -v "$PWD/entra-client-secret:/run/secrets/entra-client-secret:ro" \
+  -e BYWARD_PUBLIC_URL=https://mcp.example.com/mcp \
+  -e BYWARD_UPSTREAM_URL=http://upstream.internal:3001/mcp \
+  -e BYWARD_ENTRA_TENANT="$TENANT_ID" \
+  -e BYWARD_ENTRA_CLIENT_ID="$APP_ID" \
+  -e BYWARD_ENTRA_CLIENT_SECRET_FILE=/run/secrets/entra-client-secret \
+  -e BYWARD_LISTEN=0.0.0.0:8080 \
+  ghcr.io/byward-dev/byward:latest
+```
+
+Or with the binary: export the same five settings plus `BYWARD_DATA_DIR="$PWD/byward-data"` and run
+`byward`. A missing or empty key directory stops startup with a message naming the path and the
+setting that moves it. The clients file is optional while CIMD or DCR is on, as it is by default;
+a `BYWARD_STATIC_CLIENTS_FILE` you set must exist. The startup log says which client sources are
+active, for example `msg="client sources" static_clients=0 cimd=true dcr=true`. `BYWARD_UPSTREAM_URL` must be reachable from where
+byward runs (from inside the container, `127.0.0.1` is the container itself). Put your TLS
+terminator (reverse proxy or load balancer) in front of `:8080` so that `https://mcp.example.com`
+reaches it. All settings: [settings reference](../reference/settings.md).
+
+To check the setup: `byward check --offline` with the same settings validates them, the key and the
+clients file, if there is one, without network access. Once the proxy runs, `byward doctor` fetches its discovery
+documents the way MCP clients do and checks the Entra tenant, the client ID and the secret; each
+problem comes with its fix ([commands reference](../reference/commands.md#byward-doctor)).
+
+## 4. Connect Claude Code
+
+Add the server; Claude Code signs in with its client metadata document
+(`https://claude.ai/oauth/claude-code-client-metadata`, [CIMD how-to](cimd.md)):
+
+```sh
+claude mcp add --transport http my-mcp https://mcp.example.com/mcp
+```
+
+Then sign in: run `/mcp` inside Claude Code, or `claude mcp login my-mcp` from a shell. The browser
+shows the proxy's consent page, then Entra's sign-in. With the reference server behind the proxy,
+ask Claude Code to call its `echo` tool to see a request go all the way through. This was verified
+against Entra on 2026-11-06.
+
+Claude Code asks for `offline_access`, so it receives a refresh token and the consent page says "up
+to 30 days". It renews its access token before the hour is up, without opening the browser (checked
+with Claude Code 2.1.311 against a real tenant on 2026-11-06).
+
+## Optional: Claude Code as a static client
+
+Register Claude Code in the static clients file when you want a fixed client ID, or when you run
+with `BYWARD_CIMD=false`. Claude Code is a public client: it has no secret and authenticates with
+PKCE. Write `byward-data/clients.json`:
 
 ```json
 {
@@ -213,58 +280,7 @@ static clients file, `byward-data/clients.json`:
   version working.
 - The `client_id` is yours to choose: printable ASCII without spaces, at most 255 characters. The
   file accepts no unknown fields and no inline secrets.
-
-## 4. Run byward
-
-Five settings ([ADR-0020](../adr/0020-configuration.md) §8); everything else has a default:
-
-| Setting | Value |
-|---|---|
-| `BYWARD_PUBLIC_URL` | `https://mcp.example.com/mcp`: the URL users enter, behind your TLS terminator |
-| `BYWARD_UPSTREAM_URL` | your HTTP MCP server, e.g. `http://127.0.0.1:3001/mcp` for the reference server |
-| `BYWARD_ENTRA_TENANT` | `$TENANT_ID` from step 1.1 |
-| `BYWARD_ENTRA_CLIENT_ID` | `$APP_ID` from step 1.1 |
-| `BYWARD_ENTRA_CLIENT_SECRET_FILE` | the `entra-client-secret` file from step 1.4 |
-
-The data directory then holds:
-
-```text
-byward-data/
-├── keys/             sealing keys (step 2)
-├── clients.json      static clients (step 3)
-├── state/            the SQLite store, created on first start; back this up (state.md)
-└── store-writes      restore-detection counter, kept outside state/
-```
-
-With the container image. It runs as uid 65532 by default; `--user` makes it run as you, so it can
-write the data directory you created:
-
-```sh
-docker run --rm -p 8080:8080 --user "$(id -u):$(id -g)" \
-  -v "$PWD/byward-data:/var/lib/byward" \
-  -v "$PWD/entra-client-secret:/run/secrets/entra-client-secret:ro" \
-  -e BYWARD_PUBLIC_URL=https://mcp.example.com/mcp \
-  -e BYWARD_UPSTREAM_URL=http://upstream.internal:3001/mcp \
-  -e BYWARD_ENTRA_TENANT="$TENANT_ID" \
-  -e BYWARD_ENTRA_CLIENT_ID="$APP_ID" \
-  -e BYWARD_ENTRA_CLIENT_SECRET_FILE=/run/secrets/entra-client-secret \
-  -e BYWARD_LISTEN=0.0.0.0:8080 \
-  ghcr.io/byward-dev/byward:latest
-```
-
-Or with the binary: export the same five settings plus `BYWARD_DATA_DIR="$PWD/byward-data"` and run
-`byward`. A missing or empty key directory, or a missing clients file, stops startup with a message
-naming the path and the setting that moves it. `BYWARD_UPSTREAM_URL` must be reachable from where
-byward runs (from inside the container, `127.0.0.1` is the container itself). Put your TLS
-terminator (reverse proxy or load balancer) in front of `:8080` so that `https://mcp.example.com`
-reaches it. All settings: [settings reference](../reference/settings.md).
-
-To check the setup: `byward check --offline` with the same settings validates them, the key and the
-clients file without network access. Once the proxy runs, `byward doctor` fetches its discovery
-documents the way MCP clients do and checks the Entra tenant, the client ID and the secret; each
-problem comes with its fix ([commands reference](../reference/commands.md#byward-doctor)).
-
-## 5. Connect Claude Code
+- byward reads the file at startup; restart it after a change.
 
 Add the server with the static client ID and a fixed callback port, without `--client-secret`:
 
@@ -272,20 +288,12 @@ Add the server with the static client ID and a fixed callback port, without `--c
 claude mcp add --transport http --client-id claude-code --callback-port 8080 my-mcp https://mcp.example.com/mcp
 ```
 
-Then sign in: run `/mcp` inside Claude Code, or `claude mcp login my-mcp` from a shell. The browser
-shows the proxy's consent page, then Entra's sign-in. `claude mcp get my-mcp` shows the configured
-OAuth client. With the reference server behind the proxy, ask Claude Code to call its `echo` tool to
-see a request go all the way through.
-
-The callback port must be free on the machine running Claude Code. If it is taken, `claude mcp login`
-stops with "OAuth callback port … is already in use"; `lsof -ti:<port> -sTCP:LISTEN` shows the
-process holding it. Pick another port (remove the server with `claude mcp remove my-mcp` and add it
-again with the new `--callback-port`); the registered `redirect_uris` need no change because the
-proxy ignores the port on loopback.
-
-Claude Code asks for `offline_access`, so it receives a refresh token and the consent page says "up
-to 30 days". It renews its access token before the hour is up, without opening the browser (checked
-with Claude Code 2.1.311 against a real tenant on 2026-11-06).
+`claude mcp get my-mcp` shows the configured OAuth client. The callback port must be free on the
+machine running Claude Code. If it is taken, `claude mcp login` stops with "OAuth callback port …
+is already in use"; `lsof -ti:<port> -sTCP:LISTEN` shows the process holding it. Pick another port
+(remove the server with `claude mcp remove my-mcp` and add it again with the new
+`--callback-port`); the registered `redirect_uris` need no change because the proxy ignores the
+port on loopback.
 
 Source: Claude Code MCP documentation, "Use pre-configured OAuth credentials" and "Use a fixed OAuth
 callback port" (<https://code.claude.com/docs/en/mcp>).
@@ -317,8 +325,9 @@ az ad app show --id "$APP_ID" --query "{uris:identifierUris, version:api.request
 ```
 
 **"redirect URI not registered: registered …, sent …"** on the proxy's error page: Claude Code sent
-a redirect URI that is not in `clients.json`. Add the URI it sent (usually the other loopback host
-name, see step 3) and restart the proxy.
+a redirect URI that is not in `clients.json` (static client only). Add the URI it sent (usually the
+other loopback host name, see [the static client](#optional-claude-code-as-a-static-client)) and
+restart the proxy.
 
 ### Errors on refresh and the proxy's credentials
 

@@ -448,6 +448,78 @@ func TestOwnOriginIsAlwaysAllowed(t *testing.T) {
 	}
 }
 
+// When apps can register themselves (CIMD or DCR), byward starts without static clients: the
+// default clients file may be absent and a named one may list none. A named file must exist, so a
+// typo still fails; with CIMD and DCR both off nothing could sign in, so the old refusals stay. The
+// startup log says which client sources are active.
+func TestStaticClientsAreOptionalOnlyWhenAppsCanRegister(t *testing.T) {
+	const absent, empty, one, dangling = "absent", "empty", "one client", "a dangling symlink"
+	off := []string{"BYWARD_CIMD=false", "BYWARD_DCR=false"}
+	for _, tc := range []struct {
+		name    string
+		env     []string
+		file    string
+		named   bool
+		wantLog string // the client-sources line when it starts
+		wantErr string // the reason, in a startup error naming BYWARD_STATIC_CLIENTS_FILE, when it is refused
+	}{
+		{"CIMD and DCR on, the default file absent: starts", nil, absent, false, "static_clients=0 cimd=true dcr=true", ""},
+		{"DCR only, a named file listing no clients: starts", []string{"BYWARD_CIMD=false"}, empty, true, "static_clients=0 cimd=false dcr=true", ""},
+		{"CIMD only, the default file absent: starts", []string{"BYWARD_DCR=false"}, absent, false, "static_clients=0 cimd=true dcr=false", ""},
+		{"CIMD and DCR on, the default file listing one client: starts", nil, one, false, "static_clients=1 cimd=true dcr=true", ""},
+		{"CIMD and DCR off, a named file listing one client: starts", off, one, true, "static_clients=1 cimd=false dcr=false", ""},
+		{"CIMD and DCR on, a named file absent: refused (a typo)", nil, absent, true, "", "no such file"},
+		{"CIMD and DCR off, the default file absent: refused", off, absent, false, "", "no such file"},
+		{"CIMD and DCR on, the default file a dangling symlink: refused (a broken mount)", nil, dangling, false, "", "no such file"},
+		{"CIMD and DCR off, a named file listing no clients: refused", off, empty, true, "", "no clients"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := t.TempDir()
+			path := filepath.Join(data, "clients.json")
+			content := map[string]string{empty: `{"clients":[]}`,
+				one: `{"clients":[{"client_id":"app","token_endpoint_auth_method":"none","redirect_uris":["http://127.0.0.1/callback"]}]}`}[tc.file]
+			if tc.file == dangling {
+				if err := os.Symlink(filepath.Join(data, "gone.json"), path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if content != "" {
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			environ := []string{"BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_DATA_DIR=" + data}
+			for _, kv := range authEnv(t) {
+				if !strings.HasPrefix(kv, "BYWARD_STATIC_CLIENTS_FILE=") {
+					environ = append(environ, kv)
+				}
+			}
+			if tc.named {
+				environ = append(environ, "BYWARD_STATIC_CLIENTS_FILE="+path)
+			}
+			cfg, _, err := config.Load(nil, append(environ, tc.env...), os.ReadFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var logs bytes.Buffer
+			a, err := buildAuth(cfg, logging.New(&logs, "text"), Observability{}) // the proxy's logger, with its key allowlist
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), "BYWARD_STATIC_CLIENTS_FILE") || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want a startup error naming BYWARD_STATIC_CLIENTS_FILE: %s", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { stop(t, a) })
+			if !strings.Contains(logs.String(), `msg="client sources" `+tc.wantLog) {
+				t.Fatalf("startup log has no %q line:\n%s", tc.wantLog, logs.String())
+			}
+		})
+	}
+}
+
 func TestNewNamesTheSettingAtFault(t *testing.T) {
 	cases := []struct {
 		name, setting, doc string

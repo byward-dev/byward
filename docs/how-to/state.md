@@ -52,7 +52,7 @@ the file was lost or moved, for example on a fresh pod with the counter on an `e
 
 ```text
 /var/lib/byward/keys/2026-11-06    sealing keys (you create them, see sealing-keys.md)
-/var/lib/byward/clients.json       static clients (you create it)
+/var/lib/byward/clients.json       static clients (optional while CIMD or DCR is on)
 /var/lib/byward/store-writes       counter file, next to the keys directory
 /var/lib/byward/state/             state directory: back this up, and only this
 ```
