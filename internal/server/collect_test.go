@@ -99,7 +99,7 @@ func (c *flakyCollector) Collect(ctx context.Context, _ time.Time) error {
 	return nil
 }
 
-// A failed collection is logged and retried at the next interval; stopping is not an error.
+// A failed collection is logged and retried at the next interval.
 func TestAFailedCollectionIsLoggedAndRetried(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var logs syncBuffer
@@ -129,13 +129,17 @@ type noRevocations struct{}
 func (noRevocations) Revocations(context.Context) ([]store.Revocation, error) { return nil, nil }
 
 // The background work returns only after a collection in progress has finished, so Run never
-// closes the store under it.
+// closes the store under it; a collection cut short by shutdown is not logged as an error.
 func TestBackgroundWorkWaitsForACollectionInProgress(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
+		var logs syncBuffer
 		c := &flakyCollector{entered: make(chan struct{}), release: make(chan struct{})}
 		ctx, stop := context.WithCancel(context.Background())
 		done := make(chan struct{})
-		go func() { defer close(done); runBackground(ctx, c, denylist.New(noRevocations{}, time.Now), discard) }()
+		go func() {
+			defer close(done)
+			runBackground(ctx, c, denylist.New(noRevocations{}, time.Now), slog.New(slog.NewTextHandler(&logs, nil)))
+		}()
 		<-c.entered
 		stop()
 		synctest.Wait()
@@ -144,7 +148,10 @@ func TestBackgroundWorkWaitsForACollectionInProgress(t *testing.T) {
 			t.Fatal("the background work returned while a collection was still running")
 		default:
 		}
-		close(c.release)
+		close(c.release) // the held collection now fails, after the stop
 		<-done
+		if strings.Contains(logs.String(), "removing expired store rows failed") {
+			t.Fatalf("a collection cut short by shutdown was logged as an error: %q", logs.String())
+		}
 	})
 }
