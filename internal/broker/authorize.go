@@ -8,7 +8,9 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/corker/mcp-authproxy/internal/audit"
 	"github.com/corker/mcp-authproxy/internal/idp"
 	"github.com/corker/mcp-authproxy/internal/logging"
 	"github.com/corker/mcp-authproxy/internal/store"
@@ -135,9 +137,11 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 		b.serverError(w, r, err)
 		return
 	}
+	start := time.Now()
 	target, err := b.cfg.IdP.AuthCodeURL(idp.WithRequestID(ctx, logging.RequestID(ctx)), idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier})
+	b.cfg.ObserveIdP("authorize", idpOutcome(err), time.Since(start))
 	if err != nil {
-		b.idpFailure(w, r, err)
+		b.idpFailure(w, r, client.ID(), err)
 		return
 	}
 	//nolint:gosec // G124: Secure is false only in development mode on loopback http (ADR-0010 §10)
@@ -181,13 +185,17 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	ctx := r.Context()
 	st := q.Get("state")
+	badState := func(title string) {
+		b.cfg.Audit.RecordUnauthenticated(r, audit.Event{Name: audit.Login, Outcome: audit.Failure, Reason: "sign-in state missing, invalid or expired", IdP: b.cfg.IdPName})
+		b.page(w, r, http.StatusBadRequest, title, "Start again from your app.")
+	}
 	if len(st) < 16 {
-		b.page(w, r, http.StatusBadRequest, "This sign-in link is not valid.", "Start again from your app.")
+		badState("This sign-in link is not valid.")
 		return
 	}
 	c, err := r.Cookie(b.cookieName(st))
 	if err != nil {
-		b.page(w, r, http.StatusBadRequest, "This sign-in has expired or was started in another browser.", "Start again from your app.")
+		badState("This sign-in has expired or was started in another browser.")
 		return
 	}
 	//nolint:gosec // G124: as above (ADR-0010 §10)
@@ -195,20 +203,25 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	plain, err := b.cfg.LoginBox.Open(c.Value)
 	var l login
 	if err != nil || json.Unmarshal(plain, &l) != nil || l.IdPState != st {
-		b.page(w, r, http.StatusBadRequest, "This sign-in has expired.", "Start again from your app.")
+		badState("This sign-in has expired.")
 		return
 	}
+	start := time.Now()
 	id, toks, err := b.cfg.IdP.Callback(idp.WithRequestID(ctx, logging.RequestID(ctx)), q, idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier})
+	b.cfg.ObserveIdP("callback", idpOutcome(err), time.Since(start))
 	if err != nil {
 		var ie *idp.Error
 		if errors.As(err, &ie) && ie.OAuth == "access_denied" {
+			b.cfg.Audit.Record(r, audit.Event{Name: audit.Login, Outcome: audit.Failure, Reason: "the user declined to sign in", ClientID: l.ClientID, IdP: b.cfg.IdPName})
 			b.redirectError(w, r, l.RedirectURI, l.State, "access_denied", "the user declined to sign in")
 			return
 		}
-		b.idpFailure(w, r, err)
+		b.idpFailure(w, r, l.ClientID, err)
 		return
 	}
 	if err := b.cfg.Gate.Allow(ctx, id); err != nil {
+		b.cfg.Audit.Record(r, audit.Event{Name: audit.AccessDenied, Outcome: audit.Failure, Reason: "not allowed by the access gate",
+			ClientID: l.ClientID, UserKey: id.Subject, IdP: b.cfg.IdPName})
 		b.page(w, r, http.StatusForbidden, "You don't have access to this server.", "Ask your operator for access.")
 		return
 	}
@@ -236,6 +249,7 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 		b.serverError(w, r, err)
 		return
 	}
+	b.cfg.Audit.Record(r, audit.Event{Name: audit.Login, Outcome: audit.Success, ClientID: l.ClientID, UserKey: id.Subject, GrantID: g.ID, IdP: b.cfg.IdPName})
 	v := url.Values{"code": {code}, "iss": {b.cfg.Issuer}}
 	if l.State != "" {
 		v.Set("state", l.State)
@@ -263,20 +277,46 @@ func (b *Broker) redirectError(w http.ResponseWriter, r *http.Request, redirect,
 	http.Redirect(w, r, withQuery(redirect, v), http.StatusFound) //nolint:gosec // G710: validated redirect URI
 }
 
-// idpFailure explains an IdP error on a page; the operator hint and IdP trace IDs go to the log.
-func (b *Broker) idpFailure(w http.ResponseWriter, r *http.Request, err error) {
+// idpFailure explains an IdP error on a page; the operator hint and the IdP's error code, trace ID
+// and correlation ID go to the log (ADR-0021 §7), the failure to the audit stream.
+func (b *Broker) idpFailure(w http.ResponseWriter, r *http.Request, clientID string, err error) {
 	ctx := r.Context()
 	var ie *idp.Error
 	msg, hint := "Signing in failed.", "Try again; if it keeps failing, tell your operator the reference below."
+	reason := "the IdP sign-in failed"
 	if errors.As(err, &ie) {
 		if ie.UserMessage != "" {
 			msg = ie.UserMessage
 		}
-		b.cfg.Log.ErrorContext(ctx, "IdP sign-in failed", "request_id", logging.RequestID(ctx), "error", err, "reason", ie.OperatorHint)
+		reason = "the IdP sign-in failed (" + ie.Class.String() + ")"
+		attrs := []any{"request_id", logging.RequestID(ctx), "error", err, "reason", ie.OperatorHint}
+		if ie.Code != 0 {
+			attrs = append(attrs, "idp_error_code", ie.Code)
+		}
+		if ie.TraceID != "" {
+			attrs = append(attrs, "trace_id", ie.TraceID)
+		}
+		if ie.CorrelationID != "" {
+			attrs = append(attrs, "correlation_id", ie.CorrelationID)
+		}
+		b.cfg.Log.ErrorContext(ctx, "IdP sign-in failed", attrs...)
 	} else {
 		b.cfg.Log.ErrorContext(ctx, "IdP sign-in failed", "request_id", logging.RequestID(ctx), "error", err)
 	}
+	b.cfg.Audit.Record(r, audit.Event{Name: audit.Login, Outcome: audit.Failure, Reason: reason, ClientID: clientID, IdP: b.cfg.IdPName})
 	b.page(w, r, http.StatusBadGateway, msg, hint)
+}
+
+// idpOutcome classifies an IdP call for metrics: success, unavailable (try later) or rejected.
+func idpOutcome(err error) string {
+	var ie *idp.Error
+	switch {
+	case err == nil:
+		return "success"
+	case errors.As(err, &ie) && ie.Class == idp.Unavailable:
+		return "unavailable"
+	}
+	return "rejected"
 }
 
 func (b *Broker) serverError(w http.ResponseWriter, r *http.Request, err error) {

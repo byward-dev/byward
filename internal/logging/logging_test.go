@@ -1,13 +1,13 @@
 package logging
 
 import (
-	"regexp"
 	"bytes"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"

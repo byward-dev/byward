@@ -5,6 +5,7 @@ package metrics
 
 import (
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"time"
 
@@ -26,8 +27,12 @@ type Metrics struct {
 	auditEvents *prometheus.CounterVec
 }
 
-// New registers every metric; version and goVersion label the build-info gauge.
-func New(version, goVersion string) *Metrics {
+// New registers every metric; the build-info gauge is labelled from the binary's build info.
+func New() *Metrics {
+	version, goVersion := "unknown", "unknown"
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		version, goVersion = bi.Main.Version, bi.GoVersion
+	}
 	m := &Metrics{
 		reg: prometheus.NewRegistry(),
 		requests: prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "mcp_authproxy_http_request_duration_seconds",

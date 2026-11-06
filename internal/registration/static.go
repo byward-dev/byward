@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -55,6 +56,16 @@ func (r *StaticRegistry) Client(_ context.Context, id string) (Client, error) {
 		return nil, ErrUnknownClient
 	}
 	return c, nil
+}
+
+// IDs lists the static clients' IDs, sorted (for the client_registered audit events at startup).
+func (r *StaticRegistry) IDs() []string {
+	ids := make([]string, 0, len(r.clients))
+	for id := range r.clients {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // LoadStatic reads the static clients file at path. Secret and JWKS file paths inside it are

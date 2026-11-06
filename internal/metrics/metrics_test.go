@@ -37,7 +37,7 @@ func exercise(m *Metrics) {
 var proxyMetric = regexp.MustCompile(`(?m)^# TYPE (mcp_authproxy_\S+) (\S+)$`)
 
 func TestMetricNamesMatchTheGoldenFile(t *testing.T) {
-	m := New("v0.0.0", "go1.27.3")
+	m := New()
 	exercise(m)
 	var lines []string
 	for _, g := range proxyMetric.FindAllStringSubmatch(scrape(t, m), -1) {
@@ -76,7 +76,7 @@ func TestEveryMetricHasADocsRow(t *testing.T) {
 }
 
 func TestLabelsCarryOnlyFixedValuesAndBucketsAreFixed(t *testing.T) {
-	m := New("v0.0.0", "go1.27.3")
+	m := New()
 	exercise(m)
 	out := scrape(t, m)
 	for _, leak := range []string{"alice", "/mcp", "user="} {

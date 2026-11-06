@@ -16,7 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/corker/mcp-authproxy/internal/audit"
 	"github.com/corker/mcp-authproxy/internal/config"
+	"github.com/corker/mcp-authproxy/internal/logging"
 	"github.com/corker/mcp-authproxy/internal/resource"
 	"github.com/corker/mcp-authproxy/internal/testutil/fakeupstream"
 )
@@ -71,7 +73,8 @@ func start(t *testing.T, extraEnv ...string) env {
 		t.Fatal(err)
 	}
 	logs := &syncBuffer{}
-	srv := httptest.NewServer(Handler(cfg, slog.New(slog.NewJSONHandler(logs, nil)), acceptGood{}, nil))
+	log := slog.New(slog.NewJSONHandler(logs, nil))
+	srv := httptest.NewServer(Handler(cfg, log, acceptGood{}, nil, Observability{Audit: audit.New(log, nil, time.Now)}))
 	t.Cleanup(srv.Close)
 	return env{srv, up, logs}
 }
@@ -263,11 +266,19 @@ func TestNewConfiguresHardenedLimitsAndLoopbackBind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.ReadHeaderTimeout == 0 || s.ReadTimeout == 0 || s.IdleTimeout == 0 || s.MaxHeaderBytes == 0 {
+	for _, srv := range []*http.Server{s.Public, s.Internal} {
+		if srv.ReadHeaderTimeout == 0 || srv.ReadTimeout == 0 || srv.IdleTimeout == 0 || srv.MaxHeaderBytes == 0 {
+			t.Fatalf("a limit is unset: %+v", srv)
+		}
+	}
+	if s.Internal.Addr != "127.0.0.1:9090" {
+		t.Fatalf("default internal bind = %q", s.Internal.Addr)
+	}
+	if s := s.Public; s.ReadHeaderTimeout == 0 || s.ReadTimeout == 0 || s.IdleTimeout == 0 || s.MaxHeaderBytes == 0 {
 		t.Fatalf("a limit is unset: %+v", s)
 	}
-	if s.Addr != "127.0.0.1:8080" {
-		t.Fatalf("default bind = %q", s.Addr)
+	if s.Public.Addr != "127.0.0.1:8080" {
+		t.Fatalf("default bind = %q", s.Public.Addr)
 	}
 }
 
@@ -298,7 +309,7 @@ func TestRecovererLetsAbortedHandlersAbort(t *testing.T) {
 }
 
 func TestRunShutsDownOnCancel(t *testing.T) {
-	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0"), os.ReadFile)
+	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0", "MCP_AUTHPROXY_INTERNAL_LISTEN=127.0.0.1:0"), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +335,7 @@ func TestRunShutsDownOnCancel(t *testing.T) {
 func TestAdmitCapsRequestsAndStreamsSeparately(t *testing.T) {
 	release := make(chan struct{})
 	entered := make(chan struct{}, 4)
-	h := admit(1, 1, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h := admit(1, 1, nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		entered <- struct{}{}
 		<-release
 	}))
@@ -383,7 +394,7 @@ func TestNoAuthServesTheUpstreamWithoutMetadataOrChallenge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(Handler(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), resource.NoTokens{}, nil))
+	srv := httptest.NewServer(Handler(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), resource.NoTokens{}, nil, Observability{}))
 	t.Cleanup(srv.Close)
 	do := func(method, path, host string, hdr map[string]string) *http.Response {
 		r, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(`{"jsonrpc":"2.0"}`))
@@ -477,7 +488,7 @@ func TestNewServesTheBrokerRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(s.Handler)
+	ts := httptest.NewServer(s.Public.Handler)
 	t.Cleanup(ts.Close)
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	get := func(path string) *http.Response {
@@ -501,5 +512,70 @@ func TestNewServesTheBrokerRoutes(t *testing.T) {
 	if res.StatusCode != http.StatusFound || !strings.HasPrefix(loc.String(), "http://127.0.0.1/callback?") ||
 		loc.Query().Get("error") != "invalid_request" || loc.Query().Get("iss") != "https://mcp.example.com" {
 		t.Fatalf("authorize: %d %s", res.StatusCode, loc)
+	}
+}
+
+func getBody(t *testing.T, h http.Handler, host, path string) (int, string) {
+	t.Helper()
+	r := httptest.NewRequest("GET", path, nil)
+	r.Host = host
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w.Code, w.Body.String()
+}
+
+// ADR-0018 §10, ADR-0021 §8 and §10: metrics and probes only on the internal listener.
+func TestInternalListenerServesProbesAndMetricsAndThePublicOneDoesNot(t *testing.T) {
+	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(cfg, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := getBody(t, s.Internal.Handler, "x", "/livez"); code != 200 {
+		t.Fatalf("livez = %d", code)
+	}
+	if code, body := getBody(t, s.Internal.Handler, "x", "/readyz"); code != 200 || !strings.Contains(body, `"keys":"ok"`) || !strings.Contains(body, `"store":"ok"`) {
+		t.Fatalf("readyz = %d %s", code, body)
+	}
+	// A public request is timed under its fixed route name.
+	getBody(t, s.Public.Handler, "mcp.example.com", "/mcp")
+	code, body := getBody(t, s.Internal.Handler, "x", "/metrics")
+	if code != 200 || !strings.Contains(body, "mcp_authproxy_build_info") || !strings.Contains(body, `route="mcp",status_class="4xx"`) {
+		t.Fatalf("metrics = %d, missing build info or the public request:\n%s", code, body)
+	}
+	for _, p := range []string{"/metrics", "/livez", "/readyz"} {
+		if code, _ := getBody(t, s.Public.Handler, "mcp.example.com", p); code != http.StatusNotFound {
+			t.Errorf("public %s = %d, want 404", p, code)
+		}
+	}
+}
+
+func TestEmptyInternalListenTurnsTheInternalListenerOff(t *testing.T) {
+	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_INTERNAL_LISTEN="), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(cfg, slog.New(slog.DiscardHandler))
+	if err != nil || s.Internal != nil {
+		t.Fatalf("internal server = %v, err %v; want none", s.Internal, err)
+	}
+}
+
+func TestStartupAuditsKeysAndStaticClients(t *testing.T) {
+	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	if _, err := New(cfg, logging.New(&logs, "json")); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"event":"key_loaded","outcome":"success","reason":"signing","key_id":"2026-11-06"`, `"event":"client_registered","outcome":"success","reason":"static","client_id":"test-app"`} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("startup audit lacks %s:\n%s", want, logs.String())
+		}
 	}
 }

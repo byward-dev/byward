@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/corker/mcp-authproxy/internal/audit"
 	"github.com/corker/mcp-authproxy/internal/idp"
 	"github.com/corker/mcp-authproxy/internal/registration"
 	"github.com/corker/mcp-authproxy/internal/store"
@@ -59,7 +60,12 @@ type Config struct {
 	// SecureCookies is false only in development mode on loopback http (ADR-0010 §10).
 	SecureCookies bool
 	Log           *slog.Logger
-	Now           func() time.Time
+	// Audit receives the security events (ADR-0021 §3); nil discards them.
+	Audit *audit.Log
+	// ObserveIdP, when set, is told each IdP call's operation, outcome (success, rejected,
+	// unavailable) and duration, for metrics.
+	ObserveIdP func(operation, outcome string, d time.Duration)
+	Now        func() time.Time
 }
 
 // Broker is the authorization server.
@@ -79,6 +85,9 @@ func New(cfg Config) (*Broker, error) {
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
+	}
+	if cfg.ObserveIdP == nil {
+		cfg.ObserveIdP = func(string, string, time.Duration) {}
 	}
 	return &Broker{cfg: cfg, deny: newDenyList()}, nil
 }

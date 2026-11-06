@@ -16,6 +16,7 @@ Precedence: flag > environment > default. Secrets are read only from files.
 | `--resource-name` | `MCP_AUTHPROXY_RESOURCE_NAME` | — | human-readable resource name in protected resource metadata |
 | `--resource-documentation` | `MCP_AUTHPROXY_RESOURCE_DOCUMENTATION` | — | documentation URL in protected resource metadata |
 | `--log-format` | `MCP_AUTHPROXY_LOG_FORMAT` | json | log format: json or text |
+| `--internal-listen` | `MCP_AUTHPROXY_INTERNAL_LISTEN` | 127.0.0.1:9090 | address of the internal listener for /metrics, /livez and /readyz (ADR-0018 §10); empty turns it off |
 | `--entra-tenant` | `MCP_AUTHPROXY_ENTRA_TENANT` | — | Entra tenant ID (a GUID) of the IdP app |
 | `--entra-client-id` | `MCP_AUTHPROXY_ENTRA_CLIENT_ID` | — | application (client) ID of the IdP app registration |
 | `--entra-client-secret-file` | `MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE` | — | client secret of the IdP app |

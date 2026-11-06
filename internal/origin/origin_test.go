@@ -1,17 +1,23 @@
 package origin
 
 import (
+	"time"
+
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/corker/mcp-authproxy/internal/audit"
 )
 
 var ok = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 
-func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+func quiet() *audit.Log {
+	return audit.New(slog.New(slog.NewTextHandler(io.Discard, nil)), nil, time.Now)
+}
 
 func TestHostOutsideAllowlistGets421(t *testing.T) {
 	h := Hosts(quiet(), []string{"mcp.example.com", "internal:8080"}, ok)

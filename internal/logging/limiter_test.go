@@ -7,7 +7,7 @@ import (
 
 type clock struct{ t time.Time }
 
-func (c *clock) now() time.Time         { return c.t }
+func (c *clock) now() time.Time          { return c.t }
 func (c *clock) advance(d time.Duration) { c.t = c.t.Add(d) }
 
 func TestLimiterAllowsABurstPerSourceThenReportsTheSuppressedCount(t *testing.T) {

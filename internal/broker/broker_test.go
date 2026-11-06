@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html"
 	"io"
 	"log/slog"
@@ -22,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/corker/mcp-authproxy/internal/audit"
 	"github.com/corker/mcp-authproxy/internal/idp"
 	"github.com/corker/mcp-authproxy/internal/idp/entra"
 	"github.com/corker/mcp-authproxy/internal/logging"
@@ -109,6 +111,9 @@ type env struct {
 	idpBox *token.Box
 	fake   *fakeidp.IdP
 	now    time.Time
+	audit  *bytes.Buffer // the audit stream, JSON lines
+	logs   *bytes.Buffer // the operator log, JSON lines
+	idpOps []string      // "operation outcome" per IdP call
 }
 
 func keyRing(t *testing.T) *token.KeyRing {
@@ -128,7 +133,7 @@ func keyRing(t *testing.T) *token.KeyRing {
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
-	e := &env{now: t0, st: newMemStore()}
+	e := &env{now: t0, st: newMemStore(), audit: &bytes.Buffer{}, logs: &bytes.Buffer{}}
 	clock := func() time.Time { return e.now }
 	app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}, RedirectURIs: []string{issuer + "/callback/entra"}}
 	e.fake = fakeidp.New(t, fakeidp.Entra, fakeidp.WithClient(app), fakeidp.WithClock(clock))
@@ -144,7 +149,9 @@ func newEnv(t *testing.T) *env {
 	e.idpBox, _ = token.NewBox(ring, "idp-tokens", clock)
 	discard := slog.New(slog.NewTextHandler(io.Discard, nil))
 	e.b, err = New(Config{Issuer: issuer, Resource: res, Scope: "mcp", IdPName: "entra", IdP: prov, Clients: registry{},
-		Store: e.st, Sealer: e.sealer, LoginBox: login, IdPTokenBox: e.idpBox, SecureCookies: true, Log: discard, Now: clock})
+		Store: e.st, Sealer: e.sealer, LoginBox: login, IdPTokenBox: e.idpBox, SecureCookies: true,
+		Log: logging.New(e.logs, "json"), Audit: audit.New(logging.New(e.audit, "json"), nil, clock), Now: clock,
+		ObserveIdP: func(op, outcome string, _ time.Duration) { e.idpOps = append(e.idpOps, op+" "+outcome) }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -686,5 +693,100 @@ func TestAssertionWithoutClientIDFindsTheClient(t *testing.T) {
 				t.Fatalf("got %d %v", res.StatusCode, body)
 			}
 		})
+	}
+}
+
+// auditEvents returns the audit records with the given event name.
+func (e *env) auditEvents(t *testing.T, name string) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(e.audit.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("audit line is not JSON: %s", line)
+		}
+		if rec["log.type"] != "audit" {
+			t.Fatalf("audit line without log.type=audit: %s", line)
+		}
+		if rec["event"] == name {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+func TestSignInAndRedemptionAreAudited(t *testing.T) {
+	e := newEnv(t)
+	code := e.signIn(t, nil).Query().Get("code")
+	if _, body := e.redeem(t, code, nil); body["access_token"] == nil {
+		t.Fatalf("no token: %v", body)
+	}
+	grant := firstGrant(e.st)
+	logins := e.auditEvents(t, "login")
+	if len(logins) != 1 || logins[0]["outcome"] != "success" || logins[0]["client_id"] != clientID || logins[0]["grant_id"] != grant ||
+		!strings.Contains(fmt.Sprint(logins[0]["user_key"]), ":") || logins[0]["idp"] != "entra" || logins[0]["request_id"] == nil {
+		t.Fatalf("login records: %v", logins)
+	}
+	issued := e.auditEvents(t, "token_issued")
+	if len(issued) != 1 || issued[0]["client_id"] != clientID || issued[0]["grant_id"] != grant {
+		t.Fatalf("token_issued records: %v", issued)
+	}
+	if strings.Contains(e.audit.String(), code) || strings.Contains(e.audit.String(), token.CodePrefix) {
+		t.Fatal("the authorization code reached the audit stream")
+	}
+	if want := []string{"authorize success", "callback success"}; fmt.Sprint(e.idpOps) != fmt.Sprint(want) {
+		t.Fatalf("IdP observations = %v, want %v", e.idpOps, want)
+	}
+}
+
+func TestReusedCodeIsAuditedAsARevocation(t *testing.T) {
+	e := newEnv(t)
+	code := e.signIn(t, nil).Query().Get("code")
+	grant := firstGrant(e.st)
+	e.redeem(t, code, nil)
+	e.redeem(t, code, nil)
+	revoked := e.auditEvents(t, "grant_revoked")
+	if len(revoked) != 1 || revoked[0]["grant_id"] != grant || !strings.Contains(fmt.Sprint(revoked[0]["reason"]), "reused") {
+		t.Fatalf("grant_revoked records: %v", revoked)
+	}
+	rejected := e.auditEvents(t, "token_rejected")
+	if len(rejected) != 1 || rejected[0]["reason"] != "invalid_grant" || rejected[0]["outcome"] != "failure" {
+		t.Fatalf("token_rejected records: %v", rejected)
+	}
+}
+
+// ADR-0021 §2, §7: our request ID reaches Entra as client-request-id, comes back as correlation_id,
+// and the failure is logged with the IdP's error code, trace ID and correlation ID.
+func TestIdPFailureIsAuditedAndCorrelatesWithTheIdP(t *testing.T) {
+	e := newEnv(t)
+	f := fakeidp.InvalidClientSecret // AADSTS7000215; invalid_client counts as unavailable (ADR-0011)
+	e.fake.Set(fakeidp.FailToken(fakeidp.GrantAuthorizationCode, &f))
+	c, cb := e.startLogin(t, nil)
+	res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{c})
+	ref := res.Header.Get("X-Request-Id")
+	failed := e.auditEvents(t, "login")
+	if len(failed) != 1 || failed[0]["outcome"] != "failure" || failed[0]["request_id"] != ref || failed[0]["client_id"] != clientID {
+		t.Fatalf("login failure records: %v", failed)
+	}
+	if !strings.Contains(e.logs.String(), `"correlation_id":"`+ref+`"`) || !strings.Contains(e.logs.String(), `"trace_id":`) ||
+		!strings.Contains(e.logs.String(), `"idp_error_code":7000215`) {
+		t.Fatalf("the IdP failure log lacks the IdP's code, trace ID or our ID as correlation_id: %s", e.logs.String())
+	}
+	if want := "callback unavailable"; len(e.idpOps) != 2 || e.idpOps[1] != want {
+		t.Fatalf("IdP observations = %v, want the callback to be %q", e.idpOps, want)
+	}
+}
+
+func TestUserDeclinedIsAuditedAsAFailedLogin(t *testing.T) {
+	e := newEnv(t)
+	c, cb := e.startLogin(t, nil)
+	q := url.Values{"state": {cb.Query().Get("state")}, "error": {"access_denied"}, "error_description": {"declined"}}
+	e.do(t, "GET", "/callback/entra?"+q.Encode(), nil, []*http.Cookie{c})
+	failed := e.auditEvents(t, "login")
+	if len(failed) != 1 || failed[0]["outcome"] != "failure" || failed[0]["reason"] != "the user declined to sign in" {
+		t.Fatalf("login records: %v", failed)
 	}
 }

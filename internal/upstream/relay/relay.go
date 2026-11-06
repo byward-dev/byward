@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/corker/mcp-authproxy/internal/logging"
+	"github.com/corker/mcp-authproxy/internal/tracing"
 )
 
 // stripped are removed from every inbound request before anything of ours is set (invariant 16):
@@ -40,6 +41,9 @@ func New(log *slog.Logger, target *url.URL) http.Handler {
 			strip(pr.Out.Header)
 			// A token in the query never reaches the upstream, with or without authentication.
 			pr.Out.URL.RawQuery = withoutAccessToken(pr.Out.URL.RawQuery)
+			// Our span's trace context toward the upstream; with tracing off this is a no-op and an
+			// inbound traceparent passes unchanged. The body (`params._meta`) is never touched.
+			tracing.Inject(pr.In.Context(), pr.Out.Header)
 		},
 		Transport: &http.Transport{
 			Proxy:                 http.ProxyFromEnvironment,
