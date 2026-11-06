@@ -733,6 +733,17 @@ func wantFields(t *testing.T, what string, rec map[string]any, want map[string]a
 	}
 }
 
+// oneAuditEvent requires exactly one record named name, checks its fields and returns it.
+func (e *env) oneAuditEvent(t *testing.T, name string, want map[string]any) map[string]any {
+	t.Helper()
+	recs := e.auditEvents(t, name)
+	if len(recs) != 1 {
+		t.Fatalf("want 1 %s record, got %d: %v", name, len(recs), recs)
+	}
+	wantFields(t, name, recs[0], want)
+	return recs[0]
+}
+
 func TestSignInAndRedemptionAreAudited(t *testing.T) {
 	e := newEnv(t)
 	code := e.signIn(t, nil).Query().Get("code")
@@ -740,20 +751,12 @@ func TestSignInAndRedemptionAreAudited(t *testing.T) {
 		t.Fatalf("no token: %v", body)
 	}
 	grant := firstGrant(e.st)
-	logins := e.auditEvents(t, "login")
-	if len(logins) != 1 {
-		t.Fatalf("want 1 login record, got %d: %v", len(logins), logins)
-	}
-	wantFields(t, "login", logins[0], map[string]any{"outcome": "success", "client_id": clientID, "grant_id": grant,
+	login := e.oneAuditEvent(t, "login", map[string]any{"outcome": "success", "client_id": clientID, "grant_id": grant,
 		"idp": "entra", "user_key": "*", "request_id": "*", "remote_ip": "*"})
-	if !strings.Contains(fmt.Sprint(logins[0]["user_key"]), ":") {
-		t.Errorf("login.user_key = %v, want the tid:oid form", logins[0]["user_key"])
+	if !strings.Contains(fmt.Sprint(login["user_key"]), ":") {
+		t.Errorf("login.user_key = %v, want the tid:oid form", login["user_key"])
 	}
-	issued := e.auditEvents(t, "token_issued")
-	if len(issued) != 1 {
-		t.Fatalf("want 1 token_issued record, got %d: %v", len(issued), issued)
-	}
-	wantFields(t, "token_issued", issued[0], map[string]any{"outcome": "success", "client_id": clientID, "grant_id": grant, "user_key": logins[0]["user_key"]})
+	e.oneAuditEvent(t, "token_issued", map[string]any{"outcome": "success", "client_id": clientID, "grant_id": grant, "user_key": login["user_key"]})
 	if strings.Contains(e.audit.String(), code) || strings.Contains(e.audit.String(), token.CodePrefix) {
 		t.Fatal("the authorization code reached the audit stream")
 	}
@@ -768,19 +771,11 @@ func TestReusedCodeIsAuditedAsARevocation(t *testing.T) {
 	grant := firstGrant(e.st)
 	e.redeem(t, code, nil)
 	e.redeem(t, code, nil)
-	revoked := e.auditEvents(t, "grant_revoked")
-	if len(revoked) != 1 {
-		t.Fatalf("want 1 grant_revoked record, got %d: %v", len(revoked), revoked)
+	revoked := e.oneAuditEvent(t, "grant_revoked", map[string]any{"outcome": "success", "grant_id": grant})
+	if !strings.Contains(fmt.Sprint(revoked["reason"]), "reused") {
+		t.Errorf("grant_revoked.reason = %v, want it to say the code was reused", revoked["reason"])
 	}
-	wantFields(t, "grant_revoked", revoked[0], map[string]any{"outcome": "success", "grant_id": grant})
-	if !strings.Contains(fmt.Sprint(revoked[0]["reason"]), "reused") {
-		t.Errorf("grant_revoked.reason = %v, want it to say the code was reused", revoked[0]["reason"])
-	}
-	rejected := e.auditEvents(t, "token_rejected")
-	if len(rejected) != 1 {
-		t.Fatalf("want 1 token_rejected record, got %d: %v", len(rejected), rejected)
-	}
-	wantFields(t, "token_rejected", rejected[0], map[string]any{"outcome": "failure", "reason": "invalid_grant"})
+	e.oneAuditEvent(t, "token_rejected", map[string]any{"outcome": "failure", "reason": "invalid_grant"})
 }
 
 // ADR-0021 §2, §7: our request ID reaches Entra as client-request-id, comes back as correlation_id,
@@ -792,11 +787,7 @@ func TestIdPFailureIsAuditedAndCorrelatesWithTheIdP(t *testing.T) {
 	c, cb := e.startLogin(t, nil)
 	res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{c})
 	ref := res.Header.Get("X-Request-Id")
-	failed := e.auditEvents(t, "login")
-	if len(failed) != 1 {
-		t.Fatalf("want 1 login record, got %d: %v", len(failed), failed)
-	}
-	wantFields(t, "login", failed[0], map[string]any{"outcome": "failure", "request_id": ref, "client_id": clientID})
+	e.oneAuditEvent(t, "login", map[string]any{"outcome": "failure", "request_id": ref, "client_id": clientID})
 	for _, want := range []string{`"correlation_id":"` + ref + `"`, `"trace_id":"`, `"idp_error_code":7000215`} {
 		if !strings.Contains(e.logs.String(), want) {
 			t.Errorf("the IdP failure log lacks %s (our request ID must come back as Entra's correlation_id): %s", want, e.logs.String())
@@ -812,11 +803,7 @@ func TestUserDeclinedIsAuditedAsAFailedLogin(t *testing.T) {
 	c, cb := e.startLogin(t, nil)
 	q := url.Values{"state": {cb.Query().Get("state")}, "error": {"access_denied"}, "error_description": {"declined"}}
 	e.do(t, "GET", "/callback/entra?"+q.Encode(), nil, []*http.Cookie{c})
-	failed := e.auditEvents(t, "login")
-	if len(failed) != 1 {
-		t.Fatalf("want 1 login record, got %d: %v", len(failed), failed)
-	}
-	wantFields(t, "login", failed[0], map[string]any{"outcome": "failure", "reason": "the user declined to sign in", "client_id": clientID})
+	e.oneAuditEvent(t, "login", map[string]any{"outcome": "failure", "reason": "the user declined to sign in", "client_id": clientID})
 }
 
 type denyGate struct{}
@@ -833,11 +820,7 @@ func TestAccessGateDenialIsAuditedAndCreatesNoGrant(t *testing.T) {
 	if res.StatusCode != http.StatusForbidden {
 		t.Fatalf("callback with a denying gate = %d, want 403", res.StatusCode)
 	}
-	denied := e.auditEvents(t, "access_denied")
-	if len(denied) != 1 {
-		t.Fatalf("want 1 access_denied record, got %d: %v", len(denied), denied)
-	}
-	wantFields(t, "access_denied", denied[0], map[string]any{"outcome": "failure", "client_id": clientID, "idp": "entra", "user_key": "*"})
+	e.oneAuditEvent(t, "access_denied", map[string]any{"outcome": "failure", "client_id": clientID, "idp": "entra", "user_key": "*"})
 	if logins := e.auditEvents(t, "login"); len(logins) != 0 {
 		t.Errorf("a denied user was also audited as a login: %v", logins)
 	}
