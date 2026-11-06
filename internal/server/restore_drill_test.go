@@ -1,7 +1,7 @@
 //go:build integration
 
-// Tests behind the integration tag must be named *Drill*: `mise run test:integration:go` (and its
-// CI job) runs only those, so the unit suite is not run twice.
+// Tests behind the integration tag must be named TestIntegration*: `mise run test:integration:go`
+// (and its CI job) runs only those, so the unit suite is not run twice.
 package server
 
 import (
@@ -17,7 +17,7 @@ import (
 // writing, restore the snapshot over it with the restore counter untouched, and restart. The
 // restored store starts a new epoch, a refresh token from before the restore is refused at
 // /token, the restore is on the audit stream exactly once, and a new sign-in works again.
-func TestRestoreDrillRefusesRefreshTokensFromBeforeTheRestore(t *testing.T) {
+func TestIntegrationRestoreDrillRefusesRefreshTokensFromBeforeTheRestore(t *testing.T) {
 	_, cfg := storeEnv(t)
 	db := filepath.Join(cfg.StoreDir, "byward.db")
 
