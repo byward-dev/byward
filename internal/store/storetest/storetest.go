@@ -404,9 +404,9 @@ func revocationsAreOldestFirst(t *testing.T, s store.Store) {
 
 func cutOffRefusesLaterCreatedEarlierGrants(t *testing.T, s store.Store) {
 	before := t0.Add(time.Hour)
-	must(t, s.RevokeSubject(ctx, "tid:alice", before, before))
+	must(t, s.RevokeSubject(ctx, "tid:alice", before.In(otherZone), before))
 	inFlight := grant("in-flight", "tid:alice")
-	inFlight.CreatedAt = before.Add(-time.Minute) // the login started before revoke-user
+	inFlight.CreatedAt = before.Add(-tick) // the login started just before revoke-user
 	_, err := s.CreateGrant(ctx, inFlight)
 	wantErr(t, "CreateGrant covered by a cut-off", err, store.ErrRevoked)
 	if _, err := s.Grant(ctx, "in-flight"); !errors.Is(err, store.ErrNotFound) {
@@ -416,6 +416,12 @@ func cutOffRefusesLaterCreatedEarlierGrants(t *testing.T, s store.Store) {
 	after.CreatedAt, after.ExpiresAt = before, before.Add(time.Hour) // not before the cut-off
 	mustCreate(t, s, after)
 	mustCreate(t, s, grant("other-user", "tid:bob"))
+
+	// Once Collect drops the cut-off it no longer refuses: only retained cut-offs count.
+	must(t, s.Collect(ctx, before.Add(store.RevocationRetention)))
+	late := grant("late", "tid:alice")
+	late.CreatedAt, late.ExpiresAt = before.Add(-time.Minute), before.Add(48*time.Hour)
+	mustCreate(t, s, late)
 }
 
 // Whatever the interleaving, a grant created before the cut-off never survives it: either it is
