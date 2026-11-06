@@ -464,3 +464,25 @@ func TestConcurrentLogins(t *testing.T) {
 		})
 	}
 }
+
+func TestFailTokenDoesNotMakeUnsupportedGrantsSupported(t *testing.T) {
+	f := newFixture(t, Generic, FailToken(GrantClientCredentials, &InteractionRequired))
+	r := f.token(t, url.Values{"grant_type": {GrantClientCredentials}})
+	wantStatus(t, r, 400)
+	wantClaim(t, r.body, "error", "unsupported_grant_type")
+}
+
+func TestSetTenantMovesDefaultUserButNotExplicitOne(t *testing.T) {
+	f := newFixture(t, Entra)
+	tid := NewGUID()
+	f.idp.Set(WithTenantID(tid))
+	f.tenant = tid
+	_, id := f.verified(t, f.login(t).str("id_token"))
+	wantClaim(t, id, "tid", tid)
+
+	pinned := NewGUID()
+	f.idp.Set(WithUser(User{TenantID: pinned}), WithTenantID(NewGUID()))
+	if got := f.idp.User().TenantID; got != pinned {
+		t.Fatalf("explicit user tenant changed to %s", got)
+	}
+}

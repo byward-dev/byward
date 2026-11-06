@@ -24,7 +24,9 @@ type Failure struct {
 	Claims string
 }
 
-// Failures used by the fake itself, also for injection with FailAuthorize and FailToken.
+// Failures used by the fake itself, also for injection with FailAuthorize and FailToken. Treat
+// them as read-only: the fake and FailAuthorize/FailToken copy them, but a write changes them for
+// every later test.
 var (
 	ConsentRequired = Failure{Error: "invalid_grant", Code: 65001,
 		Description: "The user or administrator hasn't consented to use the application. Send an interactive authorization request for this user and resource."}
@@ -81,6 +83,9 @@ var (
 		Description: "The service is temporarily unavailable."}
 )
 
+// failure returns a copy of f, so callers may adjust it without touching the shared value.
+func failure(f Failure) *Failure { return &f }
+
 func (p *IdP) description(f Failure, trace, corr, ts string) string {
 	if p.profile != Entra {
 		return f.Description
@@ -92,9 +97,12 @@ func (p *IdP) description(f Failure, trace, corr, ts string) string {
 	return fmt.Sprintf("%s\r\nTrace ID: %s\r\nCorrelation ID: %s\r\nTimestamp: %s", d, trace, corr, ts)
 }
 
-// correlation returns the trace and correlation IDs of a request; the correlation ID echoes a
+// correlation returns the trace and correlation IDs of an Entra request; the correlation ID echoes a
 // GUID-shaped client-request-id header, which is also echoed as a response header.
-func correlation(w http.ResponseWriter, r *http.Request) (trace, corr string) {
+func (p *IdP) correlation(w http.ResponseWriter, r *http.Request) (trace, corr string) {
+	if p.profile != Entra {
+		return "", ""
+	}
 	trace, corr = NewGUID(), NewGUID()
 	if id := r.Header.Get("client-request-id"); isGUID(id) {
 		corr = id
@@ -112,7 +120,7 @@ func (p *IdP) tokenError(w http.ResponseWriter, r *http.Request, f Failure) {
 	}
 	body := map[string]any{"error": f.Error}
 	if p.profile == Entra {
-		trace, corr := correlation(w, r)
+		trace, corr := p.correlation(w, r)
 		ts := p.cfg.clock().UTC().Format("2006-01-02 15:04:05Z")
 		body["error_description"] = p.description(f, trace, corr, ts)
 		codes := []int{}
@@ -139,7 +147,7 @@ func (p *IdP) tokenError(w http.ResponseWriter, r *http.Request, f Failure) {
 // authorizeError redirects back to the client with an error (only once the redirect URI is
 // trusted). Caller holds p.mu.
 func (p *IdP) authorizeError(w http.ResponseWriter, r *http.Request, redirect, state string, f Failure) {
-	trace, corr := correlation(w, r)
+	trace, corr := p.correlation(w, r)
 	ts := p.cfg.clock().UTC().Format("2006-01-02 15:04:05Z")
 	q := url.Values{"error": {f.Error}}
 	if d := p.description(f, trace, corr, ts); d != "" {
@@ -156,7 +164,7 @@ func (p *IdP) authorizeError(w http.ResponseWriter, r *http.Request, redirect, s
 
 // errorPage is what the IdP shows when it cannot trust the redirect URI: no redirect at all.
 func (p *IdP) errorPage(w http.ResponseWriter, r *http.Request, f Failure) {
-	trace, corr := correlation(w, r)
+	trace, corr := p.correlation(w, r)
 	ts := p.cfg.clock().UTC().Format("2006-01-02 15:04:05Z")
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusBadRequest)

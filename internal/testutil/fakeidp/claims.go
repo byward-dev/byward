@@ -119,21 +119,30 @@ func (p *IdP) idToken(clientID string, u User, scopes []string, nonce string, au
 	profile := slices.Contains(scopes, "profile")
 	email := slices.Contains(scopes, "email") && u.Email != ""
 	if p.profile == Entra {
-		m["sub"] = pairwiseSub(u.TenantID, u.OID, clientID)
-		m["oid"] = u.OID
-		m["tid"] = u.TenantID
-		m["ver"] = "2.0"
-		m["uti"] = randomToken()[:22]
-		if profile {
-			m["name"] = u.Name
-			m["preferred_username"] = u.PreferredUsername
-		}
-		if email {
-			m["email"] = u.Email
-		}
-		p.addGroups(m, u)
-		return p.sign(m)
+		p.entraIDClaims(m, clientID, u, profile, email)
+	} else {
+		p.genericIDClaims(m, clientID, u, authTime, profile, email)
 	}
+	return p.sign(m)
+}
+
+func (p *IdP) entraIDClaims(m map[string]any, clientID string, u User, profile, email bool) {
+	m["sub"] = pairwiseSub(u.TenantID, u.OID, clientID)
+	m["oid"] = u.OID
+	m["tid"] = u.TenantID
+	m["ver"] = "2.0"
+	m["uti"] = randomToken()[:22]
+	if profile {
+		m["name"] = u.Name
+		m["preferred_username"] = u.PreferredUsername
+	}
+	if email {
+		m["email"] = u.Email
+	}
+	p.addGroups(m, u)
+}
+
+func (p *IdP) genericIDClaims(m map[string]any, clientID string, u User, authTime time.Time, profile, email bool) {
 	m["sub"] = u.Subject
 	m["azp"] = clientID
 	m["auth_time"] = authTime.Unix()
@@ -155,7 +164,6 @@ func (p *IdP) idToken(clientID string, u User, scopes []string, nonce string, au
 	if len(u.Groups) > 0 {
 		m["groups"] = u.Groups
 	}
-	return p.sign(m)
 }
 
 // azpacr is how the client authenticated: 0 public, 1 secret, 2 certificate.

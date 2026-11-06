@@ -55,9 +55,11 @@ type User struct {
 	EmailVerified bool
 	// HostedDomain is the generic profile's `hd` claim (Google Workspace).
 	HostedDomain string
-	Roles        []string
-	Groups       []string
-	// GroupsOverage replaces `groups` with the overage claims, as Entra does above 200 groups.
+	// Roles are the user's app roles (Entra only).
+	Roles  []string
+	Groups []string
+	// GroupsOverage replaces `groups` with the overage claims, as Entra does above 200 groups
+	// (Entra only).
 	GroupsOverage bool
 }
 
@@ -70,12 +72,13 @@ type Client struct {
 	// Certificates lists accepted private_key_jwt keys; more than one models a rollover.
 	Certificates []*Certificate
 	RedirectURIs []string
-	// ServicePrincipalID is the `oid` of app-only tokens; empty means a generated GUID.
+	// ServicePrincipalID is the `oid` of app-only tokens (Entra only); empty means a generated GUID.
 	ServicePrincipalID string
-	// AppRoles maps a resource client ID to the app roles assigned to this client on it.
+	// AppRoles maps a resource client ID to the app roles assigned to this client on it (Entra
+	// only).
 	AppRoles map[string][]string
 	// AssignmentRequired, on a resource, refuses client-credential tokens to callers without a
-	// role (AADSTS501051).
+	// role (AADSTS501051; Entra only).
 	AssignmentRequired bool
 }
 
@@ -99,6 +102,7 @@ type settings struct {
 	authority       string
 	issuer          string
 	user            User
+	userTenantSet   bool
 	clients         map[string]Client
 	tokenLifetime   time.Duration
 	refreshLifetime time.Duration
@@ -160,6 +164,10 @@ func (p *IdP) Set(opts ...Option) {
 	for _, o := range opts {
 		o(&p.cfg)
 	}
+	// A user without an explicit tenant follows a WithTenantID change.
+	if !p.cfg.userTenantSet {
+		p.cfg.user.TenantID = p.cfg.tenantID
+	}
 	p.cfg.user = p.completeUser(p.cfg.user)
 }
 
@@ -198,7 +206,9 @@ func WithAuthority(url string) Option {
 func WithIssuer(iss string) Option { return func(s *settings) { s.issuer = iss } }
 
 // WithUser sets the user the authorization endpoint signs in.
-func WithUser(u User) Option { return func(s *settings) { s.user = u } }
+func WithUser(u User) Option {
+	return func(s *settings) { s.user, s.userTenantSet = u, u.TenantID != "" }
+}
 
 // WithClient registers or replaces an app registration.
 func WithClient(c Client) Option {
@@ -269,9 +279,6 @@ func FailToken(grantType string, f *Failure) Option {
 
 // URL is the base URL the fake listens on.
 func (p *IdP) URL() string { return p.srv.URL }
-
-// Profile reports the fake's profile.
-func (p *IdP) Profile() Profile { return p.profile }
 
 // TenantID is the IdP's home tenant.
 func (p *IdP) TenantID() string {

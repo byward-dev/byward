@@ -234,3 +234,16 @@ func TestErrorPageHasNoSecretsAndCorrelates(t *testing.T) {
 		t.Fatalf("error page = %q", body)
 	}
 }
+
+func TestGenericErrorsCarryNoEntraHeaders(t *testing.T) {
+	f := newFixture(t, Generic, FailAuthorize(&InvalidRequest))
+	for _, resp := range []*http.Response{f.authorize(t, nil), f.authorize(t, url.Values{"client_id": {"unknown"}})} {
+		if resp.Header.Get("x-ms-request-id") != "" || resp.Header.Get("client-request-id") != "" {
+			t.Fatalf("generic response has Entra headers: %v", resp.Header)
+		}
+	}
+	q := redirectQuery(t, f.authorize(t, nil))
+	if strings.Contains(q.Get("error_description"), "AADSTS") || strings.Contains(q.Get("error_description"), "Trace ID") {
+		t.Fatalf("generic error_description = %q", q.Get("error_description"))
+	}
+}
