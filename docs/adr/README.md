@@ -26,6 +26,7 @@ each feature (F1–F22) is a GitHub issue and gets an ADR once grilled with the 
 | [0018](0018-hardening.md) | Hardening: Origin and Host checks, bounded HTTP, Rewrite-only proxying | F17 | — |
 | [0019](0019-packaging.md) | Packaging: a signed container image and Linux binaries for servers | F19 | — |
 | [0020](0020-configuration.md) | Configuration: flags and env, secrets from files, one registry | F18 | — |
+| [0021](0021-observability.md) | Observability: redacted logs, an audit stream, one request ID, telemetry off by default | F20 | — |
 
 ## Writing a new ADR
 
