@@ -41,7 +41,7 @@ type Config struct {
 	Now        func() time.Time
 }
 
-// Provider is the Entra adapter. It implements idp.Authenticator and idp.Refresher.
+// Provider is the Entra adapter.
 type Provider struct {
 	cfg     Config
 	fetch   *idp.Fetcher
@@ -51,6 +51,12 @@ type Provider struct {
 	mu    sync.Mutex
 	ready bool
 }
+
+var _ interface {
+	idp.Authenticator
+	idp.Refresher
+	idp.Readiness
+} = (*Provider)(nil)
 
 // New validates cfg (ADR-0012 §2): a tenant GUID, or organizations with a GUID allowlist; common
 // and consumers are refused.
@@ -108,8 +114,9 @@ func issuerFor(tid string) string { return Authority + "/" + tid + "/v2.0" }
 // {tenantid} template for organizations. Logins and refreshes wait for it; errors are not cached.
 func (p *Provider) Ready(ctx context.Context) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.ready {
+	ready := p.ready
+	p.mu.Unlock()
+	if ready {
 		return nil
 	}
 	var m struct {
@@ -125,7 +132,9 @@ func (p *Provider) Ready(ctx context.Context) error {
 	if m.Issuer != want {
 		return &idp.Error{Class: idp.Fatal, Err: fmt.Errorf("entra discovery: issuer %q, want %q", m.Issuer, want)}
 	}
+	p.mu.Lock()
 	p.ready = true
+	p.mu.Unlock()
 	return nil
 }
 

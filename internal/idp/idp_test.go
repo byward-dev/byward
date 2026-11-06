@@ -410,25 +410,24 @@ func TestPostTokenIsNeverRetried(t *testing.T) {
 
 func TestGetJSONStopsOnCancelDuringBackoff(t *testing.T) {
 	var n atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		n.Add(1)
-		w.WriteHeader(500)
-	}))
-	defer srv.Close()
 	f := NewFetcher(nil)
 	f.Backoff = time.Hour
 	ctx, cancel := context.WithCancel(context.Background())
-	f.Client.Transport = cancelAfter{cancel}
+	f.Client.Transport = cancelAfter{cancel: cancel, n: &n}
 	var v any
-	if err := f.GetJSON(ctx, srv.URL, &v); !errors.Is(err, context.Canceled) {
-		t.Fatalf("err = %v", err)
+	if err := f.GetJSON(ctx, "https://idp.example/keys", &v); !errors.Is(err, context.Canceled) || n.Load() != 1 {
+		t.Fatalf("err = %v, attempts = %d", err, n.Load())
 	}
 }
 
 // cancelAfter answers 500 and cancels the context, so GetJSON is waiting in backoff when it notices.
-type cancelAfter struct{ cancel context.CancelFunc }
+type cancelAfter struct {
+	cancel context.CancelFunc
+	n      *atomic.Int32
+}
 
 func (c cancelAfter) RoundTrip(r *http.Request) (*http.Response, error) {
+	c.n.Add(1)
 	c.cancel()
 	return &http.Response{StatusCode: 500, Body: http.NoBody, Request: r}, nil
 }

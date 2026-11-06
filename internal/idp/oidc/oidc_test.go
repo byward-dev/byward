@@ -410,3 +410,19 @@ func TestTokenTransportFailureIsUnavailable(t *testing.T) {
 		t.Fatalf("err = %#v", err)
 	}
 }
+
+func TestConcurrentFirstLoginsShareDiscovery(t *testing.T) {
+	e := newEnv(t, Config{})
+	errs := make(chan error, 8)
+	for range 8 {
+		go func() {
+			_, err := e.p.AuthCodeURL(context.Background(), login)
+			errs <- err
+		}()
+	}
+	for range 8 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+}

@@ -426,3 +426,19 @@ func (f failingTransport) RoundTrip(*http.Request) (*http.Response, error) {
 	f.t.Error("unexpected network call")
 	return nil, errors.New("no network")
 }
+
+func TestConcurrentFirstLoginsWaitForReadiness(t *testing.T) {
+	e := newEnv(t, Config{})
+	errs := make(chan error, 8)
+	for range 8 {
+		go func() {
+			_, err := e.p.AuthCodeURL(context.Background(), login)
+			errs <- err
+		}()
+	}
+	for range 8 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+}

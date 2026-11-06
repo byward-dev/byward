@@ -43,7 +43,7 @@ type Config struct {
 // mutableClaims are claims a user can change; using one as the subject earns a warning.
 var mutableClaims = []string{"email", "preferred_username", "upn", "name"}
 
-// Provider is a generic OIDC adapter. It implements idp.Authenticator and idp.Refresher.
+// Provider is a generic OIDC adapter.
 type Provider struct {
 	cfg      Config
 	preset   Preset
@@ -62,6 +62,12 @@ type metadata struct {
 	JWKSURI               string `json:"jwks_uri"`
 	IssParameterSupported bool   `json:"authorization_response_iss_parameter_supported"`
 }
+
+var _ interface {
+	idp.Authenticator
+	idp.Refresher
+	idp.Readiness
+} = (*Provider)(nil)
 
 // New validates cfg. Discovery is lazy: the first call that needs it (or Ready) fetches it.
 func New(cfg Config) (*Provider, error) {
@@ -104,10 +110,13 @@ func (p *Provider) Ready(ctx context.Context) error {
 
 func (p *Provider) discover(ctx context.Context) (*metadata, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.meta != nil {
-		return p.meta, nil
+	cached := p.meta
+	p.mu.Unlock()
+	if cached != nil {
+		return cached, nil
 	}
+	// Fetched without the lock, so a slow IdP never queues logins behind one another's retries;
+	// concurrent first calls may fetch twice, and the first stored result wins.
 	var m metadata
 	wellKnown := strings.TrimSuffix(p.cfg.Issuer, "/") + "/.well-known/openid-configuration"
 	if err := p.fetch.GetJSON(ctx, wellKnown, &m); err != nil {
@@ -122,8 +131,12 @@ func (p *Provider) discover(ctx context.Context) (*metadata, error) {
 			return nil, &idp.Error{Class: idp.Fatal, Err: fmt.Errorf("oidc discovery: endpoint: %w", err)}
 		}
 	}
-	p.meta = &m
-	p.keys = idp.NewKeySet(p.fetch, m.JWKSURI, p.cfg.Now)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.meta == nil {
+		p.meta = &m
+		p.keys = idp.NewKeySet(p.fetch, m.JWKSURI, p.cfg.Now)
+	}
 	return p.meta, nil
 }
 

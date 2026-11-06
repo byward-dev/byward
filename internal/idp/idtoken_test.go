@@ -90,6 +90,10 @@ func TestVerifyJWT(t *testing.T) {
 		mac.Write([]byte(header + "." + payload))
 		tok := header + "." + payload + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 		r := rules
+		r.Algs = append(append([]jose.SignatureAlgorithm{}, rules.Algs...), jose.HS256)
+		if _, err := VerifyJWT(context.Background(), tok, ks, r); err == nil {
+			t.Fatal("HS256 accepted with a mixed allowlist")
+		}
 		r.Algs = []jose.SignatureAlgorithm{jose.HS256, jose.HS384, jose.HS512}
 		if _, err := VerifyJWT(context.Background(), tok, ks, r); err == nil || !strings.Contains(err.Error(), "no signature algorithm allowed") {
 			t.Fatalf("HS* allowlist: err = %v", err)
