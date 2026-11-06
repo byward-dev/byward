@@ -38,7 +38,7 @@ var (
 		Treats403AsAuthFailure: true,
 		Facts: []Fact{
 			{"without --client-id it signs in with CIMD, client_id https://claude.ai/oauth/claude-code-client-metadata; the echo tool then works", "real run 2026-11-06 (byward 3be7365, Entra)"},
-			{"redirect http://localhost:<port>/callback; the document lists http://localhost/callback, and the broker allows any loopback port (RFC 8252 §7.3)", "https://claude.ai/oauth/claude-code-client-metadata; https://code.claude.com/docs/en/mcp"},
+			{"redirect http://localhost:<port>/callback; the document lists http://localhost/callback, and the broker allows any loopback port (RFC 8252 §7.3)", "https://claude.ai/oauth/claude-code-client-metadata; https://code.claude.com/docs/en/mcp; ADR-0009 §2"},
 			{"discovery, resource, scope, iss and 403 handling as on the static path", "the ClaudeCode profile's sources"},
 			{"picks CIMD without checking for none in token_endpoint_auth_methods_supported", Assumed},
 			{"authorization server metadata path order", Assumed},
