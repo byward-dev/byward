@@ -106,10 +106,14 @@ func TestAnIdentityWithoutASubjectIsNoSignedInUser(t *testing.T) {
 	if _, ok := signedInUser(r); ok {
 		t.Fatal("a request without an identity counts as signed in")
 	}
-	var got bool
+	var got, reached bool
 	resource.Guard(resource.Metadata{Resource: &url.URL{Scheme: "https", Host: "mcp.example.com", Path: "/mcp"}}, twoUsers{"tok-nobody": ""}, nil, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		reached = true
 		_, got = signedInUser(r)
 	})).ServeHTTP(httptest.NewRecorder(), withBearer(r, "tok-nobody"))
+	if !reached {
+		t.Fatal("Guard refused the request, so this test proves nothing")
+	}
 	if got {
 		t.Fatal("an identity with an empty subject counts as signed in")
 	}

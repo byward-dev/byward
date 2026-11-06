@@ -115,6 +115,8 @@ type sealer struct {
 	r       *http.Request
 	user    string
 	written bool
+	sealed  string // the value seal last wrote: net/http keeps headers set before a 1xx, so the
+	// final response can carry it again and must not be sealed twice
 }
 
 func (s *sealer) WriteHeader(code int) {
@@ -145,7 +147,7 @@ func (s *sealer) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 func (s *sealer) seal() {
 	h := s.Header()
 	ids := h.Values(Header)
-	if len(ids) == 0 {
+	if len(ids) == 0 || (len(ids) == 1 && ids[0] == s.sealed) {
 		return
 	}
 	h.Del(Header)
@@ -156,5 +158,6 @@ func (s *sealer) seal() {
 		s.c.Log.ErrorContext(s.r.Context(), "sealing the MCP session ID failed", "request_id", logging.RequestID(s.r.Context()), "error", err)
 		return
 	}
-	h.Set(Header, Prefix+sealed)
+	s.sealed = Prefix + sealed
+	h.Set(Header, s.sealed)
 }

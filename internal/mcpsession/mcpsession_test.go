@@ -2,12 +2,15 @@ package mcpsession
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"strings"
@@ -154,26 +157,68 @@ func TestTheClientGetsASealedSessionIDNeverTheUpstreams(t *testing.T) {
 	}
 }
 
-// Informational responses (here 103 Early Hints) come before the final one; the final response's
-// session ID must still be sealed.
-func TestTheSessionIDIsSealedAfterAnInformationalResponse(t *testing.T) {
-	e := newEnv(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Link", "</style.css>; rel=preload")
-		w.WriteHeader(http.StatusEarlyHints)
-		w.Header().Set(Header, upstreamSession)
-		w.WriteHeader(http.StatusOK)
-	}))
-	srv := httptest.NewServer(e.p.h)
-	t.Cleanup(srv.Close)
-	r, _ := http.NewRequest(http.MethodPost, srv.URL+"/mcp", nil)
-	r.Header.Set("X-Test-User", alice)
-	res, err := http.DefaultClient.Do(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = res.Body.Close()
-	if id := res.Header.Get(Header); res.StatusCode != http.StatusOK || !strings.HasPrefix(id, Prefix) || strings.Contains(id, upstreamSession) {
-		t.Fatalf("final response %d with session %q: want a sealed %s value", res.StatusCode, id, Prefix)
+// Informational responses (here 103 Early Hints) come before the final one, and net/http keeps the
+// headers set before them. Either way the client gets the session ID sealed once: its next request
+// reaches the upstream with the upstream's own ID.
+func TestTheSessionIDIsSealedOnceAroundAnInformationalResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		before bool // the upstream sets the session header before the 103 (and net/http keeps it)
+	}{
+		{"session header after the 103", false},
+		{"session header only before the 103", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			e := newEnv(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got = append(got, r.Header.Get(Header))
+				if tc.before {
+					w.Header().Set(Header, upstreamSession)
+				}
+				w.Header().Set("Link", "</style.css>; rel=preload")
+				w.WriteHeader(http.StatusEarlyHints)
+				if !tc.before {
+					w.Header().Set(Header, upstreamSession)
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			srv := httptest.NewServer(e.p.h)
+			t.Cleanup(srv.Close)
+			var early []string // the session header of each informational response the client saw
+			trace := &httptrace.ClientTrace{Got1xxResponse: func(_ int, h textproto.MIMEHeader) error {
+				early = append(early, h.Get(Header))
+				return nil
+			}}
+			post := func(session string) *http.Response {
+				r, _ := http.NewRequestWithContext(httptrace.WithClientTrace(context.Background(), trace), http.MethodPost, srv.URL+"/mcp", nil)
+				r.Header.Set("X-Test-User", alice)
+				if session != "" {
+					r.Header.Set(Header, session)
+				}
+				res, err := http.DefaultClient.Do(r)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_ = res.Body.Close()
+				return res
+			}
+			res := post("")
+			for _, h := range early {
+				if strings.Contains(h, upstreamSession) {
+					t.Fatalf("the 103 carried the upstream's session ID %q to the client", h)
+				}
+			}
+			if tc.before && (len(early) != 1 || !strings.HasPrefix(early[0], Prefix)) {
+				t.Fatalf("informational session headers %q: want one sealed value", early)
+			}
+			id := res.Header.Get(Header)
+			if res.StatusCode != http.StatusOK || !strings.HasPrefix(id, Prefix) || strings.Contains(id, upstreamSession) {
+				t.Fatalf("final response %d with session %q: want a sealed %s value", res.StatusCode, id, Prefix)
+			}
+			if res := post(id); res.StatusCode != http.StatusOK || got[len(got)-1] != upstreamSession {
+				t.Fatalf("next request: %d, upstream got %q; want its own %q", res.StatusCode, got[len(got)-1], upstreamSession)
+			}
+		})
 	}
 }
 
