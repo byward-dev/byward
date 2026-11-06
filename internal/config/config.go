@@ -21,6 +21,7 @@ var registry = []Setting{
 	{Name: "resource-name", Help: "human-readable resource name in protected resource metadata"},
 	{Name: "resource-documentation", Help: "documentation URL in protected resource metadata"},
 	{Name: "log-format", Default: "json", Help: "log format: json or text"},
+	{Name: "insecure-no-auth", Bool: true, Default: "false", Help: "no authentication at all, for trying the proxy out and for tests; loopback only (ADR-0027)"},
 	{Name: "dev", Bool: true, Default: "false", Help: "development mode: enables the relaxations it logs at startup"},
 }
 
@@ -36,6 +37,10 @@ type Config struct {
 	ResourceDocumentation string
 	LogFormat             string
 	Dev                   bool
+	// NoAuth serves the upstream with no authentication (ADR-0027).
+	NoAuth bool
+	// InContainer is set when the proxy runs in a container (/.dockerenv or /run/.containerenv).
+	InContainer bool
 
 	Values *Values
 	// Relaxations lists what --dev relaxed, for the startup log.
@@ -66,20 +71,25 @@ func Load(args, environ []string, readFile readFileFunc) (*Config, Actions, erro
 	if act.Version {
 		return nil, act, nil
 	}
-	c, err := validate(vals)
+	c, err := validate(vals, inContainer(readFile))
 	return c, act, err
 }
 
-func validate(v *Values) (*Config, error) {
+func validate(v *Values, container bool) (*Config, error) {
 	c := &Config{Values: v, Listen: v.get("listen"), Scope: v.get("scope"),
 		ResourceName: v.get("resource-name"), ResourceDocumentation: v.get("resource-documentation"),
-		LogFormat: v.get("log-format")}
+		LogFormat: v.get("log-format"), InContainer: container}
 	var errs []error
 	dev, err := strconv.ParseBool(v.get("dev"))
 	if err != nil {
 		errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "dev"}.Env(), v.get("dev")))
 	}
 	c.Dev = dev
+	noAuth, err := strconv.ParseBool(v.get("insecure-no-auth"))
+	if err != nil {
+		errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "insecure-no-auth"}.Env(), v.get("insecure-no-auth")))
+	}
+	c.NoAuth = noAuth
 
 	if relaxed, err := checkInlineSecrets(v, c.Dev); err != nil {
 		errs = append(errs, err)
@@ -101,7 +111,7 @@ func validate(v *Values) (*Config, error) {
 			switch {
 			case !isLoopback(c.PublicURL.Hostname()):
 				errs = append(errs, errorf("MCP_AUTHPROXY_PUBLIC_URL: must use https (http is allowed only for loopback hosts with --dev)"))
-			case !c.Dev:
+			case !c.Dev && !c.NoAuth:
 				errs = append(errs, errorf("MCP_AUTHPROXY_PUBLIC_URL: http on loopback needs --dev"))
 			default:
 				c.Relaxations = append(c.Relaxations, "http public URL on loopback")
@@ -142,6 +152,9 @@ func validate(v *Values) (*Config, error) {
 			errs = append(errs, err)
 		}
 	}
+	if c.NoAuth && c.PublicURL != nil {
+		errs = append(errs, checkNoAuth(c, v)...)
+	}
 	if len(errs) > 0 {
 		msgs := make([]string, 0, len(errs))
 		for _, e := range errs {
@@ -150,6 +163,59 @@ func validate(v *Values) (*Config, error) {
 		return nil, &configError{msg: strings.Join(msgs, "; ")}
 	}
 	return c, nil
+}
+
+// inContainer reports whether a container runtime's marker file exists (Docker, Podman).
+func inContainer(readFile readFileFunc) bool {
+	if readFile == nil {
+		return false
+	}
+	for _, p := range []string{"/.dockerenv", "/run/.containerenv"} {
+		if _, err := readFile(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// checkNoAuth fences --insecure-no-auth in (ADR-0027): the public URL is loopback, the listen
+// address is loopback unless the proxy runs in a container, the Host and Origin allowlists stay
+// loopback-only, and no authentication setting is present.
+func checkNoAuth(c *Config, v *Values) []error {
+	const env = "MCP_AUTHPROXY_INSECURE_NO_AUTH"
+	var errs []error
+	if !isLoopback(c.PublicURL.Hostname()) {
+		errs = append(errs, errorf("%s: MCP_AUTHPROXY_PUBLIC_URL must be a loopback URL, e.g. http://localhost:8080/mcp", env))
+	}
+	host, port, err := net.SplitHostPort(c.Listen)
+	switch {
+	case err != nil:
+	case isLoopback(host):
+	case c.InContainer:
+		c.Relaxations = append(c.Relaxations, fmt.Sprintf(
+			"listening on %s inside a container: publish the port on loopback only, e.g. docker run -p 127.0.0.1:%s:%s; anyone who can reach the published port can use the upstream", c.Listen, port, port))
+	default:
+		errs = append(errs, errorf("%s: MCP_AUTHPROXY_LISTEN must be a loopback address such as 127.0.0.1:8080 (non-loopback only inside a container)", env))
+	}
+	for _, h := range c.AllowedHosts {
+		if hn, _, err := net.SplitHostPort(h); !isLoopback(h) && (err != nil || !isLoopback(hn)) {
+			errs = append(errs, errorf("%s: MCP_AUTHPROXY_ALLOWED_HOSTS may only list loopback hosts, got %q", env, h))
+		}
+	}
+	for _, o := range c.AllowedOrigins {
+		if u, err := url.Parse(o); err != nil || !isLoopback(u.Hostname()) {
+			errs = append(errs, errorf("%s: MCP_AUTHPROXY_ALLOWED_ORIGINS may only list loopback origins, got %q", env, o))
+		}
+	}
+	for _, val := range v.Effective() {
+		if val.Setting.Auth && val.Source != SourceDefault {
+			errs = append(errs, errorf("%s cannot be combined with %s: remove one of them", env, val.Setting.Env()))
+		}
+	}
+	if len(errs) == 0 {
+		c.Relaxations = append(c.Relaxations, "AUTHENTICATION IS OFF: anyone who can reach "+c.PublicURL.String()+" can use the upstream, and the upstream receives no identity")
+	}
+	return errs
 }
 
 // checkInlineSecrets rejects secrets given directly in env; development mode accepts them and
