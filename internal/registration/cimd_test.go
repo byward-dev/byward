@@ -51,6 +51,10 @@ func TestOnlyClientIDURLsMeetingDraftSection3AreAccepted(t *testing.T) {
 }
 
 // The documents real clients publish are accepted, with grants cut to what the broker supports.
+// methodsOf is each published document's token endpoint auth methods as parsed: public clients,
+// except ChatGPT's, which offers a signed assertion first (its preferred method) and none.
+var methodsOf = map[string][]AuthMethod{"chatgpt": {PrivateKeyJWT, None}}
+
 func TestRealClientDocumentsAreAccepted(t *testing.T) {
 	for _, name := range clientdocs.Names {
 		t.Run(name, func(t *testing.T) {
@@ -59,8 +63,12 @@ func TestRealClientDocumentsAreAccepted(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !slices.Equal(m.methods, []AuthMethod{None}) || !slices.Equal(m.grants, []string{"authorization_code", "refresh_token"}) {
-				t.Fatalf("methods %v, grants %v", m.methods, m.grants)
+			want, ok := methodsOf[name]
+			if !ok {
+				want = []AuthMethod{None}
+			}
+			if !slices.Equal(m.methods, want) || !slices.Equal(m.grants, []string{"authorization_code", "refresh_token"}) {
+				t.Fatalf("methods %v (want %v), grants %v", m.methods, want, m.grants)
 			}
 			if err := MatchRedirect(m.redirects, d.Redirect); err != nil {
 				t.Fatalf("redirect %s: %v", d.Redirect, err)

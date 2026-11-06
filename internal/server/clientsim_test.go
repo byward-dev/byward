@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/clientdocs"
 	"github.com/byward-dev/byward/internal/testutil/clientsim"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
+	"github.com/go-jose/go-jose/v4"
 )
 
 // The client simulator (ADR-0024 §2): each closed client's profile signs in against the wired proxy
@@ -66,10 +68,28 @@ func newSimProxy(t *testing.T, p clientsim.Profile) clientsim.Env {
 	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithClient(app))
 
 	var docs []clientdocs.Doc
+	var auth idp.ClientAuth
 	clientID := p.ClientID
 	if p.Registration == clientsim.CIMD {
 		doc := clientdocs.Load(t, p.ClientID)
 		docs, clientID = append(docs, doc), doc.ClientID
+		if p.PrivateKeyJWT { // only the client holds its private key: serve a test key at the document's jwks_uri
+			var published struct {
+				JWKSURI string `json:"jwks_uri"`
+			}
+			if err := json.Unmarshal(doc.Body, &published); err != nil || published.JWKSURI == "" {
+				t.Fatalf("%s's document has no jwks_uri: %v", p.Client, err)
+			}
+			cert := fakeidp.NewCertificate(t)
+			jwks, err := json.Marshal(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &cert.Key.PublicKey, KeyID: "sim", Algorithm: "RS256", Use: "sig"}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			docs = append(docs, clientdocs.Doc{ClientID: published.JWKSURI, Body: jwks, Header: http.Header{"Content-Type": {"application/json"}}})
+			if auth, err = idp.PrivateKeyJWT(cert.Key, cert.X509, "sim"); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 	served := clientdocs.Serve(t, docs...)
 	origReg, origBroker := newCIMDRegistry, newBroker
@@ -121,7 +141,7 @@ func newSimProxy(t *testing.T, p clientsim.Profile) clientsim.Env {
 	t.Cleanup(srv.Close)
 	target := strings.TrimPrefix(srv.URL, "http://")
 	return clientsim.Env{
-		Public: public, MCPPath: "/mcp", ClientID: clientID, ConsentDelay: broker.ConsentDelay,
+		Public: public, MCPPath: "/mcp", ClientID: clientID, ConsentDelay: broker.ConsentDelay, ClientAuth: auth,
 		Do: func(r *http.Request) (*http.Response, error) {
 			r = r.Clone(context.Background())
 			r.URL.Scheme, r.URL.Host, r.Host = "http", target, "mcp.example.com"

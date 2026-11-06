@@ -50,6 +50,9 @@ type Profile struct {
 	// CIMDNeedsNone: the client picks CIMD only if the metadata also lists "none" as a token
 	// endpoint auth method.
 	CIMDNeedsNone bool
+	// PrivateKeyJWT: the client authenticates at /token with a signed client assertion (RFC 7523)
+	// instead of as a public client.
+	PrivateKeyJWT bool
 	// SendsResource: the client sends the RFC 8707 resource parameter on /authorize and /token.
 	SendsResource bool
 	// Scope is the scope parameter the client sends; empty sends none.

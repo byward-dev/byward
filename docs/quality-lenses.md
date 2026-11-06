@@ -267,7 +267,7 @@ specification.
 | Claude Code × static | `ClaudeCode` | simulated |
 | Claude.ai/Desktop × CIMD | `ClaudeAI` | simulated |
 | VS Code × CIMD | `VSCode` | simulated |
-| ChatGPT × CIMD | — | pending: needs ChatGPT's published document captured, and `private_key_jwt` signing it prefers |
+| ChatGPT × CIMD | `ChatGPT` | simulated (`private_key_jwt` with a test key at its document's `jwks_uri`) |
 | Cursor × DCR | — | pending #57 (DCR) |
 
 ## Feature × lens map

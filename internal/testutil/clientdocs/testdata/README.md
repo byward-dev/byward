@@ -7,6 +7,7 @@ them when a client changes its document. `*.headers` keep only Cache-Control and
 | claude-code.json | https://claude.ai/oauth/claude-code-client-metadata |
 | claude-ai.json | https://claude.ai/oauth/mcp-oauth-client-metadata (claude.ai's client ID is not confirmed by any document found) |
 | vscode.json | https://vscode.dev/oauth/client-metadata.json |
+| chatgpt.json | https://chatgpt.com/oauth/client.json (captured 2026-11-06; the stable client ID for servers meeting the issuer identification requirements of developers.openai.com/plugins/build/auth) |
 
 ## Dynamic client registration requests (`dcr/`)
 

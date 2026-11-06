@@ -60,5 +60,26 @@ var (
 	}
 )
 
+// ChatGPT with CIMD: the stable client ID, which it uses when the authorization server meets
+// OpenAI's issuer identification requirements (the broker does: RFC 9207 iss on every response).
+var ChatGPT = Profile{
+	Client: "ChatGPT", Version: "docs read 2026-11-06", Cell: "ChatGPT × CIMD",
+	Registration: CIMD, ClientID: "chatgpt", RedirectURI: "https://chatgpt.com/connector_platform_oauth_redirect",
+	Discovery:     []string{"/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server"},
+	UsesChallenge: true, PrivateKeyJWT: true, SendsResource: true, Scope: "mcp",
+	Facts: []Fact{
+		{"prefers CIMD; the stable client ID https://chatgpt.com/oauth/client.json needs iss support and an issuer equal to the PRM's authorization_servers entry", "https://developers.openai.com/plugins/build/auth"},
+		{"its document prefers private_key_jwt (RS256, jwks_uri https://chatgpt.com/oauth/jwks.json) over none; ChatGPT picks from the intersection", "https://developers.openai.com/plugins/build/auth; https://chatgpt.com/oauth/client.json"},
+		{"redirect https://chatgpt.com/connector_platform_oauth_redirect with the stable client ID", "https://developers.openai.com/plugins/build/auth"},
+		{"appends resource to the authorization and token requests; PKCE S256", "https://developers.openai.com/plugins/build/auth"},
+		{"finds the PRM at /.well-known/oauth-protected-resource or through the 401's WWW-Authenticate", "https://developers.openai.com/plugins/build/auth"},
+		{"rejects an authorization response without the advertised iss", "https://developers.openai.com/plugins/build/auth"},
+		{"order of the two authorization server metadata paths", Assumed},
+		{"requests offline_access", Assumed},
+		{"403 and insufficient_scope handling", Assumed},
+		{"the simulator signs the assertion with a test key served at the document's jwks_uri; the document itself is the captured one", "test setup"},
+	},
+}
+
 // All lists every profile, for the simulator test.
-var All = []Profile{ClaudeCode, ClaudeAI, VSCode}
+var All = []Profile{ClaudeCode, ClaudeAI, VSCode, ChatGPT}

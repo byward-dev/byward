@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/byward-dev/byward/internal/idp"
 )
 
 // Env is the proxy under test as a client reaches it.
@@ -30,6 +32,8 @@ type Env struct {
 	ClientID string
 	// ConsentDelay is how long the broker refuses an Allow after showing the consent page.
 	ConsentDelay time.Duration
+	// ClientAuth signs the client assertion of a PrivateKeyJWT profile.
+	ClientAuth idp.ClientAuth
 }
 
 // Session is what a signed-in client holds.
@@ -133,6 +137,12 @@ func SignIn(t *testing.T, e Env, p Profile) Session {
 		"redirect_uri": {p.RedirectURI}, "code_verifier": {verifier}}
 	if p.SendsResource {
 		tq.Set("resource", resource)
+	}
+	if p.PrivateKeyJWT {
+		endpoint, _ := asm["token_endpoint"].(string)
+		if err := e.ClientAuth.Apply(tq, e.ClientID, endpoint, time.Now()); err != nil {
+			t.Fatal(err)
+		}
 	}
 	tok := e.form(t, pathOf(t, asm["token_endpoint"]), tq, nil, nil)
 	var tokens struct {
