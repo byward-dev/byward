@@ -69,18 +69,39 @@ func (r *StaticRegistry) IDs() []string {
 	return ids
 }
 
+// LoadOption configures LoadStatic.
+type LoadOption func(*loadOptions)
+
+type loadOptions struct{ checkSecret func(path string) error }
+
+// WithSecretCheck runs check on each client_secret_file before it is read; the server passes the
+// permission check for secret files (ADR-0018 §11). JWKS files hold public keys and are not checked.
+func WithSecretCheck(check func(path string) error) LoadOption {
+	return func(o *loadOptions) { o.checkSecret = check }
+}
+
 // LoadStatic reads the static clients file at path. Secret and JWKS file paths inside it are
 // relative to its directory. readFile is the only file access (tests pass a map); jti is the replay
 // cache for private_key_jwt. Errors name the client and field and never contain secrets.
-func LoadStatic(path string, readFile func(string) ([]byte, error), jti JTICache) (*StaticRegistry, error) {
+func LoadStatic(path string, readFile func(string) ([]byte, error), jti JTICache, opts ...LoadOption) (*StaticRegistry, error) {
+	o := loadOptions{checkSecret: func(string) error { return nil }}
+	for _, f := range opts {
+		f(&o)
+	}
 	data, err := readFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("static clients: %w", err)
 	}
-	return parseStatic(data, filepath.Dir(path), readFile, jti)
+	readSecret := func(p string) ([]byte, error) {
+		if err := o.checkSecret(p); err != nil {
+			return nil, err
+		}
+		return readFile(p)
+	}
+	return parseStatic(data, filepath.Dir(path), readFile, readSecret, jti)
 }
 
-func parseStatic(data []byte, dir string, readFile func(string) ([]byte, error), jti JTICache) (*StaticRegistry, error) {
+func parseStatic(data []byte, dir string, readFile, readSecret func(string) ([]byte, error), jti JTICache) (*StaticRegistry, error) {
 	if len(data) > MaxStaticFileBytes {
 		return nil, fmt.Errorf("static clients: file larger than %d bytes", MaxStaticFileBytes)
 	}
@@ -109,7 +130,7 @@ func parseStatic(data []byte, dir string, readFile func(string) ([]byte, error),
 	}
 	reg := &StaticRegistry{clients: map[string]*staticClient{}}
 	for i, e := range f.Clients {
-		c, err := buildClient(e, dir, readFile, jti)
+		c, err := buildClient(e, dir, readFile, readSecret, jti)
 		if err != nil {
 			name := e.ClientID
 			if name == "" || !validClientID(name) {
@@ -137,7 +158,7 @@ func validClientID(id string) bool {
 	return true
 }
 
-func buildClient(e staticEntry, dir string, readFile func(string) ([]byte, error), jti JTICache) (*staticClient, error) {
+func buildClient(e staticEntry, dir string, readFile, readSecret func(string) ([]byte, error), jti JTICache) (*staticClient, error) {
 	if !validClientID(e.ClientID) {
 		return nil, fmt.Errorf("client_id: required, printable ASCII without spaces, at most %d characters", MaxClientIDLen)
 	}
@@ -169,7 +190,7 @@ func buildClient(e staticEntry, dir string, readFile func(string) ([]byte, error
 		if e.SecretFile == "" {
 			return nil, errors.New("client_secret_file: required for " + string(e.AuthMethod))
 		}
-		b, err := readFile(resolve(dir, e.SecretFile))
+		b, err := readSecret(resolve(dir, e.SecretFile))
 		if err != nil {
 			return nil, fmt.Errorf("client_secret_file: %w", err)
 		}

@@ -23,6 +23,7 @@ import (
 	"github.com/byward-dev/byward/internal/ratelimit"
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/resource"
+	"github.com/byward-dev/byward/internal/secretfile"
 	"github.com/byward-dev/byward/internal/ssrfguard"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/store/sqlite"
@@ -86,10 +87,23 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	if err != nil {
 		return nil, err
 	}
+	checkSecret := secretfile.Check
+	if cfg.Dev {
+		checkSecret = func(string) error { return nil }
+	}
+	var loose []error // every loose secret file and the static clients' error, reported at once
+	for _, f := range cfg.Values.SecretFiles() {
+		if err := checkSecret(f.Path); err != nil {
+			loose = append(loose, fmt.Errorf("%s: %w", f.From, err))
+		}
+	}
 	jti := registration.NewMemoryJTICache(time.Now, maxJTIs)
-	static, err := registration.LoadStatic(cfg.StaticClientsFile, os.ReadFile, jti)
+	static, err := registration.LoadStatic(cfg.StaticClientsFile, os.ReadFile, jti, registration.WithSecretCheck(checkSecret))
 	if err != nil {
-		return nil, fmt.Errorf("BYWARD_STATIC_CLIENTS_FILE: %s: %w (see docs/reference/static-clients.md)", cfg.StaticClientsFile, err)
+		loose = append(loose, fmt.Errorf("BYWARD_STATIC_CLIENTS_FILE: %s: %w (see docs/reference/static-clients.md)", cfg.StaticClientsFile, err))
+	}
+	if err := errors.Join(loose...); err != nil {
+		return nil, err
 	}
 	auditStartup(o.Audit, ring, static.IDs())
 	var clients registration.Registry = static

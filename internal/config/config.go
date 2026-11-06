@@ -21,6 +21,7 @@ import (
 var registry = []Setting{
 	{Name: "public-url", Help: "public URL of the MCP endpoint exactly as users enter it, e.g. https://mcp.example.com/mcp; an internationalized host in its ASCII (xn--) form"},
 	{Name: "upstream-url", Help: "URL of the HTTP upstream MCP server"},
+	{Name: "upstream-header-timeout", Default: "5m", Help: "how long the HTTP upstream may take to send its response headers; a request that waits longer gets a JSON-RPC timeout error, and a streamed response is not limited once its headers arrive; 1s to 1h (ADR-0018 §7)"},
 	{Name: "listen", Default: "127.0.0.1:8080", Help: "address to listen on; public addresses only when configured"},
 	{Name: "allowed-origins", Help: "comma-separated Origin values allowed on the MCP endpoint (scheme://host[:port]); an internationalized host in its ASCII (xn--) form"},
 	{Name: "allowed-hosts", Help: "comma-separated extra Host values accepted besides the public URL's host; an internationalized host in its ASCII (xn--) form"},
@@ -57,13 +58,15 @@ var registry = []Setting{
 
 // Config is the validated configuration.
 type Config struct {
-	PublicURL      *url.URL
-	UpstreamURL    *url.URL
-	Listen         string
-	InternalListen string // "" when the internal listener is off
-	AllowedOrigins []string
-	AllowedHosts   []string
-	TrustedProxies []netip.Prefix
+	PublicURL   *url.URL
+	UpstreamURL *url.URL
+	// UpstreamHeaderTimeout bounds the wait for the HTTP upstream's response headers.
+	UpstreamHeaderTimeout time.Duration
+	Listen                string
+	InternalListen        string // "" when the internal listener is off
+	AllowedOrigins        []string
+	AllowedHosts          []string
+	TrustedProxies        []netip.Prefix
 	// OAuthRateLimits is requests per minute per client address, by endpoint name.
 	OAuthRateLimits       map[string]int
 	Scope                 string
@@ -146,6 +149,10 @@ func validate(v *Values, container bool) (*Config, error) {
 		errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "insecure-no-auth"}.Env(), v.get("insecure-no-auth")))
 	}
 	c.NoAuth = noAuth
+	if c.Dev {
+		// The server skips its check of secret file permissions in development mode (ADR-0018 §11).
+		c.Relaxations = append(c.Relaxations, "secret file permissions are not checked")
+	}
 
 	if relaxed, err := checkInlineSecrets(v, c.Dev); err != nil {
 		errs = append(errs, err)
@@ -178,6 +185,10 @@ func validate(v *Values, container bool) (*Config, error) {
 		}
 	}
 	c.UpstreamURL, err = parseURL("upstream-url", v.get("upstream-url"))
+	if err != nil {
+		errs = append(errs, err)
+	}
+	c.UpstreamHeaderTimeout, err = parseHeaderTimeout(v.get("upstream-header-timeout"))
 	if err != nil {
 		errs = append(errs, err)
 	}
@@ -350,6 +361,24 @@ func (c *Config) paths(v *Values) []error {
 		errs = append(errs, errorf("BYWARD_STORE_COUNTER_FILE: %s is inside BYWARD_STORE_DIR %s, so a restored backup of the state directory would restore it too and go undetected; keep the keys directory outside the state directory, or set this to a path outside it", c.StoreCounterFile, c.StoreDir))
 	}
 	return errs
+}
+
+// Bounds of the upstream response-header timeout: long enough for any tool call that answers
+// with plain JSON (its headers come only when the tool finishes), short enough to free the slot.
+const (
+	minHeaderTimeout = time.Second
+	maxHeaderTimeout = time.Hour
+)
+
+func parseHeaderTimeout(raw string) (time.Duration, error) {
+	d, err := time.ParseDuration(raw)
+	switch {
+	case err != nil:
+		return 0, errorf("BYWARD_UPSTREAM_HEADER_TIMEOUT: want a duration such as 5m, got %q", raw)
+	case d < minHeaderTimeout || d > maxHeaderTimeout:
+		return 0, errorf("BYWARD_UPSTREAM_HEADER_TIMEOUT: want 1s to 1h, got %s", d)
+	}
+	return d, nil
 }
 
 // refreshGrace parses the refresh-token grace window (ADR-0006 §4: 0 to 60 s).

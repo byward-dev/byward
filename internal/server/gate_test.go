@@ -116,7 +116,7 @@ func TestWiredBrokerGetsTheConfiguredGateAndObservability(t *testing.T) {
 	}
 	got.ObserveIdP("callback", "success", time.Millisecond)
 	rec := httptest.NewRecorder()
-	srv.Internal.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	srv.Internal.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "http://127.0.0.1:9090/metrics", nil))
 	if !regexp.MustCompile(`\{[^}]*idp="entra"[^}]*operation="callback"[^}]*outcome="success"`).MatchString(rec.Body.String()) {
 		t.Fatalf("an IdP observation did not reach /metrics as idp=entra, callback, success:\n%s", rec.Body.String())
 	}

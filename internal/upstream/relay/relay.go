@@ -32,7 +32,8 @@ var errUpstreamRefused = errors.New("upstream refused the proxy and the request 
 type Option func(*options)
 
 type options struct {
-	inject func(context.Context, http.Header)
+	inject        func(context.Context, http.Header)
+	headerTimeout time.Duration
 }
 
 // WithTraceContext sets how the relay writes trace context onto the upstream request (the
@@ -40,6 +41,13 @@ type options struct {
 // `traceparent` passes unchanged.
 func WithTraceContext(inject func(context.Context, http.Header)) Option {
 	return func(o *options) { o.inject = inject }
+}
+
+// WithResponseHeaderTimeout bounds how long the upstream may take to send its response headers
+// (ADR-0018 §7); a request that waits longer is answered with a timeout error. Zero means no
+// limit. A streamed body is not limited once its headers have arrived.
+func WithResponseHeaderTimeout(d time.Duration) Option {
+	return func(o *options) { o.headerTimeout = d }
 }
 
 // New returns a handler relaying each request to target, the upstream's MCP endpoint URL: the
@@ -69,6 +77,7 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 			IdleConnTimeout:       90 * time.Second,
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: time.Second,
+			ResponseHeaderTimeout: o.headerTimeout,
 		},
 		FlushInterval: -1, // MCP responses may stream; never hold bytes back
 		// The proxy owns CORS and the auth challenge on the MCP endpoint. An upstream's CORS headers
@@ -110,6 +119,12 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 				http.Error(w, "upstream refused the proxy", http.StatusBadGateway)
 				return
 			}
+			if isHeaderTimeout(r.Context(), err) {
+				out := answerTimeout(r.Context(), w, r.Method)
+				log.ErrorContext(r.Context(), "upstream did not answer in time", "request_id", logging.RequestID(r.Context()),
+					"reason", "no response headers within "+o.headerTimeout.String()+"; "+string(out))
+				return
+			}
 			log.WarnContext(r.Context(), "upstream error", "request_id", logging.RequestID(r.Context()), "error", err)
 			// Never echo upstream internals (invariant 15).
 			http.Error(w, "upstream unavailable", http.StatusBadGateway)
@@ -120,7 +135,7 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 		if r.Body != nil && r.Body != http.NoBody {
 			r.Body = teeBody{io.TeeReader(r.Body, c), r.Body}
 		}
-		rp.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), captureKey{}, c)))
+		rp.ServeHTTP(w, r.WithContext(traceWrite(context.WithValue(r.Context(), captureKey{}, c))))
 	})
 }
 

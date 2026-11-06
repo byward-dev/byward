@@ -2,7 +2,7 @@ name: pin-freshness
 
 # Dependabot cannot bump the Go pin in mise.toml, nor the test-lane pins that must move together
 # (the Playwright image with @playwright/test, the conformance Node image); this flags newer
-# releases of both weekly.
+# releases of both weekly. It also reruns govulncheck, so a new advisory surfaces without a PR.
 on:
   schedule:
     - cron: "23 6 * * 1"
@@ -27,3 +27,15 @@ jobs:
         with:
           persist-credentials: false
       - run: sh scripts/test-pins-check.sh
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          install_args: go go:golang.org/x/vuln/cmd/govulncheck
+      - run: mise run vuln
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
