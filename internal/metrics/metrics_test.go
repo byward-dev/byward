@@ -37,7 +37,7 @@ func exercise(m *Metrics) {
 
 // Every family except the Go runtime's own collectors: a metric with the wrong prefix must reach the
 // golden file, not be filtered out by the prefix it should carry.
-var proxyMetric = regexp.MustCompile(`(?m)^# TYPE ((?:[a-z][a-z0-9]*)_\S+) (\S+)$`)
+var proxyMetric = regexp.MustCompile(`(?m)^# TYPE (\S+) (\S+)$`)
 
 func isRuntimeMetric(name string) bool {
 	return strings.HasPrefix(name, "go_") || strings.HasPrefix(name, "process_") || strings.HasPrefix(name, "promhttp_")
