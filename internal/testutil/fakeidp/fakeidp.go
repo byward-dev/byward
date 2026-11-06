@@ -110,6 +110,7 @@ type settings struct {
 	issParam        bool
 	requirePKCE     bool
 	rotateRefresh   bool
+	singleUseRT     bool
 	idtyp           bool
 	emailAsString   bool
 	authorizeFail   *Failure
@@ -245,6 +246,10 @@ func WithRequirePKCE(on bool) Option { return func(s *settings) { s.requirePKCE 
 
 // WithRefreshTokenRotation switches returning a new refresh token on refresh (default on).
 func WithRefreshTokenRotation(on bool) Option { return func(s *settings) { s.rotateRefresh = on } }
+
+// WithSingleUseRefreshTokens makes a rotated refresh token invalid once it has been redeemed
+// (default off: the old token stays valid until it expires).
+func WithSingleUseRefreshTokens(on bool) Option { return func(s *settings) { s.singleUseRT = on } }
 
 // WithIDTypClaim switches `idtyp: app` on app-only tokens, i.e. whether the resource app has the
 // optional claim configured (default on).

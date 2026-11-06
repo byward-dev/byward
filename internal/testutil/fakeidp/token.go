@@ -124,6 +124,9 @@ func (p *IdP) redeemRefresh(form url.Values, c Client, method string) (map[strin
 	if s := form.Get("scope"); s != "" {
 		scopes = strings.Fields(s)
 	}
+	if p.cfg.singleUseRT && p.cfg.rotateRefresh {
+		delete(p.refresh, rt)
+	}
 	return p.issue(c, method, g.user, scopes, "", g.authTime, p.cfg.rotateRefresh)
 }
 

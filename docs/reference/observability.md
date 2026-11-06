@@ -51,11 +51,11 @@ For SIEMs that use [OCSF](https://schema.ocsf.io) 1.9.0. Fields map as follows: 
 | Event | When | Outcomes | Limited | OCSF class / activity |
 |---|---|---|---|---|
 | `login` | sign-in through the IdP finished, was declined, failed at the IdP, or arrived with a missing, invalid or expired sign-in state | success, failure | only the state failures | 3002 Authentication / 1 Logon; `auth_protocol_id` 6 (OAuth 2.0) |
-| `access_denied` | the access gate refused a signed-in user (`reason` = the rule: `tenant`, `role`, `group`, `groups_unavailable`, `email_domain` or `hosted_domain`) | failure | no | 3003 Authorize Session / 99 Other |
-| `token_issued` | `/token` issued an access token | success | no | 3002 Authentication / 4 Service Ticket Request |
-| `token_rejected` | `/token` refused a request (`reason` = OAuth error code) | failure | yes | 3002 Authentication / 4 Service Ticket Request |
+| `access_denied` | the access gate refused a signed-in user, at sign-in or on a refresh (`reason` = the rule: `tenant`, `role`, `group`, `groups_unavailable`, `email_domain` or `hosted_domain`) | failure | no | 3003 Authorize Session / 99 Other |
+| `token_issued` | `/token` issued an access token, from an authorization code or a refresh token | success | no | 3002 Authentication / 4 Service Ticket Request |
+| `token_rejected` | `/token` or `/revoke` refused a request (`reason` = OAuth error code) | failure | yes | 3002 Authentication / 4 Service Ticket Request |
 | `access_token_rejected` | an MCP request carried an invalid or expired access token (`reason` = `invalid` or `expired`); a missing token is the normal start of sign-in and is not an event | failure | yes | 3002 Authentication / 99 Other (*approximate*) |
-| `grant_revoked` | a grant was revoked because its authorization code was reused or redeemed with the wrong binding | success | no | 3002 Authentication / 2 Logoff; `disposition_id` 24 Access Revoked |
+| `grant_revoked` | a grant was revoked: its authorization code or refresh token was reused, a code was redeemed with the wrong binding, the client revoked a token (`/revoke`), or a refresh found the IdP session ended or the user no longer allowed | success | no | 3002 Authentication / 2 Logoff; `disposition_id` 24 Access Revoked |
 | `client_registered` | a static client was loaded at startup (`reason` = `static`) | success | no | 3001 Account Change / 1 Create (*approximate*) |
 | `key_loaded` | a sealing key was loaded at startup (`reason` = `signing` or `verification`) | success | no | 6002 Application Lifecycle / 3 Start (*approximate*) |
 | `host_rejected` | a request named a `Host` outside the allowlist (421) | failure | yes | 4002 HTTP Activity; `disposition_id` 2 Blocked |
@@ -75,8 +75,8 @@ Prometheus text format at `/metrics` on the internal listener. Histogram buckets
 
 | Metric | Type | Labels |
 |---|---|---|
-| `mcp_authproxy_http_request_duration_seconds` | histogram | `route`: the matched route pattern (`/mcp` or your public path, `/authorize`, `/callback/entra`, `/token`, the `/.well-known/…` metadata paths) or `other`; `status_class` (`2xx` …) |
-| `mcp_authproxy_idp_request_duration_seconds` | histogram | `idp`, `operation` (`authorize`, `callback`), `outcome` (`success`, `rejected`, `unavailable`) |
+| `mcp_authproxy_http_request_duration_seconds` | histogram | `route`: the matched route pattern (`/mcp` or your public path, `/authorize`, `/callback/entra`, `/token`, `/revoke`, the `/.well-known/…` metadata paths) or `other`; `status_class` (`2xx` …) |
+| `mcp_authproxy_idp_request_duration_seconds` | histogram | `idp`, `operation` (`authorize`, `callback`, `refresh`), `outcome` (`success`, `rejected`, `unavailable`) |
 | `mcp_authproxy_upstream_in_flight` | gauge | `kind` (`request`, `stream`) |
 | `mcp_authproxy_upstream_busy_total` | counter | `kind`: requests refused with 503 because an admission cap was full |
 | `mcp_authproxy_audit_events_total` | counter | `event`, `outcome`: every audit event, including rate-limited ones |

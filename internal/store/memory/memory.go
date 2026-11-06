@@ -22,8 +22,14 @@ type Store struct {
 	mu     sync.Mutex
 	grants map[string]store.Grant
 	codes  map[string]*code // by grant ID: a grant has at most one code
-	tokens map[[sha256.Size]byte]store.RefreshToken
+	tokens map[[sha256.Size]byte]*token
 	revs   []store.Revocation
+}
+
+// token is a stored refresh token with its successor, set when it is rotated.
+type token struct {
+	t         store.RefreshToken
+	successor [sha256.Size]byte
 }
 
 type code struct {
@@ -38,7 +44,7 @@ func New() *Store {
 	return &Store{
 		grants: map[string]store.Grant{},
 		codes:  map[string]*code{},
-		tokens: map[[sha256.Size]byte]store.RefreshToken{},
+		tokens: map[[sha256.Size]byte]*token{},
 	}
 }
 
@@ -83,6 +89,22 @@ func (s *Store) RevokeGrant(_ context.Context, id string, at time.Time) error {
 	}
 	s.deleteGrantLocked(id)
 	s.revs = append(s.revs, store.Revocation{GrantID: id, Before: at, At: at})
+	return nil
+}
+
+// UpdateGrant implements store.Grants.
+func (s *Store) UpdateGrant(_ context.Context, id string, expiresAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	g, ok := s.grants[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	if !expiresAt.After(g.CreatedAt) {
+		return store.ErrInvalid
+	}
+	g.ExpiresAt = expiresAt
+	s.grants[id] = g
 	return nil
 }
 
@@ -141,7 +163,8 @@ func (s *Store) PutRefreshToken(_ context.Context, t store.RefreshToken) error {
 	if _, ok := s.tokens[t.Hash]; ok {
 		return store.ErrExists
 	}
-	s.tokens[t.Hash] = t
+	t.RotatedAt = time.Time{}
+	s.tokens[t.Hash] = &token{t: t}
 	return nil
 }
 
@@ -150,10 +173,50 @@ func (s *Store) RefreshToken(_ context.Context, hash [sha256.Size]byte, now time
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	t, ok := s.tokens[hash]
-	if !ok || !now.Before(t.IdleExpiresAt) {
+	if !ok || !now.Before(t.t.IdleExpiresAt) {
 		return store.RefreshToken{}, store.ErrNotFound
 	}
-	return t, nil
+	return t.t, nil
+}
+
+// RotateRefreshToken implements store.RefreshTokens.
+func (s *Store) RotateRefreshToken(_ context.Context, r store.RotateRequest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old, ok := s.tokens[r.Old]
+	if !ok || !r.Now.Before(old.t.IdleExpiresAt) {
+		return store.ErrNotFound
+	}
+	g, ok := s.grants[old.t.GrantID]
+	if !ok {
+		return store.ErrNotFound
+	}
+	if r.Next.GrantID != old.t.GrantID {
+		return store.ErrInvalid
+	}
+	if _, ok := s.tokens[r.Next.Hash]; ok {
+		return store.ErrExists
+	}
+	rotating := old
+	if !old.t.RotatedAt.IsZero() {
+		cur, ok := s.tokens[old.successor]
+		if !ok || !cur.t.RotatedAt.IsZero() || r.Now.Sub(old.t.RotatedAt) >= r.Grace {
+			s.deleteGrantLocked(g.ID)
+			s.revs = append(s.revs, store.Revocation{GrantID: g.ID, Before: r.Now, At: r.Now})
+			return store.ErrReused
+		}
+		rotating = cur
+		old.successor = r.Next.Hash // a further retry within the same window still works
+	}
+	rotating.t.RotatedAt, rotating.successor = r.Now, r.Next.Hash
+	next := r.Next
+	next.RotatedAt = time.Time{}
+	s.tokens[next.Hash] = &token{t: next}
+	if r.IdPTokens != nil {
+		g.IdPTokens = slices.Clone(r.IdPTokens)
+		s.grants[g.ID] = g
+	}
+	return nil
 }
 
 // Revocations implements store.Revocations.
@@ -180,7 +243,7 @@ func (s *Store) Collect(_ context.Context, now time.Time) error {
 		}
 	}
 	for h, t := range s.tokens {
-		if !now.Before(t.IdleExpiresAt) {
+		if !now.Before(t.t.IdleExpiresAt) {
 			delete(s.tokens, h)
 		}
 	}
@@ -194,7 +257,7 @@ func (s *Store) deleteGrantLocked(id string) {
 	delete(s.grants, id)
 	delete(s.codes, id)
 	for h, t := range s.tokens {
-		if t.GrantID == id {
+		if t.t.GrantID == id {
 			delete(s.tokens, h)
 		}
 	}

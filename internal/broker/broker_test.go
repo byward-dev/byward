@@ -20,6 +20,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -51,8 +52,45 @@ var t0 = time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 // memStore is the in-memory store, recording created grant IDs so tests can find "the" grant.
 type memStore struct {
 	*memory.Store
-	mu  sync.Mutex
-	ids []string
+	mu   sync.Mutex
+	ids  []string
+	down atomic.Bool // every lookup and write fails, as in a store outage
+	// revokeDown fails only RevokeGrant; reuseOnRotate makes RotateRefreshToken report reuse
+	// without recording it, as when another replica won the race.
+	revokeDown, reuseOnRotate atomic.Bool
+}
+
+var errStoreDown = errors.New("store down")
+
+func (m *memStore) RefreshToken(ctx context.Context, h [32]byte, now time.Time) (store.RefreshToken, error) {
+	if m.down.Load() {
+		return store.RefreshToken{}, errStoreDown
+	}
+	return m.Store.RefreshToken(ctx, h, now)
+}
+
+func (m *memStore) Grant(ctx context.Context, id string) (store.Grant, error) {
+	if m.down.Load() {
+		return store.Grant{}, errStoreDown
+	}
+	return m.Store.Grant(ctx, id)
+}
+
+func (m *memStore) RevokeGrant(ctx context.Context, id string, at time.Time) error {
+	if m.down.Load() || m.revokeDown.Load() {
+		return errStoreDown
+	}
+	return m.Store.RevokeGrant(ctx, id, at)
+}
+
+func (m *memStore) RotateRefreshToken(ctx context.Context, r store.RotateRequest) error {
+	if m.down.Load() {
+		return errStoreDown
+	}
+	if m.reuseOnRotate.Load() {
+		return store.ErrReused
+	}
+	return m.Store.RotateRefreshToken(ctx, r)
 }
 
 func newMemStore() *memStore { return &memStore{Store: memory.New()} }
@@ -155,6 +193,7 @@ type env struct {
 	b      *Broker
 	st     *memStore
 	sealer *token.Sealer
+	cfg    Config // as passed to New
 	idpBox *token.Box
 	fake   *fakeidp.IdP
 	reg    *registry
@@ -197,6 +236,7 @@ func keyRing(t *testing.T) *token.KeyRing {
 	return r
 }
 
+// newEnv builds a broker against the fake IdP; opts adjust its Config before New.
 func newEnv(t *testing.T, opts ...func(*Config)) *env {
 	t.Helper()
 	e := &env{now: t0, st: newMemStore(), audit: &syncBuffer{}, logs: &syncBuffer{},
@@ -224,8 +264,12 @@ func newEnv(t *testing.T, opts ...func(*Config)) *env {
 	for _, o := range opts {
 		o(&cfg)
 	}
+	e.cfg = cfg
 	e.b, err = New(cfg)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.b.Deny().Sync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
@@ -497,7 +541,7 @@ func TestTokenEndpointRechecks(t *testing.T) {
 		{"wrong redirect", url.Values{"redirect_uri": {"http://127.0.0.1:43210/other"}}, "invalid_grant", 400},
 		{"unknown client", url.Values{"client_id": {"nope"}}, "invalid_client", 401},
 		{"foreign resource", url.Values{"resource": {"https://other.example/mcp"}}, "invalid_target", 400},
-		{"refresh not yet", url.Values{"grant_type": {"refresh_token"}}, "unsupported_grant_type", 400},
+		{"refresh without a refresh token", url.Values{"grant_type": {"refresh_token"}}, "invalid_grant", 400},
 		{"client credentials never", url.Values{"grant_type": {"client_credentials"}}, "unsupported_grant_type", 400},
 		{"garbage code", url.Values{"code": {"mcpap_ac_garbage"}}, "invalid_grant", 400},
 	}
@@ -764,6 +808,11 @@ func TestFailedBindingAfterConsumeRevokesTheGrant(t *testing.T) {
 			if denied, _ := e.b.Deny().Denied(grant, "", time.Time{}); !denied {
 				t.Fatal("grant not on the deny list")
 			}
+			presenter := clientID // the audit names the client that presented the code
+			if c := override.Get("client_id"); c != "" {
+				presenter = c
+			}
+			e.oneAuditEvent(t, "grant_revoked", map[string]any{"outcome": "success", "client_id": presenter, "grant_id": grant})
 		})
 	}
 }
@@ -909,7 +958,7 @@ func TestReusedCodeIsAuditedAsARevocation(t *testing.T) {
 	grant := firstGrant(e.st)
 	e.redeem(t, code, nil)
 	e.redeem(t, code, nil)
-	revoked := e.oneAuditEvent(t, "grant_revoked", map[string]any{"outcome": "success", "grant_id": grant})
+	revoked := e.oneAuditEvent(t, "grant_revoked", map[string]any{"outcome": "success", "client_id": clientID, "grant_id": grant})
 	if !strings.Contains(fmt.Sprint(revoked["reason"]), "reused") {
 		t.Errorf("grant_revoked.reason = %v, want it to say the code was reused", revoked["reason"])
 	}

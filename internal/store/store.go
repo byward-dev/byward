@@ -24,6 +24,10 @@ var (
 	// ErrRevoked: CreateGrant for a subject whose retained cut-off covers the grant (a login that
 	// was in flight when revoke-user ran).
 	ErrRevoked = errors.New("store: subject revoked")
+	// ErrReused: a rotated refresh token was presented again outside the grace window, or was not
+	// the immediate predecessor of the current one. The store has already revoked the grant
+	// (ADR-0006 §4).
+	ErrReused = errors.New("store: refresh token reused")
 )
 
 // RevocationRetention is how long revocations are kept: the longest access-token lifetime
@@ -89,6 +93,9 @@ type Grants interface {
 	// Revocation{GrantID: id, Before: at, At: at}. An unknown grant is ErrNotFound and records
 	// nothing.
 	RevokeGrant(ctx context.Context, id string, at time.Time) error
+	// UpdateGrant sets a grant's ExpiresAt, for example when its authorization code is redeemed.
+	// An unknown grant is ErrNotFound; an ExpiresAt not after CreatedAt is ErrInvalid.
+	UpdateGrant(ctx context.Context, id string, expiresAt time.Time) error
 	// RevokeSubject is revoke-user (ADR-0006 §9): it records Revocation{Subject: subject, Before:
 	// before, At: at} and deletes the subject's grants created before `before`, with their codes,
 	// refresh tokens and IdP tokens. It records the cut-off even when the subject has no grants. An
@@ -126,9 +133,23 @@ type RefreshToken struct {
 	ClientID      string
 	CreatedAt     time.Time
 	IdleExpiresAt time.Time // 14 days idle by default (ADR-0006 §5)
+	// RotatedAt is when the token was rotated away; zero while it is the grant's current token.
+	// The store sets it; it is ignored on Put.
+	RotatedAt time.Time
 }
 
-// RefreshTokens stores refresh tokens. Rotation and reuse detection arrive with slice 1.6.
+// RotateRequest rotates one refresh token (ADR-0006 §4).
+type RotateRequest struct {
+	Old  [sha256.Size]byte // the presented token's hash
+	Next RefreshToken      // the replacement, for the same grant
+	// IdPTokens, when not nil, replace the grant's IdP tokens in the same transaction: the IdP may
+	// have rotated its own refresh token during this refresh.
+	IdPTokens []byte
+	Now       time.Time
+	Grace     time.Duration // reuse of the immediate predecessor within Grace is allowed
+}
+
+// RefreshTokens stores refresh tokens, rotated on every use.
 type RefreshTokens interface {
 	// PutRefreshToken stores t. An existing hash is ErrExists; an unknown grant ErrNotFound.
 	PutRefreshToken(ctx context.Context, t RefreshToken) error
@@ -136,6 +157,13 @@ type RefreshTokens interface {
 	// IdleExpiresAt <= now, or one whose grant's Epoch is older than the store's current epoch
 	// (the store was restored since, ADR-0007 §9) is ErrNotFound.
 	RefreshToken(ctx context.Context, hash [sha256.Size]byte, now time.Time) (RefreshToken, error)
+	// RotateRefreshToken is one atomic step. If Old is current, it is marked rotated and Next
+	// becomes current. If Old was rotated less than Grace ago and its successor is still current
+	// (a retried refresh whose response was lost), that successor is rotated to Next instead. Any
+	// other reuse revokes the grant and returns ErrReused. Old unknown, idle-expired or from an
+	// older epoch is ErrNotFound; Next for another grant is ErrInvalid; an existing Next hash is
+	// ErrExists.
+	RotateRefreshToken(ctx context.Context, r RotateRequest) error
 }
 
 // Revocation is one entry of the deny list (ADR-0006 §3): a revoked grant, or every grant of a

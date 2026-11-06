@@ -56,6 +56,12 @@ var migrations = []string{
 		at       INTEGER NOT NULL
 	) STRICT;
 	CREATE INDEX revocations_subject ON revocations (subject, before);`,
+
+	// v2: refresh-token rotation (ADR-0006 §4). rotated_at is NULL while the token is current;
+	// successor is the hash of the token issued in its place, moved to the newest one when a retry
+	// within the grace window issues another.
+	`ALTER TABLE refresh_tokens ADD COLUMN rotated_at INTEGER;
+	ALTER TABLE refresh_tokens ADD COLUMN successor BLOB;`,
 }
 
 // schemaVersion is the schema this binary writes.

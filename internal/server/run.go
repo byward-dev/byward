@@ -17,6 +17,8 @@ type Servers struct {
 	Public   *http.Server
 	Internal *http.Server // nil when MCP_AUTHPROXY_INTERNAL_LISTEN is empty
 	Health   *health.Health
+
+	background func(ctx context.Context) // nil without authentication; runs while the public listener serves
 }
 
 func hardened(addr string, h http.Handler, log *slog.Logger) *http.Server {
@@ -35,8 +37,21 @@ func hardened(addr string, h http.Handler, log *slog.Logger) *http.Server {
 // public listener closes (open streams are cancelled through their request contexts), and the
 // internal listener goes last so probes and scrapes see the drain.
 func Run(ctx context.Context, s *Servers, log *slog.Logger) error {
+	listening := func() {}
+	if s.background != nil {
+		bgCtx, stop := context.WithCancel(ctx)
+		done := make(chan struct{})
+		started := false
+		listening = func() { started = true; go func() { defer close(done); s.background(bgCtx) }() }
+		defer func() { // stops with Run, whatever ends it
+			stop()
+			if started {
+				<-done
+			}
+		}()
+	}
 	if s.Internal == nil {
-		return serve(ctx, s.Public, log, s.Health.Drain)
+		return serve(ctx, s.Public, log, s.Health.Drain, listening)
 	}
 	ln, err := net.Listen("tcp", s.Internal.Addr)
 	if err != nil {
@@ -45,7 +60,7 @@ func Run(ctx context.Context, s *Servers, log *slog.Logger) error {
 	log.Info("internal listener", "listen", ln.Addr().String())
 	internalErr := make(chan error, 1)
 	go func() { internalErr <- s.Internal.Serve(ln) }()
-	err = serve(ctx, s.Public, log, s.Health.Drain)
+	err = serve(ctx, s.Public, log, s.Health.Drain, listening)
 	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ShutdownTimeout)
 	defer cancel()
 	if serr := s.Internal.Shutdown(shutdownCtx); serr != nil && err == nil {
@@ -57,12 +72,14 @@ func Run(ctx context.Context, s *Servers, log *slog.Logger) error {
 	return err
 }
 
-// serve runs srv until ctx is done; drain is called before shutdown starts.
-func serve(ctx context.Context, srv *http.Server, log *slog.Logger, drain func()) error {
+// serve runs srv until ctx is done; listening is called once it listens, drain before shutdown
+// starts.
+func serve(ctx context.Context, srv *http.Server, log *slog.Logger, drain, listening func()) error {
 	ln, err := net.Listen("tcp", srv.Addr)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
+	listening()
 	baseCtx, cancelRequests := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancelRequests()
 	srv.BaseContext = func(net.Listener) context.Context { return baseCtx }
