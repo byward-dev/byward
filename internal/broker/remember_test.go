@@ -441,3 +441,20 @@ func TestARememberedConsentCoversLessAndOtherPrompts(t *testing.T) {
 		})
 	}
 }
+
+// An IdP that returns no refresh token costs the grant its offline_access, not the user's consent:
+// the remembered consent keeps what the user approved, so the next sign-in is still remembered.
+func TestAGrantWithoutRefreshKeepsTheApprovedScopesRemembered(t *testing.T) {
+	e := newEnv(t, withRemember(t, nil), func(c *Config) { c.IdP = noRefreshToken{c.IdP} })
+	as := url.Values{"scope": {"mcp offline_access"}}
+	h := e.remember(t, as)
+	g := user(e)
+	c, err := e.st.Consent(context.Background(), store.ConsentKey{Issuer: g.Issuer, Subject: g.Subject, ClientID: clientID,
+		Redirect: registration.RedirectKey(clientCB), Resource: resourceID})
+	if err != nil || !slices.Contains(c.Scopes, "offline_access") || slices.Contains(g.Scopes, "offline_access") {
+		t.Fatalf("consent %v (%v), grant scopes %v: want offline_access remembered but not granted", c.Scopes, err, g.Scopes)
+	}
+	if res := e.authorizeWith(t, as, h); !skipped(res) {
+		t.Fatalf("the next sign-in asking for offline_access: %d, want remembered", res.StatusCode)
+	}
+}

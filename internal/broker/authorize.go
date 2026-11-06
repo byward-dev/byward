@@ -379,6 +379,7 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 		b.page(w, r, http.StatusForbidden, "You don't have access to this server.", "Ask your operator for access.")
 		return
 	}
+	grantScopes := b.grantScopes(ctx, l, toks)
 	// A login that skipped the page holds only if the registry agrees for the user who signed in.
 	var remembered registration.Client
 	if l.Hint != nil {
@@ -398,13 +399,13 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	g, err := b.cfg.Store.CreateGrant(ctx, store.Grant{ID: randomID(), ClientID: l.ClientID, Subject: id.Subject, Issuer: id.Issuer,
 		// Short-lived until the code is redeemed (token.go extends it), so an abandoned login does
 		// not leave a 30-day grant holding IdP tokens.
-		Resource: b.cfg.Resource.String(), Scopes: l.Scopes, IdPTokens: []byte(sealedTokens), CreatedAt: now, ExpiresAt: now.Add(LoginLifetime)})
+		Resource: b.cfg.Resource.String(), Scopes: grantScopes, IdPTokens: []byte(sealedTokens), CreatedAt: now, ExpiresAt: now.Add(LoginLifetime)})
 	if err != nil {
 		failed(err)
 		return
 	}
 	if err := b.cfg.Store.PutCode(ctx, store.PendingCode{GrantID: g.ID, ClientID: l.ClientID, RedirectURI: l.RedirectURI,
-		CodeChallenge: l.Challenge, Scopes: l.Scopes, ExpiresAt: now.Add(CodeLifetime)}); err != nil {
+		CodeChallenge: l.Challenge, Scopes: grantScopes, ExpiresAt: now.Add(CodeLifetime)}); err != nil {
 		failed(err)
 		return
 	}
@@ -540,4 +541,19 @@ func (b *Broker) clientLookupFailed(ctx context.Context, clientID string, err er
 		msg = metadataUnavailable
 	}
 	b.cfg.Log.WarnContext(ctx, msg, "request_id", logging.RequestID(ctx), "error", err.Error())
+}
+
+// grantScopes are the scopes a new grant gets: those approved, less offline_access when the IdP
+// returned no refresh token, since a proxy refresh token could then only revoke the grant at its
+// first use. An IdP adapter that stops asking for refresh tokens shows up here, as a warning for a
+// client that may refresh, not as hourly sign-ins. The approved scopes themselves stay as they are.
+func (b *Broker) grantScopes(ctx context.Context, l login, toks idp.Tokens) []string {
+	if !slices.Contains(l.Scopes, "offline_access") || toks.RefreshToken != "" {
+		return l.Scopes
+	}
+	if c, err := b.cfg.Clients.Client(ctx, l.ClientID); err == nil && c.AllowsRefresh() {
+		b.cfg.Log.WarnContext(ctx, "the IdP returned no refresh token, so this grant cannot refresh", "request_id", logging.RequestID(ctx),
+			"idp", b.cfg.IdPName, "client_id", l.ClientID, "reason", "check that the IdP is asked for refresh tokens; see the IdP's how-to")
+	}
+	return slices.DeleteFunc(slices.Clone(l.Scopes), func(s string) bool { return s == "offline_access" })
 }

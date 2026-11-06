@@ -9,12 +9,11 @@ import (
 
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/config"
-	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/store"
 )
 
-// ErrNotAUserKey is RevokeUser's answer to a key that is not an IdP user key.
-var ErrNotAUserKey = errors.New("not a user key: want tid:oid, the tenant and object IDs of the Entra user")
+// ErrNotAUserKey is RevokeUser's answer to a key that is not a user key of the configured IdP.
+var ErrNotAUserKey = errors.New("not a user key: with Entra, tid:oid, the tenant and object IDs of the user; with an oidc IdP, the value of its subject claim (BYWARD_OIDC_SUBJECT_CLAIM, default sub), as the audit records' user_key shows it")
 
 // Operator revocation reasons on the audit stream (ADR-0006 §9).
 const (
@@ -27,7 +26,11 @@ const (
 // its next deny-list sync and their refresh tokens at once. It runs beside a running proxy (SQLite
 // serializes the writers). It returns the canonical user key it revoked.
 func RevokeUser(ctx context.Context, cfg *config.Config, log *slog.Logger, key string) (string, error) {
-	user, ok := entra.UserKey(key)
+	ip, err := newIdentityProvider(cfg, nil) // settings only; nothing is fetched
+	if err != nil {
+		return "", err
+	}
+	user, ok := ip.userKey(key)
 	if !ok {
 		return "", ErrNotAUserKey
 	}

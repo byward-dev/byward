@@ -22,7 +22,7 @@ type command struct {
 
 var commands = map[string]command{
 	"revoke-user": {
-		usage: "byward revoke-user <tid:oid>\n      end one user's access: their grants go, and every proxy refuses their tokens within seconds;\n      works while the proxy runs",
+		usage: "byward revoke-user <user key>\n      end one user's access: their grants go, and every proxy refuses their tokens within seconds;\n      works while the proxy runs",
 		run:   revokeUser,
 	},
 	"revoke-all": {
@@ -87,7 +87,7 @@ func operatorLoad(args, environ []string, stderr io.Writer) (*config.Config, boo
 // revokeUser is revoke-user (ADR-0006 §9).
 func revokeUser(ctx context.Context, args, environ []string, stdout, stderr io.Writer) int {
 	if len(args) != 1 {
-		_, _ = fmt.Fprintln(stderr, "byward: usage: byward revoke-user <tid:oid>")
+		_, _ = fmt.Fprintln(stderr, "byward: usage: byward revoke-user <user key>")
 		return exitConfig
 	}
 	cfg, ok := operatorLoad(nil, environ, stderr)

@@ -30,7 +30,7 @@ or the IdP's `error_description`.
 | `client_trust` | The client's trust level on the consent page: `verified`, `domain` or `not-verified` (ADR-0008 §8) |
 | `user_key` | The IdP user key (`tid:oid` for Entra). Personal data (GDPR Recital 26) |
 | `grant_id` | The grant (one user's authorization of one client) |
-| `idp` | The IdP adapter, e.g. `entra` |
+| `idp` | The IdP, the `BYWARD_IDP` value: `entra`, `oidc`, `google`, `okta`, `auth0` or `keycloak` |
 | `key_id` | A sealing key ID |
 | `host`, `origin` | The rejected `Host` or `Origin` value |
 | `reason` | A fixed reason; for `token_rejected` the OAuth error code |

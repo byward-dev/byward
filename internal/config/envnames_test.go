@@ -23,8 +23,9 @@ func TestEveryBYWARDNameInTheCodeAndDocsIsASetting(t *testing.T) {
 		}
 	}
 	// Not settings, but fixed names: identity the proxy sets for stdio upstreams (ADR-0016), the
-	// switch that regenerates the settings reference, the image build argument, and the ENTRA_* family.
-	extra := regexp.MustCompile(`^BYWARD_(ENTRA_\*|SUBJECT|ISSUER|EMAIL|UPDATE_REFERENCE|IMAGE)$`)
+	// switch that regenerates the settings reference, the image build argument, and the ENTRA_* and
+	// OIDC_* families.
+	extra := regexp.MustCompile(`^BYWARD_(ENTRA_\*|OIDC_\*|SUBJECT|ISSUER|EMAIL|UPDATE_REFERENCE|IMAGE)$`)
 	check := func(path string) {
 		src, err := os.ReadFile(path) //nolint:gosec // G304: reads this repository's own files
 		if err != nil {

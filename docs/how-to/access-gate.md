@@ -15,8 +15,8 @@ one entry is enough.
 | `BYWARD_GATE_TENANTS` | Entra `tid` | Tenant GUIDs. In single-tenant mode it must include your tenant; a multi-tenant (`organizations`) app always needs it (ADR-0012 §2). |
 | `BYWARD_GATE_ROLES` | `roles` | App role values, case-sensitive. The user needs at least one. |
 | `BYWARD_GATE_GROUPS` | `groups` | Entra group object IDs. If Entra leaves the groups out because the user is in too many (over 200), the user is denied. |
-| `BYWARD_GATE_EMAIL_DOMAINS` | email domain | Only verified emails, exact domain (no subdomains). Generic OIDC IdPs only: not available with Entra, whose `email` is not verified, and Entra is the only IdP the proxy supports so far. |
-| `BYWARD_GATE_HOSTED_DOMAINS` | Google `hd` | Google Workspace domains. Google only, which the proxy does not support yet. |
+| `BYWARD_GATE_EMAIL_DOMAINS` | email domain | Only verified emails, exact domain (no subdomains). OIDC IdPs only ([OIDC how-to](oidc.md)): not available with Entra, whose `email` is not verified. |
+| `BYWARD_GATE_HOSTED_DOMAINS` | Google `hd` | Google Workspace domains, with `BYWARD_IDP=google` only. With exactly one domain, Google is also asked to show only that Workspace's accounts. |
 | `BYWARD_GATE_ALLOW_EMPTY` | — | Allows an empty gate where the proxy otherwise refuses to start (see below). |
 
 All lists are comma-separated. An invalid entry, such as a tenant that is not a GUID or an email

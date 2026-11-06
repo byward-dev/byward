@@ -35,7 +35,7 @@ func signIn(t *testing.T, profile fakeidp.Profile, preset string, u fakeidp.User
 		}
 		a = p
 	} else {
-		p, err := oidc.New(oidc.Config{Preset: preset, Issuer: fake.Issuer(), ClientID: c.ID, ClientAuth: idp.ClientSecret(secret), RedirectURL: redirect, Now: now})
+		p, err := oidc.New(oidc.Config{Preset: preset, Issuer: fake.Issuer(), ClientID: c.ID, ClientAuth: idp.ClientSecret(secret), RedirectURL: redirect, Now: now, AllowLoopbackHTTP: true}) // the fake serves http on loopback
 		if err != nil {
 			t.Fatal(err)
 		}
