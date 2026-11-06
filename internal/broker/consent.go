@@ -103,8 +103,7 @@ func (b *Broker) consent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := b.cfg.Now()
-	prev, repeat := b.answers.prior(f.ID, now)
-	if repeat && prev != allow {
+	if prev, answered := b.answers.prior(f.ID, now); answered && prev != allow {
 		b.page(w, r, http.StatusConflict, "You already answered this request.", "Start again from your app if you want to change your answer.")
 		return
 	}
@@ -112,7 +111,7 @@ func (b *Broker) consent(w http.ResponseWriter, r *http.Request) {
 		b.renderConsent(w, r, http.StatusOK, client, l, sealed, "Take a moment to check the details, then choose again.")
 		return
 	}
-	recorded, evicted := b.answers.record(f.ID, allow, now, time.UnixMilli(f.Shown).Add(FlowLifetime))
+	recorded, first, evicted := b.answers.record(f.ID, allow, now, time.UnixMilli(f.Shown).Add(FlowLifetime))
 	if evicted {
 		b.cfg.Log.WarnContext(ctx, "consent answer table full; forgot the most recently answered flow", "request_id", logging.RequestID(ctx))
 	}
@@ -125,14 +124,14 @@ func (b *Broker) consent(w http.ResponseWriter, r *http.Request) {
 	ev := audit.Event{ClientID: client.ID(), ClientTrust: string(client.Trust())}
 	if !allow {
 		ev.Name, ev.Outcome, ev.Reason = audit.ConsentDenied, audit.Failure, "the user denied the request"
-		if !repeat {
+		if first {
 			b.cfg.Audit.RecordUnauthenticated(r, ev)
 		}
 		b.redirectError(w, r, l.RedirectURI, l.State, "access_denied", "the user denied the request")
 		return
 	}
 	ev.Name, ev.Outcome = audit.ConsentGranted, audit.Success
-	if !repeat {
+	if first {
 		b.cfg.Audit.RecordUnauthenticated(r, ev)
 	}
 	// The IdP state is stored only now, after Allow (ADR-0010 §5).

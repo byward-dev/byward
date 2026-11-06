@@ -129,7 +129,10 @@ func returnsTo(redirect string) (string, bool) {
 		}
 		return host, false
 	}
-	return displayName(host, "?") + " (" + ascii + ")", false
+	if shown := displayName(host, "?"); shown != ascii {
+		return shown + " (" + ascii + ")", false
+	}
+	return ascii, false
 }
 
 var consentTemplate = template.Must(template.New("consent").Parse(`<!doctype html>

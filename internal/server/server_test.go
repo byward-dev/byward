@@ -744,7 +744,6 @@ func TestReadinessIsKeysAndStoreOnly(t *testing.T) {
 			code, body := getBody(t, mux, "x", "/readyz")
 			if code != c.wantCode || strings.TrimSpace(body) != c.wantBody {
 				t.Fatalf("readyz = %d %s, want %d %s (exactly keys and store, no IdP, no error text)", code, body, c.wantCode, c.wantBody)
-
 			}
 		})
 	}

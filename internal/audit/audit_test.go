@@ -106,18 +106,38 @@ func TestEveryEventHasASampleAndADocsRow(t *testing.T) {
 	}
 }
 
-// Users behind one NAT share a source address; many page views must not hide their decisions.
-func TestFrequentEventsDoNotCrowdOutOtherEventsFromTheSameSource(t *testing.T) {
+// Users behind one NAT share a source address; many page views must not hide their decisions, and
+// one source's flood must not hide another source's records.
+func TestRecordsAreLimitedPerSourceAndEvent(t *testing.T) {
 	var buf bytes.Buffer
-	l := New(logging.New(&buf, "json"), nil, time.Now)
-	r := httptest.NewRequest("GET", "/authorize", nil)
-	r.RemoteAddr = "192.0.2.7:1234"
+	now := time.Unix(1_800_000_000, 0)
+	l := New(logging.New(&buf, "json"), nil, func() time.Time { return now })
+	nat := httptest.NewRequest("GET", "/authorize", nil)
+	nat.RemoteAddr = "192.0.2.7:1234"
 	for range unauthBurst + 5 {
-		l.RecordUnauthenticated(r, Event{Name: ConsentShown, Outcome: Success, ClientID: "client-1"})
+		l.RecordUnauthenticated(nat, Event{Name: ConsentShown, Outcome: Success, ClientID: "client-1"})
 	}
-	l.RecordUnauthenticated(r, Event{Name: ConsentDenied, Outcome: Failure, ClientID: "client-1"})
-	if !strings.Contains(buf.String(), `"event":"consent_denied"`) {
-		t.Fatalf("the decision was dropped after %d page views: %s", unauthBurst+5, buf.String())
+	other := httptest.NewRequest("GET", "/authorize", nil)
+	other.RemoteAddr = "198.51.100.9:1"
+	l.RecordUnauthenticated(other, Event{Name: ConsentShown, Outcome: Success, ClientID: "client-1"})
+	l.RecordUnauthenticated(nat, Event{Name: ConsentDenied, Outcome: Failure, ClientID: "client-1"})
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if n := strings.Count(buf.String(), `"event":"consent_shown","outcome":"success","client_id":"client-1","remote_ip":"192.0.2.7"`); n != unauthBurst {
+		t.Fatalf("logged %d consent_shown records from the flooding source, want %d", n, unauthBurst)
+	}
+	if len(lines) != unauthBurst+2 {
+		t.Fatalf("logged %d records, want %d: %s", len(lines), unauthBurst+2, buf.String())
+	}
+	for _, want := range []string{`"remote_ip":"198.51.100.9"`, `"event":"consent_denied"`} {
+		var line string
+		for _, l := range lines {
+			if strings.Contains(l, want) {
+				line = l
+			}
+		}
+		if line == "" || strings.Contains(line, "suppressed") {
+			t.Fatalf("record with %s missing or marked suppressed: %q", want, line)
+		}
 	}
 }
 

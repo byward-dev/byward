@@ -25,6 +25,9 @@ func visibleText(body string) string {
 	return strings.Join(strings.Fields(html.UnescapeString(tagRE.ReplaceAllString(body, " "))), " ")
 }
 
+// consentEvents names the audit event of each answer.
+var consentEvents = map[string]string{"allow": "consent_granted", "deny": "consent_denied"}
+
 // consentAudit is the one consent record named event, for clientID (verified).
 func (e *env) consentAudit(t *testing.T, event, outcome string) {
 	t.Helper()
@@ -177,6 +180,7 @@ func TestTheReturnDestinationIsShownReadablyAndLoopbackIsFlagged(t *testing.T) {
 		{"a punycode host is shown beside its Unicode", "https://xn--bcher-kva.example/cb", "bücher.example (xn--bcher-kva.example)", false},
 		{"a full-width dot shows the real host", "https://app.example.org\u3002evil.com/cb", "app.example.org\u3002evil.com (app.example.org.evil.com)", false},
 		{"an empty punycode label names no host", "https://xn--.example/cb", "xn--.example", false},
+		{"an invisible character alone shows the host once", "https://a\u00adb.example/cb", "ab.example", false},
 		{"a zero-width joiner shows the real host", "https://a\u200db.com/cb", "ab.com (xn--ab-m1t.com)", false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -209,7 +213,8 @@ func TestClientNamesAreSanitisedForDisplay(t *testing.T) {
 		{"control characters go", "Evil\x00\x1b[31m app", "Evil[31m app"},
 		{"bidi overrides go", "abc\u202egnp.exe", "abcgnp.exe"},
 		{"whitespace collapses", "  a \t\n b  ", "a b"},
-		{"empty falls back", "\u200b", "fallback"},
+		{"a name of only invisible characters falls back", "\u200b", "fallback"},
+		{"an empty name falls back", "", "fallback"},
 		{"80 characters at most", strings.Repeat("x", 100), strings.Repeat("x", 79) + "…"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -361,13 +366,12 @@ func TestRepeatedAnswerRepeatsTheResponse(t *testing.T) {
 				t.Fatalf("second %s: %d %s, first %d %s", c.action, second.StatusCode, second.Header.Get("Location"), first.StatusCode, loc)
 			}
 			// One decision, one audit record.
-			e.oneAuditEvent(t, map[string]string{"allow": "consent_granted", "deny": "consent_denied"}[c.action], nil)
+			e.oneAuditEvent(t, consentEvents[c.action], nil)
 		})
 	}
 }
 
 func TestAChangedAnswerIsRefused(t *testing.T) {
-	events := map[string]string{"allow": "consent_granted", "deny": "consent_denied"}
 	for _, c := range []struct {
 		name, first, then string
 		status            int
@@ -389,8 +393,8 @@ func TestAChangedAnswerIsRefused(t *testing.T) {
 			if title := pageTitle(t, res); res.StatusCode != http.StatusConflict || title != "You already answered this request." {
 				t.Fatalf("changed answer: %d %q", res.StatusCode, title)
 			}
-			e.oneAuditEvent(t, events[c.first], nil)
-			e.noAuditEvent(t, events[c.then])
+			e.oneAuditEvent(t, consentEvents[c.first], nil)
+			e.noAuditEvent(t, consentEvents[c.then])
 		})
 	}
 }
@@ -419,17 +423,19 @@ func TestConsentRefusesAnAnswerFromOutsideItsPage(t *testing.T) {
 		{"same-site fetch", http.Header{"Sec-Fetch-Site": {"same-site"}}},
 		{"no Sec-Fetch-Site and another Origin", http.Header{"Sec-Fetch-Site": {""}, "Origin": {"https://evil.example"}}},
 	} {
-		t.Run(c.name, func(t *testing.T) {
-			e := newEnv(t)
-			p := e.showConsent(t, nil)
-			e.now = e.now.Add(ConsentDelay)
-			res := e.answer(t, p, "allow", c.headers)
-			if title := pageTitle(t, res); res.StatusCode != http.StatusForbidden || len(res.Cookies()) != 0 ||
-				title != "This answer did not come from the proxy's consent page." {
-				t.Fatalf("%d %q, cookies %v", res.StatusCode, title, res.Cookies())
-			}
-			e.noAuditEvent(t, "consent_granted")
-		})
+		for _, action := range []string{"allow", "deny"} {
+			t.Run(c.name+"/"+action, func(t *testing.T) {
+				e := newEnv(t)
+				p := e.showConsent(t, nil)
+				e.now = e.now.Add(ConsentDelay)
+				res := e.answer(t, p, action, c.headers)
+				if title := pageTitle(t, res); res.StatusCode != http.StatusForbidden || len(res.Cookies()) != 0 ||
+					res.Header.Get("Location") != "" || title != "This answer did not come from the proxy's consent page." {
+					t.Fatalf("%d %q, cookies %v", res.StatusCode, title, res.Cookies())
+				}
+				e.noAuditEvent(t, consentEvents[action])
+			})
+		}
 	}
 }
 
@@ -451,17 +457,19 @@ func TestConsentRefusesAnAnswerWhoseBrowserFlowOrClientChanged(t *testing.T) {
 		{"redirect URI no longer registered", func(e *env, _ *consentPage) { e.reg.reregister(clientID, "http://127.0.0.1:1/other") },
 			http.StatusBadRequest, "This app asked to return to an address the proxy does not allow."},
 	} {
-		t.Run(c.name, func(t *testing.T) {
-			e := newEnv(t)
-			p := e.showConsent(t, nil)
-			e.now = e.now.Add(ConsentDelay)
-			c.edit(e, &p)
-			res := e.answer(t, p, "allow", nil)
-			if title := pageTitle(t, res); res.StatusCode != c.status || len(res.Cookies()) != 0 || title != c.title {
-				t.Fatalf("%d %q, cookies %v; want %d %q", res.StatusCode, title, res.Cookies(), c.status, c.title)
-			}
-			e.noAuditEvent(t, "consent_granted")
-		})
+		for _, action := range []string{"allow", "deny"} {
+			t.Run(c.name+"/"+action, func(t *testing.T) {
+				e := newEnv(t)
+				p := e.showConsent(t, nil)
+				e.now = e.now.Add(ConsentDelay)
+				c.edit(e, &p)
+				res := e.answer(t, p, action, nil)
+				if title := pageTitle(t, res); res.StatusCode != c.status || len(res.Cookies()) != 0 || res.Header.Get("Location") != "" || title != c.title {
+					t.Fatalf("%d %q, cookies %v; want %d %q", res.StatusCode, title, res.Cookies(), c.status, c.title)
+				}
+				e.noAuditEvent(t, consentEvents[action])
+			})
+		}
 	}
 }
 
@@ -596,7 +604,7 @@ func TestAFullAnswerTableForgetsTheFlowAnsweredLast(t *testing.T) {
 	for i := range maxFlows - 1 {
 		a.record("flood-"+strconv.Itoa(i), true, t0, t0.Add(5*time.Minute))
 	}
-	if ok, evicted := a.record("new", true, t0, t0.Add(5*time.Minute)); !ok || !evicted {
+	if ok, _, evicted := a.record("new", true, t0, t0.Add(5*time.Minute)); !ok || !evicted {
 		t.Fatalf("full table: ok %v evicted %v, want the new flow accepted by evicting one", ok, evicted)
 	}
 	if _, kept := a.prior("flood-"+strconv.Itoa(maxFlows-2), t0); kept {
@@ -607,7 +615,7 @@ func TestAFullAnswerTableForgetsTheFlowAnsweredLast(t *testing.T) {
 			t.Errorf("%s was forgotten", id)
 		}
 	}
-	if _, evicted := a.record("one more", true, t0, t0.Add(time.Minute)); !evicted {
+	if _, _, evicted := a.record("one more", true, t0, t0.Add(time.Minute)); !evicted {
 		t.Fatal("the table grew past its bound")
 	}
 }
@@ -617,20 +625,49 @@ func TestAFullAnswerTableForgetsTheFlowAnsweredLast(t *testing.T) {
 func TestTheAnswerTableAcceptsTheSameAnswerAgainAndRefusesAnother(t *testing.T) {
 	a := newAnswers()
 	expires := t0.Add(FlowLifetime)
-	if ok, _ := a.record("x", true, t0, expires); !ok {
+	if ok, _, _ := a.record("x", true, t0, expires); !ok {
 		t.Fatal("the first answer was refused")
 	}
-	if ok, _ := a.record("x", true, t0, expires); !ok {
+	if ok, _, _ := a.record("x", true, t0, expires); !ok {
 		t.Fatal("the same answer again was refused")
 	}
-	if ok, _ := a.record("x", false, t0, expires); ok {
+	if ok, _, _ := a.record("x", false, t0, expires); ok {
 		t.Fatal("a different answer was accepted")
 	}
 	if _, kept := a.prior("x", expires); kept {
 		t.Fatal("an expired flow is still remembered")
 	}
-	if ok, _ := a.record("x", false, expires, expires.Add(FlowLifetime)); !ok {
+	if ok, _, _ := a.record("x", false, expires, expires.Add(FlowLifetime)); !ok {
 		t.Fatal("an answer after the flow expired was refused")
+	}
+}
+
+// Two identical answers arriving together: both proceed, exactly one is the decision that is
+// audited.
+func TestConcurrentSameAnswersRecordOneDecision(t *testing.T) {
+	a := newAnswers()
+	const n = 16
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	firsts, oks := 0, 0
+	for range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ok, first, _ := a.record("x", true, t0, t0.Add(FlowLifetime))
+			mu.Lock()
+			defer mu.Unlock()
+			if ok {
+				oks++
+			}
+			if first {
+				firsts++
+			}
+		}()
+	}
+	wg.Wait()
+	if oks != n || firsts != 1 {
+		t.Fatalf("%d of %d answers proceeded and %d were first; want all to proceed and exactly 1 first", oks, n, firsts)
 	}
 }
 
@@ -639,7 +676,7 @@ func TestExpiredAnswersMakeRoomForNewFlowsWithoutForgettingLiveOnes(t *testing.T
 	fillAnswers(a, t0) // expire at t0+1m
 	later := t0.Add(2 * time.Minute)
 	for i := range maxFlows {
-		if ok, evicted := a.record("new-"+strconv.Itoa(i), true, later, later.Add(time.Minute)); !ok || evicted {
+		if ok, _, evicted := a.record("new-"+strconv.Itoa(i), true, later, later.Add(time.Minute)); !ok || evicted {
 			t.Fatalf("record %d: ok %v evicted %v, want room from expired flows, no live flow forgotten", i, ok, evicted)
 		}
 	}

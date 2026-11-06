@@ -41,13 +41,15 @@ func (a *answers) prior(id string, now time.Time) (allow, ok bool) {
 	return p.allow, true
 }
 
-// record stores the answer and reports whether it may proceed: true for a first answer or the same
-// one again. evicted reports that the table was full and an unexpired flow was forgotten.
-func (a *answers) record(id string, allow bool, now, expires time.Time) (ok, evicted bool) {
+// record stores the answer and reports whether it may proceed: ok for a first answer or the same
+// one again, first only for the answer that recorded the flow (one audit record per decision, even
+// when answers arrive together). evicted reports that the table was full and an unexpired flow was
+// forgotten.
+func (a *answers) record(id string, allow bool, now, expires time.Time) (ok, first, evicted bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if prev, seen := a.seen[id]; seen && prev.expires.After(now) {
-		return prev.allow == allow, false
+		return prev.allow == allow, false, false
 	}
 	if len(a.seen) >= maxFlows {
 		var latest string
@@ -65,5 +67,5 @@ func (a *answers) record(id string, allow bool, now, expires time.Time) (ok, evi
 	}
 	a.next++
 	a.seen[id] = answer{allow: allow, expires: expires, seq: a.next}
-	return true, evicted
+	return true, true, evicted
 }
