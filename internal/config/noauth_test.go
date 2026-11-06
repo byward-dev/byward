@@ -59,11 +59,12 @@ func TestNoAuthInAContainerMayListenOnAllInterfacesWithAWarning(t *testing.T) {
 		}
 		return nil, os.ErrNotExist
 	}
-	c, err := loadAnon(t, docker, "MCP_AUTHPROXY_LISTEN=0.0.0.0:8080")
+	c, err := loadAnon(t, docker, "MCP_AUTHPROXY_LISTEN=0.0.0.0:8080", "MCP_AUTHPROXY_PUBLIC_URL=http://localhost:18420/mcp")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !c.InContainer || !strings.Contains(strings.Join(c.Relaxations, "|"), "docker run -p 127.0.0.1:8080:8080") {
+	// Host port from the public URL, container port from the listen address.
+	if !c.InContainer || !strings.Contains(strings.Join(c.Relaxations, "|"), "docker run -p 127.0.0.1:18420:8080") {
 		t.Fatalf("container=%v relaxations=%v", c.InContainer, c.Relaxations)
 	}
 	if _, err := loadAnon(t, docker, "MCP_AUTHPROXY_LISTEN=0.0.0.0:8080", "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp"); !isConfigError(err) {

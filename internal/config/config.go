@@ -192,8 +192,13 @@ func checkNoAuth(c *Config, v *Values) []error {
 	case err != nil:
 	case isLoopback(host):
 	case c.InContainer:
+		// The host port is the public URL's; the container port is the listen address's.
+		hostPort := c.PublicURL.Port()
+		if hostPort == "" {
+			hostPort = "80"
+		}
 		c.Relaxations = append(c.Relaxations, fmt.Sprintf(
-			"listening on %s inside a container: publish the port on loopback only, e.g. docker run -p 127.0.0.1:%s:%s; anyone who can reach the published port can use the upstream", c.Listen, port, port))
+			"listening on %s inside a container: publish the port on loopback only, e.g. docker run -p 127.0.0.1:%s:%s; anyone who can reach the published port can use the upstream", c.Listen, hostPort, port))
 	default:
 		errs = append(errs, errorf("%s: MCP_AUTHPROXY_LISTEN must be a loopback address such as 127.0.0.1:8080 (non-loopback only inside a container)", env))
 	}
