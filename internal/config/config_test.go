@@ -10,6 +10,19 @@ import (
 var base = []string{
 	"MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp",
 	"MCP_AUTHPROXY_UPSTREAM_URL=http://upstream:9000/mcp",
+	"MCP_AUTHPROXY_ENTRA_TENANT=00000000-0000-0000-0000-000000000001",
+	"MCP_AUTHPROXY_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002",
+	"MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE=/run/secrets/entra",
+	"MCP_AUTHPROXY_KEYS_DIR=/var/lib/mcp-authproxy/keys",
+	"MCP_AUTHPROXY_STATIC_CLIENTS_FILE=/etc/mcp-authproxy/clients.json",
+}
+
+// baseFiles serves the secret file named in base.
+func baseFiles(p string) ([]byte, error) {
+	if p == "/run/secrets/entra" {
+		return []byte("s3cret-entra\n"), nil
+	}
+	return nil, os.ErrNotExist
 }
 
 func isConfigError(err error) bool {
@@ -19,7 +32,7 @@ func isConfigError(err error) bool {
 
 func load(t *testing.T, args []string, env ...string) (*Config, error) {
 	t.Helper()
-	c, _, err := Load(args, append(append([]string{}, base...), env...), nil)
+	c, _, err := Load(args, append(append([]string{}, base...), env...), baseFiles)
 	return c, err
 }
 
@@ -125,7 +138,7 @@ func TestListsAreNormalized(t *testing.T) {
 }
 
 func TestHelpFlagAsksForUsageListingEnvNames(t *testing.T) {
-	if _, _, err := Load([]string{"-h"}, base, nil); !IsHelp(err) {
+	if _, _, err := Load([]string{"-h"}, base, baseFiles); !IsHelp(err) {
 		t.Fatalf("want help, got %v", err)
 	}
 	if !strings.Contains(Usage(), "MCP_AUTHPROXY_PUBLIC_URL") {
@@ -134,7 +147,7 @@ func TestHelpFlagAsksForUsageListingEnvNames(t *testing.T) {
 }
 
 func TestPositionalArgumentIsAConfigError(t *testing.T) {
-	if _, _, err := Load([]string{"extra"}, base, nil); !isConfigError(err) || !strings.Contains(err.Error(), "extra") {
+	if _, _, err := Load([]string{"extra"}, base, baseFiles); !isConfigError(err) || !strings.Contains(err.Error(), "extra") {
 		t.Fatalf("want config error naming the argument, got %v", err)
 	}
 }
@@ -221,5 +234,23 @@ func TestSecretFileNeedsAFileReader(t *testing.T) {
 	_, err := resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET_FILE=/run/secrets/x"}, nil, nil)
 	if !isConfigError(err) || !strings.Contains(err.Error(), "not available") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestBrokerSettingsAreRequired(t *testing.T) {
+	for _, name := range []string{"MCP_AUTHPROXY_ENTRA_TENANT", "MCP_AUTHPROXY_ENTRA_CLIENT_ID", "MCP_AUTHPROXY_KEYS_DIR", "MCP_AUTHPROXY_STATIC_CLIENTS_FILE"} {
+		if _, err := load(t, nil, name+"="); !isConfigError(err) || !strings.Contains(err.Error(), name+" is required") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := load(t, nil, "MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE="); !isConfigError(err) || !strings.Contains(err.Error(), "MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE is required") {
+		t.Errorf("secret: %v", err)
+	}
+	if _, err := load(t, nil, "MCP_AUTHPROXY_ENTRA_TENANT=contoso.onmicrosoft.com"); !isConfigError(err) || !strings.Contains(err.Error(), "want the tenant ID, a GUID") {
+		t.Errorf("tenant: %v", err)
+	}
+	c, err := load(t, nil)
+	if err != nil || c.EntraClientSecret != "s3cret-entra" || c.KeysDir == "" {
+		t.Fatalf("c=%+v err=%v", c, err)
 	}
 }

@@ -60,7 +60,12 @@ func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer) 
 	if cfg.NoAuth {
 		log.Warn("to require sign-in, remove MCP_AUTHPROXY_INSECURE_NO_AUTH and configure an IdP; see docs/reference/settings.md", "relaxation", "next step")
 	}
-	if err := server.Run(ctx, server.New(cfg, log), log); err != nil {
+	srv, err := server.New(cfg, log)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "mcp-authproxy: configuration error: %v\n", err)
+		return exitConfig
+	}
+	if err := server.Run(ctx, srv, log); err != nil {
 		log.Error("stopped", "error", err)
 		return exitRuntime
 	}

@@ -30,9 +30,22 @@ type TokenRules struct {
 
 // VerifyJWT checks an IdP-signed JWT's signature against keys and its claims against r, and returns
 // the claims. Keep its checks valid for both token kinds named on TokenRules.
-func VerifyJWT(ctx context.Context, raw string, keys *KeySet, r TokenRules) (map[string]any, error) {
-	algs := make([]jose.SignatureAlgorithm, 0, len(r.Algs))
-	for _, a := range r.Algs {
+func VerifyJWT(ctx context.Context, raw string, keys KeySource, r TokenRules) (map[string]any, error) {
+	claims, err := VerifySignature(ctx, raw, keys, r.Algs)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkClaims(claims, r); err != nil {
+		return nil, err
+	}
+	return claims, nil
+}
+
+// VerifySignature checks a compact JWS against keys with an algorithm allowlist (HS* and none are
+// always refused) and returns its claims unchecked; callers apply their own claim rules.
+func VerifySignature(ctx context.Context, raw string, keys KeySource, allowed []jose.SignatureAlgorithm) (map[string]any, error) {
+	algs := make([]jose.SignatureAlgorithm, 0, len(allowed))
+	for _, a := range allowed {
 		if a != jose.HS256 && a != jose.HS384 && a != jose.HS512 && a != "none" {
 			algs = append(algs, a)
 		}
@@ -42,10 +55,11 @@ func VerifyJWT(ctx context.Context, raw string, keys *KeySet, r TokenRules) (map
 	}
 	tok, err := jwt.ParseSigned(raw, algs)
 	if err != nil {
-		return nil, fmt.Errorf("idp: ID token: %w", err)
+		// go-jose's parse errors can quote header bytes, and a JWT here may be a credential.
+		return nil, errors.New("idp: JWT is malformed or its alg is not allowed")
 	}
 	if len(tok.Headers) != 1 {
-		return nil, errors.New("idp: ID token must have one signature")
+		return nil, errors.New("idp: JWT must have one signature")
 	}
 	key, err := keys.Key(ctx, tok.Headers[0].KeyID)
 	if err != nil {
@@ -53,10 +67,7 @@ func VerifyJWT(ctx context.Context, raw string, keys *KeySet, r TokenRules) (map
 	}
 	var claims map[string]any
 	if err := tok.Claims(key.Key, &claims); err != nil {
-		return nil, fmt.Errorf("idp: ID token signature: %w", err)
-	}
-	if err := checkClaims(claims, r); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("idp: JWT signature: %w", err)
 	}
 	return claims, nil
 }

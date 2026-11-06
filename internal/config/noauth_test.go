@@ -149,8 +149,7 @@ func TestOriginDropsTheDefaultPort(t *testing.T) {
 }
 
 func TestNoAuthCannotBeCombinedWithAuthSettings(t *testing.T) {
-	// No production setting is marked Auth yet (the IdP settings arrive with the broker, slice
-	// 1.2), so the fence is exercised with a test registry until then.
+	// A synthetic registry keeps this test independent of which settings carry Auth.
 	reg := []Setting{{Name: "idp", Auth: true}, {Name: "listen", Default: "x"}}
 	v, err := resolve(reg, nil, []string{"MCP_AUTHPROXY_IDP=entra"}, nil, nil)
 	if err != nil {
@@ -176,4 +175,11 @@ func mustURL(t *testing.T, raw string) *url.URL {
 		t.Fatal(err)
 	}
 	return u
+}
+
+func TestNoAuthRefusesRealAuthSettings(t *testing.T) {
+	_, err := loadAnon(t, nil, "MCP_AUTHPROXY_ENTRA_TENANT=00000000-0000-0000-0000-000000000001")
+	if !isConfigError(err) || !strings.Contains(err.Error(), "cannot be combined with MCP_AUTHPROXY_ENTRA_TENANT") {
+		t.Fatalf("got %v", err)
+	}
 }

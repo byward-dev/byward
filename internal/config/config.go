@@ -21,6 +21,11 @@ var registry = []Setting{
 	{Name: "resource-name", Help: "human-readable resource name in protected resource metadata"},
 	{Name: "resource-documentation", Help: "documentation URL in protected resource metadata"},
 	{Name: "log-format", Default: "json", Help: "log format: json or text"},
+	{Name: "entra-tenant", Auth: true, Help: "Entra tenant ID (a GUID) of the IdP app"},
+	{Name: "entra-client-id", Auth: true, Help: "application (client) ID of the IdP app registration"},
+	{Name: "entra-client-secret", Auth: true, Secret: true, Help: "client secret of the IdP app"},
+	{Name: "keys-dir", Auth: true, Help: "directory of sealing keys; each file is one key, its name the key ID (docs/how-to/sealing-keys.md)"},
+	{Name: "static-clients-file", Auth: true, Help: "JSON file of pre-registered MCP clients (docs/reference/static-clients.md)"},
 	{Name: "insecure-no-auth", Bool: true, Default: "false", Help: "no authentication at all, for trying the proxy out and for tests; loopback only (ADR-0027)"},
 	{Name: "dev", Bool: true, Default: "false", Help: "development mode: enables the relaxations it logs at startup"},
 }
@@ -39,6 +44,12 @@ type Config struct {
 	Dev                   bool
 	// NoAuth serves the upstream with no authentication (ADR-0027).
 	NoAuth bool
+	// The broker (slice 1.2): Entra as the IdP, static clients.
+	EntraTenant       string
+	EntraClientID     string
+	EntraClientSecret string
+	KeysDir           string
+	StaticClientsFile string
 	// InContainer is set when the proxy runs in a container (/.dockerenv or /run/.containerenv)
 	// with its own network namespace; host networking does not count (see ownNetwork).
 	InContainer bool
@@ -156,6 +167,22 @@ func validate(v *Values, container bool) (*Config, error) {
 	if c.NoAuth && c.PublicURL != nil {
 		errs = append(errs, checkNoAuth(c, v)...)
 	}
+	if !c.NoAuth {
+		c.EntraTenant, c.EntraClientID, c.EntraClientSecret = v.get("entra-tenant"), v.get("entra-client-id"), v.get("entra-client-secret")
+		c.KeysDir, c.StaticClientsFile = v.get("keys-dir"), v.get("static-clients-file")
+		for _, s := range []string{"entra-tenant", "entra-client-id", "entra-client-secret", "keys-dir", "static-clients-file"} {
+			if v.get(s) == "" {
+				env := Setting{Name: s}.Env()
+				if s == "entra-client-secret" {
+					env += "_FILE"
+				}
+				errs = append(errs, errorf("%s is required (or set MCP_AUTHPROXY_INSECURE_NO_AUTH to try the proxy without sign-in)", env))
+			}
+		}
+		if t := c.EntraTenant; t != "" && !isGUID(t) {
+			errs = append(errs, errorf("MCP_AUTHPROXY_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000, got %q", t))
+		}
+	}
 	if len(errs) > 0 {
 		msgs := make([]string, 0, len(errs))
 		for _, e := range errs {
@@ -164,6 +191,23 @@ func validate(v *Values, container bool) (*Config, error) {
 		return nil, &configError{msg: strings.Join(msgs, "; ")}
 	}
 	return c, nil
+}
+
+func isGUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case i == 8 || i == 13 || i == 18 || i == 23:
+			if r != '-' {
+				return false
+			}
+		case !strings.ContainsRune("0123456789abcdefABCDEF", r):
+			return false
+		}
+	}
+	return true
 }
 
 // inContainer reports whether the proxy runs in a container (Docker or Podman marker file) that
