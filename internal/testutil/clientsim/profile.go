@@ -67,18 +67,12 @@ type Profile struct {
 	NeedsIssSupported bool
 	// SendsResource: the client sends the RFC 8707 resource parameter on /authorize and /token.
 	SendsResource bool
-	// ScopeFromServer: the client sends the challenge's scope, else the PRM's scopes_supported.
-	ScopeFromServer bool
 	// AddsOfflineAccess: the client appends offline_access when the authorization server metadata
 	// lists it in scopes_supported.
 	AddsOfflineAccess bool
-	// Scope is the scope parameter a client not taking it from the server sends; empty sends none.
-	Scope string
 	// Treats403AsAuthFailure: on 403 the client drops its token or registration and signs in again,
 	// so a refusal that reached it as a 403 would loop.
 	Treats403AsAuthFailure bool
-	// HeadersHelperOn401: the client re-runs its headersHelper command on 401 (Claude Code).
-	HeadersHelperOn401 bool
 
 	Facts []Fact
 }

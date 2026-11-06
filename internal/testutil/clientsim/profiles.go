@@ -9,8 +9,8 @@ var (
 		Registration: Static, ClientID: "claude-code", RedirectURI: "http://localhost:45813/callback",
 		ProtocolVersion: "2025-11-25",
 		Discovery:       []string{"/.well-known/oauth-protected-resource"}, ASMetadata: []string{"oauth-authorization-server", "openid-configuration"},
-		UsesChallenge: false, SendsResource: false, ScopeFromServer: true, ChecksIss: true,
-		Treats403AsAuthFailure: true, HeadersHelperOn401: true,
+		UsesChallenge: false, SendsResource: false, ChecksIss: true,
+		Treats403AsAuthFailure: true,
 		Facts: []Fact{
 			{"checks /.well-known/oauth-protected-resource first; the path-inserted form is not documented", "https://code.claude.com/docs/en/mcp"},
 			{"static client: --client-id, --client-secret, --callback-port; redirect http://localhost:<port>/callback", "https://code.claude.com/docs/en/mcp"},
@@ -32,7 +32,7 @@ var (
 		Registration: CIMD, Document: "claude-ai", RedirectURI: "https://claude.ai/api/mcp/auth_callback", ProtocolVersion: "2025-11-25",
 		Discovery:     []string{"/.well-known/oauth-protected-resource/", "/.well-known/oauth-protected-resource"},
 		ASMetadata:    []string{"oauth-authorization-server", "openid-configuration"},
-		UsesChallenge: true, CIMDNeedsNone: true, SendsResource: true, ScopeFromServer: true, AddsOfflineAccess: true,
+		UsesChallenge: true, CIMDNeedsNone: true, SendsResource: true, AddsOfflineAccess: true,
 		Facts: []Fact{
 			{"follows the 401's resource_metadata; only without one does it try the path-inserted PRM, then the root one (a fallback)", "https://claude.com/docs/connectors/building/authentication"},
 			{"uses the first authorization_servers entry and does not fall back (every profile uses the first; none falls back)", "https://claude.com/docs/connectors/building/authentication"},
@@ -55,7 +55,7 @@ var (
 		Client: "VS Code", Version: "1.145.2 (source)", Cell: "VS Code × CIMD",
 		Registration: CIMD, Document: "vscode", RedirectURI: "http://127.0.0.1:33418/", ProtocolVersion: "2025-11-25",
 		Discovery: []string{"/.well-known/oauth-protected-resource/"}, ASMetadata: []string{"oauth-authorization-server", "openid-configuration"},
-		UsesChallenge: true, SendsResource: true, ScopeFromServer: true,
+		UsesChallenge: true, SendsResource: true,
 		Treats403AsAuthFailure: true,
 		Facts: []Fact{
 			{"stored registration, then CIMD when configured (it does not check for none), then DCR", "microsoft/vscode 1.145.2 mainThreadAuthentication.ts:183-194"},
@@ -77,7 +77,7 @@ var ChatGPT = Profile{
 	Client: "ChatGPT", Version: "docs read 2026-11-06", Cell: "ChatGPT × CIMD",
 	Registration: CIMD, Document: "chatgpt", RedirectURI: "https://chatgpt.com/connector_platform_oauth_redirect", ProtocolVersion: "2025-11-25",
 	Discovery: []string{"/.well-known/oauth-protected-resource"}, ASMetadata: []string{"oauth-authorization-server", "openid-configuration"},
-	UsesChallenge: true, PrivateKeyJWT: true, ChecksIss: true, NeedsIssSupported: true, SendsResource: true, ScopeFromServer: true,
+	UsesChallenge: true, PrivateKeyJWT: true, ChecksIss: true, NeedsIssSupported: true, SendsResource: true,
 	Facts: []Fact{
 		{"prefers CIMD; the stable client ID https://chatgpt.com/oauth/client.json needs iss support and an issuer equal to the PRM's authorization_servers entry", "https://developers.openai.com/plugins/build/auth"},
 		{"its document's legacy token_endpoint_auth_method prefers private_key_jwt (RS256, jwks_uri https://chatgpt.com/oauth/jwks.json); ChatGPT picks from the intersection with the server's methods", "https://developers.openai.com/plugins/build/auth; https://chatgpt.com/oauth/client.json"},

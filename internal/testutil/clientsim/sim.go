@@ -151,7 +151,7 @@ func authorize(t *testing.T, e Env, p Profile, c Credentials, m metadata, verifi
 	state := randomString(t)
 	q := url.Values{"client_id": {c.ClientID}, "redirect_uri": {p.RedirectURI}, "response_type": {"code"}, "state": {state},
 		"code_challenge": {s256(verifier)}, "code_challenge_method": {"S256"}}
-	if s := scope(p, m); s != "" {
+	if s := scope(m); s != "" {
 		q.Set("scope", s)
 	}
 	if p.AddsOfflineAccess {
@@ -242,12 +242,8 @@ func redeem(t *testing.T, e Env, p Profile, c Credentials, m metadata, code, ver
 	return tokens.AccessToken
 }
 
-// scope is the scope the client sends: from the challenge, else the PRM's scopes_supported, for
-// clients that take it from the server; otherwise the profile's fixed scope.
-func scope(p Profile, m metadata) string {
-	if !p.ScopeFromServer {
-		return p.Scope
-	}
+// scope is the scope every profiled client sends: the challenge's, else the PRM's scopes_supported.
+func scope(m metadata) string {
 	if m.scope != "" {
 		return m.scope
 	}

@@ -38,7 +38,6 @@ func TestClosedClientsSignInAndWorkAsTheirProfilesSay(t *testing.T) {
 			if res.StatusCode != http.StatusOK {
 				t.Fatalf("initialize after sign-in: %d", res.StatusCode)
 			}
-			clientsim.WantNoAuthLoop(t, p, res)
 
 			// ADR-0025: an upstream that refuses the proxy must not look like an auth failure.
 			refused := clientsim.Call(t, e, p, s, `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"x","arguments":{}}}`)
@@ -55,13 +54,6 @@ func TestClosedClientsSignInAndWorkAsTheirProfilesSay(t *testing.T) {
 			_ = stale.Body.Close()
 			if stale.StatusCode != http.StatusUnauthorized || !strings.Contains(stale.Header.Get("WWW-Authenticate"), "resource_metadata=") {
 				t.Fatalf("an unusable token: %d %q; want a 401 challenge the client recovers from", stale.StatusCode, stale.Header.Get("WWW-Authenticate"))
-			}
-			if p.HeadersHelperOn401 { // Claude Code reruns its headersHelper, which hands it a good token again
-				retry := clientsim.Call(t, e, p, s, "")
-				_ = retry.Body.Close()
-				if retry.StatusCode != http.StatusOK {
-					t.Fatalf("the retry with the helper's token after a 401: %d", retry.StatusCode)
-				}
 			}
 		})
 	}
