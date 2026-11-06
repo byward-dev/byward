@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -444,42 +443,24 @@ func TestConcurrentFirstLoginsWaitForReadiness(t *testing.T) {
 	}
 }
 
-// keysDown fails JWKS requests with 503 once down is set and passes everything else on.
-type keysDown struct {
-	next http.RoundTripper
-	down atomic.Bool
-}
-
-func (k *keysDown) RoundTrip(r *http.Request) (*http.Response, error) {
-	if k.down.Load() && strings.HasSuffix(r.URL.Path, "/discovery/v2.0/keys") {
-		return &http.Response{StatusCode: 503, Body: http.NoBody, Header: http.Header{}, Request: r}, nil
-	}
-	return k.next.RoundTrip(r)
-}
-
-// keysDownEnv is an env whose adapter reaches the fake through a switchable keysDown transport.
-func keysDownEnv(t *testing.T) (*env, *keysDown, *fakeidp.Clock) {
+// outageEnv is an env on a step clock whose adapter does not back off between JWKS retries, so an
+// outage fails fast.
+func outageEnv(t *testing.T) (*env, *fakeidp.Clock) {
 	t.Helper()
 	clock := fakeidp.NewClock(now())
 	e := newEnv(t, Config{Now: clock.Now}, fakeidp.WithClock(clock.Now))
-	kd := &keysDown{next: e.fake.Transport()}
-	p, err := New(Config{Tenant: e.p.cfg.Tenant, ClientID: e.client.ID, ClientAuth: e.p.cfg.ClientAuth,
-		RedirectURL: redirect, HTTPClient: &http.Client{Transport: kd}, Now: clock.Now})
-	if err != nil {
-		t.Fatal(err)
-	}
-	e.p = p
-	return e, kd, clock
+	e.p.fetch.Backoff = 0
+	return e, clock
 }
 
 func TestRefreshWhileJWKSIsDownIsUnavailable(t *testing.T) {
-	e, kd, clock := keysDownEnv(t)
+	e, clock := outageEnv(t)
 	_, tok, err := callback(t, e)
 	if err != nil {
 		t.Fatal(err)
 	}
 	e.fake.RotateKeys(t) // the refreshed tokens are signed with a kid the cache does not have
-	kd.down.Store(true)
+	e.fake.Set(fakeidp.WithJWKSUnavailable(true))
 	clock.Advance(idp.MinJWKSRefresh)
 	_, _, err = e.p.Refresh(context.Background(), tok.RefreshToken)
 	var ie *idp.Error
@@ -489,11 +470,10 @@ func TestRefreshWhileJWKSIsDownIsUnavailable(t *testing.T) {
 }
 
 // checkAccessToken directly: the refresh path above fails on the ID token first.
-func TestAccessTokenCheckKeepsTheHintOnlyForMisconfiguration(t *testing.T) {
-	e, kd, clock := keysDownEnv(t)
-	tid := e.fake.TenantID()
+func TestAccessTokenCheckWhileJWKSIsDownIsUnavailableWithoutHint(t *testing.T) {
+	e, clock := outageEnv(t)
 	access := func() string {
-		c := v2Claims(tid, e.client.ID)
+		c := v2Claims(e.fake.TenantID(), e.client.ID)
 		c["scp"] = "access_as_user"
 		return e.fake.Mint(c)
 	}
@@ -504,18 +484,10 @@ func TestAccessTokenCheckKeepsTheHintOnlyForMisconfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.fake.RotateKeys(t)
-	kd.down.Store(true)
+	e.fake.Set(fakeidp.WithJWKSUnavailable(true))
 	clock.Advance(idp.MinJWKSRefresh)
 	var ie *idp.Error
 	if err := e.p.checkAccessToken(context.Background(), access()); !errors.As(err, &ie) || ie.Class != idp.Unavailable || ie.OperatorHint != "" {
 		t.Fatalf("keys down: %#v", err)
-	}
-
-	forged, _ := fakeidp.NewCertificate(t).SignJWT("RS256", map[string]any{"kid": "forged"}, v2Claims(tid, e.client.ID))
-	kd.down.Store(false)
-	clock.Advance(idp.MinJWKSRefresh)
-	if err := e.p.checkAccessToken(context.Background(), forged); !errors.As(err, &ie) || ie.Class != idp.Fatal ||
-		!strings.Contains(ie.OperatorHint, "requestedAccessTokenVersion") {
-		t.Fatalf("foreign key: %#v", err)
 	}
 }

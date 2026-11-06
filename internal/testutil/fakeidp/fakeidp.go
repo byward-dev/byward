@@ -113,6 +113,7 @@ type settings struct {
 	idtyp           bool
 	emailAsString   bool
 	authorizeFail   *Failure
+	jwksDown        bool
 	tokenFail       map[string]Failure
 }
 
@@ -252,6 +253,9 @@ func WithIDTypClaim(on bool) Option { return func(s *settings) { s.idtyp = on } 
 // WithEmailVerifiedAsString makes the generic profile send `email_verified` as "true"/"false"
 // (a Google quirk).
 func WithEmailVerifiedAsString(on bool) Option { return func(s *settings) { s.emailAsString = on } }
+
+// WithJWKSUnavailable makes the JWKS endpoint answer 503, as during an IdP outage.
+func WithJWKSUnavailable(on bool) Option { return func(s *settings) { s.jwksDown = on } }
 
 // FailAuthorize makes every authorization request redirect back with f; nil clears it.
 func FailAuthorize(f *Failure) Option {

@@ -35,6 +35,11 @@ type KeySet struct {
 	have    bool
 	lastErr error         // the last refetch's error, nil after a success
 	running chan struct{} // closed when the in-flight refetch ends; nil when none runs
+
+	// Test seams: refetchTimeout overrides the Fetcher's budget; onWait runs when a caller starts
+	// waiting for a refetch.
+	refetchTimeout time.Duration
+	onWait         func()
 }
 
 // NewKeySet caches the JWKS at url.
@@ -63,8 +68,12 @@ func (k *KeySet) Key(ctx context.Context, kid string) (*jose.JSONWebKey, error) 
 		// Detached from cancellation so a departing caller cannot abort the shared refetch.
 		go k.refetch(context.WithoutCancel(ctx), running)
 	}
+	onWait := k.onWait
 	k.mu.Unlock()
 
+	if onWait != nil {
+		onWait()
+	}
 	select {
 	case <-running:
 	case <-ctx.Done():
@@ -89,7 +98,11 @@ func (k *KeySet) missing(kid string) error {
 
 // refetch loads the JWKS and stores the result; it closes done when finished.
 func (k *KeySet) refetch(parent context.Context, done chan struct{}) {
-	ctx, cancel := context.WithTimeout(parent, k.fetch.budget())
+	timeout := k.refetchTimeout
+	if timeout <= 0 {
+		timeout = k.fetch.budget()
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	set, err := k.load(ctx)
 	k.mu.Lock()

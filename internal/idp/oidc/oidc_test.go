@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -428,32 +427,16 @@ func TestConcurrentFirstLoginsShareDiscovery(t *testing.T) {
 	}
 }
 
-// keysDown fails requests to jwksPath with 503 once down is set and passes everything else on.
-type keysDown struct {
-	next     http.RoundTripper
-	jwksPath string
-	down     atomic.Bool
-}
-
-func (k *keysDown) RoundTrip(r *http.Request) (*http.Response, error) {
-	if k.down.Load() && r.URL.Path == k.jwksPath {
-		return &http.Response{StatusCode: 503, Body: http.NoBody, Header: http.Header{}, Request: r}, nil
-	}
-	return k.next.RoundTrip(r)
-}
-
 func TestRefreshWhileJWKSIsDownIsUnavailable(t *testing.T) {
 	clock := fakeidp.NewClock(now())
-	kd := &keysDown{next: http.DefaultTransport}
-	e := newEnv(t, Config{Now: clock.Now, HTTPClient: &http.Client{Transport: kd}}, fakeidp.WithClock(clock.Now))
-	u, _ := url.Parse(e.fake.JWKSURL(""))
-	kd.jwksPath = u.Path
+	e := newEnv(t, Config{Now: clock.Now}, fakeidp.WithClock(clock.Now))
+	e.p.fetch.Backoff = 0 // the outage fails fast instead of sleeping through retries
 	_, tok, err := e.p.Callback(context.Background(), signIn(t, e, login), login)
 	if err != nil {
 		t.Fatal(err)
 	}
 	e.fake.RotateKeys(t)
-	kd.down.Store(true)
+	e.fake.Set(fakeidp.WithJWKSUnavailable(true))
 	clock.Advance(idp.MinJWKSRefresh)
 	_, _, err = e.p.Refresh(context.Background(), tok.RefreshToken)
 	var ie *idp.Error
