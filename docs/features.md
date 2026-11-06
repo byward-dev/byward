@@ -30,7 +30,7 @@ Suggested grill order follows dependencies (earlier rows constrain later ones).
 | F15 | [#16](https://github.com/corker/mcp-authproxy/issues/16) | Machine-to-machine | `area:authz` | [F3](https://github.com/corker/mcp-authproxy/issues/4), [F11](https://github.com/corker/mcp-authproxy/issues/12) | open |
 | F16 | [#17](https://github.com/corker/mcp-authproxy/issues/17) | Discovery & errors | `area:broker` | [F3](https://github.com/corker/mcp-authproxy/issues/4) | decided: [ADR-0013](adr/0013-discovery-and-errors.md) |
 | F17 | [#18](https://github.com/corker/mcp-authproxy/issues/18) | Security hardening | `area:security` | all | decided: [ADR-0018](adr/0018-hardening.md) |
-| F18 | [#19](https://github.com/corker/mcp-authproxy/issues/19) | Configuration UX | `area:ops` | [F9](https://github.com/corker/mcp-authproxy/issues/10) | open |
+| F18 | [#19](https://github.com/corker/mcp-authproxy/issues/19) | Configuration UX | `area:ops` | [F9](https://github.com/corker/mcp-authproxy/issues/10) | decided: [ADR-0020](adr/0020-configuration.md) |
 | F19 | [#20](https://github.com/corker/mcp-authproxy/issues/20) | Packaging & deployment | `area:ops` | [F1](https://github.com/corker/mcp-authproxy/issues/2) | decided: [ADR-0019](adr/0019-packaging.md) |
 | F20 | [#21](https://github.com/corker/mcp-authproxy/issues/21) | Observability | `area:ops` | — | open |
 | F21 | [#22](https://github.com/corker/mcp-authproxy/issues/22) | Testing strategy | `area:project` | [F9](https://github.com/corker/mcp-authproxy/issues/10), [F10](https://github.com/corker/mcp-authproxy/issues/11) | open |

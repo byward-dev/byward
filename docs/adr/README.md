@@ -25,6 +25,7 @@ each feature (F1–F22) is a GitHub issue and gets an ADR once grilled with the 
 | [0017](0017-delegation-obo.md) | Delegation: proxy-side Entra On-Behalf-Of in v0.1 | F14 | — |
 | [0018](0018-hardening.md) | Hardening: Origin and Host checks, bounded HTTP, Rewrite-only proxying | F17 | — |
 | [0019](0019-packaging.md) | Packaging: a signed container image and Linux binaries for servers | F19 | — |
+| [0020](0020-configuration.md) | Configuration: flags and env, secrets from files, one registry | F18 | — |
 
 ## Writing a new ADR
 
