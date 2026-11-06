@@ -43,3 +43,25 @@ jobs:
       - run: mise run release:smoke
         env:
           MISE_TASK_RUN_AUTO_INSTALL: "false"
+
+  # MCP conformance through --insecure-no-auth must equal conformance against the reference server (ADR-0024 §4a).
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          install_args: go jq
+      - run: mise run test:conformance
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: conformance-results
+          path: |
+            build/conformance/results
+            build/conformance/*.log
+          retention-days: 7
