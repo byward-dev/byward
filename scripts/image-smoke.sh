@@ -9,9 +9,10 @@ fail() { echo "image smoke: FAIL: $*" >&2; exit 1; }
 user=$(docker image inspect --format '{{.Config.User}}' "$image")
 [ "$user" = "65532:65532" ] || fail "Config.User is '$user', want 65532:65532"
 
-# The binary must start (any exit code from the program itself, not 125-127 from docker/exec).
+# The binary must start: any exit code from the program itself passes, 125-127 (docker/exec errors) fail.
+# --version so a real server never blocks the test.
 set +e
-docker run --rm "$image" >/dev/null 2>&1
+docker run --rm "$image" --version >/dev/null 2>&1
 code=$?
 set -e
 [ "$code" -lt 125 ] || fail "binary did not start (docker run exit $code)"
@@ -29,7 +30,7 @@ done
 
 docker build --quiet --build-arg "MCP_AUTHPROXY_IMAGE=$image" -t mcp-authproxy-smoke-node docs/examples/stdio-node >/dev/null
 set +e
-docker run --rm --entrypoint /usr/local/bin/mcp-authproxy mcp-authproxy-smoke-node >/dev/null 2>&1
+docker run --rm --entrypoint /usr/local/bin/mcp-authproxy mcp-authproxy-smoke-node --version >/dev/null 2>&1
 code=$?
 set -e
 [ "$code" -lt 125 ] || fail "binary did not start in the FROM node example (docker run exit $code)"
