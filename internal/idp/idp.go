@@ -85,11 +85,20 @@ type Authenticator interface {
 	// Callback handles the IdP's redirect to /callback/{idp}: an error response becomes an *Error,
 	// a code is exchanged and the ID token validated against l.
 	Callback(ctx context.Context, query url.Values, l Login) (Identity, Tokens, error)
-	// Ready reports whether discovery has succeeded (readiness, ADR-0011 §7).
+}
+
+// Readiness is for the readiness probe: nil once the IdP's discovery has succeeded (ADR-0011 §7).
+// Until then the adapter's other calls fail as well.
+type Readiness interface {
 	Ready(ctx context.Context) error
 }
 
-// Refresher renews IdP tokens. Identity is nil when the IdP returned no new ID token.
+// Refresher renews IdP tokens.
+//   - Tokens.RefreshToken is empty when the IdP kept the old one; the caller keeps it.
+//   - Tokens.Expiry is zero when the IdP sent no expires_in.
+//   - Identity is nil when the IdP returned no new ID token. When it is not nil, the caller must
+//     check that Subject and Issuer equal the grant's (OIDC Core §12.2) before re-running the
+//     access gate.
 type Refresher interface {
 	Refresh(ctx context.Context, refreshToken string) (*Identity, Tokens, error)
 }

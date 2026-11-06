@@ -58,17 +58,23 @@ func (k *KeySet) Key(ctx context.Context, kid string) (*jose.JSONWebKey, error) 
 }
 
 func (k *KeySet) lookup(kid string) *jose.JSONWebKey {
-	if kid == "" {
-		if len(k.keys.Keys) == 1 {
-			return &k.keys.Keys[0]
-		}
-		return nil
-	}
+	var found *jose.JSONWebKey
 	for i := range k.keys.Keys {
 		key := &k.keys.Keys[i]
-		if key.KeyID == kid && (key.Use == "" || key.Use == "sig") && key.Valid() && key.IsPublic() {
+		if !signingKey(key) || (kid != "" && key.KeyID != kid) {
+			continue
+		}
+		if kid != "" {
 			return key
 		}
+		if found != nil {
+			return nil // no kid and more than one candidate
+		}
+		found = key
 	}
-	return nil
+	return found
+}
+
+func signingKey(key *jose.JSONWebKey) bool {
+	return (key.Use == "" || key.Use == "sig") && key.Valid() && key.IsPublic()
 }

@@ -216,7 +216,7 @@ func (p *Provider) Callback(ctx context.Context, query url.Values, l idp.Login) 
 		return idp.Identity{}, idp.Tokens{}, &idp.Error{Class: idp.Fatal, Err: err}
 	}
 	if cb.Error != "" {
-		return idp.Identity{}, idp.Tokens{}, &idp.Error{Class: idp.GenericClass(0, cb.Error), OAuth: cb.Error,
+		return idp.Identity{}, idp.Tokens{}, &idp.Error{Class: idp.GenericClass(0, cb.Error), OAuth: cb.Error, Alert: cb.Error == "invalid_client",
 			Description: cb.ErrorDescription, UserMessage: "Sign-in at the identity provider did not complete."}
 	}
 	form := url.Values{
@@ -290,7 +290,7 @@ func (p *Provider) identity(ctx context.Context, raw, nonce string) (idp.Identit
 			accepted = append(accepted, alt)
 		}
 	}
-	claims, err := idp.VerifyIDToken(ctx, raw, p.keys, idp.IDTokenRules{
+	claims, err := idp.VerifyJWT(ctx, raw, p.keys, idp.TokenRules{
 		Issuer: func(iss string, _ map[string]any) error {
 			if !slices.Contains(accepted, iss) {
 				return fmt.Errorf("oidc: ID token issuer %q is not %q", iss, p.cfg.Issuer)

@@ -105,7 +105,7 @@ func (p *Provider) Scope() string {
 func issuerFor(tid string) string { return Authority + "/" + tid + "/v2.0" }
 
 // Ready fetches the discovery document once and checks its issuer: exact for a tenant, the
-// {tenantid} template for organizations.
+// {tenantid} template for organizations. Logins and refreshes wait for it; errors are not cached.
 func (p *Provider) Ready(ctx context.Context) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -131,7 +131,10 @@ func (p *Provider) Ready(ctx context.Context) error {
 
 // AuthCodeURL builds the login URL (ADR-0012 §4, §11): PKCE S256, nonce, response_mode=query,
 // never `resource`.
-func (p *Provider) AuthCodeURL(_ context.Context, l idp.Login) (string, error) {
+func (p *Provider) AuthCodeURL(ctx context.Context, l idp.Login) (string, error) {
+	if err := p.Ready(ctx); err != nil {
+		return "", err
+	}
 	if l.State == "" || l.Nonce == "" || l.CodeVerifier == "" {
 		return "", errors.New("entra: state, nonce and code verifier are required")
 	}
@@ -161,6 +164,9 @@ func (p *Provider) AuthCodeURL(_ context.Context, l idp.Login) (string, error) {
 // Callback handles /callback/entra. Entra sends no RFC 9207 `iss`; the per-IdP callback path and
 // the issuer bound in the broker's state defend against mix-up (ADR-0011 §6).
 func (p *Provider) Callback(ctx context.Context, query url.Values, l idp.Login) (idp.Identity, idp.Tokens, error) {
+	if err := p.Ready(ctx); err != nil {
+		return idp.Identity{}, idp.Tokens{}, err
+	}
 	cb, err := idp.ReadCallback(query, l, "")
 	if err != nil {
 		return idp.Identity{}, idp.Tokens{}, &idp.Error{Class: idp.Fatal, Err: err}
@@ -196,6 +202,9 @@ func (p *Provider) Callback(ctx context.Context, query url.Values, l idp.Login) 
 func (p *Provider) Refresh(ctx context.Context, refreshToken string) (*idp.Identity, idp.Tokens, error) {
 	if refreshToken == "" {
 		return nil, idp.Tokens{}, &idp.Error{Class: idp.SignInAgain, Err: errors.New("entra: no refresh token")}
+	}
+	if err := p.Ready(ctx); err != nil {
+		return nil, idp.Tokens{}, err
 	}
 	tr, err := p.token(ctx, url.Values{
 		"grant_type":    {"refresh_token"},
@@ -238,8 +247,8 @@ func (p *Provider) token(ctx context.Context, form url.Values) (*idp.TokenRespon
 	return tr, nil
 }
 
-func (p *Provider) rules(nonce string) idp.IDTokenRules {
-	return idp.IDTokenRules{
+func (p *Provider) rules(nonce string) idp.TokenRules {
+	return idp.TokenRules{
 		Issuer:   p.checkIssuer,
 		ClientID: p.cfg.ClientID,
 		Nonce:    nonce,
@@ -272,7 +281,7 @@ func (p *Provider) checkIssuer(iss string, claims map[string]any) error {
 }
 
 func (p *Provider) identity(ctx context.Context, raw, nonce string) (idp.Identity, error) {
-	claims, err := idp.VerifyIDToken(ctx, raw, p.keys, p.rules(nonce))
+	claims, err := idp.VerifyJWT(ctx, raw, p.keys, p.rules(nonce))
 	if err != nil {
 		return idp.Identity{}, &idp.Error{Class: idp.Fatal, Err: err}
 	}
@@ -305,7 +314,7 @@ func (p *Provider) checkAccessToken(ctx context.Context, raw string) error {
 	if raw == "" {
 		return &idp.Error{Class: idp.Fatal, OperatorHint: hint, Err: errors.New("entra: no access token for access_as_user")}
 	}
-	claims, err := idp.VerifyIDToken(ctx, raw, p.keys, p.rules(""))
+	claims, err := idp.VerifyJWT(ctx, raw, p.keys, p.rules(""))
 	if err != nil {
 		return &idp.Error{Class: idp.Fatal, OperatorHint: hint, Err: fmt.Errorf("entra: access token: %w", err)}
 	}

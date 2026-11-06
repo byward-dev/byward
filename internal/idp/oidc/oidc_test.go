@@ -2,6 +2,8 @@ package oidc
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -26,11 +28,14 @@ type env struct {
 func newEnv(t *testing.T, cfg Config, opts ...fakeidp.Option) *env {
 	t.Helper()
 	c := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{secret}, RedirectURIs: []string{redirect}}
-	fake := fakeidp.New(t, fakeidp.Generic, append([]fakeidp.Option{fakeidp.WithClient(c)}, opts...)...)
+	fake := fakeidp.New(t, fakeidp.Generic, append([]fakeidp.Option{fakeidp.WithClient(c), fakeidp.WithClock(now)}, opts...)...)
 	if cfg.Issuer == "" {
 		cfg.Issuer = fake.Issuer()
 	}
 	cfg.ClientID, cfg.RedirectURL = c.ID, redirect
+	if cfg.Now == nil {
+		cfg.Now = now
+	}
 	if cfg.ClientAuth == nil {
 		cfg.ClientAuth = idp.ClientSecret(secret)
 	}
@@ -40,6 +45,9 @@ func newEnv(t *testing.T, cfg Config, opts ...fakeidp.Option) *env {
 	}
 	return &env{fake: fake, client: c, p: p}
 }
+
+// now is the shared fixed clock of the fake and the adapter.
+func now() time.Time { return time.Unix(1_800_000_000, 0) }
 
 var login = idp.Login{State: "state-1", Nonce: "nonce-1", CodeVerifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"}
 
@@ -72,7 +80,7 @@ func TestGenericLoginReturnsIdentityAndTokens(t *testing.T) {
 	}
 	u := e.fake.User()
 	if id.Subject != u.Subject || id.Issuer != e.fake.Issuer() || id.Email != u.Email || !id.EmailVerified ||
-		len(id.Groups) != 1 || id.Claims["nonce"] != "nonce-1" {
+		len(id.Groups) != 1 || id.Claims["nonce"] != "nonce-1" || id.Claims["aud"] != e.client.ID {
 		t.Fatalf("identity = %+v", id)
 	}
 	if tok.IDToken == "" || tok.AccessToken == "" || tok.RefreshToken == "" || tok.Expiry.IsZero() {
@@ -112,16 +120,16 @@ func TestCallbackRequiresIssWhenAdvertised(t *testing.T) {
 	e := newEnv(t, Config{})
 	q := signIn(t, e, login)
 	q.Set("iss", "https://evil.example")
-	if _, _, err := e.p.Callback(context.Background(), q, login); err == nil {
-		t.Fatal("wrong iss accepted")
+	if _, _, err := e.p.Callback(context.Background(), q, login); idp.ClassOf(err) != idp.Fatal || !strings.Contains(fmt.Sprint(err), "iss mismatch") {
+		t.Fatalf("wrong iss: %v", err)
 	}
 	q.Del("iss")
-	if _, _, err := e.p.Callback(context.Background(), q, login); err == nil {
-		t.Fatal("missing iss accepted")
+	if _, _, err := e.p.Callback(context.Background(), q, login); idp.ClassOf(err) != idp.Fatal || !strings.Contains(fmt.Sprint(err), "iss mismatch") {
+		t.Fatalf("missing iss: %v", err)
 	}
 }
 
-func TestCallbackWithoutIssWhenNotAdvertised(t *testing.T) {
+func TestCallbackAcceptsMissingIssWhenNotAdvertised(t *testing.T) {
 	e := newEnv(t, Config{}, fakeidp.WithIssParameter(false))
 	if _, _, err := e.p.Callback(context.Background(), signIn(t, e, login), login); err != nil {
 		t.Fatal(err)
@@ -130,19 +138,20 @@ func TestCallbackWithoutIssWhenNotAdvertised(t *testing.T) {
 
 func TestCallbackRejects(t *testing.T) {
 	for name, tc := range map[string]struct {
-		edit func(q url.Values, l *idp.Login)
+		edit   func(q url.Values, l *idp.Login)
+		reason string
 	}{
-		"other state":    {edit: func(q url.Values, _ *idp.Login) { q.Set("state", "other") }},
-		"other nonce":    {edit: func(_ url.Values, l *idp.Login) { l.Nonce = "other" }},
-		"wrong verifier": {edit: func(_ url.Values, l *idp.Login) { l.CodeVerifier = strings.Repeat("a", 43) }},
+		"other state":    {edit: func(q url.Values, _ *idp.Login) { q.Set("state", "other") }, reason: "state mismatch"},
+		"other nonce":    {edit: func(_ url.Values, l *idp.Login) { l.Nonce = "other" }, reason: "nonce mismatch"},
+		"wrong verifier": {edit: func(_ url.Values, l *idp.Login) { l.CodeVerifier = strings.Repeat("a", 43) }, reason: "invalid_grant"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t, Config{})
 			q := signIn(t, e, login)
 			l := login
 			tc.edit(q, &l)
-			if _, _, err := e.p.Callback(context.Background(), q, l); err == nil {
-				t.Fatal("accepted")
+			if _, _, err := e.p.Callback(context.Background(), q, l); err == nil || !strings.Contains(err.Error(), tc.reason) {
+				t.Fatalf("err = %v, want %q", err, tc.reason)
 			}
 		})
 	}
@@ -174,8 +183,14 @@ func TestDiscoveryIssuerMustMatchExactly(t *testing.T) {
 	}
 }
 
+type refused struct{}
+
+func (refused) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("connection refused")
+}
+
 func TestDiscoveryUnreachableIsUnavailable(t *testing.T) {
-	p, err := New(Config{Issuer: "http://127.0.0.1:1", ClientID: "c", RedirectURL: redirect})
+	p, err := New(Config{Issuer: "https://idp.example", ClientID: "c", RedirectURL: redirect, HTTPClient: &http.Client{Transport: refused{}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +200,7 @@ func TestDiscoveryUnreachableIsUnavailable(t *testing.T) {
 	}
 }
 
-func TestRefresh(t *testing.T) {
+func TestRefreshReturnsIdentityAndFreshTokens(t *testing.T) {
 	e := newEnv(t, Config{})
 	_, tok, err := e.p.Callback(context.Background(), signIn(t, e, login), login)
 	if err != nil {
@@ -242,10 +257,10 @@ func TestPrivateKeyJWTWithKid(t *testing.T) {
 	}
 }
 
-func TestPublicClient(t *testing.T) {
+func TestPublicClientSignsInWithoutCredential(t *testing.T) {
 	c := fakeidp.Client{ID: fakeidp.NewGUID(), RedirectURIs: []string{redirect}}
-	fake := fakeidp.New(t, fakeidp.Generic, fakeidp.WithClient(c))
-	p, err := New(Config{Issuer: fake.Issuer(), ClientID: c.ID, RedirectURL: redirect})
+	fake := fakeidp.New(t, fakeidp.Generic, fakeidp.WithClient(c), fakeidp.WithClock(now))
+	p, err := New(Config{Issuer: fake.Issuer(), ClientID: c.ID, RedirectURL: redirect, Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +270,7 @@ func TestPublicClient(t *testing.T) {
 	}
 }
 
-func TestSubjectClaim(t *testing.T) {
+func TestNonSubSubjectClaimWarnsAndKeysOnThatClaim(t *testing.T) {
 	e := newEnv(t, Config{SubjectClaim: "email"}, fakeidp.WithUser(fakeidp.User{Email: "test.user@contoso.example"}))
 	if len(e.p.Warnings()) != 1 {
 		t.Fatalf("warnings = %v", e.p.Warnings())
@@ -294,13 +309,6 @@ func TestStringEmailVerifiedOnlyWithPreset(t *testing.T) {
 	id, _, err := e.p.Callback(context.Background(), signIn(t, e, login), login)
 	if err != nil || id.EmailVerified {
 		t.Fatalf("string email_verified honoured without preset: %+v %v", id, err)
-	}
-}
-
-func TestGoogleAcceptsBareIssuer(t *testing.T) {
-	p := &Provider{cfg: Config{Issuer: "https://accounts.google.com"}, preset: Presets["google"]}
-	if alt := p.preset.AlsoAcceptIssuer(p.cfg.Issuer); alt != "accounts.google.com" {
-		t.Fatalf("alt = %q", alt)
 	}
 }
 
@@ -348,25 +356,57 @@ func TestDiscoveredEndpointsMustBeHTTPS(t *testing.T) {
 	}
 }
 
-func TestIdentityKeepsRawClaimsForRules(t *testing.T) {
-	e := newEnv(t, Config{}, fakeidp.WithClock(func() time.Time { return time.Now() }))
-	id, _, err := e.p.Callback(context.Background(), signIn(t, e, login), login)
-	if err != nil || id.Claims["aud"] != e.client.ID {
-		t.Fatalf("claims %v, err %v", id.Claims, err)
-	}
-}
-
-func asError(err error, target **idp.Error) bool {
-	e, ok := err.(*idp.Error)
-	if ok {
-		*target = e
-	}
-	return ok
-}
+func asError(err error, target **idp.Error) bool { return errors.As(err, target) }
 
 func TestRefreshWithoutTokenSignsInAgain(t *testing.T) {
 	e := newEnv(t, Config{})
 	if _, _, err := e.p.Refresh(context.Background(), ""); idp.ClassOf(err) != idp.SignInAgain {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func validClaims(iss, aud string) map[string]any {
+	return map[string]any{"iss": iss, "aud": aud, "sub": "u1", "nonce": "nonce-1", "iat": now().Unix(), "exp": now().Add(time.Hour).Unix()}
+}
+
+func TestIDTokenIssuerMustBeTheConfiguredOne(t *testing.T) {
+	e := newEnv(t, Config{})
+	if err := e.p.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for iss, ok := range map[string]bool{e.p.cfg.Issuer: true, e.p.cfg.Issuer + "/": false, "https://evil.example": false} {
+		_, err := e.p.identity(context.Background(), e.fake.Mint(validClaims(iss, e.client.ID)), "nonce-1")
+		if ok != (err == nil) || (!ok && (idp.ClassOf(err) != idp.Fatal || !strings.Contains(err.Error(), "issuer"))) {
+			t.Errorf("iss %q: err = %v", iss, err)
+		}
+	}
+}
+
+func TestGooglePresetAcceptsBothIssuerForms(t *testing.T) {
+	fake := fakeidp.New(t, fakeidp.Generic)
+	p, err := New(Config{Preset: "google", Issuer: "https://accounts.google.com", ClientID: "cid", RedirectURL: redirect, Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Point the key set at the fake; discovery of the real Google is not needed for this rule.
+	p.keys = idp.NewKeySet(idp.NewFetcher(nil), fake.JWKSURL(""), now)
+	for iss, ok := range map[string]bool{"https://accounts.google.com": true, "accounts.google.com": true, "https://accounts.google.com/": false} {
+		_, err := p.identity(context.Background(), fake.Mint(validClaims(iss, "cid")), "nonce-1")
+		if ok != (err == nil) {
+			t.Errorf("iss %q: err = %v", iss, err)
+		}
+	}
+}
+
+func TestTokenTransportFailureIsUnavailable(t *testing.T) {
+	e := newEnv(t, Config{})
+	if err := e.p.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	e.p.fetch.Client = &http.Client{Transport: refused{}}
+	_, _, err := e.p.Refresh(context.Background(), "rt")
+	var ie *idp.Error
+	if !asError(err, &ie) || ie.Class != idp.Unavailable || ie.Alert {
+		t.Fatalf("err = %#v", err)
 	}
 }

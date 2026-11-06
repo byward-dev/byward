@@ -2,9 +2,7 @@ package idp
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"time"
@@ -16,8 +14,10 @@ import (
 // Leeway is the clock skew allowed on exp/iat/nbf (ADR-0006, ADR-0014).
 const Leeway = 30 * time.Second
 
-// IDTokenRules are the per-IdP inputs to ID token validation (OIDC Core §3.1.3.7, ADR-0011 §5).
-type IDTokenRules struct {
+// TokenRules are the per-IdP inputs to JWT validation: ID tokens (OIDC Core §3.1.3.7, ADR-0011 §5)
+// and, for Entra, our own v2 access_as_user access token, which needs the same iss, aud = client
+// ID, azp, exp, iat and sub checks.
+type TokenRules struct {
 	// Issuer checks `iss` given all claims; it must compare exactly.
 	Issuer   func(iss string, claims map[string]any) error
 	ClientID string
@@ -28,8 +28,9 @@ type IDTokenRules struct {
 	Now  func() time.Time
 }
 
-// VerifyIDToken checks the signature against keys and the claims against r, and returns the claims.
-func VerifyIDToken(ctx context.Context, raw string, keys *KeySet, r IDTokenRules) (map[string]any, error) {
+// VerifyJWT checks an IdP-signed JWT's signature against keys and its claims against r, and returns
+// the claims. Keep its checks valid for both token kinds named on TokenRules.
+func VerifyJWT(ctx context.Context, raw string, keys *KeySet, r TokenRules) (map[string]any, error) {
 	algs := make([]jose.SignatureAlgorithm, 0, len(r.Algs))
 	for _, a := range r.Algs {
 		if a != jose.HS256 && a != jose.HS384 && a != jose.HS512 && a != "none" {
@@ -60,7 +61,7 @@ func VerifyIDToken(ctx context.Context, raw string, keys *KeySet, r IDTokenRules
 	return claims, nil
 }
 
-func checkClaims(c map[string]any, r IDTokenRules) error {
+func checkClaims(c map[string]any, r TokenRules) error {
 	iss, _ := c["iss"].(string)
 	if err := r.Issuer(iss, c); err != nil {
 		return err
@@ -111,12 +112,6 @@ func numericDate(v any) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return time.Unix(int64(f), 0), true
-}
-
-// CodeChallenge is the PKCE S256 challenge for verifier.
-func CodeChallenge(verifier string) string {
-	sum := sha256.Sum256([]byte(verifier))
-	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 // StringClaim returns a string claim or "".

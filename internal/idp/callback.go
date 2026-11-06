@@ -1,7 +1,9 @@
 package idp
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"errors"
 	"net/url"
 )
@@ -30,4 +32,10 @@ func ReadCallback(q url.Values, l Login, wantIss string) (CallbackResult, error)
 		return CallbackResult{}, errors.New("idp: callback has neither code nor error")
 	}
 	return CallbackResult{Code: code}, nil
+}
+
+// CodeChallenge is the PKCE S256 challenge for verifier.
+func CodeChallenge(verifier string) string {
+	sum := sha256.Sum256([]byte(verifier))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }

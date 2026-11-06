@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/corker/mcp-authproxy/internal/idp"
 	"github.com/corker/mcp-authproxy/internal/testutil/fakeidp"
@@ -16,6 +17,9 @@ const (
 	redirect = "https://proxy.example/callback/entra"
 	secret   = "test-secret-value"
 )
+
+// now is the shared fixed clock of the fake and the adapter.
+func now() time.Time { return time.Unix(1_800_000_000, 0) }
 
 var login = idp.Login{State: "state-1", Nonce: "nonce-1", CodeVerifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"}
 
@@ -30,7 +34,7 @@ type env struct {
 func newEnv(t *testing.T, cfg Config, opts ...fakeidp.Option) *env {
 	t.Helper()
 	c := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{secret}, RedirectURIs: []string{redirect}}
-	fake := fakeidp.New(t, fakeidp.Entra, append([]fakeidp.Option{fakeidp.WithClient(c)}, opts...)...)
+	fake := fakeidp.New(t, fakeidp.Entra, append([]fakeidp.Option{fakeidp.WithClient(c), fakeidp.WithClock(now)}, opts...)...)
 	if cfg.Tenant == "" {
 		cfg.Tenant = fake.TenantID()
 	}
@@ -38,6 +42,9 @@ func newEnv(t *testing.T, cfg Config, opts ...fakeidp.Option) *env {
 		cfg.ClientAuth = idp.ClientSecret(secret)
 	}
 	cfg.ClientID, cfg.RedirectURL, cfg.HTTPClient = c.ID, redirect, fake.HTTPClient()
+	if cfg.Now == nil {
+		cfg.Now = now
+	}
 	p, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +99,7 @@ func TestLoginKeysUserOnTidOidAndKeepsAccessAsUserToken(t *testing.T) {
 	}
 }
 
-func TestAuthCodeURL(t *testing.T) {
+func TestAuthCodeURLTargetsTenantAuthorizeWithAccessAsUserScope(t *testing.T) {
 	e := newEnv(t, Config{})
 	l := login
 	l.LoginHint, l.DomainHint, l.SelectAccount = "u", "contoso.example", true
@@ -122,7 +129,7 @@ func TestAuthCodeURL(t *testing.T) {
 func TestGroupsOverageMakesGroupsUnavailable(t *testing.T) {
 	e := newEnv(t, Config{}, fakeidp.WithUser(fakeidp.User{Groups: []string{fakeidp.NewGUID()}, GroupsOverage: true}))
 	id, _, err := callback(t, e)
-	if err != nil || !id.GroupsUnavailable || id.Groups != nil {
+	if err != nil || !id.GroupsUnavailable || id.Groups != nil || id.Claims["groups"] != nil {
 		t.Fatalf("identity %+v, err %v", id, err)
 	}
 }
@@ -163,17 +170,64 @@ func TestOrganizationsAllowlist(t *testing.T) {
 	}
 }
 
-func TestSingleTenantRejectsOtherTenantsToken(t *testing.T) {
+// v2Claims are valid claims of a token from tenant tid for client.
+func v2Claims(tid, client string) map[string]any {
+	return map[string]any{"iss": issuerFor(tid), "aud": client, "tid": tid, "oid": fakeidp.NewGUID(), "ver": "2.0",
+		"sub": "pairwise", "iat": now().Unix(), "exp": now().Add(time.Hour).Unix()}
+}
+
+func TestSingleTenantRejectsAnotherTenantsIDToken(t *testing.T) {
 	e := newEnv(t, Config{})
-	other := newEnv(t, Config{})
-	// A token from another tenant's fake, presented to this adapter, fails (different keys and tid).
-	q := signIn(t, other, login)
-	if _, _, err := e.p.Callback(context.Background(), q, login); err == nil {
-		t.Fatal("foreign code accepted")
+	_, err := e.p.identity(context.Background(), e.fake.Mint(v2Claims(fakeidp.NewGUID(), e.client.ID)), "")
+	if err == nil || !strings.Contains(err.Error(), "not the configured tenant") {
+		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestCheckIssuer(t *testing.T) {
+func TestHasGroupsMeansGroupsUnavailable(t *testing.T) {
+	e := newEnv(t, Config{})
+	for has, want := range map[bool]bool{true: true, false: false} {
+		c := v2Claims(e.fake.TenantID(), e.client.ID)
+		c["hasgroups"] = has
+		id, err := e.p.identity(context.Background(), e.fake.Mint(c), "")
+		if err != nil || id.GroupsUnavailable != want || id.Groups != nil {
+			t.Errorf("hasgroups %v: identity %+v err %v", has, id, err)
+		}
+	}
+}
+
+func TestAccessTokenMustBeOwnV2AccessAsUser(t *testing.T) {
+	e := newEnv(t, Config{})
+	tid := e.fake.TenantID()
+	withScp := func(c map[string]any, scp string) map[string]any { c["scp"] = scp; return c }
+	graph := withScp(v2Claims(tid, fakeidp.GraphAppID), "User.Read")
+	graph["iss"], graph["ver"] = "https://sts.windows.net/"+tid+"/", "1.0"
+	for name, tc := range map[string]struct {
+		raw string
+		ok  bool
+	}{
+		"own access_as_user": {raw: e.fake.Mint(withScp(v2Claims(tid, e.client.ID), "access_as_user")), ok: true},
+		"missing":            {raw: ""},
+		"other scope":        {raw: e.fake.Mint(withScp(v2Claims(tid, e.client.ID), "User.Read"))},
+		"Graph v1 token":     {raw: e.fake.Mint(graph)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := e.p.checkAccessToken(context.Background(), tc.raw)
+			if tc.ok {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			var ie *idp.Error
+			if !errors.As(err, &ie) || ie.Class != idp.Fatal || !strings.Contains(ie.OperatorHint, "requestedAccessTokenVersion") {
+				t.Fatalf("err = %#v", err)
+			}
+		})
+	}
+}
+
+func TestIssuerMustMatchTokenTenantAndAllowlist(t *testing.T) {
 	tid := fakeidp.NewGUID()
 	single := &Provider{cfg: Config{Tenant: tid}}
 	multi := &Provider{cfg: Config{Tenant: Organizations}, allowed: map[string]bool{tid: true}}
@@ -219,7 +273,7 @@ func TestReadyChecksDiscoveryIssuer(t *testing.T) {
 	}
 }
 
-func TestRefresh(t *testing.T) {
+func TestRefreshReturnsNoRefreshTokenWhenEntraDoesNotRotate(t *testing.T) {
 	e := newEnv(t, Config{})
 	_, tok, err := callback(t, e)
 	if err != nil {
@@ -251,6 +305,11 @@ func TestTokenErrorsMapToADR0012Classes(t *testing.T) {
 		"7000222 expired key": {&fakeidp.ExpiredClientSecret, idp.Unavailable, true, 7000222, true},
 		"503":                 {&fakeidp.TemporarilyUnavailable, idp.Unavailable, false, 0, false},
 		"invalid_request":     {&fakeidp.InvalidRequest, idp.Fatal, false, 9002313, false},
+		"700016 unknown app":  {&fakeidp.UnknownClient, idp.Unavailable, true, 700016, true},
+		"5002723 thumbprint":  {&fakeidp.MissingThumbprint, idp.Unavailable, true, 5002723, false},
+		"70043 by code":       {&fakeidp.Failure{Error: "invalid_request", Code: 70043}, idp.SignInAgain, false, 70043, false},
+		"429":                 {&fakeidp.Failure{Status: 429, Error: "invalid_request"}, idp.Unavailable, false, 0, false},
+		"503 invalid_client":  {&fakeidp.Failure{Status: 503, Error: "invalid_client", Code: 7000215}, idp.Unavailable, true, 7000215, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t, Config{})
@@ -325,15 +384,34 @@ func TestNewValidates(t *testing.T) {
 	}
 }
 
-func TestCodeOf(t *testing.T) {
+func TestErrorCodePrefersErrorCodesOverDescription(t *testing.T) {
 	if codeOf([]int{50105}, "AADSTS1: x") != 50105 || codeOf(nil, "AADSTS50105: x") != 50105 || codeOf(nil, "nope") != 0 {
 		t.Fatal("codeOf")
 	}
 }
 
+func TestTokenTransportFailureIsUnavailable(t *testing.T) {
+	e := newEnv(t, Config{})
+	if err := e.p.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	e.p.fetch.Client = &http.Client{Transport: deadline{}}
+	_, _, err := e.p.Refresh(context.Background(), "rt")
+	var ie *idp.Error
+	if !errors.As(err, &ie) || ie.Class != idp.Unavailable || ie.Alert {
+		t.Fatalf("err = %#v", err)
+	}
+}
+
+type deadline struct{}
+
+func (deadline) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, context.DeadlineExceeded
+}
+
 func TestRefreshWithoutTokenSignsInAgainWithoutCallingEntra(t *testing.T) {
 	p, err := New(Config{Tenant: fakeidp.NewGUID(), ClientID: fakeidp.NewGUID(), ClientAuth: idp.ClientSecret("s"), RedirectURL: redirect,
-		HTTPClient: &http.Client{Transport: failingTransport{t}}})
+		HTTPClient: &http.Client{Transport: failingTransport{t}}, Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}

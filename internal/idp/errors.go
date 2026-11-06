@@ -44,7 +44,8 @@ type Error struct {
 	CorrelationID string
 	// Alert asks for a loud operator alert (e.g. the IdP rejects our credential).
 	Alert bool
-	// UserMessage is safe to show on an error page; OperatorHint names the fix.
+	// UserMessage is safe to show on an error page and may be empty (the caller supplies a
+	// default); OperatorHint names the fix.
 	UserMessage  string
 	OperatorHint string
 	Description  string
@@ -94,6 +95,7 @@ func GenericClass(status int, oauth string) Class {
 	case oauth == "invalid_client":
 		return Unavailable
 	case oauth == "invalid_grant" || oauth == "interaction_required" || oauth == "login_required" || oauth == "consent_required":
+		// Re-authentication can fix these.
 		return SignInAgain
 	}
 	return Fatal

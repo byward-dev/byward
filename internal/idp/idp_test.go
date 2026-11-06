@@ -29,6 +29,8 @@ import (
 
 const secretish = "tok-SECRET-value"
 
+var fixedNow = time.Unix(1_800_000_000, 0)
+
 func TestTokensNeverFormatTheirValues(t *testing.T) {
 	tok := Tokens{IDToken: secretish, AccessToken: secretish, RefreshToken: secretish, Expiry: time.Unix(0, 0)}
 	var buf bytes.Buffer
@@ -55,7 +57,10 @@ func TestErrorStringOmitsDescription(t *testing.T) {
 			t.Errorf("Error() = %q lacks %q", s, want)
 		}
 	}
-	if ClassOf(fmt.Errorf("wrap: %w", e)) != SignInAgain || ClassOf(errors.New("x")) != Fatal {
+}
+
+func TestClassOfUnwrapsAndDefaultsToFatal(t *testing.T) {
+	if ClassOf(fmt.Errorf("wrap: %w", &Error{Class: SignInAgain})) != SignInAgain || ClassOf(errors.New("x")) != Fatal {
 		t.Error("ClassOf does not unwrap")
 	}
 }
@@ -79,7 +84,7 @@ func TestGenericClass(t *testing.T) {
 func TestClientSecretPostsAndRedacts(t *testing.T) {
 	c := ClientSecret(secretish)
 	form := url.Values{}
-	if err := c.Apply(form, "cid", "aud", time.Now()); err != nil {
+	if err := c.Apply(form, "cid", "aud", fixedNow); err != nil {
 		t.Fatal(err)
 	}
 	if form.Get("client_id") != "cid" || form.Get("client_secret") != secretish {
@@ -88,7 +93,7 @@ func TestClientSecretPostsAndRedacts(t *testing.T) {
 	if s := fmt.Sprintf("%v %+v %#v", c, c, c); strings.Contains(s, secretish) {
 		t.Fatalf("secret formatted: %s", s)
 	}
-	if err := ClientSecret("").Apply(url.Values{}, "cid", "aud", time.Now()); err == nil {
+	if err := ClientSecret("").Apply(url.Values{}, "cid", "aud", fixedNow); err == nil {
 		t.Error("empty secret accepted")
 	}
 }
@@ -124,8 +129,18 @@ func TestPrivateKeyJWTAssertion(t *testing.T) {
 		t.Fatalf("claims = %+v", c)
 	}
 	form2 := url.Values{}
-	_ = ca.Apply(form2, "cid", "aud", now)
-	if form2.Get("client_assertion") == form.Get("client_assertion") {
+	if err := ca.Apply(form2, "cid", "https://idp.example/token", now); err != nil {
+		t.Fatal(err)
+	}
+	tok2, err := jwt.ParseSigned(form2.Get("client_assertion"), []jose.SignatureAlgorithm{jose.PS256})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c2 jwt.Claims
+	if err := tok2.Claims(&cert.Key.PublicKey, &c2); err != nil {
+		t.Fatal(err)
+	}
+	if c2.ID == c.ID {
 		t.Error("jti not unique per assertion")
 	}
 }
@@ -148,7 +163,7 @@ func TestAssertionFileIsReadOnEveryCall(t *testing.T) {
 			t.Fatal(err)
 		}
 		form := url.Values{}
-		if err := AssertionFile(path).Apply(form, "cid", "aud", time.Now()); err != nil {
+		if err := AssertionFile(path).Apply(form, "cid", "aud", fixedNow); err != nil {
 			t.Fatal(err)
 		}
 		if form.Get("client_assertion") != strings.TrimSpace(v) {
@@ -156,15 +171,15 @@ func TestAssertionFileIsReadOnEveryCall(t *testing.T) {
 		}
 	}
 	_ = os.WriteFile(path, []byte(" \n"), 0o600)
-	if err := AssertionFile(path).Apply(url.Values{}, "cid", "aud", time.Now()); err == nil {
+	if err := AssertionFile(path).Apply(url.Values{}, "cid", "aud", fixedNow); err == nil {
 		t.Error("empty assertion file accepted")
 	}
-	if err := AssertionFile(filepath.Join(t.TempDir(), "missing")).Apply(url.Values{}, "cid", "aud", time.Now()); err == nil {
+	if err := AssertionFile(filepath.Join(t.TempDir(), "missing")).Apply(url.Values{}, "cid", "aud", fixedNow); err == nil {
 		t.Error("missing assertion file accepted")
 	}
 }
 
-func TestFetcherRetriesGETsOnlyOnTransientFailures(t *testing.T) {
+func TestGetJSONRetriesOnlyTransientStatuses(t *testing.T) {
 	for name, tc := range map[string]struct {
 		statuses []int
 		wantErr  bool
@@ -374,5 +389,86 @@ func TestReadCallback(t *testing.T) {
 func TestRequestIDRoundTrip(t *testing.T) {
 	if RequestID(context.Background()) != "" || RequestID(WithRequestID(context.Background(), "r")) != "r" {
 		t.Fatal("request ID not carried")
+	}
+}
+
+func TestPostTokenIsNeverRetried(t *testing.T) {
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		n.Add(1)
+		w.WriteHeader(503)
+		_, _ = w.Write([]byte(`{"error":"temporarily_unavailable"}`))
+	}))
+	defer srv.Close()
+	f := NewFetcher(nil)
+	f.Backoff = 0
+	tr, err := f.PostToken(context.Background(), srv.URL, url.Values{}, nil)
+	if err != nil || tr.OK() || tr.Status != 503 || n.Load() != 1 {
+		t.Fatalf("tr %+v err %v calls %d", tr, err, n.Load())
+	}
+}
+
+func TestGetJSONStopsOnCancelDuringBackoff(t *testing.T) {
+	var n atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		n.Add(1)
+		w.WriteHeader(500)
+	}))
+	defer srv.Close()
+	f := NewFetcher(nil)
+	f.Backoff = time.Hour
+	ctx, cancel := context.WithCancel(context.Background())
+	f.Client.Transport = cancelAfter{cancel}
+	var v any
+	if err := f.GetJSON(ctx, srv.URL, &v); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// cancelAfter answers 500 and cancels the context, so GetJSON is waiting in backoff when it notices.
+type cancelAfter struct{ cancel context.CancelFunc }
+
+func (c cancelAfter) RoundTrip(r *http.Request) (*http.Response, error) {
+	c.cancel()
+	return &http.Response{StatusCode: 500, Body: http.NoBody, Request: r}, nil
+}
+
+func TestKeySetLookupUsesOnlySigningKeys(t *testing.T) {
+	sig := func(kid string) map[string]any {
+		k := map[string]any{}
+		raw, _ := json.Marshal(jose.JSONWebKey{Key: &fakeidp.NewCertificate(t).Key.PublicKey, KeyID: kid, Use: "sig"})
+		_ = json.Unmarshal(raw, &k)
+		return k
+	}
+	withUse := func(k map[string]any, use string) map[string]any {
+		if use == "" {
+			delete(k, "use")
+		} else {
+			k["use"] = use
+		}
+		return k
+	}
+	for name, tc := range map[string]struct {
+		keys  []map[string]any
+		kid   string
+		found bool
+	}{
+		"one sig key, no kid":       {keys: []map[string]any{sig("a")}, found: true},
+		"two sig keys, no kid":      {keys: []map[string]any{sig("a"), sig("b")}},
+		"one enc key, no kid":       {keys: []map[string]any{withUse(sig("a"), "enc")}},
+		"enc key with matching kid": {keys: []map[string]any{withUse(sig("a"), "enc")}, kid: "a"},
+		"key without use":           {keys: []map[string]any{withUse(sig("a"), "")}, kid: "a", found: true},
+		"enc and sig, no kid":       {keys: []map[string]any{withUse(sig("a"), "enc"), sig("b")}, found: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]any{"keys": tc.keys})
+			}))
+			defer srv.Close()
+			_, err := NewKeySet(NewFetcher(nil), srv.URL, func() time.Time { return fixedNow }).Key(context.Background(), tc.kid)
+			if (err == nil) != tc.found {
+				t.Fatalf("err = %v, want found %v", err, tc.found)
+			}
+		})
 	}
 }

@@ -15,7 +15,7 @@ import (
 	"github.com/corker/mcp-authproxy/internal/testutil/fakeidp"
 )
 
-func TestVerifyIDToken(t *testing.T) {
+func TestVerifyJWT(t *testing.T) {
 	f := fakeidp.New(t, fakeidp.Generic)
 	now := time.Unix(1_800_000_000, 0)
 	ks := NewKeySet(NewFetcher(nil), f.JWKSURL(""), func() time.Time { return now })
@@ -23,7 +23,7 @@ func TestVerifyIDToken(t *testing.T) {
 		return map[string]any{"iss": "https://issuer.example", "aud": "cid", "sub": "u1", "nonce": "n1",
 			"iat": now.Unix(), "exp": now.Add(time.Hour).Unix()}
 	}
-	rules := IDTokenRules{
+	rules := TokenRules{
 		Issuer: func(iss string, _ map[string]any) error {
 			if iss != "https://issuer.example" {
 				return errors.New("bad iss")
@@ -34,7 +34,7 @@ func TestVerifyIDToken(t *testing.T) {
 	}
 	for name, tc := range map[string]struct {
 		edit  func(map[string]any)
-		rules func(*IDTokenRules)
+		rules func(*TokenRules)
 		ok    bool
 	}{
 		"valid":                   {ok: true},
@@ -53,11 +53,10 @@ func TestVerifyIDToken(t *testing.T) {
 		"nbf in the future":       {edit: func(c map[string]any) { c["nbf"] = now.Add(time.Minute).Unix() }},
 		"nonce mismatch":          {edit: func(c map[string]any) { c["nonce"] = "n2" }},
 		"nonce missing":           {edit: func(c map[string]any) { delete(c, "nonce") }},
-		"no nonce expected":       {edit: func(c map[string]any) { delete(c, "nonce") }, rules: func(r *IDTokenRules) { r.Nonce = "" }, ok: true},
+		"no nonce expected":       {edit: func(c map[string]any) { delete(c, "nonce") }, rules: func(r *TokenRules) { r.Nonce = "" }, ok: true},
 		"no sub":                  {edit: func(c map[string]any) { delete(c, "sub") }},
-		"RS256 not in allowlist":  {rules: func(r *IDTokenRules) { r.Algs = []jose.SignatureAlgorithm{jose.ES256} }},
-		"only HS256 in allowlist": {rules: func(r *IDTokenRules) { r.Algs = []jose.SignatureAlgorithm{jose.HS256} }},
-		"wrong client in rules":   {rules: func(r *IDTokenRules) { r.ClientID = "x" }},
+		"RS256 not in allowlist":  {rules: func(r *TokenRules) { r.Algs = []jose.SignatureAlgorithm{jose.ES256} }},
+		"wrong client in rules":   {rules: func(r *TokenRules) { r.ClientID = "x" }},
 	} {
 		t.Run(name, func(t *testing.T) {
 			c := base()
@@ -68,7 +67,7 @@ func TestVerifyIDToken(t *testing.T) {
 			if tc.rules != nil {
 				tc.rules(&r)
 			}
-			_, err := VerifyIDToken(context.Background(), f.Mint(c), ks, r)
+			_, err := VerifyJWT(context.Background(), f.Mint(c), ks, r)
 			if (err == nil) != tc.ok {
 				t.Fatalf("err = %v, want ok %v", err, tc.ok)
 			}
@@ -80,7 +79,7 @@ func TestVerifyIDToken(t *testing.T) {
 		sig, _ := base64.RawURLEncoding.DecodeString(parts[2])
 		sig[0] ^= 0xFF
 		forged := parts[0] + "." + parts[1] + "." + base64.RawURLEncoding.EncodeToString(sig)
-		if _, err := VerifyIDToken(context.Background(), forged, ks, rules); err == nil {
+		if _, err := VerifyJWT(context.Background(), forged, ks, rules); err == nil {
 			t.Fatal("tampered token accepted")
 		}
 	})
@@ -91,15 +90,15 @@ func TestVerifyIDToken(t *testing.T) {
 		mac.Write([]byte(header + "." + payload))
 		tok := header + "." + payload + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 		r := rules
-		r.Algs = append(r.Algs, jose.HS256)
-		if _, err := VerifyIDToken(context.Background(), tok, ks, r); err == nil {
-			t.Fatal("HS256 accepted")
+		r.Algs = []jose.SignatureAlgorithm{jose.HS256, jose.HS384, jose.HS512}
+		if _, err := VerifyJWT(context.Background(), tok, ks, r); err == nil || !strings.Contains(err.Error(), "no signature algorithm allowed") {
+			t.Fatalf("HS* allowlist: err = %v", err)
 		}
 	})
 	t.Run("alg none", func(t *testing.T) {
 		header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`))
 		tok := header + "." + strings.Split(f.Mint(base()), ".")[1] + "."
-		if _, err := VerifyIDToken(context.Background(), tok, ks, rules); err == nil {
+		if _, err := VerifyJWT(context.Background(), tok, ks, rules); err == nil {
 			t.Fatal("alg none accepted")
 		}
 	})

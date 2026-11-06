@@ -1,7 +1,6 @@
 package entra
 
 import (
-	"net/http"
 	"regexp"
 	"strconv"
 
@@ -55,12 +54,10 @@ func classify(status int, oauth string, code int) (idp.Class, bool) {
 	switch {
 	case invalidClientCodes[code] || oauth == "invalid_client":
 		return idp.Unavailable, true
-	case status >= 500 || status == http.StatusTooManyRequests || oauth == "temporarily_unavailable":
-		return idp.Unavailable, false
-	case signInAgainCodes[code] || oauth == "invalid_grant" || oauth == "interaction_required":
+	case signInAgainCodes[code]:
 		return idp.SignInAgain, false
 	}
-	return idp.Fatal, false
+	return idp.GenericClass(status, oauth), false
 }
 
 func newError(status int, oauth, description string, codes []int, trace, corr string) *idp.Error {
