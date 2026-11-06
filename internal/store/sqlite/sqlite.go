@@ -69,7 +69,7 @@ func (opts Options) validate() (Options, error) {
 	if strings.Contains(opts.Dir, "?") {
 		return opts, errors.New("sqlite store: the state directory must not contain '?'")
 	}
-	if rel, err := filepath.Rel(opts.Dir, opts.CounterFile); err == nil && !strings.HasPrefix(rel, "..") {
+	if within(opts.Dir, opts.CounterFile) { // by path element: "..counter" is inside (#121)
 		return opts, errors.New("sqlite store: the counter file must be outside the state directory, or a backup of the directory hides restores")
 	}
 	return opts, nil
