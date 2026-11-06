@@ -860,7 +860,6 @@ func TestNewWarnsAboutGenericWordingOnlyWithoutAScopeDescription(t *testing.T) {
 // /authorize budget; from an untrusted peer, X-Forwarded-For cannot buy a fresh budget.
 func TestOAuthRateLimitsKeyOnTheResolvedClientAddress(t *testing.T) {
 	cfg := loadConfig(t, "https://mcp.example.com/mcp", "MCP_AUTHPROXY_TRUSTED_PROXIES=10.0.0.0/8", "MCP_AUTHPROXY_OAUTH_RATE_LIMITS=authorize=2")
-	// IPv6 clients behind the proxy share their /64 (ADR-0018 §8).
 	logs := &syncBuffer{}
 	s, err := New(cfg, logging.New(logs, "json"))
 	if err != nil {
@@ -890,6 +889,7 @@ func TestOAuthRateLimitsKeyOnTheResolvedClientAddress(t *testing.T) {
 		authorize("10.0.0.1", "198.51.100.1"), authorize("10.0.0.1", "198.51.100.1"), authorize("10.0.0.1", "198.51.100.1"),
 		authorize("10.0.0.1", "198.51.100.2"),
 		authorize("203.0.113.5", "1.1.1.1"), authorize("203.0.113.5", "2.2.2.2"), authorize("203.0.113.5", "3.3.3.3"),
+		// IPv6 clients behind the proxy share their /64 (ADR-0018 §8).
 		authorize("10.0.0.1", "2001:db8:1:2::1"), authorize("10.0.0.1", "2001:db8:1:2::2"), authorize("10.0.0.1", "2001:db8:1:2:ffff::3"),
 	}
 	want := []string{"passed", "passed", "limited", "passed", "passed", "passed", "limited", "passed", "passed", "limited"}

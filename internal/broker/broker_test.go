@@ -1154,6 +1154,20 @@ func TestThrottledConsentShowsThe429PageWithoutReadingTheAnswer(t *testing.T) {
 	e.oneAuditEvent(t, "rate_limited", map[string]any{"outcome": "failure", "reason": "consent"})
 }
 
+// The method comes first: a GET to /consent is a 405 and never spends the answer budget.
+func TestConsentRejectsOtherMethodsBeforeAskingTheLimiter(t *testing.T) {
+	e := newEnv(t)
+	var seen []string
+	e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"consent": true}, seenIPs: &seen}
+	res := e.do(t, "GET", "/consent", nil, nil)
+	if res.StatusCode != http.StatusMethodNotAllowed || res.Header.Get("Allow") != "POST" {
+		t.Fatalf("GET /consent = %d, Allow %q; want 405 with Allow: POST", res.StatusCode, res.Header.Get("Allow"))
+	}
+	if len(seen) != 0 {
+		t.Fatalf("the limiter was asked %v for a GET /consent, want not at all", seen)
+	}
+}
+
 // The user's decision: /revoke answers as /token does, 429 + Retry-After + no-store + JSON
 // temporarily_unavailable, before the body is read.
 func TestThrottledRevokeIsRefusedBeforeItsBodyIsRead(t *testing.T) {
