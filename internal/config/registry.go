@@ -47,6 +47,23 @@ type Value struct {
 	Setting Setting
 	Raw     string
 	Source  Source
+	Path    string // the file a SourceFile secret was read from
+	From    string // how that file was named: the flag or the env variable, for error messages
+}
+
+// SecretFile is a file a secret was read from, and the flag or env variable that named it.
+type SecretFile struct{ From, Path string }
+
+// SecretFiles lists the files secrets were read from, in registry order; the server checks their
+// permissions (ADR-0018 §11).
+func (v *Values) SecretFiles() []SecretFile {
+	var out []SecretFile
+	for _, n := range v.order {
+		if val := v.byKey[n]; val.Source == SourceFile {
+			out = append(out, SecretFile{From: val.From, Path: val.Path})
+		}
+	}
+	return out
 }
 
 // Display is the value as it may be logged: secrets are always redacted.
@@ -140,7 +157,7 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 			if err != nil {
 				return nil, err
 			}
-			v.Raw, v.Source = raw, SourceFile
+			v.Raw, v.Source, v.Path, v.From = raw, SourceFile, *fileFlagVals[s.Name], "--"+s.Name+"-file"
 		case !s.Secret && set[s.Name]:
 			v.Raw, v.Source = *flagVals[s.Name], SourceFlag
 		case s.Secret && env[s.Env()+"_FILE"] != "":
@@ -148,7 +165,7 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 			if err != nil {
 				return nil, err
 			}
-			v.Raw, v.Source = raw, SourceFile
+			v.Raw, v.Source, v.Path, v.From = raw, SourceFile, env[s.Env()+"_FILE"], s.Env()+"_FILE"
 		default:
 			if e, ok := env[s.Env()]; ok {
 				v.Raw, v.Source = e, SourceEnv

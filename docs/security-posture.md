@@ -46,7 +46,7 @@ mode, and the only upstream kind is HTTP.
 | A malicious MCP client or app, or a confused deputy | Each client sees a consent page on every request; nothing is remembered yet. Redirect URIs match exactly, except the port on loopback, and are checked again at `/token`. PKCE S256 is required. A code is single-use and bound to its client. | `internal/broker/consent.go`, `internal/registration/redirect.go`, `internal/broker/token.go` |
 | Token theft | Access tokens last 1 h. Refresh tokens rotate on every use, and reuse after the 30 s grace revokes the grant. A refresh token works only for the client it was issued to. Clients can revoke with `/revoke` (RFC 7009). | `internal/broker/refresh.go`, `internal/broker/revoke.go` |
 | CSRF or clickjacking on consent | The answer needs exactly one `Origin` equal to the public origin; a missing or `null` Origin is refused. `Sec-Fetch-Site` must be `same-origin` when the browser sends it. A `__Host-` binding cookie and a sealed flow that expires after 10 min are required. Allow is refused within 1 s of showing the page. Every page sends CSP `frame-ancestors 'none'`, `X-Frame-Options: DENY` and `script-src 'none'`. | `internal/broker/consent.go`, `internal/broker/page.go` |
-| DNS rebinding and cross-site requests to the MCP endpoint | `Host` is checked against an allowlist on the public listener (421). `Origin` on the MCP endpoint is checked against an exact list (403). Both checks run before authentication. | `internal/origin/origin.go` |
+| DNS rebinding and cross-site requests to the MCP endpoint | `Host` is checked against an allowlist on the public listener (421), and on the internal listener only IP addresses, `localhost` and listed names pass (421). `Origin` on the MCP endpoint is checked against an exact list (403). Both checks run before authentication. | `internal/origin/origin.go` |
 | SSRF | No client-supplied URL is fetched today: there is no CIMD, no DCR and no `jwks_uri` for static clients. Entra endpoints are built from the fixed `https://login.microsoftonline.com` authority and the configured tenant. The IdP fetcher follows no redirects, bounds bodies and times out after 5 s. The SSRF guard arrives with CIMD (**planned**, #56, [ADR-0008](adr/0008-client-registration.md) §4). | `internal/idp/fetch.go`, `internal/idp/entra/entra.go` |
 | Abuse of OAuth endpoints | Per-address token buckets apply on `/authorize`, `/consent`, `/callback/entra`, `/token` and `/revoke`, with IPv6 grouped by /64. Request bodies are bounded. Every `http.Server` timeout is set. | `internal/ratelimit`, `internal/server/run.go` |
 
@@ -75,10 +75,10 @@ keep them (AGENTS.md). Status on `main`:
 | 12 | Every relaxation is an explicit flag, logged at startup | `internal/config/config.go` (`Relaxations`), `cmd/byward/main.go` | `TestDevModeLogsEachRelaxation`, `TestNoAuthLogsThatAuthIsOffAndTheNextStep` |
 | 13 | Legacy MCP sessions bound to the user; one upstream process per user | **Met for HTTP upstreams with authentication:** the upstream's `Mcp-Session-Id` is replaced by a sealed value bound to the user and the upstream; another user's, tampered or expired IDs get 404 and a `session_rejected` audit record (`internal/mcpsession`). Without authentication there is no user to bind to. stdio is not wired yet (#60, #61) | `TestALegacySessionIsBoundToTheUserWhoStartedIt`, `TestASessionThatIsNotTheCallersGets404AndNeverReachesTheUpstream` |
 | 14 | Size, time and count limits | Static clients file (1000 clients, 1 MiB); body limits; token length 2 KiB; consent answer table 10,000 | `TestLoadStaticRejects`, `TestBodyOverLimitIs413AndAtLimitPasses` |
-| 15 | Errors never echo secrets or upstream internals | Fixed error strings (`internal/broker/token.go`); upstream errors become 502 `upstream unavailable` (`relay.go`); panics give a bare 500 | `TestRelayHidesUpstreamErrors`, `TestRecovererHidesPanicDetails`, `TestErrorPageEscapesInputAndIsLockedDown` |
+| 15 | Errors never echo secrets or upstream internals | Fixed error strings (`internal/broker/token.go`); upstream errors become 502 `upstream unavailable` (`relay.go`), and an upstream that sends no headers in time a fixed JSON-RPC timeout error (`timeout.go`); panics give a bare 500 | `TestRelayHidesUpstreamErrors`, `TestStalledUpstreamIsAnsweredAndDropped`, `TestRecovererHidesPanicDetails`, `TestErrorPageEscapesInputAndIsLockedDown` |
 | 16 | `ReverseProxy.Rewrite` only; identity and forwarding headers stripped | `internal/upstream/relay/relay.go` (`Authorization`, `Forwarded`, `Origin`, `X-Forwarded-*`, `Sec-Fetch-*`, matching `_` as `-`) | `TestRelayForwardsBodyVerbatimAndStripsProxyHeaders` |
-| 17 | `Origin` (403) and `Host` (421) before authentication; default bind `127.0.0.1` | `internal/origin/origin.go`, wired outermost in `internal/server/server.go`; default `127.0.0.1:8080` | `TestChecksRunBeforeAuthentication`, `TestHostOutsideAllowlistGets421`, `TestOriginOutsideAllowlistGets403`, `TestNewConfiguresHardenedLimitsAndLoopbackBind` |
-| 18 | `http.Server` timeouts and `MaxHeaderBytes` set; latest Go patch; `govulncheck` green | `internal/server/run.go` (`hardened`); Go pinned in `mise.toml`, with a weekly `go-version.yml` check. **`govulncheck` is not run in CI** (see [Known gaps](#known-gaps)) | `TestNewConfiguresHardenedLimitsAndLoopbackBind` |
+| 17 | `Origin` (403) and `Host` (421) before authentication; default bind `127.0.0.1` | `internal/origin/origin.go`, wired outermost in `internal/server/server.go`; default `127.0.0.1:8080` | `TestChecksRunBeforeAuthentication`, `TestHostOutsideAllowlistGets421`, `TestInternalListenerAcceptsAddressesAndListedNamesOnly`, `TestOriginOutsideAllowlistGets403`, `TestNewConfiguresHardenedLimitsAndLoopbackBind` |
+| 18 | `http.Server` timeouts and `MaxHeaderBytes` set; latest Go patch; `govulncheck` green | `internal/server/run.go` (`hardened`); Go pinned in `mise.toml`, with a weekly `go-version.yml` check; `govulncheck` (pinned) runs for linux and darwin in `mise run check`, so in CI, and weekly | `TestNewConfiguresHardenedLimitsAndLoopbackBind`, `mise run vuln` |
 | 19 | No own IdP credential on a caller's behalf; app-only tokens pinned | Holds trivially: `/token` offers no `client_credentials` or jwt-bearer grant, and app-only tokens are not accepted. App-only access is **planned** (#64) | `TestTokenEndpointRechecks` ("client credentials never") |
 
 ## Secure defaults
@@ -91,7 +91,8 @@ keep them (AGENTS.md). Status on `main`:
 - The public URL must be `https`. `http` is allowed only for a loopback host, with `--dev` or
   `--insecure-no-auth`.
 - Secrets are read only from files (`*_FILE`, `--*-file`). An inline secret refuses to start
-  unless `--dev` is set.
+  unless `--dev` is set, and so does a secret file its group or others can read, unless it is on a
+  read-only mount.
 - The `Origin` allowlist on the MCP endpoint is empty: only the proxy's own origin and clients that
   send no `Origin` pass. No `X-Forwarded-For` is trusted until you set
   `BYWARD_TRUSTED_PROXIES`.
@@ -158,10 +159,7 @@ bounds, but there are no settings for that yet.
 | Consent answer table is per replica, in memory, capped at 10,000 | Double-submit protection holds within one process. A full table forgets the newest flow. It matters only with several replicas, which need v0.2's PostgreSQL. | No issue (`internal/broker/answers.go`) |
 | Restore drill | Restore detection works (a restored store starts a new epoch, refuses refresh tokens from before the restore, logs it and writes a `store_restored` audit record), but no automated test restores a real backup yet. | #53 |
 | Refresh drops the IdP's new tokens when a later step fails | Fails closed: an unneeded sign-in with IdPs that revoke rotated refresh tokens. Entra is not affected. | #92 |
-| **`govulncheck` is not in CI** (invariant 18, ADR-0018 §12, ADR-0026 §3) | Known-vulnerable dependencies are not caught automatically. Dependabot alerts and security updates and the weekly Go-patch check still run. | #102 |
-| No response-header timeout toward the upstream (ADR-0018 §7) | An upstream that accepts but never answers holds an in-flight slot until the client disconnects | #103 |
 | Removing a sealing key ends grants whose IdP tokens it sealed | Those users sign in again at their next refresh | #104 |
-| Internal listener has no Host check; secret files get no permission check | Defence in depth only: the internal listener should be on loopback or a private network | #105 |
 | Entra certificate credential | `private_key_jwt` exists in `internal/idp`, but no setting selects it; only a client secret is configurable | ADR-0012 §5 |
 
 ## Dependencies and supply chain

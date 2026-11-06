@@ -541,6 +541,68 @@ func getBody(t *testing.T, h http.Handler, host, path string) (int, string) {
 	return w.Code, w.Body.String()
 }
 
+// ADR-0018 §2 on the internal listener: listed names pass (Prometheus by a Service name), foreign
+// names get 421 and are counted as host_rejected.
+func TestInternalListenerAcceptsListedHostsAndAuditsRejections(t *testing.T) {
+	cfg := loadConfig(t, "https://mcp.example.com/mcp", "BYWARD_ALLOWED_HOSTS=byward-metrics.monitoring.svc")
+	s, err := New(cfg, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := getBody(t, s.Internal.Handler, "byward-metrics.monitoring.svc:9090", "/metrics"); code != 200 {
+		t.Errorf("internal /metrics by a BYWARD_ALLOWED_HOSTS name = %d, want 200", code)
+	}
+	if code, _ := getBody(t, s.Internal.Handler, "rebind.attacker.example:9090", "/metrics"); code != http.StatusMisdirectedRequest {
+		t.Errorf("internal /metrics for a foreign host name = %d, want 421", code)
+	}
+	_, metrics := getBody(t, s.Internal.Handler, "127.0.0.1:9090", "/metrics")
+	if !strings.Contains(metrics, `byward_audit_events_total{event="host_rejected",outcome="failure"} 1`) {
+		t.Errorf("the internal listener's rejection must be audited as host_rejected:\n%s", metrics)
+	}
+}
+
+// ADR-0018 §7: BYWARD_UPSTREAM_HEADER_TIMEOUT reaches the relay; a stalled upstream is answered.
+func TestStalledUpstreamIsAnsweredAfterTheConfiguredHeaderTimeout(t *testing.T) {
+	up := fakeupstream.New()
+	release := make(chan struct{})
+	t.Cleanup(up.Close)
+	t.Cleanup(func() { close(release) }) // runs before up.Close
+	up.Handler = func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}
+	cfg, _, err := config.Load(nil, []string{
+		"BYWARD_INSECURE_NO_AUTH=true",
+		"BYWARD_PUBLIC_URL=http://localhost:8080/mcp",
+		"BYWARD_UPSTREAM_URL=" + up.URL + "/mcp",
+		"BYWARD_UPSTREAM_HEADER_TIMEOUT=1s",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(cfg, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("POST", "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"slow"}}`))
+	r.Host = "localhost:8080"
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json, text/event-stream")
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { defer close(done); s.Public.Handler.ServeHTTP(w, r) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("still waiting for the stalled upstream: BYWARD_UPSTREAM_HEADER_TIMEOUT did not reach the relay")
+	}
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"isError":true`) || !strings.Contains(w.Body.String(), "did not answer in time") {
+		t.Fatalf("got %d %q, want the timeout tool error", w.Code, w.Body)
+	}
+}
+
 // ADR-0018 §10, ADR-0021 §8 and §10: metrics and probes only on the internal listener.
 func TestInternalListenerServesProbesAndMetricsAndThePublicOneDoesNot(t *testing.T) {
 	cfg := loadConfig(t, "https://mcp.example.com/mcp")
@@ -548,15 +610,18 @@ func TestInternalListenerServesProbesAndMetricsAndThePublicOneDoesNot(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := getBody(t, s.Internal.Handler, "x", "/livez"); code != 200 {
+	if code, _ := getBody(t, s.Internal.Handler, "127.0.0.1:9090", "/livez"); code != 200 {
 		t.Errorf("internal /livez = %d, want 200", code)
 	}
-	if code, _ := getBody(t, s.Internal.Handler, "x", "/readyz"); code != 200 {
+	if code, _ := getBody(t, s.Internal.Handler, "rebind.attacker.example:9090", "/metrics"); code != http.StatusMisdirectedRequest {
+		t.Errorf("internal /metrics for a foreign host name = %d, want 421 (DNS rebinding)", code)
+	}
+	if code, _ := getBody(t, s.Internal.Handler, "127.0.0.1:9090", "/readyz"); code != 200 {
 		t.Errorf("internal /readyz = %d, want 200", code)
 	}
 	// A public request is timed under its fixed route name.
 	getBody(t, s.Public.Handler, "mcp.example.com", "/mcp")
-	code, body := getBody(t, s.Internal.Handler, "x", "/metrics")
+	code, body := getBody(t, s.Internal.Handler, "127.0.0.1:9090", "/metrics")
 	if code != 200 {
 		t.Errorf("internal /metrics = %d, want 200", code)
 	}
@@ -705,7 +770,7 @@ func TestRejectionsFromOneSourceAreRateLimitedButStillCounted(t *testing.T) {
 	if n := strings.Count(logs.String(), `"event":"host_rejected"`); n != 10 {
 		t.Errorf("logged %d host_rejected records from one source, want the burst of 10", n)
 	}
-	_, metrics := getBody(t, s.Internal.Handler, "x", "/metrics")
+	_, metrics := getBody(t, s.Internal.Handler, "127.0.0.1:9090", "/metrics")
 	if !strings.Contains(metrics, `byward_audit_events_total{event="host_rejected",outcome="failure"} 15`) {
 		t.Errorf("metrics must count all 15 rejections:\n%s", metrics)
 	}
@@ -721,7 +786,7 @@ func TestRouteLabelsNeverCarryRequestDetails(t *testing.T) {
 	for _, p := range []string{"/mcp?user=alice", "/no-such-route-alice", "/callback/entra?state=alice"} {
 		getBody(t, s.Public.Handler, "mcp.example.com", p)
 	}
-	_, metrics := getBody(t, s.Internal.Handler, "x", "/metrics")
+	_, metrics := getBody(t, s.Internal.Handler, "127.0.0.1:9090", "/metrics")
 	if strings.Contains(metrics, "alice") {
 		t.Fatalf("a request detail reached a label:\n%s", metrics)
 	}
@@ -904,7 +969,7 @@ func TestOAuthRateLimitsKeyOnTheResolvedClientAddress(t *testing.T) {
 	if strings.Contains(logs.String(), `"remote_ip":"3.3.3.3"`) {
 		t.Error("a forwarded address from an untrusted peer reached the log")
 	}
-	_, metrics := getBody(t, s.Internal.Handler, "x", "/metrics")
+	_, metrics := getBody(t, s.Internal.Handler, "127.0.0.1:9090", "/metrics")
 	if !strings.Contains(metrics, `byward_rate_limited_total{endpoint="authorize"} 3`) {
 		t.Errorf("metrics must count all three refusals:\n%s", metrics)
 	}

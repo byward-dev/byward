@@ -9,6 +9,8 @@ syft = "1.55.0"
 cosign = "3.1.4"
 jq = "1.8.2"
 "go:github.com/google/go-licenses/v2" = "2.0.1"
+# Known vulnerabilities reachable from our code (`vuln`, part of `check`; ADR-0018 §12). Needs vuln.go.dev.
+"go:golang.org/x/vuln/cmd/govulncheck" = "1.9.0"
 # Workflow and shell linters (`lint:workflows`, part of `check`); offline, no GitHub token.
 actionlint = "1.7.12"
 zizmor = "1.31.1"
@@ -32,6 +34,11 @@ run = "go vet ./..."
 description = "golangci-lint once per release GOOS, so files behind build constraints are linted on any host"
 # Keep in sync with builds.goos in .goreleaser.yaml (and scripts/licenses.sh).
 run = ["GOOS=linux golangci-lint run", "GOOS=darwin golangci-lint run"]
+
+[tasks.vuln]
+description = "govulncheck once per release GOOS: fails on a known vulnerability our code can reach (queries vuln.go.dev)"
+# Keep in sync with builds.goos in .goreleaser.yaml, like `lint`.
+run = ["GOOS=linux govulncheck ./...", "GOOS=darwin govulncheck ./..."]
 
 [tasks."lint:workflows"]
 description = "Lint GitHub workflows (actionlint with shellcheck, zizmor offline) and shell scripts"
@@ -60,7 +67,7 @@ run = "go test -tags=integration ./..."
 
 [tasks.check]
 description = "Everything CI runs without Docker"
-depends = ["fmt:check", "vet", "lint", "lint:workflows", "licenses:check", "test", "test:scripts"]
+depends = ["fmt:check", "vet", "lint", "lint:workflows", "vuln", "licenses:check", "test", "test:scripts"]
 
 [tasks."licenses:check"]
 description = "Fail on a dependency licence outside the allowlist (linux and darwin build constraints)"

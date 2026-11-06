@@ -74,7 +74,7 @@ func Handler(cfg *config.Config, log *slog.Logger, v resource.Validator, registe
 	if register != nil {
 		register(mux)
 	}
-	up := relay.New(log, cfg.UpstreamURL, relay.WithTraceContext(tracing.Inject))
+	up := relay.New(log, cfg.UpstreamURL, relay.WithTraceContext(tracing.Inject), relay.WithResponseHeaderTimeout(cfg.UpstreamHeaderTimeout))
 	if sessions != nil {
 		up = sessions(up)
 	}
@@ -119,7 +119,7 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 		mux := http.NewServeMux()
 		mux.Handle("GET /metrics", m.Handler())
 		s.Health.Register(mux)
-		s.Internal = hardened(cfg.InternalListen, mux, log)
+		s.Internal = hardened(cfg.InternalListen, origin.InternalHosts(o.Audit, cfg.AllowedHosts, mux), log)
 	}
 	return s, nil
 }

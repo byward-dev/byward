@@ -56,6 +56,29 @@ func TestConfigErrorExitCode(t *testing.T) {
 	}
 }
 
+// A loose secret file stops the process as a configuration error, telling the operator the fix.
+func TestLooseSecretFileIsAConfigError(t *testing.T) {
+	env := append(authEnv(t), serveEnv("https://m.example/mcp", "127.0.0.1:0")...)
+	var secret string
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, "BYWARD_ENTRA_CLIENT_SECRET_FILE="); ok {
+			secret = v
+		}
+	}
+	if err := os.Chmod(secret, 0o644); err != nil { //nolint:gosec // G302: the mode under test
+		t.Fatal(err)
+	}
+	code, _, stderr := runWith(nil, env...)
+	if code != exitConfig {
+		t.Fatalf("exit %d, want %d (configuration error); stderr %q", code, exitConfig, stderr)
+	}
+	for _, want := range []string{secret, "chmod 600", "read-only"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr %q lacks %q", stderr, want)
+		}
+	}
+}
+
 func TestHelp(t *testing.T) {
 	code, stdout, _ := runWith([]string{"--help"})
 	if code != exitOK || !strings.Contains(stdout, "BYWARD_UPSTREAM_URL") {

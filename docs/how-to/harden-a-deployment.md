@@ -66,9 +66,12 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) ยง1โ
         [static clients file](../reference/static-clients.md);
       - static client secrets must be at least 32 bytes.
 
-      An inline secret refuses to start unless `--dev` is set. The proxy does not check secret
-      file permissions: make each file `0600` (or a read-only secret mount) owned by the proxy's
-      user.
+      An inline secret refuses to start unless `--dev` is set. So does a secret file that its group
+      or others can read or write (mode `0600` or `0400`, owned by the proxy's user), unless it is
+      on a read-only mount such as a Kubernetes secret volume (default mode `0644`).
+      - Docker Compose: use `secrets:` (Compose mounts those read-only) or a volume with `:ro`, e.g.
+        `./entra-secret:/run/secrets/entra:ro`. A host file at `0600` owned by your user cannot be
+        read by the image's uid 65532, and `chmod 644` without `:ro` is refused.
 - [ ] Never run production with `BYWARD_DEV` or `BYWARD_INSECURE_NO_AUTH`. Each logs a
       `development mode relaxation` warning at every start; alert on that message.
 
@@ -116,14 +119,17 @@ Background: [ADR-0012](../adr/0012-entra-specifics.md), [ADR-0015](../adr/0015-a
 ## 5. The internal listener
 
 `/metrics`, `/livez` and `/readyz` are served only on the internal listener
-(`BYWARD_INTERNAL_LISTEN`, default `127.0.0.1:9090`). They have no authentication and no
-`Host` check.
+(`BYWARD_INTERNAL_LISTEN`, default `127.0.0.1:9090`). They have no authentication. The `Host`
+check there accepts any IP address and `localhost`, which is what the kubelet and Prometheus send,
+plus the names in `BYWARD_ALLOWED_HOSTS`; any other name gets `421`, which stops DNS rebinding.
 
 - [ ] Keep it on loopback, or in Kubernetes on `:9090` with that port left out of the Service that
       fronts the proxy. Restrict it with a NetworkPolicy to the kubelet and Prometheus.
 - [ ] Never route it through the public ingress. It must differ from `BYWARD_LISTEN`; the
       proxy refuses to start otherwise.
 - [ ] Set it empty to turn it off if you scrape nothing.
+- [ ] If Prometheus scrapes by a DNS name instead of the pod IP, add that name to
+      `BYWARD_ALLOWED_HOSTS`.
 
 ## 6. State, backups and restore
 
@@ -182,6 +188,10 @@ The OAuth endpoints are rate-limited per client address, with IPv6 grouped by /6
 - [ ] MCP traffic itself is not rate-limited (ADR-0001), only capped in flight: 64 requests and
       256 streams, then `503`. Put request-rate limits for MCP traffic in your ingress if you need
       them.
+- [ ] An upstream that sends no response headers within `BYWARD_UPSTREAM_HEADER_TIMEOUT` (default
+      `5m`, 1 s to 1 h) frees its slot, and the client gets a JSON-RPC timeout error. Raise it if a
+      tool answers with plain JSON after more than 5 minutes; a streamed (SSE) answer is not limited
+      once its headers arrive. Keep your ingress's upstream timeout above it.
 
 ## 9. Run as non-root
 

@@ -3,7 +3,9 @@
 package origin
 
 import (
+	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 
 	"github.com/byward-dev/byward/internal/audit"
@@ -25,6 +27,34 @@ func Hosts(rec *audit.Log, allowed []string, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// InternalHosts guards the internal listener (ADR-0018 §2, §10). Kubelet probes and Prometheus
+// address a pod by its IP, which changes, so any IP literal passes, as do `localhost` and the
+// operator's allowed hosts (port ignored: the listener's port is the operator's choice). A DNS
+// rebinding attack always arrives with the attacker's own host name, and gets 421.
+func InternalHosts(rec *audit.Log, allowed []string, next http.Handler) http.Handler {
+	set := map[string]bool{"localhost": true}
+	for _, h := range allowed {
+		set[hostname(h)] = true
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := hostname(r.Host)
+		if _, err := netip.ParseAddr(name); err != nil && !set[name] {
+			rec.RecordUnauthenticated(r, audit.Event{Name: audit.HostRejected, Outcome: audit.Failure, Host: r.Host})
+			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// hostname is h without its port and IPv6 brackets, in lower case.
+func hostname(h string) string {
+	if name, _, err := net.SplitHostPort(h); err == nil {
+		h = name
+	}
+	return strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(h, "["), "]"))
 }
 
 func hostKey(h string) string {

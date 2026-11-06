@@ -52,7 +52,7 @@ func TestCIMDClientsAreResolvedThroughTheGuardOnlyWhenOn(t *testing.T) {
 				t.Fatalf("CIMD %v (want %v), lookup error %v", got.CIMD, tc.on, err)
 			}
 			rec := httptest.NewRecorder()
-			srv.Internal.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+			srv.Internal.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "http://127.0.0.1:9090/metrics", nil))
 			if counted := strings.Contains(rec.Body.String(), `byward_cimd_fetches_total{outcome="refused"} 1`); counted != tc.on {
 				t.Fatalf("refused fetch counted: %v, want %v", counted, tc.on)
 			}
@@ -99,7 +99,7 @@ func TestTheCIMDHostListsReachTheRegistry(t *testing.T) {
 		t.Fatalf("host off the allowlist: %v", err)
 	}
 	rec := httptest.NewRecorder()
-	srv.Internal.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	srv.Internal.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "http://127.0.0.1:9090/metrics", nil))
 	if strings.Contains(rec.Body.String(), "byward_cimd_fetches_total{") {
 		t.Fatalf("a host off the allowlist was fetched:\n%s", rec.Body.String())
 	}

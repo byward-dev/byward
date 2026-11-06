@@ -161,7 +161,8 @@ func TestDevAllowsLoopbackHTTPAndRecordsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !c.Dev || len(c.Relaxations) != 1 || c.Relaxations[0] != "http public URL on loopback" {
+	if got := strings.Join(c.Relaxations, "|"); !c.Dev || len(c.Relaxations) != 2 ||
+		!strings.Contains(got, "secret file permissions are not checked") || !strings.Contains(got, "http public URL on loopback") {
 		t.Fatalf("dev=%v relaxations=%v", c.Dev, c.Relaxations)
 	}
 }
@@ -358,6 +359,72 @@ func TestOAuthRateLimitsDefaultToADR0018AndCanBeRaisedWithinBounds(t *testing.T)
 	for _, bad := range []string{"metadata=10", "authorize", "authorize=0", "authorize=10001", "authorize=fast", "authorize=-5"} {
 		if _, _, err := Load(nil, noAuthEnv("BYWARD_OAUTH_RATE_LIMITS="+bad), nil); err == nil || !strings.Contains(err.Error(), "BYWARD_OAUTH_RATE_LIMITS") {
 			t.Errorf("BYWARD_OAUTH_RATE_LIMITS=%q: want an error naming the setting, got %v", bad, err)
+		}
+	}
+}
+
+func TestSecretFileRelaxationOnlyWithDev(t *testing.T) {
+	c, err := load(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(c.Relaxations, "|"); strings.Contains(got, "secret file permissions") {
+		t.Errorf("without --dev the relaxations claim the secret file check is off: %q", got)
+	}
+}
+
+func TestSecretFilesNameTheFileEachSecretCameFrom(t *testing.T) {
+	read := func(string) ([]byte, error) { return []byte("s3cret"), nil }
+	cases := []struct {
+		name string
+		args []string
+		env  []string
+		want []SecretFile
+	}{
+		{"env", nil, []string{"BYWARD_ENTRA_CLIENT_SECRET_FILE=/run/secrets/entra"}, []SecretFile{{"BYWARD_ENTRA_CLIENT_SECRET_FILE", "/run/secrets/entra"}}},
+		{"flag", []string{"--entra-client-secret-file=/run/secrets/flag"}, nil, []SecretFile{{"--entra-client-secret-file", "/run/secrets/flag"}}},
+		{"inline (dev only)", []string{"--dev"}, []string{"BYWARD_ENTRA_CLIENT_SECRET=inline"}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			vals, err := resolve(registry, c.args, c.env, read, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := vals.SecretFiles(); fmt.Sprint(got) != fmt.Sprint(c.want) {
+				t.Errorf("SecretFiles() = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+func TestUpstreamHeaderTimeoutDefaultsToFiveMinutesWithinBounds(t *testing.T) {
+	cases := []struct {
+		env     string
+		want    time.Duration
+		wantErr bool
+	}{
+		{"", 5 * time.Minute, false},
+		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=1s", time.Second, false},
+		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=1h", time.Hour, false},
+		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=999ms", 0, true},
+		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=61m", 0, true},
+		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=0s", 0, true},
+		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=5", 0, true},
+	}
+	for _, c := range cases {
+		var env []string
+		if c.env != "" {
+			env = []string{c.env}
+		}
+		cfg, _, err := Load(nil, noAuthEnv(env...), nil)
+		switch {
+		case c.wantErr && (err == nil || !strings.Contains(err.Error(), "BYWARD_UPSTREAM_HEADER_TIMEOUT")):
+			t.Errorf("%q: want an error naming the setting, got %v", c.env, err)
+		case !c.wantErr && err != nil:
+			t.Errorf("%q: %v", c.env, err)
+		case !c.wantErr && cfg.UpstreamHeaderTimeout != c.want:
+			t.Errorf("%q: timeout %s, want %s", c.env, cfg.UpstreamHeaderTimeout, c.want)
 		}
 	}
 }

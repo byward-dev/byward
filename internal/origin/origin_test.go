@@ -42,6 +42,32 @@ func TestHostOutsideAllowlistGets421(t *testing.T) {
 	}
 }
 
+func TestInternalListenerAcceptsAddressesAndListedNamesOnly(t *testing.T) {
+	h := InternalHosts(quiet(), []string{"byward-metrics.monitoring.svc:8080"}, ok)
+	cases := map[string]int{
+		"127.0.0.1:9090":                     http.StatusNoContent,
+		"10.244.1.17:9090":                   http.StatusNoContent, // kubelet and Prometheus use the pod IP
+		"[::1]:9090":                         http.StatusNoContent,
+		"[fd00::17]":                         http.StatusNoContent,
+		"localhost:9090":                     http.StatusNoContent,
+		"LOCALHOST":                          http.StatusNoContent,
+		"byward-metrics.monitoring.svc:9090": http.StatusNoContent, // listed name, any port
+		"rebind.attacker.example:9090":       http.StatusMisdirectedRequest,
+		"localhost.attacker.example":         http.StatusMisdirectedRequest,
+		"127.0.0.1.nip.io:9090":              http.StatusMisdirectedRequest,
+		"":                                   http.StatusMisdirectedRequest,
+	}
+	for host, want := range cases {
+		r := httptest.NewRequest("GET", "/metrics", nil)
+		r.Host = host
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Errorf("host %q: got %d want %d", host, w.Code, want)
+		}
+	}
+}
+
 func TestOriginOutsideAllowlistGets403(t *testing.T) {
 	h := Origins(quiet(), []string{"https://app.example"}, ok)
 	cases := []struct {

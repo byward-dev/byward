@@ -70,3 +70,27 @@ Clients (runtime, 2026-11-06): Node `fetch` and MCP Inspector CLI 2.14.0 (TypeSc
   - Every refusal is audited as `rate_limited`.
 - Limits are per process. Each endpoint tracks at most 100,000 addresses and then falls back to a shared bucket.
 - A per-`client_id` limit on failed `/token` client authentication is deferred to DCR.
+
+## Amendment 2026-11-06 (hardening gaps #102, #103, #105)
+
+- **§7 response-header timeout:** `BYWARD_UPSTREAM_HEADER_TIMEOUT`, default 5 minutes, 1 s to 1 h. An upstream that
+  answers a request with plain JSON sends its headers only when the tool has finished, so a short timeout would
+  cut long tool calls (oauth2-proxy's 30 s does). 5 minutes is well beyond the TypeScript SDK's default request
+  timeout (60 s) and equals Envoy's default stream idle timeout. A streamed response is not limited once its
+  headers have arrived. A request that times out is answered as in ADR-0025: a `tools/call` gets a tool result
+  with `isError`, another request a JSON-RPC error `-32603` with `data.upstreamTimeout`, a notification 202, a
+  non-`POST` 405, and a request whose `id` is unknown 504. Its in-flight slot is freed and the upstream request
+  is dropped.
+- **§2 on the internal listener:** `Host` is checked there too. Kubelet probes and Prometheus address a pod by its
+  IP, which changes, so the internal listener accepts any IP literal, `localhost`, and the `BYWARD_ALLOWED_HOSTS`
+  names (port ignored); other names get 421. A DNS rebinding attack always carries the attacker's own host name.
+- **§5 consent body:** the limit is 16 KiB, not 4 KiB. The consent answer carries the sealed consent flow, which
+  holds the whole sign-in state: the login (up to 2,600 bytes of JSON, including the client's `state` of up to
+  512 bytes) plus the flow's own fields, then sealed and base64url-encoded (about 4/3 larger). That reaches about
+  4.7 KB with a 512-byte `state`, over 4 KiB. 16 KiB keeps the limit explicit with headroom.
+- **§11 secret files:** outside `--dev`, a secret file (the Entra client secret, a static client's
+  `client_secret_file`) that its group or others can read or write refuses to start, unless it is on a read-only
+  mount: Kubernetes secret volumes are mode 0644 by default and can be changed by no one inside the pod. `--dev`
+  logs the relaxation.
+- **§12:** `govulncheck` (pinned in `mise.toml`) runs once per release GOOS in `mise run check`, so in CI, and
+  weekly in `pin-freshness`.

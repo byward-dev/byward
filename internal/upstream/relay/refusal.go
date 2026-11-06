@@ -109,27 +109,33 @@ func matchingResponse(body []byte, id json.RawMessage) bool {
 	return json.Compact(&a, m.ID) == nil && json.Compact(&b, id) == nil && bytes.Equal(a.Bytes(), b.Bytes())
 }
 
-// synthesize answers req: a tools/call gets a tool result with isError (the spec's tool
-// execution error, which reaches the model in every client); anything else a JSON-RPC error.
+// synthesize answers req after an upstream refusal with upstreamStatus.
 func synthesize(req rpcRequest, upstreamStatus int) []byte {
 	msg := msgForbidden
 	if upstreamStatus == http.StatusUnauthorized {
 		msg = msgUnauthorized
 	}
+	return rpcAnswer(req, msg, map[string]int{"upstreamStatus": upstreamStatus})
+}
+
+// rpcAnswer answers req with msg: a tools/call gets a tool result with isError (the spec's tool
+// execution error, which reaches the model in every client); anything else a JSON-RPC error
+// -32603 carrying data.
+func rpcAnswer(req rpcRequest, msg string, data any) []byte {
 	var v any
 	if req.method == "tools/call" {
 		v = map[string]any{"jsonrpc": "2.0", "id": req.id, "result": map[string]any{
 			"content": []map[string]string{{"type": "text", "text": msg}}, "isError": true}}
 	} else {
 		v = map[string]any{"jsonrpc": "2.0", "id": req.id, "error": map[string]any{
-			"code": -32603, "message": msg, "data": map[string]int{"upstreamStatus": upstreamStatus}}}
+			"code": -32603, "message": msg, "data": data}}
 	}
 	// No HTML escaping: the id must come back byte for byte, and `<`, `>`, `&` are valid in it.
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(v); err != nil {
-		panic(err) // only maps of strings, ints and a validated raw id
+		panic(err) // only maps of strings, ints, bools and a validated raw id
 	}
 	return bytes.TrimSuffix(b.Bytes(), []byte("\n"))
 }
@@ -143,6 +149,7 @@ const (
 	outcomeRelayed       outcome = "upstream JSON-RPC response relayed with 200"
 	outcomeSynthesized   outcome = "answered with a JSON-RPC response"
 	outcomeUnanswerable  outcome = "request id unknown; 502"
+	outcomeTimedOut      outcome = "request id unknown; 504"
 )
 
 // translate rewrites an upstream refusal in place. It reports outcomeUnanswerable when the
