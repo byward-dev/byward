@@ -62,16 +62,16 @@ description = "Consent and error pages in Chromium: Playwright and axe (WCAG 2.2
 run = "sh scripts/ui/run.sh"
 
 [tasks."test:integration:go"]
-description = "Drills behind the integration build tag, such as the restore drill (no Docker); the unit tests run in `test`"
-# Only the tagged drills (named *Drill*); the build tag adds no other tests, so ./... would rerun the unit suite.
-run = "go test -race -count=1 -tags=integration -run Drill ./..."
+description = "Go tests behind the integration build tag: the restore drill and the real open-source MCP clients (the clients need Docker); the unit tests run in `test`"
+# Only the tagged tests (named TestIntegration*); the build tag adds no other tests, so ./... would rerun the unit suite.
+run = "go test -race -count=1 -v -timeout 11m -tags=integration -run ^TestIntegration ./..."
 
 [tasks."test:integration"]
 description = "Integration tests, including the release smoke test and MCP conformance (needs Docker)"
 depends = ["release:smoke", "test:conformance", "test:ui", "test:integration:go"]
 
 [tasks.check]
-description = "Everything CI runs without Docker, except the drills (`test:integration:go`)"
+description = "Everything CI runs without Docker, except the integration-tagged Go tests (`test:integration:go`)"
 depends = ["fmt:check", "vet", "lint", "lint:workflows", "vuln", "licenses:check", "test", "test:scripts"]
 
 [tasks."licenses:check"]

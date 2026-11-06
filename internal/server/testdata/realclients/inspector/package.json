@@ -1,0 +1,7 @@
+{
+  "name": "byward-real-client-inspector",
+  "private": true,
+  "dependencies": {
+    "@modelcontextprotocol/inspector": "2.12.0"
+  }
+}

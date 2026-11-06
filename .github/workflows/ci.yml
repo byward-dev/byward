@@ -93,7 +93,7 @@ jobs:
   # Go tests behind the integration build tag, such as the restore drill (ADR-0007 §9, ADR-0024).
   integration-go:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -104,3 +104,5 @@ jobs:
       - run: mise run test:integration:go
         env:
           MISE_TASK_RUN_AUTO_INSTALL: "false"
+          # The real open-source clients run in pinned containers on the host network (ADR-0024 §3).
+          BYWARD_REAL_CLIENTS: "1"
