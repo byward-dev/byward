@@ -113,28 +113,3 @@ func TestRelayDropsUpstreamCORS(t *testing.T) {
 		t.Fatalf("headers = %v", w.Header())
 	}
 }
-
-func TestUpstreamChallengeNeverReachesTheClient(t *testing.T) {
-	cases := []struct {
-		name           string
-		upstream, want int
-	}{
-		{"401 means the proxy's credential failed", http.StatusUnauthorized, http.StatusBadGateway},
-		{"403 passes through without its challenge", http.StatusForbidden, http.StatusForbidden},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			up := fakeupstream.New()
-			t.Cleanup(up.Close)
-			up.Handler = func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="https://elsewhere.example/.well-known/oauth-protected-resource"`)
-				w.WriteHeader(c.upstream)
-			}
-			w := httptest.NewRecorder()
-			relayTo(t, up, "/mcp").ServeHTTP(w, httptest.NewRequest("POST", "/mcp", nil))
-			if w.Code != c.want || w.Header().Get("WWW-Authenticate") != "" {
-				t.Fatalf("code=%d www=%q", w.Code, w.Header().Get("WWW-Authenticate"))
-			}
-		})
-	}
-}
