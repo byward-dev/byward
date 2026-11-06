@@ -33,7 +33,7 @@ run = "golangci-lint run"
 
 [tasks."lint:workflows"]
 description = "Lint GitHub workflows (actionlint with shellcheck, zizmor offline) and shell scripts"
-run = ["actionlint", "zizmor --offline --no-progress .github/workflows", "shellcheck scripts/*.sh"]
+run = ["actionlint", "zizmor --offline --no-progress .github/workflows", "shellcheck scripts/*.sh scripts/conformance/*.sh"]
 
 [tasks.test]
 description = "Unit tests (with the race detector)"
@@ -43,9 +43,13 @@ run = "go test -race ./..."
 description = "Table tests for the release and CI shell scripts (no network, no Docker)"
 run = "sh scripts/go-version-check_test.sh"
 
+[tasks."test:conformance"]
+description = "MCP conformance server suite (2025-11-25, 2026-07-28) direct vs through --insecure-no-auth, in a pinned node container; results must match (needs Docker)"
+run = "sh scripts/conformance/run.sh"
+
 [tasks."test:integration"]
-description = "Integration tests, including the release smoke test (needs Docker)"
-depends = ["release:smoke"]
+description = "Integration tests, including the release smoke test and MCP conformance (needs Docker)"
+depends = ["release:smoke", "test:conformance"]
 run = "go test -tags=integration ./..."
 
 [tasks.check]
