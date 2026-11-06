@@ -122,7 +122,11 @@ func (m requestMeta) checkRequest(msg []byte) error {
 // values (case-sensitive, after decoding a Base64 sentinel). Notification POSTs have no header
 // requirements in this revision.
 func checkHeaders(h http.Header, method, version string, msg []byte) error {
-	want := []struct{ name, value string }{{headerProtocolVersion, version}, {headerMethod, method}}
+	type mirrored struct {
+		name, value string
+		base64      bool // may arrive in the Base64 sentinel form
+	}
+	want := []mirrored{{headerProtocolVersion, version, false}, {headerMethod, method, false}}
 	if path, ok := nameSource[method]; ok {
 		at, err := locate(msg, path)
 		if err != nil {
@@ -133,7 +137,7 @@ func checkHeaders(h http.Header, method, version string, msg []byte) error {
 			if json.Unmarshal(at[0].value(msg), &v) != nil {
 				return fmt.Errorf("%s mirrors a value that is not a string", headerName)
 			}
-			want = append(want, struct{ name, value string }{headerName, v})
+			want = append(want, mirrored{headerName, v, true})
 		}
 	}
 	for _, w := range want {
@@ -145,7 +149,7 @@ func checkHeaders(h http.Header, method, version string, msg []byte) error {
 		if !plainHeaderValue(got) {
 			return fmt.Errorf("header %s has characters a header value may not", w.name)
 		}
-		if w.name == headerName { // only Mcp-Name may use the Base64 sentinel
+		if w.base64 { // Mcp-Name, and Mcp-Param-* should they come, only
 			var err error
 			if got, err = headerValue(got); err != nil {
 				return fmt.Errorf("header %s: %w", w.name, err)
