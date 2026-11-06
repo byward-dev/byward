@@ -43,8 +43,9 @@ func codeOf(codes []int, description string) int {
 		return codes[0]
 	}
 	if m := aadstsPrefix.FindStringSubmatch(description); m != nil {
-		n, _ := strconv.Atoi(m[1])
-		return n
+		if n, err := strconv.Atoi(m[1]); err == nil {
+			return n
+		}
 	}
 	return 0
 }

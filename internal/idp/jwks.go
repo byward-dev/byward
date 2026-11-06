@@ -2,6 +2,7 @@ package idp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -41,8 +42,7 @@ func (k *KeySet) Key(ctx context.Context, kid string) (*jose.JSONWebKey, error) 
 	if k.have && k.now().Sub(k.fetched) < MinJWKSRefresh {
 		return nil, fmt.Errorf("idp: unknown key id %q", kid)
 	}
-	var set jose.JSONWebKeySet
-	err := k.fetch.GetJSON(ctx, k.url, &set)
+	set, err := k.load(ctx)
 	k.fetched = k.now()
 	if err != nil {
 		if k.have {
@@ -55,6 +55,25 @@ func (k *KeySet) Key(ctx context.Context, kid string) (*jose.JSONWebKey, error) 
 		return key, nil
 	}
 	return nil, fmt.Errorf("idp: unknown key id %q", kid)
+}
+
+// load fetches the JWKS and keeps each key that parses; keys of unknown or unsupported types are
+// ignored rather than failing the whole set (RFC 7517 §5).
+func (k *KeySet) load(ctx context.Context) (jose.JSONWebKeySet, error) {
+	var raw struct {
+		Keys []json.RawMessage `json:"keys"`
+	}
+	if err := k.fetch.GetJSON(ctx, k.url, &raw); err != nil {
+		return jose.JSONWebKeySet{}, err
+	}
+	var set jose.JSONWebKeySet
+	for _, r := range raw.Keys {
+		var key jose.JSONWebKey
+		if err := key.UnmarshalJSON(r); err == nil {
+			set.Keys = append(set.Keys, key)
+		}
+	}
+	return set, nil
 }
 
 func (k *KeySet) lookup(kid string) *jose.JSONWebKey {
