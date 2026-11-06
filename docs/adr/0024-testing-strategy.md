@@ -114,3 +114,26 @@ direct one; opening a sealed token took 0.3 µs, signing the ES256 assertion 17 
 - axe through chromedp in Go: rejected; unofficial, and Node is already in the integration lane.
 - Mocking Entra with mockoidc or mock-oauth2-server: rejected; no Entra profile.
 - A stored Entra user refresh token for an automated OBO test: rejected; it is a stored secret.
+
+## Amendment 2026-11-06 (real open-source clients; Keycloak deferred)
+
+- **§3 is built** (slice 2.3, #58). The clients sign in with static registration and call a tool on
+  a real MCP upstream (go-sdk), on the `test:integration:go` lane:
+
+  | Client | Version | How it runs |
+  |---|---|---|
+  | go-sdk | v1.8.0 | in process |
+  | TypeScript SDK | 1.32.2 | pinned container |
+  | Python SDK `mcp` | 2.3.0 | pinned container |
+  | Inspector CLI | 2.12.0 | pinned container; its own OAuth, which runs on the v2 SDK `@modelcontextprotocol/client` 2.3.1 |
+
+  - byward runs in-process with its Entra adapter reaching the fake IdP through its HTTP client, so
+    no IdP endpoint is configurable.
+  - A scripted browser answers the consent page.
+  - DCR follows #57. CIMD stays with the Go server tests and the client simulator (#59).
+  - Python's client credentials wait for app-only access (v0.2).
+- **Keycloak (§1, §5) moves to the slice that wires the generic OIDC adapter.**
+  - The adapter exists (`internal/idp/oidc`, #73), but no setting selects it yet; the server wires
+    only Entra.
+  - Until then, a Keycloak container could test that adapter in isolation, but not byward end to end.
+- `conformance authorization` (§4b) follows in its own PR.
