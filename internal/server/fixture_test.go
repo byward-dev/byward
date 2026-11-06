@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/corker/mcp-authproxy/internal/config"
 )
 
 // authEnv writes a key directory, a static-clients file and an IdP secret into a temp dir and
@@ -34,4 +36,15 @@ func authEnv(t testing.TB) []string {
 		"MCP_AUTHPROXY_KEYS_DIR=" + keys,
 		"MCP_AUTHPROXY_STATIC_CLIENTS_FILE=" + filepath.Join(dir, "clients.json"),
 	}
+}
+
+// loadConfig loads authenticated-mode settings for publicURL plus extra env entries.
+func loadConfig(t testing.TB, publicURL string, extra ...string) *config.Config {
+	t.Helper()
+	env := append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL="+publicURL, "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp")
+	cfg, _, err := config.Load(nil, append(env, extra...), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
 }

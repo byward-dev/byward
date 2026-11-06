@@ -42,7 +42,10 @@ func TestLimiterBoundsTheNumberOfSources(t *testing.T) {
 	if ok, _ := l.Allow("c"); !ok {
 		t.Fatal("sources whose windows ended were not dropped to make room")
 	}
-	if len(l.sources) > 2 {
-		t.Fatalf("tracking %d sources, want at most 2", len(l.sources))
+	if ok, _ := l.Allow("d"); !ok {
+		t.Fatal("after the old windows ended, a second new source must fit (a and b were dropped)")
+	}
+	if ok, _ := l.Allow("e"); ok {
+		t.Fatal("a third live source was admitted beyond maxKeys")
 	}
 }

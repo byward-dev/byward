@@ -63,7 +63,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (*auth, er
 	if err != nil {
 		return nil, fmt.Errorf("MCP_AUTHPROXY_STATIC_CLIENTS_FILE: %w", err)
 	}
-	auditStartup(o.Audit, ring, clients)
+	auditStartup(o.Audit, ring, clients.IDs())
 	provider, err := entra.New(entra.Config{Tenant: cfg.EntraTenant, ClientID: cfg.EntraClientID,
 		ClientAuth: idp.ClientSecret(cfg.EntraClientSecret), RedirectURL: cfg.Issuer() + "/callback/" + idpName})
 	if err != nil {
@@ -86,7 +86,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (*auth, er
 }
 
 // auditStartup records the keys and static clients the proxy starts with (ADR-0021 §3).
-func auditStartup(rec *audit.Log, ring *token.KeyRing, clients registration.Registry) {
+func auditStartup(rec *audit.Log, ring *token.KeyRing, staticClients []string) {
 	for _, id := range ring.KeyIDs() {
 		use := "verification"
 		if id == ring.SigningKeyID() {
@@ -94,10 +94,8 @@ func auditStartup(rec *audit.Log, ring *token.KeyRing, clients registration.Regi
 		}
 		rec.Record(nil, audit.Event{Name: audit.KeyLoaded, Outcome: audit.Success, Reason: use, KeyID: id})
 	}
-	if s, ok := clients.(*registration.StaticRegistry); ok {
-		for _, id := range s.IDs() {
-			rec.Record(nil, audit.Event{Name: audit.ClientRegistered, Outcome: audit.Success, Reason: "static", ClientID: id})
-		}
+	for _, id := range staticClients {
+		rec.Record(nil, audit.Event{Name: audit.ClientRegistered, Outcome: audit.Success, Reason: "static", ClientID: id})
 	}
 }
 

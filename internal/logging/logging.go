@@ -116,9 +116,9 @@ func Middleware(log *slog.Logger, next http.Handler) http.Handler {
 		r = r.WithContext(withRequestID(r.Context(), id))
 		// Echoed so users and operators can quote it; inbound IDs are not trusted (no trusted proxies yet).
 		w.Header().Set("X-Request-Id", id)
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		rec := NewStatusRecorder(w)
 		next.ServeHTTP(rec, r)
-		attrs := []any{"request_id", id, "method", r.Method, "path", r.URL.Path, "status", rec.status,
+		attrs := []any{"request_id", id, "method", r.Method, "path", r.URL.Path, "status", rec.Status(),
 			"duration_ms", time.Since(start).Milliseconds(), "remote_ip", RemoteIP(r)}
 		if m := r.Header.Get("Mcp-Method"); m != "" {
 			attrs = append(attrs, "mcp_method", m)
@@ -137,24 +137,34 @@ func RemoteIP(r *http.Request) string {
 	return host
 }
 
-type statusRecorder struct {
+// StatusRecorder records the final status a handler writes (200 if it writes none). The request
+// log, metrics and server spans all read the status through it.
+type StatusRecorder struct {
 	http.ResponseWriter
 	status      int
 	wroteHeader bool
 }
 
-func (s *statusRecorder) WriteHeader(code int) {
-	// 1xx informational responses (other than 101) precede the final status.
+// NewStatusRecorder wraps w.
+func NewStatusRecorder(w http.ResponseWriter) *StatusRecorder {
+	return &StatusRecorder{ResponseWriter: w, status: http.StatusOK}
+}
+
+// Status is the final status written so far.
+func (s *StatusRecorder) Status() int { return s.status }
+
+// WriteHeader records code. 1xx informational responses (other than 101) precede the final status.
+func (s *StatusRecorder) WriteHeader(code int) {
 	if !s.wroteHeader && (code < 100 || code > 199 || code == http.StatusSwitchingProtocols) {
 		s.status, s.wroteHeader = code, true
 	}
 	s.ResponseWriter.WriteHeader(code)
 }
 
-func (s *statusRecorder) Write(b []byte) (int, error) {
+func (s *StatusRecorder) Write(b []byte) (int, error) {
 	s.wroteHeader = true
 	return s.ResponseWriter.Write(b)
 }
 
 // Unwrap lets http.ResponseController reach the underlying writer (flush, deadlines).
-func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
+func (s *StatusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }

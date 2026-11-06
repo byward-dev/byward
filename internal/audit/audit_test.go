@@ -127,7 +127,7 @@ func TestUnauthenticatedEventsAreRateLimitedPerSourceAndCountedAnyway(t *testing
 	}
 }
 
-func TestNilLogDiscards(t *testing.T) {
+func TestNilLogIsSafeToCall(t *testing.T) {
 	var l *Log
 	l.Record(nil, Event{Name: Login, Outcome: Success})
 	l.RecordUnauthenticated(httptest.NewRequest("GET", "/", nil), Event{Name: HostRejected, Outcome: Failure})

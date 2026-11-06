@@ -28,8 +28,6 @@ var stripped = map[string]bool{"Authorization": true, "Forwarded": true, "Origin
 
 var errUpstreamRefused = errors.New("upstream refused the proxy and the request id is unknown")
 
-// New returns a handler relaying each request to target, the upstream's MCP endpoint URL: the
-// request path is replaced by target's path; the query is kept.
 // Option configures the relay.
 type Option func(*options)
 
@@ -44,6 +42,8 @@ func WithTraceContext(inject func(context.Context, http.Header)) Option {
 	return func(o *options) { o.inject = inject }
 }
 
+// New returns a handler relaying each request to target, the upstream's MCP endpoint URL: the
+// request path is replaced by target's path; the query is kept.
 func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 	o := options{inject: func(context.Context, http.Header) {}}
 	for _, f := range opts {

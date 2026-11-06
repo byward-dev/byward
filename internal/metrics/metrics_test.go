@@ -91,11 +91,11 @@ func TestLabelsCarryOnlyFixedValuesAndBucketsAreFixed(t *testing.T) {
 	}
 }
 
-func TestNilMetricsRecordNothing(t *testing.T) {
+func TestNilMetricsIsSafeToCall(t *testing.T) {
 	var m *Metrics
 	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 	if h := m.Middleware(nil, next); h == nil {
-		t.Fatal("nil middleware")
+		t.Fatal("nil Metrics.Middleware must return the next handler, got nil")
 	}
 	m.IdP("entra", "callback", "success", time.Second)
 	m.InFlight("request", 1)

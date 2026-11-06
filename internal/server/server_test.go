@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -22,9 +21,13 @@ import (
 
 	"github.com/corker/mcp-authproxy/internal/audit"
 	"github.com/corker/mcp-authproxy/internal/config"
+	"github.com/corker/mcp-authproxy/internal/health"
 	"github.com/corker/mcp-authproxy/internal/logging"
 	"github.com/corker/mcp-authproxy/internal/resource"
+	"github.com/corker/mcp-authproxy/internal/store"
+	"github.com/corker/mcp-authproxy/internal/store/memory"
 	"github.com/corker/mcp-authproxy/internal/testutil/fakeupstream"
+	"github.com/corker/mcp-authproxy/internal/token"
 )
 
 // goodToken is distinctive so a leak check cannot match ordinary text.
@@ -262,10 +265,7 @@ func TestOnlyStreamableHTTPMethodsReachTheUpstream(t *testing.T) {
 }
 
 func TestNewConfiguresHardenedLimitsAndLoopbackBind(t *testing.T) {
-	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://m.example/mcp")
 	s, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -310,10 +310,7 @@ func TestRecovererLetsAbortedHandlersAbort(t *testing.T) {
 }
 
 func TestRunShutsDownOnCancel(t *testing.T) {
-	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0", "MCP_AUTHPROXY_INTERNAL_LISTEN=127.0.0.1:0"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://m.example/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0", "MCP_AUTHPROXY_INTERNAL_LISTEN=127.0.0.1:0")
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -481,10 +478,7 @@ func TestNewNamesTheSettingAtFault(t *testing.T) {
 }
 
 func TestNewServesTheBrokerRoutes(t *testing.T) {
-	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://mcp.example.com/mcp")
 	s, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -527,10 +521,7 @@ func getBody(t *testing.T, h http.Handler, host, path string) (int, string) {
 
 // ADR-0018 §10, ADR-0021 §8 and §10: metrics and probes only on the internal listener.
 func TestInternalListenerServesProbesAndMetricsAndThePublicOneDoesNot(t *testing.T) {
-	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://mcp.example.com/mcp")
 	s, err := New(cfg, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
@@ -555,10 +546,7 @@ func TestInternalListenerServesProbesAndMetricsAndThePublicOneDoesNot(t *testing
 }
 
 func TestEmptyInternalListenTurnsTheInternalListenerOff(t *testing.T) {
-	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_INTERNAL_LISTEN="), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://m.example/mcp", "MCP_AUTHPROXY_INTERNAL_LISTEN=")
 	s, err := New(cfg, slog.New(slog.DiscardHandler))
 	if err != nil || s.Internal != nil {
 		t.Fatalf("internal server = %v, err %v; want none", s.Internal, err)
@@ -566,10 +554,7 @@ func TestEmptyInternalListenTurnsTheInternalListenerOff(t *testing.T) {
 }
 
 func TestStartupAuditsKeysAndStaticClients(t *testing.T) {
-	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://m.example/mcp")
 	var logs bytes.Buffer
 	if _, err := New(cfg, logging.New(&logs, "json")); err != nil {
 		t.Fatal(err)
@@ -583,6 +568,21 @@ func TestStartupAuditsKeysAndStaticClients(t *testing.T) {
 
 var listenLine = regexp.MustCompile(`"msg":"listening","listen":"([^"]+)"`)
 
+// listenWatcher is a log sink that closes listening when the public listener's address is logged.
+type listenWatcher struct {
+	syncBuffer
+	listening chan struct{}
+	once      sync.Once
+}
+
+func (w *listenWatcher) Write(p []byte) (int, error) {
+	n, err := w.syncBuffer.Write(p)
+	if listenLine.Match(p) {
+		w.once.Do(func() { close(w.listening) })
+	}
+	return n, err
+}
+
 // ADR-0021 §10: on shutdown /readyz fails before the public listener closes, and the internal
 // listener (probes, metrics) closes only after the public one, so the drain is visible.
 // Shutdown runs RegisterOnShutdown callbacks in goroutines, so each asserts the state it sees.
@@ -592,7 +592,7 @@ func TestRunDrainsReadinessBeforeShutdownAndClosesTheInternalListenerLast(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	logs := &syncBuffer{}
+	logs := &listenWatcher{listening: make(chan struct{})}
 	log := logging.New(logs, "json")
 	s, err := New(cfg, log)
 	if err != nil {
@@ -624,8 +624,12 @@ func TestRunDrainsReadinessBeforeShutdownAndClosesTheInternalListenerLast(t *tes
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- Run(ctx, s, log) }()
-	for !listenLine.MatchString(logs.String()) {
-		runtime.Gosched()
+	select {
+	case <-logs.listening:
+	case err := <-done:
+		t.Fatalf("Run returned before listening: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not log its listening address within 5s")
 	}
 	cancel()
 	select {
@@ -648,10 +652,7 @@ func TestRunDrainsReadinessBeforeShutdownAndClosesTheInternalListenerLast(t *tes
 // ADR-0021 §5 through the real handler: rejections from one source are logged up to the burst and
 // counted in metrics beyond it.
 func TestRejectionsFromOneSourceAreRateLimitedButStillCounted(t *testing.T) {
-	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://mcp.example.com/mcp")
 	var logs bytes.Buffer
 	s, err := New(cfg, logging.New(&logs, "json"))
 	if err != nil {
@@ -672,10 +673,7 @@ func TestRejectionsFromOneSourceAreRateLimitedButStillCounted(t *testing.T) {
 
 // ADR-0021 §8: label values come from the route table, never from the request.
 func TestRouteLabelsNeverCarryRequestDetails(t *testing.T) {
-	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://mcp.example.com/mcp")
 	s, err := New(cfg, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
@@ -691,5 +689,40 @@ func TestRouteLabelsNeverCarryRequestDetails(t *testing.T) {
 		if !strings.Contains(metrics, want) {
 			t.Errorf("metrics lack %s", want)
 		}
+	}
+}
+
+type pingStore struct {
+	store.Store
+	err error
+}
+
+func (p pingStore) Ping(context.Context) error { return p.err }
+
+// ADR-0021 §10: /readyz is the keys and the store, never the IdP; a store that cannot be reached
+// makes it fail without putting the error in the body.
+func TestReadinessIsKeysAndStoreOnly(t *testing.T) {
+	ring, err := token.LoadKeyRing(loadConfig(t, "https://m.example/mcp").KeysDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name     string
+		st       store.Store
+		wantCode int
+		wantBody string
+	}{
+		{"memory store", memory.New(), 200, `{"checks":{"keys":"ok","store":"ok"},"status":"ok"}`},
+		{"store reachable", pingStore{memory.New(), nil}, 200, `{"checks":{"keys":"ok","store":"ok"},"status":"ok"}`},
+		{"store down", pingStore{memory.New(), errors.New("dial /var/lib/db: refused")}, 503, `{"checks":{"keys":"ok","store":"fail"},"status":"unavailable"}`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			health.New(slog.New(slog.DiscardHandler), readiness(ring, c.st)...).Register(mux)
+			code, body := getBody(t, mux, "x", "/readyz")
+			if code != c.wantCode || strings.TrimSpace(body) != c.wantBody {
+				t.Fatalf("readyz = %d %s, want %d %s (exactly keys and store, no IdP, no error text)", code, body, c.wantCode, c.wantBody)
+			}
+		})
 	}
 }

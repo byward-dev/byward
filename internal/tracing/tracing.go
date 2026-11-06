@@ -7,6 +7,8 @@
 package tracing
 
 import (
+	"github.com/corker/mcp-authproxy/internal/logging"
+
 	"context"
 	"net/http"
 
@@ -58,10 +60,10 @@ func Middleware(route func(*http.Request) string, next http.Handler) http.Handle
 		ctx, span := otel.Tracer(instrumentation).Start(ctx, r.Method+" "+name, trace.WithSpanKind(trace.SpanKindServer),
 			trace.WithAttributes(semconv.HTTPRequestMethodKey.String(r.Method), attribute.String("http.route", name)))
 		defer span.End()
-		rec := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		rec := logging.NewStatusRecorder(w)
 		next.ServeHTTP(rec, r.WithContext(ctx))
-		span.SetAttributes(semconv.HTTPResponseStatusCode(rec.status))
-		if rec.status >= 500 {
+		span.SetAttributes(semconv.HTTPResponseStatusCode(rec.Status()))
+		if rec.Status() >= 500 {
 			span.SetStatus(codes.Error, "")
 		}
 	})
@@ -72,24 +74,3 @@ func Middleware(route func(*http.Request) string, next http.Handler) http.Handle
 func Inject(ctx context.Context, h http.Header) {
 	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(h))
 }
-
-type statusWriter struct {
-	http.ResponseWriter
-	status      int
-	wroteHeader bool
-}
-
-func (s *statusWriter) WriteHeader(code int) {
-	if !s.wroteHeader && (code < 100 || code > 199 || code == http.StatusSwitchingProtocols) {
-		s.status, s.wroteHeader = code, true
-	}
-	s.ResponseWriter.WriteHeader(code)
-}
-
-func (s *statusWriter) Write(b []byte) (int, error) {
-	s.wroteHeader = true
-	return s.ResponseWriter.Write(b)
-}
-
-// Unwrap lets http.ResponseController reach the underlying writer (flush for streams).
-func (s *statusWriter) Unwrap() http.ResponseWriter { return s.ResponseWriter }

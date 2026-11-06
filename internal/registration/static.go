@@ -71,7 +71,7 @@ func (r *StaticRegistry) IDs() []string {
 // LoadStatic reads the static clients file at path. Secret and JWKS file paths inside it are
 // relative to its directory. readFile is the only file access (tests pass a map); jti is the replay
 // cache for private_key_jwt. Errors name the client and field and never contain secrets.
-func LoadStatic(path string, readFile func(string) ([]byte, error), jti JTICache) (Registry, error) {
+func LoadStatic(path string, readFile func(string) ([]byte, error), jti JTICache) (*StaticRegistry, error) {
 	data, err := readFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("static clients: %w", err)

@@ -4,6 +4,8 @@
 package metrics
 
 import (
+	"github.com/corker/mcp-authproxy/internal/logging"
+
 	"net/http"
 	"runtime/debug"
 	"strconv"
@@ -68,9 +70,9 @@ func (m *Metrics) Middleware(route func(*http.Request) string, next http.Handler
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		rec := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		rec := logging.NewStatusRecorder(w)
 		next.ServeHTTP(rec, r)
-		m.requests.WithLabelValues(route(r), strconv.Itoa(rec.status/100)+"xx").Observe(time.Since(start).Seconds())
+		m.requests.WithLabelValues(route(r), strconv.Itoa(rec.Status()/100)+"xx").Observe(time.Since(start).Seconds())
 	})
 }
 
@@ -105,24 +107,3 @@ func (m *Metrics) AuditEvent(event, outcome string) {
 	}
 	m.auditEvents.WithLabelValues(event, outcome).Inc()
 }
-
-type statusWriter struct {
-	http.ResponseWriter
-	status      int
-	wroteHeader bool
-}
-
-func (s *statusWriter) WriteHeader(code int) {
-	if !s.wroteHeader && (code < 100 || code > 199 || code == http.StatusSwitchingProtocols) {
-		s.status, s.wroteHeader = code, true
-	}
-	s.ResponseWriter.WriteHeader(code)
-}
-
-func (s *statusWriter) Write(b []byte) (int, error) {
-	s.wroteHeader = true
-	return s.ResponseWriter.Write(b)
-}
-
-// Unwrap lets http.ResponseController reach the underlying writer (flush for streams).
-func (s *statusWriter) Unwrap() http.ResponseWriter { return s.ResponseWriter }
