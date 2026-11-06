@@ -124,10 +124,10 @@ func TestUnwritableStateDirectoryFailsOpen(t *testing.T) {
 		t.Skip("root writes anywhere")
 	}
 	dir := t.TempDir()
-	if err := os.Chmod(dir, 0o500); err != nil {
+	if err := os.Chmod(dir, 0o500); err != nil { //nolint:gosec // G302: a directory needs x; read-only on purpose
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // G302: directory mode, restored for cleanup
 	_, err := Open(ctx, Options{Dir: dir, CounterFile: filepath.Join(t.TempDir(), "w")})
 	if err == nil || !strings.Contains(err.Error(), dir+" is not writable") {
 		t.Fatalf("err = %v, want one naming the unwritable directory", err)
