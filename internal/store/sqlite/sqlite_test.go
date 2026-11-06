@@ -537,6 +537,13 @@ func TestFixturesMigrateToTheCurrentSchemaKeepingTheirData(t *testing.T) {
 			if v >= 2 {
 				checkRotatedFixtureToken(t, s)
 			}
+			if v >= 4 {
+				want := store.Client{ID: "fixture-dcr-client", Metadata: []byte(`{"client_name":"Fixture"}`), CreatedAt: fixtureCreated,
+					UsedAt: fixtureCreated.Add(time.Second), ExpiresAt: fixtureExpires}
+				if got, err := s.Client(ctx, want.ID); err != nil || !reflect.DeepEqual(got, want) {
+					t.Fatalf("client = %+v, %v\nwant %+v", got, err, want)
+				}
+			}
 		})
 	}
 }
@@ -711,5 +718,30 @@ func TestTheRevocationScopeIsCheckedByTheDatabase(t *testing.T) {
 	}
 	if revs, err := s.Revocations(ctx); err != nil || len(revs) != 1 || !revs[0].All {
 		t.Fatalf("revocations = %+v, %v; want only the valid one", revs, err)
+	}
+}
+
+// A client in daily use does not write on every refresh: a use that neither marks first use nor
+// extends by minExtension leaves the store, and its write counter, untouched.
+func TestARenewalTooSmallToMatterIsNotWritten(t *testing.T) {
+	counter := filepath.Join(t.TempDir(), "writes")
+	s := open(t, t.TempDir(), counter)
+	ctx := bounded(t)
+	t0 := time.Unix(1_800_000_000, 0)
+	must(t, s.CreateClient(ctx, store.Client{ID: "dcr-a", Metadata: []byte("{}"), CreatedAt: t0, ExpiresAt: t0.Add(90 * 24 * time.Hour)}, 10))
+	must(t, s.UseClient(ctx, "dcr-a", t0, t0.Add(90*24*time.Hour), 24*time.Hour)) // first use: written
+	read := func() string {
+		b, err := os.ReadFile(counter) //nolint:gosec // G304: the test's own temp file
+		must(t, err)
+		return string(b)
+	}
+	before := read()
+	must(t, s.UseClient(ctx, "dcr-a", t0.Add(time.Hour), t0.Add(time.Hour+90*24*time.Hour), 24*time.Hour))
+	if read() != before {
+		t.Fatal("a use extending by less than minExtension wrote to the store")
+	}
+	must(t, s.UseClient(ctx, "dcr-a", t0.Add(24*time.Hour), t0.Add(24*time.Hour+90*24*time.Hour), 24*time.Hour))
+	if read() == before {
+		t.Fatal("a use extending by minExtension was not written")
 	}
 }

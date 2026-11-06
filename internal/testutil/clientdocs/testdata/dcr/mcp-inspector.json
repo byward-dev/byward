@@ -1,0 +1,1 @@
+{"client_name":"MCP Inspector","redirect_uris":["http://127.0.0.1:6276/oauth/callback"],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none","scope":"","client_uri":"https://github.com/modelcontextprotocol/inspector","application_type":"native"}

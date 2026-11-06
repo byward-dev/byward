@@ -23,7 +23,7 @@ import (
 
 // metadataHandler serves RFC 8414 metadata, identical at both well-known paths (ADR-0013 §2).
 func (b *Broker) metadataHandler() http.Handler {
-	doc, err := json.Marshal(map[string]any{
+	md := map[string]any{
 		"issuer":                   b.cfg.Issuer,
 		"authorization_endpoint":   b.cfg.Issuer + "/authorize",
 		"token_endpoint":           b.tokenEndpoint(),
@@ -40,7 +40,11 @@ func (b *Broker) metadataHandler() http.Handler {
 		"scopes_supported": []string{b.cfg.Scope, "offline_access"},
 		"authorization_response_iss_parameter_supported": true,
 		"client_id_metadata_document_supported":          b.cfg.CIMD, // ADR-0008 §1
-	})
+	}
+	if b.cfg.Registrar != nil {
+		md["registration_endpoint"] = b.cfg.Issuer + "/register" // ADR-0008 §1, RFC 7591
+	}
+	doc, err := json.Marshal(md)
 	if err != nil {
 		panic(err)
 	}

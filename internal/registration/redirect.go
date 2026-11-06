@@ -24,6 +24,7 @@ const (
 	ReasonUserinfo      = "userinfo"
 	ReasonWildcard      = "wildcard"
 	ReasonTooLong       = "too_long"
+	ReasonDenied        = "denied" // the operator's denylist names the redirect host (ADR-0008 §9)
 )
 
 // RedirectError explains a rejected redirect URI. Error() is for the error page ("registered X,
@@ -53,14 +54,16 @@ var reasonText = map[string]string{
 	ReasonUserinfo:  "must not contain user information",
 	ReasonWildcard:  "must not contain wildcards",
 	ReasonTooLong:   fmt.Sprintf("longer than %d characters", MaxRedirectURILen),
+	ReasonDenied:    "its host is on the operator's denylist",
 }
 
 func withoutQuery(s string) string {
 	u, err := url.Parse(s)
-	if err != nil || u.Host == "" {
+	if err != nil || u.Scheme == "" {
 		return "<invalid>"
 	}
-	return u.Scheme + "://" + u.Host + u.Path
+	u.User, u.RawQuery, u.ForceQuery, u.Fragment, u.RawFragment = nil, "", false, "", ""
+	return u.String()
 }
 
 // loopbackHosts are the hosts on which http and any port are allowed (ADR-0009 §2).

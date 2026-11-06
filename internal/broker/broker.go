@@ -78,15 +78,20 @@ type Config struct {
 	IdPLabel  string // "Microsoft Entra", for pages
 	IdPScopes string // the scopes asked of the IdP, listed on the consent page
 	// CIMD advertises client_id_metadata_document_supported; Clients then resolves CIMD URLs.
-	CIMD        bool
-	IdP         IdP
-	Clients     registration.Registry
-	Store       store.Store
-	Sealer      *token.Sealer // proxy tokens: access and code
-	LoginBox    *token.Box    // the login-in-progress cookie
-	ConsentBox  *token.Box    // the consent flow in the consent page's form
-	IdPTokenBox *token.Box    // IdP tokens at rest
-	Gate        Gate
+	CIMD bool
+	// Registrar, when set, serves POST /register and advertises registration_endpoint (DCR,
+	// ADR-0008 §2-3); Clients then resolves the clients it registers.
+	Registrar Registrar
+	// ObserveRegistration, when set, is told every /register outcome (one of the Registration*).
+	ObserveRegistration func(outcome string)
+	IdP                 IdP
+	Clients             registration.Registry
+	Store               store.Store
+	Sealer              *token.Sealer // proxy tokens: access and code
+	LoginBox            *token.Box    // the login-in-progress cookie
+	ConsentBox          *token.Box    // the consent flow in the consent page's form
+	IdPTokenBox         *token.Box    // IdP tokens at rest
+	Gate                Gate
 	// Consent page wording (ADR-0010 §4): the upstream's name (default: the public host), what the
 	// scope lets an app do in plain words, and who runs the proxy. All optional.
 	UpstreamName string
@@ -160,6 +165,9 @@ func (b *Broker) Register(mux *http.ServeMux) {
 	mux.HandleFunc(b.callbackPath(), b.callback)
 	mux.Handle("/token", limitBody(64<<10, http.HandlerFunc(b.token)))
 	mux.Handle("/revoke", limitBody(64<<10, http.HandlerFunc(b.revokeEndpoint)))
+	if b.cfg.Registrar != nil {
+		mux.Handle("/register", limitBody(64<<10, http.HandlerFunc(b.register)))
+	}
 }
 
 // Deny is the deny list for the access-token validator. The caller syncs it before serving and

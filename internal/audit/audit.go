@@ -23,7 +23,7 @@ const (
 	TokenRejected       = "token_rejected"        // /token or /revoke refused a request
 	AccessTokenRejected = "access_token_rejected" // an MCP request carried an invalid or expired token
 	GrantRevoked        = "grant_revoked"         // a grant was revoked (code or refresh-token reuse, misuse, the client, or the IdP)
-	ClientRegistered    = "client_registered"     // a client was registered (static clients at startup)
+	ClientRegistered    = "client_registered"     // a client was registered: static at startup, or dcr (refusals too)
 	KeyLoaded           = "key_loaded"            // a sealing key was loaded at startup
 	HostRejected        = "host_rejected"         // a request named a Host outside the allowlist
 	OriginRejected      = "origin_rejected"       // a request sent an Origin outside the allowlist
@@ -95,14 +95,15 @@ func (l *Log) Record(r *http.Request, e Event) {
 }
 
 // RecordUnauthenticated writes e for a request whose sender is not authenticated, limited per
-// source address and event, so frequent events (page views) never crowd out rarer ones (decisions);
-// when events were dropped the next record of that event carries `suppressed=N` (ADR-0021 §5).
+// source address, event and outcome, so frequent events (page views, registrations) never crowd
+// out rarer ones (decisions, refusals); when records were dropped the next one with the same key
+// carries `suppressed=N` (ADR-0021 §5).
 func (l *Log) RecordUnauthenticated(r *http.Request, e Event) {
 	if l == nil {
 		return
 	}
 	ip := logging.RemoteIP(r)
-	ok, suppressed := l.limiter.Allow(ip + "\x00" + e.Name)
+	ok, suppressed := l.limiter.Allow(ip + "\x00" + e.Name + "\x00" + e.Outcome)
 	if !ok {
 		if l.observe != nil {
 			l.observe(e.Name, e.Outcome)

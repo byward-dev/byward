@@ -65,6 +65,12 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		{"CollectRemovesExpiredRowsOnly", collectRemovesExpiredRowsOnly},
 		{"CollectRemovesOldRevocations", collectRemovesOldRevocations},
 		{"ConcurrentUseIsSafe", concurrentUseIsSafe},
+		{"ClientRoundTripsAsACopy", clientRoundTripsAsACopy},
+		{"ClientIDsAreUniqueAndIncompleteClientsInvalid", clientIDsAreUniqueAndIncompleteClientsInvalid},
+		{"CreateClientEnforcesTheCapOnLiveClients", createClientEnforcesTheCapOnLiveClients},
+		{"ConcurrentCreateClientNeverExceedsTheCap", concurrentCreateClientNeverExceedsTheCap},
+		{"UseClientMarksUseAndExtendsWithoutShortening", useClientMarksUseAndExtendsWithoutShortening},
+		{"CollectRemovesExpiredClientsAndClientsUnusedForTheirFirstDay", collectRemovesExpiredClientsAndClientsUnusedForTheirFirstDay},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { tc.fn(t, newStore(t)) })
@@ -859,5 +865,127 @@ func concurrentRotationWithoutGraceHasOneWinner(t *testing.T, s store.Store) {
 	}
 	if wins != 1 {
 		t.Fatalf("%d rotations of one token succeeded, want exactly 1", wins)
+	}
+}
+
+func client(id string) store.Client {
+	return store.Client{ID: id, Metadata: []byte(`{"client_name":"` + id + `"}`), CreatedAt: t0, ExpiresAt: t0.Add(90 * 24 * time.Hour)}
+}
+
+func clientsEqual(a, b store.Client) bool {
+	return a.ID == b.ID && bytes.Equal(a.Metadata, b.Metadata) && a.CreatedAt.Equal(b.CreatedAt) && a.UsedAt.Equal(b.UsedAt) && a.ExpiresAt.Equal(b.ExpiresAt)
+}
+
+func clientRoundTripsAsACopy(t *testing.T, s store.Store) {
+	c := client("dcr-a")
+	must(t, s.CreateClient(ctx, c, 0))
+	c.Metadata[0] = 'X' // changing the caller's slice changes nothing stored
+	got, err := s.Client(ctx, "dcr-a")
+	must(t, err)
+	if !clientsEqual(got, client("dcr-a")) || !got.UsedAt.IsZero() {
+		t.Fatalf("client = %+v, want %+v", got, client("dcr-a"))
+	}
+	got.Metadata[0] = 'Y'
+	if again, _ := s.Client(ctx, "dcr-a"); !clientsEqual(again, client("dcr-a")) {
+		t.Fatalf("a returned slice changed the stored client: %+v", again)
+	}
+	_, err = s.Client(ctx, "nobody")
+	wantErr(t, "unknown client", err, store.ErrNotFound)
+}
+
+func clientIDsAreUniqueAndIncompleteClientsInvalid(t *testing.T, s store.Store) {
+	must(t, s.CreateClient(ctx, client("dcr-a"), 0))
+	wantErr(t, "duplicate ID", s.CreateClient(ctx, client("dcr-a"), 0), store.ErrExists)
+	for name, c := range map[string]store.Client{
+		"no ID":                  {Metadata: []byte("{}"), CreatedAt: t0, ExpiresAt: t0.Add(time.Hour)},
+		"no metadata":            {ID: "x", CreatedAt: t0, ExpiresAt: t0.Add(time.Hour)},
+		"already used":           {ID: "x", Metadata: []byte("{}"), CreatedAt: t0, UsedAt: t0, ExpiresAt: t0.Add(time.Hour)},
+		"expires at creation":    {ID: "x", Metadata: []byte("{}"), CreatedAt: t0, ExpiresAt: t0},
+		"expires before created": {ID: "x", Metadata: []byte("{}"), CreatedAt: t0, ExpiresAt: t0.Add(-time.Second)},
+	} {
+		wantErr(t, name, s.CreateClient(ctx, c, 0), store.ErrInvalid)
+	}
+}
+
+// Only clients that are still live at the new client's CreatedAt count towards the cap.
+func createClientEnforcesTheCapOnLiveClients(t *testing.T, s store.Store) {
+	old := client("dcr-old")
+	old.CreatedAt, old.ExpiresAt = t0.Add(-2*time.Hour), t0 // expired exactly at t0: not live
+	must(t, s.CreateClient(ctx, old, 2))
+	must(t, s.CreateClient(ctx, client("dcr-a"), 2))
+	must(t, s.CreateClient(ctx, client("dcr-b"), 2))
+	wantErr(t, "a third live client", s.CreateClient(ctx, client("dcr-c"), 2), store.ErrFull)
+	must(t, s.CreateClient(ctx, client("dcr-d"), 0)) // max 0: no cap
+}
+
+func concurrentCreateClientNeverExceedsTheCap(t *testing.T, s store.Store) {
+	const n, max = 32, 5
+	errs := make([]error, n)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Go(func() {
+			<-start
+			errs[i] = s.CreateClient(ctx, client(fmt.Sprintf("dcr-%d", i)), max)
+		})
+	}
+	close(start)
+	wg.Wait()
+	ok := 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			ok++
+		case !errors.Is(err, store.ErrFull):
+			t.Fatalf("a registration failed with %v, want ErrFull", err)
+		}
+	}
+	if ok != max {
+		t.Fatalf("%d registrations stored, want exactly %d", ok, max)
+	}
+}
+
+func useClientMarksUseAndExtendsWithoutShortening(t *testing.T, s store.Store) {
+	c := client("dcr-a")
+	must(t, s.CreateClient(ctx, c, 0))
+	day := 24 * time.Hour
+	used := t0.Add(time.Hour)
+	// The first use is recorded even when the expiry does not move.
+	must(t, s.UseClient(ctx, "dcr-a", used, c.ExpiresAt.Add(time.Hour), day))
+	got, _ := s.Client(ctx, "dcr-a")
+	if !got.UsedAt.Equal(used) || !got.ExpiresAt.Equal(c.ExpiresAt) {
+		t.Fatalf("after the first use: used %v, expires %v; want %v, %v (an hour is less than the minimum extension)", got.UsedAt, got.ExpiresAt, used, c.ExpiresAt)
+	}
+	// A later use keeps the first UsedAt and extends by at least the minimum.
+	must(t, s.UseClient(ctx, "dcr-a", used.Add(day), c.ExpiresAt.Add(day), day))
+	got, _ = s.Client(ctx, "dcr-a")
+	if !got.UsedAt.Equal(used) || !got.ExpiresAt.Equal(c.ExpiresAt.Add(day)) {
+		t.Fatalf("after a day: used %v, expires %v; want %v, %v", got.UsedAt, got.ExpiresAt, used, c.ExpiresAt.Add(day))
+	}
+	// It never shortens.
+	must(t, s.UseClient(ctx, "dcr-a", used.Add(2*day), t0.Add(time.Hour), 0))
+	if again, _ := s.Client(ctx, "dcr-a"); !again.ExpiresAt.Equal(c.ExpiresAt.Add(day)) {
+		t.Fatalf("expiry shortened to %v", again.ExpiresAt)
+	}
+	wantErr(t, "unknown client", s.UseClient(ctx, "nobody", t0, t0, 0), store.ErrNotFound)
+}
+
+func collectRemovesExpiredClientsAndClientsUnusedForTheirFirstDay(t *testing.T, s store.Store) {
+	now := t0.Add(store.UnusedClientLifetime)
+	fresh := client("dcr-fresh")
+	fresh.CreatedAt = now.Add(-time.Second) // never used, but younger than the limit
+	expired := client("dcr-expired")
+	expired.ExpiresAt = now
+	for _, c := range []store.Client{client("dcr-unused"), client("dcr-used"), fresh, expired} {
+		must(t, s.CreateClient(ctx, c, 0))
+	}
+	must(t, s.UseClient(ctx, "dcr-used", t0.Add(time.Minute), t0, 0))
+	must(t, s.UseClient(ctx, "dcr-expired", t0.Add(time.Minute), t0, 0))
+	must(t, s.Collect(ctx, now))
+	for id, kept := range map[string]bool{"dcr-unused": false, "dcr-expired": false, "dcr-used": true, "dcr-fresh": true} {
+		_, err := s.Client(ctx, id)
+		if (err == nil) != kept {
+			t.Errorf("%s: err %v, want kept %v", id, err, kept)
+		}
 	}
 }

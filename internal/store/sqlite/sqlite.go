@@ -475,6 +475,8 @@ func (s *Store) Collect(ctx context.Context, now time.Time) error {
 			{"DELETE FROM codes WHERE expires_at <= ?", n},
 			{"DELETE FROM refresh_tokens WHERE idle_expires_at <= ?", n},
 			{"DELETE FROM revocations WHERE at <= ?", micros(now.Add(-store.RevocationRetention))},
+			{"DELETE FROM clients WHERE expires_at <= ?", n},
+			{"DELETE FROM clients WHERE used_at IS NULL AND created_at <= ?", micros(now.Add(-store.UnusedClientLifetime))},
 		} {
 			if _, err := tx.ExecContext(ctx, q.sql, q.arg); err != nil {
 				return fmt.Errorf("sqlite store: collect: %w", err)
@@ -550,4 +552,76 @@ func ensureFile(path string) error {
 		return fmt.Errorf("sqlite store: database file %s: %w", path, err)
 	}
 	return f.Close()
+}
+
+// CreateClient implements store.Clients.
+func (s *Store) CreateClient(ctx context.Context, c store.Client, max int) error {
+	if c.ID == "" || len(c.Metadata) == 0 || !c.UsedAt.IsZero() || !c.ExpiresAt.After(c.CreatedAt) {
+		return store.ErrInvalid
+	}
+	return s.write(ctx, func(tx *sql.Tx) error {
+		var n int
+		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM clients WHERE id = ?", c.ID).Scan(&n); err != nil {
+			return err
+		}
+		if n > 0 {
+			return store.ErrExists
+		}
+		if max > 0 {
+			if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM clients WHERE expires_at > ?", micros(c.CreatedAt)).Scan(&n); err != nil {
+				return err
+			}
+			if n >= max {
+				return store.ErrFull
+			}
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO clients (id, metadata, created_at, expires_at) VALUES (?, ?, ?, ?)",
+			c.ID, c.Metadata, micros(c.CreatedAt), micros(c.ExpiresAt))
+		return err
+	})
+}
+
+// Client implements store.Clients.
+func (s *Store) Client(ctx context.Context, id string) (store.Client, error) {
+	var c store.Client
+	var created, expires int64
+	var used sql.NullInt64
+	err := s.db.QueryRowContext(ctx, "SELECT id, metadata, created_at, used_at, expires_at FROM clients WHERE id = ?", id).
+		Scan(&c.ID, &c.Metadata, &created, &used, &expires)
+	if errors.Is(err, sql.ErrNoRows) {
+		return store.Client{}, store.ErrNotFound
+	}
+	if err != nil {
+		return store.Client{}, fmt.Errorf("sqlite store: client: %w", err)
+	}
+	c.CreatedAt, c.ExpiresAt = fromMicros(created), fromMicros(expires)
+	if used.Valid {
+		c.UsedAt = fromMicros(used.Int64)
+	}
+	return c, nil
+}
+
+// UseClient implements store.Clients. A use that changes nothing (already used, and not extending
+// by at least minExtension) does not write, so it costs no write-counter update.
+func (s *Store) UseClient(ctx context.Context, id string, now, expires time.Time, minExtension time.Duration) error {
+	c, err := s.Client(ctx, id)
+	if err != nil {
+		return err
+	}
+	extend := !expires.Before(c.ExpiresAt.Add(minExtension))
+	if !c.UsedAt.IsZero() && !extend {
+		return nil
+	}
+	return s.write(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE clients SET used_at = coalesce(used_at, ?),
+			expires_at = CASE WHEN ? >= expires_at + ? THEN ? ELSE expires_at END WHERE id = ?`,
+			micros(now), micros(expires), minExtension.Microseconds(), micros(expires), id)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil || n == 0 {
+			return store.ErrNotFound
+		}
+		return nil
+	})
 }

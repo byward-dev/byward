@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
@@ -202,6 +203,7 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 	if !offline { // the response reports the scope actually granted (RFC 6749 §5.1)
 		scopes = slices.DeleteFunc(slices.Clone(scopes), func(s string) bool { return s == "offline_access" })
 	}
+	b.recordUse(ctx, client, now)
 	b.issue(w, r, client.ID(), claims.GrantID, claims.Subject, now, expires, scopes, refresh)
 }
 
@@ -309,4 +311,19 @@ func (b *Broker) unavailable(w http.ResponseWriter, r *http.Request, what string
 	b.cfg.Log.ErrorContext(ctx, what, "request_id", logging.RequestID(ctx), "error", err)
 	w.Header().Set("Retry-After", retryAfter)
 	b.tokenFail(w, r, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the proxy's store is unavailable; try again"})
+}
+
+// useRecorder is a client whose registration slides with use (a DCR client).
+type useRecorder interface {
+	RecordUse(ctx context.Context, now time.Time) error
+}
+
+// recordUse renews a DCR client's registration after a code redemption or a refresh; a failure is
+// logged, never a reason to fail the token request.
+func (b *Broker) recordUse(ctx context.Context, client registration.Client, now time.Time) {
+	if u, ok := client.(useRecorder); ok {
+		if err := u.RecordUse(ctx, now); err != nil {
+			b.cfg.Log.WarnContext(ctx, "renewing a client registration failed", "request_id", logging.RequestID(ctx), "client_id", client.ID(), "error", err.Error())
+		}
+	}
 }
