@@ -406,3 +406,13 @@ func TestNoAuthServesTheUpstreamWithoutMetadataOrChallenge(t *testing.T) {
 		t.Fatalf("foreign Origin: got %d", res.StatusCode)
 	}
 }
+
+func TestOwnOriginIsAlwaysAllowed(t *testing.T) {
+	e := start(t)
+	if res := e.do(t, "POST", "/mcp", nil, map[string]string{"Origin": "https://mcp.example.com", "Authorization": "Bearer " + goodToken}); res.StatusCode != 200 {
+		t.Fatalf("same-origin request: got %d", res.StatusCode)
+	}
+	if res := e.do(t, "POST", "/mcp", nil, map[string]string{"Origin": "https://mcp.example.com.evil.example"}); res.StatusCode != http.StatusForbidden {
+		t.Fatalf("look-alike origin: got %d", res.StatusCode)
+	}
+}
