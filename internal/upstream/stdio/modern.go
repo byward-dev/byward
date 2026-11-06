@@ -141,15 +141,32 @@ func checkHeaders(h http.Header, method, version string, msg []byte) error {
 		if len(vals) != 1 {
 			return fmt.Errorf("header %s missing or repeated", w.name)
 		}
-		got, err := headerValue(vals[0])
-		if err != nil {
-			return fmt.Errorf("header %s: %w", w.name, err)
+		got := vals[0]
+		if !plainHeaderValue(got) {
+			return fmt.Errorf("header %s has characters a header value may not", w.name)
+		}
+		if w.name == headerName { // only Mcp-Name may use the Base64 sentinel
+			var err error
+			if got, err = headerValue(got); err != nil {
+				return fmt.Errorf("header %s: %w", w.name, err)
+			}
 		}
 		if got != w.value {
 			return fmt.Errorf("header %s does not match the body", w.name)
 		}
 	}
 	return nil
+}
+
+// plainHeaderValue reports whether v holds only what a header value may: visible ASCII, space and
+// tab (2026-07-28 streamable-http, Value Encoding). Anything else must come Base64-encoded.
+func plainHeaderValue(v string) bool {
+	for i := 0; i < len(v); i++ {
+		if c := v[i]; (c < 0x20 || c > 0x7e) && c != '\t' {
+			return false
+		}
+	}
+	return true
 }
 
 // headerValue decodes the Base64 sentinel form =?base64?…?= that clients use for values that are
@@ -252,7 +269,7 @@ func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity,
 			return
 		}
 		if err := checkHeaders(r.Header, env.Method, meta.version, msg); err != nil {
-			writeRPCError(w, http.StatusBadRequest, nil, codeHeaderMismatch, "Header mismatch: "+err.Error())
+			writeRPCError(w, http.StatusBadRequest, meta.id.value(msg), codeHeaderMismatch, "Header mismatch: "+err.Error())
 			return
 		}
 	}
