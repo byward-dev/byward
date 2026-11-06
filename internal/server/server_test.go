@@ -164,27 +164,40 @@ func TestAllowedHostsAccepted(t *testing.T) {
 	}
 }
 
-func TestBodyLimit(t *testing.T) {
-	e := start(t)
-	res := e.do(t, "POST", "/mcp", bytes.NewReader(make([]byte, MaxMCPBody+1)), map[string]string{"Authorization": "Bearer " + goodToken})
-	if res.StatusCode != http.StatusRequestEntityTooLarge {
-		t.Fatalf("got %d", res.StatusCode)
+func TestBodyOverLimitIs413AndAtLimitPasses(t *testing.T) {
+	cases := []struct {
+		name    string
+		size    int
+		chunked bool
+		want    int
+	}{
+		{"at the limit, content-length", MaxMCPBody, false, http.StatusOK},
+		{"over the limit, content-length", MaxMCPBody + 1, false, http.StatusRequestEntityTooLarge},
+		{"at the limit, chunked", MaxMCPBody, true, http.StatusOK},
+		{"over the limit, chunked", MaxMCPBody + 1, true, http.StatusRequestEntityTooLarge},
 	}
-}
-
-func TestChunkedBodyOverLimitIs413(t *testing.T) {
-	e := start(t)
-	big := io.MultiReader(strings.NewReader(strings.Repeat("x", MaxMCPBody)), strings.NewReader("y"))
-	r, _ := http.NewRequest("POST", e.srv.URL+"/mcp", io.NopCloser(big)) // no ContentLength: chunked
-	r.Host = "mcp.example.com"
-	r.Header.Set("Authorization", "Bearer "+goodToken)
-	res, err := http.DefaultClient.Do(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = res.Body.Close()
-	if res.StatusCode != http.StatusRequestEntityTooLarge {
-		t.Fatalf("got %d", res.StatusCode)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := start(t)
+			var body io.Reader = bytes.NewReader(make([]byte, c.size))
+			if c.chunked {
+				body = io.NopCloser(body) // hides the length, so the client sends chunked
+			}
+			r, _ := http.NewRequest("POST", e.srv.URL+"/mcp", body)
+			r.Host = "mcp.example.com"
+			r.Header.Set("Authorization", "Bearer "+goodToken)
+			res, err := http.DefaultClient.Do(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = res.Body.Close()
+			if res.StatusCode != c.want {
+				t.Fatalf("got %d want %d", res.StatusCode, c.want)
+			}
+			if c.want == http.StatusRequestEntityTooLarge && !c.chunked && len(e.up.Requests()) != 0 {
+				t.Fatal("a body declared over the limit reached the upstream")
+			}
+		})
 	}
 }
 
@@ -343,8 +356,7 @@ func TestServerSentEventsStreamThroughTheWholeChain(t *testing.T) {
 	}
 	t.Cleanup(func() { close(next) })
 	res := e.do(t, "GET", "/mcp", nil, map[string]string{"Authorization": "Bearer " + goodToken, "Accept": "text/event-stream"})
-	buf := make([]byte, 64)
-	buf = buf[:len("data: one\n\n")]
+	buf := make([]byte, len("data: one\n\n"))
 	if _, err := io.ReadFull(res.Body, buf); err != nil || string(buf) != "data: one\n\n" {
 		t.Fatalf("first event not flushed through the middleware chain: %q %v", buf, err)
 	}
