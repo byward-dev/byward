@@ -608,6 +608,9 @@ func TestCheckHeadersRequiresTheHeadersToMirrorTheBody(t *testing.T) {
 		"malformed Base64 sentinel":       {call, hdr("tools/call", "=?base64?!!?="), false},
 		"sentinel without its ?=":         {call, hdr("tools/call", "=?base64?d2VhdGhlcg=="), false},
 		"params.name not a string":        {modernBody(`7`, "tools/call", "", `"name":7`), hdr("tools/call", "7"), false},
+		"sentinel for Mcp-Method":         {call, with(hdr("tools/call", "weather"), "Mcp-Method", "=?base64?dG9vbHMvY2FsbA==?="), false},
+		"sentinel for the version":        {call, with(hdr("tools/call", "weather"), "MCP-Protocol-Version", "=?base64?MjAyNi0wNy0yOA==?="), false},
+		"raw non-ASCII Mcp-Name":          {meteo, hdr("tools/call", "météo"), false},
 	} {
 		h := http.Header{}
 		for _, kv := range tc.header {
@@ -668,8 +671,8 @@ func TestModernRequestWhoseHeadersDoNotMirrorTheBodyIsRefusedBeforeAnyProcessSta
 	res := b.do(t, context.Background(), http.MethodPost, "alice", "", call,
 		"MCP-Protocol-Version", "2026-07-28", "Mcp-Method", "tools/call", "Mcp-Name", "news")
 	raw, _ := io.ReadAll(res.Body)
-	if res.StatusCode != http.StatusBadRequest || rpcErrorCode(t, raw) != -32020 { // HeaderMismatch, a spec value
-		t.Fatalf("status %d, body %s; want 400 with HeaderMismatch (-32020)", res.StatusCode, raw)
+	if res.StatusCode != http.StatusBadRequest || rpcErrorCode(t, raw) != -32020 || !strings.Contains(string(raw), `"id":1`) { // HeaderMismatch, a spec value
+		t.Fatalf("status %d, body %s; want 400 with HeaderMismatch (-32020) under the request's id", res.StatusCode, raw)
 	}
 	if b.m.Len() != 0 {
 		t.Fatal("a process started for a request refused on its headers")
