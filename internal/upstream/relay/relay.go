@@ -16,9 +16,12 @@ import (
 	"github.com/corker/mcp-authproxy/internal/logging"
 )
 
-// MaxInFlight is the default cap on concurrent requests to the upstream; beyond it the proxy
-// answers 503 (ADR-0018 §7).
-const MaxInFlight = 64
+// Caps toward the upstream (ADR-0018 §7); beyond them the proxy answers 503. Long-lived `GET`
+// streams have their own cap so idle legacy-era streams can never use up the slots tool calls need.
+const (
+	MaxInFlight = 64
+	MaxStreams  = 256
+)
 
 // stripped are removed from every inbound request before anything of ours is set (invariant 16).
 // `X-Forwarded-*` is matched by prefix below; hop-by-hop headers are removed by ReverseProxy.
@@ -65,8 +68,12 @@ func New(log *slog.Logger, target *url.URL) http.Handler {
 			http.Error(w, "upstream unavailable", http.StatusBadGateway)
 		},
 	}
-	sem := make(chan struct{}, MaxInFlight)
+	requests, streams := make(chan struct{}, MaxInFlight), make(chan struct{}, MaxStreams)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sem := requests
+		if r.Method == http.MethodGet {
+			sem = streams
+		}
 		select {
 		case sem <- struct{}{}:
 			defer func() { <-sem }()

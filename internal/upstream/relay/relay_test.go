@@ -103,6 +103,42 @@ func TestRelayInFlightCap(t *testing.T) {
 	}
 }
 
+func TestOpenStreamsDoNotUseRequestSlots(t *testing.T) {
+	up := fakeupstream.New()
+	t.Cleanup(up.Close)
+	release := make(chan struct{})
+	var streaming sync.WaitGroup
+	streaming.Add(MaxInFlight)
+	up.Handler = func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.(http.Flusher).Flush()
+			streaming.Done()
+			<-release
+		}
+	}
+	srv := httptest.NewServer(relayTo(t, up, "/mcp"))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) })
+	for range MaxInFlight {
+		go func() {
+			if res, err := http.Get(srv.URL); err == nil {
+				defer func() { _ = res.Body.Close() }()
+				_, _ = io.Copy(io.Discard, res.Body)
+			}
+		}()
+	}
+	streaming.Wait()
+	res, err := http.Post(srv.URL, "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("POST with %d open streams: got %d", MaxInFlight, res.StatusCode)
+	}
+}
+
 func TestRelayStreamsServerSentEvents(t *testing.T) {
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)

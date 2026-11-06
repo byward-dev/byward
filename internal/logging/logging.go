@@ -104,6 +104,8 @@ func Middleware(log *slog.Logger, next http.Handler) http.Handler {
 		start := time.Now()
 		id := NewRequestID()
 		r = r.WithContext(WithRequestID(r.Context(), id))
+		// Echoed so users and operators can quote it; inbound IDs are not trusted (no trusted proxies yet).
+		w.Header().Set("X-Request-Id", id)
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
 		attrs := []any{"request_id", id, "method", r.Method, "path", r.URL.Path, "status", rec.status,

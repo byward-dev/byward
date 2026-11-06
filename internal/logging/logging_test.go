@@ -64,8 +64,13 @@ func TestMiddlewareLogsRequestWithoutQueryOrHeaders(t *testing.T) {
 	r.Header.Set("Mcp-Method", "tools/call")
 	r.Header.Set("X-Forwarded-For", "6.6.6.6")
 	r.RemoteAddr = "192.0.2.7:51234"
-	h.ServeHTTP(httptest.NewRecorder(), r)
+	r.Header.Set("X-Request-Id", "spoofed")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
 	out := buf.String()
+	if rec.Header().Get("X-Request-Id") != seen || strings.Contains(out, "spoofed") {
+		t.Fatalf("request id not echoed or inbound id trusted: %q / %s", rec.Header().Get("X-Request-Id"), out)
+	}
 	if len(seen) != 32 || !strings.Contains(out, seen) {
 		t.Fatalf("request id %q not logged: %s", seen, out)
 	}
