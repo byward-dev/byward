@@ -15,3 +15,4 @@
 {"time":"T","level":"WARN","msg":"audit rate_limited","log.type":"audit","schema_version":1,"event":"rate_limited","outcome":"failure","reason":"authorize","remote_ip":"192.0.2.7"}
 {"time":"T","level":"INFO","msg":"audit store_restored","log.type":"audit","schema_version":1,"event":"store_restored","outcome":"success","reason":"restored from an older copy","epoch":2}
 {"time":"T","level":"WARN","msg":"audit session_rejected","log.type":"audit","schema_version":1,"event":"session_rejected","outcome":"failure","reason":"session of another user","user_key":"tid:oid","remote_ip":"192.0.2.7"}
+{"time":"T","level":"INFO","msg":"audit process_evicted","log.type":"audit","schema_version":1,"event":"process_evicted","outcome":"success","reason":"user_cap","user_key":"tid:oid"}

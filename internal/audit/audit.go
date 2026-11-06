@@ -33,6 +33,7 @@ const (
 	RateLimited         = "rate_limited"          // an OAuth endpoint refused a request over its per-address budget
 	StoreRestored       = "store_restored"        // startup found the store restored from an older copy; a new epoch began (ADR-0007 §9)
 	SessionRejected     = "session_rejected"      // a signed-in user presented an MCP session ID not bound to them (invariant 13)
+	ProcessEvicted      = "process_evicted"       // an idle stdio upstream process was stopped to make room under a process cap (ADR-0003 §5)
 )
 
 // Outcomes.

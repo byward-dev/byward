@@ -3,10 +3,12 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -99,6 +101,9 @@ func (v *Values) Effective() []Value {
 	return out
 }
 
+// commandSetting is the setting a command after -- fills, as a JSON array.
+const commandSetting = "upstream-command"
+
 // readFileFunc reads a secret file; main passes os.ReadFile.
 type readFileFunc = func(path string) ([]byte, error)
 
@@ -124,6 +129,11 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 	}
 	if extraFlags != nil {
 		extraFlags(fs)
+	}
+	// Everything after the first -- is the stdio upstream's command (ADR-0019 §8).
+	var command []string
+	if i := slices.Index(args, "--"); i >= 0 {
+		args, command = args[:i], args[i+1:]
 	}
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -173,6 +183,18 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 		}
 		vals.order = append(vals.order, s.Name)
 		vals.byKey[s.Name] = v
+	}
+	if command != nil {
+		v, ok := vals.byKey[commandSetting]
+		if !ok || v.Source != SourceDefault {
+			return nil, errorf("give the stdio upstream command either after -- or with --%s / %s, not both", commandSetting, v.Setting.Env())
+		}
+		if len(command) == 0 {
+			return nil, errorf("no command after --")
+		}
+		raw, _ := json.Marshal(command)
+		v.Raw, v.Source = string(raw), SourceFlag
+		vals.byKey[commandSetting] = v
 	}
 	return vals, nil
 }

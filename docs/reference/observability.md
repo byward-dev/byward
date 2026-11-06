@@ -66,6 +66,7 @@ For SIEMs that use [OCSF](https://schema.ocsf.io) 1.9.0. Fields map as follows: 
 | `rate_limited` | an OAuth endpoint refused a request over the client address's budget (`reason` = the endpoint; [rate limits](rate-limits.md)) | failure | yes | 4002 HTTP Activity; `disposition_id` 2 Blocked |
 | `store_restored` | at startup, the store was found restored from an older copy: a new `epoch` began and refresh tokens issued before it are refused, so those users sign in again (ADR-0007 §9) | success | no | 6002 Application Lifecycle / 99 Other (*approximate*) |
 | `session_rejected` | a signed-in user presented an `Mcp-Session-Id` that is not theirs: sealed for another user or upstream, not issued by this proxy, tampered with, or expired (`reason` fixed); the client gets 404 and starts a new session | failure | no | 3003 Authorize Session / 99 Other (*approximate*) |
+| `process_evicted` | an idle stdio upstream process was stopped so another could start under `BYWARD_STDIO_MAX_PROCESSES_PER_USER` (`reason` `user_cap`, the user's own process) or `BYWARD_STDIO_MAX_PROCESSES` (`reason` `upstream_cap`, any user's); `user_key` is the evicted process's user, whose session ends and whose client starts a new one | success | no | 6002 Application Lifecycle / 4 Stop (*approximate*) |
 
 Not emitted yet; these arrive with their slices:
 dynamic registration (slice 2.2) and key rotation
@@ -81,13 +82,14 @@ Prometheus text format at `/metrics` on the internal listener. Histogram buckets
 | `byward_http_request_duration_seconds` | histogram | `route`: the matched route pattern (`/mcp` or your public path, `/authorize`, `/consent`, `/assets/page.css`, `/callback/entra`, `/token`, `/revoke`, the `/.well-known/…` metadata paths) or `other`; `status_class` (`2xx` …) |
 | `byward_idp_request_duration_seconds` | histogram | `idp`, `operation` (`authorize`, `callback`, `refresh`), `outcome` (`success`, `rejected`, `unavailable`) |
 | `byward_upstream_in_flight` | gauge | `kind` (`request`, `stream`) |
+| `byward_stdio_processes` | gauge | none; live stdio upstream processes, starting and stopping ones included (only with a stdio upstream) |
 | `byward_upstream_busy_total` | counter | `kind`: requests refused with 503 because an admission cap was full |
 | `byward_audit_events_total` | counter | `event`, `outcome`: every audit event, including rate-limited ones |
 | `byward_rate_limited_total` | counter | `endpoint`: OAuth requests refused with 429 (or a `temporarily_unavailable` redirect) over a client address's budget |
 | `byward_cimd_fetches_total` | counter | `outcome`: Client ID Metadata Document fetches: `ok`, `invalid`, `refused` (non-public address, a 4xx other than 408 and 429, redirect, too large), `unavailable` (network, timeout, 5xx, 408, 429), `rate_limited`, `busy` |
 | `byward_build_info` | gauge | `version`, `go_version`; always 1 |
 
-Plus the standard `go_*` and `process_*` collectors. Live stdio processes, deny-list sync age and store errors arrive
+Plus the standard `go_*` and `process_*` collectors. Deny-list sync age and store errors arrive
 with their slices.
 
 Example alert rules:

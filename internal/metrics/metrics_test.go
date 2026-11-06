@@ -33,6 +33,7 @@ func exercise(m *Metrics) {
 	m.Busy("stream")
 	m.AuditEvent("login", "success")
 	m.RateLimited("authorize")
+	m.StdioProcesses(func() int { return 2 })
 }
 
 // Every family except the Go runtime's own collectors: a metric with the wrong prefix must reach the

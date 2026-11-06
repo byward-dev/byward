@@ -227,7 +227,7 @@ Decided values cite their ADR; everything else is **proposed — decided per fea
 | Budget | Default | Status |
 |---|---|---|
 | stdio idle timeout | 30 min | **Decided**, ADR-0003 |
-| stdio process caps | per-upstream and per-user, LRU eviction of idle | **Decided** mechanism (ADR-0003); values proposed |
+| stdio process caps | 64 per upstream, 8 per user; LRU eviction of idle (the user's own at their cap) | **Decided** mechanism (ADR-0003); values set in #60 |
 | stdio spawn / kill | 30 s spawn timeout; kill 5 s after SIGTERM | Proposed |
 | Discovery, registration, token | < 10 s, p99 < 2 s | Proposed (Claude times out at 10 s) |
 | Refresh | < 30 s, p99 < 5 s | Proposed (Claude: 30 s) |
