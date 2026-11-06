@@ -2,6 +2,7 @@ package registration
 
 import (
 	"context"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
@@ -32,10 +33,26 @@ var assertionAlgs = []jose.SignatureAlgorithm{jose.RS256, jose.PS256, jose.ES256
 
 func invalid(reason string) error { return fmt.Errorf("%w: %s", ErrInvalidClient, reason) }
 
+// clientAuth is how a registered client authenticates at /token: the registered method and its
+// credential. Static clients embed it; CIMD and DCR clients will too (secret stays empty for them,
+// ADR-0008 §5).
+type clientAuth struct {
+	id     string
+	method AuthMethod
+	secret string
+	keys   idp.KeySource
+	jti    JTICache
+}
+
+func (c clientAuth) String() string {
+	return fmt.Sprintf("registration.clientAuth{id:%s method:%s}", c.id, c.method)
+}
+func (c clientAuth) GoString() string { return c.String() }
+
 // Authenticate checks the credentials of a /token or /revoke request: exactly the registered
 // method, a matching client_id, secrets compared in constant time, and private_key_jwt per RFC 7523
 // with aud = tokenEndpoint, exp at most 5 min ahead and a jti replay check.
-func (c *staticClient) Authenticate(ctx context.Context, form url.Values, header http.Header, tokenEndpoint string, now time.Time) error {
+func (c *clientAuth) Authenticate(ctx context.Context, form url.Values, header http.Header, tokenEndpoint string, now time.Time) error {
 	basicID, basicSecret, hasBasic := basicAuth(header)
 	if hasBasic && basicID != c.id {
 		return invalid("Basic client ID does not match")
@@ -98,7 +115,7 @@ func basicAuth(h http.Header) (id, secret string, ok bool) {
 	return id, secret, true
 }
 
-func (c *staticClient) checkSecret(got string) error {
+func (c *clientAuth) checkSecret(got string) error {
 	want, sent := sha256.Sum256([]byte(c.secret)), sha256.Sum256([]byte(got))
 	if subtle.ConstantTimeCompare(want[:], sent[:]) != 1 {
 		return invalid("client secret does not match")
@@ -106,7 +123,7 @@ func (c *staticClient) checkSecret(got string) error {
 	return nil
 }
 
-func (c *staticClient) checkAssertion(ctx context.Context, raw, tokenEndpoint string, now time.Time) error {
+func (c *clientAuth) checkAssertion(ctx context.Context, raw, tokenEndpoint string, now time.Time) error {
 	claims, err := idp.VerifySignature(ctx, raw, c.keys, assertionAlgs)
 	if err != nil {
 		return invalid("client assertion: " + err.Error())
@@ -166,4 +183,25 @@ func numericDate(v any) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return time.Unix(int64(f), 0), true
+}
+
+// parseClientJWKS parses a client's registered JWK Set: public keys only, RSA at least MinRSABits,
+// at least one usable signing key.
+func parseClientJWKS(raw []byte) (idp.StaticKeys, error) {
+	set, err := idp.ParseJWKS(raw)
+	if err != nil {
+		return idp.StaticKeys{}, fmt.Errorf("jwks: %w", err)
+	}
+	for _, k := range set.Keys {
+		if !k.IsPublic() {
+			return idp.StaticKeys{}, errors.New("jwks: contains a private key; register public keys only")
+		}
+		if rk, ok := k.Key.(*rsa.PublicKey); ok && rk.N.BitLen() < MinRSABits {
+			return idp.StaticKeys{}, fmt.Errorf("jwks: RSA keys must be at least %d bits", MinRSABits)
+		}
+	}
+	if idp.SigningKeys(set) == 0 {
+		return idp.StaticKeys{}, errors.New("jwks: no usable public signing key")
+	}
+	return idp.StaticKeys(set), nil
 }

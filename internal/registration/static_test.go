@@ -17,7 +17,7 @@ import (
 	"github.com/corker/mcp-authproxy/internal/testutil/fakeidp"
 )
 
-const goodSecret = "0123456789abcdef0123456789abcdef-secret"
+const goodSecret = "0123456789abcdef0123456789abcdef+%/:secret"
 
 // files is a readFile over an in-memory map.
 type files map[string]string
@@ -99,7 +99,7 @@ func TestLoadStaticRejects(t *testing.T) {
 		extra   files
 		wantErr string
 	}{
-		"not JSON":             {file: `{`, wantErr: "static clients:"},
+		"not JSON":             {file: `{`, wantErr: "unexpected EOF"},
 		"trailing data":        {file: entry(ok) + `{}`, wantErr: "unexpected data"},
 		"unknown field":        {file: entry(ok + `,"scope":"x"`), wantErr: "unknown field"},
 		"unknown top field":    {file: `{"clients":[{` + ok + `}],"extra":1}`, wantErr: "unknown field"},
@@ -111,10 +111,10 @@ func TestLoadStaticRejects(t *testing.T) {
 			wantErr: "c: client_secret: inline secrets are not allowed"},
 		"unknown method":      {file: entry(`"client_id":"c","token_endpoint_auth_method":"tls_client_auth","redirect_uris":["https://a.example/cb"]`), wantErr: "c: token_endpoint_auth_method"},
 		"missing method":      {file: entry(`"client_id":"c","redirect_uris":["https://a.example/cb"]`), wantErr: "c: token_endpoint_auth_method"},
-		"no redirect":         {file: entry(`"client_id":"c","token_endpoint_auth_method":"none","redirect_uris":[]`), wantErr: "c: redirect_uris"},
+		"no redirect":         {file: entry(`"client_id":"c","token_endpoint_auth_method":"none","redirect_uris":[]`), wantErr: "c: redirect_uris: between 1 and"},
 		"bad redirect":        {file: entry(`"client_id":"c","token_endpoint_auth_method":"none","redirect_uris":["http://a.example/cb"]`), wantErr: "c: redirect_uris[0]"},
 		"duplicate redirect":  {file: entry(`"client_id":"c","token_endpoint_auth_method":"none","redirect_uris":["https://a.example/cb","https://a.example/cb"]`), wantErr: "c: redirect_uris[1]: duplicate"},
-		"too many redirects":  {file: entry(`"client_id":"c","token_endpoint_auth_method":"none","redirect_uris":[` + manyRedirects(MaxRedirectURIs+1) + `]`), wantErr: "c: redirect_uris"},
+		"too many redirects":  {file: entry(`"client_id":"c","token_endpoint_auth_method":"none","redirect_uris":[` + manyRedirects(MaxRedirectURIs+1) + `]`), wantErr: "c: redirect_uris: between 1 and"},
 		"secret file missing": {file: entry(`"client_id":"c","token_endpoint_auth_method":"client_secret_post","redirect_uris":["https://a.example/cb"]`), wantErr: "c: client_secret_file: required"},
 		"secret file absent":  {file: entry(`"client_id":"c","token_endpoint_auth_method":"client_secret_post","redirect_uris":["https://a.example/cb"],"client_secret_file":"nope"`), wantErr: "c: client_secret_file: open"},
 		"short secret": {file: entry(`"client_id":"c","token_endpoint_auth_method":"client_secret_post","redirect_uris":["https://a.example/cb"],"client_secret_file":"s"`),

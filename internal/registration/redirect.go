@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -92,6 +93,11 @@ func parseRedirect(raw string) (*url.URL, error) {
 	if u.User != nil {
 		return reject(ReasonUserinfo)
 	}
+	// The scheme must be written in lower case: matching is exact, and url.Parse would otherwise
+	// fold "HTTP" into "http".
+	if !strings.HasPrefix(raw, u.Scheme+"://") {
+		return reject(ReasonScheme)
+	}
 	switch u.Scheme {
 	case "https":
 	case "http":
@@ -102,6 +108,23 @@ func parseRedirect(raw string) (*url.URL, error) {
 		return reject(ReasonScheme)
 	}
 	return u, nil
+}
+
+// ValidateRedirects checks a registration's redirect URIs: 1 to MaxRedirectURIs entries, each valid
+// and unique (ADR-0009 §1-3, §7).
+func ValidateRedirects(uris []string) error {
+	if len(uris) == 0 || len(uris) > MaxRedirectURIs {
+		return fmt.Errorf("redirect_uris: between 1 and %d required", MaxRedirectURIs)
+	}
+	for i, u := range uris {
+		if err := ValidateRedirect(u); err != nil {
+			return fmt.Errorf("redirect_uris[%d]: %w", i, err)
+		}
+		if slices.Contains(uris[:i], u) {
+			return fmt.Errorf("redirect_uris[%d]: duplicate", i)
+		}
+	}
+	return nil
 }
 
 // MatchRedirect applies ADR-0009 to a redirect URI sent at /authorize or /token: HTTPS must equal

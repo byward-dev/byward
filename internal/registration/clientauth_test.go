@@ -31,9 +31,10 @@ func newAuthEnv(t *testing.T) *authEnv {
 			{"client_id":"cli","token_endpoint_auth_method":"none","redirect_uris":["http://127.0.0.1/cb"]},
 			{"client_id":"basic","token_endpoint_auth_method":"client_secret_basic","redirect_uris":["https://a.example/cb"],"client_secret_file":"s"},
 			{"client_id":"post","token_endpoint_auth_method":"client_secret_post","redirect_uris":["https://a.example/cb"],"client_secret_file":"s"},
-			{"client_id":"jwt","token_endpoint_auth_method":"private_key_jwt","redirect_uris":["https://a.example/cb"],"jwks":` + publicJWKS(t, cert) + `}
+			{"client_id":"jwt","token_endpoint_auth_method":"private_key_jwt","redirect_uris":["https://a.example/cb"],"jwks":` + publicJWKS(t, cert) + `},
+			{"client_id":"jwt2","token_endpoint_auth_method":"private_key_jwt","redirect_uris":["https://a.example/cb"],"jwks":` + publicJWKS(t, cert) + `}
 		]}`,
-		"/s": goodSecret,
+		"/s": goodSecret + "\r\n",
 	}.read, jti)
 	if err != nil {
 		t.Fatal(err)
@@ -209,5 +210,33 @@ func TestAssertionWithoutKidUsesTheSingleKey(t *testing.T) {
 	}
 	if err := e.auth(t, "jwt", url.Values{"client_assertion_type": {clientAssertionType}, "client_assertion": {s}}, nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func rawBasic(id, secret string) http.Header {
+	r, _ := http.NewRequest(http.MethodPost, "/", nil)
+	r.SetBasicAuth(id, secret)
+	return r.Header
+}
+
+func TestReplayIsRejectedInsideTheLeewayWindow(t *testing.T) {
+	e := newAuthEnv(t)
+	form := e.assertion(t, e.cert, "PS256", map[string]any{"exp": now.Add(-AssertionLeeway + time.Second).Unix()})
+	if err := e.auth(t, "jwt", form, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.auth(t, "jwt", form, nil); !errors.Is(err, ErrInvalidClient) || !strings.Contains(err.Error(), "replayed") {
+		t.Fatalf("replay within leeway: %v", err)
+	}
+}
+
+func TestJTIIsScopedPerClient(t *testing.T) {
+	e := newAuthEnv(t)
+	for _, id := range []string{"jwt", "jwt2"} {
+		form := e.assertion(t, e.cert, "PS256", map[string]any{"iss": id, "sub": id, "jti": "shared"})
+		form.Set("client_id", id)
+		if err := e.auth(t, id, form, nil); err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
 	}
 }

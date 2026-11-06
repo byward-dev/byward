@@ -88,6 +88,8 @@ func TestMatchRedirect(t *testing.T) {
 		{"empty", []string{"https://app.example/cb"}, "", ReasonMalformed},
 		{"space in path", []string{"https://app.example/c b"}, "https://app.example/c b", ReasonMalformed},
 		{"tab", []string{"https://app.example/cb"}, "https://app.example/cb\t", ReasonMalformed},
+		{"uppercase scheme loopback", []string{"Http://127.0.0.1"}, "htTp://127.0.0.1", ReasonScheme},
+		{"uppercase scheme https", []string{"https://app.example/cb"}, "HTTPS://app.example/cb", ReasonScheme},
 		{"localhost uppercase", []string{"http://localhost/cb"}, "http://LOCALHOST:9/cb", ReasonScheme},
 		{"ipv6 zone", []string{"http://[::1]/cb"}, "http://[::1%25eth0]:8/cb", ReasonScheme},
 	} {

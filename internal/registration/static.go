@@ -3,17 +3,13 @@ package registration
 import (
 	"bytes"
 	"context"
-	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
-	"slices"
 	"strings"
 	"unicode"
-
-	"github.com/corker/mcp-authproxy/internal/idp"
 )
 
 // Static-client file limits.
@@ -136,18 +132,11 @@ func buildClient(e staticEntry, dir string, readFile func(string) ([]byte, error
 	if len(name) > MaxClientNameLen || strings.ContainsFunc(name, unicode.IsControl) {
 		return nil, fmt.Errorf("client_name: at most %d characters, no control characters", MaxClientNameLen)
 	}
-	if len(e.RedirectURIs) == 0 || len(e.RedirectURIs) > MaxRedirectURIs {
-		return nil, fmt.Errorf("redirect_uris: between 1 and %d required", MaxRedirectURIs)
+	if err := ValidateRedirects(e.RedirectURIs); err != nil {
+		return nil, err
 	}
-	for i, u := range e.RedirectURIs {
-		if err := ValidateRedirect(u); err != nil {
-			return nil, fmt.Errorf("redirect_uris[%d]: %w", i, err)
-		}
-		if slices.Contains(e.RedirectURIs[:i], u) {
-			return nil, fmt.Errorf("redirect_uris[%d]: duplicate", i)
-		}
-	}
-	c := &staticClient{id: e.ClientID, name: name, method: e.AuthMethod, redirects: e.RedirectURIs, jti: jti}
+	c := &staticClient{name: name, redirects: e.RedirectURIs,
+		clientAuth: clientAuth{id: e.ClientID, method: e.AuthMethod, jti: jti}}
 	secretMethod := e.AuthMethod == ClientSecretBasic || e.AuthMethod == ClientSecretPost
 	switch {
 	case e.AuthMethod != None && e.AuthMethod != PrivateKeyJWT && !secretMethod:
@@ -185,22 +174,11 @@ func buildClient(e staticEntry, dir string, readFile func(string) ([]byte, error
 		case len(e.JWKS) == 0:
 			return nil, errors.New("jwks: required for private_key_jwt (or jwks_file)")
 		}
-		set, err := idp.ParseJWKS(raw)
+		keys, err := parseClientJWKS(raw)
 		if err != nil {
-			return nil, fmt.Errorf("jwks: %w", err)
+			return nil, err
 		}
-		for _, k := range set.Keys {
-			if !k.IsPublic() {
-				return nil, errors.New("jwks: contains a private key; register public keys only")
-			}
-			if rk, ok := k.Key.(*rsa.PublicKey); ok && rk.N.BitLen() < MinRSABits {
-				return nil, fmt.Errorf("jwks: RSA keys must be at least %d bits", MinRSABits)
-			}
-		}
-		if idp.SigningKeys(set) == 0 {
-			return nil, errors.New("jwks: no usable public signing key")
-		}
-		c.keys = idp.StaticKeys(set)
+		c.keys = keys
 	}
 	return c, nil
 }
@@ -214,12 +192,9 @@ func resolve(dir, p string) string {
 
 // staticClient is a client from the operator's file; its trust level is Verified (ADR-0008 §8).
 type staticClient struct {
-	id, name  string
-	method    AuthMethod
+	clientAuth
+	name      string
 	redirects []string
-	secret    string
-	keys      idp.StaticKeys
-	jti       JTICache
 }
 
 func (c *staticClient) ID() string             { return c.id }
