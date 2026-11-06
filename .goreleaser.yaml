@@ -1,0 +1,95 @@
+# Release build (ADR-0019). Local, unsigned, unpublished: `mise run release:snapshot`.
+# Real releases run only from .github/workflows/release.yml on a `v*` tag.
+version: 2
+project_name: mcp-authproxy
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot.{{ .ShortCommit }}"
+
+metadata:
+  mod_timestamp: "{{ .CommitTimestamp }}"
+
+builds:
+  - id: mcp-authproxy
+    main: ./cmd/mcp-authproxy
+    binary: mcp-authproxy
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin] # darwin is for development only
+    goarch: [amd64, arm64]
+    flags: [-trimpath, -buildvcs=true]
+    # Version info comes from runtime/debug.ReadBuildInfo, never -X; setting ldflags replaces goreleaser's -X defaults.
+    ldflags: [-s -w]
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: mcp-authproxy
+    ids: [mcp-authproxy]
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    builds_info: &fileinfo
+      owner: root
+      group: root
+      mtime: "{{ .CommitDate }}"
+    files:
+      - src: LICENSE
+        info: *fileinfo
+      - src: README.md
+        info: *fileinfo
+      - src: build/licenses
+        dst: third_party
+        info: *fileinfo
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+sboms:
+  - artifacts: archive
+
+# Keyless (GitHub OIDC); release.yml only. Snapshots pass --skip=sign.
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    args: [sign-blob, "--bundle=${signature}", "${artifact}", --yes]
+
+docker_signs:
+  - cmd: cosign
+    args: [sign, "${artifact}@${digest}", --yes]
+
+dockers_v2:
+  - id: image
+    ids: [mcp-authproxy]
+    images: [ghcr.io/corker/mcp-authproxy]
+    # Snapshots are tagged snapshot-<arch> and only loaded locally (scripts/image-smoke.sh relies on it).
+    tags:
+      - "{{ if .IsSnapshot }}snapshot{{ else }}v{{ .Version }}{{ end }}"
+      - "{{ if not .IsSnapshot }}latest{{ end }}"
+    platforms: [linux/amd64, linux/arm64]
+    extra_files: [LICENSE, build/licenses]
+    build_args:
+      SOURCE_DATE_EPOCH: "{{ .CommitTimestamp }}"
+    labels:
+      org.opencontainers.image.source: https://github.com/corker/mcp-authproxy
+      org.opencontainers.image.licenses: Apache-2.0
+    # Snapshots export one platform at a time, and buildx rejects index annotations there.
+    annotations:
+      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.title": "{{ .ProjectName }}"
+      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.description": Auth-only proxy that puts an MCP server behind OAuth 2.1 / OIDC
+      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.source": https://github.com/corker/mcp-authproxy
+      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.revision": "{{ .FullCommit }}"
+      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.version": "{{ .Version }}"
+      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.created": "{{ .CommitDate }}"
+      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.licenses": Apache-2.0
+      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.base.name": "{{ .BaseImage }}"
+      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.base.digest": "{{ .BaseImageDigest }}"
+    sbom: true
+    flags:
+      - "{{ if not .IsSnapshot }}--provenance=mode=max{{ end }}"
+
+release:
+  draft: true
+
+changelog:
+  use: github

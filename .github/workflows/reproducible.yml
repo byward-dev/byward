@@ -1,0 +1,25 @@
+name: reproducible
+
+# Scheduled lane (ADR-0024): rebuild in a second directory with an empty Go cache and compare sha256.
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          install_args: go goreleaser go:github.com/google/go-licenses/v2
+      - run: mise run release:reproducible
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"

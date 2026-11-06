@@ -1,0 +1,20 @@
+name: go-version
+
+# Dependabot cannot bump the Go pin in mise.toml; this flags newer Go releases weekly.
+on:
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # curl and jq come with the ubuntu-latest image; no Go or mise needed.
+      - run: sh scripts/go-version-check.sh

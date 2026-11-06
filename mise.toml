@@ -1,7 +1,18 @@
 [tools]
-go = "1.27"
+# Exact patch, so release rebuilds are byte-identical; .github/workflows/go-version.yml flags newer releases.
+go = "1.27.3"
 golangci-lint = "2.15.0"
 "go:golang.org/x/tools/cmd/goimports" = "0.52.0"
+# Release tools (ADR-0019); used by `release*` tasks. go-licenses is also used by `check`.
+goreleaser = "2.19.0"
+syft = "1.55.0"
+cosign = "3.1.4"
+jq = "1.8.2"
+"go:github.com/google/go-licenses/v2" = "2.0.1"
+# Workflow and shell linters (`lint:workflows`, part of `check`); offline, no GitHub token.
+actionlint = "1.7.12"
+zizmor = "1.31.1"
+shellcheck = "0.11.0"
 # Operator/dev tool (Entra app setup, real-tenant tests); not needed by `mise run check`, not installed in CI.
 # azure-cli 2.92.0 pins a pre-release dependency (azure-appconfiguration 1.10.0b1); uv needs this to resolve it.
 "pipx:azure-cli" = { version = "2.92.0", uvx_args = "--prerelease=allow" }
@@ -20,14 +31,52 @@ run = "go vet ./..."
 [tasks.lint]
 run = "golangci-lint run"
 
+[tasks."lint:workflows"]
+description = "Lint GitHub workflows (actionlint with shellcheck, zizmor offline) and shell scripts"
+run = ["actionlint", "zizmor --offline --no-progress .github/workflows", "shellcheck scripts/*.sh"]
+
 [tasks.test]
 description = "Unit tests (with the race detector)"
 run = "go test -race ./..."
 
+[tasks."test:scripts"]
+description = "Table tests for the release and CI shell scripts (no network, no Docker)"
+run = "sh scripts/go-version-check_test.sh"
+
 [tasks."test:integration"]
-description = "Integration tests (needs Docker)"
+description = "Integration tests, including the release smoke test (needs Docker)"
+depends = ["release:smoke"]
 run = "go test -tags=integration ./..."
 
 [tasks.check]
-description = "Everything CI runs"
-depends = ["fmt:check", "vet", "lint", "test"]
+description = "Everything CI runs without Docker"
+depends = ["fmt:check", "vet", "lint", "lint:workflows", "licenses:check", "test", "test:scripts"]
+
+[tasks."licenses:check"]
+description = "Fail on a dependency licence outside the allowlist (linux and darwin build constraints)"
+run = "sh scripts/licenses.sh check"
+
+[tasks.licenses]
+description = "Collect third-party licence texts into build/licenses for archives and the image"
+depends = ["licenses:check"]
+run = "sh scripts/licenses.sh save"
+
+[tasks."release:snapshot"]
+description = "Build every release artifact locally (archives, checksums, SBOMs, images); signs and publishes nothing (needs Docker)"
+depends = ["licenses"]
+run = "goreleaser release --snapshot --clean --skip=sign"
+
+[tasks."release:reproducible"]
+description = "Build twice (second copy elsewhere, empty Go cache) and compare sha256 of binaries and archives"
+depends = ["licenses"]
+run = "sh scripts/reproducible.sh"
+
+[tasks.release]
+description = "Publish a release: CI only (release.yml on a v* tag), needs GITHUB_TOKEN and GitHub OIDC for keyless signing"
+depends = ["licenses"]
+run = "goreleaser release --clean"
+
+[tasks."release:smoke"]
+description = "Build a snapshot, then check dist/ (archives, SBOMs, checksums) and the image contract incl. the FROM node example"
+depends = ["release:snapshot"]
+run = ["sh scripts/dist-check.sh", "sh scripts/image-smoke.sh"]

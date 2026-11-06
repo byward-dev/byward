@@ -8,15 +8,38 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
           # Only the tools `check` needs; operator tools such as azure-cli stay out of CI.
-          install_args: go golangci-lint go:golang.org/x/tools/cmd/goimports
+          install_args: go golangci-lint go:golang.org/x/tools/cmd/goimports actionlint zizmor shellcheck go:github.com/google/go-licenses/v2
       - run: mise run check
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
+
+  # Builds every release artifact exactly as a release would, without signing or publishing (ADR-0019).
+  release-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # goreleaser reads tags
+          persist-credentials: false
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          install_args: go goreleaser syft jq go:github.com/google/go-licenses/v2
+      # Same buildx driver (docker-container) as release.yml, so the snapshot builds images the same way.
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - run: mise run release:smoke
         env:
           MISE_TASK_RUN_AUTO_INSTALL: "false"
