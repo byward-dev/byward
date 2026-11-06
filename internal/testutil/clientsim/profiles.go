@@ -38,7 +38,7 @@ var (
 		Treats403AsAuthFailure: true,
 		Facts: []Fact{
 			{"without --client-id it signs in with CIMD, client_id https://claude.ai/oauth/claude-code-client-metadata; the echo tool then works", "real run 2026-11-06 (byward 3be7365, Entra)"},
-			{"redirect http://localhost:<port>/callback; the document lists http://localhost/callback, any loopback port (RFC 8252 §7.3)", "https://claude.ai/oauth/claude-code-client-metadata; https://code.claude.com/docs/en/mcp"},
+			{"redirect http://localhost:<port>/callback; the document lists http://localhost/callback, and the broker allows any loopback port (RFC 8252 §7.3)", "https://claude.ai/oauth/claude-code-client-metadata; https://code.claude.com/docs/en/mcp"},
 			{"discovery, resource, scope, iss and 403 handling as on the static path", "the ClaudeCode profile's sources"},
 			{"picks CIMD without checking for none in token_endpoint_auth_methods_supported", Assumed},
 			{"authorization server metadata path order", Assumed},
@@ -131,7 +131,8 @@ var Cursor = Profile{
 		{"the other registration fields (grant types, response types, token_endpoint_auth_method none)", Assumed},
 		{"the registration includes cursor://anysphere.cursor-mcp/oauth/callback, which the broker drops, and https and/or loopback callbacks it keeps", "real run 2026-11-06 (byward 3be7365, Entra): the broker logged the dropped cursor:// URI"},
 		{"sends redirect_uri https://www.cursor.com/agents/mcp/oauth/callback at /authorize (consent: \"Returns to www.cursor.com\")", "real run 2026-11-06 (byward 3be7365, Entra)"},
-		{"cursor.com relays the authorization code to the desktop app at http://localhost:8787/callback; PKCE keeps a relayed code useless without the app's verifier", "real run 2026-11-06 (byward 3be7365, Entra): observed browser redirect"},
+		{"cursor.com relays the authorization code to the desktop app at http://localhost:8787/callback", "real run 2026-11-06 (byward 3be7365, Entra): observed browser redirect"},
+		{"a relayed code is useless without the verifier the app holds", "RFC 7636 (reasoning, not observed)"},
 		{"consent shows \"Cursor (Not verified)\", then the token is issued and MCP calls answer 200", "real run 2026-11-06 (byward 3be7365, Entra)"},
 		{"Cursor 2.6.22 registers only custom-scheme callbacks: every /register answers 400 invalid_redirect_uri, so it cannot sign in", "real run 2026-11-06 (byward 3be7365, Entra)"},
 		{"follows the 401's resource_metadata, else the path-inserted PRM, then the root one", Assumed},

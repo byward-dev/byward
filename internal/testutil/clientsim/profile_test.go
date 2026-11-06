@@ -3,13 +3,12 @@ package clientsim
 import (
 	"encoding/json"
 	"net/http"
-	"net/url"
 	"os"
 	"runtime"
-	"slices"
 	"strings"
 	"testing"
 
+	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/testutil/clientdocs"
 )
 
@@ -53,25 +52,11 @@ func TestEveryProfileIsSourcedAndMatchesItsClientsDocument(t *testing.T) {
 			if err := json.Unmarshal(body, &doc); err != nil {
 				t.Fatal(err)
 			}
-			if !slices.ContainsFunc(doc.RedirectURIs, func(u string) bool { return sameRedirect(u, p.RedirectURI) }) {
+			if registration.MatchRedirect(doc.RedirectURIs, p.RedirectURI) != nil { // the broker's rule: any loopback port
 				t.Fatalf("redirect %s is not in the client's document or registration request %v", p.RedirectURI, doc.RedirectURIs)
 			}
 		})
 	}
-}
-
-// sameRedirect compares a listed redirect with the one the client sends; on a loopback host any
-// port matches (RFC 8252 §7.3), as the broker matches it.
-func sameRedirect(listed, sent string) bool {
-	l, errL := url.Parse(listed)
-	s, errS := url.Parse(sent)
-	if errL != nil || errS != nil {
-		return false
-	}
-	if loopback := map[string]bool{"localhost": true, "127.0.0.1": true, "::1": true}; loopback[s.Hostname()] && l.Port() == "" {
-		s.Host = s.Hostname()
-	}
-	return l.String() == s.String()
 }
 
 // docs/quality-lenses.md lists the cells the simulator covers: every profile's cell is a "simulated"
