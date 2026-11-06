@@ -294,7 +294,7 @@ func TestGenericErrorsCarryNoEntraHeaders(t *testing.T) {
 	}
 }
 
-func TestWithJWKSUnavailable(t *testing.T) {
+func TestWithJWKSUnavailableServes503UntilCleared(t *testing.T) {
 	f := newFixture(t, Entra, WithJWKSUnavailable(true))
 	resp, err := http.Get(f.idp.JWKSURL(f.tenant))
 	if err != nil {

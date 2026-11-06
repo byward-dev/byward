@@ -311,3 +311,14 @@ func TestKeySetLookupUsesOnlySigningKeys(t *testing.T) {
 		})
 	}
 }
+
+type panickingTransport struct{}
+
+func (panickingTransport) RoundTrip(*http.Request) (*http.Response, error) { panic("boom") }
+
+func TestKeySetRefetchPanicBecomesUnavailable(t *testing.T) {
+	ks := NewKeySet(NewFetcher(&http.Client{Transport: panickingTransport{}}), "https://idp.example/keys", testClock().Now)
+	if _, err := ks.Key(context.Background(), "k"); !errors.Is(err, ErrKeysUnavailable) || !strings.Contains(err.Error(), "panicked") {
+		t.Fatalf("err = %v", err)
+	}
+}

@@ -104,7 +104,7 @@ func (k *KeySet) refetch(parent context.Context, done chan struct{}) {
 	}
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
-	set, err := k.load(ctx)
+	set, err := k.safeLoad(ctx)
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.fetched, k.lastErr = k.now(), err
@@ -113,6 +113,17 @@ func (k *KeySet) refetch(parent context.Context, done chan struct{}) {
 	}
 	k.running = nil
 	close(done)
+}
+
+// safeLoad is load for the background refetch: no HTTP handler's recover protects that
+// goroutine, so a panic while parsing becomes a fetch error instead of ending the process.
+func (k *KeySet) safeLoad(ctx context.Context) (set jose.JSONWebKeySet, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			set, err = jose.JSONWebKeySet{}, fmt.Errorf("idp: JWKS load panicked: %v", r)
+		}
+	}()
+	return k.load(ctx)
 }
 
 // load fetches the JWKS (see ParseJWKS).
