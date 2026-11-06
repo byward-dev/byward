@@ -47,6 +47,14 @@ func NewFetcher(c *http.Client) *Fetcher {
 	return &Fetcher{Client: c, Retries: DefaultRetries, Backoff: 200 * time.Millisecond}
 }
 
+// StatusError is a GetJSON response other than 200 OK; URL has no query.
+type StatusError struct {
+	URL  string
+	Code int
+}
+
+func (e *StatusError) Error() string { return fmt.Sprintf("GET %s: status %d", e.URL, e.Code) }
+
 // GetJSON fetches a JSON document of at most MaxBodyBytes into dst.
 func (f *Fetcher) GetJSON(ctx context.Context, endpoint string, dst any) error {
 	var last error
@@ -88,7 +96,7 @@ func (f *Fetcher) getOnce(ctx context.Context, endpoint string, dst any) (retry 
 	}
 	if resp.StatusCode != http.StatusOK {
 		return resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests,
-			fmt.Errorf("GET %s: status %d", redactURL(endpoint), resp.StatusCode)
+			&StatusError{URL: redactURL(endpoint), Code: resp.StatusCode}
 	}
 	if err := json.Unmarshal(body, dst); err != nil {
 		return false, fmt.Errorf("GET %s: %w", redactURL(endpoint), JSONError(err))

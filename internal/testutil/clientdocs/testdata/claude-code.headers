@@ -1,0 +1,2 @@
+content-type: application/json
+cache-control: public, max-age=300

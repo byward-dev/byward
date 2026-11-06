@@ -2,13 +2,19 @@ package registration
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 
+	"code.dny.dev/ssrf"
+	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
@@ -252,5 +258,36 @@ func TestJTIIsScopedPerClient(t *testing.T) {
 		if err := e.auth(t, id, form, nil); err != nil {
 			t.Fatalf("%s: %v", id, err)
 		}
+	}
+}
+
+// keysTransient splits jwks_uri failures like metadata documents: only retryable causes are
+// temporary.
+func TestOnlyRetryableKeyFetchFailuresAreTemporary(t *testing.T) {
+	keys := func(err error) error { return fmt.Errorf("%w: %w", idp.ErrKeysUnavailable, err) }
+	for name, tc := range map[string]struct {
+		err       error
+		transient bool
+	}{
+		"500":                   {keys(&idp.StatusError{Code: 500}), true},
+		"503":                   {keys(&idp.StatusError{Code: 503}), true},
+		"408":                   {keys(&idp.StatusError{Code: 408}), true},
+		"429":                   {keys(&idp.StatusError{Code: 429}), true},
+		"404":                   {keys(&idp.StatusError{Code: 404}), false},
+		"403":                   {keys(&idp.StatusError{Code: 403}), false},
+		"refused address":       {keys(&url.Error{Op: "Get", URL: "https://k.example", Err: ssrf.ErrProhibitedIP}), false},
+		"connection refused":    {keys(&url.Error{Op: "Get", URL: "https://k.example", Err: &net.OpError{Op: "dial", Err: errors.New("connection refused")}}), true},
+		"reset while reading":   {keys(&net.OpError{Op: "read", Err: errors.New("connection reset by peer")}), true},
+		"truncated body":        {keys(io.ErrUnexpectedEOF), true},
+		"caller's deadline":     {keys(context.DeadlineExceeded), true},
+		"caller went away":      {keys(context.Canceled), true},
+		"not JSON":              {keys(idp.JSONError(&json.SyntaxError{Offset: 1})), false},
+		"larger than the limit": {keys(errors.New("response body larger than 65536 bytes")), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := keysTransient(tc.err); got != tc.transient {
+				t.Fatalf("keysTransient(%v) = %v, want %v", tc.err, got, tc.transient)
+			}
+		})
 	}
 }

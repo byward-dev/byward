@@ -101,9 +101,15 @@ func (b *Broker) consent(w http.ResponseWriter, r *http.Request) {
 	l := f.Login
 	// The client and its redirect URI are checked again: the operator may have removed either.
 	client, err := b.cfg.Clients.Client(ctx, l.ClientID)
+	if err != nil {
+		b.clientLookupFailed(ctx, l.ClientID, err)
+	}
 	switch {
 	case errors.Is(err, registration.ErrUnknownClient):
 		b.page(w, r, http.StatusBadRequest, "This app is not registered with the proxy.", "Ask your operator to register the app, or check its client ID.")
+		return
+	case errors.Is(err, registration.ErrUnavailable):
+		b.page(w, r, http.StatusServiceUnavailable, "The proxy could not load this app's details.", "Try again in a minute.")
 		return
 	case err != nil:
 		b.serverError(w, r, err)

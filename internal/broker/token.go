@@ -68,8 +68,13 @@ func (b *Broker) token(w http.ResponseWriter, r *http.Request) {
 }
 
 // authenticateClient finds and authenticates the calling client (ADR-0008 §6), for /token and
-// /revoke. On failure it has already answered with 401 invalid_client.
-func (b *Broker) authenticateClient(w http.ResponseWriter, r *http.Request, now time.Time) (registration.Client, bool) {
+// /revoke. On failure it has already answered: 401 invalid_client, or 503 temporarily_unavailable
+// when a CIMD client's metadata could not be fetched for now (draft -03 §6.1).
+//
+// onRefused, when set, runs before the 401 if a client's metadata document was definitely refused
+// (registration.ErrMetadataRefused; never for a transient failure, a disabled CIMD or a host off the
+// allowlist), so refresh can revoke what the refused client holds.
+func (b *Broker) authenticateClient(w http.ResponseWriter, r *http.Request, now time.Time, onRefused func(*http.Request, string, time.Time)) (registration.Client, bool) {
 	ctx := r.Context()
 	f := r.PostForm
 	clientID := f.Get("client_id")
@@ -89,10 +94,28 @@ func (b *Broker) authenticateClient(w http.ResponseWriter, r *http.Request, now 
 	}
 	client, err := b.cfg.Clients.Client(ctx, clientID)
 	if err != nil {
+		b.clientLookupFailed(ctx, clientID, err)
+		if errors.Is(err, registration.ErrUnavailable) { // draft -03 §6.1: 503 for a transient failure
+			w.Header().Set("Retry-After", cimdRetryAfter)
+			b.tokenFail(w, r, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the client's metadata could not be fetched"})
+			return nil, false
+		}
+		if onRefused != nil && errors.Is(err, registration.ErrMetadataRefused) {
+			onRefused(r, clientID, now)
+		}
 		b.tokenFail(w, r, tokenError{http.StatusUnauthorized, "invalid_client", "unknown client"})
 		return nil, false
 	}
 	if err := client.Authenticate(ctx, f, r.Header, b.tokenEndpoint(), now); err != nil {
+		if errors.Is(err, registration.ErrUnavailable) { // the client's jwks_uri could not be fetched for now
+			b.clientLookupFailed(ctx, clientID, err)
+			w.Header().Set("Retry-After", cimdRetryAfter)
+			b.tokenFail(w, r, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the client's keys could not be fetched"})
+			return nil, false
+		}
+		if errors.Is(err, registration.ErrKeysRefused) { // the client's jwks_uri is unusable, not its assertion
+			b.clientLookupFailed(ctx, clientID, err)
+		}
 		b.tokenFail(w, r, tokenError{http.StatusUnauthorized, "invalid_client", "client authentication failed"})
 		return nil, false
 	}
@@ -105,7 +128,7 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	f := r.PostForm
 	now := b.cfg.Now()
-	client, ok := b.authenticateClient(w, r, now)
+	client, ok := b.authenticateClient(w, r, now, nil)
 	if !ok {
 		return
 	}
@@ -153,7 +176,8 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 	}
 	// The grant was created short-lived at the callback, so an abandoned login expires soon; now
 	// that the code is redeemed it lives as long as its tokens can (ADR-0006 §5).
-	offline := slices.Contains(pc.Scopes, "offline_access")
+	// A refresh token needs offline_access and a client that registered the refresh_token grant.
+	offline := slices.Contains(pc.Scopes, "offline_access") && client.AllowsRefresh()
 	expires := now.Add(AccessLifetime)
 	if offline {
 		expires = now.Add(GrantLifetime)
@@ -174,7 +198,11 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	b.issue(w, r, client.ID(), claims.GrantID, claims.Subject, now, expires, pc.Scopes, refresh)
+	scopes := pc.Scopes
+	if !offline { // the response reports the scope actually granted (RFC 6749 §5.1)
+		scopes = slices.DeleteFunc(slices.Clone(scopes), func(s string) bool { return s == "offline_access" })
+	}
+	b.issue(w, r, client.ID(), claims.GrantID, claims.Subject, now, expires, scopes, refresh)
 }
 
 // issue seals an access token (capped at the grant's expiry) and writes the token response.
@@ -266,8 +294,13 @@ func writeTokenError(w http.ResponseWriter, r *http.Request, e tokenError) {
 		"error_description": e.desc + " (reference " + logging.RequestID(r.Context()) + ")"})
 }
 
-// Retry-After for 503s from /token and /revoke (ADR-0007 §7).
+// Retry-After for store and admission 503s from /token and /revoke (ADR-0007 §7); a CIMD client whose
+// metadata cannot be fetched gets 60 s instead (authenticateClient).
 const retryAfter = "5"
+
+// cimdRetryAfter is the Retry-After for a CIMD client whose metadata or keys could not be fetched
+// for now: about one per-URL retry gap and cache minimum (docs/how-to/cimd.md).
+const cimdRetryAfter = "60"
 
 // unavailable answers 503 with Retry-After for a store failure (ADR-0007 §7); the refresh token is
 // not spent.

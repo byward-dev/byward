@@ -81,7 +81,10 @@ func FuzzLoadStatic(f *testing.F) {
 			if !validClientID(id) || len(c.redirects) == 0 || len(c.redirects) > MaxRedirectURIs {
 				t.Fatalf("invalid client accepted: %q", id)
 			}
-			switch c.method {
+			if len(c.methods) != 1 {
+				t.Fatalf("static client %q with methods %v", id, c.methods)
+			}
+			switch c.methods[0] {
 			case None:
 			case ClientSecretBasic, ClientSecretPost:
 				if len(c.secret) < MinSecretBytes {
@@ -92,7 +95,7 @@ func FuzzLoadStatic(f *testing.F) {
 					t.Fatalf("no keys for %q", id)
 				}
 			default:
-				t.Fatalf("method %q accepted", c.method)
+				t.Fatalf("method %q accepted", c.methods[0])
 			}
 			for _, r := range c.redirects {
 				if ValidateRedirect(r) != nil {

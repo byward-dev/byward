@@ -108,6 +108,17 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"dev not a bool", "BYWARD_DEV=maybe", "BYWARD_DEV"},
 		{"documentation not a URL", "BYWARD_RESOURCE_DOCUMENTATION=javascript:x", "BYWARD_RESOURCE_DOCUMENTATION"},
 		{"gate allow-empty not a bool", "BYWARD_GATE_ALLOW_EMPTY=yes", "BYWARD_GATE_ALLOW_EMPTY: want true or false"},
+		{"cimd not a bool", "BYWARD_CIMD=on", "BYWARD_CIMD: want true or false"},
+		{"cimd trusted hosts blank", "BYWARD_CIMD_TRUSTED_HOSTS= ,", "BYWARD_CIMD_TRUSTED_HOSTS is set but lists nothing"},
+		{"cimd allowed hosts blank", "BYWARD_CIMD_ALLOWED_HOSTS=,", "BYWARD_CIMD_ALLOWED_HOSTS is set but lists nothing"},
+		{"cimd host with a scheme", "BYWARD_CIMD_TRUSTED_HOSTS=https://claude.ai", `BYWARD_CIMD_TRUSTED_HOSTS: "https://claude.ai" is not a host name`},
+		{"cimd host with a path", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai/oauth", `BYWARD_CIMD_TRUSTED_HOSTS: "claude.ai/oauth" is not a host name`},
+		{"cimd host with user info", "BYWARD_CIMD_ALLOWED_HOSTS=user@claude.ai", `BYWARD_CIMD_ALLOWED_HOSTS: "user@claude.ai" is not a host name`},
+		{"cimd host with a space", "BYWARD_CIMD_TRUSTED_HOSTS=claude .ai", `"claude .ai" is not a host name`},
+		{"cimd host with a port", "BYWARD_CIMD_ALLOWED_HOSTS=claude.ai:443", `BYWARD_CIMD_ALLOWED_HOSTS: "claude.ai:443" is not a host name`},
+		{"cimd wildcard host", "BYWARD_CIMD_TRUSTED_HOSTS=*.example.com", `"*.example.com" is not a host name`},
+		{"cimd single-label host", "BYWARD_CIMD_TRUSTED_HOSTS=localhost", `"localhost" is not a host name`},
+		{"cimd unicode host", "BYWARD_CIMD_TRUSTED_HOSTS=bücher.example", `BYWARD_CIMD_TRUSTED_HOSTS: the host "bücher.example" is not ASCII`},
 		{"gate tenants blank", "BYWARD_GATE_TENANTS=,", "BYWARD_GATE_TENANTS is set but lists nothing"},
 		{"gate roles blank", "BYWARD_GATE_ROLES= ,,", "BYWARD_GATE_ROLES is set but lists nothing"},
 		{"gate groups blank", "BYWARD_GATE_GROUPS= ", "BYWARD_GATE_GROUPS is set but lists nothing"},
@@ -451,5 +462,22 @@ func TestInvalidStoreSettingsAreRejected(t *testing.T) {
 				t.Fatalf("want a config error containing %q, got %v", tc.want, err)
 			}
 		})
+	}
+}
+
+func TestCIMDHostListsAreNormalizedAndRefusedWhileCIMDIsOff(t *testing.T) {
+	c, err := load(t, nil, "BYWARD_CIMD_TRUSTED_HOSTS=Claude.AI, vscode.dev", "BYWARD_CIMD_ALLOWED_HOSTS=apps.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.CIMD || !slices.Equal(c.CIMDTrustedHosts, []string{"claude.ai", "vscode.dev"}) || !slices.Equal(c.CIMDAllowedHosts, []string{"apps.example.com"}) {
+		t.Fatalf("CIMD %v, trusted %v, allowed %v", c.CIMD, c.CIMDTrustedHosts, c.CIMDAllowedHosts)
+	}
+	if c, err = load(t, nil, "BYWARD_CIMD=false"); err != nil || c.CIMD {
+		t.Fatalf("CIMD off: %v, %v", c.CIMD, err)
+	}
+	// Host lists with CIMD off would silently do nothing.
+	if _, err := load(t, nil, "BYWARD_CIMD=false", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai"); !isConfigError(err) || !strings.Contains(err.Error(), "no effect while BYWARD_CIMD is false") {
+		t.Fatalf("err = %v", err)
 	}
 }

@@ -139,10 +139,14 @@ type client struct {
 	trust              registration.TrustLevel
 }
 
-func (c client) ID() string                        { return c.id }
-func (c client) Name() string                      { return c.name }
-func (c client) Trust() registration.TrustLevel    { return c.trust }
-func (client) AuthMethod() registration.AuthMethod { return registration.None }
+func (c client) ID() string                     { return c.id }
+func (c client) Name() string                   { return c.name }
+func (c client) Trust() registration.TrustLevel { return c.trust }
+func (client) AllowsRefresh() bool              { return true }
+
+func (client) AuthMethods() []registration.AuthMethod {
+	return []registration.AuthMethod{registration.None}
+}
 func (c client) RedirectAllowed(u string) error {
 	if u != c.redirect {
 		return errors.New("registered " + c.redirect + ", sent " + u)

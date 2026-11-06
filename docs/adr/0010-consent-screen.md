@@ -51,6 +51,13 @@ admin grants tenant-wide consent, and labels unverified publishers "Unverified".
    _Clarified 2026-11-06 (slice 1.6):_ the lifetime shown is how long the grant will last: up to 30
    days with `offline_access` (refresh tokens), otherwise one access-token lifetime, 1 hour
    (ADR-0006 §5).
+   _Amended 2026-11-06 (slice 2.1):_ "differs from the CIMD host" means **a different registrable
+   domain** (eTLD+1, the public suffix list via `golang.org/x/net/publicsuffix`). Comparing exact
+   hosts would warn on ordinary setups such as a document on `app.example.com` returning to
+   `auth.example.com`, and a warning that fires on legitimate apps teaches users to ignore it.
+   `claude.ai` returning to `evil.example`, or `alice.github.io` to `bob.github.io` (`github.io` is a
+   public suffix), still warns. Hosts without a registrable domain (an IP address) are compared
+   exactly. A loopback redirect gets only the loopback warning.
 5. **CSRF:** exactly one `Origin` equal to our configured public URL (never the `Host` header);
    missing or `null` is rejected; `Sec-Fetch-Site: same-origin` as a second check; a `__Host-`
    binding cookie whose name includes an instance ID; a sealed single-use flow token (10 minutes)

@@ -71,8 +71,8 @@ func TestLoadStaticAllMethods(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", id, err)
 		}
-		if c.AuthMethod() != method || c.Trust() != Verified || c.ID() != id {
-			t.Errorf("%s: method %s trust %s", id, c.AuthMethod(), c.Trust())
+		if m := c.AuthMethods(); len(m) != 1 || m[0] != method || c.Trust() != Verified || c.ID() != id {
+			t.Errorf("%s: method %s trust %s", id, c.AuthMethods(), c.Trust())
 		}
 	}
 	if c, _ := reg.Client(context.Background(), "cli"); c.Name() != "CLI" {

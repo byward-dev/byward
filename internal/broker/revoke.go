@@ -39,7 +39,7 @@ func (b *Broker) revokeEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := b.cfg.Now()
-	client, ok := b.authenticateClient(w, r, now)
+	client, ok := b.authenticateClient(w, r, now, nil)
 	if !ok {
 		return
 	}

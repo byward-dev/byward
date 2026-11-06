@@ -3,6 +3,7 @@ module github.com/byward-dev/byward
 go 1.27.3
 
 require (
+	code.dny.dev/ssrf v0.3.0
 	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/prometheus/client_golang v1.25.0
 	go.opentelemetry.io/contrib/exporters/autoexport v0.72.0
