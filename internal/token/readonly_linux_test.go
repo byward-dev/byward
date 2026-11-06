@@ -4,9 +4,9 @@ package token
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -17,18 +17,18 @@ func TestKeysOnAReadOnlyTmpfsWithMode1777Load(t *testing.T) {
 		t.Skip("mounting a tmpfs needs root")
 	}
 	dir := t.TempDir()
-	if out, err := exec.Command("mount", "-t", "tmpfs", "-o", "mode=1777", "tmpfs", dir).CombinedOutput(); err != nil {
-		t.Skipf("cannot mount a tmpfs here: %v %s", err, out)
+	if err := syscall.Mount("tmpfs", dir, "tmpfs", 0, "mode=1777"); err != nil {
+		t.Skipf("cannot mount a tmpfs here: %v", err)
 	}
-	t.Cleanup(func() { _ = exec.Command("umount", dir).Run() })
+	t.Cleanup(func() { _ = syscall.Unmount(dir, 0) })
 	if err := os.WriteFile(filepath.Join(dir, "k1"), []byte(randomKey(t)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := LoadKeyRing(dir); err == nil || !strings.Contains(err.Error(), "world-writable") {
 		t.Fatalf("writable tmpfs with mode 1777: err = %v, want the world-writable refusal", err)
 	}
-	if out, err := exec.Command("mount", "-o", "remount,ro", dir).CombinedOutput(); err != nil {
-		t.Fatalf("remount read-only: %v %s", err, out)
+	if err := syscall.Mount("", dir, "", syscall.MS_REMOUNT|syscall.MS_RDONLY, ""); err != nil {
+		t.Fatalf("remount read-only: %v", err)
 	}
 	mustRing(t, dir)
 }
