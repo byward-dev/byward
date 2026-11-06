@@ -39,7 +39,7 @@ angles can be researched in parallel (one helper or agent per angle).
 
 | ID | Persona | Success looks like |
 |---|---|---|
-| P1 | Solo dev **operator** wrapping a local stdio **upstream**; knows Go/Node, not OAuth | Working connector in < 15 min; errors name the fix |
+| P1 | Solo **operator** on a VM or Docker host wrapping a stdio **upstream**; knows Go/Node, not OAuth | Working connector in < 15 min; errors name the fix |
 | P2 | Platform **operator** in an Entra tenant, k8s behind ingress | Entra how-to matches the portal; startup check validates tenant, app ID, redirect URI; HA |
 | P3 | Security reviewer | One-page security posture; secure defaults; insecure modes named and logged; signed releases + SBOM |
 | P4 **User** at **consent**, non-technical | Knows who is asking within 3 s; one click; errors say what to tell the operator |
