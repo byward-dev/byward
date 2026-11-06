@@ -76,9 +76,10 @@ func parseStatic(data []byte, dir string, readFile func(string) ([]byte, error),
 	dec.DisallowUnknownFields()
 	var f staticFile
 	if err := dec.Decode(&f); err != nil {
-		// encoding/json's unknown-field error is untyped and quotes the name from the input.
+		// encoding/json's unknown-field error is untyped and quotes the name from the input; its
+		// offset is the end of the object, so neither is reported.
 		if strings.HasPrefix(err.Error(), "json: unknown field ") {
-			return nil, fmt.Errorf("static clients: unknown field near byte %d", dec.InputOffset())
+			return nil, errors.New("static clients: unknown field (field names must match the documented format)")
 		}
 		return nil, fmt.Errorf("static clients: %w", idp.JSONError(err))
 	}

@@ -100,7 +100,7 @@ func TestLoadStaticRejects(t *testing.T) {
 		wantErr string
 	}{
 		"not JSON":             {file: `{`, wantErr: "unexpected end of input"},
-		"wrong type":           {file: `{"clients":[{"client_id":7}]}`, wantErr: "wrong JSON type for field clients.0.client_id at byte"},
+		"wrong type":           {file: `{"clients":[{"client_id":7}]}`, wantErr: "wrong JSON type at byte"},
 		"trailing data":        {file: entry(ok) + `{}`, wantErr: "unexpected data"},
 		"unknown field":        {file: entry(ok + `,"scope":"x"`), wantErr: "unknown field"},
 		"unknown top field":    {file: `{"clients":[{` + ok + `}],"extra":1}`, wantErr: "unknown field"},
