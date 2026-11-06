@@ -21,20 +21,27 @@ node() {
   printf ']'
 }
 
-# check NAME WANT_EXIT WANT_OUTPUT(grep -E): runs the script in $tmp/repo with the fixtures in $tmp.
+# check NAME WANT_EXIT WANT_OUTPUT...: runs the script in $tmp/repo with the fixtures in $tmp; every
+# WANT_OUTPUT (grep -E) must match.
 check() {
+  name=$1 want_code=$2
+  shift 2
   set +e
   out=$(cd "$tmp/repo" && NOW=$now PLAYWRIGHT_JSON="$tmp/pw.json" AXE_JSON="$tmp/axe.json" NODE_JSON="$tmp/node.json" sh "$script" 2>&1)
   code=$?
   set -e
-  if [ "$code" -ne "$2" ] || ! printf '%s\n' "$out" | grep -Eq "$3"; then
-    echo "FAIL $1: exit $code (want $2), output: $out"
+  ok=1
+  [ "$code" -eq "$want_code" ] || ok=0
+  for want; do printf '%s\n' "$out" | grep -Eq "$want" || ok=0; done
+  if [ "$ok" -eq 0 ]; then
+    echo "FAIL $name: exit $code (want $want_code), output: $out"
     failures=$((failures + 1))
   fi
 }
 
-# run NAME IMAGE PLAYWRIGHT AXE NODE PW_JSON AXE_JSON NODE_JSON WANT_EXIT WANT_OUTPUT
+# run NAME IMAGE PLAYWRIGHT AXE NODE PW_JSON AXE_JSON NODE_JSON WANT_EXIT WANT_OUTPUT...
 run() {
+  rm -rf "$tmp/repo"
   mkdir -p "$tmp/repo/scripts/ui" "$tmp/repo/scripts/conformance"
   printf 'image=mcr.microsoft.com/playwright:v%s-noble@sha256:00\n' "$2" > "$tmp/repo/scripts/ui/run.sh"
   printf '{"devDependencies":{"@axe-core/playwright":"%s","@playwright/test":"%s"}}\n' "$4" "$3" > "$tmp/repo/scripts/ui/package.json"
@@ -42,7 +49,9 @@ run() {
   printf '%s' "$6" > "$tmp/pw.json"
   printf '%s' "$7" > "$tmp/axe.json"
   printf '%s' "$8" > "$tmp/node.json"
-  check "$1" "$9" "${10}"
+  name=$1 want_code=$9
+  shift 9
+  check "$name" "$want_code" "$@"
 }
 
 pw=$(npm 1.64.1 2026-10-14T11:58:13.696Z)
@@ -52,11 +61,11 @@ p="1.64.1 1.64.1 4.14.0 24.22.1" # the current pins: image, @playwright/test, @a
 
 # shellcheck disable=SC2086 # $p is a word list
 {
-run current                       $p "$pw" "$axe" "$nd" 0 'ok'
+run current-pins-pass             $p "$pw" "$axe" "$nd" 0 'ok'
 run playwright-in-cooldown        $p "$(npm 1.64.1 2026-10-14T11:58:13.696Z 1.65.0 2026-10-25T00:00:00.000Z)" "$axe" "$nd" 0 'ok'
 run playwright-past-cooldown      $p "$(npm 1.64.1 2026-10-01T00:00:00.000Z 1.65.0 2026-10-10T00:00:00.000Z)" "$axe" "$nd" 1 'NEWER: Playwright 1\.65\.0'
 run cutoff-is-inclusive           $p "$(npm 1.64.1 2026-10-01T00:00:00.000Z 1.65.0 2026-10-18T00:00:00.000Z)" "$axe" "$nd" 1 'NEWER: Playwright 1\.65\.0'
-run one-second-after-cutoff       $p "$(npm 1.64.1 2026-10-01T00:00:00.000Z 1.65.0 2026-10-18T00:00:01.000Z)" "$axe" "$nd" 0 'ok'
+run release-after-cutoff-ignored  $p "$(npm 1.64.1 2026-10-01T00:00:00.000Z 1.65.0 2026-10-18T00:00:01.000Z)" "$axe" "$nd" 0 'ok'
 run prerelease-ignored            $p "$(npm 1.64.1 2026-10-01T00:00:00.000Z 1.65.0-beta-1 2026-10-02T00:00:00.000Z)" "$axe" "$nd" 0 'ok'
 run newer-axe                     $p "$pw" "$(npm 4.14.0 2026-09-01T00:00:00.000Z 4.14.1 2026-10-01T00:00:00.000Z)" "$nd" 1 'NEWER: @axe-core/playwright 4\.14\.1'
 run newer-node                    $p "$pw" "$axe" "$(node 24.22.2 2026-10-15 24.22.1 2026-10-01)" 1 'NEWER: Node 24 24\.22\.2'
@@ -74,18 +83,26 @@ run playwright-pinned-ahead 1.65.0 1.65.0 4.14.0 24.22.1 "$(npm 1.64.1 2026-10-0
 run node-pinned-ahead       1.64.1 1.64.1 4.14.0 24.22.2 "$pw" "$axe" "$(node 24.22.2 2026-10-27 24.22.1 2026-10-01)" 0 'ok'
 # MISMATCH alone fails the check: nothing is newer than the pinned @playwright/test.
 run image-differs-from-playwright-test 1.64.1 1.64.0 4.14.0 24.22.1 "$(npm 1.64.0 2026-10-01T00:00:00.000Z)" "$axe" "$nd" 1 'MISMATCH: .*v1\.64\.1.*1\.64\.0'
-# One run reports every problem; the last report is Node's.
-run reports-every-stale-pin 1.64.1 1.64.0 4.14.0 24.22.1 "$(npm 1.64.0 2026-09-01T00:00:00.000Z 1.64.1 2026-09-02T00:00:00.000Z)" "$axe" "$(node 24.22.2 2026-10-01 24.22.1 2026-09-01)" 1 'NEWER: Node 24 24\.22\.2'
+# One run reports every problem.
+run reports-every-problem 1.64.1 1.64.0 4.14.0 24.22.1 "$(npm 1.64.0 2026-09-01T00:00:00.000Z 1.64.1 2026-09-02T00:00:00.000Z)" "$axe" "$(node 24.22.2 2026-10-01 24.22.1 2026-09-01)" 1 \
+  'MISMATCH: .*v1\.64\.1.*1\.64\.0' 'NEWER: Playwright 1\.64\.1' 'NEWER: Node 24 24\.22\.2'
 # Each pin must be an exact x.y.z.
 run image-not-exact      1.64   1.64.1 4.14.0  24.22.1 "$pw" "$axe" "$nd" 1 'image must be pinned to an exact'
 run playwright-not-exact 1.64.1 1.64   4.14.0  24.22.1 "$pw" "$axe" "$nd" 1 '@playwright/test must be pinned to an exact'
 run axe-not-exact        1.64.1 1.64.1 ^4.14.0 24.22.1 "$pw" "$axe" "$nd" 1 '@axe-core/playwright must be pinned to an exact'
 run node-not-exact       1.64.1 1.64.1 4.14.0  24      "$pw" "$axe" "$nd" 1 'node must be pinned to an exact'
 run four-part-version    1.64.1.1 1.64.1 4.14.0 24.22.1 "$pw" "$axe" "$nd" 1 'image must be pinned to an exact'
-# Two image lines are not one pin.
+run leading-dot-version  .64.1  1.64.1 4.14.0 24.22.1 "$pw" "$axe" "$nd" 1 'image must be pinned to an exact'
+run trailing-dot-version 1.64.  1.64.1 4.14.0 24.22.1 "$pw" "$axe" "$nd" 1 'image must be pinned to an exact'
+run empty-part-version   1..64  1.64.1 4.14.0 24.22.1 "$pw" "$axe" "$nd" 1 'image must be pinned to an exact'
+# Two image lines are not one pin (current pins otherwise).
+# shellcheck disable=SC2086
+run setup $p "$pw" "$axe" "$nd" 0 'ok'
 printf 'image=mcr.microsoft.com/playwright:v1.64.1-noble@sha256:00\nimage=mcr.microsoft.com/playwright:v1.64.1-noble@sha256:00\n' > "$tmp/repo/scripts/ui/run.sh"
 check two-image-lines 1 'image must be pinned to an exact'
 # Outside the repository root the check says so.
+# shellcheck disable=SC2086
+run setup $p "$pw" "$axe" "$nd" 0 'ok'
 rm "$tmp/repo/scripts/conformance/run.sh"
 check missing-pin-file 1 'scripts/conformance/run\.sh not found'
 
