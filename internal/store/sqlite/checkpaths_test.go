@@ -200,3 +200,39 @@ func TestCheckPathsRefusesWhatOpenWouldFailOn(t *testing.T) {
 		})
 	}
 }
+
+// A counter file inside the state directory would be in its backups and hide restores (ADR-0007
+// §9). "Inside" is decided by path elements: "..counter" is a name inside the directory, ".." and
+// "../x" are outside it (#121).
+func TestCounterFileInsideTheStateDirectoryIsRefusedWhateverItsName(t *testing.T) {
+	cases := []struct {
+		name    string
+		counter func(root, state string) string
+		inside  bool
+	}{
+		{"name starting with two dots", func(_, state string) string { return filepath.Join(state, "..counter") }, true},
+		{"directory starting with two dots", func(_, state string) string { return filepath.Join(state, "..foo", "store-writes") }, true},
+		{"plain name", func(_, state string) string { return filepath.Join(state, "store-writes") }, true},
+		{"the state directory itself", func(_, state string) string { return state }, true},
+		{"next to the state directory", func(root, _ string) string { return filepath.Join(root, "store-writes") }, false},
+		{"parent of the state directory", func(root, _ string) string { return root }, false},
+		{"sibling whose name starts with the directory's", func(root, _ string) string { return filepath.Join(root, "state..x", "c") }, false},
+	}
+	const refusal = "the counter file must be outside the state directory"
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			state := filepath.Join(root, "state")
+			opts := Options{Dir: state, CounterFile: tc.counter(root, state)}
+			err := CheckPaths(opts)
+			if refused := err != nil && strings.Contains(err.Error(), refusal); refused != tc.inside {
+				t.Fatalf("CheckPaths: err = %v, want refused = %v", err, tc.inside)
+			}
+			if tc.inside {
+				if _, err := Open(t.Context(), opts); err == nil || !strings.Contains(err.Error(), refusal) {
+					t.Fatalf("Open: err = %v, want the refusal", err)
+				}
+			}
+		})
+	}
+}
