@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/corker/mcp-authproxy/internal/config"
@@ -53,7 +52,7 @@ func Handler(cfg *config.Config, log *slog.Logger, v resource.Validator) http.Ha
 	// The proxy's own origin is same-origin and cannot be forged by another site (a DNS-rebinding
 	// page sends its own origin), so it is always allowed; the MCP conformance rebinding scenario
 	// expects it to be accepted.
-	origins := append([]string{strings.ToLower(cfg.PublicURL.Scheme + "://" + cfg.PublicURL.Host)}, cfg.AllowedOrigins...)
+	origins := append([]string{cfg.Origin()}, cfg.AllowedOrigins...)
 	mux.Handle(cfg.PublicURL.Path, origin.Origins(log, origins,
 		mcpMethods(guard(limitBody(MaxMCPBody, admit(MaxInFlight, MaxStreams, up))))))
 

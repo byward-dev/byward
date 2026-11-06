@@ -46,13 +46,19 @@ Evidence (research ANON-mode.md; runtime 2026-11-06):
 2. **Startup refuses** unless:
    - the public URL is loopback;
    - the listen address is loopback, or the proxy runs in a container (`/.dockerenv` or
-     `/run/.containerenv`);
+     `/run/.containerenv`) **with its own network namespace**. Host networking (`--network host`)
+     binds the host's interfaces, so it is detected from `/proc/self/net/dev` and refused: only
+     `lo`, `ethN` and the kernel's tunnel placeholders are allowed, and an unknown interface or an
+     unreadable list also refuses (measured on Docker 28.4: host networking adds `docker0`,
+     `bond0`, `dummy0`, `teql0`, `services1`);
    - extra allowed hosts and origins are loopback only;
    - no authentication setting is present (settings marked `Auth` in the registry).
 3. **Every protection stays on:** the exact Host allowlist from the public URL (it blocks DNS
-   rebinding and passes the conformance rebinding scenario), the `Origin` check, the header
-   stripping (an inbound `Authorization` never reaches the upstream), body limits and admission
-   caps.
+   rebinding), the `Origin` check, the header stripping (an inbound `Authorization` never reaches
+   the upstream), body limits and admission caps. An `access_token` query parameter is stripped
+   by the relay in every mode.
+   - The proxy's own origin (default port dropped) is always allowed: another site cannot forge
+     it. The conformance `dns-rebinding-protection` scenario passes 2/2 for both eras with this.
 4. **Startup log, at warning level:**
    - "AUTHENTICATION IS OFF", naming the URL, and saying that the upstream receives no identity;
    - inside a container, the `docker run -p 127.0.0.1:PORT:PORT …` command;

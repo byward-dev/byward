@@ -405,6 +405,14 @@ func TestNoAuthServesTheUpstreamWithoutMetadataOrChallenge(t *testing.T) {
 	if res := do("POST", "/mcp", "localhost:8080", map[string]string{"Origin": "https://evil.example"}); res.StatusCode != http.StatusForbidden {
 		t.Fatalf("foreign Origin: got %d", res.StatusCode)
 	}
+	// The conformance rebinding scenario sends the server's own origin and expects success.
+	if res := do("POST", "/mcp", "localhost:8080", map[string]string{"Origin": "http://localhost:8080"}); res.StatusCode != 200 {
+		t.Fatalf("own Origin: got %d", res.StatusCode)
+	}
+	do("POST", "/mcp?access_token=leak&x=1", "localhost:8080", nil)
+	if got, _ := up.Last(); strings.Contains(got.RawQuery, "access_token") || got.RawQuery != "x=1" {
+		t.Fatalf("query token reached the upstream: %q", got.RawQuery)
+	}
 }
 
 func TestOwnOriginIsAlwaysAllowed(t *testing.T) {

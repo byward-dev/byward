@@ -38,6 +38,11 @@ func New(log *slog.Logger, target *url.URL) http.Handler {
 			pr.Out.URL.Path, pr.Out.URL.RawPath = t.Path, t.RawPath
 			pr.Out.Host = ""
 			strip(pr.Out.Header)
+			// A token in the query never reaches the upstream, with or without authentication.
+			if q := pr.Out.URL.Query(); q.Has("access_token") {
+				q.Del("access_token")
+				pr.Out.URL.RawQuery = q.Encode()
+			}
 		},
 		Transport: &http.Transport{
 			Proxy:                 http.ProxyFromEnvironment,

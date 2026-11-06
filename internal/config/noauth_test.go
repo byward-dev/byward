@@ -33,6 +33,10 @@ func TestNoAuthIsRefusedOffLoopback(t *testing.T) {
 	cases := []struct{ name, env, want string }{
 		{"public URL", "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp", "MCP_AUTHPROXY_PUBLIC_URL must be a loopback URL"},
 		{"listen outside a container", "MCP_AUTHPROXY_LISTEN=0.0.0.0:8080", "MCP_AUTHPROXY_LISTEN must be a loopback address"},
+		{"listen on all interfaces by omission", "MCP_AUTHPROXY_LISTEN=:8080", "MCP_AUTHPROXY_LISTEN must be a loopback address"},
+		{"listen without port", "MCP_AUTHPROXY_LISTEN=0.0.0.0", "MCP_AUTHPROXY_LISTEN"},
+		{"listen on all IPv6 interfaces", "MCP_AUTHPROXY_LISTEN=[::]:8080", "MCP_AUTHPROXY_LISTEN must be a loopback address"},
+		{"flag not a bool", "MCP_AUTHPROXY_INSECURE_NO_AUTH=yes", "MCP_AUTHPROXY_INSECURE_NO_AUTH: want true or false"},
 		{"extra host", "MCP_AUTHPROXY_ALLOWED_HOSTS=proxy.internal:8080", "MCP_AUTHPROXY_ALLOWED_HOSTS may only list loopback hosts"},
 		{"extra origin", "MCP_AUTHPROXY_ALLOWED_ORIGINS=https://app.example", "MCP_AUTHPROXY_ALLOWED_ORIGINS may only list loopback origins"},
 	}
@@ -46,33 +50,88 @@ func TestNoAuthIsRefusedOffLoopback(t *testing.T) {
 }
 
 func TestNoAuthAcceptsLoopbackHostsAndOrigins(t *testing.T) {
-	c, err := loadAnon(t, nil, "MCP_AUTHPROXY_ALLOWED_HOSTS=127.0.0.1:8080,localhost", "MCP_AUTHPROXY_ALLOWED_ORIGINS=http://localhost:6274")
-	if err != nil || len(c.AllowedOrigins) != 1 || len(c.AllowedHosts) != 2 {
+	c, err := loadAnon(t, nil, "MCP_AUTHPROXY_ALLOWED_HOSTS=127.0.0.1:8080,localhost,[::1],[::1]:8080", "MCP_AUTHPROXY_ALLOWED_ORIGINS=http://localhost:6274", "MCP_AUTHPROXY_LISTEN=[::1]:8080", "MCP_AUTHPROXY_PUBLIC_URL=http://[::1]:8080/mcp")
+	if err != nil || len(c.AllowedOrigins) != 1 || len(c.AllowedHosts) != 4 {
 		t.Fatalf("err=%v origins=%v hosts=%v", err, c.AllowedOrigins, c.AllowedHosts)
 	}
 }
 
-func TestNoAuthInAContainerMayListenOnAllInterfacesWithAWarning(t *testing.T) {
-	docker := func(p string) ([]byte, error) {
-		if p == "/.dockerenv" {
+// fakeHost answers readFile for the given marker file and network interface list.
+func fakeHost(marker, netdev string) readFileFunc {
+	return func(p string) ([]byte, error) {
+		switch {
+		case p == marker:
 			return nil, nil
+		case p == "/proc/self/net/dev" && netdev != "":
+			return []byte(netdev), nil
 		}
 		return nil, os.ErrNotExist
 	}
-	c, err := loadAnon(t, docker, "MCP_AUTHPROXY_LISTEN=0.0.0.0:8080", "MCP_AUTHPROXY_PUBLIC_URL=http://localhost:18420/mcp")
-	if err != nil {
-		t.Fatal(err)
+}
+
+const netdevHeader = "Inter-|   Receive\n face |bytes\n"
+
+// Measured on Docker 28.4 (2026-11-06).
+const (
+	bridgeNetdev = netdevHeader + "    lo: 0\n tunl0: 0\n  gre0: 0\ngretap0: 0\nerspan0: 0\nip_vti0: 0\nip6_vti0: 0\n  sit0: 0\nip6tnl0: 0\nip6gre0: 0\n  eth0: 0\n"
+	hostNetdev   = netdevHeader + "    lo: 0\n bond0: 0\ndummy0: 0\n  eth0: 0\n teql0: 0\n tunl0: 0\nservices1: 0\ndocker0: 0\n"
+)
+
+func TestNoAuthInAContainerMayListenOnAllInterfacesWithAWarning(t *testing.T) {
+	for _, marker := range []string{"/.dockerenv", "/run/.containerenv"} {
+		c, err := loadAnon(t, fakeHost(marker, bridgeNetdev), "MCP_AUTHPROXY_LISTEN=0.0.0.0:8080", "MCP_AUTHPROXY_PUBLIC_URL=http://localhost:18420/mcp")
+		if err != nil {
+			t.Fatalf("%s: %v", marker, err)
+		}
+		// Host port from the public URL, container port from the listen address.
+		if !c.InContainer || !strings.Contains(strings.Join(c.Relaxations, "|"), "docker run -p 127.0.0.1:18420:8080") {
+			t.Fatalf("%s: container=%v relaxations=%v", marker, c.InContainer, c.Relaxations)
+		}
 	}
-	// Host port from the public URL, container port from the listen address.
-	if !c.InContainer || !strings.Contains(strings.Join(c.Relaxations, "|"), "docker run -p 127.0.0.1:18420:8080") {
-		t.Fatalf("container=%v relaxations=%v", c.InContainer, c.Relaxations)
-	}
-	if _, err := loadAnon(t, docker, "MCP_AUTHPROXY_LISTEN=0.0.0.0:8080", "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp"); !isConfigError(err) {
+	if _, err := loadAnon(t, fakeHost("/.dockerenv", bridgeNetdev), "MCP_AUTHPROXY_LISTEN=0.0.0.0:8080", "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp"); !isConfigError(err) {
 		t.Fatalf("a container still needs a loopback public URL, got %v", err)
 	}
 }
 
+func TestNoAuthInAContainerHintUsesTheSchemesDefaultPort(t *testing.T) {
+	c, err := loadAnon(t, fakeHost("/.dockerenv", bridgeNetdev), "MCP_AUTHPROXY_LISTEN=0.0.0.0:8443", "MCP_AUTHPROXY_PUBLIC_URL=https://localhost/mcp")
+	if err != nil || !strings.Contains(strings.Join(c.Relaxations, "|"), "docker run -p 127.0.0.1:443:8443") {
+		t.Fatalf("err=%v relaxations=%v", err, c.Relaxations)
+	}
+}
+
+func TestNoAuthWithHostNetworkingIsRefused(t *testing.T) {
+	cases := map[string]string{
+		"docker --network host":             hostNetdev,
+		"interfaces cannot be read":         "",
+		"an unknown interface (e.g. wlan0)": netdevHeader + "    lo: 0\n  eth0: 0\n wlan0: 0\n",
+	}
+	for name, netdev := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := loadAnon(t, fakeHost("/.dockerenv", netdev), "MCP_AUTHPROXY_LISTEN=0.0.0.0:8080")
+			if !isConfigError(err) || !strings.Contains(err.Error(), "not --network host") {
+				t.Fatalf("want refusal, got %v", err)
+			}
+		})
+	}
+}
+
+func TestOriginDropsTheDefaultPort(t *testing.T) {
+	for raw, want := range map[string]string{
+		"https://mcp.example.com:443/mcp":  "https://mcp.example.com",
+		"https://MCP.example.com:8443/mcp": "https://mcp.example.com:8443",
+		"http://localhost:80/mcp":          "http://localhost",
+		"http://[::1]:8080/mcp":            "http://[::1]:8080",
+	} {
+		if got := (&Config{PublicURL: mustURL(t, raw)}).Origin(); got != want {
+			t.Errorf("%s: got %s want %s", raw, got, want)
+		}
+	}
+}
+
 func TestNoAuthCannotBeCombinedWithAuthSettings(t *testing.T) {
+	// No production setting is marked Auth yet (the IdP settings arrive with the broker, slice
+	// 1.2), so the fence is exercised with a test registry until then.
 	reg := []Setting{{Name: "idp", Auth: true}, {Name: "listen", Default: "x"}}
 	v, err := resolve(reg, nil, []string{"MCP_AUTHPROXY_IDP=entra"}, nil, nil)
 	if err != nil {

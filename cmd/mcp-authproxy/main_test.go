@@ -85,7 +85,7 @@ func TestNoAuthLogsThatAuthIsOffAndTheNextStep(t *testing.T) {
 	var out, errb bytes.Buffer
 	code := run(ctx, nil, []string{"MCP_AUTHPROXY_INSECURE_NO_AUTH=true", "MCP_AUTHPROXY_PUBLIC_URL=http://localhost:8080/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0"}, &out, &errb)
 	logs := errb.String()
-	if code != exitOK || !strings.Contains(logs, "AUTHENTICATION IS OFF") || !strings.Contains(logs, "to require sign-in") {
+	if code != exitOK || !strings.Contains(logs, `"level":"WARN","msg":"development mode relaxation","relaxation":"AUTHENTICATION IS OFF: anyone who can reach http://localhost:8080/mcp`) || !strings.Contains(logs, "to require sign-in") {
 		t.Fatalf("code=%d logs=%s", code, logs)
 	}
 }

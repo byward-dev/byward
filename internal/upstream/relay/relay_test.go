@@ -28,7 +28,7 @@ func TestRelayForwardsBodyVerbatimAndStripsProxyHeaders(t *testing.T) {
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
 	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"_meta":{"traceparent":"00-abc-def-01"}}}`)
-	r := httptest.NewRequest("POST", "https://mcp.example.com/mcp?x=1", bytes.NewReader(body))
+	r := httptest.NewRequest("POST", "https://mcp.example.com/mcp?x=1&access_token=leak", bytes.NewReader(body))
 	r.Header.Set("Authorization", "Bearer secret")
 	r.Header.Set("Forwarded", "for=1.2.3.4")
 	r.Header.Set("X-Forwarded-For", "1.2.3.4")

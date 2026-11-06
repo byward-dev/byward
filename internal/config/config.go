@@ -39,7 +39,8 @@ type Config struct {
 	Dev                   bool
 	// NoAuth serves the upstream with no authentication (ADR-0027).
 	NoAuth bool
-	// InContainer is set when the proxy runs in a container (/.dockerenv or /run/.containerenv).
+	// InContainer is set when the proxy runs in a container (/.dockerenv or /run/.containerenv)
+	// with its own network namespace; host networking does not count (see ownNetwork).
 	InContainer bool
 
 	Values *Values
@@ -165,17 +166,52 @@ func validate(v *Values, container bool) (*Config, error) {
 	return c, nil
 }
 
-// inContainer reports whether a container runtime's marker file exists (Docker, Podman).
+// inContainer reports whether the proxy runs in a container (Docker or Podman marker file) that
+// has its own network namespace. With host networking (`--network host`) a 0.0.0.0 listener binds
+// the host's interfaces, so that does not count.
 func inContainer(readFile readFileFunc) bool {
 	if readFile == nil {
 		return false
 	}
 	for _, p := range []string{"/.dockerenv", "/run/.containerenv"} {
 		if _, err := readFile(p); err == nil {
-			return true
+			return ownNetwork(readFile)
 		}
 	}
 	return false
+}
+
+// ownNetwork reports whether every network interface is one a container's own namespace has:
+// lo, ethN, and the kernel's tunnel placeholders. Anything else (docker0, bond0, wlan0, br-…) or
+// an unreadable list means host networking, and the answer is no: the check fails closed.
+// Measured 2026-11-06 on Docker 28.4: bridge shows lo, eth0 and the placeholders; host adds
+// docker0, bond0, dummy0, teql0 and services1.
+func ownNetwork(readFile readFileFunc) bool {
+	b, err := readFile("/proc/self/net/dev")
+	if err != nil {
+		return false
+	}
+	placeholders := map[string]bool{"lo": true, "tunl0": true, "gre0": true, "gretap0": true, "erspan0": true,
+		"ip_vti0": true, "ip6_vti0": true, "sit0": true, "ip6tnl0": true, "ip6gre0": true}
+	lines := strings.Split(string(b), "\n")
+	if len(lines) < 3 {
+		return false
+	}
+	for _, l := range lines[2:] {
+		name, _, ok := strings.Cut(l, ":")
+		if !ok {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		if placeholders[name] {
+			continue
+		}
+		if rest, isEth := strings.CutPrefix(name, "eth"); isEth && rest != "" && strings.Trim(rest, "0123456789") == "" {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // checkNoAuth fences --insecure-no-auth in (ADR-0027): the public URL is loopback, the listen
@@ -190,20 +226,21 @@ func checkNoAuth(c *Config, v *Values) []error {
 	host, port, err := net.SplitHostPort(c.Listen)
 	switch {
 	case err != nil:
+		errs = append(errs, errorf("%s: MCP_AUTHPROXY_LISTEN must be a loopback host:port such as 127.0.0.1:8080", env))
 	case isLoopback(host):
 	case c.InContainer:
 		// The host port is the public URL's; the container port is the listen address's.
 		hostPort := c.PublicURL.Port()
 		if hostPort == "" {
-			hostPort = "80"
+			hostPort = map[string]string{"http": "80", "https": "443"}[c.PublicURL.Scheme]
 		}
 		c.Relaxations = append(c.Relaxations, fmt.Sprintf(
 			"listening on %s inside a container: publish the port on loopback only, e.g. docker run -p 127.0.0.1:%s:%s; anyone who can reach the published port can use the upstream", c.Listen, hostPort, port))
 	default:
-		errs = append(errs, errorf("%s: MCP_AUTHPROXY_LISTEN must be a loopback address such as 127.0.0.1:8080 (non-loopback only inside a container)", env))
+		errs = append(errs, errorf("%s: MCP_AUTHPROXY_LISTEN must be a loopback address such as 127.0.0.1:8080 (non-loopback only inside a container with its own network, not --network host)", env))
 	}
 	for _, h := range c.AllowedHosts {
-		if hn, _, err := net.SplitHostPort(h); !isLoopback(h) && (err != nil || !isLoopback(hn)) {
+		if hn, _, err := net.SplitHostPort(h); !isLoopback(strings.Trim(h, "[]")) && (err != nil || !isLoopback(hn)) {
 			errs = append(errs, errorf("%s: MCP_AUTHPROXY_ALLOWED_HOSTS may only list loopback hosts, got %q", env, h))
 		}
 	}
@@ -274,6 +311,19 @@ func isLoopback(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// Origin is the public URL's origin as browsers send it: lower case, default port dropped.
+func (c *Config) Origin() string {
+	host := strings.ToLower(c.PublicURL.Hostname())
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	defaultPort := map[string]string{"http": "80", "https": "443"}[c.PublicURL.Scheme]
+	if p := c.PublicURL.Port(); p != "" && p != defaultPort {
+		host += ":" + p
+	}
+	return c.PublicURL.Scheme + "://" + host
 }
 
 // Issuer is the broker's issuer, derived once from the public URL: its scheme, host and port.
