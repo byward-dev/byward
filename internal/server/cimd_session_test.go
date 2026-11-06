@@ -69,7 +69,7 @@ func TestACIMDClientSignsInAndUsesALegacySession(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { stop(t, a) })
-	srv := httptest.NewServer(Handler(cfg, discard, a.validator, a.register, a.sessions, Observability{}))
+	srv := httptest.NewServer(Handler(cfg, discard, httpUpstream(cfg, discard), a.validator, a.register, a.sessions, Observability{}))
 	t.Cleanup(srv.Close)
 
 	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}

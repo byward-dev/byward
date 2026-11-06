@@ -3,5 +3,6 @@ byward_build_info gauge
 byward_http_request_duration_seconds histogram
 byward_idp_request_duration_seconds histogram
 byward_rate_limited_total counter
+byward_stdio_processes gauge
 byward_upstream_busy_total counter
 byward_upstream_in_flight gauge

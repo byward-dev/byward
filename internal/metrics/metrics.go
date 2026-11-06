@@ -100,6 +100,16 @@ func (m *Metrics) InFlight(kind string, delta float64) {
 	m.inFlight.WithLabelValues(kind).Add(delta)
 }
 
+// StdioProcesses exports n, the number of live stdio upstream processes, as a gauge read at scrape
+// time. Call it once, when a stdio upstream is configured.
+func (m *Metrics) StdioProcesses(n func() int) {
+	if m == nil {
+		return
+	}
+	m.reg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{Name: "byward_stdio_processes",
+		Help: "Live stdio upstream processes, including starting and stopping ones."}, func() float64 { return float64(n()) }))
+}
+
 // Busy counts a 503 from an admission cap of kind.
 func (m *Metrics) Busy(kind string) {
 	if m == nil {

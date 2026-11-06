@@ -164,7 +164,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	log.Info("broker ready", "reason", "keys "+fmt.Sprint(len(ring.KeyIDs()))+", signing with "+ring.SigningKeyID()+"")
 	return &auth{register: b.Register, validator: v, checks: readiness(ring, st), background: func(ctx context.Context) { runBackground(ctx, st, deny, log) }, closeStore: st.Close,
 		sessions: func(next http.Handler) http.Handler {
-			return mcpsession.Bind(mcpsession.Config{Box: sessionBox, Upstream: cfg.UpstreamURL.String(), User: signedInUser,
+			return mcpsession.Bind(mcpsession.Config{Box: sessionBox, Upstream: upstreamID(cfg), User: signedInUser,
 				Lifetime: broker.GrantLifetime, Audit: o.Audit, Log: log}, next)
 		}}, nil
 }

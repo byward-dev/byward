@@ -24,7 +24,8 @@ No Windows build in v0.1.
 Changing any of these is a breaking change (ADR-0023).
 
 The binary is static, so it can be copied into an image that has the runtime a stdio upstream needs;
-see [`docs/examples/stdio-node/Dockerfile`](../examples/stdio-node/Dockerfile).
+see [`docs/examples/stdio-node/Dockerfile`](../examples/stdio-node/Dockerfile) and the
+[stdio upstream how-to](../how-to/stdio-upstream.md#6-container-image).
 
 ## Building locally
 

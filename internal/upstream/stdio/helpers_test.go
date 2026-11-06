@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-// fakeBin is the fake stdio upstream (testdata/fakestdio), built once for the package.
+// fakeBin is the fake stdio upstream (internal/testutil/fakestdio), built once for the package.
 var fakeBin string
 
 func TestMain(m *testing.M) {
@@ -25,7 +25,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	fakeBin = filepath.Join(dir, "fakestdio")
-	build := exec.Command("go", "build", "-o", fakeBin, "./testdata/fakestdio") //nolint:gosec // G204: fixed go command; fakeBin is our temp path
+	build := exec.Command("go", "build", "-o", fakeBin, "../../testutil/fakestdio") //nolint:gosec // G204: fixed go command; fakeBin is our temp path
 	if out, err := build.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "build fake upstream: %v\n%s", err, out)
 		os.Exit(1)
@@ -98,13 +98,22 @@ func (h *harness) killAll(t *testing.T) {
 	}
 }
 
+// get returns the process for key with its lease already released, so it is idle.
 func (h *harness) get(t *testing.T, key string, id Identity) *Process {
 	t.Helper()
-	p, err := h.m.Get(context.Background(), key, id)
+	p, release := h.lease(t, key, id)
+	release()
+	return p
+}
+
+// lease returns the process for key and its lease.
+func (h *harness) lease(t *testing.T, key string, id Identity) (*Process, func()) {
+	t.Helper()
+	p, release, err := h.m.Get(context.Background(), key, id)
 	if err != nil {
 		t.Fatalf("Get(%q): %v", key, err)
 	}
-	return p
+	return p, release
 }
 
 // call sends msg and returns the next stdout message.

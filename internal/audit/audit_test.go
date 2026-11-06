@@ -38,6 +38,7 @@ var samples = []Event{
 	{Name: RateLimited, Outcome: Failure, Reason: "authorize"},
 	{Name: StoreRestored, Outcome: Success, Reason: "restored from an older copy", Epoch: 2},
 	{Name: SessionRejected, Outcome: Failure, Reason: "session of another user", UserKey: "tid:oid"},
+	{Name: ProcessEvicted, Outcome: Success, Reason: "user_cap", UserKey: "tid:oid"},
 }
 
 func render(t *testing.T) string {
@@ -50,8 +51,8 @@ func render(t *testing.T) string {
 		switch e.Name {
 		case AccessTokenRejected, HostRejected, OriginRejected, TokenRejected, ConsentShown, ConsentGranted, ConsentDenied, RateLimited:
 			l.RecordUnauthenticated(r, e)
-		case ClientRegistered, KeyLoaded, StoreRestored:
-			l.Record(nil, e) // startup: no request
+		case ClientRegistered, KeyLoaded, StoreRestored, ProcessEvicted:
+			l.Record(nil, e) // startup, or no request of the user's
 		default:
 			l.Record(r, e)
 		}
