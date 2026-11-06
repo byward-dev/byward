@@ -72,18 +72,26 @@ func TestGateDecidesAtTheCallbackBeforeAnyGrant(t *testing.T) {
 			if !strings.Contains(body, "have access to this server") || !strings.Contains(body, "Ask your operator") {
 				t.Fatalf("denial page = %s", body)
 			}
-			u := e.fake.User()
-			rec := e.oneAuditEvent(t, "access_denied", map[string]any{"outcome": "failure", "level": "WARN", "reason": "role",
-				"user_key": e.fake.TenantID() + ":" + u.OID, "client_id": clientID, "idp": "entra", "request_id": "*"})
-			for k, v := range rec {
-				if s, _ := v.(string); strings.Contains(s, u.PreferredUsername) || strings.Contains(s, u.Name) {
-					t.Fatalf("audit field %s carries the user's name: %v", k, v)
-				}
-			}
-			if logins := e.auditEvents(t, "login"); len(logins) != 0 {
-				t.Errorf("a denied user was also audited as a login: %v", logins)
-			}
 		})
+	}
+}
+
+// A denial is one access_denied audit event naming the rule, with pseudonymous keys only (ADR-0015 §5).
+func TestGateDenialIsAuditedWithTheRuleAndNoName(t *testing.T) {
+	e := newEnv(t, func(c *Config) { c.Gate = roleGate{"MCP.User"} })
+	if res, _, _ := e.callback(t); res.StatusCode != http.StatusForbidden {
+		t.Fatalf("status %d, want 403", res.StatusCode)
+	}
+	u := e.fake.User()
+	rec := e.oneAuditEvent(t, "access_denied", map[string]any{"outcome": "failure", "level": "WARN", "reason": "role",
+		"user_key": e.fake.TenantID() + ":" + u.OID, "client_id": clientID, "idp": "entra", "request_id": "*"})
+	for k, v := range rec {
+		if s, _ := v.(string); strings.Contains(s, u.PreferredUsername) || strings.Contains(s, u.Name) {
+			t.Fatalf("audit field %s carries the user's name: %v", k, v)
+		}
+	}
+	if logins := e.auditEvents(t, "login"); len(logins) != 0 {
+		t.Errorf("a denied user was also audited as a login: %v", logins)
 	}
 }
 

@@ -59,7 +59,7 @@ For SIEMs that use [OCSF](https://schema.ocsf.io) 1.9.0. Fields map as follows: 
 | `host_rejected` | a request named a `Host` outside the allowlist (421) | failure | yes | 4002 HTTP Activity; `disposition_id` 2 Blocked |
 | `origin_rejected` | a request sent an `Origin` outside the allowlist (403) | failure | yes | 4002 HTTP Activity; `disposition_id` 2 Blocked |
 
-Not emitted yet; these arrive with their slices: consent granted or denied (slice 1.4), access-gate rules (slice 1.5),
+Not emitted yet; these arrive with their slices: consent granted or denied (slice 1.4),
 refresh, revocation and store restore detection (slice 1.6), dynamic registration (slice 2.2), and key rotation
 (later).
 

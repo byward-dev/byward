@@ -93,8 +93,9 @@ func TestEmptyGateWarnsAtStartup(t *testing.T) {
 	}
 }
 
-// The configured gate reaches the broker: without it the broker would fall back to AllowAll.
-func TestConfiguredRoleGateAdmitsOnlyUsersWithTheRole(t *testing.T) {
+// The configured gate reaches the broker (without it the broker would fall back to AllowAll), next
+// to the audit log and IdP observation, which a nil value would silently discard.
+func TestWiredBrokerGetsTheConfiguredGateAndObservability(t *testing.T) {
 	var got broker.Config
 	orig := newBroker
 	newBroker = func(c broker.Config) (*broker.Broker, error) { got = c; return orig(c) }
@@ -106,8 +107,8 @@ func TestConfiguredRoleGateAdmitsOnlyUsersWithTheRole(t *testing.T) {
 	if _, err := New(cfg, logging.New(io.Discard, "json")); err != nil {
 		t.Fatal(err)
 	}
-	if got.Gate == nil {
-		t.Fatal("no gate passed to the broker")
+	if got.Gate == nil || got.Audit == nil || got.ObserveIdP == nil || got.IdPName != "entra" {
+		t.Fatalf("broker wired without its gate, audit log or IdP observation: gate %v, audit %v, IdP %q", got.Gate, got.Audit, got.IdPName)
 	}
 	id := idp.Identity{Subject: fixtureTenant + ":x", Claims: map[string]any{"tid": fixtureTenant}}
 	var d broker.Denial
