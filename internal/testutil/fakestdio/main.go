@@ -355,6 +355,8 @@ func serveMCP() {
 //	listens     the ids of the open listens, as the upstream received them
 //	strayscribe a notification for a subscription nobody opened, then the result
 //	straycancel a notifications/cancelled for a request nobody sent, then the result
+//	cancelself  a notifications/cancelled naming this request, then the result
+//	scribeself  a notification whose subscription id is this request's, then the result
 //	dupresult   a result object with a repeated key, under the request's id
 //	dupid       a response with the id repeated
 func serveModern() {
@@ -529,6 +531,12 @@ func serveModern() {
 				result(id, "ok")
 			case "straycancel":
 				write(message{Method: "notifications/cancelled", Params: json.RawMessage(`{"requestId":"byw-999999"}`)})
+				result(id, "ok")
+			case "cancelself":
+				write(message{Method: "notifications/cancelled", Params: json.RawMessage(`{"requestId":` + string(id) + `}`)})
+				result(id, "ok")
+			case "scribeself":
+				write(message{Method: "notifications/tools/list_changed", Params: json.RawMessage(`{` + sub(id) + `}`)})
 				result(id, "ok")
 			case "dupresult":
 				mu.Lock()

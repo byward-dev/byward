@@ -257,9 +257,11 @@ func TestAmbiguousModernRequestsAreRefusedBeforeAnyProcessStarts(t *testing.T) {
 	// Which messages are ambiguous is locate's business (rewrite_test.go); this checks the wiring.
 	b := newModernBridge(t, nil)
 	for name, body := range map[string]string{
-		"duplicate id":         `{"jsonrpc":"2.0","id":1,"id":2,"method":"echo","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
-		"id in another case":   `{"jsonrpc":"2.0","ID":1,"method":"echo","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
-		"object progressToken": modernBody(`1`, "echo", `"progressToken":{"a":1}`, ""),
+		"duplicate id":               `{"jsonrpc":"2.0","id":1,"id":2,"method":"echo","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
+		"id in another case":         `{"jsonrpc":"2.0","ID":1,"method":"echo","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
+		"object progressToken":       modernBody(`1`, "echo", `"progressToken":{"a":1}`, ""),
+		"method in another case too": `{"jsonrpc":"2.0","id":1,"method":"subscriptions/listen","METHOD":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
+		"duplicate method":           `{"jsonrpc":"2.0","id":1,"method":"subscriptions/listen","method":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			res := b.post(t, "alice", "", body)
@@ -471,11 +473,13 @@ func TestUpstreamRequestsInTheModernEraAreAnsweredWithAnError(t *testing.T) {
 
 func TestUnroutableUpstreamMessagesAreDroppedAndLogged(t *testing.T) {
 	for name, tc := range map[string]struct{ method, msg, reason string }{
-		"notification for no request":      {"stray", "upstream notification dropped", "notification_unrouted"},
-		"progress for no request":          {"strayprogress", "upstream notification dropped", "progress_unrouted"},
-		"response for no waiting request":  {"strayresponse", "upstream response for no waiting request", "response_unrouted"},
-		"notification for no subscription": {"strayscribe", "upstream notification dropped", "subscription_unrouted"},
-		"cancellation of no request":       {"straycancel", "upstream notification dropped", "cancel_unrouted"},
+		"notification for no request":                           {"stray", "upstream notification dropped", "notification_unrouted"},
+		"progress for no request":                               {"strayprogress", "upstream notification dropped", "progress_unrouted"},
+		"response for no waiting request":                       {"strayresponse", "upstream response for no waiting request", "response_unrouted"},
+		"notification for no subscription":                      {"strayscribe", "upstream notification dropped", "subscription_unrouted"},
+		"cancellation of no request":                            {"straycancel", "upstream notification dropped", "cancel_unrouted"},
+		"cancellation of a request, not a subscription":         {"cancelself", "upstream notification dropped", "cancel_unrouted"},
+		"subscription notification for a request, not a listen": {"scribeself", "upstream notification dropped", "subscription_unrouted"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			b := newModernBridge(t, nil)
@@ -758,7 +762,7 @@ func TestASubscriptionEndWhoseSubscriptionIDIsAmbiguousAnswersAnErrorUnderTheCli
 // teardownNotices is how many list_changed fakestdio's teardown writes before its cancellation.
 const teardownNotices = 10
 
-func TestAnUpstreamCancellingASubscriptionClosesTheListenStreamWithNothingForwarded(t *testing.T) {
+func TestAnUpstreamCancellingASubscriptionDeliversWhatCameBeforeThenClosesTheListenStream(t *testing.T) {
 	// Over HTTP the server ends a subscription by closing its stream; notifications/cancelled is
 	// stdio's, so it is not forwarded. What the upstream sent before it still is.
 	b := newModernBridge(t, nil)

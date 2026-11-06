@@ -37,6 +37,7 @@ const (
 
 var (
 	pathID       = jsonPath{"id"}
+	pathMethod   = jsonPath{"method"}
 	pathVersion  = jsonPath{"params", "_meta", "io.modelcontextprotocol/protocolVersion"}
 	pathToken    = jsonPath{"params", "_meta", "progressToken"}
 	pathLogLevel = jsonPath{"params", "_meta", "io.modelcontextprotocol/logLevel"}
@@ -76,7 +77,9 @@ type requestMeta struct {
 // readMeta locates a message's id, progress token, log level and protocol version. Ambiguous JSON
 // is refused: the ids are rewritten, and a wrong guess would route one client's answer to another.
 func readMeta(msg []byte) (requestMeta, error) {
-	at, err := locate(msg, pathID, pathToken, pathLogLevel, pathVersion)
+	// The method is located only so that a repeated or case-folded "method" key is refused: the
+	// proxy and the upstream could read different methods from it.
+	at, err := locate(msg, pathID, pathToken, pathLogLevel, pathVersion, pathMethod)
 	if err != nil {
 		return requestMeta{}, err
 	}
@@ -509,11 +512,11 @@ func (c *userConn) routeResponse(msg []byte, proxyID string) {
 	}
 	var out []byte
 	if at, err := locate(msg, paths...); err == nil && at[0] != nil {
-		// This answers q by its id, so whatever a listen's _meta names is q's subscription: the
-		// client sees its own id there, never a proxy id.
-		edits := []edit{{at[0], q.id}}
-		if q.listen {
-			edits = append(edits, edit{at[1], q.id})
+		// This answers q by its id, so whatever a listen's _meta names is q's subscription: every
+		// located id becomes the client's, never a proxy id.
+		edits := make([]edit, len(at))
+		for i, s := range at {
+			edits[i] = edit{s, q.id}
 		}
 		out = replace(msg, edits...)
 	} else {
@@ -574,7 +577,7 @@ func (c *userConn) routeNotification(msg []byte, method string) {
 		if err == nil && at[0] != nil {
 			q = c.byProxyID(string(compactID(at[0].value(msg))))
 		}
-		if q == nil {
+		if q == nil || !q.listen { // only a subscription is the upstream's to end
 			c.drop(method, "cancel_unrouted")
 			return
 		}
@@ -593,7 +596,7 @@ func (c *userConn) routeSubscription(msg []byte, method string) {
 		return
 	}
 	q := c.byProxyID(string(compactID(at[0].value(msg))))
-	if q == nil {
+	if q == nil || !q.listen {
 		c.drop(method, "subscription_unrouted")
 		return
 	}
