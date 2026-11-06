@@ -36,13 +36,22 @@ type consentView struct {
 
 func (b *Broker) renderConsent(w http.ResponseWriter, r *http.Request, status int, client registration.Client, l login, sealed, notice string) {
 	v := consentView{Client: displayName(client.Name(), client.ID()), Trust: trustLabel(client.Trust()), Upstream: b.upstreamName(),
-		IdP: b.cfg.IdPLabel, Operator: b.cfg.OperatorName, ScopeText: b.scopeText(), Lifetime: fmt.Sprintf("up to %d days", int(GrantLifetime/(24*time.Hour))),
+		IdP: b.cfg.IdPLabel, Operator: b.cfg.OperatorName, ScopeText: b.scopeText(), Lifetime: lifetimeText(l.Scopes),
 		Flow: sealed, Notice: notice, RequestID: logging.RequestID(r.Context()), Stylesheet: StylesheetPath, ContinueURL: "/consent"}
 	v.ReturnsTo, v.Loopback = returnsTo(l.RedirectURI)
 	v.Raw = requestedScopes(l.Scopes, b.cfg.IdPScopes)
 	pageHeaders(w)
 	w.WriteHeader(status)
 	_ = consentTemplate.Execute(w, v)
+}
+
+// lifetimeText is how long the access may last: the grant's lifetime with offline_access (refresh
+// tokens), otherwise one access token's (ADR-0006 §5, ADR-0010 §4).
+func lifetimeText(scopes []string) string {
+	if slices.Contains(scopes, "offline_access") {
+		return fmt.Sprintf("up to %d days", int(GrantLifetime/(24*time.Hour)))
+	}
+	return "up to 1 hour" // AccessLifetime; a test keeps the two in step
 }
 
 // upstreamName is the operator's name for the upstream, or the public host when it is unset or

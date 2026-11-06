@@ -25,7 +25,7 @@ or the IdP's `error_description`.
 | Field | Meaning |
 |---|---|
 | `request_id` | The request ID: on error pages, in `/token` error descriptions, in `X-Request-Id`, and sent to Entra as `client-request-id` (Entra's `correlation_id`) |
-| `remote_ip` | The TCP peer (forwarded headers are not trusted) |
+| `remote_ip` | The client address: the TCP peer, or, when the peer is in `MCP_AUTHPROXY_TRUSTED_PROXIES`, the rightmost `X-Forwarded-For` entry that is not a trusted proxy. The request log and the rate limits use the same address |
 | `client_id` | The MCP client |
 | `client_trust` | The client's trust level on the consent page: `verified`, `domain` or `not-verified` (ADR-0008 §8) |
 | `user_key` | The IdP user key (`tid:oid` for Entra). Personal data (GDPR Recital 26) |
@@ -51,11 +51,11 @@ For SIEMs that use [OCSF](https://schema.ocsf.io) 1.9.0. Fields map as follows: 
 | Event | When | Outcomes | Limited | OCSF class / activity |
 |---|---|---|---|---|
 | `login` | sign-in through the IdP finished, was declined, failed at the IdP, or arrived with a missing, invalid or expired sign-in state | success, failure | only the state failures | 3002 Authentication / 1 Logon; `auth_protocol_id` 6 (OAuth 2.0) |
-| `access_denied` | the access gate refused a signed-in user (`reason` = the rule: `tenant`, `role`, `group`, `groups_unavailable`, `email_domain` or `hosted_domain`) | failure | no | 3003 Authorize Session / 99 Other |
-| `token_issued` | `/token` issued an access token | success | no | 3002 Authentication / 4 Service Ticket Request |
-| `token_rejected` | `/token` refused a request (`reason` = OAuth error code) | failure | yes | 3002 Authentication / 4 Service Ticket Request |
+| `access_denied` | the access gate refused a signed-in user, at sign-in or on a refresh (`reason` = the rule: `tenant`, `role`, `group`, `groups_unavailable`, `email_domain` or `hosted_domain`) | failure | no | 3003 Authorize Session / 99 Other |
+| `token_issued` | `/token` issued an access token, from an authorization code or a refresh token | success | no | 3002 Authentication / 4 Service Ticket Request |
+| `token_rejected` | `/token` or `/revoke` refused a request (`reason` = OAuth error code) | failure | yes | 3002 Authentication / 4 Service Ticket Request |
 | `access_token_rejected` | an MCP request carried an invalid or expired access token (`reason` = `invalid` or `expired`); a missing token is the normal start of sign-in and is not an event | failure | yes | 3002 Authentication / 99 Other (*approximate*) |
-| `grant_revoked` | a grant was revoked because its authorization code was reused or redeemed with the wrong binding | success | no | 3002 Authentication / 2 Logoff; `disposition_id` 24 Access Revoked |
+| `grant_revoked` | a grant was revoked: its authorization code or refresh token was reused, a code was redeemed with the wrong binding, the client revoked a token (`/revoke`), or a refresh found the IdP session ended or the user no longer allowed | success | no | 3002 Authentication / 2 Logoff; `disposition_id` 24 Access Revoked |
 | `client_registered` | a static client was loaded at startup (`reason` = `static`) | success | no | 3001 Account Change / 1 Create (*approximate*) |
 | `key_loaded` | a sealing key was loaded at startup (`reason` = `signing` or `verification`) | success | no | 6002 Application Lifecycle / 3 Start (*approximate*) |
 | `host_rejected` | a request named a `Host` outside the allowlist (421) | failure | yes | 4002 HTTP Activity; `disposition_id` 2 Blocked |
@@ -63,6 +63,7 @@ For SIEMs that use [OCSF](https://schema.ocsf.io) 1.9.0. Fields map as follows: 
 | `consent_shown` | the consent page was shown, before the IdP sign-in (the user is not known yet) | success | yes | 3003 Authorize Session / 99 Other (*approximate*) |
 | `consent_granted` | the user allowed the client on the consent page | success | yes | 3003 Authorize Session / 99 Other (*approximate*) |
 | `consent_denied` | the user denied the client on the consent page (`reason` fixed) | failure | yes | 3003 Authorize Session / 99 Other (*approximate*) |
+| `rate_limited` | an OAuth endpoint refused a request over the client address's budget (`reason` = the endpoint; [rate limits](rate-limits.md)) | failure | yes | 4002 HTTP Activity; `disposition_id` 2 Blocked |
 
 Not emitted yet; these arrive with their slices:
 refresh, revocation and store restore detection (slice 1.6), dynamic registration (slice 2.2), and key rotation
@@ -75,11 +76,12 @@ Prometheus text format at `/metrics` on the internal listener. Histogram buckets
 
 | Metric | Type | Labels |
 |---|---|---|
-| `mcp_authproxy_http_request_duration_seconds` | histogram | `route`: the matched route pattern (`/mcp` or your public path, `/authorize`, `/callback/entra`, `/token`, the `/.well-known/…` metadata paths) or `other`; `status_class` (`2xx` …) |
-| `mcp_authproxy_idp_request_duration_seconds` | histogram | `idp`, `operation` (`authorize`, `callback`), `outcome` (`success`, `rejected`, `unavailable`) |
+| `mcp_authproxy_http_request_duration_seconds` | histogram | `route`: the matched route pattern (`/mcp` or your public path, `/authorize`, `/consent`, `/assets/page.css`, `/callback/entra`, `/token`, `/revoke`, the `/.well-known/…` metadata paths) or `other`; `status_class` (`2xx` …) |
+| `mcp_authproxy_idp_request_duration_seconds` | histogram | `idp`, `operation` (`authorize`, `callback`, `refresh`), `outcome` (`success`, `rejected`, `unavailable`) |
 | `mcp_authproxy_upstream_in_flight` | gauge | `kind` (`request`, `stream`) |
 | `mcp_authproxy_upstream_busy_total` | counter | `kind`: requests refused with 503 because an admission cap was full |
 | `mcp_authproxy_audit_events_total` | counter | `event`, `outcome`: every audit event, including rate-limited ones |
+| `mcp_authproxy_rate_limited_total` | counter | `endpoint`: OAuth requests refused with 429 (or a `temporarily_unavailable` redirect) over a client address's budget |
 | `mcp_authproxy_build_info` | gauge | `version`, `go_version`; always 1 |
 
 Plus the standard `go_*` and `process_*` collectors. Live stdio processes, deny-list sync age and store errors arrive

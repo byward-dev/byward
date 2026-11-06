@@ -17,12 +17,16 @@ import (
 	"github.com/corker/mcp-authproxy/internal/health"
 	"github.com/corker/mcp-authproxy/internal/idp"
 	"github.com/corker/mcp-authproxy/internal/idp/entra"
+	"github.com/corker/mcp-authproxy/internal/ratelimit"
 	"github.com/corker/mcp-authproxy/internal/registration"
 	"github.com/corker/mcp-authproxy/internal/resource"
 	"github.com/corker/mcp-authproxy/internal/store"
 	"github.com/corker/mcp-authproxy/internal/store/memory"
 	"github.com/corker/mcp-authproxy/internal/token"
 )
+
+// maxRateLimitKeys bounds the client addresses each OAuth endpoint tracks (ADR-0018 §8).
+const maxRateLimitKeys = 100000
 
 // maxJTIs bounds the in-memory private_key_jwt replay cache.
 const maxJTIs = 10000
@@ -33,6 +37,8 @@ type auth struct {
 	register  func(*http.ServeMux)
 	validator resource.Validator
 	checks    []health.Check
+	// background runs until ctx ends: it keeps the revocation list fresh (ADR-0006 §3).
+	background func(ctx context.Context)
 }
 
 // idpName names the IdP adapter in its callback path, the broker and metrics.
@@ -90,11 +96,20 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (*auth, er
 		Store: st, Sealer: sealer, LoginBox: loginBox, IdPTokenBox: idpBox, ConsentBox: consentBox, Gate: g,
 		UpstreamName: cfg.ResourceName, ScopeText: cfg.ScopeDescription, OperatorName: cfg.OperatorName,
 		SecureCookies: cfg.PublicURL.Scheme == "https", Log: log,
-		Audit: o.Audit, ObserveIdP: func(op, outcome string, d time.Duration) { o.Metrics.IdP(idpName, op, outcome, d) }})
+		Audit: o.Audit, Limiter: ratelimit.New(cfg.OAuthRateLimits, maxRateLimitKeys, time.Now, o.Metrics.RateLimited),
+		ObserveIdP:   func(op, outcome string, d time.Duration) { o.Metrics.IdP(idpName, op, outcome, d) },
+		RefreshGrace: broker.DefaultRefreshGrace})
 	if err != nil {
 		return nil, err
 	}
-	v, err := token.NewValidator(sealer, b.Deny(), nil)
+	deny := b.Deny()
+	// The list refuses every token until its first sync, so sync before serving.
+	syncCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := deny.Sync(syncCtx); err != nil {
+		return nil, fmt.Errorf("loading the revocation list: %w", err)
+	}
+	v, err := token.NewValidator(sealer, deny, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +118,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (*auth, er
 			"reason", "set it to say in plain words what the "+cfg.Scope+" scope lets an app do (ADR-0010 §4)")
 	}
 	log.Info("broker ready", "reason", "keys "+fmt.Sprint(len(ring.KeyIDs()))+", signing with "+ring.SigningKeyID()+"; store in memory until slice 1.3")
-	return &auth{register: b.Register, validator: v, checks: readiness(ring, st)}, nil
+	return &auth{register: b.Register, validator: v, checks: readiness(ring, st), background: func(ctx context.Context) { deny.Run(ctx, log) }}, nil
 }
 
 // auditStartup records the keys and static clients the proxy starts with (ADR-0021 §3).

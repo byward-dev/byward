@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/corker/mcp-authproxy/internal/audit"
 	"github.com/corker/mcp-authproxy/internal/idp"
 	"github.com/corker/mcp-authproxy/internal/logging"
+	"github.com/corker/mcp-authproxy/internal/ratelimit"
 	"github.com/corker/mcp-authproxy/internal/registration"
 	"github.com/corker/mcp-authproxy/internal/store"
 	"github.com/corker/mcp-authproxy/internal/token"
@@ -20,12 +22,15 @@ import (
 // metadataHandler serves RFC 8414 metadata, identical at both well-known paths (ADR-0013 §2).
 func (b *Broker) metadataHandler() http.Handler {
 	doc, err := json.Marshal(map[string]any{
-		"issuer":                                           b.cfg.Issuer,
-		"authorization_endpoint":                           b.cfg.Issuer + "/authorize",
-		"token_endpoint":                                   b.tokenEndpoint(),
-		"response_types_supported":                         []string{"code"},
-		"response_modes_supported":                         []string{"query"},
-		"grant_types_supported":                            []string{"authorization_code"}, // refresh_token in slice 1.6
+		"issuer":                   b.cfg.Issuer,
+		"authorization_endpoint":   b.cfg.Issuer + "/authorize",
+		"token_endpoint":           b.tokenEndpoint(),
+		"response_types_supported": []string{"code"},
+		"response_modes_supported": []string{"query"},
+		"grant_types_supported":    grantTypes,
+		"revocation_endpoint":      b.cfg.Issuer + "/revoke",
+		// ADR-0006 §7: like the token endpoint, secret methods are not advertised.
+		"revocation_endpoint_auth_methods_supported":       []string{"none", "private_key_jwt"},
 		"code_challenge_methods_supported":                 []string{"S256"},
 		"token_endpoint_auth_methods_supported":            []string{"none", "private_key_jwt"}, // ADR-0008 §1: DCR clients are never offered a secret; configured static secrets still work
 		"token_endpoint_auth_signing_alg_values_supported": []string{"RS256", "PS256", "ES256"},
@@ -98,6 +103,17 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	ctx := r.Context()
+	if retry, limited := b.throttled(w, r, ratelimit.Authorize); limited {
+		// RFC 6749 §4.1.2.1: with a client and redirect URI we trust, tell the MCP client at once;
+		// otherwise there is nowhere safe to send it, so the user sees the page.
+		if c, err := b.cfg.Clients.Client(ctx, q.Get("client_id")); err == nil && c.RedirectAllowed(q.Get("redirect_uri")) == nil {
+			b.redirectError(w, r, q.Get("redirect_uri"), q.Get("state"), "temporarily_unavailable",
+				"too many sign-in attempts from this network; retry after "+strconv.Itoa(retry)+" s")
+			return
+		}
+		b.page(w, r, http.StatusTooManyRequests, tooManyTitle, tooManyHint(retry))
+		return
+	}
 	client, err := b.cfg.Clients.Client(ctx, q.Get("client_id"))
 	switch {
 	case errors.Is(err, registration.ErrUnknownClient):
@@ -197,6 +213,10 @@ func (b *Broker) scopes(raw string) ([]string, bool) {
 // callback receives the IdP's redirect, creates the grant and its single-use code, and returns the
 // user to the MCP client.
 func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
+	if retry, limited := b.throttled(w, r, ratelimit.Callback); limited {
+		b.page(w, r, http.StatusTooManyRequests, tooManyTitle, tooManyHint(retry))
+		return
+	}
 	q := r.URL.Query()
 	ctx := r.Context()
 	st := q.Get("state")
@@ -256,7 +276,9 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	g, err := b.cfg.Store.CreateGrant(ctx, store.Grant{ID: randomID(), ClientID: l.ClientID, Subject: id.Subject, Issuer: id.Issuer,
-		Resource: b.cfg.Resource.String(), Scopes: l.Scopes, IdPTokens: []byte(sealedTokens), CreatedAt: now, ExpiresAt: now.Add(GrantLifetime)})
+		// Short-lived until the code is redeemed (token.go extends it), so an abandoned login does
+		// not leave a 30-day grant holding IdP tokens.
+		Resource: b.cfg.Resource.String(), Scopes: l.Scopes, IdPTokens: []byte(sealedTokens), CreatedAt: now, ExpiresAt: now.Add(LoginLifetime)})
 	if err != nil {
 		b.serverError(w, r, err)
 		return

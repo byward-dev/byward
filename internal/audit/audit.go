@@ -18,11 +18,11 @@ const SchemaVersion = 1
 // Event names. Add new ones here, to the golden file and to the docs; never rename one.
 const (
 	Login               = "login"                 // sign-in through the IdP finished (success) or failed
-	AccessDenied        = "access_denied"         // the access gate refused a signed-in user (ADR-0015)
+	AccessDenied        = "access_denied"         // the access gate refused a signed-in user, at sign-in or refresh (ADR-0015)
 	TokenIssued         = "token_issued"          // /token issued an access token
-	TokenRejected       = "token_rejected"        // /token refused a request
+	TokenRejected       = "token_rejected"        // /token or /revoke refused a request
 	AccessTokenRejected = "access_token_rejected" // an MCP request carried an invalid or expired token
-	GrantRevoked        = "grant_revoked"         // a grant was revoked (code reuse or misuse)
+	GrantRevoked        = "grant_revoked"         // a grant was revoked (code or refresh-token reuse, misuse, the client, or the IdP)
 	ClientRegistered    = "client_registered"     // a client was registered (static clients at startup)
 	KeyLoaded           = "key_loaded"            // a sealing key was loaded at startup
 	HostRejected        = "host_rejected"         // a request named a Host outside the allowlist
@@ -30,6 +30,7 @@ const (
 	ConsentShown        = "consent_shown"         // the consent page was shown (ADR-0010 §12)
 	ConsentGranted      = "consent_granted"       // the user allowed the client on the consent page
 	ConsentDenied       = "consent_denied"        // the user denied the client on the consent page
+	RateLimited         = "rate_limited"          // an OAuth endpoint refused a request over its per-address budget
 )
 
 // Outcomes.

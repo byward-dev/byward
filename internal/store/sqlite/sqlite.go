@@ -215,6 +215,25 @@ func (s *Store) RevokeGrant(ctx context.Context, id string, at time.Time) error 
 	})
 }
 
+// UpdateGrant implements store.Grants.
+func (s *Store) UpdateGrant(ctx context.Context, id string, expiresAt time.Time) error {
+	return s.write(ctx, func(tx *sql.Tx) error {
+		var created int64
+		err := tx.QueryRowContext(ctx, "SELECT created_at FROM grants WHERE id = ?", id).Scan(&created)
+		if errors.Is(err, sql.ErrNoRows) {
+			return store.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if micros(expiresAt) <= created {
+			return store.ErrInvalid
+		}
+		_, err = tx.ExecContext(ctx, "UPDATE grants SET expires_at = ? WHERE id = ?", micros(expiresAt), id)
+		return err
+	})
+}
+
 // RevokeSubject implements store.Grants.
 func (s *Store) RevokeSubject(ctx context.Context, subject string, before, at time.Time) error {
 	if subject == "" {
@@ -311,9 +330,10 @@ func (s *Store) PutRefreshToken(ctx context.Context, t store.RefreshToken) error
 func (s *Store) RefreshToken(ctx context.Context, hash [sha256.Size]byte, now time.Time) (store.RefreshToken, error) {
 	var t store.RefreshToken
 	var created, idle, epoch int64
-	err := s.db.QueryRowContext(ctx, `SELECT r.grant_id, r.client_id, r.created_at, r.idle_expires_at, g.epoch
+	var rotated sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT r.grant_id, r.client_id, r.created_at, r.idle_expires_at, r.rotated_at, g.epoch
 		FROM refresh_tokens r JOIN grants g ON g.id = r.grant_id WHERE r.hash = ?`, hash[:]).
-		Scan(&t.GrantID, &t.ClientID, &created, &idle, &epoch)
+		Scan(&t.GrantID, &t.ClientID, &created, &idle, &rotated, &epoch)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && (idle <= micros(now) || epoch < s.epoch)) {
 		return store.RefreshToken{}, store.ErrNotFound
 	}
@@ -321,7 +341,82 @@ func (s *Store) RefreshToken(ctx context.Context, hash [sha256.Size]byte, now ti
 		return store.RefreshToken{}, fmt.Errorf("sqlite store: refresh token: %w", err)
 	}
 	t.Hash, t.CreatedAt, t.IdleExpiresAt = hash, fromMicros(created), fromMicros(idle)
+	if rotated.Valid {
+		t.RotatedAt = fromMicros(rotated.Int64)
+	}
 	return t, nil
+}
+
+// RotateRefreshToken implements store.RefreshTokens: one IMMEDIATE transaction. A reuse commits
+// the revocation and still reports ErrReused.
+func (s *Store) RotateRefreshToken(ctx context.Context, r store.RotateRequest) error {
+	reused := false
+	err := s.write(ctx, func(tx *sql.Tx) error {
+		var grantID string
+		var idle, epoch int64
+		var rotated sql.NullInt64
+		var successor []byte
+		err := tx.QueryRowContext(ctx, `SELECT r.grant_id, r.idle_expires_at, r.rotated_at, r.successor, g.epoch
+			FROM refresh_tokens r JOIN grants g ON g.id = r.grant_id WHERE r.hash = ?`, r.Old[:]).
+			Scan(&grantID, &idle, &rotated, &successor, &epoch)
+		if errors.Is(err, sql.ErrNoRows) || (err == nil && (idle <= micros(r.Now) || epoch < s.epoch)) {
+			return store.ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if r.Next.GrantID != grantID {
+			return store.ErrInvalid
+		}
+		var n int
+		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM refresh_tokens WHERE hash = ?", r.Next.Hash[:]).Scan(&n); err != nil {
+			return err
+		}
+		if n > 0 {
+			return store.ErrExists
+		}
+		rotating := r.Old[:]
+		if rotated.Valid {
+			// A retry is allowed only for the immediate predecessor of the current token, within
+			// Grace of its own rotation.
+			var curRotated sql.NullInt64
+			err := tx.QueryRowContext(ctx, "SELECT rotated_at FROM refresh_tokens WHERE hash = ?", successor).Scan(&curRotated)
+			if errors.Is(err, sql.ErrNoRows) || (err == nil && (curRotated.Valid || r.Now.Sub(fromMicros(rotated.Int64)) >= r.Grace)) {
+				reused = true
+				if _, err := tx.ExecContext(ctx, "DELETE FROM grants WHERE id = ?", grantID); err != nil {
+					return err
+				}
+				_, err := tx.ExecContext(ctx, "INSERT INTO revocations (grant_id, subject, before, at) VALUES (?, '', ?, ?)",
+					grantID, micros(r.Now), micros(r.Now))
+				return err
+			}
+			if err != nil {
+				return err
+			}
+			rotating = successor
+			if _, err := tx.ExecContext(ctx, "UPDATE refresh_tokens SET successor = ? WHERE hash = ?", r.Next.Hash[:], r.Old[:]); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE refresh_tokens SET rotated_at = ?, successor = ? WHERE hash = ?",
+			micros(r.Now), r.Next.Hash[:], rotating); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO refresh_tokens (hash, grant_id, client_id, created_at, idle_expires_at)
+			VALUES (?, ?, ?, ?, ?)`, r.Next.Hash[:], grantID, r.Next.ClientID, micros(r.Next.CreatedAt), micros(r.Next.IdleExpiresAt)); err != nil {
+			return err
+		}
+		if r.IdPTokens != nil {
+			if _, err := tx.ExecContext(ctx, "UPDATE grants SET idp_tokens = ? WHERE id = ?", r.IdPTokens, grantID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err == nil && reused {
+		return store.ErrReused
+	}
+	return err
 }
 
 // Revocations implements store.Revocations.

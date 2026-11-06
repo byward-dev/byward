@@ -111,6 +111,10 @@ func (stubIdP) Callback(context.Context, url.Values, idp.Login) (idp.Identity, i
 	return idp.Identity{}, idp.Tokens{}, errors.New("stub IdP: no callback")
 }
 
+func (stubIdP) Refresh(context.Context, string) (*idp.Identity, idp.Tokens, error) {
+	return nil, idp.Tokens{}, errors.New("stub IdP: no refresh")
+}
+
 // clients: a loopback app (Claude Code-like), an https web app, and an unverified one whose name
 // carries control and bidi characters.
 type clients struct{}

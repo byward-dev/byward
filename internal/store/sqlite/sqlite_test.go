@@ -47,6 +47,52 @@ func open(t *testing.T, dir, counter string) *Store {
 	return s
 }
 
+// Two stores on one database file, as two replicas would be, rotate the same refresh token at once
+// with no grace window. IMMEDIATE transactions serialize them: exactly one wins, and its reuse by
+// the others revokes the grant. storetest cannot show this: one store has one connection, so the
+// pool queues the calls before SQLite's locking is involved.
+func TestRotateRacingAcrossProcessesHasOneWinner(t *testing.T) {
+	dir, counter := t.TempDir(), filepath.Join(t.TempDir(), "writes")
+	a, b := open(t, dir, counter), open(t, dir, counter)
+	if _, err := a.CreateGrant(ctx, grant("g1", "tid:a")); err != nil {
+		t.Fatal(err)
+	}
+	t1 := store.RefreshToken{Hash: sha256.Sum256([]byte("t1")), GrantID: "g1", ClientID: "c", CreatedAt: t0, IdleExpiresAt: t0.Add(time.Hour)}
+	must(t, a.PutRefreshToken(ctx, t1))
+	const n = 10
+	errs := make([]error, n)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range n {
+		s := a
+		if i%2 == 1 {
+			s = b
+		}
+		wg.Go(func() {
+			<-start
+			next := store.RefreshToken{Hash: sha256.Sum256(fmt.Appendf(nil, "next-%d", i)), GrantID: "g1", ClientID: "c", CreatedAt: t0, IdleExpiresAt: t0.Add(time.Hour)}
+			errs[i] = s.RotateRefreshToken(ctx, store.RotateRequest{Old: t1.Hash, Next: next, Now: t0.Add(time.Minute)})
+		})
+	}
+	close(start)
+	wg.Wait()
+	wins := 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			wins++
+		case !errors.Is(err, store.ErrReused) && !errors.Is(err, store.ErrNotFound):
+			t.Fatalf("a rotation failed with %v (want ErrReused, or ErrNotFound once the grant is gone)", err)
+		}
+	}
+	if wins != 1 {
+		t.Fatalf("%d of %d concurrent rotations won, want exactly 1", wins, n)
+	}
+	if _, err := a.Grant(ctx, "g1"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the grant survived the reuse: %v", err)
+	}
+}
+
 // The lock test the conformance suite cannot replace (#50): two stores on one database file, as two
 // processes would be, race CreateGrant against RevokeSubject one pair at a time. IMMEDIATE
 // transactions serialize each pair, so no covered grant survives.
@@ -251,6 +297,11 @@ func TestRestoredDatabaseStartsANewEpochOnce(t *testing.T) {
 	if !r.Startup().Restored || r.Startup().Epoch != 2 {
 		t.Fatalf("restored=%v epoch=%d, want a detected restore and epoch 2", r.Startup().Restored, r.Startup().Epoch)
 	}
+	rotate := store.RotateRequest{Old: old.Hash, Now: t0, Grace: 30 * time.Second,
+		Next: store.RefreshToken{Hash: sha256.Sum256([]byte("old-next")), GrantID: "old", ClientID: "c", CreatedAt: t0, IdleExpiresAt: t0.Add(time.Hour)}}
+	if err := r.RotateRefreshToken(ctx, rotate); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("rotating a refresh token from the old epoch: %v, want ErrNotFound", err)
+	}
 	if _, err := r.RefreshToken(ctx, old.Hash, t0); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("refresh token from the old epoch: %v, want ErrNotFound", err)
 	}
@@ -430,7 +481,32 @@ func TestFixturesMigrateToTheCurrentSchemaKeepingTheirData(t *testing.T) {
 			if c, err := s.ConsumeCode(ctx, fixtureGrant.ID, fixtureCreated); err != nil || !reflect.DeepEqual(c, fixtureCode) {
 				t.Fatalf("code = %+v, %v\nwant %+v", c, err, fixtureCode)
 			}
+			if v >= 2 {
+				checkRotatedFixtureToken(t, s)
+			}
 		})
+	}
+}
+
+// checkRotatedFixtureToken: from v2, the fixture holds a token rotated 1 s after creation to
+// fixture-refresh. Its rotation time and its link to the successor must survive migrations: a
+// retry with it inside the grace window must rotate the successor, not count as reuse.
+func checkRotatedFixtureToken(t *testing.T, s *Store) {
+	t.Helper()
+	oldHash := sha256.Sum256([]byte("fixture-refresh-old"))
+	want := store.RefreshToken{Hash: oldHash, GrantID: fixtureGrant.ID, ClientID: "fixture-client",
+		CreatedAt: fixtureCreated, IdleExpiresAt: fixtureExpires, RotatedAt: fixtureCreated.Add(time.Second)}
+	if got, err := s.RefreshToken(ctx, oldHash, fixtureCreated); err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("rotated fixture token = %+v, %v\nwant %+v", got, err, want)
+	}
+	retry := fixtureCreated.Add(2 * time.Second)
+	next := store.RefreshToken{Hash: sha256.Sum256([]byte("fixture-refresh-next")), GrantID: fixtureGrant.ID, ClientID: "fixture-client",
+		CreatedAt: retry, IdleExpiresAt: fixtureExpires}
+	if err := s.RotateRefreshToken(ctx, store.RotateRequest{Old: oldHash, Next: next, Now: retry, Grace: 30 * time.Second}); err != nil {
+		t.Fatalf("retry with the rotated fixture token: %v (its successor link was lost)", err)
+	}
+	if got, err := s.RefreshToken(ctx, fixtureRefresh.Hash, retry); err != nil || !got.RotatedAt.Equal(retry) {
+		t.Fatalf("the successor %+v, %v: want it rotated at %v by the retry", got, err, retry)
 	}
 }
 

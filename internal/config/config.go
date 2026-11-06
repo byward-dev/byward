@@ -5,11 +5,14 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/corker/mcp-authproxy/internal/ratelimit"
 )
 
 // registry is every setting the proxy reads, in the order the effective configuration is printed.
@@ -23,6 +26,8 @@ var registry = []Setting{
 	{Name: "resource-name", Help: "human-readable resource name in protected resource metadata"},
 	{Name: "resource-documentation", Help: "documentation URL in protected resource metadata"},
 	{Name: "log-format", Default: "json", Help: "log format: json or text"},
+	{Name: "trusted-proxies", Help: "comma-separated CIDRs or addresses of reverse proxies whose X-Forwarded-For is trusted for the client address (ADR-0018 §6); empty trusts none"},
+	{Name: "oauth-rate-limits", Help: "per-minute limits per client address on OAuth endpoints, e.g. authorize=60,token=120 (ADR-0018 §8); unset endpoints keep their defaults"},
 	{Name: "internal-listen", Default: "127.0.0.1:9090", Help: "address of the internal listener for /metrics, /livez and /readyz (ADR-0018 §10); empty turns it off"},
 	{Name: "entra-tenant", Auth: true, Help: "Entra tenant ID (a GUID) of the IdP app"},
 	{Name: "entra-client-id", Auth: true, Help: "application (client) ID of the IdP app registration"},
@@ -43,12 +48,15 @@ var registry = []Setting{
 
 // Config is the validated configuration.
 type Config struct {
-	PublicURL             *url.URL
-	UpstreamURL           *url.URL
-	Listen                string
-	InternalListen        string // "" when the internal listener is off
-	AllowedOrigins        []string
-	AllowedHosts          []string
+	PublicURL      *url.URL
+	UpstreamURL    *url.URL
+	Listen         string
+	InternalListen string // "" when the internal listener is off
+	AllowedOrigins []string
+	AllowedHosts   []string
+	TrustedProxies []netip.Prefix
+	// OAuthRateLimits is requests per minute per client address, by endpoint name.
+	OAuthRateLimits       map[string]int
 	Scope                 string
 	ResourceName          string
 	ResourceDocumentation string
@@ -173,6 +181,14 @@ func validate(v *Values, container bool) (*Config, error) {
 			continue
 		}
 		c.AllowedOrigins = append(c.AllowedOrigins, n)
+	}
+	c.TrustedProxies, err = parseProxies(v.get("trusted-proxies"))
+	if err != nil {
+		errs = append(errs, err)
+	}
+	c.OAuthRateLimits, err = parseRateLimits(v.get("oauth-rate-limits"))
+	if err != nil {
+		errs = append(errs, err)
 	}
 	for _, h := range splitList(v.get("allowed-hosts")) {
 		if strings.ContainsAny(h, "/ ") {
@@ -398,6 +414,46 @@ func parseURL(name, raw string) (*url.URL, error) {
 		return nil, errorf("%s: want an absolute http(s) URL without credentials, got %q", env, raw)
 	}
 	return u, nil
+}
+
+// Bounds of a configured OAuth rate limit (ADR-0018 Consequences: configurable within bounds). There
+// is no off switch.
+const (
+	minRateLimit = 1
+	maxRateLimit = 10000
+)
+
+func parseRateLimits(raw string) (map[string]int, error) {
+	out := ratelimit.Defaults()
+	for _, item := range splitList(raw) {
+		name, val, ok := strings.Cut(item, "=")
+		name = strings.TrimSpace(name)
+		if _, known := out[name]; !ok || !known {
+			return nil, errorf("MCP_AUTHPROXY_OAUTH_RATE_LIMITS: %q is not endpoint=per-minute for one of %s", item, strings.Join(ratelimit.Endpoints, ", "))
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(val))
+		if err != nil || n < minRateLimit || n > maxRateLimit {
+			return nil, errorf("MCP_AUTHPROXY_OAUTH_RATE_LIMITS: %s must be a whole number from %d to %d per minute, got %q", name, minRateLimit, maxRateLimit, val)
+		}
+		out[name] = n
+	}
+	return out, nil
+}
+
+func parseProxies(raw string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, item := range splitList(raw) {
+		p, err := netip.ParsePrefix(item)
+		if err != nil {
+			a, aerr := netip.ParseAddr(item)
+			if aerr != nil {
+				return nil, errorf("MCP_AUTHPROXY_TRUSTED_PROXIES: %q is not a CIDR or an IP address", item)
+			}
+			p = netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen())
+		}
+		out = append(out, p.Masked())
+	}
+	return out, nil
 }
 
 func splitList(s string) []string {

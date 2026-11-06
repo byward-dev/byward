@@ -3,6 +3,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -84,7 +85,8 @@ func Handler(cfg *config.Config, log *slog.Logger, v resource.Validator, registe
 	rt := routeOf(mux)
 	// recoverer is innermost so a panic still gets its request log line, its 5xx metric and an error
 	// span: the wrappers above see the 500 it writes.
-	return logging.Middleware(log, tracing.Middleware(rt, o.Metrics.Middleware(rt, recoverer(log, origin.Hosts(o.Audit, hosts, mux)))))
+	// ClientAddress is outermost: every layer below logs and limits by the same resolved address.
+	return logging.ClientAddress(cfg.TrustedProxies, logging.Middleware(log, tracing.Middleware(rt, o.Metrics.Middleware(rt, recoverer(log, origin.Hosts(o.Audit, hosts, mux))))))
 }
 
 // New wires the proxy and returns the hardened servers. WriteTimeout stays 0 so streams can run;
@@ -95,6 +97,7 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 	o := Observability{Audit: audit.New(log, m.AuditEvent, time.Now), Metrics: m}
 	var h http.Handler
 	var checks []health.Check
+	var background func(context.Context)
 	if cfg.NoAuth {
 		h = Handler(cfg, log, resource.NoTokens{}, nil, o)
 	} else {
@@ -104,8 +107,9 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 		}
 		h = Handler(cfg, log, a.validator, a.register, o)
 		checks = a.checks
+		background = a.background
 	}
-	s := &Servers{Public: hardened(cfg.Listen, h, log), Health: health.New(log, checks...)}
+	s := &Servers{Public: hardened(cfg.Listen, h, log), Health: health.New(log, checks...), background: background}
 	if cfg.InternalListen != "" {
 		mux := http.NewServeMux()
 		mux.Handle("GET /metrics", m.Handler())

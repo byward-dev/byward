@@ -35,6 +35,7 @@ var samples = []Event{
 	{Name: ConsentShown, Outcome: Success, ClientID: "client-1", ClientTrust: "verified"},
 	{Name: ConsentGranted, Outcome: Success, ClientID: "client-1", ClientTrust: "verified"},
 	{Name: ConsentDenied, Outcome: Failure, Reason: "the user denied the request", ClientID: "client-1", ClientTrust: "verified"},
+	{Name: RateLimited, Outcome: Failure, Reason: "authorize"},
 }
 
 func render(t *testing.T) string {
@@ -45,7 +46,7 @@ func render(t *testing.T) string {
 		r := httptest.NewRequest("GET", "/mcp", nil)
 		r.RemoteAddr = "192.0.2.7:1234"
 		switch e.Name {
-		case AccessTokenRejected, HostRejected, OriginRejected, TokenRejected, ConsentShown, ConsentGranted, ConsentDenied:
+		case AccessTokenRejected, HostRejected, OriginRejected, TokenRejected, ConsentShown, ConsentGranted, ConsentDenied, RateLimited:
 			l.RecordUnauthenticated(r, e)
 		case ClientRegistered, KeyLoaded:
 			l.Record(nil, e) // startup: no request
@@ -85,7 +86,7 @@ func TestAuditRecordsMatchTheGoldenSchema(t *testing.T) {
 
 // names lists every event constant; a new one must be added here, to samples and to the docs.
 var names = []string{Login, AccessDenied, TokenIssued, TokenRejected, AccessTokenRejected, GrantRevoked,
-	ClientRegistered, KeyLoaded, HostRejected, OriginRejected, ConsentShown, ConsentGranted, ConsentDenied}
+	ClientRegistered, KeyLoaded, HostRejected, OriginRejected, ConsentShown, ConsentGranted, ConsentDenied, RateLimited}
 
 func TestEveryEventHasASampleAndADocsRow(t *testing.T) {
 	docs, err := os.ReadFile("../../docs/reference/observability.md")

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html"
 	"io"
 	"log/slog"
@@ -481,6 +482,23 @@ func TestNewNamesTheSettingAtFault(t *testing.T) {
 	}
 }
 
+// With authentication, New must hand the revocation-list sync to Run (background_test.go shows
+// that Run runs it and that it keeps tokens valid); without it every token is refused 30 s after
+// startup.
+func TestNewInAuthModeHandsTheRevocationSyncToRun(t *testing.T) {
+	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.background == nil {
+		t.Fatal("New in auth mode gives Run no background work")
+	}
+}
+
 func TestNewServesTheBrokerRoutes(t *testing.T) {
 	cfg := loadConfig(t, "https://mcp.example.com/mcp")
 	s, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -835,5 +853,63 @@ func TestNewWarnsAboutGenericWordingOnlyWithoutAScopeDescription(t *testing.T) {
 				t.Fatalf("warning logged: %v, want %v: %s", got, c.warn, logs)
 			}
 		})
+	}
+}
+
+// ADR-0018 §6 and §8 end to end: behind a trusted proxy each forwarded client has its own
+// /authorize budget; from an untrusted peer, X-Forwarded-For cannot buy a fresh budget.
+func TestOAuthRateLimitsKeyOnTheResolvedClientAddress(t *testing.T) {
+	cfg := loadConfig(t, "https://mcp.example.com/mcp", "MCP_AUTHPROXY_TRUSTED_PROXIES=10.0.0.0/8", "MCP_AUTHPROXY_OAUTH_RATE_LIMITS=authorize=2")
+	logs := &syncBuffer{}
+	s, err := New(cfg, logging.New(logs, "json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An unknown client: the broker rejects it (400) after the limit and before any IdP call, so the
+	// test makes no network request.
+	q := url.Values{"client_id": {"nobody"}}
+	authorize := func(peer, xff string) string {
+		r := httptest.NewRequest("GET", "/authorize?"+q.Encode(), nil)
+		r.Host = "mcp.example.com"
+		r.RemoteAddr = peer + ":4000"
+		if xff != "" {
+			r.Header.Set("X-Forwarded-For", xff)
+		}
+		w := httptest.NewRecorder()
+		s.Public.Handler.ServeHTTP(w, r)
+		switch w.Code {
+		case http.StatusTooManyRequests:
+			return "limited"
+		case http.StatusBadRequest:
+			return "passed"
+		}
+		return fmt.Sprintf("unexpected %d", w.Code)
+	}
+	got := []string{
+		authorize("10.0.0.1", "198.51.100.1"), authorize("10.0.0.1", "198.51.100.1"), authorize("10.0.0.1", "198.51.100.1"),
+		authorize("10.0.0.1", "198.51.100.2"),
+		authorize("203.0.113.5", "1.1.1.1"), authorize("203.0.113.5", "2.2.2.2"), authorize("203.0.113.5", "3.3.3.3"),
+		// IPv6 clients behind the proxy share their /64 (ADR-0018 §8).
+		authorize("10.0.0.1", "2001:db8:1:2::1"), authorize("10.0.0.1", "2001:db8:1:2::2"), authorize("10.0.0.1", "2001:db8:1:2:ffff::3"),
+	}
+	want := []string{"passed", "passed", "limited", "passed", "passed", "passed", "limited", "passed", "passed", "limited"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("authorize results = %v, want %v (budget 2 per resolved client address)", got, want)
+	}
+	var limitedLine string
+	for _, line := range strings.Split(logs.String(), "\n") {
+		if strings.Contains(line, `"event":"rate_limited"`) && strings.Contains(line, `"remote_ip":"198.51.100.1"`) {
+			limitedLine = line
+		}
+	}
+	if limitedLine == "" || !strings.Contains(limitedLine, `"reason":"authorize"`) || !strings.Contains(limitedLine, `"outcome":"failure"`) {
+		t.Errorf("no rate_limited audit record for authorize from the forwarded client 198.51.100.1:\n%s", logs.String())
+	}
+	if strings.Contains(logs.String(), `"remote_ip":"3.3.3.3"`) {
+		t.Error("a forwarded address from an untrusted peer reached the log")
+	}
+	_, metrics := getBody(t, s.Internal.Handler, "x", "/metrics")
+	if !strings.Contains(metrics, `mcp_authproxy_rate_limited_total{endpoint="authorize"} 3`) {
+		t.Errorf("metrics must count all three refusals:\n%s", metrics)
 	}
 }

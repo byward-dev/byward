@@ -20,6 +20,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -51,8 +52,45 @@ var t0 = time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 // memStore is the in-memory store, recording created grant IDs so tests can find "the" grant.
 type memStore struct {
 	*memory.Store
-	mu  sync.Mutex
-	ids []string
+	mu   sync.Mutex
+	ids  []string
+	down atomic.Bool // every lookup and write fails, as in a store outage
+	// revokeDown fails only RevokeGrant; reuseOnRotate makes RotateRefreshToken report reuse
+	// without recording it, as when another replica won the race.
+	revokeDown, reuseOnRotate atomic.Bool
+}
+
+var errStoreDown = errors.New("store down")
+
+func (m *memStore) RefreshToken(ctx context.Context, h [32]byte, now time.Time) (store.RefreshToken, error) {
+	if m.down.Load() {
+		return store.RefreshToken{}, errStoreDown
+	}
+	return m.Store.RefreshToken(ctx, h, now)
+}
+
+func (m *memStore) Grant(ctx context.Context, id string) (store.Grant, error) {
+	if m.down.Load() {
+		return store.Grant{}, errStoreDown
+	}
+	return m.Store.Grant(ctx, id)
+}
+
+func (m *memStore) RevokeGrant(ctx context.Context, id string, at time.Time) error {
+	if m.down.Load() || m.revokeDown.Load() {
+		return errStoreDown
+	}
+	return m.Store.RevokeGrant(ctx, id, at)
+}
+
+func (m *memStore) RotateRefreshToken(ctx context.Context, r store.RotateRequest) error {
+	if m.down.Load() {
+		return errStoreDown
+	}
+	if m.reuseOnRotate.Load() {
+		return store.ErrReused
+	}
+	return m.Store.RotateRefreshToken(ctx, r)
 }
 
 func newMemStore() *memStore { return &memStore{Store: memory.New()} }
@@ -155,6 +193,7 @@ type env struct {
 	b      *Broker
 	st     *memStore
 	sealer *token.Sealer
+	cfg    Config // as passed to New
 	idpBox *token.Box
 	fake   *fakeidp.IdP
 	reg    *registry
@@ -197,6 +236,7 @@ func keyRing(t *testing.T) *token.KeyRing {
 	return r
 }
 
+// newEnv builds a broker against the fake IdP; opts adjust its Config before New.
 func newEnv(t *testing.T, opts ...func(*Config)) *env {
 	t.Helper()
 	e := &env{now: t0, st: newMemStore(), audit: &syncBuffer{}, logs: &syncBuffer{},
@@ -224,8 +264,12 @@ func newEnv(t *testing.T, opts ...func(*Config)) *env {
 	for _, o := range opts {
 		o(&cfg)
 	}
+	e.cfg = cfg
 	e.b, err = New(cfg)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.b.Deny().Sync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
@@ -497,7 +541,7 @@ func TestTokenEndpointRechecks(t *testing.T) {
 		{"wrong redirect", url.Values{"redirect_uri": {"http://127.0.0.1:43210/other"}}, "invalid_grant", 400},
 		{"unknown client", url.Values{"client_id": {"nope"}}, "invalid_client", 401},
 		{"foreign resource", url.Values{"resource": {"https://other.example/mcp"}}, "invalid_target", 400},
-		{"refresh not yet", url.Values{"grant_type": {"refresh_token"}}, "unsupported_grant_type", 400},
+		{"refresh without a refresh token", url.Values{"grant_type": {"refresh_token"}}, "invalid_grant", 400},
 		{"client credentials never", url.Values{"grant_type": {"client_credentials"}}, "unsupported_grant_type", 400},
 		{"garbage code", url.Values{"code": {"mcpap_ac_garbage"}}, "invalid_grant", 400},
 	}
@@ -764,6 +808,11 @@ func TestFailedBindingAfterConsumeRevokesTheGrant(t *testing.T) {
 			if denied, _ := e.b.Deny().Denied(grant, "", time.Time{}); !denied {
 				t.Fatal("grant not on the deny list")
 			}
+			presenter := clientID // the audit names the client that presented the code
+			if c := override.Get("client_id"); c != "" {
+				presenter = c
+			}
+			e.oneAuditEvent(t, "grant_revoked", map[string]any{"outcome": "success", "client_id": presenter, "grant_id": grant})
 		})
 	}
 }
@@ -909,7 +958,7 @@ func TestReusedCodeIsAuditedAsARevocation(t *testing.T) {
 	grant := firstGrant(e.st)
 	e.redeem(t, code, nil)
 	e.redeem(t, code, nil)
-	revoked := e.oneAuditEvent(t, "grant_revoked", map[string]any{"outcome": "success", "grant_id": grant})
+	revoked := e.oneAuditEvent(t, "grant_revoked", map[string]any{"outcome": "success", "client_id": clientID, "grant_id": grant})
 	if !strings.Contains(fmt.Sprint(revoked["reason"]), "reused") {
 		t.Errorf("grant_revoked.reason = %v, want it to say the code was reused", revoked["reason"])
 	}
@@ -942,4 +991,200 @@ func TestUserDeclinedIsAuditedAsAFailedLogin(t *testing.T) {
 	q := url.Values{"state": {cb.Query().Get("state")}, "error": {"access_denied"}, "error_description": {"declined"}}
 	e.do(t, "GET", "/callback/entra?"+q.Encode(), nil, []*http.Cookie{c})
 	e.oneAuditEvent(t, "login", map[string]any{"outcome": "failure", "reason": "the user declined to sign in", "client_id": clientID})
+}
+
+// stubLimiter records the addresses it is asked about and refuses the endpoints it names.
+type stubLimiter struct {
+	endpoints map[string]bool
+	seenIPs   *[]string
+}
+
+func (l stubLimiter) Allow(endpoint, ip string) (bool, time.Duration) {
+	if l.seenIPs != nil {
+		*l.seenIPs = append(*l.seenIPs, endpoint+" "+ip)
+	}
+	if l.endpoints[endpoint] {
+		return false, 1500 * time.Millisecond
+	}
+	return true, 0
+}
+
+// RFC 6749 §4.1.2.1: a throttled /authorize with a trusted client and redirect tells the MCP client
+// at once; RFC 6585: Retry-After in whole seconds, rounded up.
+func TestThrottledAuthorizeRedirectsTemporarilyUnavailableToAValidClient(t *testing.T) {
+	e := newEnv(t)
+	e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"authorize": true}}
+	res := e.do(t, "GET", "/authorize?"+authorizeQuery(nil).Encode(), nil, nil)
+	loc, _ := res.Location()
+	if res.StatusCode != http.StatusFound || loc == nil || !strings.HasPrefix(loc.String(), clientCB+"?") {
+		t.Fatalf("throttled authorize = %d to %v, want a redirect to the client", res.StatusCode, loc)
+	}
+	q := loc.Query()
+	for k, want := range map[string]string{"error": "temporarily_unavailable", "state": "client-state", "iss": issuer} {
+		if q.Get(k) != want {
+			t.Errorf("redirect %s = %q, want %q", k, q.Get(k), want)
+		}
+	}
+	if got := res.Header.Get("Retry-After"); got != "2" {
+		t.Errorf("Retry-After = %q, want 2 (1.5 s rounded up)", got)
+	}
+	if len(res.Cookies()) != 0 {
+		t.Error("a throttled authorize must not start a sign-in (no login cookie)")
+	}
+	e.oneAuditEvent(t, "rate_limited", map[string]any{"outcome": "failure", "reason": "authorize", "remote_ip": "*"})
+}
+
+// Without a client and redirect URI we trust there is nowhere safe to send the error: a throttled
+// /authorize must never become an open redirect.
+func TestThrottledAuthorizeWithoutATrustedRedirectShowsThe429Page(t *testing.T) {
+	for name, override := range map[string]url.Values{
+		"unknown client":            {"client_id": {"nobody"}},
+		"unregistered redirect URI": {"redirect_uri": {"https://evil.example/cb"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"authorize": true}}
+			res := e.do(t, "GET", "/authorize?"+authorizeQuery(override).Encode(), nil, nil)
+			body, _ := io.ReadAll(res.Body)
+			if res.StatusCode != http.StatusTooManyRequests || res.Header.Get("Location") != "" {
+				t.Fatalf("throttled authorize = %d (Location %q), want 429 with no redirect", res.StatusCode, res.Header.Get("Location"))
+			}
+			if res.Header.Get("Retry-After") != "2" || res.Header.Get("Cache-Control") != "no-store" || !bytes.Contains(body, []byte("Too many sign-in attempts")) {
+				t.Fatalf("429 page: Retry-After %q, Cache-Control %q, body %s", res.Header.Get("Retry-After"), res.Header.Get("Cache-Control"), body)
+			}
+		})
+	}
+}
+
+func TestThrottledCallbackShowsThe429PageWithoutCallingTheIdP(t *testing.T) {
+	e := newEnv(t)
+	c, cb := e.startLogin(t, nil)
+	e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"callback": true}}
+	before := len(e.idpOps)
+	res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{c})
+	if res.StatusCode != http.StatusTooManyRequests || res.Header.Get("Retry-After") != "2" {
+		t.Fatalf("throttled callback = %d, Retry-After %q; want 429 and 2", res.StatusCode, res.Header.Get("Retry-After"))
+	}
+	if len(e.idpOps) != before {
+		t.Errorf("the IdP was called for a throttled callback: %v", e.idpOps[before:])
+	}
+	if firstGrant(e.st) != "" {
+		t.Error("a grant was created by a throttled callback")
+	}
+	e.oneAuditEvent(t, "rate_limited", map[string]any{"outcome": "failure", "reason": "callback"})
+}
+
+// The user's decision (#55 follow-up design): /token answers 429 + Retry-After + no-store with a
+// JSON temporarily_unavailable, before the body is read.
+func TestThrottledTokenIsRefusedBeforeItsBodyIsRead(t *testing.T) {
+	e := newEnv(t)
+	e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"token": true}}
+	// A body ParseForm rejects: a 400 would mean it was read before the limit.
+	r, _ := http.NewRequest("POST", e.srv.URL+"/token", strings.NewReader("grant_type=%zz"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	res := e.send(t, r)
+	if res.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("throttled token with a malformed body = %d, want 429 (the limit comes before parsing)", res.StatusCode)
+	}
+	if rejected := e.auditEvents(t, "token_rejected"); len(rejected) != 0 {
+		t.Errorf("the malformed body was parsed and audited: %v", rejected)
+	}
+}
+
+func TestRetrySecondsRoundsUpToWholeSecondsAtLeastOne(t *testing.T) {
+	for wait, want := range map[time.Duration]int{0: 1, time.Millisecond: 1, time.Second: 1, 1500 * time.Millisecond: 2,
+		2 * time.Second: 2, 2*time.Second + time.Nanosecond: 3, 20 * time.Second: 20} {
+		if got := retrySeconds(wait); got != want {
+			t.Errorf("retrySeconds(%v) = %d, want %d", wait, got, want)
+		}
+	}
+}
+
+func TestThrottledTokenAnswers429JSONAndLeavesTheCodeUnused(t *testing.T) {
+	e := newEnv(t)
+	code := e.signIn(t, nil).Query().Get("code")
+	e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"token": true}}
+	res, body := e.redeem(t, code, nil)
+	if res.StatusCode != http.StatusTooManyRequests || res.Header.Get("Retry-After") != "2" || res.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("throttled token = %d, Retry-After %q, Cache-Control %q; want 429, 2, no-store",
+			res.StatusCode, res.Header.Get("Retry-After"), res.Header.Get("Cache-Control"))
+	}
+	if body["error"] != "temporarily_unavailable" || !strings.Contains(fmt.Sprint(body["error_description"]), "reference ") {
+		t.Errorf("throttled token body = %v, want temporarily_unavailable with a reference", body)
+	}
+	e.oneAuditEvent(t, "rate_limited", map[string]any{"outcome": "failure", "reason": "token"})
+	if rejected := e.auditEvents(t, "token_rejected"); len(rejected) != 0 {
+		t.Errorf("a throttled request was also audited as token_rejected: %v", rejected)
+	}
+	// The code was never redeemed, so it still works once the limit lifts.
+	e.b.cfg.Limiter = nil
+	if res, body := e.redeem(t, code, nil); res.StatusCode != 200 {
+		t.Fatalf("after the limit the code must still redeem: %d %v", res.StatusCode, body)
+	}
+}
+
+func TestEveryOAuthEndpointAsksTheLimiterByClientAddress(t *testing.T) {
+	e := newEnv(t)
+	var seen []string
+	e.b.cfg.Limiter = stubLimiter{seenIPs: &seen}
+	code := e.signIn(t, nil).Query().Get("code")
+	_, body := e.redeem(t, code, nil)
+	e.revokeToken(t, fmt.Sprint(body["access_token"]), clientID)
+	want := []string{"authorize 127.0.0.1", "consent 127.0.0.1", "callback 127.0.0.1", "token 127.0.0.1", "revoke 127.0.0.1"}
+	if fmt.Sprint(seen) != fmt.Sprint(want) {
+		t.Fatalf("limiter asked %q, want %q (each endpoint once, by client address)", seen, want)
+	}
+}
+
+// A throttled consent answer is neither read nor recorded: the user starts again after Retry-After.
+func TestThrottledConsentShowsThe429PageWithoutReadingTheAnswer(t *testing.T) {
+	e := newEnv(t)
+	p := e.showConsent(t, nil)
+	e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"consent": true}}
+	res := e.answer(t, p, "allow", nil)
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusTooManyRequests || res.Header.Get("Retry-After") != "2" || !bytes.Contains(body, []byte("Too many sign-in attempts")) {
+		t.Fatalf("throttled consent = %d, Retry-After %q; want 429, 2 and the throttle page: %s", res.StatusCode, res.Header.Get("Retry-After"), body)
+	}
+	e.noAuditEvent(t, "consent_granted")
+	e.noAuditEvent(t, "consent_denied")
+	if firstGrant(e.st) != "" {
+		t.Error("a throttled consent answer led to a grant")
+	}
+	e.oneAuditEvent(t, "rate_limited", map[string]any{"outcome": "failure", "reason": "consent"})
+}
+
+// The method comes first: a GET to /consent is a 405 and never spends the answer budget.
+func TestConsentRejectsOtherMethodsBeforeAskingTheLimiter(t *testing.T) {
+	e := newEnv(t)
+	var seen []string
+	e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"consent": true}, seenIPs: &seen}
+	res := e.do(t, "GET", "/consent", nil, nil)
+	if res.StatusCode != http.StatusMethodNotAllowed || res.Header.Get("Allow") != "POST" {
+		t.Fatalf("GET /consent = %d, Allow %q; want 405 with Allow: POST", res.StatusCode, res.Header.Get("Allow"))
+	}
+	if len(seen) != 0 {
+		t.Fatalf("the limiter was asked %v for a GET /consent, want not at all", seen)
+	}
+}
+
+// The user's decision: /revoke answers as /token does, 429 + Retry-After + no-store + JSON
+// temporarily_unavailable, before the body is read.
+func TestThrottledRevokeIsRefusedBeforeItsBodyIsRead(t *testing.T) {
+	e := newEnv(t)
+	e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"revoke": true}}
+	r, _ := http.NewRequest("POST", e.srv.URL+"/revoke", strings.NewReader("token=%zz"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	res := e.send(t, r)
+	var body map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&body)
+	if res.StatusCode != http.StatusTooManyRequests || res.Header.Get("Retry-After") != "2" || res.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("throttled revoke = %d, Retry-After %q, Cache-Control %q; want 429, 2, no-store (and the body unread)",
+			res.StatusCode, res.Header.Get("Retry-After"), res.Header.Get("Cache-Control"))
+	}
+	if body["error"] != "temporarily_unavailable" {
+		t.Errorf("throttled revoke body = %v, want temporarily_unavailable", body)
+	}
+	e.noAuditEvent(t, "token_rejected")
+	e.oneAuditEvent(t, "rate_limited", map[string]any{"outcome": "failure", "reason": "revoke"})
 }

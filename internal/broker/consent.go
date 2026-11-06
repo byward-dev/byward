@@ -12,6 +12,7 @@ import (
 
 	"github.com/corker/mcp-authproxy/internal/audit"
 	"github.com/corker/mcp-authproxy/internal/logging"
+	"github.com/corker/mcp-authproxy/internal/ratelimit"
 	"github.com/corker/mcp-authproxy/internal/registration"
 )
 
@@ -82,6 +83,16 @@ func (b *Broker) showConsent(w http.ResponseWriter, r *http.Request, client regi
 
 // consent handles the page's answer.
 func (b *Broker) consent(w http.ResponseWriter, r *http.Request) {
+	// The method first, as on /authorize and /revoke: a stray GET is a 405, not a spent token.
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if retry, limited := b.throttled(w, r, ratelimit.Consent); limited {
+		b.page(w, r, http.StatusTooManyRequests, tooManyTitle, tooManyHint(retry))
+		return
+	}
 	ctx := r.Context()
 	f, sealed, allow, ok := b.readAnswer(w, r)
 	if !ok {
@@ -142,11 +153,6 @@ func (b *Broker) consent(w http.ResponseWriter, r *http.Request) {
 // an intact unexpired flow, and the browser the flow was shown in. Otherwise it writes the error
 // page and returns ok false.
 func (b *Broker) readAnswer(w http.ResponseWriter, r *http.Request) (f flow, sealed string, allow, ok bool) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", "POST")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return f, "", false, false
-	}
 	if !b.fromConsentPage(r) {
 		b.page(w, r, http.StatusForbidden, "This answer did not come from the proxy's consent page.", "Start again from your app.")
 		return f, "", false, false
