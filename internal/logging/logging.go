@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -102,12 +103,22 @@ func Middleware(log *slog.Logger, next http.Handler) http.Handler {
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rec, r)
 		attrs := []any{"request_id", id, "method", r.Method, "path", r.URL.Path, "status", rec.status,
-			"duration_ms", time.Since(start).Milliseconds()}
+			"duration_ms", time.Since(start).Milliseconds(), "remote_ip", remoteIP(r)}
 		if m := r.Header.Get("Mcp-Method"); m != "" {
 			attrs = append(attrs, "mcp_method", m)
 		}
 		log.InfoContext(r.Context(), "request", attrs...)
 	})
+}
+
+// remoteIP is the TCP peer. Forwarded headers are not trusted until trusted proxies are
+// configurable (ADR-0018 §6).
+func remoteIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 type statusRecorder struct {

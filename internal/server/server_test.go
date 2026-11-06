@@ -150,6 +150,33 @@ func TestBodyLimit(t *testing.T) {
 	}
 }
 
+func TestChunkedBodyOverLimitIs413(t *testing.T) {
+	e := start(t)
+	big := io.MultiReader(strings.NewReader(strings.Repeat("x", MaxMCPBody)), strings.NewReader("y"))
+	r, _ := http.NewRequest("POST", e.srv.URL+"/mcp", io.NopCloser(big)) // no ContentLength: chunked
+	r.Host = "mcp.example.com"
+	r.Header.Set("Authorization", "Bearer good")
+	res, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("got %d", res.StatusCode)
+	}
+}
+
+// go-sdk servers reject a Host other than their own (DNS-rebinding protection, verified with
+// go-sdk v1.8.0), so the public Host must never reach the upstream.
+func TestUpstreamSeesItsOwnHost(t *testing.T) {
+	e := start(t)
+	e.do(t, "POST", "/mcp", strings.NewReader(`{}`), map[string]string{"Authorization": "Bearer good"})
+	got, ok := e.up.Last()
+	if !ok || got.Host != strings.TrimPrefix(e.up.URL, "http://") {
+		t.Fatalf("upstream saw Host %q, want %q", got.Host, strings.TrimPrefix(e.up.URL, "http://"))
+	}
+}
+
 func TestUnknownPathsAre404(t *testing.T) {
 	e := start(t)
 	for _, p := range []string{"/", "/mcp/extra", "/debug/pprof/"} {

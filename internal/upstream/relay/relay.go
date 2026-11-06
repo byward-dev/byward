@@ -3,6 +3,7 @@
 package relay
 
 import (
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -44,6 +45,11 @@ func New(log *slog.Logger, target *url.URL) http.Handler {
 			ExpectContinueTimeout: time.Second,
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			// A chunked body over the limit only fails while it is being relayed.
+			if mbe := (*http.MaxBytesError)(nil); errors.As(err, &mbe) {
+				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+				return
+			}
 			log.WarnContext(r.Context(), "upstream error", "request_id", logging.RequestID(r.Context()), "error", err)
 			// Never echo upstream internals (invariant 15).
 			http.Error(w, "upstream unavailable", http.StatusBadGateway)

@@ -62,6 +62,8 @@ func TestMiddlewareLogsRequestWithoutQueryOrHeaders(t *testing.T) {
 	r := httptest.NewRequest("POST", "/mcp?access_token="+token, nil)
 	r.Header.Set("Authorization", "Bearer "+token)
 	r.Header.Set("Mcp-Method", "tools/call")
+	r.Header.Set("X-Forwarded-For", "6.6.6.6")
+	r.RemoteAddr = "192.0.2.7:51234"
 	h.ServeHTTP(httptest.NewRecorder(), r)
 	out := buf.String()
 	if len(seen) != 32 || !strings.Contains(out, seen) {
@@ -69,6 +71,9 @@ func TestMiddlewareLogsRequestWithoutQueryOrHeaders(t *testing.T) {
 	}
 	if strings.Contains(out, token) || strings.Contains(out, "access_token") {
 		t.Fatalf("log leaks: %s", out)
+	}
+	if !strings.Contains(out, `"remote_ip":"192.0.2.7"`) || strings.Contains(out, "6.6.6.6") {
+		t.Fatalf("remote ip must be the TCP peer: %s", out)
 	}
 	if !strings.Contains(out, `"status":418`) || !strings.Contains(out, `"mcp_method":"tools/call"`) {
 		t.Fatalf("missing fields: %s", out)
