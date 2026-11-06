@@ -67,5 +67,5 @@ func TestIntegrationGoSDKClientSignsInAndCallsATool(t *testing.T) {
 	if signIns != 1 {
 		t.Fatalf("sign-ins: %d, want exactly 1", signIns)
 	}
-	env.requireOneToolCallWithoutToken(t)
+	env.requireOneToolCallWithOnlyTheAssertion(t)
 }

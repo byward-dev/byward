@@ -48,17 +48,22 @@ type realClientEnv struct {
 	fake   *fakeidp.IdP
 	public string
 
+	// upstreamURL is BYWARD_UPSTREAM_URL, the audience of the identity assertion; proxy serves
+	// the JWKS that verifies it.
+	upstreamURL string
+	proxy       http.Handler
+
 	mu           sync.Mutex
 	upstreamAuth []string // the Authorization header of every request the upstream received
 	echoed       []string // the text of every echo call the upstream answered
 }
 
-// requireOneToolCallWithoutToken fails the test unless the upstream itself answered exactly one
-// echo call with realClientText (what a client prints is not proof the call went through byward),
-// unless no request reached it with an Authorization header (no upstream credential is configured,
-// so byward must send none, and above all never the client's own token: AGENTS.md security rules,
-// ADR-0003), and unless byward still refuses requests without a token it issued.
-func (e *realClientEnv) requireOneToolCallWithoutToken(t *testing.T) {
+// requireOneToolCallWithOnlyTheAssertion fails the test unless the upstream itself answered exactly
+// one echo call with realClientText (what a client prints is not proof the call went through
+// byward), unless every request reached it with byward's identity assertion and never the client's
+// own token (AGENTS.md security rules, ADR-0016 §2), and unless byward still refuses requests
+// without a token it issued.
+func (e *realClientEnv) requireOneToolCallWithOnlyTheAssertion(t *testing.T) {
 	t.Helper()
 	e.mu.Lock()
 	echoed, auth := append([]string(nil), e.echoed...), append([]string(nil), e.upstreamAuth...)
@@ -66,9 +71,18 @@ func (e *realClientEnv) requireOneToolCallWithoutToken(t *testing.T) {
 	if len(echoed) != 1 || echoed[0] != realClientText {
 		t.Fatalf("the upstream answered echo calls %q, want exactly one with %q", echoed, realClientText)
 	}
+	u, err := url.Parse(e.MCPURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := jwks(t, e.proxy, u.Host)
 	for _, h := range auth {
-		if h != "" {
-			t.Fatalf("an Authorization header reached the upstream (%d chars); inbound tokens must never pass through", len(h))
+		raw, ok := strings.CutPrefix(h, "Bearer ")
+		if !ok || strings.HasPrefix(raw, "byw_") {
+			t.Fatalf("the upstream got Authorization of %d chars that is not byward's assertion; the client's token must never pass through", len(h))
+		}
+		if c := verified(t, set, raw, e.upstreamURL); c["client_id"] != realClientID {
+			t.Fatalf("assertion for client %v, want %s", c["client_id"], realClientID)
 		}
 	}
 	e.requireTokenStillRequired(t)
@@ -158,6 +172,7 @@ func newRealClientEnv(t *testing.T) *realClientEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
+	env.upstreamURL, env.proxy = cfg.UpstreamURL.String(), s.Public.Handler
 	t.Cleanup(func() {
 		if s.closeStore != nil {
 			_ = s.closeStore()
