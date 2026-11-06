@@ -158,11 +158,11 @@ func (r *registry) Client(_ context.Context, id string) (registration.Client, er
 		return nil, registration.ErrUnknownClient
 	}
 	cb := map[string]string{clientID: clientCB, otherClientID: clientCB, webClientID: webCB, unverifiedID: clientCB}[id]
+	if alt, ok := r.redirect[id]; ok {
+		cb = alt // a changed redirect, or a client a test added with reregister
+	}
 	if cb == "" {
 		return nil, registration.ErrUnknownClient
-	}
-	if alt, ok := r.redirect[id]; ok {
-		cb = alt
 	}
 	if id == unverifiedID {
 		return staticClient{id: id, redirect: cb, name: hostileName, trust: registration.NotVerified}, nil
@@ -1187,4 +1187,129 @@ func TestThrottledRevokeIsRefusedBeforeItsBodyIsRead(t *testing.T) {
 	}
 	e.noAuditEvent(t, "token_rejected")
 	e.oneAuditEvent(t, "rate_limited", map[string]any{"outcome": "failure", "reason": "revoke"})
+}
+
+// Browsers drop a cookie over 4096 bytes (name, value and attributes); the sign-in would then fail
+// at the callback as an expired login (#94).
+func TestTheLargestRequestsFitTheLoginCookieAndComeBackUnchanged(t *testing.T) {
+	prefix := "https://app.example.org/"
+	maxID, maxRedirect := strings.Repeat("c", registration.MaxClientIDLen), prefix+strings.Repeat("a", registration.MaxRedirectURILen-len(prefix))
+	for _, c := range []struct {
+		name, redirect string
+		setup          func(*env)
+		query          url.Values
+	}{
+		// Not HTML-escaped: one byte each.
+		{"a 512-character state of HTML characters", clientCB, nil, url.Values{"state": {strings.Repeat("<", maxState)}}},
+		// JSON escapes each to two bytes.
+		{"a 512-character state of quotes and backslashes", clientCB, nil, url.Values{"state": {strings.Repeat(`"\`, maxState/2)}}},
+		{"every field at its registration limit", maxRedirect, func(e *env) { e.reg.reregister(maxID, maxRedirect) },
+			url.Values{"client_id": {maxID}, "redirect_uri": {maxRedirect}, "scope": {"mcp offline_access"}, "state": {strings.Repeat("&", maxState)}}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			if c.setup != nil {
+				c.setup(e)
+			}
+			cookie, cb := e.startLogin(t, c.query)
+			if set := cookie.String(); len(set) >= 4096 {
+				t.Fatalf("login cookie is %d bytes with its attributes, want under 4096", len(set))
+			}
+			res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{cookie})
+			back, _ := url.Parse(res.Header.Get("Location"))
+			if res.StatusCode != http.StatusFound || back.Scheme+"://"+back.Host+back.Path != c.redirect ||
+				back.Query().Get("state") != c.query.Get("state") || back.Query().Get("code") == "" {
+				t.Fatalf("callback: %d, Location %q", res.StatusCode, res.Header.Get("Location"))
+			}
+		})
+	}
+}
+
+// The bound itself: a login of exactly maxLoginJSON bytes, sealed with the longest key ID, gives a
+// login cookie (as startLogin sets it, name and attributes included) under 4096 bytes.
+func TestALoginAtTheSizeBoundFitsTheBrowserCookieLimit(t *testing.T) {
+	dir := t.TempDir()
+	k := make([]byte, token.KeySize)
+	_, _ = rand.Read(k)
+	if err := os.WriteFile(filepath.Join(dir, strings.Repeat("k", 64)), []byte(base64.StdEncoding.EncodeToString(k)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ring, err := token.LoadKeyRing(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newEnv(t, func(c *Config) { c.LoginBox, _ = token.NewBox(ring, "login", c.Now) })
+	l := login{ClientID: clientID, RedirectURI: clientCB, Challenge: challenge(), Scopes: []string{"mcp", "offline_access"},
+		IdPState: randomID() + randomID(), Nonce: randomID(), Verifier: randomID() + randomID(), State: "a"}
+	base, err := encodeLogin(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.State = strings.Repeat("a", maxLoginJSON-len(base)+1)
+	if plain, err := encodeLogin(l); err != nil || len(plain) != maxLoginJSON {
+		t.Fatalf("padded login is %d bytes (%v), want exactly %d", len(plain), err, maxLoginJSON)
+	}
+	rec := httptest.NewRecorder()
+	e.b.startLogin(rec, httptest.NewRequest("POST", issuer+"/consent", nil), l, e.now)
+	set := rec.Header().Get("Set-Cookie")
+	if rec.Code != http.StatusSeeOther || !strings.HasPrefix(set, "__Host-mcpap_login_") {
+		t.Fatalf("startLogin: %d, Set-Cookie %.40q", rec.Code, set)
+	}
+	if len(set) >= 4096 {
+		t.Fatalf("a %d-byte login makes a %d-byte cookie, want under 4096", maxLoginJSON, len(set))
+	}
+}
+
+func TestALoginIsKeptUpToTheSizeBoundAndRefusedOneByteOver(t *testing.T) {
+	// A one-character state, so the state key is present; each further character adds one byte.
+	base, err := encodeLogin(login{State: "a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pad := maxLoginJSON - len(base) + 1
+	if _, err := encodeLogin(login{State: strings.Repeat("a", pad)}); err != nil {
+		t.Fatalf("a login of exactly %d bytes was refused: %v", maxLoginJSON, err)
+	}
+	if _, err := encodeLogin(login{State: strings.Repeat("a", pad+1)}); !errors.Is(err, errLoginTooLarge) {
+		t.Fatalf("a login of %d bytes: %v, want errLoginTooLarge", maxLoginJSON+1, err)
+	}
+}
+
+func TestAStateMayHoldOnlyVisibleASCIIAndSpacesOrBeEmpty(t *testing.T) {
+	for s, want := range map[string]bool{"": true, " ": true, "~": true, "a b~!": true,
+		"\x1f": false, "\t": false, "\x7f": false, "é": false, "\u2028": false} {
+		if got := validState(s); got != want {
+			t.Errorf("validState(%q) = %v, want %v", s, got, want)
+		}
+	}
+}
+
+func TestAuthorizeRefusesARequestItCannotKeepInTheLoginCookie(t *testing.T) {
+	prefix := "https://app.example.org/"
+	// The longest client ID and redirect URI, made of characters JSON escapes.
+	id, redirect := strings.Repeat(`\`, registration.MaxClientIDLen), prefix+strings.Repeat(`\`, registration.MaxRedirectURILen-len(prefix))
+	for _, c := range []struct {
+		name, desc string
+		setup      func(*env)
+		query      url.Values
+	}{
+		{"an invisible character in state", "state may only contain visible ASCII characters and spaces (RFC 6749 Appendix A.5)", nil,
+			url.Values{"state": {"a\x01b"}}},
+		{"state over 512 bytes", "state is longer than 512 bytes", nil, url.Values{"state": {strings.Repeat("a", maxState+1)}}},
+		{"every field at its limit, made of characters JSON escapes", "the request is too large", func(e *env) { e.reg.reregister(id, redirect) },
+			url.Values{"client_id": {id}, "redirect_uri": {redirect}, "state": {strings.Repeat(`"`, maxState)}}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			if c.setup != nil {
+				c.setup(e)
+			}
+			res := e.do(t, "GET", "/authorize?"+authorizeQuery(c.query).Encode(), nil, nil)
+			q := func() url.Values { loc, _ := url.Parse(res.Header.Get("Location")); return loc.Query() }()
+			if res.StatusCode != http.StatusFound || q.Get("error") != "invalid_request" || q.Get("error_description") != c.desc ||
+				q.Get("iss") != issuer || len(res.Cookies()) != 0 {
+				t.Fatalf("%d %v, cookies %v", res.StatusCode, q, res.Cookies())
+			}
+		})
+	}
 }
