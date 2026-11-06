@@ -251,3 +251,72 @@ func TestNilLimiterAllowsEverything(t *testing.T) {
 		t.Fatal("a nil limiter refused a request")
 	}
 }
+
+// A /register bucket refills only to its burst of 10, not to its budget of 30, and that counts as
+// idle: a full table still drops it, so a new address gets its own burst, not the drained overflow.
+func TestANewAddressGetsItsWholeRegisterBurstWhenTheTableIsFull(t *testing.T) {
+	c := newClock()
+	l := New(map[string]int{Register: 30}, 2, c.now, nil)
+	l.Allow(Register, "192.0.2.1")
+	l.Allow(Register, "192.0.2.2")
+	for range 10 {
+		l.Allow(Register, "192.0.2.3") // the overflow bucket, drained
+	}
+	c.advance(3 * time.Second) // the two buckets are back at 10; the overflow has 1.5
+	passed := 0
+	for range 10 {
+		if ok, _ := l.Allow(Register, "192.0.2.4"); ok {
+			passed++
+		}
+	}
+	if passed != 10 {
+		t.Fatalf("a new address after the idle buckets refilled got %d of its burst of 10 (the drained overflow?)", passed)
+	}
+}
+
+// /register takes at once at most 10 registrations, or its budget if smaller (ADR-0008 §3).
+func TestRegisterTakesABurstOfTenOrItsBudgetIfSmaller(t *testing.T) {
+	for _, tc := range []struct{ budget, burst int }{{30, 10}, {5, 5}} {
+		l := New(map[string]int{Register: tc.budget}, 100, newClock().now, nil)
+		for i := range tc.burst {
+			if ok, _ := l.Allow(Register, "192.0.2.1"); !ok {
+				t.Fatalf("budget %d: registration %d of the burst of %d was refused", tc.budget, i+1, tc.burst)
+			}
+		}
+		if ok, _ := l.Allow(Register, "192.0.2.1"); ok {
+			t.Fatalf("budget %d: registration %d passed a burst of %d", tc.budget, tc.burst+1, tc.burst)
+		}
+	}
+}
+
+// After its burst, /register refills at its budget and never past the burst.
+func TestRegisterRefillsAtItsBudgetUpToItsBurst(t *testing.T) {
+	c := newClock()
+	l := New(map[string]int{Register: 30}, 100, c.now, nil)
+	for range 10 {
+		l.Allow(Register, "192.0.2.1")
+	}
+	if ok, retry := l.Allow(Register, "192.0.2.1"); ok || retry != 2*time.Second {
+		t.Fatalf("11th registration: ok=%v retryAfter=%v, want refused with 2s (30/min)", ok, retry)
+	}
+	c.advance(time.Hour) // a long pause refills to the burst, not to the budget
+	passed := 0
+	for range 30 {
+		if ok, _ := l.Allow(Register, "192.0.2.1"); ok {
+			passed++
+		}
+	}
+	if passed != 10 {
+		t.Fatalf("after a long pause %d registrations passed at once, want the burst of 10", passed)
+	}
+}
+
+// Every endpoint other than /register takes its whole per-minute budget at once.
+func TestOtherEndpointsTakeTheirWholeBudgetAtOnce(t *testing.T) {
+	l := New(map[string]int{Token: 30}, 100, newClock().now, nil)
+	for i := range 30 {
+		if ok, _ := l.Allow(Token, "192.0.2.1"); !ok {
+			t.Fatalf("token request %d of its 30/min burst was refused", i+1)
+		}
+	}
+}

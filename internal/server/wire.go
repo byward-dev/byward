@@ -106,11 +106,15 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 		return nil, err
 	}
 	auditStartup(o.Audit, ring, static.IDs())
-	var clients registration.Registry = static
+	clientDeny, err := registration.NewDenylist(cfg.ClientDenylist)
+	if err != nil {
+		return nil, fmt.Errorf("BYWARD_CLIENT_DENYLIST: %w", err)
+	}
+	guard := ssrfguard.New(ssrfguard.Config{}) // every client-supplied URL (CIMD documents, jwks_uri) goes through it
+	clients := registration.Chain{static}
 	if cfg.CIMD {
-		guard := ssrfguard.New(ssrfguard.Config{})
-		clients = registration.Chain{static, newCIMDRegistry(registration.CIMDConfig{Fetch: guard, KeysClient: guard.HTTPClient(),
-			TrustedHosts: cfg.CIMDTrustedHosts, AllowedHosts: cfg.CIMDAllowedHosts, JTI: jti, Now: time.Now, Observe: o.Metrics.CIMDFetch})}
+		clients = append(clients, newCIMDRegistry(registration.CIMDConfig{Fetch: guard, KeysClient: guard.HTTPClient(),
+			TrustedHosts: cfg.CIMDTrustedHosts, AllowedHosts: cfg.CIMDAllowedHosts, Deny: clientDeny, JTI: jti, Now: time.Now, Observe: o.Metrics.CIMDFetch}))
 	}
 	provider, err := entra.New(entra.Config{Tenant: cfg.EntraTenant, ClientID: cfg.EntraClientID,
 		ClientAuth: idp.ClientSecret(cfg.EntraClientSecret), RedirectURL: cfg.Issuer() + "/callback/" + idpName})
@@ -130,13 +134,19 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	if err != nil {
 		return nil, err
 	}
+	var registrar broker.Registrar
+	if cfg.DCR {
+		dcr := registration.NewDCRRegistry(registration.DCRConfig{Store: st, KeysClient: guard.HTTPClient(), JTI: jti, Now: time.Now,
+			Scopes: []string{cfg.Scope, "offline_access"}, Deny: clientDeny})
+		clients, registrar = append(clients, dcr), dcr
+	}
 	defer func() {
 		if err != nil {
 			_ = st.Close()
 		}
 	}()
 	b, err := newBroker(broker.Config{Issuer: cfg.Issuer(), Origin: cfg.Origin(), Resource: cfg.PublicURL, Scope: cfg.Scope,
-		IdPName: idpName, IdPLabel: "Microsoft Entra", IdPScopes: provider.Scope(), IdP: provider, Clients: clients, CIMD: cfg.CIMD,
+		IdPName: idpName, IdPLabel: "Microsoft Entra", IdPScopes: provider.Scope(), IdP: provider, Clients: clients, CIMD: cfg.CIMD, Registrar: registrar, ObserveRegistration: o.Metrics.DCRRegistration,
 		Store: st, Sealer: sealer, LoginBox: loginBox, IdPTokenBox: idpBox, ConsentBox: consentBox, Gate: g,
 		UpstreamName: cfg.ResourceName, ScopeText: cfg.ScopeDescription, OperatorName: cfg.OperatorName,
 		SecureCookies: cfg.PublicURL.Scheme == "https", Log: log,
@@ -211,7 +221,8 @@ var newBroker = broker.New
 var wireStore = openStore
 
 // collectEvery is how often expired store rows are removed (ADR-0007 §1): grants, codes, refresh
-// tokens and revocations older than store.RevocationRetention.
+// tokens, revocations older than store.RevocationRetention, and expired or never-used client
+// registrations (ADR-0008 §3).
 const collectEvery = 5 * time.Minute
 
 // runBackground keeps the revocation list fresh and removes expired store rows until ctx ends,

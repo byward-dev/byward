@@ -99,10 +99,7 @@ func TestOnlyAnEmptyGateWarnsAtStartup(t *testing.T) {
 // The configured gate reaches the broker (without it the broker would fall back to AllowAll), next
 // to the audit log and IdP observation, which a nil value would silently discard.
 func TestWiredBrokerGetsTheConfiguredGateAndObservability(t *testing.T) {
-	var got broker.Config
-	orig := newBroker
-	newBroker = func(c broker.Config) (*broker.Broker, error) { got = c; return orig(c) }
-	t.Cleanup(func() { newBroker = orig })
+	got := captureBroker(t, nil)
 	cfg, _, err := config.Load(nil, gateEnv(t, "BYWARD_GATE_ROLES=MCP.User"), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)

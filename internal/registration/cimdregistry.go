@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -69,8 +68,10 @@ type CIMDConfig struct {
 	// TrustedHosts are CIMD hosts the operator vouches for (trust level verified); AllowedHosts,
 	// when non-empty, are the only other hosts accepted. Exact, lower-case ASCII host names.
 	TrustedHosts, AllowedHosts []string
-	JTI                        JTICache
-	Now                        func() time.Time
+	// Deny is the operator's denylist; nil denies nothing.
+	Deny *Denylist
+	JTI  JTICache
+	Now  func() time.Time
 	// Observe counts each fetch attempt by outcome (one of the Fetch* values); nil ignores them.
 	Observe func(outcome string)
 }
@@ -130,6 +131,9 @@ func (r *CIMDRegistry) Client(ctx context.Context, id string) (Client, error) {
 	}
 	if err := ValidateCIMDURL(id); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnknownClient, err)
+	}
+	if r.cfg.Deny.DeniesClient(id) {
+		return nil, fmt.Errorf("%w: client %s is on the operator's denylist", ErrUnknownClient, id)
 	}
 	host := cimdHost(id)
 	if len(r.allowed) > 0 && !r.allowed[host] && !r.trusted[host] {
@@ -288,20 +292,12 @@ func (r *CIMDRegistry) pruneAttempts(now time.Time) {
 	}
 }
 
-func (r *CIMDRegistry) build(id, host string, m *cimdMetadata) *cimdClient {
+func (r *CIMDRegistry) build(id, host string, m *clientMetadata) *cimdClient {
 	trust := Domain
 	if r.trusted[host] {
 		trust = Verified
 	}
-	c := &cimdClient{name: m.name, host: host, redirects: m.redirects, grants: m.grants, trust: trust,
-		clientAuth: clientAuth{id: id, methods: m.methods, jti: r.cfg.JTI}}
-	switch {
-	case m.jwksURI != "":
-		c.keys = clientKeys{idp.NewKeySet(&idp.Fetcher{Client: r.cfg.KeysClient}, m.jwksURI, r.cfg.Now)}
-	case len(m.jwks.Keys) > 0:
-		c.keys = m.jwks
-	}
-	return c
+	return &cimdClient{metadataClient: newMetadataClient(id, m, trust, r.cfg.Deny, r.cfg.KeysClient, r.cfg.JTI, r.cfg.Now), host: host}
 }
 
 // clientKeys applies the registered-JWKS rules (public keys, RSA at least MinRSABits) to keys
@@ -339,39 +335,28 @@ func cacheTTL(h http.Header) time.Duration {
 
 // cimdClient is a client described by a Client ID Metadata Document.
 type cimdClient struct {
-	clientAuth
-	name, host string
-	redirects  []string
-	grants     []string // the document's grant types the broker supports
-	trust      TrustLevel
+	metadataClient
+	host string
 }
-
-func (c *cimdClient) ID() string                { return c.id }
-func (c *cimdClient) Name() string              { return c.name }
-func (c *cimdClient) Trust() TrustLevel         { return c.trust }
-func (c *cimdClient) AuthMethods() []AuthMethod { return append([]AuthMethod(nil), c.methods...) }
-
-// AllowsRefresh is true only if the document lists the refresh_token grant (§6: grants are filtered).
-func (c *cimdClient) AllowsRefresh() bool { return slices.Contains(c.grants, "refresh_token") }
 
 // MetadataHost is the host that published the client's metadata document, for the consent page.
 func (c *cimdClient) MetadataHost() string { return c.host }
 
-func (c *cimdClient) RedirectAllowed(redirectURI string) error {
-	return MatchRedirect(c.redirects, redirectURI)
-}
-
 // Chain looks a client up in each registry in turn; the first that knows it answers.
 type Chain []Registry
 
-// Client returns the first answer that is not ErrUnknownClient; otherwise the last registry's
-// error, which may carry a reason for the operator log (it still wraps ErrUnknownClient).
+// Client returns the first answer that is not ErrUnknownClient; otherwise the error of the registry
+// that owns the ID, the first that gave a reason (it still wraps ErrUnknownClient, so a CIMD
+// refusal stays ErrMetadataRefused whatever follows it in the chain).
 func (ch Chain) Client(ctx context.Context, id string) (Client, error) {
 	err := ErrUnknownClient
 	for _, r := range ch {
-		var c Client
-		if c, err = r.Client(ctx, id); !errors.Is(err, ErrUnknownClient) {
-			return c, err
+		c, e := r.Client(ctx, id)
+		if !errors.Is(e, ErrUnknownClient) {
+			return c, e
+		}
+		if err == ErrUnknownClient && e != ErrUnknownClient {
+			err = e
 		}
 	}
 	return nil, err

@@ -28,12 +28,13 @@ description = "Fail if any Go file is not formatted"
 run = 'test -z "$(gofmt -s -l .)$(goimports -l .)" || { gofmt -s -l .; goimports -l .; exit 1; }'
 
 [tasks.vet]
-run = "go vet ./..."
+run = "go vet -tags=integration ./..."
 
 [tasks.lint]
 description = "golangci-lint once per release GOOS, so files behind build constraints are linted on any host"
 # Keep in sync with builds.goos in .goreleaser.yaml (and scripts/licenses.sh).
-run = ["GOOS=linux golangci-lint run", "GOOS=darwin golangci-lint run"]
+# The integration tag adds its test files (the restore drill) to what is linted.
+run = ["GOOS=linux golangci-lint run --build-tags integration", "GOOS=darwin golangci-lint run --build-tags integration"]
 
 [tasks.vuln]
 description = "govulncheck once per release GOOS: fails on a known vulnerability our code can reach (queries vuln.go.dev)"
@@ -60,13 +61,17 @@ run = "sh scripts/conformance/run.sh"
 description = "Consent and error pages in Chromium: Playwright and axe (WCAG 2.2 AA), screenshots in build/ui/screenshots (needs Docker)"
 run = "sh scripts/ui/run.sh"
 
+[tasks."test:integration:go"]
+description = "Drills behind the integration build tag, such as the restore drill (no Docker); the unit tests run in `test`"
+# Only the tagged drills (named *Drill*); the build tag adds no other tests, so ./... would rerun the unit suite.
+run = "go test -race -count=1 -tags=integration -run Drill ./..."
+
 [tasks."test:integration"]
 description = "Integration tests, including the release smoke test and MCP conformance (needs Docker)"
-depends = ["release:smoke", "test:conformance", "test:ui"]
-run = "go test -tags=integration ./..."
+depends = ["release:smoke", "test:conformance", "test:ui", "test:integration:go"]
 
 [tasks.check]
-description = "Everything CI runs without Docker"
+description = "Everything CI runs without Docker, except the drills (`test:integration:go`)"
 depends = ["fmt:check", "vet", "lint", "lint:workflows", "vuln", "licenses:check", "test", "test:scripts"]
 
 [tasks."licenses:check"]

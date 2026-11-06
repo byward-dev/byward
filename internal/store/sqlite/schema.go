@@ -66,6 +66,17 @@ var migrations = []string{
 	// v3: revoke-all (ADR-0006 §9). A cut-off for every subject is marked explicitly, never by an
 	// empty subject, so a row naming nothing cannot revoke everyone.
 	`ALTER TABLE revocations ADD COLUMN scope TEXT NOT NULL DEFAULT '' CHECK (scope IN ('', 'all'));`,
+
+	// v4: dynamic client registrations (ADR-0008 §2-3). used_at is NULL until the client first
+	// redeems a code; never-used clients are collected after store.UnusedClientLifetime.
+	`CREATE TABLE clients (
+		id         TEXT PRIMARY KEY,
+		metadata   BLOB NOT NULL,
+		created_at INTEGER NOT NULL,
+		used_at    INTEGER,
+		expires_at INTEGER NOT NULL
+	) STRICT;
+	CREATE INDEX clients_expires ON clients (expires_at);`,
 }
 
 // schemaVersion is the schema this binary writes.

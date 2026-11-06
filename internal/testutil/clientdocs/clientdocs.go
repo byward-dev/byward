@@ -13,18 +13,20 @@ import (
 	"crypto/x509/pkix"
 	"embed"
 	"encoding/json"
+	"maps"
 	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
 
-//go:embed testdata/*.json testdata/*.headers
+//go:embed testdata/*.json testdata/*.headers testdata/dcr/*.json
 var files embed.FS
 
 // Doc is one published document.
@@ -152,4 +154,41 @@ func certificate(t testing.TB, hosts []string) (tls.Certificate, *x509.CertPool)
 	pool := x509.NewCertPool()
 	pool.AddCert(leaf)
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, pool
+}
+
+// Registration is a real client's dynamic registration request (RFC 7591), with a redirect URI the
+// broker keeps and the ones it drops because they fail the redirect policy (ADR-0009).
+type Registration struct {
+	Name     string
+	Body     []byte
+	Redirect string
+	Dropped  []string
+}
+
+// Registrations lists the registration fixtures, sorted.
+var Registrations = slices.Sorted(maps.Keys(registrationRedirects))
+
+// registrationRedirects is, per fixture in testdata/dcr, the redirect URI to sign in with and the
+// URIs the redirect policy drops.
+var registrationRedirects = map[string]struct {
+	redirect string
+	dropped  []string
+}{
+	"gemini-cli":    {redirect: "http://localhost:52341/oauth/callback"},
+	"mcp-inspector": {redirect: "http://127.0.0.1:6276/oauth/callback"},
+	"cursor":        {redirect: "https://www.cursor.com/agents/mcp/oauth/callback", dropped: []string{"cursor://anysphere.cursor-mcp/oauth/callback"}},
+}
+
+// LoadRegistration returns a registration fixture.
+func LoadRegistration(t testing.TB, name string) Registration {
+	t.Helper()
+	body, err := files.ReadFile("testdata/dcr/" + name + ".json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, ok := registrationRedirects[name]
+	if !ok {
+		t.Fatalf("clientdocs: no registration fixture %q (add it to registrationRedirects)", name)
+	}
+	return Registration{Name: name, Body: body, Redirect: r.redirect, Dropped: r.dropped}
 }

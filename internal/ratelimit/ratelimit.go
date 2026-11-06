@@ -23,6 +23,19 @@ const (
 // Endpoints lists every endpoint name, in the order the docs use.
 var Endpoints = []string{Authorize, Consent, Callback, Token, Revoke, Register}
 
+// bursts are the endpoints whose burst is smaller than their per-minute budget: /register, an open
+// endpoint anyone can call, takes at most 10 at once (ADR-0008 §3).
+var bursts = map[string]int{Register: 10}
+
+// burst is how many requests endpoint takes at once from one address with a per-minute budget:
+// the budget itself, or less where bursts says so.
+func burst(endpoint string, perMinute int) int {
+	if b, ok := bursts[endpoint]; ok && b < perMinute {
+		return b
+	}
+	return perMinute
+}
+
 // Defaults returns the per-minute budgets of ADR-0018 §8 and its 2026-11-06 amendment: /consent
 // takes the consent answer (with room for a retried answer), the IdP callback one per sign-in.
 func Defaults() map[string]int {
@@ -41,6 +54,7 @@ type Limiter struct {
 
 type table struct {
 	perMinute float64
+	capacity  float64 // the burst: the most a bucket holds
 	maxKeys   int
 
 	mu        sync.Mutex
@@ -55,14 +69,14 @@ type bucket struct {
 }
 
 // New limits each endpoint in budgets to that many requests per minute per address, with a burst of
-// the same size. Each endpoint tracks at most maxKeys addresses: idle buckets (refilled) are dropped
+// burst(endpoint, budget). Each endpoint tracks at most maxKeys addresses: idle buckets (refilled) are dropped
 // to make room, and when none is idle new addresses share one overflow bucket, so an
 // address-cycling flood degrades to a global limit instead of growing memory or failing open.
 // onLimit, if set, is told every refused request.
 func New(budgets map[string]int, maxKeys int, now func() time.Time, onLimit func(endpoint string)) *Limiter {
 	l := &Limiter{tables: map[string]*table{}, now: now, onLimit: onLimit}
 	for ep, n := range budgets {
-		l.tables[ep] = &table{perMinute: float64(n), maxKeys: maxKeys, buckets: map[string]*bucket{}}
+		l.tables[ep] = &table{perMinute: float64(n), capacity: float64(burst(ep, n)), maxKeys: maxKeys, buckets: map[string]*bucket{}}
 	}
 	return l
 }
@@ -92,18 +106,18 @@ func (t *table) take(key string, now time.Time) (bool, time.Duration) {
 		if len(t.buckets) >= t.maxKeys && now.Sub(t.lastSweep) >= sweepEvery {
 			t.lastSweep = now
 			for k, old := range t.buckets {
-				if t.refill(old, now) >= t.perMinute {
+				if t.refill(old, now) >= t.capacity {
 					delete(t.buckets, k)
 				}
 			}
 		}
 		switch {
 		case len(t.buckets) < t.maxKeys:
-			b = &bucket{tokens: t.perMinute, last: now}
+			b = &bucket{tokens: t.capacity, last: now}
 			t.buckets[key] = b
 		default:
 			if t.overflow == nil {
-				t.overflow = &bucket{tokens: t.perMinute, last: now}
+				t.overflow = &bucket{tokens: t.capacity, last: now}
 			}
 			b = t.overflow
 		}
@@ -120,7 +134,7 @@ func (t *table) take(key string, now time.Time) (bool, time.Duration) {
 // refill adds the tokens earned since the bucket was last used, up to its capacity.
 func (t *table) refill(b *bucket, now time.Time) float64 {
 	if elapsed := now.Sub(b.last).Seconds(); elapsed > 0 {
-		b.tokens = math.Min(t.perMinute, b.tokens+elapsed*t.perMinute/60)
+		b.tokens = math.Min(t.capacity, b.tokens+elapsed*t.perMinute/60)
 		b.last = now
 	}
 	return b.tokens

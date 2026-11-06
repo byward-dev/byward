@@ -34,6 +34,8 @@ func exercise(m *Metrics) {
 	m.AuditEvent("login", "success")
 	m.RateLimited("authorize")
 	m.StdioProcesses(func() int { return 2 })
+	m.CIMDFetch("ok")
+	m.DCRRegistration("registered")
 }
 
 // Every family except the Go runtime's own collectors: a metric with the wrong prefix must reach the
@@ -116,4 +118,6 @@ func TestNilMetricsIsSafeToCall(t *testing.T) {
 	m.Busy("request")
 	m.AuditEvent("login", "success")
 	m.RateLimited("authorize")
+	m.CIMDFetch("ok")
+	m.DCRRegistration("registered")
 }

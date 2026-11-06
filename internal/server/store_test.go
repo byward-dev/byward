@@ -3,6 +3,8 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -186,10 +188,7 @@ func TestRefreshGraceSettingReachesTheBroker(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got broker.Config
-	orig := newBroker
-	newBroker = func(c broker.Config) (*broker.Broker, error) { got = c; return orig(c) }
-	t.Cleanup(func() { newBroker = orig })
+	got := captureBroker(t, nil)
 	a, err := buildAuth(cfg, discard, Observability{})
 	if err != nil {
 		t.Fatal(err)
@@ -294,5 +293,55 @@ func TestServerClosesTheStoreWhenRunReturns(t *testing.T) {
 	}
 	if _, err := os.Stat(wal); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the -wal file is still there after Run returned (%v): the store was left open", err)
+	}
+}
+
+// ADR-0007 §5: sealing keys never reach the store. A signed-in user refreshes through /token,
+// which writes a rotated refresh token and IdP tokens sealed by the server; neither the key file's
+// text nor the key in any encoding appears anywhere in the database files.
+func TestSealingKeysAreNeverWrittenToTheStore(t *testing.T) {
+	_, cfg := storeEnv(t)
+	s, wired, _, stopServer := signedInServer(t, cfg)
+	rt := seedSignedInUser(t, wired, "sealed", time.Now())
+	if code, body := postRefresh(t, s, rt); code != http.StatusOK {
+		t.Fatalf("refresh: %d %v, want a new token pair (the scan would cover less otherwise)", code, body)
+	}
+	stopServer()
+	var keyForms [][]byte
+	keys, err := os.ReadDir(cfg.KeysDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) == 0 {
+		t.Fatalf("no key files in %s; the scan would prove nothing", cfg.KeysDir)
+	}
+	for _, k := range keys {
+		text, err := os.ReadFile(filepath.Join(cfg.KeysDir, k.Name())) //nolint:gosec // G304: the test's own key directory
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(text)))
+		if err != nil {
+			t.Fatalf("key file %s: %v", k.Name(), err)
+		}
+		keyForms = append(keyForms, bytes.TrimSpace(text), raw, []byte(base64.RawURLEncoding.EncodeToString(raw)), []byte(hex.EncodeToString(raw)))
+	}
+	files, err := filepath.Glob(filepath.Join(cfg.StoreDir, "*"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no database files in %s (%v)", cfg.StoreDir, err)
+	}
+	for _, f := range files {
+		data, err := os.ReadFile(f) //nolint:gosec // G304: the test's own state directory
+		if err != nil {
+			t.Fatal(err)
+		}
+		if filepath.Ext(f) == ".db" && !bytes.Contains(data, []byte("sealed")) {
+			t.Fatalf("%s does not hold the grant; the scan would prove nothing", f)
+		}
+		for _, k := range keyForms {
+			if bytes.Contains(data, k) {
+				t.Errorf("%s contains sealing key material", f)
+			}
+		}
 	}
 }

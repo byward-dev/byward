@@ -19,11 +19,12 @@ const epoch = 1
 // Store implements store.Store with one mutex; every method is one critical section, which makes
 // ConsumeCode's conditional update atomic.
 type Store struct {
-	mu     sync.Mutex
-	grants map[string]store.Grant
-	codes  map[string]*code // by grant ID: a grant has at most one code
-	tokens map[[sha256.Size]byte]*token
-	revs   []store.Revocation
+	mu      sync.Mutex
+	grants  map[string]store.Grant
+	codes   map[string]*code // by grant ID: a grant has at most one code
+	tokens  map[[sha256.Size]byte]*token
+	revs    []store.Revocation
+	clients map[string]store.Client
 }
 
 // token is a stored refresh token with its successor, set when it is rotated.
@@ -42,9 +43,10 @@ var _ store.Store = (*Store)(nil)
 // New returns an empty store.
 func New() *Store {
 	return &Store{
-		grants: map[string]store.Grant{},
-		codes:  map[string]*code{},
-		tokens: map[[sha256.Size]byte]*token{},
+		grants:  map[string]store.Grant{},
+		codes:   map[string]*code{},
+		tokens:  map[[sha256.Size]byte]*token{},
+		clients: map[string]store.Client{},
 	}
 }
 
@@ -262,6 +264,68 @@ func (s *Store) Collect(_ context.Context, now time.Time) error {
 	}
 	cutoff := now.Add(-store.RevocationRetention)
 	s.revs = slices.DeleteFunc(s.revs, func(r store.Revocation) bool { return !r.At.After(cutoff) })
+	unused := now.Add(-store.UnusedClientLifetime)
+	for id, c := range s.clients {
+		if !now.Before(c.ExpiresAt) || (c.UsedAt.IsZero() && !c.CreatedAt.After(unused)) {
+			delete(s.clients, id)
+		}
+	}
+	return nil
+}
+
+// CreateClient implements store.Clients.
+func (s *Store) CreateClient(_ context.Context, c store.Client, max int) error {
+	if c.ID == "" || len(c.Metadata) == 0 || !c.UsedAt.IsZero() || !c.ExpiresAt.After(c.CreatedAt) {
+		return store.ErrInvalid
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.clients[c.ID]; ok {
+		return store.ErrExists
+	}
+	if max > 0 {
+		live := 0
+		for _, o := range s.clients {
+			if o.ExpiresAt.After(c.CreatedAt) {
+				live++
+			}
+		}
+		if live >= max {
+			return store.ErrFull
+		}
+	}
+	c.Metadata = slices.Clone(c.Metadata)
+	s.clients[c.ID] = c
+	return nil
+}
+
+// Client implements store.Clients.
+func (s *Store) Client(_ context.Context, id string) (store.Client, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.clients[id]
+	if !ok {
+		return store.Client{}, store.ErrNotFound
+	}
+	c.Metadata = slices.Clone(c.Metadata)
+	return c, nil
+}
+
+// UseClient implements store.Clients.
+func (s *Store) UseClient(_ context.Context, id string, now, expires time.Time, minExtension time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.clients[id]
+	if !ok {
+		return store.ErrNotFound
+	}
+	if c.UsedAt.IsZero() {
+		c.UsedAt = now
+	}
+	if !expires.Before(c.ExpiresAt.Add(minExtension)) {
+		c.ExpiresAt = expires
+	}
+	s.clients[id] = c
 	return nil
 }
 
