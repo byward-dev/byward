@@ -6,7 +6,8 @@ from the keys directory ([sealing-keys.md](sealing-keys.md)).
 
 Expired rows are deleted at startup and every 5 minutes while the proxy runs: codes, refresh tokens
 and grants past their expiry (a grant takes its codes and refresh tokens with it), and revocations
-older than one hour, the longest access-token lifetime. The database stays the size of the live state.
+older than 61 minutes, by when every access token they cover has expired (1 h lifetime, 30 s clock
+leeway). The database stays the size of the live state.
 
 ## Settings
 

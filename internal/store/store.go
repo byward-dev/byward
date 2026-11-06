@@ -30,13 +30,14 @@ var (
 	ErrReused = errors.New("store: refresh token reused")
 )
 
-// RevocationRetention is how long revocations are kept: the longest access-token lifetime
-// (ADR-0006 §3, §5). After it, every token a revocation covers has expired anyway. It must stay
-// at least the configured maximum access-token lifetime.
+// RevocationRetention is how long revocations are kept (ADR-0006 §3, §5). After it, every token a
+// revocation covers has expired anyway. It must exceed the longest access-token lifetime plus the
+// clock leeway the validator allows on `exp` (30 s): an hour and a minute leaves 30 s of margin
+// for clock skew between replicas.
 //
 // Adapters may keep times at microsecond precision (PostgreSQL timestamptz); callers must not
 // rely on finer differences.
-const RevocationRetention = time.Hour
+const RevocationRetention = time.Hour + time.Minute
 
 // Store is everything the broker keeps.
 //
