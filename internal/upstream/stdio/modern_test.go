@@ -34,15 +34,15 @@ func modernBody(id, method, meta, params string) string {
 func modernHeaders(body string) []string {
 	var m struct {
 		Method string
-		Params struct{ Name, URI string }
+		Params struct{ Name, URI *string }
 	}
 	_ = json.Unmarshal([]byte(body), &m)
 	h := []string{"MCP-Protocol-Version", "2026-07-28", "Mcp-Method", m.Method}
-	switch m.Method {
-	case "tools/call", "prompts/get":
-		h = append(h, "Mcp-Name", m.Params.Name)
-	case "resources/read":
-		h = append(h, "Mcp-Name", m.Params.URI)
+	switch {
+	case (m.Method == "tools/call" || m.Method == "prompts/get") && m.Params.Name != nil:
+		h = append(h, "Mcp-Name", *m.Params.Name)
+	case m.Method == "resources/read" && m.Params.URI != nil:
+		h = append(h, "Mcp-Name", *m.Params.URI)
 	}
 	return h
 }
@@ -97,7 +97,9 @@ func (b *bridgeHarness) fetch(body string) ([]string, error) {
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	h := modernHeaders(body)
 	for i := 0; i+1 < len(h); i += 2 {
-		req.Header.Set(h[i], h[i+1])
+		if h[i+1] != "" {
+			req.Header.Set(h[i], h[i+1])
+		}
 	}
 	res, err := b.srv.Client().Do(req)
 	if err != nil {
@@ -323,14 +325,14 @@ func TestProxyIDsNeverRepeatAcrossTheUsersUpstreamProcesses(t *testing.T) {
 		return b.bridge.users[key]
 	}
 	first := conn()
-	a := first.register([]byte(`1`), []byte(`"t"`), false)
+	a := first.register([]byte(`1`), []byte(`"t"`), false, false)
 	first.p.stop("test")
 	waitEnded(t, first)
 	second := conn()
 	if second == first {
 		t.Fatal("no new userConn after the respawn, so this test proves nothing")
 	}
-	if c := second.register([]byte(`1`), []byte(`"t"`), false); a.proxyID == c.proxyID || a.proxyTok == c.proxyTok {
+	if c := second.register([]byte(`1`), []byte(`"t"`), false, false); a.proxyID == c.proxyID || a.proxyTok == c.proxyTok {
 		t.Fatalf("ids %s/%s repeat after the respawn", c.proxyID, c.proxyTok)
 	}
 }
@@ -371,6 +373,25 @@ func TestReadMetaTellsTheEraFromTheProtocolVersion(t *testing.T) {
 	}
 }
 
+// upstreamCancellations is the request ids notifications/cancelled has named to the upstream so far.
+func (b *bridgeHarness) upstreamCancellations(t *testing.T) []string {
+	t.Helper()
+	_, got := lastResult(t, readEvents(t, b.modern(t, "alice", modernBody(`"c"`, "cancelled", "", ""))))
+	var ids []string
+	if err := json.Unmarshal(got, &ids); err != nil {
+		t.Fatalf("cancelled: %s", got)
+	}
+	return ids
+}
+
+// awaitUpstreamCancellation waits until the upstream has seen a cancellation and returns them all.
+func (b *bridgeHarness) awaitUpstreamCancellation(t *testing.T) []string {
+	t.Helper()
+	var ids []string
+	eventually(t, "the upstream to see a cancellation", func() bool { ids = b.upstreamCancellations(t); return len(ids) > 0 })
+	return ids
+}
+
 func TestClosingTheStreamCancelsTheRequestOnTheUpstream(t *testing.T) {
 	b := newModernBridge(t, nil)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -379,14 +400,8 @@ func TestClosingTheStreamCancelsTheRequestOnTheUpstream(t *testing.T) {
 		t.Fatalf("status %d", res.StatusCode)
 	}
 	cancel()
-	var got json.RawMessage
-	eventually(t, "the upstream to see the cancellation", func() bool {
-		_, got = lastResult(t, readEvents(t, b.modern(t, "alice", modernBody(`2`, "cancelled", "", ""))))
-		return string(got) != "[]" && string(got) != "null"
-	})
-	var ids []string
-	if err := json.Unmarshal(got, &ids); err != nil || len(ids) != 1 || ids[0] == "mine" {
-		t.Fatalf("upstream saw cancellations %s; want one, under the proxy's id, not the client's", got)
+	if ids := b.awaitUpstreamCancellation(t); len(ids) != 1 || ids[0] == "mine" {
+		t.Fatalf("upstream saw cancellations %q; want one, under the proxy's id, not the client's", ids)
 	}
 }
 
@@ -404,10 +419,8 @@ func TestAClientsCancellationNeverReachesTheUpstream(t *testing.T) {
 			t.Fatalf("cancellation of %s: status %d, want 202", id, res.StatusCode)
 		}
 	}
-	_, got := lastResult(t, readEvents(t, b.modern(t, "alice", modernBody(`2`, "cancelled", "", ""))))
-	var ids []string
-	if err := json.Unmarshal(got, &ids); err != nil || len(ids) != 0 {
-		t.Fatalf("upstream saw cancellations %s, want none", got)
+	if ids := b.upstreamCancellations(t); len(ids) != 0 {
+		t.Fatalf("upstream saw cancellations %q, want none", ids)
 	}
 	cancel()
 	held.all()
@@ -458,9 +471,11 @@ func TestUpstreamRequestsInTheModernEraAreAnsweredWithAnError(t *testing.T) {
 
 func TestUnroutableUpstreamMessagesAreDroppedAndLogged(t *testing.T) {
 	for name, tc := range map[string]struct{ method, msg, reason string }{
-		"notification for no request":     {"stray", "upstream notification dropped", "notification_unrouted"},
-		"progress for no request":         {"strayprogress", "upstream notification dropped", "progress_unrouted"},
-		"response for no waiting request": {"strayresponse", "upstream response for no waiting request", "response_unrouted"},
+		"notification for no request":      {"stray", "upstream notification dropped", "notification_unrouted"},
+		"progress for no request":          {"strayprogress", "upstream notification dropped", "progress_unrouted"},
+		"response for no waiting request":  {"strayresponse", "upstream response for no waiting request", "response_unrouted"},
+		"notification for no subscription": {"strayscribe", "upstream notification dropped", "subscription_unrouted"},
+		"cancellation of no request":       {"straycancel", "upstream notification dropped", "cancel_unrouted"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			b := newModernBridge(t, nil)
@@ -559,65 +574,105 @@ func TestModernNotificationsAre202AndClientResponsesAre400(t *testing.T) {
 	}
 }
 
-func TestModernRequestHeadersMustMirrorTheBody(t *testing.T) {
+func TestCheckHeadersRequiresTheHeadersToMirrorTheBody(t *testing.T) {
 	// The bridge is the server here: the upstream never sees headers (ADR-0004 §3, amended).
-	echo := modernBody(`1`, "tools/call", "", `"name":"weather"`)
+	call := modernBody(`1`, "tools/call", "", `"name":"weather"`)
 	read := modernBody(`2`, "resources/read", "", `"uri":"file:///a"`)
-	ok := func(body string) []string { return modernHeaders(body) }
-	with := func(body string, name, value string) []string {
-		h := modernHeaders(body)
-		for i := 0; i+1 < len(h); i += 2 {
-			if h[i] == name {
-				h[i+1] = value
-			}
-		}
-		return h
-	}
-	without := func(body, name string) []string {
-		var h []string
-		src := modernHeaders(body)
-		for i := 0; i+1 < len(src); i += 2 {
-			if src[i] != name {
-				h = append(h, src[i], src[i+1])
-			}
-		}
-		return h
-	}
+	prompt := modernBody(`3`, "prompts/get", "", `"name":"greet"`)
+	meteo := modernBody(`4`, "tools/call", "", `"name":"météo"`)
 	for name, tc := range map[string]struct {
 		body   string
-		header []string
+		header [][2]string // added in order, so a name may repeat
 		ok     bool
 	}{
-		"all mirrored":                    {echo, ok(echo), true},
-		"Mcp-Name from params.uri":        {read, ok(read), true},
-		"Mcp-Name as a Base64 sentinel":   {echo, with(echo, "Mcp-Name", "=?base64?d2VhdGhlcg==?="), true},
-		"protocol version missing":        {echo, without(echo, "MCP-Protocol-Version"), false},
-		"protocol version not the body's": {echo, with(echo, "MCP-Protocol-Version", "2027-01-01"), false},
-		"method missing":                  {echo, without(echo, "Mcp-Method"), false},
-		"method not the body's":           {echo, with(echo, "Mcp-Method", "tools/list"), false},
-		"method in another case":          {echo, with(echo, "Mcp-Method", "Tools/Call"), false},
-		"name missing":                    {echo, without(echo, "Mcp-Name"), false},
-		"name not the body's":             {echo, with(echo, "Mcp-Name", "news"), false},
-		"uri not the body's":              {read, with(read, "Mcp-Name", "file:///b"), false},
-		"malformed Base64 sentinel":       {echo, with(echo, "Mcp-Name", "=?base64?!!?="), false},
+		"tools/call mirrored":             {call, hdr("tools/call", "weather"), true},
+		"resources/read mirrors the uri":  {read, hdr("resources/read", "file:///a"), true},
+		"prompts/get mirrored":            {prompt, hdr("prompts/get", "greet"), true},
+		"Base64 sentinel":                 {call, hdr("tools/call", "=?base64?d2VhdGhlcg==?="), true},
+		"Base64 sentinel of non-ASCII":    {meteo, hdr("tools/call", "=?base64?bcOpdMOpbw==?="), true},
+		"no params.name, no Mcp-Name":     {modernBody(`5`, "tools/call", "", ""), hdr("tools/call", ""), true},
+		"other method, any params.name":   {modernBody(`6`, "echo", "", `"name":{"x":1}`), hdr("echo", ""), true},
+		"version missing":                 {call, without(hdr("tools/call", "weather"), "MCP-Protocol-Version"), false},
+		"version not the body's":          {call, with(hdr("tools/call", "weather"), "MCP-Protocol-Version", "2027-01-01"), false},
+		"version repeated":                {call, append(hdr("tools/call", "weather"), [2]string{"MCP-Protocol-Version", "2026-07-28"}), false},
+		"method missing":                  {call, without(hdr("tools/call", "weather"), "Mcp-Method"), false},
+		"method not the body's":           {call, with(hdr("tools/call", "weather"), "Mcp-Method", "tools/list"), false},
+		"method in another case":          {call, with(hdr("tools/call", "weather"), "Mcp-Method", "Tools/Call"), false},
+		"name missing":                    {call, hdr("tools/call", ""), false},
+		"name not the body's":             {call, hdr("tools/call", "news"), false},
+		"name repeated":                   {call, append(hdr("tools/call", "weather"), [2]string{"Mcp-Name", "news"}), false},
+		"prompts/get name missing":        {prompt, hdr("prompts/get", ""), false},
+		"prompts/get name not the body's": {prompt, hdr("prompts/get", "farewell"), false},
+		"uri not the body's":              {read, hdr("resources/read", "file:///b"), false},
+		"Base64 sentinel of another name": {call, hdr("tools/call", "=?base64?bmV3cw==?="), false},
+		"malformed Base64 sentinel":       {call, hdr("tools/call", "=?base64?!!?="), false},
+		"sentinel without its ?=":         {call, hdr("tools/call", "=?base64?d2VhdGhlcg=="), false},
+		"params.name not a string":        {modernBody(`7`, "tools/call", "", `"name":7`), hdr("tools/call", "7"), false},
 	} {
-		t.Run(name, func(t *testing.T) {
-			b := newModernBridge(t, nil)
-			res := b.do(t, context.Background(), http.MethodPost, "alice", "", tc.body, tc.header...)
-			if tc.ok {
-				if res.StatusCode != http.StatusOK {
-					t.Fatalf("status %d, want 200", res.StatusCode)
-				}
-				return
-			}
-			raw, _ := io.ReadAll(res.Body)
-			if res.StatusCode != http.StatusBadRequest || rpcErrorCode(t, raw) != codeHeaderMismatch {
-				t.Fatalf("status %d, body %s; want 400 with HeaderMismatch (-32020)", res.StatusCode, raw)
-			}
-			if b.m.Len() != 0 {
-				t.Fatal("a process started for a request refused on its headers")
-			}
-		})
+		h := http.Header{}
+		for _, kv := range tc.header {
+			h.Add(kv[0], kv[1])
+		}
+		var env envelope
+		_ = json.Unmarshal([]byte(tc.body), &env)
+		meta, err := readMeta([]byte(tc.body))
+		if err == nil {
+			err = checkHeaders(h, env.Method, meta.version, []byte(tc.body))
+		}
+		if (err == nil) != tc.ok {
+			t.Errorf("%s: %v, want accepted %v", name, err, tc.ok)
+		}
+	}
+}
+
+// hdr is the headers of a request for method; name, when not empty, is its Mcp-Name.
+func hdr(method, name string) [][2]string {
+	h := [][2]string{{"MCP-Protocol-Version", "2026-07-28"}, {"Mcp-Method", method}}
+	if name != "" {
+		h = append(h, [2]string{"Mcp-Name", name})
+	}
+	return h
+}
+
+func with(h [][2]string, name, value string) [][2]string {
+	out := append([][2]string(nil), h...)
+	for i := range out {
+		if out[i][0] == name {
+			out[i][1] = value
+		}
+	}
+	return out
+}
+
+func without(h [][2]string, name string) [][2]string {
+	var out [][2]string
+	for _, kv := range h {
+		if kv[0] != name {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
+func TestModernRequestWithMirroredHeadersIsServed(t *testing.T) {
+	b := newModernBridge(t, nil)
+	call := modernBody(`1`, "tools/call", "", `"name":"weather"`)
+	if res := b.modern(t, "alice", call); res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200", res.StatusCode)
+	}
+}
+
+func TestModernRequestWhoseHeadersDoNotMirrorTheBodyIsRefusedBeforeAnyProcessStarts(t *testing.T) {
+	b := newModernBridge(t, nil)
+	call := modernBody(`1`, "tools/call", "", `"name":"weather"`)
+	res := b.do(t, context.Background(), http.MethodPost, "alice", "", call,
+		"MCP-Protocol-Version", "2026-07-28", "Mcp-Method", "tools/call", "Mcp-Name", "news")
+	raw, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusBadRequest || rpcErrorCode(t, raw) != -32020 { // HeaderMismatch, a spec value
+		t.Fatalf("status %d, body %s; want 400 with HeaderMismatch (-32020)", res.StatusCode, raw)
+	}
+	if b.m.Len() != 0 {
+		t.Fatal("a process started for a request refused on its headers")
 	}
 }
 
@@ -630,8 +685,19 @@ func TestModernNotificationsNeedNoHeaders(t *testing.T) {
 	}
 }
 
-// listen opens a subscriptions/listen stream as alice under the client id id and returns its events
-// after the acknowledgement, which it checks.
+func TestUpstreamResponsesThatAreUnusualButRoutableAlwaysAnswerTheClient(t *testing.T) {
+	b := newModernBridge(t, nil)
+	if got := readEvents(t, b.modern(t, "alice", modernBody(`1`, "dupresult", "", ""))); len(got) != 1 || got[0] != `{"jsonrpc":"2.0","id":1,"result":{"a":1,"a":2}}` {
+		t.Fatalf("a result with a repeated key: %q, want it relayed under the client's id", got)
+	}
+	got := readEvents(t, b.modern(t, "alice", modernBody(`2`, "dupid", "", "")))
+	if len(got) != 1 || !strings.Contains(got[0], `"id":2`) || !strings.Contains(got[0], "ambiguous response") || strings.Contains(got[0], "byw-") {
+		t.Fatalf("a response with its id repeated: %q, want an error under the client's id, never the proxy's", got)
+	}
+}
+
+// listenModern opens a subscriptions/listen stream as alice under the client id id and returns
+// its events after the acknowledgement, which it checks.
 func (b *bridgeHarness) listenModern(t *testing.T, ctx context.Context, id string) *events {
 	t.Helper()
 	ev := eventsOf(t, b.modernCtx(t, ctx, "alice", modernBody(id, "subscriptions/listen", "", `"notifications":{"toolsListChanged":true}`)))
@@ -644,45 +710,43 @@ func (b *bridgeHarness) listenModern(t *testing.T, ctx context.Context, id strin
 func TestSubscriptionNotificationsReachOnlyTheirOwnListenStreamUnderTheClientsID(t *testing.T) {
 	// Two clients of one user both listen under the id "L": the proxy's ids keep them apart.
 	b := newModernBridge(t, nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	first, second := b.listenModern(t, ctx, `"L"`), b.listenModern(t, ctx, `"L"`)
+	first, second := b.listenModern(t, context.Background(), `"L"`), b.listenModern(t, context.Background(), `"L"`)
 	if _, n := lastResult(t, readEvents(t, b.modern(t, "alice", modernBody(`1`, "notify", "", "")))); string(n) != "2" {
 		t.Fatalf("notified %s listens, want 2", n)
 	}
+	readEvents(t, b.modern(t, "alice", modernBody(`2`, "endlistens", "", ""))) // ends both streams in order
 	for name, ev := range map[string]*events{"first": first, "second": second} {
-		got, _ := ev.next()
-		if !strings.Contains(got, "notifications/tools/list_changed") || !strings.Contains(got, `"io.modelcontextprotocol/subscriptionId":"L"`) {
-			t.Fatalf("%s stream got %s, want one list_changed under the client's own id", name, got)
-		}
-	}
-	cancel()
-	for name, ev := range map[string]*events{"first": first, "second": second} {
-		if got := ev.all(); len(got) != 0 {
-			t.Fatalf("%s stream got a second notification %q", name, got)
+		got := ev.all()
+		if len(got) != 2 || !strings.Contains(got[0], "notifications/tools/list_changed") ||
+			!strings.Contains(got[0], `"io.modelcontextprotocol/subscriptionId":"L"`) || !strings.Contains(got[1], `"resultType":"complete"`) {
+			t.Fatalf("%s stream got %q, want exactly its own list_changed then its completion", name, got)
 		}
 	}
 }
 
 func TestAGracefullyEndedSubscriptionAnswersUnderTheClientsID(t *testing.T) {
-	b := newModernBridge(t, nil)
-	ev := b.listenModern(t, context.Background(), `"L"`)
-	readEvents(t, b.modern(t, "alice", modernBody(`1`, "endlistens", "", "")))
-	got := ev.all()
-	if len(got) != 1 || !strings.Contains(got[0], `"id":"L"`) || !strings.Contains(got[0], `"resultType":"complete"`) ||
-		!strings.Contains(got[0], `"io.modelcontextprotocol/subscriptionId":"L"`) {
-		t.Fatalf("events %q, want the completion result with the client's id in both places", got)
+	for name, method := range map[string]string{"naming its own subscription": "endlistens", "naming another id": "endforeign"} {
+		t.Run(name, func(t *testing.T) {
+			b := newModernBridge(t, nil)
+			ev := b.listenModern(t, context.Background(), `"L"`)
+			readEvents(t, b.modern(t, "alice", modernBody(`1`, method, "", "")))
+			got := ev.all()
+			if len(got) != 1 || !strings.Contains(got[0], `"id":"L"`) || !strings.Contains(got[0], `"resultType":"complete"`) ||
+				!strings.Contains(got[0], `"io.modelcontextprotocol/subscriptionId":"L"`) || strings.Contains(got[0], "byw-") {
+				t.Fatalf("events %q, want the completion with the client's id in both places and no proxy id", got)
+			}
+		})
 	}
 }
 
-func TestAnUpstreamTeardownClosesTheListenStream(t *testing.T) {
+func TestAnUpstreamCancellingASubscriptionClosesTheListenStreamWithNothingForwarded(t *testing.T) {
 	// Over HTTP the server ends a subscription by closing its stream; notifications/cancelled is
-	// stdio's, so it is not forwarded.
+	// stdio's, so it is not forwarded. What the upstream sent before it still is.
 	b := newModernBridge(t, nil)
 	ev := b.listenModern(t, context.Background(), `"L"`)
 	readEvents(t, b.modern(t, "alice", modernBody(`1`, "teardown", "", "")))
-	if got := ev.all(); len(got) != 0 {
-		t.Fatalf("events %q after the teardown, want the stream closed with nothing more", got)
+	if got := ev.all(); len(got) != 1 || !strings.Contains(got[0], "notifications/tools/list_changed") {
+		t.Fatalf("events %q, want the list_changed sent before the teardown, then the stream closed", got)
 	}
 }
 
@@ -690,14 +754,17 @@ func TestClosingAListenStreamCancelsTheSubscriptionOnTheUpstream(t *testing.T) {
 	b := newModernBridge(t, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	b.listenModern(t, ctx, `"L"`)
+	b.bridge.mu.Lock()
+	c := b.bridge.users["user:"+alice.user()]
+	b.bridge.mu.Unlock()
+	c.mu.Lock()
+	var proxyID string
+	for id := range c.byID {
+		proxyID = id
+	}
+	c.mu.Unlock()
 	cancel()
-	var got json.RawMessage
-	eventually(t, "the upstream to see the cancellation", func() bool {
-		_, got = lastResult(t, readEvents(t, b.modern(t, "alice", modernBody(`2`, "cancelled", "", ""))))
-		return string(got) != "[]" && string(got) != "null"
-	})
-	var ids []string
-	if err := json.Unmarshal(got, &ids); err != nil || len(ids) != 1 || ids[0] == "L" {
-		t.Fatalf("upstream saw cancellations %s; want one, under the proxy's id", got)
+	if ids := b.awaitUpstreamCancellation(t); len(ids) != 1 || `"`+ids[0]+`"` != proxyID {
+		t.Fatalf("upstream saw cancellations %q, want exactly the listen's proxy id %s", ids, proxyID)
 	}
 }

@@ -179,7 +179,9 @@ func admit(maxRequests, maxStreams int, m *metrics.Metrics, next http.Handler) h
 	requests, streams := make(chan struct{}, maxRequests), make(chan struct{}, maxStreams)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sem, kind := requests, "request"
-		if r.Method == http.MethodGet {
+		// A legacy GET stream and a modern subscriptions/listen are both long-lived: neither may use
+		// up tool-call slots. A mislabelled request only moves itself to the stream cap.
+		if r.Method == http.MethodGet || r.Header.Get("Mcp-Method") == "subscriptions/listen" {
 			sem, kind = streams, "stream"
 		}
 		select {

@@ -58,11 +58,7 @@ const (
 )
 
 // nameSource is the body field Mcp-Name mirrors, for the methods that require it.
-var nameSource = map[string]func(requestMeta) (string, bool){
-	"tools/call":     func(m requestMeta) (string, bool) { return m.name, m.hasName },
-	"prompts/get":    func(m requestMeta) (string, bool) { return m.name, m.hasName },
-	"resources/read": func(m requestMeta) (string, bool) { return m.uri, m.hasURI },
-}
+var nameSource = map[string]jsonPath{"tools/call": pathName, "prompts/get": pathName, "resources/read": pathURI}
 
 // probeRequest is the proxy's server/discover: does the upstream speak the modern era?
 var probeRequest = []byte(`{"jsonrpc":"2.0","id":` + probeID + `,"method":"server/discover","params":{"_meta":{` +
@@ -75,23 +71,18 @@ type requestMeta struct {
 	id, token *span  // nil when absent
 	logs      bool   // _meta asks for notifications/message
 	version   string // _meta protocol version; "" when absent or not a string
-	// params.name and params.uri, for Mcp-Name; has* says the field is present at all.
-	name, uri       string
-	hasName, hasURI bool
 }
 
 // readMeta locates a message's id, progress token, log level and protocol version. Ambiguous JSON
 // is refused: the ids are rewritten, and a wrong guess would route one client's answer to another.
 func readMeta(msg []byte) (requestMeta, error) {
-	at, err := locate(msg, pathID, pathToken, pathLogLevel, pathVersion, pathName, pathURI)
+	at, err := locate(msg, pathID, pathToken, pathLogLevel, pathVersion)
 	if err != nil {
 		return requestMeta{}, err
 	}
-	m := requestMeta{id: at[0], token: at[1], logs: at[2] != nil, hasName: at[4] != nil, hasURI: at[5] != nil}
-	for i, dst := range map[int]*string{3: &m.version, 4: &m.name, 5: &m.uri} {
-		if at[i] != nil {
-			_ = json.Unmarshal(at[i].value(msg), dst)
-		}
+	m := requestMeta{id: at[0], token: at[1], logs: at[2] != nil}
+	if at[3] != nil {
+		_ = json.Unmarshal(at[3].value(msg), &m.version)
 	}
 	return m, nil
 }
@@ -130,10 +121,18 @@ func (m requestMeta) checkRequest(msg []byte) error {
 // Mcp-Method, and Mcp-Name where the method mirrors one, must be present and equal the body's
 // values (case-sensitive, after decoding a Base64 sentinel). Notification POSTs have no header
 // requirements in this revision.
-func checkHeaders(h http.Header, method string, m requestMeta) error {
-	want := []struct{ name, value string }{{headerProtocolVersion, m.version}, {headerMethod, method}}
-	if src, ok := nameSource[method]; ok {
-		if v, present := src(m); present {
+func checkHeaders(h http.Header, method, version string, msg []byte) error {
+	want := []struct{ name, value string }{{headerProtocolVersion, version}, {headerMethod, method}}
+	if path, ok := nameSource[method]; ok {
+		at, err := locate(msg, path)
+		if err != nil {
+			return err
+		}
+		if at[0] != nil { // absent: the body is the upstream's to refuse
+			var v string
+			if json.Unmarshal(at[0].value(msg), &v) != nil {
+				return fmt.Errorf("%s mirrors a value that is not a string", headerName)
+			}
 			want = append(want, struct{ name, value string }{headerName, v})
 		}
 	}
@@ -226,6 +225,7 @@ type modernRequest struct {
 	logs      bool // asked for notifications/message (io.modelcontextprotocol/logLevel)
 	out       chan []byte
 	final     chan []byte
+	listen    bool          // a subscriptions/listen: its graceful end carries the id in result._meta too
 	torn      chan struct{} // closed when the upstream tears down this subscriptions/listen
 	tornOnce  sync.Once
 }
@@ -251,7 +251,7 @@ func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity,
 			writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest, "Invalid Request: "+err.Error())
 			return
 		}
-		if err := checkHeaders(r.Header, env.Method, meta); err != nil {
+		if err := checkHeaders(r.Header, env.Method, meta.version, msg); err != nil {
 			writeRPCError(w, http.StatusBadRequest, nil, codeHeaderMismatch, "Header mismatch: "+err.Error())
 			return
 		}
@@ -276,7 +276,7 @@ func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity,
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
-	c.request(w, r, msg, meta)
+	c.request(w, r, msg, env.Method, meta)
 }
 
 // legacyFallback is the answer to a modern request the upstream cannot serve: no modern error
@@ -353,12 +353,12 @@ func (c *userConn) discover(ctx context.Context, timeout time.Duration) bool {
 }
 
 // request relays one modern-era request under proxy-chosen ids.
-func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, meta requestMeta) {
+func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, method string, meta requestMeta) {
 	var token []byte
 	if meta.token != nil {
 		token = meta.token.value(msg)
 	}
-	q := c.register(meta.id.value(msg), token, meta.logs)
+	q := c.register(meta.id.value(msg), token, meta.logs, method == "subscriptions/listen")
 	defer c.unregister(q)
 	if err := c.p.Send(r.Context(), replace(msg, edit{meta.id, []byte(q.proxyID)}, edit{meta.token, []byte(q.proxyTok)})); err != nil {
 		c.log.WarnContext(r.Context(), "relaying to the upstream process failed", "request_id", logging.RequestID(r.Context()), "error", err)
@@ -366,17 +366,17 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, m
 		return
 	}
 	out := startSSE(w)
-	finish := func(m []byte) { // what the upstream sent before the response goes first
+	drain := func() { // what the upstream sent before the end goes out first
 		for {
 			select {
 			case o := <-q.out:
 				_ = out.write(o)
 			default:
-				_ = out.write(m)
 				return
 			}
 		}
 	}
+	finish := func(m []byte) { drain(); _ = out.write(m) }
 	for {
 		select {
 		case m := <-q.out:
@@ -392,15 +392,9 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, m
 			return
 		case <-q.torn:
 			// The upstream ended the subscription. Over HTTP that is said by closing the stream; the
-			// cancellation itself is stdio's (2026-07-28 cancellation). What came before goes out.
-			for {
-				select {
-				case o := <-q.out:
-					_ = out.write(o)
-				default:
-					return
-				}
-			}
+			// cancellation itself is stdio's (2026-07-28 cancellation).
+			drain()
+			return
 		case <-r.Context().Done():
 			c.cancel(q) // closing the stream cancels the request (2026-07-28 transports)
 			return
@@ -419,12 +413,12 @@ func exitAnswer(q *modernRequest) []byte {
 	}
 }
 
-func (c *userConn) register(id, token []byte, logs bool) *modernRequest {
+func (c *userConn) register(id, token []byte, logs, listen bool) *modernRequest {
 	n := strconv.FormatUint(c.ids.Add(1), 10)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	q := &modernRequest{id: id, proxyID: `"byw-` + n + `"`, logs: logs, out: make(chan []byte, streamBuffer), final: make(chan []byte, 1),
-		torn: make(chan struct{})}
+	q := &modernRequest{id: id, proxyID: `"byw-` + n + `"`, logs: logs, listen: listen, out: make(chan []byte, streamBuffer),
+		final: make(chan []byte, 1), torn: make(chan struct{})}
 	c.byID[q.proxyID] = q
 	if token != nil {
 		q.token, q.proxyTok = token, `"byw-t`+n+`"`
@@ -483,22 +477,40 @@ func (c *userConn) routeResponse(msg []byte, proxyID string) {
 		}
 		return
 	}
-	c.mu.Lock()
-	q := c.byID[proxyID]
-	c.mu.Unlock()
-	at, err := locate(msg, pathID, pathResSub)
-	if q == nil || err != nil || at[0] == nil {
+	q := c.byProxyID(proxyID)
+	if q == nil {
 		c.log.Warn("upstream response for no waiting request", "reason", "response_unrouted")
 		return
 	}
-	edits := []edit{{at[0], q.id}}
-	if at[1] != nil && string(compactID(at[1].value(msg))) == q.proxyID { // a subscription's graceful end
-		edits = append(edits, edit{at[1], q.id})
+	var out []byte
+	if q.listen { // a graceful end names the subscription in result._meta too
+		if at, err := locate(msg, pathID, pathResSub); err == nil && at[0] != nil {
+			// This answers q by its id, so whatever its _meta names is q's subscription: the client
+			// sees its own id there, never a proxy id.
+			out = replace(msg, edit{at[0], q.id}, edit{at[1], q.id})
+		}
+	}
+	if out == nil {
+		if at, err := locate(msg, pathID); err == nil && at[0] != nil {
+			out = replace(msg, edit{at[0], q.id})
+		} else {
+			// Routable, but its id cannot be placed with certainty: the client gets an error, not
+			// silence, and never the proxy's id.
+			c.log.Warn("upstream response is ambiguous", "reason", "response_ambiguous")
+			out = rpcError(q.id, codeInternalError, "the upstream sent an ambiguous response")
+		}
 	}
 	select {
-	case q.final <- replace(msg, edits...):
+	case q.final <- out:
 	default:
 	}
+}
+
+// byProxyID is the request in flight under the proxy's id, or nil.
+func (c *userConn) byProxyID(id string) *modernRequest {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.byID[id]
 }
 
 func (c *userConn) routeNotification(msg []byte, method string) {
@@ -538,9 +550,7 @@ func (c *userConn) routeNotification(msg []byte, method string) {
 		at, err := locate(msg, pathCancelID)
 		var q *modernRequest
 		if err == nil && at[0] != nil {
-			c.mu.Lock()
-			q = c.byID[string(compactID(at[0].value(msg)))]
-			c.mu.Unlock()
+			q = c.byProxyID(string(compactID(at[0].value(msg))))
 		}
 		if q == nil {
 			c.drop(method, "cancel_unrouted")
@@ -560,9 +570,7 @@ func (c *userConn) routeSubscription(msg []byte, method string) {
 		c.drop(method, "notification_unrouted")
 		return
 	}
-	c.mu.Lock()
-	q := c.byID[string(compactID(at[0].value(msg)))]
-	c.mu.Unlock()
+	q := c.byProxyID(string(compactID(at[0].value(msg))))
 	if q == nil {
 		c.drop(method, "subscription_unrouted")
 		return

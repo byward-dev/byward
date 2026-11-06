@@ -348,7 +348,13 @@ func serveMCP() {
 //	subscriptions/listen  notifications/subscriptions/acknowledged for it, then no answer
 //	notify      a notifications/tools/list_changed on every open listen, then the result
 //	endlistens  a completion result for every open listen, then its own result
-//	teardown    a notifications/cancelled for every open listen, then the result
+//	teardown    a list_changed and then a notifications/cancelled for every open listen, written
+//	            together, then the result
+//	endforeign  a completion result for every open listen whose _meta names another id
+//	strayscribe a notification for a subscription nobody opened, then the result
+//	straycancel a notifications/cancelled for a request nobody sent, then the result
+//	dupresult   a result object with a repeated key, under the request's id
+//	dupid       a response with the id repeated
 func serveModern() {
 	out := bufio.NewWriter(os.Stdout)
 	var mu sync.Mutex
@@ -491,9 +497,35 @@ func serveModern() {
 				result(id, "ok")
 			case "teardown":
 				for _, lid := range takeListens() {
-					write(message{Method: "notifications/cancelled", Params: json.RawMessage(`{"requestId":` + string(lid) + `}`)})
+					mu.Lock()
+					_, _ = fmt.Fprintf(out, "%s\n%s\n",
+						`{"jsonrpc":"2.0","method":"notifications/tools/list_changed","params":{`+sub(lid)+`}}`,
+						`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":`+string(lid)+`}}`)
+					_ = out.Flush()
+					mu.Unlock()
 				}
 				result(id, "ok")
+			case "endforeign":
+				for _, lid := range takeListens() {
+					write(message{ID: lid, Result: json.RawMessage(`{"resultType":"complete","_meta":{"io.modelcontextprotocol/subscriptionId":"byw-999999"}}`)})
+				}
+				result(id, "ok")
+			case "strayscribe":
+				write(message{Method: "notifications/tools/list_changed", Params: json.RawMessage(`{` + sub(json.RawMessage(`"byw-999999"`)) + `}`)})
+				result(id, "ok")
+			case "straycancel":
+				write(message{Method: "notifications/cancelled", Params: json.RawMessage(`{"requestId":"byw-999999"}`)})
+				result(id, "ok")
+			case "dupresult":
+				mu.Lock()
+				_, _ = fmt.Fprintf(out, `{"jsonrpc":"2.0","id":%s,"result":{"a":1,"a":2}}`+"\n", id)
+				_ = out.Flush()
+				mu.Unlock()
+			case "dupid":
+				mu.Lock()
+				_, _ = fmt.Fprintf(out, `{"jsonrpc":"2.0","id":%s,"id":%s,"result":1}`+"\n", id, id)
+				_ = out.Flush()
+				mu.Unlock()
 			case "answerexit":
 				mu.Lock()
 				_, _ = fmt.Fprintf(out, `{"jsonrpc":"2.0","id":%s,"result":"answered"}`+"\n", id)

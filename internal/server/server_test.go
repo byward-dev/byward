@@ -367,6 +367,52 @@ func TestAdmitCapsRequestsAndStreamsSeparately(t *testing.T) {
 	}
 }
 
+func TestAModernSubscriptionUsesAStreamSlotNotARequestSlot(t *testing.T) {
+	// A subscriptions/listen POST is long-lived like a GET stream: with every request slot taken by
+	// tool calls it still gets in, and it never takes a request slot itself.
+	release := make(chan struct{})
+	entered := make(chan string, 4)
+	h := admit(1, 1, nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		entered <- r.Header.Get("Mcp-Method")
+		<-release
+	}))
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) })
+	send := func(method string) {
+		go func() {
+			r, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+			r.Header.Set("Mcp-Method", method)
+			if res, err := http.DefaultClient.Do(r); err == nil {
+				_ = res.Body.Close()
+			}
+		}()
+	}
+	send("tools/call") // takes the only request slot
+	if got := <-entered; got != "tools/call" {
+		t.Fatalf("entered %q", got)
+	}
+	send("subscriptions/listen")
+	select {
+	case got := <-entered:
+		if got != "subscriptions/listen" {
+			t.Fatalf("entered %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a subscription was refused while only the request slots were full")
+	}
+	r, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+	r.Header.Set("Mcp-Method", "subscriptions/listen")
+	res, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("a second subscription over the stream cap: %d, want 503", res.StatusCode)
+	}
+}
+
 func TestServerSentEventsStreamThroughTheWholeChain(t *testing.T) {
 	e := start(t)
 	next := make(chan struct{})
