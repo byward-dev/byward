@@ -224,7 +224,43 @@ func (b *Bridge) session(w http.ResponseWriter, r *http.Request, id Identity, ke
 		http.Error(w, "session not found", http.StatusNotFound)
 		return nil, nil
 	}
+	if v := r.Header.Get(protocolVersionHeader); v != "" && !s.speaks(v) {
+		// The upstream never sees headers, so the transport's rule is ours (2025-11-25 transports,
+		// Protocol Version Header): an unsupported version gets 400. No header passes.
+		release()
+		writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest,
+			"Bad Request: unsupported "+protocolVersionHeader+"; this MCP session negotiated "+s.negotiated())
+		return nil, nil
+	}
 	return s, release
+}
+
+// protocolVersionHeader carries the negotiated version on every request after initialize.
+const protocolVersionHeader = "MCP-Protocol-Version"
+
+// speaks reports whether v is the version this MCP session negotiated. Before one is known (an
+// InitializeResult without it), any version passes: the upstream decides.
+func (s *session) speaks(v string) bool {
+	n := s.negotiated()
+	return n == "" || v == n
+}
+
+func (s *session) negotiated() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.version
+}
+
+// recordVersion keeps the protocol version from an InitializeResult.
+func (s *session) recordVersion(result json.RawMessage) {
+	var r struct {
+		ProtocolVersion string `json:"protocolVersion"`
+	}
+	if json.Unmarshal(result, &r) == nil {
+		s.mu.Lock()
+		s.version = r.ProtocolVersion
+		s.mu.Unlock()
+	}
 }
 
 // session is one MCP session: its process and the HTTP streams its messages go out on.
@@ -239,6 +275,7 @@ type session struct {
 	getStream *stream            // the GET stream, if one is open
 	queue     [][]byte           // notifications waiting for a stream
 	ended     bool
+	version   string // the protocol version the upstream's InitializeResult negotiated; "" until then
 }
 
 // stream is one SSE response: a request's (POST) or the session's GET stream.
@@ -333,7 +370,11 @@ func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id
 		case m := <-st.final:
 			answered := true
 			if initialize { // only here: parsing a large result just to relay it costs for nothing
-				if env, err := parseEnvelope(m); err != nil || env.Error != nil {
+				env, err := parseEnvelope(m)
+				if err == nil && env.Error == nil {
+					s.recordVersion(env.Result)
+				}
+				if err != nil || env.Error != nil {
 					answered, reason = false, "initialize_error"
 					if out == nil {
 						w.Header().Set("Content-Type", "application/json")

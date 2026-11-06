@@ -81,7 +81,7 @@ func (b *bridgeHarness) initialize(t *testing.T, user string) string {
 		t.Fatalf("initialize: status %d", res.StatusCode)
 	}
 	events := readEvents(t, res)
-	if len(events) != 1 || !strings.Contains(events[0], `"protocolVersion":"2025-11-25"`) {
+	if len(events) != 1 || !strings.Contains(events[0], `"result":`) {
 		t.Fatalf("initialize events = %q", events)
 	}
 	return res.Header.Get(sessionHeader)
@@ -744,5 +744,57 @@ func TestUpstreamProcessCrashingDuringInitializeIsLoggedAsACrash(t *testing.T) {
 	eventually(t, "the process to be gone", func() bool { return b.m.Len() == 0 })
 	if len(b.log.with("stopping upstream process")) != 0 || len(b.log.with("upstream process exited unexpectedly")) != 1 {
 		t.Fatal("a process that crashed must be logged as an unexpected exit, not as a stop")
+	}
+}
+
+func TestProtocolVersionHeaderMustBeTheNegotiatedOneOrAbsent(t *testing.T) {
+	for name, tc := range map[string]struct {
+		negotiated string // the version the upstream's InitializeResult names
+		header     string // "" sends none
+		want       int
+	}{
+		"absent":                 {"2025-11-25", "", http.StatusOK},
+		"the negotiated one":     {"2025-11-25", "2025-11-25", http.StatusOK},
+		"another version":        {"2025-11-25", "2025-03-26", http.StatusBadRequest},
+		"not a version":          {"2025-11-25", "latest", http.StatusBadRequest},
+		"negotiated by upstream": {"2025-06-18", "2025-06-18", http.StatusOK},
+		"default when upstream negotiated another": {"2025-06-18", "2025-11-25", http.StatusBadRequest},
+		"upstream named none":                      {"none", "2025-11-25", http.StatusOK},
+	} {
+		t.Run(name, func(t *testing.T) {
+			b := newBridge(t, func(c *Config) { c.Command = []string{fakeBin, "-mcp", "-version=" + tc.negotiated} })
+			s := b.initialize(t, "alice")
+			for _, method := range []string{http.MethodPost, http.MethodGet, http.MethodDelete} {
+				req, _ := http.NewRequest(method, b.srv.URL, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"echo","params":{}}`))
+				req.Header.Set(userHeader, "alice")
+				req.Header.Set(sessionHeader, s)
+				if tc.header != "" {
+					req.Header.Set("MCP-Protocol-Version", tc.header)
+				}
+				if method == http.MethodGet {
+					ctx, cancel := context.WithCancel(context.Background())
+					defer cancel()
+					req = req.WithContext(ctx)
+				}
+				res, err := b.srv.Client().Do(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := tc.want
+				if method == http.MethodDelete && want == http.StatusOK {
+					want = http.StatusNoContent
+				}
+				if res.StatusCode != want {
+					t.Fatalf("%s: status %d, want %d", method, res.StatusCode, want)
+				}
+				if want == http.StatusBadRequest {
+					body, _ := io.ReadAll(res.Body)
+					if rpcErrorCode(t, body) != codeInvalidRequest || !strings.Contains(string(body), `"id":null`) {
+						t.Fatalf("%s: body %s, want a -32600 error with no id", method, body)
+					}
+				}
+				_ = res.Body.Close()
+			}
+		})
 	}
 }
