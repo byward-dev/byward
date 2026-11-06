@@ -29,7 +29,9 @@ run = 'test -z "$(gofmt -s -l .)$(goimports -l .)" || { gofmt -s -l .; goimports
 run = "go vet ./..."
 
 [tasks.lint]
-run = "golangci-lint run"
+description = "golangci-lint once per release GOOS, so files behind build constraints are linted on any host"
+# Keep in sync with builds.goos in .goreleaser.yaml (and scripts/licenses.sh).
+run = ["GOOS=linux golangci-lint run", "GOOS=darwin golangci-lint run"]
 
 [tasks."lint:workflows"]
 description = "Lint GitHub workflows (actionlint with shellcheck, zizmor offline) and shell scripts"
