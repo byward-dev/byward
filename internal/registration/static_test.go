@@ -163,29 +163,36 @@ func TestLoadStaticNeedsJTICacheAndReadableFile(t *testing.T) {
 	if _, err := LoadStatic("/missing", files{}.read, NewMemoryJTICache(time.Now, 1)); err == nil {
 		t.Error("missing file accepted")
 	}
+	if _, err := LoadStatic("/missing", files{}.read, nil, AllowMissingFile()); err == nil {
+		t.Error("nil jti cache accepted when the file may be missing")
+	}
 }
 
 // When apps can register themselves (CIMD or DCR), the server lets the operator have no static
-// clients: AllowNoClients accepts an empty list, AllowMissingFile an absent file. Only the clients
-// file itself may be absent; a secret file it names must still exist.
+// clients: AllowNoClients accepts an empty list, AllowMissingFile an absent file (and so an empty
+// list too). Only absence of the clients file itself is tolerated: a file that cannot be read, or a
+// secret file it names that is absent, still fails.
 func TestStaticClientsMayBeNoneWhenTheServerAllowsIt(t *testing.T) {
 	const path = "/etc/mcp/clients.json"
 	empty := files{path: `{"clients":[]}`}
 	missingSecret := files{path: `{"clients":[{"client_id":"c","token_endpoint_auth_method":"client_secret_post","redirect_uris":["https://a.example/cb"],"client_secret_file":"nope"}]}`}
+	denied := func(p string) ([]byte, error) { return nil, fmt.Errorf("open %s: %w", p, fs.ErrPermission) }
 	for _, tc := range []struct {
 		name  string
-		fs    files
+		read  func(string) ([]byte, error)
 		opts  []LoadOption
 		wants string // "" loads with no clients
 	}{
-		{"an empty list, allowed", empty, []LoadOption{AllowNoClients()}, ""},
-		{"an empty list, not allowed", empty, nil, "no clients"},
-		{"an absent file, allowed", files{}, []LoadOption{AllowMissingFile()}, ""},
-		{"an absent file, only an empty list allowed", files{}, []LoadOption{AllowNoClients()}, "does not exist"},
-		{"an absent secret file, absent files allowed", missingSecret, []LoadOption{AllowMissingFile(), AllowNoClients()}, "c: client_secret_file: open"},
+		{"an empty list loads when no clients are allowed", empty.read, []LoadOption{AllowNoClients()}, ""},
+		{"an empty list is refused by default", empty.read, nil, "no clients"},
+		{"an empty list loads when the file may be missing", empty.read, []LoadOption{AllowMissingFile()}, ""},
+		{"an absent file loads when it may be missing", files{}.read, []LoadOption{AllowMissingFile()}, ""},
+		{"an absent file is refused when only an empty list is allowed", files{}.read, []LoadOption{AllowNoClients()}, "does not exist"},
+		{"an unreadable file is refused even when it may be missing", denied, []LoadOption{AllowMissingFile()}, "permission denied"},
+		{"an absent secret file is refused even when the clients file may be missing", missingSecret.read, []LoadOption{AllowMissingFile()}, "c: client_secret_file: open"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r, err := LoadStatic(path, tc.fs.read, NewMemoryJTICache(time.Now, 1), tc.opts...)
+			r, err := LoadStatic(path, tc.read, NewMemoryJTICache(time.Now, 1), tc.opts...)
 			switch {
 			case tc.wants == "" && (err != nil || len(r.IDs()) != 0):
 				t.Fatalf("got %v, %v; want no static clients", r, err)
@@ -193,14 +200,6 @@ func TestStaticClientsMayBeNoneWhenTheServerAllowsIt(t *testing.T) {
 				t.Fatalf("err = %v, want %q", err, tc.wants)
 			}
 		})
-	}
-}
-
-// Only absence is tolerated: a clients file that exists but cannot be read still fails the start.
-func TestAnUnreadableStaticClientsFileFailsEvenWhenItMayBeMissing(t *testing.T) {
-	denied := func(p string) ([]byte, error) { return nil, fmt.Errorf("open %s: %w", p, fs.ErrPermission) }
-	if _, err := LoadStatic("/etc/mcp/clients.json", denied, NewMemoryJTICache(time.Now, 1), AllowMissingFile(), AllowNoClients()); err == nil || !strings.Contains(err.Error(), "permission denied") {
-		t.Fatalf("err = %v, want the permission error", err)
 	}
 }
 

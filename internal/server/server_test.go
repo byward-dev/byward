@@ -452,8 +452,8 @@ func TestOwnOriginIsAlwaysAllowed(t *testing.T) {
 // default clients file may be absent and a named one may list none. A named file must exist, so a
 // typo still fails; with CIMD and DCR both off nothing could sign in, so the old refusals stay. The
 // startup log says which client sources are active.
-func TestStaticClientsAreOptionalWhenAppsCanRegister(t *testing.T) {
-	const absent, empty = "absent", "empty"
+func TestStaticClientsAreOptionalOnlyWhenAppsCanRegister(t *testing.T) {
+	const absent, empty, one = "absent", "empty", "one client"
 	off := []string{"BYWARD_CIMD=false", "BYWARD_DCR=false"}
 	for _, tc := range []struct {
 		name    string
@@ -462,18 +462,22 @@ func TestStaticClientsAreOptionalWhenAppsCanRegister(t *testing.T) {
 		named   bool
 		wantLog string // "" wants a startup error naming BYWARD_STATIC_CLIENTS_FILE
 	}{
-		{"CIMD and DCR on, the default file absent", nil, absent, false, "static=0 cimd=true dcr=true"},
-		{"DCR only, a named file listing no clients", []string{"BYWARD_CIMD=false"}, empty, true, "static=0 cimd=false dcr=true"},
-		{"CIMD only, the default file absent", []string{"BYWARD_DCR=false"}, absent, false, "static=0 cimd=true dcr=false"},
-		{"CIMD and DCR on, a named file absent", nil, absent, true, ""},
-		{"CIMD and DCR off, the default file absent", off, absent, false, ""},
-		{"CIMD and DCR off, a named file listing no clients", off, empty, true, ""},
+		{"CIMD and DCR on, the default file absent: starts", nil, absent, false, "static=0 cimd=true dcr=true"},
+		{"DCR only, a named file listing no clients: starts", []string{"BYWARD_CIMD=false"}, empty, true, "static=0 cimd=false dcr=true"},
+		{"CIMD only, the default file absent: starts", []string{"BYWARD_DCR=false"}, absent, false, "static=0 cimd=true dcr=false"},
+		{"CIMD and DCR on, the default file listing one client: starts", nil, one, false, "static=1 cimd=true dcr=true"},
+		{"CIMD and DCR off, a named file listing one client: starts", off, one, true, "static=1 cimd=false dcr=false"},
+		{"CIMD and DCR on, a named file absent: refused (a typo)", nil, absent, true, ""},
+		{"CIMD and DCR off, the default file absent: refused", off, absent, false, ""},
+		{"CIMD and DCR off, a named file listing no clients: refused", off, empty, true, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			data := t.TempDir()
 			path := filepath.Join(data, "clients.json")
-			if tc.file == empty {
-				if err := os.WriteFile(path, []byte(`{"clients":[]}`), 0o600); err != nil {
+			content := map[string]string{empty: `{"clients":[]}`,
+				one: `{"clients":[{"client_id":"app","token_endpoint_auth_method":"none","redirect_uris":["http://127.0.0.1/callback"]}]}`}[tc.file]
+			if content != "" {
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}
