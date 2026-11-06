@@ -163,6 +163,20 @@ func (e *env) do(t *testing.T, method, path string, body url.Values, cookies []*
 	return res
 }
 
+func (e *env) doBasic(t *testing.T, path string, body url.Values, user string) *http.Response {
+	t.Helper()
+	r, _ := http.NewRequest("POST", e.srv.URL+path, strings.NewReader(body.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.SetBasicAuth(user, "")
+	c := e.srv.Client()
+	res, err := c.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = res.Body.Close() })
+	return res
+}
+
 const verifier = "verifier-0123456789-0123456789-0123456789-abc"
 
 func challenge() string {
@@ -209,7 +223,13 @@ func (e *env) redeem(t *testing.T, code string, override url.Values) (*http.Resp
 	for k, v := range override {
 		f[k] = v
 	}
-	res := e.do(t, "POST", "/token", f, nil)
+	var res *http.Response
+	if u := f.Get("__basic"); u != "" {
+		f.Del("__basic")
+		res = e.doBasic(t, "/token", f, u)
+	} else {
+		res = e.do(t, "POST", "/token", f, nil)
+	}
 	var body map[string]any
 	_ = json.NewDecoder(res.Body).Decode(&body)
 	return res, body
@@ -268,6 +288,7 @@ func TestTokenEndpointRechecks(t *testing.T) {
 		status   int
 	}{
 		{"wrong verifier", url.Values{"code_verifier": {strings.Repeat("x", 43)}}, "invalid_grant", 400},
+		{"Basic user that does not decode", url.Values{"__basic": {"%zz"}}, "invalid_client", 401},
 		{"wrong redirect", url.Values{"redirect_uri": {"http://127.0.0.1:43210/other"}}, "invalid_grant", 400},
 		{"unknown client", url.Values{"client_id": {"nope"}}, "invalid_client", 401},
 		{"foreign resource", url.Values{"resource": {"https://other.example/mcp"}}, "invalid_target", 400},
@@ -358,5 +379,27 @@ func TestMetadataAdvertisesTheBroker(t *testing.T) {
 func TestPKCE(t *testing.T) {
 	if !pkceMatches(verifier, challenge()) || pkceMatches(verifier+"x", challenge()) || pkceMatches("short", challenge()) {
 		t.Fatal("pkce")
+	}
+}
+
+func TestFailedBindingAfterConsumeRevokesTheGrant(t *testing.T) {
+	for name, override := range map[string]url.Values{
+		"wrong verifier": {"code_verifier": {strings.Repeat("x", 43)}},
+		"wrong redirect": {"redirect_uri": {"http://127.0.0.1:43210/other"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			code := e.signIn(t, nil).Query().Get("code")
+			grant := firstGrant(e.st)
+			if res, _ := e.redeem(t, code, override); res.StatusCode != 400 {
+				t.Fatalf("got %d", res.StatusCode)
+			}
+			if _, err := e.st.Grant(context.Background(), grant); !errors.Is(err, store.ErrNotFound) {
+				t.Fatalf("grant still exists after a misused code: %v", err)
+			}
+			if denied, _ := e.b.Deny().Denied(grant, "", time.Time{}); !denied {
+				t.Fatal("grant not on the deny list")
+			}
+		})
 	}
 }

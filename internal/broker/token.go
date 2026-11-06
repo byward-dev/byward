@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/corker/mcp-authproxy/internal/logging"
 	"github.com/corker/mcp-authproxy/internal/store"
@@ -57,7 +59,13 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 	f := r.PostForm
 	clientID := f.Get("client_id")
 	if user, _, ok := r.BasicAuth(); ok {
-		clientID = user
+		// RFC 6749 §2.3.1: the Basic user is form-encoded, as registration compares it.
+		u, err := url.QueryUnescape(user)
+		if err != nil {
+			b.tokenFail(w, r, tokenError{http.StatusUnauthorized, "invalid_client", "client authentication failed"})
+			return
+		}
+		clientID = u
 	}
 	client, err := b.cfg.Clients.Client(ctx, clientID)
 	if err != nil {
@@ -82,27 +90,28 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, store.ErrConsumed):
 		// ADR-0006 §5: a reused code revokes the tokens it produced.
-		if rerr := b.cfg.Store.RevokeGrant(ctx, claims.GrantID, now); rerr != nil && !errors.Is(rerr, store.ErrNotFound) {
-			b.cfg.Log.ErrorContext(ctx, "revoking a grant after code reuse failed", "request_id", logging.RequestID(ctx), "error", rerr)
-		}
-		b.deny.add(claims.GrantID)
-		b.cfg.Log.WarnContext(ctx, "authorization code reused; grant revoked", "request_id", logging.RequestID(ctx))
+		b.revoke(r, claims.GrantID, now, "authorization code reused; grant revoked")
 		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_grant", "the authorization code was already used"})
 		return
 	case err != nil:
 		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_grant", "the authorization code is invalid or expired"})
 		return
 	}
+	// The code is used up now: any binding failure below means it is being misused, so the grant
+	// it stands for is revoked, as for a reused code (RFC 9700 §4.5).
 	redirect := f.Get("redirect_uri")
+	var mismatch string
 	switch {
 	case pc.ClientID != client.ID():
-		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_grant", "the code was issued to another client"})
-		return
+		mismatch = "the code was issued to another client"
 	case redirect != pc.RedirectURI || client.RedirectAllowed(redirect) != nil:
-		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_grant", "redirect_uri does not match the authorization request"})
-		return
+		mismatch = "redirect_uri does not match the authorization request"
 	case !pkceMatches(f.Get("code_verifier"), pc.CodeChallenge):
-		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_grant", "code_verifier does not match the code challenge"})
+		mismatch = "code_verifier does not match the code challenge"
+	}
+	if mismatch != "" {
+		b.revoke(r, claims.GrantID, now, "authorization code redeemed with the wrong binding; grant revoked")
+		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_grant", mismatch})
 		return
 	}
 	access, err := b.cfg.Sealer.Seal(token.Access, token.Claims{GrantID: claims.GrantID, Subject: claims.Subject, IssuedAt: now, ExpiresAt: now.Add(AccessLifetime)})
@@ -119,6 +128,16 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 		"expires_in":   int(AccessLifetime.Seconds()),
 		"scope":        strings.Join(pc.Scopes, " "),
 	})
+}
+
+// revoke ends a grant (store and deny list) and logs why.
+func (b *Broker) revoke(r *http.Request, grantID string, now time.Time, why string) {
+	ctx := r.Context()
+	if err := b.cfg.Store.RevokeGrant(ctx, grantID, now); err != nil && !errors.Is(err, store.ErrNotFound) {
+		b.cfg.Log.ErrorContext(ctx, "revoking a grant failed", "request_id", logging.RequestID(ctx), "error", err)
+	}
+	b.deny.add(grantID)
+	b.cfg.Log.WarnContext(ctx, why, "request_id", logging.RequestID(ctx))
 }
 
 // pkceMatches checks S256 (RFC 7636 §4.6) in constant time; verifiers are 43–128 characters.

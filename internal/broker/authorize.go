@@ -111,8 +111,11 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 	case q.Get("response_type") != "code":
 		fail("unsupported_response_type", "only response_type=code is supported")
 		return
-	case q.Get("code_challenge") == "" || q.Get("code_challenge_method") != "S256":
+	case !validChallenge(q.Get("code_challenge")) || q.Get("code_challenge_method") != "S256":
 		fail("invalid_request", "PKCE with code_challenge_method=S256 is required")
+		return
+	case len(q.Get("state")) > maxState:
+		fail("invalid_request", "state is longer than 512 bytes")
 		return
 	case q.Get("resource") != "" && q.Get("resource") != b.cfg.Resource.String():
 		// A missing resource means ours (ADR-0005 §4).
@@ -142,6 +145,17 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true, Secure: b.cfg.SecureCookies, SameSite: http.SameSiteLaxMode})
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, target, http.StatusFound)
+}
+
+// maxState keeps the login cookie well under the browsers' 4 KB limit.
+const maxState = 512
+
+// validChallenge accepts an S256 challenge: the base64url (no padding) of 32 bytes, 43 characters.
+func validChallenge(c string) bool {
+	if len(c) != 43 {
+		return false
+	}
+	return strings.Trim(c, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_") == ""
 }
 
 // scopes returns the requested scopes, defaulting to the resource scope; unknown scopes fail.
