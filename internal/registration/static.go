@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+
+	"github.com/corker/mcp-authproxy/internal/idp"
 )
 
 // Static-client file limits.
@@ -74,7 +76,12 @@ func parseStatic(data []byte, dir string, readFile func(string) ([]byte, error),
 	dec.DisallowUnknownFields()
 	var f staticFile
 	if err := dec.Decode(&f); err != nil {
-		return nil, fmt.Errorf("static clients: %w", err)
+		// encoding/json's unknown-field error is untyped and quotes the name from the input; its
+		// offset is the end of the object, so neither is reported.
+		if strings.HasPrefix(err.Error(), "json: unknown field ") {
+			return nil, errors.New("static clients: unknown field (field names must match the documented format)")
+		}
+		return nil, fmt.Errorf("static clients: %w", idp.JSONError(err))
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return nil, errors.New("static clients: unexpected data after the JSON object")

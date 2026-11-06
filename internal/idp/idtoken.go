@@ -55,7 +55,8 @@ func VerifySignature(ctx context.Context, raw string, keys KeySource, allowed []
 	}
 	tok, err := jwt.ParseSigned(raw, algs)
 	if err != nil {
-		return nil, fmt.Errorf("idp: JWT: %w", err)
+		// go-jose's parse errors can quote header bytes, and a JWT here may be a credential.
+		return nil, errors.New("idp: JWT is malformed or its alg is not allowed")
 	}
 	if len(tok.Headers) != 1 {
 		return nil, errors.New("idp: JWT must have one signature")

@@ -73,7 +73,7 @@ func ParseJWKS(data []byte) (jose.JSONWebKeySet, error) {
 		Keys []json.RawMessage `json:"keys"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return jose.JSONWebKeySet{}, fmt.Errorf("idp: JWKS: %w", err)
+		return jose.JSONWebKeySet{}, fmt.Errorf("idp: JWKS: %w", JSONError(err))
 	}
 	var set jose.JSONWebKeySet
 	for _, r := range raw.Keys {

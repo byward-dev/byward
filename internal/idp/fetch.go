@@ -91,7 +91,7 @@ func (f *Fetcher) getOnce(ctx context.Context, endpoint string, dst any) (retry 
 			fmt.Errorf("GET %s: status %d", redactURL(endpoint), resp.StatusCode)
 	}
 	if err := json.Unmarshal(body, dst); err != nil {
-		return false, fmt.Errorf("GET %s: %w", redactURL(endpoint), err)
+		return false, fmt.Errorf("GET %s: %w", redactURL(endpoint), JSONError(err))
 	}
 	return false, nil
 }
