@@ -36,7 +36,7 @@ func credentialFile(t *testing.T, mode os.FileMode) string {
 
 // The upstream gets the operator's credential and the identity assertion, each in its own header,
 // and a client can supply neither, in any spelling (ADR-0016 §4, §7).
-func TestTheUpstreamGetsTheOperatorCredentialBesideTheAssertion(t *testing.T) {
+func TestTheUpstreamGetsTheOperatorCredentialAndTheAssertionNeverTheClientsCopies(t *testing.T) {
 	for _, tc := range []struct {
 		name, credHeader, assertionHeader string
 		env                               []string

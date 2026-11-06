@@ -30,9 +30,9 @@ func TestNoUpstreamCredentialByDefault(t *testing.T) {
 	}
 }
 
-// shown fails the test if any setting, as --print-config and the startup log show it, contains
+// neverShown fails the test if any setting, as --print-config and the startup log show it, contains
 // the credential.
-func shown(t *testing.T, c *Config) {
+func neverShown(t *testing.T, c *Config) {
 	t.Helper()
 	for _, v := range c.Values.Effective() {
 		if strings.Contains(v.Display(), "k-123") {
@@ -61,7 +61,7 @@ func TestTheUpstreamCredentialFileFillsTheChosenHeaderAndIsRedacted(t *testing.T
 			if c.UpstreamCredential != tc.want || c.UpstreamCredentialHeader != tc.wantHeader {
 				t.Fatalf("header %q", c.UpstreamCredentialHeader)
 			}
-			shown(t, c)
+			neverShown(t, c)
 		})
 	}
 }
@@ -76,7 +76,7 @@ func TestWithoutAuthenticationTheCredentialMayUseAuthorization(t *testing.T) {
 	if c.UpstreamCredential != "Bearer k-123" || c.UpstreamCredentialHeader != "Authorization" {
 		t.Fatalf("header %q", c.UpstreamCredentialHeader)
 	}
-	shown(t, c)
+	neverShown(t, c)
 }
 
 // What cannot work refuses to start, and no error shows the credential.
@@ -106,7 +106,7 @@ func TestUpstreamCredentialSettingsRefuseWhatCannotWork(t *testing.T) {
 			"one header value on one line, without control characters"},
 		{"surrounding white space", " k-123", []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
 			"the credential starts or ends with white space"},
-		{"too long", strings.Repeat("k", maxUpstreamCredential+1), []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
+		{"too long", "k-123" + strings.Repeat("k", maxUpstreamCredential-4), []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
 			"the credential is longer than 4096 bytes"},
 		{"a credential set inline, not from a file", "", []string{"BYWARD_UPSTREAM_CREDENTIAL=k-123", "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
 			"secrets must come from a file (BYWARD_UPSTREAM_CREDENTIAL_FILE)"},
