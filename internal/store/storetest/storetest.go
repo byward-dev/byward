@@ -38,6 +38,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		{"UnknownGrantIsNotFound", unknownGrantIsNotFound},
 		{"IncompleteGrantsAndCutOffsAreInvalid", incompleteGrantsAndCutOffsAreInvalid},
 		{"StoredValuesAreCopies", storedValuesAreCopies},
+		{"NilScopesComeBackNil", nilScopesComeBackNil},
 		{"CodeIsConsumedOnce", codeIsConsumedOnce},
 		{"ConcurrentConsumeHasOneWinner", concurrentConsumeHasOneWinner},
 		{"ExpiredCodeIsNotFound", expiredCodeIsNotFound},
@@ -182,6 +183,23 @@ func incompleteGrantsAndCutOffsAreInvalid(t *testing.T, s store.Store) {
 	wantErr(t, "RevokeSubject without a subject", s.RevokeSubject(ctx, "", t0, t0), store.ErrInvalid)
 	if revs, err := s.Revocations(ctx); err != nil || len(revs) != 0 {
 		t.Fatalf("revocations = %+v, %v; want none", revs, err)
+	}
+}
+
+// A nil slice is returned as nil, not as an empty one: callers that compare with reflect.DeepEqual
+// or encode JSON (null versus []) see the same value from every adapter.
+func nilScopesComeBackNil(t *testing.T, s store.Store) {
+	g := grant("g1", "tid:alice")
+	g.Scopes = nil
+	mustCreate(t, s, g)
+	if got, err := s.Grant(ctx, "g1"); err != nil || got.Scopes != nil {
+		t.Fatalf("Grant Scopes = %#v (%v), want nil", got.Scopes, err)
+	}
+	c := pendingCode("g1")
+	c.Scopes = nil
+	must(t, s.PutCode(ctx, c))
+	if got, err := s.ConsumeCode(ctx, "g1", t0); err != nil || got.Scopes != nil {
+		t.Fatalf("ConsumeCode Scopes = %#v (%v), want nil", got.Scopes, err)
 	}
 }
 

@@ -132,8 +132,9 @@ type RefreshToken struct {
 type RefreshTokens interface {
 	// PutRefreshToken stores t. An existing hash is ErrExists; an unknown grant ErrNotFound.
 	PutRefreshToken(ctx context.Context, t RefreshToken) error
-	// RefreshToken returns the token with this hash; an unknown one, or one with
-	// IdleExpiresAt <= now, is ErrNotFound.
+	// RefreshToken returns the token with this hash; an unknown one, one with
+	// IdleExpiresAt <= now, or one whose grant's Epoch is older than the store's current epoch
+	// (the store was restored since, ADR-0007 §9) is ErrNotFound.
 	RefreshToken(ctx context.Context, hash [sha256.Size]byte, now time.Time) (RefreshToken, error)
 }
 
