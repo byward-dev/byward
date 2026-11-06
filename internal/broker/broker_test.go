@@ -199,6 +199,7 @@ type env struct {
 	sealer *token.Sealer
 	cfg    Config // as passed to New
 	idpBox *token.Box
+	keyDir string // the broker's sealing keys; a test may rotate them (rotateKeys)
 	fake   *fakeidp.IdP
 	reg    *registry
 	now    time.Time
@@ -225,19 +226,25 @@ func (s *syncBuffer) String() string {
 	return s.b.String()
 }
 
-func keyRing(t *testing.T) *token.KeyRing {
+// keyRing writes one sealing key, k1, into a new directory and loads it.
+func keyRing(t *testing.T) (*token.KeyRing, string) {
 	t.Helper()
 	dir := t.TempDir()
-	k := make([]byte, token.KeySize)
-	_, _ = rand.Read(k)
-	if err := os.WriteFile(filepath.Join(dir, "k1"), []byte(base64.StdEncoding.EncodeToString(k)), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	addKey(t, dir, "k1")
 	r, err := token.LoadKeyRing(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return r
+	return r, dir
+}
+
+func addKey(t *testing.T, dir, id string) {
+	t.Helper()
+	k := make([]byte, token.KeySize)
+	_, _ = rand.Read(k)
+	if err := os.WriteFile(filepath.Join(dir, id), []byte(base64.StdEncoding.EncodeToString(k)), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // newEnv builds a broker against the fake IdP; opts adjust its Config before New.
@@ -253,7 +260,8 @@ func newEnv(t *testing.T, opts ...func(*Config)) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ring := keyRing(t)
+	ring, keyDir := keyRing(t)
+	e.keyDir = keyDir
 	res, _ := url.Parse(resourceID)
 	e.sealer, _ = token.NewSealer(ring, resourceID)
 	login, _ := token.NewBox(ring, "login", clock)
@@ -268,20 +276,27 @@ func newEnv(t *testing.T, opts ...func(*Config)) *env {
 	for _, o := range opts {
 		o(&cfg)
 	}
-	e.cfg = cfg
-	e.b, err = New(cfg)
+	e.start(t, cfg)
+	return e
+}
+
+// start builds the broker from cfg, syncs its deny list and serves it, as the proxy does at
+// startup.
+func (e *env) start(t *testing.T, cfg Config) {
+	t.Helper()
+	b, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.b.Deny().Sync(context.Background()); err != nil {
+	if err := b.Deny().Sync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	e.cfg, e.b = cfg, b
 	mux := http.NewServeMux()
 	e.b.Register(mux)
 	// The logging middleware gives each request the ID that error pages show as the reference.
 	e.srv = httptest.NewTLSServer(logging.Middleware(slog.New(slog.NewTextHandler(io.Discard, nil)), mux))
 	t.Cleanup(e.srv.Close)
-	return e
 }
 
 // send runs r against the broker without following redirects.
