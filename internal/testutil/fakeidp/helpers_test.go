@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
@@ -267,22 +266,4 @@ func equalJSON(a, b any) bool {
 	return string(ja) == string(jb)
 }
 
-// fakeClock is a settable clock for WithClock.
-type fakeClock struct {
-	mu  sync.Mutex
-	now time.Time
-}
-
-func (c *fakeClock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.now
-}
-
-func (c *fakeClock) Advance(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.now = c.now.Add(d)
-}
-
-func newClock() *fakeClock { return &fakeClock{now: time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)} }
+func newClock() *Clock { return NewClock(time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)) }

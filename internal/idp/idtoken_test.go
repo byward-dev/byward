@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -122,5 +123,22 @@ func TestStringsClaim(t *testing.T) {
 	}
 	if StringsClaim(c, "s") != nil || StringsClaim(c, "missing") != nil {
 		t.Error("non-array claim returned values")
+	}
+}
+
+type unavailableKeys struct{}
+
+func (unavailableKeys) Key(context.Context, string) (*jose.JSONWebKey, error) {
+	return nil, fmt.Errorf("down: %w", ErrKeysUnavailable)
+}
+
+func TestVerifyJWTPassesKeyOutagesThrough(t *testing.T) {
+	f := fakeidp.New(t, fakeidp.Generic)
+	raw := f.Mint(map[string]any{"iss": "i", "aud": "c", "sub": "s"})
+	_, err := VerifyJWT(context.Background(), raw, unavailableKeys{}, TokenRules{
+		Issuer: func(string, map[string]any) error { return nil }, ClientID: "c",
+		Algs: []jose.SignatureAlgorithm{jose.RS256}, Now: func() time.Time { return fixedNow }})
+	if !errors.Is(err, ErrKeysUnavailable) {
+		t.Fatalf("err = %v", err)
 	}
 }

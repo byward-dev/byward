@@ -442,3 +442,52 @@ func TestConcurrentFirstLoginsWaitForReadiness(t *testing.T) {
 		}
 	}
 }
+
+// outageEnv is an env on a step clock whose adapter does not back off between JWKS retries, so an
+// outage fails fast.
+func outageEnv(t *testing.T) (*env, *fakeidp.Clock) {
+	t.Helper()
+	clock := fakeidp.NewClock(now())
+	e := newEnv(t, Config{Now: clock.Now}, fakeidp.WithClock(clock.Now))
+	e.p.fetch.Backoff = 0
+	return e, clock
+}
+
+func TestRefreshWhileJWKSIsDownIsUnavailable(t *testing.T) {
+	e, clock := outageEnv(t)
+	_, tok, err := callback(t, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.fake.RotateKeys(t) // the refreshed tokens are signed with a kid the cache does not have
+	e.fake.Set(fakeidp.WithJWKSUnavailable(true))
+	clock.Advance(idp.MinJWKSRefresh)
+	_, _, err = e.p.Refresh(context.Background(), tok.RefreshToken)
+	var ie *idp.Error
+	if !errors.As(err, &ie) || ie.Class != idp.Unavailable {
+		t.Fatalf("err = %#v, want Unavailable", err)
+	}
+}
+
+// checkAccessToken directly: the refresh path above fails on the ID token first.
+func TestAccessTokenCheckWhileJWKSIsDownIsUnavailableWithoutHint(t *testing.T) {
+	e, clock := outageEnv(t)
+	access := func() string {
+		c := v2Claims(e.fake.TenantID(), e.client.ID)
+		c["scp"] = "access_as_user"
+		return e.fake.Mint(c)
+	}
+	if err := e.p.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.p.checkAccessToken(context.Background(), access()); err != nil { // warms the key cache
+		t.Fatal(err)
+	}
+	e.fake.RotateKeys(t)
+	e.fake.Set(fakeidp.WithJWKSUnavailable(true))
+	clock.Advance(idp.MinJWKSRefresh)
+	var ie *idp.Error
+	if err := e.p.checkAccessToken(context.Background(), access()); !errors.As(err, &ie) || ie.Class != idp.Unavailable || ie.OperatorHint != "" {
+		t.Fatalf("keys down: %#v", err)
+	}
+}

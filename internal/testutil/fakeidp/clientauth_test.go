@@ -8,7 +8,7 @@ import (
 )
 
 // authFixture is an Entra IdP with a confidential client and a resource API, on a fixed clock.
-func authFixture(t *testing.T, c Client) (*fixture, string, *fakeClock) {
+func authFixture(t *testing.T, c Client) (*fixture, string, *Clock) {
 	t.Helper()
 	clock := newClock()
 	api := Client{ID: NewGUID()}

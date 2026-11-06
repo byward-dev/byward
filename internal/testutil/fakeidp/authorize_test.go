@@ -293,3 +293,19 @@ func TestGenericErrorsCarryNoEntraHeaders(t *testing.T) {
 		t.Fatalf("generic error_description = %q", q.Get("error_description"))
 	}
 }
+
+func TestWithJWKSUnavailableServes503UntilCleared(t *testing.T) {
+	f := newFixture(t, Entra, WithJWKSUnavailable(true))
+	resp, err := http.Get(f.idp.JWKSURL(f.tenant))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	f.idp.Set(WithJWKSUnavailable(false))
+	if len(f.jwks(t)) == 0 {
+		t.Fatal("JWKS empty after recovery")
+	}
+}

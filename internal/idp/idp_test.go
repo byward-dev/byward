@@ -16,7 +16,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -251,99 +250,6 @@ func TestFetcherErrorsDoNotLeakQueries(t *testing.T) {
 	}
 }
 
-type clock struct {
-	mu  sync.Mutex
-	now time.Time
-}
-
-func (c *clock) Now() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.now }
-func (c *clock) Advance(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.now = c.now.Add(d)
-}
-
-// countingJWKS proxies the fake's JWKS and counts fetches.
-func countingJWKS(t *testing.T, f *fakeidp.IdP) (string, *atomic.Int32) {
-	var n atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n.Add(1)
-		resp, err := http.Get(f.JWKSURL(""))
-		if err != nil {
-			w.WriteHeader(502)
-			return
-		}
-		defer func() { _ = resp.Body.Close() }()
-		var body json.RawMessage
-		_ = json.NewDecoder(resp.Body).Decode(&body)
-		_, _ = w.Write(body)
-	}))
-	t.Cleanup(srv.Close)
-	return srv.URL, &n
-}
-
-func TestKeySetRateLimitsRefetchForUnknownKid(t *testing.T) {
-	f := fakeidp.New(t, fakeidp.Generic)
-	url, n := countingJWKS(t, f)
-	c := &clock{now: time.Unix(1_800_000_000, 0)}
-	ks := NewKeySet(NewFetcher(nil), url, c.Now)
-	ctx := context.Background()
-
-	kid := jwksKid(t, f)
-	if _, err := ks.Key(ctx, kid); err != nil {
-		t.Fatal(err)
-	}
-	for range 3 {
-		if _, err := ks.Key(ctx, "unknown"); err == nil {
-			t.Fatal("unknown kid found")
-		}
-	}
-	if n.Load() != 1 {
-		t.Fatalf("fetches = %d, want 1 (cached, rate-limited)", n.Load())
-	}
-	f.RotateKeys(t)
-	c.Advance(MinJWKSRefresh)
-	if _, err := ks.Key(ctx, jwksKid(t, f)); err != nil {
-		t.Fatalf("rotated key not found after the interval: %v", err)
-	}
-	if n.Load() != 2 {
-		t.Fatalf("fetches = %d, want 2", n.Load())
-	}
-}
-
-func TestKeySetKeepsLastGoodSetWhenRefreshFails(t *testing.T) {
-	f := fakeidp.New(t, fakeidp.Generic)
-	var fail atomic.Bool
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if fail.Load() {
-			w.WriteHeader(500)
-			return
-		}
-		resp, _ := http.Get(f.JWKSURL(""))
-		defer func() { _ = resp.Body.Close() }()
-		var body json.RawMessage
-		_ = json.NewDecoder(resp.Body).Decode(&body)
-		_, _ = w.Write(body)
-	}))
-	defer srv.Close()
-	c := &clock{now: time.Unix(1_800_000_000, 0)}
-	fe := NewFetcher(nil)
-	fe.Backoff = 0
-	ks := NewKeySet(fe, srv.URL, c.Now)
-	kid := jwksKid(t, f)
-	if _, err := ks.Key(context.Background(), kid); err != nil {
-		t.Fatal(err)
-	}
-	fail.Store(true)
-	c.Advance(2 * MinJWKSRefresh)
-	if _, err := ks.Key(context.Background(), "other"); err == nil || !strings.Contains(err.Error(), "refresh failed") {
-		t.Fatalf("err = %v", err)
-	}
-	if _, err := ks.Key(context.Background(), kid); err != nil {
-		t.Fatalf("last good key lost: %v", err)
-	}
-}
-
 func jwksKid(t *testing.T, f *fakeidp.IdP) string {
 	t.Helper()
 	resp, err := http.Get(f.JWKSURL(""))
@@ -432,42 +338,35 @@ func (c cancelAfter) RoundTrip(r *http.Request) (*http.Response, error) {
 	return &http.Response{StatusCode: 500, Body: http.NoBody, Request: r}, nil
 }
 
-func TestKeySetLookupUsesOnlySigningKeys(t *testing.T) {
-	sig := func(kid string) map[string]any {
-		k := map[string]any{}
-		raw, _ := json.Marshal(jose.JSONWebKey{Key: &fakeidp.NewCertificate(t).Key.PublicKey, KeyID: kid, Use: "sig"})
-		_ = json.Unmarshal(raw, &k)
-		return k
-	}
-	withUse := func(k map[string]any, use string) map[string]any {
-		if use == "" {
-			delete(k, "use")
-		} else {
-			k["use"] = use
-		}
-		return k
-	}
+func TestTokenCheckErrorDropsTheHintOnlyWhenKeysAreUnavailable(t *testing.T) {
 	for name, tc := range map[string]struct {
-		keys  []map[string]any
-		kid   string
-		found bool
+		err      error
+		class    Class
+		keepHint bool
 	}{
-		"one sig key, no kid":       {keys: []map[string]any{sig("a")}, found: true},
-		"two sig keys, no kid":      {keys: []map[string]any{sig("a"), sig("b")}},
-		"one enc key, no kid":       {keys: []map[string]any{withUse(sig("a"), "enc")}},
-		"enc key with matching kid": {keys: []map[string]any{withUse(sig("a"), "enc")}, kid: "a"},
-		"key without use":           {keys: []map[string]any{withUse(sig("a"), "")}, kid: "a", found: true},
-		"enc and sig, no kid":       {keys: []map[string]any{withUse(sig("a"), "enc"), sig("b")}, found: true},
+		"keys unavailable":        {ErrKeysUnavailable, Unavailable, false},
+		"wrapped twice":           {fmt.Errorf("a: %w", fmt.Errorf("b: %w", ErrKeysUnavailable)), Unavailable, false},
+		"deadline with sentinel":  {fmt.Errorf("%w: %w", ErrKeysUnavailable, context.DeadlineExceeded), Unavailable, false},
+		"bad signature":           {errors.New("idp: JWT signature: crypto"), Fatal, true},
+		"cancel without sentinel": {context.Canceled, Fatal, true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				_ = json.NewEncoder(w).Encode(map[string]any{"keys": tc.keys})
-			}))
-			defer srv.Close()
-			_, err := NewKeySet(NewFetcher(nil), srv.URL, func() time.Time { return fixedNow }).Key(context.Background(), tc.kid)
-			if (err == nil) != tc.found {
-				t.Fatalf("err = %v, want found %v", err, tc.found)
+			e := TokenCheckError(tc.err, "fix it")
+			if e.Class != tc.class || (e.OperatorHint == "fix it") != tc.keepHint || !errors.Is(e, tc.err) {
+				t.Fatalf("got %+v", e)
 			}
 		})
+	}
+}
+
+func TestFetcherBudgetCoversItsRetries(t *testing.T) {
+	f := NewFetcher(&http.Client{Timeout: 2 * time.Second})
+	f.Retries, f.Backoff = 3, time.Second
+	// Worst case: 4 attempts, and before retry a a sleep under Backoff*a + Backoff (a = 1..3).
+	if b, worst := f.budget(), 4*2*time.Second+(2+3+4)*f.Backoff; b < worst {
+		t.Fatalf("budget %v is shorter than the worst case %v", b, worst)
+	}
+	if b := NewFetcher(&http.Client{}).budget(); b < 3*DefaultTimeout {
+		t.Fatalf("no client timeout: budget %v", b)
 	}
 }

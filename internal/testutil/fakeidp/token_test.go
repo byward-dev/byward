@@ -304,14 +304,14 @@ func TestEntraRefreshRotatesTokenKeepsSubAndDropsNonce(t *testing.T) {
 func TestRefreshFailures(t *testing.T) {
 	other := Client{ID: NewGUID(), Secrets: []string{testSecret}}
 	for name, tc := range map[string]struct {
-		setup func(f *fixture, clock *fakeClock)
+		setup func(f *fixture, clock *Clock)
 		form  func(rt string) url.Values
 		code  int
 	}{
-		"expired":  {setup: func(_ *fixture, c *fakeClock) { c.Advance(91 * 24 * time.Hour) }, code: 700082},
-		"revoked":  {setup: func(f *fixture, _ *fakeClock) { f.idp.RevokeRefreshTokens() }, code: 50173},
+		"expired":  {setup: func(_ *fixture, c *Clock) { c.Advance(91 * 24 * time.Hour) }, code: 700082},
+		"revoked":  {setup: func(f *fixture, _ *Clock) { f.idp.RevokeRefreshTokens() }, code: 50173},
 		"unknown":  {form: func(string) url.Values { return refreshForm("nope") }, code: 70000},
-		"injected": {setup: func(f *fixture, _ *fakeClock) { f.idp.Set(FailToken(GrantRefreshToken, &MFARequired)) }, code: 50076},
+		"injected": {setup: func(f *fixture, _ *Clock) { f.idp.Set(FailToken(GrantRefreshToken, &MFARequired)) }, code: 50076},
 		"other client": {form: func(rt string) url.Values {
 			form := refreshForm(rt)
 			form.Set("client_id", other.ID)
