@@ -46,6 +46,9 @@ only**; upgrade to it to get a fix. Older minors get no backports.
 
 ## Scope
 
+What the proxy guarantees, its threat model and known gaps: [docs/security-posture.md](docs/security-posture.md).
+
+
 In scope: this repository's code, its release artifacts (binaries, container image), and the
 documented default configuration.
 
