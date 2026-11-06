@@ -3,7 +3,7 @@
 // and issues proxy tokens at /token, acting itself as an OAuth client of the IdP (ADR-0005).
 //
 // Slice 1.2 scope: static clients, no consent page yet (slice 1.4: no release ships without it),
-// no access gate yet (slice 1.5, the Gate hook), no refresh tokens yet (slice 1.6).
+// the access gate as a Gate (slice 1.5), no refresh tokens yet (slice 1.6).
 package broker
 
 import (
@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/corker/mcp-authproxy/internal/audit"
 	"github.com/corker/mcp-authproxy/internal/idp"
 	"github.com/corker/mcp-authproxy/internal/registration"
 	"github.com/corker/mcp-authproxy/internal/store"
@@ -31,12 +32,20 @@ const (
 	LoginLifetime  = 10 * time.Minute
 )
 
-// Gate is the access gate (ADR-0015), checked before a grant is created. Slice 1.5 provides it.
+// Gate is the access gate (ADR-0015), checked before a grant is created. A refusal is an error
+// implementing Denial; any other error is a failure to decide (500), never shown as a denial.
 type Gate interface {
 	Allow(ctx context.Context, id idp.Identity) error
 }
 
-// AllowAll lets every signed-in user through; it is the gate until slice 1.5.
+// Denial is a Gate refusal; DeniedRule names the rule, for the audit log.
+type Denial interface {
+	error
+	DeniedRule() string
+}
+
+// AllowAll lets every signed-in user through; New uses it when Config.Gate is nil. The proxy wires
+// the access gate built by gate.New.
 type AllowAll struct{}
 
 // Allow implements Gate.
@@ -59,7 +68,12 @@ type Config struct {
 	// SecureCookies is false only in development mode on loopback http (ADR-0010 §10).
 	SecureCookies bool
 	Log           *slog.Logger
-	Now           func() time.Time
+	// Audit receives the security events (ADR-0021 §3); nil discards them.
+	Audit *audit.Log
+	// ObserveIdP, when set, is told each IdP call's operation, outcome (success, rejected,
+	// unavailable) and duration, for metrics.
+	ObserveIdP func(operation, outcome string, d time.Duration)
+	Now        func() time.Time
 }
 
 // Broker is the authorization server.
@@ -79,6 +93,9 @@ func New(cfg Config) (*Broker, error) {
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
+	}
+	if cfg.ObserveIdP == nil {
+		cfg.ObserveIdP = func(string, string, time.Duration) {}
 	}
 	return &Broker{cfg: cfg, deny: newDenyList()}, nil
 }

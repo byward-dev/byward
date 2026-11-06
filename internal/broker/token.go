@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/corker/mcp-authproxy/internal/audit"
 	"github.com/corker/mcp-authproxy/internal/logging"
 	"github.com/corker/mcp-authproxy/internal/store"
 	"github.com/corker/mcp-authproxy/internal/token"
@@ -130,6 +131,7 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 		b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not issue a token"})
 		return
 	}
+	b.cfg.Audit.Record(r, audit.Event{Name: audit.TokenIssued, Outcome: audit.Success, ClientID: client.ID(), UserKey: claims.Subject, GrantID: claims.GrantID})
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -167,6 +169,7 @@ func (b *Broker) revoke(r *http.Request, grantID string, now time.Time, why stri
 	}
 	b.deny.add(grantID)
 	b.cfg.Log.WarnContext(ctx, why, "request_id", logging.RequestID(ctx))
+	b.cfg.Audit.Record(r, audit.Event{Name: audit.GrantRevoked, Outcome: audit.Success, Reason: why, GrantID: grantID})
 }
 
 // pkceMatches checks S256 (RFC 7636 §4.6) in constant time; verifiers are 43–128 characters.
@@ -179,6 +182,8 @@ func pkceMatches(verifier, challenge string) bool {
 }
 
 func (b *Broker) tokenFail(w http.ResponseWriter, r *http.Request, e tokenError) {
+	// The caller may not have authenticated, so the event is rate-limited per source.
+	b.cfg.Audit.RecordUnauthenticated(r, audit.Event{Name: audit.TokenRejected, Outcome: audit.Failure, Reason: e.code})
 	if e.status == http.StatusUnauthorized {
 		w.Header().Set("WWW-Authenticate", `Basic realm="token"`)
 	}

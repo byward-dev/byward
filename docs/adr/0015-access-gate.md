@@ -36,10 +36,15 @@ Nobody ships 403 step-up.
 2. **Denials:** at login, our error page ("you don't have access — ask your operator"); at refresh,
    `invalid_grant`, so the client signs in again and lands on that page. No 403 is ever used for a
    denial; with a single scope in v0.1 there is no step-up either.
+   _Clarified 2026-11-06 (slice 1.5):_ no MCP response uses 403 for a denial; the browser denial
+   page is 403, since MCP clients never parse it and the reasoning above is about MCP responses.
 3. **Empty gate:** for single-tenant Entra it allows every user of the tenant, with a warning at every
    startup and in `doctor` ("all users of tenant X can sign in; guests too unless restricted"). For
    Google and multi-tenant IdPs an empty gate refuses to start unless an explicit flag allows it,
    logged at every start.
+   _Amended 2026-11-06 (slice 1.5):_ a multi-tenant (`organizations`) Entra gate is never empty, even
+   with the flag: ADR-0012 §2 allows `organizations` only with a non-empty `tid` allowlist. The flag
+   applies to Google and generic OIDC IdPs only.
 4. **Setup guide:** Entra "Assignment required" plus app roles first, noting that Global
    Administrators bypass assignment at the Entra level (our role gate still applies) and that "Default
    Access" carries no `roles`.

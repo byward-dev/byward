@@ -61,16 +61,7 @@ func signIn(t *testing.T, e *env, l idp.Login) url.Values {
 	if !strings.HasPrefix(u, Authority+"/") {
 		t.Fatalf("login URL %s is not under %s", u, Authority)
 	}
-	resp, err := e.fake.HTTPClient().Get(u)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	loc, err := url.Parse(resp.Header.Get("Location"))
-	if err != nil || resp.StatusCode != http.StatusFound {
-		t.Fatalf("authorize: status %d, %v", resp.StatusCode, err)
-	}
-	return loc.Query()
+	return e.fake.Authorize(t, u)
 }
 
 func callback(t *testing.T, e *env) (idp.Identity, idp.Tokens, error) {

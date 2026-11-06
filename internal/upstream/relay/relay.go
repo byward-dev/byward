@@ -28,9 +28,27 @@ var stripped = map[string]bool{"Authorization": true, "Forwarded": true, "Origin
 
 var errUpstreamRefused = errors.New("upstream refused the proxy and the request id is unknown")
 
+// Option configures the relay.
+type Option func(*options)
+
+type options struct {
+	inject func(context.Context, http.Header)
+}
+
+// WithTraceContext sets how the relay writes trace context onto the upstream request (the
+// server wires the tracing package's propagator). Without it nothing is written, and an inbound
+// `traceparent` passes unchanged.
+func WithTraceContext(inject func(context.Context, http.Header)) Option {
+	return func(o *options) { o.inject = inject }
+}
+
 // New returns a handler relaying each request to target, the upstream's MCP endpoint URL: the
 // request path is replaced by target's path; the query is kept.
-func New(log *slog.Logger, target *url.URL) http.Handler {
+func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
+	o := options{inject: func(context.Context, http.Header) {}}
+	for _, f := range opts {
+		f(&o)
+	}
 	t := *target
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
@@ -40,6 +58,8 @@ func New(log *slog.Logger, target *url.URL) http.Handler {
 			strip(pr.Out.Header)
 			// A token in the query never reaches the upstream, with or without authentication.
 			pr.Out.URL.RawQuery = withoutAccessToken(pr.Out.URL.RawQuery)
+			// Our span's trace context toward the upstream; the body (`params._meta`) is never touched.
+			o.inject(pr.In.Context(), pr.Out.Header)
 		},
 		Transport: &http.Transport{
 			Proxy:                 http.ProxyFromEnvironment,

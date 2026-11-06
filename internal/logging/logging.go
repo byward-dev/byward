@@ -29,6 +29,12 @@ var allowed = map[string]bool{
 	// and still pass the bearer-shaped redaction.
 	"upstream": true, "process": true, "user_key": true, "line": true, "truncated": true,
 	"suppressed": true, "exit_code": true, "signal": true,
+	// Audit stream (ADR-0021 §3; docs/reference/observability.md). Grant and key IDs are internal
+	// identifiers, never credentials.
+	"log.type": true, "schema_version": true, "event": true, "outcome": true, "client_id": true,
+	"grant_id": true, "key_id": true, "idp": true,
+	// IdP errors (ADR-0021 §7): the IdP's error code and its own trace and correlation IDs.
+	"idp_error_code": true, "trace_id": true, "correlation_id": true,
 }
 
 // New returns a logger writing JSON (or text) to w.
@@ -90,11 +96,15 @@ func withRequestID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, ctxKey{}, id)
 }
 
-// NewRequestID returns 16 random bytes in hex.
+// newRequestID returns a random (version 4) UUID. Entra takes it as `client-request-id` only in
+// GUID form and returns it as `correlation_id`, so one ID matches across both logs (ADR-0021 §2).
 func newRequestID() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	h := hex.EncodeToString(b)
+	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
 
 // Middleware gives each request an ID and logs one line per request. The query string is never
@@ -106,10 +116,10 @@ func Middleware(log *slog.Logger, next http.Handler) http.Handler {
 		r = r.WithContext(withRequestID(r.Context(), id))
 		// Echoed so users and operators can quote it; inbound IDs are not trusted (no trusted proxies yet).
 		w.Header().Set("X-Request-Id", id)
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		rec := NewStatusRecorder(w)
 		next.ServeHTTP(rec, r)
-		attrs := []any{"request_id", id, "method", r.Method, "path", r.URL.Path, "status", rec.status,
-			"duration_ms", time.Since(start).Milliseconds(), "remote_ip", remoteIP(r)}
+		attrs := []any{"request_id", id, "method", r.Method, "path", r.URL.Path, "status", rec.Status(),
+			"duration_ms", time.Since(start).Milliseconds(), "remote_ip", RemoteIP(r)}
 		if m := r.Header.Get("Mcp-Method"); m != "" {
 			attrs = append(attrs, "mcp_method", m)
 		}
@@ -117,9 +127,9 @@ func Middleware(log *slog.Logger, next http.Handler) http.Handler {
 	})
 }
 
-// remoteIP is the TCP peer. Forwarded headers are not trusted until trusted proxies are
+// RemoteIP is the TCP peer. Forwarded headers are not trusted until trusted proxies are
 // configurable (ADR-0018 §6).
-func remoteIP(r *http.Request) string {
+func RemoteIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
@@ -127,24 +137,34 @@ func remoteIP(r *http.Request) string {
 	return host
 }
 
-type statusRecorder struct {
+// StatusRecorder records the final status a handler writes (200 if it writes none). The request
+// log, metrics and server spans all read the status through it.
+type StatusRecorder struct {
 	http.ResponseWriter
 	status      int
 	wroteHeader bool
 }
 
-func (s *statusRecorder) WriteHeader(code int) {
-	// 1xx informational responses (other than 101) precede the final status.
+// NewStatusRecorder wraps w.
+func NewStatusRecorder(w http.ResponseWriter) *StatusRecorder {
+	return &StatusRecorder{ResponseWriter: w, status: http.StatusOK}
+}
+
+// Status is the final status written so far.
+func (s *StatusRecorder) Status() int { return s.status }
+
+// WriteHeader records code. 1xx informational responses (other than 101) precede the final status.
+func (s *StatusRecorder) WriteHeader(code int) {
 	if !s.wroteHeader && (code < 100 || code > 199 || code == http.StatusSwitchingProtocols) {
 		s.status, s.wroteHeader = code, true
 	}
 	s.ResponseWriter.WriteHeader(code)
 }
 
-func (s *statusRecorder) Write(b []byte) (int, error) {
+func (s *StatusRecorder) Write(b []byte) (int, error) {
 	s.wroteHeader = true
 	return s.ResponseWriter.Write(b)
 }
 
 // Unwrap lets http.ResponseController reach the underlying writer (flush, deadlines).
-func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
+func (s *StatusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }

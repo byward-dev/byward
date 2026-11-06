@@ -3,23 +3,23 @@
 package origin
 
 import (
-	"log/slog"
 	"net/http"
 	"strings"
 
-	"github.com/corker/mcp-authproxy/internal/logging"
+	"github.com/corker/mcp-authproxy/internal/audit"
 )
 
 // Hosts allows only the given hosts (host[:port], compared case-insensitively; default ports
-// :80 and :443 are ignored). Mismatches get 421 Misdirected Request and are logged.
-func Hosts(log *slog.Logger, allowed []string, next http.Handler) http.Handler {
+// :80 and :443 are ignored). Mismatches get 421 Misdirected Request and an audit event, rate-limited
+// per source because the sender is not authenticated.
+func Hosts(rec *audit.Log, allowed []string, next http.Handler) http.Handler {
 	set := map[string]bool{}
 	for _, h := range allowed {
 		set[hostKey(h)] = true
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !set[hostKey(r.Host)] {
-			log.WarnContext(r.Context(), "host rejected", "request_id", logging.RequestID(r.Context()), "host", r.Host)
+			rec.RecordUnauthenticated(r, audit.Event{Name: audit.HostRejected, Outcome: audit.Failure, Host: r.Host})
 			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
 			return
 		}
@@ -47,7 +47,7 @@ const (
 // Origins enforces an exact allowlist of `Origin` values (scheme://host[:port], lower case). A
 // missing Origin passes (non-browser MCP clients send none); multiple Origin headers, `null` or an
 // unlisted value get 403. A listed origin gets CORS headers, and its preflight is answered with 204.
-func Origins(log *slog.Logger, allowed []string, next http.Handler) http.Handler {
+func Origins(rec *audit.Log, allowed []string, next http.Handler) http.Handler {
 	set := map[string]bool{}
 	for _, o := range allowed {
 		set[strings.ToLower(o)] = true
@@ -63,7 +63,7 @@ func Origins(log *slog.Logger, allowed []string, next http.Handler) http.Handler
 			if len(vals) > 1 {
 				o = "multiple"
 			}
-			log.WarnContext(r.Context(), "origin rejected", "request_id", logging.RequestID(r.Context()), "origin", o)
+			rec.RecordUnauthenticated(r, audit.Event{Name: audit.OriginRejected, Outcome: audit.Failure, Origin: o})
 			// Claude Code and VS Code treat any 403 as "needs auth", so the body names the real fix.
 			http.Error(w, "origin "+o+" is not allowed; the operator can add it to MCP_AUTHPROXY_ALLOWED_ORIGINS", http.StatusForbidden)
 			return
