@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -430,5 +432,74 @@ func TestOwnOriginIsAlwaysAllowed(t *testing.T) {
 	}
 	if res := e.do(t, "POST", "/mcp", nil, map[string]string{"Origin": "https://mcp.example.com.evil.example"}); res.StatusCode != http.StatusForbidden {
 		t.Fatalf("look-alike origin: got %d", res.StatusCode)
+	}
+}
+
+func TestNewNamesTheSettingAtFault(t *testing.T) {
+	cases := []struct {
+		name, setting string
+		value         func(t *testing.T) string
+	}{
+		{"empty keys dir", "MCP_AUTHPROXY_KEYS_DIR", func(t *testing.T) string { return t.TempDir() }},
+		{"malformed clients file", "MCP_AUTHPROXY_STATIC_CLIENTS_FILE", func(t *testing.T) string {
+			p := filepath.Join(t.TempDir(), "clients.json")
+			if err := os.WriteFile(p, []byte(`{"clients":`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			environ := append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp")
+			for i, kv := range environ {
+				if strings.HasPrefix(kv, c.setting+"=") {
+					environ[i] = c.setting + "=" + c.value(t)
+				}
+			}
+			cfg, _, err := config.Load(nil, environ, os.ReadFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil))); err == nil || !strings.HasPrefix(err.Error(), c.setting+":") {
+				t.Fatalf("err = %v, want it to start with %q", err, c.setting+":")
+			}
+		})
+	}
+}
+
+func TestNewServesTheBrokerRoutes(t *testing.T) {
+	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.Handler)
+	t.Cleanup(ts.Close)
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	get := func(path string) *http.Response {
+		r, _ := http.NewRequest("GET", ts.URL+path, nil)
+		r.Host = "mcp.example.com"
+		res, err := client.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = res.Body.Close() })
+		return res
+	}
+	res := get("/.well-known/oauth-authorization-server")
+	var m struct{ Issuer string }
+	if err := json.NewDecoder(res.Body).Decode(&m); err != nil || res.StatusCode != 200 || m.Issuer != "https://mcp.example.com" {
+		t.Fatalf("metadata: %d issuer=%q err=%v", res.StatusCode, m.Issuer, err)
+	}
+	// Without PKCE the broker answers itself (no IdP call): a redirect back to the registered client.
+	res = get("/authorize?client_id=test-app&redirect_uri=http%3A%2F%2F127.0.0.1%2Fcallback&response_type=code")
+	loc, _ := url.Parse(res.Header.Get("Location"))
+	if res.StatusCode != http.StatusFound || !strings.HasPrefix(loc.String(), "http://127.0.0.1/callback?") ||
+		loc.Query().Get("error") != "invalid_request" || loc.Query().Get("iss") != "https://mcp.example.com" {
+		t.Fatalf("authorize: %d %s", res.StatusCode, loc)
 	}
 }
