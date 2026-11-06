@@ -42,6 +42,10 @@ func main() {
 	}
 	stubborn, mcp := false, false
 	for _, a := range os.Args[1:] {
+		if v, ok := strings.CutPrefix(a, "-version="); ok {
+			version = v
+			continue
+		}
 		if v, ok := strings.CutPrefix(a, "-init="); ok {
 			initMode = v
 			continue
@@ -173,8 +177,9 @@ type message struct {
 //
 // A response from the client is matched to an "ask" by id; others are kept for "last".
 // Notifications are ignored.
-// initMode is how serveMCP answers initialize: "" (normally), error, exit or hold.
-var initMode string
+// initMode is how serveMCP answers initialize: "" (normally), error, exit or hold. version is the
+// protocol version its InitializeResult names (flag -version=; "none" leaves it out).
+var initMode, version = "", "2025-11-25"
 
 func serveMCP() {
 	out := bufio.NewWriter(os.Stdout)
@@ -236,8 +241,12 @@ func serveMCP() {
 				write(message{ID: m.ID, Error: json.RawMessage(`{"code":-32602,"message":"Unsupported protocol version"}`)})
 				continue
 			}
-			result(m.ID, map[string]any{"protocolVersion": "2025-11-25", "capabilities": map[string]any{},
-				"serverInfo": map[string]any{"name": "fakestdio", "version": "0"}})
+			res := map[string]any{"protocolVersion": version, "capabilities": map[string]any{},
+				"serverInfo": map[string]any{"name": "fakestdio", "version": "0"}}
+			if version == "none" {
+				delete(res, "protocolVersion")
+			}
+			result(m.ID, res)
 		case "echo":
 			write(message{ID: m.ID, Result: m.Params})
 		case "line":

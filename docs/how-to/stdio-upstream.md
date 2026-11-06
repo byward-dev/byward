@@ -100,6 +100,7 @@ so per-user processes pile up until the idle timeout or the per-user limit recla
 | The upstream process crashes, exits or closes its stdout | Open requests get a JSON-RPC error (`-32603`, `upstream process exited`), later ones `404`. The process is not restarted; one that closed stdout but keeps running is stopped after 5 s |
 | The upstream asks the client something (sampling, elicitation, roots) while no stream is open | The proxy answers the upstream with a JSON-RPC error (`-32603`, `client not connected`) |
 | `DELETE` with the session | `204`; the process is stopped |
+| An `MCP-Protocol-Version` header other than the version the upstream's `InitializeResult` negotiated for this MCP session | `400` with a JSON-RPC error; no header at all passes (2025-11-25 transports, Protocol Version Header) |
 
 Messages the upstream sends during a request go out on that request's stream. Messages outside any
 request go to the session's GET stream; a second GET replaces the first. Until a GET stream is open,
