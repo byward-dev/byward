@@ -230,10 +230,12 @@ Decided values cite their ADR; everything else is **proposed — decided per fea
 | Discovery, registration, token | < 10 s, p99 < 2 s | Proposed (Claude times out at 10 s) |
 | Refresh | < 30 s, p99 < 5 s | Proposed (Claude: 30 s) |
 | Outbound IdP / CIMD fetch | 5 s, 2 jittered retries; CIMD ≤ 5 KB, metadata ≤ 64 KB | Proposed (CIMD -03 §10.11: 5 KB) |
-| `http.Server` | ReadHeaderTimeout 10 s, IdleTimeout 120 s, per-request write deadlines for SSE | Proposed |
-| Request body | 4 MB MCP route, 64 KB OAuth endpoints | Proposed |
-| Shutdown | ≤ 25 s (K8s grace 30 s) | Proposed |
-| Authorization code / consent state | 60 s single-use / 10 min | Proposed |
+| `http.Server` | ReadHeaderTimeout 10 s, ReadTimeout 30 s, IdleTimeout 120 s, MaxHeaderBytes 64 KiB, per-request write deadlines for streams | **Decided**, ADR-0018 |
+| Request body | 8 MiB MCP route, 64 KiB OAuth endpoints, 4 KiB consent | **Decided**, ADR-0018 |
+| Shutdown | ≤ 25 s (K8s grace 30 s) | **Decided**, ADR-0018 |
+| Proxy overhead | ≤ 2 ms p99 added latency per MCP request (measured ~84 µs on a laptop) | **Decided**, ADR-0024 |
+| Test lanes | `check` ≤ 90 s warm laptop, ≤ 3 min CI; `test:integration` ≤ 10 min | **Decided**, ADR-0024 |
+| Authorization code / consent state | 60 s single-use / 10 min | **Decided**, ADR-0006 / ADR-0010 |
 
 ## Compatibility matrix
 
@@ -246,10 +248,11 @@ Each feature names the cells it touches and adds a test per cell; untested cells
 | Spec revision | 2025-11-25, 2026-07-28 |
 | IdP | Entra (single tenant, organizations), Keycloak, Okta, Auth0, Google |
 | Upstream | HTTP, stdio |
-| Platform | linux/amd64+arm64, darwin, windows |
+| Platform | linux/amd64+arm64 (supported), darwin (development only); no Windows in v0.1 (ADR-0019) |
 
-CI runs the MCP conformance suite (`--suite auth`) on both revisions with the fake IdP's entra
-and keycloak profiles; MCP clients get manual or recorded smoke tests.
+CI runs MCP conformance `server` on both revisions through the proxy and `authorization` against the
+broker (ADR-0024); open-source clients run for real in CI, closed clients through the client
+simulator plus a manual release check.
 
 ## Feature × lens map
 
