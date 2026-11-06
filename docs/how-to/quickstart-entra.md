@@ -238,7 +238,8 @@ again with the new `--callback-port`); the registered `redirect_uris` need no ch
 proxy ignores the port on loopback.
 
 Claude Code asks for `offline_access`, so it receives a refresh token and the consent page says "up
-to 30 days".
+to 30 days". It renews its access token before the hour is up, without opening the browser (checked
+with Claude Code 2.1.311 against a real tenant on 2026-11-06).
 
 Source: Claude Code MCP documentation, "Use pre-configured OAuth credentials" and "Use a fixed OAuth
 callback port" (<https://code.claude.com/docs/en/mcp>).
