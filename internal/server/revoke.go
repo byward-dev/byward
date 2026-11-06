@@ -10,7 +10,7 @@ import (
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/idp/entra"
-	"github.com/byward-dev/byward/internal/store/sqlite"
+	"github.com/byward-dev/byward/internal/store"
 )
 
 // ErrNotAUserKey is RevokeUser's answer to a key that is not an IdP user key.
@@ -32,18 +32,18 @@ func RevokeUser(ctx context.Context, cfg *config.Config, log *slog.Logger, key s
 		return "", ErrNotAUserKey
 	}
 	return user, revoke(ctx, cfg, log, audit.Event{Name: audit.GrantRevoked, Outcome: audit.Success, Reason: reasonRevokeUser, UserKey: user},
-		func(st *sqlite.Store, now time.Time) error { return st.RevokeSubject(ctx, user, now, now) })
+		func(st store.Grants, now time.Time) error { return st.RevokeSubject(ctx, user, now, now) })
 }
 
 // RevokeAll is the operator's revoke-all, for incident response: the same as RevokeUser for every
 // user at once. Everyone signs in again.
 func RevokeAll(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
 	return revoke(ctx, cfg, log, audit.Event{Name: audit.GrantRevoked, Outcome: audit.Success, Reason: reasonRevokeAll},
-		func(st *sqlite.Store, now time.Time) error { return st.RevokeAll(ctx, now, now) })
+		func(st store.Grants, now time.Time) error { return st.RevokeAll(ctx, now, now) })
 }
 
 // revoke opens the configured store, runs do with the current time, and audits e once it is stored.
-func revoke(ctx context.Context, cfg *config.Config, log *slog.Logger, e audit.Event, do func(*sqlite.Store, time.Time) error) error {
+func revoke(ctx context.Context, cfg *config.Config, log *slog.Logger, e audit.Event, do func(store.Grants, time.Time) error) error {
 	if cfg.NoAuth {
 		return errors.New("revocation needs the broker's store; it is off with BYWARD_INSECURE_NO_AUTH")
 	}

@@ -83,10 +83,12 @@ type Grants interface {
 	// cut-off check and the insert are one atomic step, so a grant never outlives a RevokeSubject or
 	// RevokeAll that should have covered it.
 	//
-	// SQL adapters must serialize CreateGrant and RevokeSubject per subject: under READ COMMITTED
-	// each can miss the other's uncommitted row and both commit (write skew). PostgreSQL: take
-	// pg_advisory_xact_lock(hashtext(subject)) first in both, or run them SERIALIZABLE and retry
-	// on 40001. SQLite: one writer, and both start with BEGIN IMMEDIATE.
+	// SQL adapters must serialize CreateGrant with RevokeSubject per subject, and with RevokeAll for
+	// every subject: under READ COMMITTED each can miss the other's uncommitted row and both commit
+	// (write skew). PostgreSQL: CreateGrant and RevokeSubject take pg_advisory_xact_lock(
+	// hashtext(subject)) and pg_advisory_xact_lock_shared(<revoke-all key>), RevokeAll takes
+	// pg_advisory_xact_lock(<revoke-all key>); or run all three SERIALIZABLE and retry on 40001.
+	// SQLite: one writer, and all three start with BEGIN IMMEDIATE.
 	CreateGrant(ctx context.Context, g Grant) (Grant, error)
 	// Grant returns the grant, or ErrNotFound. It does not check ExpiresAt.
 	Grant(ctx context.Context, id string) (Grant, error)

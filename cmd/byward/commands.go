@@ -22,11 +22,11 @@ type command struct {
 
 var commands = map[string]command{
 	"revoke-user": {
-		usage: "byward revoke-user <tid:oid>\n      end one user's access: their grants go, and every proxy refuses their tokens within seconds",
+		usage: "byward revoke-user <tid:oid>\n      end one user's access: their grants go, and every proxy refuses their tokens within seconds;\n      works while the proxy runs",
 		run:   revokeUser,
 	},
 	"revoke-all": {
-		usage: "byward revoke-all --yes\n      end every user's access at once (incident response)",
+		usage: "byward revoke-all --yes\n      end every user's access at once (incident response); works while the proxy runs",
 		run:   revokeAll,
 	},
 }
@@ -39,7 +39,7 @@ func commandsUsage() string {
 	}
 	slices.Sort(names)
 	var b strings.Builder
-	b.WriteString("\nCommands (read the same BYWARD_* environment as the proxy and work while it runs):\n")
+	b.WriteString("\nCommands (read the same BYWARD_* environment as the proxy):\n")
 	for _, n := range names {
 		fmt.Fprintf(&b, "  %s\n", commands[n].usage)
 	}

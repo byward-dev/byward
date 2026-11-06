@@ -126,6 +126,40 @@ func TestRevokeSubjectRacingCreateGrantAcrossProcessesLeavesNoCoveredGrant(t *te
 	}
 }
 
+// The operator's revoke-all runs as a second process beside the proxy: whatever the interleaving, a
+// grant created before its cut-off never survives it.
+func TestRevokeAllRacingCreateGrantAcrossProcessesLeavesNoCoveredGrant(t *testing.T) {
+	dir, counter := t.TempDir(), filepath.Join(t.TempDir(), "writes")
+	proxy, operator := open(t, dir, counter), open(t, dir, counter)
+	const rounds = 100
+	for i := range rounds {
+		id := fmt.Sprintf("tid:u%d", i)
+		g := grant(id, id)
+		g.CreatedAt = t0.Add(time.Duration(i) * time.Hour) // each round's cut-off covers only its own grant
+		g.ExpiresAt = g.CreatedAt.Add(time.Hour)
+		before := g.CreatedAt.Add(time.Minute)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			<-start
+			if _, err := proxy.CreateGrant(ctx, g); err != nil && !errors.Is(err, store.ErrRevoked) {
+				t.Errorf("CreateGrant %s: %v", id, err)
+			}
+		})
+		wg.Go(func() {
+			<-start
+			if err := operator.RevokeAll(ctx, before, before); err != nil {
+				t.Errorf("RevokeAll: %v", err)
+			}
+		})
+		close(start)
+		wg.Wait()
+		if _, err := proxy.Grant(ctx, id); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("grant %s survived revoke-all: %v", id, err)
+		}
+	}
+}
+
 // Operators back the database up by this file name (docs/how-to/state.md).
 func TestTheDatabaseFileOperatorsBackUpIsNamedBywardDB(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state")
@@ -662,13 +696,21 @@ func TestPingAnswersWhileOpenAndFailsAfterClose(t *testing.T) {
 }
 
 // Only ” and 'all' are scopes: the database itself refuses anything else, so no write path can
+// Only ” and 'all' are scopes: the database itself refuses anything else, so no write path can
 // invent a revocation that covers more than it names.
 func TestTheRevocationScopeIsCheckedByTheDatabase(t *testing.T) {
 	s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
-	if _, err := s.db.Exec("INSERT INTO revocations (grant_id, subject, scope, before, at) VALUES ('', '', 'everyone', 1, 1)"); err == nil {
-		t.Fatal("an unknown scope was stored")
+	insert := func(scope string) error {
+		_, err := s.db.Exec("INSERT INTO revocations (grant_id, subject, scope, before, at) VALUES ('', '', ?, 1, 1)", scope)
+		return err
 	}
-	if revs, err := s.Revocations(ctx); err != nil || len(revs) != 0 {
-		t.Fatalf("revocations = %+v, %v; want none", revs, err)
+	if err := insert("all"); err != nil { // the same statement with a valid scope: proves the insert itself works
+		t.Fatalf("a valid scope was refused: %v", err)
+	}
+	if err := insert("everyone"); err == nil || !strings.Contains(err.Error(), "CHECK constraint failed") {
+		t.Fatalf("an unknown scope: %v, want the CHECK constraint to refuse it", err)
+	}
+	if revs, err := s.Revocations(ctx); err != nil || len(revs) != 1 || !revs[0].All {
+		t.Fatalf("revocations = %+v, %v; want only the valid one", revs, err)
 	}
 }
