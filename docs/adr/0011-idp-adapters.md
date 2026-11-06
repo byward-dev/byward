@@ -46,9 +46,11 @@ rate-limit them (`oidc/jwks.go`).
    discovery is lazy with bounded retries and never caches errors; the last good discovery and JWKS
    stay in memory if a refresh fails; readiness is false until discovery succeeds. Presets compare
    issuers exactly as configured and startup checks them against the discovered `issuer`.
+   _Amended by ADR-0026:_ the key set is our own (go-jose only).
 8. **Not in v0.1:** GitHub and other non-OIDC providers; several IdPs per proxy (the per-IdP callback
    keeps it possible); PAR, DPoP and IdP logout toward the IdP; on-disk discovery or JWKS caches.
 9. **Libraries:** `coreos/go-oidc` v3.21.0, `golang.org/x/oauth2` v0.37.0, `go-jose` v4.1.9.
+   _Amended by ADR-0026:_ only `go-jose` v4.1.6.
 
 ## Consequences
 
