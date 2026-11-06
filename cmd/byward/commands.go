@@ -26,7 +26,7 @@ var commands = map[string]command{
 		run:   revokeUser,
 	},
 	"revoke-all": {
-		usage: "byward revoke-all --yes\n      the same for every user (incident response)",
+		usage: "byward revoke-all --yes\n      end every user's access at once (incident response)",
 		run:   revokeAll,
 	},
 }
