@@ -339,6 +339,7 @@ func TestAClientThatGivesUpMidRefreshKeepsTheIdPsNewTokens(t *testing.T) {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-time.After(10 * time.Second):
+				t.Error("the client's cancellation never reached the gate")
 				return errors.New("the client never left")
 			}
 		})
