@@ -108,6 +108,11 @@ type Grants interface {
 	// UpdateGrant sets a grant's ExpiresAt, for example when its authorization code is redeemed.
 	// An unknown grant is ErrNotFound; an ExpiresAt not after CreatedAt is ErrInvalid.
 	UpdateGrant(ctx context.Context, id string, expiresAt time.Time) error
+	// SetIdPTokens replaces a grant's sealed IdP tokens, for a refresh that renewed them at the IdP
+	// but failed afterwards (the IdP may have revoked the old refresh token). An unknown or revoked
+	// grant is ErrNotFound and nothing is written, so it never restores a deleted grant; empty
+	// tokens are ErrInvalid.
+	SetIdPTokens(ctx context.Context, id string, sealed []byte) error
 	// RevokeSubject is revoke-user (ADR-0006 §9): it records Revocation{Subject: subject, Before:
 	// before, At: at} and deletes the subject's grants created before `before`, with their codes,
 	// refresh tokens and IdP tokens. It records the cut-off even when the subject has no grants. An

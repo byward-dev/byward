@@ -10,6 +10,7 @@
 package sqlite
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -382,6 +383,23 @@ func (s *Store) UpdateGrant(ctx context.Context, id string, expiresAt time.Time)
 		}
 		_, err = tx.ExecContext(ctx, "UPDATE grants SET expires_at = ? WHERE id = ?", micros(expiresAt), id)
 		return err
+	})
+}
+
+// SetIdPTokens implements store.Grants.
+func (s *Store) SetIdPTokens(ctx context.Context, id string, sealed []byte) error {
+	if len(sealed) == 0 {
+		return store.ErrInvalid
+	}
+	return s.write(ctx, func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, "UPDATE grants SET idp_tokens = ? WHERE id = ?", sealed, id)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil || n == 0 {
+			return cmp.Or(err, store.ErrNotFound)
+		}
+		return nil
 	})
 }
 

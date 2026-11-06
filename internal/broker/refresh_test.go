@@ -308,6 +308,21 @@ func TestIdPOutageAnswers503AndKeepsTheRefreshToken(t *testing.T) {
 	}
 }
 
+// A refresh that renewed the IdP tokens but could not rotate ours keeps the IdP's new tokens, so
+// an IdP that revokes a redeemed refresh token does not force a new sign-in on the retry (#92).
+func TestARotationFailureKeepsTheIdPsNewTokens(t *testing.T) {
+	e := newEnv(t)
+	e.fake.Set(fakeidp.WithSingleUseRefreshTokens(true))
+	rt := e.offline(t)["refresh_token"].(string)
+	e.st.rotateDown.Store(true)
+	res, body := e.refresh(t, rt, "")
+	wantOAuthError(t, res, body, http.StatusServiceUnavailable, "temporarily_unavailable")
+	e.st.rotateDown.Store(false)
+	if res, body := e.refresh(t, rt, ""); res.StatusCode != http.StatusOK {
+		t.Fatalf("the retry after the store recovered: %d %v, want 200 without a new sign-in", res.StatusCode, body)
+	}
+}
+
 func TestStoreOutageAnswers503WithRetryAfter(t *testing.T) {
 	e := newEnv(t)
 	body := e.offline(t)
@@ -640,14 +655,13 @@ func TestClientRevocationIsAudited(t *testing.T) {
 // A gate that cannot decide (not a Denial) is a server error on refresh, as at sign-in: the grant
 // and our refresh token survive, and nothing is audited as a denial. The IdP's new tokens are
 // dropped, so an IdP with single-use refresh tokens makes the next refresh a sign-in again.
-func TestGateFailureOnRefreshKeepsTheGrant(t *testing.T) {
+func TestGateFailureOnRefreshKeepsTheGrantAndTheIdPsNewTokens(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		singleUse bool
-		next      int
 	}{
-		{"IdP refresh token reusable", false, http.StatusOK},
-		{"IdP refresh token single use", true, http.StatusBadRequest},
+		{"IdP refresh token reusable", false},
+		{"IdP refresh token single use", true}, // the IdP revoked the token the grant held (#92)
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var gateErr error
@@ -667,11 +681,8 @@ func TestGateFailureOnRefreshKeepsTheGrant(t *testing.T) {
 			}
 			gateErr = nil
 			res, body = e.refresh(t, rt, "")
-			if res.StatusCode != tc.next {
-				t.Fatalf("refresh after the gate recovered: %d %v, want %d", res.StatusCode, body, tc.next)
-			}
-			if tc.singleUse && (body["error"] != "invalid_grant" || !e.grantGone(t, firstGrant(e.st))) {
-				t.Fatalf("with a spent IdP refresh token: %v, want invalid_grant and the grant revoked (sign in again)", body)
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("refresh after the gate recovered: %d %v, want 200 without a new sign-in", res.StatusCode, body)
 			}
 		})
 	}

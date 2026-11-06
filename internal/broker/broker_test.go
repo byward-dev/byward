@@ -55,9 +55,9 @@ type memStore struct {
 	mu   sync.Mutex
 	ids  []string
 	down atomic.Bool // every lookup and write fails, as in a store outage
-	// revokeDown fails only RevokeGrant; reuseOnRotate makes RotateRefreshToken report reuse
-	// without recording it, as when another replica won the race.
-	revokeDown, reuseOnRotate atomic.Bool
+	// revokeDown fails only RevokeGrant, rotateDown only RotateRefreshToken; reuseOnRotate makes
+	// RotateRefreshToken report reuse without recording it, as when another replica won the race.
+	revokeDown, rotateDown, reuseOnRotate atomic.Bool
 }
 
 var errStoreDown = errors.New("store down")
@@ -84,7 +84,7 @@ func (m *memStore) RevokeGrant(ctx context.Context, id string, at time.Time) err
 }
 
 func (m *memStore) RotateRefreshToken(ctx context.Context, r store.RotateRequest) error {
-	if m.down.Load() {
+	if m.down.Load() || m.rotateDown.Load() {
 		return errStoreDown
 	}
 	if m.reuseOnRotate.Load() {
