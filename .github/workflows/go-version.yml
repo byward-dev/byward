@@ -1,6 +1,8 @@
-name: go-version
+name: pin-freshness
 
-# Dependabot cannot bump the Go pin in mise.toml; this flags newer Go releases weekly.
+# Dependabot cannot bump the Go pin in mise.toml, nor the test-lane pins that must move together
+# (the Playwright image with @playwright/test, the conformance Node image); this flags newer
+# releases of both weekly.
 on:
   schedule:
     - cron: "23 6 * * 1"
@@ -10,7 +12,7 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  go:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -18,3 +20,10 @@ jobs:
           persist-credentials: false
       # curl and jq come with the ubuntu-latest image; no Go or mise needed.
       - run: sh scripts/go-version-check.sh
+  test-pins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: sh scripts/test-pins-check.sh
