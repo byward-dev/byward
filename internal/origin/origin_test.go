@@ -107,3 +107,13 @@ func TestNoCORSWithoutOrigin(t *testing.T) {
 		t.Fatal("CORS headers without an Origin")
 	}
 }
+
+func TestOriginRejectionNamesTheFix(t *testing.T) {
+	r := httptest.NewRequest("POST", "/mcp", nil)
+	r.Header.Set("Origin", "https://evil.example")
+	w := httptest.NewRecorder()
+	Origins(quiet(), nil, ok).ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "MCP_AUTHPROXY_ALLOWED_ORIGINS") {
+		t.Fatalf("got %d %q", w.Code, w.Body)
+	}
+}

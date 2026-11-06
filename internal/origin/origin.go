@@ -64,7 +64,8 @@ func Origins(log *slog.Logger, allowed []string, next http.Handler) http.Handler
 				o = "multiple"
 			}
 			log.WarnContext(r.Context(), "origin rejected", "request_id", logging.RequestID(r.Context()), "origin", o)
-			http.Error(w, "origin not allowed", http.StatusForbidden)
+			// Claude Code and VS Code treat any 403 as "needs auth", so the body names the real fix.
+			http.Error(w, "origin "+o+" is not allowed; the operator can add it to MCP_AUTHPROXY_ALLOWED_ORIGINS", http.StatusForbidden)
 			return
 		}
 		h := w.Header()

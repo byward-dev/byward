@@ -124,7 +124,7 @@ const (
 )
 
 // Guard admits requests carrying a valid proxy token in `Authorization: Bearer`. Tokens in the
-// query string are ignored and `access_token` is removed before the request goes on; a token sent
+// query string are ignored (the relay removes `access_token` before the upstream sees it); a token sent
 // both ways gets 400.
 func Guard(m Metadata, v Validator, next http.Handler) http.Handler {
 	challenge := `Bearer resource_metadata="` + m.PathInsertedURL() + `", scope="` + m.Scope + `"`
@@ -135,10 +135,6 @@ func Guard(m Metadata, v Validator, next http.Handler) http.Handler {
 		if len(auth) > 1 || (inQuery && len(auth) > 0) {
 			writeError(w, http.StatusBadRequest, "", "invalid_request", "The token must be sent once, in the Authorization header")
 			return
-		}
-		if inQuery {
-			q.Del("access_token")
-			r.URL.RawQuery = q.Encode()
 		}
 		token, ok := bearer(auth)
 		if !ok {

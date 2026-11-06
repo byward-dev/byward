@@ -21,6 +21,9 @@ type Setting struct {
 	Help    string
 	Secret  bool // read only from a file: `<ENV>_FILE` or `--<name>-file`
 	Bool    bool
+	// Auth marks settings that configure authentication (IdP, broker); --insecure-no-auth refuses
+	// to start when any of them is set, so a half-configured production setup never runs open.
+	Auth bool
 }
 
 // Env is the setting's environment variable name.

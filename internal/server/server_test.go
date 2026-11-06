@@ -361,3 +361,66 @@ func TestServerSentEventsStreamThroughTheWholeChain(t *testing.T) {
 		t.Fatalf("first event not flushed through the middleware chain: %q %v", buf, err)
 	}
 }
+
+func TestNoAuthServesTheUpstreamWithoutMetadataOrChallenge(t *testing.T) {
+	up := fakeupstream.New()
+	t.Cleanup(up.Close)
+	cfg, _, err := config.Load(nil, []string{
+		"MCP_AUTHPROXY_INSECURE_NO_AUTH=true",
+		"MCP_AUTHPROXY_PUBLIC_URL=http://localhost:8080/mcp",
+		"MCP_AUTHPROXY_UPSTREAM_URL=" + up.URL + "/mcp",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(Handler(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), resource.NoTokens{}))
+	t.Cleanup(srv.Close)
+	do := func(method, path, host string, hdr map[string]string) *http.Response {
+		r, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(`{"jsonrpc":"2.0"}`))
+		r.Host = host
+		for k, v := range hdr {
+			r.Header.Set(k, v)
+		}
+		res, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+		return res
+	}
+	if res := do("POST", "/mcp", "localhost:8080", map[string]string{"Authorization": "Bearer anything"}); res.StatusCode != 200 || res.Header.Get("WWW-Authenticate") != "" {
+		t.Fatalf("anonymous POST: %d %q", res.StatusCode, res.Header.Get("WWW-Authenticate"))
+	}
+	if got, _ := up.Last(); got.Header.Get("Authorization") != "" {
+		t.Fatal("an inbound Authorization header reached the upstream")
+	}
+	for _, p := range []string{"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"} {
+		if res := do("GET", p, "localhost:8080", nil); res.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s: got %d, want 404 (no metadata without auth)", p, res.StatusCode)
+		}
+	}
+	if res := do("POST", "/mcp", "evil.example", nil); res.StatusCode != http.StatusMisdirectedRequest {
+		t.Fatalf("DNS rebinding Host: got %d", res.StatusCode)
+	}
+	if res := do("POST", "/mcp", "localhost:8080", map[string]string{"Origin": "https://evil.example"}); res.StatusCode != http.StatusForbidden {
+		t.Fatalf("foreign Origin: got %d", res.StatusCode)
+	}
+	// The conformance rebinding scenario sends the server's own origin and expects success.
+	if res := do("POST", "/mcp", "localhost:8080", map[string]string{"Origin": "http://localhost:8080"}); res.StatusCode != 200 {
+		t.Fatalf("own Origin: got %d", res.StatusCode)
+	}
+	do("POST", "/mcp?access_token=leak&x=1", "localhost:8080", nil)
+	if got, _ := up.Last(); strings.Contains(got.RawQuery, "access_token") || got.RawQuery != "x=1" {
+		t.Fatalf("query token reached the upstream: %q", got.RawQuery)
+	}
+}
+
+func TestOwnOriginIsAlwaysAllowed(t *testing.T) {
+	e := start(t)
+	if res := e.do(t, "POST", "/mcp", nil, map[string]string{"Origin": "https://mcp.example.com", "Authorization": "Bearer " + goodToken}); res.StatusCode != 200 {
+		t.Fatalf("same-origin request: got %d", res.StatusCode)
+	}
+	if res := e.do(t, "POST", "/mcp", nil, map[string]string{"Origin": "https://mcp.example.com.evil.example"}); res.StatusCode != http.StatusForbidden {
+		t.Fatalf("look-alike origin: got %d", res.StatusCode)
+	}
+}
