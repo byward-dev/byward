@@ -14,12 +14,14 @@ One Go binary, configured by environment variables.
 
 ## Development
 
-Requires [mise](https://mise.jdx.dev). Then:
+Requires [mise](https://mise.jdx.dev). Then install the tools CI uses and run the checks:
 
 ```sh
-mise install
+mise install go golangci-lint go:golang.org/x/tools/cmd/goimports
 mise run check
 ```
+
+Details, including why `azure-cli` is not needed here: [CONTRIBUTING.md](CONTRIBUTING.md#making-a-change).
 
 Release artifacts (image, archives, SBOMs) and how to verify them:
 [docs/reference/packaging.md](docs/reference/packaging.md).
