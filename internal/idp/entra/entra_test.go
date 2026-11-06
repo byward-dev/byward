@@ -49,6 +49,7 @@ func newEnv(t *testing.T, cfg Config, opts ...fakeidp.Option) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	p.fetch.Backoff = 0 // retries are idp's to test; here they would only add wall time
 	return &env{fake: fake, client: c, p: p}
 }
 

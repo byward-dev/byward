@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
@@ -57,19 +58,159 @@ type Store struct {
 
 var _ store.Store = (*Store)(nil)
 
-// Open opens (creating if needed) the database in opts.Dir, migrates it and checks for a restore.
-func Open(ctx context.Context, opts Options) (*Store, error) {
+// validate is what Open requires of the paths before touching the file system.
+func (opts Options) validate() (Options, error) {
 	if opts.Dir == "" {
 		opts.Dir = DefaultDir
 	}
 	if !filepath.IsAbs(opts.Dir) || !filepath.IsAbs(opts.CounterFile) {
-		return nil, errors.New("sqlite store: the state directory and the counter file must be absolute paths")
+		return opts, errors.New("sqlite store: the state directory and the counter file must be absolute paths")
 	}
 	if strings.Contains(opts.Dir, "?") {
-		return nil, errors.New("sqlite store: the state directory must not contain '?'")
+		return opts, errors.New("sqlite store: the state directory must not contain '?'")
 	}
 	if rel, err := filepath.Rel(opts.Dir, opts.CounterFile); err == nil && !strings.HasPrefix(rel, "..") {
-		return nil, errors.New("sqlite store: the counter file must be outside the state directory, or a backup of the directory hides restores")
+		return opts, errors.New("sqlite store: the counter file must be outside the state directory, or a backup of the directory hides restores")
+	}
+	return opts, nil
+}
+
+// CheckPaths catches, without creating or writing anything, the path mistakes that would stop
+// Open (for `byward check --offline`): the rules above; the state directory is a directory, or a
+// path MkdirAll can create; the database files in it are regular files when present; the counter
+// file's directory exists (Open does not create it, unless it is created with the state
+// directory); an existing counter file is readable and not corrupt. It is not an exact prediction
+// of Open: writability needs a write, and paths with ".." through symlinks are not modelled.
+func CheckPaths(opts Options) error {
+	opts, err := opts.validate()
+	if err != nil {
+		return err
+	}
+	switch fi, err := os.Stat(opts.Dir); {
+	case err == nil && !fi.IsDir():
+		return fmt.Errorf("sqlite store: state directory %s is not a directory", opts.Dir)
+	case err == nil:
+		for _, name := range []string{fileName, fileName + "-wal", fileName + "-shm"} {
+			f := filepath.Join(opts.Dir, name)
+			// Open creates the database through a symlink whose target's directory exists (O_CREATE);
+			// SQLite does not do that for its WAL and SHM files.
+			if err := regularIfPresent(f, name == fileName); err != nil {
+				return fmt.Errorf("sqlite store: database file %w", err)
+			}
+		}
+	case errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR):
+		if err := creatable(opts.Dir); err != nil {
+			return fmt.Errorf("sqlite store: state directory %s cannot be created: %w", opts.Dir, err)
+		}
+	default:
+		return fmt.Errorf("sqlite store: state directory: %w", err)
+	}
+	dir := filepath.Dir(opts.CounterFile)
+	fi, err := os.Stat(dir)
+	switch {
+	case errors.Is(err, os.ErrNotExist) && within(dir, opts.Dir):
+		// Open's MkdirAll of the state directory creates it first; creatable checked that above.
+	case errors.Is(err, os.ErrNotExist):
+		return fmt.Errorf("sqlite store: the counter file's directory %s does not exist; create it, the store does not", dir)
+	case err != nil:
+		return fmt.Errorf("sqlite store: counter file directory: %w", err)
+	case !fi.IsDir():
+		return fmt.Errorf("sqlite store: the counter file's directory %s is not a directory", dir)
+	}
+	if fi, err := os.Stat(opts.CounterFile); err == nil && !fi.Mode().IsRegular() {
+		return fmt.Errorf("sqlite store: counter file %s is not a regular file", opts.CounterFile)
+	}
+	_, _, err = readCounter(opts.CounterFile)
+	return err
+}
+
+// regularIfPresent refuses an entry at path that is not a regular file, or a symlink to nothing;
+// with creatable, a symlink to a missing file in an existing directory passes, as O_CREATE makes it.
+func regularIfPresent(path string, creatable bool) error {
+	fi, err := os.Lstat(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return nil
+	case err != nil:
+		return err
+	case fi.Mode()&os.ModeSymlink != 0:
+		if fi, err = os.Stat(path); err != nil {
+			if creatable && targetDirExists(path) {
+				return nil
+			}
+			return fmt.Errorf("%s is a symlink to nothing", path)
+		}
+	}
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("%s is not a regular file", path)
+	}
+	return nil
+}
+
+// maxLinks bounds the symlink chain targetDirExists follows, as the kernel's own limit does.
+const maxLinks = 40
+
+// targetDirExists reports whether the final target of a symlink chain is missing but its directory
+// exists, so that O_CREATE can make it; a loop or a longer chain does not count.
+func targetDirExists(link string) bool {
+	for range maxLinks {
+		target, err := os.Readlink(link)
+		if err != nil {
+			return false
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(link), target)
+		}
+		fi, err := os.Lstat(target)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			dir, err := os.Stat(filepath.Dir(target))
+			return err == nil && dir.IsDir()
+		case err != nil || fi.Mode()&os.ModeSymlink == 0:
+			return false
+		}
+		link = target
+	}
+	return false
+}
+
+// creatable reports whether os.MkdirAll could create the missing path: walking up to the nearest
+// entry that exists, that entry must be a directory (a symlink to one counts; a dangling symlink,
+// which Stat reports as missing but MkdirAll cannot replace, does not).
+func creatable(path string) error {
+	for p := path; ; p = filepath.Dir(p) {
+		fi, err := os.Lstat(p)
+		switch {
+		case errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR): // a parent decides
+			if parent := filepath.Dir(p); parent == p {
+				return nil
+			}
+			continue
+		case err != nil:
+			return err
+		case fi.Mode()&os.ModeSymlink != 0:
+			if fi, err = os.Stat(p); err != nil {
+				return fmt.Errorf("%s is a symlink to nothing", p)
+			}
+		}
+		if !fi.IsDir() {
+			return fmt.Errorf("%s is not a directory", p)
+		}
+		return nil
+	}
+}
+
+// within reports whether path is dir or below it.
+func within(dir, path string) bool {
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// Open opens (creating if needed) the database in opts.Dir, migrates it and checks for a restore.
+func Open(ctx context.Context, opts Options) (*Store, error) {
+	opts, err := opts.validate()
+	if err != nil {
+		return nil, err
 	}
 	if err := os.MkdirAll(opts.Dir, 0o700); err != nil {
 		return nil, fmt.Errorf("sqlite store: state directory: %w", err)

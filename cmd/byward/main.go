@@ -57,7 +57,7 @@ func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer) 
 		_, _ = io.WriteString(stdout, config.Usage()+commandsUsage())
 		return exitOK
 	case err != nil:
-		_, _ = fmt.Fprintf(stderr, "byward: configuration error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "byward: configuration error: %v%s\n", err, commandHint(args))
 		return exitConfig
 	case act.Version:
 		printVersion(stdout, act.JSON)

@@ -29,6 +29,18 @@ var commands = map[string]command{
 		usage: "byward revoke-all --yes\n      end every user's access at once (incident response); works while the proxy runs",
 		run:   revokeAll,
 	},
+	"check": {
+		usage: "byward check --offline [-- stdio-upstream-command [args...]]\n      validate the configuration, keys and static clients without network access; exit 0 or 2",
+		run:   checkOffline,
+	},
+	"doctor": {
+		usage: "byward doctor [--json] [-- stdio-upstream-command [args...]]\n      probe the running proxy as MCP clients do, and the IdP app; exit 0, or 4 (proxy), 8 (IdP), 12 (both)",
+		run:   runDoctor,
+	},
+	"init": {
+		usage: "byward init entra --tenant <tenant-id> [--public-url <url>] [--upstream-url <url>] [--secret-years 1|2]\n      print the az commands for the Entra app registration and a minimal env file; runs nothing",
+		run:   initIdP,
+	},
 }
 
 // commandsUsage is the commands block of --help, in name order.
@@ -46,9 +58,21 @@ func commandsUsage() string {
 	return b.String()
 }
 
-// operatorLoad reads the configuration a command runs with; a failure is reported and exits 2.
-func operatorLoad(environ []string, stderr io.Writer) (*config.Config, bool) {
-	cfg, _, err := config.Load(nil, environ, os.ReadFile)
+// commandHint explains a command that came after flags: commands go first and read settings from
+// the environment only.
+func commandHint(args []string) string {
+	for _, a := range args {
+		if _, ok := commands[a]; ok {
+			return fmt.Sprintf(" (to run %s, put it first: byward %s ...; commands take their settings from BYWARD_* environment variables, not flags)", a, a)
+		}
+	}
+	return ""
+}
+
+// operatorLoad reads the configuration a command runs with; args is nil, or "--" and a stdio
+// upstream command, as the proxy takes it. A failure is reported and exits 2.
+func operatorLoad(args, environ []string, stderr io.Writer) (*config.Config, bool) {
+	cfg, _, err := config.Load(args, environ, os.ReadFile)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "byward: configuration error: %v\n", err)
 		return nil, false
@@ -62,7 +86,7 @@ func revokeUser(ctx context.Context, args, environ []string, stdout, stderr io.W
 		_, _ = fmt.Fprintln(stderr, "byward: usage: byward revoke-user <tid:oid>")
 		return exitConfig
 	}
-	cfg, ok := operatorLoad(environ, stderr)
+	cfg, ok := operatorLoad(nil, environ, stderr)
 	if !ok {
 		return exitConfig
 	}
@@ -86,7 +110,7 @@ func revokeAll(ctx context.Context, args, environ []string, stdout, stderr io.Wr
 		_, _ = fmt.Fprintln(stderr, "byward: usage: byward revoke-all --yes (signs every user out)")
 		return exitConfig
 	}
-	cfg, ok := operatorLoad(environ, stderr)
+	cfg, ok := operatorLoad(nil, environ, stderr)
 	if !ok {
 		return exitConfig
 	}

@@ -61,74 +61,23 @@ type pinger interface{ Ping(context.Context) error }
 // store. Errors name the file or setting at fault.
 func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, err error) {
 	logPaths(cfg, log)
-	ring, err := token.LoadKeyRing(cfg.KeysDir)
-	if err != nil {
-		// No key generation (ADR-0007 §5): the operator creates the first key.
-		return nil, fmt.Errorf("BYWARD_KEYS_DIR: %s: %w (see docs/how-to/sealing-keys.md)", cfg.KeysDir, err)
-	}
-	resourceURL := cfg.PublicURL.String()
-	sealer, err := token.NewSealer(ring, resourceURL)
+	parts, err := loadAuthParts(cfg, nil)
 	if err != nil {
 		return nil, err
 	}
-	loginBox, err := token.NewBox(ring, "login", nil)
-	if err != nil {
-		return nil, err
-	}
-	idpBox, err := token.NewBox(ring, "idp-tokens", nil)
-	if err != nil {
-		return nil, err
-	}
-	consentBox, err := token.NewBox(ring, "consent", nil)
-	if err != nil {
-		return nil, err
-	}
-	sessionBox, err := token.NewBox(ring, "mcp-session", nil)
-	if err != nil {
-		return nil, err
-	}
-	checkSecret := secretfile.Check
-	if cfg.Dev {
-		checkSecret = func(string) error { return nil }
-	}
-	var loose []error // every loose secret file and the static clients' error, reported at once
-	for _, f := range cfg.Values.SecretFiles() {
-		if err := checkSecret(f.Path); err != nil {
-			loose = append(loose, fmt.Errorf("%s: %w", f.From, err))
-		}
-	}
-	jti := registration.NewMemoryJTICache(time.Now, maxJTIs)
-	static, err := registration.LoadStatic(cfg.StaticClientsFile, os.ReadFile, jti, registration.WithSecretCheck(checkSecret))
-	if err != nil {
-		loose = append(loose, fmt.Errorf("BYWARD_STATIC_CLIENTS_FILE: %s: %w (see docs/reference/static-clients.md)", cfg.StaticClientsFile, err))
-	}
-	if err := errors.Join(loose...); err != nil {
-		return nil, err
-	}
+	ring, sealer, provider, static, g := parts.ring, parts.sealer, parts.provider, parts.static, parts.gate
 	auditStartup(o.Audit, ring, static.IDs())
-	clientDeny, err := registration.NewDenylist(cfg.ClientDenylist)
-	if err != nil {
-		return nil, fmt.Errorf("BYWARD_CLIENT_DENYLIST: %w", err)
-	}
 	guard := ssrfguard.New(ssrfguard.Config{}) // every client-supplied URL (CIMD documents, jwks_uri) goes through it
 	clients := registration.Chain{static}
 	if cfg.CIMD {
 		clients = append(clients, newCIMDRegistry(registration.CIMDConfig{Fetch: guard, KeysClient: guard.HTTPClient(),
-			TrustedHosts: cfg.CIMDTrustedHosts, AllowedHosts: cfg.CIMDAllowedHosts, Deny: clientDeny, JTI: jti, Now: time.Now, Observe: o.Metrics.CIMDFetch}))
+			TrustedHosts: cfg.CIMDTrustedHosts, AllowedHosts: cfg.CIMDAllowedHosts, Deny: parts.clientDeny, JTI: parts.jti, Now: time.Now, Observe: o.Metrics.CIMDFetch}))
 	}
-	provider, err := entra.New(entra.Config{Tenant: cfg.EntraTenant, ClientID: cfg.EntraClientID,
-		ClientAuth: idp.ClientSecret(cfg.EntraClientSecret), RedirectURL: cfg.Issuer() + "/callback/" + idpName})
-	if err != nil {
-		return nil, fmt.Errorf("entra settings (BYWARD_ENTRA_*): %w", err)
+	for _, w := range parts.warnings {
+		w.log(log)
 	}
-	g, warnings, err := gate.New(gate.Rules{Tenants: cfg.GateTenants, Roles: cfg.GateRoles, Groups: cfg.GateGroups,
-		EmailDomains: cfg.GateEmailDomains, HostedDomains: cfg.GateHostedDomains},
-		gate.Options{IdP: gate.Entra, Tenant: cfg.EntraTenant, AllowEmpty: cfg.GateAllowEmpty})
-	if err != nil {
-		return nil, gateError(err)
-	}
-	for _, w := range warnings {
-		log.Warn(w)
+	if w, ok := expiryWarning(cfg, time.Now()); ok {
+		w.log(log)
 	}
 	st, err := wireStore(cfg, log, o.Audit)
 	if err != nil {
@@ -136,8 +85,8 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	}
 	var registrar broker.Registrar
 	if cfg.DCR {
-		dcr := registration.NewDCRRegistry(registration.DCRConfig{Store: st, KeysClient: guard.HTTPClient(), JTI: jti, Now: time.Now,
-			Scopes: []string{cfg.Scope, "offline_access"}, Deny: clientDeny})
+		dcr := registration.NewDCRRegistry(registration.DCRConfig{Store: st, KeysClient: guard.HTTPClient(), JTI: parts.jti, Now: time.Now,
+			Scopes: []string{cfg.Scope, "offline_access"}, Deny: parts.clientDeny})
 		clients, registrar = append(clients, dcr), dcr
 	}
 	defer func() {
@@ -147,7 +96,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	}()
 	b, err := newBroker(broker.Config{Issuer: cfg.Issuer(), Origin: cfg.Origin(), Resource: cfg.PublicURL, Scope: cfg.Scope,
 		IdPName: idpName, IdPLabel: "Microsoft Entra", IdPScopes: provider.Scope(), IdP: provider, Clients: clients, CIMD: cfg.CIMD, Registrar: registrar, ObserveRegistration: o.Metrics.DCRRegistration,
-		Store: st, Sealer: sealer, LoginBox: loginBox, IdPTokenBox: idpBox, ConsentBox: consentBox, Gate: g,
+		Store: st, Sealer: sealer, LoginBox: parts.loginBox, IdPTokenBox: parts.idpBox, ConsentBox: parts.consentBox, Gate: g,
 		UpstreamName: cfg.ResourceName, ScopeText: cfg.ScopeDescription, OperatorName: cfg.OperatorName,
 		SecureCookies: cfg.PublicURL.Scheme == "https", Log: log,
 		Audit: o.Audit, Limiter: ratelimit.New(cfg.OAuthRateLimits, maxRateLimitKeys, time.Now, o.Metrics.RateLimited),
@@ -167,16 +116,130 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	if err != nil {
 		return nil, err
 	}
-	if cfg.ScopeDescription == "" {
-		log.Warn("consent page uses generic wording", "setting", "BYWARD_SCOPE_DESCRIPTION",
-			"reason", "set it to say in plain words what the "+cfg.Scope+" scope lets an app do (ADR-0010 §4)")
-	}
 	log.Info("broker ready", "reason", "keys "+fmt.Sprint(len(ring.KeyIDs()))+", signing with "+ring.SigningKeyID()+"")
 	return &auth{register: b.Register, validator: v, checks: readiness(ring, st), background: func(ctx context.Context) { runBackground(ctx, st, deny, log) }, closeStore: st.Close,
 		sessions: func(next http.Handler) http.Handler {
-			return mcpsession.Bind(mcpsession.Config{Box: sessionBox, Upstream: upstreamID(cfg), User: signedInUser,
+			return mcpsession.Bind(mcpsession.Config{Box: parts.sessionBox, Upstream: upstreamID(cfg), User: signedInUser,
 				Lifetime: broker.GrantLifetime, Audit: o.Audit, Log: log}, next)
 		}}, nil
+}
+
+// authParts is what authenticated mode builds from configuration alone, with no network access and
+// no writes; check --offline stops here (ADR-0020 §7).
+type authParts struct {
+	ring                         *token.KeyRing
+	sealer                       *token.Sealer
+	loginBox, idpBox, consentBox *token.Box
+	sessionBox                   *token.Box
+	static                       *registration.StaticRegistry
+	// jti is the private_key_jwt replay cache, shared by static, CIMD and DCR clients.
+	jti *registration.MemoryJTICache
+	// clientDeny is BYWARD_CLIENT_DENYLIST, applied to CIMD and DCR clients.
+	clientDeny *registration.Denylist
+	provider   *entra.Provider
+	gate       *gate.Gate
+	// warnings are logged at every start and reported by check and doctor.
+	warnings []Warning
+}
+
+// Warning is a configuration that works but that the operator should look at. Setting and Fix are
+// empty for warnings that come from a package with its own wording (the access gate's).
+type Warning struct {
+	Message string
+	Setting string
+	Fix     string
+}
+
+func (w Warning) log(log *slog.Logger) {
+	if w.Setting == "" {
+		log.Warn(w.Message)
+		return
+	}
+	log.Warn(w.Message, "setting", w.Setting, "reason", w.Fix)
+}
+
+// String is the warning on one line, for check and doctor.
+func (w Warning) String() string {
+	if w.Setting == "" {
+		return w.Message
+	}
+	return w.Message + " (" + w.Setting + ": " + w.Fix + ")"
+}
+
+// loadAuthParts reads the sealing keys and the static clients and validates the IdP and gate
+// settings. Errors name the file or setting at fault. idpHTTP reaches the IdP; nil is the default
+// client (tests give a fake's).
+func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error) {
+	ring, err := token.LoadKeyRing(cfg.KeysDir)
+	if err != nil {
+		// No key generation (ADR-0007 §5): the operator creates the first key.
+		return nil, fmt.Errorf("BYWARD_KEYS_DIR: %s: %w (see docs/how-to/sealing-keys.md)", cfg.KeysDir, err)
+	}
+	p := &authParts{ring: ring}
+	if p.sealer, err = token.NewSealer(ring, cfg.PublicURL.String()); err != nil {
+		return nil, err
+	}
+	for _, b := range []struct {
+		box     **token.Box
+		purpose string
+	}{{&p.loginBox, "login"}, {&p.idpBox, "idp-tokens"}, {&p.consentBox, "consent"}, {&p.sessionBox, "mcp-session"}} {
+		if *b.box, err = token.NewBox(ring, b.purpose, nil); err != nil {
+			return nil, err
+		}
+	}
+	checkSecret := secretCheck(cfg)
+	loose := looseSecretFiles(cfg) // with the static clients' error below, reported at once
+	p.jti = registration.NewMemoryJTICache(time.Now, maxJTIs)
+	p.static, err = registration.LoadStatic(cfg.StaticClientsFile, os.ReadFile, p.jti, registration.WithSecretCheck(checkSecret))
+	if err != nil {
+		loose = append(loose, fmt.Errorf("BYWARD_STATIC_CLIENTS_FILE: %s: %w (see docs/reference/static-clients.md)", cfg.StaticClientsFile, err))
+	}
+	if err := errors.Join(loose...); err != nil {
+		return nil, err
+	}
+	if p.clientDeny, err = registration.NewDenylist(cfg.ClientDenylist); err != nil {
+		return nil, fmt.Errorf("BYWARD_CLIENT_DENYLIST: %w", err)
+	}
+	p.provider, err = entra.New(entra.Config{Tenant: cfg.EntraTenant, ClientID: cfg.EntraClientID,
+		ClientAuth: idp.ClientSecret(cfg.EntraClientSecret), RedirectURL: config.RedirectURL(cfg.PublicURL, idpName), HTTPClient: idpHTTP})
+	if err != nil {
+		return nil, fmt.Errorf("entra settings (BYWARD_ENTRA_*): %w", err)
+	}
+	var gateWarnings []string
+	p.gate, gateWarnings, err = gate.New(gate.Rules{Tenants: cfg.GateTenants, Roles: cfg.GateRoles, Groups: cfg.GateGroups,
+		EmailDomains: cfg.GateEmailDomains, HostedDomains: cfg.GateHostedDomains},
+		gate.Options{IdP: gate.Entra, Tenant: cfg.EntraTenant, AllowEmpty: cfg.GateAllowEmpty})
+	if err != nil {
+		return nil, gateError(err)
+	}
+	for _, w := range gateWarnings {
+		p.warnings = append(p.warnings, Warning{Message: w})
+	}
+	if cfg.ScopeDescription == "" {
+		p.warnings = append(p.warnings, Warning{Message: "consent page uses generic wording", Setting: "BYWARD_SCOPE_DESCRIPTION",
+			Fix: "set it to say in plain words what the " + cfg.Scope + " scope lets an app do (ADR-0010 §4)"})
+	}
+	return p, nil
+}
+
+// secretCheck is the permission check for secret files (ADR-0018 §11); --dev turns it off.
+func secretCheck(cfg *config.Config) func(string) error {
+	if cfg.Dev {
+		return func(string) error { return nil }
+	}
+	return secretfile.Check
+}
+
+// looseSecretFiles is one error per secret file other users can read, named by its setting.
+func looseSecretFiles(cfg *config.Config) []error {
+	check := secretCheck(cfg)
+	var loose []error
+	for _, f := range cfg.Values.SecretFiles() {
+		if err := check(f.Path); err != nil {
+			loose = append(loose, fmt.Errorf("%s: %w", f.From, err))
+		}
+	}
+	return loose
 }
 
 // auditStartup records the keys and static clients the proxy starts with (ADR-0021 §3).
