@@ -46,7 +46,8 @@ entities.
 
 1. **HTTP upstream: byte-transparent reverse proxy.** The inbound `Authorization` header is
    always removed (no token passthrough). The upstream receives the authenticated user's
-   identity per F13, which is a v1 requirement (ADR-0004).
+   identity per F13, which is a v1 requirement (ADR-0004). _Amended by ADR-0025:_ an upstream 401
+   or 403 is answered as a JSON-RPC response, which needs the request's `id`.
 2. **Invariant: an upstream process never serves more than one user.**
 3. **Legacy-era traffic (2025-11-25): one upstream process per MCP session.** JSON-RPC is relayed
    unchanged — no id rewriting, no `initialize` cache; server→client requests and notifications

@@ -3,7 +3,9 @@
 package relay
 
 import (
+	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -24,7 +26,7 @@ import (
 // frameworks treat the two alike (the oauth2-proxy CVE-2025-64484 bypass).
 var stripped = map[string]bool{"Authorization": true, "Forwarded": true, "Origin": true}
 
-var errUpstreamUnauthorized = errors.New("upstream answered 401")
+var errUpstreamRefused = errors.New("upstream refused the proxy and the request id is unknown")
 
 // New returns a handler relaying each request to target, the upstream's MCP endpoint URL: the
 // request path is replaced by target's path; the query is kept.
@@ -50,7 +52,7 @@ func New(log *slog.Logger, target *url.URL) http.Handler {
 		// The proxy owns CORS and the auth challenge on the MCP endpoint. An upstream's CORS headers
 		// would duplicate Access-Control-Allow-Origin (browsers reject that), and its
 		// WWW-Authenticate would send clients to an authorization server that is not ours. An
-		// upstream 401 can only mean the proxy's own credential to it failed, so it becomes a 502.
+		// upstream 401 or 403 is a refusal of the proxy, answered per ADR-0025 (refusal.go).
 		ModifyResponse: func(res *http.Response) error {
 			for k := range res.Header {
 				if strings.HasPrefix(k, "Access-Control-") {
@@ -58,8 +60,21 @@ func New(log *slog.Logger, target *url.URL) http.Handler {
 				}
 			}
 			res.Header.Del("WWW-Authenticate")
-			if res.StatusCode == http.StatusUnauthorized {
-				return errUpstreamUnauthorized
+			if res.StatusCode != http.StatusUnauthorized && res.StatusCode != http.StatusForbidden {
+				return nil
+			}
+			ctx := res.Request.Context()
+			status := res.StatusCode
+			c, _ := ctx.Value(captureKey{}).(*capture)
+			o := translate(res, c)
+			hint := "upstream denied the proxy's identity; check the roles or groups it requires"
+			if status == http.StatusUnauthorized {
+				hint = "upstream rejected the proxy's credential; check the upstream credential"
+			}
+			log.ErrorContext(ctx, "upstream refused the request", "request_id", logging.RequestID(ctx),
+				"status", status, "reason", hint+"; "+string(o))
+			if o == outcomeUnanswerable {
+				return errUpstreamRefused
 			}
 			return nil
 		},
@@ -69,9 +84,8 @@ func New(log *slog.Logger, target *url.URL) http.Handler {
 				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 				return
 			}
-			if errors.Is(err, errUpstreamUnauthorized) {
-				log.ErrorContext(r.Context(), "upstream rejected the proxy", "request_id", logging.RequestID(r.Context()), "reason", "upstream answered 401; check the upstream credential")
-				http.Error(w, "upstream rejected the proxy", http.StatusBadGateway)
+			if errors.Is(err, errUpstreamRefused) {
+				http.Error(w, "upstream refused the proxy", http.StatusBadGateway)
 				return
 			}
 			log.WarnContext(r.Context(), "upstream error", "request_id", logging.RequestID(r.Context()), "error", err)
@@ -79,7 +93,13 @@ func New(log *slog.Logger, target *url.URL) http.Handler {
 			http.Error(w, "upstream unavailable", http.StatusBadGateway)
 		},
 	}
-	return rp
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c := &capture{}
+		if r.Body != nil && r.Body != http.NoBody {
+			r.Body = teeBody{io.TeeReader(r.Body, c), r.Body}
+		}
+		rp.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), captureKey{}, c)))
+	})
 }
 
 func strip(h http.Header) {
