@@ -4,6 +4,10 @@ The broker keeps grants, authorization codes, refresh tokens and revocations in 
 database ([ADR-0007](../adr/0007-state-and-storage.md)). Sealing keys are never stored there; they come
 from the keys directory ([sealing-keys.md](sealing-keys.md)).
 
+Expired rows are deleted at startup and every 5 minutes while the proxy runs: codes, refresh tokens
+and grants past their expiry (a grant takes its codes and refresh tokens with it), and revocations
+older than one hour, the longest access-token lifetime. The database stays the size of the live state.
+
 ## Settings
 
 | Setting | Default | Meaning |
