@@ -19,6 +19,7 @@ type Servers struct {
 	Health   *health.Health
 
 	background func(ctx context.Context) // nil without authentication; runs while the public listener serves
+	closeStore func() error              // nil without authentication; releases the store once Run is done
 }
 
 func hardened(addr string, h http.Handler, log *slog.Logger) *http.Server {
@@ -37,6 +38,13 @@ func hardened(addr string, h http.Handler, log *slog.Logger) *http.Server {
 // public listener closes (open streams are cancelled through their request contexts), and the
 // internal listener goes last so probes and scrapes see the drain.
 func Run(ctx context.Context, s *Servers, log *slog.Logger) error {
+	if s.closeStore != nil { // deferred first, so it runs after the background work has stopped
+		defer func() {
+			if err := s.closeStore(); err != nil {
+				log.Warn("closing the store failed", "error", err)
+			}
+		}()
+	}
 	listening := func() {}
 	if s.background != nil {
 		bgCtx, stop := context.WithCancel(ctx)

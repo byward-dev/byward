@@ -7,8 +7,10 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -32,8 +34,9 @@ var registry = []Setting{
 	{Name: "entra-tenant", Auth: true, Help: "Entra tenant ID (a GUID) of the IdP app"},
 	{Name: "entra-client-id", Auth: true, Help: "application (client) ID of the IdP app registration"},
 	{Name: "entra-client-secret", Auth: true, Secret: true, Help: "client secret of the IdP app"},
-	{Name: "keys-dir", Auth: true, Help: "directory of sealing keys; each file is one key, its name the key ID (docs/how-to/sealing-keys.md)"},
-	{Name: "static-clients-file", Auth: true, Help: "JSON file of pre-registered MCP clients (docs/reference/static-clients.md)"},
+	{Name: "data-dir", Auth: true, Default: "/var/lib/mcp-authproxy", Help: "data directory, an absolute path; the keys, clients and store settings default to paths in it (ADR-0007 §6, docs/how-to/state.md)"},
+	{Name: "keys-dir", Auth: true, Help: "directory of sealing keys; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md)"},
+	{Name: "static-clients-file", Auth: true, Help: "JSON file of pre-registered MCP clients; default: clients.json in the data directory (docs/reference/static-clients.md)"},
 	{Name: "gate-tenants", Auth: true, Help: "access gate: comma-separated Entra tenant IDs allowed to sign in (docs/how-to/access-gate.md)"},
 	{Name: "gate-roles", Auth: true, Help: "access gate: comma-separated app roles; users need at least one (docs/how-to/access-gate.md)"},
 	{Name: "gate-groups", Auth: true, Help: "access gate: comma-separated group IDs; users need one, and groups overage denies (docs/how-to/access-gate.md)"},
@@ -42,6 +45,9 @@ var registry = []Setting{
 	{Name: "gate-allow-empty", Auth: true, Bool: true, Default: "false", Help: "allow an empty access gate for a Google or generic OIDC IdP (anyone with an account can sign in); no effect with Entra (docs/how-to/access-gate.md)"},
 	{Name: "operator-name", Auth: true, Help: "who runs this proxy, shown on the consent page, e.g. Contoso IT"},
 	{Name: "scope-description", Auth: true, Help: "what the scope lets an app do, in plain words for the consent page, e.g. Read and query your team's dashboards"},
+	{Name: "store-dir", Auth: true, Help: "state directory of the SQLite store, an absolute path, created with mode 0700; the directory to back up; default: state in the data directory (ADR-0007, docs/how-to/state.md)"},
+	{Name: "store-counter-file", Auth: true, Help: "restore-detection counter file, an absolute path outside the state directory and its backups; default: store-writes next to the keys directory (ADR-0007 §9)"},
+	{Name: "refresh-grace", Auth: true, Default: "30s", Help: "how long a just-rotated refresh token is still accepted, for a client retrying a lost response; 0s to 60s (ADR-0006 §4)"},
 	{Name: "insecure-no-auth", Bool: true, Default: "false", Help: "no authentication at all, for trying the proxy out and for tests; loopback only (ADR-0027)"},
 	{Name: "dev", Bool: true, Default: "false", Help: "development mode: enables the relaxations it logs at startup"},
 }
@@ -76,6 +82,12 @@ type Config struct {
 	// Consent page wording (ADR-0010 §4).
 	OperatorName     string
 	ScopeDescription string
+	// The store (slice 1.3): SQLite in StoreDir, its restore counter in StoreCounterFile. The
+	// key, client and store paths default to paths in DataDir.
+	DataDir          string
+	StoreDir         string
+	StoreCounterFile string
+	RefreshGrace     time.Duration
 	// InContainer is set when the proxy runs in a container (/.dockerenv or /run/.containerenv)
 	// with its own network namespace; host networking does not count (see ownNetwork).
 	InContainer bool
@@ -217,11 +229,10 @@ func validate(v *Values, container bool) (*Config, error) {
 	}
 	if !c.NoAuth {
 		c.EntraTenant, c.EntraClientID, c.EntraClientSecret = v.get("entra-tenant"), v.get("entra-client-id"), v.get("entra-client-secret")
-		c.KeysDir, c.StaticClientsFile = v.get("keys-dir"), v.get("static-clients-file")
 		c.OperatorName, c.ScopeDescription = v.get("operator-name"), v.get("scope-description")
 		errs = append(errs, checkText("operator-name", c.OperatorName, 80)...)
 		errs = append(errs, checkText("scope-description", c.ScopeDescription, 200)...)
-		for _, s := range []string{"entra-tenant", "entra-client-id", "entra-client-secret", "keys-dir", "static-clients-file"} {
+		for _, s := range []string{"entra-tenant", "entra-client-id", "entra-client-secret"} {
 			if v.get(s) == "" {
 				env := Setting{Name: s}.Env()
 				if s == "entra-client-secret" {
@@ -241,6 +252,8 @@ func validate(v *Values, container bool) (*Config, error) {
 		if c.GateAllowEmpty, err = strconv.ParseBool(v.get("gate-allow-empty")); err != nil {
 			errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "gate-allow-empty"}.Env(), v.get("gate-allow-empty")))
 		}
+		errs = append(errs, c.paths(v)...)
+		errs = append(errs, c.refreshGrace(v)...)
 		if t := c.EntraTenant; t != "" && !isGUID(t) {
 			errs = append(errs, errorf("MCP_AUTHPROXY_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000, got %q", t))
 		}
@@ -265,6 +278,60 @@ func checkText(name, s string, max int) []error {
 	if n := utf8.RuneCountInString(s); n > max {
 		return []error{errorf("%s: at most %d characters, got %d", env, max, n)}
 	}
+	return nil
+}
+
+// within reports whether path is dir or inside it.
+func within(dir, path string) bool {
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// maxRefreshGrace is the upper bound of ADR-0006 §4 (range 0–60 s).
+const maxRefreshGrace = 60 * time.Second
+
+// paths resolves the data directory and the paths that default into it: keys, static clients,
+// the store and its restore counter (ADR-0007 §6, §9). No path is relative to the working directory.
+func (c *Config) paths(v *Values) []error {
+	var errs []error
+	c.DataDir = v.get("data-dir")
+	if !filepath.IsAbs(c.DataDir) {
+		return []error{errorf("MCP_AUTHPROXY_DATA_DIR: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got %q", c.DataDir)}
+	}
+	or := func(name, def string) string {
+		if p := v.get(name); p != "" {
+			return p
+		}
+		return filepath.Join(c.DataDir, def)
+	}
+	c.KeysDir, c.StaticClientsFile, c.StoreDir = or("keys-dir", "keys"), or("static-clients-file", "clients.json"), or("store-dir", "state")
+	if !filepath.IsAbs(c.StoreDir) {
+		errs = append(errs, errorf("MCP_AUTHPROXY_STORE_DIR: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got %q", c.StoreDir))
+	}
+	c.StoreCounterFile = v.get("store-counter-file")
+	if c.StoreCounterFile == "" {
+		// Next to the keys: outside the state directory, so a restored backup of it is detected.
+		c.StoreCounterFile = filepath.Join(filepath.Dir(filepath.Clean(c.KeysDir)), "store-writes")
+	}
+	switch {
+	case !filepath.IsAbs(c.StoreCounterFile):
+		errs = append(errs, errorf("MCP_AUTHPROXY_STORE_COUNTER_FILE: want an absolute path, got %q (the default is derived from MCP_AUTHPROXY_KEYS_DIR, so set an absolute keys directory or this setting)", c.StoreCounterFile))
+	case filepath.IsAbs(c.StoreDir) && within(c.StoreDir, c.StoreCounterFile):
+		errs = append(errs, errorf("MCP_AUTHPROXY_STORE_COUNTER_FILE: %s is inside MCP_AUTHPROXY_STORE_DIR %s, so a restored backup of the state directory would restore it too and go undetected; keep the keys directory outside the state directory, or set this to a path outside it", c.StoreCounterFile, c.StoreDir))
+	}
+	return errs
+}
+
+// refreshGrace parses the refresh-token grace window (ADR-0006 §4: 0 to 60 s).
+func (c *Config) refreshGrace(v *Values) []error {
+	grace, err := time.ParseDuration(v.get("refresh-grace"))
+	switch {
+	case err != nil:
+		return []error{errorf("MCP_AUTHPROXY_REFRESH_GRACE: want a duration such as 30s, got %q", v.get("refresh-grace"))}
+	case grace < 0 || grace > maxRefreshGrace:
+		return []error{errorf("MCP_AUTHPROXY_REFRESH_GRACE: want 0s to 60s, got %s", grace)}
+	}
+	c.RefreshGrace = grace
 	return nil
 }
 

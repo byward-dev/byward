@@ -1,7 +1,8 @@
 # Static clients file
 
 Static clients are MCP clients the operator registers in advance (ADR-0008). They are listed in one
-JSON file, given by `MCP_AUTHPROXY_STATIC_CLIENTS_FILE` (`--static-clients-file`). The file is read
+JSON file, given by `MCP_AUTHPROXY_STATIC_CLIENTS_FILE` (`--static-clients-file`), by default
+`clients.json` in the data directory (`/var/lib/mcp-authproxy/clients.json`). The file is read
 once at startup; a change needs a restart (ADR-0020 §9). Static clients are shown on the consent
 page as trusted by the operator (ADR-0008 §8).
 

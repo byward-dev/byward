@@ -46,7 +46,7 @@ hide consent decisions. Metrics count every event, logged or not.
 For SIEMs that use [OCSF](https://schema.ocsf.io) 1.9.0. Fields map as follows: `time` → `time`; `request_id` →
 `metadata.correlation_uid`; `user_key` → `user.uid`; `client_id` → `actor.app_uid`; `idp` → `actor.idp.name`;
 `remote_ip` → `src_endpoint.ip`; `grant_id` → `session.uid`; `reason` → `status_detail`; `outcome` → `status_id`
-(1 Success, 2 Failure). Rows marked *approximate* have no exact OCSF counterpart.
+(1 Success, 2 Failure); `epoch` (the store epoch, `store_restored` only) → `unmapped.epoch`. Rows marked *approximate* have no exact OCSF counterpart.
 
 | Event | When | Outcomes | Limited | OCSF class / activity |
 |---|---|---|---|---|
@@ -64,9 +64,10 @@ For SIEMs that use [OCSF](https://schema.ocsf.io) 1.9.0. Fields map as follows: 
 | `consent_granted` | the user allowed the client on the consent page | success | yes | 3003 Authorize Session / 99 Other (*approximate*) |
 | `consent_denied` | the user denied the client on the consent page (`reason` fixed) | failure | yes | 3003 Authorize Session / 99 Other (*approximate*) |
 | `rate_limited` | an OAuth endpoint refused a request over the client address's budget (`reason` = the endpoint; [rate limits](rate-limits.md)) | failure | yes | 4002 HTTP Activity; `disposition_id` 2 Blocked |
+| `store_restored` | at startup, the store was found restored from an older copy: a new `epoch` began and refresh tokens issued before it are refused, so those users sign in again (ADR-0007 §9) | success | no | 6002 Application Lifecycle / 99 Other (*approximate*) |
 
 Not emitted yet; these arrive with their slices:
-refresh, revocation and store restore detection (slice 1.6), dynamic registration (slice 2.2), and key rotation
+dynamic registration (slice 2.2) and key rotation
 (later).
 
 ## Metrics

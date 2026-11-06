@@ -32,7 +32,7 @@ func TestRevocationListStaysFreshWhileTheServerRuns(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		access := sealAccess(t, cfg, env)
+		access := sealAccess(t, cfg, env, "g")
 		if _, err := a.validator.Validate(context.Background(), access); err != nil {
 			t.Fatalf("right after startup: %v (the list must be synced before serving)", err)
 		}
@@ -46,13 +46,17 @@ func TestRevocationListStaysFreshWhileTheServerRuns(t *testing.T) {
 			t.Fatalf("after %v of serving: %v (the background sync is not running)", 3*denylist.MaxStaleness, err)
 		}
 		stop()
-		<-done // the background work ends with its context
+		<-done                                 // the background work ends with its context
+		if err := a.closeStore(); err != nil { // the store's goroutines must end inside the bubble
+			t.Fatal(err)
+		}
 	})
 }
 
 var discard = slog.New(slog.NewTextHandler(io.Discard, nil))
 
-func sealAccess(t *testing.T, cfg *config.Config, env []string) string {
+// sealAccess seals an access token for grantID with the keys the server under test loads.
+func sealAccess(t *testing.T, cfg *config.Config, env []string, grantID string) string {
 	t.Helper()
 	var keysDir string
 	for _, kv := range env {
@@ -69,7 +73,7 @@ func sealAccess(t *testing.T, cfg *config.Config, env []string) string {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	tok, err := s.Seal(token.Access, token.Claims{GrantID: "g", Subject: "tid:oid", IssuedAt: now, ExpiresAt: now.Add(time.Hour)})
+	tok, err := s.Seal(token.Access, token.Claims{GrantID: grantID, Subject: "tid:oid", IssuedAt: now, ExpiresAt: now.Add(time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,5 +167,54 @@ func TestBackgroundWorkStopsWhenServingEndsOnItsOwn(t *testing.T) {
 	case <-stopped:
 	default:
 		t.Fatal("Run returned while the background work was still running")
+	}
+}
+
+// Run releases the store when it returns, after the background work has stopped, and also when the
+// server never listened, so a failed start does not leak it.
+func TestRunClosesTheStoreLastAndAfterAFailedListen(t *testing.T) {
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = busy.Close() })
+	for _, tc := range []struct {
+		name, addr string
+		wantErr    bool
+		want       string
+	}{
+		{"after serving", "127.0.0.1:0", false, "background stopped, store closed"},
+		{"after a failed listen", busy.Addr().String(), true, "store closed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var events []string // Run's goroutine appends after the background work has ended
+			started := make(chan struct{})
+			s := &Servers{Public: &http.Server{Addr: tc.addr, Handler: http.NotFoundHandler(), ReadHeaderTimeout: time.Second}, Health: health.New(discard),
+				background: func(ctx context.Context) {
+					close(started)
+					<-ctx.Done()
+					events = append(events, "background stopped")
+				},
+				closeStore: func() error { events = append(events, "store closed"); return nil }}
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			go func() { done <- Run(ctx, s, discard) }()
+			var runErr error
+			select {
+			case <-started: // it serves: stop it
+				cancel()
+				runErr = <-done
+			case runErr = <-done: // the listen failed
+			case <-time.After(10 * time.Second):
+				t.Fatal("Run neither started the background work nor returned")
+			}
+			cancel()
+			if (runErr != nil) != tc.wantErr {
+				t.Fatalf("Run = %v, want an error: %v", runErr, tc.wantErr)
+			}
+			if got := strings.Join(events, ", "); got != tc.want {
+				t.Fatalf("events = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

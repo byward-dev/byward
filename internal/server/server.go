@@ -98,6 +98,7 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 	var h http.Handler
 	var checks []health.Check
 	var background func(context.Context)
+	var closeStore func() error
 	if cfg.NoAuth {
 		h = Handler(cfg, log, resource.NoTokens{}, nil, o)
 	} else {
@@ -107,9 +108,9 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 		}
 		h = Handler(cfg, log, a.validator, a.register, o)
 		checks = a.checks
-		background = a.background
+		background, closeStore = a.background, a.closeStore
 	}
-	s := &Servers{Public: hardened(cfg.Listen, h, log), Health: health.New(log, checks...), background: background}
+	s := &Servers{Public: hardened(cfg.Listen, h, log), Health: health.New(log, checks...), background: background, closeStore: closeStore}
 	if cfg.InternalListen != "" {
 		mux := http.NewServeMux()
 		mux.Handle("GET /metrics", m.Handler())

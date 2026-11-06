@@ -13,6 +13,13 @@ import (
 	"testing"
 )
 
+// serveEnv is what a test run that serves needs besides auth: the URLs, the public listener and an
+// ephemeral internal listener (the default 127.0.0.1:9090 may be taken on the test host).
+func serveEnv(publicURL, listen string) []string {
+	return []string{"MCP_AUTHPROXY_PUBLIC_URL=" + publicURL, "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp",
+		"MCP_AUTHPROXY_LISTEN=" + listen, "MCP_AUTHPROXY_INTERNAL_LISTEN=127.0.0.1:0"}
+}
+
 func runWith(args []string, env ...string) (int, string, string) {
 	var out, errb bytes.Buffer
 	code := run(context.Background(), args, env, &out, &errb)
@@ -38,7 +45,8 @@ func authEnv(t *testing.T) []string {
 	}
 	return []string{"MCP_AUTHPROXY_ENTRA_TENANT=00000000-0000-0000-0000-000000000001", "MCP_AUTHPROXY_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002",
 		"MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE=" + filepath.Join(dir, "secret"), "MCP_AUTHPROXY_KEYS_DIR=" + keys,
-		"MCP_AUTHPROXY_STATIC_CLIENTS_FILE=" + filepath.Join(dir, "clients.json")}
+		"MCP_AUTHPROXY_STATIC_CLIENTS_FILE=" + filepath.Join(dir, "clients.json"),
+		"MCP_AUTHPROXY_STORE_DIR=" + filepath.Join(dir, "state")}
 }
 
 func TestConfigErrorExitCode(t *testing.T) {
@@ -77,7 +85,7 @@ func TestRunStopsOnCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var out, errb bytes.Buffer
-	code := run(ctx, nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0", "MCP_AUTHPROXY_INTERNAL_LISTEN=127.0.0.1:0"), &out, &errb)
+	code := run(ctx, nil, append(authEnv(t), serveEnv("https://m.example/mcp", "127.0.0.1:0")...), &out, &errb)
 	if code != exitOK || !strings.Contains(errb.String(), `"msg":"starting"`) {
 		t.Fatalf("code=%d logs=%s", code, errb.String())
 	}
@@ -87,7 +95,7 @@ func TestDevModeLogsEachRelaxation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var out, errb bytes.Buffer
-	code := run(ctx, []string{"--dev"}, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=http://127.0.0.1:8080/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0", "MCP_AUTHPROXY_INTERNAL_LISTEN=127.0.0.1:0"), &out, &errb)
+	code := run(ctx, []string{"--dev"}, append(authEnv(t), serveEnv("http://127.0.0.1:8080/mcp", "127.0.0.1:0")...), &out, &errb)
 	if code != exitOK || !strings.Contains(errb.String(), "development mode relaxation") || !strings.Contains(errb.String(), "http public URL on loopback") {
 		t.Fatalf("code=%d logs=%s", code, errb.String())
 	}
@@ -99,7 +107,7 @@ func TestListenFailureIsARuntimeError(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = ln.Close() }()
-	code, _, stderr := runWith(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN="+ln.Addr().String(), "MCP_AUTHPROXY_INTERNAL_LISTEN=127.0.0.1:0")...)
+	code, _, stderr := runWith(nil, append(authEnv(t), serveEnv("https://m.example/mcp", ln.Addr().String())...)...)
 	if code != exitRuntime || !strings.Contains(stderr, "address already in use") {
 		t.Fatalf("code=%d stderr=%s", code, stderr)
 	}
@@ -109,7 +117,7 @@ func TestNoAuthLogsThatAuthIsOffAndTheNextStep(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var out, errb bytes.Buffer
-	code := run(ctx, nil, []string{"MCP_AUTHPROXY_INSECURE_NO_AUTH=true", "MCP_AUTHPROXY_PUBLIC_URL=http://localhost:8080/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0", "MCP_AUTHPROXY_INTERNAL_LISTEN=127.0.0.1:0"}, &out, &errb)
+	code := run(ctx, nil, append([]string{"MCP_AUTHPROXY_INSECURE_NO_AUTH=true"}, serveEnv("http://localhost:8080/mcp", "127.0.0.1:0")...), &out, &errb)
 	logs := errb.String()
 	if code != exitOK || !strings.Contains(logs, `"level":"WARN","msg":"development mode relaxation","relaxation":"AUTHENTICATION IS OFF: anyone who can reach http://localhost:8080/mcp`) || !strings.Contains(logs, "to require sign-in") {
 		t.Fatalf("code=%d logs=%s", code, logs)

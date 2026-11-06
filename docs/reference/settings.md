@@ -22,8 +22,9 @@ Precedence: flag > environment > default. Secrets are read only from files.
 | `--entra-tenant` | `MCP_AUTHPROXY_ENTRA_TENANT` | — | Entra tenant ID (a GUID) of the IdP app |
 | `--entra-client-id` | `MCP_AUTHPROXY_ENTRA_CLIENT_ID` | — | application (client) ID of the IdP app registration |
 | `--entra-client-secret-file` | `MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE` | — | client secret of the IdP app |
-| `--keys-dir` | `MCP_AUTHPROXY_KEYS_DIR` | — | directory of sealing keys; each file is one key, its name the key ID (docs/how-to/sealing-keys.md) |
-| `--static-clients-file` | `MCP_AUTHPROXY_STATIC_CLIENTS_FILE` | — | JSON file of pre-registered MCP clients (docs/reference/static-clients.md) |
+| `--data-dir` | `MCP_AUTHPROXY_DATA_DIR` | /var/lib/mcp-authproxy | data directory, an absolute path; the keys, clients and store settings default to paths in it (ADR-0007 §6, docs/how-to/state.md) |
+| `--keys-dir` | `MCP_AUTHPROXY_KEYS_DIR` | — | directory of sealing keys; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md) |
+| `--static-clients-file` | `MCP_AUTHPROXY_STATIC_CLIENTS_FILE` | — | JSON file of pre-registered MCP clients; default: clients.json in the data directory (docs/reference/static-clients.md) |
 | `--gate-tenants` | `MCP_AUTHPROXY_GATE_TENANTS` | — | access gate: comma-separated Entra tenant IDs allowed to sign in (docs/how-to/access-gate.md) |
 | `--gate-roles` | `MCP_AUTHPROXY_GATE_ROLES` | — | access gate: comma-separated app roles; users need at least one (docs/how-to/access-gate.md) |
 | `--gate-groups` | `MCP_AUTHPROXY_GATE_GROUPS` | — | access gate: comma-separated group IDs; users need one, and groups overage denies (docs/how-to/access-gate.md) |
@@ -32,6 +33,9 @@ Precedence: flag > environment > default. Secrets are read only from files.
 | `--gate-allow-empty` | `MCP_AUTHPROXY_GATE_ALLOW_EMPTY` | false | allow an empty access gate for a Google or generic OIDC IdP (anyone with an account can sign in); no effect with Entra (docs/how-to/access-gate.md) |
 | `--operator-name` | `MCP_AUTHPROXY_OPERATOR_NAME` | — | who runs this proxy, shown on the consent page, e.g. Contoso IT |
 | `--scope-description` | `MCP_AUTHPROXY_SCOPE_DESCRIPTION` | — | what the scope lets an app do, in plain words for the consent page, e.g. Read and query your team's dashboards |
+| `--store-dir` | `MCP_AUTHPROXY_STORE_DIR` | — | state directory of the SQLite store, an absolute path, created with mode 0700; the directory to back up; default: state in the data directory (ADR-0007, docs/how-to/state.md) |
+| `--store-counter-file` | `MCP_AUTHPROXY_STORE_COUNTER_FILE` | — | restore-detection counter file, an absolute path outside the state directory and its backups; default: store-writes next to the keys directory (ADR-0007 §9) |
+| `--refresh-grace` | `MCP_AUTHPROXY_REFRESH_GRACE` | 30s | how long a just-rotated refresh token is still accepted, for a client retrying a lost response; 0s to 60s (ADR-0006 §4) |
 | `--insecure-no-auth` | `MCP_AUTHPROXY_INSECURE_NO_AUTH` | false | no authentication at all, for trying the proxy out and for tests; loopback only (ADR-0027) |
 | `--dev` | `MCP_AUTHPROXY_DEV` | false | development mode: enables the relaxations it logs at startup |
 

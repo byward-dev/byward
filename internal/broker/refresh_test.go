@@ -19,6 +19,9 @@ import (
 	"github.com/corker/mcp-authproxy/internal/token"
 )
 
+// grace is the window the rotation tests use, the refresh-grace setting's default.
+const grace = 30 * time.Second
+
 // offline signs in with offline_access and returns the token response.
 func (e *env) offline(t *testing.T) map[string]any {
 	t.Helper()
@@ -124,7 +127,7 @@ func TestAbandonedLoginLeavesOnlyAShortLivedGrant(t *testing.T) {
 }
 
 func TestRefreshRotatesAndKeepsWorking(t *testing.T) {
-	e := newEnv(t, func(c *Config) { c.RefreshGrace = DefaultRefreshGrace })
+	e := newEnv(t, func(c *Config) { c.RefreshGrace = grace })
 	rt := e.offline(t)["refresh_token"].(string)
 	for i := range 3 {
 		e.now = e.now.Add(time.Hour)
@@ -141,7 +144,7 @@ func TestRefreshRotatesAndKeepsWorking(t *testing.T) {
 }
 
 func TestRetryWithinGraceSucceedsAndReuseAfterGraceRevokes(t *testing.T) {
-	e := newEnv(t, func(c *Config) { c.RefreshGrace = DefaultRefreshGrace })
+	e := newEnv(t, func(c *Config) { c.RefreshGrace = grace })
 	body := e.offline(t)
 	grant := firstGrant(e.st)
 	rt1 := body["refresh_token"].(string)
@@ -150,7 +153,7 @@ func TestRetryWithinGraceSucceedsAndReuseAfterGraceRevokes(t *testing.T) {
 		t.Fatalf("refresh: %d %v", res.StatusCode, first)
 	}
 	// The response was lost; the client retries with the old token inside the window.
-	e.now = e.now.Add(DefaultRefreshGrace - time.Second)
+	e.now = e.now.Add(grace - time.Second)
 	res, retried := e.refresh(t, rt1, "")
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("retry within grace: %d %v", res.StatusCode, retried)
