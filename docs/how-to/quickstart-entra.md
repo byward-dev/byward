@@ -143,7 +143,8 @@ appear in `az ad app permission list-grants --id "$APP_ID"`.
 ([ADR-0010](../adr/0010-consent-screen.md)) and then signs in at Entra. Whether Entra adds a consent
 screen of its own depends on the tenant's user-consent settings: in the project's real-tenant test,
 these login scopes produced no Entra consent screen (ADR-0012), but a tenant that restricts user
-consent can stop users with an approval request or AADSTS65001. Admin consent is recommended in any
+consent can stop users with an approval request or AADSTS65001. A second run with Claude Code
+(2026-11-06) confirmed it: no Entra consent screen, only the proxy's. Admin consent is recommended in any
 case, and later On-Behalf-Of features need it (ADR-0012 §12).
 
 ### 1.6 Optional: allow only assigned users
@@ -230,9 +231,14 @@ shows the proxy's consent page, then Entra's sign-in. `claude mcp get my-mcp` sh
 OAuth client. With the reference server behind the proxy, ask Claude Code to call its `echo` tool to
 see a request go all the way through.
 
-The callback port must be free on the machine running Claude Code. If 8080 is taken (for example by
-a proxy running locally), pick another port; the registered `redirect_uris` need no change because
-the proxy ignores the port on loopback.
+The callback port must be free on the machine running Claude Code. If it is taken, `claude mcp login`
+stops with "OAuth callback port … is already in use"; `lsof -ti:<port> -sTCP:LISTEN` shows the
+process holding it. Pick another port (remove the server with `claude mcp remove my-mcp` and add it
+again with the new `--callback-port`); the registered `redirect_uris` need no change because the
+proxy ignores the port on loopback.
+
+Claude Code asks for `offline_access`, so it receives a refresh token: the consent page says "up to
+30 days", and Claude Code renews its access token every hour without sending you to the browser.
 
 Source: Claude Code MCP documentation, "Use pre-configured OAuth credentials" and "Use a fixed OAuth
 callback port" (<https://code.claude.com/docs/en/mcp>).
