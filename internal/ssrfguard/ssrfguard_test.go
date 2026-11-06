@@ -34,7 +34,9 @@ func TestNonPublicAddressesAreRefused(t *testing.T) {
 		"https://[fe80::1]/doc",
 		"https://[::ffff:127.0.0.1]/doc",
 		"https://[64:ff9b::7f00:1]/doc",
-		// A name is checked after DNS: localhost resolves to a loopback address.
+		// A name is checked after DNS, on the address actually dialled: localhost resolves to a
+		// loopback address. This is also the DNS rebinding case: there is no earlier lookup whose
+		// public answer a later private one could replace.
 		"https://localhost/doc",
 	} {
 		t.Run(u, func(t *testing.T) {

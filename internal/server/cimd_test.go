@@ -12,7 +12,6 @@ import (
 
 	"code.dny.dev/ssrf"
 
-	"github.com/byward-dev/byward/internal/broker"
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/registration"
@@ -31,10 +30,7 @@ func TestCIMDClientsAreResolvedThroughTheGuardOnlyWhenOn(t *testing.T) {
 		"off":           {env: []string{"BYWARD_CIMD=false"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			var got broker.Config
-			orig := newBroker
-			newBroker = func(c broker.Config) (*broker.Broker, error) { got = c; return orig(c) }
-			t.Cleanup(func() { newBroker = orig })
+			got := captureBroker(t, nil)
 			cfg, _, err := config.Load(nil, gateEnv(t, tc.env...), os.ReadFile)
 			if err != nil {
 				t.Fatal(err)
@@ -67,10 +63,7 @@ func TestCIMDClientsAreResolvedThroughTheGuardOnlyWhenOn(t *testing.T) {
 // fetch (no guard reason, nothing counted), a trusted host is still allowed, and each list lands
 // in its own field; jwks_uri keys go through the guard too.
 func TestTheCIMDHostListsReachTheRegistry(t *testing.T) {
-	var got broker.Config
-	orig := newBroker
-	newBroker = func(c broker.Config) (*broker.Broker, error) { got = c; return orig(c) }
-	t.Cleanup(func() { newBroker = orig })
+	got := captureBroker(t, nil)
 	var wired registration.CIMDConfig
 	origReg := newCIMDRegistry
 	newCIMDRegistry = func(c registration.CIMDConfig) *registration.CIMDRegistry { wired = c; return origReg(c) }

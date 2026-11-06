@@ -154,8 +154,8 @@ plus the names in `BYWARD_ALLOWED_HOSTS`; any other name gets `421`, which stops
 - [ ] **Keep the restore counter outside the backup.** `store-writes` sits next to the key
       directory, not inside `state/`. If an older copy of the store is restored, the proxy notices,
       starts a new epoch, refuses refresh tokens issued before the restore (their users sign in
-      again), logs it and writes a `store_restored` audit record (ADR-0007 §9). An automated
-      restore drill is still to come (#53).
+      again), logs it and writes a `store_restored` audit record (ADR-0007 §9). A restore drill
+      on every PR (`mise run test:integration:go`) restores a snapshot and checks exactly this.
 
 ## 7. Logs and the audit stream
 
