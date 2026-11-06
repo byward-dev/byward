@@ -19,15 +19,16 @@ updates:
       interval: weekly
     cooldown:
       default-days: 14
-  # The real open-source MCP clients of the integration lane (ADR-0024 §3), so they stay current.
+  # The real open-source MCP clients of the integration lane (ADR-0024 §3), and the identity
+  # assertion verifiers the docs show (scripts/assertion/run.sh), so they stay current.
   - package-ecosystem: npm
-    directories: ["/internal/server/testdata/realclients/ts", "/internal/server/testdata/realclients/inspector"]
+    directories: ["/internal/server/testdata/realclients/ts", "/internal/server/testdata/realclients/inspector", "/scripts/assertion/ts"]
     schedule:
       interval: weekly
     cooldown:
       default-days: 14
   - package-ecosystem: pip
-    directory: /internal/server/testdata/realclients/python
+    directories: ["/internal/server/testdata/realclients/python", "/scripts/assertion/py"]
     schedule:
       interval: weekly
     cooldown:

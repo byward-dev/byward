@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/byward-dev/byward/internal/testutil/assertionkey"
 )
 
 // serveEnv is what a test run that serves needs besides auth: the URLs, the public listener and an
@@ -47,7 +49,7 @@ func authEnv(t *testing.T) []string {
 	return []string{"BYWARD_ENTRA_TENANT=00000000-0000-0000-0000-000000000001", "BYWARD_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002",
 		"BYWARD_ENTRA_CLIENT_SECRET_FILE=" + filepath.Join(dir, "secret"), "BYWARD_KEYS_DIR=" + keys,
 		"BYWARD_STATIC_CLIENTS_FILE=" + filepath.Join(dir, "clients.json"),
-		"BYWARD_STORE_DIR=" + filepath.Join(dir, "state")}
+		"BYWARD_STORE_DIR=" + filepath.Join(dir, "state"), "BYWARD_ASSERTION_KEYS_DIR=" + assertionkey.Dir(t)}
 }
 
 func TestConfigErrorExitCode(t *testing.T) {

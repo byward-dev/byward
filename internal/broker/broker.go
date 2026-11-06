@@ -101,6 +101,9 @@ type Config struct {
 	// with the client's trust level, for metrics (ADR-0010 §12).
 	ObserveConsent func(trust, outcome string)
 	Gate           Gate
+	// Assert selects the optional identity claims access tokens carry for the upstream's
+	// assertion (ADR-0016 §1).
+	Assert Asserted
 	// Consent page wording (ADR-0010 §4): the upstream's name (default: the public host), what the
 	// scope lets an app do in plain words, and who runs the proxy. All optional.
 	UpstreamName string

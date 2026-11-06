@@ -3,16 +3,11 @@
 package server
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
 // pythonImage is pinned by digest. The node image is read from the conformance lane's pin
@@ -46,13 +40,6 @@ func nodeImage(t *testing.T) string {
 
 // Image names in containerClients; "node" is resolved by nodeImage.
 const nodeImageRef = "node"
-
-// Per-client budgets. Three clients in sequence stay inside the lane's `go test -timeout 11m`, so
-// a slow registry fails the client it slowed, with that client's output.
-const (
-	installBudget = 90 * time.Second
-	runBudget     = 90 * time.Second
-)
 
 var npmCI = []string{"npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund", "--fetch-retries=5", "--fetch-retry-mintimeout=2000"}
 
@@ -118,11 +105,11 @@ func TestIntegrationRealClientsSignInAndCallATool(t *testing.T) {
 			runCtx, cancelRun := context.WithTimeout(context.Background(), runBudget)
 			defer cancelRun()
 			cmd := docker(runCtx, t, work, image, "host", c.env, c.run(env.MCPURL, realClientID, freePort(t), realClientText))
-			stdout := runSigningIn(t, runCtx, cancelRun, env.browse, cmd)
+			stdout, output := runSigningIn(t, runCtx, cancelRun, env.browse, env.public+"/authorize?", cmd)
 			if !strings.Contains(stdout, realClientText) {
-				t.Fatalf("%s output lacks the tool's answer %q:\n%s", name, realClientText, stdout)
+				t.Fatalf("%s stdout lacks the tool's answer %q; output:\n%s", name, realClientText, output)
 			}
-			env.requireOneToolCallWithoutToken(t)
+			env.requireOneToolCallWithOnlyTheAssertion(t)
 		})
 	}
 }
@@ -141,9 +128,10 @@ func requireRealClients(t *testing.T) {
 	}
 }
 
-// docker runs args in image with the client's directory mounted at /w, as the calling user. The
-// container is named and removed when the test ends: cancelling kills only the docker CLI.
-func docker(ctx context.Context, t *testing.T, work, image, network string, env, args []string) *exec.Cmd {
+// docker runs args in image with the client's directory mounted at /w, as the calling user, plus
+// any read-only mounts ("host path:container path"). The container is named and removed when the
+// test ends: cancelling kills only the docker CLI.
+func docker(ctx context.Context, t *testing.T, work, image, network string, env, args []string, readOnly ...string) *exec.Cmd {
 	t.Helper()
 	b := make([]byte, 6)
 	_, _ = rand.Read(b)
@@ -154,80 +142,11 @@ func docker(ctx context.Context, t *testing.T, work, image, network string, env,
 	for _, e := range env {
 		a = append(a, "-e", e)
 	}
+	for _, m := range readOnly {
+		a = append(a, "-v", m+":ro")
+	}
 	a = append(append(a, image), args...)
 	return exec.CommandContext(ctx, "docker", a...) //nolint:gosec // G204: fixed images and the test's own arguments
-}
-
-// runSigningIn runs a client and plays its browser: on the line "Please navigate to: <URL>" it
-// signs in with browse and requests the client's callback. A failed step cancels the client, so
-// the test fails at once with the client's output. It returns the client's stdout.
-func runSigningIn(t *testing.T, ctx context.Context, cancel context.CancelFunc, browse func(string) (string, error), cmd *exec.Cmd) string {
-	t.Helper()
-	var stdout, stderrLog bytes.Buffer
-	cmd.Stdout = &stdout
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	callback := &http.Client{Timeout: 30 * time.Second}
-	var signIns int
-	var stepErr error
-	lines := bufio.NewScanner(stderr)
-	lines.Buffer(make([]byte, 0, 64<<10), 1<<20)
-	for lines.Scan() {
-		line := lines.Text()
-		stderrLog.WriteString(line + "\n")
-		_, url, ok := strings.Cut(line, "Please navigate to: ")
-		if !ok || stepErr != nil {
-			continue
-		}
-		signIns++
-		if stepErr = signIn(callback, browse, strings.TrimSpace(url)); stepErr != nil {
-			cancel()
-		}
-	}
-	scanErr := lines.Err()
-	waitErr := cmd.Wait()
-	switch {
-	case stepErr != nil:
-		t.Fatalf("sign-in: %v\nstdout:\n%s\nstderr:\n%s", stepErr, stdout.String(), stderrLog.String())
-	case scanErr != nil:
-		t.Fatalf("reading the client's stderr: %v\nstderr:\n%s", scanErr, stderrLog.String())
-	case waitErr != nil:
-		t.Fatalf("client: %v%s\nstdout:\n%s\nstderr:\n%s", waitErr, budgetNote(ctx, runBudget), stdout.String(), stderrLog.String())
-	case signIns != 1:
-		t.Fatalf("sign-ins: %d, want exactly 1\nstderr:\n%s", signIns, stderrLog.String())
-	}
-	return stdout.String()
-}
-
-// signIn plays the browser for one authorization URL and delivers the redirect to the client.
-func signIn(callback *http.Client, browse func(string) (string, error), authorize string) error {
-	redirect, err := browse(authorize)
-	if err != nil {
-		return fmt.Errorf("scripted browser: %w", err)
-	}
-	res, err := callback.Get(redirect) //nolint:gosec // G107: the client's own loopback callback
-	if err != nil {
-		return fmt.Errorf("the client's callback %s: %w", redirect, err)
-	}
-	_, _ = io.Copy(io.Discard, res.Body)
-	_ = res.Body.Close()
-	if res.StatusCode >= http.StatusBadRequest {
-		return errors.New("the client's callback answered " + res.Status)
-	}
-	return nil
-}
-
-// budgetNote names an expired budget, so a hang is not read as a crash ("signal: killed").
-func budgetNote(ctx context.Context, budget time.Duration) string {
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return fmt.Sprintf(" (its %s budget ran out)", budget)
-	}
-	return ""
 }
 
 func freePort(t *testing.T) int {

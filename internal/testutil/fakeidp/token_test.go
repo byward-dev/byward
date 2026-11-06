@@ -1,6 +1,7 @@
 package fakeidp
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -404,4 +405,25 @@ func TestSetTenantMovesDefaultUserButNotExplicitOne(t *testing.T) {
 	f.tenant = "organizations"
 	_, id = f.verified(t, f.login(t).str("id_token"))
 	wantClaim(t, id, "tid", pinned)
+}
+
+// A refresh carries the user's current roles, as Entra's new ID token does; another user set
+// since then does not take over the refresh token.
+func TestRefreshCarriesTheSameUsersCurrentRoles(t *testing.T) {
+	f := newFixture(t, Entra, WithUser(User{Roles: []string{"a"}}))
+	rt := f.login(t).str("refresh_token")
+	u := f.idp.User()
+	u.Roles = []string{"a", "b"}
+	f.idp.Set(WithUser(u))
+	r := f.token(t, refreshForm(rt))
+	wantStatus(t, r, http.StatusOK)
+	if _, claims := f.verified(t, r.str("id_token")); fmt.Sprint(claims["roles"]) != "[a b]" {
+		t.Fatalf("roles after refresh %v", claims["roles"])
+	}
+	f.idp.Set(WithUser(User{Roles: []string{"other"}})) // a new OID: someone else
+	r = f.token(t, refreshForm(r.str("refresh_token")))
+	wantStatus(t, r, http.StatusOK)
+	if _, claims := f.verified(t, r.str("id_token")); claims["oid"] != u.OID || fmt.Sprint(claims["roles"]) != "[a b]" {
+		t.Fatalf("refresh switched user: %v", claims)
+	}
 }

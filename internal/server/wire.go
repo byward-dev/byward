@@ -2,8 +2,10 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/byward-dev/byward/internal/assertion"
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/broker"
 	"github.com/byward-dev/byward/internal/config"
@@ -49,6 +52,9 @@ type auth struct {
 	closeStore func() error
 	// sessions binds legacy-era MCP sessions to the user (ADR-0004 §2, invariant 13).
 	sessions func(http.Handler) http.Handler
+	// minter signs the identity assertion and jwks serves its keys; both nil for a stdio upstream.
+	minter *assertion.Minter
+	jwks   http.Handler
 }
 
 // idpName names the IdP adapter in its callback path, the broker and metrics.
@@ -67,6 +73,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	}
 	ring, sealer, provider, static, g := parts.ring, parts.sealer, parts.provider, parts.static, parts.gate
 	auditStartup(o.Audit, ring, static.IDs())
+	log.Info("client sources", "static_clients", len(static.IDs()), "cimd", cfg.CIMD, "dcr", cfg.DCR)
 	guard := ssrfguard.New(ssrfguard.Config{}) // every client-supplied URL (CIMD documents, jwks_uri) goes through it
 	clients := registration.Chain{static}
 	if cfg.CIMD {
@@ -101,7 +108,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 		SecureCookies: cfg.PublicURL.Scheme == "https", Log: log,
 		Audit: o.Audit, Limiter: ratelimit.New(cfg.OAuthRateLimits, maxRateLimitKeys, time.Now, o.Metrics.RateLimited),
 		ObserveIdP:   func(op, outcome string, d time.Duration) { o.Metrics.IdP(idpName, op, outcome, d) },
-		RefreshGrace: cfg.RefreshGrace})
+		RefreshGrace: cfg.RefreshGrace, Assert: assertedClaims(cfg)})
 	if err != nil {
 		return nil, err
 	}
@@ -117,11 +124,54 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 		return nil, err
 	}
 	log.Info("broker ready", "reason", "keys "+fmt.Sprint(len(ring.KeyIDs()))+", signing with "+ring.SigningKeyID()+"")
-	return &auth{register: b.Register, validator: v, checks: readiness(ring, st), background: func(ctx context.Context) { runBackground(ctx, st, deny, log) }, closeStore: st.Close,
+	a := &auth{register: b.Register, validator: v, checks: readiness(ring, st), background: func(ctx context.Context) { runBackground(ctx, st, deny, log) }, closeStore: st.Close,
 		sessions: func(next http.Handler) http.Handler {
 			return mcpsession.Bind(mcpsession.Config{Box: parts.sessionBox, Upstream: upstreamID(cfg), User: signedInUser,
 				Lifetime: broker.GrantLifetime, Audit: o.Audit, Log: log}, next)
-		}}, nil
+		}}
+	if k := parts.assertionKeys; k != nil {
+		if a.minter, err = assertion.NewMinter(k, cfg.Issuer(), cfg.UpstreamURL.String(), time.Now); err != nil {
+			return nil, err
+		}
+		a.jwks = k.JWKSHandler()
+		log.Info("identity assertion", "reason", "signing with key "+k.SigningKeyID()+", keys "+strings.Join(k.KeyIDs(), " "),
+			"setting", "BYWARD_ASSERTION_HEADER", "value", cfg.AssertionHeader)
+	}
+	return a, nil
+}
+
+// jwksPath serves the assertion keys (ADR-0016 §3).
+const jwksPath = "/.well-known/jwks.json"
+
+// ExportJWKS is `byward jwks`: the public keys of BYWARD_ASSERTION_KEYS_DIR as a JWKS, for an
+// upstream that loads them from a file instead of fetching them (ADR-0016 §3). Run it again after
+// every key rotation.
+func ExportJWKS(cfg *config.Config) ([]byte, error) {
+	keys, err := assertion.LoadKeys(cfg.AssertionKeysDir, secretCheck(cfg))
+	if err != nil {
+		return nil, fmt.Errorf("BYWARD_ASSERTION_KEYS_DIR: %s: %w (see docs/how-to/identity-assertion.md)", cfg.AssertionKeysDir, err)
+	}
+	return json.MarshalIndent(keys.JWKS(), "", "  ")
+}
+
+// assertedClaims maps BYWARD_ASSERTION_CLAIMS to the claims the broker seals into access tokens.
+func assertedClaims(cfg *config.Config) broker.Asserted {
+	var a broker.Asserted
+	for _, c := range cfg.AssertionClaims {
+		switch c {
+		case "roles":
+			a.Roles = true
+		case "groups":
+			a.Groups = true
+		case "email":
+			a.Email = true
+		case "name":
+			a.Name = true
+		default: // config.AssertionClaimNames and this switch must list the same names
+			panic("server: unhandled assertion claim " + c)
+		}
+	}
+	return a
 }
 
 // authParts is what authenticated mode builds from configuration alone, with no network access and
@@ -136,8 +186,10 @@ type authParts struct {
 	jti *registration.MemoryJTICache
 	// clientDeny is BYWARD_CLIENT_DENYLIST, applied to CIMD and DCR clients.
 	clientDeny *registration.Denylist
-	provider   *entra.Provider
-	gate       *gate.Gate
+	// assertionKeys sign the identity assertion for an HTTP upstream; nil for a stdio upstream.
+	assertionKeys *assertion.Keys
+	provider      *entra.Provider
+	gate          *gate.Gate
 	// warnings are logged at every start and reported by check and doctor.
 	warnings []Warning
 }
@@ -190,7 +242,16 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 	checkSecret := secretCheck(cfg)
 	loose := looseSecretFiles(cfg) // with the static clients' error below, reported at once
 	p.jti = registration.NewMemoryJTICache(time.Now, maxJTIs)
-	p.static, err = registration.LoadStatic(cfg.StaticClientsFile, os.ReadFile, p.jti, registration.WithSecretCheck(checkSecret))
+	opts := []registration.LoadOption{registration.WithSecretCheck(checkSecret)}
+	if cfg.CIMD || cfg.DCR { // apps can register themselves, so no static client is needed
+		opts = append(opts, registration.AllowNoClients())
+		// A file the operator named must exist, so a typo fails here. At the default path only nothing
+		// at all counts as absent: a dangling symlink (a broken mount) still fails.
+		if _, err := os.Lstat(cfg.StaticClientsFile); !cfg.StaticClientsFileNamed && errors.Is(err, fs.ErrNotExist) {
+			opts = append(opts, registration.AllowMissingFile())
+		}
+	}
+	p.static, err = registration.LoadStatic(cfg.StaticClientsFile, os.ReadFile, p.jti, opts...)
 	if err != nil {
 		loose = append(loose, fmt.Errorf("BYWARD_STATIC_CLIENTS_FILE: %s: %w (see docs/reference/static-clients.md)", cfg.StaticClientsFile, err))
 	}
@@ -199,6 +260,12 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 	}
 	if p.clientDeny, err = registration.NewDenylist(cfg.ClientDenylist); err != nil {
 		return nil, fmt.Errorf("BYWARD_CLIENT_DENYLIST: %w", err)
+	}
+	if cfg.UpstreamCommand == nil { // only an HTTP upstream gets the assertion (ADR-0016 §2, §6)
+		if p.assertionKeys, err = assertion.LoadKeys(cfg.AssertionKeysDir, secretCheck(cfg)); err != nil {
+			// No key generation (ADR-0007 §5, ADR-0016 §10): the operator creates the first key.
+			return nil, fmt.Errorf("BYWARD_ASSERTION_KEYS_DIR: %s: %w (see docs/how-to/identity-assertion.md)", cfg.AssertionKeysDir, err)
+		}
 	}
 	p.provider, err = entra.New(entra.Config{Tenant: cfg.EntraTenant, ClientID: cfg.EntraClientID,
 		ClientAuth: idp.ClientSecret(cfg.EntraClientSecret), RedirectURL: config.RedirectURL(cfg.PublicURL, idpName), HTTPClient: idpHTTP})

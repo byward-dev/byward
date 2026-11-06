@@ -32,15 +32,28 @@ var errUpstreamRefused = errors.New("upstream refused the proxy and the request 
 type Option func(*options)
 
 type options struct {
-	inject        func(context.Context, http.Header)
+	inject        []func(context.Context, http.Header)
+	strip         map[string]bool // more headers removed from every inbound request
 	headerTimeout time.Duration
 }
 
-// WithTraceContext sets how the relay writes trace context onto the upstream request (the
-// server wires the tracing package's propagator). Without it nothing is written, and an inbound
-// `traceparent` passes unchanged.
-func WithTraceContext(inject func(context.Context, http.Header)) Option {
-	return func(o *options) { o.inject = inject }
+// WithInject adds a function that sets headers on every upstream request, after the inbound
+// request's credentials and forwarding headers are gone (invariant 16), in the order given: the
+// tracing propagator and the identity assertion. Without one, an inbound `traceparent` passes
+// unchanged.
+func WithInject(inject func(context.Context, http.Header)) Option {
+	return func(o *options) { o.inject = append(o.inject, inject) }
+}
+
+// WithStripped removes more headers from every inbound request, compared as the built-in ones are
+// (case-insensitive, `_` read as `-`): the header the identity assertion travels in, so a client
+// can never supply one (ADR-0016 §4).
+func WithStripped(names ...string) Option {
+	return func(o *options) {
+		for _, n := range names {
+			o.strip[canonical(n)] = true
+		}
+	}
 }
 
 // WithResponseHeaderTimeout bounds how long the upstream may take to send its response headers
@@ -53,7 +66,7 @@ func WithResponseHeaderTimeout(d time.Duration) Option {
 // New returns a handler relaying each request to target, the upstream's MCP endpoint URL: the
 // request path is replaced by target's path; the query is kept.
 func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
-	o := options{inject: func(context.Context, http.Header) {}}
+	o := options{strip: map[string]bool{}}
 	for _, f := range opts {
 		f(&o)
 	}
@@ -63,11 +76,14 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 			pr.Out.URL.Scheme, pr.Out.URL.Host = t.Scheme, t.Host
 			pr.Out.URL.Path, pr.Out.URL.RawPath = t.Path, t.RawPath
 			pr.Out.Host = ""
-			strip(pr.Out.Header)
+			strip(pr.Out.Header, o.strip)
 			// A token in the query never reaches the upstream, with or without authentication.
 			pr.Out.URL.RawQuery = withoutAccessToken(pr.Out.URL.RawQuery)
-			// Our span's trace context toward the upstream; the body (`params._meta`) is never touched.
-			o.inject(pr.In.Context(), pr.Out.Header)
+			// Ours, after the strip: trace context (the body, `params._meta`, is never touched) and the
+			// identity assertion.
+			for _, inject := range o.inject {
+				inject(pr.In.Context(), pr.Out.Header)
+			}
 		},
 		Transport: &http.Transport{
 			Proxy:                 http.ProxyFromEnvironment,
@@ -157,11 +173,16 @@ func withoutAccessToken(raw string) string {
 	return strings.Join(kept, "&")
 }
 
-func strip(h http.Header) {
+func strip(h http.Header, extra map[string]bool) {
 	for k := range h {
-		n := textproto.CanonicalMIMEHeaderKey(strings.ReplaceAll(k, "_", "-"))
-		if stripped[n] || strings.HasPrefix(n, "X-Forwarded-") || strings.HasPrefix(n, "Sec-Fetch-") {
+		n := canonical(k)
+		if stripped[n] || extra[n] || strings.HasPrefix(n, "X-Forwarded-") || strings.HasPrefix(n, "Sec-Fetch-") {
 			delete(h, k)
 		}
 	}
+}
+
+// canonical is a header name as strip compares it: `_` read as `-`, canonical case.
+func canonical(name string) string {
+	return textproto.CanonicalMIMEHeaderKey(strings.ReplaceAll(name, "_", "-"))
 }

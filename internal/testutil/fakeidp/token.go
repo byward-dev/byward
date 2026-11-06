@@ -127,7 +127,11 @@ func (p *IdP) redeemRefresh(form url.Values, c Client, method string) (map[strin
 	if p.cfg.singleUseRT && p.cfg.rotateRefresh {
 		delete(p.refresh, rt)
 	}
-	return p.issue(c, method, g.user, scopes, "", g.authTime, p.cfg.rotateRefresh)
+	u := g.user
+	if cur := p.cfg.user; cur.TenantID == u.TenantID && cur.OID == u.OID {
+		u = cur // the IdP reissues the user's current claims (roles, groups) on refresh
+	}
+	return p.issue(c, method, u, scopes, "", g.authTime, p.cfg.rotateRefresh)
 }
 
 // issue builds the token response for a user login or refresh. Caller holds p.mu.

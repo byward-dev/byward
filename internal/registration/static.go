@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -72,7 +73,21 @@ func (r *StaticRegistry) IDs() []string {
 // LoadOption configures LoadStatic.
 type LoadOption func(*loadOptions)
 
-type loadOptions struct{ checkSecret func(path string) error }
+type loadOptions struct {
+	checkSecret            func(path string) error
+	allowNone, allowNoFile bool
+}
+
+// AllowNoClients accepts a file that lists no clients; the server passes it when CIMD or DCR lets
+// apps register themselves, so the operator need not pre-register any.
+func AllowNoClients() LoadOption { return func(o *loadOptions) { o.allowNone = true } }
+
+// AllowMissingFile treats an absent clients file as one with no clients, and so implies
+// AllowNoClients; the server passes it only for the default path. A secret or JWKS file the
+// clients file names must still exist.
+func AllowMissingFile() LoadOption {
+	return func(o *loadOptions) { o.allowNoFile, o.allowNone = true, true }
+}
 
 // WithSecretCheck runs check on each client_secret_file before it is read; the server passes the
 // permission check for secret files (ADR-0018 §11). JWKS files hold public keys and are not checked.
@@ -81,15 +96,23 @@ func WithSecretCheck(check func(path string) error) LoadOption {
 }
 
 // LoadStatic reads the static clients file at path. Secret and JWKS file paths inside it are
-// relative to its directory. readFile is the only file access (tests pass a map); jti is the replay
-// cache for private_key_jwt. Errors name the client and field and never contain secrets.
+// relative to its directory. readFile is the only file access (tests pass a map); for an absent
+// file it must return an error wrapping fs.ErrNotExist, as os.ReadFile does, which AllowMissingFile
+// relies on. jti is the replay cache for private_key_jwt. Errors name the client and field and
+// never contain secrets.
 func LoadStatic(path string, readFile func(string) ([]byte, error), jti JTICache, opts ...LoadOption) (*StaticRegistry, error) {
 	o := loadOptions{checkSecret: func(string) error { return nil }}
 	for _, f := range opts {
 		f(&o)
 	}
+	if jti == nil {
+		return nil, errors.New("static clients: a jti cache is required")
+	}
 	data, err := readFile(path)
-	if err != nil {
+	switch {
+	case o.allowNoFile && errors.Is(err, fs.ErrNotExist):
+		return &StaticRegistry{}, nil
+	case err != nil:
 		return nil, fmt.Errorf("static clients: %w", err)
 	}
 	readSecret := func(p string) ([]byte, error) {
@@ -98,10 +121,10 @@ func LoadStatic(path string, readFile func(string) ([]byte, error), jti JTICache
 		}
 		return readFile(p)
 	}
-	return parseStatic(data, filepath.Dir(path), readFile, readSecret, jti)
+	return parseStatic(data, filepath.Dir(path), readFile, readSecret, jti, o.allowNone)
 }
 
-func parseStatic(data []byte, dir string, readFile, readSecret func(string) ([]byte, error), jti JTICache) (*StaticRegistry, error) {
+func parseStatic(data []byte, dir string, readFile, readSecret func(string) ([]byte, error), jti JTICache, allowNone bool) (*StaticRegistry, error) {
 	if len(data) > MaxStaticFileBytes {
 		return nil, fmt.Errorf("static clients: file larger than %d bytes", MaxStaticFileBytes)
 	}
@@ -119,14 +142,11 @@ func parseStatic(data []byte, dir string, readFile, readSecret func(string) ([]b
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return nil, errors.New("static clients: unexpected data after the JSON object")
 	}
-	if len(f.Clients) == 0 {
+	if len(f.Clients) == 0 && !allowNone {
 		return nil, errors.New("static clients: no clients")
 	}
 	if len(f.Clients) > MaxStaticClients {
 		return nil, fmt.Errorf("static clients: more than %d clients", MaxStaticClients)
-	}
-	if jti == nil {
-		return nil, errors.New("static clients: a jti cache is required")
 	}
 	reg := &StaticRegistry{clients: map[string]*staticClient{}}
 	for i, e := range f.Clients {

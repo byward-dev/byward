@@ -352,9 +352,7 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 		remembered = c
 	}
 	now := b.cfg.Now()
-	tokJSON, _ := json.Marshal(toks) //nolint:gosec // G117: marshalled only to be sealed in the IdP-token box below
-
-	sealedTokens, err := b.cfg.IdPTokenBox.Seal(tokJSON, now.Add(GrantLifetime))
+	sealedTokens, err := b.cfg.IdPTokenBox.Seal(marshalSecrets(toks, b.cfg.Assert.claimsOf(id)), now.Add(GrantLifetime))
 	if err != nil {
 		b.serverError(w, r, err)
 		return

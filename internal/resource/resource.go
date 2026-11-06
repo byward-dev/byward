@@ -17,9 +17,14 @@ import (
 // WellKnownPath is the RFC 9728 well-known path prefix.
 const WellKnownPath = "/.well-known/oauth-protected-resource"
 
-// Identity is who a valid proxy token belongs to.
+// Identity is who a valid proxy token belongs to, and the claims asserted about them to the
+// upstream (ADR-0016 §1). Only Subject is set without authentication.
 type Identity struct {
-	Subject string
+	Subject  string
+	ClientID string
+	// The opted-in identity claims, as sealed at the token's issue.
+	Roles, Groups []string
+	Email, Name   string
 }
 
 // Validation errors. Only these two are distinguished to clients; every other failure,

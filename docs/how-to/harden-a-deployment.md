@@ -47,6 +47,13 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) §1�
         read-only mount such as a Kubernetes secret volume.
       - It does **not** refuse group- or other-readable files. Use `0600` (or `0400`) yourself
         wherever the platform allows.
+- [ ] Create the identity assertion's signing key as in [identity assertion](identity-assertion.md):
+      a separate directory, `BYWARD_ASSERTION_KEYS_DIR`, mode `0700`, one PEM P-256 file per key,
+      `0600` and owned by the proxy's user. Unlike sealing keys, a key file other users can read is
+      refused, unless it is on a read-only mount.
+- [ ] Configure the upstream's verifier with the audience `BYWARD_UPSTREAM_URL` exactly, and with
+      the JWKS of the internal listener if it cannot reach the public one
+      ([reference](../reference/identity-assertion.md#verifying)).
 - [ ] Keep keys out of backups of the state directory, and out of images and repositories. The
       store never holds them ([ADR-0007](../adr/0007-state-and-storage.md) §5).
 - [ ] Rotate by adding a file whose name sorts last (date names), restarting, and removing the old

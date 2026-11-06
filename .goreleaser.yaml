@@ -65,7 +65,8 @@ dockers_v2:
     # Snapshots are tagged snapshot-<arch> and only loaded locally (scripts/image-smoke.sh relies on it).
     tags:
       - "{{ if .IsSnapshot }}snapshot{{ else }}v{{ .Version }}{{ end }}"
-      - "{{ if not .IsSnapshot }}latest{{ end }}"
+      # Pre-releases (v0.1.0-rc.1) never move latest: .Prerelease is the suffix, empty for a final release.
+      - "{{ if not (or .IsSnapshot .Prerelease) }}latest{{ end }}"
     platforms: [linux/amd64, linux/arm64]
     extra_files: [LICENSE, build/licenses]
     build_args:
@@ -93,3 +94,5 @@ release:
 
 changelog:
   use: github
+  # Commit hash and message only: the default line adds the author's name and email.
+  format: "{{ .SHA }}: {{ .Message }}"

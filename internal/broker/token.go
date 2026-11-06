@@ -203,15 +203,49 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 	if !offline { // the response reports the scope actually granted (RFC 6749 §5.1)
 		scopes = slices.DeleteFunc(slices.Clone(scopes), func(s string) bool { return s == "offline_access" })
 	}
+	asserted, err := b.grantClaims(ctx, claims.GrantID)
+	if err != nil {
+		b.cfg.Log.ErrorContext(ctx, "reading a grant's identity claims failed", "request_id", logging.RequestID(ctx), "error", err)
+		b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not issue a token"})
+		return
+	}
 	b.recordUse(ctx, client, now)
-	b.issue(w, r, client.ID(), claims.GrantID, claims.Subject, now, expires, scopes, refresh)
+	b.issue(w, r, client.ID(), claims.GrantID, claims.Subject, asserted, now, expires, scopes, refresh)
 }
 
-// issue seals an access token (capped at the grant's expiry) and writes the token response.
-func (b *Broker) issue(w http.ResponseWriter, r *http.Request, clientID, grantID, subject string, now, grantExpires time.Time, scopes []string, refresh string) {
+// grantClaims are the identity claims kept with a grant at sign-in, for its first access token.
+func (b *Broker) grantClaims(ctx context.Context, grantID string) (assertedClaims, error) {
+	g, err := b.cfg.Store.Grant(ctx, grantID)
+	if err != nil {
+		return assertedClaims{}, err
+	}
+	if len(g.IdPTokens) == 0 {
+		return assertedClaims{}, nil
+	}
+	plain, err := b.cfg.IdPTokenBox.Open(string(g.IdPTokens))
+	if err != nil {
+		return assertedClaims{}, err
+	}
+	s, err := unmarshalSecrets(plain)
+	return s.Claims, err
+}
+
+// issue seals an access token (capped at the grant's expiry) carrying the client and the asserted
+// identity claims, and writes the token response.
+func (b *Broker) issue(w http.ResponseWriter, r *http.Request, clientID, grantID, subject string, asserted assertedClaims, now, grantExpires time.Time, scopes []string, refresh string) {
 	ctx := r.Context()
 	exp := minTime(now.Add(AccessLifetime), grantExpires)
-	access, err := b.cfg.Sealer.Seal(token.Access, token.Claims{GrantID: grantID, Subject: subject, IssuedAt: now, ExpiresAt: exp})
+	c := token.Claims{GrantID: grantID, Subject: subject, IssuedAt: now, ExpiresAt: exp, ClientID: clientID,
+		Roles: asserted.Roles, Groups: asserted.Groups, Email: asserted.Email, Name: asserted.Name}
+	access, err := b.cfg.Sealer.Seal(token.Access, c)
+	if errors.Is(err, token.ErrTooLong) && len(c.Groups) > 0 {
+		// Too many groups for a token: assert none rather than fail the sign-in; the upstream then
+		// sees no groups claim, as with Entra's groups overage.
+		b.cfg.Log.WarnContext(ctx, "the user's groups do not fit in an access token; the assertion carries no groups", "request_id", logging.RequestID(ctx),
+			"groups", len(c.Groups), "setting", "BYWARD_ASSERTION_CLAIMS")
+		c.Groups = nil
+		access, err = b.cfg.Sealer.Seal(token.Access, c)
+	}
 	if err != nil {
 		b.cfg.Log.ErrorContext(ctx, "sealing an access token failed", "request_id", logging.RequestID(ctx), "error", err)
 		b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not issue a token"})

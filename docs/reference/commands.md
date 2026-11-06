@@ -13,6 +13,7 @@ after `--`, as for the proxy (`byward check --offline -- /usr/local/bin/server -
 | `byward init entra --tenant <id>` | prints the `az` commands for the Entra app registration and a minimal env file | none | 0, 2 |
 | `byward revoke-user <tid:oid>` | ends one user's access ([hardening](../how-to/harden-a-deployment.md)) | the store | 0, 1, 2 |
 | `byward revoke-all --yes` | ends every user's access ([hardening](../how-to/harden-a-deployment.md)) | the store | 0, 1, 2 |
+| `byward jwks` | prints the identity assertion's public keys as a JWKS, for an upstream that loads them from a file ([identity assertion](../how-to/identity-assertion.md)) | none | 0, 2 |
 
 Decisions: [ADR-0020](../adr/0020-configuration.md) §7–8, [ADR-0021](../adr/0021-observability.md) §11,
 [ADR-0013](../adr/0013-discovery-and-errors.md) §8, [ADR-0012](../adr/0012-entra-specifics.md) §10, §12.
@@ -22,7 +23,7 @@ Decisions: [ADR-0020](../adr/0020-configuration.md) §7–8, [ADR-0021](../adr/0
 Checks everything the proxy checks at startup that needs no network and writes nothing:
 
 - the settings (unknown names, values, required settings);
-- the sealing keys and the static clients file;
+- the sealing keys and the static clients file (optional while CIMD or DCR is on);
 - the Entra settings and the access gate;
 - the secret files' permissions, as at startup (relaxed with `--dev`);
 - a stdio upstream's command (`BYWARD_UPSTREAM_COMMAND` or the command after `--`): it must be found

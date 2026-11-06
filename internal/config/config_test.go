@@ -486,6 +486,20 @@ func TestPathsDefaultIntoTheDataDirectory(t *testing.T) {
 	}
 }
 
+// The server needs to know whether the operator named the static clients file: a named file must
+// exist, while the default one may be absent when apps can register themselves.
+func TestTheConfigSaysWhetherTheStaticClientsFileWasNamed(t *testing.T) {
+	for _, tc := range []struct {
+		env   []string
+		named bool
+	}{{nil, false}, {[]string{"BYWARD_STATIC_CLIENTS_FILE=/etc/byward/clients.json"}, true}} {
+		c, err := load(t, nil, tc.env...)
+		if err != nil || c.StaticClientsFileNamed != tc.named {
+			t.Fatalf("env %q: named = %v (%v), want %v", tc.env, c.StaticClientsFileNamed, err, tc.named)
+		}
+	}
+}
+
 func TestRefreshGraceDefaultsTo30sAndAcceptsItsBounds(t *testing.T) {
 	for _, tc := range []struct {
 		name string
