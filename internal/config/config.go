@@ -12,20 +12,27 @@ import (
 
 // registry is every setting the proxy reads, in the order the effective configuration is printed.
 var registry = []Setting{
-	{Name: "public-url", Help: "public URL of the MCP endpoint exactly as users enter it, e.g. https://mcp.example.com/mcp"},
+	{Name: "public-url", Help: "public URL of the MCP endpoint exactly as users enter it, e.g. https://mcp.example.com/mcp; an internationalized host in its ASCII (xn--) form"},
 	{Name: "upstream-url", Help: "URL of the HTTP upstream MCP server"},
 	{Name: "listen", Default: "127.0.0.1:8080", Help: "address to listen on; public addresses only when configured"},
-	{Name: "allowed-origins", Help: "comma-separated Origin values allowed on the MCP endpoint (scheme://host[:port])"},
-	{Name: "allowed-hosts", Help: "comma-separated extra Host values accepted besides the public URL's host"},
+	{Name: "allowed-origins", Help: "comma-separated Origin values allowed on the MCP endpoint (scheme://host[:port]); an internationalized host in its ASCII (xn--) form"},
+	{Name: "allowed-hosts", Help: "comma-separated extra Host values accepted besides the public URL's host; an internationalized host in its ASCII (xn--) form"},
 	{Name: "scope", Default: "mcp", Help: "the scope advertised in protected resource metadata and 401 challenges"},
 	{Name: "resource-name", Help: "human-readable resource name in protected resource metadata"},
 	{Name: "resource-documentation", Help: "documentation URL in protected resource metadata"},
 	{Name: "log-format", Default: "json", Help: "log format: json or text"},
+	{Name: "internal-listen", Default: "127.0.0.1:9090", Help: "address of the internal listener for /metrics, /livez and /readyz (ADR-0018 §10); empty turns it off"},
 	{Name: "entra-tenant", Auth: true, Help: "Entra tenant ID (a GUID) of the IdP app"},
 	{Name: "entra-client-id", Auth: true, Help: "application (client) ID of the IdP app registration"},
 	{Name: "entra-client-secret", Auth: true, Secret: true, Help: "client secret of the IdP app"},
 	{Name: "keys-dir", Auth: true, Help: "directory of sealing keys; each file is one key, its name the key ID (docs/how-to/sealing-keys.md)"},
 	{Name: "static-clients-file", Auth: true, Help: "JSON file of pre-registered MCP clients (docs/reference/static-clients.md)"},
+	{Name: "gate-tenants", Auth: true, Help: "access gate: comma-separated Entra tenant IDs allowed to sign in (docs/how-to/access-gate.md)"},
+	{Name: "gate-roles", Auth: true, Help: "access gate: comma-separated app roles; users need at least one (docs/how-to/access-gate.md)"},
+	{Name: "gate-groups", Auth: true, Help: "access gate: comma-separated group IDs; users need one, and groups overage denies (docs/how-to/access-gate.md)"},
+	{Name: "gate-email-domains", Auth: true, Help: "access gate: comma-separated domains of a verified email; generic OIDC IdPs only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md)"},
+	{Name: "gate-hosted-domains", Auth: true, Help: "access gate: comma-separated Google Workspace domains (hd claim); Google only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md)"},
+	{Name: "gate-allow-empty", Auth: true, Bool: true, Default: "false", Help: "allow an empty access gate for a Google or generic OIDC IdP (anyone with an account can sign in); no effect with Entra (docs/how-to/access-gate.md)"},
 	{Name: "insecure-no-auth", Bool: true, Default: "false", Help: "no authentication at all, for trying the proxy out and for tests; loopback only (ADR-0027)"},
 	{Name: "dev", Bool: true, Default: "false", Help: "development mode: enables the relaxations it logs at startup"},
 }
@@ -35,6 +42,7 @@ type Config struct {
 	PublicURL             *url.URL
 	UpstreamURL           *url.URL
 	Listen                string
+	InternalListen        string // "" when the internal listener is off
 	AllowedOrigins        []string
 	AllowedHosts          []string
 	Scope                 string
@@ -50,6 +58,9 @@ type Config struct {
 	EntraClientSecret string
 	KeysDir           string
 	StaticClientsFile string
+	// The access gate (slice 1.5, ADR-0015); validated by gate.New when the broker is wired.
+	GateTenants, GateRoles, GateGroups, GateEmailDomains, GateHostedDomains []string
+	GateAllowEmpty                                                          bool
 	// InContainer is set when the proxy runs in a container (/.dockerenv or /run/.containerenv)
 	// with its own network namespace; host networking does not count (see ownNetwork).
 	InContainer bool
@@ -88,7 +99,7 @@ func Load(args, environ []string, readFile readFileFunc) (*Config, Actions, erro
 }
 
 func validate(v *Values, container bool) (*Config, error) {
-	c := &Config{Values: v, Listen: v.get("listen"), Scope: v.get("scope"),
+	c := &Config{Values: v, Listen: v.get("listen"), InternalListen: v.get("internal-listen"), Scope: v.get("scope"),
 		ResourceName: v.get("resource-name"), ResourceDocumentation: v.get("resource-documentation"),
 		LogFormat: v.get("log-format"), InContainer: container}
 	var errs []error
@@ -113,6 +124,9 @@ func validate(v *Values, container bool) (*Config, error) {
 	if err != nil {
 		errs = append(errs, err)
 	} else {
+		if err := asciiHost(c.PublicURL.Hostname()); err != nil {
+			errs = append(errs, errorf("MCP_AUTHPROXY_PUBLIC_URL: %v", err))
+		}
 		if c.PublicURL.Path == "" || strings.HasSuffix(c.PublicURL.Path, "/") {
 			errs = append(errs, errorf("MCP_AUTHPROXY_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://%s/mcp", c.PublicURL.Host))
 		}
@@ -138,6 +152,13 @@ func validate(v *Values, container bool) (*Config, error) {
 	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
 		errs = append(errs, errorf("MCP_AUTHPROXY_LISTEN: want host:port, got %q", c.Listen))
 	}
+	if c.InternalListen != "" {
+		if _, _, err := net.SplitHostPort(c.InternalListen); err != nil {
+			errs = append(errs, errorf("MCP_AUTHPROXY_INTERNAL_LISTEN: want host:port or empty, got %q", c.InternalListen))
+		} else if c.InternalListen == c.Listen && !strings.HasSuffix(c.Listen, ":0") {
+			errs = append(errs, errorf("MCP_AUTHPROXY_INTERNAL_LISTEN: must differ from MCP_AUTHPROXY_LISTEN; metrics and probes never share the public listener"))
+		}
+	}
 	for _, o := range splitList(v.get("allowed-origins")) {
 		n, err := normalizeOrigin(o)
 		if err != nil {
@@ -149,6 +170,10 @@ func validate(v *Values, container bool) (*Config, error) {
 	for _, h := range splitList(v.get("allowed-hosts")) {
 		if strings.ContainsAny(h, "/ ") {
 			errs = append(errs, errorf("MCP_AUTHPROXY_ALLOWED_HOSTS: %q is not a host[:port]", h))
+			continue
+		}
+		if err := asciiHost(h); err != nil {
+			errs = append(errs, errorf("MCP_AUTHPROXY_ALLOWED_HOSTS: %v", err))
 			continue
 		}
 		c.AllowedHosts = append(c.AllowedHosts, strings.ToLower(h))
@@ -178,6 +203,17 @@ func validate(v *Values, container bool) (*Config, error) {
 				}
 				errs = append(errs, errorf("%s is required (or set MCP_AUTHPROXY_INSECURE_NO_AUTH to try the proxy without sign-in)", env))
 			}
+		}
+		c.GateTenants, c.GateRoles, c.GateGroups = splitList(v.get("gate-tenants")), splitList(v.get("gate-roles")), splitList(v.get("gate-groups"))
+		c.GateEmailDomains, c.GateHostedDomains = splitList(v.get("gate-email-domains")), splitList(v.get("gate-hosted-domains"))
+		// A gate list that is set but names nothing would silently open the gate.
+		for _, s := range []string{"gate-tenants", "gate-roles", "gate-groups", "gate-email-domains", "gate-hosted-domains"} {
+			if raw := v.get(s); raw != "" && len(splitList(raw)) == 0 {
+				errs = append(errs, errorf("%s is set but lists nothing; remove it or give at least one entry", Setting{Name: s}.Env()))
+			}
+		}
+		if c.GateAllowEmpty, err = strconv.ParseBool(v.get("gate-allow-empty")); err != nil {
+			errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "gate-allow-empty"}.Env(), v.get("gate-allow-empty")))
 		}
 		if t := c.EntraTenant; t != "" && !isGUID(t) {
 			errs = append(errs, errorf("MCP_AUTHPROXY_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000, got %q", t))
@@ -357,7 +393,20 @@ func normalizeOrigin(o string) (string, error) {
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.User != nil {
 		return "", fmt.Errorf("%q is not an origin (scheme://host[:port])", o)
 	}
+	if err := asciiHost(u.Hostname()); err != nil {
+		return "", err
+	}
 	return strings.ToLower(u.Scheme + "://" + u.Host), nil
+}
+
+// asciiHost refuses a host with non-ASCII characters. Browsers and MCP clients send an
+// internationalized host in its ASCII (xn--) form in Host, Origin and every URL they compare
+// (WHATWG URL "domain to ASCII", RFC 6454 §7.3), so a Unicode host here could never match them.
+func asciiHost(host string) error {
+	if strings.ContainsFunc(host, func(r rune) bool { return r >= 0x80 }) {
+		return fmt.Errorf("the host %q is not ASCII; give its ASCII (xn--) form, which is what browsers and MCP clients send", host)
+	}
+	return nil
 }
 
 func isLoopback(host string) bool {

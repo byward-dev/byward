@@ -1,0 +1,11 @@
+{"time":"T","level":"INFO","msg":"audit login","log.type":"audit","schema_version":1,"event":"login","outcome":"success","client_id":"client-1","user_key":"tid:oid","grant_id":"grant-1","idp":"entra","remote_ip":"192.0.2.7"}
+{"time":"T","level":"WARN","msg":"audit login","log.type":"audit","schema_version":1,"event":"login","outcome":"failure","reason":"the IdP refused the sign-in","client_id":"client-1","idp":"entra","remote_ip":"192.0.2.7"}
+{"time":"T","level":"WARN","msg":"audit access_denied","log.type":"audit","schema_version":1,"event":"access_denied","outcome":"failure","reason":"not allowed by the access gate","client_id":"client-1","user_key":"tid:oid","idp":"entra","remote_ip":"192.0.2.7"}
+{"time":"T","level":"INFO","msg":"audit token_issued","log.type":"audit","schema_version":1,"event":"token_issued","outcome":"success","client_id":"client-1","user_key":"tid:oid","grant_id":"grant-1","remote_ip":"192.0.2.7"}
+{"time":"T","level":"WARN","msg":"audit token_rejected","log.type":"audit","schema_version":1,"event":"token_rejected","outcome":"failure","reason":"invalid_grant","client_id":"client-1","remote_ip":"192.0.2.7"}
+{"time":"T","level":"WARN","msg":"audit access_token_rejected","log.type":"audit","schema_version":1,"event":"access_token_rejected","outcome":"failure","reason":"invalid_token","remote_ip":"192.0.2.7"}
+{"time":"T","level":"INFO","msg":"audit grant_revoked","log.type":"audit","schema_version":1,"event":"grant_revoked","outcome":"success","reason":"authorization code reused","client_id":"client-1","grant_id":"grant-1","remote_ip":"192.0.2.7"}
+{"time":"T","level":"INFO","msg":"audit client_registered","log.type":"audit","schema_version":1,"event":"client_registered","outcome":"success","reason":"static","client_id":"client-1"}
+{"time":"T","level":"INFO","msg":"audit key_loaded","log.type":"audit","schema_version":1,"event":"key_loaded","outcome":"success","reason":"signing","key_id":"k1"}
+{"time":"T","level":"WARN","msg":"audit host_rejected","log.type":"audit","schema_version":1,"event":"host_rejected","outcome":"failure","host":"evil.example","remote_ip":"192.0.2.7"}
+{"time":"T","level":"WARN","msg":"audit origin_rejected","log.type":"audit","schema_version":1,"event":"origin_rejected","outcome":"failure","origin":"https://evil.example","remote_ip":"192.0.2.7"}

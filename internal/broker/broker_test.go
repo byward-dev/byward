@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html"
 	"io"
 	"log/slog"
@@ -22,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/corker/mcp-authproxy/internal/audit"
 	"github.com/corker/mcp-authproxy/internal/idp"
 	"github.com/corker/mcp-authproxy/internal/idp/entra"
 	"github.com/corker/mcp-authproxy/internal/logging"
@@ -109,6 +111,9 @@ type env struct {
 	idpBox *token.Box
 	fake   *fakeidp.IdP
 	now    time.Time
+	audit  *bytes.Buffer // the audit stream, JSON lines
+	logs   *bytes.Buffer // the operator log, JSON lines
+	idpOps []string      // "operation outcome" per IdP call
 }
 
 func keyRing(t *testing.T) *token.KeyRing {
@@ -126,9 +131,9 @@ func keyRing(t *testing.T) *token.KeyRing {
 	return r
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, opts ...func(*Config)) *env {
 	t.Helper()
-	e := &env{now: t0, st: newMemStore()}
+	e := &env{now: t0, st: newMemStore(), audit: &bytes.Buffer{}, logs: &bytes.Buffer{}}
 	clock := func() time.Time { return e.now }
 	app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}, RedirectURIs: []string{issuer + "/callback/entra"}}
 	e.fake = fakeidp.New(t, fakeidp.Entra, fakeidp.WithClient(app), fakeidp.WithClock(clock))
@@ -143,8 +148,14 @@ func newEnv(t *testing.T) *env {
 	login, _ := token.NewBox(ring, "login", clock)
 	e.idpBox, _ = token.NewBox(ring, "idp-tokens", clock)
 	discard := slog.New(slog.NewTextHandler(io.Discard, nil))
-	e.b, err = New(Config{Issuer: issuer, Resource: res, Scope: "mcp", IdPName: "entra", IdP: prov, Clients: registry{},
-		Store: e.st, Sealer: e.sealer, LoginBox: login, IdPTokenBox: e.idpBox, SecureCookies: true, Log: discard, Now: clock})
+	cfg := Config{Issuer: issuer, Resource: res, Scope: "mcp", IdPName: "entra", IdP: prov, Clients: registry{},
+		Store: e.st, Sealer: e.sealer, LoginBox: login, IdPTokenBox: e.idpBox, SecureCookies: true,
+		Log: logging.New(e.logs, "json"), Audit: audit.New(logging.New(e.audit, "json"), nil, clock), Now: clock,
+		ObserveIdP: func(op, outcome string, _ time.Duration) { e.idpOps = append(e.idpOps, op+" "+outcome) }}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	e.b, err = New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -687,4 +698,114 @@ func TestAssertionWithoutClientIDFindsTheClient(t *testing.T) {
 			}
 		})
 	}
+}
+
+// auditEvents returns the audit records with the given event name.
+func (e *env) auditEvents(t *testing.T, name string) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(e.audit.String()), "\n") {
+		if line == "" {
+			continue
+		}
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("audit line is not JSON: %s", line)
+		}
+		if rec["log.type"] != "audit" {
+			t.Fatalf("audit line without log.type=audit: %s", line)
+		}
+		if rec["event"] == name {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+// wantFields reports each audit field that differs from want, by name. A want value of "*" means
+// the field must be present and non-empty.
+func wantFields(t *testing.T, what string, rec map[string]any, want map[string]any) {
+	t.Helper()
+	for k, v := range want {
+		got, ok := rec[k]
+		switch {
+		case v == "*" && (!ok || got == ""):
+			t.Errorf("%s.%s is missing", what, k)
+		case v != "*" && got != v:
+			t.Errorf("%s.%s = %v, want %v", what, k, got, v)
+		}
+	}
+}
+
+// oneAuditEvent requires exactly one record named name, checks its fields and returns it.
+func (e *env) oneAuditEvent(t *testing.T, name string, want map[string]any) map[string]any {
+	t.Helper()
+	recs := e.auditEvents(t, name)
+	if len(recs) != 1 {
+		t.Fatalf("want 1 %s record, got %d: %v", name, len(recs), recs)
+	}
+	wantFields(t, name, recs[0], want)
+	return recs[0]
+}
+
+func TestSignInAndRedemptionAreAudited(t *testing.T) {
+	e := newEnv(t)
+	code := e.signIn(t, nil).Query().Get("code")
+	if _, body := e.redeem(t, code, nil); body["access_token"] == nil {
+		t.Fatalf("no token: %v", body)
+	}
+	grant := firstGrant(e.st)
+	login := e.oneAuditEvent(t, "login", map[string]any{"outcome": "success", "client_id": clientID, "grant_id": grant,
+		"idp": "entra", "user_key": "*", "request_id": "*", "remote_ip": "*"})
+	if !strings.Contains(fmt.Sprint(login["user_key"]), ":") {
+		t.Errorf("login.user_key = %v, want the tid:oid form", login["user_key"])
+	}
+	e.oneAuditEvent(t, "token_issued", map[string]any{"outcome": "success", "client_id": clientID, "grant_id": grant, "user_key": login["user_key"]})
+	if strings.Contains(e.audit.String(), code) || strings.Contains(e.audit.String(), token.CodePrefix) {
+		t.Fatal("the authorization code reached the audit stream")
+	}
+	if want := []string{"authorize success", "callback success"}; fmt.Sprint(e.idpOps) != fmt.Sprint(want) {
+		t.Fatalf("IdP observations = %v, want %v", e.idpOps, want)
+	}
+}
+
+func TestReusedCodeIsAuditedAsARevocation(t *testing.T) {
+	e := newEnv(t)
+	code := e.signIn(t, nil).Query().Get("code")
+	grant := firstGrant(e.st)
+	e.redeem(t, code, nil)
+	e.redeem(t, code, nil)
+	revoked := e.oneAuditEvent(t, "grant_revoked", map[string]any{"outcome": "success", "grant_id": grant})
+	if !strings.Contains(fmt.Sprint(revoked["reason"]), "reused") {
+		t.Errorf("grant_revoked.reason = %v, want it to say the code was reused", revoked["reason"])
+	}
+	e.oneAuditEvent(t, "token_rejected", map[string]any{"outcome": "failure", "reason": "invalid_grant"})
+}
+
+// ADR-0021 §2, §7: our request ID reaches Entra as client-request-id, comes back as correlation_id,
+// and the failure is logged with the IdP's error code, trace ID and correlation ID.
+func TestIdPFailureIsAuditedAndCorrelatesWithTheIdP(t *testing.T) {
+	e := newEnv(t)
+	f := fakeidp.InvalidClientSecret // AADSTS7000215; invalid_client counts as unavailable (ADR-0011)
+	e.fake.Set(fakeidp.FailToken(fakeidp.GrantAuthorizationCode, &f))
+	c, cb := e.startLogin(t, nil)
+	res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{c})
+	ref := res.Header.Get("X-Request-Id")
+	e.oneAuditEvent(t, "login", map[string]any{"outcome": "failure", "request_id": ref, "client_id": clientID})
+	for _, want := range []string{`"correlation_id":"` + ref + `"`, `"trace_id":"`, `"idp_error_code":7000215`} {
+		if !strings.Contains(e.logs.String(), want) {
+			t.Errorf("the IdP failure log lacks %s (our request ID must come back as Entra's correlation_id): %s", want, e.logs.String())
+		}
+	}
+	if want := "callback unavailable"; len(e.idpOps) != 2 || e.idpOps[1] != want {
+		t.Fatalf("IdP observations = %v, want the callback to be %q", e.idpOps, want)
+	}
+}
+
+func TestUserDeclinedIsAuditedAsAFailedLogin(t *testing.T) {
+	e := newEnv(t)
+	c, cb := e.startLogin(t, nil)
+	q := url.Values{"state": {cb.Query().Get("state")}, "error": {"access_denied"}, "error_description": {"declined"}}
+	e.do(t, "GET", "/callback/entra?"+q.Encode(), nil, []*http.Cookie{c})
+	e.oneAuditEvent(t, "login", map[string]any{"outcome": "failure", "reason": "the user declined to sign in", "client_id": clientID})
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -57,10 +58,20 @@ func (r *StaticRegistry) Client(_ context.Context, id string) (Client, error) {
 	return c, nil
 }
 
+// IDs lists the static clients' IDs, sorted (for the client_registered audit events at startup).
+func (r *StaticRegistry) IDs() []string {
+	ids := make([]string, 0, len(r.clients))
+	for id := range r.clients {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 // LoadStatic reads the static clients file at path. Secret and JWKS file paths inside it are
 // relative to its directory. readFile is the only file access (tests pass a map); jti is the replay
 // cache for private_key_jwt. Errors name the client and field and never contain secrets.
-func LoadStatic(path string, readFile func(string) ([]byte, error), jti JTICache) (Registry, error) {
+func LoadStatic(path string, readFile func(string) ([]byte, error), jti JTICache) (*StaticRegistry, error) {
 	data, err := readFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("static clients: %w", err)
