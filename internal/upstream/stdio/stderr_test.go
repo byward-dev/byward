@@ -30,7 +30,7 @@ func TestStderrIsRateLimitedAndSuppressedLinesAreCounted(t *testing.T) {
 		drainStderr(r, slog.New(rec), time.Now)
 
 		if got := len(rec.with("upstream stderr")); got != stderrBurst+1 {
-			t.Fatalf("logged %d lines, want the burst of %d plus the line after the refill", got, stderrBurst)
+			t.Fatalf("logged %d lines, want %d: the burst plus the line after the refill", got, stderrBurst+1)
 		}
 		sup := rec.with("upstream stderr lines suppressed")
 		if len(sup) != 1 || sup[0].attrs["suppressed"] != int64(50) {

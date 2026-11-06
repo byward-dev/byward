@@ -6,6 +6,8 @@
 //	stderr N      write N lines "line i" to stderr, then print "ok"
 //	stderrlong N  write one N-byte line to stderr, then print "ok"
 //	child         start a grandchild in the same process group, print its PID
+//	detach        start a grandchild in its own session (outside the group), print its PID
+//	block         print "blocking", then never read stdin again
 //	crash         exit with status 3
 //
 // Flag -stubborn ignores SIGTERM and keeps running after stdin closes. Mode "sleep" (first
@@ -22,12 +24,13 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "sleep" {
 		signal.Ignore(syscall.SIGTERM)
-		select {}
+		hang()
 	}
 	stubborn := false
 	for _, a := range os.Args[1:] {
@@ -74,6 +77,18 @@ func main() {
 				continue
 			}
 			reply(strconv.Itoa(c.Process.Pid))
+		case "detach":
+			c := exec.Command(os.Args[0], "sleep")
+			c.Stdout, c.Stderr = os.Stdout, os.Stderr
+			c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+			if err := c.Start(); err != nil {
+				reply("error " + err.Error())
+				continue
+			}
+			reply(strconv.Itoa(c.Process.Pid))
+		case "block":
+			reply("blocking")
+			hang()
 		case "crash":
 			os.Exit(3)
 		default:
@@ -81,6 +96,14 @@ func main() {
 		}
 	}
 	if stubborn {
-		select {}
+		hang()
+	}
+}
+
+// hang blocks forever. A bare select{} would let the runtime's deadlock detector end the
+// program once no other goroutine exists.
+func hang() {
+	for {
+		time.Sleep(time.Hour)
 	}
 }

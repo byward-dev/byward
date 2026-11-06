@@ -3,6 +3,7 @@
 package stdio
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -80,12 +82,28 @@ func TestIdentityIsNeverInArguments(t *testing.T) {
 	}
 }
 
-func TestOperatorEnvIsValidated(t *testing.T) {
-	for _, key := range []string{"MCP_AUTHPROXY_SUBJECT", "mcp_authproxy_issuer", "MCP_AUTHPROXY_OTHER", "", "A=B"} {
-		_, err := New(Config{Command: []string{fakeBin}, Env: map[string]string{key: "v"}, LookupEnv: lookup(proxyEnv)})
-		if err == nil {
-			t.Errorf("env %q accepted, want an error", key)
-		}
+func TestInvalidCommandConfigIsRejected(t *testing.T) {
+	cases := []struct {
+		name    string
+		command []string
+		env     map[string]string
+	}{
+		{"no command", nil, nil},
+		{"empty argv[0]", []string{""}, nil},
+		{"NUL in an argument", []string{fakeBin, "a\x00b"}, nil},
+		{"identity env name", []string{fakeBin}, map[string]string{"MCP_AUTHPROXY_SUBJECT": "v"}},
+		{"reserved prefix, lower case", []string{fakeBin}, map[string]string{"mcp_authproxy_issuer": "v"}},
+		{"other reserved name", []string{fakeBin}, map[string]string{"MCP_AUTHPROXY_OTHER": "v"}},
+		{"empty env name", []string{fakeBin}, map[string]string{"": "v"}},
+		{"= in env name", []string{fakeBin}, map[string]string{"A=B": "v"}},
+		{"NUL in env value", []string{fakeBin}, map[string]string{"A": "a\x00b"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := New(Config{Command: tc.command, Env: tc.env, LookupEnv: lookup(proxyEnv)}); err == nil {
+				t.Fatal("accepted, want an error")
+			}
+		})
 	}
 }
 
@@ -94,15 +112,22 @@ func TestMissingCommandNamesTheImagePattern(t *testing.T) {
 	if err := os.WriteFile(notExec, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, argv0 := range []string{"npx-not-installed", "/nonexistent/bin/uvx", notExec, t.TempDir()} {
-		_, err := New(Config{Command: []string{argv0}, LookupEnv: lookup(proxyEnv)})
-		if !errors.Is(err, ErrCommandNotFound) {
-			t.Errorf("%s: err = %v, want ErrCommandNotFound", argv0, err)
-			continue
-		}
-		if !strings.Contains(err.Error(), "COPY --from=ghcr.io/corker/mcp-authproxy:") {
-			t.Errorf("%s: error %q does not name the COPY --from pattern", argv0, err)
-		}
+	cases := map[string]string{
+		"not on PATH":    "npx-not-installed",
+		"absent path":    "/nonexistent/bin/uvx",
+		"not executable": notExec,
+		"a directory":    t.TempDir(),
+	}
+	for name, argv0 := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := New(Config{Command: []string{argv0}, LookupEnv: lookup(proxyEnv)})
+			if !errors.Is(err, ErrCommandNotFound) {
+				t.Fatalf("err = %v, want ErrCommandNotFound", err)
+			}
+			if !strings.Contains(err.Error(), "COPY --from=ghcr.io/corker/mcp-authproxy:") {
+				t.Fatalf("error %q does not name the COPY --from pattern", err)
+			}
+		})
 	}
 }
 
@@ -195,16 +220,10 @@ func TestStopEscalatesToKillingTheWholeProcessGroup(t *testing.T) {
 
 	h.m.Stop("s1")
 	h.clk.Advance(DefaultKillGrace) // stdin closed, grace over: SIGTERM, which both ignore
-	if isDone(p) {
-		t.Fatal("process exited before SIGKILL although it ignores stdin EOF and SIGTERM")
-	}
 	h.clk.Advance(DefaultKillGrace) // SIGKILL to the group
+	// The grandchild holds stdout and stderr open, and the clock never reaches the pipe
+	// fallback: Done closes only if SIGKILL reached the whole group.
 	waitDone(t, p)
-
-	// The grandchild holds stdout and stderr open; they only reach EOF if it died as well.
-	if p.forced.Load() {
-		t.Fatal("pipes had to be force-closed: a group member survived SIGKILL")
-	}
 	exits := h.log.with("upstream process exited")
 	if len(exits) != 1 || exits[0].attrs["signal"] != "killed" {
 		t.Fatalf("exit records = %v, want one with signal=killed", exits)
@@ -234,13 +253,10 @@ func TestIdleProcessIsStoppedAndTrafficKeepsItAlive(t *testing.T) {
 	h.clk.Advance(DefaultIdleTimeout - time.Minute)
 	call(t, p, "ping") // traffic restarts the idle timer
 	h.clk.Advance(DefaultIdleTimeout - time.Minute)
-	if p.isStopping() {
+	if stops := h.log.with("stopping upstream process"); len(stops) != 0 {
 		t.Fatal("stopped although it had traffic within the idle timeout")
 	}
-	h.clk.Advance(time.Minute)
-	if !p.isStopping() {
-		t.Fatal("not stopped after the idle timeout")
-	}
+	h.clk.Advance(time.Minute) // timer callbacks run inside Advance: the stop is logged by now
 	waitDone(t, p)
 	if stops := h.log.with("stopping upstream process"); len(stops) != 1 || stops[0].attrs["reason"] != "idle" {
 		t.Fatalf("stop records = %v, want reason=idle", stops)
@@ -264,7 +280,7 @@ func TestCrashFailsOnlyItsOwnKey(t *testing.T) {
 	if got := call(t, b, "ping"); got != "ping" {
 		t.Fatalf("other key's process answered %q", got)
 	}
-	if again := h.get(t, "a", alice); again.PID() == a.PID() {
+	if again := h.get(t, "a", alice); again == a {
 		t.Fatal("crashed key was not given a new process")
 	}
 	if w := h.log.with("upstream process exited unexpectedly"); len(w) != 1 || w[0].attrs["exit_code"] != int64(3) {
@@ -304,10 +320,19 @@ func TestConcurrentGetsForOneKeySpawnOnce(t *testing.T) {
 
 func TestGetRequiresAnIdentity(t *testing.T) {
 	h := newHarness(t, nil)
-	for _, id := range []Identity{{}, {Subject: "s"}, {Issuer: "i"}, {Subject: "a\x00b", Issuer: "i"}} {
-		if _, err := h.m.Get(context.Background(), "s1", id); err == nil {
-			t.Errorf("Get(%+v) succeeded", id)
-		}
+	cases := map[string]Identity{
+		"empty":          {},
+		"no issuer":      {Subject: "s"},
+		"no subject":     {Issuer: "i"},
+		"NUL in subject": {Subject: "a\x00b", Issuer: "i"},
+		"NUL in email":   {Subject: "s", Issuer: "i", Email: "a\x00b"},
+	}
+	for name, id := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := h.m.Get(context.Background(), "s1", id); err == nil {
+				t.Fatal("Get succeeded")
+			}
+		})
 	}
 	if h.m.Len() != 0 {
 		t.Fatalf("Len = %d", h.m.Len())
@@ -325,7 +350,11 @@ func TestCancelledSpawnLeavesNothingBehind(t *testing.T) {
 	if _, err := h.m.Get(ctx, "s1", alice); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Get = %v, want context.Canceled", err)
 	}
-	if left, _ := os.ReadDir(tmp); len(left) != 0 || h.m.Len() != 0 {
+	left, err := os.ReadDir(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 0 || h.m.Len() != 0 {
 		t.Fatalf("left behind: dirs %v, Len %d", left, h.m.Len())
 	}
 }
@@ -338,6 +367,9 @@ func TestOversizeStdoutMessageStopsTheProcess(t *testing.T) {
 	}
 	if err := p.Send(context.Background(), []byte("123456789")); err != nil {
 		t.Fatal(err)
+	}
+	for msg := range p.Messages() { // closed once the process is gone
+		t.Fatalf("over-limit output delivered: %q", msg)
 	}
 	waitDone(t, p)
 	if stops := h.log.with("stopping upstream process"); len(stops) != 1 || stops[0].attrs["reason"] != "message_too_large" {
@@ -358,5 +390,95 @@ func TestShutdownStopsEveryProcessAndRefusesNewOnes(t *testing.T) {
 	}
 	if _, err := h.m.Get(context.Background(), "c", alice); !errors.Is(err, ErrClosed) {
 		t.Fatalf("Get after Shutdown = %v, want ErrClosed", err)
+	}
+}
+
+// Regression: an idle timer firing before it was assigned raced with stop (d6eb42d).
+func TestImmediateIdleTimeoutStopsTheProcess(t *testing.T) {
+	h := newHarness(t, func(c *Config) { c.Clock, c.IdleTimeout = realClock{}, time.Nanosecond })
+	waitDone(t, h.get(t, "s1", alice))
+	if stops := h.log.with("stopping upstream process"); len(stops) != 1 || stops[0].attrs["reason"] != "idle" {
+		t.Fatalf("stop records = %v, want one with reason=idle", stops)
+	}
+}
+
+func TestSendThatTimesOutMidWriteStopsTheProcess(t *testing.T) {
+	h := newHarness(t, nil)
+	p := h.get(t, "s1", alice)
+	if got := call(t, p, "block"); got != "blocking" {
+		t.Fatalf("got %q", got)
+	}
+	// Larger than any pipe buffer, so the write blocks part-way; the deadline only bounds it.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if err := p.Send(ctx, bytes.Repeat([]byte("a"), 4<<20)); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Send = %v, want context.DeadlineExceeded", err)
+	}
+	if stops := h.log.with("stopping upstream process"); len(stops) != 1 || stops[0].attrs["reason"] != "partial_write" {
+		t.Fatalf("stop records = %v, want reason=partial_write", stops)
+	}
+	if err := p.Send(context.Background(), []byte("ping")); !errors.Is(err, ErrExited) {
+		t.Fatalf("Send after a broken write = %v, want ErrExited", err)
+	}
+}
+
+func TestSendWithACancelledContextWritesNothing(t *testing.T) {
+	h := newHarness(t, nil)
+	p := h.get(t, "s1", alice)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := p.Send(ctx, []byte("lost")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Send = %v, want context.Canceled", err)
+	}
+	if got := call(t, p, "ping"); got != "ping" {
+		t.Fatalf("next message = %q, want the cancelled one never written", got)
+	}
+}
+
+func TestPipesHeldByAProcessOutsideTheGroupAreClosedAfterTheGrace(t *testing.T) {
+	h := newHarness(t, func(c *Config) { c.Clock, c.KillGrace = realClock{}, 50*time.Millisecond })
+	p := h.get(t, "s1", alice)
+	pid, err := strconv.Atoi(call(t, p, "detach"))
+	if err != nil {
+		t.Fatalf("fake did not start a detached grandchild: %v", err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	if err := p.Send(context.Background(), []byte("crash")); err != nil {
+		t.Fatal(err)
+	}
+	waitDone(t, p)
+	if forced := h.log.with("upstream pipes force-closed"); len(forced) != 1 {
+		t.Fatalf("force-close records = %v, want one", forced)
+	}
+}
+
+func TestShutdownGivesUpWhenItsContextEnds(t *testing.T) {
+	h := newHarness(t, func(c *Config) { c.Command = []string{fakeBin, "-stubborn"} })
+	h.get(t, "s1", alice)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := h.m.Shutdown(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Shutdown = %v, want context.Canceled while a process ignores the stop", err)
+	}
+}
+
+func TestFailedSpawnFreesTheKeyForTheNextGet(t *testing.T) {
+	h := newHarness(t, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := h.m.Get(ctx, "s1", alice); err == nil {
+		t.Fatal("Get with a cancelled context succeeded")
+	}
+	if got := call(t, h.get(t, "s1", alice), "ping"); got != "ping" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestSameSubjectFromAnotherIssuerIsAnotherUser(t *testing.T) {
+	h := newHarness(t, nil)
+	h.get(t, "s1", alice)
+	other := Identity{Subject: alice.Subject, Issuer: "https://other-idp.example"}
+	if _, err := h.m.Get(context.Background(), "s1", other); !errors.Is(err, ErrUserMismatch) {
+		t.Fatalf("Get = %v, want ErrUserMismatch", err)
 	}
 }
