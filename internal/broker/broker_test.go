@@ -61,6 +61,9 @@ type memStore struct {
 	// RotateRefreshToken report reuse without recording it, as when another replica won the race.
 	revokeDown, rotateDown, reuseOnRotate atomic.Bool
 	rememberDown                          atomic.Bool // RememberConsent fails
+	// rewriteBlob, when set, replaces a new grant's sealed IdP-token blob, e.g. with the layout an
+	// older proxy wrote.
+	rewriteBlob func([]byte) []byte
 }
 
 var errStoreDown = errors.New("store down")
@@ -121,6 +124,9 @@ func (m *memStore) SetIdPTokens(ctx context.Context, id string, sealed []byte) e
 func newMemStore() *memStore { return &memStore{Store: memory.New()} }
 
 func (m *memStore) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, error) {
+	if m.rewriteBlob != nil {
+		g.IdPTokens = m.rewriteBlob(g.IdPTokens)
+	}
 	got, err := m.Store.CreateGrant(ctx, g)
 	if err == nil {
 		m.mu.Lock()
@@ -557,8 +563,9 @@ func TestStaticClientSignsInWithEntraAndGetsAProxyToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stored IdP tokens do not open with the IdP-token box: %v", err)
 	}
-	var toks idp.Tokens
-	if err := json.Unmarshal(plain, &toks); err != nil || strings.Count(toks.IDToken, ".") != 2 || toks.AccessToken == "" {
+	secrets, err := unmarshalSecrets(plain)
+	toks := secrets.Tokens
+	if err != nil || strings.Count(toks.IDToken, ".") != 2 || toks.AccessToken == "" {
 		t.Fatalf("stored IdP tokens decode to %v (err %v), want the IdP's ID and access tokens", toks, err)
 	}
 	if bytes.Contains(g.IdPTokens, []byte(toks.IDToken)) {

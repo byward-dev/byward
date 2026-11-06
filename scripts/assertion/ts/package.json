@@ -1,0 +1,10 @@
+{
+  "name": "byward-assertion-contract-ts",
+  "private": true,
+  "type": "module",
+  "description": "Contract test: the TypeScript SDK's requireBearerAuth with the verifier docs/reference/identity-assertion.md shows (scripts/assertion/run.sh).",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "jose": "6.2.13"
+  }
+}

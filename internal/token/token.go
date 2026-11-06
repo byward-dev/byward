@@ -2,7 +2,9 @@
 //
 // Access tokens and authorization codes are sealed: AES-256-GCM with a random 96-bit nonce, the
 // key chosen by the key ID in the token header, and the format version, token type, key ID and
-// resource URL bound as associated data. They carry only a grant ID, a subject, iat and exp.
+// resource URL bound as associated data. They carry a grant ID, a subject, iat and exp; access
+// tokens also carry the client ID and the identity claims the operator asserts to the upstream
+// (ADR-0016 §1), so a request needs no store read (ADR-0014 §2).
 // Refresh tokens are opaque random strings stored as a SHA-256 hash (ADR-0006 §4).
 //
 // Wire format of a sealed token:
@@ -51,12 +53,15 @@ func (t Type) prefix() string {
 	return ""
 }
 
-// formatVersion is the only wire format so far; a new one (for example with a `cnf` claim for
-// DPoP) gets a new number.
-const formatVersion = 1
+// formatVersion is the wire format. Version 2 added the client ID and the asserted identity
+// claims; version 1 tokens are refused, so clients refresh once after an upgrade. A new format (for
+// example with a `cnf` claim for DPoP) gets a new number.
+const formatVersion = 2
 
-// MaxLen bounds a token before it is decoded.
-const MaxLen = 2048
+// MaxLen bounds a token before it is decoded. It leaves room for an access token whose asserted
+// claims include up to 200 group IDs (Entra's overage limit), about 11 KiB; with roles only a token
+// stays under 1 KiB.
+const MaxLen = 16 << 10
 
 // maxResource bounds the resource URL bound into every token.
 const maxResource = 8 << 10
@@ -69,15 +74,28 @@ type Claims struct {
 	Subject   string
 	IssuedAt  time.Time
 	ExpiresAt time.Time
+	// ClientID is required in access tokens; codes leave it, and the claims below, empty.
+	ClientID string
+	// The identity claims asserted to the upstream: whatever of these the operator opted in to.
+	Roles, Groups []string
+	Email, Name   string
 }
 
 // wireClaims is the sealed JSON; short names keep tokens small.
 type wireClaims struct {
-	GrantID   string `json:"gid"`
-	Subject   string `json:"sub"`
-	IssuedAt  int64  `json:"iat"`
-	ExpiresAt int64  `json:"exp"`
+	GrantID   string   `json:"gid"`
+	Subject   string   `json:"sub"`
+	IssuedAt  int64    `json:"iat"`
+	ExpiresAt int64    `json:"exp"`
+	ClientID  string   `json:"cid,omitempty"`
+	Roles     []string `json:"rol,omitempty"`
+	Groups    []string `json:"grp,omitempty"`
+	Email     string   `json:"eml,omitempty"`
+	Name      string   `json:"nam,omitempty"`
 }
+
+// ErrTooLong is returned by Seal when the claims do not fit in MaxLen.
+var ErrTooLong = errTooLong
 
 var (
 	errMalformed = errors.New("token: malformed")
@@ -110,10 +128,11 @@ func (s *Sealer) Seal(t Type, c Claims) (string, error) {
 	}
 	// Tokens carry whole seconds; check what Open will see, not what was passed in.
 	c.IssuedAt, c.ExpiresAt = c.IssuedAt.Truncate(time.Second), c.ExpiresAt.Truncate(time.Second)
-	if err := c.validate(); err != nil {
+	if err := c.validate(t); err != nil {
 		return "", err
 	}
-	plain, err := json.Marshal(wireClaims{GrantID: c.GrantID, Subject: c.Subject, IssuedAt: c.IssuedAt.Unix(), ExpiresAt: c.ExpiresAt.Unix()})
+	plain, err := json.Marshal(wireClaims{GrantID: c.GrantID, Subject: c.Subject, IssuedAt: c.IssuedAt.Unix(), ExpiresAt: c.ExpiresAt.Unix(),
+		ClientID: c.ClientID, Roles: c.Roles, Groups: c.Groups, Email: c.Email, Name: c.Name})
 	if err != nil {
 		return "", err
 	}
@@ -171,8 +190,9 @@ func (s *Sealer) Open(t Type, tok string) (Claims, error) {
 	if err := dec.Decode(&w); err != nil || dec.More() {
 		return Claims{}, errClaims
 	}
-	c := Claims{GrantID: w.GrantID, Subject: w.Subject, IssuedAt: time.Unix(w.IssuedAt, 0), ExpiresAt: time.Unix(w.ExpiresAt, 0)}
-	if err := c.validate(); err != nil {
+	c := Claims{GrantID: w.GrantID, Subject: w.Subject, IssuedAt: time.Unix(w.IssuedAt, 0), ExpiresAt: time.Unix(w.ExpiresAt, 0),
+		ClientID: w.ClientID, Roles: w.Roles, Groups: w.Groups, Email: w.Email, Name: w.Name}
+	if err := c.validate(t); err != nil {
 		return Claims{}, err
 	}
 	return c, nil
@@ -189,8 +209,11 @@ func (s *Sealer) ad(t Type, kid string) []byte {
 	return append(b, s.resource...)
 }
 
-func (c Claims) validate() error {
+func (c Claims) validate(t Type) error {
 	if c.GrantID == "" || c.Subject == "" || c.IssuedAt.Unix() <= 0 || !c.ExpiresAt.After(c.IssuedAt) {
+		return errClaims
+	}
+	if t == Access && c.ClientID == "" { // RFC 9068 §2.2: the assertion needs it (ADR-0016 §1)
 		return errClaims
 	}
 	return nil

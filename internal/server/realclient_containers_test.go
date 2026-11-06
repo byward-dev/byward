@@ -109,7 +109,7 @@ func TestIntegrationRealClientsSignInAndCallATool(t *testing.T) {
 			if !strings.Contains(stdout, realClientText) {
 				t.Fatalf("%s stdout lacks the tool's answer %q; output:\n%s", name, realClientText, output)
 			}
-			env.requireOneToolCallWithoutToken(t)
+			env.requireOneToolCallWithOnlyTheAssertion(t)
 		})
 	}
 }

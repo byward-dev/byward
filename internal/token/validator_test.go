@@ -47,7 +47,7 @@ func TestExpiryAndIssuedAtHonourTheLeeway(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				s := newSealer(t)
 				iat := time.Now().Add(tc.iat)
-				tok := mustSeal(t, s, Access, Claims{GrantID: "g", Subject: "u", IssuedAt: iat, ExpiresAt: time.Now().Add(time.Hour)})
+				tok := mustSeal(t, s, Access, Claims{GrantID: "g", Subject: "u", IssuedAt: iat, ExpiresAt: time.Now().Add(time.Hour), ClientID: "c"})
 				time.Sleep(tc.wait)
 				id, err := newValidator(t, s, allowAll).Validate(context.Background(), tok)
 				if !errors.Is(err, tc.want) {

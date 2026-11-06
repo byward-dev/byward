@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/aes"
 	"crypto/sha256"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -35,7 +36,7 @@ func FuzzOpen(f *testing.F) {
 		if err != nil {
 			t.Fatalf("accepted claims that cannot be sealed again: %+v: %v", c, err)
 		}
-		if c2, err := s.Open(Access, again); err != nil || c2 != c {
+		if c2, err := s.Open(Access, again); err != nil || !reflect.DeepEqual(c2, c) {
 			t.Fatalf("claims do not round-trip: %+v → %+v, %v", c, c2, err)
 		}
 		if _, err := s.Open(Code, tok); err == nil {

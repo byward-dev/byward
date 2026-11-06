@@ -22,6 +22,12 @@ mode, and the only upstream kind is HTTP.
   refresh ([ADR-0015](adr/0015-access-gate.md)).
 - The user approves each MCP client on a **consent** page before the IdP sign-in.
 - No token the client sent is ever forwarded to the upstream.
+- An HTTP upstream learns who the user is only from the **identity assertion**: a 60-second ES256
+  JWT that the proxy signs, with `aud` = that upstream, on every request. A client cannot supply
+  one; every copy of its header is removed first ([ADR-0016](adr/0016-identity-propagation.md),
+  [reference](reference/identity-assertion.md)). A stdio upstream gets the user in its process
+  environment instead. Its roles and groups are as of the last sign-in or refresh: at most one
+  hour old.
 
 **It does not:**
 
@@ -30,9 +36,9 @@ mode, and the only upstream kind is HTTP.
   ([ADR-0015](adr/0015-access-gate.md) §6).
 - **Inspect content.** MCP bodies are relayed byte for byte and never parsed. Prompt injection and
   tool poisoning are out of scope.
-- **Tell the upstream who the user is.** The identity assertion is **planned** (#62,
-  [ADR-0016](adr/0016-identity-propagation.md)). Until then the upstream sees no user identity.
-  It cannot tell users apart, so it must not hold per-user state or per-user permissions.
+- **Verify the assertion for the upstream.** The upstream must check the signature, `aud` and `exp`
+  itself. An upstream reachable other than through the proxy, that skips this, trusts whoever
+  calls it.
 - **Rate-limit MCP traffic.** Only the OAuth endpoints are rate-limited. MCP requests are capped in
   flight: 64 requests and 256 streams, then 503.
 - **Terminate TLS.** TLS ends at your ingress or reverse proxy ([ADR-0019](adr/0019-packaging.md) §9).
@@ -61,13 +67,13 @@ keep them (AGENTS.md). Status on `main`:
 
 | # | Invariant | Enforced in | Tested by |
 |---|---|---|---|
-| 1 | No token passthrough to the upstream | `internal/upstream/relay/relay.go` (`strip` removes `Authorization`; `access_token` dropped from the query). A stdio upstream gets only the JSON-RPC body on stdin, and an environment of an allowlist, the operator's env file and the user's key (`internal/upstream/stdio/command.go`) | `TestRelayForwardsBodyVerbatimAndStripsProxyHeaders`, `TestValidTokenIsRelayedWithoutIt`, `TestEachStdioMCPSessionIsItsOwnUpstreamProcessBoundToItsUserWithNoTokenOrProxySetting`, `TestUpstreamGetsOnlyAllowlistOperatorEnvAndIdentity` |
+| 1 | No token passthrough to the upstream | `internal/upstream/relay/relay.go` (`strip` removes `Authorization`; `access_token` dropped from the query). A stdio upstream gets only the JSON-RPC body on stdin, and an environment of an allowlist, the operator's env file and the user's key (`internal/upstream/stdio/command.go`) | `TestRelayForwardsBodyVerbatimAndStripsProxyHeaders`, `TestValidTokenIsRelayedWithoutIt`, `TestEachStdioMCPSessionIsItsOwnUpstreamProcessBoundToItsUserWithNoTokenOrProxySetting`, `TestUpstreamGetsOnlyAllowlistOperatorEnvAndIdentity`, `TestAClientCannotSupplyTheAssertionHeader` |
 | 2 | Never log tokens, secrets, codes or verifiers | `internal/logging/logging.go` (attribute allowlist, bearer/JWT-shaped redaction); `internal/audit` (no credential fields) | `TestRedaction`, `TestMiddlewareLogsRequestWithoutQueryOrHeaders`, `TestAuditRecordsMatchTheGoldenSchema` |
 | 3 | Named IdP endpoints from config only | `internal/idp/entra/entra.go` (`endpoint`: the fixed authority `https://login.microsoftonline.com` plus the tenant GUID; discovery is read only to check the issuer) | `TestAuthCodeURLTargetsTenantAuthorizeWithAccessAsUserScope`, `TestIssuerMustMatchTokenTenantAndAllowlist` |
 | 4 | Client-supplied URLs only through the SSRF guard | `internal/ssrfguard` (dial-time address check); `internal/server/wire.go` builds one guard and gives it to the CIMD registry (documents and `jwks_uri`) and the DCR registry (`jwks_uri`) | `TestNonPublicAddressesAreRefused`, `TestRedirectsAreNotFollowed`, `TestTheGuardedHTTPClientRefusesPrivateAddresses`, `TestCIMDClientsAreResolvedThroughTheGuardOnlyWhenOn`, `TestARegisteredClientsKeysAreFetchedThroughTheGuard` |
 | 5 | Per-client consent before the IdP redirect | `internal/broker/authorize.go` → `showConsent`; the IdP redirect only after Allow, or for a remembered consent, which the callback checks again for the user who signed in before issuing a code (`internal/broker/remember.go`) | `TestAuthorizeShowsTheConsentPageBeforeTheIdP`, `TestADifferentUserBehindAStaleHintGetsThePageAndNoCode`, `TestAnUnverifiedClientIsAskedEveryTime` |
 | 6 | Audience validated; `iss` on authorization responses | Resource URL as associated data (`internal/token/token.go`); `iss` on success and error redirects (`internal/broker/authorize.go`) | `TestTokenForOneResourceNeverOpensForAnother`, `TestStaticClientSignsInWithEntraAndGetsAProxyToken` |
-| 7 | Proxy tokens sealed by us, carry `exp`, never IdP tokens | `internal/token/token.go`. The upstream assertion half is **planned** (#62) | `TestTypesNeverCross`, `TestAnyTamperedByteIsRejected` |
+| 7 | Proxy tokens sealed by us, carry `exp`, never IdP tokens | `internal/token/token.go`; assertions: `internal/assertion` (ES256, `aud` = the upstream, `kid` in our JWKS) | `TestTypesNeverCross`, `TestAnyTamperedByteIsRejected`, `TestTheUpstreamGetsAnAssertionItCanVerifyInsteadOfTheClientsToken`, `TestGoSDKBearerMiddlewareAcceptsTheAssertion` |
 | 8 | IdP refresh token stays in the broker, encrypted at rest | Sealed with the `idp-tokens` box (`internal/server/wire.go`, `internal/broker/authorize.go`) | `TestUnusableStoredIdPTokensRevokeTheGrant` |
 | 9 | Codes single-use and short-lived; `/token` re-checks client, redirect URI and PKCE | `internal/broker/token.go` (`redeemCode`); 60 s lifetime | `TestReusedCodeRevokesTheGrant`, `TestTokenEndpointRechecks`, `TestFailedBindingAfterConsumeRevokesTheGrant`, `TestExpiredCodeIsRejected` |
 | 10 | Exact redirect matching, only the loopback port varies | `internal/registration/redirect.go` | `TestMatchRedirect`, `FuzzMatchRedirect` |

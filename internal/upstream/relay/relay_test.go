@@ -136,7 +136,7 @@ func TestTraceContextIsInjectedAsAHeaderAndTheBodyIsUntouched(t *testing.T) {
 		opts   []Option
 		wantTP string
 	}{
-		{"with tracing", []Option{WithTraceContext(func(_ context.Context, h http.Header) { h.Set("Traceparent", ours) })}, ours},
+		{"with tracing", []Option{WithInject(func(_ context.Context, h http.Header) { h.Set("Traceparent", ours) })}, ours},
 		{"without tracing the inbound header passes unchanged", nil, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"},
 	}
 	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"_meta":{"traceparent":"00-aaaa-bbbb-01"}}}`)
@@ -159,5 +159,40 @@ func TestTraceContextIsInjectedAsAHeaderAndTheBodyIsUntouched(t *testing.T) {
 				t.Errorf("the body (params._meta) changed: %s", got.Body)
 			}
 		})
+	}
+}
+
+// A stripped header is gone in every spelling before the injectors run, so what an injector sets is
+// the only value the upstream sees; injectors run in order (ADR-0016 §4).
+func TestAForgedIdentityHeaderInAnySpellingIsReplacedBeforeInjectorsRun(t *testing.T) {
+	up := fakeupstream.New()
+	t.Cleanup(up.Close)
+	u, _ := url.Parse(up.URL + "/mcp")
+	var order []string
+	h := New(quiet(), u, WithStripped("X-Byward-Identity"),
+		WithInject(func(_ context.Context, h http.Header) {
+			order = append(order, "first")
+			h.Set("X-Byward-Identity", "Bearer ours")
+		}),
+		WithInject(func(_ context.Context, h http.Header) { order = append(order, "second:"+h.Get("X-Byward-Identity")) }))
+	r := httptest.NewRequest("POST", "https://mcp.example.com/mcp", strings.NewReader("{}"))
+	r.Header["X-Byward-Identity"] = []string{"Bearer forged"}
+	r.Header["X_BYWARD_IDENTITY"] = []string{"Bearer forged"}
+	r.Header["x-byward-identity"] = []string{"Bearer forged"}
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	got, ok := up.Last()
+	if !ok {
+		t.Fatal("nothing reached the upstream")
+	}
+	if v := got.Header.Values("X-Byward-Identity"); len(v) != 1 || v[0] != "Bearer ours" {
+		t.Fatalf("the upstream got X-Byward-Identity %q, want only ours", v)
+	}
+	for k, v := range got.Header {
+		if strings.EqualFold(strings.ReplaceAll(k, "_", "-"), "X-Byward-Identity") && (k != "X-Byward-Identity" || len(v) != 1 || v[0] != "Bearer ours") {
+			t.Fatalf("header %s = %q reached the upstream", k, v)
+		}
+	}
+	if strings.Join(order, ",") != "first,second:Bearer ours" {
+		t.Fatalf("injectors ran as %v", order)
 	}
 }

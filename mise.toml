@@ -43,7 +43,7 @@ run = ["GOOS=linux govulncheck ./...", "GOOS=darwin govulncheck ./..."]
 
 [tasks."lint:workflows"]
 description = "Lint GitHub workflows (actionlint with shellcheck, zizmor offline) and shell scripts"
-run = ["actionlint", "zizmor --offline --no-progress .github/workflows", "shellcheck scripts/*.sh scripts/conformance/*.sh scripts/ui/*.sh"]
+run = ["actionlint", "zizmor --offline --no-progress .github/workflows", "shellcheck scripts/*.sh scripts/conformance/*.sh scripts/ui/*.sh scripts/assertion/*.sh"]
 
 [tasks.test]
 description = "Unit tests (with the race detector)"
@@ -61,6 +61,10 @@ run = "sh scripts/conformance/run.sh"
 description = "Fetch, verify and build the pinned MCP conformance CLI in build/conformance/src, for the authorization suite of test:integration:go (needs Docker)"
 run = "sh scripts/conformance/run.sh --install-only"
 
+[tasks."test:assertion"]
+description = "Identity assertion contract: the TypeScript SDK's requireBearerAuth and FastMCP's JWTVerifier, as the docs configure them, accept the proxy's assertion and refuse bad ones (scripts/assertion/run.sh; needs Docker)"
+run = "sh scripts/assertion/run.sh"
+
 [tasks."test:ui"]
 description = "Consent and error pages in Chromium: Playwright and axe (WCAG 2.2 AA), screenshots in build/ui/screenshots (needs Docker)"
 run = "sh scripts/ui/run.sh"
@@ -72,7 +76,7 @@ run = "go test -race -count=1 -v -timeout 11m -tags=integration -run ^TestIntegr
 
 [tasks."test:integration"]
 description = "Integration tests, including the release smoke test and MCP conformance (needs Docker)"
-depends = ["release:smoke", "test:conformance", "test:ui"]
+depends = ["release:smoke", "test:conformance", "test:ui", "test:assertion"]
 # After the dependencies, not beside them: test:conformance builds the pinned CLI in
 # build/conformance/src and leaves it there for the Go lane's authorization suite.
 run = "mise run test:integration:go"

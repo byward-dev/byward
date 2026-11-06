@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"net/textproto"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -43,6 +45,9 @@ var registry = []Setting{
 	{Name: "entra-client-secret-expires-at", Auth: true, Help: "when the client secret expires, as a date (2027-11-06) or an RFC 3339 time; the proxy warns at startup and doctor warns from 30 days before (ADR-0012 §10)"},
 	{Name: "data-dir", Auth: true, Default: "/var/lib/byward", Help: "data directory, an absolute path; the keys, clients and store settings default to paths in it (ADR-0007 §6, docs/how-to/state.md)"},
 	{Name: "keys-dir", Auth: true, Help: "directory of sealing keys; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md)"},
+	{Name: "assertion-keys-dir", Auth: true, Help: "directory of the identity assertion's signing keys: PEM ECDSA P-256 files, each name the key ID; the key whose ID sorts last signs; needed with an HTTP upstream; default: assertion-keys in the data directory (docs/how-to/identity-assertion.md)"},
+	{Name: "assertion-header", Auth: true, Default: "Authorization", Help: "request header that carries the identity assertion to the HTTP upstream, as Bearer <JWT>; inbound copies are always removed (ADR-0016 §2)"},
+	{Name: "assertion-claims", Auth: true, Default: "roles", Help: "comma-separated optional claims in the identity assertion: roles, groups, email, name; or none (ADR-0016 §1, docs/reference/identity-assertion.md)"},
 	{Name: "static-clients-file", Auth: true, Help: "JSON file of pre-registered MCP clients; default: clients.json in the data directory, optional while CIMD or DCR is on; a file you name must exist (docs/reference/static-clients.md)"},
 	{Name: "gate-tenants", Auth: true, Help: "access gate: comma-separated Entra tenant IDs allowed to sign in (docs/how-to/access-gate.md)"},
 	{Name: "gate-roles", Auth: true, Help: "access gate: comma-separated app roles; users need at least one (docs/how-to/access-gate.md)"},
@@ -95,7 +100,12 @@ type Config struct {
 	// EntraClientSecretExpiresAt is zero when the operator did not say.
 	EntraClientSecretExpiresAt time.Time
 	KeysDir                    string
-	StaticClientsFile          string
+	// The identity assertion for the HTTP upstream (ADR-0016): its signing keys, the header that
+	// carries it and the optional claims it asserts (a subset of AssertionClaimNames).
+	AssertionKeysDir  string
+	AssertionHeader   string
+	AssertionClaims   []string
+	StaticClientsFile string
 	// StaticClientsFileNamed: the operator set the path, so the file must exist; the default may be
 	// absent when CIMD or DCR is on.
 	StaticClientsFileNamed bool
@@ -280,6 +290,7 @@ func validate(v *Values, container bool) (*Config, error) {
 		}
 		errs = append(errs, c.paths(v)...)
 		errs = append(errs, c.refreshGrace(v)...)
+		errs = append(errs, c.assertion(v)...)
 		if c.DCR, err = strconv.ParseBool(v.get("dcr")); err != nil {
 			errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "dcr"}.Env(), v.get("dcr")))
 		}
@@ -440,6 +451,10 @@ func (c *Config) paths(v *Values) []error {
 	}
 	c.KeysDir, c.StaticClientsFile, c.StoreDir = or("keys-dir", "keys"), or("static-clients-file", "clients.json"), or("store-dir", "state")
 	c.StaticClientsFileNamed = v.get("static-clients-file") != ""
+	c.AssertionKeysDir = or("assertion-keys-dir", "assertion-keys")
+	if !filepath.IsAbs(c.AssertionKeysDir) {
+		errs = append(errs, errorf("BYWARD_ASSERTION_KEYS_DIR: want an absolute path, got %q", c.AssertionKeysDir))
+	}
 	if !filepath.IsAbs(c.StoreDir) {
 		errs = append(errs, errorf("BYWARD_STORE_DIR: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got %q", c.StoreDir))
 	}
@@ -489,6 +504,55 @@ func (c *Config) secretExpiry(v *Values) []error {
 		}
 	}
 	return []error{errorf("%s: want a date such as 2027-11-06 or an RFC 3339 time, got %q", Setting{Name: "entra-client-secret-expires-at"}.Env(), raw)}
+}
+
+// AssertionClaimNames are the optional claims an identity assertion may carry.
+var AssertionClaimNames = []string{"roles", "groups", "email", "name"}
+
+// reservedHeaders may not carry the assertion: the proxy, the transport or the MCP protocol owns
+// them, or they carry forwarding or browser data (ADR-0016 §2, §4; ADR-0018 §6).
+var reservedHeaders = map[string]bool{"Host": true, "Cookie": true, "Set-Cookie": true, "Content-Length": true, "Content-Type": true,
+	"Transfer-Encoding": true, "Connection": true, "Keep-Alive": true, "Upgrade": true, "Te": true, "Trailer": true, "Accept": true,
+	"Accept-Encoding": true, "Forwarded": true, "Origin": true, "Referer": true, "Mcp-Session-Id": true, "Mcp-Protocol-Version": true,
+	"Last-Event-Id": true, "Traceparent": true, "Tracestate": true, "Baggage": true, "Www-Authenticate": true}
+
+// assertion reads the identity assertion settings: a header that is a valid token and not one the
+// proxy relies on, and claims from AssertionClaimNames (or none).
+func (c *Config) assertion(v *Values) []error {
+	var errs []error
+	hEnv := Setting{Name: "assertion-header"}.Env()
+	c.AssertionHeader = textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(v.get("assertion-header")))
+	switch h := c.AssertionHeader; {
+	case h == "" || strings.ContainsFunc(h, func(r rune) bool { return !isTokenChar(r) }):
+		errs = append(errs, errorf("%s: want a header name such as Authorization or X-Byward-Identity, got %q", hEnv, v.get("assertion-header")))
+	case reservedHeaders[h] || strings.HasPrefix(h, "X-Forwarded-") || strings.HasPrefix(h, "Proxy-") || strings.HasPrefix(h, "Sec-") || strings.HasPrefix(h, "Access-Control-"):
+		errs = append(errs, errorf("%s: %s is a header the proxy, the transport or MCP relies on; use Authorization or a header of your own such as X-Byward-Identity", hEnv, h))
+	}
+	cEnv := Setting{Name: "assertion-claims"}.Env()
+	raw := strings.TrimSpace(v.get("assertion-claims"))
+	if raw == "none" {
+		return errs
+	}
+	seen := map[string]bool{}
+	for _, name := range splitList(raw) {
+		name = strings.ToLower(name)
+		switch {
+		case !slices.Contains(AssertionClaimNames, name):
+			errs = append(errs, errorf("%s: %q is not one of %s, or none", cEnv, name, strings.Join(AssertionClaimNames, ", ")))
+		case !seen[name]:
+			seen[name] = true
+			c.AssertionClaims = append(c.AssertionClaims, name)
+		}
+	}
+	if raw != "" && len(splitList(raw)) == 0 {
+		errs = append(errs, errorf("%s is set but lists nothing; give claims, or none", cEnv))
+	}
+	return errs
+}
+
+// isTokenChar reports whether r may appear in an HTTP header name (RFC 9110 §5.6.2).
+func isTokenChar(r rune) bool {
+	return r < 0x7f && (r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("!#$%&'*+-.^_`|~", r))
 }
 
 // refreshGrace parses the refresh-token grace window (ADR-0006 §4: 0 to 60 s).
