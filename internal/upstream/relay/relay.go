@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/corker/mcp-authproxy/internal/logging"
-	"github.com/corker/mcp-authproxy/internal/tracing"
 )
 
 // stripped are removed from every inbound request before anything of ours is set (invariant 16):
@@ -31,7 +30,25 @@ var errUpstreamRefused = errors.New("upstream refused the proxy and the request 
 
 // New returns a handler relaying each request to target, the upstream's MCP endpoint URL: the
 // request path is replaced by target's path; the query is kept.
-func New(log *slog.Logger, target *url.URL) http.Handler {
+// Option configures the relay.
+type Option func(*options)
+
+type options struct {
+	inject func(context.Context, http.Header)
+}
+
+// WithTraceContext sets how the relay writes trace context onto the upstream request (the
+// server wires the tracing package's propagator). Without it nothing is written, and an inbound
+// `traceparent` passes unchanged.
+func WithTraceContext(inject func(context.Context, http.Header)) Option {
+	return func(o *options) { o.inject = inject }
+}
+
+func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
+	o := options{inject: func(context.Context, http.Header) {}}
+	for _, f := range opts {
+		f(&o)
+	}
 	t := *target
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
@@ -41,9 +58,8 @@ func New(log *slog.Logger, target *url.URL) http.Handler {
 			strip(pr.Out.Header)
 			// A token in the query never reaches the upstream, with or without authentication.
 			pr.Out.URL.RawQuery = withoutAccessToken(pr.Out.URL.RawQuery)
-			// Our span's trace context toward the upstream; with tracing off this is a no-op and an
-			// inbound traceparent passes unchanged. The body (`params._meta`) is never touched.
-			tracing.Inject(pr.In.Context(), pr.Out.Header)
+			// Our span's trace context toward the upstream; the body (`params._meta`) is never touched.
+			o.inject(pr.In.Context(), pr.Out.Header)
 		},
 		Transport: &http.Transport{
 			Proxy:                 http.ProxyFromEnvironment,

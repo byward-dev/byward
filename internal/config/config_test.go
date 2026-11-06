@@ -266,7 +266,7 @@ func TestInternalListenDefaultsToLoopbackAndMustDifferFromListen(t *testing.T) {
 	}
 	for _, bad := range []string{"9090", "127.0.0.1:8080"} {
 		if _, _, err := Load(nil, append(base, "MCP_AUTHPROXY_INTERNAL_LISTEN="+bad), nil); err == nil || !strings.Contains(err.Error(), "MCP_AUTHPROXY_INTERNAL_LISTEN") {
-			t.Errorf("internal listen %q: err %v", bad, err)
+			t.Errorf("MCP_AUTHPROXY_INTERNAL_LISTEN=%q: want an error naming the setting, got %v", bad, err)
 		}
 	}
 }

@@ -3,11 +3,15 @@ package resource
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/corker/mcp-authproxy/internal/audit"
 )
 
 func meta() Metadata {
@@ -143,5 +147,34 @@ func TestGuardTokenSentTwice(t *testing.T) {
 func TestNoTokensRejectsEverything(t *testing.T) {
 	if _, err := (NoTokens{}).Validate(context.Background(), "anything"); err != ErrInvalid {
 		t.Fatal(err)
+	}
+}
+
+// An invalid or expired token is an audit event; a missing token is the normal start of sign-in.
+func TestGuardAuditsRejectedTokensButNotMissingOnes(t *testing.T) {
+	var out strings.Builder
+	rec := audit.New(slog.New(slog.NewJSONHandler(&out, nil)), nil, time.Now)
+	g := Guard(meta(), fakeValidator{"tok-exp-1": ErrExpired, "tok-bad-2": ErrInvalid}, rec, reached)
+	cases := []struct{ auth, want string }{
+		{"", ""},
+		{"Bearer tok-bad-2", `"event":"access_token_rejected","outcome":"failure","reason":"invalid"`},
+		{"Bearer tok-exp-1", `"event":"access_token_rejected","outcome":"failure","reason":"expired"`},
+	}
+	for _, c := range cases {
+		out.Reset()
+		r := httptest.NewRequest("POST", "/mcp", nil)
+		if c.auth != "" {
+			r.Header.Set("Authorization", c.auth)
+		}
+		serve(g, r)
+		switch {
+		case c.want == "" && out.Len() != 0:
+			t.Errorf("no token: want no audit record, got %s", out.String())
+		case c.want != "" && !strings.Contains(out.String(), c.want):
+			t.Errorf("%s: want %s, got %s", c.auth, c.want, out.String())
+		}
+		if strings.Contains(out.String(), "tok-") {
+			t.Errorf("%s: the token reached the audit stream", c.auth)
+		}
 	}
 }

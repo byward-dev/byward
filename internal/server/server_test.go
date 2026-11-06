@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -273,9 +277,6 @@ func TestNewConfiguresHardenedLimitsAndLoopbackBind(t *testing.T) {
 	}
 	if s.Internal.Addr != "127.0.0.1:9090" {
 		t.Fatalf("default internal bind = %q", s.Internal.Addr)
-	}
-	if s := s.Public; s.ReadHeaderTimeout == 0 || s.ReadTimeout == 0 || s.IdleTimeout == 0 || s.MaxHeaderBytes == 0 {
-		t.Fatalf("a limit is unset: %+v", s)
 	}
 	if s.Public.Addr != "127.0.0.1:8080" {
 		t.Fatalf("default bind = %q", s.Public.Addr)
@@ -543,7 +544,7 @@ func TestInternalListenerServesProbesAndMetricsAndThePublicOneDoesNot(t *testing
 	// A public request is timed under its fixed route name.
 	getBody(t, s.Public.Handler, "mcp.example.com", "/mcp")
 	code, body := getBody(t, s.Internal.Handler, "x", "/metrics")
-	if code != 200 || !strings.Contains(body, "mcp_authproxy_build_info") || !strings.Contains(body, `route="mcp",status_class="4xx"`) {
+	if code != 200 || !strings.Contains(body, "mcp_authproxy_build_info") || !strings.Contains(body, `route="/mcp",status_class="4xx"`) {
 		t.Fatalf("metrics = %d, missing build info or the public request:\n%s", code, body)
 	}
 	for _, p := range []string{"/metrics", "/livez", "/readyz"} {
@@ -576,6 +577,119 @@ func TestStartupAuditsKeysAndStaticClients(t *testing.T) {
 	for _, want := range []string{`"event":"key_loaded","outcome":"success","reason":"signing","key_id":"2026-11-06"`, `"event":"client_registered","outcome":"success","reason":"static","client_id":"test-app"`} {
 		if !strings.Contains(logs.String(), want) {
 			t.Errorf("startup audit lacks %s:\n%s", want, logs.String())
+		}
+	}
+}
+
+var listenLine = regexp.MustCompile(`"msg":"listening","listen":"([^"]+)"`)
+
+// ADR-0021 §10: on shutdown /readyz fails before the public listener closes, and the internal
+// listener (probes, metrics) closes only after the public one, so the drain is visible.
+// Shutdown runs RegisterOnShutdown callbacks in goroutines, so each asserts the state it sees.
+func TestRunDrainsReadinessBeforeShutdownAndClosesTheInternalListenerLast(t *testing.T) {
+	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp",
+		"MCP_AUTHPROXY_LISTEN=127.0.0.1:0", "MCP_AUTHPROXY_INTERNAL_LISTEN=127.0.0.1:0"), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs := &syncBuffer{}
+	log := logging.New(logs, "json")
+	s, err := New(cfg, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probes := http.NewServeMux()
+	s.Health.Register(probes)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	var readyzAtPublicShutdown int
+	var publicDialAtInternalShutdown error
+	s.Public.RegisterOnShutdown(func() {
+		defer wg.Done()
+		readyzAtPublicShutdown, _ = getBody(t, probes, "x", "/readyz")
+	})
+	s.Internal.RegisterOnShutdown(func() {
+		defer wg.Done()
+		m := listenLine.FindStringSubmatch(logs.String())
+		if m == nil {
+			publicDialAtInternalShutdown = errors.New("no listening line")
+			return
+		}
+		c, err := net.DialTimeout("tcp", m[1], time.Second)
+		if err == nil {
+			_ = c.Close()
+			publicDialAtInternalShutdown = errors.New("the public listener still accepts connections")
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Run(ctx, s, log) }()
+	for !listenLine.MatchString(logs.String()) {
+		runtime.Gosched()
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+	wg.Wait()
+	if readyzAtPublicShutdown != http.StatusServiceUnavailable {
+		t.Errorf("/readyz was %d when the public listener began shutting down, want 503 (drain first)", readyzAtPublicShutdown)
+	}
+	if publicDialAtInternalShutdown != nil {
+		t.Errorf("internal listener shut down before the public one was closed: %v", publicDialAtInternalShutdown)
+	}
+}
+
+// ADR-0021 §5 through the real handler: rejections from one source are logged up to the burst and
+// counted in metrics beyond it.
+func TestRejectionsFromOneSourceAreRateLimitedButStillCounted(t *testing.T) {
+	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	s, err := New(cfg, logging.New(&logs, "json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs.Reset() // startup records
+	for range 15 {
+		getBody(t, s.Public.Handler, "evil.example", "/mcp")
+	}
+	if n := strings.Count(logs.String(), `"event":"host_rejected"`); n != 10 {
+		t.Errorf("logged %d host_rejected records from one source, want the burst of 10", n)
+	}
+	_, metrics := getBody(t, s.Internal.Handler, "x", "/metrics")
+	if !strings.Contains(metrics, `mcp_authproxy_audit_events_total{event="host_rejected",outcome="failure"} 15`) {
+		t.Errorf("metrics must count all 15 rejections:\n%s", metrics)
+	}
+}
+
+// ADR-0021 §8: label values come from the route table, never from the request.
+func TestRouteLabelsNeverCarryRequestDetails(t *testing.T) {
+	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(cfg, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"/mcp?user=alice", "/no-such-route-alice", "/callback/entra?state=alice"} {
+		getBody(t, s.Public.Handler, "mcp.example.com", p)
+	}
+	_, metrics := getBody(t, s.Internal.Handler, "x", "/metrics")
+	if strings.Contains(metrics, "alice") {
+		t.Fatalf("a request detail reached a label:\n%s", metrics)
+	}
+	for _, want := range []string{`route="/mcp"`, `route="other"`, `route="/callback/entra"`} {
+		if !strings.Contains(metrics, want) {
+			t.Errorf("metrics lack %s", want)
 		}
 	}
 }

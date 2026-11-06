@@ -70,7 +70,7 @@ Prometheus text format at `/metrics` on the internal listener. Histogram buckets
 
 | Metric | Type | Labels |
 |---|---|---|
-| `mcp_authproxy_http_request_duration_seconds` | histogram | `route` (`mcp`, `metadata`, `authorize`, `callback`, `token`, `other`), `status_class` (`2xx` …) |
+| `mcp_authproxy_http_request_duration_seconds` | histogram | `route`: the matched route pattern (`/mcp` or your public path, `/authorize`, `/callback/entra`, `/token`, the `/.well-known/…` metadata paths) or `other`; `status_class` (`2xx` …) |
 | `mcp_authproxy_idp_request_duration_seconds` | histogram | `idp`, `operation` (`authorize`, `callback`), `outcome` (`success`, `rejected`, `unavailable`) |
 | `mcp_authproxy_upstream_in_flight` | gauge | `kind` (`request`, `stream`) |
 | `mcp_authproxy_upstream_busy_total` | counter | `kind`: requests refused with 503 because an admission cap was full |
@@ -115,7 +115,8 @@ default; the OpenTelemetry SDK would otherwise send to `localhost:4318`. When on
 standard variables, e.g. `OTEL_TRACES_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_ENDPOINT=https://collector:4318`,
 `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`.
 
-- One server span per request, named `<METHOD> <route>`, continuing an inbound `traceparent` header.
+- One server span per request, named `<METHOD> <route pattern>` (e.g. `POST /mcp`), continuing an inbound
+  `traceparent` header.
 - `traceparent` toward the upstream is our span's; with tracing off an inbound `traceparent` passes through unchanged.
 - The MCP body, including `params._meta`, is never read or changed. A client that puts trace context only in `_meta`
   joins the upstream's trace, not ours.

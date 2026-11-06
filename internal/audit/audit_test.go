@@ -72,18 +72,24 @@ func TestAuditRecordsMatchTheGoldenSchema(t *testing.T) {
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			t.Fatal(err)
 		}
-		if rec["log.type"] != "audit" || rec["schema_version"] != float64(SchemaVersion) || rec["event"] == "" || rec["outcome"] == "" {
+		event, _ := rec["event"].(string)
+		outcome, _ := rec["outcome"].(string)
+		if rec["log.type"] != "audit" || rec["schema_version"] != float64(SchemaVersion) || event == "" || outcome == "" {
 			t.Fatalf("record lacks log.type, schema_version, event or outcome: %s", line)
 		}
 	}
 }
+
+// names lists every event constant; a new one must be added here, to samples and to the docs.
+var names = []string{Login, AccessDenied, TokenIssued, TokenRejected, AccessTokenRejected, GrantRevoked,
+	ClientRegistered, KeyLoaded, HostRejected, OriginRejected}
 
 func TestEveryEventHasASampleAndADocsRow(t *testing.T) {
 	docs, err := os.ReadFile("../../docs/reference/observability.md")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, n := range Names {
+	for _, n := range names {
 		found := false
 		for _, s := range samples {
 			found = found || s.Name == n

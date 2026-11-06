@@ -17,6 +17,7 @@ import (
 	"github.com/corker/mcp-authproxy/internal/idp/entra"
 	"github.com/corker/mcp-authproxy/internal/registration"
 	"github.com/corker/mcp-authproxy/internal/resource"
+	"github.com/corker/mcp-authproxy/internal/store"
 	"github.com/corker/mcp-authproxy/internal/store/memory"
 	"github.com/corker/mcp-authproxy/internal/token"
 )
@@ -32,6 +33,9 @@ type auth struct {
 	checks    []health.Check
 }
 
+// idpName names the IdP adapter in its callback path, the broker and metrics.
+const idpName = "entra"
+
 // pinger is a store that can say whether it is reachable; the in-memory store has nothing to check.
 type pinger interface{ Ping(context.Context) error }
 
@@ -41,13 +45,6 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (*auth, er
 	ring, err := token.LoadKeyRing(cfg.KeysDir)
 	if err != nil {
 		return nil, fmt.Errorf("MCP_AUTHPROXY_KEYS_DIR: %w", err)
-	}
-	for _, id := range ring.KeyIDs() {
-		use := "verification"
-		if id == ring.SigningKeyID() {
-			use = "signing"
-		}
-		o.Audit.Record(nil, audit.Event{Name: audit.KeyLoaded, Outcome: audit.Success, Reason: use, KeyID: id})
 	}
 	resourceURL := cfg.PublicURL.String()
 	sealer, err := token.NewSealer(ring, resourceURL)
@@ -66,21 +63,17 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (*auth, er
 	if err != nil {
 		return nil, fmt.Errorf("MCP_AUTHPROXY_STATIC_CLIENTS_FILE: %w", err)
 	}
-	if lister, ok := clients.(interface{ IDs() []string }); ok {
-		for _, id := range lister.IDs() {
-			o.Audit.Record(nil, audit.Event{Name: audit.ClientRegistered, Outcome: audit.Success, Reason: "static", ClientID: id})
-		}
-	}
+	auditStartup(o.Audit, ring, clients)
 	provider, err := entra.New(entra.Config{Tenant: cfg.EntraTenant, ClientID: cfg.EntraClientID,
-		ClientAuth: idp.ClientSecret(cfg.EntraClientSecret), RedirectURL: cfg.Issuer() + "/callback/entra"})
+		ClientAuth: idp.ClientSecret(cfg.EntraClientSecret), RedirectURL: cfg.Issuer() + "/callback/" + idpName})
 	if err != nil {
 		return nil, fmt.Errorf("entra settings (MCP_AUTHPROXY_ENTRA_*): %w", err)
 	}
 	st := memory.New()
-	b, err := broker.New(broker.Config{Issuer: cfg.Issuer(), Resource: cfg.PublicURL, Scope: cfg.Scope, IdPName: "entra",
+	b, err := broker.New(broker.Config{Issuer: cfg.Issuer(), Resource: cfg.PublicURL, Scope: cfg.Scope, IdPName: idpName,
 		IdPLabel: "Microsoft Entra", IdP: provider, Clients: clients, Store: st, Sealer: sealer,
 		LoginBox: loginBox, IdPTokenBox: idpBox, SecureCookies: cfg.PublicURL.Scheme == "https", Log: log,
-		Audit: o.Audit, ObserveIdP: func(op, outcome string, d time.Duration) { o.Metrics.IdP("entra", op, outcome, d) }})
+		Audit: o.Audit, ObserveIdP: func(op, outcome string, d time.Duration) { o.Metrics.IdP(idpName, op, outcome, d) }})
 	if err != nil {
 		return nil, err
 	}
@@ -89,16 +82,37 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (*auth, er
 		return nil, err
 	}
 	log.Info("broker ready", "reason", "keys "+fmt.Sprint(len(ring.KeyIDs()))+", signing with "+ring.SigningKeyID()+"; store in memory until slice 1.3")
+	return &auth{register: b.Register, validator: v, checks: readiness(ring, st)}, nil
+}
+
+// auditStartup records the keys and static clients the proxy starts with (ADR-0021 §3).
+func auditStartup(rec *audit.Log, ring *token.KeyRing, clients registration.Registry) {
+	for _, id := range ring.KeyIDs() {
+		use := "verification"
+		if id == ring.SigningKeyID() {
+			use = "signing"
+		}
+		rec.Record(nil, audit.Event{Name: audit.KeyLoaded, Outcome: audit.Success, Reason: use, KeyID: id})
+	}
+	if s, ok := clients.(*registration.StaticRegistry); ok {
+		for _, id := range s.IDs() {
+			rec.Record(nil, audit.Event{Name: audit.ClientRegistered, Outcome: audit.Success, Reason: "static", ClientID: id})
+		}
+	}
+}
+
+// readiness is what /readyz checks in authenticated mode: a signing key, and the store when it can
+// be pinged (the in-memory store always can serve). Never the IdP (ADR-0021 §10).
+func readiness(ring *token.KeyRing, st store.Store) []health.Check {
 	checks := []health.Check{{Name: "keys", Ready: func(context.Context) error {
 		if ring.SigningKeyID() == "" {
 			return errors.New("no signing key")
 		}
 		return nil
 	}}}
-	if p, ok := any(st).(pinger); ok {
-		checks = append(checks, health.Check{Name: "store", Ready: p.Ping})
-	} else {
-		checks = append(checks, health.Check{Name: "store", Ready: func(context.Context) error { return nil }})
+	storeReady := func(context.Context) error { return nil }
+	if p, ok := st.(pinger); ok {
+		storeReady = p.Ping
 	}
-	return &auth{register: b.Register, validator: v, checks: checks}, nil
+	return append(checks, health.Check{Name: "store", Ready: storeReady})
 }

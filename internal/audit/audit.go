@@ -29,10 +29,6 @@ const (
 	OriginRejected      = "origin_rejected"       // a request sent an Origin outside the allowlist
 )
 
-// Names lists every event name, in the order the docs table uses.
-var Names = []string{Login, AccessDenied, TokenIssued, TokenRejected, AccessTokenRejected, GrantRevoked,
-	ClientRegistered, KeyLoaded, HostRejected, OriginRejected}
-
 // Outcomes.
 const (
 	Success = "success"

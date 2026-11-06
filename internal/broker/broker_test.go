@@ -718,6 +718,21 @@ func (e *env) auditEvents(t *testing.T, name string) []map[string]any {
 	return out
 }
 
+// wantFields reports each audit field that differs from want, by name. A want value of "*" means
+// the field must be present and non-empty.
+func wantFields(t *testing.T, what string, rec map[string]any, want map[string]any) {
+	t.Helper()
+	for k, v := range want {
+		got, ok := rec[k]
+		switch {
+		case v == "*" && (!ok || got == ""):
+			t.Errorf("%s.%s is missing", what, k)
+		case v != "*" && got != v:
+			t.Errorf("%s.%s = %v, want %v", what, k, got, v)
+		}
+	}
+}
+
 func TestSignInAndRedemptionAreAudited(t *testing.T) {
 	e := newEnv(t)
 	code := e.signIn(t, nil).Query().Get("code")
@@ -726,14 +741,19 @@ func TestSignInAndRedemptionAreAudited(t *testing.T) {
 	}
 	grant := firstGrant(e.st)
 	logins := e.auditEvents(t, "login")
-	if len(logins) != 1 || logins[0]["outcome"] != "success" || logins[0]["client_id"] != clientID || logins[0]["grant_id"] != grant ||
-		!strings.Contains(fmt.Sprint(logins[0]["user_key"]), ":") || logins[0]["idp"] != "entra" || logins[0]["request_id"] == nil {
-		t.Fatalf("login records: %v", logins)
+	if len(logins) != 1 {
+		t.Fatalf("want 1 login record, got %d: %v", len(logins), logins)
+	}
+	wantFields(t, "login", logins[0], map[string]any{"outcome": "success", "client_id": clientID, "grant_id": grant,
+		"idp": "entra", "user_key": "*", "request_id": "*", "remote_ip": "*"})
+	if !strings.Contains(fmt.Sprint(logins[0]["user_key"]), ":") {
+		t.Errorf("login.user_key = %v, want the tid:oid form", logins[0]["user_key"])
 	}
 	issued := e.auditEvents(t, "token_issued")
-	if len(issued) != 1 || issued[0]["client_id"] != clientID || issued[0]["grant_id"] != grant {
-		t.Fatalf("token_issued records: %v", issued)
+	if len(issued) != 1 {
+		t.Fatalf("want 1 token_issued record, got %d: %v", len(issued), issued)
 	}
+	wantFields(t, "token_issued", issued[0], map[string]any{"outcome": "success", "client_id": clientID, "grant_id": grant, "user_key": logins[0]["user_key"]})
 	if strings.Contains(e.audit.String(), code) || strings.Contains(e.audit.String(), token.CodePrefix) {
 		t.Fatal("the authorization code reached the audit stream")
 	}
@@ -749,13 +769,18 @@ func TestReusedCodeIsAuditedAsARevocation(t *testing.T) {
 	e.redeem(t, code, nil)
 	e.redeem(t, code, nil)
 	revoked := e.auditEvents(t, "grant_revoked")
-	if len(revoked) != 1 || revoked[0]["grant_id"] != grant || !strings.Contains(fmt.Sprint(revoked[0]["reason"]), "reused") {
-		t.Fatalf("grant_revoked records: %v", revoked)
+	if len(revoked) != 1 {
+		t.Fatalf("want 1 grant_revoked record, got %d: %v", len(revoked), revoked)
+	}
+	wantFields(t, "grant_revoked", revoked[0], map[string]any{"outcome": "success", "grant_id": grant})
+	if !strings.Contains(fmt.Sprint(revoked[0]["reason"]), "reused") {
+		t.Errorf("grant_revoked.reason = %v, want it to say the code was reused", revoked[0]["reason"])
 	}
 	rejected := e.auditEvents(t, "token_rejected")
-	if len(rejected) != 1 || rejected[0]["reason"] != "invalid_grant" || rejected[0]["outcome"] != "failure" {
-		t.Fatalf("token_rejected records: %v", rejected)
+	if len(rejected) != 1 {
+		t.Fatalf("want 1 token_rejected record, got %d: %v", len(rejected), rejected)
 	}
+	wantFields(t, "token_rejected", rejected[0], map[string]any{"outcome": "failure", "reason": "invalid_grant"})
 }
 
 // ADR-0021 §2, §7: our request ID reaches Entra as client-request-id, comes back as correlation_id,
@@ -768,12 +793,14 @@ func TestIdPFailureIsAuditedAndCorrelatesWithTheIdP(t *testing.T) {
 	res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{c})
 	ref := res.Header.Get("X-Request-Id")
 	failed := e.auditEvents(t, "login")
-	if len(failed) != 1 || failed[0]["outcome"] != "failure" || failed[0]["request_id"] != ref || failed[0]["client_id"] != clientID {
-		t.Fatalf("login failure records: %v", failed)
+	if len(failed) != 1 {
+		t.Fatalf("want 1 login record, got %d: %v", len(failed), failed)
 	}
-	if !strings.Contains(e.logs.String(), `"correlation_id":"`+ref+`"`) || !strings.Contains(e.logs.String(), `"trace_id":`) ||
-		!strings.Contains(e.logs.String(), `"idp_error_code":7000215`) {
-		t.Fatalf("the IdP failure log lacks the IdP's code, trace ID or our ID as correlation_id: %s", e.logs.String())
+	wantFields(t, "login", failed[0], map[string]any{"outcome": "failure", "request_id": ref, "client_id": clientID})
+	for _, want := range []string{`"correlation_id":"` + ref + `"`, `"trace_id":"`, `"idp_error_code":7000215`} {
+		if !strings.Contains(e.logs.String(), want) {
+			t.Errorf("the IdP failure log lacks %s (our request ID must come back as Entra's correlation_id): %s", want, e.logs.String())
+		}
 	}
 	if want := "callback unavailable"; len(e.idpOps) != 2 || e.idpOps[1] != want {
 		t.Fatalf("IdP observations = %v, want the callback to be %q", e.idpOps, want)
@@ -786,7 +813,35 @@ func TestUserDeclinedIsAuditedAsAFailedLogin(t *testing.T) {
 	q := url.Values{"state": {cb.Query().Get("state")}, "error": {"access_denied"}, "error_description": {"declined"}}
 	e.do(t, "GET", "/callback/entra?"+q.Encode(), nil, []*http.Cookie{c})
 	failed := e.auditEvents(t, "login")
-	if len(failed) != 1 || failed[0]["outcome"] != "failure" || failed[0]["reason"] != "the user declined to sign in" {
-		t.Fatalf("login records: %v", failed)
+	if len(failed) != 1 {
+		t.Fatalf("want 1 login record, got %d: %v", len(failed), failed)
+	}
+	wantFields(t, "login", failed[0], map[string]any{"outcome": "failure", "reason": "the user declined to sign in", "client_id": clientID})
+}
+
+type denyGate struct{}
+
+func (denyGate) Allow(context.Context, idp.Identity) error {
+	return errors.New("not in the allowed group")
+}
+
+func TestAccessGateDenialIsAuditedAndCreatesNoGrant(t *testing.T) {
+	e := newEnv(t)
+	e.b.cfg.Gate = denyGate{}
+	c, cb := e.startLogin(t, nil)
+	res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{c})
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("callback with a denying gate = %d, want 403", res.StatusCode)
+	}
+	denied := e.auditEvents(t, "access_denied")
+	if len(denied) != 1 {
+		t.Fatalf("want 1 access_denied record, got %d: %v", len(denied), denied)
+	}
+	wantFields(t, "access_denied", denied[0], map[string]any{"outcome": "failure", "client_id": clientID, "idp": "entra", "user_key": "*"})
+	if logins := e.auditEvents(t, "login"); len(logins) != 0 {
+		t.Errorf("a denied user was also audited as a login: %v", logins)
+	}
+	if firstGrant(e.st) != "" {
+		t.Error("a grant was created for a denied user")
 	}
 }

@@ -50,29 +50,34 @@ func clearOTELEnv(t *testing.T) {
 }
 
 // ADR-0024 §6: with OTEL_* unset, no telemetry connection happens (autoexport alone would send OTLP
-// to localhost:4318).
+// to localhost:4318). Setup must leave the global provider and propagator as they were; when the
+// default port is free it is also watched for connections.
 func TestNoTelemetryConnectionWhenOTELIsUnset(t *testing.T) {
 	clearOTELEnv(t)
 	restoreGlobals(t)
-	ln, err := net.Listen("tcp", "127.0.0.1:4318")
-	if err != nil {
-		t.Skipf("cannot watch the OTLP default port: %v", err)
-	}
-	defer func() { _ = ln.Close() }()
 	var conns atomic.Int32
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
+	if ln, err := net.Listen("tcp", "127.0.0.1:4318"); err == nil {
+		defer func() { _ = ln.Close() }()
+		go func() {
+			for {
+				c, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				conns.Add(1)
+				_ = c.Close()
 			}
-			conns.Add(1)
-			_ = c.Close()
-		}
-	}()
+		}()
+	} else {
+		t.Logf("port 4318 is busy (%v); relying on the unchanged-globals check", err)
+	}
+	tp, prop := otel.GetTracerProvider(), otel.GetTextMapPropagator()
 	enabled, shutdown, err := Setup(context.Background(), os.Getenv, "test")
 	if err != nil || enabled {
-		t.Fatalf("Setup with OTEL_* unset: enabled=%v err=%v", enabled, err)
+		t.Fatalf("Setup with OTEL_* unset: enabled=%v err=%v, want off and no error", enabled, err)
+	}
+	if otel.GetTracerProvider() != tp || otel.GetTextMapPropagator() != prop {
+		t.Fatal("Setup with OTEL_* unset replaced the global tracer provider or propagator")
 	}
 	if got := forwarded(t); got != inbound {
 		t.Fatalf("with tracing off the inbound traceparent must pass unchanged, got %q", got)

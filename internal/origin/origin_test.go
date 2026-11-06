@@ -123,3 +123,37 @@ func TestOriginRejectionNamesTheFix(t *testing.T) {
 		t.Fatalf("got %d %q", w.Code, w.Body)
 	}
 }
+
+func recording() (*audit.Log, *strings.Builder) {
+	var b strings.Builder
+	return audit.New(slog.New(slog.NewJSONHandler(&b, nil)), nil, time.Now), &b
+}
+
+func TestRejectionsAreAudited(t *testing.T) {
+	rec, out := recording()
+	hosts := Hosts(rec, []string{"mcp.example.com"}, ok)
+	r := httptest.NewRequest("GET", "/mcp", nil)
+	r.Host = "evil.example"
+	hosts.ServeHTTP(httptest.NewRecorder(), r)
+	origins := Origins(rec, []string{"https://app.example"}, ok)
+	r = httptest.NewRequest("POST", "/mcp", nil)
+	r.Header.Set("Origin", "https://evil.example")
+	origins.ServeHTTP(httptest.NewRecorder(), r)
+	for _, want := range []string{`"event":"host_rejected","outcome":"failure","host":"evil.example"`,
+		`"event":"origin_rejected","outcome":"failure","origin":"https://evil.example"`} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("audit stream lacks %s:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestAllowedRequestsAreNotAudited(t *testing.T) {
+	rec, out := recording()
+	r := httptest.NewRequest("POST", "/mcp", nil)
+	r.Host = "mcp.example.com"
+	r.Header.Set("Origin", "https://app.example")
+	Hosts(rec, []string{"mcp.example.com"}, Origins(rec, []string{"https://app.example"}, ok)).ServeHTTP(httptest.NewRecorder(), r)
+	if out.Len() != 0 {
+		t.Fatalf("an allowed request produced audit records: %s", out.String())
+	}
+}
