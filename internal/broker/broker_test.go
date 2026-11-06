@@ -134,7 +134,6 @@ type env struct {
 	sealer *token.Sealer
 	fake   *fakeidp.IdP
 	now    time.Time
-	jar    http.CookieJar
 }
 
 func keyRing(t *testing.T) *token.KeyRing {

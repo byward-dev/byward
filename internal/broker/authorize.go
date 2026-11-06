@@ -137,6 +137,7 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 		b.idpFailure(w, r, err)
 		return
 	}
+	//nolint:gosec // G124: Secure is false only in development mode on loopback http (ADR-0010 §10)
 	http.SetCookie(w, &http.Cookie{Name: b.cookieName(l.IdPState), Value: sealed, Path: "/", MaxAge: int(LoginLifetime.Seconds()),
 		HttpOnly: true, Secure: b.cfg.SecureCookies, SameSite: http.SameSiteLaxMode})
 	w.Header().Set("Cache-Control", "no-store")
@@ -175,6 +176,7 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 		b.page(w, r, http.StatusBadRequest, "This sign-in has expired or was started in another browser.", "Start again from your app.")
 		return
 	}
+	//nolint:gosec // G124: as above (ADR-0010 §10)
 	http.SetCookie(w, &http.Cookie{Name: c.Name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: b.cfg.SecureCookies, SameSite: http.SameSiteLaxMode})
 	plain, err := b.cfg.LoginBox.Open(c.Value)
 	var l login
@@ -197,7 +199,8 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := b.cfg.Now()
-	tokJSON, _ := json.Marshal(toks)
+	tokJSON, _ := json.Marshal(toks) //nolint:gosec // G117: marshalled only to be sealed in the IdP-token box below
+
 	sealedTokens, err := b.cfg.IdPTokenBox.Seal(tokJSON, now.Add(GrantLifetime))
 	if err != nil {
 		b.serverError(w, r, err)
@@ -242,7 +245,8 @@ func (b *Broker) redirectError(w http.ResponseWriter, r *http.Request, redirect,
 		v.Set("state", state)
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	http.Redirect(w, r, withQuery(redirect, v), http.StatusFound)
+	// redirect was checked with RedirectAllowed (ADR-0009) before any caller gets here.
+	http.Redirect(w, r, withQuery(redirect, v), http.StatusFound) //nolint:gosec // G710: validated redirect URI
 }
 
 // idpFailure explains an IdP error on a page; the operator hint and IdP trace IDs go to the log.
