@@ -22,7 +22,7 @@ jobs:
       - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
           # Only the tools `check` needs; operator tools such as azure-cli stay out of CI.
-          install_args: go golangci-lint go:golang.org/x/tools/cmd/goimports actionlint zizmor shellcheck go:github.com/google/go-licenses/v2
+          install_args: go golangci-lint go:golang.org/x/tools/cmd/goimports actionlint zizmor shellcheck jq go:github.com/google/go-licenses/v2
       - run: mise run check
         env:
           MISE_TASK_RUN_AUTO_INSTALL: "false"
@@ -47,6 +47,7 @@ jobs:
   # MCP conformance through --insecure-no-auth must equal conformance against the reference server (ADR-0024 §4a).
   conformance:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
