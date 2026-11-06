@@ -281,7 +281,9 @@ func (m *Manager) spawn(ctx context.Context, key string, id Identity, e *entry) 
 		idleFor: m.cfg.IdleTimeout, grace: m.cfg.KillGrace, maxMsg: m.cfg.MaxMessageBytes,
 		stdin: inW, messages: make(chan []byte, 16), abandon: make(chan struct{}), done: make(chan struct{}),
 	}
+	p.mu.Lock() // the timer may fire before the assignment completes; stop reads p.idle under p.mu
 	p.idle = m.cfg.Clock.AfterFunc(m.cfg.IdleTimeout, func() { p.stop("idle") })
+	p.mu.Unlock()
 	p.readers.Add(2)
 	go p.readStdout(outR)
 	go func() {
