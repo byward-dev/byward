@@ -1317,3 +1317,16 @@ func TestAuthorizeRefusesARequestItCannotKeepInTheLoginCookie(t *testing.T) {
 		})
 	}
 }
+
+// Collect drops revocations after store.RevocationRetention, so it must outlive what they still
+// guard: access tokens (validated without a store read, so only the deny list refuses them, until
+// exp plus the validator's leeway) and logins in flight when revoke-user ran (a retained cut-off
+// refuses their grant). Refresh tokens need no revocation row: revoking deletes them with the
+// grant (storetest RevokeGrantDeletesItsRowsAndRecordsARevocation, RevokeSubjectCutsOffEarlierGrants).
+func TestRevocationsOutliveTheTokensAndLoginsTheyCover(t *testing.T) {
+	for name, lifetime := range map[string]time.Duration{"access token": AccessLifetime + token.Leeway, "login": LoginLifetime} {
+		if store.RevocationRetention <= lifetime {
+			t.Errorf("store.RevocationRetention %v is shorter than the %s lifetime %v", store.RevocationRetention, name, lifetime)
+		}
+	}
+}
