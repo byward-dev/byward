@@ -82,6 +82,7 @@ run node-registry-not-json        $p "$pw" "$axe" '<html>' 1 'no Node 24 release
 # npm lists releases by publication, so a backport can come after the newest line.
 run playwright-backport-published-last 1.63.4 1.63.4 4.14.0 24.22.1 "$(npm 1.63.4 2026-09-01T00:00:00.000Z 1.64.1 2026-09-10T00:00:00.000Z 1.63.5 2026-09-20T00:00:00.000Z)" "$axe" "$nd" 1 'NEWER: Playwright 1\.64\.1'
 run playwright-1.10-newer-than-1.9 1.9.0 1.9.0 4.14.0 24.22.1 "$(npm 1.9.0 2026-01-01T00:00:00.000Z 1.10.0 2026-02-01T00:00:00.000Z)" "$axe" "$nd" 1 'NEWER: Playwright 1\.10\.0'
+run node-24.10-newer-than-24.9 1.64.1 1.64.1 4.14.0 24.9.0 "$pw" "$axe" "$(node 24.10.0 2026-02-01 24.9.0 2026-01-01)" 1 'NEWER: Node 24 24\.10\.0'
 # A pin bumped during the cooldown is ahead of the newest release past it: not stale.
 run playwright-pinned-ahead 1.65.0 1.65.0 4.14.0 24.22.1 "$(npm 1.64.1 2026-10-01T00:00:00.000Z 1.65.0 2026-10-25T00:00:00.000Z)" "$axe" "$nd" 0 'ok'
 run node-pinned-ahead       1.64.1 1.64.1 4.14.0 24.22.2 "$pw" "$axe" "$(node 24.22.2 2026-10-27 24.22.1 2026-10-01)" 0 'ok'
