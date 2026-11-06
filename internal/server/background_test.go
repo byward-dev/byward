@@ -58,6 +58,13 @@ var discard = slog.New(slog.NewTextHandler(io.Discard, nil))
 // sealAccess seals an access token for grantID with the keys the server under test loads.
 func sealAccess(t *testing.T, cfg *config.Config, env []string, grantID string) string {
 	t.Helper()
+	return sealAccessFor(t, cfg, env, grantID, "tid:oid")
+}
+
+// sealAccessFor seals an access token for grantID and subject, issued now, with the keys the server
+// under test loads.
+func sealAccessFor(t *testing.T, cfg *config.Config, env []string, grantID, subject string) string {
+	t.Helper()
 	var keysDir string
 	for _, kv := range env {
 		if v, ok := strings.CutPrefix(kv, "BYWARD_KEYS_DIR="); ok {
@@ -73,7 +80,7 @@ func sealAccess(t *testing.T, cfg *config.Config, env []string, grantID string) 
 		t.Fatal(err)
 	}
 	now := time.Now()
-	tok, err := s.Seal(token.Access, token.Claims{GrantID: grantID, Subject: "tid:oid", IssuedAt: now, ExpiresAt: now.Add(time.Hour)})
+	tok, err := s.Seal(token.Access, token.Claims{GrantID: grantID, Subject: subject, IssuedAt: now, ExpiresAt: now.Add(time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -34,6 +34,7 @@ type List struct {
 	mu      sync.RWMutex
 	grants  map[string]bool
 	cutoffs map[string]time.Time // subject → latest Before
+	all     time.Time            // latest cut-off for every subject (revoke-all); zero if none
 	local   map[string]time.Time // this replica's revoked grants → when, until the store has them
 	synced  time.Time            // zero until the first good sync
 }
@@ -46,8 +47,8 @@ func New(src store.Revocations, now func() time.Time) *List {
 	return &List{src: src, now: now, grants: map[string]bool{}, cutoffs: map[string]time.Time{}, local: map[string]time.Time{}}
 }
 
-// Denied implements token.DenyList: the grant is revoked, or the subject was cut off after the
-// token was issued. A stale list returns errStale, which rejects the token.
+// Denied implements token.DenyList: the grant is revoked, or the subject, or every subject, was cut
+// off after the token was issued. A stale list returns errStale, which rejects the token.
 func (l *List) Denied(grantID, subject string, issuedAt time.Time) (bool, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -63,6 +64,9 @@ func (l *List) Denied(grantID, subject string, issuedAt time.Time) (bool, error)
 	// "Issued at or before the cut-off" (token.DenyList). Tokens carry whole seconds, so one issued
 	// just after the cut-off in the same second is denied too (fail safe).
 	if c, ok := l.cutoffs[subject]; ok && !issuedAt.After(c) {
+		return true, nil
+	}
+	if !l.all.IsZero() && !issuedAt.After(l.all) {
 		return true, nil
 	}
 	return false, nil
@@ -83,7 +87,12 @@ func (l *List) Sync(ctx context.Context) error {
 		return err
 	}
 	grants, cutoffs := map[string]bool{}, map[string]time.Time{}
+	var all time.Time
 	for _, r := range revs {
+		// Only an explicit All revokes every subject; a revocation naming nothing revokes nothing.
+		if r.All && r.Before.After(all) {
+			all = r.Before
+		}
 		if r.GrantID != "" {
 			grants[r.GrantID] = true
 		}
@@ -99,7 +108,7 @@ func (l *List) Sync(ctx context.Context) error {
 			delete(l.local, id)
 		}
 	}
-	l.grants, l.cutoffs, l.synced = grants, cutoffs, started
+	l.grants, l.cutoffs, l.all, l.synced = grants, cutoffs, all, started
 	return nil
 }
 

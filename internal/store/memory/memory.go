@@ -59,7 +59,7 @@ func (s *Store) CreateGrant(_ context.Context, g store.Grant) (store.Grant, erro
 		return store.Grant{}, store.ErrExists
 	}
 	for _, r := range s.revs {
-		if r.Subject == g.Subject && r.Before.After(g.CreatedAt) {
+		if (r.All || r.Subject == g.Subject) && r.Before.After(g.CreatedAt) {
 			return store.Grant{}, store.ErrRevoked
 		}
 	}
@@ -121,6 +121,19 @@ func (s *Store) RevokeSubject(_ context.Context, subject string, before, at time
 		}
 	}
 	s.revs = append(s.revs, store.Revocation{Subject: subject, Before: before, At: at})
+	return nil
+}
+
+// RevokeAll implements store.Grants.
+func (s *Store) RevokeAll(_ context.Context, before, at time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, g := range s.grants {
+		if g.CreatedAt.Before(before) {
+			s.deleteGrantLocked(id)
+		}
+	}
+	s.revs = append(s.revs, store.Revocation{All: true, Before: before, At: at})
 	return nil
 }
 

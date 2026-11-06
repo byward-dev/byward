@@ -333,6 +333,16 @@ func (p *Provider) checkAccessToken(ctx context.Context, raw string) error {
 	return nil
 }
 
+// UserKey returns the canonical user key ("tid:oid", both GUIDs in lower case, as sign-in stores
+// it) for an operator-typed key, and whether s is one: the portal shows GUIDs in either case.
+func UserKey(s string) (string, bool) {
+	tid, oid, ok := strings.Cut(strings.ToLower(strings.TrimSpace(s)), ":")
+	if !ok || !isGUID(tid) || !isGUID(oid) {
+		return "", false
+	}
+	return tid + ":" + oid, true
+}
+
 func isGUID(s string) bool {
 	if len(s) != 36 {
 		return false

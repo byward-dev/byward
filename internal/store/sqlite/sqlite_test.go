@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -463,6 +464,8 @@ var (
 		{GrantID: "fixture-revoked", Before: fixtureCreated, At: fixtureCreated},
 		{Subject: "tid:fixture-revoked-subject", Before: fixtureCreated, At: fixtureCreated.Add(time.Second)},
 	}
+	// From v3: a cut-off for every subject.
+	fixtureRevokeAll = store.Revocation{All: true, Before: fixtureCreated, At: fixtureCreated.Add(2 * time.Second)}
 )
 
 func TestFixturesMigrateToTheCurrentSchemaKeepingTheirData(t *testing.T) {
@@ -487,8 +490,12 @@ func TestFixturesMigrateToTheCurrentSchemaKeepingTheirData(t *testing.T) {
 			if r, err := s.RefreshToken(ctx, fixtureRefresh.Hash, fixtureCreated); err != nil || !reflect.DeepEqual(r, fixtureRefresh) {
 				t.Fatalf("refresh token = %+v, %v\nwant %+v", r, err, fixtureRefresh)
 			}
-			if revs, err := s.Revocations(ctx); err != nil || !reflect.DeepEqual(revs, fixtureRevocations) {
-				t.Fatalf("revocations = %+v, %v\nwant %+v", revs, err, fixtureRevocations)
+			wantRevs := fixtureRevocations
+			if v >= 3 {
+				wantRevs = append(slices.Clone(fixtureRevocations), fixtureRevokeAll)
+			}
+			if revs, err := s.Revocations(ctx); err != nil || !reflect.DeepEqual(revs, wantRevs) {
+				t.Fatalf("revocations = %+v, %v\nwant %+v", revs, err, wantRevs)
 			}
 			if c, err := s.ConsumeCode(ctx, fixtureGrant.ID, fixtureCreated); err != nil || !reflect.DeepEqual(c, fixtureCode) {
 				t.Fatalf("code = %+v, %v\nwant %+v", c, err, fixtureCode)
@@ -651,5 +658,17 @@ func TestPingAnswersWhileOpenAndFailsAfterClose(t *testing.T) {
 	must(t, s.Close())
 	if err := s.Ping(ctx); err == nil {
 		t.Fatal("Ping succeeded on a closed store")
+	}
+}
+
+// Only ” and 'all' are scopes: the database itself refuses anything else, so no write path can
+// invent a revocation that covers more than it names.
+func TestTheRevocationScopeIsCheckedByTheDatabase(t *testing.T) {
+	s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
+	if _, err := s.db.Exec("INSERT INTO revocations (grant_id, subject, scope, before, at) VALUES ('', '', 'everyone', 1, 1)"); err == nil {
+		t.Fatal("an unknown scope was stored")
+	}
+	if revs, err := s.Revocations(ctx); err != nil || len(revs) != 0 {
+		t.Fatalf("revocations = %+v, %v; want none", revs, err)
 	}
 }

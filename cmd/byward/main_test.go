@@ -123,3 +123,38 @@ func TestNoAuthLogsThatAuthIsOffAndTheNextStep(t *testing.T) {
 		t.Fatalf("code=%d logs=%s", code, logs)
 	}
 }
+
+// The operator commands: usage mistakes are configuration errors (exit 2) and touch nothing;
+// revoke-all needs --yes; a done revocation names the user and exits 0.
+func TestRevokeCommands(t *testing.T) {
+	user := "00000000-0000-0000-0000-00000000000a:11111111-1111-1111-1111-11111111111a"
+	cases := []struct {
+		name     string
+		args     []string
+		code     int
+		inStdout string
+		inStderr string
+	}{
+		{"revoke-user without a key", []string{"revoke-user"}, exitConfig, "", "usage: byward revoke-user <tid:oid>"},
+		{"revoke-user with two keys", []string{"revoke-user", user, user}, exitConfig, "", "usage:"},
+		{"revoke-user with an email", []string{"revoke-user", "alice@contoso.com"}, exitConfig, "", "not a user key"},
+		{"revoke-all without --yes", []string{"revoke-all"}, exitConfig, "", "revoke-all --yes"},
+		{"revoke-user", []string{"revoke-user", strings.ToUpper(user)}, exitOK, "revoked user " + user, `"reason":"operator revoke-user"`},
+		{"revoke-all", []string{"revoke-all", "--yes"}, exitOK, "revoked every user", `"reason":"operator revoke-all"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := runWith(tc.args, append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")...)
+			if code != tc.code || !strings.Contains(stdout, tc.inStdout) || !strings.Contains(stderr, tc.inStderr) {
+				t.Fatalf("code %d (want %d)\nstdout %q (want %q)\nstderr %q (want %q)", code, tc.code, stdout, tc.inStdout, stderr, tc.inStderr)
+			}
+		})
+	}
+}
+
+func TestHelpListsTheOperatorCommands(t *testing.T) {
+	code, stdout, _ := runWith([]string{"--help"})
+	if code != exitOK || !strings.Contains(stdout, "byward revoke-user <tid:oid>") || !strings.Contains(stdout, "byward revoke-all --yes") {
+		t.Fatalf("code=%d help=%q", code, stdout)
+	}
+}
