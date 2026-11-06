@@ -174,32 +174,56 @@ func TestGetForTheKeyOfAStoppingProcessWaitsForItAndStartsANewOne(t *testing.T) 
 	h := newHarness(t, func(c *Config) { c.Command = []string{fakeBin, "-stubborn"} })
 	old := h.get(t, "user:alice", alice)
 	h.m.Stop("user:alice")
-	got := make(chan *Process, 1)
+	short, cancelShort := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancelShort()
+	if _, _, err := h.m.Get(short, "user:alice", alice); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Get whose context ends while the key's process is stopping = %v, want DeadlineExceeded", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel) // a Get still waiting at teardown gives up instead of spawning
+	type got struct {
+		p       *Process
+		release func()
+		err     error
+	}
+	result := make(chan got, 1)
 	go func() {
-		p, release, err := h.m.Get(context.Background(), "user:alice", alice)
-		if err != nil {
-			t.Errorf("Get: %v", err)
-			close(got)
-			return
-		}
-		release()
-		got <- p
+		p, release, err := h.m.Get(ctx, "user:alice", alice)
+		result <- got{p, release, err}
 	}()
 	select {
-	case p := <-got:
-		t.Fatalf("Get returned %p (the stopping process is %p) before it had exited", p, old)
+	case r := <-result:
+		t.Fatalf("Get returned (pid %v, %v) while the stopping process %d still ran", pidOf(r.p), r.err, old.PID())
 	case <-time.After(100 * time.Millisecond):
 	}
 	h.clk.Advance(2 * DefaultKillGrace) // SIGTERM, then SIGKILL
 	waitDone(t, old)
 	select {
-	case p := <-got:
-		if p == nil || p == old || p.isStopping() {
-			t.Fatalf("Get after the stopping process exited returned %p (old %p)", p, old)
+	case r := <-result:
+		if r.err != nil {
+			t.Fatalf("Get after the stopping process exited: %v", r.err)
+		}
+		defer r.release()
+		if r.p.PID() == old.PID() {
+			t.Fatalf("Get returned the exited process %d", old.PID())
+		}
+		if answer := call(t, r.p, "ping"); answer != "ping" {
+			t.Fatalf("the new process answered %q, want ping", answer)
+		}
+		if n := h.m.Len(); n != 1 {
+			t.Fatalf("Len = %d, want only the new process", n)
 		}
 	case <-time.After(guard):
 		t.Fatal("Get did not proceed after the stopping process exited")
 	}
+}
+
+// pidOf is p's PID, or nil when there is no process.
+func pidOf(p *Process) any {
+	if p == nil {
+		return nil
+	}
+	return p.PID()
 }
 
 func TestLookingUpAProcessNeverStartsOneAndRefusesAnotherUser(t *testing.T) {

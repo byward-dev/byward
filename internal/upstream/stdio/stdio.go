@@ -130,7 +130,8 @@ func New(cfg Config) (*Manager, error) {
 
 // Get returns the live process for key, spawning one for id if there is none, with a lease: the
 // process is not evicted until release is called. A key bound to another user fails with
-// ErrUserMismatch; a full cap with nothing idle to evict fails with errBusy.
+// ErrUserMismatch; a full cap with nothing idle to evict fails with errBusy. A process that is
+// stopping is waited for, within ctx, and replaced.
 func (m *Manager) Get(ctx context.Context, key string, id Identity) (p *Process, release func(), err error) {
 	if err := id.validate(); err != nil {
 		return nil, nil, err
