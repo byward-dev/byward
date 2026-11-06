@@ -134,7 +134,10 @@ func TestHeaderFieldsAreBoundToTheSeal(t *testing.T) {
 	r := mustRing(t, keyDir(t, map[string]string{"k1": randomKey(t), "k2": randomKey(t)}))
 	s := sealerFor(t, r, resourceA)
 	tok := mustSeal(t, s, Access, claims()) // sealed with k2
-	raw, _ := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(tok, AccessPrefix))
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(tok, AccessPrefix))
+	if err != nil {
+		t.Fatal(err)
+	}
 	reencode := func(b []byte) string { return AccessPrefix + base64.RawURLEncoding.EncodeToString(b) }
 
 	swapped := append([]byte(nil), raw...)
@@ -156,22 +159,54 @@ func TestHeaderFieldsAreBoundToTheSeal(t *testing.T) {
 
 func TestMalformedTokensAreRejectedBeforeDecryption(t *testing.T) {
 	s := newSealer(t)
-	cases := map[string]string{
-		"empty":           "",
-		"prefix only":     AccessPrefix,
-		"no prefix":       strings.TrimPrefix(mustSeal(t, s, Access, claims()), AccessPrefix),
-		"JWT":             "eyJhbGciOiJIUzI1NiJ9.e30.sig",
-		"padded base64":   AccessPrefix + "AQ==",
-		"bad base64":      AccessPrefix + "!!!!",
-		"one byte":        AccessPrefix + "AQ",
-		"zero key ID":     AccessPrefix + base64.RawURLEncoding.EncodeToString([]byte{formatVersion, 0}),
-		"key ID too long": AccessPrefix + base64.RawURLEncoding.EncodeToString([]byte{formatVersion, 40, 'k'}),
-		"over MaxLen":     AccessPrefix + strings.Repeat("A", MaxLen),
+	header := func(b ...byte) string { return AccessPrefix + base64.RawURLEncoding.EncodeToString(b) }
+	cases := []struct {
+		name, tok string
+		want      error
+	}{
+		{"empty", "", errWrongType},
+		{"prefix only", AccessPrefix, errMalformed},
+		{"no prefix", strings.TrimPrefix(mustSeal(t, s, Access, claims()), AccessPrefix), errWrongType},
+		{"JWT", "eyJhbGciOiJIUzI1NiJ9.e30.sig", errWrongType},
+		{"padded base64", AccessPrefix + "AQ==", errMalformed},
+		{"bad base64", AccessPrefix + "!!!!", errMalformed},
+		{"one byte", header(formatVersion), errMalformed},
+		{"zero-length key ID", header(formatVersion, 0), errMalformed},
+		{"key ID longer than the token", header(formatVersion, 40, 'k'), errMalformed},
+		{"over MaxLen, otherwise well formed", header(append([]byte{formatVersion, 2, 'k', '1'}, make([]byte, MaxLen)...)...), errMalformed},
 	}
-	for name, tok := range cases {
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := s.Open(Access, tc.tok); !errors.Is(err, tc.want) {
+				t.Fatalf("Open = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
+// Claims that only our own key could seal: the checks after decryption still hold.
+func TestSealedButInvalidClaimsAreRejected(t *testing.T) {
+	s := newSealer(t)
+	k := s.ring.signing
+	seal := func(plain string) string {
+		b := k.aead.Seal(append([]byte{formatVersion, byte(len(k.id))}, k.id...), nil, []byte(plain), s.ad(Access, k.id)) //nolint:gosec // G407: random-nonce AEAD; nil is required
+		return AccessPrefix + base64.RawURLEncoding.EncodeToString(b)
+	}
+	valid := `{"gid":"g","sub":"u","iat":100,"exp":200}`
+	if _, err := s.Open(Access, seal(valid)); err != nil {
+		t.Fatalf("hand-sealed valid claims rejected: %v", err)
+	}
+	for name, plain := range map[string]string{
+		"not JSON":        "not json",
+		"missing fields":  `{"gid":"g"}`,
+		"unknown field":   `{"gid":"g","sub":"u","iat":100,"exp":200,"x":1}`,
+		"trailing object": valid + `{}`,
+		"zero iat":        `{"gid":"g","sub":"u","iat":0,"exp":200}`,
+		"exp before iat":  `{"gid":"g","sub":"u","iat":200,"exp":100}`,
+	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := s.Open(Access, tok); err == nil {
-				t.Fatal("accepted")
+			if _, err := s.Open(Access, seal(plain)); !errors.Is(err, errClaims) {
+				t.Fatalf("Open = %v, want errClaims", err)
 			}
 		})
 	}

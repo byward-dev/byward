@@ -48,7 +48,9 @@ func LoadKeyRing(dir string) (*KeyRing, error) {
 	if err != nil {
 		return nil, fmt.Errorf("token: key directory: %w", err)
 	}
-	if worldWritable(di) {
+	// Kubernetes mounts secret volumes as a read-only tmpfs whose root is mode 1777, so the mode
+	// alone would reject the most common deployment; on a read-only mount nobody can add a key.
+	if worldWritable(di) && !readOnlyFS(dir) {
 		return nil, fmt.Errorf("token: key directory %s is world-writable; anyone could add a key", dir)
 	}
 	entries, err := os.ReadDir(dir)

@@ -127,9 +127,10 @@ func (s *Sealer) Seal(t Type, c Claims) (string, error) {
 	return tok, nil
 }
 
-// Open checks a token of type t in the order of ADR-0014: prefix, then the AEAD open with the key
-// named in the header, then the format version and the claims. It does not check time; Validator
-// does.
+// Open checks a token of type t: prefix, then the format version (it selects the layout and is
+// also sealed as associated data), then the AEAD open with the key named in the header, then the
+// claims. ADR-0014 lists the version after the open; reading it first is safe because a changed
+// version fails the open anyway. Open does not check time; Validator does.
 func (s *Sealer) Open(t Type, tok string) (Claims, error) {
 	p := t.prefix()
 	if p == "" {
@@ -164,10 +165,13 @@ func (s *Sealer) Open(t Type, tok string) (Claims, error) {
 	if err != nil {
 		return Claims{}, errOpen
 	}
-	var w wireClaims
+	var w wireClaims // decoded strictly: one object, known fields only
 	dec := json.NewDecoder(bytes.NewReader(plain))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&w); err != nil || dec.More() {
+		return Claims{}, errClaims
+	}
+	if w.IssuedAt <= 0 {
 		return Claims{}, errClaims
 	}
 	c := Claims{GrantID: w.GrantID, Subject: w.Subject, IssuedAt: time.Unix(w.IssuedAt, 0), ExpiresAt: time.Unix(w.ExpiresAt, 0)}

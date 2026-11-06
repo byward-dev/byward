@@ -3,6 +3,8 @@ package token
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -80,6 +82,7 @@ func TestBadKeyFilesFailTheLoadNamingTheFile(t *testing.T) {
 		{"empty", "k1", "", "0 bytes"},
 		{"too large", "k1", strings.Repeat("A", maxKeyFile+1), "too large"},
 		{"bad key ID", "key one", randomKey(t), "must match"},
+		{"key ID over 64 characters", strings.Repeat("k", 65), randomKey(t), "must match"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -111,6 +114,15 @@ func TestWorldWritableKeysAreRejected(t *testing.T) {
 			t.Fatalf("err = %v", err)
 		}
 	})
+	t.Run("directory on a read-only mount (Kubernetes secret volume, mode 1777)", func(t *testing.T) {
+		dir := keyDir(t, map[string]string{"k1": randomKey(t)})
+		if err := os.Chmod(dir, 0o1777); err != nil { //nolint:gosec // G302: the Kubernetes mode under test
+			t.Fatal(err)
+		}
+		readOnlyFS = func(p string) bool { return p == dir }
+		t.Cleanup(func() { readOnlyFS = statfsReadOnly })
+		mustRing(t, dir)
+	})
 	t.Run("group- and other-readable is fine", func(t *testing.T) {
 		dir := keyDir(t, map[string]string{"k1": randomKey(t)})
 		if err := os.Chmod(filepath.Join(dir, "k1"), 0o644); err != nil { //nolint:gosec // G302: the Kubernetes default under test
@@ -128,16 +140,26 @@ func TestUnreadableKeyFileFailsTheLoad(t *testing.T) {
 	if err := os.Chmod(filepath.Join(dir, "k1"), 0o000); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadKeyRing(dir); err == nil || !strings.Contains(err.Error(), "k1") {
-		t.Fatalf("err = %v, want one naming k1", err)
+	if _, err := LoadKeyRing(dir); !errors.Is(err, fs.ErrPermission) || !strings.Contains(err.Error(), filepath.Join(dir, "k1")) {
+		t.Fatalf("err = %v, want a permission error naming the file", err)
 	}
 }
 
 func TestMissingOrEmptyKeyDirectoryRefusesToStart(t *testing.T) {
+	notADir := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(notADir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dangling := t.TempDir()
+	if err := os.Symlink(filepath.Join(dangling, "absent"), filepath.Join(dangling, "k1")); err != nil {
+		t.Fatal(err)
+	}
 	for name, dir := range map[string]string{
-		"missing":       filepath.Join(t.TempDir(), "absent"),
-		"empty":         t.TempDir(),
-		"only dotfiles": keyDir(t, map[string]string{".gitkeep": ""}),
+		"not a directory":  notADir,
+		"dangling symlink": dangling,
+		"missing":          filepath.Join(t.TempDir(), "absent"),
+		"empty":            t.TempDir(),
+		"only dotfiles":    keyDir(t, map[string]string{".gitkeep": ""}),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := LoadKeyRing(dir); err == nil || !strings.Contains(err.Error(), dir) {

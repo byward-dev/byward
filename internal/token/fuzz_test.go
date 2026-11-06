@@ -3,6 +3,8 @@ package token
 import (
 	"bytes"
 	"crypto/aes"
+	"crypto/sha256"
+	"strings"
 	"testing"
 )
 
@@ -29,8 +31,12 @@ func FuzzOpen(f *testing.F) {
 		if err != nil {
 			return
 		}
-		if c.validate() != nil {
-			t.Fatalf("accepted incomplete claims %+v", c)
+		again, err := s.Seal(Access, c)
+		if err != nil {
+			t.Fatalf("accepted claims that cannot be sealed again: %+v: %v", c, err)
+		}
+		if c2, err := s.Open(Access, again); err != nil || c2 != c {
+			t.Fatalf("claims do not round-trip: %+v → %+v, %v", c, c2, err)
 		}
 		if _, err := s.Open(Code, tok); err == nil {
 			t.Fatal("one token opened as two types")
@@ -66,7 +72,11 @@ func FuzzHashRefreshToken(f *testing.F) {
 	f.Add(RefreshPrefix)
 	f.Add("")
 	f.Fuzz(func(t *testing.T, s string) {
-		if _, ok := HashRefreshToken(s); ok && len(s) != len(tok) {
+		h, ok := HashRefreshToken(s)
+		if !ok {
+			return
+		}
+		if len(s) != len(tok) || !strings.HasPrefix(s, RefreshPrefix) || h != sha256.Sum256([]byte(s)) {
 			t.Fatalf("accepted %q", s)
 		}
 	})

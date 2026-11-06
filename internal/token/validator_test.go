@@ -28,6 +28,7 @@ func newValidator(t *testing.T, s *Sealer, deny DenyList) *Validator {
 // Inside a synctest bubble time.Now starts at 2000-01-01 00:00:00 UTC and time.Sleep moves it
 // instantly, so the edges below are exact.
 func TestExpiryAndIssuedAtHonourTheLeeway(t *testing.T) {
+	const leeway = 30 * time.Second // fixed by ADR-0014; not derived from the constant under test
 	cases := []struct {
 		name string
 		iat  time.Duration // relative to now at seal time
@@ -36,10 +37,10 @@ func TestExpiryAndIssuedAtHonourTheLeeway(t *testing.T) {
 	}{
 		{"fresh", 0, 0, nil},
 		{"at exp", 0, time.Hour, nil},
-		{"at the end of the leeway", 0, time.Hour + Leeway, nil},
-		{"one second past the leeway", 0, time.Hour + Leeway + time.Second, resource.ErrExpired},
-		{"iat in the future within the leeway", Leeway, 0, nil},
-		{"iat in the future beyond the leeway", Leeway + time.Second, 0, resource.ErrInvalid},
+		{"at the end of the leeway", 0, time.Hour + leeway, nil},
+		{"one second past the leeway", 0, time.Hour + leeway + time.Second, resource.ErrExpired},
+		{"iat in the future within the leeway", leeway, 0, nil},
+		{"iat in the future beyond the leeway", leeway + time.Second, 0, resource.ErrInvalid},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

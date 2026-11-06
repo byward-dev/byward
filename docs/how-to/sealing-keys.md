@@ -21,14 +21,17 @@ live in the store, and the proxy never generates them outside the single-node de
 - Files and directories starting with `.` are ignored (Kubernetes secret volumes keep `..data`
   entries there); subdirectories are ignored; symlinks are followed.
 - The proxy refuses to start when the directory is missing, has no key files, or any file is
-  unreadable, not 32 bytes of base64, all one byte value, or **world-writable**. The same applies to
-  a world-writable directory. The error names the file. Group- and other-readable files are fine
-  (Kubernetes mounts secrets `0644` by default).
+  unreadable, not 32 bytes of base64, all one byte value, or **world-writable**. The error names the
+  file. Group- and other-readable files are fine (Kubernetes mounts secrets `0644` by default).
+- A world-writable directory is rejected too, **unless it is on a read-only mount**: a Kubernetes
+  secret volume is a read-only tmpfs whose root is mode `1777` (checked on k3s v1.31), and nobody can
+  add a key to it.
 
 ## Which key seals
 
 **The key whose file name sorts last seals new tokens; every key in the directory opens tokens.**
-Date-based names (`2026-11-06`) therefore rotate in order.
+Names sort as plain strings, so use names that sort by age, such as dates (`2026-11-06`): `k10`
+sorts before `k9`, and a new `k10` would never seal.
 
 ## Rotating
 
