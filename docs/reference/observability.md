@@ -49,7 +49,7 @@ For SIEMs that use [OCSF](https://schema.ocsf.io) 1.9.0. Fields map as follows: 
 | Event | When | Outcomes | Limited | OCSF class / activity |
 |---|---|---|---|---|
 | `login` | sign-in through the IdP finished, was declined, failed at the IdP, or arrived with a missing, invalid or expired sign-in state | success, failure | only the state failures | 3002 Authentication / 1 Logon; `auth_protocol_id` 6 (OAuth 2.0) |
-| `access_denied` | the access gate refused a signed-in user | failure | no | 3003 Authorize Session / 99 Other |
+| `access_denied` | the access gate refused a signed-in user (`reason` = the rule: `tenant`, `role`, `group`, `groups_unavailable`, `email_domain` or `hosted_domain`) | failure | no | 3003 Authorize Session / 99 Other |
 | `token_issued` | `/token` issued an access token | success | no | 3002 Authentication / 4 Service Ticket Request |
 | `token_rejected` | `/token` refused a request (`reason` = OAuth error code) | failure | yes | 3002 Authentication / 4 Service Ticket Request |
 | `access_token_rejected` | an MCP request carried an invalid or expired access token (`reason` = `invalid` or `expired`); a missing token is the normal start of sign-in and is not an event | failure | yes | 3002 Authentication / 99 Other (*approximate*) |

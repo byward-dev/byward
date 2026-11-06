@@ -131,7 +131,7 @@ func keyRing(t *testing.T) *token.KeyRing {
 	return r
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, opts ...func(*Config)) *env {
 	t.Helper()
 	e := &env{now: t0, st: newMemStore(), audit: &bytes.Buffer{}, logs: &bytes.Buffer{}}
 	clock := func() time.Time { return e.now }
@@ -148,10 +148,14 @@ func newEnv(t *testing.T) *env {
 	login, _ := token.NewBox(ring, "login", clock)
 	e.idpBox, _ = token.NewBox(ring, "idp-tokens", clock)
 	discard := slog.New(slog.NewTextHandler(io.Discard, nil))
-	e.b, err = New(Config{Issuer: issuer, Resource: res, Scope: "mcp", IdPName: "entra", IdP: prov, Clients: registry{},
+	cfg := Config{Issuer: issuer, Resource: res, Scope: "mcp", IdPName: "entra", IdP: prov, Clients: registry{},
 		Store: e.st, Sealer: e.sealer, LoginBox: login, IdPTokenBox: e.idpBox, SecureCookies: true,
 		Log: logging.New(e.logs, "json"), Audit: audit.New(logging.New(e.audit, "json"), nil, clock), Now: clock,
-		ObserveIdP: func(op, outcome string, _ time.Duration) { e.idpOps = append(e.idpOps, op+" "+outcome) }})
+		ObserveIdP: func(op, outcome string, _ time.Duration) { e.idpOps = append(e.idpOps, op+" "+outcome) }}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	e.b, err = New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -804,27 +808,4 @@ func TestUserDeclinedIsAuditedAsAFailedLogin(t *testing.T) {
 	q := url.Values{"state": {cb.Query().Get("state")}, "error": {"access_denied"}, "error_description": {"declined"}}
 	e.do(t, "GET", "/callback/entra?"+q.Encode(), nil, []*http.Cookie{c})
 	e.oneAuditEvent(t, "login", map[string]any{"outcome": "failure", "reason": "the user declined to sign in", "client_id": clientID})
-}
-
-type denyGate struct{}
-
-func (denyGate) Allow(context.Context, idp.Identity) error {
-	return errors.New("not in the allowed group")
-}
-
-func TestAccessGateDenialIsAuditedAndCreatesNoGrant(t *testing.T) {
-	e := newEnv(t)
-	e.b.cfg.Gate = denyGate{}
-	c, cb := e.startLogin(t, nil)
-	res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{c})
-	if res.StatusCode != http.StatusForbidden {
-		t.Fatalf("callback with a denying gate = %d, want 403", res.StatusCode)
-	}
-	e.oneAuditEvent(t, "access_denied", map[string]any{"outcome": "failure", "client_id": clientID, "idp": "entra", "user_key": "*"})
-	if logins := e.auditEvents(t, "login"); len(logins) != 0 {
-		t.Errorf("a denied user was also audited as a login: %v", logins)
-	}
-	if firstGrant(e.st) != "" {
-		t.Error("a grant was created for a denied user")
-	}
 }

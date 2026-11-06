@@ -22,6 +22,12 @@ Precedence: flag > environment > default. Secrets are read only from files.
 | `--entra-client-secret-file` | `MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE` | — | client secret of the IdP app |
 | `--keys-dir` | `MCP_AUTHPROXY_KEYS_DIR` | — | directory of sealing keys; each file is one key, its name the key ID (docs/how-to/sealing-keys.md) |
 | `--static-clients-file` | `MCP_AUTHPROXY_STATIC_CLIENTS_FILE` | — | JSON file of pre-registered MCP clients (docs/reference/static-clients.md) |
+| `--gate-tenants` | `MCP_AUTHPROXY_GATE_TENANTS` | — | access gate: comma-separated Entra tenant IDs allowed to sign in (docs/how-to/access-gate.md) |
+| `--gate-roles` | `MCP_AUTHPROXY_GATE_ROLES` | — | access gate: comma-separated app roles; users need at least one (docs/how-to/access-gate.md) |
+| `--gate-groups` | `MCP_AUTHPROXY_GATE_GROUPS` | — | access gate: comma-separated group IDs; users need one, and groups overage denies (docs/how-to/access-gate.md) |
+| `--gate-email-domains` | `MCP_AUTHPROXY_GATE_EMAIL_DOMAINS` | — | access gate: comma-separated domains of a verified email; generic OIDC IdPs only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md) |
+| `--gate-hosted-domains` | `MCP_AUTHPROXY_GATE_HOSTED_DOMAINS` | — | access gate: comma-separated Google Workspace domains (hd claim); Google only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md) |
+| `--gate-allow-empty` | `MCP_AUTHPROXY_GATE_ALLOW_EMPTY` | false | allow an empty access gate for a Google or generic OIDC IdP (anyone with an account can sign in); no effect with Entra (docs/how-to/access-gate.md) |
 | `--insecure-no-auth` | `MCP_AUTHPROXY_INSECURE_NO_AUTH` | false | no authentication at all, for trying the proxy out and for tests; loopback only (ADR-0027) |
 | `--dev` | `MCP_AUTHPROXY_DEV` | false | development mode: enables the relaxations it logs at startup |
 

@@ -100,6 +100,12 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"two scopes", "MCP_AUTHPROXY_SCOPE=a b", "MCP_AUTHPROXY_SCOPE"},
 		{"dev not a bool", "MCP_AUTHPROXY_DEV=maybe", "MCP_AUTHPROXY_DEV"},
 		{"documentation not a URL", "MCP_AUTHPROXY_RESOURCE_DOCUMENTATION=javascript:x", "MCP_AUTHPROXY_RESOURCE_DOCUMENTATION"},
+		{"gate allow-empty not a bool", "MCP_AUTHPROXY_GATE_ALLOW_EMPTY=yes", "MCP_AUTHPROXY_GATE_ALLOW_EMPTY: want true or false"},
+		{"gate tenants blank", "MCP_AUTHPROXY_GATE_TENANTS=,", "MCP_AUTHPROXY_GATE_TENANTS is set but lists nothing"},
+		{"gate roles blank", "MCP_AUTHPROXY_GATE_ROLES= ,,", "MCP_AUTHPROXY_GATE_ROLES is set but lists nothing"},
+		{"gate groups blank", "MCP_AUTHPROXY_GATE_GROUPS= ", "MCP_AUTHPROXY_GATE_GROUPS is set but lists nothing"},
+		{"gate email domains blank", "MCP_AUTHPROXY_GATE_EMAIL_DOMAINS=,", "MCP_AUTHPROXY_GATE_EMAIL_DOMAINS is set but lists nothing"},
+		{"gate hosted domains blank", "MCP_AUTHPROXY_GATE_HOSTED_DOMAINS=,", "MCP_AUTHPROXY_GATE_HOSTED_DOMAINS is set but lists nothing"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

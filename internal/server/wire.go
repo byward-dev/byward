@@ -7,11 +7,13 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/corker/mcp-authproxy/internal/audit"
 	"github.com/corker/mcp-authproxy/internal/broker"
 	"github.com/corker/mcp-authproxy/internal/config"
+	"github.com/corker/mcp-authproxy/internal/gate"
 	"github.com/corker/mcp-authproxy/internal/health"
 	"github.com/corker/mcp-authproxy/internal/idp"
 	"github.com/corker/mcp-authproxy/internal/idp/entra"
@@ -69,10 +71,19 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (*auth, er
 	if err != nil {
 		return nil, fmt.Errorf("entra settings (MCP_AUTHPROXY_ENTRA_*): %w", err)
 	}
+	g, warnings, err := gate.New(gate.Rules{Tenants: cfg.GateTenants, Roles: cfg.GateRoles, Groups: cfg.GateGroups,
+		EmailDomains: cfg.GateEmailDomains, HostedDomains: cfg.GateHostedDomains},
+		gate.Options{IdP: gate.Entra, Tenant: cfg.EntraTenant, AllowEmpty: cfg.GateAllowEmpty})
+	if err != nil {
+		return nil, gateError(err)
+	}
+	for _, w := range warnings {
+		log.Warn(w)
+	}
 	st := memory.New()
-	b, err := broker.New(broker.Config{Issuer: cfg.Issuer(), Resource: cfg.PublicURL, Scope: cfg.Scope, IdPName: idpName,
+	b, err := newBroker(broker.Config{Issuer: cfg.Issuer(), Resource: cfg.PublicURL, Scope: cfg.Scope, IdPName: idpName,
 		IdPLabel: "Microsoft Entra", IdP: provider, Clients: clients, Store: st, Sealer: sealer,
-		LoginBox: loginBox, IdPTokenBox: idpBox, SecureCookies: cfg.PublicURL.Scheme == "https", Log: log,
+		LoginBox: loginBox, IdPTokenBox: idpBox, Gate: g, SecureCookies: cfg.PublicURL.Scheme == "https", Log: log,
 		Audit: o.Audit, ObserveIdP: func(op, outcome string, d time.Duration) { o.Metrics.IdP(idpName, op, outcome, d) }})
 	if err != nil {
 		return nil, err
@@ -113,4 +124,35 @@ func readiness(ring *token.KeyRing, st store.Store) []health.Check {
 		storeReady = p.Ping
 	}
 	return append(checks, health.Check{Name: "store", Ready: storeReady})
+}
+
+// newBroker is broker.New; tests replace it to see the wired configuration.
+var newBroker = broker.New
+
+// gateSettings maps gate rule lists to the settings that fill them; config owns the names.
+var gateSettings = map[string]string{
+	gate.FieldTenants:       config.Setting{Name: "gate-tenants"}.Env(),
+	gate.FieldRoles:         config.Setting{Name: "gate-roles"}.Env(),
+	gate.FieldGroups:        config.Setting{Name: "gate-groups"}.Env(),
+	gate.FieldEmailDomains:  config.Setting{Name: "gate-email-domains"}.Env(),
+	gate.FieldHostedDomains: config.Setting{Name: "gate-hosted-domains"}.Env(),
+	gate.FieldAllowEmpty:    config.Setting{Name: "gate-allow-empty"}.Env(),
+}
+
+// gateError names the setting at fault for each invalid gate rule list.
+func gateError(err error) error {
+	errs := []error{err}
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		errs = j.Unwrap()
+	}
+	msgs := make([]string, 0, len(errs))
+	for _, e := range errs {
+		var fe *gate.FieldError
+		if errors.As(e, &fe) && gateSettings[fe.Field] != "" {
+			msgs = append(msgs, gateSettings[fe.Field]+": "+fe.Msg)
+			continue
+		}
+		msgs = append(msgs, "access gate: "+e.Error())
+	}
+	return errors.New(strings.Join(msgs, "; "))
 }

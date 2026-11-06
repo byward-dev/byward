@@ -10,6 +10,9 @@ import (
 	"github.com/corker/mcp-authproxy/internal/config"
 )
 
+// fixtureTenant is the Entra tenant authEnv configures.
+const fixtureTenant = "00000000-0000-0000-0000-000000000001"
+
 // authEnv writes a key directory, a static-clients file and an IdP secret into a temp dir and
 // returns the settings that point at them.
 func authEnv(t testing.TB) []string {
@@ -30,7 +33,7 @@ func authEnv(t testing.TB) []string {
 	write(filepath.Join(dir, "clients.json"), `{"clients":[{"client_id":"test-app","client_name":"Test app","token_endpoint_auth_method":"none","redirect_uris":["http://127.0.0.1/callback"]}]}`)
 	write(filepath.Join(dir, "secret"), "s3cret-entra")
 	return []string{
-		"MCP_AUTHPROXY_ENTRA_TENANT=00000000-0000-0000-0000-000000000001",
+		"MCP_AUTHPROXY_ENTRA_TENANT=" + fixtureTenant,
 		"MCP_AUTHPROXY_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002",
 		"MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE=" + filepath.Join(dir, "secret"),
 		"MCP_AUTHPROXY_KEYS_DIR=" + keys,
