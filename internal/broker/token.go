@@ -67,6 +67,11 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 		}
 		clientID = u
 	}
+	if clientID == "" && f.Get("client_assertion") != "" {
+		// RFC 7523 §3: with an assertion, client_id is optional and the assertion's sub names the
+		// client. It is only used to find the client; Authenticate verifies the assertion.
+		clientID = assertionSubject(f.Get("client_assertion"))
+	}
 	client, err := b.cfg.Clients.Client(ctx, clientID)
 	if err != nil {
 		b.tokenFail(w, r, tokenError{http.StatusUnauthorized, "invalid_client", "unknown client"})
@@ -93,8 +98,13 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 		b.revoke(r, claims.GrantID, now, "authorization code reused; grant revoked")
 		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_grant", "the authorization code was already used"})
 		return
-	case err != nil:
+	case errors.Is(err, store.ErrNotFound):
 		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_grant", "the authorization code is invalid or expired"})
+		return
+	case err != nil:
+		// An outage is not the client's fault: the code may still be good.
+		b.cfg.Log.ErrorContext(ctx, "redeeming an authorization code failed", "request_id", logging.RequestID(ctx), "error", err)
+		b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not redeem the code; try again"})
 		return
 	}
 	// The code is used up now: any binding failure below means it is being misused, so the grant
@@ -128,6 +138,25 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 		"expires_in":   int(AccessLifetime.Seconds()),
 		"scope":        strings.Join(pc.Scopes, " "),
 	})
+}
+
+// assertionSubject returns the unverified sub claim of a JWT client assertion, or "".
+func assertionSubject(jwt string) string {
+	parts := strings.Split(jwt, ".")
+	if len(parts) != 3 || len(parts[1]) > 8<<10 {
+		return ""
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var c struct {
+		Sub string `json:"sub"`
+	}
+	if json.Unmarshal(raw, &c) != nil {
+		return ""
+	}
+	return c.Sub
 }
 
 // revoke ends a grant (store and deny list) and logs why.

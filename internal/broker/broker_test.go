@@ -626,3 +626,34 @@ func TestFailedBindingAfterConsumeRevokesTheGrant(t *testing.T) {
 		})
 	}
 }
+
+// failingStore fails code redemption like an outage would.
+type failingStore struct{ *memStore }
+
+func (failingStore) ConsumeCode(context.Context, string, time.Time) (store.PendingCode, error) {
+	return store.PendingCode{}, errors.New("database is locked")
+}
+
+func TestStoreOutageAtRedemptionIsAServerError(t *testing.T) {
+	e := newEnv(t)
+	code := e.signIn(t, nil).Query().Get("code")
+	e.b.cfg.Store = failingStore{e.st}
+	res, body := e.redeem(t, code, nil)
+	if res.StatusCode != 500 || body["error"] != "server_error" {
+		t.Fatalf("got %d %v", res.StatusCode, body)
+	}
+}
+
+func TestAssertionSubject(t *testing.T) {
+	enc := func(s string) string { return base64.RawURLEncoding.EncodeToString([]byte(s)) }
+	for jwt, want := range map[string]string{
+		enc(`{"alg":"RS256"}`) + "." + enc(`{"sub":"static-client","iss":"static-client"}`) + ".sig": "static-client",
+		"not-a-jwt":              "",
+		"a.%%%.c":                "",
+		"a." + enc(`[1]`) + ".c": "",
+	} {
+		if got := assertionSubject(jwt); got != want {
+			t.Errorf("%q: got %q want %q", jwt, got, want)
+		}
+	}
+}
