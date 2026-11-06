@@ -95,5 +95,28 @@ var ChatGPT = Profile{
 	},
 }
 
+// Cursor with dynamic client registration. Only its registration request is sourced; the rest follows
+// the MCP specification until someone checks a Cursor build.
+var Cursor = Profile{
+	Client: "Cursor", Version: "3.14.27 (forum reports read 2026-11-06)", Cell: "Cursor × DCR",
+	Registration: DCR, Document: "cursor", RedirectURI: "https://www.cursor.com/agents/mcp/oauth/callback", ProtocolVersion: "2025-11-25",
+	Discovery:     []string{"/.well-known/oauth-protected-resource/", "/.well-known/oauth-protected-resource"},
+	ASMetadata:    []string{"oauth-authorization-server", "openid-configuration"},
+	UsesChallenge: true, SendsResource: true,
+	Facts: []Fact{
+		{"registers with DCR; redirect URIs cursor://anysphere.cursor-mcp/oauth/callback, https://www.cursor.com/agents/mcp/oauth/callback and http://localhost:8787/callback", "forum.cursor.com/t/171867 (Cursor staff); forum.cursor.com/t/167608 (user report, Cursor 3.14.27)"},
+		{"the other registration fields (grant types, response types, token_endpoint_auth_method none)", Assumed},
+		{"the broker drops the cursor:// callback (ADR-0009); the https and loopback callbacks sign in", "test setup"},
+		{"follows the 401's resource_metadata, else the path-inserted PRM, then the root one", Assumed},
+		{"authorization server metadata path order", Assumed},
+		{"sends resource on authorize and token", Assumed},
+		{"requests the challenge's scope, else the PRM's scopes_supported", Assumed},
+		{"checks the redirect's iss (RFC 9207)", Assumed},
+		{"403 and insufficient_scope handling", Assumed},
+		{"sends MCP revision 2025-11-25 in initialize", Assumed},
+		{"refuses an authorization server whose code_challenge_methods_supported lacks S256 (MCP authorization MUST)", Assumed},
+	},
+}
+
 // All lists every profile, for the simulator test.
-var All = []Profile{ClaudeCode, ClaudeAI, VSCode, ChatGPT}
+var All = []Profile{ClaudeCode, ClaudeAI, VSCode, ChatGPT, Cursor}

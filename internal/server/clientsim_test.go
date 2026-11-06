@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -32,6 +33,26 @@ func TestClosedClientsSignInAndWorkAsTheirProfilesSay(t *testing.T) {
 		t.Run(p.Cell, func(t *testing.T) {
 			e, c := newSimProxy(t, p)
 			s := clientsim.SignIn(t, e, p, c)
+			if p.Registration == clientsim.DCR { // every callback the redirect policy keeps signs in; the dropped ones are gone
+				reg := clientdocs.LoadRegistration(t, p.Document)
+				var req struct {
+					RedirectURIs []string `json:"redirect_uris"`
+				}
+				if err := json.Unmarshal(reg.Body, &req); err != nil {
+					t.Fatal(err)
+				}
+				kept := slices.DeleteFunc(req.RedirectURIs, func(u string) bool { return slices.Contains(reg.Dropped, u) })
+				if !slices.Equal(s.Registered, kept) {
+					t.Fatalf("the registration kept %v; want %v (%v dropped)", s.Registered, kept, reg.Dropped)
+				}
+				for _, r := range kept {
+					if r != p.RedirectURI {
+						other := p
+						other.RedirectURI = r
+						clientsim.SignIn(t, e, other, c)
+					}
+				}
+			}
 			if p.PrivateKeyJWT && s.AuthMethod != "private_key_jwt" { // the cell promises it; the fallback to none would hide a regression
 				t.Fatalf("%s authenticated at /token with %q, want private_key_jwt", p.Client, s.AuthMethod)
 			}
@@ -72,6 +93,9 @@ func newSimProxy(t *testing.T, p clientsim.Profile) (clientsim.Env, clientsim.Cr
 
 	var docs []clientdocs.Doc
 	creds := clientsim.Credentials{ClientID: p.ClientID}
+	if p.Registration == clientsim.DCR {
+		creds.RegistrationRequest = clientdocs.LoadRegistration(t, p.Document).Body
+	}
 	if p.Registration == clientsim.CIMD {
 		doc := clientdocs.Load(t, p.Document)
 		docs, creds.ClientID = append(docs, doc), doc.ClientID

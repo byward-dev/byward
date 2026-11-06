@@ -268,7 +268,7 @@ specification.
 | Claude.ai/Desktop × CIMD | `ClaudeAI` | simulated |
 | VS Code × CIMD | `VSCode` | simulated |
 | ChatGPT × CIMD | `ChatGPT` | simulated (`private_key_jwt` with a test key at its document's `jwks_uri`) |
-| Cursor × DCR | — | pending #57 (DCR) |
+| Cursor × DCR | `Cursor` | simulated (registers its reconstructed request; `cursor://` dropped, https and loopback callbacks sign in) |
 
 ## Feature × lens map
 

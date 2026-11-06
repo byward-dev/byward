@@ -13,7 +13,8 @@ import (
 )
 
 // A profile is evidence, not a wish list: each one names its version and matrix cell, every fact has
-// a source or says it is assumed, and a CIMD profile's redirect is one its published document lists.
+// a source or says it is assumed, and a CIMD or DCR profile's redirect is one its published document
+// or registration request lists.
 func TestEveryProfileIsSourcedAndMatchesItsClientsDocument(t *testing.T) {
 	cells := map[string]bool{}
 	for _, p := range All {
@@ -33,17 +34,26 @@ func TestEveryProfileIsSourcedAndMatchesItsClientsDocument(t *testing.T) {
 					t.Errorf("fact %+v has no source; write %q if nobody has checked it", f, Assumed)
 				}
 			}
-			if p.Registration != CIMD {
+			var body []byte
+			switch p.Registration {
+			case CIMD:
+				body = clientdocs.Load(t, p.Document).Body
+			case DCR:
+				reg := clientdocs.LoadRegistration(t, p.Document)
+				if body = reg.Body; slices.Contains(reg.Dropped, p.RedirectURI) {
+					t.Fatalf("redirect %s is one the redirect policy drops", p.RedirectURI)
+				}
+			default:
 				return
 			}
 			var doc struct {
 				RedirectURIs []string `json:"redirect_uris"`
 			}
-			if err := json.Unmarshal(clientdocs.Load(t, p.Document).Body, &doc); err != nil {
+			if err := json.Unmarshal(body, &doc); err != nil {
 				t.Fatal(err)
 			}
 			if !slices.Contains(doc.RedirectURIs, p.RedirectURI) {
-				t.Fatalf("redirect %s is not in the client's published document %v", p.RedirectURI, doc.RedirectURIs)
+				t.Fatalf("redirect %s is not in the client's document or registration request %v", p.RedirectURI, doc.RedirectURIs)
 			}
 		})
 	}
