@@ -105,6 +105,9 @@ func eventsOf(t *testing.T, res *http.Response) *events {
 		body, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
 		t.Fatalf("Content-Type = %q, want text/event-stream; status %d, body %q", ct, res.StatusCode, body)
 	}
+	if v := res.Header.Get("X-Accel-Buffering"); v != "no" {
+		t.Fatalf("X-Accel-Buffering = %q, want no: a buffering reverse proxy would hold the stream back", v)
+	}
 	e := &events{t: t, ch: make(chan string, 64)}
 	go func() {
 		defer close(e.ch)

@@ -585,44 +585,47 @@ func TestCheckHeadersRequiresTheHeadersToMirrorTheBody(t *testing.T) {
 		header [][2]string // added in order, so a name may repeat
 		ok     bool
 	}{
-		"tools/call mirrored":             {call, hdr("tools/call", "weather"), true},
-		"resources/read mirrors the uri":  {read, hdr("resources/read", "file:///a"), true},
-		"prompts/get mirrored":            {prompt, hdr("prompts/get", "greet"), true},
-		"Base64 sentinel":                 {call, hdr("tools/call", "=?base64?d2VhdGhlcg==?="), true},
-		"Base64 sentinel of non-ASCII":    {meteo, hdr("tools/call", "=?base64?bcOpdMOpbw==?="), true},
-		"no params.name, no Mcp-Name":     {modernBody(`5`, "tools/call", "", ""), hdr("tools/call", ""), true},
-		"other method, any params.name":   {modernBody(`6`, "echo", "", `"name":{"x":1}`), hdr("echo", ""), true},
-		"version missing":                 {call, without(hdr("tools/call", "weather"), "MCP-Protocol-Version"), false},
-		"version not the body's":          {call, with(hdr("tools/call", "weather"), "MCP-Protocol-Version", "2027-01-01"), false},
-		"version repeated":                {call, append(hdr("tools/call", "weather"), [2]string{"MCP-Protocol-Version", "2026-07-28"}), false},
-		"method missing":                  {call, without(hdr("tools/call", "weather"), "Mcp-Method"), false},
-		"method not the body's":           {call, with(hdr("tools/call", "weather"), "Mcp-Method", "tools/list"), false},
-		"method in another case":          {call, with(hdr("tools/call", "weather"), "Mcp-Method", "Tools/Call"), false},
-		"name missing":                    {call, hdr("tools/call", ""), false},
-		"name not the body's":             {call, hdr("tools/call", "news"), false},
-		"name repeated":                   {call, append(hdr("tools/call", "weather"), [2]string{"Mcp-Name", "news"}), false},
-		"prompts/get name missing":        {prompt, hdr("prompts/get", ""), false},
-		"prompts/get name not the body's": {prompt, hdr("prompts/get", "farewell"), false},
-		"uri not the body's":              {read, hdr("resources/read", "file:///b"), false},
-		"Base64 sentinel of another name": {call, hdr("tools/call", "=?base64?bmV3cw==?="), false},
-		"malformed Base64 sentinel":       {call, hdr("tools/call", "=?base64?!!?="), false},
-		"sentinel without its ?=":         {call, hdr("tools/call", "=?base64?d2VhdGhlcg=="), false},
-		"params.name not a string":        {modernBody(`7`, "tools/call", "", `"name":7`), hdr("tools/call", "7"), false},
-		"sentinel for Mcp-Method":         {call, with(hdr("tools/call", "weather"), "Mcp-Method", "=?base64?dG9vbHMvY2FsbA==?="), false},
-		"sentinel for the version":        {call, with(hdr("tools/call", "weather"), "MCP-Protocol-Version", "=?base64?MjAyNi0wNy0yOA==?="), false},
-		"raw non-ASCII Mcp-Name":          {meteo, hdr("tools/call", "météo"), false},
+		"tools/call mirrored":              {call, hdr("tools/call", "weather"), true},
+		"resources/read mirrors the uri":   {read, hdr("resources/read", "file:///a"), true},
+		"prompts/get mirrored":             {prompt, hdr("prompts/get", "greet"), true},
+		"Base64 sentinel":                  {call, hdr("tools/call", "=?base64?d2VhdGhlcg==?="), true},
+		"Base64 sentinel of non-ASCII":     {meteo, hdr("tools/call", "=?base64?bcOpdMOpbw==?="), true},
+		"no params.name, no Mcp-Name":      {modernBody(`5`, "tools/call", "", ""), hdr("tools/call", ""), true},
+		"other method, any params.name":    {modernBody(`6`, "echo", "", `"name":{"x":1}`), hdr("echo", ""), true},
+		"params.name also in another case": {modernBody(`7`, "tools/call", "", `"name":"weather","NAME":"evil"`), hdr("tools/call", "weather"), false},
+		"version missing":                  {call, without(hdr("tools/call", "weather"), "MCP-Protocol-Version"), false},
+		"version not the body's":           {call, with(hdr("tools/call", "weather"), "MCP-Protocol-Version", "2027-01-01"), false},
+		"version repeated":                 {call, append(hdr("tools/call", "weather"), [2]string{"MCP-Protocol-Version", "2026-07-28"}), false},
+		"method missing":                   {call, without(hdr("tools/call", "weather"), "Mcp-Method"), false},
+		"method not the body's":            {call, with(hdr("tools/call", "weather"), "Mcp-Method", "tools/list"), false},
+		"method in another case":           {call, with(hdr("tools/call", "weather"), "Mcp-Method", "Tools/Call"), false},
+		"name missing":                     {call, hdr("tools/call", ""), false},
+		"name not the body's":              {call, hdr("tools/call", "news"), false},
+		"name repeated":                    {call, append(hdr("tools/call", "weather"), [2]string{"Mcp-Name", "news"}), false},
+		"prompts/get name missing":         {prompt, hdr("prompts/get", ""), false},
+		"prompts/get name not the body's":  {prompt, hdr("prompts/get", "farewell"), false},
+		"uri not the body's":               {read, hdr("resources/read", "file:///b"), false},
+		"Base64 sentinel of another name":  {call, hdr("tools/call", "=?base64?bmV3cw==?="), false},
+		"malformed Base64 sentinel":        {call, hdr("tools/call", "=?base64?!!?="), false},
+		"sentinel without its ?=":          {call, hdr("tools/call", "=?base64?d2VhdGhlcg=="), false},
+		"params.name not a string":         {modernBody(`7`, "tools/call", "", `"name":7`), hdr("tools/call", "7"), false},
+		"sentinel for Mcp-Method":          {call, with(hdr("tools/call", "weather"), "Mcp-Method", "=?base64?dG9vbHMvY2FsbA==?="), false},
+		"sentinel for the version":         {call, with(hdr("tools/call", "weather"), "MCP-Protocol-Version", "=?base64?MjAyNi0wNy0yOA==?="), false},
+		"raw non-ASCII Mcp-Name":           {meteo, hdr("tools/call", "météo"), false},
 	} {
 		h := http.Header{}
 		for _, kv := range tc.header {
 			h.Add(kv[0], kv[1])
 		}
 		var env envelope
-		_ = json.Unmarshal([]byte(tc.body), &env)
-		meta, err := readMeta([]byte(tc.body))
-		if err == nil {
-			err = checkHeaders(h, env.Method, meta.version, []byte(tc.body))
+		if err := json.Unmarshal([]byte(tc.body), &env); err != nil {
+			t.Fatalf("%s: the body does not parse: %v", name, err)
 		}
-		if (err == nil) != tc.ok {
+		meta, err := readMeta([]byte(tc.body))
+		if err != nil {
+			t.Fatalf("%s: readMeta: %v; only checkHeaders may decide a case", name, err)
+		}
+		if err := checkHeaders(h, env.Method, meta.version, []byte(tc.body)); (err == nil) != tc.ok {
 			t.Errorf("%s: %v, want accepted %v", name, err, tc.ok)
 		}
 	}
@@ -742,14 +745,32 @@ func TestAGracefullyEndedSubscriptionAnswersUnderTheClientsID(t *testing.T) {
 	}
 }
 
+func TestASubscriptionEndWhoseSubscriptionIDIsAmbiguousAnswersAnErrorUnderTheClientsID(t *testing.T) {
+	b := newModernBridge(t, nil)
+	ev := b.listenModern(t, context.Background(), `"L"`)
+	readEvents(t, b.modern(t, "alice", modernBody(`1`, "endrepeated", "", "")))
+	got := ev.all()
+	if len(got) != 1 || !strings.Contains(got[0], `"id":"L"`) || !strings.Contains(got[0], `"code":-32603`) || strings.Contains(got[0], "byw-") {
+		t.Fatalf("events %q, want an internal error under the client's id and no proxy id", got)
+	}
+}
+
+// teardownNotices is how many list_changed fakestdio's teardown writes before its cancellation.
+const teardownNotices = 10
+
 func TestAnUpstreamCancellingASubscriptionClosesTheListenStreamWithNothingForwarded(t *testing.T) {
 	// Over HTTP the server ends a subscription by closing its stream; notifications/cancelled is
 	// stdio's, so it is not forwarded. What the upstream sent before it still is.
 	b := newModernBridge(t, nil)
 	ev := b.listenModern(t, context.Background(), `"L"`)
 	readEvents(t, b.modern(t, "alice", modernBody(`1`, "teardown", "", "")))
-	if got := ev.all(); len(got) != 1 || !strings.Contains(got[0], "notifications/tools/list_changed") {
-		t.Fatalf("events %q, want the list_changed sent before the teardown, then the stream closed", got)
+	got := ev.all()
+	ok := len(got) == teardownNotices
+	for i := 0; ok && i < len(got); i++ {
+		ok = strings.Contains(got[i], "notifications/tools/list_changed") && strings.Contains(got[i], fmt.Sprintf(`"n":%d`, i))
+	}
+	if !ok {
+		t.Fatalf("events %q, want the %d list_changed sent before the teardown in order, then the stream closed", got, teardownNotices)
 	}
 }
 
@@ -757,17 +778,13 @@ func TestClosingAListenStreamCancelsTheSubscriptionOnTheUpstream(t *testing.T) {
 	b := newModernBridge(t, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	b.listenModern(t, ctx, `"L"`)
-	b.bridge.mu.Lock()
-	c := b.bridge.users["user:"+alice.user()]
-	b.bridge.mu.Unlock()
-	c.mu.Lock()
-	var proxyID string
-	for id := range c.byID {
-		proxyID = id
+	_, res := lastResult(t, readEvents(t, b.modern(t, "alice", modernBody(`1`, "listens", "", ""))))
+	var open []string
+	if err := json.Unmarshal(res, &open); err != nil || len(open) != 1 {
+		t.Fatalf("the upstream's open listens are %s (%v), want one", res, err)
 	}
-	c.mu.Unlock()
 	cancel()
-	if ids := b.awaitUpstreamCancellation(t); len(ids) != 1 || `"`+ids[0]+`"` != proxyID {
-		t.Fatalf("upstream saw cancellations %q, want exactly the listen's proxy id %s", ids, proxyID)
+	if ids := b.awaitUpstreamCancellation(t); len(ids) != 1 || ids[0] != open[0] {
+		t.Fatalf("upstream saw cancellations %q, want exactly the listen's id as it received it, %q", ids, open[0])
 	}
 }

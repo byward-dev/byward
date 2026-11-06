@@ -503,23 +503,24 @@ func (c *userConn) routeResponse(msg []byte, proxyID string) {
 		c.log.Warn("upstream response for no waiting request", "reason", "response_unrouted")
 		return
 	}
-	var out []byte
+	paths := []jsonPath{pathID}
 	if q.listen { // a graceful end names the subscription in result._meta too
-		if at, err := locate(msg, pathID, pathResSub); err == nil && at[0] != nil {
-			// This answers q by its id, so whatever its _meta names is q's subscription: the client
-			// sees its own id there, never a proxy id.
-			out = replace(msg, edit{at[0], q.id}, edit{at[1], q.id})
-		}
+		paths = append(paths, pathResSub)
 	}
-	if out == nil {
-		if at, err := locate(msg, pathID); err == nil && at[0] != nil {
-			out = replace(msg, edit{at[0], q.id})
-		} else {
-			// Routable, but its id cannot be placed with certainty: the client gets an error, not
-			// silence, and never the proxy's id.
-			c.log.Warn("upstream response is ambiguous", "reason", "response_ambiguous")
-			out = rpcError(q.id, codeInternalError, "the upstream sent an ambiguous response")
+	var out []byte
+	if at, err := locate(msg, paths...); err == nil && at[0] != nil {
+		// This answers q by its id, so whatever a listen's _meta names is q's subscription: the
+		// client sees its own id there, never a proxy id.
+		edits := []edit{{at[0], q.id}}
+		if q.listen {
+			edits = append(edits, edit{at[1], q.id})
 		}
+		out = replace(msg, edits...)
+	} else {
+		// Routable, but its id (or a listen's subscription id) cannot be placed with certainty: the
+		// client gets an error, not silence, and never the proxy's id.
+		c.log.Warn("upstream response is ambiguous", "reason", "response_ambiguous")
+		out = rpcError(q.id, codeInternalError, "the upstream sent an ambiguous response")
 	}
 	select {
 	case q.final <- out:
