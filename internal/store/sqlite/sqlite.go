@@ -20,7 +20,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
@@ -38,8 +37,8 @@ const busyTimeoutMS = 5000
 
 // Options configure Open.
 type Options struct {
-	// Dir is the state directory, an absolute path (ADR-0007 §6). It is created with mode 0700
-	// when missing; an unwritable directory fails Open.
+	// Dir is the state directory, an absolute path (ADR-0007 §6); empty means DefaultDir. It is
+	// created with mode 0700 when missing; an unwritable directory fails Open.
 	Dir string
 	// CounterFile is the absolute path of the write-counter mirror. Keep it outside the backup,
 	// next to the keys; if it is backed up and restored together with the database, restores go
@@ -49,18 +48,20 @@ type Options struct {
 
 // Store is the SQLite adapter.
 type Store struct {
-	db          *sql.DB
-	counterFile string
-	restored    bool
-
-	wmu   sync.Mutex // one write at a time, so the counter file is written in commit order
-	epoch int64      // read under wmu or after Open; changes only at Open
+	db             *sql.DB
+	counterFile    string
+	restored       bool
+	counterMissing bool
+	epoch          int64 // set at Open, never changed afterwards
 }
 
 var _ store.Store = (*Store)(nil)
 
 // Open opens (creating if needed) the database in opts.Dir, migrates it and checks for a restore.
 func Open(ctx context.Context, opts Options) (*Store, error) {
+	if opts.Dir == "" {
+		opts.Dir = DefaultDir
+	}
 	if !filepath.IsAbs(opts.Dir) || !filepath.IsAbs(opts.CounterFile) {
 		return nil, errors.New("sqlite store: the state directory and the counter file must be absolute paths")
 	}
@@ -77,7 +78,9 @@ func Open(ctx context.Context, opts Options) (*Store, error) {
 	if err := ensureFile(path); err != nil {
 		return nil, err
 	}
-	dsn := "file:" + path + "?_txlock=immediate" +
+	// A plain path, not a "file:" URI: SQLite would percent-decode a URI and could open a file
+	// other than the one ensureFile prepared.
+	dsn := path + "?_txlock=immediate" +
 		"&_pragma=busy_timeout(" + strconv.Itoa(busyTimeoutMS) + ")" +
 		"&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)&_pragma=foreign_keys(ON)"
 	db, err := sql.Open("sqlite", dsn)
@@ -93,48 +96,15 @@ func Open(ctx context.Context, opts Options) (*Store, error) {
 	return s, nil
 }
 
-func (s *Store) init(ctx context.Context) error {
-	if err := migrate(ctx, s.db); err != nil {
-		return err
-	}
-	mirror, haveMirror, err := readCounter(s.counterFile)
-	if err != nil {
-		return err
-	}
-	s.wmu.Lock()
-	defer s.wmu.Unlock()
-	return s.writeLocked(ctx, func(tx *sql.Tx) error {
-		var writes int64
-		if err := tx.QueryRowContext(ctx, "SELECT value FROM meta WHERE key = 'writes'").Scan(&writes); err != nil {
-			return err
-		}
-		if haveMirror && mirror > writes {
-			s.restored = true
-			if _, err := tx.ExecContext(ctx, "UPDATE meta SET value = value + 1 WHERE key = 'epoch'"); err != nil {
-				return err
-			}
-		}
-		// This transaction rewrites the mirror from the database's counter, so the restored copy is
-		// accepted from now on and the next start is normal.
-		return tx.QueryRowContext(ctx, "SELECT value FROM meta WHERE key = 'epoch'").Scan(&s.epoch)
-	})
-}
-
-// RestoreDetected reports whether Open found the database behind its counter mirror and bumped the
-// epoch. The caller logs and audits it (ADR-0021 §3, "store restore").
-func (s *Store) RestoreDetected() bool { return s.restored }
-
-// Epoch is the current store epoch.
-func (s *Store) Epoch() int64 { return s.epoch }
-
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }
 
-// writeLocked runs fn in one IMMEDIATE transaction, increments the write counter and mirrors it to
+// write runs fn in one IMMEDIATE transaction, increments the write counter and mirrors it to
 // the counter file before the commit. If the mirror cannot be written, nothing is committed, so an
 // error always means "not stored". If the commit then fails, the mirror is one write ahead and the
-// next Open treats the database as restored: users sign in again (fail safe). Callers hold s.wmu.
-func (s *Store) writeLocked(ctx context.Context, fn func(*sql.Tx) error) error {
+// next Open treats the database as restored: users sign in again (fail safe). The single
+// connection and the IMMEDIATE lock order every write, so the mirror follows commit order.
+func (s *Store) write(ctx context.Context, fn func(*sql.Tx) error) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("sqlite store: begin: %w", err)
@@ -156,12 +126,6 @@ func (s *Store) writeLocked(ctx context.Context, fn func(*sql.Tx) error) error {
 		return fmt.Errorf("sqlite store: commit: %w", err)
 	}
 	return nil
-}
-
-func (s *Store) write(ctx context.Context, fn func(*sql.Tx) error) error {
-	s.wmu.Lock()
-	defer s.wmu.Unlock()
-	return s.writeLocked(ctx, fn)
 }
 
 // CreateGrant implements store.Grants.
@@ -435,9 +399,15 @@ func probeWritable(dir string) error {
 	return os.Remove(name)
 }
 
-// ensureFile creates the database file with mode 0600, or tightens an existing one. SQLite
-// creates the -wal and -shm files with the database file's mode.
+// ensureFile creates the database file with mode 0600, or tightens an existing one, together with
+// leftover -wal and -shm files. SQLite creates new -wal and -shm files with the database file's
+// mode.
 func ensureFile(path string) error {
+	for _, side := range []string{path + "-wal", path + "-shm"} {
+		if err := os.Chmod(side, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("sqlite store: %s: %w", side, err)
+		}
+	}
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600) //nolint:gosec // G304: the operator's state directory
 	if err != nil {
 		return fmt.Errorf("sqlite store: database file %s: %w", path, err)
@@ -447,39 +417,4 @@ func ensureFile(path string) error {
 		return fmt.Errorf("sqlite store: database file %s: %w", path, err)
 	}
 	return f.Close()
-}
-
-// readCounter returns the mirrored write counter, or false when there is no mirror yet.
-func readCounter(path string) (int64, bool, error) {
-	b, err := os.ReadFile(path) //nolint:gosec // G304: the operator's counter file
-	if errors.Is(err, os.ErrNotExist) {
-		return 0, false, nil
-	}
-	if err != nil {
-		return 0, false, fmt.Errorf("sqlite store: counter file %s: %w", path, err)
-	}
-	v, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
-	if err != nil || v < 0 {
-		return 0, false, fmt.Errorf("sqlite store: counter file %s is corrupt; remove it to accept the database as it is", path)
-	}
-	return v, true, nil
-}
-
-// writeCounter replaces the mirror atomically (temporary file, then rename).
-func writeCounter(path string, v int64) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".counter-*")
-	if err != nil {
-		return fmt.Errorf("sqlite store: counter file: %w", err)
-	}
-	_, werr := tmp.WriteString(strconv.FormatInt(v, 10) + "\n")
-	cerr := tmp.Close()
-	if werr != nil || cerr != nil {
-		_ = os.Remove(tmp.Name())
-		return fmt.Errorf("sqlite store: counter file: %w", errors.Join(werr, cerr))
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
-		_ = os.Remove(tmp.Name())
-		return fmt.Errorf("sqlite store: counter file: %w", err)
-	}
-	return nil
 }

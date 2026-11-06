@@ -58,8 +58,8 @@ var migrations = []string{
 	CREATE INDEX revocations_subject ON revocations (subject, before);`,
 }
 
-// SchemaVersion is the schema this binary writes.
-var SchemaVersion = len(migrations)
+// schemaVersion is the schema this binary writes.
+func schemaVersion() int { return len(migrations) }
 
 // migrate brings db to SchemaVersion. A newer schema is refused: downgrading needs a backup
 // (ADR-0007 Consequences).
@@ -68,10 +68,10 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&v); err != nil {
 		return fmt.Errorf("sqlite store: read schema version: %w", err)
 	}
-	if v > SchemaVersion {
-		return fmt.Errorf("sqlite store: database schema v%d is newer than this binary's v%d; downgrading needs the backup taken before the upgrade", v, SchemaVersion)
+	if v > schemaVersion() {
+		return fmt.Errorf("sqlite store: database schema v%d is newer than this binary's v%d; downgrading needs the backup taken before the upgrade", v, schemaVersion())
 	}
-	for ; v < SchemaVersion; v++ {
+	for ; v < schemaVersion(); v++ {
 		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
 			return err

@@ -1,7 +1,8 @@
 -- Fixture for schema v1, frozen when v1 was released. Never edit it: a new schema version gets a
 -- new file (vN.sql) built by that version's code. Each fixture holds one grant "fixture-grant"
 -- (subject "tid:fixture", client "fixture-client") with a pending code and a refresh token whose
--- hash is sha256("fixture-refresh"), so the migration test can read them through the store.
+-- hash is sha256("fixture-refresh"), plus one revocation, so the migration test can read them
+-- through the store and compare every field (sqlite_test.go, fixture* values).
 CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL) STRICT;
 INSERT INTO meta (key, value) VALUES ('epoch', 1), ('writes', 3);
 
@@ -55,6 +56,8 @@ INSERT INTO codes VALUES ('fixture-grant', 'fixture-client', 'http://127.0.0.1:3
 	'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM', '["mcp"]', 4070908800000000, 0);
 INSERT INTO refresh_tokens VALUES (X'918b7df4f2e8d18c096db4cdced88cf630a86839288472a5442714be311abb80',
 	'fixture-grant', 'fixture-client', 1793966400000000, 4070908800000000);
+
+INSERT INTO revocations (grant_id, subject, before, at) VALUES ('fixture-revoked', '', 1793966400000000, 1793966400000000);
 
 -- Litestream adds this table to databases it replicates (ADR-0007 Consequences).
 CREATE TABLE _litestream_lock (id INTEGER);
