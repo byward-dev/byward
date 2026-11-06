@@ -81,12 +81,10 @@ func validate(v *Values) (*Config, error) {
 	}
 	c.Dev = dev
 
-	if secrets := v.inlineSecrets(); len(secrets) > 0 {
-		if !c.Dev {
-			errs = append(errs, errorf("%s: secrets must come from a file (%s_FILE)", strings.Join(secrets, ", "), secrets[0]))
-		} else {
-			c.Relaxations = append(c.Relaxations, "inline secrets accepted: "+strings.Join(secrets, ", "))
-		}
+	if relaxed, err := checkInlineSecrets(v, c.Dev); err != nil {
+		errs = append(errs, err)
+	} else if relaxed != "" {
+		c.Relaxations = append(c.Relaxations, relaxed)
 	}
 
 	c.PublicURL, err = parseURL("public-url", v.get("public-url"))
@@ -152,6 +150,20 @@ func validate(v *Values) (*Config, error) {
 		return nil, &configError{msg: strings.Join(msgs, "; ")}
 	}
 	return c, nil
+}
+
+// checkInlineSecrets rejects secrets given directly in env; development mode accepts them and
+// reports the relaxation instead.
+func checkInlineSecrets(v *Values, dev bool) (relaxation string, err error) {
+	secrets := v.inlineSecrets()
+	switch {
+	case len(secrets) == 0:
+		return "", nil
+	case !dev:
+		return "", errorf("%s: secrets must come from a file (%s_FILE)", strings.Join(secrets, ", "), secrets[0])
+	default:
+		return "inline secrets accepted: " + strings.Join(secrets, ", "), nil
+	}
 }
 
 func parseURL(name, raw string) (*url.URL, error) {

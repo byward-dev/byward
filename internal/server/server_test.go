@@ -18,10 +18,13 @@ import (
 	"github.com/corker/mcp-authproxy/internal/testutil/fakeupstream"
 )
 
+// goodToken is distinctive so a leak check cannot match ordinary text.
+const goodToken = "tok-good-7f3a"
+
 type acceptGood struct{}
 
 func (acceptGood) Validate(_ context.Context, tok string) (resource.Identity, error) {
-	if tok == "good" {
+	if tok == goodToken {
 		return resource.Identity{Subject: "tid:oid"}, nil
 	}
 	return resource.Identity{}, resource.ErrInvalid
@@ -109,7 +112,7 @@ func TestUnauthenticatedPostGets401WhoseMetadataResolves(t *testing.T) {
 
 func TestValidTokenIsRelayedWithoutIt(t *testing.T) {
 	e := start(t)
-	res := e.do(t, "POST", "/mcp", strings.NewReader(`{"jsonrpc":"2.0"}`), map[string]string{"Authorization": "Bearer good", "Content-Type": "application/json"})
+	res := e.do(t, "POST", "/mcp", strings.NewReader(`{"jsonrpc":"2.0"}`), map[string]string{"Authorization": "Bearer " + goodToken, "Content-Type": "application/json"})
 	b, _ := io.ReadAll(res.Body)
 	if res.StatusCode != 200 || string(b) != `{"jsonrpc":"2.0"}` {
 		t.Fatalf("code=%d body=%s", res.StatusCode, b)
@@ -118,7 +121,7 @@ func TestValidTokenIsRelayedWithoutIt(t *testing.T) {
 	if got.Header.Get("Authorization") != "" {
 		t.Fatal("token passed through to the upstream")
 	}
-	if strings.Contains(e.logs.String(), "good") {
+	if strings.Contains(e.logs.String(), goodToken) {
 		t.Fatalf("token logged: %s", e.logs)
 	}
 }
@@ -163,7 +166,7 @@ func TestAllowedHostsAccepted(t *testing.T) {
 
 func TestBodyLimit(t *testing.T) {
 	e := start(t)
-	res := e.do(t, "POST", "/mcp", bytes.NewReader(make([]byte, MaxMCPBody+1)), map[string]string{"Authorization": "Bearer good"})
+	res := e.do(t, "POST", "/mcp", bytes.NewReader(make([]byte, MaxMCPBody+1)), map[string]string{"Authorization": "Bearer " + goodToken})
 	if res.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("got %d", res.StatusCode)
 	}
@@ -174,7 +177,7 @@ func TestChunkedBodyOverLimitIs413(t *testing.T) {
 	big := io.MultiReader(strings.NewReader(strings.Repeat("x", MaxMCPBody)), strings.NewReader("y"))
 	r, _ := http.NewRequest("POST", e.srv.URL+"/mcp", io.NopCloser(big)) // no ContentLength: chunked
 	r.Host = "mcp.example.com"
-	r.Header.Set("Authorization", "Bearer good")
+	r.Header.Set("Authorization", "Bearer "+goodToken)
 	res, err := http.DefaultClient.Do(r)
 	if err != nil {
 		t.Fatal(err)
@@ -189,30 +192,53 @@ func TestChunkedBodyOverLimitIs413(t *testing.T) {
 // go-sdk v1.8.0), so the public Host must never reach the upstream.
 func TestUpstreamSeesItsOwnHost(t *testing.T) {
 	e := start(t)
-	e.do(t, "POST", "/mcp", strings.NewReader(`{}`), map[string]string{"Authorization": "Bearer good"})
+	e.do(t, "POST", "/mcp", strings.NewReader(`{}`), map[string]string{"Authorization": "Bearer " + goodToken})
 	got, ok := e.up.Last()
 	if !ok || got.Host != strings.TrimPrefix(e.up.URL, "http://") {
 		t.Fatalf("upstream saw Host %q, want %q", got.Host, strings.TrimPrefix(e.up.URL, "http://"))
 	}
 }
 
-func TestUnknownPathsAre404(t *testing.T) {
+func TestUnknownOrAmbiguousPathsNeverReachTheUpstream(t *testing.T) {
 	e := start(t)
-	for _, p := range []string{"/", "/mcp/extra", "/debug/pprof/", "/mcp;x", "/MCP", "/mcp%2F..", "/mcp/"} {
-		res := e.do(t, "GET", p, nil, map[string]string{"Authorization": "Bearer good"})
-		if res.StatusCode == 200 {
-			t.Fatalf("%s: ambiguous path reached a handler", p)
+	cases := map[string]int{
+		"/":             http.StatusNotFound,
+		"/mcp/extra":    http.StatusNotFound,
+		"/debug/pprof/": http.StatusNotFound,
+		"/mcp;x":        http.StatusNotFound,
+		"/MCP":          http.StatusNotFound,
+		"/mcp/":         http.StatusNotFound,
+		"/mcp%2F..":     http.StatusNotFound,
+	}
+	for p, want := range cases {
+		if res := e.do(t, "GET", p, nil, map[string]string{"Authorization": "Bearer " + goodToken}); res.StatusCode != want {
+			t.Errorf("%s: got %d want %d", p, res.StatusCode, want)
 		}
 	}
 	if len(e.up.Requests()) != 0 {
 		t.Fatal("an unknown or ambiguous path reached the upstream")
 	}
-	if res := e.do(t, "TRACE", "/mcp", nil, nil); res.StatusCode == 200 {
-		t.Fatal("TRACE must not succeed")
+}
+
+func TestOnlyStreamableHTTPMethodsReachTheUpstream(t *testing.T) {
+	e := start(t)
+	for _, m := range []string{"TRACE", "PUT", "PATCH", "OPTIONS"} {
+		res := e.do(t, m, "/mcp", nil, map[string]string{"Authorization": "Bearer " + goodToken})
+		if res.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("%s: got %d want 405", m, res.StatusCode)
+		}
+	}
+	if len(e.up.Requests()) != 0 {
+		t.Fatal("a disallowed method reached the upstream")
+	}
+	for _, m := range []string{"GET", "POST", "DELETE"} {
+		if res := e.do(t, m, "/mcp", nil, map[string]string{"Authorization": "Bearer " + goodToken}); res.StatusCode != 200 {
+			t.Errorf("%s: got %d", m, res.StatusCode)
+		}
 	}
 }
 
-func TestServerTimeoutsAreSet(t *testing.T) {
+func TestNewConfiguresHardenedLimitsAndLoopbackBind(t *testing.T) {
 	cfg, _, err := config.Load(nil, []string{"MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -236,6 +262,20 @@ func TestRecovererHidesPanicDetails(t *testing.T) {
 	if w.Code != 500 || strings.Contains(w.Body.String(), "boom") || strings.Contains(logs.String(), "secret") {
 		t.Fatalf("code=%d body=%q logs=%s", w.Code, w.Body, logs.String())
 	}
+}
+
+func TestRecovererLetsAbortedHandlersAbort(t *testing.T) {
+	var logs bytes.Buffer
+	h := recoverer(slog.New(slog.NewJSONHandler(&logs, nil)), http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) }))
+	defer func() {
+		if p := recover(); p != http.ErrAbortHandler { //nolint:errorlint // sentinel compared as net/http does
+			t.Fatalf("panic = %v, want http.ErrAbortHandler", p)
+		}
+		if logs.Len() != 0 {
+			t.Fatalf("an aborted handler was logged: %s", logs.String())
+		}
+	}()
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
 }
 
 func TestRunShutsDownOnCancel(t *testing.T) {
@@ -302,10 +342,10 @@ func TestServerSentEventsStreamThroughTheWholeChain(t *testing.T) {
 		<-next
 	}
 	t.Cleanup(func() { close(next) })
-	res := e.do(t, "GET", "/mcp", nil, map[string]string{"Authorization": "Bearer good", "Accept": "text/event-stream"})
+	res := e.do(t, "GET", "/mcp", nil, map[string]string{"Authorization": "Bearer " + goodToken, "Accept": "text/event-stream"})
 	buf := make([]byte, 64)
-	n, err := res.Body.Read(buf)
-	if err != nil || string(buf[:n]) != "data: one\n\n" {
-		t.Fatalf("first event not flushed through the middleware chain: %q %v", buf[:n], err)
+	buf = buf[:len("data: one\n\n")]
+	if _, err := io.ReadFull(res.Body, buf); err != nil || string(buf) != "data: one\n\n" {
+		t.Fatalf("first event not flushed through the middleware chain: %q %v", buf, err)
 	}
 }

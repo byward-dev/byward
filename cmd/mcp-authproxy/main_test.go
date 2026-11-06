@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"strings"
 	"testing"
 )
@@ -51,7 +52,29 @@ func TestRunStopsOnCancelledContext(t *testing.T) {
 	cancel()
 	var out, errb bytes.Buffer
 	code := run(ctx, nil, []string{"MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0"}, &out, &errb)
-	if code != exitOK || !strings.Contains(errb.String(), `"msg":"config"`) {
+	if code != exitOK || !strings.Contains(errb.String(), `"msg":"starting"`) {
 		t.Fatalf("code=%d logs=%s", code, errb.String())
+	}
+}
+
+func TestDevModeLogsEachRelaxation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var out, errb bytes.Buffer
+	code := run(ctx, []string{"--dev"}, []string{"MCP_AUTHPROXY_PUBLIC_URL=http://127.0.0.1:8080/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0"}, &out, &errb)
+	if code != exitOK || !strings.Contains(errb.String(), "development mode relaxation") || !strings.Contains(errb.String(), "http public URL on loopback") {
+		t.Fatalf("code=%d logs=%s", code, errb.String())
+	}
+}
+
+func TestListenFailureIsARuntimeError(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	code, _, stderr := runWith(nil, "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN="+ln.Addr().String())
+	if code != exitRuntime || !strings.Contains(stderr, "address already in use") {
+		t.Fatalf("code=%d stderr=%s", code, stderr)
 	}
 }

@@ -109,15 +109,17 @@ func TestGuardBadTokens(t *testing.T) {
 	}
 }
 
-func TestGuardValidTokenReachesNextWithIdentity(t *testing.T) {
-	r := httptest.NewRequest("POST", "/mcp?x=1&access_token=q", nil)
-	w := serve(Guard(meta(), fakeValidator{}, reached), r)
+func TestGuardIgnoresTokenInQuery(t *testing.T) {
+	w := serve(Guard(meta(), fakeValidator{}, reached), httptest.NewRequest("POST", "/mcp?x=1&access_token=q", nil))
 	if w.Code != 401 {
 		t.Fatalf("query token must be ignored, got %d", w.Code)
 	}
-	r = httptest.NewRequest("POST", "/mcp?x=1", nil)
+}
+
+func TestGuardValidTokenReachesNextWithIdentity(t *testing.T) {
+	r := httptest.NewRequest("POST", "/mcp?x=1", nil)
 	r.Header.Set("Authorization", "Bearer good")
-	w = serve(Guard(meta(), fakeValidator{}, reached), r)
+	w := serve(Guard(meta(), fakeValidator{}, reached), r)
 	if w.Code != http.StatusNoContent || w.Header().Get("X-Subject") != "tid:oid" || w.Header().Get("X-Query") != "x=1" {
 		t.Fatalf("code=%d headers=%v", w.Code, w.Header())
 	}

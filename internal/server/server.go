@@ -43,7 +43,7 @@ func Handler(cfg *config.Config, log *slog.Logger, v resource.Validator) http.Ha
 	}
 	up := relay.New(log, cfg.UpstreamURL)
 	mux.Handle(cfg.PublicURL.Path, origin.Origins(log, cfg.AllowedOrigins,
-		resource.Guard(meta, v, limitBody(MaxMCPBody, admit(MaxInFlight, MaxStreams, up)))))
+		mcpMethods(resource.Guard(meta, v, limitBody(MaxMCPBody, admit(MaxInFlight, MaxStreams, up))))))
 
 	hosts := append([]string{cfg.PublicURL.Host}, cfg.AllowedHosts...)
 	return recoverer(log, logging.Middleware(log, origin.Hosts(log, hosts, mux)))
@@ -103,6 +103,20 @@ func limitBody(n int64, next http.Handler) http.Handler {
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, n)
 		next.ServeHTTP(w, r)
+	})
+}
+
+// mcpMethods admits the methods Streamable HTTP uses; anything else (TRACE, PUT, PATCH, a
+// non-preflight OPTIONS) gets 405 before authentication and never reaches the upstream.
+func mcpMethods(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodPost, http.MethodDelete:
+			next.ServeHTTP(w, r)
+		default:
+			w.Header().Set("Allow", "GET, POST, DELETE")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
 	})
 }
 

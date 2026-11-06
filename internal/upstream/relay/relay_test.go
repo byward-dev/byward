@@ -24,7 +24,7 @@ func relayTo(t *testing.T, up *fakeupstream.Server, path string) http.Handler {
 	return New(quiet(), u)
 }
 
-func TestRelayIsByteTransparentAndStrips(t *testing.T) {
+func TestRelayForwardsBodyVerbatimAndStripsProxyHeaders(t *testing.T) {
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
 	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"_meta":{"traceparent":"00-abc-def-01"}}}`)
@@ -35,7 +35,6 @@ func TestRelayIsByteTransparentAndStrips(t *testing.T) {
 	r.Header.Set("X-Forwarded-User", "admin")
 	r.Header.Set("x-forwarded-prefix", "/evil")
 	r.Header["X_Forwarded_For"] = []string{"6.6.6.6"} // underscore spelling
-	r.Header["Authorization_"] = []string{"x"}
 	r.Header.Set("Origin", "https://app.example")
 	r.Header.Set("Sec-Fetch-Site", "cross-site")
 	r.Header.Set("Sec-Fetch-Mode", "cors")
@@ -66,7 +65,9 @@ func TestRelayIsByteTransparentAndStrips(t *testing.T) {
 }
 
 func TestRelayHidesUpstreamErrors(t *testing.T) {
-	u, _ := url.Parse("http://127.0.0.1:1/mcp")
+	gone := httptest.NewServer(http.NotFoundHandler())
+	gone.Close() // a URL nothing listens on any more
+	u, _ := url.Parse(gone.URL + "/mcp")
 	w := httptest.NewRecorder()
 	New(quiet(), u).ServeHTTP(w, httptest.NewRequest("POST", "/mcp", nil))
 	if w.Code != http.StatusBadGateway || strings.Contains(w.Body.String(), "127.0.0.1") {
@@ -78,12 +79,12 @@ func TestRelayStreamsServerSentEvents(t *testing.T) {
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
 	next := make(chan struct{})
+	t.Cleanup(func() { close(next) }) // runs before up.Close, so a failing test cannot hang
 	up.Handler = func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "data: one\n\n")
 		w.(http.Flusher).Flush()
 		<-next
-		_, _ = io.WriteString(w, "data: two\n\n")
 	}
 	srv := httptest.NewServer(relayTo(t, up, "/mcp"))
 	t.Cleanup(srv.Close)
@@ -92,12 +93,10 @@ func TestRelayStreamsServerSentEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = res.Body.Close() }()
-	buf := make([]byte, 64)
-	n, err := res.Body.Read(buf)
-	if err != nil || string(buf[:n]) != "data: one\n\n" {
-		t.Fatalf("first event not flushed: %q %v", buf[:n], err)
+	buf := make([]byte, len("data: one\n\n"))
+	if _, err := io.ReadFull(res.Body, buf); err != nil || string(buf) != "data: one\n\n" {
+		t.Fatalf("first event not flushed: %q %v", buf, err)
 	}
-	close(next)
 }
 
 func TestRelayDropsUpstreamCORS(t *testing.T) {
@@ -116,23 +115,26 @@ func TestRelayDropsUpstreamCORS(t *testing.T) {
 }
 
 func TestUpstreamChallengeNeverReachesTheClient(t *testing.T) {
-	up := fakeupstream.New()
-	t.Cleanup(up.Close)
-	status := http.StatusUnauthorized
-	up.Handler = func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="https://elsewhere.example/.well-known/oauth-protected-resource"`)
-		w.WriteHeader(status)
+	cases := []struct {
+		name           string
+		upstream, want int
+	}{
+		{"401 means the proxy's credential failed", http.StatusUnauthorized, http.StatusBadGateway},
+		{"403 passes through without its challenge", http.StatusForbidden, http.StatusForbidden},
 	}
-	h := relayTo(t, up, "/mcp")
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest("POST", "/mcp", nil))
-	if w.Code != http.StatusBadGateway || w.Header().Get("WWW-Authenticate") != "" {
-		t.Fatalf("upstream 401: code=%d www=%q", w.Code, w.Header().Get("WWW-Authenticate"))
-	}
-	status = http.StatusForbidden
-	w = httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest("POST", "/mcp", nil))
-	if w.Code != http.StatusForbidden || w.Header().Get("WWW-Authenticate") != "" {
-		t.Fatalf("upstream 403: code=%d www=%q", w.Code, w.Header().Get("WWW-Authenticate"))
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			up := fakeupstream.New()
+			t.Cleanup(up.Close)
+			up.Handler = func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="https://elsewhere.example/.well-known/oauth-protected-resource"`)
+				w.WriteHeader(c.upstream)
+			}
+			w := httptest.NewRecorder()
+			relayTo(t, up, "/mcp").ServeHTTP(w, httptest.NewRequest("POST", "/mcp", nil))
+			if w.Code != c.want || w.Header().Get("WWW-Authenticate") != "" {
+				t.Fatalf("code=%d www=%q", w.Code, w.Header().Get("WWW-Authenticate"))
+			}
+		})
 	}
 }

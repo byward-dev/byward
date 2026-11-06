@@ -13,7 +13,7 @@ var ok = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
-func TestHosts(t *testing.T) {
+func TestHostOutsideAllowlistGets421(t *testing.T) {
 	h := Hosts(quiet(), []string{"mcp.example.com", "internal:8080"}, ok)
 	cases := map[string]int{
 		"mcp.example.com":     http.StatusNoContent,
@@ -36,7 +36,7 @@ func TestHosts(t *testing.T) {
 	}
 }
 
-func TestOrigins(t *testing.T) {
+func TestOriginOutsideAllowlistGets403(t *testing.T) {
 	h := Origins(quiet(), []string{"https://app.example"}, ok)
 	cases := []struct {
 		name    string

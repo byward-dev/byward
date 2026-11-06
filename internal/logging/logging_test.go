@@ -2,12 +2,14 @@ package logging
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 const token = "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJ4In0.sig"
@@ -47,8 +49,21 @@ func TestGroupContentsAreDropped(t *testing.T) {
 func TestTimeIsUTC(t *testing.T) {
 	var buf bytes.Buffer
 	New(&buf, "json").Info("x")
-	if !strings.Contains(buf.String(), `Z","level"`) {
-		t.Fatalf("time not UTC: %s", buf.String())
+	var line struct{ Time string }
+	if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+		t.Fatal(err)
+	}
+	ts, err := time.Parse(time.RFC3339Nano, line.Time)
+	if err != nil || ts.Location() != time.UTC {
+		t.Fatalf("time %q not UTC: %v", line.Time, err)
+	}
+}
+
+func TestTextFormatRedactsToo(t *testing.T) {
+	var buf bytes.Buffer
+	New(&buf, "text").Info("request", "reason", "Bearer "+token, "token", token)
+	if strings.Contains(buf.String(), token) || !strings.Contains(buf.String(), redacted) {
+		t.Fatalf("text log leaks: %s", buf.String())
 	}
 }
 

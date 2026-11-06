@@ -67,26 +67,40 @@ func TestUnknownEnvFarFromAnySettingHasNoSuggestion(t *testing.T) {
 	}
 }
 
-func TestValidationErrors(t *testing.T) {
-	cases := map[string][]string{
-		"required":       {"MCP_AUTHPROXY_PUBLIC_URL="},
-		"trailing slash": {"MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp/"},
-		"no path":        {"MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com"},
-		"http public":    {"MCP_AUTHPROXY_PUBLIC_URL=http://mcp.example.com/mcp"},
-		"http loopback":  {"MCP_AUTHPROXY_PUBLIC_URL=http://127.0.0.1:8080/mcp"},
-		"credentials":    {"MCP_AUTHPROXY_UPSTREAM_URL=http://u:p@upstream/mcp"},
-		"bad origin":     {"MCP_AUTHPROXY_ALLOWED_ORIGINS=https://a.example/path"},
-		"bad listen":     {"MCP_AUTHPROXY_LISTEN=8080"},
-		"bad log":        {"MCP_AUTHPROXY_LOG_FORMAT=xml"},
-		"bad scope":      {"MCP_AUTHPROXY_SCOPE=a b"},
-		"bad dev":        {"MCP_AUTHPROXY_DEV=maybe"},
+func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
+	cases := []struct {
+		name, env, want string
+	}{
+		{"required", "MCP_AUTHPROXY_PUBLIC_URL=", "MCP_AUTHPROXY_PUBLIC_URL is required"},
+		{"trailing slash", "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp/", "MCP_AUTHPROXY_PUBLIC_URL"},
+		{"no path", "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com", "MCP_AUTHPROXY_PUBLIC_URL"},
+		{"query", "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp?x=1", "must not have a query or fragment"},
+		{"fragment", "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp#f", "must not have a query or fragment"},
+		{"http public", "MCP_AUTHPROXY_PUBLIC_URL=http://mcp.example.com/mcp", "must use https"},
+		{"http loopback without dev", "MCP_AUTHPROXY_PUBLIC_URL=http://127.0.0.1:8080/mcp", "needs --dev"},
+		{"credentials", "MCP_AUTHPROXY_UPSTREAM_URL=http://u:p@upstream/mcp", "MCP_AUTHPROXY_UPSTREAM_URL"},
+		{"origin with path", "MCP_AUTHPROXY_ALLOWED_ORIGINS=https://a.example/path", "MCP_AUTHPROXY_ALLOWED_ORIGINS"},
+		{"host with path", "MCP_AUTHPROXY_ALLOWED_HOSTS=a.example/x", "MCP_AUTHPROXY_ALLOWED_HOSTS"},
+		{"host with space", "MCP_AUTHPROXY_ALLOWED_HOSTS=a b", "MCP_AUTHPROXY_ALLOWED_HOSTS"},
+		{"listen without port", "MCP_AUTHPROXY_LISTEN=8080", "MCP_AUTHPROXY_LISTEN"},
+		{"log format", "MCP_AUTHPROXY_LOG_FORMAT=xml", "MCP_AUTHPROXY_LOG_FORMAT"},
+		{"two scopes", "MCP_AUTHPROXY_SCOPE=a b", "MCP_AUTHPROXY_SCOPE"},
+		{"dev not a bool", "MCP_AUTHPROXY_DEV=maybe", "MCP_AUTHPROXY_DEV"},
+		{"documentation not a URL", "MCP_AUTHPROXY_RESOURCE_DOCUMENTATION=javascript:x", "MCP_AUTHPROXY_RESOURCE_DOCUMENTATION"},
 	}
-	for name, env := range cases {
-		t.Run(name, func(t *testing.T) {
-			if _, err := load(t, nil, env...); !isConfigError(err) {
-				t.Fatalf("want config error, got %v", err)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := load(t, nil, c.env)
+			if !isConfigError(err) || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("want a config error containing %q, got %v", c.want, err)
 			}
 		})
+	}
+}
+
+func TestBaseSettingsAreValid(t *testing.T) {
+	if _, err := load(t, nil); err != nil {
+		t.Fatalf("the base settings the rejection cases build on must load: %v", err)
 	}
 }
 
@@ -95,7 +109,7 @@ func TestDevAllowsLoopbackHTTPAndRecordsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !c.Dev || len(c.Relaxations) != 1 {
+	if !c.Dev || len(c.Relaxations) != 1 || c.Relaxations[0] != "http public URL on loopback" {
 		t.Fatalf("dev=%v relaxations=%v", c.Dev, c.Relaxations)
 	}
 }
@@ -110,15 +124,18 @@ func TestListsAreNormalized(t *testing.T) {
 	}
 }
 
-func TestHelpAndUnexpectedArgs(t *testing.T) {
+func TestHelpFlagAsksForUsageListingEnvNames(t *testing.T) {
 	if _, _, err := Load([]string{"-h"}, base, nil); !IsHelp(err) {
 		t.Fatalf("want help, got %v", err)
 	}
-	if _, _, err := Load([]string{"extra"}, base, nil); !isConfigError(err) {
-		t.Fatalf("want config error, got %v", err)
-	}
 	if !strings.Contains(Usage(), "MCP_AUTHPROXY_PUBLIC_URL") {
 		t.Fatal("usage lacks env names")
+	}
+}
+
+func TestPositionalArgumentIsAConfigError(t *testing.T) {
+	if _, _, err := Load([]string{"extra"}, base, nil); !isConfigError(err) || !strings.Contains(err.Error(), "extra") {
+		t.Fatalf("want config error naming the argument, got %v", err)
 	}
 }
 
@@ -161,8 +178,8 @@ func TestSecretFromFlagFileBeatsEnvFile(t *testing.T) {
 
 func TestSecretFileMissingIsConfigError(t *testing.T) {
 	_, err := resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET_FILE=/nope"}, files(nil), nil)
-	if !isConfigError(err) || strings.Contains(err.Error(), "s3cret") {
-		t.Fatalf("err = %v", err)
+	if !isConfigError(err) || !strings.Contains(err.Error(), "MCP_AUTHPROXY_CLIENT_SECRET_FILE") {
+		t.Fatalf("want a config error naming the setting, got %v", err)
 	}
 }
 
@@ -186,8 +203,23 @@ func TestSecretHasNoInlineFlag(t *testing.T) {
 	}
 }
 
-func TestIsConfigErrorWrapped(t *testing.T) {
-	if !isConfigError(errors.Join(errors.New("x"), &configError{msg: "y"})) {
-		t.Fatal("wrapped config error not detected")
+func TestInlineSecretRejectedOutsideDevMode(t *testing.T) {
+	v, err := resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET=inline"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := checkInlineSecrets(v, false); !isConfigError(err) || !strings.Contains(err.Error(), "MCP_AUTHPROXY_CLIENT_SECRET_FILE") {
+		t.Fatalf("without dev: want error pointing at the _FILE variable, got %v", err)
+	}
+	relaxed, err := checkInlineSecrets(v, true)
+	if err != nil || !strings.Contains(relaxed, "MCP_AUTHPROXY_CLIENT_SECRET") {
+		t.Fatalf("with dev: relaxation=%q err=%v", relaxed, err)
+	}
+}
+
+func TestSecretFileNeedsAFileReader(t *testing.T) {
+	_, err := resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET_FILE=/run/secrets/x"}, nil, nil)
+	if !isConfigError(err) || !strings.Contains(err.Error(), "not available") {
+		t.Fatalf("got %v", err)
 	}
 }
