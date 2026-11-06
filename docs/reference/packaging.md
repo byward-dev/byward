@@ -6,7 +6,7 @@ Decisions: [ADR-0019](../adr/0019-packaging.md). Config: [`.goreleaser.yaml`](..
 
 | Artifact | Platforms | Notes |
 |---|---|---|
-| Container image `ghcr.io/byward-dev/byward:vX.Y.Z` and `:latest` | linux/amd64, linux/arm64 | Multi-arch index on `gcr.io/distroless/static-debian13:nonroot` (pinned by digest); cosign keyless signature; buildx SBOM and provenance (`mode=max`); GitHub build-provenance attestation |
+| Container image `ghcr.io/byward-dev/byward:vX.Y.Z`, and `:latest` for final releases only (not for pre-releases such as `-rc.1`) | linux/amd64, linux/arm64 | Multi-arch index on `gcr.io/distroless/static-debian13:nonroot` (pinned by digest); cosign keyless signature; buildx SBOM and provenance (`mode=max`); GitHub build-provenance attestation |
 | `byward_<version>_<os>_<arch>.tar.gz` | linux amd64/arm64 (supported), darwin amd64/arm64 (development only) | Binary, `LICENSE`, `README.md`, `third_party/` licence texts; a syft SBOM (`.sbom.json`) per archive |
 | `checksums.txt` | — | sha256 of every archive and SBOM; cosign bundle `checksums.txt.sigstore.json`; GitHub build-provenance attestation |
 
