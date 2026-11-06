@@ -167,6 +167,7 @@ func TestAuthorizeErrorsRedirectBackWithState(t *testing.T) {
 	}{
 		"response_type token": {params: url.Values{"response_type": {"token"}}, want: "unsupported_response_type"},
 		"form_post":           {params: url.Values{"response_mode": {"form_post"}}, want: "invalid_request"},
+		"no scope":            {params: url.Values{"scope": nil}, want: "invalid_request"},
 		"plain PKCE":          {params: url.Values{"code_challenge_method": {"plain"}}, want: "invalid_request"},
 		"PKCE required":       {params: url.Values{"code_challenge": nil, "code_challenge_method": nil}, opts: []Option{WithRequirePKCE(true)}, want: "invalid_request"},
 		"unknown resource":    {params: url.Values{"scope": {"openid api://" + NewGUID() + "/access_as_user"}}, want: "invalid_scope"},

@@ -153,6 +153,12 @@ func (p *IdP) authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	scopes := strings.Fields(q.Get("scope"))
+	if len(scopes) == 0 {
+		f := InvalidRequest
+		f.Code = 900144
+		fail(f, "The request body must contain the following parameter: 'scope'.")
+		return
+	}
 	if _, f := p.resolveResource(scopes); f != nil {
 		fail(*f, "")
 		return
