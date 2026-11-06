@@ -40,8 +40,8 @@ func TestEveryProfileIsSourcedAndMatchesItsClientsDocument(t *testing.T) {
 				body = clientdocs.Load(t, p.Document).Body
 			case DCR:
 				reg := clientdocs.LoadRegistration(t, p.Document)
-				if body = reg.Body; slices.Contains(reg.Dropped, p.RedirectURI) {
-					t.Fatalf("redirect %s is one the redirect policy drops", p.RedirectURI)
+				if body = reg.Body; reg.Redirect != p.RedirectURI {
+					t.Fatalf("redirect %s is not the fixture's sign-in redirect %s", p.RedirectURI, reg.Redirect)
 				}
 			default:
 				return

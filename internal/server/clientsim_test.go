@@ -42,14 +42,14 @@ func TestClosedClientsSignInAndWorkAsTheirProfilesSay(t *testing.T) {
 					t.Fatal(err)
 				}
 				kept := slices.DeleteFunc(req.RedirectURIs, func(u string) bool { return slices.Contains(reg.Dropped, u) })
-				if !slices.Equal(s.Registered, kept) {
+				if !slices.Equal(slices.Sorted(slices.Values(s.Registered)), slices.Sorted(slices.Values(kept))) { // RFC 7591 sets no order
 					t.Fatalf("the registration kept %v; want %v (%v dropped)", s.Registered, kept, reg.Dropped)
 				}
 				for _, r := range kept {
 					if r != p.RedirectURI {
 						other := p
 						other.RedirectURI = r
-						clientsim.SignIn(t, e, other, c)
+						t.Run(r, func(t *testing.T) { clientsim.SignIn(t, e, other, c) })
 					}
 				}
 			}
