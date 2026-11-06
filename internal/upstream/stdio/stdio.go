@@ -117,7 +117,7 @@ func (m *Manager) Get(ctx context.Context, key string, id Identity) (*Process, e
 			e = &entry{user: id.user(), ready: make(chan struct{})}
 			m.procs[key] = e
 			m.mu.Unlock()
-			e.p, e.err = m.spawn(ctx, key, id, e)
+			e.p, e.err = m.spawn(ctx, id, func() { m.remove(key, e) })
 			close(e.ready)
 			if e.err != nil {
 				m.remove(key, e)
@@ -210,7 +210,7 @@ func (m *Manager) remove(key string, e *entry) {
 
 // spawn starts one upstream process. The session directory, if the command uses one, is created
 // first and removed on every failure path.
-func (m *Manager) spawn(ctx context.Context, key string, id Identity, e *entry) (_ *Process, err error) {
+func (m *Manager) spawn(ctx context.Context, id Identity, onExit func()) (_ *Process, err error) {
 	ctx, cancel := context.WithTimeout(ctx, m.cfg.SpawnTimeout)
 	defer cancel()
 
@@ -279,5 +279,5 @@ func (m *Manager) spawn(ctx context.Context, key string, id Identity, e *entry) 
 		log: m.log.With("process", cmd.Process.Pid, "user_key", id.Subject), clock: m.cfg.Clock,
 		idleFor: m.cfg.IdleTimeout, grace: m.cfg.KillGrace, maxMsg: m.cfg.MaxMessageBytes,
 	}
-	return startProcess(cmd, inW, outR, errR, dir, opts, func() { m.remove(key, e) }), nil
+	return startProcess(cmd, inW, outR, errR, dir, opts, onExit), nil
 }

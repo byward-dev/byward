@@ -219,8 +219,24 @@ func TestStopEscalatesToKillingTheWholeProcessGroup(t *testing.T) {
 	}
 
 	h.m.Stop("s1")
-	h.clk.Advance(DefaultKillGrace) // stdin closed, grace over: SIGTERM, which both ignore
-	h.clk.Advance(DefaultKillGrace) // SIGKILL to the group
+	next := func(want string) {
+		t.Helper()
+		select {
+		case got := <-p.Messages():
+			if string(got) != want {
+				t.Fatalf("got %q, want %q", got, want)
+			}
+		case <-time.After(guard):
+			t.Fatalf("no %q", want)
+		}
+	}
+	next("stdin closed")            // step 1: stdin is closed, no signal yet
+	h.clk.Advance(DefaultKillGrace) // step 2: SIGTERM after the grace
+	next("got SIGTERM")
+	if exits := h.log.with("upstream process exited"); len(exits) != 0 {
+		t.Fatalf("exited before SIGKILL: %v", exits)
+	}
+	h.clk.Advance(DefaultKillGrace) // step 3: SIGKILL to the group
 	// The grandchild holds stdout and stderr open, and the clock never reaches the pipe
 	// fallback: Done closes only if SIGKILL reached the whole group.
 	waitDone(t, p)
@@ -357,6 +373,9 @@ func TestCancelledSpawnLeavesNothingBehind(t *testing.T) {
 	if len(left) != 0 || h.m.Len() != 0 {
 		t.Fatalf("left behind: dirs %v, Len %d", left, h.m.Len())
 	}
+	if _, err := h.m.Get(context.Background(), "s1", alice); err != nil {
+		t.Fatalf("Get after the failed spawn: %v", err)
+	}
 }
 
 func TestOversizeStdoutMessageStopsTheProcess(t *testing.T) {
@@ -393,9 +412,10 @@ func TestShutdownStopsEveryProcessAndRefusesNewOnes(t *testing.T) {
 	}
 }
 
-// Regression: an idle timer firing before it was assigned raced with stop (d6eb42d).
-func TestImmediateIdleTimeoutStopsTheProcess(t *testing.T) {
-	h := newHarness(t, func(c *Config) { c.Clock, c.IdleTimeout = realClock{}, time.Nanosecond })
+// Regression (d6eb42d): an idle timer that fires before AfterFunc returns must not race with the
+// assignment of the timer. syncClock makes that firing certain, so the bug panics without -race.
+func TestIdleTimerFiringDuringStartStopsTheProcess(t *testing.T) {
+	h := newHarness(t, func(c *Config) { c.Clock = syncClock{} })
 	waitDone(t, h.get(t, "s1", alice))
 	if stops := h.log.with("stopping upstream process"); len(stops) != 1 || stops[0].attrs["reason"] != "idle" {
 		t.Fatalf("stop records = %v, want one with reason=idle", stops)
@@ -462,17 +482,26 @@ func TestShutdownGivesUpWhenItsContextEnds(t *testing.T) {
 	}
 }
 
-func TestFailedSpawnFreesTheKeyForTheNextGet(t *testing.T) {
-	h := newHarness(t, nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := h.m.Get(ctx, "s1", alice); err == nil {
-		t.Fatal("Get with a cancelled context succeeded")
+// syncClock fires every timer at once on another goroutine and gives it up to 50 ms to finish
+// before AfterFunc returns. Its timers cannot be reset or stopped.
+type syncClock struct{}
+
+func (syncClock) Now() time.Time { return time.Now() }
+
+func (syncClock) AfterFunc(_ time.Duration, f func()) Timer {
+	done := make(chan struct{})
+	go func() { defer close(done); f() }()
+	select {
+	case <-done:
+	case <-time.After(50 * time.Millisecond): // f is blocked, as it should be, on the process lock
 	}
-	if got := call(t, h.get(t, "s1", alice), "ping"); got != "ping" {
-		t.Fatalf("got %q", got)
-	}
+	return firedTimer{}
 }
+
+type firedTimer struct{}
+
+func (firedTimer) Reset(time.Duration) bool { return false }
+func (firedTimer) Stop() bool               { return false }
 
 func TestSameSubjectFromAnotherIssuerIsAnotherUser(t *testing.T) {
 	h := newHarness(t, nil)

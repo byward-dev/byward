@@ -10,7 +10,8 @@
 //	block         print "blocking", then never read stdin again
 //	crash         exit with status 3
 //
-// Flag -stubborn ignores SIGTERM and keeps running after stdin closes. Mode "sleep" (first
+// Flag -stubborn keeps running after stdin closes and after SIGTERM, printing "stdin closed" and
+// "got SIGTERM" to stdout when they happen. Mode "sleep" (first
 // argument) blocks forever, ignoring SIGTERM; it is the grandchild.
 package main
 
@@ -23,6 +24,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -36,11 +38,13 @@ func main() {
 	for _, a := range os.Args[1:] {
 		if a == "-stubborn" {
 			stubborn = true
-			signal.Ignore(syscall.SIGTERM)
 		}
 	}
 	out := bufio.NewWriter(os.Stdout)
+	var mu sync.Mutex
 	reply := func(v any) {
+		mu.Lock()
+		defer mu.Unlock()
 		if s, ok := v.(string); ok {
 			fmt.Fprintln(out, s)
 		} else {
@@ -48,6 +52,15 @@ func main() {
 			fmt.Fprintln(out, string(b))
 		}
 		_ = out.Flush()
+	}
+	if stubborn {
+		terms := make(chan os.Signal, 1)
+		signal.Notify(terms, syscall.SIGTERM)
+		go func() {
+			for range terms {
+				reply("got SIGTERM")
+			}
+		}()
 	}
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
@@ -96,6 +109,7 @@ func main() {
 		}
 	}
 	if stubborn {
+		reply("stdin closed")
 		hang()
 	}
 }
