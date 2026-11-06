@@ -19,7 +19,7 @@ each feature (F1–F22) is a GitHub issue and gets an ADR once grilled with the 
 | [0011](0011-idp-adapters.md) | IdP adapters: small interface, generic OIDC with presets, Entra on top | F9 | — |
 | [0012](0012-entra-specifics.md) | Entra specifics: v2, tid+oid, own API scope at login, certificate credentials | F10 | — |
 | [0013](0013-discovery-and-errors.md) | Discovery and errors: both well-known paths, one issuer, `iss` everywhere | F16 | — |
-| [0014](0014-token-validation.md) | Token validation: header only, sealed checks, no store on the request path | F11 | — |
+| [0014](0014-token-validation.md) | Token validation: header only, sealed checks, no store on the request path | F11 | 0022 |
 | [0015](0015-access-gate.md) | Authorization: an access gate at login and refresh, no per-request denials | F12 | — |
 | [0016](0016-identity-propagation.md) | Identity propagation: an RFC 9068 assertion for the upstream, strip then inject | F13 | — |
 | [0017](0017-delegation-obo.md) | Delegation: proxy-side Entra On-Behalf-Of in v0.1 | F14 | — |
@@ -27,6 +27,7 @@ each feature (F1–F22) is a GitHub issue and gets an ADR once grilled with the 
 | [0019](0019-packaging.md) | Packaging: a signed container image and Linux binaries for servers | F19 | — |
 | [0020](0020-configuration.md) | Configuration: flags and env, secrets from files, one registry | F18 | — |
 | [0021](0021-observability.md) | Observability: redacted logs, an audit stream, one request ID, telemetry off by default | F20 | — |
+| [0022](0022-machine-to-machine.md) | Machine-to-machine: accept Entra app-only tokens, opt-in, in v0.1 | F15 | — |
 
 ## Writing a new ADR
 

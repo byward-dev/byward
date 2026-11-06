@@ -28,7 +28,8 @@ in again".
 2. **Check order, no store read:** type prefix → AEAD open (key chosen by key ID; resource URL and
    token type as associated data) → format version → `exp`/`iat` with the 30 s leeway → in-memory deny
    list (grant ID, per-user cut-off; fail closed when more than 30 s stale, ADR-0006). The result is the
-   request's identity (F13).
+   request's identity (F13). _Amended by ADR-0022:_ a three-part JWT goes to the opt-in Entra app-only
+   path instead; the validator is chosen by format, never by fallback.
 3. **401 shapes:** no token → `WWW-Authenticate: Bearer resource_metadata="…", scope="…"` with no
    error code; a bad, expired or revoked token → `error="invalid_token"` with a fixed description that
    only distinguishes "expired" from "invalid", and a JSON body. Every cryptographic failure looks the

@@ -198,6 +198,8 @@ Sources: [OpenSSF Best Practices (Silver)](https://www.bestpractices.dev/en/crit
     `127.0.0.1` (ADR-0018).
 18. Every `http.Server` timeout and `MaxHeaderBytes` is set; builds use the latest Go patch release;
     `govulncheck` is green (ADR-0018).
+19. The proxy never sends its own IdP credential on a caller's behalf; app-only tokens are accepted
+    only with a pinned issuer and audience, `idtyp=app` and a required app role (ADR-0022).
 
 ## Known pitfalls
 
