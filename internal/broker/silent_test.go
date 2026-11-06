@@ -317,7 +317,7 @@ func TestPromptNoneWhoseCallbackIsRateLimitedIsTemporarilyUnavailableAndSpendsIt
 	}
 	// What the browser still holds after that answer: nothing if it was told to drop the login.
 	var held []*http.Cookie
-	if c := cookieNamed(throttled, login.Name); c == nil || c.MaxAge >= 0 {
+	if c := cookieNamed(throttled, login.Name); c == nil || c.MaxAge >= 0 || c.Path != login.Path { // a browser deletes only a matching cookie
 		held = []*http.Cookie{login}
 	}
 	e.b.cfg.Limiter = nil

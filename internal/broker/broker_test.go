@@ -786,6 +786,17 @@ func TestCallbackRejectsALoginItCannotTrust(t *testing.T) {
 			if firstGrant(e.st) != "" {
 				t.Fatal("a grant was created")
 			}
+			// A login cookie that was sent is spent whether or not it opens; a browser deletes it only
+			// for the same name and path.
+			if len(cookies) == 1 && len(q.Get("state")) >= 16 {
+				var spent bool
+				for _, set := range res.Cookies() {
+					spent = spent || (set.Name == cookie.Name && set.Path == "/" && set.MaxAge < 0)
+				}
+				if !spent {
+					t.Fatalf("the login cookie was not expired: %v", res.Cookies())
+				}
+			}
 		})
 	}
 }
@@ -1156,6 +1167,16 @@ func TestThrottledCallbackShowsThe429PageWithoutCallingTheIdP(t *testing.T) {
 		t.Error("a grant was created by a throttled callback")
 	}
 	e.oneAuditEvent(t, "rate_limited", map[string]any{"outcome": "failure", "reason": "callback"})
+	// An interactive login is not spent by the 429: the user's retry once the limit lifts finishes it.
+	for _, set := range res.Cookies() {
+		if set.Name == c.Name {
+			t.Fatalf("the 429 touched the login cookie: %+v", set)
+		}
+	}
+	e.b.cfg.Limiter = nil
+	if retry := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{c}); retry.StatusCode != http.StatusFound || !strings.Contains(retry.Header.Get("Location"), "code=") {
+		t.Fatalf("the retry after the limit lifted: %d to %q, want a code", retry.StatusCode, retry.Header.Get("Location"))
+	}
 }
 
 // The user's decision (#55 follow-up design): /token answers 429 + Retry-After + no-store with a
