@@ -16,7 +16,7 @@ each feature (F1–F22) is a GitHub issue and gets an ADR once grilled with the 
 | [0008](0008-client-registration.md) | Client registration: static, CIMD and DCR, strictly validated | F6 | — |
 | [0009](0009-redirect-uri-policy.md) | Redirect URI policy: exact HTTPS, any-port loopback, re-checked at /token | F8 | 0010 |
 | [0010](0010-consent-screen.md) | Consent screen: before the IdP, per client, remembered only for trusted clients | F7 | — |
-| [0011](0011-idp-adapters.md) | IdP adapters: small interface, generic OIDC with presets, Entra on top | F9 | — |
+| [0011](0011-idp-adapters.md) | IdP adapters: small interface, generic OIDC with presets, Entra on top | F9 | 0026 |
 | [0012](0012-entra-specifics.md) | Entra specifics: v2, tid+oid, own API scope at login, certificate credentials | F10 | — |
 | [0013](0013-discovery-and-errors.md) | Discovery and errors: both well-known paths, one issuer, `iss` everywhere | F16 | — |
 | [0014](0014-token-validation.md) | Token validation: header only, sealed checks, no store on the request path | F11 | 0022 |
@@ -30,6 +30,7 @@ each feature (F1–F22) is a GitHub issue and gets an ADR once grilled with the 
 | [0022](0022-machine-to-machine.md) | Machine-to-machine: accept Entra app-only tokens, opt-in, in v0.1 | F15 | — |
 | [0023](0023-project-governance.md) | Project governance: 0.y.z with a stability contract, Apache-2.0 §5, disclosed AI help | F22 | — |
 | [0024](0024-testing-strategy.md) | Testing strategy: a Docker-free check, a client simulator, conformance three ways | F21 | — |
+| [0026](0026-idp-adapters-go-jose-only.md) | IdP adapters depend only on go-jose | F9 | — |
 
 ## Writing a new ADR
 

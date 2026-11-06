@@ -183,7 +183,9 @@ Sources: [OpenSSF Best Practices (Silver)](https://www.bestpractices.dev/en/crit
 4. Client-supplied URLs are fetched only through the SSRF guard.
 5. Per-client consent before the IdP redirect.
 6. Audience validated; authorization responses carry `iss`.
-7. Proxy tokens carry `exp`, `aud` = our resource, `iss` = us, a `kid` in our JWKS; never IdP tokens.
+7. Proxy tokens are sealed by us (AEAD; key ID from our key ring; resource URL and token type as
+   associated data), carry `exp`, and are never IdP tokens; assertions to the upstream are JWTs with
+   `aud` = that upstream and a `kid` in our JWKS (ADR-0016).
 8. The IdP refresh token never leaves the **broker** and is encrypted at rest.
 9. Authorization codes are single-use and short-lived; `/token` re-checks `client_id`, `redirect_uri`, PKCE.
 10. Exact redirect matching; only the loopback port may vary.
