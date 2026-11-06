@@ -65,3 +65,26 @@ jobs:
             build/conformance/results
             build/conformance/*.log
           retention-days: 7
+
+  # Consent and error pages in Chromium: Playwright and axe (ADR-0010, ADR-0024); screenshots kept for review.
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          install_args: go
+      - run: mise run test:ui
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-screenshots
+          path: |
+            build/ui/screenshots
+            build/ui/test-results
+            build/ui/*.log
+          retention-days: 7

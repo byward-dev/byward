@@ -27,6 +27,9 @@ const (
 	KeyLoaded           = "key_loaded"            // a sealing key was loaded at startup
 	HostRejected        = "host_rejected"         // a request named a Host outside the allowlist
 	OriginRejected      = "origin_rejected"       // a request sent an Origin outside the allowlist
+	ConsentShown        = "consent_shown"         // the consent page was shown (ADR-0010 §12)
+	ConsentGranted      = "consent_granted"       // the user allowed the client on the consent page
+	ConsentDenied       = "consent_denied"        // the user denied the client on the consent page
 )
 
 // Outcomes.
@@ -41,12 +44,14 @@ type Event struct {
 	Outcome  string
 	Reason   string // a fixed, human-readable reason; never request data
 	ClientID string // the MCP client's ID
-	UserKey  string // the IdP user key (`tid:oid` for Entra)
-	GrantID  string
-	KeyID    string
-	IdP      string // the IdP adapter name, e.g. "entra"
-	Host     string
-	Origin   string
+	// ClientTrust is the client's trust level (ADR-0008 §8): verified, domain or not-verified.
+	ClientTrust string
+	UserKey     string // the IdP user key (`tid:oid` for Entra)
+	GrantID     string
+	KeyID       string
+	IdP         string // the IdP adapter name, e.g. "entra"
+	Host        string
+	Origin      string
 }
 
 // Observer is told about every event, including suppressed ones (metrics count them all).
@@ -110,7 +115,7 @@ func (l *Log) write(ctx context.Context, e Event, ip string, suppressed int) {
 	if id := logging.RequestID(ctx); id != "" {
 		attrs = append(attrs, slog.String("request_id", id))
 	}
-	for _, f := range []struct{ k, v string }{{"reason", e.Reason}, {"client_id", e.ClientID}, {"user_key", e.UserKey},
+	for _, f := range []struct{ k, v string }{{"reason", e.Reason}, {"client_id", e.ClientID}, {"client_trust", e.ClientTrust}, {"user_key", e.UserKey},
 		{"grant_id", e.GrantID}, {"key_id", e.KeyID}, {"idp", e.IdP}, {"host", e.Host}, {"origin", e.Origin}, {"remote_ip", ip}} {
 		if f.v != "" {
 			attrs = append(attrs, slog.String(f.k, f.v))

@@ -1,0 +1,69 @@
+/* Consent and error pages (ADR-0010 §6-7). No external assets; WCAG 2.2 AA contrast in both themes. */
+:root {
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #4a4a4a;
+  --line: #c8c8c8;
+  --button-bg: #f0f0f0;
+  --button-fg: #1a1a1a;
+  --focus: #0b57d0;
+  --warn-bg: #fff4d6;
+  --warn-line: #8a6100;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161616;
+    --fg: #f0f0f0;
+    --muted: #c4c4c4;
+    --line: #5a5a5a;
+    --button-bg: #2c2c2c;
+    --button-fg: #f0f0f0;
+    --focus: #8ab4f8;
+    --warn-bg: #3a2e0a;
+    --warn-line: #e0b54a;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 1rem/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+main { max-width: 36rem; margin: 0 auto; padding: 2rem 1rem; }
+h1 { font-size: 1.5rem; line-height: 1.3; margin: 0 0 1.5rem; overflow-wrap: anywhere; }
+.name { font-weight: 700; }
+dl { margin: 0 0 1.5rem; display: grid; grid-template-columns: max-content 1fr; gap: 0.5rem 1rem; }
+dt { color: var(--muted); }
+dd { margin: 0; overflow-wrap: anywhere; }
+.trust { color: var(--muted); }
+.warning, .notice {
+  border-left: 4px solid var(--warn-line);
+  background: var(--warn-bg);
+  padding: 0.75rem 1rem;
+  margin: 0 0 1.5rem;
+}
+details { margin: 0 0 1.5rem; }
+summary { cursor: pointer; min-height: 24px; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+.actions { display: flex; gap: 1rem; }
+/* Allow and Deny carry equal weight (ADR-0010 §7). */
+button {
+  flex: 1;
+  min-height: 44px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--button-fg);
+  background: var(--button-bg);
+  border: 2px solid var(--fg);
+  border-radius: 6px;
+  cursor: pointer;
+}
+button:focus-visible, summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.next { margin: 1rem 0 0; }
+footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.875rem; }
+@media (max-width: 30rem) {
+  dl { grid-template-columns: 1fr; gap: 0 0; }
+  dd { margin-bottom: 0.5rem; }
+}

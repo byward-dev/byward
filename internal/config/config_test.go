@@ -106,6 +106,11 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"gate groups blank", "MCP_AUTHPROXY_GATE_GROUPS= ", "MCP_AUTHPROXY_GATE_GROUPS is set but lists nothing"},
 		{"gate email domains blank", "MCP_AUTHPROXY_GATE_EMAIL_DOMAINS=,", "MCP_AUTHPROXY_GATE_EMAIL_DOMAINS is set but lists nothing"},
 		{"gate hosted domains blank", "MCP_AUTHPROXY_GATE_HOSTED_DOMAINS=,", "MCP_AUTHPROXY_GATE_HOSTED_DOMAINS is set but lists nothing"},
+		{"operator name too long", "MCP_AUTHPROXY_OPERATOR_NAME=" + strings.Repeat("é", 81), "MCP_AUTHPROXY_OPERATOR_NAME: at most 80 characters, got 81"},
+		{"operator name with a newline", "MCP_AUTHPROXY_OPERATOR_NAME=a\nb", "MCP_AUTHPROXY_OPERATOR_NAME: must not contain control or formatting characters"},
+		{"operator name with a bidi override", "MCP_AUTHPROXY_OPERATOR_NAME=Evil \u202eTI", "MCP_AUTHPROXY_OPERATOR_NAME: must not contain control or formatting characters"},
+		{"scope description with a bidi override", "MCP_AUTHPROXY_SCOPE_DESCRIPTION=Read \u202edashboards", "MCP_AUTHPROXY_SCOPE_DESCRIPTION: must not contain control or formatting characters"},
+		{"scope description too long", "MCP_AUTHPROXY_SCOPE_DESCRIPTION=" + strings.Repeat("x", 201), "MCP_AUTHPROXY_SCOPE_DESCRIPTION: at most 200 characters"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -114,6 +119,16 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 				t.Fatalf("want a config error containing %q, got %v", c.want, err)
 			}
 		})
+	}
+}
+
+func TestConsentWordingLoadsUpToItsLimitCountedAsCharacters(t *testing.T) {
+	c, err := load(t, nil, "MCP_AUTHPROXY_OPERATOR_NAME="+strings.Repeat("é", 80), "MCP_AUTHPROXY_SCOPE_DESCRIPTION="+strings.Repeat("é", 200))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.OperatorName != strings.Repeat("é", 80) || c.ScopeDescription != strings.Repeat("é", 200) {
+		t.Fatalf("operator %q, scope description %q", c.OperatorName, c.ScopeDescription)
 	}
 }
 

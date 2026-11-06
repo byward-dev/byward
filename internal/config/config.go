@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // registry is every setting the proxy reads, in the order the effective configuration is printed.
@@ -33,6 +35,8 @@ var registry = []Setting{
 	{Name: "gate-email-domains", Auth: true, Help: "access gate: comma-separated domains of a verified email; generic OIDC IdPs only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md)"},
 	{Name: "gate-hosted-domains", Auth: true, Help: "access gate: comma-separated Google Workspace domains (hd claim); Google only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md)"},
 	{Name: "gate-allow-empty", Auth: true, Bool: true, Default: "false", Help: "allow an empty access gate for a Google or generic OIDC IdP (anyone with an account can sign in); no effect with Entra (docs/how-to/access-gate.md)"},
+	{Name: "operator-name", Auth: true, Help: "who runs this proxy, shown on the consent page, e.g. Contoso IT"},
+	{Name: "scope-description", Auth: true, Help: "what the scope lets an app do, in plain words for the consent page, e.g. Read and query your team's dashboards"},
 	{Name: "insecure-no-auth", Bool: true, Default: "false", Help: "no authentication at all, for trying the proxy out and for tests; loopback only (ADR-0027)"},
 	{Name: "dev", Bool: true, Default: "false", Help: "development mode: enables the relaxations it logs at startup"},
 }
@@ -61,6 +65,9 @@ type Config struct {
 	// The access gate (slice 1.5, ADR-0015); validated by gate.New when the broker is wired.
 	GateTenants, GateRoles, GateGroups, GateEmailDomains, GateHostedDomains []string
 	GateAllowEmpty                                                          bool
+	// Consent page wording (ADR-0010 §4).
+	OperatorName     string
+	ScopeDescription string
 	// InContainer is set when the proxy runs in a container (/.dockerenv or /run/.containerenv)
 	// with its own network namespace; host networking does not count (see ownNetwork).
 	InContainer bool
@@ -188,6 +195,9 @@ func validate(v *Values, container bool) (*Config, error) {
 	if !c.NoAuth {
 		c.EntraTenant, c.EntraClientID, c.EntraClientSecret = v.get("entra-tenant"), v.get("entra-client-id"), v.get("entra-client-secret")
 		c.KeysDir, c.StaticClientsFile = v.get("keys-dir"), v.get("static-clients-file")
+		c.OperatorName, c.ScopeDescription = v.get("operator-name"), v.get("scope-description")
+		errs = append(errs, checkText("operator-name", c.OperatorName, 80)...)
+		errs = append(errs, checkText("scope-description", c.ScopeDescription, 200)...)
 		for _, s := range []string{"entra-tenant", "entra-client-id", "entra-client-secret", "keys-dir", "static-clients-file"} {
 			if v.get(s) == "" {
 				env := Setting{Name: s}.Env()
@@ -220,6 +230,19 @@ func validate(v *Values, container bool) (*Config, error) {
 		return nil, &configError{msg: strings.Join(msgs, "; ")}
 	}
 	return c, nil
+}
+
+// checkText limits page wording: no control or format characters (bidi overrides), at most max
+// characters.
+func checkText(name, s string, max int) []error {
+	env := Setting{Name: name}.Env()
+	if strings.ContainsFunc(s, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }) {
+		return []error{errorf("%s: must not contain control or formatting characters", env)}
+	}
+	if n := utf8.RuneCountInString(s); n > max {
+		return []error{errorf("%s: at most %d characters, got %d", env, max, n)}
+	}
+	return nil
 }
 
 func isGUID(s string) bool {

@@ -54,8 +54,11 @@ admin grants tenant-wide consent, and labels unverified publishers "Unverified".
    consumed atomically, with an idempotent double submit; `state` set only after Allow.
 6. **Headers on every response:** CSP `default-src 'none'; script-src 'none'; object-src 'none';
    base-uri 'none'; frame-ancestors 'none'` plus same-origin styles and images (no `form-action`);
-   `X-Frame-Options: DENY`; `Cache-Control: no-store`; `Referrer-Policy: no-referrer`; no
-   `Cross-Origin-Opener-Policy: same-origin`. No external assets.
+   `X-Frame-Options: DENY`; `Cache-Control: no-store`; `Referrer-Policy: same-origin`; no
+   `Cross-Origin-Opener-Policy: same-origin`. No external assets. _Amended 2026-11-06 (slice 1.4):_
+   `no-referrer` made Chromium post the consent form with `Origin: null` (Fetch serialises the
+   origin as `null` for a non-CORS POST under that policy), which §5 rejects; `same-origin` still
+   sends no referrer to any other origin.
 7. **Page behaviour:** server-rendered, no JavaScript; Allow and Deny equal in weight, neither
    auto-focused; Allow accepted only after about 1 s (server-side); WCAG 2.2 AA; an expired flow gets
    a "start again from your app" page.

@@ -32,7 +32,7 @@ var allowed = map[string]bool{
 	// Audit stream (ADR-0021 §3; docs/reference/observability.md). Grant and key IDs are internal
 	// identifiers, never credentials.
 	"log.type": true, "schema_version": true, "event": true, "outcome": true, "client_id": true,
-	"grant_id": true, "key_id": true, "idp": true,
+	"client_trust": true, "grant_id": true, "key_id": true, "idp": true,
 	// IdP errors (ADR-0021 §7): the IdP's error code and its own trace and correlation IDs.
 	"idp_error_code": true, "trace_id": true, "correlation_id": true,
 }

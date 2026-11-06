@@ -3,7 +3,6 @@ package broker
 import (
 	"encoding/json"
 	"errors"
-	"html/template"
 	"net/http"
 	"net/url"
 	"slices"
@@ -13,6 +12,7 @@ import (
 	"github.com/corker/mcp-authproxy/internal/audit"
 	"github.com/corker/mcp-authproxy/internal/idp"
 	"github.com/corker/mcp-authproxy/internal/logging"
+	"github.com/corker/mcp-authproxy/internal/registration"
 	"github.com/corker/mcp-authproxy/internal/store"
 	"github.com/corker/mcp-authproxy/internal/token"
 )
@@ -99,8 +99,12 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	ctx := r.Context()
 	client, err := b.cfg.Clients.Client(ctx, q.Get("client_id"))
-	if err != nil {
+	switch {
+	case errors.Is(err, registration.ErrUnknownClient):
 		b.page(w, r, http.StatusBadRequest, "This app is not registered with the proxy.", "Ask your operator to register the app, or check its client ID.")
+		return
+	case err != nil:
+		b.serverError(w, r, err)
 		return
 	}
 	redirect := q.Get("redirect_uri")
@@ -131,8 +135,18 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	l := login{ClientID: client.ID(), RedirectURI: redirect, State: q.Get("state"), Challenge: q.Get("code_challenge"),
 		Scopes: scopes, IdPState: randomID() + randomID(), Nonce: randomID(), Verifier: randomID() + randomID()}
-	plain, _ := json.Marshal(l)
-	sealed, err := b.cfg.LoginBox.Seal(plain, b.cfg.Now().Add(LoginLifetime))
+	b.showConsent(w, r, client, l)
+}
+
+// startLogin sends the browser to the IdP for l, keeping l in the login cookie until the callback.
+func (b *Broker) startLogin(w http.ResponseWriter, r *http.Request, l login, now time.Time) {
+	ctx := r.Context()
+	plain, err := json.Marshal(l)
+	if err != nil {
+		b.serverError(w, r, err)
+		return
+	}
+	sealed, err := b.cfg.LoginBox.Seal(plain, now.Add(LoginLifetime))
 	if err != nil {
 		b.serverError(w, r, err)
 		return
@@ -141,14 +155,15 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 	target, err := b.cfg.IdP.AuthCodeURL(idp.WithRequestID(ctx, logging.RequestID(ctx)), idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier})
 	b.cfg.ObserveIdP("authorize", idpOutcome(err), time.Since(start))
 	if err != nil {
-		b.idpFailure(w, r, client.ID(), err)
+		b.idpFailure(w, r, l.ClientID, err)
 		return
 	}
 	//nolint:gosec // G124: Secure is false only in development mode on loopback http (ADR-0010 §10)
 	http.SetCookie(w, &http.Cookie{Name: b.cookieName(l.IdPState), Value: sealed, Path: "/", MaxAge: int(LoginLifetime.Seconds()),
 		HttpOnly: true, Secure: b.cfg.SecureCookies, SameSite: http.SameSiteLaxMode})
 	w.Header().Set("Cache-Control", "no-store")
-	http.Redirect(w, r, target, http.StatusFound)
+	// 303: the browser follows the consent form's answer with a GET.
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 // maxState keeps the login cookie well under the browsers' 4 KB limit.
@@ -330,23 +345,4 @@ func (b *Broker) serverError(w http.ResponseWriter, r *http.Request, err error) 
 	ctx := r.Context()
 	b.cfg.Log.ErrorContext(ctx, "broker error", "request_id", logging.RequestID(ctx), "error", err)
 	b.page(w, r, http.StatusInternalServerError, "Something went wrong on the proxy.", "Try again; if it keeps failing, tell your operator the reference below.")
-}
-
-var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{.Title}}</title></head>
-<body><main><h1>{{.Title}}</h1><p>{{.Hint}}</p><p>Reference: <code>{{.RequestID}}</code></p></main></body></html>
-`))
-
-// page renders an error page: no script, no external assets, request ID shown (ADR-0021 §2).
-func (b *Broker) page(w http.ResponseWriter, r *http.Request, status int, title, hint string) {
-	h := w.Header()
-	h.Set("Content-Type", "text/html; charset=utf-8")
-	h.Set("Cache-Control", "no-store")
-	h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
-	h.Set("X-Frame-Options", "DENY")
-	h.Set("Referrer-Policy", "no-referrer")
-	h.Set("X-Content-Type-Options", "nosniff")
-	w.WriteHeader(status)
-	_ = pageTemplate.Execute(w, map[string]string{"Title": title, "Hint": hint, "RequestID": logging.RequestID(r.Context())})
 }

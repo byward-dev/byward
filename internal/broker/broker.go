@@ -2,8 +2,8 @@
 // "Broker"): it serves authorization-server metadata, runs /authorize, receives the IdP's callback,
 // and issues proxy tokens at /token, acting itself as an OAuth client of the IdP (ADR-0005).
 //
-// Slice 1.2 scope: static clients, no consent page yet (slice 1.4: no release ships without it),
-// the access gate as a Gate (slice 1.5), no refresh tokens yet (slice 1.6).
+// Slice 1.4 scope: static clients, a consent page before every IdP login, the access gate as a
+// Gate (slice 1.5), no refresh tokens yet (slice 1.6).
 package broker
 
 import (
@@ -54,17 +54,25 @@ func (AllowAll) Allow(context.Context, idp.Identity) error { return nil }
 // Config wires a Broker.
 type Config struct {
 	Issuer      string   // derived once from the public URL (ADR-0013 §2)
+	Origin      string   // the public URL's origin; consent answers must carry exactly this Origin
 	Resource    *url.URL // the public MCP URL
 	Scope       string
 	IdPName     string // "entra": the callback path is /callback/{IdPName}
 	IdPLabel    string // "Microsoft Entra", for pages
+	IdPScopes   string // the scopes asked of the IdP, listed on the consent page
 	IdP         idp.Authenticator
 	Clients     registration.Registry
 	Store       store.Store
 	Sealer      *token.Sealer // proxy tokens: access and code
 	LoginBox    *token.Box    // the login-in-progress cookie
+	ConsentBox  *token.Box    // the consent flow in the consent page's form
 	IdPTokenBox *token.Box    // IdP tokens at rest
 	Gate        Gate
+	// Consent page wording (ADR-0010 §4): the upstream's name (default: the public host), what the
+	// scope lets an app do in plain words, and who runs the proxy. All optional.
+	UpstreamName string
+	ScopeText    string
+	OperatorName string
 	// SecureCookies is false only in development mode on loopback http (ADR-0010 §10).
 	SecureCookies bool
 	Log           *slog.Logger
@@ -78,14 +86,15 @@ type Config struct {
 
 // Broker is the authorization server.
 type Broker struct {
-	cfg  Config
-	deny *DenyList
+	cfg     Config
+	deny    *DenyList
+	answers *answers
 }
 
 // New checks cfg.
 func New(cfg Config) (*Broker, error) {
 	if cfg.Issuer == "" || cfg.Resource == nil || cfg.Scope == "" || cfg.IdPName == "" || cfg.IdP == nil ||
-		cfg.Clients == nil || cfg.Store == nil || cfg.Sealer == nil || cfg.LoginBox == nil || cfg.IdPTokenBox == nil || cfg.Log == nil {
+		cfg.Clients == nil || cfg.Store == nil || cfg.Sealer == nil || cfg.LoginBox == nil || cfg.IdPTokenBox == nil || cfg.ConsentBox == nil || cfg.Origin == "" || cfg.Log == nil {
 		return nil, errors.New("broker: incomplete configuration")
 	}
 	if cfg.Gate == nil {
@@ -97,7 +106,7 @@ func New(cfg Config) (*Broker, error) {
 	if cfg.ObserveIdP == nil {
 		cfg.ObserveIdP = func(string, string, time.Duration) {}
 	}
-	return &Broker{cfg: cfg, deny: newDenyList()}, nil
+	return &Broker{cfg: cfg, deny: newDenyList(), answers: newAnswers()}, nil
 }
 
 // Paths the broker serves.
@@ -110,6 +119,8 @@ func (b *Broker) Register(mux *http.ServeMux) {
 	mux.Handle("/.well-known/oauth-authorization-server", md)
 	mux.Handle("/.well-known/openid-configuration", md)
 	mux.HandleFunc("/authorize", b.authorize)
+	mux.Handle("/consent", limitBody(16<<10, http.HandlerFunc(b.consent)))
+	mux.HandleFunc(StylesheetPath, stylesheet)
 	mux.HandleFunc(b.callbackPath(), b.callback)
 	mux.Handle("/token", limitBody(64<<10, http.HandlerFunc(b.token)))
 }

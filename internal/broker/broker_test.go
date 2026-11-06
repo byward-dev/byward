@@ -40,6 +40,10 @@ const (
 	clientID      = "static-client"
 	otherClientID = "other-client"
 	clientCB      = "http://127.0.0.1:43210/callback"
+	webClientID   = "web-client"
+	unverifiedID  = "unverified-client"
+	hostileName   = "Free \u202eTools\x1b[0m Helper"
+	webCB         = "https://app.example.org/oauth/callback"
 )
 
 var t0 = time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
@@ -66,15 +70,18 @@ func (m *memStore) CreateGrant(ctx context.Context, g store.Grant) (store.Grant,
 // staticClient is a minimal in-test public client. Authenticate mirrors the client-ID checks of
 // registration's client authentication: a Basic user (form-encoded) and a form client_id must
 // both name this client.
-type staticClient struct{ id string }
+type staticClient struct {
+	id, redirect, name string
+	trust              registration.TrustLevel
+}
 
 func (c staticClient) ID() string                        { return c.id }
-func (staticClient) Name() string                        { return "Test app" }
-func (staticClient) Trust() registration.TrustLevel      { return registration.Verified }
+func (c staticClient) Name() string                      { return c.name }
+func (c staticClient) Trust() registration.TrustLevel    { return c.trust }
 func (staticClient) AuthMethod() registration.AuthMethod { return registration.None }
-func (staticClient) RedirectAllowed(u string) error {
-	if u != clientCB {
-		return errors.New("registered " + clientCB + ", sent " + u)
+func (c staticClient) RedirectAllowed(u string) error {
+	if u != c.redirect {
+		return errors.New("registered " + c.redirect + ", sent " + u)
 	}
 	return nil
 }
@@ -94,13 +101,53 @@ func (c staticClient) Authenticate(_ context.Context, f url.Values, h http.Heade
 	return nil
 }
 
-type registry struct{}
+// registry knows clientID and otherClientID (loopback) and webClientID (https). A test can remove
+// a client or change its redirect URI, as an operator would between page and answer.
+type registry struct {
+	mu       sync.Mutex
+	removed  map[string]bool
+	redirect map[string]string
+	down     bool // every lookup fails, as a store outage would
+}
 
-func (registry) Client(_ context.Context, id string) (registration.Client, error) {
-	if id != clientID && id != otherClientID {
+func (r *registry) Client(_ context.Context, id string) (registration.Client, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.down {
+		return nil, errors.New("registry unavailable")
+	}
+	if r.removed[id] {
 		return nil, registration.ErrUnknownClient
 	}
-	return staticClient{id: id}, nil
+	cb := map[string]string{clientID: clientCB, otherClientID: clientCB, webClientID: webCB, unverifiedID: clientCB}[id]
+	if cb == "" {
+		return nil, registration.ErrUnknownClient
+	}
+	if alt, ok := r.redirect[id]; ok {
+		cb = alt
+	}
+	if id == unverifiedID {
+		return staticClient{id: id, redirect: cb, name: hostileName, trust: registration.NotVerified}, nil
+	}
+	return staticClient{id: id, redirect: cb, name: "Test app", trust: registration.Verified}, nil
+}
+
+func (r *registry) fail() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.down = true
+}
+
+func (r *registry) remove(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.removed[id] = true
+}
+
+func (r *registry) reregister(id, redirect string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.redirect[id] = redirect
 }
 
 type env struct {
@@ -110,10 +157,29 @@ type env struct {
 	sealer *token.Sealer
 	idpBox *token.Box
 	fake   *fakeidp.IdP
+	reg    *registry
 	now    time.Time
-	audit  *bytes.Buffer // the audit stream, JSON lines
-	logs   *bytes.Buffer // the operator log, JSON lines
-	idpOps []string      // "operation outcome" per IdP call
+	audit  *syncBuffer // the audit stream, JSON lines
+	logs   *syncBuffer // the operator log, JSON lines
+	idpOps []string    // "operation outcome" per IdP call
+}
+
+// syncBuffer collects the broker's log lines across handler goroutines.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }
 
 func keyRing(t *testing.T) *token.KeyRing {
@@ -133,7 +199,8 @@ func keyRing(t *testing.T) *token.KeyRing {
 
 func newEnv(t *testing.T, opts ...func(*Config)) *env {
 	t.Helper()
-	e := &env{now: t0, st: newMemStore(), audit: &bytes.Buffer{}, logs: &bytes.Buffer{}}
+	e := &env{now: t0, st: newMemStore(), audit: &syncBuffer{}, logs: &syncBuffer{},
+		reg: &registry{removed: map[string]bool{}, redirect: map[string]string{}}}
 	clock := func() time.Time { return e.now }
 	app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}, RedirectURIs: []string{issuer + "/callback/entra"}}
 	e.fake = fakeidp.New(t, fakeidp.Entra, fakeidp.WithClient(app), fakeidp.WithClock(clock))
@@ -146,11 +213,13 @@ func newEnv(t *testing.T, opts ...func(*Config)) *env {
 	res, _ := url.Parse(resourceID)
 	e.sealer, _ = token.NewSealer(ring, resourceID)
 	login, _ := token.NewBox(ring, "login", clock)
+	consent, _ := token.NewBox(ring, "consent", clock)
 	e.idpBox, _ = token.NewBox(ring, "idp-tokens", clock)
-	discard := slog.New(slog.NewTextHandler(io.Discard, nil))
-	cfg := Config{Issuer: issuer, Resource: res, Scope: "mcp", IdPName: "entra", IdP: prov, Clients: registry{},
-		Store: e.st, Sealer: e.sealer, LoginBox: login, IdPTokenBox: e.idpBox, SecureCookies: true,
-		Log: logging.New(e.logs, "json"), Audit: audit.New(logging.New(e.audit, "json"), nil, clock), Now: clock,
+	// The production loggers, so tests see only the attributes their allowlist keeps.
+	cfg := Config{Issuer: issuer, Origin: issuer, Resource: res, Scope: "mcp", IdPName: "entra", IdPLabel: "Microsoft Entra",
+		IdPScopes: prov.Scope(), IdP: prov, Clients: e.reg, Store: e.st, Sealer: e.sealer, LoginBox: login, IdPTokenBox: e.idpBox,
+		ConsentBox: consent, SecureCookies: true, Log: logging.New(e.logs, "json"),
+		Audit: audit.New(logging.New(e.audit, "json"), nil, clock), Now: clock,
 		ObserveIdP: func(op, outcome string, _ time.Duration) { e.idpOps = append(e.idpOps, op+" "+outcome) }}
 	for _, o := range opts {
 		o(&cfg)
@@ -162,7 +231,7 @@ func newEnv(t *testing.T, opts ...func(*Config)) *env {
 	mux := http.NewServeMux()
 	e.b.Register(mux)
 	// The logging middleware gives each request the ID that error pages show as the reference.
-	e.srv = httptest.NewTLSServer(logging.Middleware(discard, mux))
+	e.srv = httptest.NewTLSServer(logging.Middleware(slog.New(slog.NewTextHandler(io.Discard, nil)), mux))
 	t.Cleanup(e.srv.Close)
 	return e
 }
@@ -226,26 +295,83 @@ func pageTitle(t *testing.T, res *http.Response) string {
 	return html.UnescapeString(string(m[1]))
 }
 
-// startLogin runs /authorize → fake Entra (auto-login) and returns the login cookie and the IdP's
-// redirect to /callback/entra. A nil value in extra removes that parameter.
-func (e *env) startLogin(t *testing.T, extra url.Values) (*http.Cookie, *url.URL) {
-	t.Helper()
+// authorizeQuery is a valid authorization request; a nil value in extra removes that parameter.
+func authorizeQuery(extra url.Values) url.Values {
 	q := url.Values{"client_id": {clientID}, "redirect_uri": {clientCB}, "response_type": {"code"},
 		"code_challenge": {challenge()}, "code_challenge_method": {"S256"}, "state": {"client-state"}}
 	for k, v := range extra {
 		q[k] = v
 	}
-	res := e.do(t, "GET", "/authorize?"+q.Encode(), nil, nil)
-	if res.StatusCode != http.StatusFound {
-		b, _ := io.ReadAll(res.Body)
-		t.Fatalf("authorize: %d %s", res.StatusCode, b)
+	return q
+}
+
+// consentPage is a shown consent page: its sealed flow and the binding cookie.
+type consentPage struct {
+	flow      string
+	binding   *http.Cookie
+	body      string
+	requestID string // the X-Request-Id of the page's response
+}
+
+var flowRE = regexp.MustCompile(`name="flow" value="([^"]+)"`)
+
+// showConsent runs /authorize and returns the consent page it shows.
+func (e *env) showConsent(t *testing.T, extra url.Values) consentPage {
+	t.Helper()
+	res := e.do(t, "GET", "/authorize?"+authorizeQuery(extra).Encode(), nil, nil)
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("authorize: %d %s", res.StatusCode, body)
+	}
+	m := flowRE.FindSubmatch(body)
+	if m == nil {
+		t.Fatalf("no consent form in %s", body)
 	}
 	cookies := res.Cookies()
 	if len(cookies) != 1 {
-		t.Fatalf("authorize set %d cookies, want 1", len(cookies))
+		t.Fatalf("authorize set %d cookies, want the binding cookie only", len(cookies))
+	}
+	return consentPage{flow: html.UnescapeString(string(m[1])), binding: cookies[0], body: string(body), requestID: res.Header.Get("X-Request-Id")}
+}
+
+// answer posts the consent form as the browser would: our Origin, same-origin, the binding cookie.
+// headers replaces request headers; an empty value removes one.
+func (e *env) answer(t *testing.T, p consentPage, action string, headers http.Header) *http.Response {
+	t.Helper()
+	r, _ := http.NewRequest("POST", e.srv.URL+"/consent", strings.NewReader(url.Values{"flow": {p.flow}, "action": {action}}.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Origin", issuer)
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
+	for k, v := range headers {
+		if len(v) == 0 || v[0] == "" {
+			r.Header.Del(k)
+		} else {
+			r.Header[http.CanonicalHeaderKey(k)] = v
+		}
+	}
+	if p.binding != nil {
+		r.AddCookie(p.binding)
+	}
+	return e.send(t, r)
+}
+
+// startLogin runs /authorize → consent (Allow, after the delay) → fake Entra (auto-login) and
+// returns the login cookie and the IdP's redirect to /callback/entra.
+func (e *env) startLogin(t *testing.T, extra url.Values) (*http.Cookie, *url.URL) {
+	t.Helper()
+	p := e.showConsent(t, extra)
+	e.now = e.now.Add(ConsentDelay)
+	res := e.answer(t, p, "allow", nil)
+	if res.StatusCode != http.StatusSeeOther {
+		b, _ := io.ReadAll(res.Body)
+		t.Fatalf("consent: %d %s", res.StatusCode, b)
+	}
+	cookies := res.Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("consent set %d cookies, want 1", len(cookies))
 	}
 	c := cookies[0]
-	if !strings.HasPrefix(c.Name, "__Host-mcpap_login_") || !c.HttpOnly || !c.Secure || c.SameSite != http.SameSiteLaxMode || c.Path != "/" {
+	if !strings.HasPrefix(c.Name, "__Host-mcpap_login_") || !c.HttpOnly || !c.Secure || c.SameSite != http.SameSiteLaxMode || c.Path != "/" || c.Domain != "" {
 		t.Fatalf("login cookie %+v: want __Host- prefix, HttpOnly, Secure, SameSite=Lax, Path=/", c)
 	}
 	idpRes, err := e.fake.HTTPClient().Get(res.Header.Get("Location"))
@@ -701,6 +827,14 @@ func TestAssertionWithoutClientIDFindsTheClient(t *testing.T) {
 }
 
 // auditEvents returns the audit records with the given event name.
+// noAuditEvent requires that no record named name was written.
+func (e *env) noAuditEvent(t *testing.T, name string) {
+	t.Helper()
+	if recs := e.auditEvents(t, name); len(recs) != 0 {
+		t.Fatalf("want no %s record, got %v", name, recs)
+	}
+}
+
 func (e *env) auditEvents(t *testing.T, name string) []map[string]any {
 	t.Helper()
 	var out []map[string]any
