@@ -106,6 +106,7 @@ var Cursor = Profile{
 	Facts: []Fact{
 		{"registers with DCR; redirect URIs cursor://anysphere.cursor-mcp/oauth/callback, https://www.cursor.com/agents/mcp/oauth/callback and http://localhost:8787/callback", "forum.cursor.com/t/171867 (Cursor staff); forum.cursor.com/t/167608 (user report, Cursor 3.14.27)"},
 		{"the other registration fields (grant types, response types, token_endpoint_auth_method none)", Assumed},
+		{"signs in with the https or loopback callback, not cursor:// (ADR-0009: the proxy refuses cursor://; open until the HITL compatibility run)", Assumed},
 		{"follows the 401's resource_metadata, else the path-inserted PRM, then the root one", Assumed},
 		{"authorization server metadata path order", Assumed},
 		{"sends resource on authorize and token", Assumed},
