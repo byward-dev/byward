@@ -130,10 +130,7 @@ func (b *Bridge) post(w http.ResponseWriter, r *http.Request, id Identity, key s
 	}
 	if key == "" {
 		if env.Method != "initialize" || env.kind() != kindRequest {
-			// Also what a modern-era request gets: the body is no modern error, so a dual-era client
-			// falls back to initialize (2026-07-28 transports, backwards compatibility).
-			writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest,
-				"Bad Request: this server speaks MCP 2025-11-25; start a session with initialize")
+			legacyFallback(w)
 			return
 		}
 		if s, release = b.start(w, r, id); s == nil {
