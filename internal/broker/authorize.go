@@ -25,7 +25,7 @@ func (b *Broker) metadataHandler() http.Handler {
 		"response_modes_supported":                         []string{"query"},
 		"grant_types_supported":                            []string{"authorization_code"}, // refresh_token in slice 1.6
 		"code_challenge_methods_supported":                 []string{"S256"},
-		"token_endpoint_auth_methods_supported":            []string{"none", "private_key_jwt", "client_secret_basic", "client_secret_post"},
+		"token_endpoint_auth_methods_supported":            []string{"none", "private_key_jwt"}, // ADR-0008 §1: DCR clients are never offered a secret; configured static secrets still work
 		"token_endpoint_auth_signing_alg_values_supported": []string{"RS256", "PS256", "ES256"},
 		// offline_access: the TS SDK asks for refresh tokens only when it is listed (comment on #49).
 		"scopes_supported": []string{b.cfg.Scope, "offline_access"},
