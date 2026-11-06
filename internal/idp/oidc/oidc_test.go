@@ -426,3 +426,21 @@ func TestConcurrentFirstLoginsShareDiscovery(t *testing.T) {
 		}
 	}
 }
+
+func TestRefreshWhileJWKSIsDownIsUnavailable(t *testing.T) {
+	clock := fakeidp.NewClock(now())
+	e := newEnv(t, Config{Now: clock.Now}, fakeidp.WithClock(clock.Now))
+	e.p.fetch.Backoff = 0 // the outage fails fast instead of sleeping through retries
+	_, tok, err := e.p.Callback(context.Background(), signIn(t, e, login), login)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.fake.RotateKeys(t)
+	e.fake.Set(fakeidp.WithJWKSUnavailable(true))
+	clock.Advance(idp.MinJWKSRefresh)
+	_, _, err = e.p.Refresh(context.Background(), tok.RefreshToken)
+	var ie *idp.Error
+	if !errors.As(err, &ie) || ie.Class != idp.Unavailable || ie.OperatorHint != "" {
+		t.Fatalf("err = %#v, want Unavailable without a hint", err)
+	}
+}
