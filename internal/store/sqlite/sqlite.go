@@ -30,8 +30,8 @@ import (
 // DefaultDir is the state directory in the container image (ADR-0007 §6).
 const DefaultDir = "/var/lib/mcp-authproxy"
 
-// FileName is the database file inside the state directory.
-const FileName = "mcp-authproxy.db"
+// fileName is the database file inside the state directory; back up this file (with its -wal).
+const fileName = "mcp-authproxy.db"
 
 const busyTimeoutMS = 5000
 
@@ -77,7 +77,7 @@ func Open(ctx context.Context, opts Options) (*Store, error) {
 	if err := probeWritable(opts.Dir); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(opts.Dir, FileName)
+	path := filepath.Join(opts.Dir, fileName)
 	if err := ensureFile(path); err != nil {
 		return nil, err
 	}
@@ -92,7 +92,11 @@ func Open(ctx context.Context, opts Options) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	s := &Store{db: db, counterFile: opts.CounterFile}
-	if err := s.init(ctx); err != nil {
+	if err := migrate(ctx, db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := s.detectRestore(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -188,6 +192,9 @@ func (s *Store) Grant(ctx context.Context, id string) (store.Grant, error) {
 	if err := json.Unmarshal([]byte(scopes), &g.Scopes); err != nil {
 		return store.Grant{}, fmt.Errorf("sqlite store: grant scopes: %w", err)
 	}
+	if len(g.Scopes) == 0 {
+		g.Scopes = nil // as stored by the caller: nil and empty are written alike
+	}
 	g.CreatedAt, g.ExpiresAt = fromMicros(created), fromMicros(expires)
 	return g, nil
 }
@@ -266,6 +273,9 @@ func (s *Store) ConsumeCode(ctx context.Context, grantID string, now time.Time) 
 		}
 		if err := json.Unmarshal([]byte(scopes), &c.Scopes); err != nil {
 			return fmt.Errorf("sqlite store: code scopes: %w", err)
+		}
+		if len(c.Scopes) == 0 {
+			c.Scopes = nil
 		}
 		c.ExpiresAt = fromMicros(expires)
 		_, err = tx.ExecContext(ctx, "UPDATE codes SET consumed = 1 WHERE grant_id = ? AND consumed = 0", grantID)

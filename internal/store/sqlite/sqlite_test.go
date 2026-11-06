@@ -48,17 +48,17 @@ func open(t *testing.T, dir, counter string) *Store {
 }
 
 // The lock test the conformance suite cannot replace (#50): two stores on one database file, as two
-// processes would be, race CreateGrant against RevokeSubject. IMMEDIATE transactions serialize them,
-// so no covered grant survives and no call fails with SQLITE_BUSY.
-func TestCreateGrantAndRevokeSubjectAreSerializedAcrossConnections(t *testing.T) {
+// processes would be, race CreateGrant against RevokeSubject one pair at a time. IMMEDIATE
+// transactions serialize each pair, so no covered grant survives.
+func TestRevokeSubjectRacingCreateGrantAcrossProcessesLeavesNoCoveredGrant(t *testing.T) {
 	dir, counter := t.TempDir(), filepath.Join(t.TempDir(), "writes")
 	a, b := open(t, dir, counter), open(t, dir, counter)
 	const rounds = 100
 	before := t0.Add(time.Hour)
-	var wg sync.WaitGroup
 	for i := range rounds {
 		subject := fmt.Sprintf("tid:u%d", i)
 		start := make(chan struct{})
+		var wg sync.WaitGroup
 		wg.Go(func() {
 			<-start
 			if _, err := a.CreateGrant(ctx, grant(subject, subject)); err != nil && !errors.Is(err, store.ErrRevoked) {
@@ -72,75 +72,74 @@ func TestCreateGrantAndRevokeSubjectAreSerializedAcrossConnections(t *testing.T)
 			}
 		})
 		close(start)
-	}
-	wg.Wait()
-	for i := range rounds {
-		id := fmt.Sprintf("tid:u%d", i)
-		if _, err := a.Grant(ctx, id); !errors.Is(err, store.ErrNotFound) {
-			t.Fatalf("grant %s survived its subject's cut-off: %v", id, err)
+		wg.Wait() // only the two calls of this round compete, well inside the busy timeout
+		if _, err := a.Grant(ctx, subject); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("grant %s survived its subject's cut-off: %v", subject, err)
 		}
 	}
 }
 
 func TestDatabaseFilesAreOwnerOnly(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "state") // created by Open
-	s := open(t, dir, filepath.Join(t.TempDir(), "writes"))
-	if _, err := s.CreateGrant(ctx, grant("g1", "tid:a")); err != nil {
-		t.Fatal(err)
+	files := []string{fileName, fileName + "-wal", fileName + "-shm"}
+	cases := []struct {
+		name  string
+		setup func(t *testing.T, dir string)
+	}{
+		{"created by Open", func(*testing.T, string) {}},
+		{"left behind with mode 0644", func(t *testing.T, dir string) {
+			must(t, os.MkdirAll(dir, 0o700))
+			for _, f := range files {
+				must(t, os.WriteFile(filepath.Join(dir, f), nil, 0o644)) //nolint:gosec // G306: the loose mode under test
+			}
+		}},
 	}
-	if fi, err := os.Stat(dir); err != nil || fi.Mode().Perm() != 0o700 {
-		t.Fatalf("state directory: %v %v, want 0700", fi.Mode().Perm(), err)
-	}
-	for _, name := range []string{FileName, FileName + "-wal", FileName + "-shm"} {
-		fi, err := os.Stat(filepath.Join(dir, name))
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		if fi.Mode().Perm() != 0o600 {
-			t.Errorf("%s has mode %v, want 0600", name, fi.Mode().Perm())
-		}
-	}
-}
-
-func TestExistingLooseDatabaseFilesAreTightened(t *testing.T) {
-	dir := t.TempDir()
-	for _, name := range []string{FileName, FileName + "-wal", FileName + "-shm"} {
-		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil { //nolint:gosec // G306: the loose mode under test
-			t.Fatal(err)
-		}
-	}
-	open(t, dir, filepath.Join(t.TempDir(), "writes"))
-	for _, name := range []string{FileName, FileName + "-wal", FileName + "-shm"} {
-		fi, err := os.Stat(filepath.Join(dir, name))
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		if fi.Mode().Perm() != 0o600 {
-			t.Errorf("%s has mode %v, want 0600", name, fi.Mode().Perm())
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "state")
+			tc.setup(t, dir)
+			s := open(t, dir, filepath.Join(t.TempDir(), "writes"))
+			if _, err := s.CreateGrant(ctx, grant("g1", "tid:a")); err != nil {
+				t.Fatal(err)
+			}
+			fi, err := os.Stat(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fi.Mode().Perm() != 0o700 {
+				t.Fatalf("state directory mode %v, want 0700", fi.Mode().Perm())
+			}
+			for _, f := range files {
+				fi, err := os.Stat(filepath.Join(dir, f))
+				if err != nil {
+					t.Fatalf("%s: %v", f, err)
+				}
+				if fi.Mode().Perm() != 0o600 {
+					t.Errorf("%s has mode %v, want 0600", f, fi.Mode().Perm())
+				}
+			}
+		})
 	}
 }
 
 func TestOpenRefusesBadPaths(t *testing.T) {
 	cases := []struct {
 		name string
-		opts Options
+		opts func(dir, other string) Options // dir and other are distinct temporary directories
 		want string
 	}{
-		{"relative state directory", Options{Dir: "state", CounterFile: filepath.Join(t.TempDir(), "w")}, "must be absolute"},
-		{"relative counter file", Options{Dir: t.TempDir(), CounterFile: "writes"}, "must be absolute"},
-		{"? in the path", Options{Dir: filepath.Join(t.TempDir(), "a?b"), CounterFile: filepath.Join(t.TempDir(), "w")}, "must not contain"},
-		{"counter file inside the state directory", func() Options { d := t.TempDir(); return Options{Dir: d, CounterFile: filepath.Join(d, "writes")} }(), "outside the state directory"},
-		{"counter file deeper inside", func() Options {
-			d := t.TempDir()
-			return Options{Dir: d, CounterFile: filepath.Join(d, "sub", "writes")}
-		}(), "outside the state directory"},
+		{"relative state directory", func(_, o string) Options { return Options{Dir: "state", CounterFile: filepath.Join(o, "w")} }, "must be absolute"},
+		{"relative counter file", func(d, _ string) Options { return Options{Dir: d, CounterFile: "writes"} }, "must be absolute"},
+		{"? in the path", func(d, o string) Options {
+			return Options{Dir: filepath.Join(d, "a?b"), CounterFile: filepath.Join(o, "w")}
+		}, "must not contain"},
+		{"counter file inside the state directory", func(d, _ string) Options { return Options{Dir: d, CounterFile: filepath.Join(d, "writes")} }, "outside the state directory"},
+		{"counter file deeper inside", func(d, _ string) Options { return Options{Dir: d, CounterFile: filepath.Join(d, "sub", "writes")} }, "outside the state directory"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s, err := Open(bounded(t), tc.opts)
+			s, err := Open(bounded(t), tc.opts(t.TempDir(), t.TempDir()))
 			if err == nil {
-				_ = s.Close()
+				must(t, s.Close())
 				t.Fatal("accepted")
 			}
 			if !strings.Contains(err.Error(), tc.want) {
@@ -158,7 +157,7 @@ func TestPercentInThePathOpensThatFile(t *testing.T) {
 	if _, err := s.CreateGrant(ctx, grant("g1", "tid:a")); err != nil {
 		t.Fatal(err)
 	}
-	fi, err := os.Stat(filepath.Join(dir, FileName))
+	fi, err := os.Stat(filepath.Join(dir, fileName))
 	if err != nil || fi.Size() == 0 {
 		t.Fatalf("database not in %s: %v, %v", dir, fi, err)
 	}
@@ -172,8 +171,9 @@ func TestEmptyDirMeansTheDefaultStateDirectory(t *testing.T) {
 		t.Skip("would use the real " + DefaultDir)
 	}
 	_, err := Open(bounded(t), Options{CounterFile: filepath.Join(t.TempDir(), "w")})
-	if err == nil || !strings.Contains(err.Error(), DefaultDir) {
-		t.Fatalf("err = %v, want one naming %s", err, DefaultDir)
+	// MkdirAll names the first directory it cannot create, which may be a parent of DefaultDir.
+	if err == nil || !strings.Contains(err.Error(), "state directory") || !strings.Contains(DefaultDir, strings.TrimSuffix(pathIn(err.Error()), ":")) {
+		t.Fatalf("err = %v, want a state-directory error on (a parent of) %s", err, DefaultDir)
 	}
 }
 
@@ -198,10 +198,10 @@ func TestStateSurvivesReopen(t *testing.T) {
 	if _, err := s.CreateGrant(ctx, grant("g1", "tid:a")); err != nil {
 		t.Fatal(err)
 	}
-	_ = s.Close()
+	must(t, s.Close())
 	again := open(t, dir, counter)
-	if again.RestoreDetected() || again.Epoch() != 1 {
-		t.Fatalf("reopen: restored=%v epoch=%d, want a normal start", again.RestoreDetected(), again.Epoch())
+	if again.Startup().Restored || again.Startup().Epoch != 1 {
+		t.Fatalf("reopen: restored=%v epoch=%d, want a normal start", again.Startup().Restored, again.Startup().Epoch)
 	}
 	if _, err := again.Grant(ctx, "g1"); err != nil {
 		t.Fatalf("grant lost across reopen: %v", err)
@@ -214,7 +214,7 @@ func TestNewerSchemaIsRefused(t *testing.T) {
 	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", schemaVersion()+1)); err != nil {
 		t.Fatal(err)
 	}
-	_ = db.Close()
+	must(t, db.Close())
 	_, err := Open(bounded(t), Options{Dir: dir, CounterFile: filepath.Join(t.TempDir(), "w")})
 	if err == nil || !strings.Contains(err.Error(), "newer than this binary") {
 		t.Fatalf("err = %v, want the downgrade refusal", err)
@@ -223,7 +223,7 @@ func TestNewerSchemaIsRefused(t *testing.T) {
 
 // ADR-0007 §9: a database restored from an older copy is behind the counter mirror; Open bumps the
 // epoch, refresh tokens from older epochs stop working, and grants made afterwards work.
-func TestRestoredDatabaseBumpsTheEpochAndRefusesOldRefreshTokens(t *testing.T) {
+func TestRestoredDatabaseStartsANewEpochOnce(t *testing.T) {
 	dir, counter := t.TempDir(), filepath.Join(t.TempDir(), "writes")
 	s := open(t, dir, counter)
 	if _, err := s.CreateGrant(ctx, grant("old", "tid:a")); err != nil {
@@ -233,19 +233,19 @@ func TestRestoredDatabaseBumpsTheEpochAndRefusesOldRefreshTokens(t *testing.T) {
 	if err := s.PutRefreshToken(ctx, old); err != nil {
 		t.Fatal(err)
 	}
-	_ = s.Close()
+	must(t, s.Close())
 	backup := copyDB(t, dir) // the operator's backup
 
 	s = open(t, dir, counter)
 	if _, err := s.CreateGrant(ctx, grant("after-backup", "tid:a")); err != nil {
 		t.Fatal(err)
 	}
-	_ = s.Close()
+	must(t, s.Close())
 	restoreDB(t, backup, dir) // restore by file copy, counter file untouched
 
 	r := open(t, dir, counter)
-	if !r.RestoreDetected() || r.Epoch() != 2 {
-		t.Fatalf("restored=%v epoch=%d, want a detected restore and epoch 2", r.RestoreDetected(), r.Epoch())
+	if !r.Startup().Restored || r.Startup().Epoch != 2 {
+		t.Fatalf("restored=%v epoch=%d, want a detected restore and epoch 2", r.Startup().Restored, r.Startup().Epoch)
 	}
 	if _, err := r.RefreshToken(ctx, old.Hash, t0); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("refresh token from the old epoch: %v, want ErrNotFound", err)
@@ -261,19 +261,19 @@ func TestRestoredDatabaseBumpsTheEpochAndRefusesOldRefreshTokens(t *testing.T) {
 	if _, err := r.RefreshToken(ctx, fresh.Hash, t0); err != nil {
 		t.Fatalf("refresh token of the new epoch: %v", err)
 	}
-	_ = r.Close()
+	must(t, r.Close())
 
 	// The restore is accepted once: the next start is normal.
 	next := open(t, dir, counter)
-	if next.RestoreDetected() || next.Epoch() != 2 {
-		t.Fatalf("restart after the restore: restored=%v epoch=%d, want a normal start at epoch 2", next.RestoreDetected(), next.Epoch())
+	if next.Startup().Restored || next.Startup().Epoch != 2 {
+		t.Fatalf("restart after the restore: restored=%v epoch=%d, want a normal start at epoch 2", next.Startup().Restored, next.Startup().Epoch)
 	}
 }
 
 // The counter mirror against the database's own counter: only a mirror ahead of the database is a
 // restore. One ahead is the crash window of a failed commit, which is treated as a restore on
 // purpose (fail safe).
-func TestCounterMirrorStates(t *testing.T) {
+func TestOnlyACounterMirrorAheadOfTheDatabaseIsARestore(t *testing.T) {
 	cases := []struct {
 		name           string
 		mirror         func(writes int64) string // "" removes the file
@@ -296,25 +296,28 @@ func TestCounterMirrorStates(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_ = s.Close()
+			must(t, s.Close())
 			if m := tc.mirror(writes); m == "" {
 				must(t, os.Remove(counter))
 			} else {
 				must(t, os.WriteFile(counter, []byte(m), 0o600))
 			}
 			again := open(t, dir, counter)
-			if again.RestoreDetected() != tc.restored || again.CounterMissing() != tc.gone {
-				t.Fatalf("restored=%v counterMissing=%v, want %v %v", again.RestoreDetected(), again.CounterMissing(), tc.restored, tc.gone)
+			if again.Startup().Restored != tc.restored || again.Startup().CounterMissing != tc.gone {
+				t.Fatalf("restored=%v counterMissing=%v, want %v %v", again.Startup().Restored, again.Startup().CounterMissing, tc.restored, tc.gone)
 			}
 			wantEpoch := int64(1)
 			if tc.restored {
 				wantEpoch = 2
 			}
-			if again.Epoch() != wantEpoch {
-				t.Fatalf("epoch %d, want %d", again.Epoch(), wantEpoch)
+			if again.Startup().Epoch != wantEpoch {
+				t.Fatalf("epoch %d, want %d", again.Startup().Epoch, wantEpoch)
 			}
-			if _, err := os.Stat(counter); err != nil {
-				t.Fatalf("counter file not rewritten: %v", err)
+			mirror, ok, err := readCounter(counter)
+			var dbWrites int64
+			must(t, again.db.QueryRow("SELECT value FROM meta WHERE key = 'writes'").Scan(&dbWrites))
+			if err != nil || !ok || mirror != dbWrites {
+				t.Fatalf("counter file = %d (%v, %v), want it rewritten to the database's %d", mirror, ok, err, dbWrites)
 			}
 		})
 	}
@@ -330,6 +333,13 @@ func must(t *testing.T, err error) {
 // Regression (runtime sweep): an error from a write means nothing was stored. The mirror is written
 // before the commit, so a counter path that cannot be written rolls the write back. Replacing the
 // counter's directory with a file makes the write fail for root too.
+func TestFirstOpenIsANormalStart(t *testing.T) {
+	s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
+	if got := s.Startup(); got != (Startup{Epoch: 1}) {
+		t.Fatalf("first open: %+v, want a normal start at epoch 1", got)
+	}
+}
+
 func TestFailedCounterWriteStoresNothing(t *testing.T) {
 	cdir := t.TempDir()
 	s := open(t, t.TempDir(), filepath.Join(cdir, "writes"))
@@ -344,13 +354,15 @@ func TestFailedCounterWriteStoresNothing(t *testing.T) {
 }
 
 func TestCorruptCounterFileFailsOpen(t *testing.T) {
-	counter := filepath.Join(t.TempDir(), "writes")
-	if err := os.WriteFile(counter, []byte("not a number"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	_, err := Open(bounded(t), Options{Dir: t.TempDir(), CounterFile: counter})
-	if err == nil || !strings.Contains(err.Error(), "corrupt") {
-		t.Fatalf("err = %v, want the corrupt-counter refusal", err)
+	for name, content := range map[string]string{"not a number": "not a number", "negative": "-1", "empty": ""} {
+		t.Run(name, func(t *testing.T) {
+			counter := filepath.Join(t.TempDir(), "writes")
+			must(t, os.WriteFile(counter, []byte(content), 0o600))
+			_, err := Open(bounded(t), Options{Dir: t.TempDir(), CounterFile: counter})
+			if err == nil || !strings.Contains(err.Error(), "corrupt") {
+				t.Fatalf("err = %v, want the corrupt-counter refusal", err)
+			}
+		})
 	}
 }
 
@@ -387,7 +399,7 @@ var (
 	}
 )
 
-func TestFixturesMigrateToTheCurrentSchema(t *testing.T) {
+func TestFixturesMigrateToTheCurrentSchemaKeepingTheirData(t *testing.T) {
 	want := schemaOf(t, open(t, t.TempDir(), filepath.Join(t.TempDir(), "w")).db)
 	for v := 1; v <= schemaVersion(); v++ {
 		t.Run(fmt.Sprintf("v%d", v), func(t *testing.T) {
@@ -430,11 +442,13 @@ func TestFailedMigrationChangesNothing(t *testing.T) {
 	migrations = append(append([]string{}, saved...), "CREATE TABLE half_done (a); UPDATE grants SET subject = 'x'; SELECT * FROM no_such_table;")
 	t.Cleanup(func() { migrations = saved })
 
-	if s, err := Open(bounded(t), Options{Dir: dir, CounterFile: filepath.Join(t.TempDir(), "w")}); err == nil {
+	s, err := Open(bounded(t), Options{Dir: dir, CounterFile: filepath.Join(t.TempDir(), "w")})
+	if err == nil {
 		_ = s.Close()
 		t.Fatal("Open succeeded although a migration fails")
-	} else if errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("Open deadlocked: %v", err)
+	}
+	if want := fmt.Sprintf("migrate to v%d", len(saved)+1); !strings.Contains(err.Error(), want) {
+		t.Fatalf("Open failed before the injected migration ran: %v (want %q)", err, want)
 	}
 	db := rawDB(t, dir)
 	var v int
@@ -445,10 +459,11 @@ func TestFailedMigrationChangesNothing(t *testing.T) {
 	if after := schemaOf(t, db); !reflect.DeepEqual(after, before) {
 		t.Fatalf("schema changed by a failed migration:\n%q\n%q", before, after)
 	}
-	var subject string
-	must(t, db.QueryRow("SELECT subject FROM grants WHERE id = 'fixture-grant'").Scan(&subject))
-	if subject != fixtureGrant.Subject {
-		t.Fatalf("data changed by a failed migration: subject %q", subject)
+	must(t, db.Close())
+	migrations = saved // the old binary again: it must still open the database and read its data
+	old := open(t, dir, filepath.Join(t.TempDir(), "w2"))
+	if g, err := old.Grant(ctx, fixtureGrant.ID); err != nil || !reflect.DeepEqual(g, fixtureGrant) {
+		t.Fatalf("data after a failed migration = %+v, %v; want %+v", g, err, fixtureGrant)
 	}
 }
 
@@ -476,7 +491,7 @@ func loadFixture(t *testing.T, dir string, v int) {
 	if _, err := db.Exec(string(script)); err != nil {
 		t.Fatalf("load fixture v%d: %v", v, err)
 	}
-	_ = db.Close()
+	must(t, db.Close())
 }
 
 func fixturePath(v int) string { return filepath.Join("testdata", "schema", fmt.Sprintf("v%d.sql", v)) }
@@ -484,7 +499,7 @@ func fixturePath(v int) string { return filepath.Join("testdata", "schema", fmt.
 // rawDB opens the database file in dir without the store, for setting up fixtures.
 func rawDB(t *testing.T, dir string) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", filepath.Join(dir, FileName))
+	db, err := sql.Open("sqlite", filepath.Join(dir, fileName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,17 +510,17 @@ func rawDB(t *testing.T, dir string) *sql.DB {
 // copyDB copies the database file (the store is closed, so the WAL is checkpointed).
 func copyDB(t *testing.T, dir string) string {
 	t.Helper()
-	backup := filepath.Join(t.TempDir(), FileName)
-	copyFile(t, filepath.Join(dir, FileName), backup)
+	backup := filepath.Join(t.TempDir(), fileName)
+	copyFile(t, filepath.Join(dir, fileName), backup)
 	return backup
 }
 
 func restoreDB(t *testing.T, backup, dir string) {
 	t.Helper()
 	for _, suffix := range []string{"-wal", "-shm"} {
-		_ = os.Remove(filepath.Join(dir, FileName+suffix))
+		_ = os.Remove(filepath.Join(dir, fileName+suffix))
 	}
-	copyFile(t, backup, filepath.Join(dir, FileName))
+	copyFile(t, backup, filepath.Join(dir, fileName))
 }
 
 func copyFile(t *testing.T, from, to string) {
@@ -525,4 +540,14 @@ func copyFile(t *testing.T, from, to string) {
 	if err := dst.Close(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// pathIn returns the first absolute path in an error message.
+func pathIn(msg string) string {
+	for _, f := range strings.Fields(msg) {
+		if strings.HasPrefix(f, "/") {
+			return f
+		}
+	}
+	return ""
 }

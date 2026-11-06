@@ -14,10 +14,8 @@ import (
 // Restore detection (ADR-0007 §9). Every write increments meta.writes and mirrors it to the counter
 // file before the commit; see Store.write.
 
-func (s *Store) init(ctx context.Context) error {
-	if err := migrate(ctx, s.db); err != nil {
-		return err
-	}
+// detectRestore compares the database's write counter with its mirror (ADR-0007 §9).
+func (s *Store) detectRestore(ctx context.Context) error {
 	mirror, haveMirror, err := readCounter(s.counterFile)
 	if err != nil {
 		return err
@@ -40,17 +38,23 @@ func (s *Store) init(ctx context.Context) error {
 	})
 }
 
-// RestoreDetected reports whether Open found the database behind its counter mirror and bumped the
-// epoch. The caller logs and audits it (ADR-0021 §3, "store restore").
-func (s *Store) RestoreDetected() bool { return s.restored }
+// Startup is what Open found about the database's history; the caller logs and audits it
+// (ADR-0021 §3, "store restore").
+type Startup struct {
+	// Restored: the database was behind its counter mirror, so it came from an older copy; the
+	// epoch was bumped and older refresh tokens stopped working.
+	Restored bool
+	// CounterMissing: the database has writes but no counter file. That is a start after the file
+	// was lost or moved, and also how a restore together with the counter file looks.
+	CounterMissing bool
+	// Epoch is the current store epoch.
+	Epoch int64
+}
 
-// CounterMissing reports whether Open found a database with writes but no counter file. That is a
-// first start after the file was lost or moved, and it is also how a restore together with the
-// counter file looks; the caller should log it.
-func (s *Store) CounterMissing() bool { return s.counterMissing }
-
-// Epoch is the current store epoch.
-func (s *Store) Epoch() int64 { return s.epoch }
+// Startup reports what Open found.
+func (s *Store) Startup() Startup {
+	return Startup{Restored: s.restored, CounterMissing: s.counterMissing, Epoch: s.epoch}
+}
 
 // readCounter returns the mirrored write counter, or false when there is no mirror yet.
 func readCounter(path string) (int64, bool, error) {
