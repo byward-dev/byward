@@ -3,6 +3,7 @@ package registration
 import (
 	"bytes"
 	"context"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +24,8 @@ const (
 	MaxClientNameLen   = 100
 	// MinSecretBytes is the shortest accepted client secret.
 	MinSecretBytes = 32
+	// MinRSABits is the smallest accepted RSA client key.
+	MinRSABits = 2048
 )
 
 // staticFile is the --static-clients-file format (ADR-0020 §3). Field names follow RFC 7591.
@@ -189,6 +192,9 @@ func buildClient(e staticEntry, dir string, readFile func(string) ([]byte, error
 		for _, k := range set.Keys {
 			if !k.IsPublic() {
 				return nil, errors.New("jwks: contains a private key; register public keys only")
+			}
+			if rk, ok := k.Key.(*rsa.PublicKey); ok && rk.N.BitLen() < MinRSABits {
+				return nil, fmt.Errorf("jwks: RSA keys must be at least %d bits", MinRSABits)
 			}
 		}
 		if idp.SigningKeys(set) == 0 {

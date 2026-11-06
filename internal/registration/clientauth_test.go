@@ -187,3 +187,27 @@ func TestRedirectAllowedUsesRegisteredURIs(t *testing.T) {
 		t.Fatal("other client's redirect accepted")
 	}
 }
+
+func TestAuthenticateWithNilHeader(t *testing.T) {
+	e := newAuthEnv(t)
+	c, _ := e.reg.Client(context.Background(), "basic")
+	if err := c.Authenticate(context.Background(), url.Values{}, nil, tokenEndpoint, now); !errors.Is(err, ErrInvalidClient) {
+		t.Fatalf("err = %v", err)
+	}
+	cli, _ := e.reg.Client(context.Background(), "cli")
+	if err := cli.Authenticate(context.Background(), url.Values{}, nil, tokenEndpoint, now); err != nil {
+		t.Fatalf("public client with nil header: %v", err)
+	}
+}
+
+func TestAssertionWithoutKidUsesTheSingleKey(t *testing.T) {
+	e := newAuthEnv(t)
+	s, err := e.cert.SignJWT("PS256", nil, map[string]any{"iss": "jwt", "sub": "jwt", "aud": tokenEndpoint,
+		"exp": now.Add(time.Minute).Unix(), "jti": "no-kid"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.auth(t, "jwt", url.Values{"client_assertion_type": {clientAssertionType}, "client_assertion": {s}}, nil); err != nil {
+		t.Fatal(err)
+	}
+}

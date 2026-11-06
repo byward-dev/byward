@@ -82,6 +82,9 @@ func parseRedirect(raw string) (*url.URL, error) {
 	if strings.Contains(raw, "*") {
 		return reject(ReasonWildcard)
 	}
+	if strings.ContainsFunc(raw, func(r rune) bool { return r <= ' ' || r == 0x7f }) {
+		return reject(ReasonMalformed)
+	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Opaque != "" || u.Host == "" || !u.IsAbs() {
 		return reject(ReasonMalformed)

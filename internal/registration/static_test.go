@@ -2,6 +2,8 @@ package registration
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -125,6 +127,7 @@ func TestLoadStaticRejects(t *testing.T) {
 		"jwt empty jwks":    {file: entry(`"client_id":"c","token_endpoint_auth_method":"private_key_jwt","redirect_uris":["https://a.example/cb"],"jwks":{"keys":[]}`), wantErr: "no usable public signing key"},
 		"jwt private key":   {file: entry(`"client_id":"c","token_endpoint_auth_method":"private_key_jwt","redirect_uris":["https://a.example/cb"],"jwks":` + string(private)), wantErr: "contains a private key"},
 		"jwt enc key only":  {file: entry(`"client_id":"c","token_endpoint_auth_method":"private_key_jwt","redirect_uris":["https://a.example/cb"],"jwks":` + strings.Replace(publicJWKS(t, cert), `"sig"`, `"enc"`, 1)), wantErr: "no usable public signing key"},
+		"weak RSA key":      {file: entry(`"client_id":"c","token_endpoint_auth_method":"private_key_jwt","redirect_uris":["https://a.example/cb"],"jwks":` + weakJWKS(t)), wantErr: "at least 2048 bits"},
 		"control char name": {file: entry(ok + `,"client_name":"a\u0007b"`), wantErr: "c: client_name"},
 		"too big":           {file: strings.Repeat(" ", MaxStaticFileBytes+1), wantErr: "larger than"},
 	} {
@@ -159,4 +162,14 @@ func TestLoadStaticNeedsJTICacheAndReadableFile(t *testing.T) {
 	if _, err := LoadStatic("/missing", files{}.read, NewMemoryJTICache(time.Now, 1)); err == nil {
 		t.Error("missing file accepted")
 	}
+}
+
+func weakJWKS(t *testing.T) string {
+	t.Helper()
+	k, err := rsa.GenerateKey(rand.Reader, 1024) //nolint:gosec // deliberately weak for the test
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &k.PublicKey, KeyID: "w", Use: "sig"}}})
+	return string(b)
 }

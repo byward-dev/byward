@@ -86,6 +86,10 @@ func TestMatchRedirect(t *testing.T) {
 		{"opaque", []string{"https:app.example"}, "https:app.example", ReasonMalformed},
 		{"too long", []string{"https://app.example/"}, "https://app.example/" + strings.Repeat("a", MaxRedirectURILen), ReasonTooLong},
 		{"empty", []string{"https://app.example/cb"}, "", ReasonMalformed},
+		{"space in path", []string{"https://app.example/c b"}, "https://app.example/c b", ReasonMalformed},
+		{"tab", []string{"https://app.example/cb"}, "https://app.example/cb\t", ReasonMalformed},
+		{"localhost uppercase", []string{"http://localhost/cb"}, "http://LOCALHOST:9/cb", ReasonScheme},
+		{"ipv6 zone", []string{"http://[::1]/cb"}, "http://[::1%25eth0]:8/cb", ReasonScheme},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := MatchRedirect(tc.registered, tc.sent)
