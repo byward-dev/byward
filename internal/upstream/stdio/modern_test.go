@@ -84,6 +84,16 @@ func (b *bridgeHarness) fetch(body string) ([]string, error) {
 	return events, sc.Err()
 }
 
+// waitEnded waits, bounded by guard, until c's process has ended and its cleanup has run.
+func waitEnded(t *testing.T, c *userConn) {
+	t.Helper()
+	select {
+	case <-c.ended:
+	case <-time.After(guard):
+		t.Fatal("the userConn of a stopped process never ended")
+	}
+}
+
 // stops counts the "stopping upstream process" records with reason.
 func (b *bridgeHarness) stops(reason string) int {
 	n := 0
@@ -282,7 +292,7 @@ func TestProxyIDsNeverRepeatAcrossTheUsersUpstreamProcesses(t *testing.T) {
 	first := conn()
 	a := first.register([]byte(`1`), []byte(`"t"`), false)
 	first.p.stop("test")
-	<-first.ended
+	waitEnded(t, first)
 	second := conn()
 	if second == first {
 		t.Fatal("no new userConn after the respawn, so this test proves nothing")
@@ -480,7 +490,7 @@ func TestAnEndedProcessesPumpNeverRemovesItsSuccessor(t *testing.T) {
 	b.bridge.users[key] = successor
 	b.bridge.mu.Unlock()
 	old.p.stop("test")
-	<-old.ended // closed only after the old pump's cleanup has run
+	waitEnded(t, old) // closed only after the old pump's cleanup has run
 	b.bridge.mu.Lock()
 	defer b.bridge.mu.Unlock()
 	if b.bridge.users[key] != successor {
