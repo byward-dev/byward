@@ -51,7 +51,7 @@ func lifetimeText(scopes []string) string {
 	if slices.Contains(scopes, "offline_access") {
 		return fmt.Sprintf("up to %d days", int(GrantLifetime/(24*time.Hour)))
 	}
-	return fmt.Sprintf("up to %d hour", int(AccessLifetime/time.Hour))
+	return "up to 1 hour" // AccessLifetime; a test keeps the two in step
 }
 
 // upstreamName is the operator's name for the upstream, or the public host when it is unset or

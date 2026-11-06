@@ -72,11 +72,14 @@ func TestAuthorizeShowsTheConsentPageBeforeTheIdP(t *testing.T) {
 // The page states how long access lasts: the grant's lifetime with offline_access (refresh tokens),
 // otherwise one access token's.
 func TestConsentPageLifetimeFollowsWhatTheGrantWillLast(t *testing.T) {
+	if AccessLifetime != time.Hour {
+		t.Fatalf("AccessLifetime is %v: update lifetimeText's \"up to 1 hour\"", AccessLifetime)
+	}
 	for _, tc := range []struct {
 		scope, want string
 	}{
 		{"mcp offline_access", "up to " + strconv.Itoa(int(GrantLifetime/(24*time.Hour))) + " days"},
-		{"mcp", "up to " + strconv.Itoa(int(AccessLifetime/time.Hour)) + " hour"},
+		{"mcp", "up to 1 hour"},
 	} {
 		t.Run(tc.scope, func(t *testing.T) {
 			text := visibleText(newEnv(t).showConsent(t, url.Values{"scope": {tc.scope}}).body)
