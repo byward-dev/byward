@@ -163,7 +163,7 @@ func (s *Store) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, er
 		if n > 0 {
 			return store.ErrExists
 		}
-		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM revocations WHERE subject = ? AND before > ?",
+		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM revocations WHERE (subject = ? OR scope = 'all') AND before > ?",
 			g.Subject, micros(g.CreatedAt)).Scan(&n); err != nil {
 			return err
 		}
@@ -255,6 +255,18 @@ func (s *Store) RevokeSubject(ctx context.Context, subject string, before, at ti
 		}
 		_, err := tx.ExecContext(ctx, "INSERT INTO revocations (grant_id, subject, before, at) VALUES ('', ?, ?, ?)",
 			subject, micros(before), micros(at))
+		return err
+	})
+}
+
+// RevokeAll implements store.Grants.
+func (s *Store) RevokeAll(ctx context.Context, before, at time.Time) error {
+	return s.write(ctx, func(tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM grants WHERE created_at < ?", micros(before)); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO revocations (grant_id, subject, scope, before, at) VALUES ('', '', 'all', ?, ?)",
+			micros(before), micros(at))
 		return err
 	})
 }
@@ -431,7 +443,7 @@ func (s *Store) RotateRefreshToken(ctx context.Context, r store.RotateRequest) e
 
 // Revocations implements store.Revocations.
 func (s *Store) Revocations(ctx context.Context) ([]store.Revocation, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT grant_id, subject, before, at FROM revocations ORDER BY at, seq")
+	rows, err := s.db.QueryContext(ctx, "SELECT grant_id, subject, scope, before, at FROM revocations ORDER BY at, seq")
 	if err != nil {
 		return nil, fmt.Errorf("sqlite store: revocations: %w", err)
 	}
@@ -439,10 +451,12 @@ func (s *Store) Revocations(ctx context.Context) ([]store.Revocation, error) {
 	var out []store.Revocation
 	for rows.Next() {
 		var r store.Revocation
+		var scope string
 		var before, at int64
-		if err := rows.Scan(&r.GrantID, &r.Subject, &before, &at); err != nil {
+		if err := rows.Scan(&r.GrantID, &r.Subject, &scope, &before, &at); err != nil {
 			return nil, err
 		}
+		r.All = scope == "all"
 		r.Before, r.At = fromMicros(before), fromMicros(at)
 		out = append(out, r)
 	}

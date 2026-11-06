@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -144,5 +145,61 @@ func TestNoAuthLogsThatAuthIsOffAndTheNextStep(t *testing.T) {
 	logs := errb.String()
 	if code != exitOK || !strings.Contains(logs, `"level":"WARN","msg":"development mode relaxation","relaxation":"AUTHENTICATION IS OFF: anyone who can reach http://localhost:8080/mcp`) || !strings.Contains(logs, "to require sign-in") {
 		t.Fatalf("code=%d logs=%s", code, logs)
+	}
+}
+
+// The operator commands: a usage mistake exits 2 with nothing on stdout and the store untouched (not
+// even created); a store that cannot open exits 1; a done revocation names the user and exits 0.
+func TestRevokeCommandsExit2OnMisuse1OnAStoreFailureAndReportTheRevokedUser(t *testing.T) {
+	user := "00000000-0000-0000-0000-00000000000a:11111111-1111-1111-1111-11111111111a"
+	cases := []struct {
+		name       string
+		args       []string
+		badStore   bool // BYWARD_STORE_DIR names a file, so the store cannot open
+		code       int
+		wantStdout string // "" means nothing at all
+		inStderr   string
+	}{
+		{"revoke-user without a key", []string{"revoke-user"}, false, exitConfig, "", "usage: byward revoke-user <tid:oid>"},
+		{"revoke-user with two keys", []string{"revoke-user", user, user}, false, exitConfig, "", "usage:"},
+		{"revoke-user with an email", []string{"revoke-user", "alice@contoso.com"}, false, exitConfig, "", "not a user key"},
+		{"revoke-all without --yes", []string{"revoke-all"}, false, exitConfig, "", "revoke-all --yes"},
+		{"revoke-all with yes instead of --yes", []string{"revoke-all", "yes"}, false, exitConfig, "", "revoke-all --yes"},
+		{"revoke-all with --yes and more", []string{"revoke-all", "--yes", "extra"}, false, exitConfig, "", "revoke-all --yes"},
+		{"revoke-user with a store that cannot open", []string{"revoke-user", user}, true, exitRuntime, "", "revoke-user failed"},
+		{"revoke-all with a store that cannot open", []string{"revoke-all", "--yes"}, true, exitRuntime, "", "revoke-all failed"},
+		{"revoke-user", []string{"revoke-user", strings.ToUpper(user)}, false, exitOK, "revoked user " + user, `"reason":"operator revoke-user"`},
+		{"revoke-all", []string{"revoke-all", "--yes"}, false, exitOK, "revoked every user", `"reason":"operator revoke-all"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
+			var stateDir string
+			for _, kv := range env {
+				if v, ok := strings.CutPrefix(kv, "BYWARD_STORE_DIR="); ok {
+					stateDir = v
+				}
+			}
+			if tc.badStore {
+				if err := os.WriteFile(stateDir, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			code, stdout, stderr := runWith(tc.args, env...)
+			okStdout := strings.Contains(stdout, tc.wantStdout) && (tc.wantStdout != "" || stdout == "")
+			if code != tc.code || !okStdout || !strings.Contains(stderr, tc.inStderr) {
+				t.Fatalf("code %d (want %d)\nstdout %q (want %q)\nstderr %q (want %q)", code, tc.code, stdout, tc.wantStdout, stderr, tc.inStderr)
+			}
+			if _, err := os.Stat(stateDir); tc.code == exitConfig && !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("a usage mistake touched the store (%v)", err)
+			}
+		})
+	}
+}
+
+func TestHelpListsTheOperatorCommands(t *testing.T) {
+	code, stdout, _ := runWith([]string{"--help"})
+	if code != exitOK || !strings.Contains(stdout, "byward revoke-user <tid:oid>") || !strings.Contains(stdout, "byward revoke-all --yes") {
+		t.Fatalf("code=%d help=%q", code, stdout)
 	}
 }

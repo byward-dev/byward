@@ -58,6 +58,10 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		{"RevocationsAreOldestFirst", revocationsAreOldestFirst},
 		{"CutOffRefusesLaterCreatedEarlierGrants", cutOffRefusesLaterCreatedEarlierGrants},
 		{"RevokeSubjectAndCreateGrantNeverLeaveACoveredGrant", revokeSubjectAndCreateGrantNeverLeaveACoveredGrant},
+		{"RevokeAllCutsOffEveryEarlierGrant", revokeAllCutsOffEveryEarlierGrant},
+		{"RevokeAllRefusesLaterCreatedEarlierGrantsOfAnySubject", revokeAllRefusesLaterCreatedEarlierGrantsOfAnySubject},
+		{"RevokeAllAndCreateGrantNeverLeaveACoveredGrant", revokeAllAndCreateGrantNeverLeaveACoveredGrant},
+		{"AnEmptySubjectRevokesNobody", anEmptySubjectRevokesNobody},
 		{"CollectRemovesExpiredRowsOnly", collectRemovesExpiredRowsOnly},
 		{"CollectRemovesOldRevocations", collectRemovesOldRevocations},
 		{"ConcurrentUseIsSafe", concurrentUseIsSafe},
@@ -484,6 +488,96 @@ func revokeSubjectAndCreateGrantNeverLeaveACoveredGrant(t *testing.T, s store.St
 	}
 }
 
+func revokeAllCutsOffEveryEarlierGrant(t *testing.T, s store.Store) {
+	before := t0.Add(time.Hour)
+	newer := grant("newer", "tid:carol")
+	newer.CreatedAt = before // not before the cut-off: kept
+	for _, g := range []store.Grant{grant("alice", "tid:alice"), grant("bob", "tid:bob"), newer} {
+		mustCreate(t, s, g)
+		must(t, s.PutCode(ctx, pendingCode(g.ID)))
+		must(t, s.PutRefreshToken(ctx, refresh(g.ID, 1)))
+	}
+	at := before.Add(time.Second)
+	must(t, s.RevokeAll(ctx, before, at))
+	for _, id := range []string{"alice", "bob"} {
+		_, err := s.Grant(ctx, id)
+		wantErr(t, "grant "+id+" before the cut-off", err, store.ErrNotFound)
+		_, err = s.ConsumeCode(ctx, id, t0)
+		wantErr(t, "its code", err, store.ErrNotFound)
+		_, err = s.RefreshToken(ctx, refresh(id, 1).Hash, t0)
+		wantErr(t, "its refresh token", err, store.ErrNotFound)
+	}
+	if _, err := s.Grant(ctx, "newer"); err != nil {
+		t.Fatalf("grant created at the cut-off: %v", err)
+	}
+	revs, err := s.Revocations(ctx)
+	must(t, err)
+	if want := (store.Revocation{All: true, Before: before, At: at}); len(revs) != 1 || !revEqual(revs[0], want) {
+		t.Fatalf("revocations = %+v, want one %+v", revs, want)
+	}
+}
+
+func revokeAllRefusesLaterCreatedEarlierGrantsOfAnySubject(t *testing.T, s store.Store) {
+	before := t0.Add(time.Hour)
+	must(t, s.RevokeAll(ctx, before.In(otherZone), before))
+	for _, subject := range []string{"tid:alice", "tid:someone-new"} {
+		inFlight := grant("in-flight-"+subject, subject)
+		inFlight.CreatedAt = before.Add(-tick) // a login that started just before revoke-all
+		_, err := s.CreateGrant(ctx, inFlight)
+		wantErr(t, "CreateGrant for "+subject+" covered by revoke-all", err, store.ErrRevoked)
+	}
+	after := grant("after", "tid:alice")
+	after.CreatedAt, after.ExpiresAt = before, before.Add(time.Hour)
+	mustCreate(t, s, after)
+}
+
+// As for RevokeSubject: whatever the interleaving, a grant created before the cut-off never
+// survives revoke-all.
+func revokeAllAndCreateGrantNeverLeaveACoveredGrant(t *testing.T, s store.Store) {
+	const rounds = 50
+	before := t0.Add(time.Hour)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range rounds {
+		id := fmt.Sprintf("tid:user-%d", i)
+		wg.Go(func() {
+			<-start
+			_, err := s.CreateGrant(ctx, grant(id, id)) // CreatedAt t0, before the cut-off
+			if err != nil && !errors.Is(err, store.ErrRevoked) {
+				t.Errorf("CreateGrant %s: %v", id, err)
+			}
+		})
+	}
+	wg.Go(func() {
+		<-start
+		if err := s.RevokeAll(ctx, before, before); err != nil {
+			t.Errorf("RevokeAll: %v", err)
+		}
+	})
+	close(start)
+	wg.Wait()
+	for i := range rounds {
+		id := fmt.Sprintf("tid:user-%d", i)
+		if _, err := s.Grant(ctx, id); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("grant %s survived revoke-all: %v", id, err)
+		}
+	}
+}
+
+// Only RevokeAll revokes every subject. An empty subject is refused, records nothing and leaves
+// every grant and every later login alone, so a zero value can never revoke everyone by mistake.
+func anEmptySubjectRevokesNobody(t *testing.T, s store.Store) {
+	mustCreate(t, s, grant("alice", "tid:alice"))
+	wantErr(t, "RevokeSubject without a subject", s.RevokeSubject(ctx, "", t0.Add(time.Hour), t0.Add(time.Hour)), store.ErrInvalid)
+	if _, err := s.Grant(ctx, "alice"); err != nil {
+		t.Fatalf("grant after a refused empty revocation: %v", err)
+	}
+	mustCreate(t, s, grant("bob", "tid:bob"))
+	if revs, err := s.Revocations(ctx); err != nil || len(revs) != 0 {
+		t.Fatalf("revocations = %+v, %v; want none", revs, err)
+	}
+}
+
 func collectRemovesExpiredRowsOnly(t *testing.T, s store.Store) {
 	now := t0.Add(10 * time.Minute)
 	expired := grant("expired", "tid:alice")
@@ -581,7 +675,7 @@ func concurrentUseIsSafe(t *testing.T, s store.Store) {
 }
 
 func revEqual(a, b store.Revocation) bool {
-	return a.GrantID == b.GrantID && a.Subject == b.Subject && a.Before.Equal(b.Before) && a.At.Equal(b.At)
+	return a.GrantID == b.GrantID && a.Subject == b.Subject && a.All == b.All && a.Before.Equal(b.Before) && a.At.Equal(b.At)
 }
 
 const grace = 30 * time.Second

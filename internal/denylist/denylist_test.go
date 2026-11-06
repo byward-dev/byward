@@ -88,6 +88,36 @@ func TestDeniesRevokedGrantsAndTokensIssuedUpToTheSubjectCutOff(t *testing.T) {
 	}
 }
 
+// revoke-all: an explicit All cut-off denies every subject's tokens issued up to it. A revocation
+// that names nothing (a zero value, however it got there) denies nobody.
+func TestTheRevokeAllCutOffDeniesEverySubjectAndAnEmptyRevocationNobody(t *testing.T) {
+	now := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	cut := now.Add(-time.Minute)
+	for _, tc := range []struct {
+		name string
+		revs []store.Revocation
+		iat  time.Time
+		want bool
+	}{
+		{"before the revoke-all cut-off", []store.Revocation{{All: true, Before: cut, At: now}}, cut.Add(-time.Second), true},
+		{"at the revoke-all cut-off", []store.Revocation{{All: true, Before: cut, At: now}}, cut, true},
+		{"after the revoke-all cut-off", []store.Revocation{{All: true, Before: cut, At: now}}, cut.Add(time.Second), false},
+		{"the latest revoke-all wins", []store.Revocation{{All: true, Before: cut, At: now}, {All: true, Before: cut.Add(-time.Hour), At: now}}, cut.Add(-time.Second), true},
+		{"a zero-value revocation", []store.Revocation{{}}, cut.Add(-time.Hour), false},
+		{"a revocation with only times", []store.Revocation{{Before: now, At: now}}, cut.Add(-time.Hour), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l := New(&source{revs: tc.revs}, func() time.Time { return now })
+			mustSync(t, l)
+			for _, subject := range []string{"tid:alice", "tid:bob"} {
+				if got := denied(t, l, "fine", subject, tc.iat); got != tc.want {
+					t.Errorf("%s: denied = %v, want %v", subject, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
 func TestListIsFreshThroughMaxStalenessAndStaleAfterUntilResynced(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		l := New(&source{}, nil)

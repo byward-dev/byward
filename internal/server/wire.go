@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/broker"
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/denylist"
 	"github.com/byward-dev/byward/internal/gate"
 	"github.com/byward-dev/byward/internal/health"
 	"github.com/byward-dev/byward/internal/idp"
@@ -23,6 +25,7 @@ import (
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/secretfile"
 	"github.com/byward-dev/byward/internal/ssrfguard"
+	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/store/sqlite"
 	"github.com/byward-dev/byward/internal/token"
 )
@@ -39,7 +42,8 @@ type auth struct {
 	register  func(*http.ServeMux)
 	validator resource.Validator
 	checks    []health.Check
-	// background runs until ctx ends: it keeps the revocation list fresh (ADR-0006 §3).
+	// background runs until ctx ends: it keeps the revocation list fresh (ADR-0006 §3) and removes
+	// expired store rows (ADR-0007 §1).
 	background func(ctx context.Context)
 	// closeStore releases the store; Run calls it after the background work has stopped.
 	closeStore func() error
@@ -122,7 +126,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	for _, w := range warnings {
 		log.Warn(w)
 	}
-	st, err := openStore(cfg, log, o.Audit)
+	st, err := wireStore(cfg, log, o.Audit)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +162,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 			"reason", "set it to say in plain words what the "+cfg.Scope+" scope lets an app do (ADR-0010 §4)")
 	}
 	log.Info("broker ready", "reason", "keys "+fmt.Sprint(len(ring.KeyIDs()))+", signing with "+ring.SigningKeyID()+"")
-	return &auth{register: b.Register, validator: v, checks: readiness(ring, st), background: func(ctx context.Context) { deny.Run(ctx, log) }, closeStore: st.Close,
+	return &auth{register: b.Register, validator: v, checks: readiness(ring, st), background: func(ctx context.Context) { runBackground(ctx, st, deny, log) }, closeStore: st.Close,
 		sessions: func(next http.Handler) http.Handler {
 			return mcpsession.Bind(mcpsession.Config{Box: sessionBox, Upstream: cfg.UpstreamURL.String(), User: signedInUser,
 				Lifetime: broker.GrantLifetime, Audit: o.Audit, Log: log}, next)
@@ -202,6 +206,39 @@ var newCIMDRegistry = registration.NewCIMDRegistry
 
 // newBroker is broker.New; tests replace it to see the wired configuration.
 var newBroker = broker.New
+
+// wireStore is openStore; tests replace it to reach the wired store.
+var wireStore = openStore
+
+// collectEvery is how often expired store rows are removed (ADR-0007 §1): grants, codes, refresh
+// tokens and revocations older than store.RevocationRetention.
+const collectEvery = 5 * time.Minute
+
+// runBackground keeps the revocation list fresh and removes expired store rows until ctx ends,
+// and returns only when both have stopped, so Run closes the store after the last write.
+func runBackground(ctx context.Context, st store.Collector, deny *denylist.List, log *slog.Logger) {
+	var wg sync.WaitGroup
+	wg.Go(func() { collect(ctx, st, log) })
+	deny.Run(ctx, log)
+	wg.Wait()
+}
+
+// collect runs store.Collect now and every collectEvery until ctx ends; a failure is logged and
+// retried at the next tick.
+func collect(ctx context.Context, st store.Collector, log *slog.Logger) {
+	t := time.NewTicker(collectEvery)
+	defer t.Stop()
+	for {
+		if err := st.Collect(ctx, time.Now()); err != nil && ctx.Err() == nil {
+			log.ErrorContext(ctx, "removing expired store rows failed", "error", err.Error())
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
 
 // gateSettings maps gate rule lists to the settings that fill them; config owns the names.
 var gateSettings = map[string]string{

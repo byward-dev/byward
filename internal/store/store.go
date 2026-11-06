@@ -30,13 +30,14 @@ var (
 	ErrReused = errors.New("store: refresh token reused")
 )
 
-// RevocationRetention is how long revocations are kept: the longest access-token lifetime
-// (ADR-0006 §3, §5). After it, every token a revocation covers has expired anyway. It must stay
-// at least the configured maximum access-token lifetime.
+// RevocationRetention is how long revocations are kept (ADR-0006 §3, §5). After it, every token a
+// revocation covers has expired anyway. It must exceed the longest access-token lifetime plus the
+// clock leeway the validator allows on `exp` (30 s): an hour and a minute leaves 30 s of margin
+// for clock skew between replicas.
 //
 // Adapters may keep times at microsecond precision (PostgreSQL timestamptz); callers must not
 // rely on finer differences.
-const RevocationRetention = time.Hour
+const RevocationRetention = time.Hour + time.Minute
 
 // Store is everything the broker keeps.
 //
@@ -79,13 +80,16 @@ type Grant struct {
 type Grants interface {
 	// CreateGrant stores g and returns it with Epoch set. An existing ID is ErrExists; an empty ID,
 	// ClientID or Subject, or an ExpiresAt not after CreatedAt, is ErrInvalid; a retained subject
-	// cut-off with Before after g.CreatedAt is ErrRevoked. The cut-off check and the insert are one
-	// atomic step, so a grant never outlives a RevokeSubject that should have covered it.
+	// cut-off, for g's subject or for all subjects, with Before after g.CreatedAt is ErrRevoked. The
+	// cut-off check and the insert are one atomic step, so a grant never outlives a RevokeSubject or
+	// RevokeAll that should have covered it.
 	//
-	// SQL adapters must serialize CreateGrant and RevokeSubject per subject: under READ COMMITTED
-	// each can miss the other's uncommitted row and both commit (write skew). PostgreSQL: take
-	// pg_advisory_xact_lock(hashtext(subject)) first in both, or run them SERIALIZABLE and retry
-	// on 40001. SQLite: one writer, and both start with BEGIN IMMEDIATE.
+	// SQL adapters must serialize CreateGrant with RevokeSubject per subject, and with RevokeAll for
+	// every subject: under READ COMMITTED each can miss the other's uncommitted row and both commit
+	// (write skew). PostgreSQL: CreateGrant and RevokeSubject take pg_advisory_xact_lock(
+	// hashtext(subject)) and pg_advisory_xact_lock_shared(<revoke-all key>), RevokeAll takes
+	// pg_advisory_xact_lock(<revoke-all key>); or run all three SERIALIZABLE and retry on 40001.
+	// SQLite: one writer, and all three start with BEGIN IMMEDIATE.
 	CreateGrant(ctx context.Context, g Grant) (Grant, error)
 	// Grant returns the grant, or ErrNotFound. It does not check ExpiresAt.
 	Grant(ctx context.Context, id string) (Grant, error)
@@ -101,6 +105,10 @@ type Grants interface {
 	// refresh tokens and IdP tokens. It records the cut-off even when the subject has no grants. An
 	// empty subject is ErrInvalid.
 	RevokeSubject(ctx context.Context, subject string, before, at time.Time) error
+	// RevokeAll is revoke-all (ADR-0006 §9, incident response): it records Revocation{All: true,
+	// Before: before, At: at} and deletes every grant created before `before`, with their codes,
+	// refresh tokens and IdP tokens, in one atomic step.
+	RevokeAll(ctx context.Context, before, at time.Time) error
 }
 
 // PendingCode is what an authorization code stands for until /token redeems it. The code given to
@@ -166,17 +174,21 @@ type RefreshTokens interface {
 	RotateRefreshToken(ctx context.Context, r RotateRequest) error
 }
 
-// Revocation is one entry of the deny list (ADR-0006 §3): a revoked grant, or every grant of a
-// subject issued before a time.
+// Revocation is one entry of the deny list (ADR-0006 §3): a revoked grant, every grant of a subject
+// issued before a time, or every grant of every subject issued before a time. Exactly one of
+// GrantID, Subject and All says which; a revocation naming none of them revokes nothing, so a zero
+// value can never revoke everyone by mistake.
 type Revocation struct {
-	GrantID string // empty for a subject cut-off
-	Subject string // empty for a single grant
+	GrantID string // a single grant
+	Subject string // a subject cut-off (revoke-user)
+	All     bool   // a cut-off for every subject (revoke-all); set only by Grants.RevokeAll
 	Before  time.Time
 	At      time.Time
 }
 
-// Revocations feeds the in-memory deny list. Revocations are written by Grants.RevokeGrant and
-// Grants.RevokeSubject, in the same transaction that deletes the grants they cover.
+// Revocations feeds the in-memory deny list. Revocations are written by Grants.RevokeGrant,
+// Grants.RevokeSubject and Grants.RevokeAll, in the same transaction that deletes the grants they
+// cover.
 type Revocations interface {
 	// Revocations returns every retained revocation, oldest At first (ties in any order). The deny
 	// list is rebuilt from it on each sync: a cursor would miss rows that commit out of At order
