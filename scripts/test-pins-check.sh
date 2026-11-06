@@ -16,12 +16,23 @@ now=${NOW:-$(date -u +%s)}
 cutoff=$((now - cooldown_days * 86400))
 fail() { echo "test pins check: FAIL: $*" >&2; exit 1; }
 
+for f in scripts/ui/run.sh scripts/ui/package.json scripts/conformance/run.sh; do
+  [ -f "$f" ] || fail "$f not found; run from the repository root"
+done
 image=$(sed -n 's/^image=mcr\.microsoft\.com\/playwright:v\([0-9.]*\)-noble@.*$/\1/p' scripts/ui/run.sh)
 node=$(sed -n 's/^image=node:\([0-9.]*\)-slim@.*$/\1/p' scripts/conformance/run.sh)
 pw=$(jq -r '.devDependencies["@playwright/test"] // empty' scripts/ui/package.json)
 axe=$(jq -r '.devDependencies["@axe-core/playwright"] // empty' scripts/ui/package.json)
+exact() { # one x.y.z of digits, nothing else (not even a second line)
+  case $1 in
+    *[!0-9.]* | .* | *. | *..* | '') return 1 ;;
+    *.*.*.*) return 1 ;;
+    *.*.*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 for v in "image:$image" "node:$node" "@playwright/test:$pw" "@axe-core/playwright:$axe"; do
-  printf '%s' "${v#*:}" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+' || fail "${v%%:*} must be pinned to an exact x.y.z, found '${v#*:}'"
+  exact "${v#*:}" || fail "${v%%:*} must be pinned to an exact x.y.z, found '${v#*:}'"
 done
 
 status=0
