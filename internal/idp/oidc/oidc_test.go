@@ -58,17 +58,7 @@ func signIn(t *testing.T, e *env, l idp.Login) url.Values {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	resp, err := c.Get(u)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	loc, err := url.Parse(resp.Header.Get("Location"))
-	if err != nil || resp.StatusCode != http.StatusFound {
-		t.Fatalf("authorize: status %d, %v", resp.StatusCode, err)
-	}
-	return loc.Query()
+	return e.fake.Authorize(t, u)
 }
 
 func TestGenericLoginReturnsIdentityAndTokens(t *testing.T) {

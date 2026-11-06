@@ -27,6 +27,12 @@ var registry = []Setting{
 	{Name: "entra-client-secret", Auth: true, Secret: true, Help: "client secret of the IdP app"},
 	{Name: "keys-dir", Auth: true, Help: "directory of sealing keys; each file is one key, its name the key ID (docs/how-to/sealing-keys.md)"},
 	{Name: "static-clients-file", Auth: true, Help: "JSON file of pre-registered MCP clients (docs/reference/static-clients.md)"},
+	{Name: "gate-tenants", Auth: true, Help: "access gate: comma-separated Entra tenant IDs allowed to sign in (docs/how-to/access-gate.md)"},
+	{Name: "gate-roles", Auth: true, Help: "access gate: comma-separated app roles; users need at least one (docs/how-to/access-gate.md)"},
+	{Name: "gate-groups", Auth: true, Help: "access gate: comma-separated group IDs; users need one, and groups overage denies (docs/how-to/access-gate.md)"},
+	{Name: "gate-email-domains", Auth: true, Help: "access gate: comma-separated domains of a verified email; generic OIDC IdPs only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md)"},
+	{Name: "gate-hosted-domains", Auth: true, Help: "access gate: comma-separated Google Workspace domains (hd claim); Google only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md)"},
+	{Name: "gate-allow-empty", Auth: true, Bool: true, Default: "false", Help: "allow an empty access gate for a Google or generic OIDC IdP (anyone with an account can sign in); no effect with Entra (docs/how-to/access-gate.md)"},
 	{Name: "insecure-no-auth", Bool: true, Default: "false", Help: "no authentication at all, for trying the proxy out and for tests; loopback only (ADR-0027)"},
 	{Name: "dev", Bool: true, Default: "false", Help: "development mode: enables the relaxations it logs at startup"},
 }
@@ -52,6 +58,9 @@ type Config struct {
 	EntraClientSecret string
 	KeysDir           string
 	StaticClientsFile string
+	// The access gate (slice 1.5, ADR-0015); validated by gate.New when the broker is wired.
+	GateTenants, GateRoles, GateGroups, GateEmailDomains, GateHostedDomains []string
+	GateAllowEmpty                                                          bool
 	// InContainer is set when the proxy runs in a container (/.dockerenv or /run/.containerenv)
 	// with its own network namespace; host networking does not count (see ownNetwork).
 	InContainer bool
@@ -187,6 +196,17 @@ func validate(v *Values, container bool) (*Config, error) {
 				}
 				errs = append(errs, errorf("%s is required (or set MCP_AUTHPROXY_INSECURE_NO_AUTH to try the proxy without sign-in)", env))
 			}
+		}
+		c.GateTenants, c.GateRoles, c.GateGroups = splitList(v.get("gate-tenants")), splitList(v.get("gate-roles")), splitList(v.get("gate-groups"))
+		c.GateEmailDomains, c.GateHostedDomains = splitList(v.get("gate-email-domains")), splitList(v.get("gate-hosted-domains"))
+		// A gate list that is set but names nothing would silently open the gate.
+		for _, s := range []string{"gate-tenants", "gate-roles", "gate-groups", "gate-email-domains", "gate-hosted-domains"} {
+			if raw := v.get(s); raw != "" && len(splitList(raw)) == 0 {
+				errs = append(errs, errorf("%s is set but lists nothing; remove it or give at least one entry", Setting{Name: s}.Env()))
+			}
+		}
+		if c.GateAllowEmpty, err = strconv.ParseBool(v.get("gate-allow-empty")); err != nil {
+			errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "gate-allow-empty"}.Env(), v.get("gate-allow-empty")))
 		}
 		if t := c.EntraTenant; t != "" && !isGUID(t) {
 			errs = append(errs, errorf("MCP_AUTHPROXY_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000, got %q", t))

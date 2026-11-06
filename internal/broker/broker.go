@@ -3,7 +3,7 @@
 // and issues proxy tokens at /token, acting itself as an OAuth client of the IdP (ADR-0005).
 //
 // Slice 1.2 scope: static clients, no consent page yet (slice 1.4: no release ships without it),
-// no access gate yet (slice 1.5, the Gate hook), no refresh tokens yet (slice 1.6).
+// the access gate as a Gate (slice 1.5), no refresh tokens yet (slice 1.6).
 package broker
 
 import (
@@ -32,12 +32,20 @@ const (
 	LoginLifetime  = 10 * time.Minute
 )
 
-// Gate is the access gate (ADR-0015), checked before a grant is created. Slice 1.5 provides it.
+// Gate is the access gate (ADR-0015), checked before a grant is created. A refusal is an error
+// implementing Denial; any other error is a failure to decide (500), never shown as a denial.
 type Gate interface {
 	Allow(ctx context.Context, id idp.Identity) error
 }
 
-// AllowAll lets every signed-in user through; it is the gate until slice 1.5.
+// Denial is a Gate refusal; DeniedRule names the rule, for the audit log.
+type Denial interface {
+	error
+	DeniedRule() string
+}
+
+// AllowAll lets every signed-in user through; New uses it when Config.Gate is nil. The proxy wires
+// the access gate built by gate.New.
 type AllowAll struct{}
 
 // Allow implements Gate.

@@ -220,8 +220,15 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := b.cfg.Gate.Allow(ctx, id); err != nil {
-		b.cfg.Audit.Record(r, audit.Event{Name: audit.AccessDenied, Outcome: audit.Failure, Reason: "not allowed by the access gate",
+		var d Denial
+		if !errors.As(err, &d) {
+			b.serverError(w, r, err)
+			return
+		}
+		// Every denial is audited (ADR-0015 §5): the rule and pseudonymous keys only, no email or name.
+		b.cfg.Audit.Record(r, audit.Event{Name: audit.AccessDenied, Outcome: audit.Failure, Reason: d.DeniedRule(),
 			ClientID: l.ClientID, UserKey: id.Subject, IdP: b.cfg.IdPName})
+		// A browser page the MCP client never parses, so 403 is right here (ADR-0015 §2).
 		b.page(w, r, http.StatusForbidden, "You don't have access to this server.", "Ask your operator for access.")
 		return
 	}

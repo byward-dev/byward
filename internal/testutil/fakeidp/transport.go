@@ -3,6 +3,7 @@ package fakeidp
 import (
 	"net/http"
 	"net/url"
+	"testing"
 )
 
 // Transport sends every request to the fake, keeping path and query. Adapters whose endpoints are
@@ -28,4 +29,23 @@ func (rw rewrite) RoundTrip(r *http.Request) (*http.Response, error) {
 	out := r.Clone(r.Context())
 	out.URL.Scheme, out.URL.Host, out.Host = base.Scheme, base.Host, base.Host
 	return http.DefaultTransport.RoundTrip(out)
+}
+
+// Authorize follows an adapter's login URL at the fake (auto-login) and returns the query of the
+// redirect back to the client: code and state, or error.
+func (p *IdP) Authorize(t testing.TB, loginURL string) url.Values {
+	t.Helper()
+	resp, err := p.HTTPClient().Get(loginURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("authorize: status %d, want 302", resp.StatusCode)
+	}
+	loc, err := url.Parse(resp.Header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return loc.Query()
 }
