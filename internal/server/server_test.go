@@ -179,10 +179,14 @@ func TestUpstreamSeesItsOwnHost(t *testing.T) {
 
 func TestUnknownPathsAre404(t *testing.T) {
 	e := start(t)
-	for _, p := range []string{"/", "/mcp/extra", "/debug/pprof/"} {
-		if res := e.do(t, "GET", p, nil, nil); res.StatusCode != 404 {
-			t.Fatalf("%s: got %d", p, res.StatusCode)
+	for _, p := range []string{"/", "/mcp/extra", "/debug/pprof/", "/mcp;x", "/MCP", "/mcp%2F..", "/mcp/"} {
+		res := e.do(t, "GET", p, nil, map[string]string{"Authorization": "Bearer good"})
+		if res.StatusCode == 200 {
+			t.Fatalf("%s: ambiguous path reached a handler", p)
 		}
+	}
+	if len(e.up.Requests()) != 0 {
+		t.Fatal("an unknown or ambiguous path reached the upstream")
 	}
 	if res := e.do(t, "TRACE", "/mcp", nil, nil); res.StatusCode == 200 {
 		t.Fatal("TRACE must not succeed")

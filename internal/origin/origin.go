@@ -41,7 +41,7 @@ func hostKey(h string) string {
 const (
 	allowMethods  = "GET, POST, DELETE"
 	allowHeaders  = "Authorization, Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Mcp-Method, Mcp-Name, Last-Event-ID"
-	exposeHeaders = "WWW-Authenticate, Mcp-Session-Id, Retry-After"
+	exposeHeaders = "WWW-Authenticate, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-ID, Retry-After"
 )
 
 // Origins enforces an exact allowlist of `Origin` values (scheme://host[:port], lower case). A

@@ -34,6 +34,11 @@ func TestRelayIsByteTransparentAndStrips(t *testing.T) {
 	r.Header.Set("X-Forwarded-For", "1.2.3.4")
 	r.Header.Set("X-Forwarded-User", "admin")
 	r.Header.Set("x-forwarded-prefix", "/evil")
+	r.Header["X_Forwarded_For"] = []string{"6.6.6.6"} // underscore spelling
+	r.Header["Authorization_"] = []string{"x"}
+	r.Header.Set("Origin", "https://app.example")
+	r.Header.Set("Sec-Fetch-Site", "cross-site")
+	r.Header.Set("Sec-Fetch-Mode", "cors")
 	r.Header.Set("Mcp-Session-Id", "s1")
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -50,7 +55,8 @@ func TestRelayIsByteTransparentAndStrips(t *testing.T) {
 		t.Fatalf("path=%q query=%q host=%q", got.Path, got.RawQuery, got.Host)
 	}
 	for k := range got.Header {
-		if k == "Authorization" || k == "Forwarded" || strings.HasPrefix(k, "X-Forwarded-") {
+		n := strings.ReplaceAll(k, "_", "-")
+		if n == "Authorization" || k == "Forwarded" || k == "Origin" || strings.HasPrefix(n, "X-Forwarded-") || strings.HasPrefix(k, "Sec-Fetch-") {
 			t.Fatalf("header %s reached the upstream", k)
 		}
 	}
@@ -106,5 +112,27 @@ func TestRelayDropsUpstreamCORS(t *testing.T) {
 	relayTo(t, up, "/mcp").ServeHTTP(w, httptest.NewRequest("POST", "/mcp", nil))
 	if w.Header().Get("Access-Control-Allow-Origin") != "" || w.Header().Get("Access-Control-Allow-Credentials") != "" || w.Header().Get("Mcp-Session-Id") != "s1" {
 		t.Fatalf("headers = %v", w.Header())
+	}
+}
+
+func TestUpstreamChallengeNeverReachesTheClient(t *testing.T) {
+	up := fakeupstream.New()
+	t.Cleanup(up.Close)
+	status := http.StatusUnauthorized
+	up.Handler = func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="https://elsewhere.example/.well-known/oauth-protected-resource"`)
+		w.WriteHeader(status)
+	}
+	h := relayTo(t, up, "/mcp")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("POST", "/mcp", nil))
+	if w.Code != http.StatusBadGateway || w.Header().Get("WWW-Authenticate") != "" {
+		t.Fatalf("upstream 401: code=%d www=%q", w.Code, w.Header().Get("WWW-Authenticate"))
+	}
+	status = http.StatusForbidden
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("POST", "/mcp", nil))
+	if w.Code != http.StatusForbidden || w.Header().Get("WWW-Authenticate") != "" {
+		t.Fatalf("upstream 403: code=%d www=%q", w.Code, w.Header().Get("WWW-Authenticate"))
 	}
 }

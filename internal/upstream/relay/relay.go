@@ -16,9 +16,15 @@ import (
 	"github.com/corker/mcp-authproxy/internal/logging"
 )
 
-// stripped are removed from every inbound request before anything of ours is set (invariant 16).
-// `X-Forwarded-*` is matched by prefix below; hop-by-hop headers are removed by ReverseProxy.
-var stripped = []string{"Authorization", "Forwarded"}
+// stripped are removed from every inbound request before anything of ours is set (invariant 16):
+// credentials, forwarding headers (any `X-Forwarded-*`), and the browser headers the proxy has
+// already checked. `Origin` and `Sec-Fetch-*` would make SDK servers with their own cross-origin
+// protection reject requests the proxy allowed (TS `createMcpExpressApp`, Go
+// `http.CrossOriginProtection`). Names are compared with `_` read as `-`, because some upstream
+// frameworks treat the two alike (the oauth2-proxy CVE-2025-64484 bypass).
+var stripped = map[string]bool{"Authorization": true, "Forwarded": true, "Origin": true}
+
+var errUpstreamUnauthorized = errors.New("upstream answered 401")
 
 // New returns a handler relaying each request to target, the upstream's MCP endpoint URL: the
 // request path is replaced by target's path; the query is kept.
@@ -40,13 +46,20 @@ func New(log *slog.Logger, target *url.URL) http.Handler {
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: time.Second,
 		},
-		// The proxy owns CORS on the MCP endpoint (internal/origin); an upstream's own CORS headers
-		// would duplicate Access-Control-Allow-Origin, which browsers reject.
+		FlushInterval: -1, // MCP responses may stream; never hold bytes back
+		// The proxy owns CORS and the auth challenge on the MCP endpoint. An upstream's CORS headers
+		// would duplicate Access-Control-Allow-Origin (browsers reject that), and its
+		// WWW-Authenticate would send clients to an authorization server that is not ours. An
+		// upstream 401 can only mean the proxy's own credential to it failed, so it becomes a 502.
 		ModifyResponse: func(res *http.Response) error {
 			for k := range res.Header {
 				if strings.HasPrefix(k, "Access-Control-") {
 					delete(res.Header, k)
 				}
+			}
+			res.Header.Del("WWW-Authenticate")
+			if res.StatusCode == http.StatusUnauthorized {
+				return errUpstreamUnauthorized
 			}
 			return nil
 		},
@@ -54,6 +67,11 @@ func New(log *slog.Logger, target *url.URL) http.Handler {
 			// A chunked body over the limit only fails while it is being relayed.
 			if mbe := (*http.MaxBytesError)(nil); errors.As(err, &mbe) {
 				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+				return
+			}
+			if errors.Is(err, errUpstreamUnauthorized) {
+				log.ErrorContext(r.Context(), "upstream rejected the proxy", "request_id", logging.RequestID(r.Context()), "reason", "upstream answered 401; check the upstream credential")
+				http.Error(w, "upstream rejected the proxy", http.StatusBadGateway)
 				return
 			}
 			log.WarnContext(r.Context(), "upstream error", "request_id", logging.RequestID(r.Context()), "error", err)
@@ -65,11 +83,9 @@ func New(log *slog.Logger, target *url.URL) http.Handler {
 }
 
 func strip(h http.Header) {
-	for _, k := range stripped {
-		h.Del(k)
-	}
 	for k := range h {
-		if strings.HasPrefix(textproto.CanonicalMIMEHeaderKey(k), "X-Forwarded-") {
+		n := textproto.CanonicalMIMEHeaderKey(strings.ReplaceAll(k, "_", "-"))
+		if stripped[n] || strings.HasPrefix(n, "X-Forwarded-") || strings.HasPrefix(n, "Sec-Fetch-") {
 			delete(h, k)
 		}
 	}
