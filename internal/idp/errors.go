@@ -100,3 +100,12 @@ func GenericClass(status int, oauth string) Class {
 	}
 	return Fatal
 }
+
+// TokenCheckClass classes a failure to verify an IdP-signed JWT: Unavailable when the IdP's keys
+// could not be fetched (try later), Fatal for a bad signature or claims.
+func TokenCheckClass(err error) Class {
+	if errors.Is(err, ErrKeysUnavailable) {
+		return Unavailable
+	}
+	return Fatal
+}

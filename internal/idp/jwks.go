@@ -3,6 +3,7 @@ package idp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -14,8 +15,17 @@ import (
 // (ADR-0011 §7: rate-limited, unlike go-oidc's RemoteKeySet).
 const MinJWKSRefresh = time.Minute
 
+// refetchTimeout bounds one background refetch: the Fetcher's retries at its 5 s timeout.
+const refetchTimeout = 20 * time.Second
+
+// ErrKeysUnavailable wraps every failure to fetch the JWKS; adapters class it Unavailable, not
+// Fatal (ADR-0011 §1).
+var ErrKeysUnavailable = errors.New("idp: JWKS unavailable")
+
 // KeySet caches an IdP's JWKS. An unknown kid triggers a refetch at most once per MinJWKSRefresh;
-// the last good set stays in use when a refetch fails.
+// the last good set stays in use when a refetch fails. The refetch runs once at a time in the
+// background, detached from any caller's context, so a caller that goes away neither cancels it
+// nor uses up the interval; cached lookups never wait for it.
 type KeySet struct {
 	fetch *Fetcher
 	url   string
@@ -25,6 +35,8 @@ type KeySet struct {
 	keys    jose.JSONWebKeySet
 	fetched time.Time
 	have    bool
+	lastErr error         // the last refetch's error, nil after a success
+	running chan struct{} // closed when the in-flight refetch ends; nil when none runs
 }
 
 // NewKeySet caches the JWKS at url.
@@ -35,26 +47,59 @@ func NewKeySet(f *Fetcher, url string, now func() time.Time) *KeySet {
 // Key returns the public key for kid ("" matches a set with a single key).
 func (k *KeySet) Key(ctx context.Context, kid string) (*jose.JSONWebKey, error) {
 	k.mu.Lock()
+	if key := k.lookup(kid); key != nil {
+		k.mu.Unlock()
+		return key, nil
+	}
+	running := k.running
+	if running == nil {
+		if (k.have || k.lastErr != nil) && k.now().Sub(k.fetched) < MinJWKSRefresh {
+			err := k.missing(kid)
+			k.mu.Unlock()
+			return nil, err
+		}
+		running = make(chan struct{})
+		k.running = running
+		// Detached from cancellation so a departing caller cannot abort the shared refetch.
+		go k.refetch(context.WithoutCancel(ctx), running)
+	}
+	k.mu.Unlock()
+
+	select {
+	case <-running:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	k.mu.Lock()
 	defer k.mu.Unlock()
 	if key := k.lookup(kid); key != nil {
 		return key, nil
 	}
-	if k.have && k.now().Sub(k.fetched) < MinJWKSRefresh {
-		return nil, fmt.Errorf("idp: unknown key id %q", kid)
+	return nil, k.missing(kid)
+}
+
+// missing is the error for an absent kid; it wraps ErrKeysUnavailable when the last refetch
+// failed. Caller holds k.mu.
+func (k *KeySet) missing(kid string) error {
+	if k.lastErr != nil {
+		return fmt.Errorf("idp: key id %q not found: %w: %w", kid, ErrKeysUnavailable, k.lastErr)
 	}
+	return fmt.Errorf("idp: unknown key id %q", kid)
+}
+
+// refetch loads the JWKS and stores the result; it closes done when finished.
+func (k *KeySet) refetch(parent context.Context, done chan struct{}) {
+	ctx, cancel := context.WithTimeout(parent, refetchTimeout)
+	defer cancel()
 	set, err := k.load(ctx)
-	k.fetched = k.now()
-	if err != nil {
-		if k.have {
-			return nil, fmt.Errorf("idp: unknown key id %q (JWKS refresh failed: %w)", kid, err)
-		}
-		return nil, fmt.Errorf("idp: fetch JWKS: %w", err)
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.fetched, k.lastErr = k.now(), err
+	if err == nil {
+		k.keys, k.have = set, true
 	}
-	k.keys, k.have = set, true
-	if key := k.lookup(kid); key != nil {
-		return key, nil
-	}
-	return nil, fmt.Errorf("idp: unknown key id %q", kid)
+	k.running = nil
+	close(done)
 }
 
 // load fetches the JWKS (see ParseJWKS).

@@ -316,7 +316,7 @@ func (p *Provider) identity(ctx context.Context, raw, nonce string) (idp.Identit
 		Now:      p.cfg.Now,
 	})
 	if err != nil {
-		return idp.Identity{}, &idp.Error{Class: idp.Fatal, Err: err}
+		return idp.Identity{}, &idp.Error{Class: idp.TokenCheckClass(err), Err: err}
 	}
 	subject := idp.StringClaim(claims, p.cfg.SubjectClaim)
 	if subject == "" {

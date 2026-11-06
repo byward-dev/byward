@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -336,7 +337,7 @@ func TestKeySetKeepsLastGoodSetWhenRefreshFails(t *testing.T) {
 	}
 	fail.Store(true)
 	c.Advance(2 * MinJWKSRefresh)
-	if _, err := ks.Key(context.Background(), "other"); err == nil || !strings.Contains(err.Error(), "refresh failed") {
+	if _, err := ks.Key(context.Background(), "other"); !errors.Is(err, ErrKeysUnavailable) {
 		t.Fatalf("err = %v", err)
 	}
 	if _, err := ks.Key(context.Background(), kid); err != nil {
@@ -469,5 +470,126 @@ func TestKeySetLookupUsesOnlySigningKeys(t *testing.T) {
 				t.Fatalf("err = %v, want found %v", err, tc.found)
 			}
 		})
+	}
+}
+
+// jwksServer serves the fake's JWKS through a gate the test controls, counting fetches.
+type jwksServer struct {
+	srv   *httptest.Server
+	hits  atomic.Int32
+	block chan struct{} // when non-nil, a fetch waits on it
+	fail  atomic.Bool
+}
+
+func newJWKSServer(t *testing.T, f *fakeidp.IdP) *jwksServer {
+	js := &jwksServer{}
+	js.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		js.hits.Add(1)
+		if js.block != nil {
+			<-js.block
+		}
+		if js.fail.Load() {
+			w.WriteHeader(503)
+			return
+		}
+		resp, err := http.Get(f.JWKSURL(""))
+		if err != nil {
+			w.WriteHeader(502)
+			return
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var body json.RawMessage
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(js.srv.Close)
+	return js
+}
+
+func TestCancelledCallerDoesNotUseUpTheRefetch(t *testing.T) {
+	f := fakeidp.New(t, fakeidp.Generic)
+	js := newJWKSServer(t, f)
+	c := &clock{now: time.Unix(1_800_000_000, 0)}
+	ks := NewKeySet(NewFetcher(nil), js.srv.URL, c.Now)
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := ks.Key(cancelled, jwksKid(t, f)); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled caller: %v", err)
+	}
+	// The refetch went on without the caller; a live caller gets the key, and the server was hit.
+	if _, err := ks.Key(context.Background(), jwksKid(t, f)); err != nil {
+		t.Fatalf("live caller after a cancelled one: %v", err)
+	}
+	if js.hits.Load() == 0 {
+		t.Fatal("JWKS endpoint never reached")
+	}
+}
+
+func TestCachedLookupIsNotBlockedByARefetch(t *testing.T) {
+	f := fakeidp.New(t, fakeidp.Generic)
+	js := newJWKSServer(t, f)
+	c := &clock{now: time.Unix(1_800_000_000, 0)}
+	ks := NewKeySet(NewFetcher(nil), js.srv.URL, c.Now)
+	old := jwksKid(t, f)
+	if _, err := ks.Key(context.Background(), old); err != nil {
+		t.Fatal(err)
+	}
+	js.block = make(chan struct{})
+	c.Advance(MinJWKSRefresh)
+	refetched := make(chan error, 1)
+	go func() { _, err := ks.Key(context.Background(), "rotated-away"); refetched <- err }()
+	for js.hits.Load() < 2 { // wait until the refetch is in flight
+		runtime.Gosched()
+	}
+	done := make(chan error, 1)
+	go func() { _, err := ks.Key(context.Background(), old); done <- err }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cached lookup blocked behind the refetch")
+	}
+	close(js.block)
+	if err := <-refetched; err == nil {
+		t.Fatal("rotated-away kid found")
+	}
+}
+
+func TestConcurrentMissesShareOneRefetch(t *testing.T) {
+	f := fakeidp.New(t, fakeidp.Generic)
+	js := newJWKSServer(t, f)
+	ks := NewKeySet(NewFetcher(nil), js.srv.URL, time.Now)
+	kid := jwksKid(t, f)
+	errs := make(chan error, 8)
+	for range 8 {
+		go func() { _, err := ks.Key(context.Background(), kid); errs <- err }()
+	}
+	for range 8 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := js.hits.Load(); n != 1 {
+		t.Fatalf("JWKS fetched %d times, want 1", n)
+	}
+}
+
+func TestFirstFetchFailureIsKeysUnavailable(t *testing.T) {
+	f := fakeidp.New(t, fakeidp.Generic)
+	js := newJWKSServer(t, f)
+	js.fail.Store(true)
+	fe := NewFetcher(nil)
+	fe.Backoff = 0
+	ks := NewKeySet(fe, js.srv.URL, time.Now)
+	_, err := ks.Key(context.Background(), "k")
+	if !errors.Is(err, ErrKeysUnavailable) || TokenCheckClass(err) != Unavailable {
+		t.Fatalf("err = %v", err)
+	}
+	// Within the interval the failure is remembered, still as unavailable, without refetching.
+	hits := js.hits.Load()
+	if _, err := ks.Key(context.Background(), "k"); !errors.Is(err, ErrKeysUnavailable) || js.hits.Load() != hits {
+		t.Fatalf("second call: %v, hits %d -> %d", err, hits, js.hits.Load())
 	}
 }
