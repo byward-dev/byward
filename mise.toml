@@ -2,6 +2,11 @@
 go = "1.27"
 golangci-lint = "2.15.0"
 "go:golang.org/x/tools/cmd/goimports" = "0.52.0"
+# Release tools (ADR-0019); used by `release:*` and `licenses`, not by `check`.
+goreleaser = "2.19.0"
+syft = "1.55.0"
+cosign = "3.1.4"
+"go:github.com/google/go-licenses/v2" = "2.0.1"
 # Operator/dev tool (Entra app setup, real-tenant tests); not needed by `mise run check`, not installed in CI.
 # azure-cli 2.92.0 pins a pre-release dependency (azure-appconfiguration 1.10.0b1); uv needs this to resolve it.
 "pipx:azure-cli" = { version = "2.92.0", uvx_args = "--prerelease=allow" }
@@ -31,3 +36,44 @@ run = "go test -tags=integration ./..."
 [tasks.check]
 description = "Everything CI runs"
 depends = ["fmt:check", "vet", "lint", "test"]
+
+[tasks.licenses]
+description = "Fail on a disallowed dependency licence; collect third-party licence texts into build/licenses"
+run = '''
+set -eu
+go-licenses check ./... --include_tests --ignore github.com/corker/mcp-authproxy \
+  --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT,ISC
+rm -rf build/licenses
+go-licenses save ./... --ignore github.com/corker/mcp-authproxy --save_path=build/licenses
+# The Go standard library and runtime are compiled into the binary.
+mkdir -p build/licenses/go.dev
+cp "$(go env GOROOT)/LICENSE" build/licenses/go.dev/LICENSE
+'''
+
+[tasks."release:snapshot"]
+description = "Build every release artifact locally (archives, checksums, SBOMs, images); signs and publishes nothing (needs Docker)"
+depends = ["licenses"]
+run = "goreleaser release --snapshot --clean --skip=sign"
+
+[tasks."release:reproducible"]
+description = "Build twice (second copy elsewhere, empty Go cache) and compare sha256 of binaries and archives"
+depends = ["licenses"]
+run = '''
+set -eu
+build() { goreleaser release --snapshot --clean --skip=sign,docker,sbom >/dev/null; }
+sums() { (cd "$1/dist" && find . -type f \( -name '*.tar.gz' -o -name mcp-authproxy \) -exec shasum -a 256 {} + | sort -k2); }
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+build
+sums . > "$tmp/first"
+mkdir "$tmp/src"
+tar --exclude=./dist -cf - . | tar -C "$tmp/src" -xf -
+(cd "$tmp/src" && GOCACHE="$tmp/gocache" build)
+sums "$tmp/src" > "$tmp/second"
+diff "$tmp/first" "$tmp/second"
+echo "reproducible: $(wc -l < "$tmp/first" | tr -d ' ') files identical"
+'''
+
+[tasks."image:smoke"]
+description = "Smoke-test the snapshot image: uid 65532, binary path, licences, and the FROM node + COPY --from example (needs release:snapshot)"
+run = "sh scripts/image-smoke.sh"

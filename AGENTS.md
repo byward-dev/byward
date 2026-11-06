@@ -21,6 +21,7 @@ All tools are pinned in `mise.toml`; `mise run` resolves them, no shell activati
 | Unit tests | `mise run test` |
 | Integration tests (Docker) | `mise run test:integration` |
 | **Everything CI runs** | `mise run check` |
+| Release build, no publish (Docker) | `mise run release:snapshot` then `mise run image:smoke` |
 
 **Run `mise run check` before claiming a change is done.** CI runs the same task.
 

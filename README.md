@@ -19,6 +19,9 @@ mise install
 mise run check
 ```
 
+Release artifacts (image, archives, SBOMs) and how to verify them:
+[docs/reference/packaging.md](docs/reference/packaging.md).
+
 ## License
 
 [Apache-2.0](LICENSE)

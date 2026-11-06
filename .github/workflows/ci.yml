@@ -12,11 +12,31 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
           # Only the tools `check` needs; operator tools such as azure-cli stay out of CI.
           install_args: go golangci-lint go:golang.org/x/tools/cmd/goimports
       - run: mise run check
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
+
+  # Builds every release artifact exactly as a release would, without signing or publishing (ADR-0019).
+  release-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # goreleaser reads tags
+          persist-credentials: false
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          install_args: go goreleaser syft go:github.com/google/go-licenses/v2
+      - run: mise run release:snapshot
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
+      - run: mise run image:smoke
         env:
           MISE_TASK_RUN_AUTO_INSTALL: "false"

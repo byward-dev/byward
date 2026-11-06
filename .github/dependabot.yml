@@ -1,0 +1,21 @@
+version: 2
+updates:
+  # The distroless base digest (ADR-0019).
+  - package-ecosystem: docker
+    directories: ["/", "/docs/examples/stdio-node"]
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
