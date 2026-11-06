@@ -257,6 +257,19 @@ CI runs MCP conformance `server` on both revisions through the proxy and `author
 broker (ADR-0024); open-source clients run for real in CI, closed clients through the client
 simulator plus a manual release check.
 
+The client simulator (`internal/testutil/clientsim`, run by `mise run test`) signs in and uses the MCP
+endpoint the way each closed client does, one versioned profile per cell. Every recorded behaviour
+names its source; what nobody has checked is marked "assumed, unverified" and follows the MCP
+specification.
+
+| Cell | Profile | Status |
+|---|---|---|
+| Claude Code × static | `ClaudeCode` | simulated |
+| Claude.ai/Desktop × CIMD | `ClaudeAI` | simulated |
+| VS Code × CIMD | `VSCode` | simulated |
+| ChatGPT × CIMD | `ChatGPT` | simulated (`private_key_jwt` with a test key at its document's `jwks_uri`) |
+| Cursor × DCR | — | pending #57 (DCR) |
+
 ## Feature × lens map
 
 | # | Feature | Lenses |

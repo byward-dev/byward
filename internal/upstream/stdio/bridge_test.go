@@ -45,13 +45,19 @@ func newBridge(t *testing.T, edit func(*Config)) *bridgeHarness {
 	return &bridgeHarness{harness: h, bridge: b, srv: srv}
 }
 
-func (b *bridgeHarness) do(t *testing.T, ctx context.Context, method, user, session, body string) *http.Response {
+// do sends one request; header holds extra name/value pairs, an empty value meaning none.
+func (b *bridgeHarness) do(t *testing.T, ctx context.Context, method, user, session, body string, header ...string) *http.Response {
 	t.Helper()
 	req, err := http.NewRequestWithContext(ctx, method, b.srv.URL, strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Header.Set("Accept", "application/json, text/event-stream")
+	for i := 0; i+1 < len(header); i += 2 {
+		if header[i+1] != "" { // an empty value sends no header at all
+			req.Header.Set(header[i], header[i+1])
+		}
+	}
 	if user != "" {
 		req.Header.Set(userHeader, user)
 	}
@@ -81,7 +87,7 @@ func (b *bridgeHarness) initialize(t *testing.T, user string) string {
 		t.Fatalf("initialize: status %d", res.StatusCode)
 	}
 	events := readEvents(t, res)
-	if len(events) != 1 || !strings.Contains(events[0], `"protocolVersion":"2025-11-25"`) {
+	if len(events) != 1 || !strings.Contains(events[0], `"result":`) {
 		t.Fatalf("initialize events = %q", events)
 	}
 	return res.Header.Get(sessionHeader)
@@ -744,5 +750,66 @@ func TestUpstreamProcessCrashingDuringInitializeIsLoggedAsACrash(t *testing.T) {
 	eventually(t, "the process to be gone", func() bool { return b.m.Len() == 0 })
 	if len(b.log.with("stopping upstream process")) != 0 || len(b.log.with("upstream process exited unexpectedly")) != 1 {
 		t.Fatal("a process that crashed must be logged as an unexpected exit, not as a stop")
+	}
+}
+
+func TestProtocolVersionHeaderOtherThanTheMCPSessionsNegotiatedVersionIs400(t *testing.T) {
+	for name, tc := range map[string]struct {
+		negotiated string // the version the upstream's InitializeResult names; "none" leaves it out
+		header     string // "" sends none
+		rejected   bool
+	}{
+		"absent":             {"2025-11-25", "", false},
+		"the negotiated one": {"2025-11-25", "2025-11-25", false},
+		"another version":    {"2025-11-25", "2025-03-26", true},
+		"not a version":      {"2025-11-25", "latest", true},
+		"the negotiated one when the upstream chose an older version": {"2025-06-18", "2025-06-18", false},
+		"a newer version than the upstream negotiated":                {"2025-06-18", "2025-11-25", true},
+		"any header when the upstream named no version":               {"none", "2025-11-25", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			b := newBridge(t, func(c *Config) { c.Command = []string{fakeBin, "-mcp", "-version=" + tc.negotiated} })
+			s := b.initialize(t, "alice")
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel() // ends the GET stream
+			for _, m := range []struct {
+				method string
+				ok     int
+			}{{http.MethodPost, http.StatusOK}, {http.MethodGet, http.StatusOK}, {http.MethodDelete, http.StatusNoContent}} {
+				res := b.do(t, ctx, m.method, "alice", s, `{"jsonrpc":"2.0","id":1,"method":"echo","params":{}}`, "MCP-Protocol-Version", tc.header)
+				want := m.ok
+				if tc.rejected {
+					want = http.StatusBadRequest
+				}
+				if res.StatusCode != want {
+					t.Fatalf("%s: status %d, want %d", m.method, res.StatusCode, want)
+				}
+				if tc.rejected {
+					body, _ := io.ReadAll(res.Body)
+					if rpcErrorCode(t, body) != codeInvalidRequest || !strings.Contains(string(body), `"id":null`) {
+						t.Fatalf("%s: body %s, want a -32600 error with no id", m.method, body)
+					}
+				}
+			}
+			if tc.rejected { // the rejected DELETE left the MCP session as it was
+				if got := readEvents(t, b.post(t, "alice", s, `{"jsonrpc":"2.0","id":2,"method":"echo","params":{}}`)); len(got) != 1 {
+					t.Fatalf("the MCP session after rejected requests got %q", got)
+				}
+			}
+		})
+	}
+}
+
+func TestRejectedProtocolVersionLeavesTheProcessIdle(t *testing.T) {
+	// At a per-user cap of one, a new MCP session can start only by evicting the idle process: a
+	// rejected request that kept its lease would make that a 503.
+	b := newBridge(t, func(c *Config) { c.MaxPerUser = 1 })
+	s := b.initialize(t, "alice")
+	if res := b.do(t, context.Background(), http.MethodPost, "alice", s, `{"jsonrpc":"2.0","id":1,"method":"echo","params":{}}`,
+		"MCP-Protocol-Version", "2025-03-26"); res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400", res.StatusCode)
+	}
+	if got := b.post(t, "alice", "", initialize).StatusCode; got != http.StatusOK {
+		t.Fatalf("a new MCP session at the cap: status %d, want 200", got)
 	}
 }

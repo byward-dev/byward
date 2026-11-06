@@ -31,7 +31,7 @@ var files embed.FS
 
 // Doc is one published document.
 type Doc struct {
-	Name     string // fixture name: claude-code, claude-ai, vscode
+	Name     string // fixture name: claude-code, claude-ai, vscode, chatgpt
 	ClientID string // the document's URL, which is its client_id
 	Body     []byte
 	Header   http.Header // Cache-Control and Content-Type as served
@@ -45,10 +45,11 @@ var redirects = map[string]string{
 	"claude-code": "http://127.0.0.1:53111/callback",
 	"claude-ai":   "https://claude.ai/api/mcp/auth_callback",
 	"vscode":      "http://127.0.0.1:40123/",
+	"chatgpt":     "https://chatgpt.com/connector_platform_oauth_redirect",
 }
 
 // Names lists the fixtures.
-var Names = []string{"claude-code", "claude-ai", "vscode"}
+var Names = []string{"claude-code", "claude-ai", "vscode", "chatgpt"}
 
 // Load returns a fixture.
 func Load(t testing.TB, name string) Doc {
