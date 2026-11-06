@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -139,6 +140,9 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 	case len(q.Get("state")) > maxState:
 		fail("invalid_request", "state is longer than 512 bytes")
 		return
+	case !validState(q.Get("state")):
+		fail("invalid_request", "state may only contain visible ASCII characters and spaces (RFC 6749 Appendix A.5)")
+		return
 	case q.Get("resource") != "" && q.Get("resource") != b.cfg.Resource.String():
 		// A missing resource means ours (ADR-0005 §4).
 		fail("invalid_target", "this server only issues tokens for "+b.cfg.Resource.String())
@@ -151,13 +155,19 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	l := login{ClientID: client.ID(), RedirectURI: redirect, State: q.Get("state"), Challenge: q.Get("code_challenge"),
 		Scopes: scopes, IdPState: randomID() + randomID(), Nonce: randomID(), Verifier: randomID() + randomID()}
+	// Refused now rather than lost later: a browser drops a cookie over 4 KB, which would surface
+	// only at the callback as an expired sign-in.
+	if _, err := encodeLogin(l); err != nil {
+		fail("invalid_request", "the request is too large")
+		return
+	}
 	b.showConsent(w, r, client, l)
 }
 
 // startLogin sends the browser to the IdP for l, keeping l in the login cookie until the callback.
 func (b *Broker) startLogin(w http.ResponseWriter, r *http.Request, l login, now time.Time) {
 	ctx := r.Context()
-	plain, err := json.Marshal(l)
+	plain, err := encodeLogin(l)
 	if err != nil {
 		b.serverError(w, r, err)
 		return
@@ -182,8 +192,42 @@ func (b *Broker) startLogin(w http.ResponseWriter, r *http.Request, l login, now
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
-// maxState keeps the login cookie well under the browsers' 4 KB limit.
-const maxState = 512
+// The login cookie must stay under the browsers' 4096-byte limit for name, value and attributes.
+// maxState bounds the client's state; maxLoginJSON bounds the encoded login, so the sealed, base64url
+// cookie value (4/3 of it plus about 100 bytes of header and tag) stays near 3.6 KB.
+const (
+	maxState     = 512
+	maxLoginJSON = 2600
+)
+
+// validState accepts RFC 6749's state syntax: VSCHAR, printable ASCII and space. Control
+// characters would each grow to six bytes in the encoded login.
+func validState(s string) bool {
+	for i := range len(s) {
+		if s[i] < 0x20 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+var errLoginTooLarge = errors.New("broker: login too large for its cookie")
+
+// encodeLogin encodes l for the login cookie, without HTML escaping (which would grow each <, >
+// and & to six bytes), and refuses a login over maxLoginJSON.
+func encodeLogin(l login) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(l); err != nil {
+		return nil, err
+	}
+	plain := bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
+	if len(plain) > maxLoginJSON {
+		return nil, errLoginTooLarge
+	}
+	return plain, nil
+}
 
 // validChallenge accepts an S256 challenge: the base64url (no padding) of 32 bytes, 43 characters.
 func validChallenge(c string) bool {

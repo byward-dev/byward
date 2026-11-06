@@ -43,7 +43,7 @@ run = "go test -race ./..."
 
 [tasks."test:scripts"]
 description = "Table tests for the release and CI shell scripts (no network, no Docker)"
-run = "sh scripts/go-version-check_test.sh"
+run = ["sh scripts/go-version-check_test.sh", "sh scripts/test-pins-check_test.sh"]
 
 [tasks."test:conformance"]
 description = "MCP conformance server suite (2025-11-25, 2026-07-28) direct vs through --insecure-no-auth, in a pinned node container; results must match (needs Docker)"
