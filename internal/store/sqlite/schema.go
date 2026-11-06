@@ -62,6 +62,10 @@ var migrations = []string{
 	// within the grace window issues another.
 	`ALTER TABLE refresh_tokens ADD COLUMN rotated_at INTEGER;
 	ALTER TABLE refresh_tokens ADD COLUMN successor BLOB;`,
+
+	// v3: revoke-all (ADR-0006 §9). A cut-off for every subject is marked explicitly, never by an
+	// empty subject, so a row naming nothing cannot revoke everyone.
+	`ALTER TABLE revocations ADD COLUMN scope TEXT NOT NULL DEFAULT '' CHECK (scope IN ('', 'all'));`,
 }
 
 // schemaVersion is the schema this binary writes.

@@ -57,8 +57,18 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) ยง1โ
         and the user signs in again (`internal/broker/refresh.go`).
       - So keep an old key for the grant lifetime (30 days) to avoid those sign-ins, or accept them
         (#104 tracks re-sealing so this is no longer needed).
-- [ ] Emergency "sign everyone out": replace every key file and restart. Every access token then
-      fails at once. Dedicated `revoke-user` and `revoke-all` commands are planned (#101).
+- [ ] Know the operator revocation commands. They read the same `BYWARD_*` environment as the
+      proxy (run them in its container or with its settings), write to the same store while it
+      runs, and every proxy refuses the tokens within seconds (the deny list resyncs every 5 s):
+      - `byward revoke-user <tid:oid>` ends one user's access: their grants are deleted, so their
+        refresh tokens stop at once, and their access tokens are refused. The key is the
+        `user_key` of the audit stream; the Entra portal's tenant and object IDs in either case.
+      - `byward revoke-all --yes` does the same for every user (incident response).
+      - Each writes a `grant_revoked` audit record with the reason `operator revoke-user` or
+        `operator revoke-all`. A user who still passes the access gate can sign in again; to keep
+        them out, also block them at Entra or in the gate.
+      - If the sealing keys may be compromised, also replace every key file and restart: that
+        invalidates every token at once, whatever the store holds.
 - [ ] Give secrets only as files:
       - the Entra client secret through `BYWARD_ENTRA_CLIENT_SECRET_FILE` (or
         `--entra-client-secret-file`);

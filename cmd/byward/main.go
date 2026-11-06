@@ -46,10 +46,15 @@ func main() {
 }
 
 func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 {
+		if c, ok := commands[args[0]]; ok {
+			return c.run(ctx, args[1:], environ, stdout, stderr)
+		}
+	}
 	cfg, act, err := config.Load(args, environ, os.ReadFile)
 	switch {
 	case config.IsHelp(err):
-		_, _ = io.WriteString(stdout, config.Usage())
+		_, _ = io.WriteString(stdout, config.Usage()+commandsUsage())
 		return exitOK
 	case err != nil:
 		_, _ = fmt.Fprintf(stderr, "byward: configuration error: %v\n", err)

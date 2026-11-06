@@ -137,6 +137,11 @@ bounds, but there are no settings for that yet.
   has not synced yet (`internal/denylist/denylist.go`).
 - `/revoke` revokes the whole grant, whichever of its tokens was sent. A store failure gets 503,
   never a false 200.
+- The operator commands `byward revoke-user <tid:oid>` and `byward revoke-all --yes` delete the
+  grants and record a cut-off in the store, beside a running proxy. Every proxy using the store
+  refuses those users' tokens at its next sync (`internal/server/revoke.go`). A cut-off for every
+  user is an explicit marker (`scope = 'all'`, checked by the database); a revocation naming
+  nothing revokes nobody.
 - No revocation request is sent to Entra; the IdP tokens are deleted and expire there.
 
 **Keys:**
@@ -152,8 +157,7 @@ bounds, but there are no settings for that yet.
 
 | Gap | Effect | Tracking |
 |---|---|---|
-| **No operator revoke commands.** `revoke-user` and `revoke-all` (ADR-0006 §9, ADR-0010 §11) are not built; `store.RevokeSubject` has no caller. | Revocation is client-initiated (`/revoke`) or automatic (reuse, gate, IdP). An operator can end all access at once by replacing every sealing key and restarting. Cutting off one user takes up to 1 h: block them at Entra or in the gate, and the next refresh fails. | #101 |
-| ASVS 5.0.0 10.7.3 (user review and revocation of granted access) | Not met for users. The design leaves it to the operator until a v0.2 "connected apps" page, and the operator commands above are missing too. | ADR-0010 §11; v0.2 |
+| ASVS 5.0.0 10.7.3 (user review and revocation of granted access) | Not met for users. The design leaves it to the operator (`byward revoke-user`, `byward revoke-all`) until a v0.2 "connected apps" page. | ADR-0010 §11; v0.2 |
 | Remembered consent | Not built: every client is asked every time. That is stricter than ADR-0010 §2–3. | #90 |
 | Consent answer table is per replica, in memory, capped at 10,000 | Double-submit protection holds within one process. A full table forgets the newest flow. It matters only with several replicas, which need v0.2's PostgreSQL. | No issue (`internal/broker/answers.go`) |
 | Restore drill | Restore detection works (a restored store starts a new epoch, refuses refresh tokens from before the restore, logs it and writes a `store_restored` audit record), but no automated test restores a real backup yet. | #53 |

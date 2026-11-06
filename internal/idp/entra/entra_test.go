@@ -79,6 +79,9 @@ func TestLoginKeysUserOnTidOidAndKeepsAccessAsUserToken(t *testing.T) {
 	if id.Subject != u.TenantID+":"+u.OID {
 		t.Errorf("subject = %q", id.Subject)
 	}
+	if k, ok := UserKey(id.Subject); !ok || k != id.Subject {
+		t.Errorf("UserKey(%q) = %q, %v: the operator's key must name the user sign-in stores", id.Subject, k, ok)
+	}
 	if id.Issuer != Authority+"/"+u.TenantID+"/v2.0" || id.EmailVerified || id.Email != u.Email {
 		t.Errorf("identity = %+v", id)
 	}
@@ -480,5 +483,32 @@ func TestAccessTokenCheckWhileJWKSIsDownIsUnavailableWithoutHint(t *testing.T) {
 	var ie *idp.Error
 	if err := e.p.checkAccessToken(context.Background(), access()); !errors.As(err, &ie) || ie.Class != idp.Unavailable || ie.OperatorHint != "" {
 		t.Fatalf("keys down: %#v", err)
+	}
+}
+
+// An operator types the user key from the audit stream or the Entra portal (either case); anything
+// that is not tid:oid is refused, so a typo cannot pass for a done revocation.
+func TestUserKeyAcceptsTidOidInAnyCaseAndRefusesTheRest(t *testing.T) {
+	const tid, oid = "00000000-0000-0000-0000-00000000000a", "11111111-1111-1111-1111-11111111111a"
+	for _, tc := range []struct {
+		name, in, want string
+	}{
+		{"canonical", tid + ":" + oid, tid + ":" + oid},
+		{"upper case", strings.ToUpper(tid + ":" + oid), tid + ":" + oid},
+		{"surrounding spaces", "  " + tid + ":" + oid + "\n", tid + ":" + oid},
+		{"empty", "", ""},
+		{"an email", "alice@contoso.com", ""},
+		{"no colon", tid + oid, ""},
+		{"one GUID", oid, ""},
+		{"an extra segment", tid + ":" + oid + ":x", ""},
+		{"tenant not a GUID", "contoso:" + oid, ""},
+		{"object not a GUID", tid + ":alice", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := UserKey(tc.in)
+			if got != tc.want || ok != (tc.want != "") {
+				t.Fatalf("UserKey(%q) = %q, %v; want %q", tc.in, got, ok, tc.want)
+			}
+		})
 	}
 }

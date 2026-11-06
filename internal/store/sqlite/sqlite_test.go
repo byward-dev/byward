@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -121,6 +122,40 @@ func TestRevokeSubjectRacingCreateGrantAcrossProcessesLeavesNoCoveredGrant(t *te
 		wg.Wait() // only the two calls of this round compete, well inside the busy timeout
 		if _, err := a.Grant(ctx, subject); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("grant %s survived its subject's cut-off: %v", subject, err)
+		}
+	}
+}
+
+// The operator's revoke-all runs as a second process beside the proxy: whatever the interleaving, a
+// grant created before its cut-off never survives it.
+func TestRevokeAllRacingCreateGrantAcrossProcessesLeavesNoCoveredGrant(t *testing.T) {
+	dir, counter := t.TempDir(), filepath.Join(t.TempDir(), "writes")
+	proxy, operator := open(t, dir, counter), open(t, dir, counter)
+	const rounds = 100
+	for i := range rounds {
+		id := fmt.Sprintf("tid:u%d", i)
+		g := grant(id, id)
+		g.CreatedAt = t0.Add(time.Duration(i) * time.Hour) // each round's cut-off covers only its own grant
+		g.ExpiresAt = g.CreatedAt.Add(time.Hour)
+		before := g.CreatedAt.Add(time.Minute)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			<-start
+			if _, err := proxy.CreateGrant(ctx, g); err != nil && !errors.Is(err, store.ErrRevoked) {
+				t.Errorf("CreateGrant %s: %v", id, err)
+			}
+		})
+		wg.Go(func() {
+			<-start
+			if err := operator.RevokeAll(ctx, before, before); err != nil {
+				t.Errorf("RevokeAll: %v", err)
+			}
+		})
+		close(start)
+		wg.Wait()
+		if _, err := proxy.Grant(ctx, id); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("grant %s survived revoke-all: %v", id, err)
 		}
 	}
 }
@@ -463,6 +498,8 @@ var (
 		{GrantID: "fixture-revoked", Before: fixtureCreated, At: fixtureCreated},
 		{Subject: "tid:fixture-revoked-subject", Before: fixtureCreated, At: fixtureCreated.Add(time.Second)},
 	}
+	// From v3: a cut-off for every subject.
+	fixtureRevokeAll = store.Revocation{All: true, Before: fixtureCreated, At: fixtureCreated.Add(2 * time.Second)}
 )
 
 func TestFixturesMigrateToTheCurrentSchemaKeepingTheirData(t *testing.T) {
@@ -487,8 +524,12 @@ func TestFixturesMigrateToTheCurrentSchemaKeepingTheirData(t *testing.T) {
 			if r, err := s.RefreshToken(ctx, fixtureRefresh.Hash, fixtureCreated); err != nil || !reflect.DeepEqual(r, fixtureRefresh) {
 				t.Fatalf("refresh token = %+v, %v\nwant %+v", r, err, fixtureRefresh)
 			}
-			if revs, err := s.Revocations(ctx); err != nil || !reflect.DeepEqual(revs, fixtureRevocations) {
-				t.Fatalf("revocations = %+v, %v\nwant %+v", revs, err, fixtureRevocations)
+			wantRevs := fixtureRevocations
+			if v >= 3 {
+				wantRevs = append(slices.Clone(fixtureRevocations), fixtureRevokeAll)
+			}
+			if revs, err := s.Revocations(ctx); err != nil || !reflect.DeepEqual(revs, wantRevs) {
+				t.Fatalf("revocations = %+v, %v\nwant %+v", revs, err, wantRevs)
 			}
 			if c, err := s.ConsumeCode(ctx, fixtureGrant.ID, fixtureCreated); err != nil || !reflect.DeepEqual(c, fixtureCode) {
 				t.Fatalf("code = %+v, %v\nwant %+v", c, err, fixtureCode)
@@ -651,5 +692,24 @@ func TestPingAnswersWhileOpenAndFailsAfterClose(t *testing.T) {
 	must(t, s.Close())
 	if err := s.Ping(ctx); err == nil {
 		t.Fatal("Ping succeeded on a closed store")
+	}
+}
+
+// Only the empty scope and "all" are scopes: the database itself refuses anything else, so no write path can
+// invent a revocation that covers more than it names.
+func TestTheRevocationScopeIsCheckedByTheDatabase(t *testing.T) {
+	s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
+	insert := func(scope string) error {
+		_, err := s.db.Exec("INSERT INTO revocations (grant_id, subject, scope, before, at) VALUES ('', '', ?, 1, 1)", scope)
+		return err
+	}
+	if err := insert("all"); err != nil { // the same statement with a valid scope: proves the insert itself works
+		t.Fatalf("a valid scope was refused: %v", err)
+	}
+	if err := insert("everyone"); err == nil || !strings.Contains(err.Error(), "CHECK constraint failed") {
+		t.Fatalf("an unknown scope: %v, want the CHECK constraint to refuse it", err)
+	}
+	if revs, err := s.Revocations(ctx); err != nil || len(revs) != 1 || !revs[0].All {
+		t.Fatalf("revocations = %+v, %v; want only the valid one", revs, err)
 	}
 }
