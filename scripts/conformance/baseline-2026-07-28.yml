@@ -1,3 +1,7 @@
-# Checks the reference server itself fails at 2026-07-28 (filled from the first real run).
-# A stale entry fails the lane, so this stays equal to the direct failures.
-server: []
+# Checks the reference server itself does not pass at 2026-07-28 (scored by --requirements).
+# A stale entry fails the lane, so this stays equal to the direct failures. The tasks-* and
+# http-*-header-validation scenarios fail too, but requirements/2026-07-28.yaml marks them pending
+# ("run for visibility"), so they are not scored; they are still compared direct-vs-proxy.
+server:
+  # WARNING directly and through the proxy (first CI run, 2026-11-06).
+  - input-required-result-validate-input:sep-2322-validate-input-responses

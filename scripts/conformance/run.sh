@@ -85,14 +85,15 @@ for rev in $revisions; do
 done
 
 # 5. Pass/fail matrix for the PR and the CI job summary.
+counts() { printf '%s / %s' "$(grep -c '	FAILURE$' "$1" || true)" "$(grep -c '	WARNING$' "$1" || true)"; }
 {
-  echo "| Revision | Scenarios | Checks | Failures (direct) | Failures (proxy) | Proxy = direct |"
+  echo "| Revision | Scenarios | Checks | FAILURE / WARNING (direct) | FAILURE / WARNING (proxy) | Proxy = direct |"
   echo "|---|---|---|---|---|---|"
   for rev in $revisions; do
     same=yes; [ -s "$out/diff-$rev.txt" ] && same=no
     printf '| %s | %s | %s | %s | %s | %s |\n' "$rev" \
       "$(cut -f1 "$out/direct-$rev.tsv" | sort -u | wc -l | tr -d ' ')" "$(wc -l < "$out/direct-$rev.tsv" | tr -d ' ')" \
-      "$(grep -c '	FAILURE$' "$out/direct-$rev.tsv" || true)" "$(grep -c '	FAILURE$' "$out/proxy-$rev.tsv" || true)" "$same"
+      "$(counts "$out/direct-$rev.tsv")" "$(counts "$out/proxy-$rev.tsv")" "$same"
   done
 } > "$out/summary.md"
 cat "$out/summary.md"
