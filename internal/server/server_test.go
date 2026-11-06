@@ -1,0 +1,209 @@
+package server
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/corker/mcp-authproxy/internal/config"
+	"github.com/corker/mcp-authproxy/internal/resource"
+	"github.com/corker/mcp-authproxy/internal/testutil/fakeupstream"
+)
+
+type acceptGood struct{}
+
+func (acceptGood) Validate(_ context.Context, tok string) (resource.Identity, error) {
+	if tok == "good" {
+		return resource.Identity{Subject: "tid:oid"}, nil
+	}
+	return resource.Identity{}, resource.ErrInvalid
+}
+
+type env struct {
+	srv  *httptest.Server
+	up   *fakeupstream.Server
+	logs *bytes.Buffer
+}
+
+// start runs the proxy on a test listener; the public URL's host is set as the request Host.
+func start(t *testing.T, extraEnv ...string) env {
+	t.Helper()
+	up := fakeupstream.New()
+	t.Cleanup(up.Close)
+	cfg, _, err := config.Load(nil, append([]string{
+		"MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp",
+		"MCP_AUTHPROXY_UPSTREAM_URL=" + up.URL + "/mcp",
+		"MCP_AUTHPROXY_ALLOWED_ORIGINS=https://app.example",
+	}, extraEnv...), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs := &bytes.Buffer{}
+	srv := httptest.NewServer(Handler(cfg, slog.New(slog.NewJSONHandler(logs, nil)), acceptGood{}))
+	t.Cleanup(srv.Close)
+	return env{srv, up, logs}
+}
+
+func (e env) do(t *testing.T, method, path string, body io.Reader, hdr map[string]string) *http.Response {
+	t.Helper()
+	r, err := http.NewRequest(method, e.srv.URL+path, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Host = "mcp.example.com"
+	for k, v := range hdr {
+		r.Header.Set(k, v)
+	}
+	res, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = res.Body.Close() })
+	return res
+}
+
+func TestUnauthenticatedPostGets401WhoseMetadataResolves(t *testing.T) {
+	e := start(t)
+	res := e.do(t, "POST", "/mcp", strings.NewReader(`{}`), nil)
+	www := res.Header.Get("WWW-Authenticate")
+	if res.StatusCode != 401 || !strings.Contains(www, `resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource/mcp"`) {
+		t.Fatalf("code=%d www=%q", res.StatusCode, www)
+	}
+	for _, p := range []string{"/.well-known/oauth-protected-resource/mcp", "/.well-known/oauth-protected-resource"} {
+		res := e.do(t, "GET", p, nil, nil)
+		var d struct{ Resource string }
+		if err := json.NewDecoder(res.Body).Decode(&d); err != nil || res.StatusCode != 200 || d.Resource != "https://mcp.example.com/mcp" {
+			t.Fatalf("%s: code=%d resource=%q err=%v", p, res.StatusCode, d.Resource, err)
+		}
+	}
+	if len(e.up.Requests()) != 0 {
+		t.Fatal("unauthenticated request reached the upstream")
+	}
+}
+
+func TestValidTokenIsRelayedWithoutIt(t *testing.T) {
+	e := start(t)
+	res := e.do(t, "POST", "/mcp", strings.NewReader(`{"jsonrpc":"2.0"}`), map[string]string{"Authorization": "Bearer good", "Content-Type": "application/json"})
+	b, _ := io.ReadAll(res.Body)
+	if res.StatusCode != 200 || string(b) != `{"jsonrpc":"2.0"}` {
+		t.Fatalf("code=%d body=%s", res.StatusCode, b)
+	}
+	got, _ := e.up.Last()
+	if got.Header.Get("Authorization") != "" {
+		t.Fatal("token passed through to the upstream")
+	}
+	if strings.Contains(e.logs.String(), "good") {
+		t.Fatalf("token logged: %s", e.logs)
+	}
+}
+
+func TestChecksRunBeforeAuthentication(t *testing.T) {
+	e := start(t)
+	// Wrong Origin: 403 even without a token.
+	if res := e.do(t, "POST", "/mcp", nil, map[string]string{"Origin": "https://evil.example"}); res.StatusCode != 403 {
+		t.Fatalf("origin: got %d", res.StatusCode)
+	}
+	if res := e.do(t, "POST", "/mcp", nil, map[string]string{"Origin": "https://app.example"}); res.StatusCode != 401 {
+		t.Fatalf("allowed origin without token: got %d", res.StatusCode)
+	}
+	// Wrong Host: 421 on every route.
+	for _, p := range []string{"/mcp", "/.well-known/oauth-protected-resource"} {
+		r, _ := http.NewRequest("GET", e.srv.URL+p, nil)
+		r.Host = "attacker.example"
+		res, err := http.DefaultClient.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+		if res.StatusCode != http.StatusMisdirectedRequest {
+			t.Fatalf("%s host: got %d", p, res.StatusCode)
+		}
+	}
+}
+
+func TestAllowedHostsAccepted(t *testing.T) {
+	e := start(t, "MCP_AUTHPROXY_ALLOWED_HOSTS=proxy.internal:8080")
+	r, _ := http.NewRequest("GET", e.srv.URL+"/.well-known/oauth-protected-resource", nil)
+	r.Host = "proxy.internal:8080"
+	res, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("got %d", res.StatusCode)
+	}
+}
+
+func TestBodyLimit(t *testing.T) {
+	e := start(t)
+	res := e.do(t, "POST", "/mcp", bytes.NewReader(make([]byte, MaxMCPBody+1)), map[string]string{"Authorization": "Bearer good"})
+	if res.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("got %d", res.StatusCode)
+	}
+}
+
+func TestUnknownPathsAre404(t *testing.T) {
+	e := start(t)
+	for _, p := range []string{"/", "/mcp/extra", "/debug/pprof/"} {
+		if res := e.do(t, "GET", p, nil, nil); res.StatusCode != 404 {
+			t.Fatalf("%s: got %d", p, res.StatusCode)
+		}
+	}
+	if res := e.do(t, "TRACE", "/mcp", nil, nil); res.StatusCode == 200 {
+		t.Fatal("TRACE must not succeed")
+	}
+}
+
+func TestServerTimeoutsAreSet(t *testing.T) {
+	cfg, _, err := config.Load(nil, []string{"MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), resource.NoTokens{})
+	if s.ReadHeaderTimeout == 0 || s.ReadTimeout == 0 || s.IdleTimeout == 0 || s.MaxHeaderBytes == 0 {
+		t.Fatalf("a limit is unset: %+v", s)
+	}
+	if s.Addr != "127.0.0.1:8080" {
+		t.Fatalf("default bind = %q", s.Addr)
+	}
+}
+
+func TestRecovererHidesPanicDetails(t *testing.T) {
+	var logs bytes.Buffer
+	h := recoverer(slog.New(slog.NewJSONHandler(&logs, nil)), http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") }))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", "/", nil)
+	r.Header.Set("Authorization", "Bearer secret")
+	h.ServeHTTP(w, r)
+	if w.Code != 500 || strings.Contains(w.Body.String(), "boom") || strings.Contains(logs.String(), "secret") {
+		t.Fatalf("code=%d body=%q logs=%s", w.Code, w.Body, logs.String())
+	}
+}
+
+func TestRunShutsDownOnCancel(t *testing.T) {
+	cfg, _, err := config.Load(nil, []string{"MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Run(ctx, New(cfg, log, resource.NoTokens{}), log) }()
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+}

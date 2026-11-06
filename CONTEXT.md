@@ -50,6 +50,10 @@ _Avoid_: session (alone — ambiguous with login/browser sessions), connection
 The proxy's authorization-server role toward **MCP clients**: it serves AS metadata, handles **client registration**, consent, `/authorize`, `/token`, and itself acts as an OAuth client of the **IdP** using the **IdP app**.
 _Avoid_: proxy AS, OAuth proxy, authorization server (alone)
 
+**Protected resource**:
+The proxy's resource-server role toward **MCP clients**: it serves protected resource metadata (RFC 9728) and admits MCP requests only with a valid **proxy token** (ADR-0013, ADR-0014).
+_Avoid_: RS (alone), gateway, resource (alone)
+
 **IdP token**:
 A token issued by the **IdP** (ID token, access token, refresh token).
 _Avoid_: upstream token, access token (alone)
