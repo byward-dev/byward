@@ -624,7 +624,7 @@ func TestMissingOrDuplicateMCPSessionHeadersAndUnsupportedMethodsStartNoProcess(
 		want     int
 		allow    string // the Allow header expected; only a 405 lists the methods
 	}{
-		"two session headers":                          {http.MethodPost, []string{s, s}, http.StatusBadRequest, ""},
+		"two MCP session headers":                      {http.MethodPost, []string{s, s}, http.StatusBadRequest, ""},
 		"GET without an MCP session is not allowed":    {http.MethodGet, nil, http.StatusMethodNotAllowed, "POST"},
 		"DELETE without an MCP session is not allowed": {http.MethodDelete, nil, http.StatusMethodNotAllowed, "POST"},
 		"PUT": {http.MethodPut, []string{s}, http.StatusMethodNotAllowed, "GET, POST, DELETE"},

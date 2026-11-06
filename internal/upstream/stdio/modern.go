@@ -220,10 +220,11 @@ func (b *Bridge) connFor(key string, p *Process, id Identity) *userConn {
 	go func() {
 		c.pump()
 		b.mu.Lock()
-		if b.users[key] == c {
+		if b.users[key] == c { // a successor for a respawned process stays
 			delete(b.users, key)
 		}
 		b.mu.Unlock()
+		close(c.ended) // after the map is settled, so whoever sees it ended sees that too
 	}()
 	return c
 }
@@ -355,7 +356,6 @@ func (c *userConn) pump() {
 	for msg := range c.p.Messages() {
 		c.route(msg)
 	}
-	close(c.ended)
 }
 
 // route sends one upstream message to the request it belongs to, under the client's own ids.

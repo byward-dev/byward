@@ -287,7 +287,7 @@ func TestAClientsCancellationNeverReachesTheUpstream(t *testing.T) {
 	held.all()
 }
 
-func TestLogMessagesReachARequestOnlyWhenItIsTheOneThatAskedForThem(t *testing.T) {
+func TestLogMessagesReachARequestOnlyWhenItIsTheOnlyOneAskingForThem(t *testing.T) {
 	logLevel := `"io.modelcontextprotocol/logLevel":"info"`
 	for name, tc := range map[string]struct {
 		heldAsks  bool // the other request in flight asked for log messages too
@@ -331,14 +331,14 @@ func TestUpstreamRequestsInTheModernEraAreAnsweredWithAnError(t *testing.T) {
 }
 
 func TestUnroutableUpstreamMessagesAreDroppedAndLogged(t *testing.T) {
-	for method, tc := range map[string]struct{ msg, reason string }{
-		"stray":         {"upstream notification dropped", "notification_unrouted"},
-		"strayprogress": {"upstream notification dropped", "progress_unrouted"},
-		"strayresponse": {"upstream response for no waiting request", "response_unrouted"},
+	for name, tc := range map[string]struct{ method, msg, reason string }{
+		"notification for no request":     {"stray", "upstream notification dropped", "notification_unrouted"},
+		"progress for no request":         {"strayprogress", "upstream notification dropped", "progress_unrouted"},
+		"response for no waiting request": {"strayresponse", "upstream response for no waiting request", "response_unrouted"},
 	} {
-		t.Run(method, func(t *testing.T) {
+		t.Run(name, func(t *testing.T) {
 			b := newModernBridge(t, nil)
-			if events := readEvents(t, b.post(t, "alice", "", modernBody(`1`, method, "", ""))); len(events) != 1 {
+			if events := readEvents(t, b.post(t, "alice", "", modernBody(`1`, tc.method, "", ""))); len(events) != 1 {
 				t.Fatalf("events %q, want only the result", events)
 			}
 			if recs := b.log.with(tc.msg); len(recs) != 1 || recs[0].attrs["reason"] != tc.reason {
@@ -397,8 +397,7 @@ func TestAnEndedProcessesPumpNeverRemovesItsSuccessor(t *testing.T) {
 	b.bridge.users[key] = successor
 	b.bridge.mu.Unlock()
 	old.p.stop("test")
-	<-old.ended
-	eventually(t, "the old pump to finish", func() bool { return b.m.Len() == 0 })
+	<-old.ended // closed only after the old pump's cleanup has run
 	b.bridge.mu.Lock()
 	defer b.bridge.mu.Unlock()
 	if b.bridge.users[key] != successor {
