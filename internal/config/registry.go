@@ -7,7 +7,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -85,6 +87,8 @@ func errorf(format string, a ...any) error { return &configError{msg: fmt.Sprint
 type Values struct {
 	order []string
 	byKey map[string]Value
+	// command is the stdio upstream's argv given after --; its Value shows it for display only.
+	command []string
 }
 
 // get returns the raw value of a setting.
@@ -98,6 +102,9 @@ func (v *Values) Effective() []Value {
 	}
 	return out
 }
+
+// commandSetting is the setting a command after -- fills, as a JSON array.
+const commandSetting = "upstream-command"
 
 // readFileFunc reads a secret file; main passes os.ReadFile.
 type readFileFunc = func(path string) ([]byte, error)
@@ -124,6 +131,11 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 	}
 	if extraFlags != nil {
 		extraFlags(fs)
+	}
+	// Everything after the first -- is the stdio upstream's command (ADR-0019 §8).
+	var command []string
+	if i := slices.Index(args, "--"); i >= 0 {
+		args, command = args[:i], args[i+1:]
 	}
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -173,6 +185,23 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 		}
 		vals.order = append(vals.order, s.Name)
 		vals.byKey[s.Name] = v
+	}
+	if command != nil {
+		v, ok := vals.byKey[commandSetting]
+		if !ok || v.Source != SourceDefault {
+			return nil, errorf("give the stdio upstream command either after -- or with --%s / %s, not both", commandSetting, v.Setting.Env())
+		}
+		if len(command) == 0 {
+			return nil, errorf("no command after --")
+		}
+		// Kept as argv, not re-encoded: shown quoted, word by word.
+		quoted := make([]string, len(command))
+		for i, a := range command {
+			quoted[i] = strconv.Quote(a)
+		}
+		v.Raw, v.Source = strings.Join(quoted, " "), SourceFlag
+		vals.byKey[commandSetting] = v
+		vals.command = command
 	}
 	return vals, nil
 }

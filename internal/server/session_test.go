@@ -48,7 +48,7 @@ func TestALegacySessionIsBoundToTheUserWhoStartedIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { stop(t, a) })
-	srv := httptest.NewServer(Handler(cfg, discard, twoUsers{"tok-alice": "tid:alice", "tok-bob": "tid:bob"}, nil, a.sessions, Observability{}))
+	srv := httptest.NewServer(Handler(cfg, discard, httpUpstream(cfg, discard), twoUsers{"tok-alice": "tid:alice", "tok-bob": "tid:bob"}, nil, a.sessions, Observability{}))
 	t.Cleanup(srv.Close)
 	post := func(token, session string) *http.Response {
 		t.Helper()

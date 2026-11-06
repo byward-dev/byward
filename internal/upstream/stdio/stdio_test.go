@@ -307,7 +307,7 @@ func TestCrashFailsOnlyItsOwnKey(t *testing.T) {
 func TestKeyIsBoundToOneUser(t *testing.T) {
 	h := newHarness(t, nil)
 	p := h.get(t, "s1", alice)
-	if _, err := h.m.Get(context.Background(), "s1", bob); !errors.Is(err, ErrUserMismatch) {
+	if _, _, err := h.m.Get(context.Background(), "s1", bob); !errors.Is(err, ErrUserMismatch) {
 		t.Fatalf("Get by another user = %v, want ErrUserMismatch", err)
 	}
 	if again := h.get(t, "s1", alice); again != p {
@@ -321,7 +321,7 @@ func TestConcurrentGetsForOneKeySpawnOnce(t *testing.T) {
 	pids := make([]int, 8)
 	for i := range pids {
 		wg.Go(func() {
-			if p, err := h.m.Get(context.Background(), "s1", alice); err == nil {
+			if p, _, err := h.m.Get(context.Background(), "s1", alice); err == nil {
 				pids[i] = p.PID()
 			}
 		})
@@ -345,7 +345,7 @@ func TestGetRequiresAnIdentity(t *testing.T) {
 	}
 	for name, id := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := h.m.Get(context.Background(), "s1", id); err == nil {
+			if _, _, err := h.m.Get(context.Background(), "s1", id); err == nil {
 				t.Fatal("Get succeeded")
 			}
 		})
@@ -363,7 +363,7 @@ func TestCancelledSpawnLeavesNothingBehind(t *testing.T) {
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := h.m.Get(ctx, "s1", alice); !errors.Is(err, context.Canceled) {
+	if _, _, err := h.m.Get(ctx, "s1", alice); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Get = %v, want context.Canceled", err)
 	}
 	left, err := os.ReadDir(tmp)
@@ -373,7 +373,7 @@ func TestCancelledSpawnLeavesNothingBehind(t *testing.T) {
 	if len(left) != 0 || h.m.Len() != 0 {
 		t.Fatalf("left behind: dirs %v, Len %d", left, h.m.Len())
 	}
-	if _, err := h.m.Get(context.Background(), "s1", alice); err != nil {
+	if _, _, err := h.m.Get(context.Background(), "s1", alice); err != nil {
 		t.Fatalf("Get after the failed spawn: %v", err)
 	}
 }
@@ -407,7 +407,7 @@ func TestShutdownStopsEveryProcessAndRefusesNewOnes(t *testing.T) {
 	if !isDone(a) || !isDone(b) {
 		t.Fatal("Shutdown returned with a process still running")
 	}
-	if _, err := h.m.Get(context.Background(), "c", alice); !errors.Is(err, ErrClosed) {
+	if _, _, err := h.m.Get(context.Background(), "c", alice); !errors.Is(err, ErrClosed) {
 		t.Fatalf("Get after Shutdown = %v, want ErrClosed", err)
 	}
 }
@@ -507,7 +507,43 @@ func TestSameSubjectFromAnotherIssuerIsAnotherUser(t *testing.T) {
 	h := newHarness(t, nil)
 	h.get(t, "s1", alice)
 	other := Identity{Subject: alice.Subject, Issuer: "https://other-idp.example"}
-	if _, err := h.m.Get(context.Background(), "s1", other); !errors.Is(err, ErrUserMismatch) {
+	if _, _, err := h.m.Get(context.Background(), "s1", other); !errors.Is(err, ErrUserMismatch) {
 		t.Fatalf("Get = %v, want ErrUserMismatch", err)
+	}
+}
+
+func TestProcessThatClosesStdoutButKeepsRunningIsStoppedAfterTheGrace(t *testing.T) {
+	h := newHarness(t, func(c *Config) { c.Command = []string{fakeBin, "-mcp"} })
+	p := h.get(t, "s1", alice)
+	if err := p.Send(context.Background(), []byte(`{"jsonrpc":"2.0","id":1,"method":"closestdout"}`)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case _, ok := <-p.Messages():
+		if ok {
+			t.Fatal("got a message, want stdout closed")
+		}
+	case <-time.After(guard):
+		t.Fatal("stdout did not close")
+	}
+	if isDone(p) {
+		t.Fatal("the process exited by itself, so this test proves nothing")
+	}
+	// It can answer no one, so it must not keep its cap slot until the idle timeout.
+	h.clk.Advance(DefaultKillGrace)
+	waitDone(t, p)
+	if recs := h.log.with("stopping upstream process"); len(recs) != 1 || recs[0].attrs["reason"] != "stdout_closed" {
+		t.Fatalf("stop records %v, want one for stdout_closed", recs)
+	}
+}
+
+func TestCrashIsNotLoggedAsAStdoutStop(t *testing.T) {
+	h := newHarness(t, nil)
+	p := h.get(t, "s1", alice)
+	_ = p.Send(context.Background(), []byte("crash"))
+	waitDone(t, p)
+	h.clk.Advance(DefaultKillGrace) // a timer armed at stdout EOF must be gone with the process
+	if len(h.log.with("stopping upstream process")) != 0 || len(h.log.with("upstream process exited unexpectedly")) != 1 {
+		t.Fatal("a crash must be logged as an unexpected exit, not as a stop")
 	}
 }

@@ -81,7 +81,7 @@ func start(t *testing.T, extraEnv ...string) env {
 	}
 	logs := &syncBuffer{}
 	log := slog.New(slog.NewJSONHandler(logs, nil))
-	srv := httptest.NewServer(Handler(cfg, log, acceptGood{}, nil, nil, Observability{Audit: audit.New(log, nil, time.Now)}))
+	srv := httptest.NewServer(Handler(cfg, log, httpUpstream(cfg, log), acceptGood{}, nil, nil, Observability{Audit: audit.New(log, nil, time.Now)}))
 	t.Cleanup(srv.Close)
 	return env{srv, up, logs}
 }
@@ -395,7 +395,8 @@ func TestNoAuthServesTheUpstreamWithoutMetadataOrChallenge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(Handler(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), resource.NoTokens{}, nil, nil, Observability{}))
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(Handler(cfg, log, httpUpstream(cfg, log), resource.NoTokens{}, nil, nil, Observability{}))
 	t.Cleanup(srv.Close)
 	do := func(method, path, host string, hdr map[string]string) *http.Response {
 		r, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(`{"jsonrpc":"2.0"}`))

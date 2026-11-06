@@ -20,6 +20,8 @@ type Servers struct {
 
 	background func(ctx context.Context) // nil without authentication; runs while the public listener serves
 	closeStore func() error              // nil without authentication; releases the store once Run is done
+	// closeUpstream stops the upstream's processes once the public listener is closed; nil for HTTP.
+	closeUpstream func(context.Context) error
 }
 
 func hardened(addr string, h http.Handler, log *slog.Logger) *http.Server {
@@ -42,6 +44,15 @@ func Run(ctx context.Context, s *Servers, log *slog.Logger) error {
 		defer func() {
 			if err := s.closeStore(); err != nil {
 				log.Warn("closing the store failed", "error", err)
+			}
+		}()
+	}
+	if s.closeUpstream != nil { // runs before closeStore and after the listeners have shut down
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ShutdownTimeout)
+			defer cancel()
+			if err := s.closeUpstream(ctx); err != nil {
+				log.Warn("stopping the upstream processes timed out", "error", err)
 			}
 		}()
 	}

@@ -27,6 +27,8 @@ var (
 	errMessageTooLarge = errors.New("stdio: upstream message over the size limit")
 )
 
+var newline = []byte{'\n'}
+
 // Process is one upstream process: newline-delimited JSON-RPC in on stdin and out on stdout,
 // relayed as bytes. Create it with Manager.Get.
 type Process struct {
@@ -115,10 +117,12 @@ func (p *Process) Send(ctx context.Context, msg []byte) error {
 		return err
 	}
 	cancelled := context.AfterFunc(ctx, func() { _ = p.stdin.SetWriteDeadline(time.Unix(1, 0)) })
-	buf := make([]byte, len(msg)+1)
-	copy(buf, msg)
-	buf[len(msg)] = '\n'
-	n, err := p.stdin.Write(buf)
+	n, err := p.stdin.Write(msg) // then the newline: no copy of a message up to the body limit
+	if err == nil {
+		var m int
+		m, err = p.stdin.Write(newline)
+		n += m
+	}
 	if !cancelled() {
 		_ = p.stdin.SetWriteDeadline(time.Time{})
 	}
@@ -193,7 +197,9 @@ func (p *Process) closeStdin() { p.stdinOnce.Do(func() { _ = p.stdin.Close() }) 
 func (p *Process) giveUp() { p.abandonOnce.Do(func() { close(p.abandon) }) }
 
 // readStdout delivers stdout lines until EOF. A line over the size limit stops the process; the
-// rest of the output is drained so the process never blocks on a full pipe.
+// rest of the output is drained so the process never blocks on a full pipe. A process that closes
+// stdout but has not exited a grace period later is stopped: it can answer no one. The grace keeps
+// a process that is exiting anyway logged as having exited by itself.
 func (p *Process) readStdout(r io.Reader) {
 	defer p.readers.Done()
 	defer close(p.messages)
@@ -215,6 +221,11 @@ func (p *Process) readStdout(r io.Reader) {
 			}
 		}
 		if err != nil {
+			p.mu.Lock() // before Messages closes, so whoever sees it closed sees the timer armed
+			if !p.stopping && !p.exited {
+				p.timers = append(p.timers, p.clock.AfterFunc(p.grace, func() { p.stop("stdout_closed") }))
+			}
+			p.mu.Unlock()
 			return
 		}
 	}

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,8 +21,12 @@ import (
 // registry is every setting the proxy reads, in the order the effective configuration is printed.
 var registry = []Setting{
 	{Name: "public-url", Help: "public URL of the MCP endpoint exactly as users enter it, e.g. https://mcp.example.com/mcp; an internationalized host in its ASCII (xn--) form"},
-	{Name: "upstream-url", Help: "URL of the HTTP upstream MCP server"},
+	{Name: "upstream-url", Help: "URL of the HTTP upstream MCP server; or set a stdio upstream with upstream-command"},
 	{Name: "upstream-header-timeout", Default: "5m", Help: "how long the HTTP upstream may take to send its response headers; a request that waits longer gets a JSON-RPC timeout error, and a streamed response is not limited once its headers arrive; 1s to 1h (ADR-0018 §7)"},
+	{Name: "upstream-command", Help: "stdio upstream: the command as a JSON array, e.g. [\"/usr/local/bin/server\",\"--flag\"], never run through a shell; or give it after -- on the command line (docs/how-to/stdio-upstream.md)"},
+	{Name: "upstream-env", Secret: true, Help: "stdio upstream: KEY=VALUE lines set in the environment of each upstream process, besides the inherited PATH, HOME, USER, LOGNAME, TMPDIR, TZ, LANG and LC_* (ADR-0016 §6); values are never logged"},
+	{Name: "stdio-max-processes", Default: "64", Help: "stdio upstream: most upstream processes alive at once; when full, the least recently used idle one is stopped (ADR-0003 §5)"},
+	{Name: "stdio-max-processes-per-user", Default: "8", Help: "stdio upstream: most upstream processes one user has alive at once; when full, that user's least recently used idle one is stopped"},
 	{Name: "listen", Default: "127.0.0.1:8080", Help: "address to listen on; public addresses only when configured"},
 	{Name: "allowed-origins", Help: "comma-separated Origin values allowed on the MCP endpoint (scheme://host[:port]); an internationalized host in its ASCII (xn--) form"},
 	{Name: "allowed-hosts", Help: "comma-separated extra Host values accepted besides the public URL's host; an internationalized host in its ASCII (xn--) form"},
@@ -59,14 +64,18 @@ var registry = []Setting{
 // Config is the validated configuration.
 type Config struct {
 	PublicURL   *url.URL
-	UpstreamURL *url.URL
+	UpstreamURL *url.URL // nil for a stdio upstream
 	// UpstreamHeaderTimeout bounds the wait for the HTTP upstream's response headers.
 	UpstreamHeaderTimeout time.Duration
-	Listen                string
-	InternalListen        string // "" when the internal listener is off
-	AllowedOrigins        []string
-	AllowedHosts          []string
-	TrustedProxies        []netip.Prefix
+	// A stdio upstream (ADR-0003): its argv, the operator env of its processes and its caps.
+	UpstreamCommand                    []string
+	UpstreamEnv                        map[string]string
+	StdioMaxProcesses, StdioMaxPerUser int
+	Listen                             string
+	InternalListen                     string // "" when the internal listener is off
+	AllowedOrigins                     []string
+	AllowedHosts                       []string
+	TrustedProxies                     []netip.Prefix
 	// OAuthRateLimits is requests per minute per client address, by endpoint name.
 	OAuthRateLimits       map[string]int
 	Scope                 string
@@ -184,10 +193,7 @@ func validate(v *Values, container bool) (*Config, error) {
 			}
 		}
 	}
-	c.UpstreamURL, err = parseURL("upstream-url", v.get("upstream-url"))
-	if err != nil {
-		errs = append(errs, err)
-	}
+	errs = append(errs, c.upstream(v)...)
 	c.UpstreamHeaderTimeout, err = parseHeaderTimeout(v.get("upstream-header-timeout"))
 	if err != nil {
 		errs = append(errs, err)
@@ -243,6 +249,9 @@ func validate(v *Values, container bool) (*Config, error) {
 	}
 	if c.NoAuth && c.PublicURL != nil {
 		errs = append(errs, checkNoAuth(c, v)...)
+	}
+	if c.NoAuth && c.UpstreamCommand != nil {
+		c.Relaxations = append(c.Relaxations, "stdio upstream without authentication: anyone who can reach the proxy starts upstream processes, bounded only by BYWARD_STDIO_MAX_PROCESSES, and every process runs as the same anonymous user")
 	}
 	if !c.NoAuth {
 		c.EntraTenant, c.EntraClientID, c.EntraClientSecret = v.get("entra-tenant"), v.get("entra-client-id"), v.get("entra-client-secret")
@@ -307,6 +316,81 @@ func validate(v *Values, container bool) (*Config, error) {
 		return nil, &configError{msg: strings.Join(msgs, "; ")}
 	}
 	return c, nil
+}
+
+// upstream reads the upstream: an HTTP URL or a stdio command, exactly one of them.
+func (c *Config) upstream(v *Values) []error {
+	urlEnv, cmdEnv, envEnv := Setting{Name: "upstream-url"}.Env(), Setting{Name: "upstream-command"}.Env(), Setting{Name: "upstream-env"}.Env()+"_FILE"
+	raw := v.get("upstream-command")
+	if raw == "" {
+		if v.get("upstream-env") != "" {
+			return []error{errorf("%s is set, but there is no stdio upstream: set %s too", envEnv, cmdEnv)}
+		}
+		u, err := parseURL("upstream-url", v.get("upstream-url"))
+		if err != nil {
+			return []error{errorf("%s (or %s, or a command after --)", err.Error(), cmdEnv)}
+		}
+		c.UpstreamURL = u
+		return nil
+	}
+	var errs []error
+	if v.get("upstream-url") != "" {
+		errs = append(errs, errorf("%s and %s are both set: an upstream is either HTTP or stdio", urlEnv, cmdEnv))
+	}
+	if v.command != nil {
+		c.UpstreamCommand = append([]string(nil), v.command...)
+	} else if err := json.Unmarshal([]byte(raw), &c.UpstreamCommand); err != nil {
+		c.UpstreamCommand = nil
+	}
+	if len(c.UpstreamCommand) == 0 || c.UpstreamCommand[0] == "" {
+		errs = append(errs, errorf("%s: want a JSON array of strings whose first element is the program, e.g. [\"/usr/local/bin/server\",\"--flag\"], got %q", cmdEnv, raw))
+	}
+	env, err := parseEnvLines(v.get("upstream-env"))
+	if err != nil {
+		errs = append(errs, errorf("%s: %v", envEnv, err))
+	}
+	c.UpstreamEnv = env
+	limits := []struct {
+		name string
+		dst  *int
+	}{{"stdio-max-processes", &c.StdioMaxProcesses}, {"stdio-max-processes-per-user", &c.StdioMaxPerUser}}
+	for _, l := range limits {
+		n, err := strconv.Atoi(v.get(l.name))
+		if err != nil || n < 1 || n > 10000 {
+			errs = append(errs, errorf("%s: want a whole number from 1 to 10000, got %q", Setting{Name: l.name}.Env(), v.get(l.name)))
+			continue
+		}
+		*l.dst = n
+	}
+	if c.StdioMaxPerUser > c.StdioMaxProcesses && c.StdioMaxProcesses > 0 {
+		errs = append(errs, errorf("%s (%d) must not exceed %s (%d)", Setting{Name: "stdio-max-processes-per-user"}.Env(), c.StdioMaxPerUser,
+			Setting{Name: "stdio-max-processes"}.Env(), c.StdioMaxProcesses))
+	}
+	return errs
+}
+
+// parseEnvLines reads KEY=VALUE lines; blank lines and lines starting with # are skipped. Errors
+// name the line, never its value.
+func parseEnvLines(raw string) (map[string]string, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	env := map[string]string{}
+	for i, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		k, val, ok := strings.Cut(line, "=")
+		if !ok || k == "" || strings.TrimSpace(k) != k {
+			return nil, fmt.Errorf("line %d: want KEY=VALUE", i+1)
+		}
+		if _, dup := env[k]; dup {
+			return nil, fmt.Errorf("line %d: %s is set twice", i+1, k)
+		}
+		env[k] = val
+	}
+	return env, nil
 }
 
 // checkText limits page wording: no control or format characters (bidi overrides), at most max
@@ -644,7 +728,7 @@ func IsHelp(err error) bool { return errors.Is(err, errHelp) }
 // Usage writes the generated settings reference.
 func Usage() string {
 	var b strings.Builder
-	b.WriteString("Usage: byward [flags]\n\nSettings (flag / env, default):\n")
+	b.WriteString("Usage: byward [flags] [-- stdio-upstream-command [args...]]\n\nSettings (flag / env, default):\n")
 	for _, s := range registry {
 		flagName := "--" + s.Name
 		env := s.Env()

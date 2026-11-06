@@ -21,7 +21,7 @@ func TestStderrRecordsThroughTheProxyLogger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := m.Get(context.Background(), "s1", alice)
+	p, _, err := m.Get(context.Background(), "s1", alice)
 	if err != nil {
 		t.Fatal(err)
 	}
