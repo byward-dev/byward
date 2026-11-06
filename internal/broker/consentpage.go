@@ -45,11 +45,10 @@ func (b *Broker) renderConsent(w http.ResponseWriter, r *http.Request, status in
 	_ = consentTemplate.Execute(w, v)
 }
 
+// upstreamName is the operator's name for the upstream, or the public host when it is unset or
+// cleans down to nothing (only invisible characters).
 func (b *Broker) upstreamName() string {
-	if b.cfg.UpstreamName != "" {
-		return displayName(b.cfg.UpstreamName, "")
-	}
-	return b.cfg.Resource.Host
+	return displayName(b.cfg.UpstreamName, b.cfg.Resource.Host)
 }
 
 func (b *Broker) scopeText() string {

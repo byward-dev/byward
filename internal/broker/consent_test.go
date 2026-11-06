@@ -207,6 +207,16 @@ func TestConsentPageUsesOperatorWording(t *testing.T) {
 	}
 }
 
+// The user must always see which upstream the app will act on.
+func TestAnInvisibleUpstreamNameFallsBackToThePublicHost(t *testing.T) {
+	text := visibleText(newEnv(t, func(c *Config) { c.UpstreamName = "\u200b\u202e " }).showConsent(t, nil).body)
+	for _, want := range []string{"wants to use mcp.example.com as you", "Use mcp.example.com as you"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("consent page lacks %q: %s", want, text)
+		}
+	}
+}
+
 func TestClientNamesAreSanitisedForDisplay(t *testing.T) {
 	for _, c := range []struct{ name, in, want string }{
 		{"a plain name is shown unchanged", "Claude Code", "Claude Code"},
