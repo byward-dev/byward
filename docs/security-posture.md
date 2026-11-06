@@ -163,7 +163,6 @@ bounds, but there are no settings for that yet.
 | Consent answer table is per replica, in memory, capped at 10,000 | Double-submit protection holds within one process. A full table forgets the newest flow. It matters only with several replicas, which need v0.2's PostgreSQL. | No issue (`internal/broker/answers.go`) |
 | Restore drill | Restore detection works (a restored store starts a new epoch, refuses refresh tokens from before the restore, logs it and writes a `store_restored` audit record), but no automated test restores a real backup yet. | #53 |
 | Refresh drops the IdP's new tokens when a later step fails | Fails closed: an unneeded sign-in with IdPs that revoke rotated refresh tokens. Entra is not affected. | #92 |
-| Removing a sealing key ends grants whose IdP tokens it sealed | Those users sign in again at their next refresh | #104 |
 | Entra certificate credential | `private_key_jwt` exists in `internal/idp`, but no setting selects it; only a client secret is configurable | ADR-0012 §5 |
 
 ## Dependencies and supply chain

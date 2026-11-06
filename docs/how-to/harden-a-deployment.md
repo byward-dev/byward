@@ -53,10 +53,11 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) ยง1โ
       file later ([sealing keys](sealing-keys.md#rotating)).
       - A removed key no longer opens anything it sealed. Besides access tokens, that includes the
         IdP tokens kept in each grant.
-      - A grant whose IdP tokens were last sealed with a removed key is revoked at its next refresh,
-        and the user signs in again (`internal/broker/refresh.go`).
-      - So keep an old key for the grant lifetime (30 days) to avoid those sign-ins, or accept them
-        (#104 tracks re-sealing so this is no longer needed).
+      - Every refresh re-seals them with the current key, and an unused refresh token expires after
+        14 days. So remove the old key 15 days after the restart that made the new one seal (on
+        several replicas, the last one's restart; not after adding the file), and no user has to
+        sign in again. Removed earlier, a grant not refreshed since is revoked at its next refresh
+        (`internal/broker/refresh.go`).
 - [ ] Know the operator revocation commands. They read the same `BYWARD_*` environment as the
       proxy (run them in its container or with its settings), write to the same store while it
       runs, and every proxy refuses the tokens within seconds (the deny list resyncs every 5 s):
