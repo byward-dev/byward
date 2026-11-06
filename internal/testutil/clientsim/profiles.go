@@ -39,7 +39,8 @@ var (
 		Facts: []Fact{
 			{"without --client-id it signs in with CIMD, client_id https://claude.ai/oauth/claude-code-client-metadata; the echo tool then works", "real run 2026-11-06 (byward 3be7365, Entra)"},
 			{"redirect http://localhost:<port>/callback; the document lists http://localhost/callback, and the broker allows any loopback port (RFC 8252 §7.3)", "https://claude.ai/oauth/claude-code-client-metadata; https://code.claude.com/docs/en/mcp; ADR-0009 §2"},
-			{"discovery, resource, scope, iss and 403 handling as on the static path", "the ClaudeCode profile's sources"},
+			{"checks the root PRM first, sends no resource, requests the challenge's or the PRM's scope, fails on an unexpected iss and treats 403 as an auth failure: what the ClaudeCode profile's sources say for the static path", "the ClaudeCode profile's sources"},
+			{"the CIMD path runs the same client code as the static path for those steps", Assumed},
 			{"picks CIMD without checking for none in token_endpoint_auth_methods_supported", Assumed},
 			{"authorization server metadata path order", Assumed},
 			{"sends MCP revision 2025-11-25 in initialize", Assumed},
@@ -134,7 +135,7 @@ var Cursor = Profile{
 		{"cursor.com relays the authorization code to the desktop app at http://localhost:8787/callback", "real run 2026-11-06 (byward 3be7365, Entra): observed browser redirect"},
 		{"a relayed code is useless without the verifier the app holds", "RFC 7636 (reasoning, not observed)"},
 		{"consent shows \"Cursor (Not verified)\", then the token is issued and MCP calls answer 200", "real run 2026-11-06 (byward 3be7365, Entra)"},
-		{"Cursor 2.6.22 registers only custom-scheme callbacks: every /register answers 400 invalid_redirect_uri, so it cannot sign in", "real run 2026-11-06 (byward 3be7365, Entra)"},
+		{"the registration request is the reconstructed 3.14.27 fixture (testdata/dcr/cursor.json); 3.29.9's request was not captured, and the run's log agrees with it (cursor:// dropped, the https callback kept)", "real run 2026-11-06 (byward 3be7365, Entra)"},
 		{"follows the 401's resource_metadata, else the path-inserted PRM, then the root one", Assumed},
 		{"authorization server metadata path order", Assumed},
 		{"sends resource on authorize and token", Assumed},
