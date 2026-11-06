@@ -65,8 +65,11 @@ func Open(ctx context.Context, opts Options) (*Store, error) {
 	if !filepath.IsAbs(opts.Dir) || !filepath.IsAbs(opts.CounterFile) {
 		return nil, errors.New("sqlite store: the state directory and the counter file must be absolute paths")
 	}
-	if strings.ContainsAny(opts.Dir, "?#") {
-		return nil, errors.New("sqlite store: the state directory must not contain '?' or '#'")
+	if strings.Contains(opts.Dir, "?") {
+		return nil, errors.New("sqlite store: the state directory must not contain '?'")
+	}
+	if rel, err := filepath.Rel(opts.Dir, opts.CounterFile); err == nil && !strings.HasPrefix(rel, "..") {
+		return nil, errors.New("sqlite store: the counter file must be outside the state directory, or a backup of the directory hides restores")
 	}
 	if err := os.MkdirAll(opts.Dir, 0o700); err != nil {
 		return nil, fmt.Errorf("sqlite store: state directory: %w", err)
@@ -101,7 +104,8 @@ func (s *Store) Close() error { return s.db.Close() }
 
 // write runs fn in one IMMEDIATE transaction, increments the write counter and mirrors it to
 // the counter file before the commit. If the mirror cannot be written, nothing is committed, so an
-// error always means "not stored". If the commit then fails, the mirror is one write ahead and the
+// error always means "not stored". If the commit or the directory sync then fails, the mirror is
+// one write ahead and the
 // next Open treats the database as restored: users sign in again (fail safe). The single
 // connection and the IMMEDIATE lock order every write, so the mirror follows commit order.
 func (s *Store) write(ctx context.Context, fn func(*sql.Tx) error) error {

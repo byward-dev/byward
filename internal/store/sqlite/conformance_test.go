@@ -1,7 +1,6 @@
 package sqlite
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 
@@ -13,7 +12,7 @@ import (
 // sit next to the keys).
 func openTemp(t *testing.T) *Store {
 	t.Helper()
-	s, err := Open(context.Background(), Options{Dir: t.TempDir(), CounterFile: filepath.Join(t.TempDir(), "store-writes")})
+	s, err := Open(bounded(t), Options{Dir: t.TempDir(), CounterFile: filepath.Join(t.TempDir(), "store-writes")})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

@@ -24,6 +24,14 @@ var (
 	t0  = time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 )
 
+// bounded is the context for Open: with a single connection, a statement issued outside the open
+// transaction waits forever; the deadline turns that into a quick failure.
+func bounded(t *testing.T) context.Context {
+	c, cancel := context.WithTimeout(ctx, 10*time.Second)
+	t.Cleanup(cancel)
+	return c
+}
+
 func grant(id, subject string) store.Grant {
 	return store.Grant{ID: id, ClientID: "c", Subject: subject, Issuer: "https://idp.example/v2.0",
 		Resource: "https://mcp.example.com/mcp", Scopes: []string{"mcp"}, CreatedAt: t0, ExpiresAt: t0.Add(24 * time.Hour)}
@@ -31,7 +39,7 @@ func grant(id, subject string) store.Grant {
 
 func open(t *testing.T, dir, counter string) *Store {
 	t.Helper()
-	s, err := Open(ctx, Options{Dir: dir, CounterFile: counter})
+	s, err := Open(bounded(t), Options{Dir: dir, CounterFile: counter})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -122,11 +130,15 @@ func TestOpenRefusesBadPaths(t *testing.T) {
 		{"relative state directory", Options{Dir: "state", CounterFile: filepath.Join(t.TempDir(), "w")}, "must be absolute"},
 		{"relative counter file", Options{Dir: t.TempDir(), CounterFile: "writes"}, "must be absolute"},
 		{"? in the path", Options{Dir: filepath.Join(t.TempDir(), "a?b"), CounterFile: filepath.Join(t.TempDir(), "w")}, "must not contain"},
-		{"# in the path", Options{Dir: filepath.Join(t.TempDir(), "a#b"), CounterFile: filepath.Join(t.TempDir(), "w")}, "must not contain"},
+		{"counter file inside the state directory", func() Options { d := t.TempDir(); return Options{Dir: d, CounterFile: filepath.Join(d, "writes")} }(), "outside the state directory"},
+		{"counter file deeper inside", func() Options {
+			d := t.TempDir()
+			return Options{Dir: d, CounterFile: filepath.Join(d, "sub", "writes")}
+		}(), "outside the state directory"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s, err := Open(ctx, tc.opts)
+			s, err := Open(bounded(t), tc.opts)
 			if err == nil {
 				_ = s.Close()
 				t.Fatal("accepted")
@@ -159,7 +171,7 @@ func TestEmptyDirMeansTheDefaultStateDirectory(t *testing.T) {
 	if _, err := os.Stat(DefaultDir); err == nil || os.Geteuid() == 0 {
 		t.Skip("would use the real " + DefaultDir)
 	}
-	_, err := Open(ctx, Options{CounterFile: filepath.Join(t.TempDir(), "w")})
+	_, err := Open(bounded(t), Options{CounterFile: filepath.Join(t.TempDir(), "w")})
 	if err == nil || !strings.Contains(err.Error(), DefaultDir) {
 		t.Fatalf("err = %v, want one naming %s", err, DefaultDir)
 	}
@@ -174,7 +186,7 @@ func TestUnwritableStateDirectoryFailsOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // G302: directory mode, restored for cleanup
-	_, err := Open(ctx, Options{Dir: dir, CounterFile: filepath.Join(t.TempDir(), "w")})
+	_, err := Open(bounded(t), Options{Dir: dir, CounterFile: filepath.Join(t.TempDir(), "w")})
 	if err == nil || !strings.Contains(err.Error(), dir+" is not writable") {
 		t.Fatalf("err = %v, want one naming the unwritable directory", err)
 	}
@@ -203,7 +215,7 @@ func TestNewerSchemaIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = db.Close()
-	_, err := Open(ctx, Options{Dir: dir, CounterFile: filepath.Join(t.TempDir(), "w")})
+	_, err := Open(bounded(t), Options{Dir: dir, CounterFile: filepath.Join(t.TempDir(), "w")})
 	if err == nil || !strings.Contains(err.Error(), "newer than this binary") {
 		t.Fatalf("err = %v, want the downgrade refusal", err)
 	}
@@ -336,7 +348,7 @@ func TestCorruptCounterFileFailsOpen(t *testing.T) {
 	if err := os.WriteFile(counter, []byte("not a number"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Open(ctx, Options{Dir: t.TempDir(), CounterFile: counter})
+	_, err := Open(bounded(t), Options{Dir: t.TempDir(), CounterFile: counter})
 	if err == nil || !strings.Contains(err.Error(), "corrupt") {
 		t.Fatalf("err = %v, want the corrupt-counter refusal", err)
 	}
@@ -369,7 +381,10 @@ var (
 		Hash: sha256.Sum256([]byte("fixture-refresh")), GrantID: "fixture-grant", ClientID: "fixture-client",
 		CreatedAt: fixtureCreated, IdleExpiresAt: fixtureExpires,
 	}
-	fixtureRevocations = []store.Revocation{{GrantID: "fixture-revoked", Before: fixtureCreated, At: fixtureCreated}}
+	fixtureRevocations = []store.Revocation{
+		{GrantID: "fixture-revoked", Before: fixtureCreated, At: fixtureCreated},
+		{Subject: "tid:fixture-revoked-subject", Before: fixtureCreated, At: fixtureCreated.Add(time.Second)},
+	}
 )
 
 func TestFixturesMigrateToTheCurrentSchema(t *testing.T) {
@@ -415,9 +430,11 @@ func TestFailedMigrationChangesNothing(t *testing.T) {
 	migrations = append(append([]string{}, saved...), "CREATE TABLE half_done (a); UPDATE grants SET subject = 'x'; SELECT * FROM no_such_table;")
 	t.Cleanup(func() { migrations = saved })
 
-	if s, err := Open(ctx, Options{Dir: dir, CounterFile: filepath.Join(t.TempDir(), "w")}); err == nil {
+	if s, err := Open(bounded(t), Options{Dir: dir, CounterFile: filepath.Join(t.TempDir(), "w")}); err == nil {
 		_ = s.Close()
 		t.Fatal("Open succeeded although a migration fails")
+	} else if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Open deadlocked: %v", err)
 	}
 	db := rawDB(t, dir)
 	var v int
