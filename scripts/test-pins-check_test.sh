@@ -67,9 +67,11 @@ run playwright-past-cooldown      $p "$(npm 1.64.1 2026-10-01T00:00:00.000Z 1.65
 run cutoff-is-inclusive           $p "$(npm 1.64.1 2026-10-01T00:00:00.000Z 1.65.0 2026-10-18T00:00:00.000Z)" "$axe" "$nd" 1 'NEWER: Playwright 1\.65\.0'
 run release-after-cutoff-ignored  $p "$(npm 1.64.1 2026-10-01T00:00:00.000Z 1.65.0 2026-10-18T00:00:01.000Z)" "$axe" "$nd" 0 'ok'
 run prerelease-ignored            $p "$(npm 1.64.1 2026-10-01T00:00:00.000Z 1.65.0-beta-1 2026-10-02T00:00:00.000Z)" "$axe" "$nd" 0 'ok'
-run newer-axe                     $p "$pw" "$(npm 4.14.0 2026-09-01T00:00:00.000Z 4.14.1 2026-10-01T00:00:00.000Z)" "$nd" 1 'NEWER: @axe-core/playwright 4\.14\.1'
-run newer-node                    $p "$pw" "$axe" "$(node 24.22.2 2026-10-15 24.22.1 2026-10-01)" 1 'NEWER: Node 24 24\.22\.2'
+run axe-past-cooldown             $p "$pw" "$(npm 4.14.0 2026-09-01T00:00:00.000Z 4.14.1 2026-10-01T00:00:00.000Z)" "$nd" 1 'NEWER: @axe-core/playwright 4\.14\.1'
+run node-past-cooldown            $p "$pw" "$axe" "$(node 24.22.2 2026-10-15 24.22.1 2026-10-01)" 1 'NEWER: Node 24 24\.22\.2'
 run node-in-cooldown              $p "$pw" "$axe" "$(node 24.22.2 2026-10-27 24.22.1 2026-10-01)" 0 'ok'
+run node-cutoff-is-inclusive      $p "$pw" "$axe" "$(node 24.22.2 2026-10-18 24.22.1 2026-10-01)" 1 'NEWER: Node 24 24\.22\.2'
+run playwright-major-is-newer     $p "$(npm 1.64.1 2026-09-01T00:00:00.000Z 2.0.0 2026-10-01T00:00:00.000Z)" "$axe" "$nd" 1 'NEWER: Playwright 2\.0\.0'
 run node-other-major-ignored      $p "$pw" "$axe" "$(node 26.1.0 2026-09-01 24.22.1 2026-10-01)" 0 'ok'
 run playwright-registry-empty     $p '{"time":{}}' "$axe" "$nd" 1 'no Playwright release'
 run playwright-registry-not-json  $p '<html>' "$axe" "$nd" 1 'no Playwright release'
@@ -77,6 +79,8 @@ run axe-registry-not-json         $p "$pw" '<html>' "$nd" 1 'no @axe-core/playwr
 run node-registry-empty           $p "$pw" "$axe" '[]' 1 'no Node 24 release'
 run node-registry-not-json        $p "$pw" "$axe" '<html>' 1 'no Node 24 release'
 }
+# npm lists releases by publication, so a backport can come after the newest line.
+run playwright-backport-published-last 1.63.4 1.63.4 4.14.0 24.22.1 "$(npm 1.63.4 2026-09-01T00:00:00.000Z 1.64.1 2026-09-10T00:00:00.000Z 1.63.5 2026-09-20T00:00:00.000Z)" "$axe" "$nd" 1 'NEWER: Playwright 1\.64\.1'
 run playwright-1.10-newer-than-1.9 1.9.0 1.9.0 4.14.0 24.22.1 "$(npm 1.9.0 2026-01-01T00:00:00.000Z 1.10.0 2026-02-01T00:00:00.000Z)" "$axe" "$nd" 1 'NEWER: Playwright 1\.10\.0'
 # A pin bumped during the cooldown is ahead of the newest release past it: not stale.
 run playwright-pinned-ahead 1.65.0 1.65.0 4.14.0 24.22.1 "$(npm 1.64.1 2026-10-01T00:00:00.000Z 1.65.0 2026-10-25T00:00:00.000Z)" "$axe" "$nd" 0 'ok'
@@ -97,12 +101,12 @@ run trailing-dot-version 1.64.  1.64.1 4.14.0 24.22.1 "$pw" "$axe" "$nd" 1 'imag
 run empty-part-version   1..64  1.64.1 4.14.0 24.22.1 "$pw" "$axe" "$nd" 1 'image must be pinned to an exact'
 # Two image lines are not one pin (current pins otherwise).
 # shellcheck disable=SC2086
-run setup $p "$pw" "$axe" "$nd" 0 'ok'
+run two-image-lines-baseline-passes $p "$pw" "$axe" "$nd" 0 'ok'
 printf 'image=mcr.microsoft.com/playwright:v1.64.1-noble@sha256:00\nimage=mcr.microsoft.com/playwright:v1.64.1-noble@sha256:00\n' > "$tmp/repo/scripts/ui/run.sh"
 check two-image-lines 1 'image must be pinned to an exact'
-# Outside the repository root the check says so.
+# A missing pin file fails the check and names the file.
 # shellcheck disable=SC2086
-run setup $p "$pw" "$axe" "$nd" 0 'ok'
+run missing-pin-file-baseline-passes $p "$pw" "$axe" "$nd" 0 'ok'
 rm "$tmp/repo/scripts/conformance/run.sh"
 check missing-pin-file 1 'scripts/conformance/run\.sh not found'
 
@@ -117,7 +121,7 @@ real_node=$(sed -n 's/^image=node:\([0-9.]*\)-slim@.*$/\1/p' "$root/scripts/conf
 npm "$real_pw" 2026-01-01T00:00:00.000Z > "$tmp/pw.json"
 npm "$real_axe" 2026-01-01T00:00:00.000Z > "$tmp/axe.json"
 node "$real_node" 2026-01-01 > "$tmp/node.json"
-check repository-pins 0 'ok'
+check repository-pins-parse-and-agree 0 'ok'
 
 [ "$failures" -eq 0 ] || { echo "test-pins-check_test: $failures case(s) failed" >&2; exit 1; }
 echo "test-pins-check_test: ok"
