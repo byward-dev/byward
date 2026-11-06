@@ -180,6 +180,12 @@ install -d -m 0700 byward-data/keys && (umask 077; openssl rand -base64 32 > "by
 
 ## 3. Register Claude Code as a static client
 
+> **Optional.** Without `--client-id`, Claude Code signs in with its client metadata document
+> (CIMD, [how-to](cimd.md)), so no registration is needed: skip this step and, in step 5, run
+> `claude mcp add --transport http my-mcp https://mcp.example.com/mcp`. This was verified against
+> Entra on 2026-11-06. Register a static client when you want a fixed client ID, or run with
+> `BYWARD_CIMD=false`.
+
 Claude Code is a public client: it has no secret and authenticates with PKCE. Register it in the
 static clients file, `byward-data/clients.json`:
 

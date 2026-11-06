@@ -3,7 +3,8 @@ package clientsim
 // The profiles. Refresh one when its client changes, and say which version or date it was checked
 // at; the manual release run updates them (ADR-0024 §2).
 var (
-	// ClaudeCode as a static client: the operator registers it and passes --client-id.
+	// ClaudeCode as a static client: the operator registers it and passes --client-id. Without
+	// --client-id, Claude Code uses CIMD (ClaudeCodeCIMD).
 	ClaudeCode = Profile{
 		Client: "Claude Code", Version: "2.1.251 (docs read 2026-11-06)", Cell: "Claude Code × static",
 		Registration: Static, ClientID: "claude-code", RedirectURI: "http://localhost:45813/callback",
@@ -20,6 +21,26 @@ var (
 			{"marks the server as needing authentication on 401 or 403", "https://code.claude.com/docs/en/mcp"},
 			{"re-runs headersHelper on 401/403 (10 s timeout, no caching)", "https://code.claude.com/docs/en/mcp"},
 			{"a refused tools/call: one call, no retry, no discovery; the model sees the body text", "runtime test, Claude Code 2.1.142, 2026-11-06"},
+			{"authorization server metadata path order", Assumed},
+			{"sends MCP revision 2025-11-25 in initialize", Assumed},
+			{"refuses an authorization server whose code_challenge_methods_supported lacks S256 (MCP authorization MUST)", Assumed},
+		},
+	}
+
+	// ClaudeCodeCIMD is Claude Code's default sign-in, without --client-id: CIMD with its published
+	// document. The static profile above stays valid as the alternative.
+	ClaudeCodeCIMD = Profile{
+		Client: "Claude Code", Version: "real run 2026-11-06", Cell: "Claude Code × CIMD",
+		Registration: CIMD, Document: "claude-code", RedirectURI: "http://localhost:45813/callback",
+		ProtocolVersion: "2025-11-25",
+		Discovery:       []string{"/.well-known/oauth-protected-resource"}, ASMetadata: []string{"oauth-authorization-server", "openid-configuration"},
+		UsesChallenge: false, SendsResource: false, ChecksIss: true,
+		Treats403AsAuthFailure: true,
+		Facts: []Fact{
+			{"without --client-id it signs in with CIMD, client_id https://claude.ai/oauth/claude-code-client-metadata; the echo tool then works", "real run 2026-11-06 (byward 3be7365, Entra)"},
+			{"redirect http://localhost:<port>/callback; the document lists http://localhost/callback, any loopback port (RFC 8252 §7.3)", "https://claude.ai/oauth/claude-code-client-metadata; https://code.claude.com/docs/en/mcp"},
+			{"discovery, resource, scope, iss and 403 handling as on the static path", "the ClaudeCode profile's sources"},
+			{"picks CIMD without checking for none in token_endpoint_auth_methods_supported", Assumed},
 			{"authorization server metadata path order", Assumed},
 			{"sends MCP revision 2025-11-25 in initialize", Assumed},
 			{"refuses an authorization server whose code_challenge_methods_supported lacks S256 (MCP authorization MUST)", Assumed},
@@ -95,10 +116,12 @@ var ChatGPT = Profile{
 	},
 }
 
-// Cursor with dynamic client registration. Only its registration request is sourced; the rest follows
-// the MCP specification until someone checks a Cursor build.
+// Cursor with dynamic client registration, as Cursor 3.29.9 signed in during the 2026-11-06 real run.
+// Cursor 2.6.22 registered only a custom-scheme callback and could not sign in; the first 3.x
+// release that works is not known.
+// The discovery and token details nobody captured follow the MCP specification.
 var Cursor = Profile{
-	Client: "Cursor", Version: "3.14.27 (forum reports read 2026-11-06)", Cell: "Cursor × DCR",
+	Client: "Cursor", Version: "3.29.9 (real run 2026-11-06)", Cell: "Cursor × DCR",
 	Registration: DCR, Document: "cursor", RedirectURI: "https://www.cursor.com/agents/mcp/oauth/callback", ProtocolVersion: "2025-11-25",
 	Discovery:     []string{"/.well-known/oauth-protected-resource/", "/.well-known/oauth-protected-resource"},
 	ASMetadata:    []string{"oauth-authorization-server", "openid-configuration"},
@@ -106,7 +129,11 @@ var Cursor = Profile{
 	Facts: []Fact{
 		{"registers with DCR; redirect URIs cursor://anysphere.cursor-mcp/oauth/callback, https://www.cursor.com/agents/mcp/oauth/callback and http://localhost:8787/callback", "forum.cursor.com/t/171867 (Cursor staff); forum.cursor.com/t/167608 (user report, Cursor 3.14.27)"},
 		{"the other registration fields (grant types, response types, token_endpoint_auth_method none)", Assumed},
-		{"signs in with the https or loopback callback, not cursor:// (ADR-0009: the proxy refuses cursor://; open until the HITL compatibility run)", Assumed},
+		{"the registration includes cursor://anysphere.cursor-mcp/oauth/callback, which the broker drops, and https and/or loopback callbacks it keeps", "real run 2026-11-06 (byward 3be7365, Entra): the broker logged the dropped cursor:// URI"},
+		{"sends redirect_uri https://www.cursor.com/agents/mcp/oauth/callback at /authorize (consent: \"Returns to www.cursor.com\")", "real run 2026-11-06 (byward 3be7365, Entra)"},
+		{"cursor.com relays the authorization code to the desktop app at http://localhost:8787/callback; PKCE keeps a relayed code useless without the app's verifier", "real run 2026-11-06 (byward 3be7365, Entra): observed browser redirect"},
+		{"consent shows \"Cursor (Not verified)\", then the token is issued and MCP calls answer 200", "real run 2026-11-06 (byward 3be7365, Entra)"},
+		{"Cursor 2.6.22 registers only custom-scheme callbacks: every /register answers 400 invalid_redirect_uri, so it cannot sign in", "real run 2026-11-06 (byward 3be7365, Entra)"},
 		{"follows the 401's resource_metadata, else the path-inserted PRM, then the root one", Assumed},
 		{"authorization server metadata path order", Assumed},
 		{"sends resource on authorize and token", Assumed},
@@ -119,4 +146,4 @@ var Cursor = Profile{
 }
 
 // All lists every profile, for the simulator test.
-var All = []Profile{ClaudeCode, ClaudeAI, VSCode, ChatGPT, Cursor}
+var All = []Profile{ClaudeCode, ClaudeCodeCIMD, ClaudeAI, VSCode, ChatGPT, Cursor}

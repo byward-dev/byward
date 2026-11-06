@@ -36,10 +36,21 @@ returns to instead.
 The answer (201) echoes every registered field, with the values the proxy substituted, as RFC
 7591 §3.2.1 requires.
 
-**Cursor:** the desktop app registers `cursor://anysphere.cursor-mcp/oauth/callback` and
-`https://www.cursor.com/agents/mcp/oauth/callback`. The `cursor://` URI is dropped, so the
-desktop app's custom-scheme callback is not accepted. Whether Cursor desktop then signs in is
-verified in the human compatibility run, not by the proxy's tests.
+**Cursor:** use Cursor 3.x (verified with 3.29.9). Older 2.x releases (2.6.22, for example)
+register only a `cursor://` callback and cannot sign in.
+- **Registration:** the desktop app registers `cursor://anysphere.cursor-mcp/oauth/callback`
+  together with `https://www.cursor.com/agents/mcp/oauth/callback`. The `cursor://` URI is
+  dropped and logged; the https one is kept.
+- **Sign-in:** Cursor sends the https callback at `/authorize`, so the consent page says
+  "Returns to www.cursor.com". The authorization code passes through cursor.com, which relays it
+  to the desktop app at `http://localhost:8787/callback`. PKCE keeps a relayed code useless
+  without the verifier the app holds.
+- **Older Cursor:** the proxy refuses its registration with `400 invalid_redirect_uri`, because no
+  callback passes the redirect policy. Update Cursor.
+
+The consent page shows Cursor as "Cursor (Not verified)", as for every DCR client: the name is
+what the app registered, not something the proxy checked. All of this was verified against real
+Entra on 2026-11-06.
 
 ## Limits and lifetime
 
