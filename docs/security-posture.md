@@ -161,7 +161,6 @@ bounds, but there are no settings for that yet.
 | ASVS 5.0.0 10.7.3 (user review and revocation of granted access) | Not met for users. The design leaves it to the operator (`byward revoke-user`, `byward revoke-all`) until a v0.2 "connected apps" page. | ADR-0010 §11; v0.2 |
 | Remembered consent | Not built: every client is asked every time. That is stricter than ADR-0010 §2–3. | #90 |
 | Consent answer table is per replica, in memory, capped at 10,000 | Double-submit protection holds within one process. A full table forgets the newest flow. It matters only with several replicas, which need v0.2's PostgreSQL. | No issue (`internal/broker/answers.go`) |
-| Restore drill | Restore detection works (a restored store starts a new epoch, refuses refresh tokens from before the restore, logs it and writes a `store_restored` audit record), but no automated test restores a real backup yet. | #53 |
 | Refresh drops the IdP's new tokens when a later step fails | Fails closed: an unneeded sign-in with IdPs that revoke rotated refresh tokens. Entra is not affected. | #92 |
 | Entra certificate credential | `private_key_jwt` exists in `internal/idp`, but no setting selects it; only a client secret is configurable | ADR-0012 §5 |
 
