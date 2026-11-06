@@ -741,12 +741,13 @@ func TestCallbackRejectsALoginItCannotTrust(t *testing.T) {
 		name  string
 		setup func(e *env, c *http.Cookie, q url.Values) []*http.Cookie
 		title string
+		spent bool // the login cookie sent is expired in the answer
 	}{
-		{"no login cookie", func(*env, *http.Cookie, url.Values) []*http.Cookie { return nil }, noCookie},
+		{"no login cookie", func(*env, *http.Cookie, url.Values) []*http.Cookie { return nil }, noCookie, false},
 		{"login cookie expired", func(e *env, c *http.Cookie, _ url.Values) []*http.Cookie {
 			e.now = e.now.Add(LoginLifetime + time.Second)
 			return []*http.Cookie{c}
-		}, expired},
+		}, expired, true},
 		{"login cookie tampered", func(_ *env, c *http.Cookie, _ url.Values) []*http.Cookie { //nolint:gosec // G124: a client-side copy of the broker's cookie, sent back with a tampered value
 			v := []byte(c.Value)
 			i := len(v) / 2
@@ -757,7 +758,7 @@ func TestCallbackRejectsALoginItCannotTrust(t *testing.T) {
 			}
 			c.Value = string(v)
 			return []*http.Cookie{c}
-		}, expired},
+		}, expired, true},
 		{"state differs after the cookie-name prefix", func(_ *env, c *http.Cookie, q url.Values) []*http.Cookie {
 			st := []byte(q.Get("state"))
 			if st[20] == '0' {
@@ -767,11 +768,11 @@ func TestCallbackRejectsALoginItCannotTrust(t *testing.T) {
 			}
 			q.Set("state", string(st))
 			return []*http.Cookie{c}
-		}, expired},
+		}, expired, true},
 		{"state too short", func(_ *env, c *http.Cookie, q url.Values) []*http.Cookie {
 			q.Set("state", "short")
 			return []*http.Cookie{c}
-		}, "This sign-in link is not valid."},
+		}, "This sign-in link is not valid.", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -788,7 +789,7 @@ func TestCallbackRejectsALoginItCannotTrust(t *testing.T) {
 			}
 			// A login cookie that was sent is spent whether or not it opens; a browser deletes it only
 			// for the same name and path.
-			if len(cookies) == 1 && len(q.Get("state")) >= 16 {
+			if c.spent {
 				var spent bool
 				for _, set := range res.Cookies() {
 					spent = spent || (set.Name == cookie.Name && set.Path == "/" && set.MaxAge < 0)
@@ -1151,7 +1152,7 @@ func TestThrottledAuthorizeWithoutATrustedRedirectShowsThe429Page(t *testing.T) 
 	}
 }
 
-func TestThrottledCallbackShowsThe429PageWithoutCallingTheIdP(t *testing.T) {
+func TestThrottledCallbackShowsThe429PageWithoutCallingTheIdPAndKeepsTheLoginForARetry(t *testing.T) {
 	e := newEnv(t)
 	c, cb := e.startLogin(t, nil)
 	e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"callback": true}}

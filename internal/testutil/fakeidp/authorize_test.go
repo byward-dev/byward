@@ -311,8 +311,8 @@ func TestWithJWKSUnavailableServes503UntilCleared(t *testing.T) {
 }
 
 // prompt=none fails closed with login_required, and of WithSilentSession and WithSilentError the
-// one set last wins, at New or at Set.
-func TestPromptNoneAnswersAsTheLastSilentOptionSays(t *testing.T) {
+// one set last wins.
+func TestPromptNoneFailsClosedAndTheLastSilentOptionWins(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		opts []Option
