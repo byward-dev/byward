@@ -51,8 +51,8 @@ headers are dropped, and:
    (check the upstream credential, or the roles it requires).
 
 To answer with the right `id`, the relay keeps a bounded copy (64 KiB) of each request body as it
-streams to the upstream, and parses it only on this path. The upstream body is always read and
-closed, so its connection returns to the pool. _Amends ADR-0003 §1_: the relay stays
+streams to the upstream, and parses it only on this path. The upstream body is always closed, after
+reading at most 64 KiB of it; a longer refusal body costs only that connection. _Amends ADR-0003 §1_: the relay stays
 byte-transparent except for upstream refusals. ADR-0021 is unchanged: bodies never reach logs.
 
 ## Consequences

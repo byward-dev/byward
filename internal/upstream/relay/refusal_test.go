@@ -88,8 +88,8 @@ func TestRefusalWithTruncatedCaptureFallsBackTo502(t *testing.T) {
 	big := `{"jsonrpc":"2.0","method":"tools/call","params":{"pad":"` + strings.Repeat("x", captureLimit) + `"},"id":1}`
 	w := httptest.NewRecorder()
 	refuse(t, 403, "").ServeHTTP(w, httptest.NewRequest("POST", "/mcp", strings.NewReader(big)))
-	if w.Code != http.StatusBadGateway {
-		t.Fatalf("got %d", w.Code)
+	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "upstream refused the proxy") {
+		t.Fatalf("got %d %q", w.Code, w.Body)
 	}
 }
 

@@ -149,7 +149,7 @@ const (
 // response must become a 502 instead.
 func translate(res *http.Response, c *capture) outcome {
 	up, _ := io.ReadAll(io.LimitReader(res.Body, captureLimit+1))
-	_ = res.Body.Close() // always, so the upstream connection returns to the pool
+	_ = res.Body.Close() // always; a refusal body over the bound costs only that connection
 	if res.Request.Method != http.MethodPost {
 		// GET: the spec's "no SSE stream offered"; DELETE: "termination not allowed". Clients treat
 		// both as harmless.
