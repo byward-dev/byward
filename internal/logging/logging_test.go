@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"regexp"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -86,7 +87,7 @@ func TestMiddlewareLogsRequestWithoutQueryOrHeaders(t *testing.T) {
 	if rec.Header().Get("X-Request-Id") != seen || strings.Contains(out, "spoofed") {
 		t.Fatalf("request id not echoed or inbound id trusted: %q / %s", rec.Header().Get("X-Request-Id"), out)
 	}
-	if len(seen) != 32 || !strings.Contains(out, seen) {
+	if !uuidV4.MatchString(seen) || !strings.Contains(out, seen) {
 		t.Fatalf("request id %q not logged: %s", seen, out)
 	}
 	if strings.Contains(out, token) || strings.Contains(out, "access_token") {
@@ -109,5 +110,19 @@ func TestInformationalStatusIsNotLoggedAsFinal(t *testing.T) {
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
 	if !strings.Contains(buf.String(), `"status":502`) {
 		t.Fatalf("logged %s", buf.String())
+	}
+}
+
+// Entra takes client-request-id only as a GUID (ADR-0021 §2), so request IDs are version 4 UUIDs.
+var uuidV4 = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+func TestRequestIDsAreDistinctVersion4UUIDs(t *testing.T) {
+	seen := map[string]bool{}
+	for range 1000 {
+		id := newRequestID()
+		if !uuidV4.MatchString(id) || seen[id] {
+			t.Fatalf("request id %q is not a fresh version 4 UUID", id)
+		}
+		seen[id] = true
 	}
 }
