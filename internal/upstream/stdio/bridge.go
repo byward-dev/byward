@@ -3,7 +3,6 @@
 package stdio
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -12,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/byward-dev/byward/internal/logging"
@@ -51,6 +51,9 @@ type Bridge struct {
 	sessions map[string]*session  // legacy era, by session ID
 	users    map[string]*userConn // modern era, by user
 	cap      capability           // whether the upstream speaks the modern era
+	next     atomic.Uint64        // proxy ids and tokens, unique across every userConn
+
+	probeTimeout time.Duration // bounds the server/discover probe; tests shorten it
 }
 
 // NewBridge returns the bridge for c.Manager's upstream.
@@ -58,7 +61,8 @@ func NewBridge(c BridgeConfig) *Bridge {
 	if c.Log == nil {
 		c.Log = slog.New(slog.DiscardHandler)
 	}
-	return &Bridge{c: c, sessions: map[string]*session{}, users: map[string]*userConn{}}
+	return &Bridge{c: c, sessions: map[string]*session{}, users: map[string]*userConn{},
+		cap: capability{clock: c.Manager.cfg.Clock}, probeTimeout: defaultProbeTimeout}
 }
 
 // newSessionID is 32 random bytes, base64url: visible ASCII, as the transport requires.
@@ -115,9 +119,14 @@ func (b *Bridge) post(w http.ResponseWriter, r *http.Request, id Identity, key s
 	}
 	var s *session
 	var release func()
-	if key == "" && env.Method != "initialize" && isModern(msg) {
-		b.modernPost(w, r, id, msg, env)
-		return
+	if key == "" && env.Method != "initialize" {
+		if meta, err := readMeta(msg); err == nil && meta.modern() {
+			b.modernPost(w, r, id, msg, env, meta)
+			return
+		} else if err != nil && looksModern(msg) {
+			writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest, "Invalid Request: "+err.Error())
+			return
+		}
 	}
 	if key == "" {
 		if env.Method != "initialize" || env.kind() != kindRequest {
@@ -178,6 +187,20 @@ func (b *Bridge) delete(w http.ResponseWriter, r *http.Request, id Identity, key
 	b.c.Manager.Stop(s.key)
 	s.end() // open streams finish now, not when the process is gone
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// startFailed answers a request whose process could not be had: 503 with Retry-After when every
+// process under the caps is in use, else 502.
+func (b *Bridge) startFailed(w http.ResponseWriter, r *http.Request, id Identity, err error) {
+	if errors.Is(err, errBusy) {
+		b.c.Log.WarnContext(r.Context(), "stdio process cap full: every process is in use", "request_id", logging.RequestID(r.Context()),
+			"reason", "process_cap", "user_key", id.Subject)
+		w.Header().Set("Retry-After", busyRetryAfter)
+		http.Error(w, "upstream busy", http.StatusServiceUnavailable)
+		return
+	}
+	b.c.Log.WarnContext(r.Context(), "cannot start the upstream process", "request_id", logging.RequestID(r.Context()), "error", err)
+	http.Error(w, "upstream unavailable", http.StatusBadGateway)
 }
 
 // start spawns the process of a new session. On failure it has answered the request and returns
@@ -640,9 +663,5 @@ func (s *session) undeliverable(msg []byte, reason string) {
 		return
 	}
 	s.log.Warn("upstream request answered with an error: no client stream", "reason", reason, "method", env.Method)
-	go func() { // never from the pump: the upstream may be blocked writing to us
-		ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
-		defer cancel()
-		_ = s.p.Send(ctx, rpcError(env.ID, codeInternalError, "client not connected"))
-	}()
+	s.p.sendDetached(rpcError(env.ID, codeInternalError, "client not connected"))
 }

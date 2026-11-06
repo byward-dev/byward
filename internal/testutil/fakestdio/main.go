@@ -32,6 +32,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -59,6 +60,8 @@ func main() {
 		case "-modern":
 			serveModern()
 			return
+		case "-silentdiscover":
+			silentDiscover = true
 		}
 	}
 	if mcp {
@@ -181,6 +184,10 @@ type message struct {
 //
 // A response from the client is matched to an "ask" by id; others are kept for "last".
 // Notifications are ignored.
+// silentDiscover (flag -silentdiscover) makes serveMCP never answer server/discover, like a legacy
+// server that ignores unknown requests.
+var silentDiscover bool
+
 // initMode is how serveMCP answers initialize: "" (normally), error, exit or hold. version is the
 // protocol version its InitializeResult names (flag -version=; "none" leaves it out).
 var initMode, version = "", "2025-11-25"
@@ -225,6 +232,9 @@ func serveMCP() {
 			continue
 		}
 		if m.ID == nil {
+			continue
+		}
+		if m.Method == "server/discover" && silentDiscover {
 			continue
 		}
 		switch m.Method {
@@ -330,6 +340,11 @@ func serveMCP() {
 //	stray       writes a notification unrelated to any request, then the result
 //	crash       exits with status 3
 //	env         the environment as the result
+//	burst       params.n notifications/progress for the token, written with no gap, then the result
+//	discovers   how many server/discover requests it has answered
+//	strayresponse  a response with an id nobody sent, then the result
+//	strayprogress  a progress notification for a token nobody sent, then the result
+//	answerexit  the result, then exits at once
 func serveModern() {
 	out := bufio.NewWriter(os.Stdout)
 	var mu sync.Mutex
@@ -359,6 +374,7 @@ func serveModern() {
 	sc := bufio.NewScanner(os.Stdin)
 	sc.Buffer(make([]byte, 1<<20), 1<<20)
 	n := 0
+	var discovers atomic.Int64
 	for sc.Scan() {
 		var m message
 		if json.Unmarshal(sc.Bytes(), &m) != nil {
@@ -387,6 +403,7 @@ func serveModern() {
 		go func() {
 			switch m.Method {
 			case "server/discover":
+				discovers.Add(1)
 				result(id, map[string]any{"resultType": "complete", "supportedVersions": []string{"2026-07-28"},
 					"capabilities": map[string]any{}, "ttlMs": 0, "cacheScope": "public"})
 			case "echo":
@@ -421,6 +438,29 @@ func serveModern() {
 				os.Exit(3)
 			case "env":
 				result(id, os.Environ())
+			case "burst":
+				var b struct{ N int }
+				_ = json.Unmarshal(m.Params, &b)
+				mu.Lock()
+				for i := range b.N {
+					_, _ = fmt.Fprintf(out, `{"jsonrpc":"2.0","method":"notifications/progress","params":{"progressToken":%s,"progress":%d}}`+"\n", p.Meta.ProgressToken, i+1)
+				}
+				_, _ = fmt.Fprintf(out, `{"jsonrpc":"2.0","id":%s,"result":"done"}`+"\n", id)
+				_ = out.Flush()
+				mu.Unlock()
+			case "discovers":
+				result(id, discovers.Load())
+			case "strayresponse":
+				write(message{ID: json.RawMessage(`"nobody"`), Result: json.RawMessage(`{}`)})
+				result(id, "ok")
+			case "strayprogress":
+				write(message{Method: "notifications/progress", Params: json.RawMessage(`{"progressToken":"nobody","progress":1}`)})
+				result(id, "ok")
+			case "answerexit":
+				mu.Lock()
+				_, _ = fmt.Fprintf(out, `{"jsonrpc":"2.0","id":%s,"result":"answered"}`+"\n", id)
+				_ = out.Flush()
+				os.Exit(0)
 			case "stray":
 				write(message{Method: "notifications/tools/list_changed"})
 				result(id, "ok")

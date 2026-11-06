@@ -10,6 +10,7 @@ import (
 	"io"
 	"slices"
 	"sort"
+	"strings"
 )
 
 // jsonPath is a path of object keys from the root of a JSON-RPC message.
@@ -81,7 +82,7 @@ func locate(msg []byte, paths ...jsonPath) ([]*span, error) {
 			}
 			key, _ := tok.(string)
 			if top.path != nil {
-				if top.seen[key] {
+				if top.seen[key] || foldsOnto(key, top.path, paths) {
 					return nil, errAmbiguous
 				}
 				top.seen[key] = true
@@ -131,6 +132,18 @@ func locate(msg []byte, paths ...jsonPath) ([]*span, error) {
 		return nil, errAmbiguous
 	}
 	return found, nil
+}
+
+// foldsOnto reports whether key, in an object at path, differs only in case from the next key
+// of a targeted path. encoding/json matches field names case-insensitively, so such a key could be
+// read as the targeted one elsewhere while locate passes it by.
+func foldsOnto(key string, at jsonPath, paths []jsonPath) bool {
+	for _, t := range paths {
+		if len(t) > len(at) && slices.Equal(t[:len(at)], at) && key != t[len(at)] && strings.EqualFold(key, t[len(at)]) {
+			return true
+		}
+	}
+	return false
 }
 
 // edit is one replacement of a located value.

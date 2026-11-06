@@ -551,15 +551,19 @@ func TestCrashIsNotLoggedAsAStdoutStop(t *testing.T) {
 func TestProcessInUseNeverIdlesOutAndIdlesFromItsLastRelease(t *testing.T) {
 	h := newHarness(t, nil)
 	p, release := h.lease(t, "s1", alice)
+	stops := func() int { return len(h.log.with("stopping upstream process")) }
 	h.clk.Advance(2 * DefaultIdleTimeout) // a quiet open stream, e.g. a subscription
-	if isDone(p) {
+	if stops() != 0 {
 		t.Fatal("a process in use was stopped as idle")
 	}
 	release()
 	h.clk.Advance(DefaultIdleTimeout - time.Second)
-	if isDone(p) {
+	if stops() != 0 {
 		t.Fatal("stopped before the idle timeout counted from the release")
 	}
 	h.clk.Advance(time.Second)
+	if recs := h.log.with("stopping upstream process"); len(recs) != 1 || recs[0].attrs["reason"] != "idle" {
+		t.Fatalf("stop records %v, want one for idle", recs)
+	}
 	waitDone(t, p)
 }

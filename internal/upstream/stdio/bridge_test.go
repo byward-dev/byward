@@ -624,10 +624,10 @@ func TestMissingOrDuplicateMCPSessionHeadersAndUnsupportedMethodsStartNoProcess(
 		want     int
 		allow    string // the Allow header expected; only a 405 lists the methods
 	}{
-		"two session headers":    {http.MethodPost, []string{s, s}, http.StatusBadRequest, ""},
-		"GET without session":    {http.MethodGet, nil, http.StatusMethodNotAllowed, "POST"},
-		"DELETE without session": {http.MethodDelete, nil, http.StatusMethodNotAllowed, "POST"},
-		"PUT":                    {http.MethodPut, []string{s}, http.StatusMethodNotAllowed, "GET, POST, DELETE"},
+		"two session headers":                          {http.MethodPost, []string{s, s}, http.StatusBadRequest, ""},
+		"GET without an MCP session is not allowed":    {http.MethodGet, nil, http.StatusMethodNotAllowed, "POST"},
+		"DELETE without an MCP session is not allowed": {http.MethodDelete, nil, http.StatusMethodNotAllowed, "POST"},
+		"PUT": {http.MethodPut, []string{s}, http.StatusMethodNotAllowed, "GET, POST, DELETE"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			req, _ := http.NewRequest(tc.method, b.srv.URL, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"echo","params":{}}`))

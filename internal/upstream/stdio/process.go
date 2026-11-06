@@ -52,8 +52,8 @@ type Process struct {
 	stopping bool
 	exited   bool
 
-	stopOnce, stdinOnce, abandonOnce sync.Once
-	waitErr                          error
+	stdinOnce, abandonOnce sync.Once
+	waitErr                error
 }
 
 // processOptions are the per-upstream settings a Process needs.
@@ -75,10 +75,9 @@ func startProcess(cmd *exec.Cmd, stdin, stdout, stderr *os.File, sessionDir stri
 	p.mu.Lock() // the timer may fire before the assignment completes; stop reads p.idle under p.mu
 	p.idle = o.clock.AfterFunc(o.idleFor, func() {
 		p.mu.Lock()
-		held := p.held
-		p.mu.Unlock()
-		if held == 0 { // a lease taken as the timer fired keeps the process
-			p.stop("idle")
+		defer p.mu.Unlock()
+		if p.held == 0 { // checked and stopped under one lock: a lease taken meanwhile keeps the process
+			p.stopLocked("idle")
 		}
 	})
 	p.mu.Unlock()
@@ -187,30 +186,44 @@ func (p *Process) unhold() {
 // and finally SIGKILL to the whole process group, each after the grace period. It returns at
 // once; Done reports the exit.
 func (p *Process) stop(reason string) {
-	p.stopOnce.Do(func() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.stopLocked(reason)
+}
+
+// stopLocked is stop for callers holding p.mu. Only the first call does anything.
+func (p *Process) stopLocked(reason string) {
+	if p.stopping || p.exited {
+		return
+	}
+	p.stopping = true
+	p.idle.Stop()
+	p.log.Info("stopping upstream process", "reason", reason)
+	p.closeStdin()
+	p.timers = append(p.timers, p.clock.AfterFunc(p.grace, func() {
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		if p.exited {
 			return
 		}
-		p.stopping = true
-		p.idle.Stop()
-		p.log.Info("stopping upstream process", "reason", reason)
-		p.closeStdin()
+		p.signalLocked(syscall.SIGTERM)
 		p.timers = append(p.timers, p.clock.AfterFunc(p.grace, func() {
 			p.mu.Lock()
 			defer p.mu.Unlock()
-			if p.exited {
-				return
-			}
-			p.signalLocked(syscall.SIGTERM)
-			p.timers = append(p.timers, p.clock.AfterFunc(p.grace, func() {
-				p.mu.Lock()
-				defer p.mu.Unlock()
-				p.signalLocked(syscall.SIGKILL)
-			}))
+			p.signalLocked(syscall.SIGKILL)
 		}))
-	})
+	}))
+}
+
+// sendDetached sends msg in the background, bounded by writeTimeout. Code that reads the
+// process's output uses it: the upstream may be blocked writing to us, so a write from there
+// could deadlock.
+func (p *Process) sendDetached(msg []byte) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+		defer cancel()
+		_ = p.Send(ctx, msg)
+	}()
 }
 
 // signalLocked signals the process group. It does nothing once the leader is reaped, so a

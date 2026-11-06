@@ -5,11 +5,11 @@ package stdio
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/byward-dev/byward/internal/logging"
@@ -22,8 +22,8 @@ import (
 const (
 	// modernVersion is the first protocol version without initialize; dates compare as strings.
 	modernVersion = "2026-07-28"
-	// probeTimeout bounds the server/discover probe; a legacy server may never answer it.
-	probeTimeout = 10 * time.Second
+	// defaultProbeTimeout bounds the server/discover probe; a legacy server may never answer it.
+	defaultProbeTimeout = 10 * time.Second
 	// legacyVerdictTTL is how long "this upstream is not modern" is kept, so one failed probe does
 	// not hold for the life of the proxy.
 	legacyVerdictTTL = 10 * time.Minute
@@ -45,29 +45,76 @@ var probeRequest = []byte(`{"jsonrpc":"2.0","id":` + probeID + `,"method":"serve
 	`"io.modelcontextprotocol/clientInfo":{"name":"byward","version":"probe"},` +
 	`"io.modelcontextprotocol/clientCapabilities":{}}}}`)
 
-// isModern reports whether a session-less message asks for the modern era: its _meta names a
-// protocol version from 2026-07-28 on. An unparsable message is not modern; the legacy path
-// refuses it.
-func isModern(msg []byte) bool {
-	at, err := locate(msg, pathVersion)
-	if err != nil || at[0] == nil {
-		return false
+// requestMeta is what the proxy reads of a client message, found in one pass.
+type requestMeta struct {
+	id, token *span  // nil when absent
+	logs      bool   // _meta asks for notifications/message
+	version   string // _meta protocol version; "" when absent or not a string
+}
+
+// readMeta locates a message's id, progress token, log level and protocol version. Ambiguous JSON
+// is refused: the ids are rewritten, and a wrong guess would route one client's answer to another.
+func readMeta(msg []byte) (requestMeta, error) {
+	at, err := locate(msg, pathID, pathToken, pathLogLevel, pathVersion)
+	if err != nil {
+		return requestMeta{}, err
 	}
-	var v string
-	return json.Unmarshal(at[0].value(msg), &v) == nil && v >= modernVersion
+	m := requestMeta{id: at[0], token: at[1], logs: at[2] != nil}
+	if at[3] != nil {
+		_ = json.Unmarshal(at[3].value(msg), &m.version)
+	}
+	return m, nil
+}
+
+// looksModern reports whether a message readMeta refused names a modern protocol version anyway,
+// so its refusal can say why instead of sending the client to initialize.
+func looksModern(msg []byte) bool {
+	var m struct {
+		Params struct {
+			Meta struct {
+				Version string `json:"io.modelcontextprotocol/protocolVersion"`
+			} `json:"_meta"`
+		} `json:"params"`
+	}
+	return json.Unmarshal(msg, &m) == nil && m.Params.Meta.Version >= modernVersion
+}
+
+// modern reports whether the message asks for the modern era: a protocol version from 2026-07-28.
+func (m requestMeta) modern() bool { return m.version >= modernVersion }
+
+// checkRequest refuses a request whose id or progress token is not a string or an integer.
+func (m requestMeta) checkRequest(msg []byte) error {
+	if m.id == nil {
+		return errAmbiguous
+	}
+	if err := scalarID(m.id.value(msg)); err != nil {
+		return err
+	}
+	if m.token != nil {
+		return scalarID(m.token.value(msg))
+	}
+	return nil
 }
 
 // capability is what the proxy has learned about the upstream's era.
 type capability struct {
+	clock       Clock
 	mu          sync.Mutex
 	modern      bool
 	legacyUntil time.Time
 }
 
-func (c *capability) known() (modern, legacy bool) {
+func (c *capability) isModern() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.modern, !c.modern && time.Now().Before(c.legacyUntil)
+	return c.modern
+}
+
+// legacy reports a fresh "not modern" verdict.
+func (c *capability) legacy() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return !c.modern && c.clock.Now().Before(c.legacyUntil)
 }
 
 func (c *capability) set(modern bool) {
@@ -75,18 +122,18 @@ func (c *capability) set(modern bool) {
 	defer c.mu.Unlock()
 	c.modern = modern
 	if !modern {
-		c.legacyUntil = time.Now().Add(legacyVerdictTTL)
+		c.legacyUntil = c.clock.Now().Add(legacyVerdictTTL)
 	}
 }
 
 // userConn is a user's modern-era upstream process and the requests in flight on it.
 type userConn struct {
-	key string
 	p   *Process
 	log *slog.Logger
 
+	ids *atomic.Uint64 // the Bridge's: proxy ids never repeat across userConns
+
 	mu      sync.Mutex
-	next    uint64
 	byID    map[string]*modernRequest // by proxy id
 	byToken map[string]*modernRequest // by proxy progress token
 	probe   chan []byte               // the probe's answer
@@ -106,15 +153,10 @@ type modernRequest struct {
 	final     chan []byte
 }
 
-func newUserConn(key string, p *Process, log *slog.Logger) *userConn {
-	return &userConn{key: key, p: p, log: log, byID: map[string]*modernRequest{}, byToken: map[string]*modernRequest{},
-		probe: make(chan []byte, 1), ended: make(chan struct{})}
-}
-
-// modernPost serves one session-less modern-era POST.
-func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity, msg []byte, env envelope) {
-	if modern, legacy := b.cap.known(); legacy && !modern {
-		b.legacyFallback(w)
+// modernPost serves one session-less modern-era POST; meta is the message's, already read.
+func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity, msg []byte, env envelope, meta requestMeta) {
+	if b.cap.legacy() {
+		legacyFallback(w)
 		return
 	}
 	switch env.kind() {
@@ -127,98 +169,88 @@ func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity,
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
-	}
-	var at []*span
-	if env.kind() == kindRequest { // refused before any process starts
-		var err error
-		if at, err = requestIDs(msg); err != nil {
+	case kindRequest:
+		if err := meta.checkRequest(msg); err != nil { // refused before any process starts
 			writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest, "Invalid Request: "+err.Error())
 			return
 		}
 	}
-	c, release, ok := b.userConn(w, r, id)
-	if !ok {
+	key := "user:" + id.user()
+	p, release, err := b.c.Manager.Get(r.Context(), key, id)
+	if err != nil {
+		b.startFailed(w, r, id, err)
 		return
 	}
 	defer release()
+	c := b.connFor(key, p, id)
+	if !b.speaksModern(r.Context(), c) {
+		legacyFallback(w)
+		return
+	}
 	if env.kind() == kindNotification {
-		if err := c.p.Send(r.Context(), msg); err != nil {
+		if err := p.Send(r.Context(), msg); err != nil {
 			http.Error(w, "upstream unavailable", http.StatusBadGateway)
 			return
 		}
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
-	c.request(w, r, msg, at)
-}
-
-// requestIDs locates a request's id, progress token and log level, refusing what is ambiguous:
-// the ids are rewritten, and a wrong guess would route one client's answer to another.
-func requestIDs(msg []byte) ([]*span, error) {
-	at, err := locate(msg, pathID, pathToken, pathLogLevel)
-	if err == nil {
-		err = scalarID(at[0].value(msg))
-	}
-	if err == nil && at[1] != nil {
-		err = scalarID(at[1].value(msg))
-	}
-	return at, err
+	c.request(w, r, msg, meta)
 }
 
 // legacyFallback is the answer to a modern request the upstream cannot serve: no modern error
 // code, so a dual-era client falls back to initialize (2026-07-28 transports, backwards
 // compatibility).
-func (b *Bridge) legacyFallback(w http.ResponseWriter) {
+func legacyFallback(w http.ResponseWriter) {
 	writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest,
 		"Bad Request: this server speaks MCP 2025-11-25; start a session with initialize")
 }
 
-// userConn returns the user's modern-era process, spawning and probing it if needed, with a lease.
-// On failure it has answered the request.
-func (b *Bridge) userConn(w http.ResponseWriter, r *http.Request, id Identity) (*userConn, func(), bool) {
-	key := "user:" + id.user()
-	p, release, err := b.c.Manager.Get(r.Context(), key, id)
-	if err != nil {
-		b.startFailed(w, r, id, err)
-		return nil, nil, false
-	}
+// connFor returns the userConn of the user's process p, creating it (and its pump) for a new
+// process.
+func (b *Bridge) connFor(key string, p *Process, id Identity) *userConn {
 	b.mu.Lock()
-	c := b.users[key]
-	fresh := c == nil || c.p != p
-	if fresh {
-		c = newUserConn(key, p, b.c.Log.With("process", p.PID(), "user_key", id.Subject))
-		b.users[key] = c
+	defer b.mu.Unlock()
+	if c := b.users[key]; c != nil && c.p == p {
+		return c
 	}
-	b.mu.Unlock()
-	if fresh {
-		go func() {
-			c.pump()
-			b.mu.Lock()
-			if b.users[key] == c {
-				delete(b.users, key)
-			}
-			b.mu.Unlock()
-		}()
+	c := &userConn{p: p, ids: &b.next, log: b.c.Log.With("process", p.PID(), "user_key", id.Subject),
+		byID: map[string]*modernRequest{}, byToken: map[string]*modernRequest{}, probe: make(chan []byte, 1), ended: make(chan struct{})}
+	b.users[key] = c
+	go func() {
+		c.pump()
+		b.mu.Lock()
+		if b.users[key] == c {
+			delete(b.users, key)
+		}
+		b.mu.Unlock()
+	}()
+	return c
+}
+
+// speaksModern decides the upstream's era: known modern, or probed on this process. A process
+// that fails the probe is stopped; the verdict is kept for legacyVerdictTTL.
+func (b *Bridge) speaksModern(ctx context.Context, c *userConn) bool {
+	if b.cap.isModern() {
+		return true
 	}
-	if modern, _ := b.cap.known(); !modern && !c.probed(r.Context()) {
-		release()
+	if !c.probed(ctx, b.probeTimeout) {
 		b.cap.set(false)
-		p.stop("not_modern")
-		b.legacyFallback(w)
-		return nil, nil, false
+		c.p.stop("not_modern")
+		return false
 	}
 	b.cap.set(true)
-	return c, release, true
+	return true
 }
 
 // probed asks the process server/discover, once; a DiscoverResult means it speaks the modern era.
-func (c *userConn) probed(ctx context.Context) bool {
-	c.probeOnce.Do(func() { c.modern = c.discover(ctx) })
+func (c *userConn) probed(ctx context.Context, timeout time.Duration) bool {
+	c.probeOnce.Do(func() { c.modern = c.discover(ctx, timeout) })
 	return c.modern
 }
 
-func (c *userConn) discover(ctx context.Context) bool {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), probeTimeout)
+func (c *userConn) discover(ctx context.Context, timeout time.Duration) bool {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
 	if c.p.Send(ctx, probeRequest) != nil {
 		return false
@@ -239,19 +271,30 @@ func (c *userConn) discover(ctx context.Context) bool {
 }
 
 // request relays one modern-era request under proxy-chosen ids.
-func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, at []*span) {
-	q := c.register(at[0].value(msg), at[1], msg, at[2] != nil)
-	defer c.unregister(q)
-	edits := []edit{{at[0], []byte(q.proxyID)}}
-	if at[1] != nil {
-		edits = append(edits, edit{at[1], []byte(q.proxyTok)})
+func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, meta requestMeta) {
+	var token []byte
+	if meta.token != nil {
+		token = meta.token.value(msg)
 	}
-	if err := c.p.Send(r.Context(), replace(msg, edits...)); err != nil {
+	q := c.register(meta.id.value(msg), token, meta.logs)
+	defer c.unregister(q)
+	if err := c.p.Send(r.Context(), replace(msg, edit{meta.id, []byte(q.proxyID)}, edit{meta.token, []byte(q.proxyTok)})); err != nil {
 		c.log.WarnContext(r.Context(), "relaying to the upstream process failed", "request_id", logging.RequestID(r.Context()), "error", err)
 		http.Error(w, "upstream unavailable", http.StatusBadGateway)
 		return
 	}
 	out := startSSE(w)
+	finish := func(m []byte) { // what the upstream sent before the response goes first
+		for {
+			select {
+			case o := <-q.out:
+				_ = out.write(o)
+			default:
+				_ = out.write(m)
+				return
+			}
+		}
+	}
 	for {
 		select {
 		case m := <-q.out:
@@ -260,18 +303,15 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, a
 				return
 			}
 		case m := <-q.final:
-			for drained := false; !drained; {
-				select {
-				case o := <-q.out:
-					_ = out.write(o)
-				default:
-					drained = true
-				}
-			}
-			_ = out.write(m)
+			finish(m)
 			return
 		case <-c.ended:
-			_ = out.write(rpcError(q.id, codeInternalError, "upstream process exited"))
+			select { // an answer written just before the exit still counts
+			case m := <-q.final:
+				finish(m)
+			default:
+				finish(rpcError(q.id, codeInternalError, "upstream process exited"))
+			}
 			return
 		case <-r.Context().Done():
 			c.cancel(q) // closing the stream cancels the request (2026-07-28 transports)
@@ -280,15 +320,14 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, a
 	}
 }
 
-func (c *userConn) register(id []byte, token *span, msg []byte, logs bool) *modernRequest {
+func (c *userConn) register(id, token []byte, logs bool) *modernRequest {
+	n := strconv.FormatUint(c.ids.Add(1), 10)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.next++
-	n := strconv.FormatUint(c.next, 10)
 	q := &modernRequest{id: id, proxyID: `"byw-` + n + `"`, logs: logs, out: make(chan []byte, streamBuffer), final: make(chan []byte, 1)}
 	c.byID[q.proxyID] = q
 	if token != nil {
-		q.token, q.proxyTok = token.value(msg), `"byw-t`+n+`"`
+		q.token, q.proxyTok = token, `"byw-t`+n+`"`
 		c.byToken[q.proxyTok] = q
 	}
 	return q
@@ -308,11 +347,7 @@ func (c *userConn) unregister(q *modernRequest) {
 // cancel tells the upstream to stop work on q, which nobody will read any more.
 func (c *userConn) cancel(q *modernRequest) {
 	c.unregister(q)
-	go func() { // never from a reader: the upstream may be blocked writing to us
-		ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
-		defer cancel()
-		_ = c.p.Send(ctx, []byte(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":`+q.proxyID+`}}`))
-	}()
+	c.p.sendDetached([]byte(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":` + q.proxyID + `}}`))
 }
 
 // pump routes every upstream message until stdout closes.
@@ -335,11 +370,7 @@ func (c *userConn) route(msg []byte) {
 		c.routeResponse(msg, string(compactID(env.ID)))
 	case kindRequest: // a modern server MUST NOT write requests to stdout (2026-07-28 stdio)
 		c.log.Warn("upstream sent a request, which the modern era does not allow", "reason", "upstream_request", "method", env.Method)
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
-			defer cancel()
-			_ = c.p.Send(ctx, rpcError(env.ID, codeInternalError, "server-to-client requests are not part of MCP 2026-07-28"))
-		}()
+		c.p.sendDetached(rpcError(env.ID, codeInternalError, "server-to-client requests are not part of MCP 2026-07-28"))
 	case kindNotification:
 		c.routeNotification(msg, env.Method)
 	}
@@ -357,7 +388,7 @@ func (c *userConn) routeResponse(msg []byte, proxyID string) {
 	q := c.byID[proxyID]
 	c.mu.Unlock()
 	at, err := locate(msg, pathID)
-	if q == nil || err != nil {
+	if q == nil || err != nil || at[0] == nil {
 		c.log.Warn("upstream response for no waiting request", "reason", "response_unrouted")
 		return
 	}
@@ -415,17 +446,4 @@ func (c *userConn) deliver(q *modernRequest, msg []byte, method string) {
 
 func (c *userConn) drop(method, reason string) {
 	c.log.Warn("upstream notification dropped", "reason", reason, "method", method)
-}
-
-// startFailed answers a request whose process could not be had.
-func (b *Bridge) startFailed(w http.ResponseWriter, r *http.Request, id Identity, err error) {
-	if errors.Is(err, errBusy) {
-		b.c.Log.WarnContext(r.Context(), "stdio process cap full: every process is in use", "request_id", logging.RequestID(r.Context()),
-			"reason", "process_cap", "user_key", id.Subject)
-		w.Header().Set("Retry-After", busyRetryAfter)
-		http.Error(w, "upstream busy", http.StatusServiceUnavailable)
-		return
-	}
-	b.c.Log.WarnContext(r.Context(), "cannot start the upstream process", "request_id", logging.RequestID(r.Context()), "error", err)
-	http.Error(w, "upstream unavailable", http.StatusBadGateway)
 }

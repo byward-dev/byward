@@ -355,7 +355,7 @@ func TestLooseUpstreamEnvFileRefusesToStartInEveryMode(t *testing.T) {
 
 // Invariant 13 in the modern era: each user's requests run in that user's own upstream process,
 // through the real Guard and session binding, and no token reaches it.
-func TestModernEraRequestsRunInTheUsersOwnUpstreamProcess(t *testing.T) {
+func TestModernEraRequestsRunInTheUsersOwnUpstreamProcessWithNoToken(t *testing.T) {
 	srv, _, _ := stdioProxyRunning(t, []string{"-modern"})
 	env := func(token string) []string {
 		body := `{"jsonrpc":"2.0","id":1,"method":"env","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`
