@@ -151,13 +151,19 @@ func TestTheUpstreamGetsAnAssertionItCanVerifyInsteadOfTheClientsToken(t *testin
 	}
 }
 
-// With its own header the assertion still replaces whatever the client sent there, and the client's token still never reaches the upstream (ADR-0016 §2, §4).
+// With its own header the assertion still replaces whatever the client sent there, in any
+// spelling, and the client's token still never reaches the upstream (ADR-0016 §2, §4).
 func TestAClientCannotSupplyTheAssertionHeader(t *testing.T) {
 	a := newAsserting(t, "BYWARD_ASSERTION_HEADER=X-Byward-Identity")
 	got := a.call(t, token.Claims{GrantID: "g1", Subject: "tid:oid", ClientID: "c"},
-		http.Header{"X-Byward-Identity": {"Bearer forged"}}) // other spellings: the relay's test
+		// The underscore spelling is the one only the strip removes (Set overwrites the other); the
+		// relay's test has every spelling.
+		http.Header{"X_byward_identity": {"Bearer forged"}, "X-Byward-Identity": {"Bearer forged"}})
 	if vals := got.Header.Values("X-Byward-Identity"); len(vals) != 1 || strings.Contains(vals[0], "forged") {
 		t.Fatalf("assertion header %q", vals)
+	}
+	if _, ok := got.Header["X_byward_identity"]; ok {
+		t.Fatal("the underscore spelling reached the upstream: the strip is not wired")
 	}
 	if auth := got.Header.Get("Authorization"); auth != "" {
 		t.Fatalf("the client's token reached the upstream: %q", auth)

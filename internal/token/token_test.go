@@ -324,8 +324,7 @@ func TestNewSealerNeedsARingAndAResource(t *testing.T) {
 	}
 }
 
-// Version 2 seals the client ID and the asserted claims; a version 1 token is refused, so a client
-// refreshes once after an upgrade (ADR-0016 §1).
+// Version 2 seals the client ID and the asserted claims, and they survive a round trip (ADR-0016 §1).
 func TestAccessTokensRoundTripTheAssertedClaims(t *testing.T) {
 	s := newSealer(t)
 	c := claims()
@@ -364,7 +363,7 @@ func TestAnAccessTokenWithoutAClientIsNotSealed(t *testing.T) {
 }
 
 // Sizes the operator sees: with roles only a token stays well under any header limit (8 KiB is
-// the smallest common one); with 200 groups opted in (Entra's overage limit) it still fits MaxLen.
+// the smallest common one); with 200 groups opted in (Entra's overage limit) it still fits MaxLen; 400 groups are refused with ErrTooLong.
 func TestAccessTokensFit200GroupsAndRefuse400(t *testing.T) {
 	s := newSealer(t)
 	c := claims()
