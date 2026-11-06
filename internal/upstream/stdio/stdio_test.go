@@ -567,3 +567,17 @@ func TestProcessInUseNeverIdlesOutAndIdlesFromItsLastRelease(t *testing.T) {
 	}
 	waitDone(t, p)
 }
+
+func TestEveryLeaseOfAProcessKeepsItFromIdlingOut(t *testing.T) {
+	h := newHarness(t, nil)
+	h.get(t, "s1", alice) // the spawning lease, released
+	_, release, err := h.m.leaseKey(context.Background(), "s1", alice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.clk.Advance(2 * DefaultIdleTimeout)
+	if n := len(h.log.with("stopping upstream process")); n != 0 {
+		t.Fatalf("%d stops: a process held by a later lease was stopped as idle", n)
+	}
+	release()
+}

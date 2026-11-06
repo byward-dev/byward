@@ -219,13 +219,79 @@ func TestAmbiguousModernRequestsAreRefusedBeforeAnyProcessStarts(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			res := b.post(t, "alice", "", body)
 			raw, _ := io.ReadAll(res.Body)
-			if res.StatusCode != http.StatusBadRequest || rpcErrorCode(t, raw) != codeInvalidRequest {
-				t.Fatalf("status %d, body %s; want 400 -32600", res.StatusCode, raw)
+			// The ambiguity refusal, not the fallback: that would send the client to initialize.
+			if res.StatusCode != http.StatusBadRequest || rpcErrorCode(t, raw) != codeInvalidRequest || !strings.Contains(string(raw), "ambiguous") {
+				t.Fatalf("status %d, body %s; want 400 -32600 naming the ambiguity", res.StatusCode, raw)
 			}
 		})
 	}
 	if b.m.Len() != 0 {
 		t.Fatalf("Len = %d, want no process for refused requests", b.m.Len())
+	}
+}
+
+func TestRequestIDsAndProgressTokensMustBeStringsOrIntegers(t *testing.T) {
+	for name, tc := range map[string]struct {
+		body string
+		ok   bool
+	}{
+		"string id and token":  {modernBody(`"a"`, "x", `"progressToken":"t"`, ""), true},
+		"integer id and token": {modernBody(`1`, "x", `"progressToken":-2`, ""), true},
+		"no token":             {modernBody(`1`, "x", "", ""), true},
+		"fractional token":     {modernBody(`1`, "x", `"progressToken":1.5`, ""), false},
+		"boolean token":        {modernBody(`1`, "x", `"progressToken":true`, ""), false},
+		"null token":           {modernBody(`1`, "x", `"progressToken":null`, ""), false},
+		"no id":                {`{"jsonrpc":"2.0","method":"x","params":{}}`, false},
+	} {
+		meta, err := readMeta([]byte(tc.body))
+		if err == nil {
+			err = meta.checkRequest([]byte(tc.body))
+		}
+		if (err == nil) != tc.ok {
+			t.Errorf("%s: %v, want accepted %v", name, err, tc.ok)
+		}
+	}
+}
+
+func TestAnExitedProcessesRequestGetsItsQueuedAnswerBeforeAnyExitError(t *testing.T) {
+	q := &modernRequest{id: []byte(`7`), final: make(chan []byte, 1)}
+	if got := string(exitAnswer(q)); !strings.Contains(got, "upstream process exited") || !strings.Contains(got, `"id":7`) {
+		t.Fatalf("with no answer queued: %s, want the exit error under the client's id", got)
+	}
+	q.final <- []byte(`{"jsonrpc":"2.0","id":7,"result":"answered"}`)
+	if got := string(exitAnswer(q)); got != `{"jsonrpc":"2.0","id":7,"result":"answered"}` {
+		t.Fatalf("with an answer queued: %s, want the answer", got)
+	}
+}
+
+func TestProxyIDsNeverRepeatAcrossTheUsersProcesses(t *testing.T) {
+	// A respawned process gets a new userConn; its ids must not restart where the old one's began.
+	b := newModernBridge(t, nil)
+	first, second := &userConn{ids: &b.bridge.next, byID: map[string]*modernRequest{}, byToken: map[string]*modernRequest{}},
+		&userConn{ids: &b.bridge.next, byID: map[string]*modernRequest{}, byToken: map[string]*modernRequest{}}
+	a, c := first.register([]byte(`1`), []byte(`"t"`), false), second.register([]byte(`1`), []byte(`"t"`), false)
+	if a.proxyID == c.proxyID || a.proxyTok == c.proxyTok {
+		t.Fatalf("ids %s/%s and %s/%s repeat across userConns", a.proxyID, a.proxyTok, c.proxyID, c.proxyTok)
+	}
+}
+
+func TestARespawnedProcessGetsItsOwnUserConn(t *testing.T) {
+	// The map still holds the userConn of the user's previous process: requests for the new process
+	// must not go to it, or no pump would read the new process's output.
+	b := newModernBridge(t, nil)
+	key := "user:" + alice.user()
+	stale := &userConn{p: &Process{}, ended: make(chan struct{})}
+	close(stale.ended)
+	b.bridge.mu.Lock()
+	b.bridge.users[key] = stale
+	b.bridge.mu.Unlock()
+	if id, _ := lastResult(t, readEvents(t, b.post(t, "alice", "", modernBody(`5`, "echo", "", "")))); id != `5` {
+		t.Fatalf("the request got id %s, want its own answer", id)
+	}
+	b.bridge.mu.Lock()
+	defer b.bridge.mu.Unlock()
+	if b.bridge.users[key] == stale {
+		t.Fatal("the stale userConn served the new process")
 	}
 }
 

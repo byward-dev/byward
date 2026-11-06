@@ -307,17 +307,23 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, m
 			finish(m)
 			return
 		case <-c.ended:
-			select { // an answer written just before the exit still counts
-			case m := <-q.final:
-				finish(m)
-			default:
-				finish(rpcError(q.id, codeInternalError, "upstream process exited"))
-			}
+			finish(exitAnswer(q))
 			return
 		case <-r.Context().Done():
 			c.cancel(q) // closing the stream cancels the request (2026-07-28 transports)
 			return
 		}
+	}
+}
+
+// exitAnswer is what a request gets once its process has ended: its answer, if the upstream wrote
+// it before exiting, else an error.
+func exitAnswer(q *modernRequest) []byte {
+	select {
+	case m := <-q.final:
+		return m
+	default:
+		return rpcError(q.id, codeInternalError, "upstream process exited")
 	}
 }
 
