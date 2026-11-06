@@ -28,7 +28,13 @@ var (
 	// the immediate predecessor of the current one. The store has already revoked the grant
 	// (ADR-0006 §4).
 	ErrReused = errors.New("store: refresh token reused")
+	// ErrFull: CreateClient found the cap of live client registrations reached (ADR-0008 §3).
+	ErrFull = errors.New("store: client registrations full")
 )
+
+// UnusedClientLifetime is how long a dynamically registered client that never redeemed a code is
+// kept (ADR-0008 §3): Collect deletes it after this, whatever its ExpiresAt.
+const UnusedClientLifetime = 24 * time.Hour
 
 // RevocationRetention is how long revocations are kept (ADR-0006 §3, §5). After it, every token a
 // revocation covers has expired anyway. It must exceed the longest access-token lifetime plus the
@@ -49,6 +55,7 @@ type Store interface {
 	Codes
 	RefreshTokens
 	Revocations
+	Clients
 	Collector
 }
 
@@ -56,7 +63,8 @@ type Store interface {
 type Collector interface {
 	// Collect deletes codes (pending or consumed) with ExpiresAt <= now, refresh tokens with
 	// IdleExpiresAt <= now, grants with ExpiresAt <= now together with their codes and refresh
-	// tokens, and revocations with At <= now - RevocationRetention.
+	// tokens, revocations with At <= now - RevocationRetention, and clients with ExpiresAt <= now
+	// or never used and CreatedAt <= now - UnusedClientLifetime.
 	Collect(ctx context.Context, now time.Time) error
 }
 
@@ -194,4 +202,29 @@ type Revocations interface {
 	// list is rebuilt from it on each sync: a cursor would miss rows that commit out of At order
 	// on another replica. Retention keeps the set small.
 	Revocations(ctx context.Context) ([]Revocation, error)
+}
+
+// Client is a dynamically registered MCP client (ADR-0008 §2-3). Metadata is the registered client
+// metadata as the registration package encodes it; the store does not interpret it.
+type Client struct {
+	ID        string
+	Metadata  []byte
+	CreatedAt time.Time
+	UsedAt    time.Time // zero until the client first redeems a code
+	ExpiresAt time.Time
+}
+
+// Clients are dynamic client registrations, with a sliding expiry (ADR-0008 §3).
+type Clients interface {
+	// CreateClient stores c. An existing ID is ErrExists; an empty ID or Metadata, a non-zero
+	// UsedAt, or an ExpiresAt not after CreatedAt is ErrInvalid. When max > 0 and max clients with
+	// ExpiresAt after c.CreatedAt are already stored, it is ErrFull; the count and the insert are one
+	// atomic step, so concurrent registrations never exceed max.
+	CreateClient(ctx context.Context, c Client, max int) error
+	// Client returns the client, or ErrNotFound. It does not check ExpiresAt.
+	Client(ctx context.Context, id string) (Client, error)
+	// UseClient records a use at now: it sets UsedAt to now if it is zero, and extends ExpiresAt to
+	// expires if that is at least minExtension later than the stored one, so a busy client does not
+	// write on every use. An unknown client is ErrNotFound. It never shortens ExpiresAt.
+	UseClient(ctx context.Context, id string, now, expires time.Time, minExtension time.Duration) error
 }

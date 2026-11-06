@@ -119,6 +119,8 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"cimd wildcard host", "BYWARD_CIMD_TRUSTED_HOSTS=*.example.com", `"*.example.com" is not a host name`},
 		{"cimd single-label host", "BYWARD_CIMD_TRUSTED_HOSTS=localhost", `"localhost" is not a host name`},
 		{"cimd unicode host", "BYWARD_CIMD_TRUSTED_HOSTS=bücher.example", `BYWARD_CIMD_TRUSTED_HOSTS: the host "bücher.example" is not ASCII`},
+		{"dcr not a bool", "BYWARD_DCR=on", "BYWARD_DCR: want true or false"},
+		{"client denylist blank", "BYWARD_CLIENT_DENYLIST= ,", "BYWARD_CLIENT_DENYLIST is set but lists nothing"},
 		{"gate tenants blank", "BYWARD_GATE_TENANTS=,", "BYWARD_GATE_TENANTS is set but lists nothing"},
 		{"gate roles blank", "BYWARD_GATE_ROLES= ,,", "BYWARD_GATE_ROLES is set but lists nothing"},
 		{"gate groups blank", "BYWARD_GATE_GROUPS= ", "BYWARD_GATE_GROUPS is set but lists nothing"},
@@ -546,5 +548,17 @@ func TestCIMDHostListsAreNormalizedAndRefusedWhileCIMDIsOff(t *testing.T) {
 	// Host lists with CIMD off would silently do nothing.
 	if _, err := load(t, nil, "BYWARD_CIMD=false", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai"); !isConfigError(err) || !strings.Contains(err.Error(), "no effect while BYWARD_CIMD is false") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// DCR is on unless turned off; the denylist takes comma-separated entries (each entry is checked
+// where it is used, internal/registration).
+func TestDCRIsOnByDefaultAndTheDenylistTakesCommaSeparatedEntries(t *testing.T) {
+	c, err := load(t, nil, "BYWARD_CLIENT_DENYLIST=https://evil.example/client.json, app.example")
+	if err != nil || !c.DCR || !slices.Equal(c.ClientDenylist, []string{"https://evil.example/client.json", "app.example"}) {
+		t.Fatalf("DCR %v, denylist %q, %v", c.DCR, c.ClientDenylist, err)
+	}
+	if c, err = load(t, nil, "BYWARD_DCR=false"); err != nil || c.DCR {
+		t.Fatalf("DCR off: %v, %v", c.DCR, err)
 	}
 }

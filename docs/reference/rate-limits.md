@@ -6,7 +6,8 @@ Decisions: [ADR-0018](../adr/0018-hardening.md) §6 and §8. MCP traffic is neve
 ## Budgets
 
 Requests per minute per client address. A token bucket per endpoint and address: a full minute's budget may arrive
-at once, then it refills evenly (30/min means one more request every 2 s).
+at once, then it refills evenly (30/min means one more request every 2 s). `/register` is the exception: at most 10
+may arrive at once ([ADR-0008](../adr/0008-client-registration.md) §3).
 
 | Endpoint | Default | Response when over |
 |---|---|---|
@@ -15,11 +16,10 @@ at once, then it refills evenly (30/min means one more request every 2 s).
 | `/callback/{idp}` | 30 | 429 page; the IdP is not called |
 | `/token` | 60 | 429 with JSON `{"error":"temporarily_unavailable",…}` and `Cache-Control: no-store`; the body is not read |
 | `/revoke` | 30 | as `/token` |
-| `/register` | 30 | as `/token` |
+| `/register` | 30, burst 10 | as `/token`; also audited as `client_registered` with `reason` = `rate_limited` |
 
 Every refusal carries `Retry-After` in whole seconds (RFC 6585 §4), is counted in `byward_rate_limited_total`,
-and is audited as `rate_limited` ([observability](observability.md)). `/register` applies from the slice that adds
-it (DCR). Metadata and JWKS are not limited.
+and is audited as `rate_limited` ([observability](observability.md)). Metadata and JWKS are not limited.
 
 Raise a budget with `BYWARD_OAUTH_RATE_LIMITS`, for example `authorize=120,callback=120`. Each value is 1 to
 10,000 per minute. There is no way to turn the limits off.

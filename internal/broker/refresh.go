@@ -104,6 +104,7 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 		b.unavailable(w, r, "rotating a refresh token failed", err)
 		return
 	}
+	b.recordUse(ctx, client, now)
 	b.issue(w, r, client.ID(), g.ID, g.Subject, now, g.ExpiresAt, scopes, next)
 }
 

@@ -133,8 +133,8 @@ func TestInvalidDocumentsAreRefused(t *testing.T) {
 		"inline private key":               {doc(map[string]any{"token_endpoint_auth_method": "private_key_jwt", "jwks": privateJWKS(t)}), "private key"},
 		"trailing data":                    {append(doc(nil), []byte(` {}`)...), "trailing"},
 		"not an object":                    {[]byte(`["x"]`), "not a JSON object"},
-		"name of the wrong type":           {[]byte(`{"client_id":"` + cimdID + `","client_name":7}`), "cimdDocument.client_name of type string"},
-		"redirect_uris of the wrong type":  {[]byte(`{"client_id":"` + cimdID + `","client_name":"A","redirect_uris":"https://app.example/cb"}`), "cimdDocument.redirect_uris of type []string"},
+		"name of the wrong type":           {[]byte(`{"client_id":"` + cimdID + `","client_name":7}`), "client_name: wrong JSON type (number)"},
+		"redirect_uris of the wrong type":  {[]byte(`{"client_id":"` + cimdID + `","client_name":"A","redirect_uris":"https://app.example/cb"}`), "redirect_uris: wrong JSON type (string)"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := parseCIMD(cimdID, tc.body); err == nil || !strings.Contains(err.Error(), tc.want) {

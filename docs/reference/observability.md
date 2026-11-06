@@ -36,10 +36,11 @@ or the IdP's `error_description`.
 | `reason` | A fixed reason; for `token_rejected` the OAuth error code |
 | `suppressed` | How many records of the same event from the same `remote_ip` were dropped by the rate limit since the previous one |
 
-Events from requests whose sender is not authenticated (marked *limited* below) are rate-limited per source address
-and event: 10 per minute for each event, then counted and reported as `suppressed=N` on the next record of that event
-from that source. A sender can therefore only crowd out its own records of the same event: consent page views never
-hide consent decisions. Metrics count every event, logged or not.
+Events from requests whose sender is not authenticated (marked *limited* below) are rate-limited per source address,
+event and outcome: 10 per minute for each, then counted and reported as `suppressed=N` on the next record with the same
+event and outcome from that source. A sender can therefore only crowd out its own records of the same event and
+outcome: consent page views never hide consent decisions, and successful registrations never hide refused ones.
+Metrics count every event, logged or not.
 
 ### Events and OCSF mapping
 
@@ -56,7 +57,7 @@ For SIEMs that use [OCSF](https://schema.ocsf.io) 1.9.0. Fields map as follows: 
 | `token_rejected` | `/token` or `/revoke` refused a request (`reason` = OAuth error code) | failure | yes | 3002 Authentication / 4 Service Ticket Request |
 | `access_token_rejected` | an MCP request carried an invalid or expired access token (`reason` = `invalid` or `expired`); a missing token is the normal start of sign-in and is not an event | failure | yes | 3002 Authentication / 99 Other (*approximate*) |
 | `grant_revoked` | a grant was revoked: its authorization code or refresh token was reused, a code was redeemed with the wrong binding, the client revoked a token (`/revoke`), a refresh found the IdP session ended or the user no longer allowed, a refresh came from a client whose metadata document is now refused (`reason` = `client metadata no longer valid`), or the operator ran `revoke-user` (`user_key` set) or `revoke-all` (`reason` = `operator revoke-user` or `operator revoke-all`) | success | no | 3002 Authentication / 2 Logoff; `disposition_id` 24 Access Revoked |
-| `client_registered` | a static client was loaded at startup (`reason` = `static`) | success | no | 3001 Account Change / 1 Create (*approximate*) |
+| `client_registered` | a static client was loaded at startup (`reason` = `static`), or `/register` answered: success with `reason` = `dcr` and the new `client_id`, or failure with `reason` = `invalid_redirect_uri`, `invalid_client_metadata`, `full`, `unavailable` or `rate_limited` ([DCR](../how-to/dcr.md)) | success, failure | only `/register` | 3001 Account Change / 1 Create (*approximate*) |
 | `key_loaded` | a sealing key was loaded at startup (`reason` = `signing` or `verification`) | success | no | 6002 Application Lifecycle / 3 Start (*approximate*) |
 | `host_rejected` | a request named a `Host` outside the allowlist (421) | failure | yes | 4002 HTTP Activity; `disposition_id` 2 Blocked |
 | `origin_rejected` | a request sent an `Origin` outside the allowlist (403) | failure | yes | 4002 HTTP Activity; `disposition_id` 2 Blocked |
@@ -87,6 +88,7 @@ Prometheus text format at `/metrics` on the internal listener. Histogram buckets
 | `byward_audit_events_total` | counter | `event`, `outcome`: every audit event, including rate-limited ones |
 | `byward_rate_limited_total` | counter | `endpoint`: OAuth requests refused with 429 (or a `temporarily_unavailable` redirect) over a client address's budget |
 | `byward_cimd_fetches_total` | counter | `outcome`: Client ID Metadata Document fetches: `ok`, `invalid`, `refused` (non-public address, a 4xx other than 408 and 429, redirect, too large), `unavailable` (network, timeout, 5xx, 408, 429), `rate_limited`, `busy` |
+| `byward_dcr_registrations_total` | counter | `outcome`: `/register` answers: `registered`, `invalid_redirect_uri`, `invalid_client_metadata`, `full` (the cap), `unavailable` (store failure), `rate_limited` |
 | `byward_build_info` | gauge | `version`, `go_version`; always 1 |
 
 Plus the standard `go_*` and `process_*` collectors. Deny-list sync age and store errors arrive

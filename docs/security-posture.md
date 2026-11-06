@@ -47,8 +47,8 @@ mode, and the only upstream kind is HTTP.
 | Token theft | Access tokens last 1 h. Refresh tokens rotate on every use, and reuse after the 30 s grace revokes the grant. A refresh token works only for the client it was issued to. Clients can revoke with `/revoke` (RFC 7009). | `internal/broker/refresh.go`, `internal/broker/revoke.go` |
 | CSRF or clickjacking on consent | The answer needs exactly one `Origin` equal to the public origin; a missing or `null` Origin is refused. `Sec-Fetch-Site` must be `same-origin` when the browser sends it. A `__Host-` binding cookie and a sealed flow that expires after 10 min are required. Allow is refused within 1 s of showing the page. Every page sends CSP `frame-ancestors 'none'`, `X-Frame-Options: DENY` and `script-src 'none'`. | `internal/broker/consent.go`, `internal/broker/page.go` |
 | DNS rebinding and cross-site requests to the MCP endpoint | `Host` is checked against an allowlist on the public listener (421), and on the internal listener only IP addresses, `localhost` and listed names pass (421). `Origin` on the MCP endpoint is checked against an exact list (403). Both checks run before authentication. | `internal/origin/origin.go` |
-| SSRF | No client-supplied URL is fetched today: there is no CIMD, no DCR and no `jwks_uri` for static clients. Entra endpoints are built from the fixed `https://login.microsoftonline.com` authority and the configured tenant. The IdP fetcher follows no redirects, bounds bodies and times out after 5 s. The SSRF guard arrives with CIMD (**planned**, #56, [ADR-0008](adr/0008-client-registration.md) §4). | `internal/idp/fetch.go`, `internal/idp/entra/entra.go` |
-| Abuse of OAuth endpoints | Per-address token buckets apply on `/authorize`, `/consent`, `/callback/entra`, `/token` and `/revoke`, with IPv6 grouped by /64. Request bodies are bounded. Every `http.Server` timeout is set. | `internal/ratelimit`, `internal/server/run.go` |
+| SSRF | Client-supplied URLs (CIMD documents, and the `jwks_uri` of CIMD and DCR clients) are fetched only through the SSRF guard: `https` on port 443, public addresses only, checked when the connection is dialled (after DNS resolution, so a rebinding name cannot slip through), no redirects, no environment proxy, 5 KB and 5 s ([ADR-0008](adr/0008-client-registration.md) §4). Static clients have no `jwks_uri`. Entra endpoints are built from the fixed `https://login.microsoftonline.com` authority and the configured tenant. The IdP fetcher follows no redirects, bounds bodies and times out after 5 s. | `internal/ssrfguard`, `internal/server/wire.go`, `internal/idp/fetch.go`, `internal/idp/entra/entra.go` |
+| Abuse of OAuth endpoints | Per-address token buckets apply on `/authorize`, `/consent`, `/callback/entra`, `/token`, `/revoke` and `/register`, with IPv6 grouped by /64. Open registration has its own controls (**Dynamic client registration** under [Token model](#token-model)). Request bodies are bounded. Every `http.Server` timeout is set. | `internal/ratelimit`, `internal/broker/register.go`, `internal/server/run.go` |
 
 **Out of scope:** a compromised upstream, which receives every MCP request and answer. Also out of
 scope: a compromised host or container runtime, where the sealing keys, secret files and process
@@ -64,7 +64,7 @@ keep them (AGENTS.md). Status on `main`:
 | 1 | No token passthrough to the upstream | `internal/upstream/relay/relay.go` (`strip` removes `Authorization`; `access_token` dropped from the query). A stdio upstream gets only the JSON-RPC body on stdin, and an environment of an allowlist, the operator's env file and the user's key (`internal/upstream/stdio/command.go`) | `TestRelayForwardsBodyVerbatimAndStripsProxyHeaders`, `TestValidTokenIsRelayedWithoutIt`, `TestEachStdioMCPSessionIsItsOwnUpstreamProcessBoundToItsUserWithNoTokenOrProxySetting`, `TestUpstreamGetsOnlyAllowlistOperatorEnvAndIdentity` |
 | 2 | Never log tokens, secrets, codes or verifiers | `internal/logging/logging.go` (attribute allowlist, bearer/JWT-shaped redaction); `internal/audit` (no credential fields) | `TestRedaction`, `TestMiddlewareLogsRequestWithoutQueryOrHeaders`, `TestAuditRecordsMatchTheGoldenSchema` |
 | 3 | Named IdP endpoints from config only | `internal/idp/entra/entra.go` (`endpoint`: the fixed authority `https://login.microsoftonline.com` plus the tenant GUID; discovery is read only to check the issuer) | `TestAuthCodeURLTargetsTenantAuthorizeWithAccessAsUserScope`, `TestIssuerMustMatchTokenTenantAndAllowlist` |
-| 4 | Client-supplied URLs only through the SSRF guard | Holds trivially: no such fetch exists yet | — (with #56) |
+| 4 | Client-supplied URLs only through the SSRF guard | `internal/ssrfguard` (dial-time address check); `internal/server/wire.go` builds one guard and gives it to the CIMD registry (documents and `jwks_uri`) and the DCR registry (`jwks_uri`) | `TestNonPublicAddressesAreRefused`, `TestRedirectsAreNotFollowed`, `TestTheGuardedHTTPClientRefusesPrivateAddresses`, `TestCIMDClientsAreResolvedThroughTheGuardOnlyWhenOn`, `TestARegisteredClientsKeysAreFetchedThroughTheGuard` |
 | 5 | Per-client consent before the IdP redirect | `internal/broker/authorize.go` → `showConsent`; the IdP redirect only after Allow | `TestAuthorizeShowsTheConsentPageBeforeTheIdP` |
 | 6 | Audience validated; `iss` on authorization responses | Resource URL as associated data (`internal/token/token.go`); `iss` on success and error redirects (`internal/broker/authorize.go`) | `TestTokenForOneResourceNeverOpensForAnother`, `TestStaticClientSignsInWithEntraAndGetsAProxyToken` |
 | 7 | Proxy tokens sealed by us, carry `exp`, never IdP tokens | `internal/token/token.go`. The upstream assertion half is **planned** (#62) | `TestTypesNeverCross`, `TestAnyTamperedByteIsRejected` |
@@ -144,6 +144,28 @@ bounds, but there are no settings for that yet.
   user is an explicit marker (`scope = 'all'`, checked by the database); a revocation naming
   nothing revokes nobody.
 - No revocation request is sent to Entra; the IdP tokens are deleted and expire there.
+
+**Dynamic client registration** ([DCR how-to](how-to/dcr.md), [ADR-0008](adr/0008-client-registration.md) §2–3, §8–10):
+
+- `/register` is open to anyone who can reach the proxy, so a registration grants nothing by
+  itself. Every sign-in by a DCR client shows the consent page and labels the app "Not verified",
+  and the access gate still applies.
+- Rate limit: 30 registrations per minute per address, with a burst of 10.
+- Cap: 10,000 live registrations; beyond it, 503 with `Retry-After`.
+- A registration never used to redeem a code is deleted after 24 h; a used one expires 90 days
+  after its last use.
+- No client secret is ever issued; redirect URIs follow ADR-0009, and failing ones are dropped.
+- The operator's denylist (`BYWARD_CLIENT_DENYLIST`) refuses CIMD client IDs and redirect hosts at
+  registration, `/authorize`, consent and `/token`.
+- Every outcome, refusals included (invalid, rate-limited, capped, store failure), is audited
+  (`client_registered`, rate-limited per address) and counted (`byward_dcr_registrations_total`).
+
+**Sign-ins in flight** when a client changes: the client and its redirect URI are checked again at
+consent and at `/token`, but not at the IdP callback, which relies on the sealed login cookie. If
+the operator removes a redirect URI, denies its host, or a DCR registration expires after the user
+answered consent, that sign-in still completes for up to 10 min (the login lifetime): the user is
+returned to the old redirect URI with a code. `/token` then refuses the code, because it checks
+the client and redirect URI again. This is accepted behaviour, not a gap: no token is issued.
 
 **Keys:**
 

@@ -110,6 +110,23 @@ func TestEveryEventHasASampleAndADocsRow(t *testing.T) {
 	}
 }
 
+// Successful registrations from one source must not hide that source's refused ones: an open
+// /register is an abuse path, and the refusals are what an operator looks for.
+func TestSuccessesNeverHideRefusalsOfTheSameEvent(t *testing.T) {
+	var buf bytes.Buffer
+	now := time.Unix(1_800_000_000, 0)
+	l := New(logging.New(&buf, "json"), nil, func() time.Time { return now })
+	r := httptest.NewRequest("POST", "/register", nil)
+	r.RemoteAddr = "192.0.2.7:1234"
+	for range unauthBurst + 5 {
+		l.RecordUnauthenticated(r, Event{Name: ClientRegistered, Outcome: Success, Reason: "dcr", ClientID: "dcr-x"})
+	}
+	l.RecordUnauthenticated(r, Event{Name: ClientRegistered, Outcome: Failure, Reason: "rate_limited"})
+	if n := strings.Count(buf.String(), `"outcome":"failure"`); n != 1 {
+		t.Fatalf("refused registration records after a burst of successes: %d, want 1:\n%s", n, buf.String())
+	}
+}
+
 // Users behind one NAT share a source address; many page views must not hide their decisions, and
 // one source's flood must not hide another source's records.
 func TestRecordsAreLimitedPerSourceAndEvent(t *testing.T) {

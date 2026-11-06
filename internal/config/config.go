@@ -48,6 +48,8 @@ var registry = []Setting{
 	{Name: "gate-groups", Auth: true, Help: "access gate: comma-separated group IDs; users need one, and groups overage denies (docs/how-to/access-gate.md)"},
 	{Name: "gate-email-domains", Auth: true, Help: "access gate: comma-separated domains of a verified email; generic OIDC IdPs only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md)"},
 	{Name: "gate-hosted-domains", Auth: true, Help: "access gate: comma-separated Google Workspace domains (hd claim); Google only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md)"},
+	{Name: "dcr", Auth: true, Bool: true, Default: "true", Help: "accept Dynamic Client Registration at /register (Cursor, Gemini CLI) and advertise it; false turns it off (docs/how-to/dcr.md)"},
+	{Name: "client-denylist", Auth: true, Help: "comma-separated CIMD client IDs (https URLs) and redirect host names refused for CIMD and DCR clients (docs/how-to/dcr.md)"},
 	{Name: "cimd", Auth: true, Bool: true, Default: "true", Help: "accept MCP clients identified by a Client ID Metadata Document URL (Claude, VS Code) and advertise it; false turns it off (docs/how-to/cimd.md)"},
 	{Name: "cimd-trusted-hosts", Auth: true, Help: "comma-separated hosts whose client metadata documents you vouch for: their apps show as trusted by you on the consent page (docs/how-to/cimd.md)"},
 	{Name: "cimd-allowed-hosts", Auth: true, Help: "comma-separated hosts allowed to publish client metadata documents besides the trusted ones; empty allows any host (docs/how-to/cimd.md)"},
@@ -106,6 +108,9 @@ type Config struct {
 	// Client ID Metadata Documents (slice 2.1, ADR-0008 §4, §8).
 	CIMD                               bool
 	CIMDTrustedHosts, CIMDAllowedHosts []string
+	// Dynamic client registration (slice 2.2, ADR-0008 §2-3) and the client denylist (§9).
+	DCR            bool
+	ClientDenylist []string
 	// InContainer is set when the proxy runs in a container (/.dockerenv or /run/.containerenv)
 	// with its own network namespace; host networking does not count (see ownNetwork).
 	InContainer bool
@@ -280,6 +285,14 @@ func validate(v *Values, container bool) (*Config, error) {
 		}
 		errs = append(errs, c.paths(v)...)
 		errs = append(errs, c.refreshGrace(v)...)
+		if c.DCR, err = strconv.ParseBool(v.get("dcr")); err != nil {
+			errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "dcr"}.Env(), v.get("dcr")))
+		}
+		if raw := v.get("client-denylist"); raw != "" {
+			if c.ClientDenylist = splitList(raw); len(c.ClientDenylist) == 0 {
+				errs = append(errs, errorf("%s is set but lists nothing; remove it or give at least one entry", Setting{Name: "client-denylist"}.Env()))
+			}
+		}
 		if c.CIMD, err = strconv.ParseBool(v.get("cimd")); err != nil {
 			errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "cimd"}.Env(), v.get("cimd")))
 		}

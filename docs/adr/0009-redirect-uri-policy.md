@@ -54,3 +54,26 @@ babs allows custom schemes as an opt-in.
 - ChatGPT's stable redirect URI depends on RFC 9207 `iss` (F16).
 - Our consent page is the only place a user sees the redirect host — the IdP's consent names only
   our IdP app — so ADR-0009 depends on F7 showing it.
+
+## Amendment 2026-11-06 (DCR, slice 2.2)
+
+A DCR registration (RFC 7591) that lists some redirect URIs failing rules 1–3 **keeps the ones
+that pass**. The registration succeeds, its response lists only the kept URIs (RFC 7591 §3.2.2
+lets the server substitute values), and the operator log records the dropped ones at info with the
+client ID, not as an error, following rule 8 (scheme, host and path, never the query).
+`invalid_redirect_uri` is returned only when none passes. CIMD documents are unchanged: a single
+failing URI still refuses the document, because the proxy cannot change a document it does not
+own.
+
+Why: Cursor registers `cursor://anysphere.cursor-mcp/oauth/callback` together with
+`https://www.cursor.com/agents/mcp/oauth/callback` (Cursor 3.14.27; redirect URIs confirmed by
+Cursor staff at forum.cursor.com/t/171867; fixture `internal/testutil/clientdocs/testdata/dcr/cursor.json`).
+Refusing the whole registration would turn Cursor away over a URI the proxy would never redirect
+to anyway.
+
+**Cursor desktop's `cursor://` callback is not accepted; Cursor is verified in the HITL
+compatibility run.** If Cursor desktop sends `redirect_uri=cursor://…` at `/authorize`, the proxy
+shows its invalid-redirect error page (rule 6), so this amendment alone does not prove that Cursor
+works. Rule 3 still rejects custom schemes, and this slice does not loosen it. Whether to allow
+custom schemes for desktop apps is a separate decision for the maintainer, to be made once the
+compatibility run shows what Cursor actually sends.

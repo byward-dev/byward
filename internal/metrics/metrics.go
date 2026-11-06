@@ -29,6 +29,7 @@ type Metrics struct {
 	auditEvents *prometheus.CounterVec
 	rateLimited *prometheus.CounterVec
 	cimdFetches *prometheus.CounterVec
+	dcr         *prometheus.CounterVec
 }
 
 // New registers every metric; the build-info gauge is labelled from the binary's build info.
@@ -57,11 +58,14 @@ func New() *Metrics {
 		cimdFetches: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_cimd_fetches_total",
 			Help: "Client ID Metadata Document fetches by outcome (ok, invalid, refused, unavailable, rate_limited, busy)."},
 			[]string{"outcome"}),
+		dcr: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_dcr_registrations_total",
+			Help: "Dynamic client registrations at /register by outcome (registered, invalid_redirect_uri, invalid_client_metadata, full, unavailable, rate_limited)."},
+			[]string{"outcome"}),
 	}
 	build := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "byward_build_info",
 		Help: "Always 1; labelled with the proxy and Go versions."}, []string{"version", "go_version"})
 	build.WithLabelValues(version, goVersion).Set(1)
-	m.reg.MustRegister(m.requests, m.idp, m.inFlight, m.busy, m.auditEvents, m.rateLimited, m.cimdFetches, build,
+	m.reg.MustRegister(m.requests, m.idp, m.inFlight, m.busy, m.auditEvents, m.rateLimited, m.cimdFetches, m.dcr, build,
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	return m
 }
@@ -141,4 +145,12 @@ func (m *Metrics) CIMDFetch(outcome string) {
 		return
 	}
 	m.cimdFetches.WithLabelValues(outcome).Inc()
+}
+
+// DCRRegistration counts a /register outcome; it has the signature of broker.Config.ObserveRegistration.
+func (m *Metrics) DCRRegistration(outcome string) {
+	if m == nil {
+		return
+	}
+	m.dcr.WithLabelValues(outcome).Inc()
 }
