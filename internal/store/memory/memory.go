@@ -52,6 +52,11 @@ func (s *Store) CreateGrant(_ context.Context, g store.Grant) (store.Grant, erro
 	if _, ok := s.grants[g.ID]; ok {
 		return store.Grant{}, store.ErrExists
 	}
+	for _, r := range s.revs {
+		if r.Subject == g.Subject && r.Before.After(g.CreatedAt) {
+			return store.Grant{}, store.ErrRevoked
+		}
+	}
 	g = cloneGrant(g)
 	g.Epoch = epoch
 	s.grants[g.ID] = g
@@ -151,16 +156,11 @@ func (s *Store) RefreshToken(_ context.Context, hash [sha256.Size]byte, now time
 	return t, nil
 }
 
-// RevocationsSince implements store.Revocations.
-func (s *Store) RevocationsSince(_ context.Context, since time.Time) ([]store.Revocation, error) {
+// Revocations implements store.Revocations.
+func (s *Store) Revocations(context.Context) ([]store.Revocation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	var out []store.Revocation
-	for _, r := range s.revs {
-		if !r.At.Before(since) {
-			out = append(out, r)
-		}
-	}
+	out := slices.Clone(s.revs)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].At.Before(out[j].At) })
 	return out, nil
 }

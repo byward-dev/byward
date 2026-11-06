@@ -21,10 +21,17 @@ var (
 	// ErrInvalid: a grant without an ID, client, subject or a lifetime, or a subject cut-off
 	// without a subject. An empty subject in a Revocation must never reach the deny list.
 	ErrInvalid = errors.New("store: invalid argument")
+	// ErrRevoked: CreateGrant for a subject whose retained cut-off covers the grant (a login that
+	// was in flight when revoke-user ran).
+	ErrRevoked = errors.New("store: subject revoked")
 )
 
 // RevocationRetention is how long revocations are kept: the longest access-token lifetime
-// (ADR-0006 §3, §5). After it, every token a revocation covers has expired anyway.
+// (ADR-0006 §3, §5). After it, every token a revocation covers has expired anyway. It must stay
+// at least the configured maximum access-token lifetime.
+//
+// Adapters may keep times at microsecond precision (PostgreSQL timestamptz); callers must not
+// rely on finer differences.
 const RevocationRetention = time.Hour
 
 // Store is everything the broker keeps.
@@ -67,7 +74,9 @@ type Grant struct {
 // Grants stores grants.
 type Grants interface {
 	// CreateGrant stores g and returns it with Epoch set. An existing ID is ErrExists; an empty ID,
-	// ClientID or Subject, or an ExpiresAt not after CreatedAt, is ErrInvalid.
+	// ClientID or Subject, or an ExpiresAt not after CreatedAt, is ErrInvalid; a retained subject
+	// cut-off with Before after g.CreatedAt is ErrRevoked. The cut-off check and the insert are one
+	// atomic step, so a grant never outlives a RevokeSubject that should have covered it.
 	CreateGrant(ctx context.Context, g Grant) (Grant, error)
 	// Grant returns the grant, or ErrNotFound. It does not check ExpiresAt.
 	Grant(ctx context.Context, id string) (Grant, error)
@@ -132,10 +141,11 @@ type Revocation struct {
 	At      time.Time
 }
 
-// Revocations feeds the in-memory deny list.
+// Revocations feeds the in-memory deny list. Revocations are written by Grants.RevokeGrant and
+// Grants.RevokeSubject, in the same transaction that deletes the grants they cover.
 type Revocations interface {
-	// RevocationsSince returns the revocations with At >= since, oldest first. Entries at exactly
-	// since come back again on the next call; the deny list is a set, so that is harmless and no
-	// revocation in the same instant is missed.
-	RevocationsSince(ctx context.Context, since time.Time) ([]Revocation, error)
+	// Revocations returns every retained revocation, oldest At first (ties in any order). The deny
+	// list is rebuilt from it on each sync: a cursor would miss rows that commit out of At order
+	// on another replica. Retention keeps the set small.
+	Revocations(ctx context.Context) ([]Revocation, error)
 }

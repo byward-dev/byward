@@ -19,6 +19,13 @@ import (
 // t0 is a fixed instant; every time in the suite is relative to it.
 var t0 = time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 
+// tick is the smallest time difference the suite relies on. Adapters may store microseconds
+// (PostgreSQL) or milliseconds; nothing finer is tested.
+const tick = time.Millisecond
+
+// otherZone checks that adapters compare instants, not wall-clock text.
+var otherZone = time.FixedZone("UTC+2", 2*60*60)
+
 // Run runs every contract of store.Store against stores from newStore, one fresh store per test.
 func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 	tests := []struct {
@@ -26,6 +33,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		fn   func(*testing.T, store.Store)
 	}{
 		{"CreateGrantSetsEpochAndRoundTrips", createGrantSetsEpochAndRoundTrips},
+		{"GrantIgnoresExpiry", grantIgnoresExpiry},
 		{"GrantIDsAreUnique", grantIDsAreUnique},
 		{"UnknownGrantIsNotFound", unknownGrantIsNotFound},
 		{"IncompleteGrantsAndCutOffsAreInvalid", incompleteGrantsAndCutOffsAreInvalid},
@@ -34,12 +42,14 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		{"ConcurrentConsumeHasOneWinner", concurrentConsumeHasOneWinner},
 		{"ExpiredCodeIsNotFound", expiredCodeIsNotFound},
 		{"CodeNeedsAGrantAndIsUniquePerGrant", codeNeedsAGrantAndIsUniquePerGrant},
-		{"RefreshTokenByHash", refreshTokenByHash},
+		{"RefreshTokenRoundTripsAndIdleExpires", refreshTokenRoundTripsAndIdleExpires},
 		{"RefreshTokenNeedsAGrantAndAUniqueHash", refreshTokenNeedsAGrantAndAUniqueHash},
 		{"RevokeGrantDeletesItsRowsAndRecordsARevocation", revokeGrantDeletesItsRowsAndRecordsARevocation},
 		{"RevokeUnknownGrantRecordsNothing", revokeUnknownGrantRecordsNothing},
 		{"RevokeSubjectCutsOffEarlierGrants", revokeSubjectCutsOffEarlierGrants},
-		{"RevocationsSinceFiltersAndOrders", revocationsSinceFiltersAndOrders},
+		{"RevocationsAreOldestFirst", revocationsAreOldestFirst},
+		{"CutOffRefusesLaterCreatedEarlierGrants", cutOffRefusesLaterCreatedEarlierGrants},
+		{"RevokeSubjectAndCreateGrantNeverLeaveACoveredGrant", revokeSubjectAndCreateGrantNeverLeaveACoveredGrant},
 		{"CollectRemovesExpiredRowsOnly", collectRemovesExpiredRowsOnly},
 		{"CollectRemovesOldRevocations", collectRemovesOldRevocations},
 		{"ConcurrentUseIsSafe", concurrentUseIsSafe},
@@ -131,6 +141,15 @@ func createGrantSetsEpochAndRoundTrips(t *testing.T, s store.Store) {
 	}
 }
 
+func grantIgnoresExpiry(t *testing.T, s store.Store) {
+	long := grant("expired-long-ago", "tid:alice")
+	long.CreatedAt, long.ExpiresAt = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2000, 2, 1, 0, 0, 0, 0, time.UTC)
+	mustCreate(t, s, long)
+	if _, err := s.Grant(ctx, long.ID); err != nil {
+		t.Fatalf("Grant of an expired, uncollected grant: %v (expiry is the caller's check)", err)
+	}
+}
+
 func grantIDsAreUnique(t *testing.T, s store.Store) {
 	mustCreate(t, s, grant("g1", "tid:alice"))
 	_, err := s.CreateGrant(ctx, grant("g1", "tid:bob"))
@@ -153,13 +172,15 @@ func incompleteGrantsAndCutOffsAreInvalid(t *testing.T, s store.Store) {
 		"no lifetime":          func(g *store.Grant) { g.ExpiresAt = time.Time{} },
 		"expires when created": func(g *store.Grant) { g.ExpiresAt = g.CreatedAt },
 	} {
-		g := grant("g1", "tid:alice")
-		edit(&g)
-		_, err := s.CreateGrant(ctx, g)
-		wantErr(t, "CreateGrant with "+name, err, store.ErrInvalid)
+		t.Run(name, func(t *testing.T) {
+			g := grant("g-"+name, "tid:alice")
+			edit(&g)
+			_, err := s.CreateGrant(ctx, g)
+			wantErr(t, "CreateGrant", err, store.ErrInvalid)
+		})
 	}
 	wantErr(t, "RevokeSubject without a subject", s.RevokeSubject(ctx, "", t0, t0), store.ErrInvalid)
-	if revs, err := s.RevocationsSince(ctx, time.Time{}); err != nil || len(revs) != 0 {
+	if revs, err := s.Revocations(ctx); err != nil || len(revs) != 0 {
 		t.Fatalf("revocations = %+v, %v; want none", revs, err)
 	}
 }
@@ -236,7 +257,7 @@ func expiredCodeIsNotFound(t *testing.T, s store.Store) {
 	must(t, s.PutCode(ctx, c))
 	_, err := s.ConsumeCode(ctx, "g1", c.ExpiresAt)
 	wantErr(t, "ConsumeCode at ExpiresAt", err, store.ErrNotFound)
-	if _, err := s.ConsumeCode(ctx, "g1", c.ExpiresAt.Add(-time.Nanosecond)); err != nil {
+	if _, err := s.ConsumeCode(ctx, "g1", c.ExpiresAt.Add(-tick)); err != nil {
 		t.Fatalf("ConsumeCode just before ExpiresAt: %v (an expired attempt must not consume it)", err)
 	}
 	_, err = s.ConsumeCode(ctx, "g1", c.ExpiresAt.Add(time.Hour))
@@ -253,7 +274,7 @@ func codeNeedsAGrantAndIsUniquePerGrant(t *testing.T, s store.Store) {
 	wantErr(t, "new code after the first was consumed", s.PutCode(ctx, pendingCode("g1")), store.ErrExists)
 }
 
-func refreshTokenByHash(t *testing.T, s store.Store) {
+func refreshTokenRoundTripsAndIdleExpires(t *testing.T, s store.Store) {
 	mustCreate(t, s, grant("g1", "tid:alice"))
 	want := refresh("g1", 1)
 	must(t, s.PutRefreshToken(ctx, want))
@@ -266,9 +287,9 @@ func refreshTokenByHash(t *testing.T, s store.Store) {
 	}
 	_, err = s.RefreshToken(ctx, sha256.Sum256([]byte("other")), t0)
 	wantErr(t, "unknown hash", err, store.ErrNotFound)
-	_, err = s.RefreshToken(ctx, want.Hash, want.IdleExpiresAt)
-	wantErr(t, "RefreshToken at IdleExpiresAt", err, store.ErrNotFound)
-	if _, err := s.RefreshToken(ctx, want.Hash, want.IdleExpiresAt.Add(-time.Nanosecond)); err != nil {
+	_, err = s.RefreshToken(ctx, want.Hash, want.IdleExpiresAt.In(otherZone))
+	wantErr(t, "RefreshToken at IdleExpiresAt (in another zone)", err, store.ErrNotFound)
+	if _, err := s.RefreshToken(ctx, want.Hash, want.IdleExpiresAt.Add(-tick)); err != nil {
 		t.Fatalf("RefreshToken just before IdleExpiresAt: %v", err)
 	}
 }
@@ -313,7 +334,7 @@ func revokeGrantDeletesItsRowsAndRecordsARevocation(t *testing.T, s store.Store)
 	if _, err := s.RefreshToken(ctx, refresh("g2", 1).Hash, t0); err != nil {
 		t.Fatalf("other grant's refresh token: %v", err)
 	}
-	revs, err := s.RevocationsSince(ctx, t0)
+	revs, err := s.Revocations(ctx)
 	must(t, err)
 	if want := (store.Revocation{GrantID: "g1", Before: at, At: at}); len(revs) != 1 || !revEqual(revs[0], want) {
 		t.Fatalf("revocations = %+v, want [%+v]", revs, want)
@@ -322,7 +343,7 @@ func revokeGrantDeletesItsRowsAndRecordsARevocation(t *testing.T, s store.Store)
 
 func revokeUnknownGrantRecordsNothing(t *testing.T, s store.Store) {
 	wantErr(t, "RevokeGrant of an unknown grant", s.RevokeGrant(ctx, "nope", t0), store.ErrNotFound)
-	if revs, err := s.RevocationsSince(ctx, time.Time{}); err != nil || len(revs) != 0 {
+	if revs, err := s.Revocations(ctx); err != nil || len(revs) != 0 {
 		t.Fatalf("revocations = %+v, %v; want none", revs, err)
 	}
 }
@@ -355,32 +376,78 @@ func revokeSubjectCutsOffEarlierGrants(t *testing.T, s store.Store) {
 			t.Fatalf("refresh token of %s: %v", id, err)
 		}
 	}
-	must(t, s.RevokeSubject(ctx, "tid:nobody", before, at))
-	revs, err := s.RevocationsSince(ctx, t0)
+	must(t, s.RevokeSubject(ctx, "tid:nobody", before, at.Add(time.Second)))
+	revs, err := s.Revocations(ctx)
 	must(t, err)
-	want := []store.Revocation{{Subject: "tid:alice", Before: before, At: at}, {Subject: "tid:nobody", Before: before, At: at}}
+	want := []store.Revocation{{Subject: "tid:alice", Before: before, At: at}, {Subject: "tid:nobody", Before: before, At: at.Add(time.Second)}}
 	if len(revs) != 2 || !revEqual(revs[0], want[0]) || !revEqual(revs[1], want[1]) {
 		t.Fatalf("revocations = %+v, want %+v (a cut-off is recorded even without grants)", revs, want)
 	}
 }
 
-func revocationsSinceFiltersAndOrders(t *testing.T, s store.Store) {
+func revocationsAreOldestFirst(t *testing.T, s store.Store) {
 	for i, at := range []time.Duration{3, 1, 2, 5} { // recorded out of order
 		id := fmt.Sprintf("g%d", i)
 		mustCreate(t, s, grant(id, "tid:alice"))
 		must(t, s.RevokeGrant(ctx, id, t0.Add(at*time.Minute)))
 	}
-	revs, err := s.RevocationsSince(ctx, t0.Add(2*time.Minute))
+	revs, err := s.Revocations(ctx)
 	must(t, err)
 	var got []string
 	for _, r := range revs {
 		got = append(got, r.GrantID)
 	}
-	if want := []string{"g2", "g0", "g3"}; !slices.Equal(got, want) { // at 2 (boundary, included), 3, 5
-		t.Fatalf("RevocationsSince(+2m) = %v, want %v, oldest first", got, want)
+	if want := []string{"g1", "g2", "g0", "g3"}; !slices.Equal(got, want) {
+		t.Fatalf("Revocations = %v, want %v, oldest first", got, want)
 	}
-	if revs, _ := s.RevocationsSince(ctx, t0.Add(6*time.Minute)); len(revs) != 0 {
-		t.Fatalf("RevocationsSince after the last = %+v, want none", revs)
+}
+
+func cutOffRefusesLaterCreatedEarlierGrants(t *testing.T, s store.Store) {
+	before := t0.Add(time.Hour)
+	must(t, s.RevokeSubject(ctx, "tid:alice", before, before))
+	inFlight := grant("in-flight", "tid:alice")
+	inFlight.CreatedAt = before.Add(-time.Minute) // the login started before revoke-user
+	_, err := s.CreateGrant(ctx, inFlight)
+	wantErr(t, "CreateGrant covered by a cut-off", err, store.ErrRevoked)
+	if _, err := s.Grant(ctx, "in-flight"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("refused grant was stored: %v", err)
+	}
+	after := grant("after", "tid:alice")
+	after.CreatedAt, after.ExpiresAt = before, before.Add(time.Hour) // not before the cut-off
+	mustCreate(t, s, after)
+	mustCreate(t, s, grant("other-user", "tid:bob"))
+}
+
+// Whatever the interleaving, a grant created before the cut-off never survives it: either it is
+// stored first and RevokeSubject deletes it, or CreateGrant sees the cut-off and refuses.
+func revokeSubjectAndCreateGrantNeverLeaveACoveredGrant(t *testing.T, s store.Store) {
+	const rounds = 50
+	before := t0.Add(time.Hour)
+	var wg sync.WaitGroup
+	for i := range rounds {
+		subject := fmt.Sprintf("tid:user-%d", i)
+		start := make(chan struct{})
+		wg.Go(func() {
+			<-start
+			_, err := s.CreateGrant(ctx, grant(subject, subject)) // CreatedAt t0, before the cut-off
+			if err != nil && !errors.Is(err, store.ErrRevoked) {
+				t.Errorf("CreateGrant %s: %v", subject, err)
+			}
+		})
+		wg.Go(func() {
+			<-start
+			if err := s.RevokeSubject(ctx, subject, before, before); err != nil {
+				t.Errorf("RevokeSubject %s: %v", subject, err)
+			}
+		})
+		close(start)
+	}
+	wg.Wait()
+	for i := range rounds {
+		id := fmt.Sprintf("tid:user-%d", i)
+		if _, err := s.Grant(ctx, id); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("grant %s survived its subject's cut-off: %v", id, err)
+		}
 	}
 }
 
@@ -392,23 +459,35 @@ func collectRemovesExpiredRowsOnly(t *testing.T, s store.Store) {
 	mustCreate(t, s, expired)
 	mustCreate(t, s, live)
 	must(t, s.PutRefreshToken(ctx, refresh("expired", 1)))
-	must(t, s.PutCode(ctx, pendingCode("live"))) // expires at t0+1m: before now
+	expiring := pendingCode("live")
+	expiring.ExpiresAt = now // the boundary: collected
+	must(t, s.PutCode(ctx, expiring))
+	consumedLive := grant("consumed", "tid:alice")
+	mustCreate(t, s, consumedLive)
+	usedCode := pendingCode("consumed")
+	usedCode.ExpiresAt = now
+	must(t, s.PutCode(ctx, usedCode))
+	if _, err := s.ConsumeCode(ctx, "consumed", t0); err != nil {
+		t.Fatal(err)
+	}
 	idle := refresh("live", 1)
 	idle.IdleExpiresAt = now
 	fresh := refresh("live", 2)
 	must(t, s.PutRefreshToken(ctx, idle))
 	must(t, s.PutRefreshToken(ctx, fresh))
 
-	must(t, s.Collect(ctx, now))
+	must(t, s.Collect(ctx, now.In(otherZone)))
 
 	_, err := s.Grant(ctx, "expired")
 	wantErr(t, "expired grant after Collect", err, store.ErrNotFound)
-	wantErr(t, "its refresh token after Collect", s.PutRefreshToken(ctx, refresh("expired", 1)), store.ErrNotFound)
+	_, err = s.RefreshToken(ctx, refresh("expired", 1).Hash, t0)
+	wantErr(t, "refresh token of a collected grant", err, store.ErrNotFound)
 	if _, err := s.Grant(ctx, "live"); err != nil {
 		t.Fatalf("live grant collected: %v", err)
 	}
-	// The expired code is gone, so the grant can hold a new one.
+	// Expired codes are gone, pending or consumed, so each grant can hold a new one.
 	must(t, s.PutCode(ctx, pendingCode("live")))
+	must(t, s.PutCode(ctx, pendingCode("consumed")))
 	// The idle-expired token is gone, so its hash can be stored again; the fresh one stays.
 	must(t, s.PutRefreshToken(ctx, idle))
 	if _, err := s.RefreshToken(ctx, fresh.Hash, now); err != nil {
@@ -427,7 +506,7 @@ func collectRemovesOldRevocations(t *testing.T, s store.Store) {
 		must(t, s.RevokeGrant(ctx, id, at))
 	}
 	must(t, s.Collect(ctx, now))
-	revs, err := s.RevocationsSince(ctx, time.Time{})
+	revs, err := s.Revocations(ctx)
 	must(t, err)
 	if len(revs) != 1 || revs[0].GrantID != "recent" {
 		t.Fatalf("revocations after Collect = %+v, want only the one within RevocationRetention", revs)
@@ -443,18 +522,25 @@ func concurrentUseIsSafe(t *testing.T, s store.Store) {
 				t.Error(err)
 				return
 			}
-			_ = s.PutCode(ctx, pendingCode(id))
-			_ = s.PutRefreshToken(ctx, refresh(id, 1))
-			_, _ = s.Grant(ctx, id)
-			_, _ = s.RevocationsSince(ctx, t0)
-			if i%2 == 0 {
-				_ = s.RevokeGrant(ctx, id, t0)
+			check := func(what string, err error) {
+				if err != nil {
+					t.Errorf("%s %s: %v", what, id, err)
+				}
 			}
-			_ = s.Collect(ctx, t0)
+			check("PutCode", s.PutCode(ctx, pendingCode(id)))
+			check("PutRefreshToken", s.PutRefreshToken(ctx, refresh(id, 1)))
+			_, err := s.Grant(ctx, id)
+			check("Grant", err)
+			_, err = s.Revocations(ctx)
+			check("Revocations", err)
+			if i%2 == 0 {
+				check("RevokeGrant", s.RevokeGrant(ctx, id, t0))
+			}
+			check("Collect", s.Collect(ctx, t0))
 		})
 	}
 	wg.Wait()
-	revs, err := s.RevocationsSince(ctx, time.Time{})
+	revs, err := s.Revocations(ctx)
 	must(t, err)
 	if len(revs) != 8 {
 		t.Fatalf("%d revocations, want 8", len(revs))
