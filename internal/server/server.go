@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/byward-dev/byward/internal/assertion"
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/health"
@@ -101,17 +102,27 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 	var checks []health.Check
 	var background func(context.Context)
 	var closeStore func() error
-	up, err := newUpstream(cfg, log, o)
-	if err != nil {
-		return nil, err
-	}
-	if cfg.NoAuth {
-		h = Handler(cfg, log, up.handler, resource.NoTokens{}, nil, nil, o)
-	} else {
-		a, err := buildAuth(cfg, log, o)
-		if err != nil {
+	var a *auth
+	if !cfg.NoAuth {
+		var err error
+		if a, err = buildAuth(cfg, log, o); err != nil {
 			return nil, err
 		}
+	}
+	var minter *assertion.Minter
+	if a != nil {
+		minter = a.minter
+	}
+	up, err := newUpstream(cfg, log, o, minter)
+	if err != nil {
+		if a != nil {
+			_ = a.closeStore()
+		}
+		return nil, err
+	}
+	if a == nil {
+		h = Handler(cfg, log, up.handler, resource.NoTokens{}, nil, nil, o)
+	} else {
 		h = Handler(cfg, log, up.handler, a.validator, a.register, a.sessions, o)
 		checks = a.checks
 		background, closeStore = a.background, a.closeStore
@@ -121,6 +132,9 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 	if cfg.InternalListen != "" {
 		mux := http.NewServeMux()
 		mux.Handle("GET /metrics", m.Handler())
+		if a != nil && a.jwks != nil {
+			mux.Handle("GET "+jwksPath, a.jwks) // for an upstream that reaches only the internal listener
+		}
 		s.Health.Register(mux)
 		s.Internal = hardened(cfg.InternalListen, origin.InternalHosts(o.Audit, cfg.AllowedHosts, mux), log)
 	}

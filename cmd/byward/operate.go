@@ -37,6 +37,25 @@ func checkOffline(_ context.Context, args, environ []string, stdout, stderr io.W
 	return exitOK
 }
 
+// exportJWKS is `jwks` (ADR-0016 §3): the assertion's public keys on standard output.
+func exportJWKS(_ context.Context, args, environ []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 {
+		_, _ = fmt.Fprintln(stderr, "byward: usage: byward jwks (prints the JWKS; redirect it to a file)")
+		return exitConfig
+	}
+	cfg, ok := operatorLoad(nil, environ, stderr)
+	if !ok {
+		return exitConfig
+	}
+	set, err := server.ExportJWKS(cfg)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "byward: configuration error: %v\n", err)
+		return exitConfig
+	}
+	_, _ = fmt.Fprintf(stdout, "%s\n", set)
+	return exitOK
+}
+
 // splitAtDashes splits a command's arguments at "--": its own flags, then "--" and the stdio
 // upstream command (nil when there is none), which config reads as the proxy does.
 func splitAtDashes(args []string) (flags, upstream []string) {

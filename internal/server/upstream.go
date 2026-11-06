@@ -2,15 +2,18 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"path/filepath"
 
+	"github.com/byward-dev/byward/internal/assertion"
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/tracing"
 	"github.com/byward-dev/byward/internal/upstream/relay"
@@ -28,9 +31,13 @@ type upstream struct {
 }
 
 // newUpstream builds the HTTP relay, or the stdio bridge when a command is configured. A stdio
-// command that does not exist fails here, at startup.
-func newUpstream(cfg *config.Config, log *slog.Logger, o Observability) (*upstream, error) {
+// command that does not exist fails here, at startup. With minter (authentication on), every
+// request to an HTTP upstream carries the identity assertion (ADR-0016).
+func newUpstream(cfg *config.Config, log *slog.Logger, o Observability, minter *assertion.Minter) (*upstream, error) {
 	if cfg.UpstreamCommand == nil {
+		if minter != nil {
+			return &upstream{handler: assertingUpstream(cfg, log, minter)}, nil
+		}
 		return &upstream{handler: httpUpstream(cfg, log)}, nil
 	}
 	if cfg.NoAuth {
@@ -80,10 +87,24 @@ func upstreamResult(cfg *config.Config) doctor.Result {
 	r := doctor.Result{Class: doctor.ClassProxy, Name: "upstream", Status: doctor.Pass}
 	if cfg.UpstreamCommand == nil {
 		r.Message = "HTTP upstream " + cfg.UpstreamURL.String() + "; doctor checks the proxy in front of it, not the upstream itself"
+		if !cfg.NoAuth {
+			r.Message += "; requests carry the identity assertion in " + cfg.AssertionHeader + ", with aud " + cfg.UpstreamURL.String()
+		}
 		return r
 	}
 	r.Message = "stdio upstream " + stdioName(cfg) + ": the command was found; doctor does not start it (a process starts per user at their first MCP request)"
 	return r
+}
+
+// ExportJWKS is `byward jwks`: the public keys of BYWARD_ASSERTION_KEYS_DIR as a JWKS, for an
+// upstream that loads them from a file instead of fetching them (ADR-0016 §3). Run it again after
+// every key rotation.
+func ExportJWKS(cfg *config.Config) ([]byte, error) {
+	keys, err := assertion.LoadKeys(cfg.AssertionKeysDir, secretCheck(cfg))
+	if err != nil {
+		return nil, fmt.Errorf("BYWARD_ASSERTION_KEYS_DIR: %s: %w (see docs/how-to/identity-assertion.md)", cfg.AssertionKeysDir, err)
+	}
+	return json.MarshalIndent(keys.JWKS(), "", "  ")
 }
 
 // upstreamID names the upstream in sealed session IDs, so one cannot be replayed against another.
@@ -97,9 +118,44 @@ func upstreamID(cfg *config.Config) string {
 // stdioName names a stdio upstream in logs: its program's file name.
 func stdioName(cfg *config.Config) string { return filepath.Base(cfg.UpstreamCommand[0]) }
 
-// httpUpstream is the relay to the HTTP upstream.
-func httpUpstream(cfg *config.Config, log *slog.Logger) http.Handler {
-	return relay.New(log, cfg.UpstreamURL, relay.WithTraceContext(tracing.Inject), relay.WithResponseHeaderTimeout(cfg.UpstreamHeaderTimeout))
+// httpUpstream is the relay to the HTTP upstream. The assertion's header is stripped from every
+// inbound request even when nothing is asserted, so a client can never supply one.
+func httpUpstream(cfg *config.Config, log *slog.Logger, opts ...relay.Option) http.Handler {
+	return relay.New(log, cfg.UpstreamURL, append([]relay.Option{relay.WithTraceContext(tracing.Inject),
+		relay.WithResponseHeaderTimeout(cfg.UpstreamHeaderTimeout), relay.WithStripped(cfg.AssertionHeader)}, opts...)...)
+}
+
+// assertionKey carries a request's minted assertion from withAssertion to the relay.
+type assertionKey struct{}
+
+// assertingUpstream is the relay that sends every request with the identity assertion in
+// BYWARD_ASSERTION_HEADER, after the inbound copies are gone (ADR-0016 §2, §4).
+func assertingUpstream(cfg *config.Config, log *slog.Logger, m *assertion.Minter) http.Handler {
+	header := cfg.AssertionHeader
+	return withAssertion(m, log, httpUpstream(cfg, log, relay.WithInject(func(ctx context.Context, h http.Header) {
+		if tok, ok := ctx.Value(assertionKey{}).(string); ok {
+			h.Set(header, "Bearer "+tok)
+		}
+	})))
+}
+
+// withAssertion mints the assertion for the user Guard admitted. A request it cannot mint one for
+// fails here and never reaches the upstream without it.
+func withAssertion(m *assertion.Minter, log *slog.Logger, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, ok := resource.IdentityFrom(r.Context())
+		var tok string
+		var err error
+		if ok {
+			tok, err = m.Mint(id)
+		}
+		if !ok || err != nil {
+			log.ErrorContext(r.Context(), "the identity assertion could not be minted; request refused", "request_id", logging.RequestID(r.Context()), "error", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), assertionKey{}, tok)))
+	})
 }
 
 // stdioIdentity is who a stdio process acts for: the access token's subject under the proxy's

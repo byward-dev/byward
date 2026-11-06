@@ -37,6 +37,10 @@ var commands = map[string]command{
 		usage: "byward doctor [--json] [-- stdio-upstream-command [args...]]\n      probe the running proxy as MCP clients do, and the IdP app; exit 0, or 4 (proxy), 8 (IdP), 12 (both)",
 		run:   runDoctor,
 	},
+	"jwks": {
+		usage: "byward jwks\n      print the public keys of the identity assertion as a JWKS, for an upstream that loads them from a file; run again after every key rotation",
+		run:   exportJWKS,
+	},
 	"init": {
 		usage: "byward init entra --tenant <tenant-id> [--public-url <url>] [--upstream-url <url>] [--secret-years 1|2]\n      print the az commands for the Entra app registration and a minimal env file; runs nothing",
 		run:   initIdP,

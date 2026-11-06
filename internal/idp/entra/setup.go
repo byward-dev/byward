@@ -153,5 +153,5 @@ SECRET_EXPIRES_AT={{.Expires}}
 )
 echo "Created app registration $APP_ID; the secret is in $SECRET_FILE, the settings in byward.env."
 echo "Next: assign users or groups to the enterprise application byward with the {{.UserRole}} role,"
-echo "create a sealing key (docs/how-to/sealing-keys.md), start the proxy, then run byward doctor."
+echo "create a sealing key and an assertion key (docs/how-to/quickstart-entra.md step 2), start the proxy, then run byward doctor."
 `))

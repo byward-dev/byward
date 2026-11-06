@@ -22,6 +22,7 @@ import (
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/store"
+	"github.com/byward-dev/byward/internal/testutil/assertionkey"
 	"github.com/byward-dev/byward/internal/token"
 )
 
@@ -54,6 +55,7 @@ func authEnv(t testing.TB) []string {
 		"BYWARD_KEYS_DIR=" + keys,
 		"BYWARD_STATIC_CLIENTS_FILE=" + filepath.Join(dir, "clients.json"),
 		"BYWARD_STORE_DIR=" + filepath.Join(dir, "state"), // the counter file defaults to dir/store-writes
+		"BYWARD_ASSERTION_KEYS_DIR=" + assertionkey.Dir(t),
 	}
 }
 

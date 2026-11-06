@@ -80,7 +80,7 @@ func sealAccessFor(t *testing.T, cfg *config.Config, env []string, grantID, subj
 		t.Fatal(err)
 	}
 	now := time.Now()
-	tok, err := s.Seal(token.Access, token.Claims{GrantID: grantID, Subject: subject, IssuedAt: iat, ExpiresAt: now.Add(time.Hour)})
+	tok, err := s.Seal(token.Access, token.Claims{GrantID: grantID, Subject: subject, IssuedAt: iat, ExpiresAt: now.Add(time.Hour), ClientID: "test-app"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -70,7 +70,7 @@ func stdioProxy(t *testing.T, env ...string) (*httptest.Server, *config.Config, 
 	logs := &syncBuffer{}
 	log := slog.New(slog.NewJSONHandler(logs, nil))
 	o := Observability{Audit: audit.New(log, nil, time.Now)}
-	up, err := newUpstream(cfg, log, o)
+	up, err := newUpstream(cfg, log, o, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

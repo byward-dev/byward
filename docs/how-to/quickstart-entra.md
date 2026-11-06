@@ -170,7 +170,7 @@ az ad sp update --id "$APP_ID" --set appRoleAssignmentRequired=true
 Unassigned users then get AADSTS50105. The proxy's own [access gate](access-gate.md) can restrict
 sign-in by app role or group as well.
 
-## 2. Create a sealing key
+## 2. Create the keys
 
 byward keeps its keys, its client list and its state in one **data directory**
 (`/var/lib/byward` by default; `BYWARD_DATA_DIR` moves it). Below it is `./byward-data`. The proxy
@@ -179,6 +179,14 @@ seals its tokens with keys you provide; create the first one (details and rotati
 
 ```sh
 install -d -m 0700 byward-data/keys && (umask 077; openssl rand -base64 32 > "byward-data/keys/$(date -u +%Y-%m-%d)")
+```
+
+It also signs the **identity assertion** that tells the upstream who the user is, with a key of
+its own (details: [identity assertion](identity-assertion.md)):
+
+```sh
+install -d -m 0700 byward-data/assertion-keys && (umask 077; openssl genpkey -algorithm EC \
+  -pkeyopt ec_paramgen_curve:P-256 -out "byward-data/assertion-keys/$(date -u +%Y-%m-%d)")
 ```
 
 ## 3. Run byward
@@ -198,6 +206,7 @@ The data directory then holds:
 ```text
 byward-data/
 ├── keys/             sealing keys (step 2)
+├── assertion-keys/   identity assertion signing keys (step 2)
 ├── clients.json      static clients, optional (see the end of this guide)
 ├── state/            the SQLite store, created on first start; back this up (state.md)
 └── store-writes      restore-detection counter, kept outside state/

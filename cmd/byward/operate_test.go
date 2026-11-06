@@ -192,3 +192,24 @@ func TestCheckOfflineAndDoctorTakeAStdioUpstreamAfterDashes(t *testing.T) {
 		t.Fatal("check or doctor started the stdio upstream")
 	}
 }
+
+func TestJWKSPrintsThePublicKeysOnly(t *testing.T) {
+	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
+	code, stdout, stderr := runWith([]string{"jwks"}, env...)
+	var set struct {
+		Keys []map[string]any `json:"keys"`
+	}
+	if code != exitOK || json.Unmarshal([]byte(stdout), &set) != nil || len(set.Keys) != 1 || set.Keys[0]["kid"] != "k1" || set.Keys[0]["alg"] != "ES256" {
+		t.Fatalf("code %d stdout %q stderr %q", code, stdout, stderr)
+	}
+	if _, private := set.Keys[0]["d"]; private {
+		t.Fatal("the JWKS carries the private key")
+	}
+	code, _, stderr = runWith([]string{"jwks"}, append(env, "BYWARD_ASSERTION_KEYS_DIR="+t.TempDir())...)
+	if code != exitConfig || !strings.Contains(stderr, "BYWARD_ASSERTION_KEYS_DIR") {
+		t.Fatalf("no keys: code %d stderr %q", code, stderr)
+	}
+	if code, _, stderr = runWith([]string{"jwks", "--out", "x"}, env...); code != exitConfig || !strings.Contains(stderr, "usage: byward jwks") {
+		t.Fatalf("extra argument: code %d stderr %q", code, stderr)
+	}
+}

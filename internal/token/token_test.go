@@ -3,6 +3,8 @@ package token
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -14,7 +16,7 @@ const resourceA = "https://mcp.example.com/mcp"
 var t0 = time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 
 func claims() Claims {
-	return Claims{GrantID: "g-1", Subject: "tid-1:oid-1", IssuedAt: t0, ExpiresAt: t0.Add(time.Hour)}
+	return Claims{GrantID: "g-1", Subject: "tid-1:oid-1", IssuedAt: t0, ExpiresAt: t0.Add(time.Hour), ClientID: "client-1"}
 }
 
 func sealerFor(t testing.TB, r *KeyRing, resource string) *Sealer {
@@ -46,7 +48,7 @@ func TestOpenReturnsWhatWasSealed(t *testing.T) {
 		if grant == "" || subject == "" {
 			return true
 		}
-		c := Claims{GrantID: grant, Subject: subject, IssuedAt: time.Unix(int64(iat)+1, 0), ExpiresAt: time.Unix(int64(iat)+1+int64(life)+1, 0)}
+		c := Claims{GrantID: grant, Subject: subject, IssuedAt: time.Unix(int64(iat)+1, 0), ExpiresAt: time.Unix(int64(iat)+1+int64(life)+1, 0), ClientID: "c"}
 		for _, typ := range []Type{Access, Code} {
 			tok, err := s.Seal(typ, c)
 			if err != nil {
@@ -217,17 +219,18 @@ func TestSealedButInvalidClaimsAreRejected(t *testing.T) {
 		b := k.aead.Seal(append([]byte{formatVersion, byte(len(k.id))}, k.id...), nil, []byte(plain), s.ad(Access, k.id)) //nolint:gosec // G407: random-nonce AEAD; nil is required
 		return AccessPrefix + base64.RawURLEncoding.EncodeToString(b)
 	}
-	valid := `{"gid":"g","sub":"u","iat":100,"exp":200}`
+	valid := `{"gid":"g","sub":"u","iat":100,"exp":200,"cid":"c"}`
 	if _, err := s.Open(Access, seal(valid)); err != nil {
 		t.Fatalf("hand-sealed valid claims rejected: %v", err)
 	}
 	for name, plain := range map[string]string{
 		"not JSON":        "not json",
 		"missing fields":  `{"gid":"g"}`,
-		"unknown field":   `{"gid":"g","sub":"u","iat":100,"exp":200,"x":1}`,
+		"unknown field":   `{"gid":"g","sub":"u","iat":100,"exp":200,"cid":"c","x":1}`,
+		"no client ID":    `{"gid":"g","sub":"u","iat":100,"exp":200}`,
 		"trailing object": valid + `{}`,
-		"zero iat":        `{"gid":"g","sub":"u","iat":0,"exp":200}`,
-		"exp before iat":  `{"gid":"g","sub":"u","iat":200,"exp":100}`,
+		"zero iat":        `{"gid":"g","sub":"u","iat":0,"exp":200,"cid":"c"}`,
+		"exp before iat":  `{"gid":"g","sub":"u","iat":200,"exp":100,"cid":"c"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := s.Open(Access, seal(plain)); !errors.Is(err, errClaims) {
@@ -318,5 +321,59 @@ func TestNewSealerNeedsARingAndAResource(t *testing.T) {
 				t.Fatal("accepted")
 			}
 		})
+	}
+}
+
+// Version 2 seals the client ID and the asserted claims; a version 1 token is refused, so a client
+// refreshes once after an upgrade (ADR-0016 §1).
+func TestAccessTokensCarryTheAssertedClaimsAndVersion1IsRefused(t *testing.T) {
+	s := newSealer(t)
+	c := claims()
+	c.Roles, c.Groups, c.Email, c.Name = []string{"byward.user"}, []string{"g1", "g2"}, "a@contoso.example", "Alex"
+	got, err := s.Open(Access, mustSeal(t, s, Access, c))
+	if err != nil || !got.IssuedAt.Equal(c.IssuedAt) || !got.ExpiresAt.Equal(c.ExpiresAt) {
+		t.Fatalf("round trip: %+v, %v; want %+v", got, err, c)
+	}
+	got.IssuedAt, got.ExpiresAt = c.IssuedAt, c.ExpiresAt
+	if !reflect.DeepEqual(got, c) {
+		t.Fatalf("round trip: %+v; want %+v", got, c)
+	}
+	k := s.ring.signing
+	v1 := []byte{1, byte(len(k.id))}                                                                                    //nolint:gosec // G115: key IDs are at most 64 bytes (keyIDPattern)
+	v1 = k.aead.Seal(append(v1, k.id...), nil, []byte(`{"gid":"g","sub":"u","iat":100,"exp":200}`), s.ad(Access, k.id)) //nolint:gosec // G407: random-nonce AEAD; nil is required
+	if _, err := s.Open(Access, AccessPrefix+base64.RawURLEncoding.EncodeToString(v1)); !errors.Is(err, errVersion) {
+		t.Fatalf("a version 1 token: %v, want errVersion", err)
+	}
+	c.ClientID = ""
+	if _, err := s.Seal(Access, c); !errors.Is(err, errClaims) {
+		t.Fatalf("an access token without a client ID: %v, want errClaims", err)
+	}
+}
+
+// Sizes the operator sees: with roles only a token stays well under any header limit (8 KiB is
+// the smallest common one); with 200 groups opted in (Entra's overage limit) it still fits MaxLen.
+func TestAccessTokenSizeWithRolesAndWithGroups(t *testing.T) {
+	s := newSealer(t)
+	c := claims()
+	c.Subject = "00000000-0000-0000-0000-000000000000:11111111-1111-1111-1111-111111111111"
+	c.ClientID = "https://claude.ai/oauth/claude-code-client-metadata"
+	for i := range 20 {
+		c.Roles = append(c.Roles, fmt.Sprintf("byward.role-%02d", i))
+	}
+	rolesOnly := mustSeal(t, s, Access, c)
+	if len(rolesOnly) > 1<<10 {
+		t.Fatalf("with 20 roles a token is %d bytes, want at most 1 KiB", len(rolesOnly))
+	}
+	for range 200 {
+		c.Groups = append(c.Groups, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+	}
+	withGroups, err := s.Seal(Access, c)
+	if err != nil {
+		t.Fatalf("200 groups do not fit: %v", err)
+	}
+	t.Logf("access token: %d bytes with 20 roles, %d bytes with 200 groups as well", len(rolesOnly), len(withGroups))
+	c.Groups = append(c.Groups, c.Groups...)
+	if _, err := s.Seal(Access, c); !errors.Is(err, ErrTooLong) {
+		t.Fatalf("400 groups: %v, want ErrTooLong", err)
 	}
 }
