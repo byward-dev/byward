@@ -5,6 +5,10 @@
 # stale entry fails it, so the baseline lists exactly the checks the reference server itself fails.
 # All external code runs in a pinned node container; only build/conformance is mounted.
 set -eu
+# --install-only stops after the pinned CLI is fetched, verified, installed and built in
+# build/conformance/src, for the `authorization` suite in the Go integration lane (ADR-0024 §4b).
+install_only=false
+[ "${1:-}" != "--install-only" ] || install_only=true
 
 # Pins. @modelcontextprotocol/conformance 0.2.0-alpha.12 (npm, 2026-10-01) is this commit. The npm
 # tarball lacks the reference server, so both come from git and are installed from their lockfiles.
@@ -79,15 +83,23 @@ for try in 1 2 3; do
   [ "$try" -lt 3 ] || fail "pulling $image failed three times"
   sleep 5
 done
-# One command per line: set -e does not stop at a failure inside an && list.
+# One command per line: set -e does not stop at a failure inside an && list. The reference server is
+# installed only for the server suite: --install-only serves the authorization suite, which runs the
+# CLI against byward and never starts it.
+# shellcheck disable=SC2016 # $1 is expanded by the container's shell
 in_node "$name-install" bridge sh -c '
   set -eu
   cd /work/src
   npm ci --ignore-scripts --no-audit --no-fund > /work/install.log 2>&1
   npm run build >> /work/install.log 2>&1
+  [ "$1" = true ] && exit 0
   cd examples/servers/typescript
-  npm ci --ignore-scripts --no-audit --no-fund >> /work/install.log 2>&1' \
+  npm ci --ignore-scripts --no-audit --no-fund >> /work/install.log 2>&1' sh "$install_only" \
   || { tail -n 30 "$work/install.log" >&2 || true; fail "installing the conformance CLI or reference server failed (log above, full log $work/install.log)"; }
+if $install_only; then
+  echo "conformance: CLI installed and built in $src"
+  exit 0
+fi
 # Our binary for the container's platform, the in-container script and the baselines, after the install.
 GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -trimpath -o "$work/byward" ./cmd/byward
 cp "$here/inside.sh" "$here"/baseline-*.yml "$work/"

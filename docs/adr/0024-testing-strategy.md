@@ -136,4 +136,13 @@ direct one; opening a sealed token took 0.3 µs, signing the ES256 assertion 17 
   - The adapter exists (`internal/idp/oidc`, #73), but no setting selects it yet; the server wires
     only Entra.
   - Until then, a Keycloak container could test that adapter in isolation, but not byward end to end.
-- `conformance authorization` (§4b) follows in its own PR.
+- **§4b is built** (`TestIntegrationConformanceAuthorization`). The pinned conformance CLI's
+  `authorization` suite runs against the broker:
+  - AS metadata, and the authorization code grant with PKCE and `resource`, signed in through the
+    consent page and the fake IdP by the scripted browser;
+  - DPoP, which skips because byward advertises no DPoP (ADR-0011 §8).
+
+  Every check must pass. A WARNING (a SHOULD) fails unless it is listed with a reason.
+  - It runs on the Go integration lane, not the §4a shell lane. Signing in needs the in-process
+    fake IdP, which the binary cannot reach.
+  - The CLI is the §4a pin: `scripts/conformance/run.sh --install-only` builds it.
