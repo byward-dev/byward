@@ -6,9 +6,8 @@ set -eu
 ref=${1:?usage: image-digest.sh <image:tag>}
 digest=$(jq -r --arg ref "$ref" '[.[] | select(.type == "Docker Image" and .name == $ref) | .extra.Digest] | unique | .[]' dist/artifacts.json)
 [ -n "$digest" ] || { echo "image-digest: no digest for $ref in dist/artifacts.json" >&2; exit 1; }
-case "$digest" in
-  sha256:*[!0-9a-f]* | *"
-"*) echo "image-digest: ambiguous or malformed digest for $ref: $digest" >&2; exit 1 ;;
-esac
-[ ${#digest} -eq 71 ] || { echo "image-digest: malformed digest for $ref: $digest" >&2; exit 1; }
+[ "$(printf '%s\n' "$digest" | wc -l | tr -d ' ')" = 1 ] \
+  || { echo "image-digest: $ref has more than one digest: $digest" >&2; exit 1; }
+printf '%s' "$digest" | grep -Eqx 'sha256:[0-9a-f]{64}' \
+  || { echo "image-digest: malformed digest for $ref: $digest" >&2; exit 1; }
 printf '%s\n' "$digest"
