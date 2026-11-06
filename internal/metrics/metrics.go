@@ -27,6 +27,7 @@ type Metrics struct {
 	inFlight    *prometheus.GaugeVec
 	busy        *prometheus.CounterVec
 	auditEvents *prometheus.CounterVec
+	rateLimited *prometheus.CounterVec
 }
 
 // New registers every metric; the build-info gauge is labelled from the binary's build info.
@@ -49,11 +50,14 @@ func New() *Metrics {
 		auditEvents: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "mcp_authproxy_audit_events_total",
 			Help: "Audit events by event name and outcome, including rate-limited ones that were not logged."},
 			[]string{"event", "outcome"}),
+		rateLimited: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "mcp_authproxy_rate_limited_total",
+			Help: "OAuth endpoint requests refused with 429 because the client address was over its budget, by endpoint."},
+			[]string{"endpoint"}),
 	}
 	build := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "mcp_authproxy_build_info",
 		Help: "Always 1; labelled with the proxy and Go versions."}, []string{"version", "go_version"})
 	build.WithLabelValues(version, goVersion).Set(1)
-	m.reg.MustRegister(m.requests, m.idp, m.inFlight, m.busy, m.auditEvents, build,
+	m.reg.MustRegister(m.requests, m.idp, m.inFlight, m.busy, m.auditEvents, m.rateLimited, build,
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	return m
 }
@@ -98,6 +102,14 @@ func (m *Metrics) Busy(kind string) {
 		return
 	}
 	m.busy.WithLabelValues(kind).Inc()
+}
+
+// RateLimited counts a request an OAuth endpoint refused over its budget.
+func (m *Metrics) RateLimited(endpoint string) {
+	if m == nil {
+		return
+	}
+	m.rateLimited.WithLabelValues(endpoint).Inc()
 }
 
 // AuditEvent counts an audit event; it has audit.Observer's signature.

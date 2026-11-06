@@ -3,9 +3,11 @@ package broker
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/corker/mcp-authproxy/internal/audit"
+	"github.com/corker/mcp-authproxy/internal/ratelimit"
 	"github.com/corker/mcp-authproxy/internal/store"
 	"github.com/corker/mcp-authproxy/internal/token"
 )
@@ -25,6 +27,11 @@ func (b *Broker) revokeEndpoint(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.Header().Set("Allow", "POST, OPTIONS")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if retry, limited := b.throttled(w, r, ratelimit.Revoke); limited {
+		writeTokenError(w, r, tokenError{http.StatusTooManyRequests, "temporarily_unavailable",
+			"too many requests from this address; retry after " + strconv.Itoa(retry) + " s"})
 		return
 	}
 	if err := r.ParseForm(); err != nil {

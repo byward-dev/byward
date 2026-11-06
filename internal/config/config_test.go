@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -301,5 +302,51 @@ func TestInternalListenDefaultsToLoopbackAndMustDifferFromListen(t *testing.T) {
 		if _, _, err := Load(nil, append(base, "MCP_AUTHPROXY_INTERNAL_LISTEN="+bad), nil); err == nil || !strings.Contains(err.Error(), "MCP_AUTHPROXY_INTERNAL_LISTEN") {
 			t.Errorf("MCP_AUTHPROXY_INTERNAL_LISTEN=%q: want an error naming the setting, got %v", bad, err)
 		}
+	}
+}
+
+func noAuthEnv(extra ...string) []string {
+	return append([]string{"MCP_AUTHPROXY_INSECURE_NO_AUTH=true", "MCP_AUTHPROXY_PUBLIC_URL=http://127.0.0.1:8080/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"}, extra...)
+}
+
+func TestOAuthRateLimitsDefaultToADR0018AndCanBeRaisedWithinBounds(t *testing.T) {
+	cfg, _, err := Load(nil, noAuthEnv(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int{"authorize": 30, "consent": 60, "callback": 30, "token": 60, "revoke": 30, "register": 30}
+	for ep, n := range want {
+		if cfg.OAuthRateLimits[ep] != n {
+			t.Errorf("default %s = %d/min, want %d", ep, cfg.OAuthRateLimits[ep], n)
+		}
+	}
+	cfg, _, err = Load(nil, noAuthEnv("MCP_AUTHPROXY_OAUTH_RATE_LIMITS=authorize=120, token=600"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OAuthRateLimits["authorize"] != 120 || cfg.OAuthRateLimits["token"] != 600 || cfg.OAuthRateLimits["callback"] != 30 {
+		t.Errorf("overrides = %v, want authorize 120, token 600 and the other defaults", cfg.OAuthRateLimits)
+	}
+	for _, bad := range []string{"metadata=10", "authorize", "authorize=0", "authorize=10001", "authorize=fast", "authorize=-5"} {
+		if _, _, err := Load(nil, noAuthEnv("MCP_AUTHPROXY_OAUTH_RATE_LIMITS="+bad), nil); err == nil || !strings.Contains(err.Error(), "MCP_AUTHPROXY_OAUTH_RATE_LIMITS") {
+			t.Errorf("MCP_AUTHPROXY_OAUTH_RATE_LIMITS=%q: want an error naming the setting, got %v", bad, err)
+		}
+	}
+}
+
+func TestTrustedProxiesTakeCIDRsAndAddresses(t *testing.T) {
+	cfg, _, err := Load(nil, noAuthEnv("MCP_AUTHPROXY_TRUSTED_PROXIES=10.0.0.0/8, 192.0.2.7, 2001:db8::/32, 10.1.2.3/8"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := fmt.Sprint(cfg.TrustedProxies)
+	if want := "[10.0.0.0/8 192.0.2.7/32 2001:db8::/32 10.0.0.0/8]"; got != want {
+		t.Errorf("trusted proxies = %s, want %s (bare addresses as /32 or /128, prefixes masked)", got, want)
+	}
+	if cfg, _, err := Load(nil, noAuthEnv(), nil); err != nil || len(cfg.TrustedProxies) != 0 {
+		t.Errorf("default trusted proxies = %v (err %v), want none", cfg.TrustedProxies, err)
+	}
+	if _, _, err := Load(nil, noAuthEnv("MCP_AUTHPROXY_TRUSTED_PROXIES=proxy.internal"), nil); err == nil || !strings.Contains(err.Error(), "MCP_AUTHPROXY_TRUSTED_PROXIES") {
+		t.Errorf("a hostname must be rejected with the setting named, got %v", err)
 	}
 }

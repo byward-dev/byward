@@ -25,7 +25,7 @@ or the IdP's `error_description`.
 | Field | Meaning |
 |---|---|
 | `request_id` | The request ID: on error pages, in `/token` error descriptions, in `X-Request-Id`, and sent to Entra as `client-request-id` (Entra's `correlation_id`) |
-| `remote_ip` | The TCP peer (forwarded headers are not trusted) |
+| `remote_ip` | The client address: the TCP peer, or, when the peer is in `MCP_AUTHPROXY_TRUSTED_PROXIES`, the rightmost `X-Forwarded-For` entry that is not a trusted proxy. The request log and the rate limits use the same address |
 | `client_id` | The MCP client |
 | `client_trust` | The client's trust level on the consent page: `verified`, `domain` or `not-verified` (ADR-0008 §8) |
 | `user_key` | The IdP user key (`tid:oid` for Entra). Personal data (GDPR Recital 26) |
@@ -63,6 +63,7 @@ For SIEMs that use [OCSF](https://schema.ocsf.io) 1.9.0. Fields map as follows: 
 | `consent_shown` | the consent page was shown, before the IdP sign-in (the user is not known yet) | success | yes | 3003 Authorize Session / 99 Other (*approximate*) |
 | `consent_granted` | the user allowed the client on the consent page | success | yes | 3003 Authorize Session / 99 Other (*approximate*) |
 | `consent_denied` | the user denied the client on the consent page (`reason` fixed) | failure | yes | 3003 Authorize Session / 99 Other (*approximate*) |
+| `rate_limited` | an OAuth endpoint refused a request over the client address's budget (`reason` = the endpoint; [rate limits](rate-limits.md)) | failure | yes | 4002 HTTP Activity; `disposition_id` 2 Blocked |
 
 Not emitted yet; these arrive with their slices:
 refresh, revocation and store restore detection (slice 1.6), dynamic registration (slice 2.2), and key rotation
@@ -80,6 +81,7 @@ Prometheus text format at `/metrics` on the internal listener. Histogram buckets
 | `mcp_authproxy_upstream_in_flight` | gauge | `kind` (`request`, `stream`) |
 | `mcp_authproxy_upstream_busy_total` | counter | `kind`: requests refused with 503 because an admission cap was full |
 | `mcp_authproxy_audit_events_total` | counter | `event`, `outcome`: every audit event, including rate-limited ones |
+| `mcp_authproxy_rate_limited_total` | counter | `endpoint`: OAuth requests refused with 429 (or a `temporarily_unavailable` redirect) over a client address's budget |
 | `mcp_authproxy_build_info` | gauge | `version`, `go_version`; always 1 |
 
 Plus the standard `go_*` and `process_*` collectors. Live stdio processes, deny-list sync age and store errors arrive

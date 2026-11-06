@@ -15,12 +15,14 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/corker/mcp-authproxy/internal/audit"
 	"github.com/corker/mcp-authproxy/internal/denylist"
 	"github.com/corker/mcp-authproxy/internal/idp"
+	"github.com/corker/mcp-authproxy/internal/logging"
 	"github.com/corker/mcp-authproxy/internal/registration"
 	"github.com/corker/mcp-authproxy/internal/store"
 	"github.com/corker/mcp-authproxy/internal/token"
@@ -96,10 +98,18 @@ type Config struct {
 	Log           *slog.Logger
 	// Audit receives the security events (ADR-0021 §3); nil discards them.
 	Audit *audit.Log
+	// Limiter rate-limits the OAuth endpoints per client address (ADR-0018 §8); nil limits nothing.
+	Limiter Limiter
 	// ObserveIdP, when set, is told each IdP call's operation, outcome (success, rejected,
 	// unavailable) and duration, for metrics.
 	ObserveIdP func(operation, outcome string, d time.Duration)
 	Now        func() time.Time
+}
+
+// Limiter decides whether a request to an OAuth endpoint (authorize, consent, callback, token,
+// revoke, register) from a client address may proceed, and if not, when it may retry.
+type Limiter interface {
+	Allow(endpoint, ip string) (ok bool, retryAfter time.Duration)
 }
 
 // Broker is the authorization server.
@@ -173,4 +183,36 @@ func limitBody(n int64, next http.Handler) http.Handler {
 		r.Body = http.MaxBytesReader(w, r.Body, n)
 		next.ServeHTTP(w, r)
 	})
+}
+
+// throttled reports whether r is over endpoint's budget; if so it records the audit event (rate-
+// limited itself, the sender is not authenticated), sets Retry-After and returns its seconds. The
+// caller writes the response its endpoint calls for.
+func (b *Broker) throttled(w http.ResponseWriter, r *http.Request, endpoint string) (retry int, limited bool) {
+	if b.cfg.Limiter == nil {
+		return 0, false
+	}
+	ok, wait := b.cfg.Limiter.Allow(endpoint, logging.RemoteIP(r))
+	if ok {
+		return 0, false
+	}
+	b.cfg.Audit.RecordUnauthenticated(r, audit.Event{Name: audit.RateLimited, Outcome: audit.Failure, Reason: endpoint})
+	retry = retrySeconds(wait)
+	w.Header().Set("Retry-After", strconv.Itoa(retry))
+	return retry, true
+}
+
+// retrySeconds rounds wait up to whole seconds, at least 1 (RFC 9110 §10.2.3 delay-seconds).
+func retrySeconds(wait time.Duration) int {
+	s := int((wait + time.Second - 1) / time.Second)
+	if s < 1 {
+		return 1
+	}
+	return s
+}
+
+const tooManyTitle = "Too many sign-in attempts from your network."
+
+func tooManyHint(retry int) string {
+	return "Wait " + strconv.Itoa(retry) + " seconds and start again from your app."
 }

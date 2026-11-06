@@ -30,6 +30,7 @@ const (
 	ConsentShown        = "consent_shown"         // the consent page was shown (ADR-0010 §12)
 	ConsentGranted      = "consent_granted"       // the user allowed the client on the consent page
 	ConsentDenied       = "consent_denied"        // the user denied the client on the consent page
+	RateLimited         = "rate_limited"          // an OAuth endpoint refused a request over its per-address budget
 )
 
 // Outcomes.
