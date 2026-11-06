@@ -24,6 +24,8 @@ var allowed = map[string]bool{
 	"mcp_method": true, "remote_ip": true, "host": true, "origin": true, "reason": true,
 	"error": true, "listen": true, "version": true, "relaxation": true,
 	"setting": true, "value": true, "source": true, "panic": true, "epoch": true,
+	// The client sources at startup: the static client count and whether CIMD and DCR are on.
+	"static_clients": true, "cimd": true, "dcr": true,
 	// stdio upstream processes (ADR-0003 §5, ADR-0021 §6): stderr lines are upstream-controlled text
 	// and still pass the bearer-shaped redaction.
 	"upstream": true, "process": true, "user_key": true, "line": true, "truncated": true,

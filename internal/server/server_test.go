@@ -453,7 +453,7 @@ func TestOwnOriginIsAlwaysAllowed(t *testing.T) {
 // typo still fails; with CIMD and DCR both off nothing could sign in, so the old refusals stay. The
 // startup log says which client sources are active.
 func TestStaticClientsAreOptionalOnlyWhenAppsCanRegister(t *testing.T) {
-	const absent, empty, one = "absent", "empty", "one client"
+	const absent, empty, one, dangling = "absent", "empty", "one client", "a dangling symlink"
 	off := []string{"BYWARD_CIMD=false", "BYWARD_DCR=false"}
 	for _, tc := range []struct {
 		name    string
@@ -462,13 +462,14 @@ func TestStaticClientsAreOptionalOnlyWhenAppsCanRegister(t *testing.T) {
 		named   bool
 		wantLog string // "" wants a startup error naming BYWARD_STATIC_CLIENTS_FILE
 	}{
-		{"CIMD and DCR on, the default file absent: starts", nil, absent, false, "static=0 cimd=true dcr=true"},
-		{"DCR only, a named file listing no clients: starts", []string{"BYWARD_CIMD=false"}, empty, true, "static=0 cimd=false dcr=true"},
-		{"CIMD only, the default file absent: starts", []string{"BYWARD_DCR=false"}, absent, false, "static=0 cimd=true dcr=false"},
-		{"CIMD and DCR on, the default file listing one client: starts", nil, one, false, "static=1 cimd=true dcr=true"},
-		{"CIMD and DCR off, a named file listing one client: starts", off, one, true, "static=1 cimd=false dcr=false"},
+		{"CIMD and DCR on, the default file absent: starts", nil, absent, false, "static_clients=0 cimd=true dcr=true"},
+		{"DCR only, a named file listing no clients: starts", []string{"BYWARD_CIMD=false"}, empty, true, "static_clients=0 cimd=false dcr=true"},
+		{"CIMD only, the default file absent: starts", []string{"BYWARD_DCR=false"}, absent, false, "static_clients=0 cimd=true dcr=false"},
+		{"CIMD and DCR on, the default file listing one client: starts", nil, one, false, "static_clients=1 cimd=true dcr=true"},
+		{"CIMD and DCR off, a named file listing one client: starts", off, one, true, "static_clients=1 cimd=false dcr=false"},
 		{"CIMD and DCR on, a named file absent: refused (a typo)", nil, absent, true, ""},
 		{"CIMD and DCR off, the default file absent: refused", off, absent, false, ""},
+		{"CIMD and DCR on, the default file a dangling symlink: refused (a broken mount)", nil, dangling, false, ""},
 		{"CIMD and DCR off, a named file listing no clients: refused", off, empty, true, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -476,6 +477,11 @@ func TestStaticClientsAreOptionalOnlyWhenAppsCanRegister(t *testing.T) {
 			path := filepath.Join(data, "clients.json")
 			content := map[string]string{empty: `{"clients":[]}`,
 				one: `{"clients":[{"client_id":"app","token_endpoint_auth_method":"none","redirect_uris":["http://127.0.0.1/callback"]}]}`}[tc.file]
+			if tc.file == dangling {
+				if err := os.Symlink(filepath.Join(data, "gone.json"), path); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if content != "" {
 				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 					t.Fatal(err)
@@ -495,7 +501,7 @@ func TestStaticClientsAreOptionalOnlyWhenAppsCanRegister(t *testing.T) {
 				t.Fatal(err)
 			}
 			var logs bytes.Buffer
-			a, err := buildAuth(cfg, slog.New(slog.NewTextHandler(&logs, nil)), Observability{})
+			a, err := buildAuth(cfg, logging.New(&logs, "text"), Observability{}) // the proxy's logger, with its key allowlist
 			if tc.wantLog == "" {
 				if err == nil || !strings.Contains(err.Error(), "BYWARD_STATIC_CLIENTS_FILE") {
 					t.Fatalf("err = %v, want a startup error naming BYWARD_STATIC_CLIENTS_FILE", err)

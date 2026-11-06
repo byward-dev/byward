@@ -15,8 +15,9 @@ register themselves:
 | both off | startup error | startup error | startup error |
 
 A path you set must exist, so a typo stops startup instead of silently dropping your clients. A
-file that exists but cannot be read is always an error. The startup log line `client sources`
-shows the active sources, for example `static=0 cimd=true dcr=true`.
+file that exists but cannot be read, or a dangling symlink at the default path (a broken mount),
+is always an error. The startup log line `client sources`
+shows the active sources, for example `static_clients=0 cimd=true dcr=true`.
 
 Field names follow RFC 7591. Unknown fields, trailing data after the JSON object and inline secrets
 are startup errors, so a typo never silently weakens a client.
