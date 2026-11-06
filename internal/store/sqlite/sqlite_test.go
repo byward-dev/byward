@@ -696,7 +696,6 @@ func TestPingAnswersWhileOpenAndFailsAfterClose(t *testing.T) {
 }
 
 // Only ” and 'all' are scopes: the database itself refuses anything else, so no write path can
-// Only ” and 'all' are scopes: the database itself refuses anything else, so no write path can
 // invent a revocation that covers more than it names.
 func TestTheRevocationScopeIsCheckedByTheDatabase(t *testing.T) {
 	s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
