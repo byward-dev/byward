@@ -242,6 +242,9 @@ func TestRequestIDsAndProgressTokensMustBeStringsOrIntegers(t *testing.T) {
 		"boolean token":        {modernBody(`1`, "x", `"progressToken":true`, ""), false},
 		"null token":           {modernBody(`1`, "x", `"progressToken":null`, ""), false},
 		"no id":                {`{"jsonrpc":"2.0","method":"x","params":{}}`, false},
+		"fractional id":        {modernBody(`1.5`, "x", "", ""), false},
+		"boolean id":           {modernBody(`true`, "x", "", ""), false},
+		"null id":              {modernBody(`null`, "x", "", ""), false},
 	} {
 		meta, err := readMeta([]byte(tc.body))
 		if err == nil {
@@ -264,14 +267,28 @@ func TestAnExitedProcessesRequestGetsItsQueuedAnswerBeforeAnyExitError(t *testin
 	}
 }
 
-func TestProxyIDsNeverRepeatAcrossTheUsersProcesses(t *testing.T) {
-	// A respawned process gets a new userConn; its ids must not restart where the old one's began.
+func TestProxyIDsNeverRepeatAcrossTheUsersUpstreamProcesses(t *testing.T) {
+	// A respawned upstream process gets a new userConn; its ids must not restart where the
+	// previous one's began.
 	b := newModernBridge(t, nil)
-	first, second := &userConn{ids: &b.bridge.next, byID: map[string]*modernRequest{}, byToken: map[string]*modernRequest{}},
-		&userConn{ids: &b.bridge.next, byID: map[string]*modernRequest{}, byToken: map[string]*modernRequest{}}
-	a, c := first.register([]byte(`1`), []byte(`"t"`), false), second.register([]byte(`1`), []byte(`"t"`), false)
-	if a.proxyID == c.proxyID || a.proxyTok == c.proxyTok {
-		t.Fatalf("ids %s/%s and %s/%s repeat across userConns", a.proxyID, a.proxyTok, c.proxyID, c.proxyTok)
+	key := "user:" + alice.user()
+	conn := func() *userConn {
+		t.Helper()
+		readEvents(t, b.post(t, "alice", "", modernBody(`1`, "echo", "", "")))
+		b.bridge.mu.Lock()
+		defer b.bridge.mu.Unlock()
+		return b.bridge.users[key]
+	}
+	first := conn()
+	a := first.register([]byte(`1`), []byte(`"t"`), false)
+	first.p.stop("test")
+	<-first.ended
+	second := conn()
+	if second == first {
+		t.Fatal("no new userConn after the respawn, so this test proves nothing")
+	}
+	if c := second.register([]byte(`1`), []byte(`"t"`), false); a.proxyID == c.proxyID || a.proxyTok == c.proxyTok {
+		t.Fatalf("ids %s/%s repeat after the respawn", c.proxyID, c.proxyTok)
 	}
 }
 
@@ -285,8 +302,8 @@ func TestARespawnedProcessGetsItsOwnUserConn(t *testing.T) {
 	b.bridge.mu.Lock()
 	b.bridge.users[key] = stale
 	b.bridge.mu.Unlock()
-	if id, _ := lastResult(t, readEvents(t, b.post(t, "alice", "", modernBody(`5`, "echo", "", "")))); id != `5` {
-		t.Fatalf("the request got id %s, want its own answer", id)
+	if id, res := lastResult(t, readEvents(t, b.post(t, "alice", "", modernBody(`5`, "echo", "", `"n":5`)))); id != `5` || !strings.Contains(string(res), `"n":5`) {
+		t.Fatalf("the request got id %s, result %s; want its own echo, not an exit error", id, res)
 	}
 	b.bridge.mu.Lock()
 	defer b.bridge.mu.Unlock()
