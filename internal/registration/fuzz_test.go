@@ -23,11 +23,14 @@ func FuzzMatchRedirect(f *testing.F) {
 	}
 	f.Add("https://a.example/cb", "https://a.example/cb#x")
 	f.Add("http://[::1]/cb", "http://[::1]:1/cb")
+	f.Add(`http://127.0.0.1/a"b`, "http://127.0.0.1:1/a%22b")
 	f.Fuzz(func(t *testing.T, registered, sent string) {
 		// Any-port rule (ADR-0009 §2): a valid loopback registration accepts another port.
 		if rm := loopRe.FindStringSubmatch(registered); rm != nil && ValidateRedirect(registered) == nil {
-			if err := MatchRedirect([]string{registered}, "http://"+rm[1]+":4321"+rm[2]); err != nil {
-				t.Fatalf("loopback %q refused another port: %v", registered, err)
+			if other := "http://" + rm[1] + ":4321" + rm[2]; len(other) <= MaxRedirectURILen {
+				if err := MatchRedirect([]string{registered}, other); err != nil {
+					t.Fatalf("loopback %q refused another port: %v", registered, err)
+				}
 			}
 		}
 		err := MatchRedirect([]string{registered}, sent)

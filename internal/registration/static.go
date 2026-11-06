@@ -214,3 +214,6 @@ func (c *staticClient) String() string {
 
 // GoString never shows the secret.
 func (c *staticClient) GoString() string { return c.String() }
+
+// Format makes every fmt verb use String, so no verb can reach the secret by reflection.
+func (c *staticClient) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, c.String()) }

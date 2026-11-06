@@ -127,6 +127,16 @@ func ValidateRedirects(uris []string) error {
 	return nil
 }
 
+// afterAuthority is the raw path and query of an absolute URI, exactly as written, so differently
+// escaped paths never compare equal.
+func afterAuthority(raw string) string {
+	rest := raw[strings.Index(raw, "://")+3:]
+	if i := strings.IndexAny(rest, "/?"); i >= 0 {
+		return rest[i:]
+	}
+	return ""
+}
+
 // MatchRedirect applies ADR-0009 to a redirect URI sent at /authorize or /token: HTTPS must equal
 // a registered URI exactly; a loopback URI matches a registered one with the same scheme, host
 // literal, path and query, on any port.
@@ -150,8 +160,7 @@ func MatchRedirect(registered []string, sent string) error {
 		if err != nil || ru.Scheme != "http" {
 			continue
 		}
-		if ru.Hostname() == u.Hostname() && ru.EscapedPath() == u.EscapedPath() && ru.RawQuery == u.RawQuery &&
-			u.ForceQuery == ru.ForceQuery {
+		if ru.Hostname() == u.Hostname() && afterAuthority(r) == afterAuthority(sent) {
 			return nil
 		}
 	}

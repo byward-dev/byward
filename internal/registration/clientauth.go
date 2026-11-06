@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -49,11 +50,17 @@ func (c clientAuth) String() string {
 }
 func (c clientAuth) GoString() string { return c.String() }
 
+// Format makes every fmt verb use String, so no verb can reach the secret by reflection.
+func (c clientAuth) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, c.String()) }
+
 // Authenticate checks the credentials of a /token or /revoke request: exactly the registered
 // method, a matching client_id, secrets compared in constant time, and private_key_jwt per RFC 7523
 // with aud = tokenEndpoint, exp at most 5 min ahead and a jti replay check.
 func (c *clientAuth) Authenticate(ctx context.Context, form url.Values, header http.Header, tokenEndpoint string, now time.Time) error {
-	basicID, basicSecret, hasBasic := basicAuth(header)
+	basicID, basicSecret, hasBasic, err := basicAuth(header)
+	if err != nil {
+		return invalid("Basic credentials are not form-encoded")
+	}
 	if hasBasic && basicID != c.id {
 		return invalid("Basic client ID does not match")
 	}
@@ -100,19 +107,19 @@ func presented(hasBasic bool, form url.Values) []AuthMethod {
 }
 
 // basicAuth parses RFC 6749 §2.3.1 Basic credentials, which are form-encoded inside.
-func basicAuth(h http.Header) (id, secret string, ok bool) {
+func basicAuth(h http.Header) (id, secret string, ok bool, err error) {
 	r := http.Request{Header: h}
 	id, secret, ok = r.BasicAuth()
 	if !ok {
-		return "", "", false
+		return "", "", false, nil
 	}
-	var err1, err2 error
-	id, err1 = url.QueryUnescape(id)
-	secret, err2 = url.QueryUnescape(secret)
-	if err1 != nil || err2 != nil {
-		return "", "", true
+	if id, err = url.QueryUnescape(id); err != nil {
+		return "", "", true, err
 	}
-	return id, secret, true
+	if secret, err = url.QueryUnescape(secret); err != nil {
+		return "", "", true, err
+	}
+	return id, secret, true, nil
 }
 
 func (c *clientAuth) checkSecret(got string) error {

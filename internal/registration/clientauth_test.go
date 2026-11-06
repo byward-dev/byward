@@ -134,7 +134,8 @@ func TestAuthenticate(t *testing.T) {
 		"jwt nbf within leeway": {id: "jwt", form: func() url.Values {
 			return e.assertion(t, e.cert, "PS256", map[string]any{"nbf": now.Add(AssertionLeeway).Unix()})
 		}},
-		"basic not form-encoded": {id: "basic", form: url.Values{}.Clone, header: rawBasic("basic", goodSecret), reason: "Basic client ID"},
+		"basic invalid escape": {id: "basic", form: url.Values{}.Clone, header: rawBasic("basic", goodSecret), reason: "not form-encoded"},
+		"basic raw plus":       {id: "basic", form: url.Values{}.Clone, header: rawBasic("basic", strings.ReplaceAll(goodSecret, "%/:", "")), reason: "secret does not match"},
 		"jwt iat in the future": {id: "jwt", form: func() url.Values {
 			return e.assertion(t, e.cert, "PS256", map[string]any{"iat": now.Add(time.Minute).Unix()})
 		}, reason: "iat is in the future"},

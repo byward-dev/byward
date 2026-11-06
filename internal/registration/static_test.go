@@ -84,7 +84,7 @@ func TestLoadStaticAllMethods(t *testing.T) {
 	if _, err := reg.Client(context.Background(), "nope"); !errors.Is(err, ErrUnknownClient) {
 		t.Errorf("unknown client: %v", err)
 	}
-	if c, _ := reg.Client(context.Background(), "basic"); strings.Contains(fmt.Sprintf("%v %+v %#v", c, c, c), goodSecret) {
+	if c, _ := reg.Client(context.Background(), "basic"); strings.Contains(fmt.Sprintf("%v %+v %#v %s %d %x %q", c, c, c, c, c, c, c), goodSecret) {
 		t.Error("client formats its secret")
 	}
 }
