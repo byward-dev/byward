@@ -6,12 +6,14 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/corker/mcp-authproxy/internal/audit"
 	"github.com/corker/mcp-authproxy/internal/idp"
 	"github.com/corker/mcp-authproxy/internal/logging"
+	"github.com/corker/mcp-authproxy/internal/ratelimit"
 	"github.com/corker/mcp-authproxy/internal/registration"
 	"github.com/corker/mcp-authproxy/internal/store"
 	"github.com/corker/mcp-authproxy/internal/token"
@@ -101,6 +103,17 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	ctx := r.Context()
+	if retry, limited := b.throttled(w, r, ratelimit.Authorize); limited {
+		// RFC 6749 §4.1.2.1: with a client and redirect URI we trust, tell the MCP client at once;
+		// otherwise there is nowhere safe to send it, so the user sees the page.
+		if c, err := b.cfg.Clients.Client(ctx, q.Get("client_id")); err == nil && c.RedirectAllowed(q.Get("redirect_uri")) == nil {
+			b.redirectError(w, r, q.Get("redirect_uri"), q.Get("state"), "temporarily_unavailable",
+				"too many sign-in attempts from this network; retry after "+strconv.Itoa(retry)+" s")
+			return
+		}
+		b.page(w, r, http.StatusTooManyRequests, tooManyTitle, tooManyHint(retry))
+		return
+	}
 	client, err := b.cfg.Clients.Client(ctx, q.Get("client_id"))
 	switch {
 	case errors.Is(err, registration.ErrUnknownClient):
@@ -200,6 +213,10 @@ func (b *Broker) scopes(raw string) ([]string, bool) {
 // callback receives the IdP's redirect, creates the grant and its single-use code, and returns the
 // user to the MCP client.
 func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
+	if retry, limited := b.throttled(w, r, ratelimit.Callback); limited {
+		b.page(w, r, http.StatusTooManyRequests, tooManyTitle, tooManyHint(retry))
+		return
+	}
 	q := r.URL.Query()
 	ctx := r.Context()
 	st := q.Get("state")

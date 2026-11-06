@@ -992,3 +992,153 @@ func TestUserDeclinedIsAuditedAsAFailedLogin(t *testing.T) {
 	e.do(t, "GET", "/callback/entra?"+q.Encode(), nil, []*http.Cookie{c})
 	e.oneAuditEvent(t, "login", map[string]any{"outcome": "failure", "reason": "the user declined to sign in", "client_id": clientID})
 }
+
+// stubLimiter records the addresses it is asked about and refuses the endpoints it names.
+type stubLimiter struct {
+	endpoints map[string]bool
+	seenIPs   *[]string
+}
+
+func (l stubLimiter) Allow(endpoint, ip string) (bool, time.Duration) {
+	if l.seenIPs != nil {
+		*l.seenIPs = append(*l.seenIPs, endpoint+" "+ip)
+	}
+	if l.endpoints[endpoint] {
+		return false, 1500 * time.Millisecond
+	}
+	return true, 0
+}
+
+func authorizeQuery(override url.Values) url.Values {
+	q := url.Values{"client_id": {clientID}, "redirect_uri": {clientCB}, "response_type": {"code"},
+		"code_challenge": {challenge()}, "code_challenge_method": {"S256"}, "state": {"client-state"}}
+	for k, v := range override {
+		q[k] = v
+	}
+	return q
+}
+
+// RFC 6749 §4.1.2.1: a throttled /authorize with a trusted client and redirect tells the MCP client
+// at once; RFC 6585: Retry-After in whole seconds, rounded up.
+func TestThrottledAuthorizeRedirectsTemporarilyUnavailableToAValidClient(t *testing.T) {
+	e := newEnv(t)
+	e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"authorize": true}}
+	res := e.do(t, "GET", "/authorize?"+authorizeQuery(nil).Encode(), nil, nil)
+	loc, _ := res.Location()
+	if res.StatusCode != http.StatusFound || loc == nil || !strings.HasPrefix(loc.String(), clientCB+"?") {
+		t.Fatalf("throttled authorize = %d to %v, want a redirect to the client", res.StatusCode, loc)
+	}
+	q := loc.Query()
+	for k, want := range map[string]string{"error": "temporarily_unavailable", "state": "client-state", "iss": issuer} {
+		if q.Get(k) != want {
+			t.Errorf("redirect %s = %q, want %q", k, q.Get(k), want)
+		}
+	}
+	if got := res.Header.Get("Retry-After"); got != "2" {
+		t.Errorf("Retry-After = %q, want 2 (1.5 s rounded up)", got)
+	}
+	if len(res.Cookies()) != 0 {
+		t.Error("a throttled authorize must not start a sign-in (no login cookie)")
+	}
+	e.oneAuditEvent(t, "rate_limited", map[string]any{"outcome": "failure", "reason": "authorize", "remote_ip": "*"})
+}
+
+// Without a client and redirect URI we trust there is nowhere safe to send the error: a throttled
+// /authorize must never become an open redirect.
+func TestThrottledAuthorizeWithoutATrustedRedirectShowsThe429Page(t *testing.T) {
+	for name, override := range map[string]url.Values{
+		"unknown client":            {"client_id": {"nobody"}},
+		"unregistered redirect URI": {"redirect_uri": {"https://evil.example/cb"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"authorize": true}}
+			res := e.do(t, "GET", "/authorize?"+authorizeQuery(override).Encode(), nil, nil)
+			body, _ := io.ReadAll(res.Body)
+			if res.StatusCode != http.StatusTooManyRequests || res.Header.Get("Location") != "" {
+				t.Fatalf("throttled authorize = %d (Location %q), want 429 with no redirect", res.StatusCode, res.Header.Get("Location"))
+			}
+			if res.Header.Get("Retry-After") != "2" || res.Header.Get("Cache-Control") != "no-store" || !bytes.Contains(body, []byte("Too many sign-in attempts")) {
+				t.Fatalf("429 page: Retry-After %q, Cache-Control %q, body %s", res.Header.Get("Retry-After"), res.Header.Get("Cache-Control"), body)
+			}
+		})
+	}
+}
+
+func TestThrottledCallbackShowsThe429PageWithoutCallingTheIdP(t *testing.T) {
+	e := newEnv(t)
+	c, cb := e.startLogin(t, nil)
+	e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"callback": true}}
+	before := len(e.idpOps)
+	res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{c})
+	if res.StatusCode != http.StatusTooManyRequests || res.Header.Get("Retry-After") != "2" {
+		t.Fatalf("throttled callback = %d, Retry-After %q; want 429 and 2", res.StatusCode, res.Header.Get("Retry-After"))
+	}
+	if len(e.idpOps) != before {
+		t.Errorf("the IdP was called for a throttled callback: %v", e.idpOps[before:])
+	}
+	if firstGrant(e.st) != "" {
+		t.Error("a grant was created by a throttled callback")
+	}
+	e.oneAuditEvent(t, "rate_limited", map[string]any{"outcome": "failure", "reason": "callback"})
+}
+
+// The user's decision (#55 follow-up design): /token answers 429 + Retry-After + no-store with a
+// JSON temporarily_unavailable, before the body is read.
+func TestThrottledTokenIsRefusedBeforeItsBodyIsRead(t *testing.T) {
+	e := newEnv(t)
+	e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"token": true}}
+	// A body ParseForm rejects: a 400 would mean it was read before the limit.
+	r, _ := http.NewRequest("POST", e.srv.URL+"/token", strings.NewReader("grant_type=%zz"))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	res := e.send(t, r)
+	if res.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("throttled token with a malformed body = %d, want 429 (the limit comes before parsing)", res.StatusCode)
+	}
+	if rejected := e.auditEvents(t, "token_rejected"); len(rejected) != 0 {
+		t.Errorf("the malformed body was parsed and audited: %v", rejected)
+	}
+}
+
+func TestRetrySecondsRoundsUpToWholeSecondsAtLeastOne(t *testing.T) {
+	for wait, want := range map[time.Duration]int{0: 1, time.Millisecond: 1, time.Second: 1, 1500 * time.Millisecond: 2,
+		2 * time.Second: 2, 2*time.Second + time.Nanosecond: 3, 20 * time.Second: 20} {
+		if got := retrySeconds(wait); got != want {
+			t.Errorf("retrySeconds(%v) = %d, want %d", wait, got, want)
+		}
+	}
+}
+
+func TestThrottledTokenAnswers429JSONAndLeavesTheCodeUnused(t *testing.T) {
+	e := newEnv(t)
+	code := e.signIn(t, nil).Query().Get("code")
+	e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"token": true}}
+	res, body := e.redeem(t, code, nil)
+	if res.StatusCode != http.StatusTooManyRequests || res.Header.Get("Retry-After") != "2" || res.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("throttled token = %d, Retry-After %q, Cache-Control %q; want 429, 2, no-store",
+			res.StatusCode, res.Header.Get("Retry-After"), res.Header.Get("Cache-Control"))
+	}
+	if body["error"] != "temporarily_unavailable" || !strings.Contains(fmt.Sprint(body["error_description"]), "reference ") {
+		t.Errorf("throttled token body = %v, want temporarily_unavailable with a reference", body)
+	}
+	e.oneAuditEvent(t, "rate_limited", map[string]any{"outcome": "failure", "reason": "token"})
+	if rejected := e.auditEvents(t, "token_rejected"); len(rejected) != 0 {
+		t.Errorf("a throttled request was also audited as token_rejected: %v", rejected)
+	}
+	// The code was never redeemed, so it still works once the limit lifts.
+	e.b.cfg.Limiter = nil
+	if res, body := e.redeem(t, code, nil); res.StatusCode != 200 {
+		t.Fatalf("after the limit the code must still redeem: %d %v", res.StatusCode, body)
+	}
+}
+
+func TestAuthorizeCallbackAndTokenAskTheLimiterByClientAddress(t *testing.T) {
+	e := newEnv(t)
+	var seen []string
+	e.b.cfg.Limiter = stubLimiter{seenIPs: &seen}
+	code := e.signIn(t, nil).Query().Get("code")
+	e.redeem(t, code, nil)
+	if want := []string{"authorize 127.0.0.1", "callback 127.0.0.1", "token 127.0.0.1"}; fmt.Sprint(seen) != fmt.Sprint(want) {
+		t.Fatalf("limiter asked %q, want %q (each endpoint once, by client address)", seen, want)
+	}
+}

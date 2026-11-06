@@ -9,11 +9,13 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/corker/mcp-authproxy/internal/audit"
 	"github.com/corker/mcp-authproxy/internal/logging"
+	"github.com/corker/mcp-authproxy/internal/ratelimit"
 	"github.com/corker/mcp-authproxy/internal/registration"
 	"github.com/corker/mcp-authproxy/internal/store"
 	"github.com/corker/mcp-authproxy/internal/token"
@@ -40,6 +42,12 @@ func (b *Broker) token(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.Header().Set("Allow", "POST, OPTIONS")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if retry, limited := b.throttled(w, r, ratelimit.Token); limited {
+		// RFC 6749 §5.2 has no rate-limit code; the 429 and Retry-After carry the meaning (as in babs).
+		writeTokenError(w, r, tokenError{http.StatusTooManyRequests, "temporarily_unavailable",
+			"too many requests from this address; retry after " + strconv.Itoa(retry) + " s"})
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -243,6 +251,11 @@ func pkceMatches(verifier, challenge string) bool {
 func (b *Broker) tokenFail(w http.ResponseWriter, r *http.Request, e tokenError) {
 	// The caller may not have authenticated, so the event is rate-limited per source.
 	b.cfg.Audit.RecordUnauthenticated(r, audit.Event{Name: audit.TokenRejected, Outcome: audit.Failure, Reason: e.code})
+	writeTokenError(w, r, e)
+}
+
+// writeTokenError writes an OAuth error response (RFC 6749 §5.2) with the request ID as reference.
+func writeTokenError(w http.ResponseWriter, r *http.Request, e tokenError) {
 	if e.status == http.StatusUnauthorized {
 		w.Header().Set("WWW-Authenticate", `Basic realm="token"`)
 	}

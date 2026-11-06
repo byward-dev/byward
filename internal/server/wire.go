@@ -17,12 +17,16 @@ import (
 	"github.com/corker/mcp-authproxy/internal/health"
 	"github.com/corker/mcp-authproxy/internal/idp"
 	"github.com/corker/mcp-authproxy/internal/idp/entra"
+	"github.com/corker/mcp-authproxy/internal/ratelimit"
 	"github.com/corker/mcp-authproxy/internal/registration"
 	"github.com/corker/mcp-authproxy/internal/resource"
 	"github.com/corker/mcp-authproxy/internal/store"
 	"github.com/corker/mcp-authproxy/internal/store/memory"
 	"github.com/corker/mcp-authproxy/internal/token"
 )
+
+// maxRateLimitKeys bounds the client addresses each OAuth endpoint tracks (ADR-0018 §8).
+const maxRateLimitKeys = 100000
 
 // maxJTIs bounds the in-memory private_key_jwt replay cache.
 const maxJTIs = 10000
@@ -92,7 +96,8 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (*auth, er
 		Store: st, Sealer: sealer, LoginBox: loginBox, IdPTokenBox: idpBox, ConsentBox: consentBox, Gate: g,
 		UpstreamName: cfg.ResourceName, ScopeText: cfg.ScopeDescription, OperatorName: cfg.OperatorName,
 		SecureCookies: cfg.PublicURL.Scheme == "https", Log: log,
-		Audit: o.Audit, ObserveIdP: func(op, outcome string, d time.Duration) { o.Metrics.IdP(idpName, op, outcome, d) },
+		Audit: o.Audit, Limiter: ratelimit.New(cfg.OAuthRateLimits, maxRateLimitKeys, time.Now, o.Metrics.RateLimited),
+		ObserveIdP:   func(op, outcome string, d time.Duration) { o.Metrics.IdP(idpName, op, outcome, d) },
 		RefreshGrace: broker.DefaultRefreshGrace})
 	if err != nil {
 		return nil, err

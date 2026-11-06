@@ -54,3 +54,19 @@ Clients (runtime, 2026-11-06): Node `fetch` and MCP Inspector CLI 2.14.0 (TypeSc
 
 - All limits are configurable within bounds; the defaults fit Claude's 10 s / 30 s client timeouts.
 - Behind an ingress the operator lists the internal host, or requests fail with an explicit 421.
+
+## Amendment 2026-11-06 (OAuth rate limits built)
+
+- §8 budgets add `/consent` 60/min (a GET and a POST per sign-in) and the IdP callback 30/min. Each is a token bucket
+  per endpoint and client address, with a burst of the per-minute budget. Values are 1–10,000 per minute through
+  `MCP_AUTHPROXY_OAUTH_RATE_LIMITS`, with no off switch.
+- §6 is implemented as `MCP_AUTHPROXY_TRUSTED_PROXIES` (CIDRs or addresses, none by default). The client address is
+  the rightmost `X-Forwarded-For` entry that is not a trusted proxy, and it is shared by the request log, the audit
+  stream and the limits.
+- Over-budget responses:
+  - `/token`, `/revoke` and `/register`: 429 with `Retry-After`, `no-store` and JSON `temporarily_unavailable`.
+  - `/authorize`: a `temporarily_unavailable` redirect to a valid client, else a 429 page.
+  - Browser endpoints: a 429 page.
+  - Every refusal is audited as `rate_limited`.
+- Limits are per process. Each endpoint tracks at most 100,000 addresses and then falls back to a shared bucket.
+- A per-`client_id` limit on failed `/token` client authentication is deferred to DCR.

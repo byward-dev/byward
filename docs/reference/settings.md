@@ -16,6 +16,8 @@ Precedence: flag > environment > default. Secrets are read only from files.
 | `--resource-name` | `MCP_AUTHPROXY_RESOURCE_NAME` | — | human-readable resource name in protected resource metadata |
 | `--resource-documentation` | `MCP_AUTHPROXY_RESOURCE_DOCUMENTATION` | — | documentation URL in protected resource metadata |
 | `--log-format` | `MCP_AUTHPROXY_LOG_FORMAT` | json | log format: json or text |
+| `--trusted-proxies` | `MCP_AUTHPROXY_TRUSTED_PROXIES` | — | comma-separated CIDRs or addresses of reverse proxies whose X-Forwarded-For is trusted for the client address (ADR-0018 §6); empty trusts none |
+| `--oauth-rate-limits` | `MCP_AUTHPROXY_OAUTH_RATE_LIMITS` | — | per-minute limits per client address on OAuth endpoints, e.g. authorize=60,token=120 (ADR-0018 §8); unset endpoints keep their defaults |
 | `--internal-listen` | `MCP_AUTHPROXY_INTERNAL_LISTEN` | 127.0.0.1:9090 | address of the internal listener for /metrics, /livez and /readyz (ADR-0018 §10); empty turns it off |
 | `--entra-tenant` | `MCP_AUTHPROXY_ENTRA_TENANT` | — | Entra tenant ID (a GUID) of the IdP app |
 | `--entra-client-id` | `MCP_AUTHPROXY_ENTRA_CLIENT_ID` | — | application (client) ID of the IdP app registration |

@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -125,16 +124,6 @@ func Middleware(log *slog.Logger, next http.Handler) http.Handler {
 		}
 		log.InfoContext(r.Context(), "request", attrs...)
 	})
-}
-
-// RemoteIP is the TCP peer. Forwarded headers are not trusted until trusted proxies are
-// configurable (ADR-0018 §6).
-func RemoteIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }
 
 // StatusRecorder records the final status a handler writes (200 if it writes none). The request

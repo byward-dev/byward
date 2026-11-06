@@ -32,6 +32,7 @@ func exercise(m *Metrics) {
 	m.InFlight("request", 1)
 	m.Busy("stream")
 	m.AuditEvent("login", "success")
+	m.RateLimited("authorize")
 }
 
 var proxyMetric = regexp.MustCompile(`(?m)^# TYPE (mcp_authproxy_\S+) (\S+)$`)
@@ -101,4 +102,5 @@ func TestNilMetricsIsSafeToCall(t *testing.T) {
 	m.InFlight("request", 1)
 	m.Busy("request")
 	m.AuditEvent("login", "success")
+	m.RateLimited("authorize")
 }

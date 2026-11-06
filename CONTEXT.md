@@ -30,6 +30,10 @@ _Avoid_: client, app (alone)
 A named set of defaults for the generic OIDC **IdP** adapter (`google`, `okta`, `auth0`, `keycloak`); data, not code. Entra is an adapter of its own, not a preset.
 _Avoid_: provider type, connector
 
+**Rate limit**:
+A per-minute budget of requests to one of the **broker**'s OAuth endpoints from one client address (IPv6 grouped by /64). Never applied to MCP traffic.
+_Avoid_: throttle (alone), quota
+
 **Upstream**:
 The MCP server behind the proxy — reached over HTTP or spawned as a stdio process. Always the MCP server.
 _Avoid_: backend, target, origin, downstream
