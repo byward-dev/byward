@@ -188,6 +188,23 @@ the client and redirect URI again. This is accepted behaviour, not a gap: no tok
   consent forgotten in between, it issues nothing, clears the cookie and shows the page.
 - Every revocation forgets: `/revoke`, refresh-token reuse, and `byward revoke-user` and
   `revoke-all` remove the matching rows in the same transaction as the grants.
+- **Silent sign-in (`prompt=none`, OIDC Core §3.1.2.1) never shows the page.** It proceeds only on
+  a remembered consent for the user the hint names, and then asks the IdP with its own
+  `prompt=none`. Anything else is an OAuth error at the validated redirect URI, with `state` and
+  `iss`: `consent_required` for a client asked every time or with no consent covering the request;
+  `login_required` without a hint, because nothing goes to the IdP before consent is established
+  (ADR-0010 §1); the IdP's own `login_required`, `interaction_required`, `consent_required` or
+  `account_selection_required` as it sent them; and `consent_required` when someone else signs in
+  behind the hint (nothing issued, the hint cleared). Every refusal is audited (`consent_silent`).
+  - The different answers for "no hint" and "a hint but no consent" are not an oracle: the
+    request runs in the user's own browser with the user's own hint cookie, and the answer goes
+    only to a redirect URI the client registered. Only the client learns it, and only that this
+    browser's user has not approved it, which a page would have shown it too. A third-party site
+    can start the request but cannot read where it ends. A client asked every time always gets
+    `consent_required`, whatever is remembered. `/authorize`'s rate limit applies before any of
+    this.
+  - A silent IdP round trip without a hint (for browsers that lost the cookie) is not built; it
+    would send the user to the IdP before consent is known. Later, if a real client needs it.
 - **Accepted: a local process can reuse a remembered loopback client.** A loopback redirect URI is
   remembered whatever its port, because ADR-0009 §2 lets the port vary (Claude Code picks a new one
   every run). So, for a remembered loopback client, a process on the user's machine that opens

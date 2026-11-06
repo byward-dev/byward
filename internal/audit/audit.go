@@ -31,6 +31,7 @@ const (
 	ConsentGranted      = "consent_granted"       // the user allowed the client on the consent page
 	ConsentDenied       = "consent_denied"        // the user denied the client on the consent page
 	ConsentRemembered   = "consent_remembered"    // a remembered consent was used, or failed its check after the IdP sign-in (ADR-0010 §3, §12)
+	ConsentSilent       = "consent_silent"        // a prompt=none request could not finish without the user; the reason is the error sent (OIDC Core §3.1.2.6)
 	RateLimited         = "rate_limited"          // an OAuth endpoint refused a request over its per-address budget
 	StoreRestored       = "store_restored"        // startup found the store restored from an older copy; a new epoch began (ADR-0007 §9)
 	SessionRejected     = "session_rejected"      // a signed-in user presented an MCP session ID not bound to them (invariant 13)

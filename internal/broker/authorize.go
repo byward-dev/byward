@@ -92,6 +92,9 @@ type login struct {
 	// Hint is the user a remembered consent was assumed for, from the hint cookie; the callback
 	// checks it against the user who signed in (ADR-0010 §3). Empty when the user answered the page.
 	Hint *hint `json:"h,omitempty"`
+	// Silent is a prompt=none sign-in: the IdP is asked with prompt=none too, and anything that
+	// would need the user ends in an error at the redirect URI instead of a page (#126).
+	Silent bool `json:"x,omitempty"`
 }
 
 func (b *Broker) cookieName(idpState string) string {
@@ -143,6 +146,9 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 	case !validState(q.Get("state")):
 		fail("invalid_request", "state may only contain visible ASCII characters and spaces (RFC 6749 Appendix A.5)")
 		return
+	case wantsSilent(q.Get("prompt")) && len(promptValues(q.Get("prompt"))) > 1:
+		fail("invalid_request", "prompt=none cannot be combined with other prompt values (OIDC Core 1.0 §3.1.2.1)")
+		return
 	case q.Get("resource") != "" && q.Get("resource") != b.cfg.Resource.String():
 		// A missing resource means ours (ADR-0005 §4).
 		fail("invalid_target", "this server only issues tokens for "+b.cfg.Resource.String())
@@ -159,6 +165,10 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 	// only at the callback as an expired sign-in.
 	if _, err := encodeLogin(l); err != nil {
 		fail("invalid_request", "the request is too large")
+		return
+	}
+	if wantsSilent(q.Get("prompt")) {
+		b.authorizeSilently(w, r, client, l)
 		return
 	}
 	if b.skipConsent(r, client, &l) {
@@ -208,7 +218,7 @@ func (b *Broker) startLogin(w http.ResponseWriter, r *http.Request, l login, now
 		return
 	}
 	start := time.Now()
-	target, err := b.cfg.IdP.AuthCodeURL(idp.WithRequestID(ctx, logging.RequestID(ctx)), idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier})
+	target, err := b.cfg.IdP.AuthCodeURL(idp.WithRequestID(ctx, logging.RequestID(ctx)), idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier, Silent: l.Silent})
 	b.cfg.ObserveIdP("authorize", idpOutcome(err), time.Since(start))
 	if err != nil {
 		b.idpFailure(w, r, l.ClientID, err)
@@ -320,6 +330,10 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	b.cfg.ObserveIdP("callback", idpOutcome(err), time.Since(start))
 	if err != nil {
 		var ie *idp.Error
+		if l.Silent && errors.As(err, &ie) && slices.Contains(silentIdPErrors, ie.OAuth) { // the IdP's own prompt=none needs the user
+			b.refuseSilently(w, r, nil, l, ie.OAuth, "the identity provider needs the user")
+			return
+		}
 		if errors.As(err, &ie) && ie.OAuth == "access_denied" {
 			b.cfg.Audit.Record(r, audit.Event{Name: audit.Login, Outcome: audit.Failure, Reason: "the user declined to sign in", ClientID: l.ClientID, IdP: b.cfg.IdPName})
 			b.redirectError(w, r, l.RedirectURI, l.State, "access_denied", "the user declined to sign in")
@@ -345,7 +359,14 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	var remembered registration.Client
 	if l.Hint != nil {
 		c, reason := b.confirmRemembered(ctx, l, id)
-		if reason != "" {
+		switch {
+		case reason != "" && l.Silent: // no page for prompt=none: nothing is issued, and the hint is forgotten
+			b.cfg.Audit.Record(r, audit.Event{Name: audit.ConsentRemembered, Outcome: audit.Failure, Reason: reason, ClientID: l.ClientID,
+				UserKey: id.Subject, IdP: b.cfg.IdPName})
+			b.clearHint(w)
+			b.refuseSilently(w, r, nil, l, "consent_required", "the user has not approved this request")
+			return
+		case reason != "":
 			b.askAfterMismatch(w, r, l, id, reason)
 			return
 		}
