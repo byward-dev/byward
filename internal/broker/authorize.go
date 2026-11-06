@@ -315,7 +315,8 @@ func (b *Broker) scopes(raw string) ([]string, bool) {
 func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	if retry, limited := b.throttled(w, r, ratelimit.Callback); limited {
 		// A silent sign-in's sealed login names a validated redirect URI: answer there, never a page.
-		// Its login is spent, as at any other callback, so a replay cannot later issue a code.
+		// Its login is spent as at any other callback: the browser is told to drop it, so it cannot
+		// finish this sign-in later.
 		if l, c, badLogin := b.openLogin(r); badLogin == "" && l.Silent {
 			b.expireLogin(w, c)
 			b.refuseSilently(w, r, "", l, "temporarily_unavailable", "too many sign-in attempts from this network; retry after "+strconv.Itoa(retry)+" s")

@@ -211,6 +211,13 @@ the client and redirect URI again. This is accepted behaviour, not a gap: no tok
     is `temporarily_unavailable` and keeps the hint.
   - A silent IdP round trip without a hint (for browsers that lost the cookie) is not built; it
     would send the user to the IdP before consent is known. Later, if a real client needs it.
+  - **Accepted: a login is single use on the client side only.** The sealed login cookie holds
+    the sign-in in progress; a callback spends it by telling the browser to delete it, and the
+    server keeps no record. A rate-limited silent callback answers `temporarily_unavailable`
+    without redeeming the IdP code, so a client that kept a copy of the cookie (it is `__Host-`
+    and HttpOnly) and ignored the deletion could still get a code for that request after the
+    limit. A well-behaved client has consumed its `state` with the error and refuses a later
+    code for it. Server-side single-use logins would need a store change; they are a follow-up.
 - **Accepted: a local process can reuse a remembered loopback client.** A loopback redirect URI is
   remembered whatever its port, because ADR-0009 §2 lets the port vary (Claude Code picks a new one
   every run). So, for a remembered loopback client, a process on the user's machine that opens

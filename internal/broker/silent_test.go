@@ -287,8 +287,10 @@ func TestPromptNoneWhoseSignInFailsAfterTheIdPIsAServerError(t *testing.T) {
 }
 
 // A silent sign-in whose callback is rate limited is answered at its redirect URI, which its sealed
-// login names, not with the page.
-func TestPromptNoneWhoseCallbackIsRateLimitedIsTemporarilyUnavailable(t *testing.T) {
+// login names, not with the page, and its login is spent: a browser that honours the expiry cannot
+// finish that sign-in later. (The login is single use on the client side only, as for an
+// interactive callback; a kept copy of the cookie is not refused by the server.)
+func TestPromptNoneWhoseCallbackIsRateLimitedIsTemporarilyUnavailableAndSpendsItsLogin(t *testing.T) {
 	e := newEnv(t, withRemember(t, nil))
 	h := e.remember(t, nil)
 	e.fake.Set(fakeidp.WithSilentSession())
@@ -300,6 +302,9 @@ func TestPromptNoneWhoseCallbackIsRateLimitedIsTemporarilyUnavailable(t *testing
 			login = c
 		}
 	}
+	if login == nil {
+		t.Fatal("authorize set no login cookie")
+	}
 	idpRes, err := e.fake.HTTPClient().Get(res.Header.Get("Location"))
 	if err != nil {
 		t.Fatal(err)
@@ -310,14 +315,14 @@ func TestPromptNoneWhoseCallbackIsRateLimitedIsTemporarilyUnavailable(t *testing
 	if got := answerOf(t, throttled); got != refused(e, "temporarily_unavailable") {
 		t.Fatalf("answer %+v, want temporarily_unavailable", got)
 	}
-	// The login is spent: the same callback once the limit lifts issues no code, so one request
-	// never gets both an error and a code.
+	// What the browser still holds after that answer: nothing if it was told to drop the login.
+	var held []*http.Cookie
 	if c := cookieNamed(throttled, login.Name); c == nil || c.MaxAge >= 0 {
-		t.Fatalf("login cookie not expired: %+v", c)
+		held = []*http.Cookie{login}
 	}
 	e.b.cfg.Limiter = nil
-	if replay := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, nil); replay.StatusCode != http.StatusBadRequest || replay.Header.Get("Location") != "" {
-		t.Fatalf("replay after the limit lifted: %d to %q, want the expired-sign-in page", replay.StatusCode, replay.Header.Get("Location"))
+	if replay := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, held); replay.StatusCode != http.StatusBadRequest || replay.Header.Get("Location") != "" {
+		t.Fatalf("the browser's retry after the limit lifted: %d to %q, want the expired-sign-in page", replay.StatusCode, replay.Header.Get("Location"))
 	}
 }
 
