@@ -57,18 +57,25 @@ run = ["sh scripts/go-version-check_test.sh", "sh scripts/test-pins-check_test.s
 description = "MCP conformance server suite for each pinned spec revision (scripts/conformance/run.sh), direct vs through --insecure-no-auth in a pinned node container; results must match (needs Docker)"
 run = "sh scripts/conformance/run.sh"
 
+[tasks."test:conformance:install"]
+description = "Fetch, verify and build the pinned MCP conformance CLI in build/conformance/src, for the authorization suite of test:integration:go (needs Docker)"
+run = "sh scripts/conformance/run.sh --install-only"
+
 [tasks."test:ui"]
 description = "Consent and error pages in Chromium: Playwright and axe (WCAG 2.2 AA), screenshots in build/ui/screenshots (needs Docker)"
 run = "sh scripts/ui/run.sh"
 
 [tasks."test:integration:go"]
-description = "Go tests behind the integration build tag: the restore drill and the real open-source MCP clients (the clients need Docker); the unit tests run in `test`"
+description = "Go tests behind the integration build tag: the restore drill, the real open-source MCP clients and the conformance authorization suite (those two need Docker and test:conformance:install); the unit tests run in `test`"
 # Only the tagged tests (named TestIntegration*); the build tag adds no other tests, so ./... would rerun the unit suite.
 run = "go test -race -count=1 -v -timeout 11m -tags=integration -run ^TestIntegration ./..."
 
 [tasks."test:integration"]
 description = "Integration tests, including the release smoke test and MCP conformance (needs Docker)"
-depends = ["release:smoke", "test:conformance", "test:ui", "test:integration:go"]
+depends = ["release:smoke", "test:conformance", "test:ui"]
+# After the dependencies, not beside them: test:conformance builds the pinned CLI in
+# build/conformance/src and leaves it there for the Go lane's authorization suite.
+run = "mise run test:integration:go"
 
 [tasks.check]
 description = "Everything CI runs without Docker, except the integration-tagged Go tests (`test:integration:go`)"
