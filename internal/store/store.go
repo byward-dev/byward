@@ -77,6 +77,11 @@ type Grants interface {
 	// ClientID or Subject, or an ExpiresAt not after CreatedAt, is ErrInvalid; a retained subject
 	// cut-off with Before after g.CreatedAt is ErrRevoked. The cut-off check and the insert are one
 	// atomic step, so a grant never outlives a RevokeSubject that should have covered it.
+	//
+	// SQL adapters must serialize CreateGrant and RevokeSubject per subject: under READ COMMITTED
+	// each can miss the other's uncommitted row and both commit (write skew). PostgreSQL: take
+	// pg_advisory_xact_lock(hashtext(subject)) first in both, or run them SERIALIZABLE and retry
+	// on 40001. SQLite: one writer, and both start with BEGIN IMMEDIATE.
 	CreateGrant(ctx context.Context, g Grant) (Grant, error)
 	// Grant returns the grant, or ErrNotFound. It does not check ExpiresAt.
 	Grant(ctx context.Context, id string) (Grant, error)

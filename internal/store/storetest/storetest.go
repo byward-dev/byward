@@ -420,6 +420,8 @@ func cutOffRefusesLaterCreatedEarlierGrants(t *testing.T, s store.Store) {
 
 // Whatever the interleaving, a grant created before the cut-off never survives it: either it is
 // stored first and RevokeSubject deletes it, or CreateGrant sees the cut-off and refuses.
+// Passing is not proof for SQL adapters: the write-skew window is narrow, so an adapter's own
+// tests must also cover its per-subject lock or serialization retry (see Grants.CreateGrant).
 func revokeSubjectAndCreateGrantNeverLeaveACoveredGrant(t *testing.T, s store.Store) {
 	const rounds = 50
 	before := t0.Add(time.Hour)
