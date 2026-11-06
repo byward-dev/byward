@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,7 +30,25 @@ func (acceptGood) Validate(_ context.Context, tok string) (resource.Identity, er
 type env struct {
 	srv  *httptest.Server
 	up   *fakeupstream.Server
-	logs *bytes.Buffer
+	logs *syncBuffer
+}
+
+// syncBuffer is written by the server's goroutines and read by the test.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // start runs the proxy on a test listener; the public URL's host is set as the request Host.
@@ -45,7 +64,7 @@ func start(t *testing.T, extraEnv ...string) env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	logs := &bytes.Buffer{}
+	logs := &syncBuffer{}
 	srv := httptest.NewServer(Handler(cfg, slog.New(slog.NewJSONHandler(logs, nil)), acceptGood{}))
 	t.Cleanup(srv.Close)
 	return env{srv, up, logs}
