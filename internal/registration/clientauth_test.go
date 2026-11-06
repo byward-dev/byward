@@ -122,6 +122,19 @@ func TestAuthenticate(t *testing.T) {
 		"jwt exp at 5 min": {id: "jwt", form: func() url.Values {
 			return e.assertion(t, e.cert, "PS256", map[string]any{"exp": now.Add(5 * time.Minute).Unix()})
 		}},
+		"jwt exp at 5 min + leeway": {id: "jwt", form: func() url.Values {
+			return e.assertion(t, e.cert, "PS256", map[string]any{"exp": now.Add(MaxAssertionLifetime + AssertionLeeway).Unix()})
+		}},
+		"jwt exp past 5 min + leeway": {id: "jwt", form: func() url.Values {
+			return e.assertion(t, e.cert, "PS256", map[string]any{"exp": now.Add(MaxAssertionLifetime + AssertionLeeway + time.Second).Unix()})
+		}, reason: "more than 5 minutes"},
+		"jwt iat within leeway": {id: "jwt", form: func() url.Values {
+			return e.assertion(t, e.cert, "PS256", map[string]any{"iat": now.Add(AssertionLeeway).Unix()})
+		}},
+		"jwt nbf within leeway": {id: "jwt", form: func() url.Values {
+			return e.assertion(t, e.cert, "PS256", map[string]any{"nbf": now.Add(AssertionLeeway).Unix()})
+		}},
+		"basic not form-encoded": {id: "basic", form: url.Values{}.Clone, header: rawBasic("basic", goodSecret), reason: "Basic client ID"},
 		"jwt iat in the future": {id: "jwt", form: func() url.Values {
 			return e.assertion(t, e.cert, "PS256", map[string]any{"iat": now.Add(time.Minute).Unix()})
 		}, reason: "iat is in the future"},
