@@ -5,6 +5,8 @@
 set -eu
 ref_port=39301
 proxy_port=39302
+ref_url="http://127.0.0.1:$ref_port/mcp"
+proxy_url="http://127.0.0.1:$proxy_port/mcp"
 cd /work
 pids=
 # shellcheck disable=SC2329 # invoked by the EXIT trap
@@ -15,9 +17,9 @@ trap stop_all EXIT
   > reference.log 2>&1 &
 pids="$pids $!"
 MCP_AUTHPROXY_INSECURE_NO_AUTH=true \
-MCP_AUTHPROXY_PUBLIC_URL="http://127.0.0.1:$proxy_port/mcp" \
+MCP_AUTHPROXY_PUBLIC_URL="$proxy_url" \
 MCP_AUTHPROXY_LISTEN="127.0.0.1:$proxy_port" \
-MCP_AUTHPROXY_UPSTREAM_URL="http://127.0.0.1:$ref_port/mcp" \
+MCP_AUTHPROXY_UPSTREAM_URL="$ref_url" \
   ./mcp-authproxy > proxy.log 2>&1 &
 pids="$pids $!"
 
@@ -39,10 +41,10 @@ wait_up "$proxy_port" "mcp-authproxy (see proxy.log)"
 rm -rf results && mkdir results
 for rev in "$@"; do
   set +e
-  node src/dist/index.js server --requirements "$rev" --url "http://127.0.0.1:$ref_port/mcp" \
+  node src/dist/index.js server --requirements "$rev" --url "$ref_url" \
     -o "results/direct/$rev" --expected-failures "baseline-$rev.yml" > "results/direct-$rev.txt" 2>&1
   echo $? > "results/direct-$rev.exit"
-  node src/dist/index.js server --requirements "$rev" --url "http://127.0.0.1:$proxy_port/mcp" \
+  node src/dist/index.js server --requirements "$rev" --url "$proxy_url" \
     -o "results/proxy/$rev" > "results/proxy-$rev.txt" 2>&1
   echo $? > "results/proxy-$rev.exit"
   set -e

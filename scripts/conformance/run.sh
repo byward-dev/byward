@@ -56,26 +56,32 @@ in_node() { # $1 container name, $2 network, rest: command
 # Install needs the registry; install scripts are off (esbuild ships per-platform binaries as optional deps).
 in_node "$name-install" bridge sh -c '
   set -eu
-  cd /work/src && npm ci --ignore-scripts --no-audit --no-fund >/dev/null && npm run build >/dev/null
-  cd examples/servers/typescript && npm ci --ignore-scripts --no-audit --no-fund >/dev/null'
+  cd /work/src && npm ci --ignore-scripts --no-audit --no-fund > /work/install.log 2>&1 && npm run build >> /work/install.log 2>&1
+  cd examples/servers/typescript && npm ci --ignore-scripts --no-audit --no-fund >> /work/install.log 2>&1' \
+  || fail "installing the conformance CLI or reference server failed (see $work/install.log)"
 # The run needs only loopback.
 # shellcheck disable=SC2086 # revisions is a word list
 in_node "$name-run" none sh /work/inside.sh $revisions
 
 # 4. Compare direct with proxy, check by check. Timestamps, logs and messages (which name ports) are dropped.
-normalise() {
-  for f in "$1"/server-*/checks.json; do
-    [ -f "$f" ] || continue
-    scenario=$(basename "$(dirname "$f")" | sed -E 's/^server-//; s/-[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9-]+Z$//')
-    jq -r --arg s "$scenario" '.[] | [$s, .id, .status] | @tsv' "$f"
-  done | sort
+# A checks.json jq cannot read fails the lane, so a scenario cannot drop out of both runs unnoticed.
+normalise() { # $1 results dir, $2 output TSV
+  : > "$2.unsorted"
+  for d in "$1"/server-*; do
+    [ -d "$d" ] || continue
+    scenario=$(basename "$d" | sed -E 's/^server-//; s/-[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9-]+Z$//')
+    jq -r --arg s "$scenario" '.[] | [$s, .id, .status] | @tsv' "$d/checks.json" >> "$2.unsorted" \
+      || fail "cannot read $d/checks.json"
+  done
+  sort "$2.unsorted" > "$2"
+  rm -f "$2.unsorted"
 }
 status=0
 for rev in $revisions; do
   [ "$(cat "$out/direct-$rev.exit")" = 0 ] \
     || { echo "conformance: FAIL: $rev direct run does not match baseline-$rev.yml (see $out/direct-$rev.txt)" >&2; status=1; }
-  normalise "$out/direct/$rev" > "$out/direct-$rev.tsv"
-  normalise "$out/proxy/$rev" > "$out/proxy-$rev.tsv"
+  normalise "$out/direct/$rev" "$out/direct-$rev.tsv"
+  normalise "$out/proxy/$rev" "$out/proxy-$rev.tsv"
   [ -s "$out/direct-$rev.tsv" ] || { echo "conformance: FAIL: $rev produced no checks" >&2; status=1; }
   if ! diff "$out/direct-$rev.tsv" "$out/proxy-$rev.tsv" > "$out/diff-$rev.txt"; then
     echo "conformance: FAIL: $rev results through the proxy differ from direct (< direct, > proxy):" >&2
@@ -85,7 +91,7 @@ for rev in $revisions; do
 done
 
 # 5. Pass/fail matrix for the PR and the CI job summary.
-counts() { printf '%s / %s' "$(grep -c '	FAILURE$' "$1" || true)" "$(grep -c '	WARNING$' "$1" || true)"; }
+counts() { awk -F'\t' '$3 == "FAILURE" { f++ } $3 == "WARNING" { w++ } END { printf "%d / %d", f, w }' "$1"; }
 {
   echo "| Revision | Scenarios | Checks | FAILURE / WARNING (direct) | FAILURE / WARNING (proxy) | Proxy = direct |"
   echo "|---|---|---|---|---|---|"

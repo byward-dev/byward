@@ -33,7 +33,7 @@ run = "golangci-lint run"
 
 [tasks."lint:workflows"]
 description = "Lint GitHub workflows (actionlint with shellcheck, zizmor offline) and shell scripts"
-run = ["actionlint", "zizmor --offline --no-progress .github/workflows", "shellcheck scripts/*.sh"]
+run = ["actionlint", "zizmor --offline --no-progress .github/workflows", "shellcheck scripts/*.sh scripts/conformance/*.sh"]
 
 [tasks.test]
 description = "Unit tests (with the race detector)"
