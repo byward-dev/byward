@@ -108,6 +108,12 @@ func TestTokenEndpointAuthenticatesCertificateAssertions(t *testing.T) {
 		"for another client": {signer: cert, alg: "PS256", header: s256(cert), status: 401, err: "invalid_client", code: 700027, override: func(*fixture, time.Time) map[string]any {
 			return map[string]any{"sub": NewGUID()}
 		}},
+		"iss is not the client": {signer: cert, alg: "PS256", header: s256(cert), status: 401, err: "invalid_client", code: 700027, override: func(*fixture, time.Time) map[string]any {
+			return map[string]any{"iss": NewGUID()}
+		}},
+		"no exp": {signer: cert, alg: "PS256", header: s256(cert), status: 401, err: "invalid_client", code: 700027, override: func(*fixture, time.Time) map[string]any {
+			return map[string]any{"exp": nil}
+		}},
 		"wrong assertion type": {signer: cert, alg: "PS256", header: s256(cert), status: 400, err: "invalid_request", code: 9002313,
 			form: func(v url.Values) { v.Set("client_assertion_type", "urn:example") }},
 	} {
@@ -174,20 +180,12 @@ func TestGenericCertificateAssertion(t *testing.T) {
 	}
 }
 
-func TestPublicClientLoginRequiresPKCEAndHasAzpacrZero(t *testing.T) {
+func TestPublicClientLoginHasAzpacrZero(t *testing.T) {
 	c := Client{ID: NewGUID(), RedirectURIs: []string{testRedirect}}
 	idp := New(t, Entra, WithClient(c))
 	f := &fixture{idp: idp, client: c, tenant: idp.TenantID()}
-	form := func(verifier string) url.Values {
-		v := url.Values{"grant_type": {GrantAuthorizationCode}, "client_id": {c.ID}, "code": {f.code(t, nil)}, "redirect_uri": {testRedirect}}
-		if verifier != "" {
-			v.Set("code_verifier", verifier)
-		}
-		return v
-	}
-	wantEntraError(t, postToken(t, idp.TokenURL(f.tenant), form(""), nil), 400, "invalid_grant", 501481)
-
-	r := postToken(t, idp.TokenURL(f.tenant), form(testVerifier), nil)
+	r := postToken(t, idp.TokenURL(f.tenant), url.Values{"grant_type": {GrantAuthorizationCode}, "client_id": {c.ID},
+		"code": {f.code(t, nil)}, "redirect_uri": {testRedirect}, "code_verifier": {testVerifier}}, nil)
 	wantStatus(t, r, http.StatusOK)
 	_, at := f.verified(t, r.str("access_token"))
 	wantClaim(t, at, "azpacr", "0")

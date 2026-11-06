@@ -262,12 +262,15 @@ func TestErrorPageCorrelatesWithoutEchoingSecrets(t *testing.T) {
 
 func TestGenericErrorsCarryNoEntraHeaders(t *testing.T) {
 	f := newFixture(t, Generic, FailAuthorize(&InvalidRequest))
-	for name, query := range map[string]string{
-		"redirect error": "?client_id=" + f.client.ID + "&redirect_uri=" + url.QueryEscape(testRedirect) + "&response_type=code&scope=openid&state=s",
-		"error page":     "?client_id=unknown",
+	for name, tc := range map[string]struct {
+		query  string
+		status int
+	}{
+		"redirect error": {"?client_id=" + f.client.ID + "&redirect_uri=" + url.QueryEscape(testRedirect) + "&response_type=code&scope=openid&state=s", http.StatusFound},
+		"error page":     {"?client_id=unknown", http.StatusBadRequest},
 	} {
 		t.Run(name, func(t *testing.T) {
-			req, err := http.NewRequest(http.MethodGet, f.idp.AuthorizeURL("")+query, nil)
+			req, err := http.NewRequest(http.MethodGet, f.idp.AuthorizeURL("")+tc.query, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -277,6 +280,9 @@ func TestGenericErrorsCarryNoEntraHeaders(t *testing.T) {
 				t.Fatal(err)
 			}
 			_ = resp.Body.Close()
+			if resp.StatusCode != tc.status {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tc.status)
+			}
 			if resp.Header.Get("x-ms-request-id") != "" || resp.Header.Get("client-request-id") != "" {
 				t.Fatalf("generic response has Entra headers: %v", resp.Header)
 			}
