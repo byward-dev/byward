@@ -237,8 +237,8 @@ process holding it. Pick another port (remove the server with `claude mcp remove
 again with the new `--callback-port`); the registered `redirect_uris` need no change because the
 proxy ignores the port on loopback.
 
-Claude Code asks for `offline_access`, so it receives a refresh token: the consent page says "up to
-30 days", and Claude Code renews its access token every hour without sending you to the browser.
+Claude Code asks for `offline_access`, so it receives a refresh token and the consent page says "up
+to 30 days".
 
 Source: Claude Code MCP documentation, "Use pre-configured OAuth credentials" and "Use a fixed OAuth
 callback port" (<https://code.claude.com/docs/en/mcp>).
