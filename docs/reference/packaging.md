@@ -32,9 +32,10 @@ Needs Docker with buildx, and `mise install`.
 
 | Task | What it does |
 |---|---|
-| `mise run licenses` | Fails on a dependency licence outside Apache-2.0, BSD-2/3-Clause, MIT and ISC; copies third-party licence texts into `build/licenses` |
+| `mise run licenses:check` | Fails on a dependency licence outside Apache-2.0, BSD-2/3-Clause, MIT and ISC, for both linux and darwin build constraints (part of `mise run check`) |
+| `mise run licenses` | Copies third-party licence texts into `build/licenses` for the archives and the image |
 | `mise run release:snapshot` | Builds everything into `dist/` exactly as a release would. It does not sign or publish. Images are loaded locally as `ghcr.io/corker/mcp-authproxy:snapshot-amd64` and `snapshot-arm64` |
-| `mise run image:smoke` | Checks the snapshot image: uid, paths, licences, and that the `FROM node` example builds and runs the binary |
+| `mise run release:smoke` | Builds a snapshot, then checks `dist/` (every archive and its contents, one SBOM per archive, `checksums.txt`) and the image (uid, paths, labels, licences; the `FROM node` example builds, runs the binary and can write the state directory). Part of `mise run test:integration` |
 | `mise run release:reproducible` | Builds twice (the second time in another directory with an empty Go cache) and compares the sha256 of the binaries and archives |
 
 Builds use `-trimpath -buildvcs=true` and the commit time for file timestamps, so a rebuild with the same

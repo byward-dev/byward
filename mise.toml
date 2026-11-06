@@ -2,10 +2,11 @@
 go = "1.27"
 golangci-lint = "2.15.0"
 "go:golang.org/x/tools/cmd/goimports" = "0.52.0"
-# Release tools (ADR-0019); used by `release:*` and `licenses`, not by `check`.
+# Release tools (ADR-0019); used by `release*` tasks. go-licenses is also used by `check`.
 goreleaser = "2.19.0"
 syft = "1.55.0"
 cosign = "3.1.4"
+jq = "1.8.2"
 "go:github.com/google/go-licenses/v2" = "2.0.1"
 # Workflow and shell linters (`lint:workflows`, part of `check`); offline, no GitHub token.
 actionlint = "1.7.12"
@@ -38,25 +39,22 @@ description = "Unit tests (with the race detector)"
 run = "go test -race ./..."
 
 [tasks."test:integration"]
-description = "Integration tests (needs Docker)"
+description = "Integration tests, including the release smoke test (needs Docker)"
+depends = ["release:smoke"]
 run = "go test -tags=integration ./..."
 
 [tasks.check]
-description = "Everything CI runs"
-depends = ["fmt:check", "vet", "lint", "lint:workflows", "test"]
+description = "Everything CI runs without Docker"
+depends = ["fmt:check", "vet", "lint", "lint:workflows", "licenses:check", "test"]
+
+[tasks."licenses:check"]
+description = "Fail on a dependency licence outside the allowlist (linux and darwin build constraints)"
+run = "sh scripts/licenses.sh check"
 
 [tasks.licenses]
-description = "Fail on a disallowed dependency licence; collect third-party licence texts into build/licenses"
-run = '''
-set -eu
-go-licenses check ./... --include_tests --ignore github.com/corker/mcp-authproxy \
-  --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT,ISC
-rm -rf build/licenses
-go-licenses save ./... --ignore github.com/corker/mcp-authproxy --save_path=build/licenses
-# The Go standard library and runtime are compiled into the binary.
-mkdir -p build/licenses/go.dev
-cp "$(go env GOROOT)/LICENSE" build/licenses/go.dev/LICENSE
-'''
+description = "Collect third-party licence texts into build/licenses for archives and the image"
+depends = ["licenses:check"]
+run = "sh scripts/licenses.sh save"
 
 [tasks."release:snapshot"]
 description = "Build every release artifact locally (archives, checksums, SBOMs, images); signs and publishes nothing (needs Docker)"
@@ -73,6 +71,7 @@ description = "Publish a release: CI only (release.yml on a v* tag), needs GITHU
 depends = ["licenses"]
 run = "goreleaser release --clean"
 
-[tasks."image:smoke"]
-description = "Smoke-test the snapshot image: uid 65532, binary path, licences, and the FROM node + COPY --from example (needs release:snapshot)"
-run = "sh scripts/image-smoke.sh"
+[tasks."release:smoke"]
+description = "Build a snapshot, then check dist/ (archives, SBOMs, checksums) and the image contract incl. the FROM node example"
+depends = ["release:snapshot"]
+run = ["sh scripts/dist-check.sh", "sh scripts/image-smoke.sh"]

@@ -8,10 +8,13 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 build
 sums . > "$tmp/first"
-[ -s "$tmp/first" ] || { echo "reproducible: no binaries or archives found in dist/" >&2; exit 1; }
+[ -s "$tmp/first" ] || { echo "reproducible: FAIL: no binaries or archives found in dist/" >&2; exit 1; }
 mkdir "$tmp/src"
 tar --exclude=./dist -cf - . | tar -C "$tmp/src" -xf -
 (cd "$tmp/src" && GOCACHE="$tmp/gocache" build)
 sums "$tmp/src" > "$tmp/second"
-diff "$tmp/first" "$tmp/second"
+diff "$tmp/first" "$tmp/second" || {
+  echo "reproducible: FAIL: a rebuild from a copy with an empty Go cache gave different bytes (< first, > rebuild)" >&2
+  exit 1
+}
 echo "reproducible: $(wc -l < "$tmp/first" | tr -d ' ') files identical"

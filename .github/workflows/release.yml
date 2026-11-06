@@ -28,7 +28,7 @@ jobs:
       - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
           cache: false # never restore a cache into a release build
-          install_args: go goreleaser syft cosign go:github.com/google/go-licenses/v2
+          install_args: go goreleaser syft cosign jq go:github.com/google/go-licenses/v2
       # Multi-platform manifests with attestations need the docker-container driver.
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
