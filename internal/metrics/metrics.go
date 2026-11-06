@@ -30,6 +30,7 @@ type Metrics struct {
 	rateLimited *prometheus.CounterVec
 	cimdFetches *prometheus.CounterVec
 	dcr         *prometheus.CounterVec
+	consent     *prometheus.CounterVec
 }
 
 // New registers every metric; the build-info gauge is labelled from the binary's build info.
@@ -61,11 +62,14 @@ func New() *Metrics {
 		dcr: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_dcr_registrations_total",
 			Help: "Dynamic client registrations at /register by outcome (registered, invalid_redirect_uri, invalid_client_metadata, full, unavailable, rate_limited)."},
 			[]string{"outcome"}),
+		consent: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_consent_total",
+			Help: "Consent decisions by client trust level (verified, domain, not-verified) and outcome (shown, granted, denied, remembered)."},
+			[]string{"trust", "outcome"}),
 	}
 	build := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "byward_build_info",
 		Help: "Always 1; labelled with the proxy and Go versions."}, []string{"version", "go_version"})
 	build.WithLabelValues(version, goVersion).Set(1)
-	m.reg.MustRegister(m.requests, m.idp, m.inFlight, m.busy, m.auditEvents, m.rateLimited, m.cimdFetches, m.dcr, build,
+	m.reg.MustRegister(m.requests, m.idp, m.inFlight, m.busy, m.auditEvents, m.rateLimited, m.cimdFetches, m.dcr, m.consent, build,
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	return m
 }
@@ -145,6 +149,15 @@ func (m *Metrics) CIMDFetch(outcome string) {
 		return
 	}
 	m.cimdFetches.WithLabelValues(outcome).Inc()
+}
+
+// Consent counts a consent decision for a client of a trust level (ADR-0010 §12); it has the
+// signature of broker.Config.ObserveConsent.
+func (m *Metrics) Consent(trust, outcome string) {
+	if m == nil {
+		return
+	}
+	m.consent.WithLabelValues(trust, outcome).Inc()
 }
 
 // DCRRegistration counts a /register outcome; it has the signature of broker.Config.ObserveRegistration.

@@ -56,6 +56,7 @@ type Store interface {
 	RefreshTokens
 	Revocations
 	Clients
+	Consents
 	Collector
 }
 
@@ -63,8 +64,8 @@ type Store interface {
 type Collector interface {
 	// Collect deletes codes (pending or consumed) with ExpiresAt <= now, refresh tokens with
 	// IdleExpiresAt <= now, grants with ExpiresAt <= now together with their codes and refresh
-	// tokens, revocations with At <= now - RevocationRetention, and clients with ExpiresAt <= now
-	// or never used and CreatedAt <= now - UnusedClientLifetime.
+	// tokens, revocations with At <= now - RevocationRetention, clients with ExpiresAt <= now or
+	// never used and CreatedAt <= now - UnusedClientLifetime, and consents with ExpiresAt <= now.
 	Collect(ctx context.Context, now time.Time) error
 }
 
@@ -232,4 +233,37 @@ type Clients interface {
 	// expires if that is at least minExtension later than the stored one, so a busy client does not
 	// write on every use. An unknown client is ErrNotFound. It never shortens ExpiresAt.
 	UseClient(ctx context.Context, id string, now, expires time.Time, minExtension time.Duration) error
+}
+
+// ConsentKey says what a remembered consent covers (ADR-0010 §3): one user of one IdP, one client,
+// one redirect key and one resource. The redirect key is the redirect URI as the caller compares
+// it; for loopback the caller drops the port (ADR-0009 §2).
+type ConsentKey struct {
+	Issuer   string
+	Subject  string
+	ClientID string
+	Redirect string
+	Resource string
+}
+
+// Consent is a user's remembered Allow: the scopes approved, and until when it counts.
+type Consent struct {
+	Key        ConsentKey
+	Scopes     []string
+	ApprovedAt time.Time
+	ExpiresAt  time.Time
+}
+
+// Consents is the remembered-consent registry (ADR-0010 §2-3). Revoking forgets, in the same
+// transaction that deletes the grants: RevokeGrant and a refresh-token reuse forget the consents of
+// the grant's user and client, RevokeSubject the subject's consents approved before its cut-off,
+// RevokeAll every consent approved before its cut-off. A grant that merely expires forgets nothing.
+// A store restored from an older copy forgets every consent: revocations made after the copy are
+// lost with it (ADR-0007 §9).
+type Consents interface {
+	// RememberConsent stores c, replacing a consent with the same key (scopes and lifetime too).
+	// An empty key field, no scopes, or ExpiresAt not after ApprovedAt is ErrInvalid.
+	RememberConsent(ctx context.Context, c Consent) error
+	// Consent returns the consent for k, or ErrNotFound. It does not check ExpiresAt.
+	Consent(ctx context.Context, k ConsentKey) (Consent, error)
 }

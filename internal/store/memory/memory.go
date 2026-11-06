@@ -19,12 +19,13 @@ const epoch = 1
 // Store implements store.Store with one mutex; every method is one critical section, which makes
 // ConsumeCode's conditional update atomic.
 type Store struct {
-	mu      sync.Mutex
-	grants  map[string]store.Grant
-	codes   map[string]*code // by grant ID: a grant has at most one code
-	tokens  map[[sha256.Size]byte]*token
-	revs    []store.Revocation
-	clients map[string]store.Client
+	mu       sync.Mutex
+	grants   map[string]store.Grant
+	codes    map[string]*code // by grant ID: a grant has at most one code
+	tokens   map[[sha256.Size]byte]*token
+	revs     []store.Revocation
+	clients  map[string]store.Client
+	consents map[store.ConsentKey]store.Consent
 }
 
 // token is a stored refresh token with its successor, set when it is rotated.
@@ -43,10 +44,11 @@ var _ store.Store = (*Store)(nil)
 // New returns an empty store.
 func New() *Store {
 	return &Store{
-		grants:  map[string]store.Grant{},
-		codes:   map[string]*code{},
-		tokens:  map[[sha256.Size]byte]*token{},
-		clients: map[string]store.Client{},
+		grants:   map[string]store.Grant{},
+		codes:    map[string]*code{},
+		tokens:   map[[sha256.Size]byte]*token{},
+		clients:  map[string]store.Client{},
+		consents: map[store.ConsentKey]store.Consent{},
 	}
 }
 
@@ -86,10 +88,12 @@ func (s *Store) Grant(_ context.Context, id string) (store.Grant, error) {
 func (s *Store) RevokeGrant(_ context.Context, id string, at time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.grants[id]; !ok {
+	g, ok := s.grants[id]
+	if !ok {
 		return store.ErrNotFound
 	}
 	s.deleteGrantLocked(id)
+	s.forgetGrantLocked(g)
 	s.revs = append(s.revs, store.Revocation{GrantID: id, Before: at, At: at})
 	return nil
 }
@@ -138,6 +142,11 @@ func (s *Store) RevokeSubject(_ context.Context, subject string, before, at time
 			s.deleteGrantLocked(id)
 		}
 	}
+	for k, c := range s.consents {
+		if k.Subject == subject && c.ApprovedAt.Before(before) {
+			delete(s.consents, k)
+		}
+	}
 	s.revs = append(s.revs, store.Revocation{Subject: subject, Before: before, At: at})
 	return nil
 }
@@ -149,6 +158,11 @@ func (s *Store) RevokeAll(_ context.Context, before, at time.Time) error {
 	for id, g := range s.grants {
 		if g.CreatedAt.Before(before) {
 			s.deleteGrantLocked(id)
+		}
+	}
+	for k, c := range s.consents {
+		if c.ApprovedAt.Before(before) {
+			delete(s.consents, k)
 		}
 	}
 	s.revs = append(s.revs, store.Revocation{All: true, Before: before, At: at})
@@ -233,6 +247,7 @@ func (s *Store) RotateRefreshToken(_ context.Context, r store.RotateRequest) err
 		cur, ok := s.tokens[old.successor]
 		if !ok || !cur.t.RotatedAt.IsZero() || r.Now.Sub(old.t.RotatedAt) >= r.Grace {
 			s.deleteGrantLocked(g.ID)
+			s.forgetGrantLocked(g)
 			s.revs = append(s.revs, store.Revocation{GrantID: g.ID, Before: r.Now, At: r.Now})
 			return store.ErrReused
 		}
@@ -280,6 +295,11 @@ func (s *Store) Collect(_ context.Context, now time.Time) error {
 	}
 	cutoff := now.Add(-store.RevocationRetention)
 	s.revs = slices.DeleteFunc(s.revs, func(r store.Revocation) bool { return !r.At.After(cutoff) })
+	for k, c := range s.consents {
+		if !now.Before(c.ExpiresAt) {
+			delete(s.consents, k)
+		}
+	}
 	unused := now.Add(-store.UnusedClientLifetime)
 	for id, c := range s.clients {
 		if !now.Before(c.ExpiresAt) || (c.UsedAt.IsZero() && !c.CreatedAt.After(unused)) {
@@ -343,6 +363,40 @@ func (s *Store) UseClient(_ context.Context, id string, now, expires time.Time, 
 	}
 	s.clients[id] = c
 	return nil
+}
+
+// RememberConsent implements store.Consents.
+func (s *Store) RememberConsent(_ context.Context, c store.Consent) error {
+	k := c.Key
+	if k.Issuer == "" || k.Subject == "" || k.ClientID == "" || k.Redirect == "" || k.Resource == "" || len(c.Scopes) == 0 || !c.ExpiresAt.After(c.ApprovedAt) {
+		return store.ErrInvalid
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c.Scopes = slices.Clone(c.Scopes)
+	s.consents[k] = c
+	return nil
+}
+
+// Consent implements store.Consents.
+func (s *Store) Consent(_ context.Context, k store.ConsentKey) (store.Consent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.consents[k]
+	if !ok {
+		return store.Consent{}, store.ErrNotFound
+	}
+	c.Scopes = slices.Clone(c.Scopes)
+	return c, nil
+}
+
+// forgetGrantLocked forgets the consents of a revoked grant's user and client. Callers hold s.mu.
+func (s *Store) forgetGrantLocked(g store.Grant) {
+	for k := range s.consents {
+		if k.Issuer == g.Issuer && k.Subject == g.Subject && k.ClientID == g.ClientID {
+			delete(s.consents, k)
+		}
+	}
 }
 
 // deleteGrantLocked removes a grant with its code and refresh tokens. Callers hold s.mu.

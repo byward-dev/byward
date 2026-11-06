@@ -77,6 +77,22 @@ var migrations = []string{
 		expires_at INTEGER NOT NULL
 	) STRICT;
 	CREATE INDEX clients_expires ON clients (expires_at);`,
+
+	// v5: remembered consent (ADR-0010 §2-3). One row per user, client, redirect key and resource;
+	// scopes is a JSON array like grants.scopes.
+	`CREATE TABLE consents (
+		issuer      TEXT NOT NULL,
+		subject     TEXT NOT NULL,
+		client_id   TEXT NOT NULL,
+		redirect    TEXT NOT NULL,
+		resource    TEXT NOT NULL,
+		scopes      TEXT NOT NULL,
+		approved_at INTEGER NOT NULL,
+		expires_at  INTEGER NOT NULL,
+		PRIMARY KEY (issuer, subject, client_id, redirect, resource)
+	) STRICT;
+	CREATE INDEX consents_subject ON consents (subject, approved_at);
+	CREATE INDEX consents_expires ON consents (expires_at);`,
 }
 
 // schemaVersion is the schema this binary writes.

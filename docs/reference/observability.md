@@ -64,6 +64,7 @@ For SIEMs that use [OCSF](https://schema.ocsf.io) 1.9.0. Fields map as follows: 
 | `consent_shown` | the consent page was shown, before the IdP sign-in (the user is not known yet) | success | yes | 3003 Authorize Session / 99 Other (*approximate*) |
 | `consent_granted` | the user allowed the client on the consent page | success | yes | 3003 Authorize Session / 99 Other (*approximate*) |
 | `consent_denied` | the user denied the client on the consent page (`reason` fixed) | failure | yes | 3003 Authorize Session / 99 Other (*approximate*) |
+| `consent_remembered` | a sign-in skipped the consent page on a remembered consent (ADR-0010 §3): success after the callback confirmed it for the user who signed in (`user_key`, `grant_id`, `client_trust`); failure when it did not hold and the page was shown instead (`reason` = `user_mismatch`: someone else signed in than the hint cookie named; `not_remembered`: the consent was forgotten, expired or the client is no longer trusted) | success, failure | no | 3003 Authorize Session / 99 Other (*approximate*) |
 | `rate_limited` | an OAuth endpoint refused a request over the client address's budget (`reason` = the endpoint; [rate limits](rate-limits.md)) | failure | yes | 4002 HTTP Activity; `disposition_id` 2 Blocked |
 | `store_restored` | at startup, the store was found restored from an older copy: a new `epoch` began and refresh tokens issued before it are refused, so those users sign in again (ADR-0007 §9) | success | no | 6002 Application Lifecycle / 99 Other (*approximate*) |
 | `session_rejected` | a signed-in user presented an `Mcp-Session-Id` that is not theirs: sealed for another user or upstream, not issued by this proxy, tampered with, or expired (`reason` fixed); the client gets 404 and starts a new session | failure | no | 3003 Authorize Session / 99 Other (*approximate*) |
@@ -89,6 +90,7 @@ Prometheus text format at `/metrics` on the internal listener. Histogram buckets
 | `byward_rate_limited_total` | counter | `endpoint`: OAuth requests refused with 429 (or a `temporarily_unavailable` redirect) over a client address's budget |
 | `byward_cimd_fetches_total` | counter | `outcome`: Client ID Metadata Document fetches: `ok`, `invalid`, `refused` (non-public address, a 4xx other than 408 and 429, redirect, too large), `unavailable` (network, timeout, 5xx, 408, 429), `rate_limited`, `busy` |
 | `byward_dcr_registrations_total` | counter | `outcome`: `/register` answers: `registered`, `invalid_redirect_uri`, `invalid_client_metadata`, `full` (the cap), `unavailable` (store failure), `rate_limited` |
+| `byward_consent_total` | counter | `trust` (`verified`, `domain`, `not-verified`), `outcome`: `shown` (the page), `granted`, `denied`, `remembered` (a sign-in that skipped the page, confirmed after the callback) |
 | `byward_build_info` | gauge | `version`, `go_version`; always 1 |
 
 Plus the standard `go_*` and `process_*` collectors. Deny-list sync age and store errors arrive

@@ -1,14 +1,15 @@
 # How to keep the proxy's state
 
-The broker keeps grants, authorization codes, refresh tokens, revocations and dynamic client
-registrations in an embedded SQLite database ([ADR-0007](../adr/0007-state-and-storage.md)). Sealing
-keys are never stored there; they come from the keys directory ([sealing-keys.md](sealing-keys.md)).
+The broker keeps grants, authorization codes, refresh tokens, revocations, dynamic client
+registrations and remembered consent in an embedded SQLite database
+([ADR-0007](../adr/0007-state-and-storage.md)). Sealing keys are never stored there; they come from
+the keys directory ([sealing-keys.md](sealing-keys.md)).
 
 Expired rows are deleted at startup and every 5 minutes while the proxy runs: codes, refresh tokens
 and grants past their expiry (a grant takes its codes and refresh tokens with it), and revocations
 older than 61 minutes, by when every access token they cover has expired (1 h lifetime, 30 s clock
 leeway). Client registrations go when they expire, or 24 h after registering if never used
-([DCR](dcr.md)). The database stays the size of the live state.
+([DCR](dcr.md)); a remembered consent goes 30 days after its Allow. The database stays the size of the live state.
 
 ## Settings
 
@@ -29,6 +30,7 @@ counter file was restored from an older copy. The proxy then:
 - starts a new store epoch;
 - refuses refresh tokens issued before the restore, so those users sign in again (their access
   tokens keep working until they expire, at most one hour);
+- forgets every remembered consent, so users answer the consent page again;
 - logs a warning with `"reason":"store_restore"` and the new epoch.
 
 Revocations recorded after the backup are lost with the restore: an access token revoked since then

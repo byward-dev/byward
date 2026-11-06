@@ -89,6 +89,9 @@ type login struct {
 	IdPState    string   `json:"is"`
 	Nonce       string   `json:"n"`
 	Verifier    string   `json:"v"`
+	// Hint is the user a remembered consent was assumed for, from the hint cookie; the callback
+	// checks it against the user who signed in (ADR-0010 §3). Empty when the user answered the page.
+	Hint *hint `json:"h,omitempty"`
 }
 
 func (b *Broker) cookieName(idpState string) string {
@@ -120,25 +123,10 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 		b.page(w, r, http.StatusTooManyRequests, tooManyTitle, tooManyHint(retry))
 		return
 	}
-	client, err := b.cfg.Clients.Client(ctx, q.Get("client_id"))
 	// Never a redirect: the redirect URI is not verified yet (draft-ietf-oauth-client-id-metadata-document-03 §6.1).
-	if err != nil {
-		b.clientLookupFailed(ctx, q.Get("client_id"), err)
-	}
-	switch {
-	case errors.Is(err, registration.ErrUnknownClient):
-		b.page(w, r, http.StatusBadRequest, "This app is not registered with the proxy.", "Ask your operator to register the app, or check its client ID.")
-		return
-	case errors.Is(err, registration.ErrUnavailable):
-		b.page(w, r, http.StatusServiceUnavailable, "The proxy could not load this app's details.", "Try again in a minute.")
-		return
-	case err != nil:
-		b.serverError(w, r, err)
-		return
-	}
 	redirect := q.Get("redirect_uri")
-	if err := client.RedirectAllowed(redirect); err != nil {
-		b.page(w, r, http.StatusBadRequest, "This app asked to return to an address the proxy does not allow.", err.Error())
+	client, ok := b.loadClient(w, r, q.Get("client_id"), redirect)
+	if !ok {
 		return
 	}
 	fail := func(code, desc string) { b.redirectError(w, r, redirect, q.Get("state"), code, desc) }
@@ -173,7 +161,37 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 		fail("invalid_request", "the request is too large")
 		return
 	}
+	if b.skipConsent(r, client, &l) {
+		b.startLogin(w, r, l, b.cfg.Now())
+		return
+	}
 	b.showConsent(w, r, client, l)
+}
+
+// loadClient resolves a client and checks its redirect URI, answering with an error page (never a
+// redirect) when either fails.
+func (b *Broker) loadClient(w http.ResponseWriter, r *http.Request, clientID, redirect string) (registration.Client, bool) {
+	ctx := r.Context()
+	client, err := b.cfg.Clients.Client(ctx, clientID)
+	if err != nil {
+		b.clientLookupFailed(ctx, clientID, err)
+	}
+	switch {
+	case errors.Is(err, registration.ErrUnknownClient):
+		b.page(w, r, http.StatusBadRequest, "This app is not registered with the proxy.", "Ask your operator to register the app, or check its client ID.")
+		return nil, false
+	case errors.Is(err, registration.ErrUnavailable):
+		b.page(w, r, http.StatusServiceUnavailable, "The proxy could not load this app's details.", "Try again in a minute.")
+		return nil, false
+	case err != nil:
+		b.serverError(w, r, err)
+		return nil, false
+	}
+	if err := client.RedirectAllowed(redirect); err != nil {
+		b.page(w, r, http.StatusBadRequest, "This app asked to return to an address the proxy does not allow.", err.Error())
+		return nil, false
+	}
+	return client, true
 }
 
 // startLogin sends the browser to the IdP for l, keeping l in the login cookie until the callback.
@@ -323,6 +341,16 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 		b.page(w, r, http.StatusForbidden, "You don't have access to this server.", "Ask your operator for access.")
 		return
 	}
+	// A login that skipped the page holds only if the registry agrees for the user who signed in.
+	var remembered registration.Client
+	if l.Hint != nil {
+		c, reason := b.confirmRemembered(ctx, l, id)
+		if reason != "" {
+			b.askAfterMismatch(w, r, l, id, reason)
+			return
+		}
+		remembered = c
+	}
 	now := b.cfg.Now()
 	tokJSON, _ := json.Marshal(toks) //nolint:gosec // G117: marshalled only to be sealed in the IdP-token box below
 
@@ -350,6 +378,7 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b.cfg.Audit.Record(r, audit.Event{Name: audit.Login, Outcome: audit.Success, ClientID: l.ClientID, UserKey: id.Subject, GrantID: g.ID, IdP: b.cfg.IdPName})
+	b.afterGrant(w, r, l, id, g.ID, remembered, now)
 	v := url.Values{"code": {code}, "iss": {b.cfg.Issuer}}
 	if l.State != "" {
 		v.Set("state", l.State)

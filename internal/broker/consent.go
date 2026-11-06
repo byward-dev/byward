@@ -5,7 +5,6 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -20,8 +19,16 @@ import (
 // to /consent, which checks the request came from that page in this browser, then either sends the
 // user to the IdP (Allow) or back to the client with access_denied (Deny).
 //
-// v0.1 asks every client every time. Remembering consent for static and verified clients
-// (ADR-0010 §2-3) needs a per-user registry in the store and comes later; asking is never weaker.
+// Static clients and trusted CIMD hosts are asked once and then remembered (remember.go); other
+// clients are asked every time.
+
+// Consent outcomes, for metrics with the client's trust level (ADR-0010 §12).
+const (
+	ConsentOutcomeShown      = "shown"
+	ConsentOutcomeGranted    = "granted"
+	ConsentOutcomeDenied     = "denied"
+	ConsentOutcomeRemembered = "remembered"
+)
 
 const (
 	// FlowLifetime is how long a consent page can be answered (ADR-0010 §5).
@@ -78,6 +85,7 @@ func (b *Broker) showConsent(w http.ResponseWriter, r *http.Request, client regi
 		HttpOnly: true, Secure: b.cfg.SecureCookies, SameSite: http.SameSiteLaxMode})
 	b.cfg.Audit.RecordUnauthenticated(r, audit.Event{Name: audit.ConsentShown, Outcome: audit.Success, ClientID: client.ID(),
 		ClientTrust: string(client.Trust())})
+	b.observeConsent(client.Trust(), ConsentOutcomeShown)
 	b.renderConsent(w, r, http.StatusOK, client, l, sealed, "")
 }
 
@@ -100,23 +108,8 @@ func (b *Broker) consent(w http.ResponseWriter, r *http.Request) {
 	}
 	l := f.Login
 	// The client and its redirect URI are checked again: the operator may have removed either.
-	client, err := b.cfg.Clients.Client(ctx, l.ClientID)
-	if err != nil {
-		b.clientLookupFailed(ctx, l.ClientID, err)
-	}
-	switch {
-	case errors.Is(err, registration.ErrUnknownClient):
-		b.page(w, r, http.StatusBadRequest, "This app is not registered with the proxy.", "Ask your operator to register the app, or check its client ID.")
-		return
-	case errors.Is(err, registration.ErrUnavailable):
-		b.page(w, r, http.StatusServiceUnavailable, "The proxy could not load this app's details.", "Try again in a minute.")
-		return
-	case err != nil:
-		b.serverError(w, r, err)
-		return
-	}
-	if err := client.RedirectAllowed(l.RedirectURI); err != nil {
-		b.page(w, r, http.StatusBadRequest, "This app asked to return to an address the proxy does not allow.", err.Error())
+	client, ok := b.loadClient(w, r, l.ClientID, l.RedirectURI)
+	if !ok {
 		return
 	}
 	now := b.cfg.Now()
@@ -143,6 +136,7 @@ func (b *Broker) consent(w http.ResponseWriter, r *http.Request) {
 		ev.Name, ev.Outcome, ev.Reason = audit.ConsentDenied, audit.Failure, "the user denied the request"
 		if first {
 			b.cfg.Audit.RecordUnauthenticated(r, ev)
+			b.observeConsent(client.Trust(), ConsentOutcomeDenied)
 		}
 		b.redirectError(w, r, l.RedirectURI, l.State, "access_denied", "the user denied the request")
 		return
@@ -150,6 +144,7 @@ func (b *Broker) consent(w http.ResponseWriter, r *http.Request) {
 	ev.Name, ev.Outcome = audit.ConsentGranted, audit.Success
 	if first {
 		b.cfg.Audit.RecordUnauthenticated(r, ev)
+		b.observeConsent(client.Trust(), ConsentOutcomeGranted)
 	}
 	// The IdP state is stored only now, after Allow (ADR-0010 §5).
 	b.startLogin(w, r, l, now)
@@ -200,4 +195,10 @@ func (b *Broker) fromConsentPage(r *http.Request) bool {
 	}
 	s := r.Header.Get("Sec-Fetch-Site")
 	return s == "" || s == "same-origin"
+}
+
+func (b *Broker) observeConsent(trust registration.TrustLevel, outcome string) {
+	if b.cfg.ObserveConsent != nil {
+		b.cfg.ObserveConsent(string(trust), outcome)
+	}
 }

@@ -330,6 +330,9 @@ func TestRestoredDatabaseStartsANewEpochOnce(t *testing.T) {
 	if err := s.PutRefreshToken(ctx, old); err != nil {
 		t.Fatal(err)
 	}
+	forgotten := store.Consent{Key: store.ConsentKey{Issuer: "https://idp.example/v2.0", Subject: "tid:a", ClientID: "c", Redirect: "http://127.0.0.1/cb",
+		Resource: "https://mcp.example.com/mcp"}, Scopes: []string{"mcp"}, ApprovedAt: t0, ExpiresAt: t0.Add(time.Hour)}
+	must(t, s.RememberConsent(ctx, forgotten))
 	must(t, s.Close())
 	backup := copyDB(t, dir) // the operator's backup
 
@@ -351,6 +354,9 @@ func TestRestoredDatabaseStartsANewEpochOnce(t *testing.T) {
 	}
 	if _, err := r.RefreshToken(ctx, old.Hash, t0); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("refresh token from the old epoch: %v, want ErrNotFound", err)
+	}
+	if _, err := r.Consent(ctx, forgotten.Key); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a remembered consent survived the restore: %v (a revoke-user after the backup would come undone)", err)
 	}
 	g, err := r.CreateGrant(ctx, grant("new", "tid:a"))
 	if err != nil || g.Epoch != 2 {
@@ -542,6 +548,13 @@ func TestFixturesMigrateToTheCurrentSchemaKeepingTheirData(t *testing.T) {
 					UsedAt: fixtureCreated.Add(time.Second), ExpiresAt: fixtureExpires}
 				if got, err := s.Client(ctx, want.ID); err != nil || !reflect.DeepEqual(got, want) {
 					t.Fatalf("client = %+v, %v\nwant %+v", got, err, want)
+				}
+			}
+			if v >= 5 {
+				want := store.Consent{Key: store.ConsentKey{Issuer: "https://idp.example/v2.0", Subject: "tid:fixture", ClientID: "fixture-client",
+					Redirect: "http://127.0.0.1/cb", Resource: "https://mcp.example.com/mcp"}, Scopes: []string{"mcp"}, ApprovedAt: fixtureCreated, ExpiresAt: fixtureExpires}
+				if got, err := s.Consent(ctx, want.Key); err != nil || !reflect.DeepEqual(got, want) {
+					t.Fatalf("consent = %+v, %v\nwant %+v", got, err, want)
 				}
 			}
 		})

@@ -45,6 +45,8 @@ const (
 	unverifiedID  = "unverified-client"
 	hostileName   = "Free \u202eTools\x1b[0m Helper"
 	webCB         = "https://app.example.org/oauth/callback"
+	loopbackID    = "loopback-client" // registered without a port, so any loopback port matches (ADR-0009 §2)
+	loopbackCB    = "http://127.0.0.1/callback"
 )
 
 var t0 = time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
@@ -58,6 +60,7 @@ type memStore struct {
 	// revokeDown fails only RevokeGrant, rotateDown only RotateRefreshToken; reuseOnRotate makes
 	// RotateRefreshToken report reuse without recording it, as when another replica won the race.
 	revokeDown, rotateDown, reuseOnRotate atomic.Bool
+	rememberDown                          atomic.Bool // RememberConsent fails
 }
 
 var errStoreDown = errors.New("store down")
@@ -67,6 +70,20 @@ func (m *memStore) RefreshToken(ctx context.Context, h [32]byte, now time.Time) 
 		return store.RefreshToken{}, errStoreDown
 	}
 	return m.Store.RefreshToken(ctx, h, now)
+}
+
+func (m *memStore) RememberConsent(ctx context.Context, c store.Consent) error {
+	if m.down.Load() || m.rememberDown.Load() {
+		return errStoreDown
+	}
+	return m.Store.RememberConsent(ctx, c)
+}
+
+func (m *memStore) Consent(ctx context.Context, k store.ConsentKey) (store.Consent, error) {
+	if m.down.Load() {
+		return store.Consent{}, errStoreDown
+	}
+	return m.Store.Consent(ctx, k)
 }
 
 func (m *memStore) Grant(ctx context.Context, id string) (store.Grant, error) {
@@ -119,6 +136,7 @@ func (m *memStore) CreateGrant(ctx context.Context, g store.Grant) (store.Grant,
 type staticClient struct {
 	id, redirect, name string
 	trust              registration.TrustLevel
+	anyPort            bool // match the redirect as ADR-0009 does, any loopback port
 }
 
 func (c staticClient) ID() string                     { return c.id }
@@ -130,6 +148,9 @@ func (staticClient) AuthMethods() []registration.AuthMethod {
 	return []registration.AuthMethod{registration.None}
 }
 func (c staticClient) RedirectAllowed(u string) error {
+	if c.anyPort {
+		return registration.MatchRedirect([]string{c.redirect}, u)
+	}
 	if u != c.redirect {
 		return errors.New("registered " + c.redirect + ", sent " + u)
 	}
@@ -157,7 +178,8 @@ type registry struct {
 	mu       sync.Mutex
 	removed  map[string]bool
 	redirect map[string]string
-	down     bool // every lookup fails, as a store outage would
+	demoted  map[string]bool // clients whose trust the operator withdrew: NotVerified
+	down     bool            // every lookup fails, as a store outage would
 }
 
 func (r *registry) Client(_ context.Context, id string) (registration.Client, error) {
@@ -169,12 +191,18 @@ func (r *registry) Client(_ context.Context, id string) (registration.Client, er
 	if r.removed[id] {
 		return nil, registration.ErrUnknownClient
 	}
-	cb := map[string]string{clientID: clientCB, otherClientID: clientCB, webClientID: webCB, unverifiedID: clientCB}[id]
+	cb := map[string]string{clientID: clientCB, otherClientID: clientCB, webClientID: webCB, unverifiedID: clientCB, loopbackID: loopbackCB}[id]
 	if alt, ok := r.redirect[id]; ok {
 		cb = alt // a changed redirect, or a client a test added with reregister
 	}
 	if cb == "" {
 		return nil, registration.ErrUnknownClient
+	}
+	if r.demoted[id] {
+		return staticClient{id: id, redirect: cb, name: "Test app", trust: registration.NotVerified}, nil
+	}
+	if id == loopbackID {
+		return staticClient{id: id, redirect: loopbackCB, name: "Loopback app", trust: registration.Verified, anyPort: true}, nil
 	}
 	if id == unverifiedID {
 		return staticClient{id: id, redirect: cb, name: hostileName, trust: registration.NotVerified}, nil
@@ -186,6 +214,16 @@ func (r *registry) fail() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.down = true
+}
+
+// demote withdraws a client's trust, as removing its host from the trusted list does.
+func (r *registry) demote(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.demoted == nil {
+		r.demoted = map[string]bool{}
+	}
+	r.demoted[id] = true
 }
 
 func (r *registry) remove(id string) {
