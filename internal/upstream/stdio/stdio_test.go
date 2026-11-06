@@ -547,3 +547,43 @@ func TestCrashIsNotLoggedAsAStdoutStop(t *testing.T) {
 		t.Fatal("a crash must be logged as an unexpected exit, not as a stop")
 	}
 }
+
+func TestProcessInUseNeverIdlesOutAndIdlesFromItsLastRelease(t *testing.T) {
+	h := newHarness(t, nil)
+	p, release := h.lease(t, "s1", alice)
+	stops := func() int { return len(h.log.with("stopping upstream process")) }
+	h.clk.Advance(2 * DefaultIdleTimeout) // a quiet open stream, e.g. a subscription
+	if stops() != 0 {
+		t.Fatal("a process in use was stopped as idle")
+	}
+	release()
+	h.clk.Advance(DefaultIdleTimeout - time.Second)
+	if stops() != 0 {
+		t.Fatal("stopped before the idle timeout counted from the release")
+	}
+	h.clk.Advance(time.Second)
+	if recs := h.log.with("stopping upstream process"); len(recs) != 1 || recs[0].attrs["reason"] != "idle" {
+		t.Fatalf("stop records %v, want one for idle", recs)
+	}
+	waitDone(t, p)
+}
+
+func TestEveryLeaseOfAProcessKeepsItFromIdlingOut(t *testing.T) {
+	h := newHarness(t, nil)
+	p := h.get(t, "s1", alice) // the spawning lease, released
+	_, release, err := h.m.leaseKey(context.Background(), "s1", alice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(release)
+	h.clk.Advance(2 * DefaultIdleTimeout)
+	if n := len(h.log.with("stopping upstream process")); n != 0 {
+		t.Fatalf("%d stops: a process held by a later lease was stopped as idle", n)
+	}
+	release()
+	h.clk.Advance(DefaultIdleTimeout) // the control: without a lease it does idle out
+	if recs := h.log.with("stopping upstream process"); len(recs) != 1 || recs[0].attrs["reason"] != "idle" {
+		t.Fatalf("stop records %v, want one for idle after the release", recs)
+	}
+	waitDone(t, p)
+}

@@ -54,6 +54,12 @@ func (e *buildError) Error() string {
 // would, with users alice and bob.
 func stdioProxy(t *testing.T, env ...string) (*httptest.Server, *config.Config, *syncBuffer) {
 	t.Helper()
+	return stdioProxyRunning(t, []string{"-mcp"}, env...)
+}
+
+// stdioProxyRunning is stdioProxy with the fake upstream's flags.
+func stdioProxyRunning(t *testing.T, flags []string, env ...string) (*httptest.Server, *config.Config, *syncBuffer) {
+	t.Helper()
 	bin, err := fakeStdio()
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +69,7 @@ func stdioProxy(t *testing.T, env ...string) (*httptest.Server, *config.Config, 
 		t.Fatal(err)
 	}
 	all := append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_ENV_FILE="+envFile)
-	cfg, _, err := config.Load([]string{"--", bin, "-mcp"}, append(all, env...), os.ReadFile)
+	cfg, _, err := config.Load(append([]string{"--", bin}, flags...), append(all, env...), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,5 +350,31 @@ func TestLooseUpstreamEnvFileRefusesToStartInEveryMode(t *testing.T) {
 				t.Fatalf("New = %v, want a refusal naming BYWARD_UPSTREAM_ENV_FILE", err)
 			}
 		})
+	}
+}
+
+// Invariant 13 in the modern era: each user's requests run in that user's own upstream process,
+// through the real Guard and session binding, and no token reaches it.
+func TestModernEraRequestsRunInTheUsersOwnUpstreamProcessWithNoToken(t *testing.T) {
+	srv, _, _ := stdioProxyRunning(t, []string{"-modern"})
+	env := func(token string) []string {
+		body := `{"jsonrpc":"2.0","id":1,"method":"env","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`
+		res, events := mcpPost(t, srv, token, "", body)
+		var m struct{ Result []string }
+		if res.StatusCode != http.StatusOK || len(events) != 1 || json.Unmarshal([]byte(events[0]), &m) != nil {
+			t.Fatalf("modern env: status %d, events %q", res.StatusCode, events)
+		}
+		return m.Result
+	}
+	for token, user := range map[string]string{"tok-alice": "tid:alice", "tok-bob": "tid:bob"} {
+		got := env(token)
+		if !slices.Contains(got, "BYWARD_SUBJECT="+user) {
+			t.Fatalf("%s's modern request ran as %q", user, got)
+		}
+		for _, kv := range got {
+			if strings.Contains(kv, "tok-") {
+				t.Fatalf("a token reached the upstream process: %q", kv)
+			}
+		}
 	}
 }

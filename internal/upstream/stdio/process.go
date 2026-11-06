@@ -47,12 +47,13 @@ type Process struct {
 
 	mu       sync.Mutex
 	idle     Timer
+	held     int // open leases; the idle timer does not run while any is held
 	timers   []Timer
 	stopping bool
 	exited   bool
 
-	stopOnce, stdinOnce, abandonOnce sync.Once
-	waitErr                          error
+	stdinOnce, abandonOnce sync.Once
+	waitErr                error
 }
 
 // processOptions are the per-upstream settings a Process needs.
@@ -72,7 +73,13 @@ func startProcess(cmd *exec.Cmd, stdin, stdout, stderr *os.File, sessionDir stri
 		stdin: stdin, messages: make(chan []byte, 16), abandon: make(chan struct{}), done: make(chan struct{}),
 	}
 	p.mu.Lock() // the timer may fire before the assignment completes; stop reads p.idle under p.mu
-	p.idle = o.clock.AfterFunc(o.idleFor, func() { p.stop("idle") })
+	p.idle = o.clock.AfterFunc(o.idleFor, func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		if p.held == 0 { // checked and stopped under one lock: a lease taken meanwhile keeps the process
+			p.stopLocked("idle")
+		}
+	})
 	p.mu.Unlock()
 	p.readers.Add(2)
 	go p.readStdout(stdout)
@@ -145,11 +152,32 @@ func (p *Process) isStopping() bool {
 	return p.stopping || p.exited
 }
 
-// touch restarts the idle timer.
+// touch restarts the idle timer, unless the process is held.
 func (p *Process) touch() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if !p.stopping && !p.exited {
+	if !p.stopping && !p.exited && p.held == 0 {
+		p.idle.Reset(p.idleFor)
+	}
+}
+
+// hold marks the process in use: an open request or stream, however quiet, keeps it from idling
+// out (a subscription may see no traffic for longer than the idle timeout).
+func (p *Process) hold() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.held++
+	if p.held == 1 && !p.stopping && !p.exited {
+		p.idle.Stop()
+	}
+}
+
+// unhold ends one hold; the idle timeout counts from the last one.
+func (p *Process) unhold() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.held--
+	if p.held == 0 && !p.stopping && !p.exited {
 		p.idle.Reset(p.idleFor)
 	}
 }
@@ -158,30 +186,44 @@ func (p *Process) touch() {
 // and finally SIGKILL to the whole process group, each after the grace period. It returns at
 // once; Done reports the exit.
 func (p *Process) stop(reason string) {
-	p.stopOnce.Do(func() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.stopLocked(reason)
+}
+
+// stopLocked is stop for callers holding p.mu. Only the first call does anything.
+func (p *Process) stopLocked(reason string) {
+	if p.stopping || p.exited {
+		return
+	}
+	p.stopping = true
+	p.idle.Stop()
+	p.log.Info("stopping upstream process", "reason", reason)
+	p.closeStdin()
+	p.timers = append(p.timers, p.clock.AfterFunc(p.grace, func() {
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		if p.exited {
 			return
 		}
-		p.stopping = true
-		p.idle.Stop()
-		p.log.Info("stopping upstream process", "reason", reason)
-		p.closeStdin()
+		p.signalLocked(syscall.SIGTERM)
 		p.timers = append(p.timers, p.clock.AfterFunc(p.grace, func() {
 			p.mu.Lock()
 			defer p.mu.Unlock()
-			if p.exited {
-				return
-			}
-			p.signalLocked(syscall.SIGTERM)
-			p.timers = append(p.timers, p.clock.AfterFunc(p.grace, func() {
-				p.mu.Lock()
-				defer p.mu.Unlock()
-				p.signalLocked(syscall.SIGKILL)
-			}))
+			p.signalLocked(syscall.SIGKILL)
 		}))
-	})
+	}))
+}
+
+// sendDetached sends msg in the background, bounded by writeTimeout. Code that reads the
+// process's output uses it: the upstream may be blocked writing to us, so a write from there
+// could deadlock.
+func (p *Process) sendDetached(msg []byte) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+		defer cancel()
+		_ = p.Send(ctx, msg)
+	}()
 }
 
 // signalLocked signals the process group. It does nothing once the leader is reaped, so a

@@ -130,7 +130,8 @@ func New(cfg Config) (*Manager, error) {
 
 // Get returns the live process for key, spawning one for id if there is none, with a lease: the
 // process is not evicted until release is called. A key bound to another user fails with
-// ErrUserMismatch; a full cap with nothing idle to evict fails with errBusy.
+// ErrUserMismatch; a full cap with nothing idle to evict fails with errBusy. A process that is
+// stopping is waited for, within ctx, and replaced.
 func (m *Manager) Get(ctx context.Context, key string, id Identity) (p *Process, release func(), err error) {
 	if err := id.validate(); err != nil {
 		return nil, nil, err
@@ -168,6 +169,7 @@ func (m *Manager) Get(ctx context.Context, key string, id Identity) (p *Process,
 				m.forget(key, e)
 				return nil, nil, e.err
 			}
+			e.p.hold() // the spawning Get holds the first lease
 			return e.p, m.releaser(e), nil
 		}
 		m.mu.Unlock()
@@ -177,6 +179,14 @@ func (m *Manager) Get(ctx context.Context, key string, id Identity) (p *Process,
 		p, release, err := m.lease(ctx, key, e)
 		if errors.Is(err, errNotFound) {
 			continue // that spawn failed or the process exited; try our own
+		}
+		if err == nil && p.isStopping() {
+			// It keeps its key until it has exited, and refuses every Send: wait, then start anew.
+			release()
+			if err := m.awaitExit(ctx, e); err != nil {
+				return nil, nil, err
+			}
+			continue
 		}
 		return p, release, err
 	}
@@ -227,7 +237,7 @@ func (m *Manager) lease(ctx context.Context, key string, e *entry) (*Process, fu
 	}
 	e.leases++
 	m.mu.Unlock()
-	e.p.touch()
+	e.p.hold()
 	return e.p, m.releaser(e), nil
 }
 
@@ -236,9 +246,10 @@ func (m *Manager) releaser(e *entry) func() {
 	return func() {
 		once.Do(func() {
 			m.mu.Lock()
-			defer m.mu.Unlock()
 			e.leases--
 			e.lastUsed = m.cfg.Clock.Now()
+			m.mu.Unlock()
+			e.p.unhold()
 		})
 	}
 }
