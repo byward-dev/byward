@@ -1,0 +1,49 @@
+# How to create and rotate sealing keys
+
+The broker seals its access tokens and authorization codes with keys you provide
+([ADR-0006](../adr/0006-token-model.md), [ADR-0007](../adr/0007-state-and-storage.md) §5). Keys never
+live in the store, and the proxy never generates them outside the single-node development mode.
+
+> **Status:** the package that reads keys exists (`internal/token`); the setting that points the
+> proxy at the key directory is added with the broker.
+
+## The key directory
+
+- One file per key. **The file name is the key ID**: letters, digits, `.`, `_` and `-`, at most 64
+  characters.
+- The content is the standard base64 encoding of 32 random bytes:
+
+  ```sh
+  install -d -m 0700 keys
+  (umask 077; openssl rand -base64 32 > "keys/$(date -u +%Y-%m-%d)")
+  ```
+
+- Files and directories starting with `.` are ignored (Kubernetes secret volumes keep `..data`
+  entries there); subdirectories are ignored; symlinks are followed.
+- The proxy refuses to start when the directory is missing, has no key files, or any file is
+  unreadable, not 32 bytes of base64, all one byte value, or **world-writable**. The same applies to
+  a world-writable directory. The error names the file. Group- and other-readable files are fine
+  (Kubernetes mounts secrets `0644` by default).
+
+## Which key seals
+
+**The key whose file name sorts last seals new tokens; every key in the directory opens tokens.**
+Date-based names (`2026-11-06`) therefore rotate in order.
+
+## Rotating
+
+1. Add a new key file with a name that sorts after the current one.
+2. **On several replicas, make sure the new file has reached every replica** (for example, the
+   updated secret volume) before restarting any of them. A replica that seals with a key the others
+   do not have yet issues tokens they reject.
+3. Restart. New tokens use the new key; tokens sealed with the old key keep working.
+4. After the longest token lifetime (access tokens: at most 1 h) remove the old file and restart.
+
+**Removing a key invalidates every token it sealed.** Clients then get `401 invalid_token` and sign
+in again (or refresh: refresh tokens are not sealed and survive a key change).
+
+## Limits
+
+A key must not seal more than 2^32 tokens: AES-256-GCM with random 96-bit nonces is safe only below
+that count. Rotating to a new key resets it. At one token per second this is more than 100 years per
+key.
