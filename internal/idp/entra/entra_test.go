@@ -330,3 +330,21 @@ func TestCodeOf(t *testing.T) {
 		t.Fatal("codeOf")
 	}
 }
+
+func TestRefreshWithoutTokenSignsInAgainWithoutCallingEntra(t *testing.T) {
+	p, err := New(Config{Tenant: fakeidp.NewGUID(), ClientID: fakeidp.NewGUID(), ClientAuth: idp.ClientSecret("s"), RedirectURL: redirect,
+		HTTPClient: &http.Client{Transport: failingTransport{t}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := p.Refresh(context.Background(), ""); idp.ClassOf(err) != idp.SignInAgain {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+type failingTransport struct{ t *testing.T }
+
+func (f failingTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	f.t.Error("unexpected network call")
+	return nil, errors.New("no network")
+}

@@ -241,6 +241,9 @@ func (p *Provider) Callback(ctx context.Context, query url.Values, l idp.Login) 
 
 // Refresh renews tokens. Tokens.RefreshToken is empty when the IdP kept the old one.
 func (p *Provider) Refresh(ctx context.Context, refreshToken string) (*idp.Identity, idp.Tokens, error) {
+	if refreshToken == "" {
+		return nil, idp.Tokens{}, &idp.Error{Class: idp.SignInAgain, Err: errors.New("oidc: no refresh token")}
+	}
 	m, err := p.discover(ctx)
 	if err != nil {
 		return nil, idp.Tokens{}, err

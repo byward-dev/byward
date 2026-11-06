@@ -363,3 +363,10 @@ func asError(err error, target **idp.Error) bool {
 	}
 	return ok
 }
+
+func TestRefreshWithoutTokenSignsInAgain(t *testing.T) {
+	e := newEnv(t, Config{})
+	if _, _, err := e.p.Refresh(context.Background(), ""); idp.ClassOf(err) != idp.SignInAgain {
+		t.Fatalf("err = %v", err)
+	}
+}

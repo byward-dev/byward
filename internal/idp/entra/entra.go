@@ -194,6 +194,9 @@ func (p *Provider) Callback(ctx context.Context, query url.Values, l idp.Login) 
 // Refresh renews the tokens with the login scopes. Tokens.RefreshToken is empty when Entra returned
 // none, in which case the old one stays (ADR-0012 §6).
 func (p *Provider) Refresh(ctx context.Context, refreshToken string) (*idp.Identity, idp.Tokens, error) {
+	if refreshToken == "" {
+		return nil, idp.Tokens{}, &idp.Error{Class: idp.SignInAgain, Err: errors.New("entra: no refresh token")}
+	}
 	tr, err := p.token(ctx, url.Values{
 		"grant_type":    {"refresh_token"},
 		"refresh_token": {refreshToken},
