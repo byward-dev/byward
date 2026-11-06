@@ -93,3 +93,5 @@ release:
 
 changelog:
   use: github
+  # Commit hash and message only: the default line adds the author's name and email.
+  format: "{{ .SHA }}: {{ .Message }}"
