@@ -77,7 +77,7 @@ func TestNoneExporterIsOff(t *testing.T) {
 	restoreGlobals(t)
 	t.Setenv("OTEL_TRACES_EXPORTER", "none")
 	if enabled, _, err := Setup(context.Background(), os.Getenv, "test"); err != nil || enabled {
-		t.Fatalf("OTEL_TRACES_EXPORTER=none: enabled=%v err=%v", enabled, err)
+		t.Fatalf("OTEL_TRACES_EXPORTER=none: enabled=%v err=%v, want off and no error", enabled, err)
 	}
 }
 

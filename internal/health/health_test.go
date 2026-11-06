@@ -34,7 +34,7 @@ func TestLivezIsTheProcessOnly(t *testing.T) {
 	}
 }
 
-func TestReadyz(t *testing.T) {
+func TestReadyzReportsEachCheckAndFailsWhenAnyCheckFailsOrDraining(t *testing.T) {
 	cases := []struct {
 		name     string
 		checks   []Check
