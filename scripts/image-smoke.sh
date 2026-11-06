@@ -24,13 +24,9 @@ for label in "org.opencontainers.image.licenses=Apache-2.0" "org.opencontainers.
 done
 # OCI annotations (index scope) and buildx provenance exist only on pushed releases, not on snapshots.
 
-# The binary must start: any exit code from the program itself passes, 125-127 (docker/exec errors) fail.
-# --version so a real server never blocks the test.
-set +e
-docker run --rm "$image" --version >/dev/null 2>&1
-code=$?
-set -e
-[ "$code" -lt 125 ] || fail "binary did not start (docker run exit $code)"
+# --version must exit 0 with output; it never starts a server, so it cannot block the test.
+version=$(docker run --rm "$image" --version) || fail "'mcp-authproxy --version' failed in the image"
+[ -n "$version" ] || fail "'mcp-authproxy --version' printed nothing in the image"
 
 ctr=$(docker create "$image")
 listing="$tmp/listing"
@@ -50,11 +46,8 @@ done
 # a docker-container builder such as the one setup-buildx-action selects would try to pull them.
 docker buildx build --builder "$(docker context show)" --load --quiet --build-arg "MCP_AUTHPROXY_IMAGE=$image" \
   -t "$node_image" docs/examples/stdio-node >/dev/null
-set +e
-docker run --rm --entrypoint /usr/local/bin/mcp-authproxy "$node_image" --version >/dev/null 2>&1
-code=$?
-set -e
-[ "$code" -lt 125 ] || fail "binary did not start in the FROM node example (docker run exit $code)"
+docker run --rm --entrypoint /usr/local/bin/mcp-authproxy "$node_image" --version >/dev/null \
+  || fail "'mcp-authproxy --version' failed in the FROM node example"
 docker run --rm --entrypoint sh "$node_image" -c 'touch /var/lib/mcp-authproxy/.write-test' >/dev/null 2>&1 \
   || fail "/var/lib/mcp-authproxy is not writable by the FROM node example's non-root user"
 
