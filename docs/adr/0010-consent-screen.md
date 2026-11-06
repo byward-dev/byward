@@ -48,6 +48,9 @@ admin grants tenant-wide consent, and labels unverified publishers "Unverified".
    sign in with Microsoft Entra next"), the IdP scopes we request in operator-supplied plain words with
    the raw strings behind a disclosure, the lifetime ("up to 30 days"), and the operator's name and
    optional logo. Advertised scopes without operator text are a startup warning.
+   _Clarified 2026-11-06 (slice 1.6):_ the lifetime shown is how long the grant will last: up to 30
+   days with `offline_access` (refresh tokens), otherwise one access-token lifetime, 1 hour
+   (ADR-0006 §5).
 5. **CSRF:** exactly one `Origin` equal to our configured public URL (never the `Host` header);
    missing or `null` is rejected; `Sec-Fetch-Site: same-origin` as a second check; a `__Host-`
    binding cookie whose name includes an instance ID; a sealed single-use flow token (10 minutes)

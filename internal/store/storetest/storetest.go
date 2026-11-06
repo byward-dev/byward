@@ -46,6 +46,13 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		{"RefreshTokenRoundTripsAndIdleExpires", refreshTokenRoundTripsAndIdleExpires},
 		{"RefreshTokenNeedsAGrantAndAUniqueHash", refreshTokenNeedsAGrantAndAUniqueHash},
 		{"RevokeGrantDeletesItsRowsAndRecordsARevocation", revokeGrantDeletesItsRowsAndRecordsARevocation},
+		{"UpdateGrantSetsExpiryAndRefusesBadInput", updateGrantSetsExpiryAndRefusesBadInput},
+		{"RotateMakesTheNextTokenCurrent", rotateMakesTheNextTokenCurrent},
+		{"RetryWithinGraceRotatesTheSuccessor", retryWithinGraceRotatesTheSuccessor},
+		{"ReuseRevokesTheGrant", reuseRevokesTheGrant},
+		{"RotateRefusesBadRequests", rotateRefusesBadRequests},
+		{"PutRefreshTokenIgnoresRotatedAt", putRefreshTokenIgnoresRotatedAt},
+		{"ConcurrentRotationWithoutGraceHasOneWinner", concurrentRotationWithoutGraceHasOneWinner},
 		{"RevokeUnknownGrantRecordsNothing", revokeUnknownGrantRecordsNothing},
 		{"RevokeSubjectCutsOffEarlierGrants", revokeSubjectCutsOffEarlierGrants},
 		{"RevocationsAreOldestFirst", revocationsAreOldestFirst},
@@ -575,4 +582,188 @@ func concurrentUseIsSafe(t *testing.T, s store.Store) {
 
 func revEqual(a, b store.Revocation) bool {
 	return a.GrantID == b.GrantID && a.Subject == b.Subject && a.Before.Equal(b.Before) && a.At.Equal(b.At)
+}
+
+const grace = 30 * time.Second
+
+func rotation(old, next store.RefreshToken, now time.Time) store.RotateRequest {
+	next.CreatedAt = now
+	return store.RotateRequest{Old: old.Hash, Next: next, Now: now, Grace: grace}
+}
+
+func updateGrantSetsExpiryAndRefusesBadInput(t *testing.T, s store.Store) {
+	g := grant("g1", "tid:alice")
+	g.ExpiresAt = t0.Add(10 * time.Minute) // a login whose code is not redeemed yet
+	mustCreate(t, s, g)
+	later := t0.Add(30 * 24 * time.Hour)
+	must(t, s.UpdateGrant(ctx, "g1", later))
+	if got, _ := s.Grant(ctx, "g1"); !got.ExpiresAt.Equal(later) {
+		t.Fatalf("ExpiresAt = %v, want %v", got.ExpiresAt, later)
+	}
+	wantErr(t, "UpdateGrant of an unknown grant", s.UpdateGrant(ctx, "nope", later), store.ErrNotFound)
+	wantErr(t, "UpdateGrant to CreatedAt", s.UpdateGrant(ctx, "g1", g.CreatedAt), store.ErrInvalid)
+}
+
+func rotateMakesTheNextTokenCurrent(t *testing.T, s store.Store) {
+	mustCreate(t, s, grant("g1", "tid:alice"))
+	t1, t2 := refresh("g1", 1), refresh("g1", 2)
+	must(t, s.PutRefreshToken(ctx, t1))
+	at := t0.Add(time.Minute)
+	req := rotation(t1, t2, at)
+	req.IdPTokens = []byte("rotated-idp-tokens")
+	must(t, s.RotateRefreshToken(ctx, req))
+
+	old, err := s.RefreshToken(ctx, t1.Hash, at)
+	must(t, err)
+	if !old.RotatedAt.Equal(at) {
+		t.Fatalf("old token RotatedAt = %v, want %v", old.RotatedAt, at)
+	}
+	cur, err := s.RefreshToken(ctx, t2.Hash, at)
+	must(t, err)
+	if !cur.RotatedAt.IsZero() || cur.Hash != t2.Hash || cur.GrantID != "g1" || cur.ClientID != t2.ClientID ||
+		!cur.CreatedAt.Equal(at) || !cur.IdleExpiresAt.Equal(t2.IdleExpiresAt) {
+		t.Fatalf("next token = %+v, want the requested one, current, for g1", cur)
+	}
+	if g, _ := s.Grant(ctx, "g1"); string(g.IdPTokens) != "rotated-idp-tokens" {
+		t.Fatalf("IdP tokens = %q, want them replaced in the same step", g.IdPTokens)
+	}
+	// Without IdPTokens the grant keeps its own.
+	must(t, s.RotateRefreshToken(ctx, rotation(t2, refresh("g1", 3), at.Add(time.Minute))))
+	if g, _ := s.Grant(ctx, "g1"); string(g.IdPTokens) != "rotated-idp-tokens" {
+		t.Fatalf("IdP tokens = %q after a rotation without new ones", g.IdPTokens)
+	}
+}
+
+func retryWithinGraceRotatesTheSuccessor(t *testing.T, s store.Store) {
+	mustCreate(t, s, grant("g1", "tid:alice"))
+	t1, t2, t3, t4 := refresh("g1", 1), refresh("g1", 2), refresh("g1", 3), refresh("g1", 4)
+	must(t, s.PutRefreshToken(ctx, t1))
+	at := t0.Add(time.Minute)
+	must(t, s.RotateRefreshToken(ctx, rotation(t1, t2, at)))
+	// The response carrying t2 was lost; the client retries with t1 just inside the window.
+	must(t, s.RotateRefreshToken(ctx, rotation(t1, t3, at.Add(grace-tick))))
+	got, err := s.RefreshToken(ctx, t2.Hash, at)
+	must(t, err)
+	if got.RotatedAt.IsZero() {
+		t.Fatal("t2 is still current after the retry; it must be rotated away")
+	}
+	got, err = s.RefreshToken(ctx, t3.Hash, at)
+	must(t, err)
+	if !got.RotatedAt.IsZero() {
+		t.Fatal("t3 is not current after the retry")
+	}
+	// A second retry in the window also works, and the window is not extended by the retries: it
+	// ends grace after the first rotation.
+	must(t, s.RotateRefreshToken(ctx, rotation(t1, t4, at.Add(grace-tick))))
+	wantErr(t, "retry at the end of the original window", s.RotateRefreshToken(ctx, rotation(t1, refresh("g1", 5), at.Add(grace))), store.ErrReused)
+}
+
+func reuseRevokesTheGrant(t *testing.T, s store.Store) {
+	cases := []struct {
+		name  string
+		reuse func(t *testing.T, s store.Store, g string) error
+	}{
+		{"at the end of the grace window", func(t *testing.T, s store.Store, g string) error {
+			t1 := refresh(g, 1)
+			must(t, s.PutRefreshToken(ctx, t1))
+			at := t0.Add(time.Minute)
+			must(t, s.RotateRefreshToken(ctx, rotation(t1, refresh(g, 2), at)))
+			return s.RotateRefreshToken(ctx, rotation(t1, refresh(g, 3), at.Add(grace)))
+		}},
+		{"an older token within the window", func(t *testing.T, s store.Store, g string) error {
+			t1, t2 := refresh(g, 1), refresh(g, 2)
+			must(t, s.PutRefreshToken(ctx, t1))
+			at := t0.Add(time.Minute)
+			must(t, s.RotateRefreshToken(ctx, rotation(t1, t2, at)))
+			must(t, s.RotateRefreshToken(ctx, rotation(t2, refresh(g, 3), at.Add(time.Second))))
+			return s.RotateRefreshToken(ctx, rotation(t1, refresh(g, 4), at.Add(2*time.Second)))
+		}},
+		{"with no grace at all", func(t *testing.T, s store.Store, g string) error {
+			t1 := refresh(g, 1)
+			must(t, s.PutRefreshToken(ctx, t1))
+			at := t0.Add(time.Minute)
+			req := rotation(t1, refresh(g, 2), at)
+			req.Grace = 0
+			must(t, s.RotateRefreshToken(ctx, req))
+			req.Next = refresh(g, 3)
+			return s.RotateRefreshToken(ctx, req)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := "g-" + tc.name // one store for all cases: a grant each
+			mustCreate(t, s, grant(g, "tid:alice"))
+			wantErr(t, "reuse", tc.reuse(t, s, g), store.ErrReused)
+			_, err := s.Grant(ctx, g)
+			wantErr(t, "grant after reuse", err, store.ErrNotFound)
+			revs, err := s.Revocations(ctx)
+			must(t, err)
+			if !slices.ContainsFunc(revs, func(r store.Revocation) bool { return r.GrantID == g }) {
+				t.Fatalf("revocations = %+v, want one for %s", revs, g)
+			}
+		})
+	}
+}
+
+func rotateRefusesBadRequests(t *testing.T, s store.Store) {
+	mustCreate(t, s, grant("g1", "tid:alice"))
+	mustCreate(t, s, grant("g2", "tid:bob"))
+	t1 := refresh("g1", 1)
+	must(t, s.PutRefreshToken(ctx, t1))
+	must(t, s.PutRefreshToken(ctx, refresh("g1", 9)))
+	at := t0.Add(time.Minute)
+	wantErr(t, "unknown token", s.RotateRefreshToken(ctx, rotation(refresh("g1", 5), refresh("g1", 6), at)), store.ErrNotFound)
+	wantErr(t, "idle-expired token", s.RotateRefreshToken(ctx, rotation(t1, refresh("g1", 6), t1.IdleExpiresAt)), store.ErrNotFound)
+	wantErr(t, "next for another grant", s.RotateRefreshToken(ctx, rotation(t1, refresh("g2", 6), at)), store.ErrInvalid)
+	wantErr(t, "next hash already stored", s.RotateRefreshToken(ctx, rotation(t1, refresh("g1", 9), at)), store.ErrExists)
+	got, err := s.RefreshToken(ctx, t1.Hash, at)
+	must(t, err)
+	if !got.RotatedAt.IsZero() {
+		t.Fatal("a refused rotation changed the token")
+	}
+}
+
+// RotatedAt belongs to the store: a token stored with it set is still current.
+func putRefreshTokenIgnoresRotatedAt(t *testing.T, s store.Store) {
+	mustCreate(t, s, grant("g1", "tid:alice"))
+	pre := refresh("g1", 7)
+	pre.RotatedAt = t0
+	must(t, s.PutRefreshToken(ctx, pre))
+	got, err := s.RefreshToken(ctx, pre.Hash, t0)
+	must(t, err)
+	if !got.RotatedAt.IsZero() {
+		t.Fatal("PutRefreshToken kept the caller's RotatedAt")
+	}
+}
+
+func concurrentRotationWithoutGraceHasOneWinner(t *testing.T, s store.Store) {
+	mustCreate(t, s, grant("g1", "tid:alice"))
+	t1 := refresh("g1", 1)
+	must(t, s.PutRefreshToken(ctx, t1))
+	const n = 16
+	errs := make([]error, n)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Go(func() {
+			<-start
+			req := rotation(t1, refresh("g1", 100+i), t0.Add(time.Minute))
+			req.Grace = 0
+			errs[i] = s.RotateRefreshToken(ctx, req)
+		})
+	}
+	close(start)
+	wg.Wait()
+	wins := 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			wins++
+		case !errors.Is(err, store.ErrReused) && !errors.Is(err, store.ErrNotFound):
+			t.Fatalf("loser got %v, want ErrReused (or ErrNotFound once the grant is gone)", err)
+		}
+	}
+	if wins != 1 {
+		t.Fatalf("%d rotations of one token succeeded, want exactly 1", wins)
+	}
 }

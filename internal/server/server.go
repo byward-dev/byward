@@ -3,6 +3,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -95,6 +96,7 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 	o := Observability{Audit: audit.New(log, m.AuditEvent, time.Now), Metrics: m}
 	var h http.Handler
 	var checks []health.Check
+	var background func(context.Context)
 	if cfg.NoAuth {
 		h = Handler(cfg, log, resource.NoTokens{}, nil, o)
 	} else {
@@ -104,8 +106,9 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 		}
 		h = Handler(cfg, log, a.validator, a.register, o)
 		checks = a.checks
+		background = a.background
 	}
-	s := &Servers{Public: hardened(cfg.Listen, h, log), Health: health.New(log, checks...)}
+	s := &Servers{Public: hardened(cfg.Listen, h, log), Health: health.New(log, checks...), background: background}
 	if cfg.InternalListen != "" {
 		mux := http.NewServeMux()
 		mux.Handle("GET /metrics", m.Handler())

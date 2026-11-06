@@ -481,6 +481,23 @@ func TestNewNamesTheSettingAtFault(t *testing.T) {
 	}
 }
 
+// With authentication, New must hand the revocation-list sync to Run (background_test.go shows
+// that Run runs it and that it keeps tokens valid); without it every token is refused 30 s after
+// startup.
+func TestNewInAuthModeHandsTheRevocationSyncToRun(t *testing.T) {
+	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.background == nil {
+		t.Fatal("New in auth mode gives Run no background work")
+	}
+}
+
 func TestNewServesTheBrokerRoutes(t *testing.T) {
 	cfg := loadConfig(t, "https://mcp.example.com/mcp")
 	s, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))

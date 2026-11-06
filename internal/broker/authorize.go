@@ -20,12 +20,15 @@ import (
 // metadataHandler serves RFC 8414 metadata, identical at both well-known paths (ADR-0013 §2).
 func (b *Broker) metadataHandler() http.Handler {
 	doc, err := json.Marshal(map[string]any{
-		"issuer":                                           b.cfg.Issuer,
-		"authorization_endpoint":                           b.cfg.Issuer + "/authorize",
-		"token_endpoint":                                   b.tokenEndpoint(),
-		"response_types_supported":                         []string{"code"},
-		"response_modes_supported":                         []string{"query"},
-		"grant_types_supported":                            []string{"authorization_code"}, // refresh_token in slice 1.6
+		"issuer":                   b.cfg.Issuer,
+		"authorization_endpoint":   b.cfg.Issuer + "/authorize",
+		"token_endpoint":           b.tokenEndpoint(),
+		"response_types_supported": []string{"code"},
+		"response_modes_supported": []string{"query"},
+		"grant_types_supported":    grantTypes,
+		"revocation_endpoint":      b.cfg.Issuer + "/revoke",
+		// ADR-0006 §7: like the token endpoint, secret methods are not advertised.
+		"revocation_endpoint_auth_methods_supported":       []string{"none", "private_key_jwt"},
 		"code_challenge_methods_supported":                 []string{"S256"},
 		"token_endpoint_auth_methods_supported":            []string{"none", "private_key_jwt"}, // ADR-0008 §1: DCR clients are never offered a secret; configured static secrets still work
 		"token_endpoint_auth_signing_alg_values_supported": []string{"RS256", "PS256", "ES256"},
@@ -256,7 +259,9 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	g, err := b.cfg.Store.CreateGrant(ctx, store.Grant{ID: randomID(), ClientID: l.ClientID, Subject: id.Subject, Issuer: id.Issuer,
-		Resource: b.cfg.Resource.String(), Scopes: l.Scopes, IdPTokens: []byte(sealedTokens), CreatedAt: now, ExpiresAt: now.Add(GrantLifetime)})
+		// Short-lived until the code is redeemed (token.go extends it), so an abandoned login does
+		// not leave a 30-day grant holding IdP tokens.
+		Resource: b.cfg.Resource.String(), Scopes: l.Scopes, IdPTokens: []byte(sealedTokens), CreatedAt: now, ExpiresAt: now.Add(LoginLifetime)})
 	if err != nil {
 		b.serverError(w, r, err)
 		return
