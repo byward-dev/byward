@@ -612,6 +612,28 @@ func TestAFullAnswerTableForgetsTheFlowAnsweredLast(t *testing.T) {
 	}
 }
 
+// Two answers to one flow can both pass the first check; the table itself must still refuse the
+// second, different one.
+func TestTheAnswerTableAcceptsTheSameAnswerAgainAndRefusesAnother(t *testing.T) {
+	a := newAnswers()
+	expires := t0.Add(FlowLifetime)
+	if ok, _ := a.record("x", true, t0, expires); !ok {
+		t.Fatal("the first answer was refused")
+	}
+	if ok, _ := a.record("x", true, t0, expires); !ok {
+		t.Fatal("the same answer again was refused")
+	}
+	if ok, _ := a.record("x", false, t0, expires); ok {
+		t.Fatal("a different answer was accepted")
+	}
+	if _, kept := a.prior("x", expires); kept {
+		t.Fatal("an expired flow is still remembered")
+	}
+	if ok, _ := a.record("x", false, expires, expires.Add(FlowLifetime)); !ok {
+		t.Fatal("an answer after the flow expired was refused")
+	}
+}
+
 func TestExpiredAnswersMakeRoomForNewFlowsWithoutForgettingLiveOnes(t *testing.T) {
 	a := newAnswers()
 	fillAnswers(a, t0) // expire at t0+1m

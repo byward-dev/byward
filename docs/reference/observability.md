@@ -34,11 +34,12 @@ or the IdP's `error_description`.
 | `key_id` | A sealing key ID |
 | `host`, `origin` | The rejected `Host` or `Origin` value |
 | `reason` | A fixed reason; for `token_rejected` the OAuth error code |
-| `suppressed` | How many records from the same `remote_ip` were dropped by the rate limit since the previous one |
+| `suppressed` | How many records of the same event from the same `remote_ip` were dropped by the rate limit since the previous one |
 
-Events from requests whose sender is not authenticated (marked *limited* below) are rate-limited per source address,
-across all such events together: 10 per minute, then counted and reported as `suppressed=N` on the next limited record
-from that source. A sender can therefore only crowd out its own records. Metrics count every event, logged or not.
+Events from requests whose sender is not authenticated (marked *limited* below) are rate-limited per source address
+and event: 10 per minute for each event, then counted and reported as `suppressed=N` on the next record of that event
+from that source. A sender can therefore only crowd out its own records of the same event: consent page views never
+hide consent decisions. Metrics count every event, logged or not.
 
 ### Events and OCSF mapping
 

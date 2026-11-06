@@ -90,13 +90,14 @@ func (l *Log) Record(r *http.Request, e Event) {
 }
 
 // RecordUnauthenticated writes e for a request whose sender is not authenticated, limited per
-// source address; when events were dropped the next record carries `suppressed=N` (ADR-0021 §5).
+// source address and event, so frequent events (page views) never crowd out rarer ones (decisions);
+// when events were dropped the next record of that event carries `suppressed=N` (ADR-0021 §5).
 func (l *Log) RecordUnauthenticated(r *http.Request, e Event) {
 	if l == nil {
 		return
 	}
 	ip := logging.RemoteIP(r)
-	ok, suppressed := l.limiter.Allow(ip)
+	ok, suppressed := l.limiter.Allow(ip + "\x00" + e.Name)
 	if !ok {
 		if l.observe != nil {
 			l.observe(e.Name, e.Outcome)

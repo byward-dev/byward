@@ -106,6 +106,21 @@ func TestEveryEventHasASampleAndADocsRow(t *testing.T) {
 	}
 }
 
+// Users behind one NAT share a source address; many page views must not hide their decisions.
+func TestFrequentEventsDoNotCrowdOutOtherEventsFromTheSameSource(t *testing.T) {
+	var buf bytes.Buffer
+	l := New(logging.New(&buf, "json"), nil, time.Now)
+	r := httptest.NewRequest("GET", "/authorize", nil)
+	r.RemoteAddr = "192.0.2.7:1234"
+	for range unauthBurst + 5 {
+		l.RecordUnauthenticated(r, Event{Name: ConsentShown, Outcome: Success, ClientID: "client-1"})
+	}
+	l.RecordUnauthenticated(r, Event{Name: ConsentDenied, Outcome: Failure, ClientID: "client-1"})
+	if !strings.Contains(buf.String(), `"event":"consent_denied"`) {
+		t.Fatalf("the decision was dropped after %d page views: %s", unauthBurst+5, buf.String())
+	}
+}
+
 func TestUnauthenticatedEventsAreRateLimitedPerSourceAndCountedAnyway(t *testing.T) {
 	var buf bytes.Buffer
 	counted := 0
