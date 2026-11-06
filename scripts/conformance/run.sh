@@ -19,17 +19,33 @@ work=build/conformance
 src=$work/src
 out=$work/results
 fail() { echo "conformance: FAIL: $*" >&2; exit 1; }
+# Every revision needs its baseline and its scenario list, before anything is fetched or built.
+for rev in $revisions; do
+  for f in "baseline-$rev.yml" "scenarios-$rev.txt"; do
+    [ -f "$here/$f" ] || fail "missing scripts/conformance/$f for revision $rev"
+  done
+done
 mkdir -p "$work"
 work_abs=$(cd "$work" && pwd)
+# Logs from an earlier local run must not be shown for a failure that never reached them.
+rm -f "$work/install.log" "$work/reference.log" "$work/proxy.log"
 
 # 1. Fetch the pinned commit and verify the lockfiles (fetching only; nothing from it runs on the host).
+# A cached checkout is reset to the pinned commit: an earlier run's containers wrote into it.
 if [ "$(git -C "$src" rev-parse HEAD 2>/dev/null || true)" != "$sha" ]; then
   rm -rf "$src"
   git init -q "$src"
-  git -C "$src" fetch -q --depth 1 https://github.com/modelcontextprotocol/conformance.git "$sha"
+  # Up to three tries: a transient GitHub error should not fail the lane.
+  for try in 1 2 3; do
+    git -C "$src" fetch -q --depth 1 https://github.com/modelcontextprotocol/conformance.git "$sha" && break
+    [ "$try" -lt 3 ] || fail "fetching conformance $sha failed three times"
+    sleep 5
+  done
   git -C "$src" checkout -q --detach FETCH_HEAD
 fi
 [ "$(git -C "$src" rev-parse HEAD)" = "$sha" ] || fail "fetched commit is not $sha"
+git -C "$src" reset -q --hard "$sha"
+git -C "$src" clean -qfdx
 check_lock() {
   got=$(shasum -a 256 "$1" | cut -d' ' -f1)
   [ "$got" = "$2" ] || fail "$1 sha256 is $got, want $2"
@@ -37,71 +53,58 @@ check_lock() {
 check_lock "$src/package-lock.json" "$cli_lock_sha256"
 check_lock "$src/examples/servers/typescript/package-lock.json" "$server_lock_sha256"
 
-# 2. Our binary for the container's platform, plus the in-container script and baselines.
+# 2. The container's platform; the binary, script and baselines are placed only after the install, so
+#    code run by the install (which has network) cannot touch what the network-less run trusts.
 arch=$(docker version --format '{{.Server.Arch}}')
-GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -trimpath -o "$work/byward" ./cmd/byward
-cp "$here/inside.sh" "$here"/baseline-*.yml "$work/"
+rm -f "$work/byward" "$work/inside.sh" "$work"/baseline-*.yml
 
 # 3. Containers: run as the invoking user, mount only build/conformance, no host credentials, removed on exit.
 name=byward-conformance-$$
 # shellcheck disable=SC2329 # invoked by the EXIT trap
 cleanup() { docker rm -f "$name-install" "$name-run" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
+# The container's platform is the binary's, so a host whose Docker defaults to another platform
+# (DOCKER_DEFAULT_PLATFORM) cannot hand the proxy an image it cannot execute.
 in_node() { # $1 container name, $2 network, rest: command
   n=$1 net=$2; shift 2
-  docker run --rm --name "$n" --network "$net" --user "$(id -u):$(id -g)" \
+  docker run --rm --name "$n" --network "$net" --platform "linux/$arch" --user "$(id -u):$(id -g)" \
     -e HOME=/work/home -e npm_config_cache=/work/npm-cache -e npm_config_update_notifier=false \
+    -e npm_config_fetch_retries=5 -e npm_config_fetch_retry_mintimeout=2000 \
     -v "$work_abs:/work" -w /work "$image" "$@"
 }
 # Install needs the registry; install scripts are off (esbuild ships per-platform binaries as optional deps).
+# Pull the pinned image first, with retries, so a registry error is reported as one (not as npm's).
+for try in 1 2 3; do
+  docker pull -q --platform "linux/$arch" "$image" > /dev/null && break
+  [ "$try" -lt 3 ] || fail "pulling $image failed three times"
+  sleep 5
+done
+# One command per line: set -e does not stop at a failure inside an && list.
 in_node "$name-install" bridge sh -c '
   set -eu
-  cd /work/src && npm ci --ignore-scripts --no-audit --no-fund > /work/install.log 2>&1 && npm run build >> /work/install.log 2>&1
-  cd examples/servers/typescript && npm ci --ignore-scripts --no-audit --no-fund >> /work/install.log 2>&1' \
-  || fail "installing the conformance CLI or reference server failed (see $work/install.log)"
+  cd /work/src
+  npm ci --ignore-scripts --no-audit --no-fund > /work/install.log 2>&1
+  npm run build >> /work/install.log 2>&1
+  cd examples/servers/typescript
+  npm ci --ignore-scripts --no-audit --no-fund >> /work/install.log 2>&1' \
+  || { tail -n 30 "$work/install.log" >&2 || true; fail "installing the conformance CLI or reference server failed (log above, full log $work/install.log)"; }
+# Our binary for the container's platform, the in-container script and the baselines, after the install.
+GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -trimpath -o "$work/byward" ./cmd/byward
+cp "$here/inside.sh" "$here"/baseline-*.yml "$work/"
 # The run needs only loopback.
 # shellcheck disable=SC2086 # revisions is a word list
-in_node "$name-run" none sh /work/inside.sh $revisions
-
-# 4. Compare direct with proxy, check by check. Timestamps, logs and messages (which name ports) are dropped.
-# A checks.json jq cannot read fails the lane, so a scenario cannot drop out of both runs unnoticed.
-normalise() { # $1 results dir, $2 output TSV
-  : > "$2.unsorted"
-  for d in "$1"/server-*; do
-    [ -d "$d" ] || continue
-    scenario=$(basename "$d" | sed -E 's/^server-//; s/-[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9-]+Z$//')
-    jq -r --arg s "$scenario" '.[] | [$s, .id, .status] | @tsv' "$d/checks.json" >> "$2.unsorted" \
-      || fail "cannot read $d/checks.json"
-  done
-  sort "$2.unsorted" > "$2"
-  rm -f "$2.unsorted"
+in_node "$name-run" none sh /work/inside.sh $revisions || {
+  for log in reference proxy; do echo "--- $work/$log.log" >&2; tail -n 30 "$work/$log.log" >&2 || true; done
+  fail "the run container failed before the comparison (logs above)"
 }
-status=0
-for rev in $revisions; do
-  [ "$(cat "$out/direct-$rev.exit")" = 0 ] \
-    || { echo "conformance: FAIL: $rev direct run does not match baseline-$rev.yml (see $out/direct-$rev.txt)" >&2; status=1; }
-  normalise "$out/direct/$rev" "$out/direct-$rev.tsv"
-  normalise "$out/proxy/$rev" "$out/proxy-$rev.tsv"
-  [ -s "$out/direct-$rev.tsv" ] || { echo "conformance: FAIL: $rev produced no checks" >&2; status=1; }
-  if ! diff "$out/direct-$rev.tsv" "$out/proxy-$rev.tsv" > "$out/diff-$rev.txt"; then
-    echo "conformance: FAIL: $rev results through the proxy differ from direct (< direct, > proxy):" >&2
-    cat "$out/diff-$rev.txt" >&2
-    status=1
-  fi
-done
 
-# 5. Pass/fail matrix for the PR and the CI job summary.
-counts() { awk -F'\t' '$3 == "FAILURE" { f++ } $3 == "WARNING" { w++ } END { printf "%d / %d", f, w }' "$1"; }
-{
-  echo "| Revision | Scenarios | Checks | FAILURE / WARNING (direct) | FAILURE / WARNING (proxy) | Proxy = direct |"
-  echo "|---|---|---|---|---|---|"
-  for rev in $revisions; do
-    same=yes; [ -s "$out/diff-$rev.txt" ] && same=no
-    printf '| %s | %s | %s | %s | %s | %s |\n' "$rev" \
-      "$(cut -f1 "$out/direct-$rev.tsv" | sort -u | wc -l | tr -d ' ')" "$(wc -l < "$out/direct-$rev.tsv" | tr -d ' ')" \
-      "$(counts "$out/direct-$rev.tsv")" "$(counts "$out/proxy-$rev.tsv")" "$same"
-  done
-} > "$out/summary.md"
+# 4. Compare direct with proxy, and check the scenarios against scenarios-<revision>.txt.
+status=0
+# shellcheck disable=SC2086 # revisions is a word list
+sh "$here/compare.sh" "$out" "$here" $revisions || {
+  status=$?
+  for log in reference proxy; do echo "--- last lines of $work/$log.log" >&2; tail -n 20 "$work/$log.log" >&2 || true; done
+}
 cat "$out/summary.md"
 [ -z "${GITHUB_STEP_SUMMARY:-}" ] || cat "$out/summary.md" >> "$GITHUB_STEP_SUMMARY"
 exit "$status"
