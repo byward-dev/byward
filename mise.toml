@@ -1,6 +1,6 @@
 [tools]
-go = "1.26"
-golangci-lint = "2.12.2"
+go = "1.27"
+golangci-lint = "2.15.0"
 "go:golang.org/x/tools/cmd/goimports" = "0.52.0"
 # Operator/dev tool (Entra app setup, real-tenant tests); not needed by `mise run check`, not installed in CI.
 # azure-cli 2.92.0 pins a pre-release dependency (azure-appconfiguration 1.10.0b1); uv needs this to resolve it.
