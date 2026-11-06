@@ -315,7 +315,9 @@ func (b *Broker) scopes(raw string) ([]string, bool) {
 func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	if retry, limited := b.throttled(w, r, ratelimit.Callback); limited {
 		// A silent sign-in's sealed login names a validated redirect URI: answer there, never a page.
-		if l, ok := b.openLogin(r); ok && l.Silent {
+		// Its login is spent, as at any other callback, so a replay cannot later issue a code.
+		if l, c, badLogin := b.openLogin(r); badLogin == "" && l.Silent {
+			b.expireLogin(w, c)
 			b.refuseSilently(w, r, "", l, "temporarily_unavailable", "too many sign-in attempts from this network; retry after "+strconv.Itoa(retry)+" s")
 			return
 		}
@@ -324,26 +326,13 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	ctx := r.Context()
-	st := q.Get("state")
-	badState := func(title string) {
+	l, c, badLogin := b.openLogin(r)
+	if c != nil { // single use: spent whether or not it opens
+		b.expireLogin(w, c)
+	}
+	if badLogin != "" {
 		b.cfg.Audit.RecordUnauthenticated(r, audit.Event{Name: audit.Login, Outcome: audit.Failure, Reason: "sign-in state missing, invalid or expired", IdP: b.cfg.IdPName})
-		b.page(w, r, http.StatusBadRequest, title, "Start again from your app.")
-	}
-	if len(st) < 16 {
-		badState("This sign-in link is not valid.")
-		return
-	}
-	c, err := r.Cookie(b.cookieName(st))
-	if err != nil {
-		badState("This sign-in has expired or was started in another browser.")
-		return
-	}
-	//nolint:gosec // G124: as above (ADR-0010 §10)
-	http.SetCookie(w, &http.Cookie{Name: c.Name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: b.cfg.SecureCookies, SameSite: http.SameSiteLaxMode})
-	plain, err := b.cfg.LoginBox.Open(c.Value)
-	var l login
-	if err != nil || json.Unmarshal(plain, &l) != nil || l.IdPState != st {
-		badState("This sign-in has expired.")
+		b.page(w, r, http.StatusBadRequest, badLogin, "Start again from your app.")
 		return
 	}
 	start := time.Now()
@@ -433,23 +422,29 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, withQuery(l.RedirectURI, v), http.StatusFound)
 }
 
-// openLogin returns the login the callback's state names, from its sealed cookie, without
-// clearing it; false when there is none or it does not open.
-func (b *Broker) openLogin(r *http.Request) (login, bool) {
+// openLogin returns the login the callback's state names, from its sealed cookie, and the cookie
+// itself when present. badLogin is the page title saying why there is no login, "" when it opened. It
+// is the callback's only check of a login, for the rate-limited path too.
+func (b *Broker) openLogin(r *http.Request) (l login, c *http.Cookie, badLogin string) {
 	st := r.URL.Query().Get("state")
 	if len(st) < 16 {
-		return login{}, false
+		return login{}, nil, "This sign-in link is not valid."
 	}
 	c, err := r.Cookie(b.cookieName(st))
 	if err != nil {
-		return login{}, false
+		return login{}, nil, "This sign-in has expired or was started in another browser."
 	}
 	plain, err := b.cfg.LoginBox.Open(c.Value)
-	var l login
 	if err != nil || json.Unmarshal(plain, &l) != nil || l.IdPState != st {
-		return login{}, false
+		return login{}, c, "This sign-in has expired."
 	}
-	return l, true
+	return l, c, ""
+}
+
+// expireLogin deletes a login cookie, so the login it holds cannot be used again.
+func (b *Broker) expireLogin(w http.ResponseWriter, c *http.Cookie) {
+	//nolint:gosec // G124: Secure is false only in development mode on loopback http (ADR-0010 §10)
+	http.SetCookie(w, &http.Cookie{Name: c.Name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: b.cfg.SecureCookies, SameSite: http.SameSiteLaxMode})
 }
 
 func withQuery(base string, v url.Values) string {

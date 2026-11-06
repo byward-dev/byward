@@ -112,16 +112,23 @@ func TestPromptNoneThatCannotFinishSilentlyIsAnsweredWithoutAPage(t *testing.T) 
 }
 
 // prompt=none goes with no other prompt value, in any order, and prompt is sent once (OIDC Core
-// 1.0 §3.1.2.1; RFC 6749 §3.1, whatever the values), so a request carrying none with consent can
-// never reach the page.
+// 1.0 §3.1.2.1; RFC 6749 §3.1), so a request carrying none with consent can never reach the page.
 func TestPromptNoneWithAnotherValueIsAnInvalidRequest(t *testing.T) {
-	for _, prompt := range [][]string{{"none consent"}, {"consent none"}, {"login none"}, {"none select_account"}, {"none", "consent"}, {"consent", "none"}, {"consent", "login"}} {
+	for _, prompt := range [][]string{{"none consent"}, {"consent none"}, {"login none"}, {"none select_account"}, {"none", "consent"}, {"consent", "none"}} {
 		t.Run(strings.Join(prompt, "&"), func(t *testing.T) {
 			e := newEnv(t, withRemember(t, nil))
 			if got := answerOf(t, e.authorizeWith(t, url.Values{"prompt": prompt}, nil)); got != refused(e, "invalid_request") {
 				t.Fatalf("answer %+v, want invalid_request with state and iss", got)
 			}
 		})
+	}
+}
+
+// prompt is sent once (RFC 6749 §3.1), whatever its values.
+func TestARepeatedPromptIsAnInvalidRequest(t *testing.T) {
+	e := newEnv(t, withRemember(t, nil))
+	if got := answerOf(t, e.authorizeWith(t, url.Values{"prompt": {"consent", "login"}}, nil)); got != refused(e, "invalid_request") {
+		t.Fatalf("answer %+v, want invalid_request with state and iss", got)
 	}
 }
 
@@ -141,7 +148,7 @@ func TestPromptNoneOnARememberedConsentSignsInSilently(t *testing.T) {
 	}
 }
 
-// When the IdP's own prompt=none needs the user, the client gets the IdP's answer as it is; any
+// When the IdP's own prompt=none needs or refuses the user, the client gets the IdP's answer as it is; any
 // other IdP failure becomes server_error, or temporarily_unavailable when the IdP is unavailable.
 // Nothing is issued, and nothing is a page. The fake answers login_required unless told otherwise
 // (it fails closed).
@@ -287,9 +294,40 @@ func TestPromptNoneWhoseCallbackIsRateLimitedIsTemporarilyUnavailable(t *testing
 	e.fake.Set(fakeidp.WithSilentSession())
 	res := e.authorizeWith(t, silent(nil), h)
 	e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"callback": true}}
-	if got := answerOf(t, e.finish(t, res)); got != refused(e, "temporarily_unavailable") {
+	var login *http.Cookie
+	for _, c := range res.Cookies() {
+		if strings.Contains(c.Name, "byw_login_") {
+			login = c
+		}
+	}
+	idpRes, err := e.fake.HTTPClient().Get(res.Header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = idpRes.Body.Close()
+	cb, _ := url.Parse(idpRes.Header.Get("Location"))
+	throttled := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{login})
+	if got := answerOf(t, throttled); got != refused(e, "temporarily_unavailable") {
 		t.Fatalf("answer %+v, want temporarily_unavailable", got)
 	}
+	// The login is spent: the same callback once the limit lifts issues no code, so one request
+	// never gets both an error and a code.
+	if c := cookieNamed(throttled, login.Name); c == nil || c.MaxAge >= 0 {
+		t.Fatalf("login cookie not expired: %+v", c)
+	}
+	e.b.cfg.Limiter = nil
+	if replay := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, nil); replay.StatusCode != http.StatusBadRequest || replay.Header.Get("Location") != "" {
+		t.Fatalf("replay after the limit lifted: %d to %q, want the expired-sign-in page", replay.StatusCode, replay.Header.Get("Location"))
+	}
+}
+
+func cookieNamed(res *http.Response, name string) *http.Cookie {
+	for _, c := range res.Cookies() {
+		if c.Name == name {
+			return c
+		}
+	}
+	return nil
 }
 
 // A user the access gate refuses gets access_denied at the redirect on a silent sign-in, audited

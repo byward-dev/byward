@@ -267,11 +267,13 @@ func WithSingleUseRefreshTokens(on bool) Option { return func(s *settings) { s.s
 
 // WithSilentSession lets prompt=none sign the user in without a page, as when the IdP holds a
 // session for them. Without it prompt=none answers login_required.
-func WithSilentSession() Option { return func(s *settings) { s.silentSession = true } }
+func WithSilentSession() Option {
+	return func(s *settings) { s.silentSession, s.silentFail = true, nil }
+}
 
 // WithSilentError makes prompt=none answer this OIDC error, e.g. interaction_required.
 func WithSilentError(code string) Option {
-	return func(s *settings) { s.silentFail = &Failure{Error: code} }
+	return func(s *settings) { s.silentSession, s.silentFail = false, &Failure{Error: code} }
 }
 
 // WithIDTypClaim switches `idtyp: app` on app-only tokens, i.e. whether the resource app has the
