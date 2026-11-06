@@ -448,6 +448,67 @@ func TestOwnOriginIsAlwaysAllowed(t *testing.T) {
 	}
 }
 
+// When apps can register themselves (CIMD or DCR), byward starts without static clients: the
+// default clients file may be absent and a named one may list none. A named file must exist, so a
+// typo still fails; with CIMD and DCR both off nothing could sign in, so the old refusals stay. The
+// startup log says which client sources are active.
+func TestStaticClientsAreOptionalWhenAppsCanRegister(t *testing.T) {
+	const absent, empty = "absent", "empty"
+	off := []string{"BYWARD_CIMD=false", "BYWARD_DCR=false"}
+	for _, tc := range []struct {
+		name    string
+		env     []string
+		file    string
+		named   bool
+		wantLog string // "" wants a startup error naming BYWARD_STATIC_CLIENTS_FILE
+	}{
+		{"CIMD and DCR on, the default file absent", nil, absent, false, "static=0 cimd=true dcr=true"},
+		{"DCR only, a named file listing no clients", []string{"BYWARD_CIMD=false"}, empty, true, "static=0 cimd=false dcr=true"},
+		{"CIMD only, the default file absent", []string{"BYWARD_DCR=false"}, absent, false, "static=0 cimd=true dcr=false"},
+		{"CIMD and DCR on, a named file absent", nil, absent, true, ""},
+		{"CIMD and DCR off, the default file absent", off, absent, false, ""},
+		{"CIMD and DCR off, a named file listing no clients", off, empty, true, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := t.TempDir()
+			path := filepath.Join(data, "clients.json")
+			if tc.file == empty {
+				if err := os.WriteFile(path, []byte(`{"clients":[]}`), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			environ := []string{"BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_DATA_DIR=" + data}
+			for _, kv := range authEnv(t) {
+				if !strings.HasPrefix(kv, "BYWARD_STATIC_CLIENTS_FILE=") {
+					environ = append(environ, kv)
+				}
+			}
+			if tc.named {
+				environ = append(environ, "BYWARD_STATIC_CLIENTS_FILE="+path)
+			}
+			cfg, _, err := config.Load(nil, append(environ, tc.env...), os.ReadFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var logs bytes.Buffer
+			a, err := buildAuth(cfg, slog.New(slog.NewTextHandler(&logs, nil)), Observability{})
+			if tc.wantLog == "" {
+				if err == nil || !strings.Contains(err.Error(), "BYWARD_STATIC_CLIENTS_FILE") {
+					t.Fatalf("err = %v, want a startup error naming BYWARD_STATIC_CLIENTS_FILE", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { stop(t, a) })
+			if !strings.Contains(logs.String(), `msg="client sources" `+tc.wantLog) {
+				t.Fatalf("startup log has no %q line:\n%s", tc.wantLog, logs.String())
+			}
+		})
+	}
+}
+
 func TestNewNamesTheSettingAtFault(t *testing.T) {
 	cases := []struct {
 		name, setting, doc string

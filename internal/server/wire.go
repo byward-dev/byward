@@ -67,6 +67,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	}
 	ring, sealer, provider, static, g := parts.ring, parts.sealer, parts.provider, parts.static, parts.gate
 	auditStartup(o.Audit, ring, static.IDs())
+	log.Info("client sources", "static", len(static.IDs()), "cimd", cfg.CIMD, "dcr", cfg.DCR)
 	guard := ssrfguard.New(ssrfguard.Config{}) // every client-supplied URL (CIMD documents, jwks_uri) goes through it
 	clients := registration.Chain{static}
 	if cfg.CIMD {
@@ -190,7 +191,14 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 	checkSecret := secretCheck(cfg)
 	loose := looseSecretFiles(cfg) // with the static clients' error below, reported at once
 	p.jti = registration.NewMemoryJTICache(time.Now, maxJTIs)
-	p.static, err = registration.LoadStatic(cfg.StaticClientsFile, os.ReadFile, p.jti, registration.WithSecretCheck(checkSecret))
+	opts := []registration.LoadOption{registration.WithSecretCheck(checkSecret)}
+	if cfg.CIMD || cfg.DCR { // apps can register themselves, so no static client is needed
+		opts = append(opts, registration.AllowNoClients())
+		if !cfg.StaticClientsFileNamed { // a file the operator named must exist: a typo fails here
+			opts = append(opts, registration.AllowMissingFile())
+		}
+	}
+	p.static, err = registration.LoadStatic(cfg.StaticClientsFile, os.ReadFile, p.jti, opts...)
 	if err != nil {
 		loose = append(loose, fmt.Errorf("BYWARD_STATIC_CLIENTS_FILE: %s: %w (see docs/reference/static-clients.md)", cfg.StaticClientsFile, err))
 	}

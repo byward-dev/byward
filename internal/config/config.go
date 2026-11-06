@@ -96,6 +96,9 @@ type Config struct {
 	EntraClientSecretExpiresAt time.Time
 	KeysDir                    string
 	StaticClientsFile          string
+	// StaticClientsFileNamed: the operator set the path, so the file must exist; the default may be
+	// absent when CIMD or DCR is on.
+	StaticClientsFileNamed bool
 	// The access gate (slice 1.5, ADR-0015); validated by gate.New when the broker is wired.
 	GateTenants, GateRoles, GateGroups, GateEmailDomains, GateHostedDomains []string
 	GateAllowEmpty                                                          bool
@@ -436,6 +439,7 @@ func (c *Config) paths(v *Values) []error {
 		return filepath.Join(c.DataDir, def)
 	}
 	c.KeysDir, c.StaticClientsFile, c.StoreDir = or("keys-dir", "keys"), or("static-clients-file", "clients.json"), or("store-dir", "state")
+	c.StaticClientsFileNamed = v.get("static-clients-file") != ""
 	if !filepath.IsAbs(c.StoreDir) {
 		errs = append(errs, errorf("BYWARD_STORE_DIR: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got %q", c.StoreDir))
 	}

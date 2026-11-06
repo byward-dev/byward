@@ -165,6 +165,45 @@ func TestLoadStaticNeedsJTICacheAndReadableFile(t *testing.T) {
 	}
 }
 
+// When apps can register themselves (CIMD or DCR), the server lets the operator have no static
+// clients: AllowNoClients accepts an empty list, AllowMissingFile an absent file. Only the clients
+// file itself may be absent; a secret file it names must still exist.
+func TestStaticClientsMayBeNoneWhenTheServerAllowsIt(t *testing.T) {
+	const path = "/etc/mcp/clients.json"
+	empty := files{path: `{"clients":[]}`}
+	missingSecret := files{path: `{"clients":[{"client_id":"c","token_endpoint_auth_method":"client_secret_post","redirect_uris":["https://a.example/cb"],"client_secret_file":"nope"}]}`}
+	for _, tc := range []struct {
+		name  string
+		fs    files
+		opts  []LoadOption
+		wants string // "" loads with no clients
+	}{
+		{"an empty list, allowed", empty, []LoadOption{AllowNoClients()}, ""},
+		{"an empty list, not allowed", empty, nil, "no clients"},
+		{"an absent file, allowed", files{}, []LoadOption{AllowMissingFile()}, ""},
+		{"an absent file, only an empty list allowed", files{}, []LoadOption{AllowNoClients()}, "does not exist"},
+		{"an absent secret file, absent files allowed", missingSecret, []LoadOption{AllowMissingFile(), AllowNoClients()}, "c: client_secret_file: open"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := LoadStatic(path, tc.fs.read, NewMemoryJTICache(time.Now, 1), tc.opts...)
+			switch {
+			case tc.wants == "" && (err != nil || len(r.IDs()) != 0):
+				t.Fatalf("got %v, %v; want no static clients", r, err)
+			case tc.wants != "" && (err == nil || !strings.Contains(err.Error(), tc.wants)):
+				t.Fatalf("err = %v, want %q", err, tc.wants)
+			}
+		})
+	}
+}
+
+// Only absence is tolerated: a clients file that exists but cannot be read still fails the start.
+func TestAnUnreadableStaticClientsFileFailsEvenWhenItMayBeMissing(t *testing.T) {
+	denied := func(p string) ([]byte, error) { return nil, fmt.Errorf("open %s: %w", p, fs.ErrPermission) }
+	if _, err := LoadStatic("/etc/mcp/clients.json", denied, NewMemoryJTICache(time.Now, 1), AllowMissingFile(), AllowNoClients()); err == nil || !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("err = %v, want the permission error", err)
+	}
+}
+
 func weakJWKS(t *testing.T) string {
 	t.Helper()
 	k, err := rsa.GenerateKey(rand.Reader, 1024) //nolint:gosec // deliberately weak for the test
