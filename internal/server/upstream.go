@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -33,13 +32,6 @@ type upstream struct {
 // command that does not exist fails here, at startup. With minter (authentication on), every
 // request to an HTTP upstream carries the identity assertion (ADR-0016).
 func newUpstream(cfg *config.Config, log *slog.Logger, o Observability, minter *assertion.Minter) (*upstream, error) {
-	if cfg.NoAuth {
-		// With authentication, buildAuth checks every secret file; without it, this is the only
-		// check: the stdio upstream's env file, or the HTTP upstream's credential.
-		if err := errors.Join(looseSecretFiles(cfg)...); err != nil {
-			return nil, err
-		}
-	}
 	if cfg.UpstreamCommand == nil {
 		if minter != nil {
 			return &upstream{handler: assertingUpstream(cfg, log, minter)}, nil

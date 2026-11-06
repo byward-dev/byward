@@ -17,13 +17,18 @@ import (
 	"github.com/byward-dev/byward/internal/token"
 )
 
-const upstreamCredential = "Bearer op-key-7f3a"
+// upstreamCredential is a raw API key: with a "Bearer " prefix the logger would redact it anyway,
+// and a leak would not show.
+const upstreamCredential = "op-key-7f3a"
 
 // credentialFile writes the operator's upstream credential, as the operator would: mode 0600.
 func credentialFile(t *testing.T, mode os.FileMode) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "upstream-credential")
-	if err := os.WriteFile(p, []byte(upstreamCredential+"\n"), mode); err != nil {
+	if err := os.WriteFile(p, []byte(upstreamCredential+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(p, mode); err != nil { // the mode exactly, whatever the umask
 		t.Fatal(err)
 	}
 	return p
@@ -33,21 +38,19 @@ func credentialFile(t *testing.T, mode os.FileMode) string {
 // and a client can supply neither, in any spelling (ADR-0016 §4, §7).
 func TestTheUpstreamGetsTheOperatorCredentialBesideTheAssertion(t *testing.T) {
 	for _, tc := range []struct {
-		name, credHeader, assertionHeader, forgedSpelling string
-		env                                               []string
+		name, credHeader, assertionHeader string
+		env                               []string
+		forged                            http.Header // besides the proxy token in Authorization
+		forgedSpelling                    string      // the copy only the strip removes
 	}{
-		{"credential in Authorization", "Authorization", "X-Byward-Identity", "X_byward_identity",
-			[]string{"BYWARD_ASSERTION_HEADER=X-Byward-Identity"}},
-		{"credential in its own header", "X-Api-Key", "Authorization", "X_api_key",
-			[]string{"BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"}},
+		{"credential in Authorization", "Authorization", "X-Byward-Identity", []string{"BYWARD_ASSERTION_HEADER=X-Byward-Identity"},
+			http.Header{"X_byward_identity": {"forged"}}, "X_byward_identity"},
+		{"credential in its own header", "X-Api-Key", "Authorization", []string{"BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
+			http.Header{"X-Api-Key": {"forged"}, "X_api_key": {"forged"}}, "X_api_key"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := newAsserting(t, append(tc.env, "BYWARD_UPSTREAM_CREDENTIAL_FILE="+credentialFile(t, 0o600))...)
-			forged := http.Header{tc.forgedSpelling: {"forged"}}
-			if tc.credHeader != "Authorization" {
-				forged[tc.credHeader] = []string{"forged"}
-			}
-			got := a.call(t, token.Claims{GrantID: "g1", Subject: "tid:oid", ClientID: "claude-code"}, forged)
+			got := a.call(t, token.Claims{GrantID: "g1", Subject: "tid:oid", ClientID: "claude-code"}, tc.forged)
 			if v := got.Header.Values(tc.credHeader); len(v) != 1 || v[0] != upstreamCredential {
 				t.Fatalf("%s at the upstream: %q, want only the operator's credential", tc.credHeader, v)
 			}
@@ -114,7 +117,8 @@ func TestALooseUpstreamCredentialFileRefusesToStart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := New(cfg, slog.New(slog.DiscardHandler)); err == nil || !strings.Contains(err.Error(), "BYWARD_UPSTREAM_CREDENTIAL_FILE") {
+			_, err = New(cfg, slog.New(slog.DiscardHandler))
+			if err == nil || !strings.Contains(err.Error(), "BYWARD_UPSTREAM_CREDENTIAL_FILE: secret file") || !strings.Contains(err.Error(), "so other users can read it") {
 				t.Fatalf("New = %v, want the loose credential file refused", err)
 			}
 		})

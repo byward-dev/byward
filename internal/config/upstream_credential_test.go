@@ -30,41 +30,53 @@ func TestNoUpstreamCredentialByDefault(t *testing.T) {
 	}
 }
 
-// The credential comes from a file only, and is read with its trailing newline removed, into the
-// header the operator names (Authorization by default, beside an assertion moved elsewhere).
-func TestTheUpstreamCredentialIsReadFromItsFile(t *testing.T) {
+// shown fails the test if any setting, as --print-config and the startup log show it, contains
+// the credential.
+func shown(t *testing.T, c *Config) {
+	t.Helper()
+	for _, v := range c.Values.Effective() {
+		if strings.Contains(v.Display(), "k-123") {
+			t.Fatalf("%s shows the credential", v.Setting.Env())
+		}
+	}
+}
+
+// The file fills the header the operator chose (Authorization by default, beside an assertion
+// moved elsewhere), without its trailing newline; a tab inside the value is allowed, as in any
+// header value; and the effective configuration never shows it.
+func TestTheUpstreamCredentialFileFillsTheChosenHeaderAndIsRedacted(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		noAuth     bool
-		env        []string
-		wantHeader string
+		name, cred, want, wantHeader string
+		env                          []string
 	}{
-		{"in Authorization, the assertion moved", false, []string{"BYWARD_ASSERTION_HEADER=X-Byward-Identity"}, "Authorization"},
-		{"in a header of its own", false, []string{"BYWARD_UPSTREAM_CREDENTIAL_HEADER=x-api-key"}, "X-Api-Key"},
-		{"without authentication, in Authorization", true, nil, "Authorization"},
+		{"in Authorization, the assertion moved", "Bearer k-123\n", "Bearer k-123", "Authorization", []string{"BYWARD_ASSERTION_HEADER=X-Byward-Identity"}},
+		{"in a header of its own", "k-123\n", "k-123", "X-Api-Key", []string{"BYWARD_UPSTREAM_CREDENTIAL_HEADER=x-api-key"}},
+		{"with a tab inside", "k-123\tv2", "k-123\tv2", "X-Api-Key", []string{"BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			env := append([]string{"BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile}, tc.env...)
-			var c *Config
-			var err error
-			if tc.noAuth {
-				c, _, err = Load(nil, append([]string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp",
-					"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_DEV=true"}, env...), func(string) ([]byte, error) { return []byte("Bearer k-123\n"), nil })
-			} else {
-				c, err = loadCred(t, nil, "Bearer k-123\n", env...)
-			}
+			c, err := loadCred(t, nil, tc.cred, append([]string{"BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile}, tc.env...)...)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if c.UpstreamCredential != "Bearer k-123" || c.UpstreamCredentialHeader != tc.wantHeader {
+			if c.UpstreamCredential != tc.want || c.UpstreamCredentialHeader != tc.wantHeader {
 				t.Fatalf("header %q", c.UpstreamCredentialHeader)
 			}
-			v := c.Values.byKey["upstream-credential"]
-			if v.Display() != "<redacted>" {
-				t.Fatal("the credential is shown in the effective configuration")
-			}
+			shown(t, c)
 		})
 	}
+}
+
+// Without authentication there is no assertion, so the credential may keep Authorization.
+func TestWithoutAuthenticationTheCredentialMayUseAuthorization(t *testing.T) {
+	c, _, err := Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_INSECURE_NO_AUTH=true",
+		"BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile}, func(string) ([]byte, error) { return []byte("Bearer k-123\n"), nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.UpstreamCredential != "Bearer k-123" || c.UpstreamCredentialHeader != "Authorization" {
+		t.Fatalf("header %q", c.UpstreamCredentialHeader)
+	}
+	shown(t, c)
 }
 
 // What cannot work refuses to start, and no error shows the credential.
@@ -90,11 +102,13 @@ func TestUpstreamCredentialSettingsRefuseWhatCannotWork(t *testing.T) {
 			"BYWARD_UPSTREAM_CREDENTIAL_FILE: the file is empty"},
 		{"two lines", "k-123\nk-456", []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
 			"one header value on one line, without control characters"},
+		{"a DEL character", "k-123\x7f", []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
+			"one header value on one line, without control characters"},
 		{"surrounding white space", " k-123", []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
 			"the credential starts or ends with white space"},
 		{"too long", strings.Repeat("k", maxUpstreamCredential+1), []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
 			"the credential is longer than 4096 bytes"},
-		{"inline", "", []string{"BYWARD_UPSTREAM_CREDENTIAL=k-123", "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
+		{"a credential set inline, not from a file", "", []string{"BYWARD_UPSTREAM_CREDENTIAL=k-123", "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
 			"secrets must come from a file (BYWARD_UPSTREAM_CREDENTIAL_FILE)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
