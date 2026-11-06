@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 )
 
 // An upstream 401 or 403 means it refused the proxy's credential or identity assertion: the
@@ -23,12 +24,23 @@ const (
 )
 
 // capture keeps the first captureLimit bytes of a request body as it streams to the upstream.
+// The transport writes it on its own goroutine, and an upstream may refuse before reading the whole
+// body, so reads take a locked snapshot; a partial body then fails to parse and becomes a 502.
 type capture struct {
+	mu        sync.Mutex
 	buf       []byte
 	truncated bool
 }
 
+func (c *capture) snapshot() ([]byte, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]byte(nil), c.buf...), c.truncated
+}
+
 func (c *capture) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if room := captureLimit - len(c.buf); len(p) > room {
 		c.buf = append(c.buf, p[:max(room, 0)]...)
 		c.truncated = true
@@ -112,18 +124,21 @@ func synthesize(req rpcRequest, upstreamStatus int) []byte {
 		v = map[string]any{"jsonrpc": "2.0", "id": req.id, "error": map[string]any{
 			"code": -32603, "message": msg, "data": map[string]int{"upstreamStatus": upstreamStatus}}}
 	}
-	b, err := json.Marshal(v)
-	if err != nil {
+	// No HTML escaping: the id must come back byte for byte, and `<`, `>`, `&` are valid in it.
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
 		panic(err) // only maps of strings, ints and a validated raw id
 	}
-	return b
+	return bytes.TrimSuffix(b.Bytes(), []byte("\n"))
 }
 
 // outcome names what translate did, for the operator log.
 type outcome string
 
 const (
-	outcomeStreamRefused outcome = "stream refused with 405"
+	outcomeStreamRefused outcome = "non-POST refused with 405"
 	outcomeNotification  outcome = "notification accepted with 202"
 	outcomeRelayed       outcome = "upstream JSON-RPC response relayed with 200"
 	outcomeSynthesized   outcome = "answered with a JSON-RPC response"
@@ -133,18 +148,23 @@ const (
 // translate rewrites an upstream refusal in place. It reports outcomeUnanswerable when the
 // response must become a 502 instead.
 func translate(res *http.Response, c *capture) outcome {
-	if res.Request.Method == http.MethodGet {
-		// The spec's "no SSE stream offered"; clients treat it as harmless.
+	up, _ := io.ReadAll(io.LimitReader(res.Body, captureLimit+1))
+	_ = res.Body.Close() // always, so the upstream connection returns to the pool
+	if res.Request.Method != http.MethodPost {
+		// GET: the spec's "no SSE stream offered"; DELETE: "termination not allowed". Clients treat
+		// both as harmless.
 		replace(res, http.StatusMethodNotAllowed, nil)
-		res.Header.Set("Allow", "POST, DELETE")
+		res.Header.Set("Allow", "POST")
 		return outcomeStreamRefused
 	}
-	up, _ := io.ReadAll(io.LimitReader(res.Body, captureLimit+1))
-	_ = res.Body.Close()
-	if c == nil || c.truncated {
+	if c == nil {
 		return outcomeUnanswerable
 	}
-	req, ok := parseRequest(c.buf)
+	body, truncated := c.snapshot()
+	if truncated {
+		return outcomeUnanswerable
+	}
+	req, ok := parseRequest(body)
 	switch {
 	case !ok:
 		return outcomeUnanswerable
@@ -164,6 +184,7 @@ func replace(res *http.Response, status int, body []byte) {
 	res.StatusCode = status
 	res.Status = fmt.Sprintf("%d %s", status, http.StatusText(status))
 	res.Header = http.Header{}
+	res.Trailer = nil
 	res.TransferEncoding = nil
 	res.ContentLength = int64(len(body))
 	res.Body = io.NopCloser(bytes.NewReader(body))

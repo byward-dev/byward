@@ -50,6 +50,9 @@ func TestUpstreamRefusalBecomesAReadableJSONRPCResponse(t *testing.T) {
 			`"isError":true`},
 		{"notification: accepted", 403, ``, "POST", `{"jsonrpc":"2.0","method":"notifications/initialized"}`, 202, ""},
 		{"GET stream: no stream offered", 403, ``, "GET", ``, 405, ""},
+		{"DELETE: termination not allowed", 403, ``, "DELETE", ``, 405, ""},
+		{"401 on another method names the credential", 401, ``, "POST", `{"jsonrpc":"2.0","id":3,"method":"tools/list"}`, 200,
+			`"data":{"upstreamStatus":401},"message":"The upstream MCP server rejected the proxy's credentials; ask your operator."`},
 		{"batch: id unknown, 502", 403, ``, "POST", `[` + toolsCall + `]`, 502, "upstream refused the proxy"},
 		{"not JSON-RPC: 502", 403, ``, "POST", `hello`, 502, "upstream refused the proxy"},
 		{"null id: 502", 403, ``, "POST", `{"jsonrpc":"2.0","id":null,"method":"tools/call"}`, 502, "upstream refused the proxy"},
@@ -62,7 +65,10 @@ func TestUpstreamRefusalBecomesAReadableJSONRPCResponse(t *testing.T) {
 			if w.Code != c.wantStatus {
 				t.Fatalf("status %d, want %d (body %q)", w.Code, c.wantStatus, w.Body)
 			}
-			if c.wantBody == "" && w.Body.Len() != 0 || !strings.Contains(w.Body.String(), c.wantBody) {
+			if c.wantBody == "" && w.Body.Len() != 0 {
+				t.Fatalf("body %q, want empty", w.Body)
+			}
+			if !strings.Contains(w.Body.String(), c.wantBody) {
 				t.Fatalf("body %q, want %q", w.Body, c.wantBody)
 			}
 			if w.Header().Get("WWW-Authenticate") != "" {
@@ -106,7 +112,7 @@ func TestIDIsEchoedExactly(t *testing.T) {
 }
 
 func FuzzRefusalAnswer(f *testing.F) {
-	for _, s := range []string{toolsCall, `{"jsonrpc":"2.0","method":"x"}`, `[1]`, `{"id":1}`, `{"jsonrpc":"2.0","id":"q","method":"tools/call"}`, ``} {
+	for _, s := range []string{toolsCall, `{"jsonrpc":"2.0","id":"<&>","method":"tools/call"}`, `{"jsonrpc":"2.0","method":"x"}`, `[1]`, `{"id":1}`, `{"jsonrpc":"2.0","id":"q","method":"tools/call"}`, ``} {
 		f.Add([]byte(s), []byte(`{"jsonrpc":"2.0","id":7,"result":{}}`))
 	}
 	f.Fuzz(func(t *testing.T, reqBody, upBody []byte) {
@@ -119,8 +125,8 @@ func FuzzRefusalAnswer(f *testing.F) {
 			JSONRPC string          `json:"jsonrpc"`
 			ID      json.RawMessage `json:"id"`
 		}
-		if err := json.Unmarshal(out, &m); err != nil || m.JSONRPC != "2.0" || !matchingResponse(out, req.id) {
-			t.Fatalf("synthesized answer %s is not a response to id %s", out, req.id)
+		if err := json.Unmarshal(out, &m); err != nil || m.JSONRPC != "2.0" || !bytes.Equal(m.ID, req.id) {
+			t.Fatalf("synthesized answer %s does not echo id %s byte for byte", out, req.id)
 		}
 		_ = matchingResponse(upBody, req.id) // must not panic
 	})

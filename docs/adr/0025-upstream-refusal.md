@@ -36,7 +36,8 @@ or send their own denials as 403 (ToolHive). Every one of them hits at least one
 When the upstream answers **401 or 403**, its `WWW-Authenticate` header and the rest of its
 headers are dropped, and:
 
-1. **`GET` (the stream):** 405, the spec's "no stream offered".
+1. **Anything but `POST`:** 405. For `GET` that is the spec's "no stream offered", for `DELETE`
+   "termination not allowed"; clients treat both as harmless.
 2. **A notification (no `id`):** 202.
 3. **A request whose upstream body is already a JSON-RPC response with the same `id`:** that body,
    with status 200, so the upstream's own message arrives.
@@ -50,7 +51,8 @@ headers are dropped, and:
    (check the upstream credential, or the roles it requires).
 
 To answer with the right `id`, the relay keeps a bounded copy (64 KiB) of each request body as it
-streams to the upstream, and parses it only on this path. _Amends ADR-0003 §1_: the relay stays
+streams to the upstream, and parses it only on this path. The upstream body is always read and
+closed, so its connection returns to the pool. _Amends ADR-0003 §1_: the relay stays
 byte-transparent except for upstream refusals. ADR-0021 is unchanged: bodies never reach logs.
 
 ## Consequences
