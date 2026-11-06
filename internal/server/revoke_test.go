@@ -136,3 +136,20 @@ func TestRevocationNeedsAuthentication(t *testing.T) {
 		t.Fatalf("RevokeAll without authentication = %v, want an error naming BYWARD_INSECURE_NO_AUTH", err)
 	}
 }
+
+// A revocation that fails is not audited: the grant_revoked record follows the stored revocation.
+func TestAFailedRevocationIsNotAudited(t *testing.T) {
+	cfg, _ := revokeEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the store still opens (on its own deadline); the revocation's write then fails
+	var logs bytes.Buffer
+	if err := RevokeAll(ctx, cfg, slog.New(slog.NewJSONHandler(&logs, nil))); err == nil {
+		t.Fatal("RevokeAll with a cancelled context succeeded")
+	}
+	if strings.Contains(logs.String(), `"event":"grant_revoked"`) {
+		t.Fatalf("a failed revocation was audited: %s", logs.String())
+	}
+	if !strings.Contains(logs.String(), `"msg":"store open"`) {
+		t.Fatalf("the store never opened, so this test proves nothing: %s", logs.String())
+	}
+}
