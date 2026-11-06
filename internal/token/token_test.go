@@ -50,7 +50,7 @@ func TestOpenReturnsWhatWasSealed(t *testing.T) {
 		for _, typ := range []Type{Access, Code} {
 			tok, err := s.Seal(typ, c)
 			if err != nil {
-				return len(tok) > MaxLen // only an oversized claim may fail
+				return false
 			}
 			got, err := s.Open(typ, tok)
 			if err != nil || got.GrantID != c.GrantID || got.Subject != c.Subject || !got.IssuedAt.Equal(c.IssuedAt) || !got.ExpiresAt.Equal(c.ExpiresAt) {
@@ -217,6 +217,27 @@ func TestSealRejectsIncompleteClaims(t *testing.T) {
 				t.Fatalf("Seal = %v, want errClaims", err)
 			}
 		})
+	}
+}
+
+// Regressions from the runtime sweep: Seal must never return a token that Open rejects.
+func TestSealRefusesWhatOpenWouldReject(t *testing.T) {
+	s := newSealer(t)
+	huge := claims()
+	huge.Subject = strings.Repeat("s", MaxLen)
+	if _, err := s.Seal(Access, huge); !errors.Is(err, errTooLong) {
+		t.Fatalf("oversized claims: Seal = %v, want errTooLong", err)
+	}
+	sameSecond := claims()
+	sameSecond.IssuedAt, sameSecond.ExpiresAt = time.Unix(100, 1e8), time.Unix(100, 9e8)
+	if _, err := s.Seal(Access, sameSecond); !errors.Is(err, errClaims) {
+		t.Fatalf("iat and exp in the same second: Seal = %v, want errClaims", err)
+	}
+	subSecond := claims()
+	subSecond.IssuedAt, subSecond.ExpiresAt = time.Unix(100, 9e8), time.Unix(101, 1e8)
+	got, err := s.Open(Access, mustSeal(t, s, Access, subSecond))
+	if err != nil || !got.IssuedAt.Equal(time.Unix(100, 0)) || !got.ExpiresAt.Equal(time.Unix(101, 0)) {
+		t.Fatalf("sub-second times: %+v, %v; want whole seconds", got, err)
 	}
 }
 

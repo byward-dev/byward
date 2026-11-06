@@ -85,6 +85,7 @@ var (
 	errVersion   = errors.New("token: unknown format version")
 	errOpen      = errors.New("token: cannot open")
 	errClaims    = errors.New("token: invalid claims")
+	errTooLong   = errors.New("token: claims too large for a token")
 )
 
 // Sealer seals and opens tokens for one resource URL with one key ring.
@@ -107,6 +108,8 @@ func (s *Sealer) Seal(t Type, c Claims) (string, error) {
 	if t.prefix() == "" {
 		return "", errWrongType
 	}
+	// Tokens carry whole seconds; check what Open will see, not what was passed in.
+	c.IssuedAt, c.ExpiresAt = c.IssuedAt.Truncate(time.Second), c.ExpiresAt.Truncate(time.Second)
 	if err := c.validate(); err != nil {
 		return "", err
 	}
@@ -117,7 +120,11 @@ func (s *Sealer) Seal(t Type, c Claims) (string, error) {
 	k := s.ring.signing
 	header := append([]byte{formatVersion, byte(len(k.id))}, k.id...) //nolint:gosec // G115: key IDs are at most 64 bytes (keyIDPattern)
 	sealed := k.aead.Seal(header, nil, plain, s.ad(t, k.id))          //nolint:gosec // G407: NewGCMWithRandomNonce makes the nonce; nil is required
-	return t.prefix() + base64.RawURLEncoding.EncodeToString(sealed), nil
+	tok := t.prefix() + base64.RawURLEncoding.EncodeToString(sealed)
+	if len(tok) > MaxLen {
+		return "", errTooLong
+	}
+	return tok, nil
 }
 
 // Open checks a token of type t in the order of ADR-0014: prefix, then the AEAD open with the key
