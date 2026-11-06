@@ -125,9 +125,20 @@ func TestRevokeSubjectRacingCreateGrantAcrossProcessesLeavesNoCoveredGrant(t *te
 	}
 }
 
+// Operators back the database up by this file name (docs/how-to/state.md).
+func TestTheDatabaseFileOperatorsBackUpIsNamedBywardDB(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	s := open(t, dir, filepath.Join(t.TempDir(), "writes"))
+	if _, err := s.CreateGrant(ctx, grant("g1", "tid:a")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "byward.db")); err != nil {
+		t.Fatalf("want byward.db in the state directory (docs/how-to/state.md backs it up by name): %v", err)
+	}
+}
+
 func TestDatabaseFilesAreOwnerOnly(t *testing.T) {
-	// The file name is operator-facing (docs/how-to/state.md says to back it up by name): a literal.
-	files := []string{"byward.db", "byward.db-wal", "byward.db-shm"}
+	files := []string{fileName, fileName + "-wal", fileName + "-shm"}
 	cases := []struct {
 		name  string
 		setup func(t *testing.T, dir string)
