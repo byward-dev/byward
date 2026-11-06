@@ -23,6 +23,7 @@ import (
 	"github.com/corker/mcp-authproxy/internal/idp/entra"
 	"github.com/corker/mcp-authproxy/internal/registration"
 	"github.com/corker/mcp-authproxy/internal/store"
+	"github.com/corker/mcp-authproxy/internal/store/memory"
 	"github.com/corker/mcp-authproxy/internal/testutil/fakeidp"
 	"github.com/corker/mcp-authproxy/internal/token"
 )
@@ -36,66 +37,23 @@ const (
 
 var t0 = time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 
-// memStore is a minimal in-test store until internal/store/memory lands.
+// memStore is the in-memory store, recording created grant IDs so tests can find "the" grant.
 type memStore struct {
-	mu      sync.Mutex
-	grants  map[string]store.Grant
-	codes   map[string]store.PendingCode
-	used    map[string]bool
-	revoked map[string]bool
+	*memory.Store
+	mu  sync.Mutex
+	ids []string
 }
 
-func newMemStore() *memStore {
-	return &memStore{grants: map[string]store.Grant{}, codes: map[string]store.PendingCode{}, used: map[string]bool{}, revoked: map[string]bool{}}
-}
-func (m *memStore) CreateGrant(_ context.Context, g store.Grant) (store.Grant, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	g.Epoch = 1
-	m.grants[g.ID] = g
-	return g, nil
-}
-func (m *memStore) Grant(_ context.Context, id string) (store.Grant, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	g, ok := m.grants[id]
-	if !ok {
-		return store.Grant{}, store.ErrNotFound
+func newMemStore() *memStore { return &memStore{Store: memory.New()} }
+
+func (m *memStore) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, error) {
+	got, err := m.Store.CreateGrant(ctx, g)
+	if err == nil {
+		m.mu.Lock()
+		m.ids = append(m.ids, g.ID)
+		m.mu.Unlock()
 	}
-	return g, nil
-}
-func (m *memStore) RevokeGrant(_ context.Context, id string, _ time.Time) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.grants, id)
-	m.revoked[id] = true
-	return nil
-}
-func (m *memStore) PutCode(_ context.Context, c store.PendingCode) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.codes[c.GrantID] = c
-	return nil
-}
-func (m *memStore) ConsumeCode(_ context.Context, id string, now time.Time) (store.PendingCode, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	c, ok := m.codes[id]
-	switch {
-	case !ok || !now.Before(c.ExpiresAt):
-		return store.PendingCode{}, store.ErrNotFound
-	case m.used[id]:
-		return store.PendingCode{}, store.ErrConsumed
-	}
-	m.used[id] = true
-	return c, nil
-}
-func (m *memStore) PutRefreshToken(context.Context, store.RefreshToken) error { return nil }
-func (m *memStore) RefreshToken(context.Context, [32]byte) (store.RefreshToken, error) {
-	return store.RefreshToken{}, store.ErrNotFound
-}
-func (m *memStore) RevocationsSince(context.Context, time.Time) ([]store.Revocation, error) {
-	return nil, nil
+	return got, err
 }
 
 // staticClient is a minimal in-test public client until internal/registration lands.
@@ -282,10 +240,10 @@ func TestStaticClientSignsInWithEntraAndGetsAProxyToken(t *testing.T) {
 func firstGrant(m *memStore) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for id := range m.codes {
-		return id
+	if len(m.ids) == 0 {
+		return ""
 	}
-	return ""
+	return m.ids[0]
 }
 
 func TestReusedCodeRevokesTheGrant(t *testing.T) {
