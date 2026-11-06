@@ -61,6 +61,10 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (*auth, er
 	if err != nil {
 		return nil, err
 	}
+	consentBox, err := token.NewBox(ring, "consent", nil)
+	if err != nil {
+		return nil, err
+	}
 	clients, err := registration.LoadStatic(cfg.StaticClientsFile, os.ReadFile, registration.NewMemoryJTICache(time.Now, maxJTIs))
 	if err != nil {
 		return nil, fmt.Errorf("MCP_AUTHPROXY_STATIC_CLIENTS_FILE: %w", err)
@@ -81,9 +85,11 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (*auth, er
 		log.Warn(w)
 	}
 	st := memory.New()
-	b, err := newBroker(broker.Config{Issuer: cfg.Issuer(), Resource: cfg.PublicURL, Scope: cfg.Scope, IdPName: idpName,
-		IdPLabel: "Microsoft Entra", IdP: provider, Clients: clients, Store: st, Sealer: sealer,
-		LoginBox: loginBox, IdPTokenBox: idpBox, Gate: g, SecureCookies: cfg.PublicURL.Scheme == "https", Log: log,
+	b, err := newBroker(broker.Config{Issuer: cfg.Issuer(), Origin: cfg.Origin(), Resource: cfg.PublicURL, Scope: cfg.Scope,
+		IdPName: idpName, IdPLabel: "Microsoft Entra", IdPScopes: provider.Scope(), IdP: provider, Clients: clients,
+		Store: st, Sealer: sealer, LoginBox: loginBox, IdPTokenBox: idpBox, ConsentBox: consentBox, Gate: g,
+		UpstreamName: cfg.ResourceName, ScopeText: cfg.ScopeDescription, OperatorName: cfg.OperatorName,
+		SecureCookies: cfg.PublicURL.Scheme == "https", Log: log,
 		Audit: o.Audit, ObserveIdP: func(op, outcome string, d time.Duration) { o.Metrics.IdP(idpName, op, outcome, d) }})
 	if err != nil {
 		return nil, err
@@ -91,6 +97,10 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (*auth, er
 	v, err := token.NewValidator(sealer, b.Deny(), nil)
 	if err != nil {
 		return nil, err
+	}
+	if cfg.ScopeDescription == "" {
+		log.Warn("consent page uses generic wording", "setting", "MCP_AUTHPROXY_SCOPE_DESCRIPTION",
+			"reason", "set it to say in plain words what the "+cfg.Scope+" scope lets an app do (ADR-0010 §4)")
 	}
 	log.Info("broker ready", "reason", "keys "+fmt.Sprint(len(ring.KeyIDs()))+", signing with "+ring.SigningKeyID()+"; store in memory until slice 1.3")
 	return &auth{register: b.Register, validator: v, checks: readiness(ring, st)}, nil

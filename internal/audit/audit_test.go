@@ -32,6 +32,9 @@ var samples = []Event{
 	{Name: KeyLoaded, Outcome: Success, Reason: "signing", KeyID: "k1"},
 	{Name: HostRejected, Outcome: Failure, Host: "evil.example"},
 	{Name: OriginRejected, Outcome: Failure, Origin: "https://evil.example"},
+	{Name: ConsentShown, Outcome: Success, ClientID: "client-1", ClientTrust: "verified"},
+	{Name: ConsentGranted, Outcome: Success, ClientID: "client-1", ClientTrust: "verified"},
+	{Name: ConsentDenied, Outcome: Failure, Reason: "the user denied the request", ClientID: "client-1", ClientTrust: "verified"},
 }
 
 func render(t *testing.T) string {
@@ -42,7 +45,7 @@ func render(t *testing.T) string {
 		r := httptest.NewRequest("GET", "/mcp", nil)
 		r.RemoteAddr = "192.0.2.7:1234"
 		switch e.Name {
-		case AccessTokenRejected, HostRejected, OriginRejected, TokenRejected:
+		case AccessTokenRejected, HostRejected, OriginRejected, TokenRejected, ConsentShown, ConsentGranted, ConsentDenied:
 			l.RecordUnauthenticated(r, e)
 		case ClientRegistered, KeyLoaded:
 			l.Record(nil, e) // startup: no request
@@ -82,7 +85,7 @@ func TestAuditRecordsMatchTheGoldenSchema(t *testing.T) {
 
 // names lists every event constant; a new one must be added here, to samples and to the docs.
 var names = []string{Login, AccessDenied, TokenIssued, TokenRejected, AccessTokenRejected, GrantRevoked,
-	ClientRegistered, KeyLoaded, HostRejected, OriginRejected}
+	ClientRegistered, KeyLoaded, HostRejected, OriginRejected, ConsentShown, ConsentGranted, ConsentDenied}
 
 func TestEveryEventHasASampleAndADocsRow(t *testing.T) {
 	docs, err := os.ReadFile("../../docs/reference/observability.md")
@@ -99,6 +102,41 @@ func TestEveryEventHasASampleAndADocsRow(t *testing.T) {
 		}
 		if !strings.Contains(string(docs), "| `"+n+"` |") {
 			t.Errorf("event %q has no row in docs/reference/observability.md", n)
+		}
+	}
+}
+
+// Users behind one NAT share a source address; many page views must not hide their decisions, and
+// one source's flood must not hide another source's records.
+func TestRecordsAreLimitedPerSourceAndEvent(t *testing.T) {
+	var buf bytes.Buffer
+	now := time.Unix(1_800_000_000, 0)
+	l := New(logging.New(&buf, "json"), nil, func() time.Time { return now })
+	nat := httptest.NewRequest("GET", "/authorize", nil)
+	nat.RemoteAddr = "192.0.2.7:1234"
+	for range unauthBurst + 5 {
+		l.RecordUnauthenticated(nat, Event{Name: ConsentShown, Outcome: Success, ClientID: "client-1"})
+	}
+	other := httptest.NewRequest("GET", "/authorize", nil)
+	other.RemoteAddr = "198.51.100.9:1"
+	l.RecordUnauthenticated(other, Event{Name: ConsentShown, Outcome: Success, ClientID: "client-1"})
+	l.RecordUnauthenticated(nat, Event{Name: ConsentDenied, Outcome: Failure, ClientID: "client-1"})
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if n := strings.Count(buf.String(), `"event":"consent_shown","outcome":"success","client_id":"client-1","remote_ip":"192.0.2.7"`); n != unauthBurst {
+		t.Fatalf("logged %d consent_shown records from the flooding source, want %d", n, unauthBurst)
+	}
+	if len(lines) != unauthBurst+2 {
+		t.Fatalf("logged %d records, want %d: %s", len(lines), unauthBurst+2, buf.String())
+	}
+	for _, want := range []string{`"remote_ip":"198.51.100.9"`, `"event":"consent_denied"`} {
+		var line string
+		for _, l := range lines {
+			if strings.Contains(l, want) {
+				line = l
+			}
+		}
+		if line == "" || strings.Contains(line, "suppressed") {
+			t.Fatalf("record with %s missing or marked suppressed: %q", want, line)
 		}
 	}
 }

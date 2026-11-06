@@ -27,17 +27,19 @@ or the IdP's `error_description`.
 | `request_id` | The request ID: on error pages, in `/token` error descriptions, in `X-Request-Id`, and sent to Entra as `client-request-id` (Entra's `correlation_id`) |
 | `remote_ip` | The TCP peer (forwarded headers are not trusted) |
 | `client_id` | The MCP client |
+| `client_trust` | The client's trust level on the consent page: `verified`, `domain` or `not-verified` (ADR-0008 §8) |
 | `user_key` | The IdP user key (`tid:oid` for Entra). Personal data (GDPR Recital 26) |
 | `grant_id` | The grant (one user's authorization of one client) |
 | `idp` | The IdP adapter, e.g. `entra` |
 | `key_id` | A sealing key ID |
 | `host`, `origin` | The rejected `Host` or `Origin` value |
 | `reason` | A fixed reason; for `token_rejected` the OAuth error code |
-| `suppressed` | How many records from the same `remote_ip` were dropped by the rate limit since the previous one |
+| `suppressed` | How many records of the same event from the same `remote_ip` were dropped by the rate limit since the previous one |
 
-Events from requests whose sender is not authenticated (marked *limited* below) are rate-limited per source address,
-across all such events together: 10 per minute, then counted and reported as `suppressed=N` on the next limited record
-from that source. A sender can therefore only crowd out its own records. Metrics count every event, logged or not.
+Events from requests whose sender is not authenticated (marked *limited* below) are rate-limited per source address
+and event: 10 per minute for each event, then counted and reported as `suppressed=N` on the next record of that event
+from that source. A sender can therefore only crowd out its own records of the same event: consent page views never
+hide consent decisions. Metrics count every event, logged or not.
 
 ### Events and OCSF mapping
 
@@ -58,8 +60,11 @@ For SIEMs that use [OCSF](https://schema.ocsf.io) 1.9.0. Fields map as follows: 
 | `key_loaded` | a sealing key was loaded at startup (`reason` = `signing` or `verification`) | success | no | 6002 Application Lifecycle / 3 Start (*approximate*) |
 | `host_rejected` | a request named a `Host` outside the allowlist (421) | failure | yes | 4002 HTTP Activity; `disposition_id` 2 Blocked |
 | `origin_rejected` | a request sent an `Origin` outside the allowlist (403) | failure | yes | 4002 HTTP Activity; `disposition_id` 2 Blocked |
+| `consent_shown` | the consent page was shown, before the IdP sign-in (the user is not known yet) | success | yes | 3003 Authorize Session / 99 Other (*approximate*) |
+| `consent_granted` | the user allowed the client on the consent page | success | yes | 3003 Authorize Session / 99 Other (*approximate*) |
+| `consent_denied` | the user denied the client on the consent page (`reason` fixed) | failure | yes | 3003 Authorize Session / 99 Other (*approximate*) |
 
-Not emitted yet; these arrive with their slices: consent granted or denied (slice 1.4),
+Not emitted yet; these arrive with their slices:
 refresh, revocation and store restore detection (slice 1.6), dynamic registration (slice 2.2), and key rotation
 (later).
 

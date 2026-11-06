@@ -9,3 +9,6 @@
 {"time":"T","level":"INFO","msg":"audit key_loaded","log.type":"audit","schema_version":1,"event":"key_loaded","outcome":"success","reason":"signing","key_id":"k1"}
 {"time":"T","level":"WARN","msg":"audit host_rejected","log.type":"audit","schema_version":1,"event":"host_rejected","outcome":"failure","host":"evil.example","remote_ip":"192.0.2.7"}
 {"time":"T","level":"WARN","msg":"audit origin_rejected","log.type":"audit","schema_version":1,"event":"origin_rejected","outcome":"failure","origin":"https://evil.example","remote_ip":"192.0.2.7"}
+{"time":"T","level":"INFO","msg":"audit consent_shown","log.type":"audit","schema_version":1,"event":"consent_shown","outcome":"success","client_id":"client-1","client_trust":"verified","remote_ip":"192.0.2.7"}
+{"time":"T","level":"INFO","msg":"audit consent_granted","log.type":"audit","schema_version":1,"event":"consent_granted","outcome":"success","client_id":"client-1","client_trust":"verified","remote_ip":"192.0.2.7"}
+{"time":"T","level":"WARN","msg":"audit consent_denied","log.type":"audit","schema_version":1,"event":"consent_denied","outcome":"failure","reason":"the user denied the request","client_id":"client-1","client_trust":"verified","remote_ip":"192.0.2.7"}

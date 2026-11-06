@@ -28,6 +28,8 @@ Precedence: flag > environment > default. Secrets are read only from files.
 | `--gate-email-domains` | `MCP_AUTHPROXY_GATE_EMAIL_DOMAINS` | — | access gate: comma-separated domains of a verified email; generic OIDC IdPs only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md) |
 | `--gate-hosted-domains` | `MCP_AUTHPROXY_GATE_HOSTED_DOMAINS` | — | access gate: comma-separated Google Workspace domains (hd claim); Google only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md) |
 | `--gate-allow-empty` | `MCP_AUTHPROXY_GATE_ALLOW_EMPTY` | false | allow an empty access gate for a Google or generic OIDC IdP (anyone with an account can sign in); no effect with Entra (docs/how-to/access-gate.md) |
+| `--operator-name` | `MCP_AUTHPROXY_OPERATOR_NAME` | — | who runs this proxy, shown on the consent page, e.g. Contoso IT |
+| `--scope-description` | `MCP_AUTHPROXY_SCOPE_DESCRIPTION` | — | what the scope lets an app do, in plain words for the consent page, e.g. Read and query your team's dashboards |
 | `--insecure-no-auth` | `MCP_AUTHPROXY_INSECURE_NO_AUTH` | false | no authentication at all, for trying the proxy out and for tests; loopback only (ADR-0027) |
 | `--dev` | `MCP_AUTHPROXY_DEV` | false | development mode: enables the relaxations it logs at startup |
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"html"
 	"io"
 	"log/slog"
 	"net"
@@ -743,6 +744,95 @@ func TestReadinessIsKeysAndStoreOnly(t *testing.T) {
 			code, body := getBody(t, mux, "x", "/readyz")
 			if code != c.wantCode || strings.TrimSpace(body) != c.wantBody {
 				t.Fatalf("readyz = %d %s, want %d %s (exactly keys and store, no IdP, no error text)", code, body, c.wantCode, c.wantBody)
+			}
+		})
+	}
+}
+
+// The wired broker shows the consent page with the operator's wording and accepts an answer that
+// carries the public origin: a wrong Origin wiring would refuse every real Allow.
+func TestTheServerShowsTheOperatorsConsentPageAndDenyReturnsToTheApp(t *testing.T) {
+	env := append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp",
+		"MCP_AUTHPROXY_OPERATOR_NAME=Contoso IT", "MCP_AUTHPROXY_SCOPE_DESCRIPTION=Read your dashboards.", "MCP_AUTHPROXY_RESOURCE_NAME=Team dashboards")
+	cfg, _, err := config.Load(nil, env, os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.Public.Handler)
+	t.Cleanup(ts.Close)
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1/callback"}, "response_type": {"code"},
+		"code_challenge": {strings.Repeat("A", 43)}, "code_challenge_method": {"S256"}, "state": {"s"}}
+	r, _ := http.NewRequest("GET", ts.URL+"/authorize?"+q.Encode(), nil)
+	r.Host = "mcp.example.com"
+	res, err := client.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	_ = res.Body.Close()
+	m := regexp.MustCompile(`name="flow" value="([^"]+)"`).FindSubmatch(body)
+	if res.StatusCode != http.StatusOK || m == nil || len(res.Cookies()) != 1 {
+		t.Fatalf("authorize: %d, cookies %v: %s", res.StatusCode, res.Cookies(), body)
+	}
+	text := strings.Join(strings.Fields(html.UnescapeString(regexp.MustCompile(`<[^>]*>`).ReplaceAllString(string(body), " "))), " ")
+	for _, want := range []string{"Read your dashboards.", "Run by Contoso IT.", "wants to use Team dashboards as you", "openid"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("consent page lacks %q in %q", want, text)
+		}
+	}
+	css, _ := http.NewRequest("GET", ts.URL+"/assets/page.css", nil)
+	css.Host = "mcp.example.com"
+	cres, err := client.Do(css)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = cres.Body.Close()
+	if cres.StatusCode != http.StatusOK || cres.Header.Get("Content-Type") != "text/css; charset=utf-8" {
+		t.Errorf("stylesheet through the server: %d %q", cres.StatusCode, cres.Header.Get("Content-Type"))
+	}
+	form := url.Values{"flow": {html.UnescapeString(string(m[1]))}, "action": {"deny"}}
+	r, _ = http.NewRequest("POST", ts.URL+"/consent", strings.NewReader(form.Encode()))
+	r.Host = "mcp.example.com"
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Origin", "https://mcp.example.com")
+	r.AddCookie(res.Cookies()[0])
+	res, err = client.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if loc, _ := url.Parse(res.Header.Get("Location")); res.StatusCode != http.StatusFound || loc.Query().Get("error") != "access_denied" ||
+		loc.Scheme+"://"+loc.Host+loc.Path != "http://127.0.0.1/callback" || loc.Query().Get("state") != "s" {
+		t.Fatalf("deny: %d %s, want the app's callback with access_denied and its state", res.StatusCode, loc)
+	}
+}
+
+func TestNewWarnsAboutGenericWordingOnlyWithoutAScopeDescription(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		extra []string
+		warn  bool
+	}{
+		{"no scope description warns", nil, true},
+		{"a scope description is quiet", []string{"MCP_AUTHPROXY_SCOPE_DESCRIPTION=Read your dashboards."}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			env := append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp")
+			cfg, _, err := config.Load(nil, append(env, c.extra...), os.ReadFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			logs := &syncBuffer{}
+			if _, err := New(cfg, slog.New(slog.NewJSONHandler(logs, nil))); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(logs.String(), `"setting":"MCP_AUTHPROXY_SCOPE_DESCRIPTION"`); got != c.warn {
+				t.Fatalf("warning logged: %v, want %v: %s", got, c.warn, logs)
 			}
 		})
 	}
