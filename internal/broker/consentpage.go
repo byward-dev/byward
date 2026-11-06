@@ -31,6 +31,7 @@ type consentView struct {
 	ScopeText   string
 	Raw         []string // the raw scope strings, behind a disclosure
 	Lifetime    string
+	Remembered  string // how long the answer will be remembered, when it will be (ADR-0010 §3)
 	Flow        string
 	Notice      string
 	RequestID   string
@@ -42,6 +43,9 @@ func (b *Broker) renderConsent(w http.ResponseWriter, r *http.Request, status in
 	v := consentView{Client: displayName(client.Name(), client.ID()), Trust: trustLabel(client.Trust()), Upstream: b.upstreamName(),
 		IdP: b.cfg.IdPLabel, Operator: b.cfg.OperatorName, ScopeText: b.scopeText(), Lifetime: lifetimeText(l.Scopes, client.AllowsRefresh()),
 		Flow: sealed, Notice: notice, RequestID: logging.RequestID(r.Context()), Stylesheet: StylesheetPath, ContinueURL: "/consent"}
+	if b.remembers(client) {
+		v.Remembered = fmt.Sprintf("%d days", int(ConsentLifetime/(24*time.Hour)))
+	}
 	v.ReturnsTo, v.Loopback = returnsTo(l.RedirectURI)
 	if p, ok := client.(metadataPublisher); ok {
 		v.PublishedBy = showHost(p.MetadataHost())
@@ -195,6 +199,7 @@ var consentTemplate = template.Must(template.New("consent").Parse(`<!doctype htm
 <dt>Returns to</dt><dd>{{.ReturnsTo}}</dd>
 <dt>It will be able to</dt><dd>{{.ScopeText}}</dd>
 <dt>For</dt><dd>{{.Lifetime}}, unless access is revoked</dd>
+{{if .Remembered}}<dt>Remembered</dt><dd>We'll remember your choice for this app for {{.Remembered}}. Your operator can revoke it.</dd>{{end}}
 </dl>
 {{if .OtherSite}}<p class="warning"><strong>This app returns to {{.ReturnsTo}}, which is not part of {{.PublishedBy}}.</strong> Only allow this if you expected that.</p>{{end}}
 {{if .Loopback}}<p class="warning"><strong>Only allow this if you just started connecting from an app on this computer.</strong> Any app on this computer could have opened this page.</p>{{end}}

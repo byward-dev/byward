@@ -42,6 +42,15 @@ admin grants tenant-wide consent, and labels unverified publishers "Unverified".
    only a hint for the check before the IdP redirect; without it we ask. After the callback the
    registry is checked for the actual user; a mismatching hint is discarded and the page is shown.
    `prompt=consent` forces the page.
+   _Clarified 2026-11-06 (#90):_ the 30 days run from the Allow and do not slide with use (ASVS
+   5.0.0 10.7.2, a lifetime); a new Allow for the same key replaces the approved scopes and the
+   lifetime, so an older approval never outlives its own 30 days. The registry also keys on the
+   IdP issuer. A loopback redirect URI is keyed without its port, which ADR-0009 §2 lets vary
+   (Claude Code picks a new one every run); this lets a local process reuse a remembered loopback
+   client without a page, which the security posture states as accepted. On a mismatch after the
+   callback the IdP sign-in is discarded (no grant, no code) and the page is shown for the same
+   request, so Allow leads to a new IdP sign-in. Every revocation forgets in the same transaction
+   as the grants. Only `prompt=consent` is honoured; `prompt=none` is #126.
 4. **The page shows:** the client name with its trust level (control characters stripped, 80
    characters), the CIMD host, the redirect host (loopback: "an app on this computer" plus a warning;
    punycode beside Unicode; a warning if it differs from the CIMD host), the upstream, the IdP ("You'll

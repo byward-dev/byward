@@ -96,7 +96,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	}()
 	b, err := newBroker(broker.Config{Issuer: cfg.Issuer(), Origin: cfg.Origin(), Resource: cfg.PublicURL, Scope: cfg.Scope,
 		IdPName: idpName, IdPLabel: "Microsoft Entra", IdPScopes: provider.Scope(), IdP: provider, Clients: clients, CIMD: cfg.CIMD, Registrar: registrar, ObserveRegistration: o.Metrics.DCRRegistration,
-		Store: st, Sealer: sealer, LoginBox: parts.loginBox, IdPTokenBox: parts.idpBox, ConsentBox: parts.consentBox, Gate: g,
+		Store: st, Sealer: sealer, LoginBox: parts.loginBox, IdPTokenBox: parts.idpBox, ConsentBox: parts.consentBox, ConsentHintBox: parts.hintBox, ObserveConsent: o.Metrics.Consent, Gate: g,
 		UpstreamName: cfg.ResourceName, ScopeText: cfg.ScopeDescription, OperatorName: cfg.OperatorName,
 		SecureCookies: cfg.PublicURL.Scheme == "https", Log: log,
 		Audit: o.Audit, Limiter: ratelimit.New(cfg.OAuthRateLimits, maxRateLimitKeys, time.Now, o.Metrics.RateLimited),
@@ -127,11 +127,11 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 // authParts is what authenticated mode builds from configuration alone, with no network access and
 // no writes; check --offline stops here (ADR-0020 §7).
 type authParts struct {
-	ring                         *token.KeyRing
-	sealer                       *token.Sealer
-	loginBox, idpBox, consentBox *token.Box
-	sessionBox                   *token.Box
-	static                       *registration.StaticRegistry
+	ring                                  *token.KeyRing
+	sealer                                *token.Sealer
+	loginBox, idpBox, consentBox, hintBox *token.Box
+	sessionBox                            *token.Box
+	static                                *registration.StaticRegistry
 	// jti is the private_key_jwt replay cache, shared by static, CIMD and DCR clients.
 	jti *registration.MemoryJTICache
 	// clientDeny is BYWARD_CLIENT_DENYLIST, applied to CIMD and DCR clients.
@@ -182,7 +182,7 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 	for _, b := range []struct {
 		box     **token.Box
 		purpose string
-	}{{&p.loginBox, "login"}, {&p.idpBox, "idp-tokens"}, {&p.consentBox, "consent"}, {&p.sessionBox, "mcp-session"}} {
+	}{{&p.loginBox, "login"}, {&p.idpBox, "idp-tokens"}, {&p.consentBox, "consent"}, {&p.hintBox, "consent-hint"}, {&p.sessionBox, "mcp-session"}} {
 		if *b.box, err = token.NewBox(ring, b.purpose, nil); err != nil {
 			return nil, err
 		}

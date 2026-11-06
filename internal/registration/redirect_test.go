@@ -126,3 +126,19 @@ func TestRedirectErrorDiagnostics(t *testing.T) {
 	}
 	var _ slog.LogValuer = re
 }
+
+func TestARedirectKeyDropsOnlyALoopbackPort(t *testing.T) {
+	for uri, want := range map[string]string{
+		"http://127.0.0.1:53124/callback":    "http://127.0.0.1/callback",
+		"http://localhost:8787/callback?x=1": "http://localhost/callback?x=1",
+		"http://[::1]:33418/":                "http://[::1]/",
+		"http://127.0.0.1/callback":          "http://127.0.0.1/callback",
+		"https://app.example:8443/cb":        "https://app.example:8443/cb", // only loopback http varies
+		"https://localhost:8443/cb":          "https://localhost:8443/cb",
+		"http://app.example:8080/cb":         "http://app.example:8080/cb",
+	} {
+		if got := RedirectKey(uri); got != want {
+			t.Errorf("RedirectKey(%q) = %q, want %q", uri, got, want)
+		}
+	}
+}

@@ -66,6 +66,22 @@ func withoutQuery(s string) string {
 	return u.String()
 }
 
+// RedirectKey is a redirect URI as a remembered consent compares it (ADR-0010 §3): exact, except
+// that an http loopback URI drops its port, which ADR-0009 §2 lets vary (Claude Code picks a new one
+// every run).
+func RedirectKey(uri string) string {
+	u, err := url.Parse(uri)
+	if err != nil || u.Scheme != "http" || !loopbackHosts[u.Hostname()] || u.Port() == "" {
+		return uri
+	}
+	host := u.Hostname()
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	u.Host = host
+	return u.String()
+}
+
 // loopbackHosts are the hosts on which http and any port are allowed (ADR-0009 §2).
 var loopbackHosts = map[string]bool{"127.0.0.1": true, "::1": true, "localhost": true}
 

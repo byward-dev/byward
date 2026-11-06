@@ -43,7 +43,7 @@ mode, and the only upstream kind is HTTP.
 |---|---|---|
 | Unauthenticated caller reaches the upstream | Every request to the MCP route passes the token guard. Tokens are read from `Authorization: Bearer` only. Methods other than GET, POST and DELETE get 405, and other paths never reach the upstream. | `internal/resource/resource.go` (Guard), `internal/server/server.go` (Handler, mcpMethods) |
 | Another user's token, or a forged or altered one | Sealed tokens are AES-256-GCM. The resource URL and the token type are bound as associated data, and the token carries `exp`. Every failure looks the same (`invalid_token`). | `internal/token/token.go`, `internal/token/validator.go` |
-| A malicious MCP client or app, or a confused deputy | Each client sees a consent page on every request; nothing is remembered yet. Redirect URIs match exactly, except the port on loopback, and are checked again at `/token`. PKCE S256 is required. A code is single-use and bound to its client. | `internal/broker/consent.go`, `internal/registration/redirect.go`, `internal/broker/token.go` |
+| A malicious MCP client or app, or a confused deputy | Each client sees a consent page before the IdP sign-in. Only static clients and trusted CIMD hosts are remembered, for 30 days per user, client, redirect URI and resource; domain CIMD hosts and DCR clients are asked every time (see **Remembered consent** under [Token model](#token-model)). Redirect URIs match exactly, except the port on loopback, and are checked again at `/token`. PKCE S256 is required. A code is single-use and bound to its client. | `internal/broker/consent.go`, `internal/registration/redirect.go`, `internal/broker/token.go` |
 | Token theft | Access tokens last 1 h. Refresh tokens rotate on every use, and reuse after the 30 s grace revokes the grant. A refresh token works only for the client it was issued to. Clients can revoke with `/revoke` (RFC 7009). | `internal/broker/refresh.go`, `internal/broker/revoke.go` |
 | CSRF or clickjacking on consent | The answer needs exactly one `Origin` equal to the public origin; a missing or `null` Origin is refused. `Sec-Fetch-Site` must be `same-origin` when the browser sends it. A `__Host-` binding cookie and a sealed flow that expires after 10 min are required. Allow is refused within 1 s of showing the page. Every page sends CSP `frame-ancestors 'none'`, `X-Frame-Options: DENY` and `script-src 'none'`. | `internal/broker/consent.go`, `internal/broker/page.go` |
 | DNS rebinding and cross-site requests to the MCP endpoint | `Host` is checked against an allowlist on the public listener (421), and on the internal listener only IP addresses, `localhost` and listed names pass (421). `Origin` on the MCP endpoint is checked against an exact list (403). Both checks run before authentication. | `internal/origin/origin.go` |
@@ -65,7 +65,7 @@ keep them (AGENTS.md). Status on `main`:
 | 2 | Never log tokens, secrets, codes or verifiers | `internal/logging/logging.go` (attribute allowlist, bearer/JWT-shaped redaction); `internal/audit` (no credential fields) | `TestRedaction`, `TestMiddlewareLogsRequestWithoutQueryOrHeaders`, `TestAuditRecordsMatchTheGoldenSchema` |
 | 3 | Named IdP endpoints from config only | `internal/idp/entra/entra.go` (`endpoint`: the fixed authority `https://login.microsoftonline.com` plus the tenant GUID; discovery is read only to check the issuer) | `TestAuthCodeURLTargetsTenantAuthorizeWithAccessAsUserScope`, `TestIssuerMustMatchTokenTenantAndAllowlist` |
 | 4 | Client-supplied URLs only through the SSRF guard | `internal/ssrfguard` (dial-time address check); `internal/server/wire.go` builds one guard and gives it to the CIMD registry (documents and `jwks_uri`) and the DCR registry (`jwks_uri`) | `TestNonPublicAddressesAreRefused`, `TestRedirectsAreNotFollowed`, `TestTheGuardedHTTPClientRefusesPrivateAddresses`, `TestCIMDClientsAreResolvedThroughTheGuardOnlyWhenOn`, `TestARegisteredClientsKeysAreFetchedThroughTheGuard` |
-| 5 | Per-client consent before the IdP redirect | `internal/broker/authorize.go` → `showConsent`; the IdP redirect only after Allow | `TestAuthorizeShowsTheConsentPageBeforeTheIdP` |
+| 5 | Per-client consent before the IdP redirect | `internal/broker/authorize.go` → `showConsent`; the IdP redirect only after Allow, or for a remembered consent, which the callback checks again for the user who signed in before issuing a code (`internal/broker/remember.go`) | `TestAuthorizeShowsTheConsentPageBeforeTheIdP`, `TestADifferentUserBehindAStaleHintGetsThePageAndNoCode`, `TestAnUnverifiedClientIsAskedEveryTime` |
 | 6 | Audience validated; `iss` on authorization responses | Resource URL as associated data (`internal/token/token.go`); `iss` on success and error redirects (`internal/broker/authorize.go`) | `TestTokenForOneResourceNeverOpensForAnother`, `TestStaticClientSignsInWithEntraAndGetsAProxyToken` |
 | 7 | Proxy tokens sealed by us, carry `exp`, never IdP tokens | `internal/token/token.go`. The upstream assertion half is **planned** (#62) | `TestTypesNeverCross`, `TestAnyTamperedByteIsRejected` |
 | 8 | IdP refresh token stays in the broker, encrypted at rest | Sealed with the `idp-tokens` box (`internal/server/wire.go`, `internal/broker/authorize.go`) | `TestUnusableStoredIdPTokensRevokeTheGrant` |
@@ -167,6 +167,31 @@ answered consent, that sign-in still completes for up to 10 min (the login lifet
 returned to the old redirect URI with a code. `/token` then refuses the code, because it checks
 the client and redirect URI again. This is accepted behaviour, not a gap: no token is issued.
 
+**Remembered consent** ([ADR-0010](adr/0010-consent-screen.md) §2–3):
+
+- Only clients whose identity is assured are remembered: static clients and CIMD hosts on
+  `BYWARD_CIMD_TRUSTED_HOSTS`. Trust is read at every sign-in, so removing a host from that list
+  makes its users answer again. Domain CIMD hosts and DCR clients are asked every time (ASVS 5.0.0
+  10.7.1).
+- The registry is in the store, per IdP user, client, redirect URI and resource, for 30 days from
+  the Allow (not extended by use). A later request whose scopes are all approved counts as
+  remembered; `prompt=consent` forces the page.
+- Before the sign-in the user is unknown, so a sealed `__Host-` cookie (purpose `consent-hint`)
+  names the user the browser last signed in as. It only lets `/authorize` skip the page. The
+  callback checks the registry again for the user who actually signed in; on a different user, or
+  consent forgotten in between, it issues nothing, clears the cookie and shows the page.
+- Every revocation forgets: `/revoke`, refresh-token reuse, and `byward revoke-user` and
+  `revoke-all` remove the matching rows in the same transaction as the grants.
+- **Accepted: a local process can reuse a remembered loopback client.** A loopback redirect URI is
+  remembered whatever its port, because ADR-0009 §2 lets the port vary (Claude Code picks a new one
+  every run). So, for a remembered loopback client, a process on the user's machine that opens
+  `/authorize` with that client ID and its own loopback port gets a code without a consent page;
+  PKCE does not help, because that process chooses the verifier. Without remembered consent the
+  page would at least show "Claude Code wants…" to a user who did not start it. This is accepted:
+  local malware is outside the threat model, and it could read the client's own token store anyway.
+  Operators who want the page every time for such clients can leave their CIMD host off
+  `BYWARD_CIMD_TRUSTED_HOSTS`; a static client is always remembered.
+
 **Keys:**
 
 - Keys come from `BYWARD_KEYS_DIR`. The file that sorts last seals; every file opens.
@@ -181,7 +206,6 @@ the client and redirect URI again. This is accepted behaviour, not a gap: no tok
 | Gap | Effect | Tracking |
 |---|---|---|
 | ASVS 5.0.0 10.7.3 (user review and revocation of granted access) | Not met for users. The design leaves it to the operator (`byward revoke-user`, `byward revoke-all`) until a v0.2 "connected apps" page. | ADR-0010 §11; v0.2 |
-| Remembered consent | Not built: every client is asked every time. That is stricter than ADR-0010 §2–3. | #90 |
 | Consent answer table is per replica, in memory, capped at 10,000 | Double-submit protection holds within one process. A full table forgets the newest flow. It matters only with several replicas, which need v0.2's PostgreSQL. | No issue (`internal/broker/answers.go`) |
 | Refresh drops the IdP's new tokens when sealing them fails | Kept when the gate cannot decide or the store fails to rotate (#92); a sealing failure leaves nothing safe to store. Fails closed: an unneeded sign-in with IdPs that revoke rotated refresh tokens. Entra is not affected. | `internal/broker/refresh.go` |
 | Entra certificate credential | `private_key_jwt` exists in `internal/idp`, but no setting selects it; only a client secret is configurable | ADR-0012 §5 |

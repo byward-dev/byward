@@ -31,6 +31,11 @@ func (s *Store) detectRestore(ctx context.Context) error {
 			if _, err := tx.ExecContext(ctx, "UPDATE meta SET value = value + 1 WHERE key = 'epoch'"); err != nil {
 				return err
 			}
+			// Revocations recorded after the backup are lost with it, and with them the consents
+			// they forgot; every remembered consent goes, so users answer the page again (fail safe).
+			if _, err := tx.ExecContext(ctx, "DELETE FROM consents"); err != nil {
+				return err
+			}
 		}
 		// This transaction rewrites the mirror from the database's counter, so the restored copy is
 		// accepted from now on and the next start is normal.

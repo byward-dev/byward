@@ -34,6 +34,9 @@ const (
 	AccessLifetime = time.Hour
 	GrantLifetime  = 30 * 24 * time.Hour
 	LoginLifetime  = 10 * time.Minute
+	// ConsentLifetime is how long a remembered consent counts, from its Allow (ADR-0010 §3); it does
+	// not slide with use.
+	ConsentLifetime = 30 * 24 * time.Hour
 	// RefreshIdleLifetime: a refresh token unused for this long expires (ADR-0006 §5).
 	RefreshIdleLifetime = 14 * 24 * time.Hour
 	// MaxRefreshGrace bounds the reuse grace window (ADR-0006 §4); its default is the
@@ -91,7 +94,13 @@ type Config struct {
 	LoginBox            *token.Box    // the login-in-progress cookie
 	ConsentBox          *token.Box    // the consent flow in the consent page's form
 	IdPTokenBox         *token.Box    // IdP tokens at rest
-	Gate                Gate
+	// ConsentHintBox seals the remembered-consent hint cookie (ADR-0010 §3); nil asks every client
+	// every time.
+	ConsentHintBox *token.Box
+	// ObserveConsent, when set, is told each consent outcome (shown, granted, denied, remembered)
+	// with the client's trust level, for metrics (ADR-0010 §12).
+	ObserveConsent func(trust, outcome string)
+	Gate           Gate
 	// Consent page wording (ADR-0010 §4): the upstream's name (default: the public host), what the
 	// scope lets an app do in plain words, and who runs the proxy. All optional.
 	UpstreamName string

@@ -73,6 +73,13 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		{"ConcurrentCreateClientNeverExceedsTheCap", concurrentCreateClientNeverExceedsTheCap},
 		{"UseClientMarksUseAndExtendsWithoutShortening", useClientMarksUseAndExtendsWithoutShortening},
 		{"CollectRemovesExpiredClientsAndClientsUnusedForTheirFirstDay", collectRemovesExpiredClientsAndClientsUnusedForTheirFirstDay},
+		{"ConsentRoundTripsAsACopyAndIsReplaced", consentRoundTripsAsACopyAndIsReplaced},
+		{"IncompleteConsentsAreInvalid", incompleteConsentsAreInvalid},
+		{"RevokeGrantForgetsItsUsersConsentsForItsClient", revokeGrantForgetsItsUsersConsentsForItsClient},
+		{"RefreshTokenReuseForgetsItsUsersConsentsForItsClient", refreshTokenReuseForgetsItsUsersConsentsForItsClient},
+		{"SetIdPTokensAfterARevocationNeverRestoresTheConsent", setIdPTokensAfterARevocationNeverRestoresTheConsent},
+		{"RevokeSubjectAndRevokeAllForgetConsentsBeforeTheCutOff", revokeSubjectAndRevokeAllForgetConsentsBeforeTheCutOff},
+		{"CollectRemovesExpiredConsentsAndAnExpiredGrantForgetsNothing", collectRemovesExpiredConsentsAndAnExpiredGrantForgetsNothing},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { tc.fn(t, newStore(t)) })
@@ -1044,5 +1051,155 @@ func collectRemovesExpiredClientsAndClientsUnusedForTheirFirstDay(t *testing.T, 
 		if (err == nil) != kept {
 			t.Errorf("%s: err %v, want kept %v", id, err, kept)
 		}
+	}
+}
+
+// consent is alice's remembered Allow of client-<grantID>, matching grant(grantID, subject).
+func consent(grantID, subject, redirect string) store.Consent {
+	return store.Consent{Key: store.ConsentKey{Issuer: "https://idp.example/v2.0", Subject: subject, ClientID: "client-" + grantID,
+		Redirect: redirect, Resource: "https://mcp.example.com/mcp"}, Scopes: []string{"mcp"}, ApprovedAt: t0, ExpiresAt: t0.Add(30 * 24 * time.Hour)}
+}
+
+func remembered(t *testing.T, s store.Store, c store.Consent) bool {
+	t.Helper()
+	_, err := s.Consent(ctx, c.Key)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		t.Fatal(err)
+	}
+	return err == nil
+}
+
+func consentRoundTripsAsACopyAndIsReplaced(t *testing.T, s store.Store) {
+	c := consent("g1", "tid:alice", "https://app.example/cb")
+	c.Scopes = []string{"mcp", "offline_access"}
+	must(t, s.RememberConsent(ctx, c))
+	c.Scopes[0] = "changed"
+	got, err := s.Consent(ctx, c.Key)
+	must(t, err)
+	if !slices.Equal(got.Scopes, []string{"mcp", "offline_access"}) || !got.ApprovedAt.Equal(t0) || !got.ExpiresAt.Equal(c.ExpiresAt) || got.Key != c.Key {
+		t.Fatalf("consent = %+v", got)
+	}
+	got.Scopes[0] = "changed"
+	if again, _ := s.Consent(ctx, c.Key); again.Scopes[0] != "mcp" {
+		t.Fatal("a returned consent shares its scopes with the store")
+	}
+	// A new Allow for the same key replaces the scopes and the lifetime: older approvals never
+	// outlive their own 30 days.
+	later := consent("g1", "tid:alice", "https://app.example/cb")
+	later.ApprovedAt, later.ExpiresAt = t0.Add(time.Hour), t0.Add(time.Hour+30*24*time.Hour)
+	must(t, s.RememberConsent(ctx, later))
+	if got, _ := s.Consent(ctx, c.Key); !slices.Equal(got.Scopes, []string{"mcp"}) || !got.ApprovedAt.Equal(later.ApprovedAt) || !got.ExpiresAt.Equal(later.ExpiresAt) {
+		t.Fatalf("replaced consent = %+v", got)
+	}
+	other := c.Key
+	other.Redirect = "https://app.example/other"
+	if _, err := s.Consent(ctx, other); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("another redirect key: %v, want ErrNotFound", err)
+	}
+}
+
+func incompleteConsentsAreInvalid(t *testing.T, s store.Store) {
+	for name, change := range map[string]func(*store.Consent){
+		"no issuer":   func(c *store.Consent) { c.Key.Issuer = "" },
+		"no subject":  func(c *store.Consent) { c.Key.Subject = "" },
+		"no client":   func(c *store.Consent) { c.Key.ClientID = "" },
+		"no redirect": func(c *store.Consent) { c.Key.Redirect = "" },
+		"no resource": func(c *store.Consent) { c.Key.Resource = "" },
+		"no scopes":   func(c *store.Consent) { c.Scopes = nil },
+		"no lifetime": func(c *store.Consent) { c.ExpiresAt = c.ApprovedAt },
+	} {
+		c := consent("g1", "tid:alice", "https://app.example/cb")
+		change(&c)
+		wantErr(t, name, s.RememberConsent(ctx, c), store.ErrInvalid)
+	}
+}
+
+func revokeSubjectAndRevokeAllForgetConsentsBeforeTheCutOff(t *testing.T, s store.Store) {
+	cut := t0.Add(time.Hour)
+	early := consent("g1", "tid:alice", "https://app.example/cb")
+	late := consent("g2", "tid:alice", "https://app.example/cb")
+	late.ApprovedAt, late.ExpiresAt = cut, cut.Add(30*24*time.Hour) // not before the cut-off
+	bob := consent("g1", "tid:bob", "https://app.example/cb")
+	for _, c := range []store.Consent{early, late, bob} {
+		must(t, s.RememberConsent(ctx, c))
+	}
+	must(t, s.RevokeSubject(ctx, "tid:alice", cut, cut))
+	if remembered(t, s, early) || !remembered(t, s, late) || !remembered(t, s, bob) {
+		t.Fatal("revoke-user must forget exactly the subject's consents approved before the cut-off")
+	}
+	must(t, s.RevokeAll(ctx, cut, cut.Add(time.Second)))
+	if remembered(t, s, bob) || !remembered(t, s, late) {
+		t.Fatal("revoke-all must forget exactly the consents approved before the cut-off")
+	}
+}
+
+func collectRemovesExpiredConsentsAndAnExpiredGrantForgetsNothing(t *testing.T, s store.Store) {
+	g := grant("g1", "tid:alice")
+	g.ExpiresAt = t0.Add(10 * time.Minute) // an abandoned login's short grant
+	mustCreate(t, s, g)
+	live := consent("g1", "tid:alice", "https://app.example/cb")
+	expiring := consent("g2", "tid:alice", "https://app.example/cb")
+	expiring.ExpiresAt = t0.Add(time.Hour)
+	must(t, s.RememberConsent(ctx, live))
+	must(t, s.RememberConsent(ctx, expiring))
+	must(t, s.Collect(ctx, t0.Add(time.Hour)))
+	if remembered(t, s, expiring) {
+		t.Fatal("an expired consent survived Collect")
+	}
+	if !remembered(t, s, live) {
+		t.Fatal("collecting an expired grant forgot its user's consent")
+	}
+}
+
+func revokeGrantForgetsItsUsersConsentsForItsClient(t *testing.T, s store.Store) {
+	revokingForgetsTheGrantsConsents(t, s, func() { must(t, s.RevokeGrant(ctx, "g1", t0.Add(time.Minute))) })
+}
+
+func refreshTokenReuseForgetsItsUsersConsentsForItsClient(t *testing.T, s store.Store) {
+	revokingForgetsTheGrantsConsents(t, s, func() {
+		t1 := refresh("g1", 1)
+		must(t, s.PutRefreshToken(ctx, t1))
+		at := t0.Add(time.Minute)
+		must(t, s.RotateRefreshToken(ctx, rotation(t1, refresh("g1", 2), at)))
+		wantErr(t, "reuse", s.RotateRefreshToken(ctx, rotation(t1, refresh("g1", 3), at.Add(grace))), store.ErrReused)
+	})
+}
+
+// revokingForgetsTheGrantsConsents checks that revoke, one way of revoking grant g1, forgets
+// exactly the consents of its user (at its IdP) for its client, whatever their redirect.
+func revokingForgetsTheGrantsConsents(t *testing.T, s store.Store, revoke func()) {
+	t.Helper()
+	mustCreate(t, s, grant("g1", "tid:alice"))
+	mine := consent("g1", "tid:alice", "https://app.example/cb")
+	mineElsewhere := consent("g1", "tid:alice", "http://127.0.0.1/cb")
+	otherUser := consent("g1", "tid:bob", "https://app.example/cb")
+	otherClient := consent("g2", "tid:alice", "https://app.example/cb")
+	otherIdP := consent("g1", "tid:alice", "https://app.example/cb")
+	otherIdP.Key.Issuer = "https://other-idp.example/v2.0" // the same subject string at another IdP is another user
+	for _, c := range []store.Consent{mine, mineElsewhere, otherUser, otherClient, otherIdP} {
+		must(t, s.RememberConsent(ctx, c))
+	}
+	revoke()
+	if remembered(t, s, mine) || remembered(t, s, mineElsewhere) {
+		t.Fatal("revoking a grant kept its user's consent for its client")
+	}
+	if !remembered(t, s, otherUser) || !remembered(t, s, otherClient) || !remembered(t, s, otherIdP) {
+		t.Fatal("revoking a grant forgot another user's, another client's or another IdP's consent")
+	}
+}
+
+// A refresh that renewed the IdP tokens of a grant revoked meanwhile (#92) changes nothing: the
+// grant stays gone, and so does the consent its revocation forgot.
+func setIdPTokensAfterARevocationNeverRestoresTheConsent(t *testing.T, s store.Store) {
+	mustCreate(t, s, grant("g1", "tid:alice"))
+	c := consent("g1", "tid:alice", "https://app.example/cb")
+	must(t, s.RememberConsent(ctx, c))
+	must(t, s.RevokeGrant(ctx, "g1", t0.Add(time.Minute)))
+	wantErr(t, "SetIdPTokens on the revoked grant", s.SetIdPTokens(ctx, "g1", []byte("sealed-new")), store.ErrNotFound)
+	if remembered(t, s, c) {
+		t.Fatal("keeping the IdP's new tokens brought back a forgotten consent")
+	}
+	if _, err := s.Grant(ctx, "g1"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("revoked grant after SetIdPTokens: %v, want ErrNotFound", err)
 	}
 }

@@ -354,6 +354,9 @@ func (s *Store) Grant(ctx context.Context, id string) (store.Grant, error) {
 // RevokeGrant implements store.Grants.
 func (s *Store) RevokeGrant(ctx context.Context, id string, at time.Time) error {
 	return s.write(ctx, func(tx *sql.Tx) error {
+		if err := forgetGrant(ctx, tx, id); err != nil {
+			return err
+		}
 		res, err := tx.ExecContext(ctx, "DELETE FROM grants WHERE id = ?", id)
 		if err != nil {
 			return err
@@ -412,6 +415,9 @@ func (s *Store) RevokeSubject(ctx context.Context, subject string, before, at ti
 		if _, err := tx.ExecContext(ctx, "DELETE FROM grants WHERE subject = ? AND created_at < ?", subject, micros(before)); err != nil {
 			return err
 		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM consents WHERE subject = ? AND approved_at < ?", subject, micros(before)); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx, "INSERT INTO revocations (grant_id, subject, before, at) VALUES ('', ?, ?, ?)",
 			subject, micros(before), micros(at))
 		return err
@@ -422,6 +428,9 @@ func (s *Store) RevokeSubject(ctx context.Context, subject string, before, at ti
 func (s *Store) RevokeAll(ctx context.Context, before, at time.Time) error {
 	return s.write(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM grants WHERE created_at < ?", micros(before)); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, "DELETE FROM consents WHERE approved_at < ?", micros(before)); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, "INSERT INTO revocations (grant_id, subject, scope, before, at) VALUES ('', '', 'all', ?, ?)",
@@ -564,6 +573,9 @@ func (s *Store) RotateRefreshToken(ctx context.Context, r store.RotateRequest) e
 			err := tx.QueryRowContext(ctx, "SELECT rotated_at FROM refresh_tokens WHERE hash = ?", successor).Scan(&curRotated)
 			if errors.Is(err, sql.ErrNoRows) || (err == nil && (curRotated.Valid || r.Now.Sub(fromMicros(rotated.Int64)) >= r.Grace)) {
 				reused = true
+				if err := forgetGrant(ctx, tx, grantID); err != nil {
+					return err
+				}
 				if _, err := tx.ExecContext(ctx, "DELETE FROM grants WHERE id = ?", grantID); err != nil {
 					return err
 				}
@@ -634,6 +646,7 @@ func (s *Store) Collect(ctx context.Context, now time.Time) error {
 			{"DELETE FROM codes WHERE expires_at <= ?", n},
 			{"DELETE FROM refresh_tokens WHERE idle_expires_at <= ?", n},
 			{"DELETE FROM revocations WHERE at <= ?", micros(now.Add(-store.RevocationRetention))},
+			{"DELETE FROM consents WHERE expires_at <= ?", n},
 			{"DELETE FROM clients WHERE expires_at <= ?", n},
 			{"DELETE FROM clients WHERE used_at IS NULL AND created_at <= ?", micros(now.Add(-store.UnusedClientLifetime))},
 		} {
@@ -643,6 +656,53 @@ func (s *Store) Collect(ctx context.Context, now time.Time) error {
 		}
 		return nil
 	})
+}
+
+// RememberConsent implements store.Consents.
+func (s *Store) RememberConsent(ctx context.Context, c store.Consent) error {
+	k := c.Key
+	if k.Issuer == "" || k.Subject == "" || k.ClientID == "" || k.Redirect == "" || k.Resource == "" || len(c.Scopes) == 0 || !c.ExpiresAt.After(c.ApprovedAt) {
+		return store.ErrInvalid
+	}
+	scopes, err := json.Marshal(c.Scopes)
+	if err != nil {
+		return err
+	}
+	return s.write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `INSERT INTO consents (issuer, subject, client_id, redirect, resource, scopes, approved_at, expires_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (issuer, subject, client_id, redirect, resource) DO UPDATE SET
+				scopes = excluded.scopes, approved_at = excluded.approved_at, expires_at = excluded.expires_at`,
+			k.Issuer, k.Subject, k.ClientID, k.Redirect, k.Resource, string(scopes), micros(c.ApprovedAt), micros(c.ExpiresAt))
+		return err
+	})
+}
+
+// Consent implements store.Consents.
+func (s *Store) Consent(ctx context.Context, k store.ConsentKey) (store.Consent, error) {
+	var scopes string
+	var approved, expires int64
+	err := s.db.QueryRowContext(ctx, `SELECT scopes, approved_at, expires_at FROM consents
+		WHERE issuer = ? AND subject = ? AND client_id = ? AND redirect = ? AND resource = ?`,
+		k.Issuer, k.Subject, k.ClientID, k.Redirect, k.Resource).Scan(&scopes, &approved, &expires)
+	if errors.Is(err, sql.ErrNoRows) {
+		return store.Consent{}, store.ErrNotFound
+	}
+	if err != nil {
+		return store.Consent{}, err
+	}
+	c := store.Consent{Key: k, ApprovedAt: fromMicros(approved), ExpiresAt: fromMicros(expires)}
+	if err := json.Unmarshal([]byte(scopes), &c.Scopes); err != nil {
+		return store.Consent{}, fmt.Errorf("sqlite store: consent scopes: %w", err)
+	}
+	return c, nil
+}
+
+// forgetGrant deletes the consents of a grant's user and client, before the grant itself goes.
+func forgetGrant(ctx context.Context, tx *sql.Tx, grantID string) error {
+	_, err := tx.ExecContext(ctx, `DELETE FROM consents WHERE (issuer, subject, client_id) IN
+		(SELECT issuer, subject, client_id FROM grants WHERE id = ?)`, grantID)
+	return err
 }
 
 func mustHaveGrant(ctx context.Context, tx *sql.Tx, id string) error {
