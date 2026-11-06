@@ -653,22 +653,23 @@ func TestClientRevocationIsAudited(t *testing.T) {
 }
 
 // A gate that cannot decide (not a Denial) is a server error on refresh, as at sign-in: the grant
-// and our refresh token survive, and nothing is audited as a denial. The IdP's new tokens are
-// dropped, so an IdP with single-use refresh tokens makes the next refresh a sign-in again.
+// and our refresh token survive, and nothing is audited as a denial. The IdP's new tokens are kept
+// (#92), so the refresh after the gate recovers works without a new sign-in, whatever the IdP does
+// with its refresh tokens.
 func TestGateFailureOnRefreshKeepsTheGrantAndTheIdPsNewTokens(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		singleUse bool
+		name string
+		idp  fakeidp.Option
 	}{
-		{"IdP refresh token reusable", false},
-		{"IdP refresh token single use", true}, // the IdP revoked the token the grant held (#92)
+		{"IdP refresh token single use", fakeidp.WithSingleUseRefreshTokens(true)}, // the IdP revoked the token the grant held
+		{"IdP keeps its refresh token", fakeidp.WithRefreshTokenRotation(false)},   // the kept tokens reuse the old one
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var gateErr error
 			e := newEnv(t, func(c *Config) {
 				c.Gate = gateFunc(func(context.Context, idp.Identity) error { return gateErr })
 			})
-			e.fake.Set(fakeidp.WithSingleUseRefreshTokens(tc.singleUse))
+			e.fake.Set(tc.idp)
 			rt := e.offline(t)["refresh_token"].(string)
 			gateErr = errors.New("directory lookup failed")
 			res, body := e.refresh(t, rt, "")

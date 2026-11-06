@@ -725,6 +725,8 @@ func setIdPTokensReplacesALiveGrantsTokensOnly(t *testing.T, s store.Store) {
 
 // Whatever the interleaving, SetIdPTokens never brings back a grant RevokeSubject deletes: it
 // either lands first and the grant is then deleted, or it finds the grant gone (ErrNotFound).
+// A probabilistic smoke test for check-then-act across lock sections; the guarantee is the
+// sequential ErrNotFound case in setIdPTokensReplacesALiveGrantsTokensOnly.
 func setIdPTokensAndRevokeSubjectNeverRestoreAGrant(t *testing.T, s store.Store) {
 	const rounds = 50
 	before := t0.Add(time.Hour)
