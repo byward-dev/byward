@@ -43,6 +43,7 @@ type Credentials struct {
 // Session is what a signed-in client holds.
 type Session struct {
 	AccessToken string
+	AuthMethod  string // how the client authenticated at /token: "none" or "private_key_jwt"
 }
 
 // metadata is what discovery found.
@@ -58,7 +59,7 @@ func SignIn(t *testing.T, e Env, p Profile, c Credentials) Session {
 	m := discover(t, e, p)
 	verifier := randomString(t)
 	code := authorize(t, e, p, c, m, verifier)
-	return Session{AccessToken: redeem(t, e, p, c, m, code, verifier)}
+	return redeem(t, e, p, c, m, code, verifier)
 }
 
 // discover makes the first MCP request, reads the 401, and fetches the metadata in the client's order.
@@ -188,7 +189,7 @@ func authorize(t *testing.T, e Env, p Profile, c Credentials, m metadata, verifi
 	back := e.send(t, withCookies(get(e, cb.Path+"?"+cb.RawQuery), allow.Cookies()))
 	_ = back.Body.Close()
 	ret, err := url.Parse(back.Header.Get("Location"))
-	if err != nil || back.StatusCode != http.StatusFound || !strings.HasPrefix(ret.String(), p.RedirectURI) {
+	if err != nil || back.StatusCode != http.StatusFound || ret.Scheme+"://"+ret.Host+ret.Path != p.RedirectURI {
 		t.Fatalf("%s: callback answered %d, Location %q; want the client's redirect URI %s", p.Client, back.StatusCode, back.Header.Get("Location"), p.RedirectURI)
 	}
 	switch {
@@ -201,7 +202,7 @@ func authorize(t *testing.T, e Env, p Profile, c Credentials, m metadata, verifi
 }
 
 // redeem exchanges the code at /token the way the client authenticates there.
-func redeem(t *testing.T, e Env, p Profile, c Credentials, m metadata, code, verifier string) string {
+func redeem(t *testing.T, e Env, p Profile, c Credentials, m metadata, code, verifier string) Session {
 	t.Helper()
 	endpoint, _ := m.asm["token_endpoint"].(string)
 	tq := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "client_id": {c.ClientID},
@@ -210,7 +211,9 @@ func redeem(t *testing.T, e Env, p Profile, c Credentials, m metadata, code, ver
 		tq.Set("resource", e.Public+e.MCPPath)
 	}
 	// A client preferring private_key_jwt uses it when the server offers it (OpenAI: the intersection).
+	method := "none"
 	if p.PrivateKeyJWT && slices.Contains(methods(m.asm), "private_key_jwt") {
+		method = "private_key_jwt"
 		if c.Signer == nil {
 			t.Fatalf("%s: private_key_jwt needs Credentials.Signer", p.Client)
 		}
@@ -239,7 +242,7 @@ func redeem(t *testing.T, e Env, p Profile, c Credentials, m metadata, code, ver
 	if p.AddsOfflineAccess && tokens.RefreshToken == "" { // it asked for offline_access
 		t.Fatalf("%s: no refresh_token for an offline_access request; the user would sign in again every hour", p.Client)
 	}
-	return tokens.AccessToken
+	return Session{AccessToken: tokens.AccessToken, AuthMethod: method}
 }
 
 // scope is the scope every profiled client sends: the challenge's, else the PRM's scopes_supported.

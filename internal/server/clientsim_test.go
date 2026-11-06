@@ -32,6 +32,9 @@ func TestClosedClientsSignInAndWorkAsTheirProfilesSay(t *testing.T) {
 		t.Run(p.Cell, func(t *testing.T) {
 			e, c := newSimProxy(t, p)
 			s := clientsim.SignIn(t, e, p, c)
+			if p.PrivateKeyJWT && s.AuthMethod != "private_key_jwt" { // the cell promises it; the fallback to none would hide a regression
+				t.Fatalf("%s authenticated at /token with %q, want private_key_jwt", p.Client, s.AuthMethod)
+			}
 
 			res := clientsim.Call(t, e, p, s, "")
 			_ = res.Body.Close()
