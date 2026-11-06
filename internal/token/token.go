@@ -171,9 +171,6 @@ func (s *Sealer) Open(t Type, tok string) (Claims, error) {
 	if err := dec.Decode(&w); err != nil || dec.More() {
 		return Claims{}, errClaims
 	}
-	if w.IssuedAt <= 0 {
-		return Claims{}, errClaims
-	}
 	c := Claims{GrantID: w.GrantID, Subject: w.Subject, IssuedAt: time.Unix(w.IssuedAt, 0), ExpiresAt: time.Unix(w.ExpiresAt, 0)}
 	if err := c.validate(); err != nil {
 		return Claims{}, err
@@ -193,7 +190,7 @@ func (s *Sealer) ad(t Type, kid string) []byte {
 }
 
 func (c Claims) validate() error {
-	if c.GrantID == "" || c.Subject == "" || c.IssuedAt.IsZero() || !c.ExpiresAt.After(c.IssuedAt) {
+	if c.GrantID == "" || c.Subject == "" || c.IssuedAt.Unix() <= 0 || !c.ExpiresAt.After(c.IssuedAt) {
 		return errClaims
 	}
 	return nil

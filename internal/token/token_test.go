@@ -238,11 +238,13 @@ func TestRotationKeepsOldTokensUntilTheirKeyIsRemoved(t *testing.T) {
 func TestSealRejectsIncompleteClaims(t *testing.T) {
 	s := newSealer(t)
 	cases := map[string]func(*Claims){
-		"no grant":          func(c *Claims) { c.GrantID = "" },
-		"no subject":        func(c *Claims) { c.Subject = "" },
-		"no iat":            func(c *Claims) { c.IssuedAt = time.Time{} },
-		"exp not after iat": func(c *Claims) { c.ExpiresAt = c.IssuedAt },
-		"exp before iat":    func(c *Claims) { c.ExpiresAt = c.IssuedAt.Add(-time.Second) },
+		"no grant":              func(c *Claims) { c.GrantID = "" },
+		"no subject":            func(c *Claims) { c.Subject = "" },
+		"no iat":                func(c *Claims) { c.IssuedAt = time.Time{} },
+		"iat at the Unix epoch": func(c *Claims) { c.IssuedAt = time.Unix(0, 0) },
+		"iat before 1970":       func(c *Claims) { c.IssuedAt, c.ExpiresAt = time.Unix(-100, 0), time.Unix(100, 0) },
+		"exp not after iat":     func(c *Claims) { c.ExpiresAt = c.IssuedAt },
+		"exp before iat":        func(c *Claims) { c.ExpiresAt = c.IssuedAt.Add(-time.Second) },
 	}
 	for name, edit := range cases {
 		t.Run(name, func(t *testing.T) {

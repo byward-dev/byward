@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -23,8 +24,8 @@ func TestKeysOnAReadOnlyTmpfsWithMode1777Load(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "k1"), []byte(randomKey(t)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadKeyRing(dir); err == nil {
-		t.Fatal("world-writable, writable tmpfs accepted")
+	if _, err := LoadKeyRing(dir); err == nil || !strings.Contains(err.Error(), "world-writable") {
+		t.Fatalf("writable tmpfs with mode 1777: err = %v, want the world-writable refusal", err)
 	}
 	if out, err := exec.Command("mount", "-o", "remount,ro", dir).CombinedOutput(); err != nil {
 		t.Fatalf("remount read-only: %v %s", err, out)

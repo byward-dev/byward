@@ -119,8 +119,9 @@ func TestWorldWritableKeysAreRejected(t *testing.T) {
 		if err := os.Chmod(dir, 0o1777); err != nil { //nolint:gosec // G302: the Kubernetes mode under test
 			t.Fatal(err)
 		}
+		prev := readOnlyFS
 		readOnlyFS = func(p string) bool { return p == dir }
-		t.Cleanup(func() { readOnlyFS = statfsReadOnly })
+		t.Cleanup(func() { readOnlyFS = prev })
 		mustRing(t, dir)
 	})
 	t.Run("group- and other-readable is fine", func(t *testing.T) {
@@ -154,16 +155,21 @@ func TestMissingOrEmptyKeyDirectoryRefusesToStart(t *testing.T) {
 	if err := os.Symlink(filepath.Join(dangling, "absent"), filepath.Join(dangling, "k1")); err != nil {
 		t.Fatal(err)
 	}
-	for name, dir := range map[string]string{
-		"not a directory":  notADir,
-		"dangling symlink": dangling,
-		"missing":          filepath.Join(t.TempDir(), "absent"),
-		"empty":            t.TempDir(),
-		"only dotfiles":    keyDir(t, map[string]string{".gitkeep": ""}),
-	} {
-		t.Run(name, func(t *testing.T) {
-			if _, err := LoadKeyRing(dir); err == nil || !strings.Contains(err.Error(), dir) {
-				t.Fatalf("err = %v, want one naming %s", err, dir)
+	missing, empty := filepath.Join(t.TempDir(), "absent"), t.TempDir()
+	dotfiles := keyDir(t, map[string]string{".gitkeep": ""})
+	cases := []struct {
+		name, dir, want string // want: the error must contain it
+	}{
+		{"not a directory", notADir, notADir + ": not a directory"},
+		{"dangling symlink", dangling, "key file " + filepath.Join(dangling, "k1")},
+		{"missing", missing, "key directory: stat " + missing},
+		{"empty", empty, "key directory " + empty + " has no key files"},
+		{"only dotfiles", dotfiles, "key directory " + dotfiles + " has no key files"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := LoadKeyRing(tc.dir); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want one containing %q", err, tc.want)
 			}
 		})
 	}
