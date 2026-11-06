@@ -7,9 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/http/httptest"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/corker/mcp-authproxy/internal/broker"
 	"github.com/corker/mcp-authproxy/internal/config"
@@ -104,11 +107,18 @@ func TestWiredBrokerGetsTheConfiguredGateAndObservability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := New(cfg, logging.New(io.Discard, "json")); err != nil {
+	srv, err := New(cfg, logging.New(io.Discard, "json"))
+	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Gate == nil || got.Audit == nil || got.ObserveIdP == nil || got.IdPName != "entra" {
 		t.Fatalf("broker wired without its gate, audit log or IdP observation: gate %v, audit %v, IdP %q", got.Gate, got.Audit, got.IdPName)
+	}
+	got.ObserveIdP("callback", "success", time.Millisecond)
+	rec := httptest.NewRecorder()
+	srv.Internal.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	if !regexp.MustCompile(`\{[^}]*idp="entra"[^}]*operation="callback"[^}]*outcome="success"`).MatchString(rec.Body.String()) {
+		t.Fatalf("an IdP observation did not reach /metrics as idp=entra, callback, success:\n%s", rec.Body.String())
 	}
 	id := idp.Identity{Subject: fixtureTenant + ":x", Claims: map[string]any{"tid": fixtureTenant}}
 	var d broker.Denial
