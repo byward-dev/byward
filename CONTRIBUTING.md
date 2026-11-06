@@ -28,8 +28,8 @@ Only submit work you have the right to contribute under Apache-2.0.
 ## Making a change
 
 1. Create a feature branch (in a fork, unless you are a maintainer). Never commit to `main`.
-2. Install [mise](https://mise.jdx.dev), then the tools CI uses:
-   `mise install go golangci-lint go:golang.org/x/tools/cmd/goimports`. The `azure-cli` pinned in
+2. Install [mise](https://mise.jdx.dev), then the tools CI's `check` job uses:
+   `mise install go golangci-lint go:golang.org/x/tools/cmd/goimports actionlint zizmor shellcheck go:github.com/google/go-licenses/v2`. The `azure-cli` pinned in
    `mise.toml` is an operator tool for Entra setup and real-tenant tests; `mise run check` does not
    need it.
 3. Make the change with tests (see [Test policy](#test-policy)).

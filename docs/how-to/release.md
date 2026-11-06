@@ -4,9 +4,8 @@ Written so that any maintainer can cut a release without the original author. De
 [ADR-0019](../adr/0019-packaging.md) (packaging) and [ADR-0023](../adr/0023-project-governance.md)
 (versioning, support).
 
-> **Status:** the release pipeline is being built. `mise run release:snapshot` arrives with
-> Slice R (#55) and the tag-triggered publish workflow with the first release (#67). Until then this
-> page is the agreed procedure; update it in the same pull request that changes the pipeline.
+> **Status:** the pipeline exists (`mise run release:snapshot`, `.github/workflows/release.yml`); the
+> first real release is #67. Update this page in the same pull request that changes the pipeline.
 
 ## What a release contains
 
@@ -45,7 +44,8 @@ Security fixes go into the latest minor only (SECURITY.md).
    - **Deprecations**, with the release in which each item will be removed;
    - **Security**, linking the published advisories;
    - Features, Fixes.
-5. **Tag `main`** with an annotated tag and push it; the tag push starts the publish workflow:
+5. **Tag `main`** with an annotated tag and push it. The tag push runs `release.yml`, which builds,
+   signs and pushes the image and creates a **draft** GitHub release with the archives:
 
    ```sh
    git fetch origin
@@ -53,17 +53,11 @@ Security fixes go into the latest minor only (SECURITY.md).
    git push origin vX.Y.Z
    ```
 
-6. **Verify what was published**, using the same commands the user docs give:
-
-   ```sh
-   cosign verify ghcr.io/corker/mcp-authproxy@sha256:<digest> \
-     --certificate-identity-regexp '^https://github.com/corker/mcp-authproxy/' \
-     --certificate-oidc-issuer https://token.actions.githubusercontent.com
-   gh attestation verify <archive> --repo corker/mcp-authproxy
-   ```
-
-7. **Publish the release notes** on the GitHub release. For a security release, publish the advisory
-   at the same time (SECURITY.md).
+6. **Verify what was published** with the commands in
+   [docs/reference/packaging.md](../reference/packaging.md) (`cosign verify` for the image and
+   the checksums, `gh attestation verify` for the image and an archive).
+7. **Publish the draft release** with the notes from step 4. For a security release, publish the
+   advisory at the same time (SECURITY.md).
 
 ## If something goes wrong
 

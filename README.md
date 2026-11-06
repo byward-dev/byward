@@ -17,7 +17,7 @@ One Go binary, configured by environment variables.
 Requires [mise](https://mise.jdx.dev). Then install the tools CI uses and run the checks:
 
 ```sh
-mise install go golangci-lint go:golang.org/x/tools/cmd/goimports
+mise install go golangci-lint go:golang.org/x/tools/cmd/goimports actionlint zizmor shellcheck go:github.com/google/go-licenses/v2
 mise run check
 ```
 
