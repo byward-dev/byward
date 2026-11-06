@@ -130,8 +130,10 @@ func (s *Store) Epoch() int64 { return s.epoch }
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }
 
-// writeLocked runs fn in one IMMEDIATE transaction, increments the write counter and, after the
-// commit, mirrors it to the counter file. Callers hold s.wmu.
+// writeLocked runs fn in one IMMEDIATE transaction, increments the write counter and mirrors it to
+// the counter file before the commit. If the mirror cannot be written, nothing is committed, so an
+// error always means "not stored". If the commit then fails, the mirror is one write ahead and the
+// next Open treats the database as restored: users sign in again (fail safe). Callers hold s.wmu.
 func (s *Store) writeLocked(ctx context.Context, fn func(*sql.Tx) error) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -146,10 +148,14 @@ func (s *Store) writeLocked(ctx context.Context, fn func(*sql.Tx) error) error {
 		_ = tx.Rollback()
 		return fmt.Errorf("sqlite store: write counter: %w", err)
 	}
+	if err := writeCounter(s.counterFile, writes); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("sqlite store: commit: %w", err)
 	}
-	return writeCounter(s.counterFile, writes)
+	return nil
 }
 
 func (s *Store) write(ctx context.Context, fn func(*sql.Tx) error) error {

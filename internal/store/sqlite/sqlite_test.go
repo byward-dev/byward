@@ -231,6 +231,26 @@ func TestMissingCounterFileIsAFirstStart(t *testing.T) {
 	}
 }
 
+// Regression (runtime sweep): an error from a write means nothing was stored. The mirror is written
+// before the commit, so an unwritable counter directory rolls the write back.
+func TestFailedCounterWriteStoresNothing(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes anywhere")
+	}
+	cdir := t.TempDir()
+	s := open(t, t.TempDir(), filepath.Join(cdir, "writes"))
+	if err := os.Chmod(cdir, 0o500); err != nil { //nolint:gosec // G302: a directory needs x; read-only on purpose
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(cdir, 0o700) }) //nolint:gosec // G302: directory mode, restored for cleanup
+	if _, err := s.CreateGrant(ctx, grant("g1", "tid:a")); err == nil {
+		t.Fatal("CreateGrant succeeded although the counter file cannot be written")
+	}
+	if _, err := s.Grant(ctx, "g1"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the failed write was stored: %v", err)
+	}
+}
+
 func TestCorruptCounterFileFailsOpen(t *testing.T) {
 	counter := filepath.Join(t.TempDir(), "writes")
 	if err := os.WriteFile(counter, []byte("not a number"), 0o600); err != nil {
