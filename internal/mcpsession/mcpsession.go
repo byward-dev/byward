@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -146,8 +147,9 @@ func (s *sealer) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 func (s *sealer) seal() {
 	h := s.Header()
-	ids := h.Values(Header)
-	if len(ids) == 0 || (len(ids) == 1 && ids[0] == s.sealed) {
+	// Our own earlier value (kept across a 1xx) is never sealed again, whatever order it is in.
+	ids := slices.DeleteFunc(slices.Clone(h.Values(Header)), func(v string) bool { return s.sealed != "" && v == s.sealed })
+	if len(ids) == 0 {
 		return
 	}
 	h.Del(Header)

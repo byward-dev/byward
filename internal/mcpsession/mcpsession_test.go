@@ -162,11 +162,12 @@ func TestTheClientGetsASealedSessionIDNeverTheUpstreams(t *testing.T) {
 // reaches the upstream with the upstream's own ID.
 func TestTheSessionIDIsSealedOnceAroundAnInformationalResponse(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		before bool // the upstream sets the session header before the 103 (and net/http keeps it)
+		name          string
+		before, after bool // the upstream sets the session header before the 103 (net/http keeps it), adds it after
 	}{
-		{"session header after the 103", false},
-		{"session header only before the 103", true},
+		{"session header after the 103", false, true},
+		{"session header only before the 103", true, false},
+		{"session header before the 103 and added again after", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var got []string
@@ -177,8 +178,8 @@ func TestTheSessionIDIsSealedOnceAroundAnInformationalResponse(t *testing.T) {
 				}
 				w.Header().Set("Link", "</style.css>; rel=preload")
 				w.WriteHeader(http.StatusEarlyHints)
-				if !tc.before {
-					w.Header().Set(Header, upstreamSession)
+				if tc.after {
+					w.Header().Add(Header, upstreamSession)
 				}
 				w.WriteHeader(http.StatusOK)
 			}))
