@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Byward owl</title>
+  <desc id="desc">Dark charcoal owl with mint eyes and green wings on a pale mint background.</desc>
+  <!-- Background -->
+  <rect width="256" height="256" fill="#E0F5E9"/>
+  <!-- Wings -->
+  <ellipse cx="128" cy="153" rx="79" ry="70" fill="#65CA96"/>
+  <!-- Head and body -->
+  <path fill="#2D383D" d="M67 43 Q62 34 72 37 L99 46 Q128 33 157 46 L184 37 Q194 34 189 46 L183 72 Q195 94 188 114 Q184 128 172 141 Q154 162 155 184 Q156 202 166 215 Q128 232 90 215 Q102 200 101 180 Q100 157 84 140 Q63 121 60 103 Q57 86 66 72 Z"/>
+  <!-- Eye surrounds -->
+  <ellipse cx="98" cy="92" rx="26" ry="27" fill="#E0F5E9"/>
+  <ellipse cx="157" cy="92" rx="26" ry="27" fill="#E0F5E9"/>
+  <!-- Pupils -->
+  <circle cx="99" cy="93" r="14" fill="#2D383D"/>
+  <circle cx="156" cy="93" r="14" fill="#2D383D"/>
+  <!-- Eye highlights -->
+  <circle cx="91" cy="83" r="7" fill="#E0F5E9"/>
+  <circle cx="148" cy="83" r="7" fill="#E0F5E9"/>
+  <!-- Beak -->
+  <path d="M128 108 L139 120 L128 133 L117 120 Z" fill="#65CA96"/>
+</svg>
