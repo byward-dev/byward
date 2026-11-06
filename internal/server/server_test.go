@@ -4,21 +4,30 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/corker/mcp-authproxy/internal/audit"
 	"github.com/corker/mcp-authproxy/internal/config"
+	"github.com/corker/mcp-authproxy/internal/health"
+	"github.com/corker/mcp-authproxy/internal/logging"
 	"github.com/corker/mcp-authproxy/internal/resource"
+	"github.com/corker/mcp-authproxy/internal/store"
+	"github.com/corker/mcp-authproxy/internal/store/memory"
 	"github.com/corker/mcp-authproxy/internal/testutil/fakeupstream"
+	"github.com/corker/mcp-authproxy/internal/token"
 )
 
 // goodToken is distinctive so a leak check cannot match ordinary text.
@@ -71,7 +80,8 @@ func start(t *testing.T, extraEnv ...string) env {
 		t.Fatal(err)
 	}
 	logs := &syncBuffer{}
-	srv := httptest.NewServer(Handler(cfg, slog.New(slog.NewJSONHandler(logs, nil)), acceptGood{}, nil))
+	log := slog.New(slog.NewJSONHandler(logs, nil))
+	srv := httptest.NewServer(Handler(cfg, log, acceptGood{}, nil, Observability{Audit: audit.New(log, nil, time.Now)}))
 	t.Cleanup(srv.Close)
 	return env{srv, up, logs}
 }
@@ -255,19 +265,24 @@ func TestOnlyStreamableHTTPMethodsReachTheUpstream(t *testing.T) {
 }
 
 func TestNewConfiguresHardenedLimitsAndLoopbackBind(t *testing.T) {
-	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://m.example/mcp")
 	s, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.ReadHeaderTimeout == 0 || s.ReadTimeout == 0 || s.IdleTimeout == 0 || s.MaxHeaderBytes == 0 {
-		t.Fatalf("a limit is unset: %+v", s)
+	for name, srv := range map[string]*http.Server{"public": s.Public, "internal": s.Internal} {
+		for field, unset := range map[string]bool{"ReadHeaderTimeout": srv.ReadHeaderTimeout == 0, "ReadTimeout": srv.ReadTimeout == 0,
+			"IdleTimeout": srv.IdleTimeout == 0, "MaxHeaderBytes": srv.MaxHeaderBytes == 0} {
+			if unset {
+				t.Errorf("%s listener: %s is unset", name, field)
+			}
+		}
 	}
-	if s.Addr != "127.0.0.1:8080" {
-		t.Fatalf("default bind = %q", s.Addr)
+	if s.Internal.Addr != "127.0.0.1:9090" {
+		t.Fatalf("default internal bind = %q", s.Internal.Addr)
+	}
+	if s.Public.Addr != "127.0.0.1:8080" {
+		t.Fatalf("default bind = %q", s.Public.Addr)
 	}
 }
 
@@ -298,10 +313,7 @@ func TestRecovererLetsAbortedHandlersAbort(t *testing.T) {
 }
 
 func TestRunShutsDownOnCancel(t *testing.T) {
-	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://m.example/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0", "MCP_AUTHPROXY_INTERNAL_LISTEN=127.0.0.1:0")
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -324,7 +336,7 @@ func TestRunShutsDownOnCancel(t *testing.T) {
 func TestAdmitCapsRequestsAndStreamsSeparately(t *testing.T) {
 	release := make(chan struct{})
 	entered := make(chan struct{}, 4)
-	h := admit(1, 1, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h := admit(1, 1, nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		entered <- struct{}{}
 		<-release
 	}))
@@ -383,7 +395,7 @@ func TestNoAuthServesTheUpstreamWithoutMetadataOrChallenge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(Handler(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), resource.NoTokens{}, nil))
+	srv := httptest.NewServer(Handler(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), resource.NoTokens{}, nil, Observability{}))
 	t.Cleanup(srv.Close)
 	do := func(method, path, host string, hdr map[string]string) *http.Response {
 		r, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(`{"jsonrpc":"2.0"}`))
@@ -469,15 +481,12 @@ func TestNewNamesTheSettingAtFault(t *testing.T) {
 }
 
 func TestNewServesTheBrokerRoutes(t *testing.T) {
-	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://mcp.example.com/mcp")
 	s, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(s.Handler)
+	ts := httptest.NewServer(s.Public.Handler)
 	t.Cleanup(ts.Close)
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	get := func(path string) *http.Response {
@@ -501,5 +510,240 @@ func TestNewServesTheBrokerRoutes(t *testing.T) {
 	if res.StatusCode != http.StatusFound || !strings.HasPrefix(loc.String(), "http://127.0.0.1/callback?") ||
 		loc.Query().Get("error") != "invalid_request" || loc.Query().Get("iss") != "https://mcp.example.com" {
 		t.Fatalf("authorize: %d %s", res.StatusCode, loc)
+	}
+}
+
+func getBody(t *testing.T, h http.Handler, host, path string) (int, string) {
+	t.Helper()
+	r := httptest.NewRequest("GET", path, nil)
+	r.Host = host
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w.Code, w.Body.String()
+}
+
+// ADR-0018 §10, ADR-0021 §8 and §10: metrics and probes only on the internal listener.
+func TestInternalListenerServesProbesAndMetricsAndThePublicOneDoesNot(t *testing.T) {
+	cfg := loadConfig(t, "https://mcp.example.com/mcp")
+	s, err := New(cfg, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := getBody(t, s.Internal.Handler, "x", "/livez"); code != 200 {
+		t.Errorf("internal /livez = %d, want 200", code)
+	}
+	if code, _ := getBody(t, s.Internal.Handler, "x", "/readyz"); code != 200 {
+		t.Errorf("internal /readyz = %d, want 200", code)
+	}
+	// A public request is timed under its fixed route name.
+	getBody(t, s.Public.Handler, "mcp.example.com", "/mcp")
+	code, body := getBody(t, s.Internal.Handler, "x", "/metrics")
+	if code != 200 {
+		t.Errorf("internal /metrics = %d, want 200", code)
+	}
+	for _, want := range []string{"mcp_authproxy_build_info", `route="/mcp",status_class="4xx"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("internal /metrics lacks %s (the public request must be timed under its route)", want)
+		}
+	}
+	for _, p := range []string{"/metrics", "/livez", "/readyz"} {
+		if code, _ := getBody(t, s.Public.Handler, "mcp.example.com", p); code != http.StatusNotFound {
+			t.Errorf("public %s = %d, want 404", p, code)
+		}
+	}
+}
+
+func TestEmptyInternalListenTurnsTheInternalListenerOff(t *testing.T) {
+	cfg := loadConfig(t, "https://m.example/mcp", "MCP_AUTHPROXY_INTERNAL_LISTEN=")
+	s, err := New(cfg, slog.New(slog.DiscardHandler))
+	if err != nil || s.Internal != nil {
+		t.Fatalf("internal server = %v, err %v; want none", s.Internal, err)
+	}
+}
+
+func TestStartupAuditsKeysAndStaticClients(t *testing.T) {
+	cfg := loadConfig(t, "https://m.example/mcp")
+	var logs bytes.Buffer
+	if _, err := New(cfg, logging.New(&logs, "json")); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"event":"key_loaded","outcome":"success","reason":"signing","key_id":"2026-11-06"`, `"event":"client_registered","outcome":"success","reason":"static","client_id":"test-app"`} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("startup audit lacks %s:\n%s", want, logs.String())
+		}
+	}
+}
+
+var listenLine = regexp.MustCompile(`"msg":"listening","listen":"([^"]+)"`)
+
+// listenWatcher is a log sink that closes listening when the public listener's address is logged.
+type listenWatcher struct {
+	syncBuffer
+	listening chan struct{}
+	once      sync.Once
+}
+
+func (w *listenWatcher) Write(p []byte) (int, error) {
+	n, err := w.syncBuffer.Write(p)
+	if listenLine.Match(p) {
+		w.once.Do(func() { close(w.listening) })
+	}
+	return n, err
+}
+
+// ADR-0021 §10: on shutdown /readyz fails before the public listener closes, and the internal
+// listener (probes, metrics) closes only after the public one, so the drain is visible.
+// Shutdown runs RegisterOnShutdown callbacks in goroutines, so each asserts the state it sees.
+func TestRunDrainsReadinessBeforeShutdownAndClosesTheInternalListenerLast(t *testing.T) {
+	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp",
+		"MCP_AUTHPROXY_LISTEN=127.0.0.1:0", "MCP_AUTHPROXY_INTERNAL_LISTEN=127.0.0.1:0"), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs := &listenWatcher{listening: make(chan struct{})}
+	log := logging.New(logs, "json")
+	s, err := New(cfg, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probes := http.NewServeMux()
+	s.Health.Register(probes)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	var readyzAtPublicShutdown int
+	var publicDialAtInternalShutdown error
+	s.Public.RegisterOnShutdown(func() {
+		defer wg.Done()
+		readyzAtPublicShutdown, _ = getBody(t, probes, "x", "/readyz")
+	})
+	s.Internal.RegisterOnShutdown(func() {
+		defer wg.Done()
+		m := listenLine.FindStringSubmatch(logs.String())
+		if m == nil {
+			publicDialAtInternalShutdown = errors.New("no listening line")
+			return
+		}
+		c, err := net.DialTimeout("tcp", m[1], time.Second)
+		if err == nil {
+			_ = c.Close()
+			publicDialAtInternalShutdown = errors.New("the public listener still accepts connections")
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Run(ctx, s, log) }()
+	select {
+	case <-logs.listening:
+	case err := <-done:
+		t.Fatalf("Run returned before listening: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not log its listening address within 5s")
+	}
+	// One completed connection proves Serve is accepting, so Shutdown has a listener to close.
+	addr := listenLine.FindStringSubmatch(logs.String())[1]
+	if c, err := net.DialTimeout("tcp", addr, 5*time.Second); err != nil {
+		t.Fatalf("public listener %s not accepting before cancel: %v", addr, err)
+	} else {
+		_ = c.Close()
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+	callbacks := make(chan struct{})
+	go func() { wg.Wait(); close(callbacks) }()
+	select {
+	case <-callbacks:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a server's Shutdown never ran its RegisterOnShutdown callback")
+	}
+	if readyzAtPublicShutdown != http.StatusServiceUnavailable {
+		t.Errorf("/readyz was %d when the public listener began shutting down, want 503 (drain first)", readyzAtPublicShutdown)
+	}
+	if publicDialAtInternalShutdown != nil {
+		t.Errorf("internal listener shut down before the public one was closed: %v", publicDialAtInternalShutdown)
+	}
+}
+
+// ADR-0021 §5 through the real handler: rejections from one source are logged up to the burst and
+// counted in metrics beyond it.
+func TestRejectionsFromOneSourceAreRateLimitedButStillCounted(t *testing.T) {
+	cfg := loadConfig(t, "https://mcp.example.com/mcp")
+	var logs bytes.Buffer
+	s, err := New(cfg, logging.New(&logs, "json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs.Reset() // startup records
+	for range 15 {
+		getBody(t, s.Public.Handler, "evil.example", "/mcp")
+	}
+	if n := strings.Count(logs.String(), `"event":"host_rejected"`); n != 10 {
+		t.Errorf("logged %d host_rejected records from one source, want the burst of 10", n)
+	}
+	_, metrics := getBody(t, s.Internal.Handler, "x", "/metrics")
+	if !strings.Contains(metrics, `mcp_authproxy_audit_events_total{event="host_rejected",outcome="failure"} 15`) {
+		t.Errorf("metrics must count all 15 rejections:\n%s", metrics)
+	}
+}
+
+// ADR-0021 §8: label values come from the route table, never from the request.
+func TestRouteLabelsNeverCarryRequestDetails(t *testing.T) {
+	cfg := loadConfig(t, "https://mcp.example.com/mcp")
+	s, err := New(cfg, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"/mcp?user=alice", "/no-such-route-alice", "/callback/entra?state=alice"} {
+		getBody(t, s.Public.Handler, "mcp.example.com", p)
+	}
+	_, metrics := getBody(t, s.Internal.Handler, "x", "/metrics")
+	if strings.Contains(metrics, "alice") {
+		t.Fatalf("a request detail reached a label:\n%s", metrics)
+	}
+	for _, want := range []string{`route="/mcp"`, `route="other"`, `route="/callback/entra"`} {
+		if !strings.Contains(metrics, want) {
+			t.Errorf("metrics lack %s", want)
+		}
+	}
+}
+
+type pingStore struct {
+	store.Store
+	err error
+}
+
+func (p pingStore) Ping(context.Context) error { return p.err }
+
+// ADR-0021 §10: /readyz is the keys and the store, never the IdP; a store that cannot be reached
+// makes it fail without putting the error in the body.
+func TestReadinessIsKeysAndStoreOnly(t *testing.T) {
+	ring, err := token.LoadKeyRing(loadConfig(t, "https://m.example/mcp").KeysDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name     string
+		st       store.Store
+		wantCode int
+		wantBody string
+	}{
+		{"memory store", memory.New(), 200, `{"checks":{"keys":"ok","store":"ok"},"status":"ok"}`},
+		{"store reachable", pingStore{memory.New(), nil}, 200, `{"checks":{"keys":"ok","store":"ok"},"status":"ok"}`},
+		{"store down", pingStore{memory.New(), errors.New("dial /var/lib/db: refused")}, 503, `{"checks":{"keys":"ok","store":"fail"},"status":"unavailable"}`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			health.New(slog.New(slog.DiscardHandler), readiness(ring, c.st)...).Register(mux)
+			code, body := getBody(t, mux, "x", "/readyz")
+			if code != c.wantCode || strings.TrimSpace(body) != c.wantBody {
+				t.Fatalf("readyz = %d %s, want %d %s (exactly keys and store, no IdP, no error text)", code, body, c.wantCode, c.wantBody)
+			}
+		})
 	}
 }

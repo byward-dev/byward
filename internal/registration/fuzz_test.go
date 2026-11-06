@@ -76,7 +76,7 @@ func FuzzLoadStatic(f *testing.F) {
 			}
 			return
 		}
-		sr := reg.(*StaticRegistry)
+		sr := reg
 		for id, c := range sr.clients {
 			if !validClientID(id) || len(c.redirects) == 0 || len(c.redirects) > MaxRedirectURIs {
 				t.Fatalf("invalid client accepted: %q", id)

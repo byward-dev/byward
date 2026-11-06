@@ -21,6 +21,7 @@ var registry = []Setting{
 	{Name: "resource-name", Help: "human-readable resource name in protected resource metadata"},
 	{Name: "resource-documentation", Help: "documentation URL in protected resource metadata"},
 	{Name: "log-format", Default: "json", Help: "log format: json or text"},
+	{Name: "internal-listen", Default: "127.0.0.1:9090", Help: "address of the internal listener for /metrics, /livez and /readyz (ADR-0018 §10); empty turns it off"},
 	{Name: "entra-tenant", Auth: true, Help: "Entra tenant ID (a GUID) of the IdP app"},
 	{Name: "entra-client-id", Auth: true, Help: "application (client) ID of the IdP app registration"},
 	{Name: "entra-client-secret", Auth: true, Secret: true, Help: "client secret of the IdP app"},
@@ -35,6 +36,7 @@ type Config struct {
 	PublicURL             *url.URL
 	UpstreamURL           *url.URL
 	Listen                string
+	InternalListen        string // "" when the internal listener is off
 	AllowedOrigins        []string
 	AllowedHosts          []string
 	Scope                 string
@@ -88,7 +90,7 @@ func Load(args, environ []string, readFile readFileFunc) (*Config, Actions, erro
 }
 
 func validate(v *Values, container bool) (*Config, error) {
-	c := &Config{Values: v, Listen: v.get("listen"), Scope: v.get("scope"),
+	c := &Config{Values: v, Listen: v.get("listen"), InternalListen: v.get("internal-listen"), Scope: v.get("scope"),
 		ResourceName: v.get("resource-name"), ResourceDocumentation: v.get("resource-documentation"),
 		LogFormat: v.get("log-format"), InContainer: container}
 	var errs []error
@@ -137,6 +139,13 @@ func validate(v *Values, container bool) (*Config, error) {
 
 	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
 		errs = append(errs, errorf("MCP_AUTHPROXY_LISTEN: want host:port, got %q", c.Listen))
+	}
+	if c.InternalListen != "" {
+		if _, _, err := net.SplitHostPort(c.InternalListen); err != nil {
+			errs = append(errs, errorf("MCP_AUTHPROXY_INTERNAL_LISTEN: want host:port or empty, got %q", c.InternalListen))
+		} else if c.InternalListen == c.Listen && !strings.HasSuffix(c.Listen, ":0") {
+			errs = append(errs, errorf("MCP_AUTHPROXY_INTERNAL_LISTEN: must differ from MCP_AUTHPROXY_LISTEN; metrics and probes never share the public listener"))
+		}
 	}
 	for _, o := range splitList(v.get("allowed-origins")) {
 		n, err := normalizeOrigin(o)

@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -124,5 +125,39 @@ func TestAccessTokenIsRemovedWithoutTouchingTheRestOfTheQuery(t *testing.T) {
 		if got := withoutAccessToken(raw); got != want {
 			t.Errorf("%q: got %q want %q", raw, got, want)
 		}
+	}
+}
+
+// ADR-0021 §9: the relay writes our trace context as a header and never touches params._meta.
+func TestTraceContextIsInjectedAsAHeaderAndTheBodyIsUntouched(t *testing.T) {
+	const ours = "00-11111111111111111111111111111111-2222222222222222-01"
+	cases := []struct {
+		name   string
+		opts   []Option
+		wantTP string
+	}{
+		{"with tracing", []Option{WithTraceContext(func(_ context.Context, h http.Header) { h.Set("Traceparent", ours) })}, ours},
+		{"without tracing the inbound header passes unchanged", nil, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"},
+	}
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"_meta":{"traceparent":"00-aaaa-bbbb-01"}}}`)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			up := fakeupstream.New()
+			t.Cleanup(up.Close)
+			u, _ := url.Parse(up.URL + "/mcp")
+			r := httptest.NewRequest("POST", "/mcp", bytes.NewReader(body))
+			r.Header.Set("Traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+			New(quiet(), u, c.opts...).ServeHTTP(httptest.NewRecorder(), r)
+			got, ok := up.Last()
+			if !ok {
+				t.Fatal("nothing reached the upstream")
+			}
+			if tp := got.Header.Get("Traceparent"); tp != c.wantTP {
+				t.Errorf("upstream traceparent = %q, want %q", tp, c.wantTP)
+			}
+			if !bytes.Equal(got.Body, body) {
+				t.Errorf("the body (params._meta) changed: %s", got.Body)
+			}
+		})
 	}
 }

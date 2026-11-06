@@ -3,11 +3,15 @@ package resource
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/corker/mcp-authproxy/internal/audit"
 )
 
 func meta() Metadata {
@@ -75,7 +79,7 @@ var reached = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 const challenge = `Bearer resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource/mcp", scope="mcp"`
 
 func TestGuardMissingToken(t *testing.T) {
-	g := Guard(meta(), fakeValidator{}, reached)
+	g := Guard(meta(), fakeValidator{}, nil, reached)
 	for _, auth := range []string{"", "Basic dXNlcjpwYXNz", "Bearer ", "Bearer"} {
 		r := httptest.NewRequest("POST", "/mcp", nil)
 		if auth != "" {
@@ -89,7 +93,7 @@ func TestGuardMissingToken(t *testing.T) {
 }
 
 func TestGuardBadTokens(t *testing.T) {
-	g := Guard(meta(), fakeValidator{"tok-exp-1": ErrExpired, "tok-bad-2": ErrInvalid, "tok-err-3": context.DeadlineExceeded}, reached)
+	g := Guard(meta(), fakeValidator{"tok-exp-1": ErrExpired, "tok-bad-2": ErrInvalid, "tok-err-3": context.DeadlineExceeded}, nil, reached)
 	cases := map[string]string{"tok-exp-1": descExpired, "tok-bad-2": descInvalid, "tok-err-3": descInvalid}
 	for tok, desc := range cases {
 		r := httptest.NewRequest("POST", "/mcp", nil)
@@ -111,7 +115,7 @@ func TestGuardBadTokens(t *testing.T) {
 
 // The relay strips access_token for every mode; Guard only ignores it and keeps the query intact.
 func TestGuardIgnoresTokenInQuery(t *testing.T) {
-	w := serve(Guard(meta(), fakeValidator{}, reached), httptest.NewRequest("POST", "/mcp?x=1&access_token=q", nil))
+	w := serve(Guard(meta(), fakeValidator{}, nil, reached), httptest.NewRequest("POST", "/mcp?x=1&access_token=q", nil))
 	if w.Code != 401 {
 		t.Fatalf("query token must be ignored, got %d", w.Code)
 	}
@@ -120,7 +124,7 @@ func TestGuardIgnoresTokenInQuery(t *testing.T) {
 func TestGuardValidTokenReachesNextWithIdentity(t *testing.T) {
 	r := httptest.NewRequest("POST", "/mcp?x=1", nil)
 	r.Header.Set("Authorization", "Bearer good")
-	w := serve(Guard(meta(), fakeValidator{}, reached), r)
+	w := serve(Guard(meta(), fakeValidator{}, nil, reached), r)
 	if w.Code != http.StatusNoContent || w.Header().Get("X-Subject") != "tid:oid" || w.Header().Get("X-Query") != "x=1" {
 		t.Fatalf("code=%d headers=%v", w.Code, w.Header())
 	}
@@ -129,13 +133,13 @@ func TestGuardValidTokenReachesNextWithIdentity(t *testing.T) {
 func TestGuardTokenSentTwice(t *testing.T) {
 	r := httptest.NewRequest("POST", "/mcp?access_token=q", nil)
 	r.Header.Set("Authorization", "Bearer good")
-	if w := serve(Guard(meta(), fakeValidator{}, reached), r); w.Code != 400 {
+	if w := serve(Guard(meta(), fakeValidator{}, nil, reached), r); w.Code != 400 {
 		t.Fatalf("got %d", w.Code)
 	}
 	r = httptest.NewRequest("POST", "/mcp", nil)
 	r.Header.Add("Authorization", "Bearer a")
 	r.Header.Add("Authorization", "Bearer b")
-	if w := serve(Guard(meta(), fakeValidator{}, reached), r); w.Code != 400 {
+	if w := serve(Guard(meta(), fakeValidator{}, nil, reached), r); w.Code != 400 {
 		t.Fatalf("two headers: got %d", w.Code)
 	}
 }
@@ -143,5 +147,34 @@ func TestGuardTokenSentTwice(t *testing.T) {
 func TestNoTokensRejectsEverything(t *testing.T) {
 	if _, err := (NoTokens{}).Validate(context.Background(), "anything"); err != ErrInvalid {
 		t.Fatal(err)
+	}
+}
+
+// An invalid or expired token is an audit event; a missing token is the normal start of sign-in.
+func TestGuardAuditsRejectedTokensButNotMissingOnes(t *testing.T) {
+	var out strings.Builder
+	rec := audit.New(slog.New(slog.NewJSONHandler(&out, nil)), nil, time.Now)
+	g := Guard(meta(), fakeValidator{"tok-exp-1": ErrExpired, "tok-bad-2": ErrInvalid}, rec, reached)
+	cases := []struct{ auth, want string }{
+		{"", ""},
+		{"Bearer tok-bad-2", `"event":"access_token_rejected","outcome":"failure","reason":"invalid"`},
+		{"Bearer tok-exp-1", `"event":"access_token_rejected","outcome":"failure","reason":"expired"`},
+	}
+	for _, c := range cases {
+		out.Reset()
+		r := httptest.NewRequest("POST", "/mcp", nil)
+		if c.auth != "" {
+			r.Header.Set("Authorization", c.auth)
+		}
+		serve(g, r)
+		switch {
+		case c.want == "" && out.Len() != 0:
+			t.Errorf("no token: want no audit record, got %s", out.String())
+		case c.want != "" && !strings.Contains(out.String(), c.want):
+			t.Errorf("%s: want %s, got %s", c.auth, c.want, out.String())
+		}
+		if strings.Contains(out.String(), "tok-") {
+			t.Errorf("%s: the token reached the audit stream", c.auth)
+		}
 	}
 }

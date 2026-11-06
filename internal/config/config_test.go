@@ -254,3 +254,26 @@ func TestBrokerSettingsAreRequired(t *testing.T) {
 		t.Fatalf("c=%+v err=%v", c, err)
 	}
 }
+
+func TestInternalListenDefaultsToLoopbackAndMustDifferFromListen(t *testing.T) {
+	base := []string{"MCP_AUTHPROXY_INSECURE_NO_AUTH=true", "MCP_AUTHPROXY_PUBLIC_URL=http://127.0.0.1:8080/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"}
+	cfg, _, err := Load(nil, base, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.InternalListen != "127.0.0.1:9090" {
+		t.Fatalf("default internal listener = %q, want 127.0.0.1:9090", cfg.InternalListen)
+	}
+	cfg, _, err = Load(nil, append(base, "MCP_AUTHPROXY_INTERNAL_LISTEN="), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.InternalListen != "" {
+		t.Fatalf("MCP_AUTHPROXY_INTERNAL_LISTEN= must turn the internal listener off, got %q", cfg.InternalListen)
+	}
+	for _, bad := range []string{"9090", "127.0.0.1:8080"} {
+		if _, _, err := Load(nil, append(base, "MCP_AUTHPROXY_INTERNAL_LISTEN="+bad), nil); err == nil || !strings.Contains(err.Error(), "MCP_AUTHPROXY_INTERNAL_LISTEN") {
+			t.Errorf("MCP_AUTHPROXY_INTERNAL_LISTEN=%q: want an error naming the setting, got %v", bad, err)
+		}
+	}
+}
