@@ -77,3 +77,12 @@ shows its invalid-redirect error page (rule 6), so this amendment alone does not
 works. Rule 3 still rejects custom schemes, and this slice does not loosen it. Whether to allow
 custom schemes for desktop apps is a separate decision for the maintainer, to be made once the
 compatibility run shows what Cursor actually sends.
+
+**Observed 2026-11-06 (real run, byward 3be7365, Entra):**
+- **Cursor 3.29.9:** it sends `redirect_uri=https://www.cursor.com/agents/mcp/oauth/callback` at
+  `/authorize`, and cursor.com relays the code to the desktop app at
+  `http://localhost:8787/callback`. It signs in without custom schemes.
+- **Cursor 2.6.22:** it registers only custom-scheme callbacks, so it gets `invalid_redirect_uri`
+  and cannot sign in.
+- **No change to rule 3:** `docs/how-to/dcr.md` documents Cursor 3.x instead. The first 3.x
+  release that works is not known.

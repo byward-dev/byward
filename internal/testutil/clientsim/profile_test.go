@@ -5,16 +5,16 @@ import (
 	"net/http"
 	"os"
 	"runtime"
-	"slices"
 	"strings"
 	"testing"
 
+	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/testutil/clientdocs"
 )
 
 // A profile is evidence, not a wish list: each one names its version and matrix cell, every fact has
-// a source or says it is assumed, and a CIMD or DCR profile's redirect is one its published document
-// or registration request lists.
+// a source or says it is assumed, and a CIMD or DCR profile's redirect is one the broker accepts
+// against its published document or registration request.
 func TestEveryProfileIsSourcedAndMatchesItsClientsDocument(t *testing.T) {
 	cells := map[string]bool{}
 	for _, p := range All {
@@ -52,8 +52,8 @@ func TestEveryProfileIsSourcedAndMatchesItsClientsDocument(t *testing.T) {
 			if err := json.Unmarshal(body, &doc); err != nil {
 				t.Fatal(err)
 			}
-			if !slices.Contains(doc.RedirectURIs, p.RedirectURI) {
-				t.Fatalf("redirect %s is not in the client's document or registration request %v", p.RedirectURI, doc.RedirectURIs)
+			if err := registration.MatchRedirect(doc.RedirectURIs, p.RedirectURI); err != nil { // the broker's rule: any loopback port
+				t.Fatalf("the broker refuses redirect %s against the client's document or registration request %v: %v", p.RedirectURI, doc.RedirectURIs, err)
 			}
 		})
 	}
