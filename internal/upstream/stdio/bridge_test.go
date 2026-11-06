@@ -102,7 +102,8 @@ type events struct {
 func eventsOf(t *testing.T, res *http.Response) *events {
 	t.Helper()
 	if ct := res.Header.Get("Content-Type"); ct != "text/event-stream" {
-		t.Fatalf("Content-Type = %q, want text/event-stream", ct)
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+		t.Fatalf("Content-Type = %q, want text/event-stream; status %d, body %q", ct, res.StatusCode, body)
 	}
 	e := &events{t: t, ch: make(chan string, 64)}
 	go func() {

@@ -179,6 +179,14 @@ func (m *Manager) Get(ctx context.Context, key string, id Identity) (p *Process,
 		if errors.Is(err, errNotFound) {
 			continue // that spawn failed or the process exited; try our own
 		}
+		if err == nil && p.isStopping() {
+			// It keeps its key until it has exited, and refuses every Send: wait, then start anew.
+			release()
+			if err := m.awaitExit(ctx, e); err != nil {
+				return nil, nil, err
+			}
+			continue
+		}
 		return p, release, err
 	}
 }

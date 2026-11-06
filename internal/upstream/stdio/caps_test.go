@@ -168,6 +168,40 @@ func TestStoppingProcessHoldsItsSlotUntilItHasExited(t *testing.T) {
 	}
 }
 
+func TestGetForTheKeyOfAStoppingProcessWaitsForItAndStartsANewOne(t *testing.T) {
+	// A modern-era user's key outlives its process: a request that comes while the process is
+	// stopping must get a new process, not the stopping one, whose Send refuses everything.
+	h := newHarness(t, func(c *Config) { c.Command = []string{fakeBin, "-stubborn"} })
+	old := h.get(t, "user:alice", alice)
+	h.m.Stop("user:alice")
+	got := make(chan *Process, 1)
+	go func() {
+		p, release, err := h.m.Get(context.Background(), "user:alice", alice)
+		if err != nil {
+			t.Errorf("Get: %v", err)
+			close(got)
+			return
+		}
+		release()
+		got <- p
+	}()
+	select {
+	case p := <-got:
+		t.Fatalf("Get returned %p (the stopping process is %p) before it had exited", p, old)
+	case <-time.After(100 * time.Millisecond):
+	}
+	h.clk.Advance(2 * DefaultKillGrace) // SIGTERM, then SIGKILL
+	waitDone(t, old)
+	select {
+	case p := <-got:
+		if p == nil || p == old || p.isStopping() {
+			t.Fatalf("Get after the stopping process exited returned %p (old %p)", p, old)
+		}
+	case <-time.After(guard):
+		t.Fatal("Get did not proceed after the stopping process exited")
+	}
+}
+
 func TestLookingUpAProcessNeverStartsOneAndRefusesAnotherUser(t *testing.T) {
 	h := newHarness(t, nil)
 	if _, _, err := h.m.leaseKey(context.Background(), "s1", alice); !errors.Is(err, errNotFound) {
