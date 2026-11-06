@@ -16,14 +16,33 @@ var (
 	// ErrConsumed: an authorization code was already used. ADR-0006 §5: the caller revokes the
 	// code's grant.
 	ErrConsumed = errors.New("store: already consumed")
+	// ErrExists: a grant ID, a grant's code or a refresh-token hash is already stored.
+	ErrExists = errors.New("store: already exists")
 )
 
+// RevocationRetention is how long revocations are kept: the longest access-token lifetime
+// (ADR-0006 §3, §5). After it, every token a revocation covers has expired anyway.
+const RevocationRetention = time.Hour
+
 // Store is everything the broker keeps.
+//
+// Values passed in and returned are copies: changing a slice after a call never changes what is
+// stored. Codes and refresh tokens belong to a grant that must exist (ErrNotFound otherwise) and go
+// when it goes.
 type Store interface {
 	Grants
 	Codes
 	RefreshTokens
 	Revocations
+	Collector
+}
+
+// Collector removes expired rows (ADR-0007 §1).
+type Collector interface {
+	// Collect deletes codes (pending or consumed) with ExpiresAt <= now, refresh tokens with
+	// IdleExpiresAt <= now, grants with ExpiresAt <= now together with their codes and refresh
+	// tokens, and revocations with At <= now - RevocationRetention.
+	Collect(ctx context.Context, now time.Time) error
 }
 
 // Grant is one user's authorization of one MCP client (CONTEXT.md "Grant").
@@ -44,10 +63,18 @@ type Grant struct {
 
 // Grants stores grants.
 type Grants interface {
+	// CreateGrant stores g and returns it with Epoch set. An existing ID is ErrExists.
 	CreateGrant(ctx context.Context, g Grant) (Grant, error)
+	// Grant returns the grant, or ErrNotFound. It does not check ExpiresAt.
 	Grant(ctx context.Context, id string) (Grant, error)
-	// RevokeGrant deletes the grant with its codes and refresh tokens, and records a revocation.
+	// RevokeGrant deletes the grant with its codes and refresh tokens, and records
+	// Revocation{GrantID: id, Before: at, At: at}. An unknown grant is ErrNotFound and records
+	// nothing.
 	RevokeGrant(ctx context.Context, id string, at time.Time) error
+	// RevokeSubject is revoke-user (ADR-0006 §9): it records Revocation{Subject: subject, Before:
+	// before, At: at} and deletes the subject's grants created before `before`, with their codes,
+	// refresh tokens and IdP tokens. It records the cut-off even when the subject has no grants.
+	RevokeSubject(ctx context.Context, subject string, before, at time.Time) error
 }
 
 // PendingCode is what an authorization code stands for until /token redeems it. The code given to
@@ -64,9 +91,12 @@ type PendingCode struct {
 
 // Codes stores pending authorization codes.
 type Codes interface {
+	// PutCode stores the grant's code. A grant has at most one code, pending or consumed:
+	// another is ErrExists. An unknown grant is ErrNotFound.
 	PutCode(ctx context.Context, c PendingCode) error
-	// ConsumeCode returns the code exactly once (an atomic conditional update). A second call
-	// returns ErrConsumed; an unknown or expired code ErrNotFound.
+	// ConsumeCode returns the code exactly once (an atomic conditional update). A consumed code is
+	// kept until it expires, so a second call returns ErrConsumed; an unknown code, or one with
+	// ExpiresAt <= now, is ErrNotFound.
 	ConsumeCode(ctx context.Context, grantID string, now time.Time) (PendingCode, error)
 }
 
@@ -81,8 +111,11 @@ type RefreshToken struct {
 
 // RefreshTokens stores refresh tokens. Rotation and reuse detection arrive with slice 1.6.
 type RefreshTokens interface {
+	// PutRefreshToken stores t. An existing hash is ErrExists; an unknown grant ErrNotFound.
 	PutRefreshToken(ctx context.Context, t RefreshToken) error
-	RefreshToken(ctx context.Context, hash [sha256.Size]byte) (RefreshToken, error)
+	// RefreshToken returns the token with this hash; an unknown one, or one with
+	// IdleExpiresAt <= now, is ErrNotFound.
+	RefreshToken(ctx context.Context, hash [sha256.Size]byte, now time.Time) (RefreshToken, error)
 }
 
 // Revocation is one entry of the deny list (ADR-0006 §3): a revoked grant, or every grant of a
@@ -96,5 +129,8 @@ type Revocation struct {
 
 // Revocations feeds the in-memory deny list.
 type Revocations interface {
+	// RevocationsSince returns the revocations with At >= since, oldest first. Entries at exactly
+	// since come back again on the next call; the deny list is a set, so that is harmless and no
+	// revocation in the same instant is missed.
 	RevocationsSince(ctx context.Context, since time.Time) ([]Revocation, error)
 }
