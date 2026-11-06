@@ -70,7 +70,7 @@ func TestMetadataCORS(t *testing.T) {
 }
 
 var reached = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	id, _ := identityFrom(r.Context())
+	id, _ := IdentityFrom(r.Context())
 	w.Header().Set("X-Subject", id.Subject)
 	w.Header().Set("X-Query", r.URL.RawQuery)
 	w.WriteHeader(http.StatusNoContent)

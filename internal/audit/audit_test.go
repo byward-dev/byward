@@ -37,6 +37,7 @@ var samples = []Event{
 	{Name: ConsentDenied, Outcome: Failure, Reason: "the user denied the request", ClientID: "client-1", ClientTrust: "verified"},
 	{Name: RateLimited, Outcome: Failure, Reason: "authorize"},
 	{Name: StoreRestored, Outcome: Success, Reason: "restored from an older copy", Epoch: 2},
+	{Name: SessionRejected, Outcome: Failure, Reason: "session of another user", UserKey: "tid:oid"},
 }
 
 func render(t *testing.T) string {
@@ -87,7 +88,7 @@ func TestAuditRecordsMatchTheGoldenSchema(t *testing.T) {
 
 // names lists every event constant; a new one must be added here, to samples and to the docs.
 var names = []string{Login, AccessDenied, TokenIssued, TokenRejected, AccessTokenRejected, GrantRevoked,
-	ClientRegistered, KeyLoaded, HostRejected, OriginRejected, ConsentShown, ConsentGranted, ConsentDenied, RateLimited, StoreRestored}
+	ClientRegistered, KeyLoaded, HostRejected, OriginRejected, ConsentShown, ConsentGranted, ConsentDenied, RateLimited, StoreRestored, SessionRejected}
 
 func TestEveryEventHasASampleAndADocsRow(t *testing.T) {
 	docs, err := os.ReadFile("../../docs/reference/observability.md")

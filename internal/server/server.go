@@ -54,8 +54,9 @@ const (
 )
 
 // Handler builds every route behind the Host check, request logging, metrics, the server span and
-// panic recovery. register, when not nil, adds the broker's routes (authenticated mode).
-func Handler(cfg *config.Config, log *slog.Logger, v resource.Validator, register func(*http.ServeMux), o Observability) http.Handler {
+// panic recovery. register, when not nil, adds the broker's routes, and sessions binds MCP sessions
+// to the user (authenticated mode; both nil without authentication).
+func Handler(cfg *config.Config, log *slog.Logger, v resource.Validator, register func(*http.ServeMux), sessions func(http.Handler) http.Handler, o Observability) http.Handler {
 	meta := resource.Metadata{Resource: cfg.PublicURL, Issuer: cfg.Issuer(), Scope: cfg.Scope,
 		Name: cfg.ResourceName, Documentation: cfg.ResourceDocumentation}
 	mux := http.NewServeMux()
@@ -74,6 +75,9 @@ func Handler(cfg *config.Config, log *slog.Logger, v resource.Validator, registe
 		register(mux)
 	}
 	up := relay.New(log, cfg.UpstreamURL, relay.WithTraceContext(tracing.Inject))
+	if sessions != nil {
+		up = sessions(up)
+	}
 	// The proxy's own origin is same-origin and cannot be forged by another site (a DNS-rebinding
 	// page sends its own origin), so it is always allowed; the MCP conformance rebinding scenario
 	// expects it to be accepted.
@@ -100,13 +104,13 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 	var background func(context.Context)
 	var closeStore func() error
 	if cfg.NoAuth {
-		h = Handler(cfg, log, resource.NoTokens{}, nil, o)
+		h = Handler(cfg, log, resource.NoTokens{}, nil, nil, o)
 	} else {
 		a, err := buildAuth(cfg, log, o)
 		if err != nil {
 			return nil, err
 		}
-		h = Handler(cfg, log, a.validator, a.register, o)
+		h = Handler(cfg, log, a.validator, a.register, a.sessions, o)
 		checks = a.checks
 		background, closeStore = a.background, a.closeStore
 	}

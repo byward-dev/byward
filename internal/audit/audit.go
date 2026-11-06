@@ -32,6 +32,7 @@ const (
 	ConsentDenied       = "consent_denied"        // the user denied the client on the consent page
 	RateLimited         = "rate_limited"          // an OAuth endpoint refused a request over its per-address budget
 	StoreRestored       = "store_restored"        // startup found the store restored from an older copy; a new epoch began (ADR-0007 §9)
+	SessionRejected     = "session_rejected"      // a signed-in user presented an MCP session ID not bound to them (invariant 13)
 )
 
 // Outcomes.
