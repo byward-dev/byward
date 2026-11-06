@@ -85,6 +85,10 @@ func (c staticClient) Authenticate(_ context.Context, f url.Values, h http.Heade
 	if id := f.Get("client_id"); id != "" && id != c.id {
 		return errors.New("client_id mismatch")
 	}
+	// Mirrors registration's private_key_jwt rule: the assertion's sub (and iss) must be the client.
+	if as := f.Get("client_assertion"); as != "" && assertionSubject(as) != c.id {
+		return errors.New("assertion subject mismatch")
+	}
 	return nil
 }
 
@@ -655,5 +659,32 @@ func TestAssertionSubject(t *testing.T) {
 		if got := assertionSubject(jwt); got != want {
 			t.Errorf("%q: got %q want %q", jwt, got, want)
 		}
+	}
+}
+
+func assertionFor(sub string) string {
+	enc := func(v string) string { return base64.RawURLEncoding.EncodeToString([]byte(v)) }
+	return enc(`{"alg":"ES256"}`) + "." + enc(`{"iss":"`+sub+`","sub":"`+sub+`"}`) + ".sig"
+}
+
+func TestAssertionWithoutClientIDFindsTheClient(t *testing.T) {
+	cases := []struct {
+		name, sub, code string
+		status          int
+	}{
+		{"assertion names the client", clientID, "", 200},
+		{"assertion names another client", otherClientID, "invalid_grant", 400},
+		{"assertion names nobody", "unknown", "invalid_client", 401},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t)
+			code := e.signIn(t, nil).Query().Get("code")
+			res, body := e.redeem(t, code, url.Values{"client_id": nil,
+				"client_assertion_type": {"urn:ietf:params:oauth:client-assertion-type:jwt-bearer"}, "client_assertion": {assertionFor(c.sub)}})
+			if res.StatusCode != c.status || (c.code != "" && body["error"] != c.code) {
+				t.Fatalf("got %d %v", res.StatusCode, body)
+			}
+		})
 	}
 }
