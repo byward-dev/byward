@@ -35,9 +35,18 @@ func hostKey(h string) string {
 	return h
 }
 
+// CORS for listed origins on the MCP endpoint: browser-based MCP clients send a preflight without
+// credentials, so it is answered here, before authentication, and every response to a listed
+// origin carries the headers the client must read (the 401 challenge, the session ID).
+const (
+	allowMethods  = "GET, POST, DELETE"
+	allowHeaders  = "Authorization, Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Mcp-Method, Mcp-Name, Last-Event-ID"
+	exposeHeaders = "WWW-Authenticate, Mcp-Session-Id, Retry-After"
+)
+
 // Origins enforces an exact allowlist of `Origin` values (scheme://host[:port], lower case). A
 // missing Origin passes (non-browser MCP clients send none); multiple Origin headers, `null` or an
-// unlisted value get 403.
+// unlisted value get 403. A listed origin gets CORS headers, and its preflight is answered with 204.
 func Origins(log *slog.Logger, allowed []string, next http.Handler) http.Handler {
 	set := map[string]bool{}
 	for _, o := range allowed {
@@ -56,6 +65,17 @@ func Origins(log *slog.Logger, allowed []string, next http.Handler) http.Handler
 			}
 			log.WarnContext(r.Context(), "origin rejected", "request_id", logging.RequestID(r.Context()), "origin", o)
 			http.Error(w, "origin not allowed", http.StatusForbidden)
+			return
+		}
+		h := w.Header()
+		h.Set("Access-Control-Allow-Origin", vals[0])
+		h.Add("Vary", "Origin")
+		h.Set("Access-Control-Expose-Headers", exposeHeaders)
+		if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
+			h.Set("Access-Control-Allow-Methods", allowMethods)
+			h.Set("Access-Control-Allow-Headers", allowHeaders)
+			h.Set("Access-Control-Max-Age", "600")
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		next.ServeHTTP(w, r)

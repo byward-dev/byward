@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -72,5 +73,37 @@ func TestEmptyOriginAllowlistRejectsBrowsers(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("got %d", w.Code)
+	}
+}
+
+func TestListedOriginGetsCORSAndPreflight(t *testing.T) {
+	reached := false
+	h := Origins(quiet(), []string{"https://app.example"}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	r := httptest.NewRequest("OPTIONS", "/mcp", nil)
+	r.Header.Set("Origin", "https://app.example")
+	r.Header.Set("Access-Control-Request-Method", "POST")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusNoContent || reached || w.Header().Get("Access-Control-Allow-Origin") != "https://app.example" ||
+		w.Header().Get("Access-Control-Allow-Credentials") != "" || !strings.Contains(w.Header().Get("Access-Control-Allow-Headers"), "Authorization") {
+		t.Fatalf("preflight: code=%d reached=%v headers=%v", w.Code, reached, w.Header())
+	}
+	r = httptest.NewRequest("POST", "/mcp", nil)
+	r.Header.Set("Origin", "https://app.example")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if !reached || !strings.Contains(w.Header().Get("Access-Control-Expose-Headers"), "WWW-Authenticate") || w.Header().Get("Access-Control-Allow-Origin") != "https://app.example" {
+		t.Fatalf("actual request: headers=%v", w.Header())
+	}
+}
+
+func TestNoCORSWithoutOrigin(t *testing.T) {
+	w := httptest.NewRecorder()
+	Origins(quiet(), []string{"https://app.example"}, ok).ServeHTTP(w, httptest.NewRequest("OPTIONS", "/mcp", nil))
+	if w.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatal("CORS headers without an Origin")
 	}
 }

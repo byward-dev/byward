@@ -44,6 +44,16 @@ func New(log *slog.Logger, target *url.URL) http.Handler {
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: time.Second,
 		},
+		// The proxy owns CORS on the MCP endpoint (internal/origin); an upstream's own CORS headers
+		// would duplicate Access-Control-Allow-Origin, which browsers reject.
+		ModifyResponse: func(res *http.Response) error {
+			for k := range res.Header {
+				if strings.HasPrefix(k, "Access-Control-") {
+					delete(res.Header, k)
+				}
+			}
+			return nil
+		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			// A chunked body over the limit only fails while it is being relayed.
 			if mbe := (*http.MaxBytesError)(nil); errors.As(err, &mbe) {

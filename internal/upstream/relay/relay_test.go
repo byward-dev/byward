@@ -128,3 +128,18 @@ func TestRelayStreamsServerSentEvents(t *testing.T) {
 	}
 	close(next)
 }
+
+func TestRelayDropsUpstreamCORS(t *testing.T) {
+	up := fakeupstream.New()
+	t.Cleanup(up.Close)
+	up.Handler = func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		w.Header().Set("Mcp-Session-Id", "s1")
+	}
+	w := httptest.NewRecorder()
+	relayTo(t, up, "/mcp").ServeHTTP(w, httptest.NewRequest("POST", "/mcp", nil))
+	if w.Header().Get("Access-Control-Allow-Origin") != "" || w.Header().Get("Access-Control-Allow-Credentials") != "" || w.Header().Get("Mcp-Session-Id") != "s1" {
+		t.Fatalf("headers = %v", w.Header())
+	}
+}
