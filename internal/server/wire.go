@@ -17,6 +17,7 @@ import (
 	"github.com/byward-dev/byward/internal/health"
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/idp/entra"
+	"github.com/byward-dev/byward/internal/mcpsession"
 	"github.com/byward-dev/byward/internal/ratelimit"
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/resource"
@@ -40,6 +41,8 @@ type auth struct {
 	background func(ctx context.Context)
 	// closeStore releases the store; Run calls it after the background work has stopped.
 	closeStore func() error
+	// sessions binds legacy-era MCP sessions to the user (ADR-0004 §2, invariant 13).
+	sessions func(http.Handler) http.Handler
 }
 
 // idpName names the IdP adapter in its callback path, the broker and metrics.
@@ -71,6 +74,10 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 		return nil, err
 	}
 	consentBox, err := token.NewBox(ring, "consent", nil)
+	if err != nil {
+		return nil, err
+	}
+	sessionBox, err := token.NewBox(ring, "mcp-session", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +136,11 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 			"reason", "set it to say in plain words what the "+cfg.Scope+" scope lets an app do (ADR-0010 §4)")
 	}
 	log.Info("broker ready", "reason", "keys "+fmt.Sprint(len(ring.KeyIDs()))+", signing with "+ring.SigningKeyID()+"")
-	return &auth{register: b.Register, validator: v, checks: readiness(ring, st), background: func(ctx context.Context) { deny.Run(ctx, log) }, closeStore: st.Close}, nil
+	return &auth{register: b.Register, validator: v, checks: readiness(ring, st), background: func(ctx context.Context) { deny.Run(ctx, log) }, closeStore: st.Close,
+		sessions: func(next http.Handler) http.Handler {
+			return mcpsession.Bind(mcpsession.Config{Box: sessionBox, Upstream: cfg.UpstreamURL.String(), User: signedInUser,
+				Lifetime: broker.GrantLifetime, Audit: o.Audit, Log: log}, next)
+		}}, nil
 }
 
 // auditStartup records the keys and static clients the proxy starts with (ADR-0021 §3).
@@ -156,6 +167,12 @@ func readiness(ring *token.KeyRing, st pinger) []health.Check {
 		return nil
 	}}}
 	return append(checks, health.Check{Name: "store", Ready: st.Ping})
+}
+
+// signedInUser is the access token's subject, which Guard attached to the request.
+func signedInUser(r *http.Request) (string, bool) {
+	id, ok := resource.IdentityFrom(r.Context())
+	return id.Subject, ok && id.Subject != ""
 }
 
 // newBroker is broker.New; tests replace it to see the wired configuration.

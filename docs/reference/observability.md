@@ -65,6 +65,7 @@ For SIEMs that use [OCSF](https://schema.ocsf.io) 1.9.0. Fields map as follows: 
 | `consent_denied` | the user denied the client on the consent page (`reason` fixed) | failure | yes | 3003 Authorize Session / 99 Other (*approximate*) |
 | `rate_limited` | an OAuth endpoint refused a request over the client address's budget (`reason` = the endpoint; [rate limits](rate-limits.md)) | failure | yes | 4002 HTTP Activity; `disposition_id` 2 Blocked |
 | `store_restored` | at startup, the store was found restored from an older copy: a new `epoch` began and refresh tokens issued before it are refused, so those users sign in again (ADR-0007 §9) | success | no | 6002 Application Lifecycle / 99 Other (*approximate*) |
+| `session_rejected` | a signed-in user presented an `Mcp-Session-Id` that is not theirs: sealed for another user or upstream, not issued by this proxy, tampered with, or expired (`reason` fixed); the client gets 404 and starts a new session | failure | no | 3003 Authorize Session / 99 Other (*approximate*) |
 
 Not emitted yet; these arrive with their slices:
 dynamic registration (slice 2.2) and key rotation
