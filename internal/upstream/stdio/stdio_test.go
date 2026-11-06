@@ -46,7 +46,7 @@ func TestUpstreamGetsOnlyAllowlistOperatorEnvAndIdentity(t *testing.T) {
 	}{
 		{"without email", alice, nil},
 		{"with opted-in email", Identity{Subject: alice.Subject, Issuer: alice.Issuer, Email: "alice@example.com"},
-			[]string{"MCP_AUTHPROXY_EMAIL=alice@example.com"}},
+			[]string{"BYWARD_EMAIL=alice@example.com"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -58,8 +58,8 @@ func TestUpstreamGetsOnlyAllowlistOperatorEnvAndIdentity(t *testing.T) {
 			want := append([]string{
 				"FOO=bar",
 				"LANG=en_US.UTF-8", // operator env wins over the inherited value
-				"MCP_AUTHPROXY_ISSUER=" + alice.Issuer,
-				"MCP_AUTHPROXY_SUBJECT=" + alice.Subject,
+				"BYWARD_ISSUER=" + alice.Issuer,
+				"BYWARD_SUBJECT=" + alice.Subject,
 				"PATH=/usr/bin:/bin",
 			}, tc.want...)
 			slices.Sort(env)
@@ -91,9 +91,9 @@ func TestInvalidCommandConfigIsRejected(t *testing.T) {
 		{"no command", nil, nil},
 		{"empty argv[0]", []string{""}, nil},
 		{"NUL in an argument", []string{fakeBin, "a\x00b"}, nil},
-		{"identity env name", []string{fakeBin}, map[string]string{"MCP_AUTHPROXY_SUBJECT": "v"}},
-		{"reserved prefix, lower case", []string{fakeBin}, map[string]string{"mcp_authproxy_issuer": "v"}},
-		{"other reserved name", []string{fakeBin}, map[string]string{"MCP_AUTHPROXY_OTHER": "v"}},
+		{"identity env name", []string{fakeBin}, map[string]string{"BYWARD_SUBJECT": "v"}},
+		{"reserved prefix, lower case", []string{fakeBin}, map[string]string{"byward_issuer": "v"}},
+		{"other reserved name", []string{fakeBin}, map[string]string{"BYWARD_OTHER": "v"}},
 		{"empty env name", []string{fakeBin}, map[string]string{"": "v"}},
 		{"= in env name", []string{fakeBin}, map[string]string{"A=B": "v"}},
 		{"NUL in env value", []string{fakeBin}, map[string]string{"A": "a\x00b"}},
@@ -124,7 +124,7 @@ func TestMissingCommandNamesTheImagePattern(t *testing.T) {
 			if !errors.Is(err, ErrCommandNotFound) {
 				t.Fatalf("err = %v, want ErrCommandNotFound", err)
 			}
-			if !strings.Contains(err.Error(), "COPY --from=ghcr.io/corker/mcp-authproxy:") {
+			if !strings.Contains(err.Error(), "COPY --from=ghcr.io/byward-dev/byward:") {
 				t.Fatalf("error %q does not name the COPY --from pattern", err)
 			}
 		})

@@ -24,15 +24,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/audit"
-	"github.com/corker/mcp-authproxy/internal/idp"
-	"github.com/corker/mcp-authproxy/internal/idp/entra"
-	"github.com/corker/mcp-authproxy/internal/logging"
-	"github.com/corker/mcp-authproxy/internal/registration"
-	"github.com/corker/mcp-authproxy/internal/store"
-	"github.com/corker/mcp-authproxy/internal/store/memory"
-	"github.com/corker/mcp-authproxy/internal/testutil/fakeidp"
-	"github.com/corker/mcp-authproxy/internal/token"
+	"github.com/byward-dev/byward/internal/audit"
+	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/idp/entra"
+	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/registration"
+	"github.com/byward-dev/byward/internal/store"
+	"github.com/byward-dev/byward/internal/store/memory"
+	"github.com/byward-dev/byward/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/token"
 )
 
 const (
@@ -415,7 +415,7 @@ func (e *env) startLogin(t *testing.T, extra url.Values) (*http.Cookie, *url.URL
 		t.Fatalf("consent set %d cookies, want 1", len(cookies))
 	}
 	c := cookies[0]
-	if !strings.HasPrefix(c.Name, "__Host-mcpap_login_") || !c.HttpOnly || !c.Secure || c.SameSite != http.SameSiteLaxMode || c.Path != "/" || c.Domain != "" {
+	if !strings.HasPrefix(c.Name, "__Host-byw_login_") || !c.HttpOnly || !c.Secure || c.SameSite != http.SameSiteLaxMode || c.Path != "/" || c.Domain != "" {
 		t.Fatalf("login cookie %+v: want __Host- prefix, HttpOnly, Secure, SameSite=Lax, Path=/", c)
 	}
 	idpRes, err := e.fake.HTTPClient().Get(res.Header.Get("Location"))
@@ -543,7 +543,7 @@ func TestTokenEndpointRechecks(t *testing.T) {
 		{"foreign resource", url.Values{"resource": {"https://other.example/mcp"}}, "invalid_target", 400},
 		{"refresh without a refresh token", url.Values{"grant_type": {"refresh_token"}}, "invalid_grant", 400},
 		{"client credentials never", url.Values{"grant_type": {"client_credentials"}}, "unsupported_grant_type", 400},
-		{"garbage code", url.Values{"code": {"mcpap_ac_garbage"}}, "invalid_grant", 400},
+		{"garbage code", url.Values{"code": {"byw_ac_garbage"}}, "invalid_grant", 400},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -1252,7 +1252,7 @@ func TestALoginAtTheSizeBoundFitsTheBrowserCookieLimit(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.b.startLogin(rec, httptest.NewRequest("POST", issuer+"/consent", nil), l, e.now)
 	set := rec.Header().Get("Set-Cookie")
-	if rec.Code != http.StatusSeeOther || !strings.HasPrefix(set, "__Host-mcpap_login_") {
+	if rec.Code != http.StatusSeeOther || !strings.HasPrefix(set, "__Host-byw_login_") {
 		t.Fatalf("startLogin: %d, Set-Cookie %.40q", rec.Code, set)
 	}
 	if len(set) >= 4096 {

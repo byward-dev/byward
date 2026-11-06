@@ -8,14 +8,14 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/corker/mcp-authproxy/internal/health"
+	"github.com/byward-dev/byward/internal/health"
 )
 
 // Servers are the public listener and, unless turned off, the internal one for /metrics, /livez
 // and /readyz (ADR-0018 §10).
 type Servers struct {
 	Public   *http.Server
-	Internal *http.Server // nil when MCP_AUTHPROXY_INTERNAL_LISTEN is empty
+	Internal *http.Server // nil when BYWARD_INTERNAL_LISTEN is empty
 	Health   *health.Health
 
 	background func(ctx context.Context) // nil without authentication; runs while the public listener serves

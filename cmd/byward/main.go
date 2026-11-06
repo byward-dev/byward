@@ -1,4 +1,4 @@
-// Command mcp-authproxy is an auth-only proxy that puts an MCP server behind OAuth 2.1 / OIDC.
+// Command byward is an auth-only proxy that puts an MCP server behind OAuth 2.1 / OIDC.
 package main
 
 import (
@@ -13,10 +13,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/config"
-	"github.com/corker/mcp-authproxy/internal/logging"
-	"github.com/corker/mcp-authproxy/internal/server"
-	"github.com/corker/mcp-authproxy/internal/tracing"
+	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/server"
+	"github.com/byward-dev/byward/internal/tracing"
 )
 
 // getenv looks names up in environ, the same environment the configuration was read from.
@@ -52,7 +52,7 @@ func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer) 
 		_, _ = io.WriteString(stdout, config.Usage())
 		return exitOK
 	case err != nil:
-		_, _ = fmt.Fprintf(stderr, "mcp-authproxy: configuration error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "byward: configuration error: %v\n", err)
 		return exitConfig
 	case act.Version:
 		printVersion(stdout, act.JSON)
@@ -73,12 +73,12 @@ func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer) 
 		log.Warn("development mode relaxation", "relaxation", r)
 	}
 	if cfg.NoAuth {
-		log.Warn("to require sign-in, remove MCP_AUTHPROXY_INSECURE_NO_AUTH and configure an IdP; see docs/reference/settings.md", "relaxation", "next step")
+		log.Warn("to require sign-in, remove BYWARD_INSECURE_NO_AUTH and configure an IdP; see docs/reference/settings.md", "relaxation", "next step")
 	}
 	// Traces only when the operator sets OTEL_TRACES_EXPORTER (ADR-0021 §9).
 	tracingOn, stopTracing, err := tracing.Setup(ctx, getenv(environ), buildInfo().Version)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "mcp-authproxy: configuration error: OTEL_* tracing settings: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "byward: configuration error: OTEL_* tracing settings: %v\n", err)
 		return exitConfig
 	}
 	defer func() {
@@ -91,7 +91,7 @@ func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer) 
 	}
 	srv, err := server.New(cfg, log)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "mcp-authproxy: configuration error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "byward: configuration error: %v\n", err)
 		return exitConfig
 	}
 	if err := server.Run(ctx, srv, log); err != nil {
@@ -134,5 +134,5 @@ func printVersion(w io.Writer, asJSON bool) {
 		_ = json.NewEncoder(w).Encode(v)
 		return
 	}
-	_, _ = fmt.Fprintf(w, "mcp-authproxy %s (%s, %s)\n", v.Version, v.Revision, v.GoVersion)
+	_, _ = fmt.Fprintf(w, "byward %s (%s, %s)\n", v.Version, v.Revision, v.GoVersion)
 }

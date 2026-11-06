@@ -42,7 +42,7 @@ expired and wrong-key tokens; FastMCP accepts any `typ`.
    downstream-token header (F14); then set ours and clear any header whose claim is absent.
 5. **Plain identity headers** only behind a flag, documented as safe only when the upstream is reachable
    solely through the proxy.
-6. **stdio:** identity in env at spawn (`MCP_AUTHPROXY_SUBJECT` opaque, `MCP_AUTHPROXY_ISSUER`, email
+6. **stdio:** identity in env at spawn (`BYWARD_SUBJECT` opaque, `BYWARD_ISSUER`, email
    opt-in); never in arguments; never tokens. Children do not inherit the proxy's environment — only an
    allowlist plus operator-configured env.
 7. **Upstream credential set by the operator:** a static header name and value (secret via `*_FILE`,

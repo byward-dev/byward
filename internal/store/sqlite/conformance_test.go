@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/corker/mcp-authproxy/internal/store"
-	"github.com/corker/mcp-authproxy/internal/store/storetest"
+	"github.com/byward-dev/byward/internal/store"
+	"github.com/byward-dev/byward/internal/store/storetest"
 )
 
 // openTemp opens a store in a fresh directory, with the counter file in another one (as it would

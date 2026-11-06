@@ -7,7 +7,7 @@
 package tracing
 
 import (
-	"github.com/corker/mcp-authproxy/internal/logging"
+	"github.com/byward-dev/byward/internal/logging"
 
 	"context"
 	"net/http"
@@ -23,7 +23,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-const instrumentation = "github.com/corker/mcp-authproxy"
+const instrumentation = "github.com/byward-dev/byward"
 
 // Setup installs the tracer provider and the W3C trace-context propagator when getenv
 // ("OTEL_TRACES_EXPORTER") is set, and returns a shutdown that flushes spans. Otherwise it changes
@@ -42,7 +42,7 @@ func Setup(ctx context.Context, getenv func(string) string, version string) (ena
 		return false, noop, nil
 	}
 	res, err := resource.Merge(resource.Default(), resource.NewSchemaless(
-		semconv.ServiceName("mcp-authproxy"), semconv.ServiceVersion(version)))
+		semconv.ServiceName("byward"), semconv.ServiceVersion(version)))
 	if err != nil {
 		return false, noop, err
 	}

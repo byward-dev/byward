@@ -1,6 +1,6 @@
-# mcp-authproxy
+# byward
 
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/corker/mcp-authproxy/badge)](https://scorecard.dev/viewer/?uri=github.com/corker/mcp-authproxy)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/byward-dev/byward/badge)](https://scorecard.dev/viewer/?uri=github.com/byward-dev/byward)
 
 > **Status: design phase.** Nothing to run yet.
 

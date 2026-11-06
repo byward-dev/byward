@@ -1,4 +1,4 @@
-// Package config loads the proxy's settings from flags, `MCP_AUTHPROXY_*` environment variables
+// Package config loads the proxy's settings from flags, `BYWARD_*` environment variables
 // and defaults, from one registry that also drives validation and redaction (ADR-0020).
 package config
 
@@ -12,7 +12,7 @@ import (
 )
 
 // EnvPrefix starts every environment variable the proxy reads.
-const envPrefix = "MCP_AUTHPROXY_"
+const envPrefix = "BYWARD_"
 
 // Setting is one registry entry. Every setting has a flag and an env name.
 type Setting struct {
@@ -89,7 +89,7 @@ type readFileFunc = func(path string) ([]byte, error)
 // flags (actions such as --version) on the same flag set. Inline secrets are rejected unless
 // allowInlineSecrets is set (development mode).
 func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extraFlags func(*flag.FlagSet)) (*Values, error) {
-	fs := flag.NewFlagSet("mcp-authproxy", flag.ContinueOnError)
+	fs := flag.NewFlagSet("byward", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	flagVals := map[string]*string{}
 	fileFlagVals := map[string]*string{}

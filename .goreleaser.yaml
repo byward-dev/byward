@@ -1,7 +1,7 @@
 # Release build (ADR-0019). Local, unsigned, unpublished: `mise run release:snapshot`.
 # Real releases run only from .github/workflows/release.yml on a `v*` tag.
 version: 2
-project_name: mcp-authproxy
+project_name: byward
 
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot.{{ .ShortCommit }}"
@@ -10,9 +10,9 @@ metadata:
   mod_timestamp: "{{ .CommitTimestamp }}"
 
 builds:
-  - id: mcp-authproxy
-    main: ./cmd/mcp-authproxy
-    binary: mcp-authproxy
+  - id: byward
+    main: ./cmd/byward
+    binary: byward
     env:
       - CGO_ENABLED=0
     goos: [linux, darwin] # darwin is for development only
@@ -23,8 +23,8 @@ builds:
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
-  - id: mcp-authproxy
-    ids: [mcp-authproxy]
+  - id: byward
+    ids: [byward]
     formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     builds_info: &fileinfo
@@ -60,8 +60,8 @@ docker_signs:
 
 dockers_v2:
   - id: image
-    ids: [mcp-authproxy]
-    images: [ghcr.io/corker/mcp-authproxy]
+    ids: [byward]
+    images: [ghcr.io/byward-dev/byward]
     # Snapshots are tagged snapshot-<arch> and only loaded locally (scripts/image-smoke.sh relies on it).
     tags:
       - "{{ if .IsSnapshot }}snapshot{{ else }}v{{ .Version }}{{ end }}"
@@ -71,13 +71,13 @@ dockers_v2:
     build_args:
       SOURCE_DATE_EPOCH: "{{ .CommitTimestamp }}"
     labels:
-      org.opencontainers.image.source: https://github.com/corker/mcp-authproxy
+      org.opencontainers.image.source: https://github.com/byward-dev/byward
       org.opencontainers.image.licenses: Apache-2.0
     # Snapshots export one platform at a time, and buildx rejects index annotations there.
     annotations:
       "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.title": "{{ .ProjectName }}"
       "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.description": Auth-only proxy that puts an MCP server behind OAuth 2.1 / OIDC
-      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.source": https://github.com/corker/mcp-authproxy
+      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.source": https://github.com/byward-dev/byward
       "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.revision": "{{ .FullCommit }}"
       "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.version": "{{ .Version }}"
       "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.created": "{{ .CommitDate }}"

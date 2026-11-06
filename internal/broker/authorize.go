@@ -11,13 +11,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/audit"
-	"github.com/corker/mcp-authproxy/internal/idp"
-	"github.com/corker/mcp-authproxy/internal/logging"
-	"github.com/corker/mcp-authproxy/internal/ratelimit"
-	"github.com/corker/mcp-authproxy/internal/registration"
-	"github.com/corker/mcp-authproxy/internal/store"
-	"github.com/corker/mcp-authproxy/internal/token"
+	"github.com/byward-dev/byward/internal/audit"
+	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/ratelimit"
+	"github.com/byward-dev/byward/internal/registration"
+	"github.com/byward-dev/byward/internal/store"
+	"github.com/byward-dev/byward/internal/token"
 )
 
 // metadataHandler serves RFC 8414 metadata, identical at both well-known paths (ADR-0013 §2).
@@ -87,7 +87,7 @@ type login struct {
 }
 
 func (b *Broker) cookieName(idpState string) string {
-	name := "mcpap_login_" + idpState[:16]
+	name := "byw_login_" + idpState[:16]
 	if b.cfg.SecureCookies {
 		return "__Host-" + name
 	}

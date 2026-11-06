@@ -18,10 +18,10 @@ const SessionDirPlaceholder = "{session_dir}"
 // Identity env names set on every upstream process (ADR-0016 §6). Operator env must not use the
 // prefix, so an upstream can trust that these come from the proxy.
 const (
-	EnvSubject  = "MCP_AUTHPROXY_SUBJECT"
-	EnvIssuer   = "MCP_AUTHPROXY_ISSUER"
-	EnvEmail    = "MCP_AUTHPROXY_EMAIL"
-	reservedEnv = "MCP_AUTHPROXY_"
+	EnvSubject  = "BYWARD_SUBJECT"
+	EnvIssuer   = "BYWARD_ISSUER"
+	EnvEmail    = "BYWARD_EMAIL"
+	reservedEnv = "BYWARD_"
 )
 
 // inheritedEnv is the allowlist of the proxy's own environment passed to upstream processes. The
@@ -184,8 +184,8 @@ func isExecutable(p string) bool {
 // notFound names the image pattern, because the usual cause is a runtime (node, python) that the
 // proxy's image does not contain (ADR-0019 §3).
 func notFound(name, path string) error {
-	return fmt.Errorf("%w: %q (PATH %q). The mcp-authproxy image has no node or python runtime: "+
+	return fmt.Errorf("%w: %q (PATH %q). The byward image has no node or python runtime: "+
 		"build your own image FROM the runtime and add the proxy with "+
-		"COPY --from=ghcr.io/corker/mcp-authproxy:<version> /usr/local/bin/mcp-authproxy /usr/local/bin/mcp-authproxy",
+		"COPY --from=ghcr.io/byward-dev/byward:<version> /usr/local/bin/byward /usr/local/bin/byward",
 		ErrCommandNotFound, name, path)
 }

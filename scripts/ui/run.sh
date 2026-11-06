@@ -19,7 +19,7 @@ arch=$(docker version --format '{{.Server.Arch}}')
 GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -trimpath -o "$work/pageserver" ./internal/testutil/pageserver
 cp "$here/package.json" "$here/package-lock.json" "$here/playwright.config.js" "$here/pages.spec.js" "$work/"
 
-name=mcp-authproxy-ui-$$
+name=byward-ui-$$
 # shellcheck disable=SC2329 # invoked by the EXIT trap
 cleanup() { docker rm -f "$name-install" "$name-run" >/dev/null 2>&1 || true; }
 trap cleanup EXIT

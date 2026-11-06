@@ -1,6 +1,6 @@
 #!/bin/sh
 # MCP conformance lane (ADR-0024 §4a, ADR-0027). Runs the conformance `server` suite for both spec
-# revisions against the reference server directly and through mcp-authproxy --insecure-no-auth.
+# revisions against the reference server directly and through byward --insecure-no-auth.
 # The per-check results must be identical. The direct run is gated by baseline-<revision>.yml, and a
 # stale entry fails it, so the baseline lists exactly the checks the reference server itself fails.
 # All external code runs in a pinned node container; only build/conformance is mounted.
@@ -39,11 +39,11 @@ check_lock "$src/examples/servers/typescript/package-lock.json" "$server_lock_sh
 
 # 2. Our binary for the container's platform, plus the in-container script and baselines.
 arch=$(docker version --format '{{.Server.Arch}}')
-GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -trimpath -o "$work/mcp-authproxy" ./cmd/mcp-authproxy
+GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -trimpath -o "$work/byward" ./cmd/byward
 cp "$here/inside.sh" "$here"/baseline-*.yml "$work/"
 
 # 3. Containers: run as the invoking user, mount only build/conformance, no host credentials, removed on exit.
-name=mcp-authproxy-conformance-$$
+name=byward-conformance-$$
 # shellcheck disable=SC2329 # invoked by the EXIT trap
 cleanup() { docker rm -f "$name-install" "$name-run" >/dev/null 2>&1 || true; }
 trap cleanup EXIT

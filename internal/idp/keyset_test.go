@@ -14,7 +14,7 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 
-	"github.com/corker/mcp-authproxy/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
 // jwksServer proxies a fake IdP's JWKS, counts fetches, and can fail them or hold them open.

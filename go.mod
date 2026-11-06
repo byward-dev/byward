@@ -1,4 +1,4 @@
-module github.com/corker/mcp-authproxy
+module github.com/byward-dev/byward
 
 go 1.27.3
 

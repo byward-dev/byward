@@ -19,12 +19,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/broker"
-	"github.com/corker/mcp-authproxy/internal/idp"
-	"github.com/corker/mcp-authproxy/internal/logging"
-	"github.com/corker/mcp-authproxy/internal/registration"
-	"github.com/corker/mcp-authproxy/internal/store/memory"
-	"github.com/corker/mcp-authproxy/internal/token"
+	"github.com/byward-dev/byward/internal/broker"
+	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/registration"
+	"github.com/byward-dev/byward/internal/store/memory"
+	"github.com/byward-dev/byward/internal/token"
 )
 
 func main() {

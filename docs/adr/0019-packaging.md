@@ -33,9 +33,9 @@ Developer Program. It is not how operators install this proxy.
 1. **Container image is the main artifact:** multi-arch (linux/amd64, linux/arm64) on
    `distroless/static-debian13:nonroot` pinned by digest; OCI annotations; cosign keyless signature by
    digest; buildx provenance (`mode=max`) and SBOM; tags `vX.Y.Z` and `latest`.
-2. **Image contract (public interface):** the binary at `/usr/local/bin/mcp-authproxy`, state in
-   `/var/lib/mcp-authproxy`, uid 65532. Operators build their own image with `FROM node` or
-   `FROM python` plus `COPY --from=ghcr.io/corker/mcp-authproxy:<version>`.
+2. **Image contract (public interface):** the binary at `/usr/local/bin/byward`, state in
+   `/var/lib/byward`, uid 65532. Operators build their own image with `FROM node` or
+   `FROM python` plus `COPY --from=ghcr.io/byward-dev/byward:<version>`.
 3. **One image, no runtime variants:** no node or python image in v0.1. A stdio command missing from
    the image fails with an error naming the `COPY --from` pattern.
 4. **Binaries:** goreleaser archives for linux amd64/arm64 (supported) and darwin amd64/arm64

@@ -1,4 +1,4 @@
-# mcp-authproxy
+# byward
 
 An auth-only proxy between **MCP clients** and an **upstream** MCP server. It makes the
 upstream look like a spec-compliant OAuth-protected MCP server, delegating user

@@ -7,7 +7,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/resource"
+	"github.com/byward-dev/byward/internal/resource"
 )
 
 type denyFunc func(grantID, subject string, issuedAt time.Time) (bool, error)

@@ -8,10 +8,10 @@ from the keys directory ([sealing-keys.md](sealing-keys.md)).
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `MCP_AUTHPROXY_DATA_DIR` | `/var/lib/mcp-authproxy` | Data directory, an absolute path. The settings below, the keys directory (`keys`) and the static clients file (`clients.json`) default to paths in it. |
-| `MCP_AUTHPROXY_STORE_DIR` | `state` in the data directory | State directory, an absolute path. Created with mode 0700; the database file `mcp-authproxy.db` (and its `-wal`/`-shm` files) is 0600. An unwritable directory stops startup. |
-| `MCP_AUTHPROXY_STORE_COUNTER_FILE` | `store-writes` next to the keys directory | Restore-detection counter, an absolute path **outside** the state directory. |
-| `MCP_AUTHPROXY_REFRESH_GRACE` | `30s` | How long a just-rotated refresh token is still accepted (0s–60s), for a client retrying a response it lost. |
+| `BYWARD_DATA_DIR` | `/var/lib/byward` | Data directory, an absolute path. The settings below, the keys directory (`keys`) and the static clients file (`clients.json`) default to paths in it. |
+| `BYWARD_STORE_DIR` | `state` in the data directory | State directory, an absolute path. Created with mode 0700; the database file `byward.db` (and its `-wal`/`-shm` files) is 0600. An unwritable directory stops startup. |
+| `BYWARD_STORE_COUNTER_FILE` | `store-writes` next to the keys directory | Restore-detection counter, an absolute path **outside** the state directory. |
+| `BYWARD_REFRESH_GRACE` | `30s` | How long a just-rotated refresh token is still accepted (0s–60s), for a client retrying a response it lost. |
 
 The full list is in [the settings reference](../reference/settings.md).
 
@@ -43,17 +43,17 @@ the file was lost or moved, for example on a fresh pod with the counter on an `e
 `state/` is backed up:
 
 ```text
-/var/lib/mcp-authproxy/keys/2026-11-06    sealing keys (you create them, see sealing-keys.md)
-/var/lib/mcp-authproxy/clients.json       static clients (you create it)
-/var/lib/mcp-authproxy/store-writes       counter file, next to the keys directory
-/var/lib/mcp-authproxy/state/             state directory: back this up, and only this
+/var/lib/byward/keys/2026-11-06    sealing keys (you create them, see sealing-keys.md)
+/var/lib/byward/clients.json       static clients (you create it)
+/var/lib/byward/store-writes       counter file, next to the keys directory
+/var/lib/byward/state/             state directory: back this up, and only this
 ```
 
 The proxy must be able to write the data directory (for the counter file) and the state directory;
 startup fails otherwise. It logs the absolute path of each at startup.
 
 **Kubernetes:** keys usually come from a read-only secret volume, whose parent directory is not
-writable, so set `MCP_AUTHPROXY_STORE_COUNTER_FILE` explicitly to a small writable volume that is not
+writable, so set `BYWARD_STORE_COUNTER_FILE` explicitly to a small writable volume that is not
 part of the state backup. A per-pod `emptyDir` works but loses the counter on every pod restart, which
 turns detection off for that start.
 

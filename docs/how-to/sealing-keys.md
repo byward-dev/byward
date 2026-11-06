@@ -6,8 +6,8 @@ live in the store, and the proxy never generates them outside the single-node de
 
 ## The key directory
 
-The proxy reads keys from `MCP_AUTHPROXY_KEYS_DIR`, by default `keys` in the data directory:
-`/var/lib/mcp-authproxy/keys` with the default `MCP_AUTHPROXY_DATA_DIR`. Create it and the first key
+The proxy reads keys from `BYWARD_KEYS_DIR`, by default `keys` in the data directory:
+`/var/lib/byward/keys` with the default `BYWARD_DATA_DIR`. Create it and the first key
 before the first start; a missing or empty directory stops startup with an error naming the path.
 
 - One file per key. **The file name is the key ID**: letters, digits, `.`, `_` and `-`, at most 64
@@ -15,8 +15,8 @@ before the first start; a missing or empty directory stops startup with an error
 - The content is the standard base64 encoding of 32 random bytes:
 
   ```sh
-  install -d -m 0700 /var/lib/mcp-authproxy/keys
-  (umask 077; openssl rand -base64 32 > "/var/lib/mcp-authproxy/keys/$(date -u +%Y-%m-%d)")
+  install -d -m 0700 /var/lib/byward/keys
+  (umask 077; openssl rand -base64 32 > "/var/lib/byward/keys/$(date -u +%Y-%m-%d)")
   ```
 
 - Files and directories starting with `.` are ignored (Kubernetes secret volumes keep `..data`

@@ -10,7 +10,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/store"
+	"github.com/byward-dev/byward/internal/store"
 )
 
 // source is a store.Revocations whose content and failure the test controls.

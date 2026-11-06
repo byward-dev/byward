@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/audit"
+	"github.com/byward-dev/byward/internal/audit"
 )
 
 func meta() Metadata {

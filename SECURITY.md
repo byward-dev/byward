@@ -1,6 +1,6 @@
 # Security policy
 
-mcp-authproxy is an authentication proxy, so we treat security reports as the highest-priority work
+byward is an authentication proxy, so we treat security reports as the highest-priority work
 in the project.
 
 ## Reporting a vulnerability
@@ -8,7 +8,7 @@ in the project.
 **Do not open a public issue, discussion or pull request for a vulnerability.**
 
 Report it privately through GitHub:
-[Report a vulnerability](https://github.com/corker/mcp-authproxy/security/advisories/new)
+[Report a vulnerability](https://github.com/byward-dev/byward/security/advisories/new)
 (repository **Security** tab → **Report a vulnerability**). Anyone with a GitHub account can submit a
 report; it opens a draft security advisory that only you and the maintainers can see.
 

@@ -24,14 +24,14 @@ import (
 
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
 
-	"github.com/corker/mcp-authproxy/internal/store"
+	"github.com/byward-dev/byward/internal/store"
 )
 
 // DefaultDir is the state directory in the container image (ADR-0007 §6).
-const DefaultDir = "/var/lib/mcp-authproxy"
+const DefaultDir = "/var/lib/byward"
 
 // fileName is the database file inside the state directory; back up this file (with its -wal).
-const fileName = "mcp-authproxy.db"
+const fileName = "byward.db"
 
 const busyTimeoutMS = 5000
 

@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/store"
+	"github.com/byward-dev/byward/internal/store"
 )
 
 // MaxStaleness is how old the list may be before it refuses every token (ADR-0006 §3).

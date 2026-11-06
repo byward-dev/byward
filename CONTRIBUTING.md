@@ -1,4 +1,4 @@
-# Contributing to mcp-authproxy
+# Contributing to byward
 
 Thanks for helping. This file covers the rules for issues, pull requests and AI-assisted work. The
 decisions behind it are in [ADR-0023](docs/adr/0023-project-governance.md).

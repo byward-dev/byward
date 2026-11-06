@@ -3,7 +3,7 @@
 # binaries and archives. Same goreleaser config as release:snapshot, minus signing, images and SBOMs.
 set -eu
 build() { goreleaser release --snapshot --clean --skip=sign,docker,sbom >/dev/null; }
-sums() { (cd "$1/dist" && find . -type f \( -name '*.tar.gz' -o -name mcp-authproxy \) -exec shasum -a 256 {} + | sort -k2); }
+sums() { (cd "$1/dist" && find . -type f \( -name '*.tar.gz' -o -name byward \) -exec shasum -a 256 {} + | sort -k2); }
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 build

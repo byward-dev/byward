@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/logging"
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // SchemaVersion is bumped on any incompatible change to an event's fields.

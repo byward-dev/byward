@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/corker/mcp-authproxy/internal/idp"
-	"github.com/corker/mcp-authproxy/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
 // roleGate allows users with role and refuses others with a Denial.

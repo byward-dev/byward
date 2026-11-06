@@ -36,9 +36,9 @@ const (
 // Prefixes make tokens recognisable to secret scanners and reject foreign strings before any
 // cryptography (ADR-0006 §8). The prefix is not a security boundary: the type is also sealed.
 const (
-	AccessPrefix  = "mcpap_at_"
-	CodePrefix    = "mcpap_ac_"
-	RefreshPrefix = "mcpap_rt_"
+	AccessPrefix  = "byw_at_"
+	CodePrefix    = "byw_ac_"
+	RefreshPrefix = "byw_rt_"
 )
 
 func (t Type) prefix() string {
@@ -61,7 +61,7 @@ const MaxLen = 2048
 // maxResource bounds the resource URL bound into every token.
 const maxResource = 8 << 10
 
-const adLabel = "mcp-authproxy token\x00"
+const adLabel = "byward token\x00"
 
 // Claims are what a sealed token carries.
 type Claims struct {

@@ -11,7 +11,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/corker/mcp-authproxy/internal/audit"
+	"github.com/byward-dev/byward/internal/audit"
 )
 
 // WellKnownPath is the RFC 9728 well-known path prefix.

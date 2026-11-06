@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/idp"
-	"github.com/corker/mcp-authproxy/internal/resource"
-	"github.com/corker/mcp-authproxy/internal/store"
-	"github.com/corker/mcp-authproxy/internal/testutil/fakeidp"
-	"github.com/corker/mcp-authproxy/internal/token"
+	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/resource"
+	"github.com/byward-dev/byward/internal/store"
+	"github.com/byward-dev/byward/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/token"
 )
 
 // grace is the window the rotation tests use, the refresh-grace setting's default.

@@ -15,19 +15,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/audit"
-	"github.com/corker/mcp-authproxy/internal/broker"
-	"github.com/corker/mcp-authproxy/internal/config"
-	"github.com/corker/mcp-authproxy/internal/health"
-	"github.com/corker/mcp-authproxy/internal/resource"
-	"github.com/corker/mcp-authproxy/internal/store"
-	"github.com/corker/mcp-authproxy/internal/store/sqlite"
+	"github.com/byward-dev/byward/internal/audit"
+	"github.com/byward-dev/byward/internal/broker"
+	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/health"
+	"github.com/byward-dev/byward/internal/resource"
+	"github.com/byward-dev/byward/internal/store"
+	"github.com/byward-dev/byward/internal/store/sqlite"
 )
 
 // storeEnv loads authEnv's configuration; cfg holds the store paths the server will use.
 func storeEnv(t *testing.T) (env []string, cfg *config.Config) {
 	t.Helper()
-	env = append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp")
+	env = append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
 	cfg, _, err := config.Load(nil, env, os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
@@ -64,7 +64,7 @@ func grantFor(id string, at time.Time) store.Grant {
 		Resource: "https://mcp.example.com/mcp", CreatedAt: at, ExpiresAt: at.Add(time.Hour)}
 }
 
-// The server keeps its state in SQLite in MCP_AUTHPROXY_STORE_DIR: a revocation written there
+// The server keeps its state in SQLite in BYWARD_STORE_DIR: a revocation written there
 // before the server starts refuses that grant's tokens after the start.
 func TestServerUsesTheSQLiteStoreInTheStateDirectory(t *testing.T) {
 	env, cfg := storeEnv(t)
@@ -94,7 +94,7 @@ func TestServerUsesTheSQLiteStoreInTheStateDirectory(t *testing.T) {
 
 func TestRestoredStoreIsReportedAtStartup(t *testing.T) {
 	_, cfg := storeEnv(t)
-	db := filepath.Join(cfg.StoreDir, "mcp-authproxy.db")
+	db := filepath.Join(cfg.StoreDir, "byward.db")
 	withStore(t, cfg, func(st *sqlite.Store) {
 		if _, err := st.CreateGrant(context.Background(), grantFor("before-backup", time.Now())); err != nil {
 			t.Fatal(err)
@@ -171,18 +171,18 @@ func TestUnusableStateDirectoryStopsStartupNamingTheSetting(t *testing.T) {
 	if err := os.WriteFile(notADir, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, _, err := config.Load(nil, append(env, "MCP_AUTHPROXY_STORE_DIR="+notADir), os.ReadFile)
+	cfg, _, err := config.Load(nil, append(env, "BYWARD_STORE_DIR="+notADir), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := buildAuth(cfg, discard, Observability{}); err == nil || !strings.Contains(err.Error(), "MCP_AUTHPROXY_STORE_DIR") {
-		t.Fatalf("err = %v, want one naming MCP_AUTHPROXY_STORE_DIR", err)
+	if _, err := buildAuth(cfg, discard, Observability{}); err == nil || !strings.Contains(err.Error(), "BYWARD_STORE_DIR") {
+		t.Fatalf("err = %v, want one naming BYWARD_STORE_DIR", err)
 	}
 }
 
 func TestRefreshGraceSettingReachesTheBroker(t *testing.T) {
 	env, _ := storeEnv(t)
-	cfg, _, err := config.Load(nil, append(env, "MCP_AUTHPROXY_REFRESH_GRACE=5s"), os.ReadFile)
+	cfg, _, err := config.Load(nil, append(env, "BYWARD_REFRESH_GRACE=5s"), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,10 +210,10 @@ func TestFailedStartupAfterTheStoreOpenedClosesIt(t *testing.T) {
 	if _, err := buildAuth(cfg, discard, Observability{}); err == nil {
 		t.Fatal("buildAuth succeeded with a failing broker")
 	}
-	if _, err := os.Stat(filepath.Join(cfg.StoreDir, "mcp-authproxy.db")); err != nil {
+	if _, err := os.Stat(filepath.Join(cfg.StoreDir, "byward.db")); err != nil {
 		t.Fatalf("the store was never opened, so this test proves nothing: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(cfg.StoreDir, "mcp-authproxy.db-wal")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(cfg.StoreDir, "byward.db-wal")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the store's -wal file is still there (%v): the store was left open", err)
 	}
 }
@@ -263,9 +263,9 @@ func TestStartupLogsTheResolvedPaths(t *testing.T) {
 			got[rec.Setting] = rec.Value
 		}
 	}
-	want := map[string]string{"MCP_AUTHPROXY_DATA_DIR": cfg.DataDir, "MCP_AUTHPROXY_KEYS_DIR": cfg.KeysDir,
-		"MCP_AUTHPROXY_STATIC_CLIENTS_FILE": cfg.StaticClientsFile, "MCP_AUTHPROXY_STORE_DIR": cfg.StoreDir,
-		"MCP_AUTHPROXY_STORE_COUNTER_FILE": cfg.StoreCounterFile}
+	want := map[string]string{"BYWARD_DATA_DIR": cfg.DataDir, "BYWARD_KEYS_DIR": cfg.KeysDir,
+		"BYWARD_STATIC_CLIENTS_FILE": cfg.StaticClientsFile, "BYWARD_STORE_DIR": cfg.StoreDir,
+		"BYWARD_STORE_COUNTER_FILE": cfg.StoreCounterFile}
 	if !maps.Equal(got, want) {
 		t.Fatalf("logged paths %v, want %v", got, want)
 	}
@@ -275,7 +275,7 @@ func TestStartupLogsTheResolvedPaths(t *testing.T) {
 // connection, sqlite.org/wal.html), so a stopped proxy leaves a clean database behind.
 func TestServerClosesTheStoreWhenRunReturns(t *testing.T) {
 	env, _ := storeEnv(t)
-	cfg, _, err := config.Load(nil, append(env, "MCP_AUTHPROXY_LISTEN=127.0.0.1:0", "MCP_AUTHPROXY_INTERNAL_LISTEN="), os.ReadFile)
+	cfg, _, err := config.Load(nil, append(env, "BYWARD_LISTEN=127.0.0.1:0", "BYWARD_INTERNAL_LISTEN="), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func TestServerClosesTheStoreWhenRunReturns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wal := filepath.Join(cfg.StoreDir, "mcp-authproxy.db-wal")
+	wal := filepath.Join(cfg.StoreDir, "byward.db-wal")
 	if _, err := os.Stat(wal); err != nil {
 		t.Fatalf("the store is not open after New, so this test proves nothing: %v", err)
 	}

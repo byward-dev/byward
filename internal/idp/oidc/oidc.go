@@ -16,7 +16,7 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 
-	"github.com/corker/mcp-authproxy/internal/idp"
+	"github.com/byward-dev/byward/internal/idp"
 )
 
 // Config is the generic adapter's input, as plain values.

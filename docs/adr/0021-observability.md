@@ -39,7 +39,7 @@ Runtime (2026-11-06):
 
 ## Decision
 
-1. **Logs:** `slog` JSON on stdout (`MCP_AUTHPROXY_LOG_FORMAT=text|json`, default `json`), UTC. A
+1. **Logs:** `slog` JSON on stdout (`BYWARD_LOG_FORMAT=text|json`, default `json`), UTC. A
    `ReplaceAttr` allowlist plus a redaction test; whole header maps are never logged. Request lines
    carry method, status, duration and the `Mcp-Method` header value; bodies are never parsed for logs.
 2. **Request ID** per request: on every HTML error page we render (the one place every client shows

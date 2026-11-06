@@ -4,7 +4,7 @@
 package metrics
 
 import (
-	"github.com/corker/mcp-authproxy/internal/logging"
+	"github.com/byward-dev/byward/internal/logging"
 
 	"net/http"
 	"runtime/debug"
@@ -38,23 +38,23 @@ func New() *Metrics {
 	}
 	m := &Metrics{
 		reg: prometheus.NewRegistry(),
-		requests: prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "mcp_authproxy_http_request_duration_seconds",
+		requests: prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "byward_http_request_duration_seconds",
 			Help: "HTTP request duration by route and status class.", Buckets: Buckets}, []string{"route", "status_class"}),
-		idp: prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "mcp_authproxy_idp_request_duration_seconds",
+		idp: prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "byward_idp_request_duration_seconds",
 			Help: "IdP call duration by IdP, operation and outcome (success, rejected, unavailable).", Buckets: Buckets},
 			[]string{"idp", "operation", "outcome"}),
-		inFlight: prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "mcp_authproxy_upstream_in_flight",
+		inFlight: prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "byward_upstream_in_flight",
 			Help: "Requests to the upstream in flight, by kind (request or stream)."}, []string{"kind"}),
-		busy: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "mcp_authproxy_upstream_busy_total",
+		busy: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_upstream_busy_total",
 			Help: "Requests refused with 503 because an upstream admission cap was full, by kind."}, []string{"kind"}),
-		auditEvents: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "mcp_authproxy_audit_events_total",
+		auditEvents: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_audit_events_total",
 			Help: "Audit events by event name and outcome, including rate-limited ones that were not logged."},
 			[]string{"event", "outcome"}),
-		rateLimited: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "mcp_authproxy_rate_limited_total",
+		rateLimited: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_rate_limited_total",
 			Help: "OAuth endpoint requests refused with 429 because the client address was over its budget, by endpoint."},
 			[]string{"endpoint"}),
 	}
-	build := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "mcp_authproxy_build_info",
+	build := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "byward_build_info",
 		Help: "Always 1; labelled with the proxy and Go versions."}, []string{"version", "go_version"})
 	build.WithLabelValues(version, goVersion).Set(1)
 	m.reg.MustRegister(m.requests, m.idp, m.inFlight, m.busy, m.auditEvents, m.rateLimited, build,

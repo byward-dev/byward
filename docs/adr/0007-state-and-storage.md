@@ -44,7 +44,7 @@ history; rotating the sealing key (ADR-0006) does not touch stored refresh token
    development mode, into a separate `0600` key file. A KMS key-unwrapping seam (Azure Key Vault
    first) is v0.2+.
 6. **No paths relative to the working directory.** The data directory defaults to the OS state
-   directory (`/var/lib/mcp-authproxy` in the container image); its absolute path is logged at
+   directory (`/var/lib/byward` in the container image); its absolute path is logged at
    startup and an unwritable directory fails startup.
 7. **Store outages:** readiness depends on the store, liveness does not. Refresh and revoke return
    503; access tokens keep working until the revocation list is 30 s stale, then fail closed

@@ -1,6 +1,6 @@
 {
   "private": true,
-  "name": "mcp-authproxy-ui-lane",
+  "name": "byward-ui-lane",
   "description": "Browser lane for the consent and error pages (ADR-0010, ADR-0024); run by scripts/ui/run.sh",
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",

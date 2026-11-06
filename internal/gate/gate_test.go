@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/corker/mcp-authproxy/internal/idp"
+	"github.com/byward-dev/byward/internal/idp"
 )
 
 const (

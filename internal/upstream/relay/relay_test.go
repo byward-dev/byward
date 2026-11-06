@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/corker/mcp-authproxy/internal/testutil/fakeupstream"
+	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 )
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }

@@ -10,8 +10,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/corker/mcp-authproxy/internal/logging"
-	"github.com/corker/mcp-authproxy/internal/registration"
+	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/registration"
 	"golang.org/x/net/idna"
 )
 

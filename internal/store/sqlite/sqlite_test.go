@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/store"
+	"github.com/byward-dev/byward/internal/store"
 )
 
 var (
@@ -122,6 +122,18 @@ func TestRevokeSubjectRacingCreateGrantAcrossProcessesLeavesNoCoveredGrant(t *te
 		if _, err := a.Grant(ctx, subject); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("grant %s survived its subject's cut-off: %v", subject, err)
 		}
+	}
+}
+
+// Operators back the database up by this file name (docs/how-to/state.md).
+func TestTheDatabaseFileOperatorsBackUpIsNamedBywardDB(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state")
+	s := open(t, dir, filepath.Join(t.TempDir(), "writes"))
+	if _, err := s.CreateGrant(ctx, grant("g1", "tid:a")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "byward.db")); err != nil {
+		t.Fatalf("want byward.db in the state directory (docs/how-to/state.md backs it up by name): %v", err)
 	}
 }
 

@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Set MCP_AUTHPROXY_UPDATE_GOLDEN=1 to rewrite testdata/names.golden after an intended change.
+// Set BYWARD_UPDATE_GOLDEN=1 to rewrite testdata/names.golden after an intended change.
 const golden = "testdata/names.golden"
 
 func scrape(t *testing.T, m *Metrics) string {
@@ -35,18 +35,30 @@ func exercise(m *Metrics) {
 	m.RateLimited("authorize")
 }
 
-var proxyMetric = regexp.MustCompile(`(?m)^# TYPE (mcp_authproxy_\S+) (\S+)$`)
+// Every family except the Go runtime's own collectors: a metric with the wrong prefix must reach the
+// golden file, not be filtered out by the prefix it should carry.
+var proxyMetric = regexp.MustCompile(`(?m)^# TYPE (\S+) (\S+)$`)
+
+func isRuntimeMetric(name string) bool {
+	return strings.HasPrefix(name, "go_") || strings.HasPrefix(name, "process_") || strings.HasPrefix(name, "promhttp_")
+}
 
 func TestMetricNamesMatchTheGoldenFile(t *testing.T) {
 	m := New()
 	exercise(m)
 	var lines []string
 	for _, g := range proxyMetric.FindAllStringSubmatch(scrape(t, m), -1) {
+		if isRuntimeMetric(g[1]) {
+			continue
+		}
+		if !strings.HasPrefix(g[1], "byward_") {
+			t.Errorf("metric %s lacks the byward_ prefix (ADR-0028)", g[1])
+		}
 		lines = append(lines, g[1]+" "+g[2])
 	}
 	sort.Strings(lines)
 	got := strings.Join(lines, "\n") + "\n"
-	if os.Getenv("MCP_AUTHPROXY_UPDATE_GOLDEN") == "1" {
+	if os.Getenv("BYWARD_UPDATE_GOLDEN") == "1" {
 		if err := os.WriteFile(golden, []byte(got), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -56,7 +68,7 @@ func TestMetricNamesMatchTheGoldenFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got != string(want) {
-		t.Fatalf("metric names changed (public interface, ADR-0023); if intended, rerun with MCP_AUTHPROXY_UPDATE_GOLDEN=1 and update docs/reference/observability.md\ngot:\n%s\nwant:\n%s", got, want)
+		t.Fatalf("metric names changed (public interface, ADR-0023); if intended, rerun with BYWARD_UPDATE_GOLDEN=1 and update docs/reference/observability.md\ngot:\n%s\nwant:\n%s", got, want)
 	}
 }
 
@@ -70,7 +82,7 @@ func TestEveryMetricHasADocsRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, line := range strings.Fields(string(want)) {
-		if strings.HasPrefix(line, "mcp_authproxy_") && !strings.Contains(string(docs), "`"+line+"`") {
+		if strings.HasPrefix(line, "byward_") && !strings.Contains(string(docs), "`"+line+"`") {
 			t.Errorf("metric %s is not documented in docs/reference/observability.md", line)
 		}
 	}
@@ -86,7 +98,7 @@ func TestLabelsCarryOnlyFixedValuesAndBucketsAreFixed(t *testing.T) {
 		}
 	}
 	for _, le := range []string{`le="0.05"`, `le="0.1"`, `le="0.25"`, `le="0.5"`, `le="1"`, `le="2.5"`, `le="5"`, `le="10"`, `le="+Inf"`} {
-		if !strings.Contains(out, `mcp_authproxy_http_request_duration_seconds_bucket{route="mcp",status_class="4xx",`+le+`}`) {
+		if !strings.Contains(out, `byward_http_request_duration_seconds_bucket{route="mcp",status_class="4xx",`+le+`}`) {
 			t.Fatalf("bucket %s missing: %s", le, out)
 		}
 	}

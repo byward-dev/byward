@@ -10,18 +10,18 @@ import (
 	"strings"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/audit"
-	"github.com/corker/mcp-authproxy/internal/broker"
-	"github.com/corker/mcp-authproxy/internal/config"
-	"github.com/corker/mcp-authproxy/internal/gate"
-	"github.com/corker/mcp-authproxy/internal/health"
-	"github.com/corker/mcp-authproxy/internal/idp"
-	"github.com/corker/mcp-authproxy/internal/idp/entra"
-	"github.com/corker/mcp-authproxy/internal/ratelimit"
-	"github.com/corker/mcp-authproxy/internal/registration"
-	"github.com/corker/mcp-authproxy/internal/resource"
-	"github.com/corker/mcp-authproxy/internal/store/sqlite"
-	"github.com/corker/mcp-authproxy/internal/token"
+	"github.com/byward-dev/byward/internal/audit"
+	"github.com/byward-dev/byward/internal/broker"
+	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/gate"
+	"github.com/byward-dev/byward/internal/health"
+	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/idp/entra"
+	"github.com/byward-dev/byward/internal/ratelimit"
+	"github.com/byward-dev/byward/internal/registration"
+	"github.com/byward-dev/byward/internal/resource"
+	"github.com/byward-dev/byward/internal/store/sqlite"
+	"github.com/byward-dev/byward/internal/token"
 )
 
 // maxRateLimitKeys bounds the client addresses each OAuth endpoint tracks (ADR-0018 §8).
@@ -55,7 +55,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	ring, err := token.LoadKeyRing(cfg.KeysDir)
 	if err != nil {
 		// No key generation (ADR-0007 §5): the operator creates the first key.
-		return nil, fmt.Errorf("MCP_AUTHPROXY_KEYS_DIR: %s: %w (see docs/how-to/sealing-keys.md)", cfg.KeysDir, err)
+		return nil, fmt.Errorf("BYWARD_KEYS_DIR: %s: %w (see docs/how-to/sealing-keys.md)", cfg.KeysDir, err)
 	}
 	resourceURL := cfg.PublicURL.String()
 	sealer, err := token.NewSealer(ring, resourceURL)
@@ -76,13 +76,13 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	}
 	clients, err := registration.LoadStatic(cfg.StaticClientsFile, os.ReadFile, registration.NewMemoryJTICache(time.Now, maxJTIs))
 	if err != nil {
-		return nil, fmt.Errorf("MCP_AUTHPROXY_STATIC_CLIENTS_FILE: %s: %w (see docs/reference/static-clients.md)", cfg.StaticClientsFile, err)
+		return nil, fmt.Errorf("BYWARD_STATIC_CLIENTS_FILE: %s: %w (see docs/reference/static-clients.md)", cfg.StaticClientsFile, err)
 	}
 	auditStartup(o.Audit, ring, clients.IDs())
 	provider, err := entra.New(entra.Config{Tenant: cfg.EntraTenant, ClientID: cfg.EntraClientID,
 		ClientAuth: idp.ClientSecret(cfg.EntraClientSecret), RedirectURL: cfg.Issuer() + "/callback/" + idpName})
 	if err != nil {
-		return nil, fmt.Errorf("entra settings (MCP_AUTHPROXY_ENTRA_*): %w", err)
+		return nil, fmt.Errorf("entra settings (BYWARD_ENTRA_*): %w", err)
 	}
 	g, warnings, err := gate.New(gate.Rules{Tenants: cfg.GateTenants, Roles: cfg.GateRoles, Groups: cfg.GateGroups,
 		EmailDomains: cfg.GateEmailDomains, HostedDomains: cfg.GateHostedDomains},
@@ -125,7 +125,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 		return nil, err
 	}
 	if cfg.ScopeDescription == "" {
-		log.Warn("consent page uses generic wording", "setting", "MCP_AUTHPROXY_SCOPE_DESCRIPTION",
+		log.Warn("consent page uses generic wording", "setting", "BYWARD_SCOPE_DESCRIPTION",
 			"reason", "set it to say in plain words what the "+cfg.Scope+" scope lets an app do (ADR-0010 §4)")
 	}
 	log.Info("broker ready", "reason", "keys "+fmt.Sprint(len(ring.KeyIDs()))+", signing with "+ring.SigningKeyID()+"")
@@ -192,9 +192,9 @@ func gateError(err error) error {
 // logPaths logs the absolute paths the proxy uses, defaults resolved (ADR-0007 §6).
 func logPaths(cfg *config.Config, log *slog.Logger) {
 	for _, p := range []struct{ setting, value string }{
-		{"MCP_AUTHPROXY_DATA_DIR", cfg.DataDir}, {"MCP_AUTHPROXY_KEYS_DIR", cfg.KeysDir},
-		{"MCP_AUTHPROXY_STATIC_CLIENTS_FILE", cfg.StaticClientsFile}, {"MCP_AUTHPROXY_STORE_DIR", cfg.StoreDir},
-		{"MCP_AUTHPROXY_STORE_COUNTER_FILE", cfg.StoreCounterFile},
+		{"BYWARD_DATA_DIR", cfg.DataDir}, {"BYWARD_KEYS_DIR", cfg.KeysDir},
+		{"BYWARD_STATIC_CLIENTS_FILE", cfg.StaticClientsFile}, {"BYWARD_STORE_DIR", cfg.StoreDir},
+		{"BYWARD_STORE_COUNTER_FILE", cfg.StoreCounterFile},
 	} {
 		log.Info("path", "setting", p.setting, "value", p.value)
 	}
@@ -208,18 +208,18 @@ func openStore(cfg *config.Config, log *slog.Logger, rec *audit.Log) (*sqlite.St
 	defer cancel()
 	st, err := sqlite.Open(ctx, sqlite.Options{Dir: cfg.StoreDir, CounterFile: cfg.StoreCounterFile})
 	if err != nil {
-		return nil, fmt.Errorf("MCP_AUTHPROXY_STORE_DIR / MCP_AUTHPROXY_STORE_COUNTER_FILE: %w", err)
+		return nil, fmt.Errorf("BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: %w", err)
 	}
 	s := st.Startup()
 	switch {
 	case s.Restored:
 		log.Warn("store restored from an older copy: a new epoch started, refresh tokens issued before the restore are refused and their users sign in again",
-			"reason", "store_restore", "epoch", s.Epoch, "setting", "MCP_AUTHPROXY_STORE_DIR", "value", cfg.StoreDir)
+			"reason", "store_restore", "epoch", s.Epoch, "setting", "BYWARD_STORE_DIR", "value", cfg.StoreDir)
 		rec.Record(nil, audit.Event{Name: audit.StoreRestored, Outcome: audit.Success, Reason: "restored from an older copy", Epoch: s.Epoch})
 	case s.CounterMissing:
 		log.Warn("store counter file missing: a restore of the state directory could not be detected at this start",
-			"reason", "store_counter_missing", "setting", "MCP_AUTHPROXY_STORE_COUNTER_FILE", "value", cfg.StoreCounterFile)
+			"reason", "store_counter_missing", "setting", "BYWARD_STORE_COUNTER_FILE", "value", cfg.StoreCounterFile)
 	}
-	log.Info("store open", "setting", "MCP_AUTHPROXY_STORE_DIR", "value", cfg.StoreDir, "epoch", s.Epoch)
+	log.Info("store open", "setting", "BYWARD_STORE_DIR", "value", cfg.StoreDir, "epoch", s.Epoch)
 	return st, nil
 }

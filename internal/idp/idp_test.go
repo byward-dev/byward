@@ -23,7 +23,7 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 
-	"github.com/corker/mcp-authproxy/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
 const secretish = "tok-SECRET-value"

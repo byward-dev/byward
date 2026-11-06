@@ -17,20 +17,20 @@ at once, then it refills evenly (30/min means one more request every 2 s).
 | `/revoke` | 30 | as `/token` |
 | `/register` | 30 | as `/token` |
 
-Every refusal carries `Retry-After` in whole seconds (RFC 6585 §4), is counted in `mcp_authproxy_rate_limited_total`,
+Every refusal carries `Retry-After` in whole seconds (RFC 6585 §4), is counted in `byward_rate_limited_total`,
 and is audited as `rate_limited` ([observability](observability.md)). `/register` applies from the slice that adds
 it (DCR). Metadata and JWKS are not limited.
 
-Raise a budget with `MCP_AUTHPROXY_OAUTH_RATE_LIMITS`, for example `authorize=120,callback=120`. Each value is 1 to
+Raise a budget with `BYWARD_OAUTH_RATE_LIMITS`, for example `authorize=120,callback=120`. Each value is 1 to
 10,000 per minute. There is no way to turn the limits off.
 
 ## Client address
 
 - IPv4 addresses are limited one by one; **IPv6 addresses are grouped by /64**, because a client controls its whole
   /64.
-- Without `MCP_AUTHPROXY_TRUSTED_PROXIES` (the default) the client address is the TCP peer and `X-Forwarded-For` is
+- Without `BYWARD_TRUSTED_PROXIES` (the default) the client address is the TCP peer and `X-Forwarded-For` is
   ignored.
-- **Behind a reverse proxy or ingress,** list its addresses or CIDRs in `MCP_AUTHPROXY_TRUSTED_PROXIES`. Otherwise
+- **Behind a reverse proxy or ingress,** list its addresses or CIDRs in `BYWARD_TRUSTED_PROXIES`. Otherwise
   every user shares the proxy's budget. The client address is then the rightmost `X-Forwarded-For` entry that is not
   a trusted proxy, so a client cannot choose its own address by adding entries on the left. `Forwarded` (RFC 7239)
   is not read.

@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strconv"
 
-	"github.com/corker/mcp-authproxy/internal/idp"
+	"github.com/byward-dev/byward/internal/idp"
 )
 
 // Codes whose class ADR-0012 §6 fixes.

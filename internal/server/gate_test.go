@@ -14,26 +14,26 @@ import (
 	"testing"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/broker"
-	"github.com/corker/mcp-authproxy/internal/config"
-	"github.com/corker/mcp-authproxy/internal/idp"
-	"github.com/corker/mcp-authproxy/internal/logging"
+	"github.com/byward-dev/byward/internal/broker"
+	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 func gateEnv(t *testing.T, extra ...string) []string {
 	t.Helper()
-	return append(append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"), extra...)
+	return append(append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp"), extra...)
 }
 
 // One case per gate list: the error names the exact setting, which proves the wiring maps each
 // list to its own setting. The gate's own rules are tested in internal/gate.
 func TestInvalidGateRefusesToStartNamingTheSetting(t *testing.T) {
 	for _, setting := range []string{
-		"MCP_AUTHPROXY_GATE_TENANTS=11111111-1111-4111-8111-111111111111", // the configured tenant is missing
-		"MCP_AUTHPROXY_GATE_ROLES=a\x7fb",
-		"MCP_AUTHPROXY_GATE_GROUPS=mcp-users",
-		"MCP_AUTHPROXY_GATE_EMAIL_DOMAINS=contoso.example",
-		"MCP_AUTHPROXY_GATE_HOSTED_DOMAINS=contoso.example",
+		"BYWARD_GATE_TENANTS=11111111-1111-4111-8111-111111111111", // the configured tenant is missing
+		"BYWARD_GATE_ROLES=a\x7fb",
+		"BYWARD_GATE_GROUPS=mcp-users",
+		"BYWARD_GATE_EMAIL_DOMAINS=contoso.example",
+		"BYWARD_GATE_HOSTED_DOMAINS=contoso.example",
 	} {
 		name, _, _ := strings.Cut(setting, "=")
 		t.Run(name, func(t *testing.T) {
@@ -49,12 +49,12 @@ func TestInvalidGateRefusesToStartNamingTheSetting(t *testing.T) {
 }
 
 func TestEveryInvalidGateListIsReported(t *testing.T) {
-	cfg, _, err := config.Load(nil, gateEnv(t, "MCP_AUTHPROXY_GATE_GROUPS=mcp-users", "MCP_AUTHPROXY_GATE_EMAIL_DOMAINS=contoso.example"), os.ReadFile)
+	cfg, _, err := config.Load(nil, gateEnv(t, "BYWARD_GATE_GROUPS=mcp-users", "BYWARD_GATE_EMAIL_DOMAINS=contoso.example"), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = New(cfg, logging.New(io.Discard, "json"))
-	if err == nil || !strings.Contains(err.Error(), "MCP_AUTHPROXY_GATE_GROUPS: ") || !strings.Contains(err.Error(), "; MCP_AUTHPROXY_GATE_EMAIL_DOMAINS: ") {
+	if err == nil || !strings.Contains(err.Error(), "BYWARD_GATE_GROUPS: ") || !strings.Contains(err.Error(), "; BYWARD_GATE_EMAIL_DOMAINS: ") {
 		t.Fatalf("err = %v, want both settings named", err)
 	}
 }
@@ -65,9 +65,9 @@ func TestOnlyAnEmptyGateWarnsAtStartup(t *testing.T) {
 		warn  bool
 	}{
 		"empty":     {warn: true},
-		"with role": {extra: []string{"MCP_AUTHPROXY_GATE_ROLES=MCP.User"}},
+		"with role": {extra: []string{"BYWARD_GATE_ROLES=MCP.User"}},
 		// The configured tenant reaches the gate, so listing it is accepted.
-		"own tenant": {extra: []string{"MCP_AUTHPROXY_GATE_TENANTS=" + fixtureTenant}},
+		"own tenant": {extra: []string{"BYWARD_GATE_TENANTS=" + fixtureTenant}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg, _, err := config.Load(nil, gateEnv(t, tc.extra...), os.ReadFile)
@@ -103,7 +103,7 @@ func TestWiredBrokerGetsTheConfiguredGateAndObservability(t *testing.T) {
 	orig := newBroker
 	newBroker = func(c broker.Config) (*broker.Broker, error) { got = c; return orig(c) }
 	t.Cleanup(func() { newBroker = orig })
-	cfg, _, err := config.Load(nil, gateEnv(t, "MCP_AUTHPROXY_GATE_ROLES=MCP.User"), os.ReadFile)
+	cfg, _, err := config.Load(nil, gateEnv(t, "BYWARD_GATE_ROLES=MCP.User"), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}

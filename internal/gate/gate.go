@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/corker/mcp-authproxy/internal/idp"
+	"github.com/byward-dev/byward/internal/idp"
 )
 
 // organizations is the Entra tenant value of a multi-tenant app.

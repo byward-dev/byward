@@ -9,15 +9,15 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/audit"
-	"github.com/corker/mcp-authproxy/internal/config"
-	"github.com/corker/mcp-authproxy/internal/health"
-	"github.com/corker/mcp-authproxy/internal/logging"
-	"github.com/corker/mcp-authproxy/internal/metrics"
-	"github.com/corker/mcp-authproxy/internal/origin"
-	"github.com/corker/mcp-authproxy/internal/resource"
-	"github.com/corker/mcp-authproxy/internal/tracing"
-	"github.com/corker/mcp-authproxy/internal/upstream/relay"
+	"github.com/byward-dev/byward/internal/audit"
+	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/health"
+	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/metrics"
+	"github.com/byward-dev/byward/internal/origin"
+	"github.com/byward-dev/byward/internal/resource"
+	"github.com/byward-dev/byward/internal/tracing"
+	"github.com/byward-dev/byward/internal/upstream/relay"
 )
 
 // Observability is what the routes report to: the audit stream and metrics (ADR-0021). The zero

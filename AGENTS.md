@@ -1,4 +1,4 @@
-# mcp-authproxy — instructions for coding agents
+# byward — instructions for coding agents
 
 Auth-only proxy that puts any MCP server (stdio or HTTP) behind OAuth 2.1 / OIDC, with
 first-class Microsoft Entra ID support. Single Go binary. Scope and non-goals: ADR-0001.
@@ -31,7 +31,7 @@ fixes (or "no findings") in the PR description. Agents never merge.
 
 ## Layout rules
 
-1. All code under `internal/`; `cmd/mcp-authproxy` stays thin (config → wire → run). No `pkg/`.
+1. All code under `internal/`; `cmd/byward` stays thin (config → wire → run). No `pkg/`.
    This is a binary, not a library (ADR-0002).
 2. Packages are named after `CONTEXT.md` concepts. No `util`, `common`, `models`, `helpers`.
 3. Adapters are one package each behind an interface: `internal/idp/<provider>`,
@@ -61,7 +61,7 @@ fixes (or "no findings") in the PR description. Agents never merge.
 
 ### Issue tracker
 
-GitHub Issues on `corker/mcp-authproxy` via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+GitHub Issues on `byward-dev/byward` via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

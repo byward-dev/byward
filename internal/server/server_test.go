@@ -21,13 +21,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/corker/mcp-authproxy/internal/audit"
-	"github.com/corker/mcp-authproxy/internal/config"
-	"github.com/corker/mcp-authproxy/internal/health"
-	"github.com/corker/mcp-authproxy/internal/logging"
-	"github.com/corker/mcp-authproxy/internal/resource"
-	"github.com/corker/mcp-authproxy/internal/testutil/fakeupstream"
-	"github.com/corker/mcp-authproxy/internal/token"
+	"github.com/byward-dev/byward/internal/audit"
+	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/health"
+	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/resource"
+	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
+	"github.com/byward-dev/byward/internal/token"
 )
 
 // goodToken is distinctive so a leak check cannot match ordinary text.
@@ -72,9 +72,9 @@ func start(t *testing.T, extraEnv ...string) env {
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
 	cfg, _, err := config.Load(nil, append(authEnv(t), append([]string{
-		"MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp",
-		"MCP_AUTHPROXY_UPSTREAM_URL=" + up.URL + "/mcp",
-		"MCP_AUTHPROXY_ALLOWED_ORIGINS=https://app.example",
+		"BYWARD_PUBLIC_URL=https://mcp.example.com/mcp",
+		"BYWARD_UPSTREAM_URL=" + up.URL + "/mcp",
+		"BYWARD_ALLOWED_ORIGINS=https://app.example",
 	}, extraEnv...)...), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
@@ -164,7 +164,7 @@ func TestChecksRunBeforeAuthentication(t *testing.T) {
 }
 
 func TestAllowedHostsAccepted(t *testing.T) {
-	e := start(t, "MCP_AUTHPROXY_ALLOWED_HOSTS=proxy.internal:8080")
+	e := start(t, "BYWARD_ALLOWED_HOSTS=proxy.internal:8080")
 	r, _ := http.NewRequest("GET", e.srv.URL+"/.well-known/oauth-protected-resource", nil)
 	r.Host = "proxy.internal:8080"
 	res, err := http.DefaultClient.Do(r)
@@ -313,7 +313,7 @@ func TestRecovererLetsAbortedHandlersAbort(t *testing.T) {
 }
 
 func TestRunShutsDownOnCancel(t *testing.T) {
-	cfg := loadConfig(t, "https://m.example/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0", "MCP_AUTHPROXY_INTERNAL_LISTEN=127.0.0.1:0")
+	cfg := loadConfig(t, "https://m.example/mcp", "BYWARD_LISTEN=127.0.0.1:0", "BYWARD_INTERNAL_LISTEN=127.0.0.1:0")
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -388,9 +388,9 @@ func TestNoAuthServesTheUpstreamWithoutMetadataOrChallenge(t *testing.T) {
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
 	cfg, _, err := config.Load(nil, []string{
-		"MCP_AUTHPROXY_INSECURE_NO_AUTH=true",
-		"MCP_AUTHPROXY_PUBLIC_URL=http://localhost:8080/mcp",
-		"MCP_AUTHPROXY_UPSTREAM_URL=" + up.URL + "/mcp",
+		"BYWARD_INSECURE_NO_AUTH=true",
+		"BYWARD_PUBLIC_URL=http://localhost:8080/mcp",
+		"BYWARD_UPSTREAM_URL=" + up.URL + "/mcp",
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -452,8 +452,8 @@ func TestNewNamesTheSettingAtFault(t *testing.T) {
 		name, setting, doc string
 		value              func(t *testing.T) string
 	}{
-		{"empty keys dir", "MCP_AUTHPROXY_KEYS_DIR", "docs/how-to/sealing-keys.md", func(t *testing.T) string { return t.TempDir() }},
-		{"malformed clients file", "MCP_AUTHPROXY_STATIC_CLIENTS_FILE", "docs/reference/static-clients.md", func(t *testing.T) string {
+		{"empty keys dir", "BYWARD_KEYS_DIR", "docs/how-to/sealing-keys.md", func(t *testing.T) string { return t.TempDir() }},
+		{"malformed clients file", "BYWARD_STATIC_CLIENTS_FILE", "docs/reference/static-clients.md", func(t *testing.T) string {
 			p := filepath.Join(t.TempDir(), "clients.json")
 			if err := os.WriteFile(p, []byte(`{"clients":`), 0o600); err != nil {
 				t.Fatal(err)
@@ -463,7 +463,7 @@ func TestNewNamesTheSettingAtFault(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			environ := append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp")
+			environ := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
 			path := c.value(t)
 			for i, kv := range environ {
 				if strings.HasPrefix(kv, c.setting+"=") {
@@ -486,7 +486,7 @@ func TestNewNamesTheSettingAtFault(t *testing.T) {
 // that Run runs it and that it keeps tokens valid); without it every token is refused 30 s after
 // startup.
 func TestNewInAuthModeHandsTheRevocationSyncToRun(t *testing.T) {
-	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
+	cfg, _, err := config.Load(nil, append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -560,7 +560,7 @@ func TestInternalListenerServesProbesAndMetricsAndThePublicOneDoesNot(t *testing
 	if code != 200 {
 		t.Errorf("internal /metrics = %d, want 200", code)
 	}
-	for _, want := range []string{"mcp_authproxy_build_info", `route="/mcp",status_class="4xx"`} {
+	for _, want := range []string{"byward_build_info", `route="/mcp",status_class="4xx"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("internal /metrics lacks %s (the public request must be timed under its route)", want)
 		}
@@ -573,7 +573,7 @@ func TestInternalListenerServesProbesAndMetricsAndThePublicOneDoesNot(t *testing
 }
 
 func TestEmptyInternalListenTurnsTheInternalListenerOff(t *testing.T) {
-	cfg := loadConfig(t, "https://m.example/mcp", "MCP_AUTHPROXY_INTERNAL_LISTEN=")
+	cfg := loadConfig(t, "https://m.example/mcp", "BYWARD_INTERNAL_LISTEN=")
 	s, err := New(cfg, slog.New(slog.DiscardHandler))
 	if err != nil || s.Internal != nil {
 		t.Fatalf("internal server = %v, err %v; want none", s.Internal, err)
@@ -614,8 +614,8 @@ func (w *listenWatcher) Write(p []byte) (int, error) {
 // listener (probes, metrics) closes only after the public one, so the drain is visible.
 // Shutdown runs RegisterOnShutdown callbacks in goroutines, so each asserts the state it sees.
 func TestRunDrainsReadinessBeforeShutdownAndClosesTheInternalListenerLast(t *testing.T) {
-	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp",
-		"MCP_AUTHPROXY_LISTEN=127.0.0.1:0", "MCP_AUTHPROXY_INTERNAL_LISTEN=127.0.0.1:0"), os.ReadFile)
+	cfg, _, err := config.Load(nil, append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp",
+		"BYWARD_LISTEN=127.0.0.1:0", "BYWARD_INTERNAL_LISTEN=127.0.0.1:0"), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -706,7 +706,7 @@ func TestRejectionsFromOneSourceAreRateLimitedButStillCounted(t *testing.T) {
 		t.Errorf("logged %d host_rejected records from one source, want the burst of 10", n)
 	}
 	_, metrics := getBody(t, s.Internal.Handler, "x", "/metrics")
-	if !strings.Contains(metrics, `mcp_authproxy_audit_events_total{event="host_rejected",outcome="failure"} 15`) {
+	if !strings.Contains(metrics, `byward_audit_events_total{event="host_rejected",outcome="failure"} 15`) {
 		t.Errorf("metrics must count all 15 rejections:\n%s", metrics)
 	}
 }
@@ -766,8 +766,8 @@ func TestReadinessIsKeysAndStoreOnly(t *testing.T) {
 // The wired broker shows the consent page with the operator's wording and accepts an answer that
 // carries the public origin: a wrong Origin wiring would refuse every real Allow.
 func TestTheServerShowsTheOperatorsConsentPageAndDenyReturnsToTheApp(t *testing.T) {
-	env := append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp",
-		"MCP_AUTHPROXY_OPERATOR_NAME=Contoso IT", "MCP_AUTHPROXY_SCOPE_DESCRIPTION=Read your dashboards.", "MCP_AUTHPROXY_RESOURCE_NAME=Team dashboards")
+	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp",
+		"BYWARD_OPERATOR_NAME=Contoso IT", "BYWARD_SCOPE_DESCRIPTION=Read your dashboards.", "BYWARD_RESOURCE_NAME=Team dashboards")
 	cfg, _, err := config.Load(nil, env, os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
@@ -833,10 +833,10 @@ func TestNewWarnsAboutGenericWordingOnlyWithoutAScopeDescription(t *testing.T) {
 		warn  bool
 	}{
 		{"no scope description warns", nil, true},
-		{"a scope description is quiet", []string{"MCP_AUTHPROXY_SCOPE_DESCRIPTION=Read your dashboards."}, false},
+		{"a scope description is quiet", []string{"BYWARD_SCOPE_DESCRIPTION=Read your dashboards."}, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			env := append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp")
+			env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
 			cfg, _, err := config.Load(nil, append(env, c.extra...), os.ReadFile)
 			if err != nil {
 				t.Fatal(err)
@@ -845,7 +845,7 @@ func TestNewWarnsAboutGenericWordingOnlyWithoutAScopeDescription(t *testing.T) {
 			if _, err := New(cfg, slog.New(slog.NewJSONHandler(logs, nil))); err != nil {
 				t.Fatal(err)
 			}
-			if got := strings.Contains(logs.String(), `"setting":"MCP_AUTHPROXY_SCOPE_DESCRIPTION"`); got != c.warn {
+			if got := strings.Contains(logs.String(), `"setting":"BYWARD_SCOPE_DESCRIPTION"`); got != c.warn {
 				t.Fatalf("warning logged: %v, want %v: %s", got, c.warn, logs)
 			}
 		})
@@ -855,7 +855,7 @@ func TestNewWarnsAboutGenericWordingOnlyWithoutAScopeDescription(t *testing.T) {
 // ADR-0018 §6 and §8 end to end: behind a trusted proxy each forwarded client has its own
 // /authorize budget; from an untrusted peer, X-Forwarded-For cannot buy a fresh budget.
 func TestOAuthRateLimitsKeyOnTheResolvedClientAddress(t *testing.T) {
-	cfg := loadConfig(t, "https://mcp.example.com/mcp", "MCP_AUTHPROXY_TRUSTED_PROXIES=10.0.0.0/8", "MCP_AUTHPROXY_OAUTH_RATE_LIMITS=authorize=2")
+	cfg := loadConfig(t, "https://mcp.example.com/mcp", "BYWARD_TRUSTED_PROXIES=10.0.0.0/8", "BYWARD_OAUTH_RATE_LIMITS=authorize=2")
 	logs := &syncBuffer{}
 	s, err := New(cfg, logging.New(logs, "json"))
 	if err != nil {
@@ -905,7 +905,7 @@ func TestOAuthRateLimitsKeyOnTheResolvedClientAddress(t *testing.T) {
 		t.Error("a forwarded address from an untrusted peer reached the log")
 	}
 	_, metrics := getBody(t, s.Internal.Handler, "x", "/metrics")
-	if !strings.Contains(metrics, `mcp_authproxy_rate_limited_total{endpoint="authorize"} 3`) {
+	if !strings.Contains(metrics, `byward_rate_limited_total{endpoint="authorize"} 3`) {
 		t.Errorf("metrics must count all three refusals:\n%s", metrics)
 	}
 }
