@@ -45,13 +45,19 @@ func newBridge(t *testing.T, edit func(*Config)) *bridgeHarness {
 	return &bridgeHarness{harness: h, bridge: b, srv: srv}
 }
 
-func (b *bridgeHarness) do(t *testing.T, ctx context.Context, method, user, session, body string) *http.Response {
+// do sends one request; header holds extra name/value pairs, an empty value meaning none.
+func (b *bridgeHarness) do(t *testing.T, ctx context.Context, method, user, session, body string, header ...string) *http.Response {
 	t.Helper()
 	req, err := http.NewRequestWithContext(ctx, method, b.srv.URL, strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Header.Set("Accept", "application/json, text/event-stream")
+	for i := 0; i+1 < len(header); i += 2 {
+		if header[i+1] != "" { // an empty value sends no header at all
+			req.Header.Set(header[i], header[i+1])
+		}
+	}
 	if user != "" {
 		req.Header.Set(userHeader, user)
 	}
@@ -747,54 +753,63 @@ func TestUpstreamProcessCrashingDuringInitializeIsLoggedAsACrash(t *testing.T) {
 	}
 }
 
-func TestProtocolVersionHeaderMustBeTheNegotiatedOneOrAbsent(t *testing.T) {
+func TestProtocolVersionHeaderOtherThanTheMCPSessionsNegotiatedVersionIs400(t *testing.T) {
 	for name, tc := range map[string]struct {
-		negotiated string // the version the upstream's InitializeResult names
+		negotiated string // the version the upstream's InitializeResult names; "none" leaves it out
 		header     string // "" sends none
-		want       int
+		rejected   bool
 	}{
-		"absent":                 {"2025-11-25", "", http.StatusOK},
-		"the negotiated one":     {"2025-11-25", "2025-11-25", http.StatusOK},
-		"another version":        {"2025-11-25", "2025-03-26", http.StatusBadRequest},
-		"not a version":          {"2025-11-25", "latest", http.StatusBadRequest},
-		"negotiated by upstream": {"2025-06-18", "2025-06-18", http.StatusOK},
-		"default when upstream negotiated another": {"2025-06-18", "2025-11-25", http.StatusBadRequest},
-		"upstream named none":                      {"none", "2025-11-25", http.StatusOK},
+		"absent":             {"2025-11-25", "", false},
+		"the negotiated one": {"2025-11-25", "2025-11-25", false},
+		"another version":    {"2025-11-25", "2025-03-26", true},
+		"not a version":      {"2025-11-25", "latest", true},
+		"the negotiated one when the upstream chose an older version": {"2025-06-18", "2025-06-18", false},
+		"a newer version than the upstream negotiated":                {"2025-06-18", "2025-11-25", true},
+		"any header when the upstream named no version":               {"none", "2025-11-25", false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			b := newBridge(t, func(c *Config) { c.Command = []string{fakeBin, "-mcp", "-version=" + tc.negotiated} })
 			s := b.initialize(t, "alice")
-			for _, method := range []string{http.MethodPost, http.MethodGet, http.MethodDelete} {
-				req, _ := http.NewRequest(method, b.srv.URL, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"echo","params":{}}`))
-				req.Header.Set(userHeader, "alice")
-				req.Header.Set(sessionHeader, s)
-				if tc.header != "" {
-					req.Header.Set("MCP-Protocol-Version", tc.header)
-				}
-				if method == http.MethodGet {
-					ctx, cancel := context.WithCancel(context.Background())
-					defer cancel()
-					req = req.WithContext(ctx)
-				}
-				res, err := b.srv.Client().Do(req)
-				if err != nil {
-					t.Fatal(err)
-				}
-				want := tc.want
-				if method == http.MethodDelete && want == http.StatusOK {
-					want = http.StatusNoContent
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel() // ends the GET stream
+			for _, m := range []struct {
+				method string
+				ok     int
+			}{{http.MethodPost, http.StatusOK}, {http.MethodGet, http.StatusOK}, {http.MethodDelete, http.StatusNoContent}} {
+				res := b.do(t, ctx, m.method, "alice", s, `{"jsonrpc":"2.0","id":1,"method":"echo","params":{}}`, "MCP-Protocol-Version", tc.header)
+				want := m.ok
+				if tc.rejected {
+					want = http.StatusBadRequest
 				}
 				if res.StatusCode != want {
-					t.Fatalf("%s: status %d, want %d", method, res.StatusCode, want)
+					t.Fatalf("%s: status %d, want %d", m.method, res.StatusCode, want)
 				}
-				if want == http.StatusBadRequest {
+				if tc.rejected {
 					body, _ := io.ReadAll(res.Body)
 					if rpcErrorCode(t, body) != codeInvalidRequest || !strings.Contains(string(body), `"id":null`) {
-						t.Fatalf("%s: body %s, want a -32600 error with no id", method, body)
+						t.Fatalf("%s: body %s, want a -32600 error with no id", m.method, body)
 					}
 				}
-				_ = res.Body.Close()
+			}
+			if tc.rejected { // the rejected DELETE left the MCP session as it was
+				if got := readEvents(t, b.post(t, "alice", s, `{"jsonrpc":"2.0","id":2,"method":"echo","params":{}}`)); len(got) != 1 {
+					t.Fatalf("the MCP session after rejected requests got %q", got)
+				}
 			}
 		})
+	}
+}
+
+func TestRejectedProtocolVersionLeavesTheProcessIdle(t *testing.T) {
+	// At a per-user cap of one, a new MCP session can start only by evicting the idle process: a
+	// rejected request that kept its lease would make that a 503.
+	b := newBridge(t, func(c *Config) { c.MaxPerUser = 1 })
+	s := b.initialize(t, "alice")
+	if res := b.do(t, context.Background(), http.MethodPost, "alice", s, `{"jsonrpc":"2.0","id":1,"method":"echo","params":{}}`,
+		"MCP-Protocol-Version", "2025-03-26"); res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400", res.StatusCode)
+	}
+	if got := b.post(t, "alice", "", initialize).StatusCode; got != http.StatusOK {
+		t.Fatalf("a new MCP session at the cap: status %d, want 200", got)
 	}
 }

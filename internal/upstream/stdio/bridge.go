@@ -205,7 +205,9 @@ func (b *Bridge) start(w http.ResponseWriter, r *http.Request, id Identity) (*se
 
 // session finds the live session for key and leases its process. A session that does not exist,
 // has ended or serves another user gets 404, after which the client starts a new one (2025-11-25
-// transports, Session Management rules 3 and 4); then it returns nil.
+// transports, Session Management rules 3 and 4). A request whose MCP-Protocol-Version names
+// another version than the session negotiated gets 400 (Protocol Version Header). Either way it
+// returns nil, with nothing leased.
 func (b *Bridge) session(w http.ResponseWriter, r *http.Request, id Identity, key string) (*session, func()) {
 	b.mu.Lock()
 	s := b.sessions[key]
@@ -370,17 +372,15 @@ func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id
 		case m := <-st.final:
 			answered := true
 			if initialize { // only here: parsing a large result just to relay it costs for nothing
-				env, err := parseEnvelope(m)
-				if err == nil && env.Error == nil {
-					s.recordVersion(env.Result)
-				}
-				if err != nil || env.Error != nil {
+				if env, err := parseEnvelope(m); err != nil || env.Error != nil {
 					answered, reason = false, "initialize_error"
 					if out == nil {
 						w.Header().Set("Content-Type", "application/json")
 						_, _ = w.Write(m)
 						return
 					}
+				} else {
+					s.recordVersion(env.Result) // before the result reaches the client
 				}
 			}
 			ok := true
