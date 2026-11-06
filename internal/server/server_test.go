@@ -25,6 +25,7 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/health"
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/metrics"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 	"github.com/byward-dev/byward/internal/token"
@@ -338,7 +339,8 @@ func TestAdmitCapsRequestsAndStreamsSeparately(t *testing.T) {
 	// other POST takes a request slot. Neither kind uses the other's.
 	release := make(chan struct{})
 	entered := make(chan struct{}, 4)
-	h := admit(1, 2, nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	m := metrics.New()
+	h := admit(1, 2, m, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		entered <- struct{}{}
 		<-release
 	}))
@@ -369,6 +371,16 @@ func TestAdmitCapsRequestsAndStreamsSeparately(t *testing.T) {
 	hold("GET", "", "the first stream")
 	hold("POST", "tools/call", "a request while only a stream slot was taken")
 	hold("POST", "subscriptions/listen", "a subscription while the only request slot was taken")
+	scrape := func() string {
+		rec := httptest.NewRecorder()
+		m.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		return rec.Body.String()
+	}
+	for _, want := range []string{`byward_upstream_in_flight{kind="request"} 1`, `byward_upstream_in_flight{kind="stream"} 2`} {
+		if got := scrape(); !strings.Contains(got, want) {
+			t.Fatalf("metrics lack %s:\n%s", want, got)
+		}
+	}
 	for _, c := range [][2]string{{"GET", ""}, {"POST", "subscriptions/listen"}, {"POST", "tools/call"}} {
 		res, err := client.Do(request(c[0], c[1]))
 		if err != nil {
@@ -377,6 +389,11 @@ func TestAdmitCapsRequestsAndStreamsSeparately(t *testing.T) {
 		_ = res.Body.Close()
 		if res.StatusCode != http.StatusServiceUnavailable || res.Header.Get("Retry-After") == "" {
 			t.Fatalf("%s %s over its cap: got %d, Retry-After %q", c[0], c[1], res.StatusCode, res.Header.Get("Retry-After"))
+		}
+	}
+	for _, want := range []string{`byward_upstream_busy_total{kind="request"} 1`, `byward_upstream_busy_total{kind="stream"} 2`} {
+		if got := scrape(); !strings.Contains(got, want) {
+			t.Fatalf("metrics lack %s:\n%s", want, got)
 		}
 	}
 }

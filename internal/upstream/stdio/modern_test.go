@@ -750,6 +750,17 @@ func TestAGracefullyEndedSubscriptionAnswersUnderTheClientsID(t *testing.T) {
 	}
 }
 
+func TestAListenTheUpstreamRefusesGetsItsErrorUnderTheClientsID(t *testing.T) {
+	// An error answer has no result._meta to rewrite; it is still the upstream's own answer.
+	b := newModernBridge(t, nil)
+	ev := b.listenModern(t, context.Background(), `"L"`)
+	readEvents(t, b.modern(t, "alice", modernBody(`1`, "refuselisten", "", "")))
+	got := ev.all()
+	if len(got) != 1 || !strings.Contains(got[0], `"id":"L"`) || !strings.Contains(got[0], `"code":-32602`) || strings.Contains(got[0], "byw-") {
+		t.Fatalf("events %q, want the upstream's -32602 under the client's id and no proxy id", got)
+	}
+}
+
 func TestASubscriptionEndWhoseSubscriptionIDIsAmbiguousAnswersAnErrorUnderTheClientsID(t *testing.T) {
 	b := newModernBridge(t, nil)
 	ev := b.listenModern(t, context.Background(), `"L"`)
@@ -776,6 +787,9 @@ func TestAnUpstreamCancellingASubscriptionDeliversWhatCameBeforeThenClosesTheLis
 	}
 	if !ok {
 		t.Fatalf("events %q, want the %d list_changed sent before the teardown in order, then the stream closed", got, teardownNotices)
+	}
+	if ids := b.upstreamCancellations(t); len(ids) != 0 {
+		t.Fatalf("the upstream saw cancellations %q for a subscription it ended itself", ids)
 	}
 }
 

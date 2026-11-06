@@ -353,6 +353,7 @@ func serveMCP() {
 //	endforeign  a completion result for every open listen whose _meta names another id
 //	endrepeated a completion result for every open listen whose _meta repeats the subscription id
 //	listens     the ids of the open listens, as the upstream received them
+//	refuselisten an error answer, with no result, for every open listen
 //	strayscribe a notification for a subscription nobody opened, then the result
 //	straycancel a notifications/cancelled for a request nobody sent, then the result
 //	cancelself  a notifications/cancelled naming this request, then the result
@@ -519,6 +520,11 @@ func serveModern() {
 				for _, lid := range takeListens() {
 					write(message{ID: lid, Result: json.RawMessage(`{"resultType":"complete","_meta":{"io.modelcontextprotocol/subscriptionId":` +
 						string(lid) + `,"io.modelcontextprotocol/subscriptionId":"byw-999999"}}`)})
+				}
+				result(id, "ok")
+			case "refuselisten":
+				for _, lid := range takeListens() {
+					write(message{ID: lid, Error: json.RawMessage(`{"code":-32602,"message":"no such subscription"}`)})
 				}
 				result(id, "ok")
 			case "listens":
