@@ -41,12 +41,23 @@ sorts before `k9`, and a new `k10` would never seal.
    updated secret volume) before restarting any of them. A replica that seals with a key the others
    do not have yet issues tokens they reject.
 3. Restart. New tokens use the new key; tokens sealed with the old key keep working.
-4. Remove the old file and restart once nothing sealed with it is still needed:
+4. Remove the old file and restart **15 days after the restart in step 3**. Count from the
+   restart that made the new key the one sorting last, so the one that seals, not from when you
+   added the file; with several replicas, from the restart of the last one, since a replica not yet
+   restarted still seals with the old key. By then nothing sealed with the old key is still needed:
    - access tokens live at most 1 h;
-   - the IdP tokens kept in each grant are sealed too, and stay sealed with the key in use at their
-     last refresh. A grant whose IdP tokens were sealed with a removed key is revoked at its next
-     refresh, and its user signs in again. To avoid that, keep the old key for the grant lifetime
-     (30 days), or accept the extra sign-ins (#104 tracks re-sealing so this is no longer needed).
+   - the IdP tokens kept in each grant are sealed too. Every refresh re-seals them with the current
+     key, and a refresh token unused for 14 days expires (ADR-0006 §5). A sign-in can redeem its
+     code up to a minute after its IdP tokens were sealed, so 14 days and a minute after the new
+     key started sealing, every grant that can still refresh is sealed with it; 15 days leaves a
+     margin;
+   - refresh tokens rotate on every refresh, but no key seals them: they are random and stored as
+     SHA-256 hashes, so removing a key never affects them;
+   - legacy MCP session IDs are sealed for 30 days; one sealed with a removed key gets 404, and
+     the client starts a new session (MCP Session Management), without signing in again.
+
+   Removing the old key earlier ends the grants not refreshed since step 3: their IdP tokens no
+   longer open, so the next refresh revokes the grant and the user signs in again.
 
 **Removing a key invalidates every access token it sealed.** Clients then get `401 invalid_token`
 and refresh; refresh tokens themselves are stored as hashes, not sealed.

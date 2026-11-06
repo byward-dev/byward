@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -672,5 +674,136 @@ func TestGateFailureOnRefreshKeepsTheGrant(t *testing.T) {
 				t.Fatalf("with a spent IdP refresh token: %v, want invalid_grant and the grant revoked (sign in again)", body)
 			}
 		})
+	}
+}
+
+// rotateKeys changes the key directory as an operator does (add files, remove files) and restarts
+// the broker: a new one is built from the same configuration with every box and the sealer on the
+// reloaded ring, over the same store and IdP.
+func (e *env) rotateKeys(t *testing.T, add, remove []string) {
+	t.Helper()
+	for _, id := range add {
+		addKey(t, e.keyDir, id)
+	}
+	for _, id := range remove {
+		if err := os.Remove(filepath.Join(e.keyDir, id)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ring, err := token.LoadKeyRing(e.keyDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := func() time.Time { return e.now }
+	cfg := e.cfg
+	e.sealer, _ = token.NewSealer(ring, resourceID)
+	e.idpBox, _ = token.NewBox(ring, "idp-tokens", clock)
+	cfg.Sealer, cfg.IdPTokenBox = e.sealer, e.idpBox
+	cfg.LoginBox, _ = token.NewBox(ring, "login", clock)
+	cfg.ConsentBox, _ = token.NewBox(ring, "consent", clock)
+	e.start(t, cfg)
+}
+
+// wantIdleExpiryAfterRemovingK1 removes the old key k1 and refreshes with rt: by now rt must have
+// idle-expired (invalid_grant), so the grant survives. A revoked grant means the refresh reached IdP
+// tokens no key opens any more, so rt outlived the documented key retirement.
+func (e *env) wantIdleExpiryAfterRemovingK1(t *testing.T, rt string) {
+	t.Helper()
+	e.rotateKeys(t, nil, []string{"k1"})
+	res, body := e.refresh(t, rt, "")
+	wantOAuthError(t, res, body, http.StatusBadRequest, "invalid_grant")
+	if e.grantGone(t, firstGrant(e.st)) { // the grant lives 30 days; only the unreadable-key path revokes it
+		t.Fatal("the grant was revoked: the refresh token outlived the documented key retirement")
+	}
+}
+
+// The key-retirement rule (docs/how-to/sealing-keys.md): every refresh re-seals a grant's IdP tokens
+// with the current signing key, and a refresh token unused for RefreshIdleLifetime expires. So once
+// the new key has sealed for keyRetirement, every grant that can still refresh is sealed with it,
+// and removing the old key costs no sign-in.
+func TestAnOldKeyCanGoOnceItHasNotSealedForTheDocumentedPeriod(t *testing.T) {
+	t.Run("a grant refreshed under the new key survives the old key's removal", func(t *testing.T) {
+		e := newEnv(t)
+		rt := e.offline(t)["refresh_token"].(string) // IdP tokens sealed with k1
+		e.rotateKeys(t, []string{"k2"}, nil)         // k2 seals from now on
+		e.now = e.now.Add(RefreshIdleLifetime - time.Hour)
+		res, body := e.refresh(t, rt, "")
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("refresh under k2 before k1 goes: %d %v", res.StatusCode, body)
+		}
+		e.rotateKeys(t, nil, []string{"k1"})
+		e.now = e.now.Add(time.Hour)
+		if res, body := e.refresh(t, body["refresh_token"].(string), ""); res.StatusCode != http.StatusOK {
+			t.Fatalf("refresh after k1 was removed: %d %v (the IdP tokens were not re-sealed with k2)", res.StatusCode, body)
+		}
+		if e.grantGone(t, firstGrant(e.st)) {
+			t.Fatal("the grant was revoked")
+		}
+	})
+	t.Run("a grant not refreshed since cannot refresh anyway by then", func(t *testing.T) {
+		e := newEnv(t)
+		rt := e.offline(t)["refresh_token"].(string)
+		e.rotateKeys(t, []string{"k2"}, nil)
+		e.now = e.now.Add(RefreshIdleLifetime) // its refresh token idle-expires now, whatever the keys
+		e.wantIdleExpiryAfterRemovingK1(t, rt)
+	})
+	t.Run("a refresh token rotated just before the restart idle-expires in time", func(t *testing.T) {
+		e := newEnv(t)
+		res, body := e.refresh(t, e.offline(t)["refresh_token"].(string), "") // rotated (and re-sealed) under k1
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("refresh under k1: %d %v", res.StatusCode, body)
+		}
+		e.rotateKeys(t, []string{"k2"}, nil)
+		e.now = e.now.Add(RefreshIdleLifetime) // the rotated token's idle window ends now
+		e.wantIdleExpiryAfterRemovingK1(t, body["refresh_token"].(string))
+	})
+	t.Run("a sign-in redeemed just after the restart is covered by the documented period", func(t *testing.T) {
+		e := newEnv(t)
+		code := e.signIn(t, url.Values{"scope": {"mcp offline_access"}}).Query().Get("code") // IdP tokens sealed with k1
+		e.rotateKeys(t, []string{"k2"}, nil)
+		e.now = e.now.Add(CodeLifetime - time.Second) // redeemed under k2, its IdP tokens still under k1
+		res, body := e.redeem(t, code, nil)
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("redeem: %d %v", res.StatusCode, body)
+		}
+		e.now = e.now.Add(keyRetirement - (CodeLifetime - time.Second))
+		e.wantIdleExpiryAfterRemovingK1(t, body["refresh_token"].(string))
+	})
+	t.Run("removing the old key earlier ends the grants not refreshed since", func(t *testing.T) {
+		e := newEnv(t)
+		rt := e.offline(t)["refresh_token"].(string)
+		e.rotateKeys(t, []string{"k2"}, []string{"k1"}) // k1 removed at once
+		e.now = e.now.Add(time.Hour)
+		res, body := e.refresh(t, rt, "")
+		wantOAuthError(t, res, body, http.StatusBadRequest, "invalid_grant")
+		if !e.grantGone(t, firstGrant(e.st)) {
+			t.Fatal("a grant whose IdP tokens no key opens was kept")
+		}
+	})
+}
+
+// keyRetirement is the period the docs tell operators to keep an old key after the new one starts
+// sealing (docs/how-to/sealing-keys.md, step 4).
+const keyRetirement = 15 * 24 * time.Hour
+
+// The documented period covers the longest a refreshable grant can keep IdP tokens sealed with the
+// old key: a code redeemed up to CodeLifetime after its callback, then RefreshIdleLifetime unused.
+func TestTheDocumentedKeyRetirementPeriodCoversEveryRefreshableGrant(t *testing.T) {
+	if keyRetirement < CodeLifetime+RefreshIdleLifetime {
+		t.Fatalf("key retirement %v is shorter than CodeLifetime + RefreshIdleLifetime (%v)", keyRetirement, CodeLifetime+RefreshIdleLifetime)
+	}
+	days := fmt.Sprintf("%d days", int(keyRetirement/(24*time.Hour)))
+	keys, err := os.ReadFile("../../docs/how-to/sealing-keys.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	harden, err := os.ReadFile("../../docs/how-to/harden-a-deployment.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for doc, b := range map[string][]byte{"sealing-keys.md": keys, "harden-a-deployment.md": harden} {
+		if !strings.Contains(string(b), days) {
+			t.Errorf("%s does not state the key-retirement period %q", doc, days)
+		}
 	}
 }
