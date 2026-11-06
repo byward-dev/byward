@@ -319,6 +319,6 @@ func (panickingTransport) RoundTrip(*http.Request) (*http.Response, error) { pan
 func TestKeySetRefetchPanicBecomesUnavailable(t *testing.T) {
 	ks := NewKeySet(NewFetcher(&http.Client{Transport: panickingTransport{}}), "https://idp.example/keys", testClock().Now)
 	if _, err := ks.Key(context.Background(), "k"); !errors.Is(err, ErrKeysUnavailable) || !strings.Contains(err.Error(), "panicked") {
-		t.Fatalf("err = %v", err)
+		t.Fatalf("err = %v, want ErrKeysUnavailable wrapping the recovered panic", err)
 	}
 }

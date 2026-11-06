@@ -116,7 +116,8 @@ func (k *KeySet) refetch(parent context.Context, done chan struct{}) {
 }
 
 // safeLoad is load for the background refetch: no HTTP handler's recover protects that
-// goroutine, so a panic while parsing becomes a fetch error instead of ending the process.
+// goroutine, so a panic while fetching or parsing becomes a fetch error instead of ending the
+// process.
 func (k *KeySet) safeLoad(ctx context.Context) (set jose.JSONWebKeySet, err error) {
 	defer func() {
 		if r := recover(); r != nil {
