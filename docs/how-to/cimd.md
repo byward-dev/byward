@@ -55,3 +55,9 @@ A temporary failure is logged as "client metadata unavailable" and answered with
 `Retry-After: 60`: network trouble, a timeout, a 5xx, 408 or 429 while fetching the document or the
 keys. `byward_cimd_fetches_total` counts fetches by outcome
 ([observability](../reference/observability.md)).
+
+## App notes
+
+**VS Code** may ask you to sign in twice when you add the server. If the server stays at
+"Starting", sign in again from VS Code (the run re-authenticated through VS Code's UI). Both were
+observed against Entra on 2026-11-06; the cause is not known.

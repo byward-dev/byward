@@ -264,11 +264,12 @@ specification.
 
 | Cell | Profile | Status |
 |---|---|---|
-| Claude Code × static | `ClaudeCode` | simulated |
+| Claude Code × static | `ClaudeCode` | simulated (the alternative to CIMD, with `--client-id`) |
+| Claude Code × CIMD | `ClaudeCodeCIMD` | simulated. Real run 2026-11-06: Claude Code's default sign-in, without `--client-id` |
 | Claude.ai/Desktop × CIMD | `ClaudeAI` | simulated |
 | VS Code × CIMD | `VSCode` | simulated |
 | ChatGPT × CIMD | `ChatGPT` | simulated (`private_key_jwt` with a test key at its document's `jwks_uri`) |
-| Cursor × DCR | `Cursor` | simulated (registers its reconstructed request; `cursor://` dropped, https and loopback callbacks sign in). Which callback Cursor desktop sends is unverified (ADR-0009) |
+| Cursor × DCR | `Cursor` | simulated (registers its reconstructed request; `cursor://` dropped, https and loopback callbacks sign in). Real run 2026-11-06: Cursor 3.29.9 signs in with the https cursor.com callback; 2.6.22 cannot register |
 
 ## Feature × lens map
 
