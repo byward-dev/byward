@@ -1,6 +1,6 @@
 # Quickstart: Microsoft Entra ID and Claude Code
 
-This guide puts an HTTP MCP server behind mcp-authproxy, with users signing in through your
+This guide puts an HTTP MCP server behind byward, with users signing in through your
 Microsoft Entra tenant and Claude Code as the MCP client. It takes five steps:
 
 1. [Register the Entra app](#1-register-the-entra-app) (Azure CLI)
@@ -58,7 +58,7 @@ registrations by default; the CLI does not. Leaving it there is harmless.)
 ```sh
 PUBLIC_HOST=mcp.example.com
 TENANT_ID=$(az account show --query tenantId -o tsv)
-APP_ID=$(az ad app create --display-name mcp-authproxy --sign-in-audience AzureADMyOrg \
+APP_ID=$(az ad app create --display-name byward --sign-in-audience AzureADMyOrg \
   --web-redirect-uris "https://$PUBLIC_HOST/callback/entra" --query appId -o tsv)
 echo "tenant $TENANT_ID, client ID $APP_ID"
 ```
@@ -80,10 +80,10 @@ cat > api.json <<EOF
       "value": "access_as_user",
       "type": "User",
       "isEnabled": true,
-      "adminConsentDisplayName": "Use MCP servers behind mcp-authproxy",
-      "adminConsentDescription": "Lets mcp-authproxy sign users in and call MCP servers on their behalf.",
-      "userConsentDisplayName": "Use MCP servers behind mcp-authproxy",
-      "userConsentDescription": "Lets mcp-authproxy sign you in and call MCP servers on your behalf."
+      "adminConsentDisplayName": "Use MCP servers behind byward",
+      "adminConsentDescription": "Lets byward sign users in and call MCP servers on their behalf.",
+      "userConsentDisplayName": "Use MCP servers behind byward",
+      "userConsentDescription": "Lets byward sign you in and call MCP servers on your behalf."
     }]
   }
 }
@@ -114,7 +114,7 @@ at their first sign-in, or an administrator grants consent for everyone in step 
 
 ```sh
 az ad sp create --id "$APP_ID" --query id -o tsv
-(umask 077; az ad app credential reset --id "$APP_ID" --append --display-name mcp-authproxy --years 1 \
+(umask 077; az ad app credential reset --id "$APP_ID" --append --display-name byward --years 1 \
   --query password -o tsv > entra-client-secret)
 ```
 
@@ -161,17 +161,19 @@ sign-in by app role or group as well.
 
 ## 2. Create a sealing key
 
-The proxy seals its tokens with keys you provide. Create the key directory and a first key (details
-and rotation: [sealing keys](sealing-keys.md)):
+byward keeps its keys, its client list and its state in one **data directory**
+(`/var/lib/byward` by default; `BYWARD_DATA_DIR` moves it). Below it is `./byward-data`. The proxy
+seals its tokens with keys you provide; create the first one (details and rotation:
+[sealing keys](sealing-keys.md)):
 
 ```sh
-install -d -m 0700 keys && (umask 077; openssl rand -base64 32 > "keys/$(date -u +%Y-%m-%d)")
+install -d -m 0700 byward-data/keys && (umask 077; openssl rand -base64 32 > "byward-data/keys/$(date -u +%Y-%m-%d)")
 ```
 
 ## 3. Register Claude Code as a static client
 
 Claude Code is a public client: it has no secret and authenticates with PKCE. Register it in the
-static clients file, for example `clients.json`:
+static clients file, `byward-data/clients.json`:
 
 ```json
 {
@@ -197,26 +199,50 @@ static clients file, for example `clients.json`:
 - The `client_id` is yours to choose: printable ASCII without spaces, at most 255 characters. The
   file accepts no unknown fields and no inline secrets.
 
-## 4. Settings (filled in when the data-directory defaults land)
+## 4. Run byward
 
-> **TODO.** This section is completed when the proxy defaults its key directory, static clients file
-> and state to its data directory ([ADR-0007](../adr/0007-state-and-storage.md) §6). Until then the
-> proxy also requires `MCP_AUTHPROXY_KEYS_DIR` and `MCP_AUTHPROXY_STATIC_CLIENTS_FILE`; see the
-> [settings reference](../reference/settings.md).
-
-The quickstart will need five settings ([ADR-0020](../adr/0020-configuration.md) §8):
+Five settings ([ADR-0020](../adr/0020-configuration.md) §8); everything else has a default:
 
 | Setting | Value |
 |---|---|
-| `MCP_AUTHPROXY_PUBLIC_URL` | `https://mcp.example.com/mcp` |
-| `MCP_AUTHPROXY_UPSTREAM_URL` | URL of your HTTP MCP server, e.g. `http://127.0.0.1:3001/mcp` for the reference server |
-| `MCP_AUTHPROXY_ENTRA_TENANT` | `$TENANT_ID` from step 1.1 |
-| `MCP_AUTHPROXY_ENTRA_CLIENT_ID` | `$APP_ID` from step 1.1 |
-| `MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE` | path of `entra-client-secret` from step 1.4 |
+| `BYWARD_PUBLIC_URL` | `https://mcp.example.com/mcp`: the URL users enter, behind your TLS terminator |
+| `BYWARD_UPSTREAM_URL` | your HTTP MCP server, e.g. `http://127.0.0.1:3001/mcp` for the reference server |
+| `BYWARD_ENTRA_TENANT` | `$TENANT_ID` from step 1.1 |
+| `BYWARD_ENTRA_CLIENT_ID` | `$APP_ID` from step 1.1 |
+| `BYWARD_ENTRA_CLIENT_SECRET_FILE` | the `entra-client-secret` file from step 1.4 |
 
-The sealing keys (`keys/`), the static clients file (`clients.json`) and the proxy's state will live
-under the data directory, `/var/lib/mcp-authproxy` in the container image
-([ADR-0019](../adr/0019-packaging.md) §2).
+The data directory then holds:
+
+```text
+byward-data/
+├── keys/             sealing keys (step 2)
+├── clients.json      static clients (step 3)
+├── state/            the SQLite store, created on first start; back this up (state.md)
+└── store-writes      restore-detection counter, kept outside state/
+```
+
+With the container image. It runs as uid 65532 by default; `--user` makes it run as you, so it can
+write the data directory you created:
+
+```sh
+docker run --rm -p 8080:8080 --user "$(id -u):$(id -g)" \
+  -v "$PWD/byward-data:/var/lib/byward" \
+  -v "$PWD/entra-client-secret:/run/secrets/entra-client-secret:ro" \
+  -e BYWARD_PUBLIC_URL=https://mcp.example.com/mcp \
+  -e BYWARD_UPSTREAM_URL=http://upstream.internal:3001/mcp \
+  -e BYWARD_ENTRA_TENANT="$TENANT_ID" \
+  -e BYWARD_ENTRA_CLIENT_ID="$APP_ID" \
+  -e BYWARD_ENTRA_CLIENT_SECRET_FILE=/run/secrets/entra-client-secret \
+  -e BYWARD_LISTEN=0.0.0.0:8080 \
+  ghcr.io/byward-dev/byward:latest
+```
+
+Or with the binary: export the same five settings plus `BYWARD_DATA_DIR="$PWD/byward-data"` and run
+`byward`. A missing or empty key directory, or a missing clients file, stops startup with a message
+naming the path and the setting that moves it. `BYWARD_UPSTREAM_URL` must be reachable from where
+byward runs (from inside the container, `127.0.0.1` is the container itself). Put your TLS
+terminator (reverse proxy or load balancer) in front of `:8080` so that `https://mcp.example.com`
+reaches it. All settings: [settings reference](../reference/settings.md).
 
 ## 5. Connect Claude Code
 
@@ -253,11 +279,11 @@ logged with the AADSTS code, Entra's trace ID and correlation ID.
 
 | Code | What the user sees | Fix |
 |---|---|---|
-| AADSTS50011 | The service is misconfigured. | The redirect URI is not registered: add `https://<public-host>/callback/entra` under the **Web** platform (step 1.1). It must match the host of `MCP_AUTHPROXY_PUBLIC_URL` exactly. |
-| AADSTS700016 | The service is misconfigured. | The client ID is not an app in this tenant: check `MCP_AUTHPROXY_ENTRA_CLIENT_ID` and `MCP_AUTHPROXY_ENTRA_TENANT`. |
+| AADSTS50011 | The service is misconfigured. | The redirect URI is not registered: add `https://<public-host>/callback/entra` under the **Web** platform (step 1.1). It must match the host of `BYWARD_PUBLIC_URL` exactly. |
+| AADSTS700016 | The service is misconfigured. | The client ID is not an app in this tenant: check `BYWARD_ENTRA_CLIENT_ID` and `BYWARD_ENTRA_TENANT`. |
 | AADSTS65001 | This service has not been approved in your organisation yet. | Consent is missing: grant admin consent (step 1.5). |
 | AADSTS50105 | You have not been given access to this service. | Assignment is required (step 1.6): assign the user, or a group they are in, to the enterprise application. |
-| AADSTS50020 | Your account is not from the organisation this service belongs to. | The user's home tenant is not your tenant: invite them as a guest, or check `MCP_AUTHPROXY_ENTRA_TENANT`. |
+| AADSTS50020 | Your account is not from the organisation this service belongs to. | The user's home tenant is not your tenant: invite them as a guest, or check `BYWARD_ENTRA_TENANT`. |
 | AADSTS90072 | Your account cannot sign in to this organisation. | The external account does not exist in your tenant: invite it as a guest. |
 | AADSTS53003 | Your organisation's access policy blocked this sign-in. | Conditional Access blocked the sign-in: the Entra sign-in log names the policy. |
 | AADSTS7000222 | The service is temporarily unavailable. | The client secret has expired: create a new one (step 1.4) and restart the proxy. |
