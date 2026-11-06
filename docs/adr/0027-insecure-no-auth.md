@@ -48,7 +48,8 @@ Evidence (research ANON-mode.md; runtime 2026-11-06):
    - the listen address is loopback, or the proxy runs in a container (`/.dockerenv` or
      `/run/.containerenv`) **with its own network namespace**. Host networking (`--network host`)
      binds the host's interfaces, so it is detected from `/proc/self/net/dev` and refused: only
-     `lo`, `ethN` and the kernel's tunnel placeholders are allowed, and an unknown interface or an
+     `lo`, the kernel's tunnel placeholders and an `ethN` with a peer (`iflink` ≠ `ifindex`, as
+     for veth, macvlan and ipvlan; a physical NIC has them equal) are allowed, and an unknown interface or an
      unreadable list also refuses (measured on Docker 28.4: host networking adds `docker0`,
      `bond0`, `dummy0`, `teql0`, `services1`);
    - extra allowed hosts and origins are loopback only;
@@ -79,6 +80,8 @@ Evidence (research ANON-mode.md; runtime 2026-11-06):
   127.0.0.1 (moby#45610). Documented, since it can't be detected from inside the container.
 - stdio in this mode runs as one anonymous user, so the modern era shares one process (slice 3.1);
   the audit stream records `principal_type: anonymous` (slice 5.1).
+- Rootless Podman with pasta copies the host's interface name (e.g. `enp3s0`) and is refused;
+  use a loopback listen address there.
 - Cursor is unverified (slice 1.7).
 
 ## Considered options

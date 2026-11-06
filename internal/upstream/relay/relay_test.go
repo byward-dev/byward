@@ -113,3 +113,16 @@ func TestRelayDropsUpstreamCORS(t *testing.T) {
 		t.Fatalf("headers = %v", w.Header())
 	}
 }
+func TestAccessTokenIsRemovedWithoutTouchingTheRestOfTheQuery(t *testing.T) {
+	for raw, want := range map[string]string{
+		"b=1&a=%7E&access_token=x":                  "b=1&a=%7E",
+		"access_token=x":                            "",
+		"x=1&access%5Ftoken=y&access_token=z&z=%20": "x=1&z=%20",
+		"q=access_token":                            "q=access_token",
+		"plain=1&b=2":                               "plain=1&b=2",
+	} {
+		if got := withoutAccessToken(raw); got != want {
+			t.Errorf("%q: got %q want %q", raw, got, want)
+		}
+	}
+}

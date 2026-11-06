@@ -56,14 +56,26 @@ func TestNoAuthAcceptsLoopbackHostsAndOrigins(t *testing.T) {
 	}
 }
 
-// fakeHost answers readFile for the given marker file and network interface list.
-func fakeHost(marker, netdev string) readFileFunc {
+// fakeHost answers readFile for the given marker file and network interface list; every ethN is a
+// veth (iflink differs from ifindex) unless physical lists it.
+func fakeHost(marker, netdev string, physical ...string) readFileFunc {
 	return func(p string) ([]byte, error) {
 		switch {
 		case p == marker:
 			return nil, nil
 		case p == "/proc/self/net/dev" && netdev != "":
 			return []byte(netdev), nil
+		case strings.HasPrefix(p, "/sys/class/net/eth"):
+			name := strings.Split(strings.TrimPrefix(p, "/sys/class/net/"), "/")[0]
+			if strings.HasSuffix(p, "/ifindex") {
+				return []byte("11\n"), nil
+			}
+			for _, ph := range physical {
+				if ph == name {
+					return []byte("11\n"), nil
+				}
+			}
+			return []byte("25\n"), nil
 		}
 		return nil, os.ErrNotExist
 	}
@@ -114,6 +126,13 @@ func TestNoAuthWithHostNetworkingIsRefused(t *testing.T) {
 			}
 		})
 	}
+	// Podman --network host on a VM whose only NIC is a physical eth0 (iflink == ifindex).
+	t.Run("physical eth0 only", func(t *testing.T) {
+		_, err := loadAnon(t, fakeHost("/run/.containerenv", netdevHeader+"    lo: 0\n  eth0: 0\n", "eth0"), "MCP_AUTHPROXY_LISTEN=0.0.0.0:8080")
+		if !isConfigError(err) || !strings.Contains(err.Error(), "not --network host") {
+			t.Fatalf("want refusal, got %v", err)
+		}
+	})
 }
 
 func TestOriginDropsTheDefaultPort(t *testing.T) {

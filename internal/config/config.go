@@ -206,12 +206,23 @@ func ownNetwork(readFile readFileFunc) bool {
 		if placeholders[name] {
 			continue
 		}
-		if rest, isEth := strings.CutPrefix(name, "eth"); isEth && rest != "" && strings.Trim(rest, "0123456789") == "" {
+		if rest, isEth := strings.CutPrefix(name, "eth"); isEth && rest != "" && strings.Trim(rest, "0123456789") == "" && virtual(readFile, name) {
 			continue
 		}
 		return false
 	}
 	return true
+}
+
+// virtual reports whether an interface has a peer (veth, macvlan, ipvlan: iflink differs from
+// ifindex). A host's physical NIC, as seen with host networking, has iflink == ifindex; that, or
+// an unreadable value, answers no. Measured on Docker 28.4: bridge eth0 ifindex=11 iflink=25,
+// host-network eth0 ifindex=4 iflink=4.
+func virtual(readFile readFileFunc, name string) bool {
+	index, err1 := readFile("/sys/class/net/" + name + "/ifindex")
+	link, err2 := readFile("/sys/class/net/" + name + "/iflink")
+	i, l := strings.TrimSpace(string(index)), strings.TrimSpace(string(link))
+	return err1 == nil && err2 == nil && i != "" && l != "" && i != l
 }
 
 // checkNoAuth fences --insecure-no-auth in (ADR-0027): the public URL is loopback, the listen
