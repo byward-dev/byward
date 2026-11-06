@@ -20,7 +20,19 @@ Background: [ADR-0012](../adr/0012-entra-specifics.md) (Entra), [ADR-0008](../ad
 - the Azure CLI (`az`), signed in to your tenant (`az login --tenant <tenant-id>`) as a user who may
   create app registrations. Granting admin consent (optional, step 1.5) needs an administrator. In a
   checkout of this repository, `mise exec -- az` runs the pinned version;
-- `uuidgen` and `openssl` (preinstalled on macOS and most Linux distributions).
+- `uuidgen` and `openssl` (preinstalled on macOS and most Linux distributions);
+- an HTTP MCP server to protect. To try the proxy first, run the MCP reference server
+  ([`@modelcontextprotocol/server-everything`](https://www.npmjs.com/package/@modelcontextprotocol/server-everything),
+  Streamable HTTP, both protocol eras, no authentication of its own) in a pinned Node container:
+
+  ```sh
+  docker run --rm -p 127.0.0.1:3001:3001 \
+    node:24.22.1-slim@sha256:be8204d4bd327363357f532187b752ff62759c31bedf98e9e18fc08c9cbd605c \
+    npx -y @modelcontextprotocol/server-everything@2.0.0 streamableHttp
+  ```
+
+  Its endpoint is `http://127.0.0.1:3001/mcp`. It refuses browser requests with a non-localhost
+  `Origin`; the proxy never forwards `Origin`, so that does not get in the way.
 
 ## 1. Register the Entra app
 
@@ -196,7 +208,7 @@ The quickstart will need five settings ([ADR-0020](../adr/0020-configuration.md)
 | Setting | Value |
 |---|---|
 | `MCP_AUTHPROXY_PUBLIC_URL` | `https://mcp.example.com/mcp` |
-| `MCP_AUTHPROXY_UPSTREAM_URL` | URL of your HTTP MCP server, e.g. `http://upstream:9000/mcp` |
+| `MCP_AUTHPROXY_UPSTREAM_URL` | URL of your HTTP MCP server, e.g. `http://127.0.0.1:3001/mcp` for the reference server |
 | `MCP_AUTHPROXY_ENTRA_TENANT` | `$TENANT_ID` from step 1.1 |
 | `MCP_AUTHPROXY_ENTRA_CLIENT_ID` | `$APP_ID` from step 1.1 |
 | `MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE` | path of `entra-client-secret` from step 1.4 |
@@ -215,7 +227,8 @@ claude mcp add --transport http --client-id claude-code --callback-port 8080 my-
 
 Then sign in: run `/mcp` inside Claude Code, or `claude mcp login my-mcp` from a shell. The browser
 shows the proxy's consent page, then Entra's sign-in. `claude mcp get my-mcp` shows the configured
-OAuth client.
+OAuth client. With the reference server behind the proxy, ask Claude Code to call its `echo` tool to
+see a request go all the way through.
 
 The callback port must be free on the machine running Claude Code. If 8080 is taken (for example by
 a proxy running locally), pick another port; the registered `redirect_uris` need no change because
