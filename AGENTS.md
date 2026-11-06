@@ -25,6 +25,10 @@ All tools are pinned in `mise.toml`; `mise run` resolves them, no shell activati
 
 **Run `mise run check` before claiming a change is done.** CI runs the same task.
 
+**Before reporting a PR ready, run `/sweep-runtime`, `/sweep-solid` and `/sweep-tests`** on the diff
+against `origin/main`. Loop each until it is clean, push the fixes, and list each sweep's findings and
+fixes (or "no findings") in the PR description. Agents never merge.
+
 ## Layout rules
 
 1. All code under `internal/`; `cmd/mcp-authproxy` stays thin (config → wire → run). No `pkg/`.
@@ -51,6 +55,7 @@ All tools are pinned in `mise.toml`; `mise run` resolves them, no shell activati
 - Do not merge PRs or push to `main` yourself; the maintainer reviews and merges.
 - Commit messages: Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, `test:`).
 - Disclose AI help with the `Co-Authored-By` trailer. Agents never add `Signed-off-by` (ADR-0023).
+- The full AI-assistance policy and the test policy are in `CONTRIBUTING.md`.
 
 ## Agent skills
 
