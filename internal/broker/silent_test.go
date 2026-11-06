@@ -48,28 +48,38 @@ func silent(extra url.Values) url.Values {
 // client asked every time gets consent_required before the hint is even read, so it learns
 // nothing about it.
 func TestPromptNoneThatCannotFinishSilentlyIsAnsweredWithoutAPage(t *testing.T) {
+	asked := url.Values{"client_id": {unverifiedID}} // a client asked every time
 	for _, tc := range []struct {
-		name, want, trust string
-		extra             url.Values
-		hint              bool
-		storeDown         bool
-		unverified        bool // a consent was remembered while the client was verified
+		name, want    string
+		extra         url.Values
+		hint          bool
+		storedConsent bool // a consent remembered for the client while it was verified
+		storeDown     bool
+		idpDown       bool // the IdP is not ready when the silent sign-in starts
 	}{
-		{"a client asked every time is refused with consent_required", "consent_required", "not-verified", url.Values{"client_id": {unverifiedID}}, true, false, false},
-		{"a client asked every time without a hint is refused with consent_required, not login_required", "consent_required", "not-verified", url.Values{"client_id": {unverifiedID}}, false, false, false},
-		{"a client no longer verified is refused with consent_required, whatever is remembered", "consent_required", "not-verified", url.Values{"client_id": {unverifiedID}}, true, false, true},
-		{"no hint cookie is refused with login_required", "login_required", "verified", nil, false, false, false},
-		{"a hint without a consent covering the request is refused with consent_required", "consent_required", "verified", url.Values{"scope": {"mcp offline_access"}}, true, false, false},
-		{"a store failure is answered with temporarily_unavailable", "temporarily_unavailable", "verified", nil, true, true, false},
+		{name: "a client asked every time is refused with consent_required", want: "consent_required", extra: asked, hint: true},
+		{name: "a client asked every time without a hint is refused with consent_required, not login_required", want: "consent_required", extra: asked},
+		{name: "a client no longer verified is refused with consent_required, whatever is remembered", want: "consent_required", extra: asked, hint: true, storedConsent: true},
+		{name: "no hint cookie is refused with login_required", want: "login_required"},
+		{name: "a hint without a consent covering the request is refused with consent_required", want: "consent_required", extra: url.Values{"scope": {"mcp offline_access"}}, hint: true},
+		{name: "a store failure is answered with temporarily_unavailable", want: "temporarily_unavailable", hint: true, storeDown: true},
+		{name: "an IdP that is not ready is answered with temporarily_unavailable", want: "temporarily_unavailable", hint: true, idpDown: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			trust := "verified"
+			switch {
+			case tc.extra.Get("client_id") == unverifiedID:
+				trust = "not-verified"
+			case tc.idpDown: // refused while starting the IdP leg, where the client is not re-read
+				trust = ""
+			}
 			counted := &consentOutcomes{}
 			e := newEnv(t, withRemember(t, counted))
 			var h *http.Cookie
 			if tc.hint {
 				h = e.remember(t, url.Values{"scope": {"mcp"}})
 			}
-			if tc.unverified {
+			if tc.storedConsent {
 				g := user(e)
 				if err := e.st.RememberConsent(context.Background(), store.Consent{Key: store.ConsentKey{Issuer: g.Issuer, Subject: g.Subject,
 					ClientID: unverifiedID, Redirect: registration.RedirectKey(clientCB), Resource: resourceID}, Scopes: []string{"mcp"},
@@ -77,23 +87,35 @@ func TestPromptNoneThatCannotFinishSilentlyIsAnsweredWithoutAPage(t *testing.T) 
 					t.Fatal(err)
 				}
 			}
+			if tc.idpDown { // after the interactive sign-in that set the hint
+				e.b.cfg.IdP = &failOnceIdP{IdP: e.b.cfg.IdP}
+			}
 			e.st.down.Store(tc.storeDown)
-			before := counted.list()
+			logins, before := len(e.auditEvents(t, "login")), counted.list()
 			if got := answerOf(t, e.authorizeWith(t, silent(tc.extra), h)); got != refused(e, tc.want) {
 				t.Fatalf("answer %+v, want error %s with state and iss", got, tc.want)
 			}
-			e.oneAuditEvent(t, "consent_silent", map[string]any{"outcome": "failure", "reason": tc.want, "client_id": "*", "client_trust": tc.trust})
-			if got := counted.list()[len(before):]; !slices.Equal(got, []string{tc.trust + " silent_refused"}) {
-				t.Fatalf("consent outcomes %v, want only %q", got, tc.trust+" silent_refused")
+			rec := e.oneAuditEvent(t, "consent_silent", map[string]any{"outcome": "failure", "reason": tc.want, "client_id": "*"})
+			if got, _ := rec["client_trust"].(string); got != trust {
+				t.Fatalf("client_trust = %q, want %q", got, trust)
+			}
+			if got := counted.list()[len(before):]; !slices.Equal(got, []string{trust + " silent_refused"}) {
+				t.Fatalf("consent outcomes %v, want only %q", got, trust+" silent_refused")
+			}
+			if tc.idpDown { // the IdP failure is logged and audited as for an interactive sign-in
+				if got := e.auditEvents(t, "login")[logins:]; len(got) != 1 || got[0]["outcome"] != "failure" {
+					t.Fatalf("login records after the IdP failure: %v, want one failure", got)
+				}
 			}
 		})
 	}
 }
 
 // prompt=none goes with no other prompt value, in any order, and prompt is sent once (OIDC Core
-// 1.0 §3.1.2.1; RFC 6749 §3.1), so a request carrying it with consent can never reach the page.
+// 1.0 §3.1.2.1; RFC 6749 §3.1, whatever the values), so a request carrying none with consent can
+// never reach the page.
 func TestPromptNoneWithAnotherValueIsAnInvalidRequest(t *testing.T) {
-	for _, prompt := range [][]string{{"none consent"}, {"consent none"}, {"login none"}, {"none select_account"}, {"none", "consent"}, {"consent", "none"}} {
+	for _, prompt := range [][]string{{"none consent"}, {"consent none"}, {"login none"}, {"none select_account"}, {"none", "consent"}, {"consent", "none"}, {"consent", "login"}} {
 		t.Run(strings.Join(prompt, "&"), func(t *testing.T) {
 			e := newEnv(t, withRemember(t, nil))
 			if got := answerOf(t, e.authorizeWith(t, url.Values{"prompt": prompt}, nil)); got != refused(e, "invalid_request") {
@@ -125,16 +147,18 @@ func TestPromptNoneOnARememberedConsentSignsInSilently(t *testing.T) {
 // (it fails closed).
 func TestPromptNoneAnswersTheIdPsFailureAtTheRedirect(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		idp  fakeidp.Option
-		want string
+		name    string
+		idp     fakeidp.Option
+		want    string
+		audited bool // logged and audited as an IdP sign-in failure
 	}{
-		{"no IdP session passes login_required through", nil, "login_required"},
-		{"the IdP needing interaction passes interaction_required through", fakeidp.WithSilentError("interaction_required"), "interaction_required"},
-		{"the IdP needing an account choice passes account_selection_required through", fakeidp.WithSilentError("account_selection_required"), "account_selection_required"},
-		{"the IdP needing its own consent passes consent_required through", fakeidp.WithSilentError("consent_required"), "consent_required"},
-		{"the IdP being unavailable is temporarily_unavailable", fakeidp.WithSilentError("temporarily_unavailable"), "temporarily_unavailable"},
-		{"any other IdP error is server_error", fakeidp.WithSilentError("invalid_request"), "server_error"},
+		{"no IdP session passes login_required through", nil, "login_required", false},
+		{"the IdP needing interaction passes interaction_required through", fakeidp.WithSilentError("interaction_required"), "interaction_required", false},
+		{"the IdP needing an account choice passes account_selection_required through", fakeidp.WithSilentError("account_selection_required"), "account_selection_required", false},
+		{"the IdP needing its own consent passes consent_required through", fakeidp.WithSilentError("consent_required"), "consent_required", false},
+		{"the IdP refusing the user passes access_denied through", fakeidp.WithSilentError("access_denied"), "access_denied", false},
+		{"the IdP being unavailable is temporarily_unavailable", fakeidp.WithSilentError("temporarily_unavailable"), "temporarily_unavailable", true},
+		{"any other IdP error is server_error", fakeidp.WithSilentError("invalid_request"), "server_error", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			counted := &consentOutcomes{}
@@ -143,9 +167,12 @@ func TestPromptNoneAnswersTheIdPsFailureAtTheRedirect(t *testing.T) {
 			if tc.idp != nil {
 				e.fake.Set(tc.idp)
 			}
-			grants, before := len(e.st.ids), counted.list()
+			grants, before, logins := len(e.st.ids), counted.list(), len(e.auditEvents(t, "login"))
 			if got := answerOf(t, e.finish(t, e.authorizeWith(t, silent(nil), h))); got != refused(e, tc.want) {
 				t.Fatalf("answer %+v, want %s with state and iss", got, tc.want)
+			}
+			if got := e.auditEvents(t, "login")[logins:]; (len(got) == 1 && got[0]["outcome"] == "failure") != tc.audited || len(got) > 1 {
+				t.Fatalf("login records %v, want an IdP failure audited: %v", got, tc.audited)
 			}
 			if len(e.st.ids) != grants {
 				t.Fatal("a grant was created")
@@ -176,7 +203,8 @@ func TestAnInteractiveSignInIsNeverRefusedSilently(t *testing.T) {
 // After the IdP, a silent sign-in whose remembered consent no longer holds gets consent_required
 // and no code, never the page: someone else signed in behind a stale hint, or the consent went
 // between /authorize and the callback. The hint is cleared and the mismatch audited as for an
-// interactive sign-in. A store failure while checking is temporarily_unavailable and keeps the hint.
+// interactive sign-in. A store or registry failure while checking is temporarily_unavailable and
+// keeps the hint.
 func TestPromptNoneWhoseConsentDoesNotHoldAfterTheIdPGetsNoCodeAndNoPage(t *testing.T) {
 	for _, tc := range []struct {
 		name, want, reason string
@@ -194,6 +222,12 @@ func TestPromptNoneWhoseConsentDoesNotHoldAfterTheIdPGetsNoCodeAndNoPage(t *test
 		{"a store failure while checking gets temporarily_unavailable", "temporarily_unavailable", hintNotRemembered, func(t *testing.T, e *env) {
 			e.st.down.Store(true)
 		}, false},
+		{"a registry failure while checking gets temporarily_unavailable", "temporarily_unavailable", hintNotRemembered, func(t *testing.T, e *env) {
+			e.reg.fail()
+		}, false},
+		{"a client removed in between gets consent_required", "consent_required", hintNotRemembered, func(t *testing.T, e *env) {
+			e.reg.remove(clientID)
+		}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			counted := &consentOutcomes{}
@@ -223,14 +257,38 @@ func TestPromptNoneWhoseConsentDoesNotHoldAfterTheIdPGetsNoCodeAndNoPage(t *test
 }
 
 // A broker failure after the IdP is server_error at the redirect for a silent sign-in, not a page.
-func TestPromptNoneWhoseGrantCannotBeStoredIsAServerError(t *testing.T) {
+func TestPromptNoneWhoseSignInFailsAfterTheIdPIsAServerError(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		breakIt func(e *env)
+	}{
+		{"the access gate cannot decide", func(e *env) { e.b.cfg.Gate = brokenGate{} }},
+		{"the grant cannot be stored", func(e *env) { e.st.createDown.Store(true) }},
+		{"the code cannot be stored", func(e *env) { e.st.putCodeDown.Store(true) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t, withRemember(t, nil))
+			h := e.remember(t, nil)
+			e.fake.Set(fakeidp.WithSilentSession())
+			res := e.authorizeWith(t, silent(nil), h)
+			tc.breakIt(e) // after the interactive sign-in that set the hint
+			if got := answerOf(t, e.finish(t, res)); got != refused(e, "server_error") {
+				t.Fatalf("answer %+v, want server_error", got)
+			}
+		})
+	}
+}
+
+// A silent sign-in whose callback is rate limited is answered at its redirect URI, which its sealed
+// login names, not with the page.
+func TestPromptNoneWhoseCallbackIsRateLimitedIsTemporarilyUnavailable(t *testing.T) {
 	e := newEnv(t, withRemember(t, nil))
 	h := e.remember(t, nil)
 	e.fake.Set(fakeidp.WithSilentSession())
 	res := e.authorizeWith(t, silent(nil), h)
-	e.st.createDown.Store(true)
-	if got := answerOf(t, e.finish(t, res)); got != refused(e, "server_error") {
-		t.Fatalf("answer %+v, want server_error", got)
+	e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"callback": true}}
+	if got := answerOf(t, e.finish(t, res)); got != refused(e, "temporarily_unavailable") {
+		t.Fatalf("answer %+v, want temporarily_unavailable", got)
 	}
 }
 
@@ -240,7 +298,7 @@ func TestPromptNoneWhoseGrantCannotBeStoredIsAServerError(t *testing.T) {
 func TestPromptNoneForAUserTheGateRefusesIsAccessDeniedNamingNoRule(t *testing.T) {
 	e := newEnv(t, withRemember(t, nil))
 	h := e.remember(t, nil)
-	e.b.cfg.Gate = roleGate{role: "mcp-admins"}
+	e.b.cfg.Gate = roleGate{role: "mcp-admins"} // only now: from the start it would refuse the sign-in that set the hint
 	e.fake.Set(fakeidp.WithSilentSession())
 	back := e.finish(t, e.authorizeWith(t, silent(nil), h))
 	if got := answerOf(t, back); got != refused(e, "access_denied") {

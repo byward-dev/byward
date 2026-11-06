@@ -123,12 +123,13 @@ type settings struct {
 	strictTenants   bool
 	emailAsString   bool
 	authorizeFail   *Failure
-	// silent is what prompt=none gets: "" (the default) answers login_required, failing closed;
-	// "session" signs the user in without a page; any other value is the error to send.
-	silent    string
-	jwksDown  bool
-	jwksEmpty bool
-	tokenFail map[string]Failure
+	// prompt=none: with silentFail set it answers that error; otherwise silentSession signs the user
+	// in without a page, and without it the answer is login_required (failing closed).
+	silentSession bool
+	silentFail    *Failure
+	jwksDown      bool
+	jwksEmpty     bool
+	tokenFail     map[string]Failure
 }
 
 // Option configures the fake. Options apply at New and at Set.
@@ -266,10 +267,12 @@ func WithSingleUseRefreshTokens(on bool) Option { return func(s *settings) { s.s
 
 // WithSilentSession lets prompt=none sign the user in without a page, as when the IdP holds a
 // session for them. Without it prompt=none answers login_required.
-func WithSilentSession() Option { return func(s *settings) { s.silent = "session" } }
+func WithSilentSession() Option { return func(s *settings) { s.silentSession = true } }
 
 // WithSilentError makes prompt=none answer this OIDC error, e.g. interaction_required.
-func WithSilentError(code string) Option { return func(s *settings) { s.silent = code } }
+func WithSilentError(code string) Option {
+	return func(s *settings) { s.silentFail = &Failure{Error: code} }
+}
 
 // WithIDTypClaim switches `idtyp: app` on app-only tokens, i.e. whether the resource app has the
 // optional claim configured (default on).

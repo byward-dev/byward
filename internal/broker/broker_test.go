@@ -65,6 +65,7 @@ type memStore struct {
 	// older proxy wrote.
 	rewriteBlob func([]byte) []byte
 	createDown  atomic.Bool // CreateGrant fails
+	putCodeDown atomic.Bool // PutCode fails
 }
 
 var errStoreDown = errors.New("store down")
@@ -120,6 +121,13 @@ func (m *memStore) SetIdPTokens(ctx context.Context, id string, sealed []byte) e
 		return err
 	}
 	return m.Store.SetIdPTokens(ctx, id, sealed)
+}
+
+func (m *memStore) PutCode(ctx context.Context, c store.PendingCode) error {
+	if m.putCodeDown.Load() {
+		return errStoreDown
+	}
+	return m.Store.PutCode(ctx, c)
 }
 
 func newMemStore() *memStore { return &memStore{Store: memory.New()} }

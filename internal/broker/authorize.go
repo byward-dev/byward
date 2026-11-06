@@ -314,6 +314,11 @@ func (b *Broker) scopes(raw string) ([]string, bool) {
 // user to the MCP client.
 func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	if retry, limited := b.throttled(w, r, ratelimit.Callback); limited {
+		// A silent sign-in's sealed login names a validated redirect URI: answer there, never a page.
+		if l, ok := b.openLogin(r); ok && l.Silent {
+			b.refuseSilently(w, r, "", l, "temporarily_unavailable", "too many sign-in attempts from this network; retry after "+strconv.Itoa(retry)+" s")
+			return
+		}
 		b.page(w, r, http.StatusTooManyRequests, tooManyTitle, tooManyHint(retry))
 		return
 	}
@@ -345,20 +350,11 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	id, toks, err := b.cfg.IdP.Callback(idp.WithRequestID(ctx, logging.RequestID(ctx)), q, idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier})
 	b.cfg.ObserveIdP("callback", idpOutcome(err), time.Since(start))
 	if err != nil {
+		if l.Silent {
+			b.refuseSilentIdPFailure(w, r, l, err)
+			return
+		}
 		var ie *idp.Error
-		if l.Silent && errors.As(err, &ie) && slices.Contains(silentIdPErrors, ie.OAuth) { // the IdP's own prompt=none needs the user
-			b.refuseSilently(w, r, "", l, ie.OAuth, "the identity provider needs the user")
-			return
-		}
-		if l.Silent { // any other IdP failure: logged and audited as always, then an OAuth answer, not a page
-			b.noteIdPFailure(r, l.ClientID, err)
-			code := "server_error"
-			if errors.As(err, &ie) && ie.Class == idp.Unavailable {
-				code = "temporarily_unavailable"
-			}
-			b.refuseSilently(w, r, "", l, code, "the sign-in failed; try again")
-			return
-		}
 		if errors.As(err, &ie) && ie.OAuth == "access_denied" {
 			b.cfg.Audit.Record(r, audit.Event{Name: audit.Login, Outcome: audit.Failure, Reason: "the user declined to sign in", ClientID: l.ClientID, IdP: b.cfg.IdPName})
 			b.redirectError(w, r, l.RedirectURI, l.State, "access_denied", "the user declined to sign in")
@@ -435,6 +431,25 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, withQuery(l.RedirectURI, v), http.StatusFound)
+}
+
+// openLogin returns the login the callback's state names, from its sealed cookie, without
+// clearing it; false when there is none or it does not open.
+func (b *Broker) openLogin(r *http.Request) (login, bool) {
+	st := r.URL.Query().Get("state")
+	if len(st) < 16 {
+		return login{}, false
+	}
+	c, err := r.Cookie(b.cookieName(st))
+	if err != nil {
+		return login{}, false
+	}
+	plain, err := b.cfg.LoginBox.Open(c.Value)
+	var l login
+	if err != nil || json.Unmarshal(plain, &l) != nil || l.IdPState != st {
+		return login{}, false
+	}
+	return l, true
 }
 
 func withQuery(base string, v url.Values) string {

@@ -1,11 +1,13 @@
 package broker
 
 import (
+	"errors"
 	"net/http"
 	"slices"
 	"strings"
 
 	"github.com/byward-dev/byward/internal/audit"
+	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/registration"
 )
@@ -16,9 +18,9 @@ import (
 // with its own prompt=none. Without a hint the user is unknown before the IdP, and nothing goes to
 // the IdP before consent is established (ADR-0010 §1), so the answer is login_required.
 
-// silentIdPErrors are the IdP's answers to its own prompt=none that are passed to the client as
-// they are (OIDC Core 1.0 §3.1.2.6).
-var silentIdPErrors = []string{"login_required", "interaction_required", "consent_required", "account_selection_required"}
+// silentIdPErrors are the IdP's answers that are passed to the client as they are: those to its own
+// prompt=none (OIDC Core 1.0 §3.1.2.6), and its refusal of the user.
+var silentIdPErrors = []string{"login_required", "interaction_required", "consent_required", "account_selection_required", "access_denied"}
 
 // promptValues returns the prompt parameter's space-separated values.
 func promptValues(prompt string) []string { return strings.Fields(prompt) }
@@ -50,6 +52,23 @@ func (b *Broker) authorizeSilently(w http.ResponseWriter, r *http.Request, clien
 	}
 	l.Hint, l.Silent = &h, true
 	b.startLogin(w, r, l, b.cfg.Now())
+}
+
+// refuseSilentIdPFailure answers a silent sign-in whose IdP leg failed: the IdP's own silent answers
+// pass through; any other failure is logged and audited as for an interactive sign-in, then sent as
+// server_error, or temporarily_unavailable when the IdP is unavailable. Never a page.
+func (b *Broker) refuseSilentIdPFailure(w http.ResponseWriter, r *http.Request, l login, err error) {
+	var ie *idp.Error
+	if errors.As(err, &ie) && slices.Contains(silentIdPErrors, ie.OAuth) {
+		b.refuseSilently(w, r, "", l, ie.OAuth, "the identity provider did not sign the user in silently")
+		return
+	}
+	b.noteIdPFailure(r, l.ClientID, err)
+	code := "server_error"
+	if errors.As(err, &ie) && ie.Class == idp.Unavailable {
+		code = "temporarily_unavailable"
+	}
+	b.refuseSilently(w, r, "", l, code, "the sign-in failed; try again")
 }
 
 // refuseSilently answers a prompt=none request with code at its validated redirect URI, audited

@@ -82,13 +82,12 @@ func (p *IdP) authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if slices.Contains(strings.Fields(q.Get("prompt")), "none") { // fails closed: only WithSilentSession signs in
-		switch p.cfg.silent {
-		case "session":
-		case "":
-			fail(Failure{Error: "login_required"}, "The fake holds no session for prompt=none.")
+		switch {
+		case p.cfg.silentFail != nil:
+			fail(*p.cfg.silentFail, "The fake was told to refuse prompt=none.")
 			return
-		default:
-			fail(Failure{Error: p.cfg.silent}, "The fake was told to refuse prompt=none.")
+		case !p.cfg.silentSession:
+			fail(Failure{Error: "login_required"}, "The fake holds no session for prompt=none.")
 			return
 		}
 	}
