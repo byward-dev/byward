@@ -80,6 +80,14 @@ type Client struct {
 	// AssignmentRequired, on a resource, refuses client-credential tokens to callers without a
 	// role (AADSTS501051; Entra only).
 	AssignmentRequired bool
+	// AccessTokenVersion is a resource's api.requestedAccessTokenVersion: 0 or 2 issue v2 tokens,
+	// 1 issues v1 tokens (issuer sts.windows.net, aud the Application ID URI; Entra only). 0 models
+	// the documented setup (step 1.2 of the quickstart sets 2); in Entra itself an unset (null) value
+	// means 1, which AccessTokenVersion 1 reproduces.
+	AccessTokenVersion int
+	// NoIdentifierURI, on a resource, leaves its Application ID URI unset, so api://<id>/ scopes
+	// fail with AADSTS500011 (Entra only).
+	NoIdentifierURI bool
 }
 
 func (c Client) confidential() bool { return len(c.Secrets) > 0 || len(c.Certificates) > 0 }
@@ -112,9 +120,11 @@ type settings struct {
 	rotateRefresh   bool
 	singleUseRT     bool
 	idtyp           bool
+	strictTenants   bool
 	emailAsString   bool
 	authorizeFail   *Failure
 	jwksDown        bool
+	jwksEmpty       bool
 	tokenFail       map[string]Failure
 }
 
@@ -255,12 +265,20 @@ func WithSingleUseRefreshTokens(on bool) Option { return func(s *settings) { s.s
 // optional claim configured (default on).
 func WithIDTypClaim(on bool) Option { return func(s *settings) { s.idtyp = on } }
 
+// WithUnknownTenantsRefused makes tenant GUIDs other than the IdP's own tenant fail with
+// AADSTS90002, as Entra does for a tenant that does not exist (default off: any GUID is served).
+func WithUnknownTenantsRefused(on bool) Option { return func(s *settings) { s.strictTenants = on } }
+
 // WithEmailVerifiedAsString makes the generic profile send `email_verified` as "true"/"false"
 // (a Google quirk).
 func WithEmailVerifiedAsString(on bool) Option { return func(s *settings) { s.emailAsString = on } }
 
 // WithJWKSUnavailable makes the JWKS endpoint answer 503, as during an IdP outage.
 func WithJWKSUnavailable(on bool) Option { return func(s *settings) { s.jwksDown = on } }
+
+// WithEmptyJWKS makes the JWKS endpoint answer 200 with no keys, as a proxy that rewrites
+// responses might.
+func WithEmptyJWKS(on bool) Option { return func(s *settings) { s.jwksEmpty = on } }
 
 // FailAuthorize makes every authorization request redirect back with f; nil clears it.
 func FailAuthorize(f *Failure) Option {

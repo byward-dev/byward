@@ -24,6 +24,21 @@ type resource struct {
 
 func (r *resource) graph() bool { return r.aud == GraphAppID }
 
+// v1 reports whether the resource app asks for v1 access tokens.
+func (r *resource) v1() bool { return r.app != nil && r.app.AccessTokenVersion == 1 }
+
+// v1Claims turns v2 access-token claims into the v1 form: the sts.windows.net issuer, the
+// Application ID URI as `aud`, and `appid` in place of `azp`. Only the api:// form of the resource
+// is modelled; the `aud` of a v1 token requested by the GUID form is not.
+func (r *resource) v1Claims(m map[string]any, tid string) {
+	m["iss"] = "https://sts.windows.net/" + tid + "/"
+	m["aud"] = "api://" + r.aud
+	m["ver"] = "1.0"
+	m["appid"], m["appidacr"] = m["azp"], m["azpacr"]
+	delete(m, "azp")
+	delete(m, "azpacr")
+}
+
 // scopeString is the `scope` value Entra returns: the resource's scopes in full form.
 func (r *resource) scopeString() string {
 	prefix := "api://" + r.aud + "/"
@@ -61,6 +76,9 @@ func (p *IdP) resolveResource(scopes []string) (*resource, *Failure) {
 			if !ok || perm == "" {
 				f := InvalidScope
 				return nil, &f
+			}
+			if c.NoIdentifierURI && strings.HasPrefix(prefix, "api://") {
+				return nil, failure(ResourceNotFound)
 			}
 			aud, app = c.ID, &c
 		}
@@ -195,6 +213,9 @@ func (p *IdP) userAccessToken(res *resource, clientID, method string, u User, no
 	m["preferred_username"] = u.PreferredUsername
 	m["uti"] = randomToken()[:22]
 	p.addGroups(m, u)
+	if res.v1() {
+		res.v1Claims(m, u.TenantID)
+	}
 	return p.sign(m)
 }
 
@@ -239,6 +260,9 @@ func (p *IdP) appToken(res *resource, c Client, method string, now time.Time) st
 	}
 	if p.cfg.idtyp {
 		m["idtyp"] = "app"
+	}
+	if !res.graph() && res.v1() {
+		res.v1Claims(m, p.cfg.tenantID)
 	}
 	return p.sign(m)
 }
