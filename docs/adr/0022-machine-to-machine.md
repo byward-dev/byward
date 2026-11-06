@@ -85,3 +85,13 @@ Runtime (2026-11-06):
   exchange step, and jwt-bearer needs a replay store.
 - Defer all M2M: rejected; headless callers would reach the upstream around the proxy.
 - Try validators in turn: rejected; that is the FastMCP MultiAuth flaw.
+
+## Amendment 2026-11-06 (release)
+
+Accepting Entra app-only tokens ships in v0.2, not v0.1 (slice 4.3, #64), together with On-Behalf-Of
+(ADR-0017 amendment). The first release is gated on interactive clients connecting without manual
+setup: CIMD, dynamic registration and stdio upstreams. Headless callers are not part of that. The
+design in this ADR is unchanged. The exceptions:
+- Decision 6 (`init entra`'s app role, `idtyp` claim and assignment required) can already ship in
+  v0.1, since it is harmless without Decision 1.
+- The later work in Decision 10 moves to a release after v0.2.

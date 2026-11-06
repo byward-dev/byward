@@ -27,7 +27,7 @@ each feature (F1–F22) is a GitHub issue and gets an ADR once grilled with the 
 | [0019](0019-packaging.md) | Packaging: a signed container image and Linux binaries for servers | F19 | — |
 | [0020](0020-configuration.md) | Configuration: flags and env, secrets from files, one registry | F18 | — |
 | [0021](0021-observability.md) | Observability: redacted logs, an audit stream, one request ID, telemetry off by default | F20 | — |
-| [0022](0022-machine-to-machine.md) | Machine-to-machine: accept Entra app-only tokens, opt-in, in v0.1 | F15 | — |
+| [0022](0022-machine-to-machine.md) | Machine-to-machine: accept Entra app-only tokens, opt-in (v0.2, amended) | F15 | — |
 | [0023](0023-project-governance.md) | Project governance: 0.y.z with a stability contract, Apache-2.0 §5, disclosed AI help | F22 | — |
 | [0024](0024-testing-strategy.md) | Testing strategy: a Docker-free check, a client simulator, conformance three ways | F21 | 0027 |
 | [0025](0025-upstream-refusal.md) | Upstream refusals are answered as JSON-RPC responses | F1 | — |
