@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/corker/mcp-authproxy/internal/audit"
 )
 
 // WellKnownPath is the RFC 9728 well-known path prefix.
@@ -126,7 +128,7 @@ const (
 // Guard admits requests carrying a valid proxy token in `Authorization: Bearer`. Tokens in the
 // query string are ignored (the relay removes `access_token` before the upstream sees it); a token sent
 // both ways gets 400.
-func Guard(m Metadata, v Validator, next http.Handler) http.Handler {
+func Guard(m Metadata, v Validator, rec *audit.Log, next http.Handler) http.Handler {
 	challenge := `Bearer resource_metadata="` + m.PathInsertedURL() + `", scope="` + m.Scope + `"`
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -145,10 +147,11 @@ func Guard(m Metadata, v Validator, next http.Handler) http.Handler {
 		}
 		id, err := v.Validate(r.Context(), token)
 		if err != nil {
-			desc := descInvalid
+			desc, reason := descInvalid, "invalid"
 			if errors.Is(err, ErrExpired) {
-				desc = descExpired
+				desc, reason = descExpired, "expired"
 			}
+			rec.RecordUnauthenticated(r, audit.Event{Name: audit.AccessTokenRejected, Outcome: audit.Failure, Reason: reason})
 			writeError(w, http.StatusUnauthorized, challenge, "invalid_token", desc)
 			return
 		}

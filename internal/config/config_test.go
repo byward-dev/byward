@@ -10,6 +10,19 @@ import (
 var base = []string{
 	"MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp",
 	"MCP_AUTHPROXY_UPSTREAM_URL=http://upstream:9000/mcp",
+	"MCP_AUTHPROXY_ENTRA_TENANT=00000000-0000-0000-0000-000000000001",
+	"MCP_AUTHPROXY_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002",
+	"MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE=/run/secrets/entra",
+	"MCP_AUTHPROXY_KEYS_DIR=/var/lib/mcp-authproxy/keys",
+	"MCP_AUTHPROXY_STATIC_CLIENTS_FILE=/etc/mcp-authproxy/clients.json",
+}
+
+// baseFiles serves the secret file named in base.
+func baseFiles(p string) ([]byte, error) {
+	if p == "/run/secrets/entra" {
+		return []byte("s3cret-entra\n"), nil
+	}
+	return nil, os.ErrNotExist
 }
 
 func isConfigError(err error) bool {
@@ -19,7 +32,7 @@ func isConfigError(err error) bool {
 
 func load(t *testing.T, args []string, env ...string) (*Config, error) {
 	t.Helper()
-	c, _, err := Load(args, append(append([]string{}, base...), env...), nil)
+	c, _, err := Load(args, append(append([]string{}, base...), env...), baseFiles)
 	return c, err
 }
 
@@ -78,6 +91,11 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"fragment", "MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp#f", "must not have a query or fragment"},
 		{"http public", "MCP_AUTHPROXY_PUBLIC_URL=http://mcp.example.com/mcp", "must use https"},
 		{"http loopback without dev", "MCP_AUTHPROXY_PUBLIC_URL=http://127.0.0.1:8080/mcp", "needs --dev"},
+		// Browsers and MCP clients send IDN hosts in ASCII (xn--) form, so a Unicode host never matches.
+		{"unicode public host", "MCP_AUTHPROXY_PUBLIC_URL=https://bücher.example/mcp", `MCP_AUTHPROXY_PUBLIC_URL: the host "bücher.example" is not ASCII`},
+		{"escaped unicode public host", "MCP_AUTHPROXY_PUBLIC_URL=https://b%C3%BCcher.example/mcp", `MCP_AUTHPROXY_PUBLIC_URL: the host "bücher.example" is not ASCII`},
+		{"unicode allowed origin", "MCP_AUTHPROXY_ALLOWED_ORIGINS=https://bücher.example", `MCP_AUTHPROXY_ALLOWED_ORIGINS: the host "bücher.example" is not ASCII`},
+		{"unicode allowed host", "MCP_AUTHPROXY_ALLOWED_HOSTS=bücher.example:8443", `MCP_AUTHPROXY_ALLOWED_HOSTS: the host "bücher.example:8443" is not ASCII`},
 		{"credentials", "MCP_AUTHPROXY_UPSTREAM_URL=http://u:p@upstream/mcp", "MCP_AUTHPROXY_UPSTREAM_URL"},
 		{"origin with path", "MCP_AUTHPROXY_ALLOWED_ORIGINS=https://a.example/path", "MCP_AUTHPROXY_ALLOWED_ORIGINS"},
 		{"host with path", "MCP_AUTHPROXY_ALLOWED_HOSTS=a.example/x", "MCP_AUTHPROXY_ALLOWED_HOSTS"},
@@ -87,6 +105,12 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"two scopes", "MCP_AUTHPROXY_SCOPE=a b", "MCP_AUTHPROXY_SCOPE"},
 		{"dev not a bool", "MCP_AUTHPROXY_DEV=maybe", "MCP_AUTHPROXY_DEV"},
 		{"documentation not a URL", "MCP_AUTHPROXY_RESOURCE_DOCUMENTATION=javascript:x", "MCP_AUTHPROXY_RESOURCE_DOCUMENTATION"},
+		{"gate allow-empty not a bool", "MCP_AUTHPROXY_GATE_ALLOW_EMPTY=yes", "MCP_AUTHPROXY_GATE_ALLOW_EMPTY: want true or false"},
+		{"gate tenants blank", "MCP_AUTHPROXY_GATE_TENANTS=,", "MCP_AUTHPROXY_GATE_TENANTS is set but lists nothing"},
+		{"gate roles blank", "MCP_AUTHPROXY_GATE_ROLES= ,,", "MCP_AUTHPROXY_GATE_ROLES is set but lists nothing"},
+		{"gate groups blank", "MCP_AUTHPROXY_GATE_GROUPS= ", "MCP_AUTHPROXY_GATE_GROUPS is set but lists nothing"},
+		{"gate email domains blank", "MCP_AUTHPROXY_GATE_EMAIL_DOMAINS=,", "MCP_AUTHPROXY_GATE_EMAIL_DOMAINS is set but lists nothing"},
+		{"gate hosted domains blank", "MCP_AUTHPROXY_GATE_HOSTED_DOMAINS=,", "MCP_AUTHPROXY_GATE_HOSTED_DOMAINS is set but lists nothing"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -125,7 +149,7 @@ func TestListsAreNormalized(t *testing.T) {
 }
 
 func TestHelpFlagAsksForUsageListingEnvNames(t *testing.T) {
-	if _, _, err := Load([]string{"-h"}, base, nil); !IsHelp(err) {
+	if _, _, err := Load([]string{"-h"}, base, baseFiles); !IsHelp(err) {
 		t.Fatalf("want help, got %v", err)
 	}
 	if !strings.Contains(Usage(), "MCP_AUTHPROXY_PUBLIC_URL") {
@@ -134,7 +158,7 @@ func TestHelpFlagAsksForUsageListingEnvNames(t *testing.T) {
 }
 
 func TestPositionalArgumentIsAConfigError(t *testing.T) {
-	if _, _, err := Load([]string{"extra"}, base, nil); !isConfigError(err) || !strings.Contains(err.Error(), "extra") {
+	if _, _, err := Load([]string{"extra"}, base, baseFiles); !isConfigError(err) || !strings.Contains(err.Error(), "extra") {
 		t.Fatalf("want config error naming the argument, got %v", err)
 	}
 }
@@ -221,5 +245,46 @@ func TestSecretFileNeedsAFileReader(t *testing.T) {
 	_, err := resolve(secretReg, nil, []string{"MCP_AUTHPROXY_CLIENT_SECRET_FILE=/run/secrets/x"}, nil, nil)
 	if !isConfigError(err) || !strings.Contains(err.Error(), "not available") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestBrokerSettingsAreRequired(t *testing.T) {
+	for _, name := range []string{"MCP_AUTHPROXY_ENTRA_TENANT", "MCP_AUTHPROXY_ENTRA_CLIENT_ID", "MCP_AUTHPROXY_KEYS_DIR", "MCP_AUTHPROXY_STATIC_CLIENTS_FILE"} {
+		if _, err := load(t, nil, name+"="); !isConfigError(err) || !strings.Contains(err.Error(), name+" is required") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := load(t, nil, "MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE="); !isConfigError(err) || !strings.Contains(err.Error(), "MCP_AUTHPROXY_ENTRA_CLIENT_SECRET_FILE is required") {
+		t.Errorf("secret: %v", err)
+	}
+	if _, err := load(t, nil, "MCP_AUTHPROXY_ENTRA_TENANT=contoso.onmicrosoft.com"); !isConfigError(err) || !strings.Contains(err.Error(), "want the tenant ID, a GUID") {
+		t.Errorf("tenant: %v", err)
+	}
+	c, err := load(t, nil)
+	if err != nil || c.EntraClientSecret != "s3cret-entra" || c.KeysDir == "" {
+		t.Fatalf("c=%+v err=%v", c, err)
+	}
+}
+
+func TestInternalListenDefaultsToLoopbackAndMustDifferFromListen(t *testing.T) {
+	base := []string{"MCP_AUTHPROXY_INSECURE_NO_AUTH=true", "MCP_AUTHPROXY_PUBLIC_URL=http://127.0.0.1:8080/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"}
+	cfg, _, err := Load(nil, base, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.InternalListen != "127.0.0.1:9090" {
+		t.Fatalf("default internal listener = %q, want 127.0.0.1:9090", cfg.InternalListen)
+	}
+	cfg, _, err = Load(nil, append(base, "MCP_AUTHPROXY_INTERNAL_LISTEN="), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.InternalListen != "" {
+		t.Fatalf("MCP_AUTHPROXY_INTERNAL_LISTEN= must turn the internal listener off, got %q", cfg.InternalListen)
+	}
+	for _, bad := range []string{"9090", "127.0.0.1:8080"} {
+		if _, _, err := Load(nil, append(base, "MCP_AUTHPROXY_INTERNAL_LISTEN="+bad), nil); err == nil || !strings.Contains(err.Error(), "MCP_AUTHPROXY_INTERNAL_LISTEN") {
+			t.Errorf("MCP_AUTHPROXY_INTERNAL_LISTEN=%q: want an error naming the setting, got %v", bad, err)
+		}
 	}
 }

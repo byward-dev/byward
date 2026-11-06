@@ -100,3 +100,13 @@ func GenericClass(status int, oauth string) Class {
 	}
 	return Fatal
 }
+
+// TokenCheckError wraps a failure to verify an IdP-signed JWT. It is Unavailable when the IdP's
+// keys could not be fetched (try later), and Fatal for anything else (bad signature or claims), in
+// which case hint, the operator's fix for a misconfiguration, is kept.
+func TokenCheckError(err error, hint string) *Error {
+	if errors.Is(err, ErrKeysUnavailable) {
+		return &Error{Class: Unavailable, Err: err}
+	}
+	return &Error{Class: Fatal, OperatorHint: hint, Err: err}
+}

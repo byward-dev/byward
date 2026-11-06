@@ -56,6 +56,10 @@ func (p *IdP) discovery(w http.ResponseWriter, r *http.Request) {
 func (p *IdP) jwks(w http.ResponseWriter, r *http.Request) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.cfg.jwksDown {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
 	issuer := ""
 	if p.profile == Entra {
 		tenant, ok := p.tenantSegment(w, r)

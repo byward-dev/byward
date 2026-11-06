@@ -3,20 +3,40 @@
 package server
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"time"
 
+	"github.com/corker/mcp-authproxy/internal/audit"
 	"github.com/corker/mcp-authproxy/internal/config"
+	"github.com/corker/mcp-authproxy/internal/health"
 	"github.com/corker/mcp-authproxy/internal/logging"
+	"github.com/corker/mcp-authproxy/internal/metrics"
 	"github.com/corker/mcp-authproxy/internal/origin"
 	"github.com/corker/mcp-authproxy/internal/resource"
+	"github.com/corker/mcp-authproxy/internal/tracing"
 	"github.com/corker/mcp-authproxy/internal/upstream/relay"
 )
+
+// Observability is what the routes report to: the audit stream and metrics (ADR-0021). The zero
+// value records nothing.
+type Observability struct {
+	Audit   *audit.Log
+	Metrics *metrics.Metrics
+}
+
+// routeOf names a request for metrics and spans by the mux pattern it matches, so the mux stays the
+// only route table; the values are the registered patterns (bounded, never the raw path), and
+// requests matching none are "other".
+func routeOf(mux *http.ServeMux) func(*http.Request) string {
+	return func(r *http.Request) string {
+		if _, p := mux.Handler(r); p != "" {
+			return p
+		}
+		return "other"
+	}
+}
 
 // Limits from ADR-0018 §4–5 and §9.
 const (
@@ -32,14 +52,15 @@ const (
 	MaxStreams  = 256
 )
 
-// Handler builds every route behind the Host check, request logging and panic recovery.
-func Handler(cfg *config.Config, log *slog.Logger, v resource.Validator) http.Handler {
+// Handler builds every route behind the Host check, request logging, metrics, the server span and
+// panic recovery. register, when not nil, adds the broker's routes (authenticated mode).
+func Handler(cfg *config.Config, log *slog.Logger, v resource.Validator, register func(*http.ServeMux), o Observability) http.Handler {
 	meta := resource.Metadata{Resource: cfg.PublicURL, Issuer: cfg.Issuer(), Scope: cfg.Scope,
 		Name: cfg.ResourceName, Documentation: cfg.ResourceDocumentation}
 	mux := http.NewServeMux()
 	// Without authentication there is no protected-resource metadata and no challenge: clients
 	// that find either start an OAuth flow that cannot succeed (ADR-0027).
-	guard := func(next http.Handler) http.Handler { return resource.Guard(meta, v, next) }
+	guard := func(next http.Handler) http.Handler { return resource.Guard(meta, v, o.Audit, next) }
 	if cfg.NoAuth {
 		guard = func(next http.Handler) http.Handler { return next }
 	} else {
@@ -48,62 +69,50 @@ func Handler(cfg *config.Config, log *slog.Logger, v resource.Validator) http.Ha
 			mux.Handle(p, md)
 		}
 	}
-	up := relay.New(log, cfg.UpstreamURL)
+	if register != nil {
+		register(mux)
+	}
+	up := relay.New(log, cfg.UpstreamURL, relay.WithTraceContext(tracing.Inject))
 	// The proxy's own origin is same-origin and cannot be forged by another site (a DNS-rebinding
 	// page sends its own origin), so it is always allowed; the MCP conformance rebinding scenario
 	// expects it to be accepted.
 	origins := append([]string{cfg.Origin()}, cfg.AllowedOrigins...)
-	mux.Handle(cfg.PublicURL.Path, origin.Origins(log, origins,
-		mcpMethods(guard(limitBody(MaxMCPBody, admit(MaxInFlight, MaxStreams, up))))))
+	mux.Handle(cfg.PublicURL.Path, origin.Origins(o.Audit, origins,
+		mcpMethods(guard(limitBody(MaxMCPBody, admit(MaxInFlight, MaxStreams, o.Metrics, up))))))
 
 	hosts := append([]string{cfg.PublicURL.Host}, cfg.AllowedHosts...)
-	return recoverer(log, logging.Middleware(log, origin.Hosts(log, hosts, mux)))
+	rt := routeOf(mux)
+	// recoverer is innermost so a panic still gets its request log line, its 5xx metric and an error
+	// span: the wrappers above see the 500 it writes.
+	return logging.Middleware(log, tracing.Middleware(rt, o.Metrics.Middleware(rt, recoverer(log, origin.Hosts(o.Audit, hosts, mux)))))
 }
 
-// New returns the hardened server. WriteTimeout stays 0 so streams can run; per-request
-// deadlines are set where needed through http.ResponseController. Until the broker issues proxy
-// tokens (slice 1.2), every token is rejected.
-func New(cfg *config.Config, log *slog.Logger) *http.Server {
-	return &http.Server{
-		Addr:              cfg.Listen,
-		Handler:           Handler(cfg, log, resource.NoTokens{}),
-		ReadHeaderTimeout: ReadHeaderTimeout,
-		ReadTimeout:       ReadTimeout,
-		IdleTimeout:       IdleTimeout,
-		MaxHeaderBytes:    MaxHeaderBytes,
-		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
+// New wires the proxy and returns the hardened servers. WriteTimeout stays 0 so streams can run;
+// per-request deadlines are set where needed through http.ResponseController. Errors are
+// configuration problems (a key directory, a clients file, IdP settings).
+func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
+	m := metrics.New()
+	o := Observability{Audit: audit.New(log, m.AuditEvent, time.Now), Metrics: m}
+	var h http.Handler
+	var checks []health.Check
+	if cfg.NoAuth {
+		h = Handler(cfg, log, resource.NoTokens{}, nil, o)
+	} else {
+		a, err := buildAuth(cfg, log, o)
+		if err != nil {
+			return nil, err
+		}
+		h = Handler(cfg, log, a.validator, a.register, o)
+		checks = a.checks
 	}
-}
-
-// Run serves until ctx is done, then shuts down within ShutdownTimeout; open streams are
-// cancelled through their request contexts.
-func Run(ctx context.Context, srv *http.Server, log *slog.Logger) error {
-	ln, err := net.Listen("tcp", srv.Addr)
-	if err != nil {
-		return fmt.Errorf("listen: %w", err)
+	s := &Servers{Public: hardened(cfg.Listen, h, log), Health: health.New(log, checks...)}
+	if cfg.InternalListen != "" {
+		mux := http.NewServeMux()
+		mux.Handle("GET /metrics", m.Handler())
+		s.Health.Register(mux)
+		s.Internal = hardened(cfg.InternalListen, mux, log)
 	}
-	baseCtx, cancelRequests := context.WithCancel(context.WithoutCancel(ctx))
-	defer cancelRequests()
-	srv.BaseContext = func(net.Listener) context.Context { return baseCtx }
-	log.Info("listening", "listen", ln.Addr().String())
-
-	errc := make(chan error, 1)
-	go func() { errc <- srv.Serve(ln) }()
-	select {
-	case err := <-errc:
-		return err
-	case <-ctx.Done():
-	}
-	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ShutdownTimeout)
-	defer cancel()
-	cancelRequests() // ends long-lived streams so Shutdown does not wait for them
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("shutdown: %w", err)
-	}
-	if err := <-errc; !errors.Is(err, http.ErrServerClosed) {
-		return err
-	}
-	return nil
+	return s, nil
 }
 
 func limitBody(n int64, next http.Handler) http.Handler {
@@ -133,17 +142,19 @@ func mcpMethods(next http.Handler) http.Handler {
 
 // admit caps concurrent requests: GET streams against maxStreams, everything else against
 // maxRequests; over a cap the answer is 503 with Retry-After.
-func admit(maxRequests, maxStreams int, next http.Handler) http.Handler {
+func admit(maxRequests, maxStreams int, m *metrics.Metrics, next http.Handler) http.Handler {
 	requests, streams := make(chan struct{}, maxRequests), make(chan struct{}, maxStreams)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sem := requests
+		sem, kind := requests, "request"
 		if r.Method == http.MethodGet {
-			sem = streams
+			sem, kind = streams, "stream"
 		}
 		select {
 		case sem <- struct{}{}:
-			defer func() { <-sem }()
+			m.InFlight(kind, 1)
+			defer func() { <-sem; m.InFlight(kind, -1) }()
 		default:
+			m.Busy(kind)
 			w.Header().Set("Retry-After", "1")
 			http.Error(w, "upstream busy", http.StatusServiceUnavailable)
 			return

@@ -91,7 +91,7 @@ func (f *Fetcher) getOnce(ctx context.Context, endpoint string, dst any) (retry 
 			fmt.Errorf("GET %s: status %d", redactURL(endpoint), resp.StatusCode)
 	}
 	if err := json.Unmarshal(body, dst); err != nil {
-		return false, fmt.Errorf("GET %s: %w", redactURL(endpoint), err)
+		return false, fmt.Errorf("GET %s: %w", redactURL(endpoint), JSONError(err))
 	}
 	return false, nil
 }
@@ -178,4 +178,16 @@ func redactURL(s string) string {
 	}
 	u.RawQuery, u.Fragment, u.User = "", "", nil
 	return u.String()
+}
+
+// budget is the longest a GetJSON can take with this Fetcher's timeout, retries and backoff, plus
+// a margin; it bounds work that runs detached from any caller (the JWKS refetch).
+func (f *Fetcher) budget() time.Duration {
+	per := f.Client.Timeout
+	if per <= 0 {
+		per = DefaultTimeout
+	}
+	attempts := time.Duration(f.Retries + 1)
+	backoff := f.Backoff * attempts * attempts // worst case of Backoff*attempt + jitter < Backoff
+	return per*attempts + backoff + time.Second
 }

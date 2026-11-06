@@ -9,12 +9,27 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/corker/mcp-authproxy/internal/config"
 	"github.com/corker/mcp-authproxy/internal/logging"
 	"github.com/corker/mcp-authproxy/internal/server"
+	"github.com/corker/mcp-authproxy/internal/tracing"
 )
+
+// getenv looks names up in environ, the same environment the configuration was read from.
+func getenv(environ []string) func(string) string {
+	return func(name string) string {
+		for _, kv := range environ {
+			if k, v, ok := strings.Cut(kv, "="); ok && k == name {
+				return v
+			}
+		}
+		return ""
+	}
+}
 
 // Exit codes: configuration errors are distinct from runtime failures (ADR-0020 §5).
 const (
@@ -60,7 +75,26 @@ func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer) 
 	if cfg.NoAuth {
 		log.Warn("to require sign-in, remove MCP_AUTHPROXY_INSECURE_NO_AUTH and configure an IdP; see docs/reference/settings.md", "relaxation", "next step")
 	}
-	if err := server.Run(ctx, server.New(cfg, log), log); err != nil {
+	// Traces only when the operator sets OTEL_TRACES_EXPORTER (ADR-0021 §9).
+	tracingOn, stopTracing, err := tracing.Setup(ctx, getenv(environ), buildInfo().Version)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "mcp-authproxy: configuration error: OTEL_* tracing settings: %v\n", err)
+		return exitConfig
+	}
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = stopTracing(flushCtx)
+	}()
+	if tracingOn {
+		log.Info("tracing on", "reason", "OTEL_TRACES_EXPORTER is set")
+	}
+	srv, err := server.New(cfg, log)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "mcp-authproxy: configuration error: %v\n", err)
+		return exitConfig
+	}
+	if err := server.Run(ctx, srv, log); err != nil {
 		log.Error("stopped", "error", err)
 		return exitRuntime
 	}
