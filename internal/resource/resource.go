@@ -112,8 +112,8 @@ func cors(w http.ResponseWriter, r *http.Request) {
 
 type identityKey struct{}
 
-// IdentityFrom returns the identity Guard attached to the request context.
-func IdentityFrom(ctx context.Context) (Identity, bool) {
+// identityFrom returns the identity Guard attached to the request context.
+func identityFrom(ctx context.Context) (Identity, bool) {
 	id, ok := ctx.Value(identityKey{}).(Identity)
 	return id, ok
 }

@@ -61,12 +61,6 @@ func (e *configError) Error() string { return e.msg }
 
 func errorf(format string, a ...any) error { return &configError{msg: fmt.Sprintf(format, a...)} }
 
-// isConfigError reports whether err is a configuration error.
-func isConfigError(err error) bool {
-	var ce *configError
-	return errors.As(err, &ce)
-}
-
 // Values holds the resolved registry.
 type Values struct {
 	order []string

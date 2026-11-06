@@ -12,6 +12,11 @@ var base = []string{
 	"MCP_AUTHPROXY_UPSTREAM_URL=http://upstream:9000/mcp",
 }
 
+func isConfigError(err error) bool {
+	var ce *configError
+	return errors.As(err, &ce)
+}
+
 func load(t *testing.T, args []string, env ...string) (*Config, error) {
 	t.Helper()
 	c, _, err := Load(args, append(append([]string{}, base...), env...), nil)
