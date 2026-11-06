@@ -360,6 +360,8 @@ func TestRepeatedAnswerRepeatsTheResponse(t *testing.T) {
 			if second.StatusCode != first.StatusCode || second.Header.Get("Location") != first.Header.Get("Location") {
 				t.Fatalf("second %s: %d %s, first %d %s", c.action, second.StatusCode, second.Header.Get("Location"), first.StatusCode, loc)
 			}
+			// One decision, one audit record.
+			e.oneAuditEvent(t, map[string]string{"allow": "consent_granted", "deny": "consent_denied"}[c.action], nil)
 		})
 	}
 }

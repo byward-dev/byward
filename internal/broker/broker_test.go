@@ -826,7 +826,6 @@ func TestAssertionWithoutClientIDFindsTheClient(t *testing.T) {
 	}
 }
 
-// auditEvents returns the audit records with the given event name.
 // noAuditEvent requires that no record named name was written.
 func (e *env) noAuditEvent(t *testing.T, name string) {
 	t.Helper()
@@ -835,6 +834,7 @@ func (e *env) noAuditEvent(t *testing.T, name string) {
 	}
 }
 
+// auditEvents returns the audit records with the given event name.
 func (e *env) auditEvents(t *testing.T, name string) []map[string]any {
 	t.Helper()
 	var out []map[string]any

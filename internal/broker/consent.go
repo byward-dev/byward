@@ -103,7 +103,8 @@ func (b *Broker) consent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := b.cfg.Now()
-	if prev, answered := b.answers.prior(f.ID, now); answered && prev != allow {
+	prev, repeat := b.answers.prior(f.ID, now)
+	if repeat && prev != allow {
 		b.page(w, r, http.StatusConflict, "You already answered this request.", "Start again from your app if you want to change your answer.")
 		return
 	}
@@ -119,16 +120,21 @@ func (b *Broker) consent(w http.ResponseWriter, r *http.Request) {
 		b.page(w, r, http.StatusConflict, "You already answered this request.", "Start again from your app if you want to change your answer.")
 		return
 	}
-	// The sender is not signed in yet, so the records are limited per source (ADR-0021 §5).
+	// One record per decision: a repeated answer (a double click) repeats the response only. The
+	// sender is not signed in yet, so the records are limited per source (ADR-0021 §5).
 	ev := audit.Event{ClientID: client.ID(), ClientTrust: string(client.Trust())}
 	if !allow {
 		ev.Name, ev.Outcome, ev.Reason = audit.ConsentDenied, audit.Failure, "the user denied the request"
-		b.cfg.Audit.RecordUnauthenticated(r, ev)
+		if !repeat {
+			b.cfg.Audit.RecordUnauthenticated(r, ev)
+		}
 		b.redirectError(w, r, l.RedirectURI, l.State, "access_denied", "the user denied the request")
 		return
 	}
 	ev.Name, ev.Outcome = audit.ConsentGranted, audit.Success
-	b.cfg.Audit.RecordUnauthenticated(r, ev)
+	if !repeat {
+		b.cfg.Audit.RecordUnauthenticated(r, ev)
+	}
 	// The IdP state is stored only now, after Allow (ADR-0010 §5).
 	b.startLogin(w, r, l, now)
 }

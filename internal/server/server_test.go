@@ -776,6 +776,10 @@ func TestTheServerShowsTheOperatorsConsentPageAndDenyReturnsToTheApp(t *testing.
 	}
 	body, _ := io.ReadAll(res.Body)
 	_ = res.Body.Close()
+	m := regexp.MustCompile(`name="flow" value="([^"]+)"`).FindSubmatch(body)
+	if res.StatusCode != http.StatusOK || m == nil || len(res.Cookies()) != 1 {
+		t.Fatalf("authorize: %d, cookies %v: %s", res.StatusCode, res.Cookies(), body)
+	}
 	text := strings.Join(strings.Fields(html.UnescapeString(regexp.MustCompile(`<[^>]*>`).ReplaceAllString(string(body), " "))), " ")
 	for _, want := range []string{"Read your dashboards.", "Run by Contoso IT.", "wants to use Team dashboards as you", "openid"} {
 		if !strings.Contains(text, want) {
@@ -784,14 +788,13 @@ func TestTheServerShowsTheOperatorsConsentPageAndDenyReturnsToTheApp(t *testing.
 	}
 	css, _ := http.NewRequest("GET", ts.URL+"/assets/page.css", nil)
 	css.Host = "mcp.example.com"
-	if cres, err := client.Do(css); err != nil || cres.StatusCode != http.StatusOK || cres.Header.Get("Content-Type") != "text/css; charset=utf-8" {
-		t.Errorf("stylesheet through the server: %v %v", cres, err)
-	} else {
-		_ = cres.Body.Close()
+	cres, err := client.Do(css)
+	if err != nil {
+		t.Fatal(err)
 	}
-	m := regexp.MustCompile(`name="flow" value="([^"]+)"`).FindSubmatch(body)
-	if res.StatusCode != http.StatusOK || m == nil || len(res.Cookies()) != 1 {
-		t.Fatalf("authorize: %d, cookies %v", res.StatusCode, res.Cookies())
+	_ = cres.Body.Close()
+	if cres.StatusCode != http.StatusOK || cres.Header.Get("Content-Type") != "text/css; charset=utf-8" {
+		t.Errorf("stylesheet through the server: %d %q", cres.StatusCode, cres.Header.Get("Content-Type"))
 	}
 	form := url.Values{"flow": {html.UnescapeString(string(m[1]))}, "action": {"deny"}}
 	r, _ = http.NewRequest("POST", ts.URL+"/consent", strings.NewReader(form.Encode()))
