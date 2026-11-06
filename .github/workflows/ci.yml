@@ -38,6 +38,8 @@ jobs:
       - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
           install_args: go goreleaser syft go:github.com/google/go-licenses/v2
+      # Same buildx driver (docker-container) as release.yml, so the snapshot builds images the same way.
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - run: mise run release:snapshot
         env:
           MISE_TASK_RUN_AUTO_INSTALL: "false"

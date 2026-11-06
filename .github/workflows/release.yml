@@ -36,18 +36,12 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - run: mise run licenses
-        env:
-          MISE_TASK_RUN_AUTO_INSTALL: "false"
-      - run: goreleaser release --clean
+      - run: mise run release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MISE_TASK_RUN_AUTO_INSTALL: "false"
       - id: image
-        run: |
-          digest=$(jq -r '[.[] | select(.type == "Docker Image")][0].extra.Digest' dist/artifacts.json)
-          case "$digest" in sha256:*) ;; *) echo "no image digest in dist/artifacts.json" >&2; exit 1 ;; esac
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+        run: echo "digest=$(sh scripts/image-digest.sh "ghcr.io/corker/mcp-authproxy:${GITHUB_REF_NAME}")" >> "$GITHUB_OUTPUT"
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-checksums: dist/checksums.txt

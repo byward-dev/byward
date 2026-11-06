@@ -66,21 +66,12 @@ run = "goreleaser release --snapshot --clean --skip=sign"
 [tasks."release:reproducible"]
 description = "Build twice (second copy elsewhere, empty Go cache) and compare sha256 of binaries and archives"
 depends = ["licenses"]
-run = '''
-set -eu
-build() { goreleaser release --snapshot --clean --skip=sign,docker,sbom >/dev/null; }
-sums() { (cd "$1/dist" && find . -type f \( -name '*.tar.gz' -o -name mcp-authproxy \) -exec shasum -a 256 {} + | sort -k2); }
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
-build
-sums . > "$tmp/first"
-mkdir "$tmp/src"
-tar --exclude=./dist -cf - . | tar -C "$tmp/src" -xf -
-(cd "$tmp/src" && GOCACHE="$tmp/gocache" build)
-sums "$tmp/src" > "$tmp/second"
-diff "$tmp/first" "$tmp/second"
-echo "reproducible: $(wc -l < "$tmp/first" | tr -d ' ') files identical"
-'''
+run = "sh scripts/reproducible.sh"
+
+[tasks.release]
+description = "Publish a release: CI only (release.yml on a v* tag), needs GITHUB_TOKEN and GitHub OIDC for keyless signing"
+depends = ["licenses"]
+run = "goreleaser release --clean"
 
 [tasks."image:smoke"]
 description = "Smoke-test the snapshot image: uid 65532, binary path, licences, and the FROM node + COPY --from example (needs release:snapshot)"

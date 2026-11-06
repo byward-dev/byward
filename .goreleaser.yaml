@@ -75,16 +75,17 @@ dockers_v2:
     labels:
       org.opencontainers.image.source: https://github.com/corker/mcp-authproxy
       org.opencontainers.image.licenses: Apache-2.0
+    # Snapshots export one platform at a time, and buildx rejects index annotations there.
     annotations:
-      "index,manifest:org.opencontainers.image.title": "{{ .ProjectName }}"
-      "index,manifest:org.opencontainers.image.description": Auth-only proxy that puts an MCP server behind OAuth 2.1 / OIDC
-      "index,manifest:org.opencontainers.image.source": https://github.com/corker/mcp-authproxy
-      "index,manifest:org.opencontainers.image.revision": "{{ .FullCommit }}"
-      "index,manifest:org.opencontainers.image.version": "{{ .Version }}"
-      "index,manifest:org.opencontainers.image.created": "{{ .CommitDate }}"
-      "index,manifest:org.opencontainers.image.licenses": Apache-2.0
-      "index,manifest:org.opencontainers.image.base.name": "{{ .BaseImage }}"
-      "index,manifest:org.opencontainers.image.base.digest": "{{ .BaseImageDigest }}"
+      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.title": "{{ .ProjectName }}"
+      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.description": Auth-only proxy that puts an MCP server behind OAuth 2.1 / OIDC
+      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.source": https://github.com/corker/mcp-authproxy
+      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.revision": "{{ .FullCommit }}"
+      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.version": "{{ .Version }}"
+      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.created": "{{ .CommitDate }}"
+      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.licenses": Apache-2.0
+      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.base.name": "{{ .BaseImage }}"
+      "{{ if not .IsSnapshot }}index,{{ end }}manifest:org.opencontainers.image.base.digest": "{{ .BaseImageDigest }}"
     sbom: true
     flags:
       - "{{ if not .IsSnapshot }}--provenance=mode=max{{ end }}"
