@@ -15,11 +15,9 @@ import (
 // (ADR-0011 §7: rate-limited, unlike go-oidc's RemoteKeySet).
 const MinJWKSRefresh = time.Minute
 
-// refetchTimeout bounds one background refetch: the Fetcher's retries at its 5 s timeout.
-const refetchTimeout = 20 * time.Second
-
-// ErrKeysUnavailable wraps every failure to fetch the JWKS; adapters class it Unavailable, not
-// Fatal (ADR-0011 §1).
+// ErrKeysUnavailable is wrapped by KeySet.Key when the JWKS could not be fetched, or the caller's
+// context ended while waiting for the refetch. TokenCheckError classes such errors Unavailable
+// (ADR-0011 §1); an unknown kid with a healthy JWKS is not wrapped.
 var ErrKeysUnavailable = errors.New("idp: JWKS unavailable")
 
 // KeySet caches an IdP's JWKS. An unknown kid triggers a refetch at most once per MinJWKSRefresh;
@@ -44,7 +42,9 @@ func NewKeySet(f *Fetcher, url string, now func() time.Time) *KeySet {
 	return &KeySet{fetch: f, url: url, now: now}
 }
 
-// Key returns the public key for kid ("" matches a set with a single key).
+// Key returns the public key for kid ("" matches a set with a single key). A cached key is returned
+// without waiting. If the key is absent and the last fetch failed, or ctx ends while waiting for the
+// refetch, the error wraps ErrKeysUnavailable (and ctx.Err() in the latter case).
 func (k *KeySet) Key(ctx context.Context, kid string) (*jose.JSONWebKey, error) {
 	k.mu.Lock()
 	if key := k.lookup(kid); key != nil {
@@ -68,7 +68,7 @@ func (k *KeySet) Key(ctx context.Context, kid string) (*jose.JSONWebKey, error) 
 	select {
 	case <-running:
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, fmt.Errorf("idp: key id %q: %w: %w", kid, ErrKeysUnavailable, ctx.Err())
 	}
 	k.mu.Lock()
 	defer k.mu.Unlock()
@@ -89,7 +89,7 @@ func (k *KeySet) missing(kid string) error {
 
 // refetch loads the JWKS and stores the result; it closes done when finished.
 func (k *KeySet) refetch(parent context.Context, done chan struct{}) {
-	ctx, cancel := context.WithTimeout(parent, refetchTimeout)
+	ctx, cancel := context.WithTimeout(parent, k.fetch.budget())
 	defer cancel()
 	set, err := k.load(ctx)
 	k.mu.Lock()
@@ -130,7 +130,8 @@ func ParseJWKS(data []byte) (jose.JSONWebKeySet, error) {
 	return set, nil
 }
 
-// KeySource finds the public key for a JWT's kid.
+// KeySource finds the public key for a JWT's kid. Implementations that fetch keys wrap
+// ErrKeysUnavailable when they could not, so verification errors class Unavailable, not Fatal.
 type KeySource interface {
 	Key(ctx context.Context, kid string) (*jose.JSONWebKey, error)
 }

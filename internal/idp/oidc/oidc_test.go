@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -428,41 +428,36 @@ func TestConcurrentFirstLoginsShareDiscovery(t *testing.T) {
 	}
 }
 
+// keysDown fails requests to jwksPath with 503 once down is set and passes everything else on.
 type keysDown struct {
 	next     http.RoundTripper
 	jwksPath string
+	down     atomic.Bool
 }
 
-func (k keysDown) RoundTrip(r *http.Request) (*http.Response, error) {
-	if r.URL.Path == k.jwksPath {
+func (k *keysDown) RoundTrip(r *http.Request) (*http.Response, error) {
+	if k.down.Load() && r.URL.Path == k.jwksPath {
 		return &http.Response{StatusCode: 503, Body: http.NoBody, Header: http.Header{}, Request: r}, nil
 	}
 	return k.next.RoundTrip(r)
 }
 
-type stepClock struct {
-	mu sync.Mutex
-	t  time.Time
-}
-
-func (c *stepClock) Now() time.Time          { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
-func (c *stepClock) Advance(d time.Duration) { c.mu.Lock(); defer c.mu.Unlock(); c.t = c.t.Add(d) }
-
 func TestRefreshWhileJWKSIsDownIsUnavailable(t *testing.T) {
-	clock := &stepClock{t: now()}
-	e := newEnv(t, Config{Now: clock.Now}, fakeidp.WithClock(clock.Now))
+	clock := fakeidp.NewClock(now())
+	kd := &keysDown{next: http.DefaultTransport}
+	e := newEnv(t, Config{Now: clock.Now, HTTPClient: &http.Client{Transport: kd}}, fakeidp.WithClock(clock.Now))
+	u, _ := url.Parse(e.fake.JWKSURL(""))
+	kd.jwksPath = u.Path
 	_, tok, err := e.p.Callback(context.Background(), signIn(t, e, login), login)
 	if err != nil {
 		t.Fatal(err)
 	}
 	e.fake.RotateKeys(t)
-	u, _ := url.Parse(e.fake.JWKSURL(""))
-	e.p.fetch.Client = &http.Client{Transport: keysDown{next: http.DefaultTransport, jwksPath: u.Path}}
-	e.p.fetch.Backoff = 0
+	kd.down.Store(true)
 	clock.Advance(idp.MinJWKSRefresh)
 	_, _, err = e.p.Refresh(context.Background(), tok.RefreshToken)
 	var ie *idp.Error
-	if !errors.As(err, &ie) || ie.Class != idp.Unavailable {
-		t.Fatalf("err = %#v, want Unavailable", err)
+	if !errors.As(err, &ie) || ie.Class != idp.Unavailable || ie.OperatorHint != "" {
+		t.Fatalf("err = %#v, want Unavailable without a hint", err)
 	}
 }

@@ -292,7 +292,7 @@ func (p *Provider) checkIssuer(iss string, claims map[string]any) error {
 func (p *Provider) identity(ctx context.Context, raw, nonce string) (idp.Identity, error) {
 	claims, err := idp.VerifyJWT(ctx, raw, p.keys, p.rules(nonce))
 	if err != nil {
-		return idp.Identity{}, &idp.Error{Class: idp.TokenCheckClass(err), Err: err}
+		return idp.Identity{}, idp.TokenCheckError(err, "")
 	}
 	tid := strings.ToLower(idp.StringClaim(claims, "tid"))
 	oid := strings.ToLower(idp.StringClaim(claims, "oid"))
@@ -325,11 +325,7 @@ func (p *Provider) checkAccessToken(ctx context.Context, raw string) error {
 	}
 	claims, err := idp.VerifyJWT(ctx, raw, p.keys, p.rules(""))
 	if err != nil {
-		class := idp.TokenCheckClass(err)
-		if class != idp.Fatal {
-			hint = ""
-		}
-		return &idp.Error{Class: class, OperatorHint: hint, Err: fmt.Errorf("entra: access token: %w", err)}
+		return idp.TokenCheckError(fmt.Errorf("entra: access token: %w", err), hint)
 	}
 	if !slices.Contains(strings.Fields(idp.StringClaim(claims, "scp")), "access_as_user") {
 		return &idp.Error{Class: idp.Fatal, OperatorHint: hint, Err: errors.New("entra: access token lacks scp access_as_user")}

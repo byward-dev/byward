@@ -179,3 +179,15 @@ func redactURL(s string) string {
 	u.RawQuery, u.Fragment, u.User = "", "", nil
 	return u.String()
 }
+
+// budget is the longest a GetJSON can take with this Fetcher's timeout, retries and backoff, plus
+// a margin; it bounds work that runs detached from any caller (the JWKS refetch).
+func (f *Fetcher) budget() time.Duration {
+	per := f.Client.Timeout
+	if per <= 0 {
+		per = DefaultTimeout
+	}
+	attempts := time.Duration(f.Retries + 1)
+	backoff := f.Backoff * attempts * attempts // worst case of Backoff*attempt + jitter < Backoff
+	return per*attempts + backoff + time.Second
+}
