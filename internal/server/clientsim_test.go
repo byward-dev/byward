@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,10 +30,10 @@ import (
 func TestClosedClientsSignInAndWorkAsTheirProfilesSay(t *testing.T) {
 	for _, p := range clientsim.All {
 		t.Run(p.Cell, func(t *testing.T) {
-			e := newSimProxy(t, p)
-			s := clientsim.SignIn(t, e, p)
+			e, c := newSimProxy(t, p)
+			s := clientsim.SignIn(t, e, p, c)
 
-			res := clientsim.Call(t, e, s, "")
+			res := clientsim.Call(t, e, p, s, "")
 			_ = res.Body.Close()
 			if res.StatusCode != http.StatusOK {
 				t.Fatalf("initialize after sign-in: %d", res.StatusCode)
@@ -40,7 +41,7 @@ func TestClosedClientsSignInAndWorkAsTheirProfilesSay(t *testing.T) {
 			clientsim.WantNoAuthLoop(t, p, res)
 
 			// ADR-0025: an upstream that refuses the proxy must not look like an auth failure.
-			refused := clientsim.Call(t, e, s, `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"x","arguments":{}}}`)
+			refused := clientsim.Call(t, e, p, s, `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"x","arguments":{}}}`)
 			body, _ := io.ReadAll(refused.Body)
 			_ = refused.Body.Close()
 			clientsim.WantNoAuthLoop(t, p, refused)
@@ -50,10 +51,17 @@ func TestClosedClientsSignInAndWorkAsTheirProfilesSay(t *testing.T) {
 
 			// A token the proxy no longer accepts gets a 401 with the challenge: what makes the client
 			// sign in again, or Claude Code rerun its headersHelper.
-			stale := clientsim.Call(t, e, clientsim.Session{AccessToken: "byw_at_no-longer-valid"}, "")
+			stale := clientsim.Call(t, e, p, clientsim.Session{AccessToken: "byw_at_no-longer-valid"}, "")
 			_ = stale.Body.Close()
 			if stale.StatusCode != http.StatusUnauthorized || !strings.Contains(stale.Header.Get("WWW-Authenticate"), "resource_metadata=") {
 				t.Fatalf("an unusable token: %d %q; want a 401 challenge the client recovers from", stale.StatusCode, stale.Header.Get("WWW-Authenticate"))
+			}
+			if p.HeadersHelperOn401 { // Claude Code reruns its headersHelper, which hands it a good token again
+				retry := clientsim.Call(t, e, p, s, "")
+				_ = retry.Body.Close()
+				if retry.StatusCode != http.StatusOK {
+					t.Fatalf("the retry with the helper's token after a 401: %d", retry.StatusCode)
+				}
 			}
 		})
 	}
@@ -61,18 +69,17 @@ func TestClosedClientsSignInAndWorkAsTheirProfilesSay(t *testing.T) {
 
 // newSimProxy wires the proxy with the fake Entra, the clients' published CIMD documents, a static
 // client for profiles that use one, and an upstream that refuses tools/call with 403.
-func newSimProxy(t *testing.T, p clientsim.Profile) clientsim.Env {
+func newSimProxy(t *testing.T, p clientsim.Profile) (clientsim.Env, clientsim.Credentials) {
 	t.Helper()
 	const public = "https://mcp.example.com"
 	app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}, RedirectURIs: []string{public + "/callback/entra"}}
 	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithClient(app))
 
 	var docs []clientdocs.Doc
-	var auth idp.ClientAuth
-	clientID := p.ClientID
+	creds := clientsim.Credentials{ClientID: p.ClientID}
 	if p.Registration == clientsim.CIMD {
-		doc := clientdocs.Load(t, p.ClientID)
-		docs, clientID = append(docs, doc), doc.ClientID
+		doc := clientdocs.Load(t, p.Document)
+		docs, creds.ClientID = append(docs, doc), doc.ClientID
 		if p.PrivateKeyJWT { // only the client holds its private key: serve a test key at the document's jwks_uri
 			var published struct {
 				JWKSURI string `json:"jwks_uri"`
@@ -80,15 +87,12 @@ func newSimProxy(t *testing.T, p clientsim.Profile) clientsim.Env {
 			if err := json.Unmarshal(doc.Body, &published); err != nil || published.JWKSURI == "" {
 				t.Fatalf("%s's document has no jwks_uri: %v", p.Client, err)
 			}
-			cert := fakeidp.NewCertificate(t)
-			jwks, err := json.Marshal(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &cert.Key.PublicKey, KeyID: "sim", Algorithm: "RS256", Use: "sig"}}})
+			creds.Signer = fakeidp.NewCertificate(t)
+			jwks, err := json.Marshal(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &creds.Signer.Key.PublicKey, KeyID: "sim", Algorithm: "RS256", Use: "sig"}}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			docs = append(docs, clientdocs.Doc{ClientID: published.JWKSURI, Body: jwks, Header: http.Header{"Content-Type": {"application/json"}}})
-			if auth, err = idp.PrivateKeyJWT(cert.Key, cert.X509, "sim"); err != nil {
-				t.Fatal(err)
-			}
 		}
 	}
 	served := clientdocs.Serve(t, docs...)
@@ -120,10 +124,16 @@ func newSimProxy(t *testing.T, p clientsim.Profile) clientsim.Env {
 	}))
 	t.Cleanup(up.Close)
 	env := append(authEnv(t), "BYWARD_PUBLIC_URL="+public+"/mcp", "BYWARD_UPSTREAM_URL="+up.URL+"/mcp")
-	if p.Registration == clientsim.Static {
+	if p.Registration == clientsim.Static { // as the operator registers it: the client's redirect, any loopback port
+		redirect, err := url.Parse(p.RedirectURI)
+		if err != nil {
+			t.Fatal(err)
+		}
+		redirect.Host = redirect.Hostname()
 		clients := filepath.Join(t.TempDir(), "clients.json")
-		if err := os.WriteFile(clients, []byte(`{"clients":[{"client_id":"`+p.ClientID+`","client_name":"`+p.Client+
-			`","token_endpoint_auth_method":"none","redirect_uris":["http://localhost/callback"]}]}`), 0o600); err != nil {
+		reg, _ := json.Marshal(map[string]any{"clients": []map[string]any{{"client_id": p.ClientID, "client_name": p.Client,
+			"token_endpoint_auth_method": "none", "redirect_uris": []string{redirect.String()}}}})
+		if err := os.WriteFile(clients, reg, 0o600); err != nil {
 			t.Fatal(err)
 		}
 		env = append(env, "BYWARD_STATIC_CLIENTS_FILE="+clients)
@@ -141,12 +151,12 @@ func newSimProxy(t *testing.T, p clientsim.Profile) clientsim.Env {
 	t.Cleanup(srv.Close)
 	target := strings.TrimPrefix(srv.URL, "http://")
 	return clientsim.Env{
-		Public: public, MCPPath: "/mcp", ClientID: clientID, ConsentDelay: broker.ConsentDelay, ClientAuth: auth,
+		Public: public, MCPPath: "/mcp", ConsentDelay: broker.ConsentDelay,
 		Do: func(r *http.Request) (*http.Response, error) {
 			r = r.Clone(context.Background())
 			r.URL.Scheme, r.URL.Host, r.Host = "http", target, "mcp.example.com"
 			return http.DefaultTransport.RoundTrip(r)
 		},
 		Browser: func(location string) (*http.Response, error) { return fake.HTTPClient().Get(location) },
-	}
+	}, creds
 }

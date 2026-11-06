@@ -50,11 +50,11 @@ func TestOnlyClientIDURLsMeetingDraftSection3AreAccepted(t *testing.T) {
 	}
 }
 
-// The documents real clients publish are accepted, with grants cut to what the broker supports.
 // methodsOf is each published document's token endpoint auth methods as parsed: public clients,
 // except ChatGPT's, which offers a signed assertion first (its preferred method) and none.
 var methodsOf = map[string][]AuthMethod{"chatgpt": {PrivateKeyJWT, None}}
 
+// The documents real clients publish are accepted, with grants cut to what the broker supports.
 func TestRealClientDocumentsAreAccepted(t *testing.T) {
 	for _, name := range clientdocs.Names {
 		t.Run(name, func(t *testing.T) {

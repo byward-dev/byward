@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
 // Env is the proxy under test as a client reaches it.
@@ -27,81 +27,136 @@ type Env struct {
 	// Browser follows the redirect to the IdP and returns the IdP's redirect back to the proxy, as
 	// the user's browser does after the user signs in.
 	Browser func(location string) (*http.Response, error)
-	// ClientID is the client ID the client registered with (the static client's, or the CIMD
-	// document's URL).
-	ClientID string
 	// ConsentDelay is how long the broker refuses an Allow after showing the consent page.
 	ConsentDelay time.Duration
-	// ClientAuth signs the client assertion of a PrivateKeyJWT profile.
-	ClientAuth idp.ClientAuth
+}
+
+// Credentials are what the client registered with.
+type Credentials struct {
+	ClientID string // the static client's ID, or the CIMD document's URL
+	// Signer signs the client's RS256 assertion when it authenticates with private_key_jwt (the key
+	// the client's jwks_uri publishes).
+	Signer *fakeidp.Certificate
 }
 
 // Session is what a signed-in client holds.
 type Session struct {
 	AccessToken string
-	Discovered  []string // the well-known paths the client requested, with their status
+}
+
+// metadata is what discovery found.
+type metadata struct {
+	prm, asm map[string]any
+	scope    string // the scope the challenge named, if any
 }
 
 // SignIn drives the proxy the way p's client does, from the first unauthenticated MCP request to an
 // access token, and fails t where the proxy answers differently than that client needs.
-func SignIn(t *testing.T, e Env, p Profile) Session {
+func SignIn(t *testing.T, e Env, p Profile, c Credentials) Session {
 	t.Helper()
-	var s Session
-	first := e.send(t, mcpRequest(e, ""))
+	m := discover(t, e, p)
+	verifier := randomString(t)
+	code := authorize(t, e, p, c, m, verifier)
+	return Session{AccessToken: redeem(t, e, p, c, m, code, verifier)}
+}
+
+// discover makes the first MCP request, reads the 401, and fetches the metadata in the client's order.
+func discover(t *testing.T, e Env, p Profile) metadata {
+	t.Helper()
+	first := e.send(t, mcpRequest(e, p, ""))
 	_ = first.Body.Close()
 	if first.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("%s: first MCP request got %d, want 401 (the client starts sign-in only on 401)", p.Client, first.StatusCode)
 	}
+	var m metadata
 	challenge := first.Header.Get("WWW-Authenticate")
-	if p.UsesChallenge && !strings.Contains(challenge, `resource_metadata="`) {
-		t.Fatalf("%s: the 401 has no resource_metadata to follow: %q", p.Client, challenge)
+	if !strings.HasPrefix(challenge, "Bearer ") { // clients parse a Bearer challenge (RFC 6750 §3)
+		t.Fatalf("%s: the 401's challenge %q is not a Bearer challenge", p.Client, challenge)
 	}
-
-	var prm, asm map[string]any
-	for _, path := range p.Discovery {
+	m.scope = param(challenge, "scope")
+	var tried []string
+	paths := p.Discovery
+	if p.UsesChallenge {
+		u := param(challenge, "resource_metadata")
+		if u == "" {
+			t.Fatalf("%s: the 401 has no resource_metadata to follow: %q", p.Client, challenge)
+		}
+		paths = append([]string{pathOf(t, u)}, paths...) // the challenge's URL first, the client's defaults after
+	}
+	for _, path := range paths {
 		if strings.HasSuffix(path, "/") {
 			path += strings.TrimPrefix(e.MCPPath, "/")
 		}
 		res := e.send(t, get(e, path))
-		s.Discovered = append(s.Discovered, path+" "+res.Status)
-		if res.StatusCode != http.StatusOK {
-			_ = res.Body.Close()
-			continue
+		tried = append(tried, path+" "+res.Status)
+		if res.StatusCode == http.StatusOK {
+			m.prm = decode(t, res)
+			break
 		}
-		doc := decode(t, res)
-		switch {
-		case strings.HasPrefix(path, "/.well-known/oauth-protected-resource") && prm == nil:
-			prm = doc
-		case strings.HasPrefix(path, "/.well-known/oauth-authorization-server") && asm == nil:
-			asm = doc
+		_ = res.Body.Close()
+		if p.UsesChallenge && len(tried) == 1 {
+			t.Fatalf("%s: the challenge's resource_metadata does not answer: %v", p.Client, tried)
 		}
 	}
-	if prm == nil || asm == nil {
-		t.Fatalf("%s: discovery in its order %v found no protected resource or authorization server metadata", p.Client, s.Discovered)
+	if m.prm == nil {
+		t.Fatalf("%s: no protected resource metadata in the client's order %v", p.Client, tried)
 	}
-	servers, _ := prm["authorization_servers"].([]any)
-	if len(servers) == 0 || (p.FirstAuthorizationServerOnly && servers[0] != asm["issuer"]) {
-		t.Fatalf("%s: authorization_servers %v, issuer %v: the client uses the first entry only", p.Client, servers, asm["issuer"])
+	if r, _ := m.prm["resource"].(string); r != e.Public+e.MCPPath { // RFC 9728 §3.3: clients reject any other
+		t.Fatalf("%s: PRM resource %q is not the URL the client called, %s", p.Client, r, e.Public+e.MCPPath)
+	}
+	servers, _ := m.prm["authorization_servers"].([]any)
+	issuer, _ := firstString(servers)
+	if issuer == "" {
+		t.Fatalf("%s: PRM has no authorization_servers", p.Client)
+	}
+	m.asm = authServerMetadata(t, e, p, issuer)
+	if m.asm["issuer"] != issuer { // RFC 8414 §3.3; OpenAI requires the exact string
+		t.Fatalf("%s: authorization server metadata issuer %v is not the PRM's %q", p.Client, m.asm["issuer"], issuer)
 	}
 	if p.Registration == CIMD {
-		methods, _ := asm["token_endpoint_auth_methods_supported"].([]any)
-		if asm["client_id_metadata_document_supported"] != true || (p.CIMDNeedsNone && !slices.Contains(methods, any("none"))) {
+		if m.asm["client_id_metadata_document_supported"] != true || (p.CIMDNeedsNone && !slices.Contains(methods(m.asm), "none")) {
 			t.Fatalf("%s: the metadata does not offer CIMD the way the client needs (flag %v, methods %v); it would fall back to DCR",
-				p.Client, asm["client_id_metadata_document_supported"], methods)
+				p.Client, m.asm["client_id_metadata_document_supported"], methods(m.asm))
 		}
 	}
-	resource, _ := prm["resource"].(string)
+	return m
+}
 
-	verifier := randomString(t)
-	q := url.Values{"client_id": {e.ClientID}, "redirect_uri": {p.RedirectURI}, "response_type": {"code"}, "state": {randomString(t)},
+// authServerMetadata fetches the authorization server's metadata from the issuer, RFC 8414 §3.1 path
+// insertion, trying the well-known names in the client's order.
+func authServerMetadata(t *testing.T, e Env, p Profile, issuer string) map[string]any {
+	t.Helper()
+	u, err := url.Parse(issuer)
+	if err != nil || u.Scheme+"://"+u.Host != e.Public {
+		t.Fatalf("%s: the authorization server %q is not reachable through this proxy", p.Client, issuer)
+	}
+	for _, name := range p.ASMetadata {
+		res := e.send(t, get(e, "/.well-known/"+name+strings.TrimSuffix(u.Path, "/")))
+		if res.StatusCode == http.StatusOK {
+			return decode(t, res)
+		}
+		_ = res.Body.Close()
+	}
+	t.Fatalf("%s: no authorization server metadata at %v for issuer %s", p.Client, p.ASMetadata, issuer)
+	return nil
+}
+
+// authorize sends the user through /authorize, consent and the IdP, and returns the code.
+func authorize(t *testing.T, e Env, p Profile, c Credentials, m metadata, verifier string) string {
+	t.Helper()
+	state := randomString(t)
+	q := url.Values{"client_id": {c.ClientID}, "redirect_uri": {p.RedirectURI}, "response_type": {"code"}, "state": {state},
 		"code_challenge": {s256(verifier)}, "code_challenge_method": {"S256"}}
-	if p.Scope != "" {
-		q.Set("scope", p.Scope)
+	if s := scope(p, m); s != "" {
+		q.Set("scope", s)
+	}
+	if p.AddsOfflineAccess && slices.Contains(strs(m.asm["scopes_supported"]), "offline_access") {
+		q.Set("scope", strings.TrimSpace(q.Get("scope")+" offline_access"))
 	}
 	if p.SendsResource {
-		q.Set("resource", resource)
+		q.Set("resource", e.Public+e.MCPPath)
 	}
-	page := e.send(t, get(e, pathOf(t, asm["authorization_endpoint"])+"?"+q.Encode()))
+	page := e.send(t, get(e, pathOf(t, m.asm["authorization_endpoint"])+"?"+q.Encode()))
 	body := readAll(t, page)
 	flow := regexp.MustCompile(`name="flow" value="([^"]+)"`).FindStringSubmatch(body)
 	if page.StatusCode != http.StatusOK || flow == nil {
@@ -129,45 +184,86 @@ func SignIn(t *testing.T, e Env, p Profile) Session {
 	if err != nil || back.StatusCode != http.StatusFound || !strings.HasPrefix(ret.String(), p.RedirectURI) {
 		t.Fatalf("%s: callback answered %d, Location %q; want the client's redirect URI %s", p.Client, back.StatusCode, back.Header.Get("Location"), p.RedirectURI)
 	}
-	if iss := ret.Query().Get("iss"); iss != asm["issuer"] { // RFC 9207: clients that check iss reject anything else
-		t.Fatalf("%s: the redirect's iss %q is not the metadata issuer %v", p.Client, iss, asm["issuer"])
+	switch {
+	case ret.Query().Get("state") != state: // every client rejects a callback with another state
+		t.Fatalf("%s: the redirect's state %q is not the one sent", p.Client, ret.Query().Get("state"))
+	case ret.Query().Get("iss") != m.asm["issuer"]: // RFC 9207: clients that check iss reject anything else
+		t.Fatalf("%s: the redirect's iss %q is not the metadata issuer %v", p.Client, ret.Query().Get("iss"), m.asm["issuer"])
 	}
+	return ret.Query().Get("code")
+}
 
-	tq := url.Values{"grant_type": {"authorization_code"}, "code": {ret.Query().Get("code")}, "client_id": {e.ClientID},
+// redeem exchanges the code at /token the way the client authenticates there.
+func redeem(t *testing.T, e Env, p Profile, c Credentials, m metadata, code, verifier string) string {
+	t.Helper()
+	endpoint, _ := m.asm["token_endpoint"].(string)
+	tq := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "client_id": {c.ClientID},
 		"redirect_uri": {p.RedirectURI}, "code_verifier": {verifier}}
 	if p.SendsResource {
-		tq.Set("resource", resource)
+		tq.Set("resource", e.Public+e.MCPPath)
 	}
-	if p.PrivateKeyJWT {
-		endpoint, _ := asm["token_endpoint"].(string)
-		if err := e.ClientAuth.Apply(tq, e.ClientID, endpoint, time.Now()); err != nil {
+	// A client preferring private_key_jwt uses it when the server offers it (OpenAI: the intersection).
+	if p.PrivateKeyJWT && slices.Contains(methods(m.asm), "private_key_jwt") {
+		now := time.Now()
+		assertion, err := c.Signer.SignJWT("RS256", map[string]any{"kid": "sim"}, map[string]any{
+			"iss": c.ClientID, "sub": c.ClientID, "aud": endpoint, "jti": randomString(t), "iat": now.Unix(), "exp": now.Add(time.Minute).Unix()})
+		if err != nil {
 			t.Fatal(err)
 		}
+		tq.Set("client_assertion_type", "urn:ietf:params:oauth:client-assertion-type:jwt-bearer")
+		tq.Set("client_assertion", assertion)
 	}
-	tok := e.form(t, pathOf(t, asm["token_endpoint"]), tq, nil, nil)
+	tok := e.form(t, pathOf(t, endpoint), tq, nil, nil)
+	defer func() { _ = tok.Body.Close() }()
 	var tokens struct {
 		AccessToken string `json:"access_token"`
+		TokenType   string `json:"token_type"`
 	}
 	if err := json.NewDecoder(tok.Body).Decode(&tokens); err != nil || tok.StatusCode != http.StatusOK || tokens.AccessToken == "" {
 		t.Fatalf("%s: /token answered %d (%v)", p.Client, tok.StatusCode, err)
 	}
-	_ = tok.Body.Close()
-	s.AccessToken = tokens.AccessToken
-	return s
+	if !strings.EqualFold(tokens.TokenType, "Bearer") { // RFC 6749 §5.1; OAuth libraries validate it
+		t.Fatalf("%s: token_type %q, want Bearer", p.Client, tokens.TokenType)
+	}
+	return tokens.AccessToken
+}
+
+// scope is the scope the client sends: from the challenge, else the PRM's scopes_supported, for
+// clients that take it from the server; otherwise the profile's fixed scope.
+func scope(p Profile, m metadata) string {
+	if !p.ScopeFromServer {
+		return p.Scope
+	}
+	if m.scope != "" {
+		return m.scope
+	}
+	return strings.Join(strs(m.prm["scopes_supported"]), " ")
+}
+
+// strs returns the strings of a JSON array.
+func strs(v any) []string {
+	raw, _ := v.([]any)
+	var out []string
+	for _, x := range raw {
+		if s, ok := x.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // Call sends one JSON-RPC request to the MCP endpoint with the session's token.
-func Call(t *testing.T, e Env, s Session, body string) *http.Response {
+func Call(t *testing.T, e Env, p Profile, s Session, body string) *http.Response {
 	t.Helper()
-	r := mcpRequest(e, body)
+	r := mcpRequest(e, p, body)
 	r.Header.Set("Authorization", "Bearer "+s.AccessToken)
 	return e.send(t, r)
 }
 
-// WantNoAuthLoop checks a response to an authenticated MCP request against what p's client does next:
-// a client that treats 403 as an auth failure, or reruns its headersHelper on 401, would sign in or
-// re-register again, so a request the proxy accepted must not come back as either.
-func WantNoAuthLoop(t *testing.T, p Profile, res *http.Response) {
+// WantNoAuthLoop checks a response to an authenticated MCP request against what p's client does
+// next: a 401 makes every client sign in again, and a 403 does too for clients that treat it as an
+// auth failure, so a request the proxy accepted must not come back as either.
+func WantNoAuthLoop(t testing.TB, p Profile, res *http.Response) {
 	t.Helper()
 	switch {
 	case res.StatusCode == http.StatusForbidden && p.Treats403AsAuthFailure:
@@ -177,9 +273,10 @@ func WantNoAuthLoop(t *testing.T, p Profile, res *http.Response) {
 	}
 }
 
-func mcpRequest(e Env, body string) *http.Request {
+func mcpRequest(e Env, p Profile, body string) *http.Request {
 	if body == "" {
-		body = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"sim","version":"0"}}}`
+		body = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"` + p.ProtocolVersion +
+			`","capabilities":{},"clientInfo":{"name":` + quote(p.Client) + `,"version":` + quote(p.Version) + `}}}`
 	}
 	r, _ := http.NewRequest(http.MethodPost, e.Public+e.MCPPath, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
@@ -218,6 +315,25 @@ func withCookies(r *http.Request, cookies []*http.Cookie) *http.Request {
 	return r
 }
 
+// param returns a parameter of a WWW-Authenticate challenge (`name="value"`).
+func param(challenge, name string) string {
+	m := regexp.MustCompile(`(?:^|[ ,])` + regexp.QuoteMeta(name) + `="([^"]*)"`).FindStringSubmatch(challenge)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+func methods(asm map[string]any) []string { return strs(asm["token_endpoint_auth_methods_supported"]) }
+
+func firstString(vs []any) (string, bool) {
+	if len(vs) == 0 {
+		return "", false
+	}
+	s, ok := vs[0].(string)
+	return s, ok
+}
+
 func pathOf(t *testing.T, v any) string {
 	t.Helper()
 	s, _ := v.(string)
@@ -226,6 +342,11 @@ func pathOf(t *testing.T, v any) string {
 		t.Fatalf("metadata URL %v", v)
 	}
 	return u.Path
+}
+
+func quote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 func decode(t *testing.T, res *http.Response) map[string]any {

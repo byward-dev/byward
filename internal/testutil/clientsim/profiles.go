@@ -7,7 +7,8 @@ var (
 	ClaudeCode = Profile{
 		Client: "Claude Code", Version: "2.1.251 (docs read 2026-11-06)", Cell: "Claude Code × static",
 		Registration: Static, ClientID: "claude-code", RedirectURI: "http://localhost:45813/callback",
-		Discovery:     []string{"/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server"},
+		ProtocolVersion: "2025-11-25",
+		Discovery:       []string{"/.well-known/oauth-protected-resource"}, ASMetadata: []string{"oauth-authorization-server", "openid-configuration"},
 		UsesChallenge: false, SendsResource: false, Scope: "",
 		Treats403AsAuthFailure: true, HeadersHelperOn401: true,
 		Facts: []Fact{
@@ -19,35 +20,38 @@ var (
 			{"re-runs headersHelper on 401/403 (10 s timeout, no caching)", "https://code.claude.com/docs/en/mcp"},
 			{"a refused tools/call: one call, no retry, no discovery; the model sees the body text", "runtime test, Claude Code 2.1.142, 2026-11-06"},
 			{"authorization server metadata path order", Assumed},
+			{"sends MCP revision 2025-11-25 in initialize", Assumed},
 		},
 	}
 
 	// ClaudeAI is Claude.ai and Claude Desktop remote connectors with CIMD.
 	ClaudeAI = Profile{
 		Client: "Claude.ai", Version: "docs read 2026-11-06", Cell: "Claude.ai/Desktop × CIMD",
-		Registration: CIMD, ClientID: "claude-ai", RedirectURI: "https://claude.ai/api/mcp/auth_callback",
-		Discovery:     []string{"/.well-known/oauth-protected-resource/", "/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server"},
-		UsesChallenge: true, FirstAuthorizationServerOnly: true, CIMDNeedsNone: true,
-		SendsResource: true, Scope: "mcp",
+		Registration: CIMD, Document: "claude-ai", RedirectURI: "https://claude.ai/api/mcp/auth_callback", ProtocolVersion: "2025-11-25",
+		Discovery:     []string{"/.well-known/oauth-protected-resource/", "/.well-known/oauth-protected-resource"},
+		ASMetadata:    []string{"oauth-authorization-server", "openid-configuration"},
+		UsesChallenge: true, CIMDNeedsNone: true, SendsResource: true, ScopeFromServer: true, AddsOfflineAccess: true,
 		Facts: []Fact{
-			{"tries the path-inserted PRM first, then the root one", "https://claude.com/docs/connectors/building/authentication"},
-			{"uses the first authorization_servers entry and does not fall back", "https://claude.com/docs/connectors/building/authentication"},
+			{"follows the 401's resource_metadata; only without one does it try the path-inserted PRM, then the root one (a fallback)", "https://claude.com/docs/connectors/building/authentication"},
+			{"uses the first authorization_servers entry and does not fall back (every profile uses the first; none falls back)", "https://claude.com/docs/connectors/building/authentication"},
 			{"needs a 401 to read WWW-Authenticate", "https://claude.com/docs/connectors/building/authentication"},
-			{"picks CIMD only with client_id_metadata_document_supported and none; otherwise DCR", "https://claude.com/docs/connectors/building/authentication"},
+			{"normally picks CIMD only with client_id_metadata_document_supported and none; otherwise DCR", "https://claude.com/docs/connectors/building/authentication"},
 			{"redirect https://claude.ai/api/mcp/auth_callback; PKCE S256 always", "https://claude.com/docs/connectors/building/authentication"},
 			{"the CIMD document URL is claude.ai's MCP client metadata", Assumed},
 			{"sends resource", Assumed},
-			{"requests the scope the PRM advertises", Assumed},
+			{"requests the challenge's scope, else the PRM's scopes_supported, and appends offline_access when the authorization server lists it", "https://claude.com/docs/connectors/building/authentication"},
 			{"403 and insufficient_scope handling", Assumed},
+			{"authorization server metadata path order", Assumed},
+			{"sends MCP revision 2025-11-25 in initialize", Assumed},
 		},
 	}
 
 	// VSCode with CIMD (its product configuration sets the document URL).
 	VSCode = Profile{
 		Client: "VS Code", Version: "1.145.2 (source)", Cell: "VS Code × CIMD",
-		Registration: CIMD, ClientID: "vscode", RedirectURI: "http://127.0.0.1:33418/",
-		Discovery:     []string{"/.well-known/oauth-protected-resource/", "/.well-known/oauth-authorization-server"},
-		UsesChallenge: true, SendsResource: true, Scope: "mcp",
+		Registration: CIMD, Document: "vscode", RedirectURI: "http://127.0.0.1:33418/", ProtocolVersion: "2025-11-25",
+		Discovery: []string{"/.well-known/oauth-protected-resource/"}, ASMetadata: []string{"oauth-authorization-server", "openid-configuration"},
+		UsesChallenge: true, SendsResource: true, ScopeFromServer: true,
 		Treats403AsAuthFailure: true,
 		Facts: []Fact{
 			{"stored registration, then CIMD when configured (it does not check for none), then DCR", "microsoft/vscode 1.145.2 mainThreadAuthentication.ts:183-194"},
@@ -56,6 +60,7 @@ var (
 			{"treats 401 and 403 as auth errors: new token, then a forced new registration, up to 3 sends", "microsoft/vscode 1.145.2 extHostMcp.ts:871,883-888,1038-1039"},
 			{"redirect http://127.0.0.1:33418/ (desktop)", "https://vscode.dev/oauth/client-metadata.json"},
 			{"PRM and authorization server metadata path order", Assumed},
+			{"sends MCP revision 2025-11-25 in initialize", Assumed},
 		},
 	}
 )
@@ -64,18 +69,20 @@ var (
 // OpenAI's issuer identification requirements (the broker does: RFC 9207 iss on every response).
 var ChatGPT = Profile{
 	Client: "ChatGPT", Version: "docs read 2026-11-06", Cell: "ChatGPT × CIMD",
-	Registration: CIMD, ClientID: "chatgpt", RedirectURI: "https://chatgpt.com/connector_platform_oauth_redirect",
-	Discovery:     []string{"/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server"},
-	UsesChallenge: true, PrivateKeyJWT: true, SendsResource: true, Scope: "mcp",
+	Registration: CIMD, Document: "chatgpt", RedirectURI: "https://chatgpt.com/connector_platform_oauth_redirect", ProtocolVersion: "2025-11-25",
+	Discovery: []string{"/.well-known/oauth-protected-resource"}, ASMetadata: []string{"oauth-authorization-server", "openid-configuration"},
+	UsesChallenge: true, PrivateKeyJWT: true, SendsResource: true, ScopeFromServer: true,
 	Facts: []Fact{
 		{"prefers CIMD; the stable client ID https://chatgpt.com/oauth/client.json needs iss support and an issuer equal to the PRM's authorization_servers entry", "https://developers.openai.com/plugins/build/auth"},
-		{"its document prefers private_key_jwt (RS256, jwks_uri https://chatgpt.com/oauth/jwks.json) over none; ChatGPT picks from the intersection", "https://developers.openai.com/plugins/build/auth; https://chatgpt.com/oauth/client.json"},
+		{"its document's legacy token_endpoint_auth_method prefers private_key_jwt (RS256, jwks_uri https://chatgpt.com/oauth/jwks.json); ChatGPT picks from the intersection with the server's methods", "https://developers.openai.com/plugins/build/auth; https://chatgpt.com/oauth/client.json"},
 		{"redirect https://chatgpt.com/connector_platform_oauth_redirect with the stable client ID", "https://developers.openai.com/plugins/build/auth"},
 		{"appends resource to the authorization and token requests; PKCE S256", "https://developers.openai.com/plugins/build/auth"},
 		{"finds the PRM at /.well-known/oauth-protected-resource or through the 401's WWW-Authenticate", "https://developers.openai.com/plugins/build/auth"},
 		{"rejects an authorization response without the advertised iss", "https://developers.openai.com/plugins/build/auth"},
 		{"order of the two authorization server metadata paths", Assumed},
 		{"requests offline_access", Assumed},
+		{"requests the scope the server advertises (scopes_supported \"helps ChatGPT explain the permissions\")", "https://developers.openai.com/plugins/build/auth"},
+		{"sends MCP revision 2025-11-25 in initialize", Assumed},
 		{"403 and insufficient_scope handling", Assumed},
 		{"the simulator signs the assertion with a test key served at the document's jwks_uri; the document itself is the captured one", "test setup"},
 	},
