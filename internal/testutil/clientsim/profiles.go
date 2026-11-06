@@ -85,6 +85,8 @@ var (
 			{"scope from the challenge, else the PRM's scopes_supported", "microsoft/vscode 1.145.2 extHostMcp.ts:1158-1187"},
 			{"treats 401 and 403 as auth errors: new token, then a forced new registration, up to 3 sends", "microsoft/vscode 1.145.2 extHostMcp.ts:871,883-888,1038-1039"},
 			{"redirect http://127.0.0.1:33418/ (desktop)", "https://vscode.dev/oauth/client-metadata.json"},
+			{"adding the server took two complete sign-ins, both issued tokens, with no errors; the cause is not known", "real run 2026-11-06 (byward 3be7365, Entra; VS Code version not recorded)"},
+			{"later it sent POST /mcp without an Authorization header (401) and showed the server as Starting until the user signed in again from its UI; the cause is not known", "real run 2026-11-06 (byward 3be7365, Entra; VS Code version not recorded)"},
 			{"PRM and authorization server metadata path order", Assumed},
 			{"checks the redirect's iss (RFC 9207)", Assumed},
 			{"sends MCP revision 2025-11-25 in initialize", Assumed},
