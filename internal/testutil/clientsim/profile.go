@@ -8,11 +8,11 @@ package clientsim
 // Registration is how a client gets its client ID at the broker.
 type Registration string
 
-// Registrations a profile can use. Dynamic client registration (RFC 7591) arrives with the Cursor
-// profile once the broker supports it (#57).
+// Registrations a profile can use.
 const (
 	Static Registration = "static" // pre-registered by the operator (docs/reference/static-clients.md)
 	CIMD   Registration = "cimd"   // a Client ID Metadata Document URL as the client ID (ADR-0008)
+	DCR    Registration = "dcr"    // RFC 7591 registration at the advertised registration_endpoint (ADR-0008)
 )
 
 // Fact is one recorded behaviour and where it comes from. A fact nobody has checked says so:
@@ -35,7 +35,8 @@ type Profile struct {
 	Registration Registration
 	// ClientID is a static client's ID.
 	ClientID string
-	// Document is a CIMD client's clientdocs fixture name; the document's URL is its client ID.
+	// Document is the client's clientdocs fixture name: a CIMD client's document, whose URL is its
+	// client ID, or a DCR client's registration request (testdata/dcr).
 	Document string
 	// RedirectURI is the redirect URI as the client sends it.
 	RedirectURI string

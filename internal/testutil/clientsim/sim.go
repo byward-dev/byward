@@ -38,12 +38,16 @@ type Credentials struct {
 	// the key its jwks_uri publishes, and the algorithm its document names.
 	Signer     *fakeidp.Certificate
 	KeyID, Alg string
+	// RegistrationRequest is the JSON body a DCR client POSTs to the registration_endpoint.
+	RegistrationRequest []byte
 }
 
 // Session is what a signed-in client holds.
 type Session struct {
 	AccessToken string
 	AuthMethod  string // how the client authenticated at /token: "none" or "private_key_jwt"
+	// Registered lists the redirect URIs a DCR registration kept (RFC 7591 §3.2.1).
+	Registered []string
 }
 
 // metadata is what discovery found.
@@ -57,9 +61,15 @@ type metadata struct {
 func SignIn(t *testing.T, e Env, p Profile, c Credentials) Session {
 	t.Helper()
 	m := discover(t, e, p)
+	var registered []string
+	if p.Registration == DCR {
+		c.ClientID, registered = register(t, e, p, c, m)
+	}
 	verifier := randomString(t)
 	code := authorize(t, e, p, c, m, verifier)
-	return redeem(t, e, p, c, m, code, verifier)
+	s := redeem(t, e, p, c, m, code, verifier)
+	s.Registered = registered
+	return s
 }
 
 // discover makes the first MCP request, reads the 401, and fetches the metadata in the client's order.
@@ -118,6 +128,9 @@ func discover(t *testing.T, e Env, p Profile) metadata {
 	if p.NeedsIssSupported && m.asm["authorization_response_iss_parameter_supported"] != true {
 		t.Fatalf("%s: the metadata does not advertise authorization_response_iss_parameter_supported; the client would not use its stable client ID", p.Client)
 	}
+	if p.Registration == DCR && m.asm["registration_endpoint"] == nil {
+		t.Fatalf("%s: the metadata has no registration_endpoint; the client cannot register", p.Client)
+	}
 	if p.Registration == CIMD {
 		if m.asm["client_id_metadata_document_supported"] != true || (p.CIMDNeedsNone && !slices.Contains(methods(m.asm), "none")) {
 			t.Fatalf("%s: the metadata does not offer CIMD the way the client needs (flag %v, methods %v); it would fall back to DCR",
@@ -144,6 +157,27 @@ func authServerMetadata(t *testing.T, e Env, p Profile, issuer string) map[strin
 	}
 	t.Fatalf("%s: no authorization server metadata at %v for issuer %s", p.Client, p.ASMetadata, issuer)
 	return nil
+}
+
+// register POSTs the client's registration request (RFC 7591 §3.1) and returns its client ID and
+// the redirect URIs the server kept, which must include the one the client signs in with.
+func register(t *testing.T, e Env, p Profile, c Credentials, m metadata) (string, []string) {
+	t.Helper()
+	r, _ := http.NewRequest(http.MethodPost, e.Public+e.onProxy(t, m.asm["registration_endpoint"]), strings.NewReader(string(c.RegistrationRequest)))
+	r.Header.Set("Content-Type", "application/json")
+	res := e.send(t, r)
+	defer func() { _ = res.Body.Close() }()
+	var reg struct {
+		ClientID     string   `json:"client_id"`
+		RedirectURIs []string `json:"redirect_uris"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&reg); err != nil || res.StatusCode != http.StatusCreated || reg.ClientID == "" {
+		t.Fatalf("%s: /register answered %d (%v); want 201 with a client_id", p.Client, res.StatusCode, err)
+	}
+	if !slices.Contains(reg.RedirectURIs, p.RedirectURI) {
+		t.Fatalf("%s: the registration kept %v, not the redirect %s the client signs in with", p.Client, reg.RedirectURIs, p.RedirectURI)
+	}
+	return reg.ClientID, reg.RedirectURIs
 }
 
 // authorize sends the user through /authorize, consent and the IdP, and returns the code.
