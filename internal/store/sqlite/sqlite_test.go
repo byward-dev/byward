@@ -171,8 +171,12 @@ func TestEmptyDirMeansTheDefaultStateDirectory(t *testing.T) {
 		t.Skip("would use the real " + DefaultDir)
 	}
 	_, err := Open(bounded(t), Options{CounterFile: filepath.Join(t.TempDir(), "w")})
+	if err == nil {
+		t.Fatal("Open succeeded without a writable default state directory")
+	}
 	// MkdirAll names the first directory it cannot create, which may be a parent of DefaultDir.
-	if err == nil || !strings.Contains(err.Error(), "state directory") || !strings.Contains(DefaultDir, strings.TrimSuffix(pathIn(err.Error()), ":")) {
+	p := strings.TrimSuffix(pathIn(err.Error()), ":")
+	if !strings.Contains(err.Error(), "state directory") || p == "" || (p != DefaultDir && !strings.HasPrefix(DefaultDir, p+"/")) {
 		t.Fatalf("err = %v, want a state-directory error on (a parent of) %s", err, DefaultDir)
 	}
 }
@@ -313,11 +317,10 @@ func TestOnlyACounterMirrorAheadOfTheDatabaseIsARestore(t *testing.T) {
 			if again.Startup().Epoch != wantEpoch {
 				t.Fatalf("epoch %d, want %d", again.Startup().Epoch, wantEpoch)
 			}
-			mirror, ok, err := readCounter(counter)
-			var dbWrites int64
-			must(t, again.db.QueryRow("SELECT value FROM meta WHERE key = 'writes'").Scan(&dbWrites))
-			if err != nil || !ok || mirror != dbWrites {
-				t.Fatalf("counter file = %d (%v, %v), want it rewritten to the database's %d", mirror, ok, err, dbWrites)
+			// The open rewrote the mirror: the next start is normal, so a restore is accepted once.
+			must(t, again.Close())
+			if got := open(t, dir, counter).Startup(); got != (Startup{Epoch: wantEpoch}) {
+				t.Fatalf("next start: %+v, want a normal start at epoch %d", got, wantEpoch)
 			}
 		})
 	}
@@ -330,9 +333,6 @@ func must(t *testing.T, err error) {
 	}
 }
 
-// Regression (runtime sweep): an error from a write means nothing was stored. The mirror is written
-// before the commit, so a counter path that cannot be written rolls the write back. Replacing the
-// counter's directory with a file makes the write fail for root too.
 func TestFirstOpenIsANormalStart(t *testing.T) {
 	s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
 	if got := s.Startup(); got != (Startup{Epoch: 1}) {
@@ -340,6 +340,9 @@ func TestFirstOpenIsANormalStart(t *testing.T) {
 	}
 }
 
+// Regression (runtime sweep): an error from a write means nothing was stored. The mirror is written
+// before the commit, so a counter path that cannot be written rolls the write back. Replacing the
+// counter's directory with a file makes the write fail for root too.
 func TestFailedCounterWriteStoresNothing(t *testing.T) {
 	cdir := t.TempDir()
 	s := open(t, t.TempDir(), filepath.Join(cdir, "writes"))
