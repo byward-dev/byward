@@ -57,14 +57,23 @@ func (k *KeySet) Key(ctx context.Context, kid string) (*jose.JSONWebKey, error) 
 	return nil, fmt.Errorf("idp: unknown key id %q", kid)
 }
 
-// load fetches the JWKS and keeps each key that parses; keys of unknown or unsupported types are
-// ignored rather than failing the whole set (RFC 7517 §5).
+// load fetches the JWKS (see ParseJWKS).
 func (k *KeySet) load(ctx context.Context) (jose.JSONWebKeySet, error) {
+	var raw json.RawMessage
+	if err := k.fetch.GetJSON(ctx, k.url, &raw); err != nil {
+		return jose.JSONWebKeySet{}, err
+	}
+	return ParseJWKS(raw)
+}
+
+// ParseJWKS parses a JWK Set, keeping each key that parses; keys of unknown or unsupported types
+// are ignored rather than failing the whole set (RFC 7517 §5).
+func ParseJWKS(data []byte) (jose.JSONWebKeySet, error) {
 	var raw struct {
 		Keys []json.RawMessage `json:"keys"`
 	}
-	if err := k.fetch.GetJSON(ctx, k.url, &raw); err != nil {
-		return jose.JSONWebKeySet{}, err
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return jose.JSONWebKeySet{}, fmt.Errorf("idp: JWKS: %w", err)
 	}
 	var set jose.JSONWebKeySet
 	for _, r := range raw.Keys {
@@ -76,10 +85,40 @@ func (k *KeySet) load(ctx context.Context) (jose.JSONWebKeySet, error) {
 	return set, nil
 }
 
-func (k *KeySet) lookup(kid string) *jose.JSONWebKey {
+// KeySource finds the public key for a JWT's kid.
+type KeySource interface {
+	Key(ctx context.Context, kid string) (*jose.JSONWebKey, error)
+}
+
+// StaticKeys is a fixed key set, e.g. a static client's registered JWKS. It applies the same
+// signing-key filter as KeySet.
+type StaticKeys jose.JSONWebKeySet
+
+// Key returns the signing key for kid ("" matches a set with a single signing key).
+func (s StaticKeys) Key(_ context.Context, kid string) (*jose.JSONWebKey, error) {
+	if key := lookup(jose.JSONWebKeySet(s), kid); key != nil {
+		return key, nil
+	}
+	return nil, fmt.Errorf("idp: unknown key id %q", kid)
+}
+
+// SigningKeys counts the keys in set that can verify signatures.
+func SigningKeys(set jose.JSONWebKeySet) int {
+	n := 0
+	for i := range set.Keys {
+		if signingKey(&set.Keys[i]) {
+			n++
+		}
+	}
+	return n
+}
+
+func (k *KeySet) lookup(kid string) *jose.JSONWebKey { return lookup(k.keys, kid) }
+
+func lookup(set jose.JSONWebKeySet, kid string) *jose.JSONWebKey {
 	var found *jose.JSONWebKey
-	for i := range k.keys.Keys {
-		key := &k.keys.Keys[i]
+	for i := range set.Keys {
+		key := &set.Keys[i]
 		if !signingKey(key) || (kid != "" && key.KeyID != kid) {
 			continue
 		}
