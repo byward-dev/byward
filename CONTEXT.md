@@ -70,6 +70,10 @@ _Avoid_: access token (alone), session token
 The short-lived JWT (RFC 9068 `at+jwt`) the proxy signs and sends an HTTP **upstream** on every request, saying which **user** and **MCP client** it is for; never the client's token (ADR-0016).
 _Avoid_: forwarded token, identity header (alone), passthrough
 
+**Upstream credential**:
+The operator's own header value (e.g. an API key) the proxy sends an HTTP **upstream** on every request, read from a secret file, in a header the **identity assertion** does not use; never a **user**'s or **MCP client**'s token (ADR-0016 §7).
+_Avoid_: upstream token, service token, passthrough
+
 **Grant**:
 One **user**'s authorization of one **MCP client** at the **broker**; it owns the refresh-token family and the stored **IdP tokens**, and revoking it ends every **proxy token** issued under it.
 _Avoid_: session, authorization (alone)

@@ -25,6 +25,8 @@ var registry = []Setting{
 	{Name: "public-url", Help: "public URL of the MCP endpoint exactly as users enter it, e.g. https://mcp.example.com/mcp; an internationalized host in its ASCII (xn--) form"},
 	{Name: "upstream-url", Help: "URL of the HTTP upstream MCP server; or set a stdio upstream with upstream-command"},
 	{Name: "upstream-header-timeout", Default: "5m", Help: "how long the HTTP upstream may take to send its response headers; a request that waits longer gets a JSON-RPC timeout error, and a streamed response is not limited once its headers arrive; 1s to 1h (ADR-0018 §7)"},
+	{Name: "upstream-credential", Secret: true, Help: "HTTP upstream: a header value the proxy sends with every upstream request, such as an API key the upstream needs from the proxy itself; never the user's or the client's token; read at start, never logged (ADR-0016 §7, docs/how-to/upstream-credential.md)"},
+	{Name: "upstream-credential-header", Default: "Authorization", Help: "the header that carries upstream-credential; inbound copies are always removed; it never shares a header with the identity assertion, so with Authorization here set assertion-header to another header (ADR-0016 §7)"},
 	{Name: "upstream-command", Help: "stdio upstream: the command as a JSON array, e.g. [\"/usr/local/bin/server\",\"--flag\"], never run through a shell; or give it after -- on the command line (docs/how-to/stdio-upstream.md)"},
 	{Name: "upstream-env", Secret: true, Help: "stdio upstream: KEY=VALUE lines set in the environment of each upstream process, besides the inherited PATH, HOME, USER, LOGNAME, TMPDIR, TZ, LANG and LC_* (ADR-0016 §6); values are never logged"},
 	{Name: "stdio-max-processes", Default: "64", Help: "stdio upstream: most upstream processes alive at once; when full, the least recently used idle one is stopped (ADR-0003 §5)"},
@@ -75,6 +77,9 @@ type Config struct {
 	UpstreamURL *url.URL // nil for a stdio upstream
 	// UpstreamHeaderTimeout bounds the wait for the HTTP upstream's response headers.
 	UpstreamHeaderTimeout time.Duration
+	// UpstreamCredential is the operator's header value for the HTTP upstream, sent in
+	// UpstreamCredentialHeader (ADR-0016 §7); "" when there is none. Never logged.
+	UpstreamCredential, UpstreamCredentialHeader string
 	// A stdio upstream (ADR-0003): its argv, the operator env of its processes and its caps.
 	UpstreamCommand                    []string
 	UpstreamEnv                        map[string]string
@@ -328,6 +333,7 @@ func validate(v *Values, container bool) (*Config, error) {
 			errs = append(errs, errorf("BYWARD_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000, got %q", t))
 		}
 	}
+	errs = append(errs, c.upstreamCredential(v)...)
 	if len(errs) > 0 {
 		msgs := make([]string, 0, len(errs))
 		for _, e := range errs {
@@ -520,13 +526,9 @@ var reservedHeaders = map[string]bool{"Host": true, "Cookie": true, "Set-Cookie"
 // proxy relies on, and claims from AssertionClaimNames (or none).
 func (c *Config) assertion(v *Values) []error {
 	var errs []error
-	hEnv := Setting{Name: "assertion-header"}.Env()
-	c.AssertionHeader = textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(v.get("assertion-header")))
-	switch h := c.AssertionHeader; {
-	case h == "" || strings.ContainsFunc(h, func(r rune) bool { return !isTokenChar(r) }):
-		errs = append(errs, errorf("%s: want a header name such as Authorization or X-Byward-Identity, got %q", hEnv, v.get("assertion-header")))
-	case reservedHeaders[h] || strings.HasPrefix(h, "X-Forwarded-") || strings.HasPrefix(h, "Proxy-") || strings.HasPrefix(h, "Sec-") || strings.HasPrefix(h, "Access-Control-"):
-		errs = append(errs, errorf("%s: %s is a header the proxy, the transport or MCP relies on; use Authorization or a header of your own such as X-Byward-Identity", hEnv, h))
+	var err error
+	if c.AssertionHeader, err = upstreamHeader(v, "assertion-header", "X-Byward-Identity"); err != nil {
+		errs = append(errs, err)
 	}
 	cEnv := Setting{Name: "assertion-claims"}.Env()
 	raw := strings.TrimSpace(v.get("assertion-claims"))
@@ -548,6 +550,70 @@ func (c *Config) assertion(v *Values) []error {
 		errs = append(errs, errorf("%s is set but lists nothing; give claims, or none", cEnv))
 	}
 	return errs
+}
+
+// upstreamHeader reads a setting naming a header the proxy sets on upstream requests: a valid
+// token, and not one the proxy, the transport or MCP relies on. example is a header of the
+// operator's own to suggest.
+func upstreamHeader(v *Values, setting, example string) (string, error) {
+	env := Setting{Name: setting}.Env()
+	h := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(v.get(setting)))
+	switch {
+	case h == "" || strings.ContainsFunc(h, func(r rune) bool { return !isTokenChar(r) }):
+		return "", errorf("%s: want a header name such as Authorization or %s, got %q", env, example, v.get(setting))
+	case reservedHeaders[h] || strings.HasPrefix(h, "X-Forwarded-") || strings.HasPrefix(h, "Proxy-") || strings.HasPrefix(h, "Sec-") || strings.HasPrefix(h, "Access-Control-"):
+		return "", errorf("%s: %s is a header the proxy, the transport or MCP relies on; use Authorization or a header of your own such as %s", env, h, example)
+	}
+	return h, nil
+}
+
+// maxUpstreamCredential bounds the credential: it travels in a header on every request.
+const maxUpstreamCredential = 4 << 10
+
+// upstreamCredential reads the operator's upstream credential (ADR-0016 §7): only for an HTTP
+// upstream, a header value without control characters, in a header that is not the assertion's.
+// Errors never contain the value.
+func (c *Config) upstreamCredential(v *Values) []error {
+	fileEnv, hEnv := Setting{Name: "upstream-credential"}.Env()+"_FILE", Setting{Name: "upstream-credential-header"}.Env()
+	val, header := v.byKey["upstream-credential"], v.byKey["upstream-credential-header"]
+	if val.Source == SourceDefault {
+		if header.Source != SourceDefault {
+			return []error{errorf("%s is set, but there is no credential: set %s too, or remove it", hEnv, fileEnv)}
+		}
+		return nil
+	}
+	if c.UpstreamCommand != nil {
+		return []error{errorf("%s is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE", fileEnv)}
+	}
+	var errs []error
+	switch cred := val.Raw; {
+	case cred == "":
+		errs = append(errs, errorf("%s: the file is empty", val.From))
+	case len(cred) > maxUpstreamCredential:
+		errs = append(errs, errorf("%s: the credential is longer than %d bytes", val.From, maxUpstreamCredential))
+	case strings.ContainsFunc(cred, func(r rune) bool { return r != '\t' && (r < 0x20 || r == 0x7f) }):
+		errs = append(errs, errorf("%s: the credential must be one header value on one line, without control characters", val.From))
+	case cred != strings.TrimSpace(cred):
+		errs = append(errs, errorf("%s: the credential starts or ends with white space", val.From))
+	default:
+		c.UpstreamCredential = cred
+	}
+	h, err := upstreamHeader(v, "upstream-credential-header", "X-Api-Key")
+	if err != nil {
+		return append(errs, err)
+	}
+	c.UpstreamCredentialHeader = h
+	// The relay reads "_" as "-" (invariant 16), so X_Api_Key and X-Api-Key are one header.
+	if !c.NoAuth && sameHeader(h, c.AssertionHeader) {
+		errs = append(errs, errorf("%s and %s are both %s, but the credential and the identity assertion never share a header (ADR-0016 §7): set %s to a header of your own, such as X-Byward-Identity, and verify the assertion there",
+			hEnv, Setting{Name: "assertion-header"}.Env(), h, Setting{Name: "assertion-header"}.Env()))
+	}
+	return errs
+}
+
+// sameHeader reports whether two header names reach the upstream as one.
+func sameHeader(a, b string) bool {
+	return a != "" && strings.EqualFold(strings.ReplaceAll(a, "_", "-"), strings.ReplaceAll(b, "_", "-"))
 }
 
 // isTokenChar reports whether r may appear in an HTTP header name (RFC 9110 §5.6.2).
