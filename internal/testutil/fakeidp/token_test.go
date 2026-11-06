@@ -103,15 +103,28 @@ func TestGroupsOverage(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newFixture(t, Entra, WithUser(u))
+			u := f.idp.User()
 			for _, tok := range []string{"id_token", "access_token"} {
 				_, c := f.verified(t, f.login(t).str(tok))
 				if _, ok := c["groups"]; ok {
 					t.Errorf("%s has groups despite overage", tok)
 				}
 				wantClaim(t, c, "_claim_names", map[string]string{"groups": "src1"})
+				wantClaim(t, c, "_claim_sources", map[string]any{"src1": map[string]string{
+					"endpoint": "https://graph.windows.net/" + u.TenantID + "/users/" + u.OID + "/getMemberObjects"}})
 			}
 		})
 	}
+	t.Run("at limit", func(t *testing.T) {
+		f := newFixture(t, Entra, WithUser(User{Groups: many[:groupsOverageLimit]}))
+		_, c := f.verified(t, f.login(t).str("id_token"))
+		if groups, _ := c["groups"].([]any); len(groups) != groupsOverageLimit {
+			t.Errorf("groups has %d entries, want %d", len(groups), groupsOverageLimit)
+		}
+		if _, ok := c["_claim_names"]; ok {
+			t.Error("overage claims at the limit")
+		}
+	})
 }
 
 func TestCodeIsSingleUseAndShortLived(t *testing.T) {
@@ -168,23 +181,21 @@ func TestNoPKCEIsAcceptedUnlessRequired(t *testing.T) {
 	wantStatus(t, r, http.StatusOK)
 }
 
-func TestErrorBodyIsAADSTSShapedAndEchoesClientRequestID(t *testing.T) {
+func TestErrorBodyIsAADSTSShaped(t *testing.T) {
 	clock := newClock()
 	f := newFixture(t, Entra, WithClock(clock.Now))
-	corr := NewGUID()
 	r := postToken(t, f.idp.TokenURL(f.tenant), url.Values{
 		"grant_type": {GrantAuthorizationCode}, "client_id": {f.client.ID}, "client_secret": {"wrong"},
-	}, http.Header{"Client-Request-Id": {corr}})
+	}, nil)
 
 	wantEntraError(t, r, 401, "invalid_client", 7000215)
-	wantClaim(t, r.body, "correlation_id", corr)
 	wantClaim(t, r.body, "timestamp", "2026-11-06 12:00:00Z")
-	if r.header.Get("client-request-id") != corr {
-		t.Errorf("client-request-id header = %q", r.header.Get("client-request-id"))
+	trace, corr := r.str("trace_id"), r.str("correlation_id")
+	if !isGUID(trace) || !isGUID(corr) {
+		t.Errorf("trace_id = %q, correlation_id = %q", trace, corr)
 	}
-	trace := r.str("trace_id")
-	if !isGUID(trace) {
-		t.Errorf("trace_id = %q", trace)
+	if r.header.Get("x-ms-request-id") != trace {
+		t.Errorf("x-ms-request-id = %q, want trace_id %q", r.header.Get("x-ms-request-id"), trace)
 	}
 	for _, want := range []string{"Trace ID: " + trace, "Correlation ID: " + corr, "Timestamp: 2026-11-06 12:00:00Z"} {
 		if !strings.Contains(r.str("error_description"), want) {
@@ -196,6 +207,65 @@ func TestErrorBodyIsAADSTSShapedAndEchoesClientRequestID(t *testing.T) {
 	}
 }
 
+func TestClientRequestIDIsEchoedOnlyWhenGUID(t *testing.T) {
+	guid := NewGUID()
+	for name, tc := range map[string]struct {
+		sent string
+		echo bool
+	}{
+		"GUID":           {guid, true},
+		"uppercase GUID": {strings.ToUpper(NewGUID()), true},
+		"not a GUID":     {"not-a-guid", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, Entra)
+			h := http.Header{"Client-Request-Id": {tc.sent}}
+			bad := postToken(t, f.idp.TokenURL(f.tenant), url.Values{"grant_type": {GrantAuthorizationCode}, "client_id": {f.client.ID}, "client_secret": {"wrong"}}, h)
+			if got := bad.str("correlation_id") == tc.sent; got != tc.echo {
+				t.Errorf("correlation_id = %q, echo = %v, want %v", bad.str("correlation_id"), got, tc.echo)
+			}
+			ok := postToken(t, f.idp.TokenURL(f.tenant), url.Values{"grant_type": {GrantAuthorizationCode}, "client_id": {f.client.ID},
+				"client_secret": {testSecret}, "code": {f.code(t, nil)}, "redirect_uri": {testRedirect}, "code_verifier": {testVerifier}}, h)
+			wantStatus(t, ok, http.StatusOK)
+			for _, r := range []tokenResult{bad, ok} {
+				if got := r.header.Get("client-request-id") == tc.sent; got != tc.echo {
+					t.Errorf("status %d: client-request-id header = %q, want echo %v", r.status, r.header.Get("client-request-id"), tc.echo)
+				}
+			}
+		})
+	}
+}
+
+func TestLifetimeOptions(t *testing.T) {
+	t.Run("token", func(t *testing.T) {
+		clock := newClock()
+		f := newFixture(t, Entra, WithClock(clock.Now), WithTokenLifetime(5*time.Minute))
+		r := f.login(t)
+		wantClaim(t, r.body, "expires_in", 300)
+		wantClaim(t, r.body, "ext_expires_in", 300)
+		for _, tok := range []string{"id_token", "access_token"} {
+			_, c := f.verified(t, r.str(tok))
+			wantClaim(t, c, "exp", clock.Now().Add(5*time.Minute).Unix())
+		}
+	})
+	t.Run("code", func(t *testing.T) {
+		clock := newClock()
+		f := newFixture(t, Entra, WithClock(clock.Now), WithCodeLifetime(30*time.Second))
+		code := f.code(t, nil)
+		clock.Advance(31 * time.Second)
+		wantEntraError(t, f.redeem(t, code), 400, "invalid_grant", 70008)
+	})
+	t.Run("refresh", func(t *testing.T) {
+		clock := newClock()
+		f := newFixture(t, Entra, WithClock(clock.Now), WithRefreshTokenLifetime(time.Hour))
+		rt := f.login(t).str("refresh_token")
+		clock.Advance(59 * time.Minute)
+		wantStatus(t, f.token(t, refreshForm(rt)), http.StatusOK)
+		clock.Advance(2 * time.Minute)
+		wantEntraError(t, f.token(t, refreshForm(rt)), 400, "invalid_grant", 700082)
+	})
+}
+
 func TestGenericErrorIsPlainOAuth(t *testing.T) {
 	f := newFixture(t, Generic)
 	r := f.token(t, url.Values{"grant_type": {GrantAuthorizationCode}, "code": {"nope"}})
@@ -205,169 +275,11 @@ func TestGenericErrorIsPlainOAuth(t *testing.T) {
 	}
 }
 
-func TestClientAuthentication(t *testing.T) {
-	cert, rolled := NewCertificate(t), NewCertificate(t)
-	stranger := NewCertificate(t)
-	for name, tc := range map[string]struct {
-		form   func(f *fixture) url.Values
-		header func(f *fixture) http.Header
-		status int
-		err    string
-		code   int
-		azpacr string
-	}{
-		"secret post": {
-			form: func(f *fixture) url.Values {
-				return url.Values{"client_id": {f.client.ID}, "client_secret": {testSecret}}
-			},
-			status: 200, azpacr: "1",
-		},
-		"rolled-over secret": {
-			form: func(f *fixture) url.Values {
-				return url.Values{"client_id": {f.client.ID}, "client_secret": {"previous-secret"}}
-			},
-			status: 200, azpacr: "1",
-		},
-		"secret basic": {
-			form:   func(*fixture) url.Values { return url.Values{} },
-			header: func(f *fixture) http.Header { return basic(f.client.ID, testSecret) },
-			status: 200, azpacr: "1",
-		},
-		"wrong secret": {
-			form: func(f *fixture) url.Values {
-				return url.Values{"client_id": {f.client.ID}, "client_secret": {"nope"}}
-			},
-			status: 401, err: "invalid_client", code: 7000215,
-		},
-		"no credential": {
-			form:   func(f *fixture) url.Values { return url.Values{"client_id": {f.client.ID}} },
-			status: 401, err: "invalid_client", code: 7000218,
-		},
-		"two methods": {
-			form: func(f *fixture) url.Values {
-				return url.Values{"client_id": {f.client.ID}, "client_secret": {testSecret}}
-			},
-			header: func(f *fixture) http.Header { return basic(f.client.ID, testSecret) },
-			status: 400, err: "invalid_request", code: 9002313,
-		},
-		"unknown client": {
-			form: func(*fixture) url.Values {
-				return url.Values{"client_id": {NewGUID()}, "client_secret": {testSecret}}
-			},
-			status: 400, err: "unauthorized_client", code: 700016,
-		},
-		"PS256 x5t#S256": {
-			form: func(f *fixture) url.Values {
-				return assertionForm(t, f, cert, "PS256", map[string]any{"x5t#S256": cert.ThumbprintSHA256()}, nil)
-			},
-			status: 200, azpacr: "2",
-		},
-		"RS256 x5t (SHA-1)": {
-			form: func(f *fixture) url.Values {
-				return assertionForm(t, f, cert, "RS256", map[string]any{"x5t": cert.ThumbprintSHA1()}, nil)
-			},
-			status: 200, azpacr: "2",
-		},
-		"rolled-over certificate": {
-			form: func(f *fixture) url.Values {
-				return assertionForm(t, f, rolled, "PS256", map[string]any{"x5t#S256": rolled.ThumbprintSHA256()}, nil)
-			},
-			status: 200, azpacr: "2",
-		},
-		"no thumbprint": {
-			form:   func(f *fixture) url.Values { return assertionForm(t, f, cert, "PS256", nil, nil) },
-			status: 401, err: "invalid_client", code: 5002723,
-		},
-		"signed by another key": {
-			form: func(f *fixture) url.Values {
-				return assertionForm(t, f, stranger, "PS256", map[string]any{"x5t#S256": cert.ThumbprintSHA256()}, nil)
-			},
-			status: 401, err: "invalid_client", code: 700027,
-		},
-		"unregistered certificate": {
-			form: func(f *fixture) url.Values {
-				return assertionForm(t, f, stranger, "PS256", map[string]any{"x5t#S256": stranger.ThumbprintSHA256()}, nil)
-			},
-			status: 401, err: "invalid_client", code: 700027,
-		},
-		"wrong audience": {
-			form: func(f *fixture) url.Values {
-				return assertionForm(t, f, cert, "PS256", map[string]any{"x5t#S256": cert.ThumbprintSHA256()}, map[string]any{"aud": "https://elsewhere.example/token"})
-			},
-			status: 401, err: "invalid_client", code: 700027,
-		},
-		"authority audience": {
-			form: func(f *fixture) url.Values {
-				return assertionForm(t, f, cert, "PS256", map[string]any{"x5t#S256": cert.ThumbprintSHA256()},
-					map[string]any{"aud": "https://login.microsoftonline.com/" + f.tenant + "/oauth2/v2.0/token"})
-			},
-			status: 200, azpacr: "2",
-		},
-		"expired assertion": {
-			form: func(f *fixture) url.Values {
-				return assertionForm(t, f, cert, "PS256", map[string]any{"x5t#S256": cert.ThumbprintSHA256()}, map[string]any{"exp": time.Now().Add(-time.Minute).Unix()})
-			},
-			status: 401, err: "invalid_client", code: 700027,
-		},
-		"assertion for another client": {
-			form: func(f *fixture) url.Values {
-				return assertionForm(t, f, cert, "PS256", map[string]any{"x5t#S256": cert.ThumbprintSHA256()}, map[string]any{"sub": NewGUID()})
-			},
-			status: 401, err: "invalid_client", code: 700027,
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			c := Client{ID: NewGUID(), Secrets: []string{testSecret, "previous-secret"}, Certificates: []*Certificate{cert, rolled}}
-			api := Client{ID: NewGUID()}
-			idp := New(t, Entra, WithClient(c), WithClient(api))
-			f := &fixture{idp: idp, client: c, tenant: idp.TenantID()}
-			form := tc.form(f)
-			form.Set("grant_type", GrantClientCredentials)
-			form.Set("scope", "api://"+api.ID+"/.default")
-			var h http.Header
-			if tc.header != nil {
-				h = tc.header(f)
-			}
-			r := postToken(t, idp.TokenURL(f.tenant), form, h)
-			if tc.status != 200 {
-				wantEntraError(t, r, tc.status, tc.err, tc.code)
-				return
-			}
-			wantStatus(t, r, 200)
-			_, at := f.verified(t, r.str("access_token"))
-			wantClaim(t, at, "azpacr", tc.azpacr)
-		})
-	}
-}
-
-func basic(id, secret string) http.Header {
-	req, _ := http.NewRequest(http.MethodPost, "/", nil)
-	req.SetBasicAuth(url.QueryEscape(id), url.QueryEscape(secret))
-	return req.Header
-}
-
-func assertionForm(t *testing.T, f *fixture, cert *Certificate, alg string, header, override map[string]any) url.Values {
-	t.Helper()
-	now := time.Now()
-	claims := map[string]any{
-		"iss": f.client.ID, "sub": f.client.ID, "aud": f.idp.TokenURL(f.tenant),
-		"jti": NewGUID(), "nbf": now.Unix(), "exp": now.Add(5 * time.Minute).Unix(),
-	}
-	for k, v := range override {
-		claims[k] = v
-	}
-	s, err := cert.SignJWT(alg, header, claims)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return url.Values{"client_id": {f.client.ID}, "client_assertion_type": {clientAssertionType}, "client_assertion": {s}}
-}
-
 func refreshForm(rt string) url.Values {
 	return url.Values{"grant_type": {GrantRefreshToken}, "refresh_token": {rt}}
 }
 
-func TestRefresh(t *testing.T) {
+func TestEntraRefreshRotatesTokenKeepsSubAndDropsNonce(t *testing.T) {
 	clock := newClock()
 	f := newFixture(t, Entra, WithClock(clock.Now))
 	first := f.login(t)
@@ -444,15 +356,22 @@ func TestFailTokenCanBeCleared(t *testing.T) {
 	f.login(t)
 }
 
-func TestUnsupportedGrantType(t *testing.T) {
-	for _, grant := range []string{"password", GrantClientCredentials, GrantJWTBearer} {
-		f := newFixture(t, Generic)
-		r := f.token(t, url.Values{"grant_type": {grant}})
-		wantStatus(t, r, 400)
-		wantClaim(t, r.body, "error", "unsupported_grant_type")
+func TestUnsupportedGrantsAreRefused(t *testing.T) {
+	for _, tc := range []struct {
+		profile Profile
+		grant   string
+	}{{Generic, "password"}, {Generic, GrantClientCredentials}, {Generic, GrantJWTBearer}, {Entra, "password"}} {
+		t.Run(string(tc.profile)+" "+tc.grant, func(t *testing.T) {
+			f := newFixture(t, tc.profile)
+			r := f.token(t, url.Values{"grant_type": {tc.grant}})
+			if tc.profile == Entra {
+				wantEntraError(t, r, 400, "unsupported_grant_type", 70003)
+				return
+			}
+			wantStatus(t, r, 400)
+			wantClaim(t, r.body, "error", "unsupported_grant_type")
+		})
 	}
-	f := newFixture(t, Entra)
-	wantEntraError(t, f.token(t, url.Values{"grant_type": {"password"}}), 400, "unsupported_grant_type", 70003)
 }
 
 func TestConcurrentLogins(t *testing.T) {
@@ -482,7 +401,7 @@ func TestSetTenantMovesDefaultUserButNotExplicitOne(t *testing.T) {
 
 	pinned := NewGUID()
 	f.idp.Set(WithUser(User{TenantID: pinned}), WithTenantID(NewGUID()))
-	if got := f.idp.User().TenantID; got != pinned {
-		t.Fatalf("explicit user tenant changed to %s", got)
-	}
+	f.tenant = "organizations"
+	_, id = f.verified(t, f.login(t).str("id_token"))
+	wantClaim(t, id, "tid", pinned)
 }

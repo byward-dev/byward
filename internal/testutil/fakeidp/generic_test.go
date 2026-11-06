@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestGenericLogin(t *testing.T) {
+func TestGenericLoginIssuesPlainOIDCTokensWithoutEntraClaims(t *testing.T) {
 	f := newFixture(t, Generic, WithUser(User{Email: "test.user@contoso.example", EmailVerified: true,
 		HostedDomain: "contoso.example", Groups: []string{"mcp-users"}}))
 	u := f.idp.User()
@@ -46,7 +46,11 @@ func TestGenericWithIssuer(t *testing.T) {
 func TestNewRejectsUnknownProfile(t *testing.T) {
 	ft := &fatalRecorder{TB: t}
 	func() {
-		defer func() { _ = recover() }()
+		defer func() {
+			if r := recover(); r != nil && r != "fatal" {
+				panic(r)
+			}
+		}()
 		New(ft, "okta")
 	}()
 	if !ft.failed {

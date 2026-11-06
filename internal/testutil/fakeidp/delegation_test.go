@@ -1,8 +1,10 @@
 package fakeidp
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -85,8 +87,10 @@ func TestClientCredentialsScopeRules(t *testing.T) {
 	api := Client{ID: NewGUID()}
 	_, c := m2m(t, api, Client{ID: NewGUID(), Secrets: []string{testSecret}})
 	for _, scope := range []string{"", "api://" + api.ID + "/access_as_user", "openid api://" + api.ID + "/.default"} {
-		r := c.token(t, url.Values{"grant_type": {GrantClientCredentials}, "scope": {scope}})
-		wantEntraError(t, r, 400, "invalid_scope", 70011)
+		t.Run(scope, func(t *testing.T) {
+			r := c.token(t, url.Values{"grant_type": {GrantClientCredentials}, "scope": {scope}})
+			wantEntraError(t, r, 400, "invalid_scope", 70011)
+		})
 	}
 }
 
@@ -148,21 +152,30 @@ func TestOnBehalfOfRejectsBadAssertions(t *testing.T) {
 
 	api := Client{ID: NewGUID(), Secrets: []string{testSecret}}
 	f.idp.Set(WithClient(api))
-	appOnly := (&fixture{idp: f.idp, client: api, tenant: f.tenant}).token(t, ccForm(f.client.ID)).str("access_token")
+	cc := (&fixture{idp: f.idp, client: api, tenant: f.tenant}).token(t, ccForm(f.client.ID))
+	wantStatus(t, cc, http.StatusOK)
+	appOnly := cc.str("access_token")
 
 	forged := f.idp.Mint(map[string]any{"aud": f.client.ID, "iss": "https://evil.example/", "tid": f.tenant, "scp": "x",
 		"exp": clock.Now().Add(time.Hour).Unix()})
-	tampered := login.str("access_token")[:len(login.str("access_token"))-4] + "AAAA"
+	parts := strings.Split(login.str("access_token"), ".")
+	sig, _ := base64.RawURLEncoding.DecodeString(parts[2])
+	sig[0] ^= 0xFF
+	tampered := parts[0] + "." + parts[1] + "." + base64.RawURLEncoding.EncodeToString(sig)
 
-	for name, assertion := range map[string]string{
-		"Graph token (wrong aud)": graph.str("access_token"),
-		"app-only token":          appOnly,
-		"foreign issuer":          forged,
-		"bad signature":           tampered,
-		"not a JWT":               "opaque",
+	for name, tc := range map[string]struct{ assertion, reason string }{
+		"Graph token (wrong aud)": {graph.str("access_token"), "audience"},
+		"app-only token":          {appOnly, "user principals"},
+		"foreign issuer":          {forged, "issuer"},
+		"bad signature":           {tampered, "signature"},
+		"not a JWT":               {"opaque", "not a valid JWT"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			wantEntraError(t, f.token(t, oboForm(assertion, "https://graph.microsoft.com/User.Read")), 400, "invalid_grant", 50013)
+			r := f.token(t, oboForm(tc.assertion, "https://graph.microsoft.com/User.Read"))
+			wantEntraError(t, r, 400, "invalid_grant", 50013)
+			if !strings.Contains(r.str("error_description"), tc.reason) {
+				t.Errorf("error_description = %q, want it to name %q", r.str("error_description"), tc.reason)
+			}
 		})
 	}
 

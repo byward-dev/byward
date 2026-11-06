@@ -46,8 +46,10 @@ func TestEntraDiscoveryIsTenantScopedV2WithEntraOmissions(t *testing.T) {
 func TestEntraMultiTenantDiscoveryHasIssuerTemplate(t *testing.T) {
 	f := newFixture(t, Entra)
 	for _, seg := range []string{"organizations", "common"} {
-		doc := discover(t, f.idp.DiscoveryURL(seg))
-		wantClaim(t, doc, "issuer", "https://login.microsoftonline.com/{tenantid}/v2.0")
+		t.Run(seg, func(t *testing.T) {
+			doc := discover(t, f.idp.DiscoveryURL(seg))
+			wantClaim(t, doc, "issuer", "https://login.microsoftonline.com/{tenantid}/v2.0")
+		})
 	}
 }
 
@@ -101,26 +103,48 @@ func TestJWKSRotationKeepsOldKeysUntilRetired(t *testing.T) {
 	}
 }
 
-func TestEntraJWKSKeysCarryEntraFields(t *testing.T) {
+func TestJWKSKeyFieldsAndIssuerPerTenantPath(t *testing.T) {
 	f := newFixture(t, Entra)
-	k := f.jwks(t)[0]
-	for _, field := range []string{"kty", "use", "kid", "x5t", "n", "e", "x5c", "issuer"} {
-		if _, ok := k[field]; !ok {
-			t.Errorf("JWKS key lacks %s", field)
+	for seg, issuer := range map[string]string{
+		f.tenant:        "https://login.microsoftonline.com/" + f.tenant + "/v2.0",
+		"organizations": "https://login.microsoftonline.com/{tenantid}/v2.0",
+		"common":        "https://login.microsoftonline.com/{tenantid}/v2.0",
+	} {
+		t.Run(seg, func(t *testing.T) {
+			g := &fixture{idp: f.idp, client: f.client, tenant: seg}
+			k := g.jwks(t)[0]
+			for _, field := range []string{"kty", "use", "kid", "x5t", "n", "e", "x5c"} {
+				if _, ok := k[field]; !ok {
+					t.Errorf("JWKS key lacks %s", field)
+				}
+			}
+			if k["kid"] != k["x5t"] {
+				t.Errorf("kid %v != x5t %v", k["kid"], k["x5t"])
+			}
+			wantClaim(t, k, "issuer", issuer)
+		})
+	}
+	t.Run("generic", func(t *testing.T) {
+		k := newFixture(t, Generic).jwks(t)[0]
+		wantClaim(t, k, "alg", "RS256")
+		if _, ok := k["issuer"]; ok {
+			t.Error("generic JWKS key carries issuer")
 		}
-	}
-	if k["kid"] != k["x5t"] {
-		t.Errorf("kid %v != x5t %v", k["kid"], k["x5t"])
-	}
+	})
 }
 
 func TestAuthorizeRedirectsWithCodeAndState(t *testing.T) {
-	for _, tc := range []struct {
+	for name, tc := range map[string]struct {
 		profile Profile
+		opts    []Option
 		wantIss bool
-	}{{Entra, false}, {Generic, true}} {
-		t.Run(string(tc.profile), func(t *testing.T) {
-			f := newFixture(t, tc.profile)
+	}{
+		"entra":                 {profile: Entra},
+		"generic":               {profile: Generic, wantIss: true},
+		"entra with iss option": {profile: Entra, opts: []Option{WithIssParameter(true)}, wantIss: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t, tc.profile, tc.opts...)
 			q := redirectQuery(t, f.authorize(t, nil))
 			if q.Get("code") == "" || q.Get("state") != "state-1" {
 				t.Fatalf("redirect query = %v", q)
@@ -132,14 +156,6 @@ func TestAuthorizeRedirectsWithCodeAndState(t *testing.T) {
 				t.Fatalf("iss = %q, want %q", q.Get("iss"), f.idp.Issuer())
 			}
 		})
-	}
-}
-
-func TestWithIssParameterOnEntra(t *testing.T) {
-	f := newFixture(t, Entra, WithIssParameter(true))
-	q := redirectQuery(t, f.authorize(t, nil))
-	if q.Get("iss") != f.idp.Issuer() {
-		t.Fatalf("iss = %q", q.Get("iss"))
 	}
 }
 
@@ -203,7 +219,7 @@ func TestFailAuthorizeInjectsAADSTSError(t *testing.T) {
 	}
 }
 
-func TestEntraUserFromAnotherTenant(t *testing.T) {
+func TestForeignTenantUserIsRefusedSingleTenantButSignsInViaOrganizations(t *testing.T) {
 	other := NewGUID()
 	f := newFixture(t, Entra, WithUser(User{TenantID: other}))
 
@@ -219,9 +235,12 @@ func TestEntraUserFromAnotherTenant(t *testing.T) {
 	wantClaim(t, claims, "iss", "https://login.microsoftonline.com/"+other+"/v2.0")
 }
 
-func TestErrorPageHasNoSecretsAndCorrelates(t *testing.T) {
+func TestErrorPageCorrelatesWithoutEchoingSecrets(t *testing.T) {
 	f := newFixture(t, Entra)
-	req, _ := http.NewRequest(http.MethodGet, f.idp.AuthorizeURL(f.tenant)+"?client_id="+NewGUID(), nil)
+	req, err := http.NewRequest(http.MethodGet, f.idp.AuthorizeURL(f.tenant)+"?client_id="+NewGUID()+"&client_secret="+testSecret+"-leak", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	corr := NewGUID()
 	req.Header.Set("client-request-id", corr)
 	resp, err := noRedirects().Do(req)
@@ -230,17 +249,38 @@ func TestErrorPageHasNoSecretsAndCorrelates(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
 	if !strings.Contains(string(body), "AADSTS700016:") || !strings.Contains(string(body), "Correlation ID: "+corr) {
 		t.Fatalf("error page = %q", body)
+	}
+	if strings.Contains(string(body), testSecret) {
+		t.Fatal("error page echoes a submitted secret")
 	}
 }
 
 func TestGenericErrorsCarryNoEntraHeaders(t *testing.T) {
 	f := newFixture(t, Generic, FailAuthorize(&InvalidRequest))
-	for _, resp := range []*http.Response{f.authorize(t, nil), f.authorize(t, url.Values{"client_id": {"unknown"}})} {
-		if resp.Header.Get("x-ms-request-id") != "" || resp.Header.Get("client-request-id") != "" {
-			t.Fatalf("generic response has Entra headers: %v", resp.Header)
-		}
+	for name, query := range map[string]string{
+		"redirect error": "?client_id=" + f.client.ID + "&redirect_uri=" + url.QueryEscape(testRedirect) + "&response_type=code&scope=openid&state=s",
+		"error page":     "?client_id=unknown",
+	} {
+		t.Run(name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, f.idp.AuthorizeURL("")+query, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("client-request-id", NewGUID())
+			resp, err := noRedirects().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = resp.Body.Close()
+			if resp.Header.Get("x-ms-request-id") != "" || resp.Header.Get("client-request-id") != "" {
+				t.Fatalf("generic response has Entra headers: %v", resp.Header)
+			}
+		})
 	}
 	q := redirectQuery(t, f.authorize(t, nil))
 	if strings.Contains(q.Get("error_description"), "AADSTS") || strings.Contains(q.Get("error_description"), "Trace ID") {
