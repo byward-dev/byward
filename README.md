@@ -1,8 +1,14 @@
+<p align="center"><img src="docs/assets/byward-logo.svg" alt="byward owl logo" width="128" height="128"></p>
+
 # byward
 
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/byward-dev/byward/badge)](https://scorecard.dev/viewer/?uri=github.com/byward-dev/byward)
 
-> **Status: design phase.** Nothing to run yet.
+**A sign-in gate for MCP servers.**
+
+> **Status: pre-release.** No release yet. It is pre-1.0 and has not had an independent security
+> audit. To try it: [Entra quickstart](docs/how-to/quickstart-entra.md). Before deploying:
+> [security posture](docs/security-posture.md).
 
 An auth-only proxy that puts any [MCP](https://modelcontextprotocol.io) server — stdio or
 HTTP — behind spec-compliant OAuth 2.1 / OIDC, with first-class Microsoft Entra ID support.
