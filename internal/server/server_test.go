@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -59,16 +60,16 @@ func start(t *testing.T, extraEnv ...string) env {
 	t.Helper()
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
-	cfg, _, err := config.Load(nil, append([]string{
+	cfg, _, err := config.Load(nil, append(authEnv(t), append([]string{
 		"MCP_AUTHPROXY_PUBLIC_URL=https://mcp.example.com/mcp",
 		"MCP_AUTHPROXY_UPSTREAM_URL=" + up.URL + "/mcp",
 		"MCP_AUTHPROXY_ALLOWED_ORIGINS=https://app.example",
-	}, extraEnv...), nil)
+	}, extraEnv...)...), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}
 	logs := &syncBuffer{}
-	srv := httptest.NewServer(Handler(cfg, slog.New(slog.NewJSONHandler(logs, nil)), acceptGood{}))
+	srv := httptest.NewServer(Handler(cfg, slog.New(slog.NewJSONHandler(logs, nil)), acceptGood{}, nil))
 	t.Cleanup(srv.Close)
 	return env{srv, up, logs}
 }
@@ -252,11 +253,14 @@ func TestOnlyStreamableHTTPMethodsReachTheUpstream(t *testing.T) {
 }
 
 func TestNewConfiguresHardenedLimitsAndLoopbackBind(t *testing.T) {
-	cfg, _, err := config.Load(nil, []string{"MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"}, nil)
+	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	s, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if s.ReadHeaderTimeout == 0 || s.ReadTimeout == 0 || s.IdleTimeout == 0 || s.MaxHeaderBytes == 0 {
 		t.Fatalf("a limit is unset: %+v", s)
 	}
@@ -292,14 +296,18 @@ func TestRecovererLetsAbortedHandlersAbort(t *testing.T) {
 }
 
 func TestRunShutsDownOnCancel(t *testing.T) {
-	cfg, _, err := config.Load(nil, []string{"MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0"}, nil)
+	cfg, _, err := config.Load(nil, append(authEnv(t), "MCP_AUTHPROXY_PUBLIC_URL=https://m.example/mcp", "MCP_AUTHPROXY_UPSTREAM_URL=http://u/mcp", "MCP_AUTHPROXY_LISTEN=127.0.0.1:0"), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- Run(ctx, New(cfg, log), log) }()
+	srv, err := New(cfg, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { done <- Run(ctx, srv, log) }()
 	cancel()
 	select {
 	case err := <-done:
@@ -373,7 +381,7 @@ func TestNoAuthServesTheUpstreamWithoutMetadataOrChallenge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(Handler(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), resource.NoTokens{}))
+	srv := httptest.NewServer(Handler(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), resource.NoTokens{}, nil))
 	t.Cleanup(srv.Close)
 	do := func(method, path, host string, hdr map[string]string) *http.Response {
 		r, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(`{"jsonrpc":"2.0"}`))

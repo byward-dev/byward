@@ -33,7 +33,8 @@ const (
 )
 
 // Handler builds every route behind the Host check, request logging and panic recovery.
-func Handler(cfg *config.Config, log *slog.Logger, v resource.Validator) http.Handler {
+// register, when not nil, adds the broker's routes (authenticated mode).
+func Handler(cfg *config.Config, log *slog.Logger, v resource.Validator, register func(*http.ServeMux)) http.Handler {
 	meta := resource.Metadata{Resource: cfg.PublicURL, Issuer: cfg.Issuer(), Scope: cfg.Scope,
 		Name: cfg.ResourceName, Documentation: cfg.ResourceDocumentation}
 	mux := http.NewServeMux()
@@ -48,6 +49,9 @@ func Handler(cfg *config.Config, log *slog.Logger, v resource.Validator) http.Ha
 			mux.Handle(p, md)
 		}
 	}
+	if register != nil {
+		register(mux)
+	}
 	up := relay.New(log, cfg.UpstreamURL)
 	// The proxy's own origin is same-origin and cannot be forged by another site (a DNS-rebinding
 	// page sends its own origin), so it is always allowed; the MCP conformance rebinding scenario
@@ -60,19 +64,29 @@ func Handler(cfg *config.Config, log *slog.Logger, v resource.Validator) http.Ha
 	return recoverer(log, logging.Middleware(log, origin.Hosts(log, hosts, mux)))
 }
 
-// New returns the hardened server. WriteTimeout stays 0 so streams can run; per-request
-// deadlines are set where needed through http.ResponseController. Until the broker issues proxy
-// tokens (slice 1.2), every token is rejected.
-func New(cfg *config.Config, log *slog.Logger) *http.Server {
+// New wires the proxy and returns the hardened server. WriteTimeout stays 0 so streams can run;
+// per-request deadlines are set where needed through http.ResponseController. Errors are
+// configuration problems (a key directory, a clients file, IdP settings).
+func New(cfg *config.Config, log *slog.Logger) (*http.Server, error) {
+	var h http.Handler
+	if cfg.NoAuth {
+		h = Handler(cfg, log, resource.NoTokens{}, nil)
+	} else {
+		a, err := buildAuth(cfg, log)
+		if err != nil {
+			return nil, err
+		}
+		h = Handler(cfg, log, a.validator, a.register)
+	}
 	return &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           Handler(cfg, log, resource.NoTokens{}),
+		Handler:           h,
 		ReadHeaderTimeout: ReadHeaderTimeout,
 		ReadTimeout:       ReadTimeout,
 		IdleTimeout:       IdleTimeout,
 		MaxHeaderBytes:    MaxHeaderBytes,
 		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
-	}
+	}, nil
 }
 
 // Run serves until ctx is done, then shuts down within ShutdownTimeout; open streams are
