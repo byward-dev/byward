@@ -41,6 +41,17 @@ type identityProvider struct {
 	startWarnings func(now time.Time) []Warning
 	// appTokens verifies app-only tokens for BYWARD_APP_TOKENS (ADR-0022); Entra only, else nil.
 	appTokens apptoken.Verifier
+	// startRefusal, when set, is why the proxy must not start at now (an expired certificate);
+	// serving and check refuse, doctor reports it as a result and revoke-user ignores it.
+	startRefusal func(now time.Time) error
+}
+
+// refusal is ip.startRefusal at now, or nil.
+func (ip *identityProvider) refusal(now time.Time) error {
+	if ip.startRefusal == nil {
+		return nil
+	}
+	return ip.startRefusal(now)
 }
 
 // timedWarnings is ip.startWarnings at now, or none.
@@ -62,9 +73,13 @@ func newIdentityProvider(cfg *config.Config, idpHTTP *http.Client) (*identityPro
 	return newOIDCIdentityProvider(cfg, idpHTTP, redirect)
 }
 
-// newEntraIdentityProvider is Entra (ADR-0012), with its own doctor checks and secret-expiry warning.
+// newEntraIdentityProvider is Entra (ADR-0012), with its own doctor checks, the credential's expiry
+// warning, and the refusal to start with an expired certificate.
 func newEntraIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect string) (*identityProvider, error) {
-	auth, diag := entraClientAuth(cfg)
+	auth, diag, certExpires, err := entraClientAuth(cfg)
+	if err != nil {
+		return nil, err
+	}
 	p, err := entra.New(entra.Config{Tenant: cfg.EntraTenant, ClientID: cfg.EntraClientID,
 		ClientAuth: auth, RedirectURL: redirect, HTTPClient: idpHTTP})
 	if err != nil {
@@ -73,16 +88,30 @@ func newEntraIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect
 	return &identityProvider{name: cfg.IdP, redirect: redirect, label: "Microsoft Entra", adapter: p, scope: p.Scope(), gateIdP: gate.Entra, userKey: entra.UserKey, appTokens: p,
 		diagnose: func(ctx context.Context, now time.Time) []doctor.Result {
 			out := p.Diagnose(ctx, diag)
-			if cfg.EntraClientSecret != "" { // only a secret expires
+			switch {
+			case cfg.EntraClientSecret != "": // a secret and a certificate expire; a federated token renews itself
 				out = append(out, secretExpiry(cfg, now))
+			case !certExpires.IsZero():
+				out = append(out, doctor.CertificateExpiry(diag.CredentialSetting, certExpires, now))
 			}
 			return out
 		},
 		startWarnings: func(now time.Time) []Warning {
-			if w, ok := expiryWarning(cfg, now); ok {
+			w, ok := expiryWarning(cfg, now)
+			if !certExpires.IsZero() {
+				r := doctor.CertificateExpiry(diag.CredentialSetting, certExpires, now)
+				w, ok = Warning{Message: r.Message, Setting: diag.CredentialSetting, Fix: r.Fix}, r.Status == doctor.Warn || r.Status == doctor.Fail
+			}
+			if ok {
 				return []Warning{w}
 			}
 			return nil
+		},
+		startRefusal: func(now time.Time) error {
+			if certExpires.IsZero() || now.Before(certExpires) {
+				return nil
+			}
+			return fmt.Errorf("%s: the certificate expired on %s: make and upload a new one (docs/how-to/entra-certificate.md)", diag.CredentialSetting, certExpires.UTC().Format(time.DateOnly))
 		}}, nil
 }
 
@@ -139,17 +168,31 @@ func oidcLabel(cfg *config.Config) string {
 	return "your identity provider"
 }
 
-// entraClientAuth is the Entra app's credential (ADR-0012 §5), the client secret or the federated
-// token file, and the settings doctor names in its fixes for it.
-func entraClientAuth(cfg *config.Config) (idp.ClientAuth, entra.Diagnosis) {
+// entraClientAuth is the Entra app's credential (ADR-0012 §5), the one config allowed: the client
+// secret, the federated token file or the certificate, which is loaded here; the certificate's end
+// date (zero for the other kinds), for its expiry checks, so the key stays inside the ClientAuth;
+// and the settings doctor names in its fixes for it.
+func entraClientAuth(cfg *config.Config) (idp.ClientAuth, entra.Diagnosis, time.Time, error) {
 	d := entra.Diagnosis{TenantSetting: config.Setting{Name: "entra-tenant"}.Env(), ClientIDSetting: config.Setting{Name: "entra-client-id"}.Env(),
 		GateRoles: cfg.GateRoles, AppRoles: cfg.AppRoles}
-	if f := cfg.EntraFederatedTokenFile; f != "" { // re-read on every request, never cached
-		d.FederatedTokenSetting = config.Setting{Name: "entra-federated-token-file"}.Env()
-		return idp.AssertionFile(f), d
+	switch {
+	case cfg.EntraFederatedTokenFile != "": // re-read on every request, never cached
+		d.CredentialKind, d.CredentialSetting = entra.CredentialFederated, config.Setting{Name: "entra-federated-token-file"}.Env()
+		return idp.AssertionFile(cfg.EntraFederatedTokenFile), d, time.Time{}, nil
+	case cfg.EntraClientCertificate != "":
+		d.CredentialKind, d.CredentialSetting = entra.CredentialCertificate, config.Setting{Name: "entra-client-certificate"}.Env()+"_FILE"
+		cert, err := entra.LoadCertificate([]byte(cfg.EntraClientCertificate))
+		if err != nil {
+			return nil, d, time.Time{}, fmt.Errorf("%s: %w (docs/how-to/entra-certificate.md)", d.CredentialSetting, err)
+		}
+		auth, err := cert.ClientAuth()
+		if err != nil {
+			return nil, d, time.Time{}, fmt.Errorf("%s: %w", d.CredentialSetting, err)
+		}
+		return auth, d, cert.X509.NotAfter, nil
 	}
-	d.SecretSetting = config.Setting{Name: "entra-client-secret"}.Env() + "_FILE"
-	return idp.ClientSecret(cfg.EntraClientSecret), d
+	d.CredentialKind, d.CredentialSetting = entra.CredentialSecret, config.Setting{Name: "entra-client-secret"}.Env()+"_FILE"
+	return idp.ClientSecret(cfg.EntraClientSecret), d, time.Time{}, nil
 }
 
 // oidcClientAuth is the proxy's credential at an oidc IdP: a client secret, or private_key_jwt with

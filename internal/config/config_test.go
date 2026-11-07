@@ -302,7 +302,7 @@ func TestBrokerSettingsAreRequired(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	if _, err := load(t, nil, "BYWARD_ENTRA_CLIENT_SECRET_FILE="); !isConfigError(err) || !strings.Contains(err.Error(), "BYWARD_ENTRA_CLIENT_SECRET_FILE or BYWARD_ENTRA_FEDERATED_TOKEN_FILE is required") {
+	if _, err := load(t, nil, "BYWARD_ENTRA_CLIENT_SECRET_FILE="); !isConfigError(err) || !strings.Contains(err.Error(), "BYWARD_ENTRA_CLIENT_SECRET_FILE, BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE or BYWARD_ENTRA_FEDERATED_TOKEN_FILE is required") {
 		t.Errorf("secret: %v", err)
 	}
 	if _, err := load(t, nil, "BYWARD_ENTRA_TENANT=contoso.onmicrosoft.com"); !isConfigError(err) || !strings.Contains(err.Error(), "want the tenant ID, a GUID") {

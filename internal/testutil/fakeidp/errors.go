@@ -72,6 +72,12 @@ var (
 		Description: "No matching federated identity record found for presented assertion."}
 	InvalidClientAssertion = Failure{Status: http.StatusUnauthorized, Error: "invalid_client", Code: 700027,
 		Description: "Client assertion failed signature validation."}
+	// The descriptions of these two are Microsoft's error code reference's; the HTTP status is
+	// assumed as for the other client-authentication failures.
+	CertificateNotAuthorized = Failure{Status: http.StatusUnauthorized, Error: "invalid_client", Code: 50012,
+		Description: "Authentication failed: Thumbprint of the signing certificate isn't authorized."}
+	SubjectNameNotAuthorized = Failure{Status: http.StatusUnauthorized, Error: "invalid_client", Code: 700030,
+		Description: "Invalid certificate - subject name in certificate isn't authorized."}
 	InvalidAssertion = Failure{Error: "invalid_grant", Code: 50013,
 		Description: "Assertion failed signature validation."}
 	AppNotAssigned = Failure{Error: "invalid_grant", Code: 501051,

@@ -48,6 +48,9 @@ func CheckOffline(cfg *config.Config) ([]Warning, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := parts.idp.refusal(time.Now()); err != nil {
+		return nil, err
+	}
 	if err := checkStorePaths(cfg); err != nil {
 		return nil, err
 	}

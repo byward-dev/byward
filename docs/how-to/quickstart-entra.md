@@ -137,8 +137,9 @@ credentials (without it the command removes them). The trailing newline is ignor
   (AADSTS7000222, see [Troubleshooting](#troubleshooting)).
 - Optional: set `BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT` to the end date (one year from today here,
   e.g. `2027-11-06`). The proxy then warns at every start, and `byward doctor` from 30 days before.
-- A client secret suits development and small setups. ADR-0012 §5 recommends a certificate for
-  production; there is no setting for a certificate credential yet.
+- A client secret suits development and small setups. For production, ADR-0012 §5 and Microsoft
+  recommend a certificate: `byward init entra --credential certificate`, or by hand with the
+  [certificate how-to](entra-certificate.md).
 
 ### 1.5 Optional: grant admin consent
 
@@ -347,4 +348,4 @@ restart the proxy.
 | Entra `5xx`, `429` or a timeout | `503` to the client. | Usually transient; check the Entra service health if it persists. |
 
 AADSTS5002723 and AADSTS700027 are certificate-credential errors and do not occur with a client
-secret.
+secret; see the [certificate how-to](entra-certificate.md#troubleshooting).
