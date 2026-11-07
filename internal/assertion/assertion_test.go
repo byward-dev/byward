@@ -206,7 +206,7 @@ func TestAnAssertionCarriesExactlyTheDocumentedHeaderAndClaims(t *testing.T) {
 	m, _ := NewMinter(k, issuer, audience, func() time.Time { return t0 })
 	raw, err := m.Mint(resource.Identity{Subject: "00000000-0000-0000-0000-000000000001:11111111-1111-1111-1111-111111111111",
 		ClientID: "https://claude.ai/oauth/claude-code-client-metadata", Roles: []string{"byward.user"},
-		Groups: []string{"22222222-2222-2222-2222-222222222222"}, Email: "alex@contoso.example", Name: "Alex"})
+		Groups: []string{"22222222-2222-2222-2222-222222222222"}, Email: "alex@contoso.example", EmailVerified: true, Name: "Alex"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,6 +232,33 @@ func TestAnAssertionCarriesExactlyTheDocumentedHeaderAndClaims(t *testing.T) {
 	want, err := os.ReadFile(golden) //nolint:gosec // G304: the test's own golden file
 	if err != nil || string(want) != string(got)+"\n" {
 		t.Fatalf("%s is stale (BYWARD_UPDATE_GOLDEN=1 regenerates it):\ngot\n%s", golden, got)
+	}
+}
+
+// email_verified comes with email and only with it, so the upstream sees whether the IdP vouched
+// for the address.
+func TestAnAssertionSaysWhetherItsEmailIsVerified(t *testing.T) {
+	k, _ := keys(t)
+	m, _ := NewMinter(k, issuer, audience, func() time.Time { return t0 })
+	for _, tc := range []struct {
+		name string
+		id   resource.Identity
+		want any // nil: no email_verified claim
+	}{
+		{"verified", resource.Identity{Email: "alex@contoso.example", EmailVerified: true}, true},
+		{"unverified", resource.Identity{Email: "alex@contoso.example"}, false},
+		{"no email", resource.Identity{}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.id.Subject, tc.id.ClientID = "user", "app"
+			raw, err := m.Mint(tc.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, c := verify(t, k, raw); c["email_verified"] != tc.want {
+				t.Fatalf("email_verified %v, want %v", c["email_verified"], tc.want)
+			}
+		})
 	}
 }
 

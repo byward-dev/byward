@@ -38,7 +38,8 @@ Claims:
 | `jti` | yes | 128 random bits, base64url |
 | `roles` | `roles` opted in (default) | the user's app roles, when they have any |
 | `groups` | `groups` opted in | group IDs; left out under Entra groups overage, or when too many to fit |
-| `email` | `email` opted in | display only, never for authorization (Entra does not verify it) |
+| `email` | `email` opted in, and the IdP verified it or `BYWARD_ASSERTION_UNVERIFIED_EMAIL` is `true` | display only, never for authorization |
+| `email_verified` | exactly when `email` is | `true` when the IdP vouched for the address; `false` when only `BYWARD_ASSERTION_UNVERIFIED_EMAIL` let it through (every Entra email) |
 | `name` | `name` opted in | display only |
 
 A claim the user has no value for is left out; it is never sent empty. Roles and groups are as of

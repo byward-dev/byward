@@ -212,18 +212,67 @@ func TestARequestWithoutAnIdentityNeverReachesTheUpstream(t *testing.T) {
 
 // BYWARD_ASSERTION_CLAIMS selects exactly the claims the broker seals, each name its own claim.
 func TestEachAssertionClaimNameSelectsItsOwnClaim(t *testing.T) {
+	const unverified = "BYWARD_ASSERTION_UNVERIFIED_EMAIL=true"
 	for _, tc := range []struct {
-		claims string
-		want   broker.Asserted
+		claims, extra string
+		want          broker.Asserted
 	}{
-		{"none", broker.Asserted{}},
-		{"roles", broker.Asserted{Roles: true}},
-		{"groups,email,name", broker.Asserted{Groups: true, Email: true, Name: true}},
+		{"none", "", broker.Asserted{}},
+		{"roles", "", broker.Asserted{Roles: true}},
+		{"groups,email,name", "", broker.Asserted{Groups: true, Email: true, Name: true}},
+		{"email", unverified, broker.Asserted{Email: true, UnverifiedEmail: true}},
+		{"roles", unverified, broker.Asserted{Roles: true}}, // no email to assert unverified
 	} {
-		cfg := loadConfig(t, "https://mcp.example.com/mcp", "BYWARD_ASSERTION_CLAIMS="+tc.claims)
-		if got := assertedClaims(cfg); got != tc.want {
-			t.Errorf("%s: %+v, want %+v", tc.claims, got, tc.want)
+		env := []string{"BYWARD_ASSERTION_CLAIMS=" + tc.claims}
+		if tc.extra != "" {
+			env = append(env, tc.extra)
 		}
+		cfg := loadConfig(t, "https://mcp.example.com/mcp", env...)
+		if got := assertedClaims(cfg); got != tc.want {
+			t.Errorf("%s %s: %+v, want %+v", tc.claims, tc.extra, got, tc.want)
+		}
+	}
+}
+
+// Every start says which emails the assertion leaves out or carries unverified, naming the setting
+// that changes it (ADR-0016, 2026-11-07 amendment).
+func TestStartupSaysWhichEmailsTheAssertionLeavesOutOrCarriesUnverified(t *testing.T) {
+	for _, tc := range []struct {
+		name, claims string
+		unverified   bool
+		entra        bool
+		want         string // "" for no warning
+	}{
+		{"no email", "roles", false, true, ""},
+		{"an OIDC IdP leaves out unverified emails", "email", false, false, "leaves out emails the IdP has not verified"},
+		{"Entra asserts no email", "email", false, true, "Entra never verifies an email"},
+		{"the opt-in carries unverified emails", "email", true, true, "carries emails the IdP has not verified"},
+		{"the opt-in without email does nothing", "roles", true, false, "BYWARD_ASSERTION_UNVERIFIED_EMAIL has no effect"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := emailWarnings(&config.Config{AssertionClaims: strings.Split(tc.claims, ","), AssertionUnverifiedEmail: tc.unverified}, tc.entra)
+			if tc.want == "" {
+				if len(ws) != 0 {
+					t.Fatalf("warnings %v, want none", ws)
+				}
+				return
+			}
+			if len(ws) != 1 || !strings.Contains(ws[0].Message, tc.want) || !strings.Contains(ws[0].String(), "BYWARD_ASSERTION_") {
+				t.Fatalf("warnings %v, want one saying %q and naming the setting", ws, tc.want)
+			}
+		})
+	}
+}
+
+// The email warning reaches the startup log.
+func TestAnEntraProxyAssertingEmailWarnsAtStartup(t *testing.T) {
+	cfg := loadConfig(t, "https://mcp.example.com/mcp", "BYWARD_ASSERTION_CLAIMS=email")
+	logs := &syncBuffer{}
+	if _, err := New(cfg, slog.New(slog.NewJSONHandler(logs, nil))); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logs.String(), "Entra never verifies an email") || !strings.Contains(logs.String(), `"setting":"BYWARD_ASSERTION_UNVERIFIED_EMAIL"`) {
+		t.Fatalf("no email warning in the startup log: %s", logs)
 	}
 }
 

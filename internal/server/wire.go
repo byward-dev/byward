@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -164,7 +165,7 @@ func assertedClaims(cfg *config.Config) broker.Asserted {
 		case "groups":
 			a.Groups = true
 		case "email":
-			a.Email = true
+			a.Email, a.UnverifiedEmail = true, cfg.AssertionUnverifiedEmail
 		case "name":
 			a.Name = true
 		default: // config.AssertionClaimNames and this switch must list the same names
@@ -281,11 +282,32 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 	for _, w := range gateWarnings {
 		p.warnings = append(p.warnings, Warning{Message: w})
 	}
+	p.warnings = append(p.warnings, emailWarnings(cfg, p.idp.gateIdP == gate.Entra)...)
 	if cfg.ScopeDescription == "" {
 		p.warnings = append(p.warnings, Warning{Message: "consent page uses generic wording", Setting: "BYWARD_SCOPE_DESCRIPTION",
 			Fix: "set it to say in plain words what the " + cfg.Scope + " scope lets an app do (ADR-0010 §4)"})
 	}
 	return p, nil
+}
+
+// emailWarnings say, at every start, which emails the identity assertion leaves out or carries
+// unverified (ADR-0016, 2026-11-07 amendment).
+func emailWarnings(cfg *config.Config, entra bool) []Warning {
+	const setting = "BYWARD_ASSERTION_UNVERIFIED_EMAIL"
+	switch email := slices.Contains(cfg.AssertionClaims, "email"); {
+	case !email && cfg.AssertionUnverifiedEmail:
+		return []Warning{{Message: setting + " has no effect", Setting: "BYWARD_ASSERTION_CLAIMS", Fix: "add email to it, or remove " + setting}}
+	case email && cfg.AssertionUnverifiedEmail:
+		return []Warning{{Message: "the identity assertion carries emails the IdP has not verified, marked email_verified false", Setting: setting,
+			Fix: "the upstream must never authorize on email; use sub"}}
+	case email && entra:
+		return []Warning{{Message: "Entra never verifies an email, so the identity assertion carries none", Setting: setting,
+			Fix: "set it to true to assert Entra's email anyway, marked email_verified false; never authorize on it"}}
+	case email:
+		return []Warning{{Message: "the identity assertion leaves out emails the IdP has not verified (email_verified)", Setting: setting,
+			Fix: "set it to true to assert them anyway, marked email_verified false"}}
+	}
+	return nil
 }
 
 // secretCheck is the permission check for secret files (ADR-0018 §11); --dev turns it off.

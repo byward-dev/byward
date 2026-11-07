@@ -114,13 +114,48 @@ func TestAnHTTPIssuerNeedsDevelopmentMode(t *testing.T) {
 // the IdP's, sub is the IdP's subject claim as the user key, and the opted-in claims come from the
 // IdP's ID token (ADR-0016 §1).
 func TestAnOIDCUsersAssertionIsByWardsWithTheIdPsSubject(t *testing.T) {
+	user := fakeidp.User{Subject: "248289761001", Name: "Jane", Groups: []string{"mcp-users"}}
+	c := oidcAssertion(t, user, "BYWARD_ASSERTION_CLAIMS=groups,name")
+	if c["iss"] != "https://mcp.example.com" || c["sub"] != user.Subject || c["client_id"] != "test-app" || c["name"] != "Jane" || !reflect.DeepEqual(c["groups"], []any{"mcp-users"}) {
+		t.Fatalf("assertion claims %v", c)
+	}
+}
+
+// An OIDC IdP's email is asserted only when its email_verified is true, unless the operator opted
+// in to unverified emails; email_verified says which (ADR-0016, 2026-11-07 amendment).
+func TestAnOIDCUsersEmailIsAssertedOnlyWhenVerified(t *testing.T) {
+	const email = "jane@example.com"
+	for _, tc := range []struct {
+		name       string
+		verified   bool
+		settings   []string
+		wantEmail  any // nil: left out
+		wantStatus any // email_verified; nil: left out
+	}{
+		{"verified", true, nil, email, true},
+		{"unverified is left out", false, nil, nil, nil},
+		{"unverified with the opt-in", false, []string{"BYWARD_ASSERTION_UNVERIFIED_EMAIL=true"}, email, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := oidcAssertion(t, fakeidp.User{Subject: "248289761001", Email: email, EmailVerified: tc.verified},
+				append([]string{"BYWARD_ASSERTION_CLAIMS=email"}, tc.settings...)...)
+			if c["email"] != tc.wantEmail || c["email_verified"] != tc.wantStatus {
+				t.Fatalf("email %v, email_verified %v; want %v, %v", c["email"], c["email_verified"], tc.wantEmail, tc.wantStatus)
+			}
+		})
+	}
+}
+
+// oidcAssertion signs user in through a generic OIDC IdP with the settings given, makes one MCP
+// request, and returns the claims of the verified assertion the upstream got.
+func oidcAssertion(t *testing.T, user fakeidp.User, settings ...string) map[string]any {
+	t.Helper()
 	const public = "https://mcp.example.com"
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
-	user := fakeidp.User{Subject: "248289761001", Name: "Jane", Groups: []string{"mcp-users"}}
 	app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}, RedirectURIs: []string{public + "/callback/oidc"}}
 	fake := fakeidp.New(t, fakeidp.Generic, fakeidp.WithClient(app), fakeidp.WithUser(user))
-	cfg, _, err := config.Load([]string{"--dev"}, append(oidcEnv(t, "oidc", fake.Issuer(), app.ID, "s3cret", "BYWARD_ASSERTION_CLAIMS=groups,name"),
+	cfg, _, err := config.Load([]string{"--dev"}, append(oidcEnv(t, "oidc", fake.Issuer(), app.ID, "s3cret", settings...),
 		"BYWARD_PUBLIC_URL="+public+"/mcp", "BYWARD_UPSTREAM_URL="+up.URL+"/mcp"), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
@@ -168,10 +203,7 @@ func TestAnOIDCUsersAssertionIsByWardsWithTheIdPsSubject(t *testing.T) {
 		t.Fatalf("MCP request: %d, upstream reached %v", res.StatusCode, ok)
 	}
 	raw, _ := strings.CutPrefix(got.Header.Get("Authorization"), "Bearer ")
-	c := verified(t, jwks(t, srv.Public.Handler, "mcp.example.com"), raw, cfg.UpstreamURL.String())
-	if c["iss"] != public || c["sub"] != user.Subject || c["client_id"] != "test-app" || c["name"] != "Jane" || !reflect.DeepEqual(c["groups"], []any{"mcp-users"}) {
-		t.Fatalf("assertion claims %v", c)
-	}
+	return verified(t, jwks(t, srv.Public.Handler, "mcp.example.com"), raw, cfg.UpstreamURL.String())
 }
 
 // A stdio process for an OIDC user runs under byward's issuer with the IdP's subject, as an Entra

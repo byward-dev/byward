@@ -79,6 +79,8 @@ type Claims struct {
 	// The identity claims asserted to the upstream: whatever of these the operator opted in to.
 	Roles, Groups []string
 	Email, Name   string
+	// EmailVerified: the IdP vouches for Email.
+	EmailVerified bool
 }
 
 // wireClaims is the sealed JSON; short names keep tokens small.
@@ -91,6 +93,7 @@ type wireClaims struct {
 	Roles     []string `json:"rol,omitempty"`
 	Groups    []string `json:"grp,omitempty"`
 	Email     string   `json:"eml,omitempty"`
+	EmailOK   bool     `json:"emv,omitempty"`
 	Name      string   `json:"nam,omitempty"`
 }
 
@@ -132,7 +135,7 @@ func (s *Sealer) Seal(t Type, c Claims) (string, error) {
 		return "", err
 	}
 	plain, err := json.Marshal(wireClaims{GrantID: c.GrantID, Subject: c.Subject, IssuedAt: c.IssuedAt.Unix(), ExpiresAt: c.ExpiresAt.Unix(),
-		ClientID: c.ClientID, Roles: c.Roles, Groups: c.Groups, Email: c.Email, Name: c.Name})
+		ClientID: c.ClientID, Roles: c.Roles, Groups: c.Groups, Email: c.Email, EmailOK: c.EmailVerified, Name: c.Name})
 	if err != nil {
 		return "", err
 	}
@@ -191,7 +194,7 @@ func (s *Sealer) Open(t Type, tok string) (Claims, error) {
 		return Claims{}, errClaims
 	}
 	c := Claims{GrantID: w.GrantID, Subject: w.Subject, IssuedAt: time.Unix(w.IssuedAt, 0), ExpiresAt: time.Unix(w.ExpiresAt, 0),
-		ClientID: w.ClientID, Roles: w.Roles, Groups: w.Groups, Email: w.Email, Name: w.Name}
+		ClientID: w.ClientID, Roles: w.Roles, Groups: w.Groups, Email: w.Email, EmailVerified: w.EmailOK, Name: w.Name}
 	if err := c.validate(t); err != nil {
 		return Claims{}, err
 	}

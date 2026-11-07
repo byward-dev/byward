@@ -25,6 +25,9 @@ type Identity struct {
 	// The opted-in identity claims, as sealed at the token's issue.
 	Roles, Groups []string
 	Email, Name   string
+	// EmailVerified: the IdP vouches for Email; false for an email asserted only because the
+	// operator opted in to unverified ones.
+	EmailVerified bool
 }
 
 // Validation errors. Only these two are distinguished to clients; every other failure,
