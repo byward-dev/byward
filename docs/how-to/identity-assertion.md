@@ -57,6 +57,8 @@ verifier that expects anything else refuses every request. The issuer is byward'
 - byward removes every copy of the assertion header a client sends, in any spelling (`_` for `-`
   included), before setting its own. A client can never supply the assertion.
 - The client's own token is never forwarded, whichever header you choose.
+- If the upstream also needs the proxy's own credential in `Authorization`, move the assertion to
+  another header ([upstream credential](upstream-credential.md)).
 - `email` and `name` are personal data (ADR-0021 §4): add them only when the upstream needs them.
 - `groups` can be large. With 200 groups, Entra's limit, a client's proxy token is about 11 KB;
   with roles only it stays under 1 KB. Groups that do not fit a token at all are left out with a

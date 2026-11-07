@@ -28,6 +28,9 @@ mode, and the only upstream kind is HTTP.
   [reference](reference/identity-assertion.md)). A stdio upstream gets the user in its process
   environment instead. Its roles and groups are as of the last sign-in or refresh: at most one
   hour old.
+- An HTTP upstream that needs the proxy's own credential, such as an API key, gets the operator's
+  value from a secret file, in a header the assertion does not use. A client cannot supply it, byward
+  never sends it to a client, and it is never logged ([upstream credential](how-to/upstream-credential.md)).
 
 **It does not:**
 
@@ -67,7 +70,7 @@ keep them (AGENTS.md). Status on `main`:
 
 | # | Invariant | Enforced in | Tested by |
 |---|---|---|---|
-| 1 | No token passthrough to the upstream | `internal/upstream/relay/relay.go` (`strip` removes `Authorization`; `access_token` dropped from the query). A stdio upstream gets only the JSON-RPC body on stdin, and an environment of an allowlist, the operator's env file and the user's key (`internal/upstream/stdio/command.go`) | `TestRelayForwardsBodyVerbatimAndStripsProxyHeaders`, `TestValidTokenIsRelayedWithoutIt`, `TestEachStdioMCPSessionIsItsOwnUpstreamProcessBoundToItsUserWithNoTokenOrProxySetting`, `TestUpstreamGetsOnlyAllowlistOperatorEnvAndIdentity`, `TestAClientCannotSupplyTheAssertionHeader` |
+| 1 | No token passthrough to the upstream | `internal/upstream/relay/relay.go` (`strip` removes `Authorization`; `access_token` dropped from the query). A stdio upstream gets only the JSON-RPC body on stdin, and an environment of an allowlist, the operator's env file and the user's key (`internal/upstream/stdio/command.go`) | `TestRelayForwardsBodyVerbatimAndStripsProxyHeaders`, `TestValidTokenIsRelayedWithoutIt`, `TestEachStdioMCPSessionIsItsOwnUpstreamProcessBoundToItsUserWithNoTokenOrProxySetting`, `TestUpstreamGetsOnlyAllowlistOperatorEnvAndIdentity`, `TestAClientCannotSupplyTheAssertionHeader`, `TestWithoutAuthenticationTheUpstreamGetsOnlyTheOperatorCredential` |
 | 2 | Never log tokens, secrets, codes or verifiers | `internal/logging/logging.go` (attribute allowlist, bearer/JWT-shaped redaction); `internal/audit` (no credential fields) | `TestRedaction`, `TestMiddlewareLogsRequestWithoutQueryOrHeaders`, `TestAuditRecordsMatchTheGoldenSchema` |
 | 3 | Named IdP endpoints from config only | `internal/idp/entra/entra.go` (`endpoint`: the fixed authority `https://login.microsoftonline.com` plus the tenant GUID; discovery is read only to check the issuer) | `TestAuthCodeURLTargetsTenantAuthorizeWithAccessAsUserScope`, `TestIssuerMustMatchTokenTenantAndAllowlist` |
 | 4 | Client-supplied URLs only through the SSRF guard | `internal/ssrfguard` (dial-time address check); `internal/server/wire.go` builds one guard and gives it to the CIMD registry (documents and `jwks_uri`) and the DCR registry (`jwks_uri`) | `TestNonPublicAddressesAreRefused`, `TestRedirectsAreNotFollowed`, `TestTheGuardedHTTPClientRefusesPrivateAddresses`, `TestCIMDClientsAreResolvedThroughTheGuardOnlyWhenOn`, `TestARegisteredClientsKeysAreFetchedThroughTheGuard` |
