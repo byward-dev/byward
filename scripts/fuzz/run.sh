@@ -37,8 +37,14 @@ while read -r pkg name; do
   if ! go test -run '^$' -fuzz "^${name}\$" -fuzztime "$fuzztime" "$pkg" </dev/null; then
     failed=$((failed + 1))
     echo "fuzz lane: $pkg $name failed"
-    # The failing input Go wrote: untracked files in this target's corpus.
-    git ls-files --others --exclude-standard -- "$dir/testdata/fuzz/$name" | while read -r f; do
+    # The failing input Go wrote: untracked files in this target's corpus. A target can fail
+    # without one (it did not build, say); the log above then says why.
+    inputs=$(git ls-files --others --exclude-standard -- "$dir/testdata/fuzz/$name")
+    if [ -z "$inputs" ]; then
+      echo "fuzz lane: $pkg $name wrote no input; see the log above"
+    fi
+    printf '%s\n' "$inputs" | while read -r f; do
+      [ -n "$f" ] || continue
       mkdir -p "$out/$(dirname "$f")"
       cp "$f" "$out/$f"
       echo "fuzz lane: crasher $f"
@@ -47,6 +53,6 @@ while read -r pkg name; do
 done <"build/fuzz/targets"
 
 if [ "$failed" -ne 0 ]; then
-  fail "$failed of $total targets failed; their inputs are in $out"
+  fail "$failed of $total targets failed; any inputs they wrote are in $out"
 fi
 echo "fuzz lane: ok ($total targets, $fuzztime each)"

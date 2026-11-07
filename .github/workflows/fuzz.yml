@@ -38,7 +38,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-  # One issue, labelled fuzz, opened on the first failure and commented on after that.
+  # One issue, labelled fuzz, opened on the first failure and commented on after that. A failure is
+  # not always a failing input: a build error, a timeout or a failed install leaves none.
   notify:
     needs: fuzz
     if: failure()
@@ -52,11 +53,11 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          gh label create fuzz --color B60205 --description "The nightly fuzz lane found a failing input" 2>/dev/null || true
+          gh label create fuzz --color B60205 --description "The nightly fuzz lane is failing" 2>/dev/null || true
           open=$(gh issue list --label fuzz --state open --json number --jq '.[0].number // empty')
           if [ -n "$open" ]; then
-            gh issue comment "$open" --body "Failed again: $RUN_URL (the inputs are in its fuzz-crashers artifact)"
+            gh issue comment "$open" --body "Failed again: $RUN_URL"
           else
-            gh issue create --label fuzz --title "The nightly fuzz lane found a failing input" \
-              --body "The fuzz lane failed: $RUN_URL. Download the fuzz-crashers artifact, add the input under the package's testdata/fuzz/<Target>/ and fix the code until it passes."
+            gh issue create --label fuzz --title "The nightly fuzz lane is failing" \
+              --body "The fuzz lane failed: $RUN_URL. If the run has a fuzz-crashers artifact, add its input under the package's testdata/fuzz/<Target>/ and fix the code until go test passes; otherwise read the run's log."
           fi
