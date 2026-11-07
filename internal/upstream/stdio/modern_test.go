@@ -793,30 +793,44 @@ func TestClosingAListenStreamCancelsTheSubscriptionOnTheUpstream(t *testing.T) {
 	}
 }
 
-// The bridge reads its headers (session, protocol version, the mirrored method and name) from the
-// header section only: a request trailer that contradicts them is never read as one, so it can
-// neither refuse a good request nor stand in for a header.
+// The bridge reads the headers it checks after the body (the protocol version and the mirrored
+// method and name) from the header section only: a request trailer is never read as one, so it can
+// neither refuse a good request nor stand in for a header the request left out.
 func TestARequestTrailerIsNeverReadAsAHeader(t *testing.T) {
-	b := newModernBridge(t, nil)
 	body := modernBody(`1`, "tools/call", "", `"name":"weather"`)
-	req, err := http.NewRequest(http.MethodPost, b.srv.URL, io.NopCloser(strings.NewReader(body))) // no length: chunked
-	if err != nil {
-		t.Fatal(err)
-	}
-	h := modernHeaders(body)
-	for i := 0; i+1 < len(h); i += 2 {
-		req.Header.Set(h[i], h[i+1])
-	}
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	req.Header.Set(userHeader, "alice")
-	req.Trailer = http.Header{"Mcp-Name": {"news"}, "Mcp-Protocol-Version": {"1999-01-01"}, sessionHeader: {"forged"}}
-	res, err := b.srv.Client().Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = res.Body.Close() })
-	if res.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(res.Body)
-		t.Fatalf("status %d, body %s; want 200, the trailers unread", res.StatusCode, raw)
+	for _, tc := range []struct {
+		name    string
+		omit    string      // a mirrored header the request leaves out
+		trailer http.Header // sent after the body
+		want    int
+	}{
+		{"a trailer contradicting the headers", "", http.Header{"Mcp-Name": {"news"}, "Mcp-Protocol-Version": {"1999-01-01"}}, http.StatusOK},
+		{"a trailer standing in for a missing header", "Mcp-Name", http.Header{"Mcp-Name": {"weather"}}, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newModernBridge(t, nil)
+			req, err := http.NewRequest(http.MethodPost, b.srv.URL, io.NopCloser(strings.NewReader(body))) // no length: chunked, with trailers
+			if err != nil {
+				t.Fatal(err)
+			}
+			h := modernHeaders(body)
+			for i := 0; i+1 < len(h); i += 2 {
+				if h[i] != tc.omit {
+					req.Header.Set(h[i], h[i+1])
+				}
+			}
+			req.Header.Set("Accept", "application/json, text/event-stream")
+			req.Header.Set(userHeader, "alice")
+			req.Trailer = tc.trailer
+			res, err := b.srv.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = res.Body.Close() })
+			if res.StatusCode != tc.want {
+				raw, _ := io.ReadAll(res.Body)
+				t.Fatalf("status %d, body %s; want %d, the trailer unread", res.StatusCode, raw, tc.want)
+			}
+		})
 	}
 }

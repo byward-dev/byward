@@ -195,8 +195,8 @@ Sources: [OpenSSF Best Practices (Silver)](https://www.bestpractices.dev/en/crit
 14. Size, time and count limits on registration, CIMD and the store.
 15. Errors never echo secrets or upstream internals.
 16. The reverse proxy uses `httputil.ReverseProxy.Rewrite`, never `Director`; identity, forwarding,
-    authorization and downstream-token headers are stripped before ours are set, and a client's request
-    trailers never reach the upstream (ADR-0016, ADR-0018).
+    authorization and downstream-token headers are stripped before ours are set, and an MCP client's
+    request trailers never reach the upstream (ADR-0016, ADR-0018).
 17. The MCP endpoint checks `Origin` (403) and `Host` (421) before authentication; the default bind is
     `127.0.0.1` (ADR-0018).
 18. Every `http.Server` timeout and `MaxHeaderBytes` is set; builds use the latest Go patch release;

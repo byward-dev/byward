@@ -97,19 +97,21 @@ Clients (runtime, 2026-11-06): Node `fetch` and MCP Inspector CLI 2.14.0 (TypeSc
 
 ## Amendment 2026-11-07 (request trailers, #167)
 
-- **§6 reverse proxy:** the relay drops every request trailer a client sends (`Rewrite` sets
+- **§6 reverse proxy:** the relay drops every request trailer an MCP client sends (`Rewrite` sets
   `Request.Trailer` to nil). Trailers arrive after a chunked body, so the strip-then-inject of ADR-0016 §4
-  never sees them. `ReverseProxy` removes the `Trailer` header as hop-by-hop, but `Request.Clone` keeps the
-  trailers themselves, so a trailer named like the assertion, the operator's credential or a plain identity
-  header reached the upstream. An upstream framework that reads trailers as headers could take it for ours.
-  Nothing legitimate is lost:
-  - neither MCP transports revision (2025-06-18, 2025-11-25) mentions trailers;
-  - none of the six official SDKs (TypeScript, Python, Go, Java, C#, Rust) or the HTTP libraries they use sends
-    them;
+  never sees them. `ReverseProxy` removes the client's `Trailer` header as hop-by-hop, but `Request.Clone`
+  keeps the announced names, and the Transport announced and sent them on: a trailer named like the
+  identity assertion, the upstream credential or a plain identity header reached the upstream by name,
+  with an empty value, because the relay forwards before the body is read. Anything that read the body
+  first would have sent the client's values too, for an upstream framework that reads trailers as headers
+  to take for ours. Nothing legitimate is lost:
+  - neither revision of the MCP transports spec (2025-06-18, 2025-11-25) mentions trailers;
+  - none of the six official SDKs (TypeScript, Python, Go, Java, C#, Rust) or the HTTP libraries they use
+    sends them;
   - the Fetch Standard forbids `Trailer` and `TE` as request headers, so a browser cannot send them;
-  - RFC 9112 §7.1.2: a recipient that removes the chunked coding "MAY selectively retain or discard the received
-    trailer fields".
+  - RFC 9112 §7.1.2: a recipient that removes the chunked coding "MAY selectively retain or discard the
+    received trailer fields".
 
   Sources checked 2026-11-07; research notes kept outside the repository. The stdio bridge reads its headers
-  from the header section only, so a trailer is never read as one there either.
-
+  from the header section only, so a trailer is never read as one there either. Response trailers from the
+  upstream are a separate matter.

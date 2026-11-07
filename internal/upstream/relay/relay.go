@@ -77,10 +77,11 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 			pr.Out.URL.Path, pr.Out.URL.RawPath = t.Path, t.RawPath
 			pr.Out.Host = ""
 			strip(pr.Out.Header, o.strip)
-			// A client's request trailers never reach the upstream: they are a second set of headers
-			// the strip above never sees, sent after the body, so a trailer named like a header the
-			// proxy sets could reach an upstream that reads trailers as headers. No MCP transport uses
-			// them. (ReverseProxy already drops the Trailer header itself, as hop-by-hop.)
+			// An MCP client's request trailers never reach the upstream: they are a second set of
+			// headers, sent after the body, that the strip above never sees. ReverseProxy drops the
+			// client's Trailer header, but Clone keeps the announced names, which the Transport would
+			// announce and send on; their values would follow whenever the body was read before this
+			// point. No MCP transport uses request trailers.
 			pr.Out.Trailer = nil
 			// A token in the query never reaches the upstream, with or without authentication.
 			pr.Out.URL.RawQuery = withoutAccessToken(pr.Out.URL.RawQuery)
