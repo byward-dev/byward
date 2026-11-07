@@ -14,7 +14,8 @@ import (
 
 // setIdentityHeaders writes the user the guard admitted into the plain identity headers (ADR-0016
 // §5), from the same identity the assertion is minted from. A claim the identity does not carry
-// (not opted in, or absent for this user) gets no header, never an empty one.
+// (not opted in, or absent for this user) gets no header; a list keeps every item, an empty one
+// too.
 //
 // Email: the same value the assertion carries, from the access token's sealed claims; #151 decides
 // when an unverified email is dropped there, for both.

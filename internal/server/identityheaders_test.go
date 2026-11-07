@@ -20,9 +20,10 @@ import (
 	"github.com/byward-dev/byward/internal/token"
 )
 
-// headerOfClaim is which plain identity header carries which assertion claim.
-var headerOfClaim = map[string]string{"sub": config.HeaderSubject, "client_id": config.HeaderClientID, "roles": config.HeaderRoles,
-	"groups": config.HeaderGroups, "email": config.HeaderEmail, "name": config.HeaderName}
+// headerOfClaim is which plain identity header carries which assertion claim: the names as
+// documented (docs/how-to/plain-identity-headers.md), which upstreams read.
+var headerOfClaim = map[string]string{"sub": "X-Byward-Subject", "client_id": "X-Byward-Client-Id", "roles": "X-Byward-Roles",
+	"groups": "X-Byward-Groups", "email": "X-Byward-Email", "name": "X-Byward-Name"}
 
 // forgedIdentityHeaders is a client's copy of every plain identity header, and one in `_` spelling.
 func forgedIdentityHeaders() http.Header {
@@ -132,6 +133,15 @@ func TestAnAbsentClaimSendsNoPlainHeader(t *testing.T) {
 	}
 }
 
+// A list of one empty item is still the claim: the header is sent, with an empty value.
+func TestAListOfOneEmptyItemSendsAnEmptyHeader(t *testing.T) {
+	a := newAsserting(t, "BYWARD_IDENTITY_HEADERS=true")
+	got := a.call(t, token.Claims{GrantID: "g1", Subject: "tid:oid", ClientID: "c", Roles: []string{""}}, nil)
+	if v, ok := got.Header[config.HeaderRoles]; !ok || len(v) != 1 || v[0] != "" {
+		t.Fatalf("%s = %q, %v; want one empty value", config.HeaderRoles, v, ok)
+	}
+}
+
 // Off (the default), and without authentication, the proxy sends none and still removes every copy
 // a client sends, so turning them on or off never lets a forged one through.
 func TestWithPlainIdentityHeadersOffAClientsCopiesAreStillRemoved(t *testing.T) {
@@ -184,7 +194,7 @@ func TestTurningOnPlainIdentityHeadersLogsAWarning(t *testing.T) {
 	}{{"off", nil, false}, {"on", []string{"BYWARD_IDENTITY_HEADERS=true"}, true}} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := newAsserting(t, tc.env...)
-			if got := strings.Contains(a.logs.String(), "plain identity headers are on"); got != tc.want {
+			if got := strings.Contains(a.logs.String(), `level=WARN msg="plain identity headers are on"`); got != tc.want {
 				t.Errorf("warning logged %v", got)
 			}
 		})
@@ -240,7 +250,11 @@ func TestDoctorPassesOnlyAnUpstreamHostWithNoPublicAddress(t *testing.T) {
 func TestDoctorChecksTheUpstreamHostOnlyWithPlainIdentityHeadersOn(t *testing.T) {
 	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
 		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{"s3cret-entra"}}))
-	private := func(context.Context, string) ([]netip.Addr, error) {
+	// Only the bare host name resolves: a host with its port would not, and warn.
+	private := func(_ context.Context, host string) ([]netip.Addr, error) {
+		if host != "mcp.internal" {
+			return nil, errors.New("no such host " + host)
+		}
 		return []netip.Addr{netip.MustParseAddr("10.0.0.1")}, nil
 	}
 	for _, tc := range []struct {
@@ -249,7 +263,7 @@ func TestDoctorChecksTheUpstreamHostOnlyWithPlainIdentityHeadersOn(t *testing.T)
 		wantCheck bool
 	}{
 		{"off", nil, false},
-		{"on", []string{"BYWARD_IDENTITY_HEADERS=true"}, true},
+		{"on", []string{"BYWARD_IDENTITY_HEADERS=true", "BYWARD_UPSTREAM_URL=http://mcp.internal:8080/mcp"}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := loadConfig(t, "https://mcp.example.com/mcp", tc.env...)

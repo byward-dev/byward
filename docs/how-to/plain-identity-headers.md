@@ -24,7 +24,7 @@ there.
 | `X-Byward-Email` | the user's email | with `email` |
 | `X-Byward-Name` | the user's display name | with `name` |
 
-- A claim the user does not have sends no header, never an empty one. With Entra's groups overage
+- A claim the user does not have sends no header. A list keeps every item the IdP sent, an empty one too, so it always decodes to exactly the assertion's claim. With Entra's groups overage
   there is no `X-Byward-Groups`; byward never sends an incomplete list.
 - `X-Byward-Email` is the same value as the assertion's `email`. Don't authorize on it: Entra does
   not verify it. Use `X-Byward-Subject`.
@@ -45,11 +45,13 @@ X-Byward-Name: Ren%C3%A9e%20Martin
 
 ```python
 from urllib.parse import unquote
-roles = [unquote(r) for r in request.headers.get("X-Byward-Roles", "").split(",") if r]
+h = request.headers.get("X-Byward-Roles")
+roles = [unquote(r) for r in h.split(",")] if h is not None else []
 ```
 
 ```js
-const roles = (req.headers['x-byward-roles'] ?? '').split(',').filter(Boolean).map(decodeURIComponent);
+const h = req.headers['x-byward-roles'];
+const roles = h === undefined ? [] : h.split(',').map(decodeURIComponent);
 ```
 
 ## What byward guarantees
