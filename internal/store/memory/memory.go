@@ -26,6 +26,7 @@ type Store struct {
 	revs     []store.Revocation
 	clients  map[string]store.Client
 	consents map[store.ConsentKey]store.Consent
+	logins   map[[sha256.Size]byte]time.Time // spent logins, by hash, until their expiry
 }
 
 // token is a stored refresh token with its successor, set when it is rotated.
@@ -49,7 +50,22 @@ func New() *Store {
 		tokens:   map[[sha256.Size]byte]*token{},
 		clients:  map[string]store.Client{},
 		consents: map[store.ConsentKey]store.Consent{},
+		logins:   map[[sha256.Size]byte]time.Time{},
 	}
+}
+
+// SpendLogin implements store.Logins.
+func (s *Store) SpendLogin(_ context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
+	if !expiresAt.After(now) {
+		return store.ErrInvalid
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if until, ok := s.logins[hash]; ok && now.Before(until) {
+		return store.ErrConsumed
+	}
+	s.logins[hash] = expiresAt
+	return nil
 }
 
 // CreateGrant implements store.Grants.
@@ -298,6 +314,11 @@ func (s *Store) Collect(_ context.Context, now time.Time) error {
 	for k, c := range s.consents {
 		if !now.Before(c.ExpiresAt) {
 			delete(s.consents, k)
+		}
+	}
+	for h, until := range s.logins {
+		if !now.Before(until) {
+			delete(s.logins, h)
 		}
 	}
 	unused := now.Add(-store.UnusedClientLifetime)

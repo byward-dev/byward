@@ -413,7 +413,9 @@ func TestShutdownStopsEveryProcessAndRefusesNewOnes(t *testing.T) {
 }
 
 // Regression (d6eb42d): an idle timer that fires before AfterFunc returns must not race with the
-// assignment of the timer. syncClock makes that firing certain, so the bug panics without -race.
+// assignment of the timer. syncClock fires the timer before AfterFunc returns, almost always, so
+// the bug panics without -race. A callback that loses the process lock to the spawning Get's hold
+// skips the stop; the release resets the timer, which fires it again.
 func TestIdleTimerFiringDuringStartStopsTheProcess(t *testing.T) {
 	h := newHarness(t, func(c *Config) { c.Clock = syncClock{} })
 	waitDone(t, h.get(t, "s1", alice))
@@ -482,8 +484,10 @@ func TestShutdownGivesUpWhenItsContextEnds(t *testing.T) {
 	}
 }
 
-// syncClock fires every timer at once on another goroutine and gives it up to 50 ms to finish
-// before AfterFunc returns. Its timers cannot be reset or stopped.
+// syncClock fires every timer at once on another goroutine. AfterFunc gives it 50 ms to finish
+// before returning; that only makes a firing during start likely enough for the d6eb42d bug to
+// show, and no outcome depends on it. Like a real timer that has fired, a timer that is Reset fires
+// again.
 type syncClock struct{}
 
 func (syncClock) Now() time.Time { return time.Now() }
@@ -495,13 +499,16 @@ func (syncClock) AfterFunc(_ time.Duration, f func()) Timer {
 	case <-done:
 	case <-time.After(50 * time.Millisecond): // f is blocked, as it should be, on the process lock
 	}
-	return firedTimer{}
+	return firedTimer{f}
 }
 
-type firedTimer struct{}
+// firedTimer is a timer that has fired: Reset fires it again at once; Stop cancels nothing, which
+// is safe because the callback re-checks held under the process lock and stopLocked acts only
+// once.
+type firedTimer struct{ f func() }
 
-func (firedTimer) Reset(time.Duration) bool { return false }
-func (firedTimer) Stop() bool               { return false }
+func (t firedTimer) Reset(time.Duration) bool { go t.f(); return false }
+func (firedTimer) Stop() bool                 { return false }
 
 func TestSameSubjectFromAnotherIssuerIsAnotherUser(t *testing.T) {
 	h := newHarness(t, nil)
@@ -546,6 +553,26 @@ func TestCrashIsNotLoggedAsAStdoutStop(t *testing.T) {
 	if len(h.log.with("stopping upstream process")) != 0 || len(h.log.with("upstream process exited unexpectedly")) != 1 {
 		t.Fatal("a crash must be logged as an unexpected exit, not as a stop")
 	}
+}
+
+// An idle timer that fired just before a lease took the process lock finds it held and keeps the
+// process; the release re-arms it.
+func TestIdleTimerThatFiresWhileHeldKeepsTheProcessAndTheReleaseRearmsIt(t *testing.T) {
+	h := newHarness(t, nil)
+	p, release := h.lease(t, "s1", alice)
+	h.clk.mu.Lock()
+	idle := h.clk.timers[0].f // the clock's first timer is the process's idle timer
+	h.clk.mu.Unlock()
+	idle()
+	if n := len(h.log.with("stopping upstream process")); n != 0 {
+		t.Fatalf("%d stops: an idle firing stopped a held process", n)
+	}
+	release()
+	h.clk.Advance(DefaultIdleTimeout)
+	if recs := h.log.with("stopping upstream process"); len(recs) != 1 || recs[0].attrs["reason"] != "idle" {
+		t.Fatalf("stop records %v, want one for idle after the release", recs)
+	}
+	waitDone(t, p)
 }
 
 func TestProcessInUseNeverIdlesOutAndIdlesFromItsLastRelease(t *testing.T) {
