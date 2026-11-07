@@ -12,7 +12,8 @@ trap 'rm -rf "$tmp"' EXIT
 # default excludes file sits under XDG_CONFIG_HOME or HOME even without a global config.
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 HOME="$tmp" XDG_CONFIG_HOME="$tmp"
 # Inherited repository variables (git exports them to hooks) would point git at the outer repository.
-unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR
+unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR \
+  GIT_TEMPLATE_DIR
 failures=0
 
 mkdir -p "$tmp/bin"
@@ -106,7 +107,7 @@ run() {
 
 run all-pass-and-stale-crashers-are-cleared ok "" "" 0 'fuzz lane: ok \(3 targets, 1s each\)' "" "$all"
 run one-fails-and-the-rest-still-run ok "FuzzB" "" 1 'FAIL: 1 of 3 targets failed' "a/testdata/fuzz/FuzzB/0123abcd" "$all" 'wrote no input'
-run keeps-only-new-inputs-not-committed-seeds ok "FuzzA FuzzC" "" 1 'FAIL: 2 of 3 targets failed' \
+run keeps-only-new-inputs-not-tracked-seeds ok "FuzzA FuzzC" "" 1 'FAIL: 2 of 3 targets failed' \
   "a/testdata/fuzz/FuzzA/0123abcd c/d/testdata/fuzz/FuzzC/0123abcd" "$all"
 # FuzzA's input sits beside FuzzB's empty corpus: each target gets only its own.
 run a-failure-without-an-input-says-so ok "FuzzA" "FuzzB" 1 'example.com/m/a FuzzB wrote no input;FAIL: 2 of 3 targets failed' "a/testdata/fuzz/FuzzA/0123abcd" "$all"
