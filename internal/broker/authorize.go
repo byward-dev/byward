@@ -2,7 +2,9 @@ package broker
 
 import (
 	"bytes"
+	"cmp"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -317,7 +319,8 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 		// A silent sign-in's sealed login names a validated redirect URI: answer there, never a page.
 		// Its login is spent as at any other callback: the browser is told to drop it, so it cannot
 		// finish this sign-in later.
-		if l, c, badLogin := b.openLogin(r); badLogin == "" && l.Silent {
+		// A replay of a login already used gets the page.
+		if l, c, badLogin := b.openLogin(r); badLogin == "" && l.Silent && !errors.Is(b.spendLogin(r, l), store.ErrConsumed) {
 			b.expireLogin(w, c)
 			b.refuseSilently(w, r, "", l, "temporarily_unavailable", "too many sign-in attempts from this network; retry after "+strconv.Itoa(retry)+" s")
 			return
@@ -331,9 +334,22 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	if c != nil { // single use: spent whether or not it opens
 		b.expireLogin(w, c)
 	}
-	if badLogin != "" {
+	spent := error(nil)
+	if badLogin == "" {
+		spent = b.spendLogin(r, l) // before the IdP: a login is used once, whatever the browser kept (#150)
+	}
+	if badLogin != "" || errors.Is(spent, store.ErrConsumed) {
 		b.cfg.Audit.RecordUnauthenticated(r, audit.Event{Name: audit.Login, Outcome: audit.Failure, Reason: "sign-in state missing, invalid or expired", IdP: b.cfg.IdPName})
-		b.page(w, r, http.StatusBadRequest, badLogin, "Start again from your app.")
+		b.page(w, r, http.StatusBadRequest, cmp.Or(badLogin, "This sign-in has expired."), "Start again from your app.")
+		return
+	}
+	if spent != nil { // the store is down: no login goes on unrecorded
+		if l.Silent {
+			b.cfg.Log.ErrorContext(ctx, "recording a used login failed", "request_id", logging.RequestID(ctx), "error", spent)
+			b.refuseSilently(w, r, "", l, "temporarily_unavailable", "the proxy could not record the sign-in; try again")
+			return
+		}
+		b.serverError(w, r, spent)
 		return
 	}
 	start := time.Now()
@@ -441,6 +457,13 @@ func (b *Broker) openLogin(r *http.Request) (l login, c *http.Cookie, badLogin s
 		return login{}, c, "This sign-in has expired."
 	}
 	return l, c, ""
+}
+
+// spendLogin records l as used, so the server refuses it a second time (store.ErrConsumed) for as
+// long as its sealed cookie could still open.
+func (b *Broker) spendLogin(r *http.Request, l login) error {
+	now := b.cfg.Now()
+	return b.cfg.Store.SpendLogin(r.Context(), sha256.Sum256([]byte(l.IdPState)), now, now.Add(LoginLifetime))
 }
 
 // expireLogin deletes a login cookie, so the login it holds cannot be used again.

@@ -66,6 +66,8 @@ type memStore struct {
 	rewriteBlob func([]byte) []byte
 	createDown  atomic.Bool // CreateGrant fails
 	putCodeDown atomic.Bool // PutCode fails
+	spendDown   atomic.Bool // SpendLogin fails
+	consentDown atomic.Bool // Consent fails: the remembered-consent check, while the rest of the store works
 }
 
 var errStoreDown = errors.New("store down")
@@ -85,7 +87,7 @@ func (m *memStore) RememberConsent(ctx context.Context, c store.Consent) error {
 }
 
 func (m *memStore) Consent(ctx context.Context, k store.ConsentKey) (store.Consent, error) {
-	if m.down.Load() {
+	if m.down.Load() || m.consentDown.Load() {
 		return store.Consent{}, errStoreDown
 	}
 	return m.Store.Consent(ctx, k)
@@ -121,6 +123,13 @@ func (m *memStore) SetIdPTokens(ctx context.Context, id string, sealed []byte) e
 		return err
 	}
 	return m.Store.SetIdPTokens(ctx, id, sealed)
+}
+
+func (m *memStore) SpendLogin(ctx context.Context, h [32]byte, now, expiresAt time.Time) error {
+	if m.down.Load() || m.spendDown.Load() {
+		return errStoreDown
+	}
+	return m.Store.SpendLogin(ctx, h, now, expiresAt)
 }
 
 func (m *memStore) PutCode(ctx context.Context, c store.PendingCode) error {
@@ -1430,5 +1439,39 @@ func TestRevocationsOutliveTheTokensAndLoginsTheyCover(t *testing.T) {
 		if store.RevocationRetention <= lifetime {
 			t.Errorf("store.RevocationRetention %v is shorter than the %s lifetime %v", store.RevocationRetention, name, lifetime)
 		}
+	}
+}
+
+// A login is used once on the server (#150): replaying a callback with a kept copy of the login
+// cookie after it signed in, at any time the cookie still opens, gets the expired-sign-in page, not
+// a second answer, and never reaches the IdP.
+func TestAReplayedCallbackIsRefusedByTheServer(t *testing.T) {
+	e := newEnv(t)
+	c, cb := e.startLogin(t, nil)
+	if res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{c}); res.StatusCode != http.StatusFound {
+		t.Fatalf("first callback: %d", res.StatusCode)
+	}
+	before := len(e.idpOps)
+	e.now = e.now.Add(LoginLifetime / 2) // the sealed login still opens
+	replay := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{c})
+	if got := pageTitle(t, replay); replay.StatusCode != http.StatusBadRequest || got != "This sign-in has expired." {
+		t.Fatalf("replay: %d %q, want 400 This sign-in has expired.", replay.StatusCode, got)
+	}
+	if len(e.idpOps) != before {
+		t.Fatalf("the replay reached the IdP: %v", e.idpOps[before:])
+	}
+}
+
+// When the used login cannot be recorded, the callback goes no further: no IdP call and no grant.
+func TestACallbackWhoseLoginCannotBeRecordedStops(t *testing.T) {
+	e := newEnv(t)
+	c, cb := e.startLogin(t, nil)
+	e.st.spendDown.Store(true)
+	before := len(e.idpOps)
+	if res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{c}); res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("callback with the store down: %d, want 500", res.StatusCode)
+	}
+	if len(e.idpOps) != before || firstGrant(e.st) != "" {
+		t.Fatalf("the callback went on: IdP calls %v, grant %q", e.idpOps[before:], firstGrant(e.st))
 	}
 }

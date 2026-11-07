@@ -227,7 +227,7 @@ func TestPromptNoneWhoseConsentDoesNotHoldAfterTheIdPGetsNoCodeAndNoPage(t *test
 			}
 		}, true},
 		{"a store failure while checking gets temporarily_unavailable", "temporarily_unavailable", hintNotRemembered, func(t *testing.T, e *env) {
-			e.st.down.Store(true)
+			e.st.consentDown.Store(true)
 		}, false},
 		{"a registry failure while checking gets temporarily_unavailable", "temporarily_unavailable", hintNotRemembered, func(t *testing.T, e *env) {
 			e.reg.fail()
@@ -263,6 +263,19 @@ func TestPromptNoneWhoseConsentDoesNotHoldAfterTheIdPGetsNoCodeAndNoPage(t *test
 	}
 }
 
+// A silent sign-in whose used login cannot be recorded answers temporarily_unavailable at the
+// redirect, before the IdP leg, not a page.
+func TestPromptNoneWhoseLoginCannotBeRecordedIsTemporarilyUnavailable(t *testing.T) {
+	e := newEnv(t, withRemember(t, nil))
+	h := e.remember(t, nil)
+	e.fake.Set(fakeidp.WithSilentSession())
+	res := e.authorizeWith(t, silent(nil), h)
+	e.st.spendDown.Store(true)
+	if got := answerOf(t, e.finish(t, res)); got != refused(e, "temporarily_unavailable") {
+		t.Fatalf("answer %+v, want temporarily_unavailable", got)
+	}
+}
+
 // A broker failure after the IdP is server_error at the redirect for a silent sign-in, not a page.
 func TestPromptNoneWhoseSignInFailsAfterTheIdPIsAServerError(t *testing.T) {
 	for _, tc := range []struct {
@@ -287,9 +300,9 @@ func TestPromptNoneWhoseSignInFailsAfterTheIdPIsAServerError(t *testing.T) {
 }
 
 // A silent sign-in whose callback is rate limited is answered at its redirect URI, which its sealed
-// login names, not with the page, and its login is spent: a browser that honours the expiry cannot
-// finish that sign-in later. (The login is single use on the client side only, as for an
-// interactive callback; a kept copy of the cookie is not refused by the server.)
+// login names, not with the page, and its login is spent on both sides: the browser is told to drop
+// it, and the server refuses even a kept copy of the cookie (#150). A replay of that spent login
+// gets the 429 page while the limit holds, not a second answer at the redirect.
 func TestPromptNoneWhoseCallbackIsRateLimitedIsTemporarilyUnavailableAndSpendsItsLogin(t *testing.T) {
 	e := newEnv(t, withRemember(t, nil))
 	h := e.remember(t, nil)
@@ -315,14 +328,15 @@ func TestPromptNoneWhoseCallbackIsRateLimitedIsTemporarilyUnavailableAndSpendsIt
 	if got := answerOf(t, throttled); got != refused(e, "temporarily_unavailable") {
 		t.Fatalf("answer %+v, want temporarily_unavailable", got)
 	}
-	// What the browser still holds after that answer: nothing if it was told to drop the login.
-	var held []*http.Cookie
 	if c := cookieNamed(throttled, login.Name); c == nil || c.MaxAge >= 0 || c.Path != login.Path { // a browser deletes only a matching cookie
-		held = []*http.Cookie{login}
+		t.Fatalf("the login cookie was not expired: %+v", c)
+	}
+	if again := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{login}); again.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("a replay of the spent login under the limit: %d, want the 429 page", again.StatusCode)
 	}
 	e.b.cfg.Limiter = nil
-	if replay := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, held); replay.StatusCode != http.StatusBadRequest || replay.Header.Get("Location") != "" {
-		t.Fatalf("the browser's retry after the limit lifted: %d to %q, want the expired-sign-in page", replay.StatusCode, replay.Header.Get("Location"))
+	if replay := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{login}); replay.StatusCode != http.StatusBadRequest || replay.Header.Get("Location") != "" {
+		t.Fatalf("a replay with a kept copy of the cookie after the limit lifted: %d to %q, want the expired-sign-in page", replay.StatusCode, replay.Header.Get("Location"))
 	}
 }
 
