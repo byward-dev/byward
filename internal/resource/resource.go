@@ -24,6 +24,9 @@ type Identity struct {
 	ClientID string
 	// PrincipalType is PrincipalUser, or PrincipalClient for an app-only caller (ADR-0022 §5).
 	PrincipalType string
+	// GrantID is the grant the token was issued for; it leads to the user's stored IdP tokens
+	// (On-Behalf-Of, ADR-0017). Never sent to the upstream.
+	GrantID string
 	// The opted-in identity claims, as sealed at the token's issue; an app-only caller's roles.
 	Roles, Groups []string
 	Email, Name   string

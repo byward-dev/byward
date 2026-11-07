@@ -27,8 +27,9 @@ type identityProvider struct {
 	redirect string // the callback URL to register at the IdP
 	label    string // for the consent page ("You'll sign in with <label> next")
 	adapter  broker.IdP
-	scope    string // the scope sent to the IdP, for the consent page's technical details
-	gateIdP  string // gate.Entra, gate.Google or gate.Generic
+	entra    *entra.Provider // the Entra adapter, for On-Behalf-Of (ADR-0017); nil for any other IdP
+	scope    string          // the scope sent to the IdP, for the consent page's technical details
+	gateIdP  string          // gate.Entra, gate.Google or gate.Generic
 	// warnings are logged at every start and reported by check and doctor.
 	warnings []Warning
 	// userKey checks and canonicalises an operator's user key for revoke-user, as the IdP's
@@ -73,6 +74,10 @@ func newIdentityProvider(cfg *config.Config, idpHTTP *http.Client) (*identityPro
 	return newOIDCIdentityProvider(cfg, idpHTTP, redirect)
 }
 
+// newEntraProvider is entra.New; tests replace it to reach a fake IdP through its HTTP client
+// (named IdP endpoints are never configurable).
+var newEntraProvider = entra.New
+
 // newEntraIdentityProvider is Entra (ADR-0012), with its own doctor checks, the credential's expiry
 // warning, and the refusal to start with an expired certificate.
 func newEntraIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect string) (*identityProvider, error) {
@@ -80,12 +85,12 @@ func newEntraIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect
 	if err != nil {
 		return nil, err
 	}
-	p, err := entra.New(entra.Config{Tenant: cfg.EntraTenant, ClientID: cfg.EntraClientID,
+	p, err := newEntraProvider(entra.Config{Tenant: cfg.EntraTenant, ClientID: cfg.EntraClientID,
 		ClientAuth: auth, RedirectURL: redirect, HTTPClient: idpHTTP})
 	if err != nil {
 		return nil, fmt.Errorf("entra settings (BYWARD_ENTRA_*): %w", err)
 	}
-	return &identityProvider{name: cfg.IdP, redirect: redirect, label: "Microsoft Entra", adapter: p, scope: p.Scope(), gateIdP: gate.Entra, userKey: entra.UserKey, appTokens: p,
+	return &identityProvider{name: cfg.IdP, redirect: redirect, label: "Microsoft Entra", adapter: p, entra: p, scope: p.Scope(), gateIdP: gate.Entra, userKey: entra.UserKey, appTokens: p,
 		diagnose: func(ctx context.Context, now time.Time) []doctor.Result {
 			out := p.Diagnose(ctx, diag)
 			switch {

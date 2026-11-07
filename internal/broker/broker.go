@@ -32,8 +32,14 @@ import (
 const (
 	CodeLifetime   = 60 * time.Second
 	AccessLifetime = time.Hour
-	GrantLifetime  = 30 * 24 * time.Hour
-	LoginLifetime  = 10 * time.Minute
+	// IdPTokenMargin: with CapAccessToIdPToken, an access token expires this long before the IdP
+	// access token it rides on (the downstream cache's margin, ADR-0017 §4).
+	IdPTokenMargin = 60 * time.Second
+	// MinCappedLifetime: a cap that would leave an access token less than this is not applied; a
+	// client given expires_in 0 would refresh in a loop.
+	MinCappedLifetime = 30 * time.Second
+	GrantLifetime     = 30 * 24 * time.Hour
+	LoginLifetime     = 10 * time.Minute
 	// ConsentLifetime is how long a remembered consent counts, from its Allow (ADR-0010 §3); it does
 	// not slide with use.
 	ConsentLifetime = 30 * 24 * time.Hour
@@ -112,6 +118,10 @@ type Config struct {
 	// RefreshGrace is how long the previous refresh token may be presented again after a rotation
 	// (a lost response); 0 disables it. At most MaxRefreshGrace.
 	RefreshGrace time.Duration
+	// CapAccessToIdPToken caps every access token at the grant's IdP access token expiry minus
+	// IdPTokenMargin, so the token On-Behalf-Of presents is valid while the access token is
+	// (ADR-0017 amendment 2026-11-07). The server sets it when On-Behalf-Of is on.
+	CapAccessToIdPToken bool
 	// SecureCookies is false only in development mode on loopback http (ADR-0010 §10).
 	SecureCookies bool
 	Log           *slog.Logger
