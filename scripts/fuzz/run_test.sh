@@ -11,7 +11,8 @@ trap 'rm -rf "$tmp"' EXIT
 # The developer's git config (hooks, excludes, signing) must not reach the test repositories. The
 # default excludes file sits under XDG_CONFIG_HOME or HOME even without a global config.
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 HOME="$tmp" XDG_CONFIG_HOME="$tmp"
-unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS
+# Inherited repository variables (git exports them to hooks) would point git at the outer repository.
+unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR
 failures=0
 
 mkdir -p "$tmp/bin"
@@ -48,7 +49,7 @@ case " \$(cat "$tmp/failing") " in
 *" \$name "*)
   dir=".\${pkg#example.com/m}/testdata/fuzz/\$name"
   mkdir -p "\$dir"
-  echo 'go test fuzz v1' >"\$dir/0123abcd"
+  printf 'go test fuzz v1\nstring(%s)\n' "\$name" >"\$dir/0123abcd" # its own content, to compare
   exit 1 ;;
 esac
 exit 0
@@ -56,6 +57,7 @@ EOF
 chmod +x "$tmp/bin/go"
 
 all="^\$ ^FuzzA\$ 1s example.com/m/a;^\$ ^FuzzB\$ 1s example.com/m/a;^\$ ^FuzzC\$ 1s example.com/m/c/d"
+fuzztime=1s # FUZZTIME for the next rows; empty leaves it unset
 
 # case name | listing (ok, fails, empty) | targets failing with an input | targets failing without
 # one | want exit | want output (grep -E patterns, ;-separated, each required) | want crashers (space-separated) | want runs (;-separated) |
@@ -74,11 +76,19 @@ run() {
   printf '%s' "$4" >"$tmp/no-input"
   : >"$tmp/ran"
   set +e
-  out=$(cd "$repo" && PATH="$tmp/bin:$PATH" FUZZTIME=1s sh "$script" 2>&1)
+  out=$(
+    cd "$repo" || exit
+    if [ -n "$fuzztime" ]; then export FUZZTIME="$fuzztime"; else unset FUZZTIME; fi
+    PATH="$tmp/bin:$PATH" sh "$script" 2>&1
+  )
   code=$?
   set -e
   crashers=$(cd "$repo" && find build/fuzz/crashers -type f 2>/dev/null | sed 's|^build/fuzz/crashers/||' | sort | tr '\n' ' ' | sed 's/ $//')
   ran=$(tr '\n' ';' <"$tmp/ran" | sed 's/;$//')
+  # Each crasher must be a copy of the input Go wrote, which is what a developer replays.
+  for f in $crashers; do
+    cmp -s "$repo/$f" "$repo/build/fuzz/crashers/$f" || crashers="$crashers (differs: $f)"
+  done
   unwanted=${9:-}
   missing=""
   old_ifs=$IFS
@@ -99,9 +109,25 @@ run one-fails-and-the-rest-still-run ok "FuzzB" "" 1 'FAIL: 1 of 3 targets faile
 run keeps-only-new-inputs-not-committed-seeds ok "FuzzA FuzzC" "" 1 'FAIL: 2 of 3 targets failed' \
   "a/testdata/fuzz/FuzzA/0123abcd c/d/testdata/fuzz/FuzzC/0123abcd" "$all"
 # FuzzA's input sits beside FuzzB's empty corpus: each target gets only its own.
-run a-failure-without-an-input-says-so ok "FuzzA" "FuzzB" 1 'example.com/m/a FuzzB wrote no input' "a/testdata/fuzz/FuzzA/0123abcd" "$all"
+run a-failure-without-an-input-says-so ok "FuzzA" "FuzzB" 1 'example.com/m/a FuzzB wrote no input;FAIL: 2 of 3 targets failed' "a/testdata/fuzz/FuzzA/0123abcd" "$all"
 run a-failed-listing-shows-why-and-runs-nothing fails "" "" 1 'example.com/m/b \[setup failed\];FAIL: listing the fuzz targets' "" "" 'no fuzz targets found'
 run no-targets-is-a-failure empty "" "" 1 'FAIL: no fuzz targets found' "" ""
+fuzztime=""
+run without-fuzztime-each-target-gets-2m ok "" "" 0 'fuzz lane: ok \(3 targets, 2m each\)' "" "$(printf '%s' "$all" | sed 's/ 1s / 2m /g')"
+fuzztime=1s
+
+# Outside the repository root the lane refuses to run, before it lists or deletes anything.
+mkdir -p "$tmp/not-root/build/fuzz/crashers" && : >"$tmp/not-root/build/fuzz/crashers/kept"
+: >"$tmp/ran"
+set +e
+out=$(cd "$tmp/not-root" && PATH="$tmp/bin:$PATH" sh "$script" 2>&1)
+code=$?
+set -e
+if [ "$code" -ne 1 ] || ! printf '%s\n' "$out" | grep -q 'FAIL: run from the repository root' ||
+  [ ! -f "$tmp/not-root/build/fuzz/crashers/kept" ] || [ -s "$tmp/ran" ]; then
+  echo "FAIL outside-the-repository-root-it-refuses: exit $code (want 1), output: $out"
+  failures=$((failures + 1))
+fi
 
 if [ "$failures" -ne 0 ]; then
   echo "fuzz run.sh: $failures failure(s)"
