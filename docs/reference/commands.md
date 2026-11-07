@@ -66,9 +66,9 @@ fail  idp    entra app and credential: Entra rejected the client secret (AADSTS7
 | `idp` | entra signing keys | the tenant's key set has a signing key |
 | `idp` | entra app and credential | a client-credentials request for `api://<client-id>/.default` succeeds: Entra accepted the tenant, the client ID and the secret. Needs no app permission. |
 | `idp` | entra access token | that token verifies, is version 2.0 (`requestedAccessTokenVersion: 2`) and has `aud` = the client ID |
-| `idp` | entra idtyp claim | the token carries `idtyp=app` (a warning otherwise: app-only callers need it, ADR-0022) |
+| `idp` | entra idtyp claim | the token carries `idtyp=app` (otherwise a warning, or a failure while `BYWARD_APP_TOKENS=entra`: app-only callers need it, ADR-0022) |
 | `idp` | entra redirect URI | always a skip: only Microsoft Graph can read it. The fix is the `az ad app show` command that checks it; a wrong redirect URI fails the first sign-in with AADSTS50011 |
-| `idp` | entra app roles | always a skip, for the same reason; the fix lists the access gate's roles the app must define |
+| `idp` | entra app roles | always a skip, for the same reason; the fix lists the access gate's roles the app must define, and the app roles for app-only callers (`BYWARD_APP_ROLES`) |
 | `idp` | client secret expiry | `BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT` is more than 30 days away (a warning at 30 days or less, a failure once passed, a skip when unset) |
 
 With assignment required on the app (as `init entra` sets it, and

@@ -24,7 +24,7 @@ import (
 
 // headerOfClaim is which plain identity header carries which assertion claim: the names as
 // documented (docs/how-to/plain-identity-headers.md), which upstreams read.
-var headerOfClaim = map[string]string{"sub": "X-Byward-Subject", "client_id": "X-Byward-Client-Id", "roles": "X-Byward-Roles",
+var headerOfClaim = map[string]string{"sub": "X-Byward-Subject", "client_id": "X-Byward-Client-Id", "principal_type": "X-Byward-Principal-Type", "roles": "X-Byward-Roles",
 	"groups": "X-Byward-Groups", "email": "X-Byward-Email", "email_verified": "X-Byward-Email-Verified", "name": "X-Byward-Name"}
 
 // forgedIdentityHeaders is a client's copy of every plain identity header, and one in `_` spelling.

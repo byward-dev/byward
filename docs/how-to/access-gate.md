@@ -3,7 +3,11 @@
 The access gate decides which users may use the proxy at all. It is checked when a user signs in
 and, once refresh tokens arrive (slice 1.6), at every refresh; never on individual MCP requests. A user the gate turns away sees
 "You don't have access to this server. Ask your operator for access." MCP clients never get a 403
-for a gate decision. Background: [ADR-0015](../adr/0015-access-gate.md).
+for a user gate decision. Background: [ADR-0015](../adr/0015-access-gate.md).
+
+Headless callers with [app-only tokens](app-tokens.md) have their own gate (`BYWARD_APP_ROLES`,
+`BYWARD_APP_CLIENT_IDS`), checked on every MCP request, which answers `403` when it refuses;
+`BYWARD_GATE_TENANTS` applies to them too.
 
 ## Settings
 

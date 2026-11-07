@@ -11,6 +11,7 @@
 package fakeidp
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -454,6 +455,23 @@ func (p *IdP) Mint(claims map[string]any) string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.sign(claims)
+}
+
+// MintWithHeader signs claims with the current key under a crafted JOSE header: alg (RS256 or
+// PS256) and typ as given; kid is the current key's. An empty typ leaves it out.
+func (p *IdP) MintWithHeader(alg, typ string, claims map[string]any) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	k := p.keys[len(p.keys)-1]
+	h := map[string]any{"alg": alg, "kid": k.kid}
+	if typ != "" {
+		h["typ"] = typ
+	}
+	s, err := signRSA(k.cert.Key, alg, h, claims)
+	if err != nil {
+		panic(fmt.Sprintf("fakeidp: sign: %v", err)) // only an unsupported alg
+	}
+	return s
 }
 
 func (p *IdP) sign(claims map[string]any) string {

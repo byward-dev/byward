@@ -31,6 +31,7 @@ type Metrics struct {
 	cimdFetches *prometheus.CounterVec
 	dcr         *prometheus.CounterVec
 	consent     *prometheus.CounterVec
+	appTokens   *prometheus.CounterVec
 }
 
 // New registers every metric; the build-info gauge is labelled from the binary's build info.
@@ -65,11 +66,14 @@ func New() *Metrics {
 		consent: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_consent_total",
 			Help: "Consent decisions by client trust level (verified, domain, not-verified; empty for a prompt=none refusal after the IdP) and outcome (shown, granted, denied, remembered, silent_refused)."},
 			[]string{"trust", "outcome"}),
+		appTokens: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_app_tokens_total",
+			Help: "App-only tokens at the MCP endpoint by outcome (accepted, expired, invalid, delegated, keys_unavailable, revoked, deny_list_stale, denied_role, denied_client, denied_tenant)."},
+			[]string{"outcome"}),
 	}
 	build := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "byward_build_info",
 		Help: "Always 1; labelled with the proxy and Go versions."}, []string{"version", "go_version"})
 	build.WithLabelValues(version, goVersion).Set(1)
-	m.reg.MustRegister(m.requests, m.idp, m.inFlight, m.busy, m.auditEvents, m.rateLimited, m.cimdFetches, m.dcr, m.consent, build,
+	m.reg.MustRegister(m.requests, m.idp, m.inFlight, m.busy, m.auditEvents, m.rateLimited, m.cimdFetches, m.dcr, m.consent, m.appTokens, build,
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	return m
 }
@@ -166,4 +170,12 @@ func (m *Metrics) DCRRegistration(outcome string) {
 		return
 	}
 	m.dcr.WithLabelValues(outcome).Inc()
+}
+
+// AppToken counts an app-only token's outcome at the MCP endpoint (ADR-0022 §7), every request.
+func (m *Metrics) AppToken(outcome string) {
+	if m == nil {
+		return
+	}
+	m.appTokens.WithLabelValues(outcome).Inc()
 }

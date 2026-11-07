@@ -60,7 +60,7 @@ var registry = []Setting{
 	{Name: "keys-dir", Auth: true, Help: "directory of sealing keys; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md)"},
 	{Name: "assertion-keys-dir", Auth: true, Help: "directory of the identity assertion's signing keys: PEM ECDSA P-256 files, each name the key ID; the key whose ID sorts last signs; needed with an HTTP upstream; default: assertion-keys in the data directory (docs/how-to/identity-assertion.md)"},
 	{Name: "assertion-header", Auth: true, Default: "Authorization", Help: "request header that carries the identity assertion to the HTTP upstream, as Bearer <JWT>; inbound copies are always removed (ADR-0016 §2)"},
-	{Name: "identity-headers", Auth: true, Default: "false", Help: "also send the HTTP upstream the user in plain headers (X-Byward-Subject, X-Byward-Client-Id, and X-Byward-Roles, -Groups, -Email, -Email-Verified, -Name for the assertion's claims), percent-encoded; safe only when the upstream is reachable through this proxy alone (ADR-0016 §5, docs/how-to/plain-identity-headers.md)"},
+	{Name: "identity-headers", Auth: true, Default: "false", Help: "also send the HTTP upstream the user in plain headers (X-Byward-Subject, X-Byward-Client-Id, X-Byward-Principal-Type, and X-Byward-Roles, -Groups, -Email, -Email-Verified, -Name for the assertion's claims), percent-encoded; safe only when the upstream is reachable through this proxy alone (ADR-0016 §5, docs/how-to/plain-identity-headers.md)"},
 	{Name: "assertion-claims", Auth: true, Default: "roles", Help: "comma-separated optional claims in the identity assertion: roles, groups, email, name; or none (ADR-0016 §1, docs/reference/identity-assertion.md)"},
 	{Name: "assertion-unverified-email", Auth: true, Bool: true, Default: "false", Help: "with email in BYWARD_ASSERTION_CLAIMS: also assert an email the IdP has not verified (Entra never verifies one), marked email_verified false; never authorize on it (docs/how-to/identity-assertion.md)"},
 	{Name: "static-clients-file", Auth: true, Help: "JSON file of pre-registered MCP clients; default: clients.json in the data directory, optional while CIMD or DCR is on; a file you name must exist (docs/reference/static-clients.md)"},
@@ -74,6 +74,9 @@ var registry = []Setting{
 	{Name: "cimd", Auth: true, Bool: true, Default: "true", Help: "accept MCP clients identified by a Client ID Metadata Document URL (Claude, VS Code) and advertise it; false turns it off (docs/how-to/cimd.md)"},
 	{Name: "cimd-trusted-hosts", Auth: true, Help: "comma-separated hosts whose client metadata documents you vouch for: their apps show as trusted by you on the consent page (docs/how-to/cimd.md)"},
 	{Name: "cimd-allowed-hosts", Auth: true, Help: "comma-separated hosts allowed to publish client metadata documents besides the trusted ones; empty allows any host (docs/how-to/cimd.md)"},
+	{Name: "app-tokens", Auth: true, Default: "off", Help: "accept app-only tokens from headless callers at the MCP endpoint: off, or entra (BYWARD_IDP=entra only; ADR-0022, docs/how-to/app-tokens.md)"},
+	{Name: "app-roles", Auth: true, Help: "with BYWARD_APP_TOKENS=entra, required: comma-separated app roles on the proxy's app; an app-only caller needs at least one (docs/how-to/app-tokens.md)"},
+	{Name: "app-client-ids", Auth: true, Help: "with BYWARD_APP_TOKENS=entra: comma-separated application (client) IDs allowed to call (azp); default: any caller with a role (docs/how-to/app-tokens.md)"},
 	{Name: "gate-allow-empty", Auth: true, Bool: true, Default: "false", Help: "allow an empty access gate for a Google or generic OIDC IdP (anyone with an account can sign in); no effect with Entra (docs/how-to/access-gate.md)"},
 	{Name: "operator-name", Auth: true, Help: "who runs this proxy, shown on the consent page, e.g. Contoso IT"},
 	{Name: "scope-description", Auth: true, Help: "what the scope lets an app do, in plain words for the consent page, e.g. Read and query your team's dashboards"},
@@ -148,7 +151,11 @@ type Config struct {
 	StaticClientsFileNamed bool
 	// The access gate (slice 1.5, ADR-0015); validated by gate.New when the broker is wired.
 	GateTenants, GateRoles, GateGroups, GateEmailDomains, GateHostedDomains []string
-	GateAllowEmpty                                                          bool
+	// AppTokens is "entra" when the MCP endpoint accepts Entra app-only tokens, else "off"
+	// (ADR-0022); AppRoles and AppClientIDs are the app gate.
+	AppTokens              string
+	AppRoles, AppClientIDs []string
+	GateAllowEmpty         bool
 	// Consent page wording (ADR-0010 §4).
 	OperatorName     string
 	ScopeDescription string
@@ -316,6 +323,7 @@ func validate(v *Values, container bool) (*Config, error) {
 		if c.GateAllowEmpty, err = strconv.ParseBool(v.get("gate-allow-empty")); err != nil {
 			errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "gate-allow-empty"}.Env(), v.get("gate-allow-empty")))
 		}
+		errs = append(errs, c.appTokens(v)...)
 		errs = append(errs, c.paths(v)...)
 		errs = append(errs, c.refreshGrace(v)...)
 		errs = append(errs, c.assertion(v)...)
@@ -379,6 +387,42 @@ func defaultIssuersHelp() string {
 		parts = append(parts, p+" defaults to "+OIDCDefaultIssuers[p])
 	}
 	return strings.Join(parts, ", ")
+}
+
+// appTokens reads the app-only path (ADR-0022): off by default, Entra only, and never without an
+// app role to require (§4).
+func (c *Config) appTokens(v *Values) []error {
+	c.AppTokens = v.get("app-tokens")
+	env := func(n string) string { return Setting{Name: n}.Env() }
+	switch c.AppTokens {
+	case "off":
+		var set []string
+		for _, n := range []string{"app-roles", "app-client-ids"} {
+			if v.byKey[n].Source != SourceDefault {
+				set = append(set, env(n))
+			}
+		}
+		if len(set) > 0 {
+			return []error{errorf("%s set while %s=off: they configure app-only callers; set %s=entra, or remove them", strings.Join(set, ", "), env("app-tokens"), env("app-tokens"))}
+		}
+		return nil
+	case "entra":
+	default:
+		return []error{errorf("%s: want off or entra, got %q", env("app-tokens"), c.AppTokens)}
+	}
+	var errs []error
+	if c.IdP != "entra" {
+		errs = append(errs, errorf("%s=entra cannot be used with %s=%s: app-only tokens are Entra's (ADR-0022 §1); remove it, or set %s=entra", env("app-tokens"), env("idp"), c.IdP, env("idp")))
+	}
+	if c.AppRoles = splitList(v.get("app-roles")); len(c.AppRoles) == 0 {
+		errs = append(errs, errorf("%s is required with %s=entra: at least one app role, or every service principal in the tenant could call (ADR-0022 §4)", env("app-roles"), env("app-tokens")))
+	}
+	if raw := v.get("app-client-ids"); raw != "" {
+		if c.AppClientIDs = splitList(raw); len(c.AppClientIDs) == 0 {
+			errs = append(errs, errorf("%s is set but lists nothing; remove it or give at least one entry", env("app-client-ids")))
+		}
+	}
+	return errs
 }
 
 // idp reads the IdP: Entra, or the generic OIDC adapter. The two families' settings never mix: a
@@ -783,16 +827,18 @@ func (c *Config) upstreamCredential(v *Values) []error {
 const (
 	HeaderSubject  = "X-Byward-Subject"
 	HeaderClientID = "X-Byward-Client-Id"
-	HeaderRoles    = "X-Byward-Roles"
-	HeaderGroups   = "X-Byward-Groups"
-	HeaderEmail    = "X-Byward-Email"
+	// HeaderPrincipalType is user, or client for an app-only caller (ADR-0022 §5).
+	HeaderPrincipalType = "X-Byward-Principal-Type"
+	HeaderRoles         = "X-Byward-Roles"
+	HeaderGroups        = "X-Byward-Groups"
+	HeaderEmail         = "X-Byward-Email"
 	// HeaderEmailVerified is "true" or "false", sent exactly when HeaderEmail is.
 	HeaderEmailVerified = "X-Byward-Email-Verified"
 	HeaderName          = "X-Byward-Name"
 )
 
 // IdentityHeaderNames are the plain identity headers.
-var IdentityHeaderNames = []string{HeaderSubject, HeaderClientID, HeaderRoles, HeaderGroups, HeaderEmail, HeaderEmailVerified, HeaderName}
+var IdentityHeaderNames = []string{HeaderSubject, HeaderClientID, HeaderPrincipalType, HeaderRoles, HeaderGroups, HeaderEmail, HeaderEmailVerified, HeaderName}
 
 // headerClashes refuses two purposes in one header: the identity assertion, the operator's
 // upstream credential and the plain identity headers each have their own (ADR-0016 §4, §5, §7). The

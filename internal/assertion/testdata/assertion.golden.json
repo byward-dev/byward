@@ -12,6 +12,7 @@
     "iss": "https://mcp.example.com",
     "jti": "<random>",
     "name": "Alex",
+    "principal_type": "user",
     "roles": [
       "byward.user"
     ],
