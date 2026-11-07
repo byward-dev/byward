@@ -153,3 +153,31 @@ func TestAFailedRevocationIsNotAudited(t *testing.T) {
 		t.Fatalf("the store never opened, so this test proves nothing: %s", logs.String())
 	}
 }
+
+// With an oidc IdP the user key is the subject claim's value, matched exactly (sub is
+// case-sensitive): revoke-user ends that user's grants, and a different case is another user.
+func TestRevokeUserTakesAnOIDCSubjectAsItIs(t *testing.T) {
+	cfg := loadOIDC(t, "keycloak", "https://sso.example.com/realms/acme", "c")
+	created := time.Now().Add(-time.Minute)
+	withStore(t, cfg, func(st *sqlite.Store) {
+		for id, subject := range map[string]string{"alice": "f3a1-Alice", "other": "F3A1-alice"} {
+			g := grantFor(id, created)
+			g.Subject = subject
+			if _, err := st.CreateGrant(context.Background(), g); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+	user, err := RevokeUser(context.Background(), cfg, discard, " f3a1-Alice ")
+	if err != nil || user != "f3a1-Alice" {
+		t.Fatalf("RevokeUser = %q, %v", user, err)
+	}
+	if !grantGone(t, cfg, "alice") || grantGone(t, cfg, "other") {
+		t.Fatal("revoke-user must end exactly the grants of that subject")
+	}
+	for _, key := range []string{"  ", "alice\nbob", "a\x00b"} {
+		if _, err := RevokeUser(context.Background(), cfg, discard, key); !errors.Is(err, ErrNotAUserKey) {
+			t.Errorf("RevokeUser(%q) = %v, want ErrNotAUserKey", key, err)
+		}
+	}
+}

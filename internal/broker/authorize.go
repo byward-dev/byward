@@ -92,6 +92,9 @@ type login struct {
 	// Hint is the user a remembered consent was assumed for, from the hint cookie; the callback
 	// checks it against the user who signed in (ADR-0010 §3). Empty when the user answered the page.
 	Hint *hint `json:"h,omitempty"`
+	// Silent is a prompt=none sign-in: the IdP is asked with prompt=none too, and anything that
+	// would need the user ends in an error at the redirect URI instead of a page (#126).
+	Silent bool `json:"x,omitempty"`
 }
 
 func (b *Broker) cookieName(idpState string) string {
@@ -143,6 +146,12 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 	case !validState(q.Get("state")):
 		fail("invalid_request", "state may only contain visible ASCII characters and spaces (RFC 6749 Appendix A.5)")
 		return
+	case len(q["prompt"]) > 1: // RFC 6749 §3.1: no parameter more than once; prompt=none&prompt=consent must not run silently
+		fail("invalid_request", "prompt must be sent once")
+		return
+	case wantsSilent(q.Get("prompt")) && len(promptValues(q.Get("prompt"))) > 1:
+		fail("invalid_request", "prompt=none cannot be combined with other prompt values (OIDC Core 1.0 §3.1.2.1)")
+		return
 	case q.Get("resource") != "" && q.Get("resource") != b.cfg.Resource.String():
 		// A missing resource means ours (ADR-0005 §4).
 		fail("invalid_target", "this server only issues tokens for "+b.cfg.Resource.String())
@@ -159,6 +168,10 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 	// only at the callback as an expired sign-in.
 	if _, err := encodeLogin(l); err != nil {
 		fail("invalid_request", "the request is too large")
+		return
+	}
+	if wantsSilent(q.Get("prompt")) {
+		b.authorizeSilently(w, r, client, l)
 		return
 	}
 	if b.skipConsent(r, client, &l) {
@@ -197,19 +210,32 @@ func (b *Broker) loadClient(w http.ResponseWriter, r *http.Request, clientID, re
 // startLogin sends the browser to the IdP for l, keeping l in the login cookie until the callback.
 func (b *Broker) startLogin(w http.ResponseWriter, r *http.Request, l login, now time.Time) {
 	ctx := r.Context()
+	failed := func(err error) { // a page, or an OAuth answer for prompt=none (the redirect URI is validated)
+		if !l.Silent {
+			b.serverError(w, r, err)
+			return
+		}
+		b.cfg.Log.ErrorContext(ctx, "broker error", "request_id", logging.RequestID(ctx), "error", err)
+		b.refuseSilently(w, r, "", l, "server_error", "the proxy could not start the sign-in; try again")
+	}
 	plain, err := encodeLogin(l)
 	if err != nil {
-		b.serverError(w, r, err)
+		failed(err)
 		return
 	}
 	sealed, err := b.cfg.LoginBox.Seal(plain, now.Add(LoginLifetime))
 	if err != nil {
-		b.serverError(w, r, err)
+		failed(err)
 		return
 	}
 	start := time.Now()
-	target, err := b.cfg.IdP.AuthCodeURL(idp.WithRequestID(ctx, logging.RequestID(ctx)), idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier})
+	target, err := b.cfg.IdP.AuthCodeURL(idp.WithRequestID(ctx, logging.RequestID(ctx)), idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier, Silent: l.Silent})
 	b.cfg.ObserveIdP("authorize", idpOutcome(err), time.Since(start))
+	if err != nil && l.Silent { // the IdP is not ready (discovery or keys down)
+		b.noteIdPFailure(r, l.ClientID, err)
+		b.refuseSilently(w, r, "", l, "temporarily_unavailable", "the identity provider is not reachable; try again")
+		return
+	}
 	if err != nil {
 		b.idpFailure(w, r, l.ClientID, err)
 		return
@@ -288,37 +314,36 @@ func (b *Broker) scopes(raw string) ([]string, bool) {
 // user to the MCP client.
 func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	if retry, limited := b.throttled(w, r, ratelimit.Callback); limited {
+		// A silent sign-in's sealed login names a validated redirect URI: answer there, never a page.
+		// Its login is spent as at any other callback: the browser is told to drop it, so it cannot
+		// finish this sign-in later.
+		if l, c, badLogin := b.openLogin(r); badLogin == "" && l.Silent {
+			b.expireLogin(w, c)
+			b.refuseSilently(w, r, "", l, "temporarily_unavailable", "too many sign-in attempts from this network; retry after "+strconv.Itoa(retry)+" s")
+			return
+		}
 		b.page(w, r, http.StatusTooManyRequests, tooManyTitle, tooManyHint(retry))
 		return
 	}
 	q := r.URL.Query()
 	ctx := r.Context()
-	st := q.Get("state")
-	badState := func(title string) {
+	l, c, badLogin := b.openLogin(r)
+	if c != nil { // single use: spent whether or not it opens
+		b.expireLogin(w, c)
+	}
+	if badLogin != "" {
 		b.cfg.Audit.RecordUnauthenticated(r, audit.Event{Name: audit.Login, Outcome: audit.Failure, Reason: "sign-in state missing, invalid or expired", IdP: b.cfg.IdPName})
-		b.page(w, r, http.StatusBadRequest, title, "Start again from your app.")
-	}
-	if len(st) < 16 {
-		badState("This sign-in link is not valid.")
-		return
-	}
-	c, err := r.Cookie(b.cookieName(st))
-	if err != nil {
-		badState("This sign-in has expired or was started in another browser.")
-		return
-	}
-	//nolint:gosec // G124: as above (ADR-0010 §10)
-	http.SetCookie(w, &http.Cookie{Name: c.Name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: b.cfg.SecureCookies, SameSite: http.SameSiteLaxMode})
-	plain, err := b.cfg.LoginBox.Open(c.Value)
-	var l login
-	if err != nil || json.Unmarshal(plain, &l) != nil || l.IdPState != st {
-		badState("This sign-in has expired.")
+		b.page(w, r, http.StatusBadRequest, badLogin, "Start again from your app.")
 		return
 	}
 	start := time.Now()
 	id, toks, err := b.cfg.IdP.Callback(idp.WithRequestID(ctx, logging.RequestID(ctx)), q, idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier})
 	b.cfg.ObserveIdP("callback", idpOutcome(err), time.Since(start))
 	if err != nil {
+		if l.Silent {
+			b.refuseSilentIdPFailure(w, r, l, err)
+			return
+		}
 		var ie *idp.Error
 		if errors.As(err, &ie) && ie.OAuth == "access_denied" {
 			b.cfg.Audit.Record(r, audit.Event{Name: audit.Login, Outcome: audit.Failure, Reason: "the user declined to sign in", ClientID: l.ClientID, IdP: b.cfg.IdPName})
@@ -328,25 +353,39 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 		b.idpFailure(w, r, l.ClientID, err)
 		return
 	}
+	// failed is a broker failure after the IdP: a page, or an OAuth answer for prompt=none.
+	failed := func(err error) {
+		if !l.Silent {
+			b.serverError(w, r, err)
+			return
+		}
+		b.cfg.Log.ErrorContext(ctx, "broker error", "request_id", logging.RequestID(ctx), "error", err)
+		b.refuseSilently(w, r, "", l, "server_error", "the proxy could not finish the sign-in; try again")
+	}
 	if err := b.cfg.Gate.Allow(ctx, id); err != nil {
 		var d Denial
 		if !errors.As(err, &d) {
-			b.serverError(w, r, err)
+			failed(err)
 			return
 		}
 		// Every denial is audited (ADR-0015 §5): the rule and pseudonymous keys only, no email or name.
 		b.cfg.Audit.Record(r, audit.Event{Name: audit.AccessDenied, Outcome: audit.Failure, Reason: d.DeniedRule(),
 			ClientID: l.ClientID, UserKey: id.Subject, IdP: b.cfg.IdPName})
+		if l.Silent { // a silent sign-in's browser shows no page to anyone (ADR-0015 §2, clarified for #126); never name the rule
+			b.redirectError(w, r, l.RedirectURI, l.State, "access_denied", "access denied by the operator's policy")
+			return
+		}
 		// A browser page the MCP client never parses, so 403 is right here (ADR-0015 §2).
 		b.page(w, r, http.StatusForbidden, "You don't have access to this server.", "Ask your operator for access.")
 		return
 	}
+	grantScopes := b.grantScopes(ctx, l, toks)
 	// A login that skipped the page holds only if the registry agrees for the user who signed in.
 	var remembered registration.Client
 	if l.Hint != nil {
-		c, reason := b.confirmRemembered(ctx, l, id)
+		c, reason, lookupErr := b.confirmRemembered(ctx, l, id)
 		if reason != "" {
-			b.askAfterMismatch(w, r, l, id, reason)
+			b.askAfterMismatch(w, r, l, id, reason, lookupErr)
 			return
 		}
 		remembered = c
@@ -354,25 +393,25 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	now := b.cfg.Now()
 	sealedTokens, err := b.cfg.IdPTokenBox.Seal(marshalSecrets(toks, b.cfg.Assert.claimsOf(id)), now.Add(GrantLifetime))
 	if err != nil {
-		b.serverError(w, r, err)
+		failed(err)
 		return
 	}
 	g, err := b.cfg.Store.CreateGrant(ctx, store.Grant{ID: randomID(), ClientID: l.ClientID, Subject: id.Subject, Issuer: id.Issuer,
 		// Short-lived until the code is redeemed (token.go extends it), so an abandoned login does
 		// not leave a 30-day grant holding IdP tokens.
-		Resource: b.cfg.Resource.String(), Scopes: l.Scopes, IdPTokens: []byte(sealedTokens), CreatedAt: now, ExpiresAt: now.Add(LoginLifetime)})
+		Resource: b.cfg.Resource.String(), Scopes: grantScopes, IdPTokens: []byte(sealedTokens), CreatedAt: now, ExpiresAt: now.Add(LoginLifetime)})
 	if err != nil {
-		b.serverError(w, r, err)
+		failed(err)
 		return
 	}
 	if err := b.cfg.Store.PutCode(ctx, store.PendingCode{GrantID: g.ID, ClientID: l.ClientID, RedirectURI: l.RedirectURI,
-		CodeChallenge: l.Challenge, Scopes: l.Scopes, ExpiresAt: now.Add(CodeLifetime)}); err != nil {
-		b.serverError(w, r, err)
+		CodeChallenge: l.Challenge, Scopes: grantScopes, ExpiresAt: now.Add(CodeLifetime)}); err != nil {
+		failed(err)
 		return
 	}
 	code, err := b.cfg.Sealer.Seal(token.Code, token.Claims{GrantID: g.ID, Subject: id.Subject, IssuedAt: now, ExpiresAt: now.Add(CodeLifetime)})
 	if err != nil {
-		b.serverError(w, r, err)
+		failed(err)
 		return
 	}
 	b.cfg.Audit.Record(r, audit.Event{Name: audit.Login, Outcome: audit.Success, ClientID: l.ClientID, UserKey: id.Subject, GrantID: g.ID, IdP: b.cfg.IdPName})
@@ -383,6 +422,31 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, withQuery(l.RedirectURI, v), http.StatusFound)
+}
+
+// openLogin returns the login the callback's state names, from its sealed cookie, and the cookie
+// itself when present. badLogin is the page title saying why there is no login, "" when it opened. It
+// is the callback's only check of a login, for the rate-limited path too.
+func (b *Broker) openLogin(r *http.Request) (l login, c *http.Cookie, badLogin string) {
+	st := r.URL.Query().Get("state")
+	if len(st) < 16 {
+		return login{}, nil, "This sign-in link is not valid."
+	}
+	c, err := r.Cookie(b.cookieName(st))
+	if err != nil {
+		return login{}, nil, "This sign-in has expired or was started in another browser."
+	}
+	plain, err := b.cfg.LoginBox.Open(c.Value)
+	if err != nil || json.Unmarshal(plain, &l) != nil || l.IdPState != st {
+		return login{}, c, "This sign-in has expired."
+	}
+	return l, c, ""
+}
+
+// expireLogin deletes a login cookie, so the login it holds cannot be used again.
+func (b *Broker) expireLogin(w http.ResponseWriter, c *http.Cookie) {
+	//nolint:gosec // G124: Secure is false only in development mode on loopback http (ADR-0010 §10)
+	http.SetCookie(w, &http.Cookie{Name: c.Name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: b.cfg.SecureCookies, SameSite: http.SameSiteLaxMode})
 }
 
 func withQuery(base string, v url.Values) string {
@@ -404,12 +468,12 @@ func (b *Broker) redirectError(w http.ResponseWriter, r *http.Request, redirect,
 	http.Redirect(w, r, withQuery(redirect, v), http.StatusFound) //nolint:gosec // G710: validated redirect URI
 }
 
-// idpFailure explains an IdP error on a page; the operator hint and the IdP's error code, trace ID
-// and correlation ID go to the log (ADR-0021 §7), the failure to the audit stream.
-func (b *Broker) idpFailure(w http.ResponseWriter, r *http.Request, clientID string, err error) {
+// noteIdPFailure logs and audits a failed IdP sign-in: the operator hint and the IdP's error code,
+// trace ID and correlation ID go to the log, never to the user. It returns the user's message.
+func (b *Broker) noteIdPFailure(r *http.Request, clientID string, err error) string {
 	ctx := r.Context()
 	var ie *idp.Error
-	msg, hint := "Signing in failed.", "Try again; if it keeps failing, tell your operator the reference below."
+	msg := "Signing in failed."
 	reason := "the IdP sign-in failed"
 	if errors.As(err, &ie) {
 		if ie.UserMessage != "" {
@@ -431,7 +495,14 @@ func (b *Broker) idpFailure(w http.ResponseWriter, r *http.Request, clientID str
 		b.cfg.Log.ErrorContext(ctx, "IdP sign-in failed", "request_id", logging.RequestID(ctx), "error", err)
 	}
 	b.cfg.Audit.Record(r, audit.Event{Name: audit.Login, Outcome: audit.Failure, Reason: reason, ClientID: clientID, IdP: b.cfg.IdPName})
-	b.page(w, r, http.StatusBadGateway, msg, hint)
+	return msg
+}
+
+// idpFailure explains an IdP error on a page; the operator hint and the IdP's error code, trace ID
+// and correlation ID go to the log (ADR-0021 §7), the failure to the audit stream.
+func (b *Broker) idpFailure(w http.ResponseWriter, r *http.Request, clientID string, err error) {
+	msg := b.noteIdPFailure(r, clientID, err)
+	b.page(w, r, http.StatusBadGateway, msg, "Try again; if it keeps failing, tell your operator the reference below.")
 }
 
 // idpOutcome classifies an IdP call for metrics: success, unavailable (try later) or rejected.
@@ -470,4 +541,19 @@ func (b *Broker) clientLookupFailed(ctx context.Context, clientID string, err er
 		msg = metadataUnavailable
 	}
 	b.cfg.Log.WarnContext(ctx, msg, "request_id", logging.RequestID(ctx), "error", err.Error())
+}
+
+// grantScopes are the scopes a new grant gets: those approved, less offline_access when the IdP
+// returned no refresh token, since a proxy refresh token could then only revoke the grant at its
+// first use. An IdP adapter that stops asking for refresh tokens shows up here, as a warning for a
+// client that may refresh, not as hourly sign-ins. The approved scopes themselves stay as they are.
+func (b *Broker) grantScopes(ctx context.Context, l login, toks idp.Tokens) []string {
+	if !slices.Contains(l.Scopes, "offline_access") || toks.RefreshToken != "" {
+		return l.Scopes
+	}
+	if c, err := b.cfg.Clients.Client(ctx, l.ClientID); err == nil && c.AllowsRefresh() {
+		b.cfg.Log.WarnContext(ctx, "the IdP returned no refresh token, so this grant cannot refresh", "request_id", logging.RequestID(ctx),
+			"idp", b.cfg.IdPName, "client_id", l.ClientID, "reason", "check that the IdP is asked for refresh tokens; see the IdP's how-to")
+	}
+	return slices.DeleteFunc(slices.Clone(l.Scopes), func(s string) bool { return s == "offline_access" })
 }

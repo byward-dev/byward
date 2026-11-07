@@ -1,15 +1,12 @@
 package server
 
 import (
-	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/byward-dev/byward/internal/broker"
 	"github.com/byward-dev/byward/internal/config"
@@ -47,26 +44,8 @@ func TestTheWiredServerRemembersAStaticClientsConsent(t *testing.T) {
 	h := httptest.NewServer(srv.Public.Handler)
 	t.Cleanup(h.Close)
 
-	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	send := func(method, path string, body url.Values, cookies []*http.Cookie) *http.Response {
-		t.Helper()
-		r, _ := http.NewRequest(method, h.URL+path, nil)
-		if body != nil {
-			r, _ = http.NewRequest(method, h.URL+path, strings.NewReader(body.Encode()))
-			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			r.Header.Set("Origin", public)
-			r.Header.Set("Sec-Fetch-Site", "same-origin")
-		}
-		r.Host = "mcp.example.com"
-		for _, c := range cookies {
-			r.AddCookie(c)
-		}
-		res, err := noRedirect.Do(r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return res
-	}
+	b := newTestBrowser(t, h.URL, public)
+	send := b.send
 	viaIdP := func(res *http.Response) *http.Response {
 		t.Helper()
 		idpRes, err := fake.HTTPClient().Get(res.Header.Get("Location"))
@@ -85,12 +64,10 @@ func TestTheWiredServerRemembersAStaticClientsConsent(t *testing.T) {
 
 	page := authorize("53124", nil)
 	body := readAll(t, page)
-	flow := regexp.MustCompile(`name="flow" value="([^"]+)"`).FindStringSubmatch(body)
-	if page.StatusCode != http.StatusOK || flow == nil || !strings.Contains(body, "remember your choice for this app for 30 days") {
+	if page.StatusCode != http.StatusOK || !strings.Contains(body, "remember your choice for this app for 30 days") {
 		t.Fatalf("first sign-in: %d, want the page saying the choice is remembered", page.StatusCode)
 	}
-	time.Sleep(broker.ConsentDelay + 100*time.Millisecond)
-	allow := send(http.MethodPost, "/consent", url.Values{"flow": {html.UnescapeString(flow[1])}, "action": {"allow"}}, page.Cookies())
+	allow := b.allow(page, body)
 	back := viaIdP(allow)
 	var hint []*http.Cookie
 	for _, c := range back.Cookies() {

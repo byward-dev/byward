@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -38,12 +37,6 @@ func newUpstream(cfg *config.Config, log *slog.Logger, o Observability, minter *
 			return &upstream{handler: assertingUpstream(cfg, log, minter)}, nil
 		}
 		return &upstream{handler: httpUpstream(cfg, log)}, nil
-	}
-	if cfg.NoAuth {
-		// With authentication, buildAuth checks every secret file; without it, this is the only one.
-		if err := errors.Join(looseSecretFiles(cfg)...); err != nil {
-			return nil, err
-		}
 	}
 	name := stdioName(cfg)
 	m, err := newStdioManager(cfg, stdio.Config{Name: name, Command: cfg.UpstreamCommand, Env: cfg.UpstreamEnv,
@@ -89,6 +82,9 @@ func upstreamResult(cfg *config.Config) doctor.Result {
 		if !cfg.NoAuth {
 			r.Message += "; requests carry the identity assertion in " + cfg.AssertionHeader + ", with aud " + cfg.UpstreamURL.String()
 		}
+		if cfg.UpstreamCredential != "" {
+			r.Message += "; the operator's upstream credential is set and sent in " + cfg.UpstreamCredentialHeader
+		}
 		return r
 	}
 	r.Message = "stdio upstream " + stdioName(cfg) + ": the command was found; doctor does not start it (a process starts per user at their first MCP request)"
@@ -107,10 +103,15 @@ func upstreamID(cfg *config.Config) string {
 func stdioName(cfg *config.Config) string { return filepath.Base(cfg.UpstreamCommand[0]) }
 
 // httpUpstream is the relay to the HTTP upstream. The assertion's header is stripped from every
-// inbound request even when nothing is asserted, so a client can never supply one.
+// inbound request even when nothing is asserted, so a client can never supply one; so is the
+// operator credential's, which the relay then sets (ADR-0016 §7).
 func httpUpstream(cfg *config.Config, log *slog.Logger, opts ...relay.Option) http.Handler {
-	return relay.New(log, cfg.UpstreamURL, append([]relay.Option{relay.WithInject(tracing.Inject),
-		relay.WithResponseHeaderTimeout(cfg.UpstreamHeaderTimeout), relay.WithStripped(cfg.AssertionHeader)}, opts...)...)
+	base := []relay.Option{relay.WithInject(tracing.Inject), relay.WithResponseHeaderTimeout(cfg.UpstreamHeaderTimeout), relay.WithStripped(cfg.AssertionHeader)}
+	if cred := cfg.UpstreamCredential; cred != "" {
+		header := cfg.UpstreamCredentialHeader
+		base = append(base, relay.WithStripped(header), relay.WithInject(func(_ context.Context, h http.Header) { h.Set(header, cred) }))
+	}
+	return relay.New(log, cfg.UpstreamURL, append(base, opts...)...)
 }
 
 // assertionKey carries a request's minted assertion from withAssertion to the relay.

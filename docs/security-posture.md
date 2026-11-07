@@ -11,8 +11,8 @@ An **auth-only** proxy in front of one **upstream** MCP server. To MCP clients i
 protected resource (RFC 9728) and as an OAuth 2.1 authorization server (the **broker**). It signs
 users in at an **IdP** and then relays MCP traffic to the upstream
 ([ADR-0001](adr/0001-scope-auth-only-proxy-entra-first-class.md),
-[ADR-0005](adr/0005-auth-modes-broker-only.md)). Today the only IdP is Microsoft Entra ID, in single-tenant
-mode, and the only upstream kind is HTTP.
+[ADR-0005](adr/0005-auth-modes-broker-only.md)). The IdP is Microsoft Entra ID (single-tenant) or any
+OpenID Connect IdP ([OIDC how-to](how-to/oidc.md)), one per proxy.
 
 **It guarantees:**
 
@@ -28,6 +28,9 @@ mode, and the only upstream kind is HTTP.
   [reference](reference/identity-assertion.md)). A stdio upstream gets the user in its process
   environment instead. Its roles and groups are as of the last sign-in or refresh: at most one
   hour old.
+- An HTTP upstream that needs the proxy's own credential, such as an API key, gets the operator's
+  value from a secret file, in a header the assertion does not use. A client cannot supply it, byward
+  never sends it to a client, and it is never logged ([upstream credential](how-to/upstream-credential.md)).
 
 **It does not:**
 
@@ -53,7 +56,7 @@ mode, and the only upstream kind is HTTP.
 | Token theft | Access tokens last 1 h. Refresh tokens rotate on every use, and reuse after the 30 s grace revokes the grant. A refresh token works only for the client it was issued to. Clients can revoke with `/revoke` (RFC 7009). | `internal/broker/refresh.go`, `internal/broker/revoke.go` |
 | CSRF or clickjacking on consent | The answer needs exactly one `Origin` equal to the public origin; a missing or `null` Origin is refused. `Sec-Fetch-Site` must be `same-origin` when the browser sends it. A `__Host-` binding cookie and a sealed flow that expires after 10 min are required. Allow is refused within 1 s of showing the page. Every page sends CSP `frame-ancestors 'none'`, `X-Frame-Options: DENY` and `script-src 'none'`. | `internal/broker/consent.go`, `internal/broker/page.go` |
 | DNS rebinding and cross-site requests to the MCP endpoint | `Host` is checked against an allowlist on the public listener (421), and on the internal listener only IP addresses, `localhost` and listed names pass (421). `Origin` on the MCP endpoint is checked against an exact list (403). Both checks run before authentication. | `internal/origin/origin.go` |
-| SSRF | Client-supplied URLs (CIMD documents, and the `jwks_uri` of CIMD and DCR clients) are fetched only through the SSRF guard: `https` on port 443, public addresses only, checked when the connection is dialled (after DNS resolution, so a rebinding name cannot slip through), no redirects, no environment proxy, 5 KB and 5 s ([ADR-0008](adr/0008-client-registration.md) §4). Static clients have no `jwks_uri`. Entra endpoints are built from the fixed `https://login.microsoftonline.com` authority and the configured tenant. The IdP fetcher follows no redirects, bounds bodies and times out after 5 s. | `internal/ssrfguard`, `internal/server/wire.go`, `internal/idp/fetch.go`, `internal/idp/entra/entra.go` |
+| SSRF | Client-supplied URLs (CIMD documents, and the `jwks_uri` of CIMD and DCR clients) are fetched only through the SSRF guard: `https` on port 443, public addresses only, checked when the connection is dialled (after DNS resolution, so a rebinding name cannot slip through), no redirects, no environment proxy, 5 KB and 5 s ([ADR-0008](adr/0008-client-registration.md) §4). Static clients have no `jwks_uri`. Entra endpoints are built from the fixed `https://login.microsoftonline.com` authority and the configured tenant. An OIDC IdP's endpoints come from the discovery document of the configured issuer, whose `issuer` must match exactly; the issuer and every endpoint must be `https` outside `--dev`. The IdP is the operator's, so it is reached directly, not through the SSRF guard: a self-hosted IdP on a private address works. The IdP fetcher follows no redirects, bounds bodies and times out after 5 s. | `internal/ssrfguard`, `internal/server/wire.go`, `internal/idp/fetch.go`, `internal/idp/entra/entra.go` |
 | Abuse of OAuth endpoints | Per-address token buckets apply on `/authorize`, `/consent`, `/callback/entra`, `/token`, `/revoke` and `/register`, with IPv6 grouped by /64. Open registration has its own controls (**Dynamic client registration** under [Token model](#token-model)). Request bodies are bounded. Every `http.Server` timeout is set. | `internal/ratelimit`, `internal/broker/register.go`, `internal/server/run.go` |
 
 **Out of scope:** a compromised upstream, which receives every MCP request and answer. Also out of
@@ -67,9 +70,9 @@ keep them (AGENTS.md). Status on `main`:
 
 | # | Invariant | Enforced in | Tested by |
 |---|---|---|---|
-| 1 | No token passthrough to the upstream | `internal/upstream/relay/relay.go` (`strip` removes `Authorization`; `access_token` dropped from the query). A stdio upstream gets only the JSON-RPC body on stdin, and an environment of an allowlist, the operator's env file and the user's key (`internal/upstream/stdio/command.go`) | `TestRelayForwardsBodyVerbatimAndStripsProxyHeaders`, `TestValidTokenIsRelayedWithoutIt`, `TestEachStdioMCPSessionIsItsOwnUpstreamProcessBoundToItsUserWithNoTokenOrProxySetting`, `TestUpstreamGetsOnlyAllowlistOperatorEnvAndIdentity`, `TestAClientCannotSupplyTheAssertionHeader` |
+| 1 | No token passthrough to the upstream | `internal/upstream/relay/relay.go` (`strip` removes `Authorization`; `access_token` dropped from the query). A stdio upstream gets only the JSON-RPC body on stdin, and an environment of an allowlist, the operator's env file and the user's key (`internal/upstream/stdio/command.go`) | `TestRelayForwardsBodyVerbatimAndStripsProxyHeaders`, `TestValidTokenIsRelayedWithoutIt`, `TestEachStdioMCPSessionIsItsOwnUpstreamProcessBoundToItsUserWithNoTokenOrProxySetting`, `TestUpstreamGetsOnlyAllowlistOperatorEnvAndIdentity`, `TestAClientCannotSupplyTheAssertionHeader`, `TestWithoutAuthenticationTheUpstreamGetsOnlyTheOperatorCredential` |
 | 2 | Never log tokens, secrets, codes or verifiers | `internal/logging/logging.go` (attribute allowlist, bearer/JWT-shaped redaction); `internal/audit` (no credential fields) | `TestRedaction`, `TestMiddlewareLogsRequestWithoutQueryOrHeaders`, `TestAuditRecordsMatchTheGoldenSchema` |
-| 3 | Named IdP endpoints from config only | `internal/idp/entra/entra.go` (`endpoint`: the fixed authority `https://login.microsoftonline.com` plus the tenant GUID; discovery is read only to check the issuer) | `TestAuthCodeURLTargetsTenantAuthorizeWithAccessAsUserScope`, `TestIssuerMustMatchTokenTenantAndAllowlist` |
+| 3 | Named IdP endpoints from config only | `internal/idp/entra/entra.go` (`endpoint`: the fixed authority `https://login.microsoftonline.com` plus the tenant GUID; discovery is read only to check the issuer); `internal/idp/oidc/oidc.go` (`discover`: the endpoints of the configured issuer's discovery document, whose `issuer` must match exactly, `https` outside `--dev`); the IdP is chosen only by `BYWARD_IDP` | `TestAuthCodeURLTargetsTenantAuthorizeWithAccessAsUserScope`, `TestIssuerMustMatchTokenTenantAndAllowlist`, `TestDiscoveryIssuerMustMatchExactly`, `TestDiscoveredEndpointsMustBeHTTPSUnlessALoopbackIssuerRunsInDevelopment`, `TestAnHTTPIssuerNeedsDevelopmentMode` |
 | 4 | Client-supplied URLs only through the SSRF guard | `internal/ssrfguard` (dial-time address check); `internal/server/wire.go` builds one guard and gives it to the CIMD registry (documents and `jwks_uri`) and the DCR registry (`jwks_uri`) | `TestNonPublicAddressesAreRefused`, `TestRedirectsAreNotFollowed`, `TestTheGuardedHTTPClientRefusesPrivateAddresses`, `TestCIMDClientsAreResolvedThroughTheGuardOnlyWhenOn`, `TestARegisteredClientsKeysAreFetchedThroughTheGuard` |
 | 5 | Per-client consent before the IdP redirect | `internal/broker/authorize.go` → `showConsent`; the IdP redirect only after Allow, or for a remembered consent, which the callback checks again for the user who signed in before issuing a code (`internal/broker/remember.go`) | `TestAuthorizeShowsTheConsentPageBeforeTheIdP`, `TestADifferentUserBehindAStaleHintGetsThePageAndNoCode`, `TestAnUnverifiedClientIsAskedEveryTime` |
 | 6 | Audience validated; `iss` on authorization responses | Resource URL as associated data (`internal/token/token.go`); `iss` on success and error redirects (`internal/broker/authorize.go`) | `TestTokenForOneResourceNeverOpensForAnother`, `TestStaticClientSignsInWithEntraAndGetsAProxyToken` |
@@ -119,7 +122,7 @@ setting, with secrets shown as `<redacted>`.
 |---|---|---|
 | `--dev` (`BYWARD_DEV`) | Accepts an `http` public URL on a loopback host. Over http, cookies drop `__Host-` and `Secure`. Accepts inline secrets from the environment. | `http` only on a loopback host; each relaxation is logged by name |
 | `--insecure-no-auth` (`BYWARD_INSECURE_NO_AUTH`) | No authentication at all: no token check, no metadata, no broker routes | Public URL must be loopback. Listen address must be loopback, or inside a container with its own network namespace (host networking is detected and refused). Allowed hosts and origins must be loopback. It refuses to start alongside any authentication setting. Host and Origin checks, header stripping and body limits stay on. Logs `AUTHENTICATION IS OFF` and the next step ([ADR-0027](adr/0027-insecure-no-auth.md)). With a stdio upstream, anyone who can reach the proxy starts processes, bounded only by `BYWARD_STDIO_MAX_PROCESSES`, all as one anonymous user; logged as a warning ([stdio how-to](how-to/stdio-upstream.md#without-authentication)). |
-| `BYWARD_GATE_ALLOW_EMPTY` | Allows an empty gate for Google or generic OIDC. It has **no effect with Entra**, the only IdP today. | Logged as a warning at every start |
+| `BYWARD_GATE_ALLOW_EMPTY` | Allows an empty gate for an OIDC IdP, where anyone with an account could sign in. It has **no effect with Entra**. | Logged as a warning at every start |
 
 An empty access gate with single-tenant Entra is allowed: every user of the tenant can sign in. It
 is logged as a warning at every start.
@@ -144,7 +147,7 @@ bounds, but there are no settings for that yet.
   has not synced yet (`internal/denylist/denylist.go`).
 - `/revoke` revokes the whole grant, whichever of its tokens was sent. A store failure gets 503,
   never a false 200.
-- The operator commands `byward revoke-user <tid:oid>` and `byward revoke-all --yes` delete the
+- The operator commands `byward revoke-user <user key>` and `byward revoke-all --yes` delete the
   grants and record a cut-off in the store, beside a running proxy. Every proxy using the store
   refuses those users' tokens at its next sync (`internal/server/revoke.go`). A cut-off for every
   user is an explicit marker (`scope = 'all'`, checked by the database); a revocation naming
@@ -188,6 +191,36 @@ the client and redirect URI again. This is accepted behaviour, not a gap: no tok
   consent forgotten in between, it issues nothing, clears the cookie and shows the page.
 - Every revocation forgets: `/revoke`, refresh-token reuse, and `byward revoke-user` and
   `revoke-all` remove the matching rows in the same transaction as the grants.
+- **Silent sign-in (`prompt=none`, OIDC Core §3.1.2.1) never shows the page.** It proceeds only on
+  a remembered consent for the user the hint names, and then asks the IdP with its own
+  `prompt=none`. Anything else is an OAuth error at the validated redirect URI, with `state` and
+  `iss`: `consent_required` for a client asked every time or with no consent covering the request;
+  `login_required` without a hint, because nothing goes to the IdP before consent is established
+  (ADR-0010 §1); the IdP's own `login_required`, `interaction_required`, `consent_required` or
+  `account_selection_required` as it sent them; and `consent_required` when someone else signs in
+  behind the hint (nothing issued, the hint cleared). Every refusal is audited (`consent_silent`).
+  - The different answers for "no hint" and "a hint but no consent" are not an oracle: the
+    request runs in the user's own browser with the user's own hint cookie (`SameSite=Lax`, so a
+    cross-site frame never carries it), and the answer goes only to a redirect URI the client
+    registered. Only the client learns it, or, for a loopback client, any local process (see the
+    accepted local-process item below), and only that this browser's user has not approved it,
+    which a page would have shown it too. A third-party site
+    can start the request but cannot read where it ends. A client asked every time always gets
+    `consent_required`, whatever is remembered. `/authorize`'s rate limit applies before any of
+    this.
+  - After the IdP, a silent sign-in never ends on a page either: an access-gate denial is
+    `access_denied` naming no rule (still audited as `access_denied`), any other IdP failure is
+    `server_error` or `temporarily_unavailable`, and a store failure while re-checking the consent
+    is `temporarily_unavailable` and keeps the hint.
+  - A silent IdP round trip without a hint (for browsers that lost the cookie) is not built; it
+    would send the user to the IdP before consent is known. Later, if a real client needs it.
+  - **Accepted: a login is single use on the client side only.** The sealed login cookie holds
+    the sign-in in progress; a callback spends it by telling the browser to delete it, and the
+    server keeps no record. A rate-limited silent callback answers `temporarily_unavailable`
+    without redeeming the IdP code, so a client that kept a copy of the cookie (it is `__Host-`
+    and HttpOnly) and ignored the deletion could still get a code for that request after the
+    limit. A well-behaved client has consumed its `state` with the error and refuses a later
+    code for it. Server-side single-use logins would need a store change; they are a follow-up.
 - **Accepted: a local process can reuse a remembered loopback client.** A loopback redirect URI is
   remembered whatever its port, because ADR-0009 §2 lets the port vary (Claude Code picks a new one
   every run). So, for a remembered loopback client, a process on the user's machine that opens
@@ -195,6 +228,8 @@ the client and redirect URI again. This is accepted behaviour, not a gap: no tok
   PKCE does not help, because that process chooses the verifier. Without remembered consent the
   page would at least show "Claude Code wants…" to a user who did not start it. This is accepted:
   local malware is outside the threat model, and it could read the client's own token store anyway.
+  With `prompt=none` such a process also learns, without any page, whether the user has a
+  remembered consent for that client (a page used to show when they had not).
   Operators who want the page every time for such clients can leave their CIMD host off
   `BYWARD_CIMD_TRUSTED_HOSTS`; a static client is always remembered.
 

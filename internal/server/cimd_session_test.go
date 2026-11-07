@@ -4,16 +4,13 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"html"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/byward-dev/byward/internal/broker"
 	"github.com/byward-dev/byward/internal/config"
@@ -72,42 +69,18 @@ func TestACIMDClientSignsInAndUsesALegacySession(t *testing.T) {
 	srv := httptest.NewServer(Handler(cfg, discard, httpUpstream(cfg, discard), a.validator, a.register, a.sessions, Observability{}))
 	t.Cleanup(srv.Close)
 
-	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	send := func(method, path string, body url.Values, cookies []*http.Cookie, header http.Header) *http.Response {
-		t.Helper()
-		var r *http.Request
-		if body != nil {
-			r, _ = http.NewRequest(method, srv.URL+path, strings.NewReader(body.Encode()))
-			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		} else {
-			r, _ = http.NewRequest(method, srv.URL+path, nil)
-		}
-		r.Host = "mcp.example.com"
-		for k, v := range header {
-			r.Header[k] = v
-		}
-		for _, c := range cookies {
-			r.AddCookie(c)
-		}
-		res, err := noRedirect.Do(r)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return res
-	}
+	b := newTestBrowser(t, srv.URL, public)
+	send := b.send
 
 	verifier := "verifier-0123456789-0123456789-0123456789-abc"
 	q := url.Values{"client_id": {doc.ClientID}, "redirect_uri": {doc.Redirect}, "response_type": {"code"}, "state": {"s"},
 		"code_challenge": {pkce(verifier)}, "code_challenge_method": {"S256"}, "scope": {"mcp"}}
-	page := send(http.MethodGet, "/authorize?"+q.Encode(), nil, nil, nil)
+	page := send(http.MethodGet, "/authorize?"+q.Encode(), nil, nil)
 	body := readAll(t, page)
-	flow := regexp.MustCompile(`name="flow" value="([^"]+)"`).FindStringSubmatch(body)
-	if page.StatusCode != http.StatusOK || flow == nil || !strings.Contains(body, "Published by") {
+	if page.StatusCode != http.StatusOK || !strings.Contains(body, "Published by") {
 		t.Fatalf("consent page: %d %s", page.StatusCode, body)
 	}
-	time.Sleep(broker.ConsentDelay + 100*time.Millisecond) // Allow is accepted only after the delay
-	allow := send(http.MethodPost, "/consent", url.Values{"flow": {html.UnescapeString(flow[1])}, "action": {"allow"}}, page.Cookies(),
-		http.Header{"Origin": {public}, "Sec-Fetch-Site": {"same-origin"}})
+	allow := b.allow(page, body)
 	if allow.StatusCode != http.StatusSeeOther {
 		t.Fatalf("consent answer: %d %s", allow.StatusCode, readAll(t, allow))
 	}
@@ -117,13 +90,13 @@ func TestACIMDClientSignsInAndUsesALegacySession(t *testing.T) {
 	}
 	_ = idpRes.Body.Close()
 	cb, _ := url.Parse(idpRes.Header.Get("Location"))
-	back := send(http.MethodGet, cb.Path+"?"+cb.RawQuery, nil, allow.Cookies(), nil)
+	back := send(http.MethodGet, cb.Path+"?"+cb.RawQuery, nil, allow.Cookies())
 	ret, _ := url.Parse(back.Header.Get("Location"))
 	if back.StatusCode != http.StatusFound || !strings.HasPrefix(ret.String(), doc.Redirect) {
 		t.Fatalf("callback: %d, Location %q", back.StatusCode, back.Header.Get("Location"))
 	}
 	tok := send(http.MethodPost, "/token", url.Values{"grant_type": {"authorization_code"}, "code": {ret.Query().Get("code")},
-		"client_id": {doc.ClientID}, "redirect_uri": {doc.Redirect}, "code_verifier": {verifier}}, nil, nil)
+		"client_id": {doc.ClientID}, "redirect_uri": {doc.Redirect}, "code_verifier": {verifier}}, nil)
 	var tokens struct {
 		AccessToken string `json:"access_token"`
 	}

@@ -51,6 +51,9 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) ยง1โ
       a separate directory, `BYWARD_ASSERTION_KEYS_DIR`, mode `0700`, one PEM P-256 file per key,
       `0600` and owned by the proxy's user. Unlike sealing keys, a key file other users can read is
       refused, unless it is on a read-only mount.
+- [ ] If the upstream needs the proxy's own credential, give it in `BYWARD_UPSTREAM_CREDENTIAL_FILE`,
+      `0600` and owned by the proxy's user, never inline; it and the assertion use separate headers
+      ([upstream credential](upstream-credential.md)).
 - [ ] Configure the upstream's verifier with the audience `BYWARD_UPSTREAM_URL` exactly, and with
       the JWKS of the internal listener if it cannot reach the public one
       ([reference](../reference/identity-assertion.md#verifying)).
@@ -68,9 +71,10 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) ยง1โ
 - [ ] Know the operator revocation commands. They read the same `BYWARD_*` environment as the
       proxy (run them in its container or with its settings), write to the same store while it
       runs, and every proxy refuses the tokens within seconds (the deny list resyncs every 5 s):
-      - `byward revoke-user <tid:oid>` ends one user's access: their grants are deleted, so their
+      - `byward revoke-user <user key>` ends one user's access: their grants are deleted, so their
         refresh tokens stop at once, and their access tokens are refused. The key is the
-        `user_key` of the audit stream; the Entra portal's tenant and object IDs in either case.
+        `user_key` of the audit stream: with Entra `tid:oid`, the portal's tenant and object IDs
+        in either case; with an oidc IdP the value of its subject claim, exactly.
       - `byward revoke-all --yes` does the same for every user (incident response).
       - Each writes a `grant_revoked` audit record with the reason `operator revoke-user` or
         `operator revoke-all`. A user who still passes the access gate can sign in again; to keep

@@ -22,6 +22,10 @@ type Login struct {
 	DomainHint string
 	// SelectAccount sends prompt=select_account.
 	SelectAccount bool
+	// Silent sends prompt=none: the IdP must not show any page, and answers login_required,
+	// interaction_required, consent_required or account_selection_required when it would need to
+	// (OIDC Core 1.0 §3.1.2.1, §3.1.2.6). It wins over SelectAccount.
+	Silent bool
 }
 
 // Identity is the signed-in user as the access gate and the identity assertion see them.
@@ -96,9 +100,10 @@ type Readiness interface {
 // Refresher renews IdP tokens.
 //   - Tokens.RefreshToken is empty when the IdP kept the old one; the caller keeps it.
 //   - Tokens.Expiry is zero when the IdP sent no expires_in.
-//   - Identity is nil when the IdP returned no new ID token. When it is not nil, the caller must
-//     check that Subject and Issuer equal the grant's (OIDC Core §12.2) before re-running the
-//     access gate.
+//   - Identity is nil when the IdP returned no new ID token (OIDC Core §12.2 allows it). The broker
+//     then ends the grant: the access gate needs fresh claims at every refresh (ADR-0015 §1). When
+//     it is not nil, the caller must check that Subject and Issuer equal the grant's before
+//     re-running the gate.
 type Refresher interface {
 	Refresh(ctx context.Context, refreshToken string) (*Identity, Tokens, error)
 }

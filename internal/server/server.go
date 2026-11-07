@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -108,6 +109,10 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 		if a, err = buildAuth(cfg, log, o); err != nil {
 			return nil, err
 		}
+	} else if err := errors.Join(looseSecretFiles(cfg)...); err != nil {
+		// buildAuth checks every secret file; without authentication this is the check: the stdio
+		// upstream's env file, or the HTTP upstream's credential.
+		return nil, err
 	}
 	var minter *assertion.Minter
 	if a != nil {

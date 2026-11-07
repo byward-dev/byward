@@ -164,7 +164,10 @@ func (p *Provider) AuthCodeURL(ctx context.Context, l idp.Login) (string, error)
 	if l.DomainHint != "" {
 		q.Set("domain_hint", l.DomainHint)
 	}
-	if l.SelectAccount {
+	switch {
+	case l.Silent:
+		q.Set("prompt", "none")
+	case l.SelectAccount:
 		q.Set("prompt", "select_account")
 	}
 	return p.endpoint("/oauth2/v2.0/authorize") + "?" + q.Encode(), nil

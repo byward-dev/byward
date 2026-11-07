@@ -864,3 +864,82 @@ func TestTheDocumentedKeyRetirementPeriodCoversEveryRefreshableGrant(t *testing.
 		}
 	}
 }
+
+// noRefreshToken is an IdP that, like a misconfigured preset, returns no refresh token.
+type noRefreshToken struct{ IdP }
+
+func (n noRefreshToken) Callback(ctx context.Context, q url.Values, l idp.Login) (idp.Identity, idp.Tokens, error) {
+	id, toks, err := n.IdP.Callback(ctx, q, l)
+	toks.RefreshToken = ""
+	return id, toks, err
+}
+
+// A sign-in that would refresh but got no IdP refresh token gets no proxy refresh token either
+// (its first refresh would only revoke the grant), and a warning naming the IdP, so an adapter that
+// stopped asking for one shows in the log rather than as hourly sign-ins.
+func TestASignInThatWouldRefreshButGotNoIdPRefreshTokenWarnsAndGetsNoRefreshToken(t *testing.T) {
+	for name, tc := range map[string]struct {
+		scope       string
+		strip       bool // the IdP returns no refresh token
+		warn, fresh bool // a warning; a proxy refresh token
+	}{
+		"the IdP gave none":                   {"mcp offline_access", true, true, false},
+		"the IdP gave one":                    {"mcp offline_access", false, false, true},
+		"no refresh asked, the IdP gave none": {"mcp", true, false, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t, func(c *Config) {
+				if tc.strip {
+					c.IdP = noRefreshToken{c.IdP}
+				}
+			})
+			code := e.signIn(t, url.Values{"scope": {tc.scope}}).Query().Get("code")
+			res, body := e.redeem(t, code, nil)
+			if res.StatusCode != http.StatusOK || (body["refresh_token"] != nil) != tc.fresh {
+				t.Fatalf("token: %d %v, want a refresh token %v", res.StatusCode, body, tc.fresh)
+			}
+			var warning map[string]any
+			for _, line := range strings.Split(strings.TrimSpace(e.logs.String()), "\n") {
+				var rec map[string]any
+				if json.Unmarshal([]byte(line), &rec) == nil && rec["msg"] == "the IdP returned no refresh token, so this grant cannot refresh" {
+					warning = rec
+				}
+			}
+			if (warning != nil) != tc.warn || (warning != nil && (warning["level"] != "WARN" || warning["idp"] != "entra" || warning["client_id"] != clientID)) {
+				t.Fatalf("warning %v, want one naming the IdP: %v", warning, tc.warn)
+			}
+		})
+	}
+}
+
+// noRefreshIdentity is an IdP whose refresh responses carry no ID token, which OIDC Core §12.2 allows.
+type noRefreshIdentity struct{ IdP }
+
+func (n noRefreshIdentity) Refresh(ctx context.Context, rt string) (*idp.Identity, idp.Tokens, error) {
+	_, toks, err := n.IdP.Refresh(ctx, rt)
+	return nil, toks, err
+}
+
+// The gate needs fresh claims at every refresh (ADR-0015 §1), so an IdP that refreshes without an
+// ID token ends the grant; the warning names the IdP and what it must do.
+func TestARefreshWithoutAnIDTokenEndsTheGrantNamingTheIdP(t *testing.T) {
+	e := newEnv(t, func(c *Config) { c.IdP = noRefreshIdentity{c.IdP} })
+	body := e.offline(t)
+	res, refreshed := e.refresh(t, body["refresh_token"].(string), "")
+	if res.StatusCode != http.StatusBadRequest || refreshed["error"] != "invalid_grant" {
+		t.Fatalf("refresh: %d %v, want invalid_grant", res.StatusCode, refreshed)
+	}
+	if _, err := e.st.Grant(context.Background(), firstGrant(e.st)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("grant after a refresh without an ID token: %v, want revoked", err)
+	}
+	var warning map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(e.logs.String()), "\n") {
+		var rec map[string]any
+		if json.Unmarshal([]byte(line), &rec) == nil && rec["msg"] == "the IdP returned no ID token on refresh; grant revoked" {
+			warning = rec
+		}
+	}
+	if warning == nil || warning["idp"] != "entra" || !strings.Contains(fmt.Sprint(warning["reason"]), "ID token on the refresh_token grant") {
+		t.Fatalf("warning %v, want one naming the IdP and the requirement", warning)
+	}
+}

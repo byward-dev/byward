@@ -101,7 +101,7 @@ func runDoctor(ctx context.Context, args, environ []string, stdout, stderr io.Wr
 func initIdP(_ context.Context, args, environ []string, stdout, stderr io.Writer) int {
 	const usage = "byward: usage: byward init entra --tenant <tenant-id> [--public-url <url>] [--upstream-url <url>] [--secret-years 1|2]"
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
-		_, _ = fmt.Fprintln(stderr, usage+" (entra is the only IdP so far)")
+		_, _ = fmt.Fprintln(stderr, usage+" (init prints the setup of an entra IdP; for an oidc IdP see docs/how-to/oidc.md)")
 		return exitConfig
 	}
 	env := getenv(environ)
