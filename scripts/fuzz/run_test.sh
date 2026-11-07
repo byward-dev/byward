@@ -5,11 +5,13 @@
 # testdata/fuzz/<Target>/ unless the case says it writes none. Each case runs in its own git
 # repository, so git ls-files finds new inputs as run.sh would.
 set -eu
-# The developer's git config (hooks, excludes, signing) must not reach the test repositories.
-export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 script="$(cd "$(dirname "$0")" && pwd)/run.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+# The developer's git config (hooks, excludes, signing) must not reach the test repositories. The
+# default excludes file sits under XDG_CONFIG_HOME or HOME even without a global config.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 HOME="$tmp" XDG_CONFIG_HOME="$tmp"
+unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS
 failures=0
 
 mkdir -p "$tmp/bin"
@@ -19,7 +21,9 @@ case "\$1 \$2" in
 "list -m") echo example.com/m; exit 0 ;;
 "test -list")
   case \$(cat "$tmp/list") in
-  fails) printf 'FAIL\texample.com/m/a [setup failed]\n'; exit 1 ;;
+  fails) # a partial listing: one package listed, another that did not build
+    printf 'FuzzA\nok  \texample.com/m/a\t0.1s\nFAIL\texample.com/m/b [setup failed]\n'
+    exit 1 ;;
   empty) printf 'ok  \texample.com/m/a\t0.1s\n?   \texample.com/m/none\t[no test files]\n'; exit 0 ;;
   esac
   printf 'FuzzA\nFuzzB\nok  \texample.com/m/a\t0.1s\n?   \texample.com/m/none\t[no test files]\nFuzzC\nok  \texample.com/m/c/d\t0.1s\n'
@@ -35,6 +39,7 @@ while [ \$# -gt 1 ]; do
   shift
 done
 pkg=\$1
+cat >/dev/null # as a test binary may: a run must not consume the list of targets still to run
 printf '%s %s %s %s\n' "\$run" "\$fuzz" "\$time" "\$pkg" >>"$tmp/ran"
 name=\${fuzz#^}
 name=\${name%\\\$}
@@ -53,7 +58,7 @@ chmod +x "$tmp/bin/go"
 all="^\$ ^FuzzA\$ 1s example.com/m/a;^\$ ^FuzzB\$ 1s example.com/m/a;^\$ ^FuzzC\$ 1s example.com/m/c/d"
 
 # case name | listing (ok, fails, empty) | targets failing with an input | targets failing without
-# one | want exit | want output (grep -E) | want crashers (space-separated) | want runs (;-separated) |
+# one | want exit | want output (grep -E patterns, ;-separated, each required) | want crashers (space-separated) | want runs (;-separated) |
 # output that must not appear (grep -E, optional)
 run() {
   repo="$tmp/repo-$1"
@@ -75,7 +80,14 @@ run() {
   crashers=$(cd "$repo" && find build/fuzz/crashers -type f 2>/dev/null | sed 's|^build/fuzz/crashers/||' | sort | tr '\n' ' ' | sed 's/ $//')
   ran=$(tr '\n' ';' <"$tmp/ran" | sed 's/;$//')
   unwanted=${9:-}
-  if [ "$code" -ne "$5" ] || ! printf '%s\n' "$out" | grep -Eq "$6" || [ "$crashers" != "$7" ] || [ "$ran" != "$8" ] ||
+  missing=""
+  old_ifs=$IFS
+  IFS=';'
+  for want in $6; do
+    printf '%s\n' "$out" | grep -Eq "$want" || missing="$missing [$want]"
+  done
+  IFS=$old_ifs
+  if [ "$code" -ne "$5" ] || [ -n "$missing" ] || [ "$crashers" != "$7" ] || [ "$ran" != "$8" ] ||
     { [ -n "$unwanted" ] && printf '%s\n' "$out" | grep -Eq "$unwanted"; }; then
     echo "FAIL $1: exit $code (want $5), crashers [$crashers] (want [$7]), ran [$ran] (want [$8]), output: $out"
     failures=$((failures + 1))
@@ -88,7 +100,7 @@ run keeps-only-new-inputs-not-committed-seeds ok "FuzzA FuzzC" "" 1 'FAIL: 2 of 
   "a/testdata/fuzz/FuzzA/0123abcd c/d/testdata/fuzz/FuzzC/0123abcd" "$all"
 # FuzzA's input sits beside FuzzB's empty corpus: each target gets only its own.
 run a-failure-without-an-input-says-so ok "FuzzA" "FuzzB" 1 'example.com/m/a FuzzB wrote no input' "a/testdata/fuzz/FuzzA/0123abcd" "$all"
-run a-failed-listing-shows-why-and-runs-nothing fails "" "" 1 'example.com/m/a \[setup failed\]' "" ""
+run a-failed-listing-shows-why-and-runs-nothing fails "" "" 1 'example.com/m/b \[setup failed\];FAIL: listing the fuzz targets' "" "" 'no fuzz targets found'
 run no-targets-is-a-failure empty "" "" 1 'FAIL: no fuzz targets found' "" ""
 
 if [ "$failures" -ne 0 ]; then
