@@ -61,7 +61,14 @@ Only submit work you have the right to contribute under Apache-2.0.
   `internal/testutil/`.
 - `mise run check` must pass with no Docker. Docker-based tests run in `mise run test:integration`.
 - No wall-clock sleeps in tests; use `testing/synctest` or an injected clock.
-- Fixtures use generated identifiers only, never real tenant, user or client IDs.
+- Fixtures use generated identifiers only, never real tenant, user or client IDs, and email addresses
+  only at reserved example domains (`example.com`, `example.net`, `example.org`, or any name under
+  `.example`). `internal/testutil/fixtures` enforces both in `mise run test` (ADR-0024 §13).
+  - In CI, the secret `BYWARD_FORBIDDEN_IDENTIFIERS` lists identifiers and names that must never
+    appear in the repository, one per line; every file git would commit (tracked, or untracked and
+    not ignored) is checked against it, without regard to case. Findings name only the file and line, never the value.
+  - Without the secret (forks, local runs) only email addresses are checked. To check a list
+    locally: `BYWARD_FORBIDDEN_IDENTIFIERS="$(cat my-list)" go test ./internal/testutil/fixtures`.
 - The full strategy (lanes, fuzz targets, budgets) is in
   [ADR-0024](docs/adr/0024-testing-strategy.md).
 

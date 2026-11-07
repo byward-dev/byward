@@ -113,7 +113,7 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"cimd allowed hosts blank", "BYWARD_CIMD_ALLOWED_HOSTS=,", "BYWARD_CIMD_ALLOWED_HOSTS is set but lists nothing"},
 		{"cimd host with a scheme", "BYWARD_CIMD_TRUSTED_HOSTS=https://claude.ai", `BYWARD_CIMD_TRUSTED_HOSTS: "https://claude.ai" is not a host name`},
 		{"cimd host with a path", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai/oauth", `BYWARD_CIMD_TRUSTED_HOSTS: "claude.ai/oauth" is not a host name`},
-		{"cimd host with user info", "BYWARD_CIMD_ALLOWED_HOSTS=user@claude.ai", `BYWARD_CIMD_ALLOWED_HOSTS: "user@claude.ai" is not a host name`},
+		{"cimd host with user info", "BYWARD_CIMD_ALLOWED_HOSTS=user@claude.example", `BYWARD_CIMD_ALLOWED_HOSTS: "user@claude.example" is not a host name`},
 		{"cimd host with a space", "BYWARD_CIMD_TRUSTED_HOSTS=claude .ai", `"claude .ai" is not a host name`},
 		{"cimd host with a port", "BYWARD_CIMD_ALLOWED_HOSTS=claude.ai:443", `BYWARD_CIMD_ALLOWED_HOSTS: "claude.ai:443" is not a host name`},
 		{"cimd wildcard host", "BYWARD_CIMD_TRUSTED_HOSTS=*.example.com", `"*.example.com" is not a host name`},
