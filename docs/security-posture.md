@@ -220,7 +220,10 @@ the client and redirect URI again. This is accepted behaviour, not a gap: no tok
     a second use with "This sign-in has expired." So a kept copy of the cookie cannot finish a
     sign-in twice, including after a rate-limited silent callback that answered
     `temporarily_unavailable`. If the store cannot record the login, the callback stops: a page,
-    or `temporarily_unavailable` for a silent sign-in.
+    or `temporarily_unavailable` for a silent sign-in. Accepted: during such a store outage the
+    login stays unrecorded, so a client that kept the HttpOnly `__Host-` cookie after being told to
+    delete it could finish that sign-in once the store is back; it needs both the outage and that
+    client.
 - **Accepted: a local process can reuse a remembered loopback client.** A loopback redirect URI is
   remembered whatever its port, because ADR-0009 §2 lets the port vary (Claude Code picks a new one
   every run). So, for a remembered loopback client, a process on the user's machine that opens

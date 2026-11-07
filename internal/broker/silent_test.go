@@ -263,28 +263,18 @@ func TestPromptNoneWhoseConsentDoesNotHoldAfterTheIdPGetsNoCodeAndNoPage(t *test
 	}
 }
 
-// A silent sign-in whose used login cannot be recorded answers temporarily_unavailable at the
-// redirect, before the IdP leg, not a page.
-func TestPromptNoneWhoseLoginCannotBeRecordedIsTemporarilyUnavailable(t *testing.T) {
-	e := newEnv(t, withRemember(t, nil))
-	h := e.remember(t, nil)
-	e.fake.Set(fakeidp.WithSilentSession())
-	res := e.authorizeWith(t, silent(nil), h)
-	e.st.spendDown.Store(true)
-	if got := answerOf(t, e.finish(t, res)); got != refused(e, "temporarily_unavailable") {
-		t.Fatalf("answer %+v, want temporarily_unavailable", got)
-	}
-}
-
-// A broker failure after the IdP is server_error at the redirect for a silent sign-in, not a page.
-func TestPromptNoneWhoseSignInFailsAfterTheIdPIsAServerError(t *testing.T) {
+// A broker failure at the callback is answered at the redirect for a silent sign-in, not a page:
+// temporarily_unavailable when the used login cannot be spent (before the IdP leg), server_error
+// after the IdP.
+func TestPromptNoneWhoseSignInFailsInTheBrokerIsAnsweredAtTheRedirect(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		breakIt func(e *env)
+		name, want string
+		breakIt    func(e *env)
 	}{
-		{"the access gate cannot decide", func(e *env) { e.b.cfg.Gate = brokenGate{} }},
-		{"the grant cannot be stored", func(e *env) { e.st.createDown.Store(true) }},
-		{"the code cannot be stored", func(e *env) { e.st.putCodeDown.Store(true) }},
+		{"the login cannot be spent", "temporarily_unavailable", func(e *env) { e.st.spendDown.Store(true) }},
+		{"the access gate cannot decide", "server_error", func(e *env) { e.b.cfg.Gate = brokenGate{} }},
+		{"the grant cannot be stored", "server_error", func(e *env) { e.st.createDown.Store(true) }},
+		{"the code cannot be stored", "server_error", func(e *env) { e.st.putCodeDown.Store(true) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t, withRemember(t, nil))
@@ -292,8 +282,8 @@ func TestPromptNoneWhoseSignInFailsAfterTheIdPIsAServerError(t *testing.T) {
 			e.fake.Set(fakeidp.WithSilentSession())
 			res := e.authorizeWith(t, silent(nil), h)
 			tc.breakIt(e) // after the interactive sign-in that set the hint
-			if got := answerOf(t, e.finish(t, res)); got != refused(e, "server_error") {
-				t.Fatalf("answer %+v, want server_error", got)
+			if got := answerOf(t, e.finish(t, res)); got != refused(e, tc.want) {
+				t.Fatalf("answer %+v, want %s", got, tc.want)
 			}
 		})
 	}
@@ -347,6 +337,20 @@ func cookieNamed(res *http.Response, name string) *http.Cookie {
 		}
 	}
 	return nil
+}
+
+// A rate-limited silent callback whose login cannot be spent still answers at its redirect URI,
+// never with the page.
+func TestPromptNoneWhoseCallbackIsRateLimitedWhileTheStoreFailsIsTemporarilyUnavailable(t *testing.T) {
+	e := newEnv(t, withRemember(t, nil))
+	h := e.remember(t, nil)
+	e.fake.Set(fakeidp.WithSilentSession())
+	res := e.authorizeWith(t, silent(nil), h)
+	e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"callback": true}}
+	e.st.spendDown.Store(true)
+	if got := answerOf(t, e.finish(t, res)); got != refused(e, "temporarily_unavailable") {
+		t.Fatalf("answer %+v, want temporarily_unavailable", got)
+	}
 }
 
 // A user the access gate refuses gets access_denied at the redirect on a silent sign-in, audited

@@ -319,11 +319,16 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 		// A silent sign-in's sealed login names a validated redirect URI: answer there, never a page.
 		// Its login is spent as at any other callback: the browser is told to drop it, so it cannot
 		// finish this sign-in later.
-		// A replay of a login already used gets the page.
-		if l, c, badLogin := b.openLogin(r); badLogin == "" && l.Silent && !errors.Is(b.spendLogin(r, l), store.ErrConsumed) {
-			b.expireLogin(w, c)
-			b.refuseSilently(w, r, "", l, "temporarily_unavailable", "too many sign-in attempts from this network; retry after "+strconv.Itoa(retry)+" s")
-			return
+		if l, c, badLogin := b.openLogin(r); badLogin == "" && l.Silent {
+			err := b.spendLogin(r, l)
+			if err != nil && !errors.Is(err, store.ErrConsumed) {
+				b.cfg.Log.ErrorContext(r.Context(), "recording a used login failed", "request_id", logging.RequestID(r.Context()), "error", err)
+			}
+			if !errors.Is(err, store.ErrConsumed) { // a replay of a login already used gets the page
+				b.expireLogin(w, c)
+				b.refuseSilently(w, r, "", l, "temporarily_unavailable", "too many sign-in attempts from this network; retry after "+strconv.Itoa(retry)+" s")
+				return
+			}
 		}
 		b.page(w, r, http.StatusTooManyRequests, tooManyTitle, tooManyHint(retry))
 		return

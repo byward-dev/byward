@@ -1445,25 +1445,30 @@ func TestRevocationsOutliveTheTokensAndLoginsTheyCover(t *testing.T) {
 // A login is used once on the server (#150): replaying a callback with a kept copy of the login
 // cookie after it signed in, at any time the cookie still opens, gets the expired-sign-in page, not
 // a second answer, and never reaches the IdP.
-func TestAReplayedCallbackIsRefusedByTheServer(t *testing.T) {
+func TestACallbackReplayedWithAKeptLoginCookieGetsTheExpiredPageAndNeverReachesTheIdP(t *testing.T) {
 	e := newEnv(t)
 	c, cb := e.startLogin(t, nil)
 	if res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{c}); res.StatusCode != http.StatusFound {
 		t.Fatalf("first callback: %d", res.StatusCode)
 	}
-	before := len(e.idpOps)
+	before, logins := len(e.idpOps), len(e.auditEvents(t, "login"))
 	e.now = e.now.Add(LoginLifetime / 2) // the sealed login still opens
 	replay := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{c})
 	if got := pageTitle(t, replay); replay.StatusCode != http.StatusBadRequest || got != "This sign-in has expired." {
 		t.Fatalf("replay: %d %q, want 400 This sign-in has expired.", replay.StatusCode, got)
+	}
+	// The replay attempt is audited, as every refused sign-in state is.
+	if recs := e.auditEvents(t, "login")[logins:]; len(recs) != 1 || recs[0]["outcome"] != "failure" || recs[0]["reason"] != "sign-in state missing, invalid or expired" {
+		t.Fatalf("login records for the replay: %v, want one failure", recs)
 	}
 	if len(e.idpOps) != before {
 		t.Fatalf("the replay reached the IdP: %v", e.idpOps[before:])
 	}
 }
 
-// When the used login cannot be recorded, the callback goes no further: no IdP call and no grant.
-func TestACallbackWhoseLoginCannotBeRecordedStops(t *testing.T) {
+// When the used login cannot be spent, the callback goes no further: the server-error page, no IdP
+// call and no grant.
+func TestACallbackWhoseLoginCannotBeSpentIsAServerErrorAndNeverReachesTheIdP(t *testing.T) {
 	e := newEnv(t)
 	c, cb := e.startLogin(t, nil)
 	e.st.spendDown.Store(true)

@@ -665,17 +665,18 @@ func (s *Store) SpendLogin(ctx context.Context, hash [sha256.Size]byte, now, exp
 		return store.ErrInvalid
 	}
 	return s.write(ctx, func(tx *sql.Tx) error {
-		var until int64
-		err := tx.QueryRowContext(ctx, "SELECT expires_at FROM spent_logins WHERE hash = ?", hash[:]).Scan(&until)
-		switch {
-		case err == nil && until > micros(now):
-			return store.ErrConsumed
-		case err != nil && !errors.Is(err, sql.ErrNoRows):
+		// One conditional statement (ADR-0007 §2), so it stays atomic under any isolation level: it
+		// inserts, or replaces only an expired record; no row affected means a live one exists.
+		res, err := tx.ExecContext(ctx, `INSERT INTO spent_logins (hash, expires_at) VALUES (?, ?)
+			ON CONFLICT (hash) DO UPDATE SET expires_at = excluded.expires_at WHERE spent_logins.expires_at <= ?`,
+			hash[:], micros(expiresAt), micros(now))
+		if err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO spent_logins (hash, expires_at) VALUES (?, ?) ON CONFLICT (hash) DO UPDATE SET expires_at = excluded.expires_at",
-			hash[:], micros(expiresAt))
-		return err
+		if n, err := res.RowsAffected(); err != nil || n == 0 {
+			return cmp.Or(err, store.ErrConsumed)
+		}
+		return nil
 	})
 }
 

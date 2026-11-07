@@ -67,7 +67,8 @@ type Collector interface {
 	// IdleExpiresAt <= now, grants with ExpiresAt <= now together with their codes and refresh
 	// tokens, revocations with At <= now - RevocationRetention, clients with ExpiresAt <= now or
 	// never used and CreatedAt <= now - UnusedClientLifetime, consents with ExpiresAt <= now, and
-	// spent logins with expiresAt <= now.
+	// spent logins with expiresAt <= now. An expired spent login already counts as absent, so the
+	// shared suite cannot see it collected: each adapter tests that with its own row count.
 	Collect(ctx context.Context, now time.Time) error
 }
 
