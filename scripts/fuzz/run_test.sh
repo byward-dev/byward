@@ -5,15 +5,16 @@
 # testdata/fuzz/<Target>/ unless the case says it writes none. Each case runs in its own git
 # repository, so git ls-files finds new inputs as run.sh would.
 set -eu
+# Run in an empty environment (PATH and TMPDIR only): git, the shell and grep read many variables
+# (GIT_DIR, GIT_ATTR_SOURCE, CDPATH, ...) that a developer or a git hook may have set.
+[ "${FUZZ_RUN_TEST_CLEAN_ENV:-}" = 1 ] ||
+  exec env -i FUZZ_RUN_TEST_CLEAN_ENV=1 PATH="$PATH" ${TMPDIR+TMPDIR="$TMPDIR"} sh "$0" "$@"
 script="$(cd "$(dirname "$0")" && pwd)/run.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-# The developer's git config (hooks, excludes, signing) must not reach the test repositories. The
-# default excludes file sits under XDG_CONFIG_HOME or HOME even without a global config.
+# Nor may the developer's git config files (hooks, excludes, signing): the default excludes file
+# sits under XDG_CONFIG_HOME or HOME even without a global config.
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 HOME="$tmp" XDG_CONFIG_HOME="$tmp"
-# Inherited repository variables (git exports them to hooks) would point git at the outer repository.
-unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR \
-  GIT_TEMPLATE_DIR
 failures=0
 
 mkdir -p "$tmp/bin"
