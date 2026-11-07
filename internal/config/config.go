@@ -62,6 +62,8 @@ var registry = []Setting{
 	{Name: "assertion-keys-dir", Auth: true, Help: "directory of the identity assertion's signing keys: PEM ECDSA P-256 files, each name the key ID; the key whose ID sorts last signs; needed with an HTTP upstream; default: assertion-keys in the data directory (docs/how-to/identity-assertion.md)"},
 	{Name: "assertion-header", Auth: true, Default: "Authorization", Help: "request header that carries the identity assertion to the HTTP upstream, as Bearer <JWT>; inbound copies are always removed (ADR-0016 §2)"},
 	{Name: "identity-headers", Auth: true, Default: "false", Help: "also send the HTTP upstream the user in plain headers (X-Byward-Subject, X-Byward-Client-Id, X-Byward-Principal-Type, and X-Byward-Roles, -Groups, -Email, -Email-Verified, -Name for the assertion's claims), percent-encoded; safe only when the upstream is reachable through this proxy alone (ADR-0016 §5, docs/how-to/plain-identity-headers.md)"},
+	{Name: "obo-scopes", Auth: true, Help: "On-Behalf-Of: space-separated scopes of one downstream API, e.g. https://graph.microsoft.com/User.Read; the HTTP upstream then gets a token for them in BYWARD_OBO_HEADER on every request; empty turns it off (ADR-0017, docs/how-to/downstream-apis.md)"},
+	{Name: "obo-header", Auth: true, Default: "X-Byward-Downstream-Token", Help: "On-Behalf-Of: request header that carries the downstream API token to the HTTP upstream, as Bearer <token>; inbound copies are always removed (ADR-0017 §3)"},
 	{Name: "assertion-claims", Auth: true, Default: "roles", Help: "comma-separated optional claims in the identity assertion: roles, groups, email, name; or none (ADR-0016 §1, docs/reference/identity-assertion.md)"},
 	{Name: "assertion-unverified-email", Auth: true, Bool: true, Default: "false", Help: "with email in BYWARD_ASSERTION_CLAIMS: also assert an email the IdP has not verified (Entra never verifies one), marked email_verified false; never authorize on it (docs/how-to/identity-assertion.md)"},
 	{Name: "static-clients-file", Auth: true, Help: "JSON file of pre-registered MCP clients; default: clients.json in the data directory, optional while CIMD or DCR is on; a file you name must exist (docs/reference/static-clients.md)"},
@@ -150,7 +152,11 @@ type Config struct {
 	IdentityHeaders bool
 	// AssertionUnverifiedEmail asserts an opted-in email the IdP does not vouch for, too.
 	AssertionUnverifiedEmail bool
-	StaticClientsFile        string
+	// OBOScopes are the downstream API's scopes for On-Behalf-Of (ADR-0017); empty means off.
+	OBOScopes []string
+	// OBOHeader carries the downstream token to the HTTP upstream.
+	OBOHeader         string
+	StaticClientsFile string
 	// StaticClientsFileNamed: the operator set the path, so the file must exist; the default may be
 	// absent when CIMD or DCR is on.
 	StaticClientsFileNamed bool
@@ -366,6 +372,9 @@ func validate(v *Values, container bool) (*Config, error) {
 		}
 	}
 	errs = append(errs, c.upstreamCredential(v)...)
+	if !c.NoAuth {
+		errs = append(errs, c.onBehalfOf(v)...) // after the IdP, the assertion and the credential headers
+	}
 	errs = append(errs, c.headerClashes()...)
 	if len(errs) > 0 {
 		msgs := make([]string, 0, len(errs))
@@ -851,7 +860,8 @@ const (
 var IdentityHeaderNames = []string{HeaderSubject, HeaderClientID, HeaderPrincipalType, HeaderRoles, HeaderGroups, HeaderEmail, HeaderEmailVerified, HeaderName}
 
 // headerClashes refuses two purposes in one header: the identity assertion, the operator's
-// upstream credential and the plain identity headers each have their own (ADR-0016 §4, §5, §7). The
+// upstream credential, the On-Behalf-Of token and the plain identity headers each have their own
+// (ADR-0016 §4, §5, §7; ADR-0017 §3). The
 // relay reads "_" as "-" (invariant 16), so X_Api_Key and X-Api-Key are one header.
 func (c *Config) headerClashes() []error {
 	var errs []error
@@ -860,12 +870,76 @@ func (c *Config) headerClashes() []error {
 		errs = append(errs, errorf("%s and %s are both %s, but the credential and the identity assertion never share a header (ADR-0016 §7): set %s to a header of your own, such as X-Byward-Identity, and verify the assertion there",
 			cEnv, aEnv, c.UpstreamCredentialHeader, aEnv))
 	}
-	for _, u := range []struct{ env, header string }{{aEnv, c.AssertionHeader}, {cEnv, c.UpstreamCredentialHeader}} {
+	for _, u := range []struct{ env, header string }{{aEnv, c.AssertionHeader}, {cEnv, c.UpstreamCredentialHeader}, {Setting{Name: "obo-header"}.Env(), c.OBOHeader}} {
 		for _, plain := range IdentityHeaderNames {
 			if sameHeader(u.header, plain) {
 				errs = append(errs, errorf("%s: %s is one of the plain identity headers the proxy sets (docs/how-to/plain-identity-headers.md); use another header", u.env, u.header))
 			}
 		}
+	}
+	return errs
+}
+
+// oidcScopes are login scopes, never a downstream API's.
+var oidcScopes = map[string]bool{"openid": true, "profile": true, "email": true, "offline_access": true}
+
+// scopeSlash is the index of the "/" that ends a scope URI's API part (https://graph.microsoft.com
+// in https://graph.microsoft.com/User.Read), or -1 when s is not https:// or api://, an API and a
+// scope.
+func scopeSlash(s string) int {
+	for _, scheme := range []string{"https://", "api://"} {
+		rest, ok := strings.CutPrefix(s, scheme)
+		if !ok {
+			continue
+		}
+		// The API part needs a host and no empty segment: https:///x/y and https://a//b are typos.
+		if j := strings.LastIndex(rest, "/"); j > 0 && j < len(rest)-1 && rest[0] != '/' && !strings.Contains(rest, "//") {
+			return len(scheme) + j
+		}
+	}
+	return -1
+}
+
+// onBehalfOf reads the On-Behalf-Of settings (ADR-0017): full scope URIs of one downstream API, a
+// header of its own, and an HTTP upstream (a stdio process gets its environment once, so a
+// per-request token cannot reach it).
+func (c *Config) onBehalfOf(v *Values) []error {
+	sEnv, hEnv := Setting{Name: "obo-scopes"}.Env(), Setting{Name: "obo-header"}.Env()
+	var errs []error
+	c.OBOScopes = strings.Fields(v.get("obo-scopes"))
+	resource := ""
+	for _, s := range c.OBOScopes {
+		i := scopeSlash(s)
+		switch {
+		case oidcScopes[strings.ToLower(s)]:
+			errs = append(errs, errorf("%s: %s is a sign-in scope, not a downstream API's; give the API's scopes, e.g. https://graph.microsoft.com/User.Read", sEnv, s))
+		case i < 0:
+			errs = append(errs, errorf("%s: %q is not a scope URI such as https://graph.microsoft.com/User.Read or api://<app>/<scope>", sEnv, s))
+		case resource == "":
+			resource = s[:i]
+		case s[:i] != resource:
+			errs = append(errs, errorf("%s: %s and %s are for different APIs; Entra issues a token for one API per request", sEnv, resource, s[:i]))
+		}
+	}
+	if v.get("obo-scopes") != "" && len(c.OBOScopes) == 0 {
+		errs = append(errs, errorf("%s is set but lists nothing; give scopes, or leave it unset", sEnv))
+	}
+	if len(c.OBOScopes) > 0 && c.UpstreamCommand != nil {
+		errs = append(errs, errorf("%s: On-Behalf-Of works with an HTTP upstream only; a stdio process gets its environment once and cannot receive a per-request token (#141)", sEnv))
+	}
+	if len(c.OBOScopes) > 0 && c.IdP != "entra" {
+		errs = append(errs, errorf("%s: On-Behalf-Of is Entra's; it needs BYWARD_IDP=entra, got %s", sEnv, c.IdP))
+	}
+	h, err := upstreamHeader(v, "obo-header", "X-Byward-Downstream-Token")
+	if err != nil {
+		return append(errs, err)
+	}
+	c.OBOHeader = h
+	switch {
+	case sameHeader(h, "Authorization") || sameHeader(h, c.AssertionHeader):
+		errs = append(errs, errorf("%s: %s already carries the identity assertion or the client's token; use a header of its own such as X-Byward-Downstream-Token", hEnv, h))
+	case sameHeader(h, c.UpstreamCredentialHeader):
+		errs = append(errs, errorf("%s: %s already carries the operator's upstream credential (%s); use a header of its own such as X-Byward-Downstream-Token", hEnv, h, Setting{Name: "upstream-credential-header"}.Env()))
 	}
 	return errs
 }

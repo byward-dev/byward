@@ -335,6 +335,10 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	ctx := r.Context()
+	if q.Has("admin_consent") && !q.Has("code") {
+		b.adminConsent(w, r, q)
+		return
+	}
 	l, c, badLogin := b.openLogin(r)
 	if c != nil { // single use: spent whether or not it opens
 		b.expireLogin(w, c)

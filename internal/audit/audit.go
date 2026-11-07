@@ -38,6 +38,9 @@ const (
 	ProcessEvicted      = "process_evicted"       // an idle stdio upstream process was stopped to make room under a process cap (ADR-0003 §5)
 	AppTokenAccepted    = "app_token_accepted"    // an app-only caller's token was first used at the MCP endpoint (ADR-0022 §7)
 	AppTokenRejected    = "app_token_rejected"    // an MCP request carried an app-only token that was invalid, expired, delegated, revoked or denied by the gate, or could not be checked (keys unavailable, deny list stale)
+	// DownstreamTokenRefused: Entra refused an On-Behalf-Of exchange for a signed-in user's request
+	// (ADR-0017 §5); the reason is consent_required, interaction_required, unavailable or failed.
+	DownstreamTokenRefused = "downstream_token_refused"
 )
 
 // Outcomes.
