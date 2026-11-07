@@ -136,6 +136,25 @@ func Load(args, environ []string, readFile readFileFunc) (*Config, Actions, erro
 	return c, act, err
 }
 
+// authSettings validate authenticated mode's settings, in this order; a feature with settings of its
+// own adds its check here.
+var authSettings = []func(*Config, *Values) []error{
+	(*Config).consent,
+	(*Config).idp,
+	(*Config).gate,
+	(*Config).appTokens,
+	(*Config).paths,
+	(*Config).refreshGrace,
+	(*Config).assertion,
+	(*Config).clientSources,
+}
+
+// dependentAuthSettings run after every header setting, the upstream credential's included, for
+// checks that compare against them.
+var dependentAuthSettings = []func(*Config, *Values) []error{
+	(*Config).onBehalfOf,
+}
+
 func validate(v *Values, container bool) (*Config, error) {
 	c := &Config{Values: v, Listen: v.get("listen"), InternalListen: v.get("internal-listen"), Scope: v.get("scope"),
 		ResourceName: v.get("resource-name"), ResourceDocumentation: v.get("resource-documentation"),
@@ -236,61 +255,15 @@ func validate(v *Values, container bool) (*Config, error) {
 		c.Relaxations = append(c.Relaxations, "stdio upstream without authentication: anyone who can reach the proxy starts upstream processes, bounded only by BYWARD_STDIO_MAX_PROCESSES, and every process runs as the same anonymous user")
 	}
 	if !c.NoAuth {
-		c.OperatorName, c.ScopeDescription = v.get("operator-name"), v.get("scope-description")
-		errs = append(errs, checkText("operator-name", c.OperatorName, 80)...)
-		errs = append(errs, checkText("scope-description", c.ScopeDescription, 200)...)
-		errs = append(errs, c.idp(v)...)
-		c.GateTenants, c.GateRoles, c.GateGroups = splitList(v.get("gate-tenants")), splitList(v.get("gate-roles")), splitList(v.get("gate-groups"))
-		c.GateEmailDomains, c.GateHostedDomains = splitList(v.get("gate-email-domains")), splitList(v.get("gate-hosted-domains"))
-		// A gate list that is set but names nothing would silently open the gate.
-		for _, s := range []string{"gate-tenants", "gate-roles", "gate-groups", "gate-email-domains", "gate-hosted-domains"} {
-			if raw := v.get(s); raw != "" && len(splitList(raw)) == 0 {
-				errs = append(errs, errorf("%s is set but lists nothing; remove it or give at least one entry", Setting{Name: s}.Env()))
-			}
-		}
-		if c.GateAllowEmpty, err = strconv.ParseBool(v.get("gate-allow-empty")); err != nil {
-			errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "gate-allow-empty"}.Env(), v.get("gate-allow-empty")))
-		}
-		errs = append(errs, c.appTokens(v)...)
-		errs = append(errs, c.paths(v)...)
-		errs = append(errs, c.refreshGrace(v)...)
-		errs = append(errs, c.assertion(v)...)
-		if c.DCR, err = strconv.ParseBool(v.get("dcr")); err != nil {
-			errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "dcr"}.Env(), v.get("dcr")))
-		}
-		if raw := v.get("client-denylist"); raw != "" {
-			if c.ClientDenylist = splitList(raw); len(c.ClientDenylist) == 0 {
-				errs = append(errs, errorf("%s is set but lists nothing; remove it or give at least one entry", Setting{Name: "client-denylist"}.Env()))
-			}
-		}
-		if c.CIMD, err = strconv.ParseBool(v.get("cimd")); err != nil {
-			errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "cimd"}.Env(), v.get("cimd")))
-		}
-		for _, s := range []struct {
-			name string
-			dst  *[]string
-		}{{"cimd-trusted-hosts", &c.CIMDTrustedHosts}, {"cimd-allowed-hosts", &c.CIMDAllowedHosts}} {
-			env, raw := Setting{Name: s.name}.Env(), v.get(s.name)
-			*s.dst = splitList(raw)
-			switch {
-			case raw != "" && len(*s.dst) == 0:
-				errs = append(errs, errorf("%s is set but lists nothing; remove it or give at least one host", env))
-			case raw != "" && !c.CIMD:
-				errs = append(errs, errorf("%s has no effect while BYWARD_CIMD is false; remove one of them", env))
-			}
-			for i, h := range *s.dst {
-				if err := asciiHost(h); err != nil {
-					errs = append(errs, errorf("%s: %v", env, err))
-				} else if strings.ContainsAny(h, "/:*@ ") || !strings.Contains(h, ".") {
-					errs = append(errs, errorf("%s: %q is not a host name such as claude.ai (no scheme, port, path or wildcard)", env, h))
-				}
-				(*s.dst)[i] = strings.ToLower(h)
-			}
+		for _, check := range authSettings {
+			errs = append(errs, check(c, v)...)
 		}
 	}
 	errs = append(errs, c.upstreamCredential(v)...)
 	if !c.NoAuth {
-		errs = append(errs, c.onBehalfOf(v)...) // after the IdP, the assertion and the credential headers
+		for _, check := range dependentAuthSettings {
+			errs = append(errs, check(c, v)...)
+		}
 	}
 	errs = append(errs, c.headerClashes()...)
 	if len(errs) > 0 {

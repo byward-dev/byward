@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/byward-dev/byward/internal/assertion"
@@ -18,6 +17,7 @@ import (
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/ssrfguard"
+	"github.com/byward-dev/byward/internal/store/sqlite"
 	"github.com/byward-dev/byward/internal/token"
 )
 
@@ -61,12 +61,6 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	ring, sealer, ip, static, g := parts.ring, parts.sealer, parts.idp, parts.static, parts.gate
 	auditStartup(o.Audit, ring, static.IDs())
 	log.Info("client sources", "static_clients", len(static.IDs()), "cimd", cfg.CIMD, "dcr", cfg.DCR)
-	guard := ssrfguard.New(ssrfguard.Config{}) // every client-supplied URL (CIMD documents, jwks_uri) goes through it
-	clients := registration.Chain{static}
-	if cfg.CIMD {
-		clients = append(clients, newCIMDRegistry(registration.CIMDConfig{Fetch: guard, KeysClient: guard.HTTPClient(),
-			TrustedHosts: cfg.CIMDTrustedHosts, AllowedHosts: cfg.CIMDAllowedHosts, Deny: parts.clientDeny, JTI: parts.jti, Now: time.Now, Observe: o.Metrics.CIMDFetch}))
-	}
 	for _, w := range parts.warnings {
 		w.log(log)
 	}
@@ -78,11 +72,17 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	if err != nil {
 		return nil, err
 	}
+	w := &wiring{cfg: cfg, log: log, o: o, parts: parts, store: st,
+		guard: ssrfguard.New(ssrfguard.Config{})} // every client-supplied URL (CIMD documents, jwks_uri) goes through it
+	clients := registration.Chain{static}
 	var registrar broker.Registrar
-	if cfg.DCR {
-		dcr := registration.NewDCRRegistry(registration.DCRConfig{Store: st, KeysClient: guard.HTTPClient(), JTI: parts.jti, Now: time.Now,
-			Scopes: []string{cfg.Scope, "offline_access"}, Deny: parts.clientDeny})
-		clients, registrar = append(clients, dcr), dcr
+	for _, source := range clientSources {
+		if c, r := source(w); c != nil {
+			clients = append(clients, c)
+			if r != nil {
+				registrar = r
+			}
+		}
 	}
 	defer func() {
 		if err != nil {
@@ -111,12 +111,9 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	if err != nil {
 		return nil, err
 	}
-	var app resource.Validator // nil: app-only tokens off, so a JWT reaches no validator
-	if parts.appGate != nil {
-		if app, err = appValidator(parts, deny, o); err != nil {
-			return nil, err
-		}
-		log.Info("app-only tokens", "reason", "accepting Entra app-only tokens with app roles "+strings.Join(cfg.AppRoles, ", ")+" (ADR-0022)")
+	app, err := wireAppTokens(w, deny)
+	if err != nil {
+		return nil, err
 	}
 	v := resource.Dispatch(token.Prefix, sealed, app)
 	log.Info("broker ready", "reason", "keys "+fmt.Sprint(len(ring.KeyIDs()))+", signing with "+ring.SigningKeyID()+"")
@@ -125,26 +122,33 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 			return mcpsession.Bind(mcpsession.Config{Box: parts.sessionBox, Upstream: upstreamID(cfg), User: signedInUser,
 				Lifetime: broker.GrantLifetime, Audit: o.Audit, Log: log}, next)
 		}}
-	if k := parts.assertionKeys; k != nil {
-		if a.minter, err = assertion.NewMinter(k, cfg.Issuer(), cfg.UpstreamURL.String(), time.Now); err != nil {
+	w.broker = b
+	for _, feature := range authFeatures {
+		if err := feature(w, a); err != nil {
 			return nil, err
 		}
-		a.jwks = k.JWKSHandler()
-		log.Info("identity assertion", "reason", "signing with key "+k.SigningKeyID()+", keys "+strings.Join(k.KeyIDs(), " "),
-			"setting", "BYWARD_ASSERTION_HEADER", "value", cfg.AssertionHeader)
-	}
-	if cfg.IdentityHeaders && a.minter != nil {
-		log.Warn("plain identity headers are on", "setting", "BYWARD_IDENTITY_HEADERS",
-			"reason", "the upstream gets the user in X-Byward-* headers as well as the assertion; that is safe only when it is reachable through this proxy alone (docs/how-to/plain-identity-headers.md)")
-	}
-	if len(cfg.OBOScopes) > 0 {
-		// config refuses On-Behalf-Of with any IdP but Entra, so ip.entra is set.
-		a.downstream = newDownstreamTokens(cfg.OBOScopes, cfg.OBOHeader, ip.entra, ip.name, b.IdPAccessToken, log, o)
-		log.Info("On-Behalf-Of", "reason", "downstream API "+a.downstream.resource+"; access tokens are capped at the stored IdP token's expiry",
-			"setting", "BYWARD_OBO_HEADER", "value", cfg.OBOHeader)
 	}
 	return a, nil
 }
+
+// wiring is what buildAuth has built so far, for the feature files' wiring steps.
+type wiring struct {
+	cfg    *config.Config
+	log    *slog.Logger
+	o      Observability
+	parts  *authParts
+	store  *sqlite.Store
+	guard  *ssrfguard.Fetcher
+	broker *broker.Broker // set once the broker is built, before authFeatures run
+}
+
+// clientSources add client registries after the static clients, in this order; each returns nil
+// when its feature is off, and the registry that also registers clients (DCR) as the Registrar.
+var clientSources = []func(*wiring) (registration.Registry, broker.Registrar){wireCIMD, wireDCR}
+
+// authFeatures complete auth once the broker is built, in this order (the plain identity headers
+// need the assertion's minter).
+var authFeatures = []func(*wiring, *auth) error{wireAssertion, wireIdentityHeaders, wireOBO}
 
 // auditStartup records the keys and static clients the proxy starts with (ADR-0021 §3).
 func auditStartup(rec *audit.Log, ring *token.KeyRing, staticClients []string) {

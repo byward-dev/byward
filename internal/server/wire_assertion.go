@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
+	"time"
 
 	"github.com/byward-dev/byward/internal/assertion"
 	"github.com/byward-dev/byward/internal/broker"
@@ -61,5 +63,22 @@ func emailWarnings(cfg *config.Config, entra bool) []Warning {
 		return []Warning{{Message: "the identity assertion leaves out emails the IdP has not verified (email_verified)", Setting: setting,
 			Fix: "set it to true to assert them anyway, marked email_verified false"}}
 	}
+	return nil
+}
+
+// wireAssertion is the identity assertion for an HTTP upstream (ADR-0016): its minter and the
+// JWKS of its keys; nothing for a stdio upstream.
+func wireAssertion(w *wiring, a *auth) error {
+	k := w.parts.assertionKeys
+	if k == nil {
+		return nil
+	}
+	var err error
+	if a.minter, err = assertion.NewMinter(k, w.cfg.Issuer(), w.cfg.UpstreamURL.String(), time.Now); err != nil {
+		return err
+	}
+	a.jwks = k.JWKSHandler()
+	w.log.Info("identity assertion", "reason", "signing with key "+k.SigningKeyID()+", keys "+strings.Join(k.KeyIDs(), " "),
+		"setting", "BYWARD_ASSERTION_HEADER", "value", w.cfg.AssertionHeader)
 	return nil
 }
