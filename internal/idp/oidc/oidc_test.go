@@ -297,25 +297,25 @@ func TestGooglePresetQuirks(t *testing.T) {
 }
 
 // An email is verified only when the ID token says email_verified true: the boolean, or the string
-// "true" from an IdP whose preset sends strings (Google). Absent, false or any other string is
-// unverified (ADR-0016, 2026-11-07 amendment).
+// "true" from an IdP whose preset sends strings (Google). Absent, false, the string "false" or a
+// string from an IdP without that preset is unverified (ADR-0016, 2026-11-07 amendment).
 func TestAnEmailIsVerifiedOnlyWhenTheIDTokenSaysTrue(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		preset   string
-		verified bool // the user's email_verified as the IdP sends it
-		claim    fakeidp.Option
+		verified bool   // the user's email_verified
+		sends    string // how the IdP sends it: "bool", "string" or "absent"
 		want     bool
 	}{
-		{"the boolean true", "", true, fakeidp.WithEmailVerifiedAsString(false), true},
-		{"the boolean false", "", false, fakeidp.WithEmailVerifiedAsString(false), false},
-		{"no email_verified claim", "", true, fakeidp.WithoutEmailVerified(true), false},
-		{"the string true without a preset that sends strings", "", true, fakeidp.WithEmailVerifiedAsString(true), false},
-		{"Google's string true", "google", true, fakeidp.WithEmailVerifiedAsString(true), true},
-		{"Google's string false", "google", false, fakeidp.WithEmailVerifiedAsString(true), false},
+		{"the boolean true", "", true, "bool", true},
+		{"the boolean false", "", false, "bool", false},
+		{"no email_verified claim", "", true, "absent", false},
+		{"the string true without a preset that sends strings", "", true, "string", false},
+		{"Google's string true", "google", true, "string", true},
+		{"Google's string false", "google", false, "string", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			e := newEnv(t, Config{Preset: tc.preset}, tc.claim,
+			e := newEnv(t, Config{Preset: tc.preset}, fakeidp.WithEmailVerifiedAsString(tc.sends == "string"), fakeidp.WithoutEmailVerified(tc.sends == "absent"),
 				fakeidp.WithUser(fakeidp.User{Email: "test.user@contoso.example", EmailVerified: tc.verified}))
 			id, _, err := e.p.Callback(context.Background(), signIn(t, e, login), login)
 			if err != nil || id.Email == "" || id.EmailVerified != tc.want {

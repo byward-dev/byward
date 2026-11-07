@@ -126,23 +126,24 @@ func TestAnOIDCUsersAssertionIsByWardsWithTheIdPsSubject(t *testing.T) {
 func TestAnOIDCUsersEmailIsAssertedOnlyWhenVerifiedOrTheOperatorOptedIn(t *testing.T) {
 	const email = "jane@example.com"
 	for _, tc := range []struct {
-		name         string
-		claim        fakeidp.Option // how the IdP sends email_verified
-		optIn        bool           // BYWARD_ASSERTION_UNVERIFIED_EMAIL
-		wantEmail    any            // nil: left out
-		wantVerified any            // email_verified; nil: left out
+		name             string
+		verified, absent bool // the user's email_verified; absent: the IdP sends no such claim
+		optIn            bool // BYWARD_ASSERTION_UNVERIFIED_EMAIL
+		wantEmail        any  // nil: left out
+		wantVerified     any  // email_verified; nil: left out
 	}{
-		{"verified", fakeidp.WithUser(fakeidp.User{Subject: "u1", Email: email, EmailVerified: true}), false, email, true},
-		{"unverified is left out", fakeidp.WithUser(fakeidp.User{Subject: "u1", Email: email}), false, nil, nil},
-		{"no email_verified claim is left out", fakeidp.WithoutEmailVerified(true), false, nil, nil},
-		{"unverified with the opt-in", fakeidp.WithUser(fakeidp.User{Subject: "u1", Email: email}), true, email, false},
+		{"verified", true, false, false, email, true},
+		{"unverified is left out", false, false, false, nil, nil},
+		{"no email_verified claim is left out", true, true, false, nil, nil},
+		{"unverified with the opt-in", false, false, true, email, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			settings := []string{"BYWARD_ASSERTION_CLAIMS=email"}
 			if tc.optIn {
 				settings = append(settings, "BYWARD_ASSERTION_UNVERIFIED_EMAIL=true")
 			}
-			s := signInOIDC(t, []fakeidp.Option{fakeidp.WithUser(fakeidp.User{Subject: "u1", Email: email, EmailVerified: true}), tc.claim}, settings...)
+			s := signInOIDC(t, []fakeidp.Option{fakeidp.WithUser(fakeidp.User{Subject: "u1", Email: email, EmailVerified: tc.verified}),
+				fakeidp.WithoutEmailVerified(tc.absent)}, settings...)
 			if c := s.assertion(t); c["email"] != tc.wantEmail || c["email_verified"] != tc.wantVerified {
 				t.Fatalf("email %v, email_verified %v; want %v, %v", c["email"], c["email_verified"], tc.wantEmail, tc.wantVerified)
 			}

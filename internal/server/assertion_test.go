@@ -239,7 +239,7 @@ func TestEachAssertionClaimNameSelectsItsOwnClaim(t *testing.T) {
 // Every start says which emails the assertion leaves out or carries unverified, naming the setting
 // that changes it (ADR-0016, 2026-11-07 amendment).
 func TestStartupSaysWhichEmailsTheAssertionLeavesOutOrCarriesUnverified(t *testing.T) {
-	const unverified, claims = "BYWARD_ASSERTION_UNVERIFIED_EMAIL", "BYWARD_ASSERTION_CLAIMS"
+	const optInSetting, claimsSetting = "BYWARD_ASSERTION_UNVERIFIED_EMAIL", "BYWARD_ASSERTION_CLAIMS"
 	for _, tc := range []struct {
 		name, claims string
 		unverified   bool
@@ -249,13 +249,13 @@ func TestStartupSaysWhichEmailsTheAssertionLeavesOutOrCarriesUnverified(t *testi
 	}{
 		{name: "no email", claims: "roles", entra: true},
 		{name: "an OIDC IdP leaves out unverified emails", claims: "email",
-			want: "leaves out emails the IdP has not verified", setting: unverified, fix: "set it to true"},
+			want: "leaves out emails the IdP has not verified", setting: optInSetting, fix: "set it to true"},
 		{name: "Entra asserts no email", claims: "email", entra: true,
-			want: "Entra never verifies an email", setting: unverified, fix: "never authorize on it"},
+			want: "Entra never verifies an email", setting: optInSetting, fix: "never authorize on it"},
 		{name: "the opt-in carries unverified emails", claims: "email", unverified: true, entra: true,
-			want: "carries emails the IdP has not verified", setting: unverified, fix: "never authorize on email"},
+			want: "carries emails the IdP has not verified", setting: optInSetting, fix: "never authorize on email"},
 		{name: "the opt-in without email does nothing", claims: "roles", unverified: true,
-			want: unverified + " has no effect", setting: claims, fix: "add email to it"},
+			want: optInSetting + " has no effect", setting: claimsSetting, fix: "add email to it"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ws := emailWarnings(&config.Config{AssertionClaims: strings.Split(tc.claims, ","), AssertionUnverifiedEmail: tc.unverified}, tc.entra)
