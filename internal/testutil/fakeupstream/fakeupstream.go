@@ -15,6 +15,8 @@ type Request struct {
 	Method, Path, RawQuery, Host string
 	Header                       http.Header
 	Body                         []byte
+	// Trailer is the request's trailer section, as the upstream read it after the body.
+	Trailer http.Header
 }
 
 // Server is a running fake upstream.
@@ -37,7 +39,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	s.mu.Lock()
 	s.requests = append(s.requests, Request{Method: r.Method, Path: r.URL.Path, RawQuery: r.URL.RawQuery,
-		Host: r.Host, Header: r.Header.Clone(), Body: body})
+		Host: r.Host, Header: r.Header.Clone(), Body: body, Trailer: r.Trailer.Clone()})
 	h := s.Handler
 	s.mu.Unlock()
 	if h != nil {

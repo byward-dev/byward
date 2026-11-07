@@ -77,6 +77,11 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 			pr.Out.URL.Path, pr.Out.URL.RawPath = t.Path, t.RawPath
 			pr.Out.Host = ""
 			strip(pr.Out.Header, o.strip)
+			// A client's request trailers never reach the upstream: they are a second set of headers
+			// the strip above never sees, sent after the body, so a trailer named like a header the
+			// proxy sets could reach an upstream that reads trailers as headers. No MCP transport uses
+			// them. (ReverseProxy already drops the Trailer header itself, as hop-by-hop.)
+			pr.Out.Trailer = nil
 			// A token in the query never reaches the upstream, with or without authentication.
 			pr.Out.URL.RawQuery = withoutAccessToken(pr.Out.URL.RawQuery)
 			// Ours, after the strip: trace context (the body, `params._meta`, is never touched) and the

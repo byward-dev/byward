@@ -1,13 +1,17 @@
 package relay
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -195,4 +199,60 @@ func TestAForgedIdentityHeaderInAnySpellingIsReplacedBeforeInjectorsRun(t *testi
 	if strings.Join(order, ",") != "first,second:Bearer ours" {
 		t.Fatalf("injectors ran as %v", order)
 	}
+}
+
+// A client's request trailers never reach the upstream, whatever they are named: not as trailers,
+// not announced in a Trailer header, and never beside the headers the proxy strips or sets. They
+// arrive after the body, out of the strip's sight.
+func TestAClientsRequestTrailersNeverReachTheUpstream(t *testing.T) {
+	up := fakeupstream.New()
+	t.Cleanup(up.Close)
+	u, _ := url.Parse(up.URL + "/mcp")
+	ours := func(_ context.Context, h http.Header) { h.Set("X-Byward-Identity", "ours") }
+	srv := httptest.NewServer(New(quiet(), u, WithStripped("X-Byward-Identity"), WithInject(ours)))
+	t.Cleanup(srv.Close)
+	body := `{"jsonrpc":"2.0","id":1,"method":"ping"}`
+	for _, name := range []string{"X-Byward-Identity", "Authorization", "Forwarded", "X-Forwarded-For", "Origin", "Mcp-Session-Id", "X-Harmless"} {
+		t.Run(name, func(t *testing.T) {
+			before := len(up.Requests())
+			if status := sendWithTrailer(t, srv.URL, name, body); status != http.StatusOK {
+				t.Fatalf("status %d", status)
+			}
+			got, _ := up.Last()
+			if len(up.Requests()) != before+1 {
+				t.Fatal("nothing reached the upstream")
+			}
+			if len(got.Trailer) != 0 || got.Header.Get("Trailer") != "" || string(got.Body) != body {
+				t.Fatalf("trailers %v, Trailer header %q, body %q reached the upstream", got.Trailer, got.Header.Get("Trailer"), got.Body)
+			}
+			if v := got.Header.Values(name); slices.Contains(v, "forged") {
+				t.Fatalf("the trailer reached the upstream as the header %s: %q", name, v)
+			}
+			if v := got.Header.Values("X-Byward-Identity"); len(v) != 1 || v[0] != "ours" {
+				t.Fatalf("X-Byward-Identity %q, want only ours", v)
+			}
+		})
+	}
+}
+
+// sendWithTrailer posts body to base as a raw chunked HTTP/1.1 request that announces and sends the
+// trailer name: forged, and returns the response status.
+func sendWithTrailer(t *testing.T, base, name, body string) int {
+	t.Helper()
+	conn, err := net.Dial("tcp", strings.TrimPrefix(base, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	req := "POST /mcp HTTP/1.1\r\nHost: mcp.example.com\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\nTrailer: " + name + "\r\nConnection: close\r\n\r\n" +
+		strconv.FormatInt(int64(len(body)), 16) + "\r\n" + body + "\r\n0\r\n" + name + ": forged\r\n\r\n"
+	if _, err := io.WriteString(conn, req); err != nil {
+		t.Fatal(err)
+	}
+	res, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	return res.StatusCode
 }

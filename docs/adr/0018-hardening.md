@@ -94,3 +94,22 @@ Clients (runtime, 2026-11-06): Node `fetch` and MCP Inspector CLI 2.14.0 (TypeSc
   logs the relaxation.
 - **§12:** `govulncheck` (pinned in `mise.toml`) runs once per release GOOS in `mise run check`, so in CI, and
   weekly in `pin-freshness`.
+
+## Amendment 2026-11-07 (request trailers, #167)
+
+- **§6 reverse proxy:** the relay drops every request trailer a client sends (`Rewrite` sets
+  `Request.Trailer` to nil). Trailers arrive after a chunked body, so the strip-then-inject of ADR-0016 §4
+  never sees them. `ReverseProxy` removes the `Trailer` header as hop-by-hop, but `Request.Clone` keeps the
+  trailers themselves, so a trailer named like the assertion, the operator's credential or a plain identity
+  header reached the upstream. An upstream framework that reads trailers as headers could take it for ours.
+  Nothing legitimate is lost:
+  - neither MCP transports revision (2025-06-18, 2025-11-25) mentions trailers;
+  - none of the six official SDKs (TypeScript, Python, Go, Java, C#, Rust) or the HTTP libraries they use sends
+    them;
+  - the Fetch Standard forbids `Trailer` and `TE` as request headers, so a browser cannot send them;
+  - RFC 9112 §7.1.2: a recipient that removes the chunked coding "MAY selectively retain or discard the received
+    trailer fields".
+
+  Sources checked 2026-11-07; research notes kept outside the repository. The stdio bridge reads its headers
+  from the header section only, so a trailer is never read as one there either.
+
