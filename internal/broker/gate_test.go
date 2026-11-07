@@ -41,9 +41,7 @@ func (e *env) callback(t *testing.T) (*http.Response, string, int) {
 	c, cb := e.startLogin(t, nil)
 	res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{c})
 	body, _ := io.ReadAll(res.Body)
-	e.st.mu.Lock()
-	defer e.st.mu.Unlock()
-	return res, string(body), len(e.st.ids)
+	return res, string(body), len(e.st.GrantIDs())
 }
 
 // The access gate runs in the callback, before any grant exists (ADR-0015 §1-2).

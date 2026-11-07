@@ -18,7 +18,7 @@ func TestIdPAccessTokenIsTheGrantsStoredToken(t *testing.T) {
 		e := newEnv(t)
 		e.fake.Set(fakeidp.WithTokenLifetime(idpLife))
 		e.offline(t)
-		tok, exp, err := e.b.IdPAccessToken(context.Background(), e.st.ids[len(e.st.ids)-1])
+		tok, exp, err := e.b.IdPAccessToken(context.Background(), e.st.GrantIDs()[len(e.st.GrantIDs())-1])
 		if err != nil || tok == "" || !exp.Equal(e.now.Add(idpLife)) {
 			t.Fatalf("token set %v, expiry %v, err %v; want a token expiring at %v", tok != "", exp, err, e.now.Add(idpLife))
 		}
@@ -34,7 +34,7 @@ func TestIdPAccessTokenIsTheGrantsStoredToken(t *testing.T) {
 			return marshalSecrets(s.Tokens, s.Claims)
 		})
 		e.offline(t)
-		if tok, _, err := e.b.IdPAccessToken(context.Background(), e.st.ids[len(e.st.ids)-1]); !errors.Is(err, ErrNoIdPAccessToken) || tok != "" {
+		if tok, _, err := e.b.IdPAccessToken(context.Background(), e.st.GrantIDs()[len(e.st.GrantIDs())-1]); !errors.Is(err, ErrNoIdPAccessToken) || tok != "" {
 			t.Fatalf("err %v, want ErrNoIdPAccessToken and no token", err)
 		}
 	})

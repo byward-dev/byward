@@ -315,10 +315,10 @@ func TestARotationFailureKeepsTheIdPsNewTokens(t *testing.T) {
 	e := newEnv(t)
 	e.fake.Set(fakeidp.WithSingleUseRefreshTokens(true))
 	rt := e.offline(t)["refresh_token"].(string)
-	e.st.rotateDown.Store(true)
+	e.st.Fail(errStoreDown, "RotateRefreshToken")
 	res, body := e.refresh(t, rt, "")
 	wantOAuthError(t, res, body, http.StatusServiceUnavailable, "temporarily_unavailable")
-	e.st.rotateDown.Store(false)
+	e.st.Fail(nil, "RotateRefreshToken")
 	if res, body := e.refresh(t, rt, ""); res.StatusCode != http.StatusOK {
 		t.Fatalf("the retry after the store recovered: %d %v, want 200 without a new sign-in", res.StatusCode, body)
 	}
@@ -371,7 +371,7 @@ func TestAClientThatGivesUpMidRefreshKeepsTheIdPsNewTokens(t *testing.T) {
 func TestStoreOutageAnswers503WithRetryAfter(t *testing.T) {
 	e := newEnv(t)
 	body := e.offline(t)
-	e.st.down.Store(true)
+	e.st.Down(errStoreDown)
 	res, failed := e.refresh(t, body["refresh_token"].(string), "")
 	wantOAuthError(t, res, failed, http.StatusServiceUnavailable, "temporarily_unavailable")
 	if res.Header.Get("Retry-After") == "" {
@@ -493,8 +493,8 @@ func TestUnusableStoredIdPTokensRevokeTheGrant(t *testing.T) {
 func TestReuseReportedByTheStoreDeniesAtOnce(t *testing.T) {
 	e := newEnv(t)
 	body := e.offline(t)
-	e.valid(t, body["access_token"].(string)) // a fresh list, before the reuse
-	e.st.reuseOnRotate.Store(true)            // another replica won the race; nothing recorded yet
+	e.valid(t, body["access_token"].(string))        // a fresh list, before the reuse
+	e.st.Fail(store.ErrReused, "RotateRefreshToken") // another replica won the race; nothing recorded yet
 	res, failed := e.refresh(t, body["refresh_token"].(string), "")
 	wantOAuthError(t, res, failed, http.StatusBadRequest, "invalid_grant")
 	if e.validNow(t, body["access_token"].(string)) {
@@ -547,7 +547,7 @@ func TestRevokeAnswers200ForWhatIsNotARevocableToken(t *testing.T) {
 func TestRevokeAnswers503WhenRevokingFails(t *testing.T) {
 	e := newEnv(t)
 	rt := e.offline(t)["refresh_token"].(string)
-	e.st.revokeDown.Store(true) // the lookup works, the revocation does not
+	e.st.Fail(errStoreDown, "RevokeGrant") // the lookup works, the revocation does not
 	res := e.revokeToken(t, rt, clientID)
 	if res.StatusCode != http.StatusServiceUnavailable || res.Header.Get("Retry-After") == "" {
 		t.Fatalf("revoke with a failing store write: %d, want 503 with Retry-After (never a false 200)", res.StatusCode)
@@ -668,7 +668,10 @@ func TestRefreshTokenReuseIsAuditedAsARevocation(t *testing.T) {
 		reuse func(t *testing.T, e *env, rt string)
 	}{
 		{"seen by the broker", func(t *testing.T, e *env, rt string) { e.refresh(t, rt, ""); e.refresh(t, rt, "") }},
-		{"reported by the store", func(t *testing.T, e *env, rt string) { e.st.reuseOnRotate.Store(true); e.refresh(t, rt, "") }},
+		{"reported by the store", func(t *testing.T, e *env, rt string) {
+			e.st.Fail(store.ErrReused, "RotateRefreshToken")
+			e.refresh(t, rt, "")
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t)
