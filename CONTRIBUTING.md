@@ -69,6 +69,11 @@ Only submit work you have the right to contribute under Apache-2.0.
     not ignored) is checked against it, without regard to case. Findings name only the file and line, never the value.
   - Without the secret (forks, local runs) only email addresses are checked. To check a list
     locally: `BYWARD_FORBIDDEN_IDENTIFIERS="$(cat my-list)" go test ./internal/testutil/fixtures`.
+- Fuzz targets (`func Fuzz*`) run their seed corpus in `mise run test`. The nightly `fuzz` workflow
+  fuzzes each for 2 minutes (`mise run test:fuzz`; `FUZZTIME=30s` for a shorter local run). It finds
+  new targets by itself. When it fails, its `fuzz-crashers` artifact holds the input: unzip it at the
+  repository root, which puts the input in its package's `testdata/fuzz/<Target>/`, and fix the code
+  until `go test` passes.
 - The full strategy (lanes, fuzz targets, budgets) is in
   [ADR-0024](docs/adr/0024-testing-strategy.md).
 
