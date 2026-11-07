@@ -16,7 +16,9 @@ type InitOptions struct {
 	PublicURL   *url.URL
 	UpstreamURL string // empty leaves BYWARD_UPSTREAM_URL for the operator to fill in
 	SecretYears int
-	Now         time.Time
+	// Credential is entra.CredentialSecret (the default) or entra.CredentialCertificate.
+	Credential string
+	Now        time.Time
 }
 
 // InitScript is the setup script `byward init` prints (ADR-0020 §8): the IdP's registration
@@ -27,9 +29,12 @@ func InitScript(o InitOptions) (string, error) {
 	}
 	env := config.Quickstart{PublicURL: "$PUBLIC_URL", Tenant: "$TENANT_ID", ClientID: "$APP_ID",
 		SecretFile: "$SECRET_FILE", SecretExpiresAt: "$SECRET_EXPIRES_AT"}
+	if o.Credential == entra.CredentialCertificate {
+		env.SecretFile, env.SecretExpiresAt, env.CertificateFile = "", "", "$CERTIFICATE_FILE"
+	}
 	if o.UpstreamURL != "" {
 		env.UpstreamURL = "$UPSTREAM_URL"
 	}
 	return entra.SetupScript(entra.Setup{Tenant: o.Tenant, PublicURL: o.PublicURL.String(), UpstreamURL: o.UpstreamURL,
-		RedirectURL: config.RedirectURL(o.PublicURL, "entra"), EnvFile: env.EnvFile(), SecretYears: o.SecretYears, Now: o.Now})
+		RedirectURL: config.RedirectURL(o.PublicURL, "entra"), EnvFile: env.EnvFile(), SecretYears: o.SecretYears, Credential: o.Credential, Now: o.Now})
 }

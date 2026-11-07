@@ -142,6 +142,7 @@ func TestSetupScriptRefusesBadInput(t *testing.T) {
 		{"tenant is common", func(s *Setup) { s.Tenant = "common" }, "tenant ID"},
 		{"secret for 0 years", func(s *Setup) { s.SecretYears = 0 }, "1 to 2 years"},
 		{"secret for 3 years", func(s *Setup) { s.SecretYears = 3 }, "1 to 2 years"},
+		{"an unknown credential", func(s *Setup) { s.Credential = "password" }, `the credential must be secret or certificate, not "password"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -178,6 +179,65 @@ func TestSetupScriptNeverRunsShellCodeFromAURL(t *testing.T) {
 	for _, f := range []string{"pwned", "pwned2"} {
 		if _, err := os.Stat(filepath.Join(r.Dir, f)); err == nil {
 			t.Fatal("the shell ran a command from a URL")
+		}
+	}
+}
+
+// With a certificate credential the script makes the key and a self-signed certificate on this
+// machine, keeps them together in a 0600 file that byward loads as it is, uploads only the public
+// certificate, and never prints the key (ADR-0012 §5).
+func TestSetupScriptWithACertificateUploadsOnlyThePublicCertificate(t *testing.T) {
+	if _, err := os.Stat("/usr/bin/openssl"); err != nil {
+		t.Skip("the script runs the system openssl, and there is none at /usr/bin/openssl")
+	}
+	in := setupInput
+	in.Credential = CredentialCertificate
+	in.EnvFile = "BYWARD_ENTRA_CLIENT_ID=$APP_ID\nBYWARD_ENTRA_CLIENT_CERTIFICATE_FILE=$CERTIFICATE_FILE\n"
+	in.Now = time.Now()
+	r := runSetup(t, in, setupTenant)
+	if r.Err != nil {
+		t.Fatalf("script failed: %v\n%s", r.Err, r.Stderr)
+	}
+	pemFile, mode := r.File(t, CertificateFile)
+	if mode != 0o600 {
+		t.Fatalf("certificate file mode %v", mode)
+	}
+	c, err := LoadCertificate([]byte(pemFile))
+	if err != nil {
+		t.Fatalf("byward refuses the file the script wrote: %v", err)
+	}
+	if c.Key.N.BitLen() != 2048 || c.X509.NotAfter.Before(time.Now().AddDate(1, 0, -2)) || c.X509.NotAfter.After(time.Now().AddDate(1, 0, 1)) {
+		t.Fatalf("a %d-bit key, certificate until %s; want 2048 bits for a year", c.Key.N.BitLen(), c.X509.NotAfter)
+	}
+	upload := "az ad app credential reset --id " + fakeaz.AppID + " --append --display-name byward --cert @" + filepath.Join(r.Dir, CertificateFile) + ".crt"
+	if !slices.Contains(r.Calls, upload) {
+		t.Fatalf("no %q in\n%s", upload, strings.Join(r.Calls, "\n"))
+	}
+	for _, leftover := range []string{CertificateFile + ".key", CertificateFile + ".crt", SecretFile} {
+		if _, err := os.Stat(filepath.Join(r.Dir, leftover)); err == nil {
+			t.Errorf("%s is left behind", leftover)
+		}
+	}
+	if strings.Contains(r.Stdout+r.Stderr, "PRIVATE KEY") {
+		t.Fatal("the private key was printed")
+	}
+	env, _ := r.File(t, "byward.env")
+	if want := "BYWARD_ENTRA_CLIENT_ID=" + fakeaz.AppID + "\nBYWARD_ENTRA_CLIENT_CERTIFICATE_FILE=" + filepath.Join(r.Dir, CertificateFile) + "\n"; env != want {
+		t.Fatalf("byward.env:\n%s\nwant\n%s", env, want)
+	}
+}
+
+// The certificate lives as long as --secret-years says, counted in days across leap years.
+func TestSetupScriptMakesTheCertificateForTheChosenYears(t *testing.T) {
+	for years, days := range map[int]int{1: 365, 2: 731} { // 2026-11-06 to 2028-11-06 crosses 2028-02-29
+		in := setupInput
+		in.Credential, in.SecretYears = CredentialCertificate, years
+		script, err := SetupScript(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := fmt.Sprintf("-days %d ", days); !strings.Contains(script, want) {
+			t.Errorf("%d years: no %q in the script", years, want)
 		}
 	}
 }

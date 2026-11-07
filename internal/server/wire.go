@@ -68,6 +68,9 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	if err != nil {
 		return nil, err
 	}
+	if err := parts.idp.refusal(time.Now()); err != nil {
+		return nil, err
+	}
 	ring, sealer, ip, static, g := parts.ring, parts.sealer, parts.idp, parts.static, parts.gate
 	auditStartup(o.Audit, ring, static.IDs())
 	log.Info("client sources", "static_clients", len(static.IDs()), "cimd", cfg.CIMD, "dcr", cfg.DCR)

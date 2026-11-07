@@ -42,7 +42,7 @@ var commands = map[string]command{
 		run:   exportJWKS,
 	},
 	"init": {
-		usage: "byward init entra --tenant <tenant-id> [--public-url <url>] [--upstream-url <url>] [--secret-years 1|2]\n      print the az commands for the Entra app registration and a minimal env file; runs nothing",
+		usage: "byward init entra --tenant <tenant-id> [--public-url <url>] [--upstream-url <url>] [--secret-years 1|2] [--credential secret|certificate]\n      print the az commands for the Entra app registration and a minimal env file; runs nothing",
 		run:   initIdP,
 	},
 }

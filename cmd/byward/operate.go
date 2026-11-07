@@ -99,7 +99,7 @@ func runDoctor(ctx context.Context, args, environ []string, stdout, stderr io.Wr
 // initIdP is `init entra` (ADR-0020 §8, ADR-0012 §12): it prints a script of az commands and a
 // minimal env file. It runs nothing, calls no API and never sees a secret.
 func initIdP(_ context.Context, args, environ []string, stdout, stderr io.Writer) int {
-	const usage = "byward: usage: byward init entra --tenant <tenant-id> [--public-url <url>] [--upstream-url <url>] [--secret-years 1|2]"
+	const usage = "byward: usage: byward init entra --tenant <tenant-id> [--public-url <url>] [--upstream-url <url>] [--secret-years 1|2] [--credential secret|certificate]"
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		_, _ = fmt.Fprintln(stderr, usage+" (init prints the setup of an entra IdP; for an oidc IdP see docs/how-to/oidc.md)")
 		return exitConfig
@@ -111,6 +111,7 @@ func initIdP(_ context.Context, args, environ []string, stdout, stderr io.Writer
 	publicURL := fs.String("public-url", env(config.Setting{Name: "public-url"}.Env()), "")
 	upstreamURL := fs.String("upstream-url", env(config.Setting{Name: "upstream-url"}.Env()), "")
 	years := fs.Int("secret-years", 1, "")
+	credential := fs.String("credential", "secret", "")
 	if err := fs.Parse(args[1:]); err != nil {
 		_, _ = fmt.Fprintf(stderr, "%s\nbyward: init %s: %v\n", usage, args[0], err)
 		return exitConfig
@@ -125,7 +126,7 @@ func initIdP(_ context.Context, args, environ []string, stdout, stderr io.Writer
 		return exitConfig
 	}
 	script, err := server.InitScript(server.InitOptions{IdP: args[0], Tenant: *tenant, PublicURL: u, UpstreamURL: *upstreamURL,
-		SecretYears: *years, Now: time.Now()})
+		SecretYears: *years, Credential: *credential, Now: time.Now()})
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "byward: init %s: %v\n", args[0], err)
 		return exitConfig

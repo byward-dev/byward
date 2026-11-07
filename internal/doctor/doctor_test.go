@@ -102,3 +102,30 @@ func TestSecretExpiryWarnsWithin30DaysAndFailsOnceExpired(t *testing.T) {
 		})
 	}
 }
+
+// A certificate's end date is its own, so there is no "not configured": it warns within 30 days,
+// fails once passed, and the fix names the certificate file's setting.
+func TestCertificateExpiryWarnsWithin30DaysAndFailsOnceExpired(t *testing.T) {
+	now := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name     string
+		notAfter time.Time
+		status   Status
+		inMsg    string
+	}{
+		{"expired", now.Add(-time.Hour), Fail, "client certificate expired on 2026-11-06"},
+		{"expires now", now, Fail, "expired"},
+		{"30 days left warns", now.Add(30 * 24 * time.Hour), Warn, "in 30 days"},
+		{"31 days left passes", now.Add(31 * 24 * time.Hour), Pass, "valid until 2026-12-07"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := CertificateExpiry("CERT_SETTING", tc.notAfter, now)
+			if r.Class != ClassIdP || r.Name != "client certificate expiry" || r.Status != tc.status || !strings.Contains(r.Message, tc.inMsg) {
+				t.Fatalf("%+v, want %s with %q", r, tc.status, tc.inMsg)
+			}
+			if tc.status != Pass && !strings.Contains(r.Fix, "CERT_SETTING") {
+				t.Fatalf("fix %q does not name the setting", r.Fix)
+			}
+		})
+	}
+}
