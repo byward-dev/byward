@@ -257,13 +257,13 @@ func TestAmbiguousModernRequestsAreRefusedBeforeAnyProcessStarts(t *testing.T) {
 	// Which messages are ambiguous is locate's business (rewrite_test.go); this checks the wiring.
 	b := newModernBridge(t, nil)
 	for name, body := range map[string]string{
-		"duplicate id":                                 `{"jsonrpc":"2.0","id":1,"id":2,"method":"echo","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
+		"id repeated":                                  `{"jsonrpc":"2.0","id":1,"id":2,"method":"echo","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
 		"id in another case":                           `{"jsonrpc":"2.0","ID":1,"method":"echo","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
 		"object progressToken":                         modernBody(`1`, "echo", `"progressToken":{"a":1}`, ""),
 		"method also in another case":                  `{"jsonrpc":"2.0","id":1,"method":"subscriptions/listen","METHOD":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
-		"method also in another case, initialize last": `{"jsonrpc":"2.0","id":1,"method":"tools/call","METHOD":"initialize","params":{"name":"evil","_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
+		"method also in another case, initialize last": `{"jsonrpc":"2.0","id":1,"method":"tools/call","METHOD":"initialize","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
 		"method repeated, initialize last":             `{"jsonrpc":"2.0","id":1,"method":"tools/call","method":"initialize","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
-		"duplicate method":                             `{"jsonrpc":"2.0","id":1,"method":"subscriptions/listen","method":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
+		"method repeated":                              `{"jsonrpc":"2.0","id":1,"method":"subscriptions/listen","method":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			res := b.post(t, "alice", "", body)
@@ -568,8 +568,9 @@ func TestUserAtTheirCapWithEveryProcessInUseGets503ForAModernRequest(t *testing.
 	}
 }
 
-func TestModernNotificationsAre202AndClientResponsesAre400(t *testing.T) {
+func TestModernNotificationsNeedNoHeadersAndAre202AndClientResponsesAre400(t *testing.T) {
 	b := newModernBridge(t, nil)
+	// Sent with no MCP headers: 2026-07-28 defines none for notification POSTs.
 	notif := `{"jsonrpc":"2.0","method":"notifications/x","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`
 	if res := b.post(t, "alice", "", notif); res.StatusCode != http.StatusAccepted {
 		t.Fatalf("notification: status %d, want 202", res.StatusCode)
@@ -686,15 +687,6 @@ func TestModernRequestWhoseHeadersDoNotMirrorTheBodyIsRefusedBeforeAnyProcessSta
 	}
 	if b.m.Len() != 0 {
 		t.Fatal("a process started for a request refused on its headers")
-	}
-}
-
-func TestModernNotificationsNeedNoHeaders(t *testing.T) {
-	// Header requirements for notification POSTs are not defined in 2026-07-28.
-	b := newModernBridge(t, nil)
-	notif := `{"jsonrpc":"2.0","method":"notifications/x","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`
-	if res := b.post(t, "alice", "", notif); res.StatusCode != http.StatusAccepted {
-		t.Fatalf("status %d, want 202", res.StatusCode)
 	}
 }
 
