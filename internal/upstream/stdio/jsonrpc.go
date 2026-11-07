@@ -72,6 +72,9 @@ type rpcFault struct {
 	msg  string
 }
 
+// pathMethod is where a message's method is; parseMessage refuses it repeated or in another case.
+var pathMethod = jsonPath{"method"}
+
 // parseMessage checks a POST body is one JSON-RPC message and returns it as one line for stdin.
 // The bytes are kept as sent unless they hold a line break, which can only be whitespace in JSON
 // and would break the stdio framing; then the whitespace is removed.
@@ -86,6 +89,12 @@ func parseMessage(body []byte) ([]byte, envelope, *rpcFault) {
 	}
 	if env.kind() == kindInvalid {
 		return nil, envelope{}, &rpcFault{codeInvalidRequest, "Invalid Request: not a JSON-RPC request, notification or response"}
+	}
+	// env.Method is encoding/json's reading: any case, last key wins. An upstream may read the exact
+	// key, or the first, so a repeated top-level key or a method in another case is refused before
+	// the method decides anything (initialize or not, which era, which header rules).
+	if _, err := locate(body, pathMethod); err != nil {
+		return nil, envelope{}, &rpcFault{codeInvalidRequest, "Invalid Request: the message is ambiguous: a top-level key is repeated, or the method is given in another case"}
 	}
 	if bytes.ContainsAny(body, "\r\n") {
 		var b bytes.Buffer
