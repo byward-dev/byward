@@ -57,6 +57,8 @@ verifier that expects anything else refuses every request. The issuer is byward'
 - byward removes every copy of the assertion header a client sends, in any spelling (`_` for `-`
   included), before setting its own. A client can never supply the assertion.
 - The client's own token is never forwarded, whichever header you choose.
+- If the upstream also needs the proxy's own credential in `Authorization`, move the assertion to
+  another header ([upstream credential](upstream-credential.md)).
 - `email` and `name` are personal data (ADR-0021 §4): add them only when the upstream needs them.
 - `email` is the IdP's claim as it sent it, never proof of an address: Entra does not verify it
   (ADR-0012 §3), and an [OIDC IdP](oidc.md)'s is asserted whether or not it set `email_verified`.

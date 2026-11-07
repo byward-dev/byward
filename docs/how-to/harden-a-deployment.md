@@ -51,6 +51,9 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) ยง1โ
       a separate directory, `BYWARD_ASSERTION_KEYS_DIR`, mode `0700`, one PEM P-256 file per key,
       `0600` and owned by the proxy's user. Unlike sealing keys, a key file other users can read is
       refused, unless it is on a read-only mount.
+- [ ] If the upstream needs the proxy's own credential, give it in `BYWARD_UPSTREAM_CREDENTIAL_FILE`,
+      `0600` and owned by the proxy's user, never inline; it and the assertion use separate headers
+      ([upstream credential](upstream-credential.md)).
 - [ ] Configure the upstream's verifier with the audience `BYWARD_UPSTREAM_URL` exactly, and with
       the JWKS of the internal listener if it cannot reach the public one
       ([reference](../reference/identity-assertion.md#verifying)).

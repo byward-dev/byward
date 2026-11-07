@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,7 @@ import (
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/broker"
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/store/sqlite"
 	"github.com/byward-dev/byward/internal/testutil/assertionkey"
@@ -36,6 +38,7 @@ type asserting struct {
 	internal http.Handler
 	up       *fakeupstream.Server
 	sealer   *token.Sealer
+	logs     *bytes.Buffer // everything the proxy logged
 }
 
 func newAsserting(t *testing.T, extra ...string) asserting {
@@ -47,7 +50,8 @@ func newAsserting(t *testing.T, extra ...string) asserting {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := New(cfg, slog.New(slog.DiscardHandler))
+	var logs bytes.Buffer
+	s, err := New(cfg, logging.New(&logs, "text")) // the proxy's logger, with its key allowlist
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +64,7 @@ func newAsserting(t *testing.T, extra ...string) asserting {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return asserting{cfg: cfg, public: s.Public.Handler, internal: s.Internal.Handler, up: up, sealer: sealer}
+	return asserting{cfg: cfg, public: s.Public.Handler, internal: s.Internal.Handler, up: up, sealer: sealer, logs: &logs}
 }
 
 // call sends an MCP request with a proxy token for c and returns the request the upstream got.
