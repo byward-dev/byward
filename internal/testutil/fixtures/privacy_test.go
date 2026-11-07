@@ -85,8 +85,9 @@ func scan(root string, files []string, forbidden []string) ([]finding, error) {
 	return out, nil
 }
 
-// committed is what git would commit for path: a regular file's content, or a symlink's target
-// path (never the target's content, which git does not commit). Anything else is an error.
+// committed is what git would commit for path: a regular file's content, a symlink's target path
+// (never the target's content, which git does not commit), or nothing for a submodule, which is a
+// directory holding .git and committed as a commit ID. Anything else is an error.
 func committed(path string) ([]byte, error) {
 	fi, err := os.Lstat(path)
 	switch {
@@ -95,6 +96,11 @@ func committed(path string) ([]byte, error) {
 	case fi.Mode()&os.ModeSymlink != 0:
 		target, err := os.Readlink(path)
 		return []byte(target), err
+	case fi.IsDir():
+		if _, err := os.Lstat(filepath.Join(path, ".git")); err == nil {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("%s: a directory, not a file", path)
 	case !fi.Mode().IsRegular():
 		return nil, fmt.Errorf("%s: not a regular file", path)
 	}

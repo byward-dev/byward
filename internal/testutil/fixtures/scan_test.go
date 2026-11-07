@@ -141,7 +141,7 @@ func TestOnlyAMissingGitLeavesTheFileListUnchecked(t *testing.T) {
 }
 
 // A file the scan cannot read (here, a directory) is an error, not a skipped file: only one that is
-// gone from the working tree is skipped.
+// gone from the working tree, or a submodule, is skipped.
 func TestAFileTheScanCannotReadIsAnError(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, "a-directory"), 0o750); err != nil {
@@ -149,6 +149,13 @@ func TestAFileTheScanCannotReadIsAnError(t *testing.T) {
 	}
 	if _, err := scan(root, []string{"a-directory"}, nil); err == nil {
 		t.Fatal("scan read a directory as a file without an error")
+	}
+	// A submodule (a directory holding .git) is committed as a commit ID: nothing to read.
+	if err := os.MkdirAll(filepath.Join(root, "submodule", ".git"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := scan(root, []string{"submodule"}, forbiddenList("anything")); err != nil || len(got) != 0 {
+		t.Fatalf("submodule: findings %v, err %v", got, err)
 	}
 }
 
