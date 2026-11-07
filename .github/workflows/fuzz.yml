@@ -29,6 +29,7 @@ jobs:
       - run: mise run test:fuzz
         env:
           MISE_TASK_RUN_AUTO_INSTALL: "false"
+          FUZZTIME: 2m # per target (ADR-0024 §1)
       # A failing input, to reproduce with `go test -run '<Target>/<file>' ./<package>`.
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

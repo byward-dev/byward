@@ -19,7 +19,11 @@ rm -rf "$out"
 mkdir -p "$out"
 
 # "package target" lines: go test -list prints a package's matching names, then its "ok" line.
-go test -list '^Fuzz' ./... >build/fuzz/list || fail "listing the fuzz targets"
+# Go reports a build or setup failure on stdout, so show the listing when it fails.
+go test -list '^Fuzz' ./... >build/fuzz/list || {
+  cat build/fuzz/list >&2
+  fail "listing the fuzz targets"
+}
 targets=$(awk '
   /^ok[ \t]/ { for (i = 1; i <= n; i++) print $2, names[i]; n = 0; next }
   /^Fuzz/    { names[++n] = $1 }

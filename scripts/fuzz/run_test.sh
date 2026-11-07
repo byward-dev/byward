@@ -17,7 +17,7 @@ case "\$1 \$2" in
 "list -m") echo example.com/m; exit 0 ;;
 "test -list")
   case \$(cat "$tmp/list") in
-  fails) exit 1 ;;
+  fails) printf 'FAIL\texample.com/m/a [setup failed]\n'; exit 1 ;;
   empty) printf 'ok  \texample.com/m/a\t0.1s\n?   \texample.com/m/none\t[no test files]\n'; exit 0 ;;
   esac
   printf 'FuzzA\nFuzzB\nok  \texample.com/m/a\t0.1s\n?   \texample.com/m/none\t[no test files]\nFuzzC\nok  \texample.com/m/c/d\t0.1s\n'
@@ -51,7 +51,8 @@ chmod +x "$tmp/bin/go"
 all="^\$ ^FuzzA\$ 1s example.com/m/a;^\$ ^FuzzB\$ 1s example.com/m/a;^\$ ^FuzzC\$ 1s example.com/m/c/d"
 
 # case name | listing (ok, fails, empty) | targets failing with an input | targets failing without
-# one | want exit | want output (grep -E) | want crashers (space-separated) | want runs (;-separated)
+# one | want exit | want output (grep -E) | want crashers (space-separated) | want runs (;-separated) |
+# output that must not appear (grep -E, optional)
 run() {
   repo="$tmp/repo-$1"
   mkdir -p "$repo/a/testdata/fuzz/FuzzA"
@@ -71,18 +72,21 @@ run() {
   set -e
   crashers=$(cd "$repo" && find build/fuzz/crashers -type f 2>/dev/null | sed 's|^build/fuzz/crashers/||' | sort | tr '\n' ' ' | sed 's/ $//')
   ran=$(tr '\n' ';' <"$tmp/ran" | sed 's/;$//')
-  if [ "$code" -ne "$5" ] || ! printf '%s\n' "$out" | grep -Eq "$6" || [ "$crashers" != "$7" ] || [ "$ran" != "$8" ]; then
+  unwanted=${9:-}
+  if [ "$code" -ne "$5" ] || ! printf '%s\n' "$out" | grep -Eq "$6" || [ "$crashers" != "$7" ] || [ "$ran" != "$8" ] ||
+    { [ -n "$unwanted" ] && printf '%s\n' "$out" | grep -Eq "$unwanted"; }; then
     echo "FAIL $1: exit $code (want $5), crashers [$crashers] (want [$7]), ran [$ran] (want [$8]), output: $out"
     failures=$((failures + 1))
   fi
 }
 
 run all-pass-and-stale-crashers-are-cleared ok "" "" 0 'fuzz lane: ok \(3 targets, 1s each\)' "" "$all"
-run one-fails-and-the-rest-still-run ok "FuzzB" "" 1 'FAIL: 1 of 3 targets failed' "a/testdata/fuzz/FuzzB/0123abcd" "$all"
+run one-fails-and-the-rest-still-run ok "FuzzB" "" 1 'FAIL: 1 of 3 targets failed' "a/testdata/fuzz/FuzzB/0123abcd" "$all" 'wrote no input'
 run keeps-only-new-inputs-not-committed-seeds ok "FuzzA FuzzC" "" 1 'FAIL: 2 of 3 targets failed' \
   "a/testdata/fuzz/FuzzA/0123abcd c/d/testdata/fuzz/FuzzC/0123abcd" "$all"
-run a-failure-without-an-input-says-so ok "" "FuzzC" 1 'example.com/m/c/d FuzzC wrote no input' "" "$all"
-run a-failed-listing-runs-nothing fails "" "" 1 'FAIL: listing the fuzz targets' "" ""
+# FuzzA's input sits beside FuzzB's empty corpus: each target gets only its own.
+run a-failure-without-an-input-says-so ok "FuzzA" "FuzzB" 1 'example.com/m/a FuzzB wrote no input' "a/testdata/fuzz/FuzzA/0123abcd" "$all"
+run a-failed-listing-shows-why-and-runs-nothing fails "" "" 1 'example.com/m/a \[setup failed\]' "" ""
 run no-targets-is-a-failure empty "" "" 1 'FAIL: no fuzz targets found' "" ""
 
 if [ "$failures" -ne 0 ]; then
