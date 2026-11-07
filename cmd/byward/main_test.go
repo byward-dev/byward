@@ -164,7 +164,7 @@ func TestRevokeCommandsExit2OnMisuse1OnAStoreFailureAndReportTheRevokedUser(t *t
 	}{
 		{"revoke-user without a key", []string{"revoke-user"}, false, exitConfig, "", "usage: byward revoke-user <user key>"},
 		{"revoke-user with two keys", []string{"revoke-user", user, user}, false, exitConfig, "", "usage:"},
-		{"revoke-user with an email", []string{"revoke-user", "alice@contoso.com"}, false, exitConfig, "", "not a user key"},
+		{"revoke-user with an email", []string{"revoke-user", "alice@contoso.example"}, false, exitConfig, "", "not a user key"},
 		{"revoke-all without --yes", []string{"revoke-all"}, false, exitConfig, "", "revoke-all --yes"},
 		{"revoke-all with yes instead of --yes", []string{"revoke-all", "yes"}, false, exitConfig, "", "revoke-all --yes"},
 		{"revoke-all with --yes and more", []string{"revoke-all", "--yes", "extra"}, false, exitConfig, "", "revoke-all --yes"},

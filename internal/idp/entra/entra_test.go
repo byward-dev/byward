@@ -498,7 +498,7 @@ func TestUserKeyAcceptsTidOidInAnyCaseAndRefusesTheRest(t *testing.T) {
 		{"upper case", strings.ToUpper(tid + ":" + oid), tid + ":" + oid},
 		{"surrounding spaces", "  " + tid + ":" + oid + "\n", tid + ":" + oid},
 		{"empty", "", ""},
-		{"an email", "alice@contoso.com", ""},
+		{"an email", "alice@contoso.example", ""},
 		{"no colon", tid + oid, ""},
 		{"one GUID", oid, ""},
 		{"an extra segment", tid + ":" + oid + ":x", ""},

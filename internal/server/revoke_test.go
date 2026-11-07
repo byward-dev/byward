@@ -109,7 +109,7 @@ func TestRevokeAllEndsEveryUsersAccessBesideARunningProxy(t *testing.T) {
 // A key that is not tid:oid would revoke nobody while looking done (formats: entra.UserKey).
 func TestRevokeUserRefusesWhatIsNotAUserKeyAndRevokesNobody(t *testing.T) {
 	cfg, tok := revokeEnv(t)
-	if _, err := RevokeUser(context.Background(), cfg, discard, "alice@contoso.com"); !errors.Is(err, ErrNotAUserKey) {
+	if _, err := RevokeUser(context.Background(), cfg, discard, "alice@contoso.example"); !errors.Is(err, ErrNotAUserKey) {
 		t.Fatalf("RevokeUser(an email) = %v, want ErrNotAUserKey", err)
 	}
 	if !valid(t, cfg, tok["alice"]) {
