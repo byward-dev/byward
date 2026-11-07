@@ -142,7 +142,7 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 			"set the Application ID URI to "+resource+" (docs/how-to/quickstart-entra.md step 1.2) and create the service principal: az ad sp create --id "+p.cfg.ClientID)}, nil
 	}
 	if errors.Is(ie.Err, idp.ErrCredential) { // never sent: the credential itself is unusable
-		fix := "check the client secret file"
+		fix := "the file named by " + d.SecretSetting + " must hold the client secret's value"
 		if d.FederatedTokenSetting != "" {
 			fix = "the file named by " + d.FederatedTokenSetting + " must exist, be readable by the proxy and hold the current token (whatever writes it, such as GitHub Actions or AKS workload identity, renews it in place)"
 		}

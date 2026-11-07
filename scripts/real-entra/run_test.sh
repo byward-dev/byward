@@ -26,7 +26,9 @@ case \$url in
 esac
 printf '%s\n' "\$*" >>"$tmp/oidc-calls"
 [ -f "$tmp/oidc-fails" ] && exit 22
-cat "$tmp/oidc.json"
+# A different token per request, so the test can tell which one doctor was given.
+n=\$(wc -l <"$tmp/oidc-calls" | tr -d ' ')
+sed "s/$sig/$sig\$n/" "$tmp/oidc.json"
 EOF
 cat >"$tmp/bin/go" <<EOF
 #!/bin/sh
@@ -80,7 +82,7 @@ run() {
     failures=$((failures + 1))
   fi
   # Once a token was fetched, the first thing printed is the mask for exactly that token.
-  if case $2 in *"$token"*) true ;; *) false ;; esac && [ "$(printf '%s\n' "$out" | head -n 1)" != "::add-mask::$token" ]; then
+  if case $2 in *"$token"*) true ;; *) false ;; esac && [ "$(printf '%s\n' "$out" | head -n 1)" != "::add-mask::${token}1" ]; then
     echo "FAIL $1: the mask is not the first thing printed"
     failures=$((failures + 1))
   fi
@@ -99,19 +101,27 @@ run() {
     failures=$((failures + 1))
   fi
   # byward ran as the lane means it: the CI app, in --dev on loopback.
-  if [ -f "$tmp/doctor-saw" ] && ! { cat "$tmp"/byward-env.* | grep -qx 'BYWARD_ENTRA_TENANT=00000000-0000-0000-0000-000000000001' &&
-    cat "$tmp"/byward-env.* | grep -qx 'BYWARD_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002' &&
-    cat "$tmp"/byward-env.* | grep -qx 'BYWARD_DEV=true'; }; then
-    echo "FAIL $1: byward did not get the CI app's tenant, client ID and --dev"
-    failures=$((failures + 1))
+  if [ -f "$tmp/doctor-saw" ]; then
+    for want in BYWARD_ENTRA_TENANT=00000000-0000-0000-0000-000000000001 BYWARD_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002 BYWARD_DEV=true; do
+      cat "$tmp"/byward-env.* | grep -qx "$want" || {
+        echo "FAIL $1: byward did not get $want"
+        failures=$((failures + 1))
+      }
+    done
   fi
   if [ -f "$tmp/doctor-saw" ]; then
     saw_mode=$(sed -n 2p "$tmp/doctor-saw")
     saw_token=$(sed -n 3p "$tmp/doctor-saw")
-    if [ "$saw_mode" != "-rw-------" ] || [ "$saw_token" != "$token" ] || [ "$(wc -l <"$tmp/oidc-calls" | tr -d ' ')" != 2 ]; then
-      echo "FAIL $1: doctor's token file: mode $saw_mode, the token? $([ "$saw_token" = "$token" ] && echo yes || echo no), OIDC requests $(wc -l <"$tmp/oidc-calls" | tr -d ' ')"
+    if [ "$saw_mode" != "-rw-------" ] || [ "$saw_token" != "${token}2" ] || [ "$(wc -l <"$tmp/oidc-calls" | tr -d ' ')" != 2 ]; then
+      echo "FAIL $1: doctor's token file: mode $saw_mode, the second token? $([ "$saw_token" = "${token}2" ] && echo yes || echo no), OIDC requests $(wc -l <"$tmp/oidc-calls" | tr -d ' ')"
       failures=$((failures + 1))
     fi
+    for n in 1 2; do
+      printf '%s\n' "$out" | grep -qx "::add-mask::${token}$n" || {
+        echo "FAIL $1: token $n was not masked"
+        failures=$((failures + 1))
+      }
+    done
   fi
   if [ -n "$(ls -A "$tmp/runner")" ]; then
     echo "FAIL $1: left $(ls "$tmp/runner") behind"

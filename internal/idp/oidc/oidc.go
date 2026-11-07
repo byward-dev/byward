@@ -298,7 +298,7 @@ func (p *Provider) Refresh(ctx context.Context, refreshToken string) (*idp.Ident
 func (p *Provider) token(ctx context.Context, m *metadata, form url.Values) (*idp.TokenResponse, error) {
 	if p.cfg.ClientAuth != nil {
 		if err := p.cfg.ClientAuth.Apply(form, p.cfg.ClientID, m.TokenEndpoint, p.cfg.Now()); err != nil {
-			return nil, &idp.Error{Class: idp.Unavailable, Alert: true, Err: err}
+			return nil, &idp.Error{Class: idp.Unavailable, Alert: true, Err: fmt.Errorf("%w: %w", idp.ErrCredential, err)}
 		}
 	} else {
 		form.Set("client_id", p.cfg.ClientID)

@@ -114,6 +114,10 @@ func TestDiagnoseReportsEachMisconfigurationWithItsFix(t *testing.T) {
 		}, check: "entra app and credential", status: doctor.Fail, inMessage: "AADSTS7000215", inFix: "SECRET_SETTING must hold the secret's value"},
 		{name: "expired client secret", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantClientCredentials, &fakeidp.ExpiredClientSecret)},
 			check: "entra app and credential", status: doctor.Fail, inMessage: "AADSTS7000222", inFix: "--append"},
+		{name: "a client secret that cannot be used", setup: func(t *testing.T, e *env) {
+			rebuild(t, e, func(c *Config) { c.ClientAuth = idp.ClientSecret("") })
+		}, check: "entra app and credential", status: doctor.Fail, inMessage: "not sent: idp: the client credential could not be made",
+			inFix: "SECRET_SETTING must hold the client secret's value"},
 		{name: "no Application ID URI", setup: withClient(func(c *fakeidp.Client) { c.NoIdentifierURI = true }),
 			check: "entra app and credential", status: doctor.Fail, inMessage: "AADSTS500011", inFix: "set the Application ID URI to api://"},
 		{name: "assignment required: the credential passes", setup: withClient(func(c *fakeidp.Client) { c.AssignmentRequired = true }),
