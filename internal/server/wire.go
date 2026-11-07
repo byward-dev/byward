@@ -133,6 +133,10 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 		log.Info("identity assertion", "reason", "signing with key "+k.SigningKeyID()+", keys "+strings.Join(k.KeyIDs(), " "),
 			"setting", "BYWARD_ASSERTION_HEADER", "value", cfg.AssertionHeader)
 	}
+	if cfg.IdentityHeaders && a.minter != nil {
+		log.Warn("plain identity headers are on", "setting", "BYWARD_IDENTITY_HEADERS",
+			"reason", "the upstream gets the user in X-Byward-* headers as well as the assertion; that is safe only when it is reachable through this proxy alone (docs/how-to/plain-identity-headers.md)")
+	}
 	return a, nil
 }
 

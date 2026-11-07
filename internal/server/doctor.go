@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/netip"
 	"time"
 
 	"github.com/byward-dev/byward/internal/config"
@@ -68,6 +70,9 @@ type DoctorOptions struct {
 	// Proxy reaches the proxy at its public URL; redirects are reported, never followed.
 	Proxy *http.Client
 	Now   func() time.Time
+	// Resolve looks up the upstream's host for the plain identity headers check; nil is the
+	// system resolver.
+	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
 }
 
 // probeTimeout bounds one doctor request (the discovery budget in docs/quality-lenses.md).
@@ -81,6 +86,11 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	}
 	if o.Proxy == nil {
 		o.Proxy = &http.Client{Timeout: probeTimeout}
+	}
+	if o.Resolve == nil {
+		o.Resolve = func(ctx context.Context, host string) ([]netip.Addr, error) {
+			return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		}
 	}
 	// Configuration errors first: they stop doctor before any check (exit code 2).
 	var r doctor.Report
@@ -104,6 +114,9 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 		return r, err
 	}
 	r.Checks = append(r.Checks, upstreamResult(cfg))
+	if cfg.IdentityHeaders && cfg.UpstreamCommand == nil {
+		r.Checks = append(r.Checks, identityHeadersResult(ctx, cfg.UpstreamURL.Hostname(), o.Resolve))
+	}
 	for _, w := range parts.warnings {
 		r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "configuration", Status: doctor.Warn, Message: w.Message, Fix: warningFix(w)})
 	}

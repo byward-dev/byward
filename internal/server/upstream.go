@@ -102,11 +102,12 @@ func upstreamID(cfg *config.Config) string {
 // stdioName names a stdio upstream in logs: its program's file name.
 func stdioName(cfg *config.Config) string { return filepath.Base(cfg.UpstreamCommand[0]) }
 
-// httpUpstream is the relay to the HTTP upstream. The assertion's header is stripped from every
-// inbound request even when nothing is asserted, so a client can never supply one; so is the
-// operator credential's, which the relay then sets (ADR-0016 §7).
+// httpUpstream is the relay to the HTTP upstream. The assertion's header and the plain identity
+// headers are stripped from every inbound request even when nothing is asserted, so a client can
+// never supply them; so is the operator credential's, which the relay then sets (ADR-0016 §5, §7).
 func httpUpstream(cfg *config.Config, log *slog.Logger, opts ...relay.Option) http.Handler {
-	base := []relay.Option{relay.WithInject(tracing.Inject), relay.WithResponseHeaderTimeout(cfg.UpstreamHeaderTimeout), relay.WithStripped(cfg.AssertionHeader)}
+	base := []relay.Option{relay.WithInject(tracing.Inject), relay.WithResponseHeaderTimeout(cfg.UpstreamHeaderTimeout), relay.WithStripped(cfg.AssertionHeader),
+		relay.WithStripped(config.IdentityHeaderNames...)}
 	if cred := cfg.UpstreamCredential; cred != "" {
 		header := cfg.UpstreamCredentialHeader
 		base = append(base, relay.WithStripped(header), relay.WithInject(func(_ context.Context, h http.Header) { h.Set(header, cred) }))
@@ -121,11 +122,15 @@ type assertionKey struct{}
 // BYWARD_ASSERTION_HEADER, after the inbound copies are gone (ADR-0016 §2, §4).
 func assertingUpstream(cfg *config.Config, log *slog.Logger, m *assertion.Minter) http.Handler {
 	header := cfg.AssertionHeader
-	return withAssertion(m, log, httpUpstream(cfg, log, relay.WithInject(func(ctx context.Context, h http.Header) {
+	opts := []relay.Option{relay.WithInject(func(ctx context.Context, h http.Header) {
 		if tok, ok := ctx.Value(assertionKey{}).(string); ok {
 			h.Set(header, "Bearer "+tok)
 		}
-	})))
+	})}
+	if cfg.IdentityHeaders {
+		opts = append(opts, relay.WithInject(setIdentityHeaders))
+	}
+	return withAssertion(m, log, httpUpstream(cfg, log, opts...))
 }
 
 // withAssertion mints the assertion for the user Guard admitted. A request it cannot mint one for

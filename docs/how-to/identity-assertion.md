@@ -57,6 +57,8 @@ verifier that expects anything else refuses every request. The issuer is byward'
 - byward removes every copy of the assertion header a client sends, in any spelling (`_` for `-`
   included), before setting its own. A client can never supply the assertion.
 - The client's own token is never forwarded, whichever header you choose.
+- An upstream that cannot verify a JWT can read the same values from plain `X-Byward-*` headers, but
+  only behind a network boundary ([plain identity headers](plain-identity-headers.md)).
 - If the upstream also needs the proxy's own credential in `Authorization`, move the assertion to
   another header ([upstream credential](upstream-credential.md)).
 - `email` and `name` are personal data (ADR-0021 §4): add them only when the upstream needs them.
