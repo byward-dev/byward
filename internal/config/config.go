@@ -59,6 +59,7 @@ var registry = []Setting{
 	{Name: "keys-dir", Auth: true, Help: "directory of sealing keys; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md)"},
 	{Name: "assertion-keys-dir", Auth: true, Help: "directory of the identity assertion's signing keys: PEM ECDSA P-256 files, each name the key ID; the key whose ID sorts last signs; needed with an HTTP upstream; default: assertion-keys in the data directory (docs/how-to/identity-assertion.md)"},
 	{Name: "assertion-header", Auth: true, Default: "Authorization", Help: "request header that carries the identity assertion to the HTTP upstream, as Bearer <JWT>; inbound copies are always removed (ADR-0016 §2)"},
+	{Name: "identity-headers", Auth: true, Default: "false", Help: "also send the HTTP upstream the user in plain headers (X-Byward-Subject, X-Byward-Client-Id, and X-Byward-Roles, -Groups, -Email, -Name for the assertion's claims), percent-encoded; safe only when the upstream is reachable through this proxy alone (ADR-0016 §5, docs/how-to/plain-identity-headers.md)"},
 	{Name: "assertion-claims", Auth: true, Default: "roles", Help: "comma-separated optional claims in the identity assertion: roles, groups, email, name; or none (ADR-0016 §1, docs/reference/identity-assertion.md)"},
 	{Name: "static-clients-file", Auth: true, Help: "JSON file of pre-registered MCP clients; default: clients.json in the data directory, optional while CIMD or DCR is on; a file you name must exist (docs/reference/static-clients.md)"},
 	{Name: "gate-tenants", Auth: true, Help: "access gate: comma-separated Entra tenant IDs allowed to sign in (docs/how-to/access-gate.md)"},
@@ -129,9 +130,11 @@ type Config struct {
 	KeysDir          string
 	// The identity assertion for the HTTP upstream (ADR-0016): its signing keys, the header that
 	// carries it and the optional claims it asserts (a subset of AssertionClaimNames).
-	AssertionKeysDir  string
-	AssertionHeader   string
-	AssertionClaims   []string
+	AssertionKeysDir string
+	AssertionHeader  string
+	AssertionClaims  []string
+	// IdentityHeaders also sends the user in the plain IdentityHeaderNames headers (ADR-0016 §5).
+	IdentityHeaders   bool
 	StaticClientsFile string
 	// StaticClientsFileNamed: the operator set the path, so the file must exist; the default may be
 	// absent when CIMD or DCR is on.
@@ -343,6 +346,7 @@ func validate(v *Values, container bool) (*Config, error) {
 		}
 	}
 	errs = append(errs, c.upstreamCredential(v)...)
+	errs = append(errs, c.headerClashes()...)
 	if len(errs) > 0 {
 		msgs := make([]string, 0, len(errs))
 		for _, e := range errs {
@@ -660,6 +664,9 @@ func (c *Config) assertion(v *Values) []error {
 	if c.AssertionHeader, err = upstreamHeader(v, "assertion-header", "X-Byward-Identity"); err != nil {
 		errs = append(errs, err)
 	}
+	if c.IdentityHeaders, err = strconv.ParseBool(v.get("identity-headers")); err != nil {
+		errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "identity-headers"}.Env(), v.get("identity-headers")))
+	}
 	cEnv := Setting{Name: "assertion-claims"}.Env()
 	raw := strings.TrimSpace(v.get("assertion-claims"))
 	if raw == "none" {
@@ -733,10 +740,39 @@ func (c *Config) upstreamCredential(v *Values) []error {
 		return append(errs, err)
 	}
 	c.UpstreamCredentialHeader = h
-	// The relay reads "_" as "-" (invariant 16), so X_Api_Key and X-Api-Key are one header.
-	if !c.NoAuth && sameHeader(h, c.AssertionHeader) {
+	return errs
+}
+
+// The plain identity headers (ADR-0016 §5). Their names are fixed, and reserved even while
+// BYWARD_IDENTITY_HEADERS is off: no other setting may use them, and every inbound copy is removed.
+const (
+	HeaderSubject  = "X-Byward-Subject"
+	HeaderClientID = "X-Byward-Client-Id"
+	HeaderRoles    = "X-Byward-Roles"
+	HeaderGroups   = "X-Byward-Groups"
+	HeaderEmail    = "X-Byward-Email"
+	HeaderName     = "X-Byward-Name"
+)
+
+// IdentityHeaderNames are the plain identity headers.
+var IdentityHeaderNames = []string{HeaderSubject, HeaderClientID, HeaderRoles, HeaderGroups, HeaderEmail, HeaderName}
+
+// headerClashes refuses two purposes in one header: the identity assertion, the operator's
+// upstream credential and the plain identity headers each have their own (ADR-0016 §4, §5, §7). The
+// relay reads "_" as "-" (invariant 16), so X_Api_Key and X-Api-Key are one header.
+func (c *Config) headerClashes() []error {
+	var errs []error
+	aEnv, cEnv := Setting{Name: "assertion-header"}.Env(), Setting{Name: "upstream-credential-header"}.Env()
+	if c.UpstreamCredentialHeader != "" && sameHeader(c.UpstreamCredentialHeader, c.AssertionHeader) {
 		errs = append(errs, errorf("%s and %s are both %s, but the credential and the identity assertion never share a header (ADR-0016 §7): set %s to a header of your own, such as X-Byward-Identity, and verify the assertion there",
-			hEnv, Setting{Name: "assertion-header"}.Env(), h, Setting{Name: "assertion-header"}.Env()))
+			cEnv, aEnv, c.UpstreamCredentialHeader, aEnv))
+	}
+	for _, u := range []struct{ env, header string }{{aEnv, c.AssertionHeader}, {cEnv, c.UpstreamCredentialHeader}} {
+		for _, plain := range IdentityHeaderNames {
+			if sameHeader(u.header, plain) {
+				errs = append(errs, errorf("%s: %s is one of the plain identity headers the proxy sets (docs/how-to/plain-identity-headers.md); use another header", u.env, u.header))
+			}
+		}
 	}
 	return errs
 }
