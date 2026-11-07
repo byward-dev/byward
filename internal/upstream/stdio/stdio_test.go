@@ -482,8 +482,11 @@ func TestShutdownGivesUpWhenItsContextEnds(t *testing.T) {
 	}
 }
 
-// syncClock fires every timer at once on another goroutine and gives it up to 50 ms to finish
-// before AfterFunc returns. Its timers cannot be reset or stopped.
+// syncClock fires every timer at once on another goroutine. AfterFunc gives it 50 ms to finish
+// before returning; that only makes a firing during start likely enough for the d6eb42d bug to
+// show, and no outcome depends on it. Like a real timer that has fired, a timer that is Reset fires
+// again: a callback that loses the process lock to a hold skips the stop, and the hold's release
+// resets the timer.
 type syncClock struct{}
 
 func (syncClock) Now() time.Time { return time.Now() }
@@ -495,13 +498,14 @@ func (syncClock) AfterFunc(_ time.Duration, f func()) Timer {
 	case <-done:
 	case <-time.After(50 * time.Millisecond): // f is blocked, as it should be, on the process lock
 	}
-	return firedTimer{}
+	return firedTimer{f}
 }
 
-type firedTimer struct{}
+// firedTimer is a timer that has fired: Stop has nothing to stop, Reset fires it again at once.
+type firedTimer struct{ f func() }
 
-func (firedTimer) Reset(time.Duration) bool { return false }
-func (firedTimer) Stop() bool               { return false }
+func (t firedTimer) Reset(time.Duration) bool { go t.f(); return false }
+func (firedTimer) Stop() bool                 { return false }
 
 func TestSameSubjectFromAnotherIssuerIsAnotherUser(t *testing.T) {
 	h := newHarness(t, nil)
