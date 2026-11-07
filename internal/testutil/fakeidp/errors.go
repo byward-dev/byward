@@ -66,6 +66,10 @@ var (
 		Description: "The request body must contain the following parameter: 'client_assertion' or 'client_secret'."}
 	MissingThumbprint = Failure{Status: http.StatusUnauthorized, Error: "invalid_client", Code: 5002723,
 		Description: "Invalid JWT token. No certificate SHA-1 thumbprint, certificate SHA-256 thumbprint, nor keyId specified in token header."}
+	// NoMatchingFederatedCredential is not in Microsoft's error code reference; the code and text are
+	// the ones commonly reported for this case, not verified against a tenant.
+	NoMatchingFederatedCredential = Failure{Status: http.StatusBadRequest, Error: "invalid_client", Code: 70021,
+		Description: "No matching federated identity record found for presented assertion."}
 	InvalidClientAssertion = Failure{Status: http.StatusUnauthorized, Error: "invalid_client", Code: 700027,
 		Description: "Client assertion failed signature validation."}
 	InvalidAssertion = Failure{Error: "invalid_grant", Code: 50013,

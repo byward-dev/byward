@@ -71,6 +71,9 @@ type Client struct {
 	Secrets []string
 	// Certificates lists accepted private_key_jwt keys; more than one models a rollover.
 	Certificates []*Certificate
+	// Federated lists the client's federated identity credentials (Entra workload identity
+	// federation): a token from another issuer accepted as its client assertion.
+	Federated    []FederatedCredential
 	RedirectURIs []string
 	// ServicePrincipalID is the `oid` of app-only tokens (Entra only); empty means a generated GUID.
 	ServicePrincipalID string
@@ -90,7 +93,18 @@ type Client struct {
 	NoIdentifierURI bool
 }
 
-func (c Client) confidential() bool { return len(c.Secrets) > 0 || len(c.Certificates) > 0 }
+// FederatedCredential is a federated identity credential on an app registration: a client
+// assertion whose iss, sub and aud match exactly, case-sensitively, and that Signer signed, is
+// accepted for the client (Microsoft Learn, workload identity federation).
+type FederatedCredential struct {
+	Issuer, Subject, Audience string
+	// Signer is the other issuer's key (GitHub's, say), standing in for its JWKS.
+	Signer *Certificate
+}
+
+func (c Client) confidential() bool {
+	return len(c.Secrets) > 0 || len(c.Certificates) > 0 || len(c.Federated) > 0
+}
 
 // IdP is a running fake identity provider.
 type IdP struct {

@@ -17,6 +17,9 @@ import (
 type Diagnosis struct {
 	// TenantSetting, ClientIDSetting and SecretSetting name the settings, for the fixes.
 	TenantSetting, ClientIDSetting, SecretSetting string
+	// FederatedTokenSetting names the federated token file when it replaces the secret (ADR-0012
+	// §5); SecretSetting is then "".
+	FederatedTokenSetting string
 	// GateRoles are the access gate's app roles, which the app registration must define.
 	GateRoles []string
 }
@@ -93,8 +96,12 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 	if p.cfg.Tenant == Organizations {
 		// Microsoft documents the client-credentials tenant only "in GUID or domain-name format",
 		// and organizations mode has no home tenant setting to send instead.
+		list := "az ad app credential list --id %s lists an unexpired credential"
+		if d.FederatedTokenSetting != "" {
+			list = "az ad app federated-credential list --id %s lists one matching the token's issuer, subject and audience"
+		}
 		return []doctor.Result{result(name, doctor.Skip, "not probed: client credentials need the app's home tenant, and organizations mode names none",
-				fmt.Sprintf("check by hand: az ad app credential list --id %s lists an unexpired credential, and az ad app show --id %s --query api.requestedAccessTokenVersion is 2", p.cfg.ClientID, p.cfg.ClientID))},
+				fmt.Sprintf("check by hand: "+list+", and az ad app show --id %s --query api.requestedAccessTokenVersion is 2", p.cfg.ClientID, p.cfg.ClientID))},
 			nil
 	}
 	tr, err := p.token(ctx, url.Values{"grant_type": {"client_credentials"}, "scope": {resource + defaultScopeSuffix}})
@@ -119,14 +126,27 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 		return []doctor.Result{result(name, doctor.Fail, "Entra has no app "+p.cfg.ClientID+" in tenant "+p.cfg.Tenant+" ("+code+")",
 			"set "+d.ClientIDSetting+" to the app registration's Application (client) ID, and "+d.TenantSetting+" to the tenant it is registered in")}, nil
 	case codeInvalidSecret:
+		if d.FederatedTokenSetting != "" {
+			break // no secret: the general fix below names the federated token
+		}
 		return []doctor.Result{result(name, doctor.Fail, "Entra rejected the client secret ("+code+")",
 			"the file named by "+d.SecretSetting+" must hold the secret's value, not its ID; create a new one: az ad app credential reset --id "+p.cfg.ClientID+" --append --display-name byward --years 1 --query password -o tsv")}, nil
 	case codeExpiredSecret:
+		if d.FederatedTokenSetting != "" {
+			break
+		}
 		return []doctor.Result{result(name, doctor.Fail, "the client secret has expired ("+code+")",
 			"create a new one: az ad app credential reset --id "+p.cfg.ClientID+" --append --display-name byward --years 1 --query password -o tsv, then restart the proxy with it")}, nil
 	case codeResourceNotFound:
 		return []doctor.Result{result(name, doctor.Fail, "Entra has no resource "+resource+" in tenant "+p.cfg.Tenant+" ("+code+"): the Application ID URI is not set, or the app has no service principal",
 			"set the Application ID URI to "+resource+" (docs/how-to/quickstart-entra.md step 1.2) and create the service principal: az ad sp create --id "+p.cfg.ClientID)}, nil
+	}
+	if errors.Is(ie.Err, idp.ErrCredential) { // never sent: the credential itself is unusable
+		fix := "the file named by " + d.SecretSetting + " must hold the client secret's value"
+		if d.FederatedTokenSetting != "" {
+			fix = "the file named by " + d.FederatedTokenSetting + " must exist, be readable by the proxy and hold the current token (whatever writes it, such as GitHub Actions or AKS workload identity, renews it in place)"
+		}
+		return []doctor.Result{result(name, doctor.Fail, "the client-credentials probe was not sent: "+ie.Err.Error(), fix)}, nil
 	}
 	if ie.Code == 0 {
 		msg := "the client-credentials probe failed"
@@ -139,7 +159,17 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 		return []doctor.Result{result(name, doctor.Fail, msg, reachFix)}, nil
 	}
 	fix := ie.OperatorHint
-	if fix == "" {
+	if d.FederatedTokenSetting != "" && (ie.Code == codeInvalidSecret || ie.Code == codeExpiredSecret) {
+		fix = "" // those hints are about a secret, and there is none
+	}
+	switch {
+	case fix != "":
+	case d.FederatedTokenSetting != "":
+		// Microsoft's error reference lists no code for a federated credential that does not match,
+		// so the fix says what must match.
+		fix = fmt.Sprintf("the token in the file named by %s must match one of the app's federated identity credentials exactly: issuer, subject and audience (az ad app federated-credential list --id %s), and must not have expired; look up %s in https://learn.microsoft.com/entra/identity-platform/reference-error-codes",
+			d.FederatedTokenSetting, p.cfg.ClientID, code)
+	default:
 		fix = "look up " + code + " in Microsoft's error code reference: https://learn.microsoft.com/entra/identity-platform/reference-error-codes"
 	}
 	return []doctor.Result{result(name, doctor.Fail, "the client-credentials probe failed ("+code+")", fix)}, nil

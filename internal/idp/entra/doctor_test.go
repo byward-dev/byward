@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -112,6 +114,10 @@ func TestDiagnoseReportsEachMisconfigurationWithItsFix(t *testing.T) {
 		}, check: "entra app and credential", status: doctor.Fail, inMessage: "AADSTS7000215", inFix: "SECRET_SETTING must hold the secret's value"},
 		{name: "expired client secret", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantClientCredentials, &fakeidp.ExpiredClientSecret)},
 			check: "entra app and credential", status: doctor.Fail, inMessage: "AADSTS7000222", inFix: "--append"},
+		{name: "a client secret that cannot be used", setup: func(t *testing.T, e *env) {
+			rebuild(t, e, func(c *Config) { c.ClientAuth = idp.ClientSecret("") })
+		}, check: "entra app and credential", status: doctor.Fail, inMessage: "not sent: idp: the client credential could not be made",
+			inFix: "SECRET_SETTING must hold the client secret's value"},
 		{name: "no Application ID URI", setup: withClient(func(c *fakeidp.Client) { c.NoIdentifierURI = true }),
 			check: "entra app and credential", status: doctor.Fail, inMessage: "AADSTS500011", inFix: "set the Application ID URI to api://"},
 		{name: "assignment required: the credential passes", setup: withClient(func(c *fakeidp.Client) { c.AssignmentRequired = true }),
@@ -225,5 +231,51 @@ func TestDiagnoseInOrganizationsModeSkipsTheCredentialProbe(t *testing.T) {
 	}
 	if got["entra tenant"].Status != doctor.Pass {
 		t.Fatalf("organizations discovery: %+v", got["entra tenant"])
+	}
+}
+
+// With a federated token in place of a secret, no fix talks about a secret: a failure Entra names
+// gets its own fix (an operator hint), and every other one says what the federated identity
+// credential must match (Microsoft's error reference lists no code for a credential that does not).
+func TestDiagnoseWithAFederatedTokenNeverBlamesASecret(t *testing.T) {
+	federated := Diagnosis{TenantSetting: "TENANT_SETTING", ClientIDSetting: "CLIENT_ID_SETTING", FederatedTokenSetting: "TOKEN_SETTING"}
+	const mustMatch = "TOKEN_SETTING must match one of the app's federated identity credentials exactly: issuer, subject and audience"
+	for _, tc := range []struct {
+		name      string
+		opts      []fakeidp.Option
+		setup     func(*testing.T, *env)
+		status    doctor.Status
+		inMessage string
+		inFix     string
+	}{
+		{name: "invalid client secret", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantClientCredentials, &fakeidp.InvalidClientSecret)},
+			status: doctor.Fail, inMessage: "AADSTS7000215", inFix: mustMatch},
+		{name: "expired client secret", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantClientCredentials, &fakeidp.ExpiredClientSecret)},
+			status: doctor.Fail, inMessage: "AADSTS7000222", inFix: mustMatch},
+		{name: "no matching federated credential", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantClientCredentials, &fakeidp.NoMatchingFederatedCredential)},
+			status: doctor.Fail, inMessage: "the client-credentials probe failed", inFix: mustMatch},
+		{name: "a failure with an operator hint", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantClientCredentials, &fakeidp.BlockedByConditionalAccess)},
+			status: doctor.Fail, inMessage: "AADSTS53003", inFix: "Conditional Access"},
+		{name: "an empty token file", setup: func(t *testing.T, e *env) {
+			path := filepath.Join(t.TempDir(), "token")
+			if err := os.WriteFile(path, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			rebuild(t, e, func(c *Config) { c.ClientAuth = idp.AssertionFile(path) })
+		}, status: doctor.Fail, inMessage: "not sent: idp: the client credential could not be made", inFix: "TOKEN_SETTING must exist, be readable by the proxy and hold the current token"},
+		{name: "organizations mode", setup: func(t *testing.T, e *env) {
+			rebuild(t, e, func(c *Config) { c.Tenant, c.AllowedTenants = Organizations, []string{fakeidp.NewGUID()} })
+		}, status: doctor.Skip, inMessage: "not probed", inFix: "az ad app federated-credential list --id"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t, Config{}, tc.opts...)
+			if tc.setup != nil {
+				tc.setup(t, e)
+			}
+			r := diagnose(t, e.p, federated)["entra app and credential"]
+			if r.Status != tc.status || !strings.Contains(r.Message, tc.inMessage) || !strings.Contains(r.Fix, tc.inFix) || strings.Contains(r.Fix, "secret") {
+				t.Fatalf("%+v\nwant status %s, message with %q, fix with %q and no secret", r, tc.status, tc.inMessage, tc.inFix)
+			}
+		})
 	}
 }

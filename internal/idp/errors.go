@@ -30,6 +30,10 @@ func (c Class) String() string {
 	return "fatal"
 }
 
+// ErrCredential marks a ClientAuth failure: the credential could not be made, such as from an
+// unreadable or empty client assertion file, so the request never left the proxy.
+var ErrCredential = errors.New("idp: the client credential could not be made")
+
 // Error is an IdP failure. Error() never includes the IdP's error_description, which may carry
 // user identifiers; Description is kept for operator logs only.
 type Error struct {
