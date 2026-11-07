@@ -278,6 +278,7 @@ func aLoginIsSpentOnceUntilItsExpiry(t *testing.T, s store.Store) {
 	wantErr(t, "spending a login twice", s.SpendLogin(ctx, a, t0.Add(time.Minute), expires), store.ErrConsumed)
 	must(t, s.SpendLogin(ctx, b, t0, expires))
 	must(t, s.SpendLogin(ctx, a, expires, expires.Add(10*time.Minute)))
+	wantErr(t, "spending a renewed login again", s.SpendLogin(ctx, a, expires.Add(time.Minute), expires.Add(20*time.Minute)), store.ErrConsumed)
 	wantErr(t, "an expiry not after now", s.SpendLogin(ctx, sha256.Sum256([]byte("login-c")), t0, t0), store.ErrInvalid)
 }
 
