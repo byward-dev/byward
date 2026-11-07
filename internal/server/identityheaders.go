@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"strings"
 
 	"github.com/byward-dev/byward/internal/config"
@@ -17,8 +18,9 @@ import (
 // (not opted in, or absent for this user) gets no header; a list keeps every item, an empty one
 // too.
 //
-// Email: the same value the assertion carries, from the access token's sealed claims; #151 decides
-// when an unverified email is dropped there, for both.
+// Email: the same value the assertion carries, from the access token's sealed claims, where the
+// broker decides whether an email is asserted at all (ADR-0016, 2026-11-07 amendment); its
+// verification goes with it, exactly as the assertion's email_verified does.
 func setIdentityHeaders(ctx context.Context, h http.Header) {
 	id, ok := resource.IdentityFrom(ctx)
 	if !ok { // withAssertion has already refused the request
@@ -45,6 +47,9 @@ func setIdentityHeaders(ctx context.Context, h http.Header) {
 	list(config.HeaderRoles, id.Roles)
 	list(config.HeaderGroups, id.Groups)
 	one(config.HeaderEmail, id.Email)
+	if id.Email != "" {
+		h.Set(config.HeaderEmailVerified, strconv.FormatBool(id.EmailVerified))
+	}
 	one(config.HeaderName, id.Name)
 }
 

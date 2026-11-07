@@ -10,6 +10,7 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -23,7 +24,7 @@ import (
 // headerOfClaim is which plain identity header carries which assertion claim: the names as
 // documented (docs/how-to/plain-identity-headers.md), which upstreams read.
 var headerOfClaim = map[string]string{"sub": "X-Byward-Subject", "client_id": "X-Byward-Client-Id", "roles": "X-Byward-Roles",
-	"groups": "X-Byward-Groups", "email": "X-Byward-Email", "name": "X-Byward-Name"}
+	"groups": "X-Byward-Groups", "email": "X-Byward-Email", "email_verified": "X-Byward-Email-Verified", "name": "X-Byward-Name"}
 
 // forgedIdentityHeaders is a client's copy of every plain identity header, and one in `_` spelling.
 func forgedIdentityHeaders() http.Header {
@@ -64,6 +65,8 @@ func asStrings(v any) []string {
 	switch v := v.(type) {
 	case string:
 		return []string{v}
+	case bool:
+		return []string{strconv.FormatBool(v)}
 	case []any:
 		out := make([]string, len(v))
 		for i, s := range v {
@@ -85,7 +88,7 @@ func TestPlainIdentityHeadersCarryTheAssertionsClaimsAndNeverAClientsCopies(t *t
 	}
 	a := newAsserting(t, "BYWARD_IDENTITY_HEADERS=true", "BYWARD_ASSERTION_CLAIMS="+strings.Join(config.AssertionClaimNames, ","))
 	got := a.call(t, token.Claims{GrantID: "g1", Subject: "tid:oid", ClientID: "https://claude.ai/oauth/client", Roles: []string{"byward.user", "Data,Read", ""},
-		Groups: []string{"g-1", "g-2"}, Email: "alex@contoso.example", Name: "Renée\r\nX-Evil: 1"}, forgedIdentityHeaders())
+		Groups: []string{"g-1", "g-2"}, Email: "alex@contoso.example", EmailVerified: true, Name: "Renée\r\nX-Evil: 1"}, forgedIdentityHeaders())
 	for k := range got.Header {
 		if byward(k) && !slices.Contains(config.IdentityHeaderNames, k) {
 			t.Errorf("%s reached the upstream", k)

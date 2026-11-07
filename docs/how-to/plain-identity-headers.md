@@ -21,7 +21,8 @@ there.
 | `X-Byward-Client-Id` | the MCP client (`client_id`) | always |
 | `X-Byward-Roles` | the user's app roles | with `roles` in `BYWARD_ASSERTION_CLAIMS` (the default) |
 | `X-Byward-Groups` | the user's group IDs | with `groups` |
-| `X-Byward-Email` | the user's email | with `email` |
+| `X-Byward-Email` | the user's email | with `email`, when the IdP verified it or `BYWARD_ASSERTION_UNVERIFIED_EMAIL` is `true` |
+| `X-Byward-Email-Verified` | `true` or `false` (the assertion's `email_verified`) | exactly when `X-Byward-Email` is |
 | `X-Byward-Name` | the user's display name | with `name` |
 
 - A claim the user does not have sends no header. A list keeps every item the IdP sent, an empty
@@ -29,9 +30,10 @@ there.
 - There is no `X-Byward-Groups` with Entra's groups overage, or when there are too many groups to
   fit in an access token ([identity assertion](identity-assertion.md)): byward never sends an
   incomplete list.
-- `X-Byward-Email` is the same value as the assertion's `email`: the IdP's claim, never proof of an
-  address (Entra does not verify it, and an [OIDC IdP](oidc.md)'s is sent whether or not it set
-  `email_verified`). Don't authorize on it; use `X-Byward-Subject`.
+- `X-Byward-Email` is the same value as the assertion's `email`, sent under the same rule: only an
+  email the IdP verified, unless you set `BYWARD_ASSERTION_UNVERIFIED_EMAIL=true`; Entra never
+  verifies one ([identity assertion](identity-assertion.md)). `X-Byward-Email-Verified` says which.
+  Even a verified email can change; don't authorize on it, use `X-Byward-Subject`.
 - The values are as fresh as the assertion's: up to one hour old
   ([identity assertion](identity-assertion.md)).
 

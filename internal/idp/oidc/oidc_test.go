@@ -296,12 +296,32 @@ func TestGooglePresetQuirks(t *testing.T) {
 	}
 }
 
-func TestStringEmailVerifiedOnlyWithPreset(t *testing.T) {
-	e := newEnv(t, Config{}, fakeidp.WithEmailVerifiedAsString(true),
-		fakeidp.WithUser(fakeidp.User{Email: "test.user@contoso.example", EmailVerified: true}))
-	id, _, err := e.p.Callback(context.Background(), signIn(t, e, login), login)
-	if err != nil || id.EmailVerified {
-		t.Fatalf("string email_verified honoured without preset: %+v %v", id, err)
+// An email is verified only when the ID token says email_verified true: the boolean, or the string
+// "true" from an IdP whose preset sends strings (Google). Absent, false or any other string is
+// unverified (ADR-0016, 2026-11-07 amendment).
+func TestAnEmailIsVerifiedOnlyWhenTheIDTokenSaysTrue(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		preset   string
+		verified bool // the user's email_verified as the IdP sends it
+		claim    fakeidp.Option
+		want     bool
+	}{
+		{"the boolean true", "", true, fakeidp.WithEmailVerifiedAsString(false), true},
+		{"the boolean false", "", false, fakeidp.WithEmailVerifiedAsString(false), false},
+		{"no email_verified claim", "", true, fakeidp.WithoutEmailVerified(true), false},
+		{"the string true without a preset that sends strings", "", true, fakeidp.WithEmailVerifiedAsString(true), false},
+		{"Google's string true", "google", true, fakeidp.WithEmailVerifiedAsString(true), true},
+		{"Google's string false", "google", false, fakeidp.WithEmailVerifiedAsString(true), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t, Config{Preset: tc.preset}, tc.claim,
+				fakeidp.WithUser(fakeidp.User{Email: "test.user@contoso.example", EmailVerified: tc.verified}))
+			id, _, err := e.p.Callback(context.Background(), signIn(t, e, login), login)
+			if err != nil || id.Email == "" || id.EmailVerified != tc.want {
+				t.Fatalf("identity %+v, err %v; want EmailVerified %v", id, err, tc.want)
+			}
+		})
 	}
 }
 

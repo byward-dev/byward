@@ -52,6 +52,7 @@ Example (from `internal/assertion/testdata/assertion.golden.json`; `jti` is rand
   "aud": "http://upstream.internal:3001/mcp",
   "client_id": "https://claude.ai/oauth/claude-code-client-metadata",
   "email": "alex@contoso.example",
+  "email_verified": true,
   "exp": 1794042060,
   "groups": ["22222222-2222-2222-2222-222222222222"],
   "iat": 1794042000,

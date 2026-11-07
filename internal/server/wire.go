@@ -282,7 +282,9 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 	for _, w := range gateWarnings {
 		p.warnings = append(p.warnings, Warning{Message: w})
 	}
-	p.warnings = append(p.warnings, emailWarnings(cfg, p.idp.gateIdP == gate.Entra)...)
+	if cfg.UpstreamCommand == nil { // a stdio upstream gets no assertion and no email (ADR-0016 §6)
+		p.warnings = append(p.warnings, emailWarnings(cfg, p.idp.gateIdP == gate.Entra)...)
+	}
 	if cfg.ScopeDescription == "" {
 		p.warnings = append(p.warnings, Warning{Message: "consent page uses generic wording", Setting: "BYWARD_SCOPE_DESCRIPTION",
 			Fix: "set it to say in plain words what the " + cfg.Scope + " scope lets an app do (ADR-0010 §4)"})

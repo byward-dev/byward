@@ -38,8 +38,9 @@ func TestAccessTokensCarryTheClientAndOnlyTheOptedInClaims(t *testing.T) {
 	}{
 		{name: "nothing opted in"},
 		{name: "roles (the default)", assert: Asserted{Roles: true}, wantRoles: user.Roles},
-		// Entra never verifies an email, so it is asserted only with the opt-in to unverified ones.
-		{name: "everything", assert: Asserted{Roles: true, Groups: true, Email: true, Name: true},
+		// The user's email is unverified, as every Entra email is, so it is asserted only with the
+		// opt-in to unverified ones.
+		{name: "everything but the unverified email", assert: Asserted{Roles: true, Groups: true, Email: true, Name: true},
 			wantRoles: user.Roles, wantGrps: user.Groups, wantName: user.Name},
 		{name: "everything and unverified emails", assert: Asserted{Roles: true, Groups: true, Email: true, Name: true, UnverifiedEmail: true},
 			wantRoles: user.Roles, wantGrps: user.Groups, wantEmail: user.Email, wantName: user.Name},
@@ -58,7 +59,9 @@ func TestAccessTokensCarryTheClientAndOnlyTheOptedInClaims(t *testing.T) {
 }
 
 // Only an email the IdP vouches for is asserted, unless the operator opted in to unverified ones;
-// EmailVerified then tells the two apart (ADR-0016, 2026-11-07 amendment).
+// EmailVerified then tells the two apart (ADR-0016, 2026-11-07 amendment). The last two rows are
+// defensive: configuration never sets the opt-in without email, and no email means no verification
+// for the plain identity header to send.
 func TestAnEmailIsAssertedOnlyWhenTheIdPVerifiedItOrTheOperatorOptedIn(t *testing.T) {
 	const email = "alex@contoso.example"
 	verified, unverified := idp.Identity{Email: email, EmailVerified: true}, idp.Identity{Email: email}

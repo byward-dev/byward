@@ -86,14 +86,20 @@ although nothing vouched for it. So now:
    it, `false` when only the opt-in let it through. It is added to the claims contract (§ Consequences:
    ours are only ever added).
 5. **One place decides:** the broker, when it picks the claims sealed into the access token. The
-   assertion and every other copy of the email (plain identity headers, §5) read them from there.
+   assertion and every other copy of the email read them from there: the plain identity headers
+   (§5) send `X-Byward-Email-Verified` exactly when they send `X-Byward-Email`.
 6. **Every start logs** which emails are left out or carried unverified, naming the setting; a
-   configuration with `email` opted in is never refused.
+   configuration with `email` opted in is never refused. A stdio upstream gets no email (§6), so it
+   gets no such warning either.
+7. **Tokens already issued keep their claims** until they expire: after the upgrade, or after the
+   opt-in is turned off, an access token keeps its email, marked `email_verified: false`, for at most
+   one access-token lifetime (one hour); a refresh token's next use decides again.
 
 This is stricter than the products we checked (2026-11-07): oauth2-proxy v7.15.6 refuses only an
 explicit `email_verified: false`, so with Entra its check never applies; Pomerium v0.34.0 asserts
 `email` without checking it; sigbit/mcp-auth-proxy v2.10.2 and mcp-front never read it. (Cloudflare
 Access calls its `email` "verified by the identity provider" but falls back to the UPN with Entra;
-whether it checks `email_verified` is unverified.) Sources checked 2026-11-07; research notes kept outside the repository. For a security product that is the right side to err on: an upstream that reads `email`
-gets one that someone vouched for, or a claim that says nobody did.
+whether it checks `email_verified` is unverified.) Sources checked 2026-11-07; research notes kept
+outside the repository. For a security product that is the right side to err on: an upstream that
+reads `email` gets one that someone vouched for, or a claim that says nobody did.
 

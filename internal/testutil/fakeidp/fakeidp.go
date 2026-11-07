@@ -122,6 +122,7 @@ type settings struct {
 	idtyp           bool
 	strictTenants   bool
 	emailAsString   bool
+	noEmailVerified bool
 	authorizeFail   *Failure
 	// prompt=none: with silentFail set it answers that error; otherwise silentSession signs the user
 	// in without a page, and without it the answer is login_required (failing closed).
@@ -287,6 +288,10 @@ func WithUnknownTenantsRefused(on bool) Option { return func(s *settings) { s.st
 // WithEmailVerifiedAsString makes the generic profile send `email_verified` as "true"/"false"
 // (a Google quirk).
 func WithEmailVerifiedAsString(on bool) Option { return func(s *settings) { s.emailAsString = on } }
+
+// WithoutEmailVerified makes the generic profile send `email` with no `email_verified` claim at
+// all, as some IdPs do.
+func WithoutEmailVerified(on bool) Option { return func(s *settings) { s.noEmailVerified = on } }
 
 // WithJWKSUnavailable makes the JWKS endpoint answer 503, as during an IdP outage.
 func WithJWKSUnavailable(on bool) Option { return func(s *settings) { s.jwksDown = on } }
