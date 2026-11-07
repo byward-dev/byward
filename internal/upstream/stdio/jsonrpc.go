@@ -72,12 +72,12 @@ type rpcFault struct {
 	msg  string
 }
 
-// parseMessage checks a POST body is one JSON-RPC message and returns it as one line for stdin.
-// The bytes are kept as sent unless they hold a line break, which can only be whitespace in JSON
-// and would break the stdio framing; then the whitespace is removed.
 // pathMethod is where a message's method is; parseMessage refuses it repeated or in another case.
 var pathMethod = jsonPath{"method"}
 
+// parseMessage checks a POST body is one JSON-RPC message and returns it as one line for stdin.
+// The bytes are kept as sent unless they hold a line break, which can only be whitespace in JSON
+// and would break the stdio framing; then the whitespace is removed.
 func parseMessage(body []byte) ([]byte, envelope, *rpcFault) {
 	body = bytes.TrimSpace(body)
 	if len(body) > 0 && body[0] == '[' {

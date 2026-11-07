@@ -221,8 +221,8 @@ func TestMalformedPostsAre400AndStartNothing(t *testing.T) {
 		"fractional id":                    {`{"jsonrpc":"2.0","id":1.5,"method":"initialize"}`, codeInvalidRequest},
 		"object id":                        {`{"jsonrpc":"2.0","id":{},"method":"initialize"}`, codeInvalidRequest},
 		"method repeated, initialize last": {`{"jsonrpc":"2.0","id":1,"method":"tools/call","method":"initialize"}`, codeInvalidRequest},
-		"method in another case, initialize last": {`{"jsonrpc":"2.0","id":1,"method":"tools/call","METHOD":"initialize"}`, codeInvalidRequest},
-		"another top-level key repeated":          {`{"jsonrpc":"2.0","jsonrpc":"2.0","id":1,"method":"initialize"}`, codeInvalidRequest},
+		"method also in another case, initialize last": {`{"jsonrpc":"2.0","id":1,"method":"tools/call","METHOD":"initialize"}`, codeInvalidRequest},
+		"another top-level key repeated":               {`{"jsonrpc":"2.0","jsonrpc":"2.0","id":1,"method":"initialize"}`, codeInvalidRequest},
 	} {
 		t.Run(name, func(t *testing.T) {
 			res := b.post(t, "alice", "", tc.body)
@@ -234,6 +234,24 @@ func TestMalformedPostsAre400AndStartNothing(t *testing.T) {
 	}
 	if b.m.Len() != 0 {
 		t.Fatalf("Len = %d, want 0", b.m.Len())
+	}
+}
+
+func TestAmbiguousNotificationsAndResponsesInASessionAreRefused(t *testing.T) {
+	// In a session these would be relayed (202) if the ambiguity were not caught for every kind.
+	b := newBridge(t, nil)
+	session := b.initialize(t, "alice")
+	for name, body := range map[string]string{
+		"notification with the method also in another case": `{"jsonrpc":"2.0","method":"notifications/x","METHOD":"notifications/y"}`,
+		"response with a top-level key repeated":            `{"jsonrpc":"2.0","id":1,"result":{},"result":{"a":1}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			res := b.post(t, "alice", session, body)
+			raw, _ := io.ReadAll(res.Body)
+			if res.StatusCode != http.StatusBadRequest || rpcErrorCode(t, raw) != codeInvalidRequest || !strings.Contains(string(raw), "ambiguous") {
+				t.Fatalf("status %d, body %s; want 400 -32600 naming the ambiguity", res.StatusCode, raw)
+			}
+		})
 	}
 }
 
