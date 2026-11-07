@@ -36,6 +36,9 @@ const (
 	StoreRestored       = "store_restored"        // startup found the store restored from an older copy; a new epoch began (ADR-0007 §9)
 	SessionRejected     = "session_rejected"      // a signed-in user presented an MCP session ID not bound to them (invariant 13)
 	ProcessEvicted      = "process_evicted"       // an idle stdio upstream process was stopped to make room under a process cap (ADR-0003 §5)
+	// DownstreamTokenRefused: Entra refused an On-Behalf-Of exchange for a signed-in user's request
+	// (ADR-0017 §5); the reason is consent_required, interaction_required, unavailable or failed.
+	DownstreamTokenRefused = "downstream_token_refused"
 )
 
 // Outcomes.

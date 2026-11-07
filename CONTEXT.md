@@ -82,6 +82,10 @@ _Avoid_: session, authorization (alone)
 An API the **upstream** calls on the **user**'s behalf (e.g. Microsoft Graph); the MCP spec calls it an "upstream API".
 _Avoid_: upstream API, backend
 
+**Downstream token**:
+A token for a **downstream API**, obtained by the proxy On-Behalf-Of the **user** and sent to an HTTP **upstream** in its own header; never stored or logged (ADR-0017).
+_Avoid_: OBO token, delegated token
+
 **Access gate**:
 The **operator**'s rule for which **users** may use the proxy at all (tenant, app roles, groups, email domain), checked when a **grant** is created and at every refresh — never per MCP request.
 _Avoid_: policy, ACL, authorization rules (alone)

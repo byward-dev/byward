@@ -943,3 +943,37 @@ func TestARefreshWithoutAnIDTokenEndsTheGrantNamingTheIdP(t *testing.T) {
 		t.Fatalf("warning %v, want one naming the IdP and the requirement", warning)
 	}
 }
+
+// ADR-0017 amendment 2026-11-07: with On-Behalf-Of on, an access token never outlives the IdP
+// access token it rides on (minus the margin), at the code exchange and at every refresh; without
+// it, the usual hour.
+func TestAccessTokensAreCappedAtTheIdPTokenWhenOnBehalfOfIsOn(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		cap     bool
+		idpLife time.Duration
+		want    time.Duration
+	}{
+		{"on", true, 20 * time.Minute, 20*time.Minute - IdPTokenMargin},
+		{"off", false, 20 * time.Minute, AccessLifetime},
+		// Capping at or before now would fail a request whose code or refresh token is spent.
+		{"on, IdP token within the margin", true, 30 * time.Second, AccessLifetime},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := newEnv(t, func(cfg *Config) { cfg.CapAccessToIdPToken = c.cap })
+			e.fake.Set(fakeidp.WithTokenLifetime(c.idpLife))
+			body := e.offline(t)
+			if got := body["expires_in"].(float64); got != c.want.Seconds() {
+				t.Fatalf("code exchange: expires_in %v, want %v", got, c.want.Seconds())
+			}
+			e.now = e.now.Add(15 * time.Minute)
+			res, refreshed := e.refresh(t, body["refresh_token"].(string), "")
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("refresh: %d %v", res.StatusCode, refreshed)
+			}
+			if got := refreshed["expires_in"].(float64); got != c.want.Seconds() {
+				t.Fatalf("refresh: expires_in %v, want %v (from the renewed IdP token)", got, c.want.Seconds())
+			}
+		})
+	}
+}

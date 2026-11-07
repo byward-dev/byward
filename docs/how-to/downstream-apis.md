@@ -1,0 +1,80 @@
+# Call a downstream API as the user: On-Behalf-Of
+
+An upstream MCP server that calls an API such as Microsoft Graph for the signed-in user can get a
+token for that API from byward. byward exchanges the user's sign-in for it with Entra's
+On-Behalf-Of flow and sends it with every request to the upstream, in a header of its own
+([ADR-0017](../adr/0017-delegation-obo.md)). The upstream never needs Entra credentials, and never
+sees the user's sign-in token.
+
+Supported: Microsoft Entra (`BYWARD_IDP=entra`, the default), with an HTTP upstream. A stdio
+upstream gets its environment once per user and cannot receive a token that expires within the hour
+(#141).
+
+> Not yet verified against a real tenant in this release; the fake IdP's Entra profile is the test.
+
+## 1. Grant the API permissions
+
+On the app registration byward signs users in with (see the [Entra quickstart](quickstart-entra.md)):
+
+1. **API permissions → Add a permission**: the downstream API's **delegated** permissions, for
+   example Microsoft Graph `User.Read`.
+2. **Grant admin consent** for the tenant. Users cannot consent to these themselves through
+   byward: On-Behalf-Of has no screen to ask them on.
+
+Without consent, Entra refuses the exchange (AADSTS65001), and byward tells the operator how to fix
+it (section 4).
+
+## 2. Configure the scopes
+
+```sh
+BYWARD_OBO_SCOPES="https://graph.microsoft.com/User.Read"
+```
+
+- Give full scope URIs of **one** API (Entra issues a token for one API per request), for example
+  `https://graph.microsoft.com/User.Read https://graph.microsoft.com/Mail.Read`, or
+  `api://<app ID>/<scope>` for an API of your own.
+- Never give sign-in scopes (`openid`, `offline_access`): byward requests those itself.
+- Empty (the default) turns On-Behalf-Of off.
+
+## 3. Read the token in the upstream
+
+Every request to the upstream carries:
+
+```
+X-Byward-Downstream-Token: Bearer <token for the downstream API>
+```
+
+- Use the value as the `Authorization` header of your call to the downstream API.
+- The header name is `BYWARD_OBO_HEADER`. It must differ from the identity assertion's header
+  (`BYWARD_ASSERTION_HEADER`) and from `Authorization`.
+- A client can never supply it. Every inbound copy is removed, even while On-Behalf-Of is off.
+- The token is for the user who made the MCP request. byward keeps it in memory, per replica, until
+  a minute before it expires. It is never stored or logged.
+- While On-Behalf-Of is on, byward's own access tokens expire a minute before the user's Entra token
+  does. The client's normal refresh then renews both, so every request has a valid sign-in to
+  exchange.
+
+## 4. When Entra refuses
+
+The MCP client never gets a 401 or 403 for these, which would send it into a sign-in loop. It gets
+an answer it can show the user, as for an [upstream refusal](../adr/0025-upstream-refusal.md):
+
+- a tool call returns a tool error;
+- any other request gets a JSON-RPC error with `data.downstream` set to the reason.
+
+Nothing reaches the upstream.
+
+| Reason | Cause | What to do |
+|---|---|---|
+| `consent_required` | AADSTS65001: the API permissions are not consented | Open the admin-consent URL from the error log (`admin_consent_url`) as a tenant administrator, or grant consent in the portal |
+| `interaction_required` | Conditional Access wants a step the proxy cannot complete for the downstream API | Check the sign-in log for the policy; passing its challenge to the client's next sign-in is not supported yet |
+| `unavailable` | Entra did not answer, or refused byward's own credential | As for sign-in failures: check the IdP's health and the client secret or certificate |
+| `failed` | Anything else | The error log names the AADSTS code and Entra's trace and correlation IDs |
+
+Each refusal is in the audit stream as `downstream_token_refused`, and is counted in
+`byward_downstream_tokens_total{outcome}`
+([observability reference](../reference/observability.md)).
+
+The admin-consent URL returns to byward's `/callback/entra`, which shows a confirmation or error
+page. That redirect cannot be verified, so it changes nothing: the next request simply exchanges
+again. Entra itself records the consent.

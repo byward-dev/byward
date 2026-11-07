@@ -69,6 +69,7 @@ For SIEMs that use [OCSF](https://schema.ocsf.io) 1.9.0. Fields map as follows: 
 | `rate_limited` | an OAuth endpoint refused a request over the client address's budget (`reason` = the endpoint; [rate limits](rate-limits.md)) | failure | yes | 4002 HTTP Activity; `disposition_id` 2 Blocked |
 | `store_restored` | at startup, the store was found restored from an older copy: a new `epoch` began and refresh tokens issued before it are refused, so those users sign in again (ADR-0007 §9) | success | no | 6002 Application Lifecycle / 99 Other (*approximate*) |
 | `session_rejected` | a signed-in user presented an `Mcp-Session-Id` that is not theirs: sealed for another user or upstream, not issued by this proxy, tampered with, or expired (`reason` fixed); the client gets 404 and starts a new session | failure | no | 3003 Authorize Session / 99 Other (*approximate*) |
+| `downstream_token_refused` | Entra refused the On-Behalf-Of exchange for a signed-in user's MCP request (`reason` `consent_required`, `interaction_required`, `unavailable` or `failed`); the client gets an answer it can show, never a 401 or 403, and with `consent_required` the error log carries `admin_consent_url` (ADR-0017 §5) | failure | no | 3003 Authorize Session / 99 Other (*approximate*) |
 | `process_evicted` | an idle stdio upstream process was stopped so another could start under `BYWARD_STDIO_MAX_PROCESSES_PER_USER` (`reason` `user_cap`, the user's own process) or `BYWARD_STDIO_MAX_PROCESSES` (`reason` `upstream_cap`, any user's); `user_key` is the evicted process's user, whose session ends and whose client starts a new one | success | no | 6002 Application Lifecycle / 4 Stop (*approximate*) |
 
 Not emitted yet; these arrive with their slices:
@@ -91,6 +92,7 @@ Prometheus text format at `/metrics` on the internal listener. Histogram buckets
 | `byward_rate_limited_total` | counter | `endpoint`: OAuth requests refused with 429 (or a `temporarily_unavailable` redirect) over a client address's budget |
 | `byward_cimd_fetches_total` | counter | `outcome`: Client ID Metadata Document fetches: `ok`, `invalid`, `refused` (non-public address, a 4xx other than 408 and 429, redirect, too large), `unavailable` (network, timeout, 5xx, 408, 429), `rate_limited`, `busy` |
 | `byward_dcr_registrations_total` | counter | `outcome`: `/register` answers: `registered`, `invalid_redirect_uri`, `invalid_client_metadata`, `full` (the cap), `unavailable` (store failure), `rate_limited` |
+| `byward_downstream_tokens_total` | counter | `outcome`: On-Behalf-Of downstream tokens for upstream requests: `cached`, `issued`, `consent_required`, `interaction_required`, `unavailable`, `failed` (ADR-0017) |
 | `byward_consent_total` | counter | `trust` (`verified`, `domain`, `not-verified`), `outcome`: `shown` (the page), `granted`, `denied`, `remembered` (a sign-in that skipped the page, confirmed after the callback), `silent_refused` (a `prompt=none` request answered with an error; trust empty when refused after the IdP) |
 | `byward_build_info` | gauge | `version`, `go_version`; always 1 |
 
