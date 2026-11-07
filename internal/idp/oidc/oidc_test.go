@@ -510,3 +510,14 @@ func TestGoogleIsAskedForConsentEverySignInExceptASilentOne(t *testing.T) {
 		}
 	}
 }
+
+// A credential the proxy cannot make (an assertion file that is missing) fails before any request,
+// as an ErrCredential that alerts the operator, the same as with Entra.
+func TestAnUnusableClientCredentialFailsAsErrCredential(t *testing.T) {
+	e := newEnv(t, Config{ClientAuth: idp.AssertionFile(t.TempDir() + "/missing-token")})
+	_, _, err := e.p.Refresh(context.Background(), "rt")
+	var ie *idp.Error
+	if !errors.Is(err, idp.ErrCredential) || !errors.As(err, &ie) || ie.Class != idp.Unavailable || !ie.Alert {
+		t.Fatalf("err = %v, want an alerting, unavailable ErrCredential", err)
+	}
+}
