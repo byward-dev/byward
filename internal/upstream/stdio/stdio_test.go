@@ -503,7 +503,8 @@ func (syncClock) AfterFunc(_ time.Duration, f func()) Timer {
 }
 
 // firedTimer is a timer that has fired: Reset fires it again at once; Stop cancels nothing, which
-// is safe because the callback re-checks held under the process lock.
+// is safe because the callback re-checks held under the process lock and stopLocked acts only
+// once.
 type firedTimer struct{ f func() }
 
 func (t firedTimer) Reset(time.Duration) bool { go t.f(); return false }
@@ -560,7 +561,7 @@ func TestIdleTimerThatFiresWhileHeldKeepsTheProcessAndTheReleaseRearmsIt(t *test
 	h := newHarness(t, nil)
 	p, release := h.lease(t, "s1", alice)
 	h.clk.mu.Lock()
-	idle := h.clk.timers[0].f // the idle timer is the process's first
+	idle := h.clk.timers[0].f // the clock's first timer is the process's idle timer
 	h.clk.mu.Unlock()
 	idle()
 	if n := len(h.log.with("stopping upstream process")); n != 0 {
