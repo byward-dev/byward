@@ -67,7 +67,8 @@ Several agents often work on this repo at once. These rules keep their work from
   command instead of running it elsewhere. No `git checkout --`/`reset` in subagent briefs. Stop only
   processes you started, matched by your own scratch path, never with `kill -9` on a name pattern.
 - **Gate every push on the check.** Chain with `&&`, never `;`: `mise run check && git push …`.
-  Capture the log (`mise run check 2>&1 | tee check.log`) so a failure can be read afterwards.
+  Capture the log with a redirect, not a pipe: `mise run check > check.log 2>&1 && git push …`.
+  A pipe (`| tee`, `| grep`, `| tail`) returns the last command's status and hides a failing check.
 - **Rebase as soon as `main` moves** when your branch touches the same files; small conflicts
   are cheap, late ones are not. Keep both sides, then re-run the check.
 - **Generated files are never hand-merged.** `docs/reference/settings.md` conflicts are resolved
