@@ -96,8 +96,12 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 	if p.cfg.Tenant == Organizations {
 		// Microsoft documents the client-credentials tenant only "in GUID or domain-name format",
 		// and organizations mode has no home tenant setting to send instead.
+		list := "az ad app credential list --id %s lists an unexpired credential"
+		if d.FederatedTokenSetting != "" {
+			list = "az ad app federated-credential list --id %s lists one matching the token's issuer, subject and audience"
+		}
 		return []doctor.Result{result(name, doctor.Skip, "not probed: client credentials need the app's home tenant, and organizations mode names none",
-				fmt.Sprintf("check by hand: az ad app credential list --id %s lists an unexpired credential, and az ad app show --id %s --query api.requestedAccessTokenVersion is 2", p.cfg.ClientID, p.cfg.ClientID))},
+				fmt.Sprintf("check by hand: "+list+", and az ad app show --id %s --query api.requestedAccessTokenVersion is 2", p.cfg.ClientID, p.cfg.ClientID))},
 			nil
 	}
 	tr, err := p.token(ctx, url.Values{"grant_type": {"client_credentials"}, "scope": {resource + defaultScopeSuffix}})
@@ -123,11 +127,14 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 			"set "+d.ClientIDSetting+" to the app registration's Application (client) ID, and "+d.TenantSetting+" to the tenant it is registered in")}, nil
 	case codeInvalidSecret:
 		if d.FederatedTokenSetting != "" {
-			break // not a secret: the general fix below names the federated token
+			break // no secret: the general fix below names the federated token
 		}
 		return []doctor.Result{result(name, doctor.Fail, "Entra rejected the client secret ("+code+")",
 			"the file named by "+d.SecretSetting+" must hold the secret's value, not its ID; create a new one: az ad app credential reset --id "+p.cfg.ClientID+" --append --display-name byward --years 1 --query password -o tsv")}, nil
 	case codeExpiredSecret:
+		if d.FederatedTokenSetting != "" {
+			break
+		}
 		return []doctor.Result{result(name, doctor.Fail, "the client secret has expired ("+code+")",
 			"create a new one: az ad app credential reset --id "+p.cfg.ClientID+" --append --display-name byward --years 1 --query password -o tsv, then restart the proxy with it")}, nil
 	case codeResourceNotFound:
@@ -145,6 +152,9 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 		return []doctor.Result{result(name, doctor.Fail, msg, reachFix)}, nil
 	}
 	fix := ie.OperatorHint
+	if d.FederatedTokenSetting != "" && (ie.Code == codeInvalidSecret || ie.Code == codeExpiredSecret) {
+		fix = "" // those hints are about a secret, and there is none
+	}
 	switch {
 	case fix != "":
 	case d.FederatedTokenSetting != "":

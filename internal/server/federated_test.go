@@ -21,9 +21,24 @@ const githubSubject = "repo:byward-dev@1000001/byward@2000002:environment:real-e
 // federated is a run of the lane in miniature: a "GitHub" token in a file, and the fake Entra with
 // a federated identity credential for it on the proxy's app.
 type federated struct {
-	cfg   *config.Config
-	fake  *fakeidp.IdP
-	token string // the token file's path
+	cfg    *config.Config
+	fake   *fakeidp.IdP
+	github *fakeidp.Certificate // "GitHub's" signing key
+	token  string               // the token file's path
+}
+
+// writeGitHubToken writes a GitHub Actions OIDC token for githubSubject, issued age ago, to path.
+func writeGitHubToken(t *testing.T, github *fakeidp.Certificate, path string, age time.Duration) {
+	t.Helper()
+	iat := time.Now().Add(-age)
+	tok, err := github.SignJWT("RS256", nil, map[string]any{"iss": "https://token.actions.githubusercontent.com", "sub": githubSubject,
+		"aud": "api://AzureADTokenExchange", "iat": iat.Unix(), "exp": iat.Add(5 * time.Minute).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(tok+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func newFederated(t *testing.T, credSubject string) federated {
@@ -32,16 +47,8 @@ func newFederated(t *testing.T, credSubject string) federated {
 	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant), fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID,
 		Federated: []fakeidp.FederatedCredential{{Issuer: "https://token.actions.githubusercontent.com", Subject: credSubject,
 			Audience: "api://AzureADTokenExchange", Signer: github}}}))
-	now := time.Now()
-	tok, err := github.SignJWT("RS256", nil, map[string]any{"iss": "https://token.actions.githubusercontent.com", "sub": githubSubject,
-		"aud": "api://AzureADTokenExchange", "iat": now.Unix(), "exp": now.Add(5 * time.Minute).Unix()})
-	if err != nil {
-		t.Fatal(err)
-	}
 	path := filepath.Join(t.TempDir(), "federated-token")
-	if err := os.WriteFile(path, []byte(tok+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeGitHubToken(t, github, path, 0)
 	var env []string
 	for _, kv := range authEnv(t) {
 		if !strings.HasPrefix(kv, "BYWARD_ENTRA_CLIENT_SECRET_FILE=") {
@@ -53,7 +60,7 @@ func newFederated(t *testing.T, credSubject string) federated {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return federated{cfg: cfg, fake: fake, token: path}
+	return federated{cfg: cfg, fake: fake, github: github, token: path}
 }
 
 // checks runs doctor and returns its checks by name.
@@ -84,7 +91,8 @@ func (f federated) credentialCheck(t *testing.T) doctor.Result {
 // relies on; with no secret, there is no secret expiry to report.
 func TestDoctorSignsInToEntraWithAFederatedToken(t *testing.T) {
 	got := newFederated(t, githubSubject).checks(t)
-	for _, name := range []string{"entra app and credential", "entra access token"} {
+	// The checks scripts/real-entra/run.sh requires to pass.
+	for _, name := range []string{"entra tenant", "entra signing keys", "entra app and credential", "entra access token", "entra idtyp claim"} {
 		if c := got[name]; c.Status != doctor.Pass {
 			t.Errorf("%s: %s %s", name, c.Status, c.Message)
 		}
@@ -98,18 +106,25 @@ func TestDoctorSignsInToEntraWithAFederatedToken(t *testing.T) {
 // match, naming the setting, never a client secret.
 func TestDoctorSaysWhatMustMatchWhenNoFederatedCredentialDoes(t *testing.T) {
 	c := newFederated(t, "repo:byward-dev/byward:ref:refs/heads/main").credentialCheck(t)
-	if c.Status != doctor.Fail || !strings.Contains(c.Fix, "BYWARD_ENTRA_FEDERATED_TOKEN_FILE must match one of the app's federated identity credentials exactly: issuer, subject and audience") ||
+	// The fix's wording is the Entra doctor's tests'; here, that it names this setting, and that the
+	// fake refused for the credential (not, say, a bad signature: AADSTS700027).
+	if c.Status != doctor.Fail || !strings.Contains(c.Fix, "BYWARD_ENTRA_FEDERATED_TOKEN_FILE must match") || strings.Contains(c.Message, "AADSTS700027") ||
 		strings.Contains(c.Fix, "secret") {
 		t.Fatalf("%s: %s; fix %q", c.Status, c.Message, c.Fix)
 	}
 }
 
-// The file is read for every token request, so a renewed token is used without a restart; an
-// emptied one fails closed, with no other credential to fall back on.
-func TestTheFederatedTokenFileIsReadForEveryRequestAndFailsClosedWhenEmpty(t *testing.T) {
+// A renewed token is used without a restart (the GitHub token outlives no run), and an emptied
+// file fails closed, with no other credential to fall back on.
+func TestARenewedFederatedTokenIsUsedAndAnEmptiedOneFailsClosed(t *testing.T) {
 	f := newFederated(t, githubSubject)
+	writeGitHubToken(t, f.github, f.token, 6*time.Minute) // expired
+	if c := f.credentialCheck(t); c.Status != doctor.Fail {
+		t.Fatalf("expired token: %s %s", c.Status, c.Message)
+	}
+	writeGitHubToken(t, f.github, f.token, 0) // renewed in place
 	if c := f.credentialCheck(t); c.Status != doctor.Pass {
-		t.Fatalf("first token: %s %s", c.Status, c.Message)
+		t.Fatalf("renewed token: %s %s", c.Status, c.Message)
 	}
 	if err := os.WriteFile(f.token, nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -119,27 +134,50 @@ func TestTheFederatedTokenFileIsReadForEveryRequestAndFailsClosedWhenEmpty(t *te
 	}
 }
 
-// The token file is a credential: one other users can read, or one that is missing, refuses
-// startup.
+// The token file is a credential: one other users can read refuses startup (except with --dev, as
+// every secret file), and a missing one refuses it even with --dev.
 func TestALooseOrMissingFederatedTokenFileRefusesToStart(t *testing.T) {
-	for name, prepare := range map[string]func(t *testing.T, path string){
-		"readable by others": func(t *testing.T, path string) {
+	for _, tc := range []struct {
+		name    string
+		dev     bool
+		prepare func(t *testing.T, path string)
+		inErr   string // "" when the proxy starts
+	}{
+		{"readable by others", false, func(t *testing.T, path string) {
 			if err := os.Chmod(path, 0o644); err != nil { //nolint:gosec // G302: the mode under test
 				t.Fatal(err)
 			}
-		},
-		"missing": func(t *testing.T, path string) {
-			if err := os.Remove(path); err != nil {
+		}, "has mode 0644, so other users can read it"},
+		{"readable by others, --dev", true, func(t *testing.T, path string) {
+			if err := os.Chmod(path, 0o644); err != nil { //nolint:gosec // G302: the mode under test
 				t.Fatal(err)
 			}
-		},
+		}, ""},
+		{"missing", false, func(t *testing.T, path string) { removeFile(t, path) }, "no such file or directory"},
+		{"missing, --dev", true, func(t *testing.T, path string) { removeFile(t, path) }, "no such file or directory"},
 	} {
-		t.Run(name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			f := newFederated(t, githubSubject)
-			prepare(t, f.token)
-			if _, err := New(f.cfg, discard); err == nil || !strings.Contains(err.Error(), "BYWARD_ENTRA_FEDERATED_TOKEN_FILE") {
-				t.Fatalf("New = %v, want the token file refused", err)
+			f.cfg.Dev = tc.dev
+			tc.prepare(t, f.token)
+			s, err := New(f.cfg, discard)
+			if tc.inErr == "" {
+				if err != nil {
+					t.Fatalf("New = %v, want it to start", err)
+				}
+				_ = s.closeStore()
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "BYWARD_ENTRA_FEDERATED_TOKEN_FILE") || !strings.Contains(err.Error(), tc.inErr) {
+				t.Fatalf("New = %v, want the token file refused with %q", err, tc.inErr)
 			}
 		})
+	}
+}
+
+func removeFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
 	}
 }

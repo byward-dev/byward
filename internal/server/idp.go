@@ -61,12 +61,7 @@ func newIdentityProvider(cfg *config.Config, idpHTTP *http.Client) (*identityPro
 
 // newEntraIdentityProvider is Entra (ADR-0012), with its own doctor checks and secret-expiry warning.
 func newEntraIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect string) (*identityProvider, error) {
-	auth := idp.ClientSecret(cfg.EntraClientSecret)
-	diag := entra.Diagnosis{TenantSetting: config.Setting{Name: "entra-tenant"}.Env(), ClientIDSetting: config.Setting{Name: "entra-client-id"}.Env(),
-		SecretSetting: config.Setting{Name: "entra-client-secret"}.Env() + "_FILE", GateRoles: cfg.GateRoles}
-	if f := cfg.EntraFederatedTokenFile; f != "" { // ADR-0012 §5: re-read on every request, never cached
-		auth, diag.SecretSetting, diag.FederatedTokenSetting = idp.AssertionFile(f), "", config.Setting{Name: "entra-federated-token-file"}.Env()
-	}
+	auth, diag := entraClientAuth(cfg)
 	p, err := entra.New(entra.Config{Tenant: cfg.EntraTenant, ClientID: cfg.EntraClientID,
 		ClientAuth: auth, RedirectURL: redirect, HTTPClient: idpHTTP})
 	if err != nil {
@@ -75,10 +70,10 @@ func newEntraIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect
 	return &identityProvider{name: cfg.IdP, redirect: redirect, label: "Microsoft Entra", adapter: p, scope: p.Scope(), gateIdP: gate.Entra, userKey: entra.UserKey,
 		diagnose: func(ctx context.Context, now time.Time) []doctor.Result {
 			out := p.Diagnose(ctx, diag)
-			if cfg.EntraFederatedTokenFile != "" {
-				return out // no secret to expire
+			if cfg.EntraClientSecret != "" { // only a secret expires
+				out = append(out, secretExpiry(cfg, now))
 			}
-			return append(out, secretExpiry(cfg, now))
+			return out
 		},
 		startWarnings: func(now time.Time) []Warning {
 			if w, ok := expiryWarning(cfg, now); ok {
@@ -143,6 +138,19 @@ func oidcLabel(cfg *config.Config) string {
 
 // oidcClientAuth is the proxy's credential at an oidc IdP: a client secret, or private_key_jwt with
 // a PEM key. Config refuses neither or both.
+// entraClientAuth is the Entra app's credential (ADR-0012 §5), the client secret or the federated
+// token file, and the settings doctor names in its fixes for it.
+func entraClientAuth(cfg *config.Config) (idp.ClientAuth, entra.Diagnosis) {
+	d := entra.Diagnosis{TenantSetting: config.Setting{Name: "entra-tenant"}.Env(), ClientIDSetting: config.Setting{Name: "entra-client-id"}.Env(),
+		GateRoles: cfg.GateRoles}
+	if f := cfg.EntraFederatedTokenFile; f != "" { // re-read on every request, never cached
+		d.FederatedTokenSetting = config.Setting{Name: "entra-federated-token-file"}.Env()
+		return idp.AssertionFile(f), d
+	}
+	d.SecretSetting = config.Setting{Name: "entra-client-secret"}.Env() + "_FILE"
+	return idp.ClientSecret(cfg.EntraClientSecret), d
+}
+
 func oidcClientAuth(cfg *config.Config) (idp.ClientAuth, error) {
 	if cfg.OIDCClientKey == "" {
 		return idp.ClientSecret(cfg.OIDCClientSecret), nil

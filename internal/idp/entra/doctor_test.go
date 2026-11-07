@@ -227,3 +227,42 @@ func TestDiagnoseInOrganizationsModeSkipsTheCredentialProbe(t *testing.T) {
 		t.Fatalf("organizations discovery: %+v", got["entra tenant"])
 	}
 }
+
+// With a federated token in place of a secret, no fix talks about a secret: a failure Entra names
+// gets its own fix (an operator hint), and every other one says what the federated identity
+// credential must match (Microsoft's error reference lists no code for a credential that does not).
+func TestDiagnoseWithAFederatedTokenNeverBlamesASecret(t *testing.T) {
+	federated := Diagnosis{TenantSetting: "TENANT_SETTING", ClientIDSetting: "CLIENT_ID_SETTING", FederatedTokenSetting: "TOKEN_SETTING"}
+	const mustMatch = "TOKEN_SETTING must match one of the app's federated identity credentials exactly: issuer, subject and audience"
+	for _, tc := range []struct {
+		name      string
+		opts      []fakeidp.Option
+		setup     func(*testing.T, *env)
+		status    doctor.Status
+		inMessage string
+		inFix     string
+	}{
+		{name: "invalid client secret", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantClientCredentials, &fakeidp.InvalidClientSecret)},
+			status: doctor.Fail, inMessage: "AADSTS7000215", inFix: mustMatch},
+		{name: "expired client secret", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantClientCredentials, &fakeidp.ExpiredClientSecret)},
+			status: doctor.Fail, inMessage: "AADSTS7000222", inFix: mustMatch},
+		{name: "no matching federated credential", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantClientCredentials, &fakeidp.NoMatchingFederatedCredential)},
+			status: doctor.Fail, inMessage: "the client-credentials probe failed", inFix: mustMatch},
+		{name: "a failure with an operator hint", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantClientCredentials, &fakeidp.BlockedByConditionalAccess)},
+			status: doctor.Fail, inMessage: "AADSTS53003", inFix: "Conditional Access"},
+		{name: "organizations mode", setup: func(t *testing.T, e *env) {
+			rebuild(t, e, func(c *Config) { c.Tenant, c.AllowedTenants = Organizations, []string{fakeidp.NewGUID()} })
+		}, status: doctor.Skip, inMessage: "not probed", inFix: "az ad app federated-credential list --id"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t, Config{}, tc.opts...)
+			if tc.setup != nil {
+				tc.setup(t, e)
+			}
+			r := diagnose(t, e.p, federated)["entra app and credential"]
+			if r.Status != tc.status || !strings.Contains(r.Message, tc.inMessage) || !strings.Contains(r.Fix, tc.inFix) || strings.Contains(r.Fix, "secret") {
+				t.Fatalf("%+v\nwant status %s, message with %q, fix with %q and no secret", r, tc.status, tc.inMessage, tc.inFix)
+			}
+		})
+	}
+}

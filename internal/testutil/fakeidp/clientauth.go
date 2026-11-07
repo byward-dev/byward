@@ -180,6 +180,11 @@ func (p *IdP) checkFederatedAssertion(c Client, j *jws) *Failure {
 			f.Description = "Client assertion has expired."
 			return &f
 		}
+		if nbf, ok := numericDate(j.claims["nbf"]); ok && now.Before(nbf) {
+			f := InvalidClientAssertion
+			f.Description = "Client assertion is not yet valid."
+			return &f
+		}
 		return nil
 	}
 	return failure(NoMatchingFederatedCredential)

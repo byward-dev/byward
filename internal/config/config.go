@@ -438,11 +438,18 @@ func (c *Config) entraIdP(v *Values) []error {
 	c.EntraFederatedTokenFile = v.get("entra-federated-token-file")
 	errs := c.requiredForIdP(v, "entra-tenant", "entra-client-id")
 	secretEnv, tokenEnv := Setting{Name: "entra-client-secret"}.Env()+"_FILE", Setting{Name: "entra-federated-token-file"}.Env()
+	var set []string // the Entra app's credentials given: exactly one (ADR-0012 §5)
+	for env, v := range map[string]string{secretEnv: c.EntraClientSecret, tokenEnv: c.EntraFederatedTokenFile} {
+		if v != "" {
+			set = append(set, env)
+		}
+	}
+	slices.Sort(set)
 	switch {
-	case c.EntraClientSecret == "" && c.EntraFederatedTokenFile == "":
+	case len(set) == 0:
 		errs = append(errs, errorf("%s or %s is required with BYWARD_IDP=%s (or set BYWARD_INSECURE_NO_AUTH to try the proxy without sign-in)", secretEnv, tokenEnv, c.IdP))
-	case c.EntraClientSecret != "" && c.EntraFederatedTokenFile != "":
-		errs = append(errs, errorf("%s and %s are both set: Entra gets one credential, so remove one of them", secretEnv, tokenEnv))
+	case len(set) > 1:
+		errs = append(errs, errorf("%s are set together: Entra gets one credential, so keep only one of them", strings.Join(set, " and ")))
 	case c.EntraFederatedTokenFile != "":
 		if !filepath.IsAbs(c.EntraFederatedTokenFile) {
 			errs = append(errs, errorf("%s: want an absolute path, got %q", tokenEnv, c.EntraFederatedTokenFile))

@@ -65,15 +65,6 @@ type User struct {
 
 // Client is an app registration at the fake IdP: the proxy's IdP app, a headless caller, or a
 // resource (API) that tokens are issued for.
-// FederatedCredential is a federated identity credential on an app registration: a client
-// assertion whose iss, sub and aud match exactly, case-sensitively, and that Signer signed, is
-// accepted for the client (Microsoft Learn, workload identity federation).
-type FederatedCredential struct {
-	Issuer, Subject, Audience string
-	// Signer is the other issuer's key (GitHub's, say), standing in for its JWKS.
-	Signer *Certificate
-}
-
 type Client struct {
 	ID string
 	// Secrets lists accepted client secrets; more than one models a rollover.
@@ -102,7 +93,18 @@ type Client struct {
 	NoIdentifierURI bool
 }
 
-func (c Client) confidential() bool { return len(c.Secrets) > 0 || len(c.Certificates) > 0 }
+// FederatedCredential is a federated identity credential on an app registration: a client
+// assertion whose iss, sub and aud match exactly, case-sensitively, and that Signer signed, is
+// accepted for the client (Microsoft Learn, workload identity federation).
+type FederatedCredential struct {
+	Issuer, Subject, Audience string
+	// Signer is the other issuer's key (GitHub's, say), standing in for its JWKS.
+	Signer *Certificate
+}
+
+func (c Client) confidential() bool {
+	return len(c.Secrets) > 0 || len(c.Certificates) > 0 || len(c.Federated) > 0
+}
 
 // IdP is a running fake identity provider.
 type IdP struct {

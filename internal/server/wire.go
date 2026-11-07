@@ -307,7 +307,10 @@ func looseSecretFiles(cfg *config.Config) []error {
 	}
 	// A federated token is a credential too, though it is read at each request, not at start.
 	if f := cfg.EntraFederatedTokenFile; f != "" {
-		if err := check(f); err != nil {
+		// It must exist even in --dev, as every other secret file must to be read at start.
+		if _, err := os.Stat(f); err != nil {
+			loose = append(loose, fmt.Errorf("%s: %w", config.Setting{Name: "entra-federated-token-file"}.Env(), err))
+		} else if err := check(f); err != nil {
 			loose = append(loose, fmt.Errorf("%s: %w", config.Setting{Name: "entra-federated-token-file"}.Env(), err))
 		}
 	}
