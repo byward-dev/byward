@@ -170,9 +170,11 @@ func (p *IdP) genericIDClaims(m map[string]any, clientID string, u User, authTim
 	}
 	if email {
 		m["email"] = u.Email
-		if p.cfg.emailAsString {
+		switch {
+		case p.cfg.noEmailVerified:
+		case p.cfg.emailAsString:
 			m["email_verified"] = map[bool]string{true: "true", false: "false"}[u.EmailVerified]
-		} else {
+		default:
 			m["email_verified"] = u.EmailVerified
 		}
 	}

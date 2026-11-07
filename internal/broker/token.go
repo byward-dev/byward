@@ -236,7 +236,7 @@ func (b *Broker) issue(w http.ResponseWriter, r *http.Request, clientID, grantID
 	ctx := r.Context()
 	exp := minTime(now.Add(AccessLifetime), grantExpires)
 	c := token.Claims{GrantID: grantID, Subject: subject, IssuedAt: now, ExpiresAt: exp, ClientID: clientID,
-		Roles: asserted.Roles, Groups: asserted.Groups, Email: asserted.Email, Name: asserted.Name}
+		Roles: asserted.Roles, Groups: asserted.Groups, Email: asserted.Email, EmailVerified: asserted.EmailVerified, Name: asserted.Name}
 	access, err := b.cfg.Sealer.Seal(token.Access, c)
 	if errors.Is(err, token.ErrTooLong) && len(c.Groups) > 0 {
 		// Too many groups for a token: assert none rather than fail the sign-in; the upstream then

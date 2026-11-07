@@ -38,7 +38,11 @@ func TestAccessTokensCarryTheClientAndOnlyTheOptedInClaims(t *testing.T) {
 	}{
 		{name: "nothing opted in"},
 		{name: "roles (the default)", assert: Asserted{Roles: true}, wantRoles: user.Roles},
-		{name: "everything", assert: Asserted{Roles: true, Groups: true, Email: true, Name: true},
+		// The user's email is unverified, as every Entra email is, so it is asserted only with the
+		// opt-in to unverified ones.
+		{name: "everything but the unverified email", assert: Asserted{Roles: true, Groups: true, Email: true, Name: true},
+			wantRoles: user.Roles, wantGrps: user.Groups, wantName: user.Name},
+		{name: "everything and unverified emails", assert: Asserted{Roles: true, Groups: true, Email: true, Name: true, UnverifiedEmail: true},
 			wantRoles: user.Roles, wantGrps: user.Groups, wantEmail: user.Email, wantName: user.Name},
 	}
 	for _, tc := range cases {
@@ -47,8 +51,36 @@ func TestAccessTokensCarryTheClientAndOnlyTheOptedInClaims(t *testing.T) {
 			e.fake.Set(fakeidp.WithUser(user))
 			c := e.opened(t, e.offline(t))
 			if c.ClientID != clientID || !reflect.DeepEqual(c.Roles, tc.wantRoles) || !reflect.DeepEqual(c.Groups, tc.wantGrps) ||
-				c.Email != tc.wantEmail || c.Name != tc.wantName {
+				c.Email != tc.wantEmail || c.EmailVerified || c.Name != tc.wantName {
 				t.Fatalf("claims %+v", c)
+			}
+		})
+	}
+}
+
+// Only an email the IdP vouches for is asserted, unless the operator opted in to unverified ones;
+// EmailVerified then tells the two apart (ADR-0016, 2026-11-07 amendment). The last two rows are
+// defensive: configuration never sets the opt-in without email, and no email means no verification
+// for the plain identity header to send.
+func TestAnEmailIsAssertedOnlyWhenTheIdPVerifiedItOrTheOperatorOptedIn(t *testing.T) {
+	const email = "alex@contoso.example"
+	verified, unverified := idp.Identity{Email: email, EmailVerified: true}, idp.Identity{Email: email}
+	for _, tc := range []struct {
+		name   string
+		assert Asserted
+		id     idp.Identity
+		want   assertedClaims
+	}{
+		{"a verified email", Asserted{Email: true}, verified, assertedClaims{Email: email, EmailVerified: true}},
+		{"an unverified email is left out", Asserted{Email: true}, unverified, assertedClaims{}},
+		{"an unverified email with the opt-in", Asserted{Email: true, UnverifiedEmail: true}, unverified, assertedClaims{Email: email}},
+		{"a verified email with the opt-in", Asserted{Email: true, UnverifiedEmail: true}, verified, assertedClaims{Email: email, EmailVerified: true}},
+		{"the opt-in alone asserts no email", Asserted{UnverifiedEmail: true}, verified, assertedClaims{}},
+		{"verified but no address", Asserted{Email: true}, idp.Identity{EmailVerified: true}, assertedClaims{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.assert.claimsOf(tc.id); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("claims %+v, want %+v", got, tc.want)
 			}
 		})
 	}

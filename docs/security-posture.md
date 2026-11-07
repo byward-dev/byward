@@ -113,6 +113,9 @@ keep them (AGENTS.md). Status on `main`:
 - Cookies are `__Host-`, `Secure`, `HttpOnly` and `SameSite=Lax` whenever the public URL is https.
 - Unknown `BYWARD_*` variables, positional arguments, and a gate list that is set but empty
   all refuse to start.
+- The identity assertion carries an opted-in `email` only when the IdP verified it
+  (`email_verified: true`), with `email_verified` beside it; Entra never verifies one, so by default
+  no Entra email is asserted ([ADR-0016](adr/0016-identity-propagation.md), 2026-11-07 amendment).
 - There is no telemetry or update check. Traces are off unless `OTEL_TRACES_EXPORTER` is set.
 - The image runs as uid 65532 on distroless `static-debian13:nonroot`, pinned by digest
   ([ADR-0019](adr/0019-packaging.md)).
@@ -127,6 +130,7 @@ setting, with secrets shown as `<redacted>`.
 |---|---|---|
 | `--dev` (`BYWARD_DEV`) | Accepts an `http` public URL on a loopback host. Over http, cookies drop `__Host-` and `Secure`. Accepts inline secrets from the environment. | `http` only on a loopback host; each relaxation is logged by name |
 | `--insecure-no-auth` (`BYWARD_INSECURE_NO_AUTH`) | No authentication at all: no token check, no metadata, no broker routes | Public URL must be loopback. Listen address must be loopback, or inside a container with its own network namespace (host networking is detected and refused). Allowed hosts and origins must be loopback. It refuses to start alongside any authentication setting. Host and Origin checks, header stripping and body limits stay on. Logs `AUTHENTICATION IS OFF` and the next step ([ADR-0027](adr/0027-insecure-no-auth.md)). With a stdio upstream, anyone who can reach the proxy starts processes, bounded only by `BYWARD_STDIO_MAX_PROCESSES`, all as one anonymous user; logged as a warning ([stdio how-to](how-to/stdio-upstream.md#without-authentication)). |
+| `BYWARD_ASSERTION_UNVERIFIED_EMAIL` | With `email` in `BYWARD_ASSERTION_CLAIMS`, asserts an email the IdP has not verified (every Entra email), marked `email_verified: false` | Logged as a warning at every start; the upstream must never authorize on `email` |
 | `BYWARD_GATE_ALLOW_EMPTY` | Allows an empty gate for an OIDC IdP, where anyone with an account could sign in. It has **no effect with Entra**. | Logged as a warning at every start |
 
 An empty access gate with single-tenant Entra is allowed: every user of the tenant can sign in. It
