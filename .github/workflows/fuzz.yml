@@ -30,7 +30,7 @@ jobs:
         env:
           MISE_TASK_RUN_AUTO_INSTALL: "false"
           FUZZTIME: 2m # per target (ADR-0024 §1)
-      # A failing input, to reproduce with `go test -run '<Target>/<file>' ./<package>`.
+      # Failing inputs at their repository paths: unzipped at the root, `go test` replays them.
       - if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -60,5 +60,5 @@ jobs:
             gh issue comment "$open" --body "Failed again: $RUN_URL"
           else
             gh issue create --label fuzz --title "The nightly fuzz lane is failing" \
-              --body "The fuzz lane failed: $RUN_URL. If the run has a fuzz-crashers artifact, add its input under the package's testdata/fuzz/<Target>/ and fix the code until go test passes; otherwise read the run's log."
+              --body "The fuzz lane failed: $RUN_URL. If the run has a fuzz-crashers artifact, unzip it at the repository root (it puts each input in its package's testdata/fuzz/<Target>/) and fix the code until go test passes; otherwise read the run's log."
           fi

@@ -2,8 +2,8 @@
 # Nightly fuzz lane (ADR-0024 §1, §9): every `func Fuzz*` in the module, FUZZTIME each (2 minutes in
 # the scheduled workflow). Targets are found with `go test -list`, so a new one is fuzzed without
 # editing the workflow. Every target runs even after one fails; a failing input Go wrote under a
-# package's testdata/fuzz/ is copied to build/fuzz/crashers/<package path>/ for the workflow to
-# upload, and the lane fails.
+# package's testdata/fuzz/ is copied under build/fuzz/crashers/ at its repository path, for the
+# workflow to upload, and the lane fails.
 #   FUZZTIME=2m sh scripts/fuzz/run.sh        (mise run test:fuzz)
 set -eu
 
