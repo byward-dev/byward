@@ -151,3 +151,25 @@ func TestAFileTheScanCannotReadIsAnError(t *testing.T) {
 		t.Fatal("scan read a directory as a file without an error")
 	}
 }
+
+// A symlink is checked as git commits it: its target path, never the target's content.
+func TestASymlinkIsCheckedAsTheLinkGitCommits(t *testing.T) {
+	name := "Project" + "Unnamed" + guid(t)[:6]
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte(name+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	for link, target := range map[string]string{"to-outside": outside, "named": "/opt/" + name, "to-dir": t.TempDir()} {
+		if err := os.Symlink(target, filepath.Join(root, link)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := scan(root, []string{"to-outside", "named", "to-dir"}, forbiddenList(name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].String() != "named:1: "+kindForbidden {
+		t.Fatalf("findings %v, want only the link whose target path names it", got)
+	}
+}

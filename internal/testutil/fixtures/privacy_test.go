@@ -63,7 +63,7 @@ func fixture(rel string) bool {
 func scan(root string, files []string, forbidden []string) ([]finding, error) {
 	var out []finding
 	for _, rel := range files {
-		src, err := os.ReadFile(filepath.Join(root, rel)) //nolint:gosec // G304: this repository's own files
+		src, err := committed(filepath.Join(root, rel))
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue // deleted in the working tree, still in the index
@@ -83,6 +83,22 @@ func scan(root string, files []string, forbidden []string) ([]finding, error) {
 		}
 	}
 	return out, nil
+}
+
+// committed is what git would commit for path: a regular file's content, or a symlink's target
+// path (never the target's content, which git does not commit). Anything else is an error.
+func committed(path string) ([]byte, error) {
+	fi, err := os.Lstat(path)
+	switch {
+	case err != nil:
+		return nil, err
+	case fi.Mode()&os.ModeSymlink != 0:
+		target, err := os.Readlink(path)
+		return []byte(target), err
+	case !fi.Mode().IsRegular():
+		return nil, fmt.Errorf("%s: not a regular file", path)
+	}
+	return os.ReadFile(path) //nolint:gosec // G304: this repository's own files
 }
 
 // forbiddenHits reports each place in src where an entry of forbidden (lower case) appears, in
