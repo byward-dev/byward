@@ -1,0 +1,64 @@
+name: fuzz
+
+# Scheduled lane (ADR-0024 §1, §9): `go test -fuzz` for 2 minutes per target, every target the
+# module has. The seed corpora run in `test` on every commit; this lane looks for new inputs. It
+# never blocks a pull request.
+on:
+  schedule:
+    - cron: "11 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz
+  cancel-in-progress: false
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          install_args: go
+      - run: mise run test:fuzz
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
+          FUZZTIME: 2m # per target (ADR-0024 §1)
+      # Failing inputs at their repository paths: unzipped at the root, `go test` replays them.
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-crashers
+          path: build/fuzz/crashers
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # One issue, labelled fuzz, opened on the first failure and commented on after that. A failure is
+  # not always a failing input: a build error, a timeout or a failed install leaves none.
+  notify:
+    needs: fuzz
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create fuzz --color B60205 --description "The nightly fuzz lane is failing" 2>/dev/null || true
+          open=$(gh issue list --label fuzz --state open --json number --jq '.[0].number // empty')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body "Failed again: $RUN_URL"
+          else
+            gh issue create --label fuzz --title "The nightly fuzz lane is failing" \
+              --body "The fuzz lane failed: $RUN_URL. If the run has a fuzz-crashers artifact, unzip it at the repository root (it puts each input in its package's testdata/fuzz/<Target>/) and fix the code until go test passes; otherwise read the run's log."
+          fi
