@@ -132,10 +132,10 @@ func TestAnOIDCUsersEmailIsAssertedOnlyWhenVerifiedOrTheOperatorOptedIn(t *testi
 		wantEmail        any  // nil: left out
 		wantVerified     any  // email_verified; nil: left out
 	}{
-		{"verified", true, false, false, email, true},
-		{"unverified is left out", false, false, false, nil, nil},
-		{"no email_verified claim is left out", true, true, false, nil, nil},
-		{"unverified with the opt-in", false, false, true, email, false},
+		{name: "verified", verified: true, wantEmail: email, wantVerified: true},
+		{name: "unverified is left out"},
+		{name: "no email_verified claim is left out", verified: true, absent: true},
+		{name: "unverified with the opt-in", optIn: true, wantEmail: email, wantVerified: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			settings := []string{"BYWARD_ASSERTION_CLAIMS=email"}
