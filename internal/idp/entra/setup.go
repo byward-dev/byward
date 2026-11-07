@@ -15,13 +15,21 @@ type Setup struct {
 	PublicURL, UpstreamURL string
 	// RedirectURL is https://<proxy>/callback/entra, derived from the public URL as the proxy does.
 	RedirectURL string
-	// EnvFile is the env file the script writes last, with $TENANT_ID, $APP_ID, $SECRET_FILE,
-	// $SECRET_EXPIRES_AT, $PUBLIC_URL and $UPSTREAM_URL expanded by the shell.
+	// EnvFile is the env file the script writes last, with $TENANT_ID, $APP_ID, $PUBLIC_URL,
+	// $UPSTREAM_URL and the credential's $SECRET_FILE and $SECRET_EXPIRES_AT, or $CERTIFICATE_FILE,
+	// expanded by the shell.
 	EnvFile string
-	// SecretYears is the client secret's lifetime; Entra allows at most two years (ADR-0012).
+	// Credential is CredentialSecret (the default) or CredentialCertificate (ADR-0012 §5).
+	Credential string
+	// SecretYears is the credential's lifetime, the secret's or the certificate's; Entra allows a
+	// secret at most two years (ADR-0012), and byward keeps a certificate to the same.
 	SecretYears int
 	Now         time.Time
 }
+
+// CertificateFile is where the script writes the certificate credential, its private key and
+// certificate together, mode 0600.
+const CertificateFile = "entra-client-certificate.pem"
 
 // Roles the script defines (ADR-0022 §6): one users are assigned with, one for app-only callers.
 const (
@@ -44,7 +52,12 @@ func SetupScript(s Setup) (string, error) {
 		return "", errors.New("the tenant must be the tenant ID, a GUID (az account show --query tenantId -o tsv)")
 	}
 	if s.SecretYears < 1 || s.SecretYears > MaxSecretYears {
-		return "", fmt.Errorf("the secret lifetime must be 1 to %d years", MaxSecretYears)
+		return "", fmt.Errorf("the credential lifetime must be 1 to %d years", MaxSecretYears)
+	}
+	switch s.Credential {
+	case "", CredentialSecret, CredentialCertificate:
+	default:
+		return "", fmt.Errorf("the credential must be %s or %s, not %q", CredentialSecret, CredentialCertificate, s.Credential)
 	}
 	var b strings.Builder
 	err := setupTemplate.Execute(&b, map[string]any{
@@ -57,6 +70,9 @@ func SetupScript(s Setup) (string, error) {
 		"Years":       s.SecretYears,
 		"Expires":     s.Now.UTC().AddDate(s.SecretYears, 0, 0).Format(time.DateOnly),
 		"SecretFile":  SecretFile,
+		"Certificate": s.Credential == CredentialCertificate,
+		"CertFile":    CertificateFile,
+		"Days":        int(s.Now.UTC().AddDate(s.SecretYears, 0, 0).Sub(s.Now.UTC()).Hours() / 24),
 		"UserRole":    UserRole,
 		"AppRole":     AppRole,
 	})
@@ -68,7 +84,7 @@ func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''
 
 // The commands follow docs/how-to/quickstart-entra.md step 1, which was run against a real tenant.
 var setupTemplate = template.Must(template.New("setup").Parse(`#!/bin/sh
-# Printed by byward init entra. byward has run none of it and never sees the client secret.
+# Printed by byward init entra. byward has run none of it and never sees the {{if .Certificate}}private key{{else}}client secret{{end}}.
 # Review it, save it as byward-entra.sh and run it with the Azure CLI signed in to the tenant:
 #   az login --tenant {{.Tenant}} && sh byward-entra.sh
 # Each run creates a new app registration named byward.
@@ -139,7 +155,21 @@ az ad app permission add --id "$APP_ID" --api 00000003-0000-0000-c000-0000000000
 az ad sp create --id "$APP_ID" --query id -o tsv
 az ad sp update --id "$APP_ID" --set appRoleAssignmentRequired=true
 
-# 5. The client secret, straight into a 0600 file; it is never shown. --append keeps any existing
+{{if .Certificate}}# 5. The client certificate (ADR-0012 §5): an RSA 2048 key and a self-signed certificate made
+#    here, written together to a 0600 file. The key never leaves this machine: only the public
+#    certificate is uploaded. --append keeps any existing credentials of the app. The proxy reads
+#    the certificate's end date from the file and warns before it expires.
+CERTIFICATE_FILE="$PWD/{{.CertFile}}"
+(umask 077
+  openssl req -x509 -newkey rsa:2048 -sha256 -days {{.Days}} -nodes -subj "/CN=byward-$APP_ID" \
+    -keyout "$CERTIFICATE_FILE.key" -out "$CERTIFICATE_FILE.crt"
+  cat "$CERTIFICATE_FILE.key" "$CERTIFICATE_FILE.crt" > "$CERTIFICATE_FILE"
+  rm "$CERTIFICATE_FILE.key")
+az ad app credential reset --id "$APP_ID" --append --display-name byward --cert "@$CERTIFICATE_FILE.crt" >/dev/null
+rm "$CERTIFICATE_FILE.crt"
+
+# 6. The env file: the settings the proxy needs.
+{{else}}# 5. The client secret, straight into a 0600 file; it is never shown. --append keeps any existing
 #    credentials of the app.
 SECRET_FILE="$PWD/{{.SecretFile}}"
 (umask 077; az ad app credential reset --id "$APP_ID" --append --display-name byward --years {{.Years}} \
@@ -148,10 +178,11 @@ SECRET_EXPIRES_AT={{.Expires}}
 
 # 6. The env file: the settings the proxy needs, and the secret's end date so that the proxy and
 #    byward doctor warn before it expires.
+{{end}}
 (umask 077; cat > byward.env <<EOF
 {{.EnvFile}}EOF
 )
-echo "Created app registration $APP_ID; the secret is in $SECRET_FILE, the settings in byward.env."
+echo "Created app registration $APP_ID; the {{if .Certificate}}certificate and its key are in $CERTIFICATE_FILE{{else}}secret is in $SECRET_FILE{{end}}, the settings in byward.env."
 echo "Next: assign users or groups to the enterprise application byward with the {{.UserRole}} role,"
 echo "create a sealing key and an assertion key (docs/how-to/quickstart-entra.md step 2), start the proxy, then run byward doctor."
 `))

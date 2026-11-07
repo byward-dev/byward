@@ -87,8 +87,9 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) §1�
       - If the sealing keys may be compromised, also replace every key file and restart: that
         invalidates every token at once, whatever the store holds.
 - [ ] Give secrets only as files:
-      - the Entra client secret through `BYWARD_ENTRA_CLIENT_SECRET_FILE` (or
-        `--entra-client-secret-file`), or no secret at all: where the platform hands the proxy a
+      - the Entra credential: preferably a certificate, `BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE` (see
+        below); or the client secret through `BYWARD_ENTRA_CLIENT_SECRET_FILE` (or
+        `--entra-client-secret-file`); or no secret at all: where the platform hands the proxy a
         federated token (AKS workload identity, GitHub Actions), point
         `BYWARD_ENTRA_FEDERATED_TOKEN_FILE` at it and give the app a matching federated identity
         credential ([an example](real-entra-lane.md#3-run-it-once-then-create-the-federated-credential));
@@ -141,8 +142,13 @@ Background: [ADR-0012](../adr/0012-entra-specifics.md), [ADR-0015](../adr/0015-a
         users out. Alert on
         `byward_idp_request_duration_seconds_count{outcome="unavailable"}`
         ([observability](../reference/observability.md#metrics)).
-- [ ] **Certificate credential:** recommended by ADR-0012 §5 but **not yet configurable**; only a
-      client secret can be set today.
+- [ ] **Use a certificate credential** instead of a client secret (ADR-0012 §5; Microsoft: "It's
+      therefore recommended that your application uses a certificate rather than a secret"). The
+      private key stays on the proxy's machine, and Entra gets only a short-lived signed assertion.
+      `byward init entra --credential certificate` makes one; the
+      [certificate how-to](entra-certificate.md) covers making, uploading and rotating it. byward
+      reads the certificate's end date itself, warns from 30 days before, and refuses to start
+      once it has expired.
 - [ ] Gate changes take effect after a restart, at each user's next sign-in or refresh: at most one
       access-token lifetime (1 h) later. To cut someone off sooner, remove their assignment in Entra.
       Their next refresh then fails too.

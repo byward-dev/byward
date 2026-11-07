@@ -9,6 +9,8 @@ import (
 // plus the optional secret expiry so warnings work from the first start.
 type Quickstart struct {
 	PublicURL, UpstreamURL, Tenant, ClientID, SecretFile, SecretExpiresAt string
+	// CertificateFile, when set, is the certificate credential in place of the secret (ADR-0012 §5).
+	CertificateFile string
 }
 
 // quickstartRequired are the settings the quickstart needs; ADR-0020 §8 caps them at five.
@@ -21,6 +23,10 @@ func (q Quickstart) EnvFile() string {
 		"entra-client-id": q.ClientID, "entra-client-secret": q.SecretFile}
 	var b strings.Builder
 	for _, name := range quickstartRequired {
+		if name == "entra-client-secret" && q.CertificateFile != "" {
+			name = "entra-client-certificate"
+			values[name] = q.CertificateFile
+		}
 		s := lookup(name)
 		env := s.Env()
 		if s.Secret {

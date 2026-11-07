@@ -17,7 +17,7 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
-var diagnosis = Diagnosis{TenantSetting: "TENANT_SETTING", ClientIDSetting: "CLIENT_ID_SETTING", SecretSetting: "SECRET_SETTING"}
+var diagnosis = Diagnosis{TenantSetting: "TENANT_SETTING", ClientIDSetting: "CLIENT_ID_SETTING", CredentialKind: CredentialSecret, CredentialSetting: "SECRET_SETTING"}
 
 // diagnose runs Diagnose and indexes the results by check name.
 func diagnose(t *testing.T, p *Provider, d Diagnosis) map[string]doctor.Result {
@@ -245,7 +245,7 @@ func TestDiagnoseInOrganizationsModeSkipsTheCredentialProbe(t *testing.T) {
 // gets its own fix (an operator hint), and every other one says what the federated identity
 // credential must match (Microsoft's error reference lists no code for a credential that does not).
 func TestDiagnoseWithAFederatedTokenNeverBlamesASecret(t *testing.T) {
-	federated := Diagnosis{TenantSetting: "TENANT_SETTING", ClientIDSetting: "CLIENT_ID_SETTING", FederatedTokenSetting: "TOKEN_SETTING"}
+	federated := Diagnosis{TenantSetting: "TENANT_SETTING", ClientIDSetting: "CLIENT_ID_SETTING", CredentialKind: CredentialFederated, CredentialSetting: "TOKEN_SETTING"}
 	const mustMatch = "TOKEN_SETTING must match one of the app's federated identity credentials exactly: issuer, subject and audience"
 	for _, tc := range []struct {
 		name      string
@@ -280,6 +280,56 @@ func TestDiagnoseWithAFederatedTokenNeverBlamesASecret(t *testing.T) {
 				tc.setup(t, e)
 			}
 			r := diagnose(t, e.p, federated)["entra app and credential"]
+			if r.Status != tc.status || !strings.Contains(r.Message, tc.inMessage) || !strings.Contains(r.Fix, tc.inFix) || strings.Contains(r.Fix, "secret") {
+				t.Fatalf("%+v\nwant status %s, message with %q, fix with %q and no secret", r, tc.status, tc.inMessage, tc.inFix)
+			}
+		})
+	}
+}
+
+// With a certificate in place of a secret, no fix talks about a secret, and every failure that
+// means "Entra has no certificate for this key" says how to upload it (ADR-0012 §5).
+func TestDiagnoseWithACertificateSaysHowToUploadIt(t *testing.T) {
+	cert := Diagnosis{TenantSetting: "TENANT_SETTING", ClientIDSetting: "CLIENT_ID_SETTING", CredentialKind: CredentialCertificate, CredentialSetting: "CERT_SETTING"}
+	const upload = "upload the certificate in the file named by CERT_SETTING to the app: openssl x509 -in <that file> -out byward-cert.crt, then az ad app credential reset --id "
+	for _, tc := range []struct {
+		name      string
+		opts      []fakeidp.Option
+		setup     func(*testing.T, *env)
+		status    doctor.Status
+		inMessage string
+		inFix     string
+	}{
+		{name: "a key the app has no certificate for", setup: func(t *testing.T, e *env) {
+			stranger := fakeidp.NewCertificate(t)
+			ca, err := idp.PrivateKeyJWT(stranger.Key, stranger.X509, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			rebuild(t, e, func(c *Config) { c.ClientAuth = ca })
+		}, status: doctor.Fail, inMessage: "Entra does not accept the certificate (AADSTS700027)", inFix: upload},
+		{name: "thumbprint not authorized", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantClientCredentials, &fakeidp.CertificateNotAuthorized)},
+			status: doctor.Fail, inMessage: "Entra does not accept the certificate (AADSTS50012)", inFix: upload},
+		{name: "subject name not authorized", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantClientCredentials, &fakeidp.SubjectNameNotAuthorized)},
+			status: doctor.Fail, inMessage: "Entra does not accept the certificate (AADSTS700030)", inFix: upload},
+		{name: "no thumbprint", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantClientCredentials, &fakeidp.MissingThumbprint)},
+			status: doctor.Fail, inMessage: "without a certificate thumbprint (AADSTS5002723)", inFix: "a byward bug"},
+		{name: "an invalid client secret", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantClientCredentials, &fakeidp.InvalidClientSecret)},
+			status: doctor.Fail, inMessage: "AADSTS7000215", inFix: upload},
+		{name: "an expired client secret", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantClientCredentials, &fakeidp.ExpiredClientSecret)},
+			status: doctor.Fail, inMessage: "AADSTS7000222", inFix: upload},
+		{name: "a failure with an operator hint", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantClientCredentials, &fakeidp.BlockedByConditionalAccess)},
+			status: doctor.Fail, inMessage: "AADSTS53003", inFix: "Conditional Access"},
+		{name: "organizations mode", setup: func(t *testing.T, e *env) {
+			rebuild(t, e, func(c *Config) { c.Tenant, c.AllowedTenants = Organizations, []string{fakeidp.NewGUID()} })
+		}, status: doctor.Skip, inMessage: "not probed", inFix: "--cert lists this certificate, unexpired"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t, Config{}, tc.opts...)
+			if tc.setup != nil {
+				tc.setup(t, e)
+			}
+			r := diagnose(t, e.p, cert)["entra app and credential"]
 			if r.Status != tc.status || !strings.Contains(r.Message, tc.inMessage) || !strings.Contains(r.Fix, tc.inFix) || strings.Contains(r.Fix, "secret") {
 				t.Fatalf("%+v\nwant status %s, message with %q, fix with %q and no secret", r, tc.status, tc.inMessage, tc.inFix)
 			}

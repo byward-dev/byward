@@ -114,3 +114,21 @@ func SecretExpiry(setting string, expires, now time.Time) Result {
 	}
 	return r
 }
+
+// CertificateExpiry is the client certificate's lifetime check (ADR-0012 §5, §10), from its own
+// end date: a warning within secretWarnBefore, a failure once it has passed. setting names the file.
+func CertificateExpiry(setting string, notAfter, now time.Time) Result {
+	r := Result{Class: ClassIdP, Name: "client certificate expiry"}
+	left := notAfter.Sub(now)
+	switch {
+	case left <= 0:
+		r.Status, r.Message = Fail, "the client certificate expired on "+notAfter.Format(time.DateOnly)+"; every sign-in and refresh fails"
+		r.Fix = "make and upload a new certificate, then restart the proxy with it in " + setting + " (docs/how-to/entra-certificate.md)"
+	case left <= secretWarnBefore:
+		r.Status, r.Message = Warn, fmt.Sprintf("the client certificate expires on %s, in %d days", notAfter.Format(time.DateOnly), int(left.Hours()/24))
+		r.Fix = "make and upload a new certificate before then, and restart the proxy with it in " + setting + " (docs/how-to/entra-certificate.md)"
+	default:
+		r.Status, r.Message = Pass, "the client certificate is valid until "+notAfter.Format(time.DateOnly)
+	}
+	return r
+}

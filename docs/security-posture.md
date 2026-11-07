@@ -33,6 +33,10 @@ OpenID Connect IdP ([OIDC how-to](how-to/oidc.md)), one per proxy.
   they are off. They are safe only when the upstream is reachable through the proxy alone; the
   proxy cannot enforce that, and `doctor` only hints at it
   ([plain identity headers](how-to/plain-identity-headers.md)).
+- The proxy's own Entra credential is exactly one of a certificate (recommended, ADR-0012 §5: an
+  RSA key of 2048 bits or more that never leaves the proxy, `PS256` with `x5t#S256`), a federated
+  token file or a client secret, each from a file the secret-file check guards; a certificate's end
+  date is checked at startup and by `doctor` ([certificate how-to](how-to/entra-certificate.md)).
 - An HTTP upstream that needs the proxy's own credential, such as an API key, gets the operator's
   value from a secret file, in a header the assertion does not use. A client cannot supply it, byward
   never sends it to a client, and it is never logged ([upstream credential](how-to/upstream-credential.md)).
@@ -261,7 +265,6 @@ the client and redirect URI again. This is accepted behaviour, not a gap: no tok
 | ASVS 5.0.0 10.7.3 (user review and revocation of granted access) | Not met for users. The design leaves it to the operator (`byward revoke-user`, `byward revoke-all`) until a v0.2 "connected apps" page. | ADR-0010 §11; v0.2 |
 | Consent answer table is per replica, in memory, capped at 10,000 | Double-submit protection holds within one process. A full table forgets the newest flow. It matters only with several replicas, which need v0.2's PostgreSQL. | No issue (`internal/broker/answers.go`) |
 | Refresh drops the IdP's new tokens when sealing them fails | Kept when the gate cannot decide or the store fails to rotate (#92); a sealing failure leaves nothing safe to store. Fails closed: an unneeded sign-in with IdPs that revoke rotated refresh tokens. Entra is not affected. | `internal/broker/refresh.go` |
-| Entra certificate credential | `private_key_jwt` exists in `internal/idp`, but no setting selects it; only a client secret is configurable | ADR-0012 §5 |
 
 ## Dependencies and supply chain
 

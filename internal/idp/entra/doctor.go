@@ -15,11 +15,12 @@ import (
 
 // Diagnosis is what Diagnose needs besides the adapter's own configuration.
 type Diagnosis struct {
-	// TenantSetting, ClientIDSetting and SecretSetting name the settings, for the fixes.
-	TenantSetting, ClientIDSetting, SecretSetting string
-	// FederatedTokenSetting names the federated token file when it replaces the secret (ADR-0012
-	// §5); SecretSetting is then "".
-	FederatedTokenSetting string
+	// TenantSetting and ClientIDSetting name the settings, for the fixes.
+	TenantSetting, ClientIDSetting string
+	// CredentialKind is the app's credential, CredentialSecret, CredentialFederated or
+	// CredentialCertificate (ADR-0012 §5), and CredentialSetting the setting naming its file. Every
+	// fix about a credential is chosen by the kind, so none is about another kind's.
+	CredentialKind, CredentialSetting string
 	// GateRoles are the access gate's app roles, which the app registration must define.
 	GateRoles []string
 	// AppRoles are the app gate's roles when app-only tokens are on (ADR-0022), else nil; the
@@ -35,6 +36,10 @@ const (
 	codeInvalidSecret     = 7000215 // invalid client secret
 	codeExpiredSecret     = 7000222 // InvalidClientSecretExpiredKeysProvided
 	codeAppNotAssigned    = 501051  // the app holds no role on a resource that requires assignment
+	codeBadAssertion      = 700027  // "Client assertion failed signature validation"
+	codeAuthFailed        = 50012   // AuthenticationFailed, e.g. "Thumbprint of the signing certificate isn't authorized"
+	codeSubjectNameCert   = 700030  // "Invalid certificate - subject name in certificate isn't authorized"
+	codeNoThumbprint      = 5002723 // a client assertion without a thumbprint (ADR-0012, real tenant)
 	appIDURIPrefix        = "api://"
 	defaultScopeSuffix    = "/.default"
 	accessTokenVersionFix = "set api.requestedAccessTokenVersion to 2 on the app registration (docs/how-to/quickstart-entra.md step 1.2)"
@@ -100,8 +105,11 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 		// Microsoft documents the client-credentials tenant only "in GUID or domain-name format",
 		// and organizations mode has no home tenant setting to send instead.
 		list := "az ad app credential list --id %s lists an unexpired credential"
-		if d.FederatedTokenSetting != "" {
+		switch d.CredentialKind {
+		case CredentialFederated:
 			list = "az ad app federated-credential list --id %s lists one matching the token's issuer, subject and audience"
+		case CredentialCertificate:
+			list = "az ad app credential list --id %s --cert lists this certificate, unexpired"
 		}
 		return []doctor.Result{result(name, doctor.Skip, "not probed: client credentials need the app's home tenant, and organizations mode names none",
 				fmt.Sprintf("check by hand: "+list+", and az ad app show --id %s --query api.requestedAccessTokenVersion is 2", p.cfg.ClientID, p.cfg.ClientID))},
@@ -129,13 +137,13 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 		return []doctor.Result{result(name, doctor.Fail, "Entra has no app "+p.cfg.ClientID+" in tenant "+p.cfg.Tenant+" ("+code+")",
 			"set "+d.ClientIDSetting+" to the app registration's Application (client) ID, and "+d.TenantSetting+" to the tenant it is registered in")}, nil
 	case codeInvalidSecret:
-		if d.FederatedTokenSetting != "" {
-			break // no secret: the general fix below names the federated token
+		if d.CredentialKind != CredentialSecret {
+			break // no secret: the fix below names the credential there is
 		}
 		return []doctor.Result{result(name, doctor.Fail, "Entra rejected the client secret ("+code+")",
-			"the file named by "+d.SecretSetting+" must hold the secret's value, not its ID; create a new one: az ad app credential reset --id "+p.cfg.ClientID+" --append --display-name byward --years 1 --query password -o tsv")}, nil
+			"the file named by "+d.CredentialSetting+" must hold the secret's value, not its ID; create a new one: az ad app credential reset --id "+p.cfg.ClientID+" --append --display-name byward --years 1 --query password -o tsv")}, nil
 	case codeExpiredSecret:
-		if d.FederatedTokenSetting != "" {
+		if d.CredentialKind != CredentialSecret {
 			break
 		}
 		return []doctor.Result{result(name, doctor.Fail, "the client secret has expired ("+code+")",
@@ -144,10 +152,22 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 		return []doctor.Result{result(name, doctor.Fail, "Entra has no resource "+resource+" in tenant "+p.cfg.Tenant+" ("+code+"): the Application ID URI is not set, or the app has no service principal",
 			"set the Application ID URI to "+resource+" (docs/how-to/quickstart-entra.md step 1.2) and create the service principal: az ad sp create --id "+p.cfg.ClientID)}, nil
 	}
+	if d.CredentialKind == CredentialCertificate {
+		switch ie.Code {
+		case codeBadAssertion, codeAuthFailed, codeSubjectNameCert:
+			return []doctor.Result{result(name, doctor.Fail, "Entra does not accept the certificate ("+code+"): the app has no certificate for this key", p.uploadFix(d))}, nil
+		case codeNoThumbprint:
+			return []doctor.Result{result(name, doctor.Fail, "Entra got a client assertion without a certificate thumbprint ("+code+")",
+				"a byward bug: it always sends x5t#S256; please report it with the byward version")}, nil
+		}
+	}
 	if errors.Is(ie.Err, idp.ErrCredential) { // never sent: the credential itself is unusable
-		fix := "the file named by " + d.SecretSetting + " must hold the client secret's value"
-		if d.FederatedTokenSetting != "" {
-			fix = "the file named by " + d.FederatedTokenSetting + " must exist, be readable by the proxy and hold the current token (whatever writes it, such as GitHub Actions or AKS workload identity, renews it in place)"
+		fix := "the file named by " + d.CredentialSetting + " must hold the client secret's value"
+		switch d.CredentialKind {
+		case CredentialFederated:
+			fix = "the file named by " + d.CredentialSetting + " must exist, be readable by the proxy and hold the current token (whatever writes it, such as GitHub Actions or AKS workload identity, renews it in place)"
+		case CredentialCertificate:
+			fix = "the file named by " + d.CredentialSetting + " must hold the private key and its certificate (docs/how-to/entra-certificate.md)"
 		}
 		return []doctor.Result{result(name, doctor.Fail, "the client-credentials probe was not sent: "+ie.Err.Error(), fix)}, nil
 	}
@@ -162,16 +182,18 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 		return []doctor.Result{result(name, doctor.Fail, msg, reachFix)}, nil
 	}
 	fix := ie.OperatorHint
-	if d.FederatedTokenSetting != "" && (ie.Code == codeInvalidSecret || ie.Code == codeExpiredSecret) {
+	if d.CredentialKind != CredentialSecret && (ie.Code == codeInvalidSecret || ie.Code == codeExpiredSecret) {
 		fix = "" // those hints are about a secret, and there is none
 	}
 	switch {
 	case fix != "":
-	case d.FederatedTokenSetting != "":
+	case d.CredentialKind == CredentialCertificate:
+		fix = "if the app has no certificate for this key, " + p.uploadFix(d) + "; otherwise look up " + code + " in https://learn.microsoft.com/entra/identity-platform/reference-error-codes"
+	case d.CredentialKind == CredentialFederated:
 		// Microsoft's error reference lists no code for a federated credential that does not match,
 		// so the fix says what must match.
 		fix = fmt.Sprintf("the token in the file named by %s must match one of the app's federated identity credentials exactly: issuer, subject and audience (az ad app federated-credential list --id %s), and must not have expired; look up %s in https://learn.microsoft.com/entra/identity-platform/reference-error-codes",
-			d.FederatedTokenSetting, p.cfg.ClientID, code)
+			d.CredentialSetting, p.cfg.ClientID, code)
 	default:
 		fix = "look up " + code + " in Microsoft's error code reference: https://learn.microsoft.com/entra/identity-platform/reference-error-codes"
 	}
@@ -218,4 +240,10 @@ func (p *Provider) manualChecks(d Diagnosis) []doctor.Result {
 		roles += "; app roles for app-only callers, with Application among their members: " + strings.Join(d.AppRoles, ", ")
 	}
 	return append(out, result("entra app roles", doctor.Skip, noGraph, roles))
+}
+
+// uploadFix uploads the public certificate from the file named by the certificate setting.
+func (p *Provider) uploadFix(d Diagnosis) string {
+	return fmt.Sprintf("upload the certificate in the file named by %s to the app: openssl x509 -in <that file> -out byward-cert.crt, then az ad app credential reset --id %s --append --display-name byward --cert @byward-cert.crt (docs/how-to/entra-certificate.md)",
+		d.CredentialSetting, p.cfg.ClientID)
 }

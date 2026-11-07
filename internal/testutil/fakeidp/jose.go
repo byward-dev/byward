@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"math/big"
@@ -257,4 +258,53 @@ func numericDate(v any) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return time.Unix(int64(f), 0), true
+}
+
+// NewCertificateUntil is NewCertificate with a certificate valid until notAfter (in the past for an
+// expired one), and for 400 days before it.
+func NewCertificateUntil(t testing.TB, notAfter time.Time) *Certificate {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(selfSignedDER(t, key, notAfter))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Certificate{Key: key, X509: cert}
+}
+
+// PEM is the key (PKCS#8) and the certificate in one PEM file, as byward's Entra certificate
+// credential reads them.
+func (c *Certificate) PEM(t testing.TB) []byte {
+	t.Helper()
+	return append(PrivateKeyPEM(t, c.Key), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.X509.Raw})...)
+}
+
+// SelfSignedPEM is a self-signed certificate for key (of any type), valid until notAfter and for 400
+// days before it, as a PEM block.
+func SelfSignedPEM(t testing.TB, key crypto.Signer, notAfter time.Time) []byte {
+	t.Helper()
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: selfSignedDER(t, key, notAfter)})
+}
+
+// PrivateKeyPEM is key as a PKCS#8 PEM block.
+func PrivateKeyPEM(t testing.TB, key crypto.Signer) []byte {
+	t.Helper()
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+}
+
+func selfSignedDER(t testing.TB, key crypto.Signer, notAfter time.Time) []byte {
+	t.Helper()
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "byward-test"}, NotBefore: notAfter.Add(-400 * 24 * time.Hour), NotAfter: notAfter}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return der
 }
