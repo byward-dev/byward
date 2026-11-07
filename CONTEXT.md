@@ -74,6 +74,10 @@ _Avoid_: forwarded token, identity header (alone), passthrough
 The opt-in `X-Byward-*` headers that repeat the **identity assertion**'s values, unsigned, for an HTTP **upstream** that cannot verify a JWT; safe only when the upstream is reachable through the proxy alone (ADR-0016 §5).
 _Avoid_: identity header (alone), trusted headers, forwarded user
 
+**App-only token**:
+An **IdP token** that a headless caller (CI job, managed identity, agent) got with its own credential, with no **user** behind it, and sends the MCP endpoint instead of a **proxy token**; accepted only from Entra, opt-in, with a required app role (ADR-0022). Its caller is a client principal.
+_Avoid_: service token, machine token, M2M token (alone)
+
 **Upstream credential**:
 The operator's own header value (e.g. an API key) the proxy sends an HTTP **upstream** on every request, read from a secret file, in a header the **identity assertion** does not use; never a **user**'s or **MCP client**'s token (ADR-0016 §7).
 _Avoid_: upstream token, service token, passthrough

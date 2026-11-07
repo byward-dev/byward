@@ -60,7 +60,7 @@ func write(dir string) error {
 	if err != nil {
 		return err
 	}
-	id := resource.Identity{Subject: subject, ClientID: clientID, Roles: []string{"byward.user"}}
+	id := resource.Identity{Subject: subject, ClientID: clientID, PrincipalType: resource.PrincipalUser, Roles: []string{"byward.user"}}
 	mint := func(k *assertion.Keys, aud string, now time.Time) (string, error) {
 		m, err := assertion.NewMinter(k, issuer, aud, func() time.Time { return now })
 		if err != nil {

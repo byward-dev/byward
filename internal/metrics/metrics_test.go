@@ -37,6 +37,7 @@ func exercise(m *Metrics) {
 	m.CIMDFetch("ok")
 	m.DCRRegistration("registered")
 	m.Consent("verified", "remembered")
+	m.AppToken("accepted")
 }
 
 // Every family except the Go runtime's own collectors: a metric with the wrong prefix must reach the
@@ -122,4 +123,5 @@ func TestNilMetricsIsSafeToCall(t *testing.T) {
 	m.CIMDFetch("ok")
 	m.DCRRegistration("registered")
 	m.Consent("verified", "remembered")
+	m.AppToken("accepted")
 }

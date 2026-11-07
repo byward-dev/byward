@@ -19,6 +19,7 @@ there.
 |---|---|---|
 | `X-Byward-Subject` | the user key, `tid:oid` for Entra (the assertion's `sub`) | always |
 | `X-Byward-Client-Id` | the MCP client (`client_id`) | always |
+| `X-Byward-Principal-Type` | `user`, or `client` for a headless caller with an [app-only token](app-tokens.md) (`principal_type`); check it before treating the subject as a person | always |
 | `X-Byward-Roles` | the user's app roles | with `roles` in `BYWARD_ASSERTION_CLAIMS` (the default) |
 | `X-Byward-Groups` | the user's group IDs | with `groups` |
 | `X-Byward-Email` | the user's email | with `email`, when the IdP verified it or `BYWARD_ASSERTION_UNVERIFIED_EMAIL` is `true` |

@@ -1,3 +1,4 @@
+byward_app_tokens_total counter
 byward_audit_events_total counter
 byward_build_info gauge
 byward_cimd_fetches_total counter

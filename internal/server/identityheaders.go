@@ -44,6 +44,7 @@ func setIdentityHeaders(ctx context.Context, h http.Header) {
 	}
 	one(config.HeaderSubject, id.Subject)
 	one(config.HeaderClientID, id.ClientID)
+	one(config.HeaderPrincipalType, id.PrincipalType)
 	list(config.HeaderRoles, id.Roles)
 	list(config.HeaderGroups, id.Groups)
 	one(config.HeaderEmail, id.Email)

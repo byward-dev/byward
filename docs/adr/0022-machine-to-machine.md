@@ -95,3 +95,20 @@ design in this ADR is unchanged. The exceptions:
 - Decision 6 (`init entra`'s app role, `idtyp` claim and assignment required) can already ship in
   v0.1, since it is harmless without Decision 1.
 - The later work in Decision 10 moves to a release after v0.2.
+
+## Amendment 2026-11-07 (#64, implementation)
+
+- **Principal key (§5):** an app-only caller's `sub`, `user_key`, `BYWARD_SUBJECT` and `revoke-user`
+  key are `tid:oid` of its service principal, shaped like an Entra user key, not the bare `oid`. The
+  assertion and stdio carry `principal_type` / `BYWARD_PRINCIPAL_TYPE` (ADR-0016 amendment), and MCP
+  sessions and stdio processes are keyed by the principal type too, so a user and an app never share
+  one. `revoke-user <tid:oid>` cuts an app off at once: tokens issued before it are refused.
+- **Checks (§3):** `iat` is checked with the leeway as well; `sub` must equal `oid`, and `oid` and
+  `azp` must be GUIDs.
+- **Gate (§4):** `BYWARD_APP_ROLES` (required) and `BYWARD_APP_CLIENT_IDS` (`azp`); `BYWARD_GATE_TENANTS`
+  applies too. A refusal is `403 insufficient_scope` (ADR-0014 amendment 2026-11-07).
+- **Audit (§7):** `app_token_accepted` once per token (Entra's `uti`, at most 10,000 tracked; while
+  that many are, each use of an untracked token is recorded), `app_token_rejected` with its reason, and
+  `byward_app_tokens_total{outcome}`.
+- Claude Code (docs, 2026-11-07) re-runs `headersHelper` and retries once when a tool call gets 401
+  or 403; a credential refused at connect fails the connection, as the 2.1.142 run above observed.

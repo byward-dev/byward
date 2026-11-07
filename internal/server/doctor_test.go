@@ -68,6 +68,9 @@ func TestCheckOfflineFindsWhatStartupWould(t *testing.T) {
 			}
 			return env
 		}, "BYWARD_ENTRA_CLIENT_SECRET_FILE: secret file"},
+		{"an app-only caller allowlist entry that is not a GUID", func(_ *testing.T, env []string) []string {
+			return append(env, "BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=byward.app", "BYWARD_APP_CLIENT_IDS=my-app")
+		}, `BYWARD_APP_CLIENT_IDS: "my-app" is not a GUID`},
 		{"counter file in a directory that does not exist", func(t *testing.T, env []string) []string {
 			return append(env, "BYWARD_STORE_COUNTER_FILE="+filepath.Join(t.TempDir(), "missing", "store-writes"))
 		}, "BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: sqlite store: the counter file's directory"},
@@ -146,6 +149,14 @@ func (r running) doctor(t *testing.T) map[string]doctor.Result {
 		out[c.Name] = c
 	}
 	return out
+}
+
+// With app-only tokens on, doctor's hand check of the app roles names the app gate's roles too.
+func TestDoctorNamesTheAppRolesWhenAppOnlyTokensAreOn(t *testing.T) {
+	r := runProxy(t, "BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=byward.app")
+	if got := r.doctor(t)["entra app roles"]; !strings.Contains(got.Fix, "with Application among their members: byward.app") {
+		t.Fatalf("entra app roles: %+v", got)
+	}
 }
 
 // The self-probe and the proxy agree: every proxy check passes against the real handler.

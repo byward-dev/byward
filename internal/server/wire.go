@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/byward-dev/byward/internal/apptoken"
 	"github.com/byward-dev/byward/internal/assertion"
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/broker"
@@ -63,7 +64,7 @@ type pinger interface{ Ping(context.Context) error }
 // store. Errors name the file or setting at fault.
 func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, err error) {
 	logPaths(cfg, log)
-	parts, err := loadAuthParts(cfg, nil)
+	parts, err := loadAuthParts(cfg, idpHTTPClient)
 	if err != nil {
 		return nil, err
 	}
@@ -116,10 +117,18 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	if err := deny.Sync(syncCtx); err != nil {
 		return nil, fmt.Errorf("loading the revocation list: %w", err)
 	}
-	v, err := token.NewValidator(sealer, deny, nil)
+	sealed, err := token.NewValidator(sealer, deny, nil)
 	if err != nil {
 		return nil, err
 	}
+	var app resource.Validator // nil: app-only tokens off, so a JWT reaches no validator
+	if parts.appGate != nil {
+		if app, err = appValidator(parts, deny, o); err != nil {
+			return nil, err
+		}
+		log.Info("app-only tokens", "reason", "accepting Entra app-only tokens with app roles "+strings.Join(cfg.AppRoles, ", ")+" (ADR-0022)")
+	}
+	v := resource.Dispatch(token.Prefix, sealed, app)
 	log.Info("broker ready", "reason", "keys "+fmt.Sprint(len(ring.KeyIDs()))+", signing with "+ring.SigningKeyID()+"")
 	a := &auth{register: b.Register, validator: v, checks: readiness(ring, st), background: func(ctx context.Context) { runBackground(ctx, st, deny, log) }, closeStore: st.Close,
 		sessions: func(next http.Handler) http.Handler {
@@ -191,6 +200,8 @@ type authParts struct {
 	assertionKeys *assertion.Keys
 	idp           *identityProvider
 	gate          *gate.Gate
+	// appGate admits app-only callers; nil while BYWARD_APP_TOKENS is off.
+	appGate *gate.AppGate
 	// warnings are logged at every start and reported by check and doctor.
 	warnings []Warning
 }
@@ -285,6 +296,14 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 	if cfg.UpstreamCommand == nil { // a stdio upstream gets no assertion and no email (ADR-0016 §6)
 		p.warnings = append(p.warnings, emailWarnings(cfg, p.idp.gateIdP == gate.Entra)...)
 	}
+	if cfg.AppTokens == "entra" {
+		if p.idp.appTokens == nil {
+			return nil, errors.New("BYWARD_APP_TOKENS=entra needs BYWARD_IDP=entra")
+		}
+		if p.appGate, err = gate.NewApp(gate.AppRules{Roles: cfg.AppRoles, ClientIDs: cfg.AppClientIDs, Tenants: cfg.GateTenants}); err != nil {
+			return nil, gateError(err)
+		}
+	}
 	if cfg.ScopeDescription == "" {
 		p.warnings = append(p.warnings, Warning{Message: "consent page uses generic wording", Setting: "BYWARD_SCOPE_DESCRIPTION",
 			Fix: "set it to say in plain words what the " + cfg.Scope + " scope lets an app do (ADR-0010 §4)"})
@@ -368,14 +387,30 @@ func readiness(ring *token.KeyRing, st pinger) []health.Check {
 	return append(checks, health.Check{Name: "store", Ready: st.Ping})
 }
 
-// signedInUser is the access token's subject, which Guard attached to the request.
+// appValidator is the app-only path (ADR-0022): the IdP adapter's verifier, the app gate on every
+// request, and revoke-user's cut-offs.
+func appValidator(parts *authParts, deny *denylist.List, o Observability) (resource.Validator, error) {
+	return apptoken.New(apptoken.Config{Verifier: parts.idp.appTokens, Gate: parts.appGate, Deny: deny, IdP: parts.idp.name, Count: o.Metrics.AppToken, Now: time.Now})
+}
+
+// signedInUser is the subject Guard attached to the request, which MCP sessions are bound to. Any
+// principal other than a user is marked with its type, so a user's session is never an app's
+// (invariant 13); users' keys stay as they were.
 func signedInUser(r *http.Request) (string, bool) {
 	id, ok := resource.IdentityFrom(r.Context())
-	return id.Subject, ok && id.Subject != ""
+	ok = ok && id.Subject != ""
+	if id.PrincipalType != resource.PrincipalUser && id.PrincipalType != "" {
+		return id.PrincipalType + ":" + id.Subject, ok
+	}
+	return id.Subject, ok
 }
 
 // newCIMDRegistry is registration.NewCIMDRegistry; tests replace it to see the wired host lists.
 var newCIMDRegistry = registration.NewCIMDRegistry
+
+// idpHTTPClient reaches the IdP for the serving proxy; nil is the default client. Tests point it at
+// a fake IdP.
+var idpHTTPClient *http.Client
 
 // newBroker is broker.New; tests replace it to see the wired configuration.
 var newBroker = broker.New
@@ -422,6 +457,8 @@ var gateSettings = map[string]string{
 	gate.FieldEmailDomains:  config.Setting{Name: "gate-email-domains"}.Env(),
 	gate.FieldHostedDomains: config.Setting{Name: "gate-hosted-domains"}.Env(),
 	gate.FieldAllowEmpty:    config.Setting{Name: "gate-allow-empty"}.Env(),
+	gate.FieldAppRoles:      config.Setting{Name: "app-roles"}.Env(),
+	gate.FieldAppClientIDs:  config.Setting{Name: "app-client-ids"}.Env(),
 }
 
 // gateError names the setting at fault for each invalid gate rule list.

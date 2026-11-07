@@ -39,6 +39,7 @@ The process does **not** inherit the proxy's environment. It gets only:
 | `PATH`, `HOME`, `USER`, `LOGNAME`, `TMPDIR`, `TZ`, `LANG`, `LC_ALL`, `LC_CTYPE`, `LC_MESSAGES` | the proxy's environment, if set |
 | your variables | `BYWARD_UPSTREAM_ENV_FILE` (below) |
 | `BYWARD_SUBJECT`, `BYWARD_ISSUER` | the proxy: the signed-in user's key (`tid:oid` for Entra) and the proxy's issuer URL |
+| `BYWARD_PRINCIPAL_TYPE` | the proxy: `user`, or `client` for a headless caller with an [app-only token](app-tokens.md), whose `BYWARD_SUBJECT` is its service principal's `tid:oid`; absent without authentication |
 
 So no `BYWARD_*` setting, sealing key or cloud credential of the proxy reaches the upstream. The
 user's identity is never in the arguments, and no token ever reaches the process: it acts as your
