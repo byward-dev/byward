@@ -81,7 +81,7 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_scope", "the requested scope exceeds the grant"})
 		return
 	}
-	sealed, asserted, e, ok := b.refreshIdP(r, g, now)
+	sealed, asserted, idpExpiry, e, ok := b.refreshIdP(r, g, now)
 	if !ok {
 		if sealed != nil {
 			b.keepIdPTokens(r, g.ID, sealed)
@@ -109,28 +109,24 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b.recordUse(ctx, client, now)
-	b.issue(w, r, client.ID(), g.ID, g.Subject, asserted, now, g.ExpiresAt, scopes, next)
+	b.issue(w, r, client.ID(), g.ID, g.Subject, asserted, idpExpiry, now, g.ExpiresAt, scopes, next)
 }
 
 // refreshIdP renews the grant's IdP tokens and re-checks the user (ADR-0006 §6, ADR-0012). It
 // returns the new sealed IdP tokens, or the error to send; when the IdP says the user must sign in
 // again, or the identity no longer matches or passes the gate, the grant is revoked. When the gate
 // cannot decide, it returns the error together with the sealed new tokens, for the caller to keep.
-func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]byte, assertedClaims, tokenError, bool) {
+func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]byte, assertedClaims, time.Time, tokenError, bool) {
 	ctx := r.Context()
 	signInAgain := tokenError{http.StatusBadRequest, "invalid_grant", "sign in again"}
-	end := func(why, hint string) ([]byte, assertedClaims, tokenError, bool) {
+	end := func(why, hint string) ([]byte, assertedClaims, time.Time, tokenError, bool) {
 		b.revoke(r, g.ClientID, g.ID, now, why)
 		if hint != "" {
 			b.cfg.Log.WarnContext(ctx, why, "request_id", logging.RequestID(ctx), "idp", b.cfg.IdPName, "reason", hint)
 		}
-		return nil, assertedClaims{}, signInAgain, false
+		return nil, assertedClaims{}, time.Time{}, signInAgain, false
 	}
-	plain, err := b.cfg.IdPTokenBox.Open(string(g.IdPTokens))
-	var held grantSecrets
-	if err == nil {
-		held, err = unmarshalSecrets(plain)
-	}
+	held, err := b.openSecrets(g.IdPTokens)
 	old := held.Tokens
 	if err != nil || old.RefreshToken == "" {
 		return end("the grant holds no usable IdP refresh token; grant revoked", "")
@@ -145,10 +141,10 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 			return end("the IdP ended the session; grant revoked", ie.OperatorHint)
 		case errors.As(err, &ie) && ie.Class == idp.Unavailable:
 			b.cfg.Log.WarnContext(ctx, "IdP refresh unavailable", "request_id", logging.RequestID(ctx), "error", err, "reason", ie.OperatorHint)
-			return nil, assertedClaims{}, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the identity provider is unavailable; try again"}, false
+			return nil, assertedClaims{}, time.Time{}, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the identity provider is unavailable; try again"}, false
 		default:
 			b.cfg.Log.ErrorContext(ctx, "IdP refresh failed", "request_id", logging.RequestID(ctx), "error", err)
-			return nil, assertedClaims{}, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not refresh the sign-in"}, false
+			return nil, assertedClaims{}, time.Time{}, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not refresh the sign-in"}, false
 		}
 	}
 	switch {
@@ -172,7 +168,7 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 			b.cfg.Log.ErrorContext(ctx, "the access gate could not decide on refresh", "request_id", logging.RequestID(ctx), "error", err)
 			// The claims stay as they were: the gate has not approved the new identity.
 			sealed, _ := b.sealIdPTokens(ctx, g, fresh, held.Claims) // nil when sealing fails: nothing to keep
-			return sealed, assertedClaims{}, failed, false
+			return sealed, assertedClaims{}, time.Time{}, failed, false
 		}
 		b.cfg.Audit.Record(r, audit.Event{Name: audit.AccessDenied, Outcome: audit.Failure, Reason: d.DeniedRule(),
 			ClientID: g.ClientID, UserKey: id.Subject, IdP: b.cfg.IdPName, GrantID: g.ID})
@@ -183,9 +179,9 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 	if err != nil {
 		// The IdP's new tokens are lost: nothing safe is left to store. With an IdP whose refresh
 		// tokens are single use, the next refresh fails and the user signs in again (#92).
-		return nil, assertedClaims{}, failed, false
+		return nil, assertedClaims{}, time.Time{}, failed, false
 	}
-	return sealed, asserted, tokenError{}, true
+	return sealed, asserted, fresh.Expiry, tokenError{}, true
 }
 
 // sealIdPTokens seals the grant's IdP tokens and the claims to assert for the store (ADR-0006 §8),

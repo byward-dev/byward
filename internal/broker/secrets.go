@@ -22,6 +22,15 @@ func marshalSecrets(t idp.Tokens, c assertedClaims) []byte {
 	return b
 }
 
+// openSecrets opens the grant's sealed IdP tokens and asserted claims.
+func (b *Broker) openSecrets(sealed []byte) (grantSecrets, error) {
+	plain, err := b.cfg.IdPTokenBox.Open(string(sealed))
+	if err != nil {
+		return grantSecrets{}, err
+	}
+	return unmarshalSecrets(plain)
+}
+
 var errSecrets = errors.New("broker: the grant's IdP-token blob is unreadable")
 
 func unmarshalSecrets(plain []byte) (grantSecrets, error) {

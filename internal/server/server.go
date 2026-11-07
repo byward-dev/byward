@@ -115,10 +115,11 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 		return nil, err
 	}
 	var minter *assertion.Minter
+	var down *downstreamTokens
 	if a != nil {
-		minter = a.minter
+		minter, down = a.minter, a.downstream
 	}
-	up, err := newUpstream(cfg, log, o, minter)
+	up, err := newUpstream(cfg, log, o, minter, down)
 	if err != nil {
 		if a != nil {
 			_ = a.closeStore()

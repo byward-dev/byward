@@ -54,7 +54,9 @@ type auth struct {
 	sessions func(http.Handler) http.Handler
 	// minter signs the identity assertion and jwks serves its keys; both nil for a stdio upstream.
 	minter *assertion.Minter
-	jwks   http.Handler
+	// downstream is On-Behalf-Of for the HTTP upstream (ADR-0017); nil when it is off.
+	downstream *downstreamTokens
+	jwks       http.Handler
 }
 
 // pinger is a store that can say whether it is reachable, for readiness.
@@ -105,7 +107,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	b, err := newBroker(broker.Config{Issuer: cfg.Issuer(), Origin: cfg.Origin(), Resource: cfg.PublicURL, Scope: cfg.Scope,
 		IdPName: ip.name, IdPLabel: ip.label, IdPScopes: ip.scope, IdP: ip.adapter, Clients: clients, CIMD: cfg.CIMD, Registrar: registrar, ObserveRegistration: o.Metrics.DCRRegistration,
 		Store: st, Sealer: sealer, LoginBox: parts.loginBox, IdPTokenBox: parts.idpBox, ConsentBox: parts.consentBox, ConsentHintBox: parts.hintBox, ObserveConsent: o.Metrics.Consent, Gate: g,
-		UpstreamName: cfg.ResourceName, ScopeText: cfg.ScopeDescription, OperatorName: cfg.OperatorName,
+		UpstreamName: cfg.ResourceName, ScopeText: cfg.ScopeDescription, OperatorName: cfg.OperatorName, CapAccessToIdPToken: len(cfg.OBOScopes) > 0,
 		SecureCookies: cfg.PublicURL.Scheme == "https", Log: log,
 		Audit: o.Audit, Limiter: ratelimit.New(cfg.OAuthRateLimits, maxRateLimitKeys, time.Now, o.Metrics.RateLimited),
 		ObserveIdP:   func(op, outcome string, d time.Duration) { o.Metrics.IdP(ip.name, op, outcome, d) },
@@ -149,6 +151,12 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	if cfg.IdentityHeaders && a.minter != nil {
 		log.Warn("plain identity headers are on", "setting", "BYWARD_IDENTITY_HEADERS",
 			"reason", "the upstream gets the user in X-Byward-* headers as well as the assertion; that is safe only when it is reachable through this proxy alone (docs/how-to/plain-identity-headers.md)")
+	}
+	if len(cfg.OBOScopes) > 0 {
+		// config refuses On-Behalf-Of with any IdP but Entra, so ip.entra is set.
+		a.downstream = newDownstreamTokens(cfg.OBOScopes, cfg.OBOHeader, ip.entra, ip.name, b.IdPAccessToken, log, o)
+		log.Info("On-Behalf-Of", "reason", "downstream API "+a.downstream.resource+"; access tokens are capped at the stored IdP token's expiry",
+			"setting", "BYWARD_OBO_HEADER", "value", cfg.OBOHeader)
 	}
 	return a, nil
 }
