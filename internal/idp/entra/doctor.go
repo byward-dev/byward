@@ -17,6 +17,9 @@ import (
 type Diagnosis struct {
 	// TenantSetting, ClientIDSetting and SecretSetting name the settings, for the fixes.
 	TenantSetting, ClientIDSetting, SecretSetting string
+	// FederatedTokenSetting names the federated token file when it replaces the secret (ADR-0012
+	// §5); SecretSetting is then "".
+	FederatedTokenSetting string
 	// GateRoles are the access gate's app roles, which the app registration must define.
 	GateRoles []string
 }
@@ -119,6 +122,9 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 		return []doctor.Result{result(name, doctor.Fail, "Entra has no app "+p.cfg.ClientID+" in tenant "+p.cfg.Tenant+" ("+code+")",
 			"set "+d.ClientIDSetting+" to the app registration's Application (client) ID, and "+d.TenantSetting+" to the tenant it is registered in")}, nil
 	case codeInvalidSecret:
+		if d.FederatedTokenSetting != "" {
+			break // not a secret: the general fix below names the federated token
+		}
 		return []doctor.Result{result(name, doctor.Fail, "Entra rejected the client secret ("+code+")",
 			"the file named by "+d.SecretSetting+" must hold the secret's value, not its ID; create a new one: az ad app credential reset --id "+p.cfg.ClientID+" --append --display-name byward --years 1 --query password -o tsv")}, nil
 	case codeExpiredSecret:
@@ -139,7 +145,14 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 		return []doctor.Result{result(name, doctor.Fail, msg, reachFix)}, nil
 	}
 	fix := ie.OperatorHint
-	if fix == "" {
+	switch {
+	case fix != "":
+	case d.FederatedTokenSetting != "":
+		// Microsoft's error reference lists no code for a federated credential that does not match,
+		// so the fix says what must match.
+		fix = fmt.Sprintf("the token in the file named by %s must match one of the app's federated identity credentials exactly: issuer, subject and audience (az ad app federated-credential list --id %s), and must not have expired; look up %s in https://learn.microsoft.com/entra/identity-platform/reference-error-codes",
+			d.FederatedTokenSetting, p.cfg.ClientID, code)
+	default:
 		fix = "look up " + code + " in Microsoft's error code reference: https://learn.microsoft.com/entra/identity-platform/reference-error-codes"
 	}
 	return []doctor.Result{result(name, doctor.Fail, "the client-credentials probe failed ("+code+")", fix)}, nil

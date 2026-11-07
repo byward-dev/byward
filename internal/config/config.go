@@ -46,6 +46,7 @@ var registry = []Setting{
 	{Name: "entra-tenant", Auth: true, Help: "Entra tenant ID (a GUID) of the IdP app"},
 	{Name: "entra-client-id", Auth: true, Help: "application (client) ID of the IdP app registration"},
 	{Name: "entra-client-secret", Auth: true, Secret: true, Help: "client secret of the IdP app"},
+	{Name: "entra-federated-token-file", Auth: true, Help: "instead of a client secret: an absolute path to a file holding a federated token (a JWT from another identity provider, such as GitHub Actions or AKS workload identity) that byward sends Entra as its client assertion, re-reading the file for every token request; the app registration needs a matching federated identity credential (ADR-0012 §5, docs/how-to/real-entra-lane.md)"},
 	{Name: "entra-client-secret-expires-at", Auth: true, Help: "when the client secret expires, as a date (2027-11-06) or an RFC 3339 time; the proxy warns at startup and doctor warns from 30 days before (ADR-0012 §10)"},
 	{Name: "oidc-issuer", Auth: true, Help: "with an oidc IdP: the issuer URL, exactly as its discovery document states it (https); " + defaultIssuersHelp()},
 	{Name: "oidc-client-id", Auth: true, Help: "with an oidc IdP: the client ID of the proxy's app at the IdP"},
@@ -113,6 +114,9 @@ type Config struct {
 	EntraTenant       string
 	EntraClientID     string
 	EntraClientSecret string
+	// EntraFederatedTokenFile replaces the client secret with a federated token, re-read on every
+	// token request (ADR-0012 §5); exactly one of the two is set.
+	EntraFederatedTokenFile string
 	// EntraClientSecretExpiresAt is zero when the operator did not say.
 	EntraClientSecretExpiresAt time.Time
 	// IdP is the IdP adapter: "entra", "oidc" or an OIDC preset (OIDCPresets); it also names the
@@ -431,7 +435,22 @@ func (c *Config) requiredForIdP(v *Values, names ...string) []error {
 // entraIdP reads the Entra settings (ADR-0012).
 func (c *Config) entraIdP(v *Values) []error {
 	c.EntraTenant, c.EntraClientID, c.EntraClientSecret = v.get("entra-tenant"), v.get("entra-client-id"), v.get("entra-client-secret")
-	errs := c.requiredForIdP(v, "entra-tenant", "entra-client-id", "entra-client-secret")
+	c.EntraFederatedTokenFile = v.get("entra-federated-token-file")
+	errs := c.requiredForIdP(v, "entra-tenant", "entra-client-id")
+	secretEnv, tokenEnv := Setting{Name: "entra-client-secret"}.Env()+"_FILE", Setting{Name: "entra-federated-token-file"}.Env()
+	switch {
+	case c.EntraClientSecret == "" && c.EntraFederatedTokenFile == "":
+		errs = append(errs, errorf("%s or %s is required with BYWARD_IDP=%s (or set BYWARD_INSECURE_NO_AUTH to try the proxy without sign-in)", secretEnv, tokenEnv, c.IdP))
+	case c.EntraClientSecret != "" && c.EntraFederatedTokenFile != "":
+		errs = append(errs, errorf("%s and %s are both set: Entra gets one credential, so remove one of them", secretEnv, tokenEnv))
+	case c.EntraFederatedTokenFile != "":
+		if !filepath.IsAbs(c.EntraFederatedTokenFile) {
+			errs = append(errs, errorf("%s: want an absolute path, got %q", tokenEnv, c.EntraFederatedTokenFile))
+		}
+		if v.get("entra-client-secret-expires-at") != "" {
+			errs = append(errs, errorf("%s has no effect with %s: a federated token has no secret to expire; remove it", Setting{Name: "entra-client-secret-expires-at"}.Env(), tokenEnv))
+		}
+	}
 	errs = append(errs, c.secretExpiry(v)...)
 	if t := c.EntraTenant; t != "" && !isGUID(t) {
 		errs = append(errs, errorf("BYWARD_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000, got %q", t))

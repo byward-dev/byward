@@ -1,0 +1,62 @@
+name: real-entra
+
+# Scheduled lane (ADR-0024 §1, §12): byward against the maintainer's real Entra tenant, with no
+# stored secret. GitHub's OIDC token is the CI app's federated credential (ADR-0012 §5). Set up once
+# as docs/how-to/real-entra-lane.md says; it never blocks a pull request.
+on:
+  schedule:
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-entra
+  cancel-in-progress: false
+
+jobs:
+  entra:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The federated credential's subject names this environment, whose deployment branches are main only.
+    environment: real-entra
+    permissions:
+      contents: read
+      id-token: write # this job only: the OIDC token for Entra
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          install_args: go jq
+      - run: mise run test:real-entra
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
+          BYWARD_CI_ENTRA_TENANT: ${{ vars.BYWARD_CI_ENTRA_TENANT }}
+          BYWARD_CI_ENTRA_CLIENT_ID: ${{ vars.BYWARD_CI_ENTRA_CLIENT_ID }}
+
+  # Besides GitHub's mail to whoever last changed the schedule: one issue, labelled real-entra-lane,
+  # opened on the first failure and commented on after that.
+  notify:
+    needs: entra
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create real-entra-lane --color B60205 --description "The scheduled real-Entra lane is failing" 2>/dev/null || true
+          open=$(gh issue list --label real-entra-lane --state open --json number --jq '.[0].number // empty')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body "Failed again: $RUN_URL"
+          else
+            gh issue create --label real-entra-lane --title "The scheduled real-Entra lane is failing" \
+              --body "The real-Entra lane failed: $RUN_URL. See docs/how-to/real-entra-lane.md."
+          fi

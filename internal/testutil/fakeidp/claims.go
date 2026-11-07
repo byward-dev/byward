@@ -189,7 +189,7 @@ func azpacr(method string) string {
 	switch method {
 	case "client_secret_basic", "client_secret_post":
 		return "1"
-	case "private_key_jwt":
+	case "private_key_jwt", "federated": // federated: assumed like a certificate, not verified
 		return "2"
 	}
 	return "0"

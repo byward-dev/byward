@@ -305,6 +305,12 @@ func looseSecretFiles(cfg *config.Config) []error {
 			loose = append(loose, fmt.Errorf("%s: %w", f.From, err))
 		}
 	}
+	// A federated token is a credential too, though it is read at each request, not at start.
+	if f := cfg.EntraFederatedTokenFile; f != "" {
+		if err := check(f); err != nil {
+			loose = append(loose, fmt.Errorf("%s: %w", config.Setting{Name: "entra-federated-token-file"}.Env(), err))
+		}
+	}
 	return loose
 }
 

@@ -30,6 +30,7 @@ Precedence: flag > environment > default. Secrets are read only from files.
 | `--entra-tenant` | `BYWARD_ENTRA_TENANT` | — | Entra tenant ID (a GUID) of the IdP app |
 | `--entra-client-id` | `BYWARD_ENTRA_CLIENT_ID` | — | application (client) ID of the IdP app registration |
 | `--entra-client-secret-file` | `BYWARD_ENTRA_CLIENT_SECRET_FILE` | — | client secret of the IdP app |
+| `--entra-federated-token-file` | `BYWARD_ENTRA_FEDERATED_TOKEN_FILE` | — | instead of a client secret: an absolute path to a file holding a federated token (a JWT from another identity provider, such as GitHub Actions or AKS workload identity) that byward sends Entra as its client assertion, re-reading the file for every token request; the app registration needs a matching federated identity credential (ADR-0012 §5, docs/how-to/real-entra-lane.md) |
 | `--entra-client-secret-expires-at` | `BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT` | — | when the client secret expires, as a date (2027-11-06) or an RFC 3339 time; the proxy warns at startup and doctor warns from 30 days before (ADR-0012 §10) |
 | `--oidc-issuer` | `BYWARD_OIDC_ISSUER` | — | with an oidc IdP: the issuer URL, exactly as its discovery document states it (https); google defaults to https://accounts.google.com |
 | `--oidc-client-id` | `BYWARD_OIDC_CLIENT_ID` | — | with an oidc IdP: the client ID of the proxy's app at the IdP |

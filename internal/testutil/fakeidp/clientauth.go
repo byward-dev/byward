@@ -55,6 +55,14 @@ func (p *IdP) authenticateClient(r *http.Request, tenant string) (Client, string
 		if form.Get("client_assertion_type") != clientAssertionType {
 			return Client{}, "", failure(InvalidRequest)
 		}
+		if len(c.Federated) > 0 {
+			if j, err := parseJWS(assertion); err == nil && j.claims["iss"] != c.ID {
+				if f := p.checkFederatedAssertion(c, j); f != nil {
+					return Client{}, "", f
+				}
+				return c, "federated", nil
+			}
+		}
 		if f := p.checkClientAssertion(c, assertion, tenant); f != nil {
 			return Client{}, "", f
 		}
@@ -151,4 +159,28 @@ func findCert(c Client, thumb func(*Certificate) string, want string) *Certifica
 		}
 	}
 	return nil
+}
+
+// checkFederatedAssertion accepts another issuer's token as the client's assertion when one of its
+// federated identity credentials names that issuer, subject and audience exactly, case-sensitively
+// (Microsoft Learn: "Pattern matching isn't supported"), and the token is signed and current.
+func (p *IdP) checkFederatedAssertion(c Client, j *jws) *Failure {
+	iss, _ := j.claims["iss"].(string)
+	sub, _ := j.claims["sub"].(string)
+	for _, fc := range c.Federated {
+		if fc.Issuer != iss || fc.Subject != sub || !audContains(j.claims["aud"], fc.Audience) {
+			continue
+		}
+		if err := j.verify(&fc.Signer.Key.PublicKey, "RS256"); err != nil {
+			return failure(InvalidClientAssertion)
+		}
+		now := p.cfg.clock()
+		if exp, ok := numericDate(j.claims["exp"]); !ok || !now.Before(exp) {
+			f := InvalidClientAssertion
+			f.Description = "Client assertion has expired."
+			return &f
+		}
+		return nil
+	}
+	return failure(NoMatchingFederatedCredential)
 }

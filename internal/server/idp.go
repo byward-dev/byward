@@ -61,19 +61,24 @@ func newIdentityProvider(cfg *config.Config, idpHTTP *http.Client) (*identityPro
 
 // newEntraIdentityProvider is Entra (ADR-0012), with its own doctor checks and secret-expiry warning.
 func newEntraIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect string) (*identityProvider, error) {
+	auth := idp.ClientSecret(cfg.EntraClientSecret)
+	diag := entra.Diagnosis{TenantSetting: config.Setting{Name: "entra-tenant"}.Env(), ClientIDSetting: config.Setting{Name: "entra-client-id"}.Env(),
+		SecretSetting: config.Setting{Name: "entra-client-secret"}.Env() + "_FILE", GateRoles: cfg.GateRoles}
+	if f := cfg.EntraFederatedTokenFile; f != "" { // ADR-0012 §5: re-read on every request, never cached
+		auth, diag.SecretSetting, diag.FederatedTokenSetting = idp.AssertionFile(f), "", config.Setting{Name: "entra-federated-token-file"}.Env()
+	}
 	p, err := entra.New(entra.Config{Tenant: cfg.EntraTenant, ClientID: cfg.EntraClientID,
-		ClientAuth: idp.ClientSecret(cfg.EntraClientSecret), RedirectURL: redirect, HTTPClient: idpHTTP})
+		ClientAuth: auth, RedirectURL: redirect, HTTPClient: idpHTTP})
 	if err != nil {
 		return nil, fmt.Errorf("entra settings (BYWARD_ENTRA_*): %w", err)
 	}
 	return &identityProvider{name: cfg.IdP, redirect: redirect, label: "Microsoft Entra", adapter: p, scope: p.Scope(), gateIdP: gate.Entra, userKey: entra.UserKey,
 		diagnose: func(ctx context.Context, now time.Time) []doctor.Result {
-			return append(p.Diagnose(ctx, entra.Diagnosis{
-				TenantSetting:   config.Setting{Name: "entra-tenant"}.Env(),
-				ClientIDSetting: config.Setting{Name: "entra-client-id"}.Env(),
-				SecretSetting:   config.Setting{Name: "entra-client-secret"}.Env() + "_FILE",
-				GateRoles:       cfg.GateRoles,
-			}), secretExpiry(cfg, now))
+			out := p.Diagnose(ctx, diag)
+			if cfg.EntraFederatedTokenFile != "" {
+				return out // no secret to expire
+			}
+			return append(out, secretExpiry(cfg, now))
 		},
 		startWarnings: func(now time.Time) []Warning {
 			if w, ok := expiryWarning(cfg, now); ok {

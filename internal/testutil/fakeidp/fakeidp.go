@@ -65,12 +65,24 @@ type User struct {
 
 // Client is an app registration at the fake IdP: the proxy's IdP app, a headless caller, or a
 // resource (API) that tokens are issued for.
+// FederatedCredential is a federated identity credential on an app registration: a client
+// assertion whose iss, sub and aud match exactly, case-sensitively, and that Signer signed, is
+// accepted for the client (Microsoft Learn, workload identity federation).
+type FederatedCredential struct {
+	Issuer, Subject, Audience string
+	// Signer is the other issuer's key (GitHub's, say), standing in for its JWKS.
+	Signer *Certificate
+}
+
 type Client struct {
 	ID string
 	// Secrets lists accepted client secrets; more than one models a rollover.
 	Secrets []string
 	// Certificates lists accepted private_key_jwt keys; more than one models a rollover.
 	Certificates []*Certificate
+	// Federated lists the client's federated identity credentials (Entra workload identity
+	// federation): a token from another issuer accepted as its client assertion.
+	Federated    []FederatedCredential
 	RedirectURIs []string
 	// ServicePrincipalID is the `oid` of app-only tokens (Entra only); empty means a generated GUID.
 	ServicePrincipalID string
