@@ -115,7 +115,7 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	}
 	r.Checks = append(r.Checks, upstreamResult(cfg))
 	if cfg.IdentityHeaders && cfg.UpstreamCommand == nil {
-		r.Checks = append(r.Checks, identityHeadersResult(ctx, cfg, o.Resolve))
+		r.Checks = append(r.Checks, identityHeadersResult(ctx, cfg.UpstreamURL.Hostname(), o.Resolve))
 	}
 	for _, w := range parts.warnings {
 		r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "configuration", Status: doctor.Warn, Message: w.Message, Fix: warningFix(w)})
@@ -131,42 +131,4 @@ func warningFix(w Warning) string {
 		return ""
 	}
 	return w.Setting + ": " + w.Fix
-}
-
-// cgnat is RFC 6598 shared address space: carrier-grade NAT, also used by overlay networks.
-var cgnat = netip.MustParsePrefix("100.64.0.0/10")
-
-// notPublic reports whether a is an address the internet cannot reach directly: loopback,
-// private, link-local or shared (CGNAT).
-func notPublic(a netip.Addr) bool {
-	return a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || cgnat.Contains(a)
-}
-
-// identityHeadersResult is doctor's hint for BYWARD_IDENTITY_HEADERS (ADR-0016 §5): the plain
-// headers are safe only when the upstream is reachable through the proxy alone, which doctor cannot
-// see; an upstream host with a public address, or one it cannot resolve, gets a warning.
-func identityHeadersResult(ctx context.Context, cfg *config.Config, resolve func(context.Context, string) ([]netip.Addr, error)) doctor.Result {
-	const hint = "a hint, not a guarantee: doctor sees addresses, not who can reach them"
-	r := doctor.Result{Class: doctor.ClassProxy, Name: "identity headers", Status: doctor.Pass,
-		Fix: "keep the upstream reachable only through this proxy (a private network or a network policy), or turn BYWARD_IDENTITY_HEADERS off and verify the assertion instead (docs/how-to/plain-identity-headers.md)"}
-	host := cfg.UpstreamURL.Hostname()
-	addrs := []netip.Addr{}
-	if a, err := netip.ParseAddr(host); err == nil {
-		addrs = append(addrs, a)
-	} else {
-		ctx, cancel := context.WithTimeout(ctx, probeTimeout)
-		defer cancel()
-		if addrs, err = resolve(ctx, host); err != nil || len(addrs) == 0 {
-			r.Status, r.Message = doctor.Warn, fmt.Sprintf("plain identity headers are on, and the upstream host %s does not resolve here (%v), so doctor cannot tell whether it is public (%s)", host, err, hint)
-			return r
-		}
-	}
-	for _, a := range addrs {
-		if a = a.Unmap(); !notPublic(a) {
-			r.Status, r.Message = doctor.Warn, fmt.Sprintf("plain identity headers are on, and the upstream host %s has the public address %s: whoever reaches it directly can send any identity (%s)", host, a, hint)
-			return r
-		}
-	}
-	r.Message, r.Fix = fmt.Sprintf("plain identity headers are on; the upstream host %s has only loopback, private, link-local or shared addresses (%s)", host, hint), ""
-	return r
 }

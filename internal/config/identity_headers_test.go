@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestPlainIdentityHeadersAreOffByDefault(t *testing.T) {
+func TestPlainIdentityHeadersAreOffUntilSetTrue(t *testing.T) {
 	c, err := load(t, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -15,6 +15,32 @@ func TestPlainIdentityHeadersAreOffByDefault(t *testing.T) {
 	}
 	if c, err = load(t, nil, "BYWARD_IDENTITY_HEADERS=true"); err != nil || !c.IdentityHeaders {
 		t.Fatalf("BYWARD_IDENTITY_HEADERS=true: on %v, err %v", c != nil && c.IdentityHeaders, err)
+	}
+}
+
+// The plain identity headers need an authenticated user and an HTTP upstream, and a boolean.
+func TestPlainIdentityHeadersRefuseWhatCannotWork(t *testing.T) {
+	entra := []string{"BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_ENTRA_TENANT=00000000-0000-0000-0000-000000000001",
+		"BYWARD_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002", "BYWARD_ENTRA_CLIENT_SECRET_FILE=/run/secrets/entra"}
+	for _, tc := range []struct {
+		name  string
+		args  []string
+		env   []string
+		inErr string
+	}{
+		{"without authentication", nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp",
+			"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_IDENTITY_HEADERS=true"},
+			"BYWARD_INSECURE_NO_AUTH cannot be combined with BYWARD_IDENTITY_HEADERS: remove one of them"},
+		{"a stdio upstream", []string{"--", "/usr/local/bin/server"}, append(entra, "BYWARD_IDENTITY_HEADERS=true"),
+			"BYWARD_IDENTITY_HEADERS is for an HTTP upstream; a stdio upstream gets the user in its environment"},
+		{"not a boolean", nil, append(append([]string{}, base...), "BYWARD_IDENTITY_HEADERS=yes please"),
+			"BYWARD_IDENTITY_HEADERS: want true or false, got \"yes please\""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := Load(tc.args, tc.env, baseFiles); err == nil || !strings.Contains(err.Error(), tc.inErr) {
+				t.Fatalf("err = %v, want %q", err, tc.inErr)
+			}
+		})
 	}
 }
 
@@ -38,19 +64,5 @@ func TestNoOtherSettingMayUseAPlainIdentityHeader(t *testing.T) {
 				t.Fatalf("err = %v, want %q", err, tc.inErr)
 			}
 		})
-	}
-}
-
-func TestPlainIdentityHeadersNeedAuthentication(t *testing.T) {
-	_, _, err := Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_INSECURE_NO_AUTH=true",
-		"BYWARD_IDENTITY_HEADERS=true"}, nil)
-	if err == nil || !strings.Contains(err.Error(), "BYWARD_IDENTITY_HEADERS") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestPlainIdentityHeadersTakeTrueOrFalse(t *testing.T) {
-	if _, err := load(t, nil, "BYWARD_IDENTITY_HEADERS=yes please"); err == nil || !strings.Contains(err.Error(), "BYWARD_IDENTITY_HEADERS: want true or false") {
-		t.Fatalf("err = %v", err)
 	}
 }

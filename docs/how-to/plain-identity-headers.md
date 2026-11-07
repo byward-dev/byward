@@ -9,8 +9,9 @@
 
 With `BYWARD_IDENTITY_HEADERS=true`, byward sends the user in plain headers as well as the identity
 assertion ([ADR-0016](../adr/0016-identity-propagation.md) §5). Both carry the same values. The
-setting is off by default and needs authentication. A stdio upstream gets the user in its
-environment instead ([stdio upstream](stdio-upstream.md)).
+setting is off by default, needs authentication and an HTTP upstream. A stdio upstream gets the
+user in its environment instead ([stdio upstream](stdio-upstream.md)), so the setting is refused
+there.
 
 ## The headers
 

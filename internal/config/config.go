@@ -664,8 +664,11 @@ func (c *Config) assertion(v *Values) []error {
 	if c.AssertionHeader, err = upstreamHeader(v, "assertion-header", "X-Byward-Identity"); err != nil {
 		errs = append(errs, err)
 	}
+	ihEnv := Setting{Name: "identity-headers"}.Env()
 	if c.IdentityHeaders, err = strconv.ParseBool(v.get("identity-headers")); err != nil {
-		errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "identity-headers"}.Env(), v.get("identity-headers")))
+		errs = append(errs, errorf("%s: want true or false, got %q", ihEnv, v.get("identity-headers")))
+	} else if c.IdentityHeaders && c.UpstreamCommand != nil {
+		errs = append(errs, errorf("%s is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)", ihEnv))
 	}
 	cEnv := Setting{Name: "assertion-claims"}.Env()
 	raw := strings.TrimSpace(v.get("assertion-claims"))

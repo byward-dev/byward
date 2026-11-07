@@ -9,30 +9,33 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
+	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 	"github.com/byward-dev/byward/internal/token"
 )
 
-func TestPercentEncodingLeavesOnlyUnreservedCharacters(t *testing.T) {
-	for in, want := range map[string]string{
-		"byward.user":          "byward.user",
-		"A-Z_a~z.0-9":          "A-Z_a~z.0-9",
-		"tid:oid":              "tid%3Aoid",
-		"Data,Read":            "Data%2CRead",
-		"Renée M":              "Ren%C3%A9e%20M",
-		"x\r\nX-Evil: 1":       "x%0D%0AX-Evil%3A%201",
-		"a%2C":                 "a%252C",
-		"alex@contoso.example": "alex%40contoso.example",
-	} {
-		if got := percentEncode(in); got != want {
-			t.Errorf("percentEncode(%q) = %q, want %q", in, got, want)
-		}
+// headerOfClaim is which plain identity header carries which assertion claim.
+var headerOfClaim = map[string]string{"sub": config.HeaderSubject, "client_id": config.HeaderClientID, "roles": config.HeaderRoles,
+	"groups": config.HeaderGroups, "email": config.HeaderEmail, "name": config.HeaderName}
+
+// forgedIdentityHeaders is a client's copy of every plain identity header, and one in `_` spelling.
+func forgedIdentityHeaders() http.Header {
+	h := http.Header{"X_byward_roles": {"admin"}}
+	for _, name := range config.IdentityHeaderNames {
+		h[name] = []string{"forged"}
 	}
+	return h
+}
+
+// byward reports whether an upstream header is in the proxy's X-Byward-* family.
+func byward(name string) bool {
+	return strings.HasPrefix(strings.ReplaceAll(strings.ToLower(name), "_", "-"), "x-byward-")
 }
 
 // decoded reads a plain identity header as an upstream would: split on commas, then URL-decode.
@@ -71,26 +74,47 @@ func asStrings(v any) []string {
 }
 
 // With BYWARD_IDENTITY_HEADERS the upstream reads the same user from plain headers as from the
-// assertion, even values with commas, line breaks or non-ASCII; and a client's copies, in any
-// spelling, never get through (ADR-0016 §5).
-func TestPlainIdentityHeadersCarryTheAssertionsClaimsAndNeverTheClients(t *testing.T) {
-	a := newAsserting(t, "BYWARD_IDENTITY_HEADERS=true", "BYWARD_ASSERTION_CLAIMS=roles,groups,email,name")
-	got := a.call(t, token.Claims{GrantID: "g1", Subject: "tid:oid", ClientID: "https://claude.ai/oauth/client", Roles: []string{"byward.user", "Data,Read"},
-		Groups: []string{"g-1", "g-2"}, Email: "alex@contoso.example", Name: "Renée\r\nX-Evil: 1"},
-		http.Header{"X-Byward-Subject": {"tid:someone-else"}, "X_byward_roles": {"admin"}, "X-Evil": {"forged"}})
-	if _, ok := got.Header["X_byward_roles"]; ok {
-		t.Fatal("the client's X_byward_roles reached the upstream")
+// assertion, every claim of it, even values with commas, line breaks, non-ASCII or an empty list
+// item; and no client's copy, in any spelling, gets through (ADR-0016 §5).
+func TestPlainIdentityHeadersCarryTheAssertionsClaimsAndNeverAClientsCopies(t *testing.T) {
+	for _, claim := range config.AssertionClaimNames {
+		if headerOfClaim[claim] == "" {
+			t.Fatalf("the assertion claim %q has no plain identity header", claim)
+		}
+	}
+	a := newAsserting(t, "BYWARD_IDENTITY_HEADERS=true", "BYWARD_ASSERTION_CLAIMS="+strings.Join(config.AssertionClaimNames, ","))
+	got := a.call(t, token.Claims{GrantID: "g1", Subject: "tid:oid", ClientID: "https://claude.ai/oauth/client", Roles: []string{"byward.user", "Data,Read", ""},
+		Groups: []string{"g-1", "g-2"}, Email: "alex@contoso.example", Name: "Renée\r\nX-Evil: 1"}, forgedIdentityHeaders())
+	for k := range got.Header {
+		if byward(k) && !slices.Contains(config.IdentityHeaderNames, k) {
+			t.Errorf("%s reached the upstream", k)
+		}
 	}
 	raw, _ := strings.CutPrefix(got.Header.Get("Authorization"), "Bearer ")
 	c := verified(t, jwks(t, a.public, "mcp.example.com"), raw, a.cfg.UpstreamURL.String())
-	for header, claim := range map[string]string{config.HeaderSubject: "sub", config.HeaderClientID: "client_id", config.HeaderRoles: "roles",
-		config.HeaderGroups: "groups", config.HeaderEmail: "email", config.HeaderName: "name"} {
+	for claim, header := range headerOfClaim {
 		if d, want := decoded(t, got.Header, header), asStrings(c[claim]); !reflect.DeepEqual(d, want) || len(want) == 0 {
 			t.Errorf("%s = %q, the assertion's %s = %q", header, d, claim, want)
 		}
 	}
-	if !strings.Contains(a.logs.String(), "plain identity headers are on") {
-		t.Fatalf("no startup warning in:\n%s", a.logs)
+}
+
+// Every byte outside A-Z a-z 0-9 - . _ ~ reaches the upstream as %XX, so no value can end the
+// header, add an item or add a header.
+func TestPlainIdentityHeaderValuesArePercentEncoded(t *testing.T) {
+	a := newAsserting(t, "BYWARD_IDENTITY_HEADERS=true", "BYWARD_ASSERTION_CLAIMS=name")
+	for in, want := range map[string]string{
+		"A-Z_a~z.0-9":          "A-Z_a~z.0-9",
+		"Data,Read":            "Data%2CRead",
+		"Renée M":              "Ren%C3%A9e%20M",
+		"x\r\nX-Evil: 1":       "x%0D%0AX-Evil%3A%201",
+		"a%2C":                 "a%252C",
+		"alex@contoso.example": "alex%40contoso.example",
+	} {
+		got := a.call(t, token.Claims{GrantID: "g1", Subject: "tid:oid", ClientID: "c", Name: in}, nil)
+		if v := got.Header.Get(config.HeaderName); v != want {
+			t.Errorf("name %q reached the upstream as %q, want %q", in, v, want)
+		}
 	}
 }
 
@@ -108,86 +132,104 @@ func TestAnAbsentClaimSendsNoPlainHeader(t *testing.T) {
 	}
 }
 
-// Off (the default), the proxy sends none, and still removes every copy a client sends, so turning
-// them on or off never lets a forged one through.
+// Off (the default), and without authentication, the proxy sends none and still removes every copy
+// a client sends, so turning them on or off never lets a forged one through.
 func TestWithPlainIdentityHeadersOffAClientsCopiesAreStillRemoved(t *testing.T) {
-	forged := http.Header{"X-Byward-Subject": {"tid:someone-else"}, "X_byward_roles": {"admin"}}
-	a := newAsserting(t)
-	got := a.call(t, token.Claims{GrantID: "g1", Subject: "tid:oid", ClientID: "c", Roles: []string{"byward.user"}}, forged)
-	for k := range got.Header {
-		if strings.HasPrefix(strings.ReplaceAll(strings.ToLower(k), "_", "-"), "x-byward-") {
-			t.Errorf("%s reached the upstream", k)
-		}
+	for name, upstreamGot := range map[string]func(t *testing.T) http.Header{
+		"authenticated, off": func(t *testing.T) http.Header {
+			a := newAsserting(t)
+			return a.call(t, token.Claims{GrantID: "g1", Subject: "tid:oid", ClientID: "c", Roles: []string{"byward.user"}}, forgedIdentityHeaders()).Header
+		},
+		"without authentication": func(t *testing.T) http.Header {
+			up := fakeupstream.New()
+			t.Cleanup(up.Close)
+			cfg, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=" + up.URL + "/mcp", "BYWARD_INSECURE_NO_AUTH=true"}, os.ReadFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s, err := New(cfg, discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("Accept", "application/json, text/event-stream")
+			for k, v := range forgedIdentityHeaders() {
+				r.Header[k] = v
+			}
+			s.Public.Handler.ServeHTTP(httptest.NewRecorder(), r)
+			got, ok := up.Last()
+			if !ok {
+				t.Fatal("the upstream got no request")
+			}
+			return got.Header
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for k := range upstreamGot(t) {
+				if byward(k) {
+					t.Errorf("%s reached the upstream", k)
+				}
+			}
+		})
 	}
-	if strings.Contains(a.logs.String(), "plain identity headers are on") {
-		t.Fatal("the startup warning with the headers off")
-	}
+}
 
-	// Without authentication too.
-	up := fakeupstream.New()
-	t.Cleanup(up.Close)
-	cfg, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=" + up.URL + "/mcp", "BYWARD_INSECURE_NO_AUTH=true"}, os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
-	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("Accept", "application/json, text/event-stream")
-	for k, v := range forged {
-		r.Header[k] = v
-	}
-	s, err := New(cfg, discard)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.Public.Handler.ServeHTTP(httptest.NewRecorder(), r)
-	got, ok := up.Last()
-	if !ok {
-		t.Fatal("the upstream got no request")
-	}
-	for k := range got.Header {
-		if strings.HasPrefix(strings.ReplaceAll(strings.ToLower(k), "_", "-"), "x-byward-") {
-			t.Errorf("without authentication, %s reached the upstream", k)
-		}
+// The operator sees the trade-off in the log whenever the headers are on, and only then.
+func TestTurningOnPlainIdentityHeadersLogsAWarning(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  []string
+		want bool
+	}{{"off", nil, false}, {"on", []string{"BYWARD_IDENTITY_HEADERS=true"}, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newAsserting(t, tc.env...)
+			if got := strings.Contains(a.logs.String(), "plain identity headers are on"); got != tc.want {
+				t.Errorf("warning logged %v", got)
+			}
+		})
 	}
 }
 
 // doctor's hint: an upstream host with only non-public addresses passes; a public one, or one that
-// does not resolve, warns; every message says it is a hint.
-func TestDoctorWarnsWhenPlainIdentityHeadersGoToAPublicHost(t *testing.T) {
+// does not resolve, warns and names the setting; every message says it is a hint.
+func TestDoctorPassesOnlyAnUpstreamHostWithNoPublicAddress(t *testing.T) {
 	resolve := func(_ context.Context, host string) ([]netip.Addr, error) {
 		switch host {
 		case "mcp.internal":
 			return []netip.Addr{netip.MustParseAddr("10.0.0.5"), netip.MustParseAddr("fd00::5")}, nil
 		case "mixed.example":
 			return []netip.Addr{netip.MustParseAddr("10.0.0.5"), netip.MustParseAddr("8.8.8.8")}, nil
+		case "empty.example":
+			return nil, nil
 		}
 		return nil, errors.New("no such host")
 	}
 	for _, tc := range []struct {
-		upstream string
-		want     doctor.Status
-		inMsg    string
+		host  string
+		want  doctor.Status
+		inMsg string
 	}{
-		{"http://127.0.0.1:9000/mcp", doctor.Pass, "only loopback, private, link-local or shared addresses"},
-		{"http://[::1]:9000/mcp", doctor.Pass, "only loopback"},
-		{"http://10.1.2.3/mcp", doctor.Pass, "only loopback"},
-		{"http://100.64.1.1/mcp", doctor.Pass, "only loopback"},
-		{"http://169.254.1.1/mcp", doctor.Pass, "only loopback"},
-		{"http://[fe80::1]/mcp", doctor.Pass, "only loopback"},
-		{"http://mcp.internal/mcp", doctor.Pass, "only loopback"},
-		{"http://8.8.8.8/mcp", doctor.Warn, "has the public address 8.8.8.8"},
-		{"http://[::ffff:8.8.8.8]/mcp", doctor.Warn, "has the public address 8.8.8.8"},
-		{"https://mixed.example/mcp", doctor.Warn, "has the public address 8.8.8.8"},
-		{"https://gone.example/mcp", doctor.Warn, "does not resolve here"},
+		{"127.0.0.1", doctor.Pass, "only loopback, private, link-local or shared addresses"},
+		{"::1", doctor.Pass, "only loopback"},
+		{"10.1.2.3", doctor.Pass, "only loopback"},
+		{"100.64.1.1", doctor.Pass, "only loopback"},
+		{"169.254.1.1", doctor.Pass, "only loopback"},
+		{"fe80::1", doctor.Pass, "only loopback"},
+		{"mcp.internal", doctor.Pass, "only loopback"},
+		{"8.8.8.8", doctor.Warn, "has the public address 8.8.8.8"},
+		{"::ffff:8.8.8.8", doctor.Warn, "has the public address 8.8.8.8"},
+		{"2001:4860:4860::8888", doctor.Warn, "has the public address 2001:4860:4860::8888"},
+		{"mixed.example", doctor.Warn, "has the public address 8.8.8.8"},
+		{"gone.example", doctor.Warn, "does not resolve here"},
+		{"empty.example", doctor.Warn, "does not resolve here"},
 	} {
-		t.Run(tc.upstream, func(t *testing.T) {
-			u, _ := url.Parse(tc.upstream)
-			r := identityHeadersResult(context.Background(), &config.Config{UpstreamURL: u, IdentityHeaders: true}, resolve)
+		t.Run(tc.host, func(t *testing.T) {
+			r := identityHeadersResult(context.Background(), tc.host, resolve)
 			if r.Status != tc.want || !strings.Contains(r.Message, tc.inMsg) || !strings.Contains(r.Message, "a hint, not a guarantee") {
 				t.Fatalf("%s: %s", r.Status, r.Message)
 			}
-			if (r.Status == doctor.Warn) != (r.Fix != "") {
+			if wantFix := r.Status == doctor.Warn; wantFix != strings.Contains(r.Fix, "BYWARD_IDENTITY_HEADERS") {
 				t.Fatalf("fix %q for status %s", r.Fix, r.Status)
 			}
 		})
@@ -196,27 +238,34 @@ func TestDoctorWarnsWhenPlainIdentityHeadersGoToAPublicHost(t *testing.T) {
 
 // doctor runs the hint only while the plain identity headers are on.
 func TestDoctorChecksTheUpstreamHostOnlyWithPlainIdentityHeadersOn(t *testing.T) {
+	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
+		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{"s3cret-entra"}}))
 	private := func(context.Context, string) ([]netip.Addr, error) {
 		return []netip.Addr{netip.MustParseAddr("10.0.0.1")}, nil
 	}
-	for _, on := range []bool{false, true} {
-		var extra []string
-		if on {
-			extra = append(extra, "BYWARD_IDENTITY_HEADERS=true")
-		}
-		r := runProxy(t, extra...)
-		rep, err := Doctor(context.Background(), r.cfg, DoctorOptions{IdP: r.fake.HTTPClient(), Resolve: private})
-		if err != nil {
-			t.Fatal(err)
-		}
-		var found *doctor.Result
-		for _, c := range rep.Checks {
-			if c.Name == "identity headers" {
-				found = &c
+	for _, tc := range []struct {
+		name      string
+		env       []string
+		wantCheck bool
+	}{
+		{"off", nil, false},
+		{"on", []string{"BYWARD_IDENTITY_HEADERS=true"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := loadConfig(t, "https://mcp.example.com/mcp", tc.env...)
+			rep, err := Doctor(context.Background(), cfg, DoctorOptions{IdP: fake.HTTPClient(), Proxy: &http.Client{Transport: refuse{}}, Resolve: private})
+			if err != nil {
+				t.Fatal(err)
 			}
-		}
-		if (found != nil) != on || (on && found.Status != doctor.Pass) {
-			t.Fatalf("headers on %v: identity headers check %+v", on, found)
-		}
+			var found *doctor.Result
+			for _, c := range rep.Checks {
+				if c.Name == "identity headers" {
+					found = &c
+				}
+			}
+			if (found != nil) != tc.wantCheck || (found != nil && found.Status != doctor.Pass) {
+				t.Fatalf("identity headers check %+v", found)
+			}
+		})
 	}
 }
