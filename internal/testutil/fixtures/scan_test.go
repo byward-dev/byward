@@ -131,7 +131,8 @@ func TestOnlyAMissingGitLeavesTheFileListUnchecked(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("PATH", tc.path)
-			files, err := trackedFiles(tc.root)
+			t.Setenv("GIT_DIR", filepath.Join(tc.root, ".git")) // not a repository even under a TMPDIR inside one
+			files, err := checkoutFiles(tc.root)
 			if err == nil || files != nil || errors.Is(err, exec.ErrNotFound) != tc.wantMissing {
 				t.Fatalf("files %v, err %v; want an error, missing git %v", files, err, tc.wantMissing)
 			}

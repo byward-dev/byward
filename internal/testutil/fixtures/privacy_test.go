@@ -162,20 +162,29 @@ func forbiddenList(raw string) []string {
 	return out
 }
 
-// trackedFiles lists the repository's tracked files, as git does. A missing git is an
-// exec.ErrNotFound; any other failure is an error the check must not pass over.
-func trackedFiles(root string) ([]string, error) {
-	b, err := exec.Command("git", "-C", root, "ls-files", "-z").Output() //nolint:gosec // G204: root is this repository, fixed by the test
+// checkoutFiles lists what git would commit: tracked files and untracked ones it does not ignore,
+// so a file is checked before it is added (and its content keys Go's test cache). A nested
+// repository, such as a worktree under .claude/worktrees, is listed as one "dir/" entry and left
+// out. A missing git is an exec.ErrNotFound; any other failure is an error the check must not
+// pass over.
+func checkoutFiles(root string) ([]string, error) {
+	b, err := exec.Command("git", "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard").Output() //nolint:gosec // G204: root is this repository, fixed by the test
 	if err != nil {
 		return nil, fmt.Errorf("git ls-files: %w", err)
 	}
-	return strings.Split(strings.TrimSuffix(string(b), "\x00"), "\x00"), nil
+	var out []string
+	for _, f := range strings.Split(strings.TrimSuffix(string(b), "\x00"), "\x00") {
+		if f != "" && !strings.HasSuffix(f, "/") {
+			out = append(out, f)
+		}
+	}
+	return out, nil
 }
 
-// statInputs stats git's index and every directory that holds a tracked file. Go's test cache keys
-// a result on the files the test opens or stats, so a file added since the last run re-runs the
-// check instead of returning a cached pass. The directories matter in a git worktree, whose index
-// sits outside this module, where the cache does not look.
+// statInputs stats git's index and every directory that holds a listed file. Go's test cache keys
+// a result on the files the test opens or stats, so a file created or added since the last run
+// re-runs the check instead of returning a cached pass. The directories matter in a git worktree,
+// whose index sits outside this module, where the cache does not look.
 func statInputs(root string, files []string) error {
 	out, err := exec.Command("git", "-C", root, "rev-parse", "--git-path", "index").Output() //nolint:gosec // G204: as above
 	if err != nil {
@@ -202,8 +211,8 @@ func statInputs(root string, files []string) error {
 	return nil
 }
 
-// The repository holds none of the identifiers and names the CI secret lists, anywhere, and its
-// test data no real email address (ADR-0024 §13). Without the secret (forks, local runs) only the
+// The repository holds none of the identifiers and names the CI secret lists, in any file git
+// would commit, and its test data no real email address (ADR-0024 §13). Without the secret (forks, local runs) only the
 // email rule runs.
 func TestTheRepositoryHoldsNoForbiddenIdentifiersAndItsTestDataNoRealEmails(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
@@ -214,7 +223,7 @@ func TestTheRepositoryHoldsNoForbiddenIdentifiersAndItsTestDataNoRealEmails(t *t
 	if len(forbidden) == 0 {
 		t.Logf("%s is not set: the identifier check is skipped, only email addresses are checked", forbiddenEnv)
 	}
-	files, err := trackedFiles(root)
+	files, err := checkoutFiles(root)
 	if errors.Is(err, exec.ErrNotFound) {
 		t.Skip("no git: the privacy check needs the repository's file list")
 	}
