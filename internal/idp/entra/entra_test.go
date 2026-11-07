@@ -513,3 +513,18 @@ func TestUserKeyAcceptsTidOidInAnyCaseAndRefusesTheRest(t *testing.T) {
 		})
 	}
 }
+
+// Silent sends prompt=none, and wins over SelectAccount: a silent sign-in must never show a page.
+func TestASilentLoginAsksTheIdPWithPromptNoneEvenWhenAccountSelectionIsAsked(t *testing.T) {
+	e := newEnv(t, Config{})
+	l := login
+	l.Silent, l.SelectAccount = true, true
+	raw, err := e.p.AuthCodeURL(context.Background(), l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(raw)
+	if got := u.Query()["prompt"]; len(got) != 1 || got[0] != "none" {
+		t.Fatalf("prompt = %q, want only none", got)
+	}
+}

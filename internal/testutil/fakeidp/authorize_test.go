@@ -309,3 +309,29 @@ func TestWithJWKSUnavailableServes503UntilCleared(t *testing.T) {
 		t.Fatal("JWKS empty after recovery")
 	}
 }
+
+// prompt=none fails closed with login_required, and of WithSilentSession and WithSilentError the
+// one set last wins.
+func TestPromptNoneFailsClosedAndTheLastSilentOptionWins(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		opts []Option
+		want string // "" signs in with a code
+	}{
+		{"no option fails closed", nil, "login_required"},
+		{"a session signs in", []Option{WithSilentSession()}, ""},
+		{"an error, then a session, signs in", []Option{WithSilentError("interaction_required"), WithSilentSession()}, ""},
+		{"a session, then an error, answers the error", []Option{WithSilentSession(), WithSilentError("interaction_required")}, "interaction_required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t, Entra)
+			for _, o := range tc.opts {
+				f.idp.Set(o)
+			}
+			loc, _ := url.Parse(f.authorize(t, url.Values{"prompt": {"none"}}).Header.Get("Location"))
+			if got := loc.Query().Get("error"); got != tc.want || (tc.want == "" && loc.Query().Get("code") == "") {
+				t.Fatalf("redirect %s, want error %q", loc, tc.want)
+			}
+		})
+	}
+}

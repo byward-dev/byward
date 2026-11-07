@@ -22,6 +22,10 @@ type Login struct {
 	DomainHint string
 	// SelectAccount sends prompt=select_account.
 	SelectAccount bool
+	// Silent sends prompt=none: the IdP must not show any page, and answers login_required,
+	// interaction_required, consent_required or account_selection_required when it would need to
+	// (OIDC Core 1.0 §3.1.2.1, §3.1.2.6). It wins over SelectAccount.
+	Silent bool
 }
 
 // Identity is the signed-in user as the access gate and the identity assertion see them.

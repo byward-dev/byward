@@ -81,6 +81,16 @@ func (p *IdP) authorize(w http.ResponseWriter, r *http.Request) {
 		fail(*p.cfg.authorizeFail, "")
 		return
 	}
+	if slices.Contains(strings.Fields(q.Get("prompt")), "none") { // fails closed: only WithSilentSession signs in
+		switch {
+		case p.cfg.silentFail != nil:
+			fail(*p.cfg.silentFail, "The fake was told to refuse prompt=none.")
+			return
+		case !p.cfg.silentSession:
+			fail(Failure{Error: "login_required"}, "The fake holds no session for prompt=none.")
+			return
+		}
+	}
 	u := p.cfg.user
 	if p.profile == Entra && !multiTenant(tenant) && !strings.EqualFold(tenant, u.TenantID) {
 		fail(UserFromOtherTenant, "")
