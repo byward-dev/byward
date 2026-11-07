@@ -53,6 +53,7 @@ const RevocationRetention = time.Hour + time.Minute
 type Store interface {
 	Grants
 	Codes
+	Logins
 	RefreshTokens
 	Revocations
 	Clients
@@ -65,7 +66,8 @@ type Collector interface {
 	// Collect deletes codes (pending or consumed) with ExpiresAt <= now, refresh tokens with
 	// IdleExpiresAt <= now, grants with ExpiresAt <= now together with their codes and refresh
 	// tokens, revocations with At <= now - RevocationRetention, clients with ExpiresAt <= now or
-	// never used and CreatedAt <= now - UnusedClientLifetime, and consents with ExpiresAt <= now.
+	// never used and CreatedAt <= now - UnusedClientLifetime, consents with ExpiresAt <= now, and
+	// spent logins with expiresAt <= now.
 	Collect(ctx context.Context, now time.Time) error
 }
 
@@ -146,6 +148,16 @@ type Codes interface {
 	// kept until it expires, so a second call returns ErrConsumed; an unknown code, or one with
 	// ExpiresAt <= now, is ErrNotFound.
 	ConsumeCode(ctx context.Context, grantID string, now time.Time) (PendingCode, error)
+}
+
+// Logins records the logins in progress a callback has used (#150). The login itself lives only in
+// a sealed cookie (ADR-0007 §3); this makes it single use on the server too, whatever the browser
+// keeps. Only a hash of the login's IdP state is stored.
+type Logins interface {
+	// SpendLogin records the login with this hash as spent until expiresAt, in one atomic step: the
+	// first call is nil, a later one before expiresAt ErrConsumed. A record past its expiry counts
+	// as absent. An expiresAt not after now is ErrInvalid.
+	SpendLogin(ctx context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error
 }
 
 // RefreshToken is a stored refresh token: only its hash (ADR-0006 §4).

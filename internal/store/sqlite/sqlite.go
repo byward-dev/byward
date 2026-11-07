@@ -647,6 +647,7 @@ func (s *Store) Collect(ctx context.Context, now time.Time) error {
 			{"DELETE FROM refresh_tokens WHERE idle_expires_at <= ?", n},
 			{"DELETE FROM revocations WHERE at <= ?", micros(now.Add(-store.RevocationRetention))},
 			{"DELETE FROM consents WHERE expires_at <= ?", n},
+			{"DELETE FROM spent_logins WHERE expires_at <= ?", n},
 			{"DELETE FROM clients WHERE expires_at <= ?", n},
 			{"DELETE FROM clients WHERE used_at IS NULL AND created_at <= ?", micros(now.Add(-store.UnusedClientLifetime))},
 		} {
@@ -655,6 +656,26 @@ func (s *Store) Collect(ctx context.Context, now time.Time) error {
 			}
 		}
 		return nil
+	})
+}
+
+// SpendLogin implements store.Logins.
+func (s *Store) SpendLogin(ctx context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
+	if !expiresAt.After(now) {
+		return store.ErrInvalid
+	}
+	return s.write(ctx, func(tx *sql.Tx) error {
+		var until int64
+		err := tx.QueryRowContext(ctx, "SELECT expires_at FROM spent_logins WHERE hash = ?", hash[:]).Scan(&until)
+		switch {
+		case err == nil && until > micros(now):
+			return store.ErrConsumed
+		case err != nil && !errors.Is(err, sql.ErrNoRows):
+			return err
+		}
+		_, err = tx.ExecContext(ctx, "INSERT INTO spent_logins (hash, expires_at) VALUES (?, ?) ON CONFLICT (hash) DO UPDATE SET expires_at = excluded.expires_at",
+			hash[:], micros(expiresAt))
+		return err
 	})
 }
 

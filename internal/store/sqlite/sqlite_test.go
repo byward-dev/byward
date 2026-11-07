@@ -473,6 +473,25 @@ func TestCorruptCounterFileFailsOpen(t *testing.T) {
 	}
 }
 
+// Collect drops spent logins once they expire.
+func TestCollectDropsExpiredSpentLogins(t *testing.T) {
+	s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
+	now := fixtureCreated
+	must(t, s.SpendLogin(ctx, sha256.Sum256([]byte("l")), now, now.Add(time.Minute)))
+	count := func() (n int) {
+		must(t, s.db.QueryRow("SELECT count(*) FROM spent_logins").Scan(&n))
+		return n
+	}
+	must(t, s.Collect(ctx, now.Add(30*time.Second)))
+	if n := count(); n != 1 {
+		t.Fatalf("before expiry: %d spent logins, want 1", n)
+	}
+	must(t, s.Collect(ctx, now.Add(time.Minute)))
+	if n := count(); n != 0 {
+		t.Fatalf("at expiry: %d spent logins, want 0", n)
+	}
+}
+
 // Migration fixtures (ADR-0024 §11): one per released schema version, each migrated to the current
 // schema and read back through the store.
 func TestEverySchemaVersionHasAFixture(t *testing.T) {
@@ -555,6 +574,11 @@ func TestFixturesMigrateToTheCurrentSchemaKeepingTheirData(t *testing.T) {
 					Redirect: "http://127.0.0.1/cb", Resource: "https://mcp.example.com/mcp"}, Scopes: []string{"mcp"}, ApprovedAt: fixtureCreated, ExpiresAt: fixtureExpires}
 				if got, err := s.Consent(ctx, want.Key); err != nil || !reflect.DeepEqual(got, want) {
 					t.Fatalf("consent = %+v, %v\nwant %+v", got, err, want)
+				}
+			}
+			if v >= 6 { // the spent login still refuses a second use
+				if err := s.SpendLogin(ctx, sha256.Sum256([]byte("fixture-login")), fixtureCreated, fixtureExpires); !errors.Is(err, store.ErrConsumed) {
+					t.Fatalf("spending the fixture login: %v, want ErrConsumed", err)
 				}
 			}
 		})
