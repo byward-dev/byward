@@ -2,42 +2,27 @@ package server
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"net/http"
-	"os"
-	"slices"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/byward-dev/byward/internal/apptoken"
 	"github.com/byward-dev/byward/internal/assertion"
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/broker"
 	"github.com/byward-dev/byward/internal/config"
-	"github.com/byward-dev/byward/internal/denylist"
-	"github.com/byward-dev/byward/internal/gate"
 	"github.com/byward-dev/byward/internal/health"
 	"github.com/byward-dev/byward/internal/mcpsession"
 	"github.com/byward-dev/byward/internal/ratelimit"
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/resource"
-	"github.com/byward-dev/byward/internal/secretfile"
 	"github.com/byward-dev/byward/internal/ssrfguard"
-	"github.com/byward-dev/byward/internal/store"
-	"github.com/byward-dev/byward/internal/store/sqlite"
 	"github.com/byward-dev/byward/internal/token"
 )
 
 // maxRateLimitKeys bounds the client addresses each OAuth endpoint tracks (ADR-0018 §8).
 const maxRateLimitKeys = 100000
-
-// maxJTIs bounds the in-memory private_key_jwt replay cache.
-const maxJTIs = 10000
 
 // auth is what authenticated mode adds: the broker's routes, the access-token validator and the
 // readiness checks for its keys and store.
@@ -161,217 +146,6 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	return a, nil
 }
 
-// jwksPath serves the assertion keys (ADR-0016 §3).
-const jwksPath = "/.well-known/jwks.json"
-
-// ExportJWKS is `byward jwks`: the public keys of BYWARD_ASSERTION_KEYS_DIR as a JWKS, for an
-// upstream that loads them from a file instead of fetching them (ADR-0016 §3). Run it again after
-// every key rotation.
-func ExportJWKS(cfg *config.Config) ([]byte, error) {
-	keys, err := assertion.LoadKeys(cfg.AssertionKeysDir, secretCheck(cfg))
-	if err != nil {
-		return nil, fmt.Errorf("BYWARD_ASSERTION_KEYS_DIR: %s: %w (see docs/how-to/identity-assertion.md)", cfg.AssertionKeysDir, err)
-	}
-	return json.MarshalIndent(keys.JWKS(), "", "  ")
-}
-
-// assertedClaims maps BYWARD_ASSERTION_CLAIMS to the claims the broker seals into access tokens.
-func assertedClaims(cfg *config.Config) broker.Asserted {
-	var a broker.Asserted
-	for _, c := range cfg.AssertionClaims {
-		switch c {
-		case "roles":
-			a.Roles = true
-		case "groups":
-			a.Groups = true
-		case "email":
-			a.Email, a.UnverifiedEmail = true, cfg.AssertionUnverifiedEmail
-		case "name":
-			a.Name = true
-		default: // config.AssertionClaimNames and this switch must list the same names
-			panic("server: unhandled assertion claim " + c)
-		}
-	}
-	return a
-}
-
-// authParts is what authenticated mode builds from configuration alone, with no network access and
-// no writes; check --offline stops here (ADR-0020 §7).
-type authParts struct {
-	ring                                  *token.KeyRing
-	sealer                                *token.Sealer
-	loginBox, idpBox, consentBox, hintBox *token.Box
-	sessionBox                            *token.Box
-	static                                *registration.StaticRegistry
-	// jti is the private_key_jwt replay cache, shared by static, CIMD and DCR clients.
-	jti *registration.MemoryJTICache
-	// clientDeny is BYWARD_CLIENT_DENYLIST, applied to CIMD and DCR clients.
-	clientDeny *registration.Denylist
-	// assertionKeys sign the identity assertion for an HTTP upstream; nil for a stdio upstream.
-	assertionKeys *assertion.Keys
-	idp           *identityProvider
-	gate          *gate.Gate
-	// appGate admits app-only callers; nil while BYWARD_APP_TOKENS is off.
-	appGate *gate.AppGate
-	// warnings are logged at every start and reported by check and doctor.
-	warnings []Warning
-}
-
-// Warning is a configuration that works but that the operator should look at. Setting and Fix are
-// empty for warnings that come from a package with its own wording (the access gate's).
-type Warning struct {
-	Message string
-	Setting string
-	Fix     string
-}
-
-func (w Warning) log(log *slog.Logger) {
-	if w.Setting == "" {
-		log.Warn(w.Message)
-		return
-	}
-	log.Warn(w.Message, "setting", w.Setting, "reason", w.Fix)
-}
-
-// String is the warning on one line, for check and doctor.
-func (w Warning) String() string {
-	if w.Setting == "" {
-		return w.Message
-	}
-	return w.Message + " (" + w.Setting + ": " + w.Fix + ")"
-}
-
-// loadAuthParts reads the sealing keys and the static clients and validates the IdP and gate
-// settings. Errors name the file or setting at fault. idpHTTP reaches the IdP; nil is the default
-// client (tests give a fake's).
-func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error) {
-	ring, err := token.LoadKeyRing(cfg.KeysDir)
-	if err != nil {
-		// No key generation (ADR-0007 §5): the operator creates the first key.
-		return nil, fmt.Errorf("BYWARD_KEYS_DIR: %s: %w (see docs/how-to/sealing-keys.md)", cfg.KeysDir, err)
-	}
-	p := &authParts{ring: ring}
-	if p.sealer, err = token.NewSealer(ring, cfg.PublicURL.String()); err != nil {
-		return nil, err
-	}
-	for _, b := range []struct {
-		box     **token.Box
-		purpose string
-	}{{&p.loginBox, "login"}, {&p.idpBox, "idp-tokens"}, {&p.consentBox, "consent"}, {&p.hintBox, "consent-hint"}, {&p.sessionBox, "mcp-session"}} {
-		if *b.box, err = token.NewBox(ring, b.purpose, nil); err != nil {
-			return nil, err
-		}
-	}
-	checkSecret := secretCheck(cfg)
-	loose := looseSecretFiles(cfg) // with the static clients' error below, reported at once
-	p.jti = registration.NewMemoryJTICache(time.Now, maxJTIs)
-	opts := []registration.LoadOption{registration.WithSecretCheck(checkSecret)}
-	if cfg.CIMD || cfg.DCR { // apps can register themselves, so no static client is needed
-		opts = append(opts, registration.AllowNoClients())
-		// A file the operator named must exist, so a typo fails here. At the default path only nothing
-		// at all counts as absent: a dangling symlink (a broken mount) still fails.
-		if _, err := os.Lstat(cfg.StaticClientsFile); !cfg.StaticClientsFileNamed && errors.Is(err, fs.ErrNotExist) {
-			opts = append(opts, registration.AllowMissingFile())
-		}
-	}
-	p.static, err = registration.LoadStatic(cfg.StaticClientsFile, os.ReadFile, p.jti, opts...)
-	if err != nil {
-		loose = append(loose, fmt.Errorf("BYWARD_STATIC_CLIENTS_FILE: %s: %w (see docs/reference/static-clients.md)", cfg.StaticClientsFile, err))
-	}
-	if err := errors.Join(loose...); err != nil {
-		return nil, err
-	}
-	if p.clientDeny, err = registration.NewDenylist(cfg.ClientDenylist); err != nil {
-		return nil, fmt.Errorf("BYWARD_CLIENT_DENYLIST: %w", err)
-	}
-	if cfg.UpstreamCommand == nil { // only an HTTP upstream gets the assertion (ADR-0016 §2, §6)
-		if p.assertionKeys, err = assertion.LoadKeys(cfg.AssertionKeysDir, secretCheck(cfg)); err != nil {
-			// No key generation (ADR-0007 §5, ADR-0016 §10): the operator creates the first key.
-			return nil, fmt.Errorf("BYWARD_ASSERTION_KEYS_DIR: %s: %w (see docs/how-to/identity-assertion.md)", cfg.AssertionKeysDir, err)
-		}
-	}
-	if p.idp, err = newIdentityProvider(cfg, idpHTTP); err != nil {
-		return nil, err
-	}
-	p.warnings = append(p.warnings, p.idp.warnings...)
-	var gateWarnings []string
-	p.gate, gateWarnings, err = gate.New(gate.Rules{Tenants: cfg.GateTenants, Roles: cfg.GateRoles, Groups: cfg.GateGroups,
-		EmailDomains: cfg.GateEmailDomains, HostedDomains: cfg.GateHostedDomains},
-		gate.Options{IdP: p.idp.gateIdP, Tenant: cfg.EntraTenant, AllowEmpty: cfg.GateAllowEmpty})
-	if err != nil {
-		return nil, gateError(err)
-	}
-	for _, w := range gateWarnings {
-		p.warnings = append(p.warnings, Warning{Message: w})
-	}
-	if cfg.UpstreamCommand == nil { // a stdio upstream gets no assertion and no email (ADR-0016 §6)
-		p.warnings = append(p.warnings, emailWarnings(cfg, p.idp.gateIdP == gate.Entra)...)
-	}
-	if cfg.AppTokens == "entra" {
-		if p.idp.appTokens == nil {
-			return nil, errors.New("BYWARD_APP_TOKENS=entra needs BYWARD_IDP=entra")
-		}
-		if p.appGate, err = gate.NewApp(gate.AppRules{Roles: cfg.AppRoles, ClientIDs: cfg.AppClientIDs, Tenants: cfg.GateTenants}); err != nil {
-			return nil, gateError(err)
-		}
-	}
-	if cfg.ScopeDescription == "" {
-		p.warnings = append(p.warnings, Warning{Message: "consent page uses generic wording", Setting: "BYWARD_SCOPE_DESCRIPTION",
-			Fix: "set it to say in plain words what the " + cfg.Scope + " scope lets an app do (ADR-0010 §4)"})
-	}
-	return p, nil
-}
-
-// emailWarnings say, at every start, which emails the identity assertion leaves out or carries
-// unverified (ADR-0016, 2026-11-07 amendment).
-func emailWarnings(cfg *config.Config, entra bool) []Warning {
-	const setting = "BYWARD_ASSERTION_UNVERIFIED_EMAIL"
-	switch email := slices.Contains(cfg.AssertionClaims, "email"); {
-	case !email && cfg.AssertionUnverifiedEmail:
-		return []Warning{{Message: setting + " has no effect", Setting: "BYWARD_ASSERTION_CLAIMS", Fix: "add email to it, or remove " + setting}}
-	case email && cfg.AssertionUnverifiedEmail:
-		return []Warning{{Message: "the identity assertion carries emails the IdP has not verified, marked email_verified false", Setting: setting,
-			Fix: "the upstream must never authorize on email; use sub"}}
-	case email && entra:
-		return []Warning{{Message: "Entra never verifies an email, so the identity assertion carries none", Setting: setting,
-			Fix: "set it to true to assert Entra's email anyway, marked email_verified false; never authorize on it"}}
-	case email:
-		return []Warning{{Message: "the identity assertion leaves out emails the IdP has not verified (email_verified)", Setting: setting,
-			Fix: "set it to true to assert them anyway, marked email_verified false"}}
-	}
-	return nil
-}
-
-// secretCheck is the permission check for secret files (ADR-0018 §11); --dev turns it off.
-func secretCheck(cfg *config.Config) func(string) error {
-	if cfg.Dev {
-		return func(string) error { return nil }
-	}
-	return secretfile.Check
-}
-
-// looseSecretFiles is one error per secret file other users can read, named by its setting, and
-// for the federated token file (read at each request, not at start) one if it is missing.
-func looseSecretFiles(cfg *config.Config) []error {
-	check := secretCheck(cfg)
-	var loose []error
-	for _, f := range cfg.Values.SecretFiles() {
-		if err := check(f.Path); err != nil {
-			loose = append(loose, fmt.Errorf("%s: %w", f.From, err))
-		}
-	}
-	// A federated token is a credential too, though it is read at each request, not at start.
-	if f := cfg.EntraFederatedTokenFile; f != "" {
-		// It must exist even in --dev, as every other secret file must to be read at start.
-		if _, err := os.Stat(f); err != nil {
-			loose = append(loose, fmt.Errorf("%s: %w", config.Setting{Name: "entra-federated-token-file"}.Env(), err))
-		} else if err := check(f); err != nil {
-			loose = append(loose, fmt.Errorf("%s: %w", config.Setting{Name: "entra-federated-token-file"}.Env(), err))
-		}
-	}
-	return loose
-}
-
 // auditStartup records the keys and static clients the proxy starts with (ADR-0021 §3).
 func auditStartup(rec *audit.Log, ring *token.KeyRing, staticClients []string) {
 	for _, id := range ring.KeyIDs() {
@@ -386,24 +160,6 @@ func auditStartup(rec *audit.Log, ring *token.KeyRing, staticClients []string) {
 	}
 }
 
-// readiness is what /readyz checks in authenticated mode: a signing key and the store. Never the
-// IdP (ADR-0021 §10).
-func readiness(ring *token.KeyRing, st pinger) []health.Check {
-	checks := []health.Check{{Name: "keys", Ready: func(context.Context) error {
-		if ring.SigningKeyID() == "" {
-			return errors.New("no signing key")
-		}
-		return nil
-	}}}
-	return append(checks, health.Check{Name: "store", Ready: st.Ping})
-}
-
-// appValidator is the app-only path (ADR-0022): the IdP adapter's verifier, the app gate on every
-// request, and revoke-user's cut-offs.
-func appValidator(parts *authParts, deny *denylist.List, o Observability) (resource.Validator, error) {
-	return apptoken.New(apptoken.Config{Verifier: parts.idp.appTokens, Gate: parts.appGate, Deny: deny, IdP: parts.idp.name, Count: o.Metrics.AppToken, Now: time.Now})
-}
-
 // signedInUser is the subject Guard attached to the request, which MCP sessions are bound to. Any
 // principal other than a user is marked with its type, so a user's session is never an app's
 // (invariant 13); users' keys stay as they were.
@@ -416,79 +172,12 @@ func signedInUser(r *http.Request) (string, bool) {
 	return id.Subject, ok
 }
 
-// newCIMDRegistry is registration.NewCIMDRegistry; tests replace it to see the wired host lists.
-var newCIMDRegistry = registration.NewCIMDRegistry
-
 // idpHTTPClient reaches the IdP for the serving proxy; nil is the default client. Tests point it at
 // a fake IdP.
 var idpHTTPClient *http.Client
 
 // newBroker is broker.New; tests replace it to see the wired configuration.
 var newBroker = broker.New
-
-// wireStore is openStore; tests replace it to reach the wired store.
-var wireStore = openStore
-
-// collectEvery is how often expired store rows are removed (ADR-0007 §1): grants, codes, refresh
-// tokens, revocations older than store.RevocationRetention, and expired or never-used client
-// registrations (ADR-0008 §3).
-const collectEvery = 5 * time.Minute
-
-// runBackground keeps the revocation list fresh and removes expired store rows until ctx ends,
-// and returns only when both have stopped, so Run closes the store after the last write.
-func runBackground(ctx context.Context, st store.Collector, deny *denylist.List, log *slog.Logger) {
-	var wg sync.WaitGroup
-	wg.Go(func() { collect(ctx, st, log) })
-	deny.Run(ctx, log)
-	wg.Wait()
-}
-
-// collect runs store.Collect now and every collectEvery until ctx ends; a failure is logged and
-// retried at the next tick.
-func collect(ctx context.Context, st store.Collector, log *slog.Logger) {
-	t := time.NewTicker(collectEvery)
-	defer t.Stop()
-	for {
-		if err := st.Collect(ctx, time.Now()); err != nil && ctx.Err() == nil {
-			log.ErrorContext(ctx, "removing expired store rows failed", "error", err.Error())
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
-	}
-}
-
-// gateSettings maps gate rule lists to the settings that fill them; config owns the names.
-var gateSettings = map[string]string{
-	gate.FieldTenants:       config.Setting{Name: "gate-tenants"}.Env(),
-	gate.FieldRoles:         config.Setting{Name: "gate-roles"}.Env(),
-	gate.FieldGroups:        config.Setting{Name: "gate-groups"}.Env(),
-	gate.FieldEmailDomains:  config.Setting{Name: "gate-email-domains"}.Env(),
-	gate.FieldHostedDomains: config.Setting{Name: "gate-hosted-domains"}.Env(),
-	gate.FieldAllowEmpty:    config.Setting{Name: "gate-allow-empty"}.Env(),
-	gate.FieldAppRoles:      config.Setting{Name: "app-roles"}.Env(),
-	gate.FieldAppClientIDs:  config.Setting{Name: "app-client-ids"}.Env(),
-}
-
-// gateError names the setting at fault for each invalid gate rule list.
-func gateError(err error) error {
-	errs := []error{err}
-	if j, ok := err.(interface{ Unwrap() []error }); ok {
-		errs = j.Unwrap()
-	}
-	msgs := make([]string, 0, len(errs))
-	for _, e := range errs {
-		var fe *gate.FieldError
-		if errors.As(e, &fe) && gateSettings[fe.Field] != "" {
-			msgs = append(msgs, gateSettings[fe.Field]+": "+fe.Msg)
-			continue
-		}
-		msgs = append(msgs, "access gate: "+e.Error())
-	}
-	return errors.New(strings.Join(msgs, "; "))
-}
 
 // logPaths logs the absolute paths the proxy uses, defaults resolved (ADR-0007 §6).
 func logPaths(cfg *config.Config, log *slog.Logger) {
@@ -499,28 +188,4 @@ func logPaths(cfg *config.Config, log *slog.Logger) {
 	} {
 		log.Info("path", "setting", p.setting, "value", p.value)
 	}
-}
-
-// openStore opens the SQLite store and reports what it found (ADR-0007 §9): a database behind its
-// counter file was restored from an older copy, so the store started a new epoch and refresh
-// tokens from before the restore no longer work; users sign in again.
-func openStore(cfg *config.Config, log *slog.Logger, rec *audit.Log) (*sqlite.Store, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	st, err := sqlite.Open(ctx, sqlite.Options{Dir: cfg.StoreDir, CounterFile: cfg.StoreCounterFile})
-	if err != nil {
-		return nil, fmt.Errorf("BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: %w", err)
-	}
-	s := st.Startup()
-	switch {
-	case s.Restored:
-		log.Warn("store restored from an older copy: a new epoch started, refresh tokens issued before the restore are refused and their users sign in again",
-			"reason", "store_restore", "epoch", s.Epoch, "setting", "BYWARD_STORE_DIR", "value", cfg.StoreDir)
-		rec.Record(nil, audit.Event{Name: audit.StoreRestored, Outcome: audit.Success, Reason: "restored from an older copy", Epoch: s.Epoch})
-	case s.CounterMissing:
-		log.Warn("store counter file missing: a restore of the state directory could not be detected at this start",
-			"reason", "store_counter_missing", "setting", "BYWARD_STORE_COUNTER_FILE", "value", cfg.StoreCounterFile)
-	}
-	log.Info("store open", "setting", "BYWARD_STORE_DIR", "value", cfg.StoreDir, "epoch", s.Epoch)
-	return st, nil
 }
