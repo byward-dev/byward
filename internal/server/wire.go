@@ -20,8 +20,6 @@ import (
 	"github.com/byward-dev/byward/internal/denylist"
 	"github.com/byward-dev/byward/internal/gate"
 	"github.com/byward-dev/byward/internal/health"
-	"github.com/byward-dev/byward/internal/idp"
-	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/mcpsession"
 	"github.com/byward-dev/byward/internal/ratelimit"
 	"github.com/byward-dev/byward/internal/registration"
@@ -57,9 +55,6 @@ type auth struct {
 	jwks   http.Handler
 }
 
-// idpName names the IdP adapter in its callback path, the broker and metrics.
-const idpName = "entra"
-
 // pinger is a store that can say whether it is reachable, for readiness.
 type pinger interface{ Ping(context.Context) error }
 
@@ -71,7 +66,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	if err != nil {
 		return nil, err
 	}
-	ring, sealer, provider, static, g := parts.ring, parts.sealer, parts.provider, parts.static, parts.gate
+	ring, sealer, ip, static, g := parts.ring, parts.sealer, parts.idp, parts.static, parts.gate
 	auditStartup(o.Audit, ring, static.IDs())
 	log.Info("client sources", "static_clients", len(static.IDs()), "cimd", cfg.CIMD, "dcr", cfg.DCR)
 	guard := ssrfguard.New(ssrfguard.Config{}) // every client-supplied URL (CIMD documents, jwks_uri) goes through it
@@ -83,7 +78,8 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	for _, w := range parts.warnings {
 		w.log(log)
 	}
-	if w, ok := expiryWarning(cfg, time.Now()); ok {
+	log.Info("IdP", "idp", ip.name, "reason", "register this redirect URI with the IdP app: "+ip.redirect)
+	for _, w := range ip.timedWarnings(time.Now()) {
 		w.log(log)
 	}
 	st, err := wireStore(cfg, log, o.Audit)
@@ -102,12 +98,12 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 		}
 	}()
 	b, err := newBroker(broker.Config{Issuer: cfg.Issuer(), Origin: cfg.Origin(), Resource: cfg.PublicURL, Scope: cfg.Scope,
-		IdPName: idpName, IdPLabel: "Microsoft Entra", IdPScopes: provider.Scope(), IdP: provider, Clients: clients, CIMD: cfg.CIMD, Registrar: registrar, ObserveRegistration: o.Metrics.DCRRegistration,
+		IdPName: ip.name, IdPLabel: ip.label, IdPScopes: ip.scope, IdP: ip.adapter, Clients: clients, CIMD: cfg.CIMD, Registrar: registrar, ObserveRegistration: o.Metrics.DCRRegistration,
 		Store: st, Sealer: sealer, LoginBox: parts.loginBox, IdPTokenBox: parts.idpBox, ConsentBox: parts.consentBox, ConsentHintBox: parts.hintBox, ObserveConsent: o.Metrics.Consent, Gate: g,
 		UpstreamName: cfg.ResourceName, ScopeText: cfg.ScopeDescription, OperatorName: cfg.OperatorName,
 		SecureCookies: cfg.PublicURL.Scheme == "https", Log: log,
 		Audit: o.Audit, Limiter: ratelimit.New(cfg.OAuthRateLimits, maxRateLimitKeys, time.Now, o.Metrics.RateLimited),
-		ObserveIdP:   func(op, outcome string, d time.Duration) { o.Metrics.IdP(idpName, op, outcome, d) },
+		ObserveIdP:   func(op, outcome string, d time.Duration) { o.Metrics.IdP(ip.name, op, outcome, d) },
 		RefreshGrace: cfg.RefreshGrace, Assert: assertedClaims(cfg)})
 	if err != nil {
 		return nil, err
@@ -188,7 +184,7 @@ type authParts struct {
 	clientDeny *registration.Denylist
 	// assertionKeys sign the identity assertion for an HTTP upstream; nil for a stdio upstream.
 	assertionKeys *assertion.Keys
-	provider      *entra.Provider
+	idp           *identityProvider
 	gate          *gate.Gate
 	// warnings are logged at every start and reported by check and doctor.
 	warnings []Warning
@@ -267,15 +263,14 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 			return nil, fmt.Errorf("BYWARD_ASSERTION_KEYS_DIR: %s: %w (see docs/how-to/identity-assertion.md)", cfg.AssertionKeysDir, err)
 		}
 	}
-	p.provider, err = entra.New(entra.Config{Tenant: cfg.EntraTenant, ClientID: cfg.EntraClientID,
-		ClientAuth: idp.ClientSecret(cfg.EntraClientSecret), RedirectURL: config.RedirectURL(cfg.PublicURL, idpName), HTTPClient: idpHTTP})
-	if err != nil {
-		return nil, fmt.Errorf("entra settings (BYWARD_ENTRA_*): %w", err)
+	if p.idp, err = newIdentityProvider(cfg, idpHTTP); err != nil {
+		return nil, err
 	}
+	p.warnings = append(p.warnings, p.idp.warnings...)
 	var gateWarnings []string
 	p.gate, gateWarnings, err = gate.New(gate.Rules{Tenants: cfg.GateTenants, Roles: cfg.GateRoles, Groups: cfg.GateGroups,
 		EmailDomains: cfg.GateEmailDomains, HostedDomains: cfg.GateHostedDomains},
-		gate.Options{IdP: gate.Entra, Tenant: cfg.EntraTenant, AllowEmpty: cfg.GateAllowEmpty})
+		gate.Options{IdP: p.idp.gateIdP, Tenant: cfg.EntraTenant, AllowEmpty: cfg.GateAllowEmpty})
 	if err != nil {
 		return nil, gateError(err)
 	}

@@ -61,7 +61,7 @@ button {
   cursor: pointer;
 }
 button:focus-visible, summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-.next { margin: 1rem 0 0; }
+.next { margin: 1rem 0 0; overflow-wrap: anywhere; }
 footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.875rem; }
 @media (max-width: 30rem) {
   dl { grid-template-columns: 1fr; gap: 0 0; }

@@ -26,10 +26,19 @@ Precedence: flag > environment > default. Secrets are read only from files.
 | `--trusted-proxies` | `BYWARD_TRUSTED_PROXIES` | — | comma-separated CIDRs or addresses of reverse proxies whose X-Forwarded-For is trusted for the client address (ADR-0018 §6); empty trusts none |
 | `--oauth-rate-limits` | `BYWARD_OAUTH_RATE_LIMITS` | — | per-minute limits per client address on OAuth endpoints, e.g. authorize=60,token=120 (ADR-0018 §8); unset endpoints keep their defaults |
 | `--internal-listen` | `BYWARD_INTERNAL_LISTEN` | 127.0.0.1:9090 | address of the internal listener for /metrics, /livez and /readyz (ADR-0018 §10); empty turns it off |
+| `--idp` | `BYWARD_IDP` | entra | the IdP users sign in with: entra, or oidc for any OpenID Connect IdP, or one of its presets google, okta, auth0, keycloak (ADR-0011, docs/how-to/oidc.md); the callback path is /callback/<idp> |
 | `--entra-tenant` | `BYWARD_ENTRA_TENANT` | — | Entra tenant ID (a GUID) of the IdP app |
 | `--entra-client-id` | `BYWARD_ENTRA_CLIENT_ID` | — | application (client) ID of the IdP app registration |
 | `--entra-client-secret-file` | `BYWARD_ENTRA_CLIENT_SECRET_FILE` | — | client secret of the IdP app |
 | `--entra-client-secret-expires-at` | `BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT` | — | when the client secret expires, as a date (2027-11-06) or an RFC 3339 time; the proxy warns at startup and doctor warns from 30 days before (ADR-0012 §10) |
+| `--oidc-issuer` | `BYWARD_OIDC_ISSUER` | — | with an oidc IdP: the issuer URL, exactly as its discovery document states it (https); google defaults to https://accounts.google.com |
+| `--oidc-client-id` | `BYWARD_OIDC_CLIENT_ID` | — | with an oidc IdP: the client ID of the proxy's app at the IdP |
+| `--oidc-client-secret-file` | `BYWARD_OIDC_CLIENT_SECRET_FILE` | — | with an oidc IdP: the client secret; give this or BYWARD_OIDC_CLIENT_KEY_FILE |
+| `--oidc-client-key-file` | `BYWARD_OIDC_CLIENT_KEY_FILE` | — | with an oidc IdP: a PEM private key (RSA or EC P-256) for private_key_jwt instead of a secret |
+| `--oidc-client-key-id` | `BYWARD_OIDC_CLIENT_KEY_ID` | — | with an oidc IdP: the key ID (kid) the IdP registered for BYWARD_OIDC_CLIENT_KEY_FILE |
+| `--oidc-scopes` | `BYWARD_OIDC_SCOPES` | — | with an oidc IdP: comma-separated scopes to request besides openid and the preset's |
+| `--oidc-subject-claim` | `BYWARD_OIDC_SUBJECT_CLAIM` | sub | with an oidc IdP: the claim that identifies a user; one users can change (email, preferred_username, upn, name) logs a warning |
+| `--oidc-name` | `BYWARD_OIDC_NAME` | — | with an oidc IdP: its name on the consent page; default: the preset's name, or the issuer's host |
 | `--data-dir` | `BYWARD_DATA_DIR` | /var/lib/byward | data directory, an absolute path; the keys, clients and store settings default to paths in it (ADR-0007 §6, docs/how-to/state.md) |
 | `--keys-dir` | `BYWARD_KEYS_DIR` | — | directory of sealing keys; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md) |
 | `--assertion-keys-dir` | `BYWARD_ASSERTION_KEYS_DIR` | — | directory of the identity assertion's signing keys: PEM ECDSA P-256 files, each name the key ID; the key whose ID sorts last signs; needed with an HTTP upstream; default: assertion-keys in the data directory (docs/how-to/identity-assertion.md) |
@@ -39,8 +48,8 @@ Precedence: flag > environment > default. Secrets are read only from files.
 | `--gate-tenants` | `BYWARD_GATE_TENANTS` | — | access gate: comma-separated Entra tenant IDs allowed to sign in (docs/how-to/access-gate.md) |
 | `--gate-roles` | `BYWARD_GATE_ROLES` | — | access gate: comma-separated app roles; users need at least one (docs/how-to/access-gate.md) |
 | `--gate-groups` | `BYWARD_GATE_GROUPS` | — | access gate: comma-separated group IDs; users need one, and groups overage denies (docs/how-to/access-gate.md) |
-| `--gate-email-domains` | `BYWARD_GATE_EMAIL_DOMAINS` | — | access gate: comma-separated domains of a verified email; generic OIDC IdPs only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md) |
-| `--gate-hosted-domains` | `BYWARD_GATE_HOSTED_DOMAINS` | — | access gate: comma-separated Google Workspace domains (hd claim); Google only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md) |
+| `--gate-email-domains` | `BYWARD_GATE_EMAIL_DOMAINS` | — | access gate: comma-separated domains of a verified email; oidc IdPs only, never Entra (docs/how-to/access-gate.md) |
+| `--gate-hosted-domains` | `BYWARD_GATE_HOSTED_DOMAINS` | — | access gate: comma-separated Google Workspace domains (hd claim); BYWARD_IDP=google only; with one domain it is also sent to Google as the hd hint (docs/how-to/access-gate.md) |
 | `--dcr` | `BYWARD_DCR` | true | accept Dynamic Client Registration at /register (Cursor, Gemini CLI) and advertise it; false turns it off (docs/how-to/dcr.md) |
 | `--client-denylist` | `BYWARD_CLIENT_DENYLIST` | — | comma-separated CIMD client IDs (https URLs) and redirect host names refused for CIMD and DCR clients (docs/how-to/dcr.md) |
 | `--cimd` | `BYWARD_CIMD` | true | accept MCP clients identified by a Client ID Metadata Document URL (Claude, VS Code) and advertise it; false turns it off (docs/how-to/cimd.md) |

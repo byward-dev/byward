@@ -60,6 +60,11 @@ verifier that expects anything else refuses every request. The issuer is byward'
 - If the upstream also needs the proxy's own credential in `Authorization`, move the assertion to
   another header ([upstream credential](upstream-credential.md)).
 - `email` and `name` are personal data (ADR-0021 §4): add them only when the upstream needs them.
+- `email` is the IdP's claim as it sent it, never proof of an address: Entra does not verify it
+  (ADR-0012 §3), and an [OIDC IdP](oidc.md)'s is asserted whether or not it set `email_verified`.
+  Never authorize on it; use `sub`.
+- `sub` is the user key: `tid:oid` with Entra, the IdP's subject claim (`BYWARD_OIDC_SUBJECT_CLAIM`)
+  with an OIDC IdP. The issuer is always byward's, whichever IdP signed the user in.
 - `groups` can be large. With 200 groups, Entra's limit, a client's proxy token is about 11 KB;
   with roles only it stays under 1 KB. Groups that do not fit a token at all are left out with a
   warning in the log, and an Entra user over 200 groups has none asserted (groups overage).

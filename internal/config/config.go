@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"maps"
 	"net"
 	"net/netip"
 	"net/textproto"
@@ -41,10 +42,19 @@ var registry = []Setting{
 	{Name: "trusted-proxies", Help: "comma-separated CIDRs or addresses of reverse proxies whose X-Forwarded-For is trusted for the client address (ADR-0018 §6); empty trusts none"},
 	{Name: "oauth-rate-limits", Help: "per-minute limits per client address on OAuth endpoints, e.g. authorize=60,token=120 (ADR-0018 §8); unset endpoints keep their defaults"},
 	{Name: "internal-listen", Default: "127.0.0.1:9090", Help: "address of the internal listener for /metrics, /livez and /readyz (ADR-0018 §10); empty turns it off"},
+	{Name: "idp", Auth: true, Default: "entra", Help: "the IdP users sign in with: entra, or oidc for any OpenID Connect IdP, or one of its presets " + strings.Join(OIDCPresets, ", ") + " (ADR-0011, docs/how-to/oidc.md); the callback path is /callback/<idp>"},
 	{Name: "entra-tenant", Auth: true, Help: "Entra tenant ID (a GUID) of the IdP app"},
 	{Name: "entra-client-id", Auth: true, Help: "application (client) ID of the IdP app registration"},
 	{Name: "entra-client-secret", Auth: true, Secret: true, Help: "client secret of the IdP app"},
 	{Name: "entra-client-secret-expires-at", Auth: true, Help: "when the client secret expires, as a date (2027-11-06) or an RFC 3339 time; the proxy warns at startup and doctor warns from 30 days before (ADR-0012 §10)"},
+	{Name: "oidc-issuer", Auth: true, Help: "with an oidc IdP: the issuer URL, exactly as its discovery document states it (https); " + defaultIssuersHelp()},
+	{Name: "oidc-client-id", Auth: true, Help: "with an oidc IdP: the client ID of the proxy's app at the IdP"},
+	{Name: "oidc-client-secret", Auth: true, Secret: true, Help: "with an oidc IdP: the client secret; give this or BYWARD_OIDC_CLIENT_KEY_FILE"},
+	{Name: "oidc-client-key", Auth: true, Secret: true, Help: "with an oidc IdP: a PEM private key (RSA or EC P-256) for private_key_jwt instead of a secret"},
+	{Name: "oidc-client-key-id", Auth: true, Help: "with an oidc IdP: the key ID (kid) the IdP registered for BYWARD_OIDC_CLIENT_KEY_FILE"},
+	{Name: "oidc-scopes", Auth: true, Help: "with an oidc IdP: comma-separated scopes to request besides openid and the preset's"},
+	{Name: "oidc-subject-claim", Auth: true, Default: "sub", Help: "with an oidc IdP: the claim that identifies a user; one users can change (email, preferred_username, upn, name) logs a warning"},
+	{Name: "oidc-name", Auth: true, Help: "with an oidc IdP: its name on the consent page; default: the preset's name, or the issuer's host"},
 	{Name: "data-dir", Auth: true, Default: "/var/lib/byward", Help: "data directory, an absolute path; the keys, clients and store settings default to paths in it (ADR-0007 §6, docs/how-to/state.md)"},
 	{Name: "keys-dir", Auth: true, Help: "directory of sealing keys; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md)"},
 	{Name: "assertion-keys-dir", Auth: true, Help: "directory of the identity assertion's signing keys: PEM ECDSA P-256 files, each name the key ID; the key whose ID sorts last signs; needed with an HTTP upstream; default: assertion-keys in the data directory (docs/how-to/identity-assertion.md)"},
@@ -54,8 +64,8 @@ var registry = []Setting{
 	{Name: "gate-tenants", Auth: true, Help: "access gate: comma-separated Entra tenant IDs allowed to sign in (docs/how-to/access-gate.md)"},
 	{Name: "gate-roles", Auth: true, Help: "access gate: comma-separated app roles; users need at least one (docs/how-to/access-gate.md)"},
 	{Name: "gate-groups", Auth: true, Help: "access gate: comma-separated group IDs; users need one, and groups overage denies (docs/how-to/access-gate.md)"},
-	{Name: "gate-email-domains", Auth: true, Help: "access gate: comma-separated domains of a verified email; generic OIDC IdPs only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md)"},
-	{Name: "gate-hosted-domains", Auth: true, Help: "access gate: comma-separated Google Workspace domains (hd claim); Google only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md)"},
+	{Name: "gate-email-domains", Auth: true, Help: "access gate: comma-separated domains of a verified email; oidc IdPs only, never Entra (docs/how-to/access-gate.md)"},
+	{Name: "gate-hosted-domains", Auth: true, Help: "access gate: comma-separated Google Workspace domains (hd claim); BYWARD_IDP=google only; with one domain it is also sent to Google as the hd hint (docs/how-to/access-gate.md)"},
 	{Name: "dcr", Auth: true, Bool: true, Default: "true", Help: "accept Dynamic Client Registration at /register (Cursor, Gemini CLI) and advertise it; false turns it off (docs/how-to/dcr.md)"},
 	{Name: "client-denylist", Auth: true, Help: "comma-separated CIMD client IDs (https URLs) and redirect host names refused for CIMD and DCR clients (docs/how-to/dcr.md)"},
 	{Name: "cimd", Auth: true, Bool: true, Default: "true", Help: "accept MCP clients identified by a Client ID Metadata Document URL (Claude, VS Code) and advertise it; false turns it off (docs/how-to/cimd.md)"},
@@ -104,7 +114,19 @@ type Config struct {
 	EntraClientSecret string
 	// EntraClientSecretExpiresAt is zero when the operator did not say.
 	EntraClientSecretExpiresAt time.Time
-	KeysDir                    string
+	// IdP is the IdP adapter: "entra", "oidc" or an OIDC preset (OIDCPresets); it also names the
+	// callback path (/callback/<IdP>), audit records and metrics.
+	IdP string
+	// The generic OIDC adapter (IdP other than entra; ADR-0011 §2).
+	OIDCIssuer       string
+	OIDCClientID     string
+	OIDCClientSecret string
+	OIDCClientKey    string // PEM, for private_key_jwt
+	OIDCClientKeyID  string
+	OIDCScopes       []string
+	OIDCSubjectClaim string
+	OIDCName         string
+	KeysDir          string
 	// The identity assertion for the HTTP upstream (ADR-0016): its signing keys, the header that
 	// carries it and the optional claims it asserts (a subset of AssertionClaimNames).
 	AssertionKeysDir  string
@@ -269,19 +291,10 @@ func validate(v *Values, container bool) (*Config, error) {
 		c.Relaxations = append(c.Relaxations, "stdio upstream without authentication: anyone who can reach the proxy starts upstream processes, bounded only by BYWARD_STDIO_MAX_PROCESSES, and every process runs as the same anonymous user")
 	}
 	if !c.NoAuth {
-		c.EntraTenant, c.EntraClientID, c.EntraClientSecret = v.get("entra-tenant"), v.get("entra-client-id"), v.get("entra-client-secret")
 		c.OperatorName, c.ScopeDescription = v.get("operator-name"), v.get("scope-description")
 		errs = append(errs, checkText("operator-name", c.OperatorName, 80)...)
 		errs = append(errs, checkText("scope-description", c.ScopeDescription, 200)...)
-		for _, s := range []string{"entra-tenant", "entra-client-id", "entra-client-secret"} {
-			if v.get(s) == "" {
-				env := Setting{Name: s}.Env()
-				if s == "entra-client-secret" {
-					env += "_FILE"
-				}
-				errs = append(errs, errorf("%s is required (or set BYWARD_INSECURE_NO_AUTH to try the proxy without sign-in)", env))
-			}
-		}
+		errs = append(errs, c.idp(v)...)
 		c.GateTenants, c.GateRoles, c.GateGroups = splitList(v.get("gate-tenants")), splitList(v.get("gate-roles")), splitList(v.get("gate-groups"))
 		c.GateEmailDomains, c.GateHostedDomains = splitList(v.get("gate-email-domains")), splitList(v.get("gate-hosted-domains"))
 		// A gate list that is set but names nothing would silently open the gate.
@@ -328,10 +341,6 @@ func validate(v *Values, container bool) (*Config, error) {
 				(*s.dst)[i] = strings.ToLower(h)
 			}
 		}
-		errs = append(errs, c.secretExpiry(v)...)
-		if t := c.EntraTenant; t != "" && !isGUID(t) {
-			errs = append(errs, errorf("BYWARD_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000, got %q", t))
-		}
 	}
 	errs = append(errs, c.upstreamCredential(v)...)
 	if len(errs) > 0 {
@@ -342,6 +351,127 @@ func validate(v *Values, container bool) (*Config, error) {
 		return nil, &configError{msg: strings.Join(msgs, "; ")}
 	}
 	return c, nil
+}
+
+// OIDCPresets are the IdP values that select the generic OIDC adapter with a preset (ADR-0011 §2);
+// "oidc" selects it without one.
+var OIDCPresets = []string{"google", "okta", "auth0", "keycloak"}
+
+// OIDCDefaultIssuers are the issuers of presets that have one, used when BYWARD_OIDC_ISSUER is
+// unset.
+var OIDCDefaultIssuers = map[string]string{"google": "https://accounts.google.com"}
+
+// defaultIssuersHelp lists OIDCDefaultIssuers for the settings help.
+func defaultIssuersHelp() string {
+	var parts []string
+	for _, p := range slices.Sorted(maps.Keys(OIDCDefaultIssuers)) {
+		parts = append(parts, p+" defaults to "+OIDCDefaultIssuers[p])
+	}
+	return strings.Join(parts, ", ")
+}
+
+// idp reads the IdP: Entra, or the generic OIDC adapter. The two families' settings never mix: a
+// setting of the other family refuses to start, naming it and BYWARD_IDP.
+func (c *Config) idp(v *Values) []error {
+	c.IdP = v.get("idp")
+	oidc := c.IdP == "oidc" || slices.Contains(OIDCPresets, c.IdP)
+	if c.IdP != "entra" && !oidc {
+		return []error{errorf("BYWARD_IDP: want entra, oidc, %s, got %q", strings.Join(OIDCPresets, ", "), c.IdP)}
+	}
+	other := "oidc-" // the settings family that must stay unset
+	if oidc {
+		other = "entra-"
+	}
+	errs := c.mixedIdPSettings(v, other)
+	if oidc {
+		return append(errs, c.oidcIdP(v)...)
+	}
+	return append(errs, c.entraIdP(v)...)
+}
+
+// mixedIdPSettings refuses settings of the other IdP family (prefix other), named as the operator
+// set them.
+func (c *Config) mixedIdPSettings(v *Values, other string) []error {
+	var mixed []string
+	for _, n := range v.order {
+		if val := v.byKey[n]; strings.HasPrefix(n, other) && val.Source != SourceDefault {
+			name := val.Setting.Env()
+			if val.From != "" {
+				name = val.From // the env variable or flag the operator used, with its _FILE or -file suffix
+			}
+			mixed = append(mixed, name)
+		}
+	}
+	if len(mixed) == 0 {
+		return nil
+	}
+	return []error{errorf("%s cannot be used with BYWARD_IDP=%s: they configure the %s IdP; remove them, or set BYWARD_IDP to match",
+		strings.Join(mixed, ", "), c.IdP, strings.TrimSuffix(other, "-"))}
+}
+
+// requiredForIdP is an error for each named setting left empty.
+func (c *Config) requiredForIdP(v *Values, names ...string) []error {
+	var errs []error
+	for _, s := range names {
+		if v.get(s) == "" {
+			env := v.byKey[s].Setting.Env()
+			if v.byKey[s].Setting.Secret {
+				env += "_FILE"
+			}
+			errs = append(errs, errorf("%s is required with BYWARD_IDP=%s (or set BYWARD_INSECURE_NO_AUTH to try the proxy without sign-in)", env, c.IdP))
+		}
+	}
+	return errs
+}
+
+// entraIdP reads the Entra settings (ADR-0012).
+func (c *Config) entraIdP(v *Values) []error {
+	c.EntraTenant, c.EntraClientID, c.EntraClientSecret = v.get("entra-tenant"), v.get("entra-client-id"), v.get("entra-client-secret")
+	errs := c.requiredForIdP(v, "entra-tenant", "entra-client-id", "entra-client-secret")
+	errs = append(errs, c.secretExpiry(v)...)
+	if t := c.EntraTenant; t != "" && !isGUID(t) {
+		errs = append(errs, errorf("BYWARD_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000, got %q", t))
+	}
+	return errs
+}
+
+// oidcIdP reads the generic OIDC adapter's settings (ADR-0011 §2).
+func (c *Config) oidcIdP(v *Values) []error {
+	var errs []error
+	c.OIDCIssuer, c.OIDCClientID = v.get("oidc-issuer"), v.get("oidc-client-id")
+	c.OIDCClientSecret, c.OIDCClientKey, c.OIDCClientKeyID = v.get("oidc-client-secret"), v.get("oidc-client-key"), v.get("oidc-client-key-id")
+	c.OIDCScopes, c.OIDCSubjectClaim, c.OIDCName = splitList(v.get("oidc-scopes")), v.get("oidc-subject-claim"), v.get("oidc-name")
+	if c.OIDCIssuer == "" {
+		c.OIDCIssuer = OIDCDefaultIssuers[c.IdP]
+	}
+	if c.OIDCIssuer == "" {
+		errs = append(errs, c.requiredForIdP(v, "oidc-issuer")...)
+	}
+	errs = append(errs, c.requiredForIdP(v, "oidc-client-id")...)
+	secret, key := Setting{Name: "oidc-client-secret"}.Env()+"_FILE", Setting{Name: "oidc-client-key"}.Env()+"_FILE"
+	switch {
+	case c.OIDCClientSecret == "" && c.OIDCClientKey == "":
+		// A public client would let anyone who knows the client ID start the proxy's flow at the IdP.
+		errs = append(errs, errorf("%s or %s is required with BYWARD_IDP=%s: the proxy is a confidential client", secret, key, c.IdP))
+	case c.OIDCClientSecret != "" && c.OIDCClientKey != "":
+		errs = append(errs, errorf("%s and %s are both set; give one of them", secret, key))
+	}
+	if c.OIDCClientKeyID != "" && c.OIDCClientKey == "" {
+		errs = append(errs, errorf("BYWARD_OIDC_CLIENT_KEY_ID is set without %s", key))
+	}
+	if raw := v.get("oidc-scopes"); raw != "" && len(c.OIDCScopes) == 0 {
+		errs = append(errs, errorf("BYWARD_OIDC_SCOPES is set but lists nothing; remove it or give at least one scope"))
+	}
+	for _, sc := range c.OIDCScopes {
+		if strings.ContainsAny(sc, " \\\"") {
+			errs = append(errs, errorf("BYWARD_OIDC_SCOPES: %q is not a scope", sc))
+		}
+	}
+	if strings.TrimSpace(c.OIDCSubjectClaim) == "" {
+		errs = append(errs, errorf("BYWARD_OIDC_SUBJECT_CLAIM: want a claim name, got %q", c.OIDCSubjectClaim))
+	}
+	errs = append(errs, checkText("oidc-name", c.OIDCName, 80)...)
+	return errs
 }
 
 // upstream reads the upstream: an HTTP URL or a stdio command, exactly one of them.

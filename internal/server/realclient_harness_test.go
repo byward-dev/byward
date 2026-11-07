@@ -13,7 +13,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -183,8 +182,6 @@ func newRealClientEnv(t *testing.T) *realClientEnv {
 	t.Cleanup(srv.Close)
 	return env
 }
-
-var consentFlow = regexp.MustCompile(`name="flow" value="([^"]+)"`)
 
 // browse is what a user's browser does with an authorization URL: show the consent page, allow
 // after the consent delay, sign in at the IdP (the fake IdP signs in at once) and follow the
