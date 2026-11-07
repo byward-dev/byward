@@ -2,8 +2,10 @@ package fixtures
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -110,9 +112,41 @@ func TestALineHoldsARealEmailWhereverItsAddressStands(t *testing.T) {
 		"a" + "@" + "x.corp.test": true,
 		"a bare @ sign":           false,
 		"user@localhost":          false,
+		"a" + "@" + "example.com": false,
 	} {
 		if got := hasRealEmail(line); got != want {
 			t.Errorf("hasRealEmail(%q) = %v, want %v", line, got, want)
 		}
+	}
+}
+
+// No git means no check (the test skips); any other git failure is an error, never an empty list.
+func TestOnlyAMissingGitLeavesTheFileListUnchecked(t *testing.T) {
+	for name, tc := range map[string]struct {
+		path, root  string
+		wantMissing bool
+	}{
+		"no git on PATH":   {path: t.TempDir(), root: t.TempDir(), wantMissing: true},
+		"not a repository": {path: os.Getenv("PATH"), root: t.TempDir()},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("PATH", tc.path)
+			files, err := trackedFiles(tc.root)
+			if err == nil || files != nil || errors.Is(err, exec.ErrNotFound) != tc.wantMissing {
+				t.Fatalf("files %v, err %v; want an error, missing git %v", files, err, tc.wantMissing)
+			}
+		})
+	}
+}
+
+// A file the scan cannot read (here, a directory) is an error, not a skipped file: only one that is
+// gone from the working tree is skipped.
+func TestAFileTheScanCannotReadIsAnError(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "a-directory"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scan(root, []string{"a-directory"}, nil); err == nil {
+		t.Fatal("scan read a directory as a file without an error")
 	}
 }

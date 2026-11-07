@@ -162,29 +162,44 @@ func forbiddenList(raw string) []string {
 	return out
 }
 
-// trackedFiles lists the repository's tracked files, as git does. It skips the test only where
-// there is no git at all; any other failure fails it, so the check never passes by checking
-// nothing.
-func trackedFiles(t *testing.T, root string) []string {
-	t.Helper()
-	cmd := exec.Command("git", "-C", root, "ls-files", "-z") //nolint:gosec // G204: root is this repository, fixed by the test
-	b, err := cmd.Output()
-	if errors.Is(err, exec.ErrNotFound) {
-		t.Skip("no git: the privacy check needs the repository's file list")
-	}
+// trackedFiles lists the repository's tracked files, as git does. A missing git is an
+// exec.ErrNotFound; any other failure is an error the check must not pass over.
+func trackedFiles(root string) ([]string, error) {
+	b, err := exec.Command("git", "-C", root, "ls-files", "-z").Output() //nolint:gosec // G204: root is this repository, fixed by the test
 	if err != nil {
-		t.Fatalf("git ls-files: %v", err)
+		return nil, fmt.Errorf("git ls-files: %w", err)
 	}
-	// Go caches a test's result by the files it opens: stat git's index, so a newly added file
-	// re-runs the check instead of returning a cached pass.
-	idx, err := exec.Command("git", "-C", root, "rev-parse", "--path-format=absolute", "--git-path", "index").Output() //nolint:gosec // G204: as above
+	return strings.Split(strings.TrimSuffix(string(b), "\x00"), "\x00"), nil
+}
+
+// statInputs stats git's index and every directory that holds a tracked file. Go's test cache keys
+// a result on the files the test opens or stats, so a file added since the last run re-runs the
+// check instead of returning a cached pass. The directories matter in a git worktree, whose index
+// sits outside this module, where the cache does not look.
+func statInputs(root string, files []string) error {
+	out, err := exec.Command("git", "-C", root, "rev-parse", "--git-path", "index").Output() //nolint:gosec // G204: as above
 	if err != nil {
-		t.Fatalf("git rev-parse: %v", err)
+		return fmt.Errorf("git rev-parse: %w", err)
 	}
-	if _, err := os.Stat(strings.TrimSpace(string(idx))); err != nil {
-		t.Fatalf("git's index: %v", err)
+	idx := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(idx) { // relative to root, which git -C ran in
+		idx = filepath.Join(root, idx)
 	}
-	return strings.Split(strings.TrimSuffix(string(b), "\x00"), "\x00")
+	if _, err := os.Stat(idx); err != nil {
+		return err
+	}
+	dirs := map[string]bool{".": true}
+	for _, f := range files {
+		for d := filepath.Dir(f); d != "." && !dirs[d]; d = filepath.Dir(d) {
+			dirs[d] = true
+		}
+	}
+	for d := range dirs {
+		if _, err := os.Stat(filepath.Join(root, d)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 // The repository holds none of the identifiers and names the CI secret lists, anywhere, and its
@@ -199,7 +214,16 @@ func TestTheRepositoryHoldsNoForbiddenIdentifiersAndItsTestDataNoRealEmails(t *t
 	if len(forbidden) == 0 {
 		t.Logf("%s is not set: the identifier check is skipped, only email addresses are checked", forbiddenEnv)
 	}
-	files := trackedFiles(t, root)
+	files, err := trackedFiles(root)
+	if errors.Is(err, exec.ErrNotFound) {
+		t.Skip("no git: the privacy check needs the repository's file list")
+	}
+	if err != nil {
+		t.Fatal(err) // never pass by checking nothing
+	}
+	if err := statInputs(root, files); err != nil {
+		t.Fatalf("the check's inputs: %v", err)
+	}
 	if !slices.Contains(files, "internal/testutil/fixtures/privacy_test.go") {
 		t.Fatalf("git listed %d files, not this one: the scan would check the wrong tree", len(files))
 	}
