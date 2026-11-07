@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -195,4 +196,76 @@ func TestAForgedIdentityHeaderInAnySpellingIsReplacedBeforeInjectorsRun(t *testi
 	if strings.Join(order, ",") != "first,second:Bearer ours" {
 		t.Fatalf("injectors ran as %v", order)
 	}
+}
+
+// An MCP client's request trailers never reach the upstream, whatever they are named, and never
+// beside the headers the proxy strips or sets: they arrive after the body, out of the strip's sight.
+// Each name is sent straight to the relay, which forwards before the body is read (so only the
+// trailer's name has arrived), and behind a handler that reads the body first (so its value has too).
+func TestAClientsRequestTrailersNeverReachTheUpstream(t *testing.T) {
+	up := fakeupstream.New()
+	t.Cleanup(up.Close)
+	u, _ := url.Parse(up.URL + "/mcp")
+	ours := func(_ context.Context, h http.Header) { h.Set("X-Byward-Identity", "ours") }
+	relay := New(quiet(), u, WithStripped("X-Byward-Identity"), WithInject(ours))
+	readFirst := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(b))
+		relay.ServeHTTP(w, r)
+	})
+	body := `{"jsonrpc":"2.0","id":1,"method":"ping"}`
+	// The control: sent straight to the upstream, a trailer is recorded, so an empty record below
+	// means the relay dropped it.
+	sendWithTrailer(t, up.Server, "X-Harmless", body)
+	if got, _ := up.Last(); got.Trailer.Get("X-Harmless") != "forged" {
+		t.Fatal("the fake upstream does not record a trailer sent to it directly")
+	}
+	for _, front := range []struct {
+		name string
+		h    http.Handler
+	}{{"forwarded as it arrives", relay}, {"forwarded after the body is read", readFirst}} {
+		srv := httptest.NewServer(front.h)
+		t.Cleanup(srv.Close)
+		for _, name := range []string{"X-Byward-Identity", "Authorization", "Forwarded", "X-Forwarded-For", "Origin", "Mcp-Session-Id", "X-Harmless"} {
+			t.Run(front.name+"/"+name, func(t *testing.T) {
+				before := len(up.Requests())
+				if status := sendWithTrailer(t, srv, name, body); status != http.StatusOK {
+					t.Fatalf("status %d", status)
+				}
+				got, _ := up.Last()
+				if len(up.Requests()) != before+1 {
+					t.Fatal("nothing reached the upstream")
+				}
+				if len(got.Trailer) != 0 || string(got.Body) != body {
+					t.Fatalf("trailers %v, body %q reached the upstream", got.Trailer, got.Body)
+				}
+				// A regression guard: a Go upstream keeps trailers apart from headers, so this holds
+				// unless the relay itself copies a trailer into the headers.
+				if v := got.Header.Values(name); slices.Contains(v, "forged") {
+					t.Fatalf("the trailer reached the upstream as the header %s: %q", name, v)
+				}
+				if v := got.Header.Values("X-Byward-Identity"); len(v) != 1 || v[0] != "ours" {
+					t.Fatalf("X-Byward-Identity %q, want only ours", v)
+				}
+			})
+		}
+	}
+}
+
+// sendWithTrailer posts body to srv with the request trailer name: forged, and returns the
+// response status. The body has no length, so it is sent chunked, which is what carries trailers.
+func sendWithTrailer(t *testing.T, srv *httptest.Server, name, body string) int {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/mcp", io.NopCloser(strings.NewReader(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Trailer = http.Header{name: {"forged"}}
+	res, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	return res.StatusCode
 }

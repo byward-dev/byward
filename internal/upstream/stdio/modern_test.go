@@ -792,3 +792,45 @@ func TestClosingAListenStreamCancelsTheSubscriptionOnTheUpstream(t *testing.T) {
 		t.Fatalf("upstream saw cancellations %q, want exactly the listen's id as it received it, %q", ids, open[0])
 	}
 }
+
+// The bridge reads the headers it checks after the body (the protocol version and the mirrored
+// method and name) from the header section only: a request trailer is never read as one, so it can
+// neither refuse a good request nor stand in for a header the request left out.
+func TestARequestTrailerIsNeverReadAsAHeader(t *testing.T) {
+	body := modernBody(`1`, "tools/call", "", `"name":"weather"`)
+	for _, tc := range []struct {
+		name    string
+		omit    string      // a mirrored header the request leaves out
+		trailer http.Header // sent after the body
+		want    int
+		wantIn  string // in the response body
+	}{
+		{"a trailer contradicting the headers", "", http.Header{"Mcp-Name": {"news"}, "Mcp-Protocol-Version": {"1999-01-01"}}, http.StatusOK, `"id":1`},
+		{"a trailer standing in for a missing header", "Mcp-Name", http.Header{"Mcp-Name": {"weather"}}, http.StatusBadRequest, "header Mcp-Name missing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newModernBridge(t, nil)
+			req, err := http.NewRequest(http.MethodPost, b.srv.URL, io.NopCloser(strings.NewReader(body))) // no length: chunked, with trailers
+			if err != nil {
+				t.Fatal(err)
+			}
+			h := modernHeaders(body)
+			for i := 0; i+1 < len(h); i += 2 {
+				if h[i] != tc.omit {
+					req.Header.Set(h[i], h[i+1])
+				}
+			}
+			req.Header.Set("Accept", "application/json, text/event-stream")
+			req.Header.Set(userHeader, "alice")
+			req.Trailer = tc.trailer
+			res, err := b.srv.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = res.Body.Close() })
+			if raw, _ := io.ReadAll(res.Body); res.StatusCode != tc.want || !strings.Contains(string(raw), tc.wantIn) {
+				t.Fatalf("status %d, body %s; want %d with %q, the trailer unread", res.StatusCode, raw, tc.want, tc.wantIn)
+			}
+		})
+	}
+}
