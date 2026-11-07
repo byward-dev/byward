@@ -29,8 +29,9 @@ there.
 - There is no `X-Byward-Groups` with Entra's groups overage, or when there are too many groups to
   fit in an access token ([identity assertion](identity-assertion.md)): byward never sends an
   incomplete list.
-- `X-Byward-Email` is the same value as the assertion's `email`. Don't authorize on it: Entra does
-  not verify it. Use `X-Byward-Subject`.
+- `X-Byward-Email` is the same value as the assertion's `email`: the IdP's claim, never proof of an
+  address (Entra does not verify it, and an [OIDC IdP](oidc.md)'s is sent whether or not it set
+  `email_verified`). Don't authorize on it; use `X-Byward-Subject`.
 - The values are as fresh as the assertion's: up to one hour old
   ([identity assertion](identity-assertion.md)).
 
