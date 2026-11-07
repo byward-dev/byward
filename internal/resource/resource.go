@@ -22,22 +22,87 @@ const WellKnownPath = "/.well-known/oauth-protected-resource"
 type Identity struct {
 	Subject  string
 	ClientID string
-	// The opted-in identity claims, as sealed at the token's issue.
+	// PrincipalType is PrincipalUser, or PrincipalClient for an app-only caller (ADR-0022 §5).
+	PrincipalType string
+	// The opted-in identity claims, as sealed at the token's issue; an app-only caller's roles.
 	Roles, Groups []string
 	Email, Name   string
 	// EmailVerified: the IdP vouches for Email; false for an email asserted only because the
 	// operator opted in to unverified ones.
 	EmailVerified bool
+	// Audit, when set, is a record Guard writes on admitting the request: an app-only token's
+	// first use (ADR-0022 §7). It holds no credential.
+	Audit *audit.Event
 }
 
-// Validation errors. Only these two are distinguished to clients; every other failure,
-// cryptographic or not, looks like ErrInvalid.
-var (
-	ErrExpired = errors.New("expired")
-	ErrInvalid = errors.New("invalid")
+// Principal types (ADR-0016 §1, ADR-0022 §5).
+const (
+	PrincipalUser   = "user"
+	PrincipalClient = "client"
 )
 
-// Validator checks a proxy token.
+// Validation errors. Only expired and invalid are distinguished to clients; every other failure,
+// cryptographic or not, looks like ErrInvalid. ErrForbidden is a valid app-only token whose caller
+// the app gate refuses (403, ADR-0014 §3 amendment).
+var (
+	ErrExpired   = errors.New("expired")
+	ErrInvalid   = errors.New("invalid")
+	ErrForbidden = errors.New("forbidden")
+)
+
+// Rejection is a refusal that names its own audit record; Err is ErrExpired, ErrInvalid or
+// ErrForbidden. Without one, Guard records access_token_rejected.
+type Rejection struct {
+	Err   error
+	Event audit.Event
+}
+
+func (r *Rejection) Error() string { return r.Err.Error() + ": " + r.Event.Reason }
+
+func (r *Rejection) Unwrap() error { return r.Err }
+
+// Dispatch chooses the validator by the token's format, never by fallback (ADR-0022 §2): a token
+// with the proxy-token prefix goes to sealed alone; a three-part JWT goes to app alone, and only
+// when app is non-nil (app-only tokens on); anything else is invalid without either seeing it.
+func Dispatch(prefix string, sealed, app Validator) Validator {
+	return dispatch{prefix: prefix, sealed: sealed, app: app}
+}
+
+type dispatch struct {
+	prefix      string
+	sealed, app Validator
+}
+
+func (d dispatch) Validate(ctx context.Context, tok string) (Identity, error) {
+	switch {
+	case strings.HasPrefix(tok, d.prefix):
+		return d.sealed.Validate(ctx, tok)
+	case d.app != nil && isJWT(tok):
+		return d.app.Validate(ctx, tok)
+	}
+	return Identity{}, ErrInvalid
+}
+
+// isJWT is the compact JWS shape: three non-empty base64url segments.
+func isJWT(tok string) bool {
+	parts := strings.Split(tok, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, p := range parts {
+		if p == "" || strings.ContainsFunc(p, func(r rune) bool {
+			return (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_'
+		}) {
+			return false
+		}
+	}
+	return true
+}
+
+// Validator checks a bearer token: a proxy token, or an app-only token (ADR-0022). An error wraps
+// ErrExpired, ErrInvalid or ErrForbidden, optionally as a *Rejection naming its audit record. A
+// returned Identity always sets PrincipalType (PrincipalUser or PrincipalClient): the assertion
+// minter refuses one without it, and MCP sessions and stdio processes are keyed by it.
 type Validator interface {
 	Validate(ctx context.Context, token string) (Identity, error)
 }
@@ -129,12 +194,14 @@ func IdentityFrom(ctx context.Context) (Identity, bool) {
 }
 
 const (
-	descExpired = "The access token expired"
-	descInvalid = "The access token is invalid"
+	descExpired   = "The access token expired"
+	descInvalid   = "The access token is invalid"
+	descForbidden = "The caller lacks an app role or other access this resource requires"
 )
 
-// Guard admits requests carrying a valid proxy token in `Authorization: Bearer`. Tokens in the
-// query string are ignored (the relay removes `access_token` before the upstream sees it); a token sent
+// Guard admits requests carrying a valid token in `Authorization: Bearer`: a proxy token, or an
+// app-only token while they are on (v chooses, ADR-0022); an app the app gate refuses gets 403
+// insufficient_scope, every other refusal 401. Tokens in the query string are ignored (the relay removes `access_token` before the upstream sees it); a token sent
 // both ways gets 400.
 func Guard(m Metadata, v Validator, rec *audit.Log, next http.Handler) http.Handler {
 	challenge := `Bearer resource_metadata="` + m.PathInsertedURL() + `", scope="` + m.Scope + `"`
@@ -156,12 +223,30 @@ func Guard(m Metadata, v Validator, rec *audit.Log, next http.Handler) http.Hand
 		id, err := v.Validate(r.Context(), token)
 		if err != nil {
 			desc, reason := descInvalid, "invalid"
-			if errors.Is(err, ErrExpired) {
+			switch {
+			case errors.Is(err, ErrExpired):
 				desc, reason = descExpired, "expired"
+			case errors.Is(err, ErrForbidden):
+				reason = "forbidden"
 			}
-			rec.RecordUnauthenticated(r, audit.Event{Name: audit.AccessTokenRejected, Outcome: audit.Failure, Reason: reason})
+			ev := audit.Event{Name: audit.AccessTokenRejected, Outcome: audit.Failure, Reason: reason}
+			if rej := (*Rejection)(nil); errors.As(err, &rej) {
+				ev = rej.Event
+			}
+			rec.RecordUnauthenticated(r, ev)
+			if errors.Is(err, ErrForbidden) {
+				// No scope or resource_metadata: there is nothing an interactive step-up could
+				// add; only the operator's role assignment can (RFC 6750 §3.1).
+				w.Header().Set("WWW-Authenticate", `Bearer error="insufficient_scope", error_description="`+descForbidden+`"`)
+				writeError(w, http.StatusForbidden, "", "insufficient_scope", descForbidden)
+				return
+			}
 			writeError(w, http.StatusUnauthorized, challenge, "invalid_token", desc)
 			return
+		}
+		if id.Audit != nil {
+			rec.Record(r, *id.Audit)
+			id.Audit = nil
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), identityKey{}, id)))
 	})

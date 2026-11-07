@@ -22,6 +22,9 @@ type Diagnosis struct {
 	FederatedTokenSetting string
 	// GateRoles are the access gate's app roles, which the app registration must define.
 	GateRoles []string
+	// AppRoles are the app gate's roles when app-only tokens are on (ADR-0022), else nil; the
+	// app registration must define them for applications, and the idtyp claim is then required.
+	AppRoles []string
 }
 
 // AADSTS codes doctor names a fix for; the descriptions are Microsoft's error-code reference.
@@ -106,7 +109,7 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 	}
 	tr, err := p.token(ctx, url.Values{"grant_type": {"client_credentials"}, "scope": {resource + defaultScopeSuffix}})
 	if err == nil {
-		return []doctor.Result{result(name, doctor.Pass, "Entra accepted the tenant, the client ID and the credential", "")}, p.diagnoseToken(ctx, tr.AccessToken)
+		return []doctor.Result{result(name, doctor.Pass, "Entra accepted the tenant, the client ID and the credential", "")}, p.diagnoseToken(ctx, tr.AccessToken, d)
 	}
 	var ie *idp.Error
 	if !errors.As(err, &ie) {
@@ -177,7 +180,7 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 
 // diagnoseToken checks the probe's token as the proxy checks its login tokens: signed by the
 // tenant, issuer, v2, audience = the client ID; and the idtyp claim app-only callers need (ADR-0022).
-func (p *Provider) diagnoseToken(ctx context.Context, raw string) []doctor.Result {
+func (p *Provider) diagnoseToken(ctx context.Context, raw string, d Diagnosis) []doctor.Result {
 	const name = "entra access token"
 	claims, err := idp.VerifySignature(ctx, raw, p.keys, []jose.SignatureAlgorithm{jose.RS256})
 	if err != nil {
@@ -193,7 +196,11 @@ func (p *Provider) diagnoseToken(ctx context.Context, raw string) []doctor.Resul
 	if idp.StringClaim(claims, "idtyp") == "app" {
 		return append(out, result("entra idtyp claim", doctor.Pass, "app-only tokens carry idtyp=app", ""))
 	}
-	return append(out, result("entra idtyp claim", doctor.Warn, "app-only tokens carry no idtyp=app, so app-only callers (ADR-0022) would be refused",
+	status, msg := doctor.Warn, "app-only tokens carry no idtyp=app, so app-only callers (ADR-0022) would be refused"
+	if len(d.AppRoles) > 0 {
+		status, msg = doctor.Fail, "app-only tokens are on, but Entra's carry no idtyp=app, so every app-only caller is refused"
+	}
+	return append(out, result("entra idtyp claim", status, msg,
 		"add the idtyp optional claim to access tokens on the app registration (byward init entra prints the request)"))
 }
 
@@ -206,6 +213,9 @@ func (p *Provider) manualChecks(d Diagnosis) []doctor.Result {
 	roles := fmt.Sprintf(`check by hand: az ad app show --id %s --query "appRoles[].{value:value, members:allowedMemberTypes}"`, p.cfg.ClientID)
 	if len(d.GateRoles) > 0 {
 		roles += " must include " + strings.Join(d.GateRoles, ", ")
+	}
+	if len(d.AppRoles) > 0 {
+		roles += "; app roles for app-only callers, with Application among their members: " + strings.Join(d.AppRoles, ", ")
 	}
 	return append(out, result("entra app roles", doctor.Skip, noGraph, roles))
 }

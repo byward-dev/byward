@@ -44,6 +44,24 @@ func VerifyJWT(ctx context.Context, raw string, keys KeySource, r TokenRules) (m
 // VerifySignature checks a compact JWS against keys with an algorithm allowlist (HS* and none are
 // always refused) and returns its claims unchecked; callers apply their own claim rules.
 func VerifySignature(ctx context.Context, raw string, keys KeySource, allowed []jose.SignatureAlgorithm) (map[string]any, error) {
+	claims, _, err := verifySignature(ctx, raw, keys, allowed)
+	return claims, err
+}
+
+// VerifyTypedSignature is VerifySignature that also requires the JOSE header's typ to be exactly
+// typ, so a token of another kind signed by the same keys is refused.
+func VerifyTypedSignature(ctx context.Context, raw string, keys KeySource, allowed []jose.SignatureAlgorithm, typ string) (map[string]any, error) {
+	claims, h, err := verifySignature(ctx, raw, keys, allowed)
+	if err != nil {
+		return nil, err
+	}
+	if got, _ := h.ExtraHeaders[jose.HeaderType].(string); got != typ {
+		return nil, fmt.Errorf("idp: JWT typ must be %s", typ)
+	}
+	return claims, nil
+}
+
+func verifySignature(ctx context.Context, raw string, keys KeySource, allowed []jose.SignatureAlgorithm) (map[string]any, jose.Header, error) {
 	algs := make([]jose.SignatureAlgorithm, 0, len(allowed))
 	for _, a := range allowed {
 		if a != jose.HS256 && a != jose.HS384 && a != jose.HS512 && a != "none" {
@@ -51,25 +69,25 @@ func VerifySignature(ctx context.Context, raw string, keys KeySource, allowed []
 		}
 	}
 	if len(algs) == 0 {
-		return nil, errors.New("idp: no signature algorithm allowed")
+		return nil, jose.Header{}, errors.New("idp: no signature algorithm allowed")
 	}
 	tok, err := jwt.ParseSigned(raw, algs)
 	if err != nil {
 		// go-jose's parse errors can quote header bytes, and a JWT here may be a credential.
-		return nil, errors.New("idp: JWT is malformed or its alg is not allowed")
+		return nil, jose.Header{}, errors.New("idp: JWT is malformed or its alg is not allowed")
 	}
 	if len(tok.Headers) != 1 {
-		return nil, errors.New("idp: JWT must have one signature")
+		return nil, jose.Header{}, errors.New("idp: JWT must have one signature")
 	}
 	key, err := keys.Key(ctx, tok.Headers[0].KeyID)
 	if err != nil {
-		return nil, err
+		return nil, jose.Header{}, err
 	}
 	var claims map[string]any
 	if err := tok.Claims(key.Key, &claims); err != nil {
-		return nil, fmt.Errorf("idp: JWT signature: %w", err)
+		return nil, jose.Header{}, fmt.Errorf("idp: JWT signature: %w", err)
 	}
-	return claims, nil
+	return claims, tok.Headers[0], nil
 }
 
 func checkClaims(c map[string]any, r TokenRules) error {
@@ -145,3 +163,6 @@ func StringsClaim(c map[string]any, k string) []string {
 	}
 	return out
 }
+
+// TimeClaim is the NumericDate claim k, and whether it is one.
+func TimeClaim(c map[string]any, k string) (time.Time, bool) { return numericDate(c[k]) }

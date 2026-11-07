@@ -161,6 +161,6 @@ func stdioIdentity(cfg *config.Config) func(*http.Request) (stdio.Identity, bool
 	issuer := cfg.Issuer()
 	return func(r *http.Request) (stdio.Identity, bool) {
 		id, ok := resource.IdentityFrom(r.Context())
-		return stdio.Identity{Subject: id.Subject, Issuer: issuer}, ok && id.Subject != ""
+		return stdio.Identity{Subject: id.Subject, Issuer: issuer, PrincipalType: id.PrincipalType}, ok && id.Subject != ""
 	}
 }

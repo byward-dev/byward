@@ -31,8 +31,9 @@ Claims:
 |---|---|---|
 | `iss` | yes | byward's issuer: the public URL's origin, e.g. `https://mcp.example.com` |
 | `aud` | yes | `BYWARD_UPSTREAM_URL` exactly as configured, e.g. `http://mcp-upstream.internal:3001/mcp` |
-| `sub` | yes | the user key: `tid:oid` for Entra, stable and opaque |
-| `client_id` | yes | the MCP client's ID at byward (a static ID, a CIMD URL or a DCR ID) |
+| `sub` | yes | the user key: `tid:oid` for Entra, stable and opaque; for an app-only caller, its service principal's `tid:oid` |
+| `client_id` | yes | the MCP client's ID at byward (a static ID, a CIMD URL or a DCR ID); for an app-only caller, its Entra application (client) ID |
+| `principal_type` | yes | `user`, or `client` for a headless caller with an [app-only token](../how-to/app-tokens.md): check it before treating `sub` as a person |
 | `iat` | yes | issued at, seconds |
 | `exp` | yes | `iat` + 60 seconds |
 | `jti` | yes | 128 random bits, base64url |
@@ -42,7 +43,8 @@ Claims:
 | `email_verified` | exactly when `email` is | `true` when the IdP vouched for the address; `false` when only `BYWARD_ASSERTION_UNVERIFIED_EMAIL` let it through (every Entra email) |
 | `name` | `name` opted in | display only |
 
-A claim the user has no value for is left out; it is never sent empty. Roles and groups are as of
+A claim the user has no value for is left out; it is never sent empty. An app-only caller's
+assertion carries its app roles and never `groups`, `email`, `email_verified` or `name`. Roles and groups are as of
 the user's last sign-in or token refresh, so they can be up to one hour old.
 
 Example (from `internal/assertion/testdata/assertion.golden.json`; `jti` is random):
@@ -59,6 +61,7 @@ Example (from `internal/assertion/testdata/assertion.golden.json`; `jti` is rand
   "iss": "https://mcp.example.com",
   "jti": "<random>",
   "name": "Alex",
+  "principal_type": "user",
   "roles": ["byward.user"],
   "sub": "00000000-0000-0000-0000-000000000001:11111111-1111-1111-1111-111111111111"
 }

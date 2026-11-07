@@ -7,8 +7,13 @@ with byward's public keys. Decisions: [ADR-0016](../adr/0016-identity-propagatio
 and verification examples for go-sdk, the TypeScript SDK and FastMCP are in the
 [identity assertion reference](../reference/identity-assertion.md).
 
+Every assertion says what kind of principal it is for: `principal_type` is `user`, or `client` for
+a headless caller with an [app-only token](app-tokens.md). Check it before treating `sub` as a
+person.
+
 A stdio upstream gets no assertion. Each user has their own process, started with
-`BYWARD_SUBJECT` and `BYWARD_ISSUER` in its environment ([stdio upstream](stdio-upstream.md)).
+`BYWARD_SUBJECT`, `BYWARD_ISSUER` and `BYWARD_PRINCIPAL_TYPE` in its environment
+([stdio upstream](stdio-upstream.md)).
 
 ## 1. Create a signing key
 

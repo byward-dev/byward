@@ -1,6 +1,7 @@
 package fakeidp
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"testing"
@@ -48,4 +49,26 @@ func (p *IdP) Authorize(t testing.TB, loginURL string) url.Values {
 		t.Fatal(err)
 	}
 	return loc.Query()
+}
+
+// AppToken runs the client credentials grant as a headless caller would (Entra only): caller, with
+// secret, asks for an app-only token for the resource app api. It fails the test unless the fake
+// issues one.
+func (p *IdP) AppToken(t testing.TB, callerID, secret, api string) string {
+	t.Helper()
+	form := url.Values{"grant_type": {GrantClientCredentials}, "scope": {"api://" + api + "/.default"},
+		"client_id": {callerID}, "client_secret": {secret}}
+	resp, err := p.HTTPClient().PostForm(p.TokenURL(p.TenantID()), form)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var body struct {
+		AccessToken string `json:"access_token"`
+		Error       string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil || body.AccessToken == "" {
+		t.Fatalf("client credentials for %s: %d %s %v", callerID, resp.StatusCode, body.Error, err)
+	}
+	return body.AccessToken
 }

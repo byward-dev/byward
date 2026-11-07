@@ -103,3 +103,10 @@ whether it checks `email_verified` is unverified.) Sources checked 2026-11-07; r
 outside the repository. For a security product that is the right side to err on: an upstream that
 reads `email` gets one that someone vouched for, or a claim that says nobody did.
 
+## Amendment 2026-11-07 (#64): `principal_type`
+
+Every assertion carries `principal_type`: `user`, or `client` for an Entra app-only caller
+(ADR-0022 §5), whose `sub` is the service principal's `tid:oid` and `client_id` its application ID.
+The minter refuses an identity without one rather than defaulting to `user`. stdio processes get
+`BYWARD_PRINCIPAL_TYPE` and the plain identity headers (§5) `X-Byward-Principal-Type` with the same
+values.

@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/byward-dev/byward/internal/apptoken"
 	"github.com/byward-dev/byward/internal/broker"
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
@@ -38,6 +39,8 @@ type identityProvider struct {
 	// startWarnings are the warnings that depend on the time, logged at startup and reported by
 	// check; doctor reports the same through diagnose. Nil when there are none.
 	startWarnings func(now time.Time) []Warning
+	// appTokens verifies app-only tokens for BYWARD_APP_TOKENS (ADR-0022); Entra only, else nil.
+	appTokens apptoken.Verifier
 }
 
 // timedWarnings is ip.startWarnings at now, or none.
@@ -67,7 +70,7 @@ func newEntraIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect
 	if err != nil {
 		return nil, fmt.Errorf("entra settings (BYWARD_ENTRA_*): %w", err)
 	}
-	return &identityProvider{name: cfg.IdP, redirect: redirect, label: "Microsoft Entra", adapter: p, scope: p.Scope(), gateIdP: gate.Entra, userKey: entra.UserKey,
+	return &identityProvider{name: cfg.IdP, redirect: redirect, label: "Microsoft Entra", adapter: p, scope: p.Scope(), gateIdP: gate.Entra, userKey: entra.UserKey, appTokens: p,
 		diagnose: func(ctx context.Context, now time.Time) []doctor.Result {
 			out := p.Diagnose(ctx, diag)
 			if cfg.EntraClientSecret != "" { // only a secret expires
@@ -140,7 +143,7 @@ func oidcLabel(cfg *config.Config) string {
 // token file, and the settings doctor names in its fixes for it.
 func entraClientAuth(cfg *config.Config) (idp.ClientAuth, entra.Diagnosis) {
 	d := entra.Diagnosis{TenantSetting: config.Setting{Name: "entra-tenant"}.Env(), ClientIDSetting: config.Setting{Name: "entra-client-id"}.Env(),
-		GateRoles: cfg.GateRoles}
+		GateRoles: cfg.GateRoles, AppRoles: cfg.AppRoles}
 	if f := cfg.EntraFederatedTokenFile; f != "" { // re-read on every request, never cached
 		d.FederatedTokenSetting = config.Setting{Name: "entra-federated-token-file"}.Env()
 		return idp.AssertionFile(f), d

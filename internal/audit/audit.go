@@ -36,6 +36,8 @@ const (
 	StoreRestored       = "store_restored"        // startup found the store restored from an older copy; a new epoch began (ADR-0007 §9)
 	SessionRejected     = "session_rejected"      // a signed-in user presented an MCP session ID not bound to them (invariant 13)
 	ProcessEvicted      = "process_evicted"       // an idle stdio upstream process was stopped to make room under a process cap (ADR-0003 §5)
+	AppTokenAccepted    = "app_token_accepted"    // an app-only caller's token was first used at the MCP endpoint (ADR-0022 §7)
+	AppTokenRejected    = "app_token_rejected"    // an MCP request carried an app-only token that was invalid, expired, delegated, revoked or denied by the gate, or could not be checked (keys unavailable, deny list stale)
 )
 
 // Outcomes.

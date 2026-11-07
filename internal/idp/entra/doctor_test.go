@@ -94,6 +94,7 @@ func TestDiagnoseReportsEachMisconfigurationWithItsFix(t *testing.T) {
 		status    doctor.Status
 		inMessage string
 		inFix     string
+		appRoles  []string // app-only tokens on with these roles
 	}{
 		{name: "tenant that does not exist", opts: []fakeidp.Option{fakeidp.WithUnknownTenantsRefused(true)},
 			setup: func(t *testing.T, e *env) { rebuild(t, e, func(c *Config) { c.Tenant = fakeidp.NewGUID() }) },
@@ -128,6 +129,10 @@ func TestDiagnoseReportsEachMisconfigurationWithItsFix(t *testing.T) {
 			check: "entra access token", status: doctor.Fail, inMessage: `version "1.0"`, inFix: "requestedAccessTokenVersion to 2"},
 		{name: "no idtyp claim", opts: []fakeidp.Option{fakeidp.WithIDTypClaim(false)},
 			check: "entra idtyp claim", status: doctor.Warn, inMessage: "no idtyp=app", inFix: "idtyp optional claim"},
+		{name: "no idtyp claim with app-only tokens on", opts: []fakeidp.Option{fakeidp.WithIDTypClaim(false)}, appRoles: []string{"MCP.Invoke"},
+			check: "entra idtyp claim", status: doctor.Fail, inMessage: "every app-only caller is refused", inFix: "idtyp optional claim"},
+		{name: "app roles to check by hand", appRoles: []string{"MCP.Invoke"},
+			check: "entra app roles", status: doctor.Skip, inFix: "with Application among their members: MCP.Invoke"},
 		{name: "another error code", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantClientCredentials, &fakeidp.BlockedByConditionalAccess)},
 			check: "entra app and credential", status: doctor.Fail, inMessage: "AADSTS53003", inFix: "Conditional Access"},
 		{name: "an error code without an operator hint", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantClientCredentials, &fakeidp.InvalidScope)},
@@ -144,7 +149,9 @@ func TestDiagnoseReportsEachMisconfigurationWithItsFix(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(t, e)
 			}
-			r := diagnose(t, e.p, diagnosis)[tc.check]
+			d := diagnosis
+			d.AppRoles = tc.appRoles
+			r := diagnose(t, e.p, d)[tc.check]
 			if r.Status != tc.status || !strings.Contains(r.Message, tc.inMessage) || !strings.Contains(r.Fix, tc.inFix) {
 				t.Fatalf("%s = %+v\nwant status %s, message with %q, fix with %q", tc.check, r, tc.status, tc.inMessage, tc.inFix)
 			}

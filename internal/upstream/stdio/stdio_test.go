@@ -47,6 +47,8 @@ func TestUpstreamGetsOnlyAllowlistOperatorEnvAndIdentity(t *testing.T) {
 		{"without email", alice, nil},
 		{"with opted-in email", Identity{Subject: alice.Subject, Issuer: alice.Issuer, Email: "alice@example.com"},
 			[]string{"BYWARD_EMAIL=alice@example.com"}},
+		{"a user", Identity{Subject: alice.Subject, Issuer: alice.Issuer, PrincipalType: "user"}, []string{"BYWARD_PRINCIPAL_TYPE=user"}},
+		{"an app-only caller", Identity{Subject: alice.Subject, Issuer: alice.Issuer, PrincipalType: "client"}, []string{"BYWARD_PRINCIPAL_TYPE=client"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -315,6 +317,17 @@ func TestKeyIsBoundToOneUser(t *testing.T) {
 	}
 }
 
+// A user and an app-only caller never share a process, even with the same subject and issuer.
+func TestAUserAndAnAppWithTheSameSubjectNeverShareAProcess(t *testing.T) {
+	h := newHarness(t, nil)
+	user := Identity{Subject: alice.Subject, Issuer: alice.Issuer, PrincipalType: "user"}
+	app := Identity{Subject: alice.Subject, Issuer: alice.Issuer, PrincipalType: "client"}
+	h.get(t, "s1", user)
+	if _, _, err := h.m.Get(context.Background(), "s1", app); !errors.Is(err, ErrUserMismatch) {
+		t.Fatalf("Get by the app = %v, want ErrUserMismatch", err)
+	}
+}
+
 func TestConcurrentGetsForOneKeySpawnOnce(t *testing.T) {
 	h := newHarness(t, nil)
 	var wg sync.WaitGroup
@@ -337,16 +350,18 @@ func TestConcurrentGetsForOneKeySpawnOnce(t *testing.T) {
 func TestGetRequiresAnIdentity(t *testing.T) {
 	h := newHarness(t, nil)
 	cases := map[string]Identity{
-		"empty":          {},
-		"no issuer":      {Subject: "s"},
-		"no subject":     {Issuer: "i"},
-		"NUL in subject": {Subject: "a\x00b", Issuer: "i"},
-		"NUL in email":   {Subject: "s", Issuer: "i", Email: "a\x00b"},
+		"empty":                 {},
+		"no issuer":             {Subject: "s"},
+		"no subject":            {Issuer: "i"},
+		"NUL in subject":        {Subject: "a\x00b", Issuer: "i"},
+		"NUL in email":          {Subject: "s", Issuer: "i", Email: "a\x00b"},
+		"NUL in principal type": {Subject: "s", Issuer: "i", PrincipalType: "user\x00x"},
 	}
 	for name, id := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, _, err := h.m.Get(context.Background(), "s1", id); err == nil {
-				t.Fatal("Get succeeded")
+			// Refused by the identity check itself, before any process is started.
+			if _, _, err := h.m.Get(context.Background(), "s1", id); err == nil || !strings.Contains(err.Error(), "stdio: identity") {
+				t.Fatalf("Get = %v, want the identity refused", err)
 			}
 		})
 	}

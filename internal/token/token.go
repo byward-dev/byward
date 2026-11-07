@@ -38,7 +38,9 @@ const (
 // Prefixes make tokens recognisable to secret scanners and reject foreign strings before any
 // cryptography (ADR-0006 §8). The prefix is not a security boundary: the type is also sealed.
 const (
-	AccessPrefix  = "byw_at_"
+	// Prefix starts every sealed token; the MCP endpoint dispatches on it (ADR-0022 §2).
+	Prefix        = "byw_"
+	AccessPrefix  = Prefix + "at_"
 	CodePrefix    = "byw_ac_"
 	RefreshPrefix = "byw_rt_"
 )
