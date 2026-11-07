@@ -22,7 +22,9 @@ var allowed = map[string]bool{
 	slog.TimeKey: true, slog.LevelKey: true, slog.MessageKey: true,
 	"request_id": true, "method": true, "path": true, "status": true, "duration_ms": true,
 	"mcp_method": true, "remote_ip": true, "host": true, "origin": true, "reason": true,
-	"error": true, "listen": true, "version": true, "relaxation": true,
+	// On-Behalf-Of (ADR-0017 §5): where an administrator grants consent; no secret in it.
+	"admin_consent_url": true,
+	"error":             true, "listen": true, "version": true, "relaxation": true,
 	"setting": true, "value": true, "source": true, "panic": true, "epoch": true,
 	// The client sources at startup: the static client count and whether CIMD and DCR are on.
 	"static_clients": true, "cimd": true, "dcr": true,

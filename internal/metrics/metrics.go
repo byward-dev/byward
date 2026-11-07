@@ -31,6 +31,7 @@ type Metrics struct {
 	cimdFetches *prometheus.CounterVec
 	dcr         *prometheus.CounterVec
 	consent     *prometheus.CounterVec
+	downstream  *prometheus.CounterVec
 }
 
 // New registers every metric; the build-info gauge is labelled from the binary's build info.
@@ -65,11 +66,14 @@ func New() *Metrics {
 		consent: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_consent_total",
 			Help: "Consent decisions by client trust level (verified, domain, not-verified; empty for a prompt=none refusal after the IdP) and outcome (shown, granted, denied, remembered, silent_refused)."},
 			[]string{"trust", "outcome"}),
+		downstream: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_downstream_tokens_total",
+			Help: "On-Behalf-Of downstream tokens for upstream requests by outcome (cached, issued, consent_required, interaction_required, unavailable, failed)."},
+			[]string{"outcome"}),
 	}
 	build := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "byward_build_info",
 		Help: "Always 1; labelled with the proxy and Go versions."}, []string{"version", "go_version"})
 	build.WithLabelValues(version, goVersion).Set(1)
-	m.reg.MustRegister(m.requests, m.idp, m.inFlight, m.busy, m.auditEvents, m.rateLimited, m.cimdFetches, m.dcr, m.consent, build,
+	m.reg.MustRegister(m.requests, m.idp, m.inFlight, m.busy, m.auditEvents, m.rateLimited, m.cimdFetches, m.dcr, m.consent, m.downstream, build,
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	return m
 }
@@ -149,6 +153,14 @@ func (m *Metrics) CIMDFetch(outcome string) {
 		return
 	}
 	m.cimdFetches.WithLabelValues(outcome).Inc()
+}
+
+// Downstream counts a downstream token for an upstream request by outcome (ADR-0017).
+func (m *Metrics) Downstream(outcome string) {
+	if m == nil {
+		return
+	}
+	m.downstream.WithLabelValues(outcome).Inc()
 }
 
 // Consent counts a consent decision for a client of a trust level (ADR-0010 §12); it has the

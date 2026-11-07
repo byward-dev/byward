@@ -203,38 +203,52 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 	if !offline { // the response reports the scope actually granted (RFC 6749 §5.1)
 		scopes = slices.DeleteFunc(slices.Clone(scopes), func(s string) bool { return s == "offline_access" })
 	}
-	asserted, err := b.grantClaims(ctx, claims.GrantID)
+	asserted, idpExpiry, err := b.grantClaims(ctx, claims.GrantID)
 	if err != nil {
 		b.cfg.Log.ErrorContext(ctx, "reading a grant's identity claims failed", "request_id", logging.RequestID(ctx), "error", err)
 		b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not issue a token"})
 		return
 	}
 	b.recordUse(ctx, client, now)
-	b.issue(w, r, client.ID(), claims.GrantID, claims.Subject, asserted, now, expires, scopes, refresh)
+	b.issue(w, r, client.ID(), claims.GrantID, claims.Subject, asserted, idpExpiry, now, expires, scopes, refresh)
 }
 
-// grantClaims are the identity claims kept with a grant at sign-in, for its first access token.
-func (b *Broker) grantClaims(ctx context.Context, grantID string) (assertedClaims, error) {
+// grantClaims are the identity claims kept with a grant at sign-in, for its first access token,
+// and the expiry of the IdP access token kept with them (zero if unknown).
+func (b *Broker) grantClaims(ctx context.Context, grantID string) (assertedClaims, time.Time, error) {
 	g, err := b.cfg.Store.Grant(ctx, grantID)
 	if err != nil {
-		return assertedClaims{}, err
+		return assertedClaims{}, time.Time{}, err
 	}
 	if len(g.IdPTokens) == 0 {
-		return assertedClaims{}, nil
+		return assertedClaims{}, time.Time{}, nil
 	}
 	plain, err := b.cfg.IdPTokenBox.Open(string(g.IdPTokens))
 	if err != nil {
-		return assertedClaims{}, err
+		return assertedClaims{}, time.Time{}, err
 	}
 	s, err := unmarshalSecrets(plain)
-	return s.Claims, err
+	return s.Claims, s.Tokens.Expiry, err
 }
 
-// issue seals an access token (capped at the grant's expiry) carrying the client and the asserted
-// identity claims, and writes the token response.
-func (b *Broker) issue(w http.ResponseWriter, r *http.Request, clientID, grantID, subject string, asserted assertedClaims, now, grantExpires time.Time, scopes []string, refresh string) {
+// issue seals an access token (capped at the grant's expiry and, with CapAccessToIdPToken, at the
+// IdP access token's) carrying the client and the asserted identity claims, and writes the token
+// response.
+func (b *Broker) issue(w http.ResponseWriter, r *http.Request, clientID, grantID, subject string, asserted assertedClaims, idpExpiry, now, grantExpires time.Time, scopes []string, refresh string) {
 	ctx := r.Context()
 	exp := minTime(now.Add(AccessLifetime), grantExpires)
+	if b.cfg.CapAccessToIdPToken && !idpExpiry.IsZero() {
+		// On-Behalf-Of presents the stored IdP token; an access token that outlived it would reach
+		// the upstream without a downstream token (ADR-0017 amendment 2026-11-07).
+		// An IdP token that ends within the margin is not a cap: the code or refresh token is
+		// already spent, so failing here would strand the client; On-Behalf-Of refuses instead.
+		if capped := idpExpiry.Add(-IdPTokenMargin); capped.After(now) {
+			exp = minTime(exp, capped)
+		} else {
+			b.cfg.Log.WarnContext(ctx, "the IdP access token expires within the margin; the access token is not capped to it", "request_id", logging.RequestID(ctx),
+				"idp_token_expires_in", idpExpiry.Sub(now).String(), "margin", IdPTokenMargin.String())
+		}
+	}
 	c := token.Claims{GrantID: grantID, Subject: subject, IssuedAt: now, ExpiresAt: exp, ClientID: clientID,
 		Roles: asserted.Roles, Groups: asserted.Groups, Email: asserted.Email, Name: asserted.Name}
 	access, err := b.cfg.Sealer.Seal(token.Access, c)

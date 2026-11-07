@@ -31,6 +31,10 @@ OpenID Connect IdP ([OIDC how-to](how-to/oidc.md)), one per proxy.
 - An HTTP upstream that needs the proxy's own credential, such as an API key, gets the operator's
   value from a secret file, in a header the assertion does not use. A client cannot supply it, byward
   never sends it to a client, and it is never logged ([upstream credential](how-to/upstream-credential.md)).
+- With On-Behalf-Of on, an HTTP upstream also gets a token for one configured downstream API, such
+  as Microsoft Graph, exchanged for the user's stored Entra token. It travels in its own header,
+  which a client can never supply, and is never stored or logged
+  ([ADR-0017](adr/0017-delegation-obo.md), [how-to](how-to/downstream-apis.md)).
 
 **It does not:**
 

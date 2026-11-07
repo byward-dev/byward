@@ -241,7 +241,13 @@ func (p *Provider) Refresh(ctx context.Context, refreshToken string) (*idp.Ident
 }
 
 func (p *Provider) token(ctx context.Context, form url.Values) (*idp.TokenResponse, error) {
-	tokenURL := p.endpoint("/oauth2/v2.0/token")
+	return p.tokenAt(ctx, p.cfg.Tenant, form)
+}
+
+// tokenAt posts form to the token endpoint of tenant (the configured one, or a user's own for
+// On-Behalf-Of).
+func (p *Provider) tokenAt(ctx context.Context, tenant string, form url.Values) (*idp.TokenResponse, error) {
+	tokenURL := Authority + "/" + tenant + "/oauth2/v2.0/token"
 	if err := p.cfg.ClientAuth.Apply(form, p.cfg.ClientID, tokenURL, p.cfg.Now()); err != nil {
 		return nil, &idp.Error{Class: idp.Unavailable, Alert: true, Err: err}
 	}

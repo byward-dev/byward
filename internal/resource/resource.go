@@ -22,6 +22,9 @@ const WellKnownPath = "/.well-known/oauth-protected-resource"
 type Identity struct {
 	Subject  string
 	ClientID string
+	// GrantID is the grant the token was issued for; it leads to the user's stored IdP tokens
+	// (On-Behalf-Of, ADR-0017). Never sent to the upstream.
+	GrantID string
 	// The opted-in identity claims, as sealed at the token's issue.
 	Roles, Groups []string
 	Email, Name   string
