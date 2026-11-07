@@ -56,9 +56,10 @@ run() {
   repo="$tmp/repo-$1"
   mkdir -p "$repo/a/testdata/fuzz/FuzzA"
   : >"$repo/go.mod"
-  echo 'go test fuzz v1' >"$repo/a/testdata/fuzz/FuzzA/seed" # a committed seed is no crasher
-  git -C "$repo" init -q && git -C "$repo" add -A &&
-    git -C "$repo" -c user.email=t@t.example -c user.name=t -c commit.gpgsign=false commit -qm seed
+  echo 'go test fuzz v1' >"$repo/a/testdata/fuzz/FuzzA/seed" # a seed in the index is no crasher
+  # No commit: a file in the index is not untracked, and a commit would read the developer's git
+  # config (signing, hooks).
+  git -C "$repo" init -q && git -C "$repo" add -A
   mkdir -p "$repo/build/fuzz/crashers" && : >"$repo/build/fuzz/crashers/stale" # a previous run's
   printf '%s' "$2" >"$tmp/list"
   printf '%s' "$3" >"$tmp/failing"
