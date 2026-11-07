@@ -199,7 +199,10 @@ func (p *Provider) AuthCodeURL(ctx context.Context, l idp.Login) (string, error)
 	if l.LoginHint != "" {
 		q.Set("login_hint", l.LoginHint)
 	}
-	if l.SelectAccount {
+	switch {
+	case l.Silent:
+		q.Set("prompt", "none")
+	case l.SelectAccount:
 		q.Set("prompt", "select_account")
 	}
 	u, err := url.Parse(m.AuthorizationEndpoint)

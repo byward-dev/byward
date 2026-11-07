@@ -63,7 +63,7 @@ func New() *Metrics {
 			Help: "Dynamic client registrations at /register by outcome (registered, invalid_redirect_uri, invalid_client_metadata, full, unavailable, rate_limited)."},
 			[]string{"outcome"}),
 		consent: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_consent_total",
-			Help: "Consent decisions by client trust level (verified, domain, not-verified) and outcome (shown, granted, denied, remembered)."},
+			Help: "Consent decisions by client trust level (verified, domain, not-verified; empty for a prompt=none refusal after the IdP) and outcome (shown, granted, denied, remembered, silent_refused)."},
 			[]string{"trust", "outcome"}),
 	}
 	build := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "byward_build_info",

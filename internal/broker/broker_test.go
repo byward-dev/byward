@@ -64,6 +64,8 @@ type memStore struct {
 	// rewriteBlob, when set, replaces a new grant's sealed IdP-token blob, e.g. with the layout an
 	// older proxy wrote.
 	rewriteBlob func([]byte) []byte
+	createDown  atomic.Bool // CreateGrant fails
+	putCodeDown atomic.Bool // PutCode fails
 }
 
 var errStoreDown = errors.New("store down")
@@ -121,9 +123,19 @@ func (m *memStore) SetIdPTokens(ctx context.Context, id string, sealed []byte) e
 	return m.Store.SetIdPTokens(ctx, id, sealed)
 }
 
+func (m *memStore) PutCode(ctx context.Context, c store.PendingCode) error {
+	if m.putCodeDown.Load() {
+		return errStoreDown
+	}
+	return m.Store.PutCode(ctx, c)
+}
+
 func newMemStore() *memStore { return &memStore{Store: memory.New()} }
 
 func (m *memStore) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, error) {
+	if m.createDown.Load() {
+		return store.Grant{}, errStoreDown
+	}
 	if m.rewriteBlob != nil {
 		g.IdPTokens = m.rewriteBlob(g.IdPTokens)
 	}
@@ -729,12 +741,13 @@ func TestCallbackRejectsALoginItCannotTrust(t *testing.T) {
 		name  string
 		setup func(e *env, c *http.Cookie, q url.Values) []*http.Cookie
 		title string
+		spent bool // the login cookie sent is expired in the answer
 	}{
-		{"no login cookie", func(*env, *http.Cookie, url.Values) []*http.Cookie { return nil }, noCookie},
+		{"no login cookie", func(*env, *http.Cookie, url.Values) []*http.Cookie { return nil }, noCookie, false},
 		{"login cookie expired", func(e *env, c *http.Cookie, _ url.Values) []*http.Cookie {
 			e.now = e.now.Add(LoginLifetime + time.Second)
 			return []*http.Cookie{c}
-		}, expired},
+		}, expired, true},
 		{"login cookie tampered", func(_ *env, c *http.Cookie, _ url.Values) []*http.Cookie { //nolint:gosec // G124: a client-side copy of the broker's cookie, sent back with a tampered value
 			v := []byte(c.Value)
 			i := len(v) / 2
@@ -745,7 +758,7 @@ func TestCallbackRejectsALoginItCannotTrust(t *testing.T) {
 			}
 			c.Value = string(v)
 			return []*http.Cookie{c}
-		}, expired},
+		}, expired, true},
 		{"state differs after the cookie-name prefix", func(_ *env, c *http.Cookie, q url.Values) []*http.Cookie {
 			st := []byte(q.Get("state"))
 			if st[20] == '0' {
@@ -755,11 +768,11 @@ func TestCallbackRejectsALoginItCannotTrust(t *testing.T) {
 			}
 			q.Set("state", string(st))
 			return []*http.Cookie{c}
-		}, expired},
+		}, expired, true},
 		{"state too short", func(_ *env, c *http.Cookie, q url.Values) []*http.Cookie {
 			q.Set("state", "short")
 			return []*http.Cookie{c}
-		}, "This sign-in link is not valid."},
+		}, "This sign-in link is not valid.", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -773,6 +786,17 @@ func TestCallbackRejectsALoginItCannotTrust(t *testing.T) {
 			}
 			if firstGrant(e.st) != "" {
 				t.Fatal("a grant was created")
+			}
+			// A login cookie the state names is spent whether or not it opens (a state too short to name
+			// one leaves the cookie alone); a browser deletes it only for the same name and path.
+			if c.spent {
+				var spent bool
+				for _, set := range res.Cookies() {
+					spent = spent || (set.Name == cookie.Name && set.Path == "/" && set.MaxAge < 0)
+				}
+				if !spent {
+					t.Fatalf("the login cookie was not expired: %v", res.Cookies())
+				}
 			}
 		})
 	}
@@ -1128,7 +1152,7 @@ func TestThrottledAuthorizeWithoutATrustedRedirectShowsThe429Page(t *testing.T) 
 	}
 }
 
-func TestThrottledCallbackShowsThe429PageWithoutCallingTheIdP(t *testing.T) {
+func TestThrottledCallbackShowsThe429PageWithoutCallingTheIdPAndKeepsTheLoginForARetry(t *testing.T) {
 	e := newEnv(t)
 	c, cb := e.startLogin(t, nil)
 	e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"callback": true}}
@@ -1144,6 +1168,16 @@ func TestThrottledCallbackShowsThe429PageWithoutCallingTheIdP(t *testing.T) {
 		t.Error("a grant was created by a throttled callback")
 	}
 	e.oneAuditEvent(t, "rate_limited", map[string]any{"outcome": "failure", "reason": "callback"})
+	// An interactive login is not spent by the 429: the user's retry once the limit lifts finishes it.
+	for _, set := range res.Cookies() {
+		if set.Name == c.Name {
+			t.Fatalf("the 429 touched the login cookie: %+v", set)
+		}
+	}
+	e.b.cfg.Limiter = nil
+	if retry := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{c}); retry.StatusCode != http.StatusFound || !strings.Contains(retry.Header.Get("Location"), "code=") {
+		t.Fatalf("the retry after the limit lifted: %d to %q, want a code", retry.StatusCode, retry.Header.Get("Location"))
+	}
 }
 
 // The user's decision (#55 follow-up design): /token answers 429 + Retry-After + no-store with a

@@ -188,6 +188,36 @@ the client and redirect URI again. This is accepted behaviour, not a gap: no tok
   consent forgotten in between, it issues nothing, clears the cookie and shows the page.
 - Every revocation forgets: `/revoke`, refresh-token reuse, and `byward revoke-user` and
   `revoke-all` remove the matching rows in the same transaction as the grants.
+- **Silent sign-in (`prompt=none`, OIDC Core §3.1.2.1) never shows the page.** It proceeds only on
+  a remembered consent for the user the hint names, and then asks the IdP with its own
+  `prompt=none`. Anything else is an OAuth error at the validated redirect URI, with `state` and
+  `iss`: `consent_required` for a client asked every time or with no consent covering the request;
+  `login_required` without a hint, because nothing goes to the IdP before consent is established
+  (ADR-0010 §1); the IdP's own `login_required`, `interaction_required`, `consent_required` or
+  `account_selection_required` as it sent them; and `consent_required` when someone else signs in
+  behind the hint (nothing issued, the hint cleared). Every refusal is audited (`consent_silent`).
+  - The different answers for "no hint" and "a hint but no consent" are not an oracle: the
+    request runs in the user's own browser with the user's own hint cookie (`SameSite=Lax`, so a
+    cross-site frame never carries it), and the answer goes only to a redirect URI the client
+    registered. Only the client learns it, or, for a loopback client, any local process (see the
+    accepted local-process item below), and only that this browser's user has not approved it,
+    which a page would have shown it too. A third-party site
+    can start the request but cannot read where it ends. A client asked every time always gets
+    `consent_required`, whatever is remembered. `/authorize`'s rate limit applies before any of
+    this.
+  - After the IdP, a silent sign-in never ends on a page either: an access-gate denial is
+    `access_denied` naming no rule (still audited as `access_denied`), any other IdP failure is
+    `server_error` or `temporarily_unavailable`, and a store failure while re-checking the consent
+    is `temporarily_unavailable` and keeps the hint.
+  - A silent IdP round trip without a hint (for browsers that lost the cookie) is not built; it
+    would send the user to the IdP before consent is known. Later, if a real client needs it.
+  - **Accepted: a login is single use on the client side only.** The sealed login cookie holds
+    the sign-in in progress; a callback spends it by telling the browser to delete it, and the
+    server keeps no record. A rate-limited silent callback answers `temporarily_unavailable`
+    without redeeming the IdP code, so a client that kept a copy of the cookie (it is `__Host-`
+    and HttpOnly) and ignored the deletion could still get a code for that request after the
+    limit. A well-behaved client has consumed its `state` with the error and refuses a later
+    code for it. Server-side single-use logins would need a store change; they are a follow-up.
 - **Accepted: a local process can reuse a remembered loopback client.** A loopback redirect URI is
   remembered whatever its port, because ADR-0009 §2 lets the port vary (Claude Code picks a new one
   every run). So, for a remembered loopback client, a process on the user's machine that opens
@@ -195,6 +225,8 @@ the client and redirect URI again. This is accepted behaviour, not a gap: no tok
   PKCE does not help, because that process chooses the verifier. Without remembered consent the
   page would at least show "Claude Code wants…" to a user who did not start it. This is accepted:
   local malware is outside the threat model, and it could read the client's own token store anyway.
+  With `prompt=none` such a process also learns, without any page, whether the user has a
+  remembered consent for that client (a page used to show when they had not).
   Operators who want the page every time for such clients can leave their CIMD host off
   `BYWARD_CIMD_TRUSTED_HOSTS`; a static client is always remembered.
 

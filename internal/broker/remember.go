@@ -97,32 +97,47 @@ func (b *Broker) skipConsent(r *http.Request, client registration.Client, l *log
 
 // confirmRemembered is the callback's check of a login that skipped the page: the user who signed
 // in is the one the hint named, the client is still one whose consent is remembered, and a live
-// consent still covers the request. It returns the client when it holds, or the audit reason.
-func (b *Broker) confirmRemembered(ctx context.Context, l login, id idp.Identity) (registration.Client, string) {
+// consent still covers the request. It returns the client when it holds, or the audit reason, with
+// the lookup error when the check could not be made (a store or registry failure).
+func (b *Broker) confirmRemembered(ctx context.Context, l login, id idp.Identity) (registration.Client, string, error) {
 	if l.Hint.Issuer != id.Issuer || l.Hint.Subject != id.Subject {
-		return nil, hintUserMismatch
+		return nil, hintUserMismatch, nil
 	}
 	client, err := b.cfg.Clients.Client(ctx, l.ClientID)
-	if err != nil || !b.remembers(client) || client.RedirectAllowed(l.RedirectURI) != nil {
-		return nil, hintNotRemembered
+	switch {
+	case err != nil && !errors.Is(err, registration.ErrUnknownClient):
+		return nil, hintNotRemembered, err
+	case err != nil || !b.remembers(client) || client.RedirectAllowed(l.RedirectURI) != nil:
+		return nil, hintNotRemembered, nil
 	}
 	ok, err := b.remembered(ctx, hint{Issuer: id.Issuer, Subject: id.Subject}, l, b.cfg.Now())
 	if err != nil {
-		b.cfg.Log.WarnContext(ctx, "checking remembered consent failed; asking", "request_id", logging.RequestID(ctx), "error", err.Error())
+		b.cfg.Log.WarnContext(ctx, "checking remembered consent failed", "request_id", logging.RequestID(ctx), "error", err.Error())
+		return nil, hintNotRemembered, err
 	}
 	if !ok {
-		return nil, hintNotRemembered
+		return nil, hintNotRemembered, nil
 	}
-	return client, ""
+	return client, "", nil
 }
 
 // askAfterMismatch handles a login that skipped the page when the callback's check failed: it
 // issues nothing (the IdP tokens of this sign-in are dropped), forgets the hint and shows the page
-// for the same request, which leads to a new IdP sign-in after Allow.
-func (b *Broker) askAfterMismatch(w http.ResponseWriter, r *http.Request, l login, id idp.Identity, reason string) {
+// for the same request, which leads to a new IdP sign-in after Allow. A prompt=none login gets no
+// page: consent_required, or temporarily_unavailable keeping the hint when lookupErr says the
+// check could not be made.
+func (b *Broker) askAfterMismatch(w http.ResponseWriter, r *http.Request, l login, id idp.Identity, reason string, lookupErr error) {
 	b.cfg.Audit.Record(r, audit.Event{Name: audit.ConsentRemembered, Outcome: audit.Failure, Reason: reason, ClientID: l.ClientID,
 		UserKey: id.Subject, IdP: b.cfg.IdPName})
+	if l.Silent && lookupErr != nil {
+		b.refuseSilently(w, r, "", l, "temporarily_unavailable", "the proxy could not check the consent; try again")
+		return
+	}
 	b.clearHint(w)
+	if l.Silent {
+		b.refuseSilently(w, r, "", l, "consent_required", "the user has not approved this request")
+		return
+	}
 	client, ok := b.loadClient(w, r, l.ClientID, l.RedirectURI)
 	if !ok {
 		return
