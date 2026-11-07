@@ -24,6 +24,7 @@ for a in "\$@"; do url=\$a; done
 case \$url in
 */readyz) [ -f "$tmp/serve-exits" ] && exit 7; exit 0 ;;
 esac
+printf '%s\n' "\$*" >>"$tmp/oidc-calls"
 [ -f "$tmp/oidc-fails" ] && exit 22
 cat "$tmp/oidc.json"
 EOF
@@ -34,8 +35,12 @@ cat >"\$out" <<'FAKE'
 #!/bin/sh
 env >"$tmp/byward-env.\$\$"
 case \${1:-} in
-check) echo "configuration OK"; exit 0 ;;
-doctor) cat "$tmp/doctor.json"; exit \$(cat "$tmp/doctor-exit") ;;
+check) [ -f "$tmp/check-fails" ] && exit 2; echo "configuration OK"; exit 0 ;;
+doctor)
+  [ "\${2:-}" = --json ] || exit 64
+  # What Entra would be sent: the setting, the file's mode and its content.
+  { printf '%s\n' "\$BYWARD_ENTRA_FEDERATED_TOKEN_FILE"; ls -l "\$BYWARD_ENTRA_FEDERATED_TOKEN_FILE" | cut -c1-10; cat "\$BYWARD_ENTRA_FEDERATED_TOKEN_FILE"; } >"$tmp/doctor-saw"
+  cat "$tmp/doctor.json"; exit \$(cat "$tmp/doctor-exit") ;;
 esac
 [ -f "$tmp/serve-exits" ] && exit 1
 while sleep 1; do :; done # no exec: the process keeps this path, so the test can see it left running
@@ -50,12 +55,13 @@ all_pass="{\"checks\":[{\"name\":\"entra tenant\",$pass},{\"name\":\"entra signi
 # case name | OIDC response ("fail" for an HTTP error) | doctor JSON | doctor exit | serve ("exits") |
 # want exit | want output (grep -E)
 run() {
-  rm -f "$tmp/oidc-fails" "$tmp/serve-exits" "$tmp"/byward-env.*
+  rm -f "$tmp/oidc-fails" "$tmp/serve-exits" "$tmp/check-fails" "$tmp/oidc-calls" "$tmp/doctor-saw" "$tmp"/byward-env.*
   rm -rf "$tmp/runner" && mkdir -p "$tmp/runner"
   if [ "$2" = fail ]; then : >"$tmp/oidc-fails"; else printf '%s' "$2" >"$tmp/oidc.json"; fi
   printf '%s' "$3" >"$tmp/doctor.json"
   printf '%s' "$4" >"$tmp/doctor-exit"
   [ "$5" = exits ] && : >"$tmp/serve-exits"
+  [ "$5" = check-fails ] && : >"$tmp/check-fails"
   set +e
   out=$(cd "$tmp/repo" && env PATH="$tmp/bin:$PATH" RUNNER_TEMP="$tmp/runner" ACTIONS_ID_TOKEN_REQUEST_URL="https://oidc.example/t?v=1" \
     ACTIONS_ID_TOKEN_REQUEST_TOKEN=request-token BYWARD_CI_ENTRA_TENANT=00000000-0000-0000-0000-000000000001 \
@@ -77,6 +83,35 @@ run() {
   if case $2 in *"$token"*) true ;; *) false ;; esac && [ "$(printf '%s\n' "$out" | head -n 1)" != "::add-mask::$token" ]; then
     echo "FAIL $1: the mask is not the first thing printed"
     failures=$((failures + 1))
+  fi
+  # GitHub was asked for an Entra token, with the job's request token; doctor read exactly that
+  # token from a 0600 file, fetched afresh for it (the second request).
+  if [ -f "$tmp/oidc-calls" ] && ! grep -q 'audience=api://AzureADTokenExchange' "$tmp/oidc-calls"; then
+    echo "FAIL $1: the OIDC request names no Entra audience"
+    failures=$((failures + 1))
+  fi
+  if [ -f "$tmp/oidc-calls" ] && ! grep -q 'Authorization: bearer request-token' "$tmp/oidc-calls"; then
+    echo "FAIL $1: the OIDC request lacks the job's request token"
+    failures=$((failures + 1))
+  fi
+  if [ -f "$tmp/oidc-calls" ] && grep -vq '&audience=api://AzureADTokenExchange$' "$tmp/oidc-calls"; then
+    echo "FAIL $1: an OIDC request does not end with the Entra audience: $(cat "$tmp/oidc-calls")"
+    failures=$((failures + 1))
+  fi
+  # byward ran as the lane means it: the CI app, in --dev on loopback.
+  if [ -f "$tmp/doctor-saw" ] && ! { cat "$tmp"/byward-env.* | grep -qx 'BYWARD_ENTRA_TENANT=00000000-0000-0000-0000-000000000001' &&
+    cat "$tmp"/byward-env.* | grep -qx 'BYWARD_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002' &&
+    cat "$tmp"/byward-env.* | grep -qx 'BYWARD_DEV=true'; }; then
+    echo "FAIL $1: byward did not get the CI app's tenant, client ID and --dev"
+    failures=$((failures + 1))
+  fi
+  if [ -f "$tmp/doctor-saw" ]; then
+    saw_mode=$(sed -n 2p "$tmp/doctor-saw")
+    saw_token=$(sed -n 3p "$tmp/doctor-saw")
+    if [ "$saw_mode" != "-rw-------" ] || [ "$saw_token" != "$token" ] || [ "$(wc -l <"$tmp/oidc-calls" | tr -d ' ')" != 2 ]; then
+      echo "FAIL $1: doctor's token file: mode $saw_mode, the token? $([ "$saw_token" = "$token" ] && echo yes || echo no), OIDC requests $(wc -l <"$tmp/oidc-calls" | tr -d ' ')"
+      failures=$((failures + 1))
+    fi
   fi
   if [ -n "$(ls -A "$tmp/runner")" ]; then
     echo "FAIL $1: left $(ls "$tmp/runner") behind"
@@ -105,6 +140,7 @@ run doctor-fails     "$ok"  "$all_pass" 4 serves 1 'FAIL: byward doctor exited 4
 run a-check-warns    "$ok"  "$warn"     0 serves 1 'doctor check "entra idtyp claim" is warn, want pass'
 run a-check-missing  "$ok"  "$missing"  0 serves 1 'doctor check "entra access token" is missing, want pass'
 run never-ready      "$ok"  "$all_pass" 0 exits  1 'FAIL: the proxy did not become ready'
+run check-fails      "$ok"  "$all_pass" 0 check-fails 1 'FAIL: byward check --offline'
 
 out=$(env -i PATH="$PATH" sh "$script" 2>&1) && code=0 || code=$?
 if [ "$code" -ne 1 ] || ! printf '%s\n' "$out" | grep -q 'the job needs permissions: id-token: write'; then

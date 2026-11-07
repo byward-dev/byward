@@ -136,8 +136,6 @@ func oidcLabel(cfg *config.Config) string {
 	return "your identity provider"
 }
 
-// oidcClientAuth is the proxy's credential at an oidc IdP: a client secret, or private_key_jwt with
-// a PEM key. Config refuses neither or both.
 // entraClientAuth is the Entra app's credential (ADR-0012 §5), the client secret or the federated
 // token file, and the settings doctor names in its fixes for it.
 func entraClientAuth(cfg *config.Config) (idp.ClientAuth, entra.Diagnosis) {
@@ -151,6 +149,8 @@ func entraClientAuth(cfg *config.Config) (idp.ClientAuth, entra.Diagnosis) {
 	return idp.ClientSecret(cfg.EntraClientSecret), d
 }
 
+// oidcClientAuth is the proxy's credential at an oidc IdP: a client secret, or private_key_jwt with
+// a PEM key. Config refuses neither or both.
 func oidcClientAuth(cfg *config.Config) (idp.ClientAuth, error) {
 	if cfg.OIDCClientKey == "" {
 		return idp.ClientSecret(cfg.OIDCClientSecret), nil

@@ -32,6 +32,10 @@ func (c Class) String() string {
 
 // Error is an IdP failure. Error() never includes the IdP's error_description, which may carry
 // user identifiers; Description is kept for operator logs only.
+// ErrCredential wraps a ClientAuth that could not make its credential, such as an unreadable or
+// empty client assertion file: the request never left the proxy.
+var ErrCredential = errors.New("idp: the client credential could not be made")
+
 type Error struct {
 	Class Class
 	// OAuth is the RFC 6749 error value, if the IdP sent one.

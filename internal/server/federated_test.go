@@ -129,32 +129,30 @@ func TestARenewedFederatedTokenIsUsedAndAnEmptiedOneFailsClosed(t *testing.T) {
 	if err := os.WriteFile(f.token, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if c := f.credentialCheck(t); c.Status != doctor.Fail || !strings.Contains(c.Message, "client assertion file is empty") {
+	if c := f.credentialCheck(t); c.Status != doctor.Fail || !strings.Contains(c.Message, "client assertion file is empty") ||
+		!strings.Contains(c.Fix, "BYWARD_ENTRA_FEDERATED_TOKEN_FILE must exist") {
 		t.Fatalf("empty token file: %s %s", c.Status, c.Message)
 	}
 }
 
 // The token file is a credential: one other users can read refuses startup (except with --dev, as
 // every secret file), and a missing one refuses it even with --dev.
-func TestALooseOrMissingFederatedTokenFileRefusesToStart(t *testing.T) {
+func TestALooseFederatedTokenFileRefusesToStartOutsideDevAndAMissingOneAlways(t *testing.T) {
+	loosen := func(t *testing.T, path string) {
+		if err := os.Chmod(path, 0o644); err != nil { //nolint:gosec // G302: the mode under test
+			t.Fatal(err)
+		}
+	}
 	for _, tc := range []struct {
 		name    string
 		dev     bool
 		prepare func(t *testing.T, path string)
 		inErr   string // "" when the proxy starts
 	}{
-		{"readable by others", false, func(t *testing.T, path string) {
-			if err := os.Chmod(path, 0o644); err != nil { //nolint:gosec // G302: the mode under test
-				t.Fatal(err)
-			}
-		}, "has mode 0644, so other users can read it"},
-		{"readable by others, --dev", true, func(t *testing.T, path string) {
-			if err := os.Chmod(path, 0o644); err != nil { //nolint:gosec // G302: the mode under test
-				t.Fatal(err)
-			}
-		}, ""},
-		{"missing", false, func(t *testing.T, path string) { removeFile(t, path) }, "no such file or directory"},
-		{"missing, --dev", true, func(t *testing.T, path string) { removeFile(t, path) }, "no such file or directory"},
+		{"readable by others", false, loosen, "has mode 0644, so other users can read it"},
+		{"readable by others, --dev", true, loosen, ""},
+		{"missing", false, removeFile, "no such file or directory"},
+		{"missing, --dev", true, removeFile, "no such file or directory"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFederated(t, githubSubject)

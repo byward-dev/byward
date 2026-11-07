@@ -141,6 +141,13 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 		return []doctor.Result{result(name, doctor.Fail, "Entra has no resource "+resource+" in tenant "+p.cfg.Tenant+" ("+code+"): the Application ID URI is not set, or the app has no service principal",
 			"set the Application ID URI to "+resource+" (docs/how-to/quickstart-entra.md step 1.2) and create the service principal: az ad sp create --id "+p.cfg.ClientID)}, nil
 	}
+	if errors.Is(ie.Err, idp.ErrCredential) { // never sent: the credential itself is unusable
+		fix := "check the client secret file"
+		if d.FederatedTokenSetting != "" {
+			fix = "the file named by " + d.FederatedTokenSetting + " must exist, be readable by the proxy and hold the current token (whatever writes it, such as GitHub Actions or AKS workload identity, renews it in place)"
+		}
+		return []doctor.Result{result(name, doctor.Fail, "the client-credentials probe was not sent: "+ie.Err.Error(), fix)}, nil
+	}
 	if ie.Code == 0 {
 		msg := "the client-credentials probe failed"
 		switch {

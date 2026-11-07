@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -250,6 +252,13 @@ func TestDiagnoseWithAFederatedTokenNeverBlamesASecret(t *testing.T) {
 			status: doctor.Fail, inMessage: "the client-credentials probe failed", inFix: mustMatch},
 		{name: "a failure with an operator hint", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantClientCredentials, &fakeidp.BlockedByConditionalAccess)},
 			status: doctor.Fail, inMessage: "AADSTS53003", inFix: "Conditional Access"},
+		{name: "an empty token file", setup: func(t *testing.T, e *env) {
+			path := filepath.Join(t.TempDir(), "token")
+			if err := os.WriteFile(path, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			rebuild(t, e, func(c *Config) { c.ClientAuth = idp.AssertionFile(path) })
+		}, status: doctor.Fail, inMessage: "not sent: idp: the client credential could not be made", inFix: "TOKEN_SETTING must exist, be readable by the proxy and hold the current token"},
 		{name: "organizations mode", setup: func(t *testing.T, e *env) {
 			rebuild(t, e, func(c *Config) { c.Tenant, c.AllowedTenants = Organizations, []string{fakeidp.NewGUID()} })
 		}, status: doctor.Skip, inMessage: "not probed", inFix: "az ad app federated-credential list --id"},
