@@ -5,6 +5,7 @@ package fixtures
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"go/scanner"
 	"go/token"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -68,17 +70,7 @@ func scan(root string, files []string, forbidden []string) ([]finding, error) {
 			}
 			return nil, err
 		}
-		lower := bytes.ToLower(src)
-		for _, f := range forbidden {
-			for at := 0; ; {
-				i := bytes.Index(lower[at:], []byte(f))
-				if i < 0 {
-					break
-				}
-				out = append(out, finding{rel, 1 + bytes.Count(src[:at+i], []byte("\n")), kindForbidden})
-				at += i + len(f)
-			}
-		}
+		out = append(out, forbiddenHits(rel, src, forbidden)...)
 		switch {
 		case fixture(rel):
 			for i, line := range strings.Split(string(src), "\n") {
@@ -93,6 +85,28 @@ func scan(root string, files []string, forbidden []string) ([]finding, error) {
 	return out, nil
 }
 
+// forbiddenHits reports each place in src where an entry of forbidden (lower case) appears, in
+// any case.
+func forbiddenHits(rel string, src []byte, forbidden []string) []finding {
+	var out []finding
+	lower := bytes.ToLower(src)
+	for _, f := range forbidden {
+		for at := 0; ; {
+			i := bytes.Index(lower[at:], []byte(f))
+			if i < 0 {
+				break
+			}
+			// Counted in lower: ToLower can change byte lengths (invalid UTF-8, some runes), never
+			// newlines.
+			out = append(out, finding{rel, 1 + bytes.Count(lower[:at+i], []byte("\n")), kindForbidden})
+			at += i + len(f)
+		}
+	}
+	return out
+}
+
+// hasRealEmail reports whether s holds an email-shaped string whose domain is not reserved for
+// examples.
 func hasRealEmail(s string) bool {
 	for _, m := range emailShape.FindAllStringSubmatch(s, -1) {
 		if !exampleDomain(m[1]) {
@@ -124,9 +138,15 @@ func testLiteralEmails(rel string, src []byte) []finding {
 		}
 		start := fset.Position(pos).Line
 		for i, line := range strings.Split(text, "\n") {
-			if hasRealEmail(line) {
-				out = append(out, finding{rel, start + i, kindEmail})
+			if !hasRealEmail(line) {
+				continue
 			}
+			// A raw literal spans source lines; an interpreted one's \n escapes stay on its line.
+			at := start
+			if lit[0] == '`' {
+				at += i
+			}
+			out = append(out, finding{rel, at, kindEmail})
 		}
 	}
 }
@@ -142,13 +162,27 @@ func forbiddenList(raw string) []string {
 	return out
 }
 
-// trackedFiles lists the repository's tracked files, as git does.
+// trackedFiles lists the repository's tracked files, as git does. It skips the test only where
+// there is no git at all; any other failure fails it, so the check never passes by checking
+// nothing.
 func trackedFiles(t *testing.T, root string) []string {
 	t.Helper()
 	cmd := exec.Command("git", "-C", root, "ls-files", "-z") //nolint:gosec // G204: root is this repository, fixed by the test
 	b, err := cmd.Output()
+	if errors.Is(err, exec.ErrNotFound) {
+		t.Skip("no git: the privacy check needs the repository's file list")
+	}
 	if err != nil {
-		t.Skipf("git ls-files: %v (the privacy check needs the repository's file list)", err)
+		t.Fatalf("git ls-files: %v", err)
+	}
+	// Go caches a test's result by the files it opens: stat git's index, so a newly added file
+	// re-runs the check instead of returning a cached pass.
+	idx, err := exec.Command("git", "-C", root, "rev-parse", "--path-format=absolute", "--git-path", "index").Output() //nolint:gosec // G204: as above
+	if err != nil {
+		t.Fatalf("git rev-parse: %v", err)
+	}
+	if _, err := os.Stat(strings.TrimSpace(string(idx))); err != nil {
+		t.Fatalf("git's index: %v", err)
 	}
 	return strings.Split(strings.TrimSuffix(string(b), "\x00"), "\x00")
 }
@@ -156,7 +190,7 @@ func trackedFiles(t *testing.T, root string) []string {
 // The repository holds none of the identifiers and names the CI secret lists, anywhere, and its
 // test data no real email address (ADR-0024 §13). Without the secret (forks, local runs) only the
 // email rule runs.
-func TestTheRepositoryHoldsNoRealIdentifiersOrEmails(t *testing.T) {
+func TestTheRepositoryHoldsNoForbiddenIdentifiersAndItsTestDataNoRealEmails(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
 	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
 		t.Fatalf("not at the repository root: %v", err)
@@ -165,7 +199,11 @@ func TestTheRepositoryHoldsNoRealIdentifiersOrEmails(t *testing.T) {
 	if len(forbidden) == 0 {
 		t.Logf("%s is not set: the identifier check is skipped, only email addresses are checked", forbiddenEnv)
 	}
-	found, err := scan(root, trackedFiles(t, root), forbidden)
+	files := trackedFiles(t, root)
+	if !slices.Contains(files, "internal/testutil/fixtures/privacy_test.go") {
+		t.Fatalf("git listed %d files, not this one: the scan would check the wrong tree", len(files))
+	}
+	found, err := scan(root, files, forbidden)
 	if err != nil {
 		t.Fatal(err)
 	}

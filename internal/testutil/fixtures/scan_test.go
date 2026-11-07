@@ -28,10 +28,14 @@ func TestTheScanFindsPlantedValuesAndNeverPrintsThem(t *testing.T) {
 	root := t.TempDir()
 	files := map[string]string{
 		"internal/x/testdata/fixture.json": "{\n\"tid\": \"" + strings.ToUpper(id) + "\",\n\"mail\": \"" + real + "\",\n\"ok\": \"" + example + "\"\n}\n",
-		"internal/x/x_test.go":             "package x\n\n// a comment, not test data: " + real + "\nvar a = \"" + real + "\"\nvar b = `\n" + example + "\n" + real + "`\n",
+		"internal/x/x_test.go":             "package x\n\n// a comment, not test data: " + real + "\nvar a = \"" + real + "\"\nvar b = `\n" + example + "\n" + real + "`\nvar c = \"x\\n" + real + "\"\n",
 		"docs/notes.md":                    "line one\nthe " + strings.ToLower(name) + " project\nwrite to " + real + "\nagain: " + name + "\n",
 		"internal/x/x.golden":              "\n\n" + real + "\n",
-		"internal/x/x.go":                  "package x\n\nconst mail = \"" + real + "\"\n",
+		"testdata/root.json":               example + " cc " + real + "\n",
+		// Lowering shrinks each İ (2 bytes to 1) and grows invalid bytes (1 to 3): line counts must
+		// not mix the two byte offsets.
+		"assets/blob.bin": strings.Repeat("\u0130", 20) + "\xff\n" + strings.ToUpper(name) + "\n",
+		"internal/x/x.go": "package x\n\nconst mail = \"" + real + "\"\n",
 	}
 	var rels []string
 	for rel, body := range files {
@@ -54,9 +58,12 @@ func TestTheScanFindsPlantedValuesAndNeverPrintsThem(t *testing.T) {
 		"internal/x/testdata/fixture.json:3: " + kindEmail:     true,
 		"internal/x/x_test.go:4: " + kindEmail:                 true,
 		"internal/x/x_test.go:7: " + kindEmail:                 true,
+		"internal/x/x_test.go:8: " + kindEmail:                 true,
 		"docs/notes.md:2: " + kindForbidden:                    true,
 		"docs/notes.md:4: " + kindForbidden:                    true,
 		"internal/x/x.golden:3: " + kindEmail:                  true,
+		"testdata/root.json:1: " + kindEmail:                   true,
+		"assets/blob.bin:2: " + kindForbidden:                  true,
 	}
 	gotSet := map[string]bool{}
 	for _, f := range got {
@@ -73,13 +80,39 @@ func TestTheScanFindsPlantedValuesAndNeverPrintsThem(t *testing.T) {
 	}
 }
 
-func TestOnlyReservedDomainsAreExamples(t *testing.T) {
+func TestOnlyTheExampleDomainsAreAllowedInTestEmails(t *testing.T) {
 	for d, want := range map[string]bool{
-		"example.com": true, "mail.example.org": true, "example.net": true, "contoso.example": true, "a.b.example": true,
+		"example.com": true, "Mail.EXAMPLE.com": true, "mail.example.org": true, "example.net": true, "contoso.example": true, "a.b.example": true,
 		"contoso.com": false, "example.com.evil.net": false, "notexample.com": false, "corp.test": false, "example": false,
 	} {
 		if got := exampleDomain(d); got != want {
 			t.Errorf("exampleDomain(%q) = %v, want %v", d, got, want)
+		}
+	}
+}
+
+func TestTestDataIsWhatIsUnderATestdataDirectoryOrAGoldenFile(t *testing.T) {
+	for rel, want := range map[string]bool{
+		"testdata/a.json": true, "internal/x/testdata/a": true, "x.golden": true, "internal/x/events.golden.jsonl": true,
+		"internal/x/x.go": false, "docs/testdata.md": false, "mytestdata/a": false, "internal/x/x_test.go": false,
+	} {
+		if got := fixture(rel); got != want {
+			t.Errorf("fixture(%q) = %v, want %v", rel, got, want)
+		}
+	}
+}
+
+func TestALineHoldsARealEmailWhereverItsAddressStands(t *testing.T) {
+	real, example := "ops"+"@"+"corp.test", "alex"+"@"+"contoso.example"
+	for line, want := range map[string]bool{
+		example + " then " + real: true,
+		example + ", " + example:  false,
+		"a" + "@" + "x.corp.test": true,
+		"a bare @ sign":           false,
+		"user@localhost":          false,
+	} {
+		if got := hasRealEmail(line); got != want {
+			t.Errorf("hasRealEmail(%q) = %v, want %v", line, got, want)
 		}
 	}
 }
