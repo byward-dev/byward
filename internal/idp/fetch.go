@@ -159,7 +159,10 @@ func (f *Fetcher) PostToken(ctx context.Context, endpoint string, form url.Value
 	}
 	tr.Status, tr.Header = resp.StatusCode, resp.Header
 	if resp.StatusCode/100 == 2 && tr.Error == "" && tr.AccessToken == "" && tr.IDToken == "" {
-		return nil, errors.New("token endpoint returned no tokens")
+		// A success without tokens breaks the protocol: retrying the same request will not help, and
+		// the grant is not at fault, so it is Fatal (fail the request, keep the grant), never
+		// Unavailable.
+		return nil, &Error{Class: Fatal, Alert: true, Err: errors.New("token endpoint returned a success without tokens")}
 	}
 	return tr, nil
 }

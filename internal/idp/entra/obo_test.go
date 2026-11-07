@@ -129,8 +129,8 @@ func TestOnBehalfOfRefusesAnAnswerWithoutABearerToken(t *testing.T) {
 			c := *e.p.fetch.Client
 			c.Transport = oboAnswer{next: c.Transport, body: body}
 			e.p.fetch.Client = &c
-			if tok, err := e.p.OnBehalfOf(context.Background(), tid, assertion, graphUserRead); err == nil || tok.AccessToken != "" {
-				t.Fatalf("token set %v, err %v; want an error and no token", tok.AccessToken != "", err)
+			if tok, err := e.p.OnBehalfOf(context.Background(), tid, assertion, graphUserRead); idp.ClassOf(err) != idp.Fatal || tok.AccessToken != "" {
+				t.Fatalf("token set %v, err %v; want a fatal error and no token", tok.AccessToken != "", err)
 			}
 		})
 	}

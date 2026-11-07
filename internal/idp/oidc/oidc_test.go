@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -434,6 +435,28 @@ func TestTokenTransportFailureIsUnavailable(t *testing.T) {
 	if !asError(err, &ie) || ie.Class != idp.Unavailable || ie.Alert {
 		t.Fatalf("err = %#v", err)
 	}
+}
+
+// A token answer that succeeds without tokens breaks the protocol: Fatal, never Unavailable.
+func TestATokenSuccessWithoutTokensIsFatal(t *testing.T) {
+	e := newEnv(t, Config{})
+	if err := e.p.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	e.p.fetch.Client = &http.Client{Transport: emptySuccess{}}
+	_, _, err := e.p.Refresh(context.Background(), "rt")
+	var ie *idp.Error
+	if !asError(err, &ie) || ie.Class != idp.Fatal {
+		t.Fatalf("err = %#v, want Fatal", err)
+	}
+}
+
+// emptySuccess answers every request 200 with an empty JSON object.
+type emptySuccess struct{}
+
+func (emptySuccess) RoundTrip(r *http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}},
+		Body: io.NopCloser(strings.NewReader("{}")), Request: r}, nil
 }
 
 func TestConcurrentFirstLoginsShareDiscovery(t *testing.T) {
