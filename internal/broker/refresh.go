@@ -122,7 +122,7 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 	end := func(why, hint string) ([]byte, assertedClaims, tokenError, bool) {
 		b.revoke(r, g.ClientID, g.ID, now, why)
 		if hint != "" {
-			b.cfg.Log.WarnContext(ctx, why, "request_id", logging.RequestID(ctx), "reason", hint)
+			b.cfg.Log.WarnContext(ctx, why, "request_id", logging.RequestID(ctx), "idp", b.cfg.IdPName, "reason", hint)
 		}
 		return nil, assertedClaims{}, signInAgain, false
 	}
@@ -153,8 +153,9 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 	}
 	switch {
 	case id == nil:
+		// The gate is re-run on fresh claims at every refresh (ADR-0015 §1); without them it cannot be.
 		return end("the IdP returned no ID token on refresh; grant revoked",
-			"check that openid is in the scopes the IdP app requests")
+			"the IdP must return an ID token on the refresh_token grant (openid scope); see the IdP's how-to")
 	case id.Subject != g.Subject || id.Issuer != g.Issuer:
 		return end("the IdP returned another user on refresh; grant revoked", "OIDC Core §12.2: sub and iss must not change")
 	}

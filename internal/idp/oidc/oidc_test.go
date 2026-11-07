@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -31,6 +32,7 @@ func newEnv(t *testing.T, cfg Config, opts ...fakeidp.Option) *env {
 	fake := fakeidp.New(t, fakeidp.Generic, append([]fakeidp.Option{fakeidp.WithClient(c), fakeidp.WithClock(now)}, opts...)...)
 	if cfg.Issuer == "" {
 		cfg.Issuer = fake.Issuer()
+		cfg.AllowLoopbackHTTP = true // the fake serves http on loopback, as in development mode
 	}
 	cfg.ClientID, cfg.RedirectURL = c.ID, redirect
 	if cfg.Now == nil {
@@ -158,7 +160,7 @@ func TestCallbackErrorResponseIsClassified(t *testing.T) {
 
 func TestDiscoveryIssuerMustMatchExactly(t *testing.T) {
 	e := newEnv(t, Config{}, fakeidp.WithIssuer("https://other.example"))
-	p, err := New(Config{Issuer: e.fake.URL(), ClientID: e.client.ID, RedirectURL: redirect})
+	p, err := New(Config{Issuer: e.fake.URL(), ClientID: e.client.ID, RedirectURL: redirect, AllowLoopbackHTTP: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +252,7 @@ func TestPrivateKeyJWTWithKid(t *testing.T) {
 func TestPublicClientSignsInWithoutCredential(t *testing.T) {
 	c := fakeidp.Client{ID: fakeidp.NewGUID(), RedirectURIs: []string{redirect}}
 	fake := fakeidp.New(t, fakeidp.Generic, fakeidp.WithClient(c), fakeidp.WithClock(now))
-	p, err := New(Config{Issuer: fake.Issuer(), ClientID: c.ID, RedirectURL: redirect, Now: now})
+	p, err := New(Config{Issuer: fake.Issuer(), ClientID: c.ID, RedirectURL: redirect, Now: now, AllowLoopbackHTTP: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +281,8 @@ func TestGooglePresetQuirks(t *testing.T) {
 		fakeidp.WithEmailVerifiedAsString(true),
 		fakeidp.WithUser(fakeidp.User{Email: "test.user@contoso.example", EmailVerified: true, HostedDomain: "contoso.example"}))
 	raw, _ := e.p.AuthCodeURL(context.Background(), login)
-	if u, _ := url.Parse(raw); u.Query().Get("access_type") != "offline" || strings.Contains(u.Query().Get("scope"), "offline_access") {
+	if u, _ := url.Parse(raw); u.Query().Get("access_type") != "offline" || strings.Contains(u.Query().Get("scope"), "offline_access") ||
+		u.Query().Get("hd") != "contoso.example" {
 		t.Errorf("google login URL = %s", raw)
 	}
 	id, _, err := e.p.Callback(context.Background(), signIn(t, e, login), login)
@@ -302,16 +305,17 @@ func TestStringEmailVerifiedOnlyWithPreset(t *testing.T) {
 	}
 }
 
-func TestNewValidates(t *testing.T) {
+func TestAMisconfiguredIssuerOrClientIsRefusedAndAGoodOneAccepted(t *testing.T) {
 	ok := Config{Issuer: "https://idp.example", ClientID: "c", RedirectURL: redirect}
 	for name, edit := range map[string]func(*Config){
-		"unknown preset":          func(c *Config) { c.Preset = "github" },
-		"no issuer":               func(c *Config) { c.Issuer = "" },
-		"no client":               func(c *Config) { c.ClientID = "" },
-		"http issuer":             func(c *Config) { c.Issuer = "http://idp.example" },
-		"okta org server":         func(c *Config) { c.Preset, c.Issuer = "okta", "https://x.okta.com" },
-		"auth0 without slash":     func(c *Config) { c.Preset, c.Issuer = "auth0", "https://x.auth0.com" },
-		"keycloak without realms": func(c *Config) { c.Preset, c.Issuer = "keycloak", "https://kc.example" },
+		"unknown preset":                    func(c *Config) { c.Preset = "github" },
+		"no issuer":                         func(c *Config) { c.Issuer = "" },
+		"no client":                         func(c *Config) { c.ClientID = "" },
+		"http issuer":                       func(c *Config) { c.Issuer = "http://idp.example" },
+		"okta org server":                   func(c *Config) { c.Preset, c.Issuer = "okta", "https://x.okta.com" },
+		"auth0 without slash":               func(c *Config) { c.Preset, c.Issuer = "auth0", "https://x.auth0.com" },
+		"keycloak without realms":           func(c *Config) { c.Preset, c.Issuer = "keycloak", "https://kc.example" },
+		"loopback http outside development": func(c *Config) { c.Issuer = "http://127.0.0.1:9000" },
 	} {
 		c := ok
 		edit(&c)
@@ -320,11 +324,12 @@ func TestNewValidates(t *testing.T) {
 		}
 	}
 	for name, edit := range map[string]func(*Config){
-		"plain":         func(*Config) {},
-		"okta custom":   func(c *Config) { c.Preset, c.Issuer = "okta", "https://x.okta.com/oauth2/default" },
-		"auth0":         func(c *Config) { c.Preset, c.Issuer = "auth0", "https://x.auth0.com/" },
-		"keycloak":      func(c *Config) { c.Preset, c.Issuer = "keycloak", "https://kc.example/realms/r" },
-		"loopback http": func(c *Config) { c.Issuer = "http://127.0.0.1:9000" },
+		"plain":                        func(*Config) {},
+		"okta custom":                  func(c *Config) { c.Preset, c.Issuer = "okta", "https://x.okta.com/oauth2/default" },
+		"auth0":                        func(c *Config) { c.Preset, c.Issuer = "auth0", "https://x.auth0.com/" },
+		"keycloak":                     func(c *Config) { c.Preset, c.Issuer = "keycloak", "https://kc.example/realms/r" },
+		"loopback http in development": func(c *Config) { c.Issuer, c.AllowLoopbackHTTP = "http://127.0.0.1:9000", true },
+		"https on a private address":   func(c *Config) { c.Issuer = "https://10.0.0.5/realms/r" },
 	} {
 		c := ok
 		edit(&c)
@@ -334,15 +339,25 @@ func TestNewValidates(t *testing.T) {
 	}
 }
 
-func TestDiscoveredEndpointsMustBeHTTPS(t *testing.T) {
-	if err := checkURL("http://evil.example/token", "https://idp.example"); err == nil {
-		t.Error("http endpoint for https issuer accepted")
-	}
-	if err := checkURL("http://127.0.0.1/token", "https://idp.example"); err == nil {
-		t.Error("loopback http endpoint for https issuer accepted")
-	}
-	if err := checkURL("/relative", "https://idp.example"); err == nil {
-		t.Error("relative endpoint accepted")
+func TestDiscoveredEndpointsMustBeHTTPSUnlessALoopbackIssuerRunsInDevelopment(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, issuer string
+		development, ok   bool
+	}{
+		{"https", "https://idp.example/token", "https://idp.example", false, true},
+		{"http for an https issuer", "http://evil.example/token", "https://idp.example", false, false},
+		{"http for an https issuer in development", "http://evil.example/token", "https://idp.example", true, false},
+		{"loopback http for an https issuer in development", "http://127.0.0.1/token", "https://idp.example", true, false},
+		{"a relative endpoint", "/relative", "https://idp.example", false, false},
+		{"https without a host", "https:///token", "https://idp.example", false, false},
+		{"loopback http outside development", "http://127.0.0.1:9000/token", "http://127.0.0.1:9000", false, false},
+		{"loopback http of a loopback issuer in development", "http://127.0.0.1:9000/token", "http://127.0.0.1:9000", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := checkURL(tc.raw, tc.issuer, tc.development); (err == nil) != tc.ok {
+				t.Fatalf("checkURL(%q, %q, development %v) = %v, want ok %v", tc.raw, tc.issuer, tc.development, err, tc.ok)
+			}
+		})
 	}
 }
 
@@ -447,5 +462,51 @@ func TestASilentLoginAsksTheIdPWithPromptNoneEvenWhenAccountSelectionIsAsked(t *
 	u, _ := url.Parse(raw)
 	if got := u.Query()["prompt"]; len(got) != 1 || got[0] != "none" {
 		t.Fatalf("prompt = %q, want only none", got)
+	}
+}
+
+// The IdP is the operator's, not client-supplied, so its discovery is not behind the SSRF guard:
+// a self-hosted IdP on a private or loopback address works over https (ADR-0011 §7).
+func TestAnHTTPSIssuerOnANonPublicAddressIsDiscovered(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"issuer":%q,"authorization_endpoint":%q,"token_endpoint":%q,"jwks_uri":%q}`,
+			srv.URL+"/realms/r", srv.URL+"/realms/r/auth", srv.URL+"/realms/r/token", srv.URL+"/realms/r/certs")
+	}))
+	t.Cleanup(srv.Close)
+	p, err := New(Config{Preset: "keycloak", Issuer: srv.URL + "/realms/r", ClientID: "c", RedirectURL: redirect, HTTPClient: srv.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Ready(context.Background()); err != nil {
+		t.Fatalf("discovery of an https issuer on %s: %v", srv.URL, err)
+	}
+}
+
+// Google returns a refresh token only on the first code exchange, so every sign-in asks for
+// consent again; asking to pick an account keeps that (prompt is a list). A silent sign-in sends
+// none alone, which may not be combined with other values (OIDC Core §3.1.2.1): it accepts that
+// Google may return no new refresh token.
+func TestGoogleIsAskedForConsentEverySignInExceptASilentOne(t *testing.T) {
+	e := newEnv(t, Config{Preset: "google"})
+	for name, tc := range map[string]struct {
+		selectAccount, silent bool
+		want                  string
+	}{
+		"plain":                             {want: "consent"},
+		"selecting an account":              {selectAccount: true, want: "consent select_account"},
+		"silent":                            {silent: true, want: "none"},
+		"silent, also selecting an account": {selectAccount: true, silent: true, want: "none"},
+	} {
+		l := login
+		l.SelectAccount, l.Silent = tc.selectAccount, tc.silent
+		raw, err := e.p.AuthCodeURL(context.Background(), l)
+		if err != nil {
+			t.Fatal(err)
+		}
+		u, _ := url.Parse(raw)
+		if got := u.Query()["prompt"]; len(got) != 1 || got[0] != tc.want || u.Query().Get("access_type") != "offline" {
+			t.Errorf("%s: prompt %q access_type %q, want only %q and offline", name, got, u.Query().Get("access_type"), tc.want)
+		}
 	}
 }

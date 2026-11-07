@@ -345,6 +345,21 @@ func serveMCP() {
 //	strayresponse  a response with an id nobody sent, then the result
 //	strayprogress  a progress notification for a token nobody sent, then the result
 //	answerexit  the result, then exits at once
+//	subscriptions/listen  notifications/subscriptions/acknowledged for it, then no answer
+//	notify      a notifications/tools/list_changed on every open listen, then the result
+//	endlistens  a completion result for every open listen, then its own result
+//	teardown    10 list_changed and then a notifications/cancelled for every open listen, written
+//	            together, then the result
+//	endforeign  a completion result for every open listen whose _meta names another id
+//	endrepeated a completion result for every open listen whose _meta repeats the subscription id
+//	listens     the ids of the open listens, as the upstream received them
+//	refuselisten  an error answer, with no result, for every open listen
+//	strayscribe a notification for a subscription nobody opened, then the result
+//	straycancel a notifications/cancelled for a request nobody sent, then the result
+//	cancelself  a notifications/cancelled naming this request, then the result
+//	scribeself  a notification whose subscription id is this request's, then the result
+//	dupresult   a result object with a repeated key, under the request's id
+//	dupid       a response with the id repeated
 func serveModern() {
 	out := bufio.NewWriter(os.Stdout)
 	var mu sync.Mutex
@@ -362,6 +377,17 @@ func serveModern() {
 	}
 	var cmu sync.Mutex
 	cancelled := []json.RawMessage{}
+	var listens []json.RawMessage
+	takeListens := func() []json.RawMessage {
+		cmu.Lock()
+		defer cmu.Unlock()
+		l := listens
+		listens = nil
+		return l
+	}
+	sub := func(id json.RawMessage) string {
+		return `"_meta":{"io.modelcontextprotocol/subscriptionId":` + string(id) + `}`
+	}
 	answers := map[string]chan json.RawMessage{}
 	type params struct {
 		Tag  string `json:"tag"`
@@ -456,6 +482,78 @@ func serveModern() {
 			case "strayprogress":
 				write(message{Method: "notifications/progress", Params: json.RawMessage(`{"progressToken":"nobody","progress":1}`)})
 				result(id, "ok")
+			case "subscriptions/listen":
+				cmu.Lock()
+				listens = append(listens, id)
+				cmu.Unlock()
+				write(message{Method: "notifications/subscriptions/acknowledged", Params: json.RawMessage(`{` + sub(id) + `,"notifications":{"toolsListChanged":true}}`)})
+			case "notify":
+				cmu.Lock()
+				l := append([]json.RawMessage(nil), listens...)
+				cmu.Unlock()
+				for _, lid := range l {
+					write(message{Method: "notifications/tools/list_changed", Params: json.RawMessage(`{` + sub(lid) + `}`)})
+				}
+				result(id, len(l))
+			case "endlistens":
+				for _, lid := range takeListens() {
+					write(message{ID: lid, Result: json.RawMessage(`{"resultType":"complete",` + sub(lid) + `}`)})
+				}
+				result(id, "ok")
+			case "teardown":
+				for _, lid := range takeListens() {
+					mu.Lock()
+					for i := range 10 {
+						_, _ = fmt.Fprintf(out, `{"jsonrpc":"2.0","method":"notifications/tools/list_changed","params":{"n":%d,%s}}`+"\n", i, sub(lid))
+					}
+					_, _ = fmt.Fprintf(out, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":%s}}`+"\n", lid)
+					_ = out.Flush()
+					mu.Unlock()
+				}
+				result(id, "ok")
+			case "endforeign":
+				for _, lid := range takeListens() {
+					write(message{ID: lid, Result: json.RawMessage(`{"resultType":"complete","_meta":{"io.modelcontextprotocol/subscriptionId":"byw-999999"}}`)})
+				}
+				result(id, "ok")
+			case "endrepeated":
+				for _, lid := range takeListens() {
+					write(message{ID: lid, Result: json.RawMessage(`{"resultType":"complete","_meta":{"io.modelcontextprotocol/subscriptionId":` +
+						string(lid) + `,"io.modelcontextprotocol/subscriptionId":"byw-999999"}}`)})
+				}
+				result(id, "ok")
+			case "refuselisten":
+				for _, lid := range takeListens() {
+					write(message{ID: lid, Error: json.RawMessage(`{"code":-32602,"message":"no such subscription"}`)})
+				}
+				result(id, "ok")
+			case "listens":
+				cmu.Lock()
+				l := append([]json.RawMessage{}, listens...)
+				cmu.Unlock()
+				result(id, l)
+			case "strayscribe":
+				write(message{Method: "notifications/tools/list_changed", Params: json.RawMessage(`{` + sub(json.RawMessage(`"byw-999999"`)) + `}`)})
+				result(id, "ok")
+			case "straycancel":
+				write(message{Method: "notifications/cancelled", Params: json.RawMessage(`{"requestId":"byw-999999"}`)})
+				result(id, "ok")
+			case "cancelself":
+				write(message{Method: "notifications/cancelled", Params: json.RawMessage(`{"requestId":` + string(id) + `}`)})
+				result(id, "ok")
+			case "scribeself":
+				write(message{Method: "notifications/tools/list_changed", Params: json.RawMessage(`{` + sub(id) + `}`)})
+				result(id, "ok")
+			case "dupresult":
+				mu.Lock()
+				_, _ = fmt.Fprintf(out, `{"jsonrpc":"2.0","id":%s,"result":{"a":1,"a":2}}`+"\n", id)
+				_ = out.Flush()
+				mu.Unlock()
+			case "dupid":
+				mu.Lock()
+				_, _ = fmt.Fprintf(out, `{"jsonrpc":"2.0","id":%s,"id":%s,"result":1}`+"\n", id, id)
+				_ = out.Flush()
+				mu.Unlock()
 			case "answerexit":
 				mu.Lock()
 				_, _ = fmt.Fprintf(out, `{"jsonrpc":"2.0","id":%s,"result":"answered"}`+"\n", id)

@@ -57,6 +57,24 @@ fixes (or "no findings") in the PR description. Agents never merge.
 - Disclose AI help with the `Co-Authored-By` trailer. Agents never add `Signed-off-by` (ADR-0023).
 - The full AI-assistance policy and the test policy are in `CONTRIBUTING.md`.
 
+## Working in parallel
+
+Several agents often work on this repo at once. These rules keep their work from colliding.
+
+- **Own git worktree.** Work only in your own worktree off `origin/main`. Never `checkout`, `switch`,
+  `reset`, `stash` or `pull` in the main checkout, and never touch another worktree.
+- **Subagents get a unique scratch path.** Chain `cd <path> && <command>` so a failed `cd` stops the
+  command instead of running it elsewhere. No `git checkout --`/`reset` in subagent briefs. Stop only
+  processes you started, matched by your own scratch path, never with `kill -9` on a name pattern.
+- **Gate every push on the check.** Chain with `&&`, never `;`: `mise run check && git push …`.
+  Capture the log (`mise run check 2>&1 | tee check.log`) so a failure can be read afterwards.
+- **Rebase as soon as `main` moves** when your branch touches the same files; small conflicts
+  are cheap, late ones are not. Keep both sides, then re-run the check.
+- **Generated files are never hand-merged.** `docs/reference/settings.md` conflicts are resolved
+  by regenerating it: `BYWARD_UPDATE_REFERENCE=1 go test ./internal/config/`.
+- **Sweeps run as one subagent per angle** (runtime; 5 SOLID; 7 tests) through ordinary subagent
+  calls. Multi-agent workflow tooling needs the maintainer's explicit opt-in.
+
 ## Agent skills
 
 ### Issue tracker

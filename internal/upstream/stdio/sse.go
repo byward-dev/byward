@@ -24,6 +24,7 @@ func startSSE(w http.ResponseWriter) sse {
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")
 	h.Set("Cache-Control", "no-cache")
+	h.Set("X-Accel-Buffering", "no") // reverse proxies must not buffer a stream (2026-07-28 streamable-http)
 	w.WriteHeader(http.StatusOK)
 	s := sse{w: w, rc: http.NewResponseController(w)}
 	_ = s.rc.Flush()

@@ -31,19 +31,20 @@ func TestLocateFindsTargetedValuesAndKeepsEveryOtherByte(t *testing.T) {
 
 func TestLocateRefusesWhatItCannotPlaceWithCertainty(t *testing.T) {
 	for name, msg := range map[string]string{
-		"duplicate id":            `{"id":1,"method":"x","id":2}`,
-		"duplicate params":        `{"id":1,"params":{},"params":{"_meta":{"progressToken":1}}}`,
-		"duplicate progressToken": `{"id":1,"params":{"_meta":{"progressToken":1,"progressToken":2}}}`,
-		"object id":               `{"id":{"a":1}}`,
-		"object progressToken":    `{"id":1,"params":{"_meta":{"progressToken":{}}}}`,
-		"array progressToken":     `{"id":1,"params":{"_meta":{"progressToken":[1]}}}`,
-		"duplicate _meta":         `{"id":1,"params":{"_meta":{},"_meta":{"progressToken":1}}}`,
-		"id in another case":      `{"ID":1}`,
-		"params in another case":  `{"id":1,"Params":{"_meta":{"progressToken":1}}}`,
-		"token in another case":   `{"id":1,"params":{"_meta":{"progresstoken":1}}}`,
-		"not an object":           `[{"id":1}]`,
-		"malformed":               `{"id":1,`,
-		"trailing data":           `{"id":1} {"id":2}`,
+		"duplicate id":                  `{"id":1,"method":"x","id":2}`,
+		"duplicate untargeted root key": `{"jsonrpc":"2.0","jsonrpc":"2.0","id":1}`,
+		"duplicate params":              `{"id":1,"params":{},"params":{"_meta":{"progressToken":1}}}`,
+		"duplicate progressToken":       `{"id":1,"params":{"_meta":{"progressToken":1,"progressToken":2}}}`,
+		"object id":                     `{"id":{"a":1}}`,
+		"object progressToken":          `{"id":1,"params":{"_meta":{"progressToken":{}}}}`,
+		"array progressToken":           `{"id":1,"params":{"_meta":{"progressToken":[1]}}}`,
+		"duplicate _meta":               `{"id":1,"params":{"_meta":{},"_meta":{"progressToken":1}}}`,
+		"id in another case":            `{"ID":1}`,
+		"params in another case":        `{"id":1,"Params":{"_meta":{"progressToken":1}}}`,
+		"token in another case":         `{"id":1,"params":{"_meta":{"progresstoken":1}}}`,
+		"not an object":                 `[{"id":1}]`,
+		"malformed":                     `{"id":1,`,
+		"trailing data":                 `{"id":1} {"id":2}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := locate([]byte(msg), rewritePaths...); !errors.Is(err, errAmbiguous) {

@@ -9,7 +9,6 @@ import (
 
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
-	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/store/sqlite"
 )
 
@@ -50,10 +49,7 @@ func CheckOffline(cfg *config.Config) ([]Warning, error) {
 	if err := checkStorePaths(cfg); err != nil {
 		return nil, err
 	}
-	if w, ok := expiryWarning(cfg, time.Now()); ok {
-		return append(parts.warnings, w), nil
-	}
-	return parts.warnings, nil
+	return append(parts.warnings, parts.idp.timedWarnings(time.Now())...), nil
 }
 
 // checkStorePaths is sqlite.CheckPaths with the settings named, as openStore names them.
@@ -113,13 +109,7 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	}
 	r.Checks = append(r.Checks, doctor.SelfProbe(ctx, o.Proxy, doctor.Target{Resource: cfg.PublicURL, Issuer: cfg.Issuer(),
 		HostsSetting: config.Setting{Name: "allowed-hosts"}.Env()})...)
-	r.Checks = append(r.Checks, parts.provider.Diagnose(ctx, entra.Diagnosis{
-		TenantSetting:   config.Setting{Name: "entra-tenant"}.Env(),
-		ClientIDSetting: config.Setting{Name: "entra-client-id"}.Env(),
-		SecretSetting:   config.Setting{Name: "entra-client-secret"}.Env() + "_FILE",
-		GateRoles:       cfg.GateRoles,
-	})...)
-	r.Checks = append(r.Checks, secretExpiry(cfg, o.Now()))
+	r.Checks = append(r.Checks, parts.idp.diagnose(ctx, o.Now())...)
 	return r, nil
 }
 
