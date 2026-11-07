@@ -5,6 +5,8 @@
 # testdata/fuzz/<Target>/ unless the case says it writes none. Each case runs in its own git
 # repository, so git ls-files finds new inputs as run.sh would.
 set -eu
+# The developer's git config (hooks, excludes, signing) must not reach the test repositories.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 script="$(cd "$(dirname "$0")" && pwd)/run.sh"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
