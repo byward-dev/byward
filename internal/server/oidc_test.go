@@ -114,64 +114,177 @@ func TestAnHTTPIssuerNeedsDevelopmentMode(t *testing.T) {
 // the IdP's, sub is the IdP's subject claim as the user key, and the opted-in claims come from the
 // IdP's ID token (ADR-0016 §1).
 func TestAnOIDCUsersAssertionIsByWardsWithTheIdPsSubject(t *testing.T) {
-	const public = "https://mcp.example.com"
-	up := fakeupstream.New()
-	t.Cleanup(up.Close)
 	user := fakeidp.User{Subject: "248289761001", Name: "Jane", Groups: []string{"mcp-users"}}
+	c := oidcAssertion(t, user, "BYWARD_ASSERTION_CLAIMS=groups,name")
+	if c["iss"] != "https://mcp.example.com" || c["sub"] != user.Subject || c["client_id"] != "test-app" || c["name"] != "Jane" || !reflect.DeepEqual(c["groups"], []any{"mcp-users"}) {
+		t.Fatalf("assertion claims %v", c)
+	}
+}
+
+// An OIDC IdP's email is asserted only when its email_verified is true, unless the operator opted
+// in to unverified emails; email_verified says which (ADR-0016, 2026-11-07 amendment).
+func TestAnOIDCUsersEmailIsAssertedOnlyWhenVerifiedOrTheOperatorOptedIn(t *testing.T) {
+	const email = "jane@example.com"
+	for _, tc := range []struct {
+		name             string
+		verified, absent bool // the user's email_verified; absent: the IdP sends no such claim
+		optIn            bool // BYWARD_ASSERTION_UNVERIFIED_EMAIL
+		wantEmail        any  // nil: left out
+		wantVerified     any  // email_verified; nil: left out
+	}{
+		{name: "verified", verified: true, wantEmail: email, wantVerified: true},
+		{name: "unverified is left out"},
+		{name: "no email_verified claim is left out", verified: true, absent: true},
+		{name: "unverified with the opt-in", optIn: true, wantEmail: email, wantVerified: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			settings := []string{"BYWARD_ASSERTION_CLAIMS=email"}
+			if tc.optIn {
+				settings = append(settings, "BYWARD_ASSERTION_UNVERIFIED_EMAIL=true")
+			}
+			s := signInOIDC(t, []fakeidp.Option{fakeidp.WithUser(fakeidp.User{Subject: "u1", Email: email, EmailVerified: tc.verified}),
+				fakeidp.WithoutEmailVerified(tc.absent)}, settings...)
+			if c := s.assertion(t); c["email"] != tc.wantEmail || c["email_verified"] != tc.wantVerified {
+				t.Fatalf("email %v, email_verified %v; want %v, %v", c["email"], c["email_verified"], tc.wantEmail, tc.wantVerified)
+			}
+		})
+	}
+}
+
+// Every refresh decides again from the IdP's new ID token: an email verified at sign-in and
+// unverified now is no longer asserted as verified.
+func TestARefreshAssertsTheEmailAsTheIdPVerifiesItNow(t *testing.T) {
+	const email = "jane@example.com"
+	for _, tc := range []struct {
+		name         string
+		optIn        bool
+		wantEmail    any
+		wantVerified any
+	}{
+		{"left out", false, nil, nil},
+		{"unverified with the opt-in", true, email, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			settings := []string{"BYWARD_ASSERTION_CLAIMS=email"}
+			if tc.optIn {
+				settings = append(settings, "BYWARD_ASSERTION_UNVERIFIED_EMAIL=true")
+			}
+			// The same OID: the fake reissues a user's current claims only to that user.
+			user := fakeidp.User{Subject: "u1", OID: fakeidp.NewGUID(), Email: email, EmailVerified: true}
+			s := signInOIDC(t, []fakeidp.Option{fakeidp.WithUser(user)}, settings...)
+			if c := s.assertion(t); c["email"] != email || c["email_verified"] != true {
+				t.Fatalf("at sign-in: email %v, email_verified %v; want %s, true", c["email"], c["email_verified"], email)
+			}
+			user.EmailVerified = false
+			s.fake.Set(fakeidp.WithUser(user))
+			s.refresh(t)
+			if c := s.assertion(t); c["email"] != tc.wantEmail || c["email_verified"] != tc.wantVerified {
+				t.Fatalf("after refresh: email %v, email_verified %v; want %v, %v", c["email"], c["email_verified"], tc.wantEmail, tc.wantVerified)
+			}
+		})
+	}
+}
+
+// oidcSession is a client signed in through a generic OIDC IdP: its tokens, the proxy and the
+// upstream behind it.
+type oidcSession struct {
+	fake            *fakeidp.IdP
+	cfg             *config.Config
+	srv             *Servers
+	h               *httptest.Server
+	b               *testBrowser
+	up              *fakeupstream.Server
+	access, renewal string // the access and refresh tokens
+}
+
+// oidcAssertion signs user in through a generic OIDC IdP with the settings given, makes one MCP
+// request, and returns the claims of the verified assertion the upstream got.
+func oidcAssertion(t *testing.T, user fakeidp.User, settings ...string) map[string]any {
+	t.Helper()
+	return signInOIDC(t, []fakeidp.Option{fakeidp.WithUser(user)}, settings...).assertion(t)
+}
+
+// signInOIDC wires the proxy to a fake generic OIDC IdP set up by idp, with the settings given, and
+// signs a client in for mcp and offline_access.
+func signInOIDC(t *testing.T, idp []fakeidp.Option, settings ...string) *oidcSession {
+	t.Helper()
+	const public = "https://mcp.example.com"
+	s := &oidcSession{up: fakeupstream.New()}
+	t.Cleanup(s.up.Close)
 	app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}, RedirectURIs: []string{public + "/callback/oidc"}}
-	fake := fakeidp.New(t, fakeidp.Generic, fakeidp.WithClient(app), fakeidp.WithUser(user))
-	cfg, _, err := config.Load([]string{"--dev"}, append(oidcEnv(t, "oidc", fake.Issuer(), app.ID, "s3cret", "BYWARD_ASSERTION_CLAIMS=groups,name"),
-		"BYWARD_PUBLIC_URL="+public+"/mcp", "BYWARD_UPSTREAM_URL="+up.URL+"/mcp"), os.ReadFile)
-	if err != nil {
+	s.fake = fakeidp.New(t, fakeidp.Generic, append([]fakeidp.Option{fakeidp.WithClient(app)}, idp...)...)
+	var err error
+	if s.cfg, _, err = config.Load([]string{"--dev"}, append(oidcEnv(t, "oidc", s.fake.Issuer(), app.ID, "s3cret", settings...),
+		"BYWARD_PUBLIC_URL="+public+"/mcp", "BYWARD_UPSTREAM_URL="+s.up.URL+"/mcp"), os.ReadFile); err != nil {
 		t.Fatal(err)
 	}
-	srv, err := New(cfg, discard)
-	if err != nil {
+	if s.srv, err = New(s.cfg, discard); err != nil {
 		t.Fatal(err)
 	}
-	h := httptest.NewServer(srv.Public.Handler)
-	t.Cleanup(h.Close)
-	b := newTestBrowser(t, h.URL, public)
+	s.h = httptest.NewServer(s.srv.Public.Handler)
+	t.Cleanup(s.h.Close)
+	s.b = newTestBrowser(t, s.h.URL, public)
 	const verifier = "verifier-0123456789-0123456789-0123456789-abc"
-	q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1/callback"}, "response_type": {"code"}, "scope": {"mcp"},
+	q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1/callback"}, "response_type": {"code"}, "scope": {"mcp offline_access"},
 		"code_challenge": {pkce(verifier)}, "code_challenge_method": {"S256"}}
-	page := b.send(http.MethodGet, "/authorize?"+q.Encode(), nil, nil)
-	allow := b.allow(page, readAll(t, page))
-	idpRes, err := fake.HTTPClient().Get(allow.Header.Get("Location"))
+	page := s.b.send(http.MethodGet, "/authorize?"+q.Encode(), nil, nil)
+	allow := s.b.allow(page, readAll(t, page))
+	idpRes, err := s.fake.HTTPClient().Get(allow.Header.Get("Location"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = idpRes.Body.Close()
 	cb, _ := url.Parse(idpRes.Header.Get("Location"))
-	back := b.send(http.MethodGet, cb.Path+"?"+cb.RawQuery, nil, allow.Cookies())
+	back := s.b.send(http.MethodGet, cb.Path+"?"+cb.RawQuery, nil, allow.Cookies())
 	done, _ := url.Parse(back.Header.Get("Location"))
-	tok := b.send(http.MethodPost, "/token", url.Values{"grant_type": {"authorization_code"}, "code": {done.Query().Get("code")}, "client_id": {"test-app"},
-		"redirect_uri": {"http://127.0.0.1/callback"}, "code_verifier": {verifier}}, nil)
+	s.tokens(t, url.Values{"grant_type": {"authorization_code"}, "code": {done.Query().Get("code")}, "client_id": {"test-app"},
+		"redirect_uri": {"http://127.0.0.1/callback"}, "code_verifier": {verifier}})
+	return s
+}
+
+// tokens posts form to /token and keeps the tokens it answers with.
+func (s *oidcSession) tokens(t *testing.T, form url.Values) {
+	t.Helper()
+	res := s.b.send(http.MethodPost, "/token", form, nil)
 	var body struct {
-		AccessToken string `json:"access_token"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
 	}
-	if err := json.NewDecoder(tok.Body).Decode(&body); err != nil || body.AccessToken == "" {
-		t.Fatalf("token: %d %v", tok.StatusCode, err)
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil || body.AccessToken == "" {
+		t.Fatalf("token: %d %v", res.StatusCode, err)
 	}
-	r, _ := http.NewRequest(http.MethodPost, h.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+	s.access, s.renewal = body.AccessToken, body.RefreshToken
+}
+
+// refresh redeems the session's refresh token for new tokens.
+func (s *oidcSession) refresh(t *testing.T) {
+	t.Helper()
+	if s.renewal == "" {
+		t.Fatal("no refresh token")
+	}
+	s.tokens(t, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {s.renewal}, "client_id": {"test-app"}})
+}
+
+// assertion makes one MCP request with the session's access token and returns the claims of the
+// verified assertion the upstream got.
+func (s *oidcSession) assertion(t *testing.T) map[string]any {
+	t.Helper()
+	r, _ := http.NewRequest(http.MethodPost, s.h.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
 	r.Host = "mcp.example.com"
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Accept", "application/json, text/event-stream")
-	r.Header.Set("Authorization", "Bearer "+body.AccessToken)
+	r.Header.Set("Authorization", "Bearer "+s.access)
 	res, err := http.DefaultClient.Do(r)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = res.Body.Close()
-	got, ok := up.Last()
+	got, ok := s.up.Last()
 	if res.StatusCode != http.StatusOK || !ok {
 		t.Fatalf("MCP request: %d, upstream reached %v", res.StatusCode, ok)
 	}
 	raw, _ := strings.CutPrefix(got.Header.Get("Authorization"), "Bearer ")
-	c := verified(t, jwks(t, srv.Public.Handler, "mcp.example.com"), raw, cfg.UpstreamURL.String())
-	if c["iss"] != public || c["sub"] != user.Subject || c["client_id"] != "test-app" || c["name"] != "Jane" || !reflect.DeepEqual(c["groups"], []any{"mcp-users"}) {
-		t.Fatalf("assertion claims %v", c)
-	}
+	return verified(t, jwks(t, s.srv.Public.Handler, "mcp.example.com"), raw, s.cfg.UpstreamURL.String())
 }
 
 // A stdio process for an OIDC user runs under byward's issuer with the IdP's subject, as an Entra

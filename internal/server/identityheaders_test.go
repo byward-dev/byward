@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -23,7 +25,7 @@ import (
 // headerOfClaim is which plain identity header carries which assertion claim: the names as
 // documented (docs/how-to/plain-identity-headers.md), which upstreams read.
 var headerOfClaim = map[string]string{"sub": "X-Byward-Subject", "client_id": "X-Byward-Client-Id", "roles": "X-Byward-Roles",
-	"groups": "X-Byward-Groups", "email": "X-Byward-Email", "name": "X-Byward-Name"}
+	"groups": "X-Byward-Groups", "email": "X-Byward-Email", "email_verified": "X-Byward-Email-Verified", "name": "X-Byward-Name"}
 
 // forgedIdentityHeaders is a client's copy of every plain identity header, and one in `_` spelling.
 func forgedIdentityHeaders() http.Header {
@@ -64,6 +66,8 @@ func asStrings(v any) []string {
 	switch v := v.(type) {
 	case string:
 		return []string{v}
+	case bool:
+		return []string{strconv.FormatBool(v)}
 	case []any:
 		out := make([]string, len(v))
 		for i, s := range v {
@@ -76,7 +80,8 @@ func asStrings(v any) []string {
 
 // With BYWARD_IDENTITY_HEADERS the upstream reads the same user from plain headers as from the
 // assertion, every claim of it, even values with commas, line breaks, non-ASCII or an empty list
-// item; and no client's copy, in any spelling, gets through (ADR-0016 §5).
+// item, a verified email or an unverified one; and no client's copy, in any spelling, gets through
+// (ADR-0016 §5).
 func TestPlainIdentityHeadersCarryTheAssertionsClaimsAndNeverAClientsCopies(t *testing.T) {
 	for _, claim := range config.AssertionClaimNames {
 		if headerOfClaim[claim] == "" {
@@ -84,19 +89,23 @@ func TestPlainIdentityHeadersCarryTheAssertionsClaimsAndNeverAClientsCopies(t *t
 		}
 	}
 	a := newAsserting(t, "BYWARD_IDENTITY_HEADERS=true", "BYWARD_ASSERTION_CLAIMS="+strings.Join(config.AssertionClaimNames, ","))
-	got := a.call(t, token.Claims{GrantID: "g1", Subject: "tid:oid", ClientID: "https://claude.ai/oauth/client", Roles: []string{"byward.user", "Data,Read", ""},
-		Groups: []string{"g-1", "g-2"}, Email: "alex@contoso.example", Name: "Renée\r\nX-Evil: 1"}, forgedIdentityHeaders())
-	for k := range got.Header {
-		if byward(k) && !slices.Contains(config.IdentityHeaderNames, k) {
-			t.Errorf("%s reached the upstream", k)
-		}
-	}
-	raw, _ := strings.CutPrefix(got.Header.Get("Authorization"), "Bearer ")
-	c := verified(t, jwks(t, a.public, "mcp.example.com"), raw, a.cfg.UpstreamURL.String())
-	for claim, header := range headerOfClaim {
-		if d, want := decoded(t, got.Header, header), asStrings(c[claim]); !reflect.DeepEqual(d, want) || len(want) == 0 {
-			t.Errorf("%s = %q, the assertion's %s = %q", header, d, claim, want)
-		}
+	for _, emailVerified := range []bool{true, false} {
+		t.Run(fmt.Sprintf("email verified %v", emailVerified), func(t *testing.T) {
+			got := a.call(t, token.Claims{GrantID: "g1", Subject: "tid:oid", ClientID: "https://claude.ai/oauth/client", Roles: []string{"byward.user", "Data,Read", ""},
+				Groups: []string{"g-1", "g-2"}, Email: "alex@contoso.example", EmailVerified: emailVerified, Name: "Renée\r\nX-Evil: 1"}, forgedIdentityHeaders())
+			for k := range got.Header {
+				if byward(k) && !slices.Contains(config.IdentityHeaderNames, k) {
+					t.Errorf("%s reached the upstream", k)
+				}
+			}
+			raw, _ := strings.CutPrefix(got.Header.Get("Authorization"), "Bearer ")
+			c := verified(t, jwks(t, a.public, "mcp.example.com"), raw, a.cfg.UpstreamURL.String())
+			for claim, header := range headerOfClaim {
+				if d, want := decoded(t, got.Header, header), asStrings(c[claim]); !reflect.DeepEqual(d, want) || len(want) == 0 {
+					t.Errorf("%s = %q, the assertion's %s = %q", header, d, claim, want)
+				}
+			}
+		})
 	}
 }
 
@@ -123,7 +132,7 @@ func TestPlainIdentityHeaderValuesArePercentEncoded(t *testing.T) {
 func TestAnAbsentClaimSendsNoPlainHeader(t *testing.T) {
 	a := newAsserting(t, "BYWARD_IDENTITY_HEADERS=true", "BYWARD_ASSERTION_CLAIMS=roles,groups,email,name")
 	got := a.call(t, token.Claims{GrantID: "g1", Subject: "tid:oid", ClientID: "c"}, nil)
-	for _, h := range []string{config.HeaderRoles, config.HeaderGroups, config.HeaderEmail, config.HeaderName} {
+	for _, h := range []string{config.HeaderRoles, config.HeaderGroups, config.HeaderEmail, config.HeaderEmailVerified, config.HeaderName} {
 		if v, ok := got.Header[h]; ok {
 			t.Errorf("%s = %q, want no header", h, v)
 		}

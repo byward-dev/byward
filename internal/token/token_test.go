@@ -328,7 +328,7 @@ func TestNewSealerNeedsARingAndAResource(t *testing.T) {
 func TestAccessTokensRoundTripTheAssertedClaims(t *testing.T) {
 	s := newSealer(t)
 	c := claims()
-	c.Roles, c.Groups, c.Email, c.Name = []string{"byward.user"}, []string{"g1", "g2"}, "a@contoso.example", "Alex"
+	c.Roles, c.Groups, c.Email, c.EmailVerified, c.Name = []string{"byward.user"}, []string{"g1", "g2"}, "a@contoso.example", true, "Alex"
 	got, err := s.Open(Access, mustSeal(t, s, Access, c))
 	if err != nil || !got.IssuedAt.Equal(c.IssuedAt) || !got.ExpiresAt.Equal(c.ExpiresAt) {
 		t.Fatalf("round trip: %+v, %v; want %+v", got, err, c)

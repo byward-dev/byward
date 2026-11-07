@@ -59,7 +59,9 @@ type claims struct {
 	Roles    []string         `json:"roles,omitempty"`
 	Groups   []string         `json:"groups,omitempty"`
 	Email    string           `json:"email,omitempty"`
-	Name     string           `json:"name,omitempty"`
+	// EmailVerified is set exactly when Email is: the upstream sees whether the IdP vouched for it.
+	EmailVerified *bool  `json:"email_verified,omitempty"`
+	Name          string `json:"name,omitempty"`
 }
 
 var errNoIdentity = errors.New("assertion: no subject or client to assert")
@@ -74,10 +76,14 @@ func (m *Minter) Mint(id resource.Identity) (string, error) {
 		return "", err
 	}
 	now := m.now().Truncate(time.Second)
+	var verified *bool
+	if id.Email != "" {
+		verified = &id.EmailVerified
+	}
 	return jwt.Signed(m.signer).Claims(claims{
 		Issuer: m.issuer, Audience: m.audience, Subject: id.Subject, ClientID: id.ClientID,
 		IssuedAt: jwt.NewNumericDate(now), Expiry: jwt.NewNumericDate(now.Add(Lifetime)),
 		ID:    base64.RawURLEncoding.EncodeToString(jti[:]),
-		Roles: id.Roles, Groups: id.Groups, Email: id.Email, Name: id.Name,
+		Roles: id.Roles, Groups: id.Groups, Email: id.Email, EmailVerified: verified, Name: id.Name,
 	}).Serialize()
 }

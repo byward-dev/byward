@@ -60,8 +60,9 @@ var registry = []Setting{
 	{Name: "keys-dir", Auth: true, Help: "directory of sealing keys; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md)"},
 	{Name: "assertion-keys-dir", Auth: true, Help: "directory of the identity assertion's signing keys: PEM ECDSA P-256 files, each name the key ID; the key whose ID sorts last signs; needed with an HTTP upstream; default: assertion-keys in the data directory (docs/how-to/identity-assertion.md)"},
 	{Name: "assertion-header", Auth: true, Default: "Authorization", Help: "request header that carries the identity assertion to the HTTP upstream, as Bearer <JWT>; inbound copies are always removed (ADR-0016 §2)"},
-	{Name: "identity-headers", Auth: true, Default: "false", Help: "also send the HTTP upstream the user in plain headers (X-Byward-Subject, X-Byward-Client-Id, and X-Byward-Roles, -Groups, -Email, -Name for the assertion's claims), percent-encoded; safe only when the upstream is reachable through this proxy alone (ADR-0016 §5, docs/how-to/plain-identity-headers.md)"},
+	{Name: "identity-headers", Auth: true, Default: "false", Help: "also send the HTTP upstream the user in plain headers (X-Byward-Subject, X-Byward-Client-Id, and X-Byward-Roles, -Groups, -Email, -Email-Verified, -Name for the assertion's claims), percent-encoded; safe only when the upstream is reachable through this proxy alone (ADR-0016 §5, docs/how-to/plain-identity-headers.md)"},
 	{Name: "assertion-claims", Auth: true, Default: "roles", Help: "comma-separated optional claims in the identity assertion: roles, groups, email, name; or none (ADR-0016 §1, docs/reference/identity-assertion.md)"},
+	{Name: "assertion-unverified-email", Auth: true, Bool: true, Default: "false", Help: "with email in BYWARD_ASSERTION_CLAIMS: also assert an email the IdP has not verified (Entra never verifies one), marked email_verified false; never authorize on it (docs/how-to/identity-assertion.md)"},
 	{Name: "static-clients-file", Auth: true, Help: "JSON file of pre-registered MCP clients; default: clients.json in the data directory, optional while CIMD or DCR is on; a file you name must exist (docs/reference/static-clients.md)"},
 	{Name: "gate-tenants", Auth: true, Help: "access gate: comma-separated Entra tenant IDs allowed to sign in (docs/how-to/access-gate.md)"},
 	{Name: "gate-roles", Auth: true, Help: "access gate: comma-separated app roles; users need at least one (docs/how-to/access-gate.md)"},
@@ -138,8 +139,10 @@ type Config struct {
 	AssertionHeader  string
 	AssertionClaims  []string
 	// IdentityHeaders also sends the user in the plain IdentityHeaderNames headers (ADR-0016 §5).
-	IdentityHeaders   bool
-	StaticClientsFile string
+	IdentityHeaders bool
+	// AssertionUnverifiedEmail asserts an opted-in email the IdP does not vouch for, too.
+	AssertionUnverifiedEmail bool
+	StaticClientsFile        string
 	// StaticClientsFileNamed: the operator set the path, so the file must exist; the default may be
 	// absent when CIMD or DCR is on.
 	StaticClientsFileNamed bool
@@ -696,6 +699,9 @@ func (c *Config) assertion(v *Values) []error {
 	} else if c.IdentityHeaders && c.UpstreamCommand != nil {
 		errs = append(errs, errorf("%s is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)", ihEnv))
 	}
+	if c.AssertionUnverifiedEmail, err = strconv.ParseBool(v.get("assertion-unverified-email")); err != nil {
+		errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "assertion-unverified-email"}.Env(), v.get("assertion-unverified-email")))
+	}
 	cEnv := Setting{Name: "assertion-claims"}.Env()
 	raw := strings.TrimSpace(v.get("assertion-claims"))
 	if raw == "none" {
@@ -780,11 +786,13 @@ const (
 	HeaderRoles    = "X-Byward-Roles"
 	HeaderGroups   = "X-Byward-Groups"
 	HeaderEmail    = "X-Byward-Email"
-	HeaderName     = "X-Byward-Name"
+	// HeaderEmailVerified is "true" or "false", sent exactly when HeaderEmail is.
+	HeaderEmailVerified = "X-Byward-Email-Verified"
+	HeaderName          = "X-Byward-Name"
 )
 
 // IdentityHeaderNames are the plain identity headers.
-var IdentityHeaderNames = []string{HeaderSubject, HeaderClientID, HeaderRoles, HeaderGroups, HeaderEmail, HeaderName}
+var IdentityHeaderNames = []string{HeaderSubject, HeaderClientID, HeaderRoles, HeaderGroups, HeaderEmail, HeaderEmailVerified, HeaderName}
 
 // headerClashes refuses two purposes in one header: the identity assertion, the operator's
 // upstream credential and the plain identity headers each have their own (ADR-0016 §4, §5, §7). The

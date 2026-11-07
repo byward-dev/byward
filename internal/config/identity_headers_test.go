@@ -65,4 +65,9 @@ func TestNoOtherSettingMayUseAPlainIdentityHeader(t *testing.T) {
 			}
 		})
 	}
+	for _, h := range IdentityHeaderNames { // every one, so a header added later is reserved too
+		if _, err := loadCred(t, nil, "k-123", "BYWARD_ASSERTION_HEADER="+h); err == nil || !strings.Contains(err.Error(), h+" is one of the plain identity headers") {
+			t.Errorf("BYWARD_ASSERTION_HEADER=%s: err = %v, want it refused as a plain identity header", h, err)
+		}
+	}
 }

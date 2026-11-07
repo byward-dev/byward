@@ -120,6 +120,7 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"cimd single-label host", "BYWARD_CIMD_TRUSTED_HOSTS=localhost", `"localhost" is not a host name`},
 		{"cimd unicode host", "BYWARD_CIMD_TRUSTED_HOSTS=bücher.example", `BYWARD_CIMD_TRUSTED_HOSTS: the host "bücher.example" is not ASCII`},
 		{"dcr not a bool", "BYWARD_DCR=on", "BYWARD_DCR: want true or false"},
+		{"unverified email not a bool", "BYWARD_ASSERTION_UNVERIFIED_EMAIL=yes", "BYWARD_ASSERTION_UNVERIFIED_EMAIL: want true or false"},
 		{"client denylist blank", "BYWARD_CLIENT_DENYLIST= ,", "BYWARD_CLIENT_DENYLIST is set but lists nothing"},
 		{"gate tenants blank", "BYWARD_GATE_TENANTS=,", "BYWARD_GATE_TENANTS is set but lists nothing"},
 		{"gate roles blank", "BYWARD_GATE_ROLES= ,,", "BYWARD_GATE_ROLES is set but lists nothing"},
