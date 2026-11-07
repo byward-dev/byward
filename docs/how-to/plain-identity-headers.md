@@ -24,8 +24,11 @@ there.
 | `X-Byward-Email` | the user's email | with `email` |
 | `X-Byward-Name` | the user's display name | with `name` |
 
-- A claim the user does not have sends no header. A list keeps every item the IdP sent, an empty one too, so it always decodes to exactly the assertion's claim. With Entra's groups overage
-  there is no `X-Byward-Groups`; byward never sends an incomplete list.
+- A claim the user does not have sends no header. A list keeps every item the IdP sent, an empty
+  one too, so it always decodes to exactly the assertion's claim.
+- There is no `X-Byward-Groups` with Entra's groups overage, or when there are too many groups to
+  fit in an access token ([identity assertion](identity-assertion.md)): byward never sends an
+  incomplete list.
 - `X-Byward-Email` is the same value as the assertion's `email`. Don't authorize on it: Entra does
   not verify it. Use `X-Byward-Subject`.
 - The values are as fresh as the assertion's: up to one hour old
