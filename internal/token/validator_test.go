@@ -53,8 +53,8 @@ func TestExpiryAndIssuedAtHonourTheLeeway(t *testing.T) {
 				if !errors.Is(err, tc.want) {
 					t.Fatalf("Validate = %v, want %v", err, tc.want)
 				}
-				if err == nil && id.Subject != "u" {
-					t.Fatalf("subject = %q", id.Subject)
+				if err == nil && (id.Subject != "u" || id.GrantID != "g") {
+					t.Fatalf("subject %q, grant %q: want the token's (the grant leads On-Behalf-Of to the stored IdP tokens)", id.Subject, id.GrantID)
 				}
 			})
 		})
