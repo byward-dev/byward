@@ -93,6 +93,13 @@ var migrations = []string{
 	) STRICT;
 	CREATE INDEX consents_subject ON consents (subject, approved_at);
 	CREATE INDEX consents_expires ON consents (expires_at);`,
+	// v6: spent logins (#150). A login lives in its sealed cookie; this row makes it single use on
+	// the server. hash is SHA-256 of the login's IdP state.
+	`CREATE TABLE spent_logins (
+		hash       BLOB PRIMARY KEY,
+		expires_at INTEGER NOT NULL
+	) STRICT;
+	CREATE INDEX spent_logins_expires ON spent_logins (expires_at);`,
 }
 
 // schemaVersion is the schema this binary writes.

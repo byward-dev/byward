@@ -647,12 +647,34 @@ func (s *Store) Collect(ctx context.Context, now time.Time) error {
 			{"DELETE FROM refresh_tokens WHERE idle_expires_at <= ?", n},
 			{"DELETE FROM revocations WHERE at <= ?", micros(now.Add(-store.RevocationRetention))},
 			{"DELETE FROM consents WHERE expires_at <= ?", n},
+			{"DELETE FROM spent_logins WHERE expires_at <= ?", n},
 			{"DELETE FROM clients WHERE expires_at <= ?", n},
 			{"DELETE FROM clients WHERE used_at IS NULL AND created_at <= ?", micros(now.Add(-store.UnusedClientLifetime))},
 		} {
 			if _, err := tx.ExecContext(ctx, q.sql, q.arg); err != nil {
 				return fmt.Errorf("sqlite store: collect: %w", err)
 			}
+		}
+		return nil
+	})
+}
+
+// SpendLogin implements store.Logins.
+func (s *Store) SpendLogin(ctx context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
+	if !expiresAt.After(now) {
+		return store.ErrInvalid
+	}
+	return s.write(ctx, func(tx *sql.Tx) error {
+		// One conditional statement (ADR-0007 §2), so it stays atomic under any isolation level: it
+		// inserts, or replaces only an expired record; no row affected means a live one exists.
+		res, err := tx.ExecContext(ctx, `INSERT INTO spent_logins (hash, expires_at) VALUES (?, ?)
+			ON CONFLICT (hash) DO UPDATE SET expires_at = excluded.expires_at WHERE spent_logins.expires_at <= ?`,
+			hash[:], micros(expiresAt), micros(now))
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil || n == 0 {
+			return cmp.Or(err, store.ErrConsumed)
 		}
 		return nil
 	})

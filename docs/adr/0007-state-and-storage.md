@@ -37,6 +37,9 @@ history; rotating the sealing key (ADR-0006) does not touch stored refresh token
 3. **Stateless where possible:** logins in progress are a sealed blob plus a `__Host-` cookie;
    access tokens are sealed (ADR-0006); the legacy `Mcp-Session-Id` binding is a sealed wrapper
    (amends ADR-0004).
+   _Clarified 2026-11-07 (#150):_ a login in progress stays in its sealed cookie, but the store
+   records each one a callback has used (a hash of its IdP state, until the login lifetime ends),
+   so a login is single use on the server too and not only by the browser deleting its cookie.
 4. **Several replicas only for HTTP upstreams.** stdio upstream processes live on one replica
    (ADR-0003); a multi-replica store with a stdio upstream is rejected at startup.
 5. **Keys never live in the store.** They come from a file or env with a key ID and a list of

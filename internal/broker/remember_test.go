@@ -344,11 +344,11 @@ func TestARememberedSignInGetsNoCodeUnlessTheCallbackCanConfirmTheClientAndConse
 		change func(t *testing.T, e *env)
 		status int
 	}{
-		"the client removed":     {func(_ *testing.T, e *env) { e.reg.remove(clientID) }, http.StatusBadRequest},
-		"its redirect withdrawn": {func(_ *testing.T, e *env) { e.reg.reregister(clientID, webCB) }, http.StatusBadRequest},
-		"its trust withdrawn":    {func(_ *testing.T, e *env) { e.reg.demote(clientID) }, http.StatusOK},
-		"the store down":         {func(_ *testing.T, e *env) { e.st.down.Store(true) }, http.StatusOK},
-		"the registry down":      {func(_ *testing.T, e *env) { e.reg.fail() }, http.StatusInternalServerError},
+		"the client removed":        {func(_ *testing.T, e *env) { e.reg.remove(clientID) }, http.StatusBadRequest},
+		"its redirect withdrawn":    {func(_ *testing.T, e *env) { e.reg.reregister(clientID, webCB) }, http.StatusBadRequest},
+		"its trust withdrawn":       {func(_ *testing.T, e *env) { e.reg.demote(clientID) }, http.StatusOK},
+		"the consent check failing": {func(_ *testing.T, e *env) { e.st.consentDown.Store(true) }, http.StatusOK},
+		"the registry down":         {func(_ *testing.T, e *env) { e.reg.fail() }, http.StatusInternalServerError},
 		"consent forgotten by revoke-user": {func(t *testing.T, e *env) {
 			if err := e.st.RevokeSubject(context.Background(), user(e).Subject, e.now.Add(1), e.now); err != nil {
 				t.Fatal(err)

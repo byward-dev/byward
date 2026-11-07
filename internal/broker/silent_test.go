@@ -227,7 +227,7 @@ func TestPromptNoneWhoseConsentDoesNotHoldAfterTheIdPGetsNoCodeAndNoPage(t *test
 			}
 		}, true},
 		{"a store failure while checking gets temporarily_unavailable", "temporarily_unavailable", hintNotRemembered, func(t *testing.T, e *env) {
-			e.st.down.Store(true)
+			e.st.consentDown.Store(true)
 		}, false},
 		{"a registry failure while checking gets temporarily_unavailable", "temporarily_unavailable", hintNotRemembered, func(t *testing.T, e *env) {
 			e.reg.fail()
@@ -263,15 +263,23 @@ func TestPromptNoneWhoseConsentDoesNotHoldAfterTheIdPGetsNoCodeAndNoPage(t *test
 	}
 }
 
-// A broker failure after the IdP is server_error at the redirect for a silent sign-in, not a page.
-func TestPromptNoneWhoseSignInFailsAfterTheIdPIsAServerError(t *testing.T) {
+// A broker failure at the callback is answered at the redirect for a silent sign-in, not a page:
+// temporarily_unavailable when the used login cannot be spent (before the IdP leg, rate limited or
+// not, and logged for the operator), server_error after the IdP.
+func TestPromptNoneWhoseSignInFailsInTheBrokerIsAnsweredAtTheRedirect(t *testing.T) {
+	const unrecorded = "recording a used login failed"
 	for _, tc := range []struct {
-		name    string
-		breakIt func(e *env)
+		name, want, log string // log: a line the operator must see, "" for none checked
+		breakIt         func(e *env)
 	}{
-		{"the access gate cannot decide", func(e *env) { e.b.cfg.Gate = brokenGate{} }},
-		{"the grant cannot be stored", func(e *env) { e.st.createDown.Store(true) }},
-		{"the code cannot be stored", func(e *env) { e.st.putCodeDown.Store(true) }},
+		{"the login cannot be spent", "temporarily_unavailable", unrecorded, func(e *env) { e.st.spendDown.Store(true) }},
+		{"the login cannot be spent on a rate-limited callback", "temporarily_unavailable", unrecorded, func(e *env) {
+			e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"callback": true}}
+			e.st.spendDown.Store(true)
+		}},
+		{"the access gate cannot decide", "server_error", "", func(e *env) { e.b.cfg.Gate = brokenGate{} }},
+		{"the grant cannot be stored", "server_error", "", func(e *env) { e.st.createDown.Store(true) }},
+		{"the code cannot be stored", "server_error", "", func(e *env) { e.st.putCodeDown.Store(true) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t, withRemember(t, nil))
@@ -279,17 +287,20 @@ func TestPromptNoneWhoseSignInFailsAfterTheIdPIsAServerError(t *testing.T) {
 			e.fake.Set(fakeidp.WithSilentSession())
 			res := e.authorizeWith(t, silent(nil), h)
 			tc.breakIt(e) // after the interactive sign-in that set the hint
-			if got := answerOf(t, e.finish(t, res)); got != refused(e, "server_error") {
-				t.Fatalf("answer %+v, want server_error", got)
+			if got := answerOf(t, e.finish(t, res)); got != refused(e, tc.want) {
+				t.Fatalf("answer %+v, want %s", got, tc.want)
+			}
+			if tc.log != "" && !strings.Contains(e.logs.String(), tc.log) {
+				t.Fatalf("the log has no %q", tc.log)
 			}
 		})
 	}
 }
 
 // A silent sign-in whose callback is rate limited is answered at its redirect URI, which its sealed
-// login names, not with the page, and its login is spent: a browser that honours the expiry cannot
-// finish that sign-in later. (The login is single use on the client side only, as for an
-// interactive callback; a kept copy of the cookie is not refused by the server.)
+// login names, not with the page, and its login is spent on both sides: the browser is told to drop
+// it, and the server refuses even a kept copy of the cookie (#150). A replay of that spent login
+// gets the 429 page while the limit holds, not a second answer at the redirect.
 func TestPromptNoneWhoseCallbackIsRateLimitedIsTemporarilyUnavailableAndSpendsItsLogin(t *testing.T) {
 	e := newEnv(t, withRemember(t, nil))
 	h := e.remember(t, nil)
@@ -315,14 +326,15 @@ func TestPromptNoneWhoseCallbackIsRateLimitedIsTemporarilyUnavailableAndSpendsIt
 	if got := answerOf(t, throttled); got != refused(e, "temporarily_unavailable") {
 		t.Fatalf("answer %+v, want temporarily_unavailable", got)
 	}
-	// What the browser still holds after that answer: nothing if it was told to drop the login.
-	var held []*http.Cookie
 	if c := cookieNamed(throttled, login.Name); c == nil || c.MaxAge >= 0 || c.Path != login.Path { // a browser deletes only a matching cookie
-		held = []*http.Cookie{login}
+		t.Fatalf("the login cookie was not expired: %+v", c)
+	}
+	if again := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{login}); again.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("a replay of the spent login under the limit: %d, want the 429 page", again.StatusCode)
 	}
 	e.b.cfg.Limiter = nil
-	if replay := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, held); replay.StatusCode != http.StatusBadRequest || replay.Header.Get("Location") != "" {
-		t.Fatalf("the browser's retry after the limit lifted: %d to %q, want the expired-sign-in page", replay.StatusCode, replay.Header.Get("Location"))
+	if replay := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{login}); replay.StatusCode != http.StatusBadRequest || replay.Header.Get("Location") != "" {
+		t.Fatalf("a replay with a kept copy of the cookie after the limit lifted: %d to %q, want the expired-sign-in page", replay.StatusCode, replay.Header.Get("Location"))
 	}
 }
 
