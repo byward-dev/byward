@@ -3,9 +3,13 @@ package audit
 import (
 	"bytes"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http/httptest"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +47,8 @@ var samples = []Event{
 	{Name: SessionRejected, Outcome: Failure, Reason: "session of another user", UserKey: "tid:oid"},
 	{Name: ProcessEvicted, Outcome: Success, Reason: "user_cap", UserKey: "tid:oid"},
 	{Name: DownstreamTokenRefused, Outcome: Failure, Reason: "consent_required", ClientID: "client-1", UserKey: "tid:oid", GrantID: "grant-1", IdP: "entra"},
+	{Name: AppTokenAccepted, Outcome: Success, ClientID: "app-client-1", UserKey: "tid:app-oid", IdP: "entra"},
+	{Name: AppTokenRejected, Outcome: Failure, Reason: "denied_role", ClientID: "app-client-1", UserKey: "tid:app-oid", IdP: "entra"},
 }
 
 func render(t *testing.T) string {
@@ -53,7 +59,7 @@ func render(t *testing.T) string {
 		r := httptest.NewRequest("GET", "/mcp", nil)
 		r.RemoteAddr = "192.0.2.7:1234"
 		switch e.Name {
-		case AccessTokenRejected, HostRejected, OriginRejected, TokenRejected, ConsentShown, ConsentGranted, ConsentDenied, RateLimited:
+		case AccessTokenRejected, AppTokenRejected, HostRejected, OriginRejected, TokenRejected, ConsentShown, ConsentGranted, ConsentDenied, RateLimited:
 			l.RecordUnauthenticated(r, e)
 		case ClientRegistered, KeyLoaded, StoreRestored, ProcessEvicted:
 			l.Record(nil, e) // startup, or no request of the user's
@@ -91,16 +97,41 @@ func TestAuditRecordsMatchTheGoldenSchema(t *testing.T) {
 	}
 }
 
-// names lists every event constant; a new one must be added here, to samples and to the docs.
-var names = []string{Login, AccessDenied, TokenIssued, TokenRejected, AccessTokenRejected, GrantRevoked,
-	ClientRegistered, KeyLoaded, HostRejected, OriginRejected, ConsentShown, ConsentGranted, ConsentDenied, ConsentRemembered, ConsentSilent, RateLimited, StoreRestored, SessionRejected, DownstreamTokenRefused}
+// eventNames are the values of the "Event names" constants in audit.go, read from the source so a
+// new event cannot be left out of the checks below.
+func eventNames(t *testing.T) []string {
+	t.Helper()
+	f, err := parser.ParseFile(token.NewFileSet(), "audit.go", nil, parser.ParseComments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, d := range f.Decls {
+		g, ok := d.(*ast.GenDecl)
+		if !ok || g.Tok != token.CONST || g.Doc == nil || !strings.HasPrefix(g.Doc.Text(), "Event names.") {
+			continue
+		}
+		for _, spec := range g.Specs {
+			for _, v := range spec.(*ast.ValueSpec).Values {
+				if lit, ok := v.(*ast.BasicLit); ok {
+					n, _ := strconv.Unquote(lit.Value)
+					names = append(names, n)
+				}
+			}
+		}
+	}
+	if len(names) < 20 {
+		t.Fatalf("found %d event names in audit.go; the Event names block moved?", len(names))
+	}
+	return names
+}
 
 func TestEveryEventHasASampleAndADocsRow(t *testing.T) {
 	docs, err := os.ReadFile("../../docs/reference/observability.md")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, n := range names {
+	for _, n := range eventNames(t) {
 		found := false
 		for _, s := range samples {
 			found = found || s.Name == n
