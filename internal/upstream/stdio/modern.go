@@ -4,10 +4,14 @@ package stdio
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,7 +41,24 @@ var (
 	pathToken    = jsonPath{"params", "_meta", "progressToken"}
 	pathLogLevel = jsonPath{"params", "_meta", "io.modelcontextprotocol/logLevel"}
 	pathProgress = jsonPath{"params", "progressToken"}
+	pathName     = jsonPath{"params", "name"}
+	pathURI      = jsonPath{"params", "uri"}
+	pathSub      = jsonPath{"params", "_meta", "io.modelcontextprotocol/subscriptionId"}
+	pathResSub   = jsonPath{"result", "_meta", "io.modelcontextprotocol/subscriptionId"}
+	pathCancelID = jsonPath{"params", "requestId"}
 )
+
+// Request metadata headers (2026-07-28 streamable-http). A stdio upstream never sees headers, so
+// the bridge is the server that validates them (ADR-0004 §3, amended).
+const (
+	headerProtocolVersion = "MCP-Protocol-Version"
+	headerMethod          = "Mcp-Method"
+	headerName            = "Mcp-Name"
+	codeHeaderMismatch    = -32020
+)
+
+// nameSource is the body field Mcp-Name mirrors, for the methods that require it.
+var nameSource = map[string]jsonPath{"tools/call": pathName, "prompts/get": pathName, "resources/read": pathURI}
 
 // probeRequest is the proxy's server/discover: does the upstream speak the modern era?
 var probeRequest = []byte(`{"jsonrpc":"2.0","id":` + probeID + `,"method":"server/discover","params":{"_meta":{` +
@@ -55,7 +76,7 @@ type requestMeta struct {
 // readMeta locates a message's id, progress token, log level and protocol version. Ambiguous JSON
 // is refused: the ids are rewritten, and a wrong guess would route one client's answer to another.
 func readMeta(msg []byte) (requestMeta, error) {
-	at, err := locate(msg, pathID, pathToken, pathLogLevel, pathVersion)
+	at, err := locate(msg, pathID, pathToken, pathLogLevel, pathVersion) // the method is checked by parseMessage, in both eras
 	if err != nil {
 		return requestMeta{}, err
 	}
@@ -94,6 +115,80 @@ func (m requestMeta) checkRequest(msg []byte) error {
 		return scalarID(m.token.value(msg))
 	}
 	return nil
+}
+
+// checkHeaders applies the transport's header rules to a request: MCP-Protocol-Version and
+// Mcp-Method, and Mcp-Name where the method mirrors one, must be present and equal the body's
+// values (case-sensitive, after decoding a Base64 sentinel). Notification POSTs have no header
+// requirements in this revision.
+func checkHeaders(h http.Header, method, version string, msg []byte) error {
+	type mirrored struct {
+		name, value string
+		base64      bool // may arrive in the Base64 sentinel form
+	}
+	want := []mirrored{{headerProtocolVersion, version, false}, {headerMethod, method, false}}
+	if path, ok := nameSource[method]; ok {
+		at, err := locate(msg, path)
+		if err != nil {
+			return err
+		}
+		if at[0] != nil { // absent: the body is the upstream's to refuse
+			var v string
+			if json.Unmarshal(at[0].value(msg), &v) != nil {
+				return fmt.Errorf("%s mirrors a value that is not a string", headerName)
+			}
+			want = append(want, mirrored{headerName, v, true})
+		}
+	}
+	for _, w := range want {
+		vals := h.Values(w.name)
+		if len(vals) != 1 {
+			return fmt.Errorf("header %s missing or repeated", w.name)
+		}
+		got := vals[0]
+		if !plainHeaderValue(got) {
+			return fmt.Errorf("header %s has characters a header value may not", w.name)
+		}
+		if w.base64 { // Mcp-Name, and Mcp-Param-* should they come, only
+			var err error
+			if got, err = headerValue(got); err != nil {
+				return fmt.Errorf("header %s: %w", w.name, err)
+			}
+		}
+		if got != w.value {
+			return fmt.Errorf("header %s does not match the body", w.name)
+		}
+	}
+	return nil
+}
+
+// plainHeaderValue reports whether v holds only what a header value may: visible ASCII, space and
+// tab (2026-07-28 streamable-http, Value Encoding). Anything else must come Base64-encoded.
+func plainHeaderValue(v string) bool {
+	for i := 0; i < len(v); i++ {
+		if c := v[i]; (c < 0x20 || c > 0x7e) && c != '\t' {
+			return false
+		}
+	}
+	return true
+}
+
+// headerValue decodes the Base64 sentinel form =?base64?…?= that clients use for values that are
+// not plain ASCII; any other value is taken as it is.
+func headerValue(v string) (string, error) {
+	inner, ok := strings.CutPrefix(v, "=?base64?")
+	if !ok {
+		return v, nil
+	}
+	inner, ok = strings.CutSuffix(inner, "?=")
+	if !ok {
+		return "", errors.New("malformed Base64 sentinel")
+	}
+	b, err := base64.StdEncoding.DecodeString(inner)
+	if err != nil {
+		return "", errors.New("malformed Base64 sentinel")
+	}
+	return string(b), nil
 }
 
 // capability is what the proxy has learned about the upstream's era.
@@ -151,6 +246,9 @@ type modernRequest struct {
 	logs      bool // asked for notifications/message (io.modelcontextprotocol/logLevel)
 	out       chan []byte
 	final     chan []byte
+	listen    bool          // a subscriptions/listen: its graceful end carries the id in result._meta too
+	torn      chan struct{} // closed when the upstream tears down this subscriptions/listen
+	tornOnce  sync.Once
 }
 
 // modernPost serves one session-less modern-era POST; meta is the message's, already read.
@@ -174,6 +272,10 @@ func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity,
 			writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest, "Invalid Request: "+err.Error())
 			return
 		}
+		if err := checkHeaders(r.Header, env.Method, meta.version, msg); err != nil {
+			writeRPCError(w, http.StatusBadRequest, meta.id.value(msg), codeHeaderMismatch, "Header mismatch: "+err.Error())
+			return
+		}
 	}
 	key := "user:" + id.user()
 	p, release, err := b.c.Manager.Get(r.Context(), key, id)
@@ -195,7 +297,7 @@ func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity,
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
-	c.request(w, r, msg, meta)
+	c.request(w, r, msg, env.Method, meta)
 }
 
 // legacyFallback is the answer to a modern request the upstream cannot serve: no modern error
@@ -272,12 +374,12 @@ func (c *userConn) discover(ctx context.Context, timeout time.Duration) bool {
 }
 
 // request relays one modern-era request under proxy-chosen ids.
-func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, meta requestMeta) {
+func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, method string, meta requestMeta) {
 	var token []byte
 	if meta.token != nil {
 		token = meta.token.value(msg)
 	}
-	q := c.register(meta.id.value(msg), token, meta.logs)
+	q := c.register(meta.id.value(msg), token, meta.logs, method == "subscriptions/listen")
 	defer c.unregister(q)
 	if err := c.p.Send(r.Context(), replace(msg, edit{meta.id, []byte(q.proxyID)}, edit{meta.token, []byte(q.proxyTok)})); err != nil {
 		c.log.WarnContext(r.Context(), "relaying to the upstream process failed", "request_id", logging.RequestID(r.Context()), "error", err)
@@ -285,17 +387,17 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, m
 		return
 	}
 	out := startSSE(w)
-	finish := func(m []byte) { // what the upstream sent before the response goes first
+	drain := func() { // what the upstream sent before the end goes out first
 		for {
 			select {
 			case o := <-q.out:
 				_ = out.write(o)
 			default:
-				_ = out.write(m)
 				return
 			}
 		}
 	}
+	finish := func(m []byte) { drain(); _ = out.write(m) }
 	for {
 		select {
 		case m := <-q.out:
@@ -308,6 +410,11 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, m
 			return
 		case <-c.ended:
 			finish(exitAnswer(q))
+			return
+		case <-q.torn:
+			// The upstream ended the subscription. Over HTTP that is said by closing the stream; the
+			// cancellation itself is stdio's (2026-07-28 cancellation).
+			drain()
 			return
 		case <-r.Context().Done():
 			c.cancel(q) // closing the stream cancels the request (2026-07-28 transports)
@@ -327,11 +434,12 @@ func exitAnswer(q *modernRequest) []byte {
 	}
 }
 
-func (c *userConn) register(id, token []byte, logs bool) *modernRequest {
+func (c *userConn) register(id, token []byte, logs, listen bool) *modernRequest {
 	n := strconv.FormatUint(c.ids.Add(1), 10)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	q := &modernRequest{id: id, proxyID: `"byw-` + n + `"`, logs: logs, out: make(chan []byte, streamBuffer), final: make(chan []byte, 1)}
+	q := &modernRequest{id: id, proxyID: `"byw-` + n + `"`, logs: logs, listen: listen, out: make(chan []byte, streamBuffer),
+		final: make(chan []byte, 1), torn: make(chan struct{})}
 	c.byID[q.proxyID] = q
 	if token != nil {
 		q.token, q.proxyTok = token, `"byw-t`+n+`"`
@@ -390,18 +498,41 @@ func (c *userConn) routeResponse(msg []byte, proxyID string) {
 		}
 		return
 	}
-	c.mu.Lock()
-	q := c.byID[proxyID]
-	c.mu.Unlock()
-	at, err := locate(msg, pathID)
-	if q == nil || err != nil || at[0] == nil {
+	q := c.byProxyID(proxyID)
+	if q == nil {
 		c.log.Warn("upstream response for no waiting request", "reason", "response_unrouted")
 		return
 	}
+	paths := []jsonPath{pathID}
+	if q.listen { // a graceful end names the subscription in result._meta too
+		paths = append(paths, pathResSub)
+	}
+	var out []byte
+	if at, err := locate(msg, paths...); err == nil && at[0] != nil {
+		// This answers q by its id, so whatever a listen's _meta names is q's subscription: every
+		// located id becomes the client's, never a proxy id.
+		edits := make([]edit, len(at))
+		for i, s := range at {
+			edits[i] = edit{s, q.id}
+		}
+		out = replace(msg, edits...)
+	} else {
+		// Routable, but its id (or a listen's subscription id) cannot be placed with certainty: the
+		// client gets an error, not silence, and never the proxy's id.
+		c.log.Warn("upstream response is ambiguous", "reason", "response_ambiguous")
+		out = rpcError(q.id, codeInternalError, "the upstream sent an ambiguous response")
+	}
 	select {
-	case q.final <- replace(msg, edit{at[0], q.id}):
+	case q.final <- out:
 	default:
 	}
+}
+
+// byProxyID is the request in flight under the proxy's id, or nil.
+func (c *userConn) byProxyID(id string) *modernRequest {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.byID[id]
 }
 
 func (c *userConn) routeNotification(msg []byte, method string) {
@@ -437,9 +568,36 @@ func (c *userConn) routeNotification(msg []byte, method string) {
 			return
 		}
 		c.deliver(only, msg, method)
+	case "notifications/cancelled": // the upstream tearing down a subscriptions/listen
+		at, err := locate(msg, pathCancelID)
+		var q *modernRequest
+		if err == nil && at[0] != nil {
+			q = c.byProxyID(string(compactID(at[0].value(msg))))
+		}
+		if q == nil || !q.listen { // only a subscription is the upstream's to end
+			c.drop(method, "cancel_unrouted")
+			return
+		}
+		q.tornOnce.Do(func() { close(q.torn) })
 	default:
-		c.drop(method, "notification_unrouted")
+		c.routeSubscription(msg, method)
 	}
+}
+
+// routeSubscription delivers a notification of a subscriptions/listen stream: its _meta names the
+// listen request's id, the proxy's, which is put back to the client's.
+func (c *userConn) routeSubscription(msg []byte, method string) {
+	at, err := locate(msg, pathSub)
+	if err != nil || at[0] == nil {
+		c.drop(method, "notification_unrouted")
+		return
+	}
+	q := c.byProxyID(string(compactID(at[0].value(msg))))
+	if q == nil || !q.listen {
+		c.drop(method, "subscription_unrouted")
+		return
+	}
+	c.deliver(q, replace(msg, edit{at[0], q.id}), method)
 }
 
 func (c *userConn) deliver(q *modernRequest, msg []byte, method string) {
