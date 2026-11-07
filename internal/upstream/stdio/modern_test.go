@@ -803,9 +803,10 @@ func TestARequestTrailerIsNeverReadAsAHeader(t *testing.T) {
 		omit    string      // a mirrored header the request leaves out
 		trailer http.Header // sent after the body
 		want    int
+		wantIn  string // in the response body
 	}{
-		{"a trailer contradicting the headers", "", http.Header{"Mcp-Name": {"news"}, "Mcp-Protocol-Version": {"1999-01-01"}}, http.StatusOK},
-		{"a trailer standing in for a missing header", "Mcp-Name", http.Header{"Mcp-Name": {"weather"}}, http.StatusBadRequest},
+		{"a trailer contradicting the headers", "", http.Header{"Mcp-Name": {"news"}, "Mcp-Protocol-Version": {"1999-01-01"}}, http.StatusOK, `"id":1`},
+		{"a trailer standing in for a missing header", "Mcp-Name", http.Header{"Mcp-Name": {"weather"}}, http.StatusBadRequest, "header Mcp-Name missing"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b := newModernBridge(t, nil)
@@ -827,9 +828,8 @@ func TestARequestTrailerIsNeverReadAsAHeader(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = res.Body.Close() })
-			if res.StatusCode != tc.want {
-				raw, _ := io.ReadAll(res.Body)
-				t.Fatalf("status %d, body %s; want %d, the trailer unread", res.StatusCode, raw, tc.want)
+			if raw, _ := io.ReadAll(res.Body); res.StatusCode != tc.want || !strings.Contains(string(raw), tc.wantIn) {
+				t.Fatalf("status %d, body %s; want %d with %q, the trailer unread", res.StatusCode, raw, tc.want, tc.wantIn)
 			}
 		})
 	}
