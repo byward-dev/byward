@@ -170,9 +170,61 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 		if r.Body != nil && r.Body != http.NoBody {
 			r.Body = teeBody{io.TeeReader(r.Body, c), r.Body}
 		}
-		rp.ServeHTTP(w, r.WithContext(traceWrite(context.WithValue(r.Context(), captureKey{}, c))))
+		rp.ServeHTTP(&informational{ResponseWriter: w, ours: w.Header().Clone()}, r.WithContext(traceWrite(context.WithValue(r.Context(), captureKey{}, c))))
 	})
 }
+
+// informationalHeaders are the only headers an upstream's informational (1xx) response may carry to
+// the MCP client: Link for 103 Early Hints, and Mcp-Session-Id, which the session binding then seals.
+var informationalHeaders = map[string]bool{"Link": true, "Mcp-Session-Id": true}
+
+// informational is the ResponseWriter the relay hands ReverseProxy. ReverseProxy forwards an
+// upstream's 1xx from a client-trace hook, past ModifyResponse: it copies the upstream's headers into
+// this writer, writes the code, then clears the whole header map. So this is the one place to:
+//   - keep only informationalHeaders on a 1xx;
+//   - drop an interim 101, which an HTTP/2 upstream can send through that hook, never through
+//     ModifyResponse's refusal; written, it would end the response before the final one;
+//   - on the final response, put back the headers the proxy set before the relay ran (CORS,
+//     X-Request-Id) that the clear took, never over one the final response has; a body written
+//     with no status first (the header-timeout answer) is a final 200 too.
+type informational struct {
+	http.ResponseWriter
+	ours  http.Header // the proxy's own headers, as they were before the relay ran
+	final bool        // the final status is written
+}
+
+func (w *informational) Write(p []byte) (int, error) {
+	if !w.final {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(p)
+}
+
+func (w *informational) WriteHeader(code int) {
+	h := w.Header()
+	switch {
+	case code == http.StatusSwitchingProtocols:
+		clear(h)
+		return
+	case code >= 100 && code < 200:
+		for k := range h {
+			if !informationalHeaders[k] {
+				delete(h, k)
+			}
+		}
+	default:
+		w.final = true
+		for k, v := range w.ours {
+			if _, ok := h[k]; !ok {
+				h[k] = v
+			}
+		}
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+// Unwrap lets http.ResponseController reach the writer below, for flushing streamed responses.
+func (w *informational) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // dropTrailers keeps the upstream's response trailers from the MCP client: they are a second set of
 // headers, sent after the body, that the header cleaning in ModifyResponse and the session binding
