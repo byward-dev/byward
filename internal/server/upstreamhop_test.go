@@ -241,6 +241,8 @@ func TestDoctorNamesTheEnvironmentsProxyWithoutItsCredentials(t *testing.T) {
 		{"no proxy is named when none applies", nil, httpproxy.Config{}, doctor.Pass, "HTTP upstream http://10.0.0.7/mcp", []string{"HTTP proxy"}},
 		{"a proxy is named without its password", nil, httpproxy.Config{HTTPProxy: "http://ops:pw-secret@egress.example:3128"},
 			doctor.Pass, "go through the HTTP proxy http://egress.example:3128 from the environment (list the upstream's host in NO_PROXY", []string{"ops", "pw-secret"}},
+		{"a proxy with a trailing slash is named", nil, httpproxy.Config{HTTPProxy: "http://egress.example:3128/"},
+			doctor.Pass, "go through the HTTP proxy http://egress.example:3128 ", []string{"unescaped"}},
 		{"a proxy without a scheme is named without its password", nil, httpproxy.Config{HTTPProxy: "ops:pw-secret@egress.example:3128"},
 			doctor.Pass, "go through the HTTP proxy http://egress.example:3128 ", []string{"ops", "pw-secret"}},
 		{"a password with a slash is never shown", nil, httpproxy.Config{HTTPProxy: "http://ops:pw/secret@egress.example:3128"},
