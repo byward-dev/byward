@@ -95,6 +95,7 @@ so per-user processes pile up until the idle timeout or the per-user limit recla
 | Situation | Client gets |
 |---|---|
 | `initialize` without a session | A new process and an `Mcp-Session-Id` (sealed to the user when authentication is on) |
+| `initialize` whose process cannot start, cannot be reached, or ends before sending anything | `502` with no `Mcp-Session-Id`, never `404`, which a dual-era client would take for a legacy HTTP+SSE server; the client can retry. If the upstream had already sent something on the stream, the stream ends with a JSON-RPC error (`-32603`) |
 | Any other request without a session, including a 2026-07-28 request | `400` with a JSON-RPC error; dual-era clients fall back to `initialize` |
 | A session that ended, or another user's | `404`; the client starts a new session |
 | The upstream process crashes, exits or closes its stdout | Open requests get a JSON-RPC error (`-32603`, `upstream process exited`), later ones `404`. The process is not restarted; one that closed stdout but keeps running is stopped after 5 s |
