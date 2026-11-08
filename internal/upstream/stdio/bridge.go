@@ -334,6 +334,11 @@ func (st *stream) end() { st.once.Do(func() { close(st.done) }) }
 func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id json.RawMessage, initialize bool) {
 	st := newStream(id)
 	if !s.addPost(st) {
+		if s.isEnded() && initialize { // the process ended before its initialize could go out
+			s.log.WarnContext(r.Context(), "initialize failed: no MCP session", "request_id", logging.RequestID(r.Context()), "reason", "process_ended")
+			http.Error(w, "upstream unavailable", http.StatusBadGateway)
+			return
+		}
 		if s.isEnded() {
 			http.Error(w, "session not found", http.StatusNotFound)
 			return

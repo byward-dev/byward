@@ -613,6 +613,24 @@ func TestInitializeThatCannotStartOrReachTheUpstreamProcessIs502WithoutAnMCPSess
 	}
 }
 
+func TestARequestOnASessionWhoseProcessHasAlreadyEndedIs502ForInitializeAnd404Otherwise(t *testing.T) {
+	// White-box: the process can end between starting the session and registering the request,
+	// and only then. An initialize must not get the 404 a dual-era client reads as a legacy
+	// HTTP+SSE server; any later request gets 404 and the client starts again.
+	for _, tc := range []struct {
+		initialize bool
+		want       int
+	}{{true, http.StatusBadGateway}, {false, http.StatusNotFound}} {
+		s := &session{log: slog.New(slog.DiscardHandler), byID: map[string]*stream{}}
+		s.end()
+		rec := httptest.NewRecorder()
+		s.request(rec, httptest.NewRequest(http.MethodPost, "/", nil), []byte(initialize), json.RawMessage(`1`), tc.initialize)
+		if rec.Code != tc.want || rec.Header().Get(sessionHeader) != "" {
+			t.Errorf("initialize %v: status %d, session %q; want %d and no session ID", tc.initialize, rec.Code, rec.Header().Get(sessionHeader), tc.want)
+		}
+	}
+}
+
 func TestOpenGETStreamEndsWhenTheUpstreamProcessExits(t *testing.T) {
 	b := newBridge(t, nil)
 	s := b.initialize(t, "alice")
