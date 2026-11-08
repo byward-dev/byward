@@ -123,7 +123,7 @@ for it.
 - **Which user, which grant.** A process serves one user (ADR-0003). The token is for that user,
   exchanged for the stored IdP token of the grant whose request the process served last, from the
   same cache as an HTTP upstream's. An app-only caller acts for no user: `no_user`. Once the stored
-  IdP token has expired, or the grant was revoked or signed out, `sign_in_expired`: byward never
+  IdP token or the grant itself has expired, or the grant was revoked or signed out, `sign_in_expired`: byward never
   refreshes IdP tokens outside a request, and the client's next request renews it.
 - **The same check before every request.** Before a request reaches the process, byward gets the
   token as it does for an HTTP upstream. A refusal is answered in the proxy's name (the ADR-0025
