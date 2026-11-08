@@ -133,7 +133,8 @@ func (r *TokenResponse) Tokens(now time.Time) Tokens {
 }
 
 // PostToken sends a token request. A non-2xx response is returned with its error fields and a nil
-// error; err is only for transport failures and malformed replies.
+// error; err is for transport failures and malformed replies, except a 2xx reply without tokens,
+// which comes back as an already-classed *Error (Fatal) that callers must pass through unwrapped.
 func (f *Fetcher) PostToken(ctx context.Context, endpoint string, form url.Values, header http.Header) (*TokenResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {

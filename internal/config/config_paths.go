@@ -3,7 +3,6 @@ package config
 import (
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // within reports whether path is dir or inside it.
@@ -11,9 +10,6 @@ func within(dir, path string) bool {
 	rel, err := filepath.Rel(dir, path)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
-
-// maxRefreshGrace is the upper bound of ADR-0006 §4 (range 0–60 s).
-const maxRefreshGrace = 60 * time.Second
 
 // paths resolves the data directory and the paths that default into it: keys, static clients,
 // the store and its restore counter (ADR-0007 §6, §9). No path is relative to the working directory.
@@ -50,17 +46,4 @@ func (c *Config) paths(v *Values) []error {
 		errs = append(errs, errorf("BYWARD_STORE_COUNTER_FILE: %s is inside BYWARD_STORE_DIR %s, so a restored backup of the state directory would restore it too and go undetected; keep the keys directory outside the state directory, or set this to a path outside it", c.StoreCounterFile, c.StoreDir))
 	}
 	return errs
-}
-
-// refreshGrace parses the refresh-token grace window (ADR-0006 §4: 0 to 60 s).
-func (c *Config) refreshGrace(v *Values) []error {
-	grace, err := time.ParseDuration(v.get("refresh-grace"))
-	switch {
-	case err != nil:
-		return []error{errorf("BYWARD_REFRESH_GRACE: want a duration such as 30s, got %q", v.get("refresh-grace"))}
-	case grace < 0 || grace > maxRefreshGrace:
-		return []error{errorf("BYWARD_REFRESH_GRACE: want 0s to 60s, got %s", grace)}
-	}
-	c.RefreshGrace = grace
-	return nil
 }

@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -11,23 +10,9 @@ import (
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/denylist"
-	"github.com/byward-dev/byward/internal/health"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/store/sqlite"
-	"github.com/byward-dev/byward/internal/token"
 )
-
-// readiness is what /readyz checks in authenticated mode: a signing key and the store. Never the
-// IdP (ADR-0021 §10).
-func readiness(ring *token.KeyRing, st pinger) []health.Check {
-	checks := []health.Check{{Name: "keys", Ready: func(context.Context) error {
-		if ring.SigningKeyID() == "" {
-			return errors.New("no signing key")
-		}
-		return nil
-	}}}
-	return append(checks, health.Check{Name: "store", Ready: st.Ping})
-}
 
 // wireStore is openStore; tests replace it to reach the wired store.
 var wireStore = openStore

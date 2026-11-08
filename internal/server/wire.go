@@ -44,9 +44,6 @@ type auth struct {
 	jwks       http.Handler
 }
 
-// pinger is a store that can say whether it is reachable, for readiness.
-type pinger interface{ Ping(context.Context) error }
-
 // buildAuth wires the broker: sealing keys, Entra, static clients, the access gate and the SQLite
 // store. Errors name the file or setting at fault.
 func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, err error) {
