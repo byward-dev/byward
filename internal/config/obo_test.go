@@ -118,10 +118,23 @@ func TestOnBehalfOfSettingsAreRefusedWhenTheyCannotWork(t *testing.T) {
 			t.Fatalf("err = %v, want the credential's header refused", err)
 		}
 	})
-	t.Run("a stdio upstream", func(t *testing.T) {
-		_, _, err := Load(nil, stdioBase(`BYWARD_UPSTREAM_COMMAND=["/usr/bin/server"]`, "BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read"), baseFiles)
-		if err == nil || !strings.Contains(err.Error(), "HTTP upstream only") {
-			t.Fatalf("err = %v, want On-Behalf-Of refused with a stdio upstream", err)
+	t.Run("a header for a stdio upstream", func(t *testing.T) {
+		_, _, err := Load(nil, stdioBase(`BYWARD_UPSTREAM_COMMAND=["/usr/bin/server"]`, "BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read",
+			"BYWARD_OBO_HEADER=X-Graph-Token"), baseFiles)
+		if err == nil || !strings.Contains(err.Error(), "BYWARD_OBO_HEADER: a stdio upstream gets its downstream token from its token socket") {
+			t.Fatalf("err = %v, want the header refused for a stdio upstream", err)
 		}
 	})
+}
+
+// #141: a stdio upstream asks its token socket for the downstream token, so On-Behalf-Of loads
+// with one; the header keeps its default, unused.
+func TestOnBehalfOfLoadsWithAStdioUpstream(t *testing.T) {
+	c, _, err := Load(nil, stdioBase(`BYWARD_UPSTREAM_COMMAND=["/usr/bin/server"]`, "BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read"), baseFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.OBOScopes) != 1 || c.UpstreamCommand == nil {
+		t.Fatalf("scopes %q, command %q; want On-Behalf-Of with the stdio upstream", c.OBOScopes, c.UpstreamCommand)
+	}
 }

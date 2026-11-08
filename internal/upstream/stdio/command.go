@@ -45,6 +45,9 @@ type Identity struct {
 	Issuer        string
 	Email         string
 	PrincipalType string
+	// Grant and Client are the grant and MCP client of a request, for the downstream token of the
+	// process that serves it (ADR-0017); they never reach the process's environment.
+	Grant, Client string
 }
 
 // user identifies the principal across IdPs and kinds: a subject is unique only within its issuer,
@@ -55,7 +58,7 @@ func (id Identity) validate() error {
 	if id.Subject == "" || id.Issuer == "" {
 		return errors.New("stdio: identity needs a subject and an issuer")
 	}
-	for _, v := range []string{id.Subject, id.Issuer, id.Email, id.PrincipalType} {
+	for _, v := range []string{id.Subject, id.Issuer, id.Email, id.PrincipalType, id.Grant, id.Client} {
 		if strings.ContainsRune(v, 0) {
 			return errors.New("stdio: identity contains a NUL byte")
 		}

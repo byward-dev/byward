@@ -26,6 +26,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -41,6 +42,10 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "sleep" {
 		signal.Ignore(syscall.SIGTERM)
 		hang()
+	}
+	if len(os.Args) > 1 && os.Args[1] == "token" { // a child asking the token socket
+		fmt.Println(askToken())
+		return
 	}
 	stubborn, mcp := false, false
 	for _, a := range os.Args[1:] {
@@ -131,6 +136,10 @@ func main() {
 				continue
 			}
 			reply(strconv.Itoa(c.Process.Pid))
+		case "token":
+			reply(askToken())
+		case "tokenchild":
+			reply(tokenFromChild())
 		case "block":
 			reply("blocking")
 			hang()
@@ -263,6 +272,10 @@ func serveMCP() {
 			result(m.ID, res)
 		case "echo":
 			write(message{ID: m.ID, Result: m.Params})
+		case "token": // the token socket's answer, as the result
+			result(m.ID, askToken())
+		case "tokenchild":
+			result(m.ID, tokenFromChild())
 		case "line":
 			result(m.ID, sc.Text())
 		case "noresult":
@@ -567,4 +580,36 @@ func serveModern() {
 			}
 		}()
 	}
+}
+
+// askToken asks the token socket (BYWARD_DOWNSTREAM_TOKEN_SOCKET) as an upstream server would and
+// returns its answer line, or "error ..." when there is none.
+func askToken() string {
+	path := os.Getenv("BYWARD_DOWNSTREAM_TOKEN_SOCKET")
+	if path == "" {
+		return "error no BYWARD_DOWNSTREAM_TOKEN_SOCKET"
+	}
+	c, err := net.Dial("unix", path) //nolint:gosec // G704: dials the socket the proxy named for this test process
+	if err != nil {
+		return "error " + err.Error()
+	}
+	defer func() { _ = c.Close() }()
+	if _, err := c.Write([]byte("{}\n")); err != nil {
+		return "error " + err.Error()
+	}
+	line, err := bufio.NewReader(c).ReadString('\n')
+	if err != nil {
+		return "error " + err.Error()
+	}
+	return strings.TrimSuffix(line, "\n")
+}
+
+// tokenFromChild asks the token socket from a child process, as a server started by a launcher
+// (npx, uvx) would.
+func tokenFromChild() string {
+	out, err := exec.Command(os.Args[0], "token").Output() //nolint:gosec // G204: re-runs this test binary
+	if err != nil {
+		return "error " + err.Error()
+	}
+	return strings.TrimSuffix(string(out), "\n")
 }

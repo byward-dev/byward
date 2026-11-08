@@ -6,9 +6,9 @@ On-Behalf-Of flow and sends it with every request to the upstream, in a header o
 ([ADR-0017](../adr/0017-delegation-obo.md)). The upstream never needs Entra credentials, and never
 sees the user's sign-in token.
 
-Supported: Microsoft Entra (`BYWARD_IDP=entra`, the default), with an HTTP upstream. A stdio
-upstream gets its environment once per user and cannot receive a token that expires within the hour
-(#141). An app-only caller ([app-only tokens](app-tokens.md)) acts for no user, so its requests
+Supported: Microsoft Entra (`BYWARD_IDP=entra`, the default), with an HTTP upstream or a stdio
+one. A stdio upstream asks its token socket for the token instead of reading a header
+([section 5](#5-a-stdio-upstream)). An app-only caller ([app-only tokens](app-tokens.md)) acts for no user, so its requests
 reach the upstream without a downstream token; the assertion's `principal_type` says so.
 
 > Not yet verified against a real tenant in this release; the fake IdP's Entra profile is the test.
@@ -101,3 +101,79 @@ Each refusal is in the audit stream as `downstream_token_refused`, and is counte
 The admin-consent URL returns to byward's `/callback/entra`, which shows a confirmation or error
 page. That redirect cannot be verified, so it changes nothing: the next request simply exchanges
 again. Entra itself records the consent.
+
+## 5. A stdio upstream
+
+A [stdio upstream](stdio-upstream.md) process asks byward for the token when it needs it, on a Unix
+socket named in its environment. The socket accepts only that process and the processes it starts
+(a launcher such as `npx` or `uvx` included).
+
+```
+BYWARD_DOWNSTREAM_TOKEN_SOCKET=/tmp/byward-session-1234/token.sock
+```
+
+Connect, write one JSON object on one line, and read one line back:
+
+```
+→ {}
+← {"access_token":"eyJ0eXAi...","expires_at":"2026-11-08T13:00:00Z"}
+← {"error":"consent_required"}
+```
+
+Use `Bearer <access_token>` for the downstream API, and ask again before `expires_at`. Each answer
+is for the user this process serves, from the sign-in of the request it served last.
+
+| `error` | Meaning |
+|---|---|
+| `consent_required`, `interaction_required`, `unavailable`, `failed` | As in [section 4](#4-when-entra-refuses). The client's request was already answered by byward, so this happens only when a token expired between requests. |
+| `sign_in_expired` | The user's sign-in has expired since their last request. Their next request renews it; ask again then. |
+| `no_user` | The process serves an app-only caller, which acts for no user. |
+| `refused` | The connection came from a process outside this upstream process's tree. |
+| `bad_request` | The request was not one JSON object on one line. |
+
+Python:
+
+```python
+import json, os, socket
+
+def downstream_token() -> str:
+    with socket.socket(socket.AF_UNIX) as s:
+        s.connect(os.environ["BYWARD_DOWNSTREAM_TOKEN_SOCKET"])
+        s.sendall(b"{}\n")
+        answer = json.loads(s.makefile().readline())
+    if "error" in answer:
+        raise RuntimeError("no downstream token: " + answer["error"])
+    return answer["access_token"]
+```
+
+TypeScript (Node):
+
+```ts
+import { createConnection } from "node:net";
+import { createInterface } from "node:readline";
+
+export function downstreamToken(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const s = createConnection(process.env.BYWARD_DOWNSTREAM_TOKEN_SOCKET!, () => s.write("{}\n"));
+    createInterface({ input: s }).once("line", (line) => {
+      s.end();
+      const a = JSON.parse(line);
+      a.error ? reject(new Error("no downstream token: " + a.error)) : resolve(a.access_token);
+    });
+    s.on("error", reject);
+  });
+}
+```
+
+- A server that reads a fixed environment variable needs this change. A token that expires within
+  the hour cannot reach it any other way without restarting it, which would end the session.
+- `BYWARD_OBO_HEADER` has no effect for a stdio upstream, and setting it is refused.
+- A server started with `docker run -i` cannot reach the socket: its process does not descend from
+  the one byward started.
+- Every upstream process runs as byward's uid. On a host that lets processes of one uid read each
+  other's memory (`kernel.yama.ptrace_scope` 0, Debian's default), another user's process could read
+  the token from memory. byward warns at startup and in `doctor`; see
+  [Harden a deployment §10](harden-a-deployment.md#10-isolate-stdio-upstream-processes).
+- On Linux before 6.5, and on macOS (for development only), a narrow race remains: a process that
+  hands its connection to another and exits, with its process ID reused inside the upstream's tree
+  before byward checks it, would pass the check ([ADR-0017](../adr/0017-delegation-obo.md), amendment of 2026-11-08).

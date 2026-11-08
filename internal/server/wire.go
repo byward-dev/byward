@@ -39,7 +39,7 @@ type auth struct {
 	sessions func(http.Handler) http.Handler
 	// minter signs the identity assertion and jwks serves its keys; both nil for a stdio upstream.
 	minter *assertion.Minter
-	// downstream is On-Behalf-Of for the HTTP upstream (ADR-0017); nil when it is off.
+	// downstream is On-Behalf-Of (ADR-0017); nil when it is off.
 	downstream *downstreamTokens
 	jwks       http.Handler
 }

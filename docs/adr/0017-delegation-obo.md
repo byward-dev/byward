@@ -108,3 +108,52 @@ with it, so `BYWARD_OBO_HEADER=Authorization` is now allowed while `BYWARD_ASSER
 header. The rule's purpose holds: the client's own `Authorization` is always removed before byward
 sets its headers (invariant 1), so the upstream sees only the downstream token, and an app-only
 caller, which gets none, sends no `Authorization` at all.
+
+## Amendment 2026-11-08 (#141: stdio upstreams)
+
+The 2026-11-07 settings note refused On-Behalf-Of with a stdio upstream: a process gets its
+environment once and cannot receive a token that expires within the hour. A stdio process now asks
+for it.
+
+- **A token socket per process.** Each process gets a Unix socket in its own session directory (0700;
+  the socket 0600), named in `BYWARD_DOWNSTREAM_TOKEN_SOCKET`. The process writes one JSON object on
+  one line (`{}`) and reads one line back: `{"access_token","expires_at"}` (RFC 3339), or `{"error"}`
+  with `consent_required`, `interaction_required`, `sign_in_expired`, `no_user`, `unavailable`,
+  `failed`, `refused` or `bad_request`.
+- **Which user, which grant.** A process serves one user (ADR-0003). The token is for that user,
+  exchanged for the stored IdP token of the grant whose request the process served last, from the
+  same cache as an HTTP upstream's. An app-only caller acts for no user: `no_user`. Once the stored
+  IdP token has expired, `sign_in_expired`: byward never refreshes IdP tokens outside a request,
+  and the client's next request renews it.
+- **The same check before every request.** Before a request reaches the process, byward gets the
+  token as it does for an HTTP upstream. A refusal is answered in the proxy's name (the ADR-0025
+  shapes above) and never starts or reaches a process, and a granted token is cached for the
+  process to ask for. A refused ask on the socket is recorded the same way (`downstream_token_refused`,
+  the metric, the error log with the admin-consent URL).
+- **Who may ask.** Every upstream process, whatever its user, runs as byward's uid, so file
+  permissions cannot keep one user's process from another's socket. byward accepts a connection
+  only from the spawned process or one of its descendants: the peer's uid must be byward's
+  (`SO_PEERCRED`; `LOCAL_PEERCRED` on macOS), and its parent chain must reach the spawned process
+  (`/proc/<pid>/stat`; `kern.proc` on macOS). On Linux 6.5 and later the peer is pinned with
+  `SO_PEERPIDFD`, so a peer that exits before or while it is checked is refused; only a kernel
+  without the option (`ENOPROTOOPT`) goes unpinned. Older kernels and macOS leave a narrow race: a
+  peer that hands its connection to another process and exits, with its PID reused inside the
+  upstream's tree before the check, would pass. On macOS, `LOCAL_PEERPID` names the last process to
+  use the peer's socket rather than the one that connected, so a connection handed on is checked
+  against its new holder; macOS is for development only. Other peers get `refused`, and
+  the refusal is logged with the peer's process ID.
+- **Rejected alternatives**, all tested on 2026-11-07:
+  - An inherited file descriptor (fd 3) does not survive `npx`: npm's child process gets only the
+    standard streams. `uvx` and `sh -c` keep it, but npx servers are the common case.
+  - A token file would be readable by every process of byward's uid, and would store the token,
+    against §4.
+  - The token in each request's `_meta` would reach byward's own logs whenever a server logs its
+    requests to stderr.
+- **What the host must give.** With `kernel.yama.ptrace_scope` 0 (Debian's kernel default), or no
+  Yama, one process can read another of the same uid's memory, and with it the token it holds.
+  byward warns at startup and in `doctor`, and does not refuse: the operator may isolate processes
+  by other means. Optional per-user isolation is #182.
+- **Upstream authors** change one thing: read the token from the socket when calling the
+  downstream API, and ask again before `expires_at`. A server that only reads a static environment
+  variable cannot get a token that expires within the hour without a restart.
+- `BYWARD_OBO_HEADER` has no effect for a stdio upstream; setting it there is refused.

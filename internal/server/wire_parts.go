@@ -140,6 +140,9 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 			return nil, gateError(err)
 		}
 	}
+	if w := isolationWarning(cfg, hostPtraceWarning); w != nil {
+		p.warnings = append(p.warnings, *w)
+	}
 	if cfg.ScopeDescription == "" {
 		p.warnings = append(p.warnings, Warning{Message: "consent page uses generic wording", Setting: "BYWARD_SCOPE_DESCRIPTION",
 			Fix: "set it to say in plain words what the " + cfg.Scope + " scope lets an app do (ADR-0010 §4)"})

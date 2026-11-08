@@ -40,10 +40,13 @@ The process does **not** inherit the proxy's environment. It gets only:
 | your variables | `BYWARD_UPSTREAM_ENV_FILE` (below) |
 | `BYWARD_SUBJECT`, `BYWARD_ISSUER` | the proxy: the signed-in user's key (`tid:oid` for Entra) and the proxy's issuer URL |
 | `BYWARD_PRINCIPAL_TYPE` | the proxy: `user`, or `client` for a headless caller with an [app-only token](app-tokens.md), whose `BYWARD_SUBJECT` is its service principal's `tid:oid`; absent without authentication |
+| `BYWARD_DOWNSTREAM_TOKEN_SOCKET` | the proxy, with On-Behalf-Of on (`BYWARD_OBO_SCOPES`): the socket the process asks for its user's downstream API token ([On-Behalf-Of §5](downstream-apis.md#5-a-stdio-upstream)) |
 
 So no `BYWARD_*` setting, sealing key or cloud credential of the proxy reaches the upstream. The
-user's identity is never in the arguments, and no token ever reaches the process: it acts as your
-service identity, and the proxy decides who may reach it.
+user's identity is never in the arguments, and no token is ever in the environment: the process acts
+as your service identity, and the proxy decides who may reach it. With On-Behalf-Of on, the process
+asks for a downstream token when it needs one; byward checks that the asker is the process or one of
+its children.
 
 Give the upstream its own settings and secrets in a file of `KEY=VALUE` lines (blank lines and
 lines starting with `#` are skipped):

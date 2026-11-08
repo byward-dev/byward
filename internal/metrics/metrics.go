@@ -71,7 +71,7 @@ func New() *Metrics {
 			Help: "App-only tokens at the MCP endpoint by outcome (accepted, expired, invalid, delegated, keys_unavailable, revoked, deny_list_stale, denied_role, denied_client, denied_tenant)."},
 			[]string{"outcome"}),
 		downstream: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_downstream_tokens_total",
-			Help: "On-Behalf-Of downstream tokens for upstream requests by outcome (cached, issued, consent_required, interaction_required, unavailable, failed)."},
+			Help: "On-Behalf-Of downstream tokens for upstream requests and stdio processes' asks by outcome (cached, issued, consent_required, interaction_required, unavailable, failed; for a stdio process also no_user, sign_in_expired)."},
 			[]string{"outcome"}),
 	}
 	build := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "byward_build_info",

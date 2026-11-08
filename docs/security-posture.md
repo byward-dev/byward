@@ -43,7 +43,11 @@ OpenID Connect IdP ([OIDC how-to](how-to/oidc.md)), one per proxy.
 - With On-Behalf-Of on, an HTTP upstream also gets a token for one configured downstream API, such
   as Microsoft Graph, exchanged for the user's stored Entra token. It travels in its own header,
   which a client can never supply, and is never stored or logged
-  ([ADR-0017](adr/0017-delegation-obo.md), [how-to](how-to/downstream-apis.md)).
+  ([ADR-0017](adr/0017-delegation-obo.md), [how-to](how-to/downstream-apis.md)). A stdio process
+  asks its own token socket for it instead: the socket answers only that process and its
+  descendants, for the user it serves, and the token is never in its environment or any file. On a
+  host whose ptrace restriction is off, another user's process could still read it from memory
+  (see the stdio row under [Threat model](#threat-model)).
 
 **It does not:**
 
