@@ -317,18 +317,18 @@ func strip(h http.Header, extra map[string]bool) {
 
 // builtIn reports whether the relay always removes the header named n, in canonical form.
 func builtIn(n string) bool {
-	return stripped[n] || strings.HasPrefix(n, "X-Forwarded-") || strings.HasPrefix(n, "Sec-Fetch-")
+	return stripped[n] || hopByHop[n] || strings.HasPrefix(n, "X-Forwarded-") || strings.HasPrefix(n, "Sec-Fetch-")
 }
 
-// hopByHop are the hop-by-hop headers ReverseProxy always removes from the outbound request
-// (RFC 9110 §7.6.1), Upgrade and Connection being deleted again in Rewrite. Te is not among them:
-// ReverseProxy keeps "Te: trailers".
+// hopByHop are the hop-by-hop headers (RFC 9110 §7.6.1). ReverseProxy removes them by their exact
+// name only, so strip removes them in every spelling (Proxy_Authorization too). Te is not among
+// them: ReverseProxy keeps "Te: trailers".
 var hopByHop = map[string]bool{"Connection": true, "Proxy-Connection": true, "Keep-Alive": true, "Proxy-Authenticate": true,
 	"Proxy-Authorization": true, "Trailer": true, "Upgrade": true}
 
 // Strips reports whether the relay removes the header name from every inbound request, compared
-// as it compares them: by the built-in list, as a hop-by-hop header, or as one of extra (the names
-// given WithStripped).
+// as it compares them: by the built-in list, hop-by-hop headers included, or as one of extra (the
+// names given WithStripped).
 func Strips(name string, extra ...string) bool {
 	n := canonical(name)
 	for _, e := range extra {
@@ -336,7 +336,7 @@ func Strips(name string, extra ...string) bool {
 			return true
 		}
 	}
-	return builtIn(n) || hopByHop[n]
+	return builtIn(n)
 }
 
 // canonical is a header name as strip compares it: `_` read as `-`, canonical case.

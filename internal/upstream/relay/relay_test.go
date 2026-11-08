@@ -41,6 +41,7 @@ func TestRelayForwardsBodyVerbatimAndStripsProxyHeaders(t *testing.T) {
 	r.Header.Set("Authorization", "Bearer secret")
 	r.Header.Set("DPoP", "proof-bound-to-the-clients-token")
 	r.Header["dpop"] = []string{"second-spelling"}
+	r.Header["Proxy_Authorization"] = []string{"Basic c2VjcmV0"} // ReverseProxy drops only Proxy-Authorization
 	r.Header.Set("Forwarded", "for=1.2.3.4")
 	r.Header.Set("X-Forwarded-For", "1.2.3.4")
 	r.Header.Set("X-Forwarded-User", "admin")
@@ -66,7 +67,7 @@ func TestRelayForwardsBodyVerbatimAndStripsProxyHeaders(t *testing.T) {
 	}
 	for k := range got.Header {
 		n := strings.ReplaceAll(k, "_", "-")
-		if n == "Authorization" || strings.EqualFold(k, "Dpop") || k == "Forwarded" || k == "Origin" || strings.HasPrefix(n, "X-Forwarded-") || strings.HasPrefix(k, "Sec-Fetch-") {
+		if n == "Authorization" || strings.EqualFold(n, "Proxy-Authorization") || strings.EqualFold(k, "Dpop") || k == "Forwarded" || k == "Origin" || strings.HasPrefix(n, "X-Forwarded-") || strings.HasPrefix(k, "Sec-Fetch-") {
 			t.Fatalf("header %s reached the upstream", k)
 		}
 	}
@@ -681,15 +682,17 @@ func TestAnOperatorListedHeaderNeverReachesTheUpstreamInAnySpellingAndEveryOther
 	}
 }
 
-// Strips answers as the relay strips: the built-in names and families, and the names given, in any
-// spelling.
+// Strips answers as the relay strips: the built-in names and families, every hop-by-hop header
+// (not Te, whose "trailers" ReverseProxy keeps), and the names given, in any spelling.
 func TestStripsReportsWhatTheRelayRemoves(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		extra []string
 		want  bool
 	}{
-		{"authorization", nil, true}, {"DPoP", nil, true}, {"proxy_authorization", nil, true}, {"Keep-Alive", nil, true}, {"Upgrade", nil, true},
+		{"authorization", nil, true}, {"DPoP", nil, true},
+		{"Connection", nil, true}, {"proxy_connection", nil, true}, {"Keep-Alive", nil, true}, {"Proxy-Authenticate", nil, true},
+		{"proxy_authorization", nil, true}, {"trailer", nil, true}, {"Upgrade", nil, true},
 		{"Te", nil, false}, {"X-Argocd-Base-Url", []string{"X-Api-Key"}, false}, {"x_forwarded_host", nil, true}, {"Sec-Fetch-Site", nil, true},
 		{"origin", nil, true}, {"Forwarded", nil, true},
 		{"X_Api_Key", []string{"X-Api-Key"}, true}, {"X-Api-Key", []string{"x_api_key"}, true}, {"X-Api-Key", nil, false}, {"Mcp-Session-Id", nil, false},

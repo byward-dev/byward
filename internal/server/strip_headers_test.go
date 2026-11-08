@@ -3,9 +3,11 @@ package server
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,11 +16,11 @@ import (
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
+	"github.com/byward-dev/byward/internal/tracing"
 )
 
 // Through the wired proxy, a header the operator lists never reaches the upstream while the
-// operator credential the proxy sets still does; an entry the relay strips anyway is accepted, and
-// the startup log says it changes nothing.
+// operator credential the proxy sets still does, even when the list names it too.
 func TestAListedHeaderNeverReachesTheUpstreamButTheProxysCredentialStillDoes(t *testing.T) {
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
@@ -28,8 +30,7 @@ func TestAListedHeaderNeverReachesTheUpstreamButTheProxysCredentialStillDoes(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	var logs bytes.Buffer
-	s, err := New(cfg, logging.New(&logs, "text"))
+	s, err := New(cfg, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,34 +51,62 @@ func TestAListedHeaderNeverReachesTheUpstreamButTheProxysCredentialStillDoes(t *
 	if got.Header.Get("X-Api-Key") != upstreamCredential {
 		t.Fatalf("credential %q: the list must not strip what the proxy sets", got.Header.Get("X-Api-Key"))
 	}
-	warned := func(text string, n string) bool {
-		return strings.Contains(text, n+" is stripped from every upstream request already")
-	}
-	for _, n := range []string{"Authorization", "X-Api-Key"} {
-		if !warned(logs.String(), n) || !strings.Contains(logs.String(), "setting=BYWARD_UPSTREAM_STRIP_HEADERS") {
-			t.Fatalf("the startup log does not name %s as already stripped: %s", n, logs.String())
-		}
-	}
-	if warned(logs.String(), "X-Argocd-Base-Url") {
-		t.Fatal("a header only the list strips is called redundant")
+}
+
+// The startup log names each entry the relay strips anyway, as a warning with the setting, with and
+// without authentication; an entry only the list strips is not named.
+func TestTheStartupLogNamesARedundantStripEntry(t *testing.T) {
+	strip := "BYWARD_UPSTREAM_STRIP_HEADERS=x-argocd-base-url,authorization,x_api_key"
+	for _, tc := range []struct {
+		name      string
+		env       func(*testing.T) []string
+		redundant []string
+	}{
+		{"without authentication", func(t *testing.T) []string {
+			return []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://10.0.0.7/mcp", "BYWARD_INSECURE_NO_AUTH=true",
+				"BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key", "BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credentialFile(t, 0o600), strip}
+		}, []string{"Authorization", "X-Api-Key"}},
+		{"with authentication", func(t *testing.T) []string {
+			return append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://10.0.0.7/mcp", strip)
+		}, []string{"Authorization"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, _, err := config.Load(nil, tc.env(t), os.ReadFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var logs bytes.Buffer
+			s, err := New(cfg, logging.New(&logs, "text"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if s.closeStore != nil {
+				t.Cleanup(func() { _ = s.closeStore() })
+			}
+			for _, n := range tc.redundant {
+				if !strings.Contains(logs.String(), `level=WARN msg="`+n+` is stripped from every upstream request already; the entry changes nothing" setting=BYWARD_UPSTREAM_STRIP_HEADERS`) {
+					t.Fatalf("the startup log does not warn that %s is already stripped: %s", n, logs.String())
+				}
+			}
+			if strings.Contains(logs.String(), "X-Argocd-Base-Url is stripped") {
+				t.Fatal("a header only the list strips is called redundant")
+			}
+		})
 	}
 }
 
-// With authentication too, the startup log names a redundant entry.
-func TestTheStartupLogNamesARedundantStripEntryWithAuthentication(t *testing.T) {
-	cfg, _, err := config.Load(nil, append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://10.0.0.7/mcp",
-		"BYWARD_UPSTREAM_STRIP_HEADERS=authorization"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
+// No header the tracing propagator sets can be listed: Inject sets it after the strip, from the
+// inbound trace context, so the entry would remove nothing.
+func TestNoHeaderTracingSetsCanBeListed(t *testing.T) {
+	if len(tracing.Fields()) == 0 {
+		t.Fatal("the propagator sets no header, so this test proves nothing")
 	}
-	var logs bytes.Buffer
-	s, err := New(cfg, logging.New(&logs, "text"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = s.closeStore() })
-	if !strings.Contains(logs.String(), "Authorization is stripped from every upstream request already") {
-		t.Fatalf("the startup log does not name Authorization: %s", logs.String())
+	for _, f := range tracing.Fields() {
+		_, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://10.0.0.7/mcp",
+			"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_UPSTREAM_STRIP_HEADERS=" + f}, os.ReadFile)
+		if err == nil || !strings.Contains(err.Error(), "cannot be stripped") {
+			t.Errorf("listing %s: %v, want it refused", f, err)
+		}
 	}
 }
 
@@ -126,5 +155,24 @@ func TestDoctorAndCheckNameARedundantStripEntry(t *testing.T) {
 				t.Fatalf("check --offline names %q, want Authorization alone", offline)
 			}
 		})
+	}
+}
+
+// Every kind of header the relay strips anyway is named as redundant: built in, hop-by-hop, an
+// identity header, the assertion's, the On-Behalf-Of token's and the credential's; one only the
+// list strips is not.
+func TestEveryHeaderTheRelayStripsAnywayIsNamedAsRedundant(t *testing.T) {
+	cfg := &config.Config{AssertionHeader: "X-Assert", OBOHeader: "X-Byward-Downstream-Token", UpstreamCredential: "k-123",
+		UpstreamCredentialHeader: "X-Api-Key", UpstreamStripHeaders: []string{"Dpop", "Keep-Alive", "X-Byward-Subject", "X-Assert",
+			"X-Byward-Downstream-Token", "X-Api-Key", "X-Argocd-Base-Url"}}
+	var named []string
+	for _, w := range redundantStrips(cfg) {
+		named = append(named, strings.Fields(w.Message)[0])
+		if w.Setting != "BYWARD_UPSTREAM_STRIP_HEADERS" || w.Fix != "remove "+strings.Fields(w.Message)[0]+" from the list" {
+			t.Fatalf("%+v, want the setting and the fix naming the entry", w)
+		}
+	}
+	if want := cfg.UpstreamStripHeaders[:6]; !slices.Equal(named, want) {
+		t.Fatalf("named %q, want %q", named, want)
 	}
 }
