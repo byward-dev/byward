@@ -50,6 +50,7 @@ func TestOnlyCredentialShapedValuesAreRedacted(t *testing.T) {
 		"a client ID with eyJ":              {value: "dcr-Qm9eyJx_7k-eyJAbCdEfGh", logged: "dcr-Qm9eyJx_7k-eyJAbCdEfGh"},
 		"a client ID with eyj":              {value: "dcr-xeyjq0Z-eyjAbCdEfGhIjk", logged: "dcr-xeyjq0Z-eyjAbCdEfGhIjk"},
 		"a URL with eyJ and one dot":        {value: "https://heyJude.example/cb", logged: "https://heyJude.example/cb"},
+		"a URL with .eyJ and one dot":       {value: "https://app.eyJude/cb", logged: "https://app.eyJude/cb"},
 		"a host with eyj and two dots":      {value: "https://heyjude.example.com/cb", logged: "https://heyjude.example.com/cb"},
 		"a bare JWT":                        {value: token, logged: redacted},
 		"a JWT with _ and - in it":          {value: "eyJhbGciOiJSUzI1NiIsImtpZCI6ImE_Yj5jIn0.eyJzdWIiOiJ4Pz5-In0.c2ln", logged: redacted},
@@ -63,6 +64,7 @@ func TestOnlyCredentialShapedValuesAreRedacted(t *testing.T) {
 		"a Basic value":                     {value: "Basic dXNlcjpwdw==", logged: redacted},
 		"a JWT inside a message":            {value: "upstream rejected " + token + " as expired", logged: redacted},
 		"a JWT inside an error":             {value: errors.New("verify " + token + ": expired"), logged: redacted},
+		"a Stringer with a JWT":             {value: stringer("verify " + token), logged: redacted},
 		"an error with an eyJ identifier":   {value: errors.New("unknown client dcr-eyJq0Z"), logged: "unknown client dcr-eyJq0Z"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -78,6 +80,11 @@ func TestOnlyCredentialShapedValuesAreRedacted(t *testing.T) {
 		})
 	}
 }
+
+// stringer is a fmt.Stringer, the third kind of value replace checks.
+type stringer string
+
+func (s stringer) String() string { return string(s) }
 
 func TestGroupContentsAreDropped(t *testing.T) {
 	var buf bytes.Buffer
