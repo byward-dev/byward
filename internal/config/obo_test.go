@@ -33,6 +33,18 @@ func TestOnBehalfOfSettings(t *testing.T) {
 	}
 }
 
+// #195: most Entra-protected MCP servers read the user's token from Authorization, so the
+// downstream token may go there once the assertion and the upstream credential use other headers.
+func TestOnBehalfOfMayUseAuthorizationOnceTheAssertionHasMoved(t *testing.T) {
+	c, err := load(t, nil, "BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read", "BYWARD_ASSERTION_HEADER=X-Byward-Assertion", "BYWARD_OBO_HEADER=authorization")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.OBOHeader != "Authorization" || c.AssertionHeader != "X-Byward-Assertion" {
+		t.Fatalf("OBO header %q, assertion header %q, want Authorization and X-Byward-Assertion", c.OBOHeader, c.AssertionHeader)
+	}
+}
+
 func TestOnBehalfOfSettingsAreRefusedWhenTheyCannotWork(t *testing.T) {
 	cases := []struct {
 		name string
@@ -48,7 +60,7 @@ func TestOnBehalfOfSettingsAreRefusedWhenTheyCannotWork(t *testing.T) {
 		{"two APIs", []string{"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read api://00000000-0000-0000-0000-0000000000aa/Files.Read"}, "different APIs"},
 		{"set but empty", []string{"BYWARD_OBO_SCOPES= "}, "lists nothing"},
 		{"the assertion's header", []string{"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read", "BYWARD_ASSERTION_HEADER=X-Byward-Identity", "BYWARD_OBO_HEADER=x-byward-identity"}, "already carries"},
-		{"Authorization", []string{"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read", "BYWARD_ASSERTION_HEADER=X-Byward-Identity", "BYWARD_OBO_HEADER=Authorization"}, "already carries"},
+		{"Authorization while the assertion uses it", []string{"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read", "BYWARD_OBO_HEADER=Authorization"}, "already carries the identity assertion"},
 		{"a header MCP relies on", []string{"BYWARD_OBO_HEADER=Mcp-Session-Id"}, "relies on"},
 		{"not a header name", []string{"BYWARD_OBO_HEADER=a b"}, "want a header name"},
 		{"a forwarding header", []string{"BYWARD_OBO_HEADER=X-Forwarded-For"}, "relies on"},
@@ -83,6 +95,13 @@ func TestOnBehalfOfSettingsAreRefusedWhenTheyCannotWork(t *testing.T) {
 	t.Run("the upstream credential's header", func(t *testing.T) {
 		_, err := loadCred(t, nil, "k-123", "BYWARD_UPSTREAM_CREDENTIAL_FILE="+credFile, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key",
 			"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read", "BYWARD_OBO_HEADER=x-api-key")
+		if err == nil || !strings.Contains(err.Error(), "operator's upstream credential") {
+			t.Fatalf("err = %v, want the credential's header refused", err)
+		}
+	})
+	t.Run("Authorization while the upstream credential uses it", func(t *testing.T) {
+		_, err := loadCred(t, nil, "k-123", "BYWARD_UPSTREAM_CREDENTIAL_FILE="+credFile, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=Authorization",
+			"BYWARD_ASSERTION_HEADER=X-Byward-Assertion", "BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read", "BYWARD_OBO_HEADER=Authorization")
 		if err == nil || !strings.Contains(err.Error(), "operator's upstream credential") {
 			t.Fatalf("err = %v, want the credential's header refused", err)
 		}
