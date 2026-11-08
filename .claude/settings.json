@@ -9,7 +9,21 @@
       "Bash(gh pr view *)",
       "Bash(gh pr list *)",
       "Bash(gh pr diff *)",
-      "Bash(gh pr checks *)"
+      "Bash(gh pr checks *)",
+      "Bash(go test *)",
+      "Bash(mise exec -- go test *)",
+      "Bash(mise exec -- golangci-lint *)",
+      "Bash(go vet *)",
+      "Bash(mise exec -- go vet *)",
+      "Bash(go build *)",
+      "Bash(mise exec -- gofmt -l *)",
+      "Bash(mise exec -- shellcheck *)",
+      "Bash(gh run watch *)",
+      "Bash(gh api rate_limit*)",
+      "Bash(gh attestation verify *)",
+      "Bash(dig *)",
+      "Bash(gh pr ready *)"
+
     ],
     "ask": [
       "Bash(gh pr merge *)",
