@@ -267,7 +267,11 @@ type gatedWriter struct {
 	gate    int
 	blocked chan struct{}
 	release chan struct{}
+	once    sync.Once
 }
+
+// open lets the gated flush go on; safe to call more than once.
+func (w *gatedWriter) open() { w.once.Do(func() { close(w.release) }) }
 
 func newGatedWriter(gate int) *gatedWriter {
 	return &gatedWriter{header: http.Header{}, gate: gate, blocked: make(chan struct{}), release: make(chan struct{})}
@@ -322,7 +326,7 @@ var gatedStreams = map[string]func(t *testing.T, ctx context.Context, w http.Res
 		req.Header.Set(sessionHeader, session)
 		req.Header.Set("Accept", "text/event-stream")
 		return b, func() { b.bridge.ServeHTTP(w, req) }, func() {
-			go readEvents(t, b.post(t, "alice", session, `{"jsonrpc":"2.0","id":1,"method":"announce"}`))
+			b.post(t, "alice", session, `{"jsonrpc":"2.0","id":1,"method":"announce"}`) // its body closes at cleanup
 		}
 	},
 }
@@ -330,15 +334,20 @@ var gatedStreams = map[string]func(t *testing.T, ctx context.Context, w http.Res
 func TestTheQuietPeriodStartsBeforeTheStreamAndBeforeEachWrite(t *testing.T) {
 	// If the timer were armed after the stream started, or restarted after a write, a clock that
 	// moves on while the client already has the start or the write would lose that period's comment.
+	gates := map[string]map[int]string{
+		// A listen's acknowledgement always follows its start, so only the GET stream starts quiet.
+		"legacy GET":    {1: "while the stream starts", 2: "while its first event goes out"},
+		"modern listen": {2: "while its first event goes out"},
+	}
 	for name, open := range gatedStreams {
-		for gate, at := range map[int]string{1: "while the stream starts", 2: "while its first event goes out"} {
+		for gate, at := range gates[name] {
 			t.Run(name+" "+at, func(t *testing.T) {
 				ctx, cancel := context.WithCancel(context.Background())
 				w := newGatedWriter(gate)
 				b, serve, cause := open(t, ctx, w)
 				done := make(chan struct{})
 				go func() { defer close(done); serve() }()
-				t.Cleanup(func() { cancel(); <-done })
+				t.Cleanup(func() { w.open(); cancel(); <-done })
 				if gate == 2 {
 					cause()
 				}
@@ -348,7 +357,7 @@ func TestTheQuietPeriodStartsBeforeTheStreamAndBeforeEachWrite(t *testing.T) {
 					t.Fatal("the stream never reached the flush")
 				}
 				b.clk.Advance(keepAliveInterval)
-				close(w.release)
+				w.open()
 				eventually(t, "the keep-alive the period was due", func() bool { return strings.Contains(w.written(), ":\r\n") })
 			})
 		}
