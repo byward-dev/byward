@@ -304,8 +304,10 @@ func (p *Provider) token(ctx context.Context, m *metadata, form url.Values) (*id
 		form.Set("client_id", p.cfg.ClientID)
 	}
 	tr, err := p.fetch.PostToken(ctx, m.TokenEndpoint, form, nil)
-	if err != nil {
-		return nil, &idp.Error{Class: idp.Unavailable, Err: err}
+	if ie := (*idp.Error)(nil); errors.As(err, &ie) {
+		return nil, err // the fetcher classed it (a success without tokens)
+	} else if err != nil {
+		return nil, &idp.Error{Class: idp.Unavailable, Err: err} // transport: try later
 	}
 	if !tr.OK() {
 		class := idp.GenericClass(tr.Status, tr.Error)

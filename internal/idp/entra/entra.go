@@ -256,8 +256,10 @@ func (p *Provider) tokenAt(ctx context.Context, tenant string, form url.Values) 
 		header.Set("client-request-id", id)
 	}
 	tr, err := p.fetch.PostToken(ctx, tokenURL, form, header)
-	if err != nil {
-		return nil, &idp.Error{Class: idp.Unavailable, Err: err}
+	if ie := (*idp.Error)(nil); errors.As(err, &ie) {
+		return nil, err // the fetcher classed it (a success without tokens)
+	} else if err != nil {
+		return nil, &idp.Error{Class: idp.Unavailable, Err: err} // transport: try later
 	}
 	if !tr.OK() {
 		return nil, newError(tr.Status, tr.Error, tr.ErrorDescription, tr.ErrorCodes, tr.TraceID, tr.CorrelationID)

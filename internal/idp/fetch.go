@@ -133,7 +133,8 @@ func (r *TokenResponse) Tokens(now time.Time) Tokens {
 }
 
 // PostToken sends a token request. A non-2xx response is returned with its error fields and a nil
-// error; err is only for transport failures and malformed replies.
+// error; err is for transport failures and malformed replies, except a 2xx reply without tokens,
+// which comes back as an already-classed *Error (Fatal) that callers must pass through unwrapped.
 func (f *Fetcher) PostToken(ctx context.Context, endpoint string, form url.Values, header http.Header) (*TokenResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
@@ -159,7 +160,10 @@ func (f *Fetcher) PostToken(ctx context.Context, endpoint string, form url.Value
 	}
 	tr.Status, tr.Header = resp.StatusCode, resp.Header
 	if resp.StatusCode/100 == 2 && tr.Error == "" && tr.AccessToken == "" && tr.IDToken == "" {
-		return nil, errors.New("token endpoint returned no tokens")
+		// A success without tokens breaks the protocol: retrying the same request will not help, and
+		// the grant is not at fault, so it is Fatal (fail the request, keep the grant), never
+		// Unavailable.
+		return nil, &Error{Class: Fatal, Alert: true, Err: errors.New("token endpoint returned a success without tokens")}
 	}
 	return tr, nil
 }
