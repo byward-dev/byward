@@ -42,25 +42,10 @@ func TestALegacySessionIsBoundToTheUserWhoStartedIt(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(up.Close)
-	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+up.URL+"/mcp")
-	cfg, _, err := config.Load(nil, env, os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a, err := buildAuth(cfg, discard, Observability{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { stop(t, a) })
-	srv := httptest.NewServer(Handler(cfg, discard, httpUpstream(cfg, discard), twoUsers{"tok-alice": "tid:alice", "tok-bob": "tid:bob"}, nil, a.sessions, Observability{}))
-	t.Cleanup(srv.Close)
+	cfg, srv := bindingProxy(t, up.URL, twoUsers{"tok-alice": "tid:alice", "tok-bob": "tid:bob"})
 	post := func(token, session string) *http.Response {
 		t.Helper()
-		r, _ := http.NewRequest(http.MethodPost, srv.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
-		r.Host = "mcp.example.com"
-		r.Header.Set("Authorization", "Bearer "+token)
-		r.Header.Set("Content-Type", "application/json")
-		r.Header.Set("Accept", "application/json, text/event-stream")
+		r := mcpRequest(context.Background(), srv, token, `{"jsonrpc":"2.0","id":1,"method":"ping"}`)
 		if session != "" {
 			r.Header.Set(mcpsession.Header, session)
 		}
@@ -128,6 +113,35 @@ func withBearer(r *http.Request, tok string) *http.Request {
 	return r
 }
 
+// bindingProxy wires the proxy (Guard, the session binding and the relay) in front of the upstream at
+// upstreamURL for users, and returns its configuration and server.
+func bindingProxy(t *testing.T, upstreamURL string, users twoUsers) (*config.Config, *httptest.Server) {
+	t.Helper()
+	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+upstreamURL+"/mcp")
+	cfg, _, err := config.Load(nil, env, os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := buildAuth(cfg, discard, Observability{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stop(t, a) })
+	srv := httptest.NewServer(Handler(cfg, discard, httpUpstream(cfg, discard), users, nil, a.sessions, Observability{}))
+	t.Cleanup(srv.Close)
+	return cfg, srv
+}
+
+// mcpRequest is a POST of body to srv's MCP endpoint with the token, as an MCP client sends it.
+func mcpRequest(ctx context.Context, srv *httptest.Server, token, body string) *http.Request {
+	r, _ := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/mcp", strings.NewReader(body))
+	r.Host = "mcp.example.com"
+	r.Header.Set("Authorization", "Bearer "+token)
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json, text/event-stream")
+	return r
+}
+
 // Invariant 13 at the wire level: an upstream's Mcp-Session-Id sent as a response trailer, announced
 // or not, never reaches the MCP client, nor does any other trailer; the session it sends as a header
 // still reaches the client sealed.
@@ -156,24 +170,8 @@ func TestAnUpstreamSessionSentAsATrailerNeverReachesTheClient(t *testing.T) {
 		t.Fatalf("the upstream sent trailers %v, want its raw session in them", direct.Trailer)
 	}
 
-	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+up.URL+"/mcp")
-	cfg, _, err := config.Load(nil, env, os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a, err := buildAuth(cfg, discard, Observability{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { stop(t, a) })
-	srv := httptest.NewServer(Handler(cfg, discard, httpUpstream(cfg, discard), twoUsers{"tok-alice": "tid:alice"}, nil, a.sessions, Observability{}))
-	t.Cleanup(srv.Close)
-	r, _ := http.NewRequest(http.MethodPost, srv.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
-	r.Host = "mcp.example.com"
-	r.Header.Set("Authorization", "Bearer tok-alice")
-	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("Accept", "application/json, text/event-stream")
-	res, err := http.DefaultClient.Do(r)
+	_, srv := bindingProxy(t, up.URL, twoUsers{"tok-alice": "tid:alice"})
+	res, err := http.DefaultClient.Do(mcpRequest(context.Background(), srv, "tok-alice", `{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +194,8 @@ func TestAnUpstreamSessionSentAsATrailerNeverReachesTheClient(t *testing.T) {
 }
 
 // Through the session binding, an upstream's 103 reaches the MCP client with its Mcp-Session-Id
-// sealed and nothing else but Link: never Set-Cookie or the headers the relay cleans.
+// sealed and nothing else but Link: never Set-Cookie or the headers the relay cleans. The final
+// response still carries the proxy's own CORS answer and request ID.
 func TestAnUpstreamsEarlyHintsReachTheClientSealedAndClean(t *testing.T) {
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set(mcpsession.Header, "upstream-hint-session")
@@ -211,18 +210,7 @@ func TestAnUpstreamsEarlyHintsReachTheClientSealedAndClean(t *testing.T) {
 		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{}}`)
 	}))
 	t.Cleanup(up.Close)
-	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+up.URL+"/mcp")
-	cfg, _, err := config.Load(nil, env, os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a, err := buildAuth(cfg, discard, Observability{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { stop(t, a) })
-	srv := httptest.NewServer(Handler(cfg, discard, httpUpstream(cfg, discard), twoUsers{"tok-alice": "tid:alice"}, nil, a.sessions, Observability{}))
-	t.Cleanup(srv.Close)
+	_, srv := bindingProxy(t, up.URL, twoUsers{"tok-alice": "tid:alice"})
 	var hint http.Header
 	trace := &httptrace.ClientTrace{Got1xxResponse: func(code int, h textproto.MIMEHeader) error {
 		if code == http.StatusEarlyHints {
@@ -230,12 +218,8 @@ func TestAnUpstreamsEarlyHintsReachTheClientSealedAndClean(t *testing.T) {
 		}
 		return nil
 	}}
-	r, _ := http.NewRequestWithContext(httptrace.WithClientTrace(context.Background(), trace), http.MethodPost, srv.URL+"/mcp",
-		strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
-	r.Host = "mcp.example.com"
-	r.Header.Set("Authorization", "Bearer tok-alice")
-	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("Accept", "application/json, text/event-stream")
+	r := mcpRequest(httptrace.WithClientTrace(context.Background(), trace), srv, "tok-alice", `{"jsonrpc":"2.0","id":1,"method":"initialize"}`)
+	r.Header.Set("Origin", "https://mcp.example.com")
 	res, err := http.DefaultClient.Do(r)
 	if err != nil {
 		t.Fatal(err)
@@ -248,5 +232,8 @@ func TestAnUpstreamsEarlyHintsReachTheClientSealedAndClean(t *testing.T) {
 	id := hint.Get(mcpsession.Header)
 	if !strings.HasPrefix(id, mcpsession.Prefix) || hint.Get("Link") == "" || len(hint) != 2 {
 		t.Fatalf("the 103 reached the client with %v; want only Link and a sealed session", hint)
+	}
+	if res.Header.Get("Access-Control-Allow-Origin") != "https://mcp.example.com" || res.Header.Get("X-Request-Id") == "" {
+		t.Fatalf("final headers %v; want the proxy's CORS answer and request ID after the 103", res.Header)
 	}
 }

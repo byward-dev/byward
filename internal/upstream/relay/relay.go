@@ -154,7 +154,7 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 		if r.Body != nil && r.Body != http.NoBody {
 			r.Body = teeBody{io.TeeReader(r.Body, c), r.Body}
 		}
-		rp.ServeHTTP(informational{w}, r.WithContext(traceWrite(context.WithValue(r.Context(), captureKey{}, c))))
+		rp.ServeHTTP(informational{w, w.Header().Clone()}, r.WithContext(traceWrite(context.WithValue(r.Context(), captureKey{}, c))))
 	})
 }
 
@@ -164,15 +164,33 @@ var informationalHeaders = map[string]bool{"Link": true, "Mcp-Session-Id": true}
 
 // informational is the ResponseWriter the relay hands ReverseProxy. ReverseProxy forwards an
 // upstream's 1xx from a client-trace hook, past ModifyResponse: it copies the upstream's headers into
-// this writer and writes the code, so this is the one place to keep only informationalHeaders. A
-// final response is untouched; ModifyResponse has cleaned it.
-type informational struct{ http.ResponseWriter }
+// this writer, writes the code, then clears the whole header map. So this is the one place to:
+//   - keep only informationalHeaders on a 1xx;
+//   - drop an interim 101, which an HTTP/2 upstream can send through that hook, never through
+//     ModifyResponse's refusal; written, it would end the response before the final one;
+//   - on the final response, put back the headers the proxy set before the relay ran (CORS,
+//     X-Request-Id) that the clear took, never over one the final response has.
+type informational struct {
+	http.ResponseWriter
+	ours http.Header // the proxy's own headers, as they were before the relay ran
+}
 
 func (w informational) WriteHeader(code int) {
-	if code >= 100 && code < 200 {
-		for k := range w.Header() {
+	h := w.Header()
+	switch {
+	case code == http.StatusSwitchingProtocols:
+		clear(h)
+		return
+	case code >= 100 && code < 200:
+		for k := range h {
 			if !informationalHeaders[k] {
-				delete(w.Header(), k)
+				delete(h, k)
+			}
+		}
+	default:
+		for k, v := range w.ours {
+			if _, ok := h[k]; !ok {
+				h[k] = v
 			}
 		}
 	}

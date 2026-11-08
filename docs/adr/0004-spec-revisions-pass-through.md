@@ -63,9 +63,12 @@ reserved, so it is the proxy's design choice (F13).
   every upstream response trailer: before the response starts, so none is announced, and again when the
   body is closed, since the body reader fills them in at the end. The same covers `Access-Control-*` and
   `WWW-Authenticate`, which the relay drops only as headers. MCP does not use response trailers.
-- **§2 legacy era, informational responses:** `ReverseProxy` forwards an upstream's 1xx from a
-  client-trace hook, past the cleaning of the final response, with any header the upstream set. The relay
-  keeps only `Link` (103 Early Hints) and `Mcp-Session-Id`, which the binding seals as it always did.
+- **Both eras, informational responses:** `ReverseProxy` forwards an upstream's 1xx from a client-trace
+  hook, past the cleaning of the final response, with any header the upstream set, then clears the whole
+  header map. The relay keeps only `Link` (103 Early Hints) and `Mcp-Session-Id`, which the binding seals
+  as it always did, on a 1xx; drops an HTTP/2 upstream's interim 101 (which takes that hook, not the 101
+  refusal above, and would otherwise end the response); and puts the proxy's own headers (CORS,
+  `X-Request-Id`) back on the final response, never over one it sets.
 - In the first two cases the binding still held, since a raw ID gets 404, but the upstream's own session
-  ID leaked. Affected: v0.1.0-rc.1.
+  ID leaked. All three affected v0.1.0-rc.1.
 
