@@ -536,9 +536,14 @@ func TestUpstreamProcessCrashFailsInFlightModernRequestsUnderTheirIDsAndTheNextR
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	held := eventsOf(t, b.modernCtx(t, ctx, "alice", modernBody(`"h"`, "hold", "", "")))
+	listen := b.listenModern(t, ctx, `"L"`)
 	readEvents(t, b.modern(t, "alice", modernBody(`2`, "crash", "", "")))
 	if got := held.all(); len(got) != 1 || !strings.Contains(got[0], "upstream process exited") || !strings.Contains(got[0], `"id":"h"`) {
 		t.Fatalf("held request got %q, want -32603 under its own id", got)
+	}
+	// A crash is no ending the server chose: the listen gets the error too, never a completion.
+	if got := listen.all(); len(got) != 1 || !strings.Contains(got[0], "upstream process exited") || strings.Contains(got[0], `"resultType":"complete"`) {
+		t.Fatalf("listen got %q, want -32603 and no completion result", got)
 	}
 	eventually(t, "the crashed process to be gone", func() bool { return b.m.Len() == 0 })
 	if id, _ := lastResult(t, readEvents(t, b.modern(t, "alice", modernBody(`3`, "echo", "", "")))); id != `3` {
