@@ -64,6 +64,8 @@ type Event struct {
 	Host        string
 	Origin      string
 	Epoch       int64 // the store epoch (store_restored); 0 means not set
+	// OpenStreams is how many open streams a process_evicted stop ended; 0 means none.
+	OpenStreams int
 }
 
 // Observer is told about every event, including suppressed ones (metrics count them all).
@@ -137,6 +139,9 @@ func (l *Log) write(ctx context.Context, e Event, ip string, suppressed int) {
 	}
 	if e.Epoch > 0 {
 		attrs = append(attrs, slog.Int64("epoch", e.Epoch))
+	}
+	if e.OpenStreams > 0 {
+		attrs = append(attrs, slog.Int("open_streams", e.OpenStreams))
 	}
 	if suppressed > 0 {
 		attrs = append(attrs, slog.Int("suppressed", suppressed))

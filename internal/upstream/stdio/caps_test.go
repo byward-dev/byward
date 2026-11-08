@@ -13,20 +13,22 @@ import (
 	"time"
 )
 
-// evictions records the users and reasons Manager.Evicted was told about.
+// evictions records the users, reasons and open streams Manager.Evicted was told about.
 type evictions struct {
 	mu      sync.Mutex
 	users   []string
 	reasons []string
+	streams []int
 	done    chan struct{} // receives once per eviction
 }
 
 func newEvictions() *evictions { return &evictions{done: make(chan struct{}, 16)} }
 
-func (e *evictions) record(id Identity, reason string) {
+func (e *evictions) record(id Identity, reason string, openStreams int) {
 	e.mu.Lock()
 	e.users = append(e.users, id.Subject)
 	e.reasons = append(e.reasons, reason)
+	e.streams = append(e.streams, openStreams)
 	e.mu.Unlock()
 	e.done <- struct{}{}
 }
@@ -78,7 +80,7 @@ func TestUserAtTheirCapEvictsTheirOwnLeastRecentlyUsedProcess(t *testing.T) {
 	if isDone(bob1) || isDone(alice2) {
 		t.Fatal("a process other than alice's least recently used one was stopped")
 	}
-	if _, _, err := h.m.leaseKey(context.Background(), "a1", alice); !errors.Is(err, errNotFound) {
+	if _, _, err := h.m.leaseKey(context.Background(), "a1", alice, false); !errors.Is(err, errNotFound) {
 		t.Fatalf("Lease of the evicted key = %v, want errNotFound", err)
 	}
 }
@@ -228,16 +230,16 @@ func pidOf(p *Process) any {
 
 func TestLookingUpAProcessNeverStartsOneAndRefusesAnotherUser(t *testing.T) {
 	h := newHarness(t, nil)
-	if _, _, err := h.m.leaseKey(context.Background(), "s1", alice); !errors.Is(err, errNotFound) {
+	if _, _, err := h.m.leaseKey(context.Background(), "s1", alice, false); !errors.Is(err, errNotFound) {
 		t.Fatalf("Lease of an unknown key = %v, want errNotFound", err)
 	}
 	p := h.get(t, "s1", alice)
-	if _, _, err := h.m.leaseKey(context.Background(), "s1", bob); !errors.Is(err, ErrUserMismatch) {
+	if _, _, err := h.m.leaseKey(context.Background(), "s1", bob, false); !errors.Is(err, ErrUserMismatch) {
 		t.Fatalf("Lease by another user = %v, want ErrUserMismatch", err)
 	}
 	h.m.Stop("s1")
 	waitDone(t, p)
-	if _, _, err := h.m.leaseKey(context.Background(), "s1", alice); !errors.Is(err, errNotFound) {
+	if _, _, err := h.m.leaseKey(context.Background(), "s1", alice, false); !errors.Is(err, errNotFound) {
 		t.Fatalf("Lease after exit = %v, want errNotFound", err)
 	}
 	if h.m.Len() != 0 {
@@ -342,5 +344,104 @@ func TestWaitersOnASpawnGiveUpWithTheirContextOrRetryWhenItFails(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("start called %d times, want 2", calls)
+	}
+}
+
+const streamIdle = 10 * time.Minute
+
+// stream returns the process for key with a stream lease, as a GET stream or a
+// subscriptions/listen takes it, then moves the clock on, so processes streamed earlier have been
+// quiet longer.
+func (h *harness) stream(t *testing.T, key string, id Identity) (*Process, func()) {
+	t.Helper()
+	p, release, err := h.m.get(context.Background(), key, id, true)
+	if err != nil {
+		t.Fatalf("stream lease of %q: %v", key, err)
+	}
+	t.Cleanup(release)
+	h.clk.Advance(time.Second)
+	return p, release
+}
+
+func TestAUserWhoseStreamsHoldEverySlotGivesUpTheQuietestOnceTheyHaveBeenQuietLongEnough(t *testing.T) {
+	ev := newEvictions()
+	h := newHarness(t, func(c *Config) {
+		capped(2, 2, ev)(c)
+		c.StreamIdleTimeout = streamIdle
+	})
+	alice1, _ := h.stream(t, "a1", alice) // quiet longest
+	alice2, _ := h.stream(t, "a2", alice)
+	if _, _, err := h.m.Get(context.Background(), "b1", bob); !errors.Is(err, errBusy) {
+		t.Fatalf("Get while alice's streams have been quiet under %s = %v, want errBusy", streamIdle, err)
+	}
+	h.clk.Advance(streamIdle)
+	h.get(t, "b1", bob)
+	waitDone(t, alice1)
+	if got := ev.wait(t, 1); got[0] != alice.Subject || ev.reasons[0] != "upstream_cap" || ev.streams[0] != 1 {
+		t.Fatalf("evicted %v for %v with %v open streams, want alice's quietest for upstream_cap with 1", got, ev.reasons, ev.streams)
+	}
+	if isDone(alice2) {
+		t.Fatal("alice's more recently active process was stopped too")
+	}
+}
+
+func TestAtTheUpstreamCapAnIdleProcessOfAnyoneGoesBeforeAQuietStreamOfAUserUnderTheirCap(t *testing.T) {
+	ev := newEvictions()
+	h := newHarness(t, func(c *Config) {
+		capped(2, 2, ev)(c)
+		c.StreamIdleTimeout = streamIdle
+	})
+	bob1, _ := h.stream(t, "b1", bob) // quiet for longer than the timeout: evictable, but held
+	h.clk.Advance(streamIdle)
+	carol1 := h.getAt(t, "c1", carol) // idle, and more recently used than bob's stream
+	h.get(t, "a1", alice)
+	waitDone(t, carol1)
+	if got := ev.wait(t, 1); got[0] != carol.Subject || ev.streams[0] != 0 {
+		t.Fatalf("evicted %v with %v open streams, want carol's idle process with none", got, ev.streams)
+	}
+	if isDone(bob1) {
+		t.Fatal("bob's stream-held process was stopped while an idle process was there to evict")
+	}
+}
+
+func TestAQuietStreamKeepsItsProcessWhenItIsNotQuietLongEnoughOrAlsoServesARequest(t *testing.T) {
+	cases := []struct {
+		name     string
+		timeout  time.Duration
+		traffic  bool // the process exchanges a message after the streams open
+		request  bool // a request lease is held beside the stream
+		wantBusy bool
+	}{
+		{name: "quiet for the timeout is evictable", timeout: streamIdle},
+		{name: "traffic within the timeout keeps it", timeout: streamIdle, traffic: true, wantBusy: true},
+		{name: "a request in flight keeps it", timeout: streamIdle, request: true, wantBusy: true},
+		{name: "0 keeps quiet streams however long", timeout: 0, wantBusy: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, func(c *Config) {
+				capped(1, 1, nil)(c)
+				c.StreamIdleTimeout = tc.timeout
+			})
+			p, _ := h.stream(t, "a1", alice)
+			if tc.request {
+				_, release := h.lease(t, "a1", alice)
+				t.Cleanup(release)
+			}
+			h.clk.Advance(streamIdle - time.Second) // with the stream's own second: exactly the timeout
+			if tc.traffic {
+				if answer := call(t, p, "ping"); answer != "ping" {
+					t.Fatalf("the process answered %q, want ping", answer)
+				}
+				h.clk.Advance(time.Second)
+			}
+			_, _, err := h.m.Get(context.Background(), "a2", alice)
+			if busy := errors.Is(err, errBusy); busy != tc.wantBusy {
+				t.Fatalf("Get over the cap = %v, want busy %v", err, tc.wantBusy)
+			}
+			if !tc.wantBusy {
+				waitDone(t, p)
+			}
+		})
 	}
 }

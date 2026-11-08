@@ -42,9 +42,10 @@ func newUpstream(cfg *config.Config, log *slog.Logger, o Observability, minter *
 	}
 	name := stdioName(cfg)
 	m, err := newStdioManager(cfg, stdio.Config{Name: name, Command: cfg.UpstreamCommand, Env: cfg.UpstreamEnv,
-		MaxProcesses: cfg.StdioMaxProcesses, MaxPerUser: cfg.StdioMaxPerUser, Log: log,
-		Evicted: func(id stdio.Identity, reason string) {
-			o.Audit.Record(nil, audit.Event{Name: audit.ProcessEvicted, Outcome: audit.Success, Reason: reason, UserKey: id.Subject})
+		MaxProcesses: cfg.StdioMaxProcesses, MaxPerUser: cfg.StdioMaxPerUser, StreamIdleTimeout: cfg.StdioStreamIdleTimeout, Log: log,
+		Evicted: func(id stdio.Identity, reason string, openStreams int) {
+			o.Audit.Record(nil, audit.Event{Name: audit.ProcessEvicted, Outcome: audit.Success, Reason: reason, UserKey: id.Subject,
+				OpenStreams: openStreams})
 		}})
 	if err != nil {
 		return nil, err

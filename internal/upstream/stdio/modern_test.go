@@ -305,14 +305,31 @@ func TestRequestIDsAndProgressTokensMustBeStringsOrIntegers(t *testing.T) {
 	}
 }
 
-func TestAnExitedProcessesRequestGetsItsQueuedAnswerBeforeAnyExitError(t *testing.T) {
-	q := &modernRequest{id: []byte(`7`), final: make(chan []byte, 1)}
-	if got := string(exitAnswer(q)); !strings.Contains(got, "upstream process exited") || !strings.Contains(got, `"id":7`) {
-		t.Fatalf("with no answer queued: %s, want the exit error under the client's id", got)
+func TestAnExitedProcessesRequestGetsItsQueuedAnswerElseAnErrorOrForAnEvictedListenACompletion(t *testing.T) {
+	const answered = `{"jsonrpc":"2.0","id":7,"result":"answered"}`
+	const complete = `{"id":7,"jsonrpc":"2.0","result":{"_meta":{"io.modelcontextprotocol/subscriptionId":7},"resultType":"complete"}}`
+	const exited = `{"jsonrpc":"2.0","id":7,"error":{"code":-32603,"message":"upstream process exited"}}`
+	cases := []struct {
+		name             string
+		listen, evicted  bool
+		queued, wantBody string
+	}{
+		{name: "a request whose process crashed", wantBody: exited},
+		{name: "a request whose process was evicted", evicted: true, wantBody: exited},
+		{name: "a listen whose process crashed", listen: true, wantBody: exited},
+		{name: "a listen whose process was evicted", listen: true, evicted: true, wantBody: complete},
+		{name: "a queued answer goes first", listen: true, evicted: true, queued: answered, wantBody: answered},
 	}
-	q.final <- []byte(`{"jsonrpc":"2.0","id":7,"result":"answered"}`)
-	if got := string(exitAnswer(q)); got != `{"jsonrpc":"2.0","id":7,"result":"answered"}` {
-		t.Fatalf("with an answer queued: %s, want the answer", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			q := &modernRequest{id: []byte(`7`), listen: tc.listen, final: make(chan []byte, 1)}
+			if tc.queued != "" {
+				q.final <- []byte(tc.queued)
+			}
+			if got := string(exitAnswer(q, tc.evicted)); got != tc.wantBody {
+				t.Fatalf("got %s, want %s", got, tc.wantBody)
+			}
+		})
 	}
 }
 
@@ -832,5 +849,26 @@ func TestARequestTrailerIsNeverReadAsAHeader(t *testing.T) {
 				t.Fatalf("status %d, body %s; want %d with %q, the trailer unread", res.StatusCode, raw, tc.want, tc.wantIn)
 			}
 		})
+	}
+}
+
+func TestAQuietListensProcessIsEvictedForAnotherUserAndTheListenGetsACompletionResult(t *testing.T) {
+	b := newModernBridge(t, func(c *Config) {
+		c.MaxProcesses = 1
+		c.StreamIdleTimeout = streamIdle
+	})
+	ev := b.listenModern(t, context.Background(), `"L"`)
+	if res := b.modern(t, "bob", modernBody(`1`, "echo", "", "")); res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("bob's request while alice's listen has been quiet under %s: status %d, want 503", streamIdle, res.StatusCode)
+	}
+	b.clk.Advance(streamIdle)
+	if id, _ := lastResult(t, readEvents(t, b.modern(t, "bob", modernBody(`1`, "echo", "", "")))); id != "1" {
+		t.Fatalf("bob's request answered under id %s, want 1", id)
+	}
+	// The server ended the subscription, so it says so (2026-07-28 subscriptions), under the
+	// client's own id, never the proxy's.
+	got := ev.all()
+	if len(got) != 1 || got[0] != `{"id":"L","jsonrpc":"2.0","result":{"_meta":{"io.modelcontextprotocol/subscriptionId":"L"},"resultType":"complete"}}` {
+		t.Fatalf("the evicted listen got %q, want its completion result only", got)
 	}
 }

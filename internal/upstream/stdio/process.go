@@ -47,7 +47,9 @@ type Process struct {
 
 	mu       sync.Mutex
 	idle     Timer
-	held     int // open leases; the idle timer does not run while any is held
+	held     int       // open leases; the idle timer does not run while any is held
+	traffic  time.Time // the last stdin or stdout message, or the start
+	evicted  bool      // stopped to make room under a process cap
 	timers   []Timer
 	stopping bool
 	exited   bool
@@ -71,6 +73,7 @@ func startProcess(cmd *exec.Cmd, stdin, stdout, stderr *os.File, sessionDir stri
 	p := &Process{
 		pid: cmd.Process.Pid, log: o.log, clock: o.clock, idleFor: o.idleFor, grace: o.grace, maxMsg: o.maxMsg,
 		stdin: stdin, messages: make(chan []byte, 16), abandon: make(chan struct{}), done: make(chan struct{}),
+		traffic: o.clock.Now(),
 	}
 	p.mu.Lock() // the timer may fire before the assignment completes; stop reads p.idle under p.mu
 	p.idle = o.clock.AfterFunc(o.idleFor, func() {
@@ -152,13 +155,39 @@ func (p *Process) isStopping() bool {
 	return p.stopping || p.exited
 }
 
-// touch restarts the idle timer, unless the process is held.
+// touch records traffic and restarts the idle timer, unless the process is held.
 func (p *Process) touch() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.traffic = p.clock.Now()
 	if !p.stopping && !p.exited && p.held == 0 {
 		p.idle.Reset(p.idleFor)
 	}
+}
+
+// lastTraffic is when the process last read or wrote a message, or started.
+func (p *Process) lastTraffic() time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.traffic
+}
+
+// evict stops the process to make room under a cap. Its streams end as ones the server chose to
+// end (a subscriptions/listen gets a completion result), not as after a crash.
+func (p *Process) evict(reason string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.stopping && !p.exited {
+		p.evicted = true
+	}
+	p.stopLocked(reason)
+}
+
+// wasEvicted reports whether evict stopped the process.
+func (p *Process) wasEvicted() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.evicted
 }
 
 // hold marks the process in use: an open request or stream, however quiet, keeps it from idling
