@@ -72,8 +72,12 @@ type rpcFault struct {
 	msg  string
 }
 
-// pathMethod is where a message's method is; parseMessage refuses it repeated or in another case.
-var pathMethod = jsonPath{"method"}
+// Where a message's method and id are. parseMessage refuses either repeated or in another case,
+// in both eras; the modern era also rewrites the id.
+var (
+	pathMethod = jsonPath{"method"}
+	pathID     = jsonPath{"id"}
+)
 
 // parseMessage checks a POST body is one JSON-RPC message and returns it as one line for stdin.
 // The bytes are kept as sent unless they hold a line break, which can only be whitespace in JSON
@@ -90,11 +94,12 @@ func parseMessage(body []byte) ([]byte, envelope, *rpcFault) {
 	if env.kind() == kindInvalid {
 		return nil, envelope{}, &rpcFault{codeInvalidRequest, "Invalid Request: not a JSON-RPC request, notification or response"}
 	}
-	// env.Method is encoding/json's reading: any case, last key wins. An upstream may read the exact
-	// key, or the first, so a repeated top-level key or a method in another case is refused before
-	// the method decides anything (initialize or not, which era, which header rules).
-	if _, err := locate(body, pathMethod); err != nil {
-		return nil, envelope{}, &rpcFault{codeInvalidRequest, "Invalid Request: the message is ambiguous: a top-level key is repeated, or the method is given in another case"}
+	// env.Method and env.ID are encoding/json's reading: any case, last key wins. An upstream may read
+	// the exact key, or the first, so a repeated top-level key, or a method or id in another case, is
+	// refused before either decides anything: initialize or not, which era, which header rules, and
+	// which answer a request waits for (an upstream that reads no id never answers).
+	if _, err := locate(body, pathMethod, pathID); err != nil {
+		return nil, envelope{}, &rpcFault{codeInvalidRequest, "Invalid Request: the message is ambiguous: a top-level key is repeated, or the method or id is given in another case"}
 	}
 	if bytes.ContainsAny(body, "\r\n") {
 		var b bytes.Buffer
