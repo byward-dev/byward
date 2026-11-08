@@ -32,15 +32,15 @@ func refreshFailing(t *testing.T, e *env, f fakeidp.Failure) {
 	}
 }
 
-// forgedCallback sends the callback a browser could forge: the IdP's own error, invalid_client with
-// Entra's code for a rejected secret, in the query.
-func forgedCallback(t *testing.T, e *env, _ fakeidp.Failure) {
+// forgedCallback sends the callback a browser could forge: f's error and code as the IdP's own, in
+// the query.
+func forgedCallback(t *testing.T, e *env, f fakeidp.Failure) {
 	t.Helper()
 	ck, cb := e.startLogin(t, nil)
 	q := cb.Query()
 	q.Del("code")
-	q.Set("error", "invalid_client")
-	q.Set("error_description", "AADSTS7000215: Invalid client secret provided.")
+	q.Set("error", f.Error)
+	q.Set("error_description", fmt.Sprintf("AADSTS%d: forged.", f.Code))
 	if res := e.do(t, "GET", "/callback/entra?"+q.Encode(), nil, []*http.Cookie{ck}); res.StatusCode != http.StatusBadGateway {
 		t.Fatalf("callback answered %d, want the IdP failure page (502)", res.StatusCode)
 	}
@@ -65,7 +65,8 @@ func TestIdPErrorsThatNeedTheOperatorRaiseAnAlert(t *testing.T) {
 		// Entra's own hint wins over the default.
 		{"refresh, client secret expired", refreshFailing, fakeidp.ExpiredClientSecret, "refresh credential_rejected", "AADSTS7000222: the client secret has expired; create a new one (or switch to a certificate)."},
 		{"refresh, IdP unavailable", refreshFailing, fakeidp.TemporarilyUnavailable, "", ""},
-		{"forged callback error", forgedCallback, fakeidp.Failure{}, "", ""},
+		{"forged callback, invalid_client", forgedCallback, fakeidp.InvalidClientSecret, "", ""},
+		{"forged callback, unauthorized_client", forgedCallback, fakeidp.UnknownClient, "", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

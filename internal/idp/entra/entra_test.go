@@ -558,15 +558,23 @@ func TestASilentLoginAsksTheIdPWithPromptNoneEvenWhenAccountSelectionIsAsked(t *
 // #204: the callback query is the browser's, so an invalid_client or an AADSTS code of a rejected
 // secret in it is forgeable and never an operator alert.
 func TestACallbackErrorNeverAlertsTheOperator(t *testing.T) {
-	e := newEnv(t, Config{})
-	q := signIn(t, e, login)
-	q.Del("code")
-	q.Set("error", "invalid_client")
-	q.Set("error_description", "AADSTS7000215: Invalid client secret provided.")
-	_, _, err := e.p.Callback(context.Background(), q, login)
-	var ie *idp.Error
-	if !errors.As(err, &ie) || ie.OAuth != "invalid_client" || ie.Alert != "" {
-		t.Fatalf("err = %#v, want Entra's invalid_client without an alert", err)
+	// The errors that alert at the token endpoint, with Entra's codes for them.
+	for oauth, description := range map[string]string{
+		"invalid_client":      "AADSTS7000215: Invalid client secret provided.",
+		"unauthorized_client": "AADSTS700016: Application not found in the directory.",
+	} {
+		t.Run(oauth, func(t *testing.T) {
+			e := newEnv(t, Config{})
+			q := signIn(t, e, login)
+			q.Del("code")
+			q.Set("error", oauth)
+			q.Set("error_description", description)
+			_, _, err := e.p.Callback(context.Background(), q, login)
+			var ie *idp.Error
+			if !errors.As(err, &ie) || ie.OAuth != oauth || ie.Alert != "" {
+				t.Fatalf("err = %#v, want Entra's %s without an alert", err, oauth)
+			}
+		})
 	}
 }
 
