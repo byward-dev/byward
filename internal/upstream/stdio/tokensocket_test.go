@@ -415,7 +415,9 @@ func TestARefusedPeerWithALargeRequestStillReadsTheRefusal(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = c.Close() }()
-	_ = c.(*net.UnixConn).SetWriteBuffer(4 << 10)
+	if err := c.(*net.UnixConn).SetWriteBuffer(4 << 10); err != nil {
+		t.Fatal(err) // without the small buffer this test proves nothing on Linux
+	}
 	_ = c.SetDeadline(time.Now().Add(guard))
 	if _, err := c.Write([]byte(`{"pad":"` + strings.Repeat("x", 48<<10) + `"}` + "\n")); err != nil {
 		t.Fatalf("writing a 48 KiB request: %v, want it accepted", err)
