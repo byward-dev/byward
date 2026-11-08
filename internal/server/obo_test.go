@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -26,6 +27,7 @@ import (
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/upstream/relay"
 )
 
 const oboPublic = "https://mcp.example.com"
@@ -527,4 +529,92 @@ func mustURL(t *testing.T, raw string) *url.URL {
 		t.Fatal(err)
 	}
 	return u
+}
+
+// #195: with the assertion moved, the downstream token may go in Authorization. The upstream then
+// sees exactly one Authorization, the downstream token, never the client's proxy token.
+func TestTheDownstreamTokenCanReplaceAuthorization(t *testing.T) {
+	e := newOBOEnvWith(t, graphUserRead, []string{"BYWARD_ASSERTION_HEADER=X-Byward-Assertion", "BYWARD_OBO_HEADER=Authorization"})
+	access := e.signIn(t)["access_token"].(string)
+	if status, body := e.mcp(t, access, oboToolsCall, nil); status != http.StatusOK {
+		t.Fatalf("MCP request: %d %s", status, body)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if len(e.headers) != 1 {
+		t.Fatalf("the upstream got %d requests, want 1", len(e.headers))
+	}
+	got := e.headers[0].Values("Authorization")
+	if len(got) != 1 || !strings.HasPrefix(got[0], "Bearer ") || strings.Contains(got[0], access) {
+		t.Fatalf("Authorization %q: want exactly one, the downstream token, never the client's", got)
+	}
+	if aud := jwtClaims(t, strings.TrimPrefix(got[0], "Bearer "))["aud"]; aud != fakeidp.GraphAppID {
+		t.Fatalf("Authorization carries a token for %v, want Microsoft Graph", aud)
+	}
+	if !strings.HasPrefix(e.headers[0].Get("X-Byward-Assertion"), "Bearer ") {
+		t.Fatal("the identity assertion did not reach its own header")
+	}
+}
+
+// #195: with OBO in Authorization a user's request carries the downstream token there, and an
+// app-only caller's, which gets none, carries no Authorization at all; the client's copy is removed
+// either way.
+func TestWithOBOInAuthorizationTheUpstreamGetsTheDownstreamTokenOrNothing(t *testing.T) {
+	var got []http.Header
+	var mu sync.Mutex
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		got = append(got, r.Header.Clone())
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":7,"result":{}}`)
+	}))
+	t.Cleanup(up.Close)
+	cfg := &config.Config{UpstreamURL: mustURL(t, up.URL+"/mcp"), AssertionHeader: "X-Byward-Assertion", OBOHeader: "Authorization", UpstreamHeaderTimeout: time.Minute}
+	log := slog.New(slog.DiscardHandler)
+	d := &downstreamTokens{
+		cache: downstream.New(func(context.Context, string, string, []string) (downstream.Token, error) {
+			return downstream.Token{AccessToken: "downstream-token", ExpiresAt: time.Now().Add(time.Hour)}, nil
+		}, []string{graphUserRead}, 0, time.Now),
+		header: cfg.OBOHeader, resource: "https://graph.microsoft.com", log: log,
+		assertion: func(context.Context, string) (string, time.Time, error) {
+			return "assertion", time.Now().Add(time.Hour), nil
+		},
+	}
+	relayTo := httpUpstream(cfg, log, relay.WithInject(d.inject))
+	for _, c := range []struct {
+		name string
+		id   resource.Identity
+		want []string
+	}{
+		{"a user", resource.Identity{Subject: "tid:oid", GrantID: "g", PrincipalType: resource.PrincipalUser}, []string{"Bearer downstream-token"}},
+		{"an app-only caller", resource.Identity{Subject: "tid:app", ClientID: "app", PrincipalType: resource.PrincipalClient}, nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			mu.Lock()
+			got = nil
+			mu.Unlock()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { d.serve(w, r, c.id, true, relayTo) }))
+			defer srv.Close()
+			r, err := http.NewRequest("POST", srv.URL+"/mcp", strings.NewReader(oboToolsCall))
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.Header.Set("Authorization", "Bearer the-clients-proxy-token")
+			r.Header.Set("Content-Type", "application/json")
+			res, err := http.DefaultClient.Do(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = res.Body.Close()
+			mu.Lock()
+			defer mu.Unlock()
+			if len(got) != 1 {
+				t.Fatalf("the upstream got %d requests, want 1 (serve answered %d)", len(got), res.StatusCode)
+			}
+			if a := got[0].Values("Authorization"); !slices.Equal(a, c.want) {
+				t.Fatalf("Authorization %q, want %q", a, c.want)
+			}
+		})
+	}
 }

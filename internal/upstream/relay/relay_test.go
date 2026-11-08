@@ -5,10 +5,13 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"log"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
+	"net/textproto"
 	"net/url"
 	"slices"
 	"strings"
@@ -343,9 +346,10 @@ func TestAClientsUpgradeRequestNeverReachesTheUpstream(t *testing.T) {
 	}
 }
 
-// An upstream that switches protocols anyway, asked to or not, gets the client a 502 with none of its
-// headers (never its raw Mcp-Session-Id, never a raw connection past the session binding), and the
-// operator a log line saying why.
+// An upstream that switches protocols anyway gets the client a 502 with none of its headers (never its
+// raw Mcp-Session-Id, never a raw connection past the session binding), and the operator a log line
+// saying why. With the client's Upgrade already stripped, ReverseProxy itself would refuse the 101
+// too; the log line is what pins the relay's own refusal.
 func TestAnUpstreamThatSwitchesProtocolsGetsTheClientA502(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -387,5 +391,196 @@ func TestAnUpstreamThatSwitchesProtocolsGetsTheClientA502(t *testing.T) {
 				t.Fatalf("log %q does not say the upstream switched protocols", logs.String())
 			}
 		})
+	}
+}
+
+// An upstream's informational responses (100, 102, 103) reach the MCP client with Link and
+// Mcp-Session-Id only (which the binding seals): the headers the relay cleans from the final response,
+// and any others, never ride along on a 1xx, past ModifyResponse. The final response is untouched.
+func TestAnUpstreamsInformationalResponsesCarryOnlyLinkAndTheSession(t *testing.T) {
+	hinted := map[string]string{"Link": "</style.css>; rel=preload", "Mcp-Session-Id": "raw", "Access-Control-Allow-Origin": "*",
+		"Www-Authenticate": `Bearer resource_metadata="https://evil.example"`, "Set-Cookie": "up=1", "X-Other": "x"}
+	for _, code := range []int{http.StatusContinue, http.StatusProcessing, http.StatusEarlyHints} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			up := fakeupstream.New()
+			t.Cleanup(up.Close)
+			up.Handler = func(w http.ResponseWriter, _ *http.Request) {
+				for k, v := range hinted {
+					w.Header().Set(k, v)
+				}
+				w.WriteHeader(code)
+				for k := range hinted {
+					w.Header().Del(k) // a 1xx's headers would otherwise ride on the final response too
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, "{}")
+			}
+			fetch := func(t *testing.T, url string) (http.Header, *http.Response) {
+				t.Helper()
+				var got http.Header
+				trace := &httptrace.ClientTrace{Got1xxResponse: func(c int, h textproto.MIMEHeader) error {
+					if c == code {
+						got = http.Header(h).Clone()
+					}
+					return nil
+				}}
+				req, _ := http.NewRequestWithContext(httptrace.WithClientTrace(context.Background(), trace), http.MethodPost, url, strings.NewReader(`{}`))
+				res, err := http.DefaultClient.Do(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, _ = io.ReadAll(res.Body)
+				_ = res.Body.Close()
+				return got, res
+			}
+			// The control: straight from the upstream, the 1xx carries every header.
+			if direct, _ := fetch(t, up.URL); len(direct) != len(hinted) {
+				t.Fatalf("the upstream's %d carried %v, want all of %v", code, direct, hinted)
+			}
+			srv := httptest.NewServer(relayTo(t, up, "/mcp"))
+			t.Cleanup(srv.Close)
+			got, res := fetch(t, srv.URL+"/mcp")
+			if len(got) != 2 || got.Get("Link") != hinted["Link"] || got.Get("Mcp-Session-Id") != "raw" {
+				t.Fatalf("the %d reached the client with %v, want Link and Mcp-Session-Id only", code, got)
+			}
+			if res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "application/json" {
+				t.Fatalf("final response %d %v", res.StatusCode, res.Header)
+			}
+		})
+	}
+}
+
+// The headers the proxy set before the relay ran (CORS, the request ID, and every value of each) survive
+// an upstream's 1xx, which ReverseProxy clears the header map after, whatever final response follows:
+// the upstream's own, a failure it sends, or the relay's 502 when it hangs up. They never override a
+// header the upstream's final response sets, and the upstream's own CORS headers stay dropped.
+func TestTheProxysOwnHeadersSurviveAnUpstreamsInformationalResponse(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		final func(w http.ResponseWriter) // after the 103
+		want  int
+	}{
+		{"a success", func(w http.ResponseWriter) {
+			w.Header().Set("Vary", "Accept")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			_, _ = io.WriteString(w, "{}")
+		}, http.StatusOK},
+		{"a failure", func(w http.ResponseWriter) {
+			w.Header().Set("Vary", "Accept")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.WriteHeader(http.StatusInternalServerError)
+		}, http.StatusInternalServerError},
+		{"a hang-up", func(http.ResponseWriter) { panic(http.ErrAbortHandler) }, http.StatusBadGateway},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			up := fakeupstream.New()
+			t.Cleanup(up.Close)
+			up.Handler = func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Link", "</style.css>; rel=preload")
+				w.WriteHeader(http.StatusEarlyHints)
+				w.Header().Del("Link")
+				tc.final(w)
+			}
+			relay := relayTo(t, up, "/mcp")
+			srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("X-Request-Id", "req-1")
+				w.Header().Set("Access-Control-Allow-Origin", "https://app.example")
+				w.Header()["Access-Control-Expose-Headers"] = []string{"Mcp-Session-Id", "X-Request-Id"}
+				w.Header().Set("Vary", "Origin")
+				relay.ServeHTTP(w, r)
+			}))
+			var serverLog bytes.Buffer // net/http's own complaints, such as a status written twice
+			srv.Config.ErrorLog = log.New(&serverLog, "", 0)
+			srv.Start()
+			t.Cleanup(srv.Close)
+			hinted := false
+			trace := &httptrace.ClientTrace{Got1xxResponse: func(code int, _ textproto.MIMEHeader) error {
+				hinted = hinted || code == http.StatusEarlyHints
+				return nil
+			}}
+			req, _ := http.NewRequestWithContext(httptrace.WithClientTrace(context.Background(), trace), http.MethodPost, srv.URL+"/mcp", strings.NewReader(`{}`))
+			res, err := srv.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = io.ReadAll(res.Body)
+			_ = res.Body.Close()
+			if !hinted || res.StatusCode != tc.want {
+				t.Fatalf("103 seen %v, final status %d; want a 103 then %d", hinted, res.StatusCode, tc.want)
+			}
+			if res.Header.Get("X-Request-Id") != "req-1" || !slices.Equal(res.Header.Values("Access-Control-Allow-Origin"), []string{"https://app.example"}) ||
+				!slices.Equal(res.Header.Values("Access-Control-Expose-Headers"), []string{"Mcp-Session-Id", "X-Request-Id"}) {
+				t.Fatalf("final headers %v; want the proxy's request ID and CORS back, every value, and not the upstream's", res.Header)
+			}
+			if tc.want != http.StatusBadGateway && !slices.Equal(res.Header.Values("Vary"), []string{"Accept"}) {
+				t.Fatalf("Vary %q; want the upstream's final header as it set it", res.Header.Values("Vary"))
+			}
+			srv.Close() // flushes the server's log
+			if strings.Contains(serverLog.String(), "superfluous") {
+				t.Fatalf("the relay wrote a status twice: %s", serverLog.String())
+			}
+		})
+	}
+}
+
+// The proxy's own headers also survive when the answer after a 1xx is the relay's own body with no
+// status written first: the header-timeout answer to an upstream that sent a 103 and then nothing.
+func TestTheProxysOwnHeadersSurviveATimeoutAfterAnInformationalResponse(t *testing.T) {
+	up := fakeupstream.New()
+	t.Cleanup(up.Close)
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	up.Handler = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Link", "</style.css>; rel=preload")
+		w.WriteHeader(http.StatusEarlyHints)
+		select { // no final response until the relay has given up
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}
+	u, _ := url.Parse(up.URL + "/mcp")
+	relay := New(quiet(), u, WithResponseHeaderTimeout(200*time.Millisecond))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Request-Id", "req-1")
+		w.Header().Set("Access-Control-Allow-Origin", "https://app.example")
+		relay.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	hinted := false
+	trace := &httptrace.ClientTrace{Got1xxResponse: func(code int, _ textproto.MIMEHeader) error {
+		hinted = hinted || code == http.StatusEarlyHints
+		return nil
+	}}
+	req, _ := http.NewRequestWithContext(httptrace.WithClientTrace(context.Background(), trace), http.MethodPost, srv.URL+"/mcp",
+		strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{}}`))
+	res, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	_ = res.Body.Close()
+	if !hinted {
+		t.Fatal("no 103 reached the client, so this test proves nothing")
+	}
+	if res.StatusCode != http.StatusOK || !strings.Contains(string(body), `"id":1`) {
+		t.Fatalf("status %d, body %s; want the timeout answer", res.StatusCode, body)
+	}
+	if res.Header.Get("X-Request-Id") != "req-1" || res.Header.Get("Access-Control-Allow-Origin") != "https://app.example" {
+		t.Fatalf("final headers %v; want the proxy's request ID and CORS back", res.Header)
+	}
+}
+
+// An interim 101 (an HTTP/2 upstream can send one; it reaches the writer through ReverseProxy's 1xx
+// hook, never ModifyResponse) is dropped: the final response that follows is the one the MCP client
+// gets, with none of the 101's headers.
+func TestAnInterimSwitchingProtocolsIsNeverForwarded(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := &informational{ResponseWriter: rec, ours: http.Header{}}
+	w.Header().Set("Mcp-Session-Id", "raw-101")
+	w.WriteHeader(http.StatusSwitchingProtocols)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if rec.Code != http.StatusOK || rec.Header().Get("Mcp-Session-Id") != "" {
+		t.Fatalf("status %d, headers %v; want the final 200 without the 101's headers", rec.Code, rec.Header())
 	}
 }
