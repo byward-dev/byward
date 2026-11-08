@@ -69,8 +69,11 @@ Several agents often work on this repo at once. These rules keep their work from
 - **Gate every push on the check.** Chain with `&&`, never `;`: `mise run check && git push …`.
   Capture the log with a redirect, not a pipe: `mise run check > check.log 2>&1 && git push …`.
   A pipe (`| tee`, `| grep`, `| tail`) returns the last command's status and hides a failing check.
-- **Rebase as soon as `main` moves** when your branch touches the same files; small conflicts
-  are cheap, late ones are not. Keep both sides, then re-run the check.
+- **At most two PRs open at once**, drafts included, across the repo. Wait for a free slot before
+  opening one; the coordinating session hands slots out.
+- **Rebase once, before reporting READY**, not every time `main` moves. Rebase earlier only when
+  `git merge-tree --write-tree origin/main HEAD` reports a conflict. Keep both sides, then re-run
+  the check.
 - **Generated files are never hand-merged.** `docs/reference/settings.md` conflicts are resolved
   by regenerating it: `BYWARD_UPDATE_REFERENCE=1 go test ./internal/config/`.
 - **Sweeps run as one subagent per angle** (runtime; 5 SOLID; 7 tests) through ordinary subagent
