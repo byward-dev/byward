@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -377,17 +378,25 @@ func TestARefusedPeerThatSendsNothingIsAnsweredBeforeTheDeadline(t *testing.T) {
 	t.Cleanup(s.close)
 	s.timeout, s.margin = 400*time.Millisecond, 200*time.Millisecond
 	go s.serve(stranger(t))
+	start := time.Now()
 	c, err := net.Dial("unix", s.path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = c.Close() }()
 	_ = c.SetDeadline(time.Now().Add(guard))
-	answer, err := bufio.NewReader(c).ReadString('\n') // no request at all
+	r := bufio.NewReader(c)
+	answer, err := r.ReadString('\n') // no request at all
 	if err != nil {
 		t.Fatalf("reading the answer: %v", err)
 	}
+	if took := time.Since(start); took >= s.timeout {
+		t.Fatalf("answered after %v, want before the %v deadline", took, s.timeout)
+	}
 	if _, _, code := answerOf(t, strings.TrimSuffix(answer, "\n")); code != TokenRefused {
 		t.Fatalf("answer %q, want the error %s", answer, TokenRefused)
+	}
+	if _, err := r.ReadByte(); !errors.Is(err, io.EOF) {
+		t.Fatalf("after the answer: %v, want the connection closed", err)
 	}
 }
