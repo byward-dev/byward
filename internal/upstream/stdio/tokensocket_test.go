@@ -379,6 +379,12 @@ func TestARefusedPeerThatSendsNothingIsAnsweredSoonAndClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(s.close)
+	// The socket serves one connection at a time, so the wait a stranger gets must stay short next
+	// to a legitimate process's bound; the test then shortens it.
+	if s.refusalWait != refusalWait || refusalWait > tokenAnswerTimeout/10 {
+		t.Fatalf("a refused peer is given %v to send its request, want refusalWait (%v), at most a tenth of %v",
+			s.refusalWait, refusalWait, tokenAnswerTimeout)
+	}
 	s.refusalWait = 200 * time.Millisecond
 	go s.serve(stranger(t))
 	start := time.Now()
