@@ -608,6 +608,7 @@ func TestAnUpstreamRedirectGetsTheClientA502AndTheLogWhereItPointed(t *testing.T
 		{"userinfo, query and fragment are dropped", http.StatusFound, "https://user:pw-secret@sso.example/login?code=code-secret#frag-secret", "points to https://sso.example/login;"},
 		{"path parameters are dropped", http.StatusFound, "/cb;jsessionid=sess-secret", "points to " + up.URL + "/cb;"},
 		{"an opaque Location is not logged", http.StatusFound, "https:tok-secret", "the upstream sent no usable Location"},
+		{"a host-less Location is not logged", http.StatusFound, "file:///etc/x", "the upstream sent no usable Location"},
 		{"without a Location", http.StatusFound, "", "the upstream sent no usable Location"},
 		{"not modified is passed on", http.StatusNotModified, "", ""},
 		{"a bad request is passed on", http.StatusBadRequest, "", ""},

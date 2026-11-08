@@ -98,8 +98,8 @@ func useFakes(t *testing.T, proxy http.RoundTripper) {
 	t.Helper()
 	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID("00000000-0000-0000-0000-000000000001"),
 		fakeidp.WithClient(fakeidp.Client{ID: "00000000-0000-0000-0000-000000000002", Secrets: []string{"s3cret-entra"}}))
-	old := doctorOptions
-	doctorOptions = server.DoctorOptions{IdP: fake.HTTPClient(), Proxy: &http.Client{Transport: proxy}}
+	old := doctorOptions // keeps TestMain's resolver and upstream proxy, so no test reaches the network
+	doctorOptions.IdP, doctorOptions.Proxy = fake.HTTPClient(), &http.Client{Transport: proxy}
 	t.Cleanup(func() { doctorOptions = old })
 }
 

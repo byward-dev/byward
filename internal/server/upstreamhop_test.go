@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
@@ -298,4 +300,47 @@ func checkNamed(t *testing.T, rep doctor.Report, name string) doctor.Result {
 	}
 	t.Fatalf("no %q check in %+v", name, rep.Checks)
 	return doctor.Result{}
+}
+
+// Startup gives the lookup its own budget, shorter than doctor's.
+func TestStartupBoundsTheLookupOfTheUpstreamsHost(t *testing.T) {
+	var left time.Duration
+	withResolver(t, func(ctx context.Context, _ string) ([]netip.Addr, error) {
+		d, _ := ctx.Deadline()
+		left = time.Until(d)
+		return nil, errors.New("timed out")
+	})
+	if _, err := New(noAuthHopConfig(t, "http://mcp.example.com:9/mcp"), slog.New(slog.DiscardHandler)); err != nil {
+		t.Fatal(err)
+	}
+	if left <= 0 || left > startupResolveTimeout {
+		t.Fatalf("the lookup had %v left, want at most %v", left, startupResolveTimeout)
+	}
+}
+
+// doctor's own resolver, the one `byward doctor` runs with, resolves the upstream's host.
+func TestDoctorResolvesTheUpstreamsHostByDefault(t *testing.T) {
+	withResolver(t, resolvesTo("mcp.example.com", "203.0.113.7"))
+	rep, err := Doctor(context.Background(), noAuthHopConfig(t, "http://mcp.example.com/mcp"),
+		DoctorOptions{UpstreamProxy: func(*http.Request) (*url.URL, error) { return nil, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hop := checkNamed(t, rep, "upstream hop"); !strings.Contains(hop.Message, "203.0.113.7") {
+		t.Fatalf("upstream hop %+v, want the address the system resolver gave", hop)
+	}
+}
+
+// With authentication too, doctor names the environment's HTTP proxy.
+func TestDoctorNamesTheEnvironmentsProxyWithAuthentication(t *testing.T) {
+	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
+		fakeidp.WithClient(fakeidp.Client{ID: "00000000-0000-0000-0000-000000000002", Secrets: []string{"s3cret-entra"}}))
+	rep, err := Doctor(context.Background(), authHopConfig(t, "http://10.0.0.7/mcp"), DoctorOptions{IdP: fake.HTTPClient(), Proxy: &http.Client{Transport: refuse{}},
+		UpstreamProxy: func(*http.Request) (*url.URL, error) { return url.Parse("http://egress.example:3128") }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if up := checkNamed(t, rep, "upstream"); !strings.Contains(up.Message, "HTTP proxy http://egress.example:3128") {
+		t.Fatalf("upstream %+v, want the proxy named", up)
+	}
 }
