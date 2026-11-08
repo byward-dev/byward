@@ -315,10 +315,10 @@ func TestARotationFailureKeepsTheIdPsNewTokens(t *testing.T) {
 	e := newEnv(t)
 	e.fake.Set(fakeidp.WithSingleUseRefreshTokens(true))
 	rt := e.offline(t)["refresh_token"].(string)
-	e.st.rotateDown.Store(true)
+	e.st.Fail(errStoreDown, "RotateRefreshToken")
 	res, body := e.refresh(t, rt, "")
 	wantOAuthError(t, res, body, http.StatusServiceUnavailable, "temporarily_unavailable")
-	e.st.rotateDown.Store(false)
+	e.st.Fail(nil, "RotateRefreshToken")
 	if res, body := e.refresh(t, rt, ""); res.StatusCode != http.StatusOK {
 		t.Fatalf("the retry after the store recovered: %d %v, want 200 without a new sign-in", res.StatusCode, body)
 	}
@@ -371,7 +371,7 @@ func TestAClientThatGivesUpMidRefreshKeepsTheIdPsNewTokens(t *testing.T) {
 func TestStoreOutageAnswers503WithRetryAfter(t *testing.T) {
 	e := newEnv(t)
 	body := e.offline(t)
-	e.st.down.Store(true)
+	e.st.Down(errStoreDown)
 	res, failed := e.refresh(t, body["refresh_token"].(string), "")
 	wantOAuthError(t, res, failed, http.StatusServiceUnavailable, "temporarily_unavailable")
 	if res.Header.Get("Retry-After") == "" {
@@ -493,8 +493,8 @@ func TestUnusableStoredIdPTokensRevokeTheGrant(t *testing.T) {
 func TestReuseReportedByTheStoreDeniesAtOnce(t *testing.T) {
 	e := newEnv(t)
 	body := e.offline(t)
-	e.valid(t, body["access_token"].(string)) // a fresh list, before the reuse
-	e.st.reuseOnRotate.Store(true)            // another replica won the race; nothing recorded yet
+	e.valid(t, body["access_token"].(string))        // a fresh list, before the reuse
+	e.st.Fail(store.ErrReused, "RotateRefreshToken") // another replica won the race; nothing recorded yet
 	res, failed := e.refresh(t, body["refresh_token"].(string), "")
 	wantOAuthError(t, res, failed, http.StatusBadRequest, "invalid_grant")
 	if e.validNow(t, body["access_token"].(string)) {
@@ -547,7 +547,7 @@ func TestRevokeAnswers200ForWhatIsNotARevocableToken(t *testing.T) {
 func TestRevokeAnswers503WhenRevokingFails(t *testing.T) {
 	e := newEnv(t)
 	rt := e.offline(t)["refresh_token"].(string)
-	e.st.revokeDown.Store(true) // the lookup works, the revocation does not
+	e.st.Fail(errStoreDown, "RevokeGrant") // the lookup works, the revocation does not
 	res := e.revokeToken(t, rt, clientID)
 	if res.StatusCode != http.StatusServiceUnavailable || res.Header.Get("Retry-After") == "" {
 		t.Fatalf("revoke with a failing store write: %d, want 503 with Retry-After (never a false 200)", res.StatusCode)
@@ -668,7 +668,10 @@ func TestRefreshTokenReuseIsAuditedAsARevocation(t *testing.T) {
 		reuse func(t *testing.T, e *env, rt string)
 	}{
 		{"seen by the broker", func(t *testing.T, e *env, rt string) { e.refresh(t, rt, ""); e.refresh(t, rt, "") }},
-		{"reported by the store", func(t *testing.T, e *env, rt string) { e.st.reuseOnRotate.Store(true); e.refresh(t, rt, "") }},
+		{"reported by the store", func(t *testing.T, e *env, rt string) {
+			e.st.Fail(store.ErrReused, "RotateRefreshToken")
+			e.refresh(t, rt, "")
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t)
@@ -978,5 +981,40 @@ func TestAccessTokensAreCappedAtTheIdPTokenWhenOnBehalfOfIsOn(t *testing.T) {
 				t.Fatalf("refresh: expires_in %v, want %v (from the renewed IdP token)", got, c.want.Seconds())
 			}
 		})
+	}
+}
+
+// breakableIdP is an IdP whose refresh breaks the protocol (e.g. a success without tokens) while
+// *broken is set.
+type breakableIdP struct {
+	IdP
+	broken *bool
+}
+
+func (b breakableIdP) Refresh(ctx context.Context, rt string) (*idp.Identity, idp.Tokens, error) {
+	if *b.broken {
+		return nil, idp.Tokens{}, &idp.Error{Class: idp.Fatal, Err: errors.New("token endpoint returned a success without tokens")}
+	}
+	return b.IdP.Refresh(ctx, rt)
+}
+
+// An IdP that breaks the protocol at refresh fails that refresh (500) and keeps the grant: only
+// SignInAgain ends a session, and a misbehaving IdP is not the user's session ending.
+func TestAFatalIdPErrorAtRefreshFailsTheRequestAndKeepsTheGrant(t *testing.T) {
+	broken := false
+	e := newEnv(t, func(c *Config) { c.IdP = breakableIdP{c.IdP, &broken} })
+	rt := e.offline(t)["refresh_token"].(string)
+	broken = true
+	res, body := e.refresh(t, rt, "")
+	wantOAuthError(t, res, body, http.StatusInternalServerError, "server_error")
+	if e.grantGone(t, firstGrant(e.st)) || len(e.auditEvents(t, "grant_revoked")) != 0 {
+		t.Fatal("a fatal IdP error at refresh revoked the grant")
+	}
+	if got := e.idpOps[len(e.idpOps)-1]; got != "refresh rejected" {
+		t.Errorf("IdP observation %q, want refresh rejected", got)
+	}
+	broken = false
+	if res, body := e.refresh(t, rt, ""); res.StatusCode != http.StatusOK {
+		t.Fatalf("refresh once the IdP recovered: %d %v, want 200 without a new sign-in", res.StatusCode, body)
 	}
 }
