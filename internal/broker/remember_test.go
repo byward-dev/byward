@@ -136,7 +136,7 @@ func TestAStaticClientIsAskedOnceThenRemembered(t *testing.T) {
 	if hintIn(e, back) != nil {
 		t.Fatal("a remembered sign-in renewed the hint")
 	}
-	g, _ := e.st.Grant(context.Background(), e.st.GrantIDs()[len(e.st.GrantIDs())-1])
+	g, _ := e.st.Grant(context.Background(), lastGrant(e.st))
 	if c, err := e.st.Consent(context.Background(), store.ConsentKey{Issuer: g.Issuer, Subject: g.Subject, ClientID: clientID,
 		Redirect: registration.RedirectKey(clientCB), Resource: resourceID}); err != nil || !c.ExpiresAt.Equal(t0.Add(ConsentDelay+ConsentLifetime)) {
 		t.Fatalf("consent after a remembered sign-in: %+v %v, want it to expire 30 days after the Allow", c, err)
@@ -285,7 +285,7 @@ func TestADifferentUserBehindAStaleHintGetsThePageAndNoCode(t *testing.T) {
 		t.Fatalf("%d consent_remembered records, want only the failure", n)
 	}
 	// The failure names who actually signed in, never the user the hint named.
-	mallory, _ := e.st.Grant(context.Background(), e.st.GrantIDs()[len(e.st.GrantIDs())-1])
+	mallory, _ := e.st.Grant(context.Background(), lastGrant(e.st))
 	if got := e.auditEvents(t, "consent_remembered")[0]["user_key"]; got != mallory.Subject || got == user(e).Subject {
 		t.Fatalf("mismatch record user_key = %v, want the signed-in user %s, not the hinted %s", got, mallory.Subject, user(e).Subject)
 	}

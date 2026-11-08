@@ -92,7 +92,7 @@ func TestOnBehalfOfRefusesWrongInput(t *testing.T) {
 		"no assertion":      {tid, "", graphUserRead},
 		"no scopes":         {tid, "x", nil},
 	} {
-		if _, err := e.p.OnBehalfOf(context.Background(), args.tid, args.assertion, args.scopes); idp.ClassOf(err) != idp.Fatal {
+		if _, err := e.p.OnBehalfOf(context.Background(), args.tid, args.assertion, args.scopes); err == nil || idp.ClassOf(err) != idp.Fatal {
 			t.Errorf("%s: %v, want a fatal error", name, err)
 		}
 	}
@@ -129,7 +129,7 @@ func TestOnBehalfOfRefusesAnAnswerWithoutABearerToken(t *testing.T) {
 			c := *e.p.fetch.Client
 			c.Transport = oboAnswer{next: c.Transport, body: body}
 			e.p.fetch.Client = &c
-			if tok, err := e.p.OnBehalfOf(context.Background(), tid, assertion, graphUserRead); idp.ClassOf(err) != idp.Fatal || tok.AccessToken != "" {
+			if tok, err := e.p.OnBehalfOf(context.Background(), tid, assertion, graphUserRead); err == nil || idp.ClassOf(err) != idp.Fatal || tok.AccessToken != "" {
 				t.Fatalf("token set %v, err %v; want a fatal error and no token", tok.AccessToken != "", err)
 			}
 		})

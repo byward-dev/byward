@@ -513,6 +513,15 @@ func firstGrant(m *memstore.Store) string {
 	return ids[0]
 }
 
+// lastGrant is the ID of the most recently created grant, or "" when there is none.
+func lastGrant(m *memstore.Store) string {
+	ids := m.GrantIDs()
+	if len(ids) == 0 {
+		return ""
+	}
+	return ids[len(ids)-1]
+}
+
 func TestReusedCodeRevokesTheGrant(t *testing.T) {
 	e := newEnv(t)
 	code := e.signIn(t, nil).Query().Get("code")

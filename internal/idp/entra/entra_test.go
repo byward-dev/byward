@@ -264,7 +264,7 @@ func TestReadyChecksDiscoveryIssuer(t *testing.T) {
 		t.Fatal(err)
 	}
 	wrong := newEnv(t, Config{}, fakeidp.WithAuthority("https://login.example"))
-	if err := wrong.p.Ready(context.Background()); idp.ClassOf(err) != idp.Fatal {
+	if err := wrong.p.Ready(context.Background()); err == nil || idp.ClassOf(err) != idp.Fatal {
 		t.Fatalf("issuer under another authority: %v", err)
 	}
 }
