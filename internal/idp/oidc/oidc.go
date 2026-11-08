@@ -247,8 +247,8 @@ func (p *Provider) Callback(ctx context.Context, query url.Values, l idp.Login) 
 	if err != nil {
 		return idp.Identity{}, idp.Tokens{}, &idp.Error{Class: idp.Fatal, Err: err}
 	}
-	if cb.Error != "" {
-		return idp.Identity{}, idp.Tokens{}, &idp.Error{Class: idp.GenericClass(0, cb.Error), OAuth: cb.Error, Alert: alertFor(cb.Error),
+	if cb.Error != "" { // the browser's, so forgeable: never an operator alert (#204)
+		return idp.Identity{}, idp.Tokens{}, &idp.Error{Class: idp.GenericClass(0, cb.Error), OAuth: cb.Error,
 			Description: cb.ErrorDescription, UserMessage: "Sign-in at the identity provider did not complete."}
 	}
 	form := url.Values{
@@ -311,8 +311,11 @@ func (p *Provider) token(ctx context.Context, m *metadata, form url.Values) (*id
 	}
 	if !tr.OK() {
 		class := idp.GenericClass(tr.Status, tr.Error)
-		return nil, &idp.Error{Class: class, OAuth: tr.Error, Status: tr.Status, Description: tr.ErrorDescription,
-			Alert: alertFor(tr.Error)}
+		e := &idp.Error{Class: class, OAuth: tr.Error, Status: tr.Status, Description: tr.ErrorDescription}
+		if tr.Error == "invalid_client" { // the IdP refused the proxy's own credential or client ID
+			e.Alert = idp.AlertCredentialRejected
+		}
+		return nil, e
 	}
 	return tr, nil
 }
@@ -368,13 +371,4 @@ func (p *Provider) emailVerified(v any) bool {
 		return p.preset.EmailVerifiedAsString && b == "true"
 	}
 	return false
-}
-
-// alertFor is the operator alert for an OAuth error: invalid_client means the IdP refused the
-// proxy's own credential or client ID.
-func alertFor(oauth string) idp.Alert {
-	if oauth == "invalid_client" {
-		return idp.AlertCredentialRejected
-	}
-	return ""
 }

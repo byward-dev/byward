@@ -137,6 +137,8 @@ func (d *downstreamTokens) record(ctx context.Context, r *http.Request, id resou
 	isIdP := errors.As(err, &ie)
 	if isIdP && ie.OperatorHint != "" {
 		reason = outcome + ": " + ie.OperatorHint
+	} else if isIdP && ie.Alert != "" {
+		reason = outcome + ": " + ie.Alert.Hint()
 	}
 	attrs := []any{"request_id", logging.RequestID(ctx), "reason", reason, "error", err}
 	if isIdP {

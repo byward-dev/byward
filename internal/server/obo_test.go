@@ -251,18 +251,19 @@ func TestDownstreamRefusalsAreAnsweredInTheProxysName(t *testing.T) {
 		want      string // in the response body
 		logWant   string
 		auditWant string
+		alert     string // the alert reason, or "" for none
 	}{
 		{"consent missing, tools/call", &fakeidp.ConsentRequired, oboToolsCall,
-			`"isError":true`, `"admin_consent_url":"https://login.microsoftonline.com/`, `"reason":"consent_required"`},
+			`"isError":true`, `"admin_consent_url":"https://login.microsoftonline.com/`, `"reason":"consent_required"`, ""},
 		{"Conditional Access, another method", &fakeidp.InteractionRequired, `{"jsonrpc":"2.0","id":"a","method":"tools/list"}`,
-			`"data":{"downstream":"interaction_required"}`, "Conditional Access", `"reason":"interaction_required"`},
+			`"data":{"downstream":"interaction_required"}`, "Conditional Access", `"reason":"interaction_required"`, ""},
 		{"Entra unavailable", &fakeidp.TemporarilyUnavailable, oboToolsCall,
-			"temporarily unavailable", `"reason":"unavailable"`, `"reason":"unavailable"`},
+			"temporarily unavailable", `"reason":"unavailable"`, `"reason":"unavailable"`, ""},
 		{"any other refusal", &fakeidp.InvalidAssertion, oboToolsCall,
-			"could not get access to https://graph.microsoft.com on your behalf", `"idp_error_code":50013`, `"reason":"failed"`},
+			"could not get access to https://graph.microsoft.com on your behalf", `"idp_error_code":50013`, `"reason":"failed"`, ""},
 		// #204: Entra rejecting the proxy's own credential needs the operator, so it also alerts.
 		{"client secret rejected", &fakeidp.InvalidClientSecret, oboToolsCall,
-			"temporarily unavailable", `"alert":"credential_rejected"`, `"reason":"unavailable"`},
+			"temporarily unavailable", `"reason":"unavailable: the IdP refused the proxy's client credential`, `"reason":"unavailable"`, "credential_rejected"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -301,9 +302,13 @@ func TestDownstreamRefusalsAreAnsweredInTheProxysName(t *testing.T) {
 			if want := `byward_downstream_tokens_total{outcome="` + outcome + `"} 1`; !strings.Contains(metrics, want) {
 				t.Errorf("metrics lack %s", want)
 			}
-			alert := `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="credential_rejected"} 1`
-			if wantAlert := c.failure == &fakeidp.InvalidClientSecret; strings.Contains(metrics, alert) != wantAlert || strings.Contains(logs, `"alert":`) != wantAlert {
-				t.Errorf("alert in metrics %v, in the log %v; want both %v", strings.Contains(metrics, alert), strings.Contains(logs, `"alert":`), wantAlert)
+			counted := strings.Contains(metrics, `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="`+c.alert+`"} 1`)
+			logged := strings.Contains(logs, `"alert":"`+c.alert+`"`)
+			if c.alert == "" {
+				counted, logged = strings.Contains(metrics, "byward_idp_alerts_total{"), strings.Contains(logs, `"alert":`)
+			}
+			if want := c.alert != ""; counted != want || logged != want {
+				t.Errorf("alert %q counted %v, logged %v; want both %v", c.alert, counted, logged, want)
 			}
 		})
 	}

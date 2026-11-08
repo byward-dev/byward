@@ -184,7 +184,11 @@ func (p *Provider) Callback(ctx context.Context, query url.Values, l idp.Login) 
 		return idp.Identity{}, idp.Tokens{}, &idp.Error{Class: idp.Fatal, Err: err}
 	}
 	if cb.Error != "" {
-		return idp.Identity{}, idp.Tokens{}, newError(0, cb.Error, cb.ErrorDescription, nil, "", "")
+		// The callback query is the browser's and anyone can forge it, so its error never alerts the
+		// operator (#204); a rejected credential shows at the token endpoint.
+		e := newError(0, cb.Error, cb.ErrorDescription, nil, "", "")
+		e.Alert = ""
+		return idp.Identity{}, idp.Tokens{}, e
 	}
 	tr, err := p.token(ctx, url.Values{
 		"grant_type":    {"authorization_code"},

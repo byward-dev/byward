@@ -552,3 +552,29 @@ func TestASilentLoginAsksTheIdPWithPromptNoneEvenWhenAccountSelectionIsAsked(t *
 		t.Fatalf("prompt = %q, want only none", got)
 	}
 }
+
+// #204: the callback query is the browser's, so an invalid_client or an AADSTS code of a rejected
+// secret in it is forgeable and never an operator alert.
+func TestACallbackErrorNeverAlertsTheOperator(t *testing.T) {
+	e := newEnv(t, Config{})
+	q := signIn(t, e, login)
+	q.Del("code")
+	q.Set("error", "invalid_client")
+	q.Set("error_description", "AADSTS7000215: Invalid client secret provided.")
+	_, _, err := e.p.Callback(context.Background(), q, login)
+	var ie *idp.Error
+	if !errors.As(err, &ie) || ie.OAuth != "invalid_client" || ie.Alert != "" {
+		t.Fatalf("err = %#v, want Entra's invalid_client without an alert", err)
+	}
+}
+
+// A credential the proxy cannot make (a missing federated token file) fails before any request, as
+// an ErrCredential that alerts the operator.
+func TestAnUnusableClientCredentialFailsAsErrCredential(t *testing.T) {
+	e := newEnv(t, Config{ClientAuth: idp.AssertionFile(t.TempDir() + "/missing-token")})
+	_, _, err := e.p.Refresh(context.Background(), "rt")
+	var ie *idp.Error
+	if !errors.Is(err, idp.ErrCredential) || !errors.As(err, &ie) || ie.Class != idp.Unavailable || ie.Alert != idp.AlertCredentialUnusable {
+		t.Fatalf("err = %v, want an alerting, unavailable ErrCredential", err)
+	}
+}

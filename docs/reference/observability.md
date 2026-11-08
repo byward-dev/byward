@@ -165,6 +165,7 @@ IdP sign-in failures log the IdP's error code (`idp_error_code`, the AADSTS numb
 
 An IdP error counted in `byward_idp_alerts_total` is also logged at error level with an `alert` field set to its
 reason: in the broker as its own line, `IdP alert: the operator must act`, with `idp`, `operation` and the fix in
-`reason`; for On-Behalf-Of, on the refusal line. A log-based alert can match on `alert` being present.
+`reason`; for On-Behalf-Of, on the refusal line. A log-based alert can match on `alert` being present. An error in the IdP's callback query never counts: a
+browser can forge it, so only the token endpoint's answer can say the proxy's credential was refused.
 
 Personal data in logs: `user_key` and `remote_ip`. Email and name are never logged.

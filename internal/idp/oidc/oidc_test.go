@@ -564,3 +564,17 @@ func TestAnUnusableClientCredentialFailsAsErrCredential(t *testing.T) {
 		t.Fatalf("err = %v, want an alerting, unavailable ErrCredential", err)
 	}
 }
+
+// #204: the callback query is the browser's, so an invalid_client in it is forgeable and never an
+// operator alert; only the token endpoint's answer can say the proxy's credential was refused.
+func TestACallbackErrorNeverAlertsTheOperator(t *testing.T) {
+	e := newEnv(t, Config{})
+	q := signIn(t, e, login)
+	q.Del("code")
+	q.Set("error", "invalid_client")
+	_, _, err := e.p.Callback(context.Background(), q, login)
+	var ie *idp.Error
+	if !errors.As(err, &ie) || ie.OAuth != "invalid_client" || ie.Alert != "" {
+		t.Fatalf("err = %#v, want the IdP's invalid_client without an alert", err)
+	}
+}

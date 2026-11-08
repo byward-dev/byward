@@ -554,8 +554,12 @@ func (b *Broker) observeIdP(ctx context.Context, operation string, start time.Ti
 	b.cfg.ObserveIdPAlert(operation, string(alert))
 	var ie *idp.Error
 	errors.As(err, &ie)
+	hint := ie.OperatorHint
+	if hint == "" {
+		hint = alert.Hint()
+	}
 	b.cfg.Log.ErrorContext(ctx, "IdP alert: the operator must act", "request_id", logging.RequestID(ctx), "idp", b.cfg.IdPName,
-		"operation", operation, "alert", string(alert), "reason", ie.OperatorHint)
+		"operation", operation, "alert", string(alert), "reason", hint)
 }
 
 // idpOutcome classifies an IdP call for metrics: success, unavailable (try later) or rejected.
