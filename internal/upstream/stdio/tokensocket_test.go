@@ -230,14 +230,9 @@ func TestTheSocketGivesATokenForAJSONObjectAndRefusesAnyOtherLine(t *testing.T) 
 
 func TestAProcessOutsideTheUpstreamsTreeIsRefusedAndLogged(t *testing.T) {
 	// The root is a process that is not this test's ancestor: the test asks as a stranger would.
-	other := exec.Command("sleep", "30")
-	if err := other.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = other.Process.Kill(); _ = other.Wait() })
 	log := &recorder{mu: &sync.Mutex{}, recs: &[]record{}}
 	k := &tokens{}
-	line := ask(t, serveFor(t, other.Process.Pid, k, log), `{}`)
+	line := ask(t, serveFor(t, stranger(t), k, log), `{}`)
 	if tok, _, code := answerOf(t, line); tok != "" || code != TokenRefused {
 		t.Fatalf("a stranger got %q, want only the error %s", line, TokenRefused)
 	}
@@ -331,4 +326,68 @@ func TestTheSocketClosesAsSoonAsTheProcessIsReapedEvenWhileADescendantHoldsItsPi
 	}
 	h.clk.Advance(2 * DefaultKillGrace) // the pipes are force-closed after the grace
 	waitDone(t, p)
+}
+
+// stranger is a process outside this test's ancestry, as a root that the test asks a socket for.
+func stranger(t *testing.T) int {
+	t.Helper()
+	other := exec.Command("sleep", "30")
+	if err := other.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Process.Kill(); _ = other.Wait() })
+	return other.Process.Pid
+}
+
+// #244: a refused peer that writes its request only after byward has decided still reads the
+// refusal. Without the read before the answer, its write meets a closed connection: EPIPE.
+func TestARefusedPeerThatWritesLateStillReadsTheRefusal(t *testing.T) {
+	log := &recorder{mu: &sync.Mutex{}, recs: &[]record{}}
+	c, err := net.Dial("unix", serveFor(t, stranger(t), &tokens{}, log))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	_ = c.SetDeadline(time.Now().Add(guard))
+	eventually(t, "byward to refuse the peer", func() bool {
+		return len(log.with("token socket: the peer is not the upstream process or one of its descendants")) == 1
+	})
+	time.Sleep(50 * time.Millisecond) // let an early answer and close happen, if they would
+	if _, err := c.Write([]byte("{}\n")); err != nil {
+		t.Fatalf("writing the request after the refusal was decided: %v, want it accepted", err)
+	}
+	answer, err := bufio.NewReader(c).ReadString('\n')
+	if err != nil {
+		t.Fatalf("reading the answer: %v", err)
+	}
+	if _, _, code := answerOf(t, strings.TrimSuffix(answer, "\n")); code != TokenRefused {
+		t.Fatalf("answer %q, want the error %s", answer, TokenRefused)
+	}
+}
+
+// A refused peer that never sends a request is still answered, and closed, within the deadline.
+func TestARefusedPeerThatSendsNothingIsAnsweredBeforeTheDeadline(t *testing.T) {
+	s, err := listenTokenSocket(shortTempDir(t), slog.New(&recorder{mu: &sync.Mutex{}, recs: &[]record{}}), func(context.Context) DownstreamToken {
+		t.Error("a refused peer reached the token source")
+		return DownstreamToken{}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.close)
+	s.timeout, s.margin = 400*time.Millisecond, 200*time.Millisecond
+	go s.serve(stranger(t))
+	c, err := net.Dial("unix", s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	_ = c.SetDeadline(time.Now().Add(guard))
+	answer, err := bufio.NewReader(c).ReadString('\n') // no request at all
+	if err != nil {
+		t.Fatalf("reading the answer: %v", err)
+	}
+	if _, _, code := answerOf(t, strings.TrimSuffix(answer, "\n")); code != TokenRefused {
+		t.Fatalf("answer %q, want the error %s", answer, TokenRefused)
+	}
 }

@@ -114,6 +114,11 @@ func (s *tokenSocket) handle(c *net.UnixConn, root int) {
 			attrs = append(attrs, "error", err)
 		}
 		s.log.Warn("token socket: the peer is not the upstream process or one of its descendants", attrs...)
+		// Read its request before answering: a peer whose write found the connection already closed
+		// would get EPIPE, not the refusal (#244). The read is bounded like any request, and a peer
+		// that sends nothing is answered a margin before the deadline.
+		_ = c.SetReadDeadline(deadline.Add(-s.margin))
+		_, _ = bufio.NewReaderSize(c, maxTokenRequest).ReadSlice('\n')
 		refuse(TokenRefused)
 		return
 	}
