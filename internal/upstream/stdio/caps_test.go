@@ -363,25 +363,35 @@ func (h *harness) stream(t *testing.T, key string, id Identity) (*Process, func(
 	return p, release
 }
 
-func TestAUserWhoseStreamsHoldEverySlotGivesUpTheQuietestOnceTheyHaveBeenQuietLongEnough(t *testing.T) {
+func TestAUserWhoseStreamsHoldEverySlotGivesThemUpQuietestFirstOnceTheyHaveBeenQuietLongEnough(t *testing.T) {
 	ev := newEvictions()
 	h := newHarness(t, func(c *Config) {
-		capped(2, 2, ev)(c)
+		capped(4, 4, ev)(c)
 		c.StreamIdleTimeout = streamIdle
 	})
-	alice1, _ := h.stream(t, "a1", alice) // quiet longest
-	alice2, _ := h.stream(t, "a2", alice)
+	var alices []*Process // quietest first: each was streamed a second after the one before
+	for _, key := range []string{"a1", "a2", "a3", "a4"} {
+		p, _ := h.stream(t, key, alice)
+		alices = append(alices, p)
+	}
 	if _, _, err := h.m.Get(context.Background(), "b1", bob); !errors.Is(err, errBusy) {
 		t.Fatalf("Get while alice's streams have been quiet under %s = %v, want errBusy", streamIdle, err)
 	}
 	h.clk.Advance(streamIdle)
-	h.get(t, "b1", bob)
-	waitDone(t, alice1)
-	if got := ev.wait(t, 1); got[0] != alice.Subject || ev.reasons[0] != "upstream_cap" || ev.streams[0] != 1 {
-		t.Fatalf("evicted %v for %v with %v open streams, want alice's quietest for upstream_cap with 1", got, ev.reasons, ev.streams)
-	}
-	if isDone(alice2) {
-		t.Fatal("alice's more recently active process was stopped too")
+	// Each of bob's new sessions takes the slot of alice's quietest remaining process, in order: a
+	// choice that ignored how long each had been quiet would get the order right 1 time in 24.
+	for i, key := range []string{"b1", "b2", "b3", "b4"} {
+		_, release := h.lease(t, key, bob) // held, so bob's own processes are never the idle ones to evict
+		t.Cleanup(release)
+		waitDone(t, alices[i])
+		if got := ev.wait(t, 1); got[i] != alice.Subject || ev.reasons[i] != "upstream_cap" || ev.streams[i] != 1 {
+			t.Fatalf("eviction %d: %v for %v with %v open streams, want alice's for upstream_cap with 1", i, got, ev.reasons, ev.streams)
+		}
+		for _, later := range alices[i+1:] {
+			if isDone(later) {
+				t.Fatalf("eviction %d stopped a more recently active process of alice's", i)
+			}
+		}
 	}
 }
 
@@ -411,6 +421,7 @@ func TestAQuietStreamsProcessIsEvictableOnceQuietForTheTimeoutUnlessTrafficARequ
 		traffic  bool // the process exchanges a message after the streams open
 		request  bool // a request lease is held beside the stream
 		ended    bool // the stream ends, then a request lease is held: the stream must no longer count
+		more     bool // two more streams on the running process, one of which ends: still only streams
 		wantBusy bool
 	}{
 		{name: "quiet for the timeout is evictable", timeout: streamIdle},
@@ -418,6 +429,7 @@ func TestAQuietStreamsProcessIsEvictableOnceQuietForTheTimeoutUnlessTrafficARequ
 		{name: "a request in flight keeps it", timeout: streamIdle, request: true, wantBusy: true},
 		{name: "0 keeps quiet streams however long", timeout: 0, wantBusy: true},
 		{name: "ended streams no longer count, so a quiet request keeps it", timeout: streamIdle, ended: true, wantBusy: true},
+		{name: "more streams on the running process, one ended, leave it evictable", timeout: streamIdle, more: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -430,6 +442,11 @@ func TestAQuietStreamsProcessIsEvictableOnceQuietForTheTimeoutUnlessTrafficARequ
 				release()
 				_, req := h.lease(t, "a1", alice)
 				t.Cleanup(req)
+			}
+			if tc.more {
+				h.stream(t, "a1", alice)
+				_, second := h.stream(t, "a1", alice)
+				second()
 			}
 			if tc.request {
 				_, release := h.lease(t, "a1", alice)

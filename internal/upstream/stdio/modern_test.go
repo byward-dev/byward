@@ -893,3 +893,19 @@ func sameJSON(t *testing.T, got []byte, want string) bool {
 	}
 	return reflect.DeepEqual(g, w)
 }
+
+func TestAModernRequestInFlightKeepsItsProcessBesideAQuietListen(t *testing.T) {
+	b := newModernBridge(t, func(c *Config) {
+		c.MaxProcesses = 1
+		c.StreamIdleTimeout = streamIdle
+	})
+	b.listenModern(t, context.Background(), `"L"`)
+	held := b.modern(t, "alice", modernBody(`"h"`, "hold", "", "")) // never answered: a request lease
+	if held.StatusCode != http.StatusOK {
+		t.Fatalf("the held request: status %d, want its stream open", held.StatusCode)
+	}
+	b.clk.Advance(streamIdle)
+	if res := b.modern(t, "bob", modernBody(`1`, "echo", "", "")); res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("bob's request past the timeout with alice's request in flight: status %d, want 503", res.StatusCode)
+	}
+}
