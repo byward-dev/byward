@@ -25,9 +25,24 @@ All tools are pinned in `mise.toml`; `mise run` resolves them, no shell activati
 
 **Run `mise run check` before claiming a change is done.** CI runs the same task.
 
-**Before reporting a PR ready, run `/sweep-runtime`, `/sweep-solid` and `/sweep-tests`** on the diff
-against `origin/main`. Loop each until it is clean, push the fixes, and list each sweep's findings and
-fixes (or "no findings") in the PR description. Agents never merge.
+**Before reporting a PR ready, sweep its diff** against `origin/main` with `/sweep-runtime`,
+`/sweep-solid` and `/sweep-tests`. Push the fixes, and list each angle's findings and fixes (or
+"no findings") in the PR description. Agents never merge.
+
+- **When:** once the code is complete, never mid-implementation, and before asking for the merge
+  slot.
+- **How much:** the coordinating session sets the tier when it hands out the work.
+
+  | Tier | For | Angles |
+  |---|---|---|
+  | Full | Code behind the security invariants: broker, tokens, IdP, relay, upstream, stdio, logging redaction, security settings | All |
+  | Standard | Other production code | runtime, coverage, quality, names, single responsibility |
+  | Tests | Test-only changes | coverage, quality, determinism, data-driven |
+  | None | Docs and CI configuration | None; say so in the PR |
+
+- **Rounds:** round 1 runs every angle of the tier. After that, re-run only the angles that had
+  findings or whose files a fix touched; the last of those rounds must be clean. Stop after 5
+  rounds. Anything still open goes in the PR description or a `ready-for-agent` issue.
 
 ## Layout rules
 
