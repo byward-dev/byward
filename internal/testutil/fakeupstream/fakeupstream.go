@@ -1,5 +1,5 @@
 // Package fakeupstream is a test HTTP upstream: it records every request it receives (method,
-// path, query, headers, body) and echoes the body back, so tests can assert what the proxy
+// path, query, headers, body, trailers) and echoes the body back, so tests can assert what the proxy
 // forwarded.
 package fakeupstream
 
@@ -15,6 +15,9 @@ type Request struct {
 	Method, Path, RawQuery, Host string
 	Header                       http.Header
 	Body                         []byte
+	// Trailer is every trailer the request announced (nil when no value arrived) and every trailer
+	// field it sent after the body, as a Go upstream reads them once the body is read.
+	Trailer http.Header
 }
 
 // Server is a running fake upstream.
@@ -37,7 +40,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	s.mu.Lock()
 	s.requests = append(s.requests, Request{Method: r.Method, Path: r.URL.Path, RawQuery: r.URL.RawQuery,
-		Host: r.Host, Header: r.Header.Clone(), Body: body})
+		Host: r.Host, Header: r.Header.Clone(), Body: body, Trailer: r.Trailer.Clone()})
 	h := s.Handler
 	s.mu.Unlock()
 	if h != nil {

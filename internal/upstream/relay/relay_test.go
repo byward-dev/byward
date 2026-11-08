@@ -1,15 +1,21 @@
 package relay
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
+	"net/textproto"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 )
@@ -159,5 +165,242 @@ func TestTraceContextIsInjectedAsAHeaderAndTheBodyIsUntouched(t *testing.T) {
 				t.Errorf("the body (params._meta) changed: %s", got.Body)
 			}
 		})
+	}
+}
+
+// An MCP client's request trailers never reach the upstream, whatever they are named, and never
+// beside the headers the proxy strips: they arrive after the body, out of the strip's sight.
+// Each name is sent straight to the relay, which forwards before the body is read (so only the
+// trailer's name has arrived), and behind a handler that reads the body first (so its value has too).
+func TestAClientsRequestTrailersNeverReachTheUpstream(t *testing.T) {
+	up := fakeupstream.New()
+	t.Cleanup(up.Close)
+	u, _ := url.Parse(up.URL + "/mcp")
+	relay := New(quiet(), u)
+	readFirst := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(b))
+		relay.ServeHTTP(w, r)
+	})
+	body := `{"jsonrpc":"2.0","id":1,"method":"ping"}`
+	// The control: sent straight to the upstream, a trailer is recorded, so an empty record below
+	// means the relay dropped it.
+	sendWithTrailer(t, up.Server, "X-Harmless", body)
+	if got, _ := up.Last(); got.Trailer.Get("X-Harmless") != "forged" {
+		t.Fatal("the fake upstream does not record a trailer sent to it directly")
+	}
+	for _, front := range []struct {
+		name string
+		h    http.Handler
+	}{{"forwarded as it arrives", relay}, {"forwarded after the body is read", readFirst}} {
+		srv := httptest.NewServer(front.h)
+		t.Cleanup(srv.Close)
+		for _, name := range []string{"X-Byward-Identity", "Authorization", "Forwarded", "X-Forwarded-For", "Origin", "Mcp-Session-Id", "X-Harmless"} {
+			t.Run(front.name+"/"+name, func(t *testing.T) {
+				before := len(up.Requests())
+				if status := sendWithTrailer(t, srv, name, body); status != http.StatusOK {
+					t.Fatalf("status %d", status)
+				}
+				got, _ := up.Last()
+				if len(up.Requests()) != before+1 {
+					t.Fatal("nothing reached the upstream")
+				}
+				if len(got.Trailer) != 0 || string(got.Body) != body {
+					t.Fatalf("trailers %v, body %q reached the upstream", got.Trailer, got.Body)
+				}
+				// A regression guard: a Go upstream keeps trailers apart from headers, so this holds
+				// unless the relay itself copies a trailer into the headers.
+				if v := got.Header.Values(name); slices.Contains(v, "forged") {
+					t.Fatalf("the trailer reached the upstream as the header %s: %q", name, v)
+				}
+			})
+		}
+	}
+}
+
+// sendWithTrailer posts body to srv with the request trailer name: forged, and returns the
+// response status. The body has no length, so it is sent chunked, which is what carries trailers.
+func sendWithTrailer(t *testing.T, srv *httptest.Server, name, body string) int {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/mcp", io.NopCloser(strings.NewReader(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Trailer = http.Header{name: {"forged"}}
+	res, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	return res.StatusCode
+}
+
+// The upstream's response trailers never reach the MCP client, announced or not, the headers the relay
+// cleans included: they arrive after the body, out of reach of that cleaning and of the session
+// binding.
+func TestRelayDropsUpstreamTrailers(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		trailer  func(w http.ResponseWriter) // sets the trailers after the body is written and flushed
+		announce string
+	}{
+		{"announced", func(w http.ResponseWriter) { w.Header().Set("Mcp-Session-Id", "raw") }, "Mcp-Session-Id"},
+		{"unannounced only", func(w http.ResponseWriter) { w.Header().Set(http.TrailerPrefix+"Mcp-Session-Id", "raw") }, ""},
+		{"the headers the relay cleans", func(w http.ResponseWriter) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set(http.TrailerPrefix+"Www-Authenticate", `Bearer resource_metadata="https://evil.example"`)
+		}, "Access-Control-Allow-Origin"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			up := fakeupstream.New()
+			t.Cleanup(up.Close)
+			up.Handler = func(w http.ResponseWriter, _ *http.Request) {
+				if tc.announce != "" {
+					w.Header().Set("Trailer", tc.announce)
+				}
+				_, _ = io.WriteString(w, "ok")
+				w.(http.Flusher).Flush() // chunked, so even an unannounced trailer goes on the wire
+				tc.trailer(w)
+			}
+			srv := httptest.NewServer(relayTo(t, up, "/mcp"))
+			t.Cleanup(srv.Close)
+			res, err := srv.Client().Post(srv.URL+"/mcp", "application/json", strings.NewReader(`{}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(res.Body) // trailers arrive at the end of the body
+			_ = res.Body.Close()
+			if string(body) != "ok" || len(res.Trailer) != 0 {
+				t.Fatalf("body %q, trailers %v reached the client", body, res.Trailer)
+			}
+		})
+	}
+}
+
+// A client's request to switch protocols never reaches the upstream, whatever the method: MCP never
+// upgrades, and the raw connection would bypass the session binding.
+func TestAClientsUpgradeRequestNeverReachesTheUpstream(t *testing.T) {
+	up := fakeupstream.New()
+	t.Cleanup(up.Close)
+	srv := httptest.NewServer(relayTo(t, up, "/mcp"))
+	t.Cleanup(srv.Close)
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		t.Run(method, func(t *testing.T) {
+			req, _ := http.NewRequest(method, srv.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+			req.Header.Set("Connection", "Upgrade")
+			req.Header.Set("Upgrade", "websocket")
+			res, err := srv.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = res.Body.Close()
+			got, ok := up.Last()
+			if !ok || got.Method != method {
+				t.Fatalf("the upstream got %+v, want the %s", got, method)
+			}
+			if got.Header.Get("Upgrade") != "" || strings.Contains(strings.ToLower(strings.Join(got.Header.Values("Connection"), ",")), "upgrade") {
+				t.Fatalf("Upgrade %q, Connection %q reached the upstream", got.Header.Get("Upgrade"), got.Header.Values("Connection"))
+			}
+		})
+	}
+}
+
+// An upstream that switches protocols anyway, asked to or not, gets the client a 502 with none of its
+// headers (never its raw Mcp-Session-Id, never a raw connection past the session binding), and the
+// operator a log line saying why.
+func TestAnUpstreamThatSwitchesProtocolsGetsTheClientA502(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		upgrade bool // the upstream names the protocol it switches to
+	}{{"naming the protocol", true}, {"bare", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			up := fakeupstream.New()
+			t.Cleanup(up.Close)
+			up.Handler = func(w http.ResponseWriter, _ *http.Request) {
+				if tc.upgrade {
+					w.Header().Set("Connection", "Upgrade")
+					w.Header().Set("Upgrade", "websocket")
+				}
+				w.Header().Set("Mcp-Session-Id", "raw")
+				w.WriteHeader(http.StatusSwitchingProtocols)
+			}
+			u, _ := url.Parse(up.URL + "/mcp")
+			var logs bytes.Buffer
+			srv := httptest.NewServer(New(slog.New(slog.NewTextHandler(&logs, nil)), u))
+			t.Cleanup(srv.Close)
+			conn, err := net.Dial("tcp", strings.TrimPrefix(srv.URL, "http://"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = conn.Close() }()
+			_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+			if _, err := io.WriteString(conn, "POST /mcp HTTP/1.1\r\nHost: mcp.example.com\r\nContent-Length: 2\r\n\r\n{}"); err != nil {
+				t.Fatal(err)
+			}
+			res, err := http.ReadResponse(bufio.NewReader(conn), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = res.Body.Close()
+			if res.StatusCode != http.StatusBadGateway || res.Header.Get("Mcp-Session-Id") != "" || res.Header.Get("Upgrade") != "" {
+				t.Fatalf("status %d, headers %v; want 502 with none of the upstream's headers", res.StatusCode, res.Header)
+			}
+			if !strings.Contains(logs.String(), errUpstreamUpgrade.Error()) {
+				t.Fatalf("log %q does not say the upstream switched protocols", logs.String())
+			}
+		})
+	}
+}
+
+// An upstream's informational response reaches the MCP client with Link only: the headers the relay
+// cleans from the final response (and any others) never ride along on a 103, past ModifyResponse.
+// The final response is untouched.
+func TestAnUpstreamsEarlyHintsCarryOnlyLink(t *testing.T) {
+	up := fakeupstream.New()
+	t.Cleanup(up.Close)
+	hinted := map[string]string{"Link": "</style.css>; rel=preload", "Access-Control-Allow-Origin": "*",
+		"Www-Authenticate": `Bearer resource_metadata="https://evil.example"`, "Set-Cookie": "up=1", "X-Other": "x"}
+	up.Handler = func(w http.ResponseWriter, _ *http.Request) {
+		for k, v := range hinted {
+			w.Header().Set(k, v)
+		}
+		w.WriteHeader(http.StatusEarlyHints)
+		for k := range hinted {
+			w.Header().Del(k) // a 1xx's headers would otherwise ride on the final response too
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, "{}")
+	}
+	hints := func(t *testing.T, url string) (http.Header, *http.Response) {
+		t.Helper()
+		var got http.Header
+		trace := &httptrace.ClientTrace{Got1xxResponse: func(code int, h textproto.MIMEHeader) error {
+			if code == http.StatusEarlyHints {
+				got = http.Header(h).Clone()
+			}
+			return nil
+		}}
+		req, _ := http.NewRequestWithContext(httptrace.WithClientTrace(context.Background(), trace), http.MethodPost, url, strings.NewReader(`{}`))
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.ReadAll(res.Body)
+		_ = res.Body.Close()
+		return got, res
+	}
+	// The control: straight from the upstream, the 103 carries every header.
+	if direct, _ := hints(t, up.URL); len(direct) != len(hinted) {
+		t.Fatalf("the upstream's 103 carried %v, want all of %v", direct, hinted)
+	}
+	srv := httptest.NewServer(relayTo(t, up, "/mcp"))
+	t.Cleanup(srv.Close)
+	got, res := hints(t, srv.URL+"/mcp")
+	if len(got) != 1 || got.Get("Link") != hinted["Link"] {
+		t.Fatalf("the 103 reached the client with %v, want Link only", got)
+	}
+	if res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "application/json" {
+		t.Fatalf("final response %d %v", res.StatusCode, res.Header)
 	}
 }

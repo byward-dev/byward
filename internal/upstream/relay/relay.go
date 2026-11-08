@@ -28,6 +28,10 @@ var stripped = map[string]bool{"Authorization": true, "Forwarded": true, "Origin
 
 var errUpstreamRefused = errors.New("upstream refused the proxy and the request id is unknown")
 
+// errUpstreamUpgrade: the upstream switched protocols. MCP never does, and the raw connection it
+// would leave would bypass the session binding and every later check, so the client gets 502.
+var errUpstreamUpgrade = errors.New("upstream switched protocols")
+
 // Option configures the relay.
 type Option func(*options)
 
@@ -64,6 +68,17 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 			pr.Out.URL.Path, pr.Out.URL.RawPath = t.Path, t.RawPath
 			pr.Out.Host = ""
 			strip(pr.Out.Header)
+			// An MCP client's request trailers never reach the upstream: they are a second set of
+			// headers, sent after the body, that the strip above never sees. ReverseProxy drops the
+			// client's Trailer header, but Clone keeps the announced names, which the Transport would
+			// announce and send on; their values would follow whenever the body was read before this
+			// point. No MCP transport uses request trailers.
+			pr.Out.Trailer = nil
+			// Never ask the upstream to switch protocols: MCP never does, and the raw connection would
+			// bypass the session binding. ReverseProxy puts a client's upgrade back after dropping the
+			// hop-by-hop headers, so Connection holds only the upgrade by now.
+			pr.Out.Header.Del("Upgrade")
+			pr.Out.Header.Del("Connection")
 			// A token in the query never reaches the upstream, with or without authentication.
 			pr.Out.URL.RawQuery = withoutAccessToken(pr.Out.URL.RawQuery)
 			// Our span's trace context toward the upstream; the body (`params._meta`) is never touched.
@@ -85,6 +100,10 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 		// WWW-Authenticate would send clients to an authorization server that is not ours. An
 		// upstream 401 or 403 is a refusal of the proxy, answered per ADR-0025 (refusal.go).
 		ModifyResponse: func(res *http.Response) error {
+			if res.StatusCode == http.StatusSwitchingProtocols {
+				return errUpstreamUpgrade // answered 502, with none of the upstream's headers
+			}
+			dropTrailers(res)
 			for k := range res.Header {
 				if strings.HasPrefix(k, "Access-Control-") {
 					delete(res.Header, k)
@@ -135,8 +154,55 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 		if r.Body != nil && r.Body != http.NoBody {
 			r.Body = teeBody{io.TeeReader(r.Body, c), r.Body}
 		}
-		rp.ServeHTTP(w, r.WithContext(traceWrite(context.WithValue(r.Context(), captureKey{}, c))))
+		rp.ServeHTTP(informational{w}, r.WithContext(traceWrite(context.WithValue(r.Context(), captureKey{}, c))))
 	})
+}
+
+// informationalHeaders are the only headers an upstream's informational (1xx) response may carry to
+// the MCP client: Link for 103 Early Hints, and Mcp-Session-Id, which the session binding then seals.
+var informationalHeaders = map[string]bool{"Link": true, "Mcp-Session-Id": true}
+
+// informational is the ResponseWriter the relay hands ReverseProxy. ReverseProxy forwards an
+// upstream's 1xx from a client-trace hook, past ModifyResponse: it copies the upstream's headers into
+// this writer and writes the code, so this is the one place to keep only informationalHeaders. A
+// final response is untouched; ModifyResponse has cleaned it.
+type informational struct{ http.ResponseWriter }
+
+func (w informational) WriteHeader(code int) {
+	if code >= 100 && code < 200 {
+		for k := range w.Header() {
+			if !informationalHeaders[k] {
+				delete(w.Header(), k)
+			}
+		}
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+// Unwrap lets http.ResponseController reach the writer below, for flushing streamed responses.
+func (w informational) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// dropTrailers keeps the upstream's response trailers from the MCP client: they are a second set of
+// headers, sent after the body, that the header cleaning in ModifyResponse and the session binding
+// never see, so an upstream's Mcp-Session-Id sent as a trailer would reach the client unsealed
+// (invariant 13). Nil before the body announces none; the body reader fills them in at the end of
+// the body, and ReverseProxy forwards what it finds after closing it, so they are dropped again on
+// close.
+func dropTrailers(res *http.Response) {
+	res.Trailer = nil
+	res.Body = trailerless{res.Body, res}
+}
+
+// trailerless is a response body that drops the response's trailers once it is closed.
+type trailerless struct {
+	io.ReadCloser
+	res *http.Response
+}
+
+func (b trailerless) Close() error {
+	err := b.ReadCloser.Close()
+	b.res.Trailer = nil
+	return err
 }
 
 // withoutAccessToken drops every access_token parameter and keeps every other byte of the query in

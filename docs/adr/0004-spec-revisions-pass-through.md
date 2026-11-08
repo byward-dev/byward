@@ -48,3 +48,24 @@ reserved, so it is the proxy's design choice (F13).
   compatibility matrix.
 - The proxy has no version-specific body rewriting on the HTTP path, so new spec revisions mostly
   need no proxy change beyond era recognition.
+
+## Amendment 2026-11-07 (no upgrades, response trailers or 1xx headers past the binding, #168, #176; backported to 0.1)
+
+- **§2 legacy era, upgrades:** the relay never lets the upstream switch protocols. It drops a client's
+  `Upgrade` (and the `Connection` that carries it) before forwarding, and answers an upstream's 101 with
+  502 and none of its headers. On a 101, `ReverseProxy` takes over the connection and writes the
+  upstream's response itself, past the binding, so the upstream's raw `Mcp-Session-Id` reached the MCP
+  client, and with it a raw connection to the upstream that no later check saw. Streamable HTTP has no
+  upgrade.
+- **§2 legacy era, response trailers:** `ReverseProxy` copies the upstream's response trailers to the
+  client after the body, past the binding that seals the header when the response starts, so an upstream
+  that sent its session as a trailer (announced or not) reached the MCP client unsealed. The relay drops
+  every upstream response trailer: before the response starts, so none is announced, and again when the
+  body is closed, since the body reader fills them in at the end. The same covers `Access-Control-*` and
+  `WWW-Authenticate`, which the relay drops only as headers. MCP does not use response trailers.
+- **§2 legacy era, informational responses:** `ReverseProxy` forwards an upstream's 1xx from a
+  client-trace hook, past the cleaning of the final response, with any header the upstream set. The relay
+  keeps only `Link` (103 Early Hints) and `Mcp-Session-Id`, which the binding seals as it always did.
+- In the first two cases the binding still held, since a raw ID gets 404, but the upstream's own session
+  ID leaked. Affected: v0.1.0-rc.1.
+
