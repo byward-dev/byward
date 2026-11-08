@@ -110,7 +110,7 @@ so per-user processes pile up until the idle timeout or the per-user limit recla
 | Situation | Client gets |
 |---|---|
 | `initialize` without a session | A new process and an `Mcp-Session-Id` (sealed to the user when authentication is on) |
-| `initialize` whose process cannot start, cannot be reached, or ends before answering | `502` with no `Mcp-Session-Id`, never `404`, which a dual-era client would take for a legacy HTTP+SSE server; the client can retry |
+| `initialize` whose process cannot start, cannot be reached, or ends before sending anything | `502` with no `Mcp-Session-Id`, never `404`, which a dual-era client would take for a legacy HTTP+SSE server; the client can retry. If the upstream had already sent something on the stream, the stream ends with a JSON-RPC error (`-32603`) |
 | Any other request without a session | `400` with a JSON-RPC error; dual-era clients fall back to `initialize` |
 | A 2026-07-28 request, and the server answers `server/discover` | Served by the user's upstream process; the client's request ids and progress tokens are mapped to the proxy's own on the way in and back on the way out, so the user's clients never see each other's answers |
 | A 2026-07-28 request, and the server does not answer `server/discover` | The same `400`; byward asks again after 10 minutes |
