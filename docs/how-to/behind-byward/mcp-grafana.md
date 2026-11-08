@@ -79,13 +79,20 @@ auto_sign_up = true
   not say whether it strips the prefix from a custom header. If it does not, byward needs an option
   to send the raw JWT (to be filed).
 
-## Known gap: client-supplied `X-Grafana-*` headers
+## Strip the client's `X-Grafana-*` headers
 
-byward does not remove `X-Grafana-*` headers a client sends. mcp-grafana reads some per request:
-`X-Grafana-Service-Account-Token` (a Grafana credential for that call) and `X-Grafana-Org-Id` (the
-organization). So a client could choose another credential or organization than the user's
-assertion gives. Until byward can strip extra headers (to be filed), only use MCP clients you
-trust not to send them, or put a proxy in front of mcp-grafana that removes them.
+mcp-grafana reads some request headers per call, over streamable HTTP:
+
+| Header | What a client could do with it |
+|---|---|
+| `X-Grafana-Service-Account-Token` | use another Grafana credential than the user's assertion |
+| `X-Grafana-API-Key` | the same, deprecated name |
+| `X-Grafana-Org-Id` | pick another organization |
+| `X-Grafana-URL` | pick another Grafana (only with URL override on, which is off here) |
+
+Have byward remove all four from every client request, with the strip setting of
+[#206](https://github.com/byward-dev/byward/issues/206). Without it, only use MCP clients you trust
+not to send them.
 
 ## Verify it
 
@@ -101,7 +108,8 @@ up), mcp-grafana and byward:
    the forwarded JWT.
 5. The `Bearer ` prefix question above is answered by step 2 working (or failing with Grafana's
    "invalid JWT" error).
-6. A client-sent `X-Grafana-Org-Id: 2` changes the organization (expected, the known gap).
+6. With #206's strip setting listing the four headers above, a client-sent `X-Grafana-Org-Id: 2`
+   or `X-Grafana-Service-Account-Token` never reaches mcp-grafana.
 
 Versions to pin in the run: Grafana OSS 13.3.0 (2026-10-27), mcp-grafana 2.2.0 (2026-11-02),
 Keycloak 26.8.0 (as byward's lane), and byward at the commit under test.
