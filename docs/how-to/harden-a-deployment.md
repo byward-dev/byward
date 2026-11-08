@@ -298,3 +298,39 @@ configured, the upstream credential and an On-Behalf-Of token for a downstream A
       through. An upstream at `localhost` or at a loopback IP address never uses one; any other
       name does unless `NO_PROXY` lists it, even one that resolves to a loopback address. A proxy
       setting Go cannot parse is ignored, and the hop then goes direct.
+
+## 12. Strip the upstream's header-driven settings
+
+byward removes a fixed set of request headers before relaying (`Authorization`, `DPoP`,
+`Forwarded`, `Origin`, `X-Forwarded-*`, `Sec-Fetch-*`, and the headers it sets itself) and forwards
+every other header the MCP client sends. Some MCP servers read a target URL or a credential from a
+request header. Behind byward, a signed-in client could then point the upstream elsewhere or swap
+its credentials.
+
+- [ ] Read your upstream's documentation for settings it takes from request headers, and list
+      those headers in `BYWARD_UPSTREAM_STRIP_HEADERS`, comma-separated. Names match in any case,
+      with `_` read as `-`. Some upstreams that read such headers:
+
+      | Upstream | Headers |
+      |---|---|
+      | OpenSearch MCP (with `OPENSEARCH_HEADER_AUTH=true`) | `opensearch-url`, `opensearch-cluster-name`, `aws-region`, `aws-access-key-id`, `aws-secret-access-key`, `aws-session-token`, `aws-service-name` |
+      | Argo CD MCP | `x-argocd-base-url`, `x-argocd-api-token` |
+      | Terraform MCP | `TFE_TOKEN`, `TFE_SKIP_TLS_VERIFY` |
+      | Grafana MCP | `X-Grafana-URL`, `X-Grafana-Service-Account-Token`, `X-Grafana-API-Key`, `X-Grafana-Org-Id` |
+      | mcp-atlassian | `X-Atlassian-Jira-Url`, `X-Atlassian-Confluence-Url`, `X-Atlassian-Jira-Personal-Token`, `X-Atlassian-Confluence-Personal-Token`, `X-Atlassian-Cloud-Id` |
+
+      Check the version you run: these lists change between releases.
+- [ ] List exact names. A pattern such as `X-Atlassian-*` is refused, so name each header of a
+      family.
+- [ ] Keep the headers MCP needs. `Accept`, `Content-Type`, `Content-Length`, `Transfer-Encoding`,
+      `Host`, `Last-Event-ID`, `Mcp-Session-Id`, `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name` and
+      every `Mcp-Param-*` header are refused: MCP 2026-07-28 requires a proxy to forward an
+      `Mcp-Param-*` header it does not know. `traceparent` and `tracestate` are refused too: with
+      tracing on, byward sets them from the inbound trace context, so listing them would remove
+      nothing.
+- [ ] A name byward strips anyway (its own headers, the hop-by-hop ones such as
+      `Proxy-Authorization`) is accepted and changes nothing; the startup log, `check` and `doctor`
+      say so.
+- [ ] Prefer settings the upstream reads from its own configuration. A header the upstream takes
+      from any caller is safe only while byward is the only way to reach the upstream.
+
