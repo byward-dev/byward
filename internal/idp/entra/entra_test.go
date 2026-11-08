@@ -148,7 +148,7 @@ func TestCertificateCredential(t *testing.T) {
 	e.p.cfg.ClientAuth = stranger
 	_, _, err = callback(t, e)
 	var ie *idp.Error
-	if !errors.As(err, &ie) || ie.Code != 700027 || ie.Class != idp.Unavailable || !ie.Alert {
+	if !errors.As(err, &ie) || ie.Code != 700027 || ie.Class != idp.Unavailable || ie.Alert != idp.AlertCredentialRejected {
 		t.Fatalf("wrong key: %#v", err)
 	}
 }
@@ -289,23 +289,27 @@ func TestTokenErrorsMapToADR0012Classes(t *testing.T) {
 	for name, tc := range map[string]struct {
 		f     *fakeidp.Failure
 		class idp.Class
-		alert bool
+		alert idp.Alert
 		code  int
 		paged bool
 	}{
-		"700082 expired":      {&fakeidp.RefreshTokenExpired, idp.SignInAgain, false, 700082, false},
-		"50076 MFA":           {&fakeidp.MFARequired, idp.SignInAgain, false, 50076, false},
-		"65001 consent":       {&fakeidp.ConsentRequired, idp.SignInAgain, false, 65001, true},
-		"50173 revoked":       {&fakeidp.RefreshTokenRevoked, idp.SignInAgain, false, 50173, false},
-		"7000215 secret":      {&fakeidp.InvalidClientSecret, idp.Unavailable, true, 7000215, false},
-		"7000222 expired key": {&fakeidp.ExpiredClientSecret, idp.Unavailable, true, 7000222, true},
-		"503":                 {&fakeidp.TemporarilyUnavailable, idp.Unavailable, false, 0, false},
-		"invalid_request":     {&fakeidp.InvalidRequest, idp.Fatal, false, 9002313, false},
-		"700016 unknown app":  {&fakeidp.UnknownClient, idp.Unavailable, true, 700016, true},
-		"5002723 thumbprint":  {&fakeidp.MissingThumbprint, idp.Unavailable, true, 5002723, false},
-		"70043 by code":       {&fakeidp.Failure{Error: "invalid_request", Code: 70043}, idp.SignInAgain, false, 70043, false},
-		"429":                 {&fakeidp.Failure{Status: 429, Error: "invalid_request"}, idp.Unavailable, false, 0, false},
-		"503 invalid_client":  {&fakeidp.Failure{Status: 503, Error: "invalid_client", Code: 7000215}, idp.Unavailable, true, 7000215, false},
+		"700082 expired":      {&fakeidp.RefreshTokenExpired, idp.SignInAgain, "", 700082, false},
+		"50076 MFA":           {&fakeidp.MFARequired, idp.SignInAgain, "", 50076, false},
+		"65001 consent":       {&fakeidp.ConsentRequired, idp.SignInAgain, "", 65001, true},
+		"50173 revoked":       {&fakeidp.RefreshTokenRevoked, idp.SignInAgain, "", 50173, false},
+		"7000215 secret":      {&fakeidp.InvalidClientSecret, idp.Unavailable, idp.AlertCredentialRejected, 7000215, false},
+		"7000222 expired key": {&fakeidp.ExpiredClientSecret, idp.Unavailable, idp.AlertCredentialRejected, 7000222, true},
+		"503":                 {&fakeidp.TemporarilyUnavailable, idp.Unavailable, "", 0, false},
+		"invalid_request":     {&fakeidp.InvalidRequest, idp.Fatal, "", 9002313, false},
+		"700016 unknown app":  {&fakeidp.UnknownClient, idp.Unavailable, idp.AlertCredentialRejected, 700016, true},
+		"5002723 thumbprint":  {&fakeidp.MissingThumbprint, idp.Unavailable, idp.AlertCredentialRejected, 5002723, false},
+		// invalid_client alerts by its OAuth error, whatever its code.
+		"7000218 no credential": {&fakeidp.MissingClientCredential, idp.Unavailable, idp.AlertCredentialRejected, 7000218, false},
+		"70043 by code":         {&fakeidp.Failure{Error: "invalid_request", Code: 70043}, idp.SignInAgain, "", 70043, false},
+		"429":                   {&fakeidp.Failure{Status: 429, Error: "invalid_request"}, idp.Unavailable, "", 0, false},
+		"503 invalid_client":    {&fakeidp.Failure{Status: 503, Error: "invalid_client", Code: 7000215}, idp.Unavailable, idp.AlertCredentialRejected, 7000215, false},
+		// Any unauthorized_client alerts, whatever its code, as in the OIDC adapter.
+		"unauthorized_client": {&fakeidp.Failure{Error: "unauthorized_client"}, idp.Fatal, idp.AlertCredentialRejected, 0, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t, Config{})
@@ -321,7 +325,7 @@ func TestTokenErrorsMapToADR0012Classes(t *testing.T) {
 				t.Fatalf("err = %v", err)
 			}
 			if ie.Class != tc.class || ie.Alert != tc.alert || ie.Code != tc.code {
-				t.Errorf("class %v alert %v code %d", ie.Class, ie.Alert, ie.Code)
+				t.Errorf("class %v alert %q code %d, want %v %q %d", ie.Class, ie.Alert, ie.Code, tc.class, tc.alert, tc.code)
 			}
 			if ie.CorrelationID != reqID || ie.TraceID == "" {
 				t.Errorf("correlation %q (want request ID %q), trace %q", ie.CorrelationID, reqID, ie.TraceID)
@@ -394,7 +398,7 @@ func TestTokenTransportFailureIsUnavailable(t *testing.T) {
 	e.p.fetch.Client = &http.Client{Transport: deadline{}}
 	_, _, err := e.p.Refresh(context.Background(), "rt")
 	var ie *idp.Error
-	if !errors.As(err, &ie) || ie.Class != idp.Unavailable || ie.Alert {
+	if !errors.As(err, &ie) || ie.Class != idp.Unavailable || ie.Alert != "" {
 		t.Fatalf("err = %#v", err)
 	}
 }
@@ -409,7 +413,7 @@ func TestATokenSuccessWithoutTokensIsFatal(t *testing.T) {
 	e.p.fetch.Client = &http.Client{Transport: emptySuccess{}}
 	_, _, err := e.p.Refresh(context.Background(), "rt")
 	var ie *idp.Error
-	if !errors.As(err, &ie) || ie.Class != idp.Fatal || !ie.Alert {
+	if !errors.As(err, &ie) || ie.Class != idp.Fatal || ie.Alert != idp.AlertProtocol {
 		t.Fatalf("err = %#v, want Fatal with an operator alert", err)
 	}
 }
@@ -550,5 +554,39 @@ func TestASilentLoginAsksTheIdPWithPromptNoneEvenWhenAccountSelectionIsAsked(t *
 	u, _ := url.Parse(raw)
 	if got := u.Query()["prompt"]; len(got) != 1 || got[0] != "none" {
 		t.Fatalf("prompt = %q, want only none", got)
+	}
+}
+
+// #204: the callback query is the browser's, so an invalid_client or an AADSTS code of a rejected
+// secret in it is forgeable and never an operator alert.
+func TestACallbackErrorNeverAlertsTheOperator(t *testing.T) {
+	// The errors that alert at the token endpoint, with Entra's codes for them.
+	for oauth, description := range map[string]string{
+		"invalid_client":      "AADSTS7000215: Invalid client secret provided.",
+		"unauthorized_client": "AADSTS700016: Application not found in the directory.",
+	} {
+		t.Run(oauth, func(t *testing.T) {
+			e := newEnv(t, Config{})
+			q := signIn(t, e, login)
+			q.Del("code")
+			q.Set("error", oauth)
+			q.Set("error_description", description)
+			_, _, err := e.p.Callback(context.Background(), q, login)
+			var ie *idp.Error
+			if !errors.As(err, &ie) || ie.OAuth != oauth || ie.Alert != "" {
+				t.Fatalf("err = %#v, want Entra's %s without an alert", err, oauth)
+			}
+		})
+	}
+}
+
+// A credential the proxy cannot make (a missing federated token file) fails before any request, as
+// an ErrCredential that alerts the operator.
+func TestAnUnusableClientCredentialAlertsTheOperator(t *testing.T) {
+	e := newEnv(t, Config{ClientAuth: idp.AssertionFile(t.TempDir() + "/missing-token")})
+	_, _, err := e.p.Refresh(context.Background(), "rt")
+	var ie *idp.Error
+	if !errors.Is(err, idp.ErrCredential) || !errors.As(err, &ie) || ie.Class != idp.Unavailable || ie.Alert != idp.AlertCredentialUnusable {
+		t.Fatalf("err = %v, want an alerting, unavailable ErrCredential", err)
 	}
 }

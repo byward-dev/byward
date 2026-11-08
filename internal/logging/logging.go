@@ -41,6 +41,8 @@ var allowed = map[string]bool{
 	"client_trust": true, "grant_id": true, "key_id": true, "idp": true,
 	// IdP errors (ADR-0021 §7): the IdP's error code and its own trace and correlation IDs.
 	"idp_error_code": true, "trace_id": true, "correlation_id": true,
+	// IdP alerts (#204): the IdP call and the bounded reason it needs the operator.
+	"operation": true, "alert": true,
 }
 
 // New returns a logger writing JSON (or text) to w.

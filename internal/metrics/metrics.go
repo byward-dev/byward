@@ -33,6 +33,7 @@ type Metrics struct {
 	consent     *prometheus.CounterVec
 	appTokens   *prometheus.CounterVec
 	downstream  *prometheus.CounterVec
+	idpAlerts   *prometheus.CounterVec
 }
 
 // New registers every metric; the build-info gauge is labelled from the binary's build info.
@@ -73,11 +74,14 @@ func New() *Metrics {
 		downstream: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_downstream_tokens_total",
 			Help: "On-Behalf-Of downstream tokens for upstream requests and stdio processes' asks by outcome (cached, issued, consent_required, interaction_required, unavailable, failed; for a stdio process also no_user, sign_in_expired)."},
 			[]string{"outcome"}),
+		idpAlerts: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_idp_alerts_total",
+			Help: "IdP errors that need the operator, by IdP, operation (authorize, callback, refresh, on_behalf_of) and reason (credential_unusable, credential_rejected, protocol)."},
+			[]string{"idp", "operation", "reason"}),
 	}
 	build := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "byward_build_info",
 		Help: "Always 1; labelled with the proxy and Go versions."}, []string{"version", "go_version"})
 	build.WithLabelValues(version, goVersion).Set(1)
-	m.reg.MustRegister(m.requests, m.idp, m.inFlight, m.busy, m.auditEvents, m.rateLimited, m.cimdFetches, m.dcr, m.consent, m.appTokens, m.downstream, build,
+	m.reg.MustRegister(m.requests, m.idp, m.inFlight, m.busy, m.auditEvents, m.rateLimited, m.cimdFetches, m.dcr, m.consent, m.appTokens, m.downstream, m.idpAlerts, build,
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	return m
 }
@@ -106,6 +110,28 @@ func (m *Metrics) IdP(idp, operation, outcome string, d time.Duration) {
 		return
 	}
 	m.idp.WithLabelValues(idp, operation, outcome).Observe(d.Seconds())
+}
+
+// SeedIdPAlerts exports the IdP alert series of idp for each operation and reason at 0, so an alert
+// rule on increase() sees the first alert after a start (a series that appears at 1 has no earlier
+// sample to increase from).
+func (m *Metrics) SeedIdPAlerts(idp string, operations, reasons []string) {
+	if m == nil {
+		return
+	}
+	for _, op := range operations {
+		for _, reason := range reasons {
+			m.idpAlerts.WithLabelValues(idp, op, reason)
+		}
+	}
+}
+
+// IdPAlert counts one IdP error that needs the operator (#204).
+func (m *Metrics) IdPAlert(idp, operation, reason string) {
+	if m == nil {
+		return
+	}
+	m.idpAlerts.WithLabelValues(idp, operation, reason).Inc()
 }
 
 // InFlight adjusts the upstream in-flight gauge for kind ("request" or "stream") by delta.

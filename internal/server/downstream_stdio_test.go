@@ -37,6 +37,8 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 		wantError    string
 		wantAudit    bool
 		exchanged    bool // an exchange with Entra ran: never without a user, a grant or a current sign-in
+		wantAlert    string
+		wantReason   string // the refusal line's whole reason, for an alert
 	}{
 		{name: "a signed-in user", wantToken: "graph-token", exchanged: true},
 		{name: "a stored token without an expiry", noExpiry: true, wantToken: "graph-token", exchanged: true},
@@ -47,6 +49,11 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 		{name: "the stored IdP token has expired", expires: now.Add(-time.Second), wantError: "sign_in_expired"},
 		{name: "consent missing", exchangeErr: &idp.Error{Code: entra.CodeConsentRequired}, wantError: "consent_required", wantAudit: true, exchanged: true},
 		{name: "Conditional Access", exchangeErr: &idp.Error{OAuth: entra.OAuthInteractionNeeded}, wantError: "interaction_required", wantAudit: true, exchanged: true},
+		// #204: the proxy's own credential refused needs the operator, for a process's ask as for a request.
+		{name: "the client secret has expired", exchangeErr: &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialRejected, OperatorHint: "AADSTS7000222: renew the secret"},
+			wantError: "unavailable", wantAudit: true, exchanged: true, wantAlert: "credential_rejected", wantReason: "unavailable: AADSTS7000222: renew the secret"},
+		{name: "a protocol violation", exchangeErr: &idp.Error{Class: idp.Fatal, Alert: idp.AlertProtocol},
+			wantError: "failed", wantAudit: true, exchanged: true, wantAlert: "protocol", wantReason: "failed: " + idp.AlertProtocol.Hint()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logs := &syncBuffer{}
@@ -63,9 +70,9 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 			if expires.IsZero() && !tc.noExpiry {
 				expires = now.Add(time.Hour)
 			}
-			d := &downstreamTokens{cache: downstream.New(exchange, []string{graphUserRead}, 0, func() time.Time { return now }),
-				resource: "https://graph.microsoft.com", idp: "entra", log: log, now: func() time.Time { return now },
-				o: Observability{Audit: audit.New(log, nil, time.Now), Metrics: metrics.New()},
+			o := Observability{Audit: audit.New(log, nil, time.Now), Metrics: metrics.New()}
+			d := &downstreamTokens{cache: downstream.New(alertingExchange(exchange, "entra", log, o), []string{graphUserRead}, 0, func() time.Time { return now }),
+				resource: "https://graph.microsoft.com", idp: "entra", log: log, now: func() time.Time { return now }, o: o,
 				assertion: func(_ context.Context, grant string) (string, time.Time, error) {
 					return "idp-token-of-" + grant, expires, tc.assertionErr
 				},
@@ -118,6 +125,22 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 			}
 			if tc.wantToken != "" && !strings.Contains(scrape.Body.String(), `outcome="cached"} 1`) {
 				t.Fatal("the second ask is not counted as cached")
+			}
+			alertLines := strings.Count(logs.String(), `"msg":"IdP alert: the operator must act"`)
+			refusal := ""
+			for l := range strings.Lines(logs.String()) {
+				if strings.Contains(l, `"msg":"no downstream token for a stdio process's ask`) {
+					refusal = l
+				}
+			}
+			if tc.wantAlert == "" {
+				if alertLines != 0 || strings.Contains(refusal, `"alert":`) {
+					t.Fatalf("an alert for a refusal that is not one:\n%s", logs)
+				}
+			} else if alertLines != 1 || !strings.Contains(refusal, `"alert":"`+tc.wantAlert+`"`) ||
+				!strings.Contains(refusal, `"reason":"`+tc.wantReason+`"`) ||
+				!strings.Contains(scrape.Body.String(), `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="`+tc.wantAlert+`"} 1`) {
+				t.Fatalf("want one alert line, %s and reason %q on the refusal line, counted once:\n%s\n%s", tc.wantAlert, tc.wantReason, logs, scrape.Body)
 			}
 		})
 	}

@@ -163,7 +163,7 @@ func (f *Fetcher) PostToken(ctx context.Context, endpoint string, form url.Value
 		// A success without tokens breaks the protocol: retrying the same request will not help, and
 		// the grant is not at fault, so it is Fatal (fail the request, keep the grant), never
 		// Unavailable.
-		return nil, &Error{Class: Fatal, Alert: true, Err: errors.New("token endpoint returned a success without tokens")}
+		return nil, &Error{Class: Fatal, Alert: AlertProtocol, Err: errors.New("token endpoint returned a success without tokens")}
 	}
 	return tr, nil
 }

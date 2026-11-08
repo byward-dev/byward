@@ -238,7 +238,7 @@ func TestFetcherBoundsBodiesAndRefusesRedirects(t *testing.T) {
 	// A success without tokens is a protocol violation, not an outage: Fatal, so the broker fails the
 	// request and keeps the grant instead of answering "try again".
 	_, err := f.PostToken(context.Background(), srv.URL+"/ok", url.Values{}, nil)
-	if ie := (*Error)(nil); !errors.As(err, &ie) || ie.Class != Fatal || !ie.Alert {
+	if ie := (*Error)(nil); !errors.As(err, &ie) || ie.Class != Fatal || ie.Alert != AlertProtocol {
 		t.Errorf("a success without tokens: %#v, want Fatal with an operator alert", err)
 	}
 	if c := NewHTTPClient(); c.Timeout != 5*time.Second {
@@ -374,5 +374,63 @@ func TestFetcherBudgetCoversItsRetries(t *testing.T) {
 	}
 	if b := NewFetcher(&http.Client{}).budget(); b < 3*DefaultTimeout {
 		t.Fatalf("no client timeout: budget %v", b)
+	}
+}
+
+// #204: every alert reason names a fix, distinct per reason, so an alert line never has an empty
+// reason, even for a reason added later without a hint of its own.
+func TestEveryAlertReasonNamesAFix(t *testing.T) {
+	seen := map[string]Alert{}
+	for _, a := range append(Alerts, Alert("added_later")) {
+		h := a.Hint()
+		if h == "" {
+			t.Errorf("%q has no fix", a)
+		}
+		if other, dup := seen[h]; dup {
+			t.Errorf("%q and %q share the fix %q", a, other, h)
+		}
+		seen[h] = a
+	}
+	if h := Alert("").Hint(); h != "" {
+		t.Errorf("no alert names the fix %q", h)
+	}
+}
+
+// #204: an alert names the IdP's own fix when it has one, else its reason's default.
+func TestTheFixIsTheIdPsOwnElseTheAlertsDefault(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		err  Error
+		want string
+	}{
+		{"the IdP's own", Error{Alert: AlertCredentialRejected, OperatorHint: "AADSTS7000222: renew the secret"}, "AADSTS7000222: renew the secret"},
+		{"the alert's default", Error{Alert: AlertCredentialRejected}, AlertCredentialRejected.Hint()},
+		{"neither", Error{}, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.err.Fix(); got != c.want {
+				t.Errorf("Fix() = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// #204: an alert survives wrapping; anything else is no alert.
+func TestAlertOfUnwrapsAndDefaultsToNone(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		err  error
+		want Alert
+	}{
+		{"wrapped", fmt.Errorf("wrap: %w", &Error{Alert: AlertProtocol}), AlertProtocol},
+		{"bare", &Error{Alert: AlertCredentialRejected}, AlertCredentialRejected},
+		{"not an IdP error", errors.New("x"), ""},
+		{"nil", nil, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := AlertOf(c.err); got != c.want {
+				t.Errorf("AlertOf(%v) = %q, want %q", c.err, got, c.want)
+			}
+		})
 	}
 }

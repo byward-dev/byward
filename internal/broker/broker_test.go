@@ -190,6 +190,7 @@ type env struct {
 	audit  *syncBuffer // the audit stream, JSON lines
 	logs   *syncBuffer // the operator log, JSON lines
 	idpOps []string    // "operation outcome" per IdP call
+	alerts []string    // "operation reason" per IdP alert
 }
 
 // syncBuffer collects the broker's log lines across handler goroutines.
@@ -256,7 +257,8 @@ func newEnv(t *testing.T, opts ...func(*Config)) *env {
 		IdPScopes: prov.Scope(), IdP: prov, Clients: e.reg, Store: e.st, Sealer: e.sealer, LoginBox: login, IdPTokenBox: e.idpBox,
 		ConsentBox: consent, SecureCookies: true, Log: logging.New(e.logs, "json"),
 		Audit: audit.New(logging.New(e.audit, "json"), nil, clock), Now: clock,
-		ObserveIdP: func(op, outcome string, _ time.Duration) { e.idpOps = append(e.idpOps, op+" "+outcome) }}
+		ObserveIdP:      func(op, outcome string, _ time.Duration) { e.idpOps = append(e.idpOps, op+" "+outcome) },
+		ObserveIdPAlert: func(op, reason string) { e.alerts = append(e.alerts, op+" "+reason) }}
 	for _, o := range opts {
 		o(&cfg)
 	}
