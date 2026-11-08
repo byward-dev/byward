@@ -44,19 +44,28 @@ Security fixes go into the latest minor only (SECURITY.md).
    - **Deprecations**, with the release in which each item will be removed;
    - **Security**, linking the published advisories;
    - Features, Fixes.
-5. **Tag `main`** with an annotated tag and push it. The tag push runs `release.yml`, which builds,
-   signs and pushes the image and creates a **draft** GitHub release with the archives:
+5. **Wait for `ci` on the exact commit you tag.** That is `main` for a release from main, or the
+   head of the `release/X.Y` branch for a patch or a release candidate cut there. `ci` runs on every
+   push to `main` and to `release/**`, so the merged commit gets a run of its own; a green pull request
+   before the squash merge is not enough. Check it passed:
 
    ```sh
    git fetch origin
-   git tag -a vX.Y.Z -m "vX.Y.Z" origin/main
+   gh run list --workflow ci --commit "$(git rev-parse origin/main)"   # or origin/release/X.Y
+   ```
+
+6. **Tag that commit** with an annotated tag and push it. The tag push runs `release.yml`, which
+   builds, signs and pushes the image and creates a **draft** GitHub release with the archives:
+
+   ```sh
+   git tag -a vX.Y.Z -m "vX.Y.Z" origin/main   # or origin/release/X.Y
    git push origin vX.Y.Z
    ```
 
-6. **Verify what was published** with the commands in
+7. **Verify what was published** with the commands in
    [docs/reference/packaging.md](../reference/packaging.md) (`cosign verify` for the image and
    the checksums, `gh attestation verify` for the image and an archive).
-7. **Publish the draft release** with the notes from step 4. For a security release, publish the
+8. **Publish the draft release** with the notes from step 4. For a security release, publish the
    advisory at the same time (SECURITY.md).
 
 ## If something goes wrong
