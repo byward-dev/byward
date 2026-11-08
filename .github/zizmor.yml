@@ -1,0 +1,10 @@
+# zizmor configuration (lint:workflows).
+rules:
+  cache-poisoning:
+    ignore:
+      # ci.yml runs on pushes to release/** (#228) and publishes nothing. Its caches cannot be
+      # poisoned from a pull request: GitHub scopes a pull_request run's cache to its merge ref, and
+      # a push run restores only its own branch's and main's caches
+      # (docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching).
+      # release.yml, which publishes, runs with cache: false and is not ignored.
+      - ci.yml

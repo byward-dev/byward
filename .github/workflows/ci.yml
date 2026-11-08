@@ -2,7 +2,15 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    # release/**: the exact commit a tag is cut from gets a run of its own after the squash merge
+    # (a push reads this file from the pushed ref, so each live release branch carries it too).
+    # zizmor reads a release/** push as a release workflow and flags mise's tool cache
+    # (cache-poisoning, ignored for this file in .github/zizmor.yml). This workflow publishes
+    # nothing, and its caches cannot be poisoned from a pull request: GitHub scopes a pull_request
+    # run's cache to its merge ref, and a push run restores only its own branch's and main's caches
+    # (docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching). release.yml,
+    # which publishes, runs with cache: false.
+    branches: [main, "release/**"]
   pull_request:
 
 permissions:
