@@ -146,6 +146,10 @@ func (d *downstreamTokens) record(ctx context.Context, r *http.Request, id resou
 		tid, _, _ := strings.Cut(id.Subject, ":")
 		attrs = append(attrs, "admin_consent_url", d.consentURL(tid))
 	}
+	if r == nil {
+		d.log.ErrorContext(ctx, "no downstream token for a stdio process's ask on its token socket", attrs...)
+		return
+	}
 	d.log.ErrorContext(ctx, "no downstream token for the upstream request; answered in the proxy's name", attrs...)
 }
 

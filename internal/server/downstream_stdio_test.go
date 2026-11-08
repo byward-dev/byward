@@ -89,6 +89,9 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 			if audited && (json.Unmarshal([]byte(line), &rec) != nil || rec.GrantID != "grant-a" || rec.ClientID != "client-a" || rec.Reason != tc.wantError) {
 				t.Fatalf("audit record %s, want grant-a, client-a and %s", line, tc.wantError)
 			}
+			if audited && (!strings.Contains(logs.String(), "a stdio process's ask") || strings.Contains(logs.String(), "answered in the proxy's name")) {
+				t.Fatal("the error log does not say the refusal was a stdio process's own ask")
+			}
 			if strings.Contains(logs.String(), "graph-token") || strings.Contains(logs.String(), "idp-token-of") {
 				t.Fatal("a token reached the logs")
 			}

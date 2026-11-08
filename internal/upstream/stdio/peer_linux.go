@@ -33,8 +33,9 @@ func readPeerCred(fd int) (peerCred, error) {
 }
 
 // pinPeer gets the peer's pidfd. Only a kernel without SO_PEERPIDFD (before 6.5: ENOPROTOOPT) goes
-// unpinned (-1). Any other error refuses the peer: on 6.5 and later the call fails when the peer
-// has already exited, and taking that for an old kernel would reopen the PID-reuse race.
+// unpinned (-1). Any other error refuses the peer rather than be taken for an old kernel, which
+// would reopen the PID-reuse race. A peer already reaped is caught after the walk either way:
+// newer kernels hand out a pidfd for it whose fdinfo shows "Pid: -1" (stillSame).
 func pinPeer(get func() (int, error)) (int, error) {
 	pidfd, err := get()
 	switch {

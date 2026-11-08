@@ -2,6 +2,8 @@ package server
 
 import (
 	"errors"
+	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -69,5 +71,24 @@ func TestThePtraceWarningIsGivenOnlyForOnBehalfOfWithAStdioUpstream(t *testing.T
 				t.Fatalf("warning %v, want one %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// The warning reaches startup and doctor: both read the auth parts' warnings.
+func TestOnBehalfOfWithAStdioUpstreamAddsThePtraceWarningToTheStartupWarnings(t *testing.T) {
+	orig := hostPtraceWarning
+	t.Cleanup(func() { hostPtraceWarning = orig })
+	hostPtraceWarning = func() *Warning { return &Warning{Message: "the host lets processes read each other"} }
+	cfg, _, err := config.Load([]string{"--", "/bin/server"}, append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp",
+		"BYWARD_OBO_SCOPES="+graphUserRead), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts, err := loadAuthParts(cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(parts.warnings, func(w Warning) bool { return w.Message == "the host lets processes read each other" }) {
+		t.Fatalf("warnings %+v lack the host's ptrace warning", parts.warnings)
 	}
 }

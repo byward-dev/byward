@@ -46,5 +46,5 @@ func isolationWarning(cfg *config.Config, host func() *Warning) *Warning {
 	return host()
 }
 
-// hostPtraceWarning is ptraceWarning for this host.
-func hostPtraceWarning() *Warning { return ptraceWarning(runtime.GOOS, os.ReadFile) }
+// hostPtraceWarning is ptraceWarning for this host; tests replace it.
+var hostPtraceWarning = func() *Warning { return ptraceWarning(runtime.GOOS, os.ReadFile) }

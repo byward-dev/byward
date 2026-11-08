@@ -135,8 +135,9 @@ for it.
   only from the spawned process or one of its descendants: the peer's uid must be byward's
   (`SO_PEERCRED`; `LOCAL_PEERCRED` on macOS), and its parent chain must reach the spawned process
   (`/proc/<pid>/stat`; `kern.proc` on macOS). On Linux 6.5 and later the peer is pinned with
-  `SO_PEERPIDFD`, so a peer that exits before or while it is checked is refused; only a kernel
-  without the option (`ENOPROTOOPT`) goes unpinned. Older kernels and macOS leave a narrow race: a
+  `SO_PEERPIDFD`, and its pidfd's `fdinfo` is read again after the walk: a peer that has exited by
+  then shows `Pid: -1` and is refused, as is any error from the option other than `ENOPROTOOPT`
+  (a kernel without it, which goes unpinned). Older kernels and macOS leave a narrow race: a
   peer that hands its connection to another process and exits, with its PID reused inside the
   upstream's tree before the check, would pass. On macOS, `LOCAL_PEERPID` names the last process to
   use the peer's socket rather than the one that connected, so a connection handed on is checked

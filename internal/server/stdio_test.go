@@ -314,13 +314,15 @@ func TestUpstreamProcessActsForTheTokensSubjectUnderTheProxysIssuerAndNeedsASubj
 	if _, ok := identity(httptest.NewRequest(http.MethodPost, "/mcp", nil)); ok {
 		t.Fatal("a request without an identity has a stdio identity")
 	}
+	users := identities{"tok-alice": {Subject: "tid:alice", GrantID: "grant-a", ClientID: "client-a"}, "tok-empty": {}}
 	for token, want := range map[string]stdio.Identity{
-		"tok-alice": {Subject: "tid:alice", Issuer: "https://mcp.example.com"},
+		// The grant and client are the request's, for the process's downstream token (ADR-0017).
+		"tok-alice": {Subject: "tid:alice", Issuer: "https://mcp.example.com", Grant: "grant-a", Client: "client-a"},
 		"tok-empty": {}, // no subject: no user, so no process may start for it
 	} {
 		var got stdio.Identity
 		var ok, reached bool
-		resource.Guard(resource.Metadata{Resource: cfg.PublicURL}, twoUsers{"tok-alice": "tid:alice", "tok-empty": ""}, nil,
+		resource.Guard(resource.Metadata{Resource: cfg.PublicURL}, users, nil,
 			http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { reached = true; got, ok = identity(r) })).
 			ServeHTTP(httptest.NewRecorder(), withBearer(httptest.NewRequest(http.MethodPost, "/mcp", nil), token))
 		if !reached {
@@ -330,6 +332,16 @@ func TestUpstreamProcessActsForTheTokensSubjectUnderTheProxysIssuerAndNeedsASubj
 			t.Fatalf("%s: identity %+v, %v; want %+v", token, got, ok, want)
 		}
 	}
+}
+
+// identities is a token validator that knows each token's whole identity.
+type identities map[string]resource.Identity
+
+func (u identities) Validate(_ context.Context, tok string) (resource.Identity, error) {
+	if id, ok := u[tok]; ok {
+		return id, nil
+	}
+	return resource.Identity{}, resource.ErrInvalid
 }
 
 func TestLooseUpstreamEnvFileRefusesToStartInEveryMode(t *testing.T) {
