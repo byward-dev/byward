@@ -5,10 +5,14 @@ import "strings"
 // oidcScopes are login scopes, never a downstream API's.
 var oidcScopes = map[string]bool{"openid": true, "profile": true, "email": true, "offline_access": true}
 
-// scopeSlash is the index of the "/" that ends a scope URI's API part (https://graph.microsoft.com
-// in https://graph.microsoft.com/User.Read), or -1 when s is not https:// or api://, an API and a
-// scope.
+// scopeSlash is the index of the "/" that ends a scope's API part (https://graph.microsoft.com in
+// https://graph.microsoft.com/User.Read), or -1 when s is not an API and a scope. The API is an
+// https:// or api:// URI, or an app ID (a GUID), as for an API known by its application ID, e.g.
+// AKS's server app 6dae42f8-4368-4678-94ff-3960e28e3630/.default (#196).
 func scopeSlash(s string) int {
+	if id, scope, ok := strings.Cut(s, "/"); ok && isGUID(id) && scope != "" && !strings.Contains(scope, "/") {
+		return len(id)
+	}
 	for _, scheme := range []string{"https://", "api://"} {
 		rest, ok := strings.CutPrefix(s, scheme)
 		if !ok {
@@ -36,7 +40,7 @@ func (c *Config) onBehalfOf(v *Values) []error {
 		case oidcScopes[strings.ToLower(s)]:
 			errs = append(errs, errorf("%s: %s is a sign-in scope, not a downstream API's; give the API's scopes, e.g. https://graph.microsoft.com/User.Read", sEnv, s))
 		case i < 0:
-			errs = append(errs, errorf("%s: %q is not a scope URI such as https://graph.microsoft.com/User.Read or api://<app>/<scope>", sEnv, s))
+			errs = append(errs, errorf("%s: %q is not a scope URI such as https://graph.microsoft.com/User.Read, api://<app>/<scope> or <app ID>/<scope>", sEnv, s))
 		case resource == "":
 			resource = s[:i]
 		case s[:i] != resource:

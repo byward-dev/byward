@@ -872,3 +872,41 @@ func TestRejectedProtocolVersionLeavesTheProcessIdle(t *testing.T) {
 		t.Fatalf("a new MCP session at the cap: status %d, want 200", got)
 	}
 }
+
+func TestAQuietGETStreamsProcessIsEvictedForANewSessionAndItsSessionThenGets404(t *testing.T) {
+	b := newBridge(t, func(c *Config) {
+		c.MaxPerUser = 1
+		c.StreamIdleTimeout = streamIdle
+	})
+	s := b.initialize(t, "alice")
+	ev := b.listen(t, context.Background(), s)
+	if res := b.post(t, "alice", "", initialize); res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("initialize while the GET stream has been quiet under %s: status %d, want 503", streamIdle, res.StatusCode)
+	}
+	b.clk.Advance(streamIdle)
+	if s2 := b.initialize(t, "alice"); s2 == "" || s2 == s {
+		t.Fatalf("new session %q, want a new one", s2)
+	}
+	if got := ev.all(); len(got) != 0 { // all returns once the stream has ended
+		t.Fatalf("the evicted GET stream got %q, want it to end", got)
+	}
+	// The client's next request on the old session gets 404 and it starts a new one (2025-11-25
+	// transports, Session Management).
+	if code := b.do(t, context.Background(), http.MethodGet, "alice", s, "").StatusCode; code != http.StatusNotFound {
+		t.Fatalf("the evicted session: status %d, want 404", code)
+	}
+}
+
+func TestALegacyRequestAwaitingItsAnswerKeepsItsProcessBesideAQuietGETStream(t *testing.T) {
+	b := newBridge(t, func(c *Config) {
+		c.MaxPerUser = 1
+		c.StreamIdleTimeout = streamIdle
+	})
+	s := b.initialize(t, "alice")
+	b.listen(t, context.Background(), s)
+	eventsOf(t, b.post(t, "alice", s, `{"jsonrpc":"2.0","id":"h","method":"hold"}`)) // in flight: a request lease
+	b.clk.Advance(streamIdle)
+	if res := b.post(t, "alice", "", initialize); res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("initialize past the timeout with a request in flight: status %d, want 503", res.StatusCode)
+	}
+}

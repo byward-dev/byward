@@ -211,6 +211,9 @@ func TestUpstreamGetsADownstreamTokenOnBehalfOfTheUser(t *testing.T) {
 	if strings.Contains(e.logs.String(), tok) {
 		t.Error("the downstream token reached the log")
 	}
+	if !strings.Contains(e.logs.String(), `"msg":"On-Behalf-Of","reason":"downstream API https://graph.microsoft.com;`) {
+		t.Errorf("the startup log does not name the downstream API; log: %s", e.logs)
+	}
 	// The identity assertion (ADR-0016) still reaches the upstream beside the downstream token.
 	assertion, isBearer := strings.CutPrefix(e.headers[0].Get("Authorization"), "Bearer ")
 	if !isBearer || assertion == tok {
@@ -614,6 +617,36 @@ func TestWithOBOInAuthorizationTheUpstreamGetsTheDownstreamTokenOrNothing(t *tes
 			}
 			if a := got[0].Values("Authorization"); !slices.Equal(a, c.want) {
 				t.Fatalf("Authorization %q, want %q", a, c.want)
+			}
+		})
+	}
+}
+
+// #196: a refusal names the downstream API to the user; one addressed by its app ID is named as an
+// application, so the user is not shown a bare GUID.
+func TestRefusalsNameTheDownstreamAPI(t *testing.T) {
+	for _, c := range []struct{ name, scope, want string }{
+		{"Microsoft Graph", graphUserRead, "access to https://graph.microsoft.com"},
+		{"an API of one's own", "api://00000000-0000-0000-0000-0000000000aa/Files.Read", "access to api://00000000-0000-0000-0000-0000000000aa"},
+		{"an API addressed by its app ID", "6dae42f8-4368-4678-94ff-3960e28e3630/.default", "access to the application 6dae42f8-4368-4678-94ff-3960e28e3630"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			scopes := []string{c.scope}
+			d := newDownstreamTokens(scopes, "X-Byward-Downstream-Token", nil, "entra",
+				func(context.Context, string) (string, time.Time, error) {
+					return "assertion", time.Now().Add(time.Hour), nil
+				},
+				slog.New(slog.DiscardHandler), Observability{})
+			// The exchange fails as Entra does without admin consent (AADSTS65001).
+			d.cache = downstream.New(func(context.Context, string, string, []string) (downstream.Token, error) {
+				return downstream.Token{}, &idp.Error{Class: idp.SignInAgain, Code: entra.CodeConsentRequired}
+			}, scopes, 0, time.Now)
+			d.consentURL = func(string) string { return "https://login.microsoftonline.com/x/v2.0/adminconsent" }
+			w := httptest.NewRecorder()
+			d.serve(w, httptest.NewRequest("POST", "/mcp", strings.NewReader(oboToolsCall)), resource.Identity{Subject: "tid:oid", GrantID: "g"}, true,
+				http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("a refused request was relayed") }))
+			if !strings.Contains(w.Body.String(), c.want) {
+				t.Fatalf("answer %s does not name %q", w.Body, c.want)
 			}
 		})
 	}

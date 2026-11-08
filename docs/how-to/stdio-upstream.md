@@ -83,22 +83,31 @@ Browser servers need `--isolated` or `--user-data-dir={session_dir}`.
 |---|---|---|
 | `BYWARD_STDIO_MAX_PROCESSES` | 64 | The least recently used idle process (any user's) is stopped so a new session can start |
 | `BYWARD_STDIO_MAX_PROCESSES_PER_USER` | 8 | That user's own least recently used idle process is stopped; other users' processes are never touched |
+| `BYWARD_STDIO_STREAM_IDLE_TIMEOUT` | `10m` | Only when no process is idle: a process held only by quiet streams, the one quiet longest, is stopped instead. `0` never stops such a process; otherwise at least `1m` |
 
 A process is idle when no request or stream of its own is open: a GET stream of its MCP session,
-or any 2026-07-28 request of its user. If nothing is idle, the new session or request gets `503`
-with `Retry-After: 10`, and the proxy logs `stdio process cap full: every process is in use`. Each stop under a limit writes a `process_evicted`
-audit record; the evicted session's client gets `404` and starts a new session. A process that is
+or any 2026-07-28 request of its user. If nothing is idle, a process whose only open use is streams
+(a GET stream, a `subscriptions/listen`) and that has had no traffic for
+`BYWARD_STDIO_STREAM_IDLE_TIMEOUT` can be stopped in its place. A process with any other request
+open is never stopped. If there is none of either, the new session or request gets `503` with
+`Retry-After: 10`, and the proxy logs `stdio process cap full: every process is in use`. Each stop
+under a limit writes a `process_evicted` audit record, with `open_streams` when it ended streams.
+The evicted session's client gets `404` and starts a new session; a `subscriptions/listen` gets its
+completion result (`"resultType":"complete"`), and the client listens again. A process that is
 stopping still counts until it has exited.
 
 A process also stops after 30 minutes without traffic, counted from when its last request or
 stream ended; a process in use never idles out, even with no traffic.
 
-**Long-lived streams hold slots.** An open GET stream or a long 2026-07-28 request keeps its
-process in use for as long as the client keeps it open, and a process in use is never evicted. So
-one user can hold up to `BYWARD_STDIO_MAX_PROCESSES_PER_USER` slots indefinitely, and that many
-users together can fill `BYWARD_STDIO_MAX_PROCESSES`, after which everyone else gets `503`. With the
-defaults (8 and 64) that is 8 users. If your users keep streams open, raise the upstream limit or
-lower the per-user one; watch `byward_stdio_processes` and the log line above. Size the limits by memory: a Node or Python
+**Long-lived streams hold slots while they carry traffic.** A quiet stream gives up its process
+under a full cap once it has been quiet for `BYWARD_STDIO_STREAM_IDLE_TIMEOUT`, so idle streams
+cannot starve other users. Nothing is stopped while the caps have room. Traffic is any message the
+process reads or writes; the proxy's keep-alive comments do not count. Streams that keep carrying
+notifications, and long 2026-07-28 requests, still hold their slots: one user can hold up to
+`BYWARD_STDIO_MAX_PROCESSES_PER_USER` busy slots, and that many users together can fill
+`BYWARD_STDIO_MAX_PROCESSES`, after which everyone else gets `503`. With the defaults (8 and 64)
+that is 8 users. If your users keep busy streams open, raise the upstream limit or lower the
+per-user one; watch `byward_stdio_processes` and the log line above. Size the limits by memory: a Node or Python
 server is 120–240 MB per process, about 40 % of it the `npx`/`uvx` launcher. Install the server in
 the image and run it directly where you can.
 
@@ -117,7 +126,7 @@ so per-user processes pile up until the idle timeout or the per-user limit recla
 | A message (either era: a request, a notification or a response) with a top-level key repeated, or the method or id in another case (`METHOD`, `ID`); a 2026-07-28 request with a key in `params` or in `params._meta` that is repeated, or a key at the top level, in `params` or in `params._meta` that differs only in case from a key byward reads (`Params`), or an id or progress token that is not a string or an integer | `400`: the proxy does not guess which value is meant |
 | A 2026-07-28 request whose client closes its stream | The upstream gets `notifications/cancelled` for it |
 | A 2026-07-28 request whose `MCP-Protocol-Version`, `Mcp-Method` or `Mcp-Name` header is missing or does not match its body | `400` with `HeaderMismatch` (`-32020`): byward checks these for the server, which never sees headers |
-| `subscriptions/listen` | Its stream carries the acknowledgement and the notifications the client asked for, under the client's own request id; it ends when the client closes it (the upstream gets `notifications/cancelled`), when the upstream answers it, or when the upstream tears it down |
+| `subscriptions/listen` | Its stream carries the acknowledgement and the notifications the client asked for, under the client's own request id; it ends when the client closes it (the upstream gets `notifications/cancelled`), when the upstream answers it, when the upstream tears it down, or with a completion result (`"resultType":"complete"`) when its quiet process is stopped under a full cap ([limits](#4-limits)) |
 | A `subscriptions/listen` stream or a session's GET stream with nothing to send for 15 s | A comment line (`:`), which clients ignore, keeps it open through proxies that cut quiet connections: nginx `proxy_read_timeout` and an AWS ALB's idle timeout default to 60 s, Cloudflare's proxy read timeout to 125 s. If the comment cannot be written, the client is gone: a listen is cancelled on the upstream |
 | `GET` or `DELETE` without a session | `405`: only a 2025-11-25 MCP session has them |
 | A session that ended, or another user's | `404`; the client starts a new session |

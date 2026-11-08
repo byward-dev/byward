@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -305,14 +306,38 @@ func TestRequestIDsAndProgressTokensMustBeStringsOrIntegers(t *testing.T) {
 	}
 }
 
-func TestAnExitedProcessesRequestGetsItsQueuedAnswerBeforeAnyExitError(t *testing.T) {
-	q := &modernRequest{id: []byte(`7`), final: make(chan []byte, 1)}
-	if got := string(exitAnswer(q)); !strings.Contains(got, "upstream process exited") || !strings.Contains(got, `"id":7`) {
-		t.Fatalf("with no answer queued: %s, want the exit error under the client's id", got)
+func TestAnExitedProcessesRequestGetsItsQueuedAnswerElseAnErrorOrForAnEvictedListenACompletion(t *testing.T) {
+	const answered = `{"jsonrpc":"2.0","id":7,"result":"answered"}`
+	const complete = `{"jsonrpc":"2.0","id":7,"result":{"resultType":"complete","_meta":{"io.modelcontextprotocol/subscriptionId":7}}}`
+	const exited = `{"jsonrpc":"2.0","id":7,"error":{"code":-32603,"message":"upstream process exited"}}`
+	cases := []struct {
+		name             string
+		listen, evicted  bool
+		queued, wantBody string
+	}{
+		{name: "a request whose process crashed", wantBody: exited},
+		{name: "a request whose process was evicted", evicted: true, wantBody: exited},
+		{name: "a listen whose process crashed", listen: true, wantBody: exited},
+		{name: "a listen whose process was evicted", listen: true, evicted: true, wantBody: complete},
+		{name: "a queued answer goes first", listen: true, evicted: true, queued: answered, wantBody: answered},
 	}
-	q.final <- []byte(`{"jsonrpc":"2.0","id":7,"result":"answered"}`)
-	if got := string(exitAnswer(q)); got != `{"jsonrpc":"2.0","id":7,"result":"answered"}` {
-		t.Fatalf("with an answer queued: %s, want the answer", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			q := &modernRequest{id: []byte(`7`), listen: tc.listen, final: make(chan []byte, 1)}
+			if tc.queued != "" {
+				q.final <- []byte(tc.queued)
+			}
+			got := exitAnswer(q, tc.evicted)
+			if tc.queued != "" { // the upstream's own answer goes out unchanged, byte for byte
+				if string(got) != tc.wantBody {
+					t.Fatalf("got %s, want %s", got, tc.wantBody)
+				}
+				return
+			}
+			if !sameJSON(t, got, tc.wantBody) {
+				t.Fatalf("got %s, want %s", got, tc.wantBody)
+			}
+		})
 	}
 }
 
@@ -511,9 +536,14 @@ func TestUpstreamProcessCrashFailsInFlightModernRequestsUnderTheirIDsAndTheNextR
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	held := eventsOf(t, b.modernCtx(t, ctx, "alice", modernBody(`"h"`, "hold", "", "")))
+	listen := b.listenModern(t, ctx, `"L"`)
 	readEvents(t, b.modern(t, "alice", modernBody(`2`, "crash", "", "")))
 	if got := held.all(); len(got) != 1 || !strings.Contains(got[0], "upstream process exited") || !strings.Contains(got[0], `"id":"h"`) {
 		t.Fatalf("held request got %q, want -32603 under its own id", got)
+	}
+	// A crash is no ending the server chose: the listen gets the error too, never a completion.
+	if got := listen.all(); len(got) != 1 || !strings.Contains(got[0], "upstream process exited") || strings.Contains(got[0], `"resultType":"complete"`) {
+		t.Fatalf("listen got %q, want -32603 and no completion result", got)
 	}
 	eventually(t, "the crashed process to be gone", func() bool { return b.m.Len() == 0 })
 	if id, _ := lastResult(t, readEvents(t, b.modern(t, "alice", modernBody(`3`, "echo", "", "")))); id != `3` {
@@ -832,5 +862,55 @@ func TestARequestTrailerIsNeverReadAsAHeader(t *testing.T) {
 				t.Fatalf("status %d, body %s; want %d with %q, the trailer unread", res.StatusCode, raw, tc.want, tc.wantIn)
 			}
 		})
+	}
+}
+
+func TestAQuietListensProcessIsEvictedForAnotherUserAndTheListenGetsACompletionResult(t *testing.T) {
+	b := newModernBridge(t, func(c *Config) {
+		c.MaxProcesses = 1
+		c.StreamIdleTimeout = streamIdle
+	})
+	ev := b.listenModern(t, context.Background(), `"L"`)
+	if res := b.modern(t, "bob", modernBody(`1`, "echo", "", "")); res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("bob's request while alice's listen has been quiet under %s: status %d, want 503", streamIdle, res.StatusCode)
+	}
+	b.clk.Advance(streamIdle)
+	if id, _ := lastResult(t, readEvents(t, b.modern(t, "bob", modernBody(`1`, "echo", "", "")))); id != "1" {
+		t.Fatalf("bob's request answered under id %s, want 1", id)
+	}
+	// The server ended the subscription, so it says so (2026-07-28 subscriptions), under the
+	// client's own id, never the proxy's.
+	got := ev.all()
+	if len(got) != 1 || !sameJSON(t, []byte(got[0]), `{"jsonrpc":"2.0","id":"L","result":{"resultType":"complete","_meta":{"io.modelcontextprotocol/subscriptionId":"L"}}}`) {
+		t.Fatalf("the evicted listen got %q, want its completion result only", got)
+	}
+}
+
+// sameJSON reports whether got and want are the same JSON value, whatever the key order.
+func sameJSON(t *testing.T, got []byte, want string) bool {
+	t.Helper()
+	var g, w any
+	if err := json.Unmarshal(got, &g); err != nil {
+		t.Fatalf("not JSON: %s", got)
+	}
+	if err := json.Unmarshal([]byte(want), &w); err != nil {
+		t.Fatalf("want is not JSON: %s", want)
+	}
+	return reflect.DeepEqual(g, w)
+}
+
+func TestAModernRequestInFlightKeepsItsProcessBesideAQuietListen(t *testing.T) {
+	b := newModernBridge(t, func(c *Config) {
+		c.MaxProcesses = 1
+		c.StreamIdleTimeout = streamIdle
+	})
+	b.listenModern(t, context.Background(), `"L"`)
+	held := b.modern(t, "alice", modernBody(`"h"`, "hold", "", "")) // never answered: a request lease
+	if held.StatusCode != http.StatusOK {
+		t.Fatalf("the held request: status %d, want its stream open", held.StatusCode)
+	}
+	b.clk.Advance(streamIdle)
+	if res := b.modern(t, "bob", modernBody(`1`, "echo", "", "")); res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("bob's request past the timeout with alice's request in flight: status %d, want 503", res.StatusCode)
 	}
 }

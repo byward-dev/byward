@@ -47,6 +47,7 @@ var samples = []Event{
 	{Name: StoreRestored, Outcome: Success, Reason: "restored from an older copy", Epoch: 2},
 	{Name: SessionRejected, Outcome: Failure, Reason: "session of another user", UserKey: "tid:oid"},
 	{Name: ProcessEvicted, Outcome: Success, Reason: "user_cap", UserKey: "tid:oid"},
+	{Name: ProcessEvicted, Outcome: Success, Reason: "upstream_cap", UserKey: "tid:oid", OpenStreams: 1},
 	{Name: DownstreamTokenRefused, Outcome: Failure, Reason: "consent_required", ClientID: "client-1", UserKey: "tid:oid", GrantID: "grant-1", IdP: "entra"},
 	{Name: AppTokenAccepted, Outcome: Success, ClientID: "app-client-1", UserKey: "tid:app-oid", IdP: "entra"},
 	{Name: AppTokenRejected, Outcome: Failure, Reason: "denied_role", ClientID: "app-client-1", UserKey: "tid:app-oid", IdP: "entra"},

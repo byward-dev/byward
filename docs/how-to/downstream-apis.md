@@ -31,9 +31,15 @@ it (section 4).
 BYWARD_OBO_SCOPES="https://graph.microsoft.com/User.Read"
 ```
 
-- Give full scope URIs of **one** API (Entra issues a token for one API per request), for example
-  `https://graph.microsoft.com/User.Read https://graph.microsoft.com/Mail.Read`, or
-  `api://<app ID>/<scope>` for an API of your own.
+- Give the scopes of **one** API (Entra issues a token for one API per request), in one of three
+  forms:
+  - a scope URI, for example `https://graph.microsoft.com/User.Read https://graph.microsoft.com/Mail.Read`;
+  - `api://<app ID>/<scope>` for an API of your own;
+  - `<app ID>/<scope>` for an API known by its application ID, for example
+    `6dae42f8-4368-4678-94ff-3960e28e3630/.default` for the Azure Kubernetes Service server app,
+    whose ID Microsoft lists as the token audience in
+    [its kubelogin guide](https://learn.microsoft.com/en-us/azure/aks/kubelogin-authentication).
+    Use one form for all of an API's scopes: `api://<app ID>/…` and `<app ID>/…` are not mixed.
 - Never give sign-in scopes (`openid`, `offline_access`): byward requests those itself.
 - Empty (the default) turns On-Behalf-Of off.
 
