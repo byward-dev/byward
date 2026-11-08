@@ -94,3 +94,16 @@ Clients (runtime, 2026-11-06): Node `fetch` and MCP Inspector CLI 2.14.0 (TypeSc
   logs the relaxation.
 - **§12:** `govulncheck` (pinned in `mise.toml`) runs once per release GOOS in `mise run check`, so in CI, and
   weekly in `pin-freshness`.
+
+## Amendment 2026-11-07 (request trailers, #167; backported to 0.1)
+
+- **§6 reverse proxy:** the relay drops every request trailer an MCP client sends (`Rewrite` sets
+  `Request.Trailer` to nil). Trailers arrive after a chunked body, so the strip of ADR-0016 §4 never sees
+  them. `ReverseProxy` removes the client's `Trailer` header as hop-by-hop, but `Request.Clone` keeps the
+  announced names, and the Transport announced and sent them on: a trailer named like `Authorization` or a
+  forwarding header reached the upstream by name, with an empty value, because the relay forwards before
+  the body is read; anything that read the body first would have sent the client's values too. No MCP
+  transport revision, official SDK or browser sends request trailers, and RFC 9112 §7.1.2 lets a recipient
+  discard them. The stdio bridge reads its headers from the header section only, so a trailer is never
+  read as one there either.
+

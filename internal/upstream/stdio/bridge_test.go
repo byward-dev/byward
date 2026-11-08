@@ -813,3 +813,42 @@ func TestRejectedProtocolVersionLeavesTheProcessIdle(t *testing.T) {
 		t.Fatalf("a new MCP session at the cap: status %d, want 200", got)
 	}
 }
+
+// The bridge reads the MCP session's protocol version from the header section only: a request
+// trailer naming another version is never read as the header, so it cannot refuse a good request.
+func TestARequestTrailerIsNeverReadAsAHeader(t *testing.T) {
+	b := newBridge(t, func(c *Config) { c.Command = []string{fakeBin, "-mcp", "-version=2025-11-25"} })
+	s := b.initialize(t, "alice")
+	for _, tc := range []struct {
+		name    string
+		header  string      // MCP-Protocol-Version in the header section; "" sends none
+		trailer http.Header // sent after the body
+		want    int
+	}{
+		{"a trailer naming another version", "", http.Header{"Mcp-Protocol-Version": {"2025-03-26"}}, http.StatusOK},
+		{"the header still decides", "2025-03-26", http.Header{"Mcp-Protocol-Version": {"2025-11-25"}}, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodPost, b.srv.URL, io.NopCloser(strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"echo","params":{}}`))) // no length: chunked, with trailers
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Accept", "application/json, text/event-stream")
+			req.Header.Set(userHeader, "alice")
+			req.Header.Set(sessionHeader, s)
+			if tc.header != "" {
+				req.Header.Set("MCP-Protocol-Version", tc.header)
+			}
+			req.Trailer = tc.trailer
+			res, err := b.srv.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, _ := io.ReadAll(res.Body)
+			_ = res.Body.Close()
+			if res.StatusCode != tc.want {
+				t.Fatalf("status %d, body %s; want %d, the trailer unread", res.StatusCode, raw, tc.want)
+			}
+		})
+	}
+}
