@@ -306,6 +306,8 @@ func TestTokenErrorsMapToADR0012Classes(t *testing.T) {
 		"70043 by code":       {&fakeidp.Failure{Error: "invalid_request", Code: 70043}, idp.SignInAgain, "", 70043, false},
 		"429":                 {&fakeidp.Failure{Status: 429, Error: "invalid_request"}, idp.Unavailable, "", 0, false},
 		"503 invalid_client":  {&fakeidp.Failure{Status: 503, Error: "invalid_client", Code: 7000215}, idp.Unavailable, idp.AlertCredentialRejected, 7000215, false},
+		// Any unauthorized_client alerts, whatever its code, as in the OIDC adapter.
+		"unauthorized_client": {&fakeidp.Failure{Error: "unauthorized_client"}, idp.Fatal, idp.AlertCredentialRejected, 0, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t, Config{})

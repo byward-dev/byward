@@ -100,6 +100,9 @@ const (
 	AlertProtocol Alert = "protocol"
 )
 
+// Alerts is every alert reason, for metrics that export each at 0 from the start.
+var Alerts = []Alert{AlertCredentialUnusable, AlertCredentialRejected, AlertProtocol}
+
 // Hint is the operator's fix for the alert reason, for when the IdP's error names none; never empty
 // for a reason.
 func (a Alert) Hint() string {

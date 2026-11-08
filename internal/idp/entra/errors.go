@@ -57,6 +57,8 @@ func classify(status int, oauth string, code int) (idp.Class, idp.Alert) {
 		return idp.Unavailable, idp.AlertCredentialRejected
 	case signInAgainCodes[code]:
 		return idp.SignInAgain, ""
+	case oauth == "unauthorized_client": // the app may not use the grant (RFC 6749 §5.2), as in the OIDC adapter
+		return idp.GenericClass(status, oauth), idp.AlertCredentialRejected
 	}
 	return idp.GenericClass(status, oauth), ""
 }

@@ -237,7 +237,7 @@ func (b *Broker) startLogin(w http.ResponseWriter, r *http.Request, l login, now
 	}
 	start := time.Now()
 	target, err := b.cfg.IdP.AuthCodeURL(idp.WithRequestID(ctx, logging.RequestID(ctx)), idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier, Silent: l.Silent})
-	b.observeIdP(ctx, "authorize", start, err)
+	b.observeIdP(ctx, OpAuthorize, start, err)
 	if err != nil && l.Silent { // the IdP is not ready (discovery or keys down)
 		b.noteIdPFailure(r, l.ClientID, err)
 		b.refuseSilently(w, r, "", l, "temporarily_unavailable", "the identity provider is not reachable; try again")
@@ -368,7 +368,7 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	start := time.Now()
 	id, toks, err := b.cfg.IdP.Callback(idp.WithRequestID(ctx, logging.RequestID(ctx)), q, idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier})
-	b.observeIdP(ctx, "callback", start, err)
+	b.observeIdP(ctx, OpCallback, start, err)
 	if err != nil {
 		if l.Silent {
 			b.refuseSilentIdPFailure(w, r, l, err)

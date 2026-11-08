@@ -142,6 +142,16 @@ type Config struct {
 	Now             func() time.Time
 }
 
+// The IdP calls the broker observes, as metric labels.
+const (
+	OpAuthorize = "authorize"
+	OpCallback  = "callback"
+	OpRefresh   = "refresh"
+)
+
+// IdPOperations is every IdP call the broker observes, for metrics that export each at 0.
+var IdPOperations = []string{OpAuthorize, OpCallback, OpRefresh}
+
 // Limiter decides whether a request to an OAuth endpoint (authorize, consent, callback, token,
 // revoke, register) from a client address may proceed, and if not, when it may retry.
 type Limiter interface {

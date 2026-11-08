@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/byward-dev/byward/internal/assertion"
@@ -12,6 +13,7 @@ import (
 	"github.com/byward-dev/byward/internal/broker"
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/health"
+	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/mcpsession"
 	"github.com/byward-dev/byward/internal/ratelimit"
 	"github.com/byward-dev/byward/internal/registration"
@@ -90,7 +92,11 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 			registrar = r
 		}
 	}
-	o.Metrics.SeedIdPAlerts(ip.name)
+	ops := broker.IdPOperations
+	if len(cfg.OBOScopes) > 0 {
+		ops = append(slices.Clone(ops), opOnBehalfOf)
+	}
+	o.Metrics.SeedIdPAlerts(ip.name, ops, alertReasons())
 	b, err := newBroker(broker.Config{Issuer: cfg.Issuer(), Origin: cfg.Origin(), Resource: cfg.PublicURL, Scope: cfg.Scope,
 		IdPName: ip.name, IdPLabel: ip.label, IdPScopes: ip.scope, IdP: ip.adapter, Clients: clients, CIMD: cfg.CIMD, Registrar: registrar, ObserveRegistration: o.Metrics.DCRRegistration,
 		Store: st, Sealer: sealer, LoginBox: parts.loginBox, IdPTokenBox: parts.idpBox, ConsentBox: parts.consentBox, ConsentHintBox: parts.hintBox, ObserveConsent: o.Metrics.Consent, Gate: g,
@@ -195,4 +201,13 @@ func logPaths(cfg *config.Config, log *slog.Logger) {
 	} {
 		log.Info("path", "setting", p.setting, "value", p.value)
 	}
+}
+
+// alertReasons is every IdP alert reason as a metric label.
+func alertReasons() []string {
+	r := make([]string, len(idp.Alerts))
+	for i, a := range idp.Alerts {
+		r[i] = string(a)
+	}
+	return r
 }

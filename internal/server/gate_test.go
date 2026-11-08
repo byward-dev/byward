@@ -120,10 +120,19 @@ func TestWiredBrokerGetsTheConfiguredGateAndObservability(t *testing.T) {
 	if got.ObserveIdPAlert == nil {
 		t.Fatal("broker wired without IdP alert observation")
 	}
-	series := `byward_idp_alerts_total{idp="entra",operation="refresh",reason="credential_rejected"} `
-	if !strings.Contains(rec.Body.String(), series+"0") {
-		t.Fatalf("the IdP alert series is not exported at 0 before any alert (an increase() rule would miss the first):\n%s", rec.Body.String())
+	// Before any alert every series is exported at 0, so an increase() rule sees the first; without
+	// On-Behalf-Of there is no on_behalf_of series.
+	for _, op := range broker.IdPOperations {
+		for _, a := range idp.Alerts {
+			if s := `byward_idp_alerts_total{idp="entra",operation="` + op + `",reason="` + string(a) + `"} 0`; !strings.Contains(rec.Body.String(), s) {
+				t.Errorf("%s is not exported before any alert:\n%s", s, rec.Body.String())
+			}
+		}
 	}
+	if strings.Contains(rec.Body.String(), `operation="on_behalf_of"`) {
+		t.Errorf("an on_behalf_of alert series is exported without On-Behalf-Of:\n%s", rec.Body.String())
+	}
+	series := `byward_idp_alerts_total{idp="entra",operation="refresh",reason="credential_rejected"} `
 	got.ObserveIdPAlert("refresh", "credential_rejected")
 	rec = httptest.NewRecorder()
 	srv.Internal.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "http://127.0.0.1:9090/metrics", nil))

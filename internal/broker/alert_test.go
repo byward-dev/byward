@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -91,5 +92,26 @@ func TestIdPErrorsThatNeedTheOperatorRaiseAnAlert(t *testing.T) {
 				t.Errorf("the alert line's reason does not start with %q:\n%s", c.fix, logs)
 			}
 		})
+	}
+}
+
+// #204: every IdP call the broker observes is one of IdPOperations, so its alert series is exported
+// at 0 from the start.
+func TestEveryObservedIdPCallIsAListedOperation(t *testing.T) {
+	e := newEnv(t)
+	e.offline(t) // authorize and callback
+	refreshFailing(t, e, fakeidp.InvalidClientSecret)
+	seen := map[string]bool{}
+	for _, o := range e.idpOps {
+		op, _, _ := strings.Cut(o, " ")
+		seen[op] = true
+		if !slices.Contains(IdPOperations, op) {
+			t.Errorf("the broker observed the IdP call %q, which IdPOperations does not list", op)
+		}
+	}
+	for _, op := range IdPOperations {
+		if !seen[op] {
+			t.Errorf("IdPOperations lists %q, which no sign-in or refresh observed", op)
+		}
 	}
 }

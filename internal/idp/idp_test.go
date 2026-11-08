@@ -381,7 +381,7 @@ func TestFetcherBudgetCoversItsRetries(t *testing.T) {
 // reason, even for a reason added later without a hint of its own.
 func TestEveryAlertReasonNamesAFix(t *testing.T) {
 	seen := map[string]Alert{}
-	for _, a := range []Alert{AlertCredentialUnusable, AlertCredentialRejected, AlertProtocol, Alert("added_later")} {
+	for _, a := range append(Alerts, Alert("added_later")) {
 		h := a.Hint()
 		if h == "" {
 			t.Errorf("%q has no fix", a)
