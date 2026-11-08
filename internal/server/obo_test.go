@@ -556,9 +556,10 @@ func TestTheDownstreamTokenCanReplaceAuthorization(t *testing.T) {
 	}
 }
 
-// #195: an app-only caller gets no downstream token, so with OBO in Authorization the upstream gets
-// no Authorization at all; the client's copy is removed either way.
-func TestWithTheDownstreamTokenInAuthorizationAnAppOnlyCallerSendsNone(t *testing.T) {
+// #195: with OBO in Authorization a user's request carries the downstream token there, and an
+// app-only caller's, which gets none, carries no Authorization at all; the client's copy is removed
+// either way.
+func TestWithOBOInAuthorizationTheUpstreamGetsTheDownstreamTokenOrNothing(t *testing.T) {
 	var got []http.Header
 	var mu sync.Mutex
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -595,7 +596,10 @@ func TestWithTheDownstreamTokenInAuthorizationAnAppOnlyCallerSendsNone(t *testin
 			mu.Unlock()
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { d.serve(w, r, c.id, true, relayTo) }))
 			defer srv.Close()
-			r, _ := http.NewRequest("POST", srv.URL+"/mcp", strings.NewReader(oboToolsCall))
+			r, err := http.NewRequest("POST", srv.URL+"/mcp", strings.NewReader(oboToolsCall))
+			if err != nil {
+				t.Fatal(err)
+			}
 			r.Header.Set("Authorization", "Bearer the-clients-proxy-token")
 			r.Header.Set("Content-Type", "application/json")
 			res, err := http.DefaultClient.Do(r)
@@ -606,7 +610,7 @@ func TestWithTheDownstreamTokenInAuthorizationAnAppOnlyCallerSendsNone(t *testin
 			mu.Lock()
 			defer mu.Unlock()
 			if len(got) != 1 {
-				t.Fatalf("the upstream got %d requests, want 1", len(got))
+				t.Fatalf("the upstream got %d requests, want 1 (serve answered %d)", len(got), res.StatusCode)
 			}
 			if a := got[0].Values("Authorization"); !slices.Equal(a, c.want) {
 				t.Fatalf("Authorization %q, want %q", a, c.want)
