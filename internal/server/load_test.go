@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -77,9 +78,10 @@ type loadResult struct {
 }
 
 type loadRound struct {
-	Direct, Proxy loadStats
-	AddedP50      time.Duration `json:"added_p50_ns"`
-	AddedP99      time.Duration `json:"added_p99_ns"`
+	Direct   loadStats     `json:"direct"`
+	Proxy    loadStats     `json:"proxy"`
+	AddedP50 time.Duration `json:"added_p50_ns"`
+	AddedP99 time.Duration `json:"added_p99_ns"`
 }
 
 type loadStats struct {
@@ -192,7 +194,11 @@ func loadProxy(t *testing.T, upstream string, extra time.Duration) (*httptest.Se
 		inner := h
 		h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { time.Sleep(extra); inner.ServeHTTP(w, r) })
 	}
-	srv := httptest.NewServer(h)
+	// Served by the proxy's own http.Server, with its production limits and timeouts.
+	srv := httptest.NewUnstartedServer(h)
+	srv.Config = s.Public
+	srv.Config.Handler = h
+	srv.Start()
 	t.Cleanup(srv.Close)
 	ring, err := token.LoadKeyRing(cfg.KeysDir)
 	if err != nil {
@@ -296,7 +302,7 @@ func (s *loadSide) round(t *testing.T, rate int, d time.Duration) loadStats {
 	for k := range n {
 		due := start.Add(time.Duration(k) * interval)
 		time.Sleep(time.Until(due))
-		u := k % loadUsers
+		u := (k / 5) % loadUsers // every user sends the whole mix, in turn
 		session := ""
 		if k%5 != 0 {
 			session = s.sessions[u]
@@ -333,12 +339,12 @@ func firstErr(errs []error) error {
 	return nil
 }
 
-// quantile is the q-quantile of sorted (nearest rank).
+// quantile is the q-quantile of sorted, by nearest rank: the ceil(q·n)-th value.
 func quantile(sorted []time.Duration, q float64) time.Duration {
 	if len(sorted) == 0 {
 		return 0
 	}
-	i := int(q*float64(len(sorted))+0.5) - 1
+	i := int(math.Ceil(q*float64(len(sorted)))) - 1
 	return sorted[max(0, min(i, len(sorted)-1))]
 }
 
@@ -348,10 +354,14 @@ func median[T any](xs []T, f func(T) time.Duration) time.Duration {
 		v[i] = f(x)
 	}
 	slices.Sort(v)
-	if len(v) == 0 {
+	switch n := len(v); {
+	case n == 0:
 		return 0
+	case n%2 == 0:
+		return (v[n/2-1] + v[n/2]) / 2
+	default:
+		return v[n/2]
 	}
-	return v[len(v)/2]
 }
 
 // write saves results.json and, on GitHub Actions, a table in the job summary.
@@ -385,5 +395,53 @@ func (r loadResult) write(t *testing.T, path string) {
 	defer func() { _ = f.Close() }()
 	if _, err := f.WriteString(md.String()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The statistics the gate rests on: nearest-rank quantiles (the ceil(q·n)-th value) and the
+// median, the mean of the two middle values for an even count.
+func TestLoadStatisticsAreNearestRankAndTheTrueMedian(t *testing.T) {
+	ms := func(xs ...int) []time.Duration {
+		out := make([]time.Duration, len(xs))
+		for i, x := range xs {
+			out[i] = time.Duration(x) * time.Millisecond
+		}
+		return out
+	}
+	upTo := func(n int) []int {
+		out := make([]int, n)
+		for i := range out {
+			out[i] = i + 1
+		}
+		return out
+	}
+	hundred := upTo(100)
+	for name, tc := range map[string]struct {
+		sorted []time.Duration
+		q      float64
+		want   time.Duration
+	}{
+		"p99 of 100":            {ms(hundred...), 0.99, 99 * time.Millisecond},
+		"p99 of 1070 rounds up": {ms(upTo(1070)...), 0.99, 1060 * time.Millisecond}, // 0.99·1070 = 1059.3
+		"p50 of 4":              {ms(1, 2, 3, 4), 0.5, 2 * time.Millisecond},
+		"p999 of 10":            {ms(1, 2, 3, 4, 5, 6, 7, 8, 9, 10), 0.999, 10 * time.Millisecond},
+		"empty":                 {nil, 0.99, 0},
+	} {
+		if got := quantile(tc.sorted, tc.q); got != tc.want {
+			t.Errorf("%s: %s, want %s", name, got, tc.want)
+		}
+	}
+	id := func(d time.Duration) time.Duration { return d }
+	for name, tc := range map[string]struct {
+		xs   []time.Duration
+		want time.Duration
+	}{
+		"odd":   {ms(3, 1, 2), 2 * time.Millisecond},
+		"even":  {ms(4, 1, 3, 2), 2500 * time.Microsecond},
+		"empty": {nil, 0},
+	} {
+		if got := median(tc.xs, id); got != tc.want {
+			t.Errorf("median %s: %s, want %s", name, got, tc.want)
+		}
 	}
 }

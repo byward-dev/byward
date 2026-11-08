@@ -12,8 +12,9 @@ process, over loopback TCP:
 
 - a minimal upstream that answers `initialize` (with a session ID), a tool call with a 2 KB result,
   and a streamed tool call of 10 events;
-- the proxy, wired exactly as in production (`server.New` from the settings, with an HTTP upstream,
-  the identity assertion and MCP session binding), with 50 users holding sealed proxy tokens. The
+- the proxy, wired exactly as in production (`server.New` from the settings, served by its own
+  hardened `http.Server`, with an HTTP upstream, the identity assertion, MCP session binding and
+  the background work such as the deny-list resync), with 50 users holding sealed proxy tokens. The
   IdP is never called: the tokens are sealed beforehand, and any IdP request fails the test.
 
 The same requests, in a fixed mix (20 % `initialize`, 60 % tool calls, 20 % streamed), go to the
@@ -47,7 +48,8 @@ go test -count=1 -v -tags=load -run ^TestLoad ./internal/server/ -args -load.rou
 ```
 
 Flags: `-load.rate` (requests a second), `-load.rounds`, `-load.duration` (one round), `-load.out`
-(the results file, default `build/load/results.json`).
+(the results file, default `build/load/results.json`; `go test` runs in `internal/server`, so a
+relative path resolves from there).
 
 A busy machine makes the tail of both sides worse, and the proxied side, with an extra hop, worse
 still: run it on an otherwise idle machine, or trust the CI runner's result.

@@ -28,7 +28,7 @@ description = "Fail if any Go file is not formatted"
 run = 'test -z "$(gofmt -s -l .)$(goimports -l .)" || { gofmt -s -l .; goimports -l .; exit 1; }'
 
 [tasks.vet]
-run = "go vet -tags=integration ./..."
+run = "go vet -tags=integration,load ./..."
 
 [tasks.lint]
 description = "golangci-lint once per release GOOS, so files behind build constraints are linted on any host"
