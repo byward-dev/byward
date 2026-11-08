@@ -25,11 +25,11 @@ type Config struct {
 	StdioMaxProcesses, StdioMaxPerUser int
 	// StdioStreamIdleTimeout lets the stdio caps evict a process held only by quiet streams; 0 never.
 	StdioStreamIdleTimeout time.Duration
-	Listen                             string
-	InternalListen                     string // "" when the internal listener is off
-	AllowedOrigins                     []string
-	AllowedHosts                       []string
-	TrustedProxies                     []netip.Prefix
+	Listen                 string
+	InternalListen         string // "" when the internal listener is off
+	AllowedOrigins         []string
+	AllowedHosts           []string
+	TrustedProxies         []netip.Prefix
 	// OAuthRateLimits is requests per minute per client address, by endpoint name.
 	OAuthRateLimits       map[string]int
 	Scope                 string
