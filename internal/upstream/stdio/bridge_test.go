@@ -595,7 +595,7 @@ func TestARequestOnASessionWhoseProcessHasAlreadyEndedIs502ForInitializeAnd404Ot
 		want       int
 	}{{true, initialize, http.StatusBadGateway}, {false, `{"jsonrpc":"2.0","id":0,"method":"tools/list"}`, http.StatusNotFound}} {
 		log := &recorder{mu: &sync.Mutex{}, recs: &[]record{}}
-		s := &session{log: slog.New(log), byID: map[string]*stream{}}
+		s := &session{key: "sealed-key", log: slog.New(log), byID: map[string]*stream{}} // a key, so a leaked header would show
 		s.end()
 		rec := httptest.NewRecorder()
 		s.request(rec, httptest.NewRequest(http.MethodPost, "/", nil), []byte(tc.body), json.RawMessage(`0`), tc.initialize)
