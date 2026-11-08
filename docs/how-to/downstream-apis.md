@@ -126,7 +126,7 @@ is for the user this process serves, from the sign-in of the request it served l
 | `error` | Meaning |
 |---|---|
 | `consent_required`, `interaction_required`, `unavailable`, `failed` | As in [section 4](#4-when-entra-refuses). The client's request was already answered by byward, so this happens only when a token expired between requests. |
-| `sign_in_expired` | The user's sign-in has expired since their last request. Their next request renews it; ask again then. |
+| `sign_in_expired` | The user's sign-in has expired since their last request, or they signed out or were revoked. Their next request renews it; ask again then. |
 | `no_user` | The process serves an app-only caller, which acts for no user. |
 | `refused` | The connection came from a process outside this upstream process's tree. |
 | `bad_request` | The request was not one JSON object on one line. |

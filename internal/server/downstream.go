@@ -14,6 +14,7 @@ import (
 	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/resource"
+	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/upstream/relay"
 	"github.com/byward-dev/byward/internal/upstream/stdio"
 )
@@ -156,8 +157,9 @@ func (d *downstreamTokens) record(ctx context.Context, r *http.Request, id resou
 // forProcess is the downstream token a stdio upstream process asks its token socket for: for its
 // user, exchanged for the stored IdP token of the grant whose request it served last. A refusal
 // is alerted and recorded as for a request; the process gets only the outcome. An app-only caller
-// acts for no user (no_user), and a grant whose stored token has expired waits for the client's
-// next request to renew it (sign_in_expired): byward never refreshes IdP tokens outside a request.
+// acts for no user (no_user). A grant whose stored token has expired, or that was revoked or signed
+// out since, waits for the client's next request (sign_in_expired): byward never refreshes IdP
+// tokens outside a request.
 func (d *downstreamTokens) forProcess(ctx context.Context, p stdio.Identity) stdio.DownstreamToken {
 	id := resource.Identity{Subject: p.Subject, PrincipalType: p.PrincipalType, GrantID: p.Grant, ClientID: p.Client}
 	tid, oid, keyed := strings.Cut(id.Subject, ":")
@@ -166,6 +168,12 @@ func (d *downstreamTokens) forProcess(ctx context.Context, p stdio.Identity) std
 		return stdio.DownstreamToken{Error: "no_user"}
 	}
 	assertion, expires, err := d.assertion(ctx, id.GrantID)
+	if errors.Is(err, store.ErrNotFound) {
+		// Signed out or revoked since its last request (revocation deletes the grant): routine, not
+		// a refusal to alert on; the user's next request, under a new grant, brings a new token.
+		d.o.Metrics.Downstream("sign_in_expired")
+		return stdio.DownstreamToken{Error: "sign_in_expired"}
+	}
 	if err != nil {
 		d.record(ctx, nil, id, "failed", err)
 		return stdio.DownstreamToken{Error: "failed"}

@@ -17,6 +17,7 @@ import (
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/metrics"
 	"github.com/byward-dev/byward/internal/resource"
+	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/upstream/stdio"
 )
 
@@ -41,7 +42,8 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 		{name: "a stored token without an expiry", noExpiry: true, wantToken: "graph-token", exchanged: true},
 		{name: "an app-only caller", id: func(i stdio.Identity) stdio.Identity { i.PrincipalType = resource.PrincipalClient; return i }, wantError: "no_user"},
 		{name: "no grant yet", id: func(i stdio.Identity) stdio.Identity { i.Grant = ""; return i }, wantError: "no_user"},
-		{name: "a grant that is gone", assertionErr: errors.New("grant revoked"), wantError: "failed", wantAudit: true},
+		{name: "a grant revoked or signed out since", assertionErr: store.ErrNotFound, wantError: "sign_in_expired"},
+		{name: "a grant that cannot be read", assertionErr: errors.New("the store is down"), wantError: "failed", wantAudit: true},
 		{name: "the stored IdP token has expired", expires: now.Add(-time.Second), wantError: "sign_in_expired"},
 		{name: "consent missing", exchangeErr: &idp.Error{Code: entra.CodeConsentRequired}, wantError: "consent_required", wantAudit: true, exchanged: true},
 		{name: "Conditional Access", exchangeErr: &idp.Error{OAuth: entra.OAuthInteractionNeeded}, wantError: "interaction_required", wantAudit: true, exchanged: true},
