@@ -350,10 +350,12 @@ func TestARefusedPeerThatWritesLateStillReadsTheRefusal(t *testing.T) {
 	}
 	defer func() { _ = c.Close() }()
 	_ = c.SetDeadline(time.Now().Add(guard))
+	// The refusal's log record is the one point a peer can see that comes after byward decided;
+	// writing only then is what a slow peer does. An answer sent without reading would already
+	// have closed the connection by the time the record shows.
 	eventually(t, "byward to refuse the peer", func() bool {
 		return len(log.with("token socket: the peer is not the upstream process or one of its descendants")) == 1
 	})
-	time.Sleep(50 * time.Millisecond) // let an early answer and close happen, if they would
 	if _, err := c.Write([]byte("{}\n")); err != nil {
 		t.Fatalf("writing the request after the refusal was decided: %v, want it accepted", err)
 	}
