@@ -252,7 +252,9 @@ Every stdio upstream process runs as byward's own uid, whichever user it serves.
 and `{session_dir}` keep sessions apart by default ([stdio how-to](stdio-upstream.md#3-isolate-state-between-sessions)),
 but not against a server that is compromised or hostile: such a process can read another's
 `{session_dir}` files and its environment, which needs only the same uid (`/proc/<pid>/environ`).
-Its memory is protected only by the host's ptrace restriction.
+Its memory is protected only by the host's ptrace restriction. With On-Behalf-Of on, that memory
+holds the user's downstream token, so byward warns at startup and in `doctor` when
+`kernel.yama.ptrace_scope` is `0` or missing.
 
 - [ ] Set `kernel.yama.ptrace_scope` to `1` or higher on the host:
       `cat /proc/sys/kernel/yama/ptrace_scope` must not print `0`, and a missing file means the

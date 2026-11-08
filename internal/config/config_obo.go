@@ -26,9 +26,9 @@ func scopeSlash(s string) int {
 	return -1
 }
 
-// onBehalfOf reads the On-Behalf-Of settings (ADR-0017): full scope URIs of one downstream API, a
-// header of its own, and an HTTP upstream (a stdio process gets its environment once, so a
-// per-request token cannot reach it).
+// onBehalfOf reads the On-Behalf-Of settings (ADR-0017): full scope URIs of one downstream API, and
+// a header of its own for an HTTP upstream. A stdio upstream asks a socket for its token instead,
+// so a header set for it would have no effect.
 func (c *Config) onBehalfOf(v *Values) []error {
 	sEnv, hEnv := Setting{Name: "obo-scopes"}.Env(), Setting{Name: "obo-header"}.Env()
 	var errs []error
@@ -50,8 +50,8 @@ func (c *Config) onBehalfOf(v *Values) []error {
 	if v.get("obo-scopes") != "" && len(c.OBOScopes) == 0 {
 		errs = append(errs, errorf("%s is set but lists nothing; give scopes, or leave it unset", sEnv))
 	}
-	if len(c.OBOScopes) > 0 && c.UpstreamCommand != nil {
-		errs = append(errs, errorf("%s: On-Behalf-Of works with an HTTP upstream only; a stdio process gets its environment once and cannot receive a per-request token (#141)", sEnv))
+	if c.UpstreamCommand != nil && v.byKey["obo-header"].Source != SourceDefault {
+		errs = append(errs, errorf("%s: a stdio upstream gets its downstream token from its token socket (BYWARD_DOWNSTREAM_TOKEN_SOCKET), not a header; leave %s unset", hEnv, hEnv))
 	}
 	if len(c.OBOScopes) > 0 && c.IdP != "entra" {
 		errs = append(errs, errorf("%s: On-Behalf-Of is Entra's; it needs BYWARD_IDP=entra, got %s", sEnv, c.IdP))

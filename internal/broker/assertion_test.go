@@ -23,6 +23,37 @@ func TestIdPAccessTokenIsTheGrantsStoredToken(t *testing.T) {
 			t.Fatalf("token set %v, expiry %v, err %v; want a token expiring at %v", tok != "", exp, err, e.now.Add(idpLife))
 		}
 	})
+	t.Run("the grant ends first", func(t *testing.T) {
+		e := newEnv(t)
+		e.fake.Set(fakeidp.WithTokenLifetime(idpLife))
+		e.offline(t)
+		ends := e.now.Add(5 * time.Minute) // before the IdP token's expiry
+		if err := e.st.UpdateGrant(context.Background(), lastGrant(e.st), ends); err != nil {
+			t.Fatal(err)
+		}
+		if _, exp, err := e.b.IdPAccessToken(context.Background(), lastGrant(e.st)); err != nil || !exp.Equal(ends) {
+			t.Fatalf("expiry %v, err %v; want the grant's own end %v", exp, err, ends)
+		}
+	})
+	t.Run("a stored token without an expiry ends with its grant", func(t *testing.T) {
+		e := newEnv(t)
+		e.resealBlob(t, func(plain []byte) []byte {
+			s, err := unmarshalSecrets(plain)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.Tokens.Expiry = time.Time{} // the IdP gave none
+			return marshalSecrets(s.Tokens, s.Claims)
+		})
+		e.offline(t)
+		ends := e.now.Add(5 * time.Minute)
+		if err := e.st.UpdateGrant(context.Background(), lastGrant(e.st), ends); err != nil {
+			t.Fatal(err)
+		}
+		if _, exp, err := e.b.IdPAccessToken(context.Background(), lastGrant(e.st)); err != nil || !exp.Equal(ends) {
+			t.Fatalf("expiry %v, err %v; want the grant's end %v", exp, err, ends)
+		}
+	})
 	t.Run("none stored", func(t *testing.T) {
 		e := newEnv(t)
 		e.resealBlob(t, func(plain []byte) []byte {

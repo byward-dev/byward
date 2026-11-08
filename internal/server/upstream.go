@@ -33,7 +33,7 @@ type upstream struct {
 // newUpstream builds the HTTP relay, or the stdio bridge when a command is configured. A stdio
 // command that does not exist fails here, at startup. With minter (authentication on), every
 // request to an HTTP upstream carries the identity assertion (ADR-0016); with down, a downstream
-// API token too (ADR-0017).
+// API token too, which a stdio process asks its token socket for instead (ADR-0017).
 func newUpstream(cfg *config.Config, log *slog.Logger, o Observability, minter *assertion.Minter, down *downstreamTokens) (*upstream, error) {
 	if cfg.UpstreamCommand == nil {
 		if minter != nil {
@@ -42,13 +42,23 @@ func newUpstream(cfg *config.Config, log *slog.Logger, o Observability, minter *
 		return &upstream{handler: httpUpstream(cfg, log)}, nil
 	}
 	name := stdioName(cfg)
-	m, err := newStdioManager(cfg, stdioConfig(cfg, name, log, o))
+	sc := stdioConfig(cfg, name, log, o)
+	if down != nil {
+		sc.DownstreamToken = down.forProcess
+	}
+	m, err := newStdioManager(cfg, sc)
 	if err != nil {
 		return nil, err
 	}
 	o.Metrics.StdioProcesses(m.Len)
-	b := stdio.NewBridge(stdio.BridgeConfig{Manager: m, Identity: stdioIdentity(cfg), Log: log.With("upstream", name)})
-	return &upstream{handler: b, shutdown: m.Shutdown}, nil
+	var h http.Handler = stdio.NewBridge(stdio.BridgeConfig{Manager: m, Identity: stdioIdentity(cfg), Log: log.With("upstream", name)})
+	if down != nil {
+		// The same check as for an HTTP upstream: a request whose user has no downstream token is
+		// answered in the proxy's name (ADR-0025 shapes) before it reaches the process, and the
+		// token it gets is cached for the process to ask for.
+		h = down.middleware(h)
+	}
+	return &upstream{handler: h, shutdown: m.Shutdown}, nil
 }
 
 // stdioConfig is the stdio upstream's settings from cfg, with each eviction audited.
@@ -118,6 +128,10 @@ func upstreamResult(cfg *config.Config, proxy func(*http.Request) (*url.URL, err
 		return r
 	}
 	r.Message = "stdio upstream " + stdioName(cfg) + ": the command was found; doctor does not start it (a process starts per user at their first MCP request)"
+	if len(cfg.OBOScopes) > 0 {
+		r.Message += "; each process can ask its token socket (BYWARD_DOWNSTREAM_TOKEN_SOCKET) for an On-Behalf-Of token for " +
+			strings.Join(cfg.OBOScopes, " ") + " (grant admin consent for these permissions; docs/how-to/downstream-apis.md)"
+	}
 	return r
 }
 
@@ -199,6 +213,7 @@ func stdioIdentity(cfg *config.Config) func(*http.Request) (stdio.Identity, bool
 	issuer := cfg.Issuer()
 	return func(r *http.Request) (stdio.Identity, bool) {
 		id, ok := resource.IdentityFrom(r.Context())
-		return stdio.Identity{Subject: id.Subject, Issuer: issuer, PrincipalType: id.PrincipalType}, ok && id.Subject != ""
+		return stdio.Identity{Subject: id.Subject, Issuer: issuer, PrincipalType: id.PrincipalType, Grant: id.GrantID, Client: id.ClientID},
+			ok && id.Subject != ""
 	}
 }

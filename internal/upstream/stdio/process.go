@@ -49,6 +49,7 @@ type Process struct {
 	idle     Timer
 	held     int       // open leases; the idle timer does not run while any is held
 	traffic  time.Time // the last stdin or stdout message, or the start
+	reaped   func()    // processOptions.reaped
 	evicted  bool      // stopped to make room under a process cap
 	timers   []Timer
 	stopping bool
@@ -65,6 +66,9 @@ type processOptions struct {
 	idleFor time.Duration
 	grace   time.Duration
 	maxMsg  int
+	// reaped, if set, runs as soon as the process has been reaped, before its pipes drain: what
+	// must not outlive the process itself (its token socket) closes there.
+	reaped func()
 }
 
 // startProcess takes over a started cmd and our ends of its pipes: it arms the idle timer and
@@ -73,7 +77,7 @@ func startProcess(cmd *exec.Cmd, stdin, stdout, stderr *os.File, sessionDir stri
 	p := &Process{
 		pid: cmd.Process.Pid, log: o.log, clock: o.clock, idleFor: o.idleFor, grace: o.grace, maxMsg: o.maxMsg,
 		stdin: stdin, messages: make(chan []byte, 16), abandon: make(chan struct{}), done: make(chan struct{}),
-		traffic: o.clock.Now(),
+		traffic: o.clock.Now(), reaped: o.reaped,
 	}
 	p.mu.Lock() // the timer may fire before the assignment completes; stop reads p.idle under p.mu
 	p.idle = o.clock.AfterFunc(o.idleFor, func() {
@@ -327,6 +331,9 @@ func readMessage(br *bufio.Reader, maxLen int) ([]byte, error) {
 // cleans up. Pipes held open by a process outside the group are closed after the grace period.
 func (p *Process) wait(cmd *exec.Cmd, stdout, stderr *os.File, sessionDir string, onExit func()) {
 	err := cmd.Wait()
+	if p.reaped != nil {
+		p.reaped()
+	}
 	p.mu.Lock()
 	// Leftover group members. A PID is not reused while its process group exists, so this reaches
 	// only our own processes, or nothing.

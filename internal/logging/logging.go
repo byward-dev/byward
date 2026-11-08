@@ -33,6 +33,8 @@ var allowed = map[string]bool{
 	// and still pass the bearer-shaped redaction.
 	"upstream": true, "process": true, "user_key": true, "line": true, "truncated": true,
 	"suppressed": true, "exit_code": true, "signal": true, "open_streams": true,
+	// The token socket's refusals (ADR-0017): the process ID of a peer that is not the upstream's.
+	"peer_process": true,
 	// Audit stream (ADR-0021 §3; docs/reference/observability.md). Grant and key IDs are internal
 	// identifiers, never credentials.
 	"log.type": true, "schema_version": true, "event": true, "outcome": true, "client_id": true,

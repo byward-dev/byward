@@ -66,6 +66,11 @@ type Config struct {
 	LookupEnv func(string) (string, bool)
 	// Evicted is told about each process stopped to make room under a cap; may be nil.
 	Evicted func(Eviction)
+	// DownstreamToken, when set, gives every process a token socket (EnvDownstreamTokenSocket in its
+	// environment, in its own session directory) on which the process and its descendants ask for a
+	// downstream API token for its user. It is called with the identity of the request that leased
+	// the process last, whose grant the token is exchanged for (ADR-0017).
+	DownstreamToken func(ctx context.Context, id Identity) DownstreamToken
 }
 
 // Eviction is one process stopped to make room under a cap.
@@ -89,7 +94,8 @@ type Manager struct {
 }
 
 type entry struct {
-	id       Identity
+	id       Identity      // whom the process was started for; never changes
+	latest   Identity      // the same user, as of the request that leased the process last; under m.mu
 	ready    chan struct{} // closed when the spawn finished
 	p        *Process
 	err      error
@@ -182,14 +188,14 @@ func (m *Manager) get(ctx context.Context, key string, id Identity, kind leaseKi
 				}
 				continue
 			}
-			e = &entry{id: id, ready: make(chan struct{}), leases: 1}
+			e = &entry{id: id, latest: id, ready: make(chan struct{}), leases: 1}
 			if kind == streamLease {
 				e.streams = 1
 			}
 			m.procs[key] = e
 			m.live[e] = struct{}{}
 			m.mu.Unlock()
-			p, err := m.spawn(ctx, id, func() { m.forget(key, e) })
+			p, err := m.spawn(ctx, id, func() { m.forget(key, e) }, m.latest(e))
 			m.mu.Lock() // admitLocked reads e.p under m.mu
 			e.p, e.err = p, err
 			m.mu.Unlock()
@@ -205,7 +211,7 @@ func (m *Manager) get(ctx context.Context, key string, id Identity, kind leaseKi
 		if e.id.user() != id.user() {
 			return nil, nil, ErrUserMismatch
 		}
-		p, release, err := m.lease(ctx, key, e, kind)
+		p, release, err := m.lease(ctx, key, e, id, kind)
 		if errors.Is(err, errNotFound) {
 			continue // that spawn failed or the process exited; try our own
 		}
@@ -235,7 +241,7 @@ func (m *Manager) leaseKey(ctx context.Context, key string, id Identity, kind le
 	if e.id.user() != id.user() {
 		return nil, nil, ErrUserMismatch
 	}
-	p, release, err := m.lease(ctx, key, e, kind)
+	p, release, err := m.lease(ctx, key, e, id, kind)
 	if err == nil && p.isStopping() {
 		// Not in lease: Get would spin on a stopping entry that still holds its key.
 		release()
@@ -244,8 +250,9 @@ func (m *Manager) leaseKey(ctx context.Context, key string, id Identity, kind le
 	return p, release, err
 }
 
-// lease waits for e's spawn and leases its process; errNotFound when it failed or has exited.
-func (m *Manager) lease(ctx context.Context, key string, e *entry, kind leaseKind) (*Process, func(), error) {
+// lease waits for e's spawn and leases its process for id, whose request it serves next;
+// errNotFound when the spawn failed or the process has exited.
+func (m *Manager) lease(ctx context.Context, key string, e *entry, id Identity, kind leaseKind) (*Process, func(), error) {
 	select {
 	case <-e.ready:
 	case <-ctx.Done():
@@ -269,9 +276,19 @@ func (m *Manager) lease(ctx context.Context, key string, e *entry, kind leaseKin
 	if kind == streamLease {
 		e.streams++
 	}
+	e.latest = id // the same user; its latest grant is the one the downstream token is for
 	m.mu.Unlock()
 	e.p.hold()
 	return e.p, m.releaser(e, kind), nil
+}
+
+// latest is the identity of the request that leased e's process last.
+func (m *Manager) latest(e *entry) func() Identity {
+	return func() Identity {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		return e.latest
+	}
 }
 
 func (m *Manager) releaser(e *entry, kind leaseKind) func() {
@@ -448,6 +465,13 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+// openTokenSocket opens the token socket of a process started for id in dir; it answers for the
+// identity latest gives at the time of each ask.
+func (m *Manager) openTokenSocket(dir string, id Identity, latest func() Identity) (*tokenSocket, error) {
+	ask := m.cfg.DownstreamToken
+	return listenTokenSocket(dir, m.log.With("user_key", id.Subject), func(ctx context.Context) DownstreamToken { return ask(ctx, latest()) })
+}
+
 // forget drops e: from the keys if it is still there, and from the cap count.
 func (m *Manager) forget(key string, e *entry) {
 	m.mu.Lock()
@@ -458,29 +482,41 @@ func (m *Manager) forget(key string, e *entry) {
 	delete(m.live, e)
 }
 
-// spawn starts one upstream process. The session directory, if the command uses one, is created
-// first and removed on every failure path.
-func (m *Manager) spawn(ctx context.Context, id Identity, onExit func()) (_ *Process, err error) {
+// spawn starts one upstream process. The session directory, if the command or the token socket
+// uses one, is created first and removed on every failure path; latest is the identity the token
+// socket answers for.
+func (m *Manager) spawn(ctx context.Context, id Identity, onExit func(), latest func() Identity) (_ *Process, err error) {
 	ctx, cancel := context.WithTimeout(ctx, m.cfg.SpawnTimeout)
 	defer cancel()
 
 	var dir string
-	if m.cmd.usesSessionDir() {
+	if m.cmd.usesSessionDir() || m.cfg.DownstreamToken != nil {
 		if dir, err = os.MkdirTemp(m.cfg.TempDir, "byward-session-"); err != nil {
 			return nil, fmt.Errorf("stdio: session directory: %w", err)
 		}
 	}
+	var sock *tokenSocket
 	var files []*os.File // every pipe end, closed on failure
 	defer func() {
 		if err != nil {
 			for _, f := range files {
 				_ = f.Close()
 			}
+			if sock != nil {
+				sock.close()
+			}
 			if dir != "" {
 				_ = os.RemoveAll(dir)
 			}
 		}
 	}()
+	env := m.cmd.environ(m.cfg.LookupEnv, id, dir)
+	if m.cfg.DownstreamToken != nil {
+		if sock, err = m.openTokenSocket(dir, id, latest); err != nil {
+			return nil, err
+		}
+		env = append(env, EnvDownstreamTokenSocket+"="+sock.path)
+	}
 	pipe := func() (r, w *os.File, err error) {
 		r, w, err = os.Pipe()
 		if err == nil {
@@ -507,7 +543,7 @@ func (m *Manager) spawn(ctx context.Context, id Identity, onExit func()) (_ *Pro
 	cmd := &exec.Cmd{
 		Path:        m.cmd.path,
 		Args:        m.cmd.argv(dir),
-		Env:         m.cmd.environ(m.cfg.LookupEnv, id, dir),
+		Env:         env,
 		Stdin:       inR,
 		Stdout:      outW,
 		Stderr:      errW,
@@ -528,6 +564,12 @@ func (m *Manager) spawn(ctx context.Context, id Identity, onExit func()) (_ *Pro
 	opts := processOptions{
 		log: m.log.With("process", cmd.Process.Pid, "user_key", id.Subject), clock: m.cfg.Clock,
 		idleFor: m.cfg.IdleTimeout, grace: m.cfg.KillGrace, maxMsg: m.cfg.MaxMessageBytes,
+	}
+	if sock != nil {
+		// Closed as soon as the process is reaped: a descendant that still holds its pipes must not
+		// keep a socket whose root's PID may already be reused.
+		opts.reaped = sock.close
+		go sock.serve(cmd.Process.Pid)
 	}
 	return startProcess(cmd, inW, outR, errR, dir, opts, onExit), nil
 }

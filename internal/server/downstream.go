@@ -14,12 +14,15 @@ import (
 	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/resource"
+	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/upstream/relay"
+	"github.com/byward-dev/byward/internal/upstream/stdio"
 )
 
-// downstreamTokens is On-Behalf-Of for the HTTP upstream (ADR-0017): every request carries a
-// token for the downstream API in its own header, exchanged for the signed-in user's stored IdP
-// token and cached.
+// downstreamTokens is On-Behalf-Of (ADR-0017): a token for the downstream API, exchanged for the
+// signed-in user's stored IdP token and cached. Every request to an HTTP upstream carries it in
+// its own header; a stdio upstream process asks its token socket for it (forProcess), after the
+// same check in front of every request has made sure there is one.
 type downstreamTokens struct {
 	cache    *downstream.Cache
 	header   string
@@ -31,6 +34,7 @@ type downstreamTokens struct {
 	idp        string
 	log        *slog.Logger
 	o          Observability
+	now        func() time.Time
 }
 
 func newDownstreamTokens(scopes []string, header string, provider *entra.Provider, idpName string, assertion func(context.Context, string) (string, time.Time, error),
@@ -42,7 +46,7 @@ func newDownstreamTokens(scopes []string, header string, provider *entra.Provide
 	res := scopes[0][:strings.LastIndex(scopes[0], "/")]
 	return &downstreamTokens{cache: downstream.New(exchange, scopes, 0, time.Now), header: header, resource: res,
 		assertion: assertion, consentURL: func(tid string) string { return provider.AdminConsentURL(tid, scopes) },
-		idp: idpName, log: log, o: o}
+		idp: idpName, log: log, o: o, now: time.Now}
 }
 
 // downstreamKey carries a request's downstream token from middleware to the relay.
@@ -117,7 +121,14 @@ func outcomeOf(err error) string {
 
 // refuse answers a request without a downstream token, alerts the operator and records it.
 func (d *downstreamTokens) refuse(w http.ResponseWriter, r *http.Request, id resource.Identity, outcome string, err error) {
-	ctx := r.Context()
+	d.record(r.Context(), r, id, outcome, err)
+	relay.Answer(w, r, refusalMessage(outcome, d.resource), map[string]string{"downstream": outcome}, http.StatusServiceUnavailable)
+}
+
+// record alerts the operator to a refused token and records it: the metric, the audit record (for
+// request r, nil for a stdio process's own ask) and the error log, with the admin-consent URL when
+// consent is missing.
+func (d *downstreamTokens) record(ctx context.Context, r *http.Request, id resource.Identity, outcome string, err error) {
 	d.o.Metrics.Downstream(outcome)
 	d.o.Audit.Record(r, audit.Event{Name: audit.DownstreamTokenRefused, Outcome: audit.Failure, Reason: outcome,
 		ClientID: id.ClientID, UserKey: id.Subject, GrantID: id.GrantID, IdP: d.idp})
@@ -136,8 +147,53 @@ func (d *downstreamTokens) refuse(w http.ResponseWriter, r *http.Request, id res
 		tid, _, _ := strings.Cut(id.Subject, ":")
 		attrs = append(attrs, "admin_consent_url", d.consentURL(tid))
 	}
+	if r == nil {
+		d.log.ErrorContext(ctx, "no downstream token for a stdio process's ask on its token socket", attrs...)
+		return
+	}
 	d.log.ErrorContext(ctx, "no downstream token for the upstream request; answered in the proxy's name", attrs...)
-	relay.Answer(w, r, refusalMessage(outcome, d.resource), map[string]string{"downstream": outcome}, http.StatusServiceUnavailable)
+}
+
+// forProcess is the downstream token a stdio upstream process asks its token socket for: for its
+// user, exchanged for the stored IdP token of the grant whose request it served last. A refusal
+// is alerted and recorded as for a request; the process gets only the outcome. An app-only caller
+// acts for no user (no_user). A grant whose stored token or own lifetime has ended, or that was
+// revoked or signed out since, waits for the client's next request (sign_in_expired): byward never
+// refreshes IdP tokens outside a request.
+func (d *downstreamTokens) forProcess(ctx context.Context, p stdio.Identity) stdio.DownstreamToken {
+	id := resource.Identity{Subject: p.Subject, PrincipalType: p.PrincipalType, GrantID: p.Grant, ClientID: p.Client}
+	tid, oid, keyed := strings.Cut(id.Subject, ":")
+	if id.PrincipalType == resource.PrincipalClient || !keyed || id.GrantID == "" {
+		d.o.Metrics.Downstream("no_user")
+		return stdio.DownstreamToken{Error: "no_user"}
+	}
+	assertion, expires, err := d.assertion(ctx, id.GrantID)
+	if errors.Is(err, store.ErrNotFound) {
+		// Signed out or revoked since its last request (revocation deletes the grant): routine, not
+		// a refusal to alert on; the user's next request, under a new grant, brings a new token.
+		d.o.Metrics.Downstream("sign_in_expired")
+		return stdio.DownstreamToken{Error: "sign_in_expired"}
+	}
+	if err != nil {
+		d.record(ctx, nil, id, "failed", err)
+		return stdio.DownstreamToken{Error: "failed"}
+	}
+	if !expires.IsZero() && !d.now().Before(expires) {
+		d.o.Metrics.Downstream("sign_in_expired")
+		return stdio.DownstreamToken{Error: "sign_in_expired"}
+	}
+	tok, cached, err := d.cache.Token(ctx, downstream.User{TenantID: tid, ObjectID: oid, Assertion: assertion, AssertionExpiresAt: expires})
+	if err != nil {
+		outcome := outcomeOf(err)
+		d.record(ctx, nil, id, outcome, err)
+		return stdio.DownstreamToken{Error: outcome}
+	}
+	if cached {
+		d.o.Metrics.Downstream("cached")
+	} else {
+		d.o.Metrics.Downstream("issued")
+	}
+	return stdio.DownstreamToken{AccessToken: tok.AccessToken, ExpiresAt: tok.ExpiresAt}
 }
 
 // refusalMessage is what the client is told for a refusal outcome; it names the downstream API and
