@@ -229,7 +229,7 @@ func TestCheckOfflineWarnsOfAPlainHTTPUpstreamGivenAsAPublicAddress(t *testing.T
 // of HTTP_PROXY under CGI, warn without naming it.
 func TestDoctorNamesTheEnvironmentsProxyWithoutItsCredentials(t *testing.T) {
 	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
-		fakeidp.WithClient(fakeidp.Client{ID: "00000000-0000-0000-0000-000000000002", Secrets: []string{"s3cret-entra"}}))
+		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{"s3cret-entra"}}))
 	for _, tc := range []struct {
 		name     string
 		cfg      func(*testing.T, string) *config.Config // nil: without authentication
@@ -287,7 +287,7 @@ func TestDoctorNamesTheEnvironmentsProxyWithoutItsCredentials(t *testing.T) {
 // doctor reports the plain-http hop with and without authentication, naming what travels in clear.
 func TestDoctorWarnsOfThePlainHTTPHop(t *testing.T) {
 	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
-		fakeidp.WithClient(fakeidp.Client{ID: "00000000-0000-0000-0000-000000000002", Secrets: []string{"s3cret-entra"}}))
+		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{"s3cret-entra"}}))
 	for _, tc := range []struct {
 		name string
 		cfg  *config.Config
