@@ -409,8 +409,8 @@ func TestATokenSuccessWithoutTokensIsFatal(t *testing.T) {
 	e.p.fetch.Client = &http.Client{Transport: emptySuccess{}}
 	_, _, err := e.p.Refresh(context.Background(), "rt")
 	var ie *idp.Error
-	if !errors.As(err, &ie) || ie.Class != idp.Fatal {
-		t.Fatalf("err = %#v, want Fatal", err)
+	if !errors.As(err, &ie) || ie.Class != idp.Fatal || !ie.Alert {
+		t.Fatalf("err = %#v, want Fatal with an operator alert", err)
 	}
 }
 

@@ -72,23 +72,27 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	if err != nil {
 		return nil, err
 	}
+	defer func() { // every later failure closes the store it opened
+		if err != nil {
+			_ = st.Close()
+		}
+	}()
 	w := &wiring{cfg: cfg, log: log, o: o, parts: parts, store: st,
 		guard: ssrfguard.New(ssrfguard.Config{})} // every client-supplied URL (CIMD documents, jwks_uri) goes through it
 	clients := registration.Chain{static}
 	var registrar broker.Registrar
 	for _, source := range clientSources {
-		if c, r := source(w); c != nil {
+		c, r, err := source(w)
+		if err != nil {
+			return nil, err
+		}
+		if c != nil {
 			clients = append(clients, c)
-			if r != nil {
-				registrar = r
-			}
+		}
+		if r != nil {
+			registrar = r
 		}
 	}
-	defer func() {
-		if err != nil {
-			_ = st.Close()
-		}
-	}()
 	b, err := newBroker(broker.Config{Issuer: cfg.Issuer(), Origin: cfg.Origin(), Resource: cfg.PublicURL, Scope: cfg.Scope,
 		IdPName: ip.name, IdPLabel: ip.label, IdPScopes: ip.scope, IdP: ip.adapter, Clients: clients, CIMD: cfg.CIMD, Registrar: registrar, ObserveRegistration: o.Metrics.DCRRegistration,
 		Store: st, Sealer: sealer, LoginBox: parts.loginBox, IdPTokenBox: parts.idpBox, ConsentBox: parts.consentBox, ConsentHintBox: parts.hintBox, ObserveConsent: o.Metrics.Consent, Gate: g,
@@ -144,7 +148,7 @@ type wiring struct {
 
 // clientSources add client registries after the static clients, in this order; each returns nil
 // when its feature is off, and the registry that also registers clients (DCR) as the Registrar.
-var clientSources = []func(*wiring) (registration.Registry, broker.Registrar){wireCIMD, wireDCR}
+var clientSources = []func(*wiring) (registration.Registry, broker.Registrar, error){wireCIMD, wireDCR}
 
 // authFeatures complete auth once the broker is built, in this order (the plain identity headers
 // need the assertion's minter).

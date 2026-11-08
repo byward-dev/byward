@@ -238,8 +238,8 @@ func TestFetcherBoundsBodiesAndRefusesRedirects(t *testing.T) {
 	// A success without tokens is a protocol violation, not an outage: Fatal, so the broker fails the
 	// request and keeps the grant instead of answering "try again".
 	_, err := f.PostToken(context.Background(), srv.URL+"/ok", url.Values{}, nil)
-	if err == nil || ClassOf(err) != Fatal {
-		t.Errorf("a success without tokens: %v, class %v, want Fatal", err, ClassOf(err))
+	if ie := (*Error)(nil); !errors.As(err, &ie) || ie.Class != Fatal || !ie.Alert {
+		t.Errorf("a success without tokens: %#v, want Fatal with an operator alert", err)
 	}
 	if c := NewHTTPClient(); c.Timeout != 5*time.Second {
 		t.Errorf("timeout = %v", c.Timeout)

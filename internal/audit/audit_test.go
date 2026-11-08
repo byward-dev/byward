@@ -3,6 +3,7 @@ package audit
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -113,10 +114,15 @@ func eventNames(t *testing.T) []string {
 		}
 		for _, spec := range g.Specs {
 			for _, v := range spec.(*ast.ValueSpec).Values {
-				if lit, ok := v.(*ast.BasicLit); ok {
-					n, _ := strconv.Unquote(lit.Value)
-					names = append(names, n)
+				lit, ok := v.(*ast.BasicLit)
+				n, err := "", errors.New("not a string literal")
+				if ok {
+					n, err = strconv.Unquote(lit.Value)
 				}
+				if err != nil {
+					t.Fatalf("an event name in audit.go is not a plain string: %v", err)
+				}
+				names = append(names, n)
 			}
 		}
 	}

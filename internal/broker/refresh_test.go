@@ -983,3 +983,38 @@ func TestAccessTokensAreCappedAtTheIdPTokenWhenOnBehalfOfIsOn(t *testing.T) {
 		})
 	}
 }
+
+// breakableIdP is an IdP whose refresh breaks the protocol (e.g. a success without tokens) while
+// *broken is set.
+type breakableIdP struct {
+	IdP
+	broken *bool
+}
+
+func (b breakableIdP) Refresh(ctx context.Context, rt string) (*idp.Identity, idp.Tokens, error) {
+	if *b.broken {
+		return nil, idp.Tokens{}, &idp.Error{Class: idp.Fatal, Err: errors.New("token endpoint returned a success without tokens")}
+	}
+	return b.IdP.Refresh(ctx, rt)
+}
+
+// An IdP that breaks the protocol at refresh fails that refresh (500) and keeps the grant: only
+// SignInAgain ends a session, and a misbehaving IdP is not the user's session ending.
+func TestAFatalIdPErrorAtRefreshFailsTheRequestAndKeepsTheGrant(t *testing.T) {
+	broken := false
+	e := newEnv(t, func(c *Config) { c.IdP = breakableIdP{c.IdP, &broken} })
+	rt := e.offline(t)["refresh_token"].(string)
+	broken = true
+	res, body := e.refresh(t, rt, "")
+	wantOAuthError(t, res, body, http.StatusInternalServerError, "server_error")
+	if e.grantGone(t, firstGrant(e.st)) || len(e.auditEvents(t, "grant_revoked")) != 0 {
+		t.Fatal("a fatal IdP error at refresh revoked the grant")
+	}
+	if got := e.idpOps[len(e.idpOps)-1]; got != "refresh rejected" {
+		t.Errorf("IdP observation %q, want refresh rejected", got)
+	}
+	broken = false
+	if res, body := e.refresh(t, rt, ""); res.StatusCode != http.StatusOK {
+		t.Fatalf("refresh once the IdP recovered: %d %v, want 200 without a new sign-in", res.StatusCode, body)
+	}
+}

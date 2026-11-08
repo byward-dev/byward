@@ -50,7 +50,7 @@ const (
 
 var t0 = time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 
-// memStore is the in-memory store, recording created grant IDs so tests can find "the" grant.
+// errStoreDown is the failure the broker tests inject into the store (memstore.Fail, memstore.Down).
 var errStoreDown = errors.New("store down")
 
 // failingStore is an empty store whose methods return err.

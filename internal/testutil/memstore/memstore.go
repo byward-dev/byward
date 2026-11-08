@@ -6,6 +6,7 @@ package memstore
 import (
 	"context"
 	"crypto/sha256"
+	"reflect"
 	"slices"
 	"sync"
 	"time"
@@ -27,12 +28,29 @@ type Store struct {
 // New returns an empty store with no failures.
 func New() *Store { return &Store{Store: memory.New(), fail: map[string]error{}} }
 
+// methods are store.Store's method names; Fail refuses any other, so a typo cannot silently
+// inject nothing.
+var methods = func() map[string]bool {
+	t := reflect.TypeFor[store.Store]()
+	m := make(map[string]bool, t.NumMethod())
+	for i := range t.NumMethod() {
+		m[t.Method(i).Name] = true
+	}
+	return m
+}()
+
 // Fail makes the named methods return err (store.ErrReused for RotateRefreshToken reports reuse
-// without recording it, as when another replica won the race); a nil err clears them.
-func (s *Store) Fail(err error, methods ...string) {
+// without recording it, as when another replica won the race); a nil err clears them. A name that
+// is not a store.Store method panics.
+func (s *Store) Fail(err error, names ...string) {
+	for _, m := range names {
+		if !methods[m] {
+			panic("memstore: Fail: " + m + " is not a store.Store method")
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, m := range methods {
+	for _, m := range names {
 		if err == nil {
 			delete(s.fail, m)
 		} else {
