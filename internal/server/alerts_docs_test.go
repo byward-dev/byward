@@ -83,8 +83,8 @@ func selectedReasons(text string) []string {
 // #204: a misspelled reason in any selector form (=, !=, =~, !~, an alternation) fails the docs
 // check, not only in the = form.
 func TestADocumentedSelectorInAnyMatcherFormIsChecked(t *testing.T) {
-	got := selectedReasons(`byward_idp_alerts_total{idp="entra",reason=~"credential_rejected|protocol"} byward_idp_alerts_total{reason!="protocl"}`)
-	if want := []string{"credential_rejected", "protocol", "protocl"}; !slices.Equal(got, want) {
+	got := selectedReasons(`byward_idp_alerts_total{idp="entra",reason=~"credential_rejected|protocol"} byward_idp_alerts_total{reason!="protocl"} byward_idp_alerts_total{reason!~"credential_unusable|protocl"}`)
+	if want := []string{"credential_rejected", "protocol", "protocl", "credential_unusable", "protocl"}; !slices.Equal(got, want) {
 		t.Errorf("selectedReasons = %q, want %q", got, want)
 	}
 }
