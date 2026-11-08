@@ -75,6 +75,13 @@ Several agents often work on this repo at once. These rules keep their work from
   by regenerating it: `BYWARD_UPDATE_REFERENCE=1 go test ./internal/config/`.
 - **Sweeps run as one subagent per angle** (runtime; 5 SOLID; 7 tests) through ordinary subagent
   calls. Multi-agent workflow tooling needs the maintainer's explicit opt-in.
+- **A mutation result counts only if the run was real:** the baseline is green with the same
+  toolchain (the pinned Go, not an untrusted tool setup that fails before tests run), and the killing
+  test is named and seen failing on the mutant.
+- **Don't poll CI in loops.** The GitHub API budget is shared by every agent on the account; let the
+  coordinating session watch checks, or wait at least 60 s between polls.
+- **One session files issues.** When several agents work at once, send issue drafts to the
+  coordinating session instead of filing them, so nothing is filed twice.
 
 ## Agent skills
 

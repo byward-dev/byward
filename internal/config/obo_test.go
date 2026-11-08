@@ -19,6 +19,10 @@ func TestOnBehalfOfSettings(t *testing.T) {
 		"Microsoft Graph":         {"https://graph.microsoft.com/User.Read", "https://graph.microsoft.com/Mail.Read"},
 		"an API of one's own":     {"api://00000000-0000-0000-0000-0000000000aa/Files.Read"},
 		"the resource's .default": {"https://graph.microsoft.com/.default"},
+		// #196: Entra's first-party APIs are addressed by app ID, e.g. AKS's server app.
+		"an app ID's .default":   {"6dae42f8-4368-4678-94ff-3960e28e3630/.default"},
+		"an app ID's two scopes": {"2a72489c-aab2-4b65-b93a-a91edccf33b8/a", "2a72489c-aab2-4b65-b93a-a91edccf33b8/b"},
+		"an app ID's scope":      {"2a72489c-aab2-4b65-b93a-a91edccf33b8/user_impersonation"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			const header = "X-Downstream" // set in lower case, canonicalised
@@ -71,6 +75,14 @@ func TestOnBehalfOfSettingsAreRefusedWhenTheyCannotWork(t *testing.T) {
 		{"a plain identity header", []string{"BYWARD_OBO_HEADER=X-Byward-Subject"}, "plain identity headers"},
 		{"plain http", []string{"BYWARD_OBO_SCOPES=http://graph.microsoft.com/User.Read"}, "is not a scope URI"},
 		{"a scheme alone", []string{"BYWARD_OBO_SCOPES=api://x"}, "is not a scope URI"},
+		{"an app ID and another API", []string{"BYWARD_OBO_SCOPES=6dae42f8-4368-4678-94ff-3960e28e3630/.default https://graph.microsoft.com/User.Read"}, "different APIs"},
+		// Whether Entra counts api://<app ID> and <app ID> as one resource is unverified, so they do not mix.
+		{"an app ID and its api:// form", []string{"BYWARD_OBO_SCOPES=6dae42f8-4368-4678-94ff-3960e28e3630/.default api://6dae42f8-4368-4678-94ff-3960e28e3630/x"}, "different APIs"},
+		{"an api:// API and another app ID", []string{"BYWARD_OBO_SCOPES=api://2a72489c-aab2-4b65-b93a-a91edccf33b8/x 6dae42f8-4368-4678-94ff-3960e28e3630/.default"}, "different APIs"},
+		{"two app IDs", []string{"BYWARD_OBO_SCOPES=6dae42f8-4368-4678-94ff-3960e28e3630/.default 2a72489c-aab2-4b65-b93a-a91edccf33b8/.default"}, "different APIs"},
+		{"an app ID without a scope", []string{"BYWARD_OBO_SCOPES=6dae42f8-4368-4678-94ff-3960e28e3630/"}, "is not a scope URI"},
+		{"an app ID with a path", []string{"BYWARD_OBO_SCOPES=6dae42f8-4368-4678-94ff-3960e28e3630/a/b"}, "is not a scope URI"},
+		{"not an app ID", []string{"BYWARD_OBO_SCOPES=6dae42f8-4368-4678-94ff/.default"}, "is not a scope URI"},
 		{"an API without a scope", []string{"BYWARD_OBO_SCOPES=https://graph.microsoft.com"}, "is not a scope URI"},
 		{"a host without a scope", []string{"BYWARD_OBO_SCOPES=https://graph"}, "is not a scope URI"},
 		{"a scope without an API", []string{"BYWARD_OBO_SCOPES=https:///User.Read"}, "is not a scope URI"},
