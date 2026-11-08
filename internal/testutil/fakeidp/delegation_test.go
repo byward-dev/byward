@@ -142,6 +142,17 @@ func TestOnBehalfOfToRegisteredAPI(t *testing.T) {
 	wantClaim(t, at, "azp", f.client.ID)
 }
 
+// #196: an API may be addressed by its app ID alone (<GUID>/<scope>, as for AKS's server app); the
+// token's audience is that app ID.
+func TestOnBehalfOfToAnAPIAddressedByAppID(t *testing.T) {
+	downstream := Client{ID: NewGUID()}
+	f := newFixture(t, Entra, WithClient(downstream))
+	r := f.token(t, oboForm(f.login(t).str("access_token"), downstream.ID+"/.default"))
+	wantStatus(t, r, http.StatusOK)
+	_, at := f.verified(t, r.str("access_token"))
+	wantClaim(t, at, "aud", downstream.ID)
+}
+
 func TestOnBehalfOfRejectsBadAssertions(t *testing.T) {
 	clock := newClock()
 	f := newFixture(t, Entra, WithClock(clock.Now))
