@@ -39,9 +39,10 @@ func TestRedaction(t *testing.T) {
 	}
 }
 
-// A JWT is redacted by its shape, eyJ and two dots, not by the letters eyj: a random base64url
+// Only a credential is redacted: a Bearer or Basic value, or a JWT by its shape, eyJ and two
+// dots, not by the letters eyj: a random base64url
 // client ID contains them about once in a thousand registrations, and the operator needs it (#230).
-func TestOnlyJWTShapedValuesAreRedacted(t *testing.T) {
+func TestOnlyCredentialShapedValuesAreRedacted(t *testing.T) {
 	for name, tc := range map[string]struct {
 		value  any
 		logged string
@@ -49,8 +50,11 @@ func TestOnlyJWTShapedValuesAreRedacted(t *testing.T) {
 		"a client ID with eyJ":            {value: "dcr-Qm9eyJx_7k-eyJAbCdEfGh", logged: "dcr-Qm9eyJx_7k-eyJAbCdEfGh"},
 		"a client ID with eyj":            {value: "dcr-xeyjq0Z-eyjAbCdEfGhIjk", logged: "dcr-xeyjq0Z-eyjAbCdEfGhIjk"},
 		"a URL with eyJ and one dot":      {value: "https://heyJude.example/cb", logged: "https://heyJude.example/cb"},
+		"a host with eyj and two dots":    {value: "https://heyjude.example.com/cb", logged: "https://heyjude.example.com/cb"},
 		"a bare JWT":                      {value: token, logged: redacted},
 		"an unsigned JWT":                 {value: "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ4In0.", logged: redacted},
+		"a JWT cut before its signature":  {value: "stderr: token=eyJhbGciOiJSUzI1NiJ9.eyJ1cG4iOiJh", logged: redacted},
+		"a JWT whose header has a space":  {value: "token eyAiYWxnIjoiUlMyNTYifQ.eyJzdWIiOiJ4In0.c2ln rejected", logged: redacted},
 		"a JWE with no encrypted key":     {value: "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..aXY.Y3Q.dGFn", logged: redacted},
 		"a Bearer value":                  {value: "Bearer opaque-token", logged: redacted},
 		"a Basic value":                   {value: "Basic dXNlcjpwdw==", logged: redacted},
@@ -63,7 +67,7 @@ func TestOnlyJWTShapedValuesAreRedacted(t *testing.T) {
 			New(&buf, "json").Info("x", "reason", tc.value)
 			var line struct{ Reason string }
 			if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
-				t.Fatal(err)
+				t.Fatalf("log line %q: %v", buf.String(), err)
 			}
 			if line.Reason != tc.logged {
 				t.Fatalf("reason logged as %q, want %q", line.Reason, tc.logged)

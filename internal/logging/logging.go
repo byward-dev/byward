@@ -82,10 +82,12 @@ func replace(groups []string, a slog.Attr) slog.Attr {
 	return a
 }
 
-// jwtShape is a compact JWS or JWE anywhere in a string: a header that is base64url JSON, so it
-// starts with eyJ ({"), then two dots. A random base64url identifier has no dots, so it never
-// matches, however often it happens to contain eyJ.
-var jwtShape = regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*\.`)
+// jwtShape is a compact JWS or JWE anywhere in a string. Its header or JWS payload is base64url
+// JSON, so it starts with eyJ ({"); the header may not, when its JSON starts with a space. The
+// segment after eyJ ends in a dot, or at the end of a string cut short (stderr lines are, at
+// MaxStderrLine). A random base64url identifier has no dots, so it never matches, however often it
+// happens to contain eyJ.
+var jwtShape = regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(?:\.|$)|[A-Za-z0-9_-]\.eyJ[A-Za-z0-9_-]*(?:\.|$)`)
 
 func looksSecret(s string) bool {
 	l := strings.ToLower(s)
