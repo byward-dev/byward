@@ -58,8 +58,9 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) §1�
       `0600` and owned by the proxy's user, never inline; it and the assertion use separate headers
       ([upstream credential](upstream-credential.md)).
 - [ ] Configure the upstream's verifier with the audience `BYWARD_UPSTREAM_URL` exactly, and with
-      the JWKS of the internal listener if it cannot reach the public one
-      ([reference](../reference/identity-assertion.md#verifying)).
+      the public https JWKS or a pinned `byward jwks` file. The internal listener's JWKS is plain
+      http: only on the same host, or under a NetworkPolicy **and** mesh mTLS
+      ([identity assertion](identity-assertion.md#2-point-the-upstream-at-the-public-keys)).
 - [ ] Keep keys out of backups of the state directory, and out of images and repositories. The
       store never holds them ([ADR-0007](../adr/0007-state-and-storage.md) §5).
 - [ ] Rotate by adding a file whose name sorts last (date names), restarting, and removing the old

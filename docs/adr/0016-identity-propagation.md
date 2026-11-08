@@ -110,3 +110,10 @@ Every assertion carries `principal_type`: `user`, or `client` for an Entra app-o
 The minter refuses an identity without one rather than defaulting to `user`. stdio processes get
 `BYWARD_PRINCIPAL_TYPE` and the plain identity headers (§5) `X-Byward-Principal-Type` with the same
 values.
+
+## Amendment 2026-11-08 (#187): the internal listener's JWKS
+
+§3's JWKS on the internal listener is plain http, so over any network hop an on-path attacker can
+substitute keys and forge assertions. The docs offer it only for an upstream on the same host or
+behind a NetworkPolicy and mesh mTLS; otherwise the upstream uses the public https JWKS or a pinned
+`byward jwks` export. TLS on the internal listener, reusing #183's pair, is possible later.
