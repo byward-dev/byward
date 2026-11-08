@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -48,6 +49,13 @@ const (
 	// that takes its whole time still reaches the peer.
 	tokenWriteMargin = 5 * time.Second
 	maxTokenRequest  = 4 << 10
+	// refusalWait is how long a refused peer is given to send its request, which is read and
+	// discarded so its write does not fail with EPIPE (#244). It is short: the socket serves one
+	// connection at a time, and a stranger must not hold it for a legitimate process's bound.
+	refusalWait = time.Second
+	// maxRefusedRequest bounds what is read from a refused peer before answering, past the socket
+	// buffer a large request would otherwise fill.
+	maxRefusedRequest = 64 << 10
 	// maxAncestry bounds the walk from a peer up to the upstream process.
 	maxAncestry = 64
 )
@@ -58,9 +66,10 @@ type tokenSocket struct {
 	path   string
 	log    *slog.Logger
 	answer func(context.Context) DownstreamToken
-	// timeout bounds a connection and margin is kept of it for the answer's write:
-	// tokenAnswerTimeout and tokenWriteMargin, shorter in tests.
-	timeout, margin time.Duration
+	// timeout bounds a connection and margin is kept of it for the answer's write; refusalWait
+	// bounds the read of a refused peer's request: tokenAnswerTimeout, tokenWriteMargin and
+	// refusalWait, shorter in tests.
+	timeout, margin, refusalWait time.Duration
 }
 
 // listenTokenSocket opens the token socket in dir, readable and writable by our uid only, inside
@@ -79,7 +88,8 @@ func listenTokenSocket(dir string, log *slog.Logger, answer func(context.Context
 		_ = ln.Close()
 		return nil, fmt.Errorf("stdio: token socket: %w", err)
 	}
-	return &tokenSocket{ln: ln, path: path, log: log, answer: answer, timeout: tokenAnswerTimeout, margin: tokenWriteMargin}, nil
+	return &tokenSocket{ln: ln, path: path, log: log, answer: answer, timeout: tokenAnswerTimeout, margin: tokenWriteMargin,
+		refusalWait: refusalWait}, nil
 }
 
 // serve answers requests from root (the upstream process) and its descendants until the socket is
@@ -115,10 +125,10 @@ func (s *tokenSocket) handle(c *net.UnixConn, root int) {
 		}
 		s.log.Warn("token socket: the peer is not the upstream process or one of its descendants", attrs...)
 		// Read its request before answering: a peer whose write found the connection already closed
-		// would get EPIPE, not the refusal (#244). The read is bounded like any request, and a peer
-		// that sends nothing is answered a margin before the deadline.
-		_ = c.SetReadDeadline(deadline.Add(-s.margin))
-		_, _ = bufio.NewReaderSize(c, maxTokenRequest).ReadSlice('\n')
+		// would get EPIPE, not the refusal (#244). The read takes at most refusalWait and
+		// maxRefusedRequest, so a silent or flooding stranger holds the socket only briefly.
+		_ = c.SetReadDeadline(time.Now().Add(s.refusalWait))
+		discardLine(c, maxRefusedRequest)
 		refuse(TokenRefused)
 		return
 	}
@@ -140,6 +150,16 @@ func (s *tokenSocket) handle(c *net.UnixConn, root int) {
 		return
 	}
 	reply(map[string]string{"access_token": t.AccessToken, "expires_at": t.ExpiresAt.UTC().Format(time.RFC3339)})
+}
+
+// discardLine reads from r up to the first newline, at most limit bytes, or until a read fails.
+func discardLine(r io.Reader, limit int) {
+	br := bufio.NewReaderSize(io.LimitReader(r, int64(limit)), maxTokenRequest)
+	for {
+		if _, err := br.ReadSlice('\n'); !errors.Is(err, bufio.ErrBufferFull) {
+			return
+		}
+	}
 }
 
 // errNotDescendant is reported when a peer's ancestry never reaches the upstream process.

@@ -368,8 +368,9 @@ func TestARefusedPeerThatWritesLateStillReadsTheRefusal(t *testing.T) {
 	}
 }
 
-// A refused peer that never sends a request is still answered, and closed, within the deadline.
-func TestARefusedPeerThatSendsNothingIsAnsweredBeforeTheDeadline(t *testing.T) {
+// A refused peer that never sends a request is answered soon, and the connection closed, so it does
+// not hold the socket for the processes that may ask.
+func TestARefusedPeerThatSendsNothingIsAnsweredSoonAndClosed(t *testing.T) {
 	s, err := listenTokenSocket(shortTempDir(t), slog.New(&recorder{mu: &sync.Mutex{}, recs: &[]record{}}), func(context.Context) DownstreamToken {
 		t.Error("a refused peer reached the token source")
 		return DownstreamToken{}
@@ -378,7 +379,7 @@ func TestARefusedPeerThatSendsNothingIsAnsweredBeforeTheDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(s.close)
-	s.timeout, s.margin = 400*time.Millisecond, 200*time.Millisecond
+	s.refusalWait = 200 * time.Millisecond
 	go s.serve(stranger(t))
 	start := time.Now()
 	c, err := net.Dial("unix", s.path)
@@ -392,13 +393,36 @@ func TestARefusedPeerThatSendsNothingIsAnsweredBeforeTheDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the answer: %v", err)
 	}
-	if took := time.Since(start); took >= s.timeout {
-		t.Fatalf("answered after %v, want before the %v deadline", took, s.timeout)
+	// The socket serves one connection at a time: a stranger must give it up soon, not at the
+	// connection's 40 s deadline.
+	if took := time.Since(start); took >= 4*s.refusalWait {
+		t.Fatalf("answered after %v, want within about %v", took, s.refusalWait)
 	}
 	if _, _, code := answerOf(t, strings.TrimSuffix(answer, "\n")); code != TokenRefused {
 		t.Fatalf("answer %q, want the error %s", answer, TokenRefused)
 	}
 	if _, err := r.ReadByte(); !errors.Is(err, io.EOF) {
 		t.Fatalf("after the answer: %v, want the connection closed", err)
+	}
+}
+
+// A refused peer's request larger than the socket buffer is drained too, so its write completes
+// and it reads the refusal.
+func TestARefusedPeerWithALargeRequestStillReadsTheRefusal(t *testing.T) {
+	c, err := net.Dial("unix", serveFor(t, stranger(t), &tokens{}, &recorder{mu: &sync.Mutex{}, recs: &[]record{}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	_ = c.SetDeadline(time.Now().Add(guard))
+	if _, err := c.Write([]byte(`{"pad":"` + strings.Repeat("x", 48<<10) + `"}` + "\n")); err != nil {
+		t.Fatalf("writing a 48 KiB request: %v, want it accepted", err)
+	}
+	answer, err := bufio.NewReader(c).ReadString('\n')
+	if err != nil {
+		t.Fatalf("reading the answer: %v", err)
+	}
+	if _, _, code := answerOf(t, strings.TrimSuffix(answer, "\n")); code != TokenRefused {
+		t.Fatalf("answer %q, want the error %s", answer, TokenRefused)
 	}
 }
