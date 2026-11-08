@@ -24,19 +24,21 @@ func TestAnOnBehalfOfAlertIsCountedAndLoggedOncePerExchange(t *testing.T) {
 		name    string
 		waiters int
 		leave   bool // the waiters' contexts end before the exchange fails
+		fail    *idp.Error
+		reason  string // the alert line's reason
 	}{
-		{"three waiting requests", 3, false},
-		{"the only request has gone", 1, true},
+		{"three waiting requests", 3, false,
+			&idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialRejected, OperatorHint: "AADSTS7000222: renew the secret"}, "AADSTS7000222: renew the secret"},
+		{"the only request has gone", 1, true, &idp.Error{Class: idp.Fatal, Alert: idp.AlertProtocol}, idp.AlertProtocol.Hint()},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				logs := &syncBuffer{}
 				m := metrics.New()
 				release := make(chan struct{})
-				fail := &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialRejected, OperatorHint: "AADSTS7000222: renew the secret"}
 				exchange := alertingExchange(func(context.Context, string, string, []string) (downstream.Token, error) {
 					<-release
-					return downstream.Token{}, fail
+					return downstream.Token{}, c.fail
 				}, "entra", logging.New(logs, "json"), Observability{Metrics: m})
 				cache := downstream.New(exchange, []string{graphUserRead}, 0, time.Now)
 				ctx, cancel := context.WithCancel(context.Background())
@@ -57,13 +59,18 @@ func TestAnOnBehalfOfAlertIsCountedAndLoggedOncePerExchange(t *testing.T) {
 				cancel()
 				rec := httptest.NewRecorder()
 				m.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
-				if want := `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="credential_rejected"} 1`; !strings.Contains(rec.Body.String(), want) {
+				if want := `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="` + string(c.fail.Alert) + `"} 1`; !strings.Contains(rec.Body.String(), want) {
 					t.Errorf("metrics lack %s:\n%s", want, rec.Body.String())
 				}
 				lines := regexp.MustCompile(`(?m)^.*"msg":"IdP alert: the operator must act".*$`).FindAllString(logs.String(), -1)
-				if len(lines) != 1 || !strings.Contains(lines[0], `"level":"ERROR"`) || !strings.Contains(lines[0], `"operation":"on_behalf_of"`) ||
-					!strings.Contains(lines[0], `"alert":"credential_rejected"`) || !strings.Contains(lines[0], `"reason":"AADSTS7000222: renew the secret"`) {
-					t.Errorf("want one alert line naming the IdP's fix, got %d:\n%s", len(lines), logs)
+				if len(lines) != 1 {
+					t.Fatalf("want one alert line, got %d:\n%s", len(lines), logs)
+				}
+				for _, want := range []string{`"level":"ERROR"`, `"idp":"entra"`, `"operation":"on_behalf_of"`,
+					`"alert":"` + string(c.fail.Alert) + `"`, `"reason":"` + c.reason + `"`} {
+					if !strings.Contains(lines[0], want) {
+						t.Errorf("the alert line lacks %s:\n%s", want, lines[0])
+					}
 				}
 			})
 		})

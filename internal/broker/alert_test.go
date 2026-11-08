@@ -1,8 +1,10 @@
 package broker
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -29,6 +31,32 @@ func refreshFailing(t *testing.T, e *env, f fakeidp.Failure) {
 	e.fake.Set(fakeidp.FailToken(fakeidp.GrantRefreshToken, &f))
 	if res, body := e.refresh(t, rt, ""); res.StatusCode == http.StatusOK {
 		t.Fatalf("the refresh succeeded despite the IdP failure: %v", body)
+	}
+}
+
+// failingCallback is the IdP with its code redemption answering err: for alert reasons the fake IdP
+// cannot produce at the callback.
+type failingCallback struct {
+	IdP
+	err error
+}
+
+func (f failingCallback) Callback(context.Context, url.Values, idp.Login) (idp.Identity, idp.Tokens, error) {
+	return idp.Identity{}, idp.Tokens{}, f.err
+}
+
+// callbackFailingWith restarts the broker with its IdP's code redemption answering err, then signs
+// in to the error page.
+func callbackFailingWith(err error) func(*testing.T, *env, fakeidp.Failure) {
+	return func(t *testing.T, e *env, _ fakeidp.Failure) {
+		t.Helper()
+		cfg := e.cfg
+		cfg.IdP = failingCallback{IdP: cfg.IdP, err: err}
+		e.start(t, cfg)
+		ck, cb := e.startLogin(t, nil)
+		if res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{ck}); res.StatusCode != http.StatusBadGateway {
+			t.Fatalf("callback answered %d, want the IdP failure page (502)", res.StatusCode)
+		}
 	}
 }
 
@@ -65,6 +93,11 @@ func TestIdPErrorsThatNeedTheOperatorRaiseAnAlert(t *testing.T) {
 		// Entra's own hint wins over the default.
 		{"refresh, client secret expired", refreshFailing, fakeidp.ExpiredClientSecret, "refresh credential_rejected", "AADSTS7000222: the client secret has expired; create a new one (or switch to a certificate)."},
 		{"refresh, IdP unavailable", refreshFailing, fakeidp.TemporarilyUnavailable, "", ""},
+		// The other reasons pass through as they are, each with its own fix.
+		{"sign-in, IdP protocol violation", callbackFailingWith(&idp.Error{Class: idp.Fatal, Alert: idp.AlertProtocol}), fakeidp.Failure{},
+			"callback protocol", idp.AlertProtocol.Hint()},
+		{"sign-in, credential unusable", callbackFailingWith(&idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialUnusable}), fakeidp.Failure{},
+			"callback credential_unusable", idp.AlertCredentialUnusable.Hint()},
 		{"forged callback, invalid_client", forgedCallback, fakeidp.InvalidClientSecret, "", ""},
 		{"forged callback, unauthorized_client", forgedCallback, fakeidp.UnknownClient, "", ""},
 	}

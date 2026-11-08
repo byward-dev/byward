@@ -317,6 +317,15 @@ func TestDownstreamRefusalsAreAnsweredInTheProxysName(t *testing.T) {
 			if want := c.alert != ""; counted != want || logged != want {
 				t.Errorf("alert %q counted %v, logged %v; want both %v\nmetrics:\n%s\nlogs:\n%s", c.alert, counted, logged, want, metrics, logs)
 			}
+			alertLines := regexp.MustCompile(`(?m)^.*"msg":"IdP alert: the operator must act".*$`).FindAllString(logs, -1)
+			if c.alert == "" {
+				if len(alertLines) != 0 {
+					t.Errorf("an IdP alert line for a refusal that is not an alert:\n%s", logs)
+				}
+			} else if len(alertLines) != 1 || !strings.Contains(alertLines[0], `"operation":"on_behalf_of"`) ||
+				!strings.Contains(alertLines[0], `"alert":"`+c.alert+`"`) || !strings.Contains(alertLines[0], `"reason":"`+idp.AlertCredentialRejected.Hint()+`"`) {
+				t.Errorf("want one on_behalf_of alert line naming the fix, got %d:\n%s", len(alertLines), logs)
+			}
 		})
 	}
 }
@@ -459,7 +468,7 @@ func TestAClientGoingAwayIsNotARefusal(t *testing.T) {
 }
 
 // #204: a refusal the IdP's error marks as an alert names the IdP's own fix when it has one, else
-// the alert's default, on an alert line; any other refusal is not an alert. (The count is per
+// the alert's default, on the refusal line; any other refusal is not an alert. (The count is per
 // exchange, in TestDownstreamRefusalsAreAnsweredInTheProxysName.)
 func TestARefusalThatNeedsTheOperatorNamesTheFix(t *testing.T) {
 	for _, c := range []struct {
