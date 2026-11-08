@@ -52,6 +52,7 @@ func TestOnlyCredentialShapedValuesAreRedacted(t *testing.T) {
 		"a URL with eyJ and one dot":      {value: "https://heyJude.example/cb", logged: "https://heyJude.example/cb"},
 		"a host with eyj and two dots":    {value: "https://heyjude.example.com/cb", logged: "https://heyjude.example.com/cb"},
 		"a bare JWT":                      {value: token, logged: redacted},
+		"a JWT with _ and - in it":        {value: "eyJhbGciOiJSUzI1NiIsImtpZCI6ImE_Yj5jIn0.eyJzdWIiOiJ4Pz5-In0.c2ln", logged: redacted},
 		"an unsigned JWT":                 {value: "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ4In0.", logged: redacted},
 		"a JWT cut before its signature":  {value: "stderr: token=eyJhbGciOiJSUzI1NiJ9.eyJ1cG4iOiJh", logged: redacted},
 		"a JWT whose header has a space":  {value: "token eyAiYWxnIjoiUlMyNTYifQ.eyJzdWIiOiJ4In0.c2ln rejected", logged: redacted},
