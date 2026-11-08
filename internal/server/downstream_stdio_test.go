@@ -29,7 +29,8 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 		name         string
 		id           func(stdio.Identity) stdio.Identity
 		assertionErr error
-		expires      time.Time // of the stored IdP token
+		expires      time.Time // of the stored IdP token; zero is an hour from now
+		noExpiry     bool      // the IdP gave the stored token no expiry: only the token's own counts
 		exchangeErr  error
 		wantToken    string
 		wantError    string
@@ -37,6 +38,7 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 		exchanged    bool // an exchange with Entra ran: never without a user, a grant or a current sign-in
 	}{
 		{name: "a signed-in user", wantToken: "graph-token", exchanged: true},
+		{name: "a stored token without an expiry", noExpiry: true, wantToken: "graph-token", exchanged: true},
 		{name: "an app-only caller", id: func(i stdio.Identity) stdio.Identity { i.PrincipalType = resource.PrincipalClient; return i }, wantError: "no_user"},
 		{name: "no grant yet", id: func(i stdio.Identity) stdio.Identity { i.Grant = ""; return i }, wantError: "no_user"},
 		{name: "a grant that is gone", assertionErr: errors.New("grant revoked"), wantError: "failed", wantAudit: true},
@@ -56,7 +58,7 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 				return downstream.Token{AccessToken: "graph-token", ExpiresAt: now.Add(time.Hour)}, tc.exchangeErr
 			}
 			expires := tc.expires
-			if expires.IsZero() {
+			if expires.IsZero() && !tc.noExpiry {
 				expires = now.Add(time.Hour)
 			}
 			d := &downstreamTokens{cache: downstream.New(exchange, []string{graphUserRead}, 0, func() time.Time { return now }),
@@ -76,6 +78,11 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 			}
 			if ran := exchanges.Load() > 0; ran != tc.exchanged {
 				t.Fatalf("exchanged with Entra %v, want %v", ran, tc.exchanged)
+			}
+			if tc.wantToken != "" { // a second ask is served from the cache, with no new exchange
+				if again := d.forProcess(context.Background(), id); again.AccessToken != tc.wantToken || exchanges.Load() != 1 {
+					t.Fatalf("second ask got %q after %d exchanges, want the cached token after 1", again.AccessToken, exchanges.Load())
+				}
 			}
 			line, audited := auditRecord(logs.String(), "downstream_token_refused")
 			if audited != tc.wantAudit {
@@ -103,6 +110,9 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 			}
 			if !strings.Contains(scrape.Body.String(), `outcome="`+outcome+`"} 1`) {
 				t.Fatalf("no downstream metric with outcome %s", outcome)
+			}
+			if tc.wantToken != "" && !strings.Contains(scrape.Body.String(), `outcome="cached"} 1`) {
+				t.Fatal("the second ask is not counted as cached")
 			}
 		})
 	}

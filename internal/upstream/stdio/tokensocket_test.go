@@ -32,9 +32,10 @@ func shortTempDir(t *testing.T) string {
 
 // tokens is a Config.DownstreamToken that hands out tok-1, tok-2, ... and records whom each was for.
 type tokens struct {
-	mu   sync.Mutex
-	asks []Identity
-	err  string // when set, every answer is this error
+	mu    sync.Mutex
+	asks  []Identity
+	err   string // when set, every answer is this error
+	empty bool   // when set, every answer has neither a token nor an error
 }
 
 func (k *tokens) answer(_ context.Context, id Identity) DownstreamToken {
@@ -43,6 +44,9 @@ func (k *tokens) answer(_ context.Context, id Identity) DownstreamToken {
 	k.asks = append(k.asks, id)
 	if k.err != "" {
 		return DownstreamToken{Error: k.err}
+	}
+	if k.empty {
+		return DownstreamToken{}
 	}
 	return DownstreamToken{AccessToken: "tok-" + itoa(len(k.asks)), ExpiresAt: time.Date(2026, 11, 8, 13, 0, 0, 0, time.UTC)}
 }
@@ -123,6 +127,13 @@ func TestAnErrorFromTheTokenSourceIsTheAnswerAndNoTokenIsSent(t *testing.T) {
 	line := call(t, h.get(t, "a1", alice), "token")
 	if tok, _, code := answerOf(t, line); tok != "" || code != "consent_required" || strings.Contains(line, "access_token") {
 		t.Fatalf("answer %q, want only the error consent_required", line)
+	}
+}
+
+func TestAnAnswerWithoutATokenIsAFailureNotAnEmptyToken(t *testing.T) {
+	line := call(t, tokenHarness(t, &tokens{empty: true}).get(t, "a1", alice), "token")
+	if tok, _, code := answerOf(t, line); tok != "" || code != "failed" || strings.Contains(line, "access_token") {
+		t.Fatalf("answer %q, want only the error failed", line)
 	}
 }
 
