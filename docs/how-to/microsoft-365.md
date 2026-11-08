@@ -1,5 +1,7 @@
 # Microsoft 365 data for each signed-in user: a Graph MCP server with On-Behalf-Of
 
+> Not yet verified on a real Microsoft 365 tenant; the run checklist is tracked in #212.
+
 Mail, calendar, OneDrive, SharePoint and Teams data lives behind
 [Microsoft Graph](https://learn.microsoft.com/en-us/graph/overview). An MCP server that calls Graph
 with the signed-in user's own token sees only what that user may see: Graph enforces the user's
@@ -9,8 +11,6 @@ byward gets that token for you. It exchanges each user's sign-in for a Graph tok
 [On-Behalf-Of](downstream-apis.md) flow and passes it to the server in `Authorization`. The server
 holds no Entra credentials, and never sees byward's own token. This is for **self-hosted** Graph
 MCP servers; Microsoft's hosted Work IQ MCP is already Entra-native.
-
-> Not yet verified against a real tenant in this release.
 
 ## 1. Grant the Graph permissions
 
@@ -55,11 +55,12 @@ BYWARD_UPSTREAM_URL=http://graph-mcp.internal:8000/mcp
 
 ## 3. A minimal Graph MCP server
 
-This server, in Python with the official MCP SDK, lists the signed-in user's five newest messages.
+This server, in Python with the official MCP SDK 1.x (tested with 1.30.0; SDK 2.x renamed FastMCP
+to MCPServer), lists the signed-in user's five newest messages.
 It forwards the `Authorization` header it receives to Graph and does nothing else with it:
 
 ```python
-# graph_mcp.py: pip install "mcp[cli]" httpx
+# graph_mcp.py: pip install "mcp[cli]<2" httpx
 import httpx
 from mcp.server.fastmcp import FastMCP, Context
 
