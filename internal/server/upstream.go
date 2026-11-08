@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 
@@ -82,11 +83,20 @@ func checkUpstream(cfg *config.Config) error {
 }
 
 // upstreamResult tells doctor's reader which upstream is configured; doctor checks the proxy in front
-// of it and never reaches the upstream itself.
-func upstreamResult(cfg *config.Config) doctor.Result {
+// of it and never reaches the upstream itself. proxy is the relay's: an HTTP proxy from the
+// environment that the upstream's requests go through is named, with its userinfo redacted.
+func upstreamResult(cfg *config.Config, proxy func(*http.Request) (*url.URL, error)) doctor.Result {
 	r := doctor.Result{Class: doctor.ClassProxy, Name: "upstream", Status: doctor.Pass}
 	if cfg.UpstreamCommand == nil {
 		r.Message = "HTTP upstream " + cfg.UpstreamURL.String() + "; doctor checks the proxy in front of it, not the upstream itself"
+		switch via, err := proxy(&http.Request{URL: cfg.UpstreamURL}); {
+		case err != nil: // the error quotes the setting, which may hold a password
+			r.Status = doctor.Warn
+			r.Message += "; the environment's HTTP proxy setting is not a valid URL, so every request to the upstream fails"
+			r.Fix = "fix HTTP_PROXY or HTTPS_PROXY, or list the upstream's host in NO_PROXY"
+		case via != nil:
+			r.Message += "; requests to it go through the HTTP proxy " + via.Redacted() + " from the environment (list the upstream's host in NO_PROXY to reach it directly)"
+		}
 		if !cfg.NoAuth {
 			r.Message += "; requests carry the identity assertion in " + cfg.AssertionHeader + ", with aud " + cfg.UpstreamURL.String()
 		}

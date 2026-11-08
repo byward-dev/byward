@@ -14,6 +14,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -582,5 +583,59 @@ func TestAnInterimSwitchingProtocolsIsNeverForwarded(t *testing.T) {
 	w.WriteHeader(http.StatusOK)
 	if rec.Code != http.StatusOK || rec.Header().Get("Mcp-Session-Id") != "" {
 		t.Fatalf("status %d, headers %v; want the final 200 without the 101's headers", rec.Code, rec.Header())
+	}
+}
+
+// An upstream redirect never reaches the MCP client, which would follow it away from the proxy: the
+// client gets 502 and the log names where the upstream pointed, without the parts that could carry
+// a secret. A 304 answers a conditional request and is passed on.
+func TestAnUpstreamRedirectGetsTheClientA502AndTheLogWhereItPointed(t *testing.T) {
+	up := fakeupstream.New()
+	t.Cleanup(up.Close)
+	for _, tc := range []struct {
+		name     string
+		status   int
+		location string
+		logged   string // in the log's reason; "" for a 304
+	}{
+		{"to https", http.StatusMovedPermanently, "https://mcp.internal.example/mcp", "points to https://mcp.internal.example/mcp; if that is its MCP endpoint, set BYWARD_UPSTREAM_URL to it"},
+		{"found", http.StatusFound, "https://mcp.internal.example/mcp", "points to https://mcp.internal.example/mcp;"},
+		{"see other", http.StatusSeeOther, "https://mcp.internal.example/mcp", "points to https://mcp.internal.example/mcp;"},
+		{"temporary", http.StatusTemporaryRedirect, "https://mcp.internal.example/mcp", "points to https://mcp.internal.example/mcp;"},
+		{"permanent", http.StatusPermanentRedirect, "https://mcp.internal.example/mcp", "points to https://mcp.internal.example/mcp;"},
+		{"multiple choices", http.StatusMultipleChoices, "https://mcp.internal.example/mcp", "points to https://mcp.internal.example/mcp;"},
+		{"relative", http.StatusPermanentRedirect, "/mcp/", "points to " + up.URL + "/mcp/;"},
+		{"with a secret", http.StatusFound, "https://user:pw-secret@sso.example/login?code=code-secret#frag-secret", "points to https://sso.example/login;"},
+		{"without a Location", http.StatusFound, "", "the upstream sent no usable Location"},
+		{"not modified", http.StatusNotModified, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			up.Handler = func(w http.ResponseWriter, _ *http.Request) {
+				if tc.location != "" {
+					w.Header().Set("Location", tc.location)
+				}
+				w.WriteHeader(tc.status)
+			}
+			u, _ := url.Parse(up.URL + "/mcp")
+			var logs bytes.Buffer
+			w := httptest.NewRecorder()
+			New(slog.New(slog.NewTextHandler(&logs, nil)), u).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader("{}")))
+			if tc.logged == "" {
+				if w.Code != tc.status || logs.Len() != 0 {
+					t.Fatalf("status %d, log %q; want the %d passed on, nothing logged", w.Code, logs.String(), tc.status)
+				}
+				return
+			}
+			if w.Code != http.StatusBadGateway || w.Header().Get("Location") != "" || strings.Contains(w.Body.String(), "example") {
+				t.Fatalf("status %d, Location %q, body %q; want 502 that names nothing of the upstream's", w.Code, w.Header().Get("Location"), w.Body)
+			}
+			if !strings.Contains(logs.String(), "upstream redirected the request") || !strings.Contains(logs.String(), tc.logged) ||
+				!strings.Contains(logs.String(), "status="+strconv.Itoa(tc.status)) {
+				t.Fatalf("log %q; want the redirect, its status and %q", logs.String(), tc.logged)
+			}
+			if strings.Contains(logs.String(), "secret") || strings.Contains(logs.String(), "upstream error") {
+				t.Fatalf("log %q names a secret or logs the redirect twice", logs.String())
+			}
+		})
 	}
 }

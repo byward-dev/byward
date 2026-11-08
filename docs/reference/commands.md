@@ -57,7 +57,8 @@ fail  idp    entra app and credential: Entra rejected the client secret (AADSTS7
 
 | Class | Check | Passes when |
 |---|---|---|
-| `proxy` | upstream | always passes once the configuration loads: names the HTTP upstream, or the stdio command that was found. Doctor never reaches the upstream, and never starts a stdio process |
+| `proxy` | upstream | passes once the configuration loads: names the HTTP upstream, and the environment's HTTP proxy its requests go through (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`; the password redacted), or the stdio command that was found. A warning when that proxy setting is not a valid URL. Doctor never reaches the upstream, and never starts a stdio process |
+| `proxy` | upstream hop | shown only as a warning: the HTTP upstream is `http` and its host resolves to a public address, so the secrets each request carries (the identity assertion, the upstream credential, an On-Behalf-Of token) travel in clear. A host that does not resolve gets no warning. Also logged at startup, and by `check --offline` for an upstream given as an address |
 | `proxy` | configuration | never fails; one warning per startup warning (an empty access gate, generic consent wording) |
 | `proxy` | protected resource metadata (path-inserted) | `/.well-known/oauth-protected-resource<path>` answers 200 with `resource` equal to the public URL and our issuer first in `authorization_servers` |
 | `proxy` | protected resource metadata (root) | the same at `/.well-known/oauth-protected-resource` |

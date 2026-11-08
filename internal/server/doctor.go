@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"time"
 
 	"github.com/byward-dev/byward/internal/config"
@@ -42,7 +43,7 @@ func CheckOffline(cfg *config.Config) ([]Warning, error) {
 		if err := errors.Join(looseSecretFiles(cfg)...); err != nil {
 			return nil, err
 		}
-		return []Warning{{Message: "authentication is off (BYWARD_INSECURE_NO_AUTH); only the settings, the secret files and the upstream were checked"}}, nil
+		return append([]Warning{{Message: "authentication is off (BYWARD_INSECURE_NO_AUTH); only the settings, the secret files and the upstream were checked"}}, offlineHop(cfg)...), nil
 	}
 	parts, err := loadAuthParts(cfg, nil)
 	if err != nil {
@@ -54,7 +55,17 @@ func CheckOffline(cfg *config.Config) ([]Warning, error) {
 	if err := checkStorePaths(cfg); err != nil {
 		return nil, err
 	}
-	return append(parts.warnings, parts.idp.timedWarnings(time.Now())...), nil
+	return append(append(parts.warnings, parts.idp.timedWarnings(time.Now())...), offlineHop(cfg)...), nil
+}
+
+// offlineHop is the plain-http upstream warning without the network: only an upstream given as an
+// address is judged.
+func offlineHop(cfg *config.Config) []Warning {
+	w, ok := plainHTTPUpstream(context.Background(), cfg, func(context.Context, string) ([]netip.Addr, error) { return nil, errors.New("offline") })
+	if !ok {
+		return nil
+	}
+	return []Warning{w}
 }
 
 // checkStorePaths is sqlite.CheckPaths with the settings named, as openStore names them.
@@ -76,6 +87,14 @@ type DoctorOptions struct {
 	// Resolve looks up the upstream's host for the plain identity headers check; nil is the
 	// system resolver.
 	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
+	// UpstreamProxy is the HTTP proxy the relay would use for a request; nil is
+	// http.ProxyFromEnvironment, as the relay's.
+	UpstreamProxy func(*http.Request) (*url.URL, error)
+}
+
+// lookupNetIP is the system resolver.
+func lookupNetIP(ctx context.Context, host string) ([]netip.Addr, error) {
+	return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 }
 
 // probeTimeout bounds one doctor request (the discovery budget in docs/quality-lenses.md).
@@ -91,9 +110,10 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 		o.Proxy = &http.Client{Timeout: probeTimeout}
 	}
 	if o.Resolve == nil {
-		o.Resolve = func(ctx context.Context, host string) ([]netip.Addr, error) {
-			return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-		}
+		o.Resolve = lookupNetIP
+	}
+	if o.UpstreamProxy == nil {
+		o.UpstreamProxy = http.ProxyFromEnvironment
 	}
 	// Configuration errors first: they stop doctor before any check (exit code 2).
 	var r doctor.Report
@@ -104,7 +124,9 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 		if err := errors.Join(looseSecretFiles(cfg)...); err != nil {
 			return r, err
 		}
-		r.Checks = append(r.Checks, upstreamResult(cfg), doctor.Result{Class: doctor.ClassProxy, Name: "authentication", Status: doctor.Warn,
+		r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy))
+		r.Checks = append(r.Checks, upstreamHopResult(ctx, cfg, o.Resolve)...)
+		r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "authentication", Status: doctor.Warn,
 			Message: "authentication is off (BYWARD_INSECURE_NO_AUTH): there is no discovery and no IdP to check",
 			Fix:     "configure an IdP and remove BYWARD_INSECURE_NO_AUTH before exposing the proxy"})
 		return r, nil
@@ -116,7 +138,8 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	if err := checkStorePaths(cfg); err != nil {
 		return r, err
 	}
-	r.Checks = append(r.Checks, upstreamResult(cfg))
+	r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy))
+	r.Checks = append(r.Checks, upstreamHopResult(ctx, cfg, o.Resolve)...)
 	if cfg.IdentityHeaders && cfg.UpstreamCommand == nil {
 		r.Checks = append(r.Checks, identityHeadersResult(ctx, cfg.UpstreamURL.Hostname(), o.Resolve))
 	}
