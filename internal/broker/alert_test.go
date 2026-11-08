@@ -97,7 +97,7 @@ func TestIdPErrorsThatNeedTheOperatorRaiseAnAlert(t *testing.T) {
 
 // #204: every IdP call the broker observes is one of IdPOperations, so its alert series is exported
 // at 0 from the start.
-func TestEveryObservedIdPCallIsAListedOperation(t *testing.T) {
+func TestEveryBrokerIdPCallIsExportedFromTheStart(t *testing.T) {
 	e := newEnv(t)
 	e.offline(t) // authorize and callback
 	refreshFailing(t, e, fakeidp.InvalidClientSecret)

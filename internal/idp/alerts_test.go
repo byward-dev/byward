@@ -13,7 +13,7 @@ import (
 
 // #204: Alerts lists every Alert constant of the package, so metrics export each reason at 0 from
 // the start; a reason declared without joining Alerts would appear only at its first alert.
-func TestAlertsListsEveryAlertReason(t *testing.T) {
+func TestEveryAlertReasonIsExportedFromTheStart(t *testing.T) {
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)

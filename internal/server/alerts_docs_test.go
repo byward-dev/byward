@@ -37,15 +37,37 @@ func TestTheDocumentedIdPAlertLabelsAreTheExportedOnes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	selector := regexp.MustCompile(`byward_idp_alerts_total\{[^}]*reason=~?"([^"]*)"`)
-	if len(selector.FindAllStringSubmatch(string(harden), -1)) == 0 {
+	if len(selectedReasons(string(harden))) == 0 {
 		t.Fatal("harden-a-deployment.md selects no byward_idp_alerts_total reason")
 	}
 	for doc, text := range map[string][]byte{"harden-a-deployment.md": harden, "observability.md": ref} {
-		for _, m := range selector.FindAllStringSubmatch(string(text), -1) {
-			if !slices.Contains(idp.Alerts, idp.Alert(m[1])) {
-				t.Errorf("%s selects reason %q, which the proxy does not export", doc, m[1])
+		for _, r := range selectedReasons(string(text)) {
+			if !slices.Contains(idp.Alerts, idp.Alert(r)) {
+				t.Errorf("%s selects reason %q, which the proxy does not export", doc, r)
 			}
 		}
+	}
+}
+
+var reasonMatcher = regexp.MustCompile(`byward_idp_alerts_total\{[^}]*reason(=|!=|=~|!~)"([^"]*)"`)
+
+// selectedReasons is every reason a byward_idp_alerts_total selector in text names, with each
+// alternative of a regex matcher on its own.
+func selectedReasons(text string) []string {
+	var out []string
+	for _, m := range reasonMatcher.FindAllStringSubmatch(text, -1) {
+		if strings.HasSuffix(m[1], "~") {
+			out = append(out, strings.Split(m[2], "|")...)
+		} else {
+			out = append(out, m[2])
+		}
+	}
+	return out
+}
+
+func TestSelectedReasonsReadsEveryMatcher(t *testing.T) {
+	got := selectedReasons(`byward_idp_alerts_total{idp="entra",reason=~"credential_rejected|protocol"} byward_idp_alerts_total{reason!="protocl"}`)
+	if want := []string{"credential_rejected", "protocol", "protocl"}; !slices.Equal(got, want) {
+		t.Errorf("selectedReasons = %q, want %q", got, want)
 	}
 }

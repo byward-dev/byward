@@ -465,13 +465,13 @@ func TestARefusalThatNeedsTheOperatorNamesTheFixAndCounts(t *testing.T) {
 	for _, c := range []struct {
 		name   string
 		err    *idp.Error
-		reason string // the start of the refusal line's reason, after the outcome
+		reason string // the refusal line's whole reason
 		alert  bool
 	}{
 		{"the IdP's own hint", &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialRejected, OperatorHint: "AADSTS7000222: the client secret has expired"},
-			"AADSTS7000222: the client secret has expired", true},
-		{"the alert's default", &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialRejected}, idp.AlertCredentialRejected.Hint(), true},
-		{"no alert", &idp.Error{Class: idp.Unavailable}, "", false},
+			"unavailable: AADSTS7000222: the client secret has expired", true},
+		{"the alert's default", &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialRejected}, "unavailable: " + idp.AlertCredentialRejected.Hint(), true},
+		{"no alert", &idp.Error{Class: idp.Unavailable}, "unavailable", false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			logs := &syncBuffer{}
@@ -494,8 +494,8 @@ func TestARefusalThatNeedsTheOperatorNamesTheFixAndCounts(t *testing.T) {
 			if !strings.Contains(line, `"level":"ERROR","msg":"no downstream token`) || !strings.Contains(w.Body.String(), `"isError":true`) {
 				t.Fatalf("answer %d %s, logs %s: want a logged refusal in the proxy's name", w.Code, w.Body, line)
 			}
-			if !strings.Contains(line, `"reason":"unavailable: `+c.reason) && c.reason != "" {
-				t.Errorf("the refusal's reason does not start with %q:\n%s", c.reason, line)
+			if !strings.Contains(line, `"reason":"`+c.reason+`"`) {
+				t.Errorf("the refusal's reason is not %q:\n%s", c.reason, line)
 			}
 			if got := strings.Contains(line, `"alert":"credential_rejected"`); got != c.alert {
 				t.Errorf("alert logged %v, want %v:\n%s", got, c.alert, line)
