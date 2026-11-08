@@ -16,6 +16,7 @@ import (
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/testutil/clientdocs"
+	"github.com/byward-dev/byward/internal/testutil/memstore"
 )
 
 // outcomes records what the broker counted for /register.
@@ -112,19 +113,6 @@ func TestRealClientsRegisterSignInAndRefresh(t *testing.T) {
 	}
 }
 
-// fullClients is a store whose registrations are at the cap, or (down) failing.
-type fullClients struct {
-	*memStore
-	down bool
-}
-
-func (f fullClients) CreateClient(context.Context, store.Client, int) error {
-	if f.down {
-		return errors.New("disk I/O error")
-	}
-	return store.ErrFull
-}
-
 // Every refusal is answered in RFC 7591 §3.2.2 JSON, audited and counted, not only successes: an
 // open /register is the classic abuse path. A full or failing store is temporary (503 with
 // Retry-After), never a refusal of the metadata.
@@ -144,8 +132,8 @@ func TestRegistrationRefusalsAreAnsweredAuditedAndCounted(t *testing.T) {
 			code: "invalid_client_metadata", outcome: RegistrationBadMetadata, desc: "the request body could not be read"},
 		"bad metadata":     {body: `{"redirect_uris":["https://app.example/cb"]}`, status: 400, code: "invalid_client_metadata", outcome: RegistrationBadMetadata, desc: "client_name:"},
 		"not sent as JSON": {body: good, contentType: "text/plain", status: 400, code: "invalid_client_metadata", outcome: RegistrationBadMetadata},
-		"at the cap":       {body: good, opt: withStore(fullClients{}), status: 503, code: "temporarily_unavailable", outcome: RegistrationFull, retryAfter: "60"},
-		"store down":       {body: good, opt: withStore(fullClients{down: true}), status: 503, code: "temporarily_unavailable", outcome: RegistrationUnavailable, retryAfter: "60"},
+		"at the cap":       {body: good, opt: withStore(failingStore(store.ErrFull, "CreateClient")), status: 503, code: "temporarily_unavailable", outcome: RegistrationFull, retryAfter: "60"},
+		"store down":       {body: good, opt: withStore(failingStore(errors.New("disk I/O error"), "CreateClient")), status: 503, code: "temporarily_unavailable", outcome: RegistrationUnavailable, retryAfter: "60"},
 		"rate-limited": {body: good, opt: func(c *Config) { c.Limiter = stubLimiter{endpoints: map[string]bool{"register": true}} },
 			status: 429, code: "temporarily_unavailable", outcome: RegistrationRateLimited, retryAfter: "2"},
 	} {
@@ -281,18 +269,13 @@ func TestADeniedRedirectHostStopsARegisteredClient(t *testing.T) {
 	}
 }
 
-// renewFails is a store whose registration renewals fail.
-type renewFails struct{ *memStore }
-
-func (renewFails) UseClient(context.Context, string, time.Time, time.Time, time.Duration) error {
-	return errors.New("disk I/O error")
-}
-
 // A renewal that fails is logged and never fails the token request: the code and the refresh
 // token are still honoured, and the registration simply renews at a later use.
 func TestAFailedRenewalNeverFailsTheTokenRequest(t *testing.T) {
 	e := newEnv(t, func(c *Config) {
-		dcr := newDCRFor(renewFails{c.Store.(*memStore)}, c.Now)
+		st := c.Store.(*memstore.Store)
+		st.Fail(errors.New("disk I/O error"), "UseClient") // registration renewals fail
+		dcr := newDCRFor(st, c.Now)
 		c.Clients, c.Registrar = registration.Chain{c.Clients, dcr}, dcr
 	})
 	_, reg := e.register(t, `{"client_name":"App","redirect_uris":["https://app.example/cb"],"grant_types":["authorization_code","refresh_token"]}`)

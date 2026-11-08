@@ -136,7 +136,7 @@ func TestAStaticClientIsAskedOnceThenRemembered(t *testing.T) {
 	if hintIn(e, back) != nil {
 		t.Fatal("a remembered sign-in renewed the hint")
 	}
-	g, _ := e.st.Grant(context.Background(), e.st.ids[len(e.st.ids)-1])
+	g, _ := e.st.Grant(context.Background(), lastGrant(e.st))
 	if c, err := e.st.Consent(context.Background(), store.ConsentKey{Issuer: g.Issuer, Subject: g.Subject, ClientID: clientID,
 		Redirect: registration.RedirectKey(clientCB), Resource: resourceID}); err != nil || !c.ExpiresAt.Equal(t0.Add(ConsentDelay+ConsentLifetime)) {
 		t.Fatalf("consent after a remembered sign-in: %+v %v, want it to expire 30 days after the Allow", c, err)
@@ -167,7 +167,7 @@ func TestTheConsentPageReturnsForWhatIsNotRemembered(t *testing.T) {
 		"prompt=consent":    {later: url.Values{"prompt": {"login consent"}}},
 		"after 30 days":     {before: func(e *env, _ **http.Cookie) { e.now = e.now.Add(ConsentLifetime) }},
 		"trust withdrawn":   {before: func(e *env, _ **http.Cookie) { e.reg.demote(clientID) }},
-		"the store is down": {before: func(e *env, _ **http.Cookie) { e.st.down.Store(true) }},
+		"the store is down": {before: func(e *env, _ **http.Cookie) { e.st.Down(errStoreDown) }},
 		"without the hint":  {before: func(_ *env, h **http.Cookie) { *h = nil }},
 		"a tampered hint": {before: func(_ *env, h **http.Cookie) {
 			v := []byte((*h).Value)
@@ -240,7 +240,7 @@ func TestALoopbackClientIsRememberedOnAnyPort(t *testing.T) {
 func TestADifferentUserBehindAStaleHintGetsThePageAndNoCode(t *testing.T) {
 	e := newEnv(t, withRemember(t, nil))
 	h := e.remember(t, nil)
-	grants := len(e.st.ids)
+	grants := len(e.st.GrantIDs())
 	e.fake.Set(fakeidp.WithUser(fakeidp.User{OID: fakeidp.NewGUID(), Name: "Mallory"}))
 	res := e.authorizeWith(t, nil, h)
 	if !skipped(res) {
@@ -255,7 +255,7 @@ func TestADifferentUserBehindAStaleHintGetsThePageAndNoCode(t *testing.T) {
 	if c := hintIn(e, back); c == nil || c.MaxAge >= 0 || !c.Secure || c.Path != "/" || !c.HttpOnly {
 		t.Fatalf("hint not cleared: %+v", c)
 	}
-	if len(e.st.ids) != grants {
+	if len(e.st.GrantIDs()) != grants {
 		t.Fatal("a grant was created for the user behind a stale hint")
 	}
 	if rec := e.oneAuditEvent(t, "consent_remembered", map[string]any{"outcome": "failure", "reason": hintUserMismatch, "client_id": clientID, "user_key": "*"}); rec["client_trust"] != nil {
@@ -285,7 +285,7 @@ func TestADifferentUserBehindAStaleHintGetsThePageAndNoCode(t *testing.T) {
 		t.Fatalf("%d consent_remembered records, want only the failure", n)
 	}
 	// The failure names who actually signed in, never the user the hint named.
-	mallory, _ := e.st.Grant(context.Background(), e.st.ids[len(e.st.ids)-1])
+	mallory, _ := e.st.Grant(context.Background(), lastGrant(e.st))
 	if got := e.auditEvents(t, "consent_remembered")[0]["user_key"]; got != mallory.Subject || got == user(e).Subject {
 		t.Fatalf("mismatch record user_key = %v, want the signed-in user %s, not the hinted %s", got, mallory.Subject, user(e).Subject)
 	}
@@ -347,7 +347,7 @@ func TestARememberedSignInGetsNoCodeUnlessTheCallbackCanConfirmTheClientAndConse
 		"the client removed":        {func(_ *testing.T, e *env) { e.reg.remove(clientID) }, http.StatusBadRequest},
 		"its redirect withdrawn":    {func(_ *testing.T, e *env) { e.reg.reregister(clientID, webCB) }, http.StatusBadRequest},
 		"its trust withdrawn":       {func(_ *testing.T, e *env) { e.reg.demote(clientID) }, http.StatusOK},
-		"the consent check failing": {func(_ *testing.T, e *env) { e.st.consentDown.Store(true) }, http.StatusOK},
+		"the consent check failing": {func(_ *testing.T, e *env) { e.st.Fail(errStoreDown, "Consent") }, http.StatusOK},
 		"the registry down":         {func(_ *testing.T, e *env) { e.reg.fail() }, http.StatusInternalServerError},
 		"consent forgotten by revoke-user": {func(t *testing.T, e *env) {
 			if err := e.st.RevokeSubject(context.Background(), user(e).Subject, e.now.Add(1), e.now); err != nil {
@@ -358,15 +358,15 @@ func TestARememberedSignInGetsNoCodeUnlessTheCallbackCanConfirmTheClientAndConse
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t, withRemember(t, nil))
 			h := e.remember(t, nil)
-			grants := len(e.st.ids)
+			grants := len(e.st.GrantIDs())
 			res := e.authorizeWith(t, nil, h)
 			if !skipped(res) {
 				t.Fatal("not remembered before the change")
 			}
 			tc.change(t, e)
 			back := e.finish(t, res)
-			if back.StatusCode != tc.status || back.Header.Get("Location") != "" || len(e.st.ids) != grants {
-				t.Fatalf("callback: %d to %q, %d new grants; want %d, no redirect, no grant", back.StatusCode, back.Header.Get("Location"), len(e.st.ids)-grants, tc.status)
+			if back.StatusCode != tc.status || back.Header.Get("Location") != "" || len(e.st.GrantIDs()) != grants {
+				t.Fatalf("callback: %d to %q, %d new grants; want %d, no redirect, no grant", back.StatusCode, back.Header.Get("Location"), len(e.st.GrantIDs())-grants, tc.status)
 			}
 			if rec := e.oneAuditEvent(t, "consent_remembered", map[string]any{"outcome": "failure", "reason": hintNotRemembered}); rec["client_trust"] != nil {
 				t.Fatalf("a failure record carries client_trust: %v", rec)
@@ -379,7 +379,7 @@ func TestARememberedSignInGetsNoCodeUnlessTheCallbackCanConfirmTheClientAndConse
 // user is simply asked next time.
 func TestAFailureToRememberStillIssuesTheCode(t *testing.T) {
 	e := newEnv(t, withRemember(t, nil))
-	e.st.rememberDown.Store(true)
+	e.st.Fail(errStoreDown, "RememberConsent")
 	c, cb := e.startLogin(t, nil)
 	res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{c})
 	if loc, _ := url.Parse(res.Header.Get("Location")); res.StatusCode != http.StatusFound || loc.Query().Get("code") == "" || hintIn(e, res) != nil {
