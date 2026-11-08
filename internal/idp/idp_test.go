@@ -414,3 +414,23 @@ func TestTheFixIsTheIdPsOwnElseTheAlertsDefault(t *testing.T) {
 		})
 	}
 }
+
+// #204: an alert survives wrapping; anything else is no alert.
+func TestAlertOfUnwrapsAndDefaultsToNone(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		err  error
+		want Alert
+	}{
+		{"wrapped", fmt.Errorf("wrap: %w", &Error{Alert: AlertProtocol}), AlertProtocol},
+		{"bare", &Error{Alert: AlertCredentialRejected}, AlertCredentialRejected},
+		{"not an IdP error", errors.New("x"), ""},
+		{"nil", nil, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := AlertOf(c.err); got != c.want {
+				t.Errorf("AlertOf(%v) = %q, want %q", c.err, got, c.want)
+			}
+		})
+	}
+}

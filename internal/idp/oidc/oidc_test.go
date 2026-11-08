@@ -231,7 +231,7 @@ func TestTokenErrorsAreClassified(t *testing.T) {
 			_, _, err = e.p.Refresh(context.Background(), tok.RefreshToken)
 			var ie *idp.Error
 			if !asError(err, &ie) || ie.Class != tc.class || ie.Alert != tc.alert {
-				t.Fatalf("err = %#v", err)
+				t.Fatalf("err = %#v, want class %v alert %q", err, tc.class, tc.alert)
 			}
 		})
 	}

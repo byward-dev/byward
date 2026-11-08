@@ -480,7 +480,7 @@ func TestARefusalThatNeedsTheOperatorNamesTheFix(t *testing.T) {
 		{"the IdP's own hint", &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialRejected, OperatorHint: "AADSTS7000222: the client secret has expired"},
 			"unavailable: AADSTS7000222: the client secret has expired"},
 		{"the alert's default", &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialRejected}, "unavailable: " + idp.AlertCredentialRejected.Hint()},
-		{"another reason", &idp.Error{Class: idp.Fatal, Alert: idp.AlertProtocol}, "failed: " + idp.AlertProtocol.Hint()},
+		{"a protocol violation", &idp.Error{Class: idp.Fatal, Alert: idp.AlertProtocol}, "failed: " + idp.AlertProtocol.Hint()},
 		{"no alert", &idp.Error{Class: idp.Unavailable}, "unavailable"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
