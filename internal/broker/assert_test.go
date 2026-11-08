@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/token"
 )
@@ -156,8 +157,8 @@ func TestGroupsOverageAssertsNoGroups(t *testing.T) {
 // resealBlob makes every new grant's sealed IdP-token blob hold rewrite(plain) instead, as an
 // older or newer proxy, or a damaged store, would have left it.
 func (e *env) resealBlob(t *testing.T, rewrite func(plain []byte) []byte) {
-	e.st.rewriteBlob = func(blob []byte) []byte {
-		plain, err := e.idpBox.Open(string(blob))
+	e.st.OnCreateGrant(func(g *store.Grant) {
+		plain, err := e.idpBox.Open(string(g.IdPTokens))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -165,8 +166,8 @@ func (e *env) resealBlob(t *testing.T, rewrite func(plain []byte) []byte) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return []byte(sealed)
-	}
+		g.IdPTokens = []byte(sealed)
+	})
 }
 
 // A grant whose IdP-token blob this proxy cannot read (written by a newer version before a

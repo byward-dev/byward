@@ -20,7 +20,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,8 +29,8 @@ import (
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/store"
-	"github.com/byward-dev/byward/internal/store/memory"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/testutil/memstore"
 	"github.com/byward-dev/byward/internal/token"
 )
 
@@ -51,110 +50,22 @@ const (
 
 var t0 = time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 
-// memStore is the in-memory store, recording created grant IDs so tests can find "the" grant.
-type memStore struct {
-	*memory.Store
-	mu   sync.Mutex
-	ids  []string
-	down atomic.Bool // every lookup and write fails, as in a store outage
-	// revokeDown fails only RevokeGrant, rotateDown only RotateRefreshToken; reuseOnRotate makes
-	// RotateRefreshToken report reuse without recording it, as when another replica won the race.
-	revokeDown, rotateDown, reuseOnRotate atomic.Bool
-	rememberDown                          atomic.Bool // RememberConsent fails
-	// rewriteBlob, when set, replaces a new grant's sealed IdP-token blob, e.g. with the layout an
-	// older proxy wrote.
-	rewriteBlob func([]byte) []byte
-	createDown  atomic.Bool // CreateGrant fails
-	putCodeDown atomic.Bool // PutCode fails
-	spendDown   atomic.Bool // SpendLogin fails
-	consentDown atomic.Bool // Consent fails: the remembered-consent check, while the rest of the store works
-}
-
+// errStoreDown is the failure the broker tests inject into the store (memstore.Fail, memstore.Down).
 var errStoreDown = errors.New("store down")
 
-func (m *memStore) RefreshToken(ctx context.Context, h [32]byte, now time.Time) (store.RefreshToken, error) {
-	if m.down.Load() {
-		return store.RefreshToken{}, errStoreDown
-	}
-	return m.Store.RefreshToken(ctx, h, now)
+// failingStore is an empty store whose methods return err.
+func failingStore(err error, methods ...string) *memstore.Store {
+	s := memstore.New()
+	s.Fail(err, methods...)
+	return s
 }
 
-func (m *memStore) RememberConsent(ctx context.Context, c store.Consent) error {
-	if m.down.Load() || m.rememberDown.Load() {
+// storeErr is errStoreDown when on, else nil: a failure a test switches on and off.
+func storeErr(on bool) error {
+	if on {
 		return errStoreDown
 	}
-	return m.Store.RememberConsent(ctx, c)
-}
-
-func (m *memStore) Consent(ctx context.Context, k store.ConsentKey) (store.Consent, error) {
-	if m.down.Load() || m.consentDown.Load() {
-		return store.Consent{}, errStoreDown
-	}
-	return m.Store.Consent(ctx, k)
-}
-
-func (m *memStore) Grant(ctx context.Context, id string) (store.Grant, error) {
-	if m.down.Load() {
-		return store.Grant{}, errStoreDown
-	}
-	return m.Store.Grant(ctx, id)
-}
-
-func (m *memStore) RevokeGrant(ctx context.Context, id string, at time.Time) error {
-	if m.down.Load() || m.revokeDown.Load() {
-		return errStoreDown
-	}
-	return m.Store.RevokeGrant(ctx, id, at)
-}
-
-func (m *memStore) RotateRefreshToken(ctx context.Context, r store.RotateRequest) error {
-	if m.down.Load() || m.rotateDown.Load() {
-		return errStoreDown
-	}
-	if m.reuseOnRotate.Load() {
-		return store.ErrReused
-	}
-	return m.Store.RotateRefreshToken(ctx, r)
-}
-
-// SetIdPTokens fails on a cancelled context, as the SQL store does.
-func (m *memStore) SetIdPTokens(ctx context.Context, id string, sealed []byte) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return m.Store.SetIdPTokens(ctx, id, sealed)
-}
-
-func (m *memStore) SpendLogin(ctx context.Context, h [32]byte, now, expiresAt time.Time) error {
-	if m.down.Load() || m.spendDown.Load() {
-		return errStoreDown
-	}
-	return m.Store.SpendLogin(ctx, h, now, expiresAt)
-}
-
-func (m *memStore) PutCode(ctx context.Context, c store.PendingCode) error {
-	if m.putCodeDown.Load() {
-		return errStoreDown
-	}
-	return m.Store.PutCode(ctx, c)
-}
-
-func newMemStore() *memStore { return &memStore{Store: memory.New()} }
-
-func (m *memStore) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, error) {
-	if m.createDown.Load() {
-		return store.Grant{}, errStoreDown
-	}
-	if m.rewriteBlob != nil {
-		g.IdPTokens = m.rewriteBlob(g.IdPTokens)
-	}
-	got, err := m.Store.CreateGrant(ctx, g)
-	if err == nil {
-		m.mu.Lock()
-		m.ids = append(m.ids, g.ID)
-		m.mu.Unlock()
-	}
-	return got, err
+	return nil
 }
 
 // staticClient is a minimal in-test public client. Authenticate mirrors the client-ID checks of
@@ -268,7 +179,7 @@ func (r *registry) reregister(id, redirect string) {
 type env struct {
 	srv    *httptest.Server
 	b      *Broker
-	st     *memStore
+	st     *memstore.Store
 	sealer *token.Sealer
 	cfg    Config // as passed to New
 	idpBox *token.Box
@@ -323,7 +234,7 @@ func addKey(t *testing.T, dir, id string) {
 // newEnv builds a broker against the fake IdP; opts adjust its Config before New.
 func newEnv(t *testing.T, opts ...func(*Config)) *env {
 	t.Helper()
-	e := &env{now: t0, st: newMemStore(), audit: &syncBuffer{}, logs: &syncBuffer{},
+	e := &env{now: t0, st: memstore.New(), audit: &syncBuffer{}, logs: &syncBuffer{},
 		reg: &registry{removed: map[string]bool{}, redirect: map[string]string{}}}
 	clock := func() time.Time { return e.now }
 	app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}, RedirectURIs: []string{issuer + "/callback/entra"}}
@@ -594,13 +505,21 @@ func TestStaticClientSignsInWithEntraAndGetsAProxyToken(t *testing.T) {
 	}
 }
 
-func firstGrant(m *memStore) string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if len(m.ids) == 0 {
+func firstGrant(m *memstore.Store) string {
+	ids := m.GrantIDs()
+	if len(ids) == 0 {
 		return ""
 	}
-	return m.ids[0]
+	return ids[0]
+}
+
+// lastGrant is the ID of the most recently created grant, or "" when there is none.
+func lastGrant(m *memstore.Store) string {
+	ids := m.GrantIDs()
+	if len(ids) == 0 {
+		return ""
+	}
+	return ids[len(ids)-1]
 }
 
 func TestReusedCodeRevokesTheGrant(t *testing.T) {
@@ -922,17 +841,10 @@ func TestFailedBindingAfterConsumeRevokesTheGrant(t *testing.T) {
 	}
 }
 
-// failingStore fails code redemption like an outage would.
-type failingStore struct{ *memStore }
-
-func (failingStore) ConsumeCode(context.Context, string, time.Time) (store.PendingCode, error) {
-	return store.PendingCode{}, errors.New("database is locked")
-}
-
 func TestStoreOutageAtRedemptionIsAServerError(t *testing.T) {
 	e := newEnv(t)
 	code := e.signIn(t, nil).Query().Get("code")
-	e.b.cfg.Store = failingStore{e.st}
+	e.st.Fail(errors.New("database is locked"), "ConsumeCode") // code redemption fails like an outage would
 	res, body := e.redeem(t, code, nil)
 	if res.StatusCode != 500 || body["error"] != "server_error" {
 		t.Fatalf("got %d %v", res.StatusCode, body)
@@ -1471,7 +1383,7 @@ func TestACallbackReplayedWithAKeptLoginCookieGetsTheExpiredPageAndNeverReachesT
 func TestACallbackWhoseLoginCannotBeSpentIsAServerErrorAndNeverReachesTheIdP(t *testing.T) {
 	e := newEnv(t)
 	c, cb := e.startLogin(t, nil)
-	e.st.spendDown.Store(true)
+	e.st.Fail(errStoreDown, "SpendLogin")
 	before := len(e.idpOps)
 	if res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{c}); res.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("callback with the store down: %d, want 500", res.StatusCode)

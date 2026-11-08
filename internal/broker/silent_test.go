@@ -90,7 +90,7 @@ func TestPromptNoneThatCannotFinishSilentlyIsAnsweredWithoutAPage(t *testing.T) 
 			if tc.idpDown { // after the interactive sign-in that set the hint
 				e.b.cfg.IdP = &failOnceIdP{IdP: e.b.cfg.IdP}
 			}
-			e.st.down.Store(tc.storeDown)
+			e.st.Down(storeErr(tc.storeDown))
 			logins, before := len(e.auditEvents(t, "login")), counted.list()
 			if got := answerOf(t, e.authorizeWith(t, silent(tc.extra), h)); got != refused(e, tc.want) {
 				t.Fatalf("answer %+v, want error %s with state and iss", got, tc.want)
@@ -174,14 +174,14 @@ func TestPromptNoneAnswersTheIdPsFailureAtTheRedirect(t *testing.T) {
 			if tc.idp != nil {
 				e.fake.Set(tc.idp)
 			}
-			grants, before, logins := len(e.st.ids), counted.list(), len(e.auditEvents(t, "login"))
+			grants, before, logins := len(e.st.GrantIDs()), counted.list(), len(e.auditEvents(t, "login"))
 			if got := answerOf(t, e.finish(t, e.authorizeWith(t, silent(nil), h))); got != refused(e, tc.want) {
 				t.Fatalf("answer %+v, want %s with state and iss", got, tc.want)
 			}
 			if got := e.auditEvents(t, "login")[logins:]; (len(got) == 1 && got[0]["outcome"] == "failure") != tc.audited || len(got) > 1 {
 				t.Fatalf("login records %v, want an IdP failure audited: %v", got, tc.audited)
 			}
-			if len(e.st.ids) != grants {
+			if len(e.st.GrantIDs()) != grants {
 				t.Fatal("a grant was created")
 			}
 			e.oneAuditEvent(t, "consent_silent", map[string]any{"outcome": "failure", "reason": tc.want, "client_id": clientID})
@@ -227,7 +227,7 @@ func TestPromptNoneWhoseConsentDoesNotHoldAfterTheIdPGetsNoCodeAndNoPage(t *test
 			}
 		}, true},
 		{"a store failure while checking gets temporarily_unavailable", "temporarily_unavailable", hintNotRemembered, func(t *testing.T, e *env) {
-			e.st.consentDown.Store(true)
+			e.st.Fail(errStoreDown, "Consent")
 		}, false},
 		{"a registry failure while checking gets temporarily_unavailable", "temporarily_unavailable", hintNotRemembered, func(t *testing.T, e *env) {
 			e.reg.fail()
@@ -243,7 +243,7 @@ func TestPromptNoneWhoseConsentDoesNotHoldAfterTheIdPGetsNoCodeAndNoPage(t *test
 			e.fake.Set(fakeidp.WithSilentSession())
 			res := e.authorizeWith(t, silent(nil), h)
 			tc.between(t, e)
-			grants, before := len(e.st.ids), counted.list()
+			grants, before := len(e.st.GrantIDs()), counted.list()
 			back := e.finish(t, res)
 			if got := answerOf(t, back); got != refused(e, tc.want) {
 				t.Fatalf("answer %+v, want %s and no code", got, tc.want)
@@ -251,7 +251,7 @@ func TestPromptNoneWhoseConsentDoesNotHoldAfterTheIdPGetsNoCodeAndNoPage(t *test
 			if c := hintIn(e, back); (c != nil && c.MaxAge < 0) != tc.hintCleared {
 				t.Fatalf("hint cookie %+v, want cleared %v", c, tc.hintCleared)
 			}
-			if len(e.st.ids) != grants {
+			if len(e.st.GrantIDs()) != grants {
 				t.Fatal("a grant was created")
 			}
 			e.oneAuditEvent(t, "consent_remembered", map[string]any{"outcome": "failure", "reason": tc.reason, "client_id": clientID, "user_key": "*"})
@@ -272,14 +272,14 @@ func TestPromptNoneWhoseSignInFailsInTheBrokerIsAnsweredAtTheRedirect(t *testing
 		name, want, log string // log: a line the operator must see, "" for none checked
 		breakIt         func(e *env)
 	}{
-		{"the login cannot be spent", "temporarily_unavailable", unrecorded, func(e *env) { e.st.spendDown.Store(true) }},
+		{"the login cannot be spent", "temporarily_unavailable", unrecorded, func(e *env) { e.st.Fail(errStoreDown, "SpendLogin") }},
 		{"the login cannot be spent on a rate-limited callback", "temporarily_unavailable", unrecorded, func(e *env) {
 			e.b.cfg.Limiter = stubLimiter{endpoints: map[string]bool{"callback": true}}
-			e.st.spendDown.Store(true)
+			e.st.Fail(errStoreDown, "SpendLogin")
 		}},
 		{"the access gate cannot decide", "server_error", "", func(e *env) { e.b.cfg.Gate = brokenGate{} }},
-		{"the grant cannot be stored", "server_error", "", func(e *env) { e.st.createDown.Store(true) }},
-		{"the code cannot be stored", "server_error", "", func(e *env) { e.st.putCodeDown.Store(true) }},
+		{"the grant cannot be stored", "server_error", "", func(e *env) { e.st.Fail(errStoreDown, "CreateGrant") }},
+		{"the code cannot be stored", "server_error", "", func(e *env) { e.st.Fail(errStoreDown, "PutCode") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t, withRemember(t, nil))

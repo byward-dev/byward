@@ -244,3 +244,29 @@ The OAuth endpoints are rate-limited per client address, with IPv6 grouped by /6
 - [ ] Verify the image signature and provenance before deploying
       ([packaging](../reference/packaging.md#verifying-a-release)).
 - [ ] Track releases: security fixes go into the latest minor only ([SECURITY.md](../../SECURITY.md)).
+
+## 10. Isolate stdio upstream processes
+
+Every stdio upstream process runs as byward's own uid, whichever user it serves. Separate processes
+and `{session_dir}` keep sessions apart by default ([stdio how-to](stdio-upstream.md#3-isolate-state-between-sessions)),
+but not against a server that is compromised or hostile: such a process can read another's
+`{session_dir}` files and its environment, which needs only the same uid (`/proc/<pid>/environ`).
+Its memory is protected only by the host's ptrace restriction.
+
+- [ ] Set `kernel.yama.ptrace_scope` to `1` or higher on the host:
+      `cat /proc/sys/kernel/yama/ptrace_scope` must not print `0`, and a missing file means the
+      kernel has no Yama at all. With `1`, a process can attach only to its own descendants, so
+      one upstream process cannot read another's memory
+      ([kernel Yama docs](https://docs.kernel.org/admin-guide/LSM/Yama.html)).
+      - The setting is host-wide: a container cannot change it. In Kubernetes, set it on the node.
+      - Ubuntu sets `1` (`/etc/sysctl.d/10-ptrace.conf`, from `procps`). Debian's kernels turn Yama
+        off by default (`0`), so a Debian host needs
+        `echo kernel.yama.ptrace_scope=1 > /etc/sysctl.d/10-ptrace.conf && sysctl --system`.
+      - It does not cover the environment: put nothing in an upstream's environment that another
+        user's process must not see.
+- [ ] Keep the runtime's default seccomp profile and drop all capabilities (section 9). Docker's
+      default profile allows `pidfd_getfd`, which copies another process's file descriptors, only
+      with `CAP_SYS_PTRACE`, and Docker does not grant that capability.
+- [ ] Run an upstream server you do not trust in its own deployment: one byward per such server,
+      in its own container or VM, and per tenant or user group where their data must stay apart
+      even if the server is compromised. byward does not sandbox stdio processes from each other.

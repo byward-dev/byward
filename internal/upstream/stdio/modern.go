@@ -386,6 +386,11 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, m
 		http.Error(w, "upstream unavailable", http.StatusBadGateway)
 		return
 	}
+	var silence *quiet // only a listen stream is long-lived enough to need a keep-alive
+	if q.listen {
+		silence = newQuiet(c.p.clock) // before the stream starts, as for the GET stream
+	}
+	defer silence.stop()
 	out := startSSE(w)
 	drain := func() { // what the upstream sent before the end goes out first
 		for {
@@ -401,7 +406,14 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, m
 	for {
 		select {
 		case m := <-q.out:
+			silence.writing()
 			if out.write(m) != nil {
+				c.cancel(q)
+				return
+			}
+		case <-silence.elapsed():
+			silence.writing()
+			if out.keepAlive() != nil { // the client is gone: as for a closed stream
 				c.cancel(q)
 				return
 			}
