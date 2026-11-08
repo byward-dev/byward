@@ -279,9 +279,8 @@ func redirectHint(res *http.Response) string {
 	if err != nil || loc.Opaque != "" || loc.Host == "" {
 		return "the upstream sent no usable Location; check BYWARD_UPSTREAM_URL"
 	}
-	path, _, _ := strings.Cut(loc.Path, ";")
-	clean := url.URL{Scheme: loc.Scheme, Host: loc.Host, Path: path}
-	return "the upstream points to " + clean.String() + "; if that is its MCP endpoint, set BYWARD_UPSTREAM_URL to it"
+	path, _, _ := strings.Cut(loc.EscapedPath(), ";") // escaped: a %3B or %2F is part of the path
+	return "the upstream points to " + loc.Scheme + "://" + loc.Host + path + "; if that is its MCP endpoint, set BYWARD_UPSTREAM_URL to it"
 }
 
 // Proxy is the HTTP proxy the relay sends a request through: the one the environment names

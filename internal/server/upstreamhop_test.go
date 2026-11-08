@@ -36,6 +36,9 @@ func resolvesTo(host string, addrs ...string) func(context.Context, string) ([]n
 	}
 }
 
+// noProxy is an environment that names no HTTP proxy.
+func noProxy(*http.Request) (*url.URL, error) { return nil, nil }
+
 // withResolver makes the package's system resolver resolve for the test.
 func withResolver(t *testing.T, resolve func(context.Context, string) ([]netip.Addr, error)) {
 	prev := lookupNetIP
@@ -225,29 +228,44 @@ func TestCheckOfflineWarnsOfAPlainHTTPUpstreamGivenAsAPublicAddress(t *testing.T
 // alone, from the setting as Go reads it; a setting whose credentials Go splits, and Go's refusal
 // of HTTP_PROXY under CGI, warn without naming it.
 func TestDoctorNamesTheEnvironmentsProxyWithoutItsCredentials(t *testing.T) {
-	cfg := noAuthHopConfig(t, "http://10.0.0.7/mcp")
+	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
+		fakeidp.WithClient(fakeidp.Client{ID: "00000000-0000-0000-0000-000000000002", Secrets: []string{"s3cret-entra"}}))
 	for _, tc := range []struct {
 		name     string
+		cfg      func(*testing.T, string) *config.Config // nil: without authentication
 		proxy    httpproxy.Config
 		status   doctor.Status
 		want     string
 		notWants []string
 	}{
-		{"no proxy is named when none applies", httpproxy.Config{}, doctor.Pass, "HTTP upstream http://10.0.0.7/mcp", []string{"HTTP proxy"}},
-		{"a proxy is named without its password", httpproxy.Config{HTTPProxy: "http://ops:pw-secret@egress.example:3128"},
+		{"no proxy is named when none applies", nil, httpproxy.Config{}, doctor.Pass, "HTTP upstream http://10.0.0.7/mcp", []string{"HTTP proxy"}},
+		{"a proxy is named without its password", nil, httpproxy.Config{HTTPProxy: "http://ops:pw-secret@egress.example:3128"},
 			doctor.Pass, "go through the HTTP proxy http://egress.example:3128 from the environment (list the upstream's host in NO_PROXY", []string{"ops", "pw-secret"}},
-		{"a proxy without a scheme is named without its password", httpproxy.Config{HTTPProxy: "ops:pw-secret@egress.example:3128"},
+		{"a proxy without a scheme is named without its password", nil, httpproxy.Config{HTTPProxy: "ops:pw-secret@egress.example:3128"},
 			doctor.Pass, "go through the HTTP proxy http://egress.example:3128 ", []string{"ops", "pw-secret"}},
-		{"a password with a slash is never shown", httpproxy.Config{HTTPProxy: "http://ops:pw/secret@egress.example:3128"},
+		{"a password with a slash is never shown", nil, httpproxy.Config{HTTPProxy: "http://ops:pw/secret@egress.example:3128"},
 			doctor.Warn, "has an unescaped /, ? or # before its host", []string{"ops", "pw", "secret"}},
-		{"a numeric password with a slash is never shown", httpproxy.Config{HTTPProxy: "admin:1234/5678@egress.example:3128"},
+		{"a numeric password with a slash is never shown", nil, httpproxy.Config{HTTPProxy: "admin:1234/5678@egress.example:3128"},
 			doctor.Warn, "has an unescaped /, ? or # before its host", []string{"admin", "1234", "5678"}},
-		{"the refusal under CGI warns", httpproxy.Config{HTTPProxy: "http://ops:pw-secret@egress.example:3128", NoProxy: "10.0.0.7", CGI: true},
+		{"a numeric password with a question mark is never shown", nil, httpproxy.Config{HTTPProxy: "http://admin:1234?5678@egress.example:3128"},
+			doctor.Warn, "has an unescaped /, ? or # before its host", []string{"admin", "1234", "5678"}},
+		{"a numeric password with a hash is never shown", nil, httpproxy.Config{HTTPProxy: "admin:1234#5678@egress.example:3128"},
+			doctor.Warn, "has an unescaped /, ? or # before its host", []string{"admin", "1234", "5678"}},
+		{"a user name with a hash is never shown", nil, httpproxy.Config{HTTPProxy: "http://tok3n#rest@egress.example:3128"},
+			doctor.Warn, "has an unescaped /, ? or # before its host", []string{"tok3n", "rest"}},
+		{"the refusal under CGI warns", nil, httpproxy.Config{HTTPProxy: "http://ops:pw-secret@egress.example:3128", NoProxy: "10.0.0.7", CGI: true},
 			doctor.Warn, "Go refuses HTTP_PROXY because REQUEST_METHOD is set", []string{"pw-secret", "list the upstream's host in NO_PROXY"}},
+		{"with authentication, a proxy is named too", authHopConfig, httpproxy.Config{HTTPProxy: "http://ops:pw-secret@egress.example:3128"},
+			doctor.Pass, "go through the HTTP proxy http://egress.example:3128 ", []string{"pw-secret"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			load := tc.cfg
+			if load == nil {
+				load = noAuthHopConfig
+			}
 			pf := tc.proxy.ProxyFunc()
-			rep, err := Doctor(context.Background(), cfg, DoctorOptions{UpstreamProxy: func(r *http.Request) (*url.URL, error) { return pf(r.URL) }})
+			rep, err := Doctor(context.Background(), load(t, "http://10.0.0.7/mcp"), DoctorOptions{IdP: fake.HTTPClient(), Proxy: &http.Client{Transport: refuse{}},
+				UpstreamProxy: func(r *http.Request) (*url.URL, error) { return pf(r.URL) }})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -278,7 +296,7 @@ func TestDoctorWarnsOfThePlainHTTPHop(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rep, err := Doctor(context.Background(), tc.cfg, DoctorOptions{IdP: fake.HTTPClient(), Proxy: &http.Client{Transport: refuse{}},
-				Resolve: resolvesTo("mcp.example.com", "203.0.113.7"), UpstreamProxy: func(*http.Request) (*url.URL, error) { return nil, nil }})
+				Resolve: resolvesTo("mcp.example.com", "203.0.113.7"), UpstreamProxy: noProxy})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -313,8 +331,8 @@ func TestStartupBoundsTheLookupOfTheUpstreamsHost(t *testing.T) {
 	if _, err := New(noAuthHopConfig(t, "http://mcp.example.com:9/mcp"), slog.New(slog.DiscardHandler)); err != nil {
 		t.Fatal(err)
 	}
-	if left <= 0 || left > startupResolveTimeout {
-		t.Fatalf("the lookup had %v left, want at most %v", left, startupResolveTimeout)
+	if left <= 0 || left > startupResolveTimeout || startupResolveTimeout >= probeTimeout {
+		t.Fatalf("the lookup had %v left, want at most %v, which must be under doctor's %v", left, startupResolveTimeout, probeTimeout)
 	}
 }
 
@@ -322,25 +340,11 @@ func TestStartupBoundsTheLookupOfTheUpstreamsHost(t *testing.T) {
 func TestDoctorResolvesTheUpstreamsHostByDefault(t *testing.T) {
 	withResolver(t, resolvesTo("mcp.example.com", "203.0.113.7"))
 	rep, err := Doctor(context.Background(), noAuthHopConfig(t, "http://mcp.example.com/mcp"),
-		DoctorOptions{UpstreamProxy: func(*http.Request) (*url.URL, error) { return nil, nil }})
+		DoctorOptions{UpstreamProxy: noProxy})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if hop := checkNamed(t, rep, "upstream hop"); !strings.Contains(hop.Message, "203.0.113.7") {
 		t.Fatalf("upstream hop %+v, want the address the system resolver gave", hop)
-	}
-}
-
-// With authentication too, doctor names the environment's HTTP proxy.
-func TestDoctorNamesTheEnvironmentsProxyWithAuthentication(t *testing.T) {
-	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
-		fakeidp.WithClient(fakeidp.Client{ID: "00000000-0000-0000-0000-000000000002", Secrets: []string{"s3cret-entra"}}))
-	rep, err := Doctor(context.Background(), authHopConfig(t, "http://10.0.0.7/mcp"), DoctorOptions{IdP: fake.HTTPClient(), Proxy: &http.Client{Transport: refuse{}},
-		UpstreamProxy: func(*http.Request) (*url.URL, error) { return url.Parse("http://egress.example:3128") }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if up := checkNamed(t, rep, "upstream"); !strings.Contains(up.Message, "HTTP proxy http://egress.example:3128") {
-		t.Fatalf("upstream %+v, want the proxy named", up)
 	}
 }

@@ -86,7 +86,7 @@ func checkUpstream(cfg *config.Config) error {
 // of it and never reaches the upstream itself. proxy is the relay's: an HTTP proxy from the
 // environment that the upstream's requests go through is named by its scheme and host alone. A
 // setting whose credentials hold an unescaped /, ? or # comes back with them split between the
-// host and the path, so such a proxy is not named at all.
+// host and the path, query or fragment, so such a proxy is not named at all.
 func upstreamResult(cfg *config.Config, proxy func(*http.Request) (*url.URL, error)) doctor.Result {
 	r := doctor.Result{Class: doctor.ClassProxy, Name: "upstream", Status: doctor.Pass}
 	if cfg.UpstreamCommand == nil {
@@ -96,7 +96,7 @@ func upstreamResult(cfg *config.Config, proxy func(*http.Request) (*url.URL, err
 			r.Status = doctor.Warn
 			r.Message += "; Go refuses HTTP_PROXY because REQUEST_METHOD is set in the environment, so every request to the upstream fails"
 			r.Fix = "unset REQUEST_METHOD or HTTP_PROXY in the proxy's environment; NO_PROXY does not help, since Go refuses HTTP_PROXY under CGI before it reads NO_PROXY"
-		case via != nil && via.Path != "" && via.Path != "/":
+		case via != nil && (via.Path != "" && via.Path != "/" || via.RawQuery != "" || via.ForceQuery || via.Fragment != ""):
 			r.Status = doctor.Warn
 			r.Message += "; the environment's HTTP proxy setting has an unescaped /, ? or # before its host, so Go reads part of the credentials as the host it dials"
 			r.Fix = "percent-encode the credentials in HTTPS_PROXY or HTTP_PROXY (/ as %2F, ? as %3F, # as %23)"

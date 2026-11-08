@@ -517,7 +517,7 @@ func jwtClaims(t *testing.T, tok string) map[string]any {
 func TestDoctorDescribesOnBehalfOf(t *testing.T) {
 	cfg := &config.Config{UpstreamURL: mustURL(t, "https://upstream.example/mcp"), AssertionHeader: "Authorization",
 		OBOScopes: []string{graphUserRead}, OBOHeader: "X-Byward-Downstream-Token"}
-	msg := upstreamResult(cfg, func(*http.Request) (*url.URL, error) { return nil, nil }).Message
+	msg := upstreamResult(cfg, noProxy).Message
 	for _, want := range []string{"On-Behalf-Of", graphUserRead, "X-Byward-Downstream-Token", "admin consent"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("doctor says %q, missing %q", msg, want)

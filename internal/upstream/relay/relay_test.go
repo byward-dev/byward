@@ -607,6 +607,7 @@ func TestAnUpstreamRedirectGetsTheClientA502AndTheLogWhereItPointed(t *testing.T
 		{"relative", http.StatusPermanentRedirect, "/mcp/", "points to " + up.URL + "/mcp/;"},
 		{"userinfo, query and fragment are dropped", http.StatusFound, "https://user:pw-secret@sso.example/login?code=code-secret#frag-secret", "points to https://sso.example/login;"},
 		{"path parameters are dropped", http.StatusFound, "/cb;jsessionid=sess-secret", "points to " + up.URL + "/cb;"},
+		{"an escaped path is kept as sent", http.StatusFound, "https://mcp.internal.example/a%2Fb%3Bc;x=secret", "points to https://mcp.internal.example/a%2Fb%3Bc;"},
 		{"an opaque Location is not logged", http.StatusFound, "https:tok-secret", "the upstream sent no usable Location"},
 		{"a host-less Location is not logged", http.StatusFound, "file:///etc/x", "the upstream sent no usable Location"},
 		{"without a Location", http.StatusFound, "", "the upstream sent no usable Location"},
