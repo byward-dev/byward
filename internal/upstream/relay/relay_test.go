@@ -507,12 +507,22 @@ func TestTheProxysOwnHeadersSurviveATimeoutAfterAnInformationalResponse(t *testi
 		relay.ServeHTTP(w, r)
 	}))
 	t.Cleanup(srv.Close)
-	res, err := srv.Client().Post(srv.URL+"/mcp", "application/json", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{}}`))
+	hinted := false
+	trace := &httptrace.ClientTrace{Got1xxResponse: func(code int, _ textproto.MIMEHeader) error {
+		hinted = hinted || code == http.StatusEarlyHints
+		return nil
+	}}
+	req, _ := http.NewRequestWithContext(httptrace.WithClientTrace(context.Background(), trace), http.MethodPost, srv.URL+"/mcp",
+		strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{}}`))
+	res, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	body, _ := io.ReadAll(res.Body)
 	_ = res.Body.Close()
+	if !hinted {
+		t.Fatal("no 103 reached the client, so this test proves nothing")
+	}
 	if res.StatusCode != http.StatusOK || !strings.Contains(string(body), `"id":1`) {
 		t.Fatalf("status %d, body %s; want the timeout answer", res.StatusCode, body)
 	}
