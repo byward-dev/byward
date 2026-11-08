@@ -25,6 +25,7 @@ import (
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/metrics"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/upstream/relay"
@@ -264,9 +265,6 @@ func TestDownstreamRefusalsAreAnsweredInTheProxysName(t *testing.T) {
 		// #204: Entra rejecting the proxy's own credential needs the operator, so it also alerts.
 		{"client secret rejected", &fakeidp.InvalidClientSecret, oboToolsCall,
 			"temporarily unavailable", `"reason":"unavailable: the IdP refused the proxy's client credential`, `"reason":"unavailable"`, "credential_rejected"},
-		// Entra's own operator hint wins over the alert's default.
-		{"client secret expired", &fakeidp.ExpiredClientSecret, oboToolsCall,
-			"temporarily unavailable", `"reason":"unavailable: AADSTS7000222: the client secret has expired`, `"reason":"unavailable"`, "credential_rejected"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -310,11 +308,12 @@ func TestDownstreamRefusalsAreAnsweredInTheProxysName(t *testing.T) {
 					t.Errorf("%s is not exported:\n%s", want, metrics)
 				}
 			}
-			counted := strings.Contains(metrics, `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="`+c.alert+`"} 1`)
+			nonZero := regexp.MustCompile(`byward_idp_alerts_total\{[^}]*\} [1-9]`).FindAllString(metrics, -1)
+			counted := strings.Contains(metrics, `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="`+c.alert+`"} 1`) && len(nonZero) == 1
 			refusal := regexp.MustCompile(`(?m)^.*"level":"ERROR","msg":"no downstream token for the upstream request.*$`).FindString(logs)
 			logged := strings.Contains(refusal, `"alert":"`+c.alert+`"`)
 			if c.alert == "" { // the series are exported at 0; none may have counted
-				counted, logged = regexp.MustCompile(`byward_idp_alerts_total\{[^}]*\} [1-9]`).MatchString(metrics), strings.Contains(logs, `"alert":`)
+				counted, logged = len(nonZero) > 0, strings.Contains(logs, `"alert":`)
 			}
 			if want := c.alert != ""; counted != want || logged != want {
 				t.Errorf("alert %q counted %v, logged %v; want both %v\nmetrics:\n%s\nlogs:\n%s", c.alert, counted, logged, want, metrics, logs)
@@ -457,6 +456,60 @@ func TestAClientGoingAwayIsNotARefusal(t *testing.T) {
 	}))
 	if w.Body.Len() != 0 || strings.Contains(logs.String(), "no downstream token") {
 		t.Fatalf("answer %q, logs %s: want neither for a client that went away", w.Body, logs)
+	}
+}
+
+// #204: a refusal the IdP's error marks as an alert names the IdP's own fix when it has one, else
+// the alert's default, and counts the alert; any other refusal neither alerts nor counts.
+func TestARefusalThatNeedsTheOperatorNamesTheFixAndCounts(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		err    *idp.Error
+		reason string // the start of the refusal line's reason, after the outcome
+		alert  bool
+	}{
+		{"the IdP's own hint", &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialRejected, OperatorHint: "AADSTS7000222: the client secret has expired"},
+			"AADSTS7000222: the client secret has expired", true},
+		{"the alert's default", &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialRejected}, idp.AlertCredentialRejected.Hint(), true},
+		{"no alert", &idp.Error{Class: idp.Unavailable}, "", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			logs := &syncBuffer{}
+			m := metrics.New()
+			m.SeedIdPAlerts("entra", []string{opOnBehalfOf}, []string{string(idp.AlertCredentialRejected)})
+			d := &downstreamTokens{
+				cache: downstream.New(func(context.Context, string, string, []string) (downstream.Token, error) {
+					return downstream.Token{}, c.err
+				}, []string{graphUserRead}, 0, time.Now),
+				header: "X-Byward-Downstream-Token", resource: "https://graph.microsoft.com",
+				assertion: func(context.Context, string) (string, time.Time, error) {
+					return "assertion", time.Now().Add(time.Hour), nil
+				},
+				idp: "entra", log: logging.New(logs, "json"), o: Observability{Metrics: m},
+			}
+			w := httptest.NewRecorder()
+			d.serve(w, httptest.NewRequest("POST", "/mcp", strings.NewReader(oboToolsCall)), resource.Identity{Subject: "tid:oid", GrantID: "g"}, true,
+				http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("a refused request was relayed") }))
+			line := logs.String()
+			if !strings.Contains(line, `"level":"ERROR","msg":"no downstream token`) || !strings.Contains(w.Body.String(), `"isError":true`) {
+				t.Fatalf("answer %d %s, logs %s: want a logged refusal in the proxy's name", w.Code, w.Body, line)
+			}
+			if !strings.Contains(line, `"reason":"unavailable: `+c.reason) && c.reason != "" {
+				t.Errorf("the refusal's reason does not start with %q:\n%s", c.reason, line)
+			}
+			if got := strings.Contains(line, `"alert":"credential_rejected"`); got != c.alert {
+				t.Errorf("alert logged %v, want %v:\n%s", got, c.alert, line)
+			}
+			rec := httptest.NewRecorder()
+			m.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+			want := `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="credential_rejected"} 0`
+			if c.alert {
+				want = want[:len(want)-1] + "1"
+			}
+			if !strings.Contains(rec.Body.String(), want) {
+				t.Errorf("metrics lack %s:\n%s", want, rec.Body.String())
+			}
+		})
 	}
 }
 

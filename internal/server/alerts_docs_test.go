@@ -37,7 +37,11 @@ func TestTheDocumentedIdPAlertLabelsAreTheExportedOnes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, m := range regexp.MustCompile(`byward_idp_alerts_total\{reason="([^"]*)"\}`).FindAllStringSubmatch(string(harden), -1) {
+	selected := regexp.MustCompile(`byward_idp_alerts_total\{[^}]*reason=~?"([^"]*)"`).FindAllStringSubmatch(string(harden), -1)
+	if len(selected) == 0 {
+		t.Fatal("harden-a-deployment.md selects no byward_idp_alerts_total reason")
+	}
+	for _, m := range selected {
 		if !slices.Contains(idp.Alerts, idp.Alert(m[1])) {
 			t.Errorf("harden-a-deployment.md selects reason %q, which the proxy does not export", m[1])
 		}
