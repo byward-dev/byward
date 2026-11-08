@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,7 +10,9 @@ import (
 	"testing"
 
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/doctor"
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 )
 
@@ -67,5 +70,40 @@ func TestTheOperatorsStripListIsAppliedAndARedundantEntryIsNamed(t *testing.T) {
 	}
 	if text := strings.Join(offline, "\n"); !warned(text, "Authorization") || !warned(text, "X-Api-Key") {
 		t.Fatalf("check --offline warnings %q do not name the redundant entries", offline)
+	}
+}
+
+// doctor names a redundant entry as a configuration warning, with and without authentication.
+func TestDoctorNamesARedundantStripEntry(t *testing.T) {
+	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
+		fakeidp.WithClient(fakeidp.Client{ID: "00000000-0000-0000-0000-000000000002", Secrets: []string{"s3cret-entra"}}))
+	strip := "BYWARD_UPSTREAM_STRIP_HEADERS=X-Argocd-Base-Url,authorization"
+	noAuth, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://10.0.0.7/mcp", "BYWARD_INSECURE_NO_AUTH=true", strip}, os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withAuth, _, err := config.Load(nil, append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://10.0.0.7/mcp", strip), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, cfg := range map[string]*config.Config{"without authentication": noAuth, "with authentication": withAuth} {
+		t.Run(name, func(t *testing.T) {
+			rep, err := Doctor(context.Background(), cfg, DoctorOptions{IdP: fake.HTTPClient(), Proxy: &http.Client{Transport: refuse{}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var named []string
+			for _, c := range rep.Checks {
+				if c.Name == "configuration" && strings.Contains(c.Message, "is stripped from every upstream request already") {
+					named = append(named, c.Message)
+					if c.Status != doctor.Warn || !strings.HasPrefix(c.Fix, "BYWARD_UPSTREAM_STRIP_HEADERS: ") {
+						t.Fatalf("%+v, want a warning naming the setting", c)
+					}
+				}
+			}
+			if len(named) != 1 || !strings.HasPrefix(named[0], "Authorization ") {
+				t.Fatalf("redundant entries named %q, want Authorization alone", named)
+			}
+		})
 	}
 }

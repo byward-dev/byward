@@ -690,7 +690,7 @@ func TestStripsReportsWhatTheRelayRemoves(t *testing.T) {
 	}{
 		{"authorization", nil, true}, {"DPoP", nil, true}, {"x_forwarded_host", nil, true}, {"Sec-Fetch-Site", nil, true},
 		{"origin", nil, true}, {"Forwarded", nil, true},
-		{"X_Api_Key", []string{"X-Api-Key"}, true}, {"X-Api-Key", nil, false}, {"Mcp-Session-Id", nil, false},
+		{"X_Api_Key", []string{"X-Api-Key"}, true}, {"X-Api-Key", []string{"x_api_key"}, true}, {"X-Api-Key", nil, false}, {"Mcp-Session-Id", nil, false},
 	} {
 		if got := Strips(tc.name, tc.extra...); got != tc.want {
 			t.Errorf("Strips(%q, %q) = %v, want %v", tc.name, tc.extra, got, tc.want)
