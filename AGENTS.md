@@ -25,9 +25,24 @@ All tools are pinned in `mise.toml`; `mise run` resolves them, no shell activati
 
 **Run `mise run check` before claiming a change is done.** CI runs the same task.
 
-**Before reporting a PR ready, run `/sweep-runtime`, `/sweep-solid` and `/sweep-tests`** on the diff
-against `origin/main`. Loop each until it is clean, push the fixes, and list each sweep's findings and
-fixes (or "no findings") in the PR description. Agents never merge.
+**Before reporting a PR ready, sweep its diff** against `origin/main` with `/sweep-runtime`,
+`/sweep-solid` and `/sweep-tests`. Push the fixes, and list each angle's findings and fixes (or
+"no findings") in the PR description. Agents never merge.
+
+- **When:** once the code is complete, never mid-implementation, and before asking for the merge
+  slot.
+- **How much:** the coordinating session sets the tier when it hands out the work.
+
+  | Tier | For | Angles |
+  |---|---|---|
+  | Full | Code behind the security invariants: broker, tokens, IdP, relay, upstream, stdio, logging redaction, security settings | All |
+  | Standard | Other production code | runtime, coverage, quality, names, single responsibility |
+  | Tests | Test-only changes | coverage, quality, determinism, data-driven |
+  | None | Docs and CI configuration | None; say so in the PR |
+
+- **Rounds:** round 1 runs every angle of the tier. After that, re-run only the angles that had
+  findings or whose files a fix touched; the last of those rounds must be clean. Stop after 5
+  rounds. Anything still open goes in the PR description or a `ready-for-agent` issue.
 
 ## Layout rules
 
@@ -69,11 +84,13 @@ Several agents often work on this repo at once. These rules keep their work from
 - **Gate every push on the check.** Chain with `&&`, never `;`: `mise run check && git push …`.
   Capture the log with a redirect, not a pipe: `mise run check > check.log 2>&1 && git push …`.
   A pipe (`| tee`, `| grep`, `| tail`) returns the last command's status and hides a failing check.
-- **At most two PRs open at once**, drafts included, across the repo. Wait for a free slot before
-  opening one; the coordinating session hands slots out.
-- **Rebase once, before reporting READY**, not every time `main` moves. Rebase earlier only when
-  `git merge-tree --write-tree origin/main HEAD` reports a conflict. Keep both sides, then re-run
-  the check.
+- **Open PRs freely; merge one at a time.** Any number of PRs may be open and get CI. Don't
+  rebase while you work, not even when `main` moves. Rebase earlier only when
+  `git merge-tree --write-tree origin/main HEAD` reports a conflict.
+- **The merge slot.** When the sweeps are clean, report READY. The coordinating session gives
+  the merge slot to one PR at a time. Holding it: rebase onto `origin/main`, keep both sides of
+  any conflict, re-run the check and any sweep a code conflict touched, push, and report again.
+  The PR is then merged before the slot moves on.
 - **Generated files are never hand-merged.** `docs/reference/settings.md` conflicts are resolved
   by regenerating it: `BYWARD_UPDATE_REFERENCE=1 go test ./internal/config/`.
 - **Sweeps run as one subagent per angle** (runtime; 5 SOLID; 7 tests) through ordinary subagent

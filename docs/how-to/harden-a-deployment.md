@@ -5,7 +5,7 @@ describes `main` as of 2026-11-06. Items marked **planned** do not exist yet. Th
 each item is in the [security posture](../security-posture.md). Every setting is listed in the
 [settings reference](../reference/settings.md).
 
-## 1. TLS and the reverse proxy
+## TLS and the reverse proxy
 
 The proxy does not terminate TLS ([ADR-0019](../adr/0019-packaging.md) §9). Put it behind an ingress
 or a reverse proxy that does.
@@ -26,7 +26,7 @@ or a reverse proxy that does.
       - List only proxies you control. A trusted CIDR that includes client networks lets those
         clients choose their own address.
 
-## 2. Host and Origin allowlists
+## Host and Origin allowlists
 
 Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) §1–2).
 
@@ -39,7 +39,7 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) §1�
       `403` and an `origin_rejected` event. Requests without `Origin` (desktop and CLI clients) pass.
       Add only the origins of web clients you use. Never add a wildcard; none is supported.
 
-## 3. Sealing keys and secret files
+## Sealing keys and secret files
 
 - [ ] Create the key directory as in [sealing keys](sealing-keys.md): mode `0700`, one file per key,
       `openssl rand -base64 32`, owned by the proxy's user (uid 65532 in the image).
@@ -107,7 +107,7 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) §1�
 - [ ] Never run production with `BYWARD_DEV` or `BYWARD_INSECURE_NO_AUTH`. Each logs a
       `development mode relaxation` warning at every start; alert on that message.
 
-## 4. The Entra app registration
+## The Entra app registration
 
 Background: [ADR-0012](../adr/0012-entra-specifics.md), [ADR-0015](../adr/0015-access-gate.md) and
 [access gate](access-gate.md).
@@ -140,8 +140,8 @@ Background: [ADR-0012](../adr/0012-entra-specifics.md), [ADR-0015](../adr/0015-a
         every start, and `byward doctor` from 30 days before
         ([commands](../reference/commands.md#byward-doctor)). Put the date in your monitoring too.
       - An expired or wrong secret makes sign-ins fail, and refreshes answer `503` instead of signing
-        users out. Alert on
-        `byward_idp_request_duration_seconds_count{outcome="unavailable"}`
+        users out. Alert on any increase of
+        `byward_idp_alerts_total{reason="credential_rejected"}`
         ([observability](../reference/observability.md#metrics)).
 - [ ] **Use a certificate credential** instead of a client secret (ADR-0012 §5; Microsoft: "It's
       therefore recommended that your application uses a certificate rather than a secret"). The
@@ -154,7 +154,7 @@ Background: [ADR-0012](../adr/0012-entra-specifics.md), [ADR-0015](../adr/0015-a
       access-token lifetime (1 h) later. To cut someone off sooner, remove their assignment in Entra.
       Their next refresh then fails too.
 
-## 5. The internal listener
+## The internal listener
 
 `/metrics`, `/livez` and `/readyz` are served only on the internal listener
 (`BYWARD_INTERNAL_LISTEN`, default `127.0.0.1:9090`). They have no authentication. The `Host`
@@ -169,7 +169,7 @@ plus the names in `BYWARD_ALLOWED_HOSTS`; any other name gets `421`, which stops
 - [ ] If Prometheus scrapes by a DNS name instead of the pod IP, add that name to
       `BYWARD_ALLOWED_HOSTS`.
 
-## 6. State, backups and restore
+## State, backups and restore
 
 - [ ] **State lives in SQLite** under the data directory: `state/byward.db` (with its `-wal` and
       `-shm` files), mode 0600 in a 0700 directory ([state](state.md)). Grants, refresh tokens and
@@ -184,7 +184,7 @@ plus the names in `BYWARD_ALLOWED_HOSTS`; any other name gets `421`, which stops
       again), logs it and writes a `store_restored` audit record (ADR-0007 §9). A restore drill
       on every PR (`mise run test:integration:go`) restores a snapshot and checks exactly this.
 
-## 7. Logs and the audit stream
+## Logs and the audit stream
 
 - [ ] Ship logs and audit records off the host (OWASP ASVS 16.4.3). The proxy writes JSON lines to
       **standard error** (`cmd/byward/main.go`). Audit records carry `log.type=audit` and
@@ -201,13 +201,16 @@ plus the names in `BYWARD_ALLOWED_HOSTS`; any other name gets `421`, which stops
       - `development mode relaxation` at startup;
       - `grant_revoked` with a reuse reason, which can mean token theft;
       - spikes of `access_token_rejected`, `origin_rejected`, `host_rejected` or `rate_limited`;
-      - IdP `unavailable` outcomes.
+      - IdP `unavailable` outcomes;
+      - any increase of `byward_idp_alerts_total`: the IdP refuses the proxy's own credential, the
+        proxy cannot build it, or the IdP breaks the protocol; no user can fix these (`reason` says
+        which).
 
       Example rules are in the [observability reference](../reference/observability.md#metrics).
 - [ ] Tracing is off unless you set `OTEL_TRACES_EXPORTER`. When on, send it only to a collector you
       run.
 
-## 8. Rate limits
+## Rate limits
 
 The OAuth endpoints are rate-limited per client address, with IPv6 grouped by /64
 ([rate limits](../reference/rate-limits.md)):
@@ -220,7 +223,7 @@ The OAuth endpoints are rate-limited per client address, with IPv6 grouped by /6
 | `/token` | 60 |
 | `/revoke` | 30 |
 
-- [ ] Set `BYWARD_TRUSTED_PROXIES` (section 1), or every user shares one budget.
+- [ ] Set `BYWARD_TRUSTED_PROXIES` ([TLS and the reverse proxy](#tls-and-the-reverse-proxy)), or every user shares one budget.
 - [ ] Raise budgets for offices or VPNs behind one address with `BYWARD_OAUTH_RATE_LIMITS`,
       e.g. `authorize=120,callback=120`. Each value is 1–10,000; there is no off switch.
 - [ ] MCP traffic itself is not rate-limited (ADR-0001), only capped in flight: 64 requests and
@@ -231,7 +234,7 @@ The OAuth endpoints are rate-limited per client address, with IPv6 grouped by /6
       tool answers with plain JSON after more than 5 minutes; a streamed (SSE) answer is not limited
       once its headers arrive. Keep your ingress's upstream timeout above it.
 
-## 9. Run as non-root
+## Run as non-root
 
 - [ ] Use the release image. It runs as uid/gid `65532` on `distroless/static-debian13:nonroot`,
       pinned by digest, with the binary at `/usr/local/bin/byward` and the state directory
@@ -246,7 +249,7 @@ The OAuth endpoints are rate-limited per client address, with IPv6 grouped by /6
       ([packaging](../reference/packaging.md#verifying-a-release)).
 - [ ] Track releases: security fixes go into the latest minor only ([SECURITY.md](../../SECURITY.md)).
 
-## 10. Isolate stdio upstream processes
+## Isolate stdio upstream processes
 
 Every stdio upstream process runs as byward's own uid, whichever user it serves. Separate processes
 and `{session_dir}` keep sessions apart by default ([stdio how-to](stdio-upstream.md#3-isolate-state-between-sessions)),
@@ -267,14 +270,14 @@ holds the user's downstream token, so byward warns at startup and in `doctor` wh
         `echo kernel.yama.ptrace_scope=1 > /etc/sysctl.d/10-ptrace.conf && sysctl --system`.
       - It does not cover the environment: put nothing in an upstream's environment that another
         user's process must not see.
-- [ ] Keep the runtime's default seccomp profile and drop all capabilities (section 9). Docker's
+- [ ] Keep the runtime's default seccomp profile and drop all capabilities ([Run as non-root](#run-as-non-root)). Docker's
       default profile allows `pidfd_getfd`, which copies another process's file descriptors, only
       with `CAP_SYS_PTRACE`, and Docker does not grant that capability.
 - [ ] Run an upstream server you do not trust in its own deployment: one byward per such server,
       in its own container or VM, and per tenant or user group where their data must stay apart
       even if the server is compromised. byward does not sandbox stdio processes from each other.
 
-## 11. Protect the upstream hop
+## Protect the upstream hop
 
 Every request byward relays to an HTTP upstream carries the identity assertion, and, when they are
 configured, the upstream credential and an On-Behalf-Of token for a downstream API. Over plain
@@ -299,7 +302,7 @@ configured, the upstream credential and an On-Behalf-Of token for a downstream A
       name does unless `NO_PROXY` lists it, even one that resolves to a loopback address. A proxy
       setting Go cannot parse is ignored, and the hop then goes direct.
 
-## 12. Strip the upstream's header-driven settings
+## Strip the upstream's header-driven settings
 
 byward removes a fixed set of request headers before relaying (`Authorization`, `DPoP`,
 `Forwarded`, `Origin`, `X-Forwarded-*`, `Sec-Fetch-*`, and the headers it sets itself) and forwards

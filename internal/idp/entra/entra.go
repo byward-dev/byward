@@ -184,7 +184,11 @@ func (p *Provider) Callback(ctx context.Context, query url.Values, l idp.Login) 
 		return idp.Identity{}, idp.Tokens{}, &idp.Error{Class: idp.Fatal, Err: err}
 	}
 	if cb.Error != "" {
-		return idp.Identity{}, idp.Tokens{}, newError(0, cb.Error, cb.ErrorDescription, nil, "", "")
+		// The callback query is the browser's and anyone can forge it, so its error never alerts the
+		// operator (#204); a rejected credential shows at the token endpoint.
+		e := newError(0, cb.Error, cb.ErrorDescription, nil, "", "")
+		e.Alert = ""
+		return idp.Identity{}, idp.Tokens{}, e
 	}
 	tr, err := p.token(ctx, url.Values{
 		"grant_type":    {"authorization_code"},
@@ -249,7 +253,7 @@ func (p *Provider) token(ctx context.Context, form url.Values) (*idp.TokenRespon
 func (p *Provider) tokenAt(ctx context.Context, tenant string, form url.Values) (*idp.TokenResponse, error) {
 	tokenURL := Authority + "/" + tenant + "/oauth2/v2.0/token"
 	if err := p.cfg.ClientAuth.Apply(form, p.cfg.ClientID, tokenURL, p.cfg.Now()); err != nil {
-		return nil, &idp.Error{Class: idp.Unavailable, Alert: true, Err: fmt.Errorf("%w: %w", idp.ErrCredential, err)}
+		return nil, &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialUnusable, Err: fmt.Errorf("%w: %w", idp.ErrCredential, err)}
 	}
 	header := http.Header{}
 	if id := idp.RequestID(ctx); isGUID(id) {

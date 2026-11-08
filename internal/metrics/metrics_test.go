@@ -29,6 +29,7 @@ func exercise(m *Metrics) {
 	h := m.Middleware(func(*http.Request) string { return "mcp" }, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(401) }))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/mcp?user=alice", nil))
 	m.IdP("entra", "callback", "success", 120*time.Millisecond)
+	m.IdPAlert("entra", "callback", "credential_rejected")
 	m.InFlight("request", 1)
 	m.Busy("stream")
 	m.AuditEvent("login", "success")
@@ -116,6 +117,8 @@ func TestNilMetricsIsSafeToCall(t *testing.T) {
 		t.Fatal("nil Metrics.Middleware must return the next handler, got nil")
 	}
 	m.IdP("entra", "callback", "success", time.Second)
+	m.IdPAlert("entra", "callback", "credential_rejected")
+	m.SeedIdPAlerts("entra", []string{"callback"}, []string{"protocol"})
 	m.InFlight("request", 1)
 	m.Busy("request")
 	m.AuditEvent("login", "success")
@@ -124,4 +127,22 @@ func TestNilMetricsIsSafeToCall(t *testing.T) {
 	m.DCRRegistration("registered")
 	m.Consent("verified", "remembered")
 	m.AppToken("accepted")
+}
+
+// #204: seeding exports each given operation and reason of the IdP at 0, and nothing else, so an
+// increase() rule sees the first alert after a start.
+func TestAnIdPsAlertSeriesAreExportedAtZeroBeforeAnyAlert(t *testing.T) {
+	m := New()
+	m.SeedIdPAlerts("entra", []string{"callback", "refresh"}, []string{"credential_rejected", "protocol"})
+	body := scrape(t, m)
+	for _, op := range []string{"callback", "refresh"} {
+		for _, reason := range []string{"credential_rejected", "protocol"} {
+			if s := `byward_idp_alerts_total{idp="entra",operation="` + op + `",reason="` + reason + `"} 0`; !strings.Contains(body, s) {
+				t.Errorf("%s is not exported:\n%s", s, body)
+			}
+		}
+	}
+	if n := strings.Count(body, "byward_idp_alerts_total{"); n != 4 {
+		t.Errorf("%d alert series exported, want the 4 seeded:\n%s", n, body)
+	}
 }

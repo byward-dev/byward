@@ -86,8 +86,9 @@ func redacted(s string) string {
 type Authenticator interface {
 	// AuthCodeURL is the IdP login URL for l.
 	AuthCodeURL(ctx context.Context, l Login) (string, error)
-	// Callback handles the IdP's redirect to /callback/{idp}: an error response becomes an *Error,
-	// a code is exchanged and the ID token validated against l.
+	// Callback handles the IdP's redirect to /callback/{idp}: an error response becomes an *Error
+	// that never sets Alert (the query is the browser's and forgeable; #204), a code is exchanged
+	// and the ID token validated against l.
 	Callback(ctx context.Context, query url.Values, l Login) (Identity, Tokens, error)
 }
 

@@ -212,12 +212,14 @@ func TestTokenErrorsAreClassified(t *testing.T) {
 	for name, tc := range map[string]struct {
 		f     *fakeidp.Failure
 		class idp.Class
-		alert bool
+		alert idp.Alert
 	}{
-		"invalid_grant":   {&fakeidp.RefreshTokenExpired, idp.SignInAgain, false},
-		"invalid_client":  {&fakeidp.InvalidClientSecret, idp.Unavailable, true},
-		"503":             {&fakeidp.TemporarilyUnavailable, idp.Unavailable, false},
-		"invalid_request": {&fakeidp.InvalidRequest, idp.Fatal, false},
+		"invalid_grant":   {&fakeidp.RefreshTokenExpired, idp.SignInAgain, ""},
+		"invalid_client":  {&fakeidp.InvalidClientSecret, idp.Unavailable, idp.AlertCredentialRejected},
+		"503":             {&fakeidp.TemporarilyUnavailable, idp.Unavailable, ""},
+		"invalid_request": {&fakeidp.InvalidRequest, idp.Fatal, ""},
+		// The same failure as Entra's 700016 row: the app is unknown, so both adapters alert.
+		"unknown app": {&fakeidp.UnknownClient, idp.Fatal, idp.AlertCredentialRejected},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t, Config{})
@@ -229,7 +231,7 @@ func TestTokenErrorsAreClassified(t *testing.T) {
 			_, _, err = e.p.Refresh(context.Background(), tok.RefreshToken)
 			var ie *idp.Error
 			if !asError(err, &ie) || ie.Class != tc.class || ie.Alert != tc.alert {
-				t.Fatalf("err = %#v", err)
+				t.Fatalf("err = %#v, want class %v alert %q", err, tc.class, tc.alert)
 			}
 		})
 	}
@@ -432,7 +434,7 @@ func TestTokenTransportFailureIsUnavailable(t *testing.T) {
 	e.p.fetch.Client = &http.Client{Transport: refused{}}
 	_, _, err := e.p.Refresh(context.Background(), "rt")
 	var ie *idp.Error
-	if !asError(err, &ie) || ie.Class != idp.Unavailable || ie.Alert {
+	if !asError(err, &ie) || ie.Class != idp.Unavailable || ie.Alert != "" {
 		t.Fatalf("err = %#v", err)
 	}
 }
@@ -446,7 +448,7 @@ func TestATokenSuccessWithoutTokensIsFatal(t *testing.T) {
 	e.p.fetch.Client = &http.Client{Transport: emptySuccess{}}
 	_, _, err := e.p.Refresh(context.Background(), "rt")
 	var ie *idp.Error
-	if !asError(err, &ie) || ie.Class != idp.Fatal || !ie.Alert {
+	if !asError(err, &ie) || ie.Class != idp.Fatal || ie.Alert != idp.AlertProtocol {
 		t.Fatalf("err = %#v, want Fatal with an operator alert", err)
 	}
 }
@@ -556,11 +558,29 @@ func TestGoogleIsAskedForConsentEverySignInExceptASilentOne(t *testing.T) {
 
 // A credential the proxy cannot make (an assertion file that is missing) fails before any request,
 // as an ErrCredential that alerts the operator, the same as with Entra.
-func TestAnUnusableClientCredentialFailsAsErrCredential(t *testing.T) {
+func TestAnUnusableClientCredentialAlertsTheOperator(t *testing.T) {
 	e := newEnv(t, Config{ClientAuth: idp.AssertionFile(t.TempDir() + "/missing-token")})
 	_, _, err := e.p.Refresh(context.Background(), "rt")
 	var ie *idp.Error
-	if !errors.Is(err, idp.ErrCredential) || !errors.As(err, &ie) || ie.Class != idp.Unavailable || !ie.Alert {
+	if !errors.Is(err, idp.ErrCredential) || !errors.As(err, &ie) || ie.Class != idp.Unavailable || ie.Alert != idp.AlertCredentialUnusable {
 		t.Fatalf("err = %v, want an alerting, unavailable ErrCredential", err)
+	}
+}
+
+// #204: the callback query is the browser's, so an invalid_client in it is forgeable and never an
+// operator alert; only the token endpoint's answer can say the proxy's credential was refused.
+func TestACallbackErrorNeverAlertsTheOperator(t *testing.T) {
+	for _, oauth := range []string{"invalid_client", "unauthorized_client"} { // both alert at the token endpoint
+		t.Run(oauth, func(t *testing.T) {
+			e := newEnv(t, Config{})
+			q := signIn(t, e, login)
+			q.Del("code")
+			q.Set("error", oauth)
+			_, _, err := e.p.Callback(context.Background(), q, login)
+			var ie *idp.Error
+			if !errors.As(err, &ie) || ie.OAuth != oauth || ie.Alert != "" {
+				t.Fatalf("err = %#v, want the IdP's %s without an alert", err, oauth)
+			}
+		})
 	}
 }
