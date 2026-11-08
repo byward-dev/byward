@@ -527,7 +527,7 @@ func TestDoctorDescribesOnBehalfOf(t *testing.T) {
 
 func TestDoctorDescribesOnBehalfOfForAStdioUpstream(t *testing.T) {
 	cfg := &config.Config{UpstreamCommand: []string{"/usr/bin/server"}, OBOScopes: []string{graphUserRead}}
-	msg := upstreamResult(cfg).Message
+	msg := upstreamResult(cfg, noProxy).Message
 	for _, want := range []string{"BYWARD_DOWNSTREAM_TOKEN_SOCKET", graphUserRead, "admin consent"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("doctor says %q, missing %q", msg, want)
