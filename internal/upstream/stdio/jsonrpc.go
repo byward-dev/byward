@@ -72,9 +72,12 @@ type rpcFault struct {
 	msg  string
 }
 
-// pathMethod is where a message's method is; parseMessage refuses it, and the id, repeated or in
-// another case.
-var pathMethod = jsonPath{"method"}
+// Where a message's method and id are. parseMessage refuses either repeated or in another case,
+// in both eras; the modern era also rewrites the id.
+var (
+	pathMethod = jsonPath{"method"}
+	pathID     = jsonPath{"id"}
+)
 
 // parseMessage checks a POST body is one JSON-RPC message and returns it as one line for stdin.
 // The bytes are kept as sent unless they hold a line break, which can only be whitespace in JSON

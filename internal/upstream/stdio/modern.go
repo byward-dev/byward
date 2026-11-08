@@ -36,7 +36,6 @@ const (
 )
 
 var (
-	pathID       = jsonPath{"id"}
 	pathVersion  = jsonPath{"params", "_meta", "io.modelcontextprotocol/protocolVersion"}
 	pathToken    = jsonPath{"params", "_meta", "progressToken"}
 	pathLogLevel = jsonPath{"params", "_meta", "io.modelcontextprotocol/logLevel"}
@@ -76,7 +75,8 @@ type requestMeta struct {
 // readMeta locates a message's id, progress token, log level and protocol version. Ambiguous JSON
 // is refused: the ids are rewritten, and a wrong guess would route one client's answer to another.
 func readMeta(msg []byte) (requestMeta, error) {
-	at, err := locate(msg, pathID, pathToken, pathLogLevel, pathVersion) // the method is checked by parseMessage, in both eras
+	// The method, and both keys' case, are checked by parseMessage.
+	at, err := locate(msg, pathID, pathToken, pathLogLevel, pathVersion)
 	if err != nil {
 		return requestMeta{}, err
 	}
