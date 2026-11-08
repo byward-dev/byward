@@ -151,16 +151,40 @@ func stdioName(cfg *config.Config) string { return filepath.Base(cfg.UpstreamCom
 // never supply them; so is the operator credential's, which the relay then sets (ADR-0016 §5, §7),
 // and the On-Behalf-Of header's (ADR-0017 §3).
 func httpUpstream(cfg *config.Config, log *slog.Logger, opts ...relay.Option) http.Handler {
-	base := []relay.Option{relay.WithInject(tracing.Inject), relay.WithResponseHeaderTimeout(cfg.UpstreamHeaderTimeout), relay.WithStripped(cfg.AssertionHeader),
-		relay.WithStripped(config.IdentityHeaderNames...)}
-	if cfg.OBOHeader != "" { // set with authentication, whether or not On-Behalf-Of is on
-		base = append(base, relay.WithStripped(cfg.OBOHeader))
-	}
+	base := []relay.Option{relay.WithInject(tracing.Inject), relay.WithResponseHeaderTimeout(cfg.UpstreamHeaderTimeout),
+		relay.WithStripped(proxySetHeaders(cfg)...), relay.WithStripped(cfg.UpstreamStripHeaders...)}
 	if cred := cfg.UpstreamCredential; cred != "" {
 		header := cfg.UpstreamCredentialHeader
-		base = append(base, relay.WithStripped(header), relay.WithInject(func(_ context.Context, h http.Header) { h.Set(header, cred) }))
+		base = append(base, relay.WithInject(func(_ context.Context, h http.Header) { h.Set(header, cred) }))
 	}
 	return relay.New(log, cfg.UpstreamURL, append(base, opts...)...)
+}
+
+// proxySetHeaders are the headers the proxy sets on upstream requests, or may: the assertion's, the
+// plain identity headers, the On-Behalf-Of token's (set with authentication, whether or not
+// On-Behalf-Of is on) and the operator credential's.
+func proxySetHeaders(cfg *config.Config) []string {
+	names := append([]string{cfg.AssertionHeader}, config.IdentityHeaderNames...)
+	if cfg.OBOHeader != "" {
+		names = append(names, cfg.OBOHeader)
+	}
+	if cfg.UpstreamCredential != "" {
+		names = append(names, cfg.UpstreamCredentialHeader)
+	}
+	return names
+}
+
+// redundantStrips warns of each BYWARD_UPSTREAM_STRIP_HEADERS entry the relay removes anyway, so
+// the operator does not take it for the reason the header is gone.
+func redundantStrips(cfg *config.Config) []Warning {
+	var out []Warning
+	for _, n := range cfg.UpstreamStripHeaders {
+		if relay.Strips(n, proxySetHeaders(cfg)...) {
+			out = append(out, Warning{Message: n + " is stripped from every upstream request already; the entry changes nothing",
+				Setting: config.Setting{Name: "upstream-strip-headers"}.Env(), Fix: "remove " + n + " from the list"})
+		}
+	}
+	return out
 }
 
 // assertionKey carries a request's minted assertion from withAssertion to the relay.

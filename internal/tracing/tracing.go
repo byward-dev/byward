@@ -25,6 +25,13 @@ import (
 
 const instrumentation = "github.com/byward-dev/byward"
 
+// propagator carries the trace context to the upstream: W3C trace context only.
+var propagator propagation.TextMapPropagator = propagation.TraceContext{}
+
+// Fields are the headers Inject sets on an upstream request, which the relay's strip cannot remove
+// since Inject runs after it.
+func Fields() []string { return propagator.Fields() }
+
 // Setup installs the tracer provider and the W3C trace-context propagator when getenv
 // ("OTEL_TRACES_EXPORTER") is set, and returns a shutdown that flushes spans. Otherwise it changes
 // nothing: the global provider and propagator stay no-ops, and an inbound `traceparent` reaches the
@@ -48,7 +55,7 @@ func Setup(ctx context.Context, getenv func(string) string, version string) (ena
 	}
 	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp), sdktrace.WithResource(res))
 	otel.SetTracerProvider(tp)
-	otel.SetTextMapPropagator(propagation.TraceContext{})
+	otel.SetTextMapPropagator(propagator)
 	return true, tp.Shutdown, nil
 }
 

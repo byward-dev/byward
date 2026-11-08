@@ -44,7 +44,7 @@ func CheckOffline(cfg *config.Config) ([]Warning, error) {
 		if err := errors.Join(looseSecretFiles(cfg)...); err != nil {
 			return nil, err
 		}
-		return append([]Warning{{Message: "authentication is off (BYWARD_INSECURE_NO_AUTH); only the settings, the secret files and the upstream were checked"}}, offlineHop(cfg)...), nil
+		return append(append([]Warning{{Message: "authentication is off (BYWARD_INSECURE_NO_AUTH); only the settings, the secret files and the upstream were checked"}}, offlineHop(cfg)...), redundantStrips(cfg)...), nil
 	}
 	parts, err := loadAuthParts(cfg, nil)
 	if err != nil {
@@ -56,7 +56,7 @@ func CheckOffline(cfg *config.Config) ([]Warning, error) {
 	if err := checkStorePaths(cfg); err != nil {
 		return nil, err
 	}
-	return append(append(parts.warnings, parts.idp.timedWarnings(time.Now())...), offlineHop(cfg)...), nil
+	return append(append(append(parts.warnings, parts.idp.timedWarnings(time.Now())...), offlineHop(cfg)...), redundantStrips(cfg)...), nil
 }
 
 // offlineHop is the plain-http upstream warning without the network: only an upstream given as an
@@ -124,6 +124,9 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 		if err := errors.Join(looseSecretFiles(cfg)...); err != nil {
 			return r, err
 		}
+		for _, w := range redundantStrips(cfg) {
+			r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "configuration", Status: doctor.Warn, Message: w.Message, Fix: warningFix(w)})
+		}
 		r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy))
 		r.Checks = append(r.Checks, upstreamHopResult(ctx, cfg, o.Resolve)...)
 		r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "authentication", Status: doctor.Warn,
@@ -143,7 +146,7 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	if cfg.IdentityHeaders && cfg.UpstreamCommand == nil {
 		r.Checks = append(r.Checks, identityHeadersResult(ctx, cfg.UpstreamURL.Hostname(), o.Resolve))
 	}
-	for _, w := range parts.warnings {
+	for _, w := range append(parts.warnings, redundantStrips(cfg)...) {
 		r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "configuration", Status: doctor.Warn, Message: w.Message, Fix: warningFix(w)})
 	}
 	target := doctor.Target{Resource: cfg.PublicURL, Issuer: cfg.Issuer(), HostsSetting: config.Setting{Name: "allowed-hosts"}.Env()}

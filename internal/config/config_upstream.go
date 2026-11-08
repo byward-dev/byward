@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net/textproto"
 	"strconv"
 	"strings"
 	"time"
@@ -21,9 +22,14 @@ func (c *Config) upstream(v *Values) []error {
 			return []error{errorf("%s (or %s, or a command after --)", err.Error(), cmdEnv)}
 		}
 		c.UpstreamURL = u
-		return nil
+		var errs []error
+		c.UpstreamStripHeaders, errs = stripHeaders(v.get("upstream-strip-headers"))
+		return errs
 	}
 	var errs []error
+	if v.get("upstream-strip-headers") != "" {
+		errs = append(errs, errorf("%s is set, but a stdio upstream gets no request headers", Setting{Name: "upstream-strip-headers"}.Env()))
+	}
 	if v.get("upstream-url") != "" {
 		errs = append(errs, errorf("%s and %s are both set: an upstream is either HTTP or stdio", urlEnv, cmdEnv))
 	}
@@ -161,4 +167,34 @@ func (c *Config) upstreamCredential(v *Values) []error {
 	}
 	c.UpstreamCredentialHeader = h
 	return errs
+}
+
+// mcpHeaders are the request headers MCP and its transport need at the upstream, so the operator
+// may not strip them: the 2026-07-28 revision also requires every Mcp-Param-* header to be
+// forwarded.
+var mcpHeaders = map[string]bool{"Accept": true, "Content-Type": true, "Content-Length": true, "Transfer-Encoding": true, "Host": true,
+	"Last-Event-Id": true, "Mcp-Session-Id": true, "Mcp-Protocol-Version": true, "Mcp-Method": true, "Mcp-Name": true}
+
+// stripHeaders reads BYWARD_UPSTREAM_STRIP_HEADERS: header names, canonical with _ read as -, the
+// way the relay compares them.
+func stripHeaders(raw string) ([]string, []error) {
+	env := Setting{Name: "upstream-strip-headers"}.Env()
+	var out []string
+	var errs []error
+	for _, n := range splitList(raw) {
+		h := textproto.CanonicalMIMEHeaderKey(strings.ReplaceAll(n, "_", "-"))
+		switch {
+		case strings.ContainsRune(n, '*'):
+			errs = append(errs, errorf("%s: %q: exact names only; list each header of a family by name", env, n))
+		case strings.ContainsFunc(n, func(r rune) bool { return !isTokenChar(r) }):
+			errs = append(errs, errorf("%s: %q is not a header name; list exact names, such as X-Argocd-Base-Url", env, n))
+		case mcpHeaders[h] || strings.HasPrefix(h, "Mcp-Param-"):
+			errs = append(errs, errorf("%s: %s is a header MCP needs at the upstream; remove it from the list", env, h))
+		case h == "Traceparent" || h == "Tracestate":
+			errs = append(errs, errorf("%s: %s cannot be stripped: with tracing on, the proxy sets it from the inbound trace context; remove it from the list", env, h))
+		default:
+			out = append(out, h)
+		}
+	}
+	return out, errs
 }

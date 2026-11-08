@@ -135,6 +135,9 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 		w.log(log)
 	}
 	cancel()
+	for _, w := range redundantStrips(cfg) {
+		w.log(log)
+	}
 	if a == nil {
 		h = Handler(cfg, log, up.handler, resource.NoTokens{}, nil, nil, o)
 	} else {
