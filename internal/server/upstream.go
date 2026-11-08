@@ -41,18 +41,23 @@ func newUpstream(cfg *config.Config, log *slog.Logger, o Observability, minter *
 		return &upstream{handler: httpUpstream(cfg, log)}, nil
 	}
 	name := stdioName(cfg)
-	m, err := newStdioManager(cfg, stdio.Config{Name: name, Command: cfg.UpstreamCommand, Env: cfg.UpstreamEnv,
-		MaxProcesses: cfg.StdioMaxProcesses, MaxPerUser: cfg.StdioMaxPerUser, StreamIdleTimeout: cfg.StdioStreamIdleTimeout, Log: log,
-		Evicted: func(id stdio.Identity, reason string, openStreams int) {
-			o.Audit.Record(nil, audit.Event{Name: audit.ProcessEvicted, Outcome: audit.Success, Reason: reason, UserKey: id.Subject,
-				OpenStreams: openStreams})
-		}})
+	m, err := newStdioManager(cfg, stdioConfig(cfg, name, log, o))
 	if err != nil {
 		return nil, err
 	}
 	o.Metrics.StdioProcesses(m.Len)
 	b := stdio.NewBridge(stdio.BridgeConfig{Manager: m, Identity: stdioIdentity(cfg), Log: log.With("upstream", name)})
 	return &upstream{handler: b, shutdown: m.Shutdown}, nil
+}
+
+// stdioConfig is the stdio upstream's settings from cfg, with each eviction audited.
+func stdioConfig(cfg *config.Config, name string, log *slog.Logger, o Observability) stdio.Config {
+	return stdio.Config{Name: name, Command: cfg.UpstreamCommand, Env: cfg.UpstreamEnv,
+		MaxProcesses: cfg.StdioMaxProcesses, MaxPerUser: cfg.StdioMaxPerUser, StreamIdleTimeout: cfg.StdioStreamIdleTimeout, Log: log,
+		Evicted: func(ev stdio.Eviction) {
+			o.Audit.Record(nil, audit.Event{Name: audit.ProcessEvicted, Outcome: audit.Success, Reason: ev.Reason, UserKey: ev.ID.Subject,
+				OpenStreams: ev.OpenStreams})
+		}}
 }
 
 // newStdioManager is stdio.New with the settings named in its error. It finds the command and

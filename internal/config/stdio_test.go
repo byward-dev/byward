@@ -24,7 +24,7 @@ func stdioFiles(envFile string) readFileFunc {
 	}
 }
 
-func TestStdioCommandIsReadFromAfterDoubleDashOrTheEnvironmentWithDefaultCaps(t *testing.T) {
+func TestStdioCommandIsReadFromAfterDoubleDashOrTheEnvironmentWithDefaultCapsAndStreamIdleTimeout(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args []string
 		env  []string
@@ -101,15 +101,17 @@ func TestInvalidStdioSettingsAreRejectedNamingTheSetting(t *testing.T) {
 	}
 }
 
-func TestStreamIdleTimeoutIsOffAtZeroAndOtherwiseAtLeastAMinute(t *testing.T) {
+func TestStreamIdleTimeoutAcceptsZeroAndDurationsOfAMinuteOrMore(t *testing.T) {
 	for raw, want := range map[string]time.Duration{"0": 0, "0s": 0, "1m": time.Minute, "2h": 2 * time.Hour} {
-		c, _, err := Load([]string{"--", "/bin/x"}, stdioBase("BYWARD_STDIO_STREAM_IDLE_TIMEOUT="+raw), baseFiles)
-		if err != nil {
-			t.Fatalf("%s: %v", raw, err)
-		}
-		if c.StdioStreamIdleTimeout != want {
-			t.Fatalf("%s: got %s, want %s", raw, c.StdioStreamIdleTimeout, want)
-		}
+		t.Run(raw, func(t *testing.T) {
+			c, _, err := Load([]string{"--", "/bin/x"}, stdioBase("BYWARD_STDIO_STREAM_IDLE_TIMEOUT="+raw), baseFiles)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.StdioStreamIdleTimeout != want {
+				t.Fatalf("got %s, want %s", c.StdioStreamIdleTimeout, want)
+			}
+		})
 	}
 }
 

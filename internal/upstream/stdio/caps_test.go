@@ -24,11 +24,11 @@ type evictions struct {
 
 func newEvictions() *evictions { return &evictions{done: make(chan struct{}, 16)} }
 
-func (e *evictions) record(id Identity, reason string, openStreams int) {
+func (e *evictions) record(ev Eviction) {
 	e.mu.Lock()
-	e.users = append(e.users, id.Subject)
-	e.reasons = append(e.reasons, reason)
-	e.streams = append(e.streams, openStreams)
+	e.users = append(e.users, ev.ID.Subject)
+	e.reasons = append(e.reasons, ev.Reason)
+	e.streams = append(e.streams, ev.OpenStreams)
 	e.mu.Unlock()
 	e.done <- struct{}{}
 }
@@ -80,7 +80,7 @@ func TestUserAtTheirCapEvictsTheirOwnLeastRecentlyUsedProcess(t *testing.T) {
 	if isDone(bob1) || isDone(alice2) {
 		t.Fatal("a process other than alice's least recently used one was stopped")
 	}
-	if _, _, err := h.m.leaseKey(context.Background(), "a1", alice, false); !errors.Is(err, errNotFound) {
+	if _, _, err := h.m.leaseKey(context.Background(), "a1", alice, requestLease); !errors.Is(err, errNotFound) {
 		t.Fatalf("Lease of the evicted key = %v, want errNotFound", err)
 	}
 }
@@ -230,16 +230,16 @@ func pidOf(p *Process) any {
 
 func TestLookingUpAProcessNeverStartsOneAndRefusesAnotherUser(t *testing.T) {
 	h := newHarness(t, nil)
-	if _, _, err := h.m.leaseKey(context.Background(), "s1", alice, false); !errors.Is(err, errNotFound) {
+	if _, _, err := h.m.leaseKey(context.Background(), "s1", alice, requestLease); !errors.Is(err, errNotFound) {
 		t.Fatalf("Lease of an unknown key = %v, want errNotFound", err)
 	}
 	p := h.get(t, "s1", alice)
-	if _, _, err := h.m.leaseKey(context.Background(), "s1", bob, false); !errors.Is(err, ErrUserMismatch) {
+	if _, _, err := h.m.leaseKey(context.Background(), "s1", bob, requestLease); !errors.Is(err, ErrUserMismatch) {
 		t.Fatalf("Lease by another user = %v, want ErrUserMismatch", err)
 	}
 	h.m.Stop("s1")
 	waitDone(t, p)
-	if _, _, err := h.m.leaseKey(context.Background(), "s1", alice, false); !errors.Is(err, errNotFound) {
+	if _, _, err := h.m.leaseKey(context.Background(), "s1", alice, requestLease); !errors.Is(err, errNotFound) {
 		t.Fatalf("Lease after exit = %v, want errNotFound", err)
 	}
 	if h.m.Len() != 0 {
@@ -354,7 +354,7 @@ const streamIdle = 10 * time.Minute
 // quiet longer.
 func (h *harness) stream(t *testing.T, key string, id Identity) (*Process, func()) {
 	t.Helper()
-	p, release, err := h.m.get(context.Background(), key, id, true)
+	p, release, err := h.m.get(context.Background(), key, id, streamLease)
 	if err != nil {
 		t.Fatalf("stream lease of %q: %v", key, err)
 	}
@@ -404,7 +404,7 @@ func TestAtTheUpstreamCapAnIdleProcessOfAnyoneGoesBeforeAQuietStreamOfAUserUnder
 	}
 }
 
-func TestAQuietStreamKeepsItsProcessWhenItIsNotQuietLongEnoughOrAlsoServesARequest(t *testing.T) {
+func TestAQuietStreamsProcessIsEvictableOnceQuietForTheTimeoutUnlessTrafficARequestOrZeroKeepsIt(t *testing.T) {
 	cases := []struct {
 		name     string
 		timeout  time.Duration

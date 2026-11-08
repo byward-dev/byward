@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -307,7 +308,7 @@ func TestRequestIDsAndProgressTokensMustBeStringsOrIntegers(t *testing.T) {
 
 func TestAnExitedProcessesRequestGetsItsQueuedAnswerElseAnErrorOrForAnEvictedListenACompletion(t *testing.T) {
 	const answered = `{"jsonrpc":"2.0","id":7,"result":"answered"}`
-	const complete = `{"id":7,"jsonrpc":"2.0","result":{"_meta":{"io.modelcontextprotocol/subscriptionId":7},"resultType":"complete"}}`
+	const complete = `{"jsonrpc":"2.0","id":7,"result":{"resultType":"complete","_meta":{"io.modelcontextprotocol/subscriptionId":7}}}`
 	const exited = `{"jsonrpc":"2.0","id":7,"error":{"code":-32603,"message":"upstream process exited"}}`
 	cases := []struct {
 		name             string
@@ -326,7 +327,14 @@ func TestAnExitedProcessesRequestGetsItsQueuedAnswerElseAnErrorOrForAnEvictedLis
 			if tc.queued != "" {
 				q.final <- []byte(tc.queued)
 			}
-			if got := string(exitAnswer(q, tc.evicted)); got != tc.wantBody {
+			got := exitAnswer(q, tc.evicted)
+			if tc.queued != "" { // the upstream's own answer goes out unchanged, byte for byte
+				if string(got) != tc.wantBody {
+					t.Fatalf("got %s, want %s", got, tc.wantBody)
+				}
+				return
+			}
+			if !sameJSON(t, got, tc.wantBody) {
 				t.Fatalf("got %s, want %s", got, tc.wantBody)
 			}
 		})
@@ -868,7 +876,20 @@ func TestAQuietListensProcessIsEvictedForAnotherUserAndTheListenGetsACompletionR
 	// The server ended the subscription, so it says so (2026-07-28 subscriptions), under the
 	// client's own id, never the proxy's.
 	got := ev.all()
-	if len(got) != 1 || got[0] != `{"id":"L","jsonrpc":"2.0","result":{"_meta":{"io.modelcontextprotocol/subscriptionId":"L"},"resultType":"complete"}}` {
+	if len(got) != 1 || !sameJSON(t, []byte(got[0]), `{"jsonrpc":"2.0","id":"L","result":{"resultType":"complete","_meta":{"io.modelcontextprotocol/subscriptionId":"L"}}}`) {
 		t.Fatalf("the evicted listen got %q, want its completion result only", got)
 	}
+}
+
+// sameJSON reports whether got and want are the same JSON value, whatever the key order.
+func sameJSON(t *testing.T, got []byte, want string) bool {
+	t.Helper()
+	var g, w any
+	if err := json.Unmarshal(got, &g); err != nil {
+		t.Fatalf("not JSON: %s", got)
+	}
+	if err := json.Unmarshal([]byte(want), &w); err != nil {
+		t.Fatalf("want is not JSON: %s", want)
+	}
+	return reflect.DeepEqual(g, w)
 }

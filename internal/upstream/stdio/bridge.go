@@ -136,7 +136,7 @@ func (b *Bridge) post(w http.ResponseWriter, r *http.Request, id Identity, key s
 		if s, release = b.start(w, r, id); s == nil {
 			return
 		}
-	} else if s, release = b.session(w, r, id, key, false); s == nil {
+	} else if s, release = b.session(w, r, id, key, requestLease); s == nil {
 		return
 	}
 	defer release()
@@ -160,7 +160,7 @@ func (b *Bridge) get(w http.ResponseWriter, r *http.Request, id Identity, key st
 		http.Error(w, "method not allowed without "+sessionHeader, http.StatusMethodNotAllowed)
 		return
 	}
-	s, release := b.session(w, r, id, key, true) // the GET stream: evictable once quiet
+	s, release := b.session(w, r, id, key, streamLease)
 	if s == nil {
 		return
 	}
@@ -176,7 +176,7 @@ func (b *Bridge) delete(w http.ResponseWriter, r *http.Request, id Identity, key
 		http.Error(w, "method not allowed without "+sessionHeader, http.StatusMethodNotAllowed)
 		return
 	}
-	s, release := b.session(w, r, id, key, false)
+	s, release := b.session(w, r, id, key, requestLease)
 	if s == nil {
 		return
 	}
@@ -227,13 +227,13 @@ func (b *Bridge) start(w http.ResponseWriter, r *http.Request, id Identity) (*se
 	return s, release
 }
 
-// session finds the live session for key and leases its process, as a stream lease for the GET
-// stream (stream true) or a request lease. A session that does not exist,
+// session finds the live session for key and leases its process with a lease of the given kind
+// (a stream lease for the GET stream). A session that does not exist,
 // has ended or serves another user gets 404, after which the client starts a new one (2025-11-25
 // transports, Session Management rules 3 and 4). A request whose MCP-Protocol-Version names
 // another version than the session negotiated gets 400 (Protocol Version Header). Either way it
 // returns nil, with nothing leased.
-func (b *Bridge) session(w http.ResponseWriter, r *http.Request, id Identity, key string, stream bool) (*session, func()) {
+func (b *Bridge) session(w http.ResponseWriter, r *http.Request, id Identity, key string, kind leaseKind) (*session, func()) {
 	b.mu.Lock()
 	s := b.sessions[key]
 	b.mu.Unlock()
@@ -241,7 +241,7 @@ func (b *Bridge) session(w http.ResponseWriter, r *http.Request, id Identity, ke
 		http.Error(w, "session not found", http.StatusNotFound)
 		return nil, nil
 	}
-	_, release, err := b.c.Manager.leaseKey(r.Context(), key, id, stream)
+	_, release, err := b.c.Manager.leaseKey(r.Context(), key, id, kind)
 	if err != nil {
 		if errors.Is(err, ErrUserMismatch) {
 			// The binding in front makes this unreachable; it is checked again where the process is.
