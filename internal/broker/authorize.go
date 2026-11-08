@@ -46,6 +46,11 @@ func (b *Broker) metadataHandler() http.Handler {
 	if b.cfg.Registrar != nil {
 		md["registration_endpoint"] = b.cfg.Issuer + "/register" // ADR-0008 §1, RFC 7591
 	}
+	if b.cfg.JWKSURI != "" {
+		// The identity assertion's keys only: proxy tokens are opaque byw_ strings, and the assertion
+		// is typ at+jwt with the upstream as aud, so the keys verify nothing an MCP client holds.
+		md["jwks_uri"] = b.cfg.JWKSURI
+	}
 	doc, err := json.Marshal(md)
 	if err != nil {
 		panic(err)

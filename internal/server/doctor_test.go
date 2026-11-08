@@ -174,7 +174,7 @@ func TestDoctorOfAHealthyDeploymentPasses(t *testing.T) {
 	got := r.doctor(t)
 	for _, name := range []string{"protected resource metadata (path-inserted)", "protected resource metadata (root)",
 		"authorization server metadata (RFC 8414)", "authorization server metadata (OpenID)", "unauthenticated MCP request", "Host header",
-		"entra tenant", "entra signing keys", "entra app and credential", "entra access token"} {
+		"entra tenant", "entra signing keys", "entra app and credential", "entra access token", "identity assertion keys (discovery)"} {
 		if got[name].Status != doctor.Pass {
 			t.Errorf("%s: %+v", name, got[name])
 		}

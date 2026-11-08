@@ -15,6 +15,15 @@ import (
 // jwksPath serves the assertion keys (ADR-0016 §3).
 const jwksPath = "/.well-known/jwks.json"
 
+// assertionJWKSURI is the public JWKS the authorization-server metadata advertises, when there are
+// assertion keys to verify (an HTTP upstream); "" otherwise.
+func assertionJWKSURI(cfg *config.Config, parts *authParts) string {
+	if parts.assertionKeys == nil {
+		return ""
+	}
+	return strings.TrimSuffix(cfg.Issuer(), "/") + jwksPath
+}
+
 // ExportJWKS is `byward jwks`: the public keys of BYWARD_ASSERTION_KEYS_DIR as a JWKS, for an
 // upstream that loads them from a file instead of fetching them (ADR-0016 §3). Run it again after
 // every key rotation.

@@ -1392,3 +1392,25 @@ func TestACallbackWhoseLoginCannotBeSpentIsAServerErrorAndNeverReachesTheIdP(t *
 		t.Fatalf("the callback went on: IdP calls %v, grant %q", e.idpOps[before:], firstGrant(e.st))
 	}
 }
+
+// The identity assertion's JWKS is advertised as jwks_uri, at both metadata paths, only when the
+// proxy has assertion keys (an HTTP upstream), so a verifier using OIDC discovery finds it (#207).
+func TestMetadataAdvertisesTheAssertionKeysOnlyWithThem(t *testing.T) {
+	for name, tc := range map[string]struct {
+		jwksURI string
+	}{"with assertion keys": {"https://mcp.example.com/.well-known/jwks.json"}, "without": {""}} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t, func(c *Config) { c.JWKSURI = tc.jwksURI })
+			for _, path := range []string{"/.well-known/openid-configuration", "/.well-known/oauth-authorization-server"} {
+				var md map[string]any
+				if err := json.NewDecoder(e.do(t, "GET", path, nil, nil).Body).Decode(&md); err != nil {
+					t.Fatal(err)
+				}
+				got, ok := md["jwks_uri"]
+				if tc.jwksURI == "" && ok || tc.jwksURI != "" && got != tc.jwksURI {
+					t.Fatalf("%s: jwks_uri %v (present %v), want %q", path, got, ok, tc.jwksURI)
+				}
+			}
+		})
+	}
+}
