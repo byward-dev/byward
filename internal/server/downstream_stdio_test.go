@@ -38,6 +38,7 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 		wantAudit    bool
 		exchanged    bool // an exchange with Entra ran: never without a user, a grant or a current sign-in
 		wantAlert    string
+		wantReason   string // the refusal line's whole reason, for an alert
 	}{
 		{name: "a signed-in user", wantToken: "graph-token", exchanged: true},
 		{name: "a stored token without an expiry", noExpiry: true, wantToken: "graph-token", exchanged: true},
@@ -50,7 +51,9 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 		{name: "Conditional Access", exchangeErr: &idp.Error{OAuth: entra.OAuthInteractionNeeded}, wantError: "interaction_required", wantAudit: true, exchanged: true},
 		// #204: the proxy's own credential refused needs the operator, for a process's ask as for a request.
 		{name: "the client secret has expired", exchangeErr: &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialRejected, OperatorHint: "AADSTS7000222: renew the secret"},
-			wantError: "unavailable", wantAudit: true, exchanged: true, wantAlert: "credential_rejected"},
+			wantError: "unavailable", wantAudit: true, exchanged: true, wantAlert: "credential_rejected", wantReason: "unavailable: AADSTS7000222: renew the secret"},
+		{name: "a protocol violation", exchangeErr: &idp.Error{Class: idp.Fatal, Alert: idp.AlertProtocol},
+			wantError: "failed", wantAudit: true, exchanged: true, wantAlert: "protocol", wantReason: "failed: " + idp.AlertProtocol.Hint()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logs := &syncBuffer{}
@@ -135,9 +138,9 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 					t.Fatalf("an alert for a refusal that is not one:\n%s", logs)
 				}
 			} else if alertLines != 1 || !strings.Contains(refusal, `"alert":"`+tc.wantAlert+`"`) ||
-				!strings.Contains(refusal, `"reason":"unavailable: AADSTS7000222: renew the secret"`) ||
+				!strings.Contains(refusal, `"reason":"`+tc.wantReason+`"`) ||
 				!strings.Contains(scrape.Body.String(), `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="`+tc.wantAlert+`"} 1`) {
-				t.Fatalf("want one alert line, %s on the refusal line and counted once:\n%s\n%s", tc.wantAlert, logs, scrape.Body)
+				t.Fatalf("want one alert line, %s and reason %q on the refusal line, counted once:\n%s\n%s", tc.wantAlert, tc.wantReason, logs, scrape.Body)
 			}
 		})
 	}
