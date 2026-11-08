@@ -56,14 +56,14 @@ func TestIdPErrorsThatNeedTheOperatorRaiseAnAlert(t *testing.T) {
 		drive   func(*testing.T, *env, fakeidp.Failure)
 		failure fakeidp.Failure
 		want    string // "operation reason", or "" for no alert
-		fix     string // the start of the alert line's reason
+		fix     string // the alert line's whole reason
 	}{
 		// AADSTS7000215 has no operator hint of its own, so the alert's default fix stands in.
 		{"sign-in, client secret rejected", signInFailing, fakeidp.InvalidClientSecret, "callback credential_rejected", idp.AlertCredentialRejected.Hint()},
 		{"sign-in, IdP unavailable", signInFailing, fakeidp.TemporarilyUnavailable, "", ""},
 		{"refresh, client secret rejected", refreshFailing, fakeidp.InvalidClientSecret, "refresh credential_rejected", idp.AlertCredentialRejected.Hint()},
 		// Entra's own hint wins over the default.
-		{"refresh, client secret expired", refreshFailing, fakeidp.ExpiredClientSecret, "refresh credential_rejected", "AADSTS7000222: the client secret has expired"},
+		{"refresh, client secret expired", refreshFailing, fakeidp.ExpiredClientSecret, "refresh credential_rejected", "AADSTS7000222: the client secret has expired; create a new one (or switch to a certificate)."},
 		{"refresh, IdP unavailable", refreshFailing, fakeidp.TemporarilyUnavailable, "", ""},
 		{"forged callback error", forgedCallback, fakeidp.Failure{}, "", ""},
 	}
@@ -82,14 +82,18 @@ func TestIdPErrorsThatNeedTheOperatorRaiseAnAlert(t *testing.T) {
 				t.Fatalf("alerts = %v, want [%s]", e.alerts, c.want)
 			}
 			op, reason, _ := strings.Cut(c.want, " ")
-			line := regexp.MustCompile(`(?m)^.*"msg":"IdP alert: the operator must act".*$`).FindString(logs)
+			lines := regexp.MustCompile(`(?m)^.*"msg":"IdP alert: the operator must act".*$`).FindAllString(logs, -1)
+			if len(lines) != 1 {
+				t.Fatalf("want one alert line, got %d:\n%s", len(lines), logs)
+			}
+			line := lines[0]
 			for _, want := range []string{`"level":"ERROR"`, `"idp":"entra"`, `"operation":"` + op + `"`, `"alert":"` + reason + `"`} {
 				if !strings.Contains(line, want) {
 					t.Errorf("the alert line lacks %s:\n%s", want, logs)
 				}
 			}
-			if !strings.Contains(line, `"reason":"`+c.fix) {
-				t.Errorf("the alert line's reason does not start with %q:\n%s", c.fix, logs)
+			if !strings.Contains(line, `"reason":"`+c.fix+`"`) {
+				t.Errorf("the alert line's reason is not %q:\n%s", c.fix, logs)
 			}
 		})
 	}

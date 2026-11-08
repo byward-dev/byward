@@ -75,7 +75,7 @@ func New() *Metrics {
 			Help: "On-Behalf-Of downstream tokens for upstream requests and stdio processes' asks by outcome (cached, issued, consent_required, interaction_required, unavailable, failed; for a stdio process also no_user, sign_in_expired)."},
 			[]string{"outcome"}),
 		idpAlerts: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_idp_alerts_total",
-			Help: "IdP errors that need the operator, by IdP, operation and reason (idp.Alerts)."},
+			Help: "IdP errors that need the operator, by IdP, operation (authorize, callback, refresh, on_behalf_of) and reason (credential_unusable, credential_rejected, protocol)."},
 			[]string{"idp", "operation", "reason"}),
 	}
 	build := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "byward_build_info",

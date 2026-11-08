@@ -131,7 +131,7 @@ func TestNilMetricsIsSafeToCall(t *testing.T) {
 
 // #204: seeding exports each given operation and reason of the IdP at 0, and nothing else, so an
 // increase() rule sees the first alert after a start.
-func TestSeededIdPAlertSeriesAreExportedAtZero(t *testing.T) {
+func TestAnIdPsAlertSeriesAreExportedAtZeroBeforeAnyAlert(t *testing.T) {
 	m := New()
 	m.SeedIdPAlerts("entra", []string{"callback", "refresh"}, []string{"credential_rejected", "protocol"})
 	body := scrape(t, m)

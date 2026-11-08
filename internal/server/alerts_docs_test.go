@@ -1,6 +1,7 @@
 package server
 
 import (
+	"net/http/httptest"
 	"os"
 	"regexp"
 	"slices"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/broker"
 	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/metrics"
 )
 
 // #204: the label values operators copy into alert rules from the docs are the ones the proxy
@@ -31,6 +33,19 @@ func TestTheDocumentedIdPAlertLabelsAreTheExportedOnes(t *testing.T) {
 	for _, l := range labels {
 		if !strings.Contains(row, "`"+l+"`") {
 			t.Errorf("the byward_idp_alerts_total row does not name %q:\n%s", l, row)
+		}
+	}
+	m := metrics.New()
+	m.SeedIdPAlerts("entra", broker.IdPOperations, []string{string(idp.AlertProtocol)}) // a family without series has no HELP line
+	rec := httptest.NewRecorder()
+	m.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	help := regexp.MustCompile(`(?m)^# HELP byward_idp_alerts_total .*$`).FindString(rec.Body.String())
+	if help == "" {
+		t.Fatalf("/metrics has no HELP line for byward_idp_alerts_total:\n%s", rec.Body.String())
+	}
+	for _, l := range labels {
+		if !strings.Contains(help, l) {
+			t.Errorf("the /metrics HELP line does not name %q: %s", l, help)
 		}
 	}
 	harden, err := os.ReadFile("../../docs/how-to/harden-a-deployment.md")
@@ -65,7 +80,9 @@ func selectedReasons(text string) []string {
 	return out
 }
 
-func TestSelectedReasonsReadsEveryMatcher(t *testing.T) {
+// #204: a misspelled reason in any selector form (=, !=, =~, !~, an alternation) fails the docs
+// check, not only in the = form.
+func TestADocumentedSelectorInAnyMatcherFormIsChecked(t *testing.T) {
 	got := selectedReasons(`byward_idp_alerts_total{idp="entra",reason=~"credential_rejected|protocol"} byward_idp_alerts_total{reason!="protocl"}`)
 	if want := []string{"credential_rejected", "protocol", "protocl"}; !slices.Equal(got, want) {
 		t.Errorf("selectedReasons = %q, want %q", got, want)

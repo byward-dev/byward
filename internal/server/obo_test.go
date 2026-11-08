@@ -264,7 +264,7 @@ func TestDownstreamRefusalsAreAnsweredInTheProxysName(t *testing.T) {
 			"could not get access to https://graph.microsoft.com on your behalf", `"idp_error_code":50013`, `"reason":"failed"`, ""},
 		// #204: Entra rejecting the proxy's own credential needs the operator, so it also alerts.
 		{"client secret rejected", &fakeidp.InvalidClientSecret, oboToolsCall,
-			"temporarily unavailable", `"reason":"unavailable: the IdP refused the proxy's client credential`, `"reason":"unavailable"`, "credential_rejected"},
+			"temporarily unavailable", `"reason":"unavailable: ` + idp.AlertCredentialRejected.Hint() + `"`, `"reason":"unavailable"`, "credential_rejected"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
