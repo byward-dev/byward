@@ -56,9 +56,13 @@ func TestLoadAddedLatencyStaysInBudget(t *testing.T) {
 }
 
 // The gate can fail: 5 ms more in every proxied request is caught. Shorter rounds suffice, since
-// the signal is well above the budget.
+// the signal is well above the budget. The added median must show the 5 ms too, so a busy machine's
+// tail alone cannot pass this test while the injected delay never reaches the measurement.
 func TestLoadGateCatchesAnAdded5ms(t *testing.T) {
 	r := runLoad(t, *loadRate, 3, 3*time.Second, 5*time.Millisecond)
+	if r.AddedP50 < 4*time.Millisecond {
+		t.Fatalf("the 5 ms did not reach the measurement: added p50 %s", r.AddedP50)
+	}
 	if r.AddedP99 <= loadBudget {
 		t.Fatalf("with 5 ms added the gate passed: added p99 %s, budget %s", r.AddedP99, loadBudget)
 	}
