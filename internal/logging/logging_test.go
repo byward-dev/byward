@@ -39,9 +39,9 @@ func TestRedaction(t *testing.T) {
 	}
 }
 
-// Only a credential is redacted: a Bearer or Basic value, or a JWT by its shape, eyJ and two
-// dots, not by the letters eyj: a random base64url
-// client ID contains them about once in a thousand registrations, and the operator needs it (#230).
+// Only a credential is redacted: a Bearer or Basic value, or a JWT by its shape (see jwtShape),
+// not by the letters eyj: a random base64url client ID contains them about once in a thousand
+// registrations, and the operator needs it (#230).
 func TestOnlyCredentialShapedValuesAreRedacted(t *testing.T) {
 	for name, tc := range map[string]struct {
 		value  any
