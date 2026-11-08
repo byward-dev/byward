@@ -229,7 +229,7 @@ func TestDoctorPassesOnlyAnUpstreamHostWithNoPublicAddress(t *testing.T) {
 		want  doctor.Status
 		inMsg string
 	}{
-		{"127.0.0.1", doctor.Pass, "only loopback, private, link-local or shared addresses"},
+		{"127.0.0.1", doctor.Pass, "only loopback, private, link-local, shared or unspecified addresses"},
 		{"::1", doctor.Pass, "only loopback"},
 		{"10.1.2.3", doctor.Pass, "only loopback"},
 		{"100.64.1.1", doctor.Pass, "only loopback"},

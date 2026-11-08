@@ -6,9 +6,11 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -162,4 +164,13 @@ func postRefresh(t *testing.T, s *Servers, rt string) (int, map[string]any) {
 	var body map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	return w.Code, body
+}
+
+// TestMain keeps the package's tests off the system resolver: startup and doctor resolve the
+// upstream's host, and a test that needs a name resolved gives its own resolver.
+func TestMain(m *testing.M) {
+	lookupNetIP = func(context.Context, string) ([]netip.Addr, error) {
+		return nil, errors.New("the tests resolve no names")
+	}
+	os.Exit(m.Run())
 }

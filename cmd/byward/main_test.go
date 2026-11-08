@@ -19,7 +19,7 @@ import (
 // serveEnv is what a test run that serves needs besides auth: the URLs, the public listener and an
 // ephemeral internal listener (the default 127.0.0.1:9090 may be taken on the test host).
 func serveEnv(publicURL, listen string) []string {
-	return []string{"BYWARD_PUBLIC_URL=" + publicURL, "BYWARD_UPSTREAM_URL=http://u/mcp",
+	return []string{"BYWARD_PUBLIC_URL=" + publicURL, "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp",
 		"BYWARD_LISTEN=" + listen, "BYWARD_INTERNAL_LISTEN=127.0.0.1:0"}
 }
 
@@ -99,7 +99,7 @@ func TestVersionJSON(t *testing.T) {
 
 func TestPrintConfigShowsSources(t *testing.T) {
 	code, stdout, _ := runWith([]string{"--print-config", "--listen", "127.0.0.1:9"},
-		append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")...)
+		append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp")...)
 	for _, want := range []string{"BYWARD_LISTEN=127.0.0.1:9 (flag)", "BYWARD_PUBLIC_URL=https://m.example/mcp (env)", "BYWARD_SCOPE=mcp (default)"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("code=%d missing %q in %q", code, want, stdout)
@@ -175,7 +175,7 @@ func TestRevokeCommandsExit2OnMisuse1OnAStoreFailureAndReportTheRevokedUser(t *t
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
+			env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp")
 			var stateDir string
 			for _, kv := range env {
 				if v, ok := strings.CutPrefix(kv, "BYWARD_STORE_DIR="); ok {

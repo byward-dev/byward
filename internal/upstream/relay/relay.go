@@ -32,6 +32,12 @@ var errUpstreamRefused = errors.New("upstream refused the proxy and the request 
 // would leave would bypass the session binding and every later check, so the client gets 502.
 var errUpstreamUpgrade = errors.New("upstream switched protocols")
 
+// errUpstreamRedirect: the upstream answered with a redirect. Passed on, it would send the MCP
+// client to an address that is not the proxy, often the upstream's own; it almost always means
+// BYWARD_UPSTREAM_URL is not the upstream's MCP endpoint (http where it wants https, a missing
+// trailing slash), so the client gets 502 and the log names where the upstream pointed.
+var errUpstreamRedirect = errors.New("upstream redirected the request")
+
 // Option configures the relay.
 type Option func(*options)
 
@@ -101,7 +107,7 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 			}
 		},
 		Transport: &http.Transport{
-			Proxy:                 http.ProxyFromEnvironment,
+			Proxy:                 Proxy,
 			DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 			ForceAttemptHTTP2:     true,
 			MaxIdleConnsPerHost:   64,
@@ -118,6 +124,12 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 		ModifyResponse: func(res *http.Response) error {
 			if res.StatusCode == http.StatusSwitchingProtocols {
 				return errUpstreamUpgrade // answered 502, with none of the upstream's headers
+			}
+			if isRedirect(res.StatusCode) {
+				ctx := res.Request.Context()
+				log.ErrorContext(ctx, "upstream redirected the request", "request_id", logging.RequestID(ctx), "status", res.StatusCode,
+					"reason", redirectHint(res))
+				return errUpstreamRedirect
 			}
 			dropTrailers(res)
 			for k := range res.Header {
@@ -152,6 +164,10 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 			}
 			if errors.Is(err, errUpstreamRefused) {
 				http.Error(w, "upstream refused the proxy", http.StatusBadGateway)
+				return
+			}
+			if errors.Is(err, errUpstreamRedirect) {
+				http.Error(w, "upstream unavailable", http.StatusBadGateway)
 				return
 			}
 			if isHeaderTimeout(r.Context(), err) {
@@ -248,6 +264,29 @@ func (b trailerless) Close() error {
 	b.res.Trailer = nil
 	return err
 }
+
+// isRedirect reports whether an upstream status is a redirect: every 3xx except 304, which answers
+// a conditional request and points nowhere.
+func isRedirect(status int) bool {
+	return status >= 300 && status < 400 && status != http.StatusNotModified
+}
+
+// redirectHint names where the upstream pointed, resolved against the request's URL: its scheme,
+// host and path only, without path parameters, since userinfo, the query, the fragment, an opaque
+// part or a `;jsessionid` could carry a secret.
+func redirectHint(res *http.Response) string {
+	loc, err := res.Location()
+	// An @ past the host means credentials with an unescaped /, ? or #, split by the parser.
+	if err != nil || loc.Opaque != "" || loc.Host == "" || strings.ContainsRune(loc.Path+loc.RawQuery+loc.Fragment, '@') {
+		return "the upstream sent no usable Location; check BYWARD_UPSTREAM_URL"
+	}
+	path, _, _ := strings.Cut(loc.EscapedPath(), ";") // escaped: a %3B or %2F is part of the path
+	return "the upstream points to " + loc.Scheme + "://" + loc.Host + path + "; if that is its MCP endpoint, set BYWARD_UPSTREAM_URL to it"
+}
+
+// Proxy is the HTTP proxy the relay sends a request through: the one the environment names
+// (HTTPS_PROXY, HTTP_PROXY, NO_PROXY), read once per process.
+func Proxy(r *http.Request) (*url.URL, error) { return http.ProxyFromEnvironment(r) }
 
 // withoutAccessToken drops every access_token parameter and keeps every other byte of the query in
 // its original order: url.Values.Encode would sort and re-escape it (ADR-0003, byte-transparent).

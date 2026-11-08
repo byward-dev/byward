@@ -93,6 +93,10 @@ func Handler(cfg *config.Config, log *slog.Logger, up http.Handler, v resource.V
 	return logging.ClientAddress(cfg.TrustedProxies, logging.Middleware(log, tracing.Middleware(rt, o.Metrics.Middleware(rt, recoverer(log, origin.Hosts(o.Audit, hosts, mux))))))
 }
 
+// startupResolveTimeout bounds the lookup of the upstream's host for the plain-http warning, so a
+// slow resolver delays the start this long at most.
+const startupResolveTimeout = 2 * time.Second
+
 // New wires the proxy and returns the hardened servers. WriteTimeout stays 0 so streams can run;
 // per-request deadlines are set where needed through http.ResponseController. Errors are
 // configuration problems (a key directory, a clients file, IdP settings).
@@ -126,6 +130,11 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 		}
 		return nil, err
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), startupResolveTimeout)
+	if w, ok := plainHTTPUpstream(ctx, cfg, lookupNetIP); ok {
+		w.log(log)
+	}
+	cancel()
 	if a == nil {
 		h = Handler(cfg, log, up.handler, resource.NoTokens{}, nil, nil, o)
 	} else {

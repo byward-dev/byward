@@ -271,3 +271,28 @@ Its memory is protected only by the host's ptrace restriction.
 - [ ] Run an upstream server you do not trust in its own deployment: one byward per such server,
       in its own container or VM, and per tenant or user group where their data must stay apart
       even if the server is compromised. byward does not sandbox stdio processes from each other.
+
+## 11. Protect the upstream hop
+
+Every request byward relays to an HTTP upstream carries the identity assertion, and, when they are
+configured, the upstream credential and an On-Behalf-Of token for a downstream API. Over plain
+`http` they travel in clear to anyone on the path.
+
+- [ ] Reach the upstream over `https`, through a service mesh that encrypts the hop (mTLS), or over a
+      private network that only byward and the upstream are on, with a NetworkPolicy (or firewall
+      rule) that admits byward alone. byward warns at startup and in `byward doctor` when the
+      upstream is `http` and its host resolves to a public address; a private address gets no
+      warning, so the network rule is yours to check.
+- [ ] Switching `BYWARD_UPSTREAM_URL` to `https` changes the assertion's `aud`, which is that URL
+      exactly: change the upstream verifier's audience at the same time
+      ([identity assertion](identity-assertion.md)).
+- [ ] Set `BYWARD_UPSTREAM_URL` to the upstream's MCP endpoint itself. An upstream that answers
+      with a redirect (`http` to `https`, a trailing slash) gets the MCP client a 502, and the log
+      line "upstream redirected the request" names where it pointed.
+- [ ] Mind the environment's HTTP proxy. The relay honours `HTTPS_PROXY` and `HTTP_PROXY` (for an
+      `https` and an `http` upstream), so with one set the hop goes through that proxy, which sees
+      the assertion and the credential of a plain-http upstream. List the upstream's host in
+      `NO_PROXY` to reach it directly. `byward doctor` names the proxy the upstream's requests go
+      through. An upstream at `localhost` or at a loopback IP address never uses one; any other
+      name does unless `NO_PROXY` lists it, even one that resolves to a loopback address. A proxy
+      setting Go cannot parse is ignored, and the hop then goes direct.

@@ -1,8 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -24,10 +28,15 @@ func (refusing) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, http.ErrServerClosed
 }
 
-// TestMain points doctor at refusing transports, so a test that forgets useFakes fails instead of
-// reaching Entra or anything else on the network.
+// TestMain points doctor at refusing transports and a resolver that resolves nothing, so a test
+// that forgets useFakes fails instead of reaching Entra or anything else on the network, and at no
+// HTTP proxy, so the developer's HTTP_PROXY never changes the upstream line.
 func TestMain(m *testing.M) {
-	doctorOptions = server.DoctorOptions{IdP: &http.Client{Transport: refusing{}}, Proxy: &http.Client{Transport: refusing{}}}
+	doctorOptions = server.DoctorOptions{IdP: &http.Client{Transport: refusing{}}, Proxy: &http.Client{Transport: refusing{}},
+		Resolve: func(context.Context, string) ([]netip.Addr, error) {
+			return nil, errors.New("the tests resolve no names")
+		},
+		UpstreamProxy: func(*http.Request) (*url.URL, error) { return nil, nil }}
 	os.Exit(m.Run())
 }
 
@@ -89,8 +98,8 @@ func useFakes(t *testing.T, proxy http.RoundTripper) {
 	t.Helper()
 	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID("00000000-0000-0000-0000-000000000001"),
 		fakeidp.WithClient(fakeidp.Client{ID: "00000000-0000-0000-0000-000000000002", Secrets: []string{"s3cret-entra"}}))
-	old := doctorOptions
-	doctorOptions = server.DoctorOptions{IdP: fake.HTTPClient(), Proxy: &http.Client{Transport: proxy}}
+	old := doctorOptions // keeps TestMain's resolver and upstream proxy, so no test reaches the network
+	doctorOptions.IdP, doctorOptions.Proxy = fake.HTTPClient(), &http.Client{Transport: proxy}
 	t.Cleanup(func() { doctorOptions = old })
 }
 
