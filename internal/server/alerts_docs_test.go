@@ -91,6 +91,7 @@ func TestADocumentedSelectorInAnyMatcherFormIsChecked(t *testing.T) {
 		{"!=", `byward_idp_alerts_total{reason!="protocl"}`, []string{"protocl"}},
 		{"=~ alternation", `byward_idp_alerts_total{idp="entra",reason=~"credential_rejected|protocl"}`, []string{"credential_rejected", "protocl"}},
 		{"!~ alternation", `byward_idp_alerts_total{reason!~"credential_unusable|protocl"}`, []string{"credential_unusable", "protocl"}},
+		{"every selector in a document", `byward_idp_alerts_total{reason="protocol"} byward_idp_alerts_total{reason="protocl"}`, []string{"protocol", "protocl"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if got := selectedReasons(c.text); !slices.Equal(got, c.want) {

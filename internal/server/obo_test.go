@@ -303,9 +303,13 @@ func TestDownstreamRefusalsAreAnsweredInTheProxysName(t *testing.T) {
 			if want := `byward_downstream_tokens_total{outcome="` + outcome + `"} 1`; !strings.Contains(metrics, want) {
 				t.Errorf("metrics lack %s", want)
 			}
-			for _, a := range idp.Alerts { // exported from the start, so an increase() rule sees the first
-				if want := `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="` + string(a) + `"} `; !strings.Contains(metrics, want) {
-					t.Errorf("%s is not exported:\n%s", want, metrics)
+			// Every series, the broker's and on_behalf_of, is exported from the start, so an increase()
+			// rule sees the first alert.
+			for _, op := range append(slices.Clone(broker.IdPOperations), opOnBehalfOf) {
+				for _, a := range idp.Alerts {
+					if want := `byward_idp_alerts_total{idp="entra",operation="` + op + `",reason="` + string(a) + `"} `; !strings.Contains(metrics, want) {
+						t.Errorf("%s is not exported:\n%s", want, metrics)
+					}
 				}
 			}
 			nonZero := regexp.MustCompile(`byward_idp_alerts_total\{[^}]*\} [1-9]`).FindAllString(metrics, -1)

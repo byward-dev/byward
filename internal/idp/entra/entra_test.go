@@ -303,9 +303,11 @@ func TestTokenErrorsMapToADR0012Classes(t *testing.T) {
 		"invalid_request":     {&fakeidp.InvalidRequest, idp.Fatal, "", 9002313, false},
 		"700016 unknown app":  {&fakeidp.UnknownClient, idp.Unavailable, idp.AlertCredentialRejected, 700016, true},
 		"5002723 thumbprint":  {&fakeidp.MissingThumbprint, idp.Unavailable, idp.AlertCredentialRejected, 5002723, false},
-		"70043 by code":       {&fakeidp.Failure{Error: "invalid_request", Code: 70043}, idp.SignInAgain, "", 70043, false},
-		"429":                 {&fakeidp.Failure{Status: 429, Error: "invalid_request"}, idp.Unavailable, "", 0, false},
-		"503 invalid_client":  {&fakeidp.Failure{Status: 503, Error: "invalid_client", Code: 7000215}, idp.Unavailable, idp.AlertCredentialRejected, 7000215, false},
+		// invalid_client alerts by its OAuth error, whatever its code.
+		"7000218 no credential": {&fakeidp.MissingClientCredential, idp.Unavailable, idp.AlertCredentialRejected, 7000218, false},
+		"70043 by code":         {&fakeidp.Failure{Error: "invalid_request", Code: 70043}, idp.SignInAgain, "", 70043, false},
+		"429":                   {&fakeidp.Failure{Status: 429, Error: "invalid_request"}, idp.Unavailable, "", 0, false},
+		"503 invalid_client":    {&fakeidp.Failure{Status: 503, Error: "invalid_client", Code: 7000215}, idp.Unavailable, idp.AlertCredentialRejected, 7000215, false},
 		// Any unauthorized_client alerts, whatever its code, as in the OIDC adapter.
 		"unauthorized_client": {&fakeidp.Failure{Error: "unauthorized_client"}, idp.Fatal, idp.AlertCredentialRejected, 0, false},
 	} {
