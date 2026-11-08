@@ -30,7 +30,7 @@ or the IdP's `error_description`.
 | `client_trust` | The client's trust level on the consent page: `verified`, `domain` or `not-verified` (ADR-0008 §8) |
 | `user_key` | The IdP user key (`tid:oid` for Entra). Personal data (GDPR Recital 26) |
 | `grant_id` | The grant (one user's authorization of one client) |
-| `idp` | The IdP adapter, e.g. `entra` |
+| `idp` | The IdP, the `BYWARD_IDP` value: `entra`, `oidc`, `google`, `okta`, `auth0` or `keycloak` |
 | `key_id` | A sealing key ID |
 | `host`, `origin` | The rejected `Host` or `Origin` value |
 | `reason` | A fixed reason; for `token_rejected` the OAuth error code |
@@ -64,11 +64,15 @@ For SIEMs that use [OCSF](https://schema.ocsf.io) 1.9.0. Fields map as follows: 
 | `consent_shown` | the consent page was shown, before the IdP sign-in (the user is not known yet) | success | yes | 3003 Authorize Session / 99 Other (*approximate*) |
 | `consent_granted` | the user allowed the client on the consent page | success | yes | 3003 Authorize Session / 99 Other (*approximate*) |
 | `consent_denied` | the user denied the client on the consent page (`reason` fixed) | failure | yes | 3003 Authorize Session / 99 Other (*approximate*) |
+| `consent_silent` | a `prompt=none` request could not finish without the user, so the client got an OAuth error at its redirect URI instead of a page (`reason` = the error sent: `consent_required`, `login_required`, `temporarily_unavailable`, `server_error`, or the IdP's own `login_required`, `interaction_required`, `consent_required`, `account_selection_required`; `client_trust` when refused by `/authorize`'s own checks). An access-gate denial is audited as `access_denied`, not here | failure | no | 3003 Authorize Session / 99 Other (*approximate*) |
 | `consent_remembered` | a sign-in skipped the consent page on a remembered consent (ADR-0010 §3): success after the callback confirmed it for the user who signed in (`user_key`, `grant_id`, `client_trust`); failure when it did not hold and the page was shown instead (`reason` = `user_mismatch`: someone else signed in than the hint cookie named; `not_remembered`: the consent was forgotten, expired or the client is no longer trusted) | success, failure | no | 3003 Authorize Session / 99 Other (*approximate*) |
 | `rate_limited` | an OAuth endpoint refused a request over the client address's budget (`reason` = the endpoint; [rate limits](rate-limits.md)) | failure | yes | 4002 HTTP Activity; `disposition_id` 2 Blocked |
 | `store_restored` | at startup, the store was found restored from an older copy: a new `epoch` began and refresh tokens issued before it are refused, so those users sign in again (ADR-0007 §9) | success | no | 6002 Application Lifecycle / 99 Other (*approximate*) |
 | `session_rejected` | a signed-in user presented an `Mcp-Session-Id` that is not theirs: sealed for another user or upstream, not issued by this proxy, tampered with, or expired (`reason` fixed); the client gets 404 and starts a new session | failure | no | 3003 Authorize Session / 99 Other (*approximate*) |
+| `downstream_token_refused` | Entra refused the On-Behalf-Of exchange for a signed-in user's MCP request (`reason` `consent_required`, `interaction_required`, `unavailable` or `failed`); the client gets an answer it can show, never a 401 or 403, and with `consent_required` the error log carries `admin_consent_url` (ADR-0017 §5) | failure | no | 3003 Authorize Session / 99 Other (*approximate*) |
 | `process_evicted` | an idle stdio upstream process was stopped so another could start under `BYWARD_STDIO_MAX_PROCESSES_PER_USER` (`reason` `user_cap`, the user's own process) or `BYWARD_STDIO_MAX_PROCESSES` (`reason` `upstream_cap`, any user's); `user_key` is the evicted process's user, whose session ends and whose client starts a new one | success | no | 6002 Application Lifecycle / 4 Stop (*approximate*) |
+| `app_token_accepted` | an app-only caller's Entra token was first used at the MCP endpoint ([app-only callers](../how-to/app-tokens.md)): once per token (its `uti`), with the service principal as `user_key` (`tid:oid`) and its application ID as `client_id`; while 10,000 tokens are tracked, each request with an untracked token is recorded | success | no | 3002 Authentication / 1 Logon (*approximate*) |
+| `app_token_rejected` | an MCP request carried an app-only token that was refused (`reason` = `expired`, `invalid`, `delegated` (a user's token), `keys_unavailable` (the tenant's keys could not be fetched), `revoked` (`revoke-user`), `deny_list_stale`, or `denied_role`, `denied_client`, `denied_tenant` (the app gate, answered with 403)); `user_key` and `client_id` only once the token passed every check of its own (the `denied_*`, `revoked` and `deny_list_stale` reasons) | failure | yes | 3002 Authentication / 1 Logon (*approximate*) |
 
 Not emitted yet; these arrive with their slices:
 dynamic registration (slice 2.2) and key rotation
@@ -90,7 +94,9 @@ Prometheus text format at `/metrics` on the internal listener. Histogram buckets
 | `byward_rate_limited_total` | counter | `endpoint`: OAuth requests refused with 429 (or a `temporarily_unavailable` redirect) over a client address's budget |
 | `byward_cimd_fetches_total` | counter | `outcome`: Client ID Metadata Document fetches: `ok`, `invalid`, `refused` (non-public address, a 4xx other than 408 and 429, redirect, too large), `unavailable` (network, timeout, 5xx, 408, 429), `rate_limited`, `busy` |
 | `byward_dcr_registrations_total` | counter | `outcome`: `/register` answers: `registered`, `invalid_redirect_uri`, `invalid_client_metadata`, `full` (the cap), `unavailable` (store failure), `rate_limited` |
-| `byward_consent_total` | counter | `trust` (`verified`, `domain`, `not-verified`), `outcome`: `shown` (the page), `granted`, `denied`, `remembered` (a sign-in that skipped the page, confirmed after the callback) |
+| `byward_downstream_tokens_total` | counter | `outcome`: On-Behalf-Of downstream tokens for upstream requests: `cached`, `issued`, `consent_required`, `interaction_required`, `unavailable`, `failed` (ADR-0017) |
+| `byward_consent_total` | counter | `trust` (`verified`, `domain`, `not-verified`), `outcome`: `shown` (the page), `granted`, `denied`, `remembered` (a sign-in that skipped the page, confirmed after the callback), `silent_refused` (a `prompt=none` request answered with an error; trust empty when refused after the IdP) |
+| `byward_app_tokens_total` | counter | `outcome`: every app-only token at the MCP endpoint: `accepted`, or the `app_token_rejected` reasons |
 | `byward_build_info` | gauge | `version`, `go_version`; always 1 |
 
 Plus the standard `go_*` and `process_*` collectors. Deny-list sync age and store errors arrive

@@ -57,5 +57,5 @@ func (v *Validator) Validate(_ context.Context, tok string) (resource.Identity, 
 	if err != nil || denied {
 		return resource.Identity{}, resource.ErrInvalid
 	}
-	return resource.Identity{Subject: c.Subject, ClientID: c.ClientID, Roles: c.Roles, Groups: c.Groups, Email: c.Email, Name: c.Name}, nil
+	return resource.Identity{Subject: c.Subject, ClientID: c.ClientID, PrincipalType: resource.PrincipalUser, GrantID: c.GrantID, Roles: c.Roles, Groups: c.Groups, Email: c.Email, EmailVerified: c.EmailVerified, Name: c.Name}, nil
 }

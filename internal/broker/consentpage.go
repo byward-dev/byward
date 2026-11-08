@@ -41,7 +41,7 @@ type consentView struct {
 
 func (b *Broker) renderConsent(w http.ResponseWriter, r *http.Request, status int, client registration.Client, l login, sealed, notice string) {
 	v := consentView{Client: displayName(client.Name(), client.ID()), Trust: trustLabel(client.Trust()), Upstream: b.upstreamName(),
-		IdP: b.cfg.IdPLabel, Operator: b.cfg.OperatorName, ScopeText: b.scopeText(), Lifetime: lifetimeText(l.Scopes, client.AllowsRefresh()),
+		IdP: displayName(b.cfg.IdPLabel, "your identity provider"), Operator: b.cfg.OperatorName, ScopeText: b.scopeText(), Lifetime: lifetimeText(l.Scopes, client.AllowsRefresh()),
 		Flow: sealed, Notice: notice, RequestID: logging.RequestID(r.Context()), Stylesheet: StylesheetPath, ContinueURL: "/consent"}
 	if b.remembers(client) {
 		v.Remembered = fmt.Sprintf("%d days", int(ConsentLifetime/(24*time.Hour)))

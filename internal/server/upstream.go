@@ -2,11 +2,11 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strings"
 
 	"github.com/byward-dev/byward/internal/assertion"
 	"github.com/byward-dev/byward/internal/audit"
@@ -31,19 +31,14 @@ type upstream struct {
 
 // newUpstream builds the HTTP relay, or the stdio bridge when a command is configured. A stdio
 // command that does not exist fails here, at startup. With minter (authentication on), every
-// request to an HTTP upstream carries the identity assertion (ADR-0016).
-func newUpstream(cfg *config.Config, log *slog.Logger, o Observability, minter *assertion.Minter) (*upstream, error) {
+// request to an HTTP upstream carries the identity assertion (ADR-0016); with down, a downstream
+// API token too (ADR-0017).
+func newUpstream(cfg *config.Config, log *slog.Logger, o Observability, minter *assertion.Minter, down *downstreamTokens) (*upstream, error) {
 	if cfg.UpstreamCommand == nil {
 		if minter != nil {
-			return &upstream{handler: assertingUpstream(cfg, log, minter)}, nil
+			return &upstream{handler: assertingUpstream(cfg, log, minter, down)}, nil
 		}
 		return &upstream{handler: httpUpstream(cfg, log)}, nil
-	}
-	if cfg.NoAuth {
-		// With authentication, buildAuth checks every secret file; without it, this is the only one.
-		if err := errors.Join(looseSecretFiles(cfg)...); err != nil {
-			return nil, err
-		}
 	}
 	name := stdioName(cfg)
 	m, err := newStdioManager(cfg, stdio.Config{Name: name, Command: cfg.UpstreamCommand, Env: cfg.UpstreamEnv,
@@ -89,6 +84,13 @@ func upstreamResult(cfg *config.Config) doctor.Result {
 		if !cfg.NoAuth {
 			r.Message += "; requests carry the identity assertion in " + cfg.AssertionHeader + ", with aud " + cfg.UpstreamURL.String()
 		}
+		if cfg.UpstreamCredential != "" {
+			r.Message += "; the operator's upstream credential is set and sent in " + cfg.UpstreamCredentialHeader
+		}
+		if len(cfg.OBOScopes) > 0 {
+			r.Message += "; and an On-Behalf-Of token for " + strings.Join(cfg.OBOScopes, " ") + " in " + cfg.OBOHeader +
+				" (grant admin consent for these permissions; docs/how-to/downstream-apis.md)"
+		}
 		return r
 	}
 	r.Message = "stdio upstream " + stdioName(cfg) + ": the command was found; doctor does not start it (a process starts per user at their first MCP request)"
@@ -106,11 +108,21 @@ func upstreamID(cfg *config.Config) string {
 // stdioName names a stdio upstream in logs: its program's file name.
 func stdioName(cfg *config.Config) string { return filepath.Base(cfg.UpstreamCommand[0]) }
 
-// httpUpstream is the relay to the HTTP upstream. The assertion's header is stripped from every
-// inbound request even when nothing is asserted, so a client can never supply one.
+// httpUpstream is the relay to the HTTP upstream. The assertion's header and the plain identity
+// headers are stripped from every inbound request even when nothing is asserted, so a client can
+// never supply them; so is the operator credential's, which the relay then sets (ADR-0016 §5, §7),
+// and the On-Behalf-Of header's (ADR-0017 §3).
 func httpUpstream(cfg *config.Config, log *slog.Logger, opts ...relay.Option) http.Handler {
-	return relay.New(log, cfg.UpstreamURL, append([]relay.Option{relay.WithInject(tracing.Inject),
-		relay.WithResponseHeaderTimeout(cfg.UpstreamHeaderTimeout), relay.WithStripped(cfg.AssertionHeader)}, opts...)...)
+	base := []relay.Option{relay.WithInject(tracing.Inject), relay.WithResponseHeaderTimeout(cfg.UpstreamHeaderTimeout), relay.WithStripped(cfg.AssertionHeader),
+		relay.WithStripped(config.IdentityHeaderNames...)}
+	if cfg.OBOHeader != "" { // set with authentication, whether or not On-Behalf-Of is on
+		base = append(base, relay.WithStripped(cfg.OBOHeader))
+	}
+	if cred := cfg.UpstreamCredential; cred != "" {
+		header := cfg.UpstreamCredentialHeader
+		base = append(base, relay.WithStripped(header), relay.WithInject(func(_ context.Context, h http.Header) { h.Set(header, cred) }))
+	}
+	return relay.New(log, cfg.UpstreamURL, append(base, opts...)...)
 }
 
 // assertionKey carries a request's minted assertion from withAssertion to the relay.
@@ -118,13 +130,21 @@ type assertionKey struct{}
 
 // assertingUpstream is the relay that sends every request with the identity assertion in
 // BYWARD_ASSERTION_HEADER, after the inbound copies are gone (ADR-0016 §2, §4).
-func assertingUpstream(cfg *config.Config, log *slog.Logger, m *assertion.Minter) http.Handler {
+func assertingUpstream(cfg *config.Config, log *slog.Logger, m *assertion.Minter, down *downstreamTokens) http.Handler {
 	header := cfg.AssertionHeader
-	return withAssertion(m, log, httpUpstream(cfg, log, relay.WithInject(func(ctx context.Context, h http.Header) {
+	opts := []relay.Option{relay.WithInject(func(ctx context.Context, h http.Header) {
 		if tok, ok := ctx.Value(assertionKey{}).(string); ok {
 			h.Set(header, "Bearer "+tok)
 		}
-	})))
+	})}
+	if cfg.IdentityHeaders {
+		opts = append(opts, relay.WithInject(setIdentityHeaders))
+	}
+	if down == nil {
+		return withAssertion(m, log, httpUpstream(cfg, log, opts...))
+	}
+	// The downstream token is fetched first: a request refused for want of one gets no assertion.
+	return down.middleware(withAssertion(m, log, httpUpstream(cfg, log, append(opts, relay.WithInject(down.inject))...)))
 }
 
 // withAssertion mints the assertion for the user Guard admitted. A request it cannot mint one for
@@ -155,6 +175,6 @@ func stdioIdentity(cfg *config.Config) func(*http.Request) (stdio.Identity, bool
 	issuer := cfg.Issuer()
 	return func(r *http.Request) (stdio.Identity, bool) {
 		id, ok := resource.IdentityFrom(r.Context())
-		return stdio.Identity{Subject: id.Subject, Issuer: issuer}, ok && id.Subject != ""
+		return stdio.Identity{Subject: id.Subject, Issuer: issuer, PrincipalType: id.PrincipalType}, ok && id.Subject != ""
 	}
 }

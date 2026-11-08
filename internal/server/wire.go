@@ -9,10 +9,12 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/byward-dev/byward/internal/apptoken"
 	"github.com/byward-dev/byward/internal/assertion"
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/broker"
@@ -20,8 +22,6 @@ import (
 	"github.com/byward-dev/byward/internal/denylist"
 	"github.com/byward-dev/byward/internal/gate"
 	"github.com/byward-dev/byward/internal/health"
-	"github.com/byward-dev/byward/internal/idp"
-	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/mcpsession"
 	"github.com/byward-dev/byward/internal/ratelimit"
 	"github.com/byward-dev/byward/internal/registration"
@@ -54,11 +54,10 @@ type auth struct {
 	sessions func(http.Handler) http.Handler
 	// minter signs the identity assertion and jwks serves its keys; both nil for a stdio upstream.
 	minter *assertion.Minter
-	jwks   http.Handler
+	// downstream is On-Behalf-Of for the HTTP upstream (ADR-0017); nil when it is off.
+	downstream *downstreamTokens
+	jwks       http.Handler
 }
-
-// idpName names the IdP adapter in its callback path, the broker and metrics.
-const idpName = "entra"
 
 // pinger is a store that can say whether it is reachable, for readiness.
 type pinger interface{ Ping(context.Context) error }
@@ -67,11 +66,14 @@ type pinger interface{ Ping(context.Context) error }
 // store. Errors name the file or setting at fault.
 func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, err error) {
 	logPaths(cfg, log)
-	parts, err := loadAuthParts(cfg, nil)
+	parts, err := loadAuthParts(cfg, idpHTTPClient)
 	if err != nil {
 		return nil, err
 	}
-	ring, sealer, provider, static, g := parts.ring, parts.sealer, parts.provider, parts.static, parts.gate
+	if err := parts.idp.refusal(time.Now()); err != nil {
+		return nil, err
+	}
+	ring, sealer, ip, static, g := parts.ring, parts.sealer, parts.idp, parts.static, parts.gate
 	auditStartup(o.Audit, ring, static.IDs())
 	log.Info("client sources", "static_clients", len(static.IDs()), "cimd", cfg.CIMD, "dcr", cfg.DCR)
 	guard := ssrfguard.New(ssrfguard.Config{}) // every client-supplied URL (CIMD documents, jwks_uri) goes through it
@@ -83,7 +85,8 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	for _, w := range parts.warnings {
 		w.log(log)
 	}
-	if w, ok := expiryWarning(cfg, time.Now()); ok {
+	log.Info("IdP", "idp", ip.name, "reason", "register this redirect URI with the IdP app: "+ip.redirect)
+	for _, w := range ip.timedWarnings(time.Now()) {
 		w.log(log)
 	}
 	st, err := wireStore(cfg, log, o.Audit)
@@ -102,12 +105,12 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 		}
 	}()
 	b, err := newBroker(broker.Config{Issuer: cfg.Issuer(), Origin: cfg.Origin(), Resource: cfg.PublicURL, Scope: cfg.Scope,
-		IdPName: idpName, IdPLabel: "Microsoft Entra", IdPScopes: provider.Scope(), IdP: provider, Clients: clients, CIMD: cfg.CIMD, Registrar: registrar, ObserveRegistration: o.Metrics.DCRRegistration,
+		IdPName: ip.name, IdPLabel: ip.label, IdPScopes: ip.scope, IdP: ip.adapter, Clients: clients, CIMD: cfg.CIMD, Registrar: registrar, ObserveRegistration: o.Metrics.DCRRegistration,
 		Store: st, Sealer: sealer, LoginBox: parts.loginBox, IdPTokenBox: parts.idpBox, ConsentBox: parts.consentBox, ConsentHintBox: parts.hintBox, ObserveConsent: o.Metrics.Consent, Gate: g,
-		UpstreamName: cfg.ResourceName, ScopeText: cfg.ScopeDescription, OperatorName: cfg.OperatorName,
+		UpstreamName: cfg.ResourceName, ScopeText: cfg.ScopeDescription, OperatorName: cfg.OperatorName, CapAccessToIdPToken: len(cfg.OBOScopes) > 0,
 		SecureCookies: cfg.PublicURL.Scheme == "https", Log: log,
 		Audit: o.Audit, Limiter: ratelimit.New(cfg.OAuthRateLimits, maxRateLimitKeys, time.Now, o.Metrics.RateLimited),
-		ObserveIdP:   func(op, outcome string, d time.Duration) { o.Metrics.IdP(idpName, op, outcome, d) },
+		ObserveIdP:   func(op, outcome string, d time.Duration) { o.Metrics.IdP(ip.name, op, outcome, d) },
 		RefreshGrace: cfg.RefreshGrace, Assert: assertedClaims(cfg)})
 	if err != nil {
 		return nil, err
@@ -119,10 +122,18 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	if err := deny.Sync(syncCtx); err != nil {
 		return nil, fmt.Errorf("loading the revocation list: %w", err)
 	}
-	v, err := token.NewValidator(sealer, deny, nil)
+	sealed, err := token.NewValidator(sealer, deny, nil)
 	if err != nil {
 		return nil, err
 	}
+	var app resource.Validator // nil: app-only tokens off, so a JWT reaches no validator
+	if parts.appGate != nil {
+		if app, err = appValidator(parts, deny, o); err != nil {
+			return nil, err
+		}
+		log.Info("app-only tokens", "reason", "accepting Entra app-only tokens with app roles "+strings.Join(cfg.AppRoles, ", ")+" (ADR-0022)")
+	}
+	v := resource.Dispatch(token.Prefix, sealed, app)
 	log.Info("broker ready", "reason", "keys "+fmt.Sprint(len(ring.KeyIDs()))+", signing with "+ring.SigningKeyID()+"")
 	a := &auth{register: b.Register, validator: v, checks: readiness(ring, st), background: func(ctx context.Context) { runBackground(ctx, st, deny, log) }, closeStore: st.Close,
 		sessions: func(next http.Handler) http.Handler {
@@ -136,6 +147,16 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 		a.jwks = k.JWKSHandler()
 		log.Info("identity assertion", "reason", "signing with key "+k.SigningKeyID()+", keys "+strings.Join(k.KeyIDs(), " "),
 			"setting", "BYWARD_ASSERTION_HEADER", "value", cfg.AssertionHeader)
+	}
+	if cfg.IdentityHeaders && a.minter != nil {
+		log.Warn("plain identity headers are on", "setting", "BYWARD_IDENTITY_HEADERS",
+			"reason", "the upstream gets the user in X-Byward-* headers as well as the assertion; that is safe only when it is reachable through this proxy alone (docs/how-to/plain-identity-headers.md)")
+	}
+	if len(cfg.OBOScopes) > 0 {
+		// config refuses On-Behalf-Of with any IdP but Entra, so ip.entra is set.
+		a.downstream = newDownstreamTokens(cfg.OBOScopes, cfg.OBOHeader, ip.entra, ip.name, b.IdPAccessToken, log, o)
+		log.Info("On-Behalf-Of", "reason", "downstream API "+a.downstream.resource+"; access tokens are capped at the stored IdP token's expiry",
+			"setting", "BYWARD_OBO_HEADER", "value", cfg.OBOHeader)
 	}
 	return a, nil
 }
@@ -164,7 +185,7 @@ func assertedClaims(cfg *config.Config) broker.Asserted {
 		case "groups":
 			a.Groups = true
 		case "email":
-			a.Email = true
+			a.Email, a.UnverifiedEmail = true, cfg.AssertionUnverifiedEmail
 		case "name":
 			a.Name = true
 		default: // config.AssertionClaimNames and this switch must list the same names
@@ -188,8 +209,10 @@ type authParts struct {
 	clientDeny *registration.Denylist
 	// assertionKeys sign the identity assertion for an HTTP upstream; nil for a stdio upstream.
 	assertionKeys *assertion.Keys
-	provider      *entra.Provider
+	idp           *identityProvider
 	gate          *gate.Gate
+	// appGate admits app-only callers; nil while BYWARD_APP_TOKENS is off.
+	appGate *gate.AppGate
 	// warnings are logged at every start and reported by check and doctor.
 	warnings []Warning
 }
@@ -267,26 +290,56 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 			return nil, fmt.Errorf("BYWARD_ASSERTION_KEYS_DIR: %s: %w (see docs/how-to/identity-assertion.md)", cfg.AssertionKeysDir, err)
 		}
 	}
-	p.provider, err = entra.New(entra.Config{Tenant: cfg.EntraTenant, ClientID: cfg.EntraClientID,
-		ClientAuth: idp.ClientSecret(cfg.EntraClientSecret), RedirectURL: config.RedirectURL(cfg.PublicURL, idpName), HTTPClient: idpHTTP})
-	if err != nil {
-		return nil, fmt.Errorf("entra settings (BYWARD_ENTRA_*): %w", err)
+	if p.idp, err = newIdentityProvider(cfg, idpHTTP); err != nil {
+		return nil, err
 	}
+	p.warnings = append(p.warnings, p.idp.warnings...)
 	var gateWarnings []string
 	p.gate, gateWarnings, err = gate.New(gate.Rules{Tenants: cfg.GateTenants, Roles: cfg.GateRoles, Groups: cfg.GateGroups,
 		EmailDomains: cfg.GateEmailDomains, HostedDomains: cfg.GateHostedDomains},
-		gate.Options{IdP: gate.Entra, Tenant: cfg.EntraTenant, AllowEmpty: cfg.GateAllowEmpty})
+		gate.Options{IdP: p.idp.gateIdP, Tenant: cfg.EntraTenant, AllowEmpty: cfg.GateAllowEmpty})
 	if err != nil {
 		return nil, gateError(err)
 	}
 	for _, w := range gateWarnings {
 		p.warnings = append(p.warnings, Warning{Message: w})
 	}
+	if cfg.UpstreamCommand == nil { // a stdio upstream gets no assertion and no email (ADR-0016 §6)
+		p.warnings = append(p.warnings, emailWarnings(cfg, p.idp.gateIdP == gate.Entra)...)
+	}
+	if cfg.AppTokens == "entra" {
+		if p.idp.appTokens == nil {
+			return nil, errors.New("BYWARD_APP_TOKENS=entra needs BYWARD_IDP=entra")
+		}
+		if p.appGate, err = gate.NewApp(gate.AppRules{Roles: cfg.AppRoles, ClientIDs: cfg.AppClientIDs, Tenants: cfg.GateTenants}); err != nil {
+			return nil, gateError(err)
+		}
+	}
 	if cfg.ScopeDescription == "" {
 		p.warnings = append(p.warnings, Warning{Message: "consent page uses generic wording", Setting: "BYWARD_SCOPE_DESCRIPTION",
 			Fix: "set it to say in plain words what the " + cfg.Scope + " scope lets an app do (ADR-0010 §4)"})
 	}
 	return p, nil
+}
+
+// emailWarnings say, at every start, which emails the identity assertion leaves out or carries
+// unverified (ADR-0016, 2026-11-07 amendment).
+func emailWarnings(cfg *config.Config, entra bool) []Warning {
+	const setting = "BYWARD_ASSERTION_UNVERIFIED_EMAIL"
+	switch email := slices.Contains(cfg.AssertionClaims, "email"); {
+	case !email && cfg.AssertionUnverifiedEmail:
+		return []Warning{{Message: setting + " has no effect", Setting: "BYWARD_ASSERTION_CLAIMS", Fix: "add email to it, or remove " + setting}}
+	case email && cfg.AssertionUnverifiedEmail:
+		return []Warning{{Message: "the identity assertion carries emails the IdP has not verified, marked email_verified false", Setting: setting,
+			Fix: "the upstream must never authorize on email; use sub"}}
+	case email && entra:
+		return []Warning{{Message: "Entra never verifies an email, so the identity assertion carries none", Setting: setting,
+			Fix: "set it to true to assert Entra's email anyway, marked email_verified false; never authorize on it"}}
+	case email:
+		return []Warning{{Message: "the identity assertion leaves out emails the IdP has not verified (email_verified)", Setting: setting,
+			Fix: "set it to true to assert them anyway, marked email_verified false"}}
+	}
+	return nil
 }
 
 // secretCheck is the permission check for secret files (ADR-0018 §11); --dev turns it off.
@@ -297,13 +350,23 @@ func secretCheck(cfg *config.Config) func(string) error {
 	return secretfile.Check
 }
 
-// looseSecretFiles is one error per secret file other users can read, named by its setting.
+// looseSecretFiles is one error per secret file other users can read, named by its setting, and
+// for the federated token file (read at each request, not at start) one if it is missing.
 func looseSecretFiles(cfg *config.Config) []error {
 	check := secretCheck(cfg)
 	var loose []error
 	for _, f := range cfg.Values.SecretFiles() {
 		if err := check(f.Path); err != nil {
 			loose = append(loose, fmt.Errorf("%s: %w", f.From, err))
+		}
+	}
+	// A federated token is a credential too, though it is read at each request, not at start.
+	if f := cfg.EntraFederatedTokenFile; f != "" {
+		// It must exist even in --dev, as every other secret file must to be read at start.
+		if _, err := os.Stat(f); err != nil {
+			loose = append(loose, fmt.Errorf("%s: %w", config.Setting{Name: "entra-federated-token-file"}.Env(), err))
+		} else if err := check(f); err != nil {
+			loose = append(loose, fmt.Errorf("%s: %w", config.Setting{Name: "entra-federated-token-file"}.Env(), err))
 		}
 	}
 	return loose
@@ -335,14 +398,30 @@ func readiness(ring *token.KeyRing, st pinger) []health.Check {
 	return append(checks, health.Check{Name: "store", Ready: st.Ping})
 }
 
-// signedInUser is the access token's subject, which Guard attached to the request.
+// appValidator is the app-only path (ADR-0022): the IdP adapter's verifier, the app gate on every
+// request, and revoke-user's cut-offs.
+func appValidator(parts *authParts, deny *denylist.List, o Observability) (resource.Validator, error) {
+	return apptoken.New(apptoken.Config{Verifier: parts.idp.appTokens, Gate: parts.appGate, Deny: deny, IdP: parts.idp.name, Count: o.Metrics.AppToken, Now: time.Now})
+}
+
+// signedInUser is the subject Guard attached to the request, which MCP sessions are bound to. Any
+// principal other than a user is marked with its type, so a user's session is never an app's
+// (invariant 13); users' keys stay as they were.
 func signedInUser(r *http.Request) (string, bool) {
 	id, ok := resource.IdentityFrom(r.Context())
-	return id.Subject, ok && id.Subject != ""
+	ok = ok && id.Subject != ""
+	if id.PrincipalType != resource.PrincipalUser && id.PrincipalType != "" {
+		return id.PrincipalType + ":" + id.Subject, ok
+	}
+	return id.Subject, ok
 }
 
 // newCIMDRegistry is registration.NewCIMDRegistry; tests replace it to see the wired host lists.
 var newCIMDRegistry = registration.NewCIMDRegistry
+
+// idpHTTPClient reaches the IdP for the serving proxy; nil is the default client. Tests point it at
+// a fake IdP.
+var idpHTTPClient *http.Client
 
 // newBroker is broker.New; tests replace it to see the wired configuration.
 var newBroker = broker.New
@@ -389,6 +468,8 @@ var gateSettings = map[string]string{
 	gate.FieldEmailDomains:  config.Setting{Name: "gate-email-domains"}.Env(),
 	gate.FieldHostedDomains: config.Setting{Name: "gate-hosted-domains"}.Env(),
 	gate.FieldAllowEmpty:    config.Setting{Name: "gate-allow-empty"}.Env(),
+	gate.FieldAppRoles:      config.Setting{Name: "app-roles"}.Env(),
+	gate.FieldAppClientIDs:  config.Setting{Name: "app-client-ids"}.Env(),
 }
 
 // gateError names the setting at fault for each invalid gate rule list.

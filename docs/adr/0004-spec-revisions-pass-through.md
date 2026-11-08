@@ -34,6 +34,13 @@ reserved, so it is the proxy's design choice (F13).
    check it. "Byte-transparent" means the message body; this header is rewritten.
 3. **Modern era:** forwarded unchanged. The proxy does not validate `Mcp-Method`/`Mcp-Name`
    (it enforces no policy on mirrored headers).
+   _Amended 2026-11-06 (#61):_ for a **stdio** upstream the bridge is the server, and the upstream
+   never sees HTTP headers, so the bridge enforces the transport's header rules for 2026-07-28
+   requests: `MCP-Protocol-Version`, `Mcp-Method` and, for `tools/call`, `resources/read` and
+   `prompts/get`, `Mcp-Name` must be present and equal the body's values (case-sensitive, after
+   decoding a Base64 sentinel); otherwise `400` with `HeaderMismatch` (`-32020`). Notification
+   POSTs carry no header requirements in that revision and are not checked. HTTP upstreams are
+   unchanged: they validate their own headers.
 4. **Every request is authenticated, `server/discover` included** (as the MCP conformance suite
    does).
 5. **Identity propagation (F13) is a v1 requirement for HTTP upstreams**, so they can verify
@@ -48,3 +55,22 @@ reserved, so it is the proxy's design choice (F13).
   compatibility matrix.
 - The proxy has no version-specific body rewriting on the HTTP path, so new spec revisions mostly
   need no proxy change beyond era recognition.
+
+## Amendment 2026-11-07 (no upgrades or response trailers past the binding, #168)
+
+- **§2 legacy era, upgrades:** the relay never lets the upstream switch protocols. It drops a client's
+  `Upgrade` (and the `Connection` that carries it) before forwarding, and answers an upstream's 101 with
+  502 and none of its headers. On a 101, `ReverseProxy` takes over the connection and writes the
+  upstream's response itself, past the binding, so the upstream's raw `Mcp-Session-Id` reached the MCP
+  client, and with it a raw connection to the upstream that no later check saw. Streamable HTTP has no
+  upgrade.
+- **§2 legacy era, response trailers:** the upstream's `Mcp-Session-Id` never reaches the MCP client as
+  a trailer either. The binding seals the header when the response starts, but `ReverseProxy` copies
+  the upstream's response trailers to the client after the body, so an upstream that sent its session
+  as a trailer (announced or not) reached the MCP client unsealed. The relay now drops every upstream
+  response trailer: it clears them before the response starts, so none is announced, and again when
+  the body is closed, since the body reader fills them in at the end. The same covers the headers the
+  relay drops (`Access-Control-*`, `WWW-Authenticate`), which could otherwise have arrived as trailers.
+  MCP does not use response trailers.
+- In both cases the binding still held, since a raw ID gets 404, but the upstream's own session ID
+  leaked. Affected: v0.1.0-rc.1.

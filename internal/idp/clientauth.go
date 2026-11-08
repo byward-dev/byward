@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/url"
@@ -123,4 +124,32 @@ func setAssertion(form url.Values, clientID, assertion string) {
 	form.Set("client_id", clientID)
 	form.Set("client_assertion_type", clientAssertionType)
 	form.Set("client_assertion", assertion)
+}
+
+// ParsePrivateKey reads one PEM private key for PrivateKeyJWT: PKCS #8, PKCS #1 (RSA) or SEC 1 (EC).
+func ParsePrivateKey(raw []byte) (crypto.Signer, error) {
+	block, _ := pem.Decode(raw)
+	if block == nil {
+		return nil, errors.New("not a PEM private key")
+	}
+	var key any
+	var err error
+	switch block.Type {
+	case "PRIVATE KEY":
+		key, err = x509.ParsePKCS8PrivateKey(block.Bytes)
+	case "RSA PRIVATE KEY":
+		key, err = x509.ParsePKCS1PrivateKey(block.Bytes)
+	case "EC PRIVATE KEY":
+		key, err = x509.ParseECPrivateKey(block.Bytes)
+	default:
+		return nil, fmt.Errorf("a PEM %q block is not a private key", block.Type)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("the private key does not parse: %w", err)
+	}
+	s, ok := key.(crypto.Signer)
+	if !ok {
+		return nil, errors.New("the private key cannot sign")
+	}
+	return s, nil
 }

@@ -158,7 +158,7 @@ func TestAnAssertionVerifiesWithThePublishedJWKS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := m.Mint(resource.Identity{Subject: "tid:oid", ClientID: "claude-code", Roles: []string{"byward.user"}})
+	raw, err := m.Mint(resource.Identity{Subject: "tid:oid", ClientID: "claude-code", PrincipalType: resource.PrincipalUser, Roles: []string{"byward.user"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,25 +174,36 @@ func TestAnAssertionVerifiesWithThePublishedJWKS(t *testing.T) {
 			t.Errorf("claim %s is set though the identity has none", absent)
 		}
 	}
-	other, _ := m.Mint(resource.Identity{Subject: "tid:oid", ClientID: "claude-code"})
+	other, _ := m.Mint(resource.Identity{Subject: "tid:oid", ClientID: "claude-code", PrincipalType: resource.PrincipalUser})
 	if _, c2 := verify(t, k, other); c2["jti"] == c["jti"] {
 		t.Fatal("two assertions share a jti")
 	}
 }
 
-func TestMintRefusesAnIdentityWithoutSubjectOrClient(t *testing.T) {
+// An assertion needs a subject, a client and a known principal type; no principal type is never
+// taken for a user, since an app asserted as one would be a confused deputy.
+func TestMintRefusesAnIdentityWithoutSubjectClientOrPrincipalType(t *testing.T) {
 	k, _ := keys(t)
 	m, err := NewMinter(k, issuer, audience, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.Mint(resource.Identity{Subject: "s", ClientID: "c"}); err != nil {
-		t.Fatalf("the same minter refuses a full identity: %v", err)
-	}
-	for _, id := range []resource.Identity{{ClientID: "c"}, {Subject: "s"}} {
-		if _, err := m.Mint(id); err == nil {
-			t.Errorf("minted for %+v", id)
-		}
+	for name, tc := range map[string]struct {
+		id resource.Identity
+		ok bool
+	}{
+		"a user":                    {resource.Identity{Subject: "s", ClientID: "c", PrincipalType: resource.PrincipalUser}, true},
+		"an app":                    {resource.Identity{Subject: "s", ClientID: "c", PrincipalType: resource.PrincipalClient}, true},
+		"no subject":                {resource.Identity{ClientID: "c", PrincipalType: resource.PrincipalUser}, false},
+		"no client":                 {resource.Identity{Subject: "s", PrincipalType: resource.PrincipalUser}, false},
+		"no principal type":         {resource.Identity{Subject: "s", ClientID: "c"}, false},
+		"an unknown principal type": {resource.Identity{Subject: "s", ClientID: "c", PrincipalType: "admin"}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := m.Mint(tc.id); (err == nil) != tc.ok {
+				t.Fatalf("Mint(%+v) = %v, want ok %v", tc.id, err, tc.ok)
+			}
+		})
 	}
 	if _, err := NewMinter(k, issuer, "", nil); err == nil {
 		t.Error("a minter without an audience")
@@ -205,8 +216,8 @@ func TestAnAssertionCarriesExactlyTheDocumentedHeaderAndClaims(t *testing.T) {
 	k, _ := keys(t)
 	m, _ := NewMinter(k, issuer, audience, func() time.Time { return t0 })
 	raw, err := m.Mint(resource.Identity{Subject: "00000000-0000-0000-0000-000000000001:11111111-1111-1111-1111-111111111111",
-		ClientID: "https://claude.ai/oauth/claude-code-client-metadata", Roles: []string{"byward.user"},
-		Groups: []string{"22222222-2222-2222-2222-222222222222"}, Email: "alex@contoso.example", Name: "Alex"})
+		ClientID: "https://claude.ai/oauth/claude-code-client-metadata", PrincipalType: resource.PrincipalUser, Roles: []string{"byward.user"},
+		Groups: []string{"22222222-2222-2222-2222-222222222222"}, Email: "alex@contoso.example", EmailVerified: true, Name: "Alex"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,6 +246,33 @@ func TestAnAssertionCarriesExactlyTheDocumentedHeaderAndClaims(t *testing.T) {
 	}
 }
 
+// email_verified comes with email and only with it, so the upstream sees whether the IdP vouched
+// for the address.
+func TestAnAssertionSaysWhetherItsEmailIsVerified(t *testing.T) {
+	k, _ := keys(t)
+	m, _ := NewMinter(k, issuer, audience, func() time.Time { return t0 })
+	for _, tc := range []struct {
+		name string
+		id   resource.Identity
+		want any // nil: no email_verified claim
+	}{
+		{"verified", resource.Identity{Email: "alex@contoso.example", EmailVerified: true}, true},
+		{"unverified", resource.Identity{Email: "alex@contoso.example"}, false},
+		{"no email", resource.Identity{}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.id.Subject, tc.id.ClientID, tc.id.PrincipalType = "user", "app", resource.PrincipalUser
+			raw, err := m.Mint(tc.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, c := verify(t, k, raw); c["email_verified"] != tc.want {
+				t.Fatalf("email_verified %v, want %v", c["email_verified"], tc.want)
+			}
+		})
+	}
+}
+
 func TestTheJWKSIsServedCacheable(t *testing.T) {
 	k, _ := keys(t)
 	rec := httptest.NewRecorder()
@@ -260,7 +298,7 @@ func BenchmarkMint(b *testing.B) {
 	}
 	m, _ := NewMinter(k, issuer, audience, nil)
 	id := resource.Identity{Subject: "00000000-0000-0000-0000-000000000001:11111111-1111-1111-1111-111111111111",
-		ClientID: "https://claude.ai/oauth/claude-code-client-metadata", Roles: []string{"byward.user"}}
+		ClientID: "https://claude.ai/oauth/claude-code-client-metadata", PrincipalType: resource.PrincipalUser, Roles: []string{"byward.user"}}
 	for b.Loop() {
 		if _, err := m.Mint(id); err != nil {
 			b.Fatal(err)

@@ -25,6 +25,7 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/health"
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/metrics"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 	"github.com/byward-dev/byward/internal/token"
@@ -334,35 +335,65 @@ func TestRunShutsDownOnCancel(t *testing.T) {
 }
 
 func TestAdmitCapsRequestsAndStreamsSeparately(t *testing.T) {
+	// A GET stream and a subscriptions/listen POST are long-lived and share the stream cap; every
+	// other POST takes a request slot. Neither kind uses the other's.
 	release := make(chan struct{})
 	entered := make(chan struct{}, 4)
-	h := admit(1, 1, nil, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	m := metrics.New()
+	h := admit(1, 2, m, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		entered <- struct{}{}
 		<-release
 	}))
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	t.Cleanup(func() { close(release) })
-	call := func(method string) {
+	client := &http.Client{Timeout: 5 * time.Second}
+	request := func(method, mcpMethod string) *http.Request {
+		r, _ := http.NewRequest(method, srv.URL, nil)
+		if mcpMethod != "" {
+			r.Header.Set("Mcp-Method", mcpMethod)
+		}
+		return r
+	}
+	hold := func(method, mcpMethod, what string) {
+		t.Helper()
 		go func() {
-			r, _ := http.NewRequest(method, srv.URL, nil)
-			if res, err := http.DefaultClient.Do(r); err == nil {
+			if res, err := client.Do(request(method, mcpMethod)); err == nil {
 				_ = res.Body.Close()
 			}
 		}()
-		<-entered
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s was refused", what)
+		}
 	}
-	call("GET")  // holds the only stream slot
-	call("POST") // a POST still gets in: streams do not use request slots
-	for _, m := range []string{"GET", "POST"} {
-		r, _ := http.NewRequest(m, srv.URL, nil)
-		res, err := http.DefaultClient.Do(r)
+	hold("GET", "", "the first stream")
+	hold("POST", "tools/call", "a request while only a stream slot was taken")
+	hold("POST", "subscriptions/listen", "a subscription while the only request slot was taken")
+	scrape := func() string {
+		rec := httptest.NewRecorder()
+		m.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		return rec.Body.String()
+	}
+	for _, want := range []string{`byward_upstream_in_flight{kind="request"} 1`, `byward_upstream_in_flight{kind="stream"} 2`} {
+		if got := scrape(); !strings.Contains(got, want) {
+			t.Fatalf("metrics lack %s:\n%s", want, got)
+		}
+	}
+	for _, c := range [][2]string{{"GET", ""}, {"POST", "subscriptions/listen"}, {"POST", "tools/call"}} {
+		res, err := client.Do(request(c[0], c[1]))
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("%s %s over its cap: %v", c[0], c[1], err)
 		}
 		_ = res.Body.Close()
 		if res.StatusCode != http.StatusServiceUnavailable || res.Header.Get("Retry-After") == "" {
-			t.Fatalf("%s over its cap: got %d", m, res.StatusCode)
+			t.Fatalf("%s %s over its cap: got %d, Retry-After %q", c[0], c[1], res.StatusCode, res.Header.Get("Retry-After"))
+		}
+	}
+	for _, want := range []string{`byward_upstream_busy_total{kind="request"} 1`, `byward_upstream_busy_total{kind="stream"} 2`} {
+		if got := scrape(); !strings.Contains(got, want) {
+			t.Fatalf("metrics lack %s:\n%s", want, got)
 		}
 	}
 }

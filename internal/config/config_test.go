@@ -113,13 +113,14 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"cimd allowed hosts blank", "BYWARD_CIMD_ALLOWED_HOSTS=,", "BYWARD_CIMD_ALLOWED_HOSTS is set but lists nothing"},
 		{"cimd host with a scheme", "BYWARD_CIMD_TRUSTED_HOSTS=https://claude.ai", `BYWARD_CIMD_TRUSTED_HOSTS: "https://claude.ai" is not a host name`},
 		{"cimd host with a path", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai/oauth", `BYWARD_CIMD_TRUSTED_HOSTS: "claude.ai/oauth" is not a host name`},
-		{"cimd host with user info", "BYWARD_CIMD_ALLOWED_HOSTS=user@claude.ai", `BYWARD_CIMD_ALLOWED_HOSTS: "user@claude.ai" is not a host name`},
+		{"cimd host with user info", "BYWARD_CIMD_ALLOWED_HOSTS=user@claude.example", `BYWARD_CIMD_ALLOWED_HOSTS: "user@claude.example" is not a host name`},
 		{"cimd host with a space", "BYWARD_CIMD_TRUSTED_HOSTS=claude .ai", `"claude .ai" is not a host name`},
 		{"cimd host with a port", "BYWARD_CIMD_ALLOWED_HOSTS=claude.ai:443", `BYWARD_CIMD_ALLOWED_HOSTS: "claude.ai:443" is not a host name`},
 		{"cimd wildcard host", "BYWARD_CIMD_TRUSTED_HOSTS=*.example.com", `"*.example.com" is not a host name`},
 		{"cimd single-label host", "BYWARD_CIMD_TRUSTED_HOSTS=localhost", `"localhost" is not a host name`},
 		{"cimd unicode host", "BYWARD_CIMD_TRUSTED_HOSTS=bücher.example", `BYWARD_CIMD_TRUSTED_HOSTS: the host "bücher.example" is not ASCII`},
 		{"dcr not a bool", "BYWARD_DCR=on", "BYWARD_DCR: want true or false"},
+		{"unverified email not a bool", "BYWARD_ASSERTION_UNVERIFIED_EMAIL=yes", "BYWARD_ASSERTION_UNVERIFIED_EMAIL: want true or false"},
 		{"client denylist blank", "BYWARD_CLIENT_DENYLIST= ,", "BYWARD_CLIENT_DENYLIST is set but lists nothing"},
 		{"gate tenants blank", "BYWARD_GATE_TENANTS=,", "BYWARD_GATE_TENANTS is set but lists nothing"},
 		{"gate roles blank", "BYWARD_GATE_ROLES= ,,", "BYWARD_GATE_ROLES is set but lists nothing"},
@@ -301,7 +302,7 @@ func TestBrokerSettingsAreRequired(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	if _, err := load(t, nil, "BYWARD_ENTRA_CLIENT_SECRET_FILE="); !isConfigError(err) || !strings.Contains(err.Error(), "BYWARD_ENTRA_CLIENT_SECRET_FILE is required") {
+	if _, err := load(t, nil, "BYWARD_ENTRA_CLIENT_SECRET_FILE="); !isConfigError(err) || !strings.Contains(err.Error(), "BYWARD_ENTRA_CLIENT_SECRET_FILE, BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE or BYWARD_ENTRA_FEDERATED_TOKEN_FILE is required") {
 		t.Errorf("secret: %v", err)
 	}
 	if _, err := load(t, nil, "BYWARD_ENTRA_TENANT=contoso.onmicrosoft.com"); !isConfigError(err) || !strings.Contains(err.Error(), "want the tenant ID, a GUID") {

@@ -3,10 +3,12 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -122,4 +124,71 @@ func TestAnIdentityWithoutASubjectIsNoSignedInUser(t *testing.T) {
 func withBearer(r *http.Request, tok string) *http.Request {
 	r.Header.Set("Authorization", "Bearer "+tok)
 	return r
+}
+
+// Invariant 13 at the wire level: an upstream's Mcp-Session-Id sent as a response trailer, announced
+// or not, never reaches the MCP client, nor does any other trailer; the session it sends as a header
+// still reaches the client sealed.
+func TestAnUpstreamSessionSentAsATrailerNeverReachesTheClient(t *testing.T) {
+	const raw = "upstream-trailer-session"
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(mcpsession.Header, "upstream-session-1")
+		w.Header().Set("Trailer", mcpsession.Header+", X-Announced")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{}}`)
+		w.Header().Set(mcpsession.Header, raw) // announced: becomes the trailer
+		w.Header().Set("X-Announced", "upstream")
+		w.Header().Set(http.TrailerPrefix+"X-Unannounced", raw)
+		w.Header().Set(http.TrailerPrefix+"Set-Cookie", "upstream=1")
+	}))
+	t.Cleanup(up.Close)
+	// The control: straight from the upstream, the client gets the trailers.
+	direct, err := http.Post(up.URL, "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, direct.Body)
+	_ = direct.Body.Close()
+	if direct.Trailer.Get(mcpsession.Header) != raw || direct.Trailer.Get("X-Announced") != "upstream" ||
+		direct.Trailer.Get("X-Unannounced") != raw || direct.Trailer.Get("Set-Cookie") != "upstream=1" {
+		t.Fatalf("the upstream sent trailers %v, want its raw session in them", direct.Trailer)
+	}
+
+	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+up.URL+"/mcp")
+	cfg, _, err := config.Load(nil, env, os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := buildAuth(cfg, discard, Observability{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stop(t, a) })
+	srv := httptest.NewServer(Handler(cfg, discard, httpUpstream(cfg, discard), twoUsers{"tok-alice": "tid:alice"}, nil, a.sessions, Observability{}))
+	t.Cleanup(srv.Close)
+	r, _ := http.NewRequest(http.MethodPost, srv.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
+	r.Host = "mcp.example.com"
+	r.Header.Set("Authorization", "Bearer tok-alice")
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json, text/event-stream")
+	res, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body) // trailers arrive at the end of the body
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK || string(body) != `{"jsonrpc":"2.0","id":1,"result":{}}` {
+		t.Fatalf("status %d, body %s", res.StatusCode, body)
+	}
+	if len(res.Trailer) != 0 { // an announced trailer is listed here too, even with no value
+		t.Fatalf("trailers %v reached the client", res.Trailer)
+	}
+	if id := res.Header.Get(mcpsession.Header); !strings.HasPrefix(id, mcpsession.Prefix) || len(res.Header.Values(mcpsession.Header)) != 1 {
+		t.Fatalf("session %q, want one sealed ID", res.Header.Values(mcpsession.Header))
+	}
+	for k, v := range res.Header {
+		if slices.ContainsFunc(v, func(s string) bool { return strings.Contains(s, raw) }) {
+			t.Fatalf("the upstream's trailer session reached the client in %s: %q", k, v)
+		}
+	}
 }

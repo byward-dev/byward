@@ -11,6 +11,7 @@
 package fakeidp
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -71,6 +72,9 @@ type Client struct {
 	Secrets []string
 	// Certificates lists accepted private_key_jwt keys; more than one models a rollover.
 	Certificates []*Certificate
+	// Federated lists the client's federated identity credentials (Entra workload identity
+	// federation): a token from another issuer accepted as its client assertion.
+	Federated    []FederatedCredential
 	RedirectURIs []string
 	// ServicePrincipalID is the `oid` of app-only tokens (Entra only); empty means a generated GUID.
 	ServicePrincipalID string
@@ -90,7 +94,18 @@ type Client struct {
 	NoIdentifierURI bool
 }
 
-func (c Client) confidential() bool { return len(c.Secrets) > 0 || len(c.Certificates) > 0 }
+// FederatedCredential is a federated identity credential on an app registration: a client
+// assertion whose iss, sub and aud match exactly, case-sensitively, and that Signer signed, is
+// accepted for the client (Microsoft Learn, workload identity federation).
+type FederatedCredential struct {
+	Issuer, Subject, Audience string
+	// Signer is the other issuer's key (GitHub's, say), standing in for its JWKS.
+	Signer *Certificate
+}
+
+func (c Client) confidential() bool {
+	return len(c.Secrets) > 0 || len(c.Certificates) > 0 || len(c.Federated) > 0
+}
 
 // IdP is a running fake identity provider.
 type IdP struct {
@@ -122,10 +137,15 @@ type settings struct {
 	idtyp           bool
 	strictTenants   bool
 	emailAsString   bool
+	noEmailVerified bool
 	authorizeFail   *Failure
-	jwksDown        bool
-	jwksEmpty       bool
-	tokenFail       map[string]Failure
+	// prompt=none: with silentFail set it answers that error; otherwise silentSession signs the user
+	// in without a page, and without it the answer is login_required (failing closed).
+	silentSession bool
+	silentFail    *Failure
+	jwksDown      bool
+	jwksEmpty     bool
+	tokenFail     map[string]Failure
 }
 
 // Option configures the fake. Options apply at New and at Set.
@@ -261,6 +281,17 @@ func WithRefreshTokenRotation(on bool) Option { return func(s *settings) { s.rot
 // (default off: the old token stays valid until it expires).
 func WithSingleUseRefreshTokens(on bool) Option { return func(s *settings) { s.singleUseRT = on } }
 
+// WithSilentSession lets prompt=none sign the user in without a page, as when the IdP holds a
+// session for them. Without it prompt=none answers login_required.
+func WithSilentSession() Option {
+	return func(s *settings) { s.silentSession, s.silentFail = true, nil }
+}
+
+// WithSilentError makes prompt=none answer this OIDC error, e.g. interaction_required.
+func WithSilentError(code string) Option {
+	return func(s *settings) { s.silentSession, s.silentFail = false, &Failure{Error: code} }
+}
+
 // WithIDTypClaim switches `idtyp: app` on app-only tokens, i.e. whether the resource app has the
 // optional claim configured (default on).
 func WithIDTypClaim(on bool) Option { return func(s *settings) { s.idtyp = on } }
@@ -272,6 +303,10 @@ func WithUnknownTenantsRefused(on bool) Option { return func(s *settings) { s.st
 // WithEmailVerifiedAsString makes the generic profile send `email_verified` as "true"/"false"
 // (a Google quirk).
 func WithEmailVerifiedAsString(on bool) Option { return func(s *settings) { s.emailAsString = on } }
+
+// WithoutEmailVerified makes the generic profile send `email` with no `email_verified` claim at
+// all, as some IdPs do.
+func WithoutEmailVerified(on bool) Option { return func(s *settings) { s.noEmailVerified = on } }
 
 // WithJWKSUnavailable makes the JWKS endpoint answer 503, as during an IdP outage.
 func WithJWKSUnavailable(on bool) Option { return func(s *settings) { s.jwksDown = on } }
@@ -420,6 +455,23 @@ func (p *IdP) Mint(claims map[string]any) string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.sign(claims)
+}
+
+// MintWithHeader signs claims with the current key under a crafted JOSE header: alg (RS256 or
+// PS256) and typ as given; kid is the current key's. An empty typ leaves it out.
+func (p *IdP) MintWithHeader(alg, typ string, claims map[string]any) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	k := p.keys[len(p.keys)-1]
+	h := map[string]any{"alg": alg, "kid": k.kid}
+	if typ != "" {
+		h["typ"] = typ
+	}
+	s, err := signRSA(k.cert.Key, alg, h, claims)
+	if err != nil {
+		panic(fmt.Sprintf("fakeidp: sign: %v", err)) // only an unsupported alg
+	}
+	return s
 }
 
 func (p *IdP) sign(claims map[string]any) string {

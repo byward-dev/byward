@@ -344,11 +344,11 @@ func TestARememberedSignInGetsNoCodeUnlessTheCallbackCanConfirmTheClientAndConse
 		change func(t *testing.T, e *env)
 		status int
 	}{
-		"the client removed":     {func(_ *testing.T, e *env) { e.reg.remove(clientID) }, http.StatusBadRequest},
-		"its redirect withdrawn": {func(_ *testing.T, e *env) { e.reg.reregister(clientID, webCB) }, http.StatusBadRequest},
-		"its trust withdrawn":    {func(_ *testing.T, e *env) { e.reg.demote(clientID) }, http.StatusOK},
-		"the store down":         {func(_ *testing.T, e *env) { e.st.down.Store(true) }, http.StatusOK},
-		"the registry down":      {func(_ *testing.T, e *env) { e.reg.fail() }, http.StatusInternalServerError},
+		"the client removed":        {func(_ *testing.T, e *env) { e.reg.remove(clientID) }, http.StatusBadRequest},
+		"its redirect withdrawn":    {func(_ *testing.T, e *env) { e.reg.reregister(clientID, webCB) }, http.StatusBadRequest},
+		"its trust withdrawn":       {func(_ *testing.T, e *env) { e.reg.demote(clientID) }, http.StatusOK},
+		"the consent check failing": {func(_ *testing.T, e *env) { e.st.consentDown.Store(true) }, http.StatusOK},
+		"the registry down":         {func(_ *testing.T, e *env) { e.reg.fail() }, http.StatusInternalServerError},
 		"consent forgotten by revoke-user": {func(t *testing.T, e *env) {
 			if err := e.st.RevokeSubject(context.Background(), user(e).Subject, e.now.Add(1), e.now); err != nil {
 				t.Fatal(err)
@@ -439,5 +439,22 @@ func TestARememberedConsentCoversLessAndOtherPrompts(t *testing.T) {
 				t.Fatalf("callback: %d to %q, want a code", back.StatusCode, back.Header.Get("Location"))
 			}
 		})
+	}
+}
+
+// An IdP that returns no refresh token costs the grant its offline_access, not the user's consent:
+// the remembered consent keeps what the user approved, so the next sign-in is still remembered.
+func TestAGrantWithoutRefreshKeepsTheApprovedScopesRemembered(t *testing.T) {
+	e := newEnv(t, withRemember(t, nil), func(c *Config) { c.IdP = noRefreshToken{c.IdP} })
+	as := url.Values{"scope": {"mcp offline_access"}}
+	h := e.remember(t, as)
+	g := user(e)
+	c, err := e.st.Consent(context.Background(), store.ConsentKey{Issuer: g.Issuer, Subject: g.Subject, ClientID: clientID,
+		Redirect: registration.RedirectKey(clientCB), Resource: resourceID})
+	if err != nil || !slices.Contains(c.Scopes, "offline_access") || slices.Contains(g.Scopes, "offline_access") {
+		t.Fatalf("consent %v (%v), grant scopes %v: want offline_access remembered but not granted", c.Scopes, err, g.Scopes)
+	}
+	if res := e.authorizeWith(t, as, h); !skipped(res) {
+		t.Fatalf("the next sign-in asking for offline_access: %d, want remembered", res.StatusCode)
 	}
 }

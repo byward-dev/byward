@@ -18,10 +18,12 @@ const SessionDirPlaceholder = "{session_dir}"
 // Identity env names set on every upstream process (ADR-0016 §6). Operator env must not use the
 // prefix, so an upstream can trust that these come from the proxy.
 const (
-	EnvSubject  = "BYWARD_SUBJECT"
-	EnvIssuer   = "BYWARD_ISSUER"
-	EnvEmail    = "BYWARD_EMAIL"
-	reservedEnv = "BYWARD_"
+	EnvSubject = "BYWARD_SUBJECT"
+	EnvIssuer  = "BYWARD_ISSUER"
+	EnvEmail   = "BYWARD_EMAIL"
+	// EnvPrincipalType is user, or client for an app-only caller (ADR-0022 §5).
+	EnvPrincipalType = "BYWARD_PRINCIPAL_TYPE"
+	reservedEnv      = "BYWARD_"
 )
 
 // inheritedEnv is the allowlist of the proxy's own environment passed to upstream processes. The
@@ -35,22 +37,25 @@ var inheritedEnv = []string{
 // ErrCommandNotFound is returned when the configured command is not an executable file.
 var ErrCommandNotFound = errors.New("stdio upstream command not found")
 
-// Identity is the user an upstream process acts for. Subject is the opaque user key; Email is
-// set only when the operator opted in.
+// Identity is the principal an upstream process acts for. Subject is the opaque user key; Email is
+// set only when the operator opted in; PrincipalType is user or client (an app-only caller), and
+// empty only without authentication.
 type Identity struct {
-	Subject string
-	Issuer  string
-	Email   string
+	Subject       string
+	Issuer        string
+	Email         string
+	PrincipalType string
 }
 
-// user identifies the user across IdPs: a subject is unique only within its issuer.
-func (id Identity) user() string { return id.Issuer + "\x00" + id.Subject }
+// user identifies the principal across IdPs and kinds: a subject is unique only within its issuer,
+// and a user never shares a process with an app.
+func (id Identity) user() string { return id.PrincipalType + "\x00" + id.Issuer + "\x00" + id.Subject }
 
 func (id Identity) validate() error {
 	if id.Subject == "" || id.Issuer == "" {
 		return errors.New("stdio: identity needs a subject and an issuer")
 	}
-	for _, v := range []string{id.Subject, id.Issuer, id.Email} {
+	for _, v := range []string{id.Subject, id.Issuer, id.Email, id.PrincipalType} {
 		if strings.ContainsRune(v, 0) {
 			return errors.New("stdio: identity contains a NUL byte")
 		}
@@ -143,6 +148,9 @@ func (c command) environ(proxyEnv func(string) (string, bool), id Identity, sess
 	m[EnvSubject], m[EnvIssuer] = id.Subject, id.Issuer
 	if id.Email != "" {
 		m[EnvEmail] = id.Email
+	}
+	if id.PrincipalType != "" {
+		m[EnvPrincipalType] = id.PrincipalType
 	}
 	keys := make([]string, 0, len(m))
 	for k := range m {

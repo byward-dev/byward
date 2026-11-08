@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/server"
 	"github.com/byward-dev/byward/internal/testutil/fakeaz"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
@@ -42,8 +43,8 @@ func TestOperateCommandMisuseExits2WithTheRightCallOnStderr(t *testing.T) {
 		{"check with another flag", []string{"check", "--online"}, nil, "usage: byward check --offline"},
 		{"check with a stdio command but without --offline", []string{"check", "--", "/bin/sh"}, nil, "usage: byward check --offline"},
 		{"doctor with another flag", []string{"doctor", "--yaml"}, nil, "usage: byward doctor [--json]"},
-		{"init without an IdP", []string{"init"}, nil, "entra is the only IdP so far"},
-		{"init for another IdP", []string{"init", "okta", "--tenant", tenant, "--public-url", "https://m.example/mcp"}, nil, `entra is the only IdP so far, not "okta"`},
+		{"init without an IdP", []string{"init"}, nil, "init prints the setup of an entra IdP"},
+		{"init for another IdP", []string{"init", "okta", "--tenant", tenant, "--public-url", "https://m.example/mcp"}, nil, `init sets up only an entra IdP, not "okta"`},
 		{"init entra without a tenant", []string{"init", "entra"}, nil, "usage: byward init entra --tenant"},
 		{"init entra with an extra argument", []string{"init", "entra", "--tenant", tenant, "now"}, nil, "usage: byward init entra"},
 		{"init entra with a domain as tenant", []string{"init", "entra", "--tenant", "contoso.com", "--public-url", "https://m.example/mcp"}, nil, "tenant must be the tenant ID"},
@@ -152,6 +153,33 @@ func TestInitEntraScriptWritesAnEnvFileTheProxyLoads(t *testing.T) {
 		cfg.EntraTenant != tenant || cfg.EntraClientID != fakeaz.AppID || cfg.EntraClientSecret != fakeaz.Secret ||
 		cfg.EntraClientSecretExpiresAt.Before(time.Now().AddDate(2, 0, -2)) { // a date: up to a day early, and a run may cross midnight
 		t.Fatalf("settings %+v", cfg)
+	}
+}
+
+// With --credential certificate the env file names the certificate the script made instead of a
+// secret, and the proxy loads it as it is (ADR-0012 §5).
+func TestInitEntraWithACertificateWritesAnEnvFileTheProxyLoads(t *testing.T) {
+	if _, err := os.Stat("/usr/bin/openssl"); err != nil {
+		t.Skip("the script runs the system openssl, and there is none at /usr/bin/openssl")
+	}
+	lines := initEnv(t, []string{"init", "entra", "--tenant", tenant, "--public-url", "https://flag.example/mcp", "--upstream-url", "http://127.0.0.1:3001/mcp",
+		"--credential", "certificate"})
+	cfg, _, err := config.Load(nil, append(lines, "BYWARD_DATA_DIR=/var/lib/byward"), os.ReadFile)
+	if err != nil {
+		t.Fatalf("byward.env does not load: %v\n%s", err, strings.Join(lines, "\n"))
+	}
+	if cfg.EntraClientSecret != "" || cfg.EntraClientCertificate == "" || !cfg.EntraClientSecretExpiresAt.IsZero() {
+		t.Fatalf("env file %q", lines)
+	}
+	if _, err := entra.LoadCertificate([]byte(cfg.EntraClientCertificate)); err != nil {
+		t.Fatalf("the certificate the script made does not load: %v", err)
+	}
+}
+
+func TestInitEntraRefusesAnUnknownCredential(t *testing.T) {
+	if code, _, stderr := runWith([]string{"init", "entra", "--tenant", tenant, "--public-url", "https://flag.example/mcp", "--credential", "password"}); code != exitConfig ||
+		!strings.Contains(stderr, `the credential must be secret or certificate, not "password"`) {
+		t.Fatalf("an unknown credential: %d %q", code, stderr)
 	}
 }
 

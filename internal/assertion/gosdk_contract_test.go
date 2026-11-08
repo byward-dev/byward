@@ -76,7 +76,7 @@ func TestGoSDKBearerMiddlewareAcceptsTheAssertion(t *testing.T) {
 		h.ServeHTTP(w, r)
 		return w.Code
 	}
-	id := resource.Identity{Subject: "tid:oid", ClientID: "claude-code", Roles: []string{"byward.user"}}
+	id := resource.Identity{Subject: "tid:oid", ClientID: "claude-code", PrincipalType: resource.PrincipalUser, Roles: []string{"byward.user"}}
 	mint := func(audience string, now time.Time, k *assertion.Keys) string {
 		t.Helper()
 		m, err := assertion.NewMinter(k, "https://mcp.example.com", audience, func() time.Time { return now })

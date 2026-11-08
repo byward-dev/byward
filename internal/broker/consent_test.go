@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/registration"
@@ -759,4 +760,23 @@ func TestTheStylesheetIsServedLocallyAndOnlyToGETAndHEAD(t *testing.T) {
 // testCookie is a cookie a browser would send back; only name and value reach the server.
 func testCookie(name, value string) *http.Cookie {
 	return &http.Cookie{Name: name, Value: value, Path: "/", HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode}
+}
+
+// A long IdP name (an oidc issuer's host, up to 253 characters) fits the page: it is cut to 80
+// characters and cleaned of control characters.
+func TestALongIdPNameFitsTheConsentPage(t *testing.T) {
+	long := "sso." + strings.Repeat("a", 240) + ".example\u202e"
+	p := newEnv(t, func(c *Config) { c.IdPLabel = long }).showConsent(t, nil)
+	m := regexp.MustCompile(`you'll sign in with ([^<]*) next`).FindStringSubmatch(html.UnescapeString(p.body))
+	if m == nil || utf8.RuneCountInString(m[1]) != maxNameRunes || !strings.HasSuffix(m[1], "…") || strings.ContainsRune(m[1], '\u202e') {
+		t.Fatalf("IdP name on the page: %q", m)
+	}
+}
+
+// Without a name the page still says where the user signs in.
+func TestAnUnnamedIdPIsYourIdentityProvider(t *testing.T) {
+	p := newEnv(t, func(c *Config) { c.IdPLabel = "" }).showConsent(t, nil)
+	if !strings.Contains(html.UnescapeString(p.body), "you'll sign in with your identity provider next") {
+		t.Fatalf("consent page: %s", p.body)
+	}
 }

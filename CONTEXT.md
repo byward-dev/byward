@@ -70,6 +70,18 @@ _Avoid_: access token (alone), session token
 The short-lived JWT (RFC 9068 `at+jwt`) the proxy signs and sends an HTTP **upstream** on every request, saying which **user** and **MCP client** it is for; never the client's token (ADR-0016).
 _Avoid_: forwarded token, identity header (alone), passthrough
 
+**Plain identity headers**:
+The opt-in `X-Byward-*` headers that repeat the **identity assertion**'s values, unsigned, for an HTTP **upstream** that cannot verify a JWT; safe only when the upstream is reachable through the proxy alone (ADR-0016 §5).
+_Avoid_: identity header (alone), trusted headers, forwarded user
+
+**App-only token**:
+An **IdP token** that a headless caller (CI job, managed identity, agent) got with its own credential, with no **user** behind it, and sends the MCP endpoint instead of a **proxy token**; accepted only from Entra, opt-in, with a required app role (ADR-0022). Its caller is a client principal.
+_Avoid_: service token, machine token, M2M token (alone)
+
+**Upstream credential**:
+The operator's own header value (e.g. an API key) the proxy sends an HTTP **upstream** on every request, read from a secret file, in a header the **identity assertion** does not use; never a **user**'s or **MCP client**'s token (ADR-0016 §7).
+_Avoid_: upstream token, service token, passthrough
+
 **Grant**:
 One **user**'s authorization of one **MCP client** at the **broker**; it owns the refresh-token family and the stored **IdP tokens**, and revoking it ends every **proxy token** issued under it.
 _Avoid_: session, authorization (alone)
@@ -77,6 +89,10 @@ _Avoid_: session, authorization (alone)
 **Downstream API**:
 An API the **upstream** calls on the **user**'s behalf (e.g. Microsoft Graph); the MCP spec calls it an "upstream API".
 _Avoid_: upstream API, backend
+
+**Downstream token**:
+A token for a **downstream API**, obtained by the proxy On-Behalf-Of the **user** and sent to an HTTP **upstream** in its own header; never stored or logged (ADR-0017).
+_Avoid_: OBO token, delegated token
 
 **Access gate**:
 The **operator**'s rule for which **users** may use the proxy at all (tenant, app roles, groups, email domain), checked when a **grant** is created and at every refresh — never per MCP request.

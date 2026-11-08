@@ -43,3 +43,14 @@ in again".
 
 - Validation costs one AEAD open and an in-memory lookup per request.
 - The 401 shapes are the ones in ADR-0013; F12 adds no 403s in v0.1.
+
+## Amendment 2026-11-07 (#64): the first 403, app path only, v0.2
+
+An app-only caller whose token is valid but whom the app gate refuses (no required app role, not
+in the client-ID or tenant list) gets `403` with `WWW-Authenticate: Bearer
+error="insufficient_scope"` and a fixed description, and no `scope` or `resource_metadata`: no
+interactive step-up could help, only the operator's role assignment can (RFC 6750 §3.1). Headless
+callers are not the interactive clients that loop on 403; Claude Code re-runs its `headersHelper` and
+retries once when a tool call gets 401 or 403, and fails the connection when the credential is
+refused at connect (code.claude.com/docs/en/mcp, 2026-11-07). Every other refusal keeps the 401 shapes of §3, and proxy
+tokens never get a 403.

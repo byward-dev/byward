@@ -37,10 +37,12 @@ var samples = []Event{
 	{Name: ConsentDenied, Outcome: Failure, Reason: "the user denied the request", ClientID: "client-1", ClientTrust: "verified"},
 	{Name: ConsentRemembered, Outcome: Success, ClientID: "client-1", ClientTrust: "verified", UserKey: "tid:oid", GrantID: "grant-1", IdP: "entra"},
 	{Name: ConsentRemembered, Outcome: Failure, Reason: "user_mismatch", ClientID: "client-1", UserKey: "tid:oid", IdP: "entra"},
+	{Name: ConsentSilent, Outcome: Failure, Reason: "consent_required", ClientID: "client-1", ClientTrust: "domain", IdP: "entra"},
 	{Name: RateLimited, Outcome: Failure, Reason: "authorize"},
 	{Name: StoreRestored, Outcome: Success, Reason: "restored from an older copy", Epoch: 2},
 	{Name: SessionRejected, Outcome: Failure, Reason: "session of another user", UserKey: "tid:oid"},
 	{Name: ProcessEvicted, Outcome: Success, Reason: "user_cap", UserKey: "tid:oid"},
+	{Name: DownstreamTokenRefused, Outcome: Failure, Reason: "consent_required", ClientID: "client-1", UserKey: "tid:oid", GrantID: "grant-1", IdP: "entra"},
 }
 
 func render(t *testing.T) string {
@@ -91,7 +93,7 @@ func TestAuditRecordsMatchTheGoldenSchema(t *testing.T) {
 
 // names lists every event constant; a new one must be added here, to samples and to the docs.
 var names = []string{Login, AccessDenied, TokenIssued, TokenRejected, AccessTokenRejected, GrantRevoked,
-	ClientRegistered, KeyLoaded, HostRejected, OriginRejected, ConsentShown, ConsentGranted, ConsentDenied, ConsentRemembered, RateLimited, StoreRestored, SessionRejected}
+	ClientRegistered, KeyLoaded, HostRejected, OriginRejected, ConsentShown, ConsentGranted, ConsentDenied, ConsentRemembered, ConsentSilent, RateLimited, StoreRestored, SessionRejected, DownstreamTokenRefused}
 
 func TestEveryEventHasASampleAndADocsRow(t *testing.T) {
 	docs, err := os.ReadFile("../../docs/reference/observability.md")

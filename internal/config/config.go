@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"maps"
 	"net"
 	"net/netip"
 	"net/textproto"
@@ -25,6 +26,8 @@ var registry = []Setting{
 	{Name: "public-url", Help: "public URL of the MCP endpoint exactly as users enter it, e.g. https://mcp.example.com/mcp; an internationalized host in its ASCII (xn--) form"},
 	{Name: "upstream-url", Help: "URL of the HTTP upstream MCP server; or set a stdio upstream with upstream-command"},
 	{Name: "upstream-header-timeout", Default: "5m", Help: "how long the HTTP upstream may take to send its response headers; a request that waits longer gets a JSON-RPC timeout error, and a streamed response is not limited once its headers arrive; 1s to 1h (ADR-0018 §7)"},
+	{Name: "upstream-credential", Secret: true, Help: "HTTP upstream: a header value the proxy sends with every upstream request, such as an API key the upstream needs from the proxy itself; never the user's or the client's token; read at start, never logged (ADR-0016 §7, docs/how-to/upstream-credential.md)"},
+	{Name: "upstream-credential-header", Default: "Authorization", Help: "the header that carries upstream-credential; inbound copies are always removed; it never shares a header with the identity assertion, so with Authorization here set assertion-header to another header (ADR-0016 §7)"},
 	{Name: "upstream-command", Help: "stdio upstream: the command as a JSON array, e.g. [\"/usr/local/bin/server\",\"--flag\"], never run through a shell; or give it after -- on the command line (docs/how-to/stdio-upstream.md)"},
 	{Name: "upstream-env", Secret: true, Help: "stdio upstream: KEY=VALUE lines set in the environment of each upstream process, besides the inherited PATH, HOME, USER, LOGNAME, TMPDIR, TZ, LANG and LC_* (ADR-0016 §6); values are never logged"},
 	{Name: "stdio-max-processes", Default: "64", Help: "stdio upstream: most upstream processes alive at once; when full, the least recently used idle one is stopped (ADR-0003 §5)"},
@@ -39,26 +42,44 @@ var registry = []Setting{
 	{Name: "trusted-proxies", Help: "comma-separated CIDRs or addresses of reverse proxies whose X-Forwarded-For is trusted for the client address (ADR-0018 §6); empty trusts none"},
 	{Name: "oauth-rate-limits", Help: "per-minute limits per client address on OAuth endpoints, e.g. authorize=60,token=120 (ADR-0018 §8); unset endpoints keep their defaults"},
 	{Name: "internal-listen", Default: "127.0.0.1:9090", Help: "address of the internal listener for /metrics, /livez and /readyz (ADR-0018 §10); empty turns it off"},
+	{Name: "idp", Auth: true, Default: "entra", Help: "the IdP users sign in with: entra, or oidc for any OpenID Connect IdP, or one of its presets " + strings.Join(OIDCPresets, ", ") + " (ADR-0011, docs/how-to/oidc.md); the callback path is /callback/<idp>"},
 	{Name: "entra-tenant", Auth: true, Help: "Entra tenant ID (a GUID) of the IdP app"},
 	{Name: "entra-client-id", Auth: true, Help: "application (client) ID of the IdP app registration"},
 	{Name: "entra-client-secret", Auth: true, Secret: true, Help: "client secret of the IdP app"},
+	{Name: "entra-client-certificate", Auth: true, Secret: true, Help: "instead of a client secret: a PEM file with the IdP app's certificate and its unencrypted RSA private key (2048 bits or more); the certificate must be uploaded to the app registration; recommended for production (ADR-0012 §5, docs/how-to/entra-certificate.md)"},
+	{Name: "entra-federated-token-file", Auth: true, Help: "instead of a client secret: an absolute path to a file holding a federated token (a JWT from another identity provider, such as GitHub Actions or AKS workload identity) that byward sends Entra as its client assertion, re-reading the file for every token request; the app registration needs a matching federated identity credential (ADR-0012 §5, docs/how-to/real-entra-lane.md)"},
 	{Name: "entra-client-secret-expires-at", Auth: true, Help: "when the client secret expires, as a date (2027-11-06) or an RFC 3339 time; the proxy warns at startup and doctor warns from 30 days before (ADR-0012 §10)"},
+	{Name: "oidc-issuer", Auth: true, Help: "with an oidc IdP: the issuer URL, exactly as its discovery document states it (https); " + defaultIssuersHelp()},
+	{Name: "oidc-client-id", Auth: true, Help: "with an oidc IdP: the client ID of the proxy's app at the IdP"},
+	{Name: "oidc-client-secret", Auth: true, Secret: true, Help: "with an oidc IdP: the client secret; give this or BYWARD_OIDC_CLIENT_KEY_FILE"},
+	{Name: "oidc-client-key", Auth: true, Secret: true, Help: "with an oidc IdP: a PEM private key (RSA or EC P-256) for private_key_jwt instead of a secret"},
+	{Name: "oidc-client-key-id", Auth: true, Help: "with an oidc IdP: the key ID (kid) the IdP registered for BYWARD_OIDC_CLIENT_KEY_FILE"},
+	{Name: "oidc-scopes", Auth: true, Help: "with an oidc IdP: comma-separated scopes to request besides openid and the preset's"},
+	{Name: "oidc-subject-claim", Auth: true, Default: "sub", Help: "with an oidc IdP: the claim that identifies a user; one users can change (email, preferred_username, upn, name) logs a warning"},
+	{Name: "oidc-name", Auth: true, Help: "with an oidc IdP: its name on the consent page; default: the preset's name, or the issuer's host"},
 	{Name: "data-dir", Auth: true, Default: "/var/lib/byward", Help: "data directory, an absolute path; the keys, clients and store settings default to paths in it (ADR-0007 §6, docs/how-to/state.md)"},
 	{Name: "keys-dir", Auth: true, Help: "directory of sealing keys; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md)"},
 	{Name: "assertion-keys-dir", Auth: true, Help: "directory of the identity assertion's signing keys: PEM ECDSA P-256 files, each name the key ID; the key whose ID sorts last signs; needed with an HTTP upstream; default: assertion-keys in the data directory (docs/how-to/identity-assertion.md)"},
 	{Name: "assertion-header", Auth: true, Default: "Authorization", Help: "request header that carries the identity assertion to the HTTP upstream, as Bearer <JWT>; inbound copies are always removed (ADR-0016 §2)"},
+	{Name: "identity-headers", Auth: true, Default: "false", Help: "also send the HTTP upstream the user in plain headers (X-Byward-Subject, X-Byward-Client-Id, X-Byward-Principal-Type, and X-Byward-Roles, -Groups, -Email, -Email-Verified, -Name for the assertion's claims), percent-encoded; safe only when the upstream is reachable through this proxy alone (ADR-0016 §5, docs/how-to/plain-identity-headers.md)"},
+	{Name: "obo-scopes", Auth: true, Help: "On-Behalf-Of: space-separated scopes of one downstream API, e.g. https://graph.microsoft.com/User.Read; the HTTP upstream then gets a token for them in BYWARD_OBO_HEADER on every request; empty turns it off (ADR-0017, docs/how-to/downstream-apis.md)"},
+	{Name: "obo-header", Auth: true, Default: "X-Byward-Downstream-Token", Help: "On-Behalf-Of: request header that carries the downstream API token to the HTTP upstream, as Bearer <token>; inbound copies are always removed (ADR-0017 §3)"},
 	{Name: "assertion-claims", Auth: true, Default: "roles", Help: "comma-separated optional claims in the identity assertion: roles, groups, email, name; or none (ADR-0016 §1, docs/reference/identity-assertion.md)"},
+	{Name: "assertion-unverified-email", Auth: true, Bool: true, Default: "false", Help: "with email in BYWARD_ASSERTION_CLAIMS: also assert an email the IdP has not verified (Entra never verifies one), marked email_verified false; never authorize on it (docs/how-to/identity-assertion.md)"},
 	{Name: "static-clients-file", Auth: true, Help: "JSON file of pre-registered MCP clients; default: clients.json in the data directory, optional while CIMD or DCR is on; a file you name must exist (docs/reference/static-clients.md)"},
 	{Name: "gate-tenants", Auth: true, Help: "access gate: comma-separated Entra tenant IDs allowed to sign in (docs/how-to/access-gate.md)"},
 	{Name: "gate-roles", Auth: true, Help: "access gate: comma-separated app roles; users need at least one (docs/how-to/access-gate.md)"},
 	{Name: "gate-groups", Auth: true, Help: "access gate: comma-separated group IDs; users need one, and groups overage denies (docs/how-to/access-gate.md)"},
-	{Name: "gate-email-domains", Auth: true, Help: "access gate: comma-separated domains of a verified email; generic OIDC IdPs only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md)"},
-	{Name: "gate-hosted-domains", Auth: true, Help: "access gate: comma-separated Google Workspace domains (hd claim); Google only, so not usable with Entra (the only IdP so far) (docs/how-to/access-gate.md)"},
+	{Name: "gate-email-domains", Auth: true, Help: "access gate: comma-separated domains of a verified email; oidc IdPs only, never Entra (docs/how-to/access-gate.md)"},
+	{Name: "gate-hosted-domains", Auth: true, Help: "access gate: comma-separated Google Workspace domains (hd claim); BYWARD_IDP=google only; with one domain it is also sent to Google as the hd hint (docs/how-to/access-gate.md)"},
 	{Name: "dcr", Auth: true, Bool: true, Default: "true", Help: "accept Dynamic Client Registration at /register (Cursor, Gemini CLI) and advertise it; false turns it off (docs/how-to/dcr.md)"},
 	{Name: "client-denylist", Auth: true, Help: "comma-separated CIMD client IDs (https URLs) and redirect host names refused for CIMD and DCR clients (docs/how-to/dcr.md)"},
 	{Name: "cimd", Auth: true, Bool: true, Default: "true", Help: "accept MCP clients identified by a Client ID Metadata Document URL (Claude, VS Code) and advertise it; false turns it off (docs/how-to/cimd.md)"},
 	{Name: "cimd-trusted-hosts", Auth: true, Help: "comma-separated hosts whose client metadata documents you vouch for: their apps show as trusted by you on the consent page (docs/how-to/cimd.md)"},
 	{Name: "cimd-allowed-hosts", Auth: true, Help: "comma-separated hosts allowed to publish client metadata documents besides the trusted ones; empty allows any host (docs/how-to/cimd.md)"},
+	{Name: "app-tokens", Auth: true, Default: "off", Help: "accept app-only tokens from headless callers at the MCP endpoint: off, or entra (BYWARD_IDP=entra only; ADR-0022, docs/how-to/app-tokens.md)"},
+	{Name: "app-roles", Auth: true, Help: "with BYWARD_APP_TOKENS=entra, required: comma-separated app roles on the proxy's app; an app-only caller needs at least one (docs/how-to/app-tokens.md)"},
+	{Name: "app-client-ids", Auth: true, Help: "with BYWARD_APP_TOKENS=entra: comma-separated application (client) IDs allowed to call (azp); default: any caller with a role (docs/how-to/app-tokens.md)"},
 	{Name: "gate-allow-empty", Auth: true, Bool: true, Default: "false", Help: "allow an empty access gate for a Google or generic OIDC IdP (anyone with an account can sign in); no effect with Entra (docs/how-to/access-gate.md)"},
 	{Name: "operator-name", Auth: true, Help: "who runs this proxy, shown on the consent page, e.g. Contoso IT"},
 	{Name: "scope-description", Auth: true, Help: "what the scope lets an app do, in plain words for the consent page, e.g. Read and query your team's dashboards"},
@@ -75,6 +96,9 @@ type Config struct {
 	UpstreamURL *url.URL // nil for a stdio upstream
 	// UpstreamHeaderTimeout bounds the wait for the HTTP upstream's response headers.
 	UpstreamHeaderTimeout time.Duration
+	// UpstreamCredential is the operator's header value for the HTTP upstream, sent in
+	// UpstreamCredentialHeader (ADR-0016 §7); "" when there is none. Never logged.
+	UpstreamCredential, UpstreamCredentialHeader string
 	// A stdio upstream (ADR-0003): its argv, the operator env of its processes and its caps.
 	UpstreamCommand                    []string
 	UpstreamEnv                        map[string]string
@@ -97,21 +121,52 @@ type Config struct {
 	EntraTenant       string
 	EntraClientID     string
 	EntraClientSecret string
+	// EntraFederatedTokenFile replaces the client secret with a federated token, re-read on every
+	// token request (ADR-0012 §5); exactly one of it, the client secret and EntraClientCertificate is
+	// set.
+	EntraFederatedTokenFile string
+	// EntraClientCertificate is the PEM of the app's certificate and its key, the third credential
+	// form; Load checks only that it is the one set, the IdP adapter parses it.
+	EntraClientCertificate string
 	// EntraClientSecretExpiresAt is zero when the operator did not say.
 	EntraClientSecretExpiresAt time.Time
-	KeysDir                    string
+	// IdP is the IdP adapter: "entra", "oidc" or an OIDC preset (OIDCPresets); it also names the
+	// callback path (/callback/<IdP>), audit records and metrics.
+	IdP string
+	// The generic OIDC adapter (IdP other than entra; ADR-0011 §2).
+	OIDCIssuer       string
+	OIDCClientID     string
+	OIDCClientSecret string
+	OIDCClientKey    string // PEM, for private_key_jwt
+	OIDCClientKeyID  string
+	OIDCScopes       []string
+	OIDCSubjectClaim string
+	OIDCName         string
+	KeysDir          string
 	// The identity assertion for the HTTP upstream (ADR-0016): its signing keys, the header that
 	// carries it and the optional claims it asserts (a subset of AssertionClaimNames).
-	AssertionKeysDir  string
-	AssertionHeader   string
-	AssertionClaims   []string
+	AssertionKeysDir string
+	AssertionHeader  string
+	AssertionClaims  []string
+	// IdentityHeaders also sends the user in the plain IdentityHeaderNames headers (ADR-0016 §5).
+	IdentityHeaders bool
+	// AssertionUnverifiedEmail asserts an opted-in email the IdP does not vouch for, too.
+	AssertionUnverifiedEmail bool
+	// OBOScopes are the downstream API's scopes for On-Behalf-Of (ADR-0017); empty means off.
+	OBOScopes []string
+	// OBOHeader carries the downstream token to the HTTP upstream.
+	OBOHeader         string
 	StaticClientsFile string
 	// StaticClientsFileNamed: the operator set the path, so the file must exist; the default may be
 	// absent when CIMD or DCR is on.
 	StaticClientsFileNamed bool
 	// The access gate (slice 1.5, ADR-0015); validated by gate.New when the broker is wired.
 	GateTenants, GateRoles, GateGroups, GateEmailDomains, GateHostedDomains []string
-	GateAllowEmpty                                                          bool
+	// AppTokens is "entra" when the MCP endpoint accepts Entra app-only tokens, else "off"
+	// (ADR-0022); AppRoles and AppClientIDs are the app gate.
+	AppTokens              string
+	AppRoles, AppClientIDs []string
+	GateAllowEmpty         bool
 	// Consent page wording (ADR-0010 §4).
 	OperatorName     string
 	ScopeDescription string
@@ -264,19 +319,10 @@ func validate(v *Values, container bool) (*Config, error) {
 		c.Relaxations = append(c.Relaxations, "stdio upstream without authentication: anyone who can reach the proxy starts upstream processes, bounded only by BYWARD_STDIO_MAX_PROCESSES, and every process runs as the same anonymous user")
 	}
 	if !c.NoAuth {
-		c.EntraTenant, c.EntraClientID, c.EntraClientSecret = v.get("entra-tenant"), v.get("entra-client-id"), v.get("entra-client-secret")
 		c.OperatorName, c.ScopeDescription = v.get("operator-name"), v.get("scope-description")
 		errs = append(errs, checkText("operator-name", c.OperatorName, 80)...)
 		errs = append(errs, checkText("scope-description", c.ScopeDescription, 200)...)
-		for _, s := range []string{"entra-tenant", "entra-client-id", "entra-client-secret"} {
-			if v.get(s) == "" {
-				env := Setting{Name: s}.Env()
-				if s == "entra-client-secret" {
-					env += "_FILE"
-				}
-				errs = append(errs, errorf("%s is required (or set BYWARD_INSECURE_NO_AUTH to try the proxy without sign-in)", env))
-			}
-		}
+		errs = append(errs, c.idp(v)...)
 		c.GateTenants, c.GateRoles, c.GateGroups = splitList(v.get("gate-tenants")), splitList(v.get("gate-roles")), splitList(v.get("gate-groups"))
 		c.GateEmailDomains, c.GateHostedDomains = splitList(v.get("gate-email-domains")), splitList(v.get("gate-hosted-domains"))
 		// A gate list that is set but names nothing would silently open the gate.
@@ -288,6 +334,7 @@ func validate(v *Values, container bool) (*Config, error) {
 		if c.GateAllowEmpty, err = strconv.ParseBool(v.get("gate-allow-empty")); err != nil {
 			errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "gate-allow-empty"}.Env(), v.get("gate-allow-empty")))
 		}
+		errs = append(errs, c.appTokens(v)...)
 		errs = append(errs, c.paths(v)...)
 		errs = append(errs, c.refreshGrace(v)...)
 		errs = append(errs, c.assertion(v)...)
@@ -323,11 +370,12 @@ func validate(v *Values, container bool) (*Config, error) {
 				(*s.dst)[i] = strings.ToLower(h)
 			}
 		}
-		errs = append(errs, c.secretExpiry(v)...)
-		if t := c.EntraTenant; t != "" && !isGUID(t) {
-			errs = append(errs, errorf("BYWARD_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000, got %q", t))
-		}
 	}
+	errs = append(errs, c.upstreamCredential(v)...)
+	if !c.NoAuth {
+		errs = append(errs, c.onBehalfOf(v)...) // after the IdP, the assertion and the credential headers
+	}
+	errs = append(errs, c.headerClashes()...)
 	if len(errs) > 0 {
 		msgs := make([]string, 0, len(errs))
 		for _, e := range errs {
@@ -336,6 +384,190 @@ func validate(v *Values, container bool) (*Config, error) {
 		return nil, &configError{msg: strings.Join(msgs, "; ")}
 	}
 	return c, nil
+}
+
+// OIDCPresets are the IdP values that select the generic OIDC adapter with a preset (ADR-0011 §2);
+// "oidc" selects it without one.
+var OIDCPresets = []string{"google", "okta", "auth0", "keycloak"}
+
+// OIDCDefaultIssuers are the issuers of presets that have one, used when BYWARD_OIDC_ISSUER is
+// unset.
+var OIDCDefaultIssuers = map[string]string{"google": "https://accounts.google.com"}
+
+// defaultIssuersHelp lists OIDCDefaultIssuers for the settings help.
+func defaultIssuersHelp() string {
+	var parts []string
+	for _, p := range slices.Sorted(maps.Keys(OIDCDefaultIssuers)) {
+		parts = append(parts, p+" defaults to "+OIDCDefaultIssuers[p])
+	}
+	return strings.Join(parts, ", ")
+}
+
+// appTokens reads the app-only path (ADR-0022): off by default, Entra only, and never without an
+// app role to require (§4).
+func (c *Config) appTokens(v *Values) []error {
+	c.AppTokens = v.get("app-tokens")
+	env := func(n string) string { return Setting{Name: n}.Env() }
+	switch c.AppTokens {
+	case "off":
+		var set []string
+		for _, n := range []string{"app-roles", "app-client-ids"} {
+			if v.byKey[n].Source != SourceDefault {
+				set = append(set, env(n))
+			}
+		}
+		if len(set) > 0 {
+			return []error{errorf("%s set while %s=off: they configure app-only callers; set %s=entra, or remove them", strings.Join(set, ", "), env("app-tokens"), env("app-tokens"))}
+		}
+		return nil
+	case "entra":
+	default:
+		return []error{errorf("%s: want off or entra, got %q", env("app-tokens"), c.AppTokens)}
+	}
+	var errs []error
+	if c.IdP != "entra" {
+		errs = append(errs, errorf("%s=entra cannot be used with %s=%s: app-only tokens are Entra's (ADR-0022 §1); remove it, or set %s=entra", env("app-tokens"), env("idp"), c.IdP, env("idp")))
+	}
+	if c.AppRoles = splitList(v.get("app-roles")); len(c.AppRoles) == 0 {
+		errs = append(errs, errorf("%s is required with %s=entra: at least one app role, or every service principal in the tenant could call (ADR-0022 §4)", env("app-roles"), env("app-tokens")))
+	}
+	if raw := v.get("app-client-ids"); raw != "" {
+		if c.AppClientIDs = splitList(raw); len(c.AppClientIDs) == 0 {
+			errs = append(errs, errorf("%s is set but lists nothing; remove it or give at least one entry", env("app-client-ids")))
+		}
+	}
+	return errs
+}
+
+// idp reads the IdP: Entra, or the generic OIDC adapter. The two families' settings never mix: a
+// setting of the other family refuses to start, naming it and BYWARD_IDP.
+func (c *Config) idp(v *Values) []error {
+	c.IdP = v.get("idp")
+	oidc := c.IdP == "oidc" || slices.Contains(OIDCPresets, c.IdP)
+	if c.IdP != "entra" && !oidc {
+		return []error{errorf("BYWARD_IDP: want entra, oidc, %s, got %q", strings.Join(OIDCPresets, ", "), c.IdP)}
+	}
+	other := "oidc-" // the settings family that must stay unset
+	if oidc {
+		other = "entra-"
+	}
+	errs := c.mixedIdPSettings(v, other)
+	if oidc {
+		return append(errs, c.oidcIdP(v)...)
+	}
+	return append(errs, c.entraIdP(v)...)
+}
+
+// mixedIdPSettings refuses settings of the other IdP family (prefix other), named as the operator
+// set them.
+func (c *Config) mixedIdPSettings(v *Values, other string) []error {
+	var mixed []string
+	for _, n := range v.order {
+		if val := v.byKey[n]; strings.HasPrefix(n, other) && val.Source != SourceDefault {
+			name := val.Setting.Env()
+			if val.From != "" {
+				name = val.From // the env variable or flag the operator used, with its _FILE or -file suffix
+			}
+			mixed = append(mixed, name)
+		}
+	}
+	if len(mixed) == 0 {
+		return nil
+	}
+	return []error{errorf("%s cannot be used with BYWARD_IDP=%s: they configure the %s IdP; remove them, or set BYWARD_IDP to match",
+		strings.Join(mixed, ", "), c.IdP, strings.TrimSuffix(other, "-"))}
+}
+
+// requiredForIdP is an error for each named setting left empty.
+func (c *Config) requiredForIdP(v *Values, names ...string) []error {
+	var errs []error
+	for _, s := range names {
+		if v.get(s) == "" {
+			env := v.byKey[s].Setting.Env()
+			if v.byKey[s].Setting.Secret {
+				env += "_FILE"
+			}
+			errs = append(errs, errorf("%s is required with BYWARD_IDP=%s (or set BYWARD_INSECURE_NO_AUTH to try the proxy without sign-in)", env, c.IdP))
+		}
+	}
+	return errs
+}
+
+// entraIdP reads the Entra settings (ADR-0012).
+func (c *Config) entraIdP(v *Values) []error {
+	c.EntraTenant, c.EntraClientID, c.EntraClientSecret = v.get("entra-tenant"), v.get("entra-client-id"), v.get("entra-client-secret")
+	c.EntraFederatedTokenFile, c.EntraClientCertificate = v.get("entra-federated-token-file"), v.get("entra-client-certificate")
+	errs := c.requiredForIdP(v, "entra-tenant", "entra-client-id")
+	secretEnv, tokenEnv := Setting{Name: "entra-client-secret"}.Env()+"_FILE", Setting{Name: "entra-federated-token-file"}.Env()
+	certEnv := Setting{Name: "entra-client-certificate"}.Env() + "_FILE"
+	var set []string // the Entra app's credentials given: exactly one (ADR-0012 §5)
+	for env, v := range map[string]string{secretEnv: c.EntraClientSecret, tokenEnv: c.EntraFederatedTokenFile, certEnv: c.EntraClientCertificate} {
+		if v != "" {
+			set = append(set, env)
+		}
+	}
+	slices.Sort(set)
+	switch {
+	case len(set) == 0:
+		errs = append(errs, errorf("%s, %s or %s is required with BYWARD_IDP=%s (or set BYWARD_INSECURE_NO_AUTH to try the proxy without sign-in)", secretEnv, certEnv, tokenEnv, c.IdP))
+	case len(set) > 1:
+		errs = append(errs, errorf("%s are set together: Entra gets one credential, so keep only one of them", strings.Join(set, " and ")))
+	case c.EntraFederatedTokenFile != "":
+		if !filepath.IsAbs(c.EntraFederatedTokenFile) {
+			errs = append(errs, errorf("%s: want an absolute path, got %q", tokenEnv, c.EntraFederatedTokenFile))
+		}
+		if v.get("entra-client-secret-expires-at") != "" {
+			errs = append(errs, errorf("%s has no effect with %s: a federated token has no secret to expire; remove it", Setting{Name: "entra-client-secret-expires-at"}.Env(), tokenEnv))
+		}
+	case c.EntraClientCertificate != "":
+		if v.get("entra-client-secret-expires-at") != "" {
+			errs = append(errs, errorf("%s has no effect with %s: byward reads the certificate's own end date; remove it", Setting{Name: "entra-client-secret-expires-at"}.Env(), certEnv))
+		}
+	}
+	errs = append(errs, c.secretExpiry(v)...)
+	if t := c.EntraTenant; t != "" && !isGUID(t) {
+		errs = append(errs, errorf("BYWARD_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000, got %q", t))
+	}
+	return errs
+}
+
+// oidcIdP reads the generic OIDC adapter's settings (ADR-0011 §2).
+func (c *Config) oidcIdP(v *Values) []error {
+	var errs []error
+	c.OIDCIssuer, c.OIDCClientID = v.get("oidc-issuer"), v.get("oidc-client-id")
+	c.OIDCClientSecret, c.OIDCClientKey, c.OIDCClientKeyID = v.get("oidc-client-secret"), v.get("oidc-client-key"), v.get("oidc-client-key-id")
+	c.OIDCScopes, c.OIDCSubjectClaim, c.OIDCName = splitList(v.get("oidc-scopes")), v.get("oidc-subject-claim"), v.get("oidc-name")
+	if c.OIDCIssuer == "" {
+		c.OIDCIssuer = OIDCDefaultIssuers[c.IdP]
+	}
+	if c.OIDCIssuer == "" {
+		errs = append(errs, c.requiredForIdP(v, "oidc-issuer")...)
+	}
+	errs = append(errs, c.requiredForIdP(v, "oidc-client-id")...)
+	secret, key := Setting{Name: "oidc-client-secret"}.Env()+"_FILE", Setting{Name: "oidc-client-key"}.Env()+"_FILE"
+	switch {
+	case c.OIDCClientSecret == "" && c.OIDCClientKey == "":
+		// A public client would let anyone who knows the client ID start the proxy's flow at the IdP.
+		errs = append(errs, errorf("%s or %s is required with BYWARD_IDP=%s: the proxy is a confidential client", secret, key, c.IdP))
+	case c.OIDCClientSecret != "" && c.OIDCClientKey != "":
+		errs = append(errs, errorf("%s and %s are both set; give one of them", secret, key))
+	}
+	if c.OIDCClientKeyID != "" && c.OIDCClientKey == "" {
+		errs = append(errs, errorf("BYWARD_OIDC_CLIENT_KEY_ID is set without %s", key))
+	}
+	if raw := v.get("oidc-scopes"); raw != "" && len(c.OIDCScopes) == 0 {
+		errs = append(errs, errorf("BYWARD_OIDC_SCOPES is set but lists nothing; remove it or give at least one scope"))
+	}
+	for _, sc := range c.OIDCScopes {
+		if strings.ContainsAny(sc, " \\\"") {
+			errs = append(errs, errorf("BYWARD_OIDC_SCOPES: %q is not a scope", sc))
+		}
+	}
+	if strings.TrimSpace(c.OIDCSubjectClaim) == "" {
+		errs = append(errs, errorf("BYWARD_OIDC_SUBJECT_CLAIM: want a claim name, got %q", c.OIDCSubjectClaim))
+	}
+	errs = append(errs, checkText("oidc-name", c.OIDCName, 80)...)
+	return errs
 }
 
 // upstream reads the upstream: an HTTP URL or a stdio command, exactly one of them.
@@ -520,13 +752,18 @@ var reservedHeaders = map[string]bool{"Host": true, "Cookie": true, "Set-Cookie"
 // proxy relies on, and claims from AssertionClaimNames (or none).
 func (c *Config) assertion(v *Values) []error {
 	var errs []error
-	hEnv := Setting{Name: "assertion-header"}.Env()
-	c.AssertionHeader = textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(v.get("assertion-header")))
-	switch h := c.AssertionHeader; {
-	case h == "" || strings.ContainsFunc(h, func(r rune) bool { return !isTokenChar(r) }):
-		errs = append(errs, errorf("%s: want a header name such as Authorization or X-Byward-Identity, got %q", hEnv, v.get("assertion-header")))
-	case reservedHeaders[h] || strings.HasPrefix(h, "X-Forwarded-") || strings.HasPrefix(h, "Proxy-") || strings.HasPrefix(h, "Sec-") || strings.HasPrefix(h, "Access-Control-"):
-		errs = append(errs, errorf("%s: %s is a header the proxy, the transport or MCP relies on; use Authorization or a header of your own such as X-Byward-Identity", hEnv, h))
+	var err error
+	if c.AssertionHeader, err = upstreamHeader(v, "assertion-header", "X-Byward-Identity"); err != nil {
+		errs = append(errs, err)
+	}
+	ihEnv := Setting{Name: "identity-headers"}.Env()
+	if c.IdentityHeaders, err = strconv.ParseBool(v.get("identity-headers")); err != nil {
+		errs = append(errs, errorf("%s: want true or false, got %q", ihEnv, v.get("identity-headers")))
+	} else if c.IdentityHeaders && c.UpstreamCommand != nil {
+		errs = append(errs, errorf("%s is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)", ihEnv))
+	}
+	if c.AssertionUnverifiedEmail, err = strconv.ParseBool(v.get("assertion-unverified-email")); err != nil {
+		errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "assertion-unverified-email"}.Env(), v.get("assertion-unverified-email")))
 	}
 	cEnv := Setting{Name: "assertion-claims"}.Env()
 	raw := strings.TrimSpace(v.get("assertion-claims"))
@@ -548,6 +785,168 @@ func (c *Config) assertion(v *Values) []error {
 		errs = append(errs, errorf("%s is set but lists nothing; give claims, or none", cEnv))
 	}
 	return errs
+}
+
+// upstreamHeader reads a setting naming a header the proxy sets on upstream requests: a valid
+// token, and not one the proxy, the transport or MCP relies on. example is a header of the
+// operator's own to suggest.
+func upstreamHeader(v *Values, setting, example string) (string, error) {
+	env := Setting{Name: setting}.Env()
+	h := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(v.get(setting)))
+	switch {
+	case h == "" || strings.ContainsFunc(h, func(r rune) bool { return !isTokenChar(r) }):
+		return "", errorf("%s: want a header name such as Authorization or %s, got %q", env, example, v.get(setting))
+	case reservedHeaders[h] || strings.HasPrefix(h, "X-Forwarded-") || strings.HasPrefix(h, "Proxy-") || strings.HasPrefix(h, "Sec-") || strings.HasPrefix(h, "Access-Control-"):
+		return "", errorf("%s: %s is a header the proxy, the transport or MCP relies on; use Authorization or a header of your own such as %s", env, h, example)
+	}
+	return h, nil
+}
+
+// maxUpstreamCredential bounds the credential: it travels in a header on every request.
+const maxUpstreamCredential = 4 << 10
+
+// upstreamCredential reads the operator's upstream credential (ADR-0016 §7): only for an HTTP
+// upstream, a header value without control characters, in a header that is not the assertion's.
+// Errors never contain the value.
+func (c *Config) upstreamCredential(v *Values) []error {
+	fileEnv, hEnv := Setting{Name: "upstream-credential"}.Env()+"_FILE", Setting{Name: "upstream-credential-header"}.Env()
+	val, header := v.byKey["upstream-credential"], v.byKey["upstream-credential-header"]
+	if val.Source == SourceDefault {
+		if header.Source != SourceDefault {
+			return []error{errorf("%s is set, but there is no credential: set %s too, or remove it", hEnv, fileEnv)}
+		}
+		return nil
+	}
+	if c.UpstreamCommand != nil {
+		return []error{errorf("%s is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE", fileEnv)}
+	}
+	var errs []error
+	switch cred := val.Raw; {
+	case cred == "":
+		errs = append(errs, errorf("%s: the file is empty", val.From))
+	case len(cred) > maxUpstreamCredential:
+		errs = append(errs, errorf("%s: the credential is longer than %d bytes", val.From, maxUpstreamCredential))
+	case strings.ContainsFunc(cred, func(r rune) bool { return r != '\t' && (r < 0x20 || r == 0x7f) }):
+		errs = append(errs, errorf("%s: the credential must be one header value on one line, without control characters", val.From))
+	case cred != strings.TrimSpace(cred):
+		errs = append(errs, errorf("%s: the credential starts or ends with white space", val.From))
+	default:
+		c.UpstreamCredential = cred
+	}
+	h, err := upstreamHeader(v, "upstream-credential-header", "X-Api-Key")
+	if err != nil {
+		return append(errs, err)
+	}
+	c.UpstreamCredentialHeader = h
+	return errs
+}
+
+// The plain identity headers (ADR-0016 §5). Their names are fixed, and reserved even while
+// BYWARD_IDENTITY_HEADERS is off: no other setting may use them, and every inbound copy is removed.
+const (
+	HeaderSubject  = "X-Byward-Subject"
+	HeaderClientID = "X-Byward-Client-Id"
+	// HeaderPrincipalType is user, or client for an app-only caller (ADR-0022 §5).
+	HeaderPrincipalType = "X-Byward-Principal-Type"
+	HeaderRoles         = "X-Byward-Roles"
+	HeaderGroups        = "X-Byward-Groups"
+	HeaderEmail         = "X-Byward-Email"
+	// HeaderEmailVerified is "true" or "false", sent exactly when HeaderEmail is.
+	HeaderEmailVerified = "X-Byward-Email-Verified"
+	HeaderName          = "X-Byward-Name"
+)
+
+// IdentityHeaderNames are the plain identity headers.
+var IdentityHeaderNames = []string{HeaderSubject, HeaderClientID, HeaderPrincipalType, HeaderRoles, HeaderGroups, HeaderEmail, HeaderEmailVerified, HeaderName}
+
+// headerClashes refuses two purposes in one header: the identity assertion, the operator's
+// upstream credential, the On-Behalf-Of token and the plain identity headers each have their own
+// (ADR-0016 §4, §5, §7; ADR-0017 §3). The
+// relay reads "_" as "-" (invariant 16), so X_Api_Key and X-Api-Key are one header.
+func (c *Config) headerClashes() []error {
+	var errs []error
+	aEnv, cEnv := Setting{Name: "assertion-header"}.Env(), Setting{Name: "upstream-credential-header"}.Env()
+	if c.UpstreamCredentialHeader != "" && sameHeader(c.UpstreamCredentialHeader, c.AssertionHeader) {
+		errs = append(errs, errorf("%s and %s are both %s, but the credential and the identity assertion never share a header (ADR-0016 §7): set %s to a header of your own, such as X-Byward-Identity, and verify the assertion there",
+			cEnv, aEnv, c.UpstreamCredentialHeader, aEnv))
+	}
+	for _, u := range []struct{ env, header string }{{aEnv, c.AssertionHeader}, {cEnv, c.UpstreamCredentialHeader}, {Setting{Name: "obo-header"}.Env(), c.OBOHeader}} {
+		for _, plain := range IdentityHeaderNames {
+			if sameHeader(u.header, plain) {
+				errs = append(errs, errorf("%s: %s is one of the plain identity headers the proxy sets (docs/how-to/plain-identity-headers.md); use another header", u.env, u.header))
+			}
+		}
+	}
+	return errs
+}
+
+// oidcScopes are login scopes, never a downstream API's.
+var oidcScopes = map[string]bool{"openid": true, "profile": true, "email": true, "offline_access": true}
+
+// scopeSlash is the index of the "/" that ends a scope URI's API part (https://graph.microsoft.com
+// in https://graph.microsoft.com/User.Read), or -1 when s is not https:// or api://, an API and a
+// scope.
+func scopeSlash(s string) int {
+	for _, scheme := range []string{"https://", "api://"} {
+		rest, ok := strings.CutPrefix(s, scheme)
+		if !ok {
+			continue
+		}
+		// The API part needs a host and no empty segment: https:///x/y and https://a//b are typos.
+		if j := strings.LastIndex(rest, "/"); j > 0 && j < len(rest)-1 && rest[0] != '/' && !strings.Contains(rest, "//") {
+			return len(scheme) + j
+		}
+	}
+	return -1
+}
+
+// onBehalfOf reads the On-Behalf-Of settings (ADR-0017): full scope URIs of one downstream API, a
+// header of its own, and an HTTP upstream (a stdio process gets its environment once, so a
+// per-request token cannot reach it).
+func (c *Config) onBehalfOf(v *Values) []error {
+	sEnv, hEnv := Setting{Name: "obo-scopes"}.Env(), Setting{Name: "obo-header"}.Env()
+	var errs []error
+	c.OBOScopes = strings.Fields(v.get("obo-scopes"))
+	resource := ""
+	for _, s := range c.OBOScopes {
+		i := scopeSlash(s)
+		switch {
+		case oidcScopes[strings.ToLower(s)]:
+			errs = append(errs, errorf("%s: %s is a sign-in scope, not a downstream API's; give the API's scopes, e.g. https://graph.microsoft.com/User.Read", sEnv, s))
+		case i < 0:
+			errs = append(errs, errorf("%s: %q is not a scope URI such as https://graph.microsoft.com/User.Read or api://<app>/<scope>", sEnv, s))
+		case resource == "":
+			resource = s[:i]
+		case s[:i] != resource:
+			errs = append(errs, errorf("%s: %s and %s are for different APIs; Entra issues a token for one API per request", sEnv, resource, s[:i]))
+		}
+	}
+	if v.get("obo-scopes") != "" && len(c.OBOScopes) == 0 {
+		errs = append(errs, errorf("%s is set but lists nothing; give scopes, or leave it unset", sEnv))
+	}
+	if len(c.OBOScopes) > 0 && c.UpstreamCommand != nil {
+		errs = append(errs, errorf("%s: On-Behalf-Of works with an HTTP upstream only; a stdio process gets its environment once and cannot receive a per-request token (#141)", sEnv))
+	}
+	if len(c.OBOScopes) > 0 && c.IdP != "entra" {
+		errs = append(errs, errorf("%s: On-Behalf-Of is Entra's; it needs BYWARD_IDP=entra, got %s", sEnv, c.IdP))
+	}
+	h, err := upstreamHeader(v, "obo-header", "X-Byward-Downstream-Token")
+	if err != nil {
+		return append(errs, err)
+	}
+	c.OBOHeader = h
+	switch {
+	case sameHeader(h, "Authorization") || sameHeader(h, c.AssertionHeader):
+		errs = append(errs, errorf("%s: %s already carries the identity assertion or the client's token; use a header of its own such as X-Byward-Downstream-Token", hEnv, h))
+	case sameHeader(h, c.UpstreamCredentialHeader):
+		errs = append(errs, errorf("%s: %s already carries the operator's upstream credential (%s); use a header of its own such as X-Byward-Downstream-Token", hEnv, h, Setting{Name: "upstream-credential-header"}.Env()))
+	}
+	return errs
+}
+
+// sameHeader reports whether two header names reach the upstream as one.
+func sameHeader(a, b string) bool {
+	return a != "" && strings.EqualFold(strings.ReplaceAll(a, "_", "-"), strings.ReplaceAll(b, "_", "-"))
 }
 
 // isTokenChar reports whether r may appear in an HTTP header name (RFC 9110 §5.6.2).

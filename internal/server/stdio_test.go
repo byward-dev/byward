@@ -54,6 +54,12 @@ func (e *buildError) Error() string {
 // would, with users alice and bob.
 func stdioProxy(t *testing.T, env ...string) (*httptest.Server, *config.Config, *syncBuffer) {
 	t.Helper()
+	return stdioProxyRunning(t, []string{"-mcp"}, env...)
+}
+
+// stdioProxyRunning is stdioProxy with the fake upstream's flags.
+func stdioProxyRunning(t *testing.T, flags []string, env ...string) (*httptest.Server, *config.Config, *syncBuffer) {
+	t.Helper()
 	bin, err := fakeStdio()
 	if err != nil {
 		t.Fatal(err)
@@ -63,14 +69,14 @@ func stdioProxy(t *testing.T, env ...string) (*httptest.Server, *config.Config, 
 		t.Fatal(err)
 	}
 	all := append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_ENV_FILE="+envFile)
-	cfg, _, err := config.Load([]string{"--", bin, "-mcp"}, append(all, env...), os.ReadFile)
+	cfg, _, err := config.Load(append([]string{"--", bin}, flags...), append(all, env...), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}
 	logs := &syncBuffer{}
 	log := slog.New(slog.NewJSONHandler(logs, nil))
 	o := Observability{Audit: audit.New(log, nil, time.Now)}
-	up, err := newUpstream(cfg, log, o, nil)
+	up, err := newUpstream(cfg, log, o, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +96,7 @@ func stdioProxy(t *testing.T, env ...string) (*httptest.Server, *config.Config, 
 }
 
 // mcpPost sends one JSON-RPC message and returns the response and its SSE data lines.
-func mcpPost(t *testing.T, srv *httptest.Server, token, session, body string) (*http.Response, []string) {
+func mcpPost(t *testing.T, srv *httptest.Server, token, session, body string, header ...string) (*http.Response, []string) {
 	t.Helper()
 	r, _ := http.NewRequest(http.MethodPost, srv.URL+"/mcp", strings.NewReader(body))
 	r.Host = "mcp.example.com"
@@ -99,6 +105,9 @@ func mcpPost(t *testing.T, srv *httptest.Server, token, session, body string) (*
 	r.Header.Set("Accept", "application/json, text/event-stream")
 	if session != "" {
 		r.Header.Set(mcpsession.Header, session)
+	}
+	for i := 0; i+1 < len(header); i += 2 {
+		r.Header.Set(header[i], header[i+1])
 	}
 	res, err := http.DefaultClient.Do(r)
 	if err != nil {
@@ -344,5 +353,31 @@ func TestLooseUpstreamEnvFileRefusesToStartInEveryMode(t *testing.T) {
 				t.Fatalf("New = %v, want a refusal naming BYWARD_UPSTREAM_ENV_FILE", err)
 			}
 		})
+	}
+}
+
+// Invariant 13 in the modern era: each user's requests run in that user's own upstream process,
+// through the real Guard and session binding, and no token reaches it.
+func TestModernEraRequestsRunInTheUsersOwnUpstreamProcessWithNoToken(t *testing.T) {
+	srv, _, _ := stdioProxyRunning(t, []string{"-modern"})
+	env := func(token string) []string {
+		body := `{"jsonrpc":"2.0","id":1,"method":"env","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`
+		res, events := mcpPost(t, srv, token, "", body, "MCP-Protocol-Version", "2026-07-28", "Mcp-Method", "env")
+		var m struct{ Result []string }
+		if res.StatusCode != http.StatusOK || len(events) != 1 || json.Unmarshal([]byte(events[0]), &m) != nil {
+			t.Fatalf("modern env: status %d, events %q", res.StatusCode, events)
+		}
+		return m.Result
+	}
+	for token, user := range map[string]string{"tok-alice": "tid:alice", "tok-bob": "tid:bob"} {
+		got := env(token)
+		if !slices.Contains(got, "BYWARD_SUBJECT="+user) {
+			t.Fatalf("%s's modern request ran as %q", user, got)
+		}
+		for _, kv := range got {
+			if strings.Contains(kv, "tok-") {
+				t.Fatalf("a token reached the upstream process: %q", kv)
+			}
+		}
 	}
 }

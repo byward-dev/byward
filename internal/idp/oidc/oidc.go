@@ -33,8 +33,13 @@ type Config struct {
 	Scopes []string
 	// SubjectClaim is the user key claim; default `sub`.
 	SubjectClaim string
-	// HostedDomain, if set, requires the `hd` claim to equal it (Google Workspace).
+	// HostedDomain, if set, is sent as the hd hint and requires the `hd` claim to equal it (Google
+	// Workspace).
 	HostedDomain string
+	// AllowLoopbackHTTP accepts an http issuer on a loopback host, and http endpoints on loopback
+	// for it: development mode only. Otherwise the issuer and every discovered endpoint are https.
+	// Private addresses are fine either way: the IdP is the operator's, not client-supplied.
+	AllowLoopbackHTTP bool
 	// HTTPClient defaults to idp.NewHTTPClient.
 	HTTPClient *http.Client
 	Now        func() time.Time
@@ -78,7 +83,7 @@ func New(cfg Config) (*Provider, error) {
 	if cfg.Issuer == "" || cfg.ClientID == "" || cfg.RedirectURL == "" {
 		return nil, errors.New("oidc: issuer, client ID and redirect URL are required")
 	}
-	if err := checkURL(cfg.Issuer, cfg.Issuer); err != nil {
+	if err := checkURL(cfg.Issuer, cfg.Issuer, cfg.AllowLoopbackHTTP); err != nil {
 		return nil, fmt.Errorf("oidc: issuer: %w", err)
 	}
 	if preset.CheckIssuer != nil {
@@ -127,7 +132,7 @@ func (p *Provider) discover(ctx context.Context) (*metadata, error) {
 			Err: fmt.Errorf("oidc discovery: issuer %q does not match configured %q", m.Issuer, p.cfg.Issuer)}
 	}
 	for _, e := range []string{m.AuthorizationEndpoint, m.TokenEndpoint, m.JWKSURI} {
-		if err := checkURL(e, p.cfg.Issuer); err != nil {
+		if err := checkURL(e, p.cfg.Issuer, p.cfg.AllowLoopbackHTTP); err != nil {
 			return nil, &idp.Error{Class: idp.Fatal, Err: fmt.Errorf("oidc discovery: endpoint: %w", err)}
 		}
 	}
@@ -140,8 +145,9 @@ func (p *Provider) discover(ctx context.Context) (*metadata, error) {
 	return p.meta, nil
 }
 
-// checkURL requires https, except http on a loopback host when the issuer itself is loopback http.
-func checkURL(raw, issuer string) error {
+// checkURL requires https, except, when allowed (development mode), http on a loopback host when
+// the issuer itself is loopback http.
+func checkURL(raw, issuer string, allowLoopbackHTTP bool) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
 		return fmt.Errorf("%q is not an absolute URL", raw)
@@ -150,7 +156,7 @@ func checkURL(raw, issuer string) error {
 		return nil
 	}
 	iu, _ := url.Parse(issuer)
-	if u.Scheme == "http" && iu != nil && iu.Scheme == "http" && loopback(u.Hostname()) && loopback(iu.Hostname()) {
+	if allowLoopbackHTTP && u.Scheme == "http" && iu != nil && iu.Scheme == "http" && loopback(u.Hostname()) && loopback(iu.Hostname()) {
 		return nil
 	}
 	return fmt.Errorf("%q must use https", raw)
@@ -163,6 +169,9 @@ func loopback(host string) bool {
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
 }
+
+// Scope is the scope parameter sent to the IdP, for the consent page's technical details.
+func (p *Provider) Scope() string { return strings.Join(p.scopes(), " ") }
 
 func (p *Provider) scopes() []string {
 	s := append([]string{"openid"}, p.preset.Scopes...)
@@ -199,8 +208,18 @@ func (p *Provider) AuthCodeURL(ctx context.Context, l idp.Login) (string, error)
 	if l.LoginHint != "" {
 		q.Set("login_hint", l.LoginHint)
 	}
-	if l.SelectAccount {
-		q.Set("prompt", "select_account")
+	if p.cfg.HostedDomain != "" {
+		// Google shows only that Workspace's accounts; the hd claim is still checked at the callback.
+		q.Set("hd", p.cfg.HostedDomain)
+	}
+	switch {
+	case l.Silent:
+		// none must stand alone (OIDC Core §3.1.2.1), so it replaces the preset's prompt too: a
+		// silent Google sign-in may then get no new refresh token, and its grant cannot refresh.
+		q.Set("prompt", "none")
+	case l.SelectAccount:
+		// prompt is a space-separated list (OIDC Core §3.1.2.1): keep the preset's values.
+		q.Set("prompt", strings.TrimSpace(q.Get("prompt")+" select_account"))
 	}
 	u, err := url.Parse(m.AuthorizationEndpoint)
 	if err != nil {
@@ -279,7 +298,7 @@ func (p *Provider) Refresh(ctx context.Context, refreshToken string) (*idp.Ident
 func (p *Provider) token(ctx context.Context, m *metadata, form url.Values) (*idp.TokenResponse, error) {
 	if p.cfg.ClientAuth != nil {
 		if err := p.cfg.ClientAuth.Apply(form, p.cfg.ClientID, m.TokenEndpoint, p.cfg.Now()); err != nil {
-			return nil, &idp.Error{Class: idp.Unavailable, Alert: true, Err: err}
+			return nil, &idp.Error{Class: idp.Unavailable, Alert: true, Err: fmt.Errorf("%w: %w", idp.ErrCredential, err)}
 		}
 	} else {
 		form.Set("client_id", p.cfg.ClientID)

@@ -162,9 +162,9 @@ func TestRevokeCommandsExit2OnMisuse1OnAStoreFailureAndReportTheRevokedUser(t *t
 		wantStdout string // "" means nothing at all
 		inStderr   string
 	}{
-		{"revoke-user without a key", []string{"revoke-user"}, false, exitConfig, "", "usage: byward revoke-user <tid:oid>"},
+		{"revoke-user without a key", []string{"revoke-user"}, false, exitConfig, "", "usage: byward revoke-user <user key>"},
 		{"revoke-user with two keys", []string{"revoke-user", user, user}, false, exitConfig, "", "usage:"},
-		{"revoke-user with an email", []string{"revoke-user", "alice@contoso.com"}, false, exitConfig, "", "not a user key"},
+		{"revoke-user with an email", []string{"revoke-user", "alice@contoso.example"}, false, exitConfig, "", "not a user key"},
 		{"revoke-all without --yes", []string{"revoke-all"}, false, exitConfig, "", "revoke-all --yes"},
 		{"revoke-all with yes instead of --yes", []string{"revoke-all", "yes"}, false, exitConfig, "", "revoke-all --yes"},
 		{"revoke-all with --yes and more", []string{"revoke-all", "--yes", "extra"}, false, exitConfig, "", "revoke-all --yes"},
@@ -201,7 +201,7 @@ func TestRevokeCommandsExit2OnMisuse1OnAStoreFailureAndReportTheRevokedUser(t *t
 
 func TestHelpListsTheOperatorCommands(t *testing.T) {
 	code, stdout, _ := runWith([]string{"--help"})
-	if code != exitOK || !strings.Contains(stdout, "byward revoke-user <tid:oid>") || !strings.Contains(stdout, "byward revoke-all --yes") {
+	if code != exitOK || !strings.Contains(stdout, "byward revoke-user <user key>") || !strings.Contains(stdout, "byward revoke-all --yes") {
 		t.Fatalf("code=%d help=%q", code, stdout)
 	}
 }

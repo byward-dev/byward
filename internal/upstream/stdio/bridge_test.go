@@ -102,7 +102,11 @@ type events struct {
 func eventsOf(t *testing.T, res *http.Response) *events {
 	t.Helper()
 	if ct := res.Header.Get("Content-Type"); ct != "text/event-stream" {
-		t.Fatalf("Content-Type = %q, want text/event-stream", ct)
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+		t.Fatalf("Content-Type = %q, want text/event-stream; status %d, body %q", ct, res.StatusCode, body)
+	}
+	if v := res.Header.Get("X-Accel-Buffering"); v != "no" {
+		t.Fatalf("X-Accel-Buffering = %q, want no: a buffering reverse proxy would hold the stream back", v)
 	}
 	e := &events{t: t, ch: make(chan string, 64)}
 	go func() {
@@ -182,7 +186,7 @@ func TestPostWithoutAnMCPSessionOtherThanInitializeIs400AndStartsNoUpstreamProce
 	b := newBridge(t, nil)
 	for name, body := range map[string]string{
 		"legacy request":               `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
-		"modern request":               `{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`,
+		"older protocol version":       `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2025-06-18"}}}`,
 		"notification":                 `{"jsonrpc":"2.0","method":"notifications/initialized"}`,
 		"initialize as a notification": `{"jsonrpc":"2.0","method":"initialize"}`,
 	} {
@@ -206,16 +210,19 @@ func TestMalformedPostsAre400AndStartNothing(t *testing.T) {
 		body string
 		code int
 	}{
-		"batch":            {`[` + initialize + `]`, codeInvalidRequest},
-		"not JSON":         {`{"jsonrpc":`, codeParseError},
-		"not object":       {`"initialize"`, codeParseError},
-		"empty":            {``, codeParseError},
-		"no method":        {`{"jsonrpc":"2.0","id":1}`, codeInvalidRequest},
-		"null response id": {`{"jsonrpc":"2.0","id":null,"result":{}}`, codeInvalidRequest},
-		"null request id":  {`{"jsonrpc":"2.0","id":null,"method":"initialize"}`, codeInvalidRequest},
-		"boolean id":       {`{"jsonrpc":"2.0","id":true,"method":"initialize"}`, codeInvalidRequest},
-		"fractional id":    {`{"jsonrpc":"2.0","id":1.5,"method":"initialize"}`, codeInvalidRequest},
-		"object id":        {`{"jsonrpc":"2.0","id":{},"method":"initialize"}`, codeInvalidRequest},
+		"batch":                            {`[` + initialize + `]`, codeInvalidRequest},
+		"not JSON":                         {`{"jsonrpc":`, codeParseError},
+		"not object":                       {`"initialize"`, codeParseError},
+		"empty":                            {``, codeParseError},
+		"no method":                        {`{"jsonrpc":"2.0","id":1}`, codeInvalidRequest},
+		"null response id":                 {`{"jsonrpc":"2.0","id":null,"result":{}}`, codeInvalidRequest},
+		"null request id":                  {`{"jsonrpc":"2.0","id":null,"method":"initialize"}`, codeInvalidRequest},
+		"boolean id":                       {`{"jsonrpc":"2.0","id":true,"method":"initialize"}`, codeInvalidRequest},
+		"fractional id":                    {`{"jsonrpc":"2.0","id":1.5,"method":"initialize"}`, codeInvalidRequest},
+		"object id":                        {`{"jsonrpc":"2.0","id":{},"method":"initialize"}`, codeInvalidRequest},
+		"method repeated, initialize last": {`{"jsonrpc":"2.0","id":1,"method":"tools/call","method":"initialize"}`, codeInvalidRequest},
+		"method also in another case, initialize last": {`{"jsonrpc":"2.0","id":1,"method":"tools/call","METHOD":"initialize"}`, codeInvalidRequest},
+		"another top-level key repeated":               {`{"jsonrpc":"2.0","jsonrpc":"2.0","id":1,"method":"initialize"}`, codeInvalidRequest},
 	} {
 		t.Run(name, func(t *testing.T) {
 			res := b.post(t, "alice", "", tc.body)
@@ -227,6 +234,24 @@ func TestMalformedPostsAre400AndStartNothing(t *testing.T) {
 	}
 	if b.m.Len() != 0 {
 		t.Fatalf("Len = %d, want 0", b.m.Len())
+	}
+}
+
+func TestAmbiguousNotificationsAndResponsesInASessionAreRefused(t *testing.T) {
+	// In a session these would be relayed (202) if the ambiguity were not caught for every kind.
+	b := newBridge(t, nil)
+	session := b.initialize(t, "alice")
+	for name, body := range map[string]string{
+		"notification with the method also in another case": `{"jsonrpc":"2.0","method":"notifications/x","METHOD":"notifications/y"}`,
+		"response with a top-level key repeated":            `{"jsonrpc":"2.0","id":1,"result":{},"result":{"a":1}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			res := b.post(t, "alice", session, body)
+			raw, _ := io.ReadAll(res.Body)
+			if res.StatusCode != http.StatusBadRequest || rpcErrorCode(t, raw) != codeInvalidRequest || !strings.Contains(string(raw), "ambiguous") {
+				t.Fatalf("status %d, body %s; want 400 -32600 naming the ambiguity", res.StatusCode, raw)
+			}
+		})
 	}
 }
 
@@ -624,10 +649,10 @@ func TestMissingOrDuplicateMCPSessionHeadersAndUnsupportedMethodsStartNoProcess(
 		want     int
 		allow    string // the Allow header expected; only a 405 lists the methods
 	}{
-		"two session headers":    {http.MethodPost, []string{s, s}, http.StatusBadRequest, ""},
-		"GET without session":    {http.MethodGet, nil, http.StatusBadRequest, ""},
-		"DELETE without session": {http.MethodDelete, nil, http.StatusBadRequest, ""},
-		"PUT":                    {http.MethodPut, []string{s}, http.StatusMethodNotAllowed, "GET, POST, DELETE"},
+		"two MCP session headers":                      {http.MethodPost, []string{s, s}, http.StatusBadRequest, ""},
+		"GET without an MCP session is not allowed":    {http.MethodGet, nil, http.StatusMethodNotAllowed, "POST"},
+		"DELETE without an MCP session is not allowed": {http.MethodDelete, nil, http.StatusMethodNotAllowed, "POST"},
+		"PUT": {http.MethodPut, []string{s}, http.StatusMethodNotAllowed, "GET, POST, DELETE"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			req, _ := http.NewRequest(tc.method, b.srv.URL, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"echo","params":{}}`))

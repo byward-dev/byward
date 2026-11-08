@@ -38,7 +38,9 @@ const (
 // Prefixes make tokens recognisable to secret scanners and reject foreign strings before any
 // cryptography (ADR-0006 §8). The prefix is not a security boundary: the type is also sealed.
 const (
-	AccessPrefix  = "byw_at_"
+	// Prefix starts every sealed token; the MCP endpoint dispatches on it (ADR-0022 §2).
+	Prefix        = "byw_"
+	AccessPrefix  = Prefix + "at_"
 	CodePrefix    = "byw_ac_"
 	RefreshPrefix = "byw_rt_"
 )
@@ -79,19 +81,22 @@ type Claims struct {
 	// The identity claims asserted to the upstream: whatever of these the operator opted in to.
 	Roles, Groups []string
 	Email, Name   string
+	// EmailVerified: the IdP vouches for Email.
+	EmailVerified bool
 }
 
 // wireClaims is the sealed JSON; short names keep tokens small.
 type wireClaims struct {
-	GrantID   string   `json:"gid"`
-	Subject   string   `json:"sub"`
-	IssuedAt  int64    `json:"iat"`
-	ExpiresAt int64    `json:"exp"`
-	ClientID  string   `json:"cid,omitempty"`
-	Roles     []string `json:"rol,omitempty"`
-	Groups    []string `json:"grp,omitempty"`
-	Email     string   `json:"eml,omitempty"`
-	Name      string   `json:"nam,omitempty"`
+	GrantID       string   `json:"gid"`
+	Subject       string   `json:"sub"`
+	IssuedAt      int64    `json:"iat"`
+	ExpiresAt     int64    `json:"exp"`
+	ClientID      string   `json:"cid,omitempty"`
+	Roles         []string `json:"rol,omitempty"`
+	Groups        []string `json:"grp,omitempty"`
+	Email         string   `json:"eml,omitempty"`
+	EmailVerified bool     `json:"emv,omitempty"`
+	Name          string   `json:"nam,omitempty"`
 }
 
 // ErrTooLong is returned by Seal when the claims do not fit in MaxLen.
@@ -132,7 +137,7 @@ func (s *Sealer) Seal(t Type, c Claims) (string, error) {
 		return "", err
 	}
 	plain, err := json.Marshal(wireClaims{GrantID: c.GrantID, Subject: c.Subject, IssuedAt: c.IssuedAt.Unix(), ExpiresAt: c.ExpiresAt.Unix(),
-		ClientID: c.ClientID, Roles: c.Roles, Groups: c.Groups, Email: c.Email, Name: c.Name})
+		ClientID: c.ClientID, Roles: c.Roles, Groups: c.Groups, Email: c.Email, EmailVerified: c.EmailVerified, Name: c.Name})
 	if err != nil {
 		return "", err
 	}
@@ -191,7 +196,7 @@ func (s *Sealer) Open(t Type, tok string) (Claims, error) {
 		return Claims{}, errClaims
 	}
 	c := Claims{GrantID: w.GrantID, Subject: w.Subject, IssuedAt: time.Unix(w.IssuedAt, 0), ExpiresAt: time.Unix(w.ExpiresAt, 0),
-		ClientID: w.ClientID, Roles: w.Roles, Groups: w.Groups, Email: w.Email, Name: w.Name}
+		ClientID: w.ClientID, Roles: w.Roles, Groups: w.Groups, Email: w.Email, EmailVerified: w.EmailVerified, Name: w.Name}
 	if err := c.validate(t); err != nil {
 		return Claims{}, err
 	}

@@ -7,8 +7,13 @@ with byward's public keys. Decisions: [ADR-0016](../adr/0016-identity-propagatio
 and verification examples for go-sdk, the TypeScript SDK and FastMCP are in the
 [identity assertion reference](../reference/identity-assertion.md).
 
+Every assertion says what kind of principal it is for: `principal_type` is `user`, or `client` for
+a headless caller with an [app-only token](app-tokens.md). Check it before treating `sub` as a
+person.
+
 A stdio upstream gets no assertion. Each user has their own process, started with
-`BYWARD_SUBJECT` and `BYWARD_ISSUER` in its environment ([stdio upstream](stdio-upstream.md)).
+`BYWARD_SUBJECT`, `BYWARD_ISSUER` and `BYWARD_PRINCIPAL_TYPE` in its environment
+([stdio upstream](stdio-upstream.md)).
 
 ## 1. Create a signing key
 
@@ -53,11 +58,26 @@ verifier that expects anything else refuses every request. The issuer is byward'
 |---|---|---|
 | `BYWARD_ASSERTION_HEADER` | `Authorization` | the header that carries `Bearer <assertion>` |
 | `BYWARD_ASSERTION_CLAIMS` | `roles` | optional claims to add: `roles`, `groups`, `email`, `name`, or `none` |
+| `BYWARD_ASSERTION_UNVERIFIED_EMAIL` | `false` | with `email`: also assert an email the IdP has not verified, marked `email_verified: false` |
 
 - byward removes every copy of the assertion header a client sends, in any spelling (`_` for `-`
   included), before setting its own. A client can never supply the assertion.
 - The client's own token is never forwarded, whichever header you choose.
+- An upstream that cannot verify a JWT can read the same values from plain `X-Byward-*` headers, but
+  only behind a network boundary ([plain identity headers](plain-identity-headers.md)).
+- If the upstream also needs the proxy's own credential in `Authorization`, move the assertion to
+  another header ([upstream credential](upstream-credential.md)).
 - `email` and `name` are personal data (ADR-0021 §4): add them only when the upstream needs them.
+- `email` is asserted only when the IdP vouched for it: an [OIDC IdP](oidc.md)'s ID token said
+  `email_verified: true`. Otherwise it is left out, and every start logs that it is. `email_verified`
+  comes with every asserted `email` (ADR-0016, 2026-11-07 amendment).
+- Entra never verifies an email (ADR-0012 §3), so with Entra `email` asserts nothing unless you also
+  set `BYWARD_ASSERTION_UNVERIFIED_EMAIL=true`. That asserts any IdP's unverified email, marked
+  `email_verified: false`.
+- Even a verified email is a display value: it can change, and it is not a unique identifier (OIDC
+  Core §5.7; Microsoft: "Never use it for authorization"). Never authorize on it; use `sub`.
+- `sub` is the user key: `tid:oid` with Entra, the IdP's subject claim (`BYWARD_OIDC_SUBJECT_CLAIM`)
+  with an OIDC IdP. The issuer is always byward's, whichever IdP signed the user in.
 - `groups` can be large. With 200 groups, Entra's limit, a client's proxy token is about 11 KB;
   with roles only it stays under 1 KB. Groups that do not fit a token at all are left out with a
   warning in the log, and an Entra user over 200 groups has none asserted (groups overage).

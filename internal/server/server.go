@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -108,12 +109,17 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 		if a, err = buildAuth(cfg, log, o); err != nil {
 			return nil, err
 		}
+	} else if err := errors.Join(looseSecretFiles(cfg)...); err != nil {
+		// buildAuth checks every secret file; without authentication this is the check: the stdio
+		// upstream's env file, or the HTTP upstream's credential.
+		return nil, err
 	}
 	var minter *assertion.Minter
+	var down *downstreamTokens
 	if a != nil {
-		minter = a.minter
+		minter, down = a.minter, a.downstream
 	}
-	up, err := newUpstream(cfg, log, o, minter)
+	up, err := newUpstream(cfg, log, o, minter, down)
 	if err != nil {
 		if a != nil {
 			_ = a.closeStore()
@@ -179,7 +185,9 @@ func admit(maxRequests, maxStreams int, m *metrics.Metrics, next http.Handler) h
 	requests, streams := make(chan struct{}, maxRequests), make(chan struct{}, maxStreams)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sem, kind := requests, "request"
-		if r.Method == http.MethodGet {
+		// A legacy GET stream and a modern subscriptions/listen are both long-lived: neither may use
+		// up tool-call slots. A mislabelled request only moves itself to the stream cap.
+		if r.Method == http.MethodGet || r.Header.Get("Mcp-Method") == "subscriptions/listen" {
 			sem, kind = streams, "stream"
 		}
 		select {

@@ -51,6 +51,12 @@ admin grants tenant-wide consent, and labels unverified publishers "Unverified".
    callback the IdP sign-in is discarded (no grant, no code) and the page is shown for the same
    request, so Allow leads to a new IdP sign-in. Every revocation forgets in the same transaction
    as the grants. Only `prompt=consent` is honoured; `prompt=none` is #126.
+   _Clarified 2026-11-07 (#126):_ `prompt=none` never shows the page. With a hint and a live
+   consent it signs in with the IdP's own `prompt=none`. Otherwise the client gets
+   `consent_required` (a client asked every time, no consent, or another user behind the hint after
+   the callback) or `login_required` (no hint: the user is unknown, and §1 keeps the IdP out until
+   consent is established), and the IdP's own silent errors pass through. A silent IdP round trip
+   without a hint is left for later, if a real client needs it.
 4. **The page shows:** the client name with its trust level (control characters stripped, 80
    characters), the CIMD host, the redirect host (loopback: "an app on this computer" plus a warning;
    punycode beside Unicode; a warning if it differs from the CIMD host), the upstream, the IdP ("You'll

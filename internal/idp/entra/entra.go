@@ -164,7 +164,10 @@ func (p *Provider) AuthCodeURL(ctx context.Context, l idp.Login) (string, error)
 	if l.DomainHint != "" {
 		q.Set("domain_hint", l.DomainHint)
 	}
-	if l.SelectAccount {
+	switch {
+	case l.Silent:
+		q.Set("prompt", "none")
+	case l.SelectAccount:
 		q.Set("prompt", "select_account")
 	}
 	return p.endpoint("/oauth2/v2.0/authorize") + "?" + q.Encode(), nil
@@ -238,9 +241,15 @@ func (p *Provider) Refresh(ctx context.Context, refreshToken string) (*idp.Ident
 }
 
 func (p *Provider) token(ctx context.Context, form url.Values) (*idp.TokenResponse, error) {
-	tokenURL := p.endpoint("/oauth2/v2.0/token")
+	return p.tokenAt(ctx, p.cfg.Tenant, form)
+}
+
+// tokenAt posts form to the token endpoint of tenant (the configured one, or a user's own for
+// On-Behalf-Of).
+func (p *Provider) tokenAt(ctx context.Context, tenant string, form url.Values) (*idp.TokenResponse, error) {
+	tokenURL := Authority + "/" + tenant + "/oauth2/v2.0/token"
 	if err := p.cfg.ClientAuth.Apply(form, p.cfg.ClientID, tokenURL, p.cfg.Now()); err != nil {
-		return nil, &idp.Error{Class: idp.Unavailable, Alert: true, Err: err}
+		return nil, &idp.Error{Class: idp.Unavailable, Alert: true, Err: fmt.Errorf("%w: %w", idp.ErrCredential, err)}
 	}
 	header := http.Header{}
 	if id := idp.RequestID(ctx); isGUID(id) {

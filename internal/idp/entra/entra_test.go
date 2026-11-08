@@ -498,7 +498,7 @@ func TestUserKeyAcceptsTidOidInAnyCaseAndRefusesTheRest(t *testing.T) {
 		{"upper case", strings.ToUpper(tid + ":" + oid), tid + ":" + oid},
 		{"surrounding spaces", "  " + tid + ":" + oid + "\n", tid + ":" + oid},
 		{"empty", "", ""},
-		{"an email", "alice@contoso.com", ""},
+		{"an email", "alice@contoso.example", ""},
 		{"no colon", tid + oid, ""},
 		{"one GUID", oid, ""},
 		{"an extra segment", tid + ":" + oid + ":x", ""},
@@ -511,5 +511,20 @@ func TestUserKeyAcceptsTidOidInAnyCaseAndRefusesTheRest(t *testing.T) {
 				t.Fatalf("UserKey(%q) = %q, %v; want %q", tc.in, got, ok, tc.want)
 			}
 		})
+	}
+}
+
+// Silent sends prompt=none, and wins over SelectAccount: a silent sign-in must never show a page.
+func TestASilentLoginAsksTheIdPWithPromptNoneEvenWhenAccountSelectionIsAsked(t *testing.T) {
+	e := newEnv(t, Config{})
+	l := login
+	l.Silent, l.SelectAccount = true, true
+	raw, err := e.p.AuthCodeURL(context.Background(), l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(raw)
+	if got := u.Query()["prompt"]; len(got) != 1 || got[0] != "none" {
+		t.Fatalf("prompt = %q, want only none", got)
 	}
 }

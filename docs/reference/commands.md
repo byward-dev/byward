@@ -11,7 +11,7 @@ after `--`, as for the proxy (`byward check --offline -- /usr/local/bin/server -
 | `byward check --offline [-- <command>]` | validates the configuration as the proxy does at startup | none | 0, 2 |
 | `byward doctor [--json] [-- <command>]` | probes the running proxy as MCP clients do, and the IdP app | the public URL and Entra | 0, 2, 4, 8, 12 |
 | `byward init entra --tenant <id>` | prints the `az` commands for the Entra app registration and a minimal env file | none | 0, 2 |
-| `byward revoke-user <tid:oid>` | ends one user's access ([hardening](../how-to/harden-a-deployment.md)) | the store | 0, 1, 2 |
+| `byward revoke-user <user key>` | ends one user's access ([hardening](../how-to/harden-a-deployment.md)) | the store | 0, 1, 2 |
 | `byward revoke-all --yes` | ends every user's access ([hardening](../how-to/harden-a-deployment.md)) | the store | 0, 1, 2 |
 | `byward jwks` | prints the identity assertion's public keys as a JWKS, for an upstream that loads them from a file ([identity assertion](../how-to/identity-assertion.md)) | none | 0, 2 |
 
@@ -24,7 +24,9 @@ Checks everything the proxy checks at startup that needs no network and writes n
 
 - the settings (unknown names, values, required settings);
 - the sealing keys and the static clients file (optional while CIMD or DCR is on);
-- the Entra settings and the access gate;
+- the Entra settings and the access gate, and the Entra client certificate file if there is one
+  (an RSA key of 2048 bits or more, its certificate; an expired certificate is a configuration
+  error);
 - the secret files' permissions, as at startup (relaxed with `--dev`);
 - a stdio upstream's command (`BYWARD_UPSTREAM_COMMAND` or the command after `--`): it must be found
   and executable, as at startup; it is never started;
@@ -32,7 +34,7 @@ Checks everything the proxy checks at startup that needs no network and writes n
   startup), and the counter file's directory must exist (it is not created). Nothing is created.
 
 It prints the warnings the proxy would log at startup (an empty access gate, generic consent
-wording, a client secret that expires within 30 days), then `configuration OK`. A problem is a
+wording, a client secret or client certificate that expires within 30 days), then `configuration OK`. A problem is a
 configuration error on standard error, exit code 2. `check` without `--offline` is refused, so that a
 script written today keeps meaning the same thing.
 
@@ -66,10 +68,11 @@ fail  idp    entra app and credential: Entra rejected the client secret (AADSTS7
 | `idp` | entra signing keys | the tenant's key set has a signing key |
 | `idp` | entra app and credential | a client-credentials request for `api://<client-id>/.default` succeeds: Entra accepted the tenant, the client ID and the secret. Needs no app permission. |
 | `idp` | entra access token | that token verifies, is version 2.0 (`requestedAccessTokenVersion: 2`) and has `aud` = the client ID |
-| `idp` | entra idtyp claim | the token carries `idtyp=app` (a warning otherwise: app-only callers need it, ADR-0022) |
+| `idp` | entra idtyp claim | the token carries `idtyp=app` (otherwise a warning, or a failure while `BYWARD_APP_TOKENS=entra`: app-only callers need it, ADR-0022) |
 | `idp` | entra redirect URI | always a skip: only Microsoft Graph can read it. The fix is the `az ad app show` command that checks it; a wrong redirect URI fails the first sign-in with AADSTS50011 |
-| `idp` | entra app roles | always a skip, for the same reason; the fix lists the access gate's roles the app must define |
+| `idp` | entra app roles | always a skip, for the same reason; the fix lists the access gate's roles the app must define, and the app roles for app-only callers (`BYWARD_APP_ROLES`) |
 | `idp` | client secret expiry | `BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT` is more than 30 days away (a warning at 30 days or less, a failure once passed, a skip when unset) |
+| `idp` | client certificate expiry | with `BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE` instead of a secret: the certificate's own end date is more than 30 days away (a warning at 30 days or less, a failure once passed) |
 
 With assignment required on the app (as `init entra` sets it, and
 [hardening](../how-to/harden-a-deployment.md) recommends), Entra answers the client-credentials request
@@ -129,7 +132,7 @@ One JSON document on standard output, the checks in the order they ran. Fields a
 ## `byward init entra`
 
 ```sh
-byward init entra --tenant <tenant-id> [--public-url <url>] [--upstream-url <url>] [--secret-years 1|2] > byward-entra.sh
+byward init entra --tenant <tenant-id> [--public-url <url>] [--upstream-url <url>] [--secret-years 1|2] [--credential secret|certificate] > byward-entra.sh
 ```
 
 Prints a shell script; byward runs none of it, calls no API and never sees the client secret.
@@ -147,11 +150,15 @@ the script stops if `az` is signed in elsewhere). It follows
 4. the service principal, with **assignment required**: only users, groups and applications you
    assign can sign in;
 5. a client secret (`--append` keeps existing credentials; at most two years), written straight to
-   the `0600` file `entra-client-secret`;
+   the `0600` file `entra-client-secret`; or, with `--credential certificate`, an RSA 2048 key and a
+   self-signed certificate valid for `--secret-years` years, made locally with `openssl`, written together to the `0600` file
+   `entra-client-certificate.pem`, with only the public certificate uploaded
+   ([certificate how-to](../how-to/entra-certificate.md));
 6. `byward.env` (`0600`): `BYWARD_PUBLIC_URL`, `BYWARD_UPSTREAM_URL`, `BYWARD_ENTRA_TENANT`,
    `BYWARD_ENTRA_CLIENT_ID`, `BYWARD_ENTRA_CLIENT_SECRET_FILE`, and
    `BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT` (the date `--secret-years` from today, so the expiry
-   warning works from the first start). Without an upstream URL, `BYWARD_UPSTREAM_URL` is left empty
+   warning works from the first start); with a certificate, `BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE`
+   instead of both (byward reads the certificate's own end date). Without an upstream URL, `BYWARD_UPSTREAM_URL` is left empty
    for you to fill in.
 
 Each run creates a new app registration. Afterwards, assign users or groups to the enterprise

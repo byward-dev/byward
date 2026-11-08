@@ -51,6 +51,12 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) ยง1โ
       a separate directory, `BYWARD_ASSERTION_KEYS_DIR`, mode `0700`, one PEM P-256 file per key,
       `0600` and owned by the proxy's user. Unlike sealing keys, a key file other users can read is
       refused, unless it is on a read-only mount.
+- [ ] Leave `BYWARD_IDENTITY_HEADERS` off unless the upstream cannot verify a JWT. If you turn it
+      on, make sure the upstream is reachable through the proxy alone, and run `byward doctor`
+      ([plain identity headers](plain-identity-headers.md)).
+- [ ] If the upstream needs the proxy's own credential, give it in `BYWARD_UPSTREAM_CREDENTIAL_FILE`,
+      `0600` and owned by the proxy's user, never inline; it and the assertion use separate headers
+      ([upstream credential](upstream-credential.md)).
 - [ ] Configure the upstream's verifier with the audience `BYWARD_UPSTREAM_URL` exactly, and with
       the JWKS of the internal listener if it cannot reach the public one
       ([reference](../reference/identity-assertion.md#verifying)).
@@ -68,9 +74,12 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) ยง1โ
 - [ ] Know the operator revocation commands. They read the same `BYWARD_*` environment as the
       proxy (run them in its container or with its settings), write to the same store while it
       runs, and every proxy refuses the tokens within seconds (the deny list resyncs every 5 s):
-      - `byward revoke-user <tid:oid>` ends one user's access: their grants are deleted, so their
+      - `byward revoke-user <user key>` ends one user's access: their grants are deleted, so their
         refresh tokens stop at once, and their access tokens are refused. The key is the
-        `user_key` of the audit stream; the Entra portal's tenant and object IDs in either case.
+        `user_key` of the audit stream: with Entra `tid:oid`, the portal's tenant and object IDs
+        in either case; with an oidc IdP the value of its subject claim, exactly. An
+        [app-only caller](app-tokens.md)'s key is its service principal's `tid:oid`: its tokens
+        issued before the revocation are refused.
       - `byward revoke-all --yes` does the same for every user (incident response).
       - Each writes a `grant_revoked` audit record with the reason `operator revoke-user` or
         `operator revoke-all`. A user who still passes the access gate can sign in again; to keep
@@ -78,8 +87,12 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) ยง1โ
       - If the sealing keys may be compromised, also replace every key file and restart: that
         invalidates every token at once, whatever the store holds.
 - [ ] Give secrets only as files:
-      - the Entra client secret through `BYWARD_ENTRA_CLIENT_SECRET_FILE` (or
-        `--entra-client-secret-file`);
+      - the Entra credential: preferably a certificate, `BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE` (see
+        below); or the client secret through `BYWARD_ENTRA_CLIENT_SECRET_FILE` (or
+        `--entra-client-secret-file`); or no secret at all: where the platform hands the proxy a
+        federated token (AKS workload identity, GitHub Actions), point
+        `BYWARD_ENTRA_FEDERATED_TOKEN_FILE` at it and give the app a matching federated identity
+        credential ([an example](real-entra-lane.md#3-run-it-once-then-create-the-federated-credential));
       - static client secrets through `client_secret_file` in the
         [static clients file](../reference/static-clients.md);
       - static client secrets must be at least 32 bytes.
@@ -129,8 +142,13 @@ Background: [ADR-0012](../adr/0012-entra-specifics.md), [ADR-0015](../adr/0015-a
         users out. Alert on
         `byward_idp_request_duration_seconds_count{outcome="unavailable"}`
         ([observability](../reference/observability.md#metrics)).
-- [ ] **Certificate credential:** recommended by ADR-0012 ยง5 but **not yet configurable**; only a
-      client secret can be set today.
+- [ ] **Use a certificate credential** instead of a client secret (ADR-0012 ยง5; Microsoft: "It's
+      therefore recommended that your application uses a certificate rather than a secret"). The
+      private key stays on the proxy's machine, and Entra gets only a short-lived signed assertion.
+      `byward init entra --credential certificate` makes one; the
+      [certificate how-to](entra-certificate.md) covers making, uploading and rotating it. byward
+      reads the certificate's end date itself, warns from 30 days before, and refuses to start
+      once it has expired.
 - [ ] Gate changes take effect after a restart, at each user's next sign-in or refresh: at most one
       access-token lifetime (1 h) later. To cut someone off sooner, remove their assignment in Entra.
       Their next refresh then fails too.

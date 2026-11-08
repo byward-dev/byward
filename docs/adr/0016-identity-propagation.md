@@ -61,3 +61,52 @@ expired and wrong-key tokens; FastMCP accepts any `typ`.
 - Static JWKS copies must be refreshed at key rotation.
 - Later: mTLS between proxy and upstream, binding the assertion to the request, identity over a file
   descriptor for stdio.
+
+## Amendment 2026-11-07 (only verified emails, #151)
+
+§1 asserted the opt-in `email` exactly as the IdP sent it. An upstream author may still trust it,
+although nothing vouched for it. So now:
+
+1. **An email is asserted only when the IdP vouches for it:** an OIDC ID token with
+   `email_verified: true` (the boolean, or Google's string `"true"`). OIDC Core §5.1 defines it as
+   "the OP took affirmative steps to ensure that this e-mail address was controlled by the End-User",
+   and does not say what an absent claim means; byward reads absent as unverified, as the access gate
+   already does for email domains.
+2. **Entra never vouches for an email.** It sends no `email_verified`, and Microsoft says not to rely
+   on the claim: "This value isn't guaranteed to be correct and is mutable over time. Never use it for
+   authorization or to save data for a user" (ID token claims reference); "Never use `email` or `upn`
+   claim values to store or determine whether the user in an access token should have access to data"
+   (optional claims reference); "Applications should never use the email claim for authorization due
+   to its mutability and non-uniqueness" (MSRC, 2023-06-20). `xms_edov` is not used: it is off by
+   default, and it says the email's domain owner is verified, not that the user controls the mailbox.
+   `removeUnverifiedEmailClaim` only removes the claim, and nothing in the token says it applied.
+3. **`BYWARD_ASSERTION_UNVERIFIED_EMAIL=true`** (default `false`) also asserts an email the IdP does not
+   vouch for, the same way for every IdP. It is how an Entra deployment asserts an email at all.
+4. **`email_verified` is asserted with `email`, and only with it:** `true` when the IdP vouched for
+   it, `false` when only the opt-in let it through. It is added to the claims contract (§ Consequences:
+   ours are only ever added).
+5. **One place decides:** the broker, when it picks the claims sealed into the access token. The
+   assertion and every other copy of the email read them from there: the plain identity headers
+   (§5) send `X-Byward-Email-Verified` exactly when they send `X-Byward-Email`.
+6. **Every start logs** which emails are left out or carried unverified, naming the setting; a
+   configuration with `email` opted in is never refused. A stdio upstream gets no email (§6), so it
+   gets no such warning either.
+7. **Tokens already issued keep their claims** until they expire: after the upgrade, or after the
+   opt-in is turned off, an access token keeps its email, marked `email_verified: false`, for at most
+   one access-token lifetime (one hour); a refresh token's next use decides again.
+
+This is stricter than the products we checked (2026-11-07): oauth2-proxy v7.15.6 refuses only an
+explicit `email_verified: false`, so with Entra its check never applies; Pomerium v0.34.0 asserts
+`email` without checking it; sigbit/mcp-auth-proxy v2.10.2 and mcp-front never read it. (Cloudflare
+Access calls its `email` "verified by the identity provider" but falls back to the UPN with Entra;
+whether it checks `email_verified` is unverified.) Sources checked 2026-11-07; research notes kept
+outside the repository. For a security product that is the right side to err on: an upstream that
+reads `email` gets one that someone vouched for, or a claim that says nobody did.
+
+## Amendment 2026-11-07 (#64): `principal_type`
+
+Every assertion carries `principal_type`: `user`, or `client` for an Entra app-only caller
+(ADR-0022 §5), whose `sub` is the service principal's `tid:oid` and `client_id` its application ID.
+The minter refuses an identity without one rather than defaulting to `user`. stdio processes get
+`BYWARD_PRINCIPAL_TYPE` and the plain identity headers (§5) `X-Byward-Principal-Type` with the same
+values.
