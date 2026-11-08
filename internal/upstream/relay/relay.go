@@ -276,7 +276,8 @@ func isRedirect(status int) bool {
 // part or a `;jsessionid` could carry a secret.
 func redirectHint(res *http.Response) string {
 	loc, err := res.Location()
-	if err != nil || loc.Opaque != "" || loc.Host == "" {
+	// An @ past the host means credentials with an unescaped /, ? or #, split by the parser.
+	if err != nil || loc.Opaque != "" || loc.Host == "" || strings.ContainsRune(loc.Path+loc.RawQuery+loc.Fragment, '@') {
 		return "the upstream sent no usable Location; check BYWARD_UPSTREAM_URL"
 	}
 	path, _, _ := strings.Cut(loc.EscapedPath(), ";") // escaped: a %3B or %2F is part of the path
