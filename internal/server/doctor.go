@@ -124,7 +124,9 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 		if err := errors.Join(looseSecretFiles(cfg)...); err != nil {
 			return r, err
 		}
-		r.Checks = append(r.Checks, configurationResults(redundantStrips(cfg))...)
+		for _, w := range redundantStrips(cfg) {
+			r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "configuration", Status: doctor.Warn, Message: w.Message, Fix: warningFix(w)})
+		}
 		r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy))
 		r.Checks = append(r.Checks, upstreamHopResult(ctx, cfg, o.Resolve)...)
 		r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "authentication", Status: doctor.Warn,
@@ -144,7 +146,9 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	if cfg.IdentityHeaders && cfg.UpstreamCommand == nil {
 		r.Checks = append(r.Checks, identityHeadersResult(ctx, cfg.UpstreamURL.Hostname(), o.Resolve))
 	}
-	r.Checks = append(r.Checks, configurationResults(append(parts.warnings, redundantStrips(cfg)...))...)
+	for _, w := range append(parts.warnings, redundantStrips(cfg)...) {
+		r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "configuration", Status: doctor.Warn, Message: w.Message, Fix: warningFix(w)})
+	}
 	target := doctor.Target{Resource: cfg.PublicURL, Issuer: cfg.Issuer(), HostsSetting: config.Setting{Name: "allowed-hosts"}.Env()}
 	if parts.assertionKeys != nil {
 		target.AssertionKeyID = parts.assertionKeys.SigningKeyID()
@@ -152,15 +156,6 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	r.Checks = append(r.Checks, doctor.SelfProbe(ctx, o.Proxy, target)...)
 	r.Checks = append(r.Checks, parts.idp.diagnose(ctx, o.Now())...)
 	return r, nil
-}
-
-// configurationResults are doctor's "configuration" warnings, one per startup warning.
-func configurationResults(ws []Warning) []doctor.Result {
-	var out []doctor.Result
-	for _, w := range ws {
-		out = append(out, doctor.Result{Class: doctor.ClassProxy, Name: "configuration", Status: doctor.Warn, Message: w.Message, Fix: warningFix(w)})
-	}
-	return out
 }
 
 func warningFix(w Warning) string {

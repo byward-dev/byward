@@ -16,9 +16,10 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 )
 
-// Through the wired proxy, a header the operator lists never reaches the upstream; an entry the
-// relay strips anyway is accepted, and the startup log and check --offline say it changes nothing.
-func TestTheOperatorsStripListIsAppliedAndARedundantEntryIsNamed(t *testing.T) {
+// Through the wired proxy, a header the operator lists never reaches the upstream while the
+// operator credential the proxy sets still does; an entry the relay strips anyway is accepted, and
+// the startup log says it changes nothing.
+func TestAListedHeaderNeverReachesTheUpstreamButTheProxysCredentialStillDoes(t *testing.T) {
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
 	cfg, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=" + up.URL + "/mcp",
@@ -60,23 +61,30 @@ func TestTheOperatorsStripListIsAppliedAndARedundantEntryIsNamed(t *testing.T) {
 	if warned(logs.String(), "X-Argocd-Base-Url") {
 		t.Fatal("a header only the list strips is called redundant")
 	}
-	warnings, err := CheckOffline(cfg)
+}
+
+// With authentication too, the startup log names a redundant entry.
+func TestTheStartupLogNamesARedundantStripEntryWithAuthentication(t *testing.T) {
+	cfg, _, err := config.Load(nil, append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://10.0.0.7/mcp",
+		"BYWARD_UPSTREAM_STRIP_HEADERS=authorization"), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var offline []string
-	for _, w := range warnings {
-		offline = append(offline, w.String())
+	var logs bytes.Buffer
+	s, err := New(cfg, logging.New(&logs, "text"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if text := strings.Join(offline, "\n"); !warned(text, "Authorization") || !warned(text, "X-Api-Key") {
-		t.Fatalf("check --offline warnings %q do not name the redundant entries", offline)
+	t.Cleanup(func() { _ = s.closeStore() })
+	if !strings.Contains(logs.String(), "Authorization is stripped from every upstream request already") {
+		t.Fatalf("the startup log does not name Authorization: %s", logs.String())
 	}
 }
 
 // doctor and check --offline name a redundant entry as a warning, with and without authentication.
 func TestDoctorAndCheckNameARedundantStripEntry(t *testing.T) {
 	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
-		fakeidp.WithClient(fakeidp.Client{ID: "00000000-0000-0000-0000-000000000002", Secrets: []string{"s3cret-entra"}}))
+		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{"s3cret-entra"}}))
 	strip := "BYWARD_UPSTREAM_STRIP_HEADERS=X-Argocd-Base-Url,authorization"
 	noAuth, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://10.0.0.7/mcp", "BYWARD_INSECURE_NO_AUTH=true", strip}, os.ReadFile)
 	if err != nil {
@@ -96,7 +104,7 @@ func TestDoctorAndCheckNameARedundantStripEntry(t *testing.T) {
 			for _, c := range rep.Checks {
 				if c.Name == "configuration" && strings.Contains(c.Message, "is stripped from every upstream request already") {
 					named = append(named, c.Message)
-					if c.Status != doctor.Warn || !strings.HasPrefix(c.Fix, "BYWARD_UPSTREAM_STRIP_HEADERS: ") {
+					if c.Status != doctor.Warn || c.Fix != "BYWARD_UPSTREAM_STRIP_HEADERS: remove Authorization from the list" {
 						t.Fatalf("%+v, want a warning naming the setting", c)
 					}
 				}

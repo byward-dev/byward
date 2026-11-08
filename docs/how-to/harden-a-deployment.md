@@ -325,9 +325,12 @@ its credentials.
 - [ ] Keep the headers MCP needs. `Accept`, `Content-Type`, `Content-Length`, `Transfer-Encoding`,
       `Host`, `Last-Event-ID`, `Mcp-Session-Id`, `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name` and
       every `Mcp-Param-*` header are refused: MCP 2026-07-28 requires a proxy to forward an
-      `Mcp-Param-*` header it does not know.
-- [ ] A name byward strips anyway is accepted and changes nothing; the startup log, `check` and
-      `doctor` say so.
+      `Mcp-Param-*` header it does not know. `traceparent` and `tracestate` are refused too: with
+      tracing on, byward sets them from the inbound trace context, so listing them would remove
+      nothing.
+- [ ] A name byward strips anyway (its own headers, the hop-by-hop ones such as
+      `Proxy-Authorization`) is accepted and changes nothing; the startup log, `check` and `doctor`
+      say so.
 - [ ] Prefer settings the upstream reads from its own configuration. A header the upstream takes
       from any caller is safe only while byward is the only way to reach the upstream.
 

@@ -36,9 +36,6 @@ type upstream struct {
 // API token too, which a stdio process asks its token socket for instead (ADR-0017).
 func newUpstream(cfg *config.Config, log *slog.Logger, o Observability, minter *assertion.Minter, down *downstreamTokens) (*upstream, error) {
 	if cfg.UpstreamCommand == nil {
-		for _, w := range redundantStrips(cfg) {
-			w.log(log)
-		}
 		if minter != nil {
 			return &upstream{handler: assertingUpstream(cfg, log, minter, down)}, nil
 		}

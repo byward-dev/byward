@@ -190,6 +190,8 @@ func stripHeaders(raw string) ([]string, []error) {
 			errs = append(errs, errorf("%s: %q is not a header name; list exact names, such as X-Argocd-Base-Url", env, n))
 		case mcpHeaders[h] || strings.HasPrefix(h, "Mcp-Param-"):
 			errs = append(errs, errorf("%s: %s is a header MCP needs at the upstream; remove it from the list", env, h))
+		case h == "Traceparent" || h == "Tracestate":
+			errs = append(errs, errorf("%s: %s cannot be stripped: with tracing on, the proxy sets it from the inbound trace context; remove it from the list", env, h))
 		default:
 			out = append(out, h)
 		}
