@@ -16,7 +16,7 @@ const ptraceScopeFile = "/proc/sys/kernel/yama/ptrace_scope"
 // process attach to any other of its uid: every upstream process runs as byward's uid, so one
 // user's process could read another's memory, and with it the downstream token it holds. nil when
 // the host restricts ptrace, or off Linux. byward warns and does not refuse: the operator may
-// isolate processes by other means (docs/how-to/harden-a-deployment.md §10).
+// isolate processes by other means (docs/how-to/harden-a-deployment.md, "Isolate stdio upstream processes").
 func ptraceWarning(goos string, read func(string) ([]byte, error)) *Warning {
 	if goos != "linux" {
 		return nil
@@ -34,7 +34,7 @@ func ptraceWarning(goos string, read func(string) ([]byte, error)) *Warning {
 	}
 	return &Warning{Message: "stdio upstream processes can read each other's memory: " + why + ", and every process runs as byward's uid, so one user's process could read another user's downstream token",
 		Setting: "BYWARD_OBO_SCOPES",
-		Fix:     "set kernel.yama.ptrace_scope=1 on the host, or isolate the upstream processes by other means (docs/how-to/harden-a-deployment.md §10)"}
+		Fix:     "set kernel.yama.ptrace_scope=1 on the host, or isolate the upstream processes by other means (docs/how-to/harden-a-deployment.md, \"Isolate stdio upstream processes\")"}
 }
 
 // isolationWarning is host's ptrace warning when On-Behalf-Of hands downstream tokens to stdio

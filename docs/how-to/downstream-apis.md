@@ -174,7 +174,7 @@ export function downstreamToken(): Promise<string> {
 - Every upstream process runs as byward's uid. On a host that lets processes of one uid read each
   other's memory (`kernel.yama.ptrace_scope` 0, Debian's default), another user's process could read
   the token from memory. byward warns at startup and in `doctor`; see
-  [Harden a deployment §10](harden-a-deployment.md#10-isolate-stdio-upstream-processes).
+  [Harden a deployment: Isolate stdio upstream processes](harden-a-deployment.md#isolate-stdio-upstream-processes).
 - On Linux before 6.5, and on macOS (for development only), a narrow race remains: a process that
   hands its connection to another and exits, with its process ID reused inside the upstream's tree
   before byward checks it, would pass the check ([ADR-0017](../adr/0017-delegation-obo.md), amendment of 2026-11-08).

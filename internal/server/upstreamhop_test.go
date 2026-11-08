@@ -146,7 +146,7 @@ func TestThePlainHTTPWarningPointsAtTheHardeningGuide(t *testing.T) {
 		t.Fatalf("fix %q names no guide section", w.Fix)
 	}
 	guide, err := os.ReadFile(filepath.Join("..", "..", m[1]))
-	if err != nil || !regexp.MustCompile(`(?m)^## \d+\. `+regexp.QuoteMeta(m[2])+`$`).Match(guide) {
+	if err != nil || !regexp.MustCompile(`(?m)^## `+regexp.QuoteMeta(m[2])+`$`).Match(guide) {
 		t.Fatalf("%s has no section %q (%v)", m[1], m[2], err)
 	}
 }
