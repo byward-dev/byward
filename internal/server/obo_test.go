@@ -264,6 +264,9 @@ func TestDownstreamRefusalsAreAnsweredInTheProxysName(t *testing.T) {
 		// #204: Entra rejecting the proxy's own credential needs the operator, so it also alerts.
 		{"client secret rejected", &fakeidp.InvalidClientSecret, oboToolsCall,
 			"temporarily unavailable", `"reason":"unavailable: the IdP refused the proxy's client credential`, `"reason":"unavailable"`, "credential_rejected"},
+		// Entra's own operator hint wins over the alert's default.
+		{"client secret expired", &fakeidp.ExpiredClientSecret, oboToolsCall,
+			"temporarily unavailable", `"reason":"unavailable: AADSTS7000222: the client secret has expired`, `"reason":"unavailable"`, "credential_rejected"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -304,11 +307,11 @@ func TestDownstreamRefusalsAreAnsweredInTheProxysName(t *testing.T) {
 			}
 			counted := strings.Contains(metrics, `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="`+c.alert+`"} 1`)
 			logged := strings.Contains(logs, `"alert":"`+c.alert+`"`)
-			if c.alert == "" {
-				counted, logged = strings.Contains(metrics, "byward_idp_alerts_total{"), strings.Contains(logs, `"alert":`)
+			if c.alert == "" { // the series are exported at 0; none may have counted
+				counted, logged = regexp.MustCompile(`byward_idp_alerts_total\{[^}]*\} [1-9]`).MatchString(metrics), strings.Contains(logs, `"alert":`)
 			}
 			if want := c.alert != ""; counted != want || logged != want {
-				t.Errorf("alert %q counted %v, logged %v; want both %v", c.alert, counted, logged, want)
+				t.Errorf("alert %q counted %v, logged %v; want both %v\nmetrics:\n%s\nlogs:\n%s", c.alert, counted, logged, want, metrics, logs)
 			}
 		})
 	}

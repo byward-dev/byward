@@ -321,7 +321,7 @@ func TestTokenErrorsMapToADR0012Classes(t *testing.T) {
 				t.Fatalf("err = %v", err)
 			}
 			if ie.Class != tc.class || ie.Alert != tc.alert || ie.Code != tc.code {
-				t.Errorf("class %v alert %v code %d", ie.Class, ie.Alert, ie.Code)
+				t.Errorf("class %v alert %q code %d, want %v %q %d", ie.Class, ie.Alert, ie.Code, tc.class, tc.alert, tc.code)
 			}
 			if ie.CorrelationID != reqID || ie.TraceID == "" {
 				t.Errorf("correlation %q (want request ID %q), trace %q", ie.CorrelationID, reqID, ie.TraceID)
@@ -570,7 +570,7 @@ func TestACallbackErrorNeverAlertsTheOperator(t *testing.T) {
 
 // A credential the proxy cannot make (a missing federated token file) fails before any request, as
 // an ErrCredential that alerts the operator.
-func TestAnUnusableClientCredentialFailsAsErrCredential(t *testing.T) {
+func TestAnUnusableClientCredentialAlertsTheOperator(t *testing.T) {
 	e := newEnv(t, Config{ClientAuth: idp.AssertionFile(t.TempDir() + "/missing-token")})
 	_, _, err := e.p.Refresh(context.Background(), "rt")
 	var ie *idp.Error

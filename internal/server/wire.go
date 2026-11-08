@@ -90,6 +90,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 			registrar = r
 		}
 	}
+	o.Metrics.SeedIdPAlerts(ip.name)
 	b, err := newBroker(broker.Config{Issuer: cfg.Issuer(), Origin: cfg.Origin(), Resource: cfg.PublicURL, Scope: cfg.Scope,
 		IdPName: ip.name, IdPLabel: ip.label, IdPScopes: ip.scope, IdP: ip.adapter, Clients: clients, CIMD: cfg.CIMD, Registrar: registrar, ObserveRegistration: o.Metrics.DCRRegistration,
 		Store: st, Sealer: sealer, LoginBox: parts.loginBox, IdPTokenBox: parts.idpBox, ConsentBox: parts.consentBox, ConsentHintBox: parts.hintBox, ObserveConsent: o.Metrics.Consent, Gate: g,

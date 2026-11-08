@@ -376,3 +376,22 @@ func TestFetcherBudgetCoversItsRetries(t *testing.T) {
 		t.Fatalf("no client timeout: budget %v", b)
 	}
 }
+
+// #204: every alert reason names a fix, distinct per reason, so an alert line never has an empty
+// reason, even for a reason added later without a hint of its own.
+func TestEveryAlertReasonNamesAFix(t *testing.T) {
+	seen := map[string]Alert{}
+	for _, a := range []Alert{AlertCredentialUnusable, AlertCredentialRejected, AlertProtocol, Alert("added_later")} {
+		h := a.Hint()
+		if h == "" {
+			t.Errorf("%q has no fix", a)
+		}
+		if other, dup := seen[h]; dup {
+			t.Errorf("%q and %q share the fix %q", a, other, h)
+		}
+		seen[h] = a
+	}
+	if h := Alert("").Hint(); h != "" {
+		t.Errorf("no alert names the fix %q", h)
+	}
+}

@@ -218,6 +218,8 @@ func TestTokenErrorsAreClassified(t *testing.T) {
 		"invalid_client":  {&fakeidp.InvalidClientSecret, idp.Unavailable, idp.AlertCredentialRejected},
 		"503":             {&fakeidp.TemporarilyUnavailable, idp.Unavailable, ""},
 		"invalid_request": {&fakeidp.InvalidRequest, idp.Fatal, ""},
+		// The same failure as Entra's 700016 row: the app is unknown, so both adapters alert.
+		"unknown app": {&fakeidp.UnknownClient, idp.Fatal, idp.AlertCredentialRejected},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t, Config{})
@@ -556,7 +558,7 @@ func TestGoogleIsAskedForConsentEverySignInExceptASilentOne(t *testing.T) {
 
 // A credential the proxy cannot make (an assertion file that is missing) fails before any request,
 // as an ErrCredential that alerts the operator, the same as with Entra.
-func TestAnUnusableClientCredentialFailsAsErrCredential(t *testing.T) {
+func TestAnUnusableClientCredentialAlertsTheOperator(t *testing.T) {
 	e := newEnv(t, Config{ClientAuth: idp.AssertionFile(t.TempDir() + "/missing-token")})
 	_, _, err := e.p.Refresh(context.Background(), "rt")
 	var ie *idp.Error

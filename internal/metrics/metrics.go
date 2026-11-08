@@ -112,6 +112,19 @@ func (m *Metrics) IdP(idp, operation, outcome string, d time.Duration) {
 	m.idp.WithLabelValues(idp, operation, outcome).Observe(d.Seconds())
 }
 
+// SeedIdPAlerts exports every IdP alert series of idp at 0, so an alert rule on increase() sees the
+// first alert after a start (a series that appears at 1 has no earlier sample to increase from).
+func (m *Metrics) SeedIdPAlerts(idp string) {
+	if m == nil {
+		return
+	}
+	for _, op := range []string{"authorize", "callback", "refresh", "on_behalf_of"} {
+		for _, reason := range []string{"credential_unusable", "credential_rejected", "protocol"} {
+			m.idpAlerts.WithLabelValues(idp, op, reason)
+		}
+	}
+}
+
 // IdPAlert counts one IdP error that needs the operator (#204).
 func (m *Metrics) IdPAlert(idp, operation, reason string) {
 	if m == nil {

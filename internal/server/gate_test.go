@@ -120,10 +120,14 @@ func TestWiredBrokerGetsTheConfiguredGateAndObservability(t *testing.T) {
 	if got.ObserveIdPAlert == nil {
 		t.Fatal("broker wired without IdP alert observation")
 	}
+	series := `byward_idp_alerts_total{idp="entra",operation="refresh",reason="credential_rejected"} `
+	if !strings.Contains(rec.Body.String(), series+"0") {
+		t.Fatalf("the IdP alert series is not exported at 0 before any alert (an increase() rule would miss the first):\n%s", rec.Body.String())
+	}
 	got.ObserveIdPAlert("refresh", "credential_rejected")
 	rec = httptest.NewRecorder()
 	srv.Internal.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "http://127.0.0.1:9090/metrics", nil))
-	if want := `byward_idp_alerts_total{idp="entra",operation="refresh",reason="credential_rejected"} 1`; !strings.Contains(rec.Body.String(), want) {
+	if want := series + "1"; !strings.Contains(rec.Body.String(), want) {
 		t.Fatalf("an IdP alert did not reach /metrics as %s:\n%s", want, rec.Body.String())
 	}
 	id := idp.Identity{Subject: fixtureTenant + ":x", Claims: map[string]any{"tid": fixtureTenant}}

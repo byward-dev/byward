@@ -312,7 +312,9 @@ func (p *Provider) token(ctx context.Context, m *metadata, form url.Values) (*id
 	if !tr.OK() {
 		class := idp.GenericClass(tr.Status, tr.Error)
 		e := &idp.Error{Class: class, OAuth: tr.Error, Status: tr.Status, Description: tr.ErrorDescription}
-		if tr.Error == "invalid_client" { // the IdP refused the proxy's own credential or client ID
+		// The IdP refused the proxy's own credential or client ID, or the grant its app is registered for
+		// (RFC 6749 §5.2): the operator's to fix.
+		if tr.Error == "invalid_client" || tr.Error == "unauthorized_client" {
 			e.Alert = idp.AlertCredentialRejected
 		}
 		return nil, e

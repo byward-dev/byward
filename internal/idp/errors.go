@@ -100,7 +100,8 @@ const (
 	AlertProtocol Alert = "protocol"
 )
 
-// Hint is the operator's fix for the alert reason, for when the IdP's error names none.
+// Hint is the operator's fix for the alert reason, for when the IdP's error names none; never empty
+// for a reason.
 func (a Alert) Hint() string {
 	switch a {
 	case AlertCredentialRejected:
@@ -109,8 +110,10 @@ func (a Alert) Hint() string {
 		return "the proxy could not build its client credential: check that the certificate, key or federated token file is readable and valid"
 	case AlertProtocol:
 		return "the IdP answered against the protocol: check the IdP's endpoints and status"
+	case "":
+		return ""
 	}
-	return ""
+	return "the IdP refused the proxy: check the proxy's IdP settings and the IdP's status"
 }
 
 // AlertOf is the alert reason of err, or "" when err is not an *Error that asks for one.

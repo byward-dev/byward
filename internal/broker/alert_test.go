@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
@@ -54,12 +55,16 @@ func TestIdPErrorsThatNeedTheOperatorRaiseAnAlert(t *testing.T) {
 		drive   func(*testing.T, *env, fakeidp.Failure)
 		failure fakeidp.Failure
 		want    string // "operation reason", or "" for no alert
+		fix     string // the start of the alert line's reason
 	}{
-		{"sign-in, client secret rejected", signInFailing, fakeidp.InvalidClientSecret, "callback credential_rejected"},
-		{"sign-in, IdP unavailable", signInFailing, fakeidp.TemporarilyUnavailable, ""},
-		{"refresh, client secret rejected", refreshFailing, fakeidp.InvalidClientSecret, "refresh credential_rejected"},
-		{"refresh, IdP unavailable", refreshFailing, fakeidp.TemporarilyUnavailable, ""},
-		{"forged callback error", forgedCallback, fakeidp.Failure{}, ""},
+		// AADSTS7000215 has no operator hint of its own, so the alert's default fix stands in.
+		{"sign-in, client secret rejected", signInFailing, fakeidp.InvalidClientSecret, "callback credential_rejected", idp.AlertCredentialRejected.Hint()},
+		{"sign-in, IdP unavailable", signInFailing, fakeidp.TemporarilyUnavailable, "", ""},
+		{"refresh, client secret rejected", refreshFailing, fakeidp.InvalidClientSecret, "refresh credential_rejected", idp.AlertCredentialRejected.Hint()},
+		// Entra's own hint wins over the default.
+		{"refresh, client secret expired", refreshFailing, fakeidp.ExpiredClientSecret, "refresh credential_rejected", "AADSTS7000222: the client secret has expired"},
+		{"refresh, IdP unavailable", refreshFailing, fakeidp.TemporarilyUnavailable, "", ""},
+		{"forged callback error", forgedCallback, fakeidp.Failure{}, "", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -82,9 +87,8 @@ func TestIdPErrorsThatNeedTheOperatorRaiseAnAlert(t *testing.T) {
 					t.Errorf("the alert line lacks %s:\n%s", want, logs)
 				}
 			}
-			// AADSTS7000215 has no operator hint of its own, so the alert's fix stands in.
-			if !strings.Contains(line, `"reason":"the IdP refused the proxy's client credential`) {
-				t.Errorf("the alert line does not name the fix:\n%s", logs)
+			if !strings.Contains(line, `"reason":"`+c.fix) {
+				t.Errorf("the alert line's reason does not start with %q:\n%s", c.fix, logs)
 			}
 		})
 	}
