@@ -78,6 +78,9 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 			if got.AccessToken != tc.wantToken || got.Error != tc.wantError {
 				t.Fatalf("got token %q, error %q; want %q, %q", got.AccessToken, got.Error, tc.wantToken, tc.wantError)
 			}
+			if tc.wantToken != "" && !got.ExpiresAt.Equal(now.Add(time.Hour)) { // what the process re-asks by
+				t.Fatalf("token expires %v, want the exchange's %v", got.ExpiresAt, now.Add(time.Hour))
+			}
 			if ran := exchanges.Load() > 0; ran != tc.exchanged {
 				t.Fatalf("exchanged with Entra %v, want %v", ran, tc.exchanged)
 			}
