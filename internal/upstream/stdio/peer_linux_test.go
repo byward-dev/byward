@@ -42,7 +42,7 @@ func TestAProcessNameCannotFakeItsParent(t *testing.T) {
 	if err != nil {
 		t.Skip("no sleep binary")
 	}
-	src, err := os.ReadFile(sleep)
+	src, err := os.ReadFile(sleep) //nolint:gosec // G304: copies the system sleep binary
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestAProcessNameCannotFakeItsParent(t *testing.T) {
 	if err := os.WriteFile(fake, src, 0o700); err != nil { //nolint:gosec // G306: an executable test binary
 		t.Fatal(err)
 	}
-	c := exec.Command(fake, "30")
+	c := exec.Command(fake, "30") //nolint:gosec // G204: the copy of sleep this test made
 	if err := c.Start(); err != nil {
 		t.Fatal(err)
 	}
