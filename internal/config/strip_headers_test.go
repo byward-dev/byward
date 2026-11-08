@@ -22,8 +22,9 @@ func TestTheUpstreamStripListIsReadAsCanonicalHeaderNames(t *testing.T) {
 	}
 }
 
-// A header MCP needs at the upstream, a pattern and a name that is no header are refused, each
-// named; so is the list with a stdio upstream, which gets no request headers.
+// A header MCP needs at the upstream, a header tracing sets, a pattern and a name that is no
+// header are refused, each named; so is the list with a stdio upstream, which gets no request
+// headers.
 func TestTheUpstreamStripListRefusesWhatCannotBeStripped(t *testing.T) {
 	for _, tc := range []struct{ name, list, want string }{
 		{"Accept", "accept", "Accept is a header MCP needs"},
