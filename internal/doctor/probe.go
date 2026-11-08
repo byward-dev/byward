@@ -20,6 +20,9 @@ type Target struct {
 	Issuer string
 	// HostsSetting names the setting that lists extra accepted Host values, for the fix.
 	HostsSetting string
+	// AssertionKeyID is the key that signs identity assertions (an HTTP upstream); "" when there is
+	// no assertion, and the discovery check is skipped.
+	AssertionKeyID string
 }
 
 // maxMetadata bounds a metadata response (the 64 KB budget in docs/quality-lenses.md).
@@ -47,6 +50,9 @@ func SelfProbe(ctx context.Context, client *http.Client, t Target) []Result {
 		p.serverMetadata("authorization server metadata (RFC 8414)", strings.TrimSuffix(t.Issuer, "/")+"/.well-known/oauth-authorization-server"),
 		p.serverMetadata("authorization server metadata (OpenID)", strings.TrimSuffix(t.Issuer, "/")+"/.well-known/openid-configuration"),
 		p.challenge(pathInserted, origin+wellKnownResource),
+	}
+	if t.AssertionKeyID != "" {
+		out = append(out, p.assertionKeys(strings.TrimSuffix(t.Issuer, "/")+"/.well-known/openid-configuration"))
 	}
 	return append(out, p.host())
 }
@@ -238,4 +244,52 @@ func (p *prober) host() Result {
 			Fix: "make the reverse proxy in front of it forward the original Host, or add the Host it sends to " + p.t.HostsSetting}
 	}
 	return Result{Class: ClassProxy, Name: name, Status: Pass, Message: "the proxy accepted Host " + p.t.Resource.Host}
+}
+
+// assertionKeys follows OIDC discovery as a verifier that has nothing else does (MCP Toolbox's
+// generic auth, OpenSearch's openid domain): the discovery document must name byward's issuer and a
+// jwks_uri that serves the key signing the identity assertion (ADR-0016 amendment, #207).
+func (p *prober) assertionKeys(target string) Result {
+	const name = "identity assertion keys (discovery)"
+	r := p.do(http.MethodGet, target, nil, nil)
+	switch {
+	case r.err != nil && r.status == 0:
+		return p.unreachable(name, target, r.err)
+	case r.err != nil:
+		return Result{Class: ClassProxy, Name: name, Status: Fail, Message: target + ": " + r.err.Error(),
+			Fix: "make whatever is in front of the proxy pass this path through unchanged"}
+	case r.status != http.StatusOK:
+		return p.unexpected(name, target, r, http.StatusOK)
+	}
+	var doc struct {
+		Issuer  string `json:"issuer"`
+		JWKSURI string `json:"jwks_uri"`
+	}
+	if err := json.Unmarshal(r.body, &doc); err != nil || doc.Issuer != p.t.Issuer || doc.JWKSURI == "" {
+		return Result{Class: ClassProxy, Name: name, Status: Fail,
+			Message: target + " does not name the issuer " + p.t.Issuer + " and a jwks_uri, so a verifier that uses discovery cannot find the assertion keys",
+			Fix:     "make whatever is in front of the proxy pass this path through unchanged; the proxy's own document has both"}
+	}
+	k := p.do(http.MethodGet, doc.JWKSURI, nil, nil)
+	switch {
+	case k.err != nil && k.status == 0:
+		return p.unreachable(name, doc.JWKSURI, k.err)
+	case k.err != nil:
+		return Result{Class: ClassProxy, Name: name, Status: Fail, Message: doc.JWKSURI + ": " + k.err.Error(),
+			Fix: "make whatever is in front of the proxy pass this path through unchanged"}
+	case k.status != http.StatusOK:
+		return p.unexpected(name, doc.JWKSURI, k, http.StatusOK)
+	}
+	type jwk struct {
+		KeyID string `json:"kid"`
+	}
+	var set struct {
+		Keys []jwk `json:"keys"`
+	}
+	if err := json.Unmarshal(k.body, &set); err != nil || !slices.ContainsFunc(set.Keys, func(key jwk) bool { return key.KeyID == p.t.AssertionKeyID }) {
+		return Result{Class: ClassProxy, Name: name, Status: Fail,
+			Message: doc.JWKSURI + " does not serve the signing key " + p.t.AssertionKeyID + ", so verifiers refuse every assertion",
+			Fix:     "route /.well-known/jwks.json on this host to the proxy, not to the upstream or another service"}
+	}
+	return Result{Class: ClassProxy, Name: name, Status: Pass, Message: "discovery names " + doc.JWKSURI + ", which serves the signing key " + p.t.AssertionKeyID}
 }

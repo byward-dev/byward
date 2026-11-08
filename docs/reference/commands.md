@@ -65,6 +65,7 @@ fail  idp    entra app and credential: Entra rejected the client secret (AADSTS7
 | `proxy` | authorization server metadata (RFC 8414), (OpenID) | both documents name our issuer, `authorization_response_iss_parameter_supported: true`, `S256`, and a `revocation_endpoint` |
 | `proxy` | unauthenticated MCP request | a POST without a token gets 401 whose `resource_metadata` is one of the URLs above and resolves |
 | `proxy` | Host header | no response was 421; a reverse proxy that changes `Host` shows up here |
+| `proxy` | identity assertion keys (discovery) | with an HTTP upstream: the OpenID discovery document names byward's issuer and a `jwks_uri` that serves the key signing assertions, as a verifier using only discovery (MCP Toolbox) needs |
 | `idp` | entra tenant | the tenant's v2 discovery document exists and names its v2 issuer |
 | `idp` | entra signing keys | the tenant's key set has a signing key |
 | `idp` | entra app and credential | a client-credentials request for `api://<client-id>/.default` succeeds: Entra accepted the tenant, the client ID and the secret. Needs no app permission. |

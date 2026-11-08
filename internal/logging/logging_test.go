@@ -39,6 +39,56 @@ func TestRedaction(t *testing.T) {
 	}
 }
 
+// Only a credential is redacted: a Bearer or Basic value, or a JWT by its shape (see jwtShape),
+// not by the letters eyj: a random base64url client ID contains them about once in a thousand
+// registrations, and the operator needs it (#230).
+func TestOnlyCredentialShapedValuesAreRedacted(t *testing.T) {
+	for name, tc := range map[string]struct {
+		value  any
+		logged string
+	}{
+		"a client ID with eyJ":                       {value: "dcr-Qm9eyJx_7k-eyJAbCdEfGh", logged: "dcr-Qm9eyJx_7k-eyJAbCdEfGh"},
+		"a client ID with eyj":                       {value: "dcr-xeyjq0Z-eyjAbCdEfGhIjk", logged: "dcr-xeyjq0Z-eyjAbCdEfGhIjk"},
+		"a URL with eyJ and one dot":                 {value: "https://heyJude.example/cb", logged: "https://heyJude.example/cb"},
+		"a URL with .eyJ and one dot":                {value: "https://app.eyJude/cb", logged: "https://app.eyJude/cb"},
+		"a host with eyj and two dots":               {value: "https://heyjude.example.com/cb", logged: "https://heyjude.example.com/cb"},
+		"a bare JWT":                                 {value: token, logged: redacted},
+		"a JWT with _ and - in it":                   {value: "eyJhbGciOiJSUzI1NiIsImtpZCI6ImE_Yj5jIn0.eyJzdWIiOiJ4Pz5-In0.c2ln", logged: redacted},
+		"an unsigned JWT":                            {value: "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ4In0.", logged: redacted},
+		"a JWT cut before its signature":             {value: "stderr: token=eyJhbGciOiJSUzI1NiJ9.eyJ1cG4iOiJh", logged: redacted},
+		"a JWT whose header has a space":             {value: "token eyAiYWxnIjoiUlMyNTYifQ.eyJzdWIiOiJ4Pz5-In0.c2ln rejected", logged: redacted},
+		"a JWE cut after its encrypted key":          {value: "stderr: token=eyJhbGciOiJSU0EtT0FFUCJ9.ZW5j_cnl-dGVk", logged: redacted},
+		"a spaced-header JWT cut short":              {value: "stderr: token=eyAiYWxnIjoiUlMyNTYifQ.eyJzdWIiOiJ4", logged: redacted},
+		"a spaced-header JWT with _ and - cut short": {value: "stderr: token=eyAiYWxnIjoiUlMyNTYiQ-.eyJzdWIi_x", logged: redacted},
+		"a JWE with no encrypted key":                {value: "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIiwia2lkIjoiYT9iPmMifQ_..aXY.Y3Q.dGFn", logged: redacted},
+		"a Bearer value":                             {value: "Bearer opaque-token", logged: redacted},
+		"a lowercase bearer value":                   {value: "authorization: bearer opaque-token", logged: redacted},
+		"a lowercase basic value":                    {value: "authorization: basic dXNlcjpwdw==", logged: redacted},
+		"a Basic value":                              {value: "Basic dXNlcjpwdw==", logged: redacted},
+		"a JWT inside a message":                     {value: "upstream rejected " + token + " as expired", logged: redacted},
+		"a JWT inside an error":                      {value: errors.New("verify " + token + ": expired"), logged: redacted},
+		"a Stringer with a JWT":                      {value: stringer("verify " + token), logged: redacted},
+		"an error with an eyJ identifier":            {value: errors.New("unknown client dcr-eyJq0Z"), logged: "unknown client dcr-eyJq0Z"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			New(&buf, "json").Info("x", "reason", tc.value)
+			var line struct{ Reason string }
+			if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+				t.Fatalf("log line %q: %v", buf.String(), err)
+			}
+			if line.Reason != tc.logged {
+				t.Fatalf("reason logged as %q, want %q", line.Reason, tc.logged)
+			}
+		})
+	}
+}
+
+// stringer is a fmt.Stringer, the third kind of value replace checks.
+type stringer string
+
+func (s stringer) String() string { return string(s) }
+
 func TestGroupContentsAreDropped(t *testing.T) {
 	var buf bytes.Buffer
 	New(&buf, "json").Info("x", slog.Group("req", "reason", "inside"))

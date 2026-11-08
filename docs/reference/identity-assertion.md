@@ -75,8 +75,11 @@ Example (from `internal/assertion/testdata/assertion.golden.json`; `jti` is rand
   ([how-to](../how-to/identity-assertion.md#2-point-the-upstream-at-the-public-keys)).
 - The key whose ID sorts last signs. Older keys stay in the JWKS until you remove their files, so a
   rotation needs no change in the upstream.
-- The JWKS is not advertised in byward's authorization server metadata. Proxy tokens are opaque, so
-  only upstreams use these keys.
+- With an HTTP upstream, the authorization server metadata advertises the JWKS as `jwks_uri`, at
+  `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server`, so a verifier
+  that only uses OIDC discovery finds it (see [By discovery](#by-discovery)). The keys verify
+  identity assertions only: proxy tokens are opaque `byw_` strings, so an MCP client has nothing
+  to verify with them. With a stdio upstream there is no assertion and no `jwks_uri`.
 
 ## Verifying
 
@@ -180,3 +183,61 @@ mcp = FastMCP("my-server", auth=verifier)
 FastMCP's `JWTVerifier` does not check `typ`.
 
 Tested versions: go-sdk 1.8.0, the TypeScript SDK 1.32.1 with jose 6.2.13, FastMCP 4.1.3.
+
+### By discovery
+
+Some verifiers take only an issuer and find the keys through OIDC discovery:
+`<issuer>/.well-known/openid-configuration` → `jwks_uri`. Give them byward's issuer, its public
+origin (`https://mcp.example.com`). The discovery document names that issuer, so the assertion's
+`iss` matches it. byward's contract test follows this path (`TestAVerifierUsingDiscoveryFindsTheAssertionKeys`),
+and `byward doctor` checks it ("identity assertion keys (discovery)"). The snippets below are not run
+by byward's tests; their field names are from each project's code or docs, checked 2026-11-07.
+
+**MCP Toolbox for Databases** (`generic` auth service, v1.16.0). It has no JWKS field: it reads
+`jwks_uri` from `<authorizationServer>/.well-known/openid-configuration` and checks `iss` against the
+document's `issuer` and `aud` against `audience`. It checks neither `typ` nor the algorithm, so
+the audience is what binds the assertion to this upstream.
+
+```yaml
+# The fields of the generic auth service (internal/auth/generic/generic.go); see Toolbox's docs
+# for where authServices go in your configuration.
+type: generic
+authorizationServer: https://mcp.example.com            # byward's public origin
+audience: http://mcp-upstream.internal:3001/mcp         # byward's BYWARD_UPSTREAM_URL, exactly
+```
+
+**OpenSearch.** Its `jwt` authenticator takes the JWKS directly (`jwks_uri`, OpenSearch 3.3 and
+later); its `openid` authenticator uses discovery (`openid_connect_url`):
+
+```yaml
+http_authenticator:
+  type: jwt
+  challenge: false
+  config:
+    jwks_uri: https://mcp.example.com/.well-known/jwks.json
+    # or, with type: openid:
+    # openid_connect_url: https://mcp.example.com/.well-known/openid-configuration
+    required_issuer: https://mcp.example.com
+    required_audience: http://mcp-upstream.internal:3001/mcp
+    subject_key: sub
+    roles_key: roles
+```
+
+**Go: go-oidc** (v3.21.0). Discovery checks that the document's `issuer` is the one given. byward's
+metadata does not list `id_token_signing_alg_values_supported`, so name ES256, and check `typ`
+yourself: go-oidc does not.
+
+```go
+provider, err := oidc.NewProvider(ctx, "https://mcp.example.com") // fetches the discovery document
+if err != nil {
+	return err
+}
+v := provider.Verifier(&oidc.Config{
+	ClientID:             "http://mcp-upstream.internal:3001/mcp", // aud: byward's BYWARD_UPSTREAM_URL
+	SupportedSigningAlgs: []string{oidc.ES256},
+})
+tok, err := v.Verify(ctx, raw) // checks the signature, iss, aud and exp; tok.Subject is the user key
+```
+
+Without discovery, `oidc.NewVerifier("https://mcp.example.com", oidc.NewRemoteKeySet(ctx, jwksURL), cfg)`
+does the same with the JWKS URL given directly.
