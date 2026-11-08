@@ -26,8 +26,12 @@ type proxy struct {
 	htmlMetadata   bool // every metadata document is an HTML page, as a misrouted ingress serves
 	// jwksKey, when set, is the key ID the JWKS serves, and the server metadata names jwks_uri.
 	jwksKey   string
-	noJWKSURI bool // jwks_uri left out although there is a JWKS
-	jwks404   bool // jwks_uri named, but nothing served there
+	noJWKSURI bool   // jwks_uri left out although there is a JWKS
+	jwks404   bool   // jwks_uri named, but nothing served there
+	jwksURI   string // overrides the advertised jwks_uri
+	hugeJWKS  bool
+	// noOpenIDJWKS leaves jwks_uri out of the OpenID document only, keeping it in RFC 8414's.
+	noOpenIDJWKS bool
 }
 
 func (p proxy) handler(origin string) http.Handler {
@@ -65,8 +69,12 @@ func (p proxy) handler(origin string) http.Handler {
 		if p.noRevocation {
 			delete(doc, "revocation_endpoint")
 		}
-		if p.jwksKey != "" && !p.noJWKSURI {
+		openIDWithout := p.noOpenIDJWKS && r.URL.Path == "/.well-known/openid-configuration"
+		if p.jwksKey != "" && !p.noJWKSURI && !openIDWithout {
 			doc["jwks_uri"] = origin + "/.well-known/jwks.json"
+			if p.jwksURI != "" {
+				doc["jwks_uri"] = p.jwksURI
+			}
 		}
 		_ = json.NewEncoder(w).Encode(doc)
 	}
@@ -84,6 +92,10 @@ func (p proxy) handler(origin string) http.Handler {
 	mux.HandleFunc("GET /.well-known/jwks.json", func(w http.ResponseWriter, r *http.Request) {
 		if p.jwksKey == "" || p.jwks404 {
 			http.NotFound(w, r)
+			return
+		}
+		if p.hugeJWKS {
+			_, _ = w.Write([]byte(`{"keys":[],"padding":"` + strings.Repeat("x", maxMetadata) + `"}`))
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]any{{"kty": "EC", "kid": p.jwksKey}}})
@@ -263,11 +275,16 @@ func TestSelfProbeFollowsDiscoveryToTheAssertionKey(t *testing.T) {
 		inMessage string
 		inFix     string
 	}{
-		"no jwks_uri":         {proxy{jwksKey: "k1", noJWKSURI: true}, "does not name the issuer", "pass this path through unchanged"},
-		"another issuer":      {proxy{jwksKey: "k1", issuer: "https://other.example"}, "does not name the issuer", "pass this path through unchanged"},
-		"the JWKS is missing": {proxy{jwksKey: "k1", jwks404: true}, "answered 404", "route /.well-known/"},
-		"another key":         {proxy{jwksKey: "k0"}, "does not serve the signing key k1", "route /.well-known/jwks.json on this host to the proxy"},
-		"not JSON":            {proxy{jwksKey: "k1", htmlMetadata: true}, "does not name the issuer", "pass this path through unchanged"},
+		"no jwks_uri":                          {proxy{jwksKey: "k1", noJWKSURI: true}, "does not name the issuer", "pass this path through unchanged"},
+		"another issuer":                       {proxy{jwksKey: "k1", issuer: "https://other.example"}, "does not name the issuer", "pass this path through unchanged"},
+		"the JWKS is missing":                  {proxy{jwksKey: "k1", jwks404: true}, "answered 404", "route /.well-known/"},
+		"another key":                          {proxy{jwksKey: "k0"}, "does not serve the signing key k1", "route /.well-known/jwks.json on this host to the proxy"},
+		"not JSON":                             {proxy{jwksKey: "k1", htmlMetadata: true}, "does not name the issuer", "pass this path through unchanged"},
+		"discovery refused":                    {proxy{jwksKey: "k1", misdirect: true}, "answered 421", "HOSTS_SETTING"},
+		"discovery too large":                  {proxy{jwksKey: "k1", hugeMetadata: true}, "larger than", "pass this path through unchanged"},
+		"the JWKS too large":                   {proxy{jwksKey: "k1", hugeJWKS: true}, "larger than", "pass this path through unchanged"},
+		"jwks_uri only in RFC 8414's document": {proxy{jwksKey: "k1", noOpenIDJWKS: true}, "does not name the issuer", "pass this path through unchanged"},
+		"jwks_uri unreachable":                 {proxy{jwksKey: "k1", jwksURI: "http://127.0.0.1:1/.well-known/jwks.json"}, "cannot reach http://127.0.0.1:1/.well-known/jwks.json", "start the proxy"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := probeSigning(t, tc.p, "k1")[keysByDisco]
@@ -275,5 +292,13 @@ func TestSelfProbeFollowsDiscoveryToTheAssertionKey(t *testing.T) {
 				t.Fatalf("%+v\nwant fail, message with %q, fix with %q", got, tc.inMessage, tc.inFix)
 			}
 		})
+	}
+}
+
+// A proxy that does not answer fails the discovery check too, saying to start it.
+func TestSelfProbeOfAnUnreachableProxyFailsTheDiscoveryCheck(t *testing.T) {
+	got := probeTarget(t, "http://127.0.0.1:1", http.DefaultClient, "k1")[keysByDisco]
+	if got.Status != Fail || !strings.Contains(got.Message, "cannot reach") || !strings.Contains(got.Fix, "start the proxy") {
+		t.Fatalf("%+v", got)
 	}
 }
