@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os/exec"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -589,7 +590,7 @@ func TestInitializeThatCannotStartOrReachTheUpstreamProcessIs502WithoutAnMCPSess
 	}{
 		"start fails": {start: func(*exec.Cmd) error { return errors.New("exec failed") }},
 		"stdin closed": {start: func(c *exec.Cmd) error {
-			c.Stdin = nil // the process reads /dev/null; nothing holds the pipe's read end, so the write fails
+			c.Stdin = nil // the process reads /dev/null and exits: the write fails, or it has ended already
 			return c.Start()
 		}},
 		"exits before answering": {command: []string{fakeBin, "-mcp", "-init=exit"}},
@@ -614,19 +615,24 @@ func TestInitializeThatCannotStartOrReachTheUpstreamProcessIs502WithoutAnMCPSess
 }
 
 func TestARequestOnASessionWhoseProcessHasAlreadyEndedIs502ForInitializeAnd404Otherwise(t *testing.T) {
-	// White-box: the process can end between starting the session and registering the request,
-	// and only then. An initialize must not get the 404 a dual-era client reads as a legacy
-	// HTTP+SSE server; any later request gets 404 and the client starts again.
+	// White-box: an initialize finds its session ended only if the process ends between starting
+	// the session and registering the request. It must not get the 404 a dual-era client reads as
+	// a legacy HTTP+SSE server; any later request gets 404 and the client starts again.
 	for _, tc := range []struct {
 		initialize bool
+		body       string
 		want       int
-	}{{true, http.StatusBadGateway}, {false, http.StatusNotFound}} {
-		s := &session{log: slog.New(slog.DiscardHandler), byID: map[string]*stream{}}
+	}{{true, initialize, http.StatusBadGateway}, {false, `{"jsonrpc":"2.0","id":0,"method":"tools/list"}`, http.StatusNotFound}} {
+		log := &recorder{mu: &sync.Mutex{}, recs: &[]record{}}
+		s := &session{log: slog.New(log), byID: map[string]*stream{}}
 		s.end()
 		rec := httptest.NewRecorder()
-		s.request(rec, httptest.NewRequest(http.MethodPost, "/", nil), []byte(initialize), json.RawMessage(`1`), tc.initialize)
+		s.request(rec, httptest.NewRequest(http.MethodPost, "/", nil), []byte(tc.body), json.RawMessage(`0`), tc.initialize)
 		if rec.Code != tc.want || rec.Header().Get(sessionHeader) != "" {
 			t.Errorf("initialize %v: status %d, session %q; want %d and no session ID", tc.initialize, rec.Code, rec.Header().Get(sessionHeader), tc.want)
+		}
+		if failed := log.with("initialize failed: no MCP session"); tc.initialize != (len(failed) == 1 && failed[0].attrs["reason"] == "session_ended") {
+			t.Errorf("initialize %v: logged %v", tc.initialize, failed)
 		}
 	}
 }

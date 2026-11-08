@@ -332,20 +332,6 @@ func (st *stream) end() { st.once.Do(func() { close(st.done) }) }
 // back, since an upstream may wait for a ping to be answered. Either way, an initialize that ends
 // without a result stops the process, so the ID leads nowhere: the client gets 404 and starts again.
 func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id json.RawMessage, initialize bool) {
-	st := newStream(id)
-	if !s.addPost(st) {
-		if s.isEnded() && initialize { // the process ended before its initialize could go out
-			s.log.WarnContext(r.Context(), "initialize failed: no MCP session", "request_id", logging.RequestID(r.Context()), "reason", "process_ended")
-			http.Error(w, "upstream unavailable", http.StatusBadGateway)
-			return
-		}
-		if s.isEnded() {
-			http.Error(w, "session not found", http.StatusNotFound)
-			return
-		}
-		writeRPCError(w, http.StatusBadRequest, id, codeInvalidRequest, "a request with this id is already in flight")
-		return
-	}
 	// For initialize, every way out but a written result stops the process, unless the process is
 	// already ending (stop says so), which keeps a crash logged as a crash.
 	succeeded, stop, reason := false, true, "client_disconnected"
@@ -358,6 +344,19 @@ func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id
 				s.log.WarnContext(r.Context(), "initialize failed: no MCP session", "request_id", logging.RequestID(r.Context()), "reason", reason)
 			}
 		}()
+	}
+	st := newStream(id)
+	if !s.addPost(st) {
+		switch {
+		case s.isEnded() && initialize: // the process ended before its initialize could go out
+			stop, reason = false, "session_ended"
+			http.Error(w, "upstream unavailable", http.StatusBadGateway)
+		case s.isEnded():
+			http.Error(w, "session not found", http.StatusNotFound)
+		default:
+			writeRPCError(w, http.StatusBadRequest, id, codeInvalidRequest, "a request with this id is already in flight")
+		}
+		return
 	}
 	if err := s.p.Send(r.Context(), msg); err != nil {
 		s.dropPost(st)
