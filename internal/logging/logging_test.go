@@ -61,6 +61,8 @@ func TestOnlyCredentialShapedValuesAreRedacted(t *testing.T) {
 		"a spaced-header JWT cut short":     {value: "stderr: token=eyAiYWxnIjoiUlMyNTYifQ.eyJzdWIiOiJ4", logged: redacted},
 		"a JWE with no encrypted key":       {value: "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..aXY.Y3Q.dGFn", logged: redacted},
 		"a Bearer value":                    {value: "Bearer opaque-token", logged: redacted},
+		"a lowercase bearer value":          {value: "authorization: bearer opaque-token", logged: redacted},
+		"a lowercase basic value":           {value: "authorization: basic dXNlcjpwdw==", logged: redacted},
 		"a Basic value":                     {value: "Basic dXNlcjpwdw==", logged: redacted},
 		"a JWT inside a message":            {value: "upstream rejected " + token + " as expired", logged: redacted},
 		"a JWT inside an error":             {value: errors.New("verify " + token + ": expired"), logged: redacted},
