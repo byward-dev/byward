@@ -240,15 +240,16 @@ func TestMalformedPostsAre400AndStartNothing(t *testing.T) {
 }
 
 func TestAmbiguousMessagesInASessionAreRefused(t *testing.T) {
-	// In a session these would be relayed (202) if the ambiguity were not caught for every kind.
+	// In a session these would be relayed (202, or 200 for a request) if the ambiguity were not caught
+	// for every kind; an upstream that reads only the exact key would never answer such a request.
 	b := newBridge(t, nil)
 	session := b.initialize(t, "alice")
 	for name, body := range map[string]string{
-		"notification with the method also in another case":                     `{"jsonrpc":"2.0","method":"notifications/x","METHOD":"notifications/y"}`,
-		"response with a top-level key repeated":                                `{"jsonrpc":"2.0","id":1,"result":{},"result":{"a":1}}`,
-		"request with the id in another case (the upstream would never answer)": `{"jsonrpc":"2.0","ID":2,"method":"tools/list"}`,
-		"response with the id in another case":                                  `{"jsonrpc":"2.0","ID":1,"result":{}}`,
-		"request with the id in another case, title case":                       `{"jsonrpc":"2.0","Id":3,"method":"tools/list"}`,
+		"notification with the method also in another case": `{"jsonrpc":"2.0","method":"notifications/x","METHOD":"notifications/y"}`,
+		"response with a top-level key repeated":            `{"jsonrpc":"2.0","id":1,"result":{},"result":{"a":1}}`,
+		"request with the id in another case":               `{"jsonrpc":"2.0","ID":2,"method":"tools/list"}`,
+		"response with the id in another case":              `{"jsonrpc":"2.0","ID":1,"result":{}}`,
+		"request with the id in another case, title case":   `{"jsonrpc":"2.0","Id":3,"method":"tools/list"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			res := b.post(t, "alice", session, body)
