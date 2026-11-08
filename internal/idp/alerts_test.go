@@ -4,48 +4,74 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 )
 
-// #204: Alerts lists every Alert constant, so metrics export each reason at 0 from the start; a
-// reason added to errors.go without joining Alerts would appear only at its first alert.
+// #204: Alerts lists every Alert constant of the package, so metrics export each reason at 0 from
+// the start; a reason declared without joining Alerts would appear only at its first alert.
 func TestAlertsListsEveryAlertReason(t *testing.T) {
-	f, err := parser.ParseFile(token.NewFileSet(), "errors.go", nil, 0)
+	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	n := 0
-	for _, d := range f.Decls {
-		g, ok := d.(*ast.GenDecl)
-		if !ok || g.Tok != token.CONST {
+	var declared []string
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		for _, s := range g.Specs {
-			v := s.(*ast.ValueSpec)
-			if id, ok := v.Type.(*ast.Ident); !ok || id.Name != "Alert" {
-				continue
-			}
-			for _, name := range v.Names {
-				n++
-				if !slices.ContainsFunc(Alerts, func(a Alert) bool { return string(a) == constValue(t, v, name) }) {
-					t.Errorf("the Alert constant %s is not in Alerts", name.Name)
+		f, err := parser.ParseFile(token.NewFileSet(), name, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range f.Decls {
+			if g, ok := d.(*ast.GenDecl); ok && g.Tok == token.CONST {
+				for _, s := range g.Specs {
+					declared = append(declared, alertConsts(t, s.(*ast.ValueSpec))...)
 				}
 			}
 		}
 	}
-	if n != len(Alerts) {
-		t.Errorf("errors.go declares %d Alert constants, Alerts lists %d", n, len(Alerts))
+	for _, v := range declared {
+		if !slices.Contains(Alerts, Alert(v)) {
+			t.Errorf("the Alert constant %q is not in Alerts", v)
+		}
+	}
+	if len(declared) != len(Alerts) {
+		t.Errorf("the package declares %d Alert constants %v, Alerts lists %d", len(declared), declared, len(Alerts))
 	}
 }
 
-// constValue is the string literal name is declared with in v.
-func constValue(t *testing.T, v *ast.ValueSpec, name *ast.Ident) string {
+// alertConsts is the values of the Alert constants in v: typed (`X Alert = "x"`) or converted
+// (`X = Alert("x")`).
+func alertConsts(t *testing.T, v *ast.ValueSpec) []string {
 	t.Helper()
-	i := slices.Index(v.Names, name)
-	lit, ok := v.Values[i].(*ast.BasicLit)
-	if !ok || lit.Kind != token.STRING {
-		t.Fatalf("%s is not declared with a string literal", name.Name)
+	typed := false
+	if id, ok := v.Type.(*ast.Ident); ok && id.Name == "Alert" {
+		typed = true
 	}
-	return lit.Value[1 : len(lit.Value)-1]
+	var out []string
+	for _, e := range v.Values {
+		if c, ok := e.(*ast.CallExpr); ok && !typed {
+			if id, ok := c.Fun.(*ast.Ident); !ok || id.Name != "Alert" || len(c.Args) != 1 {
+				continue
+			}
+			e = c.Args[0]
+		} else if !typed {
+			continue
+		}
+		lit, ok := e.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			t.Fatalf("an Alert constant is not declared with a string literal: %#v", e)
+		}
+		s, err := strconv.Unquote(lit.Value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, s)
+	}
+	return out
 }
