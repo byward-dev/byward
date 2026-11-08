@@ -19,6 +19,8 @@ type Config struct {
 	// UpstreamCredential is the operator's header value for the HTTP upstream, sent in
 	// UpstreamCredentialHeader (ADR-0016 §7); "" when there is none. Never logged.
 	UpstreamCredential, UpstreamCredentialHeader string
+	// UpstreamStripHeaders are the operator's extra request headers the relay removes, canonical.
+	UpstreamStripHeaders []string
 	// A stdio upstream (ADR-0003): its argv, the operator env of its processes and its caps.
 	UpstreamCommand                    []string
 	UpstreamEnv                        map[string]string

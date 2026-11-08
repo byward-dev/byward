@@ -39,6 +39,8 @@ func TestRelayForwardsBodyVerbatimAndStripsProxyHeaders(t *testing.T) {
 	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"_meta":{"traceparent":"00-abc-def-01"}}}`)
 	r := httptest.NewRequest("POST", "https://mcp.example.com/mcp?x=1&access_token=leak", bytes.NewReader(body))
 	r.Header.Set("Authorization", "Bearer secret")
+	r.Header.Set("DPoP", "proof-bound-to-the-clients-token")
+	r.Header["Dpop"] = append(r.Header["Dpop"], "second")
 	r.Header.Set("Forwarded", "for=1.2.3.4")
 	r.Header.Set("X-Forwarded-For", "1.2.3.4")
 	r.Header.Set("X-Forwarded-User", "admin")
@@ -64,7 +66,7 @@ func TestRelayForwardsBodyVerbatimAndStripsProxyHeaders(t *testing.T) {
 	}
 	for k := range got.Header {
 		n := strings.ReplaceAll(k, "_", "-")
-		if n == "Authorization" || k == "Forwarded" || k == "Origin" || strings.HasPrefix(n, "X-Forwarded-") || strings.HasPrefix(k, "Sec-Fetch-") {
+		if n == "Authorization" || strings.EqualFold(k, "Dpop") || k == "Forwarded" || k == "Origin" || strings.HasPrefix(n, "X-Forwarded-") || strings.HasPrefix(k, "Sec-Fetch-") {
 			t.Fatalf("header %s reached the upstream", k)
 		}
 	}
@@ -645,5 +647,53 @@ func TestAnUpstreamRedirectGetsTheClientA502AndTheLogWhereItPointed(t *testing.T
 				t.Fatalf("log %q names a secret or logs the redirect twice", logs.String())
 			}
 		})
+	}
+}
+
+// An operator-listed header never reaches the upstream in any case or spelling, and every header
+// it does not name, MCP's own among them, still does.
+func TestAnOperatorListedHeaderNeverReachesTheUpstreamInAnySpelling(t *testing.T) {
+	up := fakeupstream.New()
+	t.Cleanup(up.Close)
+	u, _ := url.Parse(up.URL + "/mcp")
+	r := httptest.NewRequest(http.MethodPost, "https://mcp.example.com/mcp", strings.NewReader("{}"))
+	r.Header["X-Argocd-Base-Url"] = []string{"https://evil.example"}
+	r.Header["x_argocd_base_url"] = []string{"https://evil.example"}
+	r.Header["TFE_TOKEN"] = []string{"forged"}
+	for _, h := range []string{"Mcp-Session-Id", "Mcp-Protocol-Version", "Mcp-Method", "Mcp-Name", "Mcp-Param-Region", "X-Argocd-Other"} {
+		r.Header.Set(h, "kept")
+	}
+	New(quiet(), u, WithStripped("X-Argocd-Base-Url", "Tfe-Token")).ServeHTTP(httptest.NewRecorder(), r)
+	got, ok := up.Last()
+	if !ok {
+		t.Fatal("nothing reached the upstream")
+	}
+	for k, v := range got.Header {
+		if n := canonical(k); n == "X-Argocd-Base-Url" || n == "Tfe-Token" {
+			t.Fatalf("%s = %q reached the upstream", k, v)
+		}
+	}
+	for _, h := range []string{"Mcp-Session-Id", "Mcp-Protocol-Version", "Mcp-Method", "Mcp-Name", "Mcp-Param-Region", "X-Argocd-Other"} {
+		if got.Header.Get(h) != "kept" {
+			t.Fatalf("%s did not reach the upstream: %v", h, got.Header)
+		}
+	}
+}
+
+// Strips answers as the relay strips: the built-in names and families, and the names given, in any
+// spelling.
+func TestStripsReportsWhatTheRelayRemoves(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		extra []string
+		want  bool
+	}{
+		{"authorization", nil, true}, {"DPoP", nil, true}, {"x_forwarded_host", nil, true}, {"Sec-Fetch-Site", nil, true},
+		{"origin", nil, true}, {"Forwarded", nil, true},
+		{"X_Api_Key", []string{"X-Api-Key"}, true}, {"X-Api-Key", nil, false}, {"Mcp-Session-Id", nil, false},
+	} {
+		if got := Strips(tc.name, tc.extra...); got != tc.want {
+			t.Errorf("Strips(%q, %q) = %v, want %v", tc.name, tc.extra, got, tc.want)
+		}
 	}
 }

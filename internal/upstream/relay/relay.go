@@ -19,12 +19,13 @@ import (
 )
 
 // stripped are removed from every inbound request before anything of ours is set (invariant 16):
-// credentials, forwarding headers (any `X-Forwarded-*`), and the browser headers the proxy has
+// credentials (`DPoP` is a proof bound to the client's token, which never reaches the upstream),
+// forwarding headers (any `X-Forwarded-*`), and the browser headers the proxy has
 // already checked. `Origin` and `Sec-Fetch-*` would make SDK servers with their own cross-origin
 // protection reject requests the proxy allowed (TS `createMcpExpressApp`, Go
 // `http.CrossOriginProtection`). Names are compared with `_` read as `-`, because some upstream
 // frameworks treat the two alike (the oauth2-proxy CVE-2025-64484 bypass).
-var stripped = map[string]bool{"Authorization": true, "Forwarded": true, "Origin": true}
+var stripped = map[string]bool{"Authorization": true, "Dpop": true, "Forwarded": true, "Origin": true}
 
 var errUpstreamRefused = errors.New("upstream refused the proxy and the request id is unknown")
 
@@ -308,11 +309,27 @@ func withoutAccessToken(raw string) string {
 
 func strip(h http.Header, extra map[string]bool) {
 	for k := range h {
-		n := canonical(k)
-		if stripped[n] || extra[n] || strings.HasPrefix(n, "X-Forwarded-") || strings.HasPrefix(n, "Sec-Fetch-") {
+		if n := canonical(k); builtIn(n) || extra[n] {
 			delete(h, k)
 		}
 	}
+}
+
+// builtIn reports whether the relay always removes the header named n, in canonical form.
+func builtIn(n string) bool {
+	return stripped[n] || strings.HasPrefix(n, "X-Forwarded-") || strings.HasPrefix(n, "Sec-Fetch-")
+}
+
+// Strips reports whether the relay removes the header name from every inbound request, compared
+// as it compares them: by the built-in list, or as one of extra (the names given WithStripped).
+func Strips(name string, extra ...string) bool {
+	n := canonical(name)
+	for _, e := range extra {
+		if canonical(e) == n {
+			return true
+		}
+	}
+	return builtIn(n)
 }
 
 // canonical is a header name as strip compares it: `_` read as `-`, canonical case.
