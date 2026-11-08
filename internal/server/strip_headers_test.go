@@ -73,8 +73,8 @@ func TestTheOperatorsStripListIsAppliedAndARedundantEntryIsNamed(t *testing.T) {
 	}
 }
 
-// doctor names a redundant entry as a configuration warning, with and without authentication.
-func TestDoctorNamesARedundantStripEntry(t *testing.T) {
+// doctor and check --offline name a redundant entry as a warning, with and without authentication.
+func TestDoctorAndCheckNameARedundantStripEntry(t *testing.T) {
 	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
 		fakeidp.WithClient(fakeidp.Client{ID: "00000000-0000-0000-0000-000000000002", Secrets: []string{"s3cret-entra"}}))
 	strip := "BYWARD_UPSTREAM_STRIP_HEADERS=X-Argocd-Base-Url,authorization"
@@ -103,6 +103,19 @@ func TestDoctorNamesARedundantStripEntry(t *testing.T) {
 			}
 			if len(named) != 1 || !strings.HasPrefix(named[0], "Authorization ") {
 				t.Fatalf("redundant entries named %q, want Authorization alone", named)
+			}
+			warnings, err := CheckOffline(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var offline []string
+			for _, w := range warnings {
+				if w.Setting == "BYWARD_UPSTREAM_STRIP_HEADERS" {
+					offline = append(offline, w.Message)
+				}
+			}
+			if len(offline) != 1 || !strings.HasPrefix(offline[0], "Authorization ") {
+				t.Fatalf("check --offline names %q, want Authorization alone", offline)
 			}
 		})
 	}
