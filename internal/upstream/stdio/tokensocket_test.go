@@ -407,13 +407,15 @@ func TestARefusedPeerThatSendsNothingIsAnsweredSoonAndClosed(t *testing.T) {
 }
 
 // A refused peer's request larger than the socket buffer is drained too, so its write completes
-// and it reads the refusal.
+// and it reads the refusal. The buffer is shrunk to 4 KiB: Linux's default (about 208 KiB) would
+// hold the whole request without byward reading it.
 func TestARefusedPeerWithALargeRequestStillReadsTheRefusal(t *testing.T) {
 	c, err := net.Dial("unix", serveFor(t, stranger(t), &tokens{}, &recorder{mu: &sync.Mutex{}, recs: &[]record{}}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = c.Close() }()
+	_ = c.(*net.UnixConn).SetWriteBuffer(4 << 10)
 	_ = c.SetDeadline(time.Now().Add(guard))
 	if _, err := c.Write([]byte(`{"pad":"` + strings.Repeat("x", 48<<10) + `"}` + "\n")); err != nil {
 		t.Fatalf("writing a 48 KiB request: %v, want it accepted", err)
