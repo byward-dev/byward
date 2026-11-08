@@ -98,3 +98,13 @@ Decisions 1 and 5 as "v0.2".
     unauthenticated flush would let anyone force exchanges for every user.
   - The `tenant` it returns is never used.
   - The `/callback/entra` rate limit covers it.
+
+## Amendment 2026-11-08 (#195: the downstream token in `Authorization`)
+
+§3 and the 2026-11-07 settings note said the downstream token is never in `Authorization`. Most
+Entra-protected MCP servers read the user's token from `Authorization: Bearer` and call their API
+with it, so `BYWARD_OBO_HEADER=Authorization` is now allowed while `BYWARD_ASSERTION_HEADER` and
+`BYWARD_UPSTREAM_CREDENTIAL_HEADER` use other headers; the identity assertion then travels in its own
+header. The rule's purpose holds: the client's own `Authorization` is always removed before byward
+sets its headers (invariant 1), so the upstream sees only the downstream token, and an app-only
+caller, which gets none, sends no `Authorization` at all.

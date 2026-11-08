@@ -47,7 +47,23 @@ X-Byward-Downstream-Token: Bearer <token for the downstream API>
 
 - Use the value as the `Authorization` header of your call to the downstream API.
 - The header name is `BYWARD_OBO_HEADER`. It must differ from the identity assertion's header
-  (`BYWARD_ASSERTION_HEADER`) and from `Authorization`.
+  (`BYWARD_ASSERTION_HEADER`) and from the upstream credential's (`BYWARD_UPSTREAM_CREDENTIAL_HEADER`).
+
+### An upstream that reads the user's token from `Authorization`
+
+Many Entra-protected MCP servers expect the user's token in `Authorization: Bearer`, and call the
+downstream API with it. Give them the downstream token there, and move the identity assertion to a
+header of its own:
+
+```
+BYWARD_ASSERTION_HEADER=X-Byward-Assertion
+BYWARD_OBO_HEADER=Authorization
+```
+
+The upstream then gets exactly one `Authorization`, `Bearer <token for the downstream API>`; the
+client's own `Authorization` (byward's access token) is always removed first. An app-only caller
+([app-only tokens](app-tokens.md)) gets no downstream token, so its requests reach the upstream
+without `Authorization`.
 - A client can never supply it. Every inbound copy is removed, even while On-Behalf-Of is off.
 - The token is for the user who made the MCP request. byward keeps it in memory, per replica, until
   a minute before it expires. It is never stored or logged.
