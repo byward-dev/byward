@@ -598,14 +598,16 @@ func TestAnUpstreamRedirectGetsTheClientA502AndTheLogWhereItPointed(t *testing.T
 		location string
 		logged   string // in the log's reason; "" for a 304
 	}{
-		{"to https", http.StatusMovedPermanently, "https://mcp.internal.example/mcp", "points to https://mcp.internal.example/mcp; if that is its MCP endpoint, set BYWARD_UPSTREAM_URL to it"},
+		{"moved permanently, with the fix", http.StatusMovedPermanently, "https://mcp.internal.example/mcp", "points to https://mcp.internal.example/mcp; if that is its MCP endpoint, set BYWARD_UPSTREAM_URL to it"},
 		{"found", http.StatusFound, "https://mcp.internal.example/mcp", "points to https://mcp.internal.example/mcp;"},
 		{"see other", http.StatusSeeOther, "https://mcp.internal.example/mcp", "points to https://mcp.internal.example/mcp;"},
 		{"temporary", http.StatusTemporaryRedirect, "https://mcp.internal.example/mcp", "points to https://mcp.internal.example/mcp;"},
 		{"permanent", http.StatusPermanentRedirect, "https://mcp.internal.example/mcp", "points to https://mcp.internal.example/mcp;"},
 		{"multiple choices", http.StatusMultipleChoices, "https://mcp.internal.example/mcp", "points to https://mcp.internal.example/mcp;"},
 		{"relative", http.StatusPermanentRedirect, "/mcp/", "points to " + up.URL + "/mcp/;"},
-		{"with a secret", http.StatusFound, "https://user:pw-secret@sso.example/login?code=code-secret#frag-secret", "points to https://sso.example/login;"},
+		{"userinfo, query and fragment are dropped", http.StatusFound, "https://user:pw-secret@sso.example/login?code=code-secret#frag-secret", "points to https://sso.example/login;"},
+		{"path parameters are dropped", http.StatusFound, "/cb;jsessionid=sess-secret", "points to " + up.URL + "/cb;"},
+		{"an opaque Location is not logged", http.StatusFound, "https:tok-secret", "the upstream sent no usable Location"},
 		{"without a Location", http.StatusFound, "", "the upstream sent no usable Location"},
 		{"not modified", http.StatusNotModified, "", ""},
 	} {
@@ -629,7 +631,7 @@ func TestAnUpstreamRedirectGetsTheClientA502AndTheLogWhereItPointed(t *testing.T
 			if w.Code != http.StatusBadGateway || w.Header().Get("Location") != "" || strings.Contains(w.Body.String(), "example") {
 				t.Fatalf("status %d, Location %q, body %q; want 502 that names nothing of the upstream's", w.Code, w.Header().Get("Location"), w.Body)
 			}
-			if !strings.Contains(logs.String(), "upstream redirected the request") || !strings.Contains(logs.String(), tc.logged) ||
+			if !strings.Contains(logs.String(), `level=ERROR msg="upstream redirected the request"`) || !strings.Contains(logs.String(), tc.logged) ||
 				!strings.Contains(logs.String(), "status="+strconv.Itoa(tc.status)) {
 				t.Fatalf("log %q; want the redirect, its status and %q", logs.String(), tc.logged)
 			}

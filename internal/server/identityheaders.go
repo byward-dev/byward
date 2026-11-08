@@ -77,9 +77,10 @@ func percentEncode(s string) string {
 var cgnat = netip.MustParsePrefix("100.64.0.0/10")
 
 // notPublic reports whether a is an address the internet cannot reach directly: loopback,
-// private, link-local or shared (CGNAT).
+// private, link-local, shared (CGNAT), or unspecified (0.0.0.0 and ::, which a dial sends to the
+// local host).
 func notPublic(a netip.Addr) bool {
-	return a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || cgnat.Contains(a)
+	return a.IsLoopback() || a.IsPrivate() || a.IsLinkLocalUnicast() || cgnat.Contains(a) || a.IsUnspecified()
 }
 
 // identityHeadersResult is doctor's hint for the upstream's host for BYWARD_IDENTITY_HEADERS (ADR-0016 §5): the plain
@@ -106,6 +107,6 @@ func identityHeadersResult(ctx context.Context, host string, resolve func(contex
 			return r
 		}
 	}
-	r.Message, r.Fix = fmt.Sprintf("plain identity headers are on; the upstream host %s has only loopback, private, link-local or shared addresses (%s)", host, hint), ""
+	r.Message, r.Fix = fmt.Sprintf("plain identity headers are on; the upstream host %s has only loopback, private, link-local, shared or unspecified addresses (%s)", host, hint), ""
 	return r
 }

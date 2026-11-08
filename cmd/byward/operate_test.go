@@ -1,8 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/netip"
+	"net/url"
 	"os"
 	"slices"
 	"strings"
@@ -24,10 +28,14 @@ func (refusing) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, http.ErrServerClosed
 }
 
-// TestMain points doctor at refusing transports, so a test that forgets useFakes fails instead of
-// reaching Entra or anything else on the network.
+// TestMain points doctor at refusing transports and a resolver that resolves nothing, so a test
+// that forgets useFakes fails instead of reaching Entra or anything else on the network.
 func TestMain(m *testing.M) {
-	doctorOptions = server.DoctorOptions{IdP: &http.Client{Transport: refusing{}}, Proxy: &http.Client{Transport: refusing{}}}
+	doctorOptions = server.DoctorOptions{IdP: &http.Client{Transport: refusing{}}, Proxy: &http.Client{Transport: refusing{}},
+		Resolve: func(context.Context, string) ([]netip.Addr, error) {
+			return nil, errors.New("the tests resolve no names")
+		},
+		UpstreamProxy: func(*http.Request) (*url.URL, error) { return nil, nil }}
 	os.Exit(m.Run())
 }
 

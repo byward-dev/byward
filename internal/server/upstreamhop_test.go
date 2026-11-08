@@ -8,12 +8,15 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
 // resolvesTo is a resolver that knows one host name.
@@ -30,6 +33,13 @@ func resolvesTo(host string, addrs ...string) func(context.Context, string) ([]n
 	}
 }
 
+// withResolver makes the package's system resolver resolve for the test.
+func withResolver(t *testing.T, resolve func(context.Context, string) ([]netip.Addr, error)) {
+	prev := lookupNetIP
+	lookupNetIP = resolve
+	t.Cleanup(func() { lookupNetIP = prev })
+}
+
 func hopConfig(t *testing.T, upstream string, edit func(*config.Config)) *config.Config {
 	t.Helper()
 	u, err := url.Parse(upstream)
@@ -43,6 +53,28 @@ func hopConfig(t *testing.T, upstream string, edit func(*config.Config)) *config
 	return cfg
 }
 
+// noAuthHopConfig is a configuration without authentication whose HTTP upstream gets the operator
+// credential.
+func noAuthHopConfig(t *testing.T, upstream string) *config.Config {
+	t.Helper()
+	cfg, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=" + upstream,
+		"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credentialFile(t, 0o600)}, os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+// authHopConfig is a configuration with authentication: every request carries the assertion.
+func authHopConfig(t *testing.T, upstream string) *config.Config {
+	t.Helper()
+	cfg, _, err := config.Load(nil, append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+upstream), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
 // A plain-http upstream at a public address is warned about, naming each secret that travels in
 // clear; one the internet cannot reach directly, one reached over https, one that does not
 // resolve and one that gets no secret are not.
@@ -51,15 +83,15 @@ func TestAPlainHTTPUpstreamAtAPublicAddressIsWarnedAbout(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		upstream string
-		resolve  func(context.Context, string) ([]netip.Addr, error)
+		resolve  func(context.Context, string) ([]netip.Addr, error) // nil: must not be asked
 		edit     func(*config.Config)
 		want     string // in the message; "" for no warning
 	}{
 		{"public by name", "http://mcp.example.com/mcp", resolvesTo("mcp.example.com", "203.0.113.7"), nil, "public address 203.0.113.7 (mcp.example.com), so these travel in clear: the identity assertion"},
 		{"public among private", "http://mcp.example.com/mcp", resolvesTo("mcp.example.com", "10.0.0.7", "203.0.113.7"), nil, "203.0.113.7"},
 		{"public as a mapped address", "http://mcp.example.com/mcp", resolvesTo("mcp.example.com", "::ffff:203.0.113.7"), nil, "public address 203.0.113.7 "},
-		{"public literal", "http://203.0.113.7:8080/mcp", resolvesTo("none"), nil, "203.0.113.7"},
-		{"public IPv6 literal", "http://[2001:db8::7]/mcp", resolvesTo("none"), nil, "2001:db8::7"},
+		{"public literal", "http://203.0.113.7:8080/mcp", nil, nil, "203.0.113.7"},
+		{"public IPv6 literal", "http://[2001:db8::7]/mcp", nil, nil, "2001:db8::7"},
 		{"every secret", "http://203.0.113.7/mcp", nil, func(c *config.Config) { withCredential(c); c.OBOScopes = []string{"api://x/.default"} },
 			"travel in clear: the identity assertion, the upstream credential, an On-Behalf-Of token for a downstream API"},
 		{"only the credential", "http://203.0.113.7/mcp", nil, func(c *config.Config) { c.NoAuth = true; withCredential(c) }, "travel in clear: the upstream credential"},
@@ -67,8 +99,10 @@ func TestAPlainHTTPUpstreamAtAPublicAddressIsWarnedAbout(t *testing.T) {
 		{"loopback", "http://localhost:9000/mcp", resolvesTo("localhost", "127.0.0.1", "::1"), nil, ""},
 		{"shared (CGNAT)", "http://100.64.0.7/mcp", nil, nil, ""},
 		{"link-local", "http://[fe80::7]/mcp", nil, nil, ""},
+		{"unspecified IPv4", "http://0.0.0.0:8080/mcp", nil, nil, ""},
+		{"unspecified IPv6", "http://[::]:8080/mcp", nil, nil, ""},
 		{"unresolvable", "http://mcp.example.com/mcp", resolvesTo("other.example.com", "203.0.113.7"), nil, ""},
-		{"https", "https://mcp.example.com/mcp", resolvesTo("mcp.example.com", "203.0.113.7"), nil, ""},
+		{"https", "https://mcp.example.com/mcp", nil, nil, ""},
 		{"no secret", "http://203.0.113.7/mcp", nil, func(c *config.Config) { c.NoAuth = true }, ""},
 		{"stdio", "http://203.0.113.7/mcp", nil, func(c *config.Config) { c.UpstreamCommand = []string{"server"} }, ""},
 	} {
@@ -97,23 +131,51 @@ func TestAPlainHTTPUpstreamAtAPublicAddressIsWarnedAbout(t *testing.T) {
 	}
 }
 
-// The proxy logs the warning at startup, from the configuration it starts with.
+// The warning's fix points at a guide section that exists.
+func TestThePlainHTTPWarningPointsAtTheHardeningGuide(t *testing.T) {
+	w, ok := plainHTTPUpstream(context.Background(), hopConfig(t, "http://203.0.113.7/mcp", nil), nil)
+	m := regexp.MustCompile(`(docs/how-to/[a-z-]+\.md), "([^"]+)"`).FindStringSubmatch(w.Fix)
+	if !ok || m == nil {
+		t.Fatalf("fix %q names no guide section", w.Fix)
+	}
+	guide, err := os.ReadFile(filepath.Join("..", "..", m[1]))
+	if err != nil || !regexp.MustCompile(`(?m)^## \d+\. `+regexp.QuoteMeta(m[2])+`$`).Match(guide) {
+		t.Fatalf("%s has no section %q (%v)", m[1], m[2], err)
+	}
+}
+
+// A lookup that hangs is bounded: the resolver is given a deadline.
+func TestThePlainHTTPCheckGivesTheResolverADeadline(t *testing.T) {
+	var bounded bool
+	plainHTTPUpstream(context.Background(), hopConfig(t, "http://mcp.example.com/mcp", nil), func(ctx context.Context, _ string) ([]netip.Addr, error) {
+		_, bounded = ctx.Deadline()
+		return nil, errors.New("timed out")
+	})
+	if !bounded {
+		t.Fatal("the upstream's host was resolved without a deadline")
+	}
+}
+
+// The proxy logs the warning at startup as a warning naming the setting, for an upstream given by
+// name or as an address.
 func TestThePlainHTTPWarningIsLoggedAtStartup(t *testing.T) {
 	for _, tc := range []struct {
+		name     string
 		upstream string
 		warned   bool
-	}{{"http://203.0.113.7:9/mcp", true}, {"http://10.0.0.7:9/mcp", false}} {
-		t.Run(tc.upstream, func(t *testing.T) {
-			cfg, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=" + tc.upstream,
-				"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credentialFile(t, 0o600)}, os.ReadFile)
-			if err != nil {
-				t.Fatal(err)
-			}
+	}{
+		{"a public name warns", "http://mcp.example.com:9/mcp", true},
+		{"a public address warns", "http://203.0.113.7:9/mcp", true},
+		{"a private address is silent", "http://10.0.0.7:9/mcp", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withResolver(t, resolvesTo("mcp.example.com", "203.0.113.7"))
 			var logs bytes.Buffer
-			if _, err := New(cfg, logging.New(&logs, "text")); err != nil {
+			if _, err := New(noAuthHopConfig(t, tc.upstream), logging.New(&logs, "text")); err != nil {
 				t.Fatal(err)
 			}
-			if got := strings.Contains(logs.String(), "travel in clear"); got != tc.warned {
+			line := regexp.MustCompile(`level=WARN msg="[^"]*travel in clear: the upstream credential" setting=BYWARD_UPSTREAM_URL reason=`)
+			if got := line.MatchString(logs.String()); got != tc.warned {
 				t.Fatalf("warned %v, want %v; log %s", got, tc.warned, logs.String())
 			}
 			if strings.Contains(logs.String(), upstreamCredential) {
@@ -123,69 +185,110 @@ func TestThePlainHTTPWarningIsLoggedAtStartup(t *testing.T) {
 	}
 }
 
-// check --offline judges an upstream given as an address, and resolves no name.
+// check --offline judges only an upstream given as an address: a name, even one that resolves to a
+// public address, is not looked up. With authentication it names the assertion.
 func TestCheckOfflineWarnsOfAPlainHTTPUpstreamGivenAsAPublicAddress(t *testing.T) {
 	for _, tc := range []struct {
-		upstream string
-		warned   bool
-	}{{"http://203.0.113.7:9/mcp", true}, {"http://localhost:9/mcp", false}} {
-		t.Run(tc.upstream, func(t *testing.T) {
-			cfg, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=" + tc.upstream,
-				"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credentialFile(t, 0o600)}, os.ReadFile)
+		name string
+		cfg  func(*testing.T, string) *config.Config
+		up   string
+		want string // "" for no warning
+	}{
+		{"a public address warns", noAuthHopConfig, "http://203.0.113.7:9/mcp", "travel in clear: the upstream credential"},
+		{"with authentication, the assertion", authHopConfig, "http://203.0.113.7:9/mcp", "travel in clear: the identity assertion"},
+		{"a name is not resolved", noAuthHopConfig, "http://mcp.example.com:9/mcp", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withResolver(t, resolvesTo("mcp.example.com", "203.0.113.7"))
+			warnings, err := CheckOffline(tc.cfg(t, tc.up))
 			if err != nil {
 				t.Fatal(err)
 			}
-			warnings, err := CheckOffline(cfg)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var got bool
+			var got []string
 			for _, w := range warnings {
-				got = got || strings.Contains(w.Message, "travel in clear")
+				if strings.Contains(w.Message, "travel in clear") {
+					got = append(got, w.Message)
+				}
 			}
-			if got != tc.warned {
-				t.Fatalf("warned %v, want %v: %v", got, tc.warned, warnings)
+			if (tc.want == "") != (len(got) == 0) || (tc.want != "" && !strings.Contains(strings.Join(got, "\n"), tc.want)) {
+				t.Fatalf("hop warnings %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
-// doctor reports the plain-http hop, and names the environment's HTTP proxy the upstream's
-// requests go through, without its password.
-func TestDoctorNamesThePlainHTTPHopAndTheEnvironmentsProxy(t *testing.T) {
-	cfg, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://mcp.example.com/mcp",
-		"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credentialFile(t, 0o600)}, os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+// doctor names the environment's HTTP proxy the upstream's requests go through, by scheme and host
+// alone, and Go's refusal of HTTP_PROXY under CGI.
+func TestDoctorNamesTheEnvironmentsProxyWithoutItsCredentials(t *testing.T) {
+	cfg := noAuthHopConfig(t, "http://10.0.0.7/mcp")
 	for _, tc := range []struct {
-		name   string
-		proxy  func(*http.Request) (*url.URL, error)
-		status doctor.Status
-		want   string
+		name    string
+		proxy   func(*http.Request) (*url.URL, error)
+		status  doctor.Status
+		want    string
+		notWant string
 	}{
-		{"none", func(*http.Request) (*url.URL, error) { return nil, nil }, doctor.Pass, "doctor checks the proxy in front of it, not the upstream itself"},
-		{"a proxy", func(*http.Request) (*url.URL, error) { return url.Parse("http://ops:pw-secret@egress.example:3128") },
-			doctor.Pass, "go through the HTTP proxy http://ops:xxxxx@egress.example:3128 from the environment (list the upstream's host in NO_PROXY"},
-		{"an invalid proxy", func(*http.Request) (*url.URL, error) { return nil, errors.New(`invalid proxy address "pw-secret"`) },
-			doctor.Warn, "not a valid URL, so every request to the upstream fails"},
+		{"no proxy is named when none applies", func(*http.Request) (*url.URL, error) { return nil, nil }, doctor.Pass, "HTTP upstream http://10.0.0.7/mcp", "HTTP proxy"},
+		{"a proxy is named without its password", func(*http.Request) (*url.URL, error) { return url.Parse("http://ops:pw-secret@egress.example:3128") },
+			doctor.Pass, "go through the HTTP proxy http://egress.example:3128 from the environment (list the upstream's host in NO_PROXY", "ops"},
+		// What Go makes of HTTP_PROXY=http://ops:pw/secret@egress.example:3128: the retry with
+		// http:// in front puts the credentials in the path.
+		{"a misparsed proxy is named without its path", func(*http.Request) (*url.URL, error) {
+			return url.Parse("http://http://ops:pw/secret@egress.example:3128")
+		},
+			doctor.Pass, "go through the HTTP proxy http://http: from", "pw"},
+		{"the refusal under CGI warns", func(*http.Request) (*url.URL, error) {
+			return nil, errors.New("refusing to use HTTP_PROXY value in CGI environment")
+		},
+			doctor.Warn, "Go refuses HTTP_PROXY because REQUEST_METHOD is set", "pw"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rep, err := Doctor(context.Background(), cfg, DoctorOptions{Resolve: resolvesTo("mcp.example.com", "203.0.113.7"), UpstreamProxy: tc.proxy})
+			rep, err := Doctor(context.Background(), cfg, DoctorOptions{UpstreamProxy: tc.proxy})
 			if err != nil {
 				t.Fatal(err)
 			}
-			byName := map[string]doctor.Result{}
-			for _, c := range rep.Checks {
-				byName[c.Name] = c
-			}
-			up, hop := byName["upstream"], byName["upstream hop"]
-			if up.Status != tc.status || !strings.Contains(up.Message, tc.want) || strings.Contains(up.Message+up.Fix, "pw-secret") {
-				t.Fatalf("upstream %+v, want %s with %q and no password", up, tc.status, tc.want)
-			}
-			if hop.Status != doctor.Warn || !strings.Contains(hop.Message, "travel in clear: the upstream credential") || !strings.Contains(hop.Fix, "BYWARD_UPSTREAM_URL: ") {
-				t.Fatalf("upstream hop %+v, want a warning naming the credential", hop)
+			up := checkNamed(t, rep, "upstream")
+			if up.Status != tc.status || !strings.Contains(up.Message, tc.want) || strings.Contains(up.Message+up.Fix, tc.notWant) {
+				t.Fatalf("upstream %+v, want %s with %q and without %q", up, tc.status, tc.want, tc.notWant)
 			}
 		})
 	}
+}
+
+// doctor reports the plain-http hop with and without authentication, naming what travels in clear.
+func TestDoctorWarnsOfThePlainHTTPHop(t *testing.T) {
+	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
+		fakeidp.WithClient(fakeidp.Client{ID: "00000000-0000-0000-0000-000000000002", Secrets: []string{"s3cret-entra"}}))
+	for _, tc := range []struct {
+		name string
+		cfg  *config.Config
+		want string
+	}{
+		{"without authentication", noAuthHopConfig(t, "http://mcp.example.com/mcp"), "travel in clear: the upstream credential"},
+		{"with authentication", authHopConfig(t, "http://mcp.example.com/mcp"), "travel in clear: the identity assertion"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rep, err := Doctor(context.Background(), tc.cfg, DoctorOptions{IdP: fake.HTTPClient(), Proxy: &http.Client{Transport: refuse{}},
+				Resolve: resolvesTo("mcp.example.com", "203.0.113.7"), UpstreamProxy: func(*http.Request) (*url.URL, error) { return nil, nil }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			hop := checkNamed(t, rep, "upstream hop")
+			if hop.Status != doctor.Warn || !strings.Contains(hop.Message, tc.want) || !strings.HasPrefix(hop.Fix, "BYWARD_UPSTREAM_URL: ") {
+				t.Fatalf("upstream hop %+v, want a warning with %q", hop, tc.want)
+			}
+		})
+	}
+}
+
+// checkNamed is the report's check called name.
+func checkNamed(t *testing.T, rep doctor.Report, name string) doctor.Result {
+	t.Helper()
+	for _, c := range rep.Checks {
+		if c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("no %q check in %+v", name, rep.Checks)
+	return doctor.Result{}
 }

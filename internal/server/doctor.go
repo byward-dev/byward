@@ -13,6 +13,7 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
 	"github.com/byward-dev/byward/internal/store/sqlite"
+	"github.com/byward-dev/byward/internal/upstream/relay"
 )
 
 var secretExpirySetting = config.Setting{Name: "entra-client-secret-expires-at"}.Env()
@@ -87,13 +88,12 @@ type DoctorOptions struct {
 	// Resolve looks up the upstream's host for the plain identity headers check; nil is the
 	// system resolver.
 	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
-	// UpstreamProxy is the HTTP proxy the relay would use for a request; nil is
-	// http.ProxyFromEnvironment, as the relay's.
+	// UpstreamProxy is the HTTP proxy the relay would use for a request; nil is the relay's own.
 	UpstreamProxy func(*http.Request) (*url.URL, error)
 }
 
-// lookupNetIP is the system resolver.
-func lookupNetIP(ctx context.Context, host string) ([]netip.Addr, error) {
+// lookupNetIP is the system resolver, for startup and doctor; the package's tests replace it.
+var lookupNetIP = func(ctx context.Context, host string) ([]netip.Addr, error) {
 	return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 }
 
@@ -113,7 +113,7 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 		o.Resolve = lookupNetIP
 	}
 	if o.UpstreamProxy == nil {
-		o.UpstreamProxy = http.ProxyFromEnvironment
+		o.UpstreamProxy = relay.Proxy
 	}
 	// Configuration errors first: they stop doctor before any check (exit code 2).
 	var r doctor.Report

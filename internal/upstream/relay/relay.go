@@ -107,7 +107,7 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 			}
 		},
 		Transport: &http.Transport{
-			Proxy:                 http.ProxyFromEnvironment,
+			Proxy:                 Proxy,
 			DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 			ForceAttemptHTTP2:     true,
 			MaxIdleConnsPerHost:   64,
@@ -271,16 +271,22 @@ func isRedirect(status int) bool {
 	return status >= 300 && status < 400 && status != http.StatusNotModified
 }
 
-// redirectHint names where the upstream pointed, resolved against the request's URL, with no
-// userinfo, query or fragment, which could carry a secret.
+// redirectHint names where the upstream pointed, resolved against the request's URL: its scheme,
+// host and path only, without path parameters, since userinfo, the query, the fragment, an opaque
+// part or a `;jsessionid` could carry a secret.
 func redirectHint(res *http.Response) string {
 	loc, err := res.Location()
-	if err != nil {
+	if err != nil || loc.Opaque != "" || loc.Host == "" {
 		return "the upstream sent no usable Location; check BYWARD_UPSTREAM_URL"
 	}
-	loc.User, loc.RawQuery, loc.ForceQuery, loc.Fragment, loc.RawFragment = nil, "", false, "", ""
-	return "the upstream points to " + loc.String() + "; if that is its MCP endpoint, set BYWARD_UPSTREAM_URL to it"
+	path, _, _ := strings.Cut(loc.Path, ";")
+	clean := url.URL{Scheme: loc.Scheme, Host: loc.Host, Path: path}
+	return "the upstream points to " + clean.String() + "; if that is its MCP endpoint, set BYWARD_UPSTREAM_URL to it"
 }
+
+// Proxy is the HTTP proxy the relay sends a request through: the one the environment names
+// (HTTPS_PROXY, HTTP_PROXY, NO_PROXY), read once per process.
+func Proxy(r *http.Request) (*url.URL, error) { return http.ProxyFromEnvironment(r) }
 
 // withoutAccessToken drops every access_token parameter and keeps every other byte of the query in
 // its original order: url.Values.Encode would sort and re-escape it (ADR-0003, byte-transparent).

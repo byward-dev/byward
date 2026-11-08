@@ -293,4 +293,6 @@ configured, the upstream credential and an On-Behalf-Of token for a downstream A
       `https` and an `http` upstream), so with one set the hop goes through that proxy, which sees
       the assertion and the credential of a plain-http upstream. List the upstream's host in
       `NO_PROXY` to reach it directly. `byward doctor` names the proxy the upstream's requests go
-      through. Loopback upstreams never use one.
+      through. An upstream at `localhost` or at a loopback IP address never uses one; any other
+      name does unless `NO_PROXY` lists it, even one that resolves to a loopback address. A proxy
+      setting Go cannot parse is ignored, and the hop then goes direct.
