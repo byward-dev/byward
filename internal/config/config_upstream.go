@@ -52,11 +52,34 @@ func (c *Config) upstream(v *Values) []error {
 		}
 		*l.dst = n
 	}
+	d, err := parseStreamIdleTimeout(v.get("stdio-stream-idle-timeout"))
+	if err != nil {
+		errs = append(errs, err)
+	}
+	c.StdioStreamIdleTimeout = d
 	if c.StdioMaxPerUser > c.StdioMaxProcesses && c.StdioMaxProcesses > 0 {
 		errs = append(errs, errorf("%s (%d) must not exceed %s (%d)", Setting{Name: "stdio-max-processes-per-user"}.Env(), c.StdioMaxPerUser,
 			Setting{Name: "stdio-max-processes"}.Env(), c.StdioMaxProcesses))
 	}
 	return errs
+}
+
+// minStreamIdleTimeout is the shortest stdio-stream-idle-timeout other than 0 (off): a stream quiet
+// for less is not idle.
+const minStreamIdleTimeout = time.Minute
+
+func parseStreamIdleTimeout(raw string) (time.Duration, error) {
+	env := Setting{Name: "stdio-stream-idle-timeout"}.Env()
+	d, err := time.ParseDuration(raw)
+	switch {
+	case raw == "0":
+		return 0, nil
+	case err != nil:
+		return 0, errorf("%s: want a duration such as 10m, or 0 to keep quiet streams, got %q", env, raw)
+	case d != 0 && d < minStreamIdleTimeout: // negative too
+		return 0, errorf("%s: want 0 or at least 1m, got %s", env, d)
+	}
+	return d, nil
 }
 
 // parseEnvLines reads KEY=VALUE lines; blank lines and lines starting with # are skipped. Errors

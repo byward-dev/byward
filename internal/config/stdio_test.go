@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // stdioBase is base with a stdio upstream instead of the HTTP one.
@@ -23,7 +24,7 @@ func stdioFiles(envFile string) readFileFunc {
 	}
 }
 
-func TestStdioCommandIsReadFromAfterDoubleDashOrTheEnvironmentWithDefaultCaps(t *testing.T) {
+func TestStdioCommandIsReadFromAfterDoubleDashOrTheEnvironmentWithDefaultCapsAndStreamIdleTimeout(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args []string
 		env  []string
@@ -39,8 +40,8 @@ func TestStdioCommandIsReadFromAfterDoubleDashOrTheEnvironmentWithDefaultCaps(t 
 			if !slices.Equal(c.UpstreamCommand, []string{"/usr/bin/server", "--flag", "-x"}) || c.UpstreamURL != nil {
 				t.Fatalf("command %q, URL %v", c.UpstreamCommand, c.UpstreamURL)
 			}
-			if c.StdioMaxProcesses != 64 || c.StdioMaxPerUser != 8 {
-				t.Fatalf("caps %d/%d, want the defaults 64/8", c.StdioMaxProcesses, c.StdioMaxPerUser)
+			if c.StdioMaxProcesses != 64 || c.StdioMaxPerUser != 8 || c.StdioStreamIdleTimeout != 10*time.Minute {
+				t.Fatalf("caps %d/%d, stream idle %s; want the defaults 64/8 and 10m", c.StdioMaxProcesses, c.StdioMaxPerUser, c.StdioStreamIdleTimeout)
 			}
 		})
 	}
@@ -87,11 +88,28 @@ func TestInvalidStdioSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		"inline env":              {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_ENV=A=1"}, "", "secrets must come from a file"},
 		"cap zero":                {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_MAX_PROCESSES=0"}, "", "BYWARD_STDIO_MAX_PROCESSES: want a whole number"},
 		"user cap over total":     {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_MAX_PROCESSES=4", "BYWARD_STDIO_MAX_PROCESSES_PER_USER=5"}, "", "must not exceed BYWARD_STDIO_MAX_PROCESSES"},
+		"stream idle under 1m":    {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_STREAM_IDLE_TIMEOUT=59s"}, "", "BYWARD_STDIO_STREAM_IDLE_TIMEOUT: want 0 or at least 1m"},
+		"stream idle negative":    {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_STREAM_IDLE_TIMEOUT=-10m"}, "", "BYWARD_STDIO_STREAM_IDLE_TIMEOUT: want 0 or at least 1m"},
+		"stream idle no duration": {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_STREAM_IDLE_TIMEOUT=ten"}, "", "BYWARD_STDIO_STREAM_IDLE_TIMEOUT: want a duration such as 10m"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, _, err := Load(tc.args, stdioBase(tc.env...), stdioFiles(tc.envFile))
 			if !isConfigError(err) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("got %v, want a config error containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestStreamIdleTimeoutAcceptsZeroAndDurationsOfAMinuteOrMore(t *testing.T) {
+	for raw, want := range map[string]time.Duration{"0": 0, "0s": 0, "1m": time.Minute, "2h": 2 * time.Hour} {
+		t.Run(raw, func(t *testing.T) {
+			c, _, err := Load([]string{"--", "/bin/x"}, stdioBase("BYWARD_STDIO_STREAM_IDLE_TIMEOUT="+raw), baseFiles)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.StdioStreamIdleTimeout != want {
+				t.Fatalf("got %s, want %s", c.StdioStreamIdleTimeout, want)
 			}
 		})
 	}

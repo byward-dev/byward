@@ -278,7 +278,13 @@ func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity,
 		}
 	}
 	key := "user:" + id.user()
-	p, release, err := b.c.Manager.Get(r.Context(), key, id)
+	// A subscriptions/listen is a stream lease: its process can be evicted once it has been quiet.
+	listen := env.kind() == kindRequest && env.Method == "subscriptions/listen"
+	kind := requestLease
+	if listen {
+		kind = streamLease
+	}
+	p, release, err := b.c.Manager.get(r.Context(), key, id, kind)
 	if err != nil {
 		b.startFailed(w, r, id, err)
 		return
@@ -297,7 +303,7 @@ func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity,
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
-	c.request(w, r, msg, env.Method, meta)
+	c.request(w, r, msg, listen, meta)
 }
 
 // legacyFallback is the answer to a modern request the upstream cannot serve: no modern error
@@ -373,13 +379,14 @@ func (c *userConn) discover(ctx context.Context, timeout time.Duration) bool {
 	}
 }
 
-// request relays one modern-era request under proxy-chosen ids.
-func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, method string, meta requestMeta) {
+// request relays one modern-era request under proxy-chosen ids; listen marks a
+// subscriptions/listen.
+func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, listen bool, meta requestMeta) {
 	var token []byte
 	if meta.token != nil {
 		token = meta.token.value(msg)
 	}
-	q := c.register(meta.id.value(msg), token, meta.logs, method == "subscriptions/listen")
+	q := c.register(meta.id.value(msg), token, meta.logs, listen)
 	defer c.unregister(q)
 	if err := c.p.Send(r.Context(), replace(msg, edit{meta.id, []byte(q.proxyID)}, edit{meta.token, []byte(q.proxyTok)})); err != nil {
 		c.log.WarnContext(r.Context(), "relaying to the upstream process failed", "request_id", logging.RequestID(r.Context()), "error", err)
@@ -421,7 +428,7 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, m
 			finish(m)
 			return
 		case <-c.ended:
-			finish(exitAnswer(q))
+			finish(exitAnswer(q, c.p.wasEvicted()))
 			return
 		case <-q.torn:
 			// The upstream ended the subscription. Over HTTP that is said by closing the stream; the
@@ -436,14 +443,28 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, m
 }
 
 // exitAnswer is what a request gets once its process has ended: its answer, if the upstream wrote
-// it before exiting, else an error.
-func exitAnswer(q *modernRequest) []byte {
+// it before exiting, else an error. A subscriptions/listen whose process was evicted was ended by
+// the server's choice, so it gets a completion result (2026-07-28 subscriptions: a server ending a
+// subscription on its own initiative "SHOULD respond to the original subscriptions/listen request
+// with a completion result before closing the stream").
+func exitAnswer(q *modernRequest, evicted bool) []byte {
 	select {
 	case m := <-q.final:
 		return m
 	default:
-		return rpcError(q.id, codeInternalError, "upstream process exited")
 	}
+	if q.listen && evicted {
+		return listenComplete(q.id)
+	}
+	return rpcError(q.id, codeInternalError, "upstream process exited")
+}
+
+// listenComplete is the completion result of the subscriptions/listen with id: the subscription is
+// named by the listen request's own id.
+func listenComplete(id json.RawMessage) []byte {
+	b, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id,
+		"result": map[string]any{"resultType": "complete", "_meta": map[string]any{"io.modelcontextprotocol/subscriptionId": id}}})
+	return b
 }
 
 func (c *userConn) register(id, token []byte, logs, listen bool) *modernRequest {
