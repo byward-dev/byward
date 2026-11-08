@@ -85,7 +85,7 @@ type DoctorOptions struct {
 	// Proxy reaches the proxy at its public URL; redirects are reported, never followed.
 	Proxy *http.Client
 	Now   func() time.Time
-	// Resolve looks up the upstream's host for the plain identity headers check; nil is the
+	// Resolve looks up the upstream's host for the plain identity headers and upstream hop checks; nil is the
 	// system resolver.
 	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
 	// UpstreamProxy is the HTTP proxy the relay would use for a request; nil is the relay's own.

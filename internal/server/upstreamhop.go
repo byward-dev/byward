@@ -45,11 +45,14 @@ func plainHTTPUpstream(ctx context.Context, cfg *config.Config, resolve func(con
 			return Warning{}, false
 		}
 	}
+	fix := "use https, a service mesh, or a private network the upstream alone is on (docs/how-to/harden-a-deployment.md, \"Protect the upstream hop\")"
+	if !cfg.NoAuth {
+		fix += "; with https the assertion's aud becomes the new URL"
+	}
 	for _, a := range addrs {
 		if a = a.Unmap(); !notPublic(a) {
-			return Warning{Setting: "BYWARD_UPSTREAM_URL",
-				Message: fmt.Sprintf("the upstream is reached over plain http at the public address %s (%s), so these travel in clear: %s", a, host, strings.Join(secrets, ", ")),
-				Fix:     "use https, a service mesh, or a private network the upstream alone is on (docs/how-to/harden-a-deployment.md, \"Protect the upstream hop\"); with https the assertion's aud becomes the new URL"}, true
+			return Warning{Setting: "BYWARD_UPSTREAM_URL", Fix: fix,
+				Message: fmt.Sprintf("the upstream is reached over plain http at the public address %s (%s), so these travel in clear: %s", a, host, strings.Join(secrets, ", "))}, true
 		}
 	}
 	return Warning{}, false

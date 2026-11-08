@@ -29,7 +29,8 @@ func (refusing) RoundTrip(*http.Request) (*http.Response, error) {
 }
 
 // TestMain points doctor at refusing transports and a resolver that resolves nothing, so a test
-// that forgets useFakes fails instead of reaching Entra or anything else on the network.
+// that forgets useFakes fails instead of reaching Entra or anything else on the network, and at no
+// HTTP proxy, so the developer's HTTP_PROXY never changes the upstream line.
 func TestMain(m *testing.M) {
 	doctorOptions = server.DoctorOptions{IdP: &http.Client{Transport: refusing{}}, Proxy: &http.Client{Transport: refusing{}},
 		Resolve: func(context.Context, string) ([]netip.Addr, error) {

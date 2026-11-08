@@ -17,6 +17,7 @@ import (
 	"github.com/byward-dev/byward/internal/doctor"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
+	"golang.org/x/net/http/httpproxy"
 )
 
 // resolvesTo is a resolver that knows one host name.
@@ -121,8 +122,9 @@ func TestAPlainHTTPUpstreamAtAPublicAddressIsWarnedAbout(t *testing.T) {
 				}
 				return
 			}
-			if !ok || !strings.Contains(w.Message, tc.want) || w.Setting != "BYWARD_UPSTREAM_URL" || !strings.Contains(w.Fix, "aud") {
-				t.Fatalf("warning %+v (%v), want %q, the setting and the aud note", w, ok, tc.want)
+			cfg := hopConfig(t, tc.upstream, tc.edit)
+			if !ok || !strings.Contains(w.Message, tc.want) || w.Setting != "BYWARD_UPSTREAM_URL" || strings.Contains(w.Fix, "aud") == cfg.NoAuth {
+				t.Fatalf("warning %+v (%v), want %q, the setting, and the aud note exactly when an assertion is sent", w, ok, tc.want)
 			}
 			if strings.Contains(w.String(), "s3cret") {
 				t.Fatalf("the warning names the credential's value: %s", w)
@@ -144,8 +146,8 @@ func TestThePlainHTTPWarningPointsAtTheHardeningGuide(t *testing.T) {
 	}
 }
 
-// A lookup that hangs is bounded: the resolver is given a deadline.
-func TestThePlainHTTPCheckGivesTheResolverADeadline(t *testing.T) {
+// A lookup of the upstream's host that hangs is bounded: the resolver is given a deadline.
+func TestALookupOfTheUpstreamsHostThatHangsIsBounded(t *testing.T) {
 	var bounded bool
 	plainHTTPUpstream(context.Background(), hopConfig(t, "http://mcp.example.com/mcp", nil), func(ctx context.Context, _ string) ([]netip.Addr, error) {
 		_, bounded = ctx.Deadline()
@@ -218,38 +220,43 @@ func TestCheckOfflineWarnsOfAPlainHTTPUpstreamGivenAsAPublicAddress(t *testing.T
 }
 
 // doctor names the environment's HTTP proxy the upstream's requests go through, by scheme and host
-// alone, and Go's refusal of HTTP_PROXY under CGI.
+// alone, from the setting as Go reads it; a setting whose credentials Go splits, and Go's refusal
+// of HTTP_PROXY under CGI, warn without naming it.
 func TestDoctorNamesTheEnvironmentsProxyWithoutItsCredentials(t *testing.T) {
 	cfg := noAuthHopConfig(t, "http://10.0.0.7/mcp")
 	for _, tc := range []struct {
-		name    string
-		proxy   func(*http.Request) (*url.URL, error)
-		status  doctor.Status
-		want    string
-		notWant string
+		name     string
+		proxy    httpproxy.Config
+		status   doctor.Status
+		want     string
+		notWants []string
 	}{
-		{"no proxy is named when none applies", func(*http.Request) (*url.URL, error) { return nil, nil }, doctor.Pass, "HTTP upstream http://10.0.0.7/mcp", "HTTP proxy"},
-		{"a proxy is named without its password", func(*http.Request) (*url.URL, error) { return url.Parse("http://ops:pw-secret@egress.example:3128") },
-			doctor.Pass, "go through the HTTP proxy http://egress.example:3128 from the environment (list the upstream's host in NO_PROXY", "ops"},
-		// What Go makes of HTTP_PROXY=http://ops:pw/secret@egress.example:3128: the retry with
-		// http:// in front puts the credentials in the path.
-		{"a misparsed proxy is named without its path", func(*http.Request) (*url.URL, error) {
-			return url.Parse("http://http://ops:pw/secret@egress.example:3128")
-		},
-			doctor.Pass, "go through the HTTP proxy http://http: from", "pw"},
-		{"the refusal under CGI warns", func(*http.Request) (*url.URL, error) {
-			return nil, errors.New("refusing to use HTTP_PROXY value in CGI environment")
-		},
-			doctor.Warn, "Go refuses HTTP_PROXY because REQUEST_METHOD is set", "pw"},
+		{"no proxy is named when none applies", httpproxy.Config{}, doctor.Pass, "HTTP upstream http://10.0.0.7/mcp", []string{"HTTP proxy"}},
+		{"a proxy is named without its password", httpproxy.Config{HTTPProxy: "http://ops:pw-secret@egress.example:3128"},
+			doctor.Pass, "go through the HTTP proxy http://egress.example:3128 from the environment (list the upstream's host in NO_PROXY", []string{"ops", "pw-secret"}},
+		{"a proxy without a scheme is named without its password", httpproxy.Config{HTTPProxy: "ops:pw-secret@egress.example:3128"},
+			doctor.Pass, "go through the HTTP proxy http://egress.example:3128 ", []string{"ops", "pw-secret"}},
+		{"a password with a slash is never shown", httpproxy.Config{HTTPProxy: "http://ops:pw/secret@egress.example:3128"},
+			doctor.Warn, "has an unescaped /, ? or # before its host", []string{"ops", "pw", "secret"}},
+		{"a numeric password with a slash is never shown", httpproxy.Config{HTTPProxy: "admin:1234/5678@egress.example:3128"},
+			doctor.Warn, "has an unescaped /, ? or # before its host", []string{"admin", "1234", "5678"}},
+		{"the refusal under CGI warns", httpproxy.Config{HTTPProxy: "http://ops:pw-secret@egress.example:3128", NoProxy: "10.0.0.7", CGI: true},
+			doctor.Warn, "Go refuses HTTP_PROXY because REQUEST_METHOD is set", []string{"pw-secret", "list the upstream's host in NO_PROXY"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rep, err := Doctor(context.Background(), cfg, DoctorOptions{UpstreamProxy: tc.proxy})
+			pf := tc.proxy.ProxyFunc()
+			rep, err := Doctor(context.Background(), cfg, DoctorOptions{UpstreamProxy: func(r *http.Request) (*url.URL, error) { return pf(r.URL) }})
 			if err != nil {
 				t.Fatal(err)
 			}
 			up := checkNamed(t, rep, "upstream")
-			if up.Status != tc.status || !strings.Contains(up.Message, tc.want) || strings.Contains(up.Message+up.Fix, tc.notWant) {
-				t.Fatalf("upstream %+v, want %s with %q and without %q", up, tc.status, tc.want, tc.notWant)
+			if up.Status != tc.status || !strings.Contains(up.Message, tc.want) {
+				t.Fatalf("upstream %+v, want %s with %q", up, tc.status, tc.want)
+			}
+			for _, n := range tc.notWants {
+				if strings.Contains(up.Message+up.Fix, n) {
+					t.Fatalf("upstream %+v shows %q", up, n)
+				}
 			}
 		})
 	}

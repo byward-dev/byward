@@ -65,7 +65,8 @@ func splitAtDashes(args []string) (flags, upstream []string) {
 	return args, nil
 }
 
-// doctorOptions are doctor's HTTP clients; tests point them at fakes, so they never reach Entra.
+// doctorOptions are doctor's HTTP clients, resolver and upstream proxy; tests point them at fakes,
+// so they never reach Entra or the network.
 var doctorOptions server.DoctorOptions
 
 // runDoctor is `doctor [--json]` (ADR-0021 §11). The exit code is the report's: 0, or the OR of 4

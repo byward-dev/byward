@@ -609,7 +609,8 @@ func TestAnUpstreamRedirectGetsTheClientA502AndTheLogWhereItPointed(t *testing.T
 		{"path parameters are dropped", http.StatusFound, "/cb;jsessionid=sess-secret", "points to " + up.URL + "/cb;"},
 		{"an opaque Location is not logged", http.StatusFound, "https:tok-secret", "the upstream sent no usable Location"},
 		{"without a Location", http.StatusFound, "", "the upstream sent no usable Location"},
-		{"not modified", http.StatusNotModified, "", ""},
+		{"not modified is passed on", http.StatusNotModified, "", ""},
+		{"a bad request is passed on", http.StatusBadRequest, "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			up.Handler = func(w http.ResponseWriter, _ *http.Request) {
