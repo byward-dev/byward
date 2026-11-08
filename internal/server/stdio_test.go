@@ -22,6 +22,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/mcpsession"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/token"
@@ -379,5 +380,32 @@ func TestModernEraRequestsRunInTheUsersOwnUpstreamProcessWithNoToken(t *testing.
 				t.Fatalf("a token reached the upstream process: %q", kv)
 			}
 		}
+	}
+}
+
+func TestTheStdioUpstreamGetsTheStreamIdleTimeoutAndEachEvictionIsAuditedWithItsOpenStreams(t *testing.T) {
+	cfg, _, err := config.Load([]string{"--", "/bin/server"}, append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp",
+		"BYWARD_STDIO_STREAM_IDLE_TIMEOUT=15m"), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs := &syncBuffer{}
+	log := logging.New(logs, "json") // the production logger: it drops any field it does not allow
+	sc := stdioConfig(cfg, "server", log, Observability{Audit: audit.New(log, nil, time.Now)})
+	if sc.StreamIdleTimeout != 15*time.Minute {
+		t.Fatalf("stream idle timeout %s, want the configured 15m", sc.StreamIdleTimeout)
+	}
+	sc.Evicted(stdio.Eviction{ID: stdio.Identity{Subject: "tid:alice"}, Reason: "upstream_cap", OpenStreams: 2})
+	line, ok := auditRecord(logs.String(), "process_evicted")
+	var rec struct {
+		Reason      string
+		UserKey     string `json:"user_key"`
+		OpenStreams int    `json:"open_streams"`
+	}
+	if !ok || json.Unmarshal([]byte(line), &rec) != nil {
+		t.Fatalf("no process_evicted audit record in %q", logs.String())
+	}
+	if rec.Reason != "upstream_cap" || rec.UserKey != "tid:alice" || rec.OpenStreams != 2 {
+		t.Fatalf("record %+v, want upstream_cap for tid:alice with 2 open streams", rec)
 	}
 }

@@ -31,7 +31,7 @@ var allowed = map[string]bool{
 	// stdio upstream processes (ADR-0003 §5, ADR-0021 §6): stderr lines are upstream-controlled text
 	// and still pass the bearer-shaped redaction.
 	"upstream": true, "process": true, "user_key": true, "line": true, "truncated": true,
-	"suppressed": true, "exit_code": true, "signal": true,
+	"suppressed": true, "exit_code": true, "signal": true, "open_streams": true,
 	// Audit stream (ADR-0021 §3; docs/reference/observability.md). Grant and key IDs are internal
 	// identifiers, never credentials.
 	"log.type": true, "schema_version": true, "event": true, "outcome": true, "client_id": true,
