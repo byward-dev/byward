@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"log"
 	"log/slog"
 	"net"
 	"net/http"
@@ -354,8 +355,8 @@ func TestAnUpstreamThatSwitchesProtocolsGetsTheClientA502(t *testing.T) {
 	}
 }
 
-// An upstream's informational responses (100, 102, 103) reach the MCP client with Link and the
-// MCP session only (which the binding seals): the headers the relay cleans from the final response,
+// An upstream's informational responses (100, 102, 103) reach the MCP client with Link and
+// Mcp-Session-Id only (which the binding seals): the headers the relay cleans from the final response,
 // and any others, never ride along on a 1xx, past ModifyResponse. The final response is untouched.
 func TestAnUpstreamsInformationalResponsesCarryOnlyLinkAndTheSession(t *testing.T) {
 	hinted := map[string]string{"Link": "</style.css>; rel=preload", "Mcp-Session-Id": "raw", "Access-Control-Allow-Origin": "*",
@@ -375,7 +376,7 @@ func TestAnUpstreamsInformationalResponsesCarryOnlyLinkAndTheSession(t *testing.
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = io.WriteString(w, "{}")
 			}
-			informational := func(t *testing.T, url string) (http.Header, *http.Response) {
+			fetch := func(t *testing.T, url string) (http.Header, *http.Response) {
 				t.Helper()
 				var got http.Header
 				trace := &httptrace.ClientTrace{Got1xxResponse: func(c int, h textproto.MIMEHeader) error {
@@ -394,12 +395,12 @@ func TestAnUpstreamsInformationalResponsesCarryOnlyLinkAndTheSession(t *testing.
 				return got, res
 			}
 			// The control: straight from the upstream, the 1xx carries every header.
-			if direct, _ := informational(t, up.URL); len(direct) != len(hinted) {
+			if direct, _ := fetch(t, up.URL); len(direct) != len(hinted) {
 				t.Fatalf("the upstream's %d carried %v, want all of %v", code, direct, hinted)
 			}
 			srv := httptest.NewServer(relayTo(t, up, "/mcp"))
 			t.Cleanup(srv.Close)
-			got, res := informational(t, srv.URL+"/mcp")
+			got, res := fetch(t, srv.URL+"/mcp")
 			if len(got) != 2 || got.Get("Link") != hinted["Link"] || got.Get("Mcp-Session-Id") != "raw" {
 				t.Fatalf("the %d reached the client with %v, want Link and Mcp-Session-Id only", code, got)
 			}
@@ -425,24 +426,77 @@ func TestTheProxysOwnHeadersSurviveAnUpstreamsInformationalResponse(t *testing.T
 		_, _ = io.WriteString(w, "{}")
 	}
 	relay := relayTo(t, up, "/mcp")
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Request-Id", "req-1")
 		w.Header().Set("Access-Control-Allow-Origin", "https://app.example")
 		w.Header().Set("Vary", "Origin")
 		relay.ServeHTTP(w, r)
 	}))
+	var serverLog bytes.Buffer // net/http's own complaints, such as a status written twice
+	srv.Config.ErrorLog = log.New(&serverLog, "", 0)
+	srv.Start()
 	t.Cleanup(srv.Close)
-	res, err := srv.Client().Post(srv.URL+"/mcp", "application/json", strings.NewReader(`{}`))
+	hinted := false
+	trace := &httptrace.ClientTrace{Got1xxResponse: func(code int, _ textproto.MIMEHeader) error {
+		hinted = hinted || code == http.StatusEarlyHints
+		return nil
+	}}
+	req, _ := http.NewRequestWithContext(httptrace.WithClientTrace(context.Background(), trace), http.MethodPost, srv.URL+"/mcp", strings.NewReader(`{}`))
+	res, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, _ = io.ReadAll(res.Body)
 	_ = res.Body.Close()
+	if !hinted {
+		t.Fatal("no 103 reached the client, so this test proves nothing")
+	}
 	if res.Header.Get("X-Request-Id") != "req-1" || !slices.Equal(res.Header.Values("Access-Control-Allow-Origin"), []string{"https://app.example"}) {
 		t.Fatalf("final headers %v; want the proxy's request ID and CORS back, and not the upstream's", res.Header)
 	}
 	if !slices.Equal(res.Header.Values("Vary"), []string{"Accept"}) {
 		t.Fatalf("Vary %q; want the upstream's final header as it set it", res.Header.Values("Vary"))
+	}
+	srv.Close() // flushes the server's log
+	if strings.Contains(serverLog.String(), "superfluous") {
+		t.Fatalf("the relay wrote a status twice: %s", serverLog.String())
+	}
+}
+
+// The proxy's own headers also survive when the answer after a 1xx is the relay's own body with no
+// status written first: the header-timeout answer to an upstream that sent a 103 and then nothing.
+func TestTheProxysOwnHeadersSurviveATimeoutAfterAnInformationalResponse(t *testing.T) {
+	up := fakeupstream.New()
+	t.Cleanup(up.Close)
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	up.Handler = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Link", "</style.css>; rel=preload")
+		w.WriteHeader(http.StatusEarlyHints)
+		select { // no final response until the relay has given up
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}
+	u, _ := url.Parse(up.URL + "/mcp")
+	relay := New(quiet(), u, WithResponseHeaderTimeout(200*time.Millisecond))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Request-Id", "req-1")
+		w.Header().Set("Access-Control-Allow-Origin", "https://app.example")
+		relay.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	res, err := srv.Client().Post(srv.URL+"/mcp", "application/json", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK || !strings.Contains(string(body), `"id":1`) {
+		t.Fatalf("status %d, body %s; want the timeout answer", res.StatusCode, body)
+	}
+	if res.Header.Get("X-Request-Id") != "req-1" || res.Header.Get("Access-Control-Allow-Origin") != "https://app.example" {
+		t.Fatalf("final headers %v; want the proxy's request ID and CORS back", res.Header)
 	}
 }
 
@@ -451,7 +505,7 @@ func TestTheProxysOwnHeadersSurviveAnUpstreamsInformationalResponse(t *testing.T
 // gets, with none of the 101's headers.
 func TestAnInterimSwitchingProtocolsIsNeverForwarded(t *testing.T) {
 	rec := httptest.NewRecorder()
-	w := informational{rec, http.Header{}}
+	w := &informational{ResponseWriter: rec, ours: http.Header{}}
 	w.Header().Set("Mcp-Session-Id", "raw-101")
 	w.WriteHeader(http.StatusSwitchingProtocols)
 	w.Header().Set("Content-Type", "application/json")
