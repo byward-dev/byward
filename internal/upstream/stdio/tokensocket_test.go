@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -230,14 +231,9 @@ func TestTheSocketGivesATokenForAJSONObjectAndRefusesAnyOtherLine(t *testing.T) 
 
 func TestAProcessOutsideTheUpstreamsTreeIsRefusedAndLogged(t *testing.T) {
 	// The root is a process that is not this test's ancestor: the test asks as a stranger would.
-	other := exec.Command("sleep", "30")
-	if err := other.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = other.Process.Kill(); _ = other.Wait() })
 	log := &recorder{mu: &sync.Mutex{}, recs: &[]record{}}
 	k := &tokens{}
-	line := ask(t, serveFor(t, other.Process.Pid, k, log), `{}`)
+	line := ask(t, serveFor(t, stranger(t), k, log), `{}`)
 	if tok, _, code := answerOf(t, line); tok != "" || code != TokenRefused {
 		t.Fatalf("a stranger got %q, want only the error %s", line, TokenRefused)
 	}
@@ -331,4 +327,112 @@ func TestTheSocketClosesAsSoonAsTheProcessIsReapedEvenWhileADescendantHoldsItsPi
 	}
 	h.clk.Advance(2 * DefaultKillGrace) // the pipes are force-closed after the grace
 	waitDone(t, p)
+}
+
+// stranger is a process outside this test's ancestry, as a root that the test asks a socket for.
+func stranger(t *testing.T) int {
+	t.Helper()
+	other := exec.Command("sleep", "30")
+	if err := other.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = other.Process.Kill(); _ = other.Wait() })
+	return other.Process.Pid
+}
+
+// #244: a refused peer that writes its request only after byward has decided still reads the
+// refusal. Without the read before the answer, its write meets a closed connection: EPIPE.
+func TestARefusedPeerThatWritesLateStillReadsTheRefusal(t *testing.T) {
+	log := &recorder{mu: &sync.Mutex{}, recs: &[]record{}}
+	c, err := net.Dial("unix", serveFor(t, stranger(t), &tokens{}, log))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	_ = c.SetDeadline(time.Now().Add(guard))
+	// The refusal's log record is the one point a peer can see that comes after byward decided;
+	// writing only then is what a slow peer does. An answer sent without reading would already
+	// have closed the connection by the time the record shows.
+	eventually(t, "byward to refuse the peer", func() bool {
+		return len(log.with("token socket: the peer is not the upstream process or one of its descendants")) == 1
+	})
+	if _, err := c.Write([]byte("{}\n")); err != nil {
+		t.Fatalf("writing the request after the refusal was decided: %v, want it accepted", err)
+	}
+	answer, err := bufio.NewReader(c).ReadString('\n')
+	if err != nil {
+		t.Fatalf("reading the answer: %v", err)
+	}
+	if _, _, code := answerOf(t, strings.TrimSuffix(answer, "\n")); code != TokenRefused {
+		t.Fatalf("answer %q, want the error %s", answer, TokenRefused)
+	}
+}
+
+// A refused peer that never sends a request is answered soon, and the connection closed, so it does
+// not hold the socket for the processes that may ask.
+func TestARefusedPeerThatSendsNothingIsAnsweredSoonAndClosed(t *testing.T) {
+	s, err := listenTokenSocket(shortTempDir(t), slog.New(&recorder{mu: &sync.Mutex{}, recs: &[]record{}}), func(context.Context) DownstreamToken {
+		t.Error("a refused peer reached the token source")
+		return DownstreamToken{}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.close)
+	// The socket serves one connection at a time, so the wait a stranger gets must stay short next
+	// to a legitimate process's bound; the test then shortens it.
+	if s.refusalWait != refusalWait || refusalWait > tokenAnswerTimeout/10 {
+		t.Fatalf("a refused peer is given %v to send its request, want refusalWait (%v), at most a tenth of %v",
+			s.refusalWait, refusalWait, tokenAnswerTimeout)
+	}
+	s.refusalWait = 200 * time.Millisecond
+	go s.serve(stranger(t))
+	start := time.Now()
+	c, err := net.Dial("unix", s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	_ = c.SetDeadline(time.Now().Add(guard))
+	r := bufio.NewReader(c)
+	answer, err := r.ReadString('\n') // no request at all
+	if err != nil {
+		t.Fatalf("reading the answer: %v", err)
+	}
+	// The socket serves one connection at a time: a stranger must give it up soon, not at the
+	// connection's 40 s deadline.
+	if took := time.Since(start); took >= 4*s.refusalWait {
+		t.Fatalf("answered after %v, want within about %v", took, s.refusalWait)
+	}
+	if _, _, code := answerOf(t, strings.TrimSuffix(answer, "\n")); code != TokenRefused {
+		t.Fatalf("answer %q, want the error %s", answer, TokenRefused)
+	}
+	if _, err := r.ReadByte(); !errors.Is(err, io.EOF) {
+		t.Fatalf("after the answer: %v, want the connection closed", err)
+	}
+}
+
+// A refused peer's request larger than the socket buffer is drained too, so its write completes
+// and it reads the refusal. The buffer is shrunk to 4 KiB: Linux's default (about 208 KiB) would
+// hold the whole request without byward reading it.
+func TestARefusedPeerWithALargeRequestStillReadsTheRefusal(t *testing.T) {
+	c, err := net.Dial("unix", serveFor(t, stranger(t), &tokens{}, &recorder{mu: &sync.Mutex{}, recs: &[]record{}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	if err := c.(*net.UnixConn).SetWriteBuffer(4 << 10); err != nil {
+		t.Fatal(err) // without the small buffer this test proves nothing on Linux
+	}
+	_ = c.SetDeadline(time.Now().Add(guard))
+	if _, err := c.Write([]byte(`{"pad":"` + strings.Repeat("x", 48<<10) + `"}` + "\n")); err != nil {
+		t.Fatalf("writing a 48 KiB request: %v, want it accepted", err)
+	}
+	answer, err := bufio.NewReader(c).ReadString('\n')
+	if err != nil {
+		t.Fatalf("reading the answer: %v", err)
+	}
+	if _, _, code := answerOf(t, strings.TrimSuffix(answer, "\n")); code != TokenRefused {
+		t.Fatalf("answer %q, want the error %s", answer, TokenRefused)
+	}
 }
