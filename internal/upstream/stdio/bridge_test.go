@@ -872,3 +872,17 @@ func TestAQuietGETStreamsProcessIsEvictedForANewSessionAndItsSessionThenGets404(
 		t.Fatalf("the evicted session: status %d, want 404", code)
 	}
 }
+
+func TestALegacyRequestAwaitingItsAnswerKeepsItsProcessBesideAQuietGETStream(t *testing.T) {
+	b := newBridge(t, func(c *Config) {
+		c.MaxPerUser = 1
+		c.StreamIdleTimeout = streamIdle
+	})
+	s := b.initialize(t, "alice")
+	b.listen(t, context.Background(), s)
+	eventsOf(t, b.post(t, "alice", s, `{"jsonrpc":"2.0","id":"h","method":"hold"}`)) // in flight: a request lease
+	b.clk.Advance(streamIdle)
+	if res := b.post(t, "alice", "", initialize); res.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("initialize past the timeout with a request in flight: status %d, want 503", res.StatusCode)
+	}
+}

@@ -410,12 +410,14 @@ func TestAQuietStreamsProcessIsEvictableOnceQuietForTheTimeoutUnlessTrafficARequ
 		timeout  time.Duration
 		traffic  bool // the process exchanges a message after the streams open
 		request  bool // a request lease is held beside the stream
+		ended    bool // the stream ends, then a request lease is held: the stream must no longer count
 		wantBusy bool
 	}{
 		{name: "quiet for the timeout is evictable", timeout: streamIdle},
 		{name: "traffic within the timeout keeps it", timeout: streamIdle, traffic: true, wantBusy: true},
 		{name: "a request in flight keeps it", timeout: streamIdle, request: true, wantBusy: true},
 		{name: "0 keeps quiet streams however long", timeout: 0, wantBusy: true},
+		{name: "ended streams no longer count, so a quiet request keeps it", timeout: streamIdle, ended: true, wantBusy: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -423,7 +425,12 @@ func TestAQuietStreamsProcessIsEvictableOnceQuietForTheTimeoutUnlessTrafficARequ
 				capped(1, 1, nil)(c)
 				c.StreamIdleTimeout = tc.timeout
 			})
-			p, _ := h.stream(t, "a1", alice)
+			p, release := h.stream(t, "a1", alice)
+			if tc.ended {
+				release()
+				_, req := h.lease(t, "a1", alice)
+				t.Cleanup(req)
+			}
 			if tc.request {
 				_, release := h.lease(t, "a1", alice)
 				t.Cleanup(release)
