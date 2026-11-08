@@ -47,7 +47,8 @@ type Error struct {
 	TraceID       string
 	CorrelationID string
 	// Alert, when set, asks for an operator alert: the error will not go away without the
-	// operator (#204). It names why, as a bounded metric label.
+	// operator (#204). It names why, as a bounded metric label. It comes only from the IdP's back
+	// channel or the proxy's own credential, never from a callback query.
 	Alert Alert
 	// UserMessage is safe to show on an error page and may be empty (the caller supplies a
 	// default); OperatorHint names the fix.
@@ -117,6 +118,14 @@ func (a Alert) Hint() string {
 		return ""
 	}
 	return "the IdP refused the proxy: check the proxy's IdP settings and the IdP's status"
+}
+
+// Fix is the operator's fix for e: the IdP's own hint, else its alert's default; "" for neither.
+func (e *Error) Fix() string {
+	if e.OperatorHint != "" {
+		return e.OperatorHint
+	}
+	return e.Alert.Hint()
 }
 
 // AlertOf is the alert reason of err, or "" when err is not an *Error that asks for one.

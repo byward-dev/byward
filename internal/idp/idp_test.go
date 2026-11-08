@@ -395,3 +395,22 @@ func TestEveryAlertReasonNamesAFix(t *testing.T) {
 		t.Errorf("no alert names the fix %q", h)
 	}
 }
+
+// #204: an alert names the IdP's own fix when it has one, else its reason's default.
+func TestTheFixIsTheIdPsOwnElseTheAlertsDefault(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		err  Error
+		want string
+	}{
+		{"the IdP's own", Error{Alert: AlertCredentialRejected, OperatorHint: "AADSTS7000222: renew the secret"}, "AADSTS7000222: renew the secret"},
+		{"the alert's default", Error{Alert: AlertCredentialRejected}, AlertCredentialRejected.Hint()},
+		{"neither", Error{}, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.err.Fix(); got != c.want {
+				t.Errorf("Fix() = %q, want %q", got, c.want)
+			}
+		})
+	}
+}

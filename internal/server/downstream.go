@@ -41,13 +41,9 @@ func newDownstreamTokens(scopes []string, header string, provider *entra.Provide
 	log *slog.Logger, o Observability) *downstreamTokens {
 	exchange := func(ctx context.Context, tid, assertion string, scopes []string) (downstream.Token, error) {
 		t, err := provider.OnBehalfOf(idp.WithRequestID(ctx, logging.RequestID(ctx)), tid, assertion, scopes)
-		// Counted per exchange, as the broker counts per IdP call: the cache shares one exchange among
-		// the requests waiting on it, and each of them is refused (and logged) on its own (#204).
-		if a := idp.AlertOf(err); a != "" {
-			o.Metrics.IdPAlert(idpName, opOnBehalfOf, string(a))
-		}
 		return downstream.Token{AccessToken: t.AccessToken, ExpiresAt: t.ExpiresAt}, err
 	}
+	exchange = alertingExchange(exchange, idpName, log, o)
 	res := scopes[0][:strings.LastIndex(scopes[0], "/")]
 	return &downstreamTokens{cache: downstream.New(exchange, scopes, 0, time.Now), header: header, resource: res,
 		assertion: assertion, consentURL: func(tid string) string { return provider.AdminConsentURL(tid, scopes) },
@@ -124,6 +120,24 @@ func outcomeOf(err error) string {
 	return "failed"
 }
 
+// alertingExchange counts and logs an exchange error that needs the operator once per exchange, as
+// the broker does per IdP call: the cache shares one exchange among the requests waiting on it and
+// finishes it even when they have gone, so neither a count nor its line depends on a waiter (#204).
+// Each refused waiter's own line still carries the alert.
+func alertingExchange(exchange downstream.Exchange, idpName string, log *slog.Logger, o Observability) downstream.Exchange {
+	return func(ctx context.Context, tid, assertion string, scopes []string) (downstream.Token, error) {
+		t, err := exchange(ctx, tid, assertion, scopes)
+		if a := idp.AlertOf(err); a != "" {
+			var ie *idp.Error
+			errors.As(err, &ie)
+			o.Metrics.IdPAlert(idpName, opOnBehalfOf, string(a))
+			log.ErrorContext(ctx, "IdP alert: the operator must act", "request_id", logging.RequestID(ctx), "idp", idpName,
+				"operation", opOnBehalfOf, "alert", string(a), "reason", ie.Fix())
+		}
+		return t, err
+	}
+}
+
 // opOnBehalfOf labels the On-Behalf-Of exchange in the IdP alert metric.
 const opOnBehalfOf = "on_behalf_of"
 
@@ -143,10 +157,8 @@ func (d *downstreamTokens) record(ctx context.Context, r *http.Request, id resou
 	reason := outcome
 	var ie *idp.Error
 	isIdP := errors.As(err, &ie)
-	if isIdP && ie.OperatorHint != "" {
-		reason = outcome + ": " + ie.OperatorHint
-	} else if isIdP && ie.Alert != "" {
-		reason = outcome + ": " + ie.Alert.Hint()
+	if isIdP && ie.Fix() != "" {
+		reason = outcome + ": " + ie.Fix()
 	}
 	attrs := []any{"request_id", logging.RequestID(ctx), "reason", reason, "error", err}
 	if isIdP {
