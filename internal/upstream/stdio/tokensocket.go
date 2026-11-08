@@ -41,10 +41,13 @@ const (
 	// maxSocketPath is the longest socket path both platforms accept (sun_path: 104 bytes on
 	// macOS with its NUL, 108 on Linux).
 	maxSocketPath = 103
-	// tokenAnswerTimeout bounds one request: the On-Behalf-Of exchange takes at most 30 s
+	// tokenAnswerTimeout bounds one connection: the On-Behalf-Of exchange takes at most 30 s
 	// (downstream.ExchangeTimeout), and a peer that stalls must not block the next one for longer.
 	tokenAnswerTimeout = 40 * time.Second
-	maxTokenRequest    = 4 << 10
+	// tokenWriteMargin is kept from the connection's deadline for writing the answer, so an answer
+	// that takes its whole time still reaches the peer.
+	tokenWriteMargin = 5 * time.Second
+	maxTokenRequest  = 4 << 10
 	// maxAncestry bounds the walk from a peer up to the upstream process.
 	maxAncestry = 64
 )
@@ -55,6 +58,9 @@ type tokenSocket struct {
 	path   string
 	log    *slog.Logger
 	answer func(context.Context) DownstreamToken
+	// timeout bounds a connection and margin is kept of it for the answer's write:
+	// tokenAnswerTimeout and tokenWriteMargin, shorter in tests.
+	timeout, margin time.Duration
 }
 
 // listenTokenSocket opens the token socket in dir, readable and writable by our uid only, inside
@@ -73,7 +79,7 @@ func listenTokenSocket(dir string, log *slog.Logger, answer func(context.Context
 		_ = ln.Close()
 		return nil, fmt.Errorf("stdio: token socket: %w", err)
 	}
-	return &tokenSocket{ln: ln, path: path, log: log, answer: answer}, nil
+	return &tokenSocket{ln: ln, path: path, log: log, answer: answer, timeout: tokenAnswerTimeout, margin: tokenWriteMargin}, nil
 }
 
 // serve answers requests from root (the upstream process) and its descendants until the socket is
@@ -90,21 +96,12 @@ func (s *tokenSocket) serve(root int) {
 
 func (s *tokenSocket) close() { _ = s.ln.Close() }
 
-// attach serves the socket for the started process pid and returns onExit with the socket closed
-// first, so it lives exactly as long as the process.
-func (s *tokenSocket) attach(pid int, onExit func()) func() {
-	go s.serve(pid)
-	return func() {
-		s.close()
-		onExit()
-	}
-}
-
 // handle answers one connection with one JSON line: the token, or an error code. The token is
 // never logged.
 func (s *tokenSocket) handle(c *net.UnixConn, root int) {
 	defer func() { _ = c.Close() }()
-	_ = c.SetDeadline(time.Now().Add(tokenAnswerTimeout))
+	deadline := time.Now().Add(s.timeout)
+	_ = c.SetDeadline(deadline)
 	reply := func(v any) {
 		b, _ := json.Marshal(v)
 		_, _ = c.Write(append(b, '\n'))
@@ -126,7 +123,7 @@ func (s *tokenSocket) handle(c *net.UnixConn, root int) {
 		refuse(TokenBadRequest)
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), tokenAnswerTimeout)
+	ctx, cancel := context.WithDeadline(context.Background(), deadline.Add(-s.margin))
 	defer cancel()
 	t := s.answer(ctx)
 	if t.Error != "" || t.AccessToken == "" {

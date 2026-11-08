@@ -169,7 +169,8 @@ export function downstreamToken(): Promise<string> {
   the hour cannot reach it any other way without restarting it, which would end the session.
 - `BYWARD_OBO_HEADER` has no effect for a stdio upstream, and setting it is refused.
 - A server started with `docker run -i` cannot reach the socket: its process does not descend from
-  the one byward started.
+  the one byward started. Nor can a process that detached by forking twice (`(cmd &)`, a daemon):
+  the kernel gives it a new parent, so it no longer descends from the upstream process.
 - Every upstream process runs as byward's uid. On a host that lets processes of one uid read each
   other's memory (`kernel.yama.ptrace_scope` 0, Debian's default), another user's process could read
   the token from memory. byward warns at startup and in `doctor`; see

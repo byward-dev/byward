@@ -287,3 +287,48 @@ func TestATokenSocketPathTooLongForTheKernelIsRefusedNamingTMPDIR(t *testing.T) 
 		t.Fatalf("got %v, want a refusal naming TMPDIR", err)
 	}
 }
+
+func TestAnAnswerThatTakesItsWholeTimeStillReachesThePeer(t *testing.T) {
+	s, err := listenTokenSocket(shortTempDir(t), slog.New(&recorder{mu: &sync.Mutex{}, recs: &[]record{}}), func(ctx context.Context) DownstreamToken {
+		<-ctx.Done() // an exchange that runs to its bound
+		return DownstreamToken{Error: "unavailable"}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.close)
+	s.timeout, s.margin = 400*time.Millisecond, 200*time.Millisecond
+	go s.serve(os.Getpid())
+	if _, _, code := answerOf(t, ask(t, s.path, `{}`)); code != "unavailable" {
+		t.Fatalf("the peer got error %q, want unavailable", code)
+	}
+}
+
+func TestTheSocketClosesAsSoonAsTheProcessIsReapedEvenWhileADescendantHoldsItsPipes(t *testing.T) {
+	h := tokenHarness(t, &tokens{})
+	p := h.get(t, "a1", alice)
+	var env []string
+	if err := json.Unmarshal([]byte(call(t, p, "env")), &env); err != nil {
+		t.Fatal(err)
+	}
+	var path string
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, EnvDownstreamTokenSocket+"="); ok {
+			path = v
+		}
+	}
+	call(t, p, "detach") // a child in its own session keeps stdout open after the process exits
+	h.m.Stop("a1")
+	eventually(t, "the token socket to close", func() bool {
+		c, err := net.Dial("unix", path)
+		if err == nil {
+			_ = c.Close()
+		}
+		return err != nil
+	})
+	if isDone(p) {
+		t.Fatal("the process finished before the socket closed, so this test proves nothing")
+	}
+	h.clk.Advance(2 * DefaultKillGrace) // the pipes are force-closed after the grace
+	waitDone(t, p)
+}

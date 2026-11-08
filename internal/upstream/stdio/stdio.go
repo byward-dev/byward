@@ -566,7 +566,10 @@ func (m *Manager) spawn(ctx context.Context, id Identity, onExit func(), latest 
 		idleFor: m.cfg.IdleTimeout, grace: m.cfg.KillGrace, maxMsg: m.cfg.MaxMessageBytes,
 	}
 	if sock != nil {
-		onExit = sock.attach(cmd.Process.Pid, onExit)
+		// Closed as soon as the process is reaped: a descendant that still holds its pipes must not
+		// keep a socket whose root's PID may already be reused.
+		opts.reaped = sock.close
+		go sock.serve(cmd.Process.Pid)
 	}
 	return startProcess(cmd, inW, outR, errR, dir, opts, onExit), nil
 }
