@@ -41,6 +41,11 @@ func newDownstreamTokens(scopes []string, header string, provider *entra.Provide
 	log *slog.Logger, o Observability) *downstreamTokens {
 	exchange := func(ctx context.Context, tid, assertion string, scopes []string) (downstream.Token, error) {
 		t, err := provider.OnBehalfOf(idp.WithRequestID(ctx, logging.RequestID(ctx)), tid, assertion, scopes)
+		// Counted per exchange, as the broker counts per IdP call: the cache shares one exchange among
+		// the requests waiting on it, and each of them is refused (and logged) on its own (#204).
+		if a := idp.AlertOf(err); a != "" {
+			o.Metrics.IdPAlert(idpName, opOnBehalfOf, string(a))
+		}
 		return downstream.Token{AccessToken: t.AccessToken, ExpiresAt: t.ExpiresAt}, err
 	}
 	res := scopes[0][:strings.LastIndex(scopes[0], "/")]
@@ -148,7 +153,6 @@ func (d *downstreamTokens) record(ctx context.Context, r *http.Request, id resou
 		// The IdP's error code and its own trace IDs; never its error_description (ADR-0021 §7).
 		attrs = append(attrs, "idp_error_code", ie.Code, "trace_id", ie.TraceID, "correlation_id", ie.CorrelationID)
 		if ie.Alert != "" { // the IdP refuses the proxy itself: no user can fix it (#204)
-			d.o.Metrics.IdPAlert(d.idp, opOnBehalfOf, string(ie.Alert))
 			attrs = append(attrs, "alert", string(ie.Alert))
 		}
 	}

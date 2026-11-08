@@ -202,8 +202,9 @@ plus the names in `BYWARD_ALLOWED_HOSTS`; any other name gets `421`, which stops
       - `grant_revoked` with a reuse reason, which can mean token theft;
       - spikes of `access_token_rejected`, `origin_rejected`, `host_rejected` or `rate_limited`;
       - IdP `unavailable` outcomes;
-      - any increase of `byward_idp_alerts_total`: the IdP refuses or cannot get the proxy's own
-        credential, which no user can fix.
+      - any increase of `byward_idp_alerts_total`: the IdP refuses the proxy's own credential, the
+        proxy cannot build it, or the IdP breaks the protocol; no user can fix these (`reason` says
+        which).
 
       Example rules are in the [observability reference](../reference/observability.md#metrics).
 - [ ] Tracing is off unless you set `OTEL_TRACES_EXPORTER`. When on, send it only to a collector you

@@ -25,7 +25,6 @@ import (
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/logging"
-	"github.com/byward-dev/byward/internal/metrics"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/upstream/relay"
@@ -460,8 +459,9 @@ func TestAClientGoingAwayIsNotARefusal(t *testing.T) {
 }
 
 // #204: a refusal the IdP's error marks as an alert names the IdP's own fix when it has one, else
-// the alert's default, and counts the alert; any other refusal neither alerts nor counts.
-func TestARefusalThatNeedsTheOperatorNamesTheFixAndCounts(t *testing.T) {
+// the alert's default, on an alert line; any other refusal is not an alert. (The count is per
+// exchange, in TestDownstreamRefusalsAreAnsweredInTheProxysName.)
+func TestARefusalThatNeedsTheOperatorNamesTheFix(t *testing.T) {
 	for _, c := range []struct {
 		name   string
 		err    *idp.Error
@@ -475,8 +475,6 @@ func TestARefusalThatNeedsTheOperatorNamesTheFixAndCounts(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			logs := &syncBuffer{}
-			m := metrics.New()
-			m.SeedIdPAlerts("entra", []string{opOnBehalfOf}, []string{string(idp.AlertCredentialRejected)})
 			d := &downstreamTokens{
 				cache: downstream.New(func(context.Context, string, string, []string) (downstream.Token, error) {
 					return downstream.Token{}, c.err
@@ -485,7 +483,7 @@ func TestARefusalThatNeedsTheOperatorNamesTheFixAndCounts(t *testing.T) {
 				assertion: func(context.Context, string) (string, time.Time, error) {
 					return "assertion", time.Now().Add(time.Hour), nil
 				},
-				idp: "entra", log: logging.New(logs, "json"), o: Observability{Metrics: m},
+				idp: "entra", log: logging.New(logs, "json"),
 			}
 			w := httptest.NewRecorder()
 			d.serve(w, httptest.NewRequest("POST", "/mcp", strings.NewReader(oboToolsCall)), resource.Identity{Subject: "tid:oid", GrantID: "g"}, true,
@@ -499,15 +497,6 @@ func TestARefusalThatNeedsTheOperatorNamesTheFixAndCounts(t *testing.T) {
 			}
 			if got := strings.Contains(line, `"alert":"credential_rejected"`); got != c.alert {
 				t.Errorf("alert logged %v, want %v:\n%s", got, c.alert, line)
-			}
-			rec := httptest.NewRecorder()
-			m.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
-			want := `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="credential_rejected"} 0`
-			if c.alert {
-				want = want[:len(want)-1] + "1"
-			}
-			if !strings.Contains(rec.Body.String(), want) {
-				t.Errorf("metrics lack %s:\n%s", want, rec.Body.String())
 			}
 		})
 	}
