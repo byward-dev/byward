@@ -135,6 +135,7 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 					t.Fatalf("an alert for a refusal that is not one:\n%s", logs)
 				}
 			} else if alertLines != 1 || !strings.Contains(refusal, `"alert":"`+tc.wantAlert+`"`) ||
+				!strings.Contains(refusal, `"reason":"unavailable: AADSTS7000222: renew the secret"`) ||
 				!strings.Contains(scrape.Body.String(), `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="`+tc.wantAlert+`"} 1`) {
 				t.Fatalf("want one alert line, %s on the refusal line and counted once:\n%s\n%s", tc.wantAlert, logs, scrape.Body)
 			}
