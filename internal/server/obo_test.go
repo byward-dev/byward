@@ -252,18 +252,19 @@ func TestDownstreamRefusalsAreAnsweredInTheProxysName(t *testing.T) {
 		logWant   string
 		auditWant string
 		alert     string // the alert reason, or "" for none
+		fix       string // the alert line's whole reason
 	}{
 		{"consent missing, tools/call", &fakeidp.ConsentRequired, oboToolsCall,
-			`"isError":true`, `"admin_consent_url":"https://login.microsoftonline.com/`, `"reason":"consent_required"`, ""},
+			`"isError":true`, `"admin_consent_url":"https://login.microsoftonline.com/`, `"reason":"consent_required"`, "", ""},
 		{"Conditional Access, another method", &fakeidp.InteractionRequired, `{"jsonrpc":"2.0","id":"a","method":"tools/list"}`,
-			`"data":{"downstream":"interaction_required"}`, "Conditional Access", `"reason":"interaction_required"`, ""},
+			`"data":{"downstream":"interaction_required"}`, "Conditional Access", `"reason":"interaction_required"`, "", ""},
 		{"Entra unavailable", &fakeidp.TemporarilyUnavailable, oboToolsCall,
-			"temporarily unavailable", `"reason":"unavailable"`, `"reason":"unavailable"`, ""},
+			"temporarily unavailable", `"reason":"unavailable"`, `"reason":"unavailable"`, "", ""},
 		{"any other refusal", &fakeidp.InvalidAssertion, oboToolsCall,
-			"could not get access to https://graph.microsoft.com on your behalf", `"idp_error_code":50013`, `"reason":"failed"`, ""},
+			"could not get access to https://graph.microsoft.com on your behalf", `"idp_error_code":50013`, `"reason":"failed"`, "", ""},
 		// #204: Entra rejecting the proxy's own credential needs the operator, so it also alerts.
 		{"client secret rejected", &fakeidp.InvalidClientSecret, oboToolsCall,
-			"temporarily unavailable", `"reason":"unavailable: ` + idp.AlertCredentialRejected.Hint() + `"`, `"reason":"unavailable"`, "credential_rejected"},
+			"temporarily unavailable", `"reason":"unavailable: ` + idp.AlertCredentialRejected.Hint() + `"`, `"reason":"unavailable"`, "credential_rejected", idp.AlertCredentialRejected.Hint()},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -323,7 +324,7 @@ func TestDownstreamRefusalsAreAnsweredInTheProxysName(t *testing.T) {
 					t.Errorf("an IdP alert line for a refusal that is not an alert:\n%s", logs)
 				}
 			} else if len(alertLines) != 1 || !strings.Contains(alertLines[0], `"operation":"on_behalf_of"`) ||
-				!strings.Contains(alertLines[0], `"alert":"`+c.alert+`"`) || !strings.Contains(alertLines[0], `"reason":"`+idp.AlertCredentialRejected.Hint()+`"`) {
+				!strings.Contains(alertLines[0], `"alert":"`+c.alert+`"`) || !strings.Contains(alertLines[0], `"reason":"`+c.fix+`"`) {
 				t.Errorf("want one on_behalf_of alert line naming the fix, got %d:\n%s", len(alertLines), logs)
 			}
 		})
@@ -475,12 +476,12 @@ func TestARefusalThatNeedsTheOperatorNamesTheFix(t *testing.T) {
 		name   string
 		err    *idp.Error
 		reason string // the refusal line's whole reason
-		alert  bool
 	}{
 		{"the IdP's own hint", &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialRejected, OperatorHint: "AADSTS7000222: the client secret has expired"},
-			"unavailable: AADSTS7000222: the client secret has expired", true},
-		{"the alert's default", &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialRejected}, "unavailable: " + idp.AlertCredentialRejected.Hint(), true},
-		{"no alert", &idp.Error{Class: idp.Unavailable}, "unavailable", false},
+			"unavailable: AADSTS7000222: the client secret has expired"},
+		{"the alert's default", &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialRejected}, "unavailable: " + idp.AlertCredentialRejected.Hint()},
+		{"another reason", &idp.Error{Class: idp.Fatal, Alert: idp.AlertProtocol}, "failed: " + idp.AlertProtocol.Hint()},
+		{"no alert", &idp.Error{Class: idp.Unavailable}, "unavailable"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			logs := &syncBuffer{}
@@ -504,8 +505,12 @@ func TestARefusalThatNeedsTheOperatorNamesTheFix(t *testing.T) {
 			if !strings.Contains(line, `"reason":"`+c.reason+`"`) {
 				t.Errorf("the refusal's reason is not %q:\n%s", c.reason, line)
 			}
-			if got := strings.Contains(line, `"alert":"credential_rejected"`); got != c.alert {
-				t.Errorf("alert logged %v, want %v:\n%s", got, c.alert, line)
+			if c.err.Alert == "" {
+				if strings.Contains(line, `"alert":`) {
+					t.Errorf("a refusal that is not an alert carries one:\n%s", line)
+				}
+			} else if !strings.Contains(line, `"alert":"`+string(c.err.Alert)+`"`) {
+				t.Errorf("the refusal line lacks alert %q:\n%s", c.err.Alert, line)
 			}
 		})
 	}
