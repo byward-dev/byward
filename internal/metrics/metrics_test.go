@@ -29,6 +29,7 @@ func exercise(m *Metrics) {
 	h := m.Middleware(func(*http.Request) string { return "mcp" }, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(401) }))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/mcp?user=alice", nil))
 	m.IdP("entra", "callback", "success", 120*time.Millisecond)
+	m.IdPAlert("entra", "callback", "credential_rejected")
 	m.InFlight("request", 1)
 	m.Busy("stream")
 	m.AuditEvent("login", "success")

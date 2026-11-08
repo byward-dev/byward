@@ -136,7 +136,10 @@ type Config struct {
 	// ObserveIdP, when set, is told each IdP call's operation, outcome (success, rejected,
 	// unavailable) and duration, for metrics.
 	ObserveIdP func(operation, outcome string, d time.Duration)
-	Now        func() time.Time
+	// ObserveIdPAlert, when set, is told each IdP error that needs the operator, by operation and
+	// reason (idp.Alert), for metrics.
+	ObserveIdPAlert func(operation, reason string)
+	Now             func() time.Time
 }
 
 // Limiter decides whether a request to an OAuth endpoint (authorize, consent, callback, token,
@@ -169,6 +172,9 @@ func New(cfg Config) (*Broker, error) {
 	}
 	if cfg.ObserveIdP == nil {
 		cfg.ObserveIdP = func(string, string, time.Duration) {}
+	}
+	if cfg.ObserveIdPAlert == nil {
+		cfg.ObserveIdPAlert = func(string, string) {}
 	}
 	if cfg.RefreshGrace < 0 || cfg.RefreshGrace > MaxRefreshGrace {
 		return nil, errors.New("broker: the refresh grace window must be between 0 and 60 s")

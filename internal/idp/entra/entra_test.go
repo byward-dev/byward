@@ -148,7 +148,7 @@ func TestCertificateCredential(t *testing.T) {
 	e.p.cfg.ClientAuth = stranger
 	_, _, err = callback(t, e)
 	var ie *idp.Error
-	if !errors.As(err, &ie) || ie.Code != 700027 || ie.Class != idp.Unavailable || !ie.Alert {
+	if !errors.As(err, &ie) || ie.Code != 700027 || ie.Class != idp.Unavailable || ie.Alert != idp.AlertCredentialRejected {
 		t.Fatalf("wrong key: %#v", err)
 	}
 }
@@ -289,23 +289,23 @@ func TestTokenErrorsMapToADR0012Classes(t *testing.T) {
 	for name, tc := range map[string]struct {
 		f     *fakeidp.Failure
 		class idp.Class
-		alert bool
+		alert idp.Alert
 		code  int
 		paged bool
 	}{
-		"700082 expired":      {&fakeidp.RefreshTokenExpired, idp.SignInAgain, false, 700082, false},
-		"50076 MFA":           {&fakeidp.MFARequired, idp.SignInAgain, false, 50076, false},
-		"65001 consent":       {&fakeidp.ConsentRequired, idp.SignInAgain, false, 65001, true},
-		"50173 revoked":       {&fakeidp.RefreshTokenRevoked, idp.SignInAgain, false, 50173, false},
-		"7000215 secret":      {&fakeidp.InvalidClientSecret, idp.Unavailable, true, 7000215, false},
-		"7000222 expired key": {&fakeidp.ExpiredClientSecret, idp.Unavailable, true, 7000222, true},
-		"503":                 {&fakeidp.TemporarilyUnavailable, idp.Unavailable, false, 0, false},
-		"invalid_request":     {&fakeidp.InvalidRequest, idp.Fatal, false, 9002313, false},
-		"700016 unknown app":  {&fakeidp.UnknownClient, idp.Unavailable, true, 700016, true},
-		"5002723 thumbprint":  {&fakeidp.MissingThumbprint, idp.Unavailable, true, 5002723, false},
-		"70043 by code":       {&fakeidp.Failure{Error: "invalid_request", Code: 70043}, idp.SignInAgain, false, 70043, false},
-		"429":                 {&fakeidp.Failure{Status: 429, Error: "invalid_request"}, idp.Unavailable, false, 0, false},
-		"503 invalid_client":  {&fakeidp.Failure{Status: 503, Error: "invalid_client", Code: 7000215}, idp.Unavailable, true, 7000215, false},
+		"700082 expired":      {&fakeidp.RefreshTokenExpired, idp.SignInAgain, "", 700082, false},
+		"50076 MFA":           {&fakeidp.MFARequired, idp.SignInAgain, "", 50076, false},
+		"65001 consent":       {&fakeidp.ConsentRequired, idp.SignInAgain, "", 65001, true},
+		"50173 revoked":       {&fakeidp.RefreshTokenRevoked, idp.SignInAgain, "", 50173, false},
+		"7000215 secret":      {&fakeidp.InvalidClientSecret, idp.Unavailable, idp.AlertCredentialRejected, 7000215, false},
+		"7000222 expired key": {&fakeidp.ExpiredClientSecret, idp.Unavailable, idp.AlertCredentialRejected, 7000222, true},
+		"503":                 {&fakeidp.TemporarilyUnavailable, idp.Unavailable, "", 0, false},
+		"invalid_request":     {&fakeidp.InvalidRequest, idp.Fatal, "", 9002313, false},
+		"700016 unknown app":  {&fakeidp.UnknownClient, idp.Unavailable, idp.AlertCredentialRejected, 700016, true},
+		"5002723 thumbprint":  {&fakeidp.MissingThumbprint, idp.Unavailable, idp.AlertCredentialRejected, 5002723, false},
+		"70043 by code":       {&fakeidp.Failure{Error: "invalid_request", Code: 70043}, idp.SignInAgain, "", 70043, false},
+		"429":                 {&fakeidp.Failure{Status: 429, Error: "invalid_request"}, idp.Unavailable, "", 0, false},
+		"503 invalid_client":  {&fakeidp.Failure{Status: 503, Error: "invalid_client", Code: 7000215}, idp.Unavailable, idp.AlertCredentialRejected, 7000215, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t, Config{})
@@ -394,7 +394,7 @@ func TestTokenTransportFailureIsUnavailable(t *testing.T) {
 	e.p.fetch.Client = &http.Client{Transport: deadline{}}
 	_, _, err := e.p.Refresh(context.Background(), "rt")
 	var ie *idp.Error
-	if !errors.As(err, &ie) || ie.Class != idp.Unavailable || ie.Alert {
+	if !errors.As(err, &ie) || ie.Class != idp.Unavailable || ie.Alert != "" {
 		t.Fatalf("err = %#v", err)
 	}
 }
@@ -409,7 +409,7 @@ func TestATokenSuccessWithoutTokensIsFatal(t *testing.T) {
 	e.p.fetch.Client = &http.Client{Transport: emptySuccess{}}
 	_, _, err := e.p.Refresh(context.Background(), "rt")
 	var ie *idp.Error
-	if !errors.As(err, &ie) || ie.Class != idp.Fatal || !ie.Alert {
+	if !errors.As(err, &ie) || ie.Class != idp.Fatal || ie.Alert != idp.AlertProtocol {
 		t.Fatalf("err = %#v, want Fatal with an operator alert", err)
 	}
 }

@@ -133,7 +133,7 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 	}
 	start := time.Now()
 	id, fresh, err := b.cfg.IdP.Refresh(idp.WithRequestID(ctx, logging.RequestID(ctx)), old.RefreshToken)
-	b.cfg.ObserveIdP("refresh", idpOutcome(err), time.Since(start))
+	b.observeIdP(ctx, "refresh", start, err)
 	if err != nil {
 		var ie *idp.Error
 		switch {

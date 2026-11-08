@@ -5,6 +5,7 @@ byward_cimd_fetches_total counter
 byward_consent_total counter
 byward_dcr_registrations_total counter
 byward_http_request_duration_seconds histogram
+byward_idp_alerts_total counter
 byward_idp_request_duration_seconds histogram
 byward_rate_limited_total counter
 byward_stdio_processes gauge

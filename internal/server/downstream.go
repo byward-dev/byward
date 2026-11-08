@@ -142,6 +142,10 @@ func (d *downstreamTokens) record(ctx context.Context, r *http.Request, id resou
 	if isIdP {
 		// The IdP's error code and its own trace IDs; never its error_description (ADR-0021 §7).
 		attrs = append(attrs, "idp_error_code", ie.Code, "trace_id", ie.TraceID, "correlation_id", ie.CorrelationID)
+		if ie.Alert != "" { // the IdP refuses the proxy itself: no user can fix it (#204)
+			d.o.Metrics.IdPAlert(d.idp, "on_behalf_of", string(ie.Alert))
+			attrs = append(attrs, "alert", string(ie.Alert))
+		}
 	}
 	if outcome == "consent_required" {
 		tid, _, _ := strings.Cut(id.Subject, ":")

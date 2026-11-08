@@ -140,8 +140,8 @@ Background: [ADR-0012](../adr/0012-entra-specifics.md), [ADR-0015](../adr/0015-a
         every start, and `byward doctor` from 30 days before
         ([commands](../reference/commands.md#byward-doctor)). Put the date in your monitoring too.
       - An expired or wrong secret makes sign-ins fail, and refreshes answer `503` instead of signing
-        users out. Alert on
-        `byward_idp_request_duration_seconds_count{outcome="unavailable"}`
+        users out. Alert on any increase of
+        `byward_idp_alerts_total{reason="credential_rejected"}`
         ([observability](../reference/observability.md#metrics)).
 - [ ] **Use a certificate credential** instead of a client secret (ADR-0012 §5; Microsoft: "It's
       therefore recommended that your application uses a certificate rather than a secret"). The
@@ -201,7 +201,9 @@ plus the names in `BYWARD_ALLOWED_HOSTS`; any other name gets `421`, which stops
       - `development mode relaxation` at startup;
       - `grant_revoked` with a reuse reason, which can mean token theft;
       - spikes of `access_token_rejected`, `origin_rejected`, `host_rejected` or `rate_limited`;
-      - IdP `unavailable` outcomes.
+      - IdP `unavailable` outcomes;
+      - any increase of `byward_idp_alerts_total`: the IdP refuses or cannot get the proxy's own
+        credential, which no user can fix.
 
       Example rules are in the [observability reference](../reference/observability.md#metrics).
 - [ ] Tracing is off unless you set `OTEL_TRACES_EXPORTER`. When on, send it only to a collector you

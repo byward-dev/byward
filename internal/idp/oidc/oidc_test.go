@@ -212,12 +212,12 @@ func TestTokenErrorsAreClassified(t *testing.T) {
 	for name, tc := range map[string]struct {
 		f     *fakeidp.Failure
 		class idp.Class
-		alert bool
+		alert idp.Alert
 	}{
-		"invalid_grant":   {&fakeidp.RefreshTokenExpired, idp.SignInAgain, false},
-		"invalid_client":  {&fakeidp.InvalidClientSecret, idp.Unavailable, true},
-		"503":             {&fakeidp.TemporarilyUnavailable, idp.Unavailable, false},
-		"invalid_request": {&fakeidp.InvalidRequest, idp.Fatal, false},
+		"invalid_grant":   {&fakeidp.RefreshTokenExpired, idp.SignInAgain, ""},
+		"invalid_client":  {&fakeidp.InvalidClientSecret, idp.Unavailable, idp.AlertCredentialRejected},
+		"503":             {&fakeidp.TemporarilyUnavailable, idp.Unavailable, ""},
+		"invalid_request": {&fakeidp.InvalidRequest, idp.Fatal, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t, Config{})
@@ -432,7 +432,7 @@ func TestTokenTransportFailureIsUnavailable(t *testing.T) {
 	e.p.fetch.Client = &http.Client{Transport: refused{}}
 	_, _, err := e.p.Refresh(context.Background(), "rt")
 	var ie *idp.Error
-	if !asError(err, &ie) || ie.Class != idp.Unavailable || ie.Alert {
+	if !asError(err, &ie) || ie.Class != idp.Unavailable || ie.Alert != "" {
 		t.Fatalf("err = %#v", err)
 	}
 }
@@ -446,7 +446,7 @@ func TestATokenSuccessWithoutTokensIsFatal(t *testing.T) {
 	e.p.fetch.Client = &http.Client{Transport: emptySuccess{}}
 	_, _, err := e.p.Refresh(context.Background(), "rt")
 	var ie *idp.Error
-	if !asError(err, &ie) || ie.Class != idp.Fatal || !ie.Alert {
+	if !asError(err, &ie) || ie.Class != idp.Fatal || ie.Alert != idp.AlertProtocol {
 		t.Fatalf("err = %#v, want Fatal with an operator alert", err)
 	}
 }
@@ -560,7 +560,7 @@ func TestAnUnusableClientCredentialFailsAsErrCredential(t *testing.T) {
 	e := newEnv(t, Config{ClientAuth: idp.AssertionFile(t.TempDir() + "/missing-token")})
 	_, _, err := e.p.Refresh(context.Background(), "rt")
 	var ie *idp.Error
-	if !errors.Is(err, idp.ErrCredential) || !errors.As(err, &ie) || ie.Class != idp.Unavailable || !ie.Alert {
+	if !errors.Is(err, idp.ErrCredential) || !errors.As(err, &ie) || ie.Class != idp.Unavailable || ie.Alert != idp.AlertCredentialUnusable {
 		t.Fatalf("err = %v, want an alerting, unavailable ErrCredential", err)
 	}
 }

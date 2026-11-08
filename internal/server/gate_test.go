@@ -117,6 +117,15 @@ func TestWiredBrokerGetsTheConfiguredGateAndObservability(t *testing.T) {
 	if !regexp.MustCompile(`\{[^}]*idp="entra"[^}]*operation="callback"[^}]*outcome="success"`).MatchString(rec.Body.String()) {
 		t.Fatalf("an IdP observation did not reach /metrics as idp=entra, callback, success:\n%s", rec.Body.String())
 	}
+	if got.ObserveIdPAlert == nil {
+		t.Fatal("broker wired without IdP alert observation")
+	}
+	got.ObserveIdPAlert("refresh", "credential_rejected")
+	rec = httptest.NewRecorder()
+	srv.Internal.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "http://127.0.0.1:9090/metrics", nil))
+	if want := `byward_idp_alerts_total{idp="entra",operation="refresh",reason="credential_rejected"} 1`; !strings.Contains(rec.Body.String(), want) {
+		t.Fatalf("an IdP alert did not reach /metrics as %s:\n%s", want, rec.Body.String())
+	}
 	id := idp.Identity{Subject: fixtureTenant + ":x", Claims: map[string]any{"tid": fixtureTenant}}
 	var d broker.Denial
 	if err := got.Gate.Allow(context.Background(), id); !errors.As(err, &d) || d.DeniedRule() != "role" {

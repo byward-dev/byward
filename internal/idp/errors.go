@@ -46,8 +46,9 @@ type Error struct {
 	Status        int
 	TraceID       string
 	CorrelationID string
-	// Alert asks for a loud operator alert (e.g. the IdP rejects our credential).
-	Alert bool
+	// Alert, when set, asks for an operator alert: the error will not go away without the
+	// operator (#204). It names why, as a bounded metric label.
+	Alert Alert
 	// UserMessage is safe to show on an error page and may be empty (the caller supplies a
 	// default); OperatorHint names the fix.
 	UserMessage  string
@@ -81,6 +82,32 @@ func (e *Error) Error() string {
 }
 
 func (e *Error) Unwrap() error { return e.Err }
+
+// Alert is why an IdP error needs the operator; "" means it does not. The values are metric labels
+// (byward_idp_alerts_total{reason}), so the set stays small.
+type Alert string
+
+// Alert reasons.
+const (
+	// AlertCredentialUnusable: the proxy could not even make its client credential (a broken
+	// certificate or key, an unreadable federated token file); nothing was sent.
+	AlertCredentialUnusable Alert = "credential_unusable" //nolint:gosec // G101: a metric label, not a credential
+	// AlertCredentialRejected: the IdP refused the proxy's credential or client ID (invalid_client,
+	// an expired secret, an unregistered app).
+	AlertCredentialRejected Alert = "credential_rejected" //nolint:gosec // G101: a metric label, not a credential
+	// AlertProtocol: the IdP answered in a way the protocol does not allow (a success without
+	// tokens).
+	AlertProtocol Alert = "protocol"
+)
+
+// AlertOf is the alert reason of err, or "" when err is not an *Error that asks for one.
+func AlertOf(err error) Alert {
+	var e *Error
+	if errors.As(err, &e) {
+		return e.Alert
+	}
+	return ""
+}
 
 // ClassOf returns the class of err, Fatal if err is not an *Error.
 func ClassOf(err error) Class {

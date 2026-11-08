@@ -260,6 +260,9 @@ func TestDownstreamRefusalsAreAnsweredInTheProxysName(t *testing.T) {
 			"temporarily unavailable", `"reason":"unavailable"`, `"reason":"unavailable"`},
 		{"any other refusal", &fakeidp.InvalidAssertion, oboToolsCall,
 			"could not get access to https://graph.microsoft.com on your behalf", `"idp_error_code":50013`, `"reason":"failed"`},
+		// #204: Entra rejecting the proxy's own credential needs the operator, so it also alerts.
+		{"client secret rejected", &fakeidp.InvalidClientSecret, oboToolsCall,
+			"temporarily unavailable", `"alert":"credential_rejected"`, `"reason":"unavailable"`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -294,8 +297,13 @@ func TestDownstreamRefusalsAreAnsweredInTheProxysName(t *testing.T) {
 				t.Error("an admin-consent URL for a refusal consent would not fix")
 			}
 			outcome := strings.TrimSuffix(strings.TrimPrefix(c.auditWant, `"reason":"`), `"`)
-			if want := `byward_downstream_tokens_total{outcome="` + outcome + `"} 1`; !strings.Contains(e.metrics(), want) {
+			metrics := e.metrics()
+			if want := `byward_downstream_tokens_total{outcome="` + outcome + `"} 1`; !strings.Contains(metrics, want) {
 				t.Errorf("metrics lack %s", want)
+			}
+			alert := `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="credential_rejected"} 1`
+			if wantAlert := c.failure == &fakeidp.InvalidClientSecret; strings.Contains(metrics, alert) != wantAlert || strings.Contains(logs, `"alert":`) != wantAlert {
+				t.Errorf("alert in metrics %v, in the log %v; want both %v", strings.Contains(metrics, alert), strings.Contains(logs, `"alert":`), wantAlert)
 			}
 		})
 	}

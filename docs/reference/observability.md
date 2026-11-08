@@ -87,6 +87,7 @@ Prometheus text format at `/metrics` on the internal listener. Histogram buckets
 |---|---|---|
 | `byward_http_request_duration_seconds` | histogram | `route`: the matched route pattern (`/mcp` or your public path, `/authorize`, `/consent`, `/assets/page.css`, `/callback/entra`, `/token`, `/revoke`, the `/.well-known/…` metadata paths) or `other`; `status_class` (`2xx` …) |
 | `byward_idp_request_duration_seconds` | histogram | `idp`, `operation` (`authorize`, `callback`, `refresh`), `outcome` (`success`, `rejected`, `unavailable`) |
+| `byward_idp_alerts_total` | counter | `idp`, `operation` (`authorize`, `callback`, `refresh`, `on_behalf_of`), `reason`: IdP errors that will not clear without the operator: `credential_rejected` (the IdP refuses the proxy's client credential or client ID: `invalid_client`, an expired secret, an unregistered app), `credential_unusable` (the proxy could not build its credential: an unreadable certificate, key or federated token file), `protocol` (the IdP answered against the protocol, such as a success without tokens). Alert on any increase |
 | `byward_upstream_in_flight` | gauge | `kind` (`request`, `stream`) |
 | `byward_stdio_processes` | gauge | none; live stdio upstream processes, starting and stopping ones included (only with a stdio upstream) |
 | `byward_upstream_busy_total` | counter | `kind`: requests refused with 503 because an admission cap was full |
@@ -111,6 +112,8 @@ groups:
       - alert: BywardIdPUnavailable
         expr: sum(rate(byward_idp_request_duration_seconds_count{outcome="unavailable"}[5m])) > 0
         for: 10m
+      - alert: BywardIdPNeedsTheOperator
+        expr: sum by (idp, reason) (increase(byward_idp_alerts_total[5m])) > 0
       - alert: BywardRejectedTokenSpike
         expr: sum(rate(byward_audit_events_total{event="access_token_rejected"}[5m])) > 1
         for: 10m
@@ -159,5 +162,9 @@ bodies, tokens and secrets are never logged, and bearer-shaped values are redact
 
 IdP sign-in failures log the IdP's error code (`idp_error_code`, the AADSTS number for Entra), `trace_id` and
 `correlation_id`; with Entra, `correlation_id` equals our `request_id`, so a user's reference finds both logs.
+
+An IdP error counted in `byward_idp_alerts_total` is also logged at error level with an `alert` field set to its
+reason: in the broker as its own line, `IdP alert: the operator must act`, with `idp`, `operation` and the fix in
+`reason`; for On-Behalf-Of, on the refusal line. A log-based alert can match on `alert` being present.
 
 Personal data in logs: `user_key` and `remote_ip`. Email and name are never logged.

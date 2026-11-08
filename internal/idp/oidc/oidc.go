@@ -248,7 +248,7 @@ func (p *Provider) Callback(ctx context.Context, query url.Values, l idp.Login) 
 		return idp.Identity{}, idp.Tokens{}, &idp.Error{Class: idp.Fatal, Err: err}
 	}
 	if cb.Error != "" {
-		return idp.Identity{}, idp.Tokens{}, &idp.Error{Class: idp.GenericClass(0, cb.Error), OAuth: cb.Error, Alert: cb.Error == "invalid_client",
+		return idp.Identity{}, idp.Tokens{}, &idp.Error{Class: idp.GenericClass(0, cb.Error), OAuth: cb.Error, Alert: alertFor(cb.Error),
 			Description: cb.ErrorDescription, UserMessage: "Sign-in at the identity provider did not complete."}
 	}
 	form := url.Values{
@@ -298,7 +298,7 @@ func (p *Provider) Refresh(ctx context.Context, refreshToken string) (*idp.Ident
 func (p *Provider) token(ctx context.Context, m *metadata, form url.Values) (*idp.TokenResponse, error) {
 	if p.cfg.ClientAuth != nil {
 		if err := p.cfg.ClientAuth.Apply(form, p.cfg.ClientID, m.TokenEndpoint, p.cfg.Now()); err != nil {
-			return nil, &idp.Error{Class: idp.Unavailable, Alert: true, Err: fmt.Errorf("%w: %w", idp.ErrCredential, err)}
+			return nil, &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialUnusable, Err: fmt.Errorf("%w: %w", idp.ErrCredential, err)}
 		}
 	} else {
 		form.Set("client_id", p.cfg.ClientID)
@@ -312,7 +312,7 @@ func (p *Provider) token(ctx context.Context, m *metadata, form url.Values) (*id
 	if !tr.OK() {
 		class := idp.GenericClass(tr.Status, tr.Error)
 		return nil, &idp.Error{Class: class, OAuth: tr.Error, Status: tr.Status, Description: tr.ErrorDescription,
-			Alert: tr.Error == "invalid_client"}
+			Alert: alertFor(tr.Error)}
 	}
 	return tr, nil
 }
@@ -368,4 +368,13 @@ func (p *Provider) emailVerified(v any) bool {
 		return p.preset.EmailVerifiedAsString && b == "true"
 	}
 	return false
+}
+
+// alertFor is the operator alert for an OAuth error: invalid_client means the IdP refused the
+// proxy's own credential or client ID.
+func alertFor(oauth string) idp.Alert {
+	if oauth == "invalid_client" {
+		return idp.AlertCredentialRejected
+	}
+	return ""
 }

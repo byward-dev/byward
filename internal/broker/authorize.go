@@ -237,7 +237,7 @@ func (b *Broker) startLogin(w http.ResponseWriter, r *http.Request, l login, now
 	}
 	start := time.Now()
 	target, err := b.cfg.IdP.AuthCodeURL(idp.WithRequestID(ctx, logging.RequestID(ctx)), idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier, Silent: l.Silent})
-	b.cfg.ObserveIdP("authorize", idpOutcome(err), time.Since(start))
+	b.observeIdP(ctx, "authorize", start, err)
 	if err != nil && l.Silent { // the IdP is not ready (discovery or keys down)
 		b.noteIdPFailure(r, l.ClientID, err)
 		b.refuseSilently(w, r, "", l, "temporarily_unavailable", "the identity provider is not reachable; try again")
@@ -368,7 +368,7 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	start := time.Now()
 	id, toks, err := b.cfg.IdP.Callback(idp.WithRequestID(ctx, logging.RequestID(ctx)), q, idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier})
-	b.cfg.ObserveIdP("callback", idpOutcome(err), time.Since(start))
+	b.observeIdP(ctx, "callback", start, err)
 	if err != nil {
 		if l.Silent {
 			b.refuseSilentIdPFailure(w, r, l, err)
@@ -540,6 +540,22 @@ func (b *Broker) noteIdPFailure(r *http.Request, clientID string, err error) str
 func (b *Broker) idpFailure(w http.ResponseWriter, r *http.Request, clientID string, err error) {
 	msg := b.noteIdPFailure(r, clientID, err)
 	b.page(w, r, http.StatusBadGateway, msg, "Try again; if it keeps failing, tell your operator the reference below.")
+}
+
+// observeIdP records an IdP call that began at start for metrics. When its error needs the
+// operator (idp.Alert: a rejected or unusable client credential, a protocol violation), it also
+// counts the alert and logs it on its own line, which operators alert on (#204).
+func (b *Broker) observeIdP(ctx context.Context, operation string, start time.Time, err error) {
+	b.cfg.ObserveIdP(operation, idpOutcome(err), time.Since(start))
+	alert := idp.AlertOf(err)
+	if alert == "" {
+		return
+	}
+	b.cfg.ObserveIdPAlert(operation, string(alert))
+	var ie *idp.Error
+	errors.As(err, &ie)
+	b.cfg.Log.ErrorContext(ctx, "IdP alert: the operator must act", "request_id", logging.RequestID(ctx), "idp", b.cfg.IdPName,
+		"operation", operation, "alert", string(alert), "reason", ie.OperatorHint)
 }
 
 // idpOutcome classifies an IdP call for metrics: success, unavailable (try later) or rejected.

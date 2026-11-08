@@ -51,14 +51,14 @@ func codeOf(codes []int, description string) int {
 }
 
 // classify maps an Entra error to the broker's action (ADR-0012 §6).
-func classify(status int, oauth string, code int) (idp.Class, bool) {
+func classify(status int, oauth string, code int) (idp.Class, idp.Alert) {
 	switch {
 	case invalidClientCodes[code] || oauth == "invalid_client":
-		return idp.Unavailable, true
+		return idp.Unavailable, idp.AlertCredentialRejected
 	case signInAgainCodes[code]:
-		return idp.SignInAgain, false
+		return idp.SignInAgain, ""
 	}
-	return idp.GenericClass(status, oauth), false
+	return idp.GenericClass(status, oauth), ""
 }
 
 func newError(status int, oauth, description string, codes []int, trace, corr string) *idp.Error {

@@ -249,7 +249,7 @@ func (p *Provider) token(ctx context.Context, form url.Values) (*idp.TokenRespon
 func (p *Provider) tokenAt(ctx context.Context, tenant string, form url.Values) (*idp.TokenResponse, error) {
 	tokenURL := Authority + "/" + tenant + "/oauth2/v2.0/token"
 	if err := p.cfg.ClientAuth.Apply(form, p.cfg.ClientID, tokenURL, p.cfg.Now()); err != nil {
-		return nil, &idp.Error{Class: idp.Unavailable, Alert: true, Err: fmt.Errorf("%w: %w", idp.ErrCredential, err)}
+		return nil, &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialUnusable, Err: fmt.Errorf("%w: %w", idp.ErrCredential, err)}
 	}
 	header := http.Header{}
 	if id := idp.RequestID(ctx); isGUID(id) {
