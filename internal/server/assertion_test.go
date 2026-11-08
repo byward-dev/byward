@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"reflect"
@@ -365,5 +366,49 @@ func TestAnUpstreamThatFailsToStartClosesTheStore(t *testing.T) {
 	}
 	if _, err := st.Grant(context.Background(), "g"); err == nil || errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("the store still answers after New failed: %v", err)
+	}
+}
+
+// A verifier that only uses OIDC discovery, as MCP Toolbox's generic auth does, finds the keys:
+// <issuer>/.well-known/openid-configuration names the issuer and a jwks_uri, the JWKS there
+// verifies the assertion the upstream got, and its iss is the discovered issuer (#207).
+func TestAVerifierUsingDiscoveryFindsTheAssertionKeys(t *testing.T) {
+	a := newAsserting(t)
+	got := a.call(t, token.Claims{GrantID: "g1", Subject: "tid:oid", ClientID: "claude-code"}, nil)
+	raw, _ := strings.CutPrefix(got.Header.Get("Authorization"), "Bearer ")
+	rec := httptest.NewRecorder()
+	a.public.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "https://mcp.example.com/.well-known/openid-configuration", nil))
+	var doc struct {
+		Issuer  string `json:"issuer"`
+		JWKSURI string `json:"jwks_uri"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil || doc.Issuer != "https://mcp.example.com" || doc.JWKSURI != "https://mcp.example.com/.well-known/jwks.json" {
+		t.Fatalf("discovery %d: %s", rec.Code, rec.Body)
+	}
+	u, err := url.Parse(doc.JWKSURI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := verified(t, jwks(t, a.public, u.Host), raw, a.cfg.UpstreamURL.String())
+	if c["iss"] != doc.Issuer {
+		t.Fatalf("iss %v, want the discovered issuer %s", c["iss"], doc.Issuer)
+	}
+}
+
+// A stdio upstream gets no assertion, so the metadata advertises no keys.
+func TestAStdioUpstreamAdvertisesNoAssertionKeys(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	s, err := New(stdioAuthConfig(t, sh), slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.closeStore() })
+	rec := httptest.NewRecorder()
+	s.Public.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://mcp.example.com/.well-known/openid-configuration", nil))
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), "jwks_uri") {
+		t.Fatalf("discovery %d: %s", rec.Code, rec.Body)
 	}
 }
