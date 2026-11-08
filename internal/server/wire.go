@@ -97,7 +97,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 		SecureCookies: cfg.PublicURL.Scheme == "https", Log: log,
 		Audit: o.Audit, Limiter: ratelimit.New(cfg.OAuthRateLimits, maxRateLimitKeys, time.Now, o.Metrics.RateLimited),
 		ObserveIdP:   func(op, outcome string, d time.Duration) { o.Metrics.IdP(ip.name, op, outcome, d) },
-		RefreshGrace: cfg.RefreshGrace, Assert: assertedClaims(cfg)})
+		RefreshGrace: cfg.RefreshGrace, Assert: assertedClaims(cfg), JWKSURI: assertionJWKSURI(cfg, parts)})
 	if err != nil {
 		return nil, err
 	}
