@@ -24,6 +24,10 @@ type proxy struct {
 	noRevocation   bool
 	noS256         bool
 	htmlMetadata   bool // every metadata document is an HTML page, as a misrouted ingress serves
+	// jwksKey, when set, is the key ID the JWKS serves, and the server metadata names jwks_uri.
+	jwksKey   string
+	noJWKSURI bool // jwks_uri left out although there is a JWKS
+	jwks404   bool // jwks_uri named, but nothing served there
 }
 
 func (p proxy) handler(origin string) http.Handler {
@@ -61,6 +65,9 @@ func (p proxy) handler(origin string) http.Handler {
 		if p.noRevocation {
 			delete(doc, "revocation_endpoint")
 		}
+		if p.jwksKey != "" && !p.noJWKSURI {
+			doc["jwks_uri"] = origin + "/.well-known/jwks.json"
+		}
 		_ = json.NewEncoder(w).Encode(doc)
 	}
 	mux := http.NewServeMux()
@@ -74,6 +81,13 @@ func (p proxy) handler(origin string) http.Handler {
 	})
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", asm)
 	mux.HandleFunc("GET /.well-known/openid-configuration", asm)
+	mux.HandleFunc("GET /.well-known/jwks.json", func(w http.ResponseWriter, r *http.Request) {
+		if p.jwksKey == "" || p.jwks404 {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]any{{"kty": "EC", "kid": p.jwksKey}}})
+	})
 	mux.HandleFunc("POST /mcp", func(w http.ResponseWriter, r *http.Request) {
 		if p.openMCP {
 			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
@@ -99,19 +113,30 @@ func (p proxy) handler(origin string) http.Handler {
 
 func probe(t *testing.T, p proxy) map[string]Result {
 	t.Helper()
+	return probeSigning(t, p, "")
+}
+
+// probeSigning probes a proxy whose identity assertions are signed by key ("": no assertion).
+func probeSigning(t *testing.T, p proxy, key string) map[string]Result {
+	t.Helper()
 	var origin string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { p.handler(origin).ServeHTTP(w, r) }))
 	t.Cleanup(srv.Close)
 	origin = srv.URL
-	return probeAt(t, origin, http.DefaultClient)
+	return probeTarget(t, origin, http.DefaultClient, key)
 }
 
 // probeAt probes origin with client as given: SelfProbe itself must keep redirects unfollowed.
 func probeAt(t *testing.T, origin string, client *http.Client) map[string]Result {
 	t.Helper()
+	return probeTarget(t, origin, client, "")
+}
+
+func probeTarget(t *testing.T, origin string, client *http.Client, key string) map[string]Result {
+	t.Helper()
 	res, _ := url.Parse(origin + "/mcp")
 	out := map[string]Result{}
-	for _, r := range SelfProbe(context.Background(), client, Target{Resource: res, Issuer: origin, HostsSetting: "HOSTS_SETTING"}) {
+	for _, r := range SelfProbe(context.Background(), client, Target{Resource: res, Issuer: origin, HostsSetting: "HOSTS_SETTING", AssertionKeyID: key}) {
 		if r.Class != ClassProxy {
 			t.Errorf("%s: class %q, want proxy", r.Name, r.Class)
 		}
@@ -127,6 +152,7 @@ const (
 	asOpenID    = "authorization server metadata (OpenID)"
 	challenge   = "unauthenticated MCP request"
 	hostHeader  = "Host header"
+	keysByDisco = "identity assertion keys (discovery)"
 )
 
 func TestSelfProbeOfAHealthyProxyPasses(t *testing.T) {
@@ -219,5 +245,35 @@ func TestSelfProbe404NamesTheRoute(t *testing.T) {
 	t.Cleanup(srv.Close)
 	if r := probeAt(t, srv.URL, http.DefaultClient)[prmInserted]; r.Status != Fail || !strings.Contains(r.Fix, "route /.well-known/") {
 		t.Fatalf("%+v", r)
+	}
+}
+
+// With an identity assertion, discovery must lead a verifier that uses nothing else to the signing
+// key, as MCP Toolbox's generic auth does: openid-configuration names byward's issuer and a jwks_uri
+// serving the key (ADR-0016 amendment, #207). Without one, the check is not run.
+func TestSelfProbeFollowsDiscoveryToTheAssertionKey(t *testing.T) {
+	if got := probeSigning(t, proxy{jwksKey: "k1"}, "k1")[keysByDisco]; got.Status != Pass || !strings.Contains(got.Message, "serves the signing key k1") {
+		t.Fatalf("healthy: %+v", got)
+	}
+	if _, ran := probe(t, proxy{})[keysByDisco]; ran {
+		t.Fatal("the check ran without an identity assertion")
+	}
+	for name, tc := range map[string]struct {
+		p         proxy
+		inMessage string
+		inFix     string
+	}{
+		"no jwks_uri":         {proxy{jwksKey: "k1", noJWKSURI: true}, "does not name the issuer", "pass this path through unchanged"},
+		"another issuer":      {proxy{jwksKey: "k1", issuer: "https://other.example"}, "does not name the issuer", "pass this path through unchanged"},
+		"the JWKS is missing": {proxy{jwksKey: "k1", jwks404: true}, "answered 404", "route /.well-known/"},
+		"another key":         {proxy{jwksKey: "k0"}, "does not serve the signing key k1", "route /.well-known/jwks.json on this host to the proxy"},
+		"not JSON":            {proxy{jwksKey: "k1", htmlMetadata: true}, "does not name the issuer", "pass this path through unchanged"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := probeSigning(t, tc.p, "k1")[keysByDisco]
+			if got.Status != Fail || !strings.Contains(got.Message, tc.inMessage) || !strings.Contains(got.Fix, tc.inFix) {
+				t.Fatalf("%+v\nwant fail, message with %q, fix with %q", got, tc.inMessage, tc.inFix)
+			}
+		})
 	}
 }

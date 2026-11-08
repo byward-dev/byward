@@ -110,3 +110,24 @@ Every assertion carries `principal_type`: `user`, or `client` for an Entra app-o
 The minter refuses an identity without one rather than defaulting to `user`. stdio processes get
 `BYWARD_PRINCIPAL_TYPE` and the plain identity headers (§5) `X-Byward-Principal-Type` with the same
 values.
+
+## Amendment 2026-11-08 (#207): `jwks_uri` in the authorization server metadata
+
+This reverses #135's choice not to advertise the JWKS. Some verifiers find keys only through OIDC
+discovery: MCP Toolbox's `generic` auth service (v1.16.0) has no JWKS setting and reads `jwks_uri`
+from `<issuer>/.well-known/openid-configuration`, as OpenSearch's `openid` authenticator does. FastMCP's
+`JWTVerifier`, OpenSearch's `jwt` authenticator and go-oidc take a JWKS URL directly.
+
+1. **With an HTTP upstream, the metadata at both well-known paths lists `jwks_uri`**, the public
+   `/.well-known/jwks.json`. With a stdio upstream there is no assertion and no `jwks_uri`. The
+   assertion's `iss` stays byward's issuer, so the claims contract is unchanged. OpenID Connect
+   Discovery 1.0 §3 makes `jwks_uri` REQUIRED; RFC 8414 §2 makes it OPTIONAL.
+2. **Why it is safe:** #135 feared that clients would treat proxy tokens as JWTs. They cannot: proxy
+   tokens are opaque `byw_` strings, not JWT-shaped. The keys verify only identity assertions, which
+   are `typ: at+jwt` with the upstream URL as `aud`, so an MCP client holds nothing these keys verify.
+3. **Rule:** every JWT byward signs carries a `typ` and an `aud` that only it uses, so no other kind
+   can pass as an assertion under the same issuer and keys. A test lists every signer and its `typ`
+   (`TestEveryJWTByWardSignsHasATypOfItsOwn`); a new one must be added there.
+4. `byward doctor` follows discovery to the signing key ("identity assertion keys (discovery)").
+   The internal listener serves no discovery document; a discovery-only verifier uses the public
+   origin.

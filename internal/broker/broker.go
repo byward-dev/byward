@@ -91,6 +91,10 @@ type Config struct {
 	// Registrar, when set, serves POST /register and advertises registration_endpoint (DCR,
 	// ADR-0008 §2-3); Clients then resolves the clients it registers.
 	Registrar Registrar
+	// JWKSURI is the identity assertion's JWKS (ADR-0016 §3), advertised as jwks_uri so a verifier
+	// that only uses OIDC discovery finds the keys (ADR-0016 amendment, #207); "" without assertion
+	// keys (a stdio upstream).
+	JWKSURI string
 	// ObserveRegistration, when set, is told every /register outcome (one of the Registration*).
 	ObserveRegistration func(outcome string)
 	IdP                 IdP

@@ -123,8 +123,11 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	for _, w := range parts.warnings {
 		r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "configuration", Status: doctor.Warn, Message: w.Message, Fix: warningFix(w)})
 	}
-	r.Checks = append(r.Checks, doctor.SelfProbe(ctx, o.Proxy, doctor.Target{Resource: cfg.PublicURL, Issuer: cfg.Issuer(),
-		HostsSetting: config.Setting{Name: "allowed-hosts"}.Env()})...)
+	target := doctor.Target{Resource: cfg.PublicURL, Issuer: cfg.Issuer(), HostsSetting: config.Setting{Name: "allowed-hosts"}.Env()}
+	if parts.assertionKeys != nil {
+		target.AssertionKeyID = parts.assertionKeys.SigningKeyID()
+	}
+	r.Checks = append(r.Checks, doctor.SelfProbe(ctx, o.Proxy, target)...)
 	r.Checks = append(r.Checks, parts.idp.diagnose(ctx, o.Now())...)
 	return r, nil
 }
