@@ -157,9 +157,9 @@ func (d *downstreamTokens) record(ctx context.Context, r *http.Request, id resou
 // forProcess is the downstream token a stdio upstream process asks its token socket for: for its
 // user, exchanged for the stored IdP token of the grant whose request it served last. A refusal
 // is alerted and recorded as for a request; the process gets only the outcome. An app-only caller
-// acts for no user (no_user). A grant whose stored token has expired, or that was revoked or signed
-// out since, waits for the client's next request (sign_in_expired): byward never refreshes IdP
-// tokens outside a request.
+// acts for no user (no_user). A grant whose stored token or own lifetime has ended, or that was
+// revoked or signed out since, waits for the client's next request (sign_in_expired): byward never
+// refreshes IdP tokens outside a request.
 func (d *downstreamTokens) forProcess(ctx context.Context, p stdio.Identity) stdio.DownstreamToken {
 	id := resource.Identity{Subject: p.Subject, PrincipalType: p.PrincipalType, GrantID: p.Grant, ClientID: p.Client}
 	tid, oid, keyed := strings.Cut(id.Subject, ":")

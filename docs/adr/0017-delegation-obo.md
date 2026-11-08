@@ -128,8 +128,10 @@ for it.
 - **The same check before every request.** Before a request reaches the process, byward gets the
   token as it does for an HTTP upstream. A refusal is answered in the proxy's name (the ADR-0025
   shapes above) and never starts or reaches a process, and a granted token is cached for the
-  process to ask for. A refused ask on the socket is recorded the same way (`downstream_token_refused`,
-  the metric, the error log with the admin-consent URL).
+  process to ask for. An ask the IdP refuses on the socket (`consent_required`, `interaction_required`,
+  `unavailable`, `failed`) is recorded the same way: `downstream_token_refused`, the metric, the
+  error log with the admin-consent URL. `no_user` and `sign_in_expired` are routine and only
+  counted; `refused` is a warning log; `bad_request` is the asker's own mistake.
 - **Who may ask.** Every upstream process, whatever its user, runs as byward's uid, so file
   permissions cannot keep one user's process from another's socket. byward accepts a connection
   only from the spawned process or one of its descendants: the peer's uid must be byward's
