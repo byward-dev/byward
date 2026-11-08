@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -81,9 +82,14 @@ func replace(groups []string, a slog.Attr) slog.Attr {
 	return a
 }
 
+// jwtShape is a compact JWS or JWE anywhere in a string: a header that is base64url JSON, so it
+// starts with eyJ ({"), then two dots. A random base64url identifier has no dots, so it never
+// matches, however often it happens to contain eyJ.
+var jwtShape = regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*\.`)
+
 func looksSecret(s string) bool {
 	l := strings.ToLower(s)
-	return strings.Contains(l, "bearer ") || strings.Contains(l, "basic ") || strings.Contains(l, "eyj")
+	return strings.Contains(l, "bearer ") || strings.Contains(l, "basic ") || jwtShape.MatchString(s)
 }
 
 type ctxKey struct{}

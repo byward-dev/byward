@@ -39,6 +39,39 @@ func TestRedaction(t *testing.T) {
 	}
 }
 
+// A JWT is redacted by its shape, eyJ and two dots, not by the letters eyj: a random base64url
+// client ID contains them about once in a thousand registrations, and the operator needs it (#230).
+func TestOnlyJWTShapedValuesAreRedacted(t *testing.T) {
+	for name, tc := range map[string]struct {
+		value  any
+		logged string
+	}{
+		"a client ID with eyJ":            {value: "dcr-Qm9eyJx_7k-eyJAbCdEfGh", logged: "dcr-Qm9eyJx_7k-eyJAbCdEfGh"},
+		"a client ID with eyj":            {value: "dcr-xeyjq0Z-eyjAbCdEfGhIjk", logged: "dcr-xeyjq0Z-eyjAbCdEfGhIjk"},
+		"a URL with eyJ and one dot":      {value: "https://heyJude.example/cb", logged: "https://heyJude.example/cb"},
+		"a bare JWT":                      {value: token, logged: redacted},
+		"an unsigned JWT":                 {value: "eyJhbGciOiJub25lIn0.eyJzdWIiOiJ4In0.", logged: redacted},
+		"a JWE with no encrypted key":     {value: "eyJhbGciOiJkaXIiLCJlbmMiOiJBMjU2R0NNIn0..aXY.Y3Q.dGFn", logged: redacted},
+		"a Bearer value":                  {value: "Bearer opaque-token", logged: redacted},
+		"a Basic value":                   {value: "Basic dXNlcjpwdw==", logged: redacted},
+		"a JWT inside a message":          {value: "upstream rejected " + token + " as expired", logged: redacted},
+		"a JWT inside an error":           {value: errors.New("verify " + token + ": expired"), logged: redacted},
+		"an error with an eyJ identifier": {value: errors.New("unknown client dcr-eyJq0Z"), logged: "unknown client dcr-eyJq0Z"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			New(&buf, "json").Info("x", "reason", tc.value)
+			var line struct{ Reason string }
+			if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+				t.Fatal(err)
+			}
+			if line.Reason != tc.logged {
+				t.Fatalf("reason logged as %q, want %q", line.Reason, tc.logged)
+			}
+		})
+	}
+}
+
 func TestGroupContentsAreDropped(t *testing.T) {
 	var buf bytes.Buffer
 	New(&buf, "json").Info("x", slog.Group("req", "reason", "inside"))
