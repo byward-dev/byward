@@ -55,14 +55,24 @@ type Config struct {
 	// MaxProcesses and MaxPerUser cap live processes, for the upstream and for each user. A
 	// process counts until it has exited, so a stopping one still holds its slot.
 	MaxProcesses, MaxPerUser int
+	// StreamIdleTimeout lets the caps evict a process whose only leases are streams (a legacy GET, a
+	// subscriptions/listen) once it has had no stdin or stdout traffic for this long; 0 never does,
+	// so such a process is kept however long it stays quiet.
+	StreamIdleTimeout time.Duration
 
 	Log   *slog.Logger
 	Clock Clock
 	// LookupEnv reads the proxy's own environment; default os.LookupEnv.
 	LookupEnv func(string) (string, bool)
-	// Evicted is told about each idle process stopped to make room under a cap, with the reason
-	// "user_cap" or "upstream_cap"; may be nil.
-	Evicted func(id Identity, reason string)
+	// Evicted is told about each process stopped to make room under a cap; may be nil.
+	Evicted func(Eviction)
+}
+
+// Eviction is one process stopped to make room under a cap.
+type Eviction struct {
+	ID          Identity // whom the process served
+	Reason      string   // "user_cap" (the user's own cap) or "upstream_cap"
+	OpenStreams int      // the streams the stop ends; 0 for an idle process
 }
 
 // Manager owns the upstream processes of one stdio upstream.
@@ -83,7 +93,8 @@ type entry struct {
 	ready    chan struct{} // closed when the spawn finished
 	p        *Process
 	err      error
-	leases   int       // open leases; a leased process is never evicted
+	leases   int       // open leases; a leased process is evicted only as a quiet stream holder
+	streams  int       // of those, the streams (a legacy GET, a subscriptions/listen)
 	lastUsed time.Time // when the last lease ended, for least-recently-used eviction
 	evicted  bool
 }
@@ -118,7 +129,7 @@ func New(cfg Config) (*Manager, error) {
 		cfg.LookupEnv = os.LookupEnv
 	}
 	if cfg.Evicted == nil {
-		cfg.Evicted = func(Identity, string) {}
+		cfg.Evicted = func(Eviction) {}
 	}
 	cmd, err := newCommand(cfg.Command, cfg.Env, cfg.LookupEnv)
 	if err != nil {
@@ -128,11 +139,26 @@ func New(cfg Config) (*Manager, error) {
 		procs: map[string]*entry{}, live: map[*entry]struct{}{}}, nil
 }
 
-// Get returns the live process for key, spawning one for id if there is none, with a lease: the
-// process is not evicted until release is called. A key bound to another user fails with
-// ErrUserMismatch; a full cap with nothing idle to evict fails with errBusy. A process that is
-// stopping is waited for, within ctx, and replaced.
+// leaseKind is what a lease is for. A request lease keeps its process from eviction until it is
+// released; a stream lease (a legacy GET stream, a subscriptions/listen) does so only while the
+// process has had traffic within StreamIdleTimeout.
+type leaseKind bool
+
+const (
+	requestLease leaseKind = false
+	streamLease  leaseKind = true
+)
+
+// Get returns the live process for key, spawning one for id if there is none, with a request
+// lease: the process is not evicted until release is called. A key bound to another user fails
+// with ErrUserMismatch; a full cap with nothing to evict (nothing idle, nor held only by quiet
+// streams) fails with errBusy. A process that is stopping is waited for, within ctx, and replaced.
 func (m *Manager) Get(ctx context.Context, key string, id Identity) (p *Process, release func(), err error) {
+	return m.get(ctx, key, id, requestLease)
+}
+
+// get is Get with a lease of the given kind.
+func (m *Manager) get(ctx context.Context, key string, id Identity, kind leaseKind) (p *Process, release func(), err error) {
 	if err := id.validate(); err != nil {
 		return nil, nil, err
 	}
@@ -157,6 +183,9 @@ func (m *Manager) Get(ctx context.Context, key string, id Identity) (p *Process,
 				continue
 			}
 			e = &entry{id: id, ready: make(chan struct{}), leases: 1}
+			if kind == streamLease {
+				e.streams = 1
+			}
 			m.procs[key] = e
 			m.live[e] = struct{}{}
 			m.mu.Unlock()
@@ -170,13 +199,13 @@ func (m *Manager) Get(ctx context.Context, key string, id Identity) (p *Process,
 				return nil, nil, e.err
 			}
 			e.p.hold() // the spawning Get holds the first lease
-			return e.p, m.releaser(e), nil
+			return e.p, m.releaser(e, kind), nil
 		}
 		m.mu.Unlock()
 		if e.id.user() != id.user() {
 			return nil, nil, ErrUserMismatch
 		}
-		p, release, err := m.lease(ctx, key, e)
+		p, release, err := m.lease(ctx, key, e, kind)
 		if errors.Is(err, errNotFound) {
 			continue // that spawn failed or the process exited; try our own
 		}
@@ -192,10 +221,11 @@ func (m *Manager) Get(ctx context.Context, key string, id Identity) (p *Process,
 	}
 }
 
-// leaseKey returns the live process for key without spawning one, with a lease as in Get. No
+// leaseKey returns the live process for key without spawning one, with a lease of the given kind
+// as in get. No
 // process, or one that is stopping, fails with errNotFound; one serving another user with
 // ErrUserMismatch.
-func (m *Manager) leaseKey(ctx context.Context, key string, id Identity) (*Process, func(), error) {
+func (m *Manager) leaseKey(ctx context.Context, key string, id Identity, kind leaseKind) (*Process, func(), error) {
 	m.mu.Lock()
 	e, ok := m.procs[key]
 	m.mu.Unlock()
@@ -205,7 +235,7 @@ func (m *Manager) leaseKey(ctx context.Context, key string, id Identity) (*Proce
 	if e.id.user() != id.user() {
 		return nil, nil, ErrUserMismatch
 	}
-	p, release, err := m.lease(ctx, key, e)
+	p, release, err := m.lease(ctx, key, e, kind)
 	if err == nil && p.isStopping() {
 		// Not in lease: Get would spin on a stopping entry that still holds its key.
 		release()
@@ -215,7 +245,7 @@ func (m *Manager) leaseKey(ctx context.Context, key string, id Identity) (*Proce
 }
 
 // lease waits for e's spawn and leases its process; errNotFound when it failed or has exited.
-func (m *Manager) lease(ctx context.Context, key string, e *entry) (*Process, func(), error) {
+func (m *Manager) lease(ctx context.Context, key string, e *entry, kind leaseKind) (*Process, func(), error) {
 	select {
 	case <-e.ready:
 	case <-ctx.Done():
@@ -236,17 +266,23 @@ func (m *Manager) lease(ctx context.Context, key string, e *entry) (*Process, fu
 		return nil, nil, errNotFound
 	}
 	e.leases++
+	if kind == streamLease {
+		e.streams++
+	}
 	m.mu.Unlock()
 	e.p.hold()
-	return e.p, m.releaser(e), nil
+	return e.p, m.releaser(e, kind), nil
 }
 
-func (m *Manager) releaser(e *entry) func() {
+func (m *Manager) releaser(e *entry, kind leaseKind) func() {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
 			m.mu.Lock()
 			e.leases--
+			if kind == streamLease {
+				e.streams--
+			}
 			e.lastUsed = m.cfg.Clock.Now()
 			m.mu.Unlock()
 			e.p.unhold()
@@ -257,7 +293,9 @@ func (m *Manager) releaser(e *entry) func() {
 // admitLocked decides whether id may start a process now. At the user's own cap only that user's
 // processes are candidates; at the upstream cap, with the user under theirs, anyone's are. A
 // candidate that is already stopping is waited for; otherwise the least recently used idle one is
-// evicted and waited for. Nothing to wait for fails with errBusy. Callers hold m.mu.
+// evicted and waited for. Only when no candidate is idle may one held by streams alone, quiet for
+// StreamIdleTimeout, be evicted: the one quiet longest. Nothing to wait for fails with errBusy.
+// Callers hold m.mu.
 func (m *Manager) admitLocked(id Identity) (wait *entry, err error) {
 	user := id.user()
 	mine := 0
@@ -270,24 +308,14 @@ func (m *Manager) admitLocked(id Identity) (wait *entry, err error) {
 	if !atUser && len(m.live) < m.cfg.MaxProcesses {
 		return nil, nil
 	}
-	var victim *entry
-	for e := range m.live {
-		if atUser && e.id.user() != user {
-			continue
-		}
-		if e.evicted || (e.p != nil && e.p.isStopping()) {
-			return e, nil // its slot frees once it has exited
-		}
-		if e.p == nil || e.leases > 0 {
-			continue // spawning, or in use
-		}
-		if victim == nil || e.lastUsed.Before(victim.lastUsed) {
-			victim = e
-		}
+	wait, victim := m.victimLocked(user, atUser)
+	if wait != nil {
+		return wait, nil // its slot frees once it has exited
 	}
 	if victim == nil {
 		return nil, errBusy
 	}
+	openStreams := victim.streams
 	victim.evicted = true
 	for k, e := range m.procs {
 		if e == victim {
@@ -299,10 +327,54 @@ func (m *Manager) admitLocked(id Identity) (wait *entry, err error) {
 		reason = "user_cap"
 	}
 	go func() { // outside m.mu: stop takes the process lock, and Evicted may log or audit
-		victim.p.stop("evicted_" + reason)
-		m.cfg.Evicted(victim.id, reason)
+		victim.p.evict("evicted_" + reason)
+		m.cfg.Evicted(Eviction{ID: victim.id, Reason: reason, OpenStreams: openStreams})
 	}()
 	return victim, nil
+}
+
+// victimLocked chooses among the candidates (the user's own processes when atUser, else anyone's):
+// one already stopping to wait for; else the least recently used idle one; else, held by streams
+// alone and quiet for StreamIdleTimeout, the one quiet longest. Both nil: nothing can make room.
+// Callers hold m.mu.
+func (m *Manager) victimLocked(user string, atUser bool) (wait, victim *entry) {
+	var quiet *entry
+	var quietSince time.Time
+	now := m.cfg.Clock.Now()
+	for e := range m.live {
+		if atUser && e.id.user() != user {
+			continue
+		}
+		if e.evicted || (e.p != nil && e.p.isStopping()) {
+			return e, nil
+		}
+		if e.p == nil {
+			continue // spawning
+		}
+		if e.leases > 0 {
+			if since, ok := m.quietStreamsLocked(e, now); ok && (quiet == nil || since.Before(quietSince)) {
+				quiet, quietSince = e, since
+			}
+			continue // in use
+		}
+		if victim == nil || e.lastUsed.Before(victim.lastUsed) {
+			victim = e
+		}
+	}
+	if victim == nil {
+		victim = quiet
+	}
+	return nil, victim
+}
+
+// quietStreamsLocked reports whether e is held by streams alone and has had no traffic for
+// StreamIdleTimeout, and since when it has been quiet. Callers hold m.mu.
+func (m *Manager) quietStreamsLocked(e *entry, now time.Time) (time.Time, bool) {
+	if m.cfg.StreamIdleTimeout <= 0 || e.streams != e.leases {
+		return time.Time{}, false
+	}
+	since := e.p.lastTraffic()
+	return since, now.Sub(since) >= m.cfg.StreamIdleTimeout
 }
 
 // awaitExit waits until e's process has exited, or ctx ends.

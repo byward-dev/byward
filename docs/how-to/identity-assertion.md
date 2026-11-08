@@ -38,14 +38,30 @@ install -d -m 0700 byward-data/assertion-keys
 
 ## 2. Point the upstream at the public keys
 
-The upstream verifies assertions with byward's JWKS:
+The upstream verifies assertions with byward's JWKS. Whoever can change the keys the upstream
+fetches can forge any assertion, so the way the keys travel matters as much as the keys. In order
+of preference:
 
-- `https://<public host>/.well-known/jwks.json` on the public listener, and
-- `http://<internal listener>/.well-known/jwks.json` (`BYWARD_INTERNAL_LISTEN`), for an upstream that
-  reaches only the internal network.
+1. **The public JWKS over https:** `https://<public host>/.well-known/jwks.json`. TLS protects it
+   end to end. Use it whenever the upstream can reach the public URL.
+2. **A pinned file:** `byward jwks > jwks.json`, copied to the upstream with your deployment (a
+   secret, a ConfigMap, the image) and loaded from disk. Nothing travels at request time. Export
+   and ship it again when you rotate: after adding the new key file and before the restart that
+   makes it sign, then after removing the old one ([section 5](#5-rotate-the-signing-key)).
+3. **The internal listener's JWKS**, `http://<internal listener>/.well-known/jwks.json`
+   (`BYWARD_INTERNAL_LISTEN`). It is **plain http**: anyone on the path between byward and the
+   upstream can substitute keys and forge assertions. Use it only when that path cannot be
+   tampered with:
+   - **the same host**, over loopback (the default `127.0.0.1:9090`), or the same pod;
+   - or a network you control end to end: in Kubernetes, a NetworkPolicy that lets only the
+     upstream reach byward's internal port, **and** a service mesh with mutual TLS between them.
+     A NetworkPolicy alone does not stop an on-path attacker; mTLS alone does not stop other
+     workloads from reaching the port.
 
-Both are served with `Cache-Control: public, max-age=300`. An upstream that loads keys from a file
-instead gets them with `byward jwks > jwks.json`. Run it again after every rotation.
+   Anything else, such as a different host over a shared network or a VPC without mTLS, uses option
+   1 or 2.
+
+Each is served with `Cache-Control: public, max-age=300`.
 
 Configure the verifier's audience as **`BYWARD_UPSTREAM_URL` exactly as you set it**, for example
 `http://mcp-upstream.internal:3001/mcp`. That is often an internal name, not the public URL, and a
@@ -100,6 +116,6 @@ again.
    The new key signs; the old one stays in the JWKS.
 2. Wait at least 6 minutes: an assertion lives 60 seconds, and verifiers cache the JWKS for 5 minutes.
 3. Remove the old file and restart. An upstream that loads a static JWKS needs `byward jwks` again
-   at step 1 and at step 3.
+   at step 1, after adding the file and before restarting, and at step 3.
 
 With several replicas, give them the same key files and restart them all at step 1 before step 3.

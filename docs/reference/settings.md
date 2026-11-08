@@ -16,6 +16,7 @@ Precedence: flag > environment > default. Secrets are read only from files.
 | `--upstream-env-file` | `BYWARD_UPSTREAM_ENV_FILE` | — | stdio upstream: KEY=VALUE lines set in the environment of each upstream process, besides the inherited PATH, HOME, USER, LOGNAME, TMPDIR, TZ, LANG and LC_* (ADR-0016 §6); values are never logged |
 | `--stdio-max-processes` | `BYWARD_STDIO_MAX_PROCESSES` | 64 | stdio upstream: most upstream processes alive at once; when full, the least recently used idle one is stopped (ADR-0003 §5) |
 | `--stdio-max-processes-per-user` | `BYWARD_STDIO_MAX_PROCESSES_PER_USER` | 8 | stdio upstream: most upstream processes one user has alive at once; when full, that user's least recently used idle one is stopped |
+| `--stdio-stream-idle-timeout` | `BYWARD_STDIO_STREAM_IDLE_TIMEOUT` | 10m | stdio upstream: a process kept busy only by open streams (a legacy GET stream, a subscriptions/listen) that has had no traffic for this long can be stopped when a process cap is full; 0 keeps such processes however long they are quiet, otherwise at least 1m |
 | `--listen` | `BYWARD_LISTEN` | 127.0.0.1:8080 | address to listen on; public addresses only when configured |
 | `--allowed-origins` | `BYWARD_ALLOWED_ORIGINS` | — | comma-separated Origin values allowed on the MCP endpoint (scheme://host[:port]); an internationalized host in its ASCII (xn--) form |
 | `--allowed-hosts` | `BYWARD_ALLOWED_HOSTS` | — | comma-separated extra Host values accepted besides the public URL's host; an internationalized host in its ASCII (xn--) form |

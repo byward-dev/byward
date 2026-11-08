@@ -613,7 +613,7 @@ func TestProcessInUseNeverIdlesOutAndIdlesFromItsLastRelease(t *testing.T) {
 func TestEveryLeaseOfAProcessKeepsItFromIdlingOut(t *testing.T) {
 	h := newHarness(t, nil)
 	p := h.get(t, "s1", alice) // the spawning lease, released
-	_, release, err := h.m.leaseKey(context.Background(), "s1", alice)
+	_, release, err := h.m.leaseKey(context.Background(), "s1", alice, requestLease)
 	if err != nil {
 		t.Fatal(err)
 	}

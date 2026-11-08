@@ -41,6 +41,7 @@ const guard = 10 * time.Second
 var (
 	alice = Identity{Subject: "tid-1:oid-alice", Issuer: "https://idp.example/tid-1/v2.0"}
 	bob   = Identity{Subject: "tid-1:oid-bob", Issuer: "https://idp.example/tid-1/v2.0"}
+	carol = Identity{Subject: "tid-1:oid-carol", Issuer: "https://idp.example/tid-1/v2.0"}
 )
 
 // proxyEnv is the proxy's own environment as the tests see it: two allowlisted variables and

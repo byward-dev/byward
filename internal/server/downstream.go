@@ -143,6 +143,9 @@ func (d *downstreamTokens) refuse(w http.ResponseWriter, r *http.Request, id res
 // refusalMessage is what the client is told for a refusal outcome; it names the downstream API and
 // never the IdP's error.
 func refusalMessage(outcome, api string) string {
+	if !strings.Contains(api, "://") { // an API addressed by its app ID (#196): say what the GUID is
+		api = "the application " + api
+	}
 	switch outcome {
 	case "consent_required":
 		return "This tool needs an administrator to grant access to " + api + ". Ask your operator."

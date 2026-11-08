@@ -70,7 +70,9 @@ Example (from `internal/assertion/testdata/assertion.golden.json`; `jti` is rand
 ## Keys
 
 - JWKS at `/.well-known/jwks.json` on the public and the internal listener, `Cache-Control: public,
-  max-age=300`, or exported with `byward jwks`.
+  max-age=300`, or exported with `byward jwks`. The internal listener is plain http, so its JWKS is
+  safe only on the same host or under a NetworkPolicy and mesh mTLS
+  ([how-to](../how-to/identity-assertion.md#2-point-the-upstream-at-the-public-keys)).
 - The key whose ID sorts last signs. Older keys stay in the JWKS until you remove their files, so a
   rotation needs no change in the upstream.
 - With an HTTP upstream, the authorization server metadata advertises the JWKS as `jwks_uri`, at
