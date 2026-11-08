@@ -222,6 +222,8 @@ func TestMalformedPostsAre400AndStartNothing(t *testing.T) {
 		"object id":                        {`{"jsonrpc":"2.0","id":{},"method":"initialize"}`, codeInvalidRequest},
 		"method repeated, initialize last": {`{"jsonrpc":"2.0","id":1,"method":"tools/call","method":"initialize"}`, codeInvalidRequest},
 		"method also in another case, initialize last": {`{"jsonrpc":"2.0","id":1,"method":"tools/call","METHOD":"initialize"}`, codeInvalidRequest},
+		"id in another case":                           {`{"jsonrpc":"2.0","ID":1,"method":"initialize"}`, codeInvalidRequest},
+		"id in another case, title case":               {`{"jsonrpc":"2.0","Id":1,"method":"initialize"}`, codeInvalidRequest},
 		"another top-level key repeated":               {`{"jsonrpc":"2.0","jsonrpc":"2.0","id":1,"method":"initialize"}`, codeInvalidRequest},
 	} {
 		t.Run(name, func(t *testing.T) {
