@@ -8,10 +8,10 @@
 HTTP or stdio, behind OAuth 2.1 and your identity provider, with first-class Microsoft Entra ID
 support. One Go binary, configured by environment variables.
 
-> **Latest release: [v0.1.0](https://github.com/byward-dev/byward/releases/tag/v0.1.0).** byward
+> **Latest release: [v0.1.1](https://github.com/byward-dev/byward/releases/tag/v0.1.1).** byward
 > is pre-1.0 and has not had an independent security audit. Read the
 > [security posture](docs/security-posture.md) before deploying it. `main` is ahead of the release;
-> the docs for v0.1.0 are [at its tag](https://github.com/byward-dev/byward/tree/v0.1.0/docs).
+> the docs for v0.1.1 are [at its tag](https://github.com/byward-dev/byward/tree/v0.1.1/docs).
 
 ## How it works
 
