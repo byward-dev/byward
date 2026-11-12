@@ -42,6 +42,8 @@ func TestRedaction(t *testing.T) {
 // Only a credential is redacted: a Bearer or Basic value, or a JWT by its shape (see jwtShape),
 // not by the letters eyj: a random base64url client ID contains them about once in a thousand
 // registrations, and the operator needs it (#230).
+// Prose that names a scheme before a word is redacted too: a fail-safe accepted in #242, since a
+// length floor would let a short credential through.
 func TestOnlyCredentialShapedValuesAreRedacted(t *testing.T) {
 	for name, tc := range map[string]struct {
 		value  any
@@ -70,20 +72,25 @@ func TestOnlyCredentialShapedValuesAreRedacted(t *testing.T) {
 		"a lowercase basic value":                                 {value: "authorization: basic dXNlcjpwdw==", logged: redacted},
 		"a Basic value":                                           {value: "Basic dXNlcjpwdw==", logged: redacted},
 		"an uppercase BASIC value":                                {value: "BASIC dXNlcjpwdw==", logged: redacted},
-		"a Bearer value after a tab":                              {value: "authorization: Bearer\topaque-token", logged: redacted},
+		"a tab between Bearer and its token":                      {value: "authorization: Bearer\topaque-token", logged: redacted},
 		"a config error that names client_secret_basic":           {value: "client_secret_file: only with client_secret_basic or client_secret_post", logged: "client_secret_file: only with client_secret_basic or client_secret_post"},
 		"a Bearer value after a quote":                            {value: `upstream said "Bearer opaque-token"`, logged: redacted},
-		"a Bearer value after three spaces":                       {value: "Bearer   opaque-token", logged: redacted},
+		"three spaces between Bearer and its token":               {value: "Bearer   opaque-token", logged: redacted},
 		"a Basic credential that starts with +":                   {value: "Basic +dXNlcjpwdw==", logged: redacted},
 		"a field named bearer_token":                              {value: "missing field bearer_token in the request", logged: "missing field bearer_token in the request"},
 		"a Bearer value after a JSON escape":                      {value: `{"msg":"retrying with\nBearer byw_at_opaque"}`, logged: redacted},
 		"a Basic value after an escaped CRLF":                     {value: `b'GET / HTTP/1.1\r\nBasic YTpi'`, logged: redacted},
 		"a Bearer value after a URL-encoded space":                {value: "Authorization=%20Bearer opaque-token", logged: redacted},
-		"prose that names a scheme":                               {value: "the upstream wants basic auth", logged: redacted},
+		"prose that names a scheme, an accepted over-redaction":   {value: "the upstream wants basic auth", logged: redacted},
 		"a Bearer value inside a message":                         {value: "upstream rejected Bearer opaque-token as expired", logged: redacted},
 		"a Bearer value inside an error":                          {value: errors.New("upstream echoed Authorization: Bearer opaque-token"), logged: redacted},
 		"a Bearer value after a colon":                            {value: "authorization:Bearer opaque-token", logged: redacted},
 		"a Bearer token that starts with _":                       {value: "Bearer _opaque-token", logged: redacted},
+		"a Bearer value in a Go header map":                       {value: "headers map[Authorization:[Bearer opaque-token]]", logged: redacted},
+		"a quoted Bearer value at the start":                      {value: "'Bearer opaque-token'", logged: redacted},
+		"a Bearer token that starts with -":                       {value: "Bearer -pAqUe7oKen", logged: redacted},
+		"a Bearer token that starts with /":                       {value: "Bearer /pAqUe7oKen", logged: redacted},
+		"a name that ends in _bearer":                             {value: "unknown kind x_bearer in config", logged: "unknown kind x_bearer in config"},
 		"a short Basic credential":                                {value: "Basic YTpi", logged: redacted},
 		"a scheme with no credential after it":                    {value: "the Authorization header had only Bearer ", logged: "the Authorization header had only Bearer "},
 		"a JWT inside a message":                                  {value: "upstream rejected " + token + " as expired", logged: redacted},
