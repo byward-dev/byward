@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	stdlog "log"
 	"log/slog"
 	"net"
 	"net/http"
@@ -46,6 +47,7 @@ type options struct {
 	inject        []func(context.Context, http.Header)
 	strip         map[string]bool // more headers removed from every inbound request
 	headerTimeout time.Duration
+	proxy         func(*http.Request) (*url.URL, error) // Proxy; tests give their own
 }
 
 // WithInject adds a function that sets headers on every upstream request, after the inbound
@@ -77,12 +79,17 @@ func WithResponseHeaderTimeout(d time.Duration) Option {
 // New returns a handler relaying each request to target, the upstream's MCP endpoint URL: the
 // request path is replaced by target's path; the query is kept.
 func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
-	o := options{strip: map[string]bool{}}
+	o := options{strip: map[string]bool{}, proxy: Proxy}
 	for _, f := range opts {
 		f(&o)
 	}
 	t := *target
+	// The target is fixed and Go reads the proxy setting once, so whether the upstream's proxy is
+	// one Go misread is known now; ReverseProxy's own error lines then get the same redaction.
+	via, _ := o.proxy(&http.Request{URL: &t})
+	misread := MalformedProxy(via)
 	rp := &httputil.ReverseProxy{
+		ErrorLog: stdlog.New(proxyErrorLog{log: log, misread: misread}, "", 0),
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL.Scheme, pr.Out.URL.Host = t.Scheme, t.Host
 			pr.Out.URL.Path, pr.Out.URL.RawPath = t.Path, t.RawPath
@@ -108,7 +115,7 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 			}
 		},
 		Transport: &http.Transport{
-			Proxy:                 Proxy,
+			Proxy:                 o.proxy,
 			DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 			ForceAttemptHTTP2:     true,
 			MaxIdleConnsPerHost:   64,
@@ -181,7 +188,13 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 					"reason", "no response headers within "+o.headerTimeout.String()+"; "+string(out))
 				return
 			}
-			log.WarnContext(r.Context(), "upstream error", "request_id", logging.RequestID(r.Context()), "error", err)
+			cause := []any{"error", err}
+			if misread {
+				// The error would quote the address Go dialled, which is part of the proxy's
+				// credentials (invariant 2): name the cause instead.
+				cause = []any{"reason", misreadProxy}
+			}
+			log.WarnContext(r.Context(), "upstream error", append([]any{"request_id", logging.RequestID(r.Context())}, cause...)...)
 			// Never echo upstream internals (invariant 15).
 			http.Error(w, "upstream unavailable", http.StatusBadGateway)
 		},
@@ -292,6 +305,34 @@ func redirectHint(res *http.Response) string {
 // Proxy is the HTTP proxy the relay sends a request through: the one the environment names
 // (HTTPS_PROXY, HTTP_PROXY, NO_PROXY), read once per process.
 func Proxy(r *http.Request) (*url.URL, error) { return http.ProxyFromEnvironment(r) }
+
+// misreadProxy is logged in place of an error that would quote the address Go dialled.
+const misreadProxy = "the request went through the environment's HTTP proxy, whose setting Go misread; run byward doctor"
+
+// proxyErrorLog takes ReverseProxy's own error lines (a body copy that fails, a flush that fails)
+// into the structured log; with a misread proxy setting it logs the cause in place of the line,
+// which can quote the address Go dialled.
+type proxyErrorLog struct {
+	log     *slog.Logger
+	misread bool
+}
+
+func (l proxyErrorLog) Write(p []byte) (int, error) {
+	if l.misread {
+		l.log.Warn("upstream error", "reason", misreadProxy)
+	} else {
+		l.log.Warn("upstream error", "error", strings.TrimSpace(string(p)))
+	}
+	return len(p), nil
+}
+
+// MalformedProxy reports whether via, a proxy Go read from the environment, is one whose
+// credentials held an unescaped character (/, ?, # and the like): Go then splits them between the
+// host it dials and the path, query or fragment, or returns an opaque URL with no host. Such a
+// proxy's address, and any error that quotes it, can hold part of the credentials.
+func MalformedProxy(via *url.URL) bool {
+	return via != nil && (via.Host == "" || via.Opaque != "" || via.Path != "" && via.Path != "/" || via.RawQuery != "" || via.ForceQuery || via.Fragment != "")
+}
 
 // withoutAccessToken drops every access_token parameter and keeps every other byte of the query in
 // its original order: url.Values.Encode would sort and re-escape it (ADR-0003, byte-transparent).
