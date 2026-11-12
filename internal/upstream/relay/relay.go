@@ -118,7 +118,7 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 			ResponseHeaderTimeout: o.headerTimeout,
 		},
 		FlushInterval: -1, // MCP responses may stream; never hold bytes back
-		// The proxy owns CORS and the auth challenge on the MCP endpoint. An upstream's CORS headers
+		// The proxy owns CORS, HSTS and the auth challenge on the MCP endpoint. An upstream's CORS headers
 		// would duplicate Access-Control-Allow-Origin (browsers reject that), and its
 		// WWW-Authenticate would send clients to an authorization server that is not ours. An
 		// upstream 401 or 403 is a refusal of the proxy, answered per ADR-0025 (refusal.go).
@@ -139,6 +139,10 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 				}
 			}
 			res.Header.Del("WWW-Authenticate")
+			// Strict-Transport-Security is the proxy's, from its public URL (#225): an upstream's
+			// would come first, or alone after an informational response, and browsers keep only the
+			// first (RFC 6797 §8.1).
+			res.Header.Del("Strict-Transport-Security")
 			if res.StatusCode != http.StatusUnauthorized && res.StatusCode != http.StatusForbidden {
 				return nil
 			}
