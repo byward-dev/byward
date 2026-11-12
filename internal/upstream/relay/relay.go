@@ -189,7 +189,7 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 				return
 			}
 			cause := []any{"error", err}
-			if via, perr := o.proxy(r); perr == nil && MalformedProxy(via) {
+			if misread {
 				// The error would quote the address Go dialled, which is part of the proxy's
 				// credentials (invariant 2): name the cause instead.
 				cause = []any{"reason", misreadProxy}

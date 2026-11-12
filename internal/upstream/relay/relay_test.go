@@ -810,16 +810,17 @@ func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLogAndAWellFormedProxys
 	}
 }
 
-// ReverseProxy's own error lines, such as a body that breaks off mid-copy, reach the structured log;
-// through a proxy whose setting Go misread they name the cause, never the address Go dialled.
-func TestABodyThatBreaksOffThroughAMisreadProxyNeverQuotesItsAddress(t *testing.T) {
+// ReverseProxy's own error lines, such as a body that breaks off mid-copy, reach the structured log:
+// through a proxy whose setting Go misread they name the cause, never the address Go dialled; through
+// a well-formed one they show the line, which quotes that address.
+func TestABodyThatBreaksOffReachesTheUpstreamErrorLogAndNeverQuotesAMisreadProxysAddress(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		setting func(addr string) string
 		misread bool
 	}{
-		{"misread", func(addr string) string { return addr + "/pw-secret@egress.example:3128" }, true},
-		{"well formed", func(addr string) string { return "http://" + addr }, false},
+		{"a misread proxy's address is never quoted", func(addr string) string { return addr + "/pw-secret@egress.example:3128" }, true},
+		{"a well-formed proxy's body copy error is logged", func(addr string) string { return "http://" + addr }, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ln, err := net.Listen("tcp", "127.0.0.1:0") // the "proxy" Go dials: it answers, then resets mid-body
@@ -843,14 +844,15 @@ func TestABodyThatBreaksOffThroughAMisreadProxyNeverQuotesItsAddress(t *testing.
 			var logs bytes.Buffer
 			New(slog.New(slog.NewTextHandler(&logs, nil)), u, withProxy(func(r *http.Request) (*url.URL, error) { return pf(r.URL) })).
 				ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader("{}")))
-			if !strings.Contains(logs.String(), `msg="upstream error"`) {
-				t.Fatalf("log %q; want ReverseProxy's error line in the structured log", logs.String())
+			if !strings.Contains(logs.String(), `level=WARN msg="upstream error"`) {
+				t.Fatalf("log %q; want ReverseProxy's error line in the structured log, as a warning", logs.String())
 			}
-			if tc.misread && (strings.Contains(logs.String(), addr) || !strings.Contains(logs.String(), "setting Go misread")) {
+			if tc.misread && (strings.Contains(logs.String(), addr) || !strings.Contains(logs.String(), `reason="`+misreadProxy+`"`)) {
 				t.Fatalf("log %q; want the cause, not the address Go dialled", logs.String())
 			}
-			if !tc.misread && !strings.Contains(logs.String(), "body copy") {
-				t.Fatalf("log %q; want ReverseProxy's line for a well-formed proxy", logs.String())
+			if !tc.misread && (!strings.Contains(logs.String(), `error="httputil: ReverseProxy read error during body copy: `) ||
+				!strings.Contains(logs.String(), addr) || strings.Contains(logs.String(), `\n"`)) {
+				t.Fatalf("log %q; want ReverseProxy's line for a well-formed proxy, with the address Go dialled", logs.String())
 			}
 		})
 	}
