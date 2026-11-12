@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
-	"strings"
 	"time"
 )
 
@@ -93,9 +92,13 @@ func replace(groups []string, a slog.Attr) slog.Attr {
 // happens to contain eyJ.
 var jwtShape = regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(?:\.|$)|[A-Za-z0-9_-]\.eyJ[A-Za-z0-9_-]*(?:\.|$)`)
 
+// authScheme is an HTTP Bearer or Basic credential: the scheme as a whole word, in any case, then
+// whitespace and the credential. A name that only ends in the word, such as the auth method
+// client_secret_basic, is not one (#242): _ is a word character, so there is no word boundary.
+var authScheme = regexp.MustCompile(`(?i)\b(?:bearer|basic)\s+\S`)
+
 func looksSecret(s string) bool {
-	l := strings.ToLower(s)
-	return strings.Contains(l, "bearer ") || strings.Contains(l, "basic ") || jwtShape.MatchString(s)
+	return authScheme.MatchString(s) || jwtShape.MatchString(s)
 }
 
 type ctxKey struct{}
