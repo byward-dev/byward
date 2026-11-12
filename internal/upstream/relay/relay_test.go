@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
+	"golang.org/x/net/http/httpproxy"
 )
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -745,6 +746,56 @@ func TestAnUpstreamsStrictTransportSecurityNeverReachesTheClient(t *testing.T) {
 			_ = res.Body.Close()
 			if got := res.Header.Values("Strict-Transport-Security"); res.StatusCode != http.StatusOK || !slices.Equal(got, tc.wants) {
 				t.Fatalf("status %d, Strict-Transport-Security %q, want 200 and %q", res.StatusCode, got, tc.wants)
+			}
+		})
+	}
+}
+
+// withProxy gives the relay a proxy in place of the environment's, which Go reads once per process.
+func withProxy(proxy func(*http.Request) (*url.URL, error)) Option {
+	return func(o *options) { o.proxy = proxy }
+}
+
+// A request through a proxy whose setting Go misread never logs the transport error: it quotes the
+// address Go dialled, which is part of the proxy's credentials. The log names the cause instead,
+// and the client still gets 502. A well-formed proxy's error is logged as before.
+func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLog(t *testing.T) {
+	closed := httptest.NewServer(http.NotFoundHandler())
+	addr := closed.Listener.Addr().String() // nothing listens here once closed: every dial fails at once
+	closed.Close()
+	for _, tc := range []struct {
+		name    string
+		setting string
+		leaks   []string // the parts of the credentials that must not be logged
+		misread bool
+	}{
+		// The settings of #185's proxy table, aimed at the closed port: Go dials user:password-prefix.
+		{"a slash", addr + "/pw-secret@egress.example:3128", []string{addr, "pw-secret"}, true},
+		{"a question mark", "http://" + addr + "?pw-secret@egress.example:3128", []string{addr, "pw-secret"}, true},
+		{"a hash", addr + "#pw-secret@egress.example:3128", []string{addr, "pw-secret"}, true},
+		{"a password Go cannot retry", "ops:pw/secret@egress.example:3128", []string{"ops", "pw/secret"}, true},
+		{"well formed", "http://" + addr, nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pf := (&httpproxy.Config{HTTPProxy: tc.setting}).ProxyFunc()
+			u, _ := url.Parse("http://mcp.upstream.example/mcp")
+			var logs bytes.Buffer
+			w := httptest.NewRecorder()
+			New(slog.New(slog.NewTextHandler(&logs, nil)), u, withProxy(func(r *http.Request) (*url.URL, error) { return pf(r.URL) })).
+				ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader("{}")))
+			if w.Code != http.StatusBadGateway || !strings.Contains(logs.String(), `msg="upstream error"`) {
+				t.Fatalf("status %d, log %q; want 502 and the upstream error logged", w.Code, logs.String())
+			}
+			if got := strings.Contains(logs.String(), "setting Go misread; run byward doctor"); got != tc.misread {
+				t.Fatalf("log %q names the misread setting: %v, want %v", logs.String(), got, tc.misread)
+			}
+			if !tc.misread && !strings.Contains(logs.String(), "proxyconnect") {
+				t.Fatalf("log %q; want the transport error of a well-formed proxy", logs.String())
+			}
+			for _, leak := range tc.leaks {
+				if strings.Contains(logs.String(), leak) {
+					t.Fatalf("log %q shows %q", logs.String(), leak)
+				}
 			}
 		})
 	}

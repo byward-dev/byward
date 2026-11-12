@@ -305,7 +305,10 @@ configured, the upstream credential and an On-Behalf-Of token for a downstream A
       `NO_PROXY` to reach it directly. `byward doctor` names the proxy the upstream's requests go
       through. An upstream at `localhost` or at a loopback IP address never uses one; any other
       name does unless `NO_PROXY` lists it, even one that resolves to a loopback address. A proxy
-      setting Go cannot parse is ignored, and the hop then goes direct.
+      setting Go cannot parse is ignored, and the hop then goes direct. A setting whose credentials
+      hold an unescaped `/`, `?` or `#` makes Go dial part of the credentials as the proxy host; the
+      relay's "upstream error" log then names the cause instead of quoting the error, and
+      `byward doctor` warns about the setting.
 
 ## Strip the upstream's header-driven settings
 
