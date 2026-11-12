@@ -18,6 +18,9 @@ import (
 // Redacted replaces a value that must never be logged.
 const redacted = "[REDACTED]"
 
+// panicked replaces the text of an error or Stringer whose method panicked (#239).
+const panicked = "!PANIC"
+
 // allowed lists every attribute key the proxy may log. Anything else is dropped, so a new field
 // has to be added here on purpose (invariant: never log tokens, secrets, codes or verifiers).
 var allowed = map[string]bool{
@@ -87,17 +90,19 @@ func replace(groups []string, a slog.Attr) slog.Attr {
 	return a
 }
 
-// describe returns text(), the way fmt prints a value: a typed-nil pointer whose method panics
-// (a value receiver called through nil) is <nil>, so one bad attribute does not take the line or
-// the request down with it (#239). Any other panic is a real bug and is not hidden.
+// describe returns text() and never panics, as slog promises for its own values (#239): one bad
+// attribute must not take the line, the request or a background goroutine down with it. Like fmt
+// and slog, a typed-nil pointer whose method panics (a value receiver called through nil) is
+// <nil>. Any other panic is a bug, logged as panicked, without the panic's text: that text could
+// hold a credential the redaction check cannot recognise.
 func describe(v any, text func() string) (s string) {
 	defer func() {
 		if r := recover(); r != nil {
 			if rv := reflect.ValueOf(v); rv.Kind() == reflect.Pointer && rv.IsNil() {
 				s = "<nil>"
-				return
+			} else {
+				s = panicked
 			}
-			panic(r)
 		}
 	}()
 	return text()

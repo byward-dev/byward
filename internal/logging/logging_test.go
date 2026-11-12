@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -106,16 +105,17 @@ func (valueError) Error() string     { return "value error" }
 func (valueStringer) String() string { return "value stringer" }
 func (*nilSafeError) Error() string  { return "nil-safe error carrying " + token }
 
-// A typed-nil error or Stringer is logged as <nil>, the way fmt prints it, instead of panicking
-// inside the handler and losing the line (#239).
-func TestTypedNilValuesAreLoggedAsNil(t *testing.T) {
+// A typed-nil error or Stringer never panics the logger (#239): when its method panics it is logged
+// as <nil>, the way fmt prints it, and the line keeps its other attributes; a nil-safe method still
+// runs, and its text is still redacted.
+func TestTypedNilValuesDoNotPanicTheLogger(t *testing.T) {
 	for name, tc := range map[string]struct {
 		value  any
 		logged string
 	}{
-		"a nil error with a value receiver":    {value: (*valueError)(nil), logged: "<nil>"},
-		"a nil Stringer with a value receiver": {value: (*valueStringer)(nil), logged: "<nil>"},
-		"a nil error that handles nil itself":  {value: (*nilSafeError)(nil), logged: redacted},
+		"a nil error with a value receiver":         {value: (*valueError)(nil), logged: "<nil>"},
+		"a nil Stringer with a value receiver":      {value: (*valueStringer)(nil), logged: "<nil>"},
+		"a nil-safe error's text is still redacted": {value: (*nilSafeError)(nil), logged: redacted},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var buf bytes.Buffer
@@ -131,19 +131,32 @@ func TestTypedNilValuesAreLoggedAsNil(t *testing.T) {
 	}
 }
 
-// brokenStringer panics on a non-nil value: a real bug, which the logger must not hide.
+// brokenStringer panics on a non-nil value: a bug, which is logged as panicked, never re-raised.
 type brokenStringer struct{}
 
-func (brokenStringer) String() string { panic("broken String") }
+func (brokenStringer) String() string { panic("broken String carrying " + token) }
 
-func TestAPanicFromANonNilValueIsNotHidden(t *testing.T) {
-	defer func() {
-		if r := recover(); r != "broken String" {
-			t.Fatalf("recovered %v, want the String method's own panic", r)
-		}
-	}()
-	New(io.Discard, "json").Info("x", "reason", brokenStringer{})
-	t.Fatal("logging a value whose String panics returned normally")
+// A method that panics on a non-nil value is logged as panicked, without the panic's text, and the
+// line keeps its other attributes: slog promises that for its own values, and a re-raised panic
+// would kill a goroutine that has no recover (#239).
+func TestAPanickingValueIsLoggedAsPanicked(t *testing.T) {
+	for name, value := range map[string]any{
+		"a value":                  brokenStringer{},
+		"a non-nil pointer":        &brokenStringer{},
+		"a joined typed-nil error": errors.Join((*valueError)(nil)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			New(&buf, "json").Info("x", "reason", value, "method", "POST")
+			var line struct{ Reason, Method string }
+			if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+				t.Fatalf("log line %q: %v", buf.String(), err)
+			}
+			if line.Reason != panicked || line.Method != "POST" {
+				t.Fatalf("logged reason %q and method %q, want %q and POST", line.Reason, line.Method, panicked)
+			}
+		})
+	}
 }
 
 func TestGroupContentsAreDropped(t *testing.T) {
