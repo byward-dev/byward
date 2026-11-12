@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -92,6 +93,58 @@ func TestOnlyCredentialShapedValuesAreRedacted(t *testing.T) {
 type stringer string
 
 func (s stringer) String() string { return string(s) }
+
+// valueError and valueStringer have value receivers, so calling their method through a nil
+// pointer panics; nilSafeError has a pointer receiver and handles nil itself.
+type (
+	valueError    struct{}
+	valueStringer struct{}
+	nilSafeError  struct{}
+)
+
+func (valueError) Error() string     { return "value error" }
+func (valueStringer) String() string { return "value stringer" }
+func (*nilSafeError) Error() string  { return "nil-safe error carrying " + token }
+
+// A typed-nil error or Stringer is logged as <nil>, the way fmt prints it, instead of panicking
+// inside the handler and losing the line (#239).
+func TestTypedNilValuesAreLoggedAsNil(t *testing.T) {
+	for name, tc := range map[string]struct {
+		value  any
+		logged string
+	}{
+		"a nil error with a value receiver":    {value: (*valueError)(nil), logged: "<nil>"},
+		"a nil Stringer with a value receiver": {value: (*valueStringer)(nil), logged: "<nil>"},
+		"a nil error that handles nil itself":  {value: (*nilSafeError)(nil), logged: redacted},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			New(&buf, "json").Info("x", "reason", tc.value, "method", "POST")
+			var line struct{ Reason, Method string }
+			if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+				t.Fatalf("log line %q: %v", buf.String(), err)
+			}
+			if line.Reason != tc.logged || line.Method != "POST" {
+				t.Fatalf("logged reason %q and method %q, want %q and POST", line.Reason, line.Method, tc.logged)
+			}
+		})
+	}
+}
+
+// brokenStringer panics on a non-nil value: a real bug, which the logger must not hide.
+type brokenStringer struct{}
+
+func (brokenStringer) String() string { panic("broken String") }
+
+func TestAPanicFromANonNilValueIsNotHidden(t *testing.T) {
+	defer func() {
+		if r := recover(); r != "broken String" {
+			t.Fatalf("recovered %v, want the String method's own panic", r)
+		}
+	}()
+	New(io.Discard, "json").Info("x", "reason", brokenStringer{})
+	t.Fatal("logging a value whose String panics returned normally")
+}
 
 func TestGroupContentsAreDropped(t *testing.T) {
 	var buf bytes.Buffer

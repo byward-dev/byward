@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -72,9 +73,9 @@ func replace(groups []string, a slog.Attr) slog.Attr {
 		var s string
 		switch v := a.Value.Resolve().Any().(type) {
 		case error:
-			s = v.Error()
+			s = describe(v, v.Error)
 		case interface{ String() string }:
-			s = v.String()
+			s = describe(v, v.String)
 		default:
 			return slog.Attr{}
 		}
@@ -84,6 +85,22 @@ func replace(groups []string, a slog.Attr) slog.Attr {
 		return slog.String(a.Key, s)
 	}
 	return a
+}
+
+// describe returns text(), the way fmt prints a value: a typed-nil pointer whose method panics
+// (a value receiver called through nil) is <nil>, so one bad attribute does not take the line or
+// the request down with it (#239). Any other panic is a real bug and is not hidden.
+func describe(v any, text func() string) (s string) {
+	defer func() {
+		if r := recover(); r != nil {
+			if rv := reflect.ValueOf(v); rv.Kind() == reflect.Pointer && rv.IsNil() {
+				s = "<nil>"
+				return
+			}
+			panic(r)
+		}
+	}()
+	return text()
 }
 
 // jwtShape is a compact JWS or JWE anywhere in a string. Its header or JWS payload is base64url
