@@ -12,6 +12,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
+	"github.com/byward-dev/byward/internal/envproxy"
 	"github.com/byward-dev/byward/internal/store/sqlite"
 	"github.com/byward-dev/byward/internal/upstream/relay"
 )
@@ -107,7 +108,8 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 		o.Now = time.Now
 	}
 	if o.Proxy == nil {
-		o.Proxy = &http.Client{Timeout: probeTimeout}
+		// Through a proxy setting Go misread, an error says only envproxy.Cause, never the address.
+		o.Proxy = &http.Client{Timeout: probeTimeout, Transport: envproxy.Redact(http.DefaultTransport.(*http.Transport).Clone())}
 	}
 	if o.Resolve == nil {
 		o.Resolve = lookupNetIP
