@@ -89,8 +89,10 @@ func Handler(cfg *config.Config, log *slog.Logger, up http.Handler, v resource.V
 	rt := routeOf(mux)
 	// recoverer is innermost so a panic still gets its request log line, its 5xx metric and an error
 	// span: the wrappers above see the 500 it writes.
-	// ClientAddress is outermost: every layer below logs and limits by the same resolved address.
-	return logging.ClientAddress(cfg.TrustedProxies, logging.Middleware(log, tracing.Middleware(rt, o.Metrics.Middleware(rt, recoverer(log, origin.Hosts(o.Audit, hosts, mux))))))
+	// ClientAddress is outermost but for HSTS: every layer below logs and limits by the same
+	// resolved address, and every answer, a refusal or a panic's 500 included, carries HSTS.
+	return strictTransport(cfg.PublicURL, logging.ClientAddress(cfg.TrustedProxies, logging.Middleware(log, tracing.Middleware(rt,
+		o.Metrics.Middleware(rt, recoverer(log, origin.Hosts(o.Audit, hosts, mux)))))))
 }
 
 // startupResolveTimeout bounds the lookup of the upstream's host for the plain-http warning, so a
