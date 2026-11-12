@@ -758,8 +758,9 @@ func withProxy(proxy func(*http.Request) (*url.URL, error)) Option {
 
 // A request through a proxy whose setting Go misread never logs the transport error: it quotes the
 // address Go dialled, which is part of the proxy's credentials. The log names the cause instead,
-// and the client still gets 502. A well-formed proxy's error is logged as before.
-func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLog(t *testing.T) {
+// and the client still gets 502. A well-formed proxy's error is logged as before, and it shows the
+// address Go dialled, which is what makes the error unsafe to log for a misread setting.
+func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLogAndAWellFormedProxysErrorStillDoes(t *testing.T) {
 	closed := httptest.NewServer(http.NotFoundHandler())
 	addr := closed.Listener.Addr().String() // nothing listens here once closed: every dial fails at once
 	closed.Close()
@@ -769,12 +770,16 @@ func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLog(t *testing.T) {
 		leaks   []string // the parts of the credentials that must not be logged
 		misread bool
 	}{
-		// The settings of #185's proxy table, aimed at the closed port: Go dials user:password-prefix.
-		{"a slash", addr + "/pw-secret@egress.example:3128", []string{addr, "pw-secret"}, true},
-		{"a question mark", "http://" + addr + "?pw-secret@egress.example:3128", []string{addr, "pw-secret"}, true},
-		{"a hash", addr + "#pw-secret@egress.example:3128", []string{addr, "pw-secret"}, true},
-		{"a password Go cannot retry", "ops:pw/secret@egress.example:3128", []string{"ops", "pw/secret"}, true},
-		{"well formed", "http://" + addr, nil, false},
+		// The settings of #185's proxy table, aimed at the closed port: Go dials user:password-prefix,
+		// which the transport error would quote.
+		{"a slash", addr + "/pw-secret@egress.example:3128", []string{addr}, true},
+		{"a question mark", "http://" + addr + "?pw-secret@egress.example:3128", []string{addr}, true},
+		{"a setting that ends at a question mark", "http://" + addr + "?", []string{addr}, true},
+		{"a hash", addr + "#pw-secret@egress.example:3128", []string{addr}, true},
+		// An opaque URL with no host: Go dials ":0", so only the named cause shows it was caught.
+		{"a password Go cannot retry", "ops:pw/secret@egress.example:3128", nil, true},
+		{"a well-formed proxy's error is logged", "http://" + addr, nil, false},
+		{"a trailing slash is well formed", "http://" + addr + "/", nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pf := (&httpproxy.Config{HTTPProxy: tc.setting}).ProxyFunc()
@@ -789,13 +794,59 @@ func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLog(t *testing.T) {
 			if got := strings.Contains(logs.String(), "setting Go misread; run byward doctor"); got != tc.misread {
 				t.Fatalf("log %q names the misread setting: %v, want %v", logs.String(), got, tc.misread)
 			}
-			if !tc.misread && !strings.Contains(logs.String(), "proxyconnect") {
-				t.Fatalf("log %q; want the transport error of a well-formed proxy", logs.String())
+			if !tc.misread && (!strings.Contains(logs.String(), "proxyconnect") || !strings.Contains(logs.String(), addr)) {
+				t.Fatalf("log %q; want the transport error of a well-formed proxy, with the address Go dialled", logs.String())
 			}
 			for _, leak := range tc.leaks {
 				if strings.Contains(logs.String(), leak) {
 					t.Fatalf("log %q shows %q", logs.String(), leak)
 				}
+			}
+		})
+	}
+}
+
+// ReverseProxy's own error lines, such as a body that breaks off mid-copy, reach the structured log;
+// through a proxy whose setting Go misread they name the cause, never the address Go dialled.
+func TestABodyThatBreaksOffThroughAMisreadProxyNeverQuotesItsAddress(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		setting func(addr string) string
+		misread bool
+	}{
+		{"misread", func(addr string) string { return addr + "/pw-secret@egress.example:3128" }, true},
+		{"well formed", func(addr string) string { return "http://" + addr }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ln, err := net.Listen("tcp", "127.0.0.1:0") // the "proxy" Go dials: it answers, then resets mid-body
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = ln.Close() })
+			go func() {
+				c, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				_, _ = http.ReadRequest(bufio.NewReader(c))
+				_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\npartial")
+				_ = c.(*net.TCPConn).SetLinger(0) // close with a reset, so the read error names the addresses
+				_ = c.Close()
+			}()
+			addr := ln.Addr().String()
+			pf := (&httpproxy.Config{HTTPProxy: tc.setting(addr)}).ProxyFunc()
+			u, _ := url.Parse("http://mcp.upstream.example/mcp")
+			var logs bytes.Buffer
+			New(slog.New(slog.NewTextHandler(&logs, nil)), u, withProxy(func(r *http.Request) (*url.URL, error) { return pf(r.URL) })).
+				ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader("{}")))
+			if !strings.Contains(logs.String(), `msg="upstream error"`) {
+				t.Fatalf("log %q; want ReverseProxy's error line in the structured log", logs.String())
+			}
+			if tc.misread && (strings.Contains(logs.String(), addr) || !strings.Contains(logs.String(), "setting Go misread")) {
+				t.Fatalf("log %q; want the cause, not the address Go dialled", logs.String())
+			}
+			if !tc.misread && !strings.Contains(logs.String(), "body copy") {
+				t.Fatalf("log %q; want ReverseProxy's line for a well-formed proxy", logs.String())
 			}
 		})
 	}
