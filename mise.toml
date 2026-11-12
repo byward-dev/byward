@@ -1,6 +1,6 @@
 [tools]
 # Exact patch, so release rebuilds are byte-identical; .github/workflows/go-version.yml flags newer releases.
-go = "1.27.3"
+go = "1.27.4"
 golangci-lint = "2.15.0"
 "go:golang.org/x/tools/cmd/goimports" = "0.52.0"
 # Release tools (ADR-0019); used by `release*` tasks. go-licenses is also used by `check`.
