@@ -702,3 +702,50 @@ func TestStripsReportsWhatTheRelayRemoves(t *testing.T) {
 		}
 	}
 }
+
+// #225: Strict-Transport-Security is the proxy's: an upstream's own, which would come first (or
+// alone, after an informational response) and so be the one browsers keep, never reaches the
+// client; the proxy's, set before the relay runs, does.
+func TestAnUpstreamsStrictTransportSecurityNeverReachesTheClient(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		hint  bool   // the upstream sends 103 Early Hints first
+		ours  string // the proxy's own value, "" when its public URL is http
+		wants []string
+	}{
+		{"the proxy's own", false, "max-age=31536000", []string{"max-age=31536000"}},
+		{"the proxy's own after early hints", true, "max-age=31536000", []string{"max-age=31536000"}},
+		{"none when the proxy sends none", false, "", nil},
+		{"none after early hints when the proxy sends none", true, "", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			up := fakeupstream.New()
+			t.Cleanup(up.Close)
+			up.Handler = func(w http.ResponseWriter, _ *http.Request) {
+				if tc.hint {
+					w.Header().Set("Link", "</style.css>; rel=preload")
+					w.WriteHeader(http.StatusEarlyHints)
+					w.Header().Del("Link")
+				}
+				w.Header().Set("Strict-Transport-Security", "max-age=0; includeSubDomains")
+				_, _ = io.WriteString(w, "{}")
+			}
+			relay := relayTo(t, up, "/mcp")
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.ours != "" {
+					w.Header().Set("Strict-Transport-Security", tc.ours)
+				}
+				relay.ServeHTTP(w, r)
+			}))
+			t.Cleanup(srv.Close)
+			res, err := srv.Client().Post(srv.URL+"/mcp", "application/json", strings.NewReader(`{}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = res.Body.Close()
+			if got := res.Header.Values("Strict-Transport-Security"); res.StatusCode != http.StatusOK || !slices.Equal(got, tc.wants) {
+				t.Fatalf("status %d, Strict-Transport-Security %q, want 200 and %q", res.StatusCode, got, tc.wants)
+			}
+		})
+	}
+}

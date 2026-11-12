@@ -9,12 +9,17 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"regexp"
 	"time"
 )
 
 // Redacted replaces a value that must never be logged.
 const redacted = "[REDACTED]"
+
+// panicked replaces the text of an error or Stringer whose method panicked (#239), unless the
+// value is a nil pointer, which is <nil> as fmt prints it.
+const panicked = "!PANIC"
 
 // allowed lists every attribute key the proxy may log. Anything else is dropped, so a new field
 // has to be added here on purpose (invariant: never log tokens, secrets, codes or verifiers).
@@ -71,9 +76,9 @@ func replace(groups []string, a slog.Attr) slog.Attr {
 		var s string
 		switch v := a.Value.Resolve().Any().(type) {
 		case error:
-			s = v.Error()
+			s = describe(v, v.Error)
 		case interface{ String() string }:
-			s = v.String()
+			s = describe(v, v.String)
 		default:
 			return slog.Attr{}
 		}
@@ -83,6 +88,24 @@ func replace(groups []string, a slog.Attr) slog.Attr {
 		return slog.String(a.Key, s)
 	}
 	return a
+}
+
+// describe returns text() and never panics, as slog promises for its own values (#239): one bad
+// attribute must not take the line, the request or a background goroutine down with it. Like fmt
+// and slog, a typed-nil pointer whose method panics (a value receiver called through nil) is
+// <nil>. Any other panic is a bug, logged as panicked, without the panic's text: that text could
+// hold a credential the redaction check cannot recognise.
+func describe(v any, text func() string) (s string) {
+	defer func() {
+		if r := recover(); r != nil {
+			if rv := reflect.ValueOf(v); rv.Kind() == reflect.Pointer && rv.IsNil() {
+				s = "<nil>"
+			} else {
+				s = panicked
+			}
+		}
+	}()
+	return text()
 }
 
 // jwtShape is a compact JWS or JWE anywhere in a string. Its header or JWS payload is base64url

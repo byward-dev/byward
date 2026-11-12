@@ -13,6 +13,11 @@ or a reverse proxy that does.
 - [ ] Set `BYWARD_PUBLIC_URL` to the https URL users enter, including the MCP path, e.g.
       `https://mcp.example.com/mcp`. Leave off the trailing slash, and give an internationalized host
       in its `xn--` form. A non-loopback `http` URL refuses to start.
+- [ ] With an `https` public URL, every answer carries `Strict-Transport-Security: max-age=31536000`
+      (one year, no `includeSubDomains` or `preload`), so a browser on the sign-in and consent pages
+      is never downgraded to http. It needs no setting. If the ingress adds its own, keep one: a
+      browser uses only the first (RFC 6797 §8.1). For a year after, browsers turn every http request
+      to that host into https, so serve it over https only.
 - [ ] Keep the hop from the ingress to the proxy on a private network. That hop is plain HTTP and
       carries bearer tokens.
 - [ ] Set `BYWARD_LISTEN` to the address the ingress reaches, e.g. `0.0.0.0:8080` in a
