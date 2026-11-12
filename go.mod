@@ -1,6 +1,6 @@
 module github.com/byward-dev/byward
 
-go 1.27.3
+go 1.27.4
 
 require (
 	code.dny.dev/ssrf v0.3.0
