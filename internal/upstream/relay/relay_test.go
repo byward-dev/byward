@@ -13,12 +13,14 @@ import (
 	"net/http/httptrace"
 	"net/textproto"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 	"golang.org/x/net/http/httpproxy"
 )
@@ -785,13 +787,15 @@ func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLogAndAWellFormedProxys
 			pf := (&httpproxy.Config{HTTPProxy: tc.setting}).ProxyFunc()
 			u, _ := url.Parse("http://mcp.upstream.example/mcp")
 			var logs bytes.Buffer
+			log := slog.New(slog.NewTextHandler(&logs, nil))
 			w := httptest.NewRecorder()
-			New(slog.New(slog.NewTextHandler(&logs, nil)), u, withProxy(func(r *http.Request) (*url.URL, error) { return pf(r.URL) })).
+			// Behind the request log, as wired: the line carries the request's ID.
+			logging.Middleware(slog.New(slog.DiscardHandler), New(log, u, withProxy(func(r *http.Request) (*url.URL, error) { return pf(r.URL) }))).
 				ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader("{}")))
-			if w.Code != http.StatusBadGateway || !strings.Contains(logs.String(), `msg="upstream error"`) {
-				t.Fatalf("status %d, log %q; want 502 and the upstream error logged", w.Code, logs.String())
+			if w.Code != http.StatusBadGateway || !regexp.MustCompile(`msg="upstream error" request_id=[^"\s]+`).MatchString(logs.String()) {
+				t.Fatalf("status %d, log %q; want 502 and the upstream error logged with the request ID", w.Code, logs.String())
 			}
-			if got := strings.Contains(logs.String(), "setting Go misread; run byward doctor"); got != tc.misread {
+			if got := strings.Contains(logs.String(), `reason="`+misreadProxy+`"`); got != tc.misread {
 				t.Fatalf("log %q names the misread setting: %v, want %v", logs.String(), got, tc.misread)
 			}
 			if !tc.misread && (!strings.Contains(logs.String(), "proxyconnect") || !strings.Contains(logs.String(), addr)) {
