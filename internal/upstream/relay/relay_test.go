@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/byward-dev/byward/internal/envproxy"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 	"golang.org/x/net/http/httpproxy"
@@ -795,7 +796,7 @@ func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLogAndAWellFormedProxys
 			if w.Code != http.StatusBadGateway || !regexp.MustCompile(`msg="upstream error" request_id=[^"\s]+`).MatchString(logs.String()) {
 				t.Fatalf("status %d, log %q; want 502 and the upstream error logged with the request ID", w.Code, logs.String())
 			}
-			if got := strings.Contains(logs.String(), `reason="`+misreadProxy+`"`); got != tc.misread {
+			if got := strings.Contains(logs.String(), `reason="`+envproxy.Cause+`"`); got != tc.misread {
 				t.Fatalf("log %q names the misread setting: %v, want %v", logs.String(), got, tc.misread)
 			}
 			if !tc.misread && (!strings.Contains(logs.String(), "proxyconnect") || !strings.Contains(logs.String(), addr)) {
@@ -847,7 +848,7 @@ func TestABodyThatBreaksOffReachesTheUpstreamErrorLogAndNeverQuotesAMisreadProxy
 			if !strings.Contains(logs.String(), `level=WARN msg="upstream error"`) {
 				t.Fatalf("log %q; want ReverseProxy's error line in the structured log, as a warning", logs.String())
 			}
-			if tc.misread && (strings.Contains(logs.String(), addr) || !strings.Contains(logs.String(), `reason="`+misreadProxy+`"`)) {
+			if tc.misread && (strings.Contains(logs.String(), addr) || !strings.Contains(logs.String(), `reason="`+envproxy.Cause+`"`)) {
 				t.Fatalf("log %q; want the cause, not the address Go dialled", logs.String())
 			}
 			if !tc.misread && (!strings.Contains(logs.String(), `error="httputil: ReverseProxy read error during body copy: `) ||
