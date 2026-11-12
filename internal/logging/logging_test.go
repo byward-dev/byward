@@ -117,8 +117,8 @@ func (m nilMapStringer) String() string { m["x"] = 1; return "unreachable" }
 
 // An error or Stringer never panics the logger, and the line keeps its other attributes (#239).
 // Like fmt and slog, a typed-nil pointer whose method panics is <nil>, and a nil-safe method still
-// runs and is still redacted. A method that panics on a non-nil value is logged as !PANIC, without
-// the panic's text: slog promises that for its own values, and a re-raised panic would kill a
+// runs and is still redacted. Any other panicking method, even one on a nil map, is logged as !PANIC,
+// without the panic's text: slog promises that for its own values, and a re-raised panic would kill a
 // goroutine that has no recover.
 func TestAnErrorOrStringerNeverPanicsTheLogger(t *testing.T) {
 	for name, tc := range map[string]struct {

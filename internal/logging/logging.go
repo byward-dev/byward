@@ -18,8 +18,8 @@ import (
 // Redacted replaces a value that must never be logged.
 const redacted = "[REDACTED]"
 
-// panicked replaces the text of an error or Stringer whose method panicked on a non-nil value
-// (#239); on a nil pointer it is <nil>, as fmt prints it.
+// panicked replaces the text of an error or Stringer whose method panicked (#239), unless the
+// value is a nil pointer, which is <nil> as fmt prints it.
 const panicked = "!PANIC"
 
 // allowed lists every attribute key the proxy may log. Anything else is dropped, so a new field
