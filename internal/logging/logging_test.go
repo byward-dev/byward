@@ -93,6 +93,60 @@ type stringer string
 
 func (s stringer) String() string { return string(s) }
 
+// valueError and valueStringer have value receivers, so calling their method through a nil
+// pointer panics; nilSafeError has a pointer receiver and handles nil itself.
+type (
+	valueError    struct{}
+	valueStringer struct{}
+	nilSafeError  struct{}
+)
+
+func (valueError) Error() string     { return "value error" }
+func (valueStringer) String() string { return "value stringer" }
+func (*nilSafeError) Error() string  { return "nil-safe error carrying " + token }
+
+// brokenStringer panics on a non-nil value: a bug, which is logged as panicked, never re-raised.
+type brokenStringer struct{}
+
+func (brokenStringer) String() string { panic("broken String carrying " + token) }
+
+// nilMapStringer panics when nil: only a nil pointer is <nil>, as in fmt, so a nil map is !PANIC.
+type nilMapStringer map[string]int
+
+func (m nilMapStringer) String() string { m["x"] = 1; return "unreachable" }
+
+// An error or Stringer never panics the logger, and the line keeps its other attributes (#239).
+// Like fmt and slog, a typed-nil pointer whose method panics is <nil>, and a nil-safe method still
+// runs and is still redacted. Any other panicking method, even one on a nil map, is logged as !PANIC,
+// without the panic's text: slog promises that for its own values, and a re-raised panic would kill a
+// goroutine that has no recover.
+func TestAnErrorOrStringerNeverPanicsTheLogger(t *testing.T) {
+	for name, tc := range map[string]struct {
+		value  any
+		logged string
+	}{
+		"a nil error with a value receiver":         {value: (*valueError)(nil), logged: "<nil>"},
+		"a nil Stringer with a value receiver":      {value: (*valueStringer)(nil), logged: "<nil>"},
+		"a nil-safe error's text is still redacted": {value: (*nilSafeError)(nil), logged: redacted},
+		"a panicking value":                         {value: brokenStringer{}, logged: "!PANIC"},
+		"a panicking non-nil pointer":               {value: &brokenStringer{}, logged: "!PANIC"},
+		"a panicking nil map":                       {value: nilMapStringer(nil), logged: "!PANIC"},
+		"a joined typed-nil error":                  {value: errors.Join((*valueError)(nil)), logged: "!PANIC"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			New(&buf, "json").Info("x", "reason", tc.value, "method", "POST")
+			var line struct{ Reason, Method string }
+			if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+				t.Fatalf("log line %q: %v", buf.String(), err)
+			}
+			if line.Reason != tc.logged || line.Method != "POST" {
+				t.Fatalf("logged reason %q and method %q, want %q and POST", line.Reason, line.Method, tc.logged)
+			}
+		})
+	}
+}
+
 func TestGroupContentsAreDropped(t *testing.T) {
 	var buf bytes.Buffer
 	New(&buf, "json").Info("x", slog.Group("req", "reason", "inside"))
