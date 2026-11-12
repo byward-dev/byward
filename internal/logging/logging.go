@@ -92,10 +92,12 @@ func replace(groups []string, a slog.Attr) slog.Attr {
 // happens to contain eyJ.
 var jwtShape = regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(?:\.|$)|[A-Za-z0-9_-]\.eyJ[A-Za-z0-9_-]*(?:\.|$)`)
 
-// authScheme is an HTTP Bearer or Basic credential: the scheme as a whole word, in any case, then
-// whitespace and the credential. A name that only ends in the word, such as the auth method
-// client_secret_basic, is not one (#242): _ is a word character, so there is no word boundary.
-var authScheme = regexp.MustCompile(`(?i)\b(?:bearer|basic)\s+\S`)
+// authScheme is an HTTP Bearer or Basic credential: the scheme, in any case, then whitespace and
+// the credential. The scheme must not follow _, so an auth method name such as client_secret_basic
+// is not one (#242); anything else before it still counts, so a header dumped with escapes
+// ("\nBearer ...") or %20 is caught. Prose such as "use basic auth" matches too: that over-redaction
+// is accepted, because a length floor would let a short credential such as Basic YTpi through.
+var authScheme = regexp.MustCompile(`(?i)(?:^|[^_])(?:bearer|basic)\s+\S`)
 
 func looksSecret(s string) bool {
 	return authScheme.MatchString(s) || jwtShape.MatchString(s)
