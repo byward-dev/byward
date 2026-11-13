@@ -103,7 +103,7 @@ The **user**'s explicit, per-**MCP client** approval recorded by the **broker** 
 _Avoid_: approval, authorization (alone)
 
 **Environment proxy**:
-The HTTP proxy `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` name, which the relay to an HTTP **upstream**, calls to the **IdP** and doctor's self-probe go through; never byward itself (`internal/envproxy`).
+The HTTP proxy `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` name, which the relay to an HTTP **upstream**, calls to the **IdP**, doctor's self-probe and trace export go through; never byward itself (`internal/envproxy`).
 _Avoid_: proxy (alone), egress proxy, forward proxy
 
 **User**:

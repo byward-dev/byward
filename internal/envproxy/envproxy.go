@@ -1,8 +1,8 @@
 // Package envproxy is the environment proxy: the HTTP proxy HTTPS_PROXY, HTTP_PROXY and NO_PROXY
-// name, which the relay, IdP calls and doctor's self-probe go through. A setting whose credentials
-// hold an unescaped character (/, ?, # and the like) is one Go misreads: it dials part of the
-// credentials as the proxy host, and every transport error then quotes that address. Redact keeps
-// such errors out of every log (invariant 2).
+// name, which the relay, IdP calls, doctor's self-probe and trace export go through. A setting
+// whose credentials hold an unescaped character (/, ?, # and the like) is one Go misreads: it dials
+// part of the credentials as the proxy host, and every transport error then quotes that address.
+// Redact keeps such errors out of every log (invariant 2).
 package envproxy
 
 import (
@@ -12,6 +12,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+
+	"golang.org/x/net/http/httpproxy"
 )
 
 // Cause is logged in place of an error that would quote the address Go dialled from a misread
@@ -27,6 +30,25 @@ func Proxy(r *http.Request) (*url.URL, error) { return http.ProxyFromEnvironment
 // it, can hold part of the credentials.
 func Malformed(via *url.URL) bool {
 	return via != nil && (via.Host == "" || via.Opaque != "" || via.Path != "" && via.Path != "/" || via.RawQuery != "" || via.ForceQuery || via.Fragment != "")
+}
+
+// SettingMisread reports whether a proxy setting the environment holds (HTTPS_PROXY or HTTP_PROXY,
+// in either case) is one Go misreads and does not ignore, whatever NO_PROXY says. It judges the setting,
+// not a request: for a client whose targets byward cannot name in advance, such as trace export,
+// whose grpc endpoint can be any gRPC target. Each spelling is judged on its own, so which one Go
+// prefers when both are set can only make this redact more. A setting Go ignores (one it cannot
+// parse, HTTP_PROXY under CGI) is not misread.
+func SettingMisread() bool {
+	for _, names := range [][2]string{{"HTTP_PROXY", "HTTPS_PROXY"}, {"http_proxy", "https_proxy"}} {
+		cfg := httpproxy.Config{HTTPProxy: os.Getenv(names[0]), HTTPSProxy: os.Getenv(names[1]), CGI: os.Getenv("REQUEST_METHOD") != ""}
+		proxy := cfg.ProxyFunc() // no NoProxy: the setting itself, whichever hosts NO_PROXY keeps off it
+		for _, scheme := range []string{"http", "https"} {
+			if via, err := proxy(&url.URL{Scheme: scheme, Host: "proxied.invalid"}); err == nil && Malformed(via) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Redact returns t, whose errors through a proxy Go misread, judged by t's own Proxy, are replaced
