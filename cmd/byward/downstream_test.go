@@ -13,9 +13,9 @@ import (
 	"time"
 )
 
-// shortDir is a temporary directory short enough for a socket path: t.TempDir() on macOS can be
+// shortTempDir is a temporary directory short enough for a socket path: t.TempDir() on macOS can be
 // longer than the 104 bytes a socket path may have.
-func shortDir(t *testing.T) string {
+func shortTempDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "bw")
 	if err != nil {
@@ -25,10 +25,10 @@ func shortDir(t *testing.T) string {
 	return dir
 }
 
-// answeringSocket is a token socket that answers one connection with answer.
-func answeringSocket(t *testing.T, answer string) string {
+// scriptedSocket is a token socket that answers one connection with answer.
+func scriptedSocket(t *testing.T, answer string) string {
 	t.Helper()
-	path := filepath.Join(shortDir(t), "token.sock")
+	path := filepath.Join(shortTempDir(t), "token.sock")
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatal(err)
@@ -82,9 +82,9 @@ func TestDownstreamTokenOutputAndExitCodes(t *testing.T) {
 			var env []string
 			switch tc.socket {
 			case answers:
-				env = []string{"BYWARD_DOWNSTREAM_TOKEN_SOCKET=" + answeringSocket(t, tc.answer)}
+				env = []string{"BYWARD_DOWNSTREAM_TOKEN_SOCKET=" + scriptedSocket(t, tc.answer)}
 			case noSocket:
-				env = []string{"BYWARD_DOWNSTREAM_TOKEN_SOCKET=" + filepath.Join(shortDir(t), "token.sock")}
+				env = []string{"BYWARD_DOWNSTREAM_TOKEN_SOCKET=" + filepath.Join(shortTempDir(t), "token.sock")}
 			}
 			code, stdout, stderr := runWith(append([]string{"downstream-token"}, tc.args...), env...)
 			okStderr := stderr == tc.stderr || (!tc.exactStderr && strings.Contains(stderr, tc.stderr))
@@ -101,7 +101,7 @@ func TestDownstreamTokenOutputAndExitCodes(t *testing.T) {
 // --json prints the token and its expiry (RFC 3339, UTC) as one JSON object on one line.
 func TestDownstreamTokenAsJSONHasTheTokenAndItsExpiry(t *testing.T) {
 	// The expiry is given in another zone with a fraction of a second; it is printed in UTC, in seconds.
-	path := answeringSocket(t, `{"access_token":"tok","expires_at":"2026-11-08T15:00:00.5+02:00"}`+"\n")
+	path := scriptedSocket(t, `{"access_token":"tok","expires_at":"2026-11-08T15:00:00.5+02:00"}`+"\n")
 	code, stdout, stderr := runWith([]string{"downstream-token", "--json"}, "BYWARD_DOWNSTREAM_TOKEN_SOCKET="+path)
 	var got map[string]string
 	if code != exitOK || stderr != "" || strings.Count(stdout, "\n") != 1 || !strings.HasSuffix(stdout, "\n") ||
@@ -115,7 +115,7 @@ func TestDownstreamTokenGivesUpAfterItsWait(t *testing.T) {
 	wait := downstreamTokenWait
 	downstreamTokenWait = 50 * time.Millisecond
 	t.Cleanup(func() { downstreamTokenWait = wait })
-	path := filepath.Join(shortDir(t), "token.sock")
+	path := filepath.Join(shortTempDir(t), "token.sock")
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatal(err)
@@ -151,13 +151,16 @@ func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("stdout i
 
 // A token that cannot be written is a failure, not a success with nothing printed.
 func TestDownstreamTokenThatCannotBeWrittenExits1(t *testing.T) {
-	for _, args := range [][]string{nil, {"--json"}} {
-		path := answeringSocket(t, `{"access_token":"tok","expires_at":"2026-11-08T13:00:00Z"}`+"\n")
-		var stderr bytes.Buffer
-		code := run(context.Background(), append([]string{"downstream-token"}, args...), []string{"BYWARD_DOWNSTREAM_TOKEN_SOCKET=" + path}, failingWriter{}, &stderr)
-		if code != exitRuntime || !strings.Contains(stderr.String(), "writing the token: stdout is closed") || strings.Contains(stderr.String(), "tok\n") {
-			t.Fatalf("args %q: code %d, stderr %q; want exit 1 naming the write error", args, code, stderr.String())
-		}
+	const tok = "eyJ.unwritten.token"
+	for name, args := range map[string][]string{"the token": nil, "the token as JSON": {"--json"}} {
+		t.Run(name, func(t *testing.T) {
+			path := scriptedSocket(t, `{"access_token":"`+tok+`","expires_at":"2026-11-08T13:00:00Z"}`+"\n")
+			var stderr bytes.Buffer
+			code := run(context.Background(), append([]string{"downstream-token"}, args...), []string{"BYWARD_DOWNSTREAM_TOKEN_SOCKET=" + path}, failingWriter{}, &stderr)
+			if code != exitRuntime || !strings.Contains(stderr.String(), "writing the token: stdout is closed") || strings.Contains(stderr.String(), tok) {
+				t.Fatalf("code %d, stderr %q; want exit 1 naming the write error, never the token", code, stderr.String())
+			}
+		})
 	}
 }
 

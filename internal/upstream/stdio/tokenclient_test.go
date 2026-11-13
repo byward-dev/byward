@@ -4,6 +4,7 @@ package stdio
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"os"
@@ -85,19 +86,25 @@ func scriptedSocket(t *testing.T, answer string) (string, <-chan string) {
 func TestAnAnswerThatIsNotATokenOrAnErrorCodeIsAnError(t *testing.T) {
 	const secret = "eyJ.secret.token"
 	for name, answer := range map[string]string{
-		"not JSON":                  "token " + secret + "\n",
-		"a token without expiry":    `{"access_token":"` + secret + `"}` + "\n",
-		"a token with a bad expiry": `{"access_token":"` + secret + `","expires_at":"soon"}` + "\n",
-		"a token and an error":      `{"access_token":"` + secret + `","expires_at":"2026-11-08T13:00:00Z","error":"failed"}` + "\n",
-		"an expiry without a token": `{"expires_at":"2026-11-08T13:00:00Z"}` + "\n",
-		"a code with a line break":  `{"error":"failed\nbyward: ` + secret + `"}` + "\n",
-		"a code with an escape":     `{"error":"\u001b[31mfailed"}` + "\n",
-		"a field of the wrong type": `{"access_token":5,"error":"failed"}` + "\n",
-		"a code in capitals":        `{"error":"FAILED"}` + "\n",
-		"a token with a line break": `{"access_token":"` + secret + `\nx","expires_at":"2026-11-08T13:00:00Z"}` + "\n",
-		"a token with a space":      `{"access_token":"` + secret + ` x","expires_at":"2026-11-08T13:00:00Z"}` + "\n",
-		"no newline before close":   `{"access_token":"` + secret + `","expires_at":"2026-11-08T13:00:00Z"}`,
-		"nothing before close":      "",
+		"not JSON":                      "token " + secret + "\n",
+		"a token without expiry":        `{"access_token":"` + secret + `"}` + "\n",
+		"a token with a bad expiry":     `{"access_token":"` + secret + `","expires_at":"soon"}` + "\n",
+		"a token and an error":          `{"access_token":"` + secret + `","expires_at":"2026-11-08T13:00:00Z","error":"failed"}` + "\n",
+		"an expiry without a token":     `{"expires_at":"2026-11-08T13:00:00Z"}` + "\n",
+		"a code with a line break":      `{"error":"failed\nbyward: ` + secret + `"}` + "\n",
+		"a code with an escape":         `{"error":"\u001b[31mfailed"}` + "\n",
+		"a field of the wrong type":     `{"access_token":5,"error":"failed"}` + "\n",
+		"a code in capitals":            `{"error":"FAILED"}` + "\n",
+		"a code with a non-ASCII byte":  `{"error":"failéd"}` + "\n",
+		"a code ending past z":          `{"error":"failed{"}` + "\n",
+		"a code with a backtick":        `{"error":"fail` + "`" + `"}` + "\n",
+		"a token with a line break":     `{"access_token":"` + secret + `\nx","expires_at":"2026-11-08T13:00:00Z"}` + "\n",
+		"a token with a space":          `{"access_token":"` + secret + ` x","expires_at":"2026-11-08T13:00:00Z"}` + "\n",
+		"a token with DEL":              `{"access_token":"` + secret + `\u007f","expires_at":"2026-11-08T13:00:00Z"}` + "\n",
+		"an answer longer than 64 KiB":  `{"access_token":"` + secret + strings.Repeat("t", 64<<10) + `","expires_at":"2026-11-08T13:00:00Z"}` + "\n",
+		"a token with a non-ASCII byte": `{"access_token":"` + secret + `\u009b31m","expires_at":"2026-11-08T13:00:00Z"}` + "\n",
+		"no newline before close":       `{"access_token":"` + secret + `","expires_at":"2026-11-08T13:00:00Z"}`,
+		"nothing before close":          "",
 	} {
 		t.Run(name, func(t *testing.T) {
 			path, reqs := scriptedSocket(t, answer)
@@ -117,15 +124,43 @@ func TestAnAnswerThatIsNotATokenOrAnErrorCodeIsAnError(t *testing.T) {
 	}
 }
 
-// A token far longer than the request limit (maxTokenRequest) is read whole.
-func TestATokenLongerThanTheRequestLimitIsReadWhole(t *testing.T) {
-	long := strings.Repeat("t", 3*maxTokenRequest)
+// A large token, tens of KiB, is read whole.
+func TestALargeTokenIsReadWhole(t *testing.T) {
+	long := strings.Repeat("t", 32<<10)
 	path, _ := scriptedSocket(t, `{"access_token":"`+long+`","expires_at":"2026-11-08T13:00:00Z"}`+"\n")
 	ctx, cancel := context.WithTimeout(context.Background(), guard)
 	defer cancel()
 	got, err := AskDownstreamToken(ctx, path)
 	if err != nil || got.AccessToken != long {
 		t.Fatalf("got a token of %d bytes, %v; want %d bytes", len(got.AccessToken), err, len(long))
+	}
+}
+
+// Every byte a code or a token may hold comes back whole: a to z and _ in a code, printable ASCII
+// without the space in a token.
+func TestEveryByteACodeOrATokenMayHoldComesBack(t *testing.T) {
+	var printable []byte
+	for b := byte('!'); b <= '~'; b++ {
+		printable = append(printable, b)
+	}
+	tok, _ := json.Marshal(string(printable))
+	for _, tc := range []struct {
+		name, answer string
+		want         DownstreamToken
+	}{
+		{"a token of every printable byte", `{"access_token":` + string(tok) + `,"expires_at":"2026-11-08T13:00:00Z"}` + "\n",
+			DownstreamToken{AccessToken: string(printable), ExpiresAt: time.Date(2026, 11, 8, 13, 0, 0, 0, time.UTC)}},
+		{"a code of a to z and _", `{"error":"abcdefghijklmnopqrstuvwxyz_"}` + "\n", DownstreamToken{Error: "abcdefghijklmnopqrstuvwxyz_"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path, _ := scriptedSocket(t, tc.answer)
+			ctx, cancel := context.WithTimeout(context.Background(), guard)
+			defer cancel()
+			got, err := AskDownstreamToken(ctx, path)
+			if err != nil || got.AccessToken != tc.want.AccessToken || !got.ExpiresAt.Equal(tc.want.ExpiresAt) || got.Error != tc.want.Error {
+				t.Fatalf("got %+v, %v; want %+v", got, err, tc.want)
+			}
+		})
 	}
 }
 

@@ -30,6 +30,9 @@ func AskDownstreamToken(ctx context.Context, path string) (DownstreamToken, erro
 		return DownstreamToken{}, fmt.Errorf("token socket: %w", ended(ctx, err))
 	}
 	line, err := bufio.NewReaderSize(c, maxTokenAnswer).ReadSlice('\n')
+	if errors.Is(err, bufio.ErrBufferFull) {
+		return DownstreamToken{}, errors.New("token socket: the answer is longer than 64 KiB")
+	}
 	if err != nil {
 		return DownstreamToken{}, fmt.Errorf("token socket: no answer: %w", ended(ctx, err))
 	}

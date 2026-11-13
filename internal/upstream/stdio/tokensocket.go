@@ -30,7 +30,8 @@ const (
 
 // DownstreamToken is a downstream API token for a process's user, or the error code that says why
 // there is none (consent_required, interaction_required, sign_in_expired, no_user, unavailable,
-// failed). AccessToken is set exactly when Error is empty.
+// failed; as the answer AskDownstreamToken reads, also refused or bad_request). AccessToken is set
+// exactly when Error is empty.
 type DownstreamToken struct {
 	AccessToken string
 	ExpiresAt   time.Time

@@ -177,8 +177,9 @@ export function downstreamToken(): Promise<string> {
 
 A server or SDK that takes a command printing a token (a credential command) can run
 `byward downstream-token` instead. It asks the socket as above and prints the access token alone on
-standard output; with `--json` it prints the whole answer, `{"access_token":"...","expires_at":"..."}`.
-It passes the check because the server starts it, so it descends from the upstream process. It needs
+standard output; with `--json` it prints the token and its expiry (UTC) as one JSON line,
+`{"access_token":"...","expires_at":"..."}`. An error code still goes alone to standard error. The
+socket accepts it because the server starts it, so it descends from the upstream process. It needs
 the `byward` binary on the process's `PATH`, as in the byward image (`/usr/local/bin/byward`).
 
 ```sh
