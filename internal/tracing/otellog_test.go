@@ -53,8 +53,8 @@ func TestAnOTELSettingTheExporterRejectsIsLoggedWithoutItsValue(t *testing.T) {
 
 // An SDK setting OpenTelemetry rejects is logged by its name at warn level, never by its value,
 // in the log or on stderr: OTel's own error quotes the value (part of it for a bad escape), which can
-// be a credential pasted by mistake. The SDK reads each setting once per process, so each row runs
-// in a child process.
+// be a credential pasted by mistake. Each row runs in a child process: the SDK reads the resource
+// settings once per process, and the check covers the child's stderr.
 func TestAnSDKSettingOTELRejectsIsLoggedByNameWithoutItsValue(t *testing.T) {
 	if rerun.Child() {
 		log := slog.New(slog.NewTextHandler(os.Stdout, nil))
@@ -76,7 +76,8 @@ func TestAnSDKSettingOTELRejectsIsLoggedByNameWithoutItsValue(t *testing.T) {
 		{"a resource attribute value that cannot be unescaped", []string{"OTEL_RESOURCE_ATTRIBUTES=k=%zz"}, "%zz", "OTEL_RESOURCE_ATTRIBUTES"},
 		{"a sampler argument that is not a number", []string{"OTEL_TRACES_SAMPLER=traceidratio", "OTEL_TRACES_SAMPLER_ARG=" + secret}, secret, samplerSettings},
 		{"a parent-based sampler argument that is not a number", []string{"OTEL_TRACES_SAMPLER=parentbased_traceidratio", "OTEL_TRACES_SAMPLER_ARG=" + secret}, secret, samplerSettings},
-		// A ratio that parses but is out of range; 1e9 cannot occur in a log line's timestamp.
+		// A ratio that parses but is out of range: OTel's error does not quote it, so the row pins the
+		// name; notLogged guards a later OTel that would (1e9 cannot occur in a timestamp).
 		{"a sampler ratio above 1", []string{"OTEL_TRACES_SAMPLER=traceidratio", "OTEL_TRACES_SAMPLER_ARG=1e9"}, "1e9", samplerSettings},
 		{"a sampler OTel does not know", []string{"OTEL_TRACES_SAMPLER=" + secret}, secret, samplerSettings},
 	} {
