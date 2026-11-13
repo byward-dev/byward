@@ -138,7 +138,10 @@ func TestIntegrationTheReleaseImageServes(t *testing.T) {
 	}
 	back := b.viaIdP(idp, allow)
 	done, err := url.Parse(back.Header.Get("Location"))
-	if back.StatusCode != http.StatusFound || err != nil || done.Host != "127.0.0.1" || done.Path != "/callback" || done.Query().Get("code") == "" {
+	if err != nil { // the Location carries the code: not printed
+		t.Fatalf("callback: %d with a Location that does not parse", back.StatusCode)
+	}
+	if back.StatusCode != http.StatusFound || done.Host != "127.0.0.1" || done.Path != "/callback" || done.Query().Get("code") == "" {
 		t.Fatalf("callback: %d to %s://%s%s, want a redirect to the client's callback with a code", back.StatusCode, done.Scheme, done.Host, done.Path)
 	}
 	s := &oidcSession{b: b}
@@ -148,8 +151,8 @@ func TestIntegrationTheReleaseImageServes(t *testing.T) {
 	raw := mcpAssertion(t, base, "mcp.example.com", up, s.access)
 	target, _ := url.Parse(base)
 	verified(t, jwks(t, httputil.NewSingleHostReverseProxy(target), "mcp.example.com"), raw, up.URL+"/mcp")
-	if fi, err := os.Stat(filepath.Join(data, "state")); err != nil || !fi.IsDir() {
-		t.Fatalf("the store is not in the mounted data directory (%v)", err)
+	if files, err := os.ReadDir(filepath.Join(data, "state")); err != nil || len(files) == 0 {
+		t.Fatalf("the store is not in the mounted data directory: %d files in state (%v)", len(files), err)
 	}
 }
 

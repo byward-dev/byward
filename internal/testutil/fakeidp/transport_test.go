@@ -18,7 +18,7 @@ func TestWithTLSServesHTTPSThatTheFakesClientTrusts(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status %d", resp.StatusCode)
+		t.Fatalf("discovery over https: %d, want 200", resp.StatusCode)
 	}
 	if New(t, Generic).Certificate() != nil {
 		t.Fatal("a fake without WithTLS has a certificate")
