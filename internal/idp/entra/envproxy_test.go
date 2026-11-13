@@ -18,7 +18,7 @@ import (
 // A refresh through a proxy setting Go misread fails as Unavailable either way, so callers try
 // later; with the IdP client's redaction its error never quotes the address Go dialled, which the
 // bare transport's error does.
-func TestARefreshThroughAMisreadProxyStaysUnavailableAndRedactionKeepsItsAddressOut(t *testing.T) {
+func TestARefreshThroughAMisreadProxySettingStaysUnavailableAndRedactionKeepsItsAddressOut(t *testing.T) {
 	addr := closedport.Addr(t)
 	pf := (&httpproxy.Config{HTTPSProxy: addr + "/pw-secret@egress.example:3128"}).ProxyFunc()
 	base := http.DefaultTransport.(*http.Transport).Clone()

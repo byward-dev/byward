@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/net/http/httpproxy"
 
@@ -39,7 +40,7 @@ func chain(err error) string {
 // Through a proxy setting Go misread, the error says only Cause: neither its text, nor anything in
 // its chain, quotes the address Go dialled, which is part of the credentials. Through a well-formed
 // proxy the error is the transport's own, and it does quote that address.
-func TestATransportErrorThroughAMisreadProxyNeverQuotesItsAddress(t *testing.T) {
+func TestATransportErrorThroughAMisreadProxySettingNeverQuotesItsAddress(t *testing.T) {
 	addr := closedport.Addr(t)
 	const target = "https://login.example/.well-known/openid-configuration"
 	for _, tc := range []struct {
@@ -55,7 +56,7 @@ func TestATransportErrorThroughAMisreadProxyNeverQuotesItsAddress(t *testing.T) 
 		{"a hash", addr + "#pw-secret@egress.example:3128", true, true},
 		// An opaque URL with no host: Go dials ":0", so only the cause shows it was caught.
 		{"a setting Go cannot reparse", "ops:pw/secret@egress.example:3128", true, false},
-		{"a well-formed proxy's error is its own", "http://" + addr, false, true},
+		{"a well-formed setting's error is its own", "http://" + addr, false, true},
 		{"a trailing slash is well formed", "http://" + addr + "/", false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -98,11 +99,12 @@ func TestARedactedErrorKeepsTheOriginalsClass(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		dial error
+		want string // the original's class, which the redacted error must keep
 	}{
-		{"a timeout", timeoutErr{}},
-		{"a cancellation", context.Canceled},
-		{"a passed deadline", context.DeadlineExceeded},
-		{"a refusal", errors.New("connect: connection refused")},
+		{"a timeout", timeoutErr{}, "timeout=true canceled=false deadline=false"},
+		{"a cancellation", context.Canceled, "timeout=false canceled=true deadline=false"},
+		{"a passed deadline", context.DeadlineExceeded, "timeout=true canceled=false deadline=true"},
+		{"a refusal", errors.New("connect: connection refused"), "timeout=false canceled=false deadline=false"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			classOf := func(err error) string {
@@ -118,8 +120,8 @@ func TestARedactedErrorKeepsTheOriginalsClass(t *testing.T) {
 			if !strings.Contains(redacted.Error(), Cause) || strings.Contains(redacted.Error(), "4711") {
 				t.Fatalf("redacted %q; want the cause alone", redacted)
 			}
-			if classOf(redacted) != classOf(plain) {
-				t.Fatalf("redacted answers %s, the original %s", classOf(redacted), classOf(plain))
+			if classOf(plain) != tc.want || classOf(redacted) != classOf(plain) {
+				t.Fatalf("redacted answers %s, the original %s, want %s", classOf(redacted), classOf(plain), tc.want)
 			}
 			if ne := (net.Error)(nil); !errors.As(redacted, &ne) || ne.Temporary() != ne.Timeout() { //nolint:staticcheck // Temporary is net.Error's, deprecated but required
 				t.Fatalf("redacted %#v: Temporary must answer as Timeout", redacted)
@@ -180,20 +182,23 @@ func TestMalformedJudgesTheProxyGoRead(t *testing.T) {
 	}
 }
 
-// A response body that breaks off through a proxy Go misread (the dialled address answers, then
-// resets) gives a read error that says only the cause; through a well-formed proxy the read error is
-// the transport's own and quotes that address.
-func TestABodyThatBreaksOffThroughAMisreadProxyNeverQuotesItsAddress(t *testing.T) {
+// A response body read through a proxy setting Go misread never quotes the dialled address: a body
+// that breaks off (the address answers, then resets) gives an error that says only the cause, while
+// a whole body reads as sent and one cut short ends in io.ErrUnexpectedEOF, which quotes nothing.
+// Through a well-formed setting the read error is the transport's own and quotes that address.
+func TestABodyReadThroughAMisreadProxySettingNeverQuotesItsAddressAndOtherwiseEndsAsSent(t *testing.T) {
 	misread := func(addr string) string { return addr + "/pw-secret@egress.example:3128" }
 	for _, tc := range []struct {
 		name     string
 		setting  func(addr string) string
 		misread  bool
 		complete bool // the proxy sends the whole body: it reads as sent, with no error
+		short    bool // the proxy closes early without a reset: io.ErrUnexpectedEOF, passed through
 	}{
-		{"a misread proxy's address is never quoted", misread, true, false},
-		{"a whole body through a misread proxy reads as sent", misread, true, true},
-		{"a well-formed proxy's read error is its own", func(addr string) string { return "http://" + addr }, false, false},
+		{"a reset through a misread setting never quotes the address", misread, true, false, false},
+		{"a whole body through a misread setting reads as sent", misread, true, true, false},
+		{"a body cut short through a misread setting ends in io.ErrUnexpectedEOF", misread, true, false, true},
+		{"a well-formed setting's read error is its own", func(addr string) string { return "http://" + addr }, false, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ln, err := net.Listen("tcp", "127.0.0.1:0") // the "proxy" Go dials: it answers, then resets mid-body
@@ -207,8 +212,9 @@ func TestABodyThatBreaksOffThroughAMisreadProxyNeverQuotesItsAddress(t *testing.
 					return
 				}
 				_, _ = http.ReadRequest(bufio.NewReader(c))
-				if tc.complete {
-					_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Length: 7\r\n\r\npartial")
+				if tc.complete || tc.short {
+					length := map[bool]string{true: "7", false: "1000"}[tc.complete]
+					_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Length: "+length+"\r\n\r\npartial")
 					_ = c.Close()
 					return
 				}
@@ -229,9 +235,45 @@ func TestABodyThatBreaksOffThroughAMisreadProxyNeverQuotesItsAddress(t *testing.
 				}
 				return
 			}
+			if tc.short {
+				if !errors.Is(err, io.ErrUnexpectedEOF) || strings.Contains(chain(err), Cause) || strings.Contains(chain(err), addr) {
+					t.Fatalf("read error %v; want io.ErrUnexpectedEOF, unredacted and with no address", err)
+				}
+				return
+			}
 			if err == nil || strings.Contains(chain(err), addr) == tc.misread || strings.Contains(err.Error(), Cause) != tc.misread {
 				t.Fatalf("read error %v; misread %v", err, tc.misread)
 			}
 		})
+	}
+}
+
+// failingClose is a body whose Close fails with an error that quotes the dialled address.
+type failingClose struct{ io.Reader }
+
+func (failingClose) Close() error {
+	return &net.OpError{Op: "close", Net: "tcp", Addr: &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 4711}, Err: errors.New("broken pipe")}
+}
+
+// A body through a misread proxy setting that fails to close says only the cause.
+func TestABodyThatFailsToCloseThroughAMisreadProxySettingSaysOnlyTheCause(t *testing.T) {
+	err := redactedBody{failingClose{strings.NewReader("")}}.Close()
+	if err == nil || !strings.Contains(err.Error(), Cause) || strings.Contains(chain(err), "4711") {
+		t.Fatalf("close error %v; want the cause alone", err)
+	}
+}
+
+// With no proxy at all, a client timeout through Redact still answers as a timeout and a passed
+// deadline: http.Client cancels a transport it does not know through the request's Cancel channel,
+// which changes the error's words, not its class.
+func TestAClientTimeoutThroughRedactWithNoProxyIsStillATimeout(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	t.Cleanup(slow.Close)
+	base := http.DefaultTransport.(*http.Transport).Clone()
+	base.Proxy = nil
+	_, err := (&http.Client{Transport: Redact(base), Timeout: 50 * time.Millisecond}).Get(slow.URL)
+	var ne net.Error
+	if err == nil || !errors.As(err, &ne) || !ne.Timeout() || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error %v; want a timeout that is a passed deadline", err)
 	}
 }

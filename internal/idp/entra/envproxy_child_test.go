@@ -8,7 +8,6 @@ import (
 
 	"github.com/byward-dev/byward/internal/envproxy"
 	"github.com/byward-dev/byward/internal/idp"
-	"github.com/byward-dev/byward/internal/testutil/closedport"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/rerun"
 )
@@ -22,26 +21,16 @@ func TestAnEntraProviderWithoutAClientNeverQuotesAMisreadEnvironmentProxy(t *tes
 		if err != nil {
 			t.Fatal(err)
 		}
+		p.fetch.Backoff = 0 // the production client, without the wait between retries
 		fmt.Printf("ERR=%v\n", p.Ready(context.Background()))
 		return
 	}
-	addr := closedport.Addr(t)
-	for _, tc := range []struct {
-		name    string
-		setting string
-		misread bool
-	}{
-		{"a misread setting says only the cause", addr + "/pw-secret@egress.example:3128", true},
-		{"a well-formed setting's error is its own", "http://" + addr, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got := rerun.Run(t, "TestAnEntraProviderWithoutAClientNeverQuotesAMisreadEnvironmentProxy", rerun.Proxy(tc.setting)...)
-			if !strings.Contains(got, "ERR=") || strings.Contains(got, "ERR=<nil>") {
-				t.Fatalf("child output %q; want discovery to fail", got)
-			}
-			if strings.Contains(got, addr) == tc.misread || strings.Contains(got, envproxy.Cause) != tc.misread {
-				t.Fatalf("child output %q; misread %v", got, tc.misread)
-			}
-		})
-	}
+	rerun.EachProxySetting(t, "TestAnEntraProviderWithoutAClientNeverQuotesAMisreadEnvironmentProxy", func(t *testing.T, got, addr string, misread bool) {
+		if !strings.Contains(got, "ERR=") || strings.Contains(got, "ERR=<nil>") {
+			t.Fatalf("child output %q; want discovery to fail", got)
+		}
+		if strings.Contains(got, addr) == misread || strings.Contains(got, envproxy.Cause) != misread {
+			t.Fatalf("child output %q; misread %v", got, misread)
+		}
+	})
 }

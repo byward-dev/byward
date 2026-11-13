@@ -872,23 +872,12 @@ func TestTheRelayReadsTheEnvironmentProxyAndNamesAMisreadOnesCause(t *testing.T)
 		fmt.Printf("STATUS=%d\n", w.Code)
 		return
 	}
-	addr := closedport.Addr(t)
-	for _, tc := range []struct {
-		name    string
-		setting string
-		misread bool
-	}{
-		{"a misread setting names the cause", addr + "/pw-secret@egress.example:3128", true},
-		{"a well-formed setting's error is its own", "http://" + addr, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got := rerun.Run(t, "TestTheRelayReadsTheEnvironmentProxyAndNamesAMisreadOnesCause", rerun.Proxy(tc.setting)...)
-			if !strings.Contains(got, "STATUS=502") || !strings.Contains(got, `msg="upstream error"`) {
-				t.Fatalf("child output %q; want 502 and the upstream error logged", got)
-			}
-			if strings.Contains(got, `reason="`+envproxy.Cause+`"`) != tc.misread || strings.Contains(got, addr) == tc.misread {
-				t.Fatalf("child output %q; misread %v", got, tc.misread)
-			}
-		})
-	}
+	rerun.EachProxySetting(t, "TestTheRelayReadsTheEnvironmentProxyAndNamesAMisreadOnesCause", func(t *testing.T, got, addr string, misread bool) {
+		if !strings.Contains(got, "STATUS=502") || !strings.Contains(got, `msg="upstream error"`) {
+			t.Fatalf("child output %q; want 502 and the upstream error logged", got)
+		}
+		if strings.Contains(got, `reason="`+envproxy.Cause+`"`) != misread || strings.Contains(got, addr) == misread {
+			t.Fatalf("child output %q; misread %v", got, misread)
+		}
+	})
 }

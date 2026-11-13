@@ -32,7 +32,9 @@ func Malformed(via *url.URL) bool {
 // Redact returns t, whose errors through a proxy Go misread, judged by t's own Proxy, are replaced
 // by an *Error: a failed round trip, and a read of the response body that fails (a proxy that
 // answers, then resets). Any other error, and every response through any other proxy, passes
-// through unchanged.
+// through unchanged. An http.Client cancels a transport it does not know, as this one is, through
+// the request's Cancel channel, so a client timeout reads "request canceled (Client.Timeout …)"
+// instead of "context deadline exceeded (…)", while still answering Timeout and DeadlineExceeded.
 func Redact(t *http.Transport) http.RoundTripper { return redacting{t} }
 
 type redacting struct{ t *http.Transport }
@@ -61,7 +63,7 @@ type redactedBody struct{ io.ReadCloser }
 
 func (b redactedBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
-	if err == nil || err == io.EOF || errors.Is(err, io.ErrUnexpectedEOF) { //nolint:errorlint // io.EOF is returned unwrapped, by contract
+	if err == nil || err == io.EOF || err == io.ErrUnexpectedEOF { //nolint:errorlint // both come bare (io.EOF by contract): a wrap could quote the address
 		return n, err
 	}
 	return n, redact(err)
