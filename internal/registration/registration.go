@@ -60,8 +60,8 @@ type Registry interface {
 	Client(ctx context.Context, id string) (Client, error)
 }
 
-// JTICache remembers private_key_jwt assertion IDs until they expire (ADR-0008 §6). The store
-// provides it later; an in-memory one serves a single replica.
+// JTICache remembers private_key_jwt assertion IDs until they expire (ADR-0008 §6). StoreJTICache
+// keeps them in the store, so every replica sees them.
 type JTICache interface {
 	// Seen records jti and reports whether it was already recorded.
 	Seen(ctx context.Context, jti string, expiresAt time.Time) (bool, error)

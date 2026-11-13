@@ -71,7 +71,8 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	if err != nil {
 		return nil, err
 	}
-	defer func() { // every later failure closes the store it opened
+	parts.jti.Bind(st) // before any client authenticates
+	defer func() {     // every later failure closes the store it opened
 		if err != nil {
 			_ = st.Close()
 		}

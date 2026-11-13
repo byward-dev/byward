@@ -15,6 +15,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/store"
+	"github.com/byward-dev/byward/internal/store/memory"
 	"github.com/byward-dev/byward/internal/testutil/clientdocs"
 	"github.com/byward-dev/byward/internal/testutil/memstore"
 )
@@ -55,7 +56,7 @@ func newDCRFor(st store.Clients, now func() time.Time, deny ...string) *registra
 	if err != nil {
 		panic(err)
 	}
-	return registration.NewDCRRegistry(registration.DCRConfig{Store: st, JTI: registration.NewMemoryJTICache(now, 10), Now: now,
+	return registration.NewDCRRegistry(registration.DCRConfig{Store: st, JTI: registration.NewStoreJTICache(memory.New(), now), Now: now,
 		Scopes: []string{"mcp", "offline_access"}, Deny: d})
 }
 

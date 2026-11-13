@@ -27,6 +27,7 @@ type Store struct {
 	clients  map[string]store.Client
 	consents map[store.ConsentKey]store.Consent
 	logins   map[[sha256.Size]byte]time.Time // spent logins, by hash, until their expiry
+	asserts  map[[sha256.Size]byte]time.Time // spent client assertions, by hash, until their expiry
 }
 
 // token is a stored refresh token with its successor, set when it is rotated.
@@ -51,6 +52,7 @@ func New() *Store {
 		clients:  map[string]store.Client{},
 		consents: map[store.ConsentKey]store.Consent{},
 		logins:   map[[sha256.Size]byte]time.Time{},
+		asserts:  map[[sha256.Size]byte]time.Time{},
 	}
 }
 
@@ -65,6 +67,20 @@ func (s *Store) SpendLogin(_ context.Context, hash [sha256.Size]byte, now, expir
 		return store.ErrConsumed
 	}
 	s.logins[hash] = expiresAt
+	return nil
+}
+
+// SpendAssertion implements store.ClientAssertions.
+func (s *Store) SpendAssertion(_ context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
+	if !expiresAt.After(now) {
+		return store.ErrInvalid
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if until, ok := s.asserts[hash]; ok && now.Before(until) {
+		return store.ErrConsumed
+	}
+	s.asserts[hash] = expiresAt
 	return nil
 }
 
@@ -316,9 +332,11 @@ func (s *Store) Collect(_ context.Context, now time.Time) error {
 			delete(s.consents, k)
 		}
 	}
-	for h, until := range s.logins {
-		if !now.Before(until) {
-			delete(s.logins, h)
+	for _, spent := range []map[[sha256.Size]byte]time.Time{s.logins, s.asserts} {
+		for h, until := range spent {
+			if !now.Before(until) {
+				delete(spent, h)
+			}
 		}
 	}
 	unused := now.Add(-store.UnusedClientLifetime)

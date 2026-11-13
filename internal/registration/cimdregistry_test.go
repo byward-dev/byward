@@ -19,6 +19,7 @@ import (
 	"github.com/go-jose/go-jose/v4"
 
 	"github.com/byward-dev/byward/internal/ssrfguard"
+	"github.com/byward-dev/byward/internal/store/memory"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
@@ -80,7 +81,7 @@ func transient() reply {
 func gone() reply       { return reply{err: &ssrfguard.StatusError{Code: http.StatusNotFound}} }
 func invalidDoc() reply { return reply{body: []byte(`{"client_id":"https://other.example/x"}`)} }
 func newReg(f *fakeFetch, c *clock, trusted, allowed []string) *CIMDRegistry {
-	return NewCIMDRegistry(CIMDConfig{Fetch: f, TrustedHosts: trusted, AllowedHosts: allowed, JTI: NewMemoryJTICache(c.now, 10), Now: c.now})
+	return NewCIMDRegistry(CIMDConfig{Fetch: f, TrustedHosts: trusted, AllowedHosts: allowed, JTI: NewStoreJTICache(memory.New(), c.now), Now: c.now})
 }
 
 // step is one lookup after advancing the clock: whether it fetches and what it answers.
@@ -230,7 +231,7 @@ func TestNonCIMDAndInvalidIDsAreNotFetched(t *testing.T) {
 func TestChainAsksStaticClientsFirst(t *testing.T) {
 	// A static client may use a URL as its ID; the static registry answers without a fetch.
 	static, err := LoadStatic("/c.json", files{"/c.json": `{"clients":[{"client_id":"` + cimdID + `","client_name":"Static","token_endpoint_auth_method":"none","redirect_uris":["https://a.example/cb"]},
-		{"client_id":"static-app","token_endpoint_auth_method":"none","redirect_uris":["https://a.example/cb"]}]}`}.read, NewMemoryJTICache(time.Now, 1))
+		{"client_id":"static-app","token_endpoint_auth_method":"none","redirect_uris":["https://a.example/cb"]}]}`}.read, NewStoreJTICache(memory.New(), time.Now))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -568,7 +569,7 @@ func docIDs(f *fakeFetch, n int, cache string) []string {
 func newObservedReg(f *fakeFetch, c *clock) (r *CIMDRegistry, outcomes func() []string) {
 	var mu sync.Mutex
 	var got []string
-	r = NewCIMDRegistry(CIMDConfig{Fetch: f, JTI: NewMemoryJTICache(c.now, 10), Now: c.now,
+	r = NewCIMDRegistry(CIMDConfig{Fetch: f, JTI: NewStoreJTICache(memory.New(), c.now), Now: c.now,
 		Observe: func(o string) { mu.Lock(); got = append(got, o); mu.Unlock() }})
 	return r, func() []string { mu.Lock(); defer mu.Unlock(); return slices.Clone(got) }
 }

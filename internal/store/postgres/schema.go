@@ -107,6 +107,13 @@ var migrations = []string{
 		expires_at timestamptz NOT NULL
 	);
 	CREATE INDEX spent_logins_expires ON spent_logins (expires_at);`,
+
+	// v2: spent client assertions (#227). hash is SHA-256 of the client ID, 0x00 and the jti.
+	`CREATE TABLE spent_assertions (
+		hash       bytea PRIMARY KEY,
+		expires_at timestamptz NOT NULL
+	);
+	CREATE INDEX spent_assertions_expires ON spent_assertions (expires_at);`,
 }
 
 // schemaVersion is the schema this binary writes.

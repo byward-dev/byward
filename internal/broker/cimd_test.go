@@ -14,6 +14,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/ssrfguard"
+	"github.com/byward-dev/byward/internal/store/memory"
 	"github.com/byward-dev/byward/internal/testutil/clientdocs"
 )
 
@@ -22,7 +23,7 @@ func withCIMD(srv *clientdocs.Server, trusted ...string) func(*Config) {
 	return func(c *Config) {
 		guard := ssrfguard.New(ssrfguard.Config{RootCAs: srv.RootCAs, Dial: srv.Dial})
 		c.Clients = registration.Chain{c.Clients, registration.NewCIMDRegistry(registration.CIMDConfig{Fetch: guard,
-			KeysClient: guard.HTTPClient(), TrustedHosts: trusted, JTI: registration.NewMemoryJTICache(time.Now, 10), Now: time.Now})}
+			KeysClient: guard.HTTPClient(), TrustedHosts: trusted, JTI: registration.NewStoreJTICache(memory.New(), time.Now), Now: time.Now})}
 		c.CIMD = true
 	}
 }

@@ -18,7 +18,7 @@ import (
 )
 
 func newDCR(st store.Clients, now func() time.Time, max int) *DCRRegistry {
-	return NewDCRRegistry(DCRConfig{Store: st, JTI: NewMemoryJTICache(now, 10), Now: now, Scopes: []string{"mcp", "offline_access"}, Max: max})
+	return NewDCRRegistry(DCRConfig{Store: st, JTI: NewStoreJTICache(memory.New(), now), Now: now, Scopes: []string{"mcp", "offline_access"}, Max: max})
 }
 
 func response(t *testing.T, r *Registered) map[string]any {
@@ -238,7 +238,7 @@ func TestRegistrationsSlideAndExpire(t *testing.T) {
 func TestADeniedRedirectHostRefusesTheWholeRegistration(t *testing.T) {
 	deny, _ := NewDenylist([]string{"app.example"})
 	c := newClock()
-	r := NewDCRRegistry(DCRConfig{Store: memory.New(), JTI: NewMemoryJTICache(c.now, 10), Now: c.now, Deny: deny})
+	r := NewDCRRegistry(DCRConfig{Store: memory.New(), JTI: NewStoreJTICache(memory.New(), c.now), Now: c.now, Deny: deny})
 	_, err := r.Register(context.Background(), []byte(`{"client_name":"App","redirect_uris":["https://ok.example/cb","https://app.example/cb?code=leak"]}`))
 	if !errors.Is(err, ErrInvalidRedirectURI) || !strings.Contains(err.Error(), "https://app.example/cb returns to a host on the operator's denylist") || strings.Contains(err.Error(), "leak") {
 		t.Fatalf("err = %v", err)

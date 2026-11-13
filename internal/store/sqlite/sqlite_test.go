@@ -474,21 +474,35 @@ func TestCorruptCounterFileFailsOpen(t *testing.T) {
 }
 
 // Collect drops spent logins once they expire.
-func TestCollectDropsExpiredSpentLogins(t *testing.T) {
-	s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
-	now := fixtureCreated
-	must(t, s.SpendLogin(ctx, sha256.Sum256([]byte("l")), now, now.Add(time.Minute)))
-	count := func() (n int) {
-		must(t, s.db.QueryRow("SELECT count(*) FROM spent_logins").Scan(&n))
-		return n
-	}
-	must(t, s.Collect(ctx, now.Add(30*time.Second)))
-	if n := count(); n != 1 {
-		t.Fatalf("before expiry: %d spent logins, want 1", n)
-	}
-	must(t, s.Collect(ctx, now.Add(time.Minute)))
-	if n := count(); n != 0 {
-		t.Fatalf("at expiry: %d spent logins, want 0", n)
+// An expired spent login or assertion already counts as absent, so storetest cannot see it
+// collected: the row count shows it.
+func TestCollectDropsExpiredSpentRecords(t *testing.T) {
+	for _, tc := range []struct {
+		table string
+		spend func(*Store, [sha256.Size]byte, time.Time, time.Time) error
+	}{
+		{"spent_logins", func(s *Store, h [sha256.Size]byte, now, exp time.Time) error { return s.SpendLogin(ctx, h, now, exp) }},
+		{"spent_assertions", func(s *Store, h [sha256.Size]byte, now, exp time.Time) error {
+			return s.SpendAssertion(ctx, h, now, exp)
+		}},
+	} {
+		t.Run(tc.table, func(t *testing.T) {
+			s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
+			now := fixtureCreated
+			must(t, tc.spend(s, sha256.Sum256([]byte("x")), now, now.Add(time.Minute)))
+			count := func() (n int) {
+				must(t, s.db.QueryRow("SELECT count(*) FROM "+tc.table).Scan(&n))
+				return n
+			}
+			must(t, s.Collect(ctx, now.Add(30*time.Second)))
+			if n := count(); n != 1 {
+				t.Fatalf("before expiry: %d rows, want 1", n)
+			}
+			must(t, s.Collect(ctx, now.Add(time.Minute)))
+			if n := count(); n != 0 {
+				t.Fatalf("at expiry: %d rows, want 0", n)
+			}
+		})
 	}
 }
 
@@ -579,6 +593,11 @@ func TestFixturesMigrateToTheCurrentSchemaKeepingTheirData(t *testing.T) {
 			if v >= 6 { // the spent login still refuses a second use
 				if err := s.SpendLogin(ctx, sha256.Sum256([]byte("fixture-login")), fixtureCreated, fixtureExpires); !errors.Is(err, store.ErrConsumed) {
 					t.Fatalf("spending the fixture login: %v, want ErrConsumed", err)
+				}
+			}
+			if v >= 7 { // the spent client assertion still refuses a second use
+				if err := s.SpendAssertion(ctx, sha256.Sum256([]byte("fixture-assertion")), fixtureCreated, fixtureExpires); !errors.Is(err, store.ErrConsumed) {
+					t.Fatalf("spending the fixture assertion: %v, want ErrConsumed", err)
 				}
 			}
 		})
