@@ -13,6 +13,7 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
 	"github.com/byward-dev/byward/internal/envproxy"
+	"github.com/byward-dev/byward/internal/store/postgres"
 	"github.com/byward-dev/byward/internal/store/sqlite"
 )
 
@@ -53,10 +54,11 @@ func CheckOffline(cfg *config.Config) ([]Warning, error) {
 	if err := parts.idp.refusal(time.Now()); err != nil {
 		return nil, err
 	}
-	if err := checkStorePaths(cfg); err != nil {
+	storeWarnings, err := checkStore(cfg)
+	if err != nil {
 		return nil, err
 	}
-	return append(append(append(parts.warnings, parts.idp.timedWarnings(time.Now())...), offlineHop(cfg)...), redundantStrips(cfg)...), nil
+	return append(append(append(append(parts.warnings, storeWarnings...), parts.idp.timedWarnings(time.Now())...), offlineHop(cfg)...), redundantStrips(cfg)...), nil
 }
 
 // offlineHop is the plain-http upstream warning without the network: only an upstream given as an
@@ -68,6 +70,24 @@ func offlineHop(cfg *config.Config) []Warning {
 	}
 	return []Warning{w}
 }
+
+// checkStore checks the configured store without opening it: the PostgreSQL DSN as Open would
+// parse it, with what several replicas need, or the SQLite paths.
+func checkStore(cfg *config.Config) ([]Warning, error) {
+	if cfg.StorePostgresDSN == "" {
+		return nil, checkStorePaths(cfg)
+	}
+	if err := postgres.CheckDSN(cfg.StorePostgresDSN, cfg.Dev); err != nil {
+		return nil, fmt.Errorf("BYWARD_STORE_POSTGRES_DSN_FILE: %w (see docs/how-to/postgres.md)", err)
+	}
+	return []Warning{replicaKeys}, nil
+}
+
+// replicaKeys is what the PostgreSQL store implies for every replica (ADR-0007 §5 and its #227
+// amendment): the keys are not in the store, so each replica needs the same ones.
+var replicaKeys = Warning{Setting: "BYWARD_STORE_POSTGRES_DSN_FILE",
+	Message: "the PostgreSQL store serves several replicas, and keys never live in the store: a token sealed or an assertion signed by one replica is refused by another without the same keys; the per-address rate limits apply per replica",
+	Fix:     "give every replica the same BYWARD_KEYS_DIR and BYWARD_ASSERTION_KEYS_DIR contents (docs/how-to/postgres.md)"}
 
 // checkStorePaths is sqlite.CheckPaths with the settings named, as openStore names them.
 func checkStorePaths(cfg *config.Config) error {

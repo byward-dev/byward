@@ -19,7 +19,6 @@ import (
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/ssrfguard"
-	"github.com/byward-dev/byward/internal/store/sqlite"
 	"github.com/byward-dev/byward/internal/token"
 )
 
@@ -127,7 +126,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	}
 	v := resource.Dispatch(token.Prefix, sealed, app)
 	log.Info("broker ready", "reason", "keys "+fmt.Sprint(len(ring.KeyIDs()))+", signing with "+ring.SigningKeyID()+"")
-	a := &auth{register: b.Register, validator: v, checks: readiness(ring, st), background: func(ctx context.Context) { runBackground(ctx, st, deny, log) }, closeStore: st.Close,
+	a := &auth{register: b.Register, validator: v, checks: readiness(ring, st), background: func(ctx context.Context) { runBackground(ctx, st, deny, log, restoreWatch(st, log, o.Audit)) }, closeStore: st.Close,
 		sessions: func(next http.Handler) http.Handler {
 			return mcpsession.Bind(mcpsession.Config{Box: parts.sessionBox, Upstream: upstreamID(cfg), User: signedInUser,
 				Lifetime: broker.GrantLifetime, Audit: o.Audit, Log: log}, next)
@@ -147,7 +146,7 @@ type wiring struct {
 	log    *slog.Logger
 	o      Observability
 	parts  *authParts
-	store  *sqlite.Store
+	store  openedStore
 	guard  *ssrfguard.Fetcher
 	broker *broker.Broker // set once the broker is built, before authFeatures run
 }

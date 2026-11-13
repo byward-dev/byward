@@ -26,12 +26,18 @@ import (
 // #227): the replay cache lives in the store, not in each process, so a second replica refuses an
 // assertion the first one accepted.
 func TestAClientAssertionAcceptedByOneReplicaIsAReplayOnAnother(t *testing.T) {
+	replayIsRefusedAcrossReplicas(t, gateEnv(t))
+}
+
+// replayIsRefusedAcrossReplicas wires two servers on env's store, with a private_key_jwt client in
+// env's static clients file, and checks that an assertion one accepted is a replay on the other.
+func replayIsRefusedAcrossReplicas(t *testing.T, env []string) {
+	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	jwks, _ := json.Marshal(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: "k1", Algorithm: "ES256", Use: "sig"}}})
-	env := gateEnv(t)
 	clientsFile := ""
 	for _, kv := range env {
 		if v, ok := strings.CutPrefix(kv, "BYWARD_STATIC_CLIENTS_FILE="); ok {

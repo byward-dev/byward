@@ -23,7 +23,7 @@ const (
 
 // RevokeUser is the operator's revoke-user (ADR-0006 §9, ADR-0010 §11): it deletes the user's grants
 // and records a cut-off, so every proxy using the same store refuses the user's access tokens at
-// its next deny-list sync and their refresh tokens at once. It runs beside a running proxy (SQLite
+// its next deny-list sync and their refresh tokens at once. It runs beside a running proxy (the store
 // serializes the writers). It returns the canonical user key it revoked.
 func RevokeUser(ctx context.Context, cfg *config.Config, log *slog.Logger, key string) (string, error) {
 	ip, err := newIdentityProvider(cfg, nil) // settings only; nothing is fetched

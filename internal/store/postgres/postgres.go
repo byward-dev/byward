@@ -35,6 +35,7 @@ type Options struct {
 // Store is the PostgreSQL adapter.
 type Store struct {
 	pool *pgxpool.Pool
+	mark mark // this replica's view of store_writes and the epoch, for restore detection
 }
 
 var _ store.Store = (*Store)(nil)
@@ -54,7 +55,14 @@ func Open(ctx context.Context, opts Options) (*Store, error) {
 		pool.Close()
 		return nil, err
 	}
-	return &Store{pool: pool}, nil
+	s := &Store{pool: pool}
+	// The epoch at Open is the first one this replica has seen: a restore found by its first check
+	// starts a new epoch, unless another replica already has.
+	if err := pool.QueryRow(ctx, epochSQL).Scan(&s.mark.epoch); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("postgres store: epoch: %w", err)
+	}
+	return s, nil
 }
 
 // Ping checks that the database answers, for the readiness probe (ADR-0021 §10).
@@ -63,6 +71,19 @@ func (s *Store) Ping(ctx context.Context) error {
 		return fmt.Errorf("postgres store: ping: %w", err)
 	}
 	return nil
+}
+
+// Describe names the database for the startup log: host, port, database and TLS, never the DSN.
+func (s *Store) Describe() string {
+	c := s.pool.Config().ConnConfig
+	tls := "verify-full"
+	switch {
+	case c.TLSConfig == nil:
+		tls = "off"
+	case c.TLSConfig.InsecureSkipVerify:
+		tls = "unverified"
+	}
+	return fmt.Sprintf("host=%s port=%d dbname=%s tls=%s", c.Host, c.Port, c.Database, tls)
 }
 
 // Close closes the pool, waiting for connections in use to be returned.

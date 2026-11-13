@@ -30,6 +30,10 @@ var commands = map[string]command{
 		usage: "byward revoke-all --yes\n      end every user's access at once (incident response); works while the proxy runs",
 		run:   revokeAll,
 	},
+	"store": {
+		usage: "byward store new-epoch --yes\n      after restoring the PostgreSQL store (pg_restore, point-in-time recovery): start a new epoch, so refresh tokens\n      from before it stop working and their users sign in again; works while the proxy runs",
+		run:   storeCommand,
+	},
 	"check": {
 		usage: "byward check --offline [-- stdio-upstream-command [args...]]\n      validate the configuration, keys and static clients without network access; exit 0 or 2",
 		run:   checkOffline,
@@ -128,5 +132,28 @@ func revokeAll(ctx context.Context, args, environ []string, stdout, stderr io.Wr
 		return exitRuntime
 	}
 	_, _ = fmt.Fprintln(stdout, "revoked every user: their grants are gone and their tokens stop working within seconds")
+	return exitOK
+}
+
+// storeCommand is `store new-epoch --yes` (ADR-0007 §9); --yes, because users sign in again.
+func storeCommand(ctx context.Context, args, environ []string, stdout, stderr io.Writer) int {
+	if !slices.Equal(args, []string{"new-epoch", "--yes"}) {
+		_, _ = fmt.Fprintln(stderr, "byward: usage: byward store new-epoch --yes (refresh tokens from before it stop working)")
+		return exitConfig
+	}
+	cfg, ok := operatorLoad(nil, environ, stderr)
+	if !ok {
+		return exitConfig
+	}
+	epoch, err := server.NewEpoch(ctx, cfg, logging.New(stderr, cfg.LogFormat))
+	switch {
+	case errors.Is(err, server.ErrNewEpochNeedsPostgres):
+		_, _ = fmt.Fprintf(stderr, "byward: store new-epoch: %v\n", err)
+		return exitConfig
+	case err != nil:
+		_, _ = fmt.Fprintf(stderr, "byward: store new-epoch failed: %v\n", err)
+		return exitRuntime
+	}
+	_, _ = fmt.Fprintf(stdout, "started store epoch %d: refresh tokens from before it stop working, and their users sign in again\n", epoch)
 	return exitOK
 }

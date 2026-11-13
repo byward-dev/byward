@@ -26,7 +26,6 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/store"
-	"github.com/byward-dev/byward/internal/store/sqlite"
 	"github.com/byward-dev/byward/internal/testutil/assertionkey"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
@@ -374,10 +373,10 @@ func TestAStdioUpstreamStartsWithoutAssertionKeysAndServesNoJWKS(t *testing.T) {
 
 // The store is opened before the upstream is built, so a failing upstream must close it again.
 func TestAnUpstreamThatFailsToStartClosesTheStore(t *testing.T) {
-	var st *sqlite.Store
+	var st openedStore
 	orig := wireStore
 	t.Cleanup(func() { wireStore = orig })
-	wireStore = func(cfg *config.Config, log *slog.Logger, rec *audit.Log) (*sqlite.Store, error) {
+	wireStore = func(cfg *config.Config, log *slog.Logger, rec *audit.Log) (openedStore, error) {
 		s, err := orig(cfg, log, rec)
 		st = s
 		return s, err
