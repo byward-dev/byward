@@ -93,9 +93,9 @@ func TestAProcessAsksItsSocketForAFreshTokenEachTimeWithoutARestart(t *testing.T
 	h := tokenHarness(t, k)
 	p := h.get(t, "a1", alice)
 	for _, want := range []string{"tok-1", "tok-2"} {
-		tok, expires, code := answerOf(t, call(t, p, "token"))
-		if tok != want || expires != "2026-11-08T13:00:00Z" || code != "" {
-			t.Fatalf("answer token %q, expires %q, error %q; want %s expiring 2026-11-08T13:00:00Z", tok, expires, code, want)
+		// The exact line: a client may test for the error key alone (the documented Python one does).
+		if line, wantLine := call(t, p, "token"), `{"access_token":"`+want+`","expires_at":"2026-11-08T13:00:00Z"}`; line != wantLine {
+			t.Fatalf("answer %s, want %s", line, wantLine)
 		}
 	}
 	if isDone(p) {
@@ -128,7 +128,7 @@ func TestAnErrorFromTheTokenSourceIsTheAnswerAndNoTokenIsSent(t *testing.T) {
 	k := &tokens{err: "consent_required"}
 	h := tokenHarness(t, k)
 	line := call(t, h.get(t, "a1", alice), "token")
-	if tok, _, code := answerOf(t, line); tok != "" || code != "consent_required" || strings.Contains(line, "access_token") {
+	if line != `{"error":"consent_required"}` {
 		t.Fatalf("answer %q, want only the error consent_required", line)
 	}
 }
