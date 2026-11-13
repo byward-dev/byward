@@ -60,6 +60,10 @@ jobs:
           install_args: go goreleaser syft jq go:github.com/google/go-licenses/v2
       # Same buildx driver (docker-container) as release.yml, so the snapshot builds images the same way.
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # The runner is amd64: QEMU runs the arm64 image, so release:smoke checks both (#311).
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
       - run: mise run release:smoke
         env:
           MISE_TASK_RUN_AUTO_INSTALL: "false"
