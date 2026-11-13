@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 
 	"golang.org/x/net/http/httpproxy"
 )
@@ -32,18 +33,19 @@ func Malformed(via *url.URL) bool {
 }
 
 // SettingMisread reports whether a proxy setting the environment holds (HTTPS_PROXY or HTTP_PROXY,
-// in either case) is one Go misreads, whatever NO_PROXY says. It judges the setting, not a request:
-// for a client whose targets byward cannot name in advance, such as trace export, whose grpc
-// endpoint can be any gRPC target.
-func SettingMisread() bool { return settingMisread(*httpproxy.FromEnvironment()) }
-
-// settingMisread is SettingMisread over cfg, read as Go reads it (Go vendors this httpproxy).
-func settingMisread(cfg httpproxy.Config) bool {
-	cfg.NoProxy, cfg.CGI = "", false // the setting itself, wherever a request goes
-	proxy := cfg.ProxyFunc()
-	for _, scheme := range []string{"http", "https"} {
-		if via, err := proxy(&url.URL{Scheme: scheme, Host: "proxied.invalid"}); err == nil && Malformed(via) {
-			return true
+// in either case) is one Go misreads and would use, whatever NO_PROXY says. It judges the setting,
+// not a request: for a client whose targets byward cannot name in advance, such as trace export,
+// whose grpc endpoint can be any gRPC target. Each spelling is judged on its own, so which one Go
+// prefers when both are set can only make this redact more. A setting Go ignores (one it cannot
+// parse, HTTP_PROXY under CGI) is not misread.
+func SettingMisread() bool {
+	for _, names := range [][2]string{{"HTTP_PROXY", "HTTPS_PROXY"}, {"http_proxy", "https_proxy"}} {
+		cfg := httpproxy.Config{HTTPProxy: os.Getenv(names[0]), HTTPSProxy: os.Getenv(names[1]), CGI: os.Getenv("REQUEST_METHOD") != ""}
+		proxy := cfg.ProxyFunc() // no NoProxy: the setting itself, whichever hosts NO_PROXY keeps off it
+		for _, scheme := range []string{"http", "https"} {
+			if via, err := proxy(&url.URL{Scheme: scheme, Host: "proxied.invalid"}); err == nil && Malformed(via) {
+				return true
+			}
 		}
 	}
 	return false

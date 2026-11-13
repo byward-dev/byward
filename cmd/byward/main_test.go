@@ -124,8 +124,8 @@ func TestRunStopsOnCancelledContext(t *testing.T) {
 // With tracing on, OpenTelemetry's errors reach the proxy's own log at warn level, not stderr as they
 // are: run hands its logger to the tracing setup.
 func TestATracingErrorReachesTheLogAtWarnLevel(t *testing.T) {
-	for _, kv := range os.Environ() { // autoexport reads the process environment: a developer's OTEL_* too
-		if k, _, _ := strings.Cut(kv, "="); strings.HasPrefix(k, "OTEL_") {
+	for _, kv := range os.Environ() { // autoexport and the proxy judgment read the process environment: a developer's settings too
+		if k, _, _ := strings.Cut(kv, "="); strings.HasPrefix(k, "OTEL_") || strings.HasSuffix(strings.ToUpper(k), "_PROXY") {
 			t.Setenv(k, "")
 		}
 	}

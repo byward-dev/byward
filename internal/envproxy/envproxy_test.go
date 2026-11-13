@@ -297,27 +297,34 @@ func TestAClientTimeoutThroughRedactWithNoProxyIsStillATimeout(t *testing.T) {
 	}
 }
 
-// A proxy setting is judged as Go reads it, for either scheme and whatever NO_PROXY says: a
-// request to a host NO_PROXY exempts sends nothing through it, but a client whose targets cannot be
-// named in advance may still reach one that it does not exempt.
-func TestSettingMisreadJudgesEachSettingWhateverNoProxySays(t *testing.T) {
+// A proxy setting is judged as Go reads it, for either scheme, in each case whichever Go prefers, and
+// whatever NO_PROXY says: a client whose targets cannot be named in advance may reach a host NO_PROXY
+// does not list. A setting Go ignores is not misread.
+func TestSettingMisreadJudgesEachSettingGoWouldUseWhateverNoProxySays(t *testing.T) {
 	const misread, wellFormed = "127.0.0.1:1/pw-secret@egress.example:3128", "http://egress.example:3128"
 	for _, tc := range []struct {
 		name string
-		cfg  httpproxy.Config
+		env  map[string]string // the rest of the proxy variables are cleared
 		want bool
 	}{
-		{"no setting", httpproxy.Config{}, false},
-		{"a misread HTTP_PROXY", httpproxy.Config{HTTPProxy: misread}, true},
-		{"a misread HTTPS_PROXY alone", httpproxy.Config{HTTPProxy: wellFormed, HTTPSProxy: misread}, true},
-		{"well-formed settings", httpproxy.Config{HTTPProxy: wellFormed, HTTPSProxy: wellFormed}, false},
-		{"a misread setting NO_PROXY exempts every host from", httpproxy.Config{HTTPSProxy: misread, NoProxy: "*"}, true},
-		{"a misread setting Go ignores under CGI", httpproxy.Config{HTTPProxy: misread, CGI: true}, true},
-		{"a setting Go cannot parse, so ignores", httpproxy.Config{HTTPProxy: "http://pw%zz@egress.example:3128"}, false},
+		{"no setting", nil, false},
+		{"a misread HTTP_PROXY", map[string]string{"HTTP_PROXY": misread}, true},
+		{"a misread HTTPS_PROXY beside a well-formed HTTP_PROXY", map[string]string{"HTTP_PROXY": wellFormed, "HTTPS_PROXY": misread}, true},
+		{"a misread https_proxy in lower case", map[string]string{"https_proxy": misread}, true},
+		{"a misread HTTPS_PROXY beside a well-formed https_proxy", map[string]string{"HTTPS_PROXY": misread, "https_proxy": wellFormed}, true},
+		{"a misread https_proxy beside a well-formed HTTPS_PROXY", map[string]string{"HTTPS_PROXY": wellFormed, "https_proxy": misread}, true},
+		{"well-formed settings", map[string]string{"HTTP_PROXY": wellFormed, "HTTPS_PROXY": wellFormed}, false},
+		{"a misread setting NO_PROXY keeps some hosts off", map[string]string{"HTTPS_PROXY": misread, "NO_PROXY": ".invalid,.internal"}, true},
+		{"a misread HTTPS_PROXY under CGI, which Go still uses", map[string]string{"HTTPS_PROXY": misread, "REQUEST_METHOD": "GET"}, true},
+		{"a misread HTTP_PROXY under CGI, which Go ignores", map[string]string{"HTTP_PROXY": misread, "REQUEST_METHOD": "GET"}, false},
+		{"a setting Go cannot parse, so ignores", map[string]string{"HTTP_PROXY": "http://pw%zz@egress.example:3128"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := settingMisread(tc.cfg); got != tc.want {
-				t.Fatalf("settingMisread(%+v) = %v; want %v", tc.cfg, got, tc.want)
+			for _, k := range []string{"HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy", "REQUEST_METHOD"} {
+				t.Setenv(k, tc.env[k])
+			}
+			if got := SettingMisread(); got != tc.want {
+				t.Fatalf("SettingMisread() with %v = %v; want %v", tc.env, got, tc.want)
 			}
 		})
 	}
