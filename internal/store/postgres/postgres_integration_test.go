@@ -161,8 +161,9 @@ func migrationsRunOneAtATime(t *testing.T, srv *server) {
 	_, err := holder.Exec(ctx, "SELECT pg_advisory_lock($1)", migrateLock)
 	must(t, err)
 	done := make(chan error, 1)
+	openCtx := bounded(t)
 	go func() {
-		s, err := Open(bounded(t), Options{DSN: srv.dsn(db)})
+		s, err := Open(openCtx, Options{DSN: srv.dsn(db)})
 		if err == nil {
 			_ = s.Close()
 		}

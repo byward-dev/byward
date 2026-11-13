@@ -26,7 +26,8 @@ func (s *Store) write(ctx context.Context, fn func(pgx.Tx) error) error {
 	return s.inTx(ctx, pgx.Serializable, fn)
 }
 
-// inTx runs fn in one transaction at iso, retried as write says.
+// inTx runs fn in one transaction at iso that also takes a value from store_writes, retried as
+// write says.
 func (s *Store) inTx(ctx context.Context, iso pgx.TxIsoLevel, fn func(pgx.Tx) error) error {
 	return retryLostRaces(ctx, func() error { return s.once(ctx, iso, fn) })
 }
@@ -42,6 +43,9 @@ func retryLostRaces(ctx context.Context, attempt func() error) error {
 		}
 		if n == maxAttempts {
 			return fmt.Errorf("postgres store: still conflicting after %d attempts: %w", n, err)
+		}
+		if ctx.Err() != nil { // checked first: a select with a timer that has also fired picks either
+			return fmt.Errorf("postgres store: %w (after %v)", ctx.Err(), err)
 		}
 		wait := time.Duration(rand.Int64N(int64(min(time.Millisecond<<min(n, 7), 100*time.Millisecond)))) //nolint:gosec // G404: jitter, not a secret
 		select {
