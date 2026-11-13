@@ -85,7 +85,10 @@ an answer it can show the user, as for an [upstream refusal](../adr/0025-upstrea
 - a tool call returns a tool error;
 - any other request gets a JSON-RPC error with `data.downstream` set to the reason.
 
-Nothing reaches the upstream.
+Nothing reaches the upstream. byward gets the token before every request, `initialize` included, so
+while a reason lasts the client cannot open a session at all: its first request, `initialize`, gets
+the JSON-RPC error. Some clients show only that they failed to connect. Look in byward's error log for
+the reason; for `consent_required`, the line carries the admin-consent URL.
 
 | Reason | Cause | What to do |
 |---|---|---|
