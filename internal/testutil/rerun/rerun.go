@@ -5,9 +5,11 @@ package rerun
 import (
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/byward-dev/byward/internal/envproxy"
 	"github.com/byward-dev/byward/internal/testutil/closedport"
 )
 
@@ -59,4 +61,23 @@ func EachProxySetting(t *testing.T, name string, check func(t *testing.T, out, a
 	} {
 		t.Run(tc.name, func(t *testing.T) { check(t, Run(t, name, ProxyEnv(tc.setting)...), addr, tc.misread) })
 	}
+}
+
+// CauseOnlyIfMisread fails t unless the child's output out names envproxy.Cause and never addr when
+// the setting was misread, and quotes addr without the cause when it was well-formed.
+func CauseOnlyIfMisread(t *testing.T, out, addr string, misread bool) {
+	t.Helper()
+	if strings.Contains(out, addr) == misread || strings.Contains(out, envproxy.Cause) != misread {
+		t.Fatalf("child output %q; misread %v", out, misread)
+	}
+}
+
+// CallFailedWithCauseOnlyIfMisread is the check for a child that prints its call's error as ERR=:
+// the call failed, and its error says CauseOnlyIfMisread.
+func CallFailedWithCauseOnlyIfMisread(t *testing.T, out, addr string, misread bool) {
+	t.Helper()
+	if !strings.Contains(out, "ERR=") || strings.Contains(out, "ERR=<nil>") {
+		t.Fatalf("child output %q; want the call to fail", out)
+	}
+	CauseOnlyIfMisread(t, out, addr, misread)
 }

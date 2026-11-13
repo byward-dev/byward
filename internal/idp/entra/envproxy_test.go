@@ -37,6 +37,7 @@ func TestARefreshThroughAMisreadProxySettingStaysUnavailableAndRedactionKeepsIts
 			if err != nil {
 				t.Fatal(err)
 			}
+			p.fetch.Backoff = 0 // retries are idp's to test; here they would only add wall time
 			_, _, err = p.Refresh(context.Background(), "refresh-token")
 			if err == nil || idp.ClassOf(err) != idp.Unavailable {
 				t.Fatalf("err %v, class %v; want an Unavailable error", err, idp.ClassOf(err))

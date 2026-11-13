@@ -187,21 +187,26 @@ func TestMalformedJudgesTheProxyGoRead(t *testing.T) {
 // a whole body reads as sent and one cut short ends in io.ErrUnexpectedEOF, which quotes nothing.
 // Through a well-formed setting the read error is the transport's own and quotes that address.
 func TestABodyReadThroughAMisreadProxySettingNeverQuotesItsAddressAndOtherwiseEndsAsSent(t *testing.T) {
+	type ending int
+	const (
+		reset ending = iota // the proxy resets mid-body: a read error that names the addresses
+		whole               // the proxy sends the whole body: it reads as sent, with no error
+		short               // the proxy closes early without a reset: io.ErrUnexpectedEOF, passed through
+	)
 	misread := func(addr string) string { return addr + "/pw-secret@egress.example:3128" }
 	for _, tc := range []struct {
-		name     string
-		setting  func(addr string) string
-		misread  bool
-		complete bool // the proxy sends the whole body: it reads as sent, with no error
-		short    bool // the proxy closes early without a reset: io.ErrUnexpectedEOF, passed through
+		name    string
+		setting func(addr string) string
+		misread bool
+		end     ending
 	}{
-		{"a reset through a misread setting never quotes the address", misread, true, false, false},
-		{"a whole body through a misread setting reads as sent", misread, true, true, false},
-		{"a body cut short through a misread setting ends in io.ErrUnexpectedEOF", misread, true, false, true},
-		{"a well-formed setting's read error is its own", func(addr string) string { return "http://" + addr }, false, false, false},
+		{"a reset through a misread setting never quotes the address", misread, true, reset},
+		{"a whole body through a misread setting reads as sent", misread, true, whole},
+		{"a body cut short through a misread setting ends in io.ErrUnexpectedEOF", misread, true, short},
+		{"a well-formed setting's read error is its own", func(addr string) string { return "http://" + addr }, false, reset},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ln, err := net.Listen("tcp", "127.0.0.1:0") // the "proxy" Go dials: it answers, then resets mid-body
+			ln, err := net.Listen("tcp", "127.0.0.1:0") // the "proxy" Go dials: it answers, then ends the body as the row says
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -212,14 +217,14 @@ func TestABodyReadThroughAMisreadProxySettingNeverQuotesItsAddressAndOtherwiseEn
 					return
 				}
 				_, _ = http.ReadRequest(bufio.NewReader(c))
-				if tc.complete || tc.short {
-					length := map[bool]string{true: "7", false: "1000"}[tc.complete]
-					_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Length: "+length+"\r\n\r\npartial")
-					_ = c.Close()
-					return
+				length := "1000"
+				if tc.end == whole {
+					length = "7"
 				}
-				_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\npartial")
-				_ = c.(*net.TCPConn).SetLinger(0) // close with a reset, so the read error names the addresses
+				_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Length: "+length+"\r\n\r\npartial")
+				if tc.end == reset {
+					_ = c.(*net.TCPConn).SetLinger(0) // close with a reset, so the read error names the addresses
+				}
 				_ = c.Close()
 			}()
 			addr := ln.Addr().String()
@@ -229,37 +234,51 @@ func TestABodyReadThroughAMisreadProxySettingNeverQuotesItsAddressAndOtherwiseEn
 			}
 			body, err := io.ReadAll(res.Body)
 			_ = res.Body.Close()
-			if tc.complete {
+			switch tc.end {
+			case whole:
 				if err != nil || string(body) != "partial" {
 					t.Fatalf("body %q, error %v; want the whole body and no error", body, err)
 				}
-				return
-			}
-			if tc.short {
+			case short:
 				if !errors.Is(err, io.ErrUnexpectedEOF) || strings.Contains(chain(err), Cause) || strings.Contains(chain(err), addr) {
 					t.Fatalf("read error %v; want io.ErrUnexpectedEOF, unredacted and with no address", err)
 				}
-				return
-			}
-			if err == nil || strings.Contains(chain(err), addr) == tc.misread || strings.Contains(err.Error(), Cause) != tc.misread {
-				t.Fatalf("read error %v; misread %v", err, tc.misread)
+			case reset:
+				if err == nil || strings.Contains(chain(err), addr) == tc.misread || strings.Contains(err.Error(), Cause) != tc.misread {
+					t.Fatalf("read error %v; misread %v", err, tc.misread)
+				}
 			}
 		})
 	}
 }
 
-// failingClose is a body whose Close fails with an error that quotes the dialled address.
-type failingClose struct{ io.Reader }
+// failingBody is a body whose Read fails with readErr and whose Close fails with closeErr.
+type failingBody struct{ readErr, closeErr error }
 
-func (failingClose) Close() error {
-	return &net.OpError{Op: "close", Net: "tcp", Addr: &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 4711}, Err: errors.New("broken pipe")}
-}
+func (b failingBody) Read([]byte) (int, error) { return 0, b.readErr }
+func (b failingBody) Close() error             { return b.closeErr }
 
-// A body through a misread proxy setting that fails to close says only the cause.
-func TestABodyThatFailsToCloseThroughAMisreadProxySettingSaysOnlyTheCause(t *testing.T) {
-	err := redactedBody{failingClose{strings.NewReader("")}}.Close()
-	if err == nil || !strings.Contains(err.Error(), Cause) || strings.Contains(chain(err), "4711") {
-		t.Fatalf("close error %v; want the cause alone", err)
+// A body through a misread proxy setting whose read or close fails with an error that quotes the
+// dialled address says only the cause, even when that error wraps an end of body: only the bare
+// io.EOF and io.ErrUnexpectedEOF pass through.
+func TestABodyThatFailsThroughAMisreadProxySettingSaysOnlyTheCause(t *testing.T) {
+	quoting := func(err error) error { return fmt.Errorf("read tcp 127.0.0.1:4711: %w", err) }
+	opErr := &net.OpError{Op: "close", Net: "tcp", Addr: &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 4711}, Err: errors.New("broken pipe")}
+	for _, tc := range []struct {
+		name string
+		do   func(redactedBody) error
+		body failingBody
+	}{
+		{"a read that wraps io.EOF", func(b redactedBody) error { _, err := b.Read(make([]byte, 1)); return err }, failingBody{readErr: quoting(io.EOF)}},
+		{"a read that wraps io.ErrUnexpectedEOF", func(b redactedBody) error { _, err := b.Read(make([]byte, 1)); return err }, failingBody{readErr: quoting(io.ErrUnexpectedEOF)}},
+		{"a close", redactedBody.Close, failingBody{closeErr: opErr}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.do(redactedBody{tc.body})
+			if !errors.As(err, new(*Error)) || strings.Contains(chain(err), "4711") {
+				t.Fatalf("error %v; want the cause alone", err)
+			}
+		})
 	}
 }
 

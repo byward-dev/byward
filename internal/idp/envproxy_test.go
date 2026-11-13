@@ -3,10 +3,8 @@ package idp
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 
-	"github.com/byward-dev/byward/internal/envproxy"
 	"github.com/byward-dev/byward/internal/testutil/rerun"
 )
 
@@ -21,12 +19,5 @@ func TestTheIdPClientNeverQuotesAMisreadEnvironmentProxy(t *testing.T) {
 		fmt.Printf("ERR=%v\n", err)
 		return
 	}
-	rerun.EachProxySetting(t, "TestTheIdPClientNeverQuotesAMisreadEnvironmentProxy", func(t *testing.T, got, addr string, misread bool) {
-		if !strings.Contains(got, "ERR=") || strings.Contains(got, "ERR=<nil>") {
-			t.Fatalf("child output %q; want the IdP call to fail", got)
-		}
-		if strings.Contains(got, addr) == misread || strings.Contains(got, envproxy.Cause) != misread {
-			t.Fatalf("child output %q; misread %v", got, misread)
-		}
-	})
+	rerun.EachProxySetting(t, "TestTheIdPClientNeverQuotesAMisreadEnvironmentProxy", rerun.CallFailedWithCauseOnlyIfMisread)
 }

@@ -3,10 +3,8 @@ package entra
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 
-	"github.com/byward-dev/byward/internal/envproxy"
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/rerun"
@@ -25,12 +23,5 @@ func TestAnEntraProviderWithoutAClientNeverQuotesAMisreadEnvironmentProxy(t *tes
 		fmt.Printf("ERR=%v\n", p.Ready(context.Background()))
 		return
 	}
-	rerun.EachProxySetting(t, "TestAnEntraProviderWithoutAClientNeverQuotesAMisreadEnvironmentProxy", func(t *testing.T, got, addr string, misread bool) {
-		if !strings.Contains(got, "ERR=") || strings.Contains(got, "ERR=<nil>") {
-			t.Fatalf("child output %q; want discovery to fail", got)
-		}
-		if strings.Contains(got, addr) == misread || strings.Contains(got, envproxy.Cause) != misread {
-			t.Fatalf("child output %q; misread %v", got, misread)
-		}
-	})
+	rerun.EachProxySetting(t, "TestAnEntraProviderWithoutAClientNeverQuotesAMisreadEnvironmentProxy", rerun.CallFailedWithCauseOnlyIfMisread)
 }
