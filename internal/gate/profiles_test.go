@@ -125,7 +125,7 @@ func TestEveryIdPGatesOnTheTopLevelRolesAndGroupsByDefault(t *testing.T) {
 		idp     string
 		profile fakeidp.Profile
 		preset  string
-		kind    string
+		gateIdP string
 	}{
 		{"entra", fakeidp.Entra, "", Entra},
 		{"keycloak", fakeidp.Generic, "keycloak", Generic},
@@ -145,7 +145,7 @@ func TestEveryIdPGatesOnTheTopLevelRolesAndGroupsByDefault(t *testing.T) {
 			if !slices.Equal(id.Roles, []string{"MCP.User"}) || !slices.Equal(id.Groups, []string{group}) {
 				t.Fatalf("roles %q, groups %q; want the top-level roles and groups claims only", id.Roles, id.Groups)
 			}
-			o := Options{IdP: tc.kind, Tenant: tid}
+			o := Options{IdP: tc.gateIdP, Tenant: tid}
 			checkDecision(t, mustGate(t, Rules{Roles: []string{"MCP.User"}, Groups: []string{group}}, o).Allow(context.Background(), id), "")
 			checkDecision(t, mustGate(t, Rules{Roles: []string{"Namespaced.Role"}}, o).Allow(context.Background(), id), RuleRole)
 			checkDecision(t, mustGate(t, Rules{Groups: []string{other}}, o).Allow(context.Background(), id), RuleGroup)

@@ -117,9 +117,11 @@ func (c *Config) entraIdP(v *Values) []error {
 	return errs
 }
 
-// protocolClaims are ID token claims about the sign-in itself (RFC 7519 §4.1, OIDC Core §2), never
-// a user's roles or groups.
-var protocolClaims = []string{"iss", "sub", "aud", "azp", "exp", "iat", "nbf", "jti", "nonce", "auth_time", "sid", "at_hash", "c_hash"}
+// protocolClaims are ID token claims about the sign-in itself, never a user's roles or groups: the
+// registered claims of RFC 7519 §4.1 and the ID token claims of OpenID Connect Core 1.0 (§2, §3),
+// plus sid, the session ID an IdP adds for logout. amr is an array of strings, so it would
+// otherwise be read as roles without an error.
+var protocolClaims = []string{"iss", "sub", "aud", "azp", "exp", "iat", "nbf", "jti", "nonce", "auth_time", "acr", "amr", "sid", "at_hash", "c_hash"}
 
 // oidcIdP reads the generic OIDC adapter's settings (ADR-0011 §2).
 func (c *Config) oidcIdP(v *Values) []error {

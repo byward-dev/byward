@@ -95,7 +95,7 @@ func TestAnOIDCIdPWithMissingOrConflictingSettingsRefusesToStart(t *testing.T) {
 		"an empty roles claim":            {with("BYWARD_OIDC_ROLES_CLAIM="), `BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles, got ""`},
 		"a padded roles claim":            {with("BYWARD_OIDC_ROLES_CLAIM= roles"), `BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles, got " roles"`},
 		"aud as the roles claim":          {with("BYWARD_OIDC_ROLES_CLAIM=aud"), `BYWARD_OIDC_ROLES_CLAIM: "aud" is a claim of the sign-in itself`},
-		"sub as the groups claim":         {with("BYWARD_OIDC_GROUPS_CLAIM=sub"), `BYWARD_OIDC_GROUPS_CLAIM: "sub" is a claim of the sign-in itself`},
+		"sub as the groups claim":         {with("BYWARD_OIDC_GROUPS_CLAIM=sub"), `BYWARD_OIDC_GROUPS_CLAIM: "sub" is a claim of the sign-in itself, not roles or groups; name the claim the IdP sends them in, such as https://example.com/groups`},
 		"a roles claim padded at the end": {with("BYWARD_OIDC_ROLES_CLAIM=roles\t"), `BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles, got "roles\t"`},
 		"a blank groups claim":            {with("BYWARD_OIDC_GROUPS_CLAIM= "), `BYWARD_OIDC_GROUPS_CLAIM: want a claim name such as https://example.com/groups, got " "`},
 		"a name too long":                 {with("BYWARD_OIDC_NAME=" + strings.Repeat("n", 81)), "BYWARD_OIDC_NAME"},
@@ -132,17 +132,38 @@ func TestTheRolesAndGroupsClaimsDefaultToRolesAndGroupsForEveryOIDCIdP(t *testin
 	for _, idp := range append([]string{"oidc"}, OIDCPresets...) {
 		t.Run(idp, func(t *testing.T) {
 			c, err := loadOIDC(t, func(env []string) []string { return with("BYWARD_IDP=" + idp)(without("BYWARD_IDP")(env)) })
-			if err != nil || c.OIDCRolesClaim != "roles" || c.OIDCGroupsClaim != "groups" {
-				t.Fatalf("roles claim %q, groups claim %q, err %v; want roles and groups", c.OIDCRolesClaim, c.OIDCGroupsClaim, err)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.OIDCRolesClaim != "roles" || c.OIDCGroupsClaim != "groups" {
+				t.Fatalf("roles claim %q, groups claim %q; want roles and groups", c.OIDCRolesClaim, c.OIDCGroupsClaim)
 			}
 		})
 	}
-	t.Run("named claims", func(t *testing.T) {
-		c, err := loadOIDC(t, with("BYWARD_OIDC_ROLES_CLAIM=https://byward.dev/roles", "BYWARD_OIDC_GROUPS_CLAIM=https://byward.dev/groups"))
-		if err != nil || c.OIDCRolesClaim != "https://byward.dev/roles" || c.OIDCGroupsClaim != "https://byward.dev/groups" {
-			t.Fatalf("roles claim %q, groups claim %q, err %v", c.OIDCRolesClaim, c.OIDCGroupsClaim, err)
-		}
-	})
+}
+
+// Named claims are read as the operator gives them, a namespaced URL included.
+func TestTheRolesAndGroupsClaimSettingsAreReadAsNamed(t *testing.T) {
+	c, err := loadOIDC(t, with("BYWARD_OIDC_ROLES_CLAIM=https://byward.dev/roles", "BYWARD_OIDC_GROUPS_CLAIM=https://byward.dev/groups"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.OIDCRolesClaim != "https://byward.dev/roles" || c.OIDCGroupsClaim != "https://byward.dev/groups" {
+		t.Fatalf("roles claim %q, groups claim %q; want the named claims", c.OIDCRolesClaim, c.OIDCGroupsClaim)
+	}
+}
+
+// A claim about the sign-in itself is never roles: aud and azp hold the proxy's client ID, so a
+// gate on either would admit every user of the IdP. The list is the test's own, not the code's.
+func TestAClaimOfTheSignInItselfIsRefusedAsTheRolesClaim(t *testing.T) {
+	for _, claim := range []string{"iss", "sub", "aud", "azp", "exp", "iat", "nbf", "jti", "nonce", "auth_time", "acr", "amr", "sid", "at_hash", "c_hash"} {
+		t.Run(claim, func(t *testing.T) {
+			_, err := loadOIDC(t, with("BYWARD_OIDC_ROLES_CLAIM="+claim))
+			if want := `BYWARD_OIDC_ROLES_CLAIM: "` + claim + `" is a claim of the sign-in itself`; !isConfigError(err) || !strings.Contains(err.Error(), want) {
+				t.Fatalf("err = %v, want a configuration error containing %q", err, want)
+			}
+		})
+	}
 }
 
 // Entra's roles and groups claims are fixed, so naming others with Entra refuses to start, even

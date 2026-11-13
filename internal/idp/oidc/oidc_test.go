@@ -613,6 +613,9 @@ func TestRolesAndGroupsAreReadFromTheNamedClaimsOnly(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if refreshed == nil {
+				t.Fatal("the refresh returned no identity; want one from the refreshed ID token")
+			}
 			for when, got := range map[string]idp.Identity{"sign-in": id, "refresh": *refreshed} {
 				if !slices.Equal(got.Roles, tc.wantRoles) || !slices.Equal(got.Groups, tc.wantGroups) {
 					t.Errorf("%s: roles %q, groups %q; want %q, %q", when, got.Roles, got.Groups, tc.wantRoles, tc.wantGroups)

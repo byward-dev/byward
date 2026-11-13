@@ -69,6 +69,13 @@ func TestGenericDiscoveryIsServedUnderTheIssuersPath(t *testing.T) {
 	}
 }
 
+// A user's Claims override the profile's claim of the same name, as their comment says.
+func TestUserClaimsOverrideTheProfilesClaims(t *testing.T) {
+	f := newFixture(t, Generic, WithUser(User{Groups: []string{"profile-group"}, Claims: map[string]any{"groups": []string{"raw-group"}}}))
+	_, id := f.verified(t, f.login(t).str("id_token"))
+	wantClaim(t, id, "groups", []string{"raw-group"})
+}
+
 func TestNewRejectsUnknownProfile(t *testing.T) {
 	ft := &fatalRecorder{TB: t}
 	func() {

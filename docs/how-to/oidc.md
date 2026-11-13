@@ -111,8 +111,8 @@ An OIDC IdP usually lets anyone with an account sign in, so an empty
   ```
 
   `BYWARD_OIDC_GROUPS_CLAIM` does the same for a groups claim an Action sets. Either claim must be
-  an array of strings: a single string, or a claim about the sign-in itself such as `aud` or `sub`,
-  is not read as roles (the latter refuses to start). The defaults stay
+  an array of strings; a single string is ignored. Naming a claim about the sign-in itself, such as
+  `aud` or `sub`, refuses to start. The defaults stay
   `roles` and `groups` for every preset, Auth0 included, so nothing changes until you set them.
   The identity assertion's `roles` and `groups` come from the same claims as the gate's.
   With Entra, whose `roles` and `groups` claims are fixed, these settings refuse to start.

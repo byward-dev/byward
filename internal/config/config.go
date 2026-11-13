@@ -66,7 +66,7 @@ type Config struct {
 	OIDCScopes       []string
 	OIDCSubjectClaim string
 	// OIDCRolesClaim and OIDCGroupsClaim are the ID token claims roles and groups are read from;
-	// roles and groups for every preset (#286).
+	// default `roles` and `groups` for every preset (#286).
 	OIDCRolesClaim, OIDCGroupsClaim string
 	OIDCName                        string
 	KeysDir                         string

@@ -28,7 +28,8 @@ const (
 type Rules struct {
 	// Tenants are Entra tenant IDs (`tid`).
 	Tenants []string
-	// Roles are app roles; the user needs at least one (`roles`).
+	// Roles are app roles; the user needs at least one (Identity.Roles: `roles`, or the claim an OIDC
+	// IdP is told to read).
 	Roles []string
 	// Groups are group IDs (Entra object IDs); opt-in, and groups overage denies (ADR-0012 §8).
 	Groups []string

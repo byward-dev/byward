@@ -290,24 +290,22 @@ func (s oneSubject) Validate(context.Context, string) (resource.Identity, error)
 }
 
 // The roles and groups claims the operator names reach both the access gate and the identity
-// assertion; by default both read the top-level roles and groups claims and ignore namespaced ones
-// (#286).
+// assertion through the wired server; with the settings unset, the top-level roles claim does (#286).
+// The defaults are pinned per preset in config, the adapter and the gate.
 func TestTheRolesAndGroupsClaimsReachTheGateAndTheAssertion(t *testing.T) {
-	const roles, groups = "https://byward.dev/roles", "https://byward.dev/groups"
+	const nsRoles, nsGroups = "https://byward.dev/roles", "https://byward.dev/groups"
 	asserted := "BYWARD_ASSERTION_CLAIMS=roles,groups"
 	for name, tc := range map[string]struct {
 		claims   map[string]any
 		settings []string
 		key      string // the asserted claim that must be [mcp]
 	}{
-		"roles by default, the top-level claim": {map[string]any{"roles": []string{"mcp"}, roles: []string{"other"}},
+		"roles by default, the top-level claim": {map[string]any{"roles": []string{"mcp"}, nsRoles: []string{"other"}},
 			[]string{"BYWARD_GATE_ROLES=mcp", asserted}, "roles"},
-		"a named roles claim": {map[string]any{"roles": []string{"other"}, roles: []string{"mcp"}},
-			[]string{"BYWARD_OIDC_ROLES_CLAIM=" + roles, "BYWARD_GATE_ROLES=mcp", asserted}, "roles"},
-		"groups by default, the top-level claim": {map[string]any{"groups": []string{"mcp"}, groups: []string{"other"}},
-			[]string{"BYWARD_GATE_GROUPS=mcp", asserted}, "groups"},
-		"a named groups claim": {map[string]any{"groups": []string{"other"}, groups: []string{"mcp"}},
-			[]string{"BYWARD_OIDC_GROUPS_CLAIM=" + groups, "BYWARD_GATE_GROUPS=mcp", asserted}, "groups"},
+		"a named roles claim": {map[string]any{"roles": []string{"other"}, nsRoles: []string{"mcp"}},
+			[]string{"BYWARD_OIDC_ROLES_CLAIM=" + nsRoles, "BYWARD_GATE_ROLES=mcp", asserted}, "roles"},
+		"a named groups claim": {map[string]any{"groups": []string{"other"}, nsGroups: []string{"mcp"}},
+			[]string{"BYWARD_OIDC_GROUPS_CLAIM=" + nsGroups, "BYWARD_GATE_GROUPS=mcp", asserted}, "groups"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := oidcAssertion(t, fakeidp.User{Claims: tc.claims}, tc.settings...)
