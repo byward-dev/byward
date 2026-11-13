@@ -81,7 +81,7 @@ func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer) 
 		log.Warn("to require sign-in, remove BYWARD_INSECURE_NO_AUTH and configure an IdP; see docs/reference/settings.md", "relaxation", "next step")
 	}
 	// Traces only when the operator sets OTEL_TRACES_EXPORTER (ADR-0021 §9).
-	tracingOn, stopTracing, err := tracing.Setup(ctx, getenv(environ), buildInfo().Version)
+	tracingOn, stopTracing, err := tracing.Setup(ctx, getenv(environ), buildInfo().Version, log)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "byward: configuration error: OTEL_* tracing settings: %v\n", err)
 		return exitConfig

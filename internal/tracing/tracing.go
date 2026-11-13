@@ -7,9 +7,11 @@
 package tracing
 
 import (
+	"github.com/byward-dev/byward/internal/envproxy"
 	"github.com/byward-dev/byward/internal/logging"
 
 	"context"
+	"log/slog"
 	"net/http"
 
 	"go.opentelemetry.io/contrib/exporters/autoexport"
@@ -32,11 +34,12 @@ var propagator propagation.TextMapPropagator = propagation.TraceContext{}
 // since Inject runs after it.
 func Fields() []string { return propagator.Fields() }
 
-// Setup installs the tracer provider and the W3C trace-context propagator when getenv
-// ("OTEL_TRACES_EXPORTER") is set, and returns a shutdown that flushes spans. Otherwise it changes
-// nothing: the global provider and propagator stay no-ops, and an inbound `traceparent` reaches the
-// upstream unchanged. Baggage is never propagated (it can carry user data).
-func Setup(ctx context.Context, getenv func(string) string, version string) (enabled bool, shutdown func(context.Context) error, err error) {
+// Setup installs the tracer provider, the W3C trace-context propagator and an error handler that
+// sends OpenTelemetry's errors, such as a failed export, to log, when getenv("OTEL_TRACES_EXPORTER")
+// is set, and returns a shutdown that flushes spans. Otherwise it changes nothing: the global
+// provider and propagator stay no-ops, and an inbound `traceparent` reaches the upstream unchanged.
+// Baggage is never propagated (it can carry user data).
+func Setup(ctx context.Context, getenv func(string) string, version string, log *slog.Logger) (enabled bool, shutdown func(context.Context) error, err error) {
 	noop := func(context.Context) error { return nil }
 	if getenv("OTEL_TRACES_EXPORTER") == "" {
 		return false, noop, nil
@@ -53,10 +56,24 @@ func Setup(ctx context.Context, getenv func(string) string, version string) (ena
 	if err != nil {
 		return false, noop, err
 	}
+	otel.SetErrorHandler(errorHandler(log, envproxy.SettingMisread()))
 	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp), sdktrace.WithResource(res))
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagator)
 	return true, tp.Shutdown, nil
+}
+
+// errorHandler logs OpenTelemetry's errors in place of its default, which prints them to stderr as
+// they are. Through an environment proxy Go misread, an export error quotes the address Go dialled
+// from the setting's credentials, so every error then says only envproxy.Cause.
+func errorHandler(log *slog.Logger, misread bool) otel.ErrorHandlerFunc {
+	return func(err error) {
+		if misread {
+			log.Warn("tracing error", "error", envproxy.Cause)
+			return
+		}
+		log.Warn("tracing error", "error", err)
+	}
 }
 
 // Middleware starts the server span for each request, named by route(r), a fixed set of names.
