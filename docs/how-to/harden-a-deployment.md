@@ -30,6 +30,10 @@ or a reverse proxy that does.
       - `Forwarded` (RFC 7239) is not read.
       - List only proxies you control. A trusted CIDR that includes client networks lets those
         clients choose their own address.
+- [ ] For an IdP or upstream with a private CA, add only that CA with `SSL_CERT_FILE`. Don't
+      replace the image's `/etc/ssl/certs` or set `SSL_CERT_DIR` without it: that drops the
+      public roots. Every outbound TLS connection trusts the CA you add
+      ([trust a private CA](private-ca.md)).
 
 ## Host and Origin allowlists
 

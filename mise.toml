@@ -45,9 +45,20 @@ run = ["GOOS=linux govulncheck ./...", "GOOS=darwin govulncheck ./..."]
 description = "Lint GitHub workflows (actionlint with shellcheck, zizmor offline) and shell scripts"
 run = ["actionlint", "zizmor --offline --no-progress .github/workflows", "shellcheck scripts/*.sh scripts/conformance/*.sh scripts/ui/*.sh scripts/assertion/*.sh scripts/real-entra/*.sh scripts/fuzz/*.sh"]
 
+# The environment of the tasks that run the test suite (test:fuzz runs only fuzz targets, which make
+# no HTTP calls). Tests make plain-HTTP calls to local fakes: Go refuses them all when
+# REQUEST_METHOD (its CGI guard) and HTTP_PROXY are both set, and a proxy setting from the shell is
+# not the test's to use. A golden-file switch left set in the shell would
+# make the golden tests rewrite their files and pass; regenerate with a bare go test instead.
+# Empty, not false: false does not override a variable the shell set (mise 2026.7.5), and Go reads
+# an empty one as unset.
+[task_templates.go-test]
+env = { HTTP_PROXY = "", HTTPS_PROXY = "", NO_PROXY = "", http_proxy = "", https_proxy = "", no_proxy = "", REQUEST_METHOD = "", BYWARD_UPDATE_GOLDEN = "", BYWARD_UPDATE_REFERENCE = "" }
+
 [tasks.test]
 description = "Unit tests (with the race detector)"
 run = "go test -race ./..."
+extends = "go-test"
 
 [tasks."test:scripts"]
 description = "Table tests for the release and CI shell scripts (no network, no Docker)"
@@ -76,6 +87,7 @@ run = "sh scripts/fuzz/run.sh"
 [tasks."test:load"]
 description = "Scheduled load test (ADR-0024 §10): the latency the wired proxy adds to MCP requests, against 2 ms p99, and proof that the gate catches 5 ms; results in build/load/results.json (docs/how-to/load-test.md)"
 run = "go test -count=1 -v -timeout 15m -tags=load -run ^TestLoad ./internal/server/"
+extends = "go-test"
 
 [tasks."test:ui"]
 description = "Consent and error pages in Chromium: Playwright and axe (WCAG 2.2 AA), screenshots in build/ui/screenshots (needs Docker)"
@@ -85,11 +97,13 @@ run = "sh scripts/ui/run.sh"
 description = "Go tests behind the integration build tag: the restore drill, the real open-source MCP clients and the conformance authorization suite (those two need Docker and test:conformance:install); the unit tests run in `test`"
 # Only the tagged tests (named TestIntegration*); the build tag adds no other tests, so ./... would rerun the unit suite.
 run = "go test -race -count=1 -v -timeout 11m -tags=integration -run ^TestIntegration ./..."
+extends = "go-test"
 
 [tasks."test:postgres"]
 description = "The PostgreSQL store adapter on PostgreSQL 15 and 18 in pinned containers with TLS (verify-full): the conformance suite, the migration fixtures and the adapter's own tests (needs Docker)"
 env = { BYWARD_POSTGRES = "1" }
 run = "go test -race -count=1 -v -timeout 10m -tags=integration -run ^TestIntegrationPostgres$ ./internal/store/postgres/"
+extends = "go-test"
 
 [tasks."test:integration"]
 description = "Integration tests, including the release smoke test, MCP conformance and the PostgreSQL store (needs Docker)"
@@ -127,6 +141,6 @@ depends = ["licenses"]
 run = "goreleaser release --clean"
 
 [tasks."release:smoke"]
-description = "Build a snapshot, then check dist/ (archives, SBOMs, checksums) and the image contract incl. the FROM node example"
+description = "Build a snapshot, then check dist/ (archives, SBOMs, checksums), the image contract incl. the FROM node example, and that the image serves (Linux)"
 depends = ["release:snapshot"]
 run = ["sh scripts/dist-check.sh", "sh scripts/image-smoke.sh"]

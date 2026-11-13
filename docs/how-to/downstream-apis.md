@@ -188,3 +188,23 @@ export function downstreamToken(): Promise<string> {
 - On Linux before 6.5, and on macOS (for development only), a narrow race remains: a process that
   hands its connection to another and exits, with its process ID reused inside the upstream's tree
   before byward checks it, would pass the check ([ADR-0017](../adr/0017-delegation-obo.md), amendment of 2026-11-08).
+
+A server or SDK that takes a command printing a token (a credential command) can run
+`byward downstream-token` instead. It asks the socket as above and prints the access token alone on
+standard output; with `--json` it prints the token and its expiry (UTC) as one JSON line,
+`{"access_token":"...","expires_at":"..."}`. An error code still goes alone to standard error. The
+socket accepts it because the server starts it, so it descends from the upstream process. It needs
+the `byward` binary on the process's `PATH`, as in the byward image (`/usr/local/bin/byward`).
+
+```sh
+TOKEN=$(byward downstream-token) || exit 1
+curl -H "Authorization: Bearer $TOKEN" https://graph.microsoft.com/v1.0/me
+```
+
+| Exit code | Meaning |
+|---|---|
+| 0 | the token is on standard output |
+| 1 | no token: the socket's `error` code alone on standard error (table above), or `byward: downstream-token: <reason>` when the socket could not be asked, its answer was not one, or the token could not be written |
+| 2 | `BYWARD_DOWNSTREAM_TOKEN_SOCKET` is not set, or the arguments are wrong |
+
+It reads no other setting and logs nothing; the token is only ever on standard output.
