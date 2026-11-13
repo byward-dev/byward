@@ -1,8 +1,8 @@
 // Package envproxy is the environment proxy: the HTTP proxy HTTPS_PROXY, HTTP_PROXY and NO_PROXY
-// name, which the relay, IdP calls, doctor's self-probe and trace export go through. A setting whose credentials
-// hold an unescaped character (/, ?, # and the like) is one Go misreads: it dials part of the
-// credentials as the proxy host, and every transport error then quotes that address. Redact keeps
-// such errors out of every log (invariant 2).
+// name, which the relay, IdP calls, doctor's self-probe and trace export go through. A setting
+// whose credentials hold an unescaped character (/, ?, # and the like) is one Go misreads: it dials
+// part of the credentials as the proxy host, and every transport error then quotes that address.
+// Redact keeps such errors out of every log (invariant 2).
 package envproxy
 
 import (

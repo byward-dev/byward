@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"go.opentelemetry.io/contrib/exporters/autoexport"
 	"go.opentelemetry.io/otel"
@@ -77,25 +78,26 @@ func errorHandler(log *slog.Logger, misread bool) otel.ErrorHandlerFunc {
 	}
 }
 
-// collectorProxyMisread reports whether the proxy, as proxy reads it (envproxy.Proxy in production),
-// that requests to the configured OTLP collector go through is one Go misread. The http/protobuf exporter picks its proxy by the
-// endpoint's scheme, the grpc one always as https, so both are judged. With no endpoint set the
-// collector is on localhost, which Go never sends through a proxy.
+// collectorProxyMisread reports whether an environment proxy, as proxy reads it (envproxy.Proxy in
+// production), that requests to an OTLP endpoint the settings name go through is one Go misread.
+// Every endpoint setting is judged, not only the one the exporter picks, so a change in how it picks
+// (it skips a traces endpoint it cannot parse) can only redact more. The http/protobuf exporter
+// picks its proxy by the endpoint's scheme, the grpc one always as https, so both are judged. With
+// no endpoint set the collector is on localhost, which Go never sends through a proxy.
 func collectorProxyMisread(getenv func(string) string, proxy func(*http.Request) (*url.URL, error)) bool {
-	endpoint := getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
-	if endpoint == "" {
-		endpoint = getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	}
-	if endpoint == "" {
-		return false
-	}
-	host := endpoint // grpc takes a bare host:port
-	if u, err := url.Parse(endpoint); err == nil && u.Host != "" {
-		host = u.Host
-	}
-	for _, scheme := range []string{"http", "https"} {
-		if via, err := proxy(&http.Request{URL: &url.URL{Scheme: scheme, Host: host}}); err == nil && envproxy.Malformed(via) {
-			return true
+	for _, setting := range []string{"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT"} {
+		endpoint := strings.TrimSpace(getenv(setting)) // as OTel reads it
+		if endpoint == "" {
+			continue
+		}
+		host := endpoint // grpc takes a bare host:port
+		if u, err := url.Parse(endpoint); err == nil && u.Host != "" {
+			host = u.Host
+		}
+		for _, scheme := range []string{"http", "https"} {
+			if via, err := proxy(&http.Request{URL: &url.URL{Scheme: scheme, Host: host}}); err == nil && envproxy.Malformed(via) {
+				return true
+			}
 		}
 	}
 	return false

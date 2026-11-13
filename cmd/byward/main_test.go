@@ -13,7 +13,11 @@ import (
 	"strings"
 	"testing"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace/noop"
+
 	"github.com/byward-dev/byward/internal/testutil/assertionkey"
+	"github.com/byward-dev/byward/internal/testutil/closedport"
 )
 
 // serveEnv is what a test run that serves needs besides auth: the URLs, the public listener and an
@@ -114,6 +118,31 @@ func TestRunStopsOnCancelledContext(t *testing.T) {
 	code := run(ctx, nil, append(authEnv(t), serveEnv("https://m.example/mcp", "127.0.0.1:0")...), &out, &errb)
 	if code != exitOK || !strings.Contains(errb.String(), `"msg":"starting"`) {
 		t.Fatalf("code=%d logs=%s", code, errb.String())
+	}
+}
+
+// With tracing on, OpenTelemetry's errors reach the proxy's own log at warn level, not stderr as they
+// are: run hands its logger to the tracing setup.
+func TestATracingErrorReachesTheLogAtWarnLevel(t *testing.T) {
+	t.Setenv("OTEL_TRACES_EXPORTER", "otlp") // autoexport reads the process environment
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://"+closedport.Addr(t))
+	t.Cleanup(func() {
+		otel.SetTracerProvider(noop.NewTracerProvider())
+		otel.SetErrorHandler(otel.ErrorHandlerFunc(func(error) {}))
+	})
+	ln, err := net.Listen("tcp", "127.0.0.1:0") // a taken listen address: run returns once tracing is set up
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	var out, errb bytes.Buffer
+	env := append(authEnv(t), serveEnv("https://m.example/mcp", ln.Addr().String())...)
+	if code := run(context.Background(), nil, append(env, "OTEL_TRACES_EXPORTER=otlp"), &out, &errb); code != exitRuntime || !strings.Contains(errb.String(), `"msg":"tracing on"`) {
+		t.Fatalf("code=%d logs=%s; want tracing on, then the listen failure", code, errb.String())
+	}
+	otel.Handle(errors.New("probe")) // the handler Setup installed outlives run
+	if logs := errb.String(); !strings.Contains(logs, `"level":"WARN","msg":"tracing error","error":"probe"`) {
+		t.Fatalf("logs=%s; want the tracing error at warn level", logs)
 	}
 }
 

@@ -38,6 +38,7 @@ func restoreGlobals(t *testing.T) {
 	t.Cleanup(func() {
 		otel.SetTracerProvider(noop.NewTracerProvider())
 		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator())
+		otel.SetErrorHandler(otel.ErrorHandlerFunc(func(error) {})) // Setup's handler logs to its test's logger
 	})
 }
 
