@@ -226,7 +226,8 @@ type userConn struct {
 	p   *Process
 	log *slog.Logger
 
-	ids *atomic.Uint64 // the Bridge's: proxy ids never repeat across userConns
+	ids      *atomic.Uint64  // the Bridge's: proxy ids never repeat across userConns
+	draining <-chan struct{} // the Bridge's: closed when byward starts shutting down
 
 	mu      sync.Mutex
 	byID    map[string]*modernRequest // by proxy id
@@ -322,7 +323,7 @@ func (b *Bridge) connFor(key string, p *Process, id Identity) *userConn {
 	if c := b.users[key]; c != nil && c.p == p {
 		return c
 	}
-	c := &userConn{p: p, ids: &b.next, log: b.c.Log.With("process", p.PID(), "user_key", id.Subject),
+	c := &userConn{p: p, ids: &b.next, draining: b.draining, log: b.c.Log.With("process", p.PID(), "user_key", id.Subject),
 		byID: map[string]*modernRequest{}, byToken: map[string]*modernRequest{}, probe: make(chan []byte, 1), ended: make(chan struct{})}
 	b.users[key] = c
 	go func() {
@@ -393,9 +394,11 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, l
 		http.Error(w, "upstream unavailable", http.StatusBadGateway)
 		return
 	}
-	var silence *quiet // only a listen stream is long-lived enough to need a keep-alive
+	var silence *quiet           // only a listen stream is long-lived enough to need a keep-alive
+	var draining <-chan struct{} // nil, never ready, but for a listen
 	if q.listen {
 		silence = newQuiet(c.p.clock) // before the stream starts, as for the GET stream
+		draining = c.draining
 	}
 	defer silence.stop()
 	out := startSSE(w)
@@ -410,6 +413,8 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, l
 		}
 	}
 	finish := func(m []byte) { drain(); _ = out.write(m) }
+	// endListen ends a listen byward chose to end with its completion result and cancels it upstream.
+	endListen := func() { finish(exitAnswer(q, true)); c.cancel(q) }
 	for {
 		select {
 		case m := <-q.out:
@@ -428,7 +433,10 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, l
 			finish(m)
 			return
 		case <-c.ended:
-			finish(exitAnswer(q, c.p.wasEvicted()))
+			finish(exitAnswer(q, c.p.endedByChoice()))
+			return
+		case <-draining:
+			endListen()
 			return
 		case <-q.torn:
 			// The upstream ended the subscription. Over HTTP that is said by closing the stream; the
@@ -436,27 +444,42 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, l
 			drain()
 			return
 		case <-r.Context().Done():
+			if q.listen && closed(c.draining) { // shutdown cancels the request; the listen still ends cleanly
+				endListen()
+				return
+			}
 			c.cancel(q) // closing the stream cancels the request (2026-07-28 transports)
 			return
 		}
 	}
 }
 
-// exitAnswer is what a request gets once its process has ended: its answer, if the upstream wrote
-// it before exiting, else an error. A subscriptions/listen whose process was evicted was ended by
+// exitAnswer is what a request gets when it ends without a relayed answer (its process exited, or
+// byward ends the listen): its answer, if the upstream wrote it, else an error. A
+// subscriptions/listen that byward ended (its process retired, or byward draining) was ended by
 // the server's choice, so it gets a completion result (2026-07-28 subscriptions: a server ending a
 // subscription on its own initiative "SHOULD respond to the original subscriptions/listen request
 // with a completion result before closing the stream").
-func exitAnswer(q *modernRequest, evicted bool) []byte {
+func exitAnswer(q *modernRequest, chosen bool) []byte {
 	select {
 	case m := <-q.final:
 		return m
 	default:
 	}
-	if q.listen && evicted {
+	if q.listen && chosen {
 		return listenComplete(q.id)
 	}
 	return rpcError(q.id, codeInternalError, "upstream process exited")
+}
+
+// closed reports whether ch is closed, without waiting.
+func closed(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
 }
 
 // listenComplete is the completion result of the subscriptions/listen with id: the subscription is
