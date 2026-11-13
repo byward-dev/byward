@@ -413,13 +413,13 @@ func TestOversizeStdoutMessageStopsTheProcess(t *testing.T) {
 
 // A stop byward chose ends a subscriptions/listen with a completion result; a fault does not
 // (#180).
-func TestOnlyAStopBywardChoseIsTakenAsItsChoice(t *testing.T) {
+func TestAnIdleTimeoutStopOrShutdownCountsAsBywardsChoiceButAFaultNeverDoes(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		end    func(h *harness, p *Process)
 		chosen bool
 	}{
-		{"idle", func(h *harness, _ *Process) { h.clk.Advance(DefaultIdleTimeout) }, true},
+		{"the idle timeout", func(h *harness, _ *Process) { h.clk.Advance(DefaultIdleTimeout) }, true},
 		{"Stop", func(h *harness, _ *Process) { h.m.Stop("k") }, true},
 		{"Shutdown", func(h *harness, _ *Process) {
 			ctx, cancel := context.WithTimeout(context.Background(), guard)
@@ -428,6 +428,7 @@ func TestOnlyAStopBywardChoseIsTakenAsItsChoice(t *testing.T) {
 		}, true},
 		{"a crash", func(_ *harness, p *Process) { _ = p.Send(context.Background(), []byte("crash")) }, false},
 		{"a message over the size limit", func(_ *harness, p *Process) { _ = p.Send(context.Background(), []byte("123456789")) }, false},
+		{"a fault, then a stop byward chose", func(_ *harness, p *Process) { p.stop("partial_write"); p.retire("shutdown") }, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, func(c *Config) { c.MaxMessageBytes = 8 })

@@ -370,18 +370,22 @@ func TestLooseUpstreamEnvFileRefusesToStartInEveryMode(t *testing.T) {
 	}
 }
 
-// Invariant 13 in the modern era: each user's requests run in that user's own upstream process,
-// through the real Guard and session binding, and no token reaches it.
 // #180, through Run: shutting down ends an open subscriptions/listen with its completion result
 // under the client's own id before the stream closes, not by cutting it off (2026-07-28
 // subscriptions).
 func TestShutdownEndsAnOpenListenWithItsCompletionResultBeforeItsStreamCloses(t *testing.T) {
+	for name, internal := range map[string]string{"with the internal listener": "127.0.0.1:0", "without it": ""} {
+		t.Run(name, func(t *testing.T) { shutdownEndsAnOpenListen(t, internal) })
+	}
+}
+
+func shutdownEndsAnOpenListen(t *testing.T, internalListen string) {
 	bin, err := fakeStdio()
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg, _, err := config.Load([]string{"--", bin, "-modern"}, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp",
-		"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_LISTEN=127.0.0.1:0", "BYWARD_INTERNAL_LISTEN=127.0.0.1:0"}, os.ReadFile)
+		"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_LISTEN=127.0.0.1:0", "BYWARD_INTERNAL_LISTEN=" + internalListen}, os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -462,6 +466,8 @@ func sameJSONValue(got, want string) bool {
 	return json.Unmarshal([]byte(got), &g) == nil && json.Unmarshal([]byte(want), &w) == nil && reflect.DeepEqual(g, w)
 }
 
+// Invariant 13 in the modern era: each user's requests run in that user's own upstream process,
+// through the real Guard and session binding, and no token reaches it.
 func TestModernEraRequestsRunInTheUsersOwnUpstreamProcessWithNoToken(t *testing.T) {
 	srv, _, _ := stdioProxyRunning(t, []string{"-modern"})
 	env := func(token string) []string {

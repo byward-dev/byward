@@ -54,14 +54,15 @@ func newUpstream(cfg *config.Config, log *slog.Logger, o Observability, minter *
 		return nil, err
 	}
 	o.Metrics.StdioProcesses(m.Len)
-	var h http.Handler = stdio.NewBridge(stdio.BridgeConfig{Manager: m, Identity: stdioIdentity(cfg), Log: log.With("upstream", name)})
+	b := stdio.NewBridge(stdio.BridgeConfig{Manager: m, Identity: stdioIdentity(cfg), Log: log.With("upstream", name)})
+	var h http.Handler = b
 	if down != nil {
 		// The same check as for an HTTP upstream: a request whose user has no downstream token is
 		// answered in the proxy's name (ADR-0025 shapes) before it reaches the process, and the
 		// token it gets is cached for the process to ask for.
 		h = down.middleware(h)
 	}
-	return &upstream{handler: h, drain: m.Drain, shutdown: m.Shutdown}, nil
+	return &upstream{handler: h, drain: b.Drain, shutdown: m.Shutdown}, nil
 }
 
 // stdioConfig is the stdio upstream's settings from cfg, with each eviction audited.

@@ -227,7 +227,7 @@ type userConn struct {
 	log *slog.Logger
 
 	ids      *atomic.Uint64  // the Bridge's: proxy ids never repeat across userConns
-	draining <-chan struct{} // the Manager's: closed when byward starts shutting down
+	draining <-chan struct{} // the Bridge's: closed when byward starts shutting down
 
 	mu      sync.Mutex
 	byID    map[string]*modernRequest // by proxy id
@@ -323,7 +323,7 @@ func (b *Bridge) connFor(key string, p *Process, id Identity) *userConn {
 	if c := b.users[key]; c != nil && c.p == p {
 		return c
 	}
-	c := &userConn{p: p, ids: &b.next, draining: b.c.Manager.draining, log: b.c.Log.With("process", p.PID(), "user_key", id.Subject),
+	c := &userConn{p: p, ids: &b.next, draining: b.draining, log: b.c.Log.With("process", p.PID(), "user_key", id.Subject),
 		byID: map[string]*modernRequest{}, byToken: map[string]*modernRequest{}, probe: make(chan []byte, 1), ended: make(chan struct{})}
 	b.users[key] = c
 	go func() {
@@ -454,9 +454,10 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, l
 	}
 }
 
-// exitAnswer is what a request gets once its process has ended: its answer, if the upstream wrote
-// it before exiting, else an error. A subscriptions/listen that byward ended (its process retired,
-// or byward shutting down) was ended by the server's choice, so it gets a completion result (2026-07-28 subscriptions: a server ending a
+// exitAnswer is what a request gets when it ends without a relayed answer (its process exited, or
+// byward ends the listen): its answer, if the upstream wrote it, else an error. A
+// subscriptions/listen that byward ended (its process retired, or byward draining) was ended by
+// the server's choice, so it gets a completion result (2026-07-28 subscriptions: a server ending a
 // subscription on its own initiative "SHOULD respond to the original subscriptions/listen request
 // with a completion result before closing the stream").
 func exitAnswer(q *modernRequest, chosen bool) []byte {

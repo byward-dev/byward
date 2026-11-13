@@ -890,21 +890,23 @@ func TestAQuietListensProcessIsEvictedForAnotherUserAndTheListenGetsACompletionR
 // Shutdown (2026-07-28 subscriptions): "When the server ends a subscription on its own initiative
 // (for example, during shutdown), it SHOULD respond to the original subscriptions/listen request
 // with a completion result before closing the stream."
-func TestDrainEndsEachOpenListenWithItsCompletionResultUnderTheClientsIDAndLeavesOtherRequests(t *testing.T) {
+func TestDrainCompletesAndCancelsUpstreamEachOpenListenUnderTheClientsIDButLeavesOtherRequestsRunning(t *testing.T) {
 	b := newModernBridge(t, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	held := b.modernCtx(t, ctx, "alice", modernBody(`"h"`, "hold", "", ""))
-	if held.StatusCode != http.StatusOK {
-		t.Fatalf("held request: status %d", held.StatusCode)
+	heldRes := b.modernCtx(t, ctx, "alice", modernBody(`"h"`, "hold", "", ""))
+	if heldRes.StatusCode != http.StatusOK {
+		t.Fatalf("held request: status %d", heldRes.StatusCode)
 	}
+	held := eventsOf(t, heldRes)
 	listens := map[string]*events{`"L"`: b.listenModern(t, context.Background(), `"L"`), `9`: b.listenModern(t, context.Background(), `9`)}
 	_, res := lastResult(t, readEvents(t, b.modern(t, "alice", modernBody(`1`, "listens", "", ""))))
 	var open []string // the listens' ids as the upstream received them
 	if err := json.Unmarshal(res, &open); err != nil || len(open) != 2 {
 		t.Fatalf("the upstream's open listens are %s (%v), want two", res, err)
 	}
-	b.m.Drain()
+	b.bridge.Drain()
+	b.bridge.Drain() // a second call is harmless
 	for id, ev := range listens {
 		got := ev.all()
 		want := `{"jsonrpc":"2.0","id":` + id + `,"result":{"resultType":"complete","_meta":{"io.modelcontextprotocol/subscriptionId":` + id + `}}}`
@@ -921,8 +923,14 @@ func TestDrainEndsEachOpenListenWithItsCompletionResultUnderTheClientsIDAndLeave
 	if !slices.Equal(ids, open) {
 		t.Fatalf("upstream saw cancellations %q, want exactly the listens' %q", ids, open)
 	}
-	if b.m.Len() != 1 {
-		t.Fatalf("Len = %d after Drain, want the process still running", b.m.Len())
+	// The held request is still open: it ends only when its process does, with the exit error.
+	sctx, scancel := context.WithTimeout(context.Background(), guard)
+	defer scancel()
+	if err := b.m.Shutdown(sctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := held.all(); len(got) != 1 || !strings.Contains(got[0], `"id":"h"`) || !strings.Contains(got[0], "upstream process exited") {
+		t.Fatalf("held request got %q, want only the exit error at Shutdown: Drain must not end it", got)
 	}
 }
 

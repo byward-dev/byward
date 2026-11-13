@@ -91,9 +91,6 @@ type Manager struct {
 	procs  map[string]*entry   // by key; an evicted entry leaves at once
 	live   map[*entry]struct{} // every entry holding a cap slot, until its process has exited
 	closed bool
-
-	draining  chan struct{} // closed by Drain
-	drainOnce sync.Once
 }
 
 type entry struct {
@@ -145,7 +142,7 @@ func New(cfg Config) (*Manager, error) {
 		return nil, err
 	}
 	return &Manager{cfg: cfg, cmd: cmd, log: cfg.Log.With("upstream", cfg.Name), start: (*exec.Cmd).Start,
-		procs: map[string]*entry{}, live: map[*entry]struct{}{}, draining: make(chan struct{})}, nil
+		procs: map[string]*entry{}, live: map[*entry]struct{}{}}, nil
 }
 
 // leaseKind is what a lease is for. A request lease keeps its process from eviction until it is
@@ -436,15 +433,8 @@ func (m *Manager) Len() int {
 	return len(m.live)
 }
 
-// Drain tells open streams that byward is shutting down: each subscriptions/listen ends with its
-// completion result, as a subscription the server chose to end (2026-07-28 subscriptions). Call
-// it before the requests' contexts are cancelled, which would close the streams without one.
-// Processes keep running until Shutdown.
-func (m *Manager) Drain() { m.drainOnce.Do(func() { close(m.draining) }) }
-
 // Shutdown stops every process and waits for them, or for ctx. Get fails afterwards.
 func (m *Manager) Shutdown(ctx context.Context) error {
-	m.Drain()
 	m.mu.Lock()
 	m.closed = true
 	entries := make([]*entry, 0, len(m.live))

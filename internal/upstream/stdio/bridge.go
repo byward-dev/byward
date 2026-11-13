@@ -54,6 +54,9 @@ type Bridge struct {
 	next     atomic.Uint64        // proxy ids and tokens, unique across every userConn
 
 	probeTimeout time.Duration // bounds the server/discover probe; tests shorten it
+
+	draining  chan struct{} // closed by Drain
+	drainOnce sync.Once
 }
 
 // NewBridge returns the bridge for c.Manager's upstream.
@@ -62,8 +65,14 @@ func NewBridge(c BridgeConfig) *Bridge {
 		c.Log = slog.New(slog.DiscardHandler)
 	}
 	return &Bridge{c: c, sessions: map[string]*session{}, users: map[string]*userConn{},
-		cap: capability{clock: c.Manager.cfg.Clock}, probeTimeout: defaultProbeTimeout}
+		cap: capability{clock: c.Manager.cfg.Clock}, probeTimeout: defaultProbeTimeout, draining: make(chan struct{})}
 }
+
+// Drain tells open streams that byward is shutting down: each subscriptions/listen ends with its
+// completion result, as a subscription the server chose to end (2026-07-28 subscriptions), and is
+// cancelled on the upstream. Call it before the requests' contexts are cancelled, which would
+// close the streams without one. Other requests and the processes keep running.
+func (b *Bridge) Drain() { b.drainOnce.Do(func() { close(b.draining) }) }
 
 // newSessionID is 32 random bytes, base64url: visible ASCII, as the transport requires.
 func newSessionID() (string, error) {
