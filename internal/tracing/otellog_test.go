@@ -63,7 +63,8 @@ func TestAResourceDetectionErrorReachesTheLogNotStderr(t *testing.T) {
 		return
 	}
 	clearOTELEnv(t)
-	got := rerun.Run(t, "TestAResourceDetectionErrorReachesTheLogNotStderr", "OTEL_TRACES_EXPORTER=console", "OTEL_RESOURCE_ATTRIBUTES=novalue")
+	// No proxy setting: a misread one in the developer's shell would redact the error to the cause.
+	got := rerun.Run(t, "TestAResourceDetectionErrorReachesTheLogNotStderr", append(rerun.ProxyEnv(""), "OTEL_TRACES_EXPORTER=console", "OTEL_RESOURCE_ATTRIBUTES=novalue")...)
 	if !strings.Contains(got, "error detecting resource") {
 		t.Fatalf("child output %q; want resource detection's error", got)
 	}
