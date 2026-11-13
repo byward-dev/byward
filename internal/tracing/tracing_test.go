@@ -2,6 +2,7 @@ package tracing
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -56,7 +57,7 @@ func TestNoTelemetryConnectionWhenOTELIsUnset(t *testing.T) {
 	clearOTELEnv(t)
 	restoreGlobals(t)
 	tp, prop := otel.GetTracerProvider(), otel.GetTextMapPropagator()
-	enabled, shutdown, err := Setup(context.Background(), os.Getenv, "test")
+	enabled, shutdown, err := Setup(context.Background(), os.Getenv, "test", slog.New(slog.DiscardHandler))
 	if err != nil || enabled {
 		t.Fatalf("Setup with OTEL_* unset: enabled=%v err=%v, want off and no error", enabled, err)
 	}
@@ -76,7 +77,7 @@ func TestNoneExporterIsOff(t *testing.T) {
 	clearOTELEnv(t)
 	restoreGlobals(t)
 	t.Setenv("OTEL_TRACES_EXPORTER", "none")
-	if enabled, _, err := Setup(context.Background(), os.Getenv, "test"); err != nil || enabled {
+	if enabled, _, err := Setup(context.Background(), os.Getenv, "test", slog.New(slog.DiscardHandler)); err != nil || enabled {
 		t.Fatalf("OTEL_TRACES_EXPORTER=none: enabled=%v err=%v, want off and no error", enabled, err)
 	}
 }
@@ -95,7 +96,7 @@ func TestTracesContinueTheInboundTraceAndReachTheExporter(t *testing.T) {
 	t.Setenv("OTEL_TRACES_EXPORTER", "otlp")
 	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.URL)
-	enabled, shutdown, err := Setup(context.Background(), os.Getenv, "test")
+	enabled, shutdown, err := Setup(context.Background(), os.Getenv, "test", slog.New(slog.DiscardHandler))
 	if err != nil || !enabled {
 		t.Fatalf("Setup: enabled=%v err=%v", enabled, err)
 	}

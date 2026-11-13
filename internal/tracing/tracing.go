@@ -7,10 +7,13 @@
 package tracing
 
 import (
+	"github.com/byward-dev/byward/internal/envproxy"
 	"github.com/byward-dev/byward/internal/logging"
 
 	"context"
+	"log/slog"
 	"net/http"
+	"net/url"
 
 	"go.opentelemetry.io/contrib/exporters/autoexport"
 	"go.opentelemetry.io/otel"
@@ -32,11 +35,12 @@ var propagator propagation.TextMapPropagator = propagation.TraceContext{}
 // since Inject runs after it.
 func Fields() []string { return propagator.Fields() }
 
-// Setup installs the tracer provider and the W3C trace-context propagator when getenv
-// ("OTEL_TRACES_EXPORTER") is set, and returns a shutdown that flushes spans. Otherwise it changes
-// nothing: the global provider and propagator stay no-ops, and an inbound `traceparent` reaches the
-// upstream unchanged. Baggage is never propagated (it can carry user data).
-func Setup(ctx context.Context, getenv func(string) string, version string) (enabled bool, shutdown func(context.Context) error, err error) {
+// Setup installs the tracer provider, the W3C trace-context propagator and an error handler that
+// sends OpenTelemetry's errors, such as a failed export, to log, when getenv("OTEL_TRACES_EXPORTER")
+// is set, and returns a shutdown that flushes spans. Otherwise it changes nothing: the global
+// provider and propagator stay no-ops, and an inbound `traceparent` reaches the upstream unchanged.
+// Baggage is never propagated (it can carry user data).
+func Setup(ctx context.Context, getenv func(string) string, version string, log *slog.Logger) (enabled bool, shutdown func(context.Context) error, err error) {
 	noop := func(context.Context) error { return nil }
 	if getenv("OTEL_TRACES_EXPORTER") == "" {
 		return false, noop, nil
@@ -53,10 +57,48 @@ func Setup(ctx context.Context, getenv func(string) string, version string) (ena
 	if err != nil {
 		return false, noop, err
 	}
+	otel.SetErrorHandler(errorHandler(log, collectorProxyMisread(getenv, envproxy.Proxy)))
 	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp), sdktrace.WithResource(res))
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagator)
 	return true, tp.Shutdown, nil
+}
+
+// errorHandler logs OpenTelemetry's errors in place of its default, which prints them to stderr as
+// they are. Through an environment proxy Go misread, an export error quotes the address Go dialled
+// from the setting's credentials, so every error then says only envproxy.Cause.
+func errorHandler(log *slog.Logger, misread bool) otel.ErrorHandlerFunc {
+	return func(err error) {
+		if misread {
+			log.Warn("tracing error", "error", envproxy.Cause)
+			return
+		}
+		log.Warn("tracing error", "error", err)
+	}
+}
+
+// collectorProxyMisread reports whether the proxy, as proxy reads it (envproxy.Proxy in production),
+// that requests to the configured OTLP collector go through is one Go misread. The http/protobuf exporter picks its proxy by the
+// endpoint's scheme, the grpc one always as https, so both are judged. With no endpoint set the
+// collector is on localhost, which Go never sends through a proxy.
+func collectorProxyMisread(getenv func(string) string, proxy func(*http.Request) (*url.URL, error)) bool {
+	endpoint := getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+	if endpoint == "" {
+		endpoint = getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	}
+	if endpoint == "" {
+		return false
+	}
+	host := endpoint // grpc takes a bare host:port
+	if u, err := url.Parse(endpoint); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	for _, scheme := range []string{"http", "https"} {
+		if via, err := proxy(&http.Request{URL: &url.URL{Scheme: scheme, Host: host}}); err == nil && envproxy.Malformed(via) {
+			return true
+		}
+	}
+	return false
 }
 
 // Middleware starts the server span for each request, named by route(r), a fixed set of names.
