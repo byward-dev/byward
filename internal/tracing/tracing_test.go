@@ -88,7 +88,7 @@ func TestNoneExporterIsOff(t *testing.T) {
 	}
 }
 
-func TestTracesContinueTheInboundTraceAndReachTheExporter(t *testing.T) {
+func TestTracesContinueTheInboundTraceAndReachTheExporterWithSetupsVersion(t *testing.T) {
 	clearOTELEnv(t)
 	restoreGlobals(t)
 	const version = "9.9.9-setup" // Setup's version, which must reach the exported resource
