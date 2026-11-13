@@ -34,6 +34,8 @@ history; rotating the sealing key (ADR-0006) does not touch stored refresh token
    transaction. **PostgreSQL adapter (`pgx/v5`) in v0.2** for more than one replica; we claim
    PostgreSQL only and keep SQL portable (single-statement conditional updates, retry on
    serialization failures). Postgres connections require TLS unless explicitly disabled.
+   _Amended 2026-11-13 (#227):_ the adapter ships in v0.3, for PostgreSQL 15 or later, with TLS
+   verify-full only; see the amendment below.
 3. **Stateless where possible:** logins in progress are a sealed blob plus a `__Host-` cookie;
    access tokens are sealed (ADR-0006); the legacy `Mcp-Session-Id` binding is a sealed wrapper
    (amends ADR-0004).
@@ -76,3 +78,42 @@ history; rotating the sealing key (ADR-0006) does not touch stored refresh token
 - LiteFS, rqlite, dqlite, libSQL/Turso, embedded Raft, Kubernetes CRDs — rejected (see Context).
 - Keys stored in the database (dex) — rejected: a leaked backup would leak the keys.
 - Manual epoch bump only — rejected: an operator restoring by file copy forgets it.
+
+## Amendment 2026-11-13 (#227): the PostgreSQL adapter
+
+Approved on #227 on 2026-11-08; built in three PRs (the adapter; the JTI replay cache in the store;
+wiring, restore detection and docs).
+
+1. **Version and driver.** PostgreSQL 15 or later (15 is supported until 2027-11-11,
+   postgresql.org/support/versioning), through `github.com/jackc/pgx/v5` (MIT). CI runs the
+   conformance suite on 15 and on the newest major, with TLS.
+2. **Writes.** Every write is one SERIALIZABLE transaction, retried (bounded, with jitter) on a
+   serialization failure (40001), a deadlock (40P01) or a unique violation (23505). That covers the
+   write skew between CreateGrant and RevokeSubject or RevokeAll, and the client cap, without
+   per-key locks. Collect runs READ COMMITTED behind `pg_try_advisory_xact_lock`, so one replica
+   collects per tick. Times are `timestamptz` (microseconds) and come back in UTC.
+3. **Migrations.** Forward-only, run at startup under `pg_advisory_lock`, one transaction per
+   migration, the version in `schema_version`. A newer schema is refused. Within a minor release,
+   migrations only add, so replicas still on the older binary keep working during a rolling
+   upgrade.
+4. **TLS: verify-full only.** After pgx parses the DSN (its PG* environment variables, service file
+   and `~/.pgpass` included), the connection and every fallback must have a TLS config with host
+   name and chain verification. Plaintext, a Unix socket, and `require`, `verify-ca`, `allow` and
+   `prefer` (pgx's default) are refused; only development mode accepts plaintext. The DSN is a
+   secret: it is never logged nor quoted in an error. Whether a database proxy on a Unix socket or
+   plaintext localhost (a cloud SQL sidecar) may be allowed is open until the wiring PR.
+5. **Restore detection (§9).** A `store_writes` sequence replaces the counter: every write
+   transaction takes a value from it, and pg_dump saves it. Each replica keeps a high-water mark,
+   taken only from values of transactions that committed: an uncommitted `nextval` may be lost in
+   a crash (postgresql.org/docs/current/functions-sequence.html). A sequence below the mark means a
+   restore: under an advisory lock, one replica bumps the epoch, forgets every consent and records
+   `store_restored`. The epoch is read in SQL on every use, never cached per replica. A failover to
+   an asynchronous standby that lost committed transactions is detected as a restore (users sign in
+   again, the fail-safe outcome). Writes made while pg_dump runs are not covered: the dump reads the
+   sequence outside its data snapshot. `byward store new-epoch` is the manual step after a restore,
+   recorded with `source=manual`.
+6. **Several replicas.** All replicas share the sealing and assertion keys (§5 still holds: keys
+   never live in the store). The JTI replay cache moves into the store. A stdio upstream with the
+   PostgreSQL store is refused at startup (§4). Per-IP rate limits, and the On-Behalf-Of and CIMD
+   caches, stay per replica.
+
