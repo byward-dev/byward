@@ -216,7 +216,11 @@ func TestABodyReadThroughAMisreadProxySettingNeverQuotesItsAddressAndOtherwiseEn
 				if err != nil {
 					return
 				}
-				_, _ = http.ReadRequest(bufio.NewReader(c))
+				// The whole request before answering, so a reset can only hit the response (#272); a GET
+				// has no body today, but a request that gains one must not race the reset.
+				if req, err := http.ReadRequest(bufio.NewReader(c)); err == nil {
+					_, _ = io.Copy(io.Discard, req.Body)
+				}
 				length := "1000"
 				if tc.end == whole {
 					length = "7"
