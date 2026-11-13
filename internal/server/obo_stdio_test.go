@@ -33,6 +33,14 @@ func newStdioOBOEnv(t *testing.T, scopes string, opts ...fakeidp.Option) *oboEnv
 		return entra.New(c)
 	}
 	t.Cleanup(func() { newEntraProvider = origProvider })
+	// Each process's token socket lives under the temporary directory, which a long TMPDIR would
+	// push over the socket path limit (#307).
+	short, err := os.MkdirTemp("/tmp", "bw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(short) })
+	t.Setenv("TMPDIR", short)
 	settings := append(authEnv(t), "BYWARD_PUBLIC_URL="+oboPublic+"/mcp", "BYWARD_OBO_SCOPES="+scopes)
 	cfg, _, err := config.Load([]string{"--", bin, "-mcp"}, settings, os.ReadFile)
 	if err != nil {
@@ -56,6 +64,30 @@ func newStdioOBOEnv(t *testing.T, scopes string, opts ...fakeidp.Option) *oboEnv
 	e.srv = httptest.NewServer(s.Public.Handler)
 	t.Cleanup(e.srv.Close)
 	return e
+}
+
+// #307: check --offline and doctor refuse a temporary directory too long for the token socket, as
+// startup does; without On-Behalf-Of there is no socket to place.
+func TestOfflineChecksRefuseATempDirTooLongForTheTokenSocketWithOnBehalfOf(t *testing.T) {
+	bin, err := fakeStdio()
+	if err != nil {
+		t.Fatal(err)
+	}
+	load := func(extra ...string) *config.Config {
+		cfg, _, err := config.Load([]string{"--", bin, "-mcp"}, append(authEnv(t), append(extra, "BYWARD_PUBLIC_URL="+oboPublic+"/mcp")...), os.ReadFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+	obo, plain := load("BYWARD_OBO_SCOPES="+graphUserRead), load()
+	t.Setenv("TMPDIR", "/"+strings.Repeat("d", 120)) // after the configs: t.TempDir reads it too
+	if err := checkUpstream(obo); err == nil || !strings.Contains(err.Error(), "TMPDIR") {
+		t.Fatalf("with On-Behalf-Of: %v, want an error naming TMPDIR", err)
+	}
+	if err := checkUpstream(plain); err != nil {
+		t.Fatalf("without On-Behalf-Of: %v, want none", err)
+	}
 }
 
 // initialize starts a legacy MCP session with the access token and returns its ID.

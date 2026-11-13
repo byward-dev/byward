@@ -69,6 +69,23 @@ type tokenAnswer struct {
 	Error       string `json:"error,omitempty"`
 }
 
+// sessionDirPattern names a process's session directory; os.MkdirTemp appends a uint32 in decimal.
+const sessionDirPattern = "byward-session-"
+
+// checkTokenSocketDir fails when a token socket in a session directory under tempDir (os.TempDir()
+// when empty) can be longer than a socket path may be, naming the limit.
+func checkTokenSocketDir(tempDir string) error {
+	if tempDir == "" {
+		tempDir = os.TempDir()
+	}
+	longest := filepath.Join(tempDir, sessionDirPattern+"4294967295", tokenSocketName)
+	if len(longest) > maxSocketPath {
+		return fmt.Errorf("stdio: with On-Behalf-Of, each process's token socket is %s, up to %d bytes, over the %d a socket path may have; set a shorter temporary directory (TMPDIR)",
+			filepath.Join(tempDir, sessionDirPattern+"<n>", tokenSocketName), len(longest), maxSocketPath)
+	}
+	return nil
+}
+
 // tokenSocket serves one upstream process's token socket in its session directory.
 type tokenSocket struct {
 	ln     *net.UnixListener

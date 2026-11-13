@@ -92,7 +92,11 @@ func checkUpstream(cfg *config.Config) error {
 	if cfg.UpstreamCommand == nil {
 		return nil
 	}
-	_, err := newStdioManager(cfg, stdio.Config{Name: stdioName(cfg), Command: cfg.UpstreamCommand, Env: cfg.UpstreamEnv})
+	sc := stdio.Config{Name: stdioName(cfg), Command: cfg.UpstreamCommand, Env: cfg.UpstreamEnv}
+	if len(cfg.OBOScopes) > 0 { // so the token socket's path is checked as at startup; never called here
+		sc.DownstreamToken = func(context.Context, stdio.Identity) stdio.DownstreamToken { return stdio.DownstreamToken{} }
+	}
+	_, err := newStdioManager(cfg, sc)
 	return err
 }
 

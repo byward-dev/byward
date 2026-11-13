@@ -109,6 +109,40 @@ func TestInvalidCommandConfigIsRejected(t *testing.T) {
 	}
 }
 
+// #307: with On-Behalf-Of, each process gets a token socket in a session directory under the
+// temporary directory. One whose longest such path is over the socket path limit fails New, naming
+// the limit and TMPDIR, instead of failing every spawn with a 502.
+func TestOnBehalfOfRefusesATempDirTooLongForItsTokenSocketAtStartup(t *testing.T) {
+	// The longest path is tempDir + "/byward-session-" + 10 digits + "/token.sock".
+	fits := "/" + strings.Repeat("d", maxSocketPath-len("/byward-session-4294967295/token.sock")-1)
+	tooLong := fits + "d"
+	ask := func(context.Context, Identity) DownstreamToken { return DownstreamToken{} }
+	for _, tc := range []struct {
+		name    string
+		tempDir string
+		obo     bool
+		wantErr bool
+	}{
+		{"exactly at the limit", fits, true, false},
+		{"one byte over", tooLong, true, true},
+		{"over, without On-Behalf-Of", tooLong, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{Command: []string{fakeBin}, LookupEnv: lookup(proxyEnv), TempDir: tc.tempDir}
+			if tc.obo {
+				cfg.DownstreamToken = ask
+			}
+			_, err := New(cfg)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("New: %v, want an error %v", err, tc.wantErr)
+			}
+			if err != nil && (!strings.Contains(err.Error(), strconv.Itoa(maxSocketPath)) || !strings.Contains(err.Error(), "TMPDIR")) {
+				t.Fatalf("error %q does not name the %d-byte limit and TMPDIR", err, maxSocketPath)
+			}
+		})
+	}
+}
+
 func TestMissingCommandNamesTheImagePattern(t *testing.T) {
 	notExec := filepath.Join(t.TempDir(), "server.js")
 	if err := os.WriteFile(notExec, []byte("x"), 0o600); err != nil {

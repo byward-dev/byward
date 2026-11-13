@@ -141,6 +141,11 @@ func New(cfg Config) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cfg.DownstreamToken != nil { // at startup, not as a 502 on every request
+		if err := checkTokenSocketDir(cfg.TempDir); err != nil {
+			return nil, err
+		}
+	}
 	return &Manager{cfg: cfg, cmd: cmd, log: cfg.Log.With("upstream", cfg.Name), start: (*exec.Cmd).Start,
 		procs: map[string]*entry{}, live: map[*entry]struct{}{}}, nil
 }
@@ -491,7 +496,7 @@ func (m *Manager) spawn(ctx context.Context, id Identity, onExit func(), latest 
 
 	var dir string
 	if m.cmd.usesSessionDir() || m.cfg.DownstreamToken != nil {
-		if dir, err = os.MkdirTemp(m.cfg.TempDir, "byward-session-"); err != nil {
+		if dir, err = os.MkdirTemp(m.cfg.TempDir, sessionDirPattern); err != nil {
 			return nil, fmt.Errorf("stdio: session directory: %w", err)
 		}
 	}
