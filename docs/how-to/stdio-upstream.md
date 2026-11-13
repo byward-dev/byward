@@ -46,7 +46,9 @@ So no `BYWARD_*` setting, sealing key or cloud credential of the proxy reaches t
 user's identity is never in the arguments, and no token is ever in the environment: the process acts
 as your service identity, and the proxy decides who may reach it. With On-Behalf-Of on, the process
 asks for a downstream token when it needs one; byward checks that the asker is the process or one of
-its descendants (a launcher such as `npx` puts the server two levels down).
+its descendants (a launcher such as `npx` puts the server two levels down). A server that takes a
+credential command can run `byward downstream-token`, which prints the token
+([On-Behalf-Of §5](downstream-apis.md#5-a-stdio-upstream)).
 
 Give the upstream its own settings and secrets in a file of `KEY=VALUE` lines (blank lines and
 lines starting with `#` are skipped):
