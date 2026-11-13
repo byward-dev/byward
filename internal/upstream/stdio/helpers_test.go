@@ -87,7 +87,7 @@ func newHarness(t *testing.T, edit func(*Config)) *harness {
 func (h *harness) killAll(t *testing.T) {
 	h.m.mu.Lock()
 	var ps []*Process
-	for _, e := range h.m.procs {
+	for e := range h.m.live { // not procs: an evicted process leaves procs before it has exited
 		if e.p != nil {
 			ps = append(ps, e.p)
 		}
