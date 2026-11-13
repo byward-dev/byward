@@ -89,9 +89,9 @@ func TestAClientAssertionAcceptedByOneReplicaIsAReplayOnAnother(t *testing.T) {
 		"client_assertion_type": {"urn:ietf:params:oauth:client-assertion-type:jwt-bearer"}}
 
 	if err := a.Authenticate(context.Background(), form, http.Header{}, tokenEndpoint, now); err != nil {
-		t.Fatalf("first use on server A: %v", err)
+		t.Fatalf("first use on one replica: %v", err)
 	}
 	if err := b.Authenticate(context.Background(), form, http.Header{}, tokenEndpoint, now); !errors.Is(err, registration.ErrInvalidClient) || !strings.Contains(err.Error(), "replayed") {
-		t.Fatalf("replay on server B: %v, want the replay refused", err)
+		t.Fatalf("replay on another replica: %v, want the replay refused", err)
 	}
 }

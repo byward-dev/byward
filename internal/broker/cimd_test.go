@@ -477,9 +477,9 @@ func TestAReplayCheckTheStoreCannotAnswerIsAStoreOutage(t *testing.T) {
 	mode.Store(modeReplayCheckDown)
 	before := len(e.logs.String())
 	res, body := e.refresh(t, rt, d.ClientID)
-	if res.StatusCode != http.StatusServiceUnavailable || body["error"] != "temporarily_unavailable" || res.Header.Get("Retry-After") != retryAfter ||
+	if res.StatusCode != http.StatusServiceUnavailable || body["error"] != "temporarily_unavailable" || res.Header.Get("Retry-After") != "5" ||
 		!strings.Contains(e.logs.String()[before:], "client assertion replay check failed") || len(e.auditEvents(t, "grant_revoked")) != 0 {
-		t.Fatalf("status %d %v, Retry-After %q, logs %s", res.StatusCode, body, res.Header.Get("Retry-After"), e.logs.String()[before:])
+		t.Fatalf("status %d %v, Retry-After %q (want 503, temporarily_unavailable, 5), logs %s", res.StatusCode, body, res.Header.Get("Retry-After"), e.logs.String()[before:])
 	}
 	mode.Store(modeOK)
 	if res, body := e.refresh(t, rt, d.ClientID); res.StatusCode != http.StatusOK {
