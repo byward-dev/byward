@@ -836,7 +836,11 @@ func TestABodyThatBreaksOffReachesTheUpstreamErrorLogAndNeverQuotesAMisreadProxy
 				if err != nil {
 					return
 				}
-				_, _ = http.ReadRequest(bufio.NewReader(c))
+				// The whole request, body included, before answering: a reset while the transport still
+				// writes the body would fail the round trip instead of the response's body copy (#272).
+				if req, err := http.ReadRequest(bufio.NewReader(c)); err == nil {
+					_, _ = io.Copy(io.Discard, req.Body)
+				}
 				_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\npartial")
 				_ = c.(*net.TCPConn).SetLinger(0) // close with a reset, so the read error names the addresses
 				_ = c.Close()
