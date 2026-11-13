@@ -30,7 +30,7 @@ func TestAnOTELSettingTheExporterRejectsIsLoggedWithoutItsValue(t *testing.T) {
 	}{
 		{"a header without '='", "OTEL_EXPORTER_OTLP_HEADERS", "authorization:Bearer " + secret, "parse headers"},
 		{"a header value that cannot be unescaped", "OTEL_EXPORTER_OTLP_HEADERS", "authorization=Bearer%zz" + secret, "escape header value"},
-		{"an endpoint with userinfo that cannot be parsed", "OTEL_EXPORTER_OTLP_ENDPOINT", "http://user:" + secret + "@collector.example:4318/%zz", "parse url"},
+		{"an endpoint with a bad escape and userinfo", "OTEL_EXPORTER_OTLP_ENDPOINT", "http://user:" + secret + "@collector.example:4318/%zz", "parse url"},
 	} {
 		for _, protocol := range []string{"http/protobuf", "grpc"} {
 			t.Run(tc.name+" over "+protocol, func(t *testing.T) {
@@ -38,10 +38,13 @@ func TestAnOTELSettingTheExporterRejectsIsLoggedWithoutItsValue(t *testing.T) {
 				got := rerun.Run(t, "TestAnOTELSettingTheExporterRejectsIsLoggedWithoutItsValue",
 					"OTEL_TRACES_EXPORTER=otlp", "OTEL_EXPORTER_OTLP_PROTOCOL="+protocol, tc.setting+"="+tc.value)
 				if strings.Contains(got, secret) {
-					t.Fatalf("child output %q; want no part of the setting's value", got)
+					t.Fatalf("child output %q; want no %q from the setting's value", got, secret)
 				}
 				if !strings.Contains(got, `level=WARN msg="tracing error" error="`+tc.message+`"`) {
 					t.Fatalf("child output %q; want the rejection logged at warn level as %q", got, tc.message)
+				}
+				if n := strings.Count(got, `msg="tracing error"`); n != 1 { // OTel's info and warnings stay out
+					t.Fatalf("child output %q; want that one tracing error, got %d", got, n)
 				}
 			})
 		}

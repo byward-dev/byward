@@ -35,9 +35,9 @@ var propagator propagation.TextMapPropagator = propagation.TraceContext{}
 // since Inject runs after it.
 func Fields() []string { return propagator.Fields() }
 
-// Setup installs the tracer provider, the W3C trace-context propagator and an error handler that
-// sends OpenTelemetry's errors, such as a failed export, to log, when getenv("OTEL_TRACES_EXPORTER")
-// is set, and returns a shutdown that flushes spans. Otherwise it changes nothing: the global
+// Setup installs the tracer provider, the W3C trace-context propagator, and an error handler and a
+// logger that send OpenTelemetry's errors (a failed export, an exporter setting it rejects) to log,
+// when getenv("OTEL_TRACES_EXPORTER") is set, and returns a shutdown that flushes spans. Otherwise it changes nothing: the global
 // provider and propagator stay no-ops, and an inbound `traceparent` reaches the upstream unchanged.
 // Baggage is never propagated (it can carry user data).
 func Setup(ctx context.Context, getenv func(string) string, version string, log *slog.Logger) (enabled bool, shutdown func(context.Context) error, err error) {
@@ -45,7 +45,10 @@ func Setup(ctx context.Context, getenv func(string) string, version string, log 
 	if getenv("OTEL_TRACES_EXPORTER") == "" {
 		return false, noop, nil
 	}
-	otel.SetLogger(logr.New(otelLog{log})) // before the exporter reads its settings, which it reports through it
+	// Both go in first: the exporter reports a setting it rejects through the logger, and resource
+	// detection reports through the error handler.
+	otel.SetLogger(logr.New(otelLog{log}))
+	otel.SetErrorHandler(errorHandler(log, envproxy.SettingMisread()))
 	exp, err := autoexport.NewSpanExporter(ctx)
 	if err != nil {
 		return false, noop, err
@@ -58,7 +61,6 @@ func Setup(ctx context.Context, getenv func(string) string, version string, log 
 	if err != nil {
 		return false, noop, err
 	}
-	otel.SetErrorHandler(errorHandler(log, envproxy.SettingMisread()))
 	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp), sdktrace.WithResource(res))
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagator)

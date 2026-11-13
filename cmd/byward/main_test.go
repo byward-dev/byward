@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace/noop"
 
@@ -134,6 +135,7 @@ func TestATracingErrorReachesTheLogAtWarnLevel(t *testing.T) {
 	t.Cleanup(func() {
 		otel.SetTracerProvider(noop.NewTracerProvider())
 		otel.SetErrorHandler(otel.ErrorHandlerFunc(func(error) {}))
+		otel.SetLogger(logr.Discard())
 	})
 	ln, err := net.Listen("tcp", "127.0.0.1:0") // a taken listen address: run returns once tracing is set up
 	if err != nil {
