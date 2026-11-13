@@ -14,8 +14,8 @@ import (
 
 // AskDownstreamToken asks the token socket at path for a downstream token, as an upstream process or
 // one of its descendants does (byward downstream-token, #181). An answer is the token or its error
-// code; err is set only when there is no answer: the socket cannot be reached, it closed, or what it
-// sent is not an answer. ctx bounds the whole exchange.
+// code; err is set only when there is no answer: the socket cannot be reached, it closed or ctx ended
+// before it answered, or what it sent is not an answer. ctx bounds the whole exchange.
 func AskDownstreamToken(ctx context.Context, path string) (DownstreamToken, error) {
 	var d net.Dialer
 	c, err := d.DialContext(ctx, "unix", path)
@@ -31,7 +31,7 @@ func AskDownstreamToken(ctx context.Context, path string) (DownstreamToken, erro
 	}
 	line, err := bufio.NewReaderSize(c, maxTokenAnswer).ReadSlice('\n')
 	if errors.Is(err, bufio.ErrBufferFull) {
-		return DownstreamToken{}, errors.New("token socket: the answer is longer than 64 KiB")
+		return DownstreamToken{}, errLongAnswer
 	}
 	if err != nil {
 		return DownstreamToken{}, fmt.Errorf("token socket: no answer: %w", ended(ctx, err))
@@ -50,6 +50,9 @@ func ended(ctx context.Context, err error) error {
 // maxTokenAnswer bounds the answer line the client reads. It holds the whole access token, whose
 // size the IdP decides, so it is far above maxTokenRequest, which bounds only the request.
 const maxTokenAnswer = 64 << 10
+
+// errLongAnswer is an answer line longer than maxTokenAnswer.
+var errLongAnswer = fmt.Errorf("token socket: the answer is longer than %d KiB", maxTokenAnswer>>10)
 
 // errBadAnswer is a line from the token socket that is neither a token nor an error code. Its text
 // never includes the line, which may hold a token.

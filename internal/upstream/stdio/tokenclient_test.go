@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -56,7 +57,7 @@ func TestAskingTheTokenSocketGivesTheTokenOrTheErrorCode(t *testing.T) {
 }
 
 // scriptedSocket answers one connection's request with answer, then closes it, and returns the
-// socket's path and the requests it read.
+// socket's path and the request it read.
 func scriptedSocket(t *testing.T, answer string) (string, <-chan string) {
 	t.Helper()
 	path := filepath.Join(shortTempDir(t), "token.sock")
@@ -85,34 +86,39 @@ func scriptedSocket(t *testing.T, answer string) (string, <-chan string) {
 // error never quotes the answer, which may hold a token.
 func TestAnAnswerThatIsNotATokenOrAnErrorCodeIsAnError(t *testing.T) {
 	const secret = "eyJ.secret.token"
-	for name, answer := range map[string]string{
-		"not JSON":                      "token " + secret + "\n",
-		"a token without expiry":        `{"access_token":"` + secret + `"}` + "\n",
-		"a token with a bad expiry":     `{"access_token":"` + secret + `","expires_at":"soon"}` + "\n",
-		"a token and an error":          `{"access_token":"` + secret + `","expires_at":"2026-11-08T13:00:00Z","error":"failed"}` + "\n",
-		"an expiry without a token":     `{"expires_at":"2026-11-08T13:00:00Z"}` + "\n",
-		"a code with a line break":      `{"error":"failed\nbyward: ` + secret + `"}` + "\n",
-		"a code with an escape":         `{"error":"\u001b[31mfailed"}` + "\n",
-		"a field of the wrong type":     `{"access_token":5,"error":"failed"}` + "\n",
-		"a code in capitals":            `{"error":"FAILED"}` + "\n",
-		"a code with a non-ASCII byte":  `{"error":"failéd"}` + "\n",
-		"a code ending past z":          `{"error":"failed{"}` + "\n",
-		"a code with a backtick":        `{"error":"fail` + "`" + `"}` + "\n",
-		"a token with a line break":     `{"access_token":"` + secret + `\nx","expires_at":"2026-11-08T13:00:00Z"}` + "\n",
-		"a token with a space":          `{"access_token":"` + secret + ` x","expires_at":"2026-11-08T13:00:00Z"}` + "\n",
-		"a token with DEL":              `{"access_token":"` + secret + `\u007f","expires_at":"2026-11-08T13:00:00Z"}` + "\n",
-		"an answer longer than 64 KiB":  `{"access_token":"` + secret + strings.Repeat("t", 64<<10) + `","expires_at":"2026-11-08T13:00:00Z"}` + "\n",
-		"a token with a non-ASCII byte": `{"access_token":"` + secret + `\u009b31m","expires_at":"2026-11-08T13:00:00Z"}` + "\n",
-		"no newline before close":       `{"access_token":"` + secret + `","expires_at":"2026-11-08T13:00:00Z"}`,
-		"nothing before close":          "",
+	for name, tc := range map[string]struct {
+		answer string
+		want   error
+	}{
+		"not JSON":                          {"token " + secret + "\n", errBadAnswer},
+		"a token without expiry":            {`{"access_token":"` + secret + `"}` + "\n", errBadAnswer},
+		"a token with a bad expiry":         {`{"access_token":"` + secret + `","expires_at":"soon"}` + "\n", errBadAnswer},
+		"a token and an error":              {`{"access_token":"` + secret + `","expires_at":"2026-11-08T13:00:00Z","error":"failed"}` + "\n", errBadAnswer},
+		"an expiry without a token":         {`{"expires_at":"2026-11-08T13:00:00Z"}` + "\n", errBadAnswer},
+		"a code with a line break":          {`{"error":"failed\nbyward: ` + secret + `"}` + "\n", errBadAnswer},
+		"a code with an escape":             {`{"error":"\u001b[31mfailed"}` + "\n", errBadAnswer},
+		"a field of the wrong type":         {`{"access_token":5,"error":"failed"}` + "\n", errBadAnswer},
+		"a code in capitals":                {`{"error":"FAILED"}` + "\n", errBadAnswer},
+		"a code with a non-ASCII byte":      {`{"error":"failéd"}` + "\n", errBadAnswer},
+		"a code ending past z":              {`{"error":"failed{"}` + "\n", errBadAnswer},
+		"a code with a backtick":            {`{"error":"fail` + "`" + `"}` + "\n", errBadAnswer},
+		"a token with a line break":         {`{"access_token":"` + secret + `\nx","expires_at":"2026-11-08T13:00:00Z"}` + "\n", errBadAnswer},
+		"a token with a space":              {`{"access_token":"` + secret + ` x","expires_at":"2026-11-08T13:00:00Z"}` + "\n", errBadAnswer},
+		"a token with DEL":                  {`{"access_token":"` + secret + `\u007f","expires_at":"2026-11-08T13:00:00Z"}` + "\n", errBadAnswer},
+		"an answer one byte over 64 KiB":    {answerLine(secret, 64<<10+1), errLongAnswer},
+		"a code that starts with a capital": {`{"error":"Failed"}` + "\n", errBadAnswer},
+		"a token that starts with a space":  {`{"access_token":" ` + secret + `","expires_at":"2026-11-08T13:00:00Z"}` + "\n", errBadAnswer},
+		"a token with a non-ASCII byte":     {`{"access_token":"` + secret + `\u009b31m","expires_at":"2026-11-08T13:00:00Z"}` + "\n", errBadAnswer},
+		"no newline before close":           {`{"access_token":"` + secret + `","expires_at":"2026-11-08T13:00:00Z"}`, io.EOF},
+		"nothing before close":              {"", io.EOF},
 	} {
 		t.Run(name, func(t *testing.T) {
-			path, reqs := scriptedSocket(t, answer)
+			path, reqs := scriptedSocket(t, tc.answer)
 			ctx, cancel := context.WithTimeout(context.Background(), guard)
 			defer cancel()
 			got, err := AskDownstreamToken(ctx, path)
-			if err == nil || got != (DownstreamToken{}) {
-				t.Fatalf("got %+v, %v; want only an error", got, err)
+			if !errors.Is(err, tc.want) || got != (DownstreamToken{}) {
+				t.Fatalf("got %+v, %v; want only the error %v", got, err, tc.want)
 			}
 			if strings.Contains(err.Error(), "secret") {
 				t.Fatalf("the error quotes the answer: %v", err)
@@ -124,15 +130,24 @@ func TestAnAnswerThatIsNotATokenOrAnErrorCodeIsAnError(t *testing.T) {
 	}
 }
 
-// A large token, tens of KiB, is read whole.
-func TestALargeTokenIsReadWhole(t *testing.T) {
-	long := strings.Repeat("t", 32<<10)
-	path, _ := scriptedSocket(t, `{"access_token":"`+long+`","expires_at":"2026-11-08T13:00:00Z"}`+"\n")
+// answerLine is a token answer of exactly size bytes, its newline included, whose token starts with
+// prefix.
+func answerLine(prefix string, size int) string {
+	const head, tail = `{"access_token":"`, `","expires_at":"2026-11-08T13:00:00Z"}` + "\n"
+	return head + prefix + strings.Repeat("t", size-len(head)-len(prefix)-len(tail)) + tail
+}
+
+// An answer line of exactly 64 KiB, its newline included, is read whole; one byte more is
+// errLongAnswer (TestAnAnswerThatIsNotATokenOrAnErrorCodeIsAnError).
+func TestAnAnswerOfExactly64KiBIsReadWhole(t *testing.T) {
+	line := answerLine("eyJ", 64<<10)
+	path, _ := scriptedSocket(t, line)
 	ctx, cancel := context.WithTimeout(context.Background(), guard)
 	defer cancel()
 	got, err := AskDownstreamToken(ctx, path)
-	if err != nil || got.AccessToken != long {
-		t.Fatalf("got a token of %d bytes, %v; want %d bytes", len(got.AccessToken), err, len(long))
+	want := line[len(`{"access_token":"`):strings.Index(line, `","expires_at"`)]
+	if err != nil || got.AccessToken != want {
+		t.Fatalf("got a token of %d bytes, %v; want %d bytes", len(got.AccessToken), err, len(want))
 	}
 }
 
@@ -171,58 +186,68 @@ func TestAMissingTokenSocketIsAnError(t *testing.T) {
 	}
 }
 
-// A socket that reads the request and never answers holds the client only until its context ends.
-// The cancel comes once the socket has the request, so it ends the client's read, not its dial; a
-// deadline ends whichever the client is in.
-func TestASilentTokenSocketHoldsTheClientOnlyUntilItsContextEnds(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		deadline bool
-		want     error
-	}{
-		{name: "a cancel while it waits for the answer", want: context.Canceled},
-		{name: "a deadline", deadline: true, want: context.DeadlineExceeded},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(shortTempDir(t), "token.sock")
-			ln, err := net.Listen("unix", path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = ln.Close() })
-			asked := make(chan struct{})
-			go func() {
-				c, err := ln.Accept()
-				if err != nil {
-					return
-				}
-				t.Cleanup(func() { _ = c.Close() })
-				_, _ = c.Read(make([]byte, 64))
-				close(asked)
-			}()
-			ctx, cancel := context.WithCancel(context.Background())
-			if tc.deadline {
-				ctx, cancel = context.WithTimeout(context.Background(), 50*time.Millisecond)
-			}
-			defer cancel()
-			done := make(chan error, 1)
-			go func() { _, err := AskDownstreamToken(ctx, path); done <- err }()
-			if !tc.deadline {
-				select {
-				case <-asked:
-					cancel()
-				case <-time.After(guard):
-					t.Fatal("the socket never got the request")
-				}
-			}
-			select {
-			case err := <-done:
-				if !errors.Is(err, tc.want) {
-					t.Fatalf("err %v, want %v: the context's own end", err, tc.want)
-				}
-			case <-time.After(guard):
-				t.Fatal("the client is still waiting after its context ended")
-			}
-		})
+// silentSocket reads one connection's request, then says so on asked and never answers.
+func silentSocket(t *testing.T) (path string, asked <-chan struct{}) {
+	t.Helper()
+	path = filepath.Join(shortTempDir(t), "token.sock")
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	got := make(chan struct{})
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		t.Cleanup(func() { _ = c.Close() })
+		_, _ = c.Read(make([]byte, 64))
+		close(got)
+	}()
+	return path, got
+}
+
+// askUntilDone runs AskDownstreamToken in the background and returns its error, failing the test
+// if it is still waiting after guard.
+func askUntilDone(t *testing.T, ctx context.Context, path string, whileWaiting func()) error {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { _, err := AskDownstreamToken(ctx, path); done <- err }()
+	whileWaiting()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(guard):
+		t.Fatal("the client is still waiting after its context ended")
+		return nil
+	}
+}
+
+// A cancel while the client waits for the answer ends its read with the cancel's own error.
+func TestACancelEndsTheWaitForASilentSocket(t *testing.T) {
+	path, asked := silentSocket(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := askUntilDone(t, ctx, path, func() {
+		select {
+		case <-asked: // the client has sent its request, so it is in its read
+			cancel()
+		case <-time.After(guard):
+			t.Fatal("the socket never got the request")
+		}
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err %v, want context.Canceled", err)
+	}
+}
+
+// A deadline ends the wait for a silent socket, wherever the client is, with the deadline's error.
+func TestADeadlineEndsTheWaitForASilentSocket(t *testing.T) {
+	path, _ := silentSocket(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := askUntilDone(t, ctx, path, func() {}); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err %v, want context.DeadlineExceeded", err)
 	}
 }

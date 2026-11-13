@@ -175,6 +175,20 @@ export function downstreamToken(): Promise<string> {
 }
 ```
 
+- A server that reads a fixed environment variable needs this change. A token that expires within
+  the hour cannot reach it any other way without restarting it, which would end the session.
+- `BYWARD_OBO_HEADER` has no effect for a stdio upstream, and setting it is refused.
+- A server started with `docker run -i` cannot reach the socket: its process does not descend from
+  the one byward started. Nor can a process that detached by forking twice (`(cmd &)`, a daemon):
+  the kernel gives it a new parent, so it no longer descends from the upstream process.
+- Every upstream process runs as byward's uid. On a host that lets processes of one uid read each
+  other's memory (`kernel.yama.ptrace_scope` 0, Debian's default), another user's process could read
+  the token from memory. byward warns at startup and in `doctor`; see
+  [Harden a deployment: Isolate stdio upstream processes](harden-a-deployment.md#isolate-stdio-upstream-processes).
+- On Linux before 6.5, and on macOS (for development only), a narrow race remains: a process that
+  hands its connection to another and exits, with its process ID reused inside the upstream's tree
+  before byward checks it, would pass the check ([ADR-0017](../adr/0017-delegation-obo.md), amendment of 2026-11-08).
+
 A server or SDK that takes a command printing a token (a credential command) can run
 `byward downstream-token` instead. It asks the socket as above and prints the access token alone on
 standard output; with `--json` it prints the token and its expiry (UTC) as one JSON line,
@@ -194,17 +208,3 @@ curl -H "Authorization: Bearer $TOKEN" https://graph.microsoft.com/v1.0/me
 | 2 | `BYWARD_DOWNSTREAM_TOKEN_SOCKET` is not set, or the arguments are wrong |
 
 It reads no other setting and logs nothing; the token is only ever on standard output.
-
-- A server that reads a fixed environment variable needs this change. A token that expires within
-  the hour cannot reach it any other way without restarting it, which would end the session.
-- `BYWARD_OBO_HEADER` has no effect for a stdio upstream, and setting it is refused.
-- A server started with `docker run -i` cannot reach the socket: its process does not descend from
-  the one byward started. Nor can a process that detached by forking twice (`(cmd &)`, a daemon):
-  the kernel gives it a new parent, so it no longer descends from the upstream process.
-- Every upstream process runs as byward's uid. On a host that lets processes of one uid read each
-  other's memory (`kernel.yama.ptrace_scope` 0, Debian's default), another user's process could read
-  the token from memory. byward warns at startup and in `doctor`; see
-  [Harden a deployment: Isolate stdio upstream processes](harden-a-deployment.md#isolate-stdio-upstream-processes).
-- On Linux before 6.5, and on macOS (for development only), a narrow race remains: a process that
-  hands its connection to another and exits, with its process ID reused inside the upstream's tree
-  before byward checks it, would pass the check ([ADR-0017](../adr/0017-delegation-obo.md), amendment of 2026-11-08).
