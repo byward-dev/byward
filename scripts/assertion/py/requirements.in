@@ -1,4 +1,4 @@
 # Contract test pins (scripts/assertion/run.sh); compile with:
 #   uv pip compile --universal --python-version 3.13 --generate-hashes --exclude-newer <a date 14 days ago> requirements.in -o requirements.txt
 # (the 14-day cooldown of the other pins, for every transitive dependency too)
-fastmcp==4.1.3
+fastmcp==4.1.4
