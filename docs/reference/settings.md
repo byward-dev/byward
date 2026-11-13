@@ -42,6 +42,8 @@ Precedence: flag > environment > default. Secrets are read only from files.
 | `--oidc-client-key-id` | `BYWARD_OIDC_CLIENT_KEY_ID` | — | with an oidc IdP: the key ID (kid) the IdP registered for BYWARD_OIDC_CLIENT_KEY_FILE |
 | `--oidc-scopes` | `BYWARD_OIDC_SCOPES` | — | with an oidc IdP: comma-separated scopes to request besides openid and the preset's |
 | `--oidc-subject-claim` | `BYWARD_OIDC_SUBJECT_CLAIM` | sub | with an oidc IdP: the claim that identifies a user; one users can change (email, preferred_username, upn, name) logs a warning |
+| `--oidc-roles-claim` | `BYWARD_OIDC_ROLES_CLAIM` | roles | with an oidc IdP: the ID token claim the access gate (BYWARD_GATE_ROLES) and the identity assertion read roles from, such as a namespaced https://example.com/roles; the default is roles for every preset (docs/how-to/oidc.md) |
+| `--oidc-groups-claim` | `BYWARD_OIDC_GROUPS_CLAIM` | groups | with an oidc IdP: the ID token claim the access gate (BYWARD_GATE_GROUPS) and the identity assertion read groups from, such as a namespaced https://example.com/groups; the default is groups for every preset (docs/how-to/oidc.md) |
 | `--oidc-name` | `BYWARD_OIDC_NAME` | — | with an oidc IdP: its name on the consent page; default: the preset's name, or the issuer's host |
 | `--data-dir` | `BYWARD_DATA_DIR` | /var/lib/byward | data directory, an absolute path; the keys, clients and store settings default to paths in it (ADR-0007 §6, docs/how-to/state.md) |
 | `--keys-dir` | `BYWARD_KEYS_DIR` | — | directory of sealing keys; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md) |

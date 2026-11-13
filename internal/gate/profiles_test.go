@@ -2,6 +2,8 @@ package gate
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,9 +22,12 @@ var login = idp.Login{State: "s", Nonce: "n", CodeVerifier: "dBjftJeZ4CVP-mB92K2
 
 func now() time.Time { return time.Unix(1_800_000_000, 0) }
 
-// signIn logs u in at a fake IdP through the real adapter and returns the Identity the broker
-// would hand to the gate.
-func signIn(t *testing.T, profile fakeidp.Profile, preset string, u fakeidp.User) (idp.Identity, string) {
+// issuerPaths are what each preset's issuer check needs after the fake's URL.
+var issuerPaths = map[string]string{"okta": "/oauth2/default", "auth0": "/", "keycloak": "/realms/acme"}
+
+// signIn logs u in at a fake IdP through the real adapter, with opts applied to a generic
+// adapter's Config, and returns the Identity the broker would hand to the gate.
+func signIn(t *testing.T, profile fakeidp.Profile, preset string, u fakeidp.User, opts ...func(*oidc.Config)) (idp.Identity, string) {
 	t.Helper()
 	c := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{secret}, RedirectURIs: []string{redirect}}
 	fake := fakeidp.New(t, profile, fakeidp.WithClient(c), fakeidp.WithClock(now), fakeidp.WithUser(u))
@@ -35,7 +40,14 @@ func signIn(t *testing.T, profile fakeidp.Profile, preset string, u fakeidp.User
 		}
 		a = p
 	} else {
-		p, err := oidc.New(oidc.Config{Preset: preset, Issuer: fake.Issuer(), ClientID: c.ID, ClientAuth: idp.ClientSecret(secret), RedirectURL: redirect, Now: now, AllowLoopbackHTTP: true}) // the fake serves http on loopback
+		if path := issuerPaths[preset]; path != "" {
+			fake.Set(fakeidp.WithIssuer(strings.TrimSuffix(fake.Issuer(), "/") + path))
+		}
+		cfg := oidc.Config{Preset: preset, Issuer: fake.Issuer(), ClientID: c.ID, ClientAuth: idp.ClientSecret(secret), RedirectURL: redirect, Now: now, AllowLoopbackHTTP: true} // the fake serves http on loopback
+		for _, o := range opts {
+			o(&cfg)
+		}
+		p, err := oidc.New(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -99,4 +111,65 @@ func TestGateDecidesOnEmailVerificationAndHostedDomainFromARealOIDCSignIn(t *tes
 		id, _ := signIn(t, fakeidp.Generic, "google", fakeidp.User{HostedDomain: "contoso.example"})
 		checkDecision(t, mustGate(t, Rules{HostedDomains: []string{"contoso.example"}}, Options{IdP: Google}).Allow(context.Background(), id), "")
 	})
+}
+
+// namespaced are an Auth0 Action's roles and groups claims, which no preset reads by default.
+const namespacedRoles, namespacedGroups = "https://byward.dev/roles", "https://byward.dev/groups"
+
+// With BYWARD_OIDC_ROLES_CLAIM and BYWARD_OIDC_GROUPS_CLAIM unset, every IdP's gate reads the
+// top-level roles and groups claims, as on v0.2.0-rc.1, and ignores namespaced ones (#286).
+func TestEveryIdPGatesOnTheTopLevelRolesAndGroupsByDefault(t *testing.T) {
+	group, other := fakeidp.NewGUID(), fakeidp.NewGUID()
+	for _, tc := range []struct {
+		idp     string
+		profile fakeidp.Profile
+		preset  string
+		kind    string
+	}{
+		{"entra", fakeidp.Entra, "", Entra},
+		{"keycloak", fakeidp.Generic, "keycloak", Generic},
+		{"google", fakeidp.Generic, "google", Google},
+		{"okta", fakeidp.Generic, "okta", Generic},
+		{"auth0", fakeidp.Generic, "auth0", Generic},
+		{"oidc", fakeidp.Generic, "", Generic},
+	} {
+		t.Run(tc.idp, func(t *testing.T) {
+			u := fakeidp.User{Claims: map[string]any{namespacedRoles: []string{"Namespaced.Role"}, namespacedGroups: []string{other}}}
+			if tc.profile == fakeidp.Entra {
+				u.Roles, u.Groups = []string{"MCP.User"}, []string{group}
+			} else {
+				u.Claims["roles"], u.Claims["groups"] = []string{"MCP.User"}, []string{group}
+			}
+			id, tid := signIn(t, tc.profile, tc.preset, u)
+			if !slices.Equal(id.Roles, []string{"MCP.User"}) || !slices.Equal(id.Groups, []string{group}) {
+				t.Fatalf("roles %q, groups %q; want the top-level roles and groups claims only", id.Roles, id.Groups)
+			}
+			o := Options{IdP: tc.kind, Tenant: tid}
+			checkDecision(t, mustGate(t, Rules{Roles: []string{"MCP.User"}, Groups: []string{group}}, o).Allow(context.Background(), id), "")
+			checkDecision(t, mustGate(t, Rules{Roles: []string{"Namespaced.Role"}}, o).Allow(context.Background(), id), RuleRole)
+			checkDecision(t, mustGate(t, Rules{Groups: []string{other}}, o).Allow(context.Background(), id), RuleGroup)
+		})
+	}
+}
+
+// Named claims, as an Auth0 Action sets them, are what the gate reads, and only they.
+func TestTheGateReadsTheNamedRolesAndGroupsClaims(t *testing.T) {
+	named := func(c *oidc.Config) { c.RolesClaim, c.GroupsClaim = namespacedRoles, namespacedGroups }
+	for name, tc := range map[string]struct {
+		claims map[string]any
+		rules  Rules
+		deny   string
+	}{
+		"a role in the named claim":       {map[string]any{namespacedRoles: []string{"mcp-user"}}, Rules{Roles: []string{"mcp-user"}}, ""},
+		"a group in the named claim":      {map[string]any{namespacedGroups: []string{"mcp"}}, Rules{Groups: []string{"mcp"}}, ""},
+		"no named roles claim":            {map[string]any{}, Rules{Roles: []string{"mcp-user"}}, RuleRole},
+		"another role in the named claim": {map[string]any{namespacedRoles: []string{"viewer"}}, Rules{Roles: []string{"mcp-user"}}, RuleRole},
+		"a top-level roles claim only":    {map[string]any{"roles": []string{"mcp-user"}}, Rules{Roles: []string{"mcp-user"}}, RuleRole},
+		"a top-level groups claim only":   {map[string]any{"groups": []string{"mcp"}}, Rules{Groups: []string{"mcp"}}, RuleGroup},
+	} {
+		t.Run(name, func(t *testing.T) {
+			id, _ := signIn(t, fakeidp.Generic, "auth0", fakeidp.User{Claims: tc.claims}, named)
+			checkDecision(t, mustGate(t, tc.rules, Options{IdP: Generic}).Allow(context.Background(), id), tc.deny)
+		})
+	}
 }

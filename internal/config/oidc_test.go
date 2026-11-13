@@ -92,6 +92,9 @@ func TestAnOIDCIdPWithMissingOrConflictingSettingsRefusesToStart(t *testing.T) {
 		"a scope with a backslash": {with(`BYWARD_OIDC_SCOPES=a\b`), `BYWARD_OIDC_SCOPES: "a\\b" is not a scope`},
 		"a scope with a space":     {with("BYWARD_OIDC_SCOPES=a b"), `BYWARD_OIDC_SCOPES: "a b" is not a scope`},
 		"a blank subject claim":    {with("BYWARD_OIDC_SUBJECT_CLAIM= "), "BYWARD_OIDC_SUBJECT_CLAIM: want a claim name"},
+		"an empty roles claim":     {with("BYWARD_OIDC_ROLES_CLAIM="), `BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles, got ""`},
+		"a padded roles claim":     {with("BYWARD_OIDC_ROLES_CLAIM= roles"), `BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles, got " roles"`},
+		"a blank groups claim":     {with("BYWARD_OIDC_GROUPS_CLAIM= "), `BYWARD_OIDC_GROUPS_CLAIM: want a claim name such as https://example.com/roles, got " "`},
 		"a name too long":          {with("BYWARD_OIDC_NAME=" + strings.Repeat("n", 81)), "BYWARD_OIDC_NAME"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -118,6 +121,31 @@ func TestMixingEntraAndOIDCSettingsNamesBothSides(t *testing.T) {
 		!strings.Contains(err.Error(), "the oidc IdP") {
 		t.Fatalf("OIDC settings with entra: %v", err)
 	}
+}
+
+// The roles and groups claims are roles and groups for every OIDC IdP unless the operator names
+// others, and setting them with Entra refuses to start (#286): Entra's own claims are fixed.
+func TestTheRolesAndGroupsClaimsDefaultToRolesAndGroupsForEveryIdP(t *testing.T) {
+	for _, idp := range append([]string{"oidc"}, OIDCPresets...) {
+		t.Run(idp, func(t *testing.T) {
+			c, err := loadOIDC(t, func(env []string) []string { return with("BYWARD_IDP=" + idp)(without("BYWARD_IDP")(env)) })
+			if err != nil || c.OIDCRolesClaim != "roles" || c.OIDCGroupsClaim != "groups" {
+				t.Fatalf("roles claim %q, groups claim %q, err %v; want roles and groups", c.OIDCRolesClaim, c.OIDCGroupsClaim, err)
+			}
+		})
+	}
+	t.Run("named claims", func(t *testing.T) {
+		c, err := loadOIDC(t, with("BYWARD_OIDC_ROLES_CLAIM=https://byward.dev/roles", "BYWARD_OIDC_GROUPS_CLAIM=https://byward.dev/groups"))
+		if err != nil || c.OIDCRolesClaim != "https://byward.dev/roles" || c.OIDCGroupsClaim != "https://byward.dev/groups" {
+			t.Fatalf("roles claim %q, groups claim %q, err %v", c.OIDCRolesClaim, c.OIDCGroupsClaim, err)
+		}
+	})
+	t.Run("entra", func(t *testing.T) {
+		_, err := load(t, nil, "BYWARD_OIDC_ROLES_CLAIM=roles", "BYWARD_OIDC_GROUPS_CLAIM=https://byward.dev/groups")
+		if !isConfigError(err) || !strings.Contains(err.Error(), "BYWARD_OIDC_ROLES_CLAIM, BYWARD_OIDC_GROUPS_CLAIM cannot be used with BYWARD_IDP=entra") {
+			t.Fatalf("the claim settings with entra: %v", err)
+		}
+	})
 }
 
 // The default stays Entra, so existing deployments and the five-key quickstart are unchanged.

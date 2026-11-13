@@ -288,3 +288,24 @@ type oneSubject string
 func (s oneSubject) Validate(context.Context, string) (resource.Identity, error) {
 	return resource.Identity{Subject: string(s)}, nil
 }
+
+// The roles claim the operator names reaches both the access gate and the identity assertion; by
+// default both read the top-level roles claim and ignore a namespaced one (#286).
+func TestTheRolesClaimReachesTheGateAndTheAssertion(t *testing.T) {
+	const namespaced = "https://byward.dev/roles"
+	for name, tc := range map[string]struct {
+		claims   map[string]any
+		settings []string
+	}{
+		"by default, the top-level roles claim": {map[string]any{"roles": []string{"mcp-user"}, namespaced: []string{"other"}}, nil},
+		"a named claim": {map[string]any{"roles": []string{"other"}, namespaced: []string{"mcp-user"}},
+			[]string{"BYWARD_OIDC_ROLES_CLAIM=" + namespaced}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := oidcAssertion(t, fakeidp.User{Claims: tc.claims}, append(tc.settings, "BYWARD_GATE_ROLES=mcp-user")...)
+			if roles, _ := got["roles"].([]any); len(roles) != 1 || roles[0] != "mcp-user" {
+				t.Fatalf("asserted roles %v, want [mcp-user]", got["roles"])
+			}
+		})
+	}
+}

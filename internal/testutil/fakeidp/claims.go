@@ -2,6 +2,7 @@ package fakeidp
 
 import (
 	"crypto/sha256"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -141,6 +142,7 @@ func (p *IdP) idToken(clientID string, u User, scopes []string, nonce string, au
 	} else {
 		p.genericIDClaims(m, clientID, u, authTime, profile, email)
 	}
+	maps.Copy(m, u.Claims)
 	return p.sign(m)
 }
 

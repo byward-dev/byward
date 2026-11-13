@@ -123,6 +123,7 @@ func (c *Config) oidcIdP(v *Values) []error {
 	c.OIDCIssuer, c.OIDCClientID = v.get("oidc-issuer"), v.get("oidc-client-id")
 	c.OIDCClientSecret, c.OIDCClientKey, c.OIDCClientKeyID = v.get("oidc-client-secret"), v.get("oidc-client-key"), v.get("oidc-client-key-id")
 	c.OIDCScopes, c.OIDCSubjectClaim, c.OIDCName = splitList(v.get("oidc-scopes")), v.get("oidc-subject-claim"), v.get("oidc-name")
+	c.OIDCRolesClaim, c.OIDCGroupsClaim = v.get("oidc-roles-claim"), v.get("oidc-groups-claim")
 	if c.OIDCIssuer == "" {
 		c.OIDCIssuer = OIDCDefaultIssuers[c.IdP]
 	}
@@ -151,6 +152,12 @@ func (c *Config) oidcIdP(v *Values) []error {
 	}
 	if strings.TrimSpace(c.OIDCSubjectClaim) == "" {
 		errs = append(errs, errorf("BYWARD_OIDC_SUBJECT_CLAIM: want a claim name, got %q", c.OIDCSubjectClaim))
+	}
+	// A claim name is matched exactly, so a blank or padded one would never match and close the gate.
+	for _, s := range []struct{ env, claim string }{{"BYWARD_OIDC_ROLES_CLAIM", c.OIDCRolesClaim}, {"BYWARD_OIDC_GROUPS_CLAIM", c.OIDCGroupsClaim}} {
+		if s.claim == "" || strings.TrimSpace(s.claim) != s.claim {
+			errs = append(errs, errorf("%s: want a claim name such as https://example.com/roles, got %q", s.env, s.claim))
+		}
 	}
 	errs = append(errs, checkText("oidc-name", c.OIDCName, 80)...)
 	return errs
