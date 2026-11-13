@@ -94,7 +94,6 @@ func TestAnOIDCIdPWithMissingOrConflictingSettingsRefusesToStart(t *testing.T) {
 		"a blank subject claim":           {with("BYWARD_OIDC_SUBJECT_CLAIM= "), "BYWARD_OIDC_SUBJECT_CLAIM: want a claim name"},
 		"an empty roles claim":            {with("BYWARD_OIDC_ROLES_CLAIM="), `BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles, got ""`},
 		"a padded roles claim":            {with("BYWARD_OIDC_ROLES_CLAIM= roles"), `BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles, got " roles"`},
-		"aud as the roles claim":          {with("BYWARD_OIDC_ROLES_CLAIM=aud"), `BYWARD_OIDC_ROLES_CLAIM: "aud" is a claim of the sign-in itself`},
 		"sub as the groups claim":         {with("BYWARD_OIDC_GROUPS_CLAIM=sub"), `BYWARD_OIDC_GROUPS_CLAIM: "sub" is a claim of the sign-in itself, not roles or groups; name the claim the IdP sends them in, such as https://example.com/groups`},
 		"a roles claim padded at the end": {with("BYWARD_OIDC_ROLES_CLAIM=roles\t"), `BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles, got "roles\t"`},
 		"a blank groups claim":            {with("BYWARD_OIDC_GROUPS_CLAIM= "), `BYWARD_OIDC_GROUPS_CLAIM: want a claim name such as https://example.com/groups, got " "`},

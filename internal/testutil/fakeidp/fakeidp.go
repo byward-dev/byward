@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -499,9 +500,10 @@ func (p *IdP) routes() http.Handler {
 		mux.HandleFunc("GET /authorize", p.authorize)
 		mux.HandleFunc("POST /token", p.token)
 		// An issuer with a path, as a preset requires (Keycloak /realms/{realm}, Okta /oauth2/{id}),
-		// is discovered under that path; set it with WithIssuer.
-		mux.HandleFunc("GET /{issuerPath...}", func(w http.ResponseWriter, r *http.Request) {
-			if !strings.HasSuffix(r.URL.Path, "/.well-known/openid-configuration") {
+		// is discovered under exactly that path; set it with WithIssuer. Any other path is not found.
+		mux.HandleFunc("GET /{path...}", func(w http.ResponseWriter, r *http.Request) {
+			issuer, err := url.Parse(p.Issuer())
+			if err != nil || r.URL.Path != strings.TrimSuffix(issuer.Path, "/")+"/.well-known/openid-configuration" {
 				http.NotFound(w, r)
 				return
 			}

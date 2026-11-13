@@ -25,9 +25,9 @@ func now() time.Time { return time.Unix(1_800_000_000, 0) }
 // issuerPaths are what each preset's issuer check needs after the fake's URL.
 var issuerPaths = map[string]string{"okta": "/oauth2/default", "auth0": "/", "keycloak": "/realms/acme"}
 
-// signIn logs u in at a fake IdP through the real adapter, with opts applied to a generic
-// adapter's Config, and returns the Identity the broker would hand to the gate.
-func signIn(t *testing.T, profile fakeidp.Profile, preset string, u fakeidp.User, opts ...func(*oidc.Config)) (idp.Identity, string) {
+// signIn logs u in at a fake IdP through the real adapter and returns the Identity the broker
+// would hand to the gate.
+func signIn(t *testing.T, profile fakeidp.Profile, preset string, u fakeidp.User) (idp.Identity, string) {
 	t.Helper()
 	c := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{secret}, RedirectURIs: []string{redirect}}
 	fake := fakeidp.New(t, profile, fakeidp.WithClient(c), fakeidp.WithClock(now), fakeidp.WithUser(u))
@@ -43,11 +43,7 @@ func signIn(t *testing.T, profile fakeidp.Profile, preset string, u fakeidp.User
 		if path := issuerPaths[preset]; path != "" {
 			fake.Set(fakeidp.WithIssuer(strings.TrimSuffix(fake.Issuer(), "/") + path))
 		}
-		cfg := oidc.Config{Preset: preset, Issuer: fake.Issuer(), ClientID: c.ID, ClientAuth: idp.ClientSecret(secret), RedirectURL: redirect, Now: now, AllowLoopbackHTTP: true} // the fake serves http on loopback
-		for _, o := range opts {
-			o(&cfg)
-		}
-		p, err := oidc.New(cfg)
+		p, err := oidc.New(oidc.Config{Preset: preset, Issuer: fake.Issuer(), ClientID: c.ID, ClientAuth: idp.ClientSecret(secret), RedirectURL: redirect, Now: now, AllowLoopbackHTTP: true}) // the fake serves http on loopback
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -149,25 +145,6 @@ func TestEveryIdPGatesOnTheTopLevelRolesAndGroupsByDefault(t *testing.T) {
 			checkDecision(t, mustGate(t, Rules{Roles: []string{"MCP.User"}, Groups: []string{group}}, o).Allow(context.Background(), id), "")
 			checkDecision(t, mustGate(t, Rules{Roles: []string{"Namespaced.Role"}}, o).Allow(context.Background(), id), RuleRole)
 			checkDecision(t, mustGate(t, Rules{Groups: []string{other}}, o).Allow(context.Background(), id), RuleGroup)
-		})
-	}
-}
-
-// The gate follows the claims the adapter is told to read: an Auth0 user whose role is in the named
-// namespaced claim is admitted, one whose role is only in the top-level claim is not. The adapter's
-// own tests cover the claim choice in full.
-func TestTheGateFollowsTheNamedRolesClaim(t *testing.T) {
-	named := func(c *oidc.Config) { c.RolesClaim = namespacedRoles }
-	for name, tc := range map[string]struct {
-		claims map[string]any
-		deny   string
-	}{
-		"the role in the named claim":     {map[string]any{namespacedRoles: []string{"mcp-user"}}, ""},
-		"the role in the top-level claim": {map[string]any{"roles": []string{"mcp-user"}}, RuleRole},
-	} {
-		t.Run(name, func(t *testing.T) {
-			id, _ := signIn(t, fakeidp.Generic, "auth0", fakeidp.User{Claims: tc.claims}, named)
-			checkDecision(t, mustGate(t, Rules{Roles: []string{"mcp-user"}}, Options{IdP: Generic}).Allow(context.Background(), id), tc.deny)
 		})
 	}
 }

@@ -44,15 +44,16 @@ func TestGenericWithIssuer(t *testing.T) {
 	wantClaim(t, id, "iss", "https://issuer.example/")
 }
 
-// An issuer with a path, as the keycloak and okta presets need, is discovered under that path;
-// any other path under it is not found.
+// An issuer with a path, as the keycloak and okta presets need, is discovered under exactly that
+// path; any other path, another realm's included, is not found.
 func TestGenericDiscoveryIsServedUnderTheIssuersPath(t *testing.T) {
 	f := newFixture(t, Generic)
 	f.idp.Set(WithIssuer(f.idp.URL() + "/realms/acme"))
 	for path, want := range map[string]int{
-		"/realms/acme/.well-known/openid-configuration": http.StatusOK,
-		"/realms/acme/anything":                         http.StatusNotFound,
-		"/realms/acme/.well-known/other":                http.StatusNotFound,
+		"/realms/acme/.well-known/openid-configuration":  http.StatusOK,
+		"/realms/acme/anything":                          http.StatusNotFound,
+		"/realms/acme/.well-known/other":                 http.StatusNotFound,
+		"/realms/other/.well-known/openid-configuration": http.StatusNotFound,
 	} {
 		t.Run(path, func(t *testing.T) {
 			res, err := http.Get(f.idp.URL() + path)

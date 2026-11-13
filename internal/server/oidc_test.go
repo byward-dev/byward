@@ -291,7 +291,7 @@ func (s oneSubject) Validate(context.Context, string) (resource.Identity, error)
 
 // The roles and groups claims the operator names reach both the access gate and the identity
 // assertion through the wired server; with the settings unset, the top-level roles claim does (#286).
-// The defaults are pinned per preset in config, the adapter and the gate.
+// The defaults are pinned per preset in config and the gate, and in the adapter.
 func TestTheRolesAndGroupsClaimsReachTheGateAndTheAssertion(t *testing.T) {
 	const nsRoles, nsGroups = "https://byward.dev/roles", "https://byward.dev/groups"
 	asserted := "BYWARD_ASSERTION_CLAIMS=roles,groups"

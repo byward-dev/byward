@@ -18,7 +18,7 @@ one entry is enough.
 |---|---|---|
 | `BYWARD_GATE_TENANTS` | Entra `tid` | Tenant GUIDs. In single-tenant mode it must include your tenant; a multi-tenant (`organizations`) app always needs it (ADR-0012 §2). |
 | `BYWARD_GATE_ROLES` | `roles` (an OIDC IdP: the claim named by `BYWARD_OIDC_ROLES_CLAIM`, [OIDC how-to](oidc.md#4-who-may-sign-in)) | App role values, case-sensitive. The user needs at least one. |
-| `BYWARD_GATE_GROUPS` | `groups` (an OIDC IdP: the claim named by `BYWARD_OIDC_GROUPS_CLAIM`) | Entra group object IDs. If Entra leaves the groups out because the user is in too many (over 200), the user is denied. |
+| `BYWARD_GATE_GROUPS` | `groups` (an OIDC IdP: the claim named by `BYWARD_OIDC_GROUPS_CLAIM`) | Entra: group object IDs. An OIDC IdP: the claim's values, exactly (Keycloak sends full paths such as `/byward-users` unless "Full group path" is off). If Entra leaves the groups out because the user is in too many (over 200), the user is denied. |
 | `BYWARD_GATE_EMAIL_DOMAINS` | email domain | Only verified emails, exact domain (no subdomains). OIDC IdPs only ([OIDC how-to](oidc.md)): not available with Entra, whose `email` is not verified. |
 | `BYWARD_GATE_HOSTED_DOMAINS` | Google `hd` | Google Workspace domains, with `BYWARD_IDP=google` only. With exactly one domain, Google is also asked to show only that Workspace's accounts. |
 | `BYWARD_GATE_ALLOW_EMPTY` | — | Allows an empty gate where the proxy otherwise refuses to start (see below). |

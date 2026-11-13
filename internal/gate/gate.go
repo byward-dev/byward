@@ -31,7 +31,8 @@ type Rules struct {
 	// Roles are app roles; the user needs at least one (Identity.Roles: `roles`, or the claim an OIDC
 	// IdP is told to read).
 	Roles []string
-	// Groups are group IDs (Entra object IDs); opt-in, and groups overage denies (ADR-0012 §8).
+	// Groups are group values (Identity.Groups: `groups`, or the claim an OIDC IdP is told to read;
+	// Entra object IDs); opt-in, and Entra's groups overage denies (ADR-0012 §8).
 	Groups []string
 	// EmailDomains match the domain of a verified email (generic IdPs only, never Entra).
 	EmailDomains []string
