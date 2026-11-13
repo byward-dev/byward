@@ -113,7 +113,8 @@ func TestGateDecidesOnEmailVerificationAndHostedDomainFromARealOIDCSignIn(t *tes
 	})
 }
 
-// namespaced are an Auth0 Action's roles and groups claims, which no preset reads by default.
+// namespacedRoles and namespacedGroups are an Auth0 Action's roles and groups claims, which no preset
+// reads by default.
 const namespacedRoles, namespacedGroups = "https://byward.dev/roles", "https://byward.dev/groups"
 
 // With BYWARD_OIDC_ROLES_CLAIM and BYWARD_OIDC_GROUPS_CLAIM unset, every IdP's gate reads the
@@ -152,24 +153,21 @@ func TestEveryIdPGatesOnTheTopLevelRolesAndGroupsByDefault(t *testing.T) {
 	}
 }
 
-// Named claims, as an Auth0 Action sets them, are what the gate reads, and only they.
-func TestTheGateReadsTheNamedRolesAndGroupsClaims(t *testing.T) {
-	named := func(c *oidc.Config) { c.RolesClaim, c.GroupsClaim = namespacedRoles, namespacedGroups }
+// The gate follows the claims the adapter is told to read: an Auth0 user whose role is in the named
+// namespaced claim is admitted, one whose role is only in the top-level claim is not. The adapter's
+// own tests cover the claim choice in full.
+func TestTheGateFollowsTheNamedRolesClaim(t *testing.T) {
+	named := func(c *oidc.Config) { c.RolesClaim = namespacedRoles }
 	for name, tc := range map[string]struct {
 		claims map[string]any
-		rules  Rules
 		deny   string
 	}{
-		"a role in the named claim":       {map[string]any{namespacedRoles: []string{"mcp-user"}}, Rules{Roles: []string{"mcp-user"}}, ""},
-		"a group in the named claim":      {map[string]any{namespacedGroups: []string{"mcp"}}, Rules{Groups: []string{"mcp"}}, ""},
-		"no named roles claim":            {map[string]any{}, Rules{Roles: []string{"mcp-user"}}, RuleRole},
-		"another role in the named claim": {map[string]any{namespacedRoles: []string{"viewer"}}, Rules{Roles: []string{"mcp-user"}}, RuleRole},
-		"a top-level roles claim only":    {map[string]any{"roles": []string{"mcp-user"}}, Rules{Roles: []string{"mcp-user"}}, RuleRole},
-		"a top-level groups claim only":   {map[string]any{"groups": []string{"mcp"}}, Rules{Groups: []string{"mcp"}}, RuleGroup},
+		"the role in the named claim":     {map[string]any{namespacedRoles: []string{"mcp-user"}}, ""},
+		"the role in the top-level claim": {map[string]any{"roles": []string{"mcp-user"}}, RuleRole},
 	} {
 		t.Run(name, func(t *testing.T) {
 			id, _ := signIn(t, fakeidp.Generic, "auth0", fakeidp.User{Claims: tc.claims}, named)
-			checkDecision(t, mustGate(t, tc.rules, Options{IdP: Generic}).Allow(context.Background(), id), tc.deny)
+			checkDecision(t, mustGate(t, Rules{Roles: []string{"mcp-user"}}, Options{IdP: Generic}).Allow(context.Background(), id), tc.deny)
 		})
 	}
 }

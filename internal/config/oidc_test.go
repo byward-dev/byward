@@ -81,21 +81,24 @@ func TestAnOIDCIdPWithMissingOrConflictingSettingsRefusesToStart(t *testing.T) {
 		change func([]string) []string
 		want   string
 	}{
-		"an unknown IdP":           {with("BYWARD_IDP=github"), `BYWARD_IDP: want entra, oidc, google, okta, auth0, keycloak, got "github"`},
-		"no issuer":                {without("BYWARD_OIDC_ISSUER"), "BYWARD_OIDC_ISSUER is required with BYWARD_IDP=keycloak"},
-		"no client ID":             {without("BYWARD_OIDC_CLIENT_ID"), "BYWARD_OIDC_CLIENT_ID is required with BYWARD_IDP=keycloak"},
-		"a public client":          {without("BYWARD_OIDC_CLIENT_SECRET_FILE"), "BYWARD_OIDC_CLIENT_SECRET_FILE or BYWARD_OIDC_CLIENT_KEY_FILE is required"},
-		"a secret and a key":       {with("BYWARD_OIDC_CLIENT_KEY_FILE=/run/secrets/key.pem"), "are both set; give one of them"},
-		"a key ID with no key":     {with("BYWARD_OIDC_CLIENT_KEY_ID=k1"), "BYWARD_OIDC_CLIENT_KEY_ID is set without BYWARD_OIDC_CLIENT_KEY_FILE"},
-		"blank scopes":             {with("BYWARD_OIDC_SCOPES= ,"), "BYWARD_OIDC_SCOPES is set but lists nothing"},
-		"a scope with a quote":     {with(`BYWARD_OIDC_SCOPES=a"b`), `BYWARD_OIDC_SCOPES: "a\"b" is not a scope`},
-		"a scope with a backslash": {with(`BYWARD_OIDC_SCOPES=a\b`), `BYWARD_OIDC_SCOPES: "a\\b" is not a scope`},
-		"a scope with a space":     {with("BYWARD_OIDC_SCOPES=a b"), `BYWARD_OIDC_SCOPES: "a b" is not a scope`},
-		"a blank subject claim":    {with("BYWARD_OIDC_SUBJECT_CLAIM= "), "BYWARD_OIDC_SUBJECT_CLAIM: want a claim name"},
-		"an empty roles claim":     {with("BYWARD_OIDC_ROLES_CLAIM="), `BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles, got ""`},
-		"a padded roles claim":     {with("BYWARD_OIDC_ROLES_CLAIM= roles"), `BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles, got " roles"`},
-		"a blank groups claim":     {with("BYWARD_OIDC_GROUPS_CLAIM= "), `BYWARD_OIDC_GROUPS_CLAIM: want a claim name such as https://example.com/roles, got " "`},
-		"a name too long":          {with("BYWARD_OIDC_NAME=" + strings.Repeat("n", 81)), "BYWARD_OIDC_NAME"},
+		"an unknown IdP":                  {with("BYWARD_IDP=github"), `BYWARD_IDP: want entra, oidc, google, okta, auth0, keycloak, got "github"`},
+		"no issuer":                       {without("BYWARD_OIDC_ISSUER"), "BYWARD_OIDC_ISSUER is required with BYWARD_IDP=keycloak"},
+		"no client ID":                    {without("BYWARD_OIDC_CLIENT_ID"), "BYWARD_OIDC_CLIENT_ID is required with BYWARD_IDP=keycloak"},
+		"a public client":                 {without("BYWARD_OIDC_CLIENT_SECRET_FILE"), "BYWARD_OIDC_CLIENT_SECRET_FILE or BYWARD_OIDC_CLIENT_KEY_FILE is required"},
+		"a secret and a key":              {with("BYWARD_OIDC_CLIENT_KEY_FILE=/run/secrets/key.pem"), "are both set; give one of them"},
+		"a key ID with no key":            {with("BYWARD_OIDC_CLIENT_KEY_ID=k1"), "BYWARD_OIDC_CLIENT_KEY_ID is set without BYWARD_OIDC_CLIENT_KEY_FILE"},
+		"blank scopes":                    {with("BYWARD_OIDC_SCOPES= ,"), "BYWARD_OIDC_SCOPES is set but lists nothing"},
+		"a scope with a quote":            {with(`BYWARD_OIDC_SCOPES=a"b`), `BYWARD_OIDC_SCOPES: "a\"b" is not a scope`},
+		"a scope with a backslash":        {with(`BYWARD_OIDC_SCOPES=a\b`), `BYWARD_OIDC_SCOPES: "a\\b" is not a scope`},
+		"a scope with a space":            {with("BYWARD_OIDC_SCOPES=a b"), `BYWARD_OIDC_SCOPES: "a b" is not a scope`},
+		"a blank subject claim":           {with("BYWARD_OIDC_SUBJECT_CLAIM= "), "BYWARD_OIDC_SUBJECT_CLAIM: want a claim name"},
+		"an empty roles claim":            {with("BYWARD_OIDC_ROLES_CLAIM="), `BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles, got ""`},
+		"a padded roles claim":            {with("BYWARD_OIDC_ROLES_CLAIM= roles"), `BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles, got " roles"`},
+		"aud as the roles claim":          {with("BYWARD_OIDC_ROLES_CLAIM=aud"), `BYWARD_OIDC_ROLES_CLAIM: "aud" is a claim of the sign-in itself`},
+		"sub as the groups claim":         {with("BYWARD_OIDC_GROUPS_CLAIM=sub"), `BYWARD_OIDC_GROUPS_CLAIM: "sub" is a claim of the sign-in itself`},
+		"a roles claim padded at the end": {with("BYWARD_OIDC_ROLES_CLAIM=roles\t"), `BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles, got "roles\t"`},
+		"a blank groups claim":            {with("BYWARD_OIDC_GROUPS_CLAIM= "), `BYWARD_OIDC_GROUPS_CLAIM: want a claim name such as https://example.com/groups, got " "`},
+		"a name too long":                 {with("BYWARD_OIDC_NAME=" + strings.Repeat("n", 81)), "BYWARD_OIDC_NAME"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := loadOIDC(t, tc.change)
@@ -124,8 +127,8 @@ func TestMixingEntraAndOIDCSettingsNamesBothSides(t *testing.T) {
 }
 
 // The roles and groups claims are roles and groups for every OIDC IdP unless the operator names
-// others, and setting them with Entra refuses to start (#286): Entra's own claims are fixed.
-func TestTheRolesAndGroupsClaimsDefaultToRolesAndGroupsForEveryIdP(t *testing.T) {
+// others (#286).
+func TestTheRolesAndGroupsClaimsDefaultToRolesAndGroupsForEveryOIDCIdP(t *testing.T) {
 	for _, idp := range append([]string{"oidc"}, OIDCPresets...) {
 		t.Run(idp, func(t *testing.T) {
 			c, err := loadOIDC(t, func(env []string) []string { return with("BYWARD_IDP=" + idp)(without("BYWARD_IDP")(env)) })
@@ -140,12 +143,15 @@ func TestTheRolesAndGroupsClaimsDefaultToRolesAndGroupsForEveryIdP(t *testing.T)
 			t.Fatalf("roles claim %q, groups claim %q, err %v", c.OIDCRolesClaim, c.OIDCGroupsClaim, err)
 		}
 	})
-	t.Run("entra", func(t *testing.T) {
-		_, err := load(t, nil, "BYWARD_OIDC_ROLES_CLAIM=roles", "BYWARD_OIDC_GROUPS_CLAIM=https://byward.dev/groups")
-		if !isConfigError(err) || !strings.Contains(err.Error(), "BYWARD_OIDC_ROLES_CLAIM, BYWARD_OIDC_GROUPS_CLAIM cannot be used with BYWARD_IDP=entra") {
-			t.Fatalf("the claim settings with entra: %v", err)
-		}
-	})
+}
+
+// Entra's roles and groups claims are fixed, so naming others with Entra refuses to start, even
+// when the name is the default (#286).
+func TestTheRolesAndGroupsClaimSettingsAreRefusedWithEntra(t *testing.T) {
+	_, err := load(t, nil, "BYWARD_OIDC_ROLES_CLAIM=roles", "BYWARD_OIDC_GROUPS_CLAIM=https://byward.dev/groups")
+	if !isConfigError(err) || !strings.Contains(err.Error(), "BYWARD_OIDC_ROLES_CLAIM, BYWARD_OIDC_GROUPS_CLAIM cannot be used with BYWARD_IDP=entra") {
+		t.Fatalf("the claim settings with entra: %v", err)
+	}
 }
 
 // The default stays Entra, so existing deployments and the five-key quickstart are unchanged.

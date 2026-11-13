@@ -117,6 +117,10 @@ func (c *Config) entraIdP(v *Values) []error {
 	return errs
 }
 
+// protocolClaims are ID token claims about the sign-in itself (RFC 7519 §4.1, OIDC Core §2), never
+// a user's roles or groups.
+var protocolClaims = []string{"iss", "sub", "aud", "azp", "exp", "iat", "nbf", "jti", "nonce", "auth_time", "sid", "at_hash", "c_hash"}
+
 // oidcIdP reads the generic OIDC adapter's settings (ADR-0011 §2).
 func (c *Config) oidcIdP(v *Values) []error {
 	var errs []error
@@ -154,9 +158,14 @@ func (c *Config) oidcIdP(v *Values) []error {
 		errs = append(errs, errorf("BYWARD_OIDC_SUBJECT_CLAIM: want a claim name, got %q", c.OIDCSubjectClaim))
 	}
 	// A claim name is matched exactly, so a blank or padded one would never match and close the gate.
-	for _, s := range []struct{ env, claim string }{{"BYWARD_OIDC_ROLES_CLAIM", c.OIDCRolesClaim}, {"BYWARD_OIDC_GROUPS_CLAIM", c.OIDCGroupsClaim}} {
-		if s.claim == "" || strings.TrimSpace(s.claim) != s.claim {
-			errs = append(errs, errorf("%s: want a claim name such as https://example.com/roles, got %q", s.env, s.claim))
+	for _, s := range []struct{ env, claim, example string }{{"BYWARD_OIDC_ROLES_CLAIM", c.OIDCRolesClaim, "https://example.com/roles"},
+		{"BYWARD_OIDC_GROUPS_CLAIM", c.OIDCGroupsClaim, "https://example.com/groups"}} {
+		switch {
+		case s.claim == "" || strings.TrimSpace(s.claim) != s.claim:
+			errs = append(errs, errorf("%s: want a claim name such as %s, got %q", s.env, s.example, s.claim))
+		case slices.Contains(protocolClaims, s.claim):
+			// aud holds our client ID, so a gate on it would admit every user of the IdP.
+			errs = append(errs, errorf("%s: %q is a claim of the sign-in itself, not roles or groups; name the claim the IdP sends them in, such as %s", s.env, s.claim, s.example))
 		}
 	}
 	errs = append(errs, checkText("oidc-name", c.OIDCName, 80)...)

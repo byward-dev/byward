@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -580,6 +581,42 @@ func TestACallbackErrorNeverAlertsTheOperator(t *testing.T) {
 			var ie *idp.Error
 			if !errors.As(err, &ie) || ie.OAuth != oauth || ie.Alert != "" {
 				t.Fatalf("err = %#v, want the IdP's %s without an alert", err, oauth)
+			}
+		})
+	}
+}
+
+// Roles and groups come from the claims the Config names, roles and groups by default, and only
+// from them, at sign-in and at refresh alike (#286).
+func TestRolesAndGroupsAreReadFromTheNamedClaimsOnly(t *testing.T) {
+	const nsRoles, nsGroups = "https://byward.dev/roles", "https://byward.dev/groups"
+	named := Config{RolesClaim: nsRoles, GroupsClaim: nsGroups}
+	both := map[string]any{"roles": []string{"top-r"}, "groups": []string{"top-g"}, nsRoles: []string{"ns-r"}, nsGroups: []string{"ns-g"}}
+	for name, tc := range map[string]struct {
+		cfg                   Config
+		claims                map[string]any
+		wantRoles, wantGroups []string
+	}{
+		"the defaults read roles and groups":  {Config{}, both, []string{"top-r"}, []string{"top-g"}},
+		"named claims read only those claims": {named, both, []string{"ns-r"}, []string{"ns-g"}},
+		"named claims absent from the token":  {named, map[string]any{"roles": []string{"top-r"}, "groups": []string{"top-g"}}, nil, nil},
+		"the defaults absent from the token":  {Config{}, map[string]any{nsRoles: []string{"ns-r"}, nsGroups: []string{"ns-g"}}, nil, nil},
+		"a roles claim that is not an array":  {named, map[string]any{nsRoles: "ns-r", nsGroups: []string{"ns-g"}}, nil, []string{"ns-g"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t, tc.cfg, fakeidp.WithUser(fakeidp.User{Claims: tc.claims}))
+			id, tok, err := e.p.Callback(context.Background(), signIn(t, e, login), login)
+			if err != nil {
+				t.Fatal(err)
+			}
+			refreshed, _, err := e.p.Refresh(context.Background(), tok.RefreshToken)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for when, got := range map[string]idp.Identity{"sign-in": id, "refresh": *refreshed} {
+				if !slices.Equal(got.Roles, tc.wantRoles) || !slices.Equal(got.Groups, tc.wantGroups) {
+					t.Errorf("%s: roles %q, groups %q; want %q, %q", when, got.Roles, got.Groups, tc.wantRoles, tc.wantGroups)
+				}
 			}
 		})
 	}

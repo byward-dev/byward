@@ -1,6 +1,7 @@
 package fakeidp
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 )
@@ -41,6 +42,31 @@ func TestGenericWithIssuer(t *testing.T) {
 	f := newFixture(t, Generic, WithIssuer("https://issuer.example/"))
 	_, id := f.verified(t, f.login(t).str("id_token"))
 	wantClaim(t, id, "iss", "https://issuer.example/")
+}
+
+// An issuer with a path, as the keycloak and okta presets need, is discovered under that path;
+// any other path under it is not found.
+func TestGenericDiscoveryIsServedUnderTheIssuersPath(t *testing.T) {
+	f := newFixture(t, Generic)
+	f.idp.Set(WithIssuer(f.idp.URL() + "/realms/acme"))
+	for path, want := range map[string]int{
+		"/realms/acme/.well-known/openid-configuration": http.StatusOK,
+		"/realms/acme/anything":                         http.StatusNotFound,
+		"/realms/acme/.well-known/other":                http.StatusNotFound,
+	} {
+		t.Run(path, func(t *testing.T) {
+			res, err := http.Get(f.idp.URL() + path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = res.Body.Close() }()
+			var doc struct{ Issuer string }
+			_ = json.NewDecoder(res.Body).Decode(&doc)
+			if res.StatusCode != want || (want == http.StatusOK && doc.Issuer != f.idp.URL()+"/realms/acme") {
+				t.Fatalf("status %d, issuer %q; want %d with the issuer under the path", res.StatusCode, doc.Issuer, want)
+			}
+		})
+	}
 }
 
 func TestNewRejectsUnknownProfile(t *testing.T) {

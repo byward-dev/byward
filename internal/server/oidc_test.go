@@ -289,22 +289,30 @@ func (s oneSubject) Validate(context.Context, string) (resource.Identity, error)
 	return resource.Identity{Subject: string(s)}, nil
 }
 
-// The roles claim the operator names reaches both the access gate and the identity assertion; by
-// default both read the top-level roles claim and ignore a namespaced one (#286).
-func TestTheRolesClaimReachesTheGateAndTheAssertion(t *testing.T) {
-	const namespaced = "https://byward.dev/roles"
+// The roles and groups claims the operator names reach both the access gate and the identity
+// assertion; by default both read the top-level roles and groups claims and ignore namespaced ones
+// (#286).
+func TestTheRolesAndGroupsClaimsReachTheGateAndTheAssertion(t *testing.T) {
+	const roles, groups = "https://byward.dev/roles", "https://byward.dev/groups"
+	asserted := "BYWARD_ASSERTION_CLAIMS=roles,groups"
 	for name, tc := range map[string]struct {
 		claims   map[string]any
 		settings []string
+		key      string // the asserted claim that must be [mcp]
 	}{
-		"by default, the top-level roles claim": {map[string]any{"roles": []string{"mcp-user"}, namespaced: []string{"other"}}, nil},
-		"a named claim": {map[string]any{"roles": []string{"other"}, namespaced: []string{"mcp-user"}},
-			[]string{"BYWARD_OIDC_ROLES_CLAIM=" + namespaced}},
+		"roles by default, the top-level claim": {map[string]any{"roles": []string{"mcp"}, roles: []string{"other"}},
+			[]string{"BYWARD_GATE_ROLES=mcp", asserted}, "roles"},
+		"a named roles claim": {map[string]any{"roles": []string{"other"}, roles: []string{"mcp"}},
+			[]string{"BYWARD_OIDC_ROLES_CLAIM=" + roles, "BYWARD_GATE_ROLES=mcp", asserted}, "roles"},
+		"groups by default, the top-level claim": {map[string]any{"groups": []string{"mcp"}, groups: []string{"other"}},
+			[]string{"BYWARD_GATE_GROUPS=mcp", asserted}, "groups"},
+		"a named groups claim": {map[string]any{"groups": []string{"other"}, groups: []string{"mcp"}},
+			[]string{"BYWARD_OIDC_GROUPS_CLAIM=" + groups, "BYWARD_GATE_GROUPS=mcp", asserted}, "groups"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got := oidcAssertion(t, fakeidp.User{Claims: tc.claims}, append(tc.settings, "BYWARD_GATE_ROLES=mcp-user")...)
-			if roles, _ := got["roles"].([]any); len(roles) != 1 || roles[0] != "mcp-user" {
-				t.Fatalf("asserted roles %v, want [mcp-user]", got["roles"])
+			got := oidcAssertion(t, fakeidp.User{Claims: tc.claims}, tc.settings...)
+			if v, _ := got[tc.key].([]any); len(v) != 1 || v[0] != "mcp" {
+				t.Fatalf("asserted %s %v, want [mcp]", tc.key, got[tc.key])
 			}
 		})
 	}

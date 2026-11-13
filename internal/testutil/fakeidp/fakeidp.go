@@ -62,8 +62,8 @@ type User struct {
 	// GroupsOverage replaces `groups` with the overage claims, as Entra does above 200 groups
 	// (Entra only).
 	GroupsOverage bool
-	// Claims are added to the ID token as they are, after the profile's own claims: a `roles`
-	// claim a Keycloak mapper sends, or a namespaced one set by an Auth0 Action.
+	// Claims are set in the ID token as they are, overriding the profile's claim of the same name:
+	// a `roles` claim a Keycloak mapper sends, or a namespaced one set by an Auth0 Action.
 	Claims map[string]any
 }
 
