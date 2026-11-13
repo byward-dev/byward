@@ -344,7 +344,7 @@ func (m *Manager) admitLocked(id Identity) (wait *entry, err error) {
 		reason = "user_cap"
 	}
 	go func() { // outside m.mu: stop takes the process lock, and Evicted may log or audit
-		victim.p.evict("evicted_" + reason)
+		victim.p.retire("evicted_" + reason)
 		m.cfg.Evicted(Eviction{ID: victim.id, Reason: reason, OpenStreams: openStreams})
 	}()
 	return victim, nil
@@ -422,7 +422,7 @@ func (m *Manager) Stop(key string) {
 	}
 	<-e.ready
 	if e.p != nil {
-		e.p.stop("closed")
+		e.p.retire("closed")
 	}
 }
 
@@ -449,7 +449,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 			return ctx.Err()
 		}
 		if e.p != nil {
-			e.p.stop("shutdown")
+			e.p.retire("shutdown")
 		}
 	}
 	for _, e := range entries {
