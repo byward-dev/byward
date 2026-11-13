@@ -307,9 +307,10 @@ configured, the upstream credential and an On-Behalf-Of token for a downstream A
       name does unless `NO_PROXY` lists it, even one that resolves to a loopback address. A proxy
       setting Go cannot parse is ignored, and the hop then goes direct. A setting whose credentials
       hold an unescaped `/`, `?` or `#` makes Go dial part of the credentials as the proxy host.
-      Every error through it (the relay's "upstream error" log, IdP sign-in, refresh, discovery
-      and readiness failures, and doctor's checks) then names the cause instead of quoting the
-      address, and `byward doctor` warns about the setting.
+      The relay's "upstream error" log, IdP sign-in, refresh, discovery and readiness failures,
+      and doctor's checks then name the cause instead of quoting the address, and
+      `byward doctor` warns about the setting. Trace export errors are not covered yet
+      ([#258](https://github.com/byward-dev/byward/issues/258)).
 
 ## Strip the upstream's header-driven settings
 

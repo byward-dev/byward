@@ -3,7 +3,6 @@ package entra
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -12,16 +11,15 @@ import (
 
 	"github.com/byward-dev/byward/internal/envproxy"
 	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/testutil/closedport"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
 // A refresh through a proxy setting Go misread fails as Unavailable either way, so callers try
 // later; with the IdP client's redaction its error never quotes the address Go dialled, which the
 // bare transport's error does.
-func TestARefreshThroughAMisreadProxyStaysUnavailableAndNeverQuotesItsAddress(t *testing.T) {
-	gone := httptest.NewServer(http.NotFoundHandler())
-	addr := gone.Listener.Addr().String() // nothing listens here once closed: the dial fails at once
-	gone.Close()
+func TestARefreshThroughAMisreadProxyStaysUnavailableAndRedactionKeepsItsAddressOut(t *testing.T) {
+	addr := closedport.Addr(t)
 	pf := (&httpproxy.Config{HTTPSProxy: addr + "/pw-secret@egress.example:3128"}).ProxyFunc()
 	base := http.DefaultTransport.(*http.Transport).Clone()
 	base.Proxy = func(r *http.Request) (*url.URL, error) { return pf(r.URL) }

@@ -1,9 +1,11 @@
 package envproxy
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -12,16 +14,9 @@ import (
 	"testing"
 
 	"golang.org/x/net/http/httpproxy"
-)
 
-// closedAddr is a local address nothing listens on, so every dial to it fails at once.
-func closedAddr(t *testing.T) string {
-	t.Helper()
-	s := httptest.NewServer(http.NotFoundHandler())
-	addr := s.Listener.Addr().String()
-	s.Close()
-	return addr
-}
+	"github.com/byward-dev/byward/internal/testutil/closedport"
+)
 
 // through is a transport whose proxy is setting, read as Go reads the environment.
 func through(setting string) *http.Transport {
@@ -45,24 +40,30 @@ func chain(err error) string {
 // its chain, quotes the address Go dialled, which is part of the credentials. Through a well-formed
 // proxy the error is the transport's own, and it does quote that address.
 func TestATransportErrorThroughAMisreadProxyNeverQuotesItsAddress(t *testing.T) {
-	addr := closedAddr(t)
+	addr := closedport.Addr(t)
+	const target = "https://login.example/.well-known/openid-configuration"
 	for _, tc := range []struct {
 		name    string
 		setting string
 		misread bool
+		quotes  bool // the bare transport's error quotes the dialled address: what the redaction hides
 	}{
 		// #185's split settings, aimed at the closed port: Go dials user:password-prefix.
-		{"a slash", addr + "/pw-secret@egress.example:3128", true},
-		{"a question mark", "http://" + addr + "?pw-secret@egress.example:3128", true},
-		{"a setting that ends at a question mark", "http://" + addr + "?", true},
-		{"a hash", addr + "#pw-secret@egress.example:3128", true},
-		{"a password Go cannot retry", "ops:pw/secret@egress.example:3128", true},
-		{"a well-formed proxy's error is its own", "http://" + addr, false},
-		{"a trailing slash is well formed", "http://" + addr + "/", false},
+		{"a slash", addr + "/pw-secret@egress.example:3128", true, true},
+		{"a question mark", "http://" + addr + "?pw-secret@egress.example:3128", true, true},
+		{"a setting that ends at a question mark", "http://" + addr + "?", true, true},
+		{"a hash", addr + "#pw-secret@egress.example:3128", true, true},
+		// An opaque URL with no host: Go dials ":0", so only the cause shows it was caught.
+		{"a setting Go cannot reparse", "ops:pw/secret@egress.example:3128", true, false},
+		{"a well-formed proxy's error is its own", "http://" + addr, false, true},
+		{"a trailing slash is well formed", "http://" + addr + "/", false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if _, bare := (&http.Client{Transport: through(tc.setting)}).Get(target); bare == nil || strings.Contains(bare.Error(), addr) != tc.quotes {
+				t.Fatalf("the bare transport's error %v quotes %s: %v, want %v", bare, addr, bare != nil && strings.Contains(bare.Error(), addr), tc.quotes)
+			}
 			c := &http.Client{Transport: Redact(through(tc.setting))}
-			_, err := c.Get("https://login.example/.well-known/openid-configuration")
+			_, err := c.Get(target)
 			if err == nil {
 				t.Fatal("the request through a closed proxy succeeded")
 			}
@@ -70,8 +71,8 @@ func TestATransportErrorThroughAMisreadProxyNeverQuotesItsAddress(t *testing.T) 
 			if errors.As(err, &redacted) != tc.misread || strings.Contains(err.Error(), Cause) != tc.misread {
 				t.Fatalf("error %q: redacted %v, want %v", err, errors.As(err, &redacted), tc.misread)
 			}
-			if got := strings.Contains(chain(err), addr); got == tc.misread {
-				t.Fatalf("error chain %q shows the dialled address: %v, want %v", chain(err), got, !tc.misread)
+			if got := strings.Contains(chain(err), addr); got != (tc.quotes && !tc.misread) {
+				t.Fatalf("error chain %q shows the dialled address: %v, want %v", chain(err), got, tc.quotes && !tc.misread)
 			}
 		})
 	}
@@ -120,6 +121,9 @@ func TestARedactedErrorKeepsTheOriginalsClass(t *testing.T) {
 			if classOf(redacted) != classOf(plain) {
 				t.Fatalf("redacted answers %s, the original %s", classOf(redacted), classOf(plain))
 			}
+			if ne := (net.Error)(nil); !errors.As(redacted, &ne) || ne.Temporary() != ne.Timeout() { //nolint:staticcheck // Temporary is net.Error's, deprecated but required
+				t.Fatalf("redacted %#v: Temporary must answer as Timeout", redacted)
+			}
 		})
 	}
 }
@@ -127,7 +131,7 @@ func TestARedactedErrorKeepsTheOriginalsClass(t *testing.T) {
 // Through a well-formed proxy, or none, Redact passes the transport's error through untouched: with
 // no proxy the very value the dial returned, and through a well-formed one the transport's own
 // error, as the bare transport gives it. A response passes through unchanged.
-func TestRedactPassesAWellFormedProxysErrorThroughAsTheSameValue(t *testing.T) {
+func TestRedactPassesTheSameValueWithNoProxyAndTheTransportsOwnErrorThroughAWellFormedOne(t *testing.T) {
 	want := errors.New("connect: connection refused")
 	direct := failingDial("", want)
 	direct.Proxy = nil
@@ -138,12 +142,14 @@ func TestRedactPassesAWellFormedProxysErrorThroughAsTheSameValue(t *testing.T) {
 	proxied := failingDial("http://127.0.0.1:4711", want)
 	_, bare := proxied.RoundTrip(req())
 	_, err := Redact(proxied).RoundTrip(req())
-	if !errors.Is(err, want) || errors.As(err, new(*Error)) || bare == nil || err.Error() != bare.Error() {
+	var opErr *net.OpError
+	if !errors.Is(err, want) || errors.As(err, new(*Error)) || bare == nil || err.Error() != bare.Error() || !errors.As(err, &opErr) || err != error(opErr) { //nolint:errorlint // the transport's own *net.OpError, not a wrap
 		t.Fatalf("through a well-formed proxy: error %#v, want the transport's own %#v", err, bare)
 	}
 	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) }))
 	t.Cleanup(ok.Close)
 	base := http.DefaultTransport.(*http.Transport).Clone()
+	base.Proxy = nil // not the environment's: this checks a response, not a proxy
 	res, err := Redact(base).RoundTrip(httptest.NewRequest(http.MethodGet, ok.URL, nil))
 	if err != nil || res.StatusCode != http.StatusTeapot {
 		t.Fatalf("response %v, error %v; want the upstream's 418", res, err)
@@ -171,5 +177,61 @@ func TestMalformedJudgesTheProxyGoRead(t *testing.T) {
 	}
 	if Malformed(nil) {
 		t.Error("no proxy counts as malformed")
+	}
+}
+
+// A response body that breaks off through a proxy Go misread (the dialled address answers, then
+// resets) gives a read error that says only the cause; through a well-formed proxy the read error is
+// the transport's own and quotes that address.
+func TestABodyThatBreaksOffThroughAMisreadProxyNeverQuotesItsAddress(t *testing.T) {
+	misread := func(addr string) string { return addr + "/pw-secret@egress.example:3128" }
+	for _, tc := range []struct {
+		name     string
+		setting  func(addr string) string
+		misread  bool
+		complete bool // the proxy sends the whole body: it reads as sent, with no error
+	}{
+		{"a misread proxy's address is never quoted", misread, true, false},
+		{"a whole body through a misread proxy reads as sent", misread, true, true},
+		{"a well-formed proxy's read error is its own", func(addr string) string { return "http://" + addr }, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ln, err := net.Listen("tcp", "127.0.0.1:0") // the "proxy" Go dials: it answers, then resets mid-body
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = ln.Close() })
+			go func() {
+				c, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				_, _ = http.ReadRequest(bufio.NewReader(c))
+				if tc.complete {
+					_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Length: 7\r\n\r\npartial")
+					_ = c.Close()
+					return
+				}
+				_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\npartial")
+				_ = c.(*net.TCPConn).SetLinger(0) // close with a reset, so the read error names the addresses
+				_ = c.Close()
+			}()
+			addr := ln.Addr().String()
+			res, err := (&http.Client{Transport: Redact(through(tc.setting(addr)))}).Get("http://login.example/")
+			if err != nil {
+				t.Fatalf("the proxy answered, but the request failed: %v", err)
+			}
+			body, err := io.ReadAll(res.Body)
+			_ = res.Body.Close()
+			if tc.complete {
+				if err != nil || string(body) != "partial" {
+					t.Fatalf("body %q, error %v; want the whole body and no error", body, err)
+				}
+				return
+			}
+			if err == nil || strings.Contains(chain(err), addr) == tc.misread || strings.Contains(err.Error(), Cause) != tc.misread {
+				t.Fatalf("read error %v; misread %v", err, tc.misread)
+			}
+		})
 	}
 }

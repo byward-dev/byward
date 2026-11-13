@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"net/http/httptrace"
 	"net/textproto"
 	"net/url"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -22,7 +24,9 @@ import (
 
 	"github.com/byward-dev/byward/internal/envproxy"
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/testutil/closedport"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
+	"github.com/byward-dev/byward/internal/testutil/rerun"
 	"golang.org/x/net/http/httpproxy"
 )
 
@@ -764,9 +768,7 @@ func withProxy(proxy func(*http.Request) (*url.URL, error)) Option {
 // and the client still gets 502. A well-formed proxy's error is logged as before, and it shows the
 // address Go dialled, which is what makes the error unsafe to log for a misread setting.
 func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLogAndAWellFormedProxysErrorStillDoes(t *testing.T) {
-	closed := httptest.NewServer(http.NotFoundHandler())
-	addr := closed.Listener.Addr().String() // nothing listens here once closed: every dial fails at once
-	closed.Close()
+	addr := closedport.Addr(t)
 	for _, tc := range []struct {
 		name    string
 		setting string
@@ -854,6 +856,38 @@ func TestABodyThatBreaksOffReachesTheUpstreamErrorLogAndNeverQuotesAMisreadProxy
 			if !tc.misread && (!strings.Contains(logs.String(), `error="httputil: ReverseProxy read error during body copy: `) ||
 				!strings.Contains(logs.String(), addr) || strings.Contains(logs.String(), `\n"`)) {
 				t.Fatalf("log %q; want ReverseProxy's line for a well-formed proxy, with the address Go dialled", logs.String())
+			}
+		})
+	}
+}
+
+// The relay, as production builds it, reads the environment's proxy (once per process, so the check
+// runs in a child process): through a setting Go misread, the upstream error names the cause; through
+// a well-formed one it is the transport's own.
+func TestTheRelayReadsTheEnvironmentProxyAndNamesAMisreadOnesCause(t *testing.T) {
+	if rerun.Child() {
+		u, _ := url.Parse("http://mcp.upstream.example/mcp")
+		w := httptest.NewRecorder()
+		New(slog.New(slog.NewTextHandler(os.Stdout, nil)), u).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader("{}")))
+		fmt.Printf("STATUS=%d\n", w.Code)
+		return
+	}
+	addr := closedport.Addr(t)
+	for _, tc := range []struct {
+		name    string
+		setting string
+		misread bool
+	}{
+		{"a misread setting names the cause", addr + "/pw-secret@egress.example:3128", true},
+		{"a well-formed setting's error is its own", "http://" + addr, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := rerun.Run(t, "TestTheRelayReadsTheEnvironmentProxyAndNamesAMisreadOnesCause", rerun.Proxy(tc.setting)...)
+			if !strings.Contains(got, "STATUS=502") || !strings.Contains(got, `msg="upstream error"`) {
+				t.Fatalf("child output %q; want 502 and the upstream error logged", got)
+			}
+			if strings.Contains(got, `reason="`+envproxy.Cause+`"`) != tc.misread || strings.Contains(got, addr) == tc.misread {
+				t.Fatalf("child output %q; misread %v", got, tc.misread)
 			}
 		})
 	}

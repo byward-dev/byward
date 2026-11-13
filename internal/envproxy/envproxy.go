@@ -8,6 +8,7 @@ package envproxy
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -28,23 +29,56 @@ func Malformed(via *url.URL) bool {
 	return via != nil && (via.Host == "" || via.Opaque != "" || via.Path != "" && via.Path != "/" || via.RawQuery != "" || via.ForceQuery || via.Fragment != "")
 }
 
-// Redact returns t, whose transport errors are replaced by an *Error when the request went through
-// a proxy Go misread, judged by t's own Proxy. Any other error, and every response, passes through
-// unchanged.
+// Redact returns t, whose errors through a proxy Go misread, judged by t's own Proxy, are replaced
+// by an *Error: a failed round trip, and a read of the response body that fails (a proxy that
+// answers, then resets). Any other error, and every response through any other proxy, passes
+// through unchanged.
 func Redact(t *http.Transport) http.RoundTripper { return redacting{t} }
 
 type redacting struct{ t *http.Transport }
 
 func (r redacting) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := r.t.RoundTrip(req)
-	if err == nil || r.t.Proxy == nil {
+	if r.t.Proxy == nil {
 		return resp, err
 	}
 	if via, perr := r.t.Proxy(req); perr != nil || !Malformed(via) {
 		return resp, err
 	}
+	if err != nil {
+		return nil, redact(err)
+	}
+	resp.Body = redactedBody{resp.Body}
+	return resp, nil
+}
+
+// CloseIdleConnections passes through to the transport, as http.Client expects of one.
+func (r redacting) CloseIdleConnections() { r.t.CloseIdleConnections() }
+
+// redactedBody is a response body through a misread proxy: a read error that would quote the
+// address Go dialled says only Cause. io.EOF and io.ErrUnexpectedEOF quote nothing and pass through.
+type redactedBody struct{ io.ReadCloser }
+
+func (b redactedBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err == nil || err == io.EOF || errors.Is(err, io.ErrUnexpectedEOF) { //nolint:errorlint // io.EOF is returned unwrapped, by contract
+		return n, err
+	}
+	return n, redact(err)
+}
+
+func (b redactedBody) Close() error {
+	if err := b.ReadCloser.Close(); err != nil {
+		return redact(err)
+	}
+	return nil
+}
+
+// redact is err as an *Error: the cause alone, answering as err did for a timeout, a cancellation
+// and a passed deadline.
+func redact(err error) *Error {
 	var ne net.Error
-	return nil, &Error{timeout: errors.As(err, &ne) && ne.Timeout(), canceled: errors.Is(err, context.Canceled),
+	return &Error{timeout: errors.As(err, &ne) && ne.Timeout(), canceled: errors.Is(err, context.Canceled),
 		deadline: errors.Is(err, context.DeadlineExceeded)}
 }
 
