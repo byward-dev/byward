@@ -14,7 +14,7 @@ This document defines the scope and boundaries for independent security reviews 
 - **Consent:** Per-client consent screens with CSRF protections (`Origin`, `Sec-Fetch-Site`, `__Host-` cookies, 10-minute flow expiry).
 
 ### B. Token Handling & Cryptography
-- **Sealed Tokens:** Access and refresh tokens are encrypted and authenticated using AES-256-GCM (`internal/token/token.go`). Associated data binds the resource URL and token type, and tokens carry strict expiration (`exp`).
+- **Sealed Tokens:** Access tokens and authorization codes are encrypted and authenticated using AES-256-GCM (`internal/token/token.go`). Refresh tokens are opaque random strings stored as SHA-256 hashes. Associated data binds the resource URL and token type, and tokens carry strict expiration (`exp`).
 - **Refresh & Revocation:** Access tokens last 1 hour. Refresh tokens rotate on every use, with a 30-second grace period for retries; reuse outside the grace revokes the grant. RFC 7009 revocation is fully supported.
 
 ### C. IdP Adapters
