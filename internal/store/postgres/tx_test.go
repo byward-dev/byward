@@ -65,8 +65,8 @@ func TestAWriteIsRetriedOnlyWhileItLosesRaces(t *testing.T) {
 	}
 }
 
-// A context that ends during the pause after a lost race stops the retries.
-func TestACancelledWriteStopsRetrying(t *testing.T) {
+// A context that has ended by the time a race is lost stops the retries before another attempt.
+func TestAWriteWhoseContextEndedIsNotAttemptedAgain(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	calls := 0
 	err := retryLostRaces(ctx, func() error {
@@ -74,7 +74,8 @@ func TestACancelledWriteStopsRetrying(t *testing.T) {
 		cancel()
 		return &pgconn.PgError{Code: "40001"}
 	})
-	if calls != 1 || !errors.Is(err, context.Canceled) {
-		t.Fatalf("%d attempts, err = %v; want 1 attempt and context.Canceled", calls, err)
+	var pg *pgconn.PgError
+	if calls != 1 || !errors.Is(err, context.Canceled) || !errors.As(err, &pg) {
+		t.Fatalf("%d attempts, err = %v; want 1 attempt, context.Canceled and the lost race", calls, err)
 	}
 }

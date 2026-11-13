@@ -45,12 +45,12 @@ func retryLostRaces(ctx context.Context, attempt func() error) error {
 			return fmt.Errorf("postgres store: still conflicting after %d attempts: %w", n, err)
 		}
 		if ctx.Err() != nil { // checked first: a select with a timer that has also fired picks either
-			return fmt.Errorf("postgres store: %w (after %v)", ctx.Err(), err)
+			return fmt.Errorf("postgres store: %w (after %w)", ctx.Err(), err)
 		}
 		wait := time.Duration(rand.Int64N(int64(min(time.Millisecond<<min(n, 7), 100*time.Millisecond)))) //nolint:gosec // G404: jitter, not a secret
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("postgres store: %w (after %v)", ctx.Err(), err)
+			return fmt.Errorf("postgres store: %w (after %w)", ctx.Err(), err)
 		case <-time.After(wait):
 		}
 	}
