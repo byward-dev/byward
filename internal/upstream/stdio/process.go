@@ -50,7 +50,7 @@ type Process struct {
 	held     int       // open leases; the idle timer does not run while any is held
 	traffic  time.Time // the last stdin or stdout message, or the start
 	reaped   func()    // processOptions.reaped
-	evicted  bool      // stopped to make room under a process cap
+	chosen   bool      // stopped by byward's choice (idle, a cap, a session's end, shutdown), not a fault
 	timers   []Timer
 	stopping bool
 	exited   bool
@@ -84,7 +84,7 @@ func startProcess(cmd *exec.Cmd, stdin, stdout, stderr *os.File, sessionDir stri
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		if p.held == 0 { // checked and stopped under one lock: a lease taken meanwhile keeps the process
-			p.stopLocked("idle")
+			p.retireLocked("idle")
 		}
 	})
 	p.mu.Unlock()
@@ -176,22 +176,29 @@ func (p *Process) lastTraffic() time.Time {
 	return p.traffic
 }
 
-// evict stops the process to make room under a cap. Its streams end as ones the server chose to
-// end (a subscriptions/listen gets a completion result), not as after a crash.
-func (p *Process) evict(reason string) {
+// retire stops the process by byward's choice: idle, to make room under a cap, at a session's end
+// or at shutdown. Its streams end as ones the server chose to end (a subscriptions/listen gets a
+// completion result), not as after a crash.
+func (p *Process) retire(reason string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.retireLocked(reason)
+}
+
+// retireLocked is retire for callers holding p.mu. A process already stopping or exited keeps the
+// reason it had: a fault stays a fault.
+func (p *Process) retireLocked(reason string) {
 	if !p.stopping && !p.exited {
-		p.evicted = true
+		p.chosen = true
 	}
 	p.stopLocked(reason)
 }
 
-// wasEvicted reports whether evict stopped the process.
-func (p *Process) wasEvicted() bool {
+// endedByChoice reports whether retire stopped the process.
+func (p *Process) endedByChoice() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.evicted
+	return p.chosen
 }
 
 // hold marks the process in use: an open request or stream, however quiet, keeps it from idling
@@ -215,9 +222,9 @@ func (p *Process) unhold() {
 	}
 }
 
-// stop shuts the process down as the MCP stdio transport says: close stdin, wait, then SIGTERM
-// and finally SIGKILL to the whole process group, each after the grace period. It returns at
-// once; Done reports the exit.
+// stop shuts the process down after a fault (retire is for a stop byward chose), as the MCP stdio
+// transport says: close stdin, wait, then SIGTERM and finally SIGKILL to the whole process group,
+// each after the grace period. It returns at once; Done reports the exit.
 func (p *Process) stop(reason string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

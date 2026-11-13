@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -371,6 +372,96 @@ func TestLooseUpstreamEnvFileRefusesToStartInEveryMode(t *testing.T) {
 
 // Invariant 13 in the modern era: each user's requests run in that user's own upstream process,
 // through the real Guard and session binding, and no token reaches it.
+// #180, through Run: shutting down ends an open subscriptions/listen with its completion result
+// under the client's own id before the stream closes, not by cutting it off (2026-07-28
+// subscriptions).
+func TestShutdownEndsAnOpenListenWithItsCompletionResultBeforeItsStreamCloses(t *testing.T) {
+	bin, err := fakeStdio()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := config.Load([]string{"--", bin, "-modern"}, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp",
+		"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_LISTEN=127.0.0.1:0", "BYWARD_INTERNAL_LISTEN=127.0.0.1:0"}, os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs := &listenWatcher{listening: make(chan struct{})}
+	log := logging.New(logs, "json")
+	s, err := New(cfg, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- Run(ctx, s, log) }()
+	select {
+	case <-logs.listening:
+	case err := <-done:
+		t.Fatalf("Run returned before listening: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not log its listening address within 5s")
+	}
+	body := `{"jsonrpc":"2.0","id":"L","method":"subscriptions/listen","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28",` +
+		`"io.modelcontextprotocol/clientCapabilities":{}},"notifications":{"toolsListChanged":true}}}`
+	r, _ := http.NewRequest(http.MethodPost, "http://"+listenLine.FindStringSubmatch(logs.String())[1]+"/mcp", strings.NewReader(body))
+	r.Host = "127.0.0.1:8080"
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json, text/event-stream")
+	r.Header.Set("MCP-Protocol-Version", "2026-07-28")
+	r.Header.Set("Mcp-Method", "subscriptions/listen")
+	res, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = res.Body.Close() }()
+	events := make(chan string)
+	go func() {
+		defer close(events)
+		sc := bufio.NewScanner(res.Body)
+		for sc.Scan() {
+			if d, ok := strings.CutPrefix(sc.Text(), "data: "); ok {
+				events <- d
+			}
+		}
+	}()
+	next := func() (string, bool) {
+		select {
+		case d, ok := <-events:
+			return d, ok
+		case <-time.After(10 * time.Second):
+			t.Fatal("no event within 10s")
+			return "", false
+		}
+	}
+	if ack, _ := next(); !strings.Contains(ack, "notifications/subscriptions/acknowledged") {
+		t.Fatalf("status %d, first event %s; want the acknowledgement", res.StatusCode, ack)
+	}
+	cancel()
+	var rest []string
+	for d, ok := next(); ok; d, ok = next() {
+		rest = append(rest, d)
+	}
+	const complete = `{"jsonrpc":"2.0","id":"L","result":{"resultType":"complete","_meta":{"io.modelcontextprotocol/subscriptionId":"L"}}}`
+	if len(rest) != 1 || !sameJSONValue(rest[0], complete) {
+		t.Fatalf("after shutdown the listen got %q, want its completion result only, under its own id", rest)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+}
+
+// sameJSONValue reports whether got and want are the same JSON value, whatever the key order.
+func sameJSONValue(got, want string) bool {
+	var g, w any
+	return json.Unmarshal([]byte(got), &g) == nil && json.Unmarshal([]byte(want), &w) == nil && reflect.DeepEqual(g, w)
+}
+
 func TestModernEraRequestsRunInTheUsersOwnUpstreamProcessWithNoToken(t *testing.T) {
 	srv, _, _ := stdioProxyRunning(t, []string{"-modern"})
 	env := func(token string) []string {

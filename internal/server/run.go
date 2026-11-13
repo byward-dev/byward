@@ -20,6 +20,9 @@ type Servers struct {
 
 	background func(ctx context.Context) // nil without authentication; runs while the public listener serves
 	closeStore func() error              // nil without authentication; releases the store once Run is done
+	// drainUpstream ends the upstream's open subscriptions with a completion result before the
+	// public listener cancels its requests; nil for HTTP.
+	drainUpstream func()
 	// closeUpstream stops the upstream's processes once the public listener is closed; nil for HTTP.
 	closeUpstream func(context.Context) error
 }
@@ -36,9 +39,10 @@ func hardened(addr string, h http.Handler, log *slog.Logger) *http.Server {
 	}
 }
 
-// Run serves until ctx is done, then shuts down within ShutdownTimeout: readiness fails first, the
-// public listener closes (open streams are cancelled through their request contexts), and the
-// internal listener goes last so probes and scrapes see the drain.
+// Run serves until ctx is done, then shuts down within ShutdownTimeout: readiness fails first and
+// the upstream's subscriptions end with a completion result, the public listener closes (open
+// streams are cancelled through their request contexts), and the internal listener goes last so
+// probes and scrapes see the drain.
 func Run(ctx context.Context, s *Servers, log *slog.Logger) error {
 	if s.closeStore != nil { // deferred first, so it runs after the background work has stopped
 		defer func() {
@@ -69,8 +73,12 @@ func Run(ctx context.Context, s *Servers, log *slog.Logger) error {
 			}
 		}()
 	}
+	drain := s.Health.Drain
+	if s.drainUpstream != nil {
+		drain = func() { s.Health.Drain(); s.drainUpstream() }
+	}
 	if s.Internal == nil {
-		return serve(ctx, s.Public, log, s.Health.Drain, listening)
+		return serve(ctx, s.Public, log, drain, listening)
 	}
 	ln, err := net.Listen("tcp", s.Internal.Addr)
 	if err != nil {
@@ -79,7 +87,7 @@ func Run(ctx context.Context, s *Servers, log *slog.Logger) error {
 	log.Info("internal listener", "listen", ln.Addr().String())
 	internalErr := make(chan error, 1)
 	go func() { internalErr <- s.Internal.Serve(ln) }()
-	err = serve(ctx, s.Public, log, s.Health.Drain, listening)
+	err = serve(ctx, s.Public, log, drain, listening)
 	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ShutdownTimeout)
 	defer cancel()
 	if serr := s.Internal.Shutdown(shutdownCtx); serr != nil && err == nil {

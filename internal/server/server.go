@@ -155,7 +155,7 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 		background, closeStore = a.background, a.closeStore
 	}
 	s := &Servers{Public: hardened(cfg.Listen, h, log), Health: health.New(log, checks...), background: background,
-		closeStore: closeStore, closeUpstream: up.shutdown}
+		closeStore: closeStore, drainUpstream: up.drain, closeUpstream: up.shutdown}
 	if cfg.InternalListen != "" {
 		mux := http.NewServeMux()
 		mux.Handle("GET /metrics", m.Handler())

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -306,20 +307,20 @@ func TestRequestIDsAndProgressTokensMustBeStringsOrIntegers(t *testing.T) {
 	}
 }
 
-func TestAnExitedProcessesRequestGetsItsQueuedAnswerElseAnErrorOrForAnEvictedListenACompletion(t *testing.T) {
+func TestAnExitedProcessesRequestGetsItsQueuedAnswerElseAnErrorOrForAListenBywardEndedACompletion(t *testing.T) {
 	const answered = `{"jsonrpc":"2.0","id":7,"result":"answered"}`
 	const complete = `{"jsonrpc":"2.0","id":7,"result":{"resultType":"complete","_meta":{"io.modelcontextprotocol/subscriptionId":7}}}`
 	const exited = `{"jsonrpc":"2.0","id":7,"error":{"code":-32603,"message":"upstream process exited"}}`
 	cases := []struct {
 		name             string
-		listen, evicted  bool
+		listen, chosen   bool
 		queued, wantBody string
 	}{
 		{name: "a request whose process crashed", wantBody: exited},
-		{name: "a request whose process was evicted", evicted: true, wantBody: exited},
+		{name: "a request whose process byward stopped", chosen: true, wantBody: exited},
 		{name: "a listen whose process crashed", listen: true, wantBody: exited},
-		{name: "a listen whose process was evicted", listen: true, evicted: true, wantBody: complete},
-		{name: "a queued answer goes first", listen: true, evicted: true, queued: answered, wantBody: answered},
+		{name: "a listen whose process byward stopped", listen: true, chosen: true, wantBody: complete},
+		{name: "a queued answer goes first", listen: true, chosen: true, queued: answered, wantBody: answered},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -327,7 +328,7 @@ func TestAnExitedProcessesRequestGetsItsQueuedAnswerElseAnErrorOrForAnEvictedLis
 			if tc.queued != "" {
 				q.final <- []byte(tc.queued)
 			}
-			got := exitAnswer(q, tc.evicted)
+			got := exitAnswer(q, tc.chosen)
 			if tc.queued != "" { // the upstream's own answer goes out unchanged, byte for byte
 				if string(got) != tc.wantBody {
 					t.Fatalf("got %s, want %s", got, tc.wantBody)
@@ -883,6 +884,45 @@ func TestAQuietListensProcessIsEvictedForAnotherUserAndTheListenGetsACompletionR
 	got := ev.all()
 	if len(got) != 1 || !sameJSON(t, []byte(got[0]), `{"jsonrpc":"2.0","id":"L","result":{"resultType":"complete","_meta":{"io.modelcontextprotocol/subscriptionId":"L"}}}`) {
 		t.Fatalf("the evicted listen got %q, want its completion result only", got)
+	}
+}
+
+// Shutdown (2026-07-28 subscriptions): "When the server ends a subscription on its own initiative
+// (for example, during shutdown), it SHOULD respond to the original subscriptions/listen request
+// with a completion result before closing the stream."
+func TestDrainEndsEachOpenListenWithItsCompletionResultUnderTheClientsIDAndLeavesOtherRequests(t *testing.T) {
+	b := newModernBridge(t, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	held := b.modernCtx(t, ctx, "alice", modernBody(`"h"`, "hold", "", ""))
+	if held.StatusCode != http.StatusOK {
+		t.Fatalf("held request: status %d", held.StatusCode)
+	}
+	listens := map[string]*events{`"L"`: b.listenModern(t, context.Background(), `"L"`), `9`: b.listenModern(t, context.Background(), `9`)}
+	_, res := lastResult(t, readEvents(t, b.modern(t, "alice", modernBody(`1`, "listens", "", ""))))
+	var open []string // the listens' ids as the upstream received them
+	if err := json.Unmarshal(res, &open); err != nil || len(open) != 2 {
+		t.Fatalf("the upstream's open listens are %s (%v), want two", res, err)
+	}
+	b.m.Drain()
+	for id, ev := range listens {
+		got := ev.all()
+		want := `{"jsonrpc":"2.0","id":` + id + `,"result":{"resultType":"complete","_meta":{"io.modelcontextprotocol/subscriptionId":` + id + `}}}`
+		if len(got) != 1 || !sameJSON(t, []byte(got[0]), want) {
+			t.Fatalf("listen %s got %q, want its completion result only, under its own id", id, got)
+		}
+	}
+	// Both subscriptions are cancelled on the upstream; the held request is not, and its process
+	// keeps running until Shutdown.
+	var ids []string
+	eventually(t, "the upstream to see both cancellations", func() bool { ids = b.upstreamCancellations(t); return len(ids) >= 2 })
+	slices.Sort(ids)
+	slices.Sort(open)
+	if !slices.Equal(ids, open) {
+		t.Fatalf("upstream saw cancellations %q, want exactly the listens' %q", ids, open)
+	}
+	if b.m.Len() != 1 {
+		t.Fatalf("Len = %d after Drain, want the process still running", b.m.Len())
 	}
 }
 

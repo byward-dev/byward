@@ -27,7 +27,9 @@ var noAuthIdentity = stdio.Identity{Subject: "anonymous", Issuer: "urn:byward:no
 // upstream is the configured upstream adapter (ADR-0003).
 type upstream struct {
 	handler http.Handler
-	// shutdown stops what the adapter runs; nil for an HTTP upstream.
+	// drain ends the adapter's open subscriptions before the requests are cancelled; shutdown stops
+	// what the adapter runs. Both nil for an HTTP upstream.
+	drain    func()
 	shutdown func(context.Context) error
 }
 
@@ -59,7 +61,7 @@ func newUpstream(cfg *config.Config, log *slog.Logger, o Observability, minter *
 		// token it gets is cached for the process to ask for.
 		h = down.middleware(h)
 	}
-	return &upstream{handler: h, shutdown: m.Shutdown}, nil
+	return &upstream{handler: h, drain: m.Drain, shutdown: m.Shutdown}, nil
 }
 
 // stdioConfig is the stdio upstream's settings from cfg, with each eviction audited.
