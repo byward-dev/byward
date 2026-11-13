@@ -51,10 +51,11 @@ func TestAnOTELSettingTheExporterRejectsIsLoggedWithoutItsValue(t *testing.T) {
 	}
 }
 
-// An error resource detection reports while tracing is set up reaches the log, not OpenTelemetry's
-// default stderr print: the error handler goes in before the resource. Detection runs once per
-// process, so the check runs in a child process.
-func TestAResourceDetectionErrorReachesTheLogNotStderr(t *testing.T) {
+// An SDK setting OpenTelemetry rejects is logged by its name at warn level, never by its value,
+// in the log or on stderr: OTel's own error quotes the value (part of it for a bad escape), which can
+// be a credential pasted by mistake. Each row runs in a child process: the SDK reads the resource
+// settings once per process, and the check covers the child's stderr.
+func TestAnSDKSettingOTELRejectsIsLoggedByNameWithoutItsValue(t *testing.T) {
 	if rerun.Child() {
 		log := slog.New(slog.NewTextHandler(os.Stdout, nil))
 		if _, shutdown, err := Setup(context.Background(), os.Getenv, "test", log); err == nil {
@@ -62,15 +63,39 @@ func TestAResourceDetectionErrorReachesTheLogNotStderr(t *testing.T) {
 		}
 		return
 	}
-	clearOTELEnv(t)
-	// No proxy setting: a misread one in the developer's shell would redact the error to the cause.
-	got := rerun.Run(t, "TestAResourceDetectionErrorReachesTheLogNotStderr", append(rerun.ProxyEnv(""), "OTEL_TRACES_EXPORTER=console", "OTEL_RESOURCE_ATTRIBUTES=novalue")...)
-	if !strings.Contains(got, "error detecting resource") {
-		t.Fatalf("child output %q; want resource detection's error", got)
-	}
-	for _, line := range strings.Split(got, "\n") {
-		if strings.Contains(line, "error detecting resource") && !strings.Contains(line, `level=WARN msg="tracing error"`) {
-			t.Fatalf("line %q; want resource detection's error only in the log, at warn level", line)
-		}
+	const secret = "s3cret-token"
+	const samplerSettings = "OTEL_TRACES_SAMPLER or OTEL_TRACES_SAMPLER_ARG"
+	for _, tc := range []struct {
+		name      string
+		env       []string
+		notLogged string // the part of the value that must reach neither the log nor stderr
+		loggedAs  string // the setting the log names
+	}{
+		{"a resource attribute without '='", []string{"OTEL_RESOURCE_ATTRIBUTES=" + secret}, secret, "OTEL_RESOURCE_ATTRIBUTES"},
+		// OTel's error quotes only the bad escape, so that is what must stay out.
+		{"a resource attribute value that cannot be unescaped", []string{"OTEL_RESOURCE_ATTRIBUTES=k=%zz"}, "%zz", "OTEL_RESOURCE_ATTRIBUTES"},
+		{"a sampler argument that is not a number", []string{"OTEL_TRACES_SAMPLER=traceidratio", "OTEL_TRACES_SAMPLER_ARG=" + secret}, secret, samplerSettings},
+		{"a parent-based sampler argument that is not a number", []string{"OTEL_TRACES_SAMPLER=parentbased_traceidratio", "OTEL_TRACES_SAMPLER_ARG=" + secret}, secret, samplerSettings},
+		// A ratio that parses but is out of range: OTel's error does not quote it, so the row pins the
+		// name; notLogged guards a later OTel that would (1e9 cannot occur in a timestamp).
+		{"a sampler ratio above 1", []string{"OTEL_TRACES_SAMPLER=traceidratio", "OTEL_TRACES_SAMPLER_ARG=1e9"}, "1e9", samplerSettings},
+		{"a sampler OTel does not know", []string{"OTEL_TRACES_SAMPLER=" + secret}, secret, samplerSettings},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clearOTELEnv(t)
+			got := rerun.Run(t, "TestAnSDKSettingOTELRejectsIsLoggedByNameWithoutItsValue", append(tc.env, "OTEL_TRACES_EXPORTER=console")...)
+			if strings.Contains(got, tc.notLogged) {
+				t.Fatalf("child output %q; want no %q from the setting's value", got, tc.notLogged)
+			}
+			want := `level=WARN msg="tracing error" error="invalid ` + tc.loggedAs + `"`
+			if !strings.Contains(got, want) {
+				t.Fatalf("child output %q; want %q", got, want)
+			}
+			for _, line := range strings.Split(got, "\n") {
+				if strings.Contains(line, `msg="tracing error"`) && !strings.Contains(line, want) {
+					t.Fatalf("line %q; want every tracing error to be %q", line, want)
+				}
+			}
+		})
 	}
 }
