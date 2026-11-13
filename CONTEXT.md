@@ -19,7 +19,7 @@ How far the **broker** vouches for an **MCP client**'s identity on the **consent
 _Avoid_: verified app, trusted client (alone)
 
 **IdP**:
-The external identity provider that authenticates the **user** (Entra ID, Keycloak, Okta, Google, …). Always the IdP — never "upstream".
+The external identity provider that authenticates the **user** (Entra ID, Keycloak, Okta, Google, …), reached through the **environment proxy** when one applies. Always the IdP — never "upstream".
 _Avoid_: upstream, auth server (ambiguous), provider (alone, except in code as `idp.Provider`)
 
 **IdP app**:
@@ -35,7 +35,7 @@ A per-minute budget of requests to one of the **broker**'s OAuth endpoints from 
 _Avoid_: throttle (alone), quota
 
 **Upstream**:
-The MCP server behind the proxy — reached over HTTP or spawned as a stdio process. Always the MCP server.
+The MCP server behind the proxy — reached over HTTP (through the **environment proxy** when one applies) or spawned as a stdio process. Always the MCP server.
 _Avoid_: backend, target, origin, downstream
 
 **Upstream process**:
@@ -102,6 +102,10 @@ _Avoid_: policy, ACL, authorization rules (alone)
 The **user**'s explicit, per-**MCP client** approval recorded by the **broker** before it forwards an authorization request to the **IdP** (required by the MCP security best practices against the confused-deputy problem).
 _Avoid_: approval, authorization (alone)
 
+**Environment proxy**:
+The HTTP proxy `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` name, which the relay to an HTTP **upstream**, calls to the **IdP**, doctor's self-probe and trace export go through; never byward itself (`internal/envproxy`).
+_Avoid_: proxy (alone), egress proxy, forward proxy
+
 **User**:
 The human who signs in at the **IdP** and on whose behalf the **MCP client** acts.
 _Avoid_: client, operator
@@ -111,6 +115,9 @@ The person who deploys and configures the proxy (IdP app, upstream, policy).
 _Avoid_: user, admin
 
 ## Flagged ambiguities
+
+- "Proxy" alone is byward. The HTTP proxy the process environment names is the **environment
+  proxy**.
 
 - The MCP spec says "upstream API" (security considerations, token passthrough) for what we call a
   **downstream API**; in this repo **upstream** is always the MCP server behind the proxy. When

@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/byward-dev/byward/internal/envproxy"
 	"github.com/byward-dev/byward/internal/logging"
 )
 
@@ -79,7 +80,7 @@ func WithResponseHeaderTimeout(d time.Duration) Option {
 // New returns a handler relaying each request to target, the upstream's MCP endpoint URL: the
 // request path is replaced by target's path; the query is kept.
 func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
-	o := options{strip: map[string]bool{}, proxy: Proxy}
+	o := options{strip: map[string]bool{}, proxy: envproxy.Proxy}
 	for _, f := range opts {
 		f(&o)
 	}
@@ -87,7 +88,7 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 	// The target is fixed and Go reads the proxy setting once, so whether the upstream's proxy is
 	// one Go misread is known now; ReverseProxy's own error lines then get the same redaction.
 	via, _ := o.proxy(&http.Request{URL: &t})
-	misread := MalformedProxy(via)
+	misread := envproxy.Malformed(via)
 	rp := &httputil.ReverseProxy{
 		ErrorLog: stdlog.New(proxyErrorLog{log: log, misread: misread}, "", 0),
 		Rewrite: func(pr *httputil.ProxyRequest) {
@@ -192,7 +193,7 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 			if misread {
 				// The error would quote the address Go dialled, which is part of the proxy's
 				// credentials (invariant 2): name the cause instead.
-				cause = []any{"reason", misreadProxy}
+				cause = []any{"reason", envproxy.Cause}
 			}
 			log.WarnContext(r.Context(), "upstream error", append([]any{"request_id", logging.RequestID(r.Context())}, cause...)...)
 			// Never echo upstream internals (invariant 15).
@@ -302,13 +303,6 @@ func redirectHint(res *http.Response) string {
 	return "the upstream points to " + loc.Scheme + "://" + loc.Host + path + "; if that is its MCP endpoint, set BYWARD_UPSTREAM_URL to it"
 }
 
-// Proxy is the HTTP proxy the relay sends a request through: the one the environment names
-// (HTTPS_PROXY, HTTP_PROXY, NO_PROXY), read once per process.
-func Proxy(r *http.Request) (*url.URL, error) { return http.ProxyFromEnvironment(r) }
-
-// misreadProxy is logged in place of an error that would quote the address Go dialled.
-const misreadProxy = "the request went through the environment's HTTP proxy, whose setting Go misread; run byward doctor"
-
 // proxyErrorLog takes ReverseProxy's own error lines (a body copy that fails, a flush that fails)
 // into the structured log; with a misread proxy setting it logs the cause in place of the line,
 // which can quote the address Go dialled.
@@ -319,19 +313,11 @@ type proxyErrorLog struct {
 
 func (l proxyErrorLog) Write(p []byte) (int, error) {
 	if l.misread {
-		l.log.Warn("upstream error", "reason", misreadProxy)
+		l.log.Warn("upstream error", "reason", envproxy.Cause)
 	} else {
 		l.log.Warn("upstream error", "error", strings.TrimSpace(string(p)))
 	}
 	return len(p), nil
-}
-
-// MalformedProxy reports whether via, a proxy Go read from the environment, is one whose
-// credentials held an unescaped character (/, ?, # and the like): Go then splits them between the
-// host it dials and the path, query or fragment, or returns an opaque URL with no host. Such a
-// proxy's address, and any error that quotes it, can hold part of the credentials.
-func MalformedProxy(via *url.URL) bool {
-	return via != nil && (via.Host == "" || via.Opaque != "" || via.Path != "" && via.Path != "/" || via.RawQuery != "" || via.ForceQuery || via.Fragment != "")
 }
 
 // withoutAccessToken drops every access_token parameter and keeps every other byte of the query in
