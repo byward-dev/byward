@@ -166,11 +166,20 @@ func postRefresh(t *testing.T, s *Servers, rt string) (int, map[string]any) {
 	return w.Code, body
 }
 
+// afterTests holds what TestMain removes once every test has run, such as a fake built for the
+// whole package; t.Cleanup cannot, as the fake outlives the test that built it.
+var afterTests []func()
+
 // TestMain keeps the package's tests off the system resolver: startup and doctor resolve the
-// upstream's host, and a test that needs a name resolved gives its own resolver.
+// upstream's host, and a test that needs a name resolved gives its own resolver. It runs
+// afterTests last.
 func TestMain(m *testing.M) {
 	lookupNetIP = func(context.Context, string) ([]netip.Addr, error) {
 		return nil, errors.New("the tests resolve no names")
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	for _, f := range afterTests {
+		f()
+	}
+	os.Exit(code)
 }
