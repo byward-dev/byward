@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace/noop"
@@ -39,6 +40,7 @@ func restoreGlobals(t *testing.T) {
 		otel.SetTracerProvider(noop.NewTracerProvider())
 		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator())
 		otel.SetErrorHandler(otel.ErrorHandlerFunc(func(error) {})) // Setup's handler logs to its test's logger
+		otel.SetLogger(logr.Discard())                              // and so does its logger
 	})
 }
 
