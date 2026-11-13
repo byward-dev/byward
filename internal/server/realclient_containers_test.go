@@ -133,9 +133,7 @@ func requireRealClients(t *testing.T) {
 // test ends: cancelling kills only the docker CLI.
 func docker(ctx context.Context, t *testing.T, work, image, network string, env, args []string, readOnly ...string) *exec.Cmd {
 	t.Helper()
-	b := make([]byte, 6)
-	_, _ = rand.Read(b)
-	name := "byward-real-client-" + hex.EncodeToString(b)
+	name := containerName(t, "byward-real-client-")
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", name).Run() }) //nolint:gosec // G204: our own container name
 	a := []string{"run", "--rm", "--name", name, "--network", network, "-u", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
 		"-e", "HOME=/tmp", "-e", "npm_config_cache=/tmp/npm", "-v", work + ":/w", "-w", "/w"}
@@ -147,6 +145,16 @@ func docker(ctx context.Context, t *testing.T, work, image, network string, env,
 	}
 	a = append(append(a, image), args...)
 	return exec.CommandContext(ctx, "docker", a...) //nolint:gosec // G204: fixed images and the test's own arguments
+}
+
+// containerName is prefix and random hex: a container name no other run uses.
+func containerName(t *testing.T, prefix string) string {
+	t.Helper()
+	b := make([]byte, 6)
+	if _, err := rand.Read(b); err != nil {
+		t.Fatal(err)
+	}
+	return prefix + hex.EncodeToString(b)
 }
 
 func freePort(t *testing.T) int {

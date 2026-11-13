@@ -17,6 +17,9 @@ sh scripts/image-digest.sh "$image" >/dev/null || fail "no well-formed digest fo
 
 user=$(docker image inspect --format '{{.Config.User}}' "$image")
 [ "$user" = "65532:65532" ] || fail "image must run as 65532:65532, Config.User is '$user'"
+# A setting baked into the image would apply to every deployment unseen (BYWARD_DEV=true, say).
+docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$image" | grep -q '^BYWARD_' \
+  && fail "the image sets BYWARD_ environment variables; settings belong to the deployment"
 for label in "org.opencontainers.image.licenses=Apache-2.0" "org.opencontainers.image.source=https://github.com/byward-dev/byward"; do
   key=${label%%=*}
   got=$(docker image inspect --format "{{index .Config.Labels \"$key\"}}" "$image")
@@ -37,10 +40,12 @@ grep -Eq '^drwx.* 65532[ /]+65532 .* var/lib/byward/?$' "$listing" \
   || fail "/var/lib/byward must be a directory owned by 65532:65532"
 # The serving check below trusts its fake IdP through SSL_CERT_DIR, which Go reads beside this
 # bundle; a real IdP needs the bundle itself.
+# 100 is well under the bundle's ~150 certificates and well over a stub's.
 rm -f "$tmp/ca"
 docker cp "$ctr:/etc/ssl/certs/ca-certificates.crt" "$tmp/ca" >/dev/null 2>&1 || true
-[ -f "$tmp/ca" ] && [ -s "$tmp/ca" ] \
-  || fail "image lacks a non-empty /etc/ssl/certs/ca-certificates.crt (the CA bundle a real IdP's TLS needs)"
+certs=$( (grep -c 'BEGIN CERTIFICATE' "$tmp/ca" 2>/dev/null) || true)
+[ "${certs:-0}" -ge 100 ] \
+  || fail "/etc/ssl/certs/ca-certificates.crt holds ${certs:-no} certificates, want the CA bundle a real IdP's TLS needs"
 for f in LICENSE third_party/go.dev/LICENSE; do
   rm -f "$tmp/licence"
   docker cp "$ctr:/usr/share/doc/byward/$f" "$tmp/licence" >/dev/null 2>&1 || true
@@ -61,9 +66,14 @@ docker run --rm --entrypoint sh "$node_image" -c 'touch /var/lib/byward/.write-t
 # request, signs a user in through a fake IdP and relays an MCP request with the identity assertion
 # (internal/server/image_test.go). The fakes listen on loopback, which the container reaches on a
 # Linux host network only.
+# go test passes with nothing run when the pattern matches no test, or the test skips: require the
+# PASS line.
 if [ "$(uname -s)" = Linux ]; then
-  BYWARD_IMAGE="$image" go test -tags integration -count=1 -run '^TestIntegrationTheReleaseImageServes$' ./internal/server/ \
-    || fail "the image does not serve (see the test output above)"
+  serve_log="$tmp/serve.log"
+  BYWARD_IMAGE="$image" go test -v -tags integration -count=1 -run '^TestIntegrationTheReleaseImageServes$' ./internal/server/ >"$serve_log" 2>&1 \
+    || { cat "$serve_log" >&2; fail "the image does not serve (see the test output above)"; }
+  grep -q '^--- PASS: TestIntegrationTheReleaseImageServes ' "$serve_log" \
+    || { cat "$serve_log" >&2; fail "the serving test did not run (renamed, skipped or not built)"; }
 else
   echo "image smoke: skipped the serving check, which needs a Linux host network (CI runs it)" >&2
 fi

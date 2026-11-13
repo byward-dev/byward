@@ -97,6 +97,30 @@ func (a asserting) call(t *testing.T, c token.Claims, header http.Header) fakeup
 	return got
 }
 
+// mcpAssertion sends one MCP request to the proxy at base with the access token, as Host host
+// when it is not empty, and returns the assertion the upstream got.
+func mcpAssertion(t *testing.T, base, host string, up *fakeupstream.Server, access string) string {
+	t.Helper()
+	r, _ := http.NewRequest(http.MethodPost, base+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+	if host != "" {
+		r.Host = host
+	}
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json, text/event-stream")
+	r.Header.Set("Authorization", "Bearer "+access)
+	res, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	got, ok := up.Last()
+	if res.StatusCode != http.StatusOK || !ok {
+		t.Fatalf("MCP request: %d, upstream reached %v", res.StatusCode, ok)
+	}
+	raw, _ := strings.CutPrefix(got.Header.Get("Authorization"), "Bearer ")
+	return raw
+}
+
 // jwks fetches the JWKS from h, as an upstream's verifier does.
 func jwks(t *testing.T, h http.Handler, host string) jose.JSONWebKeySet {
 	t.Helper()
