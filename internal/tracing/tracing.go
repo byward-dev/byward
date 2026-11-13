@@ -11,8 +11,10 @@ import (
 	"github.com/byward-dev/byward/internal/logging"
 
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 
 	"github.com/go-logr/logr"
 	"go.opentelemetry.io/contrib/exporters/autoexport"
@@ -36,19 +38,21 @@ var propagator propagation.TextMapPropagator = propagation.TraceContext{}
 func Fields() []string { return propagator.Fields() }
 
 // Setup installs the tracer provider, the W3C trace-context propagator, and an error handler and a
-// logger that send OpenTelemetry's errors (a failed export, an exporter setting it rejects) to log,
-// when getenv("OTEL_TRACES_EXPORTER") is set, and returns a shutdown that flushes spans. Otherwise
-// it changes nothing: the global provider and propagator stay no-ops, and an inbound `traceparent`
-// reaches the upstream unchanged. Baggage is never propagated (it can carry user data).
+// logger that send OpenTelemetry's errors (a failed export, an exporter setting it rejects, an SDK
+// setting it cannot parse) to log, when getenv("OTEL_TRACES_EXPORTER") is set, and returns a
+// shutdown that flushes spans. Otherwise it changes nothing: the global provider and propagator stay
+// no-ops, and an inbound `traceparent` reaches the upstream unchanged. Baggage is never propagated
+// (it can carry user data).
 func Setup(ctx context.Context, getenv func(string) string, version string, log *slog.Logger) (enabled bool, shutdown func(context.Context) error, err error) {
 	noop := func(context.Context) error { return nil }
 	if getenv("OTEL_TRACES_EXPORTER") == "" {
 		return false, noop, nil
 	}
-	// Both go in first: the exporter reports a setting it rejects through the logger, and resource
-	// detection reports through the error handler.
+	// Both go in first: the exporter reports a setting it rejects through the logger.
+	// settingErrors replaces the handler only while the SDK reads its own settings.
 	otel.SetLogger(logr.New(otelLog{log}))
-	otel.SetErrorHandler(errorHandler(log, envproxy.SettingMisread()))
+	handler := errorHandler(log, envproxy.SettingMisread())
+	otel.SetErrorHandler(handler)
 	exp, err := autoexport.NewSpanExporter(ctx)
 	if err != nil {
 		return false, noop, err
@@ -56,12 +60,12 @@ func Setup(ctx context.Context, getenv func(string) string, version string, log 
 	if autoexport.IsNoneSpanExporter(exp) {
 		return false, noop, nil
 	}
-	res, err := resource.Merge(resource.Default(), resource.NewSchemaless(
-		semconv.ServiceName("byward"), semconv.ServiceVersion(version)))
+	otel.SetErrorHandler(settingErrors(log))
+	tp, err := provider(exp, version)
+	otel.SetErrorHandler(handler)
 	if err != nil {
 		return false, noop, err
 	}
-	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp), sdktrace.WithResource(res))
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagator)
 	return true, tp.Shutdown, nil
@@ -77,6 +81,32 @@ func errorHandler(log *slog.Logger, misread bool) otel.ErrorHandlerFunc {
 			return
 		}
 		log.Warn("tracing error", "error", err)
+	}
+}
+
+// provider is the tracer provider exporting to exp. Building it reads the SDK's settings:
+// OTEL_RESOURCE_ATTRIBUTES (twice) and the sampler's.
+func provider(exp sdktrace.SpanExporter, version string) (*sdktrace.TracerProvider, error) {
+	res, err := resource.Merge(resource.Default(), resource.NewSchemaless(
+		semconv.ServiceName("byward"), semconv.ServiceVersion(version)))
+	if err != nil {
+		return nil, err
+	}
+	return sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp), sdktrace.WithResource(res)), nil
+}
+
+// settingErrors is the error handler while the SDK reads its settings: it logs a fixed text naming
+// the setting OpenTelemetry could not parse, since OTel's error quotes the value (part of it for a bad
+// escape), which can be a credential pasted by mistake. Resource detection's errors are told apart
+// by type; any other is the sampler's, the only other setting read then.
+func settingErrors(log *slog.Logger) otel.ErrorHandlerFunc {
+	return func(err error) {
+		setting := "OTEL_TRACES_SAMPLER or OTEL_TRACES_SAMPLER_ARG"
+		var escape url.EscapeError
+		if errors.Is(err, resource.ErrPartialResource) || errors.As(err, &escape) {
+			setting = "OTEL_RESOURCE_ATTRIBUTES"
+		}
+		log.Warn("tracing error", "error", "cannot parse "+setting)
 	}
 }
 
