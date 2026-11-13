@@ -140,6 +140,11 @@ default; the OpenTelemetry SDK would otherwise send to `localhost:4318`. When on
 standard variables, e.g. `OTEL_TRACES_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_ENDPOINT=https://collector:4318`,
 `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`.
 
+- OpenTelemetry's own errors, such as a failed export, are logged at warn level as `tracing error`, not printed to
+  stderr. Through an [environment proxy](../how-to/harden-a-deployment.md#protect-the-upstream-hop) whose setting Go misread, the error is a
+  fixed cause that never quotes the address Go dialled. An `OTEL_*` setting the exporter rejects is logged the same
+  way, by what was being parsed (e.g. `parse headers`, `parse url`), never by its value: a header can be a
+  credential and an endpoint can carry userinfo.
 - One server span per request, named `<METHOD> <route pattern>` (e.g. `POST /mcp`), continuing an inbound
   `traceparent` header.
 - `traceparent` toward the upstream is our span's; with tracing off an inbound `traceparent` passes through unchanged.
