@@ -33,7 +33,7 @@ func Malformed(via *url.URL) bool {
 }
 
 // SettingMisread reports whether a proxy setting the environment holds (HTTPS_PROXY or HTTP_PROXY,
-// in either case) is one Go misreads and would use, whatever NO_PROXY says. It judges the setting,
+// in either case) is one Go misreads and does not ignore, whatever NO_PROXY says. It judges the setting,
 // not a request: for a client whose targets byward cannot name in advance, such as trace export,
 // whose grpc endpoint can be any gRPC target. Each spelling is judged on its own, so which one Go
 // prefers when both are set can only make this redact more. A setting Go ignores (one it cannot
