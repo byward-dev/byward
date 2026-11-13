@@ -30,6 +30,9 @@ import (
 
 const instrumentation = "github.com/byward-dev/byward"
 
+// tracingError is the message every OpenTelemetry error is logged with.
+const tracingError = "tracing error"
+
 // propagator carries the trace context to the upstream: W3C trace context only.
 var propagator propagation.TextMapPropagator = propagation.TraceContext{}
 
@@ -39,7 +42,7 @@ func Fields() []string { return propagator.Fields() }
 
 // Setup installs the tracer provider, the W3C trace-context propagator, and an error handler and a
 // logger that send OpenTelemetry's errors (a failed export, an exporter setting it rejects, an SDK
-// setting it cannot parse) to log, when getenv("OTEL_TRACES_EXPORTER") is set, and returns a
+// setting it rejects) to log, when getenv("OTEL_TRACES_EXPORTER") is set, and returns a
 // shutdown that flushes spans. Otherwise it changes nothing: the global provider and propagator stay
 // no-ops, and an inbound `traceparent` reaches the upstream unchanged. Baggage is never propagated
 // (it can carry user data).
@@ -48,8 +51,9 @@ func Setup(ctx context.Context, getenv func(string) string, version string, log 
 	if getenv("OTEL_TRACES_EXPORTER") == "" {
 		return false, noop, nil
 	}
-	// Both go in first: the exporter reports a setting it rejects through the logger.
-	// settingErrors replaces the handler only while the SDK reads its own settings.
+	// Both go in first: the exporter reports a setting it rejects through the logger, and the first
+	// handler set is the one OTel's default handler forwards to for good. settingErrors replaces it
+	// only while the SDK reads its own settings.
 	otel.SetLogger(logr.New(otelLog{log}))
 	handler := errorHandler(log, envproxy.SettingMisread())
 	otel.SetErrorHandler(handler)
@@ -77,10 +81,10 @@ func Setup(ctx context.Context, getenv func(string) string, version string, log 
 func errorHandler(log *slog.Logger, misread bool) otel.ErrorHandlerFunc {
 	return func(err error) {
 		if misread {
-			log.Warn("tracing error", "error", envproxy.Cause)
+			log.Warn(tracingError, "error", envproxy.Cause)
 			return
 		}
-		log.Warn("tracing error", "error", err)
+		log.Warn(tracingError, "error", err)
 	}
 }
 
@@ -96,9 +100,10 @@ func provider(exp sdktrace.SpanExporter, version string) (*sdktrace.TracerProvid
 }
 
 // settingErrors is the error handler while the SDK reads its settings: it logs a fixed text naming
-// the setting OpenTelemetry could not parse, since OTel's error quotes the value (part of it for a bad
-// escape), which can be a credential pasted by mistake. Resource detection's errors are told apart
-// by type; any other is the sampler's, the only other setting read then.
+// the setting OpenTelemetry rejected (one it cannot parse, or a sampler ratio out of range), since
+// OTel's error quotes the value (part of it for a bad escape), which can be a credential pasted by
+// mistake. Resource detection's errors are told apart by type; any other is the sampler's, the only
+// other setting read then.
 func settingErrors(log *slog.Logger) otel.ErrorHandlerFunc {
 	return func(err error) {
 		setting := "OTEL_TRACES_SAMPLER or OTEL_TRACES_SAMPLER_ARG"
@@ -106,7 +111,7 @@ func settingErrors(log *slog.Logger) otel.ErrorHandlerFunc {
 		if errors.Is(err, resource.ErrPartialResource) || errors.As(err, &escape) {
 			setting = "OTEL_RESOURCE_ATTRIBUTES"
 		}
-		log.Warn("tracing error", "error", "cannot parse "+setting)
+		log.Warn(tracingError, "error", "invalid "+setting)
 	}
 }
 
@@ -119,8 +124,8 @@ type otelLog struct{ log *slog.Logger }
 
 func (otelLog) Init(logr.RuntimeInfo)                 {}
 func (otelLog) Enabled(level int) bool                { return level == 0 }
-func (l otelLog) Info(_ int, msg string, _ ...any)    { l.log.Warn("tracing error", "error", msg) }
-func (l otelLog) Error(_ error, msg string, _ ...any) { l.log.Warn("tracing error", "error", msg) }
+func (l otelLog) Info(_ int, msg string, _ ...any)    { l.log.Warn(tracingError, "error", msg) }
+func (l otelLog) Error(_ error, msg string, _ ...any) { l.log.Warn(tracingError, "error", msg) }
 func (l otelLog) WithValues(...any) logr.LogSink      { return l }
 func (l otelLog) WithName(string) logr.LogSink        { return l }
 

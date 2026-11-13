@@ -51,11 +51,11 @@ func TestAnOTELSettingTheExporterRejectsIsLoggedWithoutItsValue(t *testing.T) {
 	}
 }
 
-// An SDK setting OpenTelemetry cannot parse is logged by its name at warn level, never by its value,
+// An SDK setting OpenTelemetry rejects is logged by its name at warn level, never by its value,
 // in the log or on stderr: OTel's own error quotes the value (part of it for a bad escape), which can
 // be a credential pasted by mistake. The SDK reads each setting once per process, so each row runs
 // in a child process.
-func TestAnSDKSettingOTELCannotParseIsLoggedByNameWithoutItsValue(t *testing.T) {
+func TestAnSDKSettingOTELRejectsIsLoggedByNameWithoutItsValue(t *testing.T) {
 	if rerun.Child() {
 		log := slog.New(slog.NewTextHandler(os.Stdout, nil))
 		if _, shutdown, err := Setup(context.Background(), os.Getenv, "test", log); err == nil {
@@ -63,26 +63,28 @@ func TestAnSDKSettingOTELCannotParseIsLoggedByNameWithoutItsValue(t *testing.T) 
 		}
 		return
 	}
-	const sampler = "OTEL_TRACES_SAMPLER or OTEL_TRACES_SAMPLER_ARG"
+	const secret = "s3cret-token"
+	const samplerSettings = "OTEL_TRACES_SAMPLER or OTEL_TRACES_SAMPLER_ARG"
 	for _, tc := range []struct {
-		name    string
-		env     []string
-		quoted  string // what OTel's own error quotes from the value
-		setting string
+		name      string
+		env       []string
+		notLogged string // the part of the value that must reach neither the log nor stderr
+		loggedAs  string // the setting the log names
 	}{
-		{"a resource attribute without '='", []string{"OTEL_RESOURCE_ATTRIBUTES=s3cret-token"}, "s3cret-token", "OTEL_RESOURCE_ATTRIBUTES"},
-		{"a resource attribute value that cannot be unescaped", []string{"OTEL_RESOURCE_ATTRIBUTES=k=%zzs3cret"}, "%zz", "OTEL_RESOURCE_ATTRIBUTES"},
-		{"a sampler argument that is not a number", []string{"OTEL_TRACES_SAMPLER=traceidratio", "OTEL_TRACES_SAMPLER_ARG=s3cret-token"}, "s3cret-token", sampler},
-		{"a parent-based sampler argument that is not a number", []string{"OTEL_TRACES_SAMPLER=parentbased_traceidratio", "OTEL_TRACES_SAMPLER_ARG=s3cret-token"}, "s3cret-token", sampler},
-		{"a sampler OTel does not know", []string{"OTEL_TRACES_SAMPLER=s3cret-token"}, "s3cret-token", sampler},
+		{"a resource attribute without '='", []string{"OTEL_RESOURCE_ATTRIBUTES=" + secret}, secret, "OTEL_RESOURCE_ATTRIBUTES"},
+		// OTel's error quotes only the bad escape, so that is what must stay out.
+		{"a resource attribute value that cannot be unescaped", []string{"OTEL_RESOURCE_ATTRIBUTES=k=%zz"}, "%zz", "OTEL_RESOURCE_ATTRIBUTES"},
+		{"a sampler argument that is not a number", []string{"OTEL_TRACES_SAMPLER=traceidratio", "OTEL_TRACES_SAMPLER_ARG=" + secret}, secret, samplerSettings},
+		{"a parent-based sampler argument that is not a number", []string{"OTEL_TRACES_SAMPLER=parentbased_traceidratio", "OTEL_TRACES_SAMPLER_ARG=" + secret}, secret, samplerSettings},
+		{"a sampler OTel does not know", []string{"OTEL_TRACES_SAMPLER=" + secret}, secret, samplerSettings},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			clearOTELEnv(t)
-			got := rerun.Run(t, "TestAnSDKSettingOTELCannotParseIsLoggedByNameWithoutItsValue", append(tc.env, "OTEL_TRACES_EXPORTER=console")...)
-			if strings.Contains(got, tc.quoted) {
-				t.Fatalf("child output %q; want no %q from the setting's value", got, tc.quoted)
+			got := rerun.Run(t, "TestAnSDKSettingOTELRejectsIsLoggedByNameWithoutItsValue", append(tc.env, "OTEL_TRACES_EXPORTER=console")...)
+			if strings.Contains(got, tc.notLogged) {
+				t.Fatalf("child output %q; want no %q from the setting's value", got, tc.notLogged)
 			}
-			want := `level=WARN msg="tracing error" error="cannot parse ` + tc.setting + `"`
+			want := `level=WARN msg="tracing error" error="invalid ` + tc.loggedAs + `"`
 			if !strings.Contains(got, want) {
 				t.Fatalf("child output %q; want %q", got, want)
 			}

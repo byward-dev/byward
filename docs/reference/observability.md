@@ -144,9 +144,9 @@ standard variables, e.g. `OTEL_TRACES_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_ENDPOI
   stderr. Through an [environment proxy](../how-to/harden-a-deployment.md#protect-the-upstream-hop) whose setting Go misread, the error is a
   fixed cause that never quotes the address Go dialled. An `OTEL_*` setting the exporter rejects is logged the same
   way, by what was being parsed (e.g. `parse headers`, `parse url`), never by its value: a header can be a
-  credential and an endpoint can carry userinfo. An SDK setting it cannot parse is logged by its name (e.g.
-  `cannot parse OTEL_RESOURCE_ATTRIBUTES`, `cannot parse OTEL_TRACES_SAMPLER or OTEL_TRACES_SAMPLER_ARG`), never by
-  its value. One exception, a [known gap](../security-posture.md#known-gaps): a span limit setting such as
+  credential and an endpoint can carry userinfo. An SDK setting it rejects is logged by its name (e.g.
+  `invalid OTEL_RESOURCE_ATTRIBUTES`, `invalid OTEL_TRACES_SAMPLER or OTEL_TRACES_SAMPLER_ARG`), never by its
+  value. One exception, a [known gap](../security-posture.md#known-gaps): a span limit setting such as
   `OTEL_ATTRIBUTE_COUNT_LIMIT` that is not a number is printed to stderr with its value at start, even with tracing
   off.
 - One server span per request, named `<METHOD> <route pattern>` (e.g. `POST /mcp`), continuing an inbound

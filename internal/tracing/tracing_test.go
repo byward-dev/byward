@@ -2,6 +2,7 @@ package tracing
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace/noop"
+	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 const inbound = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
@@ -85,13 +88,16 @@ func TestNoneExporterIsOff(t *testing.T) {
 	}
 }
 
-func TestTracesContinueTheInboundTraceAndReachTheExporter(t *testing.T) {
+func TestTracesContinueTheInboundTraceAndReachTheExporterAsByward(t *testing.T) {
 	clearOTELEnv(t)
 	restoreGlobals(t)
-	var exports atomic.Int32
+	var export atomic.Pointer[coltracepb.ExportTraceServiceRequest]
 	collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" && r.URL.Path == "/v1/traces" {
-			exports.Add(1)
+			req := new(coltracepb.ExportTraceServiceRequest)
+			if b, err := io.ReadAll(r.Body); err == nil && proto.Unmarshal(b, req) == nil {
+				export.Store(req)
+			}
 		}
 		w.WriteHeader(200)
 	}))
@@ -111,7 +117,18 @@ func TestTracesContinueTheInboundTraceAndReachTheExporter(t *testing.T) {
 	if err := shutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if exports.Load() == 0 {
+	req := export.Load()
+	if req == nil || len(req.GetResourceSpans()) == 0 {
 		t.Fatal("no span reached the configured OTLP endpoint")
+	}
+	attrs := map[string]string{}
+	for _, kv := range req.GetResourceSpans()[0].GetResource().GetAttributes() {
+		attrs[kv.GetKey()] = kv.GetValue().GetStringValue()
+	}
+	// byward's name and version, on top of the SDK's own attributes.
+	for key, want := range map[string]string{"service.name": "byward", "service.version": "test", "telemetry.sdk.language": "go"} {
+		if attrs[key] != want {
+			t.Errorf("exported resource %v: %s = %q, want %q", attrs, key, attrs[key], want)
+		}
 	}
 }
