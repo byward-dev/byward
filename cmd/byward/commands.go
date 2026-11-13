@@ -14,7 +14,8 @@ import (
 	"github.com/byward-dev/byward/internal/server"
 )
 
-// command is a subcommand of byward. Each reads the same BYWARD_* environment as the proxy.
+// command is a subcommand of byward. Each reads the same BYWARD_* environment as the proxy, unless its
+// usage says otherwise.
 type command struct {
 	usage string                                                                          // for --help: the call, then indented lines
 	run   func(ctx context.Context, args, environ []string, stdout, stderr io.Writer) int // args exclude the command name
@@ -45,6 +46,10 @@ var commands = map[string]command{
 		usage: "byward init entra --tenant <tenant-id> [--public-url <url>] [--upstream-url <url>] [--secret-years 1|2] [--credential secret|certificate]\n      print the az commands for the Entra app registration and a minimal env file; runs nothing",
 		run:   initIdP,
 	},
+	"downstream-token": {
+		usage: "byward downstream-token [--json]\n      run by a stdio upstream process or one of its descendants: print its user's On-Behalf-Of token\n      (--json: with expires_at); reads only BYWARD_DOWNSTREAM_TOKEN_SOCKET; on an error answer, its code alone on stderr and exit 1",
+		run:   downstreamToken,
+	},
 }
 
 // commandsUsage is the commands block of --help, in name order.
@@ -55,7 +60,7 @@ func commandsUsage() string {
 	}
 	slices.Sort(names)
 	var b strings.Builder
-	b.WriteString("\nCommands (read the same BYWARD_* environment as the proxy):\n")
+	b.WriteString("\nCommands (read the same BYWARD_* environment as the proxy, unless their line says otherwise):\n")
 	for _, n := range names {
 		fmt.Fprintf(&b, "  %s\n", commands[n].usage)
 	}

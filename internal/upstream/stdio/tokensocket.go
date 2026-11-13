@@ -30,7 +30,8 @@ const (
 
 // DownstreamToken is a downstream API token for a process's user, or the error code that says why
 // there is none (consent_required, interaction_required, sign_in_expired, no_user, unavailable,
-// failed). AccessToken is set exactly when Error is empty.
+// failed; as the answer AskDownstreamToken reads, also refused or bad_request). AccessToken is set
+// exactly when Error is empty.
 type DownstreamToken struct {
 	AccessToken string
 	ExpiresAt   time.Time
@@ -59,6 +60,14 @@ const (
 	// maxAncestry bounds the walk from a peer up to the upstream process.
 	maxAncestry = 64
 )
+
+// tokenAnswer is the answer line of the token socket: a token with its expiry (RFC 3339, UTC), or an
+// error code alone. The server writes it and AskDownstreamToken reads it.
+type tokenAnswer struct {
+	AccessToken string `json:"access_token,omitempty"`
+	ExpiresAt   string `json:"expires_at,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
 
 // tokenSocket serves one upstream process's token socket in its session directory.
 type tokenSocket struct {
@@ -112,11 +121,11 @@ func (s *tokenSocket) handle(c *net.UnixConn, root int) {
 	defer func() { _ = c.Close() }()
 	deadline := time.Now().Add(s.timeout)
 	_ = c.SetDeadline(deadline)
-	reply := func(v any) {
-		b, _ := json.Marshal(v)
+	reply := func(v tokenAnswer) {
+		b, _ := json.Marshal(v) //nolint:gosec // G117: the answer carries the token to the peer that passed the ancestry check
 		_, _ = c.Write(append(b, '\n'))
 	}
-	refuse := func(code string) { reply(map[string]string{"error": code}) }
+	refuse := func(code string) { reply(tokenAnswer{Error: code}) }
 	peer, ok, err := peerIsDescendant(c, root)
 	if !ok {
 		attrs := []any{"reason", "token_peer_refused", "peer_process", peer}
@@ -149,7 +158,7 @@ func (s *tokenSocket) handle(c *net.UnixConn, root int) {
 		refuse(code)
 		return
 	}
-	reply(map[string]string{"access_token": t.AccessToken, "expires_at": t.ExpiresAt.UTC().Format(time.RFC3339)})
+	reply(tokenAnswer{AccessToken: t.AccessToken, ExpiresAt: t.ExpiresAt.UTC().Format(time.RFC3339)})
 }
 
 // discardLine reads from r up to the first newline, at most limit bytes, or until a read fails.

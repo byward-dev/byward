@@ -47,8 +47,8 @@ demand.
 
 | `BYWARD_IDP` | Issuer | Scopes asked | Notes |
 |---|---|---|---|
-| `google` | `https://accounts.google.com` | `profile email` | Refresh tokens come from `access_type=offline` with `prompt=consent` (see below). `email_verified` may be a string. |
-| `okta` | `https://<domain>/oauth2/<server>` | `profile email offline_access` | Only a custom authorization server issues tokens for the proxy; the org server (`https://<domain>`) is refused. |
+| `google` | `https://accounts.google.com` | `profile email` | Refresh tokens come from `access_type=offline` with `prompt=consent` (see below). `email_verified` may be a string. Step by step: [google.md](google.md). |
+| `okta` | `https://<domain>/oauth2/<server>` | `profile email offline_access` | Only a custom authorization server issues tokens for the proxy; the org server (`https://<domain>`) is refused. Not yet verified against a real Okta org (#281). |
 | `auth0` | `https://<tenant>.auth0.com/` | `profile email offline_access` | The issuer ends with a slash. Auth0 drops `roles` and `groups` claims, so gate by email domain (below). |
 | `keycloak` | `https://<host>/realms/<realm>` | `profile email` | Enable "Client authentication" on the client. Step by step: [keycloak.md](keycloak.md). |
 | `oidc` | any | `profile email offline_access` | No quirks. |
