@@ -2,7 +2,6 @@ package tracing
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -15,9 +14,8 @@ import (
 	"github.com/go-logr/logr"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace/noop"
-	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
-	"google.golang.org/protobuf/proto"
 )
 
 const inbound = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
@@ -88,16 +86,13 @@ func TestNoneExporterIsOff(t *testing.T) {
 	}
 }
 
-func TestTracesContinueTheInboundTraceAndReachTheExporterAsByward(t *testing.T) {
+func TestTracesContinueTheInboundTraceAndReachTheExporter(t *testing.T) {
 	clearOTELEnv(t)
 	restoreGlobals(t)
-	var export atomic.Pointer[coltracepb.ExportTraceServiceRequest]
+	var exports atomic.Int32
 	collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "POST" && r.URL.Path == "/v1/traces" {
-			req := new(coltracepb.ExportTraceServiceRequest)
-			if b, err := io.ReadAll(r.Body); err == nil && proto.Unmarshal(b, req) == nil {
-				export.Store(req)
-			}
+			exports.Add(1)
 		}
 		w.WriteHeader(200)
 	}))
@@ -117,18 +112,36 @@ func TestTracesContinueTheInboundTraceAndReachTheExporterAsByward(t *testing.T) 
 	if err := shutdown(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	req := export.Load()
-	if req == nil || len(req.GetResourceSpans()) == 0 {
+	if exports.Load() == 0 {
 		t.Fatal("no span reached the configured OTLP endpoint")
 	}
-	attrs := map[string]string{}
-	for _, kv := range req.GetResourceSpans()[0].GetResource().GetAttributes() {
-		attrs[kv.GetKey()] = kv.GetValue().GetStringValue()
+}
+
+// Exported spans name byward and its version, on top of the SDK's own attributes.
+func TestExportedSpansCarryBywardsNameAndVersion(t *testing.T) {
+	clearOTELEnv(t)
+	exp := tracetest.NewInMemoryExporter()
+	tp, err := provider(exp, "test")
+	if err != nil {
+		t.Fatal(err)
 	}
-	// byward's name and version, on top of the SDK's own attributes.
+	_, span := tp.Tracer("t").Start(context.Background(), "span")
+	span.End()
+	if err := tp.ForceFlush(context.Background()); err != nil { // Shutdown would clear the exporter
+		t.Fatal(err)
+	}
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+	attrs := map[string]string{}
+	for _, kv := range spans[0].Resource.Attributes() {
+		attrs[string(kv.Key)] = kv.Value.AsString()
+	}
 	for key, want := range map[string]string{"service.name": "byward", "service.version": "test", "telemetry.sdk.language": "go"} {
 		if attrs[key] != want {
 			t.Errorf("exported resource %v: %s = %q, want %q", attrs, key, attrs[key], want)
 		}
 	}
+	_ = tp.Shutdown(context.Background())
 }

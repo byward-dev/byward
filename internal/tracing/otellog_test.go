@@ -76,6 +76,8 @@ func TestAnSDKSettingOTELRejectsIsLoggedByNameWithoutItsValue(t *testing.T) {
 		{"a resource attribute value that cannot be unescaped", []string{"OTEL_RESOURCE_ATTRIBUTES=k=%zz"}, "%zz", "OTEL_RESOURCE_ATTRIBUTES"},
 		{"a sampler argument that is not a number", []string{"OTEL_TRACES_SAMPLER=traceidratio", "OTEL_TRACES_SAMPLER_ARG=" + secret}, secret, samplerSettings},
 		{"a parent-based sampler argument that is not a number", []string{"OTEL_TRACES_SAMPLER=parentbased_traceidratio", "OTEL_TRACES_SAMPLER_ARG=" + secret}, secret, samplerSettings},
+		// A ratio that parses but is out of range; 1e9 cannot occur in a log line's timestamp.
+		{"a sampler ratio above 1", []string{"OTEL_TRACES_SAMPLER=traceidratio", "OTEL_TRACES_SAMPLER_ARG=1e9"}, "1e9", samplerSettings},
 		{"a sampler OTel does not know", []string{"OTEL_TRACES_SAMPLER=" + secret}, secret, samplerSettings},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
