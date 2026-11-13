@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -180,22 +181,22 @@ func TestEveryByteACodeOrATokenMayHoldComesBack(t *testing.T) {
 }
 
 func TestAMissingTokenSocketIsAnError(t *testing.T) {
-	_, err := AskDownstreamToken(context.Background(), filepath.Join(shortTempDir(t), "token.sock"))
-	if err == nil {
-		t.Fatal("no error for a socket that is not there")
+	got, err := AskDownstreamToken(context.Background(), filepath.Join(shortTempDir(t), "token.sock"))
+	if !errors.Is(err, syscall.ENOENT) || got != (DownstreamToken{}) {
+		t.Fatalf("got %+v, %v; want only the dial error for a socket that is not there", got, err)
 	}
 }
 
 // silentSocket reads one connection's request, then says so on asked and never answers.
-func silentSocket(t *testing.T) (path string, asked <-chan struct{}) {
+func silentSocket(t *testing.T) (string, <-chan struct{}) {
 	t.Helper()
-	path = filepath.Join(shortTempDir(t), "token.sock")
+	path := filepath.Join(shortTempDir(t), "token.sock")
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ln.Close() })
-	got := make(chan struct{})
+	asked := make(chan struct{})
 	go func() {
 		c, err := ln.Accept()
 		if err != nil {
@@ -203,9 +204,9 @@ func silentSocket(t *testing.T) (path string, asked <-chan struct{}) {
 		}
 		t.Cleanup(func() { _ = c.Close() })
 		_, _ = c.Read(make([]byte, 64))
-		close(got)
+		close(asked)
 	}()
-	return path, got
+	return path, asked
 }
 
 // askUntilDone runs AskDownstreamToken in the background and returns its error, failing the test

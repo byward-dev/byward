@@ -47,7 +47,7 @@ var commands = map[string]command{
 		run:   initIdP,
 	},
 	"downstream-token": {
-		usage: "byward downstream-token [--json]\n      run by a stdio upstream process or one of its children: print its user's On-Behalf-Of token\n      (--json: with expires_at); reads only BYWARD_DOWNSTREAM_TOKEN_SOCKET; on an error answer, its code alone on stderr and exit 1",
+		usage: "byward downstream-token [--json]\n      run by a stdio upstream process or one of its descendants: print its user's On-Behalf-Of token\n      (--json: with expires_at); reads only BYWARD_DOWNSTREAM_TOKEN_SOCKET; on an error answer, its code alone on stderr and exit 1",
 		run:   downstreamToken,
 	},
 }

@@ -22,7 +22,7 @@ var downstreamTokenWait = 90 * time.Second
 func downstreamToken(ctx context.Context, args, environ []string, stdout, stderr io.Writer) int {
 	asJSON := slices.Equal(args, []string{"--json"})
 	if len(args) > 0 && !asJSON {
-		_, _ = fmt.Fprintln(stderr, "byward: usage: byward downstream-token [--json] (run by a stdio upstream process or one of its children)")
+		_, _ = fmt.Fprintln(stderr, "byward: usage: byward downstream-token [--json] (run by a stdio upstream process or one of its descendants)")
 		return exitConfig
 	}
 	path := getenv(environ)(stdio.EnvDownstreamTokenSocket)
