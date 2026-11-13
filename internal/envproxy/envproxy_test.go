@@ -296,3 +296,29 @@ func TestAClientTimeoutThroughRedactWithNoProxyIsStillATimeout(t *testing.T) {
 		t.Fatalf("error %v; want a timeout that is a passed deadline", err)
 	}
 }
+
+// A proxy setting is judged as Go reads it, for either scheme and whatever NO_PROXY says: a
+// request to a host NO_PROXY exempts sends nothing through it, but a client whose targets cannot be
+// named in advance may still reach one that it does not exempt.
+func TestSettingMisreadJudgesEachSettingWhateverNoProxySays(t *testing.T) {
+	const misread, wellFormed = "127.0.0.1:1/pw-secret@egress.example:3128", "http://egress.example:3128"
+	for _, tc := range []struct {
+		name string
+		cfg  httpproxy.Config
+		want bool
+	}{
+		{"no setting", httpproxy.Config{}, false},
+		{"a misread HTTP_PROXY", httpproxy.Config{HTTPProxy: misread}, true},
+		{"a misread HTTPS_PROXY alone", httpproxy.Config{HTTPProxy: wellFormed, HTTPSProxy: misread}, true},
+		{"well-formed settings", httpproxy.Config{HTTPProxy: wellFormed, HTTPSProxy: wellFormed}, false},
+		{"a misread setting NO_PROXY exempts every host from", httpproxy.Config{HTTPSProxy: misread, NoProxy: "*"}, true},
+		{"a misread setting Go ignores under CGI", httpproxy.Config{HTTPProxy: misread, CGI: true}, true},
+		{"a setting Go cannot parse, so ignores", httpproxy.Config{HTTPProxy: "http://pw%zz@egress.example:3128"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := settingMisread(tc.cfg); got != tc.want {
+				t.Fatalf("settingMisread(%+v) = %v; want %v", tc.cfg, got, tc.want)
+			}
+		})
+	}
+}

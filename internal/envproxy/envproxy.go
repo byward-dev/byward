@@ -12,6 +12,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+
+	"golang.org/x/net/http/httpproxy"
 )
 
 // Cause is logged in place of an error that would quote the address Go dialled from a misread
@@ -27,6 +29,24 @@ func Proxy(r *http.Request) (*url.URL, error) { return http.ProxyFromEnvironment
 // it, can hold part of the credentials.
 func Malformed(via *url.URL) bool {
 	return via != nil && (via.Host == "" || via.Opaque != "" || via.Path != "" && via.Path != "/" || via.RawQuery != "" || via.ForceQuery || via.Fragment != "")
+}
+
+// SettingMisread reports whether a proxy setting the environment holds (HTTPS_PROXY or HTTP_PROXY,
+// in either case) is one Go misreads, whatever NO_PROXY says. It judges the setting, not a request:
+// for a client whose targets byward cannot name in advance, such as trace export, whose grpc
+// endpoint can be any gRPC target.
+func SettingMisread() bool { return settingMisread(*httpproxy.FromEnvironment()) }
+
+// settingMisread is SettingMisread over cfg, read as Go reads it (Go vendors this httpproxy).
+func settingMisread(cfg httpproxy.Config) bool {
+	cfg.NoProxy, cfg.CGI = "", false // the setting itself, wherever a request goes
+	proxy := cfg.ProxyFunc()
+	for _, scheme := range []string{"http", "https"} {
+		if via, err := proxy(&url.URL{Scheme: scheme, Host: "proxied.invalid"}); err == nil && Malformed(via) {
+			return true
+		}
+	}
+	return false
 }
 
 // Redact returns t, whose errors through a proxy Go misread, judged by t's own Proxy, are replaced
