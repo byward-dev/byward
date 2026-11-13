@@ -307,7 +307,7 @@ func TestRequestIDsAndProgressTokensMustBeStringsOrIntegers(t *testing.T) {
 	}
 }
 
-func TestAnExitedProcessesRequestGetsItsQueuedAnswerElseAnErrorOrForAListenBywardEndedACompletion(t *testing.T) {
+func TestARequestEndedWithoutAnAnswerGetsItsQueuedAnswerElseAnErrorOrForAListenBywardEndedACompletion(t *testing.T) {
 	const answered = `{"jsonrpc":"2.0","id":7,"result":"answered"}`
 	const complete = `{"jsonrpc":"2.0","id":7,"result":{"resultType":"complete","_meta":{"io.modelcontextprotocol/subscriptionId":7}}}`
 	const exited = `{"jsonrpc":"2.0","id":7,"error":{"code":-32603,"message":"upstream process exited"}}`
@@ -923,14 +923,10 @@ func TestDrainCompletesAndCancelsUpstreamEachOpenListenUnderTheClientsIDButLeave
 	if !slices.Equal(ids, open) {
 		t.Fatalf("upstream saw cancellations %q, want exactly the listens' %q", ids, open)
 	}
-	// The held request is still open: it ends only when its process does, with the exit error.
-	sctx, scancel := context.WithTimeout(context.Background(), guard)
-	defer scancel()
-	if err := b.m.Shutdown(sctx); err != nil {
-		t.Fatal(err)
-	}
-	if got := held.all(); len(got) != 1 || !strings.Contains(got[0], `"id":"h"`) || !strings.Contains(got[0], "upstream process exited") {
-		t.Fatalf("held request got %q, want only the exit error at Shutdown: Drain must not end it", got)
+	// The held request is still running: released, it gets the upstream's own answer.
+	readEvents(t, b.modern(t, "alice", modernBody(`2`, "release", "", "")))
+	if got := held.all(); len(got) != 1 || !sameJSON(t, []byte(got[0]), `{"jsonrpc":"2.0","id":"h","result":"released"}`) {
+		t.Fatalf("held request got %q, want only its own answer after Drain: Drain must not end it", got)
 	}
 }
 

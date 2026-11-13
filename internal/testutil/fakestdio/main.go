@@ -346,7 +346,8 @@ func serveMCP() {
 //	            message = params.tag, then the result {"tag": params.tag}
 //	log         a notifications/message if params._meta carries io.modelcontextprotocol/logLevel,
 //	            then the result {"tag": params.tag}
-//	hold        no answer; a notifications/cancelled for it is recorded
+//	hold        no answer until a later "release"; a notifications/cancelled for it is recorded
+//	release     "released" to every held request, then its own result
 //	cancelled   the request ids notifications/cancelled has named so far
 //	ask         writes a JSON-RPC request to stdout (which a modern server must not), then waits
 //	            for the answer and returns it as the result
@@ -391,6 +392,7 @@ func serveModern() {
 	var cmu sync.Mutex
 	cancelled := []json.RawMessage{}
 	var listens []json.RawMessage
+	var held []json.RawMessage
 	takeListens := func() []json.RawMessage {
 		cmu.Lock()
 		defer cmu.Unlock()
@@ -460,6 +462,18 @@ func serveModern() {
 				}
 				result(id, map[string]string{"tag": p.Tag})
 			case "hold":
+				cmu.Lock()
+				held = append(held, id)
+				cmu.Unlock()
+			case "release":
+				cmu.Lock()
+				h := held
+				held = nil
+				cmu.Unlock()
+				for _, hid := range h {
+					result(hid, "released")
+				}
+				result(id, "ok")
 			case "cancelled":
 				cmu.Lock()
 				ids := append([]json.RawMessage(nil), cancelled...)

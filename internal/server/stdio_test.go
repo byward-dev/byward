@@ -429,26 +429,31 @@ func shutdownEndsAnOpenListen(t *testing.T, internalListen string) {
 			}
 		}
 	}()
-	next := func() (string, bool) {
+	next := func(what string) (string, bool) {
 		select {
 		case d, ok := <-events:
 			return d, ok
 		case <-time.After(10 * time.Second):
-			t.Fatal("no event within 10s")
+			t.Fatalf("no %s within 10s", what)
 			return "", false
 		}
 	}
-	if ack, _ := next(); !strings.Contains(ack, "notifications/subscriptions/acknowledged") {
+	if ack, _ := next("acknowledgement"); !strings.Contains(ack, "notifications/subscriptions/acknowledged") {
 		t.Fatalf("status %d, first event %s; want the acknowledgement", res.StatusCode, ack)
 	}
 	cancel()
 	var rest []string
-	for d, ok := next(); ok; d, ok = next() {
+	for d, ok := next("completion result or end of stream"); ok; d, ok = next("end of stream") {
 		rest = append(rest, d)
 	}
 	const complete = `{"jsonrpc":"2.0","id":"L","result":{"resultType":"complete","_meta":{"io.modelcontextprotocol/subscriptionId":"L"}}}`
 	if len(rest) != 1 || !sameJSONValue(rest[0], complete) {
 		t.Fatalf("after shutdown the listen got %q, want its completion result only, under its own id", rest)
+	}
+	probes := http.NewServeMux() // the upstream's drain comes with readiness failing, not instead of it
+	s.Health.Register(probes)
+	if code, _ := getBody(t, probes, "x", "/readyz"); code != http.StatusServiceUnavailable {
+		t.Fatalf("/readyz is %d once shutdown has begun, want 503", code)
 	}
 	select {
 	case err := <-done:
