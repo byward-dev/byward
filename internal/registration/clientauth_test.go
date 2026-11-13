@@ -15,6 +15,7 @@ import (
 
 	"code.dny.dev/ssrf"
 	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/store/memory"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
@@ -25,13 +26,13 @@ var now = time.Unix(1_800_000_000, 0)
 type authEnv struct {
 	reg  Registry
 	cert *fakeidp.Certificate
-	jti  *MemoryJTICache
+	jti  *StoreJTICache
 }
 
 func newAuthEnv(t *testing.T) *authEnv {
 	t.Helper()
 	cert := fakeidp.NewCertificate(t)
-	jti := NewMemoryJTICache(func() time.Time { return now }, 100)
+	jti := NewStoreJTICache(memory.New())
 	reg, err := LoadStatic("/c.json", files{
 		"/c.json": `{"clients":[
 			{"client_id":"cli","token_endpoint_auth_method":"none","redirect_uris":["http://127.0.0.1/cb"]},
@@ -189,11 +190,14 @@ func TestAssertionReplayIsRejected(t *testing.T) {
 	}
 }
 
-func TestJTICacheFailureIsNotInvalidClient(t *testing.T) {
+// A replay check that cannot answer is no verdict on the client: it is ErrReplayCheckUnavailable,
+// never ErrInvalidClient.
+func TestAReplayCheckThatCannotAnswerIsUnavailableNotInvalidClient(t *testing.T) {
 	e := newAuthEnv(t)
-	e.jti.maxEntries = 0
+	broken := errors.New("store down")
+	e.jti.Bind(&recordingAssertions{err: broken})
 	err := e.auth(t, "jwt", e.assertion(t, e.cert, "PS256", nil), nil)
-	if err == nil || errors.Is(err, ErrInvalidClient) || !errors.Is(err, ErrJTICacheFull) {
+	if err == nil || errors.Is(err, ErrInvalidClient) || !errors.Is(err, ErrReplayCheckUnavailable) || !errors.Is(err, broken) {
 		t.Fatalf("err = %v", err)
 	}
 }

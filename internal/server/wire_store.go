@@ -17,9 +17,8 @@ import (
 // wireStore is openStore; tests replace it to reach the wired store.
 var wireStore = openStore
 
-// collectEvery is how often expired store rows are removed (ADR-0007 §1): grants, codes, refresh
-// tokens, revocations older than store.RevocationRetention, and expired or never-used client
-// registrations (ADR-0008 §3).
+// collectEvery is how often expired store rows are removed (ADR-0007 §1); store.Collector says
+// which.
 const collectEvery = 5 * time.Minute
 
 // runBackground keeps the revocation list fresh and removes expired store rows until ctx ends,

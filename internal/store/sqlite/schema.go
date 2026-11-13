@@ -100,6 +100,13 @@ var migrations = []string{
 		expires_at INTEGER NOT NULL
 	) STRICT;
 	CREATE INDEX spent_logins_expires ON spent_logins (expires_at);`,
+	// v7: spent client assertions (#227). A private_key_jwt assertion /token accepted; hash is
+	// SHA-256 of its replay key, never the jti.
+	`CREATE TABLE spent_assertions (
+		hash       BLOB PRIMARY KEY,
+		expires_at INTEGER NOT NULL
+	) STRICT;
+	CREATE INDEX spent_assertions_expires ON spent_assertions (expires_at);`,
 }
 
 // schemaVersion is the schema this binary writes.

@@ -10,10 +10,10 @@ import (
 	"io/fs"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/go-jose/go-jose/v4"
 
+	"github.com/byward-dev/byward/internal/store/memory"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
@@ -45,7 +45,7 @@ func publicJWKS(t testing.TB, keys ...*fakeidp.Certificate) string {
 
 func load(t *testing.T, fs files) (Registry, error) {
 	t.Helper()
-	return LoadStatic("/etc/mcp/clients.json", fs.read, NewMemoryJTICache(time.Now, 100))
+	return LoadStatic("/etc/mcp/clients.json", fs.read, NewStoreJTICache(memory.New()))
 }
 
 func TestLoadStaticAllMethods(t *testing.T) {
@@ -160,7 +160,7 @@ func TestLoadStaticNeedsJTICacheAndReadableFile(t *testing.T) {
 	if _, err := LoadStatic("/x", files{"/x": `{"clients":[{"client_id":"c","token_endpoint_auth_method":"none","redirect_uris":["https://a.example/cb"]}]}`}.read, nil); err == nil {
 		t.Error("nil jti cache accepted")
 	}
-	if _, err := LoadStatic("/missing", files{}.read, NewMemoryJTICache(time.Now, 1)); err == nil {
+	if _, err := LoadStatic("/missing", files{}.read, NewStoreJTICache(memory.New())); err == nil {
 		t.Error("missing file accepted")
 	}
 	if _, err := LoadStatic("/missing", files{}.read, nil, AllowMissingFile()); err == nil {
@@ -192,7 +192,7 @@ func TestStaticClientsMayBeNoneWhenTheServerAllowsIt(t *testing.T) {
 		{"an absent secret file is refused even when the clients file may be missing", missingSecret.read, []LoadOption{AllowMissingFile()}, "c: client_secret_file: open"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r, err := LoadStatic(path, tc.read, NewMemoryJTICache(time.Now, 1), tc.opts...)
+			r, err := LoadStatic(path, tc.read, NewStoreJTICache(memory.New()), tc.opts...)
 			switch {
 			case tc.wants == "" && (err != nil || len(r.IDs()) != 0):
 				t.Fatalf("got %v, %v; want no static clients", r, err)
