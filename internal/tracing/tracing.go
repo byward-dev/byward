@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/go-logr/logr"
 	"go.opentelemetry.io/contrib/exporters/autoexport"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -44,6 +45,7 @@ func Setup(ctx context.Context, getenv func(string) string, version string, log 
 	if getenv("OTEL_TRACES_EXPORTER") == "" {
 		return false, noop, nil
 	}
+	otel.SetLogger(logr.New(otelLog{log})) // before the exporter reads its settings, which it reports through it
 	exp, err := autoexport.NewSpanExporter(ctx)
 	if err != nil {
 		return false, noop, err
@@ -75,6 +77,20 @@ func errorHandler(log *slog.Logger, misread bool) otel.ErrorHandlerFunc {
 		log.Warn("tracing error", "error", err)
 	}
 }
+
+// otelLog is OpenTelemetry's own logger, in place of its default, which prints to stderr. OTel logs
+// the raw value of a setting it cannot parse (a header, often a credential, or an endpoint with its
+// userinfo), and the error it logs with it can quote that value too, so only its message, which
+// names what it was parsing, reaches the log. Like the default, it passes only OTel's errors, not its
+// warnings or below.
+type otelLog struct{ log *slog.Logger }
+
+func (otelLog) Init(logr.RuntimeInfo)                 {}
+func (otelLog) Enabled(level int) bool                { return level == 0 }
+func (l otelLog) Info(_ int, msg string, _ ...any)    { l.log.Warn("tracing error", "error", msg) }
+func (l otelLog) Error(_ error, msg string, _ ...any) { l.log.Warn("tracing error", "error", msg) }
+func (l otelLog) WithValues(...any) logr.LogSink      { return l }
+func (l otelLog) WithName(string) logr.LogSink        { return l }
 
 // Middleware starts the server span for each request, named by route(r), a fixed set of names.
 func Middleware(route func(*http.Request) string, next http.Handler) http.Handler {
