@@ -163,20 +163,24 @@ func TestCheckReportsAMutableSubjectClaim(t *testing.T) {
 	}
 }
 
-// doctor checks an oidc IdP's discovery: a matching issuer passes, a mismatch fails naming the
-// setting, and nothing Entra's is reported.
-func TestDoctorChecksAnOIDCIdPsDiscoveryOnly(t *testing.T) {
-	app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}}
-	fake := fakeidp.New(t, fakeidp.Generic, fakeidp.WithClient(app))
-	for name, tc := range map[string]struct {
-		issuer string
-		want   doctor.Status
+// doctor checks an oidc IdP's discovery and then its client credential (#288): a matching issuer
+// passes and a mismatch fails naming the setting; the credential is checked only after discovery,
+// and a wrong secret fails naming its setting. Nothing Entra's is reported.
+func TestDoctorChecksAnOIDCIdPsDiscoveryAndClientCredential(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		other, secretAtTheIdP string // other: appended to the issuer
+		discovery, credential doctor.Status
+		fix                   string
 	}{
-		"the discovered issuer": {fake.Issuer(), doctor.Pass},
-		"another issuer":        {fake.Issuer() + "/other", doctor.Fail},
+		{"the discovered issuer and the right secret", "", "s3cret", doctor.Pass, doctor.Pass, ""},
+		{"another issuer", "/other", "s3cret", doctor.Fail, doctor.Skip, "BYWARD_OIDC_ISSUER"},
+		{"a secret the IdP does not hold", "", "rotated", doctor.Pass, doctor.Fail, "BYWARD_OIDC_CLIENT_SECRET_FILE"},
 	} {
-		t.Run(name, func(t *testing.T) {
-			report, err := Doctor(context.Background(), loadOIDC(t, "oidc", tc.issuer, app.ID), DoctorOptions{IdP: fake.HTTPClient()})
+		t.Run(tc.name, func(t *testing.T) {
+			app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{tc.secretAtTheIdP}}
+			fake := fakeidp.New(t, fakeidp.Generic, fakeidp.WithClient(app))
+			report, err := Doctor(context.Background(), loadOIDC(t, "oidc", fake.Issuer()+tc.other, app.ID), DoctorOptions{IdP: fake.HTTPClient()})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -189,9 +193,31 @@ func TestDoctorChecksAnOIDCIdPsDiscoveryOnly(t *testing.T) {
 					idpChecks = append(idpChecks, r)
 				}
 			}
-			if len(idpChecks) != 1 || idpChecks[0].Name != "discovery" || idpChecks[0].Status != tc.want ||
-				(tc.want == doctor.Fail && !strings.Contains(idpChecks[0].Fix, "BYWARD_OIDC_ISSUER")) {
-				t.Fatalf("IdP checks %+v, want one discovery check that is %s", idpChecks, tc.want)
+			if len(idpChecks) != 2 || idpChecks[0].Name != "discovery" || idpChecks[0].Status != tc.discovery ||
+				idpChecks[1].Name != "client credential" || idpChecks[1].Status != tc.credential ||
+				!strings.Contains(idpChecks[0].Fix+idpChecks[1].Fix, tc.fix) {
+				t.Fatalf("IdP checks %+v, want discovery %s then the client credential %s, a fix naming %q", idpChecks, tc.discovery, tc.credential, tc.fix)
+			}
+		})
+	}
+}
+
+// doctor's fixes for an oidc client credential name the setting that holds it: the secret file, or
+// the key file with private_key_jwt.
+func TestTheOIDCCredentialFixNamesTheSettingThatHoldsIt(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		cfg     config.Config
+		setting string
+		key     bool
+	}{
+		{"a secret", config.Config{OIDCClientSecret: "s"}, "BYWARD_OIDC_CLIENT_SECRET_FILE", false},
+		{"a key", config.Config{OIDCClientKey: "-----BEGIN PRIVATE KEY-----"}, "BYWARD_OIDC_CLIENT_KEY_FILE", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := oidcDiagnosis(&tc.cfg)
+			if d.ClientIDSetting != "BYWARD_OIDC_CLIENT_ID" || d.CredentialSetting != tc.setting || d.Key != tc.key {
+				t.Fatalf("diagnosis %+v, want the credential in %s (key %v)", d, tc.setting, tc.key)
 			}
 		})
 	}

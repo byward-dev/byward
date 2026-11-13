@@ -141,7 +141,7 @@ func newOIDCIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect 
 	}
 	ip := &identityProvider{name: cfg.IdP, redirect: redirect, label: oidcLabel(cfg), adapter: p, scope: p.Scope(), gateIdP: gate.Generic, userKey: oidcUserKey,
 		diagnose: func(ctx context.Context, _ time.Time) []doctor.Result {
-			return diagnoseDiscovery(ctx, p, cfg.OIDCIssuer)
+			return append(diagnoseDiscovery(ctx, p, cfg.OIDCIssuer), p.DiagnoseClient(ctx, oidcDiagnosis(cfg)))
 		}}
 	if oidc.Presets[preset].HostedDomains {
 		ip.gateIdP = gate.Google // the gate's kind for an IdP with hosted domains
@@ -198,6 +198,15 @@ func entraClientAuth(cfg *config.Config) (idp.ClientAuth, entra.Diagnosis, time.
 	}
 	d.CredentialKind, d.CredentialSetting = entra.CredentialSecret, config.Setting{Name: "entra-client-secret"}.Env()+"_FILE"
 	return idp.ClientSecret(cfg.EntraClientSecret), d, time.Time{}, nil
+}
+
+// oidcDiagnosis names the settings of the oidc client and its credential, for doctor's fixes.
+func oidcDiagnosis(cfg *config.Config) oidc.Diagnosis {
+	d := oidc.Diagnosis{ClientIDSetting: config.Setting{Name: "oidc-client-id"}.Env(), CredentialSetting: config.Setting{Name: "oidc-client-secret"}.Env() + "_FILE"}
+	if cfg.OIDCClientKey != "" {
+		d.CredentialSetting, d.Key = config.Setting{Name: "oidc-client-key"}.Env()+"_FILE", true
+	}
+	return d
 }
 
 // oidcClientAuth is the proxy's credential at an oidc IdP: a client secret, or private_key_jwt with

@@ -79,9 +79,9 @@ docker run … -v /etc/pki/my-ca.pem:/etc/byward/ca.pem:ro -e SSL_CERT_FILE=/etc
 
 ## 5. Check it
 
-- `byward check --offline`, then `byward doctor`: "discovery … matches the configured issuer". doctor
-  does not yet check the client secret or key against Keycloak; a wrong one shows at the first sign-in
-  as an IdP alert.
+- `byward check --offline`, then `byward doctor`: "discovery … matches the configured issuer", and
+  "client credential": Keycloak accepted the client ID and the secret or key. A wrong secret fails
+  with `unauthorized_client`, a wrong key with `invalid_client`, each with the setting to fix.
 - Sign in from an MCP client. A user without the role or group gets "You don't have access to this
   server." and the audit has `access_denied` with `reason` `role` or `group`.
 - Refresh: Keycloak returns an ID token on refresh, which byward needs to recheck the gate. A client gets

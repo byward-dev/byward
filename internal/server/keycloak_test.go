@@ -50,7 +50,7 @@ func TestIntegrationKeycloakSignsAUserInAndRefreshes(t *testing.T) {
 		t.Fatal(err)
 	}
 	public := "http://" + ln.Addr().String()
-	kc := startKeycloak(t, public+"/callback/keycloak")
+	kc := startKeycloak(t, keycloakRealm(public+"/callback/keycloak"))
 	issuer := kc + "/realms/byward"
 
 	up := fakeupstream.New()
@@ -101,17 +101,17 @@ func TestIntegrationKeycloakSignsAUserInAndRefreshes(t *testing.T) {
 
 const keycloakClientSecret = "byward-test-secret"
 
-// startKeycloak runs Keycloak with the test realm and returns its base URL once the realm's
-// discovery answers. The container publishes one loopback port, so no host network is needed.
-func startKeycloak(t *testing.T, redirect string) string {
+// startKeycloak runs Keycloak with realm and returns its base URL once the realm's discovery
+// answers. The container publishes one loopback port, so no host network is needed.
+func startKeycloak(t *testing.T, realm map[string]any) string {
 	t.Helper()
 	dir := t.TempDir()
 	// The image runs Keycloak as its own user, which must read the realm: world-readable test data.
 	if err := os.Chmod(dir, 0o755); err != nil { //nolint:gosec // G302: a directory of non-secret test data the container reads
 		t.Fatal(err)
 	}
-	realm, _ := json.Marshal(keycloakRealm(redirect))
-	if err := os.WriteFile(filepath.Join(dir, "byward-realm.json"), realm, 0o644); err != nil { //nolint:gosec // G306: a test realm the container reads
+	data, _ := json.Marshal(realm)
+	if err := os.WriteFile(filepath.Join(dir, "byward-realm.json"), data, 0o644); err != nil { //nolint:gosec // G306: a test realm the container reads
 		t.Fatal(err)
 	}
 	b := make([]byte, 6)
