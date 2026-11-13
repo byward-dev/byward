@@ -127,6 +127,6 @@ depends = ["licenses"]
 run = "goreleaser release --clean"
 
 [tasks."release:smoke"]
-description = "Build a snapshot, then check dist/ (archives, SBOMs, checksums) and the image contract incl. the FROM node example"
+description = "Build a snapshot, then check dist/ (archives, SBOMs, checksums), the image contract incl. the FROM node example, and that the image serves (Linux)"
 depends = ["release:snapshot"]
 run = ["sh scripts/dist-check.sh", "sh scripts/image-smoke.sh"]
