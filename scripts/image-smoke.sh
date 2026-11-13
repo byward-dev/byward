@@ -35,6 +35,12 @@ grep -Eq '^-r-xr-xr-x .* usr/local/bin/byward$' "$listing" \
   || fail "/usr/local/bin/byward must exist with mode r-xr-xr-x (not writable)"
 grep -Eq '^drwx.* 65532[ /]+65532 .* var/lib/byward/?$' "$listing" \
   || fail "/var/lib/byward must be a directory owned by 65532:65532"
+# The serving check below trusts its fake IdP through SSL_CERT_DIR, which Go reads beside this
+# bundle; a real IdP needs the bundle itself.
+rm -f "$tmp/ca"
+docker cp "$ctr:/etc/ssl/certs/ca-certificates.crt" "$tmp/ca" >/dev/null 2>&1 || true
+[ -f "$tmp/ca" ] && [ -s "$tmp/ca" ] \
+  || fail "image lacks a non-empty /etc/ssl/certs/ca-certificates.crt (the CA bundle a real IdP's TLS needs)"
 for f in LICENSE third_party/go.dev/LICENSE; do
   rm -f "$tmp/licence"
   docker cp "$ctr:/usr/share/doc/byward/$f" "$tmp/licence" >/dev/null 2>&1 || true
@@ -50,5 +56,16 @@ docker run --rm --entrypoint /usr/local/bin/byward "$node_image" --version >/dev
   || fail "'byward --version' failed in the FROM node example"
 docker run --rm --entrypoint sh "$node_image" -c 'touch /var/lib/byward/.write-test' >/dev/null 2>&1 \
   || fail "/var/lib/byward is not writable by the FROM node example's non-root user"
+
+# The image serves: run as the README does, it answers /readyz, challenges an unauthenticated MCP
+# request, signs a user in through a fake IdP and relays an MCP request with the identity assertion
+# (internal/server/image_test.go). The fakes listen on loopback, which the container reaches on a
+# Linux host network only.
+if [ "$(uname -s)" = Linux ]; then
+  BYWARD_IMAGE="$image" go test -tags integration -count=1 -run '^TestIntegrationTheReleaseImageServes$' ./internal/server/ \
+    || fail "the image does not serve (see the test output above)"
+else
+  echo "image smoke: skipped the serving check, which needs a Linux host network (CI runs it)" >&2
+fi
 
 echo "image smoke: ok ($image)"
