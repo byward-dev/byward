@@ -48,6 +48,10 @@ rm byward-cert.crt
 works too: in the Microsoft Entra admin center, **App registrations** › byward › **Certificates &
 secrets** › **Certificates** › **Upload certificate** (`.cer`, `.pem` or `.crt`).
 
+Allow a few minutes before you test a sign-in. In the real-tenant test (2026-11-13), `byward doctor`
+accepted a newly uploaded certificate within a minute, but sign-ins were refused with AADSTS700027
+for about five minutes after the upload.
+
 ## 3. Point byward at the file
 
 ```sh
@@ -90,4 +94,5 @@ Error descriptions are from Microsoft's
 [error code reference](https://learn.microsoft.com/entra/identity-platform/reference-error-codes);
 AADSTS5002723 was observed in the real-tenant test of ADR-0012.
 
-Verified against a real tenant: not yet (on the HITL list).
+Verified against a real tenant on 2026-11-13: sign-in, On-Behalf-Of and `byward doctor` with a
+certificate; a certificate that is not uploaded gives AADSTS700027, as in the table.

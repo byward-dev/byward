@@ -1,6 +1,7 @@
 # Microsoft 365 data for each signed-in user: a Graph MCP server with On-Behalf-Of
 
-> Not yet verified on a real Microsoft 365 tenant; the run checklist is tracked in #212.
+> Verified against a real tenant on 2026-11-13 with Graph `User.Read`, over HTTP and stdio. Mail,
+> calendar and the other workloads were not tested: the test users had no Microsoft 365 licence.
 
 Mail, calendar, OneDrive, SharePoint and Teams data lives behind
 [Microsoft Graph](https://learn.microsoft.com/en-us/graph/overview). An MCP server that calls Graph

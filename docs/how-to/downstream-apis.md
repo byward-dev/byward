@@ -11,7 +11,8 @@ one. A stdio upstream asks its token socket for the token instead of reading a h
 ([section 5](#5-a-stdio-upstream)). An app-only caller ([app-only tokens](app-tokens.md)) acts for no user, so its requests
 reach the upstream without a downstream token; the assertion's `principal_type` says so.
 
-> Not yet verified against a real tenant in this release; the fake IdP's Entra profile is the test.
+> Verified against a real tenant on 2026-11-13: Microsoft Graph `User.Read` over HTTP and stdio, with
+> consent missing and then granted.
 
 ## 1. Grant the API permissions
 
@@ -21,6 +22,12 @@ On the app registration byward signs users in with (see the [Entra quickstart](q
    example Microsoft Graph `User.Read`.
 2. **Grant admin consent** for the tenant. Users cannot consent to these themselves through
    byward: On-Behalf-Of has no screen to ask them on.
+
+Granting consent through the admin-consent URL that byward logs (section 4) also assigned the
+consenting administrator to the enterprise application, with default access, in the real-tenant test
+(2026-11-13). With assignment required, that administrator can then sign in through byward. If only
+users with a role may use it, set `BYWARD_GATE_ROLES` ([access gate](access-gate.md)) or remove that
+assignment.
 
 Without consent, Entra refuses the exchange (AADSTS65001), and byward tells the operator how to fix
 it (section 4).

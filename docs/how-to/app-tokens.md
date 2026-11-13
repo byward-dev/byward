@@ -151,8 +151,10 @@ byward revoke-user <tenant ID>:<service principal object ID>
 ```
 
 Tokens issued before that moment are refused; a token Entra issues after it works again unless the
-role is gone too. A caller's tool may keep handing out its cached token until that expires
-[unverified for the Azure CLI], so remove the role assignment as well when the caller must stay out. byward assumes an object ID is never both a user's and a service principal's in one
+role is gone too. Expect the caller to stay out until the tokens it holds expire, up to about an
+hour: in the real-tenant test (2026-11-13), both the Azure CLI 2.92.0 (even after `az logout` and
+`az login`) and Entra's token endpoint itself kept returning tokens issued before the revocation.
+Remove the role assignment as well when the caller must stay out. byward assumes an object ID is never both a user's and a service principal's in one
 tenant; Microsoft describes `oid` as identifying "the user or service principal" but does not state
 that the two never share a value [unverified].
 
