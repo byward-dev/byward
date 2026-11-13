@@ -34,14 +34,15 @@ MCP client ──OAuth 2.1──▶ byward ──sign-in──▶ Entra ID
 
 ## Verified clients
 
-Signed in through byward against a real Entra tenant and called a tool:
+Signed in through byward against a real Entra tenant and called a tool (last run 2026-11-13, on
+the v0.2 code):
 
 | Client | How it registers |
 |---|---|
-| Claude Code | CIMD (or a static client) |
+| Claude Code 2.1.311 | CIMD (or a static client) |
 | claude.ai | CIMD |
-| ChatGPT | CIMD |
-| VS Code | CIMD |
+| ChatGPT (developer mode) | CIMD |
+| VS Code 1.142.0 | CIMD |
 | Cursor 3.29.9 (2.6.22 does not work) | DCR |
 
 The TypeScript, Python and Go MCP SDK clients and MCP Inspector run against byward in CI.
