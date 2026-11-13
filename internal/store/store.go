@@ -68,7 +68,9 @@ type Collector interface {
 	// tokens, revocations with At <= now - RevocationRetention, clients with ExpiresAt <= now or
 	// never used and CreatedAt <= now - UnusedClientLifetime, consents with ExpiresAt <= now, and
 	// spent logins with expiresAt <= now. An expired spent login already counts as absent, so the
-	// shared suite cannot see it collected: each adapter tests that with its own row count.
+	// shared suite cannot see it collected: each adapter tests that with its own row count. A store
+	// shared by several replicas may return nil having deleted nothing while another replica
+	// collects; the rows go at a later call.
 	Collect(ctx context.Context, now time.Time) error
 }
 

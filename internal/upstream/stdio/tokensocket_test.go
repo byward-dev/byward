@@ -13,8 +13,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -313,7 +315,13 @@ func TestTheSocketClosesAsSoonAsTheProcessIsReapedEvenWhileADescendantHoldsItsPi
 			path = v
 		}
 	}
-	call(t, p, "detach") // a child in its own session keeps stdout open after the process exits
+	// A child in its own session keeps stdout open after the process exits. It is outside the
+	// process group byward kills, so the test kills it (#292).
+	pid, err := strconv.Atoi(call(t, p, "detach"))
+	if err != nil {
+		t.Fatalf("fake did not start a detached grandchild: %v", err)
+	}
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
 	h.m.Stop("a1")
 	eventually(t, "the token socket to close", func() bool {
 		c, err := net.Dial("unix", path)

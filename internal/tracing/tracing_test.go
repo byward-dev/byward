@@ -1,7 +1,9 @@
 package tracing
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +16,7 @@ import (
 	"github.com/go-logr/logr"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
@@ -85,12 +88,13 @@ func TestNoneExporterIsOff(t *testing.T) {
 	}
 }
 
-func TestTracesContinueTheInboundTraceAndReachTheExporter(t *testing.T) {
+func TestTracesContinueTheInboundTraceAndReachTheExporterWithSetupsVersion(t *testing.T) {
 	clearOTELEnv(t)
 	restoreGlobals(t)
+	const version = "9.9.9-setup" // Setup's version, which must reach the exported resource
 	var exports atomic.Int32
 	collector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "POST" && r.URL.Path == "/v1/traces" {
+		if b, err := io.ReadAll(r.Body); err == nil && r.Method == "POST" && r.URL.Path == "/v1/traces" && bytes.Contains(b, []byte(version)) {
 			exports.Add(1)
 		}
 		w.WriteHeader(200)
@@ -99,7 +103,7 @@ func TestTracesContinueTheInboundTraceAndReachTheExporter(t *testing.T) {
 	t.Setenv("OTEL_TRACES_EXPORTER", "otlp")
 	t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", collector.URL)
-	enabled, shutdown, err := Setup(context.Background(), os.Getenv, "test", slog.New(slog.DiscardHandler))
+	enabled, shutdown, err := Setup(context.Background(), os.Getenv, version, slog.New(slog.DiscardHandler))
 	if err != nil || !enabled {
 		t.Fatalf("Setup: enabled=%v err=%v", enabled, err)
 	}
@@ -112,6 +116,35 @@ func TestTracesContinueTheInboundTraceAndReachTheExporter(t *testing.T) {
 		t.Fatal(err)
 	}
 	if exports.Load() == 0 {
-		t.Fatal("no span reached the configured OTLP endpoint")
+		t.Fatal("no span with Setup's version reached the configured OTLP endpoint")
+	}
+}
+
+// Exported spans name byward and its version, on top of the SDK's own attributes.
+func TestExportedSpansCarryBywardsNameAndVersion(t *testing.T) {
+	clearOTELEnv(t)
+	exp := tracetest.NewInMemoryExporter()
+	tp, err := provider(exp, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+	_, span := tp.Tracer("t").Start(context.Background(), "span")
+	span.End()
+	if err := tp.ForceFlush(context.Background()); err != nil { // Shutdown would clear the exporter
+		t.Fatal(err)
+	}
+	spans := exp.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("got %d spans, want 1", len(spans))
+	}
+	attrs := map[string]string{}
+	for _, kv := range spans[0].Resource.Attributes() {
+		attrs[string(kv.Key)] = kv.Value.AsString()
+	}
+	for key, want := range map[string]string{"service.name": "byward", "service.version": "test", "telemetry.sdk.language": "go"} {
+		if attrs[key] != want {
+			t.Errorf("exported resource %v: %s = %q, want %q", attrs, key, attrs[key], want)
+		}
 	}
 }
