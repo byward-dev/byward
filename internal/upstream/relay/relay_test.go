@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"net/http/httptrace"
 	"net/textproto"
 	"net/url"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -20,8 +22,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/byward-dev/byward/internal/envproxy"
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/testutil/closedport"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
+	"github.com/byward-dev/byward/internal/testutil/rerun"
 	"golang.org/x/net/http/httpproxy"
 )
 
@@ -763,9 +768,7 @@ func withProxy(proxy func(*http.Request) (*url.URL, error)) Option {
 // and the client still gets 502. A well-formed proxy's error is logged as before, and it shows the
 // address Go dialled, which is what makes the error unsafe to log for a misread setting.
 func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLogAndAWellFormedProxysErrorStillDoes(t *testing.T) {
-	closed := httptest.NewServer(http.NotFoundHandler())
-	addr := closed.Listener.Addr().String() // nothing listens here once closed: every dial fails at once
-	closed.Close()
+	addr := closedport.Addr(t)
 	for _, tc := range []struct {
 		name    string
 		setting string
@@ -795,7 +798,7 @@ func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLogAndAWellFormedProxys
 			if w.Code != http.StatusBadGateway || !regexp.MustCompile(`msg="upstream error" request_id=[^"\s]+`).MatchString(logs.String()) {
 				t.Fatalf("status %d, log %q; want 502 and the upstream error logged with the request ID", w.Code, logs.String())
 			}
-			if got := strings.Contains(logs.String(), `reason="`+misreadProxy+`"`); got != tc.misread {
+			if got := strings.Contains(logs.String(), `reason="`+envproxy.Cause+`"`); got != tc.misread {
 				t.Fatalf("log %q names the misread setting: %v, want %v", logs.String(), got, tc.misread)
 			}
 			if !tc.misread && (!strings.Contains(logs.String(), "proxyconnect") || !strings.Contains(logs.String(), addr)) {
@@ -833,7 +836,11 @@ func TestABodyThatBreaksOffReachesTheUpstreamErrorLogAndNeverQuotesAMisreadProxy
 				if err != nil {
 					return
 				}
-				_, _ = http.ReadRequest(bufio.NewReader(c))
+				// The whole request, body included, before answering: a reset while the transport still
+				// writes the body would fail the round trip instead of the response's body copy (#272).
+				if req, err := http.ReadRequest(bufio.NewReader(c)); err == nil {
+					_, _ = io.Copy(io.Discard, req.Body)
+				}
 				_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\npartial")
 				_ = c.(*net.TCPConn).SetLinger(0) // close with a reset, so the read error names the addresses
 				_ = c.Close()
@@ -842,12 +849,18 @@ func TestABodyThatBreaksOffReachesTheUpstreamErrorLogAndNeverQuotesAMisreadProxy
 			pf := (&httpproxy.Config{HTTPProxy: tc.setting(addr)}).ProxyFunc()
 			u, _ := url.Parse("http://mcp.upstream.example/mcp")
 			var logs bytes.Buffer
+			rec := httptest.NewRecorder()
 			New(slog.New(slog.NewTextHandler(&logs, nil)), u, withProxy(func(r *http.Request) (*url.URL, error) { return pf(r.URL) })).
-				ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader("{}")))
+				ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader("{}")))
+			// The proxy answered, so the error is the body copy's: a failed round trip (#272) would also
+			// log the cause, and pass the misread row for the wrong reason.
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status %d, want the proxy's 200 before its body broke off; log %q", rec.Code, logs.String())
+			}
 			if !strings.Contains(logs.String(), `level=WARN msg="upstream error"`) {
 				t.Fatalf("log %q; want ReverseProxy's error line in the structured log, as a warning", logs.String())
 			}
-			if tc.misread && (strings.Contains(logs.String(), addr) || !strings.Contains(logs.String(), `reason="`+misreadProxy+`"`)) {
+			if tc.misread && (strings.Contains(logs.String(), addr) || !strings.Contains(logs.String(), `reason="`+envproxy.Cause+`"`)) {
 				t.Fatalf("log %q; want the cause, not the address Go dialled", logs.String())
 			}
 			if !tc.misread && (!strings.Contains(logs.String(), `error="httputil: ReverseProxy read error during body copy: `) ||
@@ -856,4 +869,25 @@ func TestABodyThatBreaksOffReachesTheUpstreamErrorLogAndNeverQuotesAMisreadProxy
 			}
 		})
 	}
+}
+
+// The relay, as production builds it, reads the environment's proxy (once per process, so the check
+// runs in a child process): through a setting Go misread, the upstream error names the cause; through
+// a well-formed one it is the transport's own.
+func TestTheRelayReadsTheEnvironmentProxyAndNamesAMisreadOnesCause(t *testing.T) {
+	if rerun.Child() {
+		u, _ := url.Parse("http://mcp.upstream.example/mcp")
+		w := httptest.NewRecorder()
+		New(slog.New(slog.NewTextHandler(os.Stdout, nil)), u).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader("{}")))
+		fmt.Printf("STATUS=%d\n", w.Code)
+		return
+	}
+	rerun.EachProxySetting(t, "TestTheRelayReadsTheEnvironmentProxyAndNamesAMisreadOnesCause", func(t *testing.T, got, addr string, misread bool) {
+		if !strings.Contains(got, "STATUS=502") || !strings.Contains(got, `msg="upstream error"`) {
+			t.Fatalf("child output %q; want 502 and the upstream error logged", got)
+		}
+		if strings.Contains(got, `reason="`+envproxy.Cause+`"`) != misread || strings.Contains(got, addr) == misread {
+			t.Fatalf("child output %q; misread %v", got, misread)
+		}
+	})
 }
