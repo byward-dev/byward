@@ -319,7 +319,7 @@ func TestARequestEndedWithoutAnAnswerGetsItsQueuedAnswerElseAnErrorOrForAListenB
 		{name: "a request whose process crashed", wantBody: exited},
 		{name: "a request whose process byward stopped", chosen: true, wantBody: exited},
 		{name: "a listen whose process crashed", listen: true, wantBody: exited},
-		{name: "a listen whose process byward stopped", listen: true, chosen: true, wantBody: complete},
+		{name: "a listen byward ended (its process retired, or byward draining)", listen: true, chosen: true, wantBody: complete},
 		{name: "a queued answer goes first", listen: true, chosen: true, queued: answered, wantBody: answered},
 	}
 	for _, tc := range cases {

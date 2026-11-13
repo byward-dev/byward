@@ -370,10 +370,10 @@ func TestLooseUpstreamEnvFileRefusesToStartInEveryMode(t *testing.T) {
 	}
 }
 
-// #180, through Run: shutting down ends an open subscriptions/listen with its completion result
-// under the client's own id before the stream closes, not by cutting it off (2026-07-28
-// subscriptions).
-func TestShutdownEndsAnOpenListenWithItsCompletionResultBeforeItsStreamCloses(t *testing.T) {
+// #180, through Run: shutting down fails readiness and ends an open subscriptions/listen with its
+// completion result under the client's own id before the stream closes, not by cutting it off
+// (2026-07-28 subscriptions).
+func TestShutdownFailsReadinessAndEndsAnOpenListenWithItsCompletionResultBeforeItsStreamCloses(t *testing.T) {
 	for name, internal := range map[string]string{"with the internal listener": "127.0.0.1:0", "without it": ""} {
 		t.Run(name, func(t *testing.T) { shutdownEndsAnOpenListen(t, internal) })
 	}
@@ -452,8 +452,8 @@ func shutdownEndsAnOpenListen(t *testing.T, internalListen string) {
 	}
 	probes := http.NewServeMux() // the upstream's drain comes with readiness failing, not instead of it
 	s.Health.Register(probes)
-	if code, _ := getBody(t, probes, "x", "/readyz"); code != http.StatusServiceUnavailable {
-		t.Fatalf("/readyz is %d once shutdown has begun, want 503", code)
+	if code, body := getBody(t, probes, "x", "/readyz"); code != http.StatusServiceUnavailable || !strings.Contains(body, `"draining":"fail"`) {
+		t.Fatalf("/readyz is %d %s once shutdown has begun, want 503 with draining failing", code, body)
 	}
 	select {
 	case err := <-done:
