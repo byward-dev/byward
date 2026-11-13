@@ -86,9 +86,14 @@ description = "Go tests behind the integration build tag: the restore drill, the
 # Only the tagged tests (named TestIntegration*); the build tag adds no other tests, so ./... would rerun the unit suite.
 run = "go test -race -count=1 -v -timeout 11m -tags=integration -run ^TestIntegration ./..."
 
+[tasks."test:postgres"]
+description = "The PostgreSQL store adapter on PostgreSQL 15 and 18 in pinned containers with TLS (verify-full): the conformance suite, the migration fixtures and the adapter's own tests (needs Docker)"
+env = { BYWARD_POSTGRES = "1" }
+run = "go test -race -count=1 -v -timeout 10m -tags=integration -run ^TestIntegrationPostgres$ ./internal/store/postgres/"
+
 [tasks."test:integration"]
-description = "Integration tests, including the release smoke test and MCP conformance (needs Docker)"
-depends = ["release:smoke", "test:conformance", "test:ui", "test:assertion"]
+description = "Integration tests, including the release smoke test, MCP conformance and the PostgreSQL store (needs Docker)"
+depends = ["release:smoke", "test:conformance", "test:ui", "test:assertion", "test:postgres"]
 # After the dependencies, not beside them: test:conformance builds the pinned CLI in
 # build/conformance/src and leaves it there for the Go lane's authorization suite.
 run = "mise run test:integration:go"

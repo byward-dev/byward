@@ -146,3 +146,19 @@ jobs:
           MISE_TASK_RUN_AUTO_INSTALL: "false"
           # The real open-source clients run in pinned containers on the host network (ADR-0024 §3).
           BYWARD_REAL_CLIENTS: "1"
+
+  # The PostgreSQL store adapter on PostgreSQL 15 and 18 in pinned containers with TLS: the
+  # conformance suite and the adapter's own tests (ADR-0007 §2, amended for #227).
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        with:
+          install_args: go
+      - run: mise run test:postgres
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
