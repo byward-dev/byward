@@ -47,12 +47,13 @@ func TestIntegrationKeycloakDoctorChecksTheClientCredential(t *testing.T) {
 	for _, tc := range []struct {
 		name, clientID, secret, key string
 		want                        doctor.Status
+		message                     string // Keycloak's answer, as the keycloak preset records it
 		fix                         string
 	}{
-		{"the right secret", "byward", keycloakClientSecret, "", doctor.Pass, ""},
-		{"a wrong secret", "byward", "not-the-secret", "", doctor.Fail, "BYWARD_OIDC_CLIENT_SECRET_FILE"},
-		{"the registered key", "byward-jwt", "", key, doctor.Pass, ""},
-		{"another key", "byward-jwt", "", other, doctor.Fail, "BYWARD_OIDC_CLIENT_KEY_FILE"},
+		{"the right secret", "byward", keycloakClientSecret, "", doctor.Pass, "accepted the client ID and credential", ""},
+		{"a wrong secret", "byward", "not-the-secret", "", doctor.Fail, "(unauthorized_client, HTTP 401)", "BYWARD_OIDC_CLIENT_SECRET_FILE"},
+		{"the registered key", "byward-jwt", "", key, doctor.Pass, "accepted the client ID and credential", ""},
+		{"another key", "byward-jwt", "", other, doctor.Fail, "(invalid_client, HTTP 400)", "BYWARD_OIDC_CLIENT_KEY_FILE"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := oidcEnv(t, "keycloak", issuer, tc.clientID, tc.secret, "BYWARD_PUBLIC_URL="+public+"/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
@@ -70,8 +71,8 @@ func TestIntegrationKeycloakDoctorChecksTheClientCredential(t *testing.T) {
 			}
 			for _, r := range report.Checks {
 				if r.Name == "client credential" {
-					if r.Status != tc.want || !strings.Contains(r.Fix, tc.fix) {
-						t.Fatalf("client credential %+v; want %s with a fix naming %q", r, tc.want, tc.fix)
+					if r.Status != tc.want || !strings.Contains(r.Message, tc.message) || !strings.Contains(r.Fix, tc.fix) {
+						t.Fatalf("client credential %+v; want %s with %q and a fix naming %q", r, tc.want, tc.message, tc.fix)
 					}
 					return
 				}

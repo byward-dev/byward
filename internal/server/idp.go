@@ -204,7 +204,7 @@ func entraClientAuth(cfg *config.Config) (idp.ClientAuth, entra.Diagnosis, time.
 func oidcDiagnosis(cfg *config.Config) oidc.Diagnosis {
 	d := oidc.Diagnosis{ClientIDSetting: config.Setting{Name: "oidc-client-id"}.Env(), CredentialSetting: config.Setting{Name: "oidc-client-secret"}.Env() + "_FILE"}
 	if cfg.OIDCClientKey != "" {
-		d.CredentialSetting, d.Key = config.Setting{Name: "oidc-client-key"}.Env()+"_FILE", true
+		d.CredentialSetting, d.KeyCredential = config.Setting{Name: "oidc-client-key"}.Env()+"_FILE", true
 	}
 	return d
 }

@@ -216,7 +216,7 @@ func TestTheOIDCCredentialFixNamesTheSettingThatHoldsIt(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d := oidcDiagnosis(&tc.cfg)
-			if d.ClientIDSetting != "BYWARD_OIDC_CLIENT_ID" || d.CredentialSetting != tc.setting || d.Key != tc.key {
+			if d.ClientIDSetting != "BYWARD_OIDC_CLIENT_ID" || d.CredentialSetting != tc.setting || d.KeyCredential != tc.key {
 				t.Fatalf("diagnosis %+v, want the credential in %s (key %v)", d, tc.setting, tc.key)
 			}
 		})

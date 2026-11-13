@@ -49,6 +49,14 @@ func newEnv(t *testing.T, cfg Config, opts ...fakeidp.Option) *env {
 	return &env{fake: fake, client: c, p: p}
 }
 
+// ready fetches discovery, so that a later transport only sees the token request.
+func (e *env) ready(t *testing.T) {
+	t.Helper()
+	if err := e.p.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // now is the shared fixed clock of the fake and the adapter.
 func now() time.Time { return time.Unix(1_800_000_000, 0) }
 
@@ -457,8 +465,12 @@ func TestATokenSuccessWithoutTokensIsFatal(t *testing.T) {
 type emptySuccess struct{}
 
 func (emptySuccess) RoundTrip(r *http.Request) (*http.Response, error) {
-	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}},
-		Body: io.NopCloser(strings.NewReader("{}")), Request: r}, nil
+	return jsonResponse(r, "{}"), nil
+}
+
+// jsonResponse is a 200 answer to r with the JSON body.
+func jsonResponse(r *http.Request, body string) *http.Response {
+	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}
 }
 
 func TestConcurrentFirstLoginsShareDiscovery(t *testing.T) {

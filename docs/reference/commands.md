@@ -43,8 +43,9 @@ script written today keeps meaning the same thing.
 ## `byward doctor`
 
 Run it where the proxy runs, with the same environment, while the proxy is running. It reaches the
-proxy at `BYWARD_PUBLIC_URL`, as an MCP client would, and Entra at `login.microsoftonline.com`. It
-sends no token to the proxy, and it calls no Microsoft Graph API.
+proxy at `BYWARD_PUBLIC_URL`, as an MCP client would, and the IdP: Entra at
+`login.microsoftonline.com`, or an `oidc` IdP's discovery document and token endpoint. It sends no
+token to the proxy, and it calls no Microsoft Graph API.
 
 A configuration error stops doctor before any check, with exit code 2. Otherwise it prints one line
 per check, with the fix below each problem:
@@ -69,7 +70,7 @@ fail  idp    entra app and credential: Entra rejected the client secret (AADSTS7
 | `proxy` | Host header | no response was 421; a reverse proxy that changes `Host` shows up here |
 | `proxy` | identity assertion keys (discovery) | with an HTTP upstream: the OpenID discovery document names byward's issuer and a `jwks_uri` that serves the key signing assertions, as a verifier using only discovery (MCP Toolbox) needs |
 | `idp` | discovery | with an `oidc` IdP or preset: the discovery document at `BYWARD_OIDC_ISSUER` names that issuer exactly |
-| `idp` | client credential | with an `oidc` IdP or preset: a token request with a made-up authorization code is answered `invalid_grant`, so the IdP accepted the client ID and the secret or key and refused only the code. `invalid_client`, `unauthorized_client`, or `access_denied` with 401 (Auth0) fail, with a fix naming the credential's setting; any other answer is a warning. Needs no user. Keycloak, Okta, Auth0 and Google were measured to check the client before the code; for plain `oidc` a pass says that order is assumed |
+| `idp` | client credential | with an `oidc` IdP or preset: a token request with a made-up authorization code is answered `invalid_grant` with a 4xx status, so the IdP accepted the client ID and the secret or key and refused only the code. `invalid_client`, `unauthorized_client`, or `access_denied` with 401 (Auth0) fail, with a fix naming the credential's setting; any other answer is a warning. The IdP's `error_description` is never shown (an IdP may echo the request into it). Needs no user. Keycloak, Okta, Auth0 and Google were measured to check the client before the code; for plain `oidc` a pass says that order is assumed |
 | `idp` | entra tenant | the tenant's v2 discovery document exists and names its v2 issuer |
 | `idp` | entra signing keys | the tenant's key set has a signing key |
 | `idp` | entra app and credential | a client-credentials request for `api://<client-id>/.default` succeeds: Entra accepted the tenant, the client ID and the secret. Needs no app permission. |
