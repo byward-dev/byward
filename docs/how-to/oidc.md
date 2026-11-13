@@ -49,7 +49,7 @@ demand.
 |---|---|---|---|
 | `google` | `https://accounts.google.com` | `profile email` | Refresh tokens come from `access_type=offline` with `prompt=consent` (see below). `email_verified` may be a string. |
 | `okta` | `https://<domain>/oauth2/<server>` | `profile email offline_access` | Only a custom authorization server issues tokens for the proxy; the org server (`https://<domain>`) is refused. |
-| `auth0` | `https://<tenant>.auth0.com/` | `profile email offline_access` | The issuer ends with a slash. |
+| `auth0` | `https://<tenant>.auth0.com/` | `profile email offline_access` | The issuer ends with a slash. Auth0 drops `roles` and `groups` claims, so gate by email domain (below). |
 | `keycloak` | `https://<host>/realms/<realm>` | `profile email` | Enable "Client authentication" on the client. |
 | `oidc` | any | `profile email offline_access` | No quirks. |
 
@@ -80,6 +80,11 @@ An OIDC IdP usually lets anyone with an account sign in, so an empty
   with the token claim name `roles` (and a "Group Membership" mapper for `groups`) so the gate sees
   them. The integration test checks this against Keycloak 26.8.0
   (`TestIntegrationKeycloakSignsAUserInAndRefreshes`).
+- **Auth0: no role or group gate yet.** Auth0 reserves the `roles` and `groups` claim names and silently
+  drops custom claims that use them; roles can only arrive under a namespaced claim such as
+  `https://example.com/roles`, which the gate does not read yet (#286). With `BYWARD_IDP=auth0`, a role or
+  group gate refuses everyone, so gate on `BYWARD_GATE_EMAIL_DOMAINS` instead. Found in a real-tenant test
+  on 2026-11-13.
 
 ## 5. Check it
 
