@@ -50,8 +50,9 @@ BYWARD_UPSTREAM_URL=http://graph-mcp.internal:8000/mcp
 - `BYWARD_OBO_HEADER=Authorization` gives the server `Authorization: Bearer <Graph token>`, which is
   what Graph MCP servers expect. The identity assertion moves to `X-Byward-Assertion`, since the two
   must not share a header ([downstream APIs](downstream-apis.md#an-upstream-that-reads-the-users-token-from-authorization)).
-- On-Behalf-Of needs an HTTP upstream. A stdio upstream cannot receive a token that expires within
-  the hour yet (#141).
+- This guide uses an HTTP upstream. A stdio upstream gets the Graph token from its token socket
+  instead of a header, and `BYWARD_OBO_HEADER` is refused for it
+  ([downstream APIs: a stdio upstream](downstream-apis.md#5-a-stdio-upstream)).
 
 ## 3. A minimal Graph MCP server
 
@@ -108,7 +109,8 @@ uses that request-provided token for its Graph calls, which is exactly what bywa
 ## 5. When Entra refuses
 
 Entra can refuse the exchange; the client then gets an answer it can show, never a 401
-([§4](downstream-apis.md#4-when-entra-refuses)). For Microsoft 365, two causes are common:
+([§4](downstream-apis.md#4-when-entra-refuses)). Until the cause is fixed the client cannot connect:
+`initialize` is refused too, so look in byward's error log. For Microsoft 365, two causes are common:
 
 - **`consent_required`**: a permission in `BYWARD_OBO_SCOPES` has no admin consent. The error log's
   `admin_consent_url` opens the consent screen for a tenant administrator.
