@@ -836,7 +836,11 @@ func TestABodyThatBreaksOffReachesTheUpstreamErrorLogAndNeverQuotesAMisreadProxy
 				if err != nil {
 					return
 				}
-				_, _ = http.ReadRequest(bufio.NewReader(c))
+				// The whole request, body included, before answering: a reset while the transport still
+				// writes the body would fail the round trip instead of the response's body copy (#272).
+				if req, err := http.ReadRequest(bufio.NewReader(c)); err == nil {
+					_, _ = io.Copy(io.Discard, req.Body)
+				}
 				_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\npartial")
 				_ = c.(*net.TCPConn).SetLinger(0) // close with a reset, so the read error names the addresses
 				_ = c.Close()
@@ -845,8 +849,14 @@ func TestABodyThatBreaksOffReachesTheUpstreamErrorLogAndNeverQuotesAMisreadProxy
 			pf := (&httpproxy.Config{HTTPProxy: tc.setting(addr)}).ProxyFunc()
 			u, _ := url.Parse("http://mcp.upstream.example/mcp")
 			var logs bytes.Buffer
+			rec := httptest.NewRecorder()
 			New(slog.New(slog.NewTextHandler(&logs, nil)), u, withProxy(func(r *http.Request) (*url.URL, error) { return pf(r.URL) })).
-				ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader("{}")))
+				ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader("{}")))
+			// The proxy answered, so the error is the body copy's: a failed round trip (#272) would also
+			// log the cause, and pass the misread row for the wrong reason.
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status %d, want the proxy's 200 before its body broke off; log %q", rec.Code, logs.String())
+			}
 			if !strings.Contains(logs.String(), `level=WARN msg="upstream error"`) {
 				t.Fatalf("log %q; want ReverseProxy's error line in the structured log, as a warning", logs.String())
 			}
