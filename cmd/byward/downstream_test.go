@@ -25,29 +25,29 @@ func shortTempDir(t *testing.T) string {
 	return dir
 }
 
-// scriptedSocket is a token socket that answers one connection with answer. asked is closed once a
-// connection is accepted, before the answer is written.
-func scriptedSocket(t *testing.T, answer string) (path string, asked <-chan struct{}) {
+// scriptedSocket is a token socket that answers one connection with answer. It returns its path and a
+// channel that is closed once a connection is accepted, before the request is read.
+func scriptedSocket(t *testing.T, answer string) (string, <-chan struct{}) {
 	t.Helper()
-	path = filepath.Join(shortTempDir(t), "token.sock")
+	path := filepath.Join(shortTempDir(t), "token.sock")
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ln.Close() })
-	accepted := make(chan struct{})
+	connected := make(chan struct{})
 	go func() {
 		c, err := ln.Accept()
 		if err != nil {
 			return
 		}
-		close(accepted)
+		close(connected)
 		defer func() { _ = c.Close() }()
 		_ = c.SetDeadline(time.Now().Add(10 * time.Second))
 		_, _ = c.Read(make([]byte, 64))
 		_, _ = c.Write([]byte(answer))
 	}()
-	return path, accepted
+	return path, connected
 }
 
 // downstream-token prints the token alone and nothing on stderr; an
@@ -83,11 +83,11 @@ func TestDownstreamTokenOutputAndExitCodes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var env []string
-			var asked <-chan struct{}
+			var connected <-chan struct{}
 			switch tc.socket {
 			case answers:
 				var path string
-				path, asked = scriptedSocket(t, tc.answer)
+				path, connected = scriptedSocket(t, tc.answer)
 				env = []string{"BYWARD_DOWNSTREAM_TOKEN_SOCKET=" + path}
 			case noSocket:
 				env = []string{"BYWARD_DOWNSTREAM_TOKEN_SOCKET=" + filepath.Join(shortTempDir(t), "token.sock")}
@@ -100,10 +100,10 @@ func TestDownstreamTokenOutputAndExitCodes(t *testing.T) {
 			if strings.Contains(stderr, tok) {
 				t.Fatalf("the token reached stderr: %q", stderr)
 			}
-			if tc.code == exitConfig && asked != nil {
+			if tc.code == exitConfig && connected != nil {
 				select {
-				case <-asked:
-					t.Fatal("a usage mistake asked the socket for a token")
+				case <-connected:
+					t.Fatal("a usage mistake connected to the socket")
 				default:
 				}
 			}

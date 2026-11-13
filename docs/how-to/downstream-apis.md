@@ -204,7 +204,7 @@ curl -H "Authorization: Bearer $TOKEN" https://graph.microsoft.com/v1.0/me
 | Exit code | Meaning |
 |---|---|
 | 0 | the token is on standard output |
-| 1 | no token: the socket's `error` code alone on standard error (table above), or why the socket could not be asked |
+| 1 | no token: the socket's `error` code alone on standard error (table above), or `byward: downstream-token: <reason>` when the socket could not be asked, its answer was not one, or the token could not be written |
 | 2 | `BYWARD_DOWNSTREAM_TOKEN_SOCKET` is not set, or the arguments are wrong |
 
 It reads no other setting and logs nothing; the token is only ever on standard output.
