@@ -123,7 +123,7 @@ BYWARD_DOWNSTREAM_TOKEN_SOCKET=/tmp/byward-session-1234/token.sock
 ```
 
 The socket is in a directory under byward's temporary directory (`TMPDIR`). A socket path may be
-at most 103 bytes, so with a long `TMPDIR` byward refuses to start, and `byward check --offline` and
+at most 107 bytes on Linux and 103 on macOS, so with a long `TMPDIR` byward refuses to start, and `byward check --offline` and
 `byward doctor` fail, naming the limit; set a shorter `TMPDIR`.
 
 Connect, write one JSON object on one line, and read one line back:

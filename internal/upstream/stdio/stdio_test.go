@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -148,6 +149,21 @@ func TestOnBehalfOfRefusesATempDirTooLongForItsTokenSocketAtStartup(t *testing.T
 				}
 			}
 		})
+	}
+}
+
+// The token socket's path limit is the platform's own: sun_path less its NUL. A 105-byte path, as
+// a Linux deployment may have, starts on Linux and is refused on macOS.
+func TestTheTokenSocketPathLimitIsThePlatforms(t *testing.T) {
+	want := map[string]int{"linux": 107, "darwin": 103}[runtime.GOOS]
+	if maxSocketPath != want {
+		t.Fatalf("maxSocketPath = %d on %s, want %d", maxSocketPath, runtime.GOOS, want)
+	}
+	tempDir := "/" + strings.Repeat("d", 105-len("/byward-session-4294967295/token.sock")-1) // a 105-byte socket path
+	_, err := New(Config{Command: []string{fakeBin}, LookupEnv: lookup(proxyEnv), TempDir: tempDir,
+		DownstreamToken: func(context.Context, Identity) DownstreamToken { return DownstreamToken{} }})
+	if refused := errors.Is(err, ErrTempDirTooLong); refused != (runtime.GOOS == "darwin") {
+		t.Fatalf("a 105-byte socket path on %s: %v", runtime.GOOS, err)
 	}
 }
 

@@ -13,6 +13,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"time"
 )
 
@@ -40,9 +42,9 @@ type DownstreamToken struct {
 
 const (
 	tokenSocketName = "token.sock"
-	// maxSocketPath is the longest socket path both platforms accept (sun_path: 104 bytes on
-	// macOS with its NUL, 108 on Linux).
-	maxSocketPath = 103
+	// maxSocketPath is the longest socket path this platform accepts: sun_path less its NUL, 107
+	// bytes on Linux and 103 on macOS.
+	maxSocketPath = len(syscall.RawSockaddrUnix{}.Path) - 1
 	// tokenAnswerTimeout bounds one connection: the On-Behalf-Of exchange takes at most 30 s
 	// (downstream.ExchangeTimeout), and a peer that stalls must not block the next one for longer.
 	tokenAnswerTimeout = 40 * time.Second
@@ -81,8 +83,8 @@ func checkTempDirFitsTokenSocket(tempDir string) error {
 	}
 	longest := filepath.Join(tempDir, sessionDirPattern+longestSessionDirSuffix, tokenSocketName)
 	if len(longest) > maxSocketPath {
-		return fmt.Errorf("%w: with On-Behalf-Of, each process's token socket is %s, up to %d bytes, longer than the %d bytes a socket path may have; set a shorter temporary directory (TMPDIR)",
-			ErrTempDirTooLong, filepath.Join(tempDir, sessionDirPattern+"<n>", tokenSocketName), len(longest), maxSocketPath)
+		return fmt.Errorf("%w: with On-Behalf-Of, each process's token socket is %s, up to %d bytes, longer than the %d bytes a socket path may have on %s; set a shorter temporary directory (TMPDIR)",
+			ErrTempDirTooLong, filepath.Join(tempDir, sessionDirPattern+"<n>", tokenSocketName), len(longest), maxSocketPath, runtime.GOOS)
 	}
 	return nil
 }
