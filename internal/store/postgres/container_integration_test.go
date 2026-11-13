@@ -4,14 +4,8 @@ package postgres
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/hex"
-	"encoding/pem"
-	"math/big"
 	"net"
 	"net/url"
 	"os"
@@ -127,8 +121,8 @@ func (s *server) dsn(db string) string {
 		Path: "/" + db, RawQuery: url.Values{"sslmode": {"verify-full"}, "sslrootcert": {s.caFile}}.Encode()}).String()
 }
 
-// database creates an empty database, dropped when the test ends, and returns its name.
-func (s *server) database(t *testing.T) string {
+// newDatabase creates an empty database, dropped when the test ends, and returns its name.
+func (s *server) newDatabase(t *testing.T) string {
 	t.Helper()
 	name := "t_" + randomHex(t)
 	if _, err := s.admin.Exec(context.Background(), "CREATE DATABASE "+name); err != nil {
@@ -141,7 +135,7 @@ func (s *server) database(t *testing.T) string {
 // open opens a store on a new database.
 func (s *server) open(t *testing.T) (*Store, string) {
 	t.Helper()
-	db := s.database(t)
+	db := s.newDatabase(t)
 	return s.openOn(t, db), db
 }
 
@@ -181,53 +175,6 @@ func randomHex(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return hex.EncodeToString(b)
-}
-
-type testCA struct {
-	cert    *x509.Certificate
-	key     *ecdsa.PrivateKey
-	certPEM []byte
-}
-
-func newCA(t *testing.T, name string) *testCA {
-	t.Helper()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: name},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour), IsCA: true, BasicConstraintsValid: true,
-		KeyUsage: x509.KeyUsageCertSign}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cert, err := x509.ParseCertificate(der)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &testCA{cert: cert, key: key, certPEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})}
-}
-
-// issue makes a server certificate for one IP address and returns it with its key, in PEM.
-func (ca *testCA) issue(t *testing.T, ip string) (certPEM, keyPEM []byte) {
-	t.Helper()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tmpl := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: ip},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour), IPAddresses: []net.IP{net.ParseIP(ip)},
-		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca.cert, &key.PublicKey, ca.key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pkcs8, err := x509.MarshalPKCS8PrivateKey(key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8})
 }
 
 // waitFor polls query on c until it returns true, or fails the test after 10 s.

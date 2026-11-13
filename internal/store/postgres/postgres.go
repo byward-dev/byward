@@ -14,11 +14,9 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"math/rand/v2"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/byward-dev/byward/internal/store"
@@ -73,84 +71,6 @@ func (s *Store) Close() error {
 	return nil
 }
 
-// maxAttempts bounds the retries of one write. Conflicting writes on one key commit one at a time,
-// so this many attempts covers a burst of that many writers on the same key.
-const maxAttempts = 40
-
-// write runs fn in one SERIALIZABLE transaction that also takes a value from store_writes, retrying
-// the whole transaction on a serialization failure, a deadlock or a unique violation. Every insert
-// here checks for its key first, so a concurrent SERIALIZABLE insert of the same key surfaces as a
-// serialization failure; one by a writer that is not SERIALIZABLE surfaces as a unique violation
-// (postgresql.org/docs/current/transaction-iso.html). Either way the retry's own check then sees
-// the key. fn must not keep state across attempts. Errors from fn, such as the store's, are
-// returned as they are.
-func (s *Store) write(ctx context.Context, fn func(pgx.Tx) error) error {
-	return s.retry(ctx, pgx.Serializable, fn)
-}
-
-func (s *Store) retry(ctx context.Context, iso pgx.TxIsoLevel, fn func(pgx.Tx) error) error {
-	for attempt := 1; ; attempt++ {
-		err := s.once(ctx, iso, fn)
-		if err == nil || !retryable(err) {
-			return err
-		}
-		if attempt == maxAttempts {
-			return fmt.Errorf("postgres store: still conflicting after %d attempts: %w", attempt, err)
-		}
-		// Full jitter, so writers that collided do not collide again in step.
-		wait := time.Duration(rand.Int64N(int64(min(time.Millisecond<<min(attempt, 7), 100*time.Millisecond)))) //nolint:gosec // G404: jitter, not a secret
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("postgres store: %w (after %v)", ctx.Err(), err)
-		case <-time.After(wait):
-		}
-	}
-}
-
-func (s *Store) once(ctx context.Context, iso pgx.TxIsoLevel, fn func(pgx.Tx) error) error {
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: iso})
-	if err != nil {
-		return fmt.Errorf("postgres store: begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }() // a no-op after Commit
-	if err := fn(tx); err != nil {
-		return wrap(err)
-	}
-	if _, err := tx.Exec(ctx, "SELECT nextval('store_writes')"); err != nil {
-		return fmt.Errorf("postgres store: write counter: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("postgres store: commit: %w", err)
-	}
-	return nil
-}
-
-// retryable: a transaction that lost a race and may succeed when run again.
-func retryable(err error) bool {
-	var pg *pgconn.PgError
-	if !errors.As(err, &pg) {
-		return false
-	}
-	switch pg.Code {
-	case "40001", // serialization_failure
-		"40P01", // deadlock_detected
-		"23505": // unique_violation
-		return true
-	}
-	return false
-}
-
-// wrap names the adapter in database errors and leaves the store's own errors alone.
-func wrap(err error) error {
-	for _, sentinel := range []error{store.ErrNotFound, store.ErrConsumed, store.ErrExists, store.ErrInvalid,
-		store.ErrRevoked, store.ErrReused, store.ErrFull} {
-		if errors.Is(err, sentinel) {
-			return err
-		}
-	}
-	return fmt.Errorf("postgres store: %w", err)
-}
-
 // epochSQL is the store's current epoch, read in each statement that needs it (ADR-0007 §9).
 const epochSQL = "(SELECT value FROM meta WHERE key = 'epoch')"
 
@@ -176,7 +96,7 @@ func (s *Store) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, er
 		return tx.QueryRow(ctx, `INSERT INTO grants
 			(id, client_id, subject, issuer, resource, scopes, idp_tokens, created_at, expires_at, epoch)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, `+epochSQL+`) RETURNING epoch`,
-			g.ID, g.ClientID, g.Subject, g.Issuer, g.Resource, nonNil(g.Scopes), g.IdPTokens,
+			g.ID, g.ClientID, g.Subject, g.Issuer, g.Resource, nonNil(g.Scopes), nilIfEmpty(g.IdPTokens),
 			ts(g.CreatedAt), ts(g.ExpiresAt)).Scan(&epoch)
 	})
 	if err != nil {
@@ -431,7 +351,7 @@ func (s *Store) RotateRefreshToken(ctx context.Context, r store.RotateRequest) e
 			return err
 		}
 		if r.IdPTokens != nil {
-			if _, err := tx.Exec(ctx, "UPDATE grants SET idp_tokens = $1 WHERE id = $2", r.IdPTokens, grantID); err != nil {
+			if _, err := tx.Exec(ctx, "UPDATE grants SET idp_tokens = $1 WHERE id = $2", nilIfEmpty(r.IdPTokens), grantID); err != nil {
 				return err
 			}
 		}
@@ -476,7 +396,7 @@ const collectLock int64 = 0x6279773a636f6c6c
 // replica holds the try-lock, it returns nil having deleted nothing.
 func (s *Store) Collect(ctx context.Context, now time.Time) error {
 	n := ts(now)
-	return s.retry(ctx, pgx.ReadCommitted, func(tx pgx.Tx) error {
+	return s.inTx(ctx, pgx.ReadCommitted, func(tx pgx.Tx) error {
 		var mine bool
 		if err := tx.QueryRow(ctx, "SELECT pg_try_advisory_xact_lock($1)", collectLock).Scan(&mine); err != nil {
 			return fmt.Errorf("collect: %w", err)
@@ -662,9 +582,11 @@ func ts(t time.Time) time.Time { return t.Truncate(time.Microsecond).UTC() }
 
 func nonNil(s []string) []string { return append([]string{}, s...) }
 
-func nilIfEmpty(s []string) []string {
+// nilIfEmpty: nil and empty are stored alike (an empty bytea is NULL, as SQLite's adapter stores
+// it), so scopes and IdP tokens read back as nil when there are none.
+func nilIfEmpty[S ~[]E, E any](s S) S {
 	if len(s) == 0 {
-		return nil // as stored by the caller: nil and empty are written alike
+		return nil
 	}
 	return s
 }

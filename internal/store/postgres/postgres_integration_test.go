@@ -50,17 +50,19 @@ func TestIntegrationPostgres(t *testing.T) {
 				name string
 				fn   func(*testing.T, *server)
 			}{
-				{"CreateGrantRetriesPastACutOffCommittedDuringIt", createGrantRetriesPastACutOffCommittedDuringIt},
+				{"RevocationRacingCreateGrantAcrossReplicasLeavesNoCoveredGrant", revocationRacingCreateGrantAcrossReplicasLeavesNoCoveredGrant},
 				{"AConcurrentInsertOfTheSameIDIsErrExists", aConcurrentInsertOfTheSameIDIsErrExists},
 				{"MigrationsRunOneAtATime", migrationsRunOneAtATime},
 				{"NewerSchemaIsRefused", newerSchemaIsRefused},
 				{"FixturesMigrateToTheCurrentSchemaKeepingTheirData", fixturesMigrateToTheCurrentSchemaKeepingTheirData},
 				{"FailedMigrationChangesNothing", failedMigrationChangesNothing},
-				{"TheEpochIsReadOnEveryUse", theEpochIsReadOnEveryUse},
-				{"EveryWriteTakesAValueFromTheWriteSequence", everyWriteTakesAValueFromTheWriteSequence},
+				{"AnEpochBumpCountsAtOnceWithoutAReopen", anEpochBumpCountsAtOnceWithoutAReopen},
+				{"OnlyCommittedWritesAdvanceTheWriteSequence", onlyCommittedWritesAdvanceTheWriteSequence},
 				{"CollectDropsExpiredSpentLogins", collectDropsExpiredSpentLogins},
-				{"OneReplicaCollectsAtATime", oneReplicaCollectsAtATime},
-				{"VerifyFullChecksTheCAAndTheHostName", verifyFullChecksTheCAAndTheHostName},
+				{"CollectSkipsWhileAnotherReplicaCollects", collectSkipsWhileAnotherReplicaCollects},
+				{"VerifyFullRefusesAnotherCAOrHostName", verifyFullRefusesAnotherCAOrHostName},
+				{"PingAnswersWhileOpenAndFailsAfterClose", pingAnswersWhileOpenAndFailsAfterClose},
+				{"EmptyIdPTokensReadBackAsNone", emptyIdPTokensReadBackAsNone},
 			} {
 				t.Run(tc.name, func(t *testing.T) { tc.fn(t, srv) })
 			}
@@ -84,7 +86,7 @@ func must(t *testing.T, err error) {
 // (an uncommitted grant with the same ID holds it) while replica B's cut-off commits. Under READ
 // COMMITTED, A would then insert a grant the cut-off covers. SERIALIZABLE aborts A with 40001, and
 // A's retry sees the cut-off and refuses (store.Grants.CreateGrant).
-func createGrantRetriesPastACutOffCommittedDuringIt(t *testing.T, srv *server) {
+func revocationRacingCreateGrantAcrossReplicasLeavesNoCoveredGrant(t *testing.T, srv *server) {
 	cutOff := t0.Add(time.Hour)
 	for _, tc := range []struct {
 		name   string
@@ -154,7 +156,7 @@ func aConcurrentInsertOfTheSameIDIsErrExists(t *testing.T, srv *server) {
 // Replicas that start together migrate one at a time: while another holds the migration lock, Open
 // waits and changes nothing, then finds the schema migrated.
 func migrationsRunOneAtATime(t *testing.T, srv *server) {
-	db := srv.database(t)
+	db := srv.newDatabase(t)
 	holder := srv.conn(t, db)
 	_, err := holder.Exec(ctx, "SELECT pg_advisory_lock($1)", migrateLock)
 	must(t, err)
@@ -227,7 +229,7 @@ func fixturesMigrateToTheCurrentSchemaKeepingTheirData(t *testing.T, srv *server
 	want := schemaOf(t, srv.conn(t, fresh))
 	for v := 1; v <= schemaVersion(); v++ {
 		t.Run(fmt.Sprintf("v%d", v), func(t *testing.T) {
-			db := srv.database(t)
+			db := srv.newDatabase(t)
 			loadFixture(t, srv.conn(t, db), v)
 			s := srv.openOn(t, db)
 
@@ -285,7 +287,7 @@ func checkRotatedFixtureToken(t *testing.T, s *Store) {
 // A migration that fails leaves the database exactly as it was: its DDL and the version bump are
 // one transaction, and the binary before it still opens the database.
 func failedMigrationChangesNothing(t *testing.T, srv *server) {
-	db := srv.database(t)
+	db := srv.newDatabase(t)
 	c := srv.conn(t, db)
 	loadFixture(t, c, schemaVersion())
 	before := schemaOf(t, c)
@@ -316,7 +318,7 @@ func failedMigrationChangesNothing(t *testing.T, srv *server) {
 
 // The epoch is read in SQL on every use (ADR-0007 §9): a bump by anyone counts at once, without a
 // reopen, for refresh tokens of older grants and for new grants.
-func theEpochIsReadOnEveryUse(t *testing.T, srv *server) {
+func anEpochBumpCountsAtOnceWithoutAReopen(t *testing.T, srv *server) {
 	s, db := srv.open(t)
 	if g, err := s.CreateGrant(ctx, grant("old", "tid:a")); err != nil || g.Epoch != 1 {
 		t.Fatalf("CreateGrant = %+v, %v; want epoch 1", g, err)
@@ -344,7 +346,7 @@ func theEpochIsReadOnEveryUse(t *testing.T, srv *server) {
 
 // Restore detection reads the store_writes sequence (ADR-0007 §9): every committed write takes a
 // value from it; a refused write commits nothing and takes none.
-func everyWriteTakesAValueFromTheWriteSequence(t *testing.T, srv *server) {
+func onlyCommittedWritesAdvanceTheWriteSequence(t *testing.T, srv *server) {
 	s, db := srv.open(t)
 	c := srv.conn(t, db)
 	writes := func() (n int64) {
@@ -384,7 +386,7 @@ func collectDropsExpiredSpentLogins(t *testing.T, srv *server) {
 
 // While another replica collects (it holds the collect lock), Collect returns at once having
 // deleted nothing; once it is done, Collect deletes.
-func oneReplicaCollectsAtATime(t *testing.T, srv *server) {
+func collectSkipsWhileAnotherReplicaCollects(t *testing.T, srv *server) {
 	s, db := srv.open(t)
 	must(t, s.SpendLogin(ctx, sha256.Sum256([]byte("l")), t0, t0.Add(time.Minute)))
 	holder, c := srv.conn(t, db), srv.conn(t, db)
@@ -409,8 +411,8 @@ func oneReplicaCollectsAtATime(t *testing.T, srv *server) {
 
 // verify-full is checked end to end: a server certificate from another CA, or for another host
 // name, fails the connection.
-func verifyFullChecksTheCAAndTheHostName(t *testing.T, srv *server) {
-	db := srv.database(t)
+func verifyFullRefusesAnotherCAOrHostName(t *testing.T, srv *server) {
+	db := srv.newDatabase(t)
 	other := filepath.Join(t.TempDir(), "other-ca.pem")
 	must(t, os.WriteFile(other, newCA(t, "another CA").certPEM, 0o600))
 
@@ -427,6 +429,38 @@ func verifyFullChecksTheCAAndTheHostName(t *testing.T, srv *server) {
 	_, err = Open(bounded(t), Options{DSN: wrongHost.dsn(db)})
 	if _, ok := errors.AsType[x509.HostnameError](err); !ok {
 		t.Fatalf("another host name: err = %v, want a host name mismatch", err)
+	}
+}
+
+// Ping backs the readiness probe (ADR-0021 §10): it answers while the store is open and fails once
+// it is closed.
+func pingAnswersWhileOpenAndFailsAfterClose(t *testing.T, srv *server) {
+	s, _ := srv.open(t)
+	must(t, s.Ping(ctx))
+	must(t, s.Close())
+	if err := s.Ping(ctx); err == nil || !strings.HasPrefix(err.Error(), "postgres store: ping") {
+		t.Fatalf("Ping after Close = %v, want the ping error", err)
+	}
+}
+
+// Empty IdP tokens are stored as none (store.Grant: "Nil when there are none"), as the SQLite
+// adapter stores them, whether they come with the grant or with a rotation.
+func emptyIdPTokensReadBackAsNone(t *testing.T, srv *server) {
+	s, _ := srv.open(t)
+	g := grant("g", "tid:a")
+	g.IdPTokens = []byte{}
+	_, err := s.CreateGrant(ctx, g)
+	must(t, err)
+	if got, err := s.Grant(ctx, "g"); err != nil || got.IdPTokens != nil {
+		t.Fatalf("after CreateGrant: IdP tokens %#v, %v; want nil", got.IdPTokens, err)
+	}
+	old := store.RefreshToken{Hash: sha256.Sum256([]byte("old")), GrantID: "g", ClientID: "c", CreatedAt: t0, IdleExpiresAt: t0.Add(time.Hour)}
+	must(t, s.PutRefreshToken(ctx, old))
+	must(t, s.SetIdPTokens(ctx, "g", []byte("sealed")))
+	next := store.RefreshToken{Hash: sha256.Sum256([]byte("next")), GrantID: "g", ClientID: "c", CreatedAt: t0, IdleExpiresAt: t0.Add(time.Hour)}
+	must(t, s.RotateRefreshToken(ctx, store.RotateRequest{Old: old.Hash, Next: next, IdPTokens: []byte{}, Now: t0}))
+	if got, err := s.Grant(ctx, "g"); err != nil || got.IdPTokens != nil {
+		t.Fatalf("after a rotation with empty IdP tokens: %#v, %v; want nil", got.IdPTokens, err)
 	}
 }
 
