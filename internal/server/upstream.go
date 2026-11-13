@@ -13,6 +13,7 @@ import (
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
+	"github.com/byward-dev/byward/internal/envproxy"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/tracing"
@@ -107,7 +108,7 @@ func upstreamResult(cfg *config.Config, proxy func(*http.Request) (*url.URL, err
 			r.Status = doctor.Warn
 			r.Message += "; Go refuses HTTP_PROXY because REQUEST_METHOD is set in the environment, so every request to the upstream fails"
 			r.Fix = "unset REQUEST_METHOD or HTTP_PROXY in the proxy's environment; NO_PROXY does not help, since Go refuses HTTP_PROXY under CGI before it reads NO_PROXY"
-		case relay.MalformedProxy(via):
+		case envproxy.Malformed(via):
 			r.Status = doctor.Warn
 			r.Message += "; the environment's HTTP proxy setting has an unescaped character in its credentials (such as /, ? or #), so Go cannot read the host it dials and may read part of the credentials as that host"
 			r.Fix = "percent-encode the credentials in HTTPS_PROXY or HTTP_PROXY (/ as %2F, ? as %3F, # as %23, and so on)"
