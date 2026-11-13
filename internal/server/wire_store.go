@@ -144,14 +144,17 @@ func openPostgres(ctx context.Context, cfg *config.Config, log *slog.Logger) (*p
 	return st, nil
 }
 
-// restoreWatch is watchRestore for a store that checks for restores while running, or nil. Only
-// PostgreSQL does, so its setting and database name the store in the log.
+// restoreWatch is watchRestore for a store that checks for restores while running and names its
+// database, or nil. Only the PostgreSQL store does, so its setting names the store in the log.
 func restoreWatch(st openedStore, log *slog.Logger, rec *audit.Log) func(context.Context) {
-	pg, ok := st.(*postgres.Store)
+	rc, ok := st.(interface {
+		restoreChecker
+		Describe() string
+	})
 	if !ok {
 		return nil
 	}
 	return func(ctx context.Context) {
-		watchRestore(ctx, pg, log, rec, "BYWARD_STORE_POSTGRES_DSN_FILE", pg.Describe())
+		watchRestore(ctx, rc, log, rec, "BYWARD_STORE_POSTGRES_DSN_FILE", rc.Describe())
 	}
 }

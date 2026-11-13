@@ -160,3 +160,22 @@ func writeCA(t *testing.T) string {
 	}
 	return path
 }
+
+// The startup log's TLS mode follows the parsed DSN: verify-full, unverified for require, off for
+// plaintext (the last two in development mode only).
+func TestTheTLSModeNamesHowTheConnectionIsProtected(t *testing.T) {
+	for _, tc := range []struct{ sslmode, want string }{
+		{"verify-full", "verify-full"}, {"require", "unverified"}, {"disable", "off"},
+	} {
+		t.Run(tc.sslmode, func(t *testing.T) {
+			clearPGEnv(t)
+			cfg, err := parseDSN("host=db.example user=byward sslmode="+tc.sslmode, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := tlsMode(&cfg.ConnConfig.Config); got != tc.want {
+				t.Fatalf("tlsMode = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

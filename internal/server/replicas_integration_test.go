@@ -42,7 +42,7 @@ func TestIntegrationTwoReplicasShareThePostgreSQLStore(t *testing.T) {
 		// it does not use.
 		for _, r := range []*replica{a, b} {
 			if logs := r.logs.String(); !strings.Contains(logs, "tls=verify-full") || strings.Contains(logs, srv.Password) ||
-				strings.Contains(logs, "BYWARD_STORE_DIR") {
+				strings.Contains(logs, "BYWARD_STORE_DIR") || strings.Contains(logs, "BYWARD_STORE_COUNTER_FILE") {
 				t.Fatalf("startup log without the database's TLS, or with the password or a SQLite path:\n%s", logs)
 			}
 		}
@@ -81,7 +81,7 @@ func TestIntegrationTwoReplicasShareThePostgreSQLStore(t *testing.T) {
 	})
 
 	t.Run("store new-epoch refuses older refresh tokens on every replica, audited once", func(t *testing.T) {
-		cfg, _, a, b := pair(t)
+		cfg, db, a, b := pair(t)
 		rt := seedSignedInUser(t, a.wired, "g3", time.Now())
 		var logs syncBuffer
 		epoch, err := NewEpoch(context.Background(), cfg, logging.New(&logs, "json"))
@@ -89,17 +89,13 @@ func TestIntegrationTwoReplicasShareThePostgreSQLStore(t *testing.T) {
 			t.Fatalf("NewEpoch = %d, %v; want epoch 2", epoch, err)
 		}
 		if out := logs.String(); strings.Count(out, `"event":"store_restored"`) != 1 || !strings.Contains(out, `"reason":"operator new-epoch"`) ||
-			strings.Contains(out, srv.Password) {
-			t.Fatalf("want one store_restored record with the operator's reason, and no password:\n%s", out)
+			!restoreLineNames(out, "dbname="+db) || strings.Contains(out, srv.Password) {
+			t.Fatalf("want one store_restored record with the operator's reason, a warning naming the database, and no password:\n%s", out)
 		}
 		for _, r := range []*replica{a, b} {
 			if code, body := postRefresh(t, r.s, rt); code != http.StatusBadRequest || body["error"] != "invalid_grant" {
 				t.Fatalf("a refresh token from before new-epoch: %d %v, want 400 invalid_grant", code, body)
 			}
-		}
-		time.Sleep(2 * restoreCheckEvery) // the replicas adopt the epoch without a record of their own
-		if n := strings.Count(a.logs.String()+b.logs.String(), `"event":"store_restored"`); n != 0 {
-			t.Fatalf("the replicas recorded %d restores of their own after new-epoch, want 0", n)
 		}
 	})
 
@@ -124,10 +120,11 @@ func TestIntegrationTwoReplicasShareThePostgreSQLStore(t *testing.T) {
 		srv.Exec(t, dump, "pg_restore", "--clean", "--if-exists", "--dbname="+db)
 
 		restored := func() int { return strings.Count(a.logs.String()+b.logs.String(), `"event":"store_restored"`) }
+		// That one replica starts the epoch and the other adopts it is the adapter's own test
+		// (ARestoreStartsOneEpochAcrossReplicas); here, the wired replicas find the restore and record it.
 		eventually(t, "a replica records the restore", func() bool { return restored() > 0 })
-		time.Sleep(3 * restoreCheckEvery) // both replicas have checked again by now
-		if n := restored(); n != 1 {
-			t.Fatalf("store_restored records: %d, want 1 between the replicas\nA: %s\nB: %s", n, a.logs, b.logs)
+		if n := restored(); n != 1 || !restoreLineNames(a.logs.String()+b.logs.String(), "dbname="+db) {
+			t.Fatalf("store_restored records: %d, want 1 between the replicas with a warning naming the database\nA: %s\nB: %s", n, a.logs, b.logs)
 		}
 		// The dump holds ua and ub as current tokens: only the new epoch refuses them, on both replicas.
 		for _, r := range []*replica{a, b} {
@@ -198,4 +195,15 @@ func eventually(t *testing.T, what string, cond func() bool) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// restoreLineNames reports whether the restore warning in logs (`"reason":"store_restore"`) has want
+// in it: the startup line names the database too, so the whole log would not tell.
+func restoreLineNames(logs, want string) bool {
+	for line := range strings.Lines(logs) {
+		if strings.Contains(line, `"reason":"store_restore"`) && strings.Contains(line, want) {
+			return true
+		}
+	}
+	return false
 }

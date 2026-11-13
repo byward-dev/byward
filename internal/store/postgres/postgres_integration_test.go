@@ -69,7 +69,7 @@ func TestIntegrationPostgres(t *testing.T) {
 				{"AReplicasFirstCheckFindsARestore", aReplicasFirstCheckFindsARestore},
 				{"AValueLostInACrashIsNoRestore", aValueLostInACrashIsNoRestore},
 				{"ConcurrentWritesAreNoRestore", concurrentWritesAreNoRestore},
-				{"NewEpochStartsOneAndRunningReplicasAdoptIt", newEpochStartsOneAndRunningReplicasAdoptIt},
+				{"NewEpochStartsAnEpochEachTimeThatRunningReplicasAdopt", newEpochStartsAnEpochEachTimeThatRunningReplicasAdopt},
 				{"DescribeNamesTheDatabaseAndItsTLSNeverThePassword", describeNamesTheDatabaseAndItsTLSNeverThePassword},
 			} {
 				t.Run(tc.name, func(t *testing.T) { tc.fn(t, srv) })
@@ -616,7 +616,7 @@ func concurrentWritesAreNoRestore(t *testing.T, srv *server) {
 
 // new-epoch starts one epoch each time and forgets the remembered consents; a running replica
 // adopts it at its next check without reporting a restore of its own.
-func newEpochStartsOneAndRunningReplicasAdoptIt(t *testing.T, srv *server) {
+func newEpochStartsAnEpochEachTimeThatRunningReplicasAdopt(t *testing.T, srv *server) {
 	running, db := srv.open(t)
 	_, err := running.CreateGrant(ctx, grant("g", "tid:a"))
 	must(t, err)
@@ -647,8 +647,7 @@ func newEpochStartsOneAndRunningReplicasAdoptIt(t *testing.T, srv *server) {
 // verify-full normally, off for a plaintext connection development mode accepted.
 func describeNamesTheDatabaseAndItsTLSNeverThePassword(t *testing.T, srv *server) {
 	s, db := srv.open(t)
-	plain := *srv.Server
-	dsn := strings.Replace(plain.DSN(db), "sslmode=verify-full", "sslmode=disable", 1)
+	dsn := strings.Replace(srv.DSN(db), "sslmode=verify-full", "sslmode=disable", 1)
 	p, err := Open(bounded(t), Options{DSN: dsn, AllowPlaintext: true})
 	must(t, err)
 	t.Cleanup(func() { _ = p.Close() })

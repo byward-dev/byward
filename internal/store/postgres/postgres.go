@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/byward-dev/byward/internal/store"
@@ -76,14 +77,19 @@ func (s *Store) Ping(ctx context.Context) error {
 // Describe names the database for the startup log: host, port, database and TLS, never the DSN.
 func (s *Store) Describe() string {
 	c := s.pool.Config().ConnConfig
-	tls := "verify-full"
+	return fmt.Sprintf("host=%s port=%d dbname=%s tls=%s", c.Host, c.Port, c.Database, tlsMode(&c.Config))
+}
+
+// tlsMode is how the first host's connection is protected: verify-full, unverified (encrypted, the
+// server not checked; development mode only) or off.
+func tlsMode(c *pgconn.Config) string {
 	switch {
 	case c.TLSConfig == nil:
-		tls = "off"
+		return "off"
 	case c.TLSConfig.InsecureSkipVerify:
-		tls = "unverified"
+		return "unverified"
 	}
-	return fmt.Sprintf("host=%s port=%d dbname=%s tls=%s", c.Host, c.Port, c.Database, tls)
+	return "verify-full"
 }
 
 // Close closes the pool, waiting for connections in use to be returned.
