@@ -12,8 +12,9 @@ import (
 )
 
 // downstreamTokenWait bounds downstream-token: the socket answers one connection within 40 s
-// (the On-Behalf-Of exchange takes at most 30 s), and a connection may wait behind another.
-const downstreamTokenWait = 90 * time.Second
+// (the On-Behalf-Of exchange takes at most 30 s), and a connection may wait behind another. A
+// variable only so that a test can shorten it.
+var downstreamTokenWait = 90 * time.Second
 
 // downstreamToken is downstream-token (#181): a credential command for a stdio upstream. It asks the
 // process's token socket and prints the token alone, or with --json the token and its expiry. It
@@ -39,10 +40,16 @@ func downstreamToken(ctx context.Context, args, environ []string, stdout, stderr
 	case t.Error != "":
 		_, _ = fmt.Fprintln(stderr, t.Error)
 		return exitRuntime
-	case asJSON:
-		_ = json.NewEncoder(stdout).Encode(map[string]string{"access_token": t.AccessToken, "expires_at": t.ExpiresAt.UTC().Format(time.RFC3339)})
-	default:
-		_, _ = fmt.Fprintln(stdout, t.AccessToken)
+	}
+	if asJSON {
+		err = json.NewEncoder(stdout).Encode(map[string]string{"access_token": t.AccessToken, "expires_at": t.ExpiresAt.UTC().Format(time.RFC3339)})
+	} else {
+		_, err = fmt.Fprintln(stdout, t.AccessToken)
+	}
+	if err != nil {
+		// A write error names the file, never what was written.
+		_, _ = fmt.Fprintf(stderr, "byward: downstream-token: writing the token: %v\n", err)
+		return exitRuntime
 	}
 	return exitOK
 }

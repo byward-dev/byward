@@ -23,40 +23,47 @@ func AskDownstreamToken(ctx context.Context, path string) (DownstreamToken, erro
 		return DownstreamToken{}, fmt.Errorf("token socket: %w", err)
 	}
 	defer func() { _ = c.Close() }()
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = c.SetDeadline(deadline)
-	}
-	// A cancelled ctx without a deadline ends a read that would otherwise wait for the socket.
+	// The end of ctx, by its deadline or a cancel, ends a write or read still waiting on the socket.
 	stop := context.AfterFunc(ctx, func() { _ = c.SetDeadline(time.Now()) })
 	defer stop()
 	if _, err := c.Write([]byte("{}\n")); err != nil {
-		return DownstreamToken{}, fmt.Errorf("token socket: %w", err)
+		return DownstreamToken{}, fmt.Errorf("token socket: %w", ended(ctx, err))
 	}
-	line, err := bufio.NewReaderSize(c, maxTokenRequest).ReadSlice('\n')
+	line, err := bufio.NewReaderSize(c, maxTokenAnswer).ReadSlice('\n')
 	if err != nil {
-		return DownstreamToken{}, fmt.Errorf("token socket: no answer: %w", err)
+		return DownstreamToken{}, fmt.Errorf("token socket: no answer: %w", ended(ctx, err))
 	}
 	return parseTokenAnswer(line)
 }
+
+// ended is ctx's error once ctx has ended, which is why the socket's deadline passed, or else err.
+func ended(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
+}
+
+// maxTokenAnswer bounds the answer line the client reads. It holds the whole access token, whose
+// size the IdP decides, so it is far above maxTokenRequest, which bounds only the request.
+const maxTokenAnswer = 64 << 10
 
 // errBadAnswer is a line from the token socket that is neither a token nor an error code. Its text
 // never includes the line, which may hold a token.
 var errBadAnswer = errors.New("token socket: the answer is neither a token nor an error code")
 
-// parseTokenAnswer reads one answer line of the token socket.
+// parseTokenAnswer reads one answer line of the token socket. The error code and the token are
+// printed as they are (byward downstream-token), so a code must be lowercase letters and _, and a
+// token printable ASCII without spaces: a line break or a terminal escape is a bad answer.
 func parseTokenAnswer(line []byte) (DownstreamToken, error) {
-	var a struct {
-		AccessToken string `json:"access_token"`
-		ExpiresAt   string `json:"expires_at"`
-		Error       string `json:"error"`
-	}
+	var a tokenAnswer
 	if json.Unmarshal(line, &a) != nil {
 		return DownstreamToken{}, errBadAnswer
 	}
 	switch {
-	case a.Error != "" && a.AccessToken == "":
+	case a.Error != "" && a.AccessToken == "" && only(a.Error, isCodeByte):
 		return DownstreamToken{Error: a.Error}, nil
-	case a.Error != "" || a.AccessToken == "":
+	case a.Error != "" || a.AccessToken == "" || !only(a.AccessToken, isTokenByte):
 		return DownstreamToken{}, errBadAnswer
 	}
 	exp, err := time.Parse(time.RFC3339, a.ExpiresAt)
@@ -65,3 +72,16 @@ func parseTokenAnswer(line []byte) (DownstreamToken, error) {
 	}
 	return DownstreamToken{AccessToken: a.AccessToken, ExpiresAt: exp}, nil
 }
+
+// only reports whether every byte of s passes ok.
+func only(s string, ok func(byte) bool) bool {
+	for i := range len(s) {
+		if !ok(s[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isCodeByte(b byte) bool  { return b >= 'a' && b <= 'z' || b == '_' }
+func isTokenByte(b byte) bool { return b > ' ' && b < 0x7f }

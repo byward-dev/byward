@@ -14,7 +14,8 @@ import (
 	"github.com/byward-dev/byward/internal/server"
 )
 
-// command is a subcommand of byward. Each reads the same BYWARD_* environment as the proxy.
+// command is a subcommand of byward. Each reads the same BYWARD_* environment as the proxy, except
+// downstream-token, which reads only BYWARD_DOWNSTREAM_TOKEN_SOCKET.
 type command struct {
 	usage string                                                                          // for --help: the call, then indented lines
 	run   func(ctx context.Context, args, environ []string, stdout, stderr io.Writer) int // args exclude the command name
@@ -46,7 +47,7 @@ var commands = map[string]command{
 		run:   initIdP,
 	},
 	"downstream-token": {
-		usage: "byward downstream-token [--json]\n      run by a stdio upstream process or one of its children: print its user's On-Behalf-Of token\n      from BYWARD_DOWNSTREAM_TOKEN_SOCKET (--json: with expires_at); on a refusal, its code on stderr and exit 1",
+		usage: "byward downstream-token [--json]\n      run by a stdio upstream process or one of its children: print its user's On-Behalf-Of token\n      from BYWARD_DOWNSTREAM_TOKEN_SOCKET (--json: with expires_at); on an error answer, its code alone on stderr and exit 1",
 		run:   downstreamToken,
 	},
 }
@@ -59,7 +60,7 @@ func commandsUsage() string {
 	}
 	slices.Sort(names)
 	var b strings.Builder
-	b.WriteString("\nCommands (read the same BYWARD_* environment as the proxy):\n")
+	b.WriteString("\nCommands (read the same BYWARD_* environment as the proxy; downstream-token reads only BYWARD_DOWNSTREAM_TOKEN_SOCKET):\n")
 	for _, n := range names {
 		fmt.Fprintf(&b, "  %s\n", commands[n].usage)
 	}

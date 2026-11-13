@@ -54,7 +54,7 @@ func TestAskingTheTokenSocketGivesTheTokenOrTheErrorCode(t *testing.T) {
 	}
 }
 
-// scriptedSocket answers each connection's request with answer, then closes it, and returns the
+// scriptedSocket answers one connection's request with answer, then closes it, and returns the
 // socket's path and the requests it read.
 func scriptedSocket(t *testing.T, answer string) (string, <-chan string) {
 	t.Helper()
@@ -89,7 +89,13 @@ func TestAnAnswerThatIsNotATokenOrAnErrorCodeIsAnError(t *testing.T) {
 		"a token without expiry":    `{"access_token":"` + secret + `"}` + "\n",
 		"a token with a bad expiry": `{"access_token":"` + secret + `","expires_at":"soon"}` + "\n",
 		"a token and an error":      `{"access_token":"` + secret + `","expires_at":"2026-11-08T13:00:00Z","error":"failed"}` + "\n",
-		"an empty object":           "{}\n",
+		"an expiry without a token": `{"expires_at":"2026-11-08T13:00:00Z"}` + "\n",
+		"a code with a line break":  `{"error":"failed\nbyward: ` + secret + `"}` + "\n",
+		"a code with an escape":     `{"error":"\u001b[31mfailed"}` + "\n",
+		"a field of the wrong type": `{"access_token":5,"error":"failed"}` + "\n",
+		"a code in capitals":        `{"error":"FAILED"}` + "\n",
+		"a token with a line break": `{"access_token":"` + secret + `\nx","expires_at":"2026-11-08T13:00:00Z"}` + "\n",
+		"a token with a space":      `{"access_token":"` + secret + ` x","expires_at":"2026-11-08T13:00:00Z"}` + "\n",
 		"no newline before close":   `{"access_token":"` + secret + `","expires_at":"2026-11-08T13:00:00Z"}`,
 		"nothing before close":      "",
 	} {
@@ -111,6 +117,18 @@ func TestAnAnswerThatIsNotATokenOrAnErrorCodeIsAnError(t *testing.T) {
 	}
 }
 
+// A token far longer than the request limit (maxTokenRequest) is read whole.
+func TestATokenLongerThanTheRequestLimitIsReadWhole(t *testing.T) {
+	long := strings.Repeat("t", 3*maxTokenRequest)
+	path, _ := scriptedSocket(t, `{"access_token":"`+long+`","expires_at":"2026-11-08T13:00:00Z"}`+"\n")
+	ctx, cancel := context.WithTimeout(context.Background(), guard)
+	defer cancel()
+	got, err := AskDownstreamToken(ctx, path)
+	if err != nil || got.AccessToken != long {
+		t.Fatalf("got a token of %d bytes, %v; want %d bytes", len(got.AccessToken), err, len(long))
+	}
+}
+
 func TestAMissingTokenSocketIsAnError(t *testing.T) {
 	_, err := AskDownstreamToken(context.Background(), filepath.Join(shortTempDir(t), "token.sock"))
 	if err == nil {
@@ -118,33 +136,54 @@ func TestAMissingTokenSocketIsAnError(t *testing.T) {
 	}
 }
 
-// A socket that never answers holds the client only until its context ends, deadline or not.
+// A socket that reads the request and never answers holds the client only until its context ends.
+// The cancel comes once the socket has the request, so it ends the client's read, not its dial; a
+// deadline ends whichever the client is in.
 func TestASilentTokenSocketHoldsTheClientOnlyUntilItsContextEnds(t *testing.T) {
-	path := filepath.Join(shortTempDir(t), "token.sock")
-	ln, err := net.Listen("unix", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-	for name, ctx := range map[string]func() (context.Context, context.CancelFunc){
-		"a deadline": func() (context.Context, context.CancelFunc) {
-			return context.WithTimeout(context.Background(), 50*time.Millisecond)
-		},
-		"a cancel without a deadline": func() (context.Context, context.CancelFunc) {
-			ctx, cancel := context.WithCancel(context.Background())
-			time.AfterFunc(50*time.Millisecond, cancel)
-			return ctx, cancel
-		},
+	for _, tc := range []struct {
+		name     string
+		deadline bool
+		want     error
+	}{
+		{name: "a cancel while it waits for the answer", want: context.Canceled},
+		{name: "a deadline", deadline: true, want: context.DeadlineExceeded},
 	} {
-		t.Run(name, func(t *testing.T) {
-			ctx, cancel := ctx()
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(shortTempDir(t), "token.sock")
+			ln, err := net.Listen("unix", path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = ln.Close() })
+			asked := make(chan struct{})
+			go func() {
+				c, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				t.Cleanup(func() { _ = c.Close() })
+				_, _ = c.Read(make([]byte, 64))
+				close(asked)
+			}()
+			ctx, cancel := context.WithCancel(context.Background())
+			if tc.deadline {
+				ctx, cancel = context.WithTimeout(context.Background(), 50*time.Millisecond)
+			}
 			defer cancel()
 			done := make(chan error, 1)
 			go func() { _, err := AskDownstreamToken(ctx, path); done <- err }()
+			if !tc.deadline {
+				select {
+				case <-asked:
+					cancel()
+				case <-time.After(guard):
+					t.Fatal("the socket never got the request")
+				}
+			}
 			select {
 			case err := <-done:
-				if err == nil || !(errors.Is(err, os.ErrDeadlineExceeded)) {
-					t.Fatalf("err %v, want a deadline error", err)
+				if !errors.Is(err, tc.want) {
+					t.Fatalf("err %v, want %v: the context's own end", err, tc.want)
 				}
 			case <-time.After(guard):
 				t.Fatal("the client is still waiting after its context ended")
