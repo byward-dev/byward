@@ -23,7 +23,7 @@ func withCIMD(srv *clientdocs.Server, trusted ...string) func(*Config) {
 	return func(c *Config) {
 		guard := ssrfguard.New(ssrfguard.Config{RootCAs: srv.RootCAs, Dial: srv.Dial})
 		c.Clients = registration.Chain{c.Clients, registration.NewCIMDRegistry(registration.CIMDConfig{Fetch: guard,
-			KeysClient: guard.HTTPClient(), TrustedHosts: trusted, JTI: registration.NewStoreJTICache(memory.New(), time.Now), Now: time.Now})}
+			KeysClient: guard.HTTPClient(), TrustedHosts: trusted, JTI: registration.NewStoreJTICache(memory.New()), Now: time.Now})}
 		c.CIMD = true
 	}
 }
@@ -213,6 +213,7 @@ const (
 	modeKeysUnavailable       // the client resolves, but its jwks_uri cannot be fetched for now
 	modeKeysRefused           // the client resolves, but the keys at its jwks_uri are unusable
 	modeBadAssertion          // the client resolves, but its assertion is wrong
+	modeReplayCheckDown       // the client resolves, but the store cannot check its assertion for replay
 )
 
 // switchable resolves clients through inner, or fails or changes them as its mode says: modeUnknown
@@ -248,6 +249,9 @@ func (s switchable) Client(ctx context.Context, id string) (registration.Client,
 	if err == nil && s.mode.Load() == modeBadAssertion {
 		return badAssertion{c}, nil
 	}
+	if err == nil && s.mode.Load() == modeReplayCheckDown {
+		return replayCheckDown{c}, nil
+	}
 	return c, err
 }
 
@@ -259,6 +263,12 @@ type badAssertion struct{ registration.Client }
 
 func (badAssertion) Authenticate(context.Context, url.Values, http.Header, string, time.Time) error {
 	return fmt.Errorf("%w: bad signature", registration.ErrInvalidClient)
+}
+
+type replayCheckDown struct{ registration.Client }
+
+func (replayCheckDown) Authenticate(context.Context, url.Values, http.Header, string, time.Time) error {
+	return fmt.Errorf("%w: store down", registration.ErrReplayCheckUnavailable)
 }
 
 type keysBad struct{ registration.Client }
@@ -455,5 +465,24 @@ func TestClientKeyFailuresAreClassifiedAndLogged(t *testing.T) {
 				t.Fatalf("Retry-After %q on a %d", res.Header.Get("Retry-After"), res.StatusCode)
 			}
 		})
+	}
+}
+
+// A replay check the store cannot answer is a store outage, not a refused client: /token answers 503
+// with the store's Retry-After and logs it (ADR-0007 §7); the grant survives and works once the store
+// is back.
+func TestAReplayCheckTheStoreCannotAnswerIsAStoreOutage(t *testing.T) {
+	e, d, mode, tokens := offlineCIMD(t)
+	rt := tokens["refresh_token"].(string)
+	mode.Store(modeReplayCheckDown)
+	before := len(e.logs.String())
+	res, body := e.refresh(t, rt, d.ClientID)
+	if res.StatusCode != http.StatusServiceUnavailable || body["error"] != "temporarily_unavailable" || res.Header.Get("Retry-After") != retryAfter ||
+		!strings.Contains(e.logs.String()[before:], "client assertion replay check failed") || len(e.auditEvents(t, "grant_revoked")) != 0 {
+		t.Fatalf("status %d %v, Retry-After %q, logs %s", res.StatusCode, body, res.Header.Get("Retry-After"), e.logs.String()[before:])
+	}
+	mode.Store(modeOK)
+	if res, body := e.refresh(t, rt, d.ClientID); res.StatusCode != http.StatusOK {
+		t.Fatalf("once the store is back: %d %v", res.StatusCode, body)
 	}
 }

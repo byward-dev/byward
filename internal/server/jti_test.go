@@ -22,10 +22,10 @@ import (
 	"github.com/byward-dev/byward/internal/registration"
 )
 
-// A private_key_jwt assertion is single use across servers that share the store (ADR-0008 §6,
+// A private_key_jwt assertion is single use across replicas, servers that share the store (ADR-0008 §6,
 // #227): the replay cache lives in the store, not in each process, so a second replica refuses an
 // assertion the first one accepted.
-func TestAClientAssertionAcceptedByOneServerIsAReplayOnAnotherSharingTheStore(t *testing.T) {
+func TestAClientAssertionAcceptedByOneReplicaIsAReplayOnAnother(t *testing.T) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +59,9 @@ func TestAClientAssertionAcceptedByOneServerIsAReplayOnAnotherSharingTheStore(t 
 		}
 		t.Cleanup(func() {
 			if s.closeStore != nil {
-				_ = s.closeStore()
+				if err := s.closeStore(); err != nil {
+					t.Error(err)
+				}
 			}
 		})
 		c, err := got.Clients.Client(context.Background(), "jwt-app")

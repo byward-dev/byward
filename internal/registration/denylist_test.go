@@ -73,7 +73,7 @@ func TestADeniedCIMDClientIsUnknownWithoutAFetch(t *testing.T) {
 	deny, _ := NewDenylist([]string{cimdID})
 	f := &fakeFetch{replies: map[string][]reply{other: {{body: doc(map[string]any{"client_id": other})}}}}
 	c := newClock()
-	r := NewCIMDRegistry(CIMDConfig{Fetch: f, Deny: deny, JTI: NewStoreJTICache(memory.New(), c.now), Now: c.now})
+	r := NewCIMDRegistry(CIMDConfig{Fetch: f, Deny: deny, JTI: NewStoreJTICache(memory.New()), Now: c.now})
 	_, err := r.Client(context.Background(), cimdID)
 	if !errors.Is(err, ErrUnknownClient) || errors.Is(err, ErrMetadataRefused) || !strings.Contains(err.Error(), "denylist") || f.calls.Load() != 0 {
 		t.Fatalf("denied client: %v after %d fetches, want unknown (on the denylist) and no fetch", err, f.calls.Load())
@@ -105,7 +105,7 @@ func TestACIMDClientReturningToADeniedHostIsRefused(t *testing.T) {
 	deny, _ := NewDenylist([]string{"app.example"})
 	f := &fakeFetch{replies: map[string][]reply{cimdID: {ok("")}}}
 	c := newClock()
-	cl, err := NewCIMDRegistry(CIMDConfig{Fetch: f, Deny: deny, JTI: NewStoreJTICache(memory.New(), c.now), Now: c.now}).Client(context.Background(), cimdID)
+	cl, err := NewCIMDRegistry(CIMDConfig{Fetch: f, Deny: deny, JTI: NewStoreJTICache(memory.New()), Now: c.now}).Client(context.Background(), cimdID)
 	if err != nil {
 		t.Fatal(err)
 	}

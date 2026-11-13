@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/store/memory"
 )
 
@@ -20,13 +19,14 @@ type clock struct {
 func (c *clock) now() time.Time          { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
 func (c *clock) advance(d time.Duration) { c.mu.Lock(); defer c.mu.Unlock(); c.t = c.t.Add(d) }
 
-// An assertion ID is new once, a replay while it lives, and new again once it has expired.
+// An assertion ID is new once, a replay while it lives, and new again once it has expired; expiry
+// is judged at the now the caller passes.
 func TestAnAssertionIDIsSpentUntilItExpires(t *testing.T) {
 	c := &clock{t: now}
-	cache := NewStoreJTICache(memory.New(), c.now)
-	seen := func(jti string, exp time.Duration) bool {
+	cache := NewStoreJTICache(memory.New())
+	seen := func(key string, exp time.Duration) bool {
 		t.Helper()
-		s, err := cache.Seen(context.Background(), jti, c.now().Add(exp))
+		s, err := cache.Seen(context.Background(), key, c.now(), c.now().Add(exp))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -47,18 +47,6 @@ func TestAnAssertionIDIsSpentUntilItExpires(t *testing.T) {
 	}
 }
 
-// Two caches over one store are two replicas: an ID spent through one is a replay through the other.
-func TestAnAssertionIDSpentOnOneReplicaIsAReplayOnAnother(t *testing.T) {
-	st := memory.New()
-	a, b := NewStoreJTICache(st, func() time.Time { return now }), NewStoreJTICache(st, func() time.Time { return now })
-	if s, err := a.Seen(context.Background(), "x", now.Add(time.Minute)); err != nil || s {
-		t.Fatalf("first use on A: seen=%v, %v", s, err)
-	}
-	if s, err := b.Seen(context.Background(), "x", now.Add(time.Minute)); err != nil || !s {
-		t.Fatalf("replay on B: seen=%v, %v; want a replay", s, err)
-	}
-}
-
 // recordingAssertions remembers the hashes it is given and answers with err.
 type recordingAssertions struct {
 	hashes [][sha256.Size]byte
@@ -70,10 +58,10 @@ func (r *recordingAssertions) SpendAssertion(_ context.Context, h [sha256.Size]b
 	return r.err
 }
 
-// The store gets SHA-256 of what Seen is given, never the ID itself.
-func TestOnlyAHashOfTheAssertionIDReachesTheStore(t *testing.T) {
+// The store gets SHA-256 of the key, never the key itself.
+func TestOnlyAHashOfTheReplayKeyReachesTheStore(t *testing.T) {
 	rec := &recordingAssertions{}
-	if _, err := NewStoreJTICache(rec, func() time.Time { return now }).Seen(context.Background(), "client\x00jti", now.Add(time.Minute)); err != nil {
+	if _, err := NewStoreJTICache(rec).Seen(context.Background(), "client\x00jti", now, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if len(rec.hashes) != 1 || rec.hashes[0] != sha256.Sum256([]byte("client\x00jti")) {
@@ -84,20 +72,11 @@ func TestOnlyAHashOfTheAssertionIDReachesTheStore(t *testing.T) {
 // A cache without its store, or a store that fails, is an error, never "not seen": callers fail
 // closed.
 func TestACacheThatCannotAnswerFailsClosed(t *testing.T) {
+	if s, err := NewStoreJTICache(nil).Seen(context.Background(), "x", now, now.Add(time.Minute)); s || !errors.Is(err, ErrJTICacheUnbound) {
+		t.Fatalf("without a store: seen=%v, err=%v; want ErrJTICacheUnbound", s, err)
+	}
 	broken := errors.New("store down")
-	for _, tc := range []struct {
-		name  string
-		spent store.ClientAssertions
-		want  error
-	}{
-		{"no store yet", nil, ErrJTICacheUnbound},
-		{"the store fails", &recordingAssertions{err: broken}, broken},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			s, err := NewStoreJTICache(tc.spent, func() time.Time { return now }).Seen(context.Background(), "x", now.Add(time.Minute))
-			if s || !errors.Is(err, tc.want) {
-				t.Fatalf("seen=%v, err=%v; want %v", s, err, tc.want)
-			}
-		})
+	if s, err := NewStoreJTICache(&recordingAssertions{err: broken}).Seen(context.Background(), "x", now, now.Add(time.Minute)); s || !errors.Is(err, broken) {
+		t.Fatalf("with a failing store: seen=%v, err=%v; want the store's error", s, err)
 	}
 }

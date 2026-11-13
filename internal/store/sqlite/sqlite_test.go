@@ -473,7 +473,6 @@ func TestCorruptCounterFileFailsOpen(t *testing.T) {
 	}
 }
 
-// Collect drops spent logins once they expire.
 // An expired spent login or assertion already counts as absent, so storetest cannot see it
 // collected: the row count shows it.
 func TestCollectDropsExpiredSpentRecords(t *testing.T) {

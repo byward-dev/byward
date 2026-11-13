@@ -15,6 +15,11 @@ import (
 // `invalid_client` (ADR-0008 §3).
 var ErrUnknownClient = errors.New("registration: unknown client")
 
+// ErrReplayCheckUnavailable means the replay cache could not answer whether a client assertion was
+// already used (the store failed). It is no verdict on the client: /token answers 503, as for any
+// store failure (ADR-0007 §7).
+var ErrReplayCheckUnavailable = errors.New("registration: client assertion replay check unavailable")
+
 // AuthMethod is a token endpoint authentication method.
 type AuthMethod string
 
@@ -63,6 +68,7 @@ type Registry interface {
 // JTICache remembers private_key_jwt assertion IDs until they expire (ADR-0008 §6). StoreJTICache
 // keeps them in the store, so every replica sees them.
 type JTICache interface {
-	// Seen records jti and reports whether it was already recorded.
-	Seen(ctx context.Context, jti string, expiresAt time.Time) (bool, error)
+	// Seen records key until expiresAt and reports whether it was already recorded and unexpired at
+	// now. The caller passes the now it validated the assertion against, so one instant decides both.
+	Seen(ctx context.Context, key string, now, expiresAt time.Time) (bool, error)
 }

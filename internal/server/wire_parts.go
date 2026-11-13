@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/byward-dev/byward/internal/assertion"
 	"github.com/byward-dev/byward/internal/config"
@@ -87,7 +86,7 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 	}
 	checkSecret := secretCheck(cfg)
 	loose := looseSecretFiles(cfg) // with the static clients' error below, reported at once
-	p.jti = registration.NewStoreJTICache(nil, time.Now)
+	p.jti = registration.NewStoreJTICache(nil)
 	opts := []registration.LoadOption{registration.WithSecretCheck(checkSecret)}
 	if cfg.CIMD || cfg.DCR { // apps can register themselves, so no static client is needed
 		opts = append(opts, registration.AllowNoClients())

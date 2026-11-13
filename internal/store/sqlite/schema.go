@@ -101,7 +101,7 @@ var migrations = []string{
 	) STRICT;
 	CREATE INDEX spent_logins_expires ON spent_logins (expires_at);`,
 	// v7: spent client assertions (#227). A private_key_jwt assertion /token accepted; hash is
-	// SHA-256 of the client ID, 0x00 and the jti.
+	// SHA-256 of its replay key, never the jti.
 	`CREATE TABLE spent_assertions (
 		hash       BLOB PRIMARY KEY,
 		expires_at INTEGER NOT NULL

@@ -13,16 +13,14 @@ import (
 var ErrJTICacheUnbound = errors.New("registration: jti cache has no store yet")
 
 // StoreJTICache is the JTICache over the store (ADR-0008 §6, #227), so an assertion spent on one
-// replica is refused on every other. It stores only SHA-256 of what Seen is given (the client ID,
-// 0x00 and the jti), never the jti itself.
+// replica is refused on every other. The store gets only SHA-256 of the key Seen is given.
 type StoreJTICache struct {
-	now   func() time.Time
 	spent store.ClientAssertions
 }
 
-// NewStoreJTICache returns a cache over spent, which may be nil until Bind; now is the clock.
-func NewStoreJTICache(spent store.ClientAssertions, now func() time.Time) *StoreJTICache {
-	return &StoreJTICache{now: now, spent: spent}
+// NewStoreJTICache returns a cache over spent, which may be nil until Bind.
+func NewStoreJTICache(spent store.ClientAssertions) *StoreJTICache {
+	return &StoreJTICache{spent: spent}
 }
 
 // Bind gives the cache its store once it is open, before the first Seen: the static clients that
@@ -30,12 +28,12 @@ func NewStoreJTICache(spent store.ClientAssertions, now func() time.Time) *Store
 // one.
 func (c *StoreJTICache) Bind(spent store.ClientAssertions) { c.spent = spent }
 
-// Seen records jti until expiresAt and reports whether it was already recorded and unexpired.
-func (c *StoreJTICache) Seen(ctx context.Context, jti string, expiresAt time.Time) (bool, error) {
+// Seen implements JTICache.
+func (c *StoreJTICache) Seen(ctx context.Context, key string, now, expiresAt time.Time) (bool, error) {
 	if c.spent == nil {
 		return false, ErrJTICacheUnbound
 	}
-	switch err := c.spent.SpendAssertion(ctx, sha256.Sum256([]byte(jti)), c.now(), expiresAt); {
+	switch err := c.spent.SpendAssertion(ctx, sha256.Sum256([]byte(key)), now, expiresAt); {
 	case err == nil:
 		return false, nil
 	case errors.Is(err, store.ErrConsumed):

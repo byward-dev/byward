@@ -166,8 +166,8 @@ type Logins interface {
 }
 
 // ClientAssertions records the private_key_jwt client assertions /token has accepted (ADR-0008 §6,
-// #227), so an assertion is single use across every replica. Only a hash is stored:
-// SHA-256(client ID, 0x00, jti), never the jti itself.
+// #227), so an assertion is single use across every replica. Only a hash of its replay key is
+// stored, never the jti itself.
 type ClientAssertions interface {
 	// SpendAssertion records the assertion with this hash as spent until expiresAt, in one atomic
 	// step: the first call is nil, a later one before expiresAt ErrConsumed. A record past its expiry

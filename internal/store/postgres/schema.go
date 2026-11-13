@@ -108,7 +108,7 @@ var migrations = []string{
 	);
 	CREATE INDEX spent_logins_expires ON spent_logins (expires_at);`,
 
-	// v2: spent client assertions (#227). hash is SHA-256 of the client ID, 0x00 and the jti.
+	// v2: spent client assertions (#227). hash is SHA-256 of an assertion's replay key, never the jti.
 	`CREATE TABLE spent_assertions (
 		hash       bytea PRIMARY KEY,
 		expires_at timestamptz NOT NULL

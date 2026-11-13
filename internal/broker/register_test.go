@@ -56,7 +56,7 @@ func newDCRFor(st store.Clients, now func() time.Time, deny ...string) *registra
 	if err != nil {
 		panic(err)
 	}
-	return registration.NewDCRRegistry(registration.DCRConfig{Store: st, JTI: registration.NewStoreJTICache(memory.New(), now), Now: now,
+	return registration.NewDCRRegistry(registration.DCRConfig{Store: st, JTI: registration.NewStoreJTICache(memory.New()), Now: now,
 		Scopes: []string{"mcp", "offline_access"}, Deny: d})
 }
 

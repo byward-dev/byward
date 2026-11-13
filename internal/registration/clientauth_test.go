@@ -32,7 +32,7 @@ type authEnv struct {
 func newAuthEnv(t *testing.T) *authEnv {
 	t.Helper()
 	cert := fakeidp.NewCertificate(t)
-	jti := NewStoreJTICache(memory.New(), func() time.Time { return now })
+	jti := NewStoreJTICache(memory.New())
 	reg, err := LoadStatic("/c.json", files{
 		"/c.json": `{"clients":[
 			{"client_id":"cli","token_endpoint_auth_method":"none","redirect_uris":["http://127.0.0.1/cb"]},
@@ -190,12 +190,14 @@ func TestAssertionReplayIsRejected(t *testing.T) {
 	}
 }
 
-func TestJTICacheFailureIsNotInvalidClient(t *testing.T) {
+// A replay check that cannot answer is no verdict on the client: it is ErrReplayCheckUnavailable,
+// never ErrInvalidClient.
+func TestAReplayCheckThatCannotAnswerIsUnavailableNotInvalidClient(t *testing.T) {
 	e := newAuthEnv(t)
 	broken := errors.New("store down")
 	e.jti.Bind(&recordingAssertions{err: broken})
 	err := e.auth(t, "jwt", e.assertion(t, e.cert, "PS256", nil), nil)
-	if err == nil || errors.Is(err, ErrInvalidClient) || !errors.Is(err, broken) {
+	if err == nil || errors.Is(err, ErrInvalidClient) || !errors.Is(err, ErrReplayCheckUnavailable) || !errors.Is(err, broken) {
 		t.Fatalf("err = %v", err)
 	}
 }
