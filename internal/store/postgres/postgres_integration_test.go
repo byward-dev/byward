@@ -58,7 +58,7 @@ func TestIntegrationPostgres(t *testing.T) {
 				{"FailedMigrationChangesNothing", failedMigrationChangesNothing},
 				{"AnEpochBumpCountsAtOnceWithoutAReopen", anEpochBumpCountsAtOnceWithoutAReopen},
 				{"OnlyCommittedWritesAdvanceTheWriteSequence", onlyCommittedWritesAdvanceTheWriteSequence},
-				{"CollectDropsExpiredSpentLogins", collectDropsExpiredSpentLogins},
+				{"CollectDropsExpiredSpentRecords", collectDropsExpiredSpentRecords},
 				{"CollectSkipsWhileAnotherReplicaCollects", collectSkipsWhileAnotherReplicaCollects},
 				{"VerifyFullRefusesAnotherCAOrHostName", verifyFullRefusesAnotherCAOrHostName},
 				{"PingAnswersWhileOpenAndFailsAfterClose", pingAnswersWhileOpenAndFailsAfterClose},
@@ -255,6 +255,11 @@ func fixturesMigrateToTheCurrentSchemaKeepingTheirData(t *testing.T, srv *server
 			if err := s.SpendLogin(ctx, sha256.Sum256([]byte("fixture-login")), fixtureCreated, fixtureExpires); !errors.Is(err, store.ErrConsumed) {
 				t.Fatalf("spending the fixture login: %v, want ErrConsumed", err)
 			}
+			if v >= 2 { // the spent client assertion still refuses a second use
+				if err := s.SpendAssertion(ctx, sha256.Sum256([]byte("fixture-assertion")), fixtureCreated, fixtureExpires); !errors.Is(err, store.ErrConsumed) {
+					t.Fatalf("spending the fixture assertion: %v, want ErrConsumed", err)
+				}
+			}
 			checkRotatedFixtureToken(t, s)
 			if c, err := s.ConsumeCode(ctx, fixtureGrant.ID, fixtureCreated); err != nil || !reflect.DeepEqual(c, fixtureCode) {
 				t.Fatalf("code = %+v, %v\nwant %+v", c, err, fixtureCode)
@@ -369,19 +374,31 @@ func onlyCommittedWritesAdvanceTheWriteSequence(t *testing.T, srv *server) {
 	}
 }
 
-// An expired spent login already counts as absent, so storetest cannot see it collected: the row
-// count shows it.
-func collectDropsExpiredSpentLogins(t *testing.T, srv *server) {
-	s, db := srv.open(t)
-	must(t, s.SpendLogin(ctx, sha256.Sum256([]byte("l")), t0, t0.Add(time.Minute)))
-	c := srv.conn(t, db)
-	must(t, s.Collect(ctx, t0.Add(30*time.Second)))
-	if n := count(t, c, "spent_logins"); n != 1 {
-		t.Fatalf("before expiry: %d spent logins, want 1", n)
-	}
-	must(t, s.Collect(ctx, t0.Add(time.Minute)))
-	if n := count(t, c, "spent_logins"); n != 0 {
-		t.Fatalf("at expiry: %d spent logins, want 0", n)
+// An expired spent login or assertion already counts as absent, so storetest cannot see it
+// collected: the row count shows it.
+func collectDropsExpiredSpentRecords(t *testing.T, srv *server) {
+	for _, tc := range []struct {
+		table string
+		spend func(*Store, [sha256.Size]byte, time.Time, time.Time) error
+	}{
+		{"spent_logins", func(s *Store, h [sha256.Size]byte, now, exp time.Time) error { return s.SpendLogin(ctx, h, now, exp) }},
+		{"spent_assertions", func(s *Store, h [sha256.Size]byte, now, exp time.Time) error {
+			return s.SpendAssertion(ctx, h, now, exp)
+		}},
+	} {
+		t.Run(tc.table, func(t *testing.T) {
+			s, db := srv.open(t)
+			must(t, tc.spend(s, sha256.Sum256([]byte("x")), t0, t0.Add(time.Minute)))
+			c := srv.conn(t, db)
+			must(t, s.Collect(ctx, t0.Add(30*time.Second)))
+			if n := count(t, c, tc.table); n != 1 {
+				t.Fatalf("before expiry: %d rows, want 1", n)
+			}
+			must(t, s.Collect(ctx, t0.Add(time.Minute)))
+			if n := count(t, c, tc.table); n != 0 {
+				t.Fatalf("at expiry: %d rows, want 0", n)
+			}
+		})
 	}
 }
 
