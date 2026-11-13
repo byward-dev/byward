@@ -3,6 +3,7 @@ package ssrfguard
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -141,16 +142,19 @@ func TestRedirectsAreNotFollowed(t *testing.T) {
 // An environment proxy would dial on our behalf, past the guard. Go reads the proxy environment
 // once per process, so the fetch runs in a child process that starts with HTTPS_PROXY set: it must
 // reach the server directly and read its answer. Through the proxy it would send a CONNECT, which the
-// server never answers, and the child, and so the test, fails.
+// TLS server rejects, so the child never reports the direct fetch and the test fails.
 func TestTheEnvironmentProxyIsIgnored(t *testing.T) {
 	if rerun.Child() {
 		f := server(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("direct")) }, time.Second)
 		if res, err := f.Get(context.Background(), "https://example.com/doc", 1024); err != nil || string(res.Body) != "direct" {
 			t.Fatalf("res = %v, err = %v", res, err)
 		}
+		fmt.Println("fetched directly")
 		return
 	}
-	rerun.Run(t, "TestTheEnvironmentProxyIsIgnored", rerun.ProxyEnv("http://proxy.invalid:3128")...)
+	if out := rerun.Run(t, "TestTheEnvironmentProxyIsIgnored", rerun.ProxyEnv("http://proxy.invalid:3128")...); !strings.Contains(out, "fetched directly") {
+		t.Fatalf("child output %q; want the fetch to reach the server directly", out)
+	}
 }
 
 func TestAStatusErrorNamesTheURLWithoutItsQuery(t *testing.T) {
