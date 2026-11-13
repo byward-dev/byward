@@ -166,20 +166,22 @@ func postRefresh(t *testing.T, s *Servers, rt string) (int, map[string]any) {
 	return w.Code, body
 }
 
-// afterTests holds what TestMain removes once every test has run, such as a fake built for the
-// whole package; t.Cleanup cannot, as the fake outlives the test that built it.
-var afterTests []func()
+// fakeStdioDir is where fakeStdio built the fake stdio upstream, if a test asked for it; TestMain
+// removes it once every test has run (t.Cleanup cannot: the fake outlives the test that built it).
+// A run that ends in a panic, os.Exit or a timeout leaves it behind, as it would a test's TempDir
+// after os.Exit or a timeout; removing old ones at start would delete other runs' fakes.
+var fakeStdioDir string
 
 // TestMain keeps the package's tests off the system resolver: startup and doctor resolve the
-// upstream's host, and a test that needs a name resolved gives its own resolver. It runs
-// afterTests last.
+// upstream's host, and a test that needs a name resolved gives its own resolver. It removes
+// fakeStdioDir last.
 func TestMain(m *testing.M) {
 	lookupNetIP = func(context.Context, string) ([]netip.Addr, error) {
 		return nil, errors.New("the tests resolve no names")
 	}
 	code := m.Run()
-	for _, f := range afterTests {
-		f()
+	if fakeStdioDir != "" {
+		_ = os.RemoveAll(fakeStdioDir)
 	}
 	os.Exit(code)
 }
