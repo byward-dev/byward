@@ -28,7 +28,7 @@ refused) with:
 | `BYWARD_OIDC_ISSUER` | — (`google`: `https://accounts.google.com`) | The issuer, exactly as the IdP's discovery document (`/.well-known/openid-configuration`) states it. `https` only. |
 | `BYWARD_OIDC_CLIENT_ID` | — | The application's client ID. |
 | `BYWARD_OIDC_CLIENT_SECRET_FILE` | — | A file holding the client secret. |
-| `BYWARD_OIDC_CLIENT_KEY_FILE` | — | Instead of a secret: a PEM private key (RSA or EC P-256) for `private_key_jwt`. |
+| `BYWARD_OIDC_CLIENT_KEY_FILE` | — | Instead of a secret: a PEM private key (RSA or EC P-256) for `private_key_jwt`. byward signs with PS256 for an RSA key and ES256 for an EC key, so the IdP's client must accept that algorithm (not RS256). |
 | `BYWARD_OIDC_CLIENT_KEY_ID` | — | The key ID (`kid`) the IdP registered for that key. |
 | `BYWARD_OIDC_SCOPES` | — | Extra scopes, comma-separated, besides `openid` and the preset's. |
 | `BYWARD_OIDC_SUBJECT_CLAIM` | `sub` | The claim that identifies a user. A claim users can change (`email`, `preferred_username`, `upn`, `name`) logs a warning at every start: someone could take over another user's grants by changing it. |
@@ -49,8 +49,8 @@ demand.
 |---|---|---|---|
 | `google` | `https://accounts.google.com` | `profile email` | Refresh tokens come from `access_type=offline` with `prompt=consent` (see below). `email_verified` may be a string. |
 | `okta` | `https://<domain>/oauth2/<server>` | `profile email offline_access` | Only a custom authorization server issues tokens for the proxy; the org server (`https://<domain>`) is refused. |
-| `auth0` | `https://<tenant>.auth0.com/` | `profile email offline_access` | The issuer ends with a slash. |
-| `keycloak` | `https://<host>/realms/<realm>` | `profile email` | Enable "Client authentication" on the client. |
+| `auth0` | `https://<tenant>.auth0.com/` | `profile email offline_access` | The issuer ends with a slash. Auth0 drops `roles` and `groups` claims, so gate by email domain (below). |
+| `keycloak` | `https://<host>/realms/<realm>` | `profile email` | Enable "Client authentication" on the client. Step by step: [keycloak.md](keycloak.md). |
 | `oidc` | any | `profile email offline_access` | No quirks. |
 
 **Google shows its consent screen at every sign-in.** Google returns a refresh token only on the
@@ -75,11 +75,18 @@ An OIDC IdP usually lets anyone with an account sign in, so an empty
 - `BYWARD_GATE_EMAIL_DOMAINS`: verified email domains.
 - `BYWARD_GATE_HOSTED_DOMAINS` (`google` only): Google Workspace domains (`hd`). With exactly one
   domain the proxy also asks Google to show only that Workspace's accounts.
-- `BYWARD_GATE_ROLES` and `BYWARD_GATE_GROUPS`: they read the top-level `roles` and `groups` claims.
+- `BYWARD_GATE_ROLES` and `BYWARD_GATE_GROUPS`: they read the top-level `roles` and `groups` claims,
+  and each value must match a claim value exactly. Keycloak's Group Membership mapper sends full paths
+  (`/byward-users`) unless "Full group path" is off.
   Keycloak puts realm roles under `realm_access.roles` by default; add a "User Realm Role" mapper
   with the token claim name `roles` (and a "Group Membership" mapper for `groups`) so the gate sees
   them. The integration test checks this against Keycloak 26.8.0
   (`TestIntegrationKeycloakSignsAUserInAndRefreshes`).
+- **Auth0: no role or group gate yet.** Auth0 reserves the `roles` and `groups` claim names and silently
+  drops custom claims that use them; roles can only arrive under a namespaced claim such as
+  `https://example.com/roles`, which the gate does not read yet (#286). With `BYWARD_IDP=auth0`, a role or
+  group gate refuses everyone, so gate on `BYWARD_GATE_EMAIL_DOMAINS` instead. Found in a real-tenant test
+  on 2026-11-13.
 
 ## 5. Check it
 
