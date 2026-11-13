@@ -478,8 +478,11 @@ func TestAReplayCheckTheStoreCannotAnswerIsAStoreOutage(t *testing.T) {
 	before := len(e.logs.String())
 	res, body := e.refresh(t, rt, d.ClientID)
 	if res.StatusCode != http.StatusServiceUnavailable || body["error"] != "temporarily_unavailable" || res.Header.Get("Retry-After") != "5" ||
-		!strings.Contains(e.logs.String()[before:], "client assertion replay check failed") || len(e.auditEvents(t, "grant_revoked")) != 0 {
-		t.Fatalf("status %d %v, Retry-After %q (want 503, temporarily_unavailable, 5), logs %s", res.StatusCode, body, res.Header.Get("Retry-After"), e.logs.String()[before:])
+		!strings.Contains(e.logs.String()[before:], "client assertion replay check failed") {
+		t.Fatalf("status %d %v, Retry-After %q (want 503, temporarily_unavailable, 5 and the log line), logs %s", res.StatusCode, body, res.Header.Get("Retry-After"), e.logs.String()[before:])
+	}
+	if n := len(e.auditEvents(t, "grant_revoked")); n != 0 {
+		t.Fatalf("grant_revoked events = %d, want 0: a store outage revokes nothing", n)
 	}
 	mode.Store(modeOK)
 	if res, body := e.refresh(t, rt, d.ClientID); res.StatusCode != http.StatusOK {
