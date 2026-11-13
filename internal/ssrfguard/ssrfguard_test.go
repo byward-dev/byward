@@ -139,7 +139,9 @@ func TestRedirectsAreNotFollowed(t *testing.T) {
 }
 
 // An environment proxy would dial on our behalf, past the guard. Go reads the proxy environment
-// once per process, so the fetch runs in a child process that starts with HTTPS_PROXY set.
+// once per process, so the fetch runs in a child process that starts with HTTPS_PROXY set: it must
+// reach the server directly and read its answer. Through the proxy it would send a CONNECT, which the
+// server never answers, and the child, and so the test, fails.
 func TestTheEnvironmentProxyIsIgnored(t *testing.T) {
 	if rerun.Child() {
 		f := server(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("direct")) }, time.Second)
@@ -148,15 +150,7 @@ func TestTheEnvironmentProxyIsIgnored(t *testing.T) {
 		}
 		return
 	}
-	var proxied atomic.Bool
-	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		proxied.Store(true)
-		w.WriteHeader(http.StatusBadGateway)
-	}))
-	t.Cleanup(proxy.Close)
-	if out := rerun.Run(t, "TestTheEnvironmentProxyIsIgnored", rerun.ProxyEnv(proxy.URL)...); proxied.Load() {
-		t.Fatalf("the fetch went through the environment proxy\n%s", out)
-	}
+	rerun.Run(t, "TestTheEnvironmentProxyIsIgnored", rerun.ProxyEnv("http://proxy.invalid:3128")...)
 }
 
 func TestAStatusErrorNamesTheURLWithoutItsQuery(t *testing.T) {

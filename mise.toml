@@ -45,9 +45,10 @@ run = ["GOOS=linux govulncheck ./...", "GOOS=darwin govulncheck ./..."]
 description = "Lint GitHub workflows (actionlint with shellcheck, zizmor offline) and shell scripts"
 run = ["actionlint", "zizmor --offline --no-progress .github/workflows", "shellcheck scripts/*.sh scripts/conformance/*.sh scripts/ui/*.sh scripts/assertion/*.sh scripts/real-entra/*.sh scripts/fuzz/*.sh"]
 
-# The environment of every task that runs go test. Tests make plain-HTTP calls to local fakes: Go
-# refuses them all when REQUEST_METHOD (its CGI guard) and HTTP_PROXY are both set, and a proxy
-# setting from the shell is not the test's to use. A golden-file switch left set in the shell would
+# The environment of the tasks that run the test suite (test:fuzz runs only fuzz targets, which make
+# no HTTP calls). Tests make plain-HTTP calls to local fakes: Go refuses them all when
+# REQUEST_METHOD (its CGI guard) and HTTP_PROXY are both set, and a proxy setting from the shell is
+# not the test's to use. A golden-file switch left set in the shell would
 # make the golden tests rewrite their files and pass; regenerate with a bare go test instead.
 # Empty, not false: false does not override a variable the shell set (mise 2026.7.5), and Go reads
 # an empty one as unset.
