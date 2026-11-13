@@ -136,8 +136,16 @@ func TestOnBehalfOfRefusesATempDirTooLongForItsTokenSocketAtStartup(t *testing.T
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("New: %v, want an error %v", err, tc.wantErr)
 			}
-			if err != nil && (!strings.Contains(err.Error(), strconv.Itoa(maxSocketPath)) || !strings.Contains(err.Error(), "TMPDIR")) {
-				t.Fatalf("error %q does not name the %d-byte limit and TMPDIR", err, maxSocketPath)
+			if err == nil {
+				return
+			}
+			if !errors.Is(err, ErrTempDirTooLong) {
+				t.Fatalf("error %v is not ErrTempDirTooLong", err)
+			}
+			for _, want := range []string{tc.tempDir, strconv.Itoa(maxSocketPath+1) + " bytes", strconv.Itoa(maxSocketPath) + " bytes", "TMPDIR"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error %q does not name %q: the path, its length, the limit and TMPDIR", err, want)
+				}
 			}
 		})
 	}

@@ -69,19 +69,20 @@ type tokenAnswer struct {
 	Error       string `json:"error,omitempty"`
 }
 
-// sessionDirPattern names a process's session directory; os.MkdirTemp appends a uint32 in decimal.
-const sessionDirPattern = "byward-session-"
+// ErrTempDirTooLong is returned by New when, with On-Behalf-Of, the temporary directory leaves no
+// room for a token socket path; its fix is TMPDIR, not the command settings.
+var ErrTempDirTooLong = errors.New("temporary directory too long for the token socket")
 
-// checkTokenSocketDir fails when a token socket in a session directory under tempDir (os.TempDir()
-// when empty) can be longer than a socket path may be, naming the limit.
-func checkTokenSocketDir(tempDir string) error {
+// checkTempDirFitsTokenSocket fails when the token socket in a session directory under tempDir
+// (os.TempDir() when empty) can be longer than a socket path may be, naming the limit.
+func checkTempDirFitsTokenSocket(tempDir string) error {
 	if tempDir == "" {
 		tempDir = os.TempDir()
 	}
-	longest := filepath.Join(tempDir, sessionDirPattern+"4294967295", tokenSocketName)
+	longest := filepath.Join(tempDir, sessionDirPattern+longestSessionDirSuffix, tokenSocketName)
 	if len(longest) > maxSocketPath {
-		return fmt.Errorf("stdio: with On-Behalf-Of, each process's token socket is %s, up to %d bytes, over the %d a socket path may have; set a shorter temporary directory (TMPDIR)",
-			filepath.Join(tempDir, sessionDirPattern+"<n>", tokenSocketName), len(longest), maxSocketPath)
+		return fmt.Errorf("%w: with On-Behalf-Of (BYWARD_OBO_SCOPES), each process's token socket is %s, up to %d bytes, longer than the %d bytes a socket path may have; set a shorter temporary directory (TMPDIR)",
+			ErrTempDirTooLong, filepath.Join(tempDir, sessionDirPattern+"<n>", tokenSocketName), len(longest), maxSocketPath)
 	}
 	return nil
 }

@@ -142,7 +142,7 @@ func New(cfg Config) (*Manager, error) {
 		return nil, err
 	}
 	if cfg.DownstreamToken != nil { // at startup, not as a 502 on every request
-		if err := checkTokenSocketDir(cfg.TempDir); err != nil {
+		if err := checkTempDirFitsTokenSocket(cfg.TempDir); err != nil {
 			return nil, err
 		}
 	}
@@ -486,6 +486,13 @@ func (m *Manager) forget(key string, e *entry) {
 	}
 	delete(m.live, e)
 }
+
+// sessionDirPattern names a process's session directory, to which os.MkdirTemp appends a uint32
+// in decimal: at longest longestSessionDirSuffix.
+const (
+	sessionDirPattern       = "byward-session-"
+	longestSessionDirSuffix = "4294967295" // math.MaxUint32
+)
 
 // spawn starts one upstream process. The session directory, if the command or the token socket
 // uses one, is created first and removed on every failure path; latest is the identity the token

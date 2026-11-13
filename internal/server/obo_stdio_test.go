@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/mcpsession"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/upstream/stdio"
 )
 
 // newStdioOBOEnv is newOBOEnv with the fake stdio upstream (legacy MCP) instead of an HTTP one.
@@ -68,7 +70,7 @@ func newStdioOBOEnv(t *testing.T, scopes string, opts ...fakeidp.Option) *oboEnv
 
 // #307: check --offline and doctor refuse a temporary directory too long for the token socket, as
 // startup does; without On-Behalf-Of there is no socket to place.
-func TestOfflineChecksRefuseATempDirTooLongForTheTokenSocketWithOnBehalfOf(t *testing.T) {
+func TestOfflineChecksRefuseATempDirTooLongForTheTokenSocketOnlyWithOnBehalfOf(t *testing.T) {
 	bin, err := fakeStdio()
 	if err != nil {
 		t.Fatal(err)
@@ -82,8 +84,9 @@ func TestOfflineChecksRefuseATempDirTooLongForTheTokenSocketWithOnBehalfOf(t *te
 	}
 	obo, plain := load("BYWARD_OBO_SCOPES="+graphUserRead), load()
 	t.Setenv("TMPDIR", "/"+strings.Repeat("d", 120)) // after the configs: t.TempDir reads it too
-	if err := checkUpstream(obo); err == nil || !strings.Contains(err.Error(), "TMPDIR") {
-		t.Fatalf("with On-Behalf-Of: %v, want an error naming TMPDIR", err)
+	err = checkUpstream(obo)
+	if !errors.Is(err, stdio.ErrTempDirTooLong) || !strings.Contains(err.Error(), "TMPDIR") || strings.Contains(err.Error(), "BYWARD_UPSTREAM_COMMAND") {
+		t.Fatalf("with On-Behalf-Of: %v, want the token socket's path refused, naming TMPDIR and not the command settings", err)
 	}
 	if err := checkUpstream(plain); err != nil {
 		t.Fatalf("without On-Behalf-Of: %v, want none", err)
