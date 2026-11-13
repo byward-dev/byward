@@ -70,7 +70,7 @@ docker run --rm --entrypoint sh "$node_image" -c 'touch /var/lib/byward/.write-t
 # PASS line.
 if [ "$(uname -s)" = Linux ]; then
   serve_log="$tmp/serve.log"
-  BYWARD_IMAGE="$image" go test -v -tags integration -count=1 -run '^TestIntegrationTheReleaseImageServes$' ./internal/server/ >"$serve_log" 2>&1 \
+  BYWARD_IMAGE="$image" go test -v -timeout 3m -tags integration -count=1 -run '^TestIntegrationTheReleaseImageServes$' ./internal/server/ >"$serve_log" 2>&1 \
     || { cat "$serve_log" >&2; fail "the image does not serve (see the test output above)"; }
   grep -q '^--- PASS: TestIntegrationTheReleaseImageServes ' "$serve_log" \
     || { cat "$serve_log" >&2; fail "the serving test did not run (renamed, skipped or not built)"; }

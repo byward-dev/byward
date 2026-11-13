@@ -159,11 +159,21 @@ func containerName(t *testing.T, prefix string) string {
 
 func freePort(t *testing.T) int {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	return freePorts(t, 1)[0]
+}
+
+// freePorts returns n distinct free loopback ports: each listener stays open until all are chosen,
+// so the kernel cannot hand one out twice.
+func freePorts(t *testing.T, n int) []int {
+	t.Helper()
+	ports := make([]int, n)
+	for i := range ports {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = ln.Close() }()
+		ports[i] = ln.Addr().(*net.TCPAddr).Port
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
-	return port
+	return ports
 }

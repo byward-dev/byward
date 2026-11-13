@@ -77,7 +77,8 @@ func TestIntegrationTheReleaseImageServes(t *testing.T) {
 	// image's own CA bundle, not instead of it.
 	write(filepath.Join(ca, "fakeidp.pem"), string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: idp.Certificate().Raw})))
 
-	listen, internal := freePort(t), freePort(t)
+	ports := freePorts(t, 2)
+	listen, internal := ports[0], ports[1]
 	env := []string{
 		"SSL_CERT_DIR=/etc/byward/ca",
 		"BYWARD_PUBLIC_URL=" + public + "/mcp",
