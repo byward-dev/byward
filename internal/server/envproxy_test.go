@@ -27,10 +27,16 @@ func TestDoctorsSelfProbeNeverQuotesAMisreadEnvironmentProxyAndTheUpstreamLineWa
 		return
 	}
 	rerun.EachProxySetting(t, "TestDoctorsSelfProbeNeverQuotesAMisreadEnvironmentProxyAndTheUpstreamLineWarnsOfIt", func(t *testing.T, got, addr string, misread bool) {
-		if !strings.Contains(got, "cannot reach") {
+		var probe []string // the self-probe's lines: the upstream line quotes a well-formed setting itself
+		for _, l := range strings.Split(got, "\n") {
+			if strings.Contains(l, "cannot reach") {
+				probe = append(probe, l)
+			}
+		}
+		if len(probe) == 0 {
 			t.Fatalf("child output %q; want the self-probe to report the public URL unreachable", got)
 		}
-		rerun.CauseOnlyIfMisread(t, got, addr, misread)
+		rerun.CauseOnlyIfMisread(t, strings.Join(probe, "\n"), addr, misread)
 		// The upstream line reads the same environment proxy, through doctor's default.
 		if strings.Contains(got, "unescaped character in its credentials") != misread {
 			t.Fatalf("child output %q; want the upstream line to warn exactly when the setting is misread", got)
