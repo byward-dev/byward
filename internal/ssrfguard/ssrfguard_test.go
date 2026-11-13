@@ -6,14 +6,14 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"code.dny.dev/ssrf"
+
+	"github.com/byward-dev/byward/internal/testutil/rerun"
 )
 
 // The guard refuses before connecting, so these never reach the network.
@@ -141,7 +141,7 @@ func TestRedirectsAreNotFollowed(t *testing.T) {
 // An environment proxy would dial on our behalf, past the guard. Go reads the proxy environment
 // once per process, so the fetch runs in a child process that starts with HTTPS_PROXY set.
 func TestTheEnvironmentProxyIsIgnored(t *testing.T) {
-	if os.Getenv("SSRFGUARD_PROXY_CHILD") == "1" {
+	if rerun.Child() {
 		f := server(t, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("direct")) }, time.Second)
 		if res, err := f.Get(context.Background(), "https://example.com/doc", 1024); err != nil || string(res.Body) != "direct" {
 			t.Fatalf("res = %v, err = %v", res, err)
@@ -154,10 +154,8 @@ func TestTheEnvironmentProxyIsIgnored(t *testing.T) {
 		w.WriteHeader(http.StatusBadGateway)
 	}))
 	t.Cleanup(proxy.Close)
-	cmd := exec.Command(os.Args[0], "-test.run=^TestTheEnvironmentProxyIsIgnored$") //nolint:gosec // G204: re-runs this test binary
-	cmd.Env = append(os.Environ(), "SSRFGUARD_PROXY_CHILD=1", "HTTPS_PROXY="+proxy.URL, "HTTP_PROXY="+proxy.URL, "NO_PROXY=")
-	if out, err := cmd.CombinedOutput(); err != nil || proxied.Load() {
-		t.Fatalf("proxied = %v, err = %v\n%s", proxied.Load(), err, out)
+	if out := rerun.Run(t, "TestTheEnvironmentProxyIsIgnored", rerun.ProxyEnv(proxy.URL)...); proxied.Load() {
+		t.Fatalf("the fetch went through the environment proxy\n%s", out)
 	}
 }
 
