@@ -103,6 +103,7 @@ extends = "go-test"
 description = "The PostgreSQL store adapter on PostgreSQL 15 and 18 in pinned containers with TLS (verify-full): the conformance suite, the migration fixtures and the adapter's own tests (needs Docker)"
 env = { BYWARD_POSTGRES = "1" }
 run = "go test -race -count=1 -v -timeout 10m -tags=integration -run ^TestIntegrationPostgres$ ./internal/store/postgres/"
+extends = "go-test"
 
 [tasks."test:integration"]
 description = "Integration tests, including the release smoke test, MCP conformance and the PostgreSQL store (needs Docker)"
