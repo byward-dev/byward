@@ -81,8 +81,8 @@ func stdioConfig(cfg *config.Config, name string, log *slog.Logger, o Observabil
 func newStdioManager(cfg *config.Config, sc stdio.Config) (*stdio.Manager, error) {
 	m, err := stdio.New(sc)
 	switch {
-	case errors.Is(err, stdio.ErrTempDirTooLong): // it names its own settings: TMPDIR and BYWARD_OBO_SCOPES
-		return nil, fmt.Errorf("stdio upstream: %w", err)
+	case errors.Is(err, stdio.ErrTempDirTooLong): // its fix is TMPDIR, which it names
+		return nil, fmt.Errorf("stdio upstream (BYWARD_OBO_SCOPES): %w", err)
 	case err != nil:
 		return nil, fmt.Errorf("stdio upstream (BYWARD_UPSTREAM_COMMAND, BYWARD_UPSTREAM_ENV_FILE): %w", err)
 	}
@@ -90,8 +90,8 @@ func newStdioManager(cfg *config.Config, sc stdio.Config) (*stdio.Manager, error
 }
 
 // checkUpstream is what check --offline and doctor ask of the upstream without reaching it: a stdio
-// command that can be found, with the same check startup makes. An HTTP upstream has nothing to
-// check offline.
+// command that can be found and, with On-Behalf-Of, a temporary directory short enough for the
+// token socket, with the same checks startup makes. An HTTP upstream has nothing to check offline.
 func checkUpstream(cfg *config.Config) error {
 	if cfg.UpstreamCommand == nil {
 		return nil

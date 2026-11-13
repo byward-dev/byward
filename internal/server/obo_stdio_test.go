@@ -85,8 +85,9 @@ func TestOfflineChecksRefuseATempDirTooLongForTheTokenSocketOnlyWithOnBehalfOf(t
 	obo, plain := load("BYWARD_OBO_SCOPES="+graphUserRead), load()
 	t.Setenv("TMPDIR", "/"+strings.Repeat("d", 120)) // after the configs: t.TempDir reads it too
 	err = checkUpstream(obo)
-	if !errors.Is(err, stdio.ErrTempDirTooLong) || !strings.Contains(err.Error(), "TMPDIR") || strings.Contains(err.Error(), "BYWARD_UPSTREAM_COMMAND") {
-		t.Fatalf("with On-Behalf-Of: %v, want the token socket's path refused, naming TMPDIR and not the command settings", err)
+	if !errors.Is(err, stdio.ErrTempDirTooLong) || !strings.HasPrefix(err.Error(), "stdio upstream (BYWARD_OBO_SCOPES): ") ||
+		!strings.Contains(err.Error(), "TMPDIR") || strings.Contains(err.Error(), "BYWARD_UPSTREAM_COMMAND") {
+		t.Fatalf("with On-Behalf-Of: %v, want the token socket's path refused under BYWARD_OBO_SCOPES, naming TMPDIR and not the command settings", err)
 	}
 	if err := checkUpstream(plain); err != nil {
 		t.Fatalf("without On-Behalf-Of: %v, want none", err)

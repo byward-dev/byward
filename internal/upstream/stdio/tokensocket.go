@@ -70,7 +70,7 @@ type tokenAnswer struct {
 }
 
 // ErrTempDirTooLong is returned by New when, with On-Behalf-Of, the temporary directory leaves no
-// room for a token socket path; its fix is TMPDIR, not the command settings.
+// room for a token socket path; its fix is TMPDIR.
 var ErrTempDirTooLong = errors.New("temporary directory too long for the token socket")
 
 // checkTempDirFitsTokenSocket fails when the token socket in a session directory under tempDir
@@ -81,7 +81,7 @@ func checkTempDirFitsTokenSocket(tempDir string) error {
 	}
 	longest := filepath.Join(tempDir, sessionDirPattern+longestSessionDirSuffix, tokenSocketName)
 	if len(longest) > maxSocketPath {
-		return fmt.Errorf("%w: with On-Behalf-Of (BYWARD_OBO_SCOPES), each process's token socket is %s, up to %d bytes, longer than the %d bytes a socket path may have; set a shorter temporary directory (TMPDIR)",
+		return fmt.Errorf("%w: with On-Behalf-Of, each process's token socket is %s, up to %d bytes, longer than the %d bytes a socket path may have; set a shorter temporary directory (TMPDIR)",
 			ErrTempDirTooLong, filepath.Join(tempDir, sessionDirPattern+"<n>", tokenSocketName), len(longest), maxSocketPath)
 	}
 	return nil
