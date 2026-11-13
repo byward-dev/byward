@@ -37,9 +37,9 @@ func Fields() []string { return propagator.Fields() }
 
 // Setup installs the tracer provider, the W3C trace-context propagator, and an error handler and a
 // logger that send OpenTelemetry's errors (a failed export, an exporter setting it rejects) to log,
-// when getenv("OTEL_TRACES_EXPORTER") is set, and returns a shutdown that flushes spans. Otherwise it changes nothing: the global
-// provider and propagator stay no-ops, and an inbound `traceparent` reaches the upstream unchanged.
-// Baggage is never propagated (it can carry user data).
+// when getenv("OTEL_TRACES_EXPORTER") is set, and returns a shutdown that flushes spans. Otherwise
+// it changes nothing: the global provider and propagator stay no-ops, and an inbound `traceparent`
+// reaches the upstream unchanged. Baggage is never propagated (it can carry user data).
 func Setup(ctx context.Context, getenv func(string) string, version string, log *slog.Logger) (enabled bool, shutdown func(context.Context) error, err error) {
 	noop := func(context.Context) error { return nil }
 	if getenv("OTEL_TRACES_EXPORTER") == "" {

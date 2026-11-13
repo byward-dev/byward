@@ -43,10 +43,33 @@ func TestAnOTELSettingTheExporterRejectsIsLoggedWithoutItsValue(t *testing.T) {
 				if !strings.Contains(got, `level=WARN msg="tracing error" error="`+tc.message+`"`) {
 					t.Fatalf("child output %q; want the rejection logged at warn level as %q", got, tc.message)
 				}
-				if n := strings.Count(got, `msg="tracing error"`); n != 1 { // OTel's info and warnings stay out
+				if n := strings.Count(got, `msg="tracing error"`); n != 1 { // OTel's info stays out (its "TracerProvider created")
 					t.Fatalf("child output %q; want that one tracing error, got %d", got, n)
 				}
 			})
+		}
+	}
+}
+
+// An error resource detection reports while tracing is set up reaches the log, not OpenTelemetry's
+// default stderr print: the error handler goes in before the resource. Detection runs once per
+// process, so the check runs in a child process.
+func TestAResourceDetectionErrorReachesTheLogNotStderr(t *testing.T) {
+	if rerun.Child() {
+		log := slog.New(slog.NewTextHandler(os.Stdout, nil))
+		if _, shutdown, err := Setup(context.Background(), os.Getenv, "test", log); err == nil {
+			_ = shutdown(context.Background())
+		}
+		return
+	}
+	clearOTELEnv(t)
+	got := rerun.Run(t, "TestAResourceDetectionErrorReachesTheLogNotStderr", "OTEL_TRACES_EXPORTER=console", "OTEL_RESOURCE_ATTRIBUTES=novalue")
+	if !strings.Contains(got, "error detecting resource") {
+		t.Fatalf("child output %q; want resource detection's error", got)
+	}
+	for _, line := range strings.Split(got, "\n") {
+		if strings.Contains(line, "error detecting resource") && !strings.Contains(line, `level=WARN msg="tracing error"`) {
+			t.Fatalf("line %q; want resource detection's error only in the log, at warn level", line)
 		}
 	}
 }
