@@ -45,6 +45,10 @@ var commands = map[string]command{
 		usage: "byward init entra --tenant <tenant-id> [--public-url <url>] [--upstream-url <url>] [--secret-years 1|2] [--credential secret|certificate]\n      print the az commands for the Entra app registration and a minimal env file; runs nothing",
 		run:   initIdP,
 	},
+	"downstream-token": {
+		usage: "byward downstream-token [--json]\n      run by a stdio upstream process or one of its children: print its user's On-Behalf-Of token\n      from BYWARD_DOWNSTREAM_TOKEN_SOCKET (--json: with expires_at); on a refusal, its code on stderr and exit 1",
+		run:   downstreamToken,
+	},
 }
 
 // commandsUsage is the commands block of --help, in name order.

@@ -1,7 +1,8 @@
 # Commands reference
 
 `byward` with no command runs the proxy. The commands below read the same `BYWARD_*` environment
-as the proxy ([settings](settings.md)), so run them with the proxy's configuration. They take no
+as the proxy ([settings](settings.md)), so run them with the proxy's configuration;
+`downstream-token` is the exception: it reads only `BYWARD_DOWNSTREAM_TOKEN_SOCKET`. They take no
 setting flags; give settings through the environment. A stdio upstream given on the command line goes
 after `--`, as for the proxy (`byward check --offline -- /usr/local/bin/server --flag`).
 `byward --help` lists them.
@@ -14,6 +15,7 @@ after `--`, as for the proxy (`byward check --offline -- /usr/local/bin/server -
 | `byward revoke-user <user key>` | ends one user's access ([hardening](../how-to/harden-a-deployment.md)) | the store | 0, 1, 2 |
 | `byward revoke-all --yes` | ends every user's access ([hardening](../how-to/harden-a-deployment.md)) | the store | 0, 1, 2 |
 | `byward jwks` | prints the identity assertion's public keys as a JWKS, for an upstream that loads them from a file ([identity assertion](../how-to/identity-assertion.md)) | none | 0, 2 |
+| `byward downstream-token [--json]` | run by a stdio upstream process or its children: prints its user's On-Behalf-Of token from `BYWARD_DOWNSTREAM_TOKEN_SOCKET`, for a server that takes a credential command ([On-Behalf-Of §5](../how-to/downstream-apis.md#5-a-stdio-upstream)) | the token socket | 0, 1, 2 |
 
 Decisions: [ADR-0020](../adr/0020-configuration.md) §7–8, [ADR-0021](../adr/0021-observability.md) §11,
 [ADR-0013](../adr/0013-discovery-and-errors.md) §8, [ADR-0012](../adr/0012-entra-specifics.md) §10, §12.
