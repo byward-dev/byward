@@ -5,6 +5,7 @@ package rerun
 import (
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -13,12 +14,14 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/closedport"
 )
 
-// childVar marks the child, so the test can tell which side of the run it is on. It is not a
-// BYWARD_ name, which is kept for settings.
+// childVar marks the child, so the test can tell which side of the run it is on: Run sets it to
+// its own process ID, which only its child sees as its parent's. A value from the shell then never
+// makes a test take the child's side and pass without checking anything. It is not a BYWARD_ name,
+// which is kept for settings.
 const childVar = "RERUN_TEST_CHILD"
 
 // Child reports whether this process is the child of a Run.
-func Child() bool { return os.Getenv(childVar) == "1" }
+func Child() bool { return os.Getenv(childVar) == strconv.Itoa(os.Getppid()) }
 
 // Run runs the test named name again in a child process, with env added to this process's
 // environment, and returns the child's combined output. The child gets what is left of this test's
@@ -30,7 +33,7 @@ func Run(t *testing.T, name string, env ...string) string {
 		args = append(args, "-test.timeout="+time.Until(d).String())
 	}
 	cmd := exec.Command(os.Args[0], args...) //nolint:gosec // G204: this test binary, re-run as its own child
-	cmd.Env = append(append(os.Environ(), childVar+"=1"), env...)
+	cmd.Env = append(append(os.Environ(), childVar+"="+strconv.Itoa(os.Getpid())), env...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("child: %v\n%s", err, out)
