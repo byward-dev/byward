@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/byward-dev/byward/internal/envproxy"
 )
 
 // Outbound budgets (docs/quality-lenses.md, "Default budgets").
@@ -22,9 +24,11 @@ const (
 )
 
 // NewHTTPClient is the outbound client for IdP calls: a 5 s timeout and no redirects, so a
-// configured endpoint can never be bounced elsewhere.
+// configured endpoint can never be bounced elsewhere. A transport error through a proxy setting Go
+// misread says only envproxy.Cause, never the address it quotes (invariant 2).
 func NewHTTPClient() *http.Client {
 	return &http.Client{
+		Transport:     envproxy.Redact(http.DefaultTransport.(*http.Transport).Clone()),
 		Timeout:       DefaultTimeout,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
