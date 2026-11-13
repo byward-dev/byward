@@ -23,9 +23,10 @@ type openedStore interface {
 }
 
 // restoreChecker is a store shared by replicas, which finds a restore while they run (PostgreSQL,
-// ADR-0007 §9 as amended for #227); SQLite finds one at Open.
+// ADR-0007 §9 as amended for #227); SQLite finds one at Open. restored is true on the replica that
+// started the new epoch.
 type restoreChecker interface {
-	CheckRestore(ctx context.Context) (postgres.Restore, error)
+	CheckRestore(ctx context.Context) (restored bool, epoch int64, err error)
 }
 
 // wireStore is openStore; tests replace it to reach the wired store.
@@ -55,7 +56,8 @@ const restoreCheckEvery = 5 * time.Second
 // watchRestore runs rc.CheckRestore every restoreCheckEvery until ctx ends. The replica that starts
 // the new epoch logs and audits it, as a restore found at startup is; a failure is logged once until
 // a check succeeds again.
-func watchRestore(ctx context.Context, rc restoreChecker, log *slog.Logger, rec *audit.Log) {
+// setting and value name the store in the log, as for a restore found at startup.
+func watchRestore(ctx context.Context, rc restoreChecker, log *slog.Logger, rec *audit.Log, setting, value string) {
 	t := time.NewTicker(restoreCheckEvery)
 	defer t.Stop()
 	failing := false
@@ -65,15 +67,15 @@ func watchRestore(ctx context.Context, rc restoreChecker, log *slog.Logger, rec 
 			return
 		case <-t.C:
 		}
-		r, err := rc.CheckRestore(ctx)
+		restored, epoch, err := rc.CheckRestore(ctx)
 		switch {
 		case err != nil && ctx.Err() == nil && !failing:
 			failing = true
 			log.ErrorContext(ctx, "checking the store for a restore failed", "error", err.Error())
 		case err == nil:
 			failing = false
-			if r.Restored {
-				logRestore(log, rec, r.Epoch, "BYWARD_STORE_POSTGRES_DSN_FILE", "", "restored from an older copy, found while running")
+			if restored {
+				logRestore(log, rec, epoch, setting, value, "restored from an older copy, found while running")
 			}
 		}
 	}
@@ -142,11 +144,14 @@ func openPostgres(ctx context.Context, cfg *config.Config, log *slog.Logger) (*p
 	return st, nil
 }
 
-// restoreWatch is watchRestore for a store that checks for restores while running, or nil.
+// restoreWatch is watchRestore for a store that checks for restores while running, or nil. Only
+// PostgreSQL does, so its setting and database name the store in the log.
 func restoreWatch(st openedStore, log *slog.Logger, rec *audit.Log) func(context.Context) {
-	rc, ok := st.(restoreChecker)
+	pg, ok := st.(*postgres.Store)
 	if !ok {
 		return nil
 	}
-	return func(ctx context.Context) { watchRestore(ctx, rc, log, rec) }
+	return func(ctx context.Context) {
+		watchRestore(ctx, pg, log, rec, "BYWARD_STORE_POSTGRES_DSN_FILE", pg.Describe())
+	}
 }

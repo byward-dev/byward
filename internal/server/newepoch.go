@@ -40,6 +40,6 @@ func NewEpoch(ctx context.Context, cfg *config.Config, log *slog.Logger) (int64,
 	if err != nil {
 		return 0, fmt.Errorf("starting a new epoch: %w", err)
 	}
-	logRestore(log, audit.New(log, nil, time.Now), epoch, "BYWARD_STORE_POSTGRES_DSN_FILE", "", reasonNewEpoch)
+	logRestore(log, audit.New(log, nil, time.Now), epoch, "BYWARD_STORE_POSTGRES_DSN_FILE", st.Describe(), reasonNewEpoch)
 	return epoch, nil
 }

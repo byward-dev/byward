@@ -54,21 +54,24 @@ func (m *mark) reset(writes, epoch int64) {
 // restore together start one epoch. The bytes spell "byw:rest".
 const restoreLock int64 = 0x6279773a72657374
 
-// Restore is what CheckRestore found.
-type Restore struct {
-	// Restored: this replica found the store restored from an older copy and started a new epoch;
-	// refresh tokens of older grants stopped working and every remembered consent was forgotten. It
-	// is false on the other replicas, which adopt that epoch.
-	Restored bool
-	// Epoch is the current store epoch.
-	Epoch int64
-}
-
 // CheckRestore compares the store_writes sequence with this replica's mark; the server calls it as
 // often as it syncs the deny list. A sequence below the mark means a restore: under restoreLock,
 // unless another replica has started a new epoch since this one last looked, it starts one, as the
-// SQLite store does at Open.
-func (s *Store) CheckRestore(ctx context.Context) (Restore, error) {
+// SQLite store does at Open. It reports whether this replica started one (refresh tokens of older
+// grants stopped working and every remembered consent was forgotten; the other replicas adopt the
+// epoch and report false) and the current epoch.
+func (s *Store) CheckRestore(ctx context.Context) (restored bool, epoch int64, err error) {
+	r, err := s.checkRestore(ctx)
+	return r.restored, r.epoch, err
+}
+
+// restore is what a check or a new epoch found.
+type restore struct {
+	restored bool
+	epoch    int64
+}
+
+func (s *Store) checkRestore(ctx context.Context) (restore, error) {
 	// The mark first: every value in it was taken from the sequence before the read below, so a
 	// sequence that was not restored reads at least as high. Taken after, a write committing in
 	// between would look like a restore.
@@ -76,14 +79,14 @@ func (s *Store) CheckRestore(ctx context.Context) (Restore, error) {
 	var last, epoch int64
 	var called bool
 	if err := s.pool.QueryRow(ctx, "SELECT last_value, is_called, "+epochSQL+" FROM store_writes").Scan(&last, &called, &epoch); err != nil {
-		return Restore{}, fmt.Errorf("postgres store: restore check: %w", err)
+		return restore{}, fmt.Errorf("postgres store: restore check: %w", err)
 	}
 	if !called {
 		last = 0 // a sequence nothing has taken from yet
 	}
 	if last >= writes {
 		s.mark.sawEpoch(epoch)
-		return Restore{Epoch: epoch}, nil
+		return restore{epoch: epoch}, nil
 	}
 	return s.newEpoch(ctx, seen)
 }
@@ -92,18 +95,18 @@ func (s *Store) CheckRestore(ctx context.Context) (Restore, error) {
 // a pg_restore or a point-in-time recovery. It returns the new epoch.
 func (s *Store) NewEpoch(ctx context.Context) (int64, error) {
 	r, err := s.newEpoch(ctx, -1)
-	return r.Epoch, err
+	return r.epoch, err
 }
 
 // newEpoch bumps the epoch past both the stored one and seen, and forgets every remembered consent
 // (revocations made after the copy are lost with it), unless the stored epoch is already past seen:
 // then another replica started it for the same restore, and this one adopts it. A seen of -1 always
 // bumps. Either way the mark restarts from this transaction's own, committed, store_writes value.
-func (s *Store) newEpoch(ctx context.Context, seen int64) (Restore, error) {
-	var r Restore
+func (s *Store) newEpoch(ctx context.Context, seen int64) (restore, error) {
+	var r restore
 	var writes int64
 	err := retryLostRaces(ctx, func() error {
-		r = Restore{}
+		r = restore{}
 		return pgx.BeginTxFunc(ctx, s.pool, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
 			if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", restoreLock); err != nil {
 				return err
@@ -112,10 +115,10 @@ func (s *Store) newEpoch(ctx context.Context, seen int64) (Restore, error) {
 			if err := tx.QueryRow(ctx, "SELECT value FROM meta WHERE key = 'epoch' FOR UPDATE").Scan(&epoch); err != nil {
 				return err
 			}
-			r.Epoch = epoch
+			r.epoch = epoch
 			if seen < 0 || epoch <= seen {
-				r.Restored, r.Epoch = true, max(epoch, seen)+1
-				if _, err := tx.Exec(ctx, "UPDATE meta SET value = $1 WHERE key = 'epoch'", r.Epoch); err != nil {
+				r.restored, r.epoch = true, max(epoch, seen)+1
+				if _, err := tx.Exec(ctx, "UPDATE meta SET value = $1 WHERE key = 'epoch'", r.epoch); err != nil {
 					return err
 				}
 				if _, err := tx.Exec(ctx, "DELETE FROM consents"); err != nil {
@@ -126,8 +129,8 @@ func (s *Store) newEpoch(ctx context.Context, seen int64) (Restore, error) {
 		})
 	})
 	if err != nil {
-		return Restore{}, fmt.Errorf("postgres store: new epoch: %w", err)
+		return restore{}, fmt.Errorf("postgres store: new epoch: %w", err)
 	}
-	s.mark.reset(writes, r.Epoch)
+	s.mark.reset(writes, r.epoch)
 	return r, nil
 }

@@ -48,8 +48,9 @@ func TestTheDSNFileSelectsPostgreSQLAndIsNeverShown(t *testing.T) {
 	}
 }
 
-// One store only, and PostgreSQL never with a stdio upstream; each refusal names the settings.
-func TestThePostgreSQLStoreRefusesAStateDirectoryOrAStdioUpstream(t *testing.T) {
+// One store only, with no SQLite setting it would ignore, and PostgreSQL never with a stdio
+// upstream; each refusal names the settings.
+func TestThePostgreSQLStoreRefusesSQLiteSettingsOrAStdioUpstream(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -57,6 +58,7 @@ func TestThePostgreSQLStoreRefusesAStateDirectoryOrAStdioUpstream(t *testing.T) 
 		want string
 	}{
 		{"with a state directory", nil, []string{"BYWARD_STORE_DIR=/var/lib/byward/state"}, "BYWARD_STORE_DIR"},
+		{"with a counter file", nil, []string{"BYWARD_STORE_COUNTER_FILE=/var/lib/byward/store-writes"}, "BYWARD_STORE_COUNTER_FILE"},
 		{"with a stdio upstream", []string{"--", "node", "server.js"}, []string{"BYWARD_UPSTREAM_URL="}, "stdio upstream"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -69,7 +71,7 @@ func TestThePostgreSQLStoreRefusesAStateDirectoryOrAStdioUpstream(t *testing.T) 
 }
 
 // Development mode lists the PostgreSQL relaxation only when PostgreSQL is selected.
-func TestDevelopmentModeListsThePlaintextPostgreSQLRelaxation(t *testing.T) {
+func TestDevelopmentModeListsThePlaintextPostgreSQLRelaxationOnlyForPostgreSQL(t *testing.T) {
 	const relaxed = "the PostgreSQL store accepts a connection without verify-full TLS"
 	c, err := loadDSN(t, []string{"--dev"}, "BYWARD_STORE_POSTGRES_DSN_FILE="+dsnFile)
 	if err != nil {

@@ -70,6 +70,7 @@ func TestIntegrationPostgres(t *testing.T) {
 				{"AValueLostInACrashIsNoRestore", aValueLostInACrashIsNoRestore},
 				{"ConcurrentWritesAreNoRestore", concurrentWritesAreNoRestore},
 				{"NewEpochStartsOneAndRunningReplicasAdoptIt", newEpochStartsOneAndRunningReplicasAdoptIt},
+				{"DescribeNamesTheDatabaseAndItsTLSNeverThePassword", describeNamesTheDatabaseAndItsTLSNeverThePassword},
 			} {
 				t.Run(tc.name, func(t *testing.T) { tc.fn(t, srv) })
 			}
@@ -489,41 +490,55 @@ func emptyIdPTokensReadBackAsNone(t *testing.T, srv *server) {
 	}
 }
 
-// A restore moves store_writes back below what both replicas saw committed: the first to check
-// starts a new epoch and forgets the consents, the other adopts it, and neither reports the restore
+// aConsent is one remembered consent of tid:b, for the tests that check a new epoch forgets it.
+var aConsent = store.Consent{Key: store.ConsentKey{Issuer: "i", Subject: "tid:b", ClientID: "c", Redirect: "r", Resource: "u"},
+	Scopes: []string{"mcp"}, ApprovedAt: t0, ExpiresAt: t0.Add(time.Hour)}
+
+// copyOf takes a pg_dump of database db, and restoreCopy puts it back with pg_restore, as an
+// operator's backup and restore would, while the stores stay open.
+func copyOf(t *testing.T, srv *server, db string) []byte {
+	t.Helper()
+	return srv.Exec(t, nil, "pg_dump", "--format=custom", "--dbname="+db)
+}
+
+func restoreCopy(t *testing.T, srv *server, db string, dump []byte) {
+	t.Helper()
+	srv.Exec(t, dump, "pg_restore", "--clean", "--if-exists", "--dbname="+db)
+}
+
+// A restore from a copy older than what both replicas saw committed: the first to check starts a new
+// epoch and forgets the remembered consents, the other adopts it, and neither reports the restore
 // again. The epoch goes up by one.
 func aRestoreStartsOneEpochAcrossReplicas(t *testing.T, srv *server) {
 	a, db := srv.open(t)
 	b := srv.openOn(t, db)
+	must(t, b.RememberConsent(ctx, aConsent))
+	dump := copyOf(t, srv, db)
 	_, err := a.CreateGrant(ctx, grant("ga", "tid:a"))
 	must(t, err)
 	_, err = b.CreateGrant(ctx, grant("gb", "tid:b"))
 	must(t, err)
-	must(t, b.RememberConsent(ctx, store.Consent{Key: store.ConsentKey{Issuer: "i", Subject: "tid:b", ClientID: "c", Redirect: "r", Resource: "u"},
-		Scopes: []string{"mcp"}, ApprovedAt: t0, ExpiresAt: t0.Add(time.Hour)}))
 	for name, s := range map[string]*Store{"A": a, "B": b} {
-		if r, err := s.CheckRestore(ctx); err != nil || r.Restored || r.Epoch != 1 {
-			t.Fatalf("%s before the restore: %+v, %v; want epoch 1, no restore", name, r, err)
+		if restored, epoch, err := s.CheckRestore(ctx); err != nil || restored || epoch != 1 {
+			t.Fatalf("%s before the restore: restored=%v epoch=%d, %v; want epoch 1, no restore", name, restored, epoch, err)
 		}
 	}
-	c := srv.conn(t, db)
-	// Back to before both replicas' writes, as a restore of an older copy leaves it.
-	_, err = c.Exec(ctx, "SELECT setval('store_writes', 1, false)")
-	must(t, err)
+	restoreCopy(t, srv, db, dump)
 
-	first, err := a.CheckRestore(ctx)
+	firstRestored, firstEpoch, err := a.CheckRestore(ctx)
 	must(t, err)
-	second, err := b.CheckRestore(ctx)
+	secondRestored, secondEpoch, err := b.CheckRestore(ctx)
 	must(t, err)
-	if !first.Restored || first.Epoch != 2 || second.Restored || second.Epoch != 2 {
-		t.Fatalf("A %+v, B %+v; want A to start epoch 2 and B to adopt it", first, second)
+	if !firstRestored || firstEpoch != 2 || secondRestored || secondEpoch != 2 {
+		t.Fatalf("A restored=%v epoch=%d, B restored=%v epoch=%d; want A to start epoch 2 and B to adopt it",
+			firstRestored, firstEpoch, secondRestored, secondEpoch)
 	}
-	if n := count(t, c, "consents"); n != 0 {
-		t.Fatalf("%d consents after the restore, want none", n)
+	if _, err := b.Consent(ctx, aConsent.Key); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the consent from the copy after the restore: %v, want it forgotten", err)
 	}
 	for name, s := range map[string]*Store{"A": a, "B": b} {
-		if r, err := s.CheckRestore(ctx); err != nil || r.Restored || r.Epoch != 2 {
-			t.Fatalf("%s after the restore: %+v, %v; want epoch 2 and no second restore", name, r, err)
+		if restored, epoch, err := s.CheckRestore(ctx); err != nil || restored || epoch != 2 {
+			t.Fatalf("%s after the restore: restored=%v epoch=%d, %v; want epoch 2 and no second restore", name, restored, epoch, err)
 		}
 	}
 	if g, err := a.CreateGrant(ctx, grant("after", "tid:a")); err != nil || g.Epoch != 2 {
@@ -535,17 +550,18 @@ func aRestoreStartsOneEpochAcrossReplicas(t *testing.T, srv *server) {
 // epoch since Open.
 func aReplicasFirstCheckFindsARestore(t *testing.T, srv *server) {
 	s, db := srv.open(t)
+	dump := copyOf(t, srv, db)
 	_, err := s.CreateGrant(ctx, grant("g", "tid:a"))
 	must(t, err)
-	_, err = srv.conn(t, db).Exec(ctx, "SELECT setval('store_writes', 1, false)")
-	must(t, err)
-	if r, err := s.CheckRestore(ctx); err != nil || !r.Restored || r.Epoch != 2 {
-		t.Fatalf("the first check after a restore: %+v, %v; want epoch 2 started", r, err)
+	restoreCopy(t, srv, db, dump)
+	if restored, epoch, err := s.CheckRestore(ctx); err != nil || !restored || epoch != 2 {
+		t.Fatalf("the first check after a restore: restored=%v epoch=%d, %v; want epoch 2 started", restored, epoch, err)
 	}
 }
 
 // After a crash the sequence may lose values no transaction committed (postgresql.org/docs/current/
-// functions-sequence.html): the mark holds only committed values, so that is no restore.
+// functions-sequence.html): the mark holds only committed values, so that is no restore. No API
+// loses a sequence value, so setval stands in for the crash.
 func aValueLostInACrashIsNoRestore(t *testing.T, s0 *server) {
 	s, db := s0.open(t)
 	_, err := s.CreateGrant(ctx, grant("g", "tid:a"))
@@ -553,7 +569,7 @@ func aValueLostInACrashIsNoRestore(t *testing.T, s0 *server) {
 	c := s0.conn(t, db)
 	var committed int64
 	must(t, c.QueryRow(ctx, "SELECT last_value FROM store_writes").Scan(&committed))
-	if _, err := s.CheckRestore(ctx); err != nil { // the replica sees the values taken so far
+	if _, _, err := s.CheckRestore(ctx); err != nil { // the replica sees the values taken so far
 		t.Fatal(err)
 	}
 	tx, err := c.Begin(ctx)
@@ -563,13 +579,13 @@ func aValueLostInACrashIsNoRestore(t *testing.T, s0 *server) {
 		must(t, err)
 	}
 	must(t, tx.Rollback(ctx))
-	if r, err := s.CheckRestore(ctx); err != nil || r.Restored {
-		t.Fatalf("with uncommitted values taken: %+v, %v", r, err)
+	if restored, _, err := s.CheckRestore(ctx); err != nil || restored {
+		t.Fatalf("with uncommitted values taken: restored=%v, %v", restored, err)
 	}
 	_, err = c.Exec(ctx, "SELECT setval('store_writes', $1)", committed) // the crash loses them
 	must(t, err)
-	if r, err := s.CheckRestore(ctx); err != nil || r.Restored || r.Epoch != 1 {
-		t.Fatalf("after losing uncommitted values: %+v, %v; want no restore", r, err)
+	if restored, epoch, err := s.CheckRestore(ctx); err != nil || restored || epoch != 1 {
+		t.Fatalf("after losing uncommitted values: restored=%v epoch=%d, %v; want no restore", restored, epoch, err)
 	}
 }
 
@@ -592,19 +608,20 @@ func concurrentWritesAreNoRestore(t *testing.T, srv *server) {
 	}
 	defer func() { close(done); wg.Wait() }()
 	for range 300 {
-		if r, err := s.CheckRestore(ctx); err != nil || r.Restored {
-			t.Fatalf("a check during writes: %+v, %v; want no restore", r, err)
+		if restored, _, err := s.CheckRestore(ctx); err != nil || restored {
+			t.Fatalf("a check during writes: restored=%v, %v; want no restore", restored, err)
 		}
 	}
 }
 
-// new-epoch starts one epoch each time and forgets the consents; a running replica adopts it at its
-// next check without reporting a restore of its own.
+// new-epoch starts one epoch each time and forgets the remembered consents; a running replica
+// adopts it at its next check without reporting a restore of its own.
 func newEpochStartsOneAndRunningReplicasAdoptIt(t *testing.T, srv *server) {
 	running, db := srv.open(t)
 	_, err := running.CreateGrant(ctx, grant("g", "tid:a"))
 	must(t, err)
-	if _, err := running.CheckRestore(ctx); err != nil {
+	must(t, running.RememberConsent(ctx, aConsent))
+	if _, _, err := running.CheckRestore(ctx); err != nil {
 		t.Fatal(err)
 	}
 	operator := srv.openOn(t, db)
@@ -613,13 +630,37 @@ func newEpochStartsOneAndRunningReplicasAdoptIt(t *testing.T, srv *server) {
 			t.Fatalf("NewEpoch = %d, %v; want %d", got, err, want)
 		}
 	}
-	if r, err := running.CheckRestore(ctx); err != nil || r.Restored || r.Epoch != 3 {
-		t.Fatalf("the running replica: %+v, %v; want it to adopt epoch 3 without a restore", r, err)
+	if _, err := running.Consent(ctx, aConsent.Key); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a consent after new-epoch: %v, want it forgotten", err)
+	}
+	if restored, epoch, err := running.CheckRestore(ctx); err != nil || restored || epoch != 3 {
+		t.Fatalf("the running replica: restored=%v epoch=%d, %v; want it to adopt epoch 3 without a restore", restored, epoch, err)
 	}
 	old := store.RefreshToken{Hash: sha256.Sum256([]byte("old")), GrantID: "g", ClientID: "c", CreatedAt: t0, IdleExpiresAt: t0.Add(time.Hour)}
 	must(t, running.PutRefreshToken(ctx, old))
 	if _, err := running.RefreshToken(ctx, old.Hash, t0); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("a refresh token of a grant from epoch 1: %v, want ErrNotFound", err)
+	}
+}
+
+// Describe, for the startup log, names the host, the database and the TLS mode, never the password:
+// verify-full normally, off for a plaintext connection development mode accepted.
+func describeNamesTheDatabaseAndItsTLSNeverThePassword(t *testing.T, srv *server) {
+	s, db := srv.open(t)
+	plain := *srv.Server
+	dsn := strings.Replace(plain.DSN(db), "sslmode=verify-full", "sslmode=disable", 1)
+	p, err := Open(bounded(t), Options{DSN: dsn, AllowPlaintext: true})
+	must(t, err)
+	t.Cleanup(func() { _ = p.Close() })
+	for _, tc := range []struct {
+		s   *Store
+		tls string
+	}{{s, "tls=verify-full"}, {p, "tls=off"}} {
+		d := tc.s.Describe()
+		if !strings.Contains(d, "host=127.0.0.1") || !strings.Contains(d, "dbname="+db) || !strings.Contains(d, tc.tls) ||
+			strings.Contains(d, srv.Password) {
+			t.Fatalf("Describe() = %q, want host, database and %s, and no password", d, tc.tls)
+		}
 	}
 }
 

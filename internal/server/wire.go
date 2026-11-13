@@ -192,13 +192,17 @@ var idpHTTPClient *http.Client
 // newBroker is broker.New; tests replace it to see the wired configuration.
 var newBroker = broker.New
 
-// logPaths logs the absolute paths the proxy uses, defaults resolved (ADR-0007 §6).
+// logPaths logs the absolute paths the proxy uses, defaults resolved (ADR-0007 §6); the SQLite
+// store's only when it is the store.
 func logPaths(cfg *config.Config, log *slog.Logger) {
-	for _, p := range []struct{ setting, value string }{
-		{"BYWARD_DATA_DIR", cfg.DataDir}, {"BYWARD_KEYS_DIR", cfg.KeysDir},
-		{"BYWARD_STATIC_CLIENTS_FILE", cfg.StaticClientsFile}, {"BYWARD_STORE_DIR", cfg.StoreDir},
-		{"BYWARD_STORE_COUNTER_FILE", cfg.StoreCounterFile},
-	} {
+	paths := []struct{ setting, value string }{
+		{"BYWARD_DATA_DIR", cfg.DataDir}, {"BYWARD_KEYS_DIR", cfg.KeysDir}, {"BYWARD_STATIC_CLIENTS_FILE", cfg.StaticClientsFile},
+	}
+	if cfg.StorePostgresDSN == "" {
+		paths = append(paths, struct{ setting, value string }{"BYWARD_STORE_DIR", cfg.StoreDir},
+			struct{ setting, value string }{"BYWARD_STORE_COUNTER_FILE", cfg.StoreCounterFile})
+	}
+	for _, p := range paths {
 		log.Info("path", "setting", p.setting, "value", p.value)
 	}
 }

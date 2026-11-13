@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -29,21 +28,7 @@ func TestIntegrationTwoReplicasShareThePostgreSQLStore(t *testing.T) {
 	srv := pgtest.Start(t, img.Image)
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
-	// pgEnv is a fresh authEnv on database db of srv instead of a SQLite state directory.
-	pgEnv := func(t *testing.T, db string) []string {
-		t.Helper()
-		dsn := filepath.Join(t.TempDir(), "postgres-dsn")
-		if err := os.WriteFile(dsn, []byte(srv.DSN(db)), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		var env []string
-		for _, kv := range authEnv(t) {
-			if !strings.HasPrefix(kv, "BYWARD_STORE_DIR=") {
-				env = append(env, kv)
-			}
-		}
-		return append(env, "BYWARD_STORE_POSTGRES_DSN_FILE="+dsn, "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+up.URL+"/mcp")
-	}
+	pgEnv := func(t *testing.T, db string) []string { return postgresEnv(t, srv.DSN(db), up.URL+"/mcp") }
 	// pair starts two replicas on a new database and returns its name too.
 	pair := func(t *testing.T) (cfg *config.Config, db string, a, b *replica) {
 		t.Helper()
@@ -52,7 +37,16 @@ func TestIntegrationTwoReplicasShareThePostgreSQLStore(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return cfg, db, startReplica(t, cfg), startReplica(t, cfg)
+		a, b = startReplica(t, cfg), startReplica(t, cfg)
+		// The startup log names the database and its TLS, never the DSN's password nor the SQLite paths
+		// it does not use.
+		for _, r := range []*replica{a, b} {
+			if logs := r.logs.String(); !strings.Contains(logs, "tls=verify-full") || strings.Contains(logs, srv.Password) ||
+				strings.Contains(logs, "BYWARD_STORE_DIR") {
+				t.Fatalf("startup log without the database's TLS, or with the password or a SQLite path:\n%s", logs)
+			}
+		}
+		return cfg, db, a, b
 	}
 
 	t.Run("a grant revoked on one replica is refused on the other", func(t *testing.T) {
@@ -84,6 +78,29 @@ func TestIntegrationTwoReplicasShareThePostgreSQLStore(t *testing.T) {
 			t.Fatal(err)
 		}
 		eventually(t, "B refuses every token", func() bool { return mcpPing(b.s, access) == http.StatusUnauthorized })
+	})
+
+	t.Run("store new-epoch refuses older refresh tokens on every replica, audited once", func(t *testing.T) {
+		cfg, _, a, b := pair(t)
+		rt := seedSignedInUser(t, a.wired, "g3", time.Now())
+		var logs syncBuffer
+		epoch, err := NewEpoch(context.Background(), cfg, logging.New(&logs, "json"))
+		if err != nil || epoch != 2 {
+			t.Fatalf("NewEpoch = %d, %v; want epoch 2", epoch, err)
+		}
+		if out := logs.String(); strings.Count(out, `"event":"store_restored"`) != 1 || !strings.Contains(out, `"reason":"operator new-epoch"`) ||
+			strings.Contains(out, srv.Password) {
+			t.Fatalf("want one store_restored record with the operator's reason, and no password:\n%s", out)
+		}
+		for _, r := range []*replica{a, b} {
+			if code, body := postRefresh(t, r.s, rt); code != http.StatusBadRequest || body["error"] != "invalid_grant" {
+				t.Fatalf("a refresh token from before new-epoch: %d %v, want 400 invalid_grant", code, body)
+			}
+		}
+		time.Sleep(2 * restoreCheckEvery) // the replicas adopt the epoch without a record of their own
+		if n := strings.Count(a.logs.String()+b.logs.String(), `"event":"store_restored"`); n != 0 {
+			t.Fatalf("the replicas recorded %d restores of their own after new-epoch, want 0", n)
+		}
 	})
 
 	t.Run("a client assertion accepted by one replica is a replay on the other", func(t *testing.T) {

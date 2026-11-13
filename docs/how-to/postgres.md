@@ -27,8 +27,8 @@ database is enough.
 ## 2. Give the proxy the connection string
 
 Write the connection string to a file that only the proxy's user can read, and point
-`BYWARD_STORE_POSTGRES_DSN_FILE` at it. Setting it selects PostgreSQL. Do not also set
-`BYWARD_STORE_DIR`: the proxy refuses both.
+`BYWARD_STORE_POSTGRES_DSN_FILE` at it. Setting it selects PostgreSQL. Do not also set the SQLite
+store's `BYWARD_STORE_DIR` or `BYWARD_STORE_COUNTER_FILE`: the proxy refuses them beside it.
 
 ```sh
 # /run/secrets/byward-postgres, mode 0600
