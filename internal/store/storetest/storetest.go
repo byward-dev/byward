@@ -41,8 +41,10 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		{"NilScopesComeBackNil", nilScopesComeBackNil},
 		{"CodeIsConsumedOnce", codeIsConsumedOnce},
 		{"ConcurrentConsumeHasOneWinner", concurrentConsumeHasOneWinner},
-		{"ALoginIsSpentOnceUntilItsExpiry", aLoginIsSpentOnceUntilItsExpiry},
-		{"ConcurrentSpendsOfALoginHaveOneWinner", concurrentSpendsOfALoginHaveOneWinner},
+		{"ALoginIsSpentOnceUntilItsExpiry", spentOnceUntilItsExpiry(store.Store.SpendLogin)},
+		{"ConcurrentSpendsOfALoginHaveOneWinner", concurrentSpendsHaveOneWinner(store.Store.SpendLogin)},
+		{"AClientAssertionIsSpentOnceUntilItsExpiry", spentOnceUntilItsExpiry(store.Store.SpendAssertion)},
+		{"ConcurrentSpendsOfAClientAssertionHaveOneWinner", concurrentSpendsHaveOneWinner(store.Store.SpendAssertion)},
 		{"ExpiredCodeIsNotFound", expiredCodeIsNotFound},
 		{"CodeNeedsAGrantAndIsUniquePerGrant", codeNeedsAGrantAndIsUniquePerGrant},
 		{"RefreshTokenRoundTripsAndIdleExpires", refreshTokenRoundTripsAndIdleExpires},
@@ -268,46 +270,53 @@ func codeIsConsumedOnce(t *testing.T, s store.Store) {
 	wantErr(t, "ConsumeCode of an unknown grant", err, store.ErrNotFound)
 }
 
-// A login is spent once: the first SpendLogin is nil, a later one before its expiry ErrConsumed.
-// Another login is independent, and once the record has expired it is gone (the sealed login it
-// stood for has expired with it). An expiry not after now is ErrInvalid.
-func aLoginIsSpentOnceUntilItsExpiry(t *testing.T, s store.Store) {
-	a, b := sha256.Sum256([]byte("login-a")), sha256.Sum256([]byte("login-b"))
-	expires := t0.Add(10 * time.Minute)
-	must(t, s.SpendLogin(ctx, a, t0, expires))
-	wantErr(t, "spending a login twice", s.SpendLogin(ctx, a, t0.Add(time.Minute), expires), store.ErrConsumed)
-	must(t, s.SpendLogin(ctx, b, t0, expires))
-	must(t, s.SpendLogin(ctx, a, expires, expires.Add(10*time.Minute)))
-	wantErr(t, "spending a renewed login again", s.SpendLogin(ctx, a, expires.Add(time.Minute), expires.Add(20*time.Minute)), store.ErrConsumed)
-	wantErr(t, "an expiry not after now", s.SpendLogin(ctx, sha256.Sum256([]byte("login-c")), t0, t0), store.ErrInvalid)
+// spendFunc is SpendLogin or SpendAssertion: both record a hash as spent until an expiry.
+type spendFunc func(store.Store, context.Context, [sha256.Size]byte, time.Time, time.Time) error
+
+// A login or a client assertion is spent once: the first spend is nil, a later one before its
+// expiry ErrConsumed. Another hash is independent, and once the record has expired it is gone (what
+// it stood for has expired with it). An expiry not after now is ErrInvalid.
+func spentOnceUntilItsExpiry(spend spendFunc) func(*testing.T, store.Store) {
+	return func(t *testing.T, s store.Store) {
+		a, b := sha256.Sum256([]byte("spent-a")), sha256.Sum256([]byte("spent-b"))
+		expires := t0.Add(10 * time.Minute)
+		must(t, spend(s, ctx, a, t0, expires))
+		wantErr(t, "spending twice", spend(s, ctx, a, t0.Add(time.Minute), expires), store.ErrConsumed)
+		must(t, spend(s, ctx, b, t0, expires))
+		must(t, spend(s, ctx, a, expires, expires.Add(10*time.Minute)))
+		wantErr(t, "spending a renewed record again", spend(s, ctx, a, expires.Add(time.Minute), expires.Add(20*time.Minute)), store.ErrConsumed)
+		wantErr(t, "an expiry not after now", spend(s, ctx, sha256.Sum256([]byte("spent-c")), t0, t0), store.ErrInvalid)
+	}
 }
 
-// Whatever the interleaving, exactly one of many concurrent spends of a login wins.
-func concurrentSpendsOfALoginHaveOneWinner(t *testing.T, s store.Store) {
-	h := sha256.Sum256([]byte("login-a"))
-	const n = 32
-	errs := make([]error, n)
-	start := make(chan struct{})
-	var wg sync.WaitGroup
-	for i := range n {
-		wg.Go(func() {
-			<-start
-			errs[i] = s.SpendLogin(ctx, h, t0, t0.Add(10*time.Minute))
-		})
-	}
-	close(start)
-	wg.Wait()
-	won := 0
-	for _, err := range errs {
-		switch {
-		case err == nil:
-			won++
-		case !errors.Is(err, store.ErrConsumed):
-			t.Fatalf("SpendLogin: %v", err)
+// Whatever the interleaving, exactly one of many concurrent spends of one hash wins.
+func concurrentSpendsHaveOneWinner(spend spendFunc) func(*testing.T, store.Store) {
+	return func(t *testing.T, s store.Store) {
+		h := sha256.Sum256([]byte("spent-a"))
+		const n = 32
+		errs := make([]error, n)
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for i := range n {
+			wg.Go(func() {
+				<-start
+				errs[i] = spend(s, ctx, h, t0, t0.Add(10*time.Minute))
+			})
 		}
-	}
-	if won != 1 {
-		t.Fatalf("%d spends won, want exactly 1", won)
+		close(start)
+		wg.Wait()
+		won := 0
+		for _, err := range errs {
+			switch {
+			case err == nil:
+				won++
+			case !errors.Is(err, store.ErrConsumed):
+				t.Fatalf("spend: %v", err)
+			}
+		}
+		if won != 1 {
+			t.Fatalf("%d spends won, want exactly 1", won)
+		}
 	}
 }
 

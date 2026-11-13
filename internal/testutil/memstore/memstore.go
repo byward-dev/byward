@@ -183,6 +183,13 @@ func (s *Store) SpendLogin(ctx context.Context, hash [sha256.Size]byte, now, exp
 	return s.Store.SpendLogin(ctx, hash, now, expiresAt)
 }
 
+func (s *Store) SpendAssertion(ctx context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
+	if err := s.err("SpendAssertion"); err != nil {
+		return err
+	}
+	return s.Store.SpendAssertion(ctx, hash, now, expiresAt)
+}
+
 func (s *Store) PutRefreshToken(ctx context.Context, t store.RefreshToken) error {
 	if err := s.err("PutRefreshToken"); err != nil {
 		return err

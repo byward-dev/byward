@@ -133,9 +133,7 @@ func requireRealClients(t *testing.T) {
 // test ends: cancelling kills only the docker CLI.
 func docker(ctx context.Context, t *testing.T, work, image, network string, env, args []string, readOnly ...string) *exec.Cmd {
 	t.Helper()
-	b := make([]byte, 6)
-	_, _ = rand.Read(b)
-	name := "byward-real-client-" + hex.EncodeToString(b)
+	name := containerName(t, "byward-real-client-")
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", name).Run() }) //nolint:gosec // G204: our own container name
 	a := []string{"run", "--rm", "--name", name, "--network", network, "-u", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()),
 		"-e", "HOME=/tmp", "-e", "npm_config_cache=/tmp/npm", "-v", work + ":/w", "-w", "/w"}
@@ -149,13 +147,33 @@ func docker(ctx context.Context, t *testing.T, work, image, network string, env,
 	return exec.CommandContext(ctx, "docker", a...) //nolint:gosec // G204: fixed images and the test's own arguments
 }
 
-func freePort(t *testing.T) int {
+// containerName is prefix and random hex: a container name no other run uses.
+func containerName(t *testing.T, prefix string) string {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
+	b := make([]byte, 6)
+	if _, err := rand.Read(b); err != nil {
 		t.Fatal(err)
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
-	return port
+	return prefix + hex.EncodeToString(b)
+}
+
+func freePort(t *testing.T) int {
+	t.Helper()
+	return freePorts(t, 1)[0]
+}
+
+// freePorts returns n distinct free loopback ports: each listener stays open until all are chosen,
+// so the kernel cannot hand one out twice.
+func freePorts(t *testing.T, n int) []int {
+	t.Helper()
+	ports := make([]int, n)
+	for i := range ports {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = ln.Close() }()
+		ports[i] = ln.Addr().(*net.TCPAddr).Port
+	}
+	return ports
 }
