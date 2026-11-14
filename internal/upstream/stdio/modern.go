@@ -49,7 +49,7 @@ var (
 
 // Request metadata headers (2026-07-28 streamable-http). A stdio upstream never sees headers, so
 // the bridge is the server that validates them (ADR-0004 §3, amended).
-// Mcp-Protocol-Version is headerProtocolVersion (bridge.go), which both eras read.
+// MCP-Protocol-Version is headerProtocolVersion (bridge.go), which both eras read.
 const (
 	headerMethod       = "Mcp-Method"
 	headerName         = "Mcp-Name"
