@@ -9,7 +9,8 @@ The data directory, the keys and starting the proxy are in [run byward](run-bywa
 > private CA and without `--dev`: sign-in, the role and group gates, refresh, revoke, and both a client
 > secret and `private_key_jwt`. Use that image, `ghcr.io/byward-dev/byward:v0.2.0-rc.1`, or a later
 > release: `latest` is still v0.1.1, which has no OIDC IdPs. The local trial below was run on
-> 2026-11-14 with Keycloak 26.8.2 `start-dev` and the binary built from `main`.
+> 2026-11-14 with Keycloak 26.8.2 `start-dev`, both with the v0.2.0-rc.1 release binary
+> (darwin/arm64) and with a build of `main`.
 
 ## Try it on your machine
 
@@ -59,7 +60,15 @@ and a host name both your browser and the container resolve.
 
    `kcadm.sh` runs inside the container, so it reaches Keycloak at `http://localhost:8080`.
 
-3. **The MCP reference server**, with the `docker run` under "You need" in [run byward](run-byward.md).
+3. **The MCP reference server** ([what it is](run-byward.md)), for the binary on this host; no Docker
+   network is needed:
+
+   ```sh
+   docker run --rm -d --name byward-upstream -p 127.0.0.1:3001:3001 \
+     node:24.22.1-slim@sha256:be8204d4bd327363357f532187b752ff62759c31bedf98e9e18fc08c9cbd605c \
+     npx -y @modelcontextprotocol/server-everything@2.0.0 streamableHttp
+   ```
+
 4. **The keys**: [create the keys](run-byward.md#2-create-the-keys) in `./byward-data`.
 5. **byward**, the [binary](run-byward.md#4-start-the-proxy) on the host, with this `byward.env`:
 
@@ -71,6 +80,7 @@ and a host name both your browser and the container resolve.
    BYWARD_OIDC_ISSUER=http://localhost:8180/realms/byward
    BYWARD_OIDC_CLIENT_ID=byward
    BYWARD_GATE_ROLES=byward.user
+   # BYWARD_INTERNAL_LISTEN=127.0.0.1:9190   # uncomment if port 9090 is taken
    ```
 
    ```sh
@@ -79,14 +89,24 @@ and a host name both your browser and the container resolve.
    ./byward check --offline && ./byward
    ```
 
-   The startup log names each relaxation `--dev` applied. If port 9090 is taken, move the internal
-   listener (`BYWARD_INTERNAL_LISTEN=127.0.0.1:9190`).
-6. **Check it**: in another shell with the same settings, `./byward doctor`. Then sign in with
+   The startup log lists the relaxations `--dev` applied: secret file permissions and the http
+   public URL. The http issuer is not listed in v0.2.0-rc.1; it is from
+   [#355](https://github.com/byward-dev/byward/issues/355) on.
+6. **Check it**: in another shell with the same settings, `./byward doctor`. In v0.2.0-rc.1 doctor
+   checks Keycloak's discovery but not the client secret: a wrong secret shows only at the first
+   sign-in, as byward's "Signing in failed." page and an `IdP alert: the operator must act` log line
+   with `alert` `credential_rejected`. Then sign in with
    [`mcp-check.py`](run-byward.md#without-an-ai-client): `uv run --script mcp-check.py
    http://localhost:8080/mcp`, open the URL it prints, allow on byward's consent page, and sign in as
-   `alice`. It prints `echo: Echo: hello through byward`. Run it again as `bob`: byward shows "You
-   don't have access to this server", and the audit log has `access_denied` with `reason` `role`.
-7. **Clean up**: stop byward, then `docker rm -f byward-keycloak upstream && docker network rm byward`.
+   `alice`. It prints `echo: Echo: hello through byward`.
+
+   Then run it again and sign in as `bob` in a **private browser window** (or sign out of Keycloak
+   first, at `http://localhost:8180/realms/byward/account`): otherwise Keycloak still has alice's
+   session and signs her in again without asking. byward shows bob "You don't have access to this
+   server", and the audit log has `access_denied` with `reason` `role`. `mcp-check.py` gets no
+   answer for a refused user; it stops after 120 s with a message saying so.
+7. **Clean up**: stop byward, then `docker rm -f byward-keycloak byward-upstream` (both were started
+   with `--rm`, so this stops and removes them).
 
 ## 1. The realm and the client
 
@@ -106,18 +126,19 @@ In the Keycloak admin console (`/admin`), create the realm if your users are not
 
 byward's gate reads the top-level `roles` and `groups` claims of the ID token. Keycloak puts realm roles
 elsewhere by default, so add two mappers: **Clients › byward › Client scopes › byward-dedicated ›
-Configure a new mapper**.
+Configure a new mapper** for the first; once one exists, the button is **Add mapper › By
+configuration**.
 
-| Mapper type | Name | Token claim name | Settings |
+| Mapper type | Name | Token Claim Name | Settings |
 |---|---|---|---|
-| **User Realm Role** | realm roles | `roles` | Multivalued on, Add to ID token on |
+| **User Realm Role** | roles | `roles` | Multivalued on, Add to ID token on |
 | **Group Membership** | groups | `groups` | Add to ID token on; Full group path as you like (below) |
 
 Then create the role and give it to your users:
 
 1. **Realm roles › Create role**, for example `byward.user`.
-2. For each user: **Users › Create new user** (or open an existing one); on its **Credentials** tab,
-   fill in **Set password** (with **Temporary** off for a test user); on its **Role mappings** tab,
+2. For each user: **Users › Add user** (or open an existing one); on its **Credentials** tab,
+   **Set password** (with **Temporary** off for a test user); on its **Role mapping** tab,
    **Assign role** and pick `byward.user`. Or put the users in a group (**Groups**, create one, then
    the user's **Groups** tab › **Join Group**) and gate on the group.
 
@@ -156,7 +177,8 @@ public IdPs and upstreams keep working. Details, Kubernetes and the pitfalls are
 
 1. Make an RSA (2048 bits or more) or EC P-256 key: `openssl genpkey -algorithm RSA -pkeyopt
    rsa_keygen_bits:2048 -out keycloak-client.pem`, readable only by the proxy's user.
-2. **Credentials** tab: **Client Authenticator** = **Signed Jwt**, **Signature algorithm** = the
+2. **Credentials** tab: **Client Authenticator** = **Signed JWT** (not *Signed JWT - Federated* or
+   *Signed JWT with Client Secret*), **Signature algorithm** = the
    algorithm byward signs with: **PS256** for an RSA key by default, **RS256** if you set
    `BYWARD_OIDC_CLIENT_KEY_ALG=RS256` (on `main`, not in v0.2.0-rc.1), **ES256** for an EC key. If they differ, Keycloak refuses the
    sign-in and byward logs an IdP alert, `credential_rejected`. When Keycloak answers with the OAuth
@@ -178,7 +200,8 @@ public IdPs and upstreams keep working. Details, Kubernetes and the pitfalls are
 - Sign in from an MCP client, or with [`mcp-check.py`](run-byward.md#without-an-ai-client). A user
   without the role or group gets "You don't have access to this server." and the audit has
   `access_denied` with `reason` `role` or `group`. The client receives no error redirect; it waits
-  until its own sign-in times out.
+  until its own sign-in times out (`mcp-check.py` after 120 s). To try a second user, use a private
+  browser window or sign out of Keycloak first, or Keycloak signs the first user in again.
 - Refresh: Keycloak returns an ID token on refresh, which byward needs to recheck the gate. byward gives
   a refresh token to every client that registered the `refresh_token` grant, whether or not it asks
   for `offline_access` ([ADR-0006](../adr/0006-token-model.md), amended for #287).

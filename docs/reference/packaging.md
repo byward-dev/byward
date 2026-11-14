@@ -61,6 +61,6 @@ gh attestation verify oci://ghcr.io/byward-dev/byward:vX.Y.Z --repo byward-dev/b
 cosign verify-blob checksums.txt --bundle checksums.txt.sigstore.json \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp '^https://github.com/byward-dev/byward/\.github/workflows/release\.yml@refs/tags/v'
-sha256sum --ignore-missing -c checksums.txt
+sha256sum --ignore-missing -c checksums.txt   # macOS: shasum -a 256 --ignore-missing -c checksums.txt
 gh attestation verify byward_X.Y.Z_linux_amd64.tar.gz --repo byward-dev/byward
 ```
