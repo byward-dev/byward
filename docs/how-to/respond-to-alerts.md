@@ -189,9 +189,11 @@ cannot fix it, so byward does not answer with 401 or 403
 | any other request | `200`: JSON-RPC error `-32603` with the text below and `data.upstreamStatus` |
 | a request whose `id` cannot be read (a batch, a body over 64 KiB, not JSON-RPC) | `502` |
 
-There is no metric or audit event for these. Each is logged at error level as
-`upstream refused the request`, with `request_id`, `status` (the upstream's 401 or 403) and a
-`reason` that holds the hint and what the client got. Alert on that log line.
+The rule `BywardUpstreamRefusing` fires on
+[`byward_upstream_refusals_total`](../reference/observability.md#metrics), by `status` (`401` or
+`403`); both series start at 0, so the first refusal after a start counts. There is no audit event.
+Each refusal is also logged at error level as `upstream refused the request`, with `request_id`,
+`status` and a `reason` that holds the hint and what the client got: use it to find the request.
 
 ### 401: the upstream rejected the proxy's credential
 

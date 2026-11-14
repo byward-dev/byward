@@ -124,6 +124,9 @@ type IdP struct {
 }
 
 type settings struct {
+	// assertionAlgs are the client assertion algorithms the token endpoint accepts; nil means RS256
+	// and PS256.
+	assertionAlgs   []string
 	clock           func() time.Time
 	tenantID        string
 	authority       string
@@ -324,6 +327,13 @@ func WithTLS() Option { return func(s *settings) { s.tls = true } }
 
 // WithJWKSUnavailable makes the JWKS endpoint answer 503, as during an IdP outage.
 func WithJWKSUnavailable(on bool) Option { return func(s *settings) { s.jwksDown = on } }
+
+// WithClientAssertionAlgs limits the client assertion algorithms the token endpoint accepts, as Okta
+// accepts RS256 but refuses PS256 (#306); none accepts no assertion. Without the option the token
+// endpoint accepts RS256 and PS256.
+func WithClientAssertionAlgs(algs ...string) Option {
+	return func(s *settings) { s.assertionAlgs = append([]string{}, algs...) }
+}
 
 // WithEmptyJWKS makes the JWKS endpoint answer 200 with no keys, as a proxy that rewrites
 // responses might.

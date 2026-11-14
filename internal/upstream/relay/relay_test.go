@@ -32,13 +32,13 @@ import (
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
-func relayTo(t *testing.T, up *fakeupstream.Server, path string) http.Handler {
+func relayTo(t *testing.T, up *fakeupstream.Server, path string, opts ...Option) http.Handler {
 	t.Helper()
 	u, err := url.Parse(up.URL + path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return New(quiet(), u)
+	return New(quiet(), u, opts...)
 }
 
 func TestRelayForwardsBodyVerbatimAndStripsProxyHeaders(t *testing.T) {

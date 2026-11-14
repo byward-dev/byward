@@ -62,7 +62,7 @@ byte-transparent except for upstream refusals. ADR-0021 is unchanged: bodies nev
 - Upstream authors should deny tools with an `isError` result. An HTTP 401 or 403 from them is
   translated; the claims-contract doc (slice 4.1) says so.
 - Memory: at most 64 KiB per in-flight request, so 4 MiB at the default cap of 64.
-- A metric for upstream refusals is added with the metrics in slice 5.1.
+- A metric for upstream refusals is added with the metrics in slice 5.1: `byward_upstream_refusals_total{status}`, added 2026-11-14 (#339).
 - Unverified until the real-client check (slice 1.7): Claude Code inside an OAuth session, VS Code
   at runtime, Cursor and ChatGPT.
 

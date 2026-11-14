@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"net/http"
 	"net/url"
+	"slices"
 )
 
 const clientAssertionType = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
@@ -93,8 +94,9 @@ func secretMatches(c Client, secret string) bool {
 }
 
 // checkClientAssertion validates a private_key_jwt assertion the way the real-tenant test saw
-// Entra do it (ADR-0012): RS256 or PS256, a certificate found by x5t#S256 or x5t, `aud` = the v2
-// token endpoint, `iss` = `sub` = the client ID.
+// Entra do it (ADR-0012): RS256 or PS256 by default (WithClientAssertionAlgs sets them, and a
+// refused alg gets Okta's description), a certificate found by x5t#S256 or x5t, `aud` = the v2 token
+// endpoint, `iss` = `sub` = the client ID.
 func (p *IdP) checkClientAssertion(c Client, assertion, tenant string) *Failure {
 	bad := func(desc string) *Failure {
 		f := InvalidClientAssertion
@@ -121,7 +123,14 @@ func (p *IdP) checkClientAssertion(c Client, assertion, tenant string) *Failure 
 	if cert == nil {
 		return bad("Client assertion contains an invalid signature. The key was not found.")
 	}
-	if err := j.verify(&cert.Key.PublicKey, "RS256", "PS256"); err != nil {
+	algs := p.cfg.assertionAlgs
+	if algs == nil {
+		algs = []string{"RS256", "PS256"}
+	}
+	if !slices.Contains(algs, j.str("alg")) {
+		return bad("The client_assertion JWT signature algorithm is invalid.") // as Okta words it
+	}
+	if err := j.verify(&cert.Key.PublicKey, algs...); err != nil {
 		return bad("")
 	}
 	now := p.cfg.clock()

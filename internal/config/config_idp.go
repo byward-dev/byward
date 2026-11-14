@@ -148,6 +148,13 @@ func (c *Config) oidcIdP(v *Values) []error {
 	if c.OIDCClientKeyID != "" && c.OIDCClientKey == "" {
 		errs = append(errs, errorf("BYWARD_OIDC_CLIENT_KEY_ID is set without %s", key))
 	}
+	switch c.OIDCClientKeyAlg = v.get("oidc-client-key-alg"); {
+	case c.OIDCClientKeyAlg == "":
+	case c.OIDCClientKey == "":
+		errs = append(errs, errorf("BYWARD_OIDC_CLIENT_KEY_ALG is set without %s", key))
+	case !slices.Contains([]string{"PS256", "RS256", "ES256"}, c.OIDCClientKeyAlg):
+		errs = append(errs, errorf("BYWARD_OIDC_CLIENT_KEY_ALG: want PS256 or RS256 (an RSA key) or ES256 (an EC P-256 key), got %q", c.OIDCClientKeyAlg))
+	}
 	if raw := v.get("oidc-scopes"); raw != "" && len(c.OIDCScopes) == 0 {
 		errs = append(errs, errorf("BYWARD_OIDC_SCOPES is set but lists nothing; remove it or give at least one scope"))
 	}

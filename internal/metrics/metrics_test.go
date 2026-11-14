@@ -40,6 +40,7 @@ func exercise(m *Metrics) {
 	m.Consent("verified", "remembered")
 	m.Downstream("issued")
 	m.AppToken("accepted")
+	m.UpstreamRefused(403)
 }
 
 // Every family except the Go runtime's own collectors: a metric with the wrong prefix must reach the
@@ -129,6 +130,7 @@ func TestNilMetricsIsSafeToCall(t *testing.T) {
 	m.Consent("verified", "remembered")
 	m.Downstream("issued")
 	m.AppToken("accepted")
+	m.UpstreamRefused(401)
 }
 
 // #204: seeding exports each given operation and reason of the IdP at 0, and nothing else, so an
@@ -146,5 +148,25 @@ func TestAnIdPsAlertSeriesAreExportedAtZeroBeforeAnyAlert(t *testing.T) {
 	}
 	if n := strings.Count(body, "byward_idp_alerts_total{"); n != 4 {
 		t.Errorf("%d alert series exported, want the 4 seeded:\n%s", n, body)
+	}
+}
+
+// Upstream refusals are counted by status, and both statuses are exported at 0 before the first,
+// so an increase() alert sees it.
+func TestUpstreamRefusalsAreCountedByStatusFromZero(t *testing.T) {
+	m := New()
+	before := scrape(t, m)
+	for _, want := range []string{`byward_upstream_refusals_total{status="401"} 0`, `byward_upstream_refusals_total{status="403"} 0`} {
+		if !strings.Contains(before, want) {
+			t.Fatalf("before any refusal, want %s in\n%s", want, before)
+		}
+	}
+	m.UpstreamRefused(403)
+	m.UpstreamRefused(403)
+	after := scrape(t, m)
+	for _, want := range []string{`byward_upstream_refusals_total{status="401"} 0`, `byward_upstream_refusals_total{status="403"} 2`} {
+		if !strings.Contains(after, want) {
+			t.Fatalf("after two 403s, want %s in\n%s", want, after)
+		}
 	}
 }
