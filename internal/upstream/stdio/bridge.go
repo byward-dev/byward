@@ -20,6 +20,11 @@ import (
 // sessionHeader is the MCP session header (2025-11-25 transports, Session Management).
 const sessionHeader = "Mcp-Session-Id"
 
+// headerProtocolVersion is the MCP-Protocol-Version header, which both eras read: on every legacy
+// request after initialize it carries the negotiated version; on every modern request it mirrors
+// the body's _meta protocolVersion (checkHeaders).
+const headerProtocolVersion = "MCP-Protocol-Version"
+
 const (
 	// streamBuffer is how many upstream messages wait for one slow HTTP stream; past it a
 	// notification is dropped and a request is answered with an error.

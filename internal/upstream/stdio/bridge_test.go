@@ -846,8 +846,8 @@ func TestProtocolVersionHeaderOtherThanTheMCPSessionsNegotiatedVersionIs400(t *t
 				if tc.rejected {
 					body, _ := io.ReadAll(res.Body)
 					if rpcErrorCode(t, body) != codeInvalidRequest || !strings.Contains(string(body), `"id":null`) ||
-						!strings.Contains(string(body), "unsupported MCP-Protocol-Version") {
-						t.Fatalf("%s: body %s, want a -32600 error with no id that names the header", m.method, body)
+						!strings.Contains(string(body), "unsupported MCP-Protocol-Version") || !strings.Contains(string(body), "negotiated "+tc.negotiated) {
+						t.Fatalf("%s: body %s, want a -32600 error with no id that names the header and the negotiated version", m.method, body)
 					}
 				}
 			}
