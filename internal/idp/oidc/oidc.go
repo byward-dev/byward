@@ -27,6 +27,9 @@ type Config struct {
 	ClientID string
 	// ClientAuth authenticates the IdP app; nil means a public client (PKCE only).
 	ClientAuth idp.ClientAuth
+	// KeyAlgSetting is the setting that picks a client key's signing algorithm, named in the fix when
+	// the preset refuses the key's algorithm (#306).
+	KeyAlgSetting string
 	// RedirectURL is our /callback/{idp} URL.
 	RedirectURL string
 	// Scopes are requested in addition to openid and the preset's scopes.
@@ -326,6 +329,12 @@ func (p *Provider) token(ctx context.Context, m *metadata, form url.Values) (*id
 		// (RFC 6749 §5.2), or, at Auth0, the secret (access_denied 401): the operator's to fix.
 		if refusesClient(e) {
 			e.Alert = idp.AlertCredentialRejected
+			// Only invalid_client gets the hint about the assertion: unauthorized_client is a grant the
+			// client may not use (RFC 6749 §5.2), and the IdP measured to answer a wrong credential
+			// with it, Keycloak, does so for a secret, refusing a wrong key with invalid_client (#288).
+			if info, ok := p.cfg.ClientAuth.(idp.AssertionInfo); ok && tr.Error == "invalid_client" {
+				e.OperatorHint = rejectedAssertionHint(info, p.preset, p.cfg.KeyAlgSetting)
+			}
 		}
 		return nil, e
 	}
@@ -390,4 +399,71 @@ func (p *Provider) emailVerified(v any) bool {
 		return p.preset.EmailVerifiedAsString && b == "true"
 	}
 	return false
+}
+
+// rejectedAssertionHint is the operator's fix when the IdP refuses a private_key_jwt client: the
+// client ID, the registered public key, or the signing algorithm, which some IdPs refuse; when the
+// preset's IdP is known to refuse it, the fix leads with that refusal (refusedAlgLead, #306).
+func rejectedAssertionHint(info idp.AssertionInfo, preset Preset, keyAlgSetting string) string {
+	key := "the client key"
+	if info.KeyID() != "" {
+		key += " (key ID " + info.KeyID() + ")"
+	}
+	alg := info.SigningAlgorithm()
+	if slices.Contains(preset.RefusedAssertionAlgs, alg) { // the likely cause first (#306)
+		return refusedAlgLead(alg, preset, keyAlgSetting) + "; otherwise check the client ID and that the public half of " + key + " is registered on the app"
+	}
+	return "the IdP refused the proxy's client ID or its private_key_jwt client assertion, signed with " + alg + " by " + key +
+		": check the client ID, that the key's public half is registered on the app, and that the IdP accepts " + alg + " for client assertions"
+}
+
+// refusedAlgLead says that preset's IdP refuses alg for client assertions and what to do instead:
+// set keyAlgSetting to another algorithm the key signs with that the IdP does not refuse, or use
+// another key type. It leads a fix, since it is the likely cause (#306).
+func refusedAlgLead(alg string, preset Preset, keyAlgSetting string) string {
+	lead := preset.Label + " refuses " + alg + " for client assertions: "
+	otherAlgs, otherKeys, ok := assertionAlternatives(alg, preset)
+	switch {
+	case !ok:
+		return lead + "use another key"
+	case len(otherAlgs) == 0:
+		return lead + "use " + strings.Join(otherKeys, " or ")
+	}
+	return lead + "set " + keyAlgSetting + "=" + strings.Join(otherAlgs, " or ") + " (or use " + strings.Join(otherKeys, " or ") + ")"
+}
+
+// RefusedAssertionAdvice is what to do when preset's IdP refuses alg for client assertions: sign
+// with another algorithm the same key can use that the IdP does not refuse, or use another key type.
+func RefusedAssertionAdvice(alg string, preset Preset) string {
+	otherAlgs, otherKeys, ok := assertionAlternatives(alg, preset)
+	if !ok {
+		return "use another key"
+	}
+	advice := "use " + strings.Join(otherKeys, " or ")
+	if len(otherAlgs) > 0 {
+		advice = "sign with " + strings.Join(otherAlgs, " or ") + ", or " + advice
+	}
+	return advice
+}
+
+// assertionAlternatives are, for a key that signs with alg, the other algorithms it signs with that
+// preset's IdP does not refuse, and the other key types ("an EC P-256 key"); ok is false for an
+// algorithm no key type signs with.
+func assertionAlternatives(alg string, preset Preset) (otherAlgs, otherKeys []string, ok bool) {
+	types := idp.ClientKeyTypes()
+	i := slices.IndexFunc(types, func(t idp.ClientKeyType) bool { return slices.Contains(t.Algs, alg) })
+	if i < 0 {
+		return nil, nil, false
+	}
+	for _, a := range types[i].Algs {
+		if a != alg && !slices.Contains(preset.RefusedAssertionAlgs, a) {
+			otherAlgs = append(otherAlgs, a)
+		}
+	}
+	for j, t := range types {
+		if j != i {
+			otherKeys = append(otherKeys, "an "+t.Name+" key")
+		}
+	}
+	return otherAlgs, otherKeys, true
 }

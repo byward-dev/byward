@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/byward-dev/byward/internal/doctor"
@@ -55,7 +56,7 @@ func (p *Provider) DiagnoseClient(ctx context.Context, d Diagnosis) doctor.Resul
 	case ie.OAuth == "":
 		return check.Result(doctor.Fail, "the IdP's token endpoint gave no OAuth answer: "+err.Error(), "check "+m.TokenEndpoint+": it must be the IdP's token endpoint")
 	case refusesClient(ie):
-		return check.Result(doctor.Fail, fmt.Sprintf("the IdP refused the client ID or its credential (%s)", answer(ie)), p.credentialFix(d))
+		return check.Result(doctor.Fail, fmt.Sprintf("the IdP refused the client ID or its credential (%s)", answer(ie)), p.credentialFix(d, ie.OAuth == "invalid_client"))
 	case ie.OAuth == "invalid_grant" && ie.Status/100 == 4:
 		msg := "the IdP accepted the client ID and credential (it refused the made-up code, as it should)"
 		if !p.preset.ClientCheckedFirst {
@@ -67,9 +68,20 @@ func (p *Provider) DiagnoseClient(ctx context.Context, d Diagnosis) doctor.Resul
 		"sign in once to check the credential")
 }
 
-func (p *Provider) credentialFix(d Diagnosis) string {
+// credentialFix is the fix for a refused credential; badClient is an invalid_client answer, the only
+// one that leads with a key algorithm the preset refuses, as at sign-in (#306).
+func (p *Provider) credentialFix(d Diagnosis, badClient bool) string {
 	if d.KeyCredential {
-		return fmt.Sprintf("register the public key of %s with the IdP app %s (private_key_jwt), and check %s", d.CredentialSetting, p.cfg.ClientID, d.ClientIDSetting)
+		fix := fmt.Sprintf("register the public key of %s with the IdP app %s (private_key_jwt), and check %s", d.CredentialSetting, p.cfg.ClientID, d.ClientIDSetting)
+		info, ok := p.cfg.ClientAuth.(idp.AssertionInfo)
+		switch {
+		case !ok: // a credential that does not describe its algorithm: nothing to add
+		case badClient && slices.Contains(p.preset.RefusedAssertionAlgs, info.SigningAlgorithm()): // the likely cause first (#306)
+			fix = refusedAlgLead(info.SigningAlgorithm(), p.preset, p.cfg.KeyAlgSetting) + "; otherwise " + fix
+		default: // name the algorithm after the usual checks (#306)
+			fix += "; the key signs with " + info.SigningAlgorithm() + ": the IdP must accept " + info.SigningAlgorithm() + " for client assertions"
+		}
+		return fix
 	}
 	return fmt.Sprintf("set %s to the IdP app's current secret, and %s to its client ID", d.CredentialSetting, d.ClientIDSetting)
 }

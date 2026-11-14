@@ -51,6 +51,13 @@ func without(prefixes ...string) func([]string) []string {
 	}
 }
 
+// withAKey swaps the client secret for a key file, adding kv.
+func withAKey(kv ...string) func([]string) []string {
+	return func(env []string) []string {
+		return with(append([]string{"BYWARD_OIDC_CLIENT_KEY_FILE=/run/secrets/key.pem"}, kv...)...)(without("BYWARD_OIDC_CLIENT_SECRET_FILE")(env))
+	}
+}
+
 func with(kv ...string) func([]string) []string {
 	return func(env []string) []string { return append(env, kv...) }
 }
@@ -87,6 +94,9 @@ func TestAnOIDCIdPWithMissingOrConflictingSettingsRefusesToStart(t *testing.T) {
 		"a public client":                 {without("BYWARD_OIDC_CLIENT_SECRET_FILE"), "BYWARD_OIDC_CLIENT_SECRET_FILE or BYWARD_OIDC_CLIENT_KEY_FILE is required"},
 		"a secret and a key":              {with("BYWARD_OIDC_CLIENT_KEY_FILE=/run/secrets/key.pem"), "are both set; give one of them"},
 		"a key ID with no key":            {with("BYWARD_OIDC_CLIENT_KEY_ID=k1"), "BYWARD_OIDC_CLIENT_KEY_ID is set without BYWARD_OIDC_CLIENT_KEY_FILE"},
+		"a key algorithm with no key":     {with("BYWARD_OIDC_CLIENT_KEY_ALG=RS256"), "BYWARD_OIDC_CLIENT_KEY_ALG is set without BYWARD_OIDC_CLIENT_KEY_FILE"},
+		"an unknown key algorithm":        {withAKey("BYWARD_OIDC_CLIENT_KEY_ALG=RS384"), `BYWARD_OIDC_CLIENT_KEY_ALG: want PS256 or RS256 (an RSA key) or ES256 (an EC P-256 key), got "RS384"`},
+		"a key algorithm in lower case":   {withAKey("BYWARD_OIDC_CLIENT_KEY_ALG=rs256"), `BYWARD_OIDC_CLIENT_KEY_ALG: want PS256 or RS256 (an RSA key) or ES256 (an EC P-256 key), got "rs256"`},
 		"blank scopes":                    {with("BYWARD_OIDC_SCOPES= ,"), "BYWARD_OIDC_SCOPES is set but lists nothing"},
 		"a scope with a quote":            {with(`BYWARD_OIDC_SCOPES=a"b`), `BYWARD_OIDC_SCOPES: "a\"b" is not a scope`},
 		"a scope with a backslash":        {with(`BYWARD_OIDC_SCOPES=a\b`), `BYWARD_OIDC_SCOPES: "a\\b" is not a scope`},
@@ -184,10 +194,28 @@ func TestEntraIsTheDefaultIdP(t *testing.T) {
 
 // A PEM key instead of a secret is read from its file, with its key ID.
 func TestAnOIDCClientKeyIsReadFromItsFile(t *testing.T) {
-	c, err := loadOIDC(t, func(env []string) []string {
-		return with("BYWARD_OIDC_CLIENT_KEY_FILE=/run/secrets/key.pem", "BYWARD_OIDC_CLIENT_KEY_ID=k1")(without("BYWARD_OIDC_CLIENT_SECRET_FILE")(env))
-	})
+	c, err := loadOIDC(t, withAKey("BYWARD_OIDC_CLIENT_KEY_ID=k1"))
 	if err != nil || !strings.Contains(c.OIDCClientKey, "BEGIN PRIVATE KEY") || c.OIDCClientKeyID != "k1" || c.OIDCClientSecret != "" {
 		t.Fatalf("config %+v, %v", c, err)
+	}
+}
+
+// Each accepted client key algorithm is read as given; unset is none, the key type's default
+// (#306).
+func TestAnOIDCClientKeyAlgorithmIsRead(t *testing.T) {
+	for _, alg := range []string{"", "PS256", "RS256", "ES256"} {
+		t.Run("alg "+alg, func(t *testing.T) {
+			var algEnv []string
+			if alg != "" {
+				algEnv = []string{"BYWARD_OIDC_CLIENT_KEY_ALG=" + alg}
+			}
+			c, err := loadOIDC(t, withAKey(algEnv...))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.OIDCClientKeyAlg != alg {
+				t.Fatalf("key algorithm %q, want %q", c.OIDCClientKeyAlg, alg)
+			}
+		})
 	}
 }

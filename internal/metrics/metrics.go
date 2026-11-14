@@ -34,6 +34,7 @@ type Metrics struct {
 	appTokens   *prometheus.CounterVec
 	downstream  *prometheus.CounterVec
 	idpAlerts   *prometheus.CounterVec
+	refusals    *prometheus.CounterVec
 }
 
 // New registers every metric; the build-info gauge is labelled from the binary's build info.
@@ -53,6 +54,8 @@ func New() *Metrics {
 			Help: "Requests to the upstream in flight, by kind (request or stream)."}, []string{"kind"}),
 		busy: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_upstream_busy_total",
 			Help: "Requests refused with 503 because an upstream admission cap was full, by kind."}, []string{"kind"}),
+		refusals: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_upstream_refusals_total",
+			Help: "Upstream refusals: requests the HTTP upstream answered with 401 or 403 (ADR-0025), by status."}, []string{"status"}),
 		auditEvents: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_audit_events_total",
 			Help: "Audit events by event name and outcome, including rate-limited ones that were not logged."},
 			[]string{"event", "outcome"}),
@@ -81,7 +84,11 @@ func New() *Metrics {
 	build := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "byward_build_info",
 		Help: "Always 1; labelled with the proxy and Go versions."}, []string{"version", "go_version"})
 	build.WithLabelValues(version, goVersion).Set(1)
-	m.reg.MustRegister(m.requests, m.idp, m.inFlight, m.busy, m.auditEvents, m.rateLimited, m.cimdFetches, m.dcr, m.consent, m.appTokens, m.downstream, m.idpAlerts, build,
+	// Both statuses are exported at 0 from the start, so an alert rule on increase() sees the first
+	// refusal (a series that appears at 1 has no earlier sample to increase from).
+	m.refusals.WithLabelValues("401")
+	m.refusals.WithLabelValues("403")
+	m.reg.MustRegister(m.requests, m.idp, m.inFlight, m.busy, m.refusals, m.auditEvents, m.rateLimited, m.cimdFetches, m.dcr, m.consent, m.appTokens, m.downstream, m.idpAlerts, build,
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	return m
 }
@@ -158,6 +165,14 @@ func (m *Metrics) Busy(kind string) {
 		return
 	}
 	m.busy.WithLabelValues(kind).Inc()
+}
+
+// UpstreamRefused counts one refusal by the HTTP upstream with status (401 or 403).
+func (m *Metrics) UpstreamRefused(status int) {
+	if m == nil {
+		return
+	}
+	m.refusals.WithLabelValues(strconv.Itoa(status)).Inc()
 }
 
 // RateLimited counts a request an OAuth endpoint refused over its budget.

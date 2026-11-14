@@ -25,13 +25,16 @@ func checkOffline(_ context.Context, args, environ []string, stdout, stderr io.W
 	if !ok {
 		return exitConfig
 	}
-	warnings, err := server.CheckOffline(cfg)
+	report, err := server.CheckOfflineReport(cfg)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "byward: configuration error: %v\n", err)
 		return exitConfig
 	}
-	for _, w := range warnings {
+	for _, w := range report.Warnings {
 		_, _ = fmt.Fprintf(stdout, "warn  %s\n", w)
+	}
+	if report.ClientCredentialDesc != "" {
+		_, _ = fmt.Fprintf(stdout, "info  client credential: %s\n", report.ClientCredentialDesc)
 	}
 	_, _ = fmt.Fprintln(stdout, "configuration OK (offline: the IdP and the running proxy were not contacted; run byward doctor for those)")
 	return exitOK
