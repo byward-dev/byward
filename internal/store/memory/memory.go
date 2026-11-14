@@ -58,8 +58,8 @@ func New() *Store {
 
 // SpendLogin implements store.Logins.
 func (s *Store) SpendLogin(_ context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
-	if !expiresAt.After(now) {
-		return store.ErrInvalid
+	if err := store.CheckSpend(now, expiresAt); err != nil {
+		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -72,8 +72,8 @@ func (s *Store) SpendLogin(_ context.Context, hash [sha256.Size]byte, now, expir
 
 // SpendAssertion implements store.ClientAssertions.
 func (s *Store) SpendAssertion(_ context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
-	if !expiresAt.After(now) {
-		return store.ErrInvalid
+	if err := store.CheckSpend(now, expiresAt); err != nil {
+		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -86,8 +86,8 @@ func (s *Store) SpendAssertion(_ context.Context, hash [sha256.Size]byte, now, e
 
 // CreateGrant implements store.Grants.
 func (s *Store) CreateGrant(_ context.Context, g store.Grant) (store.Grant, error) {
-	if g.ID == "" || g.ClientID == "" || g.Subject == "" || !g.ExpiresAt.After(g.CreatedAt) {
-		return store.Grant{}, store.ErrInvalid
+	if err := g.Check(); err != nil {
+		return store.Grant{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -350,8 +350,8 @@ func (s *Store) Collect(_ context.Context, now time.Time) error {
 
 // CreateClient implements store.Clients.
 func (s *Store) CreateClient(_ context.Context, c store.Client, max int) error {
-	if c.ID == "" || len(c.Metadata) == 0 || !c.UsedAt.IsZero() || !c.ExpiresAt.After(c.CreatedAt) {
-		return store.ErrInvalid
+	if err := c.Check(); err != nil {
+		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -406,10 +406,10 @@ func (s *Store) UseClient(_ context.Context, id string, now, expires time.Time, 
 
 // RememberConsent implements store.Consents.
 func (s *Store) RememberConsent(_ context.Context, c store.Consent) error {
-	k := c.Key
-	if k.Issuer == "" || k.Subject == "" || k.ClientID == "" || k.Redirect == "" || k.Resource == "" || len(c.Scopes) == 0 || !c.ExpiresAt.After(c.ApprovedAt) {
-		return store.ErrInvalid
+	if err := c.Check(); err != nil {
+		return err
 	}
+	k := c.Key
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c.Scopes = slices.Clone(c.Scopes)

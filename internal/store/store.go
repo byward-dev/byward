@@ -92,6 +92,15 @@ type Grant struct {
 	Epoch     int64     // ADR-0007 §9; set by the store on create
 }
 
+// Check is CreateGrant's ErrInvalid rule, which every adapter applies: an empty ID, ClientID or
+// Subject, or an ExpiresAt not after CreatedAt.
+func (g Grant) Check() error {
+	if g.ID == "" || g.ClientID == "" || g.Subject == "" || !g.ExpiresAt.After(g.CreatedAt) {
+		return ErrInvalid
+	}
+	return nil
+}
+
 // Grants stores grants.
 type Grants interface {
 	// CreateGrant stores g and returns it with Epoch set. An existing ID is ErrExists; an empty ID,
@@ -175,6 +184,14 @@ type ClientAssertions interface {
 	SpendAssertion(ctx context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error
 }
 
+// CheckSpend is the ErrInvalid rule of SpendLogin and SpendAssertion: an expiresAt not after now.
+func CheckSpend(now, expiresAt time.Time) error {
+	if !expiresAt.After(now) {
+		return ErrInvalid
+	}
+	return nil
+}
+
 // RefreshToken is a stored refresh token: only its hash (ADR-0006 §4).
 type RefreshToken struct {
 	Hash          [sha256.Size]byte
@@ -247,6 +264,15 @@ type Client struct {
 	ExpiresAt time.Time
 }
 
+// Check is CreateClient's ErrInvalid rule: an empty ID or Metadata, a non-zero UsedAt, or an
+// ExpiresAt not after CreatedAt.
+func (c Client) Check() error {
+	if c.ID == "" || len(c.Metadata) == 0 || !c.UsedAt.IsZero() || !c.ExpiresAt.After(c.CreatedAt) {
+		return ErrInvalid
+	}
+	return nil
+}
+
 // Clients are dynamic client registrations, with a sliding expiry (ADR-0008 §3).
 type Clients interface {
 	// CreateClient stores c. An existing ID is ErrExists; an empty ID or Metadata, a non-zero
@@ -284,6 +310,16 @@ type Consent struct {
 	// that rule, or was rewritten by a replica on an older binary during a rolling upgrade, and its
 	// offline_access does not count.
 	RecordsLifetime bool
+}
+
+// Check is RememberConsent's ErrInvalid rule: an empty key field, no scopes, or an ExpiresAt not
+// after ApprovedAt.
+func (c Consent) Check() error {
+	k := c.Key
+	if k.Issuer == "" || k.Subject == "" || k.ClientID == "" || k.Redirect == "" || k.Resource == "" || len(c.Scopes) == 0 || !c.ExpiresAt.After(c.ApprovedAt) {
+		return ErrInvalid
+	}
+	return nil
 }
 
 // Consents is the remembered-consent registry (ADR-0010 §2-3). Revoking forgets, in the same

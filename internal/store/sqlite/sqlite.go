@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -290,8 +291,8 @@ func (s *Store) write(ctx context.Context, fn func(*sql.Tx) error) error {
 
 // CreateGrant implements store.Grants.
 func (s *Store) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, error) {
-	if g.ID == "" || g.ClientID == "" || g.Subject == "" || !g.ExpiresAt.After(g.CreatedAt) {
-		return store.Grant{}, store.ErrInvalid
+	if err := g.Check(); err != nil {
+		return store.Grant{}, err
 	}
 	scopes, err := json.Marshal(nonNil(g.Scopes))
 	if err != nil {
@@ -323,7 +324,7 @@ func (s *Store) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, er
 		return store.Grant{}, err
 	}
 	g.Epoch = s.epoch
-	g.Scopes, g.IdPTokens = cloneStrings(g.Scopes), cloneBytes(g.IdPTokens)
+	g.Scopes, g.IdPTokens = slices.Clone(g.Scopes), slices.Clone(g.IdPTokens)
 	return g, nil
 }
 
@@ -662,8 +663,8 @@ func (s *Store) Collect(ctx context.Context, now time.Time) error {
 
 // SpendLogin implements store.Logins.
 func (s *Store) SpendLogin(ctx context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
-	if !expiresAt.After(now) {
-		return store.ErrInvalid
+	if err := store.CheckSpend(now, expiresAt); err != nil {
+		return err
 	}
 	return s.write(ctx, func(tx *sql.Tx) error {
 		// One conditional statement (ADR-0007 §2), so it stays atomic under any isolation level: it
@@ -683,8 +684,8 @@ func (s *Store) SpendLogin(ctx context.Context, hash [sha256.Size]byte, now, exp
 
 // SpendAssertion implements store.ClientAssertions, as SpendLogin does for logins.
 func (s *Store) SpendAssertion(ctx context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
-	if !expiresAt.After(now) {
-		return store.ErrInvalid
+	if err := store.CheckSpend(now, expiresAt); err != nil {
+		return err
 	}
 	return s.write(ctx, func(tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx, `INSERT INTO spent_assertions (hash, expires_at) VALUES (?, ?)
@@ -702,10 +703,10 @@ func (s *Store) SpendAssertion(ctx context.Context, hash [sha256.Size]byte, now,
 
 // RememberConsent implements store.Consents.
 func (s *Store) RememberConsent(ctx context.Context, c store.Consent) error {
-	k := c.Key
-	if k.Issuer == "" || k.Subject == "" || k.ClientID == "" || k.Redirect == "" || k.Resource == "" || len(c.Scopes) == 0 || !c.ExpiresAt.After(c.ApprovedAt) {
-		return store.ErrInvalid
+	if err := c.Check(); err != nil {
+		return err
 	}
+	k := c.Key
 	scopes, err := json.Marshal(c.Scopes)
 	if err != nil {
 		return err
@@ -769,18 +770,6 @@ func mustHaveGrant(ctx context.Context, tx *sql.Tx, id string) error {
 func micros(t time.Time) int64     { return t.UnixMicro() }
 func fromMicros(v int64) time.Time { return time.UnixMicro(v).UTC() }
 func nonNil(s []string) []string   { return append([]string{}, s...) }
-func cloneStrings(s []string) []string {
-	if s == nil {
-		return nil
-	}
-	return append([]string{}, s...)
-}
-func cloneBytes(b []byte) []byte {
-	if b == nil {
-		return nil
-	}
-	return append([]byte{}, b...)
-}
 
 // blob keeps nil as SQL NULL rather than an empty blob.
 func blob(b []byte) any {
@@ -823,8 +812,8 @@ func ensureFile(path string) error {
 
 // CreateClient implements store.Clients.
 func (s *Store) CreateClient(ctx context.Context, c store.Client, max int) error {
-	if c.ID == "" || len(c.Metadata) == 0 || !c.UsedAt.IsZero() || !c.ExpiresAt.After(c.CreatedAt) {
-		return store.ErrInvalid
+	if err := c.Check(); err != nil {
+		return err
 	}
 	return s.write(ctx, func(tx *sql.Tx) error {
 		var n int
