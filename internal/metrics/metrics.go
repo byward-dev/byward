@@ -55,7 +55,7 @@ func New() *Metrics {
 		busy: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_upstream_busy_total",
 			Help: "Requests refused with 503 because an upstream admission cap was full, by kind."}, []string{"kind"}),
 		refusals: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_upstream_refusals_total",
-			Help: "Requests the HTTP upstream refused with 401 or 403 (ADR-0025), by status."}, []string{"status"}),
+			Help: "Upstream refusals: requests the HTTP upstream answered with 401 or 403 (ADR-0025), by status."}, []string{"status"}),
 		auditEvents: prometheus.NewCounterVec(prometheus.CounterOpts{Name: "byward_audit_events_total",
 			Help: "Audit events by event name and outcome, including rate-limited ones that were not logged."},
 			[]string{"event", "outcome"}),

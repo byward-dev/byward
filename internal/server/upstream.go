@@ -40,11 +40,11 @@ type upstream struct {
 // API token too, which a stdio process asks its token socket for instead (ADR-0017).
 func newUpstream(cfg *config.Config, log *slog.Logger, o Observability, minter *assertion.Minter, down *downstreamTokens) (*upstream, error) {
 	if cfg.UpstreamCommand == nil {
-		refusals := relay.WithRefusalObserver(o.Metrics.UpstreamRefused)
+		countRefusals := relay.WithRefusalObserver(o.Metrics.UpstreamRefused)
 		if minter != nil {
-			return &upstream{handler: assertingUpstream(cfg, log, minter, down, refusals)}, nil
+			return &upstream{handler: assertingUpstream(cfg, log, minter, down, countRefusals)}, nil
 		}
-		return &upstream{handler: httpUpstream(cfg, log, refusals)}, nil
+		return &upstream{handler: httpUpstream(cfg, log, countRefusals)}, nil
 	}
 	name := stdioName(cfg)
 	sc := stdioConfig(cfg, name, log, o)
@@ -211,13 +211,13 @@ type assertionKey struct{}
 
 // assertingUpstream is the relay that sends every request with the identity assertion in
 // BYWARD_ASSERTION_HEADER, after the inbound copies are gone (ADR-0016 §2, §4).
-func assertingUpstream(cfg *config.Config, log *slog.Logger, m *assertion.Minter, down *downstreamTokens, more ...relay.Option) http.Handler {
+func assertingUpstream(cfg *config.Config, log *slog.Logger, m *assertion.Minter, down *downstreamTokens, extra ...relay.Option) http.Handler {
 	header := cfg.AssertionHeader
 	opts := append([]relay.Option{relay.WithInject(func(ctx context.Context, h http.Header) {
 		if tok, ok := ctx.Value(assertionKey{}).(string); ok {
 			h.Set(header, "Bearer "+tok)
 		}
-	})}, more...)
+	})}, extra...)
 	if cfg.IdentityHeaders {
 		opts = append(opts, relay.WithInject(setIdentityHeaders))
 	}

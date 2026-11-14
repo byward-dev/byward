@@ -100,3 +100,64 @@ func TestADocumentedSelectorInAnyMatcherFormIsChecked(t *testing.T) {
 		})
 	}
 }
+
+// The upstream refusal labels the docs name are the ones the proxy exports, so an alert rule copied
+// from them matches.
+func TestTheDocumentedUpstreamRefusalLabelsAreTheExportedOnes(t *testing.T) {
+	ref, err := os.ReadFile("../../docs/reference/observability.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := regexp.MustCompile("(?m)^\\| `byward_upstream_refusals_total` \\|.*$").FindString(string(ref))
+	if row == "" {
+		t.Fatal("observability.md has no byward_upstream_refusals_total row")
+	}
+	rec := httptest.NewRecorder()
+	metrics.New().Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	for _, status := range []string{"401", "403"} {
+		if !strings.Contains(row, "`status`") || !strings.Contains(row, "`"+status+"`") {
+			t.Errorf("the byward_upstream_refusals_total row does not name status %s:\n%s", status, row)
+		}
+		if !strings.Contains(rec.Body.String(), `byward_upstream_refusals_total{status="`+status+`"}`) {
+			t.Errorf("/metrics does not export status %s", status)
+		}
+	}
+}
+
+var metricName = regexp.MustCompile(`byward_[a-z_]+`)
+
+// Every metric an example alert rule or the alerts page queries is one the proxy exports, so a
+// rule copied from the docs never matches nothing.
+func TestTheAlertRulesInTheDocsQueryExportedMetrics(t *testing.T) {
+	golden, err := os.ReadFile("../metrics/testdata/names.golden")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exported := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(string(golden)), "\n") {
+		exported[strings.Fields(line)[0]] = true
+	}
+	ref, err := os.ReadFile("../../docs/reference/observability.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := regexp.MustCompile("(?s)```yaml\ngroups:.*?```").FindString(string(ref))
+	if rules == "" {
+		t.Fatal("observability.md has no example alert rules")
+	}
+	alerts, err := os.ReadFile("../../docs/how-to/respond-to-alerts.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for doc, text := range map[string]string{"observability.md's alert rules": rules, "respond-to-alerts.md": string(alerts)} {
+		for _, name := range metricName.FindAllString(text, -1) {
+			base := name
+			for _, suffix := range []string{"_bucket", "_sum", "_count"} {
+				base = strings.TrimSuffix(base, suffix)
+			}
+			if !exported[base] && !exported[name] {
+				t.Errorf("%s queries %s, which the proxy does not export", doc, name)
+			}
+		}
+	}
+}
