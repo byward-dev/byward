@@ -263,3 +263,24 @@ func TestAnIPv6SourceIsLimitedByItsSlash64AndLoggedByItsAddress(t *testing.T) {
 		t.Fatalf("a sender in another /64 was limited too, or charged with the first one's drops:\n%s", buf.String())
 	}
 }
+
+// An audit record carries its request's ID, once, through the proxy's logger (which adds it from the
+// request's context); a record with no request carries none.
+func TestARecordCarriesItsRequestsID(t *testing.T) {
+	var buf bytes.Buffer
+	l := New(logging.New(&buf, "json"), nil, time.Now)
+	r := httptest.NewRequest("POST", "/token", nil)
+	r = r.WithContext(logging.WithRequestID(r.Context(), "req-1"))
+	l.Record(r, Event{Name: TokenIssued, Outcome: Success})
+	l.RecordUnauthenticated(r, Event{Name: TokenRejected, Outcome: Failure})
+	l.Record(nil, Event{Name: KeyLoaded, Outcome: Success})
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("%d lines, want 3: %s", len(lines), buf.String())
+	}
+	for i, want := range []int{1, 1, 0} {
+		if n := strings.Count(lines[i], `"request_id":"req-1"`); n != want || strings.Count(lines[i], `"request_id"`) != want {
+			t.Errorf("line %d has the request ID %d times, want %d: %s", i, n, want, lines[i])
+		}
+	}
+}
