@@ -84,8 +84,8 @@ func TestTheStartupLogNamesARedundantStripEntry(t *testing.T) {
 				t.Cleanup(func() { _ = s.closeStore() })
 			}
 			for _, n := range tc.redundant {
-				if !strings.Contains(logs.String(), `level=WARN msg="`+n+` is stripped from every upstream request already; the entry changes nothing" setting=BYWARD_UPSTREAM_STRIP_HEADERS`) {
-					t.Fatalf("the startup log does not warn that %s is already stripped: %s", n, logs.String())
+				if c := strings.Count(logs.String(), `level=WARN msg="`+n+` is stripped from every upstream request already; the entry changes nothing" setting=BYWARD_UPSTREAM_STRIP_HEADERS`); c != 1 {
+					t.Fatalf("the startup log warns %d times that %s is already stripped, want once: %s", c, n, logs.String())
 				}
 			}
 			if strings.Contains(logs.String(), "X-Argocd-Base-Url is stripped") {
