@@ -191,3 +191,35 @@ func TestAnOIDCClientKeyIsReadFromItsFile(t *testing.T) {
 		t.Fatalf("config %+v, %v", c, err)
 	}
 }
+
+// --dev accepts an http IdP issuer on a loopback host (the oidc adapter's AllowLoopbackHTTP), and
+// records it as a relaxation, so it is logged at startup (security invariant 12, #355); an https
+// issuer, an http issuer elsewhere (which the adapter refuses) and no --dev record nothing.
+func TestDevRecordsAnHTTPIdPIssuerOnLoopbackAsARelaxation(t *testing.T) {
+	for _, tc := range []struct {
+		name, issuer string
+		dev, want    bool
+	}{
+		{"localhost over http", "http://localhost:8180/realms/byward", true, true},
+		{"127.0.0.1 over http", "http://127.0.0.1:8180/realms/byward", true, true},
+		{"[::1] over http", "http://[::1]:8180/realms/byward", true, true},
+		{"https", "https://sso.example.com/realms/acme", true, false},
+		{"http on another host", "http://sso.example.com/realms/acme", true, false},
+		{"http on localhost without --dev", "http://localhost:8180/realms/byward", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kv := []string{"BYWARD_OIDC_ISSUER=" + tc.issuer}
+			if tc.dev {
+				kv = append(kv, "BYWARD_DEV=true")
+			}
+			c, err := loadOIDC(t, func(env []string) []string { return with(kv...)(without("BYWARD_OIDC_ISSUER")(env)) })
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "http IdP issuer on loopback (" + tc.issuer + "): discovery, the token endpoint and the IdP's signing keys are fetched over http"
+			if got := slices.Contains(c.Relaxations, want); got != tc.want {
+				t.Fatalf("relaxations %q; want %q listed: %v", c.Relaxations, want, tc.want)
+			}
+		})
+	}
+}

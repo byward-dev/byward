@@ -163,6 +163,37 @@ func TestDevModeLogsEachRelaxation(t *testing.T) {
 	}
 }
 
+// An http IdP issuer on loopback, which --dev accepts, is logged at startup as a relaxation, and
+// check --offline prints each relaxation (security invariant 12, #355).
+func TestDevModeLogsAnHTTPIdPIssuerOnLoopback(t *testing.T) {
+	dir := t.TempDir()
+	secret := filepath.Join(dir, "oidc-secret")
+	if err := os.WriteFile(secret, []byte("s3cret-oidc"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const relaxation = "http IdP issuer on loopback (http://localhost:8180/realms/byward)"
+	var env []string
+	for _, kv := range authEnv(t) {
+		if !strings.HasPrefix(kv, "BYWARD_ENTRA_") {
+			env = append(env, kv)
+		}
+	}
+	env = append(env, "BYWARD_IDP=keycloak", "BYWARD_OIDC_ISSUER=http://localhost:8180/realms/byward", "BYWARD_OIDC_CLIENT_ID=byward",
+		"BYWARD_OIDC_CLIENT_SECRET_FILE="+secret, "BYWARD_GATE_ALLOW_EMPTY=true", "BYWARD_DEV=true")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var out, errb bytes.Buffer
+	if code := run(ctx, nil, append(env, serveEnv("http://127.0.0.1:8080/mcp", "127.0.0.1:0")...), &out, &errb); code != exitOK ||
+		!strings.Contains(errb.String(), `"msg":"development mode relaxation","relaxation":"`+relaxation) {
+		t.Fatalf("code=%d logs=%s; want the issuer logged as a relaxation", code, errb.String())
+	}
+	code, stdout, stderr := runWith([]string{"check", "--offline"}, append(env, "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")...)
+	if code != exitOK || !strings.Contains(stdout, "warn  development mode relaxation: "+relaxation) ||
+		!strings.Contains(stdout, "warn  development mode relaxation: http public URL on loopback") || stderr != "" {
+		t.Fatalf("check: code %d stdout %q stderr %q; want each relaxation printed", code, stdout, stderr)
+	}
+}
+
 func TestListenFailureIsARuntimeError(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
