@@ -234,7 +234,7 @@ func recoverer(log *slog.Logger, next http.Handler) http.Handler {
 				if p == http.ErrAbortHandler { //nolint:errorlint // sentinel compared as net/http does
 					panic(p)
 				}
-				log.ErrorContext(r.Context(), "panic", "request_id", logging.RequestID(r.Context()), "panic", fmt.Sprint(p))
+				log.ErrorContext(r.Context(), "panic", "panic", fmt.Sprint(p))
 				http.Error(w, "internal error", http.StatusInternalServerError)
 			}
 		}()

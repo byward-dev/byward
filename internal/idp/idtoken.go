@@ -11,7 +11,8 @@ import (
 	"github.com/go-jose/go-jose/v4/jwt"
 )
 
-// Leeway is the clock skew allowed on exp/iat/nbf (ADR-0006, ADR-0014).
+// Leeway is the clock skew allowed on exp/iat/nbf of an IdP's tokens: ID tokens (ADR-0011 §5) and
+// app-only tokens (ADR-0022 §3). The proxy's own tokens have their own (token.Leeway, ADR-0014 §2).
 const Leeway = 30 * time.Second
 
 // TokenRules are the per-IdP inputs to JWT validation: ID tokens (OIDC Core §3.1.3.7, ADR-0011 §5)

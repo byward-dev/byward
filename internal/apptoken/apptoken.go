@@ -13,6 +13,7 @@ import (
 	"github.com/byward-dev/byward/internal/gate"
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/resource"
+	"github.com/byward-dev/byward/internal/token"
 )
 
 // Verifier checks an app-only token's signature and claims (entra.Provider).
@@ -23,12 +24,6 @@ type Verifier interface {
 // Gate judges an app-only caller (gate.AppGate); a refusal is a *gate.Denied.
 type Gate interface {
 	Allow(idp.App) error
-}
-
-// DenyList is revoke-user's cut-offs (denylist.List): an app has no grant, so only the subject
-// and every-subject cut-offs apply.
-type DenyList interface {
-	Denied(grantID, subject string, issuedAt time.Time) (bool, error)
 }
 
 // Outcomes, for the counter and the audit reason.
@@ -53,7 +48,9 @@ const MaxTracked = 10_000
 type Config struct {
 	Verifier Verifier
 	Gate     Gate
-	Deny     DenyList
+	// Deny is revoke-user's cut-offs (denylist.List): an app has no grant, so only the subject and
+	// every-subject cut-offs apply.
+	Deny token.DenyList
 	// IdP names the adapter in audit records ("entra").
 	IdP string
 	// Count is told every outcome (metrics.AppToken); nil counts nothing.

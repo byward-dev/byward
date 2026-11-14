@@ -8,7 +8,8 @@ import (
 	"github.com/byward-dev/byward/internal/resource"
 )
 
-// Leeway is the clock skew allowed on `iat` and `exp` (ADR-0014 §2).
+// Leeway is the clock skew allowed on `iat` and `exp` of the proxy's own tokens (ADR-0014 §2). An
+// IdP's tokens have their own (idp.Leeway).
 const Leeway = 30 * time.Second
 
 // DenyList is the in-memory revocation list the broker keeps (ADR-0006 §3).
