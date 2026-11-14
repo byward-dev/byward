@@ -92,7 +92,11 @@ smoke() {
   echo "image smoke: ok ($image)"
 }
 
-for arch in amd64 arm64; do
+# Every snapshot image goreleaser built (.goreleaser.yaml dockers_v2 platforms), so an architecture
+# added there is smoked too; the ELF check fails one it does not know.
+arches=$(jq -r '.[] | select(.type == "Docker Image") | .name | capture("byward:snapshot-(?<a>[a-z0-9]+)$").a' dist/artifacts.json | sort -u)
+[ -n "$arches" ] || fail "dist/artifacts.json lists no snapshot images"
+for arch in $arches; do
   smoke "$arch"
 done
 
