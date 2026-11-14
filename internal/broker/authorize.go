@@ -520,10 +520,7 @@ func (b *Broker) noteIdPFailure(r *http.Request, clientID string, err error) str
 			msg = ie.UserMessage
 		}
 		reason = "the IdP sign-in failed (" + ie.Class.String() + ")"
-		attrs := []any{"request_id", logging.RequestID(ctx), "error", err}
-		if fix := ie.Fix(); fix != "" { // Auth0's wrong secret has only the alert's fix (#315)
-			attrs = append(attrs, "reason", fix)
-		}
+		attrs := append([]any{"request_id", logging.RequestID(ctx), "error", err}, fixAttr(err)...)
 		if ie.Code != 0 {
 			attrs = append(attrs, "idp_error_code", ie.Code)
 		}
@@ -539,6 +536,16 @@ func (b *Broker) noteIdPFailure(r *http.Request, clientID string, err error) str
 	}
 	b.cfg.Audit.Record(r, audit.Event{Name: audit.Login, Outcome: audit.Failure, Reason: reason, ClientID: clientID, IdP: b.cfg.IdPName})
 	return msg
+}
+
+// fixAttr is the log attribute naming the operator's fix for err (idp.Error.Fix: the IdP's hint,
+// else the alert's), or none when there is no fix: a log line never has an empty reason (#315).
+func fixAttr(err error) []any {
+	var ie *idp.Error
+	if errors.As(err, &ie) && ie.Fix() != "" {
+		return []any{"reason", ie.Fix()}
+	}
+	return nil
 }
 
 // idpFailure explains an IdP error on a page; the rest goes to the log and the audit stream as

@@ -140,14 +140,10 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 		case errors.As(err, &ie) && ie.Class == idp.SignInAgain:
 			return end("the IdP ended the session; grant revoked", ie.OperatorHint)
 		case errors.As(err, &ie) && ie.Class == idp.Unavailable:
-			attrs := []any{"request_id", logging.RequestID(ctx), "error", err}
-			if fix := ie.Fix(); fix != "" { // as for a failed sign-in (noteIdPFailure)
-				attrs = append(attrs, "reason", fix)
-			}
-			b.cfg.Log.WarnContext(ctx, "IdP refresh unavailable", attrs...)
+			b.cfg.Log.WarnContext(ctx, "IdP refresh unavailable", append([]any{"request_id", logging.RequestID(ctx), "error", err}, fixAttr(err)...)...)
 			return nil, assertedClaims{}, time.Time{}, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the identity provider is unavailable; try again"}, false
 		default:
-			b.cfg.Log.ErrorContext(ctx, "IdP refresh failed", "request_id", logging.RequestID(ctx), "error", err)
+			b.cfg.Log.ErrorContext(ctx, "IdP refresh failed", append([]any{"request_id", logging.RequestID(ctx), "error", err}, fixAttr(err)...)...)
 			return nil, assertedClaims{}, time.Time{}, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not refresh the sign-in"}, false
 		}
 	}
