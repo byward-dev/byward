@@ -201,7 +201,15 @@ func TestAFenceOpensOnThreeOfOneCharacter(t *testing.T) {
 	for _, tc := range []struct {
 		line string
 		want bool
-	}{{"```go", true}, {"   ~~~", true}, {"    ```", false}, {"``", false}, {"~~", false}, {"``` a`b", false}, {"~~~ a`b", true}} {
+	}{
+		{"```go", true},
+		{"   ~~~", true},
+		{"    ```", false},
+		{"``", false},
+		{"~~", false},
+		{"``` a`b", false},
+		{"~~~ a`b", true},
+	} {
 		if got := openingFence.MatchString(tc.line); got != tc.want {
 			t.Errorf("openingFence.MatchString(%q) = %v, want %v", tc.line, got, tc.want)
 		}
