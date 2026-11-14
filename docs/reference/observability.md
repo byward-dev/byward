@@ -120,7 +120,7 @@ Prometheus text format at `/metrics` on the internal listener. Histogram buckets
 Plus the standard `go_*` and `process_*` collectors. There is no metric for the deny list's sync age
 or for store errors: a store that fails turns `/readyz` to 503 (below) and is logged.
 
-Example alert rules:
+Example alert rules (what to do when each fires: [respond to alerts](../how-to/respond-to-alerts.md)):
 
 ```yaml
 groups:
