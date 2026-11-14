@@ -69,6 +69,9 @@ Security fixes go into the latest minor only (SECURITY.md).
    the checksums, `gh attestation verify` for the image and an archive).
 8. **Publish the draft release** with the notes from step 4. For a security release, publish the
    advisory at the same time (SECURITY.md).
+9. **Point the docs at the new image** in a pull request: put the tag in `scripts/docs-image-tag`,
+   then run `sh scripts/docs-lint.sh`, which lists every `ghcr.io/byward-dev/byward:<tag>` in the
+   docs that still names the old one.
 
 ## Release candidates and patches
 

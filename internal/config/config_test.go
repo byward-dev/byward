@@ -100,14 +100,26 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"unicode allowed host", "BYWARD_ALLOWED_HOSTS=bücher.example:8443", `BYWARD_ALLOWED_HOSTS: the host "bücher.example:8443" is not ASCII`},
 		{"credentials", "BYWARD_UPSTREAM_URL=http://u:p@upstream/mcp", "BYWARD_UPSTREAM_URL"},
 		{"origin with path", "BYWARD_ALLOWED_ORIGINS=https://a.example/path", "BYWARD_ALLOWED_ORIGINS"},
-		{"host with path", "BYWARD_ALLOWED_HOSTS=a.example/x", "BYWARD_ALLOWED_HOSTS"},
-		{"host with space", "BYWARD_ALLOWED_HOSTS=a b", "BYWARD_ALLOWED_HOSTS"},
+		{"host with path", "BYWARD_ALLOWED_HOSTS=a.example/x", `BYWARD_ALLOWED_HOSTS: "a.example/x" is not a host[:port]: give host`},
+		{"host with space", "BYWARD_ALLOWED_HOSTS=a b", `BYWARD_ALLOWED_HOSTS: "a b" is not a host[:port]: give host`},
 		{"bracketed host name", "BYWARD_ALLOWED_HOSTS=[mcp.internal.example]", `BYWARD_ALLOWED_HOSTS: "[mcp.internal.example]" is not a host[:port]: give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port`},
 		{"bracketed IPv4 with a port", "BYWARD_ALLOWED_HOSTS=[127.0.0.1]:8443", `BYWARD_ALLOWED_HOSTS: "[127.0.0.1]:8443" is not a host[:port]`},
 		{"IPv6 with a zone", "BYWARD_ALLOWED_HOSTS=[fe80::1%eth0]:8443", `BYWARD_ALLOWED_HOSTS: "[fe80::1%eth0]:8443" is not a host[:port]`},
 		{"unclosed bracket", "BYWARD_ALLOWED_HOSTS=[::1", `BYWARD_ALLOWED_HOSTS: "[::1" is not a host[:port]`},
-		{"name with a closing bracket", "BYWARD_ALLOWED_HOSTS=mcp.example]", `BYWARD_ALLOWED_HOSTS: "mcp.example]" is not a host[:port]`},
-		{"name with an opening bracket", "BYWARD_ALLOWED_HOSTS=mcp.example[", `BYWARD_ALLOWED_HOSTS: "mcp.example[" is not a host[:port]`},
+		{"name with a closing bracket", "BYWARD_ALLOWED_HOSTS=mcp.example]", `BYWARD_ALLOWED_HOSTS: "mcp.example]" is not a host[:port]: give host`},
+		{"name with an opening bracket", "BYWARD_ALLOWED_HOSTS=mcp.example[", `BYWARD_ALLOWED_HOSTS: "mcp.example[" is not a host[:port]: give host`},
+		{"name with user info", "BYWARD_ALLOWED_HOSTS=a@b", `BYWARD_ALLOWED_HOSTS: "a@b" is not a host[:port]: a host name has only letters, digits and - . _ ~`},
+		{"name with a query", "BYWARD_ALLOWED_HOSTS=a?b", `BYWARD_ALLOWED_HOSTS: "a?b" is not a host[:port]: a host name`},
+		{"name with a fragment", "BYWARD_ALLOWED_HOSTS=a#b", `BYWARD_ALLOWED_HOSTS: "a#b" is not a host[:port]: a host name`},
+		{"name with a backslash", "BYWARD_ALLOWED_HOSTS=a\\b", `BYWARD_ALLOWED_HOSTS: "a\\b" is not a host[:port]: a host name`},
+		{"name with a semicolon", "BYWARD_ALLOWED_HOSTS=a;b", `BYWARD_ALLOWED_HOSTS: "a;b" is not a host[:port]: a host name`},
+		{"name with a tab", "BYWARD_ALLOWED_HOSTS=a\tb", `BYWARD_ALLOWED_HOSTS: "a\tb" is not a host[:port]: a host name`},
+		{"name that is a wildcard", "BYWARD_ALLOWED_HOSTS=*", `BYWARD_ALLOWED_HOSTS: "*" is not a host[:port]: a host name`},
+		{"name with a port and a bad character", "BYWARD_ALLOWED_HOSTS=a*b:8080", `BYWARD_ALLOWED_HOSTS: "a*b:8080" is not a host[:port]: a host name`},
+		{"trailing dot", "BYWARD_ALLOWED_HOSTS=mcp.example.com.", `BYWARD_ALLOWED_HOSTS: "mcp.example.com." is not a host[:port]: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
+		{"trailing dot with a port", "BYWARD_ALLOWED_HOSTS=mcp.example.com.:8443", `BYWARD_ALLOWED_HOSTS: "mcp.example.com.:8443" is not a host[:port]: a host name`},
+		{"leading dot", "BYWARD_ALLOWED_HOSTS=.example.com", `BYWARD_ALLOWED_HOSTS: ".example.com" is not a host[:port]: a host name`},
+		{"double dot", "BYWARD_ALLOWED_HOSTS=mcp..example.com:8443", `BYWARD_ALLOWED_HOSTS: "mcp..example.com:8443" is not a host[:port]: a host name`},
 		{"bracket then an empty port", "BYWARD_ALLOWED_HOSTS=[::1]:", `BYWARD_ALLOWED_HOSTS: "[::1]:" is not a host[:port]`},
 		{"bracket then junk", "BYWARD_ALLOWED_HOSTS=[::1]x", `BYWARD_ALLOWED_HOSTS: "[::1]x" is not a host[:port]`},
 		{"bracket then digits without a colon", "BYWARD_ALLOWED_HOSTS=[::1]8080", `BYWARD_ALLOWED_HOSTS: "[::1]8080" is not a host[:port]`},
@@ -190,11 +202,11 @@ func TestDevAllowsLoopbackHTTPAndRecordsIt(t *testing.T) {
 	}
 }
 
-// Every form a Host header carries loads, with any port from 1 to 65535, and a bare IPv6 address is
+// Every form a Host header carries loads, in lower case, with any port from 1 to 65535, and a bare IPv6 address is
 // stored in brackets, as a Host header carries it, so the public listener can match it (#325).
 func TestAllowedHostsLoadEveryHostHeaderFormAndBracketABareIPv6(t *testing.T) {
-	c, err := load(t, nil, "BYWARD_ALLOWED_HOSTS=mcp.example.com,mcp.example.com:9765,10.0.0.5:8080,localhost:1,::1,2001:db8::1,[2001:db8::1],[::1]:65535")
-	want := []string{"mcp.example.com", "mcp.example.com:9765", "10.0.0.5:8080", "localhost:1", "[::1]", "[2001:db8::1]", "[2001:db8::1]", "[::1]:65535"}
+	c, err := load(t, nil, "BYWARD_ALLOWED_HOSTS=mcp.example.com,mcp.example.com:9765,10.0.0.5:8080,localhost:1,::1,2001:db8::1,[2001:db8::1],[::1]:65535,my_svc~1,xn--bcher-kva.example,Mixed-Case.Example,abcdefghijklmnopqrstuvwxyz.ABCDEFGHIJKLMNOPQRSTUVWXYZ.0123456789")
+	want := []string{"mcp.example.com", "mcp.example.com:9765", "10.0.0.5:8080", "localhost:1", "[::1]", "[2001:db8::1]", "[2001:db8::1]", "[::1]:65535", "my_svc~1", "xn--bcher-kva.example", "mixed-case.example", "abcdefghijklmnopqrstuvwxyz.abcdefghijklmnopqrstuvwxyz.0123456789"}
 	if err != nil || !slices.Equal(c.AllowedHosts, want) {
 		t.Fatalf("err=%v hosts=%v, want %v", err, c.AllowedHosts, want)
 	}
@@ -633,6 +645,25 @@ func TestAnAllowedHostEntryOrHostHeaderReducesToItsLowerCaseHostName(t *testing.
 	} {
 		if got := Hostname(entry); got != want {
 			t.Errorf("Hostname(%q) = %q, want %q", entry, got, want)
+		}
+	}
+}
+
+// #334: a name with any ASCII character outside RFC 3986's unreserved set (a control character, a sub-delim,
+// a %-escape, "@", "?", "#", "\\" ...) is refused as a host name, with or without a port. ":", the
+// brackets, "/" and the space belong to the form check and are covered there; "," separates the
+// list's entries.
+func TestAnAllowedHostNameRefusesEveryCharacterAHostNameCannotHave(t *testing.T) {
+	const unreserved = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+	for c := byte(1); c < 0x80; c++ {
+		if strings.IndexByte(unreserved+":[]/, ", c) >= 0 {
+			continue
+		}
+		for _, entry := range []string{"a" + string(c) + "b", "a" + string(c) + "b:8443"} {
+			_, err := load(t, nil, "BYWARD_ALLOWED_HOSTS="+entry)
+			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%q is not a host[:port]: a host name", entry)) {
+				t.Errorf("BYWARD_ALLOWED_HOSTS=%s: %v, want it refused as a host name", entry, err)
+			}
 		}
 	}
 }

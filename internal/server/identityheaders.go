@@ -88,8 +88,7 @@ func notPublic(a netip.Addr) bool {
 // see; an upstream host with a public address, or one it cannot resolve, gets a warning.
 func identityHeadersResult(ctx context.Context, host string, resolve func(context.Context, string) ([]netip.Addr, error)) doctor.Result {
 	const hint = "a hint, not a guarantee: doctor sees addresses, not who can reach them"
-	r := doctor.Result{Class: doctor.ClassProxy, Name: "identity headers", Status: doctor.Pass,
-		Fix: "keep the upstream reachable only through this proxy (a private network or a network policy), or turn BYWARD_IDENTITY_HEADERS off and verify the assertion instead (docs/how-to/plain-identity-headers.md)"}
+	r := doctor.CheckIdentityHeaders.Result(doctor.Pass, "", "keep the upstream reachable only through this proxy (a private network or a network policy), or turn BYWARD_IDENTITY_HEADERS off and verify the assertion instead (docs/how-to/plain-identity-headers.md)")
 	addrs := []netip.Addr{}
 	if a, err := netip.ParseAddr(host); err == nil {
 		addrs = append(addrs, a)

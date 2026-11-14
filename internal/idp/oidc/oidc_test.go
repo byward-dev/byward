@@ -223,10 +223,14 @@ func TestTokenErrorsAreClassified(t *testing.T) {
 		class idp.Class
 		alert idp.Alert
 	}{
-		"invalid_grant":   {&fakeidp.RefreshTokenExpired, idp.SignInAgain, ""},
-		"invalid_client":  {&fakeidp.InvalidClientSecret, idp.Unavailable, idp.AlertCredentialRejected},
-		"503":             {&fakeidp.TemporarilyUnavailable, idp.Unavailable, ""},
-		"invalid_request": {&fakeidp.InvalidRequest, idp.Fatal, ""},
+		"invalid_grant":  {&fakeidp.RefreshTokenExpired, idp.SignInAgain, ""},
+		"invalid_client": {&fakeidp.InvalidClientSecret, idp.Unavailable, idp.AlertCredentialRejected},
+		// Auth0 answers a wrong secret access_denied 401 (#315); an access_denied with any other status is no refusal of the credential.
+		"access_denied 401, Auth0's wrong secret": {&fakeidp.Failure{Status: 401, Error: "access_denied", Description: "Unauthorized"}, idp.Fatal, idp.AlertCredentialRejected},
+		"access_denied 403":                       {&fakeidp.Failure{Status: 403, Error: "access_denied"}, idp.Fatal, ""},
+		"access_denied 400":                       {&fakeidp.Failure{Status: 400, Error: "access_denied"}, idp.Fatal, ""},
+		"503":                                     {&fakeidp.TemporarilyUnavailable, idp.Unavailable, ""},
+		"invalid_request":                         {&fakeidp.InvalidRequest, idp.Fatal, ""},
 		// The same failure as Entra's 700016 row: the app is unknown, so both adapters alert.
 		"unknown app": {&fakeidp.UnknownClient, idp.Fatal, idp.AlertCredentialRejected},
 	} {
@@ -580,10 +584,11 @@ func TestAnUnusableClientCredentialAlertsTheOperator(t *testing.T) {
 	}
 }
 
-// #204: the callback query is the browser's, so an invalid_client in it is forgeable and never an
+// #204, #315: the callback query is the browser's, so an error in it (invalid_client,
+// unauthorized_client, or access_denied, which is a user's refusal there) is forgeable and never an
 // operator alert; only the token endpoint's answer can say the proxy's credential was refused.
 func TestACallbackErrorNeverAlertsTheOperator(t *testing.T) {
-	for _, oauth := range []string{"invalid_client", "unauthorized_client"} { // both alert at the token endpoint
+	for _, oauth := range []string{"invalid_client", "unauthorized_client", "access_denied"} { // each alerts at the token endpoint (access_denied with 401)
 		t.Run(oauth, func(t *testing.T) {
 			e := newEnv(t, Config{})
 			q := signIn(t, e, login)

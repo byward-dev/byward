@@ -94,7 +94,7 @@ const (
 	// certificate or key, an unreadable federated token file); nothing was sent.
 	AlertCredentialUnusable Alert = "credential_unusable" //nolint:gosec // G101: a metric label, not a credential
 	// AlertCredentialRejected: the IdP refused the proxy's credential or client ID (invalid_client,
-	// an expired secret, an unregistered app).
+	// an expired secret, an unregistered app, Auth0's access_denied 401).
 	AlertCredentialRejected Alert = "credential_rejected" //nolint:gosec // G101: a metric label, not a credential
 	// AlertProtocol: the IdP answered in a way the protocol does not allow (a success without
 	// tokens).
