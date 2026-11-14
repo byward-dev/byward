@@ -104,22 +104,21 @@ func TestAnOperatorRevocationReachesTheRunningProxysAuditStream(t *testing.T) {
 // revocation, or one naming nobody, maps to none, so a new kind is never recorded as another.
 func TestOnlyAnOperatorRevocationMapsToAnAuditRecord(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		r      store.Revocation
-		ok     bool
-		reason string
-		user   string
+		name string
+		r    store.Revocation
+		ok   bool
+		want audit.Event
 	}{
-		{"a grant of a user", store.Revocation{GrantID: "g1", Subject: "tid:alice"}, false, "", ""},
-		{"a grant under revoke-all", store.Revocation{GrantID: "g1", All: true}, false, "", ""},
-		{"nobody", store.Revocation{}, false, "", ""},
-		{"every user", store.Revocation{All: true}, true, reasonRevokeAll, ""},
-		{"one user", store.Revocation{Subject: "tid:alice"}, true, reasonRevokeUser, "tid:alice"},
+		{"a grant of a user", store.Revocation{GrantID: "g1", Subject: "tid:alice"}, false, audit.Event{}},
+		{"a grant under revoke-all", store.Revocation{GrantID: "g1", All: true}, false, audit.Event{}},
+		{"nobody", store.Revocation{}, false, audit.Event{}},
+		{"every user", store.Revocation{All: true}, true, audit.Event{Name: audit.GrantRevoked, Outcome: audit.Success, Reason: reasonRevokeAll}},
+		{"one user", store.Revocation{Subject: "tid:alice"}, true,
+			audit.Event{Name: audit.GrantRevoked, Outcome: audit.Success, Reason: reasonRevokeUser, UserKey: "tid:alice"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			e, ok := operatorRevocationEvent(tc.r)
-			if ok != tc.ok || e.Reason != tc.reason || e.UserKey != tc.user || (ok && e.Name != audit.GrantRevoked) {
-				t.Fatalf("got %+v, %v; want ok %v, reason %q, user %q", e, ok, tc.ok, tc.reason, tc.user)
+			if e, ok := operatorRevocationEvent(tc.r); e != tc.want || ok != tc.ok {
+				t.Fatalf("got %+v, %v; want %+v, %v", e, ok, tc.want, tc.ok)
 			}
 		})
 	}
