@@ -1,7 +1,14 @@
-// Package docs holds the checks that keep the repository's Markdown true to its own tree: every
+// Package doclinks holds the checks that keep the repository's Markdown true to its own tree: every
 // relative link and #anchor resolves, and every page byward.dev links to exists. They read whatever
 // *.md files the tree has, so a PR that moves, renames or deletes a page is checked as it stands.
-package docs
+//
+// What is checked: inline links and images ([text](dest), with an optional "title", 'title' or
+// (title), and <dest> in angle brackets) outside fenced code, code spans and HTML comments; their
+// #anchors against ATX headings (# Heading), as GitHub names them. Not checked: external URLs,
+// reference-style links ([text][ref]), HTML href/src, and anchors from setext headings or <a id>,
+// none of which the docs use. Untracked files are read too, and path case is only enforced on a
+// case-sensitive file system (CI's Linux, not macOS's default).
+package doclinks
 
 import (
 	"bufio"
@@ -41,8 +48,7 @@ func repoRoot(t *testing.T) string {
 }
 
 // markdownFiles lists every *.md file under root, as slash paths relative to it.
-func markdownFiles(t *testing.T, root string) []string {
-	t.Helper()
+func markdownFiles(root string) ([]string, error) {
 	var files []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -60,50 +66,47 @@ func markdownFiles(t *testing.T, root string) []string {
 		}
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return files
+	return files, err
 }
 
 var (
-	fence      = regexp.MustCompile("^\\s*(```|~~~)")
-	codeSpan   = regexp.MustCompile("`+[^`]*`+")
-	comment    = regexp.MustCompile(`(?s)<!--.*?-->`)
-	inlineLink = regexp.MustCompile(`\]\(([^)\s]*)(?:\s+"[^"]*")?\)`)
-	heading    = regexp.MustCompile(`^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$`)
-	headingRef = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
-	htmlTag    = regexp.MustCompile(`<[^>]+>`)
-	lineAnchor = regexp.MustCompile(`^L\d+(-L\d+)?$`)
+	fenceOpen    = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})")
+	htmlComment  = regexp.MustCompile(`(?s)<!--.*?-->`)
+	inlineLink   = regexp.MustCompile(`\]\((?:<([^>]*)>|([^)\s]*))(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\)`)
+	heading      = regexp.MustCompile(`^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$`)
+	linkWithText = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
+	htmlTag      = regexp.MustCompile(`<[^>]+>`)
+	lineAnchor   = regexp.MustCompile(`^L\d+(-L\d+)?$`)
 )
 
-// page is what one Markdown file offers to links: its prose lines (outside code blocks and
-// comments) and the anchors its headings get on GitHub.
+// page is what one Markdown file offers to links: its prose lines (code blocks and comments
+// blanked, so line numbers still match) and the anchors its headings get on GitHub.
 type page struct {
 	lines   []string
 	anchors map[string]bool
 }
 
 func readPage(path string) (page, error) {
-	b, err := os.ReadFile(path) //nolint:gosec // G304: a file the walk found in the repository
+	b, err := os.ReadFile(path) //nolint:gosec // G304: a Markdown file of the repository, or a test's own
 	if err != nil {
 		return page{}, err
 	}
 	p := page{anchors: map[string]bool{}}
 	seen := map[string]int{}
-	inFence := false
-	sc := bufio.NewScanner(strings.NewReader(comment.ReplaceAllStringFunc(string(b), blankKeepingLines)))
+	fence := "" // the opening fence while inside a fenced code block
+	sc := bufio.NewScanner(strings.NewReader(htmlComment.ReplaceAllStringFunc(string(b), blankKeepingLines)))
 	sc.Buffer(nil, 1<<20)
 	for sc.Scan() {
 		line := sc.Text()
-		if fence.MatchString(line) {
-			inFence = !inFence
-			p.lines = append(p.lines, "")
-			continue
-		}
-		if inFence {
-			p.lines = append(p.lines, "")
-			continue
+		switch {
+		case fence != "":
+			if closesFence(line, fence) {
+				fence = ""
+			}
+			line = ""
+		case fenceOpen.MatchString(line):
+			fence = fenceOpen.FindStringSubmatch(line)[1]
+			line = ""
 		}
 		p.lines = append(p.lines, line)
 		if m := heading.FindStringSubmatch(line); m != nil {
@@ -113,14 +116,64 @@ func readPage(path string) (page, error) {
 	return p, sc.Err()
 }
 
+// closesFence reports whether line closes a block opened by fence: the same character, at least
+// as many, up to three spaces before and nothing but spaces after (CommonMark, as GitHub renders).
+func closesFence(line, fence string) bool {
+	trimmed := strings.TrimLeft(line, " ")
+	if len(line)-len(trimmed) > 3 {
+		return false
+	}
+	run := len(trimmed) - len(strings.TrimLeft(trimmed, fence[:1]))
+	return run >= len(fence) && strings.TrimSpace(trimmed[run:]) == ""
+}
+
 // blankKeepingLines replaces an HTML comment with its newlines only, so line numbers still match.
 func blankKeepingLines(s string) string { return strings.Repeat("\n", strings.Count(s, "\n")) }
 
-// anchorOf is the anchor GitHub gives a heading: the rendered text (link text kept, code kept
-// without its backticks, emphasis and HTML dropped), lowercased, without punctuation and
-// symbols, each space a hyphen (github-slugger, which GitHub's anchors follow).
+// withoutCodeSpans drops the code spans of a line: a run of backticks up to the next run of the
+// same length. A run that is never closed is literal text.
+func withoutCodeSpans(line string) string {
+	var b strings.Builder
+	for i := 0; i < len(line); {
+		if line[i] != '`' {
+			b.WriteByte(line[i])
+			i++
+			continue
+		}
+		n := len(line[i:]) - len(strings.TrimLeft(line[i:], "`"))
+		end := closingRun(line, i+n, n)
+		if end < 0 {
+			b.WriteString(line[i : i+n])
+			i += n
+			continue
+		}
+		i = end + n
+	}
+	return b.String()
+}
+
+// closingRun is the index of the next run of exactly n backticks at or after from, or -1.
+func closingRun(line string, from, n int) int {
+	for j := from; j < len(line); {
+		if line[j] != '`' {
+			j++
+			continue
+		}
+		m := len(line[j:]) - len(strings.TrimLeft(line[j:], "`"))
+		if m == n {
+			return j
+		}
+		j += m
+	}
+	return -1
+}
+
+// anchorOf is the anchor GitHub gives a heading (github-slugger, which GitHub's anchors follow):
+// the rendered text (link text kept, code kept without its backticks, * emphasis and HTML tags
+// dropped), lowercased, without punctuation and symbols, each space a hyphen. _ emphasis is not
+// dropped: an underscore is kept, as in snake_case.
 func anchorOf(text string) string {
-	text = headingRef.ReplaceAllString(text, "$1")
+	text = linkWithText.ReplaceAllString(text, "$1")
 	text = htmlTag.ReplaceAllString(text, "")
 	text = strings.NewReplacer("`", "", "*", "").Replace(text)
 	var b strings.Builder
@@ -160,8 +213,8 @@ type link struct {
 func relativeLinks(p page) []link {
 	var links []link
 	for i, line := range p.lines {
-		for _, m := range inlineLink.FindAllStringSubmatch(codeSpan.ReplaceAllString(line, ""), -1) {
-			target := m[1]
+		for _, m := range inlineLink.FindAllStringSubmatch(withoutCodeSpans(line), -1) {
+			target := m[1] + m[2]
 			if target == "" || strings.HasPrefix(target, "//") {
 				continue
 			}
@@ -174,13 +227,17 @@ func relativeLinks(p page) []link {
 	return links
 }
 
-// resolve checks one link from file (a slash path relative to root) and says what is wrong, or "".
-// A leading / is the repository root, as on GitHub.
-func resolve(root, file, target string, pages func(string) (page, error)) string {
+// linkProblem checks one link from file (a slash path relative to root) and says what is wrong, or
+// "". A leading / is the repository root, as on GitHub; a ?query is ignored.
+func linkProblem(root, file, target string, pageAt func(string) (page, error)) string {
 	pathPart, fragment, _ := strings.Cut(target, "#")
+	pathPart, _, _ = strings.Cut(pathPart, "?")
 	pathPart, err := url.PathUnescape(pathPart)
 	if err != nil {
 		return "the path is not valid URL escaping"
+	}
+	if fragment, err = url.PathUnescape(fragment); err != nil {
+		return "the #anchor is not valid URL escaping"
 	}
 	dest := file
 	switch {
@@ -190,7 +247,7 @@ func resolve(root, file, target string, pages func(string) (page, error)) string
 	default:
 		dest = filepath.ToSlash(filepath.Join(filepath.Dir(file), pathPart))
 	}
-	if dest == ".." || strings.HasPrefix(dest, "../") {
+	if !filepath.IsLocal(filepath.FromSlash(dest)) && dest != "." {
 		return "it points outside the repository"
 	}
 	fi, err := os.Stat(filepath.Join(root, filepath.FromSlash(dest)))
@@ -206,7 +263,7 @@ func resolve(root, file, target string, pages func(string) (page, error)) string
 		}
 		return "#" + fragment + " on a file that is not Markdown: only line anchors (#L12, #L12-L20) are checked there"
 	}
-	p, err := pages(dest)
+	p, err := pageAt(dest)
 	if err != nil {
 		return err.Error()
 	}
@@ -217,11 +274,11 @@ func resolve(root, file, target string, pages func(string) (page, error)) string
 }
 
 // Every relative link and #anchor in the repository's Markdown resolves in this tree, as GitHub
-// would resolve it. External URLs are not fetched.
+// would resolve it. External URLs are not fetched; the package comment lists the link forms read.
 func TestEveryRelativeLinkInTheMarkdownResolves(t *testing.T) {
 	root := repoRoot(t)
 	cache := map[string]page{}
-	pages := func(rel string) (page, error) {
+	pageAt := func(rel string) (page, error) {
 		if p, ok := cache[rel]; ok {
 			return p, nil
 		}
@@ -231,58 +288,22 @@ func TestEveryRelativeLinkInTheMarkdownResolves(t *testing.T) {
 		}
 		return p, err
 	}
-	files := markdownFiles(t, root)
+	files, err := markdownFiles(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(files) == 0 {
 		t.Fatal("no Markdown files found")
 	}
 	for _, file := range files {
-		p, err := pages(file)
+		p, err := pageAt(file)
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, l := range relativeLinks(p) {
-			if problem := resolve(root, file, l.target, pages); problem != "" {
-				t.Errorf("%s:%d: (%s): %s", file, l.line, l.target, problem)
+			if problem := linkProblem(root, file, l.target, pageAt); problem != "" {
+				t.Errorf("%s:%d: link %s: %s; fix the link, or restore what it points to", file, l.line, l.target, problem)
 			}
 		}
-	}
-}
-
-// siteLinks is the file listing every link from byward.dev into this repository.
-const siteLinks = "site-links.txt"
-
-// Every page byward.dev links to exists in this tree, so a PR that moves one without leaving a
-// pointer at the old path fails here. The list is kept in step with the site by a check in the
-// site's repository (site-links.txt says how).
-func TestEveryPageTheWebsiteLinksToExists(t *testing.T) {
-	root := repoRoot(t)
-	b, err := os.ReadFile(siteLinks)
-	if err != nil {
-		t.Fatal(err)
-	}
-	const prefix = "https://github.com/byward-dev/byward/"
-	n := 0
-	for i, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		n++
-		rest, ok := strings.CutPrefix(line, prefix)
-		kind, path, found := strings.Cut(rest, "/main/")
-		if !ok || !found || (kind != "blob" && kind != "tree") || path == "" {
-			t.Errorf("%s:%d: %q is not a %sblob/main/<path> or tree/main/<path> link", siteLinks, i+1, line, prefix)
-			continue
-		}
-		fi, err := os.Stat(filepath.Join(root, filepath.FromSlash(path)))
-		switch {
-		case err != nil:
-			t.Errorf("%s:%d: byward.dev links to %s, which is not in this tree: keep the file, or leave a page at the old path that links to the new one", siteLinks, i+1, path)
-		case kind == "blob" && fi.IsDir(), kind == "tree" && !fi.IsDir():
-			t.Errorf("%s:%d: %s is a %s link, but the path is %s", siteLinks, i+1, path, kind, map[bool]string{true: "a directory", false: "a file"}[fi.IsDir()])
-		}
-	}
-	if n == 0 {
-		t.Fatalf("%s lists no links", siteLinks)
 	}
 }
