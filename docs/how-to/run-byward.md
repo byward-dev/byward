@@ -11,9 +11,27 @@ IdP; only the IdP's own settings differ, and those come from your IdP guide.
 5. [Check it](#5-check-it)
 6. [Connect a client](#6-connect-a-client)
 
-**You need** a public HTTPS host for the proxy (`mcp.example.com` below), an HTTP MCP server to
-protect, `openssl`, and the image `ghcr.io/byward-dev/byward:v0.2.0-rc.1` or the `byward` binary of
-that release ([what a release contains](../reference/packaging.md#what-a-release-contains)).
+**You need:**
+
+- a public HTTPS host for the proxy (`mcp.example.com` below). To try byward on one machine first,
+  with plain http on `localhost` and `--dev`, follow
+  [try it on your machine](keycloak.md#try-it-on-your-machine) in the Keycloak guide;
+- `openssl`, and the image `ghcr.io/byward-dev/byward:v0.2.0-rc.1` or the `byward` binary of that
+  release ([what a release contains](../reference/packaging.md#what-a-release-contains));
+- an HTTP MCP server to protect. To try the proxy first, run the MCP reference server
+  ([`@modelcontextprotocol/server-everything`](https://www.npmjs.com/package/@modelcontextprotocol/server-everything),
+  Streamable HTTP, both protocol eras, no authentication of its own) in a pinned Node container:
+
+  ```sh
+  docker network create byward
+  docker run --rm --network byward --name upstream -p 127.0.0.1:3001:3001 \
+    node:24.22.1-slim@sha256:be8204d4bd327363357f532187b752ff62759c31bedf98e9e18fc08c9cbd605c \
+    npx -y @modelcontextprotocol/server-everything@2.0.0 streamableHttp
+  ```
+
+  Its endpoint is `http://upstream:3001/mcp` for byward in a container on the `byward` network, and
+  `http://127.0.0.1:3001/mcp` for the `byward` binary on the same host. It refuses browser requests
+  with a non-localhost `Origin`; the proxy never forwards `Origin`, so that does not get in the way.
 
 ## 1. Register the proxy at your IdP
 
@@ -128,9 +146,18 @@ uid 65532 instead. To reach the probes from the host, add `-e BYWARD_INTERNAL_LI
 -p 127.0.0.1:9090:9090`; `127.0.0.1` inside a container is the container itself, which also applies
 to `BYWARD_UPSTREAM_URL`.
 
-**As a binary.** Unpack the release archive (`byward_<version>_linux_<arch>.tar.gz`; the darwin
-archives are for development only). Fill in the placeholders in `byward.env`, then export the same settings, with `BYWARD_DATA_DIR` set to an
-absolute path and the secret file paths pointing at your files, then run `byward`:
+**As a binary.** Download and unpack the release archive, `byward_<version>_<os>_<arch>.tar.gz` (the
+version without its `v`; the darwin archives are for development only), and check it against
+`checksums.txt` ([verifying a release](../reference/packaging.md#verifying-a-release)). For example,
+v0.2.0-rc.1 for Linux on x86-64:
+
+```sh
+curl -LO https://github.com/byward-dev/byward/releases/download/v0.2.0-rc.1/byward_0.2.0-rc.1_linux_amd64.tar.gz
+tar -xzf byward_0.2.0-rc.1_linux_amd64.tar.gz byward
+```
+
+Fill in the placeholders in `byward.env`, then export the same settings, with `BYWARD_DATA_DIR` set
+to an absolute path and the secret file paths pointing at your files, and run `byward`:
 
 ```sh
 set -a; . ./byward.env; set +a
@@ -150,8 +177,8 @@ startup log also says which client sources are active, for example
   `docker run --rm … ghcr.io/byward-dev/byward:v0.2.0-rc.1 check --offline` with the same options.
 - `byward doctor`, once the proxy runs, fetches its discovery documents the way MCP clients do and
   checks the IdP app ([checks](../reference/commands.md#checks)). For Entra it checks the tenant,
-  the client ID and the credential; for the other IdPs, the discovery and client credential checks
-  are on `main`.
+  the client ID and the credential. For the other IdPs it checks discovery and, on `main` only (not
+  in v0.2.0-rc.1), the client ID and the credential.
 - `curl http://127.0.0.1:9090/readyz` (the binary, or the container with the probes published)
   answers 200 when the proxy has a signing key and its store answers, and 503 otherwise.
 
@@ -159,6 +186,28 @@ startup log also says which client sources are active, for example
 
 Add `https://mcp.example.com/mcp` to your MCP client and sign in. For Claude Code, see
 [Connect Claude Code](quickstart-entra.md#4-connect-claude-code); it works the same with every IdP.
+
+### Without an AI client
+
+[`mcp-check.py`](../examples/mcp-check.py) is a short client on the MCP Python SDK (`mcp` 2.3.0): it
+registers itself with DCR, prints the sign-in URL for you to open in a browser, lists the tools,
+and calls the reference server's `echo` tool. It needs [uv](https://docs.astral.sh/uv/):
+
+```sh
+curl -LO https://raw.githubusercontent.com/byward-dev/byward/main/docs/examples/mcp-check.py
+uv run --script mcp-check.py https://mcp.example.com/mcp
+```
+
+DCR with a loopback redirect URI (`http://127.0.0.1:<port>/callback`) works with byward's default
+settings, so no client needs registering first ([DCR](dcr.md)). MCP Inspector is another option.
+
+If you script the browser too:
+
+- byward refuses an **Allow** clicked less than a second after the consent page appeared, and shows
+  the page again ([ADR-0010](../adr/0010-consent-screen.md) §7), so wait a second before clicking;
+- a script that posts the consent form itself must send the proxy's own `Origin`, as a browser does;
+- a user the [access gate](access-gate.md) refuses sees byward's "You don't have access" page, and
+  the client receives no error redirect: it waits until its own sign-in times out.
 
 ## Next steps
 
