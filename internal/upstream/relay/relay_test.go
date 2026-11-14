@@ -813,7 +813,7 @@ func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLogAndAWellFormedProxys
 	}
 }
 
-// A request body over the server's limit is answered 413 through any proxy: through a misread one
+// A chunked request body over the server's limit is answered 413 through any proxy: through a misread one
 // too, whose redaction must keep the limit error (it quotes no address) for the relay to see it.
 func TestABodyOverTheLimitIsAnswered413ThroughAMisreadProxyAsThroughAnyOther(t *testing.T) {
 	for _, tc := range []struct {
@@ -847,8 +847,10 @@ func TestABodyOverTheLimitIsAnswered413ThroughAMisreadProxyAsThroughAnyOther(t *
 				r.Body = http.MaxBytesReader(w, r.Body, 16) // as the server's body limit does
 				rl.ServeHTTP(w, r)
 			})
+			r := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(toolsCall))
+			r.ContentLength = -1 // chunked: a declared length over the limit is refused before the relay
 			w := httptest.NewRecorder()
-			limited.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(toolsCall)))
+			limited.ServeHTTP(w, r)
 			if w.Code != http.StatusRequestEntityTooLarge {
 				t.Fatalf("status %d, want 413; log %q", w.Code, logs.String())
 			}
