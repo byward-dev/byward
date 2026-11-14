@@ -78,6 +78,16 @@ func TestIntegrationTwoReplicasShareThePostgreSQLStore(t *testing.T) {
 			t.Fatal(err)
 		}
 		eventually(t, "B refuses every token", func() bool { return mcpPing(b.s, access) == http.StatusUnauthorized })
+		// #337: each replica records the operator's revocation in its own audit stream, once.
+		for name, r := range map[string]*replica{"A": a, "B": b} {
+			eventually(t, name+" records revoke-all", func() bool { return strings.Contains(r.logs.String(), `"reason":"operator revoke-all"`) })
+		}
+		time.Sleep(6 * time.Second) // one more deny-list sync, which must not record it again
+		for name, r := range map[string]*replica{"A": a, "B": b} {
+			if n := strings.Count(r.logs.String(), `"reason":"operator revoke-all"`); n != 1 {
+				t.Errorf("replica %s recorded revoke-all %d times, want once", name, n)
+			}
+		}
 	})
 
 	t.Run("store new-epoch refuses older refresh tokens on every replica, audited once", func(t *testing.T) {

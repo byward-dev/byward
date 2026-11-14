@@ -197,7 +197,7 @@ tenant and object IDs); with an `oidc` IdP, the value of its subject claim (`BYW
 `sub` by default). It runs beside a running proxy. A key that is not a user key of the configured
 IdP exits 2; a store that cannot be opened or written exits 1. The revocation is audited as
 `grant_revoked` with the reason `operator revoke-user`, by the command and by each running proxy at
-its next revocation-list sync ([where it is recorded](../how-to/revoke-access.md#where-an-operator-revocation-is-recorded)).
+its next deny-list sync ([where it is recorded](../how-to/revoke-access.md#where-an-operator-revocation-is-recorded)).
 
 ## `byward revoke-all`
 

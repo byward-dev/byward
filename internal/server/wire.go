@@ -112,7 +112,11 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	}
 	deny := b.Deny()
 	// An operator revocation reaches this proxy's audit stream too, not only the command's output.
-	deny.OnOperatorRevocation(func(r store.Revocation) { o.Audit.Record(nil, operatorRevocationEvent(r)) })
+	deny.OnOperatorRevocation(func(r store.Revocation) {
+		if e, ok := operatorRevocationEvent(r); ok {
+			o.Audit.Record(nil, e)
+		}
+	})
 	// The list refuses every token until its first sync, so sync before serving.
 	syncCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

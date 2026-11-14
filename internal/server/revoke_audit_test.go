@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"maps"
-	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -16,24 +14,6 @@ import (
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/config"
 )
-
-// lockedBuffer is a bytes.Buffer safe for the proxy's background goroutine and the test.
-type lockedBuffer struct {
-	mu sync.Mutex
-	b  bytes.Buffer
-}
-
-func (l *lockedBuffer) Write(p []byte) (int, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.b.Write(p)
-}
-
-func (l *lockedBuffer) String() string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.b.String()
-}
 
 // grantRevokedRecords is every grant_revoked audit record in a JSON log, each as its fields
 // without the time.
@@ -76,7 +56,7 @@ func TestAnOperatorRevocationReachesTheRunningProxysAuditStream(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				cfg, tokens := revokeEnv(t)
-				proxyLog := &lockedBuffer{}
+				proxyLog := &syncBuffer{}
 				logger := slog.New(slog.NewJSONHandler(proxyLog, nil))
 				proxy, err := buildAuth(cfg, discard, Observability{Audit: audit.New(logger, nil, time.Now)})
 				if err != nil {
@@ -90,7 +70,7 @@ func TestAnOperatorRevocationReachesTheRunningProxysAuditStream(t *testing.T) {
 				time.Sleep(time.Second)
 				var command bytes.Buffer
 				tc.revoke(t, cfg, slog.New(slog.NewJSONHandler(&command, nil)))
-				time.Sleep(10 * time.Second) // two deny-list syncs
+				time.Sleep(10 * time.Second) // two deny-list syncs, which run every 5 s
 				synctest.Wait()
 
 				want := grantRevokedRecords(t, command.String())
@@ -98,20 +78,21 @@ func TestAnOperatorRevocationReachesTheRunningProxysAuditStream(t *testing.T) {
 				if len(want) != 1 || len(got) != 1 {
 					t.Fatalf("the command wrote %d grant_revoked records and the proxy %d, want 1 each\ncommand: %s\nproxy: %s", len(want), len(got), command.String(), proxyLog.String())
 				}
-				for _, k := range []string{"msg", "level"} {
-					delete(want[0], k)
-					delete(got[0], k)
-				}
 				if !maps.Equal(want[0], got[0]) {
 					t.Fatalf("the proxy recorded %v, want the command's record %v", got[0], want[0])
 				}
-				for k, v := range got[0] {
-					if s, ok := v.(string); ok && slices.ContainsFunc(slices.Collect(maps.Values(tokens)), func(tok string) bool { return strings.Contains(s, tok) }) {
-						t.Fatalf("the proxy's record carries a token in %s", k)
+				// Stated on their own: the record never carries a token or a grant ID (invariant 2), even
+				// if the command's record ever did.
+				for field, v := range got[0] {
+					s, _ := v.(string)
+					for id, tok := range tokens {
+						if strings.Contains(s, tok) {
+							t.Fatalf("the proxy's record carries %s's access token in %q", id, field)
+						}
 					}
 				}
-				if _, ok := got[0]["grant_id"]; ok {
-					t.Fatal("the proxy's record carries a grant ID")
+				if id, ok := got[0]["grant_id"]; ok {
+					t.Fatalf("the proxy's record carries grant_id %v", id)
 				}
 			})
 		})

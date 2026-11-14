@@ -65,13 +65,14 @@ error and in each running proxy's audit stream ([where it is recorded](#where-an
 
 - **The command** writes it to its own standard error once the revocation is stored.
 - **Each running proxy** writes the same record (event, outcome, `reason` and, for `revoke-user`,
-  `user_key`; never a grant ID or a token) to its audit stream at the first revocation-list sync that
-  finds it, within 5 seconds. With several replicas on PostgreSQL, each replica writes one. The
+  `user_key`; never a grant ID or a token) to its audit stream at the first deny-list sync that finds
+  it, within 5 seconds. With several replicas on PostgreSQL, each replica writes one. The
   records name no replica: tell them apart by your log collector's source (pod or host), and count one
   revocation per `user_key` and `reason` within a few seconds.
 
-A proxy records only the revocations made after it started, so one made while no proxy runs is only
-on the command's standard error: when you run the command as a job, collect its output too.
+A proxy records only the revocations made after it started, by the clock of the host that ran the
+command: one made while no proxy runs, or within a clock difference of a proxy's start, is only on
+the command's standard error. When you run the command as a job, collect its output too.
 
 ## One app
 

@@ -205,10 +205,10 @@ func operatorRevocations(l *List) *[]store.Revocation {
 }
 
 // An operator revocation (a subject or every-subject cut-off) made while the list runs is reported
-// once, at the first sync that finds it, after the list already denies it; grant revocations, which
-// are audited where they are made, never are; nor is one made before the list was created (a
-// restart), which the revoking command records.
-func TestEachNewOperatorRevocationIsReportedOnceAfterItIsDenied(t *testing.T) {
+// once, at the first sync that finds it; grant revocations, which are audited where they are made,
+// never are; nor is one made before the list was created (a restart), which the revoking command
+// records.
+func TestEachNewOperatorRevocationIsReportedOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		src := &source{}
 		before := time.Now().Add(-time.Minute)
@@ -224,20 +224,49 @@ func TestEachNewOperatorRevocationIsReportedOnceAfterItIsDenied(t *testing.T) {
 		user := store.Revocation{Subject: "tid:alice", Before: now, At: now}
 		all := store.Revocation{All: true, Before: now, At: now}
 		grant := store.Revocation{GrantID: "g1", Before: now, At: now}
-		var deniedAtNotice []bool
-		l.OnOperatorRevocation(func(r store.Revocation) {
-			d, _ := l.Denied("other", "tid:alice", now.Add(-time.Second))
-			deniedAtNotice = append(deniedAtNotice, d)
-		})
-		got = operatorRevocations(l)
 		src.set([]store.Revocation{{Subject: "tid:old", Before: before, At: before}, user, all, grant}, nil)
 		mustSync(t, l)
 		mustSync(t, l)
 		if len(*got) != 2 || (*got)[0] != user || (*got)[1] != all {
 			t.Fatalf("reported %v, want the subject and the every-subject revocation once each", *got)
 		}
-		if len(deniedAtNotice) != 0 {
-			t.Fatal("OnOperatorRevocation added a second observer instead of replacing it")
+	})
+}
+
+// A second revocation of the same user is its own: reported too, even with the same cut-off.
+func TestARepeatedRevocationOfTheSameUserIsReportedAgain(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		src := &source{}
+		l := New(src, nil)
+		got := operatorRevocations(l)
+		mustSync(t, l)
+		time.Sleep(time.Second)
+		before := time.Now()
+		first := store.Revocation{Subject: "tid:alice", Before: before, At: before}
+		second := store.Revocation{Subject: "tid:alice", Before: before, At: before.Add(time.Second)}
+		src.set([]store.Revocation{first, second}, nil)
+		mustSync(t, l)
+		if len(*got) != 2 {
+			t.Fatalf("reported %v, want both revocations", *got)
+		}
+	})
+}
+
+// Setting an observer replaces the earlier one.
+func TestOnOperatorRevocationReplacesTheEarlierObserver(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		src := &source{}
+		l := New(src, nil)
+		first := 0
+		l.OnOperatorRevocation(func(store.Revocation) { first++ })
+		got := operatorRevocations(l)
+		mustSync(t, l)
+		time.Sleep(time.Second)
+		now := time.Now()
+		src.set([]store.Revocation{{Subject: "tid:alice", Before: now, At: now}}, nil)
+		mustSync(t, l)
+		if first != 0 || len(*got) != 1 {
+			t.Fatalf("the earlier observer was called %d times after it was replaced; the new one %d", first, len(*got))
 		}
 	})
 }
@@ -286,7 +315,7 @@ func TestAFailedSyncReportsNoOperatorRevocation(t *testing.T) {
 
 // What the list remembers of reported revocations stays within the retention window: an older
 // revocation is forgotten, never reported again although the store still returns it, and never
-// remembered again.
+// remembered again. Forgetting has no other visible effect, so the bound is read from the field.
 func TestTheReportedSetStaysWithinTheRetentionWindow(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		src := &source{}
@@ -298,8 +327,8 @@ func TestTheReportedSetStaysWithinTheRetentionWindow(t *testing.T) {
 		rev := store.Revocation{Subject: "tid:alice", Before: now, At: now}
 		src.set([]store.Revocation{rev}, nil)
 		mustSync(t, l)
-		if len(*got) != 1 || len(l.reported) != 1 {
-			t.Fatalf("reported %v, remembering %d, want one of each", *got, len(l.reported))
+		if len(*got) != 1 {
+			t.Fatalf("reported %v, want the revocation once", *got)
 		}
 		time.Sleep(store.RevocationRetention + time.Second)
 		mustSync(t, l) // the store has not collected the row yet

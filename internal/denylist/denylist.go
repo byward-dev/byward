@@ -42,16 +42,16 @@ type List struct {
 	local   map[string]time.Time // this replica's revoked grants → when, until the store has them
 	synced  time.Time            // zero until the first good sync
 
-	created  time.Time                        // operator revocations made before it are not reported
-	notice   func(store.Revocation)           // OnOperatorRevocation's; nil reports nothing
-	reported map[operatorRevocation]time.Time // reported → At, within the retention window
+	created              time.Time                           // operator revocations made before it are not reported
+	onOperatorRevocation func(store.Revocation)              // OnOperatorRevocation's; nil reports nothing
+	reported             map[operatorRevocationKey]time.Time // reported → At, within the retention window
 }
 
-// operatorRevocation identifies a subject or every-subject cut-off across syncs.
-type operatorRevocation struct {
-	subject string
-	all     bool
-	before  int64 // Before, in Unix nanoseconds
+// operatorRevocationKey identifies a subject or every-subject cut-off across syncs.
+type operatorRevocationKey struct {
+	subject    string
+	all        bool
+	before, at int64 // Before and At, in Unix nanoseconds
 }
 
 // New returns an empty, stale list over src; now defaults to time.Now.
@@ -60,17 +60,19 @@ func New(src store.Revocations, now func() time.Time) *List {
 		now = time.Now
 	}
 	return &List{src: src, now: now, grants: map[string]bool{}, cutoffs: map[string]time.Time{}, local: map[string]time.Time{},
-		created: now(), reported: map[operatorRevocation]time.Time{}}
+		created: now(), reported: map[operatorRevocationKey]time.Time{}}
 }
 
-// OnOperatorRevocation sets notice, which a sync calls once for each operator revocation it finds
-// first: a subject or every-subject cut-off made after the list was created and within the
-// retention window. It is called after the list denies what the revocation covers, never while
-// the list is locked. A grant revocation is not one: it is audited where it is made.
+// OnOperatorRevocation sets notice, replacing any earlier one; a sync calls it once for each
+// operator revocation it finds first: a subject or every-subject cut-off (GrantID empty) made after
+// the list was created, by the revoking host's clock, and within the retention window. It is called
+// after the list denies what the revocation covers, on the sync's goroutine, never while the list
+// is locked: it must not block for long or panic. A grant revocation is not one: it is audited
+// where it is made.
 func (l *List) OnOperatorRevocation(notice func(store.Revocation)) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.notice = notice
+	l.onOperatorRevocation = notice
 }
 
 // Denied implements token.DenyList: the grant is revoked, or the subject, or every subject, was cut
@@ -135,7 +137,7 @@ func (l *List) Sync(ctx context.Context) error {
 	}
 	l.grants, l.cutoffs, l.all, l.synced = grants, cutoffs, all, started
 	fresh := l.newOperatorRevocations(revs, started)
-	notice := l.notice
+	notice := l.onOperatorRevocation
 	l.mu.Unlock()
 	if notice != nil {
 		for _, r := range fresh {
@@ -159,7 +161,7 @@ func (l *List) newOperatorRevocations(revs []store.Revocation, started time.Time
 		if r.GrantID != "" || (r.Subject == "" && !r.All) || !r.At.After(l.created) || started.Sub(r.At) > store.RevocationRetention {
 			continue
 		}
-		k := operatorRevocation{subject: r.Subject, all: r.All, before: r.Before.UnixNano()}
+		k := operatorRevocationKey{subject: r.Subject, all: r.All, before: r.Before.UnixNano(), at: r.At.UnixNano()}
 		if _, done := l.reported[k]; done {
 			continue
 		}

@@ -25,11 +25,18 @@ const (
 // writes it to its own output, and each proxy writes the same record to its audit stream when its
 // deny-list sync first finds the revocation (#337). It carries the reason and, for revoke-user, the
 // user key; never a grant ID or a token.
-func operatorRevocationEvent(r store.Revocation) audit.Event {
-	if r.All {
-		return audit.Event{Name: audit.GrantRevoked, Outcome: audit.Success, Reason: reasonRevokeAll}
+// A revocation of any other kind is none: ok is false, so a new kind is never recorded under
+// another's reason.
+func operatorRevocationEvent(r store.Revocation) (e audit.Event, ok bool) {
+	switch {
+	case r.GrantID != "":
+		return audit.Event{}, false
+	case r.All:
+		return audit.Event{Name: audit.GrantRevoked, Outcome: audit.Success, Reason: reasonRevokeAll}, true
+	case r.Subject != "":
+		return audit.Event{Name: audit.GrantRevoked, Outcome: audit.Success, Reason: reasonRevokeUser, UserKey: r.Subject}, true
 	}
-	return audit.Event{Name: audit.GrantRevoked, Outcome: audit.Success, Reason: reasonRevokeUser, UserKey: r.Subject}
+	return audit.Event{}, false
 }
 
 // RevokeUser is the operator's revoke-user (ADR-0006 §9, ADR-0010 §11): it deletes the user's grants
@@ -45,14 +52,16 @@ func RevokeUser(ctx context.Context, cfg *config.Config, log *slog.Logger, key s
 	if !ok {
 		return "", ErrNotAUserKey
 	}
-	return user, revoke(ctx, cfg, log, operatorRevocationEvent(store.Revocation{Subject: user}),
+	e, _ := operatorRevocationEvent(store.Revocation{Subject: user})
+	return user, revoke(ctx, cfg, log, e,
 		func(st store.Grants, now time.Time) error { return st.RevokeSubject(ctx, user, now, now) })
 }
 
 // RevokeAll is the operator's revoke-all, for incident response: the same as RevokeUser for every
 // user at once. Everyone signs in again.
 func RevokeAll(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
-	return revoke(ctx, cfg, log, operatorRevocationEvent(store.Revocation{All: true}),
+	e, _ := operatorRevocationEvent(store.Revocation{All: true})
+	return revoke(ctx, cfg, log, e,
 		func(st store.Grants, now time.Time) error { return st.RevokeAll(ctx, now, now) })
 }
 
