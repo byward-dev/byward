@@ -41,9 +41,10 @@ func checkInlineSecrets(v *Values, dev bool) (relaxation string, err error) {
 }
 
 // ParsePublicURL validates the public URL of the MCP endpoint, as `byward init entra` also needs it:
-// absolute, an ASCII host that is an IP address or follows validHostName's rule, a path without a
-// trailing slash, no query or fragment, and https unless the host is loopback (which the proxy
-// itself accepts only with --dev).
+// absolute, an ASCII host[:port] that BYWARD_ALLOWED_HOSTS would accept (normalizeAllowedHost: an IP
+// address or a name following validHostName's rule, a port from 1 to 65535, no IPv6 zone), a path
+// without a trailing slash, no query or fragment, and https unless the host is loopback (which the
+// proxy itself accepts only with --dev).
 func ParsePublicURL(raw string) (*url.URL, error) {
 	u, err := parseURL("public-url", raw)
 	if err != nil {
@@ -54,9 +55,10 @@ func ParsePublicURL(raw string) (*url.URL, error) {
 		errs = append(errs, "BYWARD_PUBLIC_URL: give a host, e.g. https://mcp.example.com/mcp")
 	} else if err := asciiHost(u.Hostname()); err != nil {
 		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: %v", err))
-	} else if _, ipErr := netip.ParseAddr(u.Hostname()); ipErr != nil && !validHostName(u.Hostname()) {
-		// The host joins the public listener's Host allow-list, as BYWARD_ALLOWED_HOSTS entries do (#344).
-		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: the host %q is not valid: %s", u.Hostname(), hostNameRule))
+	} else if _, err := normalizeAllowedHost(u.Host); err != nil {
+		// host:port joins the public listener's Host allow-list, so it follows BYWARD_ALLOWED_HOSTS'
+		// rules (#344, #353).
+		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: %v", err))
 	}
 	if u.Path == "" || strings.HasSuffix(u.Path, "/") {
 		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://%s/mcp", u.Host))
