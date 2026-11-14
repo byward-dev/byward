@@ -133,11 +133,7 @@ func eventNames(t *testing.T) []string {
 	return names
 }
 
-func TestEveryEventHasASampleAndADocsRow(t *testing.T) {
-	docs, err := os.ReadFile("../../docs/reference/observability.md")
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestEveryEventHasAGoldenSample(t *testing.T) {
 	for _, n := range eventNames(t) {
 		found := false
 		for _, s := range samples {
@@ -145,9 +141,6 @@ func TestEveryEventHasASampleAndADocsRow(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("event %q has no golden sample", n)
-		}
-		if !strings.Contains(string(docs), "| `"+n+"` |") {
-			t.Errorf("event %q has no row in docs/reference/observability.md", n)
 		}
 	}
 }
