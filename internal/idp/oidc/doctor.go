@@ -67,13 +67,6 @@ func (p *Provider) DiagnoseClient(ctx context.Context, d Diagnosis) doctor.Resul
 		"sign in once to check the credential")
 }
 
-// refusesClient reports whether the IdP's answer refuses the client ID or credential. Auth0 answers
-// a wrong secret access_denied 401, which is otherwise a user's refusal; only with 401 is it the
-// client's.
-func refusesClient(ie *idp.Error) bool {
-	return ie.OAuth == "invalid_client" || ie.OAuth == "unauthorized_client" || ie.OAuth == "access_denied" && ie.Status == 401
-}
-
 func (p *Provider) credentialFix(d Diagnosis) string {
 	if d.KeyCredential {
 		return fmt.Sprintf("register the public key of %s with the IdP app %s (private_key_jwt), and check %s", d.CredentialSetting, p.cfg.ClientID, d.ClientIDSetting)

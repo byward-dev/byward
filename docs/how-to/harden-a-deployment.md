@@ -75,28 +75,16 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) ยง1โ
 - [ ] Rotate by adding a file whose name sorts last (date names), restarting, and removing the old
       file 15 days after that restart, so no user has to sign in again
       ([sealing keys](sealing-keys.md#rotating) explains the 15 days and the several-replica case).
-- [ ] Know the operator revocation commands. They read the same `BYWARD_*` environment as the
-      proxy (run them in its container or with its settings), write to the same store while it
-      runs, and every proxy refuses the tokens within seconds (the deny list resyncs every 5 s):
-      - `byward revoke-user <user key>` ends one user's access: their grants are deleted, so their
-        refresh tokens stop at once, and their access tokens are refused. The key is the
-        `user_key` of the audit stream: with Entra `tid:oid`, the portal's tenant and object IDs
-        in either case; with an oidc IdP the value of its subject claim, exactly. An
-        [app-only caller](app-tokens.md)'s key is its service principal's `tid:oid`: its tokens
-        issued before the revocation are refused.
-      - `byward revoke-all --yes` does the same for every user (incident response).
-      - Each writes a `grant_revoked` audit record with the reason `operator revoke-user` or
-        `operator revoke-all`. A user who still passes the access gate can sign in again; to keep
-        them out, also block them at the IdP or in the gate.
-      - If the sealing keys may be compromised, also replace every key file and restart: that
-        invalidates every token at once, whatever the store holds.
+- [ ] Know how to cut access off before you need to: one user, everyone, one app, an app-only caller,
+      or everyone after a leaked sealing key ([revoke access](revoke-access.md)). The commands read
+      the proxy's settings and work while it runs.
 - [ ] Give secrets only as files:
       - the Entra credential: preferably a certificate, `BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE` (see
         below); or the client secret through `BYWARD_ENTRA_CLIENT_SECRET_FILE` (or
         `--entra-client-secret-file`); or no secret at all: where the platform hands the proxy a
         federated token (AKS workload identity, GitHub Actions), point
         `BYWARD_ENTRA_FEDERATED_TOKEN_FILE` at it and give the app a matching federated identity
-        credential ([an example](../maintainers/real-entra-lane.md#3-run-it-once-then-create-the-federated-credential));
+        credential ([how](entra-federated-credential.md));
       - static client secrets through `client_secret_file` in the
         [static clients file](../reference/static-clients.md);
       - static client secrets must be at least 32 bytes.
@@ -154,7 +142,7 @@ Background: [ADR-0012](../adr/0012-entra-specifics.md), [ADR-0015](../adr/0015-a
       reads the certificate's end date itself, warns from 30 days before, and refuses to start
       once it has expired.
 - [ ] Gate changes take effect after a restart, at each user's next sign-in or refresh: at most one
-      access-token lifetime (1 h) later. To cut someone off sooner, use `byward revoke-user` (above);
+      access-token lifetime (1 h) later. To cut someone off sooner, use `byward revoke-user` ([revoke access](revoke-access.md#one-user));
       to keep them out, remove their assignment in Entra, after which their next refresh fails too.
 
 ## An OIDC IdP

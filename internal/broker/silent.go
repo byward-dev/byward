@@ -55,11 +55,12 @@ func (b *Broker) authorizeSilently(w http.ResponseWriter, r *http.Request, clien
 }
 
 // refuseSilentIdPFailure answers a silent sign-in whose IdP leg failed: the IdP's own silent answers
-// pass through; any other failure is logged and audited as for an interactive sign-in, then sent as
-// server_error, or temporarily_unavailable when the IdP is unavailable. Never a page.
+// pass through, unless one alerts the operator (Auth0's access_denied for a wrong secret, #315); any
+// other failure is logged and audited as for an interactive sign-in, then sent as server_error, or
+// temporarily_unavailable when the IdP is unavailable. Never a page.
 func (b *Broker) refuseSilentIdPFailure(w http.ResponseWriter, r *http.Request, l login, err error) {
 	var ie *idp.Error
-	if errors.As(err, &ie) && slices.Contains(silentIdPErrors, ie.OAuth) {
+	if errors.As(err, &ie) && slices.Contains(silentIdPErrors, ie.OAuth) && ie.Alert == "" {
 		b.refuseSilently(w, r, "", l, ie.OAuth, "the identity provider did not sign the user in silently")
 		return
 	}

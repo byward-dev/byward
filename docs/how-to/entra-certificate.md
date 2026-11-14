@@ -10,7 +10,8 @@ the key (`private_key_jwt`, `PS256`, `x5t#S256`, per
 [Microsoft's certificate credentials](https://learn.microsoft.com/entra/identity-platform/certificate-credentials)).
 
 byward takes exactly one Entra credential: `BYWARD_ENTRA_CLIENT_SECRET_FILE`,
-`BYWARD_ENTRA_FEDERATED_TOKEN_FILE` or `BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE`.
+`BYWARD_ENTRA_FEDERATED_TOKEN_FILE` ([a federated credential](entra-federated-credential.md)) or
+`BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE`.
 
 ## 1. Make the certificate
 

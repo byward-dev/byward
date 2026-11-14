@@ -375,7 +375,9 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var ie *idp.Error
-		if errors.As(err, &ie) && ie.OAuth == "access_denied" {
+		// The user's refusal, not an access_denied that refuses the proxy's own credential (Auth0's
+		// wrong secret, which alerts the operator: #315).
+		if errors.As(err, &ie) && ie.OAuth == "access_denied" && ie.Alert == "" {
 			b.cfg.Audit.Record(r, audit.Event{Name: audit.Login, Outcome: audit.Failure, Reason: "the user declined to sign in", ClientID: l.ClientID, IdP: b.cfg.IdPName})
 			b.redirectError(w, r, l.RedirectURI, l.State, "access_denied", "the user declined to sign in")
 			return
@@ -505,8 +507,9 @@ func (b *Broker) redirectError(w http.ResponseWriter, r *http.Request, redirect,
 	http.Redirect(w, r, withQuery(redirect, v), http.StatusFound) //nolint:gosec // G710: validated redirect URI
 }
 
-// noteIdPFailure logs and audits a failed IdP sign-in: the operator hint and the IdP's error code,
-// trace ID and correlation ID go to the log, never to the user. It returns the user's message.
+// noteIdPFailure logs and audits a failed IdP sign-in: the operator's fix (idp.Error.Fix: the IdP's
+// hint, else the alert's) and the IdP's error code, trace ID and correlation ID go to the log, never
+// to the user. It returns the user's message.
 func (b *Broker) noteIdPFailure(r *http.Request, clientID string, err error) string {
 	ctx := r.Context()
 	var ie *idp.Error
@@ -517,7 +520,7 @@ func (b *Broker) noteIdPFailure(r *http.Request, clientID string, err error) str
 			msg = ie.UserMessage
 		}
 		reason = "the IdP sign-in failed (" + ie.Class.String() + ")"
-		attrs := []any{"request_id", logging.RequestID(ctx), "error", err, "reason", ie.OperatorHint}
+		attrs := append([]any{"request_id", logging.RequestID(ctx), "error", err}, fixAttr(err)...)
 		if ie.Code != 0 {
 			attrs = append(attrs, "idp_error_code", ie.Code)
 		}
@@ -535,8 +538,18 @@ func (b *Broker) noteIdPFailure(r *http.Request, clientID string, err error) str
 	return msg
 }
 
-// idpFailure explains an IdP error on a page; the operator hint and the IdP's error code, trace ID
-// and correlation ID go to the log (ADR-0021 §7), the failure to the audit stream.
+// fixAttr is the log attribute naming the operator's fix for err (idp.Error.Fix: the IdP's hint,
+// else the alert's), or none when there is no fix: a log line never has an empty reason (#315).
+func fixAttr(err error) []any {
+	var ie *idp.Error
+	if errors.As(err, &ie) && ie.Fix() != "" {
+		return []any{"reason", ie.Fix()}
+	}
+	return nil
+}
+
+// idpFailure explains an IdP error on a page; the rest goes to the log and the audit stream as
+// noteIdPFailure says (ADR-0021 §7).
 func (b *Broker) idpFailure(w http.ResponseWriter, r *http.Request, clientID string, err error) {
 	msg := b.noteIdPFailure(r, clientID, err)
 	b.page(w, r, http.StatusBadGateway, msg, "Try again; if it keeps failing, tell your operator the reference below.")
