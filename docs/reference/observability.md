@@ -39,8 +39,8 @@ or the IdP's `error_description`.
 | `suppressed` | How many records of the same event and outcome from the same source (the `remote_ip`, or its IPv6 /64) were dropped by the rate limit since the previous one |
 
 Events from requests whose sender is not authenticated (marked *limited* below) are rate-limited per source address
-(IPv6 grouped by /64, as for the OAuth rate limits), event and outcome: 10 per minute for each, then counted and reported as `suppressed=N` on the next record with the same
-event and outcome from that source. A sender can therefore only crowd out its own records of the same event and
+(IPv6 grouped by /64, as for the OAuth rate limits), event and outcome: 10 per minute for each, then counted and
+reported as `suppressed=N` on the next record with the same event and outcome from that source. A sender can therefore only crowd out its own records of the same event and
 outcome: consent page views never hide consent decisions, and successful registrations never hide refused ones.
 Metrics count every event, logged or not.
 
