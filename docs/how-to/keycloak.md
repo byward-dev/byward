@@ -89,9 +89,9 @@ and a host name both your browser and the container resolve.
    ./byward check --offline && ./byward
    ```
 
-   The startup log lists the relaxations `--dev` applied: secret file permissions and the http
-   public URL. The http issuer is not listed in v0.2.0-rc.1; it is from
-   [#355](https://github.com/byward-dev/byward/issues/355) on.
+   The startup log, and `check --offline`, list the relaxations `--dev` applied: secret file
+   permissions, the http public URL and, on `main`, the http IdP issuer. v0.2.0-rc.1 does not list
+   the issuer.
 6. **Check it**: in another shell with the same settings, `./byward doctor`. In v0.2.0-rc.1 doctor
    checks Keycloak's discovery but not the client secret: a wrong secret shows only at the first
    sign-in, as byward's "Signing in failed." page and an `IdP alert: the operator must act` log line

@@ -30,6 +30,11 @@ func checkOffline(_ context.Context, args, environ []string, stdout, stderr io.W
 		_, _ = fmt.Fprintf(stderr, "byward: configuration error: %v\n", err)
 		return exitConfig
 	}
+	// As the startup log has them (security invariant 12), labelled neutrally: --insecure-no-auth's
+	// are not development mode.
+	for _, r := range cfg.Relaxations {
+		_, _ = fmt.Fprintf(stdout, "warn  relaxation: %s\n", r)
+	}
 	for _, w := range report.Warnings {
 		_, _ = fmt.Fprintf(stdout, "warn  %s\n", w)
 	}

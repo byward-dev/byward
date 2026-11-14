@@ -297,3 +297,33 @@ func TestJWKSRefusesNoKeysOrAnExtraArgument(t *testing.T) {
 		}
 	}
 }
+
+// check --offline prints each relaxation in effect, as the startup log has them, before the
+// startup warnings and "configuration OK", labelled neutrally: --insecure-no-auth's are not
+// development mode (security invariant 12, #355).
+func TestCheckOfflinePrintsEachRelaxationFirst(t *testing.T) {
+	for _, tc := range []struct {
+		name, warning string
+		env           []string
+		relaxations   []string
+	}{
+		{"--dev", "warn  access gate is empty", append(authEnv(t), "BYWARD_DEV=true", "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp"),
+			[]string{"secret file permissions are not checked", "http public URL on loopback"}},
+		{"--insecure-no-auth", "warn  authentication is off", []string{"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp"},
+			[]string{"http public URL on loopback", "AUTHENTICATION IS OFF: anyone who can reach http://127.0.0.1:8080/mcp can use the upstream, and the upstream receives no identity"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := runWith([]string{"check", "--offline"}, tc.env...)
+			if code != exitOK || stderr != "" || !strings.Contains(stdout, tc.warning) || !strings.Contains(stdout, "configuration OK") {
+				t.Fatalf("code %d stdout %q stderr %q; want the warnings and configuration OK", code, stdout, stderr)
+			}
+			var want string
+			for _, r := range tc.relaxations {
+				want += "warn  relaxation: " + r + "\n"
+			}
+			if !strings.HasPrefix(stdout, want) || strings.Contains(stdout, "development mode") {
+				t.Fatalf("stdout %q; want it to start with\n%s", stdout, want)
+			}
+		})
+	}
+}

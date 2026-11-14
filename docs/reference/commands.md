@@ -39,8 +39,8 @@ Checks everything the proxy checks at startup that needs no network and writes n
   connecting. Nothing is created;
 - with `BYWARD_TLS_CERT_FILE`, the TLS certificate and key: readable, a matching pair, and valid now.
 
-It prints the warnings the proxy would log at startup (an empty access gate, generic consent
-wording, a client secret or client certificate that expires within 30 days, a TLS certificate that
+It prints each relaxation (`warn  relaxation: …`) and the warnings the proxy would log at startup (an
+empty access gate, generic consent wording, a client secret or client certificate that expires within 30 days, a TLS certificate that
 expires within 30 days or names neither the public URL's host nor an allowed host, a client key
 algorithm the IdP refuses (Okta: PS256), and with PostgreSQL the reminder that every replica needs the
 same keys), then `configuration OK`. With an oidc IdP, an `info  client credential:` line before it

@@ -2,7 +2,7 @@
 
 The broker seals its access tokens and authorization codes with keys you provide
 ([ADR-0006](../adr/0006-token-model.md), [ADR-0007](../adr/0007-state-and-storage.md) §5). Keys never
-live in the store, and the proxy never generates them outside the single-node development mode.
+live in the store, and the proxy never generates them.
 
 ## The key directory
 

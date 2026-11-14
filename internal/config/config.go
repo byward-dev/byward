@@ -63,7 +63,11 @@ type Config struct {
 	// callback path (/callback/<IdP>), audit records and metrics.
 	IdP string
 	// The generic OIDC adapter (IdP other than entra; ADR-0011 §2).
-	OIDCIssuer       string
+	OIDCIssuer string
+	// OIDCLoopbackHTTP lets the oidc adapter use the http issuer on a loopback host, and http
+	// endpoints on loopback with it: --dev only, and set together with its relaxation, so the
+	// adapter is relaxed exactly when the startup log says so (security invariant 12, #355).
+	OIDCLoopbackHTTP bool
 	OIDCClientID     string
 	OIDCClientSecret string
 	OIDCClientKey    string // PEM, for private_key_jwt
@@ -125,7 +129,8 @@ type Config struct {
 	InContainer bool
 
 	Values *Values
-	// Relaxations lists what --dev relaxed, for the startup log.
+	// Relaxations lists every relaxation in effect (--dev, --insecure-no-auth), for the startup log
+	// and check --offline (security invariant 12).
 	Relaxations []string
 }
 
@@ -179,11 +184,13 @@ func validate(v *Values, container bool) (*Config, error) {
 		ResourceName: v.get("resource-name"), ResourceDocumentation: v.get("resource-documentation"),
 		LogFormat: v.get("log-format"), InContainer: container}
 	var errs []error
-	dev, err := strconv.ParseBool(v.get("dev"))
+	// Parsed straight into the field: --dev is read only as Config.Dev, where the guard test counts
+	// every reader (#355).
+	var err error
+	c.Dev, err = strconv.ParseBool(v.get("dev"))
 	if err != nil {
 		errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "dev"}.Env(), v.get("dev")))
 	}
-	c.Dev = dev
 	noAuth, err := strconv.ParseBool(v.get("insecure-no-auth"))
 	if err != nil {
 		errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "insecure-no-auth"}.Env(), v.get("insecure-no-auth")))

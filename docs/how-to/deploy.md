@@ -122,7 +122,7 @@ This is the whole list. Each relaxation applies only with `--dev`, for trying by
 | Secret files' permissions are not checked | A secret file its group or others can read is refused, unless on a read-only mount | `secret file permissions are not checked` |
 | Secrets may be given inline, as `BYWARD_<NAME>` instead of `BYWARD_<NAME>_FILE` | An inline secret is refused | `inline secrets accepted: <the settings>` |
 | An http public URL on a loopback host (`http://localhost:8080/mcp`) | The public URL must be https | `http public URL on loopback`; `BYWARD_INSECURE_NO_AUTH` allows it too |
-| An http OIDC issuer on a loopback host, and http endpoints in its discovery document on loopback | The issuer and every endpoint must be https | not logged in v0.2.0-rc.1 (logged from [#355](https://github.com/byward-dev/byward/issues/355)) |
+| An http OIDC issuer on a loopback host, and http endpoints in its discovery document on loopback | The issuer and every endpoint must be https | `http IdP issuer on loopback (<issuer>): …` (on `main`; v0.2.0-rc.1 does not log it) |
 | A PostgreSQL connection without `sslmode=verify-full` (on `main`) | `verify-full` is required | `the PostgreSQL store accepts a connection without verify-full TLS` |
 
 ## 9. Check the deployment

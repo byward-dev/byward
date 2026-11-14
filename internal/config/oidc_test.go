@@ -219,3 +219,61 @@ func TestAnOIDCClientKeyAlgorithmIsRead(t *testing.T) {
 		})
 	}
 }
+
+// --dev accepts an http IdP issuer on a loopback host, relaxing the oidc adapter (OIDCLoopbackHTTP)
+// only together with a relaxation, so it is logged at startup (security invariant 12, #355); an
+// https issuer, an issuer of another scheme, an http issuer elsewhere and no --dev relax and record
+// nothing.
+func TestDevRecordsAnHTTPIdPIssuerOnLoopbackAsARelaxation(t *testing.T) {
+	for _, tc := range []struct {
+		name, issuer string
+		dev, want    bool
+	}{
+		{"localhost over http", "http://localhost:8180/realms/byward", true, true},
+		{"127.0.0.1 over http", "http://127.0.0.1:8180/realms/byward", true, true},
+		{"[::1] over http", "http://[::1]:8180/realms/byward", true, true},
+		{"127.0.0.2 over http", "http://127.0.0.2:8180/realms/byward", true, true}, // any loopback address, as the adapter has it
+		{"https", "https://sso.example.com/realms/acme", true, false},
+		{"https on localhost", "https://localhost:8443/realms/byward", true, false},
+		{"another scheme on localhost", "ftp://localhost/realms/byward", true, false},
+		{"http on a private address", "http://10.0.0.5:8180/realms/byward", true, false},
+		{"http on a host ending in localhost", "http://evil-localhost:8180/realms/byward", true, false},
+		{"http on a subdomain named localhost", "http://localhost.idp.example/realms/byward", true, false},
+		{"an issuer that does not parse", "http://[::1", true, false}, // the adapter refuses it; config must not panic
+		{"http on another host", "http://sso.example.com/realms/acme", true, false},
+		{"http on localhost without --dev", "http://localhost:8180/realms/byward", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kv := []string{"BYWARD_OIDC_ISSUER=" + tc.issuer}
+			if tc.dev {
+				kv = append(kv, "BYWARD_DEV=true")
+			}
+			c, err := loadOIDC(t, func(env []string) []string { return with(kv...)(without("BYWARD_OIDC_ISSUER")(env)) })
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "http IdP issuer on loopback (" + tc.issuer + "): discovery over http, and the IdP's sign-in page, token endpoint and signing keys over http too where it lists them on loopback"
+			if got := slices.Contains(c.Relaxations, want); got != tc.want || c.OIDCLoopbackHTTP != tc.want {
+				t.Fatalf("relaxations %q, adapter relaxed %v; want listed and relaxed = %v (%q)", c.Relaxations, c.OIDCLoopbackHTTP, tc.want, want)
+			}
+		})
+	}
+}
+
+// --dev accepts inline secrets and records them as a relaxation naming every setting (security
+// invariant 12, #355's audit); without --dev it refuses to start.
+func TestDevRecordsAnInlineSecretAsARelaxation(t *testing.T) {
+	inline := func(env []string) []string {
+		return with("BYWARD_OIDC_CLIENT_SECRET=s3cret", "BYWARD_UPSTREAM_CREDENTIAL=k3y", "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key")(without("BYWARD_OIDC_CLIENT_SECRET_FILE")(env))
+	}
+	c, err := loadOIDC(t, func(env []string) []string { return with("BYWARD_DEV=true")(inline(env)) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(c.Relaxations, "inline secrets accepted: BYWARD_UPSTREAM_CREDENTIAL, BYWARD_OIDC_CLIENT_SECRET") {
+		t.Fatalf("with --dev: relaxations %v; want both inline secrets recorded", c.Relaxations)
+	}
+	if _, err := loadOIDC(t, inline); !isConfigError(err) || !strings.Contains(err.Error(), "BYWARD_UPSTREAM_CREDENTIAL, BYWARD_OIDC_CLIENT_SECRET: secrets must come from a file") {
+		t.Fatalf("without --dev: %v, want both inline secrets refused", err)
+	}
+}

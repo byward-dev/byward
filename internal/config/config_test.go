@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -719,5 +720,42 @@ func TestHostSettingsLoadUnderscoresIDNANamesAndMixedCase(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// --dev changes nothing in a configuration but what it records as relaxations (and the fields
+// decided beside them), on each setup with a --dev branch that also loads without it: the base
+// (https, SQLite), a PostgreSQL store, and an http IdP issuer on loopback. So no setting is quietly
+// relaxed (security invariant 12, #355).
+func TestDevelopmentModeChangesOnlyWhatItRecords(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		load func(args []string) (*Config, error)
+	}{
+		{"https, SQLite", func(args []string) (*Config, error) { return load(t, args) }},
+		{"a PostgreSQL store", func(args []string) (*Config, error) {
+			return loadDSN(t, args, "BYWARD_STORE_POSTGRES_DSN_FILE="+dsnFile)
+		}},
+		{"an http IdP issuer on loopback", func(args []string) (*Config, error) {
+			c, _, err := Load(args, with("BYWARD_OIDC_ISSUER=http://127.0.0.1:8180/realms/byward")(without("BYWARD_OIDC_ISSUER")(slices.Clone(oidcBase))), oidcFiles)
+			return c, err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			without, err := tc.load(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			with, err := tc.load([]string{"--dev"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, c := range []*Config{without, with} {
+				c.Dev, c.Relaxations, c.Values, c.OIDCLoopbackHTTP = false, nil, nil, false
+			}
+			if !reflect.DeepEqual(without, with) {
+				t.Fatalf("--dev changed the configuration beyond its relaxations:\nwithout %+v\nwith    %+v", without, with)
+			}
+		})
 	}
 }
