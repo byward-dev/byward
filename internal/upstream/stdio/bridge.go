@@ -260,19 +260,16 @@ func (b *Bridge) session(w http.ResponseWriter, r *http.Request, id Identity, ke
 		http.Error(w, "session not found", http.StatusNotFound)
 		return nil, nil
 	}
-	if v := r.Header.Get(protocolVersionHeader); v != "" && !s.speaks(v) {
+	if v := r.Header.Get(headerProtocolVersion); v != "" && !s.speaks(v) {
 		// The upstream never sees headers, so the transport's rule is ours (2025-11-25 transports,
 		// Protocol Version Header): an unsupported version gets 400. No header passes.
 		release()
 		writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest,
-			"Bad Request: unsupported "+protocolVersionHeader+"; this MCP session negotiated "+s.negotiated())
+			"Bad Request: unsupported "+headerProtocolVersion+"; this MCP session negotiated "+s.negotiated())
 		return nil, nil
 	}
 	return s, release
 }
-
-// protocolVersionHeader carries the negotiated version on every request after initialize.
-const protocolVersionHeader = "MCP-Protocol-Version"
 
 // speaks reports whether v is the version this MCP session negotiated. Before one is known (an
 // InitializeResult without it), any version passes: the upstream decides.
