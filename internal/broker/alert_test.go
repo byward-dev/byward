@@ -60,6 +60,32 @@ func callbackFailingWith(err error) func(*testing.T, *env, fakeidp.Failure) {
 	}
 }
 
+// failingRefresh is the IdP with its refresh answering err: for alert reasons the fake IdP cannot
+// produce at a refresh.
+type failingRefresh struct {
+	IdP
+	err error
+}
+
+func (f failingRefresh) Refresh(context.Context, string) (*idp.Identity, idp.Tokens, error) {
+	return nil, idp.Tokens{}, f.err
+}
+
+// refreshFailingWith signs in, restarts the broker with its IdP's refresh answering err, and
+// refreshes.
+func refreshFailingWith(err error) func(*testing.T, *env, fakeidp.Failure) {
+	return func(t *testing.T, e *env, _ fakeidp.Failure) {
+		t.Helper()
+		rt := e.offline(t)["refresh_token"].(string)
+		cfg := e.cfg
+		cfg.IdP = failingRefresh{IdP: cfg.IdP, err: err}
+		e.start(t, cfg)
+		if res, body := e.refresh(t, rt, ""); res.StatusCode == http.StatusOK {
+			t.Fatalf("the refresh succeeded despite the IdP failure: %v", body)
+		}
+	}
+}
+
 // forgedCallback sends the callback a browser could forge: f's error and code as the IdP's own, in
 // the query.
 func forgedCallback(t *testing.T, e *env, f fakeidp.Failure) {
@@ -84,11 +110,19 @@ func TestIdPErrorsThatNeedTheOperatorRaiseAnAlert(t *testing.T) {
 		drive   func(*testing.T, *env, fakeidp.Failure)
 		failure fakeidp.Failure
 		want    string // "operation reason", or "" for no alert
-		fix     string // the alert line's whole reason
+		fix     string // the whole reason on the alert line and on the failure's own line
 	}{
 		// AADSTS7000215 has no operator hint of its own, so the alert's default fix stands in.
 		{"sign-in, client secret rejected", signInFailing, fakeidp.InvalidClientSecret, "callback credential_rejected", idp.AlertCredentialRejected.Hint()},
+		// Entra's own hint wins over the default, on the sign-in failure line too.
+		{"sign-in, client secret expired", signInFailing, fakeidp.ExpiredClientSecret, "callback credential_rejected", "AADSTS7000222: the client secret has expired; create a new one (or switch to a certificate)."},
 		{"sign-in, IdP unavailable", signInFailing, fakeidp.TemporarilyUnavailable, "", ""},
+		// Auth0 refuses a wrong secret with access_denied 401 (#315): the IdP failure page, not "the
+		// user declined", since the alert says the credential was refused.
+		{"sign-in, Auth0 wrong secret", callbackFailingWith(&idp.Error{Class: idp.Fatal, OAuth: "access_denied", Status: 401, Alert: idp.AlertCredentialRejected}),
+			fakeidp.Failure{}, "callback credential_rejected", idp.AlertCredentialRejected.Hint()},
+		{"refresh, Auth0 wrong secret", refreshFailingWith(&idp.Error{Class: idp.Fatal, OAuth: "access_denied", Status: 401, Alert: idp.AlertCredentialRejected}),
+			fakeidp.Failure{}, "refresh credential_rejected", idp.AlertCredentialRejected.Hint()},
 		{"refresh, client secret rejected", refreshFailing, fakeidp.InvalidClientSecret, "refresh credential_rejected", idp.AlertCredentialRejected.Hint()},
 		// Entra's own hint wins over the default.
 		{"refresh, client secret expired", refreshFailing, fakeidp.ExpiredClientSecret, "refresh credential_rejected", "AADSTS7000222: the client secret has expired; create a new one (or switch to a certificate)."},
@@ -106,6 +140,10 @@ func TestIdPErrorsThatNeedTheOperatorRaiseAnAlert(t *testing.T) {
 			e := newEnv(t)
 			c.drive(t, e, c.failure)
 			logs := e.logs.String()
+			// With no fix to name, a failure line (sign-in or refresh) leaves the reason out rather than log it empty.
+			if strings.Contains(logs, `"reason":""`) {
+				t.Errorf("a log line has an empty reason:\n%s", logs)
+			}
 			if c.want == "" {
 				if len(e.alerts) != 0 || strings.Contains(logs, `"alert":`) {
 					t.Fatalf("no alert wanted, got %v:\n%s", e.alerts, logs)
@@ -128,6 +166,11 @@ func TestIdPErrorsThatNeedTheOperatorRaiseAnAlert(t *testing.T) {
 			}
 			if !strings.Contains(line, `"reason":"`+c.fix+`"`) {
 				t.Errorf("the alert line's reason is not %q:\n%s", c.fix, logs)
+			}
+			// The failure's own line names the same fix (#315: it was empty when only the alert had one).
+			msg := map[string]string{"callback": "IdP sign-in failed", "refresh": "IdP refresh (unavailable|failed)"}[op]
+			if failed := regexp.MustCompile(`(?m)^.*"msg":"` + msg + `".*$`).FindString(logs); !strings.Contains(failed, `"reason":"`+c.fix+`"`) {
+				t.Errorf("the %q line's reason is not %q:\n%s", msg, c.fix, logs)
 			}
 		})
 	}

@@ -3,6 +3,7 @@
 Step by step: a Keycloak realm and client for byward, roles and groups for the
 [access gate](access-gate.md), and the proxy settings. The general OIDC guide, with every setting, is
 [oidc.md](oidc.md).
+The data directory, the keys and starting the proxy are in [run byward](run-byward.md).
 
 > Verified on 2026-11-13 with Keycloak 26.8.2 and the byward v0.2.0-rc.1 image, over https with a
 > private CA and without `--dev`: sign-in, the role and group gates, refresh, revoke, and both a client
