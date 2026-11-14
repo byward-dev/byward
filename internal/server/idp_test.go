@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"crypto/ecdsa"
-	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
@@ -140,13 +139,11 @@ func TestAClientKeySignsInWithItsKeyIDAndAnUnusableOneNamesTheSetting(t *testing
 		t.Fatalf("code exchange with private_key_jwt: %v", err)
 	}
 
-	p384, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	_, edKey, _ := ed25519.GenerateKey(rand.Reader)
+	// One row for each place the server names the setting: a key that does not parse, and one
+	// PrivateKeyJWTWithAlg refuses. The idp tests pin every refusal's own text.
 	for name, tc := range map[string]struct{ key, want string }{
-		"EC P-384": {pkcs8PEM(t, p384), "BYWARD_OIDC_CLIENT_KEY_FILE: idp: EC client keys must use P-256"},
-		"Ed25519":  {pkcs8PEM(t, edKey), "BYWARD_OIDC_CLIENT_KEY_FILE: idp: unsupported client key type ed25519.PublicKey"},
-		"RSA 1024": {pkcs8PEM(t, weakRSAKey(t)), "BYWARD_OIDC_CLIENT_KEY_FILE: idp: a 1024-bit RSA key: use at least 2048 bits"},
 		"not PEM":  {"s3cret", "BYWARD_OIDC_CLIENT_KEY_FILE: not a PEM private key"},
+		"RSA 1024": {pkcs8PEM(t, weakRSAKey(t)), "BYWARD_OIDC_CLIENT_KEY_FILE: idp: a 1024-bit RSA key: use at least 2048 bits"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			c := oidcConfig("keycloak", func(c *config.Config) { c.OIDCClientSecret, c.OIDCClientKey = "", tc.key })

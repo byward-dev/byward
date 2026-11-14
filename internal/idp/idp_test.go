@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
@@ -149,10 +150,11 @@ func TestPrivateKeyJWTAssertion(t *testing.T) {
 }
 
 // A client key may be an EC P-256 key, or an RSA key of MinRSABits or more with either RSA
-// algorithm; another curve or a shorter RSA key is refused, saying why.
-func TestOnlyAP256OrMinRSABitsRSAKeySignsAClientAssertion(t *testing.T) {
+// algorithm; another curve, another key type or a shorter RSA key is refused, saying why.
+func TestOnlyAP256OrMinRSABitsRSAKeyIsAClientKey(t *testing.T) {
 	p256, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	p384, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	_, ed, _ := ed25519.GenerateKey(rand.Reader)
 	rsaKey := func(bits int) crypto.Signer {
 		t.Helper()
 		k, err := rsa.GenerateKey(rand.Reader, bits) //nolint:gosec // deliberately weak keys for the test
@@ -169,6 +171,7 @@ func TestOnlyAP256OrMinRSABitsRSAKeySignsAClientAssertion(t *testing.T) {
 	}{
 		"EC P-256":                {key: p256},
 		"EC P-384":                {key: p384, wantErr: "idp: EC client keys must use P-256"},
+		"Ed25519":                 {key: ed, wantErr: "idp: unsupported client key type ed25519.PublicKey"},
 		"RSA 2048, PS256":         {key: rsa2048, alg: "PS256"},
 		"RSA 2048, RS256":         {key: rsa2048, alg: "RS256"},
 		"RSA 2047, default PS256": {key: rsaKey(2047), wantErr: "idp: a 2047-bit RSA key: use at least 2048 bits"},

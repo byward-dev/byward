@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"strings"
 	"testing"
 )
 
@@ -25,13 +26,16 @@ func TestAPrivateKeyIsReadFromPEMInItsUsualFormats(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	for name, raw := range map[string][]byte{
-		"not PEM":       []byte("s3cret"),
-		"a certificate": pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte{1}}),
-		"broken":        pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte{1, 2, 3}}),
+	for name, tc := range map[string]struct {
+		raw  []byte
+		want string // the error's start: a parse error appends the x509 package's reason
+	}{
+		"not PEM":       {[]byte("s3cret"), "not a PEM private key"},
+		"a certificate": {pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte{1}}), `a PEM "CERTIFICATE" block is not a private key`},
+		"broken":        {pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte{1, 2, 3}}), "the private key does not parse: "},
 	} {
-		if _, err := ParsePrivateKey(raw); err == nil {
-			t.Errorf("%s: accepted", name)
+		if _, err := ParsePrivateKey(tc.raw); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", name, err, tc.want)
 		}
 	}
 }
