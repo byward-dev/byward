@@ -30,21 +30,7 @@ func secretExpiry(cfg *config.Config, now time.Time) doctor.Result {
 // expiryWarning is the startup warning for a client secret that expires within 30 days or has
 // expired; doctor reports the same check as a result of its own.
 func expiryWarning(cfg *config.Config, now time.Time) (Warning, bool) {
-	r := secretExpiry(cfg, now)
-	if r.Status != doctor.Warn && r.Status != doctor.Fail {
-		return Warning{}, false
-	}
-	return Warning{Message: r.Message, Setting: secretExpirySetting, Fix: r.Fix}, true
-}
-
-// CheckOffline is `byward check --offline` (ADR-0020 §7): everything the proxy validates at
-// startup that needs no network and writes nothing. It reads the sealing keys and the static
-// clients, validates the IdP and gate settings, checks the store without opening or creating it, and
-// checks the TLS certificate as startup does.
-// The error is a configuration error; the warnings are what the proxy would log at startup.
-func CheckOffline(cfg *config.Config) ([]Warning, error) {
-	r, err := CheckOfflineReport(cfg)
-	return r.Warnings, err
+	return warningOf(secretExpiry(cfg, now), secretExpirySetting)
 }
 
 // OfflineReport is what check --offline found: the startup warnings, and a description of the
@@ -54,8 +40,12 @@ type OfflineReport struct {
 	ClientCredentialDesc string
 }
 
-// CheckOfflineReport is CheckOffline with a description of the client credential the proxy would
-// use (#306); it names no secret.
+// CheckOfflineReport is `byward check --offline` (ADR-0020 §7): everything the proxy validates at
+// startup that needs no network and writes nothing. It reads the sealing keys and the static
+// clients, validates the IdP and gate settings, checks the store without opening or creating it, and
+// checks the TLS certificate as startup does. The error is a configuration error; the warnings are
+// what the proxy would log at startup, and the report also describes the client credential the
+// proxy would use (#306), naming no secret.
 func CheckOfflineReport(cfg *config.Config) (OfflineReport, error) {
 	if err := checkUpstream(cfg); err != nil {
 		return OfflineReport{}, err
@@ -78,7 +68,7 @@ func CheckOfflineReport(cfg *config.Config) (OfflineReport, error) {
 	if err := parts.idp.refusal(time.Now()); err != nil {
 		return OfflineReport{}, err
 	}
-	storeWarnings, err := checkStore(cfg)
+	findings, err := configFindings(cfg, parts)
 	if err != nil {
 		return OfflineReport{}, err
 	}
@@ -87,7 +77,7 @@ func CheckOfflineReport(cfg *config.Config) (OfflineReport, error) {
 		return OfflineReport{}, err
 	}
 	tlsWarnings := servingCertWarnings(cfg, pair, time.Now())
-	return OfflineReport{Warnings: append(append(append(append(append(parts.warnings, storeWarnings...), parts.idp.startWarningsAt(time.Now())...), tlsWarnings...), offlineHop(cfg)...), redundantStrips(cfg)...),
+	return OfflineReport{Warnings: append(append(append(findings, parts.idp.startWarningsAt(time.Now())...), tlsWarnings...), offlineHop(cfg)...),
 		ClientCredentialDesc: parts.idp.credentialDesc}, nil
 }
 
@@ -188,7 +178,7 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	if err != nil {
 		return r, err
 	}
-	storeWarnings, err := checkStore(cfg)
+	findings, err := configFindings(cfg, parts)
 	if err != nil {
 		return r, err
 	}
@@ -202,7 +192,7 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	if cfg.IdentityHeaders && cfg.UpstreamCommand == nil {
 		r.Checks = append(r.Checks, identityHeadersResult(ctx, cfg.UpstreamURL.Hostname(), o.Resolve))
 	}
-	for _, w := range append(append(parts.warnings, storeWarnings...), redundantStrips(cfg)...) {
+	for _, w := range findings {
 		r.Checks = append(r.Checks, doctor.CheckConfiguration.Result(doctor.Warn, w.Message, warningFix(w)))
 	}
 	target := doctor.Target{Resource: cfg.PublicURL, Issuer: cfg.Issuer(), HostsSetting: config.Setting{Name: "allowed-hosts"}.Env()}

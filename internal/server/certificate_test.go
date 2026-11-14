@@ -92,7 +92,7 @@ func TestACertificateCloseToItsEndDateIsWarnedOf(t *testing.T) {
 	}{"in 10 days": {10 * 24 * time.Hour, true}, "in a year": {365 * 24 * time.Hour, false}} {
 		t.Run(name, func(t *testing.T) {
 			file, _ := certificateFile(t, tc.validFor)
-			warnings, err := CheckOffline(loadCertificateConfig(t, file))
+			warnings, err := checkOffline(loadCertificateConfig(t, file))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -114,7 +114,7 @@ func TestAnExpiredCertificateRefusesToServeButDoctorAndRevokeUserStillWork(t *te
 	file, _ := certificateFile(t, -time.Hour)
 	cfg := loadCertificateConfig(t, file)
 	const want = "BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE: the certificate expired on"
-	if _, err := CheckOffline(cfg); err == nil || !strings.Contains(err.Error(), want) {
+	if _, err := checkOffline(cfg); err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("check: %v, want %q", err, want)
 	}
 	if _, err := New(cfg, discard); err == nil || !strings.Contains(err.Error(), want) {
@@ -162,7 +162,7 @@ func TestAnUnusableCertificateFileRefusesToStartNamingTheSetting(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := loadCertificateConfig(t, tc.file(t))
-			if _, err := CheckOffline(cfg); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, err := checkOffline(cfg); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("check: %v, want %q", err, tc.want)
 			}
 			if _, err := New(cfg, discard); err == nil || !strings.Contains(err.Error(), tc.want) {

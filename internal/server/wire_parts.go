@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
 
 	"github.com/byward-dev/byward/internal/assertion"
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/doctor"
 	"github.com/byward-dev/byward/internal/gate"
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/secretfile"
@@ -53,6 +55,26 @@ func (w Warning) log(log *slog.Logger) {
 		return
 	}
 	log.Warn(w.Message, "setting", w.Setting, "reason", w.Fix)
+}
+
+// warningOf is the startup warning for a check result that warns or fails, naming setting; ok is
+// false for any other result.
+func warningOf(r doctor.Result, setting string) (w Warning, ok bool) {
+	if r.Status != doctor.Warn && r.Status != doctor.Fail {
+		return Warning{}, false
+	}
+	return Warning{Message: r.Message, Setting: setting, Fix: r.Fix}, true
+}
+
+// configFindings are the configuration's warnings that startup logs, check prints and doctor
+// reports alike: those of the settings, the store and the upstream's strip list. The error is the
+// store's configuration error.
+func configFindings(cfg *config.Config, parts *authParts) ([]Warning, error) {
+	store, err := checkStore(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return append(append(slices.Clone(parts.warnings), store...), redundantStrips(cfg)...), nil
 }
 
 // String is the warning on one line, for check and doctor.

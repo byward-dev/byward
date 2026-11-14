@@ -91,44 +91,79 @@ func (r Report) WriteJSON(w io.Writer) error {
 	return enc.Encode(r)
 }
 
-// secretWarnBefore is how early an expiring client secret is a warning (ADR-0012 §10).
-const secretWarnBefore = 30 * 24 * time.Hour
+// expiryWarning is how early an expiring credential or certificate is a warning (ADR-0012 §10).
+const expiryWarning = 30 * 24 * time.Hour
+
+// Expiry is an end date as an expiry check sees it at a moment: Fail once it has passed, Warn within
+// 30 days of it, else Pass. Date is the end date in UTC, and In says how soon it is ("in 3 days")
+// in calendar days in UTC, so the two agree.
+type Expiry struct {
+	Status   Status
+	Date, In string
+}
+
+// ExpiryAt is notAfter's Expiry at now. Each check words its own messages from it.
+func ExpiryAt(notAfter, now time.Time) Expiry {
+	e := Expiry{Status: Pass, Date: notAfter.UTC().Format(time.DateOnly), In: inDays(notAfter, now)}
+	switch left := notAfter.Sub(now); {
+	case left <= 0:
+		e.Status = Fail
+	case left <= expiryWarning:
+		e.Status = Warn
+	}
+	return e
+}
+
+// inDays says how soon notAfter is from now: under a day, or in calendar days in UTC, the zone its
+// date is given in, so the count agrees with the date.
+func inDays(notAfter, now time.Time) string {
+	if notAfter.Sub(now) < 24*time.Hour {
+		return "in less than a day"
+	}
+	midnight := func(t time.Time) time.Time { return t.UTC().Truncate(24 * time.Hour) }
+	if days := int(midnight(notAfter).Sub(midnight(now)) / (24 * time.Hour)); days != 1 {
+		return fmt.Sprintf("in %d days", days)
+	}
+	return "in 1 day"
+}
 
 // SecretExpiry checks the client secret's end date, which the operator states in setting (the IdP
 // does not tell). A zero expires means it was not stated.
 func SecretExpiry(setting string, expires, now time.Time) Result {
 	r := CheckClientSecretExpiry.NewResult()
-	left := expires.Sub(now)
-	switch {
-	case expires.IsZero():
+	if expires.IsZero() {
 		r.Status, r.Message = Skip, "the expiry date is not configured"
 		r.Fix = "set " + setting + " to the secret's end date, so doctor and the startup log warn before it expires"
-	case left <= 0:
-		r.Status, r.Message = Fail, "the client secret expired on "+expires.Format(time.DateOnly)+"; every sign-in and refresh fails"
+		return r
+	}
+	e := ExpiryAt(expires, now)
+	switch r.Status = e.Status; e.Status {
+	case Fail:
+		r.Message = "the client secret expired on " + e.Date + "; every sign-in and refresh fails"
 		r.Fix = "create a new secret, restart the proxy with it, and update " + setting
-	case left <= secretWarnBefore:
-		r.Status, r.Message = Warn, fmt.Sprintf("the client secret expires on %s, in %d days", expires.Format(time.DateOnly), int(left.Hours()/24))
+	case Warn:
+		r.Message = "the client secret expires on " + e.Date + ", " + e.In
 		r.Fix = "create a new secret before then, restart the proxy with it, and update " + setting
 	default:
-		r.Status, r.Message = Pass, "the client secret is valid until "+expires.Format(time.DateOnly)
+		r.Message = "the client secret is valid until " + e.Date
 	}
 	return r
 }
 
 // CertificateExpiry is the client certificate's lifetime check (ADR-0012 §5, §10), from its own
-// end date: a warning within secretWarnBefore, a failure once it has passed. setting names the file.
+// end date: a warning within 30 days of it, a failure once it has passed. setting names the file.
 func CertificateExpiry(setting string, notAfter, now time.Time) Result {
 	r := CheckClientCertificateExpiry.NewResult()
-	left := notAfter.Sub(now)
-	switch {
-	case left <= 0:
-		r.Status, r.Message = Fail, "the client certificate expired on "+notAfter.Format(time.DateOnly)+"; every sign-in and refresh fails"
+	e := ExpiryAt(notAfter, now)
+	switch r.Status = e.Status; e.Status {
+	case Fail:
+		r.Message = "the client certificate expired on " + e.Date + "; every sign-in and refresh fails"
 		r.Fix = "make and upload a new certificate, then restart the proxy with it in " + setting + " (docs/how-to/entra-certificate.md)"
-	case left <= secretWarnBefore:
-		r.Status, r.Message = Warn, fmt.Sprintf("the client certificate expires on %s, in %d days", notAfter.Format(time.DateOnly), int(left.Hours()/24))
+	case Warn:
+		r.Message = "the client certificate expires on " + e.Date + ", " + e.In
 		r.Fix = "make and upload a new certificate before then, and restart the proxy with it in " + setting + " (docs/how-to/entra-certificate.md)"
 	default:
-		r.Status, r.Message = Pass, "the client certificate is valid until "+notAfter.Format(time.DateOnly)
+		r.Message = "the client certificate is valid until " + e.Date
 	}
 	return r
 }

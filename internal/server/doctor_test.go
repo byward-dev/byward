@@ -22,7 +22,7 @@ const fixtureClientID = "00000000-0000-0000-0000-000000000002"
 
 func TestCheckOfflineAcceptsAWorkingConfigurationAndWritesNothing(t *testing.T) {
 	cfg := loadConfig(t, "https://mcp.example.com/mcp")
-	warnings, err := CheckOffline(cfg)
+	warnings, err := checkOffline(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestCheckOfflineFindsWhatStartupWould(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := CheckOffline(cfg); err == nil || !strings.Contains(err.Error(), tc.inErr) {
+			if _, err := checkOffline(cfg); err == nil || !strings.Contains(err.Error(), tc.inErr) {
 				t.Fatalf("err = %v, want %q", err, tc.inErr)
 			}
 		})
@@ -93,7 +93,7 @@ func TestCheckOfflineFindsWhatStartupWould(t *testing.T) {
 func TestCheckOfflineWarnsOfAnExpiringSecret(t *testing.T) {
 	soon := time.Now().Add(10 * 24 * time.Hour).UTC().Format(time.DateOnly)
 	cfg := loadConfig(t, "https://mcp.example.com/mcp", "BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT="+soon)
-	warnings, err := CheckOffline(cfg)
+	warnings, err := checkOffline(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestCheckOfflineWithoutAuthSaysOnlyTheSettingsWereChecked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w, err := CheckOffline(cfg); err != nil || len(w) != 1 || !strings.Contains(w[0].Message, "authentication is off") {
+	if w, err := checkOffline(cfg); err != nil || len(w) != 1 || !strings.Contains(w[0].Message, "authentication is off") {
 		t.Fatalf("warnings %v, err %v", w, err)
 	}
 }
@@ -287,7 +287,7 @@ func TestCheckOfflineAndDoctorCheckAStdioUpstreamWithoutStartingIt(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := CheckOffline(cfg); err != nil {
+	if _, err := checkOffline(cfg); err != nil {
 		t.Fatalf("check --offline: %v", err)
 	}
 	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
@@ -333,7 +333,7 @@ func TestCheckOfflineFindsStdioUpstreamMistakes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := CheckOffline(cfg); err == nil || !strings.Contains(err.Error(), tc.inErr) {
+			if _, err := checkOffline(cfg); err == nil || !strings.Contains(err.Error(), tc.inErr) {
 				t.Fatalf("check --offline: err = %v, want %q", err, tc.inErr)
 			}
 			if _, err := Doctor(context.Background(), cfg, DoctorOptions{IdP: &http.Client{Transport: refuse{}}, Proxy: &http.Client{Transport: refuse{}}}); err == nil || !strings.Contains(err.Error(), tc.inErr) {

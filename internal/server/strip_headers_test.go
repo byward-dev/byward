@@ -141,7 +141,7 @@ func TestDoctorAndCheckNameARedundantStripEntry(t *testing.T) {
 			if len(named) != 1 || !strings.HasPrefix(named[0], "Authorization ") {
 				t.Fatalf("redundant entries named %q, want Authorization alone", named)
 			}
-			warnings, err := CheckOffline(cfg)
+			warnings, err := checkOffline(cfg)
 			if err != nil {
 				t.Fatal(err)
 			}

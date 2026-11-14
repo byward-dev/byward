@@ -45,6 +45,10 @@ func TestIntegrationTwoReplicasShareThePostgreSQLStore(t *testing.T) {
 				strings.Contains(logs, "BYWARD_STORE_DIR") || strings.Contains(logs, "BYWARD_STORE_COUNTER_FILE") {
 				t.Fatalf("startup log without the database's TLS, or with the password or a SQLite path:\n%s", logs)
 			}
+			// The keys never live in the store, which startup says as check and doctor do.
+			if n := strings.Count(r.logs.String(), replicaKeys.Message); n != 1 {
+				t.Fatalf("startup logged the replica-keys warning %d times, want once:\n%s", n, r.logs.String())
+			}
 		}
 		return cfg, db, a, b
 	}

@@ -88,6 +88,9 @@ func TestSecretExpiryWarnsWithin30DaysAndFailsOnceExpired(t *testing.T) {
 		{"expired", now.Add(-time.Hour), Fail, "expired on 2026-11-06"},
 		{"expires now", now, Fail, "expired"},
 		{"30 days left warns", now.Add(30 * 24 * time.Hour), Warn, "in 30 days"},
+		{"hours left", now.Add(2 * time.Hour), Warn, "expires on 2026-11-06, in less than a day"},
+		{"a day and some hours left, on the date after tomorrow", now.Add(36 * time.Hour), Warn, "expires on 2026-11-08, in 2 days"},
+		{"a date given in another zone, in UTC", time.Date(2026, 11, 20, 8, 0, 0, 0, time.FixedZone("UTC+10", 10*3600)), Warn, "expires on 2026-11-19, in 13 days"},
 		{"31 days left passes", now.Add(31 * 24 * time.Hour), Pass, "valid until 2026-12-07"},
 	}
 	for _, tc := range cases {
@@ -116,6 +119,9 @@ func TestCertificateExpiryWarnsWithin30DaysAndFailsOnceExpired(t *testing.T) {
 		{"expired", now.Add(-time.Hour), Fail, "client certificate expired on 2026-11-06"},
 		{"expires now", now, Fail, "expired"},
 		{"30 days left warns", now.Add(30 * 24 * time.Hour), Warn, "in 30 days"},
+		{"hours left", now.Add(2 * time.Hour), Warn, "expires on 2026-11-06, in less than a day"},
+		{"a day and some hours left, on the date after tomorrow", now.Add(36 * time.Hour), Warn, "expires on 2026-11-08, in 2 days"},
+		{"a date given in another zone, in UTC", time.Date(2026, 11, 20, 8, 0, 0, 0, time.FixedZone("UTC+10", 10*3600)), Warn, "expires on 2026-11-19, in 13 days"},
 		{"31 days left passes", now.Add(31 * 24 * time.Hour), Pass, "valid until 2026-12-07"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
