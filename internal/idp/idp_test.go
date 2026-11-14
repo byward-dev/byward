@@ -148,37 +148,37 @@ func TestPrivateKeyJWTAssertion(t *testing.T) {
 	}
 }
 
+// PrivateKeyJWT accepts an EC P-256 key and an RSA key of MinRSABits or more, with either RSA
+// algorithm, and refuses another curve or a shorter RSA key, saying why.
 func TestPrivateKeyJWTKeyTypes(t *testing.T) {
 	p256, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if _, err := PrivateKeyJWT(p256, nil, ""); err != nil {
-		t.Errorf("P-256: %v", err)
-	}
 	p384, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	if _, err := PrivateKeyJWT(p384, nil, ""); err == nil {
-		t.Error("P-384 accepted")
-	}
-}
-
-// An RSA client key needs MinRSABits, at every IdP and with either algorithm; the error names the
-// key's size and the minimum.
-func TestAnRSAClientKeyNeedsMinRSABits(t *testing.T) {
-	for _, bits := range []int{1024, MinRSABits - 1, MinRSABits} {
-		key, err := rsa.GenerateKey(rand.Reader, bits) //nolint:gosec // deliberately weak keys for the test
+	rsaKey := func(bits int) crypto.Signer {
+		k, err := rsa.GenerateKey(rand.Reader, bits) //nolint:gosec // deliberately weak keys for the test
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, alg := range []string{"PS256", "RS256"} {
-			t.Run(fmt.Sprintf("%d bits, %s", bits, alg), func(t *testing.T) {
-				_, err := PrivateKeyJWTWithAlg(key, nil, "", alg)
-				want := fmt.Sprintf("idp: a %d-bit RSA key: use at least %d bits", bits, MinRSABits)
-				switch {
-				case bits >= MinRSABits && err != nil:
-					t.Fatalf("refused: %v", err)
-				case bits < MinRSABits && (err == nil || err.Error() != want):
-					t.Fatalf("err = %v, want %q", err, want)
-				}
-			})
-		}
+		return k
+	}
+	rsa2048 := rsaKey(2048)
+	for name, tc := range map[string]struct {
+		key     crypto.Signer
+		alg     string
+		wantErr string // "" accepts
+	}{
+		"EC P-256":        {key: p256},
+		"EC P-384":        {key: p384, wantErr: "idp: EC client keys must use P-256"},
+		"RSA 2048, PS256": {key: rsa2048, alg: "PS256"},
+		"RSA 2048, RS256": {key: rsa2048, alg: "RS256"},
+		"RSA 2047":        {key: rsaKey(2047), wantErr: "idp: a 2047-bit RSA key: use at least 2048 bits"},
+		"RSA 1024, RS256": {key: rsaKey(1024), alg: "RS256", wantErr: "idp: a 1024-bit RSA key: use at least 2048 bits"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := PrivateKeyJWTWithAlg(tc.key, nil, "", tc.alg)
+			if got := fmt.Sprint(err); (tc.wantErr == "" && err != nil) || (tc.wantErr != "" && got != tc.wantErr) {
+				t.Fatalf("err = %v, want %q", err, tc.wantErr)
+			}
+		})
 	}
 }
 
@@ -582,9 +582,9 @@ func TestReportAlertIgnoresWhatIsNoAlert(t *testing.T) {
 	}
 }
 
-// IsGUID accepts the 36-character form in either case and nothing else: a tenant name, a GUID one
-// character short or long, a misplaced dash or a non-hex digit.
-func TestIsGUID(t *testing.T) {
+// A GUID is the 36-character form in either case and nothing else: not a tenant name, a GUID one
+// character short or long, one with a dash missing or moved, or one with a non-hex digit.
+func TestOnlyThe36CharacterFormIsAGUID(t *testing.T) {
 	g := fakeidp.NewGUID()
 	for s, want := range map[string]bool{
 		g:                                      true,
@@ -592,7 +592,7 @@ func TestIsGUID(t *testing.T) {
 		g[:35]:                                 false,
 		g + "0":                                false,
 		g[:8] + "0" + g[9:]:                    false, // dash missing
-		"g" + g[1:]:                            false,
+		g[:7] + "-" + g[7:8] + g[9:]:           false, // dash moved one place left
 		"organizations":                        false,
 		"":                                     false,
 		"00000000-0000-0000-0000-00000000000g": false,

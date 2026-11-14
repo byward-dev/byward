@@ -231,7 +231,7 @@ func entraClientAuth(cfg *config.Config) (idp.ClientAuth, entra.Diagnosis, time.
 		}
 		auth, err := cert.ClientAuth()
 		if err != nil {
-			return nil, d, time.Time{}, fmt.Errorf("%s: %w", d.CredentialSetting, err)
+			return nil, d, time.Time{}, fmt.Errorf("%s: %w (docs/how-to/entra-certificate.md)", d.CredentialSetting, err)
 		}
 		return auth, d, cert.X509.NotAfter, nil
 	}

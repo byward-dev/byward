@@ -27,7 +27,8 @@ func rsaKey(t *testing.T, bits int) *rsa.PrivateKey {
 
 // The file byward init entra writes, and each way a file can be unusable: refused at startup with
 // a reason, never quoting the file. Expiry is not this check's: an expired certificate loads, for
-// doctor to report and for revoke-user, which needs no credential.
+// doctor to report and for revoke-user, which needs no credential. Nor is the key's size: the
+// client assertion refuses a short key (idp.MinRSABits).
 func TestACertificateFileIsReadOrRefusedWithItsReason(t *testing.T) {
 	key, other := rsaKey(t, 2048), rsaKey(t, 2048)
 	year := now().Add(365 * 24 * time.Hour)
@@ -74,19 +75,6 @@ func TestACertificateFileIsReadOrRefusedWithItsReason(t *testing.T) {
 				t.Fatalf("the error quotes the file: %v", err)
 			}
 		})
-	}
-}
-
-// A certificate whose key is under idp.MinRSABits loads, but cannot become the client assertion:
-// startup calls ClientAuth right after loading, so it refuses the file there.
-func TestACertificateWithAShortKeyIsNoClientAssertion(t *testing.T) {
-	small := rsaKey(t, 1024)
-	c, err := LoadCertificate(append(fakeidp.PrivateKeyPEM(t, small), fakeidp.SelfSignedPEM(t, small, now().Add(time.Hour))...))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := c.ClientAuth(); err == nil || !strings.Contains(err.Error(), "a 1024-bit RSA key: use at least 2048 bits") {
-		t.Fatalf("err = %v, want the key size refused", err)
 	}
 }
 
