@@ -31,10 +31,11 @@ type Options struct {
 }
 
 // Bundle is an issued certificate: the certificate file (leaf, then any intermediate), its key
-// file, and a pool holding the root, for clients.
+// file, and the root, as a pool for clients and as the PEM file a client is pointed at.
 type Bundle struct {
 	Cert, Key []byte
 	Roots     *x509.CertPool
+	RootPEM   []byte
 }
 
 // Valid is a validity around now: from an hour ago to days ahead.
@@ -45,9 +46,7 @@ func Valid(now time.Time, days int) Validity {
 // Issue issues a leaf for o.
 func Issue(t testing.TB, o Options) Bundle {
 	t.Helper()
-	now := time.Now()
-	root, rootKey := issue(t, &x509.Certificate{Subject: pkix.Name{CommonName: "Test Root"}, IsCA: true, BasicConstraintsValid: true,
-		KeyUsage: x509.KeyUsageCertSign, NotBefore: now.AddDate(-10, 0, 0), NotAfter: now.AddDate(10, 0, 0)}, nil, nil)
+	root, rootKey := newRoot(t)
 	pool := x509.NewCertPool()
 	pool.AddCert(root)
 	parent, parentKey := root, rootKey
@@ -55,7 +54,7 @@ func Issue(t testing.TB, o Options) Bundle {
 	if o.Intermediate != nil {
 		parent, parentKey = issue(t, &x509.Certificate{Subject: pkix.Name{CommonName: "Test Intermediate"}, IsCA: true, BasicConstraintsValid: true,
 			KeyUsage: x509.KeyUsageCertSign, NotBefore: o.Intermediate.NotBefore, NotAfter: o.Intermediate.NotAfter}, root, rootKey)
-		chain = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: parent.Raw})
+		chain = certPEM(parent)
 	}
 	leafTmpl := &x509.Certificate{Subject: pkix.Name{CommonName: "Test Leaf"}, KeyUsage: x509.KeyUsageDigitalSignature,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, NotBefore: o.Leaf.NotBefore, NotAfter: o.Leaf.NotAfter}
@@ -72,10 +71,31 @@ func Issue(t testing.TB, o Options) Bundle {
 		t.Fatal(err)
 	}
 	return Bundle{
-		Cert:  append(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leaf.Raw}), chain...),
-		Key:   pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}),
-		Roots: pool,
+		Cert:    append(certPEM(leaf), chain...),
+		Key:     pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}),
+		Roots:   pool,
+		RootPEM: certPEM(root),
 	}
+}
+
+// Root returns a fresh root that issued nothing, in PEM: another CA, which a client pointed at it
+// must refuse every Bundle's leaf under.
+func Root(t testing.TB) []byte {
+	t.Helper()
+	root, _ := newRoot(t)
+	return certPEM(root)
+}
+
+// newRoot makes a root valid from ten years ago to ten years ahead.
+func newRoot(t testing.TB) (*x509.Certificate, *ecdsa.PrivateKey) {
+	t.Helper()
+	now := time.Now()
+	return issue(t, &x509.Certificate{Subject: pkix.Name{CommonName: "Test Root"}, IsCA: true, BasicConstraintsValid: true,
+		KeyUsage: x509.KeyUsageCertSign, NotBefore: now.AddDate(-10, 0, 0), NotAfter: now.AddDate(10, 0, 0)}, nil, nil)
+}
+
+func certPEM(c *x509.Certificate) []byte {
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Raw})
 }
 
 // Write writes the bundle's files into dir as tls.crt and tls.key (mode 0600) and returns their

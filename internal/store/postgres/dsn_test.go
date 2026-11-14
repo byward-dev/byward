@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/byward-dev/byward/internal/testutil/pgtest"
+	"github.com/byward-dev/byward/internal/testutil/testcert"
 )
 
 // clearPGEnv unsets the PG* variables pgx reads, so the developer's environment cannot change a
@@ -155,7 +155,7 @@ func setEnv(t *testing.T, env map[string]string) {
 func writeCA(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "ca.pem")
-	if err := os.WriteFile(path, pgtest.NewCA(t, "byward test CA").CertPEM, 0o600); err != nil {
+	if err := os.WriteFile(path, testcert.Root(t), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path
