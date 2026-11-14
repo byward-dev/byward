@@ -100,9 +100,9 @@ run = "go test -race -count=1 -v -timeout 11m -tags=integration -run ^TestIntegr
 extends = "go-test"
 
 [tasks."test:postgres"]
-description = "The PostgreSQL store adapter on PostgreSQL 15 and 18 in pinned containers with TLS (verify-full): the conformance suite, the migration fixtures and the adapter's own tests (needs Docker)"
+description = "The PostgreSQL store on PostgreSQL 15 and 18 in pinned containers with TLS (verify-full): the conformance suite, the migration fixtures, the adapter's own tests and two replicas of the wired proxy sharing it (needs Docker)"
 env = { BYWARD_POSTGRES = "1" }
-run = "go test -race -count=1 -v -timeout 10m -tags=integration -run ^TestIntegrationPostgres$ ./internal/store/postgres/"
+run = "go test -race -count=1 -v -timeout 10m -tags=integration -run '^TestIntegrationPostgres$|^TestIntegrationTwoReplicasShareThePostgreSQLStore$' ./internal/store/postgres/ ./internal/server/"
 extends = "go-test"
 
 [tasks."test:integration"]

@@ -14,6 +14,7 @@ after `--`, as for the proxy (`byward check --offline -- /usr/local/bin/server -
 | `byward init entra --tenant <id>` | prints the `az` commands for the Entra app registration and a minimal env file | none | 0, 2 |
 | `byward revoke-user <user key>` | ends one user's access ([hardening](../how-to/harden-a-deployment.md)) | the store | 0, 1, 2 |
 | `byward revoke-all --yes` | ends every user's access ([hardening](../how-to/harden-a-deployment.md)) | the store | 0, 1, 2 |
+| `byward store new-epoch --yes` | after restoring the PostgreSQL store: starts a new store epoch, so refresh tokens from before it are refused ([PostgreSQL](../how-to/postgres.md#backup-and-restore)) | the store | 0, 1, 2 |
 | `byward jwks` | prints the identity assertion's public keys as a JWKS, for an upstream that loads them from a file ([identity assertion](../how-to/identity-assertion.md)) | none | 0, 2 |
 | `byward downstream-token [--json]` | run by a stdio upstream process or one of its descendants: prints its user's On-Behalf-Of token from `BYWARD_DOWNSTREAM_TOKEN_SOCKET`, for a server that takes a credential command ([On-Behalf-Of §5](../how-to/downstream-apis.md#5-a-stdio-upstream)) | the token socket | 0, 1, 2 |
 
