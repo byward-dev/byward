@@ -187,6 +187,12 @@ func normalizeAllowedHost(h string) (string, error) {
 		if host == "" {
 			return "", invalid
 		}
+		// A Host header's name is RFC 3986's unreserved characters; a trailing dot (an absolute DNS
+		// name), a leading one or "..", never match the name a client is given (#334).
+		if strings.Trim(host, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~") != "" ||
+			strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") || strings.Contains(host, "..") {
+			return "", fmt.Errorf("%q is not a host[:port]: a host name has only letters, digits and - . _ ~, with no empty label (no leading, trailing or double dot)", h)
+		}
 		port, hasPort = p, ok
 	}
 	if isV6 {
