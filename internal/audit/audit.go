@@ -79,7 +79,8 @@ type Log struct {
 	observe Observer
 }
 
-// Unauthenticated events are limited to this many per source address per minute.
+// Unauthenticated events are limited to this many per minute for each source, event and outcome
+// (RecordUnauthenticated).
 const (
 	unauthBurst   = 10
 	unauthWindow  = time.Minute
@@ -105,16 +106,17 @@ func (l *Log) Record(r *http.Request, e Event) {
 }
 
 // RecordUnauthenticated writes e for a request whose sender is not authenticated, limited per
-// source address (an IPv6 sender by its /64, as the OAuth rate limit groups it: it can rotate
-// freely within its own /64), event and outcome, so frequent events (page views, registrations) never crowd
-// out rarer ones (decisions, refusals); when records were dropped the next one with the same key
-// carries `suppressed=N` (ADR-0021 §5).
+// source, event and outcome, so frequent events (page views, registrations) never crowd out rarer
+// ones (decisions, refusals); when records were dropped the next one with the same key carries
+// `suppressed=N` (ADR-0021 §5). A source is an address, or an IPv6 sender's /64 as the OAuth rate
+// limit groups it, since it can rotate freely within its own /64; each record still carries the
+// sender's own address.
 func (l *Log) RecordUnauthenticated(r *http.Request, e Event) {
 	if l == nil {
 		return
 	}
 	ip := logging.RemoteIP(r)
-	ok, suppressed := l.limiter.Allow(ratelimit.Key(ip) + "\x00" + e.Name + "\x00" + e.Outcome) // L2
+	ok, suppressed := l.limiter.Allow(ratelimit.Key(ip) + "\x00" + e.Name + "\x00" + e.Outcome)
 	if !ok {
 		if l.observe != nil {
 			l.observe(e.Name, e.Outcome)

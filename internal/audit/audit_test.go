@@ -235,7 +235,7 @@ func TestNilLogIsSafeToCall(t *testing.T) {
 	l.RecordUnauthenticated(httptest.NewRequest("GET", "/", nil), Event{Name: HostRejected, Outcome: Failure})
 }
 
-// L2: an IPv6 sender rotating through its own /64 shares one budget, as the OAuth rate limit groups
+// An IPv6 sender rotating through its own /64 shares one budget, as the OAuth rate limit groups
 // it, so it cannot claim a fresh budget per address or fill the source table; each record still
 // carries the address that sent it, and another /64 keeps its own budget.
 func TestAnIPv6SourceIsLimitedByItsSlash64AndLoggedByItsAddress(t *testing.T) {
@@ -258,7 +258,8 @@ func TestAnIPv6SourceIsLimitedByItsSlash64AndLoggedByItsAddress(t *testing.T) {
 	other := httptest.NewRequest("GET", "/", nil)
 	other.RemoteAddr = "[2001:db8:1:3::1]:1234"
 	l.RecordUnauthenticated(other, Event{Name: HostRejected, Outcome: Failure, Host: "evil.example"})
-	if !strings.Contains(buf.String(), `"remote_ip":"2001:db8:1:3::1"`) {
-		t.Fatalf("a sender in another /64 was limited too:\n%s", buf.String())
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if last := lines[len(lines)-1]; !strings.Contains(last, `"remote_ip":"2001:db8:1:3::1"`) || strings.Contains(last, "suppressed") {
+		t.Fatalf("a sender in another /64 was limited too, or charged with the first one's drops:\n%s", buf.String())
 	}
 }
