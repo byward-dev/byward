@@ -323,13 +323,20 @@ func (p *Provider) token(ctx context.Context, m *metadata, form url.Values) (*id
 		class := idp.GenericClass(tr.Status, tr.Error)
 		e := &idp.Error{Class: class, OAuth: tr.Error, Status: tr.Status, Description: tr.ErrorDescription}
 		// The IdP refused the proxy's own credential or client ID, or the grant its app is registered for
-		// (RFC 6749 §5.2): the operator's to fix.
-		if tr.Error == "invalid_client" || tr.Error == "unauthorized_client" {
+		// (RFC 6749 §5.2), or, at Auth0, the secret (access_denied 401): the operator's to fix.
+		if refusesClient(e) {
 			e.Alert = idp.AlertCredentialRejected
 		}
 		return nil, e
 	}
 	return tr, nil
+}
+
+// refusesClient reports whether the IdP's token endpoint refuses the client ID or credential, for
+// the sign-in path's operator alert and for doctor alike (#288, #315). Auth0 answers a wrong secret
+// access_denied 401, which is otherwise a user's refusal: only with 401 is it the client's.
+func refusesClient(ie *idp.Error) bool {
+	return ie.OAuth == "invalid_client" || ie.OAuth == "unauthorized_client" || ie.OAuth == "access_denied" && ie.Status == 401
 }
 
 func (p *Provider) identity(ctx context.Context, raw, nonce string) (idp.Identity, error) {

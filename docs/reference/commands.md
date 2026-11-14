@@ -183,6 +183,8 @@ proxy and run `byward doctor`.
 
 ## `byward revoke-user`
 
+Which command fits which situation: [revoke access](../how-to/revoke-access.md).
+
 ```sh
 byward revoke-user <user key>
 ```

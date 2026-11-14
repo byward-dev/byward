@@ -17,16 +17,21 @@ Find your role below. Each page appears once, under the reader who needs it firs
 | Google | [Sign users in with Google](how-to/google.md) |
 | Okta | [Sign users in with Okta](how-to/okta.md) |
 | Keycloak | [Sign users in with Keycloak](how-to/keycloak.md) |
-| Auth0 | [The OIDC guide and its presets](how-to/oidc.md#3-presets) |
+| Auth0 | [Sign users in with Auth0](how-to/auth0.md) |
 | Any other OpenID Connect IdP | [Sign users in with an OpenID Connect IdP](how-to/oidc.md) |
 
 Then, for every deployment:
 
+- [Run byward](how-to/run-byward.md): the data directory, the keys, the settings, the container or
+  the binary, and the first checks.
+- [Deploy byward](how-to/deploy.md): one replica or several, TLS, the internal listener.
 - [Restrict who can sign in](how-to/access-gate.md) (the access gate).
 - [Harden a deployment](how-to/harden-a-deployment.md): the checklist before production.
 - [Keep the proxy's state](how-to/state.md) on SQLite (one replica), or
   [run several replicas on PostgreSQL](how-to/postgres.md).
 - [Create and rotate sealing keys](how-to/sealing-keys.md).
+- [Revoke access](how-to/revoke-access.md) for a user, everyone, a client or a headless caller.
+- [Respond to alerts](how-to/respond-to-alerts.md): what each IdP alert and upstream refusal means.
 - [Serve TLS at the proxy](how-to/tls.md), and [trust a private CA](how-to/private-ca.md).
 
 ### Your MCP server (the upstream)
@@ -57,9 +62,11 @@ The IdP guides above start with what to register at the IdP; these pages go furt
 
 - Entra: [register the app](how-to/quickstart-entra.md#1-register-the-entra-app),
   [a certificate instead of a client secret](how-to/entra-certificate.md),
+  [a federated credential instead](how-to/entra-federated-credential.md),
   [app roles for headless callers](how-to/app-tokens.md#1-give-the-caller-a-role-on-the-proxys-app),
   [API permissions for On-Behalf-Of](how-to/downstream-apis.md#1-grant-the-api-permissions),
   [the recommended gate setup](how-to/access-gate.md#entra-recommended-setup).
+- Auth0: [roles in the ID token](how-to/auth0.md#2-roles-in-the-id-token).
 - Keycloak: [roles and groups in the token](how-to/keycloak.md#2-roles-and-groups-in-the-token).
 - Okta: [the authorization server](how-to/okta.md#2-the-authorization-server),
   [a key instead of the secret](how-to/okta.md#5-a-key-instead-of-the-secret-private_key_jwt).
@@ -79,6 +86,7 @@ The IdP guides above start with what to register at the IdP; these pages go furt
 - [Cut a release](maintainers/release.md).
 - [The scheduled real-Entra lane](maintainers/real-entra-lane.md).
 - [Run and read the load test](maintainers/load-test.md).
+- [Agent fleet rules](maintainers/agent-fleet.md): when several coding agents work at once.
 
 ## Archive
 
