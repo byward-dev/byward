@@ -54,8 +54,8 @@ func (b *Broker) consentKey(h hint, l login) store.ConsentKey {
 
 // remembered reports whether a live consent of h covers l's request: same key, every scope the page
 // would approve (consentScopes, for a client that may refresh or not) approved, not expired. In a
-// consent from before #287's rule (RecordsLifetime unset) offline_access does not count: it may have
-// been approved on a page that said "up to 1 hour" (#363).
+// consent from before #287's rule, or rewritten by an older replica (RecordsLifetime unset),
+// offline_access does not count: it may have been approved on a page that said "up to 1 hour" (#363).
 func (b *Broker) remembered(ctx context.Context, h hint, l login, allowsRefresh bool, now time.Time) (bool, error) {
 	c, err := b.cfg.Store.Consent(ctx, b.consentKey(h, l))
 	switch {
@@ -68,7 +68,7 @@ func (b *Broker) remembered(ctx context.Context, h hint, l login, allowsRefresh 
 		return false, nil
 	}
 	approved := c.Scopes
-	if !c.RecordsLifetime { // from before #287's rule: its offline_access may have been shown as "up to 1 hour" (#363)
+	if !c.RecordsLifetime { // from before #287's rule, or an older replica's: offline_access may have been shown as "up to 1 hour" (#363)
 		approved = slices.DeleteFunc(slices.Clone(approved), func(s string) bool { return s == "offline_access" })
 	}
 	for _, s := range consentScopes(l.Scopes, allowsRefresh) {

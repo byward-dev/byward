@@ -766,19 +766,22 @@ func pathIn(msg string) string {
 // approved_at but not records_lifetime_at; its scopes followed the old rule, so the mark must not
 // survive (#363).
 func TestAnOlderBinarysReapprovalUnmarksTheConsent(t *testing.T) {
-	dir := t.TempDir()
-	s := open(t, dir, filepath.Join(t.TempDir(), "writes"))
-	k := store.ConsentKey{Issuer: "https://idp.example/v2.0", Subject: "tid:alice", ClientID: "c", Redirect: "https://app.example/cb", Resource: "https://mcp.example.com/mcp"}
-	must(t, s.RememberConsent(ctx, store.Consent{Key: k, Scopes: []string{"mcp"}, ApprovedAt: fixtureCreated, ExpiresAt: fixtureExpires, RecordsLifetime: true}))
-	reapproved := fixtureCreated.Add(time.Second)
-	_, err := rawDB(t, dir).Exec(`INSERT INTO consents (issuer, subject, client_id, redirect, resource, scopes, approved_at, expires_at)
+	// Later or earlier than the mark: a replica's clock may lag, and only equality keeps it.
+	for _, skew := range []time.Duration{time.Second, -time.Second} {
+		dir := t.TempDir()
+		s := open(t, dir, filepath.Join(t.TempDir(), "writes"))
+		k := store.ConsentKey{Issuer: "https://idp.example/v2.0", Subject: "tid:alice", ClientID: "c", Redirect: "https://app.example/cb", Resource: "https://mcp.example.com/mcp"}
+		must(t, s.RememberConsent(ctx, store.Consent{Key: k, Scopes: []string{"mcp"}, ApprovedAt: fixtureCreated, ExpiresAt: fixtureExpires, RecordsLifetime: true}))
+		reapproved := fixtureCreated.Add(skew)
+		_, err := rawDB(t, dir).Exec(`INSERT INTO consents (issuer, subject, client_id, redirect, resource, scopes, approved_at, expires_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (issuer, subject, client_id, redirect, resource) DO UPDATE SET
 			scopes = excluded.scopes, approved_at = excluded.approved_at, expires_at = excluded.expires_at`,
-		k.Issuer, k.Subject, k.ClientID, k.Redirect, k.Resource, `["mcp","offline_access"]`, micros(reapproved), micros(fixtureExpires))
-	must(t, err)
-	if got, err := s.Consent(ctx, k); err != nil || got.RecordsLifetime || !got.ApprovedAt.Equal(reapproved) {
-		t.Fatalf("consent after an older binary's re-approval = %+v, %v; want it unmarked", got, err)
+			k.Issuer, k.Subject, k.ClientID, k.Redirect, k.Resource, `["mcp","offline_access"]`, micros(reapproved), micros(fixtureExpires))
+		must(t, err)
+		if got, err := s.Consent(ctx, k); err != nil || got.RecordsLifetime || !got.ApprovedAt.Equal(reapproved) {
+			t.Fatalf("consent after an older binary's re-approval %v off = %+v, %v; want it unmarked", skew, got, err)
+		}
 	}
 }
 

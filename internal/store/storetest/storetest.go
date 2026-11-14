@@ -1159,7 +1159,9 @@ func consentKeepsItsLifetimeMarkUntilReplaced(t *testing.T, s store.Store) {
 	c := consent("g1", "tid:alice", "https://app.example/cb")
 	for i, mark := range []bool{false, true, true, false} {
 		c.RecordsLifetime = mark
-		c.ApprovedAt, c.ExpiresAt = t0.Add(time.Duration(i)*time.Hour), t0.Add(time.Duration(i)*time.Hour+30*24*time.Hour)
+		// Sub-second, as a real Allow's time is: the mark must keep the stored precision.
+		at := t0.Add(time.Duration(i)*time.Hour + 123456*time.Microsecond)
+		c.ApprovedAt, c.ExpiresAt = at, at.Add(30*24*time.Hour)
 		must(t, s.RememberConsent(ctx, c))
 		got, err := s.Consent(ctx, c.Key)
 		must(t, err)

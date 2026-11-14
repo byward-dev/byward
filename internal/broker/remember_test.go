@@ -641,3 +641,23 @@ func TestALegacyConsentsOfflineAccessDoesNotCoverARefreshingGrant(t *testing.T) 
 		})
 	}
 }
+
+// A legacy consent still covers what its offline_access does not decide: for a client without the
+// refresh_token grant (a one-hour grant) the page stays skipped, so the upgrade re-asks only where a
+// grant would refresh (#363).
+func TestALegacyConsentStillCoversAClientThatDoesNotRefresh(t *testing.T) {
+	e := newEnv(t, withRemember(t, nil), withoutRefreshGrant)
+	h := e.remember(t, url.Values{"scope": {"mcp"}})
+	if h == nil {
+		t.Fatal("no hint cookie")
+	}
+	g := user(e)
+	if err := e.st.RememberConsent(context.Background(), store.Consent{Key: store.ConsentKey{Issuer: g.Issuer, Subject: g.Subject,
+		ClientID: clientID, Redirect: registration.RedirectKey(clientCB), Resource: resourceID}, Scopes: []string{"mcp", "offline_access"},
+		ApprovedAt: e.now, ExpiresAt: e.now.Add(ConsentLifetime)}); err != nil {
+		t.Fatal(err)
+	}
+	if res := e.authorizeWith(t, nil, h); !skipped(res) {
+		t.Fatalf("authorize: %d to %q, want the IdP without the page", res.StatusCode, res.Header.Get("Location"))
+	}
+}
