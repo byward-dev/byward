@@ -172,7 +172,8 @@ var (
 )
 
 // ruleLabels is every label filtered or grouped by in doc's code (fenced blocks and inline code),
-// and an error for each selector or regex matcher it cannot read, so nothing unreadable passes.
+// and an error for each matcher it cannot read, each regex it cannot split into values, and each
+// grouping with no byward_ metric, so nothing unreadable passes.
 func ruleLabels(doc, text string) ([]ruleLabel, []string) {
 	var out []ruleLabel
 	var errs []string
@@ -297,6 +298,7 @@ func TestTheDocumentedAlertRulesUseExportedLabelsAndValues(t *testing.T) {
 
 // #354: the check catches each kind of mistake in a rule, in every matcher form, and says where.
 func TestABadLabelInADocumentedRuleIsReportedWithItsLine(t *testing.T) {
+	known := knownLabels(t)
 	for _, c := range []struct {
 		name, text string
 		want       string // in the one error; "" for none
@@ -313,25 +315,28 @@ func TestABadLabelInADocumentedRuleIsReportedWithItsLine(t *testing.T) {
 		{"every grouping in a code region", "```yaml\n- expr: sum by (status) (increase(byward_upstream_refusals_total[5m]))\n- expr: sum by (stauts) (increase(byward_upstream_refusals_total[5m]))\n```", `doc.md:3: byward_upstream_refusals_total has no label "stauts"`},
 		{"a misspelled first alternative", "`byward_idp_alerts_total{reason=~\"protocl|credential_rejected\"}`", `never exports reason "protocl"`},
 		{"a misspelled label in without", "`sum without (stauts) (byward_upstream_refusals_total)`", `has no label "stauts"`},
-		{"a grouping after the expression is its own expression's", "`byward_upstream_refusals_total{status=\"401\"} + sum(rate(byward_upstream_busy_total[5m])) by (kind)`", ""},
-		{"a grouping before the expression ends at its paren", "`sum by (kind) (rate(byward_upstream_busy_total[5m])) / byward_upstream_refusals_total`", ""},
+		{"a grouping after the expression groups only that expression", "`byward_upstream_refusals_total{status=\"401\"} + sum(rate(byward_upstream_busy_total[5m])) by (kind)`", ""},
+		{"a grouping before the expression groups only its parenthesised expression", "`sum by (kind) (rate(byward_upstream_busy_total[5m])) / byward_upstream_refusals_total`", ""},
 		{"le on a metric that is not a histogram bucket", "`byward_upstream_busy_total{le=\"1\"}`", `has no label "le"`},
 		{"a histogram's sum", "`byward_idp_request_duration_seconds_sum{outcome=\"success\"}`", ""},
 		{"the On-Behalf-Of operation of an IdP alert", "`byward_idp_alerts_total{operation=\"on_behalf_of\"}`", ""},
+		{"the 403 refusal status", "`byward_upstream_refusals_total{status=\"403\"}`", ""},
+		{"a failed audit event", "`byward_audit_events_total{event=\"login\",outcome=\"failure\"}`", ""},
+		{"an OIDC preset's IdP alert", "`byward_idp_alerts_total{idp=\"keycloak\"}`", ""},
 		{"a grouping with no byward_ metric", "`sum by (status) (rate(up[5m]))`", "no byward_ metric"},
 		{"a regex that is not a plain alternation", "`byward_idp_alerts_total{reason=~\"cred.*\"}`", "not a plain a|b alternation"},
 		{"an unquoted value", "`byward_idp_alerts_total{reason=protocol}`", "cannot read the matcher"},
 		{"a metric with no known set", "`byward_cimd_fetches_total{outcome=\"failure\"}`", "has no known label set"},
 		{"a histogram's count and bucket", "```\nbyward_idp_request_duration_seconds_count{outcome=\"unavailable\"} byward_idp_request_duration_seconds_bucket{le=\"0.5\"}\n```", ""},
 		{"a misspelled outcome", "`byward_idp_request_duration_seconds_count{outcome=\"unavailble\"}`", `never exports outcome "unavailble"`},
-		{"grouping after the expression", "`sum(rate(byward_upstream_busy_total[5m])) by (kidn)`", `has no label "kidn"`},
-		{"an audit event never recorded", "`byward_audit_events_total{event=\"access_token_rejectd\"}`", `"access_token_rejectd"`},
+		{"a misspelled label grouped after the expression", "`sum(rate(byward_upstream_busy_total[5m])) by (kidn)`", `has no label "kidn"`},
+		{"an audit event never recorded", "`byward_audit_events_total{event=\"access_token_rejectd\"}`", `never exports event "access_token_rejectd"`},
 		{"the line it is on", "prose\n\n```yaml\nrules:\n  - expr: byward_upstream_refusals_total{status=\"404\"}\n```", "doc.md:5:"},
 		{"prose is not read", "sort by (status) in prose, byward_upstream_refusals_total{status=\"404\"} outside code", ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			labels, errs := ruleLabels("doc.md", c.text)
-			errs = append(errs, badLabels(labels, knownLabels(t))...)
+			errs = append(errs, badLabels(labels, known)...)
 			if c.want == "" {
 				if len(errs) != 0 {
 					t.Fatalf("want no error, got %q", errs)
