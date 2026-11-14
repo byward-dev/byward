@@ -206,6 +206,7 @@ func TestDevRecordsAnHTTPIdPIssuerOnLoopbackAsARelaxation(t *testing.T) {
 		{"127.0.0.2 over http", "http://127.0.0.2:8180/realms/byward", true, true}, // any loopback address, as the adapter has it
 		{"https", "https://sso.example.com/realms/acme", true, false},
 		{"https on localhost", "https://localhost:8443/realms/byward", true, false},
+		{"another scheme on localhost", "ftp://localhost/realms/byward", true, false},
 		{"http on another host", "http://sso.example.com/realms/acme", true, false},
 		{"http on localhost without --dev", "http://localhost:8180/realms/byward", false, false},
 	} {

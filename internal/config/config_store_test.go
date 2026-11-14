@@ -83,4 +83,8 @@ func TestDevelopmentModeListsThePlaintextPostgreSQLRelaxationOnlyForPostgreSQL(t
 	if c, err = load(t, []string{"--dev"}); err != nil || slices.Contains(c.Relaxations, relaxed) {
 		t.Fatalf("SQLite in development mode: relaxations %q, %v", c.Relaxations, err)
 	}
+	// Without --dev nothing is relaxed, so a production start never logs it (#355).
+	if c, err = loadDSN(t, nil, "BYWARD_STORE_POSTGRES_DSN_FILE="+dsnFile); err != nil || slices.Contains(c.Relaxations, relaxed) {
+		t.Fatalf("PostgreSQL outside development mode: relaxations %q, %v", c.Relaxations, err)
+	}
 }
