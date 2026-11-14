@@ -52,13 +52,43 @@ var allowed = map[string]bool{
 	"tls": true, "cert_file": true, "key_file": true, "subject": true, "not_after": true,
 }
 
-// New returns a logger writing JSON (or text) to w.
+// New returns a logger writing JSON (or text) to w. A line logged with a request's context (the
+// *Context methods) carries its request ID, so callers never add it themselves.
 func New(w io.Writer, format string) *slog.Logger {
 	opts := &slog.HandlerOptions{ReplaceAttr: replace}
 	if format == "text" {
-		return slog.New(slog.NewTextHandler(w, opts))
+		return slog.New(requestIDHandler{slog.NewTextHandler(w, opts)})
 	}
-	return slog.New(slog.NewJSONHandler(w, opts))
+	return slog.New(requestIDHandler{slog.NewJSONHandler(w, opts)})
+}
+
+// requestIDHandler adds the request ID of the record's context (WithRequestID) to every line,
+// unless the line already has one.
+type requestIDHandler struct{ slog.Handler }
+
+func (h requestIDHandler) Handle(ctx context.Context, r slog.Record) error {
+	if id := RequestID(ctx); id != "" && !hasRequestID(r) {
+		r = r.Clone()
+		r.AddAttrs(slog.String("request_id", id))
+	}
+	return h.Handler.Handle(ctx, r)
+}
+
+func (h requestIDHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return requestIDHandler{h.Handler.WithAttrs(attrs)}
+}
+
+func (h requestIDHandler) WithGroup(name string) slog.Handler {
+	return requestIDHandler{h.Handler.WithGroup(name)}
+}
+
+func hasRequestID(r slog.Record) bool {
+	found := false
+	r.Attrs(func(a slog.Attr) bool {
+		found = a.Key == "request_id"
+		return !found
+	})
+	return found
 }
 
 func replace(groups []string, a slog.Attr) slog.Attr {
@@ -137,8 +167,9 @@ func RequestID(ctx context.Context) string {
 	return id
 }
 
-// WithRequestID stores id in ctx.
-func withRequestID(ctx context.Context, id string) context.Context {
+// WithRequestID stores id in ctx as the request's ID. Middleware sets it for every request; a test
+// sets it to drive code that reads it.
+func WithRequestID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, ctxKey{}, id)
 }
 
@@ -159,12 +190,12 @@ func Middleware(log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		id := newRequestID()
-		r = r.WithContext(withRequestID(r.Context(), id))
+		r = r.WithContext(WithRequestID(r.Context(), id))
 		// Echoed so users and operators can quote it; inbound IDs are not trusted (no trusted proxies yet).
 		w.Header().Set("X-Request-Id", id)
 		rec := NewStatusRecorder(w)
 		next.ServeHTTP(rec, r)
-		attrs := []any{"request_id", id, "method", r.Method, "path", r.URL.Path, "status", rec.Status(),
+		attrs := []any{"method", r.Method, "path", r.URL.Path, "status", rec.Status(),
 			"duration_ms", time.Since(start).Milliseconds(), "remote_ip", RemoteIP(r)}
 		if m := r.Header.Get("Mcp-Method"); m != "" {
 			attrs = append(attrs, "mcp_method", m)

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
@@ -319,7 +320,7 @@ func TestTokenErrorsMapToADR0012Classes(t *testing.T) {
 			}
 			e.fake.Set(fakeidp.FailToken(fakeidp.GrantRefreshToken, tc.f))
 			reqID := fakeidp.NewGUID()
-			_, _, err = e.p.Refresh(idp.WithRequestID(context.Background(), reqID), tok.RefreshToken)
+			_, _, err = e.p.Refresh(logging.WithRequestID(context.Background(), reqID), tok.RefreshToken)
 			var ie *idp.Error
 			if !errors.As(err, &ie) {
 				t.Fatalf("err = %v", err)
@@ -353,7 +354,7 @@ func TestNonGUIDRequestIDIsNotSent(t *testing.T) {
 	e := newEnv(t, Config{})
 	_, tok, _ := callback(t, e)
 	e.fake.Set(fakeidp.FailToken(fakeidp.GrantRefreshToken, &fakeidp.RefreshTokenExpired))
-	_, _, err := e.p.Refresh(idp.WithRequestID(context.Background(), "not-a-guid"), tok.RefreshToken)
+	_, _, err := e.p.Refresh(logging.WithRequestID(context.Background(), "not-a-guid"), tok.RefreshToken)
 	var ie *idp.Error
 	if !errors.As(err, &ie) || ie.CorrelationID == "not-a-guid" || ie.CorrelationID == "" {
 		t.Fatalf("err = %#v", err)

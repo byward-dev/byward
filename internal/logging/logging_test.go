@@ -2,12 +2,14 @@ package logging
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -231,6 +233,39 @@ func TestMiddlewareLogsRequestWithoutQueryOrHeaders(t *testing.T) {
 	}
 	if !strings.Contains(out, `"status":418`) || !strings.Contains(out, `"mcp_method":"tools/call"`) {
 		t.Fatalf("missing fields: %s", out)
+	}
+}
+
+// Every line logged with a request's context carries its ID exactly once, in both formats and
+// through a logger with attributes, so no caller adds it by hand; a line without one carries none,
+// and one that already names an ID keeps its own.
+func TestALineCarriesItsRequestsID(t *testing.T) {
+	ctx := WithRequestID(context.Background(), "req-1")
+	for name, tc := range map[string]struct {
+		format string
+		log    func(*slog.Logger)
+		want   []string // request_id values in the line, in order
+	}{
+		"a request's line":     {format: "json", log: func(l *slog.Logger) { l.InfoContext(ctx, "x") }, want: []string{"req-1"}},
+		"through With":         {format: "json", log: func(l *slog.Logger) { l.With("upstream", "u").WarnContext(ctx, "x") }, want: []string{"req-1"}},
+		"through LogAttrs":     {format: "json", log: func(l *slog.Logger) { l.LogAttrs(ctx, slog.LevelError, "x") }, want: []string{"req-1"}},
+		"no request":           {format: "json", log: func(l *slog.Logger) { l.InfoContext(context.Background(), "x") }},
+		"no context":           {format: "json", log: func(l *slog.Logger) { l.Info("x") }},
+		"an ID the caller set": {format: "json", log: func(l *slog.Logger) { l.InfoContext(ctx, "x", "request_id", "own") }, want: []string{"own"}},
+		"the text format":      {format: "text", log: func(l *slog.Logger) { l.InfoContext(ctx, "x") }, want: []string{"req-1"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			tc.log(New(&buf, tc.format))
+			got := regexp.MustCompile(`"?request_id"?[:=]"?([^",\s]+)`).FindAllStringSubmatch(buf.String(), -1)
+			var ids []string
+			for _, m := range got {
+				ids = append(ids, m[1])
+			}
+			if !slices.Equal(ids, tc.want) {
+				t.Fatalf("request IDs %q, want %q: %s", ids, tc.want, buf.String())
+			}
+		})
 	}
 }
 

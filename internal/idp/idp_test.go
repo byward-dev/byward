@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -24,6 +25,7 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
@@ -390,12 +392,6 @@ func TestReadCallback(t *testing.T) {
 	}
 }
 
-func TestRequestIDRoundTrip(t *testing.T) {
-	if RequestID(context.Background()) != "" || RequestID(WithRequestID(context.Background(), "r")) != "r" {
-		t.Fatal("request ID not carried")
-	}
-}
-
 func TestPostTokenIsNeverRetried(t *testing.T) {
 	var n atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -507,21 +503,49 @@ func TestTheFixIsTheIdPsOwnElseTheAlertsDefault(t *testing.T) {
 	}
 }
 
-// #204: an alert survives wrapping; anything else is no alert.
-func TestAlertOfUnwrapsAndDefaultsToNone(t *testing.T) {
+// #204: an alert survives wrapping and is counted and logged once, on the line operators alert on,
+// with the request's ID; anything else is no alert, and neither counted nor logged.
+func TestReportAlertCountsAndLogsOnlyAnAlert(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		err  error
 		want Alert
 	}{
 		{"wrapped", fmt.Errorf("wrap: %w", &Error{Alert: AlertProtocol}), AlertProtocol},
-		{"bare", &Error{Alert: AlertCredentialRejected}, AlertCredentialRejected},
+		{"bare", &Error{Alert: AlertCredentialRejected, OperatorHint: "rotate the secret"}, AlertCredentialRejected},
+		{"an IdP error without an alert", &Error{Class: Unavailable}, ""},
 		{"not an IdP error", errors.New("x"), ""},
 		{"nil", nil, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			if got := AlertOf(c.err); got != c.want {
-				t.Errorf("AlertOf(%v) = %q, want %q", c.err, got, c.want)
+			var logs bytes.Buffer
+			var counted []string
+			ctx := logging.WithRequestID(context.Background(), "req-1")
+			got := ReportAlert(ctx, logging.New(&logs, "json"), "entra", "refresh", c.err, func(op, reason string) { counted = append(counted, op+" "+reason) })
+			if got != (c.want != "") {
+				t.Fatalf("ReportAlert = %v, want %v", got, c.want != "")
+			}
+			if c.want == "" {
+				if counted != nil || logs.Len() != 0 {
+					t.Fatalf("no alert, yet counted %v and logged %q", counted, logs.String())
+				}
+				return
+			}
+			if !slices.Equal(counted, []string{"refresh " + string(c.want)}) {
+				t.Errorf("counted %v, want refresh %s once", counted, c.want)
+			}
+			var line map[string]any
+			if err := json.Unmarshal(logs.Bytes(), &line); err != nil {
+				t.Fatalf("not one JSON line: %q", logs.String())
+			}
+			var e *Error
+			errors.As(c.err, &e)
+			want := map[string]any{"msg": "IdP alert: the operator must act", "level": "ERROR", "idp": "entra", "operation": "refresh",
+				"alert": string(c.want), "reason": e.Fix(), "request_id": "req-1"}
+			for k, v := range want {
+				if line[k] != v {
+					t.Errorf("%s = %v, want %v (line %v)", k, line[k], v, line)
+				}
 			}
 		})
 	}

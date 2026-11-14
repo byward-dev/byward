@@ -132,9 +132,6 @@ func (l *Log) write(ctx context.Context, e Event, ip string, suppressed int) {
 	}
 	attrs := []slog.Attr{slog.String("log.type", "audit"), slog.Int("schema_version", SchemaVersion),
 		slog.String("event", e.Name), slog.String("outcome", e.Outcome)}
-	if id := logging.RequestID(ctx); id != "" {
-		attrs = append(attrs, slog.String("request_id", id))
-	}
 	for _, f := range []struct{ k, v string }{{"reason", e.Reason}, {"client_id", e.ClientID}, {"client_trust", e.ClientTrust}, {"user_key", e.UserKey},
 		{"grant_id", e.GrantID}, {"key_id", e.KeyID}, {"idp", e.IdP}, {"host", e.Host}, {"origin", e.Origin}, {"remote_ip", ip}} {
 		if f.v != "" {
