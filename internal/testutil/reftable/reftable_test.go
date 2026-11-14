@@ -63,8 +63,8 @@ func TestRenderRebuildsOnlyTheTable(t *testing.T) {
 	}
 }
 
-// A row too short to have the key column does not stop render.
-func TestRenderSurvivesARowTooShortForTheKeyColumn(t *testing.T) {
+// A row too short to have the key column does not stop render; it is dropped.
+func TestRenderDropsARowTooShortForTheKeyColumn(t *testing.T) {
 	got, err := render(page, "## Things", 1, nil, row)
 	if err != nil {
 		t.Fatal(err)
