@@ -40,8 +40,9 @@ type oboEnv struct {
 	srv   *httptest.Server
 	logs  *syncBuffer
 
-	mu      sync.Mutex
-	headers []http.Header // what the upstream received
+	mu         sync.Mutex
+	headers    []http.Header // what the upstream received
+	refuseWith int           // when set, the status the upstream answers every request with
 }
 
 func newOBOEnv(t *testing.T, scopes string, opts ...fakeidp.Option) *oboEnv {
@@ -64,7 +65,12 @@ func newOBOEnvWith(t *testing.T, scopes string, env []string, opts ...fakeidp.Op
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		e.mu.Lock()
 		e.headers = append(e.headers, r.Header.Clone())
+		refuseWith := e.refuseWith
 		e.mu.Unlock()
+		if refuseWith != 0 {
+			w.WriteHeader(refuseWith)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{}}`)
 	}))
