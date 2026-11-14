@@ -798,7 +798,7 @@ func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLogAndAWellFormedProxys
 			if w.Code != http.StatusBadGateway || !regexp.MustCompile(`msg="upstream error" .*request_id=[^"\s]+`).MatchString(logs.String()) {
 				t.Fatalf("status %d, log %q; want 502 and the upstream error logged with the request ID", w.Code, logs.String())
 			}
-			if got := strings.Contains(logs.String(), `reason="`+envproxy.Cause+`"`); got != tc.misread {
+			if got := strings.Contains(logs.String(), `error="`+envproxy.Cause+`"`); got != tc.misread {
 				t.Fatalf("log %q names the misread setting: %v, want %v", logs.String(), got, tc.misread)
 			}
 			if !tc.misread && (!strings.Contains(logs.String(), "proxyconnect") || !strings.Contains(logs.String(), addr)) {
@@ -860,7 +860,8 @@ func TestABodyThatBreaksOffReachesTheUpstreamErrorLogAndNeverQuotesAMisreadProxy
 			if !strings.Contains(logs.String(), `level=WARN msg="upstream error"`) {
 				t.Fatalf("log %q; want ReverseProxy's error line in the structured log, as a warning", logs.String())
 			}
-			if tc.misread && (strings.Contains(logs.String(), addr) || !strings.Contains(logs.String(), `reason="`+envproxy.Cause+`"`)) {
+			if tc.misread && (strings.Contains(logs.String(), addr) ||
+				!strings.Contains(logs.String(), `error="httputil: ReverseProxy read error during body copy: `+envproxy.Cause+`"`)) {
 				t.Fatalf("log %q; want the cause, not the address Go dialled", logs.String())
 			}
 			if !tc.misread && (!strings.Contains(logs.String(), `error="httputil: ReverseProxy read error during body copy: `) ||
@@ -886,8 +887,6 @@ func TestTheRelayReadsTheEnvironmentProxyAndNamesAMisreadOnesCause(t *testing.T)
 		if !strings.Contains(got, "STATUS=502") || !strings.Contains(got, `msg="upstream error"`) {
 			t.Fatalf("child output %q; want 502 and the upstream error logged", got)
 		}
-		if strings.Contains(got, `reason="`+envproxy.Cause+`"`) != misread || strings.Contains(got, addr) == misread {
-			t.Fatalf("child output %q; misread %v", got, misread)
-		}
+		rerun.CauseOnlyIfMisread(t, got, addr, misread)
 	})
 }

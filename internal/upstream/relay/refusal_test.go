@@ -130,8 +130,10 @@ func TestRefusalWithTruncatedCaptureFallsBackTo502(t *testing.T) {
 	}
 }
 
-func TestIDIsEchoedExactly(t *testing.T) {
-	for _, id := range []string{`7`, `-1.5e3`, `"xé"`, `"a\"b"`} {
+// MCP's id is a string or an integer (L3): those are echoed byte for byte, a large integer too, and
+// any other value leaves the request unanswerable.
+func TestAStringOrIntegerIDIsEchoedExactlyAndAnyOtherIsRefused(t *testing.T) {
+	for _, id := range []string{`7`, `-12`, `0`, `12345678901234567890`, `"xé"`, `"a\"b"`, `"1.5"`} {
 		req, ok := parseRequest([]byte(`{"jsonrpc":"2.0","method":"m","id":` + id + `}`))
 		if !ok {
 			t.Fatalf("%s rejected", id)
@@ -141,7 +143,7 @@ func TestIDIsEchoedExactly(t *testing.T) {
 			t.Fatalf("id %s echoed as %s (%v)", id, out.ID, err)
 		}
 	}
-	for _, id := range []string{`null`, `true`, `{}`, `[]`} {
+	for _, id := range []string{`null`, `true`, `{}`, `[]`, `1.5`, `-1.5e3`, `1e3`, `1E3`, `7.0`} {
 		if _, ok := parseRequest([]byte(`{"jsonrpc":"2.0","method":"m","id":` + id + `}`)); ok {
 			t.Fatalf("invalid id %s accepted", id)
 		}

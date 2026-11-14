@@ -44,31 +44,26 @@ func isHeaderTimeout(ctx context.Context, err error) bool {
 // the timer only after the request body is fully written, so the capture is complete unless it
 // was truncated.
 func answerTimeout(ctx context.Context, w http.ResponseWriter, method string) outcome {
-	if method != http.MethodPost {
+	c, _ := ctx.Value(captureKey{}).(*capture)
+	var body []byte
+	truncated := c == nil // without a capture the id is unknown
+	if c != nil {
+		body, truncated = c.snapshot()
+	}
+	req, out := decide(method, body, truncated)
+	switch out {
+	case outcomeStreamRefused:
 		w.Header().Set("Allow", http.MethodPost)
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		return outcomeStreamRefused
-	}
-	c, _ := ctx.Value(captureKey{}).(*capture)
-	if c == nil {
-		return timeoutUnanswerable(w)
-	}
-	body, truncated := c.snapshot()
-	req, ok := parseRequest(body)
-	switch {
-	case truncated || !ok:
-		return timeoutUnanswerable(w)
-	case req.id == nil:
+	case outcomeUnanswerable:
+		// The fallback when the request id is unknown: RFC 9110 §15.6.5.
+		http.Error(w, "upstream did not answer in time", http.StatusGatewayTimeout)
+		return outcomeTimedOut
+	case outcomeNotification:
 		w.WriteHeader(http.StatusAccepted)
-		return outcomeNotification
+	default:
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(rpcAnswer(req, msgTimeout, map[string]bool{"upstreamTimeout": true}))
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(rpcAnswer(req, msgTimeout, map[string]bool{"upstreamTimeout": true}))
-	return outcomeSynthesized
-}
-
-// timeoutUnanswerable is the fallback when the request id is unknown: RFC 9110 §15.6.5.
-func timeoutUnanswerable(w http.ResponseWriter) outcome {
-	http.Error(w, "upstream did not answer in time", http.StatusGatewayTimeout)
-	return outcomeTimedOut
+	return out
 }
