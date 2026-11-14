@@ -413,6 +413,9 @@ func TestRefreshNeedsTheRefreshTokenGrant(t *testing.T) {
 	if res, tok := e.redeem(t, back.Query().Get("code"), url.Values{"client_id": {appDoc}, "redirect_uri": {"https://auth.example.com/cb"}}); res.StatusCode != http.StatusOK || tok["refresh_token"] != nil || tok["scope"] != "mcp" {
 		t.Fatalf("redeem: %d %v, want an access token only, scope mcp (offline_access not granted)", res.StatusCode, tok)
 	}
+	if g, err := e.st.Grant(context.Background(), firstGrant(e.st)); err != nil || !g.ExpiresAt.Equal(e.now.Add(AccessLifetime)) {
+		t.Fatalf("grant %+v, %v: want it to end with the access token", g, err)
+	}
 
 	e2, d, mode, tokens := offlineCIMD(t)
 	mode.Store(modeNoRefresh)

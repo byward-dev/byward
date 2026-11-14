@@ -179,5 +179,6 @@ public IdPs and upstreams keep working. Details, Kubernetes and the pitfalls are
   without the role or group gets "You don't have access to this server." and the audit has
   `access_denied` with `reason` `role` or `group`. The client receives no error redirect; it waits
   until its own sign-in times out.
-- Refresh: Keycloak returns an ID token on refresh, which byward needs to recheck the gate. A client gets
-  a refresh token from byward only if it asks for `offline_access`.
+- Refresh: Keycloak returns an ID token on refresh, which byward needs to recheck the gate. byward gives
+  a refresh token to every client that registered the `refresh_token` grant, whether or not it asks
+  for `offline_access` ([ADR-0006](../adr/0006-token-model.md), amended for #287).

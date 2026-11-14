@@ -38,7 +38,11 @@ func (b *Broker) metadataHandler() http.Handler {
 		"code_challenge_methods_supported":                 []string{"S256"},
 		"token_endpoint_auth_methods_supported":            []string{"none", "private_key_jwt"}, // ADR-0008 §1: DCR clients are never offered a secret; configured static secrets still work
 		"token_endpoint_auth_signing_alg_values_supported": []string{"RS256", "PS256", "ES256"},
-		// offline_access: the TS SDK asks for refresh tokens only when it is listed (comment on #49).
+		// offline_access: a client MAY add it when it is listed here (MCP 2026-07-28, Refresh Tokens),
+		// as VS Code (since 1.142), the v2 SDKs and, per its docs, Claude Code do. byward issues a
+		// refresh token to any client that registered the refresh_token grant, with or without it
+		// (ADR-0006 §4, amended for #287). It is never in the challenge or the protected resource
+		// metadata, which the spec advises against.
 		"scopes_supported": []string{b.cfg.Scope, "offline_access"},
 		"authorization_response_iss_parameter_supported": true,
 		"client_id_metadata_document_supported":          b.cfg.CIMD, // ADR-0008 §1
@@ -102,6 +106,10 @@ type login struct {
 	// Silent is a prompt=none sign-in: the IdP is asked with prompt=none too, and anything that
 	// would need the user ends in an error at the redirect URI instead of a page (#126).
 	Silent bool `json:"x,omitempty"`
+	// Refresh is what the page says, or would say, about the lifetime when the login starts: "up to
+	// 30 days" for a client that registered the refresh_token grant. The callback grants refresh
+	// tokens and remembers the consent by it, not by the registration it reads later (#287).
+	Refresh bool `json:"rt,omitempty"`
 }
 
 func (b *Broker) cookieName(idpState string) string {
@@ -170,7 +178,7 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	l := login{ClientID: client.ID(), RedirectURI: redirect, State: q.Get("state"), Challenge: q.Get("code_challenge"),
-		Scopes: scopes, IdPState: randomID() + randomID(), Nonce: randomID(), Verifier: randomID() + randomID()}
+		Scopes: scopes, IdPState: randomID() + randomID(), Nonce: randomID(), Verifier: randomID() + randomID(), Refresh: client.AllowsRefresh()}
 	// Refused now rather than lost later: a browser drops a cookie over 4 KB, which would surface
 	// only at the callback as an expired sign-in.
 	if _, err := encodeLogin(l); err != nil {
@@ -609,17 +617,28 @@ func (b *Broker) clientLookupFailed(ctx context.Context, clientID string, err er
 	b.cfg.Log.WarnContext(ctx, msg, "request_id", logging.RequestID(ctx), "error", err.Error())
 }
 
-// grantScopes are the scopes a new grant gets: those approved, less offline_access when the IdP
-// returned no refresh token, since a proxy refresh token could then only revoke the grant at its
-// first use. An IdP adapter that stops asking for refresh tokens shows up here, as a warning for a
-// client that may refresh, not as hourly sign-ins. The approved scopes themselves stay as they are.
+// grantScopes are the scopes a new grant gets: the approved ones but offline_access, which stands for
+// the grant's refresh tokens and is added, whether or not it was asked for, only when the page
+// said "up to 30 days" (l.Refresh) and the client still registers the refresh_token grant (ADR-0006
+// §4, amended for #287). A grant whose IdP returned no refresh token gets none either, since a proxy
+// refresh token could then only revoke the grant at its first use: an IdP adapter that stops asking
+// for refresh tokens shows up here, as a warning for a client that may refresh, not as hourly
+// sign-ins.
 func (b *Broker) grantScopes(ctx context.Context, l login, toks idp.Tokens) []string {
-	if !slices.Contains(l.Scopes, "offline_access") || toks.RefreshToken != "" {
-		return l.Scopes
+	scopes := slices.DeleteFunc(slices.Clone(l.Scopes), func(s string) bool { return s == "offline_access" })
+	c, err := b.cfg.Clients.Client(ctx, l.ClientID)
+	if err != nil {
+		b.cfg.Log.WarnContext(ctx, "looking up the client failed, so this grant cannot refresh", "request_id", logging.RequestID(ctx),
+			"client_id", l.ClientID, "error", err.Error())
+		return scopes
 	}
-	if c, err := b.cfg.Clients.Client(ctx, l.ClientID); err == nil && c.AllowsRefresh() {
+	if !l.Refresh || !c.AllowsRefresh() { // as the page said, and as the client still registers
+		return scopes
+	}
+	if toks.RefreshToken == "" {
 		b.cfg.Log.WarnContext(ctx, "the IdP returned no refresh token, so this grant cannot refresh", "request_id", logging.RequestID(ctx),
 			"idp", b.cfg.IdPName, "client_id", l.ClientID, "reason", "check that the IdP is asked for refresh tokens; see the IdP's how-to")
+		return scopes
 	}
-	return slices.DeleteFunc(slices.Clone(l.Scopes), func(s string) bool { return s == "offline_access" })
+	return append(scopes, "offline_access")
 }

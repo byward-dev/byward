@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -160,8 +161,6 @@ func TestTheConsentPageReturnsForWhatIsNotRemembered(t *testing.T) {
 		later  url.Values
 		before func(e *env, h **http.Cookie) // changes the world between the two sign-ins
 	}{
-		"a wider scope":     {later: url.Values{"scope": {"mcp offline_access"}}},
-		"another scope":     {later: url.Values{"scope": {"offline_access"}}},
 		"another client":    {later: url.Values{"client_id": {otherClientID}}},
 		"another redirect":  {later: url.Values{"redirect_uri": {webCB}}, before: func(e *env, _ **http.Cookie) { e.reg.reregister(clientID, webCB) }},
 		"prompt=consent":    {later: url.Values{"prompt": {"login consent"}}},
@@ -457,4 +456,144 @@ func TestAGrantWithoutRefreshKeepsTheApprovedScopesRemembered(t *testing.T) {
 	if res := e.authorizeWith(t, as, h); !skipped(res) {
 		t.Fatalf("the next sign-in asking for offline_access: %d, want remembered", res.StatusCode)
 	}
+}
+
+// A consent given while the page said "up to 1 hour" (a client without the refresh_token grant) does
+// not cover a grant that refreshes once the client registers the grant (#287): the page returns, and
+// a silent sign-in is refused with consent_required, rather than a 30-day grant the user never saw.
+func TestARememberedOneHourConsentDoesNotCoverARefreshingGrant(t *testing.T) {
+	interactive := func(t *testing.T, _ *env, res *http.Response) {
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("authorize: %d to %q, want the consent page", res.StatusCode, res.Header.Get("Location"))
+		}
+	}
+	quiet := func(t *testing.T, e *env, res *http.Response) {
+		if got := answerOf(t, res); got != refused(e, "consent_required") {
+			t.Fatalf("answer %+v, want consent_required", got)
+		}
+	}
+	for _, tc := range []struct {
+		name, remembered string // what the client asked for when the user allowed
+		extra            url.Values
+		check            func(*testing.T, *env, *http.Response)
+	}{
+		{"interactive", "mcp", nil, interactive},
+		{"silent", "mcp", silent(nil), quiet},
+		// offline_access asked for, but the page still said "up to 1 hour": not approved either.
+		{"interactive, offline_access asked for", "mcp offline_access", nil, interactive},
+		{"silent, offline_access asked for", "mcp offline_access", silent(nil), quiet},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			grants := new(atomic.Bool)
+			e := newEnv(t, withRemember(t, nil), func(c *Config) { c.Clients = refreshGrantWhen{c.Clients, grants} })
+			h := e.remember(t, url.Values{"scope": {tc.remembered}}) // the page said "up to 1 hour"
+			if h == nil {
+				t.Fatal("no hint cookie: the one-hour consent was not remembered")
+			}
+			grants.Store(true) // the client registers the refresh_token grant
+			tc.check(t, e, e.authorizeWith(t, tc.extra, h))
+		})
+	}
+}
+
+// A client that registers the refresh_token grant between the page ("up to 1 hour") and the callback
+// gets the grant the page described: no refresh token, and a consent that does not cover a grant
+// that refreshes, so the next sign-in shows the page again (#287).
+func TestTheGrantFollowsThePageWhenTheClientRegistersTheRefreshGrantBeforeTheCallback(t *testing.T) {
+	grants := new(atomic.Bool)
+	e := newEnv(t, withRemember(t, nil), func(c *Config) { c.Clients = refreshGrantWhen{c.Clients, grants} })
+	ck, cb := e.startLogin(t, url.Values{"scope": {"mcp"}}) // the page says "up to 1 hour"
+	grants.Store(true)
+	res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{ck})
+	if res.StatusCode != http.StatusFound {
+		t.Fatalf("callback: %d, want the redirect to the client", res.StatusCode)
+	}
+	h := hintIn(e, res)
+	if h == nil {
+		t.Fatal("the callback set no hint cookie: the one-hour consent was not remembered")
+	}
+	loc, _ := url.Parse(res.Header.Get("Location"))
+	e.redeemWithoutRefresh(t, loc.Query().Get("code"))
+	if r := e.authorizeWith(t, nil, h); r.StatusCode != http.StatusOK {
+		t.Fatalf("next authorize: %d to %q, want the consent page", r.StatusCode, r.Header.Get("Location"))
+	}
+}
+
+// refreshGrantWhen is the registry with the static client registering the refresh_token grant only
+// while grants holds.
+type refreshGrantWhen struct {
+	registration.Registry
+	grants *atomic.Bool
+}
+
+func (r refreshGrantWhen) Client(ctx context.Context, id string) (registration.Client, error) {
+	c, err := r.Registry.Client(ctx, id)
+	if err != nil || r.grants.Load() {
+		return c, err
+	}
+	return noRefresh{c}, nil
+}
+
+// A sign-in that skipped the page under a one-hour consent, whose client registers the refresh_token
+// grant before the callback, gets the page again (the consent no longer covers it), and that page
+// still says what the login started with, "up to 1 hour", which is what its grant will last (#287).
+func TestThePageShownAgainAfterTheCallbackStatesTheLifetimeTheLoginStartedWith(t *testing.T) {
+	grants := new(atomic.Bool)
+	e := newEnv(t, withRemember(t, nil), func(c *Config) { c.Clients = refreshGrantWhen{c.Clients, grants} })
+	h := e.remember(t, url.Values{"scope": {"mcp"}})
+	res := e.authorizeWith(t, nil, h) // the remembered consent covers it: on to the IdP
+	if res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("authorize: %d, want the IdP redirect", res.StatusCode)
+	}
+	grants.Store(true)
+	page := e.finish(t, res)
+	b, _ := io.ReadAll(page.Body)
+	text := visibleText(string(b))
+	if page.StatusCode != http.StatusOK || !strings.Contains(text, "up to 1 hour,") {
+		t.Fatalf("callback: %d %s, want the consent page saying up to 1 hour", page.StatusCode, text)
+	}
+}
+
+// A remembered client that never registered the refresh_token grant keeps its one-hour consent: the
+// page is skipped, the callback issues a code, and the grant gets no refresh token; a silent sign-in
+// goes on to the IdP (#287).
+func TestARememberedClientWithoutTheRefreshGrantKeepsItsOneHourConsent(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		extra url.Values
+	}{{"interactive", nil}, {"silent", silent(nil)}} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t, withRemember(t, nil), withoutRefreshGrant)
+			h := e.remember(t, url.Values{"scope": {"mcp"}})
+			e.fake.Set(fakeidp.WithSilentSession()) // the IdP still has the user's session
+			res := e.authorizeWith(t, tc.extra, h)
+			if !skipped(res) {
+				t.Fatalf("authorize: %d to %q, want the IdP without the page", res.StatusCode, res.Header.Get("Location"))
+			}
+			back := e.finish(t, res)
+			loc, _ := url.Parse(back.Header.Get("Location"))
+			if back.StatusCode != http.StatusFound || loc.Query().Get("code") == "" {
+				t.Fatalf("callback: %d to %q, want the redirect with a code", back.StatusCode, back.Header.Get("Location"))
+			}
+			e.redeemWithoutRefresh(t, loc.Query().Get("code"))
+		})
+	}
+}
+
+// A client that drops the refresh_token grant between the page ("up to 30 days") and the callback
+// gets a grant without refresh, even if it registers the grant again before redeeming the code: the
+// callback grants refresh only to a client that still registers it (#287).
+func TestTheCallbackGrantsRefreshOnlyToAClientThatStillRegistersIt(t *testing.T) {
+	grants := new(atomic.Bool)
+	grants.Store(true)
+	e := newEnv(t, func(c *Config) { c.Clients = refreshGrantWhen{c.Clients, grants} })
+	ck, cb := e.startLogin(t, url.Values{"scope": {"mcp"}}) // the page says "up to 30 days"
+	grants.Store(false)
+	res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{ck})
+	if res.StatusCode != http.StatusFound {
+		t.Fatalf("callback: %d, want the redirect to the client", res.StatusCode)
+	}
+	grants.Store(true)
+	loc, _ := url.Parse(res.Header.Get("Location"))
+	e.redeemWithoutRefresh(t, loc.Query().Get("code"))
 }

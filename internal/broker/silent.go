@@ -40,7 +40,7 @@ func (b *Broker) authorizeSilently(w http.ResponseWriter, r *http.Request, clien
 		b.refuseSilently(w, r, client.Trust(), l, "login_required", "the user must sign in")
 		return
 	}
-	ok, err := b.remembered(r.Context(), h, l, b.cfg.Now())
+	ok, err := b.remembered(r.Context(), h, l, l.Refresh, b.cfg.Now())
 	switch {
 	case err != nil:
 		b.cfg.Log.WarnContext(r.Context(), "checking remembered consent failed", "request_id", logging.RequestID(r.Context()), "error", err.Error())

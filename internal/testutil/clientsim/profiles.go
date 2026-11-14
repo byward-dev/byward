@@ -77,9 +77,10 @@ var (
 		Client: "VS Code", Version: "1.145.2 (source)", Cell: "VS Code × CIMD",
 		Registration: CIMD, Document: "vscode", RedirectURI: "http://127.0.0.1:33418/", ProtocolVersion: "2025-11-25",
 		Discovery: []string{"/.well-known/oauth-protected-resource/"}, ASMetadata: []string{"oauth-authorization-server", "openid-configuration"},
-		UsesChallenge: true, SendsResource: true,
+		UsesChallenge: true, SendsResource: true, AddsOfflineAccess: true,
 		Treats403AsAuthFailure: true,
 		Facts: []Fact{
+			{"appends offline_access when the authorization server metadata lists it (since 1.142.0)", "microsoft/vscode 1.145.2 extHostAuthentication.ts _getRequestScopes"},
 			{"stored registration, then CIMD when configured (it does not check for none), then DCR", "microsoft/vscode 1.145.2 mainThreadAuthentication.ts:183-194"},
 			{"sends resource on authorize and token", "microsoft/vscode 1.145.2 extHostAuthentication.ts:739,749,837,900"},
 			{"scope from the challenge, else the PRM's scopes_supported", "microsoft/vscode 1.145.2 extHostMcp.ts:1158-1187"},

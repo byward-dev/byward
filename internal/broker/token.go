@@ -181,7 +181,8 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 	}
 	// The grant was created short-lived at the callback, so an abandoned login expires soon; now
 	// that the code is redeemed it lives as long as its tokens can (ADR-0006 §5).
-	// A refresh token needs offline_access and a client that registered the refresh_token grant.
+	// A refresh token needs offline_access in the grant (grantScopes: a client that registered the
+	// refresh_token grant, and an IdP refresh token) and a client that still allows refresh.
 	offline := slices.Contains(pc.Scopes, "offline_access") && client.AllowsRefresh()
 	expires := now.Add(AccessLifetime)
 	if offline {

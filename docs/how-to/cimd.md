@@ -36,7 +36,7 @@ app.example.com returning to auth.example.com is not flagged).
 - **The document**:
   - `client_id` equals the URL exactly, and `client_name` is present;
   - `redirect_uris` follow the [redirect policy](../adr/0009-redirect-uri-policy.md);
-  - `authorization_code` is among the grant types. Refresh tokens are issued only if `refresh_token` is too, even when the app asks for `offline_access`; the consent page then says "up to 1 hour";
+  - `authorization_code` is among the grant types. Refresh tokens are issued if `refresh_token` is too, whether or not the app asks for `offline_access`; without it, none are, even with `offline_access`, and the consent page says "up to 1 hour";
   - no client secret. The auth method is `none` or `private_key_jwt`, with `jwks` or `jwks_uri`, which is fetched through the guard too.
 - **Caching**:
   - a document is cached for its `Cache-Control` lifetime, kept between 1 minute and 24 hours. A `no-store` document is still reused for 1 minute;

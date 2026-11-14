@@ -252,8 +252,8 @@ shows the proxy's consent page, then Entra's sign-in. With the reference server 
 ask Claude Code to call its `echo` tool to see a request go all the way through. This was verified
 against Entra on 2026-11-06.
 
-Claude Code asks for `offline_access`, so it receives a refresh token and the consent page says "up
-to 30 days". It renews its access token before the hour is up, without opening the browser (checked
+Claude Code registers the `refresh_token` grant, so it receives a refresh token and the consent page
+says "up to 30 days". It renews its access token before the hour is up, without opening the browser (checked
 with Claude Code 2.1.311 against a real tenant on 2026-11-06).
 
 ## Optional: Claude Code as a static client

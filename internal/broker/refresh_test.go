@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
@@ -98,29 +99,42 @@ func wantOAuthError(t *testing.T, res *http.Response, body map[string]any, statu
 	}
 }
 
-func TestOfflineAccessIssuesARefreshTokenAndExtendsTheGrant(t *testing.T) {
-	e := newEnv(t)
-	body := e.offline(t)
-	rt, _ := body["refresh_token"].(string)
-	if !strings.HasPrefix(rt, token.RefreshPrefix) || !strings.Contains(body["scope"].(string), "offline_access") {
-		t.Fatalf("token response %v: want a refresh token and offline_access", body)
-	}
-	g, err := e.st.Grant(context.Background(), firstGrant(e.st))
-	if err != nil || !g.ExpiresAt.Equal(e.now.Add(GrantLifetime)) {
-		t.Fatalf("grant %+v, %v: want it to live GrantLifetime after redemption", g, err)
+// A client that registered the refresh_token grant gets a refresh token, with or without
+// offline_access (the MCP SDKs that send only the challenge's scope never add it), and its grant lives
+// GrantLifetime (#287, ADR-0006 as amended). The response's scope reports what was granted (RFC 6749
+// §5.1). A client without the grant: TestRefreshNeedsTheRefreshTokenGrant, with a real document.
+func TestARefreshTokenGoesToEveryClientThatRegisteredTheRefreshGrant(t *testing.T) {
+	for _, scope := range []string{"mcp offline_access", "mcp"} {
+		t.Run(scope, func(t *testing.T) {
+			e := newEnv(t)
+			res, body := e.redeem(t, e.signIn(t, url.Values{"scope": {scope}}).Query().Get("code"), nil)
+			rt, _ := body["refresh_token"].(string)
+			granted, _ := body["scope"].(string)
+			if res.StatusCode != http.StatusOK || !strings.HasPrefix(rt, token.RefreshPrefix) || !sameScopes(granted, "mcp offline_access") {
+				t.Fatalf("token: %d %v; want a refresh token and the scope mcp offline_access", res.StatusCode, body)
+			}
+			if g, err := e.st.Grant(context.Background(), firstGrant(e.st)); err != nil || !g.ExpiresAt.Equal(e.now.Add(GrantLifetime)) {
+				t.Fatalf("grant %+v, %v: want it to live GrantLifetime after redemption", g, err)
+			}
+			// It refreshes, rather than signing in again when the access token expires.
+			if res, r := e.refresh(t, rt, ""); res.StatusCode != http.StatusOK || r["refresh_token"] == nil || r["refresh_token"] == rt {
+				t.Fatalf("refresh: %d %v, want a new refresh token", res.StatusCode, r)
+			}
+		})
 	}
 }
 
-func TestWithoutOfflineAccessThereIsNoRefreshTokenAndTheGrantEndsWithTheAccessToken(t *testing.T) {
-	e := newEnv(t)
-	_, body := e.redeem(t, e.signIn(t, nil).Query().Get("code"), nil)
-	if _, ok := body["refresh_token"]; ok {
-		t.Fatalf("token response %v: no refresh token without offline_access", body)
-	}
-	if g, _ := e.st.Grant(context.Background(), firstGrant(e.st)); !g.ExpiresAt.Equal(e.now.Add(AccessLifetime)) {
-		t.Fatalf("grant expires %v, want with the access token", g.ExpiresAt)
-	}
+// sameScopes reports whether two space-separated scope lists hold the same scopes, in any order (RFC
+// 6749 §3.3).
+func sameScopes(a, b string) bool {
+	x, y := strings.Fields(a), strings.Fields(b)
+	slices.Sort(x)
+	slices.Sort(y)
+	return slices.Equal(x, y)
 }
+
+// withoutRefreshGrant makes the static client one that did not register the refresh_token grant.
+func withoutRefreshGrant(c *Config) { c.Clients = refreshGrantWhen{c.Clients, new(atomic.Bool)} }
 
 func TestAbandonedLoginLeavesOnlyAShortLivedGrant(t *testing.T) {
 	e := newEnv(t)
@@ -885,16 +899,21 @@ func TestASignInThatWouldRefreshButGotNoIdPRefreshTokenWarnsAndGetsNoRefreshToke
 	for name, tc := range map[string]struct {
 		scope       string
 		strip       bool // the IdP returns no refresh token
+		noGrant     bool // the client did not register the refresh_token grant
 		warn, fresh bool // a warning; a proxy refresh token
 	}{
-		"the IdP gave none":                   {"mcp offline_access", true, true, false},
-		"the IdP gave one":                    {"mcp offline_access", false, false, true},
-		"no refresh asked, the IdP gave none": {"mcp", true, false, false},
+		"the IdP gave none":                                           {"mcp offline_access", true, false, true, false},
+		"the IdP gave one":                                            {"mcp offline_access", false, false, false, true},
+		"without offline_access, the IdP gave none":                   {"mcp", true, false, true, false},
+		"a client without the refresh_token grant, the IdP gave none": {"mcp offline_access", true, true, false, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t, func(c *Config) {
 				if tc.strip {
 					c.IdP = noRefreshToken{c.IdP}
+				}
+				if tc.noGrant {
+					withoutRefreshGrant(c)
 				}
 			})
 			code := e.signIn(t, url.Values{"scope": {tc.scope}}).Query().Get("code")
@@ -1046,4 +1065,59 @@ func TestARefreshErrorWithNoFixFailsTheRequestKeepsTheGrantAndRaisesNoAlert(t *t
 			}
 		})
 	}
+}
+
+// A client whose registration drops the refresh_token grant between the callback and the code's
+// redemption (a CIMD document refetched without it) gets no refresh token: the token endpoint checks
+// the grant again, so the IdP tokens are not held for 30 days for a client that may not refresh.
+func TestAClientThatDropsTheRefreshGrantBeforeRedemptionGetsNoRefreshToken(t *testing.T) {
+	grants := new(atomic.Bool)
+	grants.Store(true)
+	e := newEnv(t, func(c *Config) { c.Clients = refreshGrantWhen{c.Clients, grants} })
+	code := e.signIn(t, url.Values{"scope": {"mcp"}}).Query().Get("code")
+	grants.Store(false)
+	e.redeemWithoutRefresh(t, code)
+	if g, err := e.st.Grant(context.Background(), firstGrant(e.st)); err != nil || !g.ExpiresAt.Equal(e.now.Add(AccessLifetime)) {
+		t.Fatalf("grant %+v, %v: want it to end with the access token", g, err)
+	}
+}
+
+// When the client cannot be looked up at the callback, the sign-in still completes, but the grant
+// gets no refresh token, and the operator sees why in a warning, rather than hourly sign-ins with no
+// trace.
+func TestAClientLookupFailureAtTheCallbackGivesNoRefreshAndWarns(t *testing.T) {
+	down := new(atomic.Bool)
+	e := newEnv(t, func(c *Config) { c.Clients = downWhen{c.Clients, down} })
+	ck, cb := e.startLogin(t, url.Values{"scope": {"mcp offline_access"}})
+	down.Store(true)
+	res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{ck})
+	down.Store(false)
+	if res.StatusCode != http.StatusFound {
+		t.Fatalf("callback: %d, want the redirect to the client", res.StatusCode)
+	}
+	loc, _ := url.Parse(res.Header.Get("Location"))
+	e.redeemWithoutRefresh(t, loc.Query().Get("code"))
+	if !strings.Contains(e.logs.String(), `"msg":"looking up the client failed, so this grant cannot refresh"`) || !strings.Contains(e.logs.String(), `"client_id":"`+clientID+`"`) {
+		t.Fatalf("no warning naming the client:\n%s", e.logs.String())
+	}
+}
+
+// downWhen is the registry, unreachable while down holds.
+type downWhen struct {
+	registration.Registry
+	down *atomic.Bool
+}
+
+func (d downWhen) Client(ctx context.Context, id string) (registration.Client, error) {
+	if d.down.Load() {
+		return failingRegistry{}.Client(ctx, id)
+	}
+	return d.Registry.Client(ctx, id)
+}
+
+// failingRegistry is a client registry that cannot be reached.
+type failingRegistry struct{}
+
+func (failingRegistry) Client(context.Context, string) (registration.Client, error) {
+	return nil, fmt.Errorf("%w: refetch timed out", registration.ErrUnavailable)
 }
