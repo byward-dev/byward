@@ -101,7 +101,8 @@ func TestTheAlertRulesInTheDocsQueryExportedMetrics(t *testing.T) {
 	if rules == "" {
 		t.Fatal("observability.md has no example alert rules")
 	}
-	for doc, text := range map[string]string{"observability.md's alert rules": rules, "respond-to-alerts.md": readDoc(t, "how-to/respond-to-alerts.md")} {
+	for doc, text := range map[string]string{"observability.md's alert rules": rules, "respond-to-alerts.md": readDoc(t, "how-to/respond-to-alerts.md"),
+		"harden-a-deployment.md": readDoc(t, "how-to/harden-a-deployment.md")} {
 		names := metricName.FindAllString(text, -1)
 		if len(names) == 0 {
 			t.Errorf("%s queries no byward_ metric; the scan found nothing", doc)
@@ -139,13 +140,17 @@ func knownLabels(t *testing.T) map[string]map[string][]string {
 			events = append(events, m[1])
 		}
 	}
+	var statuses []string // seeded by metrics.New
+	for _, m := range regexp.MustCompile(`byward_upstream_refusals_total\{status="([^"]+)"\}`).FindAllStringSubmatch(scrapeMetrics(t, metrics.New()), -1) {
+		statuses = append(statuses, m[1])
+	}
 	kinds := []string{"request", "stream"} // admit in server.go has no list
 	return map[string]map[string][]string{
 		"byward_idp_request_duration_seconds": {"idp": idps, "operation": broker.IdPOperations,
 			"outcome": {"success", "rejected", "unavailable"}}, // idpOutcome in internal/broker, unexported
 		"byward_idp_alerts_total":        {"idp": idps, "operation": append(slices.Clone(broker.IdPOperations), opOnBehalfOf), "reason": reasons},
 		"byward_audit_events_total":      {"event": events, "outcome": {audit.Success, audit.Failure}},
-		"byward_upstream_refusals_total": {"status": {"401", "403"}},
+		"byward_upstream_refusals_total": {"status": statuses},
 		"byward_upstream_busy_total":     {"kind": kinds},
 		"byward_upstream_in_flight":      {"kind": kinds},
 	}
@@ -300,9 +305,13 @@ func TestABadLabelInADocumentedRuleIsReportedWithItsLine(t *testing.T) {
 		{"a misspelled grouping label", "`sum by (stauts) (increase(byward_upstream_refusals_total[5m]))`", `has no label "stauts"`},
 		{"a misspelled filter label", "`byward_upstream_busy_total{knd=\"request\"}`", `has no label "knd"`},
 		{"a value never exported", "`byward_upstream_refusals_total{status=\"404\"}`", `never exports status "404"`},
-		{"!=", "`byward_idp_alerts_total{reason!=\"protocl\"}`", `"protocl"`},
-		{"=~ alternation", "`byward_idp_alerts_total{idp=\"entra\",reason=~\"credential_rejected|protocl\"}`", `"protocl"`},
-		{"!~ alternation", "`byward_idp_alerts_total{reason!~\"credential_unusable|protocl\"}`", `"protocl"`},
+		{"a misspelled value in a != matcher", "`byward_idp_alerts_total{reason!=\"protocl\"}`", `never exports reason "protocl"`},
+		{"a misspelled alternative in a =~ matcher", "`byward_idp_alerts_total{idp=\"entra\",reason=~\"credential_rejected|protocl\"}`", `never exports reason "protocl"`},
+		{"a misspelled alternative in a !~ matcher", "`byward_idp_alerts_total{reason!~\"credential_unusable|protocl\"}`", `never exports reason "protocl"`},
+		{"every selector in a code region", "`byward_idp_alerts_total{reason=\"protocol\"} + byward_idp_alerts_total{reason=\"protocl\"}`", `never exports reason "protocl"`},
+		{"every code region in a document", "`byward_idp_alerts_total{reason=\"protocol\"}` and `byward_idp_alerts_total{reason=\"protocl\"}`", `never exports reason "protocl"`},
+		{"every grouping in a code region", "```yaml\n- expr: sum by (status) (increase(byward_upstream_refusals_total[5m]))\n- expr: sum by (stauts) (increase(byward_upstream_refusals_total[5m]))\n```", `doc.md:3: byward_upstream_refusals_total has no label "stauts"`},
+		{"a grouping with no byward_ metric", "`sum by (status) (rate(up[5m]))`", "no byward_ metric"},
 		{"a regex that is not a plain alternation", "`byward_idp_alerts_total{reason=~\"cred.*\"}`", "not a plain a|b alternation"},
 		{"an unquoted value", "`byward_idp_alerts_total{reason=protocol}`", "cannot read the matcher"},
 		{"a metric with no known set", "`byward_cimd_fetches_total{outcome=\"failure\"}`", "has no known label set"},
