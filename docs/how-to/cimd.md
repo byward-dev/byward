@@ -14,8 +14,9 @@ need no registration. This is on by default, and the proxy advertises it in its 
 | `BYWARD_CIMD_TRUSTED_HOSTS` | — | Hosts whose documents you vouch for, for example `claude.ai,vscode.dev`. Their apps show as "Trusted by your operator". Consent for their apps is remembered for 30 days per user ([ADR-0010](../adr/0010-consent-screen.md) §2-3); apps of other hosts are asked every time. |
 | `BYWARD_CIMD_ALLOWED_HOSTS` | — | When set, only these hosts and the trusted ones may publish documents; any other app is refused before its document is fetched. Empty allows any host. |
 
-Hosts are exact, comma-separated ASCII names, with no scheme, port, path or wildcard. A
-subdomain is a different host. An internationalized host goes in its `xn--` form.
+Hosts are exact, comma-separated ASCII names, with no scheme, port, path or wildcard: letters,
+digits and `- . _ ~` only, at least one dot, and no leading, trailing or double dot. A subdomain is
+a different host. An internationalized host goes in its `xn--` form.
 
 Any other host's apps show as "Identified by its web address". Every CIMD app's consent page shows
 the host that published its document ("Published by"), and warns when the app returns to an

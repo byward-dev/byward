@@ -41,16 +41,22 @@ func checkInlineSecrets(v *Values, dev bool) (relaxation string, err error) {
 }
 
 // ParsePublicURL validates the public URL of the MCP endpoint, as `byward init entra` also needs it:
-// absolute, an ASCII host, a path without a trailing slash, no query or fragment, and https unless
-// the host is loopback (which the proxy itself accepts only with --dev).
+// absolute, an ASCII host that is an IP address or follows validHostName's rule, a path without a
+// trailing slash, no query or fragment, and https unless the host is loopback (which the proxy
+// itself accepts only with --dev).
 func ParsePublicURL(raw string) (*url.URL, error) {
 	u, err := parseURL("public-url", raw)
 	if err != nil {
 		return nil, err
 	}
 	var errs []string
-	if err := asciiHost(u.Hostname()); err != nil {
+	if u.Hostname() == "" {
+		errs = append(errs, "BYWARD_PUBLIC_URL: give a host, e.g. https://mcp.example.com/mcp")
+	} else if err := asciiHost(u.Hostname()); err != nil {
 		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: %v", err))
+	} else if _, ipErr := netip.ParseAddr(u.Hostname()); ipErr != nil && !validHostName(u.Hostname()) {
+		// The host joins the public listener's Host allow-list, as BYWARD_ALLOWED_HOSTS entries do (#344).
+		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: the host %q is not valid: %s", u.Hostname(), hostNameRule))
 	}
 	if u.Path == "" || strings.HasSuffix(u.Path, "/") {
 		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://%s/mcp", u.Host))
@@ -188,7 +194,7 @@ func normalizeAllowedHost(h string) (string, error) {
 			return "", invalid
 		}
 		if !validHostName(host) {
-			return "", fmt.Errorf("%q is not a host[:port]: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)", h)
+			return "", fmt.Errorf("%q is not a host[:port]: %s", h, hostNameRule)
 		}
 		port, hasPort = p, ok
 	}
@@ -207,13 +213,17 @@ func normalizeAllowedHost(h string) (string, error) {
 	return strings.ToLower(stored), nil
 }
 
-// validHostName reports whether host is a name an allowed host can match on (#334): only RFC 3986's
-// unreserved characters (a DNS name never uses reg-name's sub-delims or %-escapes, which a Host
-// header could carry), and no empty label. A trailing dot is refused, not stripped: the entry would
+// hostNameRule is what validHostName requires, for the errors of the settings that use it.
+const hostNameRule = "a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)"
+
+// validHostName reports whether host is a name a host setting can match on: BYWARD_ALLOWED_HOSTS
+// (#334), BYWARD_PUBLIC_URL's host, BYWARD_CIMD_TRUSTED_HOSTS and BYWARD_CIMD_ALLOWED_HOSTS
+// (#344). Not empty, only RFC 3986's unreserved characters (a DNS name never uses reg-name's
+// sub-delims or %-escapes, which a Host header or a URL could carry), and no empty label. A trailing dot is refused, not stripped: the setting would
 // match only a client given the absolute name, never the usual one, so it is almost always copied
 // from a DNS zone by mistake.
 func validHostName(host string) bool {
-	return strings.Trim(host, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~") == "" &&
+	return host != "" && strings.Trim(host, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~") == "" &&
 		!strings.HasPrefix(host, ".") && !strings.HasSuffix(host, ".") && !strings.Contains(host, "..")
 }
 
