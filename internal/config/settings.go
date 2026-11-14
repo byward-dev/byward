@@ -69,6 +69,7 @@ var registry = []Setting{
 	{Name: "oidc-client-id", Group: GroupOIDC, Auth: true, Help: "with an oidc IdP: the client ID of the proxy's app at the IdP"},
 	{Name: "oidc-client-secret", Group: GroupOIDC, Auth: true, Secret: true, Help: "with an oidc IdP: the client secret; give this or BYWARD_OIDC_CLIENT_KEY_FILE"},
 	{Name: "oidc-client-key", Group: GroupOIDC, Auth: true, Secret: true, Help: "with an oidc IdP: a PEM private key (RSA or EC P-256) for private_key_jwt instead of a secret"},
+	{Name: "oidc-client-key-alg", Group: GroupOIDC, Auth: true, Help: "with an oidc IdP and BYWARD_OIDC_CLIENT_KEY_FILE: the client assertion's signing algorithm, PS256 or RS256 for an RSA key, ES256 for an EC P-256 key; default PS256 for RSA, ES256 for EC. Okta refuses PS256: use RS256 there (docs/how-to/oidc.md)"},
 	{Name: "oidc-client-key-id", Group: GroupOIDC, Auth: true, Help: "with an oidc IdP: the key ID (kid) the IdP registered for BYWARD_OIDC_CLIENT_KEY_FILE"},
 	{Name: "oidc-scopes", Group: GroupOIDC, Auth: true, Help: "with an oidc IdP: comma-separated scopes to request besides openid and the preset's"},
 	{Name: "oidc-subject-claim", Group: GroupOIDC, Auth: true, Default: "sub", Help: "with an oidc IdP: the claim that identifies a user; one users can change (email, preferred_username, upn, name) logs a warning"},

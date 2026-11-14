@@ -41,8 +41,11 @@ Checks everything the proxy checks at startup that needs no network and writes n
 
 It prints the warnings the proxy would log at startup (an empty access gate, generic consent
 wording, a client secret or client certificate that expires within 30 days, a TLS certificate that
-expires within 30 days or names neither the public URL's host nor an allowed host, and with
-PostgreSQL the reminder that every replica needs the same keys), then `configuration OK`. A problem is a
+expires within 30 days or names neither the public URL's host nor an allowed host, a client key
+algorithm the IdP refuses (Okta: PS256), and with PostgreSQL the reminder that every replica needs the
+same keys), then `configuration OK`. With an oidc IdP, an `info  client credential:` line before it
+names the credential: a client secret, or `private_key_jwt` with its signing algorithm and its key ID
+if set. A problem is a
 configuration error on standard error, exit code 2. `check` without `--offline` is refused, so that a
 script written today keeps meaning the same thing.
 
@@ -82,7 +85,7 @@ fail  idp    entra app and credential: Entra rejected the client secret (AADSTS7
 | `proxy` | identity assertion keys (discovery) | with an HTTP upstream: the OpenID discovery document names byward's issuer and a `jwks_uri` that serves the key signing assertions, as a verifier using only discovery (MCP Toolbox) needs |
 | `proxy` | authentication | only with `BYWARD_INSECURE_NO_AUTH`: always a warning, since there is no discovery and no IdP to check |
 | `idp` | discovery | with an `oidc` IdP or preset: the discovery document at `BYWARD_OIDC_ISSUER` names that issuer exactly |
-| `idp` | client credential | with an `oidc` IdP or preset: a token request with a made-up authorization code is answered `invalid_grant` with a 4xx status, so the IdP accepted the client ID and the secret or key and refused only the code. `invalid_client`, `unauthorized_client`, or `access_denied` with 401 (Auth0) fail, with a fix naming the credential's setting; any other answer is a warning. The IdP's `error_description` is never shown (an IdP may echo the request into it). Needs no user. Keycloak, Okta, Auth0 and Google were measured to check the client before the code; for plain `oidc` a pass says that order is assumed |
+| `idp` | client credential | with an `oidc` IdP or preset: a token request with a made-up authorization code is answered `invalid_grant` with a 4xx status, so the IdP accepted the client ID and the secret or key and refused only the code. `invalid_client`, `unauthorized_client`, or `access_denied` with 401 (Auth0) fail, with a fix naming the credential's setting; any other answer is a warning. The IdP's `error_description` is never shown (an IdP may echo the request into it). Needs no user. Keycloak, Okta, Auth0 and Google were measured to check the client before the code; for plain `oidc` a pass says that order is assumed. The message names the credential (a client secret, or the `private_key_jwt` algorithm and key ID); a refused key's fix also names its algorithm; at a preset that refuses that algorithm (Okta: PS256), the fix leads with the refusal and what to set instead, then the usual checks. Unless the probe passed or its fix already leads with the refusal, a key algorithm the preset refuses is added to its result, after the probe's own fix, with a fix naming `BYWARD_OIDC_CLIENT_KEY_ALG`; a skipped probe then becomes a warning |
 | `idp` | entra tenant | the tenant's v2 discovery document exists and names its v2 issuer |
 | `idp` | entra signing keys | the tenant's key set has a signing key |
 | `idp` | entra app and credential | a client-credentials request for `api://<client-id>/.default` succeeds: Entra accepted the tenant, the client ID and the secret. Needs no app permission. |
