@@ -174,18 +174,21 @@ func TestTheTokenSocketPathLimitIsThePlatformsOwn(t *testing.T) {
 			t.Fatalf("New with a 105-byte socket path on %s: %v, want it to start", runtime.GOOS, err)
 		}
 	}
-	// The limit is the kernel's: a socket of exactly maxSocketPath bytes binds and accepts a
-	// connection (the limit is not above it), and one byte more is refused by the kernel itself
-	// (it is not below it).
+	// The limit is bind's: a socket of exactly maxSocketPath bytes binds and accepts a connection
+	// (the limit is not above it), and one byte more is refused with EINVAL (it is not below it).
+	// Go's syscall layer refuses that one, from the same sun_path size, before the kernel would.
 	dir := shortTempDir(t)
 	dir = filepath.Join(dir, strings.Repeat("d", maxSocketPath-len(dir)-len("/")-len("/"+tokenSocketName)))
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	over := filepath.Join(dir, "x"+tokenSocketName)
-	if ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: over, Net: "unix"}); err == nil {
+	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: over, Net: "unix"})
+	if err == nil {
 		_ = ln.Close()
-		t.Fatalf("the kernel bound a %d-byte socket path: maxSocketPath %d is below its limit", len(over), maxSocketPath)
+	}
+	if !errors.Is(err, syscall.EINVAL) {
+		t.Fatalf("binding a %d-byte socket path: %v, want EINVAL: maxSocketPath %d is below the limit", len(over), err, maxSocketPath)
 	}
 	s, err := listenTokenSocket(dir, slog.New(slog.DiscardHandler), func(context.Context) DownstreamToken { return DownstreamToken{} })
 	if err != nil {
