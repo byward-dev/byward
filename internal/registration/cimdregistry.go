@@ -351,7 +351,7 @@ type Chain []Registry
 
 // Client returns the first answer that is not ErrUnknownClient; otherwise the error of the registry
 // that owns the ID, the first that gave a reason (it still wraps ErrUnknownClient, so a CIMD
-// refusal stays ErrMetadataRefused whatever follows it in the chain).
+// refusal stays ErrMetadataRefused or ErrClientDenied whatever follows it in the chain).
 func (ch Chain) Client(ctx context.Context, id string) (Client, error) {
 	err := ErrUnknownClient
 	for _, r := range ch {

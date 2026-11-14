@@ -60,6 +60,11 @@ func TestADeniedHostMatchesExactlyIgnoringCase(t *testing.T) {
 	if d.DeniesClient("https://app.example/other.json") {
 		t.Error("another document on a denied CIMD URL's host is denied")
 	}
+	for _, notCIMD := range []string{"http://app.example/client.json", "//app.example/client.json"} {
+		if d.DeniesClient(notCIMD) {
+			t.Errorf("DeniesClient(%q) = true: not a CIMD client ID, so never denied by ID", notCIMD)
+		}
+	}
 	var none *Denylist
 	if none.DeniesClient("https://app.example/client.json") || none.DeniesRedirect("https://app.example/cb") {
 		t.Error("a nil denylist denied something")
@@ -93,7 +98,10 @@ func TestTheChainKeepsTheFirstReasonedRefusal(t *testing.T) {
 	if _, err := ch.Client(context.Background(), cimdID); !errors.Is(err, ErrMetadataRefused) {
 		t.Fatalf("refused document behind the DCR registry: %v, want ErrMetadataRefused", err)
 	}
-	deny, _ := NewDenylist([]string{cimdID})
+	deny, err := NewDenylist([]string{cimdID})
+	if err != nil {
+		t.Fatal(err)
+	}
 	denied := Chain{NewCIMDRegistry(CIMDConfig{Fetch: f, Deny: deny, JTI: NewStoreJTICache(memory.New()), Now: c.now}), newDCR(brokenClients{}, c.now, 0)}
 	if _, err := denied.Client(context.Background(), cimdID); !errors.Is(err, ErrClientDenied) {
 		t.Fatalf("denied client ID behind the DCR registry: %v, want ErrClientDenied", err)
@@ -118,6 +126,35 @@ func TestACIMDClientReturningToADeniedHostIsRefused(t *testing.T) {
 	var re *RedirectError
 	if err := cl.RedirectAllowed("https://app.example/cb"); !errors.As(err, &re) || re.Reason != ReasonDenied {
 		t.Fatalf("RedirectAllowed = %v, want a denied redirect", err)
+	}
+}
+
+// A CIMD or DCR client is denied once any one of its registered redirect URIs returns to a denied
+// host (#338); its client ID alone is the lookup's business (ErrClientDenied), not this check's.
+func TestAClientIsDeniedByAnyOfItsRedirectHosts(t *testing.T) {
+	redirects := []string{"https://app.example/cb", "https://second.example/cb"}
+	for name, tc := range map[string]struct {
+		entries []string
+		want    bool
+	}{
+		"the second redirect's host": {entries: []string{"second.example"}, want: true},
+		"another host":               {entries: []string{"other.example"}},
+		"no denylist":                {},
+		"only the client ID":         {entries: []string{cimdID}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var deny *Denylist
+			if tc.entries != nil {
+				var err error
+				if deny, err = NewDenylist(tc.entries); err != nil {
+					t.Fatal(err)
+				}
+			}
+			c := newMetadataClient(cimdID, &clientMetadata{redirects: redirects}, NotVerified, deny, nil, nil, newClock().now)
+			if got := c.Denied(); got != tc.want {
+				t.Fatalf("Denied() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

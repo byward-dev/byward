@@ -35,8 +35,11 @@ func NewDenylist(entries []string) (*Denylist, error) {
 	return d, nil
 }
 
-// DeniesClient reports whether a CIMD client ID is on the list.
-func (d *Denylist) DeniesClient(id string) bool { return d != nil && d.urls[canonicalCIMD(id)] }
+// DeniesClient reports whether a CIMD client ID is on the list. Any other client ID, such as a
+// static or DCR one, is never denied by ID, even when it looks like a URL.
+func (d *Denylist) DeniesClient(id string) bool {
+	return d != nil && IsCIMDURL(id) && d.urls[canonicalCIMD(id)]
+}
 
 // DeniesRedirect reports whether a redirect URI returns to a denied host.
 func (d *Denylist) DeniesRedirect(redirectURI string) bool {
