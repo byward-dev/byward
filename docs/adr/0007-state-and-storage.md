@@ -1,6 +1,6 @@
 # ADR-0007: State and storage — one store interface, embedded SQLite by default
 
-- Status: Accepted; clarified 2026-11-07 (#150); amended 2026-11-13 (#227)
+- Status: Accepted; clarified 2026-11-07 (#150); amended 2026-11-13 (#227), 2026-11-14 (#365)
 - Date: 2026-11-05
 - Issue: #6 (F5)
 
@@ -48,6 +48,10 @@ history; rotating the sealing key (ADR-0006) does not touch stored refresh token
    previous keys; generating and persisting keys is allowed only in an explicit single-node
    development mode, into a separate `0600` key file. A KMS key-unwrapping seam (Azure Key Vault
    first) is v0.2+.
+   _Amended 2026-11-14 (#365):_ no mode generates keys, development mode included. The operator
+   creates every sealing key and assertion signing key, and a missing or empty key directory stops
+   startup, with `--dev` too ([sealing keys](../how-to/sealing-keys.md)). The keys come from a key
+   directory, one file per key named by its key ID, not from the environment.
 6. **No paths relative to the working directory.** The data directory defaults to the OS state
    directory (`/var/lib/byward` in the container image); its absolute path is logged at
    startup and an unwritable directory fails startup.
