@@ -49,6 +49,7 @@ type options struct {
 	strip         map[string]bool // more headers removed from every inbound request
 	headerTimeout time.Duration
 	proxy         func(*http.Request) (*url.URL, error) // Proxy; tests give their own
+	refused       []func(status int)
 }
 
 // WithInject adds a function that sets headers on every upstream request, after the inbound
@@ -70,6 +71,12 @@ func WithStripped(names ...string) Option {
 	}
 }
 
+// WithRefusalObserver calls observe with the status of every upstream refusal (401 or 403,
+// ADR-0025), once per refused request, however the refusal is answered.
+func WithRefusalObserver(observe func(status int)) Option {
+	return func(o *options) { o.refused = append(o.refused, observe) }
+}
+
 // WithResponseHeaderTimeout bounds how long the upstream may take to send its response headers
 // (ADR-0018 §7); a request that waits longer is answered with a timeout error. Zero means no
 // limit. A streamed body is not limited once its headers have arrived.
@@ -85,6 +92,7 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 		f(&o)
 	}
 	t := *target
+	refused := o.refused
 	// The target is fixed and Go reads the proxy setting once, so whether the upstream's proxy is
 	// one Go misread is known now; ReverseProxy's own error lines then get the same redaction.
 	via, _ := o.proxy(&http.Request{URL: &t})
@@ -164,6 +172,9 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 			}
 			log.ErrorContext(ctx, "upstream refused the request", "request_id", logging.RequestID(ctx),
 				"status", status, "reason", hint+"; "+string(o))
+			for _, observe := range refused {
+				observe(status)
+			}
 			if o == outcomeUnanswerable {
 				return errUpstreamRefused
 			}
