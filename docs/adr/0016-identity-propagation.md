@@ -43,9 +43,9 @@ expired and wrong-key tokens; FastMCP accepts any `typ`.
 5. **Plain identity headers** only behind a flag, documented as safe only when the upstream is reachable
    solely through the proxy.
 6. **stdio:** identity in env at spawn (`BYWARD_SUBJECT` opaque, `BYWARD_ISSUER`); never in
-   arguments; never tokens. _Amended 2026-11-14 (#330):_ no email. The `email` opt-in of §1 is the
-   assertion's only; a stdio process gets no `BYWARD_EMAIL`, as item 6 of the 2026-11-07 amendment
-   says. Children do not inherit the proxy's environment — only an
+   arguments; never tokens. _Amended 2026-11-14 (#330):_ no email. The `email` opt-in of §1 applies to
+   the assertion only; an upstream process gets no `BYWARD_EMAIL`, as item 6 of the 2026-11-07
+   amendment says. Children do not inherit the proxy's environment — only an
    allowlist plus operator-configured env.
 7. **Upstream credential set by the operator:** a static header name and value (secret via `*_FILE`,
    never logged, redacted in the startup config line). If it uses `Authorization`, the assertion moves to
