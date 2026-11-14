@@ -76,7 +76,8 @@ direct one; opening a sealed token took 0.3 µs, signing the ES256 assertion 17 
    tests, and a test fails when an invariant has none. The table is added with the first tests.
    _Amended 2026-11-14:_ the table, with its "Tested by" column, is in
    [`docs/security-posture.md`](../security-posture.md#security-invariants); `docs/quality-lenses.md` keeps the
-   list of invariants.
+   list of invariants. _Amended again 2026-11-14:_ the list's wording moved there too, so
+   `docs/security-posture.md` holds the whole table and `docs/quality-lenses.md` links to it.
 8. **Time:** `testing/synctest` and an injected clock; a wall-clock sleep in a test fails review.
 9. **Fuzz targets:** sealed tokens, redirect URIs, CIMD documents, era detection, token-format dispatch.
 10. **Performance:** Go benchmarks on the hot path (token open, deny-list check, `Rewrite`, assertion

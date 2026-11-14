@@ -1,6 +1,6 @@
 # ADR-0011: IdP adapters — small interface, generic OIDC with presets, Entra on top
 
-- Status: Accepted; amended by ADR-0026, and 2026-11-14 (#286, #306)
+- Status: Accepted; amended by ADR-0026 and ADR-0030, and 2026-11-14 (#286, #306)
 - Date: 2026-11-05
 - Issue: #10 (F9)
 
@@ -33,6 +33,7 @@ rate-limit them (`oidc/jwks.go`).
    bool or string, optional `hd` check). `subject_claim` defaults to `sub`; setting it to a mutable
    claim (`email`, `preferred_username`, `upn`) logs a startup warning.
    _Amended 2026-11-14 (#286):_ the roles and groups claims are configurable too (below).
+   _Amended by ADR-0030:_ the decision in full.
 3. **`internal/idp/entra` builds on the generic adapter** (ADR-0012); its subject key is fixed.
 4. **Client credentials are an injected service** shared by all adapters: client secret from
    `*_FILE`; `private_key_jwt` with a key file; a client assertion read from a file on every call
