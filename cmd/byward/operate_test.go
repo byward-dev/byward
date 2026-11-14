@@ -83,6 +83,23 @@ func TestCheckOfflinePassesAWorkingSetupWithItsStartupWarnings(t *testing.T) {
 	}
 }
 
+// check --offline prints each relaxation in effect, as the startup log has them, before the
+// startup warnings and "configuration OK" (security invariant 12, #355).
+func TestCheckOfflinePrintsEachRelaxationFirst(t *testing.T) {
+	env := append(authEnv(t), "BYWARD_DEV=true", "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
+	code, stdout, stderr := runWith([]string{"check", "--offline"}, env...)
+	relaxations := []string{"warn  development mode relaxation: secret file permissions are not checked", "warn  development mode relaxation: http public URL on loopback"}
+	warning := strings.Index(stdout, "warn  access gate is empty")
+	if code != exitOK || stderr != "" || warning < 0 || !strings.Contains(stdout, "configuration OK") {
+		t.Fatalf("code %d stdout %q stderr %q; want the warnings and configuration OK", code, stdout, stderr)
+	}
+	for _, r := range relaxations {
+		if i := strings.Index(stdout, r); i < 0 || i > warning {
+			t.Fatalf("stdout %q; want %q before the warnings", stdout, r)
+		}
+	}
+}
+
 func TestCheckOfflineAndDoctorExit2OnAConfigurationErrorAndCheckNothing(t *testing.T) {
 	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_KEYS_DIR=/nonexistent/keys")
 	for _, args := range [][]string{{"check", "--offline"}, {"doctor"}, {"doctor", "--json"}} {

@@ -63,7 +63,11 @@ type Config struct {
 	// callback path (/callback/<IdP>), audit records and metrics.
 	IdP string
 	// The generic OIDC adapter (IdP other than entra; ADR-0011 §2).
-	OIDCIssuer       string
+	OIDCIssuer string
+	// OIDCLoopbackHTTP lets the oidc adapter use the http issuer on a loopback host, and http
+	// endpoints on loopback with it: --dev only, and set together with its relaxation, so the
+	// adapter is relaxed exactly when the startup log says so (security invariant 12, #355).
+	OIDCLoopbackHTTP bool
 	OIDCClientID     string
 	OIDCClientSecret string
 	OIDCClientKey    string // PEM, for private_key_jwt
@@ -122,7 +126,8 @@ type Config struct {
 	InContainer bool
 
 	Values *Values
-	// Relaxations lists what --dev relaxed, for the startup log.
+	// Relaxations lists every relaxation in effect (--dev, --insecure-no-auth), for the startup log
+	// and check --offline (security invariant 12).
 	Relaxations []string
 }
 

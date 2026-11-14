@@ -140,7 +140,8 @@ func (c *Config) oidcIdP(v *Values) []error {
 	// --dev lets the oidc adapter use an http issuer on a loopback host, and http endpoints on
 	// loopback with it (AllowLoopbackHTTP); every relaxation is logged (security invariant 12, #355).
 	if u, err := url.Parse(c.OIDCIssuer); c.Dev && err == nil && u.Scheme == "http" && isLoopback(u.Hostname()) {
-		c.Relaxations = append(c.Relaxations, "http IdP issuer on loopback ("+c.OIDCIssuer+"): discovery, the token endpoint and the IdP's signing keys are fetched over http")
+		c.OIDCLoopbackHTTP = true
+		c.Relaxations = append(c.Relaxations, "http IdP issuer on loopback ("+c.OIDCIssuer+"): discovery over http, and the IdP's sign-in page, token endpoint and signing keys over http too where it lists them on loopback")
 	}
 	errs = append(errs, c.requiredForIdP(v, "oidc-client-id")...)
 	secret, key := Setting{Name: "oidc-client-secret"}.Env()+"_FILE", Setting{Name: "oidc-client-key"}.Env()+"_FILE"

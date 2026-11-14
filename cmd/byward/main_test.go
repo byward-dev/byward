@@ -158,13 +158,13 @@ func TestDevModeLogsEachRelaxation(t *testing.T) {
 	cancel()
 	var out, errb bytes.Buffer
 	code := run(ctx, []string{"--dev"}, append(authEnv(t), serveEnv("http://127.0.0.1:8080/mcp", "127.0.0.1:0")...), &out, &errb)
-	if code != exitOK || !strings.Contains(errb.String(), "development mode relaxation") || !strings.Contains(errb.String(), "http public URL on loopback") {
+	if logs := errb.String(); code != exitOK || !strings.Contains(logs, `"relaxation":"secret file permissions are not checked"`) || !strings.Contains(logs, `"relaxation":"http public URL on loopback"`) {
 		t.Fatalf("code=%d logs=%s", code, errb.String())
 	}
 }
 
-// An http IdP issuer on loopback, which --dev accepts, is logged at startup as a relaxation, and
-// check --offline prints each relaxation (security invariant 12, #355).
+// An http IdP issuer on loopback, which --dev accepts, is logged at startup as a relaxation
+// (security invariant 12): #355's acceptance test, end to end from the settings.
 func TestDevModeLogsAnHTTPIdPIssuerOnLoopback(t *testing.T) {
 	dir := t.TempDir()
 	secret := filepath.Join(dir, "oidc-secret")
@@ -186,11 +186,6 @@ func TestDevModeLogsAnHTTPIdPIssuerOnLoopback(t *testing.T) {
 	if code := run(ctx, nil, append(env, serveEnv("http://127.0.0.1:8080/mcp", "127.0.0.1:0")...), &out, &errb); code != exitOK ||
 		!strings.Contains(errb.String(), `"msg":"development mode relaxation","relaxation":"`+relaxation) {
 		t.Fatalf("code=%d logs=%s; want the issuer logged as a relaxation", code, errb.String())
-	}
-	code, stdout, stderr := runWith([]string{"check", "--offline"}, append(env, "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")...)
-	if code != exitOK || !strings.Contains(stdout, "warn  development mode relaxation: "+relaxation) ||
-		!strings.Contains(stdout, "warn  development mode relaxation: http public URL on loopback") || stderr != "" {
-		t.Fatalf("check: code %d stdout %q stderr %q; want each relaxation printed", code, stdout, stderr)
 	}
 }
 

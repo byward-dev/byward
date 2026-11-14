@@ -192,9 +192,9 @@ func TestAnOIDCClientKeyIsReadFromItsFile(t *testing.T) {
 	}
 }
 
-// --dev accepts an http IdP issuer on a loopback host (the oidc adapter's AllowLoopbackHTTP), and
-// records it as a relaxation, so it is logged at startup (security invariant 12, #355); an https
-// issuer, an http issuer elsewhere (which the adapter refuses) and no --dev record nothing.
+// --dev accepts an http IdP issuer on a loopback host, relaxing the oidc adapter (OIDCLoopbackHTTP)
+// only together with a relaxation, so it is logged at startup (security invariant 12, #355); an
+// https issuer, an http issuer elsewhere and no --dev relax and record nothing.
 func TestDevRecordsAnHTTPIdPIssuerOnLoopbackAsARelaxation(t *testing.T) {
 	for _, tc := range []struct {
 		name, issuer string
@@ -203,7 +203,9 @@ func TestDevRecordsAnHTTPIdPIssuerOnLoopbackAsARelaxation(t *testing.T) {
 		{"localhost over http", "http://localhost:8180/realms/byward", true, true},
 		{"127.0.0.1 over http", "http://127.0.0.1:8180/realms/byward", true, true},
 		{"[::1] over http", "http://[::1]:8180/realms/byward", true, true},
+		{"127.0.0.2 over http", "http://127.0.0.2:8180/realms/byward", true, true}, // any loopback address, as the adapter has it
 		{"https", "https://sso.example.com/realms/acme", true, false},
+		{"https on localhost", "https://localhost:8443/realms/byward", true, false},
 		{"http on another host", "http://sso.example.com/realms/acme", true, false},
 		{"http on localhost without --dev", "http://localhost:8180/realms/byward", false, false},
 	} {
@@ -216,9 +218,9 @@ func TestDevRecordsAnHTTPIdPIssuerOnLoopbackAsARelaxation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := "http IdP issuer on loopback (" + tc.issuer + "): discovery, the token endpoint and the IdP's signing keys are fetched over http"
-			if got := slices.Contains(c.Relaxations, want); got != tc.want {
-				t.Fatalf("relaxations %q; want %q listed: %v", c.Relaxations, want, tc.want)
+			want := "http IdP issuer on loopback (" + tc.issuer + "): discovery over http, and the IdP's sign-in page, token endpoint and signing keys over http too where it lists them on loopback"
+			if got := slices.Contains(c.Relaxations, want); got != tc.want || c.OIDCLoopbackHTTP != tc.want {
+				t.Fatalf("relaxations %q, adapter relaxed %v; want %q listed and the adapter relaxed: %v", c.Relaxations, c.OIDCLoopbackHTTP, want, tc.want)
 			}
 		})
 	}
