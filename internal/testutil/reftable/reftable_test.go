@@ -1,6 +1,10 @@
 package reftable
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -19,40 +23,46 @@ Some prose.
 | ` + "`b`" + ` | old | written for b |
 | ` + "`gone`" + ` | old | written for gone |
 | ` + "`a`" + ` | old | written for a |
+| short |
 
 Prose after.
 
-## Other
+## Things
 
 | Thing | Meaning |
 |---|---|
-| ` + "`a`" + ` | not this table |
+| ` + "`a`" + ` | a second heading of the same text: not this table |
 `
 
 func row(key string, old []string) []string {
 	meaning := Todo
-	if old != nil {
+	if len(old) == 3 {
 		meaning = old[2]
 	}
 	return []string{"`" + key + "`", "new", meaning}
 }
 
-// The table gets one row per key, in the keys' order: hand-written cells are kept for known keys,
-// a new key gets Todo, a key the code no longer has is dropped, and nothing else on the page moves.
+// The first table under the heading gets one row per key, in the keys' order: hand-written cells
+// are kept for known keys, a new key gets Todo, a key the code no longer has is dropped, a row
+// too short for the key column is dropped, and nothing else on the page moves.
 func TestRenderRebuildsOnlyTheTable(t *testing.T) {
-	got, err := Render(page, "## Things", 0, []string{"a", "b", "c"}, row)
+	got, err := render(page, "## Things", 1, []string{"old"}, func(key string, old []string) []string { return old })
+	if err != nil || !strings.Contains(got, "| `a` | old | written for a |") {
+		t.Fatalf("keyed on a column the short row lacks: err %v\n%s", err, got)
+	}
+	got, err = render(page, "## Things", 0, []string{"a", "b", "c"}, row)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := strings.Replace(page, "| `b` | old | written for b |\n| `gone` | old | written for gone |\n| `a` | old | written for a |",
+	want := strings.Replace(page, "| `b` | old | written for b |\n| `gone` | old | written for gone |\n| `a` | old | written for a |\n| short |",
 		"| `a` | new | written for a |\n| `b` | new | written for b |\n| `c` | new | "+Todo+" |", 1)
 	if got != want {
 		t.Fatalf("got\n%s\nwant\n%s", got, want)
 	}
-	if u := Undescribed(got, "## Things", 0); !slices.Equal(u, []string{"c"}) {
+	if u := undescribed(got, "## Things", 0); !slices.Equal(u, []string{"c"}) {
 		t.Errorf("undescribed %v, want [c]", u)
 	}
-	if u := Undescribed(page, "## Things", 0); u != nil {
+	if u := undescribed(page, "## Things", 0); u != nil {
 		t.Errorf("undescribed in the page as written %v, want none", u)
 	}
 }
@@ -64,7 +74,7 @@ func TestRenderNeedsATableUnderTheHeading(t *testing.T) {
 		{"## Empty\n\nprose\n\n## Next\n\n| a |\n|---|\n", "## Empty", `no table under "## Empty"`},
 		{"## Header only\n\n| a |\n", "## Header only", `no table under "## Header only"`},
 	} {
-		_, err := Render(tc.doc, tc.heading, 0, nil, row)
+		_, err := render(tc.doc, tc.heading, 0, nil, row)
 		if err == nil || !strings.Contains(err.Error(), tc.inErr) {
 			t.Errorf("%s: err %v, want %q", tc.heading, err, tc.inErr)
 		}
@@ -79,10 +89,92 @@ func TestCellsSplitsOutsideCode(t *testing.T) {
 	}{
 		{"| a | b |", []string{"a", "b"}},
 		{"|`x|y`| z |", []string{"`x|y`", "z"}},
-		{"| a |  |", []string{"a", ""}},
+		{"|  a  |  |", []string{"a", ""}},
 	} {
-		if got := Cells(tc.row); !slices.Equal(got, tc.want) {
-			t.Errorf("Cells(%q) = %q, want %q", tc.row, got, tc.want)
+		if got := cells(tc.row); !slices.Equal(got, tc.want) {
+			t.Errorf("cells(%q) = %q, want %q", tc.row, got, tc.want)
 		}
+	}
+}
+
+// recorder is a testing.TB that records failures; Fatal ends the goroutine running Sync.
+type recorder struct {
+	testing.TB
+	failures []string
+}
+
+func (r *recorder) Helper() {}
+
+func (r *recorder) Errorf(format string, a ...any) {
+	r.failures = append(r.failures, fmt.Sprintf(format, a...))
+}
+
+func (r *recorder) Fatal(a ...any) {
+	r.failures = append(r.failures, fmt.Sprint(a...))
+	runtime.Goexit()
+}
+
+func (r *recorder) Fatalf(format string, a ...any) {
+	r.Errorf(format, a...)
+	runtime.Goexit()
+}
+
+// syncFailures runs Sync on a copy of doc and returns its failures and the file afterwards.
+func syncFailures(t *testing.T, doc string, keys []string, update bool) ([]string, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "page.md")
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if update {
+		t.Setenv("BYWARD_UPDATE_REFERENCE", "1")
+	} else {
+		t.Setenv("BYWARD_UPDATE_REFERENCE", "")
+	}
+	r := &recorder{TB: t}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		Table{Path: path, Heading: "## Things", Package: "./internal/x/"}.Sync(r, keys, row)
+	}()
+	<-done
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r.failures, string(b)
+}
+
+// Sync fails on a stale table and names the package that regenerates it; with
+// BYWARD_UPDATE_REFERENCE=1 it rewrites the table, then fails only on a row still to describe.
+func TestSyncFailsUntilTheTableIsCurrentAndDescribed(t *testing.T) {
+	current, err := render(page, "## Things", 0, []string{"a", "b"}, row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, doc string
+		keys      []string
+		update    bool
+		inFailure string
+		rewritten bool
+	}{
+		{"current", current, []string{"a", "b"}, false, "", false},
+		{"stale", page, []string{"a", "b"}, false, "run BYWARD_UPDATE_REFERENCE=1 go test ./internal/x/", false},
+		{"updated", page, []string{"a", "b"}, true, "", true},
+		{"a new key", current, []string{"a", "b", "c"}, true, "describe c", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			failures, after := syncFailures(t, tc.doc, tc.keys, tc.update)
+			switch {
+			case tc.inFailure == "" && len(failures) > 0:
+				t.Fatalf("failures %q, want none", failures)
+			case tc.inFailure != "" && (len(failures) != 1 || !strings.Contains(failures[0], tc.inFailure)):
+				t.Fatalf("failures %q, want one containing %q", failures, tc.inFailure)
+			}
+			if rewritten := after != tc.doc; rewritten != tc.rewritten {
+				t.Fatalf("file rewritten = %v, want %v", rewritten, tc.rewritten)
+			}
+		})
 	}
 }

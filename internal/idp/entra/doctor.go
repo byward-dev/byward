@@ -59,47 +59,43 @@ func (p *Provider) Diagnose(ctx context.Context, d Diagnosis) []doctor.Result {
 	return append(out, p.manualChecks(d)...)
 }
 
-func result(c doctor.Check, s doctor.Status, msg, fix string) doctor.Result {
-	return c.Result(s, msg, fix)
-}
-
 func (p *Provider) diagnoseTenant(ctx context.Context, d Diagnosis) doctor.Result {
-	name := doctor.CheckEntraTenant
+	check := doctor.CheckEntraTenant
 	var m struct {
 		Issuer string `json:"issuer"`
 	}
 	fix := "set " + d.TenantSetting + " to your tenant ID: az account show --query tenantId -o tsv"
 	if err := p.fetch.GetJSON(ctx, p.endpoint("/v2.0/.well-known/openid-configuration"), &m); err != nil {
-		return result(name, doctor.Fail, "no discovery document for tenant "+p.cfg.Tenant+": "+err.Error(), fix)
+		return check.Result(doctor.Fail, "no discovery document for tenant "+p.cfg.Tenant+": "+err.Error(), fix)
 	}
 	want := issuerFor(p.cfg.Tenant)
 	if p.cfg.Tenant == Organizations {
 		want = issuerFor("{tenantid}")
 	}
 	if m.Issuer != want {
-		return result(name, doctor.Fail, fmt.Sprintf("the discovery document names issuer %q, want %q", m.Issuer, want), fix)
+		return check.Result(doctor.Fail, fmt.Sprintf("the discovery document names issuer %q, want %q", m.Issuer, want), fix)
 	}
-	return result(name, doctor.Pass, "discovery document found, issuer "+m.Issuer, "")
+	return check.Result(doctor.Pass, "discovery document found, issuer "+m.Issuer, "")
 }
 
 func (p *Provider) diagnoseKeys(ctx context.Context) doctor.Result {
-	name := doctor.CheckEntraSigningKeys
+	check := doctor.CheckEntraSigningKeys
 	var set jose.JSONWebKeySet
 	if err := p.fetch.GetJSON(ctx, p.endpoint("/discovery/v2.0/keys"), &set); err != nil {
-		return result(name, doctor.Fail, "cannot fetch the tenant's signing keys: "+err.Error(), reachFix)
+		return check.Result(doctor.Fail, "cannot fetch the tenant's signing keys: "+err.Error(), reachFix)
 	}
 	n := idp.SigningKeys(set)
 	if n == 0 {
-		return result(name, doctor.Fail, "the tenant's key set has no signing key", "check that the proxy's host reaches "+Authority+" directly, not through a proxy that rewrites responses")
+		return check.Result(doctor.Fail, "the tenant's key set has no signing key", "check that the proxy's host reaches "+Authority+" directly, not through a proxy that rewrites responses")
 	}
-	return result(name, doctor.Pass, fmt.Sprintf("the tenant's key set has %d signing key(s)", n), "")
+	return check.Result(doctor.Pass, fmt.Sprintf("the tenant's key set has %d signing key(s)", n), "")
 }
 
 // diagnoseCredential requests an app-only token for api://<client-id>/.default. A token, or
 // AADSTS501051 (assignment required, and the app holds no role on itself), means Entra accepted the
 // tenant, the client ID and the credential.
 func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, claims []doctor.Result) {
-	name := doctor.CheckEntraAppAndCredential
+	check := doctor.CheckEntraAppAndCredential
 	resource := appIDURIPrefix + p.cfg.ClientID
 	if p.cfg.Tenant == Organizations {
 		// Microsoft documents the client-credentials tenant only "in GUID or domain-name format",
@@ -111,13 +107,13 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 		case CredentialCertificate:
 			list = "az ad app credential list --id %s --cert lists this certificate, unexpired"
 		}
-		return []doctor.Result{result(name, doctor.Skip, "not probed: client credentials need the app's home tenant, and organizations mode names none",
+		return []doctor.Result{check.Result(doctor.Skip, "not probed: client credentials need the app's home tenant, and organizations mode names none",
 				fmt.Sprintf("check by hand: "+list+", and az ad app show --id %s --query api.requestedAccessTokenVersion is 2", p.cfg.ClientID, p.cfg.ClientID))},
 			nil
 	}
 	tr, err := p.token(ctx, url.Values{"grant_type": {"client_credentials"}, "scope": {resource + defaultScopeSuffix}})
 	if err == nil {
-		return []doctor.Result{result(name, doctor.Pass, "Entra accepted the tenant, the client ID and the credential", "")}, p.diagnoseToken(ctx, tr.AccessToken, d)
+		return []doctor.Result{check.Result(doctor.Pass, "Entra accepted the tenant, the client ID and the credential", "")}, p.diagnoseToken(ctx, tr.AccessToken, d)
 	}
 	var ie *idp.Error
 	if !errors.As(err, &ie) {
@@ -126,38 +122,38 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 	code := fmt.Sprintf("AADSTS%d", ie.Code)
 	switch ie.Code {
 	case codeAppNotAssigned:
-		return []doctor.Result{result(name, doctor.Pass, "Entra accepted the tenant, the client ID and the credential", "")},
-			[]doctor.Result{result(doctor.CheckEntraAccessToken, doctor.Skip,
+		return []doctor.Result{check.Result(doctor.Pass, "Entra accepted the tenant, the client ID and the credential", "")},
+			[]doctor.Result{doctor.CheckEntraAccessToken.Result(doctor.Skip,
 				"Entra issued no token to check ("+code+"): assignment is required on the app, and the app holds no role on itself",
 				fmt.Sprintf(`check by hand: az ad app show --id %s --query "{version:api.requestedAccessTokenVersion, claims:optionalClaims.accessToken[].name}" must show version 2`, p.cfg.ClientID))}
 	case codeTenantNotFound:
-		return []doctor.Result{result(name, doctor.Fail, "Entra does not know tenant "+p.cfg.Tenant+" ("+code+")",
+		return []doctor.Result{check.Result(doctor.Fail, "Entra does not know tenant "+p.cfg.Tenant+" ("+code+")",
 			"set "+d.TenantSetting+" to your tenant ID: az account show --query tenantId -o tsv")}, nil
 	case codeAppNotFound:
-		return []doctor.Result{result(name, doctor.Fail, "Entra has no app "+p.cfg.ClientID+" in tenant "+p.cfg.Tenant+" ("+code+")",
+		return []doctor.Result{check.Result(doctor.Fail, "Entra has no app "+p.cfg.ClientID+" in tenant "+p.cfg.Tenant+" ("+code+")",
 			"set "+d.ClientIDSetting+" to the app registration's Application (client) ID, and "+d.TenantSetting+" to the tenant it is registered in")}, nil
 	case codeInvalidSecret:
 		if d.CredentialKind != CredentialSecret {
 			break // no secret: the fix below names the credential there is
 		}
-		return []doctor.Result{result(name, doctor.Fail, "Entra rejected the client secret ("+code+")",
+		return []doctor.Result{check.Result(doctor.Fail, "Entra rejected the client secret ("+code+")",
 			"the file named by "+d.CredentialSetting+" must hold the secret's value, not its ID; create a new one: az ad app credential reset --id "+p.cfg.ClientID+" --append --display-name byward --years 1 --query password -o tsv")}, nil
 	case codeExpiredSecret:
 		if d.CredentialKind != CredentialSecret {
 			break
 		}
-		return []doctor.Result{result(name, doctor.Fail, "the client secret has expired ("+code+")",
+		return []doctor.Result{check.Result(doctor.Fail, "the client secret has expired ("+code+")",
 			"create a new one: az ad app credential reset --id "+p.cfg.ClientID+" --append --display-name byward --years 1 --query password -o tsv, then restart the proxy with it")}, nil
 	case codeResourceNotFound:
-		return []doctor.Result{result(name, doctor.Fail, "Entra has no resource "+resource+" in tenant "+p.cfg.Tenant+" ("+code+"): the Application ID URI is not set, or the app has no service principal",
+		return []doctor.Result{check.Result(doctor.Fail, "Entra has no resource "+resource+" in tenant "+p.cfg.Tenant+" ("+code+"): the Application ID URI is not set, or the app has no service principal",
 			"set the Application ID URI to "+resource+" (docs/how-to/quickstart-entra.md step 1.2) and create the service principal: az ad sp create --id "+p.cfg.ClientID)}, nil
 	}
 	if d.CredentialKind == CredentialCertificate {
 		switch ie.Code {
 		case codeBadAssertion, codeAuthFailed, codeSubjectNameCert:
-			return []doctor.Result{result(name, doctor.Fail, "Entra does not accept the certificate ("+code+"): the app has no certificate for this key", p.uploadFix(d))}, nil
+			return []doctor.Result{check.Result(doctor.Fail, "Entra does not accept the certificate ("+code+"): the app has no certificate for this key", p.uploadFix(d))}, nil
 		case codeNoThumbprint:
-			return []doctor.Result{result(name, doctor.Fail, "Entra got a client assertion without a certificate thumbprint ("+code+")",
+			return []doctor.Result{check.Result(doctor.Fail, "Entra got a client assertion without a certificate thumbprint ("+code+")",
 				"a byward bug: it always sends x5t#S256; please report it with the byward version")}, nil
 		}
 	}
@@ -169,7 +165,7 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 		case CredentialCertificate:
 			fix = "the file named by " + d.CredentialSetting + " must hold the private key and its certificate (docs/how-to/entra-certificate.md)"
 		}
-		return []doctor.Result{result(name, doctor.Fail, "the client-credentials probe was not sent: "+ie.Err.Error(), fix)}, nil
+		return []doctor.Result{check.Result(doctor.Fail, "the client-credentials probe was not sent: "+ie.Err.Error(), fix)}, nil
 	}
 	if ie.Code == 0 {
 		msg := "the client-credentials probe failed"
@@ -179,7 +175,7 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 		case ie.Status != 0:
 			msg += fmt.Sprintf(": HTTP %d %s", ie.Status, ie.OAuth)
 		}
-		return []doctor.Result{result(name, doctor.Fail, msg, reachFix)}, nil
+		return []doctor.Result{check.Result(doctor.Fail, msg, reachFix)}, nil
 	}
 	fix := ie.OperatorHint
 	if d.CredentialKind != CredentialSecret && (ie.Code == codeInvalidSecret || ie.Code == codeExpiredSecret) {
@@ -197,39 +193,39 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 	default:
 		fix = "look up " + code + " in Microsoft's error code reference: https://learn.microsoft.com/entra/identity-platform/reference-error-codes"
 	}
-	return []doctor.Result{result(name, doctor.Fail, "the client-credentials probe failed ("+code+")", fix)}, nil
+	return []doctor.Result{check.Result(doctor.Fail, "the client-credentials probe failed ("+code+")", fix)}, nil
 }
 
 // diagnoseToken checks the probe's token as the proxy checks its login tokens: signed by the
 // tenant, issuer, v2, audience = the client ID; and the idtyp claim app-only callers need (ADR-0022).
 func (p *Provider) diagnoseToken(ctx context.Context, raw string, d Diagnosis) []doctor.Result {
-	name := doctor.CheckEntraAccessToken
+	check := doctor.CheckEntraAccessToken
 	claims, err := idp.VerifySignature(ctx, raw, p.keys, []jose.SignatureAlgorithm{jose.RS256})
 	if err != nil {
-		return []doctor.Result{result(name, doctor.Fail, "the probe's token does not verify with the tenant's keys: "+err.Error(), reachFix)}
+		return []doctor.Result{check.Result(doctor.Fail, "the probe's token does not verify with the tenant's keys: "+err.Error(), reachFix)}
 	}
 	if v := idp.StringClaim(claims, "ver"); v != "2.0" {
-		return []doctor.Result{result(name, doctor.Fail, fmt.Sprintf("Entra issues version %q tokens for the app, the proxy accepts only 2.0", v), accessTokenVersionFix)}
+		return []doctor.Result{check.Result(doctor.Fail, fmt.Sprintf("Entra issues version %q tokens for the app, the proxy accepts only 2.0", v), accessTokenVersionFix)}
 	}
 	if _, err := idp.VerifyJWT(ctx, raw, p.keys, p.rules("")); err != nil {
-		return []doctor.Result{result(name, doctor.Fail, "the probe's token fails the proxy's checks: "+err.Error(), accessTokenVersionFix)}
+		return []doctor.Result{check.Result(doctor.Fail, "the probe's token fails the proxy's checks: "+err.Error(), accessTokenVersionFix)}
 	}
-	out := []doctor.Result{result(name, doctor.Pass, "v2 token for audience "+p.cfg.ClientID+", issuer "+idp.StringClaim(claims, "iss"), "")}
+	out := []doctor.Result{check.Result(doctor.Pass, "v2 token for audience "+p.cfg.ClientID+", issuer "+idp.StringClaim(claims, "iss"), "")}
 	if idp.StringClaim(claims, "idtyp") == "app" {
-		return append(out, result(doctor.CheckEntraIdtypClaim, doctor.Pass, "app-only tokens carry idtyp=app", ""))
+		return append(out, doctor.CheckEntraIdtypClaim.Result(doctor.Pass, "app-only tokens carry idtyp=app", ""))
 	}
 	status, msg := doctor.Warn, "app-only tokens carry no idtyp=app, so app-only callers (ADR-0022) would be refused"
 	if len(d.AppRoles) > 0 {
 		status, msg = doctor.Fail, "app-only tokens are on, but Entra's carry no idtyp=app, so every app-only caller is refused"
 	}
-	return append(out, result(doctor.CheckEntraIdtypClaim, status, msg,
+	return append(out, doctor.CheckEntraIdtypClaim.Result(status, msg,
 		"add the idtyp optional claim to access tokens on the app registration (byward init entra prints the request)"))
 }
 
 // manualChecks are the app registration properties only Microsoft Graph can read.
 func (p *Provider) manualChecks(d Diagnosis) []doctor.Result {
 	noGraph := "byward does not call Microsoft Graph (ADR-0012 §8), so it cannot read this"
-	out := []doctor.Result{result(doctor.CheckEntraRedirectURI, doctor.Skip,
+	out := []doctor.Result{doctor.CheckEntraRedirectURI.Result(doctor.Skip,
 		noGraph+"; a wrong redirect URI fails the first sign-in with AADSTS50011",
 		fmt.Sprintf("check by hand: az ad app show --id %s --query web.redirectUris must list %s", p.cfg.ClientID, p.cfg.RedirectURL))}
 	roles := fmt.Sprintf(`check by hand: az ad app show --id %s --query "appRoles[].{value:value, members:allowedMemberTypes}"`, p.cfg.ClientID)
@@ -239,7 +235,7 @@ func (p *Provider) manualChecks(d Diagnosis) []doctor.Result {
 	if len(d.AppRoles) > 0 {
 		roles += "; app roles for app-only callers, with Application among their members: " + strings.Join(d.AppRoles, ", ")
 	}
-	return append(out, result(doctor.CheckEntraAppRoles, doctor.Skip, noGraph, roles))
+	return append(out, doctor.CheckEntraAppRoles.Result(doctor.Skip, noGraph, roles))
 }
 
 // uploadFix uploads the public certificate from the file named by the certificate setting.

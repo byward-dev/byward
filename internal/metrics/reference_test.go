@@ -4,6 +4,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -38,7 +40,10 @@ func declaredMetrics(t *testing.T) []metric {
 		kind := strings.ToLower(strings.TrimSuffix(sel.Sel.Name, "Opts"))
 		for _, e := range lit.Elts {
 			kv, ok := e.(*ast.KeyValueExpr)
-			if k, _ := kv.Key.(*ast.Ident); !ok || k == nil || k.Name != "Name" {
+			if !ok {
+				continue
+			}
+			if k, _ := kv.Key.(*ast.Ident); k == nil || k.Name != "Name" {
 				continue
 			}
 			v, ok := kv.Value.(*ast.BasicLit)
@@ -69,11 +74,30 @@ func TestTheMetricsReferenceIsCurrent(t *testing.T) {
 		names = append(names, m.name)
 		kind[m.name] = m.kind
 	}
-	reftable.Sync(t, "../../docs/reference/observability.md", "## Metrics", 0, names, func(name string, old []string) []string {
-		labels := reftable.Todo
-		if len(old) > 2 {
-			labels = old[2]
+	table := reftable.Table{Path: "../../docs/reference/observability.md", Heading: "## Metrics", Package: "./internal/metrics/"}
+	table.Sync(t, names, func(name string, old []string) []string {
+		row := []string{"`" + name + "`", kind[name], reftable.Todo}
+		if len(old) == len(row) {
+			row[2] = old[2]
 		}
-		return []string{"`" + name + "`", kind[name], labels}
+		return row
 	})
+}
+
+// metrics.go declares exactly the metrics a scrape exports (testdata/names.golden), so the
+// reference, read from metrics.go, misses none.
+func TestTheDeclaredMetricsAreTheExportedOnes(t *testing.T) {
+	b, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exported := strings.Split(strings.TrimSpace(string(b)), "\n")
+	var declared []string
+	for _, m := range declaredMetrics(t) {
+		declared = append(declared, m.name+" "+m.kind)
+	}
+	slices.Sort(declared)
+	if !slices.Equal(declared, exported) {
+		t.Fatalf("metrics.go declares %q, a scrape exports %q (%s)", declared, exported, golden)
+	}
 }
