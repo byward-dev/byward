@@ -73,18 +73,25 @@ func TestThePostgreSQLStoreRefusesSQLiteSettingsOrAStdioUpstream(t *testing.T) {
 // Development mode lists the PostgreSQL relaxation only when PostgreSQL is selected.
 func TestDevelopmentModeListsThePlaintextPostgreSQLRelaxationOnlyForPostgreSQL(t *testing.T) {
 	const relaxed = "the PostgreSQL store accepts a connection without verify-full TLS"
-	c, err := loadDSN(t, []string{"--dev"}, "BYWARD_STORE_POSTGRES_DSN_FILE="+dsnFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(c.Relaxations, relaxed) {
-		t.Fatalf("relaxations %q, want %q", c.Relaxations, relaxed)
-	}
-	if c, err = load(t, []string{"--dev"}); err != nil || slices.Contains(c.Relaxations, relaxed) {
-		t.Fatalf("SQLite in development mode: relaxations %q, %v", c.Relaxations, err)
-	}
-	// Without --dev nothing is relaxed, so a production start never logs it (#355).
-	if c, err = loadDSN(t, nil, "BYWARD_STORE_POSTGRES_DSN_FILE="+dsnFile); err != nil || slices.Contains(c.Relaxations, relaxed) {
-		t.Fatalf("PostgreSQL outside development mode: relaxations %q, %v", c.Relaxations, err)
+	dsn := "BYWARD_STORE_POSTGRES_DSN_FILE=" + dsnFile
+	for _, tc := range []struct {
+		name string
+		args []string
+		env  []string
+		want bool
+	}{
+		{"PostgreSQL in development mode", []string{"--dev"}, []string{dsn}, true},
+		{"SQLite in development mode", []string{"--dev"}, nil, false},
+		{"PostgreSQL outside development mode", nil, []string{dsn}, false}, // so a production start never logs it (#355)
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := loadDSN(t, tc.args, tc.env...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := slices.Contains(c.Relaxations, relaxed); got != tc.want {
+				t.Fatalf("relaxations %q; want %q listed: %v", c.Relaxations, relaxed, tc.want)
+			}
+		})
 	}
 }

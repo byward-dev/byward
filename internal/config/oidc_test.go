@@ -194,7 +194,8 @@ func TestAnOIDCClientKeyIsReadFromItsFile(t *testing.T) {
 
 // --dev accepts an http IdP issuer on a loopback host, relaxing the oidc adapter (OIDCLoopbackHTTP)
 // only together with a relaxation, so it is logged at startup (security invariant 12, #355); an
-// https issuer, an http issuer elsewhere and no --dev relax and record nothing.
+// https issuer, an issuer of another scheme, an http issuer elsewhere and no --dev relax and record
+// nothing.
 func TestDevRecordsAnHTTPIdPIssuerOnLoopbackAsARelaxation(t *testing.T) {
 	for _, tc := range []struct {
 		name, issuer string
