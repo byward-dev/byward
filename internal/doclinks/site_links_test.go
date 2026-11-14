@@ -45,7 +45,7 @@ func siteLinkProblem(root, line string) string {
 // Every page byward.dev links to exists in this tree, so a PR that moves one without leaving a
 // pointer at the old path fails here. The list is kept in step with the site by a check in the
 // site's repository (site-links.txt says how).
-func TestEveryPageTheWebsiteLinksToExists(t *testing.T) {
+func TestEveryPageTheSiteLinksToExists(t *testing.T) {
 	root := repoRoot(t)
 	b, err := os.ReadFile(siteLinksFile)
 	if err != nil {
@@ -62,5 +62,38 @@ func TestEveryPageTheWebsiteLinksToExists(t *testing.T) {
 	}
 	if listed == 0 {
 		t.Fatalf("%s lists no links", siteLinksFile)
+	}
+}
+
+// A site link must be a blob link to a file or a tree link to a directory that exists in the tree.
+func TestASiteLinkNamesAPageInTheTree(t *testing.T) {
+	root := writeTree(t, map[string]string{"docs/a.md": ""})
+	for _, tc := range []struct{ line, inProblem string }{
+		{"", ""},
+		{"# a comment", ""},
+		{repoURL + "blob/main/docs/a.md", ""},
+		{repoURL + "tree/main/docs", ""},
+		{repoURL + "blob/main/docs", "is a directory"},
+		{repoURL + "tree/main/docs/a.md", "is a file"},
+		{repoURL + "blob/main/docs/gone.md", "which is not in this tree"},
+		{repoURL + "blob/main/docs/a.md#part", "without its #anchor"},
+		{repoURL + "blob/main/docs/a.md?plain=1", "without its #anchor"},
+		{"blob/main/docs/a.md", "is not a"},
+		{repoURL + "raw/main/docs/a.md", "is not a"},
+		{repoURL + "blob/v1/docs/a.md", "is not a"},
+		{repoURL + "blob/main/", "is not a"},
+		{"https://example.com/docs/a.md", "is not a"},
+		{repoURL + "blob/main/../x.md", "outside the repository"},
+	} {
+		problem := siteLinkProblem(root, tc.line)
+		if tc.inProblem == "" {
+			if problem != "" {
+				t.Errorf("%q: problem %q, want none", tc.line, problem)
+			}
+			continue
+		}
+		if !strings.Contains(problem, tc.inProblem) {
+			t.Errorf("%q: problem %q, want one containing %q", tc.line, problem, tc.inProblem)
+		}
 	}
 }

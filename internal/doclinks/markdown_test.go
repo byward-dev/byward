@@ -60,8 +60,8 @@ func writeTree(t *testing.T, files map[string]string) string {
 	return root
 }
 
-// Only ATX headings in prose give anchors: not one in a fence, an indented one, one with seven #,
-// and closing #s are not part of the text.
+// Only ATX headings in prose give anchors: not one in a fence, an indented one, or one with seven #.
+// Closing #s are not part of the text.
 func TestOnlyHeadingsInProseGiveAnchors(t *testing.T) {
 	root := writeTree(t, map[string]string{"a.md": strings.Join([]string{
 		"## Setup ##",
@@ -110,6 +110,7 @@ func TestOnlyRelativeLinksInProseAreChecked(t *testing.T) {
 		"[other fence](no.md)",
 		"```",
 		"``a ` b`` then [after span](d.md) and [single](e.md 'title') and [paren](f.md (title)) and [angle](<g h.md>)",
+		"``` x ``` then [inline fence](h.md)",
 		"[last](c/)",
 	}, "\n")})
 	p, err := readPage(filepath.Join(root, "a.md"))
@@ -120,7 +121,7 @@ func TestOnlyRelativeLinksInProseAreChecked(t *testing.T) {
 	for _, l := range relativeLinks(p) {
 		got = append(got, fmt.Sprintf("%s@%d", l.target, l.line))
 	}
-	want := []string{"b.md#part@2", "#title@2", "pic.png@2", "d.md@20", "e.md@20", "f.md@20", "g h.md@20", "c/@21"}
+	want := []string{"b.md#part@2", "#title@2", "pic.png@2", "d.md@20", "e.md@20", "f.md@20", "g h.md@20", "h.md@21", "c/@22"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
@@ -148,13 +149,16 @@ func TestALinkResolvesAsOnGitHub(t *testing.T) {
 		{"docs/guide.md", "sub/#anything", ""},
 		{"docs/guide.md", "img/logo.svg", ""},
 		{"docs/guide.md", "../internal/x/x.go#L1-L2", ""},
-		{"docs/guide.md", "../README.md#setup-2", "no heading in README.md has the anchor #setup-2"},
+		{"docs/guide.md", "../README.md#setup-2", "no heading in README.md has the anchor #setup-2; fix the link, or restore the heading"},
 		{"docs/guide.md", "#nowhere", "no heading in docs/guide.md has the anchor #nowhere"},
-		{"docs/guide.md", "missing.md", "no such file or directory: docs/missing.md"},
+		{"docs/guide.md", "missing.md", "no such file or directory: docs/missing.md; fix the link, or restore the file"},
 		{"docs/guide.md", "../../outside.md", "outside the repository"},
 		{"README.md", "..", "outside the repository"},
 		{"docs/guide.md", "../internal/x/x.go#func", "only line anchors"},
 		{"docs/guide.md", "../internal/x/x.go#L1foo", "only line anchors"},
+		{"docs/guide.md", "../internal/x/x.go#xL1", "only line anchors"},
+		{"docs/guide.md", "#bad%zz", "#anchor is not valid URL escaping"},
+		{"docs/guide.md", "../", ""},
 		{"docs/guide.md", "bad%zz.md", "not valid URL escaping"},
 	} {
 		problem := linkProblem(root, tc.file, tc.target, pageAt)
@@ -170,45 +174,58 @@ func TestALinkResolvesAsOnGitHub(t *testing.T) {
 	}
 }
 
-// The walk reads every *.md file but none in build output or agent worktrees.
+// The walk reads every *.md file but none in build output or agent worktrees; the root itself is
+// walked whatever its name.
 func TestTheWalkSkipsBuildOutputAndWorktrees(t *testing.T) {
-	root := writeTree(t, map[string]string{".claude/worktrees/x/a.md": "", "build/b.md": "", "docs/c.md": "", ".github/d.md": "", "e.txt": ""})
-	got, err := markdownFiles(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := []string{".github/d.md", "docs/c.md"}; !slices.Equal(got, want) {
-		t.Fatalf("got %v, want %v", got, want)
+	root := writeTree(t, map[string]string{".claude/worktrees/x/a.md": "", "build/b.md": "", "build/docs/f.md": "", "docs/c.md": "", ".github/d.md": "", "e.txt": ""})
+	for _, tc := range []struct {
+		root string
+		want []string
+	}{
+		{root, []string{".github/d.md", "docs/c.md"}},
+		{filepath.Join(root, "build"), []string{"b.md", "docs/f.md"}},
+	} {
+		got, err := markdownFiles(tc.root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("walk of %s: got %v, want %v", tc.root, got, tc.want)
+		}
 	}
 }
 
-// A site link must be a blob link to a file or a tree link to a directory that exists in the tree.
-func TestASiteLinkNamesAPageInTheTree(t *testing.T) {
-	root := writeTree(t, map[string]string{"docs/a.md": ""})
-	for _, tc := range []struct{ line, inProblem string }{
-		{"", ""},
-		{"# a comment", ""},
-		{repoURL + "blob/main/docs/a.md", ""},
-		{repoURL + "tree/main/docs", ""},
-		{repoURL + "blob/main/docs", "is a directory"},
-		{repoURL + "tree/main/docs/a.md", "is a file"},
-		{repoURL + "blob/main/docs/gone.md", "which is not in this tree"},
-		{repoURL + "blob/main/docs/a.md#part", "without its #anchor"},
-		{repoURL + "raw/main/docs/a.md", "is not a"},
-		{repoURL + "blob/v1/docs/a.md", "is not a"},
-		{repoURL + "blob/main/", "is not a"},
-		{"https://example.com/docs/a.md", "is not a"},
-		{repoURL + "blob/main/../x.md", "outside the repository"},
+// A fence closes only on a run of its own character at least as long as the opening one, indented
+// at most three spaces, with nothing after it but spaces.
+func TestAFenceClosesOnlyOnALongEnoughRunOfItsCharacter(t *testing.T) {
+	for _, tc := range []struct {
+		line, fence string
+		want        bool
+	}{
+		{"```", "```", true},
+		{"   ````  ", "```", true},
+		{"    ```", "```", false},
+		{"``` x", "```", false},
+		{"``", "```", false},
+		{"~~~", "```", false},
+		{"~~~~", "~~~", true},
 	} {
-		problem := siteLinkProblem(root, tc.line)
-		if tc.inProblem == "" {
-			if problem != "" {
-				t.Errorf("%q: problem %q, want none", tc.line, problem)
-			}
-			continue
+		if got := closesFence(tc.line, tc.fence); got != tc.want {
+			t.Errorf("closesFence(%q, %q) = %v, want %v", tc.line, tc.fence, got, tc.want)
 		}
-		if !strings.Contains(problem, tc.inProblem) {
-			t.Errorf("%q: problem %q, want one containing %q", tc.line, problem, tc.inProblem)
+	}
+}
+
+// A code span ends at the next run of exactly as many backticks; a run never closed is text.
+func TestACodeSpanEndsAtARunOfTheSameLength(t *testing.T) {
+	for _, tc := range []struct{ line, want string }{
+		{"a `b` c", "a  c"},
+		{"a `` b", "a `` b"},
+		{"`` x ``` y `` z", " z"},
+		{"`a` and `b`", " and "},
+	} {
+		if got := withoutCodeSpans(tc.line); got != tc.want {
+			t.Errorf("withoutCodeSpans(%q) = %q, want %q", tc.line, got, tc.want)
 		}
 	}
 }

@@ -5,8 +5,9 @@
 // What is checked: inline links and images ([text](dest), with an optional "title", 'title' or
 // (title), and <dest> in angle brackets) outside fenced code, code spans and HTML comments; their
 // #anchors against ATX headings (# Heading), as GitHub names them. Not checked: external URLs,
-// reference-style links ([text][ref]), HTML href/src, and anchors from setext headings or <a id>,
-// none of which the docs use. Untracked files are read too, and path case is only enforced on a
+// reference-style links ([text][ref]), HTML href/src, anchors from setext headings or <a id>, and
+// prose after an HTML comment opened inside code (<!-- in a fence) until its -->; the docs use none
+// of these. Untracked files are read too, and path case is only enforced on a
 // case-sensitive file system (CI's Linux, not macOS's default).
 package doclinks
 
@@ -70,7 +71,7 @@ func markdownFiles(root string) ([]string, error) {
 }
 
 var (
-	fenceOpen    = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})")
+	openingFence = regexp.MustCompile("^ {0,3}(?:(`{3,})[^`]*$|(~{3,}))") // a ``` fence's info string has no backtick
 	htmlComment  = regexp.MustCompile(`(?s)<!--.*?-->`)
 	inlineLink   = regexp.MustCompile(`\]\((?:<([^>]*)>|([^)\s]*))(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\)`)
 	heading      = regexp.MustCompile(`^ {0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$`)
@@ -104,8 +105,9 @@ func readPage(path string) (page, error) {
 				fence = ""
 			}
 			line = ""
-		case fenceOpen.MatchString(line):
-			fence = fenceOpen.FindStringSubmatch(line)[1]
+		case openingFence.MatchString(line):
+			m := openingFence.FindStringSubmatch(line)
+			fence = m[1] + m[2]
 			line = ""
 		}
 		p.lines = append(p.lines, line)
@@ -119,13 +121,16 @@ func readPage(path string) (page, error) {
 // closesFence reports whether line closes a block opened by fence: the same character, at least
 // as many, up to three spaces before and nothing but spaces after (CommonMark, as GitHub renders).
 func closesFence(line, fence string) bool {
-	trimmed := strings.TrimLeft(line, " ")
-	if len(line)-len(trimmed) > 3 {
+	indent := leadingRun(line, " ")
+	if indent > 3 {
 		return false
 	}
-	run := len(trimmed) - len(strings.TrimLeft(trimmed, fence[:1]))
-	return run >= len(fence) && strings.TrimSpace(trimmed[run:]) == ""
+	run := leadingRun(line[indent:], fence[:1])
+	return run >= len(fence) && strings.TrimSpace(line[indent+run:]) == ""
 }
+
+// leadingRun is the length of the run of chars that s starts with.
+func leadingRun(s, chars string) int { return len(s) - len(strings.TrimLeft(s, chars)) }
 
 // blankKeepingLines replaces an HTML comment with its newlines only, so line numbers still match.
 func blankKeepingLines(s string) string { return strings.Repeat("\n", strings.Count(s, "\n")) }
@@ -140,7 +145,7 @@ func withoutCodeSpans(line string) string {
 			i++
 			continue
 		}
-		n := len(line[i:]) - len(strings.TrimLeft(line[i:], "`"))
+		n := leadingRun(line[i:], "`")
 		end := closingRun(line, i+n, n)
 		if end < 0 {
 			b.WriteString(line[i : i+n])
@@ -159,7 +164,7 @@ func closingRun(line string, from, n int) int {
 			j++
 			continue
 		}
-		m := len(line[j:]) - len(strings.TrimLeft(line[j:], "`"))
+		m := leadingRun(line[j:], "`")
 		if m == n {
 			return j
 		}
@@ -247,12 +252,12 @@ func linkProblem(root, file, target string, pageAt func(string) (page, error)) s
 	default:
 		dest = filepath.ToSlash(filepath.Join(filepath.Dir(file), pathPart))
 	}
-	if !filepath.IsLocal(filepath.FromSlash(dest)) && dest != "." {
+	if !filepath.IsLocal(filepath.FromSlash(dest)) {
 		return "it points outside the repository"
 	}
 	fi, err := os.Stat(filepath.Join(root, filepath.FromSlash(dest)))
 	if err != nil {
-		return "no such file or directory: " + dest
+		return "no such file or directory: " + dest + "; fix the link, or restore the file"
 	}
 	if fragment == "" || fi.IsDir() {
 		return ""
@@ -268,7 +273,7 @@ func linkProblem(root, file, target string, pageAt func(string) (page, error)) s
 		return err.Error()
 	}
 	if !p.anchors[fragment] {
-		return fmt.Sprintf("no heading in %s has the anchor #%s", dest, fragment)
+		return fmt.Sprintf("no heading in %s has the anchor #%s; fix the link, or restore the heading", dest, fragment)
 	}
 	return ""
 }
@@ -302,7 +307,7 @@ func TestEveryRelativeLinkInTheMarkdownResolves(t *testing.T) {
 		}
 		for _, l := range relativeLinks(p) {
 			if problem := linkProblem(root, file, l.target, pageAt); problem != "" {
-				t.Errorf("%s:%d: link %s: %s; fix the link, or restore what it points to", file, l.line, l.target, problem)
+				t.Errorf("%s:%d: link %s: %s", file, l.line, l.target, problem)
 			}
 		}
 	}
