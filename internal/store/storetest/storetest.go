@@ -78,6 +78,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		{"UseClientMarksUseAndExtendsWithoutShortening", useClientMarksUseAndExtendsWithoutShortening},
 		{"CollectRemovesExpiredClientsAndClientsUnusedForTheirFirstDay", collectRemovesExpiredClientsAndClientsUnusedForTheirFirstDay},
 		{"ConsentRoundTripsAsACopyAndIsReplaced", consentRoundTripsAsACopyAndIsReplaced},
+		{"ConsentKeepsItsLifetimeMarkUntilReplaced", consentKeepsItsLifetimeMarkUntilReplaced},
 		{"IncompleteConsentsAreInvalid", incompleteConsentsAreInvalid},
 		{"RevokeGrantForgetsItsUsersConsentsForItsClient", revokeGrantForgetsItsUsersConsentsForItsClient},
 		{"RefreshTokenReuseForgetsItsUsersConsentsForItsClient", refreshTokenReuseForgetsItsUsersConsentsForItsClient},
@@ -1149,6 +1150,22 @@ func consentRoundTripsAsACopyAndIsReplaced(t *testing.T, s store.Store) {
 	other.Redirect = "https://app.example/other"
 	if _, err := s.Consent(ctx, other); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("another redirect key: %v, want ErrNotFound", err)
+	}
+}
+
+// A consent's RecordsLifetime mark (#363) is stored with it, and a new Allow for the same key sets
+// it like the other fields, in both directions.
+func consentKeepsItsLifetimeMarkUntilReplaced(t *testing.T, s store.Store) {
+	c := consent("g1", "tid:alice", "https://app.example/cb")
+	for i, mark := range []bool{false, true, true, false} {
+		c.RecordsLifetime = mark
+		c.ApprovedAt, c.ExpiresAt = t0.Add(time.Duration(i)*time.Hour), t0.Add(time.Duration(i)*time.Hour+30*24*time.Hour)
+		must(t, s.RememberConsent(ctx, c))
+		got, err := s.Consent(ctx, c.Key)
+		must(t, err)
+		if got.RecordsLifetime != mark {
+			t.Fatalf("write %d: RecordsLifetime = %v, want %v", i, got.RecordsLifetime, mark)
+		}
 	}
 }
 

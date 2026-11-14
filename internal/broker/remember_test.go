@@ -597,3 +597,47 @@ func TestTheCallbackGrantsRefreshOnlyToAClientThatStillRegistersIt(t *testing.T)
 	loc, _ := url.Parse(res.Header.Get("Location"))
 	e.redeemWithoutRefresh(t, loc.Query().Get("code"))
 }
+
+// A consent remembered before #287's rule may hold offline_access approved on a page that said "up
+// to 1 hour" (a client that asked for it without the refresh_token grant). It does not cover a grant
+// that refreshes: the page returns, or consent_required for prompt=none. The same consent written
+// under the rule does (#363).
+func TestALegacyConsentsOfflineAccessDoesNotCoverARefreshingGrant(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		marked bool
+		extra  url.Values
+		want   func(*testing.T, *env, *http.Response)
+	}{
+		{"legacy, interactive", false, nil, func(t *testing.T, _ *env, res *http.Response) {
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("authorize: %d to %q, want the consent page", res.StatusCode, res.Header.Get("Location"))
+			}
+		}},
+		{"legacy, silent", false, silent(nil), func(t *testing.T, e *env, res *http.Response) {
+			if got := answerOf(t, res); got != refused(e, "consent_required") {
+				t.Fatalf("answer %+v, want consent_required", got)
+			}
+		}},
+		{"written under the rule", true, nil, func(t *testing.T, _ *env, res *http.Response) {
+			if !skipped(res) {
+				t.Fatalf("authorize: %d to %q, want the IdP without the page", res.StatusCode, res.Header.Get("Location"))
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t, withRemember(t, nil))
+			h := e.remember(t, url.Values{"scope": {"mcp"}})
+			if h == nil {
+				t.Fatal("no hint cookie")
+			}
+			g := user(e)
+			if err := e.st.RememberConsent(context.Background(), store.Consent{Key: store.ConsentKey{Issuer: g.Issuer, Subject: g.Subject,
+				ClientID: clientID, Redirect: registration.RedirectKey(clientCB), Resource: resourceID}, Scopes: []string{"mcp", "offline_access"},
+				RecordsLifetime: tc.marked, ApprovedAt: e.now, ExpiresAt: e.now.Add(ConsentLifetime)}); err != nil {
+				t.Fatal(err)
+			}
+			tc.want(t, e, e.authorizeWith(t, tc.extra, h))
+		})
+	}
+}

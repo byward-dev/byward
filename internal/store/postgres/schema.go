@@ -114,6 +114,12 @@ var migrations = []string{
 		expires_at timestamptz NOT NULL
 	);
 	CREATE INDEX spent_assertions_expires ON spent_assertions (expires_at);`,
+
+	// v3: consents written under the lifetime rule (#363). records_lifetime_at is the approved_at
+	// of the write that marked the consent; the mark counts only while it still equals approved_at,
+	// so a replica on an older binary that re-approves the consent (and so sets approved_at but not
+	// this column) leaves it unmarked. NULL on every row from before this version.
+	`ALTER TABLE consents ADD COLUMN records_lifetime_at timestamptz;`,
 }
 
 // schemaVersion is the schema this binary writes.

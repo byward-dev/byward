@@ -499,12 +499,17 @@ func (s *Store) RememberConsent(ctx context.Context, c store.Consent) error {
 	if k.Issuer == "" || k.Subject == "" || k.ClientID == "" || k.Redirect == "" || k.Resource == "" || len(c.Scopes) == 0 || !c.ExpiresAt.After(c.ApprovedAt) {
 		return store.ErrInvalid
 	}
+	var marked *time.Time // records_lifetime_at: see migration v3
+	if c.RecordsLifetime {
+		marked = new(ts(c.ApprovedAt))
+	}
 	return s.write(ctx, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO consents (issuer, subject, client_id, redirect, resource, scopes, approved_at, expires_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		_, err := tx.Exec(ctx, `INSERT INTO consents (issuer, subject, client_id, redirect, resource, scopes, approved_at, expires_at, records_lifetime_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 			ON CONFLICT (issuer, subject, client_id, redirect, resource) DO UPDATE SET
-				scopes = excluded.scopes, approved_at = excluded.approved_at, expires_at = excluded.expires_at`,
-			k.Issuer, k.Subject, k.ClientID, k.Redirect, k.Resource, c.Scopes, ts(c.ApprovedAt), ts(c.ExpiresAt))
+				scopes = excluded.scopes, approved_at = excluded.approved_at, expires_at = excluded.expires_at,
+				records_lifetime_at = excluded.records_lifetime_at`,
+			k.Issuer, k.Subject, k.ClientID, k.Redirect, k.Resource, c.Scopes, ts(c.ApprovedAt), ts(c.ExpiresAt), marked)
 		return err
 	})
 }
@@ -512,9 +517,9 @@ func (s *Store) RememberConsent(ctx context.Context, c store.Consent) error {
 // Consent implements store.Consents.
 func (s *Store) Consent(ctx context.Context, k store.ConsentKey) (store.Consent, error) {
 	c := store.Consent{Key: k}
-	err := s.pool.QueryRow(ctx, `SELECT scopes, approved_at, expires_at FROM consents
+	err := s.pool.QueryRow(ctx, `SELECT scopes, approved_at, expires_at, records_lifetime_at IS NOT DISTINCT FROM approved_at FROM consents
 		WHERE issuer = $1 AND subject = $2 AND client_id = $3 AND redirect = $4 AND resource = $5`,
-		k.Issuer, k.Subject, k.ClientID, k.Redirect, k.Resource).Scan(&c.Scopes, &c.ApprovedAt, &c.ExpiresAt)
+		k.Issuer, k.Subject, k.ClientID, k.Redirect, k.Resource).Scan(&c.Scopes, &c.ApprovedAt, &c.ExpiresAt, &c.RecordsLifetime)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return store.Consent{}, store.ErrNotFound
 	}

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -65,6 +66,7 @@ func TestIntegrationPostgres(t *testing.T) {
 				{"VerifyFullRefusesAnotherCAOrHostName", verifyFullRefusesAnotherCAOrHostName},
 				{"PingAnswersWhileOpenAndFailsAfterClose", pingAnswersWhileOpenAndFailsAfterClose},
 				{"EmptyIdPTokensReadBackAsNone", emptyIdPTokensReadBackAsNone},
+				{"AnOlderBinarysReapprovalUnmarksTheConsent", anOlderBinarysReapprovalUnmarksTheConsent},
 				{"ARestoreStartsOneEpochAcrossReplicas", aRestoreStartsOneEpochAcrossReplicas},
 				{"AReplicasFirstCheckFindsARestore", aReplicasFirstCheckFindsARestore},
 				{"AValueLostInACrashIsNoRestore", aValueLostInACrashIsNoRestore},
@@ -268,11 +270,27 @@ func fixturesMigrateToTheCurrentSchemaKeepingTheirData(t *testing.T, srv *server
 					t.Fatalf("spending the fixture assertion: %v, want ErrConsumed", err)
 				}
 			}
+			if v >= 3 {
+				checkMarkedFixtureConsents(t, s)
+			}
 			checkRotatedFixtureToken(t, s)
 			if c, err := s.ConsumeCode(ctx, fixtureGrant.ID, fixtureCreated); err != nil || !reflect.DeepEqual(c, fixtureCode) {
 				t.Fatalf("code = %+v, %v\nwant %+v", c, err, fixtureCode)
 			}
 		})
+	}
+}
+
+// checkMarkedFixtureConsents: from v3, the fixture holds a consent marked under the lifetime rule
+// (#363), and one an older binary re-approved after it was marked, which no longer counts as marked.
+func checkMarkedFixtureConsents(t *testing.T, s *Store) {
+	t.Helper()
+	for subject, want := range map[string]bool{"tid:fixture": true, "tid:fixture-reapproved": false} {
+		k := store.ConsentKey{Issuer: "https://idp.example/v2.0", Subject: subject, ClientID: "fixture-client",
+			Redirect: "https://app.example/cb", Resource: "https://mcp.example.com/mcp"}
+		if got, err := s.Consent(ctx, k); err != nil || got.RecordsLifetime != want || !slices.Equal(got.Scopes, []string{"mcp", "offline_access"}) {
+			t.Fatalf("%s's consent = %+v, %v; want RecordsLifetime %v", subject, got, err, want)
+		}
 	}
 }
 
@@ -471,6 +489,25 @@ func pingAnswersWhileOpenAndFailsAfterClose(t *testing.T, srv *server) {
 
 // Empty IdP tokens are stored as none (store.Grant: "Nil when there are none"), as the SQLite
 // adapter stores them, whether they come with the grant or with a rotation.
+// A replica still on the binary before v3 re-approves a consent with its own statement, which sets
+// approved_at but not records_lifetime_at; its scopes followed the old rule, so the mark must not
+// survive (#363).
+func anOlderBinarysReapprovalUnmarksTheConsent(t *testing.T, srv *server) {
+	s, db := srv.open(t)
+	k := store.ConsentKey{Issuer: "https://idp.example/v2.0", Subject: "tid:alice", ClientID: "c", Redirect: "https://app.example/cb", Resource: "https://mcp.example.com/mcp"}
+	must(t, s.RememberConsent(ctx, store.Consent{Key: k, Scopes: []string{"mcp"}, ApprovedAt: t0, ExpiresAt: t0.Add(time.Hour), RecordsLifetime: true}))
+	reapproved := t0.Add(time.Second)
+	_, err := srv.conn(t, db).Exec(ctx, `INSERT INTO consents (issuer, subject, client_id, redirect, resource, scopes, approved_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (issuer, subject, client_id, redirect, resource) DO UPDATE SET
+			scopes = excluded.scopes, approved_at = excluded.approved_at, expires_at = excluded.expires_at`,
+		k.Issuer, k.Subject, k.ClientID, k.Redirect, k.Resource, []string{"mcp", "offline_access"}, reapproved, t0.Add(time.Hour))
+	must(t, err)
+	if got, err := s.Consent(ctx, k); err != nil || got.RecordsLifetime || !got.ApprovedAt.Equal(reapproved) {
+		t.Fatalf("consent after an older binary's re-approval = %+v, %v; want it unmarked", got, err)
+	}
+}
+
 func emptyIdPTokensReadBackAsNone(t *testing.T, srv *server) {
 	s, _ := srv.open(t)
 	g := grant("g", "tid:a")

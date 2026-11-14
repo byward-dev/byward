@@ -710,12 +710,17 @@ func (s *Store) RememberConsent(ctx context.Context, c store.Consent) error {
 	if err != nil {
 		return err
 	}
+	var marked *int64 // records_lifetime_at: see migration v8
+	if c.RecordsLifetime {
+		marked = new(micros(c.ApprovedAt))
+	}
 	return s.write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `INSERT INTO consents (issuer, subject, client_id, redirect, resource, scopes, approved_at, expires_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		_, err := tx.ExecContext(ctx, `INSERT INTO consents (issuer, subject, client_id, redirect, resource, scopes, approved_at, expires_at, records_lifetime_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT (issuer, subject, client_id, redirect, resource) DO UPDATE SET
-				scopes = excluded.scopes, approved_at = excluded.approved_at, expires_at = excluded.expires_at`,
-			k.Issuer, k.Subject, k.ClientID, k.Redirect, k.Resource, string(scopes), micros(c.ApprovedAt), micros(c.ExpiresAt))
+				scopes = excluded.scopes, approved_at = excluded.approved_at, expires_at = excluded.expires_at,
+				records_lifetime_at = excluded.records_lifetime_at`,
+			k.Issuer, k.Subject, k.ClientID, k.Redirect, k.Resource, string(scopes), micros(c.ApprovedAt), micros(c.ExpiresAt), marked)
 		return err
 	})
 }
@@ -724,16 +729,17 @@ func (s *Store) RememberConsent(ctx context.Context, c store.Consent) error {
 func (s *Store) Consent(ctx context.Context, k store.ConsentKey) (store.Consent, error) {
 	var scopes string
 	var approved, expires int64
-	err := s.db.QueryRowContext(ctx, `SELECT scopes, approved_at, expires_at FROM consents
+	var marked bool
+	err := s.db.QueryRowContext(ctx, `SELECT scopes, approved_at, expires_at, records_lifetime_at IS approved_at FROM consents
 		WHERE issuer = ? AND subject = ? AND client_id = ? AND redirect = ? AND resource = ?`,
-		k.Issuer, k.Subject, k.ClientID, k.Redirect, k.Resource).Scan(&scopes, &approved, &expires)
+		k.Issuer, k.Subject, k.ClientID, k.Redirect, k.Resource).Scan(&scopes, &approved, &expires, &marked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.Consent{}, store.ErrNotFound
 	}
 	if err != nil {
 		return store.Consent{}, err
 	}
-	c := store.Consent{Key: k, ApprovedAt: fromMicros(approved), ExpiresAt: fromMicros(expires)}
+	c := store.Consent{Key: k, ApprovedAt: fromMicros(approved), ExpiresAt: fromMicros(expires), RecordsLifetime: marked}
 	if err := json.Unmarshal([]byte(scopes), &c.Scopes); err != nil {
 		return store.Consent{}, fmt.Errorf("sqlite store: consent scopes: %w", err)
 	}

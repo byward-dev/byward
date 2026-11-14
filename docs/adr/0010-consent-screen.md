@@ -1,6 +1,6 @@
 # ADR-0010: Consent screen — before the IdP, per client, remembered only for trusted clients
 
-- Status: Accepted; clarified 2026-11-06 (#90), 2026-11-07 (#126), 2026-11-14 (#287); amended 2026-11-06 (slices 1.4, 2.1)
+- Status: Accepted; clarified 2026-11-06 (#90), 2026-11-07 (#126), 2026-11-14 (#287, #363); amended 2026-11-06 (slices 1.4, 2.1)
 - Date: 2026-11-05
 - Issue: #8 (F7)
 
@@ -62,6 +62,10 @@ admin grants tenant-wide consent, and labels unverified publishers "Unverified".
    requested (ADR-0006, amendment 2026-11-14). A later request is checked against the client's
    current registration: a consent given while the page said "up to 1 hour" does not cover a grant
    that refreshes, so the page is shown again (`consent_required` for `prompt=none`).
+   _Clarified 2026-11-14 (#363):_ a consent written before that rule, or by a replica still on an
+   older binary during a rolling upgrade, carries no mark of it, and its `offline_access` does not
+   count: it may have been approved on a page that said "up to 1 hour". The store keeps the mark as
+   the `approved_at` it was written with, so an older binary's re-approval unmarks the consent.
 4. **The page shows:** the client name with its trust level (control characters stripped, 80
    characters), the CIMD host, the redirect host (loopback: "an app on this computer" plus a warning;
    punycode beside Unicode; a warning if it differs from the CIMD host), the upstream, the IdP ("You'll
