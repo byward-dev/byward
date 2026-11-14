@@ -114,8 +114,11 @@ func TestTheDocumentedUpstreamRefusalLabelsAreTheExportedOnes(t *testing.T) {
 	}
 	rec := httptest.NewRecorder()
 	metrics.New().Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	if !strings.Contains(row, "`status`") {
+		t.Errorf("the byward_upstream_refusals_total row does not name the `status` label:\n%s", row)
+	}
 	for _, status := range []string{"401", "403"} {
-		if !strings.Contains(row, "`status`") || !strings.Contains(row, "`"+status+"`") {
+		if !strings.Contains(row, "`"+status+"`") {
 			t.Errorf("the byward_upstream_refusals_total row does not name status %s:\n%s", status, row)
 		}
 		if !strings.Contains(rec.Body.String(), `byward_upstream_refusals_total{status="`+status+`"}`) {
@@ -124,10 +127,10 @@ func TestTheDocumentedUpstreamRefusalLabelsAreTheExportedOnes(t *testing.T) {
 	}
 }
 
-var metricName = regexp.MustCompile(`byward_[a-z_]+`)
+var metricName = regexp.MustCompile(`byward_[a-z0-9_]+`)
 
 // Every metric an example alert rule or the alerts page queries is one the proxy exports, so a
-// rule copied from the docs never matches nothing.
+// rule copied from the docs queries a real metric.
 func TestTheAlertRulesInTheDocsQueryExportedMetrics(t *testing.T) {
 	golden, err := os.ReadFile("../metrics/testdata/names.golden")
 	if err != nil {
@@ -150,7 +153,11 @@ func TestTheAlertRulesInTheDocsQueryExportedMetrics(t *testing.T) {
 		t.Fatal(err)
 	}
 	for doc, text := range map[string]string{"observability.md's alert rules": rules, "respond-to-alerts.md": string(alerts)} {
-		for _, name := range metricName.FindAllString(text, -1) {
+		names := metricName.FindAllString(text, -1)
+		if len(names) == 0 {
+			t.Errorf("%s queries no byward_ metric; the scan found nothing", doc)
+		}
+		for _, name := range names {
 			base := name
 			for _, suffix := range []string{"_bucket", "_sum", "_count"} {
 				base = strings.TrimSuffix(base, suffix)
