@@ -128,7 +128,8 @@ func NewCIMDRegistry(c CIMDConfig) *CIMDRegistry {
 
 // Client returns the client for a CIMD URL: from the cache while fresh, otherwise fetched once
 // however many requests ask at the same time. An unacceptable URL, host or document wraps
-// ErrUnknownClient; a transient failure with no usable copy wraps ErrUnavailable.
+// ErrUnknownClient; a transient failure with no usable copy, or ctx ending before the shared fetch
+// does, wraps ErrUnavailable.
 func (r *CIMDRegistry) Client(ctx context.Context, id string) (Client, error) {
 	if !IsCIMDURL(id) {
 		return nil, ErrUnknownClient
@@ -183,7 +184,7 @@ func (r *CIMDRegistry) Client(ctx context.Context, id string) (Client, error) {
 
 	// The fetch runs on its own, detached from cancellation, and the leader waits for it like any
 	// other caller: a leader whose request ends leaves at once, and the shared fetch still finishes
-	// for the others (as idp.KeySet and downstream do, L8).
+	// for the others (as idp.KeySet and downstream do).
 	go r.lead(context.WithoutCancel(ctx), call, id, host, now)
 	return wait(ctx, call)
 }
@@ -194,7 +195,8 @@ func (r *CIMDRegistry) Client(ctx context.Context, id string) (Client, error) {
 func (r *CIMDRegistry) lead(ctx context.Context, call *cimdCall, id, host string, now time.Time) {
 	defer func() {
 		if p := recover(); p != nil {
-			call.client, call.err = nil, fmt.Errorf("%w: fetching %s panicked: %v", ErrUnavailable, host, p)
+			// A transient failure like any other: a copy inside the stale window still serves.
+			call.client, call.err = r.staleOr(id, now, fmt.Errorf("%w: fetching %s panicked: %v", ErrUnavailable, host, p))
 		}
 		r.mu.Lock()
 		delete(r.inflight, id)
