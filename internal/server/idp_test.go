@@ -143,15 +143,17 @@ func TestAClientKeySignsInWithItsKeyIDAndAnUnusableOneNamesTheSetting(t *testing
 	p384, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	_, edKey, _ := ed25519.GenerateKey(rand.Reader)
 	for name, tc := range map[string]struct{ key, want string }{
-		"EC P-384": {pkcs8PEM(t, p384), "BYWARD_OIDC_CLIENT_KEY_FILE: "},
-		"Ed25519":  {pkcs8PEM(t, edKey), "BYWARD_OIDC_CLIENT_KEY_FILE: "},
+		"EC P-384": {pkcs8PEM(t, p384), "BYWARD_OIDC_CLIENT_KEY_FILE: idp: EC client keys must use P-256"},
+		"Ed25519":  {pkcs8PEM(t, edKey), "BYWARD_OIDC_CLIENT_KEY_FILE: idp: unsupported client key type ed25519.PublicKey"},
 		"RSA 1024": {pkcs8PEM(t, weakRSAKey(t)), "BYWARD_OIDC_CLIENT_KEY_FILE: idp: a 1024-bit RSA key: use at least 2048 bits"},
-		"not PEM":  {"s3cret", "BYWARD_OIDC_CLIENT_KEY_FILE: "},
+		"not PEM":  {"s3cret", "BYWARD_OIDC_CLIENT_KEY_FILE: not a PEM private key"},
 	} {
-		c := oidcConfig("keycloak", func(c *config.Config) { c.OIDCClientSecret, c.OIDCClientKey = "", tc.key })
-		if _, err := newIdentityProvider(c, nil); err == nil || !strings.HasPrefix(err.Error(), tc.want) {
-			t.Errorf("%s: %v, want an error starting %q", name, err, tc.want)
-		}
+		t.Run(name, func(t *testing.T) {
+			c := oidcConfig("keycloak", func(c *config.Config) { c.OIDCClientSecret, c.OIDCClientKey = "", tc.key })
+			if _, err := newIdentityProvider(c, nil); err == nil || err.Error() != tc.want {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 

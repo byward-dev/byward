@@ -148,12 +148,13 @@ func TestPrivateKeyJWTAssertion(t *testing.T) {
 	}
 }
 
-// PrivateKeyJWT accepts an EC P-256 key and an RSA key of MinRSABits or more, with either RSA
-// algorithm, and refuses another curve or a shorter RSA key, saying why.
-func TestPrivateKeyJWTKeyTypes(t *testing.T) {
+// A client key may be an EC P-256 key, or an RSA key of MinRSABits or more with either RSA
+// algorithm; another curve or a shorter RSA key is refused, saying why.
+func TestOnlyAP256OrMinRSABitsRSAKeySignsAClientAssertion(t *testing.T) {
 	p256, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	p384, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	rsaKey := func(bits int) crypto.Signer {
+		t.Helper()
 		k, err := rsa.GenerateKey(rand.Reader, bits) //nolint:gosec // deliberately weak keys for the test
 		if err != nil {
 			t.Fatal(err)
@@ -166,12 +167,12 @@ func TestPrivateKeyJWTKeyTypes(t *testing.T) {
 		alg     string
 		wantErr string // "" accepts
 	}{
-		"EC P-256":        {key: p256},
-		"EC P-384":        {key: p384, wantErr: "idp: EC client keys must use P-256"},
-		"RSA 2048, PS256": {key: rsa2048, alg: "PS256"},
-		"RSA 2048, RS256": {key: rsa2048, alg: "RS256"},
-		"RSA 2047":        {key: rsaKey(2047), wantErr: "idp: a 2047-bit RSA key: use at least 2048 bits"},
-		"RSA 1024, RS256": {key: rsaKey(1024), alg: "RS256", wantErr: "idp: a 1024-bit RSA key: use at least 2048 bits"},
+		"EC P-256":                {key: p256},
+		"EC P-384":                {key: p384, wantErr: "idp: EC client keys must use P-256"},
+		"RSA 2048, PS256":         {key: rsa2048, alg: "PS256"},
+		"RSA 2048, RS256":         {key: rsa2048, alg: "RS256"},
+		"RSA 2047, default PS256": {key: rsaKey(2047), wantErr: "idp: a 2047-bit RSA key: use at least 2048 bits"},
+		"RSA 1024, RS256":         {key: rsaKey(1024), alg: "RS256", wantErr: "idp: a 1024-bit RSA key: use at least 2048 bits"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := PrivateKeyJWTWithAlg(tc.key, nil, "", tc.alg)
@@ -589,6 +590,7 @@ func TestOnlyThe36CharacterFormIsAGUID(t *testing.T) {
 	for s, want := range map[string]bool{
 		g:                                      true,
 		strings.ToUpper(g):                     true,
+		"D4991BF4-0BFE-4828-9C3A-ABCDEF012345": true, // upper case, whatever g is
 		g[:35]:                                 false,
 		g + "0":                                false,
 		g[:8] + "0" + g[9:]:                    false, // dash missing
