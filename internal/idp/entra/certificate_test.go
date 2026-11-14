@@ -36,7 +36,6 @@ func TestACertificateFileIsReadOrRefusedWithItsReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	small := rsaKey(t, 1024)
 	_, ed, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +59,6 @@ func TestACertificateFileIsReadOrRefusedWithItsReason(t *testing.T) {
 		"a legacy encrypted key":            {cat(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Headers: map[string]string{"Proc-Type": "4,ENCRYPTED"}, Bytes: []byte{1}}), cert), "encrypted"},
 		"an EC key":                         {cat(fakeidp.PrivateKeyPEM(t, ec), fakeidp.SelfSignedPEM(t, ec, year)), "an EC key: Entra accepts only RSA"},
 		"an Ed25519 key":                    {cat(fakeidp.PrivateKeyPEM(t, ed), fakeidp.SelfSignedPEM(t, ed, year)), "an Ed25519 key: Entra accepts only RSA"},
-		"a 1024-bit key":                    {cat(fakeidp.PrivateKeyPEM(t, small), fakeidp.SelfSignedPEM(t, small, year)), "1024-bit RSA key: use at least 2048"},
 		"a certificate for another key":     {cat(keyPEM, fakeidp.SelfSignedPEM(t, other, year)), "no certificate in the file is for its private key"},
 		"a certificate that does not parse": {cat(keyPEM, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte("x")})), "a certificate does not parse"},
 		"not PEM at all":                    {[]byte("s3cret"), "no PEM private key"},
@@ -76,6 +74,19 @@ func TestACertificateFileIsReadOrRefusedWithItsReason(t *testing.T) {
 				t.Fatalf("the error quotes the file: %v", err)
 			}
 		})
+	}
+}
+
+// A certificate whose key is under idp.MinRSABits loads, but cannot become the client assertion:
+// startup calls ClientAuth right after loading, so it refuses the file there.
+func TestACertificateWithAShortKeyIsNoClientAssertion(t *testing.T) {
+	small := rsaKey(t, 1024)
+	c, err := LoadCertificate(append(fakeidp.PrivateKeyPEM(t, small), fakeidp.SelfSignedPEM(t, small, now().Add(time.Hour))...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ClientAuth(); err == nil || !strings.Contains(err.Error(), "a 1024-bit RSA key: use at least 2048 bits") {
+		t.Fatalf("err = %v, want the key size refused", err)
 	}
 }
 

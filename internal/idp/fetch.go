@@ -59,6 +59,12 @@ type StatusError struct {
 
 func (e *StatusError) Error() string { return fmt.Sprintf("GET %s: status %d", e.URL, e.Code) }
 
+// Transient reports whether the status is worth retrying: a 5xx, 408 or 429. ssrfguard.Transient
+// keeps the same rule for its own StatusError.
+func (e *StatusError) Transient() bool {
+	return e.Code >= 500 || e.Code == http.StatusRequestTimeout || e.Code == http.StatusTooManyRequests
+}
+
 // GetJSON fetches a JSON document of at most MaxBodyBytes into dst.
 func (f *Fetcher) GetJSON(ctx context.Context, endpoint string, dst any) error {
 	var last error
@@ -99,8 +105,8 @@ func (f *Fetcher) getOnce(ctx context.Context, endpoint string, dst any) (retry 
 		return false, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests,
-			&StatusError{URL: redactURL(endpoint), Code: resp.StatusCode}
+		se := &StatusError{URL: redactURL(endpoint), Code: resp.StatusCode}
+		return se.Transient(), se
 	}
 	if err := json.Unmarshal(body, dst); err != nil {
 		return false, fmt.Errorf("GET %s: %w", redactURL(endpoint), JSONError(err))

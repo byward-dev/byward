@@ -7,6 +7,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -158,6 +159,29 @@ func TestPrivateKeyJWTKeyTypes(t *testing.T) {
 	}
 }
 
+// An RSA client key needs MinRSABits, at every IdP and with either algorithm; the error names the
+// key's size and the minimum.
+func TestAnRSAClientKeyNeedsMinRSABits(t *testing.T) {
+	for _, bits := range []int{1024, MinRSABits - 1, MinRSABits} {
+		key, err := rsa.GenerateKey(rand.Reader, bits) //nolint:gosec // deliberately weak keys for the test
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, alg := range []string{"PS256", "RS256"} {
+			t.Run(fmt.Sprintf("%d bits, %s", bits, alg), func(t *testing.T) {
+				_, err := PrivateKeyJWTWithAlg(key, nil, "", alg)
+				want := fmt.Sprintf("idp: a %d-bit RSA key: use at least %d bits", bits, MinRSABits)
+				switch {
+				case bits >= MinRSABits && err != nil:
+					t.Fatalf("refused: %v", err)
+				case bits < MinRSABits && (err == nil || err.Error() != want):
+					t.Fatalf("err = %v, want %q", err, want)
+				}
+			})
+		}
+	}
+}
+
 // The client assertion is signed with the chosen algorithm, or the key type's default when none is
 // chosen (PS256 for RSA, ES256 for EC P-256, as before #306); an algorithm the key cannot sign with
 // is refused.
@@ -280,6 +304,7 @@ func TestGetJSONRetriesOnlyTransientStatuses(t *testing.T) {
 	}{
 		"503 then 200":    {statuses: []int{503, 200}, calls: 2},
 		"429 twice, 200":  {statuses: []int{429, 429, 200}, calls: 3},
+		"408 then 200":    {statuses: []int{408, 200}, calls: 2},
 		"always 500":      {statuses: []int{500, 500, 500, 500}, wantErr: true, calls: 3},
 		"404 not retried": {statuses: []int{404, 200}, wantErr: true, calls: 1},
 	} {
@@ -554,5 +579,26 @@ func TestReportAlertIgnoresWhatIsNoAlert(t *testing.T) {
 				t.Fatalf("counted %d and logged %q, want neither", counted, logs.String())
 			}
 		})
+	}
+}
+
+// IsGUID accepts the 36-character form in either case and nothing else: a tenant name, a GUID one
+// character short or long, a misplaced dash or a non-hex digit.
+func TestIsGUID(t *testing.T) {
+	g := fakeidp.NewGUID()
+	for s, want := range map[string]bool{
+		g:                                      true,
+		strings.ToUpper(g):                     true,
+		g[:35]:                                 false,
+		g + "0":                                false,
+		g[:8] + "0" + g[9:]:                    false, // dash missing
+		"g" + g[1:]:                            false,
+		"organizations":                        false,
+		"":                                     false,
+		"00000000-0000-0000-0000-00000000000g": false,
+	} {
+		if got := IsGUID(s); got != want {
+			t.Errorf("IsGUID(%q) = %v, want %v", s, got, want)
+		}
 	}
 }

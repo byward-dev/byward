@@ -159,6 +159,15 @@ func TestAnUnusableCertificateFileRefusesToStartNamingTheSetting(t *testing.T) {
 			}
 			return f
 		}, "BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE: no PEM certificate"},
+		"a 1024-bit key": {func(t *testing.T) string {
+			f, _ := certificateFile(t, 365*24*time.Hour)
+			small := weakRSAKey(t)
+			pair := append(fakeidp.PrivateKeyPEM(t, small), fakeidp.SelfSignedPEM(t, small, time.Now().Add(365*24*time.Hour))...)
+			if err := os.WriteFile(f, pair, 0o600); err != nil { //nolint:gosec // G703: the test's own temp file
+				t.Fatal(err)
+			}
+			return f
+		}, "BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE: idp: a 1024-bit RSA key: use at least 2048 bits"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := loadCertificateConfig(t, tc.file(t))

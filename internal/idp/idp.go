@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -107,4 +108,23 @@ type Readiness interface {
 //     re-running the gate.
 type Refresher interface {
 	Refresh(ctx context.Context, refreshToken string) (*Identity, Tokens, error)
+}
+
+// IsGUID reports whether s is a GUID in its 36-character form (8-4-4-4-12 hex digits), as Entra
+// writes tenant, object and client IDs and as gate matches them.
+func IsGUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, r := range s {
+		switch {
+		case i == 8 || i == 13 || i == 18 || i == 23:
+			if r != '-' {
+				return false
+			}
+		case !strings.ContainsRune("0123456789abcdefABCDEF", r):
+			return false
+		}
+	}
+	return true
 }

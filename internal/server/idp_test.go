@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"net/url"
@@ -141,7 +142,7 @@ func TestAClientKeySignsInWithItsKeyIDAndAnUnusableOneNamesTheSetting(t *testing
 
 	p384, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	_, edKey, _ := ed25519.GenerateKey(rand.Reader)
-	for name, key := range map[string]string{"EC P-384": pkcs8PEM(t, p384), "Ed25519": pkcs8PEM(t, edKey), "not PEM": "s3cret"} {
+	for name, key := range map[string]string{"EC P-384": pkcs8PEM(t, p384), "Ed25519": pkcs8PEM(t, edKey), "RSA 1024": pkcs8PEM(t, weakRSAKey(t)), "not PEM": "s3cret"} {
 		c := oidcConfig("keycloak", func(c *config.Config) { c.OIDCClientSecret, c.OIDCClientKey = "", key })
 		if _, err := newIdentityProvider(c, nil); err == nil || !strings.Contains(err.Error(), "BYWARD_OIDC_CLIENT_KEY_FILE") {
 			t.Errorf("%s: %v, want an error naming BYWARD_OIDC_CLIENT_KEY_FILE", name, err)
@@ -212,6 +213,16 @@ func TestAnOktaClientKeyOnPS256Warns(t *testing.T) {
 }
 
 // pkcs8PEM is key as a PEM PKCS #8 private key, as BYWARD_OIDC_CLIENT_KEY_FILE holds it.
+// weakRSAKey is an RSA key below idp.MinRSABits, which no IdP credential may use.
+func weakRSAKey(t *testing.T) *rsa.PrivateKey {
+	t.Helper()
+	k, err := rsa.GenerateKey(rand.Reader, 1024) //nolint:gosec // deliberately weak for the test
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k
+}
+
 func pkcs8PEM(t *testing.T, key any) string {
 	t.Helper()
 	der, err := x509.MarshalPKCS8PrivateKey(key)
