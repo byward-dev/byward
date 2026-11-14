@@ -19,7 +19,6 @@ import (
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/ssrfguard"
-	"github.com/byward-dev/byward/internal/store/sqlite"
 	"github.com/byward-dev/byward/internal/token"
 )
 
@@ -71,7 +70,8 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	if err != nil {
 		return nil, err
 	}
-	defer func() { // every later failure closes the store it opened
+	parts.jti.Bind(st) // before any client authenticates
+	defer func() {     // every later failure closes the store it opened
 		if err != nil {
 			_ = st.Close()
 		}
@@ -126,7 +126,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	}
 	v := resource.Dispatch(token.Prefix, sealed, app)
 	log.Info("broker ready", "reason", "keys "+fmt.Sprint(len(ring.KeyIDs()))+", signing with "+ring.SigningKeyID()+"")
-	a := &auth{register: b.Register, validator: v, checks: readiness(ring, st), background: func(ctx context.Context) { runBackground(ctx, st, deny, log) }, closeStore: st.Close,
+	a := &auth{register: b.Register, validator: v, checks: readiness(ring, st), background: func(ctx context.Context) { runBackground(ctx, st, deny, log, restoreWatch(st, log, o.Audit)) }, closeStore: st.Close,
 		sessions: func(next http.Handler) http.Handler {
 			return mcpsession.Bind(mcpsession.Config{Box: parts.sessionBox, Upstream: upstreamID(cfg), User: signedInUser,
 				Lifetime: broker.GrantLifetime, Audit: o.Audit, Log: log}, next)
@@ -146,7 +146,7 @@ type wiring struct {
 	log    *slog.Logger
 	o      Observability
 	parts  *authParts
-	store  *sqlite.Store
+	store  openedStore
 	guard  *ssrfguard.Fetcher
 	broker *broker.Broker // set once the broker is built, before authFeatures run
 }
@@ -192,13 +192,17 @@ var idpHTTPClient *http.Client
 // newBroker is broker.New; tests replace it to see the wired configuration.
 var newBroker = broker.New
 
-// logPaths logs the absolute paths the proxy uses, defaults resolved (ADR-0007 §6).
+// logPaths logs the absolute paths the proxy uses, defaults resolved (ADR-0007 §6); the SQLite
+// store's only when it is the store.
 func logPaths(cfg *config.Config, log *slog.Logger) {
-	for _, p := range []struct{ setting, value string }{
-		{"BYWARD_DATA_DIR", cfg.DataDir}, {"BYWARD_KEYS_DIR", cfg.KeysDir},
-		{"BYWARD_STATIC_CLIENTS_FILE", cfg.StaticClientsFile}, {"BYWARD_STORE_DIR", cfg.StoreDir},
-		{"BYWARD_STORE_COUNTER_FILE", cfg.StoreCounterFile},
-	} {
+	paths := []struct{ setting, value string }{
+		{"BYWARD_DATA_DIR", cfg.DataDir}, {"BYWARD_KEYS_DIR", cfg.KeysDir}, {"BYWARD_STATIC_CLIENTS_FILE", cfg.StaticClientsFile},
+	}
+	if cfg.StorePostgresDSN == "" {
+		paths = append(paths, struct{ setting, value string }{"BYWARD_STORE_DIR", cfg.StoreDir},
+			struct{ setting, value string }{"BYWARD_STORE_COUNTER_FILE", cfg.StoreCounterFile})
+	}
+	for _, p := range paths {
 		log.Info("path", "setting", p.setting, "value", p.value)
 	}
 }

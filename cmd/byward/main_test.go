@@ -237,7 +237,47 @@ func TestRevokeCommandsExit2OnMisuse1OnAStoreFailureAndReportTheRevokedUser(t *t
 
 func TestHelpListsTheOperatorCommands(t *testing.T) {
 	code, stdout, _ := runWith([]string{"--help"})
-	if code != exitOK || !strings.Contains(stdout, "byward revoke-user <user key>") || !strings.Contains(stdout, "byward revoke-all --yes") {
+	if code != exitOK || !strings.Contains(stdout, "byward revoke-user <user key>") || !strings.Contains(stdout, "byward revoke-all --yes") ||
+		!strings.Contains(stdout, "byward store new-epoch --yes") {
 		t.Fatalf("code=%d help=%q", code, stdout)
+	}
+}
+
+// store new-epoch: a usage mistake exits 2 without touching any store; the SQLite store is refused
+// with exit 2, as it finds a restore by itself; a PostgreSQL store that cannot be reached exits 1.
+func TestStoreNewEpochExits2OnMisuseOrSQLiteAnd1WhenPostgreSQLIsUnreachable(t *testing.T) {
+	cases := []struct {
+		name     string
+		args     []string
+		postgres bool
+		code     int
+		inStderr string
+	}{
+		{"no subcommand", []string{"store"}, true, exitConfig, "usage: byward store new-epoch --yes"},
+		{"without --yes", []string{"store", "new-epoch"}, true, exitConfig, "usage: byward store new-epoch --yes"},
+		{"with SQLite", []string{"store", "new-epoch", "--yes"}, false, exitConfig, "new-epoch is for the PostgreSQL store"},
+		{"with PostgreSQL unreachable", []string{"store", "new-epoch", "--yes"}, true, exitRuntime, "store new-epoch failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp")
+			if tc.postgres {
+				var kept []string
+				for _, kv := range env {
+					if !strings.HasPrefix(kv, "BYWARD_STORE_DIR=") {
+						kept = append(kept, kv)
+					}
+				}
+				dsn := filepath.Join(t.TempDir(), "dsn")
+				if err := os.WriteFile(dsn, []byte("host=127.0.0.1 port=1 user=byward sslmode=verify-full connect_timeout=2"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				env = append(kept, "BYWARD_STORE_POSTGRES_DSN_FILE="+dsn)
+			}
+			code, stdout, stderr := runWith(tc.args, env...)
+			if code != tc.code || stdout != "" || !strings.Contains(stderr, tc.inStderr) {
+				t.Fatalf("code %d (want %d), stdout %q, stderr %q (want %q)", code, tc.code, stdout, stderr, tc.inStderr)
+			}
+		})
 	}
 }

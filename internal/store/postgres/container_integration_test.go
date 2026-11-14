@@ -4,133 +4,25 @@ package postgres
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"net"
-	"net/url"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/byward-dev/byward/internal/testutil/pgtest"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// postgresImages are the versions the adapter is tested on: the oldest it claims (15) and the
-// newest, pinned by digest. Dependabot does not see Go constants: keep each at least 14 days old by
-// Docker Hub's last-updated date when updating (ADR-0024 §5). 15.18: 2026-08-05; 18.4: 2026-08-06.
-var postgresImages = []struct{ name, image string }{
-	{"15", "postgres:15.18@sha256:6eb0add3b77c081df18aa518ce43df58fdcc40f2e6d868a6fd08038dc7acd425"},
-	{"18", "postgres:18.4@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636"},
-}
+// server is a pgtest container, with the adapter's own helpers.
+type server struct{ *pgtest.Server }
 
-// postgresStartup bounds the image pull, initdb and the first connection.
-const postgresStartup = 3 * time.Minute
+var postgresImages = pgtest.Images
 
-// server is one PostgreSQL container with TLS on. Its certificate is for 127.0.0.1 only, signed by
-// a CA made for the test, so the tests connect with sslmode=verify-full as production must.
-type server struct {
-	host, port, password string
-	caFile               string
-	admin                *pgxpool.Pool // the postgres database, for creating and dropping test databases
-}
+func requirePostgres(t *testing.T) { pgtest.Require(t) }
 
-// requirePostgres skips unless BYWARD_POSTGRES=1 (`mise run test:postgres` sets it).
-func requirePostgres(t *testing.T) {
-	t.Helper()
-	if os.Getenv("BYWARD_POSTGRES") != "1" {
-		t.Skip("set BYWARD_POSTGRES=1 to run the PostgreSQL tests (needs Docker)")
-	}
-	if _, err := exec.LookPath("docker"); err != nil {
-		t.Fatalf("BYWARD_POSTGRES=1 but docker is not available: %v", err)
-	}
-}
+func startPostgres(t *testing.T, image string) *server { return &server{pgtest.Start(t, image)} }
 
-// startPostgres runs image with TLS on and returns once it accepts a verify-full connection.
-func startPostgres(t *testing.T, image string) *server {
-	t.Helper()
-	dir := t.TempDir()
-	// The container's root reads the files and copies them for the postgres user: world-readable
-	// test data, including a key made for this test only.
-	if err := os.Chmod(dir, 0o755); err != nil { //nolint:gosec // G302: test certificates the container reads
-		t.Fatal(err)
-	}
-	ca := newCA(t, "byward test CA")
-	certPEM, keyPEM := ca.issue(t, "127.0.0.1")
-	for name, data := range map[string][]byte{"ca.pem": ca.certPEM, "server.crt": certPEM, "server.key": keyPEM} {
-		if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil { //nolint:gosec // G306: read by the container
-			t.Fatal(err)
-		}
-	}
-	srv := &server{host: "127.0.0.1", password: randomHex(t), caFile: filepath.Join(dir, "ca.pem")}
+func (s *server) dsn(db string) string { return s.DSN(db) }
 
-	name := "byward-postgres-" + randomHex(t)
-	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", name).Run() }) //nolint:gosec // G204: our own container name
-	// PostgreSQL refuses a key readable by others: the entrypoint copies it with mode 0600 for the
-	// postgres user before starting the server. Docker picks the host port.
-	setup := "install -d -o postgres -m 0700 /run/byward-tls && " +
-		"install -o postgres -m 0600 /tls/server.crt /tls/server.key /run/byward-tls/ && " +
-		"exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/run/byward-tls/server.crt " +
-		"-c ssl_key_file=/run/byward-tls/server.key -c fsync=off"
-	run := exec.Command("docker", "run", "-d", "--name", name, "-p", "127.0.0.1::5432", //nolint:gosec // G204: a pinned image and our own arguments
-		"-e", "POSTGRES_PASSWORD="+srv.password, "-v", dir+":/tls:ro", "--tmpfs", "/var/lib/postgresql",
-		"--entrypoint", "sh", image, "-c", setup)
-	if out, err := run.CombinedOutput(); err != nil {
-		t.Fatalf("docker run %s: %v\n%s", image, err, out)
-	}
-	published, err := exec.Command("docker", "port", name, "5432/tcp").Output() //nolint:gosec // G204: our own container name
-	if err != nil {
-		t.Fatalf("docker port: %v", err)
-	}
-	_, srv.port, err = net.SplitHostPort(strings.TrimSpace(strings.Split(string(published), "\n")[0]))
-	if err != nil {
-		t.Fatalf("docker port %q: %v", published, err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), postgresStartup)
-	defer cancel()
-	// During initdb the entrypoint's temporary server listens on its Unix socket only, so the first
-	// TCP connection that works is the final server's.
-	for {
-		cfg, err := pgxpool.ParseConfig(srv.dsn("postgres"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if srv.admin, err = pgxpool.NewWithConfig(ctx, cfg); err == nil {
-			if err = srv.admin.Ping(ctx); err == nil {
-				t.Cleanup(srv.admin.Close)
-				return srv
-			}
-			srv.admin.Close()
-		}
-		select {
-		case <-ctx.Done():
-			logs, _ := exec.Command("docker", "logs", "--tail", "60", name).CombinedOutput() //nolint:gosec // G204: our own container name
-			t.Fatalf("PostgreSQL did not accept a connection within %s: %v\n%s", postgresStartup, err, logs)
-		case <-time.After(500 * time.Millisecond):
-		}
-	}
-}
-
-// dsn is a verify-full URL for database db.
-func (s *server) dsn(db string) string {
-	return (&url.URL{Scheme: "postgres", User: url.UserPassword("postgres", s.password), Host: net.JoinHostPort(s.host, s.port),
-		Path: "/" + db, RawQuery: url.Values{"sslmode": {"verify-full"}, "sslrootcert": {s.caFile}}.Encode()}).String()
-}
-
-// newDatabase creates an empty database, dropped when the test ends, and returns its name.
-func (s *server) newDatabase(t *testing.T) string {
-	t.Helper()
-	name := "t_" + randomHex(t)
-	if _, err := s.admin.Exec(context.Background(), "CREATE DATABASE "+name); err != nil {
-		t.Fatalf("create database: %v", err)
-	}
-	t.Cleanup(func() { _, _ = s.admin.Exec(context.Background(), "DROP DATABASE "+name+" WITH (FORCE)") })
-	return name
-}
+func (s *server) newDatabase(t *testing.T) string { return s.NewDatabase(t) }
 
 // open opens a store on a new database.
 func (s *server) open(t *testing.T) (*Store, string) {
@@ -166,15 +58,6 @@ func bounded(t *testing.T) context.Context {
 	c, cancel := context.WithTimeout(context.Background(), time.Minute)
 	t.Cleanup(cancel)
 	return c
-}
-
-func randomHex(t *testing.T) string {
-	t.Helper()
-	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		t.Fatal(err)
-	}
-	return hex.EncodeToString(b)
 }
 
 // waitFor polls query on c until it returns true, or fails the test after 10 s.

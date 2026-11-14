@@ -146,6 +146,7 @@ type settings struct {
 	jwksDown      bool
 	jwksEmpty     bool
 	tokenFail     map[string]Failure
+	tls           bool // read at New only
 }
 
 // Option configures the fake. Options apply at New and at Set.
@@ -184,7 +185,12 @@ func New(t testing.TB, profile Profile, opts ...Option) *IdP {
 		t.Fatalf("fakeidp: signing key: %v", err)
 	}
 	p.keys = []*signingKey{key}
-	p.srv = httptest.NewServer(p.routes())
+	p.srv = httptest.NewUnstartedServer(p.routes())
+	if p.cfg.tls {
+		p.srv.StartTLS()
+	} else {
+		p.srv.Start()
+	}
 	t.Cleanup(p.srv.Close)
 	return p
 }
@@ -307,6 +313,10 @@ func WithEmailVerifiedAsString(on bool) Option { return func(s *settings) { s.em
 // WithoutEmailVerified makes the generic profile send `email` with no `email_verified` claim at
 // all, as some IdPs do.
 func WithoutEmailVerified(on bool) Option { return func(s *settings) { s.noEmailVerified = on } }
+
+// WithTLS serves the fake over https, with a certificate for 127.0.0.1 that Certificate returns,
+// for a proxy that refuses an http issuer (one outside development mode). It applies at New only.
+func WithTLS() Option { return func(s *settings) { s.tls = true } }
 
 // WithJWKSUnavailable makes the JWKS endpoint answer 503, as during an IdP outage.
 func WithJWKSUnavailable(on bool) Option { return func(s *settings) { s.jwksDown = on } }

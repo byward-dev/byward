@@ -26,7 +26,6 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/store"
-	"github.com/byward-dev/byward/internal/store/sqlite"
 	"github.com/byward-dev/byward/internal/testutil/assertionkey"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
@@ -95,6 +94,30 @@ func (a asserting) call(t *testing.T, c token.Claims, header http.Header) fakeup
 		t.Fatal("the upstream got no request")
 	}
 	return got
+}
+
+// mcpAssertion sends one MCP request to the proxy at base with the access token, as Host host
+// when it is not empty, and returns the assertion the upstream got.
+func mcpAssertion(t *testing.T, base, host string, up *fakeupstream.Server, access string) string {
+	t.Helper()
+	r, _ := http.NewRequest(http.MethodPost, base+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+	if host != "" {
+		r.Host = host
+	}
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json, text/event-stream")
+	r.Header.Set("Authorization", "Bearer "+access)
+	res, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	got, ok := up.Last()
+	if res.StatusCode != http.StatusOK || !ok {
+		t.Fatalf("MCP request: %d, upstream reached %v", res.StatusCode, ok)
+	}
+	raw, _ := strings.CutPrefix(got.Header.Get("Authorization"), "Bearer ")
+	return raw
 }
 
 // jwks fetches the JWKS from h, as an upstream's verifier does.
@@ -350,10 +373,10 @@ func TestAStdioUpstreamStartsWithoutAssertionKeysAndServesNoJWKS(t *testing.T) {
 
 // The store is opened before the upstream is built, so a failing upstream must close it again.
 func TestAnUpstreamThatFailsToStartClosesTheStore(t *testing.T) {
-	var st *sqlite.Store
+	var st openedStore
 	orig := wireStore
 	t.Cleanup(func() { wireStore = orig })
-	wireStore = func(cfg *config.Config, log *slog.Logger, rec *audit.Log) (*sqlite.Store, error) {
+	wireStore = func(cfg *config.Config, log *slog.Logger, rec *audit.Log) (openedStore, error) {
 		s, err := orig(cfg, log, rec)
 		st = s
 		return s, err

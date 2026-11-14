@@ -3,7 +3,8 @@
 The broker keeps grants, authorization codes, refresh tokens, revocations, dynamic client
 registrations and remembered consent in an embedded SQLite database
 ([ADR-0007](../adr/0007-state-and-storage.md)). Sealing keys are never stored there; they come from
-the keys directory ([sealing-keys.md](sealing-keys.md)).
+the keys directory ([sealing-keys.md](sealing-keys.md)). For more than one replica, use the
+PostgreSQL store instead ([postgres.md](postgres.md)).
 
 Expired rows are deleted at startup and every 5 minutes while the proxy runs: codes, refresh tokens
 and grants past their expiry (a grant takes its codes and refresh tokens with it), and revocations
