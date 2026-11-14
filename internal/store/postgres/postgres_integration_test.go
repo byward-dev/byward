@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -205,33 +204,8 @@ func newerSchemaIsRefused(t *testing.T, srv *server) {
 	}
 }
 
-// What every fixture holds (testdata/schema/vN.sql) and must still hold after migrating.
-var (
-	fixtureCreated = time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
-	fixtureExpires = time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)
-	fixtureGrant   = store.Grant{
-		ID: "fixture-grant", ClientID: "fixture-client", Subject: "tid:fixture", Issuer: "https://idp.example/v2.0",
-		Resource: "https://mcp.example.com/mcp", Scopes: []string{"mcp"}, IdPTokens: []byte("sea"),
-		CreatedAt: fixtureCreated, ExpiresAt: fixtureExpires, Epoch: 1,
-	}
-	fixtureCode = store.PendingCode{
-		GrantID: "fixture-grant", ClientID: "fixture-client", RedirectURI: "http://127.0.0.1:33418/callback",
-		CodeChallenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", Scopes: []string{"mcp"}, ExpiresAt: fixtureExpires,
-	}
-	fixtureRefresh = store.RefreshToken{
-		Hash: sha256.Sum256([]byte("fixture-refresh")), GrantID: "fixture-grant", ClientID: "fixture-client",
-		CreatedAt: fixtureCreated, IdleExpiresAt: fixtureExpires,
-	}
-	fixtureRevocations = []store.Revocation{
-		{GrantID: "fixture-revoked", Before: fixtureCreated, At: fixtureCreated},
-		{Subject: "tid:fixture-revoked-subject", Before: fixtureCreated, At: fixtureCreated.Add(time.Second)},
-		{All: true, Before: fixtureCreated, At: fixtureCreated.Add(2 * time.Second)},
-	}
-	fixtureClient = store.Client{ID: "fixture-dcr-client", Metadata: []byte(`{"client_name":"Fixture"}`), CreatedAt: fixtureCreated,
-		UsedAt: fixtureCreated.Add(time.Second), ExpiresAt: fixtureExpires}
-	fixtureConsent = store.Consent{Key: store.ConsentKey{Issuer: "https://idp.example/v2.0", Subject: "tid:fixture", ClientID: "fixture-client",
-		Redirect: "http://127.0.0.1/cb", Resource: "https://mcp.example.com/mcp"}, Scopes: []string{"mcp"}, ApprovedAt: fixtureCreated, ExpiresAt: fixtureExpires}
-)
+// The schema version that first holds each part of the migration fixture.
+var fixtureSince = storetest.FixtureSince{RevokeAll: 1, RotatedToken: 1, Client: 1, Consent: 1, SpentLogin: 1, SpentAssertion: 2, MarkedConsents: 3}
 
 // Migration fixtures (ADR-0024 §11): each released schema version, with data, migrated to the
 // current schema and read back through the store, in UTC.
@@ -247,72 +221,8 @@ func fixturesMigrateToTheCurrentSchemaKeepingTheirData(t *testing.T, srv *server
 			if got := schemaOf(t, srv.conn(t, db)); !reflect.DeepEqual(got, want) {
 				t.Fatalf("migrated schema differs from a fresh one:\n got %q\nwant %q", got, want)
 			}
-			if g, err := s.Grant(ctx, fixtureGrant.ID); err != nil || !reflect.DeepEqual(g, fixtureGrant) {
-				t.Fatalf("grant = %+v, %v\nwant %+v", g, err, fixtureGrant)
-			}
-			if r, err := s.RefreshToken(ctx, fixtureRefresh.Hash, fixtureCreated); err != nil || !reflect.DeepEqual(r, fixtureRefresh) {
-				t.Fatalf("refresh token = %+v, %v\nwant %+v", r, err, fixtureRefresh)
-			}
-			if revs, err := s.Revocations(ctx); err != nil || !reflect.DeepEqual(revs, fixtureRevocations) {
-				t.Fatalf("revocations = %+v, %v\nwant %+v", revs, err, fixtureRevocations)
-			}
-			if c, err := s.Client(ctx, fixtureClient.ID); err != nil || !reflect.DeepEqual(c, fixtureClient) {
-				t.Fatalf("client = %+v, %v\nwant %+v", c, err, fixtureClient)
-			}
-			if c, err := s.Consent(ctx, fixtureConsent.Key); err != nil || !reflect.DeepEqual(c, fixtureConsent) {
-				t.Fatalf("consent = %+v, %v\nwant %+v", c, err, fixtureConsent)
-			}
-			if err := s.SpendLogin(ctx, sha256.Sum256([]byte("fixture-login")), fixtureCreated, fixtureExpires); !errors.Is(err, store.ErrConsumed) {
-				t.Fatalf("spending the fixture login: %v, want ErrConsumed", err)
-			}
-			if v >= 2 { // the spent client assertion still refuses a second use
-				if err := s.SpendAssertion(ctx, sha256.Sum256([]byte("fixture-assertion")), fixtureCreated, fixtureExpires); !errors.Is(err, store.ErrConsumed) {
-					t.Fatalf("spending the fixture assertion: %v, want ErrConsumed", err)
-				}
-			}
-			if v >= 3 {
-				checkMarkedFixtureConsents(t, s)
-			}
-			checkRotatedFixtureToken(t, s)
-			if c, err := s.ConsumeCode(ctx, fixtureGrant.ID, fixtureCreated); err != nil || !reflect.DeepEqual(c, fixtureCode) {
-				t.Fatalf("code = %+v, %v\nwant %+v", c, err, fixtureCode)
-			}
+			storetest.CheckFixture(t, s, v, fixtureSince)
 		})
-	}
-}
-
-// checkMarkedFixtureConsents: from v3, the fixture holds a consent marked under the lifetime rule
-// (#363), and one an older binary re-approved after it was marked, which no longer counts as marked.
-func checkMarkedFixtureConsents(t *testing.T, s *Store) {
-	t.Helper()
-	for subject, want := range map[string]bool{"tid:fixture": true, "tid:fixture-reapproved": false} {
-		k := store.ConsentKey{Issuer: "https://idp.example/v2.0", Subject: subject, ClientID: "fixture-client",
-			Redirect: "https://app.example/cb", Resource: "https://mcp.example.com/mcp"}
-		if got, err := s.Consent(ctx, k); err != nil || got.RecordsLifetime != want || !slices.Equal(got.Scopes, []string{"mcp", "offline_access"}) {
-			t.Fatalf("%s's consent = %+v, %v; want RecordsLifetime %v", subject, got, err, want)
-		}
-	}
-}
-
-// checkRotatedFixtureToken: the fixture holds a token rotated 1 s after creation to
-// fixture-refresh. A retry with it inside the grace window must rotate the successor, not count as
-// reuse.
-func checkRotatedFixtureToken(t *testing.T, s *Store) {
-	t.Helper()
-	oldHash := sha256.Sum256([]byte("fixture-refresh-old"))
-	want := store.RefreshToken{Hash: oldHash, GrantID: fixtureGrant.ID, ClientID: "fixture-client",
-		CreatedAt: fixtureCreated, IdleExpiresAt: fixtureExpires, RotatedAt: fixtureCreated.Add(time.Second)}
-	if got, err := s.RefreshToken(ctx, oldHash, fixtureCreated); err != nil || !reflect.DeepEqual(got, want) {
-		t.Fatalf("rotated fixture token = %+v, %v\nwant %+v", got, err, want)
-	}
-	retry := fixtureCreated.Add(2 * time.Second)
-	next := store.RefreshToken{Hash: sha256.Sum256([]byte("fixture-refresh-next")), GrantID: fixtureGrant.ID, ClientID: "fixture-client",
-		CreatedAt: retry, IdleExpiresAt: fixtureExpires}
-	if err := s.RotateRefreshToken(ctx, store.RotateRequest{Old: oldHash, Next: next, Now: retry, Grace: 30 * time.Second}); err != nil {
-		t.Fatalf("retry with the rotated fixture token: %v (its successor link was lost)", err)
-	}
-	if got, err := s.RefreshToken(ctx, fixtureRefresh.Hash, retry); err != nil || !got.RotatedAt.Equal(retry) {
-		t.Fatalf("the successor %+v, %v: want it rotated at %v by the retry", got, err, retry)
 	}
 }
 
@@ -343,8 +253,8 @@ func failedMigrationChangesNothing(t *testing.T, srv *server) {
 		t.Fatalf("schema changed by a failed migration:\n%q\n%q", before, after)
 	}
 	migrations = saved
-	if g, err := srv.openOn(t, db).Grant(ctx, fixtureGrant.ID); err != nil || !reflect.DeepEqual(g, fixtureGrant) {
-		t.Fatalf("data after a failed migration = %+v, %v; want %+v", g, err, fixtureGrant)
+	if g, err := srv.openOn(t, db).Grant(ctx, storetest.FixtureGrant.ID); err != nil || !reflect.DeepEqual(g, storetest.FixtureGrant) {
+		t.Fatalf("data after a failed migration = %+v, %v; want %+v", g, err, storetest.FixtureGrant)
 	}
 }
 
@@ -400,32 +310,13 @@ func onlyCommittedWritesAdvanceTheWriteSequence(t *testing.T, srv *server) {
 	}
 }
 
-// An expired spent login or assertion already counts as absent, so storetest cannot see it
-// collected: the row count shows it.
 func collectDropsExpiredSpentRecords(t *testing.T, srv *server) {
-	for _, tc := range []struct {
-		table string
-		spend func(*Store, [sha256.Size]byte, time.Time, time.Time) error
-	}{
-		{"spent_logins", func(s *Store, h [sha256.Size]byte, now, exp time.Time) error { return s.SpendLogin(ctx, h, now, exp) }},
-		{"spent_assertions", func(s *Store, h [sha256.Size]byte, now, exp time.Time) error {
-			return s.SpendAssertion(ctx, h, now, exp)
-		}},
-	} {
-		t.Run(tc.table, func(t *testing.T) {
-			s, db := srv.open(t)
-			must(t, tc.spend(s, sha256.Sum256([]byte("x")), t0, t0.Add(time.Minute)))
-			c := srv.conn(t, db)
-			must(t, s.Collect(ctx, t0.Add(30*time.Second)))
-			if n := count(t, c, tc.table); n != 1 {
-				t.Fatalf("before expiry: %d rows, want 1", n)
-			}
-			must(t, s.Collect(ctx, t0.Add(time.Minute)))
-			if n := count(t, c, tc.table); n != 0 {
-				t.Fatalf("at expiry: %d rows, want 0", n)
-			}
-		})
-	}
+	conns := map[store.Store]*pgx.Conn{}
+	storetest.CollectDropsExpiredSpent(t, func(t *testing.T) store.Store {
+		s, db := srv.open(t)
+		conns[s] = srv.conn(t, db)
+		return s
+	}, func(t *testing.T, s store.Store, kind storetest.Spent) int { return count(t, conns[s], string(kind)) })
 }
 
 // While another replica collects (it holds the collect lock), Collect returns at once having
