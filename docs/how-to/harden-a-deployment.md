@@ -32,8 +32,8 @@ supply ([Serve TLS at the proxy](tls.md), [ADR-0019](../adr/0019-packaging.md) Â
       the address is read from `X-Forwarded-For`: [rate limits](../reference/rate-limits.md#client-address).
 - [ ] For an IdP or upstream with a private CA, add only that CA with `SSL_CERT_FILE`. Don't
       mount over the image's `/etc/ssl/certs`, or set `SSL_CERT_DIR` without it beside
-      `SSL_CERT_FILE`: either drops the public roots. Every outbound TLS connection trusts the CA
-      you add ([trust a private CA](private-ca.md)).
+      `SSL_CERT_FILE`: either drops the public roots, and doctor's "trust store" line warns of the
+      second. Every outbound TLS connection trusts the CA you add ([trust a private CA](private-ca.md)).
 
 ## Host and Origin allowlists
 
