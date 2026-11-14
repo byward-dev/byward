@@ -112,6 +112,19 @@ be group- or other-readable, but never world-writable ([sealing keys](sealing-ke
 it, nor with `BYWARD_INSECURE_NO_AUTH`: each logs a `development mode relaxation` warning at every
 start.
 
+### What `--dev` relaxes
+
+This is the whole list. Each relaxation applies only with `--dev`, for trying byward out
+([try it on your machine](keycloak.md#try-it-on-your-machine)).
+
+| With `--dev` | Without it | Startup log (`development mode relaxation`) |
+|---|---|---|
+| Secret files' permissions are not checked | A secret file its group or others can read is refused, unless on a read-only mount | `secret file permissions are not checked` |
+| Secrets may be given inline, as `BYWARD_<NAME>` instead of `BYWARD_<NAME>_FILE` | An inline secret is refused | `inline secrets accepted: <the settings>` |
+| An http public URL on a loopback host (`http://localhost:8080/mcp`) | The public URL must be https | `http public URL on loopback`; `BYWARD_INSECURE_NO_AUTH` allows it too |
+| An http OIDC issuer on a loopback host, and http endpoints in its discovery document on loopback | The issuer and every endpoint must be https | not logged in v0.2.0-rc.1 (logged from [#355](https://github.com/byward-dev/byward/issues/355)) |
+| A PostgreSQL connection without `sslmode=verify-full` (on `main`) | `verify-full` is required | `the PostgreSQL store accepts a connection without verify-full TLS` |
+
 ## 9. Check the deployment
 
 1. `byward check --offline` with the production settings validates them, the keys and the secret

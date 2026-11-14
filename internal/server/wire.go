@@ -19,6 +19,7 @@ import (
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/ssrfguard"
+	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/token"
 )
 
@@ -63,7 +64,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 		w.log(log)
 	}
 	log.Info("IdP", "idp", ip.name, "reason", "register this redirect URI with the IdP app: "+ip.redirect)
-	for _, w := range ip.timedWarnings(time.Now()) {
+	for _, w := range ip.startWarningsAt(time.Now()) {
 		w.log(log)
 	}
 	st, err := wireStore(cfg, log, o.Audit)
@@ -110,6 +111,12 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 		return nil, err
 	}
 	deny := b.Deny()
+	// An operator revocation reaches this proxy's audit stream too, not only the command's output.
+	deny.OnOperatorRevocation(func(r store.Revocation) {
+		if e, ok := operatorRevocationEvent(r); ok {
+			o.Audit.Record(nil, e)
+		}
+	})
 	// The list refuses every token until its first sync, so sync before serving.
 	syncCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

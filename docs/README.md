@@ -5,6 +5,8 @@ Find your role below. Each page appears once, under the reader who needs it firs
 ## Evaluating byward
 
 - [README](../README.md): what byward does, and how to try it on your machine without an IdP.
+- [Try it on your machine with Keycloak](how-to/keycloak.md#try-it-on-your-machine): a local IdP, the
+  reference MCP server and a short client, over http with `--dev`.
 - [Security posture](security-posture.md): guarantees, threat model, security invariants, known gaps.
 - [Scope and non-goals](adr/0001-scope-auth-only-proxy-entra-first-class.md): what byward will not do.
 - [Packaging](reference/packaging.md): images, archives, signatures and build provenance.

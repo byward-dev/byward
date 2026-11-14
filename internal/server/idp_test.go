@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
@@ -138,17 +139,174 @@ func TestAClientKeySignsInWithItsKeyIDAndAnUnusableOneNamesTheSetting(t *testing
 		t.Fatalf("code exchange with private_key_jwt: %v", err)
 	}
 
-	pkcs8 := func(key any) string {
-		der, _ := x509.MarshalPKCS8PrivateKey(key)
-		return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
-	}
 	p384, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	_, edKey, _ := ed25519.GenerateKey(rand.Reader)
-	for name, key := range map[string]string{"EC P-384": pkcs8(p384), "Ed25519": pkcs8(edKey), "not PEM": "s3cret"} {
+	for name, key := range map[string]string{"EC P-384": pkcs8PEM(t, p384), "Ed25519": pkcs8PEM(t, edKey), "not PEM": "s3cret"} {
 		c := oidcConfig("keycloak", func(c *config.Config) { c.OIDCClientSecret, c.OIDCClientKey = "", key })
 		if _, err := newIdentityProvider(c, nil); err == nil || !strings.Contains(err.Error(), "BYWARD_OIDC_CLIENT_KEY_FILE") {
 			t.Errorf("%s: %v, want an error naming BYWARD_OIDC_CLIENT_KEY_FILE", name, err)
 		}
+	}
+}
+
+// Okta refuses PS256 client assertions, so an RSA key left on PS256 with the okta preset warns at
+// startup and check, naming the setting; RS256, an EC key or another preset does not (#306).
+// doctor's credential check names the credential, and when its probe cannot tell (here: no
+// discovery) the refusal is its warning.
+func TestAnOktaClientKeyOnPS256Warns(t *testing.T) {
+	rsaKey := pkcs8PEM(t, fakeidp.NewCertificate(t).Key)
+	p256, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	const notProbed = "not probed: discovery failed; the credential: "
+	const oktaRefuses = ", which Okta refuses for client assertions"
+	oktaWarning := Warning{Message: "the client key signs with PS256" + oktaRefuses, Setting: "BYWARD_OIDC_CLIENT_KEY_ALG", Fix: "sign with RS256, or use an EC P-256 key"}
+	for _, tc := range []struct {
+		name, preset, key, alg, kid string
+		warns                       bool
+		credential                  string // as check and doctor name it
+	}{
+		{name: "okta, an RSA key by default", preset: "okta", key: rsaKey, warns: true, credential: "private_key_jwt signed with PS256"},
+		{name: "okta, an RSA key with PS256 and a key ID", preset: "okta", key: rsaKey, alg: "PS256", kid: "k1", warns: true, credential: "private_key_jwt signed with PS256, key ID k1"},
+		{name: "okta, an RSA key with RS256 and a key ID", preset: "okta", key: rsaKey, alg: "RS256", kid: "k1", credential: "private_key_jwt signed with RS256, key ID k1"},
+		{name: "okta, an EC key", preset: "okta", key: pkcs8PEM(t, p256), credential: "private_key_jwt signed with ES256"},
+		{name: "keycloak, an RSA key by default", preset: "keycloak", key: rsaKey, credential: "private_key_jwt signed with PS256"},
+		{name: "okta, a client secret", preset: "okta", credential: "a client secret"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ip, err := newIdentityProvider(oidcConfig(tc.preset, func(c *config.Config) {
+				if tc.preset == "okta" { // the okta preset accepts only an /oauth2/ issuer
+					c.OIDCIssuer = "https://acme.okta.com/oauth2/default"
+				}
+				if tc.key != "" {
+					c.OIDCClientSecret, c.OIDCClientKey, c.OIDCClientKeyAlg, c.OIDCClientKeyID = "", tc.key, tc.alg, tc.kid
+				}
+			}), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// startup and check: a start warning, so doctor does not also list it as configuration
+			var wantStart []Warning
+			if tc.warns {
+				wantStart = []Warning{oktaWarning}
+			}
+			if got := ip.startWarningsAt(time.Now()); !slices.Equal(got, wantStart) ||
+				slices.ContainsFunc(ip.warnings, func(w Warning) bool { return w.Setting == "BYWARD_OIDC_CLIENT_KEY_ALG" }) {
+				t.Fatalf("start warnings %+v, warnings %+v; want start warnings %+v only", got, ip.warnings, wantStart)
+			}
+			// doctor's credential check; a cancelled context keeps discovery off the network.
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			want, wantFix, wantMessage := doctor.Skip, "", notProbed+tc.credential
+			if tc.warns {
+				want, wantFix, wantMessage = doctor.Warn, oktaWarning.Setting+": "+oktaWarning.Fix, notProbed+tc.credential+"; "+oktaWarning.Message
+			}
+			results := ip.diagnose(ctx, time.Now())
+			if len(results) == 0 {
+				t.Fatal("doctor returned no results")
+			}
+			if r := results[len(results)-1]; r.Name != "client credential" || r.Status != want ||
+				r.Message != wantMessage || r.Fix != wantFix {
+				t.Fatalf("doctor's last result %+v, want client credential, %s, %q, fix %q", r, want, wantMessage, wantFix)
+			}
+		})
+	}
+}
+
+// pkcs8PEM is key as a PEM PKCS #8 private key, as BYWARD_OIDC_CLIENT_KEY_FILE holds it.
+func pkcs8PEM(t *testing.T, key any) string {
+	t.Helper()
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
+}
+
+// doctor's credential check names the credential; unless its probe passed, a key algorithm the
+// preset refuses is added to what the probe found, keeping the probe's own status (a skipped probe
+// becomes a warning) and its own fix, and not repeated when the fix already gives the advice (#306).
+func TestDoctorAddsARefusedKeyAlgorithmToWhatItsProbeFound(t *testing.T) {
+	refused := &Warning{Message: "the client key signs with PS256, which Okta refuses for client assertions", Setting: "BYWARD_OIDC_CLIENT_KEY_ALG", Fix: "sign with RS256, or use an EC P-256 key"}
+	const desc, keyAlgFix = "private_key_jwt signed with PS256", "BYWARD_OIDC_CLIENT_KEY_ALG: sign with RS256, or use an EC P-256 key"
+	for _, tc := range []struct {
+		name    string
+		probe   doctor.Result
+		refused *Warning
+		want    doctor.Result
+	}{
+		{"no refused algorithm", doctor.Result{Status: doctor.Fail, Message: "m", Fix: "f"}, nil,
+			doctor.Result{Status: doctor.Fail, Message: "m; the credential: " + desc, Fix: "f"}},
+		{"a probe that passed", doctor.Result{Status: doctor.Pass, Message: "accepted"}, refused,
+			doctor.Result{Status: doctor.Pass, Message: "accepted; the credential: " + desc}},
+		{"a probe that could not run", doctor.Result{Status: doctor.Skip, Message: "not probed"}, refused,
+			doctor.Result{Status: doctor.Warn, Message: "not probed; the credential: " + desc + "; " + refused.Message, Fix: keyAlgFix}},
+		{"a probe that cannot tell", doctor.Result{Status: doctor.Warn, Message: "unclear", Fix: "sign in once"}, refused,
+			doctor.Result{Status: doctor.Warn, Message: "unclear; the credential: " + desc + "; " + refused.Message, Fix: "sign in once; " + keyAlgFix}},
+		{"a probe that failed for another reason", doctor.Result{Status: doctor.Fail, Message: "no answer", Fix: "check the network"}, refused,
+			doctor.Result{Status: doctor.Fail, Message: "no answer; the credential: " + desc + "; " + refused.Message, Fix: "check the network; " + keyAlgFix}},
+		{"a refused key whose fix gives the advice", doctor.Result{Status: doctor.Fail, Message: "refused", Fix: "Okta refuses PS256 for client assertions: set BYWARD_OIDC_CLIENT_KEY_ALG=RS256; otherwise register the key"}, refused,
+			doctor.Result{Status: doctor.Fail, Message: "refused; the credential: " + desc, Fix: "Okta refuses PS256 for client assertions: set BYWARD_OIDC_CLIENT_KEY_ALG=RS256; otherwise register the key"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := withCredential(tc.probe, desc, tc.refused); got != tc.want {
+				t.Fatalf("result %+v\nwant   %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// At Okta, doctor trusts its probe of a PS256 key over the preset: an IdP that accepts PS256 passes,
+// one that refuses it fails, its fix leading with the refusal and naming the setting once (#306).
+func TestDoctorAtOktaTrustsItsProbeOfAPS256Key(t *testing.T) {
+	const issuer = "https://acme.okta.com/oauth2/default"
+	const lead = "Okta refuses PS256 for client assertions: set BYWARD_OIDC_CLIENT_KEY_ALG=RS256 (or use an EC P-256 key); otherwise register the public key"
+	for _, tc := range []struct {
+		name string
+		opts []fakeidp.Option
+		want doctor.Status
+	}{
+		{"an IdP that accepts PS256", nil, doctor.Pass},
+		{"an IdP that refuses PS256", []fakeidp.Option{fakeidp.WithClientAssertionAlgs("RS256")}, doctor.Fail},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cert := fakeidp.NewCertificate(t)
+			app := fakeidp.Client{ID: "byward", Certificates: []*fakeidp.Certificate{cert}}
+			fake := fakeidp.New(t, fakeidp.Generic, append([]fakeidp.Option{fakeidp.WithTLS(), fakeidp.WithIssuer(issuer), fakeidp.WithClient(app)}, tc.opts...)...)
+			ip, err := newIdentityProvider(oidcConfig("okta", func(c *config.Config) {
+				c.OIDCIssuer, c.OIDCClientID = issuer, app.ID
+				c.OIDCClientSecret, c.OIDCClientKey, c.OIDCClientKeyID = "", pkcs8PEM(t, cert.Key), cert.ThumbprintSHA256()
+			}), fake.HTTPClient())
+			if err != nil {
+				t.Fatal(err)
+			}
+			results := ip.diagnose(context.Background(), time.Now())
+			if len(results) == 0 {
+				t.Fatal("doctor returned no results")
+			}
+			r := results[len(results)-1]
+			if refused := tc.want == doctor.Fail; r.Name != "client credential" || r.Status != tc.want ||
+				strings.HasPrefix(r.Fix, lead) != refused || (strings.Count(r.Fix, "BYWARD_OIDC_CLIENT_KEY_ALG") == 1) != refused {
+				t.Fatalf("result %+v; want the credential check %s, leading with the refusal once: %v", r, tc.want, refused)
+			}
+		})
+	}
+}
+
+// An algorithm the client key cannot sign with refuses to start, naming BYWARD_OIDC_CLIENT_KEY_ALG
+// (#306); the credential each accepted one describes is TestAnOktaClientKeyOnPS256Warns's.
+func TestAClientKeyAlgorithmTheKeyCannotUseRefusesToStart(t *testing.T) {
+	rsaKey := pkcs8PEM(t, fakeidp.NewCertificate(t).Key)
+	p256, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	ecKey := pkcs8PEM(t, p256)
+	for name, tc := range map[string]struct{ key, alg string }{
+		"RS256 with an EC key":  {ecKey, "RS256"},
+		"ES256 with an RSA key": {rsaKey, "ES256"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := oidcConfig("keycloak", func(c *config.Config) { c.OIDCClientSecret, c.OIDCClientKey, c.OIDCClientKeyAlg = "", tc.key, tc.alg })
+			if _, err := newIdentityProvider(c, nil); err == nil || !strings.HasPrefix(err.Error(), "BYWARD_OIDC_CLIENT_KEY_ALG: ") {
+				t.Fatalf("err = %v, want an error naming BYWARD_OIDC_CLIENT_KEY_ALG", err)
+			}
+		})
 	}
 }
 
@@ -165,7 +323,8 @@ func TestCheckReportsAMutableSubjectClaim(t *testing.T) {
 
 // doctor checks an oidc IdP's discovery and then its client credential (#288): a matching issuer
 // passes and a mismatch fails naming the setting; the credential is checked only after discovery,
-// and a wrong secret fails naming its setting. Nothing Entra's is reported.
+// and a wrong secret fails naming its setting; the result names the credential (#306). Nothing
+// Entra's is reported.
 func TestDoctorChecksAnOIDCIdPsDiscoveryAndClientCredential(t *testing.T) {
 	for _, tc := range []struct {
 		name                  string
@@ -195,6 +354,7 @@ func TestDoctorChecksAnOIDCIdPsDiscoveryAndClientCredential(t *testing.T) {
 			}
 			if len(idpChecks) != 2 || idpChecks[0].Name != "discovery" || idpChecks[0].Status != tc.discovery ||
 				idpChecks[1].Name != "client credential" || idpChecks[1].Status != tc.credential ||
+				!strings.HasSuffix(idpChecks[1].Message, "; the credential: a client secret") ||
 				!strings.Contains(idpChecks[0].Fix+idpChecks[1].Fix, tc.fix) {
 				t.Fatalf("IdP checks %+v, want discovery %s then the client credential %s, a fix naming %q", idpChecks, tc.discovery, tc.credential, tc.fix)
 			}

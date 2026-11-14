@@ -68,6 +68,9 @@ type Config struct {
 	OIDCClientSecret string
 	OIDCClientKey    string // PEM, for private_key_jwt
 	OIDCClientKeyID  string
+	// OIDCClientKeyAlg is the client assertion's algorithm; "" means the key type's default (PS256 for
+	// RSA, ES256 for EC P-256) (#306).
+	OIDCClientKeyAlg string
 	OIDCScopes       []string
 	OIDCSubjectClaim string
 	// OIDCRolesClaim and OIDCGroupsClaim are the ID token claims roles and groups are read from;

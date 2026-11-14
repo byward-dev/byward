@@ -23,7 +23,7 @@ ADR itself, with its issue. The last column lists both.
 | [0013](0013-discovery-and-errors.md) | Discovery and errors: both well-known paths, one issuer, `iss` everywhere | F16 | — |
 | [0014](0014-token-validation.md) | Token validation: header only, sealed checks, no store on the request path | F11 | ADR-0022; 2026-11-07 (#64) |
 | [0015](0015-access-gate.md) | Authorization: an access gate at login and refresh, no per-request denials | F12 | 2026-11-06 (slice 1.5); 2026-11-07 (#126); ADR-0014 (#64); ADR-0011 (#286) |
-| [0016](0016-identity-propagation.md) | Identity propagation: an RFC 9068 assertion for the upstream, strip then inject | F13 | 2026-11-07 (#151, #64); 2026-11-08 (#187, #207) |
+| [0016](0016-identity-propagation.md) | Identity propagation: an RFC 9068 assertion for the upstream, strip then inject | F13 | 2026-11-07 (#151, #64); 2026-11-08 (#187, #207); 2026-11-14 (#330) |
 | [0017](0017-delegation-obo.md) | Delegation: proxy-side Entra On-Behalf-Of (v0.2, amended) | F14 | ADR-0029; 2026-11-06 (release); 2026-11-07 (slice 4.2); 2026-11-08 (#195, #141) |
 | [0018](0018-hardening.md) | Hardening: Origin and Host checks, bounded HTTP, Rewrite-only proxying | F17 | 2026-11-06 (OAuth rate limits; #102, #103, #105); 2026-11-07 (#167); 2026-11-14 (§13, invariants list moved) |
 | [0019](0019-packaging.md) | Packaging: a signed container image and Linux binaries for servers | F19 | 2026-11-13 (#183, TLS) |

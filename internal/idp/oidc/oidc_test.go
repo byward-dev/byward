@@ -2,6 +2,7 @@ package oidc
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -56,6 +57,17 @@ func (e *env) ready(t *testing.T) {
 	if err := e.p.Ready(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// newKeyEnv is newEnv with a private_key_jwt client: ca signs its assertions and the fake knows only
+// cert, no secret.
+func newKeyEnv(t *testing.T, ca idp.ClientAuth, cert *fakeidp.Certificate, opts ...fakeidp.Option) *env {
+	t.Helper()
+	e := newEnv(t, Config{ClientAuth: ca, KeyAlgSetting: "BYWARD_OIDC_CLIENT_KEY_ALG"}, opts...)
+	c := e.client
+	c.Secrets, c.Certificates = nil, []*fakeidp.Certificate{cert}
+	e.fake.Set(fakeidp.WithClient(c))
+	return e
 }
 
 // now is the shared fixed clock of the fake and the adapter.
@@ -256,13 +268,162 @@ func TestPrivateKeyJWTWithKid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := newEnv(t, Config{ClientAuth: ca})
-	c := e.client
-	c.Secrets, c.Certificates = nil, []*fakeidp.Certificate{cert}
-	e.fake.Set(fakeidp.WithClient(c))
+	e := newKeyEnv(t, ca, cert)
 	if _, _, err := e.p.Callback(context.Background(), signIn(t, e, login), login); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// An IdP that refuses PS256 for client assertions, as Okta does (#306): a PS256 assertion is refused
+// with a fix that names its algorithm and its key ID when it has one, and the okta preset's advice;
+// RS256 signs in. The fix's full wording is TestTheRefusalFixLeadsWithAnAlgorithmThePresetRefuses's.
+func TestAnIdPThatRefusesPS256AcceptsAnRS256ClientAssertion(t *testing.T) {
+	cert := fakeidp.NewCertificate(t)
+	for _, tc := range []struct {
+		name, preset string
+		alg          string // "" signs with PS256, the RSA default
+		kid          string // "" finds the key by its x5t#S256 instead
+		refusedFix   string // a part of the fix; "" means the sign-in succeeds
+	}{
+		{name: "PS256 with a key ID", kid: cert.ThumbprintSHA256(), refusedFix: "signed with PS256 by the client key (key ID " + cert.ThumbprintSHA256() + ")"},
+		{name: "PS256 without a key ID", refusedFix: "signed with PS256 by the client key:"},
+		{name: "PS256 at okta", preset: "okta", kid: cert.ThumbprintSHA256(), refusedFix: "Okta refuses PS256 for client assertions: set BYWARD_OIDC_CLIENT_KEY_ALG=RS256 (or use an EC P-256 key); otherwise check the client ID"},
+		{name: "RS256", alg: "RS256", kid: cert.ThumbprintSHA256()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var x5t *x509.Certificate
+			if tc.kid == "" {
+				x5t = cert.X509 // without a kid the fake finds the key by its x5t#S256
+			}
+			ca, err := idp.PrivateKeyJWTWithAlg(cert.Key, x5t, tc.kid, tc.alg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e := newKeyEnv(t, ca, cert, fakeidp.WithClientAssertionAlgs("RS256"))
+			if tc.preset != "" {
+				e.p.preset = Presets[tc.preset] // after New: the okta preset's issuer check refuses the fake's issuer
+			}
+			_, _, err = e.p.Callback(context.Background(), signIn(t, e, login), login)
+			if tc.refusedFix == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			var ie *idp.Error
+			if !errors.As(err, &ie) || ie.Alert != idp.AlertCredentialRejected ||
+				ie.Description != "The client_assertion JWT signature algorithm is invalid." || !strings.Contains(ie.Fix(), tc.refusedFix) ||
+				(tc.kid == "" && strings.Contains(ie.Fix(), "(key ID")) {
+				t.Fatalf("err = %v, fix %q; want credential_rejected with a fix containing %q", err, fixOf(ie), tc.refusedFix)
+			}
+		})
+	}
+}
+
+// Only a refused client assertion gets the fix about the assertion: a rejected client secret, a
+// refused grant and an unauthorized client keep the generic fix for their alert.
+func TestOnlyARefusedAssertionGetsTheAssertionFix(t *testing.T) {
+	cert := fakeidp.NewCertificate(t)
+	keyEnv := func(t *testing.T) *env {
+		ca, err := idp.PrivateKeyJWT(cert.Key, nil, cert.ThumbprintSHA256())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return newKeyEnv(t, ca, cert)
+	}
+	secretEnv := func(t *testing.T) *env { return newEnv(t, Config{ClientAuth: idp.ClientSecret("wrong-secret")}) }
+	unauthorizedEnv := func(t *testing.T) *env {
+		e := keyEnv(t)
+		e.fake.Set(fakeidp.FailToken(fakeidp.GrantAuthorizationCode, &fakeidp.UnknownClient))
+		return e
+	}
+	wrongVerifier := login
+	wrongVerifier.CodeVerifier = strings.Repeat("a", 43)
+	for _, tc := range []struct {
+		name      string
+		env       func(t *testing.T) *env
+		login     idp.Login
+		wantOAuth string
+		wantAlert idp.Alert // "" means no alert
+	}{
+		{name: "a rejected client secret", env: secretEnv, login: login, wantOAuth: "invalid_client", wantAlert: idp.AlertCredentialRejected},
+		{name: "a refused grant", env: keyEnv, login: wrongVerifier, wantOAuth: "invalid_grant"},
+		{name: "an unauthorized client", env: unauthorizedEnv, login: login, wantOAuth: "unauthorized_client", wantAlert: idp.AlertCredentialRejected},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := tc.env(t)
+			_, _, err := e.p.Callback(context.Background(), signIn(t, e, login), tc.login)
+			var ie *idp.Error
+			if !errors.As(err, &ie) || ie.OAuth != tc.wantOAuth || ie.Alert != tc.wantAlert || ie.OperatorHint != "" {
+				t.Fatalf("err = %v, fix %q; want %s, alert %q and no assertion fix", err, fixOf(ie), tc.wantOAuth, tc.wantAlert)
+			}
+		})
+	}
+}
+
+// stubAssertion is an AssertionInfo with a fixed algorithm and key ID.
+type stubAssertion struct{ alg, kid string }
+
+func (s stubAssertion) SigningAlgorithm() string { return s.alg }
+func (s stubAssertion) KeyID() string            { return s.kid }
+
+// The refusal fix names the algorithm and key ID; when the preset's IdP refuses the algorithm, it
+// leads with that refusal and what to set instead, the likely cause (#306).
+func TestTheRefusalFixLeadsWithAnAlgorithmThePresetRefuses(t *testing.T) {
+	const base = "the IdP refused the proxy's client ID or its private_key_jwt client assertion, signed with %s by %s: " +
+		"check the client ID, that the key's public half is registered on the app, and that the IdP accepts %s for client assertions"
+	const okta = "Okta refuses PS256 for client assertions: set BYWARD_OIDC_CLIENT_KEY_ALG=RS256 (or use an EC P-256 key); otherwise check the client ID and that the public half of %s is registered on the app"
+	for _, tc := range []struct {
+		name, preset, alg, kid, want string
+	}{
+		{"okta, PS256 with a key ID", "okta", "PS256", "k1", fmt.Sprintf(okta, "the client key (key ID k1)")},
+		{"okta, PS256 without a key ID", "okta", "PS256", "", fmt.Sprintf(okta, "the client key")},
+		{"okta, RS256", "okta", "RS256", "k1", fmt.Sprintf(base, "RS256", "the client key (key ID k1)", "RS256")},
+		{"okta, ES256", "okta", "ES256", "", fmt.Sprintf(base, "ES256", "the client key", "ES256")},
+		{"keycloak, PS256", "keycloak", "PS256", "k1", fmt.Sprintf(base, "PS256", "the client key (key ID k1)", "PS256")},
+		{"plain oidc, PS256", "", "PS256", "", fmt.Sprintf(base, "PS256", "the client key", "PS256")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := rejectedAssertionHint(stubAssertion{tc.alg, tc.kid}, Presets[tc.preset], "BYWARD_OIDC_CLIENT_KEY_ALG"); got != tc.want {
+				t.Fatalf("fix\n %q\nwant\n %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The advice for a refused algorithm, and the lead of a refused key's fix, name what the key can
+// still sign with, or the other key type, from the preset's refused list, never offering
+// the refused algorithm as what to use.
+func TestTheAdviceForARefusedAlgorithmNamesWhatIsLeft(t *testing.T) {
+	refuses := func(algs ...string) Preset { return Preset{Label: "X", RefusedAssertionAlgs: algs} }
+	for _, tc := range []struct {
+		name, alg    string
+		preset       Preset
+		advice, lead string // lead: after "X refuses <alg> for client assertions: "
+	}{
+		{"PS256 refused", "PS256", refuses("PS256"), "sign with RS256, or use an EC P-256 key", "set S=RS256 (or use an EC P-256 key)"},
+		{"RS256 refused", "RS256", refuses("RS256"), "sign with PS256, or use an EC P-256 key", "set S=PS256 (or use an EC P-256 key)"},
+		{"both RSA algorithms refused", "PS256", refuses("PS256", "RS256"), "use an EC P-256 key", "use an EC P-256 key"},
+		{"ES256 refused", "ES256", refuses("ES256"), "use an RSA key", "use an RSA key"},
+		{"an algorithm no key type signs with", "EdDSA", refuses("EdDSA"), "use another key", "use another key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := RefusedAssertionAdvice(tc.alg, tc.preset); got != tc.advice {
+				t.Fatalf("advice %q, want %q", got, tc.advice)
+			}
+			if got, want := refusedAlgLead(tc.alg, tc.preset, "S"), "X refuses "+tc.alg+" for client assertions: "+tc.lead; got != want {
+				t.Fatalf("lead %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// fixOf is e's fix, "" for no error.
+func fixOf(e *idp.Error) string {
+	if e == nil {
+		return ""
+	}
+	return e.Fix()
 }
 
 func TestPublicClientSignsInWithoutCredential(t *testing.T) {

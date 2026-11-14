@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -48,24 +49,75 @@ func (c clientSecret) GoString() string { return c.String() }
 
 type privateKeyJWT struct {
 	signer jose.Signer
+	alg    jose.SignatureAlgorithm
+	keyID  string
+}
+
+// ErrClientKeyAlg means the client key cannot sign with the chosen algorithm.
+var ErrClientKeyAlg = errors.New("idp: the client key cannot sign with that algorithm")
+
+var _ AssertionInfo = privateKeyJWT{} // PrivateKeyJWT's credentials describe themselves
+
+// AssertionInfo describes a private_key_jwt credential: its algorithm and key ID, for the
+// operator's diagnosis. Neither is secret. PrivateKeyJWT's credentials implement it.
+type AssertionInfo interface {
+	SigningAlgorithm() string
+	KeyID() string
 }
 
 // PrivateKeyJWT signs a client assertion with key. RSA keys use PS256, EC P-256 keys ES256. With
 // cert, the header carries x5t#S256 (what Entra matches on, ADR-0012 §5); keyID, if set, becomes
 // `kid` (what most other IdPs match on).
 func PrivateKeyJWT(key crypto.Signer, cert *x509.Certificate, keyID string) (ClientAuth, error) {
-	var alg jose.SignatureAlgorithm
+	return PrivateKeyJWTWithAlg(key, cert, keyID, "")
+}
+
+// ClientKeyType is a kind of client key and the algorithms it signs client assertions with, its
+// default first.
+type ClientKeyType struct {
+	Name string // as in "an <Name> client key"
+	Algs []string
+}
+
+// clientKeyTypes are the key types PrivateKeyJWTWithAlg signs with: RSA first, then EC P-256, since
+// it picks a row by position; each row lists its default algorithm first.
+var clientKeyTypes = []ClientKeyType{
+	{Name: "RSA", Algs: []string{string(jose.PS256), string(jose.RS256)}}, // RS256 for an IdP that refuses PS256 (Okta, #306)
+	{Name: "EC P-256", Algs: []string{string(jose.ES256)}},
+}
+
+// ClientKeyTypes are the client key types PrivateKeyJWTWithAlg accepts and the algorithms each signs
+// with, for advice on what else to use (#306).
+func ClientKeyTypes() []ClientKeyType {
+	out := slices.Clone(clientKeyTypes)
+	for i := range out {
+		out[i].Algs = slices.Clone(out[i].Algs)
+	}
+	return out
+}
+
+// PrivateKeyJWTWithAlg is PrivateKeyJWT with the signing algorithm chosen: "" for the key type's
+// default, else one of the algorithms ClientKeyTypes lists for it.
+func PrivateKeyJWTWithAlg(key crypto.Signer, cert *x509.Certificate, keyID, algName string) (ClientAuth, error) {
+	var kt ClientKeyType
 	switch k := key.Public().(type) {
 	case *rsa.PublicKey:
-		alg = jose.PS256
+		kt = clientKeyTypes[0]
 	case *ecdsa.PublicKey:
 		if k.Curve.Params().Name != "P-256" {
 			return nil, errors.New("idp: EC client keys must use P-256")
 		}
-		alg = jose.ES256
+		kt = clientKeyTypes[1]
 	default:
 		return nil, fmt.Errorf("idp: unsupported client key type %T", k)
 	}
+	if algName == "" {
+		algName = kt.Algs[0]
+	}
+	if !slices.Contains(kt.Algs, algName) {
+		return nil, fmt.Errorf("%w: an %s client key signs with %s, not %q", ErrClientKeyAlg, kt.Name, strings.Join(kt.Algs, " or "), algName)
+	}
+	alg := jose.SignatureAlgorithm(algName)
 	opts := (&jose.SignerOptions{}).WithType("JWT")
 	if cert != nil {
 		sum := sha256.Sum256(cert.Raw)
@@ -78,8 +130,14 @@ func PrivateKeyJWT(key crypto.Signer, cert *x509.Certificate, keyID string) (Cli
 	if err != nil {
 		return nil, err
 	}
-	return privateKeyJWT{signer: s}, nil
+	return privateKeyJWT{signer: s, alg: alg, keyID: keyID}, nil
 }
+
+// SigningAlgorithm is the client assertion's JWS algorithm.
+func (p privateKeyJWT) SigningAlgorithm() string { return string(p.alg) }
+
+// KeyID is the assertion's `kid`, "" when there is none.
+func (p privateKeyJWT) KeyID() string { return p.keyID }
 
 func (p privateKeyJWT) Apply(form url.Values, clientID, audience string, now time.Time) error {
 	jti := rand.Text()
