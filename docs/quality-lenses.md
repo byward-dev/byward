@@ -177,25 +177,8 @@ Sources: [OpenSSF Best Practices (Silver)](https://www.bestpractices.dev/en/crit
 
 ## Invariants
 
-1. No token passthrough to the upstream.
-2. Never log tokens, secrets, authorization codes or PKCE verifiers.
-3. Named IdP endpoints come from config, never overridable.
-4. Client-supplied URLs are fetched only through the SSRF guard.
-5. Per-client consent before the IdP redirect.
-6. Audience validated; authorization responses carry `iss`.
-7. Proxy tokens are sealed by us (AEAD; key ID from our key ring; resource URL and token type as associated data), carry `exp`, and are never IdP tokens; assertions to the upstream are JWTs with `aud` = that upstream and a `kid` in our JWKS (ADR-0016).
-8. The IdP refresh token never leaves the **broker** and is encrypted at rest.
-9. Authorization codes are single-use and short-lived; `/token` re-checks `client_id`, `redirect_uri`, PKCE.
-10. Exact redirect matching; only the loopback port may vary.
-11. Keys come from the operator; never derived from the IdP client secret; never ephemeral across replicas; rotation keeps verify-only keys.
-12. Every relaxation is an explicit flag, logged at startup.
-13. Legacy MCP sessions are bound to the user (ADR-0004); an upstream process never serves more than one user (ADR-0003).
-14. Size, time and count limits on registration, CIMD and the store.
-15. Errors never echo secrets or upstream internals.
-16. The reverse proxy uses `httputil.ReverseProxy.Rewrite`, never `Director`; identity, forwarding, authorization (with `DPoP`), downstream-token and operator-listed headers are stripped before ours are set, and an MCP client's request trailers never reach the upstream (ADR-0016, ADR-0018).
-17. The MCP endpoint checks `Origin` (403) and `Host` (421) before authentication; the default bind is `127.0.0.1` (ADR-0018).
-18. Every `http.Server` timeout and `MaxHeaderBytes` is set; builds use the latest Go patch release; `govulncheck` is green (ADR-0018).
-19. The proxy never sends its own IdP credential on a caller's behalf; app-only tokens are accepted only with a pinned issuer and audience, `idtyp=app` and a required app role (ADR-0022).
+Every design keeps the security invariants. Their wording, where each is enforced and the tests
+that pin it are in [security posture](security-posture.md#security-invariants).
 
 ## Known pitfalls
 

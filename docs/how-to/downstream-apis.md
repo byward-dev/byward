@@ -100,7 +100,7 @@ the reason; for `consent_required`, the line carries the admin-consent URL.
 | Reason | Cause | What to do |
 |---|---|---|
 | `consent_required` | AADSTS65001: the API permissions are not consented | Open the admin-consent URL from the error log (`admin_consent_url`) as a tenant administrator, or grant consent in the portal |
-| `interaction_required` | Conditional Access wants a step the proxy cannot complete for the downstream API | Check the sign-in log for the policy; passing its challenge to the client's next sign-in is not supported yet |
+| `interaction_required` | Conditional Access wants a step the proxy cannot complete for the downstream API | Check the sign-in log for the policy. The proxy does not pass the policy's challenge on to the client ([ADR-0012 §9](../adr/0012-entra-specifics.md)) |
 | `unavailable` | Entra did not answer, or refused byward's own credential | As for sign-in failures: check the IdP's health and the client secret or certificate |
 | `failed` | Anything else | The error log names the AADSTS code and Entra's trace and correlation IDs |
 

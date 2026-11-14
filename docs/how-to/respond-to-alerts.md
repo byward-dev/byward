@@ -161,9 +161,9 @@ The rule `BywardUpstreamBusy` fires when requests are refused with `503` and `Re
 because an admission cap is full: [`byward_upstream_busy_total`](../reference/observability.md#metrics),
 with `kind` `request` or `stream`.
 
-**What it means.** Each proxy process lets at most 64 requests and 256 long-lived streams (`GET`
-streams and `subscriptions/listen`) reach the upstream at once ([ADR-0018](../adr/0018-hardening.md)
-§7). The caps are fixed, not settings.
+**What it means.** Each proxy process caps the requests and long-lived streams that reach the
+upstream at once ([MCP in-flight caps](../reference/rate-limits.md#mcp-in-flight-caps)). The caps are
+fixed, not settings.
 
 **What to do.**
 
@@ -233,6 +233,6 @@ carry for this user, or its own policy refuses the user.
    ([choose the claims](identity-assertion.md#3-choose-the-header-and-the-claims)), and assign the
    missing role or group at the IdP.
 2. A role assigned at the IdP is asserted from the client's next refresh, at most one access-token
-   lifetime (1 hour) later ([how fresh the claims are](identity-assertion.md#4-how-fresh-the-claims-are)).
+   lifetime (1 hour) later ([how fresh the claims are](../reference/identity-assertion.md#how-fresh-the-claims-are)).
 3. If the upstream denies tools on purpose, it should answer with a tool result with `isError`
    instead of an HTTP 403; the user then sees the upstream's own message.

@@ -83,7 +83,7 @@ Only submit work you have the right to contribute under Apache-2.0.
 ## Security rules for every change
 
 The proxy sits on the authentication path, so every pull request keeps the invariants in
-[docs/quality-lenses.md](docs/quality-lenses.md#invariants). The ones most often at risk:
+[docs/security-posture.md](docs/security-posture.md#security-invariants). The ones most often at risk:
 
 - never pass an inbound token through to the upstream;
 - never log tokens, secrets, authorization codes or PKCE verifiers;
