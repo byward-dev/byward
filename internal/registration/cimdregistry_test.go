@@ -138,8 +138,8 @@ func TestCIMDCacheFollowsTheDocumentAndTheDraft(t *testing.T) {
 				if (s.err == nil) != (err == nil) || (s.err != nil && !errors.Is(err, s.err)) || f.calls.Load() != s.fetches {
 					t.Fatalf("step %d: err = %v (want %v), fetches = %d (want %d)", i, err, s.err, f.calls.Load(), s.fetches)
 				}
-				if err == nil && cl.ID() != cimdID {
-					t.Fatalf("step %d: client %s", i, cl.ID())
+				if err == nil && (cl.ID() != cimdID || !slices.Equal(cl.AuthMethods(), []AuthMethod{None})) {
+					t.Fatalf("step %d: client %s, methods %v", i, cl.ID(), cl.AuthMethods())
 				}
 			}
 		})

@@ -59,9 +59,12 @@ type clientAuth struct {
 func (c clientAuth) ID() string                { return c.id }
 func (c clientAuth) AuthMethods() []AuthMethod { return slices.Clone(c.methods) }
 
+// String never shows the secret: through the promoted Format it is how every client formats.
 func (c clientAuth) String() string {
 	return fmt.Sprintf("registration.clientAuth{id:%s methods:%v}", c.id, c.methods)
 }
+
+// GoString never shows the secret.
 func (c clientAuth) GoString() string { return c.String() }
 
 // Format makes every fmt verb use String, so no verb can reach the secret by reflection.
