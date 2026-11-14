@@ -148,12 +148,18 @@ to `BYWARD_UPSTREAM_URL`.
 
 **As a binary.** Download and unpack the release archive, `byward_<version>_<os>_<arch>.tar.gz` (the
 version without its `v`; the darwin archives are for development only), and check it against
-`checksums.txt` ([verifying a release](../reference/packaging.md#verifying-a-release)). For example,
-v0.2.0-rc.1 for Linux on x86-64:
+`checksums.txt` ([verifying a release](../reference/packaging.md#verifying-a-release)). For
+v0.2.0-rc.1 on this machine's OS and architecture (`linux` or `darwin`, `amd64` or `arm64`):
 
 ```sh
-curl -LO https://github.com/byward-dev/byward/releases/download/v0.2.0-rc.1/byward_0.2.0-rc.1_linux_amd64.tar.gz
-tar -xzf byward_0.2.0-rc.1_linux_amd64.tar.gz byward
+V=0.2.0-rc.1
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
+A=byward_${V}_${OS}_${ARCH}.tar.gz      # e.g. byward_0.2.0-rc.1_linux_amd64.tar.gz
+curl -LO https://github.com/byward-dev/byward/releases/download/v$V/$A
+curl -LO https://github.com/byward-dev/byward/releases/download/v$V/checksums.txt
+sha256sum --ignore-missing -c checksums.txt   # macOS: shasum -a 256 --ignore-missing -c checksums.txt
+tar -xzf $A byward
 ```
 
 Fill in the placeholders in `byward.env`, then export the same settings, with `BYWARD_DATA_DIR` set
@@ -179,7 +185,8 @@ startup log also says which client sources are active, for example
   checks the IdP app ([checks](../reference/commands.md#checks)). For Entra it checks the tenant,
   the client ID and the credential. For the other IdPs it checks discovery and, on `main` only (not
   in v0.2.0-rc.1), the client ID and the credential.
-- `curl http://127.0.0.1:9090/readyz` (the binary, or the container with the probes published)
+- `curl http://127.0.0.1:9090/readyz` (the binary, or the container with the probes published; use
+  your `BYWARD_INTERNAL_LISTEN` address if you moved it)
   answers 200 when the proxy has a signing key and its store answers, and 503 otherwise.
 
 ## 6. Connect a client
@@ -191,7 +198,8 @@ Add `https://mcp.example.com/mcp` to your MCP client and sign in. For Claude Cod
 
 [`mcp-check.py`](../examples/mcp-check.py) is a short client on the MCP Python SDK (`mcp` 2.3.0): it
 registers itself with DCR, prints the sign-in URL for you to open in a browser, lists the tools,
-and calls the reference server's `echo` tool. It needs [uv](https://docs.astral.sh/uv/):
+and calls the reference server's `echo` tool. If no sign-in comes back within 120 s, it stops with a
+message. It needs [uv](https://docs.astral.sh/uv/):
 
 ```sh
 curl -LO https://raw.githubusercontent.com/byward-dev/byward/main/docs/examples/mcp-check.py
@@ -207,7 +215,10 @@ If you script the browser too:
   the page again ([ADR-0010](../adr/0010-consent-screen.md) §7), so wait a second before clicking;
 - a script that posts the consent form itself must send the proxy's own `Origin`, as a browser does;
 - a user the [access gate](access-gate.md) refuses sees byward's "You don't have access" page, and
-  the client receives no error redirect: it waits until its own sign-in times out.
+  the client receives no error redirect: it waits until its own sign-in times out (`mcp-check.py`
+  after 120 s);
+- the IdP's session outlives a sign-in: to sign in as another user, use a private browser window or
+  sign out at the IdP first, or the IdP signs the previous user in again without asking.
 
 ## Next steps
 

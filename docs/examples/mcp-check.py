@@ -7,9 +7,11 @@ and call the reference server's echo tool if there is one.
 
     uv run --script mcp-check.py http://localhost:8080/mcp
 
-The browser comes back to http://127.0.0.1:33418/callback, which this script listens on.
+The browser comes back to http://127.0.0.1:33418/callback, which this script listens on. If no
+sign-in comes back within WAIT seconds (a user the access gate refuses never comes back), it stops
+with a message.
 """
-import asyncio, sys
+import asyncio, os, sys
 from urllib.parse import parse_qs, urlparse
 
 import httpx2
@@ -18,7 +20,7 @@ from mcp.client.auth import AuthorizationCodeResult, OAuthClientProvider
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.auth import OAuthClientMetadata
 
-URL, PORT = sys.argv[1], 33418
+URL, PORT, WAIT = sys.argv[1], 33418, 120
 REDIRECT = f"http://127.0.0.1:{PORT}/callback"
 
 
@@ -47,7 +49,13 @@ async def main():
         print(f"Open this URL in a browser and sign in:\n{url}", file=sys.stderr, flush=True)
 
     async def code():
-        q = parse_qs(urlparse(await redirected).query)
+        try:
+            target = await asyncio.wait_for(asyncio.shield(redirected), WAIT)
+        except TimeoutError:
+            print(f"No sign-in came back within {WAIT} s. If the browser shows byward's \"You don't have "
+                  "access to this server\" page, the access gate refused that user.", file=sys.stderr, flush=True)
+            os._exit(1)  # the SDK's task group would hold a raised exception; stop the whole check here
+        q = parse_qs(urlparse(target).query)
         if "error" in q:
             sys.exit(f"sign-in refused: {q['error'][0]}")
         return AuthorizationCodeResult(code=q["code"][0], state=q.get("state", [None])[0], iss=q.get("iss", [None])[0])
