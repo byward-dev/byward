@@ -93,8 +93,18 @@ smoke() {
 }
 
 # Every snapshot image goreleaser built (.goreleaser.yaml dockers_v2 platforms), so an architecture
-# added there is smoked too; the ELF check fails one it does not know.
-arches=$(jq -r '.[] | select(.type == "Docker Image") | .name | capture("byward:snapshot-(?<a>[a-z0-9]+)$").a' dist/artifacts.json | sort -u)
+# added there is smoked too; the ELF check fails one it does not know. An image of any other name
+# fails rather than being skipped.
+names=$(jq -r '.[] | select(.type == "Docker Image") | .name' dist/artifacts.json) \
+  || fail "cannot read the images in dist/artifacts.json"
+arches=
+for name in $names; do
+  arch=${name#ghcr.io/byward-dev/byward:snapshot-}
+  [ "$arch" != "$name" ] && [ -n "$arch" ] || fail "dist/artifacts.json lists $name, not a ghcr.io/byward-dev/byward:snapshot-<arch> image"
+  arches="$arches
+$arch"
+done
+arches=$(printf '%s\n' "$arches" | sed '/^$/d' | sort -u)
 [ -n "$arches" ] || fail "dist/artifacts.json lists no snapshot images"
 for arch in $arches; do
   smoke "$arch"
