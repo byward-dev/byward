@@ -120,4 +120,5 @@ An OIDC IdP usually lets anyone with an account sign in, so an empty
 ## 5. Check it
 
 `byward check --offline` validates the settings; `byward doctor` fetches discovery and checks that
-its issuer matches. The consent page says "You'll sign in with `<name>` next".
+its issuer matches, then that the IdP accepts the client ID and the secret or key (it sends a made-up
+authorization code, so no user is needed). The consent page says "You'll sign in with `<name>` next".
