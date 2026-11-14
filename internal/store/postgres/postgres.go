@@ -105,7 +105,7 @@ const epochSQL = "(SELECT value FROM meta WHERE key = 'epoch')"
 // CreateGrant implements store.Grants. SERIALIZABLE makes the cut-off check and the insert one
 // step against a concurrent RevokeSubject or RevokeAll on any replica (store.Grants.CreateGrant).
 func (s *Store) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, error) {
-	if err := g.Check(); err != nil {
+	if err := g.CheckNew(); err != nil {
 		return store.Grant{}, err
 	}
 	var epoch int64
@@ -496,7 +496,7 @@ func (s *Store) SpendAssertion(ctx context.Context, hash [sha256.Size]byte, now,
 
 // RememberConsent implements store.Consents.
 func (s *Store) RememberConsent(ctx context.Context, c store.Consent) error {
-	if err := c.Check(); err != nil {
+	if err := c.CheckNew(); err != nil {
 		return err
 	}
 	k := c.Key
@@ -534,7 +534,7 @@ func (s *Store) Consent(ctx context.Context, k store.ConsentKey) (store.Consent,
 // CreateClient implements store.Clients. SERIALIZABLE makes the count and the insert one step, so
 // concurrent registrations on any replica never exceed max.
 func (s *Store) CreateClient(ctx context.Context, c store.Client, max int) error {
-	if err := c.Check(); err != nil {
+	if err := c.CheckNew(); err != nil {
 		return err
 	}
 	return s.write(ctx, func(tx pgx.Tx) error {

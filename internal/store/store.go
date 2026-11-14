@@ -18,8 +18,9 @@ var (
 	ErrConsumed = errors.New("store: already consumed")
 	// ErrExists: a grant ID, a grant's code or a refresh-token hash is already stored.
 	ErrExists = errors.New("store: already exists")
-	// ErrInvalid: a grant without an ID, client, subject or a lifetime, or a subject cut-off
-	// without a subject. An empty subject in a Revocation must never reach the deny list.
+	// ErrInvalid: an argument the contract refuses, such as a grant, client or consent missing a field
+	// or a lifetime (CheckNew), a spend expiring by now (CheckSpend), or a subject cut-off without a
+	// subject. An empty subject in a Revocation must never reach the deny list.
 	ErrInvalid = errors.New("store: invalid argument")
 	// ErrRevoked: CreateGrant for a subject whose retained cut-off covers the grant (a login that
 	// was in flight when revoke-user ran).
@@ -92,9 +93,9 @@ type Grant struct {
 	Epoch     int64     // ADR-0007 §9; set by the store on create
 }
 
-// Check is CreateGrant's ErrInvalid rule, which every adapter applies: an empty ID, ClientID or
-// Subject, or an ExpiresAt not after CreatedAt.
-func (g Grant) Check() error {
+// CheckNew is CreateGrant's ErrInvalid rule for a grant about to be stored, which every adapter
+// applies: an empty ID, ClientID or Subject, or an ExpiresAt not after CreatedAt.
+func (g Grant) CheckNew() error {
 	if g.ID == "" || g.ClientID == "" || g.Subject == "" || !g.ExpiresAt.After(g.CreatedAt) {
 		return ErrInvalid
 	}
@@ -264,9 +265,9 @@ type Client struct {
 	ExpiresAt time.Time
 }
 
-// Check is CreateClient's ErrInvalid rule: an empty ID or Metadata, a non-zero UsedAt, or an
-// ExpiresAt not after CreatedAt.
-func (c Client) Check() error {
+// CheckNew is CreateClient's ErrInvalid rule for a client about to be registered: an empty ID or
+// Metadata, a non-zero UsedAt, or an ExpiresAt not after CreatedAt.
+func (c Client) CheckNew() error {
 	if c.ID == "" || len(c.Metadata) == 0 || !c.UsedAt.IsZero() || !c.ExpiresAt.After(c.CreatedAt) {
 		return ErrInvalid
 	}
@@ -312,9 +313,9 @@ type Consent struct {
 	RecordsLifetime bool
 }
 
-// Check is RememberConsent's ErrInvalid rule: an empty key field, no scopes, or an ExpiresAt not
-// after ApprovedAt.
-func (c Consent) Check() error {
+// CheckNew is RememberConsent's ErrInvalid rule for a consent about to be remembered: an empty key
+// field, no scopes, or an ExpiresAt not after ApprovedAt.
+func (c Consent) CheckNew() error {
 	k := c.Key
 	if k.Issuer == "" || k.Subject == "" || k.ClientID == "" || k.Redirect == "" || k.Resource == "" || len(c.Scopes) == 0 || !c.ExpiresAt.After(c.ApprovedAt) {
 		return ErrInvalid

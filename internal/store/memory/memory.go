@@ -86,7 +86,7 @@ func (s *Store) SpendAssertion(_ context.Context, hash [sha256.Size]byte, now, e
 
 // CreateGrant implements store.Grants.
 func (s *Store) CreateGrant(_ context.Context, g store.Grant) (store.Grant, error) {
-	if err := g.Check(); err != nil {
+	if err := g.CheckNew(); err != nil {
 		return store.Grant{}, err
 	}
 	s.mu.Lock()
@@ -350,7 +350,7 @@ func (s *Store) Collect(_ context.Context, now time.Time) error {
 
 // CreateClient implements store.Clients.
 func (s *Store) CreateClient(_ context.Context, c store.Client, max int) error {
-	if err := c.Check(); err != nil {
+	if err := c.CheckNew(); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -406,7 +406,7 @@ func (s *Store) UseClient(_ context.Context, id string, now, expires time.Time, 
 
 // RememberConsent implements store.Consents.
 func (s *Store) RememberConsent(_ context.Context, c store.Consent) error {
-	if err := c.Check(); err != nil {
+	if err := c.CheckNew(); err != nil {
 		return err
 	}
 	k := c.Key

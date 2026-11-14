@@ -209,6 +209,10 @@ func incompleteGrantsAndCutOffsAreInvalid(t *testing.T, s store.Store) {
 			edit(&g)
 			_, err := s.CreateGrant(ctx, g)
 			wantErr(t, "CreateGrant", err, store.ErrInvalid)
+			if g.ID != "" {
+				_, err := s.Grant(ctx, g.ID)
+				wantErr(t, "the refused grant", err, store.ErrNotFound)
+			}
 		})
 	}
 	wantErr(t, "RevokeSubject without a subject", s.RevokeSubject(ctx, "", t0, t0), store.ErrInvalid)
@@ -221,8 +225,10 @@ func incompleteGrantsAndCutOffsAreInvalid(t *testing.T, s store.Store) {
 // or encode JSON (null versus []) see the same value from every adapter.
 func nilScopesComeBackNil(t *testing.T, s store.Store) {
 	g := grant("g1", "tid:alice")
-	g.Scopes = nil
-	mustCreate(t, s, g)
+	g.Scopes, g.IdPTokens = nil, nil
+	if created := mustCreate(t, s, g); created.Scopes != nil || created.IdPTokens != nil {
+		t.Fatalf("CreateGrant returned Scopes %#v, IdPTokens %#v; want nil", created.Scopes, created.IdPTokens)
+	}
 	if got, err := s.Grant(ctx, "g1"); err != nil || got.Scopes != nil {
 		t.Fatalf("Grant Scopes = %#v (%v), want nil", got.Scopes, err)
 	}
@@ -236,8 +242,11 @@ func nilScopesComeBackNil(t *testing.T, s store.Store) {
 
 func storedValuesAreCopies(t *testing.T, s store.Store) {
 	g := grant("g1", "tid:alice")
-	mustCreate(t, s, g)
+	created := mustCreate(t, s, g)
 	g.Scopes[0], g.IdPTokens[0] = "changed", 'X'
+	if created.Scopes[0] != "mcp" || created.IdPTokens[0] != 's' {
+		t.Fatal("changing the caller's grant after CreateGrant changed the grant it returned")
+	}
 	got, _ := s.Grant(ctx, "g1")
 	if got.Scopes[0] != "mcp" || got.IdPTokens[0] != 's' {
 		t.Fatal("changing the caller's grant after CreateGrant changed the stored one")
@@ -286,7 +295,11 @@ func spentOnceUntilItsExpiry(spend spendFunc) func(*testing.T, store.Store) {
 		must(t, spend(s, ctx, b, t0, expires))
 		must(t, spend(s, ctx, a, expires, expires.Add(10*time.Minute)))
 		wantErr(t, "spending a renewed record again", spend(s, ctx, a, expires.Add(time.Minute), expires.Add(20*time.Minute)), store.ErrConsumed)
-		wantErr(t, "an expiry not after now", spend(s, ctx, sha256.Sum256([]byte("spent-c")), t0, t0), store.ErrInvalid)
+		c := sha256.Sum256([]byte("spent-c"))
+		wantErr(t, "an expiry not after now", spend(s, ctx, c, t0, t0), store.ErrInvalid)
+		// The refused spend recorded nothing: a spend of c before t0, while a record expiring at t0
+		// would still count, succeeds.
+		must(t, spend(s, ctx, c, t0.Add(-time.Minute), t0.Add(time.Minute)))
 	}
 }
 
@@ -1024,6 +1037,8 @@ func clientIDsAreUniqueAndIncompleteClientsInvalid(t *testing.T, s store.Store) 
 	} {
 		wantErr(t, name, s.CreateClient(ctx, c, 0), store.ErrInvalid)
 	}
+	_, err := s.Client(ctx, "x")
+	wantErr(t, "a refused client", err, store.ErrNotFound)
 }
 
 // Only clients that are still live at the new client's CreatedAt count towards the cap.
@@ -1185,6 +1200,8 @@ func incompleteConsentsAreInvalid(t *testing.T, s store.Store) {
 		change(&c)
 		wantErr(t, name, s.RememberConsent(ctx, c), store.ErrInvalid)
 	}
+	_, err := s.Consent(ctx, consent("g1", "tid:alice", "https://app.example/cb").Key)
+	wantErr(t, "a refused consent", err, store.ErrNotFound)
 }
 
 func revokeSubjectAndRevokeAllForgetConsentsBeforeTheCutOff(t *testing.T, s store.Store) {

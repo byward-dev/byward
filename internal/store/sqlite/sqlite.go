@@ -291,7 +291,7 @@ func (s *Store) write(ctx context.Context, fn func(*sql.Tx) error) error {
 
 // CreateGrant implements store.Grants.
 func (s *Store) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, error) {
-	if err := g.Check(); err != nil {
+	if err := g.CheckNew(); err != nil {
 		return store.Grant{}, err
 	}
 	scopes, err := json.Marshal(nonNil(g.Scopes))
@@ -703,7 +703,7 @@ func (s *Store) SpendAssertion(ctx context.Context, hash [sha256.Size]byte, now,
 
 // RememberConsent implements store.Consents.
 func (s *Store) RememberConsent(ctx context.Context, c store.Consent) error {
-	if err := c.Check(); err != nil {
+	if err := c.CheckNew(); err != nil {
 		return err
 	}
 	k := c.Key
@@ -812,7 +812,7 @@ func ensureFile(path string) error {
 
 // CreateClient implements store.Clients.
 func (s *Store) CreateClient(ctx context.Context, c store.Client, max int) error {
-	if err := c.Check(); err != nil {
+	if err := c.CheckNew(); err != nil {
 		return err
 	}
 	return s.write(ctx, func(tx *sql.Tx) error {
