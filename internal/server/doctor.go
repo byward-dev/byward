@@ -35,7 +35,7 @@ func expiryWarning(cfg *config.Config, now time.Time) (Warning, bool) {
 
 // CheckOffline is `byward check --offline` (ADR-0020 §7): everything the proxy validates at
 // startup that needs no network and writes nothing. It reads the sealing keys and the static
-// clients, validates the IdP and gate settings, checks the store paths without creating them, and
+// clients, validates the IdP and gate settings, checks the store without opening or creating it, and
 // checks the TLS certificate as startup does.
 // The error is a configuration error; the warnings are what the proxy would log at startup.
 func CheckOffline(cfg *config.Config) ([]Warning, error) {
@@ -175,7 +175,8 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	if err != nil {
 		return r, err
 	}
-	if err := checkStorePaths(cfg); err != nil {
+	storeWarnings, err := checkStore(cfg)
+	if err != nil {
 		return r, err
 	}
 	pair, err := diskCert(cfg)
@@ -188,7 +189,7 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	if cfg.IdentityHeaders && cfg.UpstreamCommand == nil {
 		r.Checks = append(r.Checks, identityHeadersResult(ctx, cfg.UpstreamURL.Hostname(), o.Resolve))
 	}
-	for _, w := range append(parts.warnings, redundantStrips(cfg)...) {
+	for _, w := range append(append(parts.warnings, storeWarnings...), redundantStrips(cfg)...) {
 		r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "configuration", Status: doctor.Warn, Message: w.Message, Fix: warningFix(w)})
 	}
 	target := doctor.Target{Resource: cfg.PublicURL, Issuer: cfg.Issuer(), HostsSetting: config.Setting{Name: "allowed-hosts"}.Env()}

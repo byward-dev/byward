@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/doctor"
 )
 
 // check is one scripted CheckRestore answer.
@@ -103,6 +106,53 @@ func TestCheckOfflineChecksThePostgreSQLDSNWithoutConnecting(t *testing.T) {
 			}
 			if !found {
 				t.Fatalf("warnings %+v, want the replica keys reminder", warnings)
+			}
+		})
+	}
+}
+
+// Doctor checks the store as check --offline does: with the PostgreSQL store it applies the
+// verify-full rule and gives the replica keys reminder as a configuration warning, and never
+// checks the SQLite paths it does not use; with SQLite there is no reminder.
+func TestDoctorChecksTheConfiguredStore(t *testing.T) {
+	// A data directory under a regular file: the default SQLite state directory in it cannot be
+	// created, so a doctor that checked the SQLite paths would stop there.
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unusable := "BYWARD_DATA_DIR=" + filepath.Join(file, "data")
+	for _, tc := range []struct {
+		name     string
+		env      []string
+		inErr    string
+		reminder bool
+	}{
+		{"a verify-full DSN brings the replica reminder", append(postgresEnv(t, "host=127.0.0.1 port=1 user=byward sslmode=verify-full", "http://u/mcp"), unusable), "", true},
+		{"a require DSN stops doctor naming the setting", append(postgresEnv(t, "host=127.0.0.1 port=1 user=byward sslmode=require", "http://u/mcp"), unusable), "BYWARD_STORE_POSTGRES_DSN_FILE: postgres store: the DSN must use sslmode=verify-full", false},
+		{"SQLite has no replica reminder", append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp"), "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, _, err := config.Load(nil, tc.env, os.ReadFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rep, err := Doctor(context.Background(), cfg, DoctorOptions{IdP: &http.Client{Transport: refuse{}}, Proxy: &http.Client{Transport: refuse{}}})
+			if tc.inErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.inErr) || len(rep.Checks) != 0 {
+					t.Fatalf("err %v, checks %v; want %q before any check", err, rep.Checks, tc.inErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, c := range rep.Checks {
+				found = found || (c.Name == "configuration" && c.Status == doctor.Warn && c.Message == replicaKeys.Message && c.Fix == warningFix(replicaKeys))
+			}
+			if found != tc.reminder {
+				t.Fatalf("replica keys reminder present = %v, want %v; checks %+v", found, tc.reminder, rep.Checks)
 			}
 		})
 	}
