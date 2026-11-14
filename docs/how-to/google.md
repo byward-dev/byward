@@ -5,6 +5,8 @@ general OIDC guide, with every setting, is [oidc.md](oidc.md).
 
 > Verified on 2026-11-13 with the byward v0.2.0-rc.1 code: sign-in, refresh, revoke, and the email-domain
 > gate (allowed and refused). The Workspace domain gate (`BYWARD_GATE_HOSTED_DOMAINS`) was not tested.
+> Use the image `ghcr.io/byward-dev/byward:v0.2.0-rc.1` or a later release: `latest` is still v0.1.1,
+> which has no OIDC IdPs.
 
 ## 1. The OAuth client
 
@@ -57,5 +59,7 @@ Google has no roles or groups claims for this; use the domain gates.
 ## 5. Check it
 
 `byward check --offline`, then `byward doctor`: "discovery at https://accounts.google.com matches the
-configured issuer". doctor does not yet check the client secret; a wrong one shows at the first sign-in
-as an IdP alert.
+configured issuer", and "client credential": Google accepted the client ID and the secret. A wrong
+secret fails, with the setting to fix. (The client credential check is on `main`; the doctor in
+v0.2.0-rc.1 does not have it, and a wrong secret shows at the first sign-in as an IdP alert.) Then sign in from an MCP client
+([oidc.md](oidc.md#5-check-it)).

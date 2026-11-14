@@ -6,7 +6,8 @@ Step by step: a Keycloak realm and client for byward, roles and groups for the
 
 > Verified on 2026-11-13 with Keycloak 26.8.2 and the byward v0.2.0-rc.1 image, over https with a
 > private CA and without `--dev`: sign-in, the role and group gates, refresh, revoke, and both a client
-> secret and `private_key_jwt`.
+> secret and `private_key_jwt`. Use that image, `ghcr.io/byward-dev/byward:v0.2.0-rc.1`, or a later
+> release: `latest` is still v0.1.1, which has no OIDC IdPs.
 
 ## 1. The realm and the client
 
@@ -85,7 +86,8 @@ public IdPs and upstreams keep working. Details, Kubernetes and the pitfalls are
 
 - `byward check --offline`, then `byward doctor`: "discovery … matches the configured issuer", and
   "client credential": Keycloak accepted the client ID and the secret or key. A wrong secret fails
-  with `unauthorized_client`, a wrong key with `invalid_client`, each with the setting to fix.
+  with `unauthorized_client`, a wrong key with `invalid_client`, each with the setting to fix. (The
+  client credential check is on `main`, not in v0.2.0-rc.1.)
 - Sign in from an MCP client. A user without the role or group gets "You don't have access to this
   server." and the audit has `access_denied` with `reason` `role` or `group`.
 - Refresh: Keycloak returns an ID token on refresh, which byward needs to recheck the gate. A client gets

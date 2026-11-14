@@ -4,7 +4,7 @@ This guide puts an HTTP MCP server behind byward, with users signing in through 
 Microsoft Entra tenant and Claude Code as the MCP client. It takes four steps:
 
 1. [Register the Entra app](#1-register-the-entra-app) (Azure CLI)
-2. [Create a sealing key](#2-create-a-sealing-key)
+2. [Create the keys](#2-create-the-keys)
 3. [Run byward](#3-run-byward)
 4. [Connect Claude Code](#4-connect-claude-code)
 
@@ -19,7 +19,10 @@ Background: [ADR-0012](../adr/0012-entra-specifics.md) (Entra), [ADR-0008](../ad
 **You need:**
 
 - a public HTTPS host for the proxy, called `mcp.example.com` below; the MCP endpoint is
-  `https://mcp.example.com/mcp`;
+  `https://mcp.example.com/mcp`. TLS can end at a reverse proxy, a load balancer or a tunnel in
+  front of byward, or at byward itself with your certificate ([TLS](tls.md), on `main` only so far);
+- the container image `ghcr.io/byward-dev/byward:v0.2.0-rc.1` or a later release, or the `byward`
+  binary of that release. The `latest` tag is still v0.1.1 until v0.2.0 is final;
 - the Azure CLI (`az`), signed in to your tenant (`az login --tenant <tenant-id>`) as a user who may
   create app registrations. Granting admin consent (optional, step 1.5) needs an administrator. In a
   checkout of this repository, `mise exec -- az` runs the pinned version;
@@ -29,13 +32,15 @@ Background: [ADR-0012](../adr/0012-entra-specifics.md) (Entra), [ADR-0008](../ad
   Streamable HTTP, both protocol eras, no authentication of its own) in a pinned Node container:
 
   ```sh
-  docker run --rm -p 127.0.0.1:3001:3001 \
+  docker network create byward
+  docker run --rm --network byward --name upstream -p 127.0.0.1:3001:3001 \
     node:24.22.1-slim@sha256:be8204d4bd327363357f532187b752ff62759c31bedf98e9e18fc08c9cbd605c \
     npx -y @modelcontextprotocol/server-everything@2.0.0 streamableHttp
   ```
 
-  Its endpoint is `http://127.0.0.1:3001/mcp`. It refuses browser requests with a non-localhost
-  `Origin`; the proxy never forwards `Origin`, so that does not get in the way.
+  Its endpoint is `http://upstream:3001/mcp` for byward in a container on the `byward` network, and
+  `http://127.0.0.1:3001/mcp` for the `byward` binary on the same host. It refuses browser requests
+  with a non-localhost `Origin`; the proxy never forwards `Origin`, so that does not get in the way.
 
 ## 1. Register the Entra app
 
@@ -155,9 +160,9 @@ appear in `az ad app permission list-grants --id "$APP_ID"`.
 ([ADR-0010](../adr/0010-consent-screen.md)) and then signs in at Entra. Whether Entra adds a consent
 screen of its own depends on the tenant's user-consent settings: in the project's real-tenant test,
 these login scopes produced no Entra consent screen (ADR-0012), but a tenant that restricts user
-consent can stop users with an approval request or AADSTS65001. A second run with Claude Code
-(2026-11-06) confirmed it: no Entra consent screen, only the proxy's. Admin consent is recommended in any
-case, and later On-Behalf-Of features need it (ADR-0012 §12).
+consent can stop users with an approval request or AADSTS65001; a run with Claude Code on 2026-11-06
+showed the proxy's consent page only. Admin consent is recommended in any case, and
+[On-Behalf-Of](downstream-apis.md) needs it for the downstream API's permissions (ADR-0012 §12).
 
 ### 1.6 Optional: allow only assigned users
 
@@ -197,7 +202,7 @@ Five settings ([ADR-0020](../adr/0020-configuration.md) §8); everything else ha
 | Setting | Value |
 |---|---|
 | `BYWARD_PUBLIC_URL` | `https://mcp.example.com/mcp`: the URL users enter, behind your TLS terminator |
-| `BYWARD_UPSTREAM_URL` | your HTTP MCP server, e.g. `http://127.0.0.1:3001/mcp` for the reference server |
+| `BYWARD_UPSTREAM_URL` | your HTTP MCP server, e.g. `http://upstream:3001/mcp` for the reference server from the container below, `http://127.0.0.1:3001/mcp` from the binary |
 | `BYWARD_ENTRA_TENANT` | `$TENANT_ID` from step 1.1 |
 | `BYWARD_ENTRA_CLIENT_ID` | `$APP_ID` from step 1.1 |
 | `BYWARD_ENTRA_CLIENT_SECRET_FILE` | the `entra-client-secret` file from step 1.4 |
@@ -217,26 +222,26 @@ With the container image. It runs as uid 65532 by default; `--user` makes it run
 write the data directory you created:
 
 ```sh
-docker run --rm -p 8080:8080 --user "$(id -u):$(id -g)" \
+docker run --rm --network byward -p 8080:8080 --user "$(id -u):$(id -g)" \
   -v "$PWD/byward-data:/var/lib/byward" \
   -v "$PWD/entra-client-secret:/run/secrets/entra-client-secret:ro" \
   -e BYWARD_PUBLIC_URL=https://mcp.example.com/mcp \
-  -e BYWARD_UPSTREAM_URL=http://upstream.internal:3001/mcp \
+  -e BYWARD_UPSTREAM_URL=http://upstream:3001/mcp \
   -e BYWARD_ENTRA_TENANT="$TENANT_ID" \
   -e BYWARD_ENTRA_CLIENT_ID="$APP_ID" \
   -e BYWARD_ENTRA_CLIENT_SECRET_FILE=/run/secrets/entra-client-secret \
   -e BYWARD_LISTEN=0.0.0.0:8080 \
-  ghcr.io/byward-dev/byward:latest
+  ghcr.io/byward-dev/byward:v0.2.0-rc.1
 ```
 
 Or with the binary: export the same five settings plus `BYWARD_DATA_DIR="$PWD/byward-data"` and run
 `byward`. A missing or empty key directory stops startup with a message naming the path and the
 setting that moves it. The clients file is optional while CIMD or DCR is on, as it is by default;
 a `BYWARD_STATIC_CLIENTS_FILE` you set must exist. The startup log says which client sources are
-active, for example `msg="client sources" static_clients=0 cimd=true dcr=true`. `BYWARD_UPSTREAM_URL` must be reachable from where
-byward runs (from inside the container, `127.0.0.1` is the container itself). Put your TLS
+active, for example `msg="client sources" static_clients=0 cimd=true dcr=true`.
+`BYWARD_UPSTREAM_URL` must be reachable from where byward runs (from inside the container, `127.0.0.1` is the container itself). Put your TLS
 terminator (reverse proxy or load balancer) in front of `:8080` so that `https://mcp.example.com`
-reaches it. All settings: [settings reference](../reference/settings.md).
+reaches it, or have byward serve TLS itself ([TLS](tls.md)). All settings: [settings reference](../reference/settings.md).
 
 To check the setup: `byward check --offline` with the same settings validates them, the key and the
 clients file, if there is one, without network access. Once the proxy runs, `byward doctor` fetches its discovery
@@ -307,6 +312,14 @@ port on loopback.
 
 Source: Claude Code MCP documentation, "Use pre-configured OAuth credentials" and "Use a fixed OAuth
 callback port" (<https://code.claude.com/docs/en/mcp>).
+
+## Next steps
+
+- Work through the [hardening checklist](harden-a-deployment.md) before real users sign in.
+- Restrict who may sign in with the [access gate](access-gate.md) (app roles, groups, tenants).
+- Back up the state directory: [state and backups](state.md).
+- Use a certificate instead of the client secret: [Entra certificate](entra-certificate.md).
+- Let the MCP server call Microsoft Graph or another API as the user: [downstream APIs](downstream-apis.md).
 
 ## Troubleshooting
 
