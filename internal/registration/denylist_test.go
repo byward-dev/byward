@@ -132,7 +132,7 @@ func TestACIMDClientReturningToADeniedHostIsRefused(t *testing.T) {
 // A CIMD client is denied once any one of its registered redirect URIs returns to a denied host
 // (#338), as the broker sees it: a client from the registry, checked with Denied(). A DCR client
 // shares the check; the broker's refresh tests cover both kinds.
-func TestAClientIsDeniedByAnyOfItsRedirectHosts(t *testing.T) {
+func TestACIMDClientIsDeniedByAnyOfItsRedirectHosts(t *testing.T) {
 	redirects := []string{"https://app.example/cb", "https://second.example/cb"}
 	for name, tc := range map[string]struct {
 		entries []string
