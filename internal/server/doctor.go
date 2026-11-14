@@ -83,8 +83,8 @@ func offlineHop(cfg *config.Config) []Warning {
 }
 
 // checkStore checks the configured store without opening it: the PostgreSQL DSN as Open would
-// parse it, with what several replicas need, or the SQLite paths with the settings named, as
-// openStore names them.
+// parse it, with what several replicas need, or the SQLite paths. Its errors name the settings,
+// as openStore's do.
 func checkStore(cfg *config.Config) ([]Warning, error) {
 	if cfg.StorePostgresDSN == "" {
 		if err := sqlite.CheckPaths(sqlite.Options{Dir: cfg.StoreDir, CounterFile: cfg.StoreCounterFile}); err != nil {
