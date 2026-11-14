@@ -3,8 +3,10 @@ package oidc
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -141,39 +143,45 @@ func TestDoctorReportsAClientCheckItCouldNotMake(t *testing.T) {
 		status  doctor.Status
 		message string
 		fix     string
+		fixEnd  string // what the fix ends with: the token endpoint, never the issuer
 	}{
-		{"a public client", func(e *env) { e.p.cfg.ClientAuth = nil }, doctor.Skip, "public client", ""},
-		{"discovery fails", func(e *env) { e.p.fetch.Client = &http.Client{Transport: refused{}} }, doctor.Skip, "discovery failed", ""},
+		{"a public client", func(e *env) { e.p.cfg.ClientAuth = nil }, doctor.Skip, "public client", "", ""},
+		{"discovery fails", func(e *env) { e.p.fetch.Client = &http.Client{Transport: refused{}} }, doctor.Skip, "discovery failed", "", ""},
 		{"a credential the proxy cannot make", func(e *env) { e.p.cfg.ClientAuth = idp.AssertionFile(t.TempDir() + "/missing") }, doctor.Fail,
-			"cannot make its credential", "check BYWARD_OIDC_CLIENT_SECRET_FILE"},
+			"cannot make its credential", "check BYWARD_OIDC_CLIENT_SECRET_FILE", ""},
 		{"the token endpoint is unreachable", func(e *env) { e.ready(t); e.p.fetch.Client = &http.Client{Transport: refused{}} }, doctor.Fail,
-			"did not answer", "check that the proxy's host reaches http://"},
-		{"an answer cut off mid-body", func(e *env) { e.ready(t); e.p.fetch.Client = &http.Client{Transport: cutOff{}} }, doctor.Fail,
-			"did not answer", "check that the proxy's host reaches http://"},
+			"did not answer in full", "check that the proxy's host reaches http://", "/token and gets its whole answer"},
+		{"an answer cut off mid-body", func(e *env) { e.ready(t); e.p.fetch.Client = &http.Client{Transport: cutOff{io.ErrUnexpectedEOF}} }, doctor.Fail,
+			"did not answer in full", "check that the proxy's host reaches http://", "/token and gets its whole answer"},
+		{"an answer that times out mid-body", func(e *env) {
+			e.ready(t)
+			e.p.fetch.Client = &http.Client{Transport: cutOff{&net.OpError{Op: "read", Net: "tcp", Err: os.ErrDeadlineExceeded}}}
+		}, doctor.Fail, "did not answer in full", "check that the proxy's host reaches http://", "/token and gets its whole answer"},
 		{"an answer that is not JSON", func(e *env) {
 			e.ready(t)
 			e.p.fetch.Client = &http.Client{Transport: answering{status: 404, body: "<html>not here</html>"}}
 		}, doctor.Fail,
-			"gave no OAuth answer", "/token: it must be the IdP's token endpoint"},
+			"gave no OAuth answer", "it must be the IdP's token endpoint", "/token: it must be the IdP's token endpoint"},
 		{"a failure without an error code", func(e *env) {
 			e.ready(t)
 			e.p.fetch.Client = &http.Client{Transport: answering{status: 503, body: "{}"}}
 		}, doctor.Fail,
-			"gave no OAuth answer", "/token: it must be the IdP's token endpoint"},
+			"gave no OAuth answer", "it must be the IdP's token endpoint", "/token: it must be the IdP's token endpoint"},
 		{"a success without tokens", func(e *env) { e.ready(t); e.p.fetch.Client = &http.Client{Transport: emptySuccess{}} }, doctor.Fail,
-			"gave no OAuth answer: idp: fatal: token endpoint returned a success without tokens", "/token: it must be the IdP's token endpoint"},
+			"gave no OAuth answer: idp: fatal: token endpoint returned a success without tokens", "it must be the IdP's token endpoint",
+			"/token: it must be the IdP's token endpoint"},
 		{"tokens for a made-up code", func(e *env) {
 			e.ready(t)
 			e.p.fetch.Client = &http.Client{Transport: answering{status: 200, body: `{"access_token":"at","token_type":"Bearer","expires_in":3600}`}}
-		}, doctor.Warn, "issued tokens for a made-up", "must refuse unknown codes"},
+		}, doctor.Warn, "issued tokens for a made-up", "must refuse unknown codes", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t, Config{})
 			tc.setup(e)
 			r := e.p.DiagnoseClient(context.Background(), secretDiagnosis)
 			wantResult(t, r, tc.status, tc.message, tc.fix)
-			if strings.Contains(tc.fix, "reaches") && !strings.HasSuffix(r.Fix, "/token") {
-				t.Fatalf("fix %q; want it to name the token endpoint, not the issuer", r.Fix)
+			if !strings.HasSuffix(r.Fix, tc.fixEnd) {
+				t.Fatalf("fix %q; want it to end with %q", r.Fix, tc.fixEnd)
 			}
 		})
 	}
@@ -221,12 +229,12 @@ func (a answering) RoundTrip(r *http.Request) (*http.Response, error) {
 	return res, nil
 }
 
-// cutOff answers with headers, then a body that breaks off.
-type cutOff struct{}
+// cutOff answers with headers, then a body whose read fails with err.
+type cutOff struct{ err error }
 
-func (cutOff) RoundTrip(r *http.Request) (*http.Response, error) {
+func (c cutOff) RoundTrip(r *http.Request) (*http.Response, error) {
 	res := jsonResponse(r, "")
-	res.StatusCode, res.Body = http.StatusBadRequest, io.NopCloser(io.MultiReader(strings.NewReader(`{"error":"inv`), errReader{io.ErrUnexpectedEOF}))
+	res.StatusCode, res.Body = http.StatusBadRequest, io.NopCloser(io.MultiReader(strings.NewReader(`{"error":"inv`), errReader(c)))
 	return res, nil
 }
 
