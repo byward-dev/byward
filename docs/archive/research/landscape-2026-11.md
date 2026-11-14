@@ -1,6 +1,6 @@
 # Landscape detail — MCP auth spec, IdPs, proxies, clients (2026-11-05)
 
-Full research brief behind `docs/research.md`. *[unverified]* = no primary source found;
+Full research brief behind `docs/archive/research.md`. *[unverified]* = no primary source found;
 *[secondary]* = third-party only (Zuplo, blogs, forums). Versions via `gh` on the date above.
 
 ## A. MCP authorization spec
@@ -108,7 +108,7 @@ Older reports (AADSTS901002, "use `.default` instead of `resource`") conflict wi
   https://docs.descope.com/agentic-identity-hub/core-components/mcp-servers ,
   https://stytch.com/docs/connected-apps/oauth-learn-more/client-types
 
-## C. Products — details beyond `docs/research.md`
+## C. Products — details beyond `docs/archive/research.md`
 
 | Product | Notes |
 |---|---|

@@ -8,7 +8,7 @@ first-class Microsoft Entra ID support. Single Go binary. Scope and non-goals: A
 - Domain words are defined in `CONTEXT.md`. Use them exactly — especially **IdP** vs
   **upstream** (upstream is always the MCP server, never the IdP).
 - Decisions live in `docs/adr/`. Read the relevant ADR before changing a design.
-- Work items live in GitHub Issues (`gh issue view <n>`); `docs/features.md` is the index.
+- Work items live in GitHub Issues (`gh issue view <n>`). The docs index is `docs/README.md`.
 - When grilling a feature, walk `docs/quality-lenses.md`.
 
 ## Commands

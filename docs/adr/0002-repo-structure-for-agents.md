@@ -18,6 +18,8 @@ names.
    when an area has local rules — as `CLAUDE.md`, which loads on read/write/edit.
 2. **Planning:** decisions in `docs/adr/`; work items in GitHub Issues with milestones;
    `docs/features.md` is an index only.
+   _Amended 2026-11-14:_ the v0.1 features are all decided; `docs/features.md` moved to
+   `docs/archive/` and is no longer updated. GitHub Issues are the only backlog.
 3. **Binary only:** all code in `internal/`, per https://go.dev/doc/modules/layout ("Server
    projects … keep the Go packages implementing the server's logic in the `internal`
    directory"). Packages may be promoted to a public API later without breaking users.

@@ -8,7 +8,7 @@
 MCP servers commonly hand-roll OAuth in
 front of Entra ID, with different designs and different gaps (no consent step, no protected
 resource metadata, tokens without expiry, single-replica state). Research (see
-`docs/research.md`) found no maintained single-binary Go proxy that combines an MCP-compliant
+`docs/archive/research.md`) found no maintained single-binary Go proxy that combines an MCP-compliant
 authorization-server facade (DCR + CIMD + consent), Entra adaptation, stdio bridging, and
 support for both the 2025-11-25 and 2026-07-28 spec revisions.
 
