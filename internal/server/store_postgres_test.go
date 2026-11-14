@@ -123,14 +123,14 @@ func TestDoctorChecksTheConfiguredStore(t *testing.T) {
 	}
 	unusableDataDir := "BYWARD_DATA_DIR=" + filepath.Join(regularFile, "data")
 	for _, tc := range []struct {
-		name     string
-		env      []string
-		inErr    string
-		reminder bool
+		name      string
+		env       []string
+		inErr     string
+		reminders int
 	}{
-		{"a verify-full DSN brings the replica reminder", append(postgresEnv(t, "host=127.0.0.1 port=1 user=byward sslmode=verify-full", "http://u/mcp"), unusableDataDir), "", true},
-		{"a require DSN stops doctor naming the setting", append(postgresEnv(t, "host=127.0.0.1 port=1 user=byward sslmode=require", "http://u/mcp"), unusableDataDir), "BYWARD_STORE_POSTGRES_DSN_FILE: postgres store: the DSN must use sslmode=verify-full", false},
-		{"SQLite has no replica reminder", append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp"), "", false},
+		{"a verify-full DSN brings the replica reminder", append(postgresEnv(t, "host=127.0.0.1 port=1 user=byward sslmode=verify-full", "http://u/mcp"), unusableDataDir), "", 1},
+		{"a require DSN stops doctor naming the setting", append(postgresEnv(t, "host=127.0.0.1 port=1 user=byward sslmode=require", "http://u/mcp"), unusableDataDir), "BYWARD_STORE_POSTGRES_DSN_FILE: postgres store: the DSN must use sslmode=verify-full", 0},
+		{"SQLite has no replica reminder", append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp"), "", 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, _, err := config.Load(nil, tc.env, os.ReadFile)
@@ -153,8 +153,8 @@ func TestDoctorChecksTheConfiguredStore(t *testing.T) {
 					reminders++
 				}
 			}
-			if want := map[bool]int{true: 1}[tc.reminder]; reminders != want {
-				t.Fatalf("%d replica keys reminders, want %d; checks %+v", reminders, want, rep.Checks)
+			if reminders != tc.reminders {
+				t.Fatalf("%d replica keys reminders, want %d; checks %+v", reminders, tc.reminders, rep.Checks)
 			}
 		})
 	}

@@ -83,10 +83,14 @@ func offlineHop(cfg *config.Config) []Warning {
 }
 
 // checkStore checks the configured store without opening it: the PostgreSQL DSN as Open would
-// parse it, with what several replicas need, or the SQLite paths.
+// parse it, with what several replicas need, or the SQLite paths with the settings named, as
+// openStore names them.
 func checkStore(cfg *config.Config) ([]Warning, error) {
 	if cfg.StorePostgresDSN == "" {
-		return nil, checkSQLitePaths(cfg)
+		if err := sqlite.CheckPaths(sqlite.Options{Dir: cfg.StoreDir, CounterFile: cfg.StoreCounterFile}); err != nil {
+			return nil, fmt.Errorf("BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: %w (see docs/how-to/state.md)", err)
+		}
+		return nil, nil
 	}
 	if err := postgres.CheckDSN(cfg.StorePostgresDSN, cfg.Dev); err != nil {
 		return nil, fmt.Errorf("BYWARD_STORE_POSTGRES_DSN_FILE: %w (see docs/how-to/postgres.md)", err)
@@ -99,14 +103,6 @@ func checkStore(cfg *config.Config) ([]Warning, error) {
 var replicaKeys = Warning{Setting: "BYWARD_STORE_POSTGRES_DSN_FILE",
 	Message: "the PostgreSQL store serves several replicas, and keys never live in the store: a token sealed or an assertion signed by one replica is refused by another without the same keys; the per-address rate limits apply per replica",
 	Fix:     "give every replica the same BYWARD_KEYS_DIR and BYWARD_ASSERTION_KEYS_DIR contents (docs/how-to/postgres.md)"}
-
-// checkSQLitePaths is sqlite.CheckPaths with the settings named, as openStore names them.
-func checkSQLitePaths(cfg *config.Config) error {
-	if err := sqlite.CheckPaths(sqlite.Options{Dir: cfg.StoreDir, CounterFile: cfg.StoreCounterFile}); err != nil {
-		return fmt.Errorf("BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: %w (see docs/how-to/state.md)", err)
-	}
-	return nil
-}
 
 // DoctorOptions are the HTTP clients doctor uses; nil means the default for each. Tests point
 // them at fakes.
