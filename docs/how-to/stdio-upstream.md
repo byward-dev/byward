@@ -184,8 +184,8 @@ USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/byward", "--", "mcp-server-time"]
 ```
 
-`<version>` is the byward release you run, such as `v0.2.0-rc.1`: a stdio upstream needs v0.1.0 or
-later, and the On-Behalf-Of token socket (section 2) v0.2.0-rc.1 or later. Pin both images by
+`<version>` is the byward release you run, such as `v0.2.0`: a stdio upstream needs v0.1.0 or
+later, and the On-Behalf-Of token socket (section 2) v0.2.0 or later. Pin both images by
 digest in production. The repository's tested example is
 [`docs/examples/stdio-node/Dockerfile`](../examples/stdio-node/Dockerfile).
 

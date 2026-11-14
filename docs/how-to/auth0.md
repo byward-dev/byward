@@ -9,7 +9,7 @@ itself are in [run byward](run-byward.md).
 > domain gate (allowed and refused), refresh, revoke, and a client secret. The role gate through
 > `BYWARD_OIDC_ROLES_CLAIM` was verified on 2026-11-14 with the code on `main`: a user with the role
 > admitted, one without refused, and the role still there after a refresh. `private_key_jwt` was not
-> tested. Use the image `ghcr.io/byward-dev/byward:v0.2.0-rc.1` or a later release.
+> tested. Use the image `ghcr.io/byward-dev/byward:v0.2.0` or a later release.
 
 ## 1. The application
 
@@ -66,7 +66,7 @@ BYWARD_IDP=auth0
 BYWARD_OIDC_ISSUER=https://<tenant>.auth0.com/
 BYWARD_OIDC_CLIENT_ID=<client id>
 BYWARD_OIDC_CLIENT_SECRET_FILE=/run/secrets/auth0-client-secret
-# on `main`, not in v0.2.0-rc.1:
+# on `main`, not in v0.2.0:
 BYWARD_OIDC_ROLES_CLAIM=https://byward.example.com/roles
 BYWARD_GATE_ROLES=byward.user
 ```
@@ -77,7 +77,7 @@ BYWARD_GATE_ROLES=byward.user
   (`https://<tenant>.<region>.auth0.com/`).
 - The `auth0` preset asks for `openid profile email offline_access`; add others with
   `BYWARD_OIDC_SCOPES`.
-- `BYWARD_OIDC_ROLES_CLAIM` is on `main`, not in v0.2.0-rc.1. With v0.2.0-rc.1, gate by email domain
+- `BYWARD_OIDC_ROLES_CLAIM` is on `main`, not in v0.2.0. With v0.2.0, gate by email domain
   (section 4).
 
 ## 4. Who may sign in
@@ -104,7 +104,7 @@ byward signs an RSA key with PS256 by default and an EC key with ES256, so:
 - Use an RSA key of 2048 to 4096 bits, not an EC key.
 - Register its public key (PEM) on the application with the algorithm byward signs with: **PS256**,
   or Auth0's default **RS256** if you set `BYWARD_OIDC_CLIENT_KEY_ALG=RS256` (on `main`, not in
-  v0.2.0-rc.1).
+  v0.2.0).
 - Replace the secret with `BYWARD_OIDC_CLIENT_KEY_FILE` and `BYWARD_OIDC_CLIENT_KEY_ID` (the `kid`
   Auth0 generates for the credential).
 
@@ -112,7 +112,7 @@ byward signs an RSA key with PS256 by default and an EC key with ES256, so:
 
 - `byward check --offline`, then `byward doctor`: "discovery … matches the configured issuer". On
   `main`, doctor also checks that Auth0 accepts the client ID and the secret; the doctor in
-  v0.2.0-rc.1 does not, and a wrong secret shows only at the first sign-in.
+  v0.2.0 does not, and a wrong secret shows only at the first sign-in.
 - Sign in from an MCP client ([run byward](run-byward.md#6-connect-a-client)): byward's consent page,
   then Auth0's login page. The user's `sub` looks like `auth0|…`.
 - Refresh: byward gives a refresh token to every client that registered the `refresh_token` grant, whether or not it asks for `offline_access` ([ADR-0006](../adr/0006-token-model.md), amended for #287).

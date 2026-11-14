@@ -1,7 +1,7 @@
 # Security posture
 
 For security reviewers. What byward guarantees, what it does not, and where each claim is
-enforced and tested. This page describes `main` as of 2026-11-14: the v0.2 line (v0.2.0-rc.1 is
+enforced and tested. This page describes `main` as of 2026-11-14: the v0.2 line (v0.2.0 is
 the latest release) plus the PostgreSQL store, which is not released yet. Items marked
 **planned** are not built yet. Terms follow [CONTEXT.md](../CONTEXT.md). To deploy it, see
 [Harden a deployment](how-to/harden-a-deployment.md).

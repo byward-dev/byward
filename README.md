@@ -10,12 +10,11 @@ OpenID Connect IdP, with guides for [Okta](docs/how-to/okta.md), [Keycloak](docs
 [Google](docs/how-to/google.md), and Auth0 and the rest through the [generic OIDC guide](docs/how-to/oidc.md).
 One Go binary, configured by environment variables.
 
-> **Latest release: [v0.1.1](https://github.com/byward-dev/byward/releases/tag/v0.1.1)** (Entra
-> only). **Pre-release: [v0.2.0-rc.1](https://github.com/byward-dev/byward/releases/tag/v0.2.0-rc.1)**
-> adds the OIDC IdPs, On-Behalf-Of and app-only tokens; use it for those. The `latest` image tag
-> stays on v0.1.1 until v0.2.0 is final, since pre-releases never move it. These docs follow
-> `main`, which is ahead of both: TLS at the proxy and the PostgreSQL store are in no release yet.
-> The docs for a release are at its tag, for example [v0.1.1](https://github.com/byward-dev/byward/tree/v0.1.1/docs).
+> **Latest release: [v0.2.0](https://github.com/byward-dev/byward/releases/tag/v0.2.0)**, the
+> `latest` image tag: Microsoft Entra ID and the OIDC IdPs, On-Behalf-Of and app-only tokens. These
+> docs follow `main`, which is ahead of it: TLS at the proxy and the PostgreSQL store are in no
+> release yet ("on `main`"). The docs for a release are at its tag, for example
+> [v0.2.0](https://github.com/byward-dev/byward/tree/v0.2.0/docs).
 >
 > byward is pre-1.0 and has not had an independent security audit. Read the
 > [security posture](docs/security-posture.md) before deploying it.
@@ -82,7 +81,7 @@ docker run --rm -p 8080:8080 --user "$(id -u):$(id -g)" \
   -e BYWARD_ENTRA_CLIENT_ID="$APP_ID" \
   -e BYWARD_ENTRA_CLIENT_SECRET_FILE=/run/secrets/entra-client-secret \
   -e BYWARD_LISTEN=0.0.0.0:8080 \
-  ghcr.io/byward-dev/byward:v0.2.0-rc.1
+  ghcr.io/byward-dev/byward:v0.2.0
 ```
 
 `upstream` is your MCP server's address as the container sees it (the quickstart runs both on one

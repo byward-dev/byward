@@ -5,8 +5,8 @@ authorization code flow with PKCE and validates the ID token per OIDC Core §3.1
 quirks of Google, Okta, Auth0 and Keycloak. Background: [ADR-0011](../adr/0011-idp-adapters.md). One
 IdP per proxy. The data directory, the keys and starting the proxy are in [run byward](run-byward.md).
 
-> Needs byward v0.2.0-rc.1 or later: the image `ghcr.io/byward-dev/byward:v0.2.0-rc.1`. The `latest`
-> tag is still v0.1.1, which has no OIDC IdPs and refuses `BYWARD_IDP` as an unknown setting.
+> Needs byward v0.2.0 or later: the image `ghcr.io/byward-dev/byward:v0.2.0`. v0.1.1 and earlier have
+> no OIDC IdPs.
 > `BYWARD_OIDC_ROLES_CLAIM` and `BYWARD_OIDC_GROUPS_CLAIM` are on `main` only, in no release yet.
 
 ## 1. Register the proxy at the IdP
@@ -34,7 +34,7 @@ refused) with:
 | `BYWARD_OIDC_CLIENT_ID` | — | The application's client ID. |
 | `BYWARD_OIDC_CLIENT_SECRET_FILE` | — | A file holding the client secret. |
 | `BYWARD_OIDC_CLIENT_KEY_FILE` | — | Instead of a secret: a PEM private key (RSA or EC P-256) for `private_key_jwt`. byward signs with `BYWARD_OIDC_CLIENT_KEY_ALG` (by default PS256 for an RSA key, ES256 for an EC key), so the IdP's client must accept that algorithm. |
-| `BYWARD_OIDC_CLIENT_KEY_ALG` | PS256 for an RSA key, ES256 for an EC key | The client assertion's signing algorithm: `PS256` or `RS256` for an RSA key, `ES256` for an EC P-256 key. An algorithm the key cannot sign with refuses to start. Okta refuses PS256: use `RS256` there, or an EC key; with `BYWARD_IDP=okta` and an RSA key on PS256, startup and `check` warn, and `doctor`'s client credential check reports it unless the IdP accepted the key: a refused key fails, its fix leading with the algorithm (on `main`, not in v0.2.0-rc.1). Auth0's discovery listed RS256, RS384 and PS256 but not ES256 (measured 2026-11-13). `byward check` and `doctor` name the algorithm in use. |
+| `BYWARD_OIDC_CLIENT_KEY_ALG` | PS256 for an RSA key, ES256 for an EC key | The client assertion's signing algorithm: `PS256` or `RS256` for an RSA key, `ES256` for an EC P-256 key. An algorithm the key cannot sign with refuses to start. Okta refuses PS256: use `RS256` there, or an EC key; with `BYWARD_IDP=okta` and an RSA key on PS256, startup and `check` warn, and `doctor`'s client credential check reports it unless the IdP accepted the key: a refused key fails, its fix leading with the algorithm (on `main`, not in v0.2.0). Auth0's discovery listed RS256, RS384 and PS256 but not ES256 (measured 2026-11-13). `byward check` and `doctor` name the algorithm in use. |
 | `BYWARD_OIDC_CLIENT_KEY_ID` | — | The key ID (`kid`) the IdP registered for that key. |
 | `BYWARD_OIDC_SCOPES` | — | Extra scopes, comma-separated, besides `openid` and the preset's. |
 | `BYWARD_OIDC_SUBJECT_CLAIM` | `sub` | The claim that identifies a user. A claim users can change (`email`, `preferred_username`, `upn`, `name`) logs a warning at every start: someone could take over another user's grants by changing it. |
@@ -106,7 +106,7 @@ An OIDC IdP usually lets anyone with an account sign in, so an empty
 
 `byward check --offline` validates the settings; `byward doctor` fetches discovery and checks that
 its issuer matches, then that the IdP accepts the client ID and the secret or key (it sends a made-up
-authorization code, so no user is needed; this check is on `main`, not in v0.2.0-rc.1). The
+authorization code, so no user is needed; this check is on `main`, not in v0.2.0). The
 consent page says "You'll sign in with `<name>` next".
 
 Then connect an MCP client, sign in and call a tool. For Claude Code, as in the
