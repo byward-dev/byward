@@ -92,7 +92,7 @@ func checkNoAuth(c *Config, v *Values) []error {
 		errs = append(errs, errorf("%s: BYWARD_LISTEN must be a loopback address such as 127.0.0.1:8080 (non-loopback only inside a container with its own network, not --network host)", env))
 	}
 	for _, h := range c.AllowedHosts {
-		if hn, _, err := net.SplitHostPort(h); !isLoopback(strings.Trim(h, "[]")) && (err != nil || !isLoopback(hn)) {
+		if !isLoopback(Hostname(h)) {
 			errs = append(errs, errorf("%s: BYWARD_ALLOWED_HOSTS may only list loopback hosts, got %q", env, h))
 		}
 	}
