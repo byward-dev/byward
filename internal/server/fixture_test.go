@@ -23,6 +23,7 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/metrics"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/testutil/assertionkey"
 	"github.com/byward-dev/byward/internal/token"
@@ -201,4 +202,22 @@ func TestMain(m *testing.M) {
 		_ = os.RemoveAll(fakeStdioDir)
 	}
 	os.Exit(code)
+}
+
+// readDoc is the text of a file under docs/, by its path relative to docs/.
+func readDoc(t *testing.T, rel string) string {
+	t.Helper()
+	b, err := os.ReadFile("../../docs/" + rel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// scrapeMetrics is what /metrics shows of m.
+func scrapeMetrics(t *testing.T, m *metrics.Metrics) string {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	m.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	return rec.Body.String()
 }

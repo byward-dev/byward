@@ -72,7 +72,8 @@ func WithStripped(names ...string) Option {
 }
 
 // WithRefusalObserver calls observe with the status of every upstream refusal (401 or 403,
-// ADR-0025), once per refused request, however the refusal is answered.
+// ADR-0025), once per refused request, however the refusal is answered. observe runs on the
+// request's goroutine, from concurrent requests: it must be safe for concurrent use and not block.
 func WithRefusalObserver(observe func(status int)) Option {
 	return func(o *options) { o.refusalObservers = append(o.refusalObservers, observe) }
 }

@@ -47,11 +47,10 @@ func TestAnUpstreamRefusalIsCountedWithoutAuthentication(t *testing.T) {
 	if answer.Code != http.StatusOK || !strings.Contains(answer.Body.String(), "rejected the proxy's credentials") {
 		t.Fatalf("got %d %s, want the readable refusal", answer.Code, answer.Body)
 	}
-	rec := httptest.NewRecorder()
-	m.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	scrape := scrapeMetrics(t, m)
 	for _, want := range []string{`byward_upstream_refusals_total{status="401"} 1`, `byward_upstream_refusals_total{status="403"} 0`} {
-		if !strings.Contains(rec.Body.String(), want) {
-			t.Errorf("metrics lack %s:\n%s", want, rec.Body)
+		if !strings.Contains(scrape, want) {
+			t.Errorf("metrics lack %s:\n%s", want, scrape)
 		}
 	}
 }
