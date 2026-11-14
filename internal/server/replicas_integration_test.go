@@ -41,13 +41,14 @@ func TestIntegrationTwoReplicasShareThePostgreSQLStore(t *testing.T) {
 		// The startup log names the database and its TLS, never the DSN's password nor the SQLite paths
 		// it does not use.
 		for _, r := range []*replica{a, b} {
-			if logs := r.logs.String(); !strings.Contains(logs, "tls=verify-full") || strings.Contains(logs, srv.Password) ||
+			logs := r.logs.String()
+			if !strings.Contains(logs, "tls=verify-full") || strings.Contains(logs, srv.Password) ||
 				strings.Contains(logs, "BYWARD_STORE_DIR") || strings.Contains(logs, "BYWARD_STORE_COUNTER_FILE") {
 				t.Fatalf("startup log without the database's TLS, or with the password or a SQLite path:\n%s", logs)
 			}
-			// The keys never live in the store, which startup says as check and doctor do.
-			if n := strings.Count(r.logs.String(), replicaKeys.Message); n != 1 {
-				t.Fatalf("startup logged the replica-keys warning %d times, want once:\n%s", n, r.logs.String())
+			// Startup warns, as check and doctor do, that the keys never live in the store.
+			if n := strings.Count(logs, replicaKeys.Message); n != 1 || !strings.Contains(logs, replicaKeys.Fix) {
+				t.Fatalf("startup logged the replica-keys warning %d times, want once with its fix:\n%s", n, logs)
 			}
 		}
 		return cfg, db, a, b

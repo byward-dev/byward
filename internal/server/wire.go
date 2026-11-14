@@ -61,11 +61,11 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	auditStartup(o.Audit, ring, static.IDs())
 	log.Info("client sources", "static_clients", len(static.IDs()), "cimd", cfg.CIMD, "dcr", cfg.DCR)
 	// What check and doctor report too, the PostgreSQL store's need for the same keys included.
-	findings, err := configFindings(cfg, parts)
+	cfgWarnings, err := configWarnings(cfg, parts)
 	if err != nil {
 		return nil, err
 	}
-	for _, w := range findings {
+	for _, w := range cfgWarnings {
 		w.log(log)
 	}
 	log.Info("IdP", "idp", ip.name, "reason", "register this redirect URI with the IdP app: "+ip.redirect)

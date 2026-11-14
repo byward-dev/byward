@@ -144,12 +144,11 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 		w.log(log)
 	}
 	cancel()
-	if a == nil { // with authentication, buildAuth has logged them among the configuration's findings
-		for _, w := range redundantStrips(cfg) {
+	if a == nil {
+		warnings, _ := configWarnings(cfg, nil) // with authentication, buildAuth logs them
+		for _, w := range warnings {
 			w.log(log)
 		}
-	}
-	if a == nil {
 		h = Handler(cfg, log, up.handler, resource.NoTokens{}, nil, nil, o)
 	} else {
 		register := a.register

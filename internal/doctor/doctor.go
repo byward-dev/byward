@@ -91,8 +91,8 @@ func (r Report) WriteJSON(w io.Writer) error {
 	return enc.Encode(r)
 }
 
-// expiryWarning is how early an expiring credential or certificate is a warning (ADR-0012 §10).
-const expiryWarning = 30 * 24 * time.Hour
+// warnBefore is how early an expiring credential or certificate is a warning (ADR-0012 §10).
+const warnBefore = 30 * 24 * time.Hour
 
 // Expiry is an end date as an expiry check sees it at a moment: Fail once it has passed, Warn within
 // 30 days of it, else Pass. Date is the end date in UTC, and In says how soon it is ("in 3 days")
@@ -108,7 +108,7 @@ func ExpiryAt(notAfter, now time.Time) Expiry {
 	switch left := notAfter.Sub(now); {
 	case left <= 0:
 		e.Status = Fail
-	case left <= expiryWarning:
+	case left <= warnBefore:
 		e.Status = Warn
 	}
 	return e

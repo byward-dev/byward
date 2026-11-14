@@ -59,7 +59,8 @@ func CheckOfflineReport(cfg *config.Config) (OfflineReport, error) {
 			return OfflineReport{}, err
 		}
 		tlsWarnings := servingCertWarnings(cfg, pair, time.Now())
-		return OfflineReport{Warnings: append(append(append([]Warning{{Message: "authentication is off (BYWARD_INSECURE_NO_AUTH); only the settings, the secret files, the TLS certificate and the upstream were checked"}}, tlsWarnings...), offlineHop(cfg)...), redundantStrips(cfg)...)}, nil
+		cfgWarnings, _ := configWarnings(cfg, nil)
+		return OfflineReport{Warnings: append(append(append([]Warning{{Message: "authentication is off (BYWARD_INSECURE_NO_AUTH); only the settings, the secret files, the TLS certificate and the upstream were checked"}}, tlsWarnings...), offlineHop(cfg)...), cfgWarnings...)}, nil
 	}
 	parts, err := loadAuthParts(cfg, nil)
 	if err != nil {
@@ -68,7 +69,7 @@ func CheckOfflineReport(cfg *config.Config) (OfflineReport, error) {
 	if err := parts.idp.refusal(time.Now()); err != nil {
 		return OfflineReport{}, err
 	}
-	findings, err := configFindings(cfg, parts)
+	cfgWarnings, err := configWarnings(cfg, parts)
 	if err != nil {
 		return OfflineReport{}, err
 	}
@@ -77,7 +78,7 @@ func CheckOfflineReport(cfg *config.Config) (OfflineReport, error) {
 		return OfflineReport{}, err
 	}
 	tlsWarnings := servingCertWarnings(cfg, pair, time.Now())
-	return OfflineReport{Warnings: append(append(append(findings, parts.idp.startWarningsAt(time.Now())...), tlsWarnings...), offlineHop(cfg)...),
+	return OfflineReport{Warnings: append(append(append(cfgWarnings, parts.idp.startWarningsAt(time.Now())...), tlsWarnings...), offlineHop(cfg)...),
 		ClientCredentialDesc: parts.idp.credentialDesc}, nil
 }
 
@@ -166,7 +167,8 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 			return r, err
 		}
 		r.Checks = append(r.Checks, servingCertChecks(cfg, pair, o.Now())...)
-		for _, w := range redundantStrips(cfg) {
+		cfgWarnings, _ := configWarnings(cfg, nil)
+		for _, w := range cfgWarnings {
 			r.Checks = append(r.Checks, doctor.CheckConfiguration.Result(doctor.Warn, w.Message, warningFix(w)))
 		}
 		r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy), doctor.TrustStore(trustSettings(), os.ReadFile, doctor.CertDirEntries))
@@ -178,7 +180,7 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	if err != nil {
 		return r, err
 	}
-	findings, err := configFindings(cfg, parts)
+	cfgWarnings, err := configWarnings(cfg, parts)
 	if err != nil {
 		return r, err
 	}
@@ -192,7 +194,7 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	if cfg.IdentityHeaders && cfg.UpstreamCommand == nil {
 		r.Checks = append(r.Checks, identityHeadersResult(ctx, cfg.UpstreamURL.Hostname(), o.Resolve))
 	}
-	for _, w := range findings {
+	for _, w := range cfgWarnings {
 		r.Checks = append(r.Checks, doctor.CheckConfiguration.Result(doctor.Warn, w.Message, warningFix(w)))
 	}
 	target := doctor.Target{Resource: cfg.PublicURL, Issuer: cfg.Issuer(), HostsSetting: config.Setting{Name: "allowed-hosts"}.Env()}

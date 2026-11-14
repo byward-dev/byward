@@ -66,10 +66,13 @@ func warningOf(r doctor.Result, setting string) (w Warning, ok bool) {
 	return Warning{Message: r.Message, Setting: setting, Fix: r.Fix}, true
 }
 
-// configFindings are the configuration's warnings that startup logs, check prints and doctor
-// reports alike: those of the settings, the store and the upstream's strip list. The error is the
-// store's configuration error.
-func configFindings(cfg *config.Config, parts *authParts) ([]Warning, error) {
+// configWarnings are the configuration's warnings that startup logs, check prints and doctor
+// reports alike: those of the settings and the store (with authentication, parts not nil) and of the
+// upstream's strip list. The error is the store's configuration error.
+func configWarnings(cfg *config.Config, parts *authParts) ([]Warning, error) {
+	if parts == nil {
+		return redundantStrips(cfg), nil
+	}
 	store, err := checkStore(cfg)
 	if err != nil {
 		return nil, err
