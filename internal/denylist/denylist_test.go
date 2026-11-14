@@ -233,8 +233,8 @@ func TestEachNewOperatorRevocationIsReportedOnce(t *testing.T) {
 	})
 }
 
-// A second revocation of the same user is its own: reported too, even with the same cut-off.
-func TestARepeatedRevocationOfTheSameUserIsReportedAgain(t *testing.T) {
+// A second revocation of the same subject is its own: reported too, even with the same cut-off.
+func TestARepeatedRevocationOfTheSameSubjectIsReportedAgain(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		src := &source{}
 		l := New(src, nil)

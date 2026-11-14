@@ -13,6 +13,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/store"
 )
 
 // grantRevokedRecords is every grant_revoked audit record in a JSON log, each as its fields
@@ -81,8 +82,8 @@ func TestAnOperatorRevocationReachesTheRunningProxysAuditStream(t *testing.T) {
 				if !maps.Equal(want[0], got[0]) {
 					t.Fatalf("the proxy recorded %v, want the command's record %v", got[0], want[0])
 				}
-				// Stated on their own: the record never carries a token or a grant ID (invariant 2), even
-				// if the command's record ever did.
+				// Stated on their own, even if the command's record ever changed: the record never carries
+				// a token (invariant 2), and has no grant ID because an operator revocation names no grant.
 				for field, v := range got[0] {
 					s, _ := v.(string)
 					for id, tok := range tokens {
@@ -95,6 +96,31 @@ func TestAnOperatorRevocationReachesTheRunningProxysAuditStream(t *testing.T) {
 					t.Fatalf("the proxy's record carries grant_id %v", id)
 				}
 			})
+		})
+	}
+}
+
+// Only an operator revocation maps to an audit record, each under its own reason: a grant
+// revocation, or one naming nobody, maps to none, so a new kind is never recorded as another.
+func TestOnlyAnOperatorRevocationMapsToAnAuditRecord(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		r      store.Revocation
+		ok     bool
+		reason string
+		user   string
+	}{
+		{"a grant of a user", store.Revocation{GrantID: "g1", Subject: "tid:alice"}, false, "", ""},
+		{"a grant under revoke-all", store.Revocation{GrantID: "g1", All: true}, false, "", ""},
+		{"nobody", store.Revocation{}, false, "", ""},
+		{"every user", store.Revocation{All: true}, true, reasonRevokeAll, ""},
+		{"one user", store.Revocation{Subject: "tid:alice"}, true, reasonRevokeUser, "tid:alice"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, ok := operatorRevocationEvent(tc.r)
+			if ok != tc.ok || e.Reason != tc.reason || e.UserKey != tc.user || (ok && e.Name != audit.GrantRevoked) {
+				t.Fatalf("got %+v, %v; want ok %v, reason %q, user %q", e, ok, tc.ok, tc.reason, tc.user)
+			}
 		})
 	}
 }
