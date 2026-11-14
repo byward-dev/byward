@@ -36,7 +36,9 @@ returns to instead.
 The answer (201) echoes every registered field, with the values the proxy substituted, as RFC
 7591 §3.2.1 requires.
 
-**Cursor:** use a current Cursor. 3.29.9 is verified; 2.6.22 fails, because it registers only
+### Cursor
+
+Use a current Cursor. 3.29.9 is verified; 2.6.22 fails, because it registers only
 custom-scheme callbacks. The first release that works is not known.
 - **Registration:** the desktop app registers `cursor://anysphere.cursor-mcp/oauth/callback`
   together with `https://www.cursor.com/agents/mcp/oauth/callback`. The `cursor://` URI is

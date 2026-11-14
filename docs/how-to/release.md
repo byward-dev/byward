@@ -4,13 +4,14 @@ Written so that any maintainer can cut a release without the original author. De
 [ADR-0019](../adr/0019-packaging.md) (packaging) and [ADR-0023](../adr/0023-project-governance.md)
 (versioning, support).
 
-> **Status:** the pipeline exists (`mise run release:snapshot`, `.github/workflows/release.yml`); the
-> first real release is #67. Update this page in the same pull request that changes the pipeline.
+Update this page in the same pull request that changes the pipeline (`.goreleaser.yaml`,
+`.github/workflows/release.yml`).
 
 ## What a release contains
 
-- Container image `ghcr.io/byward-dev/byward`, multi-arch (linux/amd64, linux/arm64), tags `vX.Y.Z`
-  and `latest`, cosign keyless signature by digest, buildx provenance and SBOM.
+- Container image `ghcr.io/byward-dev/byward`, multi-arch (linux/amd64, linux/arm64), tag `vX.Y.Z`,
+  and `latest` for a final release only: a pre-release (`-rc.N`) never moves `latest`
+  (`.goreleaser.yaml`). Cosign keyless signature by digest, buildx provenance and SBOM.
 - goreleaser archives: linux amd64/arm64 (supported), darwin amd64/arm64 (development only), with
   checksums, syft SBOM, cosign bundles and build provenance.
 - GitHub release notes, which are the changelog.
@@ -32,8 +33,9 @@ Security fixes go into the latest minor only (SECURITY.md).
 
 1. **`main` is green.** The latest `check` and `test:integration` runs on `main` pass, and the
    scheduled lanes (real Entra, fuzz, reproducible-build rebuild) have no open failures.
-2. **Build locally without publishing:** `mise run release:snapshot`. Check that the archives and
-   the image build, and run the image once (`--version`).
+2. **Build and smoke-test locally without publishing:** `mise run release:smoke` (on Linux). It
+   builds the snapshot and checks the archives, SBOMs and checksums, the image contract, and that
+   the image serves.
 3. **Manual client checklist** (ADR-0024, lane "manual"): the full sign-in and a tool call through the
    proxy with Claude Code, Claude.ai, VS Code, Cursor and ChatGPT, plus OBO if it is enabled. Record
    the client versions in the release notes.
@@ -67,6 +69,16 @@ Security fixes go into the latest minor only (SECURITY.md).
    the checksums, `gh attestation verify` for the image and an archive).
 8. **Publish the draft release** with the notes from step 4. For a security release, publish the
    advisory at the same time (SECURITY.md).
+
+## Release candidates and patches
+
+- **A release candidate** is a tag `vX.Y.Z-rc.N`, cut with the same steps. Its image gets only that
+  tag; `latest` stays on the last final release. Check that the GitHub release is marked as a
+  pre-release before you publish the draft.
+- **A patch to an earlier minor** is cut from that minor's `release/X.Y` branch (for example
+  `release/0.1`): open a pull request against the branch with the fix taken from `main`, wait for
+  `ci` on the branch's head (step 5), and tag there. Only the latest minor gets security fixes
+  (SECURITY.md).
 
 ## If something goes wrong
 

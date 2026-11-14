@@ -1,7 +1,7 @@
 # How to harden a deployment
 
 A checklist for operators putting byward in front of an MCP server for real users. It
-describes `main` as of 2026-11-06. Items marked **planned** do not exist yet. The reasoning behind
+describes `main`; items about a feature in no release yet say "(on `main`)". The reasoning behind
 each item is in the [security posture](../security-posture.md). Every setting is listed in the
 [settings reference](../reference/settings.md).
 
@@ -27,16 +27,13 @@ supply ([Serve TLS at the proxy](tls.md), [ADR-0019](../adr/0019-packaging.md) ย
       container. The default `127.0.0.1:8080` is reachable only from the same host or pod.
 - [ ] Set `BYWARD_TRUSTED_PROXIES` to the ingress's addresses or CIDRs, e.g. `10.0.0.0/8`.
       Without it, every request seems to come from the ingress. All users then share one rate-limit
-      budget, and logs and audit records show the ingress address.
-      - With the setting, the client address is the rightmost `X-Forwarded-For` entry that is not a
-        trusted proxy, so a client cannot spoof it by adding entries on the left.
-      - `Forwarded` (RFC 7239) is not read.
-      - List only proxies you control. A trusted CIDR that includes client networks lets those
-        clients choose their own address.
+      budget, and logs and audit records show the ingress address. List only proxies you control: a
+      trusted CIDR that includes client networks lets those clients choose their own address. How
+      the address is read from `X-Forwarded-For`: [rate limits](../reference/rate-limits.md#client-address).
 - [ ] For an IdP or upstream with a private CA, add only that CA with `SSL_CERT_FILE`. Don't
-      replace the image's `/etc/ssl/certs` or set `SSL_CERT_DIR` without it: that drops the
-      public roots. Every outbound TLS connection trusts the CA you add
-      ([trust a private CA](private-ca.md)).
+      mount over the image's `/etc/ssl/certs`, or set `SSL_CERT_DIR` without it beside
+      `SSL_CERT_FILE`: either drops the public roots. Every outbound TLS connection trusts the CA
+      you add ([trust a private CA](private-ca.md)).
 
 ## Host and Origin allowlists
 
@@ -76,14 +73,8 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) ยง1โ
 - [ ] Keep keys out of backups of the state directory, and out of images and repositories. The
       store never holds them ([ADR-0007](../adr/0007-state-and-storage.md) ยง5).
 - [ ] Rotate by adding a file whose name sorts last (date names), restarting, and removing the old
-      file later ([sealing keys](sealing-keys.md#rotating)).
-      - A removed key no longer opens anything it sealed. Besides access tokens, that includes the
-        IdP tokens kept in each grant.
-      - Every refresh re-seals them with the current key, and an unused refresh token expires after
-        14 days. So remove the old key 15 days after the restart that made the new one seal (on
-        several replicas, the last one's restart; not after adding the file), and no user has to
-        sign in again. Removed earlier, a grant not refreshed since is revoked at its next refresh
-        (`internal/broker/refresh.go`).
+      file 15 days after that restart, so no user has to sign in again
+      ([sealing keys](sealing-keys.md#rotating) explains the 15 days and the several-replica case).
 - [ ] Know the operator revocation commands. They read the same `BYWARD_*` environment as the
       proxy (run them in its container or with its settings), write to the same store while it
       runs, and every proxy refuses the tokens within seconds (the deny list resyncs every 5 s):
@@ -96,7 +87,7 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) ยง1โ
       - `byward revoke-all --yes` does the same for every user (incident response).
       - Each writes a `grant_revoked` audit record with the reason `operator revoke-user` or
         `operator revoke-all`. A user who still passes the access gate can sign in again; to keep
-        them out, also block them at Entra or in the gate.
+        them out, also block them at the IdP or in the gate.
       - If the sealing keys may be compromised, also replace every key file and restart: that
         invalidates every token at once, whatever the store holds.
 - [ ] Give secrets only as files:
@@ -163,8 +154,28 @@ Background: [ADR-0012](../adr/0012-entra-specifics.md), [ADR-0015](../adr/0015-a
       reads the certificate's end date itself, warns from 30 days before, and refuses to start
       once it has expired.
 - [ ] Gate changes take effect after a restart, at each user's next sign-in or refresh: at most one
-      access-token lifetime (1 h) later. To cut someone off sooner, remove their assignment in Entra.
-      Their next refresh then fails too.
+      access-token lifetime (1 h) later. To cut someone off sooner, use `byward revoke-user` (above);
+      to keep them out, remove their assignment in Entra, after which their next refresh fails too.
+
+## An OIDC IdP
+
+For Google, Okta, Keycloak, Auth0 or another OpenID Connect IdP ([OIDC how-to](oidc.md)).
+
+- [ ] **A confidential client**, with the redirect URI `https://<public host>/callback/<idp>`
+      (`<idp>` is the `BYWARD_IDP` value; the proxy logs the exact URI at startup).
+- [ ] **The credential as a file:** `BYWARD_OIDC_CLIENT_SECRET_FILE`, or a key for `private_key_jwt`
+      in `BYWARD_OIDC_CLIENT_KEY_FILE` with `BYWARD_OIDC_CLIENT_KEY_ID`. The secret-file rules above
+      apply to both.
+- [ ] **A gate.** With an empty gate anyone with an account at the IdP could sign in, so the proxy
+      refuses to start unless `BYWARD_GATE_ALLOW_EMPTY=true`. Gate on roles, groups, a verified email
+      domain or a Google Workspace domain ([access gate](access-gate.md)).
+- [ ] **A stable subject.** Keep `BYWARD_OIDC_SUBJECT_CLAIM` at `sub`. A claim users can change
+      (`email`, `preferred_username`, `upn`, `name`) logs a warning at every start: someone could take
+      over another user's grants by changing it.
+- [ ] **An ID token on refresh.** The gate is checked again at every refresh, so the IdP must return
+      an ID token then; a refresh without one ends the grant ([OIDC how-to](oidc.md)).
+- [ ] Run `byward doctor`: it checks discovery and the issuer, and (on `main`) that the IdP accepts
+      the client ID and the secret or key.
 
 ## The internal listener
 
@@ -183,18 +194,23 @@ plus the names in `BYWARD_ALLOWED_HOSTS`; any other name gets `421`, which stops
 
 ## State, backups and restore
 
-- [ ] **State lives in SQLite** under the data directory: `state/byward.db` (with its `-wal` and
-      `-shm` files), mode 0600 in a 0700 directory ([state](state.md)). Grants, refresh tokens and
-      revocations survive a restart; the revocation list is reloaded from the store before the
-      proxy serves.
-- [ ] Run **one replica**. SQLite is a single-node store; several replicas need PostgreSQL (v0.2).
+- [ ] **State lives in SQLite** by default, under the data directory: `state/byward.db` (with its
+      `-wal` and `-shm` files), mode 0600 in a 0700 directory ([state](state.md)). Grants, refresh
+      tokens and revocations survive a restart; the revocation list is reloaded from the store before
+      the proxy serves.
+- [ ] **One replica on SQLite.** For several, use the PostgreSQL store (on `main`,
+      [postgres](postgres.md)); a stdio upstream stays on one replica, and the proxy refuses to start
+      with a stdio upstream and PostgreSQL. With PostgreSQL:
+      - give the connection string as a file (`BYWARD_STORE_POSTGRES_DSN_FILE`, mode `0600`), with
+        `sslmode=verify-full`;
+      - give every replica the same sealing and assertion keys: they never live in the store;
+      - after restoring the database, run `byward store new-epoch --yes`
+        ([postgres](postgres.md#backup-and-restore)).
 - [ ] **Back up the state directory** (see [state](state.md)), and separately and securely the key
       directory, the static clients file with its secret and JWKS files, and your settings.
 - [ ] **Keep the restore counter outside the backup.** `store-writes` sits next to the key
-      directory, not inside `state/`. If an older copy of the store is restored, the proxy notices,
-      starts a new epoch, refuses refresh tokens issued before the restore (their users sign in
-      again), logs it and writes a `store_restored` audit record (ADR-0007 ยง9). A restore drill
-      on every PR (`mise run test:integration:go`) restores a snapshot and checks exactly this.
+      directory, not inside `state/`, so the proxy can notice a restored older store and refuse the
+      refresh tokens issued before it ([restore detection](state.md#restore-detection)).
 
 ## Logs and the audit stream
 
@@ -224,16 +240,8 @@ plus the names in `BYWARD_ALLOWED_HOSTS`; any other name gets `421`, which stops
 
 ## Rate limits
 
-The OAuth endpoints are rate-limited per client address, with IPv6 grouped by /64
-([rate limits](../reference/rate-limits.md)):
-
-| Endpoint | Default per minute |
-|---|---|
-| `/authorize` | 30 |
-| `/consent` | 60 |
-| `/callback/entra` | 30 |
-| `/token` | 60 |
-| `/revoke` | 30 |
+The OAuth endpoints, `/register` included, are rate-limited per client address, with IPv6 grouped
+by /64. The budgets per endpoint: [rate limits](../reference/rate-limits.md#budgets).
 
 - [ ] Set `BYWARD_TRUSTED_PROXIES` ([TLS and the reverse proxy](#tls-and-the-reverse-proxy)), or every user shares one budget.
 - [ ] Raise budgets for offices or VPNs behind one address with `BYWARD_OAUTH_RATE_LIMITS`,

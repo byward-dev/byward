@@ -252,6 +252,12 @@ func validate(v *Values, container bool) (*Config, error) {
 			errs = append(errs, errorf("BYWARD_ALLOWED_HOSTS: %v", err))
 			continue
 		}
+		// Brackets enclose an IPv6 address only, as a Host header does: the public listener could never
+		// match [name], [IPv4] or a zone, and the other readers would strip the brackets silently.
+		if strings.ContainsAny(h, "[]") && !bracketedIPv6(h) {
+			errs = append(errs, errorf("BYWARD_ALLOWED_HOSTS: %q is not a host[:port]; brackets may only enclose an IPv6 address, without a zone", h))
+			continue
+		}
 		c.AllowedHosts = append(c.AllowedHosts, strings.ToLower(h))
 	}
 	if c.LogFormat != "json" && c.LogFormat != "text" {

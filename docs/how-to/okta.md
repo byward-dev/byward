@@ -6,7 +6,9 @@ Step by step: an Okta app and authorization server for byward, groups for the
 
 > Verified on 2026-11-13 with the byward v0.2.0-rc.1 code and an Okta Integrator Free Plan org: sign-in,
 > the group gate (allowed and refused), refresh, revoke, a client secret, and `private_key_jwt` with an
-> EC key. An RSA key does not work yet (section 5).
+> EC key. An RSA key does not work yet (section 5). Use the image
+> `ghcr.io/byward-dev/byward:v0.2.0-rc.1` or a later release: `latest` is still v0.1.1, which has no
+> OIDC IdPs.
 
 ## 1. The app
 
@@ -61,7 +63,7 @@ Use the org's own domain in the issuer (`https://<org>.okta.com/...`), not the a
 
 **Use an EC P-256 key with Okta.** byward signs EC keys with ES256, which Okta accepts. It signs RSA
 keys with PS256, which Okta refuses ("The client_assertion JWT signature algorithm is invalid."); an
-option to sign with RS256 is tracked in #306.
+option to sign with RS256 is tracked in [#306](https://github.com/byward-dev/byward/issues/306).
 
 1. `openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out okta-client.pem`, readable only
    by the proxy's user.
@@ -78,5 +80,8 @@ A refused key shows up at the first sign-in as an IdP alert, `credential_rejecte
 
 ## 6. Check it
 
-`byward check --offline`, then `byward doctor`: "discovery … matches the configured issuer". doctor
-does not yet check the client secret or key; a wrong one shows at the first sign-in as an IdP alert.
+`byward check --offline`, then `byward doctor`: "discovery … matches the configured issuer", and
+"client credential": Okta accepted the client ID and the secret or key. A wrong one fails, with the
+setting to fix. (The client credential check is on `main`; the doctor in v0.2.0-rc.1 does not have
+it, and a wrong secret or key shows at the first sign-in as an IdP alert.) Then sign in from an MCP
+client ([oidc.md](oidc.md#5-check-it)).

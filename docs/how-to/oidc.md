@@ -5,6 +5,10 @@ authorization code flow with PKCE and validates the ID token per OIDC Core §3.1
 quirks of Google, Okta, Auth0 and Keycloak. Background: [ADR-0011](../adr/0011-idp-adapters.md). One
 IdP per proxy.
 
+> Needs byward v0.2.0-rc.1 or later: the image `ghcr.io/byward-dev/byward:v0.2.0-rc.1`. The `latest`
+> tag is still v0.1.1, which has no OIDC IdPs and refuses `BYWARD_IDP` as an unknown setting.
+> `BYWARD_OIDC_ROLES_CLAIM` and `BYWARD_OIDC_GROUPS_CLAIM` are on `main` only, in no release yet.
+
 ## 1. Register the proxy at the IdP
 
 Create a **confidential** web application (the proxy holds a secret or a key; a public client is
@@ -16,8 +20,9 @@ refused) with:
 - **Grant types:** authorization code and refresh token. The IdP must return an ID token when the
   proxy refreshes (OIDC Core §12.2 makes it optional): the [access gate](access-gate.md) is checked
   on fresh claims at every refresh, so a refresh without one ends the grant, and the log says "the IdP
-  returned no ID token on refresh". Entra and Keycloak return one (Keycloak is checked by the
-  integration test); for other IdPs check that the refresh response carries `id_token`.
+  returned no ID token on refresh". Entra, Keycloak, Google and Okta return one (Keycloak is checked
+  by the integration test; Google and Okta in the runs their guides record, 2026-11-13), and so did
+  Auth0 in a live run on 2026-11-14; for other IdPs check that the refresh response carries `id_token`.
 - **Scopes:** `openid`, plus what the preset asks for (below).
 
 ## 2. Configure the proxy
@@ -32,8 +37,8 @@ refused) with:
 | `BYWARD_OIDC_CLIENT_KEY_ID` | — | The key ID (`kid`) the IdP registered for that key. |
 | `BYWARD_OIDC_SCOPES` | — | Extra scopes, comma-separated, besides `openid` and the preset's. |
 | `BYWARD_OIDC_SUBJECT_CLAIM` | `sub` | The claim that identifies a user. A claim users can change (`email`, `preferred_username`, `upn`, `name`) logs a warning at every start: someone could take over another user's grants by changing it. |
-| `BYWARD_OIDC_ROLES_CLAIM` | `roles` | The ID token claim the access gate (`BYWARD_GATE_ROLES`) and the identity assertion read roles from, for every preset. Name another claim only when the IdP cannot send `roles`, such as Auth0's namespaced `https://<namespace>/roles` (§4). |
-| `BYWARD_OIDC_GROUPS_CLAIM` | `groups` | The same for groups (`BYWARD_GATE_GROUPS`). |
+| `BYWARD_OIDC_ROLES_CLAIM` | `roles` | On `main` only. The ID token claim the access gate (`BYWARD_GATE_ROLES`) and the identity assertion read roles from, for every preset. Name another claim only when the IdP cannot send `roles`, such as Auth0's namespaced `https://<namespace>/roles` (§4). |
+| `BYWARD_OIDC_GROUPS_CLAIM` | `groups` | On `main` only. The same for groups (`BYWARD_GATE_GROUPS`). |
 | `BYWARD_OIDC_NAME` | the preset's name, or the issuer's host | The IdP's name on the consent page ("You'll sign in with … next"), up to 80 characters. |
 
 Give exactly one of the secret and the key. `BYWARD_ENTRA_*` settings with an OIDC IdP, or
@@ -50,7 +55,7 @@ demand.
 | `BYWARD_IDP` | Issuer | Scopes asked | Notes |
 |---|---|---|---|
 | `google` | `https://accounts.google.com` | `profile email` | Refresh tokens come from `access_type=offline` with `prompt=consent` (see below). `email_verified` may be a string. Step by step: [google.md](google.md). |
-| `okta` | `https://<domain>/oauth2/<server>` | `profile email offline_access` | Only a custom authorization server issues tokens for the proxy; the org server (`https://<domain>`) is refused. With `private_key_jwt`, use an EC key (#306). Step by step: [okta.md](okta.md). |
+| `okta` | `https://<domain>/oauth2/<server>` | `profile email offline_access` | Only a custom authorization server issues tokens for the proxy; the org server (`https://<domain>`) is refused. With `private_key_jwt`, use an EC key ([#306](https://github.com/byward-dev/byward/issues/306)). Step by step: [okta.md](okta.md). |
 | `auth0` | `https://<tenant>.auth0.com/` | `profile email offline_access` | The issuer ends with a slash. Auth0 drops custom `roles` and `groups` claims: send roles under a namespaced claim and name it in `BYWARD_OIDC_ROLES_CLAIM` (§4). |
 | `keycloak` | `https://<host>/realms/<realm>` | `profile email` | Enable "Client authentication" on the client. Step by step: [keycloak.md](keycloak.md). |
 | `oidc` | any | `profile email offline_access` | No quirks. |
@@ -84,7 +89,8 @@ An OIDC IdP usually lets anyone with an account sign in, so an empty
   Keycloak puts realm roles under `realm_access.roles` by default; add a "User Realm Role" mapper
   with the token claim name `roles` (and a "Group Membership" mapper for `groups`) so the gate sees
   them. The integration test checks this against Keycloak 26.8.0
-  (`TestIntegrationKeycloakSignsAUserInAndRefreshes`).
+  (`TestIntegrationKeycloakSignsAUserInAndRefreshes`); the manual run in the [Keycloak guide](keycloak.md)
+  used 26.8.2.
 - **Auth0: roles under a namespaced claim.** Auth0 reserves the `roles` and `groups` claim names
   and does not add a custom claim with either name
   ([Create Custom Claims](https://auth0.com/docs/secure/tokens/json-web-tokens/create-custom-claims)).
@@ -121,4 +127,12 @@ An OIDC IdP usually lets anyone with an account sign in, so an empty
 
 `byward check --offline` validates the settings; `byward doctor` fetches discovery and checks that
 its issuer matches, then that the IdP accepts the client ID and the secret or key (it sends a made-up
-authorization code, so no user is needed). The consent page says "You'll sign in with `<name>` next".
+authorization code, so no user is needed; this check is on `main`, not in v0.2.0-rc.1). The
+consent page says "You'll sign in with `<name>` next".
+
+Then connect an MCP client, sign in and call a tool. For Claude Code, as in the
+[Entra quickstart](quickstart-entra.md#4-connect-claude-code):
+
+```sh
+claude mcp add --transport http my-mcp https://mcp.example.com/mcp
+```

@@ -44,5 +44,5 @@ Raise a budget with `BYWARD_OAUTH_RATE_LIMITS`, for example `authorize=120,callb
 - **Memory:** each endpoint tracks up to 100,000 addresses. Idle ones are dropped. When that many are active, new
   addresses share one bucket, so a flood from changing addresses becomes a global limit instead of using unbounded
   memory.
-- **Not limited yet:** failed client authentication per `client_id` at `/token`. It comes with dynamic client
-  registration.
+- **Not limited:** failed client authentication per `client_id` at `/token`. Only static confidential clients
+  have a secret to fail with; DCR clients get none.

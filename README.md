@@ -5,32 +5,41 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/byward-dev/byward/badge)](https://scorecard.dev/viewer/?uri=github.com/byward-dev/byward)
 
 **A sign-in gate for MCP servers.** byward puts any [MCP](https://modelcontextprotocol.io) server,
-HTTP or stdio, behind OAuth 2.1 and your identity provider, with first-class Microsoft Entra ID
-support. One Go binary, configured by environment variables.
+HTTP or stdio, behind OAuth 2.1 and your identity provider: Microsoft Entra ID first-class, and any
+OpenID Connect IdP, with guides for [Okta](docs/how-to/okta.md), [Keycloak](docs/how-to/keycloak.md),
+[Google](docs/how-to/google.md), and Auth0 and the rest through the [generic OIDC guide](docs/how-to/oidc.md).
+One Go binary, configured by environment variables.
 
-> **Latest release: [v0.1.1](https://github.com/byward-dev/byward/releases/tag/v0.1.1).** byward
-> is pre-1.0 and has not had an independent security audit. Read the
-> [security posture](docs/security-posture.md) before deploying it. `main` is ahead of the release;
-> the docs for v0.1.1 are [at its tag](https://github.com/byward-dev/byward/tree/v0.1.1/docs).
+> **Latest release: [v0.1.1](https://github.com/byward-dev/byward/releases/tag/v0.1.1)** (Entra
+> only). **Pre-release: [v0.2.0-rc.1](https://github.com/byward-dev/byward/releases/tag/v0.2.0-rc.1)**
+> adds the OIDC IdPs, On-Behalf-Of and app-only tokens; use it for those. The `latest` image tag
+> stays on v0.1.1 until v0.2.0 is final, since pre-releases never move it. These docs follow
+> `main`, which is ahead of both: TLS at the proxy and the PostgreSQL store are in no release yet.
+> The docs for a release are at its tag, for example [v0.1.1](https://github.com/byward-dev/byward/tree/v0.1.1/docs).
+>
+> byward is pre-1.0 and has not had an independent security audit. Read the
+> [security posture](docs/security-posture.md) before deploying it.
 
 ## How it works
 
 ```
-MCP client ──OAuth 2.1──▶ byward ──sign-in──▶ Entra ID
+MCP client ──OAuth 2.1──▶ byward ──sign-in──▶ your IdP (Entra ID, Okta, Keycloak, …)
  (Claude, ChatGPT,          │
   VS Code, Cursor…)         └──▶ MCP server (HTTP or stdio)
                                  never sees the client's or the IdP's token
 ```
 
 - **MCP clients sign in with standard OAuth 2.1.** byward is the authorization server: it signs the
-  user in at Entra, shows its own consent page, and issues short-lived tokens of its own.
+  user in at your IdP, shows its own consent page, and issues short-lived tokens of its own.
 - **Clients connect without manual setup**, through Client ID Metadata Documents (CIMD) or Dynamic
   Client Registration (DCR). Static clients cover anything else.
 - **The MCP server needs no auth code.** It never gets the client's token (no token passthrough).
-- **Access is gated** by Entra app roles and groups. Refresh tokens rotate with reuse detection, and
-  operators can revoke a user or everyone.
-- **Built to run:** SQLite state, rate limits on the OAuth endpoints, a structured audit stream,
-  Prometheus metrics, and `byward doctor` to check a deployment.
+- **Access is gated** by tenant, app roles and groups, a verified email domain or a Google Workspace
+  domain, as the IdP provides them ([access gate](docs/how-to/access-gate.md)). Refresh tokens rotate with reuse
+  detection, and operators can revoke a user or everyone.
+- **Built to run:** SQLite state for one replica, or PostgreSQL for several
+  ([postgres](docs/how-to/postgres.md), on `main`), rate limits on the OAuth endpoints, a structured
+  audit stream, Prometheus metrics, and `byward doctor` to check a deployment.
 
 ## Verified clients
 
@@ -49,23 +58,38 @@ The TypeScript, Python and Go MCP SDK clients and MCP Inspector run against bywa
 
 ## Try it
 
-The [Entra quickstart](docs/how-to/quickstart-entra.md) registers the app (or `byward init entra`
-prints the commands for you) and then runs byward in front of your MCP server:
+**Without an IdP, on your own machine:** `--insecure-no-auth` serves an MCP server with no sign-in
+at all, on loopback only, to see byward relay requests before you set up an IdP
+([ADR-0027](docs/adr/0027-insecure-no-auth.md)):
+
+```sh
+byward --insecure-no-auth --public-url http://127.0.0.1:8080/mcp --upstream-url http://127.0.0.1:3001/mcp
+```
+
+**With Entra:** the [Entra quickstart](docs/how-to/quickstart-entra.md) registers the app (or
+`byward init entra` prints the commands for you) and then runs byward in front of your MCP server.
+For another IdP, start with its guide ([Okta](docs/how-to/okta.md), [Keycloak](docs/how-to/keycloak.md),
+[Google](docs/how-to/google.md), [Auth0 or any OIDC IdP](docs/how-to/oidc.md)); the settings below
+then use `BYWARD_IDP` and `BYWARD_OIDC_*` instead of `BYWARD_ENTRA_*`.
 
 ```sh
 docker run --rm -p 8080:8080 --user "$(id -u):$(id -g)" \
   -v "$PWD/byward-data:/var/lib/byward" \
   -v "$PWD/entra-client-secret:/run/secrets/entra-client-secret:ro" \
   -e BYWARD_PUBLIC_URL=https://mcp.example.com/mcp \
-  -e BYWARD_UPSTREAM_URL=http://upstream.internal:3001/mcp \
+  -e BYWARD_UPSTREAM_URL=http://upstream:3001/mcp \
   -e BYWARD_ENTRA_TENANT="$TENANT_ID" \
   -e BYWARD_ENTRA_CLIENT_ID="$APP_ID" \
   -e BYWARD_ENTRA_CLIENT_SECRET_FILE=/run/secrets/entra-client-secret \
   -e BYWARD_LISTEN=0.0.0.0:8080 \
-  ghcr.io/byward-dev/byward:latest
+  ghcr.io/byward-dev/byward:v0.2.0-rc.1
 ```
 
-byward does not terminate TLS: put it behind your ingress or reverse proxy. Then work through the
+`upstream` is your MCP server's address as the container sees it (the quickstart runs both on one
+Docker network).
+
+TLS usually ends at your ingress or reverse proxy; byward can also serve it with your certificate
+([TLS](docs/how-to/tls.md), on `main`). Then work through the
 [hardening checklist](docs/how-to/harden-a-deployment.md).
 
 Images and archives are signed with cosign and carry build provenance; how to verify them:
@@ -75,7 +99,8 @@ Images and archives are signed with cosign and carry build provenance; how to ve
 
 - **How-to guides:** [stdio upstreams](docs/how-to/stdio-upstream.md),
   [access gate](docs/how-to/access-gate.md), [CIMD](docs/how-to/cimd.md), [DCR](docs/how-to/dcr.md),
-  [state and backups](docs/how-to/state.md), [all guides](docs/how-to/)
+  [state and backups](docs/how-to/state.md), [downstream APIs (On-Behalf-Of)](docs/how-to/downstream-apis.md),
+  [TLS](docs/how-to/tls.md), [all guides](docs/how-to/)
 - **Reference:** [settings](docs/reference/settings.md), [commands](docs/reference/commands.md),
   [observability](docs/reference/observability.md), [identity assertion](docs/reference/identity-assertion.md),
   [rate limits](docs/reference/rate-limits.md), [static clients](docs/reference/static-clients.md),

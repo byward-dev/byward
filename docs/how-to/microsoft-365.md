@@ -102,7 +102,7 @@ token.
 [ms-365-mcp-server](https://github.com/Softeria/ms-365-mcp-server) (MIT) is a ready-made Graph MCP
 server. Started with `--http`, it requires `Authorization: Bearer <token>` on every MCP request and
 uses that request-provided token for its Graph calls, which is exactly what byward sends with
-`BYWARD_OBO_HEADER=Authorization` (#205).
+`BYWARD_OBO_HEADER=Authorization` ([#205](https://github.com/byward-dev/byward/issues/205)).
 
 - Run it with `--read-only` for read access only, and narrow its tools with `--enabled-tools`.
 - Match `BYWARD_OBO_SCOPES` to what its enabled tools need: `--list-permissions` prints them.

@@ -102,6 +102,14 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"origin with path", "BYWARD_ALLOWED_ORIGINS=https://a.example/path", "BYWARD_ALLOWED_ORIGINS"},
 		{"host with path", "BYWARD_ALLOWED_HOSTS=a.example/x", "BYWARD_ALLOWED_HOSTS"},
 		{"host with space", "BYWARD_ALLOWED_HOSTS=a b", "BYWARD_ALLOWED_HOSTS"},
+		{"bracketed host name", "BYWARD_ALLOWED_HOSTS=[mcp.internal.example]", `BYWARD_ALLOWED_HOSTS: "[mcp.internal.example]" is not a host[:port]; brackets may only enclose an IPv6 address`},
+		{"bracketed IPv4 with a port", "BYWARD_ALLOWED_HOSTS=[127.0.0.1]:8443", `BYWARD_ALLOWED_HOSTS: "[127.0.0.1]:8443" is not a host[:port]`},
+		{"IPv6 with a zone", "BYWARD_ALLOWED_HOSTS=[fe80::1%eth0]:8443", `BYWARD_ALLOWED_HOSTS: "[fe80::1%eth0]:8443" is not a host[:port]`},
+		{"unclosed bracket", "BYWARD_ALLOWED_HOSTS=[::1", `BYWARD_ALLOWED_HOSTS: "[::1" is not a host[:port]`},
+		{"unopened bracket", "BYWARD_ALLOWED_HOSTS=::1]", `BYWARD_ALLOWED_HOSTS: "::1]" is not a host[:port]`},
+		{"bracket then an empty port", "BYWARD_ALLOWED_HOSTS=[::1]:", `BYWARD_ALLOWED_HOSTS: "[::1]:" is not a host[:port]`},
+		{"bracket then junk", "BYWARD_ALLOWED_HOSTS=[::1]x", `BYWARD_ALLOWED_HOSTS: "[::1]x" is not a host[:port]`},
+		{"bracket then a junk port", "BYWARD_ALLOWED_HOSTS=[::1]:80a", `BYWARD_ALLOWED_HOSTS: "[::1]:80a" is not a host[:port]`},
 		{"listen without port", "BYWARD_LISTEN=8080", "BYWARD_LISTEN"},
 		{"log format", "BYWARD_LOG_FORMAT=xml", "BYWARD_LOG_FORMAT"},
 		{"two scopes", "BYWARD_SCOPE=a b", "BYWARD_SCOPE"},
@@ -167,6 +175,15 @@ func TestDevAllowsLoopbackHTTPAndRecordsIt(t *testing.T) {
 	if got := strings.Join(c.Relaxations, "|"); !c.Dev || len(c.Relaxations) != 2 ||
 		!strings.Contains(got, "secret file permissions are not checked") || !strings.Contains(got, "http public URL on loopback") {
 		t.Fatalf("dev=%v relaxations=%v", c.Dev, c.Relaxations)
+	}
+}
+
+// Any IPv6 address may be listed in brackets, with or without a port: loopback or not, mapped or
+// not (#319).
+func TestAnIPv6AllowedHostIsAcceptedInBrackets(t *testing.T) {
+	c, err := load(t, nil, "BYWARD_ALLOWED_HOSTS=[2001:db8::1]:8443,[fe80::1],[::ffff:10.0.0.1],[::1]:8080")
+	if err != nil || len(c.AllowedHosts) != 4 {
+		t.Fatalf("err=%v hosts=%v", err, c.AllowedHosts)
 	}
 }
 
@@ -575,5 +592,25 @@ func TestDCRIsOnByDefaultAndTheDenylistTakesCommaSeparatedEntries(t *testing.T) 
 	}
 	if c, err = load(t, nil, "BYWARD_DCR=false"); err != nil || c.DCR {
 		t.Fatalf("DCR off: %v, %v", c.DCR, err)
+	}
+}
+
+// #319: one reduction of a BYWARD_ALLOWED_HOSTS entry or a Host header to a host name, for the
+// internal listener's Host check, the no-auth loopback check and the TLS certificate names.
+func TestAnAllowedHostEntryOrHostHeaderReducesToItsLowerCaseHostName(t *testing.T) {
+	for entry, want := range map[string]string{
+		"mcp.example.com":      "mcp.example.com",
+		"mcp.example.com:8443": "mcp.example.com",
+		"MCP.Example.COM:8443": "mcp.example.com",
+		"[::1]":                "::1",
+		"[::1]:8443":           "::1",
+		"::1":                  "::1",
+		"[FE80::1]:8443":       "fe80::1",
+		"127.0.0.1:8080":       "127.0.0.1",
+		"localhost":            "localhost",
+	} {
+		if got := Hostname(entry); got != want {
+			t.Errorf("Hostname(%q) = %q, want %q", entry, got, want)
+		}
 	}
 }
