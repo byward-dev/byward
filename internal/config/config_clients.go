@@ -36,8 +36,8 @@ func (c *Config) clientSources(v *Values) []error {
 		for i, h := range *s.dst {
 			if err := asciiHost(h); err != nil {
 				errs = append(errs, errorf("%s: %v", env, err))
-			} else if strings.ContainsAny(h, "/:*@ ") || !strings.Contains(h, ".") {
-				errs = append(errs, errorf("%s: %q is not a host name such as claude.ai (no scheme, port, path or wildcard)", env, h))
+			} else if !validHostName(h) || !strings.Contains(h, ".") { // #344
+				errs = append(errs, errorf("%s: %q is not a host name such as claude.ai (no scheme, port, path or wildcard): %s", env, h, hostNameRule))
 			}
 			(*s.dst)[i] = strings.ToLower(h)
 		}

@@ -93,6 +93,10 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"fragment", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp#f", "must not have a query or fragment"},
 		{"http public", "BYWARD_PUBLIC_URL=http://mcp.example.com/mcp", "must use https"},
 		{"http loopback without dev", "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "needs --dev"},
+		// #344: the public host joins the public Host allow-list, so it follows BYWARD_ALLOWED_HOSTS' name rule.
+		{"public host with a trailing dot", "BYWARD_PUBLIC_URL=https://mcp.example.com./mcp", `BYWARD_PUBLIC_URL: "mcp.example.com." is not a host name: only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
+		{"public host with a double dot", "BYWARD_PUBLIC_URL=https://a..b/mcp", `BYWARD_PUBLIC_URL: "a..b" is not a host name`},
+		{"public host with a wildcard", "BYWARD_PUBLIC_URL=https://a*b/mcp", `BYWARD_PUBLIC_URL: "a*b" is not a host name`},
 		// Browsers and MCP clients send IDN hosts in ASCII (xn--) form, so a Unicode host never matches.
 		{"unicode public host", "BYWARD_PUBLIC_URL=https://bücher.example/mcp", `BYWARD_PUBLIC_URL: the host "bücher.example" is not ASCII`},
 		{"escaped unicode public host", "BYWARD_PUBLIC_URL=https://b%C3%BCcher.example/mcp", `BYWARD_PUBLIC_URL: the host "bücher.example" is not ASCII`},
@@ -146,6 +150,11 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"cimd host with a scheme", "BYWARD_CIMD_TRUSTED_HOSTS=https://claude.ai", `BYWARD_CIMD_TRUSTED_HOSTS: "https://claude.ai" is not a host name`},
 		{"cimd host with a path", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai/oauth", `BYWARD_CIMD_TRUSTED_HOSTS: "claude.ai/oauth" is not a host name`},
 		{"cimd host with user info", "BYWARD_CIMD_ALLOWED_HOSTS=user@claude.example", `BYWARD_CIMD_ALLOWED_HOSTS: "user@claude.example" is not a host name`},
+		// #344: names no client ID can carry, refused as in BYWARD_ALLOWED_HOSTS.
+		{"cimd host with a query", "BYWARD_CIMD_ALLOWED_HOSTS=a?b.example", `BYWARD_CIMD_ALLOWED_HOSTS: "a?b.example" is not a host name such as claude.ai (no scheme, port, path or wildcard): only letters, digits and - . _ ~`},
+		{"cimd host with a fragment", "BYWARD_CIMD_TRUSTED_HOSTS=a#b.example", `BYWARD_CIMD_TRUSTED_HOSTS: "a#b.example" is not a host name`},
+		{"cimd host with a semicolon", "BYWARD_CIMD_ALLOWED_HOSTS=a;b.example", `BYWARD_CIMD_ALLOWED_HOSTS: "a;b.example" is not a host name`},
+		{"cimd host with a trailing dot", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai.", `BYWARD_CIMD_TRUSTED_HOSTS: "claude.ai." is not a host name such as claude.ai (no scheme, port, path or wildcard): only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
 		{"cimd host with a space", "BYWARD_CIMD_TRUSTED_HOSTS=claude .ai", `"claude .ai" is not a host name`},
 		{"cimd host with a port", "BYWARD_CIMD_ALLOWED_HOSTS=claude.ai:443", `BYWARD_CIMD_ALLOWED_HOSTS: "claude.ai:443" is not a host name`},
 		{"cimd wildcard host", "BYWARD_CIMD_TRUSTED_HOSTS=*.example.com", `"*.example.com" is not a host name`},
@@ -664,6 +673,18 @@ func TestAnAllowedHostNameRefusesEveryCharacterAHostNameCannotHave(t *testing.T)
 			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%q is not a host[:port]: a host name", entry)) {
 				t.Errorf("BYWARD_ALLOWED_HOSTS=%s: %v, want it refused as a host name", entry, err)
 			}
+		}
+	}
+}
+
+// #344: every host setting that follows the name rule still loads underscores, xn-- names and
+// mixed case (in lower case where the setting stores it so).
+func TestHostSettingsLoadUnderscoresIDNANamesAndMixedCase(t *testing.T) {
+	for _, host := range []string{"my_svc.example", "xn--bcher-kva.example", "Mixed-Case.Example"} {
+		c, err := load(t, nil, "BYWARD_PUBLIC_URL=https://"+host+"/mcp", "BYWARD_CIMD_TRUSTED_HOSTS="+host, "BYWARD_CIMD_ALLOWED_HOSTS="+host, "BYWARD_ALLOWED_HOSTS="+host)
+		lower := strings.ToLower(host)
+		if err != nil || c.CIMDTrustedHosts[0] != lower || c.CIMDAllowedHosts[0] != lower || c.AllowedHosts[0] != lower {
+			t.Errorf("%s: err=%v trusted=%v allowed=%v hosts=%v", host, err, c.CIMDTrustedHosts, c.CIMDAllowedHosts, c.AllowedHosts)
 		}
 	}
 }

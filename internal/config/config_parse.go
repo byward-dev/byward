@@ -51,6 +51,9 @@ func ParsePublicURL(raw string) (*url.URL, error) {
 	var errs []string
 	if err := asciiHost(u.Hostname()); err != nil {
 		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: %v", err))
+	} else if _, ipErr := netip.ParseAddr(u.Hostname()); ipErr != nil && !validHostName(u.Hostname()) {
+		// The host joins the public listener's Host allow-list, as BYWARD_ALLOWED_HOSTS entries do (#344).
+		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: %q is not a host name: %s", u.Hostname(), hostNameRule))
 	}
 	if u.Path == "" || strings.HasSuffix(u.Path, "/") {
 		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://%s/mcp", u.Host))
@@ -188,7 +191,7 @@ func normalizeAllowedHost(h string) (string, error) {
 			return "", invalid
 		}
 		if !validHostName(host) {
-			return "", fmt.Errorf("%q is not a host[:port]: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)", h)
+			return "", fmt.Errorf("%q is not a host[:port]: a host name has %s", h, hostNameRule)
 		}
 		port, hasPort = p, ok
 	}
@@ -207,9 +210,13 @@ func normalizeAllowedHost(h string) (string, error) {
 	return strings.ToLower(stored), nil
 }
 
-// validHostName reports whether host is a name an allowed host can match on (#334): only RFC 3986's
-// unreserved characters (a DNS name never uses reg-name's sub-delims or %-escapes, which a Host
-// header could carry), and no empty label. A trailing dot is refused, not stripped: the entry would
+// hostNameRule is what validHostName requires, for the errors of the settings that use it.
+const hostNameRule = "only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)"
+
+// validHostName reports whether host is a name a host setting can match on: BYWARD_ALLOWED_HOSTS
+// (#334), the public URL's host and the CIMD host lists (#344). Only RFC 3986's unreserved
+// characters (a DNS name never uses reg-name's sub-delims or %-escapes, which a Host header or a
+// URL could carry), and no empty label. A trailing dot is refused, not stripped: the setting would
 // match only a client given the absolute name, never the usual one, so it is almost always copied
 // from a DNS zone by mistake.
 func validHostName(host string) bool {
