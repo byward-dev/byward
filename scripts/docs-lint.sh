@@ -15,6 +15,7 @@
 # Usage: sh scripts/docs-lint.sh [repository root]
 set -eu
 root=${1:-.}
+case $root in (*?/) root=${root%/} ;; esac
 tag_file="$root/scripts/docs-image-tag"
 [ -f "$tag_file" ] || { echo "docs-lint: $tag_file is missing" >&2; exit 2; }
 tag=$(grep -v '^#' "$tag_file" | tr -d '[:space:]')
@@ -24,7 +25,7 @@ found=$(find "$root" \( -name .git -o -name .claude -o -name build -o -name dist
   while IFS= read -r f; do
     rel=${f#"$root"/}
     stale=1
-    case $rel in (docs/adr/* | docs/archive/*) stale=0 ;; esac
+    case $rel in (docs/adr/*) stale=0 ;; esac
     case $rel in (docs/archive/*) continue ;; esac
     awk -v file="$rel" -v stale="$stale" -v want="$tag" '
       /docs-lint: allow/ { next }

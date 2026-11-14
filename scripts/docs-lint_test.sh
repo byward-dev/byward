@@ -9,18 +9,18 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 failures=0
 
-# check NAME WANT_EXIT FILE CONTENT [WANT_OUTPUT]: a fresh repository whose tag file names v1.2.3
-# and whose FILE holds CONTENT; the lint must exit WANT_EXIT, and its output match WANT_OUTPUT
-# (grep -E) when given.
+# check NAME WANT_EXIT FILE CONTENT [WANT_OUTPUT]: a fresh repository whose tag file holds TAGFILE
+# (default: a comment and v1.2.3) and whose FILE holds CONTENT; the lint, given ROOT_SUFFIX after
+# the repository path, must exit WANT_EXIT, and its output match WANT_OUTPUT (grep -E) when given.
 check() {
   name=$1 want_code=$2 file=$3 content=$4 want=${5:-}
   repo="$tmp/repo"
   rm -rf "$repo"
   mkdir -p "$repo/scripts" "$repo/$(dirname "$file")"
-  printf '# a comment\nv1.2.3\n' >"$repo/scripts/docs-image-tag"
+  printf '%b' "${TAGFILE:-# a comment\nv1.2.3\n}" >"$repo/scripts/docs-image-tag"
   printf '%s\n' "$content" >"$repo/$file"
   set +e
-  out=$(sh "$script" "$repo" 2>&1)
+  out=$(sh "$script" "$repo${ROOT_SUFFIX:-}" 2>&1)
   code=$?
   set -e
   ok=1
@@ -55,6 +55,27 @@ check "a version placeholder in angle brackets" 0 docs/how-to/a.md "COPY --from=
 check "an ADR's image tag" 1 docs/adr/0019-x.md "FROM ghcr.io/byward-dev/byward:v0.1.0" 'image tag v0.1.0'
 check "an archived image tag" 0 docs/archive/old.md "FROM ghcr.io/byward-dev/byward:v0.1.0"
 check "a worktree is not read" 0 .claude/worktrees/x/a.md "Not supported yet."
+for dir in .git build dist node_modules testdata; do
+  check "$dir is not read" 0 "$dir/x/a.md" "Not supported yet."
+done
+check "only Markdown is read" 0 docs/a.txt "Not supported yet."
+check "in v0.1 at the line's end" 1 docs/a.md "Shipped in v0.1" '"in v0.1"'
+check "the docs' tag mid-line" 0 docs/a.md "Run ghcr.io/byward-dev/byward:v1.2.3 now."
+check "in v0x1 is no release" 0 docs/a.md "in v0x1"
+check "slice 12 is no slice label" 0 docs/a.md "slice 12 of the cake"
+check "as of now has no date" 0 docs/a.md "as of now"
+check "a date with only a major version" 1 docs/a.md "as of 2026-11-14 (v2)" 'without a version'
+check "a tag ending in snapshot" 1 docs/a.md "ghcr.io/byward-dev/byward:v1-snapshot" 'image tag v1-snapshot'
+check "docs/agents is not an ADR" 1 docs/agents/x.md "Not supported yet." '"not supported yet"'
+# A VAR=value prefix on a function call may outlive the call in sh, so these set and unset it.
+TAGFILE='  v1.2.3  \r\n'
+check "a tag file with spaces and CRLF" 0 docs/a.md "ghcr.io/byward-dev/byward:v1.2.3"
+TAGFILE='# only a comment\n'
+check "a tag file with no tag" 2 docs/a.md "x" 'holds no tag'
+unset TAGFILE
+ROOT_SUFFIX=/
+check "a root with a trailing slash" 0 docs/adr/0001-x.md "in v0.1"
+unset ROOT_SUFFIX
 
 repo="$tmp/repo"
 rm -rf "$repo" && mkdir -p "$repo/docs"
