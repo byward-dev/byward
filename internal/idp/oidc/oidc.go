@@ -33,6 +33,10 @@ type Config struct {
 	Scopes []string
 	// SubjectClaim is the user key claim; default `sub`.
 	SubjectClaim string
+	// RolesClaim and GroupsClaim are the claims Identity.Roles and Identity.Groups are read from;
+	// default `roles` and `groups`, for every preset. Auth0 drops claims with those names, so there
+	// the operator names a namespaced claim (#286).
+	RolesClaim, GroupsClaim string
 	// HostedDomain, if set, is sent as the hd hint and requires the `hd` claim to equal it (Google
 	// Workspace).
 	HostedDomain string
@@ -93,6 +97,12 @@ func New(cfg Config) (*Provider, error) {
 	}
 	if cfg.SubjectClaim == "" {
 		cfg.SubjectClaim = "sub"
+	}
+	if cfg.RolesClaim == "" {
+		cfg.RolesClaim = "roles"
+	}
+	if cfg.GroupsClaim == "" {
+		cfg.GroupsClaim = "groups"
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
@@ -359,8 +369,8 @@ func (p *Provider) identity(ctx context.Context, raw, nonce string) (idp.Identit
 		Email:             idp.StringClaim(claims, "email"),
 		EmailVerified:     p.emailVerified(claims["email_verified"]),
 		PreferredUsername: idp.StringClaim(claims, "preferred_username"),
-		Roles:             idp.StringsClaim(claims, "roles"),
-		Groups:            idp.StringsClaim(claims, "groups"),
+		Roles:             idp.StringsClaim(claims, p.cfg.RolesClaim),
+		Groups:            idp.StringsClaim(claims, p.cfg.GroupsClaim),
 		Claims:            claims,
 	}, nil
 }

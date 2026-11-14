@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -62,6 +63,9 @@ type User struct {
 	// GroupsOverage replaces `groups` with the overage claims, as Entra does above 200 groups
 	// (Entra only).
 	GroupsOverage bool
+	// Claims are set in the ID token as they are, overriding the profile's claim of the same name:
+	// a `roles` claim a Keycloak mapper sends, or a namespaced one set by an Auth0 Action.
+	Claims map[string]any
 }
 
 // Client is an app registration at the fake IdP: the proxy's IdP app, a headless caller, or a
@@ -495,6 +499,16 @@ func (p *IdP) routes() http.Handler {
 		mux.HandleFunc("GET /keys", p.jwks)
 		mux.HandleFunc("GET /authorize", p.authorize)
 		mux.HandleFunc("POST /token", p.token)
+		// An issuer with a path, as a preset requires (Keycloak /realms/{realm}, Okta /oauth2/{id}),
+		// is discovered under exactly that path; set it with WithIssuer. Any other path is not found.
+		mux.HandleFunc("GET /{path...}", func(w http.ResponseWriter, r *http.Request) {
+			issuer, err := url.Parse(p.Issuer())
+			if err != nil || r.URL.Path != strings.TrimSuffix(issuer.Path, "/")+"/.well-known/openid-configuration" {
+				http.NotFound(w, r)
+				return
+			}
+			p.discovery(w, r)
+		})
 		return mux
 	}
 	mux.HandleFunc("GET /{tenant}/v2.0/.well-known/openid-configuration", p.discovery)
