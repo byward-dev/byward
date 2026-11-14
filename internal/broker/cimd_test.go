@@ -21,11 +21,16 @@ import (
 // withCIMD resolves CIMD clients from documents served by srv, after the static clients.
 func withCIMD(srv *clientdocs.Server, trusted ...string) func(*Config) {
 	return func(c *Config) {
-		guard := ssrfguard.New(ssrfguard.Config{RootCAs: srv.RootCAs, Dial: srv.Dial})
-		c.Clients = registration.Chain{c.Clients, registration.NewCIMDRegistry(registration.CIMDConfig{Fetch: guard,
-			KeysClient: guard.HTTPClient(), TrustedHosts: trusted, JTI: registration.NewStoreJTICache(memory.New()), Now: time.Now})}
+		c.Clients = registration.Chain{c.Clients, newCIMDFor(srv, nil, trusted...)}
 		c.CIMD = true
 	}
+}
+
+// newCIMDFor is a CIMD registry fetching from srv; deny is the operator's denylist.
+func newCIMDFor(srv *clientdocs.Server, deny *registration.Denylist, trusted ...string) *registration.CIMDRegistry {
+	guard := ssrfguard.New(ssrfguard.Config{RootCAs: srv.RootCAs, Dial: srv.Dial})
+	return registration.NewCIMDRegistry(registration.CIMDConfig{Fetch: guard, KeysClient: guard.HTTPClient(), TrustedHosts: trusted,
+		Deny: deny, JTI: registration.NewStoreJTICache(memory.New()), Now: time.Now})
 }
 
 // Each real client's published document signs a user in and redeems the code with PKCE and no

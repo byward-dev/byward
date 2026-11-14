@@ -18,7 +18,8 @@ sign-in still shows the consent page, marks the app **"Not verified"**, and pass
 | `BYWARD_CLIENT_DENYLIST` | — | Comma-separated entries the proxy refuses: a CIMD client ID (an `https` URL) or a host name. A host refuses every DCR or CIMD app that returns to it; a subdomain is another host. Spellings of the same host or URL match too: letter case, a trailing dot, and for a URL `:443` and percent-encoding in the path. Static clients are never checked. |
 
 A DCR client ID alone cannot be denied: the app would just register again. Deny the host it
-returns to instead.
+returns to instead. An app already signed in loses its grant at its next refresh, but its current
+access token keeps working until it expires, at most an hour ([one app](revoke-access.md#one-app)).
 
 ## What the proxy accepts
 

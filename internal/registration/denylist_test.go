@@ -75,22 +75,28 @@ func TestADeniedCIMDClientIsUnknownWithoutAFetch(t *testing.T) {
 	c := newClock()
 	r := NewCIMDRegistry(CIMDConfig{Fetch: f, Deny: deny, JTI: NewStoreJTICache(memory.New()), Now: c.now})
 	_, err := r.Client(context.Background(), cimdID)
-	if !errors.Is(err, ErrUnknownClient) || errors.Is(err, ErrMetadataRefused) || !strings.Contains(err.Error(), "denylist") || f.calls.Load() != 0 {
-		t.Fatalf("denied client: %v after %d fetches, want unknown (on the denylist) and no fetch", err, f.calls.Load())
+	if !errors.Is(err, ErrUnknownClient) || !errors.Is(err, ErrClientDenied) || errors.Is(err, ErrMetadataRefused) || f.calls.Load() != 0 {
+		t.Fatalf("denied client: %v after %d fetches, want unknown, ErrClientDenied and no fetch", err, f.calls.Load())
 	}
 	if cl, err := r.Client(context.Background(), other); err != nil || cl.ID() != other {
 		t.Fatalf("another client on the host: %v %v", cl, err)
 	}
 }
 
-// The chain answers with the first registry that has something to say: a refused CIMD document
-// stays refused (so its grants are revoked on refresh) even with the DCR registry after it.
+// The chain answers with the first registry that has something to say: a refused CIMD document or
+// a denied client ID stays refused (so its grants are revoked on refresh) even with the DCR
+// registry after it.
 func TestTheChainKeepsTheFirstReasonedRefusal(t *testing.T) {
 	f := &fakeFetch{replies: map[string][]reply{cimdID: {gone()}}}
 	c := newClock()
 	ch := Chain{newReg(f, c, nil, nil), newDCR(brokenClients{}, c.now, 0)}
 	if _, err := ch.Client(context.Background(), cimdID); !errors.Is(err, ErrMetadataRefused) {
 		t.Fatalf("refused document behind the DCR registry: %v, want ErrMetadataRefused", err)
+	}
+	deny, _ := NewDenylist([]string{cimdID})
+	denied := Chain{NewCIMDRegistry(CIMDConfig{Fetch: f, Deny: deny, JTI: NewStoreJTICache(memory.New()), Now: c.now}), newDCR(brokenClients{}, c.now, 0)}
+	if _, err := denied.Client(context.Background(), cimdID); !errors.Is(err, ErrClientDenied) {
+		t.Fatalf("denied client ID behind the DCR registry: %v, want ErrClientDenied", err)
 	}
 	if _, err := ch.Client(context.Background(), "nobody"); err != ErrUnknownClient {
 		t.Fatalf("an ID no registry knows: %v, want the plain ErrUnknownClient", err)

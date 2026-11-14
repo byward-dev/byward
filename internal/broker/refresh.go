@@ -22,7 +22,7 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	f := r.PostForm
 	now := b.cfg.Now()
-	client, ok := b.authenticateClient(w, r, now, b.revokeForRefusedMetadata)
+	client, ok := b.authenticateClient(w, r, now, b.revokeForRefusedClient)
 	if !ok {
 		return
 	}
@@ -57,6 +57,12 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	unlock := b.lockGrant(rt.GrantID)
 	defer unlock()
+	if d, ok := client.(denied); ok && d.Denied() {
+		// The operator denied the client after it signed in (ADR-0008 §9, #338): end its grant.
+		b.revoke(r, client.ID(), rt.GrantID, now, reasonClientDenied)
+		b.tokenFail(w, r, invalid)
+		return
+	}
 	if !rt.RotatedAt.IsZero() && now.Sub(rt.RotatedAt) >= b.cfg.RefreshGrace {
 		// Clear reuse: revoke without calling the IdP. Retries within the window go on, and the
 		// store decides atomically below.
@@ -227,11 +233,21 @@ func narrowScopes(requested string, granted []string) ([]string, bool) {
 	return want, true
 }
 
-// revokeForRefusedMetadata applies draft-ietf-oauth-client-id-metadata-document-03 §6.1: when a CIMD
-// client's metadata is now definitely refused (its document mismatches, is invalid or gone), the
-// grant behind the refresh token it presents is revoked, so restoring the document cannot revive
-// it. Only a terminal failure gets here; a transient fetch failure never revokes.
-func (b *Broker) revokeForRefusedMetadata(r *http.Request, clientID string, now time.Time) {
+// denied is a client the operator can deny by its redirect hosts after it signed in (a CIMD or DCR
+// client).
+type denied interface {
+	Denied() bool
+}
+
+// reasonClientDenied is the grant_revoked reason for a refresh by a client the operator denied.
+const reasonClientDenied = "client on the operator's denylist; grant revoked"
+
+// revokeForRefusedClient revokes the grant behind the refresh token a refused client presents, for
+// the reason why. A CIMD client's metadata that is now definitely refused (its document mismatches,
+// is invalid or gone) revokes it under draft-ietf-oauth-client-id-metadata-document-03 §6.1, so
+// restoring the document cannot revive it; so does a client ID the operator denied (#338). Only a
+// definite refusal gets here; a transient fetch failure never revokes.
+func (b *Broker) revokeForRefusedClient(r *http.Request, clientID string, now time.Time, why string) {
 	hash, ok := token.HashRefreshToken(r.PostForm.Get("refresh_token"))
 	if !ok {
 		return
@@ -242,5 +258,5 @@ func (b *Broker) revokeForRefusedMetadata(r *http.Request, clientID string, now 
 	}
 	unlock := b.lockGrant(rt.GrantID)
 	defer unlock()
-	b.revoke(r, clientID, rt.GrantID, now, "client metadata no longer valid")
+	b.revoke(r, clientID, rt.GrantID, now, why)
 }

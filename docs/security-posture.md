@@ -195,7 +195,9 @@ bounds, but there are no settings for that yet.
   after its last use.
 - No client secret is ever issued; redirect URIs follow ADR-0009, and failing ones are dropped.
 - The operator's denylist (`BYWARD_CLIENT_DENYLIST`) refuses CIMD client IDs and redirect hosts at
-  registration, `/authorize`, consent and `/token`.
+  registration, `/authorize`, consent and `/token`. A denied app's next refresh revokes its grant.
+  A denied CIMD client ID's access tokens are refused at once; those of an app denied by its
+  redirect host run out within an hour (#338).
 - Every outcome, refusals included (invalid, rate-limited, capped, store failure), is audited
   (`client_registered`, rate-limited per address) and counted (`byward_dcr_registrations_total`).
 

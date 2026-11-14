@@ -123,7 +123,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	if err := deny.Sync(syncCtx); err != nil {
 		return nil, fmt.Errorf("loading the revocation list: %w", err)
 	}
-	sealed, err := token.NewValidator(sealer, deny, nil)
+	sealed, err := token.NewValidator(sealer, deny, parts.clientDeny, nil)
 	if err != nil {
 		return nil, err
 	}

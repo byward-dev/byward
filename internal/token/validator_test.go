@@ -18,7 +18,7 @@ var allowAll = denyFunc(func(string, string, time.Time) (bool, error) { return f
 
 func newValidator(t *testing.T, s *Sealer, deny DenyList) *Validator {
 	t.Helper()
-	v, err := NewValidator(s, deny, nil)
+	v, err := NewValidator(s, deny, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestEveryOtherFailureIsInvalid(t *testing.T) {
 	s := newSealer(t)
 	other := sealerFor(t, mustRing(t, keyDir(t, map[string]string{"k1": randomKey(t)})), resourceA)
 	now := t0.Add(time.Minute)
-	v, err := NewValidator(s, allowAll, func() time.Time { return now })
+	v, err := NewValidator(s, allowAll, nil, func() time.Time { return now })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestDenyListIsConsultedAndFailsClosed(t *testing.T) {
 				gotGrant, gotSubject, gotIAT = g, sub, iat
 				return tc.deny.Denied(g, sub, iat)
 			})
-			v, err := NewValidator(s, spy, now)
+			v, err := NewValidator(s, spy, nil, now)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -119,10 +119,43 @@ func TestDenyListIsConsultedAndFailsClosed(t *testing.T) {
 }
 
 func TestNewValidatorNeedsASealerAndADenyList(t *testing.T) {
-	if _, err := NewValidator(nil, allowAll, nil); err == nil {
+	if _, err := NewValidator(nil, allowAll, nil, nil); err == nil {
 		t.Error("nil sealer accepted")
 	}
-	if _, err := NewValidator(newSealer(t), nil, nil); err == nil {
+	if _, err := NewValidator(newSealer(t), nil, nil, nil); err == nil {
 		t.Error("nil deny list accepted")
+	}
+}
+
+type clientDenyFunc func(id string) bool
+
+func (f clientDenyFunc) DeniesClient(id string) bool { return f(id) }
+
+// A token whose client ID the operator denied is refused at once, whatever its grant (#338); other
+// clients' tokens, and every token when no client denylist is given, still pass.
+func TestATokenOfADeniedClientIsInvalid(t *testing.T) {
+	denyApp := clientDenyFunc(func(id string) bool { return id == "https://app.example/client.json" })
+	for name, tc := range map[string]struct {
+		clients  ClientDenylist
+		clientID string
+		want     error
+	}{
+		"denied client":      {clients: denyApp, clientID: "https://app.example/client.json", want: resource.ErrInvalid},
+		"another client":     {clients: denyApp, clientID: "https://other.example/client.json"},
+		"no client denylist": {clientID: "https://app.example/client.json"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				s := newSealer(t)
+				tok := mustSeal(t, s, Access, Claims{GrantID: "g", Subject: "u", IssuedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour), ClientID: tc.clientID})
+				v, err := NewValidator(s, allowAll, tc.clients, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := v.Validate(context.Background(), tok); !errors.Is(err, tc.want) {
+					t.Fatalf("Validate = %v, want %v", err, tc.want)
+				}
+			})
+		})
 	}
 }

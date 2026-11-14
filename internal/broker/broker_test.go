@@ -492,7 +492,7 @@ func TestStaticClientSignsInWithEntraAndGetsAProxyToken(t *testing.T) {
 	if res.StatusCode != 200 || body["token_type"] != "Bearer" || res.Header.Get("Cache-Control") != "no-store" {
 		t.Fatalf("token: %d %v", res.StatusCode, body)
 	}
-	v, _ := token.NewValidator(e.sealer, e.b.Deny(), func() time.Time { return e.now })
+	v, _ := token.NewValidator(e.sealer, e.b.Deny(), nil, func() time.Time { return e.now })
 	id, err := v.Validate(context.Background(), body["access_token"].(string))
 	if err != nil || !strings.Contains(id.Subject, ":") {
 		t.Fatalf("validate: %+v %v", id, err)
@@ -541,7 +541,7 @@ func TestReusedCodeRevokesTheGrant(t *testing.T) {
 	if res.StatusCode != 400 || body["error"] != "invalid_grant" {
 		t.Fatalf("reuse: %d %v", res.StatusCode, body)
 	}
-	v, _ := token.NewValidator(e.sealer, e.b.Deny(), func() time.Time { return e.now })
+	v, _ := token.NewValidator(e.sealer, e.b.Deny(), nil, func() time.Time { return e.now })
 	if _, err := v.Validate(context.Background(), first["access_token"].(string)); err == nil {
 		t.Fatal("the first access token still works after the code was reused")
 	}

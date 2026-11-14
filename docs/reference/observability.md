@@ -87,6 +87,7 @@ Not emitted: a key rotation as such. Keys are read at startup, and each one load
 | `refresh token reused; grant revoked` | a rotated refresh token was presented after its grace period |
 | `the client revoked a token (RFC 7009)` | the client called `/revoke` |
 | `client metadata no longer valid` | a refresh came from a CIMD client whose metadata document is now refused |
+| `client on the operator's denylist; grant revoked` | a refresh came from an app on `BYWARD_CLIENT_DENYLIST`, by its CIMD client ID or a redirect host ([one app](../how-to/revoke-access.md#one-app)) |
 | `the grant holds no usable IdP refresh token; grant revoked` | a refresh found no IdP refresh token to use |
 | `the IdP ended the session; grant revoked` | the IdP refused the refresh: the user's session there is over |
 | `the IdP returned no ID token on refresh; grant revoked` | the IdP's refresh answer had no ID token, so the user could not be checked again |

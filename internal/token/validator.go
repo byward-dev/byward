@@ -19,22 +19,30 @@ type DenyList interface {
 	Denied(grantID, subject string, issuedAt time.Time) (bool, error)
 }
 
-// Validator checks access tokens for the resource server (resource.Validator). It reads no store.
-type Validator struct {
-	sealer *Sealer
-	deny   DenyList
-	now    func() time.Time
+// ClientDenylist is the operator's denylist of client IDs (ADR-0008 §9).
+type ClientDenylist interface {
+	// DeniesClient reports whether the operator refuses the client ID.
+	DeniesClient(id string) bool
 }
 
-// NewValidator returns a Validator; now defaults to time.Now.
-func NewValidator(s *Sealer, deny DenyList, now func() time.Time) (*Validator, error) {
+// Validator checks access tokens for the resource server (resource.Validator). It reads no store.
+type Validator struct {
+	sealer  *Sealer
+	deny    DenyList
+	clients ClientDenylist
+	now     func() time.Time
+}
+
+// NewValidator returns a Validator; clients may be nil (no client is denied), and now defaults to
+// time.Now.
+func NewValidator(s *Sealer, deny DenyList, clients ClientDenylist, now func() time.Time) (*Validator, error) {
 	if s == nil || deny == nil {
 		return nil, errors.New("token: a validator needs a sealer and a deny list")
 	}
 	if now == nil {
 		now = time.Now
 	}
-	return &Validator{sealer: s, deny: deny, now: now}, nil
+	return &Validator{sealer: s, deny: deny, clients: clients, now: now}, nil
 }
 
 var _ resource.Validator = (*Validator)(nil)
@@ -55,6 +63,12 @@ func (v *Validator) Validate(_ context.Context, tok string) (resource.Identity, 
 	}
 	denied, err := v.deny.Denied(c.GrantID, c.Subject, c.IssuedAt)
 	if err != nil || denied {
+		return resource.Identity{}, resource.ErrInvalid
+	}
+	// A client ID the operator denied is refused at once (#338). A client denied by its redirect
+	// host is not checked here, since that needs its registration; its tokens run out within the
+	// access-token lifetime, and its refresh is refused.
+	if v.clients != nil && v.clients.DeniesClient(c.ClientID) {
 		return resource.Identity{}, resource.ErrInvalid
 	}
 	return resource.Identity{Subject: c.Subject, ClientID: c.ClientID, PrincipalType: resource.PrincipalUser, GrantID: c.GrantID, Roles: c.Roles, Groups: c.Groups, Email: c.Email, EmailVerified: c.EmailVerified, Name: c.Name}, nil

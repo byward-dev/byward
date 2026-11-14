@@ -62,7 +62,7 @@ func (e *env) valid(t *testing.T, access string) bool {
 	if err := e.b.Deny().Sync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	v, err := token.NewValidator(e.sealer, e.b.Deny(), func() time.Time { return e.now })
+	v, err := token.NewValidator(e.sealer, e.b.Deny(), nil, func() time.Time { return e.now })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func (e *env) validNow(t *testing.T, access string) bool {
 	if _, err := e.b.Deny().Denied("", "", time.Time{}); err != nil {
 		t.Fatalf("deny list is stale (%v): sync it before checking a local revocation", err)
 	}
-	v, err := token.NewValidator(e.sealer, e.b.Deny(), func() time.Time { return e.now })
+	v, err := token.NewValidator(e.sealer, e.b.Deny(), nil, func() time.Time { return e.now })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,7 +630,7 @@ func TestRevocationReachesAnotherReplicaThroughTheStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.revokeToken(t, body["refresh_token"].(string), clientID)
-	v, _ := token.NewValidator(e.sealer, other.Deny(), func() time.Time { return e.now })
+	v, _ := token.NewValidator(e.sealer, other.Deny(), nil, func() time.Time { return e.now })
 	if _, err := v.Validate(context.Background(), body["access_token"].(string)); err != nil {
 		t.Fatalf("before its sync the other replica already refuses: %v", err)
 	}

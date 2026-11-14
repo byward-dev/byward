@@ -27,6 +27,10 @@ var ErrUnavailable = errors.New("registration: client metadata temporarily unava
 // grant behind a token only for this (draft -03 §6.1).
 var ErrMetadataRefused = fmt.Errorf("%w: client metadata refused", ErrUnknownClient)
 
+// ErrClientDenied wraps ErrUnknownClient when the operator's denylist names the client ID
+// (ADR-0008 §9). Refresh revokes the grant behind a token for this too (#338).
+var ErrClientDenied = fmt.Errorf("%w: client on the operator's denylist", ErrUnknownClient)
+
 // CIMD cache rules (ADR-0008 §4; draft -03 §6.1-6.2).
 const (
 	// MinCIMDTTL and MaxCIMDTTL clamp the cache lifetime a document's Cache-Control asks for. A
@@ -133,7 +137,7 @@ func (r *CIMDRegistry) Client(ctx context.Context, id string) (Client, error) {
 		return nil, fmt.Errorf("%w: %v", ErrUnknownClient, err)
 	}
 	if r.cfg.Deny.DeniesClient(id) {
-		return nil, fmt.Errorf("%w: client %s is on the operator's denylist", ErrUnknownClient, id)
+		return nil, fmt.Errorf("%w: %s", ErrClientDenied, id)
 	}
 	host := cimdHost(id)
 	if len(r.allowed) > 0 && !r.allowed[host] && !r.trusted[host] {

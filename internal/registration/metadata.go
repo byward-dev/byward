@@ -212,6 +212,13 @@ func (c *metadataClient) AuthMethods() []AuthMethod { return append([]AuthMethod
 // AllowsRefresh is true only if the client registered the refresh_token grant (draft -03 §6).
 func (c *metadataClient) AllowsRefresh() bool { return slices.Contains(c.grants, "refresh_token") }
 
+// Denied reports whether the operator's denylist now refuses a host that any of the client's
+// registered redirect URIs returns to (ADR-0008 §9, #338). A denied client ID never gets here: the
+// lookup refuses it (ErrClientDenied).
+func (c *metadataClient) Denied() bool {
+	return slices.ContainsFunc(c.redirects, c.deny.DeniesRedirect)
+}
+
 // RedirectAllowed applies ADR-0009, then the operator's denylist of redirect hosts (ADR-0008 §9).
 func (c *metadataClient) RedirectAllowed(redirectURI string) error {
 	if err := MatchRedirect(c.redirects, redirectURI); err != nil {

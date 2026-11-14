@@ -87,19 +87,27 @@ A DCR client ID cannot be denied, since the app would just register again; deny 
 clients are never checked: remove one from the [static clients file](../reference/static-clients.md)
 and restart instead. The setting's full rules are in [DCR settings](dcr.md#settings).
 
-The denylist stops new registrations and sign-ins. It does not end what the app already holds:
+The denylist stops new registrations and sign-ins, and ends what an app already holds:
 
-- a denied CIMD client ID gets 401 `invalid_client` at `/token`, so it can no longer refresh, but
-  its access tokens keep working until they expire, at most an hour;
-- a denied host does not stop refreshes of an app that is already signed in.
+- **Its next refresh** is refused and revokes the grant behind the refresh token: 401
+  `invalid_client` for a denied CIMD client ID, 400 `invalid_grant` for an app denied by its
+  redirect host.
+- **Its access tokens:**
+  - for a denied CIMD client ID, they are refused at the next request;
+  - for an app denied by its redirect host, a DCR app always, they keep working until they expire,
+    at most an hour, unless the app refreshes first. Checking the host would need the app's
+    registration on every request.
 
-There is no command that ends one app's grants. To end them, revoke the users who use the app with
-`revoke-user`, or everyone with `revoke-all`. The audit stream's `login` and `token_issued` records
-carry both `client_id` and `user_key`.
+To cut an app denied by host off at once, also revoke its users with `revoke-user`, or everyone
+with `revoke-all`. The audit stream's `login` and `token_issued` records carry both `client_id` and
+`user_key`.
 
-Audit: a refused DCR registration is `client_registered` with `outcome` `failure` and `reason`
-`invalid_redirect_uri`; a refused `/token` request is `token_rejected` with `reason`
-`invalid_client`.
+Audit:
+- a refused DCR registration is `client_registered` with `outcome` `failure` and `reason`
+  `invalid_redirect_uri`;
+- a refused `/token` request is `token_rejected` with `reason` `invalid_client` or `invalid_grant`;
+- a revoked grant is `grant_revoked` with `reason` `client on the operator's denylist; grant revoked`
+  and the app's `client_id`.
 
 ## An app-only caller
 

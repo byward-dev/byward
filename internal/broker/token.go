@@ -72,10 +72,11 @@ func (b *Broker) token(w http.ResponseWriter, r *http.Request) {
 // /revoke. On failure it has already answered: 401 invalid_client, or 503 temporarily_unavailable
 // when a CIMD client's metadata could not be fetched for now (draft -03 §6.1).
 //
-// onRefused, when set, runs before the 401 if a client's metadata document was definitely refused
-// (registration.ErrMetadataRefused; never for a transient failure, a disabled CIMD or a host off the
-// allowlist), so refresh can revoke what the refused client holds.
-func (b *Broker) authenticateClient(w http.ResponseWriter, r *http.Request, now time.Time, onRefused func(*http.Request, string, time.Time)) (registration.Client, bool) {
+// onRefused, when set, runs before the 401 with the revocation reason if a client's metadata
+// document was definitely refused (registration.ErrMetadataRefused; never for a transient failure,
+// a disabled CIMD or a host off the allowlist) or the operator's denylist names its client ID
+// (registration.ErrClientDenied), so refresh can revoke what the refused client holds.
+func (b *Broker) authenticateClient(w http.ResponseWriter, r *http.Request, now time.Time, onRefused func(r *http.Request, clientID string, now time.Time, why string)) (registration.Client, bool) {
 	ctx := r.Context()
 	f := r.PostForm
 	clientID := f.Get("client_id")
@@ -101,8 +102,12 @@ func (b *Broker) authenticateClient(w http.ResponseWriter, r *http.Request, now 
 			b.tokenFail(w, r, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the client's metadata could not be fetched"})
 			return nil, false
 		}
-		if onRefused != nil && errors.Is(err, registration.ErrMetadataRefused) {
-			onRefused(r, clientID, now)
+		switch {
+		case onRefused == nil:
+		case errors.Is(err, registration.ErrClientDenied):
+			onRefused(r, clientID, now, reasonClientDenied)
+		case errors.Is(err, registration.ErrMetadataRefused):
+			onRefused(r, clientID, now, "client metadata no longer valid")
 		}
 		b.tokenFail(w, r, tokenError{http.StatusUnauthorized, "invalid_client", "unknown client"})
 		return nil, false

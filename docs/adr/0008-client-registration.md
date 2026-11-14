@@ -1,6 +1,6 @@
 # ADR-0008: Client registration — static, CIMD and DCR, strictly validated
 
-- Status: Accepted
+- Status: Accepted; amended 2026-11-14 (#338)
 - Date: 2026-11-05
 - Issue: #7 (F6)
 
@@ -56,6 +56,11 @@ domain; nobody offers operator-trusted hosts.
    (other CIMD hosts), not verified (DCR). A redirect host different from the CIMD host triggers a
    warning, never a block; loopback reads "an app on this computer".
 9. **Denylist** by CIMD URL or redirect host (a client ID alone is re-registered around).
+   _Amended 2026-11-14 (#338):_ a denial also ends what the app already holds. Its next refresh is
+   refused and revokes the grant: `invalid_grant`, or `invalid_client` for a denied CIMD URL, which
+   the lookup refuses. An access token of a denied CIMD URL is refused at every request, an
+   in-memory check. One of an app denied by its redirect host runs out within its lifetime (1 h),
+   since checking the host would need the client's registration on every request.
 10. **Consent** is mandatory for DCR and CIMD clients; whether static clients see it, and how
     scopes are worded (operator text per scope), is F7.
 
