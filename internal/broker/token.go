@@ -108,6 +108,10 @@ func (b *Broker) authenticateClient(w http.ResponseWriter, r *http.Request, now 
 		return nil, false
 	}
 	if err := client.Authenticate(ctx, f, r.Header, b.tokenEndpoint(), now); err != nil {
+		if errors.Is(err, registration.ErrReplayCheckUnavailable) { // the store, not the client, failed
+			b.unavailable(w, r, "client assertion replay check failed", err)
+			return nil, false
+		}
 		if errors.Is(err, registration.ErrUnavailable) { // the client's jwks_uri could not be fetched for now
 			b.clientLookupFailed(ctx, clientID, err)
 			w.Header().Set("Retry-After", cimdRetryAfter)

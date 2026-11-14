@@ -6,8 +6,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
+	"github.com/byward-dev/byward/internal/store/memory"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
@@ -63,7 +63,7 @@ func FuzzLoadStatic(f *testing.F) {
 	f.Add(`{"clients":null}`)
 	f.Fuzz(func(t *testing.T, data string) {
 		fs := files{"/c.json": data, "/s": goodSecret}
-		reg, err := LoadStatic("/c.json", fs.read, NewMemoryJTICache(time.Now, 10))
+		reg, err := LoadStatic("/c.json", fs.read, NewStoreJTICache(memory.New()))
 		if err != nil {
 			if strings.Contains(err.Error(), goodSecret) {
 				t.Fatal("error leaks the secret")

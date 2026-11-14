@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/byward-dev/byward/internal/testutil/pgtest"
 )
 
 // clearPGEnv unsets the PG* variables pgx reads, so the developer's environment cannot change a
@@ -153,8 +155,27 @@ func setEnv(t *testing.T, env map[string]string) {
 func writeCA(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "ca.pem")
-	if err := os.WriteFile(path, newCA(t, "byward test CA").certPEM, 0o600); err != nil {
+	if err := os.WriteFile(path, pgtest.NewCA(t, "byward test CA").CertPEM, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// The startup log's TLS mode follows the parsed DSN: verify-full, unverified for require, off for
+// plaintext (the last two in development mode only).
+func TestTheTLSModeNamesHowTheConnectionIsProtected(t *testing.T) {
+	for _, tc := range []struct{ sslmode, want string }{
+		{"verify-full", "verify-full"}, {"require", "unverified"}, {"disable", "off"},
+	} {
+		t.Run(tc.sslmode, func(t *testing.T) {
+			clearPGEnv(t)
+			cfg, err := parseDSN("host=db.example user=byward sslmode="+tc.sslmode, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := tlsMode(&cfg.ConnConfig.Config); got != tc.want {
+				t.Fatalf("tlsMode = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }

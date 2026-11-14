@@ -135,7 +135,7 @@ func newOIDCIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect 
 		hd = cfg.GateHostedDomains[0] // also the hd hint at Google; the gate list stays the rule (ADR-0015)
 	}
 	p, err := oidc.New(oidc.Config{Preset: preset, Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID, ClientAuth: auth, RedirectURL: redirect,
-		Scopes: cfg.OIDCScopes, SubjectClaim: cfg.OIDCSubjectClaim, HostedDomain: hd, AllowLoopbackHTTP: cfg.Dev, HTTPClient: idpHTTP})
+		Scopes: cfg.OIDCScopes, SubjectClaim: cfg.OIDCSubjectClaim, RolesClaim: cfg.OIDCRolesClaim, GroupsClaim: cfg.OIDCGroupsClaim, HostedDomain: hd, AllowLoopbackHTTP: cfg.Dev, HTTPClient: idpHTTP})
 	if err != nil {
 		return nil, fmt.Errorf("oidc settings (BYWARD_OIDC_*): %w", err)
 	}

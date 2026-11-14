@@ -46,16 +46,6 @@ func TestTheWiredServerRemembersAStaticClientsConsent(t *testing.T) {
 
 	b := newTestBrowser(t, h.URL, public)
 	send := b.send
-	viaIdP := func(res *http.Response) *http.Response {
-		t.Helper()
-		idpRes, err := fake.HTTPClient().Get(res.Header.Get("Location"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		_ = idpRes.Body.Close()
-		cb, _ := url.Parse(idpRes.Header.Get("Location"))
-		return send(http.MethodGet, cb.Path+"?"+cb.RawQuery, nil, res.Cookies())
-	}
 	authorize := func(port string, cookies []*http.Cookie) *http.Response {
 		q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1:" + port + "/callback"}, "response_type": {"code"},
 			"code_challenge": {pkce("verifier-0123456789-0123456789-0123456789-abc")}, "code_challenge_method": {"S256"}}
@@ -68,7 +58,7 @@ func TestTheWiredServerRemembersAStaticClientsConsent(t *testing.T) {
 		t.Fatalf("first sign-in: %d, want the page saying the choice is remembered", page.StatusCode)
 	}
 	allow := b.allow(page, body)
-	back := viaIdP(allow)
+	back := b.viaIdP(fake, allow)
 	var hint []*http.Cookie
 	for _, c := range back.Cookies() {
 		if strings.Contains(c.Name, "byw_hint_") && c.MaxAge > 0 {
@@ -83,7 +73,7 @@ func TestTheWiredServerRemembersAStaticClientsConsent(t *testing.T) {
 	if again.StatusCode != http.StatusSeeOther || !strings.Contains(again.Header.Get("Location"), "/oauth2/v2.0/authorize") {
 		t.Fatalf("second sign-in on another port: %d to %q, want straight to the IdP", again.StatusCode, again.Header.Get("Location"))
 	}
-	if code := viaIdP(again); code.StatusCode != http.StatusFound || !strings.Contains(code.Header.Get("Location"), "code=") {
+	if code := b.viaIdP(fake, again); code.StatusCode != http.StatusFound || !strings.Contains(code.Header.Get("Location"), "code=") {
 		t.Fatalf("remembered callback: %d to %q", code.StatusCode, code.Header.Get("Location"))
 	}
 	scrape := httptest.NewRequest("GET", "/metrics", nil)

@@ -65,12 +65,14 @@ func (s *Store) once(ctx context.Context, iso pgx.TxIsoLevel, fn func(pgx.Tx) er
 	if err := fn(tx); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, "SELECT nextval('store_writes')"); err != nil {
+	var writes int64
+	if err := tx.QueryRow(ctx, "SELECT nextval('store_writes')").Scan(&writes); err != nil {
 		return fmt.Errorf("postgres store: write counter: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("postgres store: commit: %w", err)
 	}
+	s.mark.committed(writes)
 	return nil
 }
 

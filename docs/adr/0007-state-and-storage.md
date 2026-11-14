@@ -100,18 +100,23 @@ wiring, restore detection and docs).
    and `~/.pgpass` included), the connection and every fallback must have a TLS config with host
    name and chain verification. Plaintext, a Unix socket, and `require`, `verify-ca`, `allow` and
    `prefer` (pgx's default) are refused; only development mode accepts plaintext. The DSN is a
-   secret: it is never logged nor quoted in an error. Whether a database proxy on a Unix socket or
-   plaintext localhost (a cloud SQL sidecar) may be allowed is open until the wiring PR.
+   secret: it is never logged nor quoted in an error. A database proxy on a Unix socket or
+   plaintext localhost (a cloud SQL sidecar) is not allowed either (maintainer, 2026-11-13): it
+   would need verify-full itself.
 5. **Restore detection (§9).** A `store_writes` sequence replaces the counter: every write
    transaction takes a value from it, and pg_dump saves it. Each replica keeps a high-water mark,
    taken only from values of transactions that committed: an uncommitted `nextval` may be lost in
    a crash (postgresql.org/docs/current/functions-sequence.html). A sequence below the mark means a
    restore: under an advisory lock, one replica bumps the epoch, forgets every consent and records
-   `store_restored`. The epoch is read in SQL on every use, never cached per replica. A failover to
+   `store_restored`. The others adopt that epoch: each replica remembers the newest epoch it has
+   seen since it opened the store, and a stored epoch past it means another replica already started
+   one for this restore. The epoch is read in SQL on every use, never cached per replica. A failover to
    an asynchronous standby that lost committed transactions is detected as a restore (users sign in
    again, the fail-safe outcome). Writes made while pg_dump runs are not covered: the dump reads the
-   sequence outside its data snapshot. `byward store new-epoch` is the manual step after a restore,
-   recorded with `source=manual`.
+   sequence outside its data snapshot. `byward store new-epoch --yes` is the manual step after a
+   restore, recorded with the reason `operator new-epoch`; it also covers replicas that were not
+   running during the restore. A per-replica counter file (`BYWARD_STORE_COUNTER_FILE`) for
+   PostgreSQL was considered optional and is not built.
 6. **Several replicas.** All replicas share the sealing and assertion keys (§5 still holds: keys
    never live in the store). The JTI replay cache moves into the store. A stdio upstream with the
    PostgreSQL store is refused at startup (§4). Per-IP rate limits, and the On-Behalf-Of and CIMD

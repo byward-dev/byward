@@ -1,6 +1,7 @@
 package fakeidp
 
 import (
+	"crypto/x509"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -10,7 +11,12 @@ import (
 // Transport sends every request to the fake, keeping path and query. Adapters whose endpoints are
 // derived from a fixed authority (Entra) reach the fake through it, so production code needs no
 // endpoint setting.
-func (p *IdP) Transport() http.RoundTripper { return rewrite{base: p.srv.URL} }
+func (p *IdP) Transport() http.RoundTripper {
+	return rewrite{base: p.srv.URL, next: p.srv.Client().Transport}
+}
+
+// Certificate is the fake's TLS certificate, for a client to trust; nil without WithTLS.
+func (p *IdP) Certificate() *x509.Certificate { return p.srv.Certificate() }
 
 // HTTPClient is a client using Transport that never follows redirects.
 func (p *IdP) HTTPClient() *http.Client {
@@ -20,7 +26,10 @@ func (p *IdP) HTTPClient() *http.Client {
 	}
 }
 
-type rewrite struct{ base string }
+type rewrite struct {
+	base string
+	next http.RoundTripper // trusts the fake's certificate under WithTLS
+}
 
 func (rw rewrite) RoundTrip(r *http.Request) (*http.Response, error) {
 	base, err := url.Parse(rw.base)
@@ -29,7 +38,7 @@ func (rw rewrite) RoundTrip(r *http.Request) (*http.Response, error) {
 	}
 	out := r.Clone(r.Context())
 	out.URL.Scheme, out.URL.Host, out.Host = base.Scheme, base.Host, base.Host
-	return http.DefaultTransport.RoundTrip(out)
+	return rw.next.RoundTrip(out)
 }
 
 // Authorize follows an adapter's login URL at the fake (auto-login) and returns the query of the

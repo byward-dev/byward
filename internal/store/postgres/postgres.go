@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/byward-dev/byward/internal/store"
@@ -35,6 +36,7 @@ type Options struct {
 // Store is the PostgreSQL adapter.
 type Store struct {
 	pool *pgxpool.Pool
+	mark mark // this replica's view of store_writes and the epoch, for restore detection
 }
 
 var _ store.Store = (*Store)(nil)
@@ -54,7 +56,14 @@ func Open(ctx context.Context, opts Options) (*Store, error) {
 		pool.Close()
 		return nil, err
 	}
-	return &Store{pool: pool}, nil
+	s := &Store{pool: pool}
+	// The epoch at Open is the first one this replica has seen: a restore found by its first check
+	// starts a new epoch, unless another replica already has.
+	if err := pool.QueryRow(ctx, epochSQL).Scan(&s.mark.epoch); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("postgres store: epoch: %w", err)
+	}
+	return s, nil
 }
 
 // Ping checks that the database answers, for the readiness probe (ADR-0021 §10).
@@ -63,6 +72,24 @@ func (s *Store) Ping(ctx context.Context) error {
 		return fmt.Errorf("postgres store: ping: %w", err)
 	}
 	return nil
+}
+
+// Describe names the database for the startup log: host, port, database and TLS, never the DSN.
+func (s *Store) Describe() string {
+	c := s.pool.Config().ConnConfig
+	return fmt.Sprintf("host=%s port=%d dbname=%s tls=%s", c.Host, c.Port, c.Database, tlsMode(&c.Config))
+}
+
+// tlsMode is how the first host's connection is protected: verify-full, unverified (encrypted, the
+// server not checked; development mode only) or off.
+func tlsMode(c *pgconn.Config) string {
+	switch {
+	case c.TLSConfig == nil:
+		return "off"
+	case c.TLSConfig.InsecureSkipVerify:
+		return "unverified"
+	}
+	return "verify-full"
 }
 
 // Close closes the pool, waiting for connections in use to be returned.
@@ -414,6 +441,7 @@ func (s *Store) Collect(ctx context.Context, now time.Time) error {
 			{"DELETE FROM revocations WHERE at <= $1", ts(now.Add(-store.RevocationRetention))},
 			{"DELETE FROM consents WHERE expires_at <= $1", n},
 			{"DELETE FROM spent_logins WHERE expires_at <= $1", n},
+			{"DELETE FROM spent_assertions WHERE expires_at <= $1", n},
 			{"DELETE FROM clients WHERE expires_at <= $1", n},
 			{"DELETE FROM clients WHERE used_at IS NULL AND created_at <= $1", ts(now.Add(-store.UnusedClientLifetime))},
 		} {
@@ -435,6 +463,25 @@ func (s *Store) SpendLogin(ctx context.Context, hash [sha256.Size]byte, now, exp
 		// no row affected means a live one exists.
 		tag, err := tx.Exec(ctx, `INSERT INTO spent_logins (hash, expires_at) VALUES ($1, $2)
 			ON CONFLICT (hash) DO UPDATE SET expires_at = excluded.expires_at WHERE spent_logins.expires_at <= $3`,
+			hash[:], ts(expiresAt), ts(now))
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return store.ErrConsumed
+		}
+		return nil
+	})
+}
+
+// SpendAssertion implements store.ClientAssertions, as SpendLogin does for logins.
+func (s *Store) SpendAssertion(ctx context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
+	if !expiresAt.After(now) {
+		return store.ErrInvalid
+	}
+	return s.write(ctx, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `INSERT INTO spent_assertions (hash, expires_at) VALUES ($1, $2)
+			ON CONFLICT (hash) DO UPDATE SET expires_at = excluded.expires_at WHERE spent_assertions.expires_at <= $3`,
 			hash[:], ts(expiresAt), ts(now))
 		if err != nil {
 			return err

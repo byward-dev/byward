@@ -117,7 +117,14 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 		}
 	} else if err := errors.Join(looseSecretFiles(cfg)...); err != nil {
 		// buildAuth checks every secret file; without authentication this is the check: the stdio
-		// upstream's env file, or the HTTP upstream's credential.
+		// upstream's env file, the HTTP upstream's credential, the TLS key.
+		return nil, err
+	}
+	tlsConfig, err := servingTLS(cfg, log, time.Now)
+	if err != nil {
+		if a != nil {
+			_ = a.closeStore()
+		}
 		return nil, err
 	}
 	var minter *assertion.Minter
@@ -156,6 +163,7 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 	}
 	s := &Servers{Public: hardened(cfg.Listen, h, log), Health: health.New(log, checks...), background: background,
 		closeStore: closeStore, drainUpstream: up.drain, closeUpstream: up.shutdown}
+	s.Public.TLSConfig = tlsConfig
 	if cfg.InternalListen != "" {
 		mux := http.NewServeMux()
 		mux.Handle("GET /metrics", m.Handler())

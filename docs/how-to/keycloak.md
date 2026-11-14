@@ -61,6 +61,10 @@ The issuer is the realm URL exactly as Keycloak's discovery document states it
 docker run … -v /etc/pki/my-ca.pem:/etc/byward/ca.pem:ro -e SSL_CERT_FILE=/etc/byward/ca.pem …
 ```
 
+The file needs only your CA. Go still reads the image's public bundle in `/etc/ssl/certs`, so
+public IdPs and upstreams keep working. Details, Kubernetes and the pitfalls are in
+[trust a private CA](private-ca.md).
+
 ## 4. A key instead of the secret (`private_key_jwt`)
 
 1. Make an RSA (2048 bits or more) or EC P-256 key: `openssl genpkey -algorithm RSA -pkeyopt
