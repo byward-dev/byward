@@ -164,7 +164,7 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 		for _, w := range redundantStrips(cfg) {
 			r.Checks = append(r.Checks, doctor.CheckConfiguration.Result(doctor.Warn, w.Message, warningFix(w)))
 		}
-		r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy), doctor.TrustStore(trustSettings(), os.ReadFile))
+		r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy), doctor.TrustStore(trustSettings(), os.ReadFile, doctor.CertDirEntries))
 		r.Checks = append(r.Checks, upstreamHopResult(ctx, cfg, o.Resolve)...)
 		r.Checks = append(r.Checks, doctor.CheckAuthentication.Result(doctor.Warn, "authentication is off (BYWARD_INSECURE_NO_AUTH): there is no discovery and no IdP to check", "configure an IdP and remove BYWARD_INSECURE_NO_AUTH before exposing the proxy"))
 		return r, nil
@@ -182,7 +182,7 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 		return r, err
 	}
 	r.Checks = append(r.Checks, servingCertChecks(cfg, pair, o.Now())...)
-	r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy), doctor.TrustStore(trustSettings(), os.ReadFile))
+	r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy), doctor.TrustStore(trustSettings(), os.ReadFile, doctor.CertDirEntries))
 	r.Checks = append(r.Checks, upstreamHopResult(ctx, cfg, o.Resolve)...)
 	if cfg.IdentityHeaders && cfg.UpstreamCommand == nil {
 		r.Checks = append(r.Checks, identityHeadersResult(ctx, cfg.UpstreamURL.Hostname(), o.Resolve))
