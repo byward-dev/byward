@@ -79,6 +79,34 @@ func TestATransportErrorThroughAMisreadProxySettingNeverQuotesItsAddress(t *test
 	}
 }
 
+// A request body over its http.MaxBytesReader limit stays the bare *http.MaxBytesError through a
+// misread proxy, so a server can still answer 413; it quotes no address.
+func TestABodyOverItsLimitThroughAMisreadProxyStaysAMaxBytesError(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0") // the proxy Go dials: it reads the request, so the body is sent
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = c.Close() }()
+		if req, err := http.ReadRequest(bufio.NewReader(c)); err == nil {
+			_, _ = io.Copy(io.Discard, req.Body)
+		}
+	}()
+	addr := ln.Addr().String()
+	body := http.MaxBytesReader(httptest.NewRecorder(), io.NopCloser(strings.NewReader(strings.Repeat("x", 64))), 1)
+	req, _ := http.NewRequest(http.MethodPost, "http://mcp.upstream.example/mcp", body)
+	_, err = Redact(through(addr + "/pw-secret@egress.example:3128")).RoundTrip(req)
+	var mbe *http.MaxBytesError
+	if !errors.As(err, &mbe) || strings.Contains(chain(err), addr) {
+		t.Fatalf("error %v; want a bare *http.MaxBytesError that quotes no address", err)
+	}
+}
+
 // failingDial is a transport through the proxy setting whose dial to the proxy fails with err.
 func failingDial(setting string, err error) *http.Transport {
 	t := through(setting)

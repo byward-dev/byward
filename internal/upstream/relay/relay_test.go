@@ -822,9 +822,10 @@ func TestABodyOverTheLimitIsAnswered413ThroughAMisreadProxyAsThroughAnyOther(t *
 	}{
 		{"a misread proxy", func(addr string) string { return addr + "/pw-secret@egress.example:3128" }},
 		{"a well-formed proxy", func(addr string) string { return "http://" + addr }},
+		{"no proxy", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ln, err := net.Listen("tcp", "127.0.0.1:0") // the "proxy" Go dials: it reads the request, so the body is sent
+			ln, err := net.Listen("tcp", "127.0.0.1:0") // the proxy, or with none the upstream: it reads the request, so the body is sent
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -839,10 +840,15 @@ func TestABodyOverTheLimitIsAnswered413ThroughAMisreadProxyAsThroughAnyOther(t *
 					_, _ = io.Copy(io.Discard, req.Body)
 				}
 			}()
-			pf := (&httpproxy.Config{HTTPProxy: tc.setting(ln.Addr().String())}).ProxyFunc()
-			u, _ := url.Parse("http://mcp.upstream.example/mcp")
+			u, _ := url.Parse("http://" + ln.Addr().String() + "/mcp")
+			proxy := func(*http.Request) (*url.URL, error) { return nil, nil }
+			if tc.setting != nil {
+				u, _ = url.Parse("http://mcp.upstream.example/mcp")
+				pf := (&httpproxy.Config{HTTPProxy: tc.setting(ln.Addr().String())}).ProxyFunc()
+				proxy = func(r *http.Request) (*url.URL, error) { return pf(r.URL) }
+			}
 			var logs bytes.Buffer
-			rl := New(slog.New(slog.NewTextHandler(&logs, nil)), u, withProxy(func(r *http.Request) (*url.URL, error) { return pf(r.URL) }))
+			rl := New(slog.New(slog.NewTextHandler(&logs, nil)), u, withProxy(proxy))
 			limited := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				r.Body = http.MaxBytesReader(w, r.Body, 16) // as the server's body limit does
 				rl.ServeHTTP(w, r)

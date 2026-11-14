@@ -63,9 +63,9 @@ type rpcRequest struct {
 	method string
 }
 
-// parseRequest reads the captured body as one JSON-RPC request. Batches, truncated bodies, and
-// anything that is not a well-formed request return ok=false; decide then reports
-// outcomeUnanswerable.
+// parseRequest reads a body as one JSON-RPC request. Batches and anything that is not a
+// well-formed request return ok=false; decide then reports outcomeUnanswerable. A truncated capture
+// can still parse (cut off in trailing whitespace), so decide refuses it before calling this.
 func parseRequest(body []byte) (rpcRequest, bool) {
 	var m struct {
 		JSONRPC string          `json:"jsonrpc"`
