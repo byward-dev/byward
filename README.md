@@ -97,18 +97,19 @@ Images and archives are signed with cosign and carry build provenance; how to ve
 
 ## Documentation
 
+Every page, grouped by reader: [the docs index](docs/README.md).
+
 - **How-to guides:** [stdio upstreams](docs/how-to/stdio-upstream.md),
   [access gate](docs/how-to/access-gate.md), [CIMD](docs/how-to/cimd.md), [DCR](docs/how-to/dcr.md),
   [state and backups](docs/how-to/state.md), [downstream APIs (On-Behalf-Of)](docs/how-to/downstream-apis.md),
-  [TLS](docs/how-to/tls.md), [all guides](docs/how-to/)
+  [TLS](docs/how-to/tls.md)
 - **Reference:** [settings](docs/reference/settings.md), [commands](docs/reference/commands.md),
   [observability](docs/reference/observability.md), [identity assertion](docs/reference/identity-assertion.md),
   [rate limits](docs/reference/rate-limits.md), [static clients](docs/reference/static-clients.md),
   [packaging](docs/reference/packaging.md)
 - **Design:** [security posture](docs/security-posture.md),
   [scope and non-goals](docs/adr/0001-scope-auth-only-proxy-entra-first-class.md),
-  [all decisions](docs/adr/), [glossary](CONTEXT.md), [feature backlog](docs/features.md),
-  [landscape research](docs/research.md)
+  [all decisions](docs/adr/), [glossary](CONTEXT.md), [landscape research](docs/archive/research.md)
 
 ## Development
 
