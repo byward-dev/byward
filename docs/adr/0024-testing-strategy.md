@@ -1,6 +1,6 @@
 # ADR-0024: Testing strategy — a Docker-free check, a client simulator, conformance three ways
 
-- Status: Accepted
+- Status: Accepted; amended by ADR-0027, and 2026-11-06, 2026-11-07 (#164), 2026-11-14
 - Date: 2026-11-06
 - Issue: #22 (F21)
 
@@ -74,6 +74,9 @@ direct one; opening a sealed token took 0.3 µs, signing the ES256 assertion 17 
    - token-format dispatch never falls back to another validator.
 7. **Invariants are linked to tests:** a table in `docs/quality-lenses.md` maps each invariant to its
    tests, and a test fails when an invariant has none. The table is added with the first tests.
+   _Amended 2026-11-14:_ the table, with its "Tested by" column, is in
+   [`docs/security-posture.md`](../security-posture.md#security-invariants); `docs/quality-lenses.md` keeps the
+   list of invariants.
 8. **Time:** `testing/synctest` and an injected clock; a wall-clock sleep in a test fails review.
 9. **Fuzz targets:** sealed tokens, redirect URIs, CIMD documents, era detection, token-format dispatch.
 10. **Performance:** Go benchmarks on the hot path (token open, deny-list check, `Rewrite`, assertion

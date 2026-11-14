@@ -28,12 +28,14 @@ or the IdP's `error_description`.
 | `remote_ip` | The client address: the TCP peer, or, when the peer is in `BYWARD_TRUSTED_PROXIES`, the rightmost `X-Forwarded-For` entry that is not a trusted proxy. The request log and the rate limits use the same address |
 | `client_id` | The MCP client |
 | `client_trust` | The client's trust level on the consent page: `verified`, `domain` or `not-verified` (ADR-0008 §8) |
-| `user_key` | The IdP user key (`tid:oid` for Entra). Personal data (GDPR Recital 26) |
+| `user_key` | The IdP user key: `tid:oid` for Entra; for an `oidc` IdP, the value of its subject claim (`BYWARD_OIDC_SUBJECT_CLAIM`, `sub` by default). Personal data (GDPR Recital 26) |
 | `grant_id` | The grant (one user's authorization of one client) |
 | `idp` | The IdP, the `BYWARD_IDP` value: `entra`, `oidc`, `google`, `okta`, `auth0` or `keycloak` |
 | `key_id` | A sealing key ID |
 | `host`, `origin` | The rejected `Host` or `Origin` value |
 | `reason` | A fixed reason; for `token_rejected` the OAuth error code |
+| `epoch` | The store epoch; `store_restored` only |
+| `open_streams` | How many open streams the stopped process had; `process_evicted` only, omitted when none |
 | `suppressed` | How many records of the same event from the same `remote_ip` were dropped by the rate limit since the previous one |
 
 Events from requests whose sender is not authenticated (marked *limited* below) are rate-limited per source address,
@@ -56,7 +58,7 @@ For SIEMs that use [OCSF](https://schema.ocsf.io) 1.9.0. Fields map as follows: 
 | `token_issued` | `/token` issued an access token, from an authorization code or a refresh token | success | no | 3002 Authentication / 4 Service Ticket Request |
 | `token_rejected` | `/token` or `/revoke` refused a request (`reason` = OAuth error code) | failure | yes | 3002 Authentication / 4 Service Ticket Request |
 | `access_token_rejected` | an MCP request carried an invalid or expired access token (`reason` = `invalid` or `expired`); a missing token is the normal start of sign-in and is not an event | failure | yes | 3002 Authentication / 99 Other (*approximate*) |
-| `grant_revoked` | a grant was revoked: its authorization code or refresh token was reused, a code was redeemed with the wrong binding, the client revoked a token (`/revoke`), a refresh found the IdP session ended or the user no longer allowed, a refresh came from a client whose metadata document is now refused (`reason` = `client metadata no longer valid`), or the operator ran `revoke-user` (`user_key` set) or `revoke-all` (`reason` = `operator revoke-user` or `operator revoke-all`) | success | no | 3002 Authentication / 2 Logoff; `disposition_id` 24 Access Revoked |
+| `grant_revoked` | a grant was revoked: its authorization code or refresh token was reused, a code was redeemed with the wrong binding, the client revoked a token (`/revoke`), a refresh found the IdP session ended or the user no longer allowed, a refresh came from a client whose metadata document is now refused, or the operator ran `revoke-user` (`user_key` set) or `revoke-all`; `reason` is one of the [values below](#grant_revoked-reasons) | success | no | 3002 Authentication / 2 Logoff; `disposition_id` 24 Access Revoked |
 | `client_registered` | a static client was loaded at startup (`reason` = `static`), or `/register` answered: success with `reason` = `dcr` and the new `client_id`, or failure with `reason` = `invalid_redirect_uri`, `invalid_client_metadata`, `full`, `unavailable` or `rate_limited` ([DCR](../how-to/dcr.md)) | success, failure | only `/register` | 3001 Account Change / 1 Create (*approximate*) |
 | `key_loaded` | a sealing key was loaded at startup (`reason` = `signing` or `verification`) | success | no | 6002 Application Lifecycle / 3 Start (*approximate*) |
 | `host_rejected` | a request named a `Host` outside the allowlist (421) | failure | yes | 4002 HTTP Activity; `disposition_id` 2 Blocked |
@@ -74,9 +76,24 @@ For SIEMs that use [OCSF](https://schema.ocsf.io) 1.9.0. Fields map as follows: 
 | `app_token_accepted` | an app-only caller's Entra token was first used at the MCP endpoint ([app-only callers](../how-to/app-tokens.md)): once per token (its `uti`), with the service principal as `user_key` (`tid:oid`) and its application ID as `client_id`; while 10,000 tokens are tracked, each request with an untracked token is recorded | success | no | 3002 Authentication / 1 Logon (*approximate*) |
 | `app_token_rejected` | an MCP request carried an app-only token that was refused (`reason` = `expired`, `invalid`, `delegated` (a user's token), `keys_unavailable` (the tenant's keys could not be fetched), `revoked` (`revoke-user`), `deny_list_stale`, or `denied_role`, `denied_client`, `denied_tenant` (the app gate, answered with 403)); `user_key` and `client_id` only once the token passed every check of its own (the `denied_*`, `revoked` and `deny_list_stale` reasons) | failure | yes | 3002 Authentication / 1 Logon (*approximate*) |
 
-Not emitted yet; these arrive with their slices:
-dynamic registration (slice 2.2) and key rotation
-(later).
+Not emitted: a key rotation as such. Keys are read at startup, and each one loaded is a `key_loaded` record.
+
+### `grant_revoked` reasons
+
+| `reason` | Why |
+|---|---|
+| `authorization code reused; grant revoked` | an authorization code was presented a second time |
+| `authorization code redeemed with the wrong binding; grant revoked` | a code was redeemed with another client, redirect URI or PKCE verifier |
+| `refresh token reused; grant revoked` | a rotated refresh token was presented after its grace period |
+| `the client revoked a token (RFC 7009)` | the client called `/revoke` |
+| `client metadata no longer valid` | a refresh came from a CIMD client whose metadata document is now refused |
+| `the grant holds no usable IdP refresh token; grant revoked` | a refresh found no IdP refresh token to use |
+| `the IdP ended the session; grant revoked` | the IdP refused the refresh: the user's session there is over |
+| `the IdP returned no ID token on refresh; grant revoked` | the IdP's refresh answer had no ID token, so the user could not be checked again |
+| `the IdP returned another user on refresh; grant revoked` | the refreshed ID token named another subject or issuer |
+| `the access gate refused the user on refresh; grant revoked` | the user no longer passes the access gate |
+| `operator revoke-user` | `byward revoke-user`; `user_key` names the user |
+| `operator revoke-all` | `byward revoke-all` |
 
 ## Metrics
 
@@ -85,7 +102,7 @@ Prometheus text format at `/metrics` on the internal listener. Histogram buckets
 
 | Metric | Type | Labels |
 |---|---|---|
-| `byward_http_request_duration_seconds` | histogram | `route`: the matched route pattern (`/mcp` or your public path, `/authorize`, `/consent`, `/assets/page.css`, `/callback/entra`, `/token`, `/revoke`, the `/.well-known/…` metadata paths) or `other`; `status_class` (`2xx` …) |
+| `byward_http_request_duration_seconds` | histogram | `route`: the matched route pattern (`/mcp` or your public path, `/authorize`, `/consent`, `/assets/page.css`, `/callback/{idp}`, `/token`, `/revoke`, `/register`, the `/.well-known/…` metadata paths, `GET /.well-known/jwks.json`) or `other`; `status_class` (`2xx` …) |
 | `byward_idp_request_duration_seconds` | histogram | `idp`, `operation` (`authorize`, `callback`, `refresh`), `outcome` (`success`, `rejected`, `unavailable`) |
 | `byward_idp_alerts_total` | counter | `idp`, `operation` (`authorize`, `callback`, `refresh`, `on_behalf_of`), `reason`: IdP errors that will not clear without the operator: `credential_rejected` (the IdP refuses the proxy's client credential or client ID: `invalid_client` or `unauthorized_client` from the token endpoint, an expired secret, an unregistered app), `credential_unusable` (the proxy could not build its credential: an unreadable certificate, key or federated token file), `protocol` (the IdP answered against the protocol, such as a success without tokens). Every series is exported at 0 from the start (`on_behalf_of` only with On-Behalf-Of on), so `increase()` sees the first one. Alert on any increase |
 | `byward_upstream_in_flight` | gauge | `kind` (`request`, `stream`) |
@@ -100,8 +117,8 @@ Prometheus text format at `/metrics` on the internal listener. Histogram buckets
 | `byward_app_tokens_total` | counter | `outcome`: every app-only token at the MCP endpoint: `accepted`, or the `app_token_rejected` reasons |
 | `byward_build_info` | gauge | `version`, `go_version`; always 1 |
 
-Plus the standard `go_*` and `process_*` collectors. Deny-list sync age and store errors arrive
-with their slices.
+Plus the standard `go_*` and `process_*` collectors. There is no metric for the deny list's sync age
+or for store errors: a store that fails turns `/readyz` to 503 (below) and is logged.
 
 Example alert rules:
 
@@ -130,6 +147,12 @@ groups:
 | `GET /readyz` | ready for traffic: configuration loaded, a signing key present, the store reachable | a check fails, or the proxy is shutting down (`"draining":"fail"`) |
 
 The body is JSON, e.g. `{"status":"ok","checks":{"keys":"ok","store":"ok"}}`. Check errors go to the log, not the body.
+
+| Check | Fails when | Fix |
+|---|---|---|
+| `keys` | no sealing key signs | add a key to `BYWARD_KEYS_DIR` ([sealing keys](../how-to/sealing-keys.md)) |
+| `store` | the store does not answer a ping | the SQLite state directory or the PostgreSQL database; the log names the error |
+| `draining` | the proxy is shutting down | none: it is stopping |
 **The IdP is not part of readiness:** MCP requests are validated locally, so an IdP outage must not take every replica
 out of service. Watch IdP health in `byward_idp_request_duration_seconds{outcome="unavailable"}`.
 
@@ -173,7 +196,9 @@ IdP sign-in failures log the IdP's error code (`idp_error_code`, the AADSTS numb
 `correlation_id`; with Entra, `correlation_id` equals our `request_id`, so a user's reference finds both logs.
 
 An IdP error counted in `byward_idp_alerts_total` is also logged once, at error level, as its own line
-`IdP alert: the operator must act` with `idp`, `operation`, `alert` (the reason) and the fix in `reason`. For
+`IdP alert: the operator must act` with `idp`, `operation`, `alert` (the reason, as in the metric) and the fix in `reason`
+(so `reason` here holds the fix, not a reason code), for example
+`{"level":"ERROR","msg":"IdP alert: the operator must act","idp":"entra","operation":"refresh","alert":"credential_rejected","reason":"<the fix>"}`. For
 On-Behalf-Of that is once per exchange with the IdP, however many requests were waiting on it; each refused request's
 line, and each refused token-socket ask's line, also carries `alert`. A log-based alert can match on that message or on `alert` being present. An error in the
 IdP's callback query never counts: a browser can forge it, so only the token endpoint's answer can say the proxy's

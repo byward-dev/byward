@@ -1,6 +1,6 @@
 # ADR-0001: Scope — auth-only proxy, public OSS, Entra as first-class
 
-- Status: Accepted
+- Status: Accepted; amended 2026-11-06
 - Date: 2026-11-05
 
 ## Context

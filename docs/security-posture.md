@@ -1,7 +1,8 @@
 # Security posture
 
 For security reviewers. What byward guarantees, what it does not, and where each claim is
-enforced and tested. This page describes `main` as of 2026-11-06 (pre-release, 0.y.z). Items marked
+enforced and tested. This page describes `main` as of 2026-11-14: the v0.2 line (v0.2.0-rc.1 is
+the latest release) plus the PostgreSQL store, which is not released yet. Items marked
 **planned** are not built yet. Terms follow [CONTEXT.md](../CONTEXT.md). To deploy it, see
 [Harden a deployment](how-to/harden-a-deployment.md).
 
@@ -61,7 +62,9 @@ OpenID Connect IdP ([OIDC how-to](how-to/oidc.md)), one per proxy.
   calls it.
 - **Rate-limit MCP traffic.** Only the OAuth endpoints are rate-limited. MCP requests are capped in
   flight: 64 requests and 256 streams, then 503.
-- **Terminate TLS.** TLS ends at your ingress or reverse proxy ([ADR-0019](adr/0019-packaging.md) §9).
+- **Choose where TLS ends.** At your ingress or reverse proxy, or at byward with your certificate
+  (`BYWARD_TLS_CERT_FILE`, see the threat model below; [ADR-0019](adr/0019-packaging.md) §9 as
+  amended). byward never obtains a certificate itself.
 
 ## Threat model
 
@@ -76,8 +79,9 @@ OpenID Connect IdP ([OIDC how-to](how-to/oidc.md)), one per proxy.
 | Eavesdropping on the hop from the ingress to the proxy | That hop carries bearer tokens. Either keep it private, or have byward terminate TLS with the operator's certificate (`BYWARD_TLS_CERT_FILE`, `BYWARD_TLS_KEY_FILE`). TLS 1.2 or later. The key file passes the secret-file permission check. A replaced pair is served from the next handshake, never one that does not load, match or validate, and no certificate in the chain may be expired or not yet valid. Startup refuses a pair it cannot serve, and an `http` public URL with TLS on. It warns 30 days before the chain's first expiry and when the certificate covers none of the proxy's hosts; `doctor` reports the files on disk. The issuer, cookies and HSTS still come from `BYWARD_PUBLIC_URL` alone. No ACME. An ingress that does not verify the certificate gets encryption without authentication ([Serve TLS at the proxy](how-to/tls.md)). | `internal/servingcert`, `internal/server/wire_tls.go`, `internal/config/config_tls.go` |
 | DNS rebinding and cross-site requests to the MCP endpoint | `Host` is checked against an allowlist on the public listener (421), and on the internal listener only IP addresses, `localhost` and listed names pass (421). `Origin` on the MCP endpoint is checked against an exact list (403). Both checks run before authentication. | `internal/origin/origin.go` |
 | SSRF | Client-supplied URLs (CIMD documents, and the `jwks_uri` of CIMD and DCR clients) are fetched only through the SSRF guard: `https` on port 443, public addresses only, checked when the connection is dialled (after DNS resolution, so a rebinding name cannot slip through), no redirects, no environment proxy, 5 KB and 5 s ([ADR-0008](adr/0008-client-registration.md) §4). Static clients have no `jwks_uri`. Entra endpoints are built from the fixed `https://login.microsoftonline.com` authority and the configured tenant. An OIDC IdP's endpoints come from the discovery document of the configured issuer, whose `issuer` must match exactly; the issuer and every endpoint must be `https` outside `--dev`. The IdP is the operator's, so it is reached directly, not through the SSRF guard: a self-hosted IdP on a private address works. The IdP fetcher follows no redirects, bounds bodies and times out after 5 s. Every outbound TLS connection, the guard's included, trusts Go's system roots, which take any CA the operator adds through `SSL_CERT_FILE` or `SSL_CERT_DIR` ([private CA](how-to/private-ca.md)). | `internal/ssrfguard`, `internal/server/wire.go`, `internal/idp/fetch.go`, `internal/idp/entra/entra.go` |
-| Abuse of OAuth endpoints | Per-address token buckets apply on `/authorize`, `/consent`, `/callback/entra`, `/token`, `/revoke` and `/register`, with IPv6 grouped by /64. Open registration has its own controls (**Dynamic client registration** under [Token model](#token-model)). Request bodies are bounded. Every `http.Server` timeout is set. | `internal/ratelimit`, `internal/broker/register.go`, `internal/server/run.go` |
+| Abuse of OAuth endpoints | Per-address token buckets apply on `/authorize`, `/consent`, `/callback/{idp}`, `/token`, `/revoke` and `/register`, with IPv6 grouped by /64. Open registration has its own controls (**Dynamic client registration** under [Token model](#token-model)). Request bodies are bounded. Every `http.Server` timeout is set. | `internal/ratelimit`, `internal/broker/register.go`, `internal/server/run.go` |
 | Eavesdropping on the hop to an HTTP upstream | The proxy accepts an `http` upstream, so a deployment on a private network needs no certificate. Startup and `byward doctor` warn when the upstream is `http` at a public address (`check --offline` when it is given as one), and name the secrets that would travel in clear (the identity assertion, the upstream credential, an On-Behalf-Of token). A private address is not checked further: the operator keeps the hop private ([Harden a deployment](how-to/harden-a-deployment.md#protect-the-upstream-hop)). An upstream redirect is answered with 502, never passed to the MCP client, so a client is not sent to the upstream's own address. `doctor` names an environment HTTP proxy the hop goes through. | `internal/server/upstreamhop.go`, `internal/upstream/relay/relay.go` |
+| Eavesdropping on, or impersonation of, the PostgreSQL store; a restored copy of it | With `BYWARD_STORE_POSTGRES_DSN_FILE`, the connection must be `sslmode=verify-full` for every host: the server's name and chain are checked, and plaintext, a Unix socket and the weaker modes are refused at startup, judged after pgx has read its `PG*` environment and files (only `--dev` relaxes this). The DSN is a secret file, never logged or quoted in an error. A database restored from an older copy is found while the replicas run, and a new store epoch refuses the refresh tokens it brought back ([ADR-0007](adr/0007-state-and-storage.md), #227 amendment). | `internal/store/postgres/dsn.go`, `internal/store/postgres/restore.go` |
 | One user's stdio upstream process reads another user's data | Each legacy MCP session, or each user in the 2026-07-28 era, gets its own process, and `{session_dir}` gives each process its own directory (invariant 13). **This is a separation, not a sandbox:** every process runs as byward's own uid. Any upstream process can read another's files and its environment (`/proc/<pid>/environ` needs only the same uid), and, on a host that allows ptrace between processes of one uid (`kernel.yama.ptrace_scope` 0), its memory. The operator closes the memory path with `ptrace_scope` 1 or higher and runs untrusted upstream servers in their own container or VM ([Harden a deployment](how-to/harden-a-deployment.md#isolate-stdio-upstream-processes)). | `internal/upstream/stdio` |
 
 **Out of scope:** a compromised upstream, which receives every MCP request and answer. Also out of
@@ -104,7 +108,7 @@ keep them (AGENTS.md). Status on `main`:
 | 11 | Keys from the operator, never derived or ephemeral; rotation keeps verify-only keys | `internal/token/keyring.go` (directory of key files; startup fails without one) | `TestMissingOrEmptyKeyDirectoryRefusesToStart`, `TestRotationKeepsOldTokensUntilTheirKeyIsRemoved` |
 | 12 | Every relaxation is an explicit flag, logged at startup | `internal/config/config.go` (`Relaxations`), `cmd/byward/main.go` | `TestDevModeLogsEachRelaxation`, `TestNoAuthLogsThatAuthIsOffAndTheNextStep` |
 | 13 | Legacy MCP sessions bound to the user; one upstream process per user | **Met for HTTP upstreams with authentication:** the upstream's `Mcp-Session-Id` is replaced by a sealed value bound to the user and the upstream; another user's, tampered or expired IDs get 404 and a `session_rejected` audit record (`internal/mcpsession`). It holds at the wire level too: the relay never lets the upstream switch protocols (a client's `Upgrade` is dropped; an upstream's 101 is answered 502, and an HTTP/2 upstream's interim 101 is dropped) and drops every upstream response trailer, so the upstream's `Mcp-Session-Id` never reaches the MCP client past the binding; an informational (1xx) response carries only `Link` and the sealed `Mcp-Session-Id`, and the proxy's own headers (CORS, `X-Request-Id`) still reach the final response after one (`internal/upstream/relay/relay.go`, #168, #176). Without authentication there is no user to bind to. **Met for stdio upstreams in the legacy era:** one process per MCP session, keyed by a proxy-issued session ID that is sealed the same way, and the process manager refuses a key bound to another user (`internal/upstream/stdio`). **Met for stdio in the modern era:** one process per user (keyed by issuer and subject); requests of the user's several clients share it under proxy-assigned ids and progress tokens, so answers reach only their own stream, and ambiguous JSON is refused (`internal/upstream/stdio/modern.go`, `rewrite.go`) | `TestALegacySessionIsBoundToTheUserWhoStartedIt`, `TestAnUpstreamSessionSentAsATrailerNeverReachesTheClient`, `TestRelayDropsUpstreamTrailers`, `TestAClientsUpgradeRequestNeverReachesTheUpstream`, `TestAnUpstreamThatSwitchesProtocolsGetsTheClientA502`, `TestAnUpstreamsInformationalResponsesCarryOnlyLinkAndTheSession`, `TestTheProxysOwnHeadersSurviveAnUpstreamsInformationalResponse`, `TestTheProxysOwnHeadersSurviveATimeoutAfterAnInformationalResponse`, `TestAnInterimSwitchingProtocolsIsNeverForwarded`, `TestAnUpstreamsEarlyHintsReachTheClientSealedAndClean`, `TestASessionThatIsNotTheCallersGets404AndNeverReachesTheUpstream`, `TestEachStdioMCPSessionIsItsOwnUpstreamProcessBoundToItsUserWithNoTokenOrProxySetting`, `TestKeyIsBoundToOneUser`, `TestModernEraRequestsRunInTheUsersOwnUpstreamProcessWithNoToken`, `TestConcurrentClientsOfOneUserGetOnlyTheirOwnResponsesAndProgress`, `FuzzLocateAndReplace` |
-| 14 | Size, time and count limits | Static clients file (1000 clients, 1 MiB); body limits; token length 2 KiB; consent answer table 10,000 | `TestLoadStaticRejects`, `TestBodyOverLimitIs413AndAtLimitPasses` |
+| 14 | Size, time and count limits | Static clients file (1000 clients, 1 MiB); body limits; token length 16 KiB; consent answer table 10,000 | `TestLoadStaticRejects`, `TestBodyOverLimitIs413AndAtLimitPasses` |
 | 15 | Errors never echo secrets or upstream internals | Fixed error strings (`internal/broker/token.go`); upstream errors and redirects become 502 `upstream unavailable` (`relay.go`), and an error through an environment proxy whose setting Go misread is reported by its cause, never quoting the address Go dialled from the credentials: the relay's logs, every IdP call (`internal/idp`, through `envproxy.Redact`), doctor's self-probe and trace export errors (`internal/tracing`), and an upstream that sends no headers in time a fixed JSON-RPC timeout error (`timeout.go`); panics give a bare 500 | `TestRelayHidesUpstreamErrors`, `TestAMisreadProxySettingNeverReachesTheUpstreamErrorLogAndAWellFormedProxysErrorStillDoes`, `TestATransportErrorThroughAMisreadProxySettingNeverQuotesItsAddress`, `TestTheIdPClientNeverQuotesAMisreadEnvironmentProxy`, `TestDoctorsSelfProbeNeverQuotesAMisreadEnvironmentProxyAndTheUpstreamLineWarnsOfIt`, `TestAFailedTraceExportNeverQuotesAMisreadEnvironmentProxy`, `TestAnUpstreamRedirectGetsTheClientA502AndTheLogWhereItPointed`, `TestStalledUpstreamIsAnsweredAndDropped`, `TestRecovererHidesPanicDetails`, `TestErrorPageEscapesInputAndIsLockedDown` |
 | 16 | `ReverseProxy.Rewrite` only; identity and forwarding headers stripped; request trailers dropped | `internal/upstream/relay/relay.go` (`Authorization`, `DPoP`, `Forwarded`, `Origin`, `X-Forwarded-*`, `Sec-Fetch-*`, and the operator's `BYWARD_UPSTREAM_STRIP_HEADERS`, matching `_` as `-`; every request trailer). The operator's list may not name a header MCP needs (`internal/config/config_upstream.go`) | `TestRelayForwardsBodyVerbatimAndStripsProxyHeaders`, `TestAClientsRequestTrailersNeverReachTheUpstream`, `TestATrailerNamedLikeAProxySetHeaderNeverReachesTheUpstream`, `TestAnOperatorListedHeaderNeverReachesTheUpstreamInAnySpellingAndEveryOtherHeaderStillDoes`, `TestAListedHeaderNeverReachesTheUpstreamButTheProxysCredentialStillDoes`, `TestTheUpstreamStripListRefusesWhatCannotBeStripped` |
 | 17 | `Origin` (403) and `Host` (421) before authentication; default bind `127.0.0.1` | `internal/origin/origin.go`, wired outermost in `internal/server/server.go`; default `127.0.0.1:8080` | `TestChecksRunBeforeAuthentication`, `TestHostOutsideAllowlistGets421`, `TestInternalListenerAcceptsAddressesAndListedNamesOnly`, `TestOriginOutsideAllowlistGets403`, `TestNewConfiguresHardenedLimitsAndLoopbackBind` |
@@ -113,16 +117,16 @@ keep them (AGENTS.md). Status on `main`:
 
 ## Secure defaults
 
-- **Authentication is on.** Without the Entra settings, `BYWARD_KEYS_DIR` and
-  `BYWARD_STATIC_CLIENTS_FILE`, the proxy refuses to start (exit 2). It never silently runs
-  without auth.
+- **Authentication is on.** Without an IdP configured (Entra or an `oidc` IdP) and a sealing key, the
+  proxy refuses to start (exit 2). It never silently runs without auth; only the explicit
+  `BYWARD_INSECURE_NO_AUTH` turns it off, on loopback.
 - Both listeners bind to loopback: public on `127.0.0.1:8080`, internal (metrics and probes) on
   `127.0.0.1:9090`. The two must differ.
 - The public URL must be `https`. `http` is allowed only for a loopback host, with `--dev` or
   `--insecure-no-auth`.
 - Secrets are read only from files (`*_FILE`, `--*-file`). An inline secret refuses to start
-  unless `--dev` is set, and so does a secret file its group or others can read, unless it is on a
-  read-only mount.
+  unless `--dev` is set, and so does a secret file (a setting's `*_FILE`, or the TLS key; not a sealing
+  key) its group or others can read, unless it is on a read-only mount.
 - The `Origin` allowlist on the MCP endpoint is empty: only the proxy's own origin and clients that
   send no `Origin` pass. No `X-Forwarded-For` is trusted until you set
   `BYWARD_TRUSTED_PROXIES`.
@@ -156,7 +160,7 @@ is logged as a warning at every start.
 
 | Artifact | Form | Lifetime | Notes |
 |---|---|---|---|
-| Access token (`byw_at_…`) | Sealed AES-256-GCM, random 96-bit nonce; claims: grant ID, subject, `iat`, `exp`; key ID and format version in the header | 1 h, capped at the grant's expiry; 30 s clock leeway | Validated without a store read: open → time → deny list |
+| Access token (`byw_at_…`) | Sealed AES-256-GCM, random 96-bit nonce; claims: grant ID, subject, `iat`, `exp`, and the client ID and the asserted roles, groups, email (with whether it is verified) and name when there are any; key ID and format version in the header. The client holds it but cannot read it | 1 h, capped at the grant's expiry; 30 s clock leeway | Validated without a store read: open → time → deny list |
 | Authorization code (`byw_ac_…`) | Sealed as above, plus a single-use row in the store | 60 s | Reuse, or redemption with the wrong client, redirect URI or verifier, revokes the grant |
 | Refresh token (`byw_rt_…`) | 32 random bytes; only the SHA-256 hash is stored | 30 days absolute, 14 days idle | Issued only with `offline_access`. Rotated on every use. The previous token is accepted again within 30 s; any other reuse revokes the grant. Every refresh also refreshes the IdP tokens and re-runs the gate. |
 | IdP tokens | Sealed with the same key ring, purpose `idp-tokens` as associated data | Up to the grant's expiry | Deleted with the grant. Never sent to the client. |
@@ -278,6 +282,9 @@ the client and redirect URI again. This is accepted behaviour, not a gap: no tok
 | Consent answer table is per replica, in memory, capped at 10,000 | Double-submit protection holds within one process. A full table forgets the newest flow. It matters only with several replicas, on the PostgreSQL store. | No issue (`internal/broker/answers.go`) |
 | Refresh drops the IdP's new tokens when sealing them fails | Kept when the gate cannot decide or the store fails to rotate (#92); a sealing failure leaves nothing safe to store. Fails closed: an unneeded sign-in with IdPs that revoke rotated refresh tokens. Entra is not affected. | `internal/broker/refresh.go` |
 | A span limit setting that is not a number is printed with its value | `go.opentelemetry.io/auto/sdk` v1.2.1 (`limit.go`), linked in through `go.opentelemetry.io/otel`, reads `OTEL_ATTRIBUTE_COUNT_LIMIT`, `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT` and the `OTEL_SPAN_*`, `OTEL_EVENT_*` and `OTEL_LINK_*` limits when the process starts, even with tracing off. It warns about a non-integer value, value included, through Go's default logger to stderr, before byward can install its own logger. These settings hold numbers; a credential lands there only if pasted into the wrong one. | Upstream: [open-telemetry/opentelemetry-go-instrumentation#3952](https://github.com/open-telemetry/opentelemetry-go-instrumentation/issues/3952); found in #274 |
+| One key ring for every purpose | Access tokens, codes, IdP tokens, login cookies and consent flows are sealed with the same keys, each purpose bound as associated data. ADR-0006 §8 asks for a separate key per purpose. | ADR-0006 §8 (Keys, above) |
+| Token lifetimes are fixed | Access token 1 h, refresh token 30 days absolute and 14 days idle, codes 60 s: constants, with no setting, although ADR-0006 §5 allows configuring them within bounds. | ADR-0006 §5; `internal/broker/broker.go` |
+| Failed client authentication is not throttled per client | The `/token` limit is per address only; a client secret or client assertion guessed from many addresses is limited by the address budgets alone. | [Rate limits](reference/rate-limits.md) |
 | stdio upstream processes share byward's uid | One user's process can read another user's files and environment, and on a `ptrace_scope` 0 host their memory. byward offers no per-user uid or sandbox for them; the operator isolates by host settings and separate containers or VMs. | #182 |
 
 ## Dependencies and supply chain
@@ -286,9 +293,14 @@ Direct modules (`go.mod`):
 
 | Module | Version | Purpose |
 |---|---|---|
+| `code.dny.dev/ssrf` | v0.3.0 | The SSRF guard's dial-time address check for client-supplied URLs (`internal/ssrfguard`) |
 | `github.com/go-jose/go-jose/v4` | v4.1.6 | Verifying IdP ID tokens, client assertions and the JWKS. The only JOSE/OIDC library: no go-oidc, no x/oauth2 ([ADR-0026](adr/0026-idp-adapters-go-jose-only.md)). |
 | `golang.org/x/net` | v0.62.0 | `idna`: shows punycode on the consent page |
 | `modernc.org/sqlite` | v1.61.0 | The pure-Go SQLite store (the default store). |
+| `github.com/jackc/pgx/v5` | v5.12.0 | The PostgreSQL store, for several replicas (`internal/store/postgres`) |
+| `golang.org/x/sys` | v0.49.0 | The peer credentials of a stdio process asking the token socket (`internal/upstream/stdio`) |
+| `github.com/go-logr/logr` | v1.4.4 | Routes the tracing SDK's own errors into byward's log (`internal/tracing`) |
+| `github.com/modelcontextprotocol/go-sdk` | v1.8.0 | Tests only: the real-client and assertion-contract tests |
 | `github.com/prometheus/client_golang` | v1.25.0 | `/metrics` |
 | `go.opentelemetry.io/otel`, `…/sdk`, `…/trace`, `contrib/exporters/autoexport` | v1.47.0 / v0.72.0 | Traces, used only when `OTEL_TRACES_EXPORTER` is set |
 
@@ -309,8 +321,8 @@ Proxy-token cryptography is the Go standard library only: `crypto/aes`, `crypto/
   digest, with a 14-day cooldown.
 - golangci-lint includes `gosec`.
 
-Verification commands are in [packaging](reference/packaging.md#verifying-a-release). No release
-has been published yet (#67).
+Verification commands are in [packaging](reference/packaging.md#verifying-a-release); releases
+are on [GitHub](https://github.com/byward-dev/byward/releases).
 
 ## Reporting a vulnerability
 

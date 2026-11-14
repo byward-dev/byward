@@ -1,6 +1,6 @@
 # ADR-0019: Packaging — a signed container image and Linux binaries for servers
 
-- Status: Accepted
+- Status: Accepted; amended 2026-11-13 (#183)
 - Date: 2026-11-06
 - Issue: #20 (F19)
 
@@ -40,7 +40,7 @@ Developer Program. It is not how operators install this proxy.
    the image fails with an error naming the `COPY --from` pattern.
 4. **Binaries:** goreleaser archives for linux amd64/arm64 (supported) and darwin amd64/arm64
    (development only), with checksums, syft SBOM, cosign bundles and build provenance. `go install`
-   works. **No Windows in v0.1.**
+   works. **No Windows build.**
 5. **Supply chain:** GitHub Actions pinned by SHA; tools pinned in `mise.toml` and at least two weeks
    old; reproducible builds (`-trimpath`, `-buildvcs=true`, `SOURCE_DATE_EPOCH`) checked by a rebuild in
    CI; a dependency licence check, with LICENSE, NOTICE and third-party licence texts in archives and the
@@ -65,7 +65,7 @@ Developer Program. It is not how operators install this proxy.
   guide says to back up first, because rolling back the image alone does not work.
 - Persona P1 becomes a solo operator on a VM or Docker host (`docs/quality-lenses.md`).
 - Later: Homebrew cask (with a signing identity), Windows (Job Objects for stdio process trees),
-  deb/rpm, Helm, a node image with an owner, TLS file flags.
+  deb/rpm, Helm, a node image with an owner. (TLS file flags shipped with #183, see the amendment.)
 
 ## Considered options
 

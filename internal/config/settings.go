@@ -130,8 +130,24 @@ func reference() string {
 		}
 		fmt.Fprintf(&b, "| `%s` | `%s` | %s | %s |\n", flagName, env, def, s.Help)
 	}
-	b.WriteString("\nActions: `--version [--json]`, `--print-config`, `--help`.\n")
-	b.WriteString("Commands (`check --offline`, `doctor`, `init entra`): [commands reference](commands.md).\n\n")
-	b.WriteString("Exit codes: 0 success, 1 runtime error, 2 configuration error; `doctor` adds 4, 8 and 12.\n")
+	b.WriteString("\nActions: `--version [--json]`, `--print-config`, `--help` ([proxy actions](commands.md#proxy-actions)).\n")
+	b.WriteString("Commands: [commands reference](commands.md).\n\n")
+	b.WriteString("Exit codes: 0 success, 1 runtime error, 2 configuration error; `doctor` adds 4, 8 and 12.\n\n")
+	b.WriteString(otherEnvironment)
 	return b.String()
 }
+
+// otherEnvironment is the reference's list of environment variables that are not settings: read
+// by Go or a library the proxy uses, or set by the proxy for a stdio upstream process.
+const otherEnvironment = `## Other environment variables
+
+These are not settings, so ` + "`--print-config`" + ` does not show them.
+
+| Variable | Read or set by | Meaning |
+|---|---|---|
+| ` + "`OTEL_*`" + ` | the proxy, through the OpenTelemetry SDK | traces, off unless ` + "`OTEL_TRACES_EXPORTER`" + ` is set ([observability](observability.md)) |
+| ` + "`SSL_CERT_FILE`, `SSL_CERT_DIR`" + ` | the proxy, through Go | the CAs it trusts for outbound TLS: the IdP, the upstream, an MCP client's CIMD document and ` + "`jwks_uri`" + `, and the PostgreSQL store when its DSN has no ` + "`sslrootcert`" + ` ([private CA](../how-to/private-ca.md)) |
+| ` + "`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`" + ` | the proxy, through Go | the environment proxy: the relay to an HTTP upstream, IdP calls, doctor's self-probe and trace export go through it ([doctor](commands.md#checks) names it) |
+| ` + "`BYWARD_SUBJECT`, `BYWARD_ISSUER`, `BYWARD_PRINCIPAL_TYPE`" + ` | set by the proxy for a stdio upstream process | who the process acts for ([stdio upstream](../how-to/stdio-upstream.md)) |
+| ` + "`BYWARD_DOWNSTREAM_TOKEN_SOCKET`" + ` | set by the proxy for a stdio upstream process, read by ` + "`byward downstream-token`" + ` | the token socket the process asks for its user's downstream token |
+`

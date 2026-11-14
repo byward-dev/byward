@@ -1,6 +1,6 @@
 # ADR-0022: Machine-to-machine — accept Entra app-only tokens, opt-in, in v0.1
 
-- Status: Accepted
+- Status: Accepted; amended 2026-11-06 (release), 2026-11-07 (#64)
 - Date: 2026-11-06
 - Issue: #16 (F15)
 

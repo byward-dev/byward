@@ -1,6 +1,6 @@
 # ADR-0002: Repository structure optimised for coding agents
 
-- Status: Accepted
+- Status: Accepted; amended 2026-11-14
 - Date: 2026-11-05
 
 ## Context
@@ -37,6 +37,9 @@ names.
 8. **Committed `.claude/settings.json`:** format hook + read-mostly allowlist; merges and
    pushes always ask. Project skills (`add-idp-adapter`, …) are written after the second
    adapter exists, not before. `.mcp.json` added once `mise run dev` exists.
+   _Amended 2026-11-14:_ several adapters exist (`internal/idp/*`, `internal/store/*`), and no
+   project skill has been written yet; the review sweeps AGENTS.md names run from skills outside
+   the repository.
 9. **`CONTEXT.md` seeded** with the terms that collide in this domain (client, upstream,
    token, broker).
 10. **License:** Apache-2.0, matching agentgateway, Pomerium, ToolHive, dex, Envoy.

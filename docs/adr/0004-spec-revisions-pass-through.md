@@ -1,6 +1,6 @@
 # ADR-0004: Spec revisions — serve both eras, pass through, never translate
 
-- Status: Accepted
+- Status: Accepted; amended by ADR-0007, and 2026-11-06 (#61), 2026-11-07 (#168)
 - Date: 2026-11-05
 - Issue: #3 (F2)
 

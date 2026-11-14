@@ -1,6 +1,6 @@
 # ADR-0018: Hardening — Origin and Host checks, bounded HTTP, Rewrite-only proxying
 
-- Status: Accepted
+- Status: Accepted; amended 2026-11-06 (#102, #103, #105), 2026-11-07 (#167)
 - Date: 2026-11-06
 - Issue: #18 (F17)
 

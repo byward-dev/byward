@@ -102,21 +102,23 @@ Images and archives are signed with cosign and carry build provenance; how to ve
   [state and backups](docs/how-to/state.md), [downstream APIs (On-Behalf-Of)](docs/how-to/downstream-apis.md),
   [TLS](docs/how-to/tls.md), [all guides](docs/how-to/)
 - **Reference:** [settings](docs/reference/settings.md), [commands](docs/reference/commands.md),
-  [observability](docs/reference/observability.md)
-- **Design:** [scope and non-goals](docs/adr/0001-scope-auth-only-proxy-entra-first-class.md),
+  [observability](docs/reference/observability.md), [identity assertion](docs/reference/identity-assertion.md),
+  [rate limits](docs/reference/rate-limits.md), [static clients](docs/reference/static-clients.md),
+  [packaging](docs/reference/packaging.md)
+- **Design:** [security posture](docs/security-posture.md),
+  [scope and non-goals](docs/adr/0001-scope-auth-only-proxy-entra-first-class.md),
   [all decisions](docs/adr/), [glossary](CONTEXT.md), [feature backlog](docs/features.md),
   [landscape research](docs/research.md)
 
 ## Development
 
-Requires [mise](https://mise.jdx.dev). Then install the tools CI uses and run the checks:
+Requires [mise](https://mise.jdx.dev) and the tools CI's `check` job uses, listed in
+[CONTRIBUTING.md](CONTRIBUTING.md#making-a-change), which also says why `azure-cli` is not needed here.
+Then run the checks:
 
 ```sh
-mise install go golangci-lint go:golang.org/x/tools/cmd/goimports actionlint zizmor shellcheck go:github.com/google/go-licenses/v2
 mise run check
 ```
-
-Details, including why `azure-cli` is not needed here: [CONTRIBUTING.md](CONTRIBUTING.md#making-a-change).
 
 ## Contributing
 

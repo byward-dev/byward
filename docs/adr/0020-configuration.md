@@ -56,8 +56,8 @@ variables.
 - Setting names and the static-clients file format are public interface, versioned through the
   registry's `since` and deprecation fields.
 - Kubernetes secret rotation needs a rollout; that is the supported path.
-- Later: a JSON Schema if a config file is ever added; reloading TLS certificate files if the proxy
-  terminates TLS.
+- Later: a JSON Schema if a config file is ever added. (Reloading TLS certificate files shipped with
+  #183: a replaced file is served from the next connection on, ADR-0019's amendment.)
 
 ## Considered options
 

@@ -1,6 +1,6 @@
 # ADR-0003: Upstream kinds — HTTP relay; stdio processes never shared between users
 
-- Status: Accepted
+- Status: Accepted; amended by ADR-0025
 - Date: 2026-11-05
 - Issue: #2 (F1)
 

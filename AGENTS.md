@@ -22,6 +22,7 @@ All tools are pinned in `mise.toml`; `mise run` resolves them, no shell activati
 | Integration tests (Docker) | `mise run test:integration` |
 | **Everything CI runs** | `mise run check` |
 | Release build and smoke test, no publish (Docker) | `mise run release:smoke` |
+| Add or change a setting | edit `internal/config/settings.go`, then `BYWARD_UPDATE_REFERENCE=1 go test ./internal/config/` |
 
 **Run `mise run check` before claiming a change is done.** CI runs the same task.
 
@@ -31,7 +32,8 @@ All tools are pinned in `mise.toml`; `mise run` resolves them, no shell activati
 
 - **When:** once the code is complete, never mid-implementation, and before asking for the merge
   slot.
-- **How much:** the coordinating session sets the tier when it hands out the work.
+- **How much:** the coordinating session sets the tier when it hands out the work; without one, take
+  the tier the table gives for the code you changed.
 
   | Tier | For | Angles |
   |---|---|---|
@@ -40,6 +42,11 @@ All tools are pinned in `mise.toml`; `mise run` resolves them, no shell activati
   | Tests | Test-only changes | coverage, quality, determinism, data-driven |
   | None | Docs and CI configuration | None; say so in the PR |
 
+- **Angles:** runtime (run the changed code, edge cases included); the five SOLID angles (single
+  responsibility, open/closed, Liskov substitution, interface segregation, dependency inversion);
+  the seven test angles (coverage, quality, names, pyramid, determinism, data-driven,
+  structure vs behaviour). The `/sweep-*` skills are not in this repository; without them, review
+  each angle by hand.
 - **Rounds:** round 1 runs every angle of the tier. After that, re-run only the angles that had
   findings or whose files a fix touched; the last of those rounds must be clean. Stop after 5
   rounds. Anything still open goes in the PR description or a `ready-for-agent` issue.
@@ -48,10 +55,13 @@ All tools are pinned in `mise.toml`; `mise run` resolves them, no shell activati
 
 1. All code under `internal/`; `cmd/byward` stays thin (config → wire → run). No `pkg/`.
    This is a binary, not a library (ADR-0002).
-2. Packages are named after `CONTEXT.md` concepts. No `util`, `common`, `models`, `helpers`.
+2. Packages are named after `CONTEXT.md` concepts or ADR terms. No `util`, `common`, `models`,
+   `helpers`.
 3. Adapters are one package each behind an interface: `internal/idp/<provider>`,
    `internal/upstream/<kind>`, `internal/store/<impl>`. Core packages depend on the
-   interface only; `internal/server` is the only place that wires concrete adapters.
+   interface only; `internal/server` is the only place that wires concrete adapters. The one
+   exception: `cmd/byward`'s `downstream-token` is a client of `internal/upstream/stdio`'s token
+   socket.
 4. Create a package when the feature that needs it is built — no empty scaffolding.
 5. Tests sit next to the code. Shared fakes (fake IdP, fake upstream, scripted MCP client)
    live in `internal/testutil/`.
