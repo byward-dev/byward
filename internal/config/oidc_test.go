@@ -225,3 +225,26 @@ func TestDevRecordsAnHTTPIdPIssuerOnLoopbackAsARelaxation(t *testing.T) {
 		})
 	}
 }
+
+// --dev accepts an inline secret and records it as a relaxation naming the setting (security
+// invariant 12, #355's audit); without --dev it refuses to start.
+func TestDevRecordsAnInlineSecretAsARelaxation(t *testing.T) {
+	inline := func(env []string) []string {
+		return with("BYWARD_OIDC_CLIENT_SECRET=s3cret")(without("BYWARD_OIDC_CLIENT_SECRET_FILE")(env))
+	}
+	c, err := loadOIDC(t, func(env []string) []string { return with("BYWARD_DEV=true")(inline(env)) })
+	if err != nil || !slices.Contains(c.Relaxations, "inline secrets accepted: BYWARD_OIDC_CLIENT_SECRET") {
+		t.Fatalf("with --dev: relaxations %v, %v; want the inline secret recorded", relaxationsOf(c), err)
+	}
+	if _, err := loadOIDC(t, inline); !isConfigError(err) {
+		t.Fatalf("without --dev: %v, want a configuration error", err)
+	}
+}
+
+// relaxationsOf is c's relaxations, none for no configuration.
+func relaxationsOf(c *Config) []string {
+	if c == nil {
+		return nil
+	}
+	return c.Relaxations
+}
