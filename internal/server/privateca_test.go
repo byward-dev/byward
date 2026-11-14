@@ -47,7 +47,10 @@ func TestAnIdPOnAPrivateCAIsTrustedThroughSSLCertFile(t *testing.T) {
 	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: idp.Certificate().Raw}), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dir := t.TempDir()
+	dir := t.TempDir() // a directory of the CA alone, which leaves out the public roots
+	if err := os.WriteFile(filepath.Join(dir, "ca.pem"), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: idp.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	// On macOS either setting replaces the system's verifier, which the trust store line warns of.
 	platformVerifier := runtime.GOOS == "darwin"
 	trusted := "trust store: pass: roots from SSL_CERT_FILE " + ca + " (1 certificate(s)): " // and how many in all
