@@ -61,7 +61,7 @@ func answerTimeout(ctx context.Context, w http.ResponseWriter, method string) ou
 		return outcomeTimedOut
 	case outcomeNotification:
 		w.WriteHeader(http.StatusAccepted)
-	default:
+	case outcomeSynthesized:
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(rpcAnswer(req, msgTimeout, map[string]bool{"upstreamTimeout": true}))
 	}

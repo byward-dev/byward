@@ -306,8 +306,8 @@ func redirectHint(res *http.Response) string {
 }
 
 // proxyErrorLog takes ReverseProxy's own error lines (a body copy that fails, a flush that fails)
-// into the structured log. A line about the upstream's body through a misread proxy quotes only
-// envproxy.Cause: the transport has already redacted the error.
+// into the structured log. A line about the upstream's body through a misread proxy quotes
+// envproxy.Cause in place of the error: the transport has already redacted it.
 type proxyErrorLog struct{ log *slog.Logger }
 
 func (l proxyErrorLog) Write(p []byte) (int, error) {

@@ -53,8 +53,9 @@ func SettingMisread() bool {
 
 // Redact returns t, whose errors through a proxy Go misread, judged by t's own Proxy, are replaced
 // by an *Error: a failed round trip, and a read of the response body that fails (a proxy that
-// answers, then resets). Any other error, and every response through any other proxy, passes
-// through unchanged. An http.Client cancels a transport it does not know, as this one is, through
+// answers, then resets). A request body over its http.MaxBytesReader limit stays the bare
+// *http.MaxBytesError, which quotes no address, so a server can still answer 413. Any other error,
+// and every response through any other proxy, passes through unchanged. An http.Client cancels a transport it does not know, as this one is, through
 // the request's Cancel channel, so a client timeout reads "request canceled (Client.Timeout …)"
 // instead of "context deadline exceeded (…)", while still answering Timeout and DeadlineExceeded.
 func Redact(t *http.Transport) http.RoundTripper { return redacting{t} }
@@ -68,6 +69,9 @@ func (r redacting) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	if via, perr := r.t.Proxy(req); perr != nil || !Malformed(via) {
 		return resp, err
+	}
+	if mbe := (*http.MaxBytesError)(nil); errors.As(err, &mbe) {
+		return nil, mbe // only the limit; whatever wrapped it is dropped
 	}
 	if err != nil {
 		return nil, redact(err)

@@ -64,6 +64,7 @@ func serveStalled(t *testing.T, h http.Handler, r *http.Request) *httptest.Respo
 
 func TestStalledUpstreamIsAnsweredAndDropped(t *testing.T) {
 	overCapture := `{"jsonrpc":"2.0","method":"tools/call","params":{"pad":"` + strings.Repeat("x", captureLimit) + `"},"id":1}`
+	padded := toolsCall + strings.Repeat(" ", captureLimit) // a whole request whose capture is cut off in the padding
 	cases := []struct {
 		name, method, reqBody string
 		wantStatus            int
@@ -78,6 +79,7 @@ func TestStalledUpstreamIsAnsweredAndDropped(t *testing.T) {
 		{"batch: id unknown, 504", "POST", `[` + toolsCall + `]`, 504, "upstream did not answer in time"},
 		{"not JSON-RPC: 504", "POST", `hello`, 504, "upstream did not answer in time"},
 		{"body over the capture limit: id unknown, 504", "POST", overCapture, 504, "upstream did not answer in time"},
+		{"body over the capture limit, its readable part a whole request: 504", "POST", padded, 504, "upstream did not answer in time"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -97,6 +99,9 @@ func TestStalledUpstreamIsAnsweredAndDropped(t *testing.T) {
 			}
 			if l := logs.String(); !strings.Contains(l, "upstream did not answer in time") || !strings.Contains(l, "no response headers within 50ms") {
 				t.Errorf("the operator log lacks the timeout and its duration: %q", l)
+			}
+			if l := logs.String(); c.wantStatus == http.StatusGatewayTimeout && !strings.Contains(l, string(outcomeTimedOut)) {
+				t.Errorf("the operator log does not name the 504: %q", l)
 			}
 			select {
 			case <-dropped:

@@ -64,7 +64,8 @@ type rpcRequest struct {
 }
 
 // parseRequest reads the captured body as one JSON-RPC request. Batches, truncated bodies, and
-// anything that is not a well-formed request return ok=false; the caller then falls back to 502.
+// anything that is not a well-formed request return ok=false; decide then reports
+// outcomeUnanswerable.
 func parseRequest(body []byte) (rpcRequest, bool) {
 	var m struct {
 		JSONRPC string          `json:"jsonrpc"`
@@ -80,8 +81,8 @@ func parseRequest(body []byte) (rpcRequest, bool) {
 	return rpcRequest{id: m.ID, method: m.Method}, true
 }
 
-// validID reports whether id, a JSON value, is an id MCP allows: a string or an integer, never null
-// or a fraction. The stdio upstream holds the same rule (stdio.validID).
+// validID reports whether id, a JSON value, is an id MCP allows: a string or an integer literal (no
+// fraction or exponent), never null. The stdio upstream holds the same rule (stdio.validID).
 func validID(id json.RawMessage) bool {
 	switch c := id[0]; {
 	case c == '"':
@@ -139,7 +140,8 @@ func rpcAnswer(req rpcRequest, msg string, data any) []byte {
 	return bytes.TrimSuffix(b.Bytes(), []byte("\n"))
 }
 
-// outcome names what translate did, for the operator log.
+// outcome is what the proxy did with a request it answers in its own name: decide's verdict, refined
+// by translate (outcomeRelayed) and answerTimeout (outcomeTimedOut), and named for the operator log.
 type outcome string
 
 const (
@@ -163,9 +165,12 @@ func decide(method string, body []byte, truncated bool) (rpcRequest, outcome) {
 	if method != http.MethodPost {
 		return rpcRequest{}, outcomeStreamRefused
 	}
+	if truncated {
+		return rpcRequest{}, outcomeUnanswerable
+	}
 	req, ok := parseRequest(body)
 	switch {
-	case truncated || !ok:
+	case !ok:
 		return rpcRequest{}, outcomeUnanswerable
 	case req.id == nil:
 		return req, outcomeNotification
@@ -184,18 +189,19 @@ func translate(res *http.Response, c *capture) outcome {
 		body, truncated = c.snapshot()
 	}
 	req, out := decide(res.Request.Method, body, truncated)
-	switch {
-	case out == outcomeStreamRefused:
+	switch out {
+	case outcomeStreamRefused:
 		// GET: the spec's "no SSE stream offered"; DELETE: "termination not allowed". Clients treat
 		// both as harmless.
 		replace(res, http.StatusMethodNotAllowed, nil)
 		res.Header.Set("Allow", "POST")
-	case out == outcomeNotification:
+	case outcomeNotification:
 		replace(res, http.StatusAccepted, nil)
-	case out == outcomeSynthesized && len(up) <= captureLimit && matchingResponse(up, req.id):
-		replace(res, http.StatusOK, up)
-		return outcomeRelayed
-	case out == outcomeSynthesized:
+	case outcomeSynthesized:
+		if len(up) <= captureLimit && matchingResponse(up, req.id) {
+			replace(res, http.StatusOK, up)
+			return outcomeRelayed
+		}
 		replace(res, http.StatusOK, synthesize(req, res.StatusCode))
 	}
 	return out

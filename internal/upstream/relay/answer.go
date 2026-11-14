@@ -29,7 +29,7 @@ func Answer(w http.ResponseWriter, r *http.Request, msg string, data any, fallba
 		http.Error(w, msg, fallback)
 	case outcomeNotification:
 		w.WriteHeader(http.StatusAccepted)
-	default:
+	case outcomeSynthesized:
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(rpcAnswer(req, msg, data))
 	}

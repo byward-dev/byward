@@ -47,6 +47,9 @@ func TestUpstreamRefusalBecomesAReadableJSONRPCResponse(t *testing.T) {
 			`{"error":{"code":-32603,"data":{"upstreamStatus":403},"message":"The upstream MCP server denied this request; ask your operator."},"id":"a-1","jsonrpc":"2.0"}`},
 		{"upstream's own JSON-RPC answer with the same id is relayed", 403, `{"jsonrpc":"2.0","id":7,"error":{"code":-32001,"message":"missing role Mcp.Admin"}}`, "POST", toolsCall, 200,
 			`"missing role Mcp.Admin"`},
+		{"upstream's JSON-RPC answer past the capture limit is not trusted", 403,
+			`{"jsonrpc":"2.0","id":7,"error":{"code":-32001,"message":"missing role"}}` + strings.Repeat(" ", captureLimit), "POST", toolsCall, 200,
+			`"isError":true`},
 		{"upstream's JSON-RPC answer for another id is not trusted", 403, `{"jsonrpc":"2.0","id":8,"error":{"code":-32001,"message":"other"}}`, "POST", toolsCall, 200,
 			`"isError":true`},
 		{"notification: accepted", 403, ``, "POST", `{"jsonrpc":"2.0","method":"notifications/initialized"}`, 202, ""},
@@ -122,31 +125,45 @@ func TestEachUpstreamRefusalIsObservedOnce(t *testing.T) {
 }
 
 func TestRefusalWithTruncatedCaptureFallsBackTo502(t *testing.T) {
-	big := `{"jsonrpc":"2.0","method":"tools/call","params":{"pad":"` + strings.Repeat("x", captureLimit) + `"},"id":1}`
-	w := httptest.NewRecorder()
-	refuse(t, 403, "").ServeHTTP(w, httptest.NewRequest("POST", "/mcp", strings.NewReader(big)))
-	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "upstream refused the proxy") {
-		t.Fatalf("got %d %q", w.Code, w.Body)
+	for name, body := range map[string]string{
+		"cut off inside the request":    `{"jsonrpc":"2.0","method":"tools/call","params":{"pad":"` + strings.Repeat("x", captureLimit) + `"},"id":1}`,
+		"cut off after a whole request": toolsCall + strings.Repeat(" ", captureLimit),
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			refuse(t, 403, "").ServeHTTP(w, httptest.NewRequest("POST", "/mcp", strings.NewReader(body)))
+			if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "upstream refused the proxy") {
+				t.Fatalf("got %d %q", w.Code, w.Body)
+			}
+		})
 	}
 }
 
-// MCP's id is a string or an integer (L3): those are echoed byte for byte, a large integer too, and
-// any other value leaves the request unanswerable.
-func TestAStringOrIntegerIDIsEchoedExactlyAndAnyOtherIsRefused(t *testing.T) {
-	for _, id := range []string{`7`, `-12`, `0`, `12345678901234567890`, `"xé"`, `"a\"b"`, `"1.5"`} {
-		req, ok := parseRequest([]byte(`{"jsonrpc":"2.0","method":"m","id":` + id + `}`))
-		if !ok {
-			t.Fatalf("%s rejected", id)
-		}
-		var out struct{ ID json.RawMessage }
-		if err := json.Unmarshal(synthesize(req, 403), &out); err != nil || !bytes.Equal(out.ID, []byte(id)) {
-			t.Fatalf("id %s echoed as %s (%v)", id, out.ID, err)
-		}
-	}
-	for _, id := range []string{`null`, `true`, `{}`, `[]`, `1.5`, `-1.5e3`, `1e3`, `1E3`, `7.0`} {
-		if _, ok := parseRequest([]byte(`{"jsonrpc":"2.0","method":"m","id":` + id + `}`)); ok {
-			t.Fatalf("invalid id %s accepted", id)
-		}
+// MCP's id is a string or an integer: those are echoed byte for byte, a large integer and an id
+// written with spaces around it too, and any other value leaves the request unanswerable.
+func TestAStringOrIntegerIDIsEchoedExactlyAndAnyOtherLeavesTheRequestUnanswerable(t *testing.T) {
+	for _, tc := range []struct {
+		id    string
+		valid bool
+	}{
+		{`7`, true}, {`-12`, true}, {`0`, true}, {`12345678901234567890`, true}, {` 7 `, true},
+		{`"xé"`, true}, {`"a\"b"`, true}, {`"1.5"`, true},
+		{`null`, false}, {`true`, false}, {`{}`, false}, {`[]`, false},
+		{`1.5`, false}, {`-1.5e3`, false}, {`1e3`, false}, {`1E3`, false}, {`7.0`, false},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			req, ok := parseRequest([]byte(`{"jsonrpc": "2.0", "method": "m", "id":` + tc.id + `}`))
+			if ok != tc.valid {
+				t.Fatalf("id %s answerable: %v, want %v", tc.id, ok, tc.valid)
+			}
+			if !ok {
+				return
+			}
+			var out struct{ ID json.RawMessage }
+			if err := json.Unmarshal(synthesize(req, 403), &out); err != nil || !bytes.Equal(out.ID, []byte(strings.TrimSpace(tc.id))) {
+				t.Fatalf("id %s echoed as %s (%v)", tc.id, out.ID, err)
+			}
+		})
 	}
 }
 

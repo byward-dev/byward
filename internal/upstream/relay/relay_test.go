@@ -813,6 +813,52 @@ func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLogAndAWellFormedProxys
 	}
 }
 
+// A request body over the server's limit is answered 413 through any proxy: through a misread one
+// too, whose redaction must keep the limit error (it quotes no address) for the relay to see it.
+func TestABodyOverTheLimitIsAnswered413ThroughAMisreadProxyAsThroughAnyOther(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		setting func(addr string) string
+	}{
+		{"a misread proxy", func(addr string) string { return addr + "/pw-secret@egress.example:3128" }},
+		{"a well-formed proxy", func(addr string) string { return "http://" + addr }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ln, err := net.Listen("tcp", "127.0.0.1:0") // the "proxy" Go dials: it reads the request, so the body is sent
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = ln.Close() })
+			go func() {
+				c, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				defer func() { _ = c.Close() }()
+				if req, err := http.ReadRequest(bufio.NewReader(c)); err == nil {
+					_, _ = io.Copy(io.Discard, req.Body)
+				}
+			}()
+			pf := (&httpproxy.Config{HTTPProxy: tc.setting(ln.Addr().String())}).ProxyFunc()
+			u, _ := url.Parse("http://mcp.upstream.example/mcp")
+			var logs bytes.Buffer
+			rl := New(slog.New(slog.NewTextHandler(&logs, nil)), u, withProxy(func(r *http.Request) (*url.URL, error) { return pf(r.URL) }))
+			limited := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.Body = http.MaxBytesReader(w, r.Body, 16) // as the server's body limit does
+				rl.ServeHTTP(w, r)
+			})
+			w := httptest.NewRecorder()
+			limited.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(toolsCall)))
+			if w.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("status %d, want 413; log %q", w.Code, logs.String())
+			}
+			if strings.Contains(logs.String(), ln.Addr().String()) {
+				t.Fatalf("log %q quotes the address Go dialled", logs.String())
+			}
+		})
+	}
+}
+
 // ReverseProxy's own error lines, such as a body that breaks off mid-copy, reach the structured log:
 // through a proxy whose setting Go misread they name the cause, never the address Go dialled; through
 // a well-formed one they show the line, which quotes that address.
