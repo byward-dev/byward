@@ -196,3 +196,119 @@ func TestRunKeepsTheListFreshAndStopsWithItsContext(t *testing.T) {
 		<-done
 	})
 }
+
+// operatorRevocations collects what the list reports through OnOperatorRevocation.
+func operatorRevocations(l *List) *[]store.Revocation {
+	var got []store.Revocation
+	l.OnOperatorRevocation(func(r store.Revocation) { got = append(got, r) })
+	return &got
+}
+
+// An operator revocation (a subject or every-subject cut-off) made while the list runs is reported
+// once, at the first sync that finds it, after the list already denies it; grant revocations, which
+// are audited where they are made, never are; nor is one made before the list was created (a
+// restart), which the revoking command records.
+func TestEachNewOperatorRevocationIsReportedOnceAfterItIsDenied(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		src := &source{}
+		before := time.Now().Add(-time.Minute)
+		src.set([]store.Revocation{{Subject: "tid:old", Before: before, At: before}}, nil)
+		l := New(src, nil)
+		got := operatorRevocations(l)
+		mustSync(t, l)
+		if len(*got) != 0 {
+			t.Fatalf("a revocation from before the list was created was reported: %v", *got)
+		}
+		time.Sleep(time.Second)
+		now := time.Now()
+		user := store.Revocation{Subject: "tid:alice", Before: now, At: now}
+		all := store.Revocation{All: true, Before: now, At: now}
+		grant := store.Revocation{GrantID: "g1", Before: now, At: now}
+		var deniedAtNotice []bool
+		l.OnOperatorRevocation(func(r store.Revocation) {
+			d, _ := l.Denied("other", "tid:alice", now.Add(-time.Second))
+			deniedAtNotice = append(deniedAtNotice, d)
+		})
+		got = operatorRevocations(l)
+		src.set([]store.Revocation{{Subject: "tid:old", Before: before, At: before}, user, all, grant}, nil)
+		mustSync(t, l)
+		mustSync(t, l)
+		if len(*got) != 2 || (*got)[0] != user || (*got)[1] != all {
+			t.Fatalf("reported %v, want the subject and the every-subject revocation once each", *got)
+		}
+		if len(deniedAtNotice) != 0 {
+			t.Fatal("OnOperatorRevocation added a second observer instead of replacing it")
+		}
+	})
+}
+
+// The list reports a revocation only after it denies what the revocation covers.
+func TestAnOperatorRevocationIsReportedOnlyOnceItIsEnforced(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		src := &source{}
+		l := New(src, nil)
+		mustSync(t, l)
+		time.Sleep(time.Second)
+		now := time.Now()
+		enforced := false
+		l.OnOperatorRevocation(func(store.Revocation) { enforced = denied(t, l, "g", "tid:alice", now.Add(-time.Second)) })
+		src.set([]store.Revocation{{Subject: "tid:alice", Before: now, At: now}}, nil)
+		mustSync(t, l)
+		if !enforced {
+			t.Fatal("the revocation was reported before the list denied the user's tokens")
+		}
+	})
+}
+
+// A failed sync reports nothing; the next good one reports what is new.
+func TestAFailedSyncReportsNoOperatorRevocation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		src := &source{}
+		l := New(src, nil)
+		got := operatorRevocations(l)
+		mustSync(t, l)
+		time.Sleep(time.Second)
+		now := time.Now()
+		src.set([]store.Revocation{{Subject: "tid:alice", Before: now, At: now}}, errors.New("store down"))
+		if err := l.Sync(ctx); err == nil {
+			t.Fatal("the failing sync succeeded")
+		}
+		if len(*got) != 0 {
+			t.Fatalf("a failed sync reported %v", *got)
+		}
+		src.set([]store.Revocation{{Subject: "tid:alice", Before: now, At: now}}, nil)
+		mustSync(t, l)
+		if len(*got) != 1 {
+			t.Fatalf("reported %v after the store recovered, want the revocation once", *got)
+		}
+	})
+}
+
+// What the list remembers of reported revocations stays within the retention window: an older
+// revocation is forgotten, never reported again although the store still returns it, and never
+// remembered again.
+func TestTheReportedSetStaysWithinTheRetentionWindow(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		src := &source{}
+		l := New(src, nil)
+		got := operatorRevocations(l)
+		mustSync(t, l)
+		time.Sleep(time.Second)
+		now := time.Now()
+		rev := store.Revocation{Subject: "tid:alice", Before: now, At: now}
+		src.set([]store.Revocation{rev}, nil)
+		mustSync(t, l)
+		if len(*got) != 1 || len(l.reported) != 1 {
+			t.Fatalf("reported %v, remembering %d, want one of each", *got, len(l.reported))
+		}
+		time.Sleep(store.RevocationRetention + time.Second)
+		mustSync(t, l) // the store has not collected the row yet
+		mustSync(t, l)
+		if len(*got) != 1 {
+			t.Fatalf("reported %v, want the expired revocation not reported again", *got)
+		}
+		if len(l.reported) != 0 {
+			t.Fatalf("still remembering %d revocations past the retention window", len(l.reported))
+		}
+	})
+}

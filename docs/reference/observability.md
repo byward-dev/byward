@@ -92,8 +92,8 @@ Not emitted: a key rotation as such. Keys are read at startup, and each one load
 | `the IdP returned no ID token on refresh; grant revoked` | the IdP's refresh answer had no ID token, so the user could not be checked again |
 | `the IdP returned another user on refresh; grant revoked` | the refreshed ID token named another subject or issuer |
 | `the access gate refused the user on refresh; grant revoked` | the user no longer passes the access gate |
-| `operator revoke-user` | `byward revoke-user`; `user_key` names the user |
-| `operator revoke-all` | `byward revoke-all` |
+| `operator revoke-user` | `byward revoke-user`; `user_key` names the user. Written by the command and by each running proxy ([where](../how-to/revoke-access.md#where-an-operator-revocation-is-recorded)) |
+| `operator revoke-all` | `byward revoke-all`. Written by the command and by each running proxy ([where](../how-to/revoke-access.md#where-an-operator-revocation-is-recorded)) |
 
 ## Metrics
 
