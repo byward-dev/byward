@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -232,4 +233,32 @@ func TestNilLogIsSafeToCall(t *testing.T) {
 	var l *Log
 	l.Record(nil, Event{Name: Login, Outcome: Success})
 	l.RecordUnauthenticated(httptest.NewRequest("GET", "/", nil), Event{Name: HostRejected, Outcome: Failure})
+}
+
+// L2: an IPv6 sender rotating through its own /64 shares one budget, as the OAuth rate limit groups
+// it, so it cannot claim a fresh budget per address or fill the source table; each record still
+// carries the address that sent it, and another /64 keeps its own budget.
+func TestAnIPv6SourceIsLimitedByItsSlash64AndLoggedByItsAddress(t *testing.T) {
+	var buf bytes.Buffer
+	now := time.Unix(1_800_000_000, 0)
+	l := New(logging.New(&buf, "json"), nil, func() time.Time { return now })
+	for i := range unauthBurst + 5 {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = fmt.Sprintf("[2001:db8:1:2::%x]:1234", i+1)
+		l.RecordUnauthenticated(r, Event{Name: HostRejected, Outcome: Failure, Host: "evil.example"})
+	}
+	if n := strings.Count(buf.String(), `"event":"host_rejected"`); n != unauthBurst {
+		t.Fatalf("logged %d records from one /64, want %d (its burst)", n, unauthBurst)
+	}
+	for i := range unauthBurst {
+		if want := fmt.Sprintf(`"remote_ip":"2001:db8:1:2::%x"`, i+1); !strings.Contains(buf.String(), want) {
+			t.Errorf("no record carries the sender's own address %s:\n%s", want, buf.String())
+		}
+	}
+	other := httptest.NewRequest("GET", "/", nil)
+	other.RemoteAddr = "[2001:db8:1:3::1]:1234"
+	l.RecordUnauthenticated(other, Event{Name: HostRejected, Outcome: Failure, Host: "evil.example"})
+	if !strings.Contains(buf.String(), `"remote_ip":"2001:db8:1:3::1"`) {
+		t.Fatalf("a sender in another /64 was limited too:\n%s", buf.String())
+	}
 }

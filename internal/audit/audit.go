@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/ratelimit"
 )
 
 // SchemaVersion is bumped on any incompatible change to an event's fields.
@@ -104,7 +105,8 @@ func (l *Log) Record(r *http.Request, e Event) {
 }
 
 // RecordUnauthenticated writes e for a request whose sender is not authenticated, limited per
-// source address, event and outcome, so frequent events (page views, registrations) never crowd
+// source address (an IPv6 sender by its /64, as the OAuth rate limit groups it: it can rotate
+// freely within its own /64), event and outcome, so frequent events (page views, registrations) never crowd
 // out rarer ones (decisions, refusals); when records were dropped the next one with the same key
 // carries `suppressed=N` (ADR-0021 §5).
 func (l *Log) RecordUnauthenticated(r *http.Request, e Event) {
@@ -112,7 +114,7 @@ func (l *Log) RecordUnauthenticated(r *http.Request, e Event) {
 		return
 	}
 	ip := logging.RemoteIP(r)
-	ok, suppressed := l.limiter.Allow(ip + "\x00" + e.Name + "\x00" + e.Outcome)
+	ok, suppressed := l.limiter.Allow(ratelimit.Key(ip) + "\x00" + e.Name + "\x00" + e.Outcome) // L2
 	if !ok {
 		if l.observe != nil {
 			l.observe(e.Name, e.Outcome)
