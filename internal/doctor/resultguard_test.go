@@ -56,19 +56,19 @@ type finding struct {
 // namingsOf finds, in one parsed file, every Result literal that sets Class or Name or has no field
 // names, and every assignment of Class or Name to a variable declared or assigned as a result.
 func namingsOf(f *ast.File) []finding {
-	doctorImport := ""
+	doctorQualifier := ""
 	if f.Name.Name == "doctor" {
-		doctorImport = "."
+		doctorQualifier = "."
 	}
 	for _, imp := range f.Imports {
 		if strings.Trim(imp.Path.Value, `"`) == "github.com/byward-dev/byward/internal/doctor" {
-			doctorImport = "doctor"
+			doctorQualifier = "doctor"
 			if imp.Name != nil {
-				doctorImport = imp.Name.Name
+				doctorQualifier = imp.Name.Name
 			}
 		}
 	}
-	if doctorImport == "" {
+	if doctorQualifier == "" {
 		return nil
 	}
 	isResult := func(e ast.Expr) bool {
@@ -77,10 +77,10 @@ func namingsOf(f *ast.File) []finding {
 		}
 		switch x := e.(type) {
 		case *ast.Ident:
-			return doctorImport == "." && x.Name == "Result"
+			return doctorQualifier == "." && x.Name == "Result"
 		case *ast.SelectorExpr:
 			pkg, ok := x.X.(*ast.Ident)
-			return ok && pkg.Name == doctorImport && x.Sel.Name == "Result"
+			return ok && pkg.Name == doctorQualifier && x.Sel.Name == "Result"
 		}
 		return false
 	}
@@ -111,7 +111,7 @@ func namingsOf(f *ast.File) []finding {
 			}
 		}
 	}
-	// scanElided scans the elements of a slice, array or map of Result whose type is left out.
+	// scanElided scans the elements of a slice, array or map of Result that leave out their type.
 	scanElided := func(lit *ast.CompositeLit) {
 		for _, e := range lit.Elts {
 			if kv, ok := e.(*ast.KeyValueExpr); ok {
@@ -175,8 +175,8 @@ func namingsOf(f *ast.File) []finding {
 	return out
 }
 
-// Each way the guard can see of naming a result outside a declared check is found, and the ways
-// the code names one through a check are not.
+// Each way of naming a result outside a declared check that the guard can see is found, and the
+// ways the code names one through a check are not.
 func TestTheGuardFindsEachSyntacticWayToNameAResult(t *testing.T) {
 	const imp = "package p\nimport \"github.com/byward-dev/byward/internal/doctor\"\n"
 	for _, tc := range []struct {
@@ -196,8 +196,9 @@ func TestTheGuardFindsEachSyntacticWayToNameAResult(t *testing.T) {
 		{"a class set after Result", imp + `func f() { r := doctor.CheckUpstream.Result(doctor.Pass, "", ""); r.Class = doctor.ClassIdP }`, "an assignment sets a result's Class"},
 		{"a name set after a pointer literal", imp + `func f() { r := &doctor.Result{Status: doctor.Pass}; r.Name = "x" }`, "an assignment sets a result's Name"},
 		{"a name set after var NewResult", imp + `func f() { var r = doctor.CheckUpstream.NewResult(); r.Name = "x" }`, "an assignment sets a result's Name"},
+		{"a name set after a multi-name var", imp + `func f() { var r, n = doctor.CheckUpstream.NewResult(), 0; _ = n; r.Name = "x" }`, "an assignment sets a result's Name"},
 		{"a name set on a declared result", imp + `func f() { var r doctor.Result; r.Name = "x" }`, "an assignment sets a result's Name"},
-		{"a check's Result", imp + `func f() doctor.Result { r := doctor.CheckUpstream.NewResult(); r.Status, r.Message = doctor.Pass, "m"; return r }`, ""},
+		{"status and message set after NewResult", imp + `func f() doctor.Result { r := doctor.CheckUpstream.NewResult(); r.Status, r.Message = doctor.Pass, "m"; return r }`, ""},
 		{"another type's Name", imp + `type s struct{ Name string }; func f() { v := s{Name: "x"}; v.Name = "y"; _ = doctor.Pass }`, ""},
 		{"no doctor import", "package p\n" + `type Result struct{ Name string }; var r = Result{Name: "x"}`, ""},
 	} {
