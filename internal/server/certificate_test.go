@@ -167,7 +167,7 @@ func TestAnUnusableCertificateFileRefusesToStartNamingTheSetting(t *testing.T) {
 				t.Fatal(err)
 			}
 			return f
-		}, "BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE: idp: a 1024-bit RSA key: use at least 2048 bits"},
+		}, "BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE: idp: a 1024-bit RSA key: use at least 2048 bits (docs/how-to/entra-certificate.md)"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := loadCertificateConfig(t, tc.file(t))
