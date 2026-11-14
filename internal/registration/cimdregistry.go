@@ -181,12 +181,27 @@ func (r *CIMDRegistry) Client(ctx context.Context, id string) (Client, error) {
 	}
 	r.mu.Unlock()
 
-	call.client, call.err = r.fetch(context.WithoutCancel(ctx), id, host, now)
-	r.mu.Lock()
-	delete(r.inflight, id)
-	r.mu.Unlock()
-	close(call.done)
-	return call.client, call.err
+	// The fetch runs on its own, detached from cancellation, and the leader waits for it like any
+	// other caller: a leader whose request ends leaves at once, and the shared fetch still finishes
+	// for the others (as idp.KeySet and downstream do, L8).
+	go r.lead(context.WithoutCancel(ctx), call, id, host, now)
+	return wait(ctx, call)
+}
+
+// lead runs the shared fetch for call and releases its waiters. No HTTP handler's recover protects
+// this goroutine, so a panic while fetching or parsing becomes a fetch error instead of ending the
+// process.
+func (r *CIMDRegistry) lead(ctx context.Context, call *cimdCall, id, host string, now time.Time) {
+	defer func() {
+		if p := recover(); p != nil {
+			call.client, call.err = nil, fmt.Errorf("%w: fetching %s panicked: %v", ErrUnavailable, host, p)
+		}
+		r.mu.Lock()
+		delete(r.inflight, id)
+		r.mu.Unlock()
+		close(call.done)
+	}()
+	call.client, call.err = r.fetch(ctx, id, host, now)
 }
 
 func (r *CIMDRegistry) observe(outcome string) {

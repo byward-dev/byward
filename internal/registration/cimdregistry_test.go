@@ -493,8 +493,8 @@ func waitForWaiters(t *testing.T, r *CIMDRegistry, n int) {
 	t.Fatalf("%d lookups never joined the fetch", n)
 }
 
-// The fetch is shared, so the request that started it leaving does not fail the others: the
-// document is still fetched and cached.
+// The fetch is shared and detached: the request that started it leaves as soon as its own context
+// ends, like any waiter, while the fetch goes on and serves the others and the cache (L8).
 func TestTheSharedFetchOutlivesTheRequestThatStartedIt(t *testing.T) {
 	f := &fakeFetch{replies: map[string][]reply{cimdID: {ok("max-age=300")}}, gate: make(chan struct{})}
 	r := newReg(f, newClock(), nil, nil)
@@ -506,12 +506,13 @@ func TestTheSharedFetchOutlivesTheRequestThatStartedIt(t *testing.T) {
 	go func() { _, err := r.Client(context.Background(), cimdID); waiter <- err }()
 	waitForWaiters(t, r, 1)
 	cancel()
+	// The fetch is still held at the gate: the lookup that started it returns anyway.
+	if err := <-first; !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("the lookup that started the fetch, after its request ended: %v; want ErrUnavailable at once", err)
+	}
 	close(f.gate)
 	if err := <-waiter; err != nil {
 		t.Fatalf("waiter: %v", err)
-	}
-	if err := <-first; err != nil {
-		t.Fatalf("the lookup that started the fetch: %v (its request ending must not fail the shared fetch)", err)
 	}
 	if _, err := r.Client(context.Background(), cimdID); err != nil || f.calls.Load() != 1 {
 		t.Fatalf("cached lookup: %v, fetches %d", err, f.calls.Load())
@@ -634,5 +635,21 @@ func TestOnlyARefusedDocumentIsErrMetadataRefused(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// panicFetch panics on every fetch.
+type panicFetch struct{}
+
+func (panicFetch) Get(context.Context, string, int64) (*ssrfguard.Response, error) {
+	panic("fetcher bug")
+}
+
+// The shared fetch runs where no HTTP handler's recover reaches: a panic in it is a fetch failure
+// for the lookup (ErrUnavailable), not the end of the process, and the lookup is not left stuck.
+func TestAPanickingFetchIsAnUnavailableClientNotACrash(t *testing.T) {
+	r := NewCIMDRegistry(CIMDConfig{Fetch: panicFetch{}, JTI: NewStoreJTICache(memory.New()), Now: newClock().now})
+	if _, err := r.Client(context.Background(), cimdID); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("lookup with a panicking fetch: %v; want ErrUnavailable", err)
 	}
 }
