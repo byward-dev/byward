@@ -39,7 +39,7 @@ func expiryWarning(cfg *config.Config, now time.Time) (Warning, bool) {
 
 // CheckOffline is `byward check --offline` (ADR-0020 §7): everything the proxy validates at
 // startup that needs no network and writes nothing. It reads the sealing keys and the static
-// clients, validates the IdP and gate settings, checks the store paths without creating them, and
+// clients, validates the IdP and gate settings, checks the store without opening or creating it, and
 // checks the TLS certificate as startup does.
 // The error is a configuration error; the warnings are what the proxy would log at startup.
 func CheckOffline(cfg *config.Config) ([]Warning, error) {
@@ -87,10 +87,14 @@ func offlineHop(cfg *config.Config) []Warning {
 }
 
 // checkStore checks the configured store without opening it: the PostgreSQL DSN as Open would
-// parse it, with what several replicas need, or the SQLite paths.
+// parse it, with what several replicas need, or the SQLite paths. Its errors name the settings,
+// as openStore's do.
 func checkStore(cfg *config.Config) ([]Warning, error) {
 	if cfg.StorePostgresDSN == "" {
-		return nil, checkStorePaths(cfg)
+		if err := sqlite.CheckPaths(sqlite.Options{Dir: cfg.StoreDir, CounterFile: cfg.StoreCounterFile}); err != nil {
+			return nil, fmt.Errorf("BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: %w (see docs/how-to/state.md)", err)
+		}
+		return nil, nil
 	}
 	if err := postgres.CheckDSN(cfg.StorePostgresDSN, cfg.Dev); err != nil {
 		return nil, fmt.Errorf("BYWARD_STORE_POSTGRES_DSN_FILE: %w (see docs/how-to/postgres.md)", err)
@@ -103,14 +107,6 @@ func checkStore(cfg *config.Config) ([]Warning, error) {
 var replicaKeys = Warning{Setting: "BYWARD_STORE_POSTGRES_DSN_FILE",
 	Message: "the PostgreSQL store serves several replicas, and keys never live in the store: a token sealed or an assertion signed by one replica is refused by another without the same keys; the per-address rate limits apply per replica",
 	Fix:     "give every replica the same BYWARD_KEYS_DIR and BYWARD_ASSERTION_KEYS_DIR contents (docs/how-to/postgres.md)"}
-
-// checkStorePaths is sqlite.CheckPaths with the settings named, as openStore names them.
-func checkStorePaths(cfg *config.Config) error {
-	if err := sqlite.CheckPaths(sqlite.Options{Dir: cfg.StoreDir, CounterFile: cfg.StoreCounterFile}); err != nil {
-		return fmt.Errorf("BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: %w (see docs/how-to/state.md)", err)
-	}
-	return nil
-}
 
 // DoctorOptions are the HTTP clients doctor uses; nil means the default for each. Tests point
 // them at fakes.
@@ -179,7 +175,8 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	if err != nil {
 		return r, err
 	}
-	if err := checkStorePaths(cfg); err != nil {
+	storeWarnings, err := checkStore(cfg)
+	if err != nil {
 		return r, err
 	}
 	pair, err := diskCert(cfg)
@@ -192,7 +189,7 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	if cfg.IdentityHeaders && cfg.UpstreamCommand == nil {
 		r.Checks = append(r.Checks, identityHeadersResult(ctx, cfg.UpstreamURL.Hostname(), o.Resolve))
 	}
-	for _, w := range append(parts.warnings, redundantStrips(cfg)...) {
+	for _, w := range append(append(parts.warnings, storeWarnings...), redundantStrips(cfg)...) {
 		r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "configuration", Status: doctor.Warn, Message: w.Message, Fix: warningFix(w)})
 	}
 	target := doctor.Target{Resource: cfg.PublicURL, Issuer: cfg.Issuer(), HostsSetting: config.Setting{Name: "allowed-hosts"}.Env()}
