@@ -106,6 +106,7 @@ Prometheus text format at `/metrics` on the internal listener. Histogram buckets
 | `byward_idp_request_duration_seconds` | histogram | `idp`, `operation` (`authorize`, `callback`, `refresh`), `outcome` (`success`, `rejected`, `unavailable`) |
 | `byward_upstream_in_flight` | gauge | `kind` (`request`, `stream`) |
 | `byward_upstream_busy_total` | counter | `kind`: requests refused with 503 because an admission cap was full |
+| `byward_upstream_refusals_total` | counter | `status` (`401`, `403`): relayed requests the HTTP upstream refused ([ADR-0025](../adr/0025-upstream-refusal.md)); both are exported at 0 from the start |
 | `byward_audit_events_total` | counter | `event`, `outcome`: every audit event, including rate-limited ones |
 | `byward_rate_limited_total` | counter | `endpoint`: OAuth requests refused with 429 (or a `temporarily_unavailable` redirect) over a client address's budget |
 | `byward_cimd_fetches_total` | counter | `outcome`: Client ID Metadata Document fetches: `ok`, `invalid`, `refused` (non-public address, a 4xx other than 408 and 429, redirect, too large), `unavailable` (network, timeout, 5xx, 408, 429), `rate_limited`, `busy` |
@@ -137,6 +138,8 @@ groups:
       - alert: BywardUpstreamBusy
         expr: sum(rate(byward_upstream_busy_total[5m])) > 0
         for: 5m
+      - alert: BywardUpstreamRefusing
+        expr: sum by (status) (increase(byward_upstream_refusals_total[5m])) > 0
 ```
 
 ## Health
