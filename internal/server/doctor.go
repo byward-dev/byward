@@ -2,12 +2,16 @@ package server
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/byward-dev/byward/internal/config"
@@ -160,7 +164,7 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 		for _, w := range redundantStrips(cfg) {
 			r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "configuration", Status: doctor.Warn, Message: w.Message, Fix: warningFix(w)})
 		}
-		r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy))
+		r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy), doctor.TrustStore(trustSettings(), os.ReadFile))
 		r.Checks = append(r.Checks, upstreamHopResult(ctx, cfg, o.Resolve)...)
 		r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "authentication", Status: doctor.Warn,
 			Message: "authentication is off (BYWARD_INSECURE_NO_AUTH): there is no discovery and no IdP to check",
@@ -180,7 +184,7 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 		return r, err
 	}
 	r.Checks = append(r.Checks, servingCertChecks(cfg, pair, o.Now())...)
-	r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy))
+	r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy), doctor.TrustStore(trustSettings(), os.ReadFile))
 	r.Checks = append(r.Checks, upstreamHopResult(ctx, cfg, o.Resolve)...)
 	if cfg.IdentityHeaders && cfg.UpstreamCommand == nil {
 		r.Checks = append(r.Checks, identityHeadersResult(ctx, cfg.UpstreamURL.Hostname(), o.Resolve))
@@ -195,6 +199,32 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	r.Checks = append(r.Checks, doctor.SelfProbe(ctx, o.Proxy, target)...)
 	r.Checks = append(r.Checks, parts.idp.diagnose(ctx, o.Now())...)
 	return r, nil
+}
+
+// trustSettings are the settings Go reads its roots from, whether a platform verifier is in use or
+// kept by GODEBUG x509sslcertoverrideplatform=0 (both settings then ignored), and the number of
+// roots Go loaded.
+func trustSettings() doctor.TrustSettings {
+	platform := runtime.GOOS == "darwin" || runtime.GOOS == "windows" || runtime.GOOS == "ios"
+	// Go 1.27's default replaces the platform verifier; x509sslcertoverrideplatform=0 keeps it.
+	ignored := platform && godebugValue(os.Getenv("GODEBUG"), "x509sslcertoverrideplatform") == "0"
+	s := doctor.TrustSettings{CertFile: os.Getenv("SSL_CERT_FILE"), CertDir: os.Getenv("SSL_CERT_DIR"), PlatformVerifier: platform && !ignored, SettingsIgnored: ignored}
+	if pool, err := x509.SystemCertPool(); err == nil {
+		s.RootCount = len(pool.Subjects()) //nolint:staticcheck // SA1019: the only count of the system pool, shown, never used to verify
+	}
+	return s
+}
+
+// godebugValue is the value GODEBUG gives key, as Go parses it (internal/godebug): the last
+// key=value entry wins, an entry without = is skipped, and a #bisect pattern is not part of the value.
+func godebugValue(godebug, key string) string {
+	v := ""
+	for _, kv := range strings.Split(godebug, ",") {
+		if k, val, ok := strings.Cut(kv, "="); ok && k == key {
+			v, _, _ = strings.Cut(val, "#")
+		}
+	}
+	return v
 }
 
 func warningFix(w Warning) string {

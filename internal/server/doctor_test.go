@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -227,14 +228,14 @@ func TestDoctorNamesTheSettingsInFixes(t *testing.T) {
 	}
 }
 
-func TestDoctorWithoutAuthNamesTheUpstreamWarnsAndChecksNothingElse(t *testing.T) {
+func TestDoctorWithoutAuthChecksOnlyTheUpstreamAndTheTrustStoreAndWarns(t *testing.T) {
 	cfg, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_INSECURE_NO_AUTH=true"}, os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rep, err := Doctor(context.Background(), cfg, DoctorOptions{Proxy: &http.Client{Transport: refuse{}}})
-	if err != nil || len(rep.Checks) != 2 || rep.Checks[0].Name != "upstream" || rep.Checks[1].Status != doctor.Warn ||
-		!strings.Contains(rep.Checks[1].Message, "authentication is off") || rep.ExitCode() != 0 {
+	if err != nil || len(rep.Checks) != 3 || rep.Checks[0].Name != "upstream" || rep.Checks[1].Name != "trust store" || rep.Checks[2].Status != doctor.Warn ||
+		!strings.Contains(rep.Checks[2].Message, "authentication is off") || rep.ExitCode() != 0 {
 		t.Fatalf("report %+v, err %v", rep, err)
 	}
 }
@@ -339,5 +340,46 @@ func TestCheckOfflineFindsStdioUpstreamMistakes(t *testing.T) {
 				t.Fatalf("doctor: err = %v, want %q", err, tc.inErr)
 			}
 		})
+	}
+}
+
+// GODEBUG's x509sslcertoverrideplatform is read as Go reads it: the last entry wins, and only "0"
+// keeps the platform verifier.
+func TestGODEBUGIsReadAsGoReadsIt(t *testing.T) {
+	for _, tc := range []struct{ godebug, want string }{
+		{"", ""},
+		{"x509sslcertoverrideplatform=0", "0"},
+		{"http2client=0,x509sslcertoverrideplatform=0", "0"},
+		{"x509sslcertoverrideplatform=0,x509sslcertoverrideplatform=1", "1"},
+		{"x509sslcertoverrideplatform=00", "00"},
+		{"xx509sslcertoverrideplatform=0", ""},
+		{"x509sslcertoverrideplatform=0,x509sslcertoverrideplatform", "0"},
+		{" x509sslcertoverrideplatform=0", ""},
+		{"x509sslcertoverrideplatform=0#pattern", "0"},
+		{"x509sslcertoverrideplatform= 0", " 0"},
+	} {
+		if got := godebugValue(tc.godebug, "x509sslcertoverrideplatform"); got != tc.want {
+			t.Errorf("godebugValue(%q) = %q, want %q", tc.godebug, got, tc.want)
+		}
+	}
+}
+
+// With GODEBUG x509sslcertoverrideplatform=0, Go keeps a platform verifier and ignores SSL_CERT_FILE
+// and SSL_CERT_DIR; on Linux there is no platform verifier either way.
+func TestTrustSettingsFollowGODEBUGOnAPlatformVerifier(t *testing.T) {
+	platform := runtime.GOOS == "darwin" || runtime.GOOS == "windows" || runtime.GOOS == "ios"
+	t.Setenv("SSL_CERT_FILE", "/nonexistent")
+	for _, tc := range []struct {
+		godebug           string
+		verifier, ignored bool
+	}{
+		{"", platform, false},
+		{"x509sslcertoverrideplatform=0", false, platform},
+		{"x509sslcertoverrideplatform=0,x509sslcertoverrideplatform=1", platform, false},
+	} {
+		t.Setenv("GODEBUG", tc.godebug)
+		if s := trustSettings(); s.PlatformVerifier != tc.verifier || s.SettingsIgnored != tc.ignored {
+			t.Errorf("GODEBUG=%q on %s: %+v; want PlatformVerifier %v, SettingsIgnored %v", tc.godebug, runtime.GOOS, s, tc.verifier, tc.ignored)
+		}
 	}
 }
