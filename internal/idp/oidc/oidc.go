@@ -323,8 +323,7 @@ func (p *Provider) token(ctx context.Context, m *metadata, form url.Values) (*id
 		class := idp.GenericClass(tr.Status, tr.Error)
 		e := &idp.Error{Class: class, OAuth: tr.Error, Status: tr.Status, Description: tr.ErrorDescription}
 		// The IdP refused the proxy's own credential or client ID, or the grant its app is registered for
-		// (RFC 6749 §5.2), or, at Auth0, the secret (access_denied 401): the operator's to fix. The rule
-		// is doctor's too (#315).
+		// (RFC 6749 §5.2), or, at Auth0, the secret (access_denied 401): the operator's to fix.
 		if refusesClient(e) {
 			e.Alert = idp.AlertCredentialRejected
 		}

@@ -375,7 +375,9 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var ie *idp.Error
-		if errors.As(err, &ie) && ie.OAuth == "access_denied" {
+		// The user's refusal, not an access_denied that refuses the proxy's own credential (Auth0's
+		// wrong secret, which alerts the operator: #315).
+		if errors.As(err, &ie) && ie.OAuth == "access_denied" && ie.Alert == "" {
 			b.cfg.Audit.Record(r, audit.Event{Name: audit.Login, Outcome: audit.Failure, Reason: "the user declined to sign in", ClientID: l.ClientID, IdP: b.cfg.IdPName})
 			b.redirectError(w, r, l.RedirectURI, l.State, "access_denied", "the user declined to sign in")
 			return

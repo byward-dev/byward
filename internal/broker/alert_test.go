@@ -89,6 +89,10 @@ func TestIdPErrorsThatNeedTheOperatorRaiseAnAlert(t *testing.T) {
 		// AADSTS7000215 has no operator hint of its own, so the alert's default fix stands in.
 		{"sign-in, client secret rejected", signInFailing, fakeidp.InvalidClientSecret, "callback credential_rejected", idp.AlertCredentialRejected.Hint()},
 		{"sign-in, IdP unavailable", signInFailing, fakeidp.TemporarilyUnavailable, "", ""},
+		// Auth0 refuses a wrong secret with access_denied 401 (#315): the IdP failure page, not "the
+		// user declined", since the alert says the credential was refused.
+		{"sign-in, Auth0 wrong secret", callbackFailingWith(&idp.Error{Class: idp.Fatal, OAuth: "access_denied", Status: 401, Alert: idp.AlertCredentialRejected}),
+			fakeidp.Failure{}, "callback credential_rejected", idp.AlertCredentialRejected.Hint()},
 		{"refresh, client secret rejected", refreshFailing, fakeidp.InvalidClientSecret, "refresh credential_rejected", idp.AlertCredentialRejected.Hint()},
 		// Entra's own hint wins over the default.
 		{"refresh, client secret expired", refreshFailing, fakeidp.ExpiredClientSecret, "refresh credential_rejected", "AADSTS7000222: the client secret has expired; create a new one (or switch to a certificate)."},

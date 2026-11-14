@@ -2,12 +2,14 @@ package broker
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
@@ -189,6 +191,28 @@ func TestPromptNoneAnswersTheIdPsFailureAtTheRedirect(t *testing.T) {
 				t.Fatalf("consent outcomes %v, want only a silent refusal with no trust", got)
 			}
 		})
+	}
+}
+
+// A silent sign-in whose IdP refuses the proxy's own credential with access_denied (Auth0's wrong
+// secret, #315) is no silent refusal of the user: the client gets server_error, and the failure is
+// audited as an IdP sign-in failure.
+func TestPromptNoneDoesNotPassOnAnAccessDeniedThatRefusesTheProxysCredential(t *testing.T) {
+	e := newEnv(t, withRemember(t, nil))
+	h := e.remember(t, nil) // a real sign-in, before the IdP's code redemption fails
+	cfg := e.cfg
+	cfg.IdP = failingCallback{IdP: cfg.IdP, err: &idp.Error{Class: idp.Fatal, OAuth: "access_denied", Status: 401, Alert: idp.AlertCredentialRejected}}
+	e.start(t, cfg)
+	e.fake.Set(fakeidp.WithSilentSession())
+	logins := len(e.auditEvents(t, "login"))
+	if got := answerOf(t, e.finish(t, e.authorizeWith(t, silent(nil), h))); got != refused(e, "server_error") {
+		t.Fatalf("answer %+v, want server_error, not the IdP's access_denied", got)
+	}
+	if got := e.auditEvents(t, "login")[logins:]; len(got) != 1 || got[0]["outcome"] != "failure" || got[0]["reason"] == "the user declined to sign in" {
+		t.Fatalf("login records %v, want one IdP failure that does not blame the user", got)
+	}
+	if fmt.Sprint(e.alerts) != "[callback credential_rejected]" {
+		t.Fatalf("alerts = %v, want the credential rejection", e.alerts)
 	}
 }
 
