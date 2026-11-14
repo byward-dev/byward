@@ -30,11 +30,13 @@ import (
 	"github.com/byward-dev/byward/internal/upstream/stdio"
 )
 
+// fakeStdio builds the fake stdio upstream once for the package, into fakeStdioDir (#298).
 var fakeStdio = sync.OnceValues(func() (string, error) {
 	dir, err := os.MkdirTemp("", "fakestdio-")
 	if err != nil {
 		return "", err
 	}
+	fakeStdioDir = dir // before the build, so a failed one is removed too
 	bin := filepath.Join(dir, "fakestdio")
 	out, err := exec.Command("go", "build", "-o", bin, "../testutil/fakestdio").CombinedOutput() //nolint:gosec // G204: fixed go command; bin is our temp path
 	if err != nil {
