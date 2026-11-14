@@ -156,6 +156,19 @@ func asciiHost(host string) error {
 	return nil
 }
 
+// bracketedIPv6 reports whether h is [v6] or [v6]:port, v6 an IPv6 address without a zone.
+func bracketedIPv6(h string) bool {
+	inner, rest, ok := strings.Cut(strings.TrimPrefix(h, "["), "]")
+	if !ok || !strings.HasPrefix(h, "[") {
+		return false
+	}
+	if port, hasPort := strings.CutPrefix(rest, ":"); rest != "" && (!hasPort || port == "" || strings.Trim(port, "0123456789") != "") {
+		return false
+	}
+	ip, err := netip.ParseAddr(inner)
+	return err == nil && ip.Is6() && ip.Zone() == ""
+}
+
 // Hostname is a host as BYWARD_ALLOWED_HOSTS lists it or a Host header carries it (host,
 // host:port, [v6], [v6]:port or a bare v6 address) reduced to its host name: no port, no
 // brackets, in lower case. The internal listener's Host check, the no-auth loopback check and
