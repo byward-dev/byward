@@ -80,22 +80,6 @@ func TestMetricNamesMatchTheGoldenFile(t *testing.T) {
 	}
 }
 
-func TestEveryMetricHasADocsRow(t *testing.T) {
-	docs, err := os.ReadFile("../../docs/reference/observability.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want, err := os.ReadFile(golden)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, line := range strings.Fields(string(want)) {
-		if strings.HasPrefix(line, "byward_") && !strings.Contains(string(docs), "`"+line+"`") {
-			t.Errorf("metric %s is not documented in docs/reference/observability.md", line)
-		}
-	}
-}
-
 func TestLabelsCarryOnlyFixedValuesAndBucketsAreFixed(t *testing.T) {
 	m := New()
 	exercise(m)

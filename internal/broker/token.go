@@ -159,7 +159,7 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 		return
 	case err != nil:
 		// An outage is not the client's fault: the code may still be good.
-		b.cfg.Log.ErrorContext(ctx, "redeeming an authorization code failed", "request_id", logging.RequestID(ctx), "error", err)
+		b.cfg.Log.ErrorContext(ctx, "redeeming an authorization code failed", "error", err)
 		b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not redeem the code; try again"})
 		return
 	}
@@ -190,7 +190,7 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 		expires = now.Add(GrantLifetime)
 	}
 	if err := b.cfg.Store.UpdateGrant(ctx, claims.GrantID, expires); err != nil {
-		b.cfg.Log.ErrorContext(ctx, "extending a grant failed", "request_id", logging.RequestID(ctx), "error", err)
+		b.cfg.Log.ErrorContext(ctx, "extending a grant failed", "error", err)
 		b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not issue a token"})
 		return
 	}
@@ -200,7 +200,7 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 		refresh, hash = token.NewRefreshToken()
 		if err := b.cfg.Store.PutRefreshToken(ctx, store.RefreshToken{Hash: hash, GrantID: claims.GrantID, ClientID: client.ID(),
 			CreatedAt: now, IdleExpiresAt: minTime(now.Add(RefreshIdleLifetime), expires)}); err != nil {
-			b.cfg.Log.ErrorContext(ctx, "storing a refresh token failed", "request_id", logging.RequestID(ctx), "error", err)
+			b.cfg.Log.ErrorContext(ctx, "storing a refresh token failed", "error", err)
 			b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not issue a token"})
 			return
 		}
@@ -211,7 +211,7 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 	}
 	asserted, idpExpiry, err := b.grantClaims(ctx, claims.GrantID)
 	if err != nil {
-		b.cfg.Log.ErrorContext(ctx, "reading a grant's identity claims failed", "request_id", logging.RequestID(ctx), "error", err)
+		b.cfg.Log.ErrorContext(ctx, "reading a grant's identity claims failed", "error", err)
 		b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not issue a token"})
 		return
 	}
@@ -247,8 +247,7 @@ func (b *Broker) issue(w http.ResponseWriter, r *http.Request, clientID, grantID
 		if capped := idpExpiry.Add(-IdPTokenMargin); !capped.Before(now.Add(MinCappedLifetime)) {
 			exp = minTime(exp, capped)
 		} else {
-			b.cfg.Log.WarnContext(ctx, "the IdP access token expires within the margin; the access token is not capped to it", "request_id", logging.RequestID(ctx),
-				"idp_token_expires_in", idpExpiry.Sub(now).String(), "margin", IdPTokenMargin.String())
+			b.cfg.Log.WarnContext(ctx, "the IdP access token expires within the margin; the access token is not capped to it", "idp_token_expires_in", idpExpiry.Sub(now).String(), "margin", IdPTokenMargin.String())
 		}
 	}
 	c := token.Claims{GrantID: grantID, Subject: subject, IssuedAt: now, ExpiresAt: exp, ClientID: clientID,
@@ -257,13 +256,12 @@ func (b *Broker) issue(w http.ResponseWriter, r *http.Request, clientID, grantID
 	if errors.Is(err, token.ErrTooLong) && len(c.Groups) > 0 {
 		// Too many groups for a token: assert none rather than fail the sign-in; the upstream then
 		// sees no groups claim, as with Entra's groups overage.
-		b.cfg.Log.WarnContext(ctx, "the user's groups do not fit in an access token; the assertion carries no groups", "request_id", logging.RequestID(ctx),
-			"groups", len(c.Groups), "setting", "BYWARD_ASSERTION_CLAIMS")
+		b.cfg.Log.WarnContext(ctx, "the user's groups do not fit in an access token; the assertion carries no groups", "groups", len(c.Groups), "setting", "BYWARD_ASSERTION_CLAIMS")
 		c.Groups = nil
 		access, err = b.cfg.Sealer.Seal(token.Access, c)
 	}
 	if err != nil {
-		b.cfg.Log.ErrorContext(ctx, "sealing an access token failed", "request_id", logging.RequestID(ctx), "error", err)
+		b.cfg.Log.ErrorContext(ctx, "sealing an access token failed", "error", err)
 		b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not issue a token"})
 		return
 	}
@@ -312,10 +310,10 @@ func assertionSubject(jwt string) string {
 func (b *Broker) revoke(r *http.Request, clientID, grantID string, now time.Time, why string) {
 	ctx := r.Context()
 	if err := b.cfg.Store.RevokeGrant(ctx, grantID, now); err != nil && !errors.Is(err, store.ErrNotFound) {
-		b.cfg.Log.ErrorContext(ctx, "revoking a grant failed", "request_id", logging.RequestID(ctx), "error", err)
+		b.cfg.Log.ErrorContext(ctx, "revoking a grant failed", "error", err)
 	}
 	b.deny.Add(grantID)
-	b.cfg.Log.WarnContext(ctx, why, "request_id", logging.RequestID(ctx))
+	b.cfg.Log.WarnContext(ctx, why)
 	b.cfg.Audit.Record(r, audit.Event{Name: audit.GrantRevoked, Outcome: audit.Success, Reason: why, ClientID: clientID, GrantID: grantID})
 }
 
@@ -358,7 +356,7 @@ const cimdRetryAfter = "60"
 // not spent.
 func (b *Broker) unavailable(w http.ResponseWriter, r *http.Request, what string, err error) {
 	ctx := r.Context()
-	b.cfg.Log.ErrorContext(ctx, what, "request_id", logging.RequestID(ctx), "error", err)
+	b.cfg.Log.ErrorContext(ctx, what, "error", err)
 	w.Header().Set("Retry-After", retryAfter)
 	b.tokenFail(w, r, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the proxy's store is unavailable; try again"})
 }
@@ -373,7 +371,7 @@ type useRecorder interface {
 func (b *Broker) recordUse(ctx context.Context, client registration.Client, now time.Time) {
 	if u, ok := client.(useRecorder); ok {
 		if err := u.RecordUse(ctx, now); err != nil {
-			b.cfg.Log.WarnContext(ctx, "renewing a client registration failed", "request_id", logging.RequestID(ctx), "client_id", client.ID(), "error", err.Error())
+			b.cfg.Log.WarnContext(ctx, "renewing a client registration failed", "client_id", client.ID(), "error", err.Error())
 		}
 	}
 }

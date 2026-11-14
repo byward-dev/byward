@@ -16,6 +16,7 @@ import (
 	"github.com/go-jose/go-jose/v4"
 
 	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // Authority is the only Entra host the adapter talks to; endpoints are derived from it and the
@@ -256,7 +257,9 @@ func (p *Provider) tokenAt(ctx context.Context, tenant string, form url.Values) 
 		return nil, &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialUnusable, Err: fmt.Errorf("%w: %w", idp.ErrCredential, err)}
 	}
 	header := http.Header{}
-	if id := idp.RequestID(ctx); isGUID(id) {
+	// The request ID the request log carries (logging.Middleware), so Entra's logs correlate with
+	// ours; Entra takes it as client-request-id only in GUID form.
+	if id := logging.RequestID(ctx); isGUID(id) {
 		header.Set("client-request-id", id)
 	}
 	tr, err := p.fetch.PostToken(ctx, tokenURL, form, header)

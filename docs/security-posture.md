@@ -199,7 +199,7 @@ bounds, but there are no settings for that yet.
   A denied CIMD client ID's access tokens are refused at once; those of an app denied by its
   redirect host run out within an hour (#338).
 - Every outcome, refusals included (invalid, rate-limited, capped, store failure), is audited
-  (`client_registered`, rate-limited per address) and counted (`byward_dcr_registrations_total`).
+  (`client_registered`, rate-limited per address, IPv6 per /64) and counted (`byward_dcr_registrations_total`).
 
 **Sign-ins in flight** when a client changes: the client and its redirect URI are checked again at
 consent and at `/token`, but not at the IdP callback, which relies on the sealed login cookie. If

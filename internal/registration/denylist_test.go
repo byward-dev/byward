@@ -94,7 +94,7 @@ func TestADeniedCIMDClientIsUnknownWithoutAFetch(t *testing.T) {
 func TestTheChainKeepsTheFirstReasonedRefusal(t *testing.T) {
 	f := &fakeFetch{replies: map[string][]reply{cimdID: {gone()}}}
 	c := newClock()
-	ch := Chain{newReg(f, c, nil, nil), newDCR(brokenClients{}, c.now, 0)}
+	ch := Chain{newReg(f, c, nil, nil), newDCR(brokenClients(), c.now, 0)}
 	if _, err := ch.Client(context.Background(), cimdID); !errors.Is(err, ErrMetadataRefused) {
 		t.Fatalf("refused document behind the DCR registry: %v, want ErrMetadataRefused", err)
 	}
@@ -102,7 +102,7 @@ func TestTheChainKeepsTheFirstReasonedRefusal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	denied := Chain{newDenyingReg(f, c, deny), newDCR(brokenClients{}, c.now, 0)}
+	denied := Chain{newDenyingReg(f, c, deny), newDCR(brokenClients(), c.now, 0)}
 	if _, err := denied.Client(context.Background(), cimdID); !errors.Is(err, ErrClientDenied) {
 		t.Fatalf("denied client ID behind the DCR registry: %v, want ErrClientDenied", err)
 	}

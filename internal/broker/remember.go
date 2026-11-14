@@ -13,7 +13,6 @@ import (
 
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/idp"
-	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/store"
 )
@@ -92,7 +91,7 @@ func (b *Broker) skipConsent(r *http.Request, client registration.Client, l *log
 	}
 	ok, err := b.remembered(r.Context(), h, *l, l.Refresh, b.cfg.Now())
 	if err != nil {
-		b.cfg.Log.WarnContext(r.Context(), "checking remembered consent failed; asking", "request_id", logging.RequestID(r.Context()), "error", err.Error())
+		b.cfg.Log.WarnContext(r.Context(), "checking remembered consent failed; asking", "error", err.Error())
 		return false
 	}
 	if ok {
@@ -120,7 +119,7 @@ func (b *Broker) confirmRemembered(ctx context.Context, l login, id idp.Identity
 	// asked again, on a page that still states the lifetime the login started with (#287).
 	ok, err := b.remembered(ctx, hint{Issuer: id.Issuer, Subject: id.Subject}, l, client.AllowsRefresh(), b.cfg.Now())
 	if err != nil {
-		b.cfg.Log.WarnContext(ctx, "checking remembered consent failed", "request_id", logging.RequestID(ctx), "error", err.Error())
+		b.cfg.Log.WarnContext(ctx, "checking remembered consent failed", "error", err.Error())
 		return nil, hintNotRemembered, err
 	}
 	if !ok {
@@ -191,7 +190,7 @@ func (b *Broker) rememberAllow(w http.ResponseWriter, r *http.Request, l login, 
 	h := hint{Issuer: id.Issuer, Subject: id.Subject}
 	if err := b.cfg.Store.RememberConsent(ctx, store.Consent{Key: b.consentKey(h, l), Scopes: consentScopes(l.Scopes, l.Refresh), RecordsLifetime: true, ApprovedAt: now,
 		ExpiresAt: now.Add(ConsentLifetime)}); err != nil {
-		b.cfg.Log.WarnContext(ctx, "remembering consent failed; the user will be asked again", "request_id", logging.RequestID(ctx), "error", err.Error())
+		b.cfg.Log.WarnContext(ctx, "remembering consent failed; the user will be asked again", "error", err.Error())
 		return
 	}
 	b.setHint(w, h, now)

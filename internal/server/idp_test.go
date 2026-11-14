@@ -312,7 +312,7 @@ func TestAClientKeyAlgorithmTheKeyCannotUseRefusesToStart(t *testing.T) {
 
 // check reports a subject claim users can change, naming the setting.
 func TestCheckReportsAMutableSubjectClaim(t *testing.T) {
-	warnings, err := CheckOffline(loadOIDC(t, "keycloak", "https://sso.example.com/realms/acme", "c", "BYWARD_OIDC_SUBJECT_CLAIM=email"))
+	warnings, err := checkOffline(loadOIDC(t, "keycloak", "https://sso.example.com/realms/acme", "c", "BYWARD_OIDC_SUBJECT_CLAIM=email"))
 	if err != nil {
 		t.Fatal(err)
 	}
