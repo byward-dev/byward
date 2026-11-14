@@ -1,0 +1,9 @@
+# Every link from byward.dev (repository byward-dev/byward-dev.github.io, index.html) into this
+# repository. TestEveryPageTheWebsiteLinksToExists fails when one of these paths is missing, so a PR
+# that moves a page the site links to must keep a page at the old path that links to the new one.
+#
+# Kept in step with the site by a check in the site's repository: it fails when index.html links to
+# a blob/main or tree/main path of this repository that this file does not list. A new site link
+# therefore lands here first.
+https://github.com/byward-dev/byward/blob/main/docs/how-to/quickstart-entra.md
+https://github.com/byward-dev/byward/blob/main/docs/security-posture.md
