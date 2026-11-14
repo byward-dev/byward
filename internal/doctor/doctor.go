@@ -97,7 +97,7 @@ const secretWarnBefore = 30 * 24 * time.Hour
 // SecretExpiry checks the client secret's end date, which the operator states in setting (the IdP
 // does not tell). A zero expires means it was not stated.
 func SecretExpiry(setting string, expires, now time.Time) Result {
-	r := Result{Class: ClassIdP, Name: "client secret expiry"}
+	r := CheckClientSecretExpiry.NewResult()
 	left := expires.Sub(now)
 	switch {
 	case expires.IsZero():
@@ -118,7 +118,7 @@ func SecretExpiry(setting string, expires, now time.Time) Result {
 // CertificateExpiry is the client certificate's lifetime check (ADR-0012 §5, §10), from its own
 // end date: a warning within secretWarnBefore, a failure once it has passed. setting names the file.
 func CertificateExpiry(setting string, notAfter, now time.Time) Result {
-	r := Result{Class: ClassIdP, Name: "client certificate expiry"}
+	r := CheckClientCertificateExpiry.NewResult()
 	left := notAfter.Sub(now)
 	switch {
 	case left <= 0:
