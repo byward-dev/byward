@@ -41,15 +41,15 @@ func TestSendRejectsMessagesThatBreakFraming(t *testing.T) {
 	}
 }
 
+// An upstream process gets exactly the allowlist, the operator's env and its identity: nothing
+// else, so no BYWARD_EMAIL (ADR-0016 §6).
 func TestUpstreamGetsOnlyAllowlistOperatorEnvAndIdentity(t *testing.T) {
 	cases := []struct {
 		name string
 		id   Identity
 		want []string
 	}{
-		{"without email", alice, nil},
-		{"with opted-in email", Identity{Subject: alice.Subject, Issuer: alice.Issuer, Email: "alice@example.com"},
-			[]string{"BYWARD_EMAIL=alice@example.com"}},
+		{"without a principal type", alice, nil},
 		{"a user", Identity{Subject: alice.Subject, Issuer: alice.Issuer, PrincipalType: "user"}, []string{"BYWARD_PRINCIPAL_TYPE=user"}},
 		{"an app-only caller", Identity{Subject: alice.Subject, Issuer: alice.Issuer, PrincipalType: "client"}, []string{"BYWARD_PRINCIPAL_TYPE=client"}},
 	}
@@ -450,7 +450,9 @@ func TestGetRequiresAnIdentity(t *testing.T) {
 		"no issuer":             {Subject: "s"},
 		"no subject":            {Issuer: "i"},
 		"NUL in subject":        {Subject: "a\x00b", Issuer: "i"},
-		"NUL in email":          {Subject: "s", Issuer: "i", Email: "a\x00b"},
+		"NUL in issuer":         {Subject: "s", Issuer: "a\x00b"},
+		"NUL in grant":          {Subject: "s", Issuer: "i", Grant: "g\x00x"},
+		"NUL in MCP client":     {Subject: "s", Issuer: "i", Client: "c\x00x"},
 		"NUL in principal type": {Subject: "s", Issuer: "i", PrincipalType: "user\x00x"},
 	}
 	for name, id := range cases {

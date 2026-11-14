@@ -41,7 +41,7 @@ It runs while the proxy runs: it writes to the same store, SQLite or PostgreSQL 
 
 | Audit record | When |
 |---|---|
-| `grant_revoked`, `reason` `operator revoke-user`, `user_key` set | `revoke-user` ran. Written once, by the command, to its own standard error, not to the proxy's log |
+| `grant_revoked`, `reason` `operator revoke-user`, `user_key` set | `revoke-user` ran. Written by the command to its standard error, and by each running proxy to its audit stream ([where it is recorded](#where-an-operator-revocation-is-recorded)) |
 | `access_denied` and `grant_revoked` (`the access gate refused the user on refresh; grant revoked`) | a refresh found the user outside the gate |
 | `grant_revoked` (`the IdP ended the session; grant revoked`) | the IdP refused the refresh |
 
@@ -57,7 +57,22 @@ consent goes, and every token issued before it is refused within seconds. Everyo
 ([`byward revoke-all`](../reference/commands.md#byward-revoke-all)).
 
 Audit: one `grant_revoked` record with `reason` `operator revoke-all`, on the command's standard
-error.
+error and in each running proxy's audit stream ([where it is recorded](#where-an-operator-revocation-is-recorded)).
+
+## Where an operator revocation is recorded
+
+`revoke-user` and `revoke-all` write their `grant_revoked` record in two places:
+
+- **The command** writes it to its own standard error once the revocation is stored.
+- **Each running proxy** writes the same record (event, outcome, `reason` and, for `revoke-user`,
+  `user_key`; never a grant ID or a token) to its audit stream at the first deny-list sync that finds
+  it, within 5 seconds. With several replicas on PostgreSQL, each replica writes one. The
+  records name no replica: tell them apart by your log collector's source (pod or host), and count one
+  revocation per `user_key` and `reason` within a few seconds.
+
+A proxy records only the revocations made after it started, by the clock of the host that ran the
+command: one made while no proxy runs, or within a clock difference of a proxy's start, is only on
+the command's standard error. When you run the command as a job, collect its output too.
 
 ## One app
 

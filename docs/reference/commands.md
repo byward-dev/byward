@@ -199,7 +199,8 @@ seconds. The user key is the one the audit records show as `user_key`: with Entr
 tenant and object IDs); with an `oidc` IdP, the value of its subject claim (`BYWARD_OIDC_SUBJECT_CLAIM`,
 `sub` by default). It runs beside a running proxy. A key that is not a user key of the configured
 IdP exits 2; a store that cannot be opened or written exits 1. The revocation is audited as
-`grant_revoked` with the reason `operator revoke-user` ([observability](observability.md)).
+`grant_revoked` with the reason `operator revoke-user`, by the command and by each running proxy at
+its next deny-list sync ([where it is recorded](../how-to/revoke-access.md#where-an-operator-revocation-is-recorded)).
 
 ## `byward revoke-all`
 
@@ -208,7 +209,8 @@ byward revoke-all --yes
 ```
 
 The same for every user at once, for incident response: everyone signs in again. `--yes` is required.
-Audited as `grant_revoked` with the reason `operator revoke-all`.
+Audited as `grant_revoked` with the reason `operator revoke-all`, by the command and by each running
+proxy ([where it is recorded](../how-to/revoke-access.md#where-an-operator-revocation-is-recorded)).
 
 ## `byward store new-epoch`
 
