@@ -24,10 +24,11 @@ func TestEveryBYWARDNameInTheCodeAndDocsIsASetting(t *testing.T) {
 	}
 	// Not settings, but fixed names: identity and the token socket the proxy sets for stdio
 	// upstreams (ADR-0016, ADR-0017), the
-	// switch that regenerates the settings reference, the image build argument, the ENTRA_*, OIDC_*
+	// switch that regenerates the settings reference, the switch of the PostgreSQL test lane
+	// (internal/testutil/pgtest), the image build argument, the ENTRA_*, OIDC_*
 	// and APP_* families, the real-Entra lane's repository variables (docs/how-to/real-entra-lane.md)
 	// and the fixture privacy test's CI secret (ADR-0024 §13).
-	extra := regexp.MustCompile(`^BYWARD_(ENTRA_\*|OIDC_\*|APP_\*|SUBJECT|ISSUER|EMAIL|PRINCIPAL_TYPE|DOWNSTREAM_TOKEN_SOCKET|UPDATE_REFERENCE|IMAGE|CI_ENTRA_TENANT|CI_ENTRA_CLIENT_ID|FORBIDDEN_IDENTIFIERS)$`)
+	extra := regexp.MustCompile(`^BYWARD_(ENTRA_\*|OIDC_\*|APP_\*|SUBJECT|ISSUER|EMAIL|PRINCIPAL_TYPE|DOWNSTREAM_TOKEN_SOCKET|UPDATE_REFERENCE|POSTGRES|IMAGE|CI_ENTRA_TENANT|CI_ENTRA_CLIENT_ID|FORBIDDEN_IDENTIFIERS)$`)
 	check := func(path string) {
 		src, err := os.ReadFile(path) //nolint:gosec // G304: reads this repository's own files
 		if err != nil {

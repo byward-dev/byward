@@ -147,8 +147,8 @@ jobs:
           # The real open-source clients run in pinned containers on the host network (ADR-0024 §3).
           BYWARD_REAL_CLIENTS: "1"
 
-  # The PostgreSQL store adapter on PostgreSQL 15 and 18 in pinned containers with TLS: the
-  # conformance suite and the adapter's own tests (ADR-0007 §2, amended for #227).
+  # The PostgreSQL store on PostgreSQL 15 and 18 in pinned containers with TLS: the conformance
+  # suite, the adapter's own tests and two replicas of the wired proxy sharing it (ADR-0007, #227).
   postgres:
     runs-on: ubuntu-latest
     timeout-minutes: 12

@@ -135,13 +135,13 @@ func newOIDCIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect 
 		hd = cfg.GateHostedDomains[0] // also the hd hint at Google; the gate list stays the rule (ADR-0015)
 	}
 	p, err := oidc.New(oidc.Config{Preset: preset, Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID, ClientAuth: auth, RedirectURL: redirect,
-		Scopes: cfg.OIDCScopes, SubjectClaim: cfg.OIDCSubjectClaim, HostedDomain: hd, AllowLoopbackHTTP: cfg.Dev, HTTPClient: idpHTTP})
+		Scopes: cfg.OIDCScopes, SubjectClaim: cfg.OIDCSubjectClaim, RolesClaim: cfg.OIDCRolesClaim, GroupsClaim: cfg.OIDCGroupsClaim, HostedDomain: hd, AllowLoopbackHTTP: cfg.Dev, HTTPClient: idpHTTP})
 	if err != nil {
 		return nil, fmt.Errorf("oidc settings (BYWARD_OIDC_*): %w", err)
 	}
 	ip := &identityProvider{name: cfg.IdP, redirect: redirect, label: oidcLabel(cfg), adapter: p, scope: p.Scope(), gateIdP: gate.Generic, userKey: oidcUserKey,
 		diagnose: func(ctx context.Context, _ time.Time) []doctor.Result {
-			return diagnoseDiscovery(ctx, p, cfg.OIDCIssuer)
+			return append(diagnoseDiscovery(ctx, p, cfg.OIDCIssuer), p.DiagnoseClient(ctx, oidcDiagnosis(cfg)))
 		}}
 	if oidc.Presets[preset].HostedDomains {
 		ip.gateIdP = gate.Google // the gate's kind for an IdP with hosted domains
@@ -198,6 +198,15 @@ func entraClientAuth(cfg *config.Config) (idp.ClientAuth, entra.Diagnosis, time.
 	}
 	d.CredentialKind, d.CredentialSetting = entra.CredentialSecret, config.Setting{Name: "entra-client-secret"}.Env()+"_FILE"
 	return idp.ClientSecret(cfg.EntraClientSecret), d, time.Time{}, nil
+}
+
+// oidcDiagnosis names the settings of the oidc client and its credential, for doctor's fixes.
+func oidcDiagnosis(cfg *config.Config) oidc.Diagnosis {
+	d := oidc.Diagnosis{ClientIDSetting: config.Setting{Name: "oidc-client-id"}.Env(), CredentialSetting: config.Setting{Name: "oidc-client-secret"}.Env() + "_FILE"}
+	if cfg.OIDCClientKey != "" {
+		d.CredentialSetting, d.KeyCredential = config.Setting{Name: "oidc-client-key"}.Env()+"_FILE", true
+	}
+	return d
 }
 
 // oidcClientAuth is the proxy's credential at an oidc IdP: a client secret, or private_key_jwt with

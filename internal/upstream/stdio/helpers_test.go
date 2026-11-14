@@ -252,6 +252,18 @@ func (t *fakeTimer) Stop() bool {
 	return was
 }
 
+// due reports whether an active timer fires within d of now.
+func (c *fakeClock) due(d time.Duration) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, t := range c.timers {
+		if t.active && !t.at.After(c.now.Add(d)) {
+			return true
+		}
+	}
+	return false
+}
+
 // Advance moves time forward by d, firing due timers in order, including ones they create.
 func (c *fakeClock) Advance(d time.Duration) {
 	c.mu.Lock()

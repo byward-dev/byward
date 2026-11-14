@@ -61,6 +61,10 @@ The issuer is the realm URL exactly as Keycloak's discovery document states it
 docker run … -v /etc/pki/my-ca.pem:/etc/byward/ca.pem:ro -e SSL_CERT_FILE=/etc/byward/ca.pem …
 ```
 
+The file needs only your CA. Go still reads the image's public bundle in `/etc/ssl/certs`, so
+public IdPs and upstreams keep working. Details, Kubernetes and the pitfalls are in
+[trust a private CA](private-ca.md).
+
 ## 4. A key instead of the secret (`private_key_jwt`)
 
 1. Make an RSA (2048 bits or more) or EC P-256 key: `openssl genpkey -algorithm RSA -pkeyopt
@@ -79,9 +83,9 @@ docker run … -v /etc/pki/my-ca.pem:/etc/byward/ca.pem:ro -e SSL_CERT_FILE=/etc
 
 ## 5. Check it
 
-- `byward check --offline`, then `byward doctor`: "discovery … matches the configured issuer". doctor
-  does not yet check the client secret or key against Keycloak; a wrong one shows at the first sign-in
-  as an IdP alert.
+- `byward check --offline`, then `byward doctor`: "discovery … matches the configured issuer", and
+  "client credential": Keycloak accepted the client ID and the secret or key. A wrong secret fails
+  with `unauthorized_client`, a wrong key with `invalid_client`, each with the setting to fix.
 - Sign in from an MCP client. A user without the role or group gets "You don't have access to this
   server." and the audit has `access_denied` with `reason` `role` or `group`.
 - Refresh: Keycloak returns an ID token on refresh, which byward needs to recheck the gate. A client gets

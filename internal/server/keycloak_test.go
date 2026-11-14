@@ -4,8 +4,6 @@ package server
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"html"
 	"io"
@@ -50,7 +48,7 @@ func TestIntegrationKeycloakSignsAUserInAndRefreshes(t *testing.T) {
 		t.Fatal(err)
 	}
 	public := "http://" + ln.Addr().String()
-	kc := startKeycloak(t, public+"/callback/keycloak")
+	kc := startKeycloak(t, keycloakRealm(public+"/callback/keycloak"))
 	issuer := kc + "/realms/byward"
 
 	up := fakeupstream.New()
@@ -84,7 +82,7 @@ func TestIntegrationKeycloakSignsAUserInAndRefreshes(t *testing.T) {
 			t.Fatalf("token response %v, want an access and a refresh token", tok)
 		}
 		// The upstream's assertion is byward's, for Keycloak's subject, with the realm role.
-		c := verified(t, jwks(t, s.Public.Handler, ln.Addr().String()), mcpAssertion(t, public, up, tok["access_token"].(string)), cfg.UpstreamURL.String())
+		c := verified(t, jwks(t, s.Public.Handler, ln.Addr().String()), mcpAssertion(t, public, "", up, tok["access_token"].(string)), cfg.UpstreamURL.String())
 		if c["iss"] != public || c["sub"] == "" || c["sub"] == "alice" || c["client_id"] != "test-app" || !reflect.DeepEqual(c["roles"], []any{"mcp-user"}) {
 			t.Fatalf("assertion claims %v", c)
 		}
@@ -101,22 +99,20 @@ func TestIntegrationKeycloakSignsAUserInAndRefreshes(t *testing.T) {
 
 const keycloakClientSecret = "byward-test-secret"
 
-// startKeycloak runs Keycloak with the test realm and returns its base URL once the realm's
-// discovery answers. The container publishes one loopback port, so no host network is needed.
-func startKeycloak(t *testing.T, redirect string) string {
+// startKeycloak runs Keycloak with realm and returns its base URL once the realm's discovery
+// answers. The container publishes one loopback port, so no host network is needed.
+func startKeycloak(t *testing.T, realm map[string]any) string {
 	t.Helper()
 	dir := t.TempDir()
 	// The image runs Keycloak as its own user, which must read the realm: world-readable test data.
 	if err := os.Chmod(dir, 0o755); err != nil { //nolint:gosec // G302: a directory of non-secret test data the container reads
 		t.Fatal(err)
 	}
-	realm, _ := json.Marshal(keycloakRealm(redirect))
-	if err := os.WriteFile(filepath.Join(dir, "byward-realm.json"), realm, 0o644); err != nil { //nolint:gosec // G306: a test realm the container reads
+	data, _ := json.Marshal(realm)
+	if err := os.WriteFile(filepath.Join(dir, "byward-realm.json"), data, 0o644); err != nil { //nolint:gosec // G306: a test realm the container reads
 		t.Fatal(err)
 	}
-	b := make([]byte, 6)
-	_, _ = rand.Read(b)
-	name := "byward-keycloak-" + hex.EncodeToString(b)
+	name := containerName(t, "byward-keycloak-")
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", name).Run() }) //nolint:gosec // G204: our own container name
 	// Docker picks the host port, so no other process can take it between choosing and binding.
 	run := exec.Command("docker", "run", "-d", "--name", name, "-p", "127.0.0.1::8080", //nolint:gosec // G204: a pinned image and our own arguments
@@ -225,26 +221,6 @@ func keycloakSignIn(t *testing.T, public, user string, want int, verifier string
 	}
 	loc, _ := url.Parse(back.Header.Get("Location"))
 	return loc.Query().Get("code")
-}
-
-// mcpAssertion sends one MCP request with the proxy token and returns the assertion the upstream got.
-func mcpAssertion(t *testing.T, public string, up *fakeupstream.Server, access string) string {
-	t.Helper()
-	r, _ := http.NewRequest(http.MethodPost, public+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
-	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("Accept", "application/json, text/event-stream")
-	r.Header.Set("Authorization", "Bearer "+access)
-	res, err := http.DefaultClient.Do(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = res.Body.Close()
-	got, ok := up.Last()
-	if res.StatusCode != http.StatusOK || !ok {
-		t.Fatalf("MCP request: %d, upstream reached %v", res.StatusCode, ok)
-	}
-	raw, _ := strings.CutPrefix(got.Header.Get("Authorization"), "Bearer ")
-	return raw
 }
 
 func tokenRequest(t *testing.T, public string, form url.Values) map[string]any {

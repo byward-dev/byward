@@ -47,6 +47,9 @@ var allowed = map[string]bool{
 	"idp_error_code": true, "trace_id": true, "correlation_id": true,
 	// IdP alerts (#204): the IdP call and the bounded reason it needs the operator.
 	"operation": true, "alert": true,
+	// The public listener's TLS (#183): whether it is on, the certificate files' paths, and the
+	// subject and end of a newly served certificate; never the files' contents.
+	"tls": true, "cert_file": true, "key_file": true, "subject": true, "not_after": true,
 }
 
 // New returns a logger writing JSON (or text) to w.

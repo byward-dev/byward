@@ -228,14 +228,7 @@ func signInOIDC(t *testing.T, idp []fakeidp.Option, settings ...string) *oidcSes
 	q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1/callback"}, "response_type": {"code"}, "scope": {"mcp offline_access"},
 		"code_challenge": {pkce(verifier)}, "code_challenge_method": {"S256"}}
 	page := s.b.send(http.MethodGet, "/authorize?"+q.Encode(), nil, nil)
-	allow := s.b.allow(page, readAll(t, page))
-	idpRes, err := s.fake.HTTPClient().Get(allow.Header.Get("Location"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = idpRes.Body.Close()
-	cb, _ := url.Parse(idpRes.Header.Get("Location"))
-	back := s.b.send(http.MethodGet, cb.Path+"?"+cb.RawQuery, nil, allow.Cookies())
+	back := s.b.viaIdP(s.fake, s.b.allow(page, readAll(t, page)))
 	done, _ := url.Parse(back.Header.Get("Location"))
 	s.tokens(t, url.Values{"grant_type": {"authorization_code"}, "code": {done.Query().Get("code")}, "client_id": {"test-app"},
 		"redirect_uri": {"http://127.0.0.1/callback"}, "code_verifier": {verifier}})
@@ -269,21 +262,7 @@ func (s *oidcSession) refresh(t *testing.T) {
 // verified assertion the upstream got.
 func (s *oidcSession) assertion(t *testing.T) map[string]any {
 	t.Helper()
-	r, _ := http.NewRequest(http.MethodPost, s.h.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
-	r.Host = "mcp.example.com"
-	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("Accept", "application/json, text/event-stream")
-	r.Header.Set("Authorization", "Bearer "+s.access)
-	res, err := http.DefaultClient.Do(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = res.Body.Close()
-	got, ok := s.up.Last()
-	if res.StatusCode != http.StatusOK || !ok {
-		t.Fatalf("MCP request: %d, upstream reached %v", res.StatusCode, ok)
-	}
-	raw, _ := strings.CutPrefix(got.Header.Get("Authorization"), "Bearer ")
+	raw := mcpAssertion(t, s.h.URL, "mcp.example.com", s.up, s.access)
 	return verified(t, jwks(t, s.srv.Public.Handler, "mcp.example.com"), raw, s.cfg.UpstreamURL.String())
 }
 
@@ -308,4 +287,31 @@ type oneSubject string
 
 func (s oneSubject) Validate(context.Context, string) (resource.Identity, error) {
 	return resource.Identity{Subject: string(s)}, nil
+}
+
+// The roles and groups claims the operator names reach both the access gate and the identity
+// assertion through the wired server; with the settings unset, the top-level roles claim does (#286).
+// The defaults are pinned per preset in config and the gate, and in the adapter.
+func TestTheRolesAndGroupsClaimsReachTheGateAndTheAssertion(t *testing.T) {
+	const nsRoles, nsGroups = "https://byward.dev/roles", "https://byward.dev/groups"
+	asserted := "BYWARD_ASSERTION_CLAIMS=roles,groups"
+	for name, tc := range map[string]struct {
+		claims   map[string]any
+		settings []string
+		key      string // the asserted claim that must be [mcp]
+	}{
+		"roles by default, the top-level claim": {map[string]any{"roles": []string{"mcp"}, nsRoles: []string{"other"}},
+			[]string{"BYWARD_GATE_ROLES=mcp", asserted}, "roles"},
+		"a named roles claim": {map[string]any{"roles": []string{"other"}, nsRoles: []string{"mcp"}},
+			[]string{"BYWARD_OIDC_ROLES_CLAIM=" + nsRoles, "BYWARD_GATE_ROLES=mcp", asserted}, "roles"},
+		"a named groups claim": {map[string]any{"groups": []string{"other"}, nsGroups: []string{"mcp"}},
+			[]string{"BYWARD_OIDC_GROUPS_CLAIM=" + nsGroups, "BYWARD_GATE_GROUPS=mcp", asserted}, "groups"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := oidcAssertion(t, fakeidp.User{Claims: tc.claims}, tc.settings...)
+			if v, _ := got[tc.key].([]any); len(v) != 1 || v[0] != "mcp" {
+				t.Fatalf("asserted %s %v, want [mcp]", tc.key, got[tc.key])
+			}
+		})
+	}
 }

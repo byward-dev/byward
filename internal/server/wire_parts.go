@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/byward-dev/byward/internal/assertion"
 	"github.com/byward-dev/byward/internal/config"
@@ -17,9 +16,6 @@ import (
 	"github.com/byward-dev/byward/internal/token"
 )
 
-// maxJTIs bounds the in-memory private_key_jwt replay cache.
-const maxJTIs = 10000
-
 // authParts is what authenticated mode builds from configuration alone, with no network access and
 // no writes; check --offline stops here (ADR-0020 §7).
 type authParts struct {
@@ -28,8 +24,9 @@ type authParts struct {
 	loginBox, idpBox, consentBox, hintBox *token.Box
 	sessionBox                            *token.Box
 	static                                *registration.StaticRegistry
-	// jti is the private_key_jwt replay cache, shared by static, CIMD and DCR clients.
-	jti *registration.MemoryJTICache
+	// jti is the private_key_jwt replay cache, shared by static, CIMD and DCR clients. It keeps its
+	// IDs in the store, which buildAuth binds once it is open.
+	jti *registration.StoreJTICache
 	// clientDeny is BYWARD_CLIENT_DENYLIST, applied to CIMD and DCR clients.
 	clientDeny *registration.Denylist
 	// assertionKeys sign the identity assertion for an HTTP upstream; nil for a stdio upstream.
@@ -89,7 +86,7 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 	}
 	checkSecret := secretCheck(cfg)
 	loose := looseSecretFiles(cfg) // with the static clients' error below, reported at once
-	p.jti = registration.NewMemoryJTICache(time.Now, maxJTIs)
+	p.jti = registration.NewStoreJTICache(nil)
 	opts := []registration.LoadOption{registration.WithSecretCheck(checkSecret)}
 	if cfg.CIMD || cfg.DCR { // apps can register themselves, so no static client is needed
 		opts = append(opts, registration.AllowNoClients())
@@ -158,14 +155,19 @@ func secretCheck(cfg *config.Config) func(string) error {
 	return secretfile.Check
 }
 
-// looseSecretFiles is one error per secret file other users can read, named by its setting, and
-// for the federated token file (read at each request, not at start) one if it is missing.
+// looseSecretFiles is one error per secret file other users can read (the TLS key's included),
+// named by its setting, and for the federated token file (read at each request, not at start) one if it is missing.
 func looseSecretFiles(cfg *config.Config) []error {
 	check := secretCheck(cfg)
 	var loose []error
 	for _, f := range cfg.Values.SecretFiles() {
 		if err := check(f.Path); err != nil {
 			loose = append(loose, fmt.Errorf("%s: %w", f.From, err))
+		}
+	}
+	if f := cfg.TLSKeyFile; f != "" {
+		if err := check(f); err != nil {
+			loose = append(loose, fmt.Errorf("%s: %w", tlsKeyEnv, err))
 		}
 	}
 	// A federated token is a credential too, though it is read at each request, not at start.

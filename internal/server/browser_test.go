@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/broker"
+	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
 // consentFlow finds the sealed flow in the consent page's form.
@@ -49,6 +50,19 @@ func (b *testBrowser) send(method, path string, form url.Values, cookies []*http
 		b.t.Fatal(err)
 	}
 	return res
+}
+
+// viaIdP follows res's redirect to the fake IdP, which signs the user in, and sends the IdP's
+// redirect back to the proxy with res's cookies, as the user's browser does.
+func (b *testBrowser) viaIdP(fake *fakeidp.IdP, res *http.Response) *http.Response {
+	b.t.Helper()
+	idpRes, err := fake.HTTPClient().Get(res.Header.Get("Location"))
+	if err != nil {
+		b.t.Fatal(err)
+	}
+	_ = idpRes.Body.Close()
+	cb, _ := url.Parse(idpRes.Header.Get("Location"))
+	return b.send(http.MethodGet, cb.Path+"?"+cb.RawQuery, nil, res.Cookies())
 }
 
 // allow answers the consent page (its body, already read) with Allow, after the consent delay.

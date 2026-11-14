@@ -183,9 +183,10 @@ func (c *clientAuth) checkAssertion(ctx context.Context, raw, tokenEndpoint stri
 	if jti == "" || len(jti) > MaxJTILen {
 		return invalid("client assertion jti missing or too long")
 	}
-	seen, err := c.jti.Seen(ctx, c.id+"\x00"+jti, exp.Add(AssertionLeeway))
+	// The replay key is the client ID, 0x00 and the jti, so one client's jti never blocks another's.
+	seen, err := c.jti.Seen(ctx, c.id+"\x00"+jti, now, exp.Add(AssertionLeeway))
 	if err != nil {
-		return fmt.Errorf("registration: jti cache: %w", err)
+		return fmt.Errorf("%w: %w", ErrReplayCheckUnavailable, err)
 	}
 	if seen {
 		return invalid("client assertion replayed")
