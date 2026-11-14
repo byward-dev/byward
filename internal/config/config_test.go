@@ -94,10 +94,18 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"http public", "BYWARD_PUBLIC_URL=http://mcp.example.com/mcp", "must use https"},
 		{"http loopback without dev", "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "needs --dev"},
 		// #344: the public host joins the public Host allow-list, so it follows BYWARD_ALLOWED_HOSTS' name rule.
-		{"public host with a trailing dot", "BYWARD_PUBLIC_URL=https://mcp.example.com./mcp", `BYWARD_PUBLIC_URL: the host "mcp.example.com." is not valid: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
+		{"public host with a trailing dot", "BYWARD_PUBLIC_URL=https://mcp.example.com./mcp", `BYWARD_PUBLIC_URL: "mcp.example.com." is not a host[:port]: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
 		{"public host empty, with a port", "BYWARD_PUBLIC_URL=https://:8443/mcp", `BYWARD_PUBLIC_URL: give a host, e.g. https://mcp.example.com/mcp`},
-		{"public host with a double dot", "BYWARD_PUBLIC_URL=https://a..b/mcp", `BYWARD_PUBLIC_URL: the host "a..b" is not valid`},
-		{"public host with a wildcard", "BYWARD_PUBLIC_URL=https://a*b/mcp", `BYWARD_PUBLIC_URL: the host "a*b" is not valid`},
+		{"public host with a double dot", "BYWARD_PUBLIC_URL=https://a..b/mcp", `BYWARD_PUBLIC_URL: "a..b" is not a host[:port]: a host name`},
+		{"public host with a wildcard", "BYWARD_PUBLIC_URL=https://a*b/mcp", `BYWARD_PUBLIC_URL: "a*b" is not a host[:port]: a host name`},
+		// #353: the port and the zone follow BYWARD_ALLOWED_HOSTS' rules too.
+		{"public URL with an empty port", "BYWARD_PUBLIC_URL=https://a.example:/mcp", `BYWARD_PUBLIC_URL: "a.example:" is not a host[:port]: give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone`},
+		{"public URL with a port over 65535", "BYWARD_PUBLIC_URL=https://a.example:65536/mcp", `BYWARD_PUBLIC_URL: "a.example:65536" is not a host[:port]`},
+		{"unicode public host with a port", "BYWARD_PUBLIC_URL=https://bücher.example:8443/mcp", `BYWARD_PUBLIC_URL: the host "bücher.example:8443" is not ASCII`},
+		{"public URL with port 0", "BYWARD_PUBLIC_URL=https://a.example:0/mcp", `BYWARD_PUBLIC_URL: "a.example:0" is not a host[:port]`},
+		{"public URL with a leading-zero port", "BYWARD_PUBLIC_URL=https://a.example:0443/mcp", `BYWARD_PUBLIC_URL: "a.example:0443" is not a host[:port]`},
+		{"public URL with an IPv6 zone", "BYWARD_PUBLIC_URL=https://[fe80::1%25eth0]/mcp", `BYWARD_PUBLIC_URL: "[fe80::1%eth0]" is not a host[:port]: give host`},
+		{"public URL with an IPv6 zone and a port", "BYWARD_PUBLIC_URL=https://[fe80::1%25eth0]:8443/mcp", `BYWARD_PUBLIC_URL: "[fe80::1%eth0]:8443" is not a host[:port]`},
 		// Browsers and MCP clients send IDN hosts in ASCII (xn--) form, so a Unicode host never matches.
 		{"unicode public host", "BYWARD_PUBLIC_URL=https://bücher.example/mcp", `BYWARD_PUBLIC_URL: the host "bücher.example" is not ASCII`},
 		{"escaped unicode public host", "BYWARD_PUBLIC_URL=https://b%C3%BCcher.example/mcp", `BYWARD_PUBLIC_URL: the host "bücher.example" is not ASCII`},
