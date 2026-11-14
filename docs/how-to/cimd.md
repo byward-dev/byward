@@ -11,7 +11,7 @@ need no registration. This is on by default, and the proxy advertises it in its 
 | Setting | Default | Effect |
 |---|---|---|
 | `BYWARD_CIMD` | `true` | `false` stops accepting and advertising CIMD clients. Static clients still work. |
-| `BYWARD_CIMD_TRUSTED_HOSTS` | — | Hosts whose documents you vouch for, for example `claude.ai,vscode.dev`. Their apps show as "Trusted by your operator". (Remembering consent for them comes with the consent registry, ADR-0010 §2-3; v0.1 asks every time.) |
+| `BYWARD_CIMD_TRUSTED_HOSTS` | — | Hosts whose documents you vouch for, for example `claude.ai,vscode.dev`. Their apps show as "Trusted by your operator". Consent for their apps is remembered for 30 days per user ([ADR-0010](../adr/0010-consent-screen.md) §2-3); apps of other hosts are asked every time. |
 | `BYWARD_CIMD_ALLOWED_HOSTS` | — | When set, only these hosts and the trusted ones may publish documents; any other app is refused before its document is fetched. Empty allows any host. |
 
 Hosts are exact, comma-separated ASCII names, with no scheme, port, path or wildcard. A

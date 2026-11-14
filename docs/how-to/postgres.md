@@ -2,7 +2,9 @@
 
 The default store is an embedded SQLite database ([state.md](state.md)): one replica. To run more
 than one replica of the proxy behind a load balancer, give them a shared PostgreSQL store
-([ADR-0007](../adr/0007-state-and-storage.md), amended for #227).
+([ADR-0007](../adr/0007-state-and-storage.md), amended for [#227](https://github.com/byward-dev/byward/issues/227)).
+
+> On `main` only: the PostgreSQL store is in no release yet.
 
 Requirements:
 
@@ -12,7 +14,9 @@ Requirements:
 - **The same keys on every replica.** Keys never live in the store. Each replica needs the same
   sealing keys (`BYWARD_KEYS_DIR`, [sealing-keys.md](sealing-keys.md)) and assertion keys
   (`BYWARD_ASSERTION_KEYS_DIR`); otherwise a token one replica sealed is refused by the next.
-  `byward check --offline` and `byward doctor` remind you of this.
+  `byward check --offline` and `byward doctor` remind you of this. On Kubernetes, mount the keys from
+  one Secret into every replica. Rotate them as [sealing keys](sealing-keys.md#rotating) and
+  [the assertion key](identity-assertion.md#5-rotate-the-signing-key) describe, on every replica.
 
 ## 1. Create the database and a role
 
@@ -68,6 +72,13 @@ What is shared and what is not:
 
 A revocation on one replica, or with `byward revoke-user` / `byward revoke-all`, reaches every
 replica at its next deny-list sync, within seconds.
+
+- **Rate limits:** to keep the total budget, divide the budgets by the number of replicas with
+  `BYWARD_OAUTH_RATE_LIMITS` ([rate limits](../reference/rate-limits.md)).
+- **Metrics and the audit stream** are per replica too: each serves its own `/metrics` and writes its
+  own log. Scrape every replica and collect every replica's log.
+- **No session affinity needed:** a legacy MCP session ID is sealed, so any replica can check it. The
+  upstream may still need affinity if it keeps session state per instance.
 
 ## Backup and restore
 

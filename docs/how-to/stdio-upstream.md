@@ -11,7 +11,10 @@ sign-in as an HTTP upstream. An upstream process only ever acts for one signed-i
   its first 2026-07-28 request. A server that does not answer it is treated as 2025-11-25 only,
   and clients fall back to that.
 
-Linux and macOS only, one replica.
+Linux and macOS only, and one replica: the processes live on the replica that started them, so the
+proxy refuses a stdio upstream together with the PostgreSQL store for several replicas
+([postgres](postgres.md)). The byward image has no Node or Python; for a server that needs a
+runtime, build your own image with it (section 6).
 
 ## 1. Give the command
 
@@ -29,6 +32,11 @@ BYWARD_UPSTREAM_COMMAND='["/usr/local/bin/my-server","--read-only"]'
 
 The command is never run through a shell. Give it either way, not both, and never together with
 `BYWARD_UPSTREAM_URL`. A command that is not found stops startup with exit code 2.
+
+To check the setup, give the same settings and command to `byward check --offline -- <command>`
+before you start, and to `byward doctor -- <command>` once the proxy runs: it reports whether the
+command is found, without starting it ([commands](../reference/commands.md)). Then sign in from an
+MCP client and call a tool.
 
 ## 2. Environment of the upstream process
 
@@ -81,6 +89,10 @@ byward ... -- /usr/local/bin/memory-server --file "{session_dir}/memory.json"
 ```
 
 Browser servers need `--isolated` or `--user-data-dir={session_dir}`.
+
+This keeps sessions apart, not a hostile server: every process runs as byward's own uid. Against
+that, and to protect On-Behalf-Of tokens in a process's memory, see
+[isolate stdio upstream processes](harden-a-deployment.md#isolate-stdio-upstream-processes).
 
 ## 4. Limits
 
@@ -172,7 +184,9 @@ USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/byward", "--", "mcp-server-time"]
 ```
 
-Pin both images by digest in production. The repository's tested example is
+`<version>` is the byward release you run, such as `v0.2.0-rc.1`: a stdio upstream needs v0.1.0 or
+later, and the On-Behalf-Of token socket (section 2) v0.2.0-rc.1 or later. Pin both images by
+digest in production. The repository's tested example is
 [`docs/examples/stdio-node/Dockerfile`](../examples/stdio-node/Dockerfile).
 
 ## Without authentication
