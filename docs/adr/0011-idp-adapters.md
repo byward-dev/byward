@@ -1,6 +1,6 @@
 # ADR-0011: IdP adapters — small interface, generic OIDC with presets, Entra on top
 
-- Status: Accepted; amended by ADR-0026 and ADR-0030, and 2026-11-14 (#286, #306)
+- Status: Accepted; amended by ADR-0026 and ADR-0030, and 2026-11-14 (#286, #306; §5's leeway reference corrected)
 - Date: 2026-11-05
 - Issue: #10 (F9)
 
@@ -39,7 +39,7 @@ rate-limit them (`oidc/jwks.go`).
    `*_FILE`; `private_key_jwt` with a key file; a client assertion read from a file on every call
    (workload identity). No vendor SDK. _Amended 2026-11-14 (#306):_ the signing algorithm (below).
 5. **ID token validation per OIDC Core §3.1.3.7:** exact `iss`; `aud` contains our client ID with no
-   untrusted extra audiences; `azp`; `exp`; `iat` within the ADR-0006 skew leeway; `nonce` always sent
+   untrusted extra audiences; `azp`; `exp`; `iat` within a 30 s skew leeway; `nonce` always sent
    and checked; an algorithm allowlist per IdP (never `HS*` or `none`); signatures always verified,
    including on the direct token-endpoint flow.
 6. **Mix-up defence:** a callback path per IdP (`/callback/{idp}`, RFC 9700 §4.4.2.2), the expected

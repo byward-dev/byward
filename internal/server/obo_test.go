@@ -321,6 +321,12 @@ func TestDownstreamRefusalsAreAnsweredInTheProxysName(t *testing.T) {
 			nonZero := regexp.MustCompile(`byward_idp_alerts_total\{[^}]*\} [1-9]`).FindAllString(metrics, -1)
 			counted := strings.Contains(metrics, `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="`+c.alert+`"} 1`) && len(nonZero) == 1
 			refusal := regexp.MustCompile(`(?m)^.*"level":"ERROR","msg":"no downstream token for the upstream request.*$`).FindString(logs)
+			// The request's ID reaches Entra as client-request-id and comes back as its correlation_id,
+			// as on the broker's IdP calls (ADR-0021 §2, §7).
+			id := regexp.MustCompile(`"request_id":"([^"]+)"`).FindStringSubmatch(refusal)
+			if id == nil || !strings.Contains(refusal, `"correlation_id":"`+id[1]+`"`) {
+				t.Errorf("the refusal line does not carry the request's ID back as Entra's correlation_id: %s", refusal)
+			}
 			logged := strings.Contains(refusal, `"alert":"`+c.alert+`"`)
 			if c.alert == "" { // the series are exported at 0; none may have counted
 				counted, logged = len(nonZero) > 0, strings.Contains(logs, `"alert":`)
