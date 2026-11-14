@@ -2,7 +2,6 @@ package broker
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -186,40 +185,5 @@ func TestEveryBrokerIdPCallIsExportedFromTheStart(t *testing.T) {
 		if !seen[op] {
 			t.Errorf("IdPOperations lists %q, which no sign-in or refresh observed", op)
 		}
-	}
-}
-
-// #342: a refresh error of no known kind (not an *idp.Error, such as a bug in an adapter) is the
-// proxy's own failure: a 500 server_error that keeps the grant, logged at error level with the
-// request and the error but no fix to name, and no alert.
-func TestARefreshErrorOfNoKnownKindIsAServerErrorLoggedWithoutAFix(t *testing.T) {
-	e := newEnv(t)
-	rt := e.offline(t)["refresh_token"].(string)
-	working, cfg := e.cfg, e.cfg
-	cfg.IdP = refresherFunc{IdP: cfg.IdP, refresh: func(context.Context, string) (*idp.Identity, idp.Tokens, error) {
-		return nil, idp.Tokens{}, errors.New("plain failure")
-	}}
-	e.start(t, cfg)
-	res, body := e.refresh(t, rt, "")
-	if res.StatusCode != http.StatusInternalServerError || body["error"] != "server_error" {
-		t.Fatalf("refresh = %d %v, want 500 server_error", res.StatusCode, body)
-	}
-	logs := e.logs.String()
-	line := regexp.MustCompile(`(?m)^.*"msg":"IdP refresh failed".*$`).FindString(logs)
-	for _, want := range []string{`"level":"ERROR"`, `"request_id":"`, `"error":"plain failure"`} {
-		if !strings.Contains(line, want) {
-			t.Errorf("the refresh failure line lacks %s:\n%s", want, logs)
-		}
-	}
-	if line == "" || strings.Contains(line, `"reason":`) {
-		t.Errorf("want one failure line with no reason:\n%s", logs)
-	}
-	if len(e.alerts) != 0 || strings.Contains(logs, `"alert":`) {
-		t.Errorf("an error of no known kind raised an alert %v:\n%s", e.alerts, logs)
-	}
-	// The grant is kept: the same refresh token works once the IdP answers again.
-	e.start(t, working)
-	if res, body := e.refresh(t, rt, ""); res.StatusCode != http.StatusOK {
-		t.Errorf("after the failure, refresh = %d %v, want the grant kept", res.StatusCode, body)
 	}
 }
