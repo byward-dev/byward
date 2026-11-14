@@ -126,4 +126,4 @@ audit schema, metric names, log fields, and the image paths and uid are public i
 - a deprecated item keeps working, with a warning, for at least one minor release before it is
   removed.
 
-Releases follow [docs/how-to/release.md](docs/how-to/release.md).
+Releases follow [docs/maintainers/release.md](docs/maintainers/release.md).

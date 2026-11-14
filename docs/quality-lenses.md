@@ -17,7 +17,7 @@ angles can be researched in parallel (one helper or agent per angle).
    spec and security best practices, RFCs and drafts, OWASP ASVS, WCAG, browser specs. Quote it
    with a link or `file:line`. Note where sources conflict and which one you follow.
 2. **Competitors.** Build a table from source at a named commit: what each comparable project
-   (`docs/research/reference-projects.md`) does for this question, including their bugs and issues.
+   (`docs/archive/research/reference-projects.md`) does for this question, including their bugs and issues.
 3. **What competitors missed.** Options none of them ship: other standards, designs, tools, and
    product/UX/operational ideas. Evaluate those too — the best answer may be one nobody ships yet.
 4. **MCP clients.** How each client (Claude, Claude Code, VS Code, Cursor, ChatGPT, MCP Inspector,

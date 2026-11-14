@@ -96,7 +96,7 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) ยง1โ
         `--entra-client-secret-file`); or no secret at all: where the platform hands the proxy a
         federated token (AKS workload identity, GitHub Actions), point
         `BYWARD_ENTRA_FEDERATED_TOKEN_FILE` at it and give the app a matching federated identity
-        credential ([an example](real-entra-lane.md#3-run-it-once-then-create-the-federated-credential));
+        credential ([an example](../maintainers/real-entra-lane.md#3-run-it-once-then-create-the-federated-credential));
       - static client secrets through `client_secret_file` in the
         [static clients file](../reference/static-clients.md);
       - static client secrets must be at least 32 bytes.
