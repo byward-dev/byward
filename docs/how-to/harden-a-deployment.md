@@ -7,8 +7,8 @@ each item is in the [security posture](../security-posture.md). Every setting is
 
 ## TLS and the reverse proxy
 
-The proxy does not terminate TLS ([ADR-0019](../adr/0019-packaging.md) §9). Put it behind an ingress
-or a reverse proxy that does.
+TLS usually ends at an ingress or a reverse proxy. byward can also terminate it with a certificate you
+supply ([Serve TLS at the proxy](tls.md), [ADR-0019](../adr/0019-packaging.md) §9 as amended).
 
 - [ ] Set `BYWARD_PUBLIC_URL` to the https URL users enter, including the MCP path, e.g.
       `https://mcp.example.com/mcp`. Leave off the trailing slash, and give an internationalized host
@@ -18,8 +18,11 @@ or a reverse proxy that does.
       is never downgraded to http. It needs no setting. If the ingress adds its own, keep one: a
       browser uses only the first (RFC 6797 §8.1). For a year after, browsers turn every http request
       to that host into https, so serve it over https only.
-- [ ] Keep the hop from the ingress to the proxy on a private network. That hop is plain HTTP and
-      carries bearer tokens.
+- [ ] Protect the hop from the ingress to the proxy: it carries bearer tokens. Either keep it on a
+      private network, or encrypt it with `BYWARD_TLS_CERT_FILE` and `BYWARD_TLS_KEY_FILE`
+      ([Serve TLS at the proxy](tls.md)). Have the ingress verify the proxy's certificate (with a
+      Gateway API `BackendTLSPolicy`, for example). An ingress that does not verify it gets encryption
+      without authentication: anything that takes the proxy's address can impersonate it.
 - [ ] Set `BYWARD_LISTEN` to the address the ingress reaches, e.g. `0.0.0.0:8080` in a
       container. The default `127.0.0.1:8080` is reachable only from the same host or pod.
 - [ ] Set `BYWARD_TRUSTED_PROXIES` to the ingress's addresses or CIDRs, e.g. `10.0.0.0/8`.
@@ -31,9 +34,9 @@ or a reverse proxy that does.
       - List only proxies you control. A trusted CIDR that includes client networks lets those
         clients choose their own address.
 - [ ] For an IdP or upstream with a private CA, add only that CA with `SSL_CERT_FILE`. Don't
-      replace the image's `/etc/ssl/certs` or set `SSL_CERT_DIR` without it: that drops the
-      public roots. Every outbound TLS connection trusts the CA you add
-      ([trust a private CA](private-ca.md)).
+      mount over the image's `/etc/ssl/certs`, or set `SSL_CERT_DIR` without it beside
+      `SSL_CERT_FILE`: either drops the public roots. Every outbound TLS connection trusts the CA
+      you add ([trust a private CA](private-ca.md)).
 
 ## Host and Origin allowlists
 

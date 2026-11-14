@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -47,6 +48,14 @@ func newEnv(t *testing.T, cfg Config, opts ...fakeidp.Option) *env {
 		t.Fatal(err)
 	}
 	return &env{fake: fake, client: c, p: p}
+}
+
+// ready fetches discovery, so that a later transport only sees the token request.
+func (e *env) ready(t *testing.T) {
+	t.Helper()
+	if err := e.p.Ready(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // now is the shared fixed clock of the fake and the adapter.
@@ -457,8 +466,12 @@ func TestATokenSuccessWithoutTokensIsFatal(t *testing.T) {
 type emptySuccess struct{}
 
 func (emptySuccess) RoundTrip(r *http.Request) (*http.Response, error) {
-	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}},
-		Body: io.NopCloser(strings.NewReader("{}")), Request: r}, nil
+	return jsonResponse(r, "{}"), nil
+}
+
+// jsonResponse is a 200 answer to r with the JSON body.
+func jsonResponse(r *http.Request, body string) *http.Response {
+	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}
 }
 
 func TestConcurrentFirstLoginsShareDiscovery(t *testing.T) {
@@ -580,6 +593,45 @@ func TestACallbackErrorNeverAlertsTheOperator(t *testing.T) {
 			var ie *idp.Error
 			if !errors.As(err, &ie) || ie.OAuth != oauth || ie.Alert != "" {
 				t.Fatalf("err = %#v, want the IdP's %s without an alert", err, oauth)
+			}
+		})
+	}
+}
+
+// Roles and groups come from the claims the Config names, roles and groups by default, and only
+// from them, at sign-in and at refresh alike (#286).
+func TestRolesAndGroupsAreReadFromTheNamedClaimsOnly(t *testing.T) {
+	const nsRoles, nsGroups = "https://byward.dev/roles", "https://byward.dev/groups"
+	named := Config{RolesClaim: nsRoles, GroupsClaim: nsGroups}
+	both := map[string]any{"roles": []string{"top-r"}, "groups": []string{"top-g"}, nsRoles: []string{"ns-r"}, nsGroups: []string{"ns-g"}}
+	for name, tc := range map[string]struct {
+		cfg                   Config
+		claims                map[string]any
+		wantRoles, wantGroups []string
+	}{
+		"the defaults read roles and groups":  {Config{}, both, []string{"top-r"}, []string{"top-g"}},
+		"named claims read only those claims": {named, both, []string{"ns-r"}, []string{"ns-g"}},
+		"named claims absent from the token":  {named, map[string]any{"roles": []string{"top-r"}, "groups": []string{"top-g"}}, nil, nil},
+		"the defaults absent from the token":  {Config{}, map[string]any{nsRoles: []string{"ns-r"}, nsGroups: []string{"ns-g"}}, nil, nil},
+		"a roles claim that is not an array":  {named, map[string]any{nsRoles: "ns-r", nsGroups: []string{"ns-g"}}, nil, []string{"ns-g"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t, tc.cfg, fakeidp.WithUser(fakeidp.User{Claims: tc.claims}))
+			id, tok, err := e.p.Callback(context.Background(), signIn(t, e, login), login)
+			if err != nil {
+				t.Fatal(err)
+			}
+			refreshed, _, err := e.p.Refresh(context.Background(), tok.RefreshToken)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if refreshed == nil {
+				t.Fatal("the refresh returned no identity; want one from the refreshed ID token")
+			}
+			for when, got := range map[string]idp.Identity{"sign-in": id, "refresh": *refreshed} {
+				if !slices.Equal(got.Roles, tc.wantRoles) || !slices.Equal(got.Groups, tc.wantGroups) {
+					t.Errorf("%s: roles %q, groups %q; want %q, %q", when, got.Roles, got.Groups, tc.wantRoles, tc.wantGroups)
+				}
 			}
 		})
 	}

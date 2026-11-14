@@ -54,6 +54,7 @@ type Store interface {
 	Grants
 	Codes
 	Logins
+	ClientAssertions
 	RefreshTokens
 	Revocations
 	Clients
@@ -67,8 +68,9 @@ type Collector interface {
 	// IdleExpiresAt <= now, grants with ExpiresAt <= now together with their codes and refresh
 	// tokens, revocations with At <= now - RevocationRetention, clients with ExpiresAt <= now or
 	// never used and CreatedAt <= now - UnusedClientLifetime, consents with ExpiresAt <= now, and
-	// spent logins with expiresAt <= now. An expired spent login already counts as absent, so the
-	// shared suite cannot see it collected: each adapter tests that with its own row count. A store
+	// spent logins and spent client assertions with expiresAt <= now. An expired spent login or
+	// assertion already counts as absent, so the shared suite cannot see it collected: each adapter
+	// tests that with its own row count. A store
 	// shared by several replicas may return nil having deleted nothing while another replica
 	// collects; the rows go at a later call.
 	Collect(ctx context.Context, now time.Time) error
@@ -161,6 +163,16 @@ type Logins interface {
 	// first call is nil, a later one before expiresAt ErrConsumed. A record past its expiry counts
 	// as absent. An expiresAt not after now is ErrInvalid.
 	SpendLogin(ctx context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error
+}
+
+// ClientAssertions records the private_key_jwt client assertions /token has accepted (ADR-0008 §6,
+// #227), so an assertion is single use across every replica. Only a hash of its replay key is
+// stored, never the jti itself.
+type ClientAssertions interface {
+	// SpendAssertion records the assertion with this hash as spent until expiresAt, in one atomic
+	// step: the first call is nil, a later one before expiresAt ErrConsumed. A record past its expiry
+	// counts as absent. An expiresAt not after now is ErrInvalid.
+	SpendAssertion(ctx context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error
 }
 
 // RefreshToken is a stored refresh token: only its hash (ADR-0006 §4).

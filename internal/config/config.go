@@ -32,6 +32,11 @@ type Config struct {
 	AllowedOrigins         []string
 	AllowedHosts           []string
 	TrustedProxies         []netip.Prefix
+
+	// TLSCertFile and TLSKeyFile serve TLS on the public listener (#183); both "" when it is plain
+	// HTTP, as behind an ingress that terminates TLS.
+	TLSCertFile, TLSKeyFile string
+
 	// OAuthRateLimits is requests per minute per client address, by endpoint name.
 	OAuthRateLimits       map[string]int
 	Scope                 string
@@ -65,8 +70,11 @@ type Config struct {
 	OIDCClientKeyID  string
 	OIDCScopes       []string
 	OIDCSubjectClaim string
-	OIDCName         string
-	KeysDir          string
+	// OIDCRolesClaim and OIDCGroupsClaim are the ID token claims roles and groups are read from;
+	// default `roles` and `groups` for every preset (#286).
+	OIDCRolesClaim, OIDCGroupsClaim string
+	OIDCName                        string
+	KeysDir                         string
 	// The identity assertion for the HTTP upstream (ADR-0016): its signing keys, the header that
 	// carries it and the optional claims it asserts (a subset of AssertionClaimNames).
 	AssertionKeysDir string
@@ -99,6 +107,9 @@ type Config struct {
 	DataDir          string
 	StoreDir         string
 	StoreCounterFile string
+	// StorePostgresDSN selects the PostgreSQL store instead of SQLite (#227): the connection
+	// string, read from its secret file. It holds a password: never log it.
+	StorePostgresDSN string
 	RefreshGrace     time.Duration
 	// Client ID Metadata Documents (slice 2.1, ADR-0008 §4, §8).
 	CIMD                               bool
@@ -148,6 +159,7 @@ var authSettings = []func(*Config, *Values) []error{
 	(*Config).gate,
 	(*Config).appTokens,
 	(*Config).paths,
+	(*Config).storeBackend,
 	(*Config).refreshGrace,
 	(*Config).assertion,
 	(*Config).clientSources,
@@ -199,6 +211,7 @@ func validate(v *Values, container bool) (*Config, error) {
 		}
 	}
 	errs = append(errs, c.upstream(v)...)
+	errs = append(errs, c.tls(v)...)
 	c.UpstreamHeaderTimeout, err = parseHeaderTimeout(v.get("upstream-header-timeout"))
 	if err != nil {
 		errs = append(errs, err)

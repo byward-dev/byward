@@ -288,3 +288,30 @@ type oneSubject string
 func (s oneSubject) Validate(context.Context, string) (resource.Identity, error) {
 	return resource.Identity{Subject: string(s)}, nil
 }
+
+// The roles and groups claims the operator names reach both the access gate and the identity
+// assertion through the wired server; with the settings unset, the top-level roles claim does (#286).
+// The defaults are pinned per preset in config and the gate, and in the adapter.
+func TestTheRolesAndGroupsClaimsReachTheGateAndTheAssertion(t *testing.T) {
+	const nsRoles, nsGroups = "https://byward.dev/roles", "https://byward.dev/groups"
+	asserted := "BYWARD_ASSERTION_CLAIMS=roles,groups"
+	for name, tc := range map[string]struct {
+		claims   map[string]any
+		settings []string
+		key      string // the asserted claim that must be [mcp]
+	}{
+		"roles by default, the top-level claim": {map[string]any{"roles": []string{"mcp"}, nsRoles: []string{"other"}},
+			[]string{"BYWARD_GATE_ROLES=mcp", asserted}, "roles"},
+		"a named roles claim": {map[string]any{"roles": []string{"other"}, nsRoles: []string{"mcp"}},
+			[]string{"BYWARD_OIDC_ROLES_CLAIM=" + nsRoles, "BYWARD_GATE_ROLES=mcp", asserted}, "roles"},
+		"a named groups claim": {map[string]any{"groups": []string{"other"}, nsGroups: []string{"mcp"}},
+			[]string{"BYWARD_OIDC_GROUPS_CLAIM=" + nsGroups, "BYWARD_GATE_GROUPS=mcp", asserted}, "groups"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := oidcAssertion(t, fakeidp.User{Claims: tc.claims}, tc.settings...)
+			if v, _ := got[tc.key].([]any); len(v) != 1 || v[0] != "mcp" {
+				t.Fatalf("asserted %s %v, want [mcp]", tc.key, got[tc.key])
+			}
+		})
+	}
+}

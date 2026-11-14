@@ -141,6 +141,11 @@ func New(cfg Config) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cfg.DownstreamToken != nil { // at startup, not as a 502 on every request
+		if err := checkTempDirFitsTokenSocket(cfg.TempDir); err != nil {
+			return nil, err
+		}
+	}
 	return &Manager{cfg: cfg, cmd: cmd, log: cfg.Log.With("upstream", cfg.Name), start: (*exec.Cmd).Start,
 		procs: map[string]*entry{}, live: map[*entry]struct{}{}}, nil
 }
@@ -482,6 +487,13 @@ func (m *Manager) forget(key string, e *entry) {
 	delete(m.live, e)
 }
 
+// sessionDirPattern names a process's session directory, to which os.MkdirTemp appends a uint32
+// in decimal: at longest longestSessionDirSuffix.
+const (
+	sessionDirPattern       = "byward-session-"
+	longestSessionDirSuffix = "4294967295" // math.MaxUint32
+)
+
 // spawn starts one upstream process. The session directory, if the command or the token socket
 // uses one, is created first and removed on every failure path; latest is the identity the token
 // socket answers for.
@@ -491,7 +503,7 @@ func (m *Manager) spawn(ctx context.Context, id Identity, onExit func(), latest 
 
 	var dir string
 	if m.cmd.usesSessionDir() || m.cfg.DownstreamToken != nil {
-		if dir, err = os.MkdirTemp(m.cfg.TempDir, "byward-session-"); err != nil {
+		if dir, err = os.MkdirTemp(m.cfg.TempDir, sessionDirPattern); err != nil {
 			return nil, fmt.Errorf("stdio: session directory: %w", err)
 		}
 	}
