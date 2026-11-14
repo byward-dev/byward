@@ -110,6 +110,18 @@ func TestAnHTTPIssuerNeedsDevelopmentMode(t *testing.T) {
 	}
 }
 
+// The adapter follows config's decision, not --dev itself: with development mode on but no
+// loopback-issuer relaxation recorded, an http issuer is still refused, so the adapter is never
+// relaxed without the startup log saying so (security invariant 12, #355).
+func TestTheIdPAdapterIsRelaxedOnlyByTheRecordedRelaxation(t *testing.T) {
+	ip, err := newIdentityProvider(oidcConfig("oidc", func(c *config.Config) {
+		c.OIDCIssuer, c.Dev, c.OIDCLoopbackHTTP = "http://127.0.0.1:9000", true, false
+	}), nil)
+	if err == nil || !strings.Contains(err.Error(), "must use https") {
+		t.Fatalf("an http issuer without the recorded relaxation: %v, %v; want it refused", ip, err)
+	}
+}
+
 // With an OIDC IdP the upstream's assertion is still byward's own: iss is byward's issuer, never
 // the IdP's, sub is the IdP's subject claim as the user key, and the opted-in claims come from the
 // IdP's ID token (ADR-0016 §1).

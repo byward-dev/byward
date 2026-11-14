@@ -220,7 +220,7 @@ func TestDevRecordsAnHTTPIdPIssuerOnLoopbackAsARelaxation(t *testing.T) {
 			}
 			want := "http IdP issuer on loopback (" + tc.issuer + "): discovery over http, and the IdP's sign-in page, token endpoint and signing keys over http too where it lists them on loopback"
 			if got := slices.Contains(c.Relaxations, want); got != tc.want || c.OIDCLoopbackHTTP != tc.want {
-				t.Fatalf("relaxations %q, adapter relaxed %v; want %q listed and the adapter relaxed: %v", c.Relaxations, c.OIDCLoopbackHTTP, want, tc.want)
+				t.Fatalf("relaxations %q, adapter relaxed %v; want listed and relaxed = %v (%q)", c.Relaxations, c.OIDCLoopbackHTTP, tc.want, want)
 			}
 		})
 	}
@@ -233,18 +233,13 @@ func TestDevRecordsAnInlineSecretAsARelaxation(t *testing.T) {
 		return with("BYWARD_OIDC_CLIENT_SECRET=s3cret")(without("BYWARD_OIDC_CLIENT_SECRET_FILE")(env))
 	}
 	c, err := loadOIDC(t, func(env []string) []string { return with("BYWARD_DEV=true")(inline(env)) })
-	if err != nil || !slices.Contains(c.Relaxations, "inline secrets accepted: BYWARD_OIDC_CLIENT_SECRET") {
-		t.Fatalf("with --dev: relaxations %v, %v; want the inline secret recorded", relaxationsOf(c), err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(c.Relaxations, "inline secrets accepted: BYWARD_OIDC_CLIENT_SECRET") {
+		t.Fatalf("with --dev: relaxations %v; want the inline secret recorded", c.Relaxations)
 	}
 	if _, err := loadOIDC(t, inline); !isConfigError(err) {
 		t.Fatalf("without --dev: %v, want a configuration error", err)
 	}
-}
-
-// relaxationsOf is c's relaxations, none for no configuration.
-func relaxationsOf(c *Config) []string {
-	if c == nil {
-		return nil
-	}
-	return c.Relaxations
 }
