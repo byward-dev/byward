@@ -156,43 +156,49 @@ func asciiHost(host string) error {
 	return nil
 }
 
-// allowedHostForm reports whether h is a form a Host header can carry: name, name:port,
-// IPv4:port, [v6] or [v6]:port, with a port from 1 to 65535 written without a sign or leading zero
-// and a v6 address without a zone; or a bare v6 address, taken whole (never as v6:port), which
-// config stores as [v6]. The caller has already refused spaces, slashes and non-ASCII.
-func allowedHostForm(h string) bool {
-	v6, port, isV6, hasPort := "", "", false, false
+// normalizeAllowedHost returns a BYWARD_ALLOWED_HOSTS entry as the public listener compares it
+// with a Host header: in lower case, a bare IPv6 address in brackets, as a Host header carries it.
+// It refuses any form a Host header cannot carry, since such an entry could never match there.
+// Accepted: host or host:port (a host may be an IPv4 address), [IPv6], [IPv6]:port, or a bare IPv6
+// address taken whole (never as IPv6:port); a port from 1 to 65535 without a sign or leading zero,
+// and no IPv6 zone. The caller has refused non-ASCII already.
+func normalizeAllowedHost(h string) (string, error) {
+	invalid := fmt.Errorf("%q is not a host[:port]: give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone", h)
+	if strings.ContainsAny(h, "/ ") {
+		return "", invalid
+	}
+	stored, v6, port, isV6, hasPort := h, "", "", false, false
 	switch {
 	case strings.HasPrefix(h, "["):
 		inner, rest, ok := strings.Cut(h[1:], "]")
 		if !ok || (rest != "" && !strings.HasPrefix(rest, ":")) {
-			return false
+			return "", invalid
 		}
 		v6, isV6, port, hasPort = inner, true, strings.TrimPrefix(rest, ":"), rest != ""
 	case strings.Contains(h, "]"):
-		return false
+		return "", invalid
 	case strings.Count(h, ":") > 1:
-		v6, isV6 = h, true
+		v6, isV6, stored = h, true, "["+h+"]"
 	default:
-		name, p, ok := strings.Cut(h, ":")
-		if name == "" {
-			return false
+		host, p, ok := strings.Cut(h, ":")
+		if host == "" {
+			return "", invalid
 		}
 		port, hasPort = p, ok
 	}
 	if isV6 {
 		ip, err := netip.ParseAddr(v6)
 		if err != nil || !ip.Is6() || ip.Zone() != "" {
-			return false
+			return "", invalid
 		}
 	}
 	if hasPort {
-		n, err := strconv.Atoi(port)
-		if err != nil || port[0] < '1' || port[0] > '9' || n > 65535 {
-			return false
+		// No sign, no leading zero: "+80", "-1", "0" and "080" all sort below '1'.
+		if n, err := strconv.Atoi(port); err != nil || port[0] < '1' || n > 65535 {
+			return "", invalid
 		}
 	}
-	return true
+	return strings.ToLower(stored), nil
 }
 
 // Hostname is a host as BYWARD_ALLOWED_HOSTS lists it or a Host header carries it (host,

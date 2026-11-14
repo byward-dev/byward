@@ -244,25 +244,16 @@ func validate(v *Values, container bool) (*Config, error) {
 		errs = append(errs, err)
 	}
 	for _, h := range splitList(v.get("allowed-hosts")) {
-		if strings.ContainsAny(h, "/ ") {
-			errs = append(errs, errorf("BYWARD_ALLOWED_HOSTS: %q is not a host[:port]", h))
-			continue
-		}
 		if err := asciiHost(h); err != nil {
 			errs = append(errs, errorf("BYWARD_ALLOWED_HOSTS: %v", err))
 			continue
 		}
-		// Only a form a Host header can carry: anything else could never match a request on the public
-		// listener, and the other readers would reduce it to a host name silently (#323, #325).
-		if !allowedHostForm(h) {
-			errs = append(errs, errorf("BYWARD_ALLOWED_HOSTS: %q is not a host[:port]; give a name, name:port, an IPv6 address, [v6] or [v6]:port, with a port from 1 to 65535 and no zone", h))
+		n, err := normalizeAllowedHost(h) // #323, #325
+		if err != nil {
+			errs = append(errs, errorf("BYWARD_ALLOWED_HOSTS: %v", err))
 			continue
 		}
-		// A Host header always brackets an IPv6 address, so the public listener compares [v6].
-		if !strings.HasPrefix(h, "[") && strings.Count(h, ":") > 1 {
-			h = "[" + h + "]"
-		}
-		c.AllowedHosts = append(c.AllowedHosts, strings.ToLower(h))
+		c.AllowedHosts = append(c.AllowedHosts, n)
 	}
 	if c.LogFormat != "json" && c.LogFormat != "text" {
 		errs = append(errs, errorf("BYWARD_LOG_FORMAT: want json or text, got %q", c.LogFormat))
