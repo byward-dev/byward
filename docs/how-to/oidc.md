@@ -67,7 +67,7 @@ first code exchange for a user and the proxy's app; without one, a grant cannot 
 would sign in again every hour. So the `google` preset sends `prompt=consent`, which makes Google
 issue a new refresh token each time. Remembered consent ([ADR-0010](../adr/0010-consent-screen.md))
 skips only the proxy's own consent page, never Google's. If an IdP still returns no refresh token for
-a client that asked for `offline_access`, the proxy issues no refresh token of its own either (it
+a client that registered the `refresh_token` grant, the proxy issues no refresh token of its own either (it
 could not refresh), and logs a warning, "the IdP returned no refresh token, so this grant cannot
 refresh", naming the IdP.
 

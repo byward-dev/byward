@@ -41,7 +41,7 @@ type consentView struct {
 
 func (b *Broker) renderConsent(w http.ResponseWriter, r *http.Request, status int, client registration.Client, l login, sealed, notice string) {
 	v := consentView{Client: displayName(client.Name(), client.ID()), Trust: trustLabel(client.Trust()), Upstream: b.upstreamName(),
-		IdP: displayName(b.cfg.IdPLabel, "your identity provider"), Operator: b.cfg.OperatorName, ScopeText: b.scopeText(), Lifetime: lifetimeText(l.Scopes, client.AllowsRefresh()),
+		IdP: displayName(b.cfg.IdPLabel, "your identity provider"), Operator: b.cfg.OperatorName, ScopeText: b.scopeText(), Lifetime: lifetimeText(l.Refresh),
 		Flow: sealed, Notice: notice, RequestID: logging.RequestID(r.Context()), Stylesheet: StylesheetPath, ContinueURL: "/consent"}
 	if b.remembers(client) {
 		v.Remembered = fmt.Sprintf("%d days", int(ConsentLifetime/(24*time.Hour)))
@@ -57,10 +57,11 @@ func (b *Broker) renderConsent(w http.ResponseWriter, r *http.Request, status in
 	_ = consentTemplate.Execute(w, v)
 }
 
-// lifetimeText is how long the access may last: the grant's lifetime with offline_access (refresh
-// tokens) for a client allowed to refresh, otherwise one access token's (ADR-0006 §5, ADR-0010 §4).
-func lifetimeText(scopes []string, allowsRefresh bool) string {
-	if allowsRefresh && slices.Contains(scopes, "offline_access") {
+// lifetimeText is how long the access may last: the grant's lifetime for a client that registered
+// the refresh_token grant, which gets refresh tokens whether or not it asks for offline_access,
+// otherwise one access token's (ADR-0006 §4-5 as amended for #287, ADR-0010 §4).
+func lifetimeText(allowsRefresh bool) string {
+	if allowsRefresh {
 		return fmt.Sprintf("up to %d days", int(GrantLifetime/(24*time.Hour)))
 	}
 	return "up to 1 hour" // AccessLifetime; a test keeps the two in step

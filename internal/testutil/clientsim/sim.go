@@ -189,10 +189,9 @@ func authorize(t *testing.T, e Env, p Profile, c Credentials, m metadata, verifi
 	if s := scope(m); s != "" {
 		q.Set("scope", s)
 	}
-	if p.AddsOfflineAccess {
-		if !slices.Contains(strs(m.asm["scopes_supported"]), "offline_access") {
-			t.Fatalf("%s: the metadata does not list offline_access; the client gets no refresh token and the user signs in again every hour", p.Client)
-		}
+	// A client MAY add offline_access when the metadata lists it (MCP 2026-07-28, Refresh Tokens);
+	// it gets a refresh token either way (#287).
+	if p.AddsOfflineAccess && slices.Contains(strs(m.asm["scopes_supported"]), "offline_access") {
 		q.Set("scope", strings.TrimSpace(q.Get("scope")+" offline_access"))
 	}
 	if p.SendsResource {
@@ -273,8 +272,8 @@ func redeem(t *testing.T, e Env, p Profile, c Credentials, m metadata, code, ver
 	if !strings.EqualFold(tokens.TokenType, "Bearer") { // RFC 6749 §5.1; OAuth libraries validate it
 		t.Fatalf("%s: token_type %q, want Bearer", p.Client, tokens.TokenType)
 	}
-	if p.AddsOfflineAccess && tokens.RefreshToken == "" { // it asked for offline_access
-		t.Fatalf("%s: no refresh_token for an offline_access request; the user would sign in again every hour", p.Client)
+	if tokens.RefreshToken == "" { // every profiled client registers the refresh_token grant (#287)
+		t.Fatalf("%s: no refresh_token for a client that registered the refresh_token grant; the user would sign in again every hour", p.Client)
 	}
 	return Session{AccessToken: tokens.AccessToken, AuthMethod: method}
 }

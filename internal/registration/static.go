@@ -262,7 +262,8 @@ func (c *staticClient) Name() string              { return c.name }
 func (c *staticClient) Trust() TrustLevel         { return Verified }
 func (c *staticClient) AuthMethods() []AuthMethod { return slices.Clone(c.methods) }
 
-// AllowsRefresh is true: static clients are configured by the operator, who controls offline_access.
+// AllowsRefresh is true: a static client counts as having registered the refresh_token grant, so it
+// gets refresh tokens with or without offline_access (ADR-0006, amendment 2026-11-14).
 func (c *staticClient) AllowsRefresh() bool { return true }
 
 // RedirectAllowed applies ADR-0009 against the registered redirect URIs.

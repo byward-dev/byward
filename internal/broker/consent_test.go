@@ -70,22 +70,19 @@ func TestAuthorizeShowsTheConsentPageBeforeTheIdP(t *testing.T) {
 	}
 }
 
-// The page states how long access lasts: the grant's lifetime with offline_access (refresh tokens),
-// otherwise one access token's.
+// The page states how long access lasts: the grant's lifetime for a client that registered the
+// refresh_token grant, which gets refresh tokens with or without offline_access (#287), otherwise
+// one access token's (a client without the grant: TestRefreshNeedsTheRefreshTokenGrant).
 func TestConsentPageLifetimeFollowsWhatTheGrantWillLast(t *testing.T) {
 	if AccessLifetime != time.Hour {
 		t.Fatalf("AccessLifetime is %v: update lifetimeText's \"up to 1 hour\"", AccessLifetime)
 	}
-	for _, tc := range []struct {
-		scope, want string
-	}{
-		{"mcp offline_access", "up to " + strconv.Itoa(int(GrantLifetime/(24*time.Hour))) + " days"},
-		{"mcp", "up to 1 hour"},
-	} {
-		t.Run(tc.scope, func(t *testing.T) {
-			text := visibleText(newEnv(t).showConsent(t, url.Values{"scope": {tc.scope}}).body)
-			if !strings.Contains(text, tc.want+",") {
-				t.Fatalf("consent page lacks %q: %s", tc.want, text)
+	days := "up to " + strconv.Itoa(int(GrantLifetime/(24*time.Hour))) + " days"
+	for _, scope := range []string{"mcp offline_access", "mcp"} {
+		t.Run(scope, func(t *testing.T) {
+			text := visibleText(newEnv(t).showConsent(t, url.Values{"scope": {scope}}).body)
+			if !strings.Contains(text, days+",") {
+				t.Fatalf("consent page lacks %q: %s", days, text)
 			}
 		})
 	}

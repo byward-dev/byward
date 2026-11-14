@@ -115,4 +115,4 @@ byward signs an RSA key with PS256 by default and an EC key with ES256, so:
   v0.2.0-rc.1 does not, and a wrong secret shows only at the first sign-in.
 - Sign in from an MCP client ([run byward](run-byward.md#6-connect-a-client)): byward's consent page,
   then Auth0's login page. The user's `sub` looks like `auth0|…`.
-- Refresh: byward issues a client a refresh token only if the client asks for `offline_access`.
+- Refresh: byward gives a refresh token to every client that registered the `refresh_token` grant, whether or not it asks for `offline_access` ([ADR-0006](../adr/0006-token-model.md), amended for #287).

@@ -48,8 +48,10 @@ type Client interface {
 	Trust() TrustLevel
 	// AuthMethods lists the methods the client may use at /token.
 	AuthMethods() []AuthMethod
-	// AllowsRefresh reports whether the client registered the refresh_token grant; without it the
-	// broker issues no refresh tokens (draft-ietf-oauth-client-id-metadata-document-03 §6).
+	// AllowsRefresh reports whether the client registered the refresh_token grant (a static client
+	// always counts as registered). On the client's side it alone decides whether the broker issues
+	// refresh tokens, with or without offline_access (ADR-0006, amendment 2026-11-14;
+	// draft-ietf-oauth-client-id-metadata-document-03 §6).
 	AllowsRefresh() bool
 	// RedirectAllowed applies ADR-0009 to a redirect URI sent at /authorize or /token. The error
 	// says "registered X, sent Y" and is safe to show on the error page.

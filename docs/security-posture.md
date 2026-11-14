@@ -162,7 +162,7 @@ is logged as a warning at every start.
 |---|---|---|---|
 | Access token (`byw_at_…`) | Sealed AES-256-GCM, random 96-bit nonce; claims: grant ID, subject, `iat`, `exp`, and the client ID and the asserted roles, groups, email (with whether it is verified) and name when there are any; key ID and format version in the header. The client holds it but cannot read it | 1 h, capped at the grant's expiry; 30 s clock leeway | Validated without a store read: open → time → deny list |
 | Authorization code (`byw_ac_…`) | Sealed as above, plus a single-use row in the store | 60 s | Reuse, or redemption with the wrong client, redirect URI or verifier, revokes the grant |
-| Refresh token (`byw_rt_…`) | 32 random bytes; only the SHA-256 hash is stored | 30 days absolute, 14 days idle | Issued only with `offline_access`. Rotated on every use. The previous token is accepted again within 30 s; any other reuse revokes the grant. Every refresh also refreshes the IdP tokens and re-runs the gate. |
+| Refresh token (`byw_rt_…`) | 32 random bytes; only the SHA-256 hash is stored | 30 days absolute, 14 days idle | Issued to a client that registered the `refresh_token` grant, with or without `offline_access`: as recorded when the login started (the consent page's lifetime), and still at the callback and at `/token`. Rotated on every use. The previous token is accepted again within 30 s; any other reuse revokes the grant. Every refresh also refreshes the IdP tokens and re-runs the gate. |
 | IdP tokens | Sealed with the same key ring, purpose `idp-tokens` as associated data | Up to the grant's expiry | Deleted with the grant. Never sent to the client. |
 | Login and consent state | Sealed cookie and sealed form field | 10 min | `state` goes to the IdP only after Allow |
 
@@ -213,7 +213,10 @@ the client and redirect URI again. This is accepted behaviour, not a gap: no tok
   10.7.1).
 - The registry is in the store, per IdP user, client, redirect URI and resource, for 30 days from
   the Allow (not extended by use). A later request whose scopes are all approved counts as
-  remembered; `prompt=consent` forces the page.
+  remembered; for a client that registered the `refresh_token` grant the approved scopes must include
+  `offline_access`, which an Allow records exactly when the page said "up to 30 days" (never under
+  "up to 1 hour", even when requested), so a consent given under "up to 1 hour" asks again (#287).
+  `prompt=consent` forces the page.
 - Before the sign-in the user is unknown, so a sealed `__Host-` cookie (purpose `consent-hint`)
   names the user the browser last signed in as. It only lets `/authorize` skip the page. The
   callback checks the registry again for the user who actually signed in; on a different user, or

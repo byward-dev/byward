@@ -455,6 +455,14 @@ func (e *env) signIn(t *testing.T, extra url.Values) *url.URL {
 	return back
 }
 
+// redeemWithoutRefresh redeems code and fails unless the grant is mcp alone, with no refresh token.
+func (e *env) redeemWithoutRefresh(t *testing.T, code string) {
+	t.Helper()
+	if r, body := e.redeem(t, code, nil); r.StatusCode != http.StatusOK || body["refresh_token"] != nil || body["scope"] != "mcp" {
+		t.Fatalf("token: %d %v, want no refresh token and the scope mcp", r.StatusCode, body)
+	}
+}
+
 func (e *env) redeem(t *testing.T, code string, override url.Values) (*http.Response, map[string]any) {
 	t.Helper()
 	f := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {clientCB}, "client_id": {clientID}, "code_verifier": {verifier}}

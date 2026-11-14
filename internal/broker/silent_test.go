@@ -63,7 +63,7 @@ func TestPromptNoneThatCannotFinishSilentlyIsAnsweredWithoutAPage(t *testing.T) 
 		{name: "a client asked every time without a hint is refused with consent_required, not login_required", want: "consent_required", extra: asked},
 		{name: "a client no longer verified is refused with consent_required, whatever is remembered", want: "consent_required", extra: asked, hint: true, storedConsent: true},
 		{name: "no hint cookie is refused with login_required", want: "login_required"},
-		{name: "a hint without a consent covering the request is refused with consent_required", want: "consent_required", extra: url.Values{"scope": {"mcp offline_access"}}, hint: true},
+		{name: "a hint without a consent covering the request is refused with consent_required", want: "consent_required", extra: url.Values{"client_id": {otherClientID}}, hint: true},
 		{name: "a store failure is answered with temporarily_unavailable", want: "temporarily_unavailable", hint: true, storeDown: true},
 		{name: "an IdP that is not ready is answered with temporarily_unavailable", want: "temporarily_unavailable", hint: true, idpDown: true},
 	} {

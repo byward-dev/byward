@@ -1,6 +1,6 @@
 # ADR-0010: Consent screen — before the IdP, per client, remembered only for trusted clients
 
-- Status: Accepted; clarified 2026-11-06 (#90), 2026-11-07 (#126); amended 2026-11-06 (slices 1.4, 2.1)
+- Status: Accepted; clarified 2026-11-06 (#90), 2026-11-07 (#126), 2026-11-14 (#287); amended 2026-11-06 (slices 1.4, 2.1)
 - Date: 2026-11-05
 - Issue: #8 (F7)
 
@@ -57,6 +57,11 @@ admin grants tenant-wide consent, and labels unverified publishers "Unverified".
    the callback) or `login_required` (no hint: the user is unknown, and §1 keeps the IdP out until
    consent is established), and the IdP's own silent errors pass through. A silent IdP round trip
    without a hint is left for later, if a real client needs it.
+   _Clarified 2026-11-14 (#287):_ a consent records what the page approved: the requested scopes,
+   plus `offline_access` exactly when the page said "up to 30 days", and never otherwise, even when
+   requested (ADR-0006, amendment 2026-11-14). A later request is checked against the client's
+   current registration: a consent given while the page said "up to 1 hour" does not cover a grant
+   that refreshes, so the page is shown again (`consent_required` for `prompt=none`).
 4. **The page shows:** the client name with its trust level (control characters stripped, 80
    characters), the CIMD host, the redirect host (loopback: "an app on this computer" plus a warning;
    punycode beside Unicode; a warning if it differs from the CIMD host), the upstream, the IdP ("You'll
@@ -65,7 +70,9 @@ admin grants tenant-wide consent, and labels unverified publishers "Unverified".
    optional logo. Advertised scopes without operator text are a startup warning.
    _Clarified 2026-11-06 (slice 1.6):_ the lifetime shown is how long the grant will last: up to 30
    days with `offline_access` (refresh tokens), otherwise one access-token lifetime, 1 hour
-   (ADR-0006 §5).
+   (ADR-0006 §5). _Clarified 2026-11-14 (#287):_ up to 30 days for a client that registered the
+   `refresh_token` grant when the login started (`/authorize`), which gets refresh tokens with or
+   without `offline_access` (ADR-0006, amendment 2026-11-14); otherwise 1 hour.
    _Amended 2026-11-06 (slice 2.1):_ "differs from the CIMD host" means **a different registrable
    domain** (eTLD+1, the public suffix list via `golang.org/x/net/publicsuffix`). Comparing exact
    hosts would warn on ordinary setups such as a document on `app.example.com` returning to

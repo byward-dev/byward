@@ -55,7 +55,7 @@ Google has no roles or groups claims for this; use the domain gates.
 - Google's consent screen at **every** sign-in: the preset sends `prompt=consent`, because Google
   returns a refresh token only on the first consent otherwise ([oidc.md](oidc.md)). byward's own consent
   page is remembered; Google's is not.
-- A client gets a refresh token from byward only if it asks for `offline_access`.
+- byward gives a refresh token to every client that registered the `refresh_token` grant, whether or not it asks for `offline_access` ([ADR-0006](../adr/0006-token-model.md), amended for #287).
 
 ## 5. Check it
 

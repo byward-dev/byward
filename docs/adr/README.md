@@ -13,11 +13,11 @@ ADR itself, with its issue. The last column lists both.
 | [0003](0003-upstream-kinds.md) | Upstream kinds: HTTP relay; stdio processes never shared between users | F1 | ADR-0025 |
 | [0004](0004-spec-revisions-pass-through.md) | Spec revisions: serve both eras, pass through, never translate | F2 | ADR-0007; 2026-11-06 (#61); 2026-11-07 (#168) |
 | [0005](0005-auth-modes-broker-only.md) | Auth modes: broker only (a loopback no-auth mode added by ADR-0027) | F3 | ADR-0027 |
-| [0006](0006-token-model.md) | Token model: minted, sealed proxy tokens with a revocation deny list | F4 | ADR-0007 |
+| [0006](0006-token-model.md) | Token model: minted, sealed proxy tokens with a revocation deny list | F4 | ADR-0007; 2026-11-14 (#287) |
 | [0007](0007-state-and-storage.md) | State and storage: one store interface, embedded SQLite by default | F5 | 2026-11-07 (#150); 2026-11-13 (#227, PostgreSQL) |
 | [0008](0008-client-registration.md) | Client registration: static, CIMD and DCR, strictly validated | F6 | — |
 | [0009](0009-redirect-uri-policy.md) | Redirect URI policy: exact HTTPS, any-port loopback, re-checked at /token | F8 | ADR-0010; 2026-11-06 (DCR) |
-| [0010](0010-consent-screen.md) | Consent screen: before the IdP, per client, remembered only for trusted clients | F7 | 2026-11-06 (#90, slices 1.4, 1.6, 2.1); 2026-11-07 (#126) |
+| [0010](0010-consent-screen.md) | Consent screen: before the IdP, per client, remembered only for trusted clients | F7 | 2026-11-06 (#90, slices 1.4, 1.6, 2.1); 2026-11-07 (#126); 2026-11-14 (#287) |
 | [0011](0011-idp-adapters.md) | IdP adapters: small interface, generic OIDC with presets, Entra on top | F9 | ADR-0026; ADR-0030; 2026-11-14 (#286, #306) |
 | [0012](0012-entra-specifics.md) | Entra specifics: v2, tid+oid, own API scope at login, certificate credentials | F10 | — |
 | [0013](0013-discovery-and-errors.md) | Discovery and errors: both well-known paths, one issuer, `iss` everywhere | F16 | — |

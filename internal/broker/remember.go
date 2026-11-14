@@ -52,9 +52,9 @@ func (b *Broker) consentKey(h hint, l login) store.ConsentKey {
 		Resource: b.cfg.Resource.String()}
 }
 
-// remembered reports whether a live consent of h covers l's request: same key, every requested
-// scope approved, not expired.
-func (b *Broker) remembered(ctx context.Context, h hint, l login, now time.Time) (bool, error) {
+// remembered reports whether a live consent of h covers l's request: same key, every scope the page
+// would approve (consentScopes, for a client that may refresh or not) approved, not expired.
+func (b *Broker) remembered(ctx context.Context, h hint, l login, allowsRefresh bool, now time.Time) (bool, error) {
 	c, err := b.cfg.Store.Consent(ctx, b.consentKey(h, l))
 	switch {
 	case errors.Is(err, store.ErrNotFound):
@@ -65,7 +65,7 @@ func (b *Broker) remembered(ctx context.Context, h hint, l login, now time.Time)
 	if !now.Before(c.ExpiresAt) {
 		return false, nil
 	}
-	for _, s := range l.Scopes {
+	for _, s := range consentScopes(l.Scopes, allowsRefresh) {
 		if !slices.Contains(c.Scopes, s) {
 			return false, nil
 		}
@@ -84,7 +84,7 @@ func (b *Broker) skipConsent(r *http.Request, client registration.Client, l *log
 	if !ok {
 		return false
 	}
-	ok, err := b.remembered(r.Context(), h, *l, b.cfg.Now())
+	ok, err := b.remembered(r.Context(), h, *l, l.Refresh, b.cfg.Now())
 	if err != nil {
 		b.cfg.Log.WarnContext(r.Context(), "checking remembered consent failed; asking", "request_id", logging.RequestID(r.Context()), "error", err.Error())
 		return false
@@ -110,7 +110,9 @@ func (b *Broker) confirmRemembered(ctx context.Context, l login, id idp.Identity
 	case err != nil || !b.remembers(client) || client.RedirectAllowed(l.RedirectURI) != nil:
 		return nil, hintNotRemembered, nil
 	}
-	ok, err := b.remembered(ctx, hint{Issuer: id.Issuer, Subject: id.Subject}, l, b.cfg.Now())
+	// The registration now, not l.Refresh: a client that registered the grant since /authorize is
+	// asked again, on a page that still states the lifetime the login started with (#287).
+	ok, err := b.remembered(ctx, hint{Issuer: id.Issuer, Subject: id.Subject}, l, client.AllowsRefresh(), b.cfg.Now())
 	if err != nil {
 		b.cfg.Log.WarnContext(ctx, "checking remembered consent failed", "request_id", logging.RequestID(ctx), "error", err.Error())
 		return nil, hintNotRemembered, err
@@ -160,6 +162,18 @@ func (b *Broker) afterGrant(w http.ResponseWriter, r *http.Request, l login, id 
 	b.rememberAllow(w, r, l, id, now)
 }
 
+// consentScopes are what the user approves on the page: the requested scopes but offline_access, and
+// offline_access exactly when the page says "up to 30 days" (allowsRefresh: a client that registered
+// the refresh_token grant), whether or not it was requested (#287). A consent given while the page
+// said "up to 1 hour" so never covers a grant that refreshes.
+func consentScopes(scopes []string, allowsRefresh bool) []string {
+	out := slices.DeleteFunc(slices.Clone(scopes), func(s string) bool { return s == "offline_access" })
+	if allowsRefresh {
+		out = append(out, "offline_access")
+	}
+	return out
+}
+
 // rememberAllow keeps the user's Allow, for a client whose consent is remembered, and points the
 // hint at this user. A failure only means asking next time.
 func (b *Broker) rememberAllow(w http.ResponseWriter, r *http.Request, l login, id idp.Identity, now time.Time) {
@@ -169,7 +183,7 @@ func (b *Broker) rememberAllow(w http.ResponseWriter, r *http.Request, l login, 
 		return
 	}
 	h := hint{Issuer: id.Issuer, Subject: id.Subject}
-	if err := b.cfg.Store.RememberConsent(ctx, store.Consent{Key: b.consentKey(h, l), Scopes: l.Scopes, ApprovedAt: now,
+	if err := b.cfg.Store.RememberConsent(ctx, store.Consent{Key: b.consentKey(h, l), Scopes: consentScopes(l.Scopes, l.Refresh), ApprovedAt: now,
 		ExpiresAt: now.Add(ConsentLifetime)}); err != nil {
 		b.cfg.Log.WarnContext(ctx, "remembering consent failed; the user will be asked again", "request_id", logging.RequestID(ctx), "error", err.Error())
 		return
