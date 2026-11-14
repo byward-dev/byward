@@ -208,6 +208,8 @@ func TestDevRecordsAnHTTPIdPIssuerOnLoopbackAsARelaxation(t *testing.T) {
 		{"https", "https://sso.example.com/realms/acme", true, false},
 		{"https on localhost", "https://localhost:8443/realms/byward", true, false},
 		{"another scheme on localhost", "ftp://localhost/realms/byward", true, false},
+		{"http on a private address", "http://10.0.0.5:8180/realms/byward", true, false},
+		{"an issuer that does not parse", "http://[::1", true, false}, // the adapter refuses it; config must not panic
 		{"http on another host", "http://sso.example.com/realms/acme", true, false},
 		{"http on localhost without --dev", "http://localhost:8180/realms/byward", false, false},
 	} {
