@@ -104,7 +104,7 @@ The claims come from the user's proxy token, which byward seals at sign-in and a
 so a request needs no database lookup. Roles and groups in an assertion can therefore be up to
 **one access-token lifetime (1 hour) old**, the same as the [access gate](access-gate.md). A removed
 role stops being asserted at the client's next refresh. To end a user's access at once, use
-`byward revoke-user` ([hardening](harden-a-deployment.md)).
+`byward revoke-user` ([revoke access](revoke-access.md#one-user)).
 
 After upgrading to a version with the identity assertion, existing proxy tokens are refused once
 with `401 invalid_token`. Clients refresh, and the new tokens carry the claims. Users do not sign in

@@ -3,7 +3,7 @@
 Instead of Microsoft Entra, the proxy can sign users in with any OpenID Connect IdP. It uses the
 authorization code flow with PKCE and validates the ID token per OIDC Core §3.1.3.7. Presets carry the
 quirks of Google, Okta, Auth0 and Keycloak. Background: [ADR-0011](../adr/0011-idp-adapters.md). One
-IdP per proxy.
+IdP per proxy. The data directory, the keys and starting the proxy are in [run byward](run-byward.md).
 
 > Needs byward v0.2.0-rc.1 or later: the image `ghcr.io/byward-dev/byward:v0.2.0-rc.1`. The `latest`
 > tag is still v0.1.1, which has no OIDC IdPs and refuses `BYWARD_IDP` as an unknown setting.
@@ -37,7 +37,7 @@ refused) with:
 | `BYWARD_OIDC_CLIENT_KEY_ID` | — | The key ID (`kid`) the IdP registered for that key. |
 | `BYWARD_OIDC_SCOPES` | — | Extra scopes, comma-separated, besides `openid` and the preset's. |
 | `BYWARD_OIDC_SUBJECT_CLAIM` | `sub` | The claim that identifies a user. A claim users can change (`email`, `preferred_username`, `upn`, `name`) logs a warning at every start: someone could take over another user's grants by changing it. |
-| `BYWARD_OIDC_ROLES_CLAIM` | `roles` | On `main` only. The ID token claim the access gate (`BYWARD_GATE_ROLES`) and the identity assertion read roles from, for every preset. Name another claim only when the IdP cannot send `roles`, such as Auth0's namespaced `https://<namespace>/roles` (§4). |
+| `BYWARD_OIDC_ROLES_CLAIM` | `roles` | On `main` only. The ID token claim the access gate (`BYWARD_GATE_ROLES`) and the identity assertion read roles from, for every preset. Name another claim only when the IdP cannot send `roles`, such as Auth0's namespaced `https://<namespace>/roles` ([Auth0](auth0.md#2-roles-in-the-id-token)). |
 | `BYWARD_OIDC_GROUPS_CLAIM` | `groups` | On `main` only. The same for groups (`BYWARD_GATE_GROUPS`). |
 | `BYWARD_OIDC_NAME` | the preset's name, or the issuer's host | The IdP's name on the consent page ("You'll sign in with … next"), up to 80 characters. |
 
@@ -56,7 +56,7 @@ demand.
 |---|---|---|---|
 | `google` | `https://accounts.google.com` | `profile email` | Refresh tokens come from `access_type=offline` with `prompt=consent` (see below). `email_verified` may be a string. Step by step: [google.md](google.md). |
 | `okta` | `https://<domain>/oauth2/<server>` | `profile email offline_access` | Only a custom authorization server issues tokens for the proxy; the org server (`https://<domain>`) is refused. With `private_key_jwt`, use an EC key ([#306](https://github.com/byward-dev/byward/issues/306)). Step by step: [okta.md](okta.md). |
-| `auth0` | `https://<tenant>.auth0.com/` | `profile email offline_access` | The issuer ends with a slash. Auth0 drops custom `roles` and `groups` claims: send roles under a namespaced claim and name it in `BYWARD_OIDC_ROLES_CLAIM` (§4). |
+| `auth0` | `https://<tenant>.auth0.com/` | `profile email offline_access` | The issuer ends with a slash. Auth0 drops custom `roles` and `groups` claims: send roles under a namespaced claim and name it in `BYWARD_OIDC_ROLES_CLAIM`. Step by step: [auth0.md](auth0.md). |
 | `keycloak` | `https://<host>/realms/<realm>` | `profile email` | Enable "Client authentication" on the client. Step by step: [keycloak.md](keycloak.md). |
 | `oidc` | any | `profile email offline_access` | No quirks. |
 
@@ -91,37 +91,14 @@ An OIDC IdP usually lets anyone with an account sign in, so an empty
   them. The integration test checks this against Keycloak 26.8.0
   (`TestIntegrationKeycloakSignsAUserInAndRefreshes`); the manual run in the [Keycloak guide](keycloak.md)
   used 26.8.2.
-- **Auth0: roles under a namespaced claim.** Auth0 reserves the `roles` and `groups` claim names
-  and does not add a custom claim with either name
-  ([Create Custom Claims](https://auth0.com/docs/secure/tokens/json-web-tokens/create-custom-claims)).
-  Send the user's roles under a namespaced claim with a Login / Post Login Action, as in Auth0's
-  sample "Add user roles to tokens"
-  ([Actions with authorization](https://auth0.com/docs/manage-users/access-control/sample-use-cases-actions-with-authorization)).
-  The namespace is any `http` or `https` URL that is not an Auth0 domain; it need not resolve.
-
-  ```js
-  exports.onExecutePostLogin = async (event, api) => {
-    const namespace = 'https://byward.example.com';
-    if (event.authorization) {
-      api.idToken.setCustomClaim(`${namespace}/roles`, event.authorization.roles);
-    }
-  };
-  ```
-
-  Then name the claim, and gate on the role:
-
-  ```sh
-  BYWARD_IDP=auth0
-  BYWARD_OIDC_ROLES_CLAIM=https://byward.example.com/roles
-  BYWARD_GATE_ROLES=mcp-user
-  ```
-
-  `BYWARD_OIDC_GROUPS_CLAIM` does the same for a groups claim an Action sets. Either claim must be
-  an array of strings; a single string is ignored. Naming a claim about the sign-in itself, such as
-  `aud` or `sub`, refuses to start. The defaults stay
-  `roles` and `groups` for every preset, Auth0 included, so nothing changes until you set them.
-  The identity assertion's `roles` and `groups` come from the same claims as the gate's.
-  With Entra, whose `roles` and `groups` claims are fixed, these settings refuse to start.
+- `BYWARD_OIDC_ROLES_CLAIM` and `BYWARD_OIDC_GROUPS_CLAIM` (on `main`) name another claim for an IdP
+  that cannot send `roles` or `groups`, such as Auth0
+  ([roles in the ID token](auth0.md#2-roles-in-the-id-token)). Either claim must be an array of
+  strings; a single string is ignored. Naming a claim about the sign-in itself, such as `aud` or
+  `sub`, refuses to start. The defaults stay `roles` and `groups` for every preset, so nothing
+  changes until you set them. The identity assertion's `roles` and `groups` come from the same
+  claims as the gate's. With Entra, whose `roles` and `groups` claims are fixed, these settings
+  refuse to start.
 
 ## 5. Check it
 

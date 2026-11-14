@@ -2,6 +2,7 @@
 
 Step by step: a Google Cloud OAuth client for byward, who may sign in, and the proxy settings. The
 general OIDC guide, with every setting, is [oidc.md](oidc.md).
+The data directory, the keys and starting the proxy are in [run byward](run-byward.md).
 
 > Verified on 2026-11-13 with the byward v0.2.0-rc.1 code: sign-in, refresh, revoke, and the email-domain
 > gate (allowed and refused). The Workspace domain gate (`BYWARD_GATE_HOSTED_DOMAINS`) was not tested.
