@@ -20,7 +20,6 @@ const SessionDirPlaceholder = "{session_dir}"
 const (
 	EnvSubject = "BYWARD_SUBJECT"
 	EnvIssuer  = "BYWARD_ISSUER"
-	EnvEmail   = "BYWARD_EMAIL"
 	// EnvPrincipalType is user, or client for an app-only caller (ADR-0022 §5).
 	EnvPrincipalType = "BYWARD_PRINCIPAL_TYPE"
 	reservedEnv      = "BYWARD_"
@@ -37,13 +36,12 @@ var inheritedEnv = []string{
 // ErrCommandNotFound is returned when the configured command is not an executable file.
 var ErrCommandNotFound = errors.New("stdio upstream command not found")
 
-// Identity is the principal an upstream process acts for. Subject is the opaque user key; Email is
-// set only when the operator opted in; PrincipalType is user or client (an app-only caller), and
-// empty only without authentication.
+// Identity is the principal an upstream process acts for. Subject is the opaque user key;
+// PrincipalType is user or client (an app-only caller), and empty only without authentication. It
+// carries no email: a stdio upstream gets none (ADR-0016 §6, as amended for #330).
 type Identity struct {
 	Subject       string
 	Issuer        string
-	Email         string
 	PrincipalType string
 	// Grant and Client are the grant and MCP client of a request, for the downstream token of the
 	// process that serves it (ADR-0017); they never reach the process's environment.
@@ -58,7 +56,7 @@ func (id Identity) validate() error {
 	if id.Subject == "" || id.Issuer == "" {
 		return errors.New("stdio: identity needs a subject and an issuer")
 	}
-	for _, v := range []string{id.Subject, id.Issuer, id.Email, id.PrincipalType, id.Grant, id.Client} {
+	for _, v := range []string{id.Subject, id.Issuer, id.PrincipalType, id.Grant, id.Client} {
 		if strings.ContainsRune(v, 0) {
 			return errors.New("stdio: identity contains a NUL byte")
 		}
@@ -149,9 +147,6 @@ func (c command) environ(proxyEnv func(string) (string, bool), id Identity, sess
 		m[k] = strings.ReplaceAll(v, SessionDirPlaceholder, sessionDir)
 	}
 	m[EnvSubject], m[EnvIssuer] = id.Subject, id.Issuer
-	if id.Email != "" {
-		m[EnvEmail] = id.Email
-	}
 	if id.PrincipalType != "" {
 		m[EnvPrincipalType] = id.PrincipalType
 	}
