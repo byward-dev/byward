@@ -117,7 +117,7 @@ func TestTheCallbackPathIsTheIdPsName(t *testing.T) {
 }
 
 // With a PEM key the proxy signs in with private_key_jwt, the assertion carrying
-// BYWARD_OIDC_CLIENT_KEY_ID; keys it cannot sign with name the setting.
+// BYWARD_OIDC_CLIENT_KEY_ID; a key it cannot read or sign with names the setting.
 func TestAClientKeySignsInWithItsKeyIDAndAnUnusableOneNamesTheSetting(t *testing.T) {
 	cert := fakeidp.NewCertificate(t)
 	der, err := x509.MarshalPKCS8PrivateKey(cert.Key)
