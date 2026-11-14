@@ -393,6 +393,9 @@ func TestDiscoveredEndpointsMustBeHTTPSUnlessALoopbackIssuerRunsInDevelopment(t 
 		// Only endpoints on loopback get http, as the logged relaxation says.
 		{"http on a private address for a loopback issuer in development", "http://10.0.0.5/token", "http://127.0.0.1:9000", true, false},
 		{"http on another host for a loopback issuer in development", "http://idp.example/token", "http://127.0.0.1:9000", true, false},
+		{"http on a host ending in localhost for a loopback issuer in development", "http://evil-localhost/token", "http://localhost:9000", true, false},
+		{"http on a subdomain named localhost for a loopback issuer in development", "http://localhost.idp.example/token", "http://localhost:9000", true, false},
+		{"another scheme on loopback for a loopback issuer in development", "ftp://127.0.0.1/token", "http://127.0.0.1:9000", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := checkURL(tc.raw, tc.issuer, tc.development); (err == nil) != tc.ok {
