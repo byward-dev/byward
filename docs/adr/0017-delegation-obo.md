@@ -1,6 +1,6 @@
 # ADR-0017: Delegation — proxy-side Entra On-Behalf-Of in v0.1
 
-- Status: Accepted; amended 2026-11-06 (release), 2026-11-07, 2026-11-08 (#195, #141)
+- Status: Accepted; amended 2026-11-06 (release), 2026-11-07, 2026-11-08 (#195, #141); amended by ADR-0029
 - Date: 2026-11-06
 - Issue: #15 (F14)
 
@@ -34,7 +34,8 @@ tested.
    token.
 3. **The downstream token goes in a dedicated header,** stripped from inbound requests (ADR-0016), never
    in `Authorization`. _Amended 2026-11-08 (#195):_ `Authorization` is allowed (see below); with a
-   stdio upstream (#141) the token goes through the token socket instead.
+   stdio upstream (#141) the token goes through the token socket instead. _Amended by ADR-0029:_
+   the token socket is recorded there, with `byward downstream-token`.
 4. **Cache** keyed by `tid`, `oid` and downstream scopes; in-memory LRU, bounded; TTL = the token's
    `exp` − 60 s, never beyond the stored assertion's `exp`. Downstream tokens are not refreshed — OBO
    runs again. They are never stored or logged.
@@ -111,6 +112,10 @@ sets its headers (invariant 1), so the upstream sees only the downstream token, 
 caller, which gets none, sends no `Authorization` at all.
 
 ## Amendment 2026-11-08 (#141: stdio upstreams)
+
+_Amended by ADR-0029_, which records this design as its own decision and adds the
+`byward downstream-token` credential command (#181) and the startup check on the socket path
+(#312).
 
 The 2026-11-07 settings note refused On-Behalf-Of with a stdio upstream: a process gets its
 environment once and cannot receive a token that expires within the hour. A stdio process now asks

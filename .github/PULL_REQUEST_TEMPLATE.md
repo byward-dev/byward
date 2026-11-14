@@ -17,7 +17,7 @@
 ### Quality lenses (`docs/quality-lenses.md`)
 
 - [ ] I walked the lenses this change touches, per the feature × lens map: <!-- e.g. #secure, #operable -->
-- [ ] Every invariant still holds: no token passthrough; no tokens, secrets, codes or verifiers logged; client-supplied URLs go through the SSRF guard
+- [ ] Every invariant in `docs/security-posture.md` still holds; most often at risk: no token passthrough; no tokens, secrets, codes or verifiers logged; client-supplied URLs go through the SSRF guard
 - [ ] Public interface (config keys, assertion claims, audit schema, metrics, log fields, image paths) is unchanged, **or** the change is listed as breaking or deprecated
 - [ ] Docs are updated for anything an operator, user or upstream author sees
 
