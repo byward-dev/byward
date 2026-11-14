@@ -64,5 +64,5 @@ func upstreamHopResult(ctx context.Context, cfg *config.Config, resolve func(con
 	if !ok {
 		return nil
 	}
-	return []doctor.Result{{Class: doctor.ClassProxy, Name: "upstream hop", Status: doctor.Warn, Message: w.Message, Fix: warningFix(w)}}
+	return []doctor.Result{doctor.CheckUpstreamHop.Result(doctor.Warn, w.Message, warningFix(w))}
 }

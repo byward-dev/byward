@@ -234,7 +234,7 @@ func TestDoctorWithoutAuthChecksOnlyTheUpstreamAndTheTrustStoreAndWarns(t *testi
 		t.Fatal(err)
 	}
 	rep, err := Doctor(context.Background(), cfg, DoctorOptions{Proxy: &http.Client{Transport: refuse{}}})
-	if err != nil || len(rep.Checks) != 3 || rep.Checks[0].Name != "upstream" || rep.Checks[1].Name != "trust store" || rep.Checks[2].Status != doctor.Warn ||
+	if err != nil || len(rep.Checks) != 3 || rep.Checks[0].Name != "upstream" || rep.Checks[1].Name != "trust store" || rep.Checks[2].Name != "authentication" || rep.Checks[2].Status != doctor.Warn ||
 		!strings.Contains(rep.Checks[2].Message, "authentication is off") || rep.ExitCode() != 0 {
 		t.Fatalf("report %+v, err %v", rep, err)
 	}

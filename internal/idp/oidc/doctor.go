@@ -32,13 +32,13 @@ type Diagnosis struct {
 // the order is assumed. The IdP's error_description is never shown: an IdP may echo the request,
 // secret included, into it.
 func (p *Provider) DiagnoseClient(ctx context.Context, d Diagnosis) doctor.Result {
-	const name = "client credential"
+	check := doctor.CheckClientCredential
 	if p.cfg.ClientAuth == nil {
-		return result(name, doctor.Skip, "a public client has no credential to check", "")
+		return check.Result(doctor.Skip, "a public client has no credential to check", "")
 	}
 	m, err := p.discover(ctx)
 	if err != nil {
-		return result(name, doctor.Skip, "not probed: discovery failed", "")
+		return check.Result(doctor.Skip, "not probed: discovery failed", "")
 	}
 	_, err = p.token(ctx, m, url.Values{"grant_type": {"authorization_code"}, "code": {"byward-doctor-probe-" + unissued()},
 		"redirect_uri": {p.cfg.RedirectURL}, "code_verifier": {unissued() + unissued()}})
@@ -46,24 +46,24 @@ func (p *Provider) DiagnoseClient(ctx context.Context, d Diagnosis) doctor.Resul
 	var netErr net.Error // the http.Client's own error, a body read that timed out, envproxy.Error
 	switch {
 	case err == nil:
-		return result(name, doctor.Warn, "the IdP issued tokens for a made-up authorization code", "check the IdP's token endpoint: it must refuse unknown codes")
+		return check.Result(doctor.Warn, "the IdP issued tokens for a made-up authorization code", "check the IdP's token endpoint: it must refuse unknown codes")
 	case errors.Is(err, idp.ErrCredential):
-		return result(name, doctor.Fail, "the proxy cannot make its credential: "+err.Error(), "check "+d.CredentialSetting)
+		return check.Result(doctor.Fail, "the proxy cannot make its credential: "+err.Error(), "check "+d.CredentialSetting)
 	case errors.As(err, &netErr) || errors.Is(err, io.ErrUnexpectedEOF) || !errors.As(err, &ie): // no whole answer
-		return result(name, doctor.Fail, "the IdP's token endpoint did not answer in full: "+err.Error(),
+		return check.Result(doctor.Fail, "the IdP's token endpoint did not answer in full: "+err.Error(),
 			"check that the proxy's host reaches "+m.TokenEndpoint+" and gets its whole answer")
 	case ie.OAuth == "":
-		return result(name, doctor.Fail, "the IdP's token endpoint gave no OAuth answer: "+err.Error(), "check "+m.TokenEndpoint+": it must be the IdP's token endpoint")
+		return check.Result(doctor.Fail, "the IdP's token endpoint gave no OAuth answer: "+err.Error(), "check "+m.TokenEndpoint+": it must be the IdP's token endpoint")
 	case refusesClient(ie):
-		return result(name, doctor.Fail, fmt.Sprintf("the IdP refused the client ID or its credential (%s)", answer(ie)), p.credentialFix(d))
+		return check.Result(doctor.Fail, fmt.Sprintf("the IdP refused the client ID or its credential (%s)", answer(ie)), p.credentialFix(d))
 	case ie.OAuth == "invalid_grant" && ie.Status/100 == 4:
 		msg := "the IdP accepted the client ID and credential (it refused the made-up code, as it should)"
 		if !p.preset.ClientCheckedFirst {
 			msg += "; this assumes the IdP checks the client before the code, as the presets were measured to"
 		}
-		return result(name, doctor.Pass, msg, "")
+		return check.Result(doctor.Pass, msg, "")
 	}
-	return result(name, doctor.Warn, fmt.Sprintf("the IdP's answer (%s) does not tell whether it accepted the credential", answer(ie)),
+	return check.Result(doctor.Warn, fmt.Sprintf("the IdP's answer (%s) does not tell whether it accepted the credential", answer(ie)),
 		"sign in once to check the credential")
 }
 
@@ -87,10 +87,6 @@ func answer(ie *idp.Error) string {
 		code = code[:64]
 	}
 	return fmt.Sprintf("%s, HTTP %d", code, ie.Status)
-}
-
-func result(name string, s doctor.Status, msg, fix string) doctor.Result {
-	return doctor.Result{Class: doctor.ClassIdP, Name: name, Status: s, Message: msg, Fix: fix}
 }
 
 // unissued is 16 random bytes in hex: a code and a verifier no IdP has issued.

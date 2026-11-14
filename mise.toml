@@ -60,9 +60,13 @@ description = "Unit tests (with the race detector)"
 run = "go test -race ./..."
 extends = "go-test"
 
+[tasks."lint:docs"]
+description = "Docs lint: no wording that goes stale, and the one image tag of scripts/docs-image-tag (scripts/docs-lint.sh)"
+run = "sh scripts/docs-lint.sh"
+
 [tasks."test:scripts"]
 description = "Table tests for the release and CI shell scripts (no network, no Docker)"
-run = ["sh scripts/go-version-check_test.sh", "sh scripts/test-pins-check_test.sh", "sh scripts/conformance/compare_test.sh", "sh scripts/real-entra/run_test.sh", "sh scripts/fuzz/run_test.sh"]
+run = ["sh scripts/docs-lint_test.sh", "sh scripts/go-version-check_test.sh", "sh scripts/test-pins-check_test.sh", "sh scripts/conformance/compare_test.sh", "sh scripts/real-entra/run_test.sh", "sh scripts/fuzz/run_test.sh"]
 
 [tasks."test:conformance"]
 description = "MCP conformance server suite for each pinned spec revision (scripts/conformance/run.sh), direct vs through --insecure-no-auth in a pinned node container; results must match (needs Docker)"
@@ -114,7 +118,7 @@ run = "mise run test:integration:go"
 
 [tasks.check]
 description = "Everything CI runs without Docker, except the integration-tagged Go tests (`test:integration:go`)"
-depends = ["fmt:check", "vet", "lint", "lint:workflows", "vuln", "licenses:check", "test", "test:scripts"]
+depends = ["fmt:check", "vet", "lint", "lint:workflows", "lint:docs", "vuln", "licenses:check", "test", "test:scripts"]
 
 [tasks."licenses:check"]
 description = "Fail on a dependency licence outside the allowlist (linux and darwin build constraints)"

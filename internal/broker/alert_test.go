@@ -60,25 +60,16 @@ func callbackFailingWith(err error) func(*testing.T, *env, fakeidp.Failure) {
 	}
 }
 
-// failingRefresh is the IdP with its refresh answering err: for alert reasons the fake IdP cannot
-// produce at a refresh.
-type failingRefresh struct {
-	IdP
-	err error
-}
-
-func (f failingRefresh) Refresh(context.Context, string) (*idp.Identity, idp.Tokens, error) {
-	return nil, idp.Tokens{}, f.err
-}
-
-// refreshFailingWith signs in, restarts the broker with its IdP's refresh answering err, and
-// refreshes.
+// refreshFailingWith signs in, restarts the broker with its IdP's refresh answering err (for
+// errors the fake IdP cannot produce at a refresh), and refreshes.
 func refreshFailingWith(err error) func(*testing.T, *env, fakeidp.Failure) {
 	return func(t *testing.T, e *env, _ fakeidp.Failure) {
 		t.Helper()
 		rt := e.offline(t)["refresh_token"].(string)
 		cfg := e.cfg
-		cfg.IdP = failingRefresh{IdP: cfg.IdP, err: err}
+		cfg.IdP = refresherFunc{IdP: cfg.IdP, refresh: func(context.Context, string) (*idp.Identity, idp.Tokens, error) {
+			return nil, idp.Tokens{}, err
+		}}
 		e.start(t, cfg)
 		if res, body := e.refresh(t, rt, ""); res.StatusCode == http.StatusOK {
 			t.Fatalf("the refresh succeeded despite the IdP failure: %v", body)

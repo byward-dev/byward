@@ -1,11 +1,13 @@
 package doctor
 
 import (
+	"cmp"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -33,12 +35,12 @@ type TrustSettings struct {
 
 // TrustStore reports where the roots byward trusts for the IdP, an https upstream and client
 // metadata documents (CIMD) come from (#308, docs/how-to/private-ca.md). Go silently ignores an
-// SSL_CERT_FILE it cannot read or that holds no certificate it accepts, drops the public roots when
-// the settings reach none of them, and ignores both settings under GODEBUG
-// x509sslcertoverrideplatform=0: each is a warning. It does not read SSL_CERT_DIR's entries. read
-// reads a file.
-func TrustStore(s TrustSettings, read func(string) ([]byte, error)) Result {
-	r := Result{Class: ClassProxy, Name: "trust store", Status: Pass}
+// SSL_CERT_FILE or SSL_CERT_DIR entry it cannot read or that holds no certificate it accepts, drops
+// the public roots when the settings reach none of them, and ignores both settings under GODEBUG
+// x509sslcertoverrideplatform=0: each is a warning (#327 for the directories). read reads a file;
+// list lists a directory as Go does (CertDirEntries).
+func TrustStore(s TrustSettings, read func(string) ([]byte, error), list func(string) ([]string, error)) Result {
+	r := CheckTrustStore.Result(Pass, "", "")
 	if s.SettingsIgnored {
 		r.Message = "roots from the system's verifier"
 		if s.CertFile != "" || s.CertDir != "" {
@@ -47,25 +49,50 @@ func TrustStore(s TrustSettings, read func(string) ([]byte, error)) Result {
 		}
 		return r
 	}
-	var from []string
+	var from, problems, fixes []string
+	file := 0 // the certificates Go reads from SSL_CERT_FILE
+	fileErr := false
 	if s.CertFile != "" {
 		data, err := read(s.CertFile)
 		switch n := countCertificates(data); {
 		case err != nil:
-			r.Status, r.Message = Warn, fmt.Sprintf("SSL_CERT_FILE %s cannot be read (%v), so Go reads nothing from it, and %s", s.CertFile, err,
-				withoutFile(s, !errors.Is(err, fs.ErrNotExist)))
-			r.Fix = "mount the CA file at that path, readable by byward's user, or unset SSL_CERT_FILE (docs/how-to/private-ca.md)"
-			return r
+			problems = append(problems, fmt.Sprintf("SSL_CERT_FILE %s cannot be read (%v), so Go reads nothing from it", s.CertFile, err))
+			fixes = append(fixes, "mount the CA file at that path, readable by byward's user, or unset SSL_CERT_FILE")
+			fileErr = !errors.Is(err, fs.ErrNotExist)
 		case n == 0:
-			r.Status, r.Message = Warn, fmt.Sprintf("SSL_CERT_FILE %s holds no PEM certificate Go accepts, so Go reads nothing from it, and %s", s.CertFile, withoutFile(s, false))
-			r.Fix = "put the CA's PEM certificate (-----BEGIN CERTIFICATE-----, no headers) in that file (docs/how-to/private-ca.md)"
-			return r
+			problems = append(problems, fmt.Sprintf("SSL_CERT_FILE %s holds no PEM certificate Go accepts, so Go reads nothing from it", s.CertFile))
+			fixes = append(fixes, "put the CA's PEM certificate (-----BEGIN CERTIFICATE-----, no headers) in that file")
 		default:
+			file = n
 			from = append(from, fmt.Sprintf("SSL_CERT_FILE %s (%d certificate(s))", s.CertFile, n))
 		}
 	}
-	if s.CertDir != "" {
-		from = append(from, "SSL_CERT_DIR "+s.CertDir)
+	d := readCertDirs(s.CertDir, read, list)
+	if len(d.problems) > 0 {
+		problems = append(problems, d.problems...)
+		fixes = append(fixes, "make each SSL_CERT_DIR entry a directory of PEM certificates that byward's user can read, or remove the entry")
+	}
+	skipped := ""
+	if len(d.missing) > 0 && len(d.missing) < len(filepath.SplitList(s.CertDir)) { // none at all is a problem of its own
+		skipped = "Go skips the missing entries " + strings.Join(d.missing, ", ")
+		if len(d.missing) == 1 {
+			skipped = "Go skips the missing entry " + d.missing[0]
+		}
+	}
+	if d.certs > 0 {
+		note := ""
+		if skipped != "" {
+			note = "; " + skipped
+		}
+		from = append(from, fmt.Sprintf("SSL_CERT_DIR %s (%d certificate(s)%s)", s.CertDir, d.certs, note))
+	}
+	if len(problems) > 0 {
+		if skipped != "" {
+			problems = append(problems, skipped)
+		}
+		r.Status, r.Message = Warn, strings.Join(problems, "; ")+", and "+trusted(s, file, d, fileErr)
+		r.Fix = strings.Join(fixes, "; ") + " (docs/how-to/private-ca.md)"
+		return r
 	}
 	if s.PlatformVerifier && len(from) > 0 {
 		r.Status, r.Message = Warn, "SSL_CERT_FILE or SSL_CERT_DIR replaces the system's verifier here, so Go trusts only "+strings.Join(from, " and ")
@@ -93,24 +120,110 @@ func TrustStore(s TrustSettings, read func(string) ([]byte, error)) Result {
 	return r
 }
 
-// withoutFile is what Go trusts when it reads nothing from SSL_CERT_FILE (crypto/x509, root.go). A
-// platform verifier is replaced all the same, unless the file existed but could not be read
-// (unreadable) and nothing else yields a root: Go then falls back to that verifier. On Linux the
-// directories alone are read: SSL_CERT_DIR's, or the public ones.
-func withoutFile(s TrustSettings, unreadable bool) string {
-	switch {
-	case s.PlatformVerifier && unreadable && s.CertDir == "":
-		return "falls back to the system's verifier"
-	case s.PlatformVerifier && unreadable:
-		return "trusts only SSL_CERT_DIR " + s.CertDir + ", or the system's verifier if that holds no certificate"
-	case s.PlatformVerifier && s.CertDir == "":
-		return "trusts no root at all"
-	case s.CertDir != "" && !s.PlatformVerifier && !listsPublicDir(s.CertDir):
-		return "trusts only SSL_CERT_DIR " + s.CertDir + ": the public roots are dropped"
-	case s.CertDir != "":
-		return "trusts only SSL_CERT_DIR " + s.CertDir
+// certDirs is what Go reads from the SSL_CERT_DIR list: the certificates it accepts, whether an
+// entry failed other than by not existing (Go then falls back to a platform verifier when no root
+// loads), what is wrong with the entries, those Go skips because they do not exist, and those that
+// yield a certificate.
+type certDirs struct {
+	certs    int
+	err      bool
+	problems []string
+	missing  []string
+	yielded  []string // the entries that hold a certificate
+}
+
+// readCertDirs reads the SSL_CERT_DIR list as Go does (crypto/x509, loadOnDiskRoots): an entry that
+// does not exist is skipped silently, any other error is kept, and every file of a directory is
+// read, its errors ignored. An entry that cannot be read or holds no certificate is a problem, and
+// so is a list of which no entry exists.
+func readCertDirs(dirs string, read func(string) ([]byte, error), list func(string) ([]string, error)) certDirs {
+	var d certDirs
+	if dirs == "" {
+		return d
 	}
-	return "trusts the public roots alone"
+	entries := filepath.SplitList(dirs)
+	for _, dir := range entries {
+		names, err := list(dir)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			d.missing = append(d.missing, cmp.Or(dir, `""`)) // an empty entry, as in a trailing ":", is named visibly
+			continue
+		case err != nil:
+			d.err = true
+			d.problems = append(d.problems, fmt.Sprintf("SSL_CERT_DIR entry %s cannot be read as a directory (%v), so Go reads nothing from it", dir, err))
+			continue
+		}
+		n := 0
+		for _, name := range names {
+			data, _ := read(filepath.Join(dir, name))
+			n += countCertificates(data)
+		}
+		if n == 0 {
+			d.problems = append(d.problems, fmt.Sprintf("SSL_CERT_DIR entry %s holds no PEM certificate Go accepts, so Go reads nothing from it", dir))
+		} else {
+			d.yielded = append(d.yielded, dir)
+		}
+		d.certs += n
+	}
+	if len(d.missing) == len(entries) {
+		d.problems = append(d.problems, fmt.Sprintf("no SSL_CERT_DIR entry exists (%s), so Go reads no directory", strings.Join(d.missing, ", ")))
+	}
+	return d
+}
+
+// trusted is what Go trusts when a setting yields less than it should (crypto/x509, root.go): the
+// file's and the directories' certificates, the public roots where the settings leave them in, or,
+// on a platform verifier, that verifier again when nothing loads and something failed other than by
+// not existing (fileErr, d.err).
+func trusted(s TrustSettings, file int, d certDirs, fileErr bool) string {
+	var parts []string
+	if file > 0 {
+		parts = append(parts, "SSL_CERT_FILE "+s.CertFile)
+	}
+	switch len(d.yielded) {
+	case 0:
+	case 1:
+		parts = append(parts, "SSL_CERT_DIR entry "+d.yielded[0])
+	default:
+		parts = append(parts, "SSL_CERT_DIR entries "+strings.Join(d.yielded, ", "))
+	}
+	switch {
+	case s.PlatformVerifier && len(parts) == 0 && (fileErr || d.err):
+		return "falls back to the system's verifier"
+	case s.PlatformVerifier && len(parts) == 0:
+		return "trusts no root at all"
+	case s.PlatformVerifier:
+		return "trusts only " + strings.Join(parts, " and ")
+	case s.CertDir == "" && file == 0:
+		return "trusts the public roots alone"
+	case s.CertFile == "":
+		parts = append([]string{"the public bundle"}, parts...)
+	case len(parts) == 0:
+		return "trusts no root at all"
+	}
+	if !keepsPublicRoots(s) {
+		return "trusts only " + strings.Join(parts, " and ") + ": the public roots are dropped"
+	}
+	return "trusts only " + strings.Join(parts, " and ")
+}
+
+// CertDirEntries lists a directory as Go does for SSL_CERT_DIR (crypto/x509,
+// readUniqueDirectoryEntries): every entry but a symlink to another entry of the same directory.
+func CertDirEntries(dir string) ([]string, error) {
+	des, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, de := range des {
+		if de.Type()&fs.ModeSymlink != 0 {
+			if target, err := os.Readlink(filepath.Join(dir, de.Name())); err == nil && !strings.ContainsRune(target, filepath.Separator) {
+				continue
+			}
+		}
+		names = append(names, de.Name())
+	}
+	return names, nil
 }
 
 // keepsPublicRoots reports whether Go, on Linux, still reads a public bundle or directory: with

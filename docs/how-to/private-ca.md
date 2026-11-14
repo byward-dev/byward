@@ -42,9 +42,11 @@ What each way of adding a CA leaves byward trusting, measured in the image (Go 1
 | A volume mounted over the whole `/etc/ssl/certs` | **no** | yes |
 | `SSL_CERT_FILE` naming a file that does not exist | yes | **no**, without an error |
 
-Go silently ignores an `SSL_CERT_FILE` it cannot read or that holds no certificate (the last row).
-`byward doctor`'s "trust store" line warns about that file, and about an `SSL_CERT_FILE` other than the
-image's bundle with an `SSL_CERT_DIR` that leaves out `/etc/ssl/certs`.
+Go silently ignores an `SSL_CERT_FILE` it cannot read or that holds no certificate (the last row),
+and likewise an `SSL_CERT_DIR` entry that does not exist, is not a directory it can read, or holds no
+certificate. `byward doctor`'s "trust store" line warns about each of those (a missing entry only when
+every entry is missing; beside an entry that exists, it is reported as skipped), and about an
+`SSL_CERT_FILE` other than the image's bundle with an `SSL_CERT_DIR` that leaves out `/etc/ssl/certs`.
 
 ## Kubernetes, with trust-manager
 
@@ -106,7 +108,8 @@ changes, restart the Deployment (`kubectl rollout restart`): byward reads the ro
   on whether your distribution keeps its bundle in one of those directories. Adding your CA to the
   system trust store (`update-ca-certificates`, `update-ca-trust`) avoids the question.
 - **macOS:** with either variable set, Go (since 1.27) stops using the system verifier and trusts
-  only the files you name; an `SSL_CERT_FILE` that exists but cannot be read falls back to the system
-  verifier, unless `SSL_CERT_DIR` yields a certificate.
+  only the files you name. An `SSL_CERT_FILE` that exists but cannot be read, or an `SSL_CERT_DIR`
+  entry that is a file or a directory Go may not read, falls back to the system verifier, unless
+  another entry or the other setting yields a certificate.
   `GODEBUG=x509sslcertoverrideplatform=0` keeps the system verifier and ignores both variables. Add
   your CA to the keychain instead.
