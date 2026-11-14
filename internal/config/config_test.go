@@ -95,7 +95,7 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"http loopback without dev", "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "needs --dev"},
 		// #344: the public host joins the public Host allow-list, so it follows BYWARD_ALLOWED_HOSTS' name rule.
 		{"public host with a trailing dot", "BYWARD_PUBLIC_URL=https://mcp.example.com./mcp", `BYWARD_PUBLIC_URL: the host "mcp.example.com." is not valid: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
-		{"public host empty, with a port", "BYWARD_PUBLIC_URL=https://:8443/mcp", `BYWARD_PUBLIC_URL: the host "" is not valid`},
+		{"public host empty, with a port", "BYWARD_PUBLIC_URL=https://:8443/mcp", `BYWARD_PUBLIC_URL: give a host, e.g. https://mcp.example.com/mcp`},
 		{"public host with a double dot", "BYWARD_PUBLIC_URL=https://a..b/mcp", `BYWARD_PUBLIC_URL: the host "a..b" is not valid`},
 		{"public host with a wildcard", "BYWARD_PUBLIC_URL=https://a*b/mcp", `BYWARD_PUBLIC_URL: the host "a*b" is not valid`},
 		// Browsers and MCP clients send IDN hosts in ASCII (xn--) form, so a Unicode host never matches.
@@ -159,6 +159,8 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"cimd host with a space", "BYWARD_CIMD_TRUSTED_HOSTS=claude .ai", `"claude .ai" is not a host name`},
 		{"cimd host with a port", "BYWARD_CIMD_ALLOWED_HOSTS=claude.ai:443", `BYWARD_CIMD_ALLOWED_HOSTS: "claude.ai:443" is not a host name`},
 		{"cimd wildcard host", "BYWARD_CIMD_TRUSTED_HOSTS=*.example.com", `"*.example.com" is not a host name`},
+		// The name rule comes first: "a*b" lacks a dot too, but a dot would not fix it.
+		{"cimd host breaking the rule and without a dot", "BYWARD_CIMD_TRUSTED_HOSTS=a*b", `BYWARD_CIMD_TRUSTED_HOSTS: "a*b" is not a host name such as claude.ai: a host name has only letters`},
 		{"cimd single-label host", "BYWARD_CIMD_TRUSTED_HOSTS=localhost", `BYWARD_CIMD_TRUSTED_HOSTS: "localhost" is not a host name such as claude.ai: give a name with at least one dot`},
 		{"cimd unicode host", "BYWARD_CIMD_TRUSTED_HOSTS=bücher.example", `BYWARD_CIMD_TRUSTED_HOSTS: the host "bücher.example" is not ASCII`},
 		{"dcr not a bool", "BYWARD_DCR=on", "BYWARD_DCR: want true or false"},
@@ -215,8 +217,8 @@ func TestDevAllowsLoopbackHTTPAndRecordsIt(t *testing.T) {
 // Every form a Host header carries loads, in lower case, with any port from 1 to 65535, and a bare IPv6 address is
 // stored in brackets, as a Host header carries it, so the public listener can match it (#325).
 func TestAllowedHostsLoadEveryHostHeaderFormAndBracketABareIPv6(t *testing.T) {
-	c, err := load(t, nil, "BYWARD_ALLOWED_HOSTS=mcp.example.com,mcp.example.com:9765,10.0.0.5:8080,localhost:1,::1,2001:db8::1,[2001:db8::1],[::1]:65535,my_svc~1,xn--bcher-kva.example,Mixed-Case.Example,abcdefghijklmnopqrstuvwxyz.ABCDEFGHIJKLMNOPQRSTUVWXYZ.0123456789")
-	want := []string{"mcp.example.com", "mcp.example.com:9765", "10.0.0.5:8080", "localhost:1", "[::1]", "[2001:db8::1]", "[2001:db8::1]", "[::1]:65535", "my_svc~1", "xn--bcher-kva.example", "mixed-case.example", "abcdefghijklmnopqrstuvwxyz.abcdefghijklmnopqrstuvwxyz.0123456789"}
+	c, err := load(t, nil, "BYWARD_ALLOWED_HOSTS=a,mcp.example.com,mcp.example.com:9765,10.0.0.5:8080,localhost:1,::1,2001:db8::1,[2001:db8::1],[::1]:65535,my_svc~1,xn--bcher-kva.example,Mixed-Case.Example,abcdefghijklmnopqrstuvwxyz.ABCDEFGHIJKLMNOPQRSTUVWXYZ.0123456789")
+	want := []string{"a", "mcp.example.com", "mcp.example.com:9765", "10.0.0.5:8080", "localhost:1", "[::1]", "[2001:db8::1]", "[2001:db8::1]", "[::1]:65535", "my_svc~1", "xn--bcher-kva.example", "mixed-case.example", "abcdefghijklmnopqrstuvwxyz.abcdefghijklmnopqrstuvwxyz.0123456789"}
 	if err != nil {
 		t.Fatal(err)
 	}

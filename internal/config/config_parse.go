@@ -50,7 +50,9 @@ func ParsePublicURL(raw string) (*url.URL, error) {
 		return nil, err
 	}
 	var errs []string
-	if err := asciiHost(u.Hostname()); err != nil {
+	if u.Hostname() == "" {
+		errs = append(errs, "BYWARD_PUBLIC_URL: give a host, e.g. https://mcp.example.com/mcp")
+	} else if err := asciiHost(u.Hostname()); err != nil {
 		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: %v", err))
 	} else if _, ipErr := netip.ParseAddr(u.Hostname()); ipErr != nil && !validHostName(u.Hostname()) {
 		// The host joins the public listener's Host allow-list, as BYWARD_ALLOWED_HOSTS entries do (#344).
@@ -216,9 +218,8 @@ const hostNameRule = "a host name has only letters, digits and - . _ ~, and no e
 
 // validHostName reports whether host is a name a host setting can match on: BYWARD_ALLOWED_HOSTS
 // (#334), BYWARD_PUBLIC_URL's host, BYWARD_CIMD_TRUSTED_HOSTS and BYWARD_CIMD_ALLOWED_HOSTS
-// (#344). Not empty, only RFC 3986's unreserved
-// characters (a DNS name never uses reg-name's sub-delims or %-escapes, which a Host header or a
-// URL could carry), and no empty label. A trailing dot is refused, not stripped: the setting would
+// (#344). Not empty, only RFC 3986's unreserved characters (a DNS name never uses reg-name's
+// sub-delims or %-escapes, which a Host header or a URL could carry), and no empty label. A trailing dot is refused, not stripped: the setting would
 // match only a client given the absolute name, never the usual one, so it is almost always copied
 // from a DNS zone by mistake.
 func validHostName(host string) bool {
