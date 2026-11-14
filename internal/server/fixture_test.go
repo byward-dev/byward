@@ -207,7 +207,7 @@ func TestMain(m *testing.M) {
 // readDoc is the text of a file under docs/, by its path relative to docs/.
 func readDoc(t *testing.T, rel string) string {
 	t.Helper()
-	b, err := os.ReadFile("../../docs/" + rel)
+	b, err := os.ReadFile("../../docs/" + rel) //nolint:gosec // G304: a page under docs/ that the test names
 	if err != nil {
 		t.Fatal(err)
 	}
