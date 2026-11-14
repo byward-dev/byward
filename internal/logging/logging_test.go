@@ -245,9 +245,11 @@ func TestALineCarriesItsRequestsID(t *testing.T) {
 		format string
 		log    func(*slog.Logger)
 		want   []string // request_id values in the line, in order
+		keeps  string   // another part of the line that must survive
 	}{
 		"a request's line":     {format: "json", log: func(l *slog.Logger) { l.InfoContext(ctx, "x") }, want: []string{"req-1"}},
-		"through With":         {format: "json", log: func(l *slog.Logger) { l.With("upstream", "u").WarnContext(ctx, "x") }, want: []string{"req-1"}},
+		"through With":         {format: "json", log: func(l *slog.Logger) { l.With("upstream", "u").WarnContext(ctx, "x") }, want: []string{"req-1"}, keeps: `"upstream":"u"`},
+		"an ID the logger has": {format: "json", log: func(l *slog.Logger) { l.With("request_id", "own").InfoContext(ctx, "x") }, want: []string{"own"}},
 		"through LogAttrs":     {format: "json", log: func(l *slog.Logger) { l.LogAttrs(ctx, slog.LevelError, "x") }, want: []string{"req-1"}},
 		"no request":           {format: "json", log: func(l *slog.Logger) { l.InfoContext(context.Background(), "x") }},
 		"no context":           {format: "json", log: func(l *slog.Logger) { l.Info("x") }},
@@ -264,6 +266,27 @@ func TestALineCarriesItsRequestsID(t *testing.T) {
 			}
 			if !slices.Equal(ids, tc.want) {
 				t.Fatalf("request IDs %q, want %q: %s", ids, tc.want, buf.String())
+			}
+			if !strings.Contains(buf.String(), tc.keeps) {
+				t.Fatalf("the line lost %s: %s", tc.keeps, buf.String())
+			}
+		})
+	}
+}
+
+// The request line carries its ID whatever logger Middleware is given, not only New's, and once.
+func TestTheRequestLineCarriesItsIDWithAnyLogger(t *testing.T) {
+	for name, log := range map[string]func(*bytes.Buffer) *slog.Logger{
+		"a plain slog logger": func(b *bytes.Buffer) *slog.Logger { return slog.New(slog.NewJSONHandler(b, nil)) },
+		"New's logger":        func(b *bytes.Buffer) *slog.Logger { return New(b, "json") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			rec := httptest.NewRecorder()
+			Middleware(log(&buf), http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+			want := `"request_id":"` + rec.Header().Get("X-Request-Id") + `"`
+			if strings.Count(buf.String(), `"request_id"`) != 1 || !strings.Contains(buf.String(), want) {
+				t.Fatalf("request line %s, want %s once", buf.String(), want)
 			}
 		})
 	}

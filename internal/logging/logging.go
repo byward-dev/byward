@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"reflect"
 	"regexp"
+	"slices"
 	"time"
 )
 
@@ -53,21 +54,25 @@ var allowed = map[string]bool{
 }
 
 // New returns a logger writing JSON (or text) to w. A line logged with a request's context (the
-// *Context methods) carries its request ID, so callers never add it themselves.
+// *Context methods) carries its request ID, so callers never add it themselves. A logger with a
+// group (WithGroup) logs nothing in it, the ID included: the allow-list drops grouped attributes.
 func New(w io.Writer, format string) *slog.Logger {
 	opts := &slog.HandlerOptions{ReplaceAttr: replace}
 	if format == "text" {
-		return slog.New(requestIDHandler{slog.NewTextHandler(w, opts)})
+		return slog.New(requestIDHandler{Handler: slog.NewTextHandler(w, opts)})
 	}
-	return slog.New(requestIDHandler{slog.NewJSONHandler(w, opts)})
+	return slog.New(requestIDHandler{Handler: slog.NewJSONHandler(w, opts)})
 }
 
 // requestIDHandler adds the request ID of the record's context (WithRequestID) to every line,
-// unless the line already has one.
-type requestIDHandler struct{ slog.Handler }
+// unless the line already has one, from the record or from the logger's own attributes (With).
+type requestIDHandler struct {
+	slog.Handler
+	own bool // the logger's attributes name a request_id
+}
 
 func (h requestIDHandler) Handle(ctx context.Context, r slog.Record) error {
-	if id := RequestID(ctx); id != "" && !hasRequestID(r) {
+	if id := RequestID(ctx); id != "" && !h.own && !hasRequestID(r) {
 		r = r.Clone()
 		r.AddAttrs(slog.String("request_id", id))
 	}
@@ -75,11 +80,12 @@ func (h requestIDHandler) Handle(ctx context.Context, r slog.Record) error {
 }
 
 func (h requestIDHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return requestIDHandler{h.Handler.WithAttrs(attrs)}
+	own := h.own || slices.ContainsFunc(attrs, func(a slog.Attr) bool { return a.Key == "request_id" })
+	return requestIDHandler{h.Handler.WithAttrs(attrs), own}
 }
 
 func (h requestIDHandler) WithGroup(name string) slog.Handler {
-	return requestIDHandler{h.Handler.WithGroup(name)}
+	return requestIDHandler{h.Handler.WithGroup(name), h.own}
 }
 
 func hasRequestID(r slog.Record) bool {
@@ -195,7 +201,9 @@ func Middleware(log *slog.Logger, next http.Handler) http.Handler {
 		w.Header().Set("X-Request-Id", id)
 		rec := NewStatusRecorder(w)
 		next.ServeHTTP(rec, r)
-		attrs := []any{"method", r.Method, "path", r.URL.Path, "status", rec.Status(),
+		// The ID is set here, not left to New's handler, so the request line has it whatever
+		// logger it is given.
+		attrs := []any{"request_id", id, "method", r.Method, "path", r.URL.Path, "status", rec.Status(),
 			"duration_ms", time.Since(start).Milliseconds(), "remote_ip", RemoteIP(r)}
 		if m := r.Header.Get("Mcp-Method"); m != "" {
 			attrs = append(attrs, "mcp_method", m)
