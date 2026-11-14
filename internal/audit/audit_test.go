@@ -273,14 +273,17 @@ func TestARecordCarriesItsRequestsID(t *testing.T) {
 		record func(*Log)
 		want   int
 	}{
-		"Record":                {record: func(l *Log) { l.Record(r, Event{Name: TokenIssued, Outcome: Success}) }, want: 1},
-		"RecordUnauthenticated": {record: func(l *Log) { l.RecordUnauthenticated(r, Event{Name: TokenRejected, Outcome: Failure}) }, want: 1},
-		"no request":            {record: func(l *Log) { l.Record(nil, Event{Name: KeyLoaded, Outcome: Success}) }},
+		"a request's record":                  {record: func(l *Log) { l.Record(r, Event{Name: TokenIssued, Outcome: Success}) }, want: 1},
+		"an unauthenticated request's record": {record: func(l *Log) { l.RecordUnauthenticated(r, Event{Name: TokenRejected, Outcome: Failure}) }, want: 1},
+		"no request":                          {record: func(l *Log) { l.Record(nil, Event{Name: KeyLoaded, Outcome: Success}) }},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var buf bytes.Buffer
 			tc.record(New(logging.New(&buf, "json"), nil, time.Now))
-			line := strings.TrimSpace(buf.String())
+			if strings.Count(buf.String(), "\n") != 1 {
+				t.Fatalf("want one record: %q", buf.String())
+			}
+			line := buf.String()
 			if strings.Count(line, `"request_id":"req-1"`) != tc.want || strings.Count(line, `"request_id"`) != tc.want {
 				t.Fatalf("want the request ID %d time(s) in one line: %s", tc.want, buf.String())
 			}
