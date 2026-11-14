@@ -78,7 +78,7 @@ func TestADeniedCIMDClientIsUnknownWithoutAFetch(t *testing.T) {
 	deny, _ := NewDenylist([]string{cimdID})
 	f := &fakeFetch{replies: map[string][]reply{other: {{body: doc(map[string]any{"client_id": other})}}}}
 	c := newClock()
-	r := NewCIMDRegistry(CIMDConfig{Fetch: f, Deny: deny, JTI: NewStoreJTICache(memory.New()), Now: c.now})
+	r := newDenyingReg(f, c, deny)
 	_, err := r.Client(context.Background(), cimdID)
 	if !errors.Is(err, ErrUnknownClient) || !errors.Is(err, ErrClientDenied) || errors.Is(err, ErrMetadataRefused) || f.calls.Load() != 0 {
 		t.Fatalf("denied client: %v after %d fetches, want unknown, ErrClientDenied and no fetch", err, f.calls.Load())
@@ -102,7 +102,7 @@ func TestTheChainKeepsTheFirstReasonedRefusal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	denied := Chain{NewCIMDRegistry(CIMDConfig{Fetch: f, Deny: deny, JTI: NewStoreJTICache(memory.New()), Now: c.now}), newDCR(brokenClients{}, c.now, 0)}
+	denied := Chain{newDenyingReg(f, c, deny), newDCR(brokenClients{}, c.now, 0)}
 	if _, err := denied.Client(context.Background(), cimdID); !errors.Is(err, ErrClientDenied) {
 		t.Fatalf("denied client ID behind the DCR registry: %v, want ErrClientDenied", err)
 	}
@@ -119,7 +119,7 @@ func TestACIMDClientReturningToADeniedHostIsRefused(t *testing.T) {
 	deny, _ := NewDenylist([]string{"app.example"})
 	f := &fakeFetch{replies: map[string][]reply{cimdID: {ok("")}}}
 	c := newClock()
-	cl, err := NewCIMDRegistry(CIMDConfig{Fetch: f, Deny: deny, JTI: NewStoreJTICache(memory.New()), Now: c.now}).Client(context.Background(), cimdID)
+	cl, err := newDenyingReg(f, c, deny).Client(context.Background(), cimdID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,8 +129,9 @@ func TestACIMDClientReturningToADeniedHostIsRefused(t *testing.T) {
 	}
 }
 
-// A client is denied once any one of its registered redirect URIs returns to a denied host (#338),
-// as the broker sees it: a client from the registry, checked with Denied().
+// A CIMD client is denied once any one of its registered redirect URIs returns to a denied host
+// (#338), as the broker sees it: a client from the registry, checked with Denied(). A DCR client
+// shares the check; the broker's refresh tests cover both kinds.
 func TestAClientIsDeniedByAnyOfItsRedirectHosts(t *testing.T) {
 	redirects := []string{"https://app.example/cb", "https://second.example/cb"}
 	for name, tc := range map[string]struct {
@@ -149,7 +150,7 @@ func TestAClientIsDeniedByAnyOfItsRedirectHosts(t *testing.T) {
 			}
 			f := &fakeFetch{replies: map[string][]reply{cimdID: {{body: doc(map[string]any{"redirect_uris": redirects})}}}}
 			c := newClock()
-			cl, err := NewCIMDRegistry(CIMDConfig{Fetch: f, Deny: deny, JTI: NewStoreJTICache(memory.New()), Now: c.now}).Client(context.Background(), cimdID)
+			cl, err := newDenyingReg(f, c, deny).Client(context.Background(), cimdID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -162,6 +163,11 @@ func TestAClientIsDeniedByAnyOfItsRedirectHosts(t *testing.T) {
 			}
 		})
 	}
+}
+
+// newDenyingReg is a CIMD registry fetching through f, with deny as the operator's denylist.
+func newDenyingReg(f *fakeFetch, c *clock, deny *Denylist) *CIMDRegistry {
+	return NewCIMDRegistry(CIMDConfig{Fetch: f, Deny: deny, JTI: NewStoreJTICache(memory.New()), Now: c.now})
 }
 
 // reasoned is a registry that does not know the client and says why.
