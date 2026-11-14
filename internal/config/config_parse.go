@@ -156,6 +156,17 @@ func asciiHost(host string) error {
 	return nil
 }
 
+// Hostname is a host as BYWARD_ALLOWED_HOSTS lists it or a Host header carries it (host,
+// host:port, [v6], [v6]:port or a bare v6 address) reduced to its host name: no port, no
+// brackets, in lower case. Every reader of those entries goes through it, so they agree.
+func Hostname(hostport string) string {
+	h := hostport
+	if name, _, err := net.SplitHostPort(h); err == nil {
+		h = name
+	}
+	return strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(h, "["), "]"))
+}
+
 func isLoopback(host string) bool {
 	if host == "localhost" {
 		return true

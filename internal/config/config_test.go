@@ -577,3 +577,23 @@ func TestDCRIsOnByDefaultAndTheDenylistTakesCommaSeparatedEntries(t *testing.T) 
 		t.Fatalf("DCR off: %v, %v", c.DCR, err)
 	}
 }
+
+// #319: one reduction of a BYWARD_ALLOWED_HOSTS entry to a host name, for the Host check, the
+// no-auth loopback check and the TLS certificate names.
+func TestHostnameReducesEveryAllowedHostFormToALowerCaseHostName(t *testing.T) {
+	for entry, want := range map[string]string{
+		"mcp.example.com":      "mcp.example.com",
+		"mcp.example.com:8443": "mcp.example.com",
+		"MCP.Example.COM:8443": "mcp.example.com",
+		"[::1]":                "::1",
+		"[::1]:8443":           "::1",
+		"::1":                  "::1",
+		"[FE80::1]:8443":       "fe80::1",
+		"127.0.0.1:8080":       "127.0.0.1",
+		"localhost":            "localhost",
+	} {
+		if got := Hostname(entry); got != want {
+			t.Errorf("Hostname(%q) = %q, want %q", entry, got, want)
+		}
+	}
+}

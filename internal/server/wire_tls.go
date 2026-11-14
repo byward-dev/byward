@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log/slog"
-	"net"
 	"time"
 
 	"github.com/byward-dev/byward/internal/config"
@@ -141,10 +140,7 @@ func servingCertNames(cfg *config.Config, p *servingcert.Pair) doctor.Result {
 	r := doctor.Result{Class: doctor.ClassProxy, Name: "TLS certificate names"}
 	hosts := []string{cfg.PublicURL.Hostname()}
 	for _, h := range cfg.AllowedHosts {
-		if name, _, err := net.SplitHostPort(h); err == nil {
-			h = name
-		}
-		hosts = append(hosts, h) // VerifyHostname takes an IPv6 address in brackets too
+		hosts = append(hosts, config.Hostname(h))
 	}
 	for _, h := range hosts {
 		if p.Covers(h) {
