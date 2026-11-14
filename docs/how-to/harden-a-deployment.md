@@ -32,8 +32,8 @@ supply ([Serve TLS at the proxy](tls.md), [ADR-0019](../adr/0019-packaging.md) ย
       the address is read from `X-Forwarded-For`: [rate limits](../reference/rate-limits.md#client-address).
 - [ ] For an IdP or upstream with a private CA, add only that CA with `SSL_CERT_FILE`. Don't
       mount over the image's `/etc/ssl/certs`, or set `SSL_CERT_DIR` without it beside
-      `SSL_CERT_FILE`: either drops the public roots. Every outbound TLS connection trusts the CA
-      you add ([trust a private CA](private-ca.md)).
+      `SSL_CERT_FILE`: either drops the public roots, and doctor's "trust store" line warns of the
+      second. Every outbound TLS connection trusts the CA you add ([trust a private CA](private-ca.md)).
 
 ## Host and Origin allowlists
 
@@ -96,7 +96,7 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) ยง1โ
         `--entra-client-secret-file`); or no secret at all: where the platform hands the proxy a
         federated token (AKS workload identity, GitHub Actions), point
         `BYWARD_ENTRA_FEDERATED_TOKEN_FILE` at it and give the app a matching federated identity
-        credential ([an example](real-entra-lane.md#3-run-it-once-then-create-the-federated-credential));
+        credential ([an example](../maintainers/real-entra-lane.md#3-run-it-once-then-create-the-federated-credential));
       - static client secrets through `client_secret_file` in the
         [static clients file](../reference/static-clients.md);
       - static client secrets must be at least 32 bytes.

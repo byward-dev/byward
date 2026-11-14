@@ -1,7 +1,7 @@
 # Architecture decision records
 
 Decisions for byward, one file each. ADRs 0003–0024 came from the v0.1 features (F1–F22 in
-[`docs/features.md`](../features.md)), grilled with the procedure in
+[`docs/archive/features.md`](../archive/features.md)), grilled with the procedure in
 [`docs/quality-lenses.md`](../quality-lenses.md); later ADRs and amendments come from GitHub issues.
 An ADR is changed only by an amendment: a later ADR (`ADR-NNNN`) or a dated section or note in the
 ADR itself, with its issue. The last column lists both.
@@ -9,7 +9,7 @@ ADR itself, with its issue. The last column lists both.
 | ADR | Decision | Feature | Amendments |
 |---|---|---|---|
 | [0001](0001-scope-auth-only-proxy-entra-first-class.md) | Scope: auth-only proxy, public OSS, Entra first-class | — | 2026-11-06 (rate limiting) |
-| [0002](0002-repo-structure-for-agents.md) | Repository structure optimised for coding agents | — | 2026-11-14 (§8, skills) |
+| [0002](0002-repo-structure-for-agents.md) | Repository structure optimised for coding agents | — | 2026-11-14 (§2, features.md archived; §8, skills) |
 | [0003](0003-upstream-kinds.md) | Upstream kinds: HTTP relay; stdio processes never shared between users | F1 | ADR-0025 |
 | [0004](0004-spec-revisions-pass-through.md) | Spec revisions: serve both eras, pass through, never translate | F2 | ADR-0007; 2026-11-06 (#61); 2026-11-07 (#168) |
 | [0005](0005-auth-modes-broker-only.md) | Auth modes: broker only (a loopback no-auth mode added by ADR-0027) | F3 | ADR-0027 |
@@ -46,4 +46,4 @@ ADR itself, with its issue. The last column lists both.
   "_Amended by ADR-NNNN_" note at the affected line; a change recorded in the ADR itself is a dated
   "## Amendment" section or "_Amended <date> (#n)_" note. Either way, add it to the Status line and
   to the Amendments column here.
-- Add the row to this table and link the ADR from `docs/features.md` in the same PR.
+- Add the row to this table in the same PR.

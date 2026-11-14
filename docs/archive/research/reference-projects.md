@@ -96,11 +96,11 @@ Details and sources: F6 client matrix (research notes, 2026-11-05).
 
 | Feature | Study |
 |---|---|
-| F1 Upstream kinds ([ADR-0003](../adr/0003-upstream-kinds.md)) | agentgateway `mcp/upstream/stdio.rs`; supergateway `--stateful`; ToolHive dispatcher (what sharing costs); docker clientpool |
-| F2 Spec revisions ([ADR-0004](../adr/0004-spec-revisions-pass-through.md)) | go-sdk `streamable.go`, `client.go` (discover → initialize fallback); ToolHive `pkg/mcp/revision.go`; agentgateway (no translation) |
-| F3 Auth modes ([ADR-0005](../adr/0005-auth-modes-broker-only.md)) / F4 Token model ([ADR-0006](../adr/0006-token-model.md)) | babs (sealed tokens); Pomerium `internal/mcp/DESIGN.md`; workers-oauth-provider; giantswarm/mcp-oauth |
-| F5 State & storage ([ADR-0007](../adr/0007-state-and-storage.md)) | dex storage; Pomerium databroker; workers-oauth-provider storage schema; ToolHive key fallback files |
-| F6 Client registration ([ADR-0008](../adr/0008-client-registration.md)) / F8 Redirect URIs ([ADR-0009](../adr/0009-redirect-uri-policy.md)) | Pomerium CIMD + SSRF; Obot redirect checks and RFC 7592; xnyzer toggles; ToolHive TTL + cap; babs optional CIMD host allowlist; workers-oauth-provider 90 d sliding TTL |
+| F1 Upstream kinds ([ADR-0003](../../adr/0003-upstream-kinds.md)) | agentgateway `mcp/upstream/stdio.rs`; supergateway `--stateful`; ToolHive dispatcher (what sharing costs); docker clientpool |
+| F2 Spec revisions ([ADR-0004](../../adr/0004-spec-revisions-pass-through.md)) | go-sdk `streamable.go`, `client.go` (discover → initialize fallback); ToolHive `pkg/mcp/revision.go`; agentgateway (no translation) |
+| F3 Auth modes ([ADR-0005](../../adr/0005-auth-modes-broker-only.md)) / F4 Token model ([ADR-0006](../../adr/0006-token-model.md)) | babs (sealed tokens); Pomerium `internal/mcp/DESIGN.md`; workers-oauth-provider; giantswarm/mcp-oauth |
+| F5 State & storage ([ADR-0007](../../adr/0007-state-and-storage.md)) | dex storage; Pomerium databroker; workers-oauth-provider storage schema; ToolHive key fallback files |
+| F6 Client registration ([ADR-0008](../../adr/0008-client-registration.md)) / F8 Redirect URIs ([ADR-0009](../../adr/0009-redirect-uri-policy.md)) | Pomerium CIMD + SSRF; Obot redirect checks and RFC 7592; xnyzer toggles; ToolHive TTL + cap; babs optional CIMD host allowlist; workers-oauth-provider 90 d sliding TTL |
 | F7 Consent | dex approval; Obot; lethek CSRF design; ToolHive post-callback user re-check; babs no-JS page |
 | F9 IdP adapters | dex connectors; agentgateway `McpIDP` adapters |
 | F10 Entra / F14 OBO | agentgateway Entra shim; FastMCP `AzureProvider`; MSAL Go; ToolHive OBO CRD |

@@ -38,6 +38,8 @@ func TestNoAuthIsRefusedOffLoopback(t *testing.T) {
 		{"listen on all IPv6 interfaces", "BYWARD_LISTEN=[::]:8080", "BYWARD_LISTEN must be a loopback address"},
 		{"flag not a bool", "BYWARD_INSECURE_NO_AUTH=yes", "BYWARD_INSECURE_NO_AUTH: want true or false"},
 		{"extra host", "BYWARD_ALLOWED_HOSTS=proxy.internal:8080", "BYWARD_ALLOWED_HOSTS may only list loopback hosts"},
+		// Loopback hosts that can match no Host header are refused, not accepted for their host name (#325).
+		{"loopback host with a junk port", "BYWARD_ALLOWED_HOSTS=127.0.0.1:abc", `"127.0.0.1:abc" is not a host[:port]`},
 		{"extra origin", "BYWARD_ALLOWED_ORIGINS=https://app.example", "BYWARD_ALLOWED_ORIGINS may only list loopback origins"},
 	}
 	for _, c := range cases {

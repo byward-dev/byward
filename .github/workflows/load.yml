@@ -1,7 +1,7 @@
 name: load
 
 # Scheduled lane (ADR-0024 §10): the latency the proxy adds per MCP request, against a budget of
-# 2 ms p99 (docs/how-to/load-test.md). It also runs on a pull request that changes the harness or
+# 2 ms p99 (docs/maintainers/load-test.md). It also runs on a pull request that changes the harness or
 # this workflow, so a change to the measurement is measured; it never blocks other pull requests.
 on:
   schedule:
@@ -61,5 +61,5 @@ jobs:
             gh issue comment "$open" --body "Failed again: $RUN_URL"
           else
             gh issue create --label load-test --title "The scheduled load test is failing" \
-              --body "The load test failed: $RUN_URL. See docs/how-to/load-test.md."
+              --body "The load test failed: $RUN_URL. See docs/maintainers/load-test.md."
           fi

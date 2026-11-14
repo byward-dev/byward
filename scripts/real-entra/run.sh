@@ -1,5 +1,5 @@
 #!/bin/sh
-# Scheduled real-Entra lane (ADR-0024 §1, §12; docs/how-to/real-entra-lane.md): byward against the
+# Scheduled real-Entra lane (ADR-0024 §1, §12; docs/maintainers/real-entra-lane.md): byward against the
 # maintainer's real tenant, with no stored secret. GitHub's OIDC token for this run is the Entra
 # app's federated credential (ADR-0012 §5). It is masked as soon as it is fetched, kept only in a
 # 0600 file, and never printed; the lane fails closed without it, with no other credential to use.
@@ -43,7 +43,7 @@ fetch_token() {
 
 fetch_token
 # The claims Entra matches, never the token: the first run's sub goes into the app's federated
-# identity credential (docs/how-to/real-entra-lane.md step 3).
+# identity credential (docs/maintainers/real-entra-lane.md step 3).
 claims=$(cut -d. -f2 <"$token" | tr '_-' '/+' |
   awk '{ n = length($0) % 4; if (n == 2) $0 = $0 "=="; else if (n == 3) $0 = $0 "="; print }' |
   base64 -d | jq -c '{iss, sub, aud}') || fail "decoding the token's claims"

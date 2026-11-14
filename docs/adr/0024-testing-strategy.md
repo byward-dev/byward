@@ -156,4 +156,4 @@ direct one; opening a sealed token took 0.3 µs, signing the ES256 assertion 17 
 weekly by `.github/workflows/load.yml`. It sends the same requests to the upstream directly and
 through the wired proxy, open loop at a fixed rate, in alternating rounds, and gates on the median
 over seven rounds of the added p99; a companion test proves that 5 ms more fails the gate
-([how-to](../how-to/load-test.md)).
+([how-to](../maintainers/load-test.md)).

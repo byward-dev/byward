@@ -2,7 +2,7 @@ name: real-entra
 
 # Scheduled lane (ADR-0024 §1, §12): byward against the maintainer's real Entra tenant, with no
 # stored secret. GitHub's OIDC token is the CI app's federated credential (ADR-0012 §5). Set up once
-# as docs/how-to/real-entra-lane.md says; it never blocks a pull request.
+# as docs/maintainers/real-entra-lane.md says; it never blocks a pull request.
 on:
   schedule:
     - cron: "41 3 * * *"
@@ -58,5 +58,5 @@ jobs:
             gh issue comment "$open" --body "Failed again: $RUN_URL"
           else
             gh issue create --label real-entra-lane --title "The scheduled real-Entra lane is failing" \
-              --body "The real-Entra lane failed: $RUN_URL. See docs/how-to/real-entra-lane.md."
+              --body "The real-Entra lane failed: $RUN_URL. See docs/maintainers/real-entra-lane.md."
           fi

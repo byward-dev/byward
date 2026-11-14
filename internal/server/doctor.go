@@ -2,12 +2,16 @@ package server
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/byward-dev/byward/internal/config"
@@ -35,7 +39,7 @@ func expiryWarning(cfg *config.Config, now time.Time) (Warning, bool) {
 
 // CheckOffline is `byward check --offline` (ADR-0020 §7): everything the proxy validates at
 // startup that needs no network and writes nothing. It reads the sealing keys and the static
-// clients, validates the IdP and gate settings, checks the store paths without creating them, and
+// clients, validates the IdP and gate settings, checks the store without opening or creating it, and
 // checks the TLS certificate as startup does.
 // The error is a configuration error; the warnings are what the proxy would log at startup.
 func CheckOffline(cfg *config.Config) ([]Warning, error) {
@@ -83,10 +87,14 @@ func offlineHop(cfg *config.Config) []Warning {
 }
 
 // checkStore checks the configured store without opening it: the PostgreSQL DSN as Open would
-// parse it, with what several replicas need, or the SQLite paths.
+// parse it, with what several replicas need, or the SQLite paths. Its errors name the settings,
+// as openStore's do.
 func checkStore(cfg *config.Config) ([]Warning, error) {
 	if cfg.StorePostgresDSN == "" {
-		return nil, checkStorePaths(cfg)
+		if err := sqlite.CheckPaths(sqlite.Options{Dir: cfg.StoreDir, CounterFile: cfg.StoreCounterFile}); err != nil {
+			return nil, fmt.Errorf("BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: %w (see docs/how-to/state.md)", err)
+		}
+		return nil, nil
 	}
 	if err := postgres.CheckDSN(cfg.StorePostgresDSN, cfg.Dev); err != nil {
 		return nil, fmt.Errorf("BYWARD_STORE_POSTGRES_DSN_FILE: %w (see docs/how-to/postgres.md)", err)
@@ -99,14 +107,6 @@ func checkStore(cfg *config.Config) ([]Warning, error) {
 var replicaKeys = Warning{Setting: "BYWARD_STORE_POSTGRES_DSN_FILE",
 	Message: "the PostgreSQL store serves several replicas, and keys never live in the store: a token sealed or an assertion signed by one replica is refused by another without the same keys; the per-address rate limits apply per replica",
 	Fix:     "give every replica the same BYWARD_KEYS_DIR and BYWARD_ASSERTION_KEYS_DIR contents (docs/how-to/postgres.md)"}
-
-// checkStorePaths is sqlite.CheckPaths with the settings named, as openStore names them.
-func checkStorePaths(cfg *config.Config) error {
-	if err := sqlite.CheckPaths(sqlite.Options{Dir: cfg.StoreDir, CounterFile: cfg.StoreCounterFile}); err != nil {
-		return fmt.Errorf("BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: %w (see docs/how-to/state.md)", err)
-	}
-	return nil
-}
 
 // DoctorOptions are the HTTP clients doctor uses; nil means the default for each. Tests point
 // them at fakes.
@@ -164,7 +164,7 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 		for _, w := range redundantStrips(cfg) {
 			r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "configuration", Status: doctor.Warn, Message: w.Message, Fix: warningFix(w)})
 		}
-		r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy))
+		r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy), doctor.TrustStore(trustSettings(), os.ReadFile))
 		r.Checks = append(r.Checks, upstreamHopResult(ctx, cfg, o.Resolve)...)
 		r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "authentication", Status: doctor.Warn,
 			Message: "authentication is off (BYWARD_INSECURE_NO_AUTH): there is no discovery and no IdP to check",
@@ -175,7 +175,8 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	if err != nil {
 		return r, err
 	}
-	if err := checkStorePaths(cfg); err != nil {
+	storeWarnings, err := checkStore(cfg)
+	if err != nil {
 		return r, err
 	}
 	pair, err := diskCert(cfg)
@@ -183,12 +184,12 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 		return r, err
 	}
 	r.Checks = append(r.Checks, servingCertChecks(cfg, pair, o.Now())...)
-	r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy))
+	r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy), doctor.TrustStore(trustSettings(), os.ReadFile))
 	r.Checks = append(r.Checks, upstreamHopResult(ctx, cfg, o.Resolve)...)
 	if cfg.IdentityHeaders && cfg.UpstreamCommand == nil {
 		r.Checks = append(r.Checks, identityHeadersResult(ctx, cfg.UpstreamURL.Hostname(), o.Resolve))
 	}
-	for _, w := range append(parts.warnings, redundantStrips(cfg)...) {
+	for _, w := range append(append(parts.warnings, storeWarnings...), redundantStrips(cfg)...) {
 		r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "configuration", Status: doctor.Warn, Message: w.Message, Fix: warningFix(w)})
 	}
 	target := doctor.Target{Resource: cfg.PublicURL, Issuer: cfg.Issuer(), HostsSetting: config.Setting{Name: "allowed-hosts"}.Env()}
@@ -198,6 +199,32 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	r.Checks = append(r.Checks, doctor.SelfProbe(ctx, o.Proxy, target)...)
 	r.Checks = append(r.Checks, parts.idp.diagnose(ctx, o.Now())...)
 	return r, nil
+}
+
+// trustSettings are the settings Go reads its roots from, whether a platform verifier is in use or
+// kept by GODEBUG x509sslcertoverrideplatform=0 (both settings then ignored), and the number of
+// roots Go loaded.
+func trustSettings() doctor.TrustSettings {
+	platform := runtime.GOOS == "darwin" || runtime.GOOS == "windows" || runtime.GOOS == "ios"
+	// Go 1.27's default replaces the platform verifier; x509sslcertoverrideplatform=0 keeps it.
+	ignored := platform && godebugValue(os.Getenv("GODEBUG"), "x509sslcertoverrideplatform") == "0"
+	s := doctor.TrustSettings{CertFile: os.Getenv("SSL_CERT_FILE"), CertDir: os.Getenv("SSL_CERT_DIR"), PlatformVerifier: platform && !ignored, SettingsIgnored: ignored}
+	if pool, err := x509.SystemCertPool(); err == nil {
+		s.RootCount = len(pool.Subjects()) //nolint:staticcheck // SA1019: the only count of the system pool, shown, never used to verify
+	}
+	return s
+}
+
+// godebugValue is the value GODEBUG gives key, as Go parses it (internal/godebug): the last
+// key=value entry wins, an entry without = is skipped, and a #bisect pattern is not part of the value.
+func godebugValue(godebug, key string) string {
+	v := ""
+	for _, kv := range strings.Split(godebug, ",") {
+		if k, val, ok := strings.Cut(kv, "="); ok && k == key {
+			v, _, _ = strings.Cut(val, "#")
+		}
+	}
+	return v
 }
 
 func warningFix(w Warning) string {
