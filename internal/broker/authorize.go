@@ -507,8 +507,9 @@ func (b *Broker) redirectError(w http.ResponseWriter, r *http.Request, redirect,
 	http.Redirect(w, r, withQuery(redirect, v), http.StatusFound) //nolint:gosec // G710: validated redirect URI
 }
 
-// noteIdPFailure logs and audits a failed IdP sign-in: the operator hint and the IdP's error code,
-// trace ID and correlation ID go to the log, never to the user. It returns the user's message.
+// noteIdPFailure logs and audits a failed IdP sign-in: the operator's fix (idp.Error.Fix: the IdP's
+// hint, else the alert's) and the IdP's error code, trace ID and correlation ID go to the log, never
+// to the user. It returns the user's message.
 func (b *Broker) noteIdPFailure(r *http.Request, clientID string, err error) string {
 	ctx := r.Context()
 	var ie *idp.Error
@@ -520,7 +521,7 @@ func (b *Broker) noteIdPFailure(r *http.Request, clientID string, err error) str
 		}
 		reason = "the IdP sign-in failed (" + ie.Class.String() + ")"
 		attrs := []any{"request_id", logging.RequestID(ctx), "error", err}
-		if fix := ie.Fix(); fix != "" { // the IdP's own hint, or else the alert's: Auth0's wrong secret has only the alert (#315)
+		if fix := ie.Fix(); fix != "" { // Auth0's wrong secret has only the alert's fix (#315)
 			attrs = append(attrs, "reason", fix)
 		}
 		if ie.Code != 0 {
@@ -540,8 +541,8 @@ func (b *Broker) noteIdPFailure(r *http.Request, clientID string, err error) str
 	return msg
 }
 
-// idpFailure explains an IdP error on a page; the operator hint and the IdP's error code, trace ID
-// and correlation ID go to the log (ADR-0021 §7), the failure to the audit stream.
+// idpFailure explains an IdP error on a page; the rest goes to the log and the audit stream as
+// noteIdPFailure says (ADR-0021 §7).
 func (b *Broker) idpFailure(w http.ResponseWriter, r *http.Request, clientID string, err error) {
 	msg := b.noteIdPFailure(r, clientID, err)
 	b.page(w, r, http.StatusBadGateway, msg, "Try again; if it keeps failing, tell your operator the reference below.")

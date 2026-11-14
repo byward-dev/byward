@@ -140,7 +140,11 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 		case errors.As(err, &ie) && ie.Class == idp.SignInAgain:
 			return end("the IdP ended the session; grant revoked", ie.OperatorHint)
 		case errors.As(err, &ie) && ie.Class == idp.Unavailable:
-			b.cfg.Log.WarnContext(ctx, "IdP refresh unavailable", "request_id", logging.RequestID(ctx), "error", err, "reason", ie.OperatorHint)
+			attrs := []any{"request_id", logging.RequestID(ctx), "error", err}
+			if fix := ie.Fix(); fix != "" { // as for a failed sign-in (noteIdPFailure)
+				attrs = append(attrs, "reason", fix)
+			}
+			b.cfg.Log.WarnContext(ctx, "IdP refresh unavailable", attrs...)
 			return nil, assertedClaims{}, time.Time{}, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the identity provider is unavailable; try again"}, false
 		default:
 			b.cfg.Log.ErrorContext(ctx, "IdP refresh failed", "request_id", logging.RequestID(ctx), "error", err)
