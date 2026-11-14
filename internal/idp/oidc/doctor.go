@@ -32,7 +32,7 @@ type Diagnosis struct {
 // the order is assumed. The IdP's error_description is never shown: an IdP may echo the request,
 // secret included, into it.
 func (p *Provider) DiagnoseClient(ctx context.Context, d Diagnosis) doctor.Result {
-	const name = "client credential"
+	name := doctor.CheckClientCredential
 	if p.cfg.ClientAuth == nil {
 		return result(name, doctor.Skip, "a public client has no credential to check", "")
 	}
@@ -96,8 +96,8 @@ func answer(ie *idp.Error) string {
 	return fmt.Sprintf("%s, HTTP %d", code, ie.Status)
 }
 
-func result(name string, s doctor.Status, msg, fix string) doctor.Result {
-	return doctor.Result{Class: doctor.ClassIdP, Name: name, Status: s, Message: msg, Fix: fix}
+func result(c doctor.Check, s doctor.Status, msg, fix string) doctor.Result {
+	return c.Result(s, msg, fix)
 }
 
 // unissued is 16 random bytes in hex: a code and a verifier no IdP has issued.

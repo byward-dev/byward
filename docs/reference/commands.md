@@ -75,7 +75,8 @@ fail  idp    entra app and credential: Entra rejected the client secret (AADSTS7
 | `proxy` | configuration | never fails; one warning per startup warning (an empty access gate, generic consent wording), and with the PostgreSQL store the reminder that every replica needs the same keys |
 | `proxy` | protected resource metadata (path-inserted) | `/.well-known/oauth-protected-resource<path>` answers 200 with `resource` equal to the public URL and our issuer first in `authorization_servers` |
 | `proxy` | protected resource metadata (root) | the same at `/.well-known/oauth-protected-resource` |
-| `proxy` | authorization server metadata (RFC 8414), (OpenID) | both documents name our issuer, `authorization_response_iss_parameter_supported: true`, `S256`, and a `revocation_endpoint` |
+| `proxy` | authorization server metadata (RFC 8414) | `/.well-known/oauth-authorization-server` names our issuer, `authorization_response_iss_parameter_supported: true`, `S256`, and a `revocation_endpoint` |
+| `proxy` | authorization server metadata (OpenID) | the same for `/.well-known/openid-configuration` |
 | `proxy` | unauthenticated MCP request | a POST without a token gets 401 whose `resource_metadata` is one of the URLs above and resolves |
 | `proxy` | Host header | no response was 421; a reverse proxy that changes `Host` shows up here |
 | `proxy` | identity assertion keys (discovery) | with an HTTP upstream: the OpenID discovery document names byward's issuer and a `jwks_uri` that serves the key signing assertions, as a verifier using only discovery (MCP Toolbox) needs |

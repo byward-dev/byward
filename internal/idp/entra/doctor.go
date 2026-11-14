@@ -59,12 +59,12 @@ func (p *Provider) Diagnose(ctx context.Context, d Diagnosis) []doctor.Result {
 	return append(out, p.manualChecks(d)...)
 }
 
-func result(name string, s doctor.Status, msg, fix string) doctor.Result {
-	return doctor.Result{Class: doctor.ClassIdP, Name: name, Status: s, Message: msg, Fix: fix}
+func result(c doctor.Check, s doctor.Status, msg, fix string) doctor.Result {
+	return c.Result(s, msg, fix)
 }
 
 func (p *Provider) diagnoseTenant(ctx context.Context, d Diagnosis) doctor.Result {
-	const name = "entra tenant"
+	name := doctor.CheckEntraTenant
 	var m struct {
 		Issuer string `json:"issuer"`
 	}
@@ -83,7 +83,7 @@ func (p *Provider) diagnoseTenant(ctx context.Context, d Diagnosis) doctor.Resul
 }
 
 func (p *Provider) diagnoseKeys(ctx context.Context) doctor.Result {
-	const name = "entra signing keys"
+	name := doctor.CheckEntraSigningKeys
 	var set jose.JSONWebKeySet
 	if err := p.fetch.GetJSON(ctx, p.endpoint("/discovery/v2.0/keys"), &set); err != nil {
 		return result(name, doctor.Fail, "cannot fetch the tenant's signing keys: "+err.Error(), reachFix)
@@ -99,7 +99,7 @@ func (p *Provider) diagnoseKeys(ctx context.Context) doctor.Result {
 // AADSTS501051 (assignment required, and the app holds no role on itself), means Entra accepted the
 // tenant, the client ID and the credential.
 func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, claims []doctor.Result) {
-	const name = "entra app and credential"
+	name := doctor.CheckEntraAppAndCredential
 	resource := appIDURIPrefix + p.cfg.ClientID
 	if p.cfg.Tenant == Organizations {
 		// Microsoft documents the client-credentials tenant only "in GUID or domain-name format",
@@ -127,7 +127,7 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 	switch ie.Code {
 	case codeAppNotAssigned:
 		return []doctor.Result{result(name, doctor.Pass, "Entra accepted the tenant, the client ID and the credential", "")},
-			[]doctor.Result{result("entra access token", doctor.Skip,
+			[]doctor.Result{result(doctor.CheckEntraAccessToken, doctor.Skip,
 				"Entra issued no token to check ("+code+"): assignment is required on the app, and the app holds no role on itself",
 				fmt.Sprintf(`check by hand: az ad app show --id %s --query "{version:api.requestedAccessTokenVersion, claims:optionalClaims.accessToken[].name}" must show version 2`, p.cfg.ClientID))}
 	case codeTenantNotFound:
@@ -203,7 +203,7 @@ func (p *Provider) diagnoseCredential(ctx context.Context, d Diagnosis) (cred, c
 // diagnoseToken checks the probe's token as the proxy checks its login tokens: signed by the
 // tenant, issuer, v2, audience = the client ID; and the idtyp claim app-only callers need (ADR-0022).
 func (p *Provider) diagnoseToken(ctx context.Context, raw string, d Diagnosis) []doctor.Result {
-	const name = "entra access token"
+	name := doctor.CheckEntraAccessToken
 	claims, err := idp.VerifySignature(ctx, raw, p.keys, []jose.SignatureAlgorithm{jose.RS256})
 	if err != nil {
 		return []doctor.Result{result(name, doctor.Fail, "the probe's token does not verify with the tenant's keys: "+err.Error(), reachFix)}
@@ -216,20 +216,20 @@ func (p *Provider) diagnoseToken(ctx context.Context, raw string, d Diagnosis) [
 	}
 	out := []doctor.Result{result(name, doctor.Pass, "v2 token for audience "+p.cfg.ClientID+", issuer "+idp.StringClaim(claims, "iss"), "")}
 	if idp.StringClaim(claims, "idtyp") == "app" {
-		return append(out, result("entra idtyp claim", doctor.Pass, "app-only tokens carry idtyp=app", ""))
+		return append(out, result(doctor.CheckEntraIdtypClaim, doctor.Pass, "app-only tokens carry idtyp=app", ""))
 	}
 	status, msg := doctor.Warn, "app-only tokens carry no idtyp=app, so app-only callers (ADR-0022) would be refused"
 	if len(d.AppRoles) > 0 {
 		status, msg = doctor.Fail, "app-only tokens are on, but Entra's carry no idtyp=app, so every app-only caller is refused"
 	}
-	return append(out, result("entra idtyp claim", status, msg,
+	return append(out, result(doctor.CheckEntraIdtypClaim, status, msg,
 		"add the idtyp optional claim to access tokens on the app registration (byward init entra prints the request)"))
 }
 
 // manualChecks are the app registration properties only Microsoft Graph can read.
 func (p *Provider) manualChecks(d Diagnosis) []doctor.Result {
 	noGraph := "byward does not call Microsoft Graph (ADR-0012 §8), so it cannot read this"
-	out := []doctor.Result{result("entra redirect URI", doctor.Skip,
+	out := []doctor.Result{result(doctor.CheckEntraRedirectURI, doctor.Skip,
 		noGraph+"; a wrong redirect URI fails the first sign-in with AADSTS50011",
 		fmt.Sprintf("check by hand: az ad app show --id %s --query web.redirectUris must list %s", p.cfg.ClientID, p.cfg.RedirectURL))}
 	roles := fmt.Sprintf(`check by hand: az ad app show --id %s --query "appRoles[].{value:value, members:allowedMemberTypes}"`, p.cfg.ClientID)
@@ -239,7 +239,7 @@ func (p *Provider) manualChecks(d Diagnosis) []doctor.Result {
 	if len(d.AppRoles) > 0 {
 		roles += "; app roles for app-only callers, with Application among their members: " + strings.Join(d.AppRoles, ", ")
 	}
-	return append(out, result("entra app roles", doctor.Skip, noGraph, roles))
+	return append(out, result(doctor.CheckEntraAppRoles, doctor.Skip, noGraph, roles))
 }
 
 // uploadFix uploads the public certificate from the file named by the certificate setting.
