@@ -665,6 +665,22 @@ func TestInternalListenerAcceptsListedHostsAndAuditsRejections(t *testing.T) {
 	}
 }
 
+// #325: a bare IPv6 entry in BYWARD_ALLOWED_HOSTS matches the Host header a client sends for it,
+// which always brackets the address; before, the public listener compared it unbracketed (421).
+func TestABareIPv6AllowedHostMatchesItsBracketedHostHeaderOnThePublicListener(t *testing.T) {
+	cfg := loadConfig(t, "https://mcp.example.com/mcp", "BYWARD_ALLOWED_HOSTS=::1,2001:db8::1")
+	s, err := New(cfg, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for host, want := range map[string]bool{"[::1]": true, "[2001:db8::1]": true, "[2001:DB8::1]": true, "[::2]": false} {
+		code, _ := getBody(t, s.Public.Handler, host, "/.well-known/oauth-protected-resource/mcp")
+		if wantCode := map[bool]int{true: http.StatusOK, false: http.StatusMisdirectedRequest}[want]; code != wantCode {
+			t.Errorf("Host %s on the public listener: %d, want %d", host, code, wantCode)
+		}
+	}
+}
+
 // ADR-0018 §7: BYWARD_UPSTREAM_HEADER_TIMEOUT reaches the relay; a stalled upstream is answered.
 func TestStalledUpstreamIsAnsweredAfterTheConfiguredHeaderTimeout(t *testing.T) {
 	up := fakeupstream.New()
