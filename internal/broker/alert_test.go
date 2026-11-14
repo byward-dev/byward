@@ -133,6 +133,10 @@ func TestIdPErrorsThatNeedTheOperatorRaiseAnAlert(t *testing.T) {
 			if !strings.Contains(line, `"reason":"`+c.fix+`"`) {
 				t.Errorf("the alert line's reason is not %q:\n%s", c.fix, logs)
 			}
+			// A failed sign-in's own line names the same fix (#315: it was empty when only the alert had one).
+			if failed := regexp.MustCompile(`(?m)^.*"msg":"IdP sign-in failed".*$`).FindString(logs); op == "callback" && !strings.Contains(failed, `"reason":"`+c.fix+`"`) {
+				t.Errorf("the sign-in failure line's reason is not %q:\n%s", c.fix, logs)
+			}
 		})
 	}
 }

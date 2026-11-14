@@ -225,7 +225,7 @@ func TestTokenErrorsAreClassified(t *testing.T) {
 	}{
 		"invalid_grant":  {&fakeidp.RefreshTokenExpired, idp.SignInAgain, ""},
 		"invalid_client": {&fakeidp.InvalidClientSecret, idp.Unavailable, idp.AlertCredentialRejected},
-		// Auth0 answers a wrong secret access_denied 401 (#315); a 403 access_denied is no refusal of the credential.
+		// Auth0 answers a wrong secret access_denied 401 (#315); an access_denied with any other status is no refusal of the credential.
 		"access_denied 401, Auth0's wrong secret": {&fakeidp.Failure{Status: 401, Error: "access_denied", Description: "Unauthorized"}, idp.Fatal, idp.AlertCredentialRejected},
 		"access_denied 403":                       {&fakeidp.Failure{Status: 403, Error: "access_denied"}, idp.Fatal, ""},
 		"access_denied 400":                       {&fakeidp.Failure{Status: 400, Error: "access_denied"}, idp.Fatal, ""},

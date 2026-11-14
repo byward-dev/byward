@@ -159,20 +159,30 @@ func TestPromptNoneAnswersTheIdPsFailureAtTheRedirect(t *testing.T) {
 		name    string
 		idp     fakeidp.Option
 		want    string
-		audited bool // logged and audited as an IdP sign-in failure
+		audited string // the reason of the IdP sign-in failure logged and audited, if one is
+		redeem  error  // what the IdP's code redemption fails with, if it does
+		alerts  string // the operator alerts raised
 	}{
-		{"no IdP session passes login_required through", nil, "login_required", false},
-		{"the IdP needing interaction passes interaction_required through", fakeidp.WithSilentError("interaction_required"), "interaction_required", false},
-		{"the IdP needing an account choice passes account_selection_required through", fakeidp.WithSilentError("account_selection_required"), "account_selection_required", false},
-		{"the IdP needing its own consent passes consent_required through", fakeidp.WithSilentError("consent_required"), "consent_required", false},
-		{"the IdP refusing the user passes access_denied through", fakeidp.WithSilentError("access_denied"), "access_denied", false},
-		{"the IdP being unavailable is temporarily_unavailable", fakeidp.WithSilentError("temporarily_unavailable"), "temporarily_unavailable", true},
-		{"any other IdP error is server_error", fakeidp.WithSilentError("invalid_request"), "server_error", true},
+		{"no IdP session passes login_required through", nil, "login_required", "", nil, "[]"},
+		{"the IdP needing interaction passes interaction_required through", fakeidp.WithSilentError("interaction_required"), "interaction_required", "", nil, "[]"},
+		{"the IdP needing an account choice passes account_selection_required through", fakeidp.WithSilentError("account_selection_required"), "account_selection_required", "", nil, "[]"},
+		{"the IdP needing its own consent passes consent_required through", fakeidp.WithSilentError("consent_required"), "consent_required", "", nil, "[]"},
+		{"the IdP refusing the user passes access_denied through", fakeidp.WithSilentError("access_denied"), "access_denied", "", nil, "[]"},
+		{"the IdP being unavailable is temporarily_unavailable", fakeidp.WithSilentError("temporarily_unavailable"), "temporarily_unavailable", "the IdP sign-in failed (unavailable)", nil, "[]"},
+		{"any other IdP error is server_error", fakeidp.WithSilentError("invalid_request"), "server_error", "the IdP sign-in failed (fatal)", nil, "[]"},
+		// Auth0 answers its wrong secret access_denied 401 (#315): no refusal of the user, so it is not passed through.
+		{"an access_denied refusing the proxy's credential is server_error", fakeidp.WithSilentSession(), "server_error", "the IdP sign-in failed (fatal)",
+			&idp.Error{Class: idp.Fatal, OAuth: "access_denied", Status: 401, Alert: idp.AlertCredentialRejected}, "[callback credential_rejected]"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			counted := &consentOutcomes{}
 			e := newEnv(t, withRemember(t, counted))
 			h := e.remember(t, nil)
+			if tc.redeem != nil { // after remember, whose own sign-in must succeed
+				cfg := e.cfg
+				cfg.IdP = failingCallback{IdP: cfg.IdP, err: tc.redeem}
+				e.start(t, cfg)
+			}
 			if tc.idp != nil {
 				e.fake.Set(tc.idp)
 			}
@@ -180,8 +190,8 @@ func TestPromptNoneAnswersTheIdPsFailureAtTheRedirect(t *testing.T) {
 			if got := answerOf(t, e.finish(t, e.authorizeWith(t, silent(nil), h))); got != refused(e, tc.want) {
 				t.Fatalf("answer %+v, want %s with state and iss", got, tc.want)
 			}
-			if got := e.auditEvents(t, "login")[logins:]; (len(got) == 1 && got[0]["outcome"] == "failure") != tc.audited || len(got) > 1 {
-				t.Fatalf("login records %v, want an IdP failure audited: %v", got, tc.audited)
+			if got := e.auditEvents(t, "login")[logins:]; tc.audited == "" && len(got) != 0 || tc.audited != "" && (len(got) != 1 || got[0]["outcome"] != "failure" || got[0]["reason"] != tc.audited) {
+				t.Fatalf("login records %v, want an IdP failure audited as %q", got, tc.audited)
 			}
 			if len(e.st.GrantIDs()) != grants {
 				t.Fatal("a grant was created")
@@ -190,29 +200,10 @@ func TestPromptNoneAnswersTheIdPsFailureAtTheRedirect(t *testing.T) {
 			if got := counted.list()[len(before):]; !slices.Equal(got, []string{" silent_refused"}) {
 				t.Fatalf("consent outcomes %v, want only a silent refusal with no trust", got)
 			}
+			if fmt.Sprint(e.alerts) != tc.alerts {
+				t.Fatalf("alerts = %v, want %s", e.alerts, tc.alerts)
+			}
 		})
-	}
-}
-
-// A silent sign-in whose IdP refuses the proxy's own credential with access_denied (Auth0's wrong
-// secret, #315) is no silent refusal of the user: the client gets server_error, and the failure is
-// audited as an IdP sign-in failure.
-func TestPromptNoneDoesNotPassOnAnAccessDeniedThatRefusesTheProxysCredential(t *testing.T) {
-	e := newEnv(t, withRemember(t, nil))
-	h := e.remember(t, nil) // a real sign-in, before the IdP's code redemption fails
-	cfg := e.cfg
-	cfg.IdP = failingCallback{IdP: cfg.IdP, err: &idp.Error{Class: idp.Fatal, OAuth: "access_denied", Status: 401, Alert: idp.AlertCredentialRejected}}
-	e.start(t, cfg)
-	e.fake.Set(fakeidp.WithSilentSession())
-	logins := len(e.auditEvents(t, "login"))
-	if got := answerOf(t, e.finish(t, e.authorizeWith(t, silent(nil), h))); got != refused(e, "server_error") {
-		t.Fatalf("answer %+v, want server_error, not the IdP's access_denied", got)
-	}
-	if got := e.auditEvents(t, "login")[logins:]; len(got) != 1 || got[0]["outcome"] != "failure" || got[0]["reason"] == "the user declined to sign in" {
-		t.Fatalf("login records %v, want one IdP failure that does not blame the user", got)
-	}
-	if fmt.Sprint(e.alerts) != "[callback credential_rejected]" {
-		t.Fatalf("alerts = %v, want the credential rejection", e.alerts)
 	}
 }
 

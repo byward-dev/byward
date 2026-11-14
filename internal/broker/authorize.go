@@ -519,7 +519,10 @@ func (b *Broker) noteIdPFailure(r *http.Request, clientID string, err error) str
 			msg = ie.UserMessage
 		}
 		reason = "the IdP sign-in failed (" + ie.Class.String() + ")"
-		attrs := []any{"request_id", logging.RequestID(ctx), "error", err, "reason", ie.OperatorHint}
+		attrs := []any{"request_id", logging.RequestID(ctx), "error", err}
+		if fix := ie.Fix(); fix != "" { // the IdP's own hint, or else the alert's: Auth0's wrong secret has only the alert (#315)
+			attrs = append(attrs, "reason", fix)
+		}
 		if ie.Code != 0 {
 			attrs = append(attrs, "idp_error_code", ie.Code)
 		}
