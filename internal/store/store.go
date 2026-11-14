@@ -279,6 +279,11 @@ type Consent struct {
 	Scopes     []string
 	ApprovedAt time.Time
 	ExpiresAt  time.Time
+	// RecordsLifetime marks a consent written under the rule that Scopes holds offline_access
+	// exactly when the page said "up to 30 days" (#287, #363). A consent without it is from before
+	// that rule, or was rewritten by a replica on an older binary during a rolling upgrade, and its
+	// offline_access does not count.
+	RecordsLifetime bool
 }
 
 // Consents is the remembered-consent registry (ADR-0010 §2-3). Revoking forgets, in the same

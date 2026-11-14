@@ -217,6 +217,8 @@ the client and redirect URI again. This is accepted behaviour, not a gap: no tok
   remembered; for a client that registered the `refresh_token` grant the approved scopes must include
   `offline_access`, which an Allow records exactly when the page said "up to 30 days" (never under
   "up to 1 hour", even when requested), so a consent given under "up to 1 hour" asks again (#287).
+  In a consent from before that rule, or rewritten by an older replica, `offline_access` does not
+  count (#363).
   `prompt=consent` forces the page.
 - Before the sign-in the user is unknown, so a sealed `__Host-` cookie (purpose `consent-hint`)
   names the user the browser last signed in as. It only lets `/authorize` skip the page. The
