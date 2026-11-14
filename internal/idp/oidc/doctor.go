@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/url"
 	"strings"
 
@@ -41,13 +43,13 @@ func (p *Provider) DiagnoseClient(ctx context.Context, d Diagnosis) doctor.Resul
 	_, err = p.token(ctx, m, url.Values{"grant_type": {"authorization_code"}, "code": {"byward-doctor-probe-" + unissued()},
 		"redirect_uri": {p.cfg.RedirectURL}, "code_verifier": {unissued() + unissued()}})
 	var ie *idp.Error
-	var transport *url.Error
+	var transport net.Error // the http.Client's own error, a body cut off or timed out, envproxy.Error
 	switch {
 	case err == nil:
 		return result(name, doctor.Warn, "the IdP issued tokens for a made-up authorization code", "check the IdP's token endpoint: it must refuse unknown codes")
 	case errors.Is(err, idp.ErrCredential):
 		return result(name, doctor.Fail, "the proxy cannot make its credential: "+err.Error(), "check "+d.CredentialSetting)
-	case errors.As(err, &transport) || !errors.As(err, &ie): // no answer: the http.Client's own error
+	case errors.As(err, &transport) || errors.Is(err, io.ErrUnexpectedEOF) || !errors.As(err, &ie): // no whole answer
 		return result(name, doctor.Fail, "the IdP's token endpoint did not answer: "+err.Error(), "check that the proxy's host reaches "+m.TokenEndpoint)
 	case ie.OAuth == "":
 		return result(name, doctor.Fail, "the IdP's token endpoint gave no OAuth answer: "+err.Error(), "check "+m.TokenEndpoint+": it must be the IdP's token endpoint")

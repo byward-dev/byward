@@ -2,6 +2,7 @@ package oidc
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -146,7 +147,9 @@ func TestDoctorReportsAClientCheckItCouldNotMake(t *testing.T) {
 		{"a credential the proxy cannot make", func(e *env) { e.p.cfg.ClientAuth = idp.AssertionFile(t.TempDir() + "/missing") }, doctor.Fail,
 			"cannot make its credential", "check BYWARD_OIDC_CLIENT_SECRET_FILE"},
 		{"the token endpoint is unreachable", func(e *env) { e.ready(t); e.p.fetch.Client = &http.Client{Transport: refused{}} }, doctor.Fail,
-			"did not answer", "/token"}, // the token endpoint, not the issuer
+			"did not answer", "check that the proxy's host reaches http://"},
+		{"an answer cut off mid-body", func(e *env) { e.ready(t); e.p.fetch.Client = &http.Client{Transport: cutOff{}} }, doctor.Fail,
+			"did not answer", "check that the proxy's host reaches http://"},
 		{"an answer that is not JSON", func(e *env) {
 			e.ready(t)
 			e.p.fetch.Client = &http.Client{Transport: answering{status: 404, body: "<html>not here</html>"}}
@@ -167,7 +170,11 @@ func TestDoctorReportsAClientCheckItCouldNotMake(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t, Config{})
 			tc.setup(e)
-			wantResult(t, e.p.DiagnoseClient(context.Background(), secretDiagnosis), tc.status, tc.message, tc.fix)
+			r := e.p.DiagnoseClient(context.Background(), secretDiagnosis)
+			wantResult(t, r, tc.status, tc.message, tc.fix)
+			if strings.Contains(tc.fix, "reaches") && !strings.HasSuffix(r.Fix, "/token") {
+				t.Fatalf("fix %q; want it to name the token endpoint, not the issuer", r.Fix)
+			}
 		})
 	}
 }
@@ -213,6 +220,19 @@ func (a answering) RoundTrip(r *http.Request) (*http.Response, error) {
 	res.StatusCode = a.status
 	return res, nil
 }
+
+// cutOff answers with headers, then a body that breaks off.
+type cutOff struct{}
+
+func (cutOff) RoundTrip(r *http.Request) (*http.Response, error) {
+	res := jsonResponse(r, "")
+	res.StatusCode, res.Body = http.StatusBadRequest, io.NopCloser(io.MultiReader(strings.NewReader(`{"error":"inv`), errReader{io.ErrUnexpectedEOF}))
+	return res, nil
+}
+
+type errReader struct{ err error }
+
+func (e errReader) Read([]byte) (int, error) { return 0, e.err }
 
 // recordForm records the form of each token request and answers invalid_grant.
 type recordForm struct{ forms *[]url.Values }
