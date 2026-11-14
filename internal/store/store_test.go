@@ -6,8 +6,9 @@ import (
 	"time"
 )
 
-// The ErrInvalid rules every adapter applies are the store's own: each field the contract names
-// makes the value invalid on its own, and a value with all of them right is valid.
+// The ErrInvalid rules every adapter applies are the store's own: each field the contract names (or
+// argument, for CheckSpend) makes the value invalid on its own, and a value with all of them right
+// is valid.
 func TestTheInputRulesRefuseEachInvalidFieldAndAcceptAValidValue(t *testing.T) {
 	t0 := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
 	grant := func(f func(*Grant)) error {
@@ -52,7 +53,7 @@ func TestTheInputRulesRefuseEachInvalidFieldAndAcceptAValidValue(t *testing.T) {
 		{"a consent without a resource", consent(func(c *Consent) { c.Key.Resource = "" }), false},
 		{"a consent without scopes", consent(func(c *Consent) { c.Scopes = nil }), false},
 		{"a consent with empty scopes", consent(func(c *Consent) { c.Scopes = []string{} }), false},
-		{"a consent expiring when approved", consent(func(c *Consent) { c.ExpiresAt = c.ApprovedAt }), false},
+		{"a consent expiring when it is approved", consent(func(c *Consent) { c.ExpiresAt = c.ApprovedAt }), false},
 		{"a consent expiring before it is approved", consent(func(c *Consent) { c.ExpiresAt = c.ApprovedAt.Add(-time.Second) }), false},
 		{"spent until later", CheckSpend(t0, t0.Add(time.Second)), true},
 		{"spent until now", CheckSpend(t0, t0), false},

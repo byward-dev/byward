@@ -18,9 +18,11 @@ var (
 	ErrConsumed = errors.New("store: already consumed")
 	// ErrExists: a grant ID, a grant's code or a refresh-token hash is already stored.
 	ErrExists = errors.New("store: already exists")
-	// ErrInvalid: an argument the contract refuses, such as a grant, client or consent missing a field
-	// or a lifetime (CheckNew), a spend expiring by now (CheckSpend), or a subject cut-off without a
-	// subject. An empty subject in a Revocation must never reach the deny list.
+	// ErrInvalid: an argument the contract refuses: a grant, client or consent missing a field or a
+	// lifetime (CheckNew), a spend expiring by now (CheckSpend), an UpdateGrant expiry not after the
+	// grant's creation, empty IdP tokens for SetIdPTokens, a rotation whose next token is for another
+	// grant, or a subject cut-off without a subject. An empty subject in a Revocation must never reach
+	// the deny list.
 	ErrInvalid = errors.New("store: invalid argument")
 	// ErrRevoked: CreateGrant for a subject whose retained cut-off covers the grant (a login that
 	// was in flight when revoke-user ran).

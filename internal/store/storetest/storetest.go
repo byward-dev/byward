@@ -38,7 +38,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		{"UnknownGrantIsNotFound", unknownGrantIsNotFound},
 		{"IncompleteGrantsAndCutOffsAreInvalid", incompleteGrantsAndCutOffsAreInvalid},
 		{"StoredValuesAreCopies", storedValuesAreCopies},
-		{"NilScopesComeBackNil", nilScopesComeBackNil},
+		{"NilSlicesComeBackNil", nilSlicesComeBackNil},
 		{"CodeIsConsumedOnce", codeIsConsumedOnce},
 		{"ConcurrentConsumeHasOneWinner", concurrentConsumeHasOneWinner},
 		{"ALoginIsSpentOnceUntilItsExpiry", spentOnceUntilItsExpiry(store.Store.SpendLogin)},
@@ -223,7 +223,7 @@ func incompleteGrantsAndCutOffsAreInvalid(t *testing.T, s store.Store) {
 
 // A nil slice is returned as nil, not as an empty one: callers that compare with reflect.DeepEqual
 // or encode JSON (null versus []) see the same value from every adapter.
-func nilScopesComeBackNil(t *testing.T, s store.Store) {
+func nilSlicesComeBackNil(t *testing.T, s store.Store) {
 	g := grant("g1", "tid:alice")
 	g.Scopes, g.IdPTokens = nil, nil
 	if created := mustCreate(t, s, g); created.Scopes != nil || created.IdPTokens != nil {
@@ -246,6 +246,10 @@ func storedValuesAreCopies(t *testing.T, s store.Store) {
 	g.Scopes[0], g.IdPTokens[0] = "changed", 'X'
 	if created.Scopes[0] != "mcp" || created.IdPTokens[0] != 's' {
 		t.Fatal("changing the caller's grant after CreateGrant changed the grant it returned")
+	}
+	created.Scopes[0], created.IdPTokens[0] = "changed", 'X'
+	if stored, _ := s.Grant(ctx, "g1"); stored.Scopes[0] != "mcp" || stored.IdPTokens[0] != 's' {
+		t.Fatal("changing the grant CreateGrant returned changed the stored one")
 	}
 	got, _ := s.Grant(ctx, "g1")
 	if got.Scopes[0] != "mcp" || got.IdPTokens[0] != 's' {
@@ -1038,7 +1042,7 @@ func clientIDsAreUniqueAndIncompleteClientsInvalid(t *testing.T, s store.Store) 
 		wantErr(t, name, s.CreateClient(ctx, c, 0), store.ErrInvalid)
 	}
 	_, err := s.Client(ctx, "x")
-	wantErr(t, "a refused client", err, store.ErrNotFound)
+	wantErr(t, "the refused client", err, store.ErrNotFound)
 }
 
 // Only clients that are still live at the new client's CreatedAt count towards the cap.
@@ -1201,7 +1205,7 @@ func incompleteConsentsAreInvalid(t *testing.T, s store.Store) {
 		wantErr(t, name, s.RememberConsent(ctx, c), store.ErrInvalid)
 	}
 	_, err := s.Consent(ctx, consent("g1", "tid:alice", "https://app.example/cb").Key)
-	wantErr(t, "a refused consent", err, store.ErrNotFound)
+	wantErr(t, "the refused consent", err, store.ErrNotFound)
 }
 
 func revokeSubjectAndRevokeAllForgetConsentsBeforeTheCutOff(t *testing.T, s store.Store) {
