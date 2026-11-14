@@ -99,7 +99,7 @@ func servingCertWarnings(cfg *config.Config, p *servingcert.Pair, now time.Time)
 // servingCertExpiry is the "TLS certificate expiry" check: it names the chain's certificate that
 // expires first.
 func servingCertExpiry(p *servingcert.Pair, now time.Time) doctor.Result {
-	r := doctor.Result{Class: doctor.ClassProxy, Name: "TLS certificate expiry"}
+	r := doctor.CheckTLSCertificateExpiry.NewResult()
 	name, notAfter := p.FirstExpiry()
 	err := p.Validity(now)
 	at, notYet := servingcert.ServableAt(err)
@@ -137,7 +137,7 @@ func inDays(notAfter, now time.Time) string {
 // neither the public URL's host nor any allowed host. It is only a warning: an ingress may verify
 // the proxy under an internal name, such as a Kubernetes service's.
 func servingCertNames(cfg *config.Config, p *servingcert.Pair) doctor.Result {
-	r := doctor.Result{Class: doctor.ClassProxy, Name: "TLS certificate names"}
+	r := doctor.CheckTLSCertificateNames.NewResult()
 	hosts := []string{cfg.PublicURL.Hostname()}
 	for _, h := range cfg.AllowedHosts {
 		hosts = append(hosts, config.Hostname(h))

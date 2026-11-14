@@ -38,6 +38,7 @@ func exercise(m *Metrics) {
 	m.CIMDFetch("ok")
 	m.DCRRegistration("registered")
 	m.Consent("verified", "remembered")
+	m.Downstream("issued")
 	m.AppToken("accepted")
 }
 
@@ -126,6 +127,7 @@ func TestNilMetricsIsSafeToCall(t *testing.T) {
 	m.CIMDFetch("ok")
 	m.DCRRegistration("registered")
 	m.Consent("verified", "remembered")
+	m.Downstream("issued")
 	m.AppToken("accepted")
 }
 

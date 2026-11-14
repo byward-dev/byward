@@ -229,7 +229,7 @@ func oidcClientAuth(cfg *config.Config) (idp.ClientAuth, error) {
 // diagnoseDiscovery is doctor's check of an oidc IdP: discovery, and that its issuer matches
 // (ADR-0011 §7).
 func diagnoseDiscovery(ctx context.Context, p idp.Readiness, issuer string) []doctor.Result {
-	r := doctor.Result{Class: doctor.ClassIdP, Name: "discovery"}
+	r := doctor.CheckDiscovery.NewResult()
 	if err := p.Ready(ctx); err != nil {
 		r.Status, r.Message = doctor.Fail, "the IdP's discovery document at "+issuer+" failed: "+err.Error()
 		r.Fix = "BYWARD_OIDC_ISSUER: set it exactly as the IdP's discovery document states its issuer, over https"

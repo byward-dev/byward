@@ -38,7 +38,7 @@ type TrustSettings struct {
 // x509sslcertoverrideplatform=0: each is a warning. It does not read SSL_CERT_DIR's entries. read
 // reads a file.
 func TrustStore(s TrustSettings, read func(string) ([]byte, error)) Result {
-	r := Result{Class: ClassProxy, Name: "trust store", Status: Pass}
+	r := CheckTrustStore.Result(Pass, "", "")
 	if s.SettingsIgnored {
 		r.Message = "roots from the system's verifier"
 		if s.CertFile != "" || s.CertDir != "" {
