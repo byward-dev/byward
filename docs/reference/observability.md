@@ -196,9 +196,9 @@ IdP sign-in failures log the IdP's error code (`idp_error_code`, the AADSTS numb
 `correlation_id`; with Entra, `correlation_id` equals our `request_id`, so a user's reference finds both logs.
 
 An IdP error counted in `byward_idp_alerts_total` is also logged once, at error level, as its own line
-`IdP alert: the operator must act` with `idp`, `operation`, `alert` (the reason, as in the metric) and the fix in `reason`
+`IdP alert: the operator must act` with `request_id`, `idp`, `operation`, `alert` (the reason, as in the metric) and the fix in `reason`
 (so `reason` here holds the fix, not a reason code), for example
-`{"level":"ERROR","msg":"IdP alert: the operator must act","idp":"entra","operation":"refresh","alert":"credential_rejected","reason":"<the fix>"}`. For
+`{"level":"ERROR","msg":"IdP alert: the operator must act","request_id":"<id>","idp":"entra","operation":"refresh","alert":"credential_rejected","reason":"<the fix>"}`. For
 On-Behalf-Of that is once per exchange with the IdP, however many requests were waiting on it; each refused request's
 line, and each refused token-socket ask's line, also carries `alert`. A log-based alert can match on that message or on `alert` being present. An error in the
 IdP's callback query never counts: a browser can forge it, so only the token endpoint's answer can say the proxy's
