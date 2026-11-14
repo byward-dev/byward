@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -79,21 +80,34 @@ func stdioConfig(cfg *config.Config, name string, log *slog.Logger, o Observabil
 // starts nothing; processes start per user (ADR-0003).
 func newStdioManager(cfg *config.Config, sc stdio.Config) (*stdio.Manager, error) {
 	m, err := stdio.New(sc)
-	if err != nil {
+	switch {
+	case errors.Is(err, stdio.ErrTempDirTooLong): // its fix is TMPDIR, which it names
+		return nil, fmt.Errorf("stdio upstream (BYWARD_OBO_SCOPES): %w", err)
+	case err != nil:
 		return nil, fmt.Errorf("stdio upstream (BYWARD_UPSTREAM_COMMAND, BYWARD_UPSTREAM_ENV_FILE): %w", err)
 	}
 	return m, nil
 }
 
 // checkUpstream is what check --offline and doctor ask of the upstream without reaching it: a stdio
-// command that can be found, with the same check startup makes. An HTTP upstream has nothing to
-// check offline.
+// command that can be found and, with On-Behalf-Of, a temporary directory short enough for the
+// token socket, with the same checks startup makes. An HTTP upstream has nothing to check offline.
 func checkUpstream(cfg *config.Config) error {
 	if cfg.UpstreamCommand == nil {
 		return nil
 	}
-	_, err := newStdioManager(cfg, stdio.Config{Name: stdioName(cfg), Command: cfg.UpstreamCommand, Env: cfg.UpstreamEnv})
+	sc := stdio.Config{Name: stdioName(cfg), Command: cfg.UpstreamCommand, Env: cfg.UpstreamEnv}
+	if len(cfg.OBOScopes) > 0 {
+		sc.DownstreamToken = offlineDownstreamToken
+	}
+	_, err := newStdioManager(cfg, sc)
 	return err
+}
+
+// offlineDownstreamToken turns the token socket on for checkUpstream, so its path is checked as at
+// startup; checkUpstream starts no process, so nothing asks it.
+func offlineDownstreamToken(context.Context, stdio.Identity) stdio.DownstreamToken {
+	return stdio.DownstreamToken{Error: "unavailable"}
 }
 
 // upstreamResult tells doctor's reader which upstream is configured; doctor checks the proxy in front
