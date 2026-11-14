@@ -474,11 +474,12 @@ func TestCorruptCounterFileFailsOpen(t *testing.T) {
 }
 
 func TestCollectDropsExpiredSpentRecords(t *testing.T) {
-	storetest.CollectDropsExpiredSpent(t, func(t *testing.T) store.Store {
-		return open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
-	}, func(t *testing.T, s store.Store, kind storetest.Spent) (n int) {
-		must(t, s.(*Store).db.QueryRow("SELECT count(*) FROM "+string(kind)).Scan(&n))
-		return n
+	storetest.CollectDropsExpiredSpent(t, func(t *testing.T) (store.Store, func(storetest.Spent) int) {
+		s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
+		return s, func(kind storetest.Spent) (n int) {
+			must(t, s.db.QueryRow("SELECT count(*) FROM "+string(kind)).Scan(&n))
+			return n
+		}
 	})
 }
 

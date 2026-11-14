@@ -311,12 +311,11 @@ func onlyCommittedWritesAdvanceTheWriteSequence(t *testing.T, srv *server) {
 }
 
 func collectDropsExpiredSpentRecords(t *testing.T, srv *server) {
-	conns := map[store.Store]*pgx.Conn{}
-	storetest.CollectDropsExpiredSpent(t, func(t *testing.T) store.Store {
+	storetest.CollectDropsExpiredSpent(t, func(t *testing.T) (store.Store, func(storetest.Spent) int) {
 		s, db := srv.open(t)
-		conns[s] = srv.conn(t, db)
-		return s
-	}, func(t *testing.T, s store.Store, kind storetest.Spent) int { return count(t, conns[s], string(kind)) })
+		c := srv.conn(t, db)
+		return s, func(kind storetest.Spent) int { return count(t, c, string(kind)) }
+	})
 }
 
 // While another replica collects (it holds the collect lock), Collect returns at once having
