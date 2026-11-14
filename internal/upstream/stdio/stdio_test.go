@@ -452,7 +452,7 @@ func TestGetRequiresAnIdentity(t *testing.T) {
 		"NUL in subject":        {Subject: "a\x00b", Issuer: "i"},
 		"NUL in issuer":         {Subject: "s", Issuer: "a\x00b"},
 		"NUL in grant":          {Subject: "s", Issuer: "i", Grant: "g\x00x"},
-		"NUL in client":         {Subject: "s", Issuer: "i", Client: "c\x00x"},
+		"NUL in MCP client":     {Subject: "s", Issuer: "i", Client: "c\x00x"},
 		"NUL in principal type": {Subject: "s", Issuer: "i", PrincipalType: "user\x00x"},
 	}
 	for name, id := range cases {
