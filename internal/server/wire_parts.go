@@ -155,14 +155,19 @@ func secretCheck(cfg *config.Config) func(string) error {
 	return secretfile.Check
 }
 
-// looseSecretFiles is one error per secret file other users can read, named by its setting, and
-// for the federated token file (read at each request, not at start) one if it is missing.
+// looseSecretFiles is one error per secret file other users can read (the TLS key's included),
+// named by its setting, and for the federated token file (read at each request, not at start) one if it is missing.
 func looseSecretFiles(cfg *config.Config) []error {
 	check := secretCheck(cfg)
 	var loose []error
 	for _, f := range cfg.Values.SecretFiles() {
 		if err := check(f.Path); err != nil {
 			loose = append(loose, fmt.Errorf("%s: %w", f.From, err))
+		}
+	}
+	if f := cfg.TLSKeyFile; f != "" {
+		if err := check(f); err != nil {
+			loose = append(loose, fmt.Errorf("%s: %w", tlsKeyEnv, err))
 		}
 	}
 	// A federated token is a credential too, though it is read at each request, not at start.

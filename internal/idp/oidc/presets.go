@@ -27,6 +27,10 @@ type Preset struct {
 	EmailVerifiedAsString bool
 	// CheckIssuer rejects issuers this IdP does not mean for third-party validation.
 	CheckIssuer func(issuer string) error
+	// ClientCheckedFirst: measured that the token endpoint authenticates the client before it looks
+	// at the code, so doctor's made-up code tells a refused credential from an accepted one
+	// (invalid_grant). The measurements, 2026-11-13, are on each preset.
+	ClientCheckedFirst bool
 }
 
 // Presets by name; "" is plain OIDC.
@@ -55,13 +59,19 @@ var Presets = map[string]Preset{
 			return ""
 		},
 		EmailVerifiedAsString: true,
+		// A web client: a wrong secret is invalid_client 401, a made-up code with the right one
+		// invalid_grant 400 (measured 2026-11-13).
+		ClientCheckedFirst: true,
 	},
 	// Okta: only custom authorization servers (https://{domain}/oauth2/{id}) issue tokens meant for
 	// our validation (ADR-0011); refresh needs offline_access (developer.okta.com, 2026-11-06).
+	// Okta answers a bad client assertion invalid_client 401 and a made-up code with a good one
+	// invalid_grant (measured 2026-11-13).
 	"okta": {
-		Name:   "okta",
-		Label:  "Okta",
-		Scopes: []string{"profile", "email", "offline_access"},
+		Name:               "okta",
+		Label:              "Okta",
+		ClientCheckedFirst: true,
+		Scopes:             []string{"profile", "email", "offline_access"},
 		CheckIssuer: func(iss string) error {
 			if !strings.Contains(iss, "/oauth2/") {
 				return errors.New("okta: use a custom authorization server issuer (https://{domain}/oauth2/{id}), not the org authorization server")
@@ -71,10 +81,13 @@ var Presets = map[string]Preset{
 	},
 	// Auth0: the issuer ends in a slash (ADR-0011); refresh needs offline_access (auth0.com docs,
 	// 2026-11-06).
+	// A wrong secret is access_denied 401 ("Unauthorized"), a made-up code with the right one
+	// invalid_grant 403 (Free plan, EU tenant, measured 2026-11-13).
 	"auth0": {
-		Name:   "auth0",
-		Label:  "Auth0",
-		Scopes: []string{"profile", "email", "offline_access"},
+		Name:               "auth0",
+		Label:              "Auth0",
+		ClientCheckedFirst: true,
+		Scopes:             []string{"profile", "email", "offline_access"},
 		CheckIssuer: func(iss string) error {
 			if !strings.HasSuffix(iss, "/") {
 				return errors.New("auth0: the issuer ends with a slash, e.g. https://{tenant}.auth0.com/")
@@ -82,11 +95,14 @@ var Presets = map[string]Preset{
 			return nil
 		},
 	},
-	// Keycloak: the issuer is {base}/realms/{realm} (ADR-0011).
+	// Keycloak: the issuer is {base}/realms/{realm} (ADR-0011). It answers a wrong secret
+	// unauthorized_client 401, a wrong key invalid_client 400, and a made-up code with a right one
+	// invalid_grant (26.8.0, measured 2026-11-13; TestIntegrationKeycloakDoctorChecksTheClientCredential).
 	"keycloak": {
-		Name:   "keycloak",
-		Label:  "Keycloak",
-		Scopes: []string{"profile", "email"},
+		Name:               "keycloak",
+		Label:              "Keycloak",
+		ClientCheckedFirst: true,
+		Scopes:             []string{"profile", "email"},
 		CheckIssuer: func(iss string) error {
 			if !strings.Contains(iss, "/realms/") {
 				return errors.New("keycloak: the issuer is {base}/realms/{realm}")

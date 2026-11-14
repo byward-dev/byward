@@ -19,6 +19,8 @@ Precedence: flag > environment > default. Secrets are read only from files.
 | `--stdio-max-processes-per-user` | `BYWARD_STDIO_MAX_PROCESSES_PER_USER` | 8 | stdio upstream: most upstream processes one user has alive at once; when full, that user's least recently used idle one is stopped |
 | `--stdio-stream-idle-timeout` | `BYWARD_STDIO_STREAM_IDLE_TIMEOUT` | 10m | stdio upstream: a process kept busy only by open streams (a legacy GET stream, a subscriptions/listen) that has had no traffic for this long can be stopped when a process cap is full; 0 keeps such processes however long they are quiet, otherwise at least 1m |
 | `--listen` | `BYWARD_LISTEN` | 127.0.0.1:8080 | address to listen on; public addresses only when configured |
+| `--tls-cert-file` | `BYWARD_TLS_CERT_FILE` | — | serve TLS on the listener: an absolute path to the PEM certificate, followed by any intermediates; with tls-key-file; needs an https public-url; a replaced file is served from the next connection on, with no restart (docs/how-to/tls.md) |
+| `--tls-key-file` | `BYWARD_TLS_KEY_FILE` | — | serve TLS on the listener: an absolute path to the certificate's unencrypted PEM private key, readable by the proxy's user alone or on a read-only mount; with tls-cert-file (docs/how-to/tls.md) |
 | `--allowed-origins` | `BYWARD_ALLOWED_ORIGINS` | — | comma-separated Origin values allowed on the MCP endpoint (scheme://host[:port]); an internationalized host in its ASCII (xn--) form |
 | `--allowed-hosts` | `BYWARD_ALLOWED_HOSTS` | — | comma-separated extra Host values accepted besides the public URL's host; an internationalized host in its ASCII (xn--) form |
 | `--scope` | `BYWARD_SCOPE` | mcp | the scope advertised in protected resource metadata and 401 challenges |

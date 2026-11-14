@@ -21,6 +21,8 @@ var registry = []Setting{
 	{Name: "stdio-max-processes-per-user", Default: "8", Help: "stdio upstream: most upstream processes one user has alive at once; when full, that user's least recently used idle one is stopped"},
 	{Name: "stdio-stream-idle-timeout", Default: "10m", Help: "stdio upstream: a process kept busy only by open streams (a legacy GET stream, a subscriptions/listen) that has had no traffic for this long can be stopped when a process cap is full; 0 keeps such processes however long they are quiet, otherwise at least 1m"},
 	{Name: "listen", Default: "127.0.0.1:8080", Help: "address to listen on; public addresses only when configured"},
+	{Name: "tls-cert-file", Help: "serve TLS on the listener: an absolute path to the PEM certificate, followed by any intermediates; with tls-key-file; needs an https public-url; a replaced file is served from the next connection on, with no restart (docs/how-to/tls.md)"},
+	{Name: "tls-key-file", Help: "serve TLS on the listener: an absolute path to the certificate's unencrypted PEM private key, readable by the proxy's user alone or on a read-only mount; with tls-cert-file (docs/how-to/tls.md)"},
 	{Name: "allowed-origins", Help: "comma-separated Origin values allowed on the MCP endpoint (scheme://host[:port]); an internationalized host in its ASCII (xn--) form"},
 	{Name: "allowed-hosts", Help: "comma-separated extra Host values accepted besides the public URL's host; an internationalized host in its ASCII (xn--) form"},
 	{Name: "scope", Default: "mcp", Help: "the scope advertised in protected resource metadata and 401 challenges"},

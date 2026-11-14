@@ -22,7 +22,7 @@ import (
 )
 
 // shortTempDir is a temporary directory short enough for a socket path inside it: a test's own
-// t.TempDir() on macOS can be longer than the 103 bytes a socket path may have.
+// t.TempDir() on macOS can be longer than the 103 bytes a socket path may have there.
 func shortTempDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "bw")
