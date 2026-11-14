@@ -43,37 +43,52 @@ func expiryWarning(cfg *config.Config, now time.Time) (Warning, bool) {
 // checks the TLS certificate as startup does.
 // The error is a configuration error; the warnings are what the proxy would log at startup.
 func CheckOffline(cfg *config.Config) ([]Warning, error) {
+	r, err := CheckOfflineReport(cfg)
+	return r.Warnings, err
+}
+
+// OfflineReport is what check --offline found: the startup warnings, and a description of the
+// IdP's client credential when the IdP has one to name ("" otherwise), never the secret itself.
+type OfflineReport struct {
+	Warnings             []Warning
+	ClientCredentialDesc string
+}
+
+// CheckOfflineReport is CheckOffline with a description of the client credential the proxy would
+// use (#306); it names no secret.
+func CheckOfflineReport(cfg *config.Config) (OfflineReport, error) {
 	if err := checkUpstream(cfg); err != nil {
-		return nil, err
+		return OfflineReport{}, err
 	}
 	if cfg.NoAuth {
 		if err := errors.Join(looseSecretFiles(cfg)...); err != nil {
-			return nil, err
+			return OfflineReport{}, err
 		}
 		pair, err := servableCert(cfg, time.Now())
 		if err != nil {
-			return nil, err
+			return OfflineReport{}, err
 		}
 		tlsWarnings := servingCertWarnings(cfg, pair, time.Now())
-		return append(append(append([]Warning{{Message: "authentication is off (BYWARD_INSECURE_NO_AUTH); only the settings, the secret files, the TLS certificate and the upstream were checked"}}, tlsWarnings...), offlineHop(cfg)...), redundantStrips(cfg)...), nil
+		return OfflineReport{Warnings: append(append(append([]Warning{{Message: "authentication is off (BYWARD_INSECURE_NO_AUTH); only the settings, the secret files, the TLS certificate and the upstream were checked"}}, tlsWarnings...), offlineHop(cfg)...), redundantStrips(cfg)...)}, nil
 	}
 	parts, err := loadAuthParts(cfg, nil)
 	if err != nil {
-		return nil, err
+		return OfflineReport{}, err
 	}
 	if err := parts.idp.refusal(time.Now()); err != nil {
-		return nil, err
+		return OfflineReport{}, err
 	}
 	storeWarnings, err := checkStore(cfg)
 	if err != nil {
-		return nil, err
+		return OfflineReport{}, err
 	}
 	pair, err := servableCert(cfg, time.Now())
 	if err != nil {
-		return nil, err
+		return OfflineReport{}, err
 	}
 	tlsWarnings := servingCertWarnings(cfg, pair, time.Now())
-	return append(append(append(append(append(parts.warnings, storeWarnings...), parts.idp.timedWarnings(time.Now())...), tlsWarnings...), offlineHop(cfg)...), redundantStrips(cfg)...), nil
+	return OfflineReport{Warnings: append(append(append(append(append(parts.warnings, storeWarnings...), parts.idp.startWarningsAt(time.Now())...), tlsWarnings...), offlineHop(cfg)...), redundantStrips(cfg)...),
+		ClientCredentialDesc: parts.idp.credentialDesc}, nil
 }
 
 // offlineHop is the plain-http upstream warning without the network: only an upstream given as an

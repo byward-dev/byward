@@ -82,33 +82,49 @@ func TestDoctorShowsAtMost64CharactersOfTheIdPsErrorCode(t *testing.T) {
 	}
 }
 
-// With private_key_jwt, a key the IdP has not registered is refused, and the fix names the key and
-// the client ID.
+// With private_key_jwt, a key the IdP has not registered is refused, and the fix names the key, the
+// client ID and the algorithm the key signs with; at a preset that refuses that algorithm, it leads
+// with that refusal and what to set instead (#306).
 func TestDoctorChecksAPrivateKeyJWTCredential(t *testing.T) {
 	registered, other := fakeidp.NewCertificate(t), fakeidp.NewCertificate(t)
 	d := Diagnosis{ClientIDSetting: "BYWARD_OIDC_CLIENT_ID", CredentialSetting: "BYWARD_OIDC_CLIENT_KEY_FILE", KeyCredential: true}
+	const algFix = "; the key signs with PS256: the IdP must accept PS256 for client assertions"
 	for _, tc := range []struct {
-		name   string
-		key    *fakeidp.Certificate
-		status doctor.Status
-		fix    string
+		name    string
+		key     *fakeidp.Certificate
+		alg     string // "" signs with PS256, the RSA default
+		preset  string
+		opts    []fakeidp.Option
+		status  doctor.Status
+		fixHead string // before "register the public key …"
+		fixTail string // after "…with the IdP app <client ID> (private_key_jwt), and check BYWARD_OIDC_CLIENT_ID"
 	}{
-		{"the registered key", registered, doctor.Pass, ""},
-		{"another key", other, doctor.Fail, "register the public key of BYWARD_OIDC_CLIENT_KEY_FILE with the IdP app "},
+		{name: "the registered key", key: registered, status: doctor.Pass},
+		{name: "another key", key: other, status: doctor.Fail, fixTail: algFix},
+		{name: "a refused algorithm at okta", key: registered, preset: "okta", opts: []fakeidp.Option{fakeidp.WithClientAssertionAlgs("RS256")},
+			status: doctor.Fail, fixHead: "Okta refuses PS256 for client assertions: set BYWARD_OIDC_CLIENT_KEY_ALG=RS256 (or use an EC P-256 key); otherwise "},
+		{name: "a refused grant at okta", key: registered, preset: "okta", opts: []fakeidp.Option{fakeidp.FailToken(fakeidp.GrantAuthorizationCode, &fakeidp.UnknownClient)},
+			status: doctor.Fail, fixTail: algFix}, // unauthorized_client: not blamed on the algorithm, as at sign-in
+		{name: "another key with RS256 at okta", key: other, alg: "RS256", preset: "okta",
+			status: doctor.Fail, fixTail: "; the key signs with RS256: the IdP must accept RS256 for client assertions"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			auth, err := idp.PrivateKeyJWT(tc.key.Key, nil, tc.key.ThumbprintSHA256())
+			auth, err := idp.PrivateKeyJWTWithAlg(tc.key.Key, nil, tc.key.ThumbprintSHA256(), tc.alg)
 			if err != nil {
 				t.Fatal(err)
 			}
-			e := newEnv(t, Config{ClientAuth: auth})
-			c := e.client
-			c.Secrets, c.Certificates = nil, []*fakeidp.Certificate{registered}
-			e.fake.Set(fakeidp.WithClient(c))
+			e := newKeyEnv(t, auth, registered, tc.opts...)
+			if tc.preset != "" {
+				e.p.preset = Presets[tc.preset] // after New: the okta preset's issuer check refuses the fake's issuer
+			}
 			r := e.p.DiagnoseClient(context.Background(), d)
-			wantResult(t, r, tc.status, "", tc.fix)
-			if tc.status == doctor.Fail && !strings.HasSuffix(r.Fix, "with the IdP app "+e.p.cfg.ClientID+" (private_key_jwt), and check BYWARD_OIDC_CLIENT_ID") {
-				t.Fatalf("fix %q; want it to name the IdP app and the client ID setting", r.Fix)
+			wantFix := ""
+			if tc.status == doctor.Fail {
+				wantFix = tc.fixHead + "register the public key of BYWARD_OIDC_CLIENT_KEY_FILE with the IdP app " + e.p.cfg.ClientID + " (private_key_jwt), and check BYWARD_OIDC_CLIENT_ID" + tc.fixTail
+			}
+			wantResult(t, r, tc.status, "", wantFix)
+			if r.Fix != wantFix {
+				t.Fatalf("fix %q, want %q", r.Fix, wantFix)
 			}
 		})
 	}

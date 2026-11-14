@@ -99,11 +99,12 @@ Auth0. The gate lists are explained in [the access gate](access-gate.md).
 
 Not tested with Auth0. Auth0 offers Private Key JWT on its Enterprise plan only, and accepts RS256,
 RS384 and PS256 assertions ([Configure Private Key JWT Authentication](https://auth0.com/docs/get-started/applications/configure-private-key-jwt)).
-byward signs an RSA key with PS256 and an EC key with ES256, so:
+byward signs an RSA key with PS256 by default and an EC key with ES256, so:
 
 - Use an RSA key of 2048 to 4096 bits, not an EC key.
-- Register its public key (PEM) on the application with the algorithm **PS256**; Auth0's default is
-  RS256.
+- Register its public key (PEM) on the application with the algorithm byward signs with: **PS256**,
+  or Auth0's default **RS256** if you set `BYWARD_OIDC_CLIENT_KEY_ALG=RS256` (on `main`, not in
+  v0.2.0-rc.1).
 - Replace the secret with `BYWARD_OIDC_CLIENT_KEY_FILE` and `BYWARD_OIDC_CLIENT_KEY_ID` (the `kid`
   Auth0 generates for the credential).
 

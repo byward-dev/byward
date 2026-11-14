@@ -71,10 +71,11 @@ public IdPs and upstreams keep working. Details, Kubernetes and the pitfalls are
 
 1. Make an RSA (2048 bits or more) or EC P-256 key: `openssl genpkey -algorithm RSA -pkeyopt
    rsa_keygen_bits:2048 -out keycloak-client.pem`, readable only by the proxy's user.
-2. **Credentials** tab: **Client Authenticator** = **Signed Jwt**, **Signature algorithm** = **PS256**
-   for an RSA key, **ES256** for an EC key. byward signs RSA keys with PS256, never RS256; with RS256
-   selected, Keycloak refuses the sign-in (`invalid_client_credentials`) and byward logs an IdP alert,
-   `credential_rejected`.
+2. **Credentials** tab: **Client Authenticator** = **Signed Jwt**, **Signature algorithm** = the
+   algorithm byward signs with: **PS256** for an RSA key by default, **RS256** if you set
+   `BYWARD_OIDC_CLIENT_KEY_ALG=RS256` (on `main`, not in v0.2.0-rc.1), **ES256** for an EC key. If they differ, Keycloak refuses the
+   sign-in and byward logs an IdP alert, `credential_rejected`. When Keycloak answers with the OAuth
+   error `invalid_client`, the alert's fix names the algorithm byward signed with.
 3. **Keys** tab: give Keycloak the public key, as a JWKS URL or by importing it, with a key ID.
 4. Settings: replace the secret with
 
