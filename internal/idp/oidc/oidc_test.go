@@ -388,6 +388,8 @@ func TestDiscoveredEndpointsMustBeHTTPSUnlessALoopbackIssuerRunsInDevelopment(t 
 		{"https without a host", "https:///token", "https://idp.example", false, false},
 		{"loopback http outside development", "http://127.0.0.1:9000/token", "http://127.0.0.1:9000", false, false},
 		{"loopback http of a loopback issuer in development", "http://127.0.0.1:9000/token", "http://127.0.0.1:9000", true, true},
+		// The issuer decides the relaxation config logs (#355): an https issuer gets no http endpoint.
+		{"loopback http for a loopback https issuer in development", "http://127.0.0.1/token", "https://localhost:8443", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := checkURL(tc.raw, tc.issuer, tc.development); (err == nil) != tc.ok {

@@ -241,7 +241,7 @@ var testLogin = idp.Login{State: "s", Nonce: "n", CodeVerifier: strings.Repeat("
 func fakeIdentityProvider(t *testing.T, fake *fakeidp.IdP, app fakeidp.Client, name string, change func(*config.Config)) *identityProvider {
 	t.Helper()
 	c := oidcConfig(name, func(c *config.Config) {
-		c.OIDCIssuer, c.OIDCClientID, c.Dev = fake.Issuer(), app.ID, true
+		c.OIDCIssuer, c.OIDCClientID, c.Dev, c.OIDCLoopbackHTTP = fake.Issuer(), app.ID, true, true // as config sets them for --dev
 		if change != nil {
 			change(c)
 		}

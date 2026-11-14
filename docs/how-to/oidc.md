@@ -47,7 +47,7 @@ Give exactly one of the secret and the key. `BYWARD_ENTRA_*` settings with an OI
 **Network:** the IdP is yours, so the proxy reaches it directly, not through the SSRF guard that
 client-supplied URLs go through. A self-hosted Keycloak or Okta on a private address works. The
 issuer and every endpoint in its discovery document must use `https`; only `--dev` accepts `http` on
-a loopback host. The proxy checks the issuer at the first sign-in and `byward doctor` checks it on
+a loopback host, and logs it at startup as a relaxation. The proxy checks the issuer at the first sign-in and `byward doctor` checks it on
 demand.
 
 ## 3. Presets
