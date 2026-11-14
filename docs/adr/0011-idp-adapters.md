@@ -63,7 +63,9 @@ rate-limit them (`oidc/jwks.go`).
 
 ## Amendment 2026-11-14 (#286, #306): claims and the client assertion's algorithm
 
-Recorded after the fact; both shipped in v0.2.
+Recorded after the fact. Neither change is in v0.2.0-rc.1: #286 is on `main` (#302), and the
+algorithm setting #306 asks for comes with #321, not merged. Item 2 describes the signing that
+v0.2.0-rc.1 and `main` already do.
 
 1. **Roles and groups claims (#286):** for an OIDC IdP, the access gate and the identity assertion
    read roles and groups from the ID token claims `BYWARD_OIDC_ROLES_CLAIM` and
@@ -73,4 +75,5 @@ Recorded after the fact; both shipped in v0.2.
    client ID, so a gate on it would admit every user of the IdP.
 2. **The client assertion's algorithm (#306):** `private_key_jwt` signs with PS256 for an RSA key and
    ES256 for an EC P-256 key, never RS256, so the IdP's client must accept that algorithm
-   (`internal/idp/clientauth.go`; [OIDC how-to](../how-to/oidc.md)).
+   (`internal/idp/clientauth.go`; [OIDC how-to](../how-to/oidc.md)). A setting that chooses RS256
+   for an RSA key comes with #321.
