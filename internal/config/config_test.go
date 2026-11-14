@@ -205,8 +205,8 @@ func TestDevAllowsLoopbackHTTPAndRecordsIt(t *testing.T) {
 // Every form a Host header carries loads, in lower case, with any port from 1 to 65535, and a bare IPv6 address is
 // stored in brackets, as a Host header carries it, so the public listener can match it (#325).
 func TestAllowedHostsLoadEveryHostHeaderFormAndBracketABareIPv6(t *testing.T) {
-	c, err := load(t, nil, "BYWARD_ALLOWED_HOSTS=mcp.example.com,mcp.example.com:9765,10.0.0.5:8080,localhost:1,::1,2001:db8::1,[2001:db8::1],[::1]:65535,my_svc~1,xn--bcher-kva.example,Mixed-Case.Example")
-	want := []string{"mcp.example.com", "mcp.example.com:9765", "10.0.0.5:8080", "localhost:1", "[::1]", "[2001:db8::1]", "[2001:db8::1]", "[::1]:65535", "my_svc~1", "xn--bcher-kva.example", "mixed-case.example"}
+	c, err := load(t, nil, "BYWARD_ALLOWED_HOSTS=mcp.example.com,mcp.example.com:9765,10.0.0.5:8080,localhost:1,::1,2001:db8::1,[2001:db8::1],[::1]:65535,my_svc~1,xn--bcher-kva.example,Mixed-Case.Example,abcdefghijklmnopqrstuvwxyz.ABCDEFGHIJKLMNOPQRSTUVWXYZ.0123456789")
+	want := []string{"mcp.example.com", "mcp.example.com:9765", "10.0.0.5:8080", "localhost:1", "[::1]", "[2001:db8::1]", "[2001:db8::1]", "[::1]:65535", "my_svc~1", "xn--bcher-kva.example", "mixed-case.example", "abcdefghijklmnopqrstuvwxyz.abcdefghijklmnopqrstuvwxyz.0123456789"}
 	if err != nil || !slices.Equal(c.AllowedHosts, want) {
 		t.Fatalf("err=%v hosts=%v, want %v", err, c.AllowedHosts, want)
 	}
@@ -649,14 +649,14 @@ func TestAnAllowedHostEntryOrHostHeaderReducesToItsLowerCaseHostName(t *testing.
 	}
 }
 
-// #334: a name with any printable ASCII character outside RFC 3986's unreserved set (a sub-delim,
+// #334: a name with any ASCII character outside RFC 3986's unreserved set (a control character, a sub-delim,
 // a %-escape, "@", "?", "#", "\\" ...) is refused as a host name, with or without a port. ":", the
 // brackets, "/" and the space belong to the form check and are covered there; "," separates the
 // list's entries.
 func TestAnAllowedHostNameRefusesEveryCharacterAHostNameCannotHave(t *testing.T) {
 	const unreserved = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
-	for c := byte('!'); c <= '~'; c++ {
-		if strings.IndexByte(unreserved+":[]/,", c) >= 0 {
+	for c := byte(1); c < 0x80; c++ {
+		if strings.IndexByte(unreserved+":[]/, ", c) >= 0 {
 			continue
 		}
 		for _, entry := range []string{"a" + string(c) + "b", "a" + string(c) + "b:8443"} {
