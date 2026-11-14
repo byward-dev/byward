@@ -341,3 +341,28 @@ func TestTheReportedSetStaysWithinTheRetentionWindow(t *testing.T) {
 		}
 	})
 }
+
+// Each operator revocation is reported, even two at the same instant, or the same user revoked
+// again.
+func TestEachOperatorRevocationIsReportedEvenForTheSameSubjectOrInstant(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		src := &source{}
+		l := New(src, nil)
+		got := operatorRevocations(l)
+		mustSync(t, l)
+		time.Sleep(time.Second)
+		now := time.Now()
+		alice := store.Revocation{Subject: "tid:alice", Before: now, At: now}
+		bob := store.Revocation{Subject: "tid:bob", Before: now, At: now}
+		src.set([]store.Revocation{alice, bob}, nil)
+		mustSync(t, l)
+		time.Sleep(time.Second)
+		later := time.Now()
+		again := store.Revocation{Subject: "tid:alice", Before: later, At: later}
+		src.set([]store.Revocation{alice, bob, again}, nil)
+		mustSync(t, l)
+		if len(*got) != 3 || (*got)[0] != alice || (*got)[1] != bob || (*got)[2] != again {
+			t.Fatalf("reported %v, want alice, bob, then alice again", *got)
+		}
+	})
+}
