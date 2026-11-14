@@ -50,6 +50,8 @@ Developer Program. It is not how operators install this proxy.
 8. **`-- <cmd>`** after the flags sets a stdio upstream (same mechanism as config, ADR-0003).
 9. **No TLS or ACME in the proxy;** TLS ends at the ingress or a reverse proxy. Loopback HTTP only
    for local clients (VS Code, Cursor, Claude Code); Claude.ai and ChatGPT need a public HTTPS URL.
+   _Amended 2026-11-13 (#183): byward may terminate TLS with operator-supplied certificates; still no
+   ACME. See the amendment below._
 10. **No update check or phone-home.**
 11. **Docs:** Dockerfile examples for a stdio upstream via `npx` and via `uvx`, compose with an HTTP
     upstream, plain Kubernetes manifests meeting PodSecurity `restricted` (Litestream sidecar, probes,
@@ -72,3 +74,50 @@ Developer Program. It is not how operators install this proxy.
 - An image with node and python preinstalled (sigbit) — rejected: large, and EOL runtimes become our
   CVEs.
 - ACME in the proxy — rejected: binds 80/443, adds state and rate limits; users turn it off.
+
+## Amendment 2026-11-13 (optional TLS with operator-supplied certificates, #183)
+
+**§9 now reads:** byward may terminate TLS on its public listener with certificate files the operator
+supplies; there is still no ACME. Without the files, TLS ends at the ingress as before. The hop from an
+ingress to byward is plain HTTP that carries bearer tokens, and before this the hardening guide could
+only say to keep it private.
+
+- **Settings:** `BYWARD_TLS_CERT_FILE` (the certificate, then any intermediates) and
+  `BYWARD_TLS_KEY_FILE`, both or neither, as absolute paths. The key goes through the secret-file
+  permission check (ADR-0018 §11), which `--dev` relaxes. `MinVersion` is TLS 1.2 and Go's default
+  cipher suites stand, with no setting for either.
+- **Serving:** `ServeTLS(ln, "", "")` with `Certificates` empty and `GetCertificate` set. Go calls
+  `GetCertificate` "only if the client supplies SNI information or if Certificates is empty"
+  (`crypto/tls`), so it runs at every handshake. HTTP/2 and HTTP/1.1 are both served, and plain HTTP
+  on the port gets Go's 400. There is no `:80` listener and no redirect.
+- **Rotation without a restart:** at each handshake byward stats both files, following symlinks.
+  When the device, inode, size or modification time changes, it reads both again. A Kubernetes
+  secret volume's `..data` swap counts as a change. A pair that does not load, does not match, or
+  has a certificate in its chain outside its validity is never served: the previous pair stays, and
+  one warning is logged per state of the files, naming the files and never their contents.
+  `NotBefore` may be up to 5 minutes ahead of byward's clock, for an issuer whose clock runs ahead. A
+  pair refused only because it is not valid yet is tried again from 5 minutes before its `NotBefore`,
+  without waiting for the files to change again.
+- **Refused at startup and by `check --offline`:**
+  - one file without the other, or a relative path;
+  - an unreadable file, or a key that does not match;
+  - any certificate in the chain expired, or not valid for more than 5 minutes yet;
+  - an `http` `BYWARD_PUBLIC_URL`, including `--dev` on loopback. Clients use the public URL, so an
+    http one would reach a listener that speaks only TLS.
+- **Warned:**
+  - expiry within 30 days, counted from the earliest `NotAfter` in the chain;
+  - a certificate that covers neither the public URL's host nor any `BYWARD_ALLOWED_HOSTS` entry. This
+    is only a warning, because an ingress may verify byward under its service name.
+- **`doctor`:** "TLS certificate expiry" and "TLS certificate names" read the files on disk, which the
+  next handshake serves. The expiry check names the chain's certificate that expires first, and says
+  when a running proxy will serve a pair that is not valid yet.
+- **Invariant kept:** the issuer, the cookies' `Secure` and `__Host-` prefix, and
+  `Strict-Transport-Security` (#225) derive from `BYWARD_PUBLIC_URL` alone, never from `r.TLS` or
+  `X-Forwarded-Proto`. The internal listener stays plain HTTP.
+- **Rejected or later:**
+  - ACME (this ADR);
+  - OCSP stapling: Let's Encrypt ended OCSP on 2025-08-06;
+  - the PROXY protocol;
+  - mTLS from the ingress;
+  - several certificates chosen by SNI;
+  - TLS on the internal listener.

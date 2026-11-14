@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	stdlog "log"
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 
 	"github.com/byward-dev/byward/internal/health"
 )
@@ -35,8 +37,21 @@ func hardened(addr string, h http.Handler, log *slog.Logger) *http.Server {
 		ReadTimeout:       ReadTimeout,
 		IdleTimeout:       IdleTimeout,
 		MaxHeaderBytes:    MaxHeaderBytes,
-		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
+		ErrorLog:          stdlog.New(serverErrors{log}, "", 0),
 	}
+}
+
+// serverErrors is an http.Server's error log, each line a warning, except a TLS handshake the
+// client closed or reset before it began: every TCP health probe of a TLS port is one.
+type serverErrors struct{ log *slog.Logger }
+
+func (e serverErrors) Write(p []byte) (int, error) {
+	msg := strings.TrimSuffix(string(p), "\n")
+	if strings.HasPrefix(msg, "http: TLS handshake error from ") && (strings.HasSuffix(msg, ": EOF") || strings.HasSuffix(msg, ": connection reset by peer")) {
+		return len(p), nil
+	}
+	e.log.Warn(msg)
+	return len(p), nil
 }
 
 // Run serves until ctx is done, then shuts down within ShutdownTimeout: readiness fails first and
@@ -110,10 +125,16 @@ func serve(ctx context.Context, srv *http.Server, log *slog.Logger, drain, liste
 	baseCtx, cancelRequests := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancelRequests()
 	srv.BaseContext = func(net.Listener) context.Context { return baseCtx }
-	log.Info("listening", "listen", ln.Addr().String())
+	log.Info("listening", "listen", ln.Addr().String(), "tls", srv.TLSConfig != nil)
 
 	errc := make(chan error, 1)
-	go func() { errc <- srv.Serve(ln) }()
+	go func() {
+		if srv.TLSConfig != nil { // the certificate comes from TLSConfig.GetCertificate, not from files
+			errc <- srv.ServeTLS(ln, "", "")
+			return
+		}
+		errc <- srv.Serve(ln)
+	}()
 	select {
 	case err := <-errc:
 		return err
