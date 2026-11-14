@@ -19,7 +19,7 @@ type signedInClient struct {
 }
 
 // A client the operator denies after it signed in loses its grant at its next refresh (#338): the
-// refresh is refused, the grant is revoked and audited, and its access token stops working. A
+// refresh is refused, the grant is revoked and audited, and its proxy token stops working. A
 // denied CIMD client ID is refused at lookup, so it gets 401; a client denied by its redirect host
 // is still found, so it gets invalid_grant. A denylist that names another client changes nothing.
 func TestADeniedClientLosesItsGrantAtRefresh(t *testing.T) {
@@ -62,7 +62,7 @@ func TestADeniedClientLosesItsGrantAtRefresh(t *testing.T) {
 				}
 			}
 			if got := c.e.valid(t, c.tokens["access_token"].(string)); got == denied {
-				t.Fatalf("the access token issued before the denial passes: %v, want %v", got, !denied)
+				t.Fatalf("the proxy token issued before the denial passes: %v, want %v", got, !denied)
 			}
 		})
 	}
@@ -72,8 +72,8 @@ func TestADeniedClientLosesItsGrantAtRefresh(t *testing.T) {
 // would be, and revokes nothing: the token's own client keeps its grant (RFC 6749 §6).
 func TestADeniedClientCannotRevokeAnotherClientsGrant(t *testing.T) {
 	e := newEnv(t, withDCR(nil))
-	owner := dcrSignIn(t, e, "https://app.example/cb")
-	denied := dcrSignIn(t, e, "https://evil.example/cb")
+	owner := dcrSignInTo(t, e, "https://app.example/cb")
+	denied := dcrSignInTo(t, e, "https://evil.example/cb")
 	owner.deny(t, "evil.example")
 	rt := owner.tokens["refresh_token"].(string)
 	if res, body := e.refresh(t, rt, denied.clientID); res.StatusCode != http.StatusBadRequest || body["error"] != "invalid_grant" {
@@ -84,6 +84,13 @@ func TestADeniedClientCannotRevokeAnotherClientsGrant(t *testing.T) {
 	}
 	if res, body := e.refresh(t, rt, owner.clientID); res.StatusCode != http.StatusOK {
 		t.Fatalf("the owner's refresh: %d %v, want 200", res.StatusCode, body)
+	}
+	// The denial is in force: the denied client's own refresh token ends its grant.
+	if res, body := e.refresh(t, denied.tokens["refresh_token"].(string), denied.clientID); res.StatusCode != http.StatusBadRequest || body["error"] != "invalid_grant" {
+		t.Fatalf("the denied client's own refresh: %d %v, want 400 invalid_grant", res.StatusCode, body)
+	}
+	if revocations := e.auditEvents(t, "grant_revoked"); len(revocations) != 1 || revocations[0]["client_id"] != denied.clientID {
+		t.Fatalf("grant_revoked events %v, want one, for the denied client", revocations)
 	}
 }
 
@@ -99,12 +106,12 @@ func redirectHost(_, redirect string) string {
 // dcrSignedIn registers a DCR client in a new broker and signs a user in with it.
 func dcrSignedIn(t *testing.T) signedInClient {
 	t.Helper()
-	return dcrSignIn(t, newEnv(t, withDCR(nil)), "https://app.example/cb")
+	return dcrSignInTo(t, newEnv(t, withDCR(nil)), "https://app.example/cb")
 }
 
-// dcrSignIn registers a DCR client with the refresh_token grant and one redirect URI in e, and signs
+// dcrSignInTo registers a DCR client with the refresh_token grant and one redirect URI in e, and signs
 // a user in with it.
-func dcrSignIn(t *testing.T, e *env, redirect string) signedInClient {
+func dcrSignInTo(t *testing.T, e *env, redirect string) signedInClient {
 	t.Helper()
 	_, reg := e.register(t, `{"client_name":"App","redirect_uris":["`+redirect+`"],"grant_types":["authorization_code","refresh_token"]}`)
 	id := reg["client_id"].(string)

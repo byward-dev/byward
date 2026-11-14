@@ -16,11 +16,11 @@ import (
 	"github.com/byward-dev/byward/internal/token"
 )
 
-// The operator's client denylist reaches the access-token check (#338): a token of a denied CIMD
-// client ID is refused at its next MCP request, before the upstream sees it. Another client's
-// token still passes, and so does one of a DCR client whose host is denied: the check does not
-// look the client up, so that token runs out within its hour.
-func TestADeniedClientIDsAccessTokenIsRefused(t *testing.T) {
+// The operator's client denylist reaches the proxy-token check (#338): a proxy token of a denied
+// CIMD client ID is refused at its next MCP request, before the upstream sees it. Another client's
+// proxy token still passes, and so does one of a DCR client whose host is denied: the check does
+// not look the client up, so that proxy token runs out within its hour.
+func TestADeniedClientIDsProxyTokenIsRefused(t *testing.T) {
 	const denied = "https://evil.example/client.json"
 	a := newAsserting(t, "BYWARD_CLIENT_DENYLIST="+denied+",app.example")
 	for clientID, want := range map[string]int{
@@ -53,7 +53,7 @@ func TestADeniedClientIDsAccessTokenIsRefused(t *testing.T) {
 
 // The denylist never refuses a static client, so an entry that names one is a mistake the proxy
 // refuses to start with, naming the setting (#338).
-func TestADenylistEntryNamingAStaticClientRefusesToStart(t *testing.T) {
+func TestADenylistEntryNamingAStaticClientStopsTheProxyStarting(t *testing.T) {
 	const id = "https://static.example/client.json"
 	clients := filepath.Join(t.TempDir(), "clients.json")
 	if err := os.WriteFile(clients, []byte(`{"clients":[{"client_id":"`+id+`","client_name":"Static","token_endpoint_auth_method":"none","redirect_uris":["http://127.0.0.1/callback"]}]}`), 0o600); err != nil {

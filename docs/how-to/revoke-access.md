@@ -85,7 +85,8 @@ BYWARD_CLIENT_DENYLIST=https://app.example.com/oauth/client.json,callback.exampl
 An entry is a CIMD client ID (an `https` URL) or a host name that the app's redirect URIs return to.
 A DCR client ID cannot be denied, since the app would just register again; deny its host. Static
 clients are never checked: remove one from the [static clients file](../reference/static-clients.md)
-and restart instead. An entry that names a static client stops the proxy from starting. The setting's full rules are in [DCR settings](dcr.md#settings).
+and restart instead. An entry that names a static client stops the proxy from starting. The
+setting's full rules are in [DCR settings](dcr.md#settings).
 
 The denylist stops new registrations and sign-ins, and ends what an app already holds:
 
