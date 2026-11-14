@@ -27,28 +27,28 @@ type Table struct {
 // Sync checks the table: one row per key, in order, each built by row from its key and the cells
 // of the table's row for that key (nil when there is none). With BYWARD_UPDATE_REFERENCE=1 it first
 // rewrites the file. A row still holding Todo fails.
-func (tb Table) Sync(t testing.TB, keys []string, row func(key string, old []string) []string) {
+func (table Table) Sync(t testing.TB, keys []string, row func(key string, old []string) []string) {
 	t.Helper()
-	b, err := os.ReadFile(tb.Path) //nolint:gosec // G304: a reference page the calling test names
+	b, err := os.ReadFile(table.Path) //nolint:gosec // G304: a reference page the calling test names
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := render(string(b), tb.Heading, tb.KeyCol, keys, row)
+	want, err := render(string(b), table.Heading, table.KeyCol, keys, row)
 	if err != nil {
-		t.Fatalf("%s: %v", tb.Path, err)
+		t.Fatalf("%s: %v", table.Path, err)
 	}
 	if os.Getenv("BYWARD_UPDATE_REFERENCE") == "1" {
 		// Path is the calling test's constant, not input.
-		if err := os.WriteFile(tb.Path, []byte(want), 0o600); err != nil { //nolint:gosec // G703: see above
+		if err := os.WriteFile(table.Path, []byte(want), 0o600); err != nil { //nolint:gosec // G703: see above
 			t.Fatal(err)
 		}
 		b = []byte(want)
 	}
 	if string(b) != want {
-		t.Fatalf("the table under %q in %s is stale; run BYWARD_UPDATE_REFERENCE=1 go test %s, then write any %q cells", tb.Heading, tb.Path, tb.Package, Todo)
+		t.Fatalf("the table under %q in %s is stale; run BYWARD_UPDATE_REFERENCE=1 go test %s, then write any %q cells", table.Heading, table.Path, table.Package, Todo)
 	}
-	for _, k := range undescribed(want, tb.Heading, tb.KeyCol) {
-		t.Errorf("%s: describe %s in the table under %q (its row says %q)", tb.Path, k, tb.Heading, Todo)
+	for _, k := range undescribed(want, table.Heading, table.KeyCol) {
+		t.Errorf("%s: describe %s in the table under %q (its row says %q)", table.Path, k, table.Heading, Todo)
 	}
 }
 

@@ -43,14 +43,10 @@ func row(key string, old []string) []string {
 }
 
 // The first table under the heading gets one row per key, in the keys' order: hand-written cells
-// are kept for known keys, a new key gets Todo, a key the code no longer has is dropped, a row
-// too short for the key column is dropped, and nothing else on the page moves.
+// are kept for known keys, a new key gets Todo, a key the code no longer has is dropped, and
+// nothing else on the page moves.
 func TestRenderRebuildsOnlyTheTable(t *testing.T) {
-	got, err := render(page, "## Things", 1, []string{"old"}, func(key string, old []string) []string { return old })
-	if err != nil || !strings.Contains(got, "| `a` | old | written for a |") {
-		t.Fatalf("keyed on a column the short row lacks: err %v\n%s", err, got)
-	}
-	got, err = render(page, "## Things", 0, []string{"a", "b", "c"}, row)
+	got, err := render(page, "## Things", 0, []string{"a", "b", "c"}, row)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +60,17 @@ func TestRenderRebuildsOnlyTheTable(t *testing.T) {
 	}
 	if u := undescribed(page, "## Things", 0); u != nil {
 		t.Errorf("undescribed in the page as written %v, want none", u)
+	}
+}
+
+// A row too short to have the key column is no key's row, and is dropped.
+func TestRenderDropsARowTooShortForTheKeyColumn(t *testing.T) {
+	got, err := render(page, "## Things", 1, nil, row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "| short |") {
+		t.Fatalf("the short row is still there:\n%s", got)
 	}
 }
 
@@ -90,6 +97,7 @@ func TestCellsSplitsOutsideCode(t *testing.T) {
 		{"| a | b |", []string{"a", "b"}},
 		{"|`x|y`| z |", []string{"`x|y`", "z"}},
 		{"|  a  |  |", []string{"a", ""}},
+		{"| a | b | ", []string{"a", "b"}},
 	} {
 		if got := cells(tc.row); !slices.Equal(got, tc.want) {
 			t.Errorf("cells(%q) = %q, want %q", tc.row, got, tc.want)
@@ -119,18 +127,18 @@ func (r *recorder) Fatalf(format string, a ...any) {
 	runtime.Goexit()
 }
 
-// syncFailures runs Sync on a copy of doc and returns its failures and the file afterwards.
-func syncFailures(t *testing.T, doc string, keys []string, update bool) ([]string, string) {
+// runSync runs Sync on a copy of doc and returns its failures and the file afterwards.
+func runSync(t *testing.T, doc string, keys []string, update bool) ([]string, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "page.md")
 	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	env := ""
 	if update {
-		t.Setenv("BYWARD_UPDATE_REFERENCE", "1")
-	} else {
-		t.Setenv("BYWARD_UPDATE_REFERENCE", "")
+		env = "1"
 	}
+	t.Setenv("BYWARD_UPDATE_REFERENCE", env)
 	r := &recorder{TB: t}
 	done := make(chan struct{})
 	go func() {
@@ -138,7 +146,7 @@ func syncFailures(t *testing.T, doc string, keys []string, update bool) ([]strin
 		Table{Path: path, Heading: "## Things", Package: "./internal/x/"}.Sync(r, keys, row)
 	}()
 	<-done
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // G304: the test's own temp file
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +173,7 @@ func TestSyncFailsUntilTheTableIsCurrentAndDescribed(t *testing.T) {
 		{"a new key", current, []string{"a", "b", "c"}, true, "describe c", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			failures, after := syncFailures(t, tc.doc, tc.keys, tc.update)
+			failures, after := runSync(t, tc.doc, tc.keys, tc.update)
 			switch {
 			case tc.inFailure == "" && len(failures) > 0:
 				t.Fatalf("failures %q, want none", failures)
