@@ -108,17 +108,3 @@ type Readiness interface {
 type Refresher interface {
 	Refresh(ctx context.Context, refreshToken string) (*Identity, Tokens, error)
 }
-
-type requestIDKey struct{}
-
-// WithRequestID attaches the caller's request ID; adapters send it to the IdP where supported
-// (Entra: client-request-id), so IdP logs correlate with ours.
-func WithRequestID(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, requestIDKey{}, id)
-}
-
-// RequestID returns the request ID from ctx, if any.
-func RequestID(ctx context.Context) string {
-	id, _ := ctx.Value(requestIDKey{}).(string)
-	return id
-}

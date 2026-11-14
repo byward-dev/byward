@@ -9,7 +9,6 @@ import (
 	"io"
 	"io/fs"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -257,10 +256,8 @@ type staticClient struct {
 	redirects []string
 }
 
-func (c *staticClient) ID() string                { return c.id }
-func (c *staticClient) Name() string              { return c.name }
-func (c *staticClient) Trust() TrustLevel         { return Verified }
-func (c *staticClient) AuthMethods() []AuthMethod { return slices.Clone(c.methods) }
+func (c *staticClient) Name() string      { return c.name }
+func (c *staticClient) Trust() TrustLevel { return Verified }
 
 // AllowsRefresh is true: a static client counts as having registered the refresh_token grant, so it
 // gets refresh tokens with or without offline_access (ADR-0006, amendment 2026-11-14).
@@ -270,14 +267,3 @@ func (c *staticClient) AllowsRefresh() bool { return true }
 func (c *staticClient) RedirectAllowed(redirectURI string) error {
 	return MatchRedirect(c.redirects, redirectURI)
 }
-
-// String never shows the secret.
-func (c *staticClient) String() string {
-	return fmt.Sprintf("registration.staticClient{id:%s methods:%v}", c.id, c.methods)
-}
-
-// GoString never shows the secret.
-func (c *staticClient) GoString() string { return c.String() }
-
-// Format makes every fmt verb use String, so no verb can reach the secret by reflection.
-func (c *staticClient) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, c.String()) }

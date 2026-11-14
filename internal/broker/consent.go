@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/audit"
-	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/ratelimit"
 	"github.com/byward-dev/byward/internal/registration"
 )
@@ -125,7 +124,7 @@ func (b *Broker) consent(w http.ResponseWriter, r *http.Request) {
 	}
 	recorded, first, evicted := b.answers.record(f.ID, allow, now, time.UnixMilli(f.Shown).Add(FlowLifetime))
 	if evicted {
-		b.cfg.Log.WarnContext(ctx, "consent answer table full; forgot the most recently answered flow", "request_id", logging.RequestID(ctx))
+		b.cfg.Log.WarnContext(ctx, "consent answer table full; forgot the most recently answered flow")
 	}
 	if !recorded {
 		b.page(w, r, http.StatusConflict, "You already answered this request.", "Start again from your app if you want to change your answer.")

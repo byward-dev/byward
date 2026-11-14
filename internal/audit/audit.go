@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/ratelimit"
 )
 
 // SchemaVersion is bumped on any incompatible change to an event's fields.
@@ -78,7 +79,8 @@ type Log struct {
 	observe Observer
 }
 
-// Unauthenticated events are limited to this many per source address per minute.
+// Unauthenticated events are limited to this many per minute for each source, event and outcome
+// (RecordUnauthenticated).
 const (
 	unauthBurst   = 10
 	unauthWindow  = time.Minute
@@ -104,15 +106,17 @@ func (l *Log) Record(r *http.Request, e Event) {
 }
 
 // RecordUnauthenticated writes e for a request whose sender is not authenticated, limited per
-// source address, event and outcome, so frequent events (page views, registrations) never crowd
-// out rarer ones (decisions, refusals); when records were dropped the next one with the same key
-// carries `suppressed=N` (ADR-0021 §5).
+// source, event and outcome, so frequent events (page views, registrations) never crowd out rarer
+// ones (decisions, refusals); when records were dropped the next one with the same key carries
+// `suppressed=N` (ADR-0021 §5). A source is an address, or an IPv6 sender's /64 as the OAuth rate
+// limit groups it, since it can rotate freely within its own /64; each record still carries the
+// sender's own address.
 func (l *Log) RecordUnauthenticated(r *http.Request, e Event) {
 	if l == nil {
 		return
 	}
 	ip := logging.RemoteIP(r)
-	ok, suppressed := l.limiter.Allow(ip + "\x00" + e.Name + "\x00" + e.Outcome)
+	ok, suppressed := l.limiter.Allow(ratelimit.Key(ip) + "\x00" + e.Name + "\x00" + e.Outcome)
 	if !ok {
 		if l.observe != nil {
 			l.observe(e.Name, e.Outcome)
@@ -128,9 +132,6 @@ func (l *Log) write(ctx context.Context, e Event, ip string, suppressed int) {
 	}
 	attrs := []slog.Attr{slog.String("log.type", "audit"), slog.Int("schema_version", SchemaVersion),
 		slog.String("event", e.Name), slog.String("outcome", e.Outcome)}
-	if id := logging.RequestID(ctx); id != "" {
-		attrs = append(attrs, slog.String("request_id", id))
-	}
 	for _, f := range []struct{ k, v string }{{"reason", e.Reason}, {"client_id", e.ClientID}, {"client_trust", e.ClientTrust}, {"user_key", e.UserKey},
 		{"grant_id", e.GrantID}, {"key_id", e.KeyID}, {"idp", e.IdP}, {"host", e.Host}, {"origin", e.Origin}, {"remote_ip", ip}} {
 		if f.v != "" {
