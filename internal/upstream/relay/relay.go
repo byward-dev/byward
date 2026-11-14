@@ -11,11 +11,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"net/textproto"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/envproxy"
 	"github.com/byward-dev/byward/internal/logging"
 )
@@ -66,7 +66,7 @@ func WithInject(inject func(context.Context, http.Header)) Option {
 func WithStripped(names ...string) Option {
 	return func(o *options) {
 		for _, n := range names {
-			o.strip[canonical(n)] = true
+			o.strip[config.CanonicalHeader(n)] = true
 		}
 	}
 }
@@ -352,7 +352,7 @@ func withoutAccessToken(raw string) string {
 
 func strip(h http.Header, extra map[string]bool) {
 	for k := range h {
-		if n := canonical(k); builtIn(n) || extra[n] {
+		if n := config.CanonicalHeader(k); builtIn(n) || extra[n] {
 			delete(h, k)
 		}
 	}
@@ -373,16 +373,11 @@ var hopByHop = map[string]bool{"Connection": true, "Proxy-Connection": true, "Ke
 // as it compares them: by the built-in list, hop-by-hop headers included, or as one of extra (the
 // names given WithStripped).
 func Strips(name string, extra ...string) bool {
-	n := canonical(name)
+	n := config.CanonicalHeader(name)
 	for _, e := range extra {
-		if canonical(e) == n {
+		if config.CanonicalHeader(e) == n {
 			return true
 		}
 	}
 	return builtIn(n)
-}
-
-// canonical is a header name as strip compares it: `_` read as `-`, canonical case.
-func canonical(name string) string {
-	return textproto.CanonicalMIMEHeaderKey(strings.ReplaceAll(name, "_", "-"))
 }

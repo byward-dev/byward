@@ -18,10 +18,11 @@ var reservedHeaders = map[string]bool{"Host": true, "Cookie": true, "Set-Cookie"
 func upstreamHeader(v *Values, setting, example string) (string, error) {
 	env := Setting{Name: setting}.Env()
 	h := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(v.get(setting)))
+	n := CanonicalHeader(h) // as the upstream may read it: X_Forwarded_For is X-Forwarded-For
 	switch {
 	case h == "" || strings.ContainsFunc(h, func(r rune) bool { return !isTokenChar(r) }):
 		return "", errorf("%s: want a header name such as Authorization or %s, got %q", env, example, v.get(setting))
-	case reservedHeaders[h] || strings.HasPrefix(h, "X-Forwarded-") || strings.HasPrefix(h, "Proxy-") || strings.HasPrefix(h, "Sec-") || strings.HasPrefix(h, "Access-Control-"):
+	case reservedHeaders[n] || strings.HasPrefix(n, "X-Forwarded-") || strings.HasPrefix(n, "Proxy-") || strings.HasPrefix(n, "Sec-") || strings.HasPrefix(n, "Access-Control-"):
 		return "", errorf("%s: %s is a header the proxy, the transport or MCP relies on; use Authorization or a header of your own such as %s", env, h, example)
 	}
 	return h, nil
@@ -68,7 +69,16 @@ func (c *Config) headerClashes() []error {
 
 // sameHeader reports whether two header names reach the upstream as one.
 func sameHeader(a, b string) bool {
-	return a != "" && strings.EqualFold(strings.ReplaceAll(a, "_", "-"), strings.ReplaceAll(b, "_", "-"))
+	return a != "" && CanonicalHeader(a) == CanonicalHeader(b)
+}
+
+// CanonicalHeader is a header name as it reaches the upstream: `_` folded to `-`, because some
+// upstream frameworks read the two alike (invariant 16; the oauth2-proxy CVE-2025-64484 bypass),
+// then canonicalized (textproto.CanonicalMIMEHeaderKey). Every comparison of a header name the
+// proxy sets, strips or reserves uses it: the reserved checks of upstreamHeader, sameHeader,
+// the strip list, and the relay's own strip.
+func CanonicalHeader(name string) string {
+	return textproto.CanonicalMIMEHeaderKey(strings.ReplaceAll(name, "_", "-"))
 }
 
 // isTokenChar reports whether r may appear in an HTTP header name (RFC 9110 §5.6.2).
