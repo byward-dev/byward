@@ -234,9 +234,9 @@ by /64. The budgets per endpoint: [rate limits](../reference/rate-limits.md#budg
 - [ ] Set `BYWARD_TRUSTED_PROXIES` ([TLS and the reverse proxy](#tls-and-the-reverse-proxy)), or every user shares one budget.
 - [ ] Raise budgets for offices or VPNs behind one address with `BYWARD_OAUTH_RATE_LIMITS`,
       e.g. `authorize=120,callback=120`. Each value is 1–10,000; there is no off switch.
-- [ ] MCP traffic itself is not rate-limited (ADR-0001), only capped in flight: 64 requests and
-      256 streams, then `503`. Put request-rate limits for MCP traffic in your ingress if you need
-      them.
+- [ ] MCP traffic itself is not rate-limited (ADR-0001), only
+      [capped in flight](../reference/rate-limits.md#mcp-in-flight-caps). Put request-rate limits for
+      MCP traffic in your ingress if you need them.
 - [ ] An upstream that sends no response headers within `BYWARD_UPSTREAM_HEADER_TIMEOUT` (default
       `5m`, 1 s to 1 h) frees its slot, and the client gets a JSON-RPC timeout error. Raise it if a
       tool answers with plain JSON after more than 5 minutes; a streamed (SSE) answer is not limited

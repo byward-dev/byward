@@ -12,8 +12,9 @@ Authorization: Bearer eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjYtMTEtMDEiLCJ0eXAiOiJhdC
 ```
 
 The header is `BYWARD_ASSERTION_HEADER` (default `Authorization`), and the value is always
-`Bearer <JWT>`. Every copy of that header sent by the client is removed first, and the client's own
-token never reaches the upstream.
+`Bearer <JWT>`. Every copy of that header the client sends is removed first, in any spelling (`_` is
+read as `-`), so a client can never supply the assertion. The client's own token never reaches the
+upstream, whichever header carries the assertion.
 
 ## The JWT
 
@@ -29,23 +30,23 @@ Claims:
 
 | Claim | Always | Value |
 |---|---|---|
-| `iss` | yes | byward's issuer: the public URL's origin, e.g. `https://mcp.example.com` |
+| `iss` | yes | byward's issuer: the public URL's origin, e.g. `https://mcp.example.com`, whichever IdP signed the user in |
 | `aud` | yes | `BYWARD_UPSTREAM_URL` exactly as configured, e.g. `http://mcp-upstream.internal:3001/mcp` |
-| `sub` | yes | the user key: `tid:oid` for Entra, stable and opaque; for an `oidc` IdP, the value of its subject claim (`BYWARD_OIDC_SUBJECT_CLAIM`, `sub` by default); for an app-only caller, its service principal's `tid:oid` |
+| `sub` | yes | the user key, per IdP: see [The user key](#the-user-key-sub) |
 | `client_id` | yes | the MCP client's ID at byward (a static ID, a CIMD URL or a DCR ID); for an app-only caller, its Entra application (client) ID |
 | `principal_type` | yes | `user`, or `client` for a headless caller with an [app-only token](../how-to/app-tokens.md): check it before treating `sub` as a person |
 | `iat` | yes | issued at, seconds |
 | `exp` | yes | `iat` + 60 seconds |
 | `jti` | yes | 128 random bits, base64url |
 | `roles` | `roles` opted in (default) | the user's roles, when they have any: Entra app roles, or for an `oidc` IdP the ID token claim `BYWARD_OIDC_ROLES_CLAIM` names (`roles` by default) |
-| `groups` | `groups` opted in | the user's groups: Entra group IDs, or for an `oidc` IdP the claim `BYWARD_OIDC_GROUPS_CLAIM` names (`groups` by default); left out under Entra groups overage, or when too many to fit |
-| `email` | `email` opted in, and the IdP verified it or `BYWARD_ASSERTION_UNVERIFIED_EMAIL` is `true` | display only, never for authorization |
+| `groups` | `groups` opted in | the user's groups: Entra group IDs, or for an `oidc` IdP the claim `BYWARD_OIDC_GROUPS_CLAIM` names (`groups` by default); left out when there are too many ([Groups](#groups)) |
+| `email` | `email` opted in, and the IdP verified it or `BYWARD_ASSERTION_UNVERIFIED_EMAIL` is `true` | display only, never for authorization ([Email](#email)) |
 | `email_verified` | exactly when `email` is | `true` when the IdP vouched for the address; `false` when only `BYWARD_ASSERTION_UNVERIFIED_EMAIL` let it through (every Entra email) |
 | `name` | `name` opted in | display only |
 
 A claim the user has no value for is left out; it is never sent empty. An app-only caller's
-assertion carries its app roles and never `groups`, `email`, `email_verified` or `name`. Roles and groups are as of
-the user's last sign-in or token refresh, so they can be up to one hour old.
+assertion carries its app roles and never `groups`, `email`, `email_verified` or `name`. Roles and
+groups can be up to one hour old ([How fresh the claims are](#how-fresh-the-claims-are)).
 
 Example (from `internal/assertion/testdata/assertion.golden.json`; `jti` is random):
 
@@ -67,14 +68,55 @@ Example (from `internal/assertion/testdata/assertion.golden.json`; `jti` is rand
 }
 ```
 
+### The user key: `sub`
+
+`sub` is who the caller is; authorize on it, never on `email` or `name`. Read `principal_type` first:
+only `user` is a person.
+
+| Caller | `sub` |
+|---|---|
+| user, Entra | `tid:oid`: the tenant and object IDs, lower-case GUIDs; stable and opaque |
+| user, `oidc` IdP | the value of the ID token claim `BYWARD_OIDC_SUBJECT_CLAIM` names (`sub` by default). byward warns at start when that claim is one users can change (`email`, `preferred_username`, `upn` or `name`) |
+| app-only caller (Entra only) | its service principal's `tid:oid` |
+
+### Email
+
+- `email` and `name` are personal data ([ADR-0021](../adr/0021-observability.md) §4): opt in only
+  when the upstream needs them.
+- `email` is asserted only when the IdP vouched for it: an [OIDC IdP](../how-to/oidc.md)'s ID token
+  said `email_verified: true`. Otherwise it is left out, and every start logs that it is.
+  `email_verified` comes with every asserted `email` (ADR-0016, 2026-11-07 amendment).
+- Entra's email is display only ([ADR-0012](../adr/0012-entra-specifics.md) §3), and byward never
+  treats it as verified. With Entra, `email` therefore asserts nothing unless
+  `BYWARD_ASSERTION_UNVERIFIED_EMAIL` is `true`. That setting asserts any IdP's unverified email,
+  marked `email_verified: false`, and every start logs that it does.
+- Even a verified email is a display value: it can change, and it is not a unique identifier (OIDC
+  Core §5.7; Microsoft: "Never use it for authorization"). Never authorize on it; use `sub`.
+
+### Groups
+
+`groups` can be large. With 200 groups, Entra's overage limit, a proxy token is about 11 KiB; with
+roles only it stays under 1 KiB. Groups that do not fit in a token are left out entirely, with a
+warning in the log. An Entra user over the overage limit has no groups asserted. Either way the
+upstream sees no `groups` claim, never a partial list.
+
+### How fresh the claims are
+
+The claims come from the user's proxy token, which byward seals at sign-in and at every refresh, so
+a request needs no database lookup. Roles and groups in an assertion can therefore be up to **one
+access-token lifetime (1 hour) old**, the same as the [access gate](../how-to/access-gate.md). A
+removed role stops being asserted at the client's next refresh. To end a user's access at once, use
+`byward revoke-user` ([revoke access](../how-to/revoke-access.md#one-user)).
+
 ## Keys
 
 - JWKS at `/.well-known/jwks.json` on the public and the internal listener, `Cache-Control: public,
-  max-age=300`, or exported with `byward jwks`. The internal listener is plain http, so its JWKS is
-  safe only on the same host or under a NetworkPolicy and mesh mTLS
-  ([how-to](../how-to/identity-assertion.md#2-point-the-upstream-at-the-public-keys)).
+  max-age=300`, or exported with `byward jwks`. Which of the three an upstream should use, and when
+  the plain-http internal listener is safe, is
+  [step 2 of the how-to](../how-to/identity-assertion.md#2-point-the-upstream-at-the-public-keys).
 - The key whose ID sorts last signs. Older keys stay in the JWKS until you remove their files, so a
-  rotation needs no change in the upstream.
+  rotation needs no change in an upstream that fetches the JWKS
+  ([rotation](../how-to/identity-assertion.md#5-rotate-the-signing-key)).
 - With an HTTP upstream, the authorization server metadata advertises the JWKS as `jwks_uri`, at
   `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server`, so a verifier
   that only uses OIDC discovery finds it (see [By discovery](#by-discovery)). The keys verify
@@ -109,6 +151,11 @@ identity to assert: an HTTP upstream gets no assertion header, and a stdio proce
 Check the signature against the JWKS (ES256 only), `iss`, `aud`, and `exp` with a leeway of about
 30 seconds. Check `typ` = `at+jwt` where the library allows it, so no other JWT signed by these keys
 is mistaken for an assertion. Rely on `sub` for who the user is.
+
+The audience is **`BYWARD_UPSTREAM_URL` exactly as you set it**, for example
+`http://mcp-upstream.internal:3001/mcp`. That is often an internal name, not the public URL, and a
+verifier that expects anything else refuses every request. The issuer is byward's public origin
+(`https://mcp.example.com`).
 
 There is no replay cache: the 60-second lifetime and the per-upstream `aud` bound replay.
 

@@ -4,6 +4,7 @@ byward_build_info gauge
 byward_cimd_fetches_total counter
 byward_consent_total counter
 byward_dcr_registrations_total counter
+byward_downstream_tokens_total counter
 byward_http_request_duration_seconds histogram
 byward_idp_alerts_total counter
 byward_idp_request_duration_seconds histogram

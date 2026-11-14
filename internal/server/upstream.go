@@ -117,7 +117,7 @@ func offlineDownstreamToken(context.Context, stdio.Identity) stdio.DownstreamTok
 // host and the path, query or fragment, or as an opaque URL with no host, so such a proxy is not
 // named at all.
 func upstreamResult(cfg *config.Config, proxy func(*http.Request) (*url.URL, error)) doctor.Result {
-	r := doctor.Result{Class: doctor.ClassProxy, Name: "upstream", Status: doctor.Pass}
+	r := doctor.CheckUpstream.Result(doctor.Pass, "", "")
 	if cfg.UpstreamCommand == nil {
 		r.Message = "HTTP upstream " + cfg.UpstreamURL.String() + "; doctor checks the proxy in front of it, not the upstream itself"
 		switch via, err := proxy(&http.Request{URL: cfg.UpstreamURL}); {

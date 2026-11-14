@@ -1,7 +1,9 @@
-# OAuth endpoint rate limits
+# Rate limits and caps
 
-Decisions: [ADR-0018](../adr/0018-hardening.md) §6 and §8. MCP traffic is never rate-limited, only capped in flight
-([ADR-0001](../adr/0001-scope-auth-only-proxy-entra-first-class.md)).
+The OAuth endpoints are rate-limited per client address ([budgets](#budgets)). MCP traffic is never rate-limited,
+only capped in flight ([MCP in-flight caps](#mcp-in-flight-caps);
+[ADR-0001](../adr/0001-scope-auth-only-proxy-entra-first-class.md)). Decisions:
+[ADR-0018](../adr/0018-hardening.md) §6–§8.
 
 ## Budgets
 
@@ -46,3 +48,15 @@ Raise a budget with `BYWARD_OAUTH_RATE_LIMITS`, for example `authorize=120,callb
   memory.
 - **Not limited:** failed client authentication per `client_id` at `/token`. Only static confidential clients
   have a secret to fail with; DCR clients get none.
+
+## MCP in-flight caps
+
+Each proxy process lets at most **64 requests** and **256 long-lived streams** (a `GET` stream, or a request with
+`Mcp-Method: subscriptions/listen`) reach the upstream at once ([ADR-0018](../adr/0018-hardening.md) §7). Streams
+have their own cap, so open streams never use up the slots for tool calls. The caps are fixed, not settings.
+
+- Over a cap, the request is refused with `503`, `Retry-After: 1` and the body `upstream busy`, and counted in
+  `byward_upstream_busy_total` by `kind` (`request` or `stream`). `byward_upstream_in_flight` shows how full each cap
+  is ([metrics](observability.md#metrics)). What to do when they fill up:
+  [respond to alerts](../how-to/respond-to-alerts.md#upstream-busy).
+- The caps count per process, like the rate limits. For a request-rate limit on MCP traffic, use your ingress.

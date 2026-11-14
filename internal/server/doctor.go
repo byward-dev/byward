@@ -162,13 +162,11 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 		}
 		r.Checks = append(r.Checks, servingCertChecks(cfg, pair, o.Now())...)
 		for _, w := range redundantStrips(cfg) {
-			r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "configuration", Status: doctor.Warn, Message: w.Message, Fix: warningFix(w)})
+			r.Checks = append(r.Checks, doctor.CheckConfiguration.Result(doctor.Warn, w.Message, warningFix(w)))
 		}
 		r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy), doctor.TrustStore(trustSettings(), os.ReadFile))
 		r.Checks = append(r.Checks, upstreamHopResult(ctx, cfg, o.Resolve)...)
-		r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "authentication", Status: doctor.Warn,
-			Message: "authentication is off (BYWARD_INSECURE_NO_AUTH): there is no discovery and no IdP to check",
-			Fix:     "configure an IdP and remove BYWARD_INSECURE_NO_AUTH before exposing the proxy"})
+		r.Checks = append(r.Checks, doctor.CheckAuthentication.Result(doctor.Warn, "authentication is off (BYWARD_INSECURE_NO_AUTH): there is no discovery and no IdP to check", "configure an IdP and remove BYWARD_INSECURE_NO_AUTH before exposing the proxy"))
 		return r, nil
 	}
 	parts, err := loadAuthParts(cfg, o.IdP)
@@ -190,7 +188,7 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 		r.Checks = append(r.Checks, identityHeadersResult(ctx, cfg.UpstreamURL.Hostname(), o.Resolve))
 	}
 	for _, w := range append(append(parts.warnings, storeWarnings...), redundantStrips(cfg)...) {
-		r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "configuration", Status: doctor.Warn, Message: w.Message, Fix: warningFix(w)})
+		r.Checks = append(r.Checks, doctor.CheckConfiguration.Result(doctor.Warn, w.Message, warningFix(w)))
 	}
 	target := doctor.Target{Resource: cfg.PublicURL, Issuer: cfg.Issuer(), HostsSetting: config.Setting{Name: "allowed-hosts"}.Env()}
 	if parts.assertionKeys != nil {
