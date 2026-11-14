@@ -90,7 +90,7 @@ func TestCheckOfflineChecksThePostgreSQLDSNWithoutConnecting(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			warnings, err := CheckOffline(cfg)
+			warnings, err := checkOffline(cfg)
 			if tc.inErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.inErr) {
 					t.Fatalf("err = %v, want %q", err, tc.inErr)

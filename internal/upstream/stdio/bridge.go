@@ -13,8 +13,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/byward-dev/byward/internal/logging"
 )
 
 // sessionHeader is the MCP session header (2025-11-25 transports, Session Management).
@@ -199,13 +197,12 @@ func (b *Bridge) delete(w http.ResponseWriter, r *http.Request, id Identity, key
 // process under the caps is in use, else 502.
 func (b *Bridge) startFailed(w http.ResponseWriter, r *http.Request, id Identity, err error) {
 	if errors.Is(err, errBusy) {
-		b.c.Log.WarnContext(r.Context(), "stdio process cap full: every process is in use", "request_id", logging.RequestID(r.Context()),
-			"reason", "process_cap", "user_key", id.Subject)
+		b.c.Log.WarnContext(r.Context(), "stdio process cap full: every process is in use", "reason", "process_cap", "user_key", id.Subject)
 		w.Header().Set("Retry-After", busyRetryAfter)
 		http.Error(w, "upstream busy", http.StatusServiceUnavailable)
 		return
 	}
-	b.c.Log.WarnContext(r.Context(), "cannot start the upstream process", "request_id", logging.RequestID(r.Context()), "error", err)
+	b.c.Log.WarnContext(r.Context(), "cannot start the upstream process", "error", err)
 	http.Error(w, "upstream unavailable", http.StatusBadGateway)
 }
 
@@ -214,7 +211,7 @@ func (b *Bridge) startFailed(w http.ResponseWriter, r *http.Request, id Identity
 func (b *Bridge) start(w http.ResponseWriter, r *http.Request, id Identity) (*session, func()) {
 	key, err := newSessionID()
 	if err != nil {
-		b.c.Log.ErrorContext(r.Context(), "cannot create a session ID", "request_id", logging.RequestID(r.Context()), "error", err)
+		b.c.Log.ErrorContext(r.Context(), "cannot create a session ID", "error", err)
 		http.Error(w, "upstream unavailable", http.StatusBadGateway)
 		return nil, nil
 	}
@@ -254,8 +251,7 @@ func (b *Bridge) session(w http.ResponseWriter, r *http.Request, id Identity, ke
 	if err != nil {
 		if errors.Is(err, ErrUserMismatch) {
 			// The binding in front makes this unreachable; it is checked again where the process is.
-			b.c.Log.WarnContext(r.Context(), "session of another user", "request_id", logging.RequestID(r.Context()),
-				"reason", "session_user_mismatch", "user_key", id.Subject)
+			b.c.Log.WarnContext(r.Context(), "session of another user", "reason", "session_user_mismatch", "user_key", id.Subject)
 		}
 		http.Error(w, "session not found", http.StatusNotFound)
 		return nil, nil
@@ -351,7 +347,7 @@ func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id
 				if stop {
 					s.p.stop("initialize_failed")
 				}
-				s.log.WarnContext(r.Context(), "initialize failed: no MCP session", "request_id", logging.RequestID(r.Context()), "reason", reason)
+				s.log.WarnContext(r.Context(), "initialize failed: no MCP session", "reason", reason)
 			}
 		}()
 	}
@@ -497,7 +493,7 @@ func (s *session) sendFailed(w http.ResponseWriter, r *http.Request, err error) 
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
-	s.log.WarnContext(r.Context(), "relaying to the upstream process failed", "request_id", logging.RequestID(r.Context()), "error", err)
+	s.log.WarnContext(r.Context(), "relaying to the upstream process failed", "error", err)
 	http.Error(w, "upstream unavailable", http.StatusBadGateway)
 }
 

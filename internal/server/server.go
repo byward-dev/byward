@@ -144,10 +144,11 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 		w.log(log)
 	}
 	cancel()
-	for _, w := range redundantStrips(cfg) {
-		w.log(log)
-	}
 	if a == nil {
+		warnings, _ := configWarnings(cfg, nil) // with authentication, buildAuth logs them
+		for _, w := range warnings {
+			w.log(log)
+		}
 		h = Handler(cfg, log, up.handler, resource.NoTokens{}, nil, nil, o)
 	} else {
 		register := a.register
@@ -234,7 +235,7 @@ func recoverer(log *slog.Logger, next http.Handler) http.Handler {
 				if p == http.ErrAbortHandler { //nolint:errorlint // sentinel compared as net/http does
 					panic(p)
 				}
-				log.ErrorContext(r.Context(), "panic", "request_id", logging.RequestID(r.Context()), "panic", fmt.Sprint(p))
+				log.ErrorContext(r.Context(), "panic", "panic", fmt.Sprint(p))
 				http.Error(w, "internal error", http.StatusInternalServerError)
 			}
 		}()

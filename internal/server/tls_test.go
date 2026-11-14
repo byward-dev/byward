@@ -504,7 +504,7 @@ func TestTLSFilesThatCannotBeServedFailStartupCheckAndDoctorAndDevRelaxesOnlyThe
 				if s != nil && s.closeStore != nil {
 					t.Cleanup(func() { _ = s.closeStore() })
 				}
-				_, checkErr := CheckOffline(cfg)
+				_, checkErr := checkOffline(cfg)
 				rep, doctorErr := Doctor(context.Background(), cfg, DoctorOptions{IdP: fakeEntra(t), Proxy: &http.Client{Transport: refuse{}}})
 				errs := map[string]error{"startup": startErr, "check --offline": checkErr, "doctor": doctorErr}
 				if tc.doctorFails {
@@ -551,7 +551,7 @@ func TestACertificateNeedingTheOperatorIsWarnedAboutAtStartupCheckAndDoctor(t *t
 				cfg := mode.load(t, tlsSettings(t, testcert.Issue(t, testcert.Options{Hosts: hosts, Leaf: testcert.Valid(now, tc.days)}))...)
 				var logs syncBuffer
 				started(t, cfg, logging.New(&logs, "json"))
-				warnings, err := CheckOffline(cfg)
+				warnings, err := checkOffline(cfg)
 				if err != nil {
 					t.Fatal(err)
 				}

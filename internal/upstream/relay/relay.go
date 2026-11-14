@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/envproxy"
-	"github.com/byward-dev/byward/internal/logging"
 )
 
 // stripped are removed from every inbound request before anything of ours is set (invariant 16):
@@ -145,7 +144,7 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 			}
 			if isRedirect(res.StatusCode) {
 				ctx := res.Request.Context()
-				log.ErrorContext(ctx, "upstream redirected the request", "request_id", logging.RequestID(ctx), "status", res.StatusCode,
+				log.ErrorContext(ctx, "upstream redirected the request", "status", res.StatusCode,
 					"reason", redirectHint(res))
 				return errUpstreamRedirect
 			}
@@ -171,8 +170,7 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 			if status == http.StatusUnauthorized {
 				hint = "upstream rejected the proxy's credential; check the upstream credential"
 			}
-			log.ErrorContext(ctx, "upstream refused the request", "request_id", logging.RequestID(ctx),
-				"status", status, "reason", hint+"; "+string(o))
+			log.ErrorContext(ctx, "upstream refused the request", "status", status, "reason", hint+"; "+string(o))
 			for _, observe := range refusalObservers {
 				observe(status)
 			}
@@ -197,8 +195,7 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 			}
 			if isHeaderTimeout(r.Context(), err) {
 				out := answerTimeout(r.Context(), w, r.Method)
-				log.ErrorContext(r.Context(), "upstream did not answer in time", "request_id", logging.RequestID(r.Context()),
-					"reason", "no response headers within "+o.headerTimeout.String()+"; "+string(out))
+				log.ErrorContext(r.Context(), "upstream did not answer in time", "reason", "no response headers within "+o.headerTimeout.String()+"; "+string(out))
 				return
 			}
 			cause := []any{"error", err}
@@ -207,7 +204,7 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 				// credentials (invariant 2): name the cause instead.
 				cause = []any{"reason", envproxy.Cause}
 			}
-			log.WarnContext(r.Context(), "upstream error", append([]any{"request_id", logging.RequestID(r.Context())}, cause...)...)
+			log.WarnContext(r.Context(), "upstream error", cause...)
 			// Never echo upstream internals (invariant 15).
 			http.Error(w, "upstream unavailable", http.StatusBadGateway)
 		},

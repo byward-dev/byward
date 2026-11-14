@@ -20,7 +20,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/store/storetest"
-	"github.com/byward-dev/byward/internal/testutil/pgtest"
+	"github.com/byward-dev/byward/internal/testutil/testcert"
 )
 
 var (
@@ -348,7 +348,7 @@ func collectSkipsWhileAnotherReplicaCollects(t *testing.T, srv *server) {
 func verifyFullRefusesAnotherCAOrHostName(t *testing.T, srv *server) {
 	db := srv.newDatabase(t)
 	other := filepath.Join(t.TempDir(), "other-ca.pem")
-	must(t, os.WriteFile(other, pgtest.NewCA(t, "another CA").CertPEM, 0o600))
+	must(t, os.WriteFile(other, testcert.Root(t), 0o600))
 
 	wrongCA := *srv.Server
 	wrongCA.CAFile = other
