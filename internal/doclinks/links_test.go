@@ -6,7 +6,7 @@
 // (title), and <dest> in angle brackets) outside fenced code, code spans and HTML comments; their
 // #anchors against ATX headings (# Heading), as GitHub names them. Not checked: external URLs,
 // reference-style links ([text][ref]), HTML href/src, anchors from setext headings or <a id>, and
-// prose after an HTML comment opened inside code (<!-- in a fence) until its -->; the docs use none
+// prose after an HTML comment opened inside code (<!-- in a fence or code span) until its -->; the docs use none
 // of these. Untracked files are read too, and path case is only enforced on a
 // case-sensitive file system (CI's Linux, not macOS's default).
 package doclinks
@@ -129,7 +129,7 @@ func closesFence(line, fence string) bool {
 	return run >= len(fence) && strings.TrimSpace(line[indent+run:]) == ""
 }
 
-// leadingRun is the length of the run of chars that s starts with.
+// leadingRun is how many bytes at the start of s are in chars.
 func leadingRun(s, chars string) int { return len(s) - len(strings.TrimLeft(s, chars)) }
 
 // blankKeepingLines replaces an HTML comment with its newlines only, so line numbers still match.

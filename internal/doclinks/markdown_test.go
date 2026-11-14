@@ -187,10 +187,23 @@ func TestTheWalkSkipsBuildOutputAndWorktrees(t *testing.T) {
 	} {
 		got, err := markdownFiles(tc.root)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("walk of %s: %v", tc.root, err)
 		}
 		if !slices.Equal(got, tc.want) {
 			t.Errorf("walk of %s: got %v, want %v", tc.root, got, tc.want)
+		}
+	}
+}
+
+// A fence opens on three or more backticks or tildes, indented at most three spaces; a backtick
+// fence's info string has no backtick.
+func TestAFenceOpensOnThreeOfOneCharacter(t *testing.T) {
+	for _, tc := range []struct {
+		line string
+		want bool
+	}{{"```go", true}, {"   ~~~", true}, {"    ```", false}, {"``", false}, {"~~", false}, {"``` a`b", false}, {"~~~ a`b", true}} {
+		if got := openingFence.MatchString(tc.line); got != tc.want {
+			t.Errorf("openingFence.MatchString(%q) = %v, want %v", tc.line, got, tc.want)
 		}
 	}
 }

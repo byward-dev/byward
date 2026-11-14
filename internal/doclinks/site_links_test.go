@@ -77,7 +77,7 @@ func TestASiteLinkNamesAPageInTheTree(t *testing.T) {
 		{repoURL + "tree/main/docs/a.md", "is a file"},
 		{repoURL + "blob/main/docs/gone.md", "which is not in this tree"},
 		{repoURL + "blob/main/docs/a.md#part", "without its #anchor"},
-		{repoURL + "blob/main/docs/a.md?plain=1", "without its #anchor"},
+		{repoURL + "blob/main/docs/a.md?plain=1", "#anchor or ?query"},
 		{"blob/main/docs/a.md", "is not a"},
 		{repoURL + "raw/main/docs/a.md", "is not a"},
 		{repoURL + "blob/v1/docs/a.md", "is not a"},
