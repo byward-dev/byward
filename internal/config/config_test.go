@@ -110,6 +110,12 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"bracket then an empty port", "BYWARD_ALLOWED_HOSTS=[::1]:", `BYWARD_ALLOWED_HOSTS: "[::1]:" is not a host[:port]`},
 		{"bracket then junk", "BYWARD_ALLOWED_HOSTS=[::1]x", `BYWARD_ALLOWED_HOSTS: "[::1]x" is not a host[:port]`},
 		{"bracket then a junk port", "BYWARD_ALLOWED_HOSTS=[::1]:80a", `BYWARD_ALLOWED_HOSTS: "[::1]:80a" is not a host[:port]`},
+		{"host then an empty port", "BYWARD_ALLOWED_HOSTS=localhost:", `BYWARD_ALLOWED_HOSTS: "localhost:" is not a host[:port]; a port is digits`},
+		{"host then a junk port", "BYWARD_ALLOWED_HOSTS=localhost:abc", `BYWARD_ALLOWED_HOSTS: "localhost:abc" is not a host[:port]`},
+		{"IPv4 then an empty port", "BYWARD_ALLOWED_HOSTS=127.0.0.1:", `BYWARD_ALLOWED_HOSTS: "127.0.0.1:" is not a host[:port]`},
+		{"a port without a host", "BYWARD_ALLOWED_HOSTS=:8080", `BYWARD_ALLOWED_HOSTS: ":8080" is not a host[:port]`},
+		{"bare IPv6 with a zone", "BYWARD_ALLOWED_HOSTS=fe80::1%eth0", `BYWARD_ALLOWED_HOSTS: "fe80::1%eth0" is not a host[:port]; a port is digits, and an IPv6 address takes no zone`},
+		{"many colons, not IPv6", "BYWARD_ALLOWED_HOSTS=a:b:c", `BYWARD_ALLOWED_HOSTS: "a:b:c" is not a host[:port]`},
 		{"listen without port", "BYWARD_LISTEN=8080", "BYWARD_LISTEN"},
 		{"log format", "BYWARD_LOG_FORMAT=xml", "BYWARD_LOG_FORMAT"},
 		{"two scopes", "BYWARD_SCOPE=a b", "BYWARD_SCOPE"},
@@ -175,6 +181,15 @@ func TestDevAllowsLoopbackHTTPAndRecordsIt(t *testing.T) {
 	if got := strings.Join(c.Relaxations, "|"); !c.Dev || len(c.Relaxations) != 2 ||
 		!strings.Contains(got, "secret file permissions are not checked") || !strings.Contains(got, "http public URL on loopback") {
 		t.Fatalf("dev=%v relaxations=%v", c.Dev, c.Relaxations)
+	}
+}
+
+// Every form a Host header can match still loads: a host, host:port, a bare IPv6 address, [v6] and
+// [v6]:port (#325).
+func TestEveryAllowedHostFormAHostHeaderCanMatchLoads(t *testing.T) {
+	c, err := load(t, nil, "BYWARD_ALLOWED_HOSTS=mcp.example.com,mcp.example.com:8443,10.0.0.5:8080,2001:db8::1,::1,[2001:db8::1],[::1]:8080")
+	if err != nil || len(c.AllowedHosts) != 7 {
+		t.Fatalf("err=%v hosts=%v", err, c.AllowedHosts)
 	}
 }
 

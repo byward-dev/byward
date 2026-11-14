@@ -169,6 +169,21 @@ func bracketedIPv6(h string) bool {
 	return err == nil && ip.Is6() && ip.Zone() == ""
 }
 
+// plainHost reports whether h, without brackets, is a host, host:port with a digits-only port, or
+// a bare IPv6 address without a zone (more than one colon: it cannot carry a port).
+func plainHost(h string) bool {
+	switch strings.Count(h, ":") {
+	case 0:
+		return h != ""
+	case 1:
+		host, port, _ := strings.Cut(h, ":")
+		return host != "" && port != "" && strings.Trim(port, "0123456789") == ""
+	default:
+		ip, err := netip.ParseAddr(h)
+		return err == nil && ip.Is6() && ip.Zone() == ""
+	}
+}
+
 // Hostname is a host as BYWARD_ALLOWED_HOSTS lists it or a Host header carries it (host,
 // host:port, [v6], [v6]:port or a bare v6 address) reduced to its host name: no port, no
 // brackets, in lower case. The internal listener's Host check, the no-auth loopback check and
