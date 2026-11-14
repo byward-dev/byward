@@ -100,7 +100,8 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"public host with a wildcard", "BYWARD_PUBLIC_URL=https://a*b/mcp", `BYWARD_PUBLIC_URL: "a*b" is not a host[:port]: a host name`},
 		// #353: the port and the zone follow BYWARD_ALLOWED_HOSTS' rules too.
 		{"public URL with an empty port", "BYWARD_PUBLIC_URL=https://a.example:/mcp", `BYWARD_PUBLIC_URL: "a.example:" is not a host[:port]: give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone`},
-		{"public URL with a port over 65535", "BYWARD_PUBLIC_URL=https://a.example:99999/mcp", `BYWARD_PUBLIC_URL: "a.example:99999" is not a host[:port]`},
+		{"public URL with a port over 65535", "BYWARD_PUBLIC_URL=https://a.example:65536/mcp", `BYWARD_PUBLIC_URL: "a.example:65536" is not a host[:port]`},
+		{"unicode public host with a port", "BYWARD_PUBLIC_URL=https://bücher.example:8443/mcp", `BYWARD_PUBLIC_URL: the host "bücher.example:8443" is not ASCII`},
 		{"public URL with port 0", "BYWARD_PUBLIC_URL=https://a.example:0/mcp", `BYWARD_PUBLIC_URL: "a.example:0" is not a host[:port]`},
 		{"public URL with a leading-zero port", "BYWARD_PUBLIC_URL=https://a.example:0443/mcp", `BYWARD_PUBLIC_URL: "a.example:0443" is not a host[:port]`},
 		{"public URL with an IPv6 zone", "BYWARD_PUBLIC_URL=https://[fe80::1%25eth0]/mcp", `BYWARD_PUBLIC_URL: "[fe80::1%eth0]" is not a host[:port]: give host`},
