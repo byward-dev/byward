@@ -92,7 +92,7 @@ These are not settings, so `--print-config` does not show them.
 | Variable | Read or set by | Meaning |
 |---|---|---|
 | `OTEL_*` | the proxy, through the OpenTelemetry SDK | traces, off unless `OTEL_TRACES_EXPORTER` is set ([observability](observability.md)) |
-| `SSL_CERT_FILE`, `SSL_CERT_DIR` | the proxy, through Go | the CAs it trusts for outbound TLS: the IdP, the upstream, CIMD documents and client key sets (`jwks_uri`), and the PostgreSQL store when its DSN has no `sslrootcert` ([private CA](../how-to/private-ca.md)) |
+| `SSL_CERT_FILE`, `SSL_CERT_DIR` | the proxy, through Go | the CAs it trusts for outbound TLS: the IdP, the upstream, an MCP client's CIMD document and `jwks_uri`, and the PostgreSQL store when its DSN has no `sslrootcert` ([private CA](../how-to/private-ca.md)) |
 | `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | the proxy, through Go | the environment proxy: the relay to an HTTP upstream, IdP calls, doctor's self-probe and trace export go through it ([doctor](commands.md#checks) names it) |
 | `BYWARD_SUBJECT`, `BYWARD_ISSUER`, `BYWARD_PRINCIPAL_TYPE` | set by the proxy for a stdio upstream process | who the process acts for ([stdio upstream](../how-to/stdio-upstream.md)) |
 | `BYWARD_DOWNSTREAM_TOKEN_SOCKET` | set by the proxy for a stdio upstream process, read by `byward downstream-token` | the token socket the process asks for its user's downstream token |
