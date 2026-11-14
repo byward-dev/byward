@@ -70,6 +70,20 @@ func TestGenericDiscoveryIsServedUnderTheIssuersPath(t *testing.T) {
 	}
 }
 
+// An issuer path ending in a slash is discovered without it, as the adapter asks for it.
+func TestGenericDiscoveryOfAnIssuerPathEndingInASlash(t *testing.T) {
+	f := newFixture(t, Generic)
+	f.idp.Set(WithIssuer(f.idp.URL() + "/realms/acme/"))
+	res, err := http.Get(f.idp.URL() + "/realms/acme/.well-known/openid-configuration")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200", res.StatusCode)
+	}
+}
+
 // A user's Claims override the profile's claim of the same name, as their comment says.
 func TestUserClaimsOverrideTheProfilesClaims(t *testing.T) {
 	f := newFixture(t, Generic, WithUser(User{Groups: []string{"profile-group"}, Claims: map[string]any{"groups": []string{"raw-group"}}}))
