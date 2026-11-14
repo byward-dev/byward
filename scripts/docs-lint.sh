@@ -15,7 +15,8 @@
 # Usage: sh scripts/docs-lint.sh [repository root]
 set -eu
 root=${1:-.}
-case $root in (*?/) root=${root%/} ;; esac
+# Drop every trailing slash (so rel below is relative); "/" stays as it is.
+case $root in (*[!/]*) root=${root%"${root##*[!/]}"} ;; esac
 tag_file="$root/scripts/docs-image-tag"
 [ -f "$tag_file" ] || { echo "docs-lint: $tag_file is missing" >&2; exit 2; }
 tag=$(grep -v '^#' "$tag_file" | tr -d '[:space:]')

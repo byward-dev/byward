@@ -66,6 +66,9 @@ check "slice 12 is no slice label" 0 docs/a.md "slice 12 of the cake"
 check "as of now has no date" 0 docs/a.md "as of now"
 check "a date with only a major version" 1 docs/a.md "as of 2026-11-14 (v2)" 'without a version'
 check "a tag ending in snapshot" 1 docs/a.md "ghcr.io/byward-dev/byward:v1-snapshot" 'image tag v1-snapshot'
+check "slice 1x2 is no slice label" 0 docs/a.md "slice 1x2"
+check "snapshot inside a tag" 1 docs/a.md "ghcr.io/byward-dev/byward:v1-snapshot-x" 'image tag v1-snapshot-x'
+check "snapshot without its dash" 1 docs/a.md "ghcr.io/byward-dev/byward:snapshotx" 'image tag snapshotx'
 check "docs/agents is not an ADR" 1 docs/agents/x.md "Not supported yet." '"not supported yet"'
 # A VAR=value prefix on a function call may outlive the call in sh, so these set and unset it.
 TAGFILE='  v1.2.3  \r\n'
@@ -75,6 +78,8 @@ check "a tag file with no tag" 2 docs/a.md "x" 'holds no tag'
 unset TAGFILE
 ROOT_SUFFIX=/
 check "a root with a trailing slash" 0 docs/adr/0001-x.md "in v0.1"
+ROOT_SUFFIX=//
+check "a root with two trailing slashes" 0 docs/adr/0001-x.md "in v0.1"
 unset ROOT_SUFFIX
 
 repo="$tmp/repo"
