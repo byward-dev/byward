@@ -1,6 +1,6 @@
 # ADR-0014: Token validation — header only, sealed checks, no store on the request path
 
-- Status: Accepted
+- Status: Accepted; amended by ADR-0022, and 2026-11-07 (#64)
 - Date: 2026-11-05
 - Issue: #12 (F11)
 

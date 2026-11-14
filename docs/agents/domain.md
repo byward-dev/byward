@@ -8,21 +8,10 @@ How the engineering skills should consume this repo's domain documentation when 
 - **`docs/adr/`** — read ADRs that touch the area you're about to work in. ADR-0001 (scope)
   and ADR-0002 (repo structure) apply to almost everything.
 
-If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The producer skill (`/grill-with-docs`) creates them lazily when terms or decisions actually get resolved.
-
 ## File structure
 
-Single-context repo:
-
-```
-/
-├── CONTEXT.md
-├── docs/adr/
-│   ├── 0001-scope-auth-only-proxy-entra-first-class.md
-│   └── 0002-repo-structure-for-agents.md
-├── cmd/byward/
-└── internal/
-```
+A single-context repo: one `CONTEXT.md` at the root, and the ADRs in `docs/adr/`, listed with their
+amendments in [docs/adr/README.md](../adr/README.md).
 
 ## Use the glossary's vocabulary
 

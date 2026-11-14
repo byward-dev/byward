@@ -1,6 +1,6 @@
 # ADR-0016: Identity propagation — an RFC 9068 assertion for the upstream, strip then inject
 
-- Status: Accepted
+- Status: Accepted; amended 2026-11-07 (#151, #64), 2026-11-08 (#187, #207)
 - Date: 2026-11-06
 - Issue: #14 (F13)
 

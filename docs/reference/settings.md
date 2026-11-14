@@ -80,7 +80,19 @@ Precedence: flag > environment > default. Secrets are read only from files.
 | `--insecure-no-auth` | `BYWARD_INSECURE_NO_AUTH` | false | no authentication at all, for trying the proxy out and for tests; loopback only (ADR-0027) |
 | `--dev` | `BYWARD_DEV` | false | development mode: enables the relaxations it logs at startup |
 
-Actions: `--version [--json]`, `--print-config`, `--help`.
-Commands (`check --offline`, `doctor`, `init entra`): [commands reference](commands.md).
+Actions: `--version [--json]`, `--print-config`, `--help` ([proxy actions](commands.md#proxy-actions)).
+Commands: [commands reference](commands.md).
 
 Exit codes: 0 success, 1 runtime error, 2 configuration error; `doctor` adds 4, 8 and 12.
+
+## Other environment variables
+
+These are not settings, so `--print-config` does not show them.
+
+| Variable | Read or set by | Meaning |
+|---|---|---|
+| `OTEL_*` | the proxy, through the OpenTelemetry SDK | traces, off unless `OTEL_TRACES_EXPORTER` is set ([observability](observability.md)) |
+| `SSL_CERT_FILE`, `SSL_CERT_DIR` | the proxy, through Go | the CAs it trusts for outbound TLS: the IdP, the upstream, client metadata ([private CA](../how-to/private-ca.md)) |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` | the proxy, through Go | the HTTP proxy outbound requests go through ([doctor](commands.md#checks) names it) |
+| `BYWARD_SUBJECT`, `BYWARD_ISSUER`, `BYWARD_PRINCIPAL_TYPE` | set by the proxy for a stdio upstream process | who the process acts for ([stdio upstream](../how-to/stdio-upstream.md)) |
+| `BYWARD_DOWNSTREAM_TOKEN_SOCKET` | set by the proxy for a stdio upstream process, read by `byward downstream-token` | the socket the process asks for its On-Behalf-Of token |

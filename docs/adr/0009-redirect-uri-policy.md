@@ -1,6 +1,6 @@
 # ADR-0009: Redirect URI policy — exact HTTPS, any-port loopback, re-checked at /token
 
-- Status: Accepted
+- Status: Accepted; amended by ADR-0010, and 2026-11-06 (DCR)
 - Date: 2026-11-05
 - Issue: #9 (F8)
 

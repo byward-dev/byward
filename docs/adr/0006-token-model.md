@@ -1,6 +1,6 @@
 # ADR-0006: Token model — minted, sealed proxy tokens with a revocation deny list
 
-- Status: Accepted
+- Status: Accepted; amended by ADR-0007
 - Date: 2026-11-05
 - Issue: #5 (F4)
 

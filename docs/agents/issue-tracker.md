@@ -19,8 +19,7 @@ Infer the repo from `git remote -v` — `gh` does this automatically when run in
 - `docs/features.md` is the backlog index (`F<n>` rows). Details and discussion live in the
   issue, not the index. When an issue is created for a feature row, or a feature's status
   changes, update its row in `docs/features.md`.
-- Triage labels other than `wontfix` do not exist yet. Create one on first use:
-  `gh label create <name> --description "..."`. Label strings: `docs/agents/triage-labels.md`.
+- The triage labels exist on the repo; their strings are in `docs/agents/triage-labels.md`.
 - Use `CONTEXT.md` vocabulary in issue titles and bodies (see `docs/agents/domain.md`).
 
 ## When a skill says "publish to the issue tracker"

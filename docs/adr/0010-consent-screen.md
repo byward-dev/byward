@@ -1,6 +1,6 @@
 # ADR-0010: Consent screen — before the IdP, per client, remembered only for trusted clients
 
-- Status: Accepted
+- Status: Accepted; clarified 2026-11-06 (#90), 2026-11-07 (#126); amended 2026-11-06 (slices 1.4, 2.1)
 - Date: 2026-11-05
 - Issue: #8 (F7)
 

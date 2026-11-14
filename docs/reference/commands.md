@@ -12,11 +12,11 @@ after `--`, as for the proxy (`byward check --offline -- /usr/local/bin/server -
 | `byward check --offline [-- <command>]` | validates the configuration as the proxy does at startup | none | 0, 2 |
 | `byward doctor [--json] [-- <command>]` | probes the running proxy as MCP clients do, and the IdP app | the public URL and the IdP | 0, 2, 4, 8, 12 |
 | `byward init entra --tenant <id>` | prints the `az` commands for the Entra app registration and a minimal env file | none | 0, 2 |
-| `byward revoke-user <user key>` | ends one user's access ([hardening](../how-to/harden-a-deployment.md)) | the store | 0, 1, 2 |
-| `byward revoke-all --yes` | ends every user's access ([hardening](../how-to/harden-a-deployment.md)) | the store | 0, 1, 2 |
-| `byward store new-epoch --yes` | after restoring the PostgreSQL store: starts a new store epoch, so refresh tokens from before it are refused ([PostgreSQL](../how-to/postgres.md#backup-and-restore)) | the store | 0, 1, 2 |
-| `byward jwks` | prints the identity assertion's public keys as a JWKS, for an upstream that loads them from a file ([identity assertion](../how-to/identity-assertion.md)) | none | 0, 2 |
-| `byward downstream-token [--json]` | run by a stdio upstream process or one of its descendants: prints its user's On-Behalf-Of token from `BYWARD_DOWNSTREAM_TOKEN_SOCKET`, for a server that takes a credential command ([On-Behalf-Of §5](../how-to/downstream-apis.md#5-a-stdio-upstream)) | the token socket | 0, 1, 2 |
+| `byward revoke-user <user key>` | ends one user's access ([below](#byward-revoke-user)) | the store | 0, 1, 2 |
+| `byward revoke-all --yes` | ends every user's access ([below](#byward-revoke-all)) | the store | 0, 1, 2 |
+| `byward store new-epoch --yes` | after restoring the PostgreSQL store: starts a new store epoch, so refresh tokens from before it are refused ([below](#byward-store-new-epoch)) | the store | 0, 1, 2 |
+| `byward jwks` | prints the identity assertion's public keys as a JWKS, for an upstream that loads them from a file ([below](#byward-jwks)) | none | 0, 2 |
+| `byward downstream-token [--json]` | run by a stdio upstream process or one of its descendants: prints its user's On-Behalf-Of token from `BYWARD_DOWNSTREAM_TOKEN_SOCKET`, for a server that takes a credential command ([below](#byward-downstream-token)) | the token socket | 0, 1, 2 |
 
 Decisions: [ADR-0020](../adr/0020-configuration.md) §7–8, [ADR-0021](../adr/0021-observability.md) §11,
 [ADR-0013](../adr/0013-discovery-and-errors.md) §8, [ADR-0012](../adr/0012-entra-specifics.md) §10, §12.
@@ -27,17 +27,22 @@ Checks everything the proxy checks at startup that needs no network and writes n
 
 - the settings (unknown names, values, required settings);
 - the sealing keys and the static clients file (optional while CIMD or DCR is on);
-- the Entra settings and the access gate, and the Entra client certificate file if there is one
-  (an RSA key of 2048 bits or more, its certificate; an expired certificate is a configuration
-  error);
+- the IdP settings (Entra or `oidc`) and the access gate, and the IdP credential file if there is one:
+  the Entra client certificate (an RSA key of 2048 bits or more, its certificate; an expired
+  certificate is a configuration error) or the `oidc` client key;
 - the secret files' permissions, as at startup (relaxed with `--dev`);
 - a stdio upstream's command (`BYWARD_UPSTREAM_COMMAND` or the command after `--`): it must be found
   and executable, as at startup; it is never started;
-- the store paths: an existing state directory must be a directory (a missing one is created at
-  startup), and the counter file's directory must exist (it is not created). Nothing is created.
+- the store: with SQLite, its paths (an existing state directory must be a directory, a missing one
+  is created at startup, and the counter file's directory must exist, it is not created); with
+  PostgreSQL, the DSN as startup parses it, including the `sslmode=verify-full` rule, without
+  connecting. Nothing is created;
+- with `BYWARD_TLS_CERT_FILE`, the TLS certificate and key: readable, a matching pair, and valid now.
 
 It prints the warnings the proxy would log at startup (an empty access gate, generic consent
-wording, a client secret or client certificate that expires within 30 days), then `configuration OK`. A problem is a
+wording, a client secret or client certificate that expires within 30 days, a TLS certificate that
+expires within 30 days or names neither the public URL's host nor an allowed host, and with
+PostgreSQL the reminder that every replica needs the same keys), then `configuration OK`. A problem is a
 configuration error on standard error, exit code 2. `check` without `--offline` is refused, so that a
 script written today keeps meaning the same thing.
 
@@ -61,8 +66,11 @@ fail  idp    entra app and credential: Entra rejected the client secret (AADSTS7
 
 | Class | Check | Passes when |
 |---|---|---|
+| `proxy` | TLS certificate expiry | with `BYWARD_TLS_CERT_FILE`: the chain's first certificate to expire is more than 30 days from expiry (a warning at 30 days or less; a failure when the files are not valid yet or cannot be served) |
+| `proxy` | TLS certificate names | with `BYWARD_TLS_CERT_FILE`: the certificate covers the public URL's host or a `BYWARD_ALLOWED_HOSTS` entry (otherwise a warning: fine when only an ingress connects and verifies another name) |
 | `proxy` | upstream | passes once the configuration loads: names the HTTP upstream, and the environment's HTTP proxy its requests go through (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`; by scheme and host only), or the stdio command that was found. A warning when Go refuses `HTTP_PROXY` because `REQUEST_METHOD` is set (its CGI guard, which `NO_PROXY` does not lift), or when the proxy setting's credentials hold an unescaped character (such as `/`, `?` or `#`), which Go then reads partly as the host, or cannot read a host from at all. A proxy setting Go cannot parse is ignored without an error, so then no proxy is named. Doctor never reaches the upstream, and never starts a stdio process |
 | `proxy` | upstream hop | shown only as a warning: the HTTP upstream is `http` and its host resolves to a public address, so the secrets each request carries (the identity assertion, the upstream credential, an On-Behalf-Of token) travel in clear. A host that does not resolve gets no warning. Also logged at startup, and by `check --offline` for an upstream given as an address |
+| `proxy` | identity headers | with `BYWARD_IDENTITY_HEADERS` and an HTTP upstream: the upstream's host resolves only to loopback, private, link-local, shared (CGNAT) or unspecified addresses (a warning when it has a public address or does not resolve). A hint, not a guarantee: doctor sees addresses, not who can reach them |
 | `proxy` | configuration | never fails; one warning per startup warning (an empty access gate, generic consent wording) |
 | `proxy` | protected resource metadata (path-inserted) | `/.well-known/oauth-protected-resource<path>` answers 200 with `resource` equal to the public URL and our issuer first in `authorization_servers` |
 | `proxy` | protected resource metadata (root) | the same at `/.well-known/oauth-protected-resource` |
@@ -70,6 +78,7 @@ fail  idp    entra app and credential: Entra rejected the client secret (AADSTS7
 | `proxy` | unauthenticated MCP request | a POST without a token gets 401 whose `resource_metadata` is one of the URLs above and resolves |
 | `proxy` | Host header | no response was 421; a reverse proxy that changes `Host` shows up here |
 | `proxy` | identity assertion keys (discovery) | with an HTTP upstream: the OpenID discovery document names byward's issuer and a `jwks_uri` that serves the key signing assertions, as a verifier using only discovery (MCP Toolbox) needs |
+| `proxy` | authentication | only with `BYWARD_INSECURE_NO_AUTH`: always a warning, since there is no discovery and no IdP to check |
 | `idp` | discovery | with an `oidc` IdP or preset: the discovery document at `BYWARD_OIDC_ISSUER` names that issuer exactly |
 | `idp` | client credential | with an `oidc` IdP or preset: a token request with a made-up authorization code is answered `invalid_grant` with a 4xx status, so the IdP accepted the client ID and the secret or key and refused only the code. `invalid_client`, `unauthorized_client`, or `access_denied` with 401 (Auth0) fail, with a fix naming the credential's setting; any other answer is a warning. The IdP's `error_description` is never shown (an IdP may echo the request into it). Needs no user. Keycloak, Okta, Auth0 and Google were measured to check the client before the code; for plain `oidc` a pass says that order is assumed |
 | `idp` | entra tenant | the tenant's v2 discovery document exists and names its v2 issuer |
@@ -88,11 +97,8 @@ with AADSTS501051 unless the app holds a role on itself. Doctor then reports the
 passed, since Entra checked it before refusing, and the access token as a skip, with the
 `az ad app show` command that checks its version by hand.
 
-With `BYWARD_ENTRA_TENANT=organizations` there is no home tenant to send a client-credentials request
-to (Microsoft documents that request only with a tenant ID or domain), so the credential check is a
-skip with the `az` commands that check it by hand.
-
-With `BYWARD_INSECURE_NO_AUTH` there is no discovery and no IdP; doctor reports one warning.
+With `BYWARD_INSECURE_NO_AUTH` there is no discovery and no IdP: doctor runs the TLS certificate,
+`upstream`, `upstream hop` and `configuration` checks, then reports `authentication` as a warning.
 
 ### Statuses and exit codes
 
@@ -157,7 +163,8 @@ the script stops if `az` is signed in elsewhere). It follows
 3. the OpenID Connect permissions;
 4. the service principal, with **assignment required**: only users, groups and applications you
    assign can sign in;
-5. a client secret (`--append` keeps existing credentials; at most two years), written straight to
+5. a client secret (the script's `az ad app credential reset --append` keeps existing credentials; at
+   most two years), written straight to
    the `0600` file `entra-client-secret`; or, with `--credential certificate`, an RSA 2048 key and a
    self-signed certificate valid for `--secret-years` years, made locally with `openssl`, written together to the `0600` file
    `entra-client-certificate.pem`, with only the public certificate uploaded
@@ -172,3 +179,71 @@ the script stops if `az` is signed in elsewhere). It follows
 Each run creates a new app registration. Afterwards, assign users or groups to the enterprise
 application with the `byward.user` role, create a [sealing key](../how-to/sealing-keys.md), start the
 proxy and run `byward doctor`.
+
+## `byward revoke-user`
+
+```sh
+byward revoke-user <user key>
+```
+
+Deletes every grant of one user and records a cut-off, so every proxy using the same store refuses
+the user's refresh tokens at once and their access tokens at its next deny-list sync, within
+seconds. The user key is the one the audit records show as `user_key`: with Entra, `tid:oid` (the
+tenant and object IDs); with an `oidc` IdP, the value of its subject claim (`BYWARD_OIDC_SUBJECT_CLAIM`,
+`sub` by default). It runs beside a running proxy. A key that is not a user key of the configured
+IdP exits 2; a store that cannot be opened or written exits 1. The revocation is audited as
+`grant_revoked` with the reason `operator revoke-user` ([observability](observability.md)).
+
+## `byward revoke-all`
+
+```sh
+byward revoke-all --yes
+```
+
+The same for every user at once, for incident response: everyone signs in again. `--yes` is required.
+Audited as `grant_revoked` with the reason `operator revoke-all`.
+
+## `byward store new-epoch`
+
+```sh
+byward store new-epoch --yes
+```
+
+For the PostgreSQL store, after a `pg_restore` or a point-in-time recovery: starts a new store epoch,
+so refresh tokens issued before it are refused and their users sign in again, and forgets every
+remembered consent. Running replicas adopt the epoch at once. It prints the new epoch and is audited as
+`store_restored` with the reason `operator new-epoch`. With the SQLite store it exits 2: SQLite finds a
+restore by itself at startup ([state](../how-to/state.md#restore-detection)). See
+[PostgreSQL](../how-to/postgres.md#backup-and-restore).
+
+## `byward jwks`
+
+```sh
+byward jwks > byward-jwks.json
+```
+
+Prints the identity assertion's public keys as a JWKS, for an upstream that loads them from a file
+instead of the JWKS URL. Run it again after every assertion key rotation
+([identity assertion](../how-to/identity-assertion.md)).
+
+## `byward downstream-token`
+
+```sh
+byward downstream-token [--json]
+```
+
+Run by a stdio upstream process or one of its descendants. It reads only
+`BYWARD_DOWNSTREAM_TOKEN_SOCKET`, asks that socket for its user's On-Behalf-Of token and prints it;
+`--json` prints the token with its `expires_at`. On an error answer it prints the error code alone on
+standard error and exits 1 ([On-Behalf-Of §5](../how-to/downstream-apis.md#5-a-stdio-upstream)).
+
+## Proxy actions
+
+These are flags of the proxy itself (`byward` with no command), read with the same settings:
+
+| Action | What it does | Exit codes |
+|---|---|---|
+| `byward --help` | prints the settings and the commands | 0 |
+| `byward --version [--json]` | prints the version, the source revision and the Go version; with `--json`, an object with `version`, `revision`, `time`, `modified` (only when set) and `go_version` | 0 |
+| `byward --print-config` | prints every setting as `NAME=value (source)`, the source being `flag`, `env`, `file` or `default`; secrets show as `<redacted>` | 0, 2 |
+

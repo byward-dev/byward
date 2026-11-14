@@ -1,6 +1,6 @@
 # ADR-0007: State and storage — one store interface, embedded SQLite by default
 
-- Status: Accepted
+- Status: Accepted; clarified 2026-11-07 (#150); amended 2026-11-13 (#227)
 - Date: 2026-11-05
 - Issue: #6 (F5)
 

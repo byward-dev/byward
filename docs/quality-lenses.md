@@ -42,9 +42,9 @@ angles can be researched in parallel (one helper or agent per angle).
 | P1 | Solo **operator** on a VM or Docker host wrapping a stdio **upstream**; knows Go/Node, not OAuth | Working connector in < 15 min; errors name the fix |
 | P2 | Platform **operator** in an Entra tenant, k8s behind ingress | Entra how-to matches the portal; startup check validates tenant, app ID, redirect URI; HA |
 | P3 | Security reviewer | One-page security posture; secure defaults; insecure modes named and logged; signed releases + SBOM |
-| P4 **User** at **consent**, non-technical | Knows who is asking within 3 s; one click; errors say what to tell the operator |
-| P5 MCP-server author | Stable identity contract to the upstream, no token passthrough |
-| P6 Contributor (human or agent) | `mise run check` passes locally; ADRs answer "why"; fakes in `internal/testutil` |
+| P4 | **User** at **consent**, non-technical | Knows who is asking within 3 s; one click; errors say what to tell the operator |
+| P5 | MCP-server author | Stable identity contract to the upstream, no token passthrough |
+| P6 | Contributor (human or agent) | `mise run check` passes locally; ADRs answer "why"; fakes in `internal/testutil` |
 
 ## Lenses
 
@@ -222,10 +222,10 @@ Decided values cite their ADR; everything else is **proposed — decided per fea
 |---|---|---|
 | stdio idle timeout | 30 min | **Decided**, ADR-0003 |
 | stdio process caps | 64 per upstream, 8 per user; LRU eviction of idle (the user's own at their cap) | **Decided** mechanism (ADR-0003); values set in #60 |
-| stdio spawn / kill | 30 s spawn timeout; kill 5 s after SIGTERM | Proposed |
-| Discovery, registration, token | < 10 s, p99 < 2 s | Proposed (Claude times out at 10 s) |
-| Refresh | < 30 s, p99 < 5 s | Proposed (Claude: 30 s) |
-| Outbound IdP / CIMD fetch | 5 s, 2 jittered retries; CIMD ≤ 5 KB, metadata ≤ 64 KB | Proposed (CIMD -03 §10.11: 5 KB) |
+| stdio spawn / kill | 30 s spawn timeout; kill 5 s after SIGTERM | **Decided** in code (`internal/upstream/stdio/stdio.go`) |
+| Discovery, registration, token | < 10 s, p99 < 2 s | Proposed, not enforced (Claude times out at 10 s) |
+| Refresh | < 30 s, p99 < 5 s | Proposed, not enforced (Claude: 30 s) |
+| Outbound IdP / CIMD fetch | 5 s, 2 jittered retries for IdP GETs (never for token POSTs); CIMD ≤ 5 KiB, IdP responses ≤ 64 KiB | **Decided** in code (`internal/idp/fetch.go`, `internal/ssrfguard`, `internal/registration/cimd.go`; CIMD -03 §10.11: 5 KB) |
 | `http.Server` | ReadHeaderTimeout 10 s, ReadTimeout 30 s, IdleTimeout 120 s, MaxHeaderBytes 64 KiB, per-request write deadlines for streams | **Decided**, ADR-0018 |
 | Request body | 8 MiB MCP route, 64 KiB OAuth endpoints, 16 KiB consent | **Decided**, ADR-0018 (consent amended 2026-11-06) |
 | HTTP upstream response headers | 5 min (1 s to 1 h); a stream is not limited once its headers arrive | **Decided**, ADR-0018 (amended 2026-11-06) |
@@ -245,7 +245,7 @@ Each feature names the cells it touches and adds a test per cell; untested cells
 | Spec revision | 2025-11-25, 2026-07-28 |
 | IdP | Entra (single tenant, organizations), Keycloak, Okta, Auth0, Google |
 | Upstream | HTTP, stdio |
-| Platform | linux/amd64+arm64 (supported), darwin (development only); no Windows in v0.1 (ADR-0019) |
+| Platform | linux/amd64+arm64 (supported), darwin (development only); no Windows build (ADR-0019) |
 
 CI runs MCP conformance `server` on both revisions through the proxy and `authorization` against the
 broker (ADR-0024); open-source clients run for real in CI, closed clients through the client

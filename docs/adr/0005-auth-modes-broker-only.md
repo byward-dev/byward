@@ -1,6 +1,6 @@
 # ADR-0005: Auth modes — broker only in v0.1
 
-- Status: Accepted
+- Status: Accepted; amended by ADR-0027
 - Date: 2026-11-05
 - Issue: #4 (F3)
 
