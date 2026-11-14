@@ -78,8 +78,8 @@ func Issue(t testing.TB, o Options) Bundle {
 	}
 }
 
-// Root returns a fresh root that issued nothing, in PEM: another CA, which a client pointed at it
-// must refuse every Bundle's leaf under.
+// Root returns, in PEM, a fresh root that issued nothing: a client that trusts only it must refuse
+// every Bundle's leaf.
 func Root(t testing.TB) []byte {
 	t.Helper()
 	root, _ := newRoot(t)
