@@ -13,6 +13,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"time"
 )
 
@@ -40,9 +42,9 @@ type DownstreamToken struct {
 
 const (
 	tokenSocketName = "token.sock"
-	// maxSocketPath is the longest socket path both platforms accept (sun_path: 104 bytes on
-	// macOS with its NUL, 108 on Linux).
-	maxSocketPath = 103
+	// maxSocketPath is the longest socket path this platform accepts: sun_path less its NUL, 107
+	// bytes on Linux and 103 on macOS.
+	maxSocketPath = len(syscall.RawSockaddrUnix{}.Path) - 1
 	// tokenAnswerTimeout bounds one connection: the On-Behalf-Of exchange takes at most 30 s
 	// (downstream.ExchangeTimeout), and a peer that stalls must not block the next one for longer.
 	tokenAnswerTimeout = 40 * time.Second
@@ -67,6 +69,24 @@ type tokenAnswer struct {
 	AccessToken string `json:"access_token,omitempty"`
 	ExpiresAt   string `json:"expires_at,omitempty"`
 	Error       string `json:"error,omitempty"`
+}
+
+// ErrTempDirTooLong is returned by New when, with On-Behalf-Of, the temporary directory leaves no
+// room for a token socket path; its fix is TMPDIR.
+var ErrTempDirTooLong = errors.New("temporary directory too long for the token socket")
+
+// checkTempDirFitsTokenSocket fails when the token socket in a session directory under tempDir
+// (os.TempDir() when empty) can be longer than a socket path may be, naming the limit.
+func checkTempDirFitsTokenSocket(tempDir string) error {
+	if tempDir == "" {
+		tempDir = os.TempDir()
+	}
+	longest := filepath.Join(tempDir, sessionDirPattern+longestSessionDirSuffix, tokenSocketName)
+	if len(longest) > maxSocketPath {
+		return fmt.Errorf("%w: with On-Behalf-Of, each process's token socket is %s, up to %d bytes, longer than the %d bytes a socket path may have on %s; set a shorter temporary directory (TMPDIR)",
+			ErrTempDirTooLong, filepath.Join(tempDir, sessionDirPattern+"<n>", tokenSocketName), len(longest), maxSocketPath, runtime.GOOS)
+	}
+	return nil
 }
 
 // tokenSocket serves one upstream process's token socket in its session directory.

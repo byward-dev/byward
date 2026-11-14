@@ -7,9 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -107,6 +110,99 @@ func TestInvalidCommandConfigIsRejected(t *testing.T) {
 			}
 		})
 	}
+}
+
+// #307: with On-Behalf-Of, each process gets a token socket in a session directory under the
+// temporary directory. One whose longest such path is over the socket path limit fails New, naming
+// the limit and TMPDIR, instead of failing every spawn with a 502.
+func TestOnBehalfOfRefusesATempDirTooLongForItsTokenSocketAtStartup(t *testing.T) {
+	// The longest path is tempDir + "/byward-session-" + 10 digits + "/token.sock".
+	fits := "/" + strings.Repeat("d", maxSocketPath-len("/byward-session-4294967295/token.sock")-1)
+	tooLong := fits + "d"
+	ask := func(context.Context, Identity) DownstreamToken { return DownstreamToken{} }
+	for _, tc := range []struct {
+		name    string
+		tempDir string
+		obo     bool
+		wantErr bool
+	}{
+		{"exactly at the limit", fits, true, false},
+		{"one byte over", tooLong, true, true},
+		{"over, without On-Behalf-Of", tooLong, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{Command: []string{fakeBin}, LookupEnv: lookup(proxyEnv), TempDir: tc.tempDir}
+			if tc.obo {
+				cfg.DownstreamToken = ask
+			}
+			_, err := New(cfg)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("New: %v, want an error %v", err, tc.wantErr)
+			}
+			if err == nil {
+				return
+			}
+			if !errors.Is(err, ErrTempDirTooLong) {
+				t.Fatalf("error %v is not ErrTempDirTooLong", err)
+			}
+			for _, want := range []string{tc.tempDir, strconv.Itoa(maxSocketPath+1) + " bytes", strconv.Itoa(maxSocketPath) + " bytes", "on " + runtime.GOOS, "TMPDIR"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error %q does not name %q: the path, its length, the limit and TMPDIR", err, want)
+				}
+			}
+		})
+	}
+}
+
+// The token socket's path limit is the platform's own: sun_path less its NUL. A 105-byte path, as
+// a Linux deployment may have, starts on Linux and is refused on macOS.
+func TestTheTokenSocketPathLimitIsThePlatformsOwn(t *testing.T) {
+	want := map[string]int{"linux": 107, "darwin": 103}[runtime.GOOS]
+	if maxSocketPath != want {
+		t.Fatalf("maxSocketPath = %d on %s, want %d", maxSocketPath, runtime.GOOS, want)
+	}
+	tempDir := "/" + strings.Repeat("d", 105-len("/byward-session-4294967295/token.sock")-1) // a 105-byte socket path
+	_, err := New(Config{Command: []string{fakeBin}, LookupEnv: lookup(proxyEnv), TempDir: tempDir,
+		DownstreamToken: func(context.Context, Identity) DownstreamToken { return DownstreamToken{} }})
+	switch runtime.GOOS {
+	case "darwin":
+		if !errors.Is(err, ErrTempDirTooLong) {
+			t.Fatalf("New with a 105-byte socket path on darwin: %v, want ErrTempDirTooLong", err)
+		}
+	default:
+		if err != nil {
+			t.Fatalf("New with a 105-byte socket path on %s: %v, want it to start", runtime.GOOS, err)
+		}
+	}
+	// The limit is bind's: a socket of exactly maxSocketPath bytes binds and accepts a connection
+	// (the limit is not above it), and one byte more is refused with EINVAL (it is not below it).
+	// Go's syscall layer refuses that one, from the same sun_path size, before the kernel would.
+	dir := shortTempDir(t)
+	dir = filepath.Join(dir, strings.Repeat("d", maxSocketPath-len(dir)-len("/")-len("/"+tokenSocketName)))
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	over := filepath.Join(dir, "x"+tokenSocketName)
+	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: over, Net: "unix"})
+	if err == nil {
+		_ = ln.Close()
+	}
+	if !errors.Is(err, syscall.EINVAL) {
+		t.Fatalf("binding a %d-byte socket path: %v, want EINVAL: maxSocketPath %d is below the limit", len(over), err, maxSocketPath)
+	}
+	s, err := listenTokenSocket(dir, slog.New(slog.DiscardHandler), func(context.Context) DownstreamToken { return DownstreamToken{} })
+	if err != nil {
+		t.Fatalf("a %d-byte socket path: %v", len(filepath.Join(dir, tokenSocketName)), err)
+	}
+	defer s.close()
+	if len(s.path) != maxSocketPath {
+		t.Fatalf("the socket path is %d bytes, want %d", len(s.path), maxSocketPath)
+	}
+	c, err := net.Dial("unix", s.path)
+	if err != nil {
+		t.Fatalf("dial the %d-byte socket path: %v", maxSocketPath, err)
+	}
+	_ = c.Close()
 }
 
 func TestMissingCommandNamesTheImagePattern(t *testing.T) {

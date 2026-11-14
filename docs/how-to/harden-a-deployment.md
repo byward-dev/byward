@@ -34,9 +34,9 @@ supply ([Serve TLS at the proxy](tls.md), [ADR-0019](../adr/0019-packaging.md) Â
       - List only proxies you control. A trusted CIDR that includes client networks lets those
         clients choose their own address.
 - [ ] For an IdP or upstream with a private CA, add only that CA with `SSL_CERT_FILE`. Don't
-      replace the image's `/etc/ssl/certs` or set `SSL_CERT_DIR` without it: that drops the
-      public roots. Every outbound TLS connection trusts the CA you add
-      ([trust a private CA](private-ca.md)).
+      mount over the image's `/etc/ssl/certs`, or set `SSL_CERT_DIR` without it beside
+      `SSL_CERT_FILE`: either drops the public roots. Every outbound TLS connection trusts the CA
+      you add ([trust a private CA](private-ca.md)).
 
 ## Host and Origin allowlists
 
