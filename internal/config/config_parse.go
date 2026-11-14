@@ -187,11 +187,8 @@ func normalizeAllowedHost(h string) (string, error) {
 		if host == "" {
 			return "", invalid
 		}
-		// A Host header's name is RFC 3986's unreserved characters; a trailing dot (an absolute DNS
-		// name), a leading one or "..", never match the name a client is given (#334).
-		if strings.Trim(host, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~") != "" ||
-			strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") || strings.Contains(host, "..") {
-			return "", fmt.Errorf("%q is not a host[:port]: a host name has only letters, digits and - . _ ~, with no empty label (no leading, trailing or double dot)", h)
+		if !validHostName(host) {
+			return "", fmt.Errorf("%q is not a host[:port]: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)", h)
 		}
 		port, hasPort = p, ok
 	}
@@ -208,6 +205,16 @@ func normalizeAllowedHost(h string) (string, error) {
 		}
 	}
 	return strings.ToLower(stored), nil
+}
+
+// validHostName reports whether host is a name an allowed host can match on (#334): only RFC 3986's
+// unreserved characters (a DNS name never uses reg-name's sub-delims or %-escapes, which a Host
+// header could carry), and no empty label. A trailing dot is refused, not stripped: the entry would
+// match only a client given the absolute name, never the usual one, so it is almost always copied
+// from a DNS zone by mistake.
+func validHostName(host string) bool {
+	return strings.Trim(host, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~") == "" &&
+		!strings.HasPrefix(host, ".") && !strings.HasSuffix(host, ".") && !strings.Contains(host, "..")
 }
 
 // Hostname is a host as BYWARD_ALLOWED_HOSTS lists it or a Host header carries it (host,
