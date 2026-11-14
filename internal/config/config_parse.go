@@ -156,32 +156,43 @@ func asciiHost(host string) error {
 	return nil
 }
 
-// bracketedIPv6 reports whether h is [v6] or [v6]:port, v6 an IPv6 address without a zone.
-func bracketedIPv6(h string) bool {
-	inner, rest, ok := strings.Cut(strings.TrimPrefix(h, "["), "]")
-	if !ok || !strings.HasPrefix(h, "[") {
+// allowedHostForm reports whether h is a form a Host header can carry: name, name:port,
+// IPv4:port, [v6] or [v6]:port, with a port from 1 to 65535 written without a sign or leading zero
+// and a v6 address without a zone; or a bare v6 address, taken whole (never as v6:port), which
+// config stores as [v6]. The caller has already refused spaces, slashes and non-ASCII.
+func allowedHostForm(h string) bool {
+	v6, port, isV6, hasPort := "", "", false, false
+	switch {
+	case strings.HasPrefix(h, "["):
+		inner, rest, ok := strings.Cut(h[1:], "]")
+		if !ok || (rest != "" && !strings.HasPrefix(rest, ":")) {
+			return false
+		}
+		v6, isV6, port, hasPort = inner, true, strings.TrimPrefix(rest, ":"), rest != ""
+	case strings.Contains(h, "]"):
 		return false
-	}
-	if port, hasPort := strings.CutPrefix(rest, ":"); rest != "" && (!hasPort || port == "" || strings.Trim(port, "0123456789") != "") {
-		return false
-	}
-	ip, err := netip.ParseAddr(inner)
-	return err == nil && ip.Is6() && ip.Zone() == ""
-}
-
-// plainHost reports whether h, without brackets, is a host, host:port with a digits-only port, or
-// a bare IPv6 address without a zone (more than one colon: it cannot carry a port).
-func plainHost(h string) bool {
-	switch strings.Count(h, ":") {
-	case 0:
-		return h != ""
-	case 1:
-		host, port, _ := strings.Cut(h, ":")
-		return host != "" && port != "" && strings.Trim(port, "0123456789") == ""
+	case strings.Count(h, ":") > 1:
+		v6, isV6 = h, true
 	default:
-		ip, err := netip.ParseAddr(h)
-		return err == nil && ip.Is6() && ip.Zone() == ""
+		name, p, ok := strings.Cut(h, ":")
+		if name == "" {
+			return false
+		}
+		port, hasPort = p, ok
 	}
+	if isV6 {
+		ip, err := netip.ParseAddr(v6)
+		if err != nil || !ip.Is6() || ip.Zone() != "" {
+			return false
+		}
+	}
+	if hasPort {
+		n, err := strconv.Atoi(port)
+		if err != nil || port[0] < '1' || port[0] > '9' || n > 65535 {
+			return false
+		}
+	}
+	return true
 }
 
 // Hostname is a host as BYWARD_ALLOWED_HOSTS lists it or a Host header carries it (host,

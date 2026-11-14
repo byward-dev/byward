@@ -252,16 +252,15 @@ func validate(v *Values, container bool) (*Config, error) {
 			errs = append(errs, errorf("BYWARD_ALLOWED_HOSTS: %v", err))
 			continue
 		}
-		// Brackets enclose an IPv6 address only, as a Host header does: the public listener could never
-		// match [name], [IPv4] or a zone, and the other readers would strip the brackets silently.
-		if strings.ContainsAny(h, "[]") && !bracketedIPv6(h) {
-			errs = append(errs, errorf("BYWARD_ALLOWED_HOSTS: %q is not a host[:port]; brackets may only enclose an IPv6 address, without a zone", h))
+		// Only a form a Host header can carry: anything else could never match a request on the public
+		// listener, and the other readers would reduce it to a host name silently (#323, #325).
+		if !allowedHostForm(h) {
+			errs = append(errs, errorf("BYWARD_ALLOWED_HOSTS: %q is not a host[:port]; give a name, name:port, an IPv6 address, [v6] or [v6]:port, with a port from 1 to 65535 and no zone", h))
 			continue
 		}
-		// Unbracketed, likewise: an empty or junk port, or a zone, can never match a Host header (#325).
-		if !strings.ContainsAny(h, "[]") && !plainHost(h) {
-			errs = append(errs, errorf("BYWARD_ALLOWED_HOSTS: %q is not a host[:port]; a port is digits, and an IPv6 address takes no zone", h))
-			continue
+		// A Host header always brackets an IPv6 address, so the public listener compares [v6].
+		if !strings.HasPrefix(h, "[") && strings.Count(h, ":") > 1 {
+			h = "[" + h + "]"
 		}
 		c.AllowedHosts = append(c.AllowedHosts, strings.ToLower(h))
 	}

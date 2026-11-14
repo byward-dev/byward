@@ -102,19 +102,25 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"origin with path", "BYWARD_ALLOWED_ORIGINS=https://a.example/path", "BYWARD_ALLOWED_ORIGINS"},
 		{"host with path", "BYWARD_ALLOWED_HOSTS=a.example/x", "BYWARD_ALLOWED_HOSTS"},
 		{"host with space", "BYWARD_ALLOWED_HOSTS=a b", "BYWARD_ALLOWED_HOSTS"},
-		{"bracketed host name", "BYWARD_ALLOWED_HOSTS=[mcp.internal.example]", `BYWARD_ALLOWED_HOSTS: "[mcp.internal.example]" is not a host[:port]; brackets may only enclose an IPv6 address`},
+		{"bracketed host name", "BYWARD_ALLOWED_HOSTS=[mcp.internal.example]", `BYWARD_ALLOWED_HOSTS: "[mcp.internal.example]" is not a host[:port]; give a name, name:port, an IPv6 address, [v6] or [v6]:port`},
 		{"bracketed IPv4 with a port", "BYWARD_ALLOWED_HOSTS=[127.0.0.1]:8443", `BYWARD_ALLOWED_HOSTS: "[127.0.0.1]:8443" is not a host[:port]`},
 		{"IPv6 with a zone", "BYWARD_ALLOWED_HOSTS=[fe80::1%eth0]:8443", `BYWARD_ALLOWED_HOSTS: "[fe80::1%eth0]:8443" is not a host[:port]`},
 		{"unclosed bracket", "BYWARD_ALLOWED_HOSTS=[::1", `BYWARD_ALLOWED_HOSTS: "[::1" is not a host[:port]`},
 		{"unopened bracket", "BYWARD_ALLOWED_HOSTS=::1]", `BYWARD_ALLOWED_HOSTS: "::1]" is not a host[:port]`},
+		{"name with a closing bracket", "BYWARD_ALLOWED_HOSTS=mcp.example]", `BYWARD_ALLOWED_HOSTS: "mcp.example]" is not a host[:port]`},
 		{"bracket then an empty port", "BYWARD_ALLOWED_HOSTS=[::1]:", `BYWARD_ALLOWED_HOSTS: "[::1]:" is not a host[:port]`},
 		{"bracket then junk", "BYWARD_ALLOWED_HOSTS=[::1]x", `BYWARD_ALLOWED_HOSTS: "[::1]x" is not a host[:port]`},
 		{"bracket then a junk port", "BYWARD_ALLOWED_HOSTS=[::1]:80a", `BYWARD_ALLOWED_HOSTS: "[::1]:80a" is not a host[:port]`},
-		{"host then an empty port", "BYWARD_ALLOWED_HOSTS=localhost:", `BYWARD_ALLOWED_HOSTS: "localhost:" is not a host[:port]; a port is digits`},
+		{"host then an empty port", "BYWARD_ALLOWED_HOSTS=localhost:", `BYWARD_ALLOWED_HOSTS: "localhost:" is not a host[:port]`},
 		{"host then a junk port", "BYWARD_ALLOWED_HOSTS=localhost:abc", `BYWARD_ALLOWED_HOSTS: "localhost:abc" is not a host[:port]`},
-		{"IPv4 then an empty port", "BYWARD_ALLOWED_HOSTS=127.0.0.1:", `BYWARD_ALLOWED_HOSTS: "127.0.0.1:" is not a host[:port]`},
+		{"host then a signed port", "BYWARD_ALLOWED_HOSTS=localhost:+80", `BYWARD_ALLOWED_HOSTS: "localhost:+80" is not a host[:port]`},
+		{"port 0", "BYWARD_ALLOWED_HOSTS=localhost:0", `BYWARD_ALLOWED_HOSTS: "localhost:0" is not a host[:port]; give a name, name:port, an IPv6 address, [v6] or [v6]:port, with a port from 1 to 65535`},
+		{"port over 65535", "BYWARD_ALLOWED_HOSTS=localhost:65536", `BYWARD_ALLOWED_HOSTS: "localhost:65536" is not a host[:port]`},
+		{"port with a leading zero", "BYWARD_ALLOWED_HOSTS=localhost:080", `BYWARD_ALLOWED_HOSTS: "localhost:080" is not a host[:port]`},
+		{"bracketed port 0", "BYWARD_ALLOWED_HOSTS=[::1]:0", `BYWARD_ALLOWED_HOSTS: "[::1]:0" is not a host[:port]`},
+		{"bracketed port over 65535", "BYWARD_ALLOWED_HOSTS=[::1]:99999", `BYWARD_ALLOWED_HOSTS: "[::1]:99999" is not a host[:port]`},
 		{"a port without a host", "BYWARD_ALLOWED_HOSTS=:8080", `BYWARD_ALLOWED_HOSTS: ":8080" is not a host[:port]`},
-		{"bare IPv6 with a zone", "BYWARD_ALLOWED_HOSTS=fe80::1%eth0", `BYWARD_ALLOWED_HOSTS: "fe80::1%eth0" is not a host[:port]; a port is digits, and an IPv6 address takes no zone`},
+		{"bare IPv6 with a zone", "BYWARD_ALLOWED_HOSTS=fe80::1%eth0", `BYWARD_ALLOWED_HOSTS: "fe80::1%eth0" is not a host[:port]; give a name, name:port, an IPv6 address, [v6] or [v6]:port, with a port from 1 to 65535 and no zone`},
 		{"many colons, not IPv6", "BYWARD_ALLOWED_HOSTS=a:b:c", `BYWARD_ALLOWED_HOSTS: "a:b:c" is not a host[:port]`},
 		{"listen without port", "BYWARD_LISTEN=8080", "BYWARD_LISTEN"},
 		{"log format", "BYWARD_LOG_FORMAT=xml", "BYWARD_LOG_FORMAT"},
@@ -184,12 +190,13 @@ func TestDevAllowsLoopbackHTTPAndRecordsIt(t *testing.T) {
 	}
 }
 
-// Every form a Host header can match still loads: a host, host:port, a bare IPv6 address, [v6] and
-// [v6]:port (#325).
-func TestEveryAllowedHostFormAHostHeaderCanMatchLoads(t *testing.T) {
-	c, err := load(t, nil, "BYWARD_ALLOWED_HOSTS=mcp.example.com,mcp.example.com:8443,10.0.0.5:8080,2001:db8::1,::1,[2001:db8::1],[::1]:8080")
-	if err != nil || len(c.AllowedHosts) != 7 {
-		t.Fatalf("err=%v hosts=%v", err, c.AllowedHosts)
+// Every form a Host header carries loads, with any port from 1 to 65535, and a bare IPv6 address is
+// stored in brackets, as a Host header carries it, so the public listener can match it (#325).
+func TestAllowedHostsAcceptEveryFormAHostHeaderCarries(t *testing.T) {
+	c, err := load(t, nil, "BYWARD_ALLOWED_HOSTS=mcp.example.com,mcp.example.com:9765,10.0.0.5:1234,localhost:1,2001:db8::1,[2001:db8::1],[::1]:65535")
+	want := []string{"mcp.example.com", "mcp.example.com:9765", "10.0.0.5:1234", "localhost:1", "[2001:db8::1]", "[2001:db8::1]", "[::1]:65535"}
+	if err != nil || !slices.Equal(c.AllowedHosts, want) {
+		t.Fatalf("err=%v hosts=%v, want %v", err, c.AllowedHosts, want)
 	}
 }
 
