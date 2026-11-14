@@ -31,6 +31,11 @@ type Preset struct {
 	// at the code, so doctor's made-up code tells a refused credential from an accepted one
 	// (invalid_grant). The measurements, 2026-11-13, are on each preset.
 	ClientCheckedFirst bool
+	// RefusedAssertionAlgs are client assertion algorithms the IdP refuses without advertising it
+	// (#306): a key that would sign with one is warned about at startup, by check, and by doctor unless
+	// its probe passed; the fix of a refused client assertion signed with one leads with what to use
+	// instead.
+	RefusedAssertionAlgs []string
 }
 
 // Presets by name; "" is plain OIDC.
@@ -72,6 +77,9 @@ var Presets = map[string]Preset{
 		Label:              "Okta",
 		ClientCheckedFirst: true,
 		Scopes:             []string{"profile", "email", "offline_access"},
+		// Okta refuses PS256 ("The client_assertion JWT signature algorithm is invalid.") and its
+		// discovery lists no client assertion algorithms (measured 2026-11-13, #306).
+		RefusedAssertionAlgs: []string{"PS256"},
 		CheckIssuer: func(iss string) error {
 			if !strings.Contains(iss, "/oauth2/") {
 				return errors.New("okta: use a custom authorization server issuer (https://{domain}/oauth2/{id}), not the org authorization server")

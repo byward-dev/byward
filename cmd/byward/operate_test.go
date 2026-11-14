@@ -83,6 +83,36 @@ func TestCheckOfflinePassesAWorkingSetupWithItsStartupWarnings(t *testing.T) {
 	}
 }
 
+// check names an oidc IdP's client credential (#306); Entra's has no such line.
+func TestCheckOfflineNamesAnOIDCClientCredential(t *testing.T) {
+	base := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
+	var secret string
+	oidcEnv := slices.DeleteFunc(slices.Clone(base), func(kv string) bool {
+		if v, ok := strings.CutPrefix(kv, "BYWARD_ENTRA_CLIENT_SECRET_FILE="); ok {
+			secret = v
+		}
+		return strings.HasPrefix(kv, "BYWARD_ENTRA_")
+	})
+	oidcEnv = append(oidcEnv, "BYWARD_IDP=keycloak", "BYWARD_OIDC_ISSUER=https://sso.example.com/realms/acme", "BYWARD_OIDC_CLIENT_ID=byward",
+		"BYWARD_OIDC_CLIENT_SECRET_FILE="+secret, "BYWARD_GATE_ALLOW_EMPTY=true")
+	for name, tc := range map[string]struct {
+		env  []string
+		line string // "" means no credential line
+	}{
+		"entra":    {base, ""},
+		"keycloak": {oidcEnv, "info  client credential: a client secret\n"},
+		"no auth":  {[]string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_INSECURE_NO_AUTH=true"}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, stdout, stderr := runWith([]string{"check", "--offline"}, tc.env...)
+			hasLine := strings.Contains(stdout, "client credential")
+			if code != exitOK || stderr != "" || (tc.line == "" && hasLine) || (tc.line != "" && !strings.Contains(stdout, tc.line)) {
+				t.Fatalf("code %d stdout %q stderr %q; want the line %q", code, stdout, stderr, tc.line)
+			}
+		})
+	}
+}
+
 func TestCheckOfflineAndDoctorExit2OnAConfigurationErrorAndCheckNothing(t *testing.T) {
 	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_KEYS_DIR=/nonexistent/keys")
 	for _, args := range [][]string{{"check", "--offline"}, {"doctor"}, {"doctor", "--json"}} {

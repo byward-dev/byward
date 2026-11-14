@@ -3,6 +3,7 @@ package idp
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -152,6 +153,97 @@ func TestPrivateKeyJWTKeyTypes(t *testing.T) {
 	p384, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	if _, err := PrivateKeyJWT(p384, nil, ""); err == nil {
 		t.Error("P-384 accepted")
+	}
+}
+
+// The client assertion is signed with the chosen algorithm, or the key type's default when none is
+// chosen (PS256 for RSA, ES256 for EC P-256, as before #306); an algorithm the key cannot sign with
+// is refused.
+func TestPrivateKeyJWTSignsWithTheChosenAlgorithm(t *testing.T) {
+	rsaKey := fakeidp.NewCertificate(t).Key
+	ecKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	for _, tc := range []struct {
+		name, alg string
+		want      string // the algorithm signed with; "" means refused with ErrClientKeyAlg, as wantErr
+		wantErr   string
+		key       crypto.Signer
+	}{
+		{name: "an RSA key by default", key: rsaKey, want: "PS256"},
+		{name: "an RSA key with PS256", key: rsaKey, alg: "PS256", want: "PS256"},
+		{name: "an RSA key with RS256", key: rsaKey, alg: "RS256", want: "RS256"},
+		{name: "an EC key by default", key: ecKey, want: "ES256"},
+		{name: "an EC key with ES256", key: ecKey, alg: "ES256", want: "ES256"},
+		{name: "an RSA key with ES256", key: rsaKey, alg: "ES256", wantErr: `an RSA client key signs with PS256 or RS256, not "ES256"`},
+		{name: "an RSA key with RS384", key: rsaKey, alg: "RS384", wantErr: `an RSA client key signs with PS256 or RS256, not "RS384"`},
+		{name: "an EC key with RS256", key: ecKey, alg: "RS256", wantErr: `an EC P-256 client key signs with ES256, not "RS256"`},
+		{name: "an EC key with PS256", key: ecKey, alg: "PS256", wantErr: `an EC P-256 client key signs with ES256, not "PS256"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ca, err := PrivateKeyJWTWithAlg(tc.key, nil, "kid-1", tc.alg)
+			if tc.want == "" {
+				if !errors.Is(err, ErrClientKeyAlg) || err.Error() != ErrClientKeyAlg.Error()+": "+tc.wantErr {
+					t.Fatalf("err = %v, want ErrClientKeyAlg: %s", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			info, ok := ca.(AssertionInfo)
+			if !ok {
+				t.Fatalf("%T is not an AssertionInfo", ca)
+			}
+			if info.SigningAlgorithm() != tc.want || info.KeyID() != "kid-1" {
+				t.Fatalf("SigningAlgorithm %q, KeyID %q; want %s, kid-1", info.SigningAlgorithm(), info.KeyID(), tc.want)
+			}
+			form := url.Values{}
+			if err := ca.Apply(form, "cid", "https://idp.example/token", time.Unix(1_800_000_000, 0)); err != nil {
+				t.Fatal(err)
+			}
+			tok, err := jwt.ParseSigned(form.Get("client_assertion"), []jose.SignatureAlgorithm{jose.SignatureAlgorithm(tc.want)})
+			if err != nil {
+				t.Fatalf("the assertion is not signed with %s: %v", tc.want, err)
+			}
+			var c jwt.Claims
+			if err := tok.Claims(tc.key.Public(), &c); err != nil {
+				t.Fatalf("the assertion does not verify with the key: %v", err)
+			}
+		})
+	}
+}
+
+// Every algorithm ClientKeyTypes lists for a key type signs with that key type, so advice built from
+// it names only algorithms PrivateKeyJWTWithAlg accepts (#306).
+func TestEveryListedClientKeyAlgorithmSigns(t *testing.T) {
+	ecKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	keys := map[string]crypto.Signer{"RSA": fakeidp.NewCertificate(t).Key, "EC P-256": ecKey}
+	types := ClientKeyTypes()
+	if len(types) != len(keys) {
+		t.Fatalf("ClientKeyTypes %+v, want one per key type the test knows: %d", types, len(keys))
+	}
+	for _, kt := range types {
+		key, ok := keys[kt.Name]
+		if !ok {
+			t.Fatalf("no test key for %q", kt.Name)
+		}
+		for _, alg := range append([]string{""}, kt.Algs...) {
+			want := alg
+			if alg == "" {
+				want = kt.Algs[0] // the default
+			}
+			ca, err := PrivateKeyJWTWithAlg(key, nil, "", alg)
+			if err != nil {
+				t.Fatalf("%s with %q: %v", kt.Name, alg, err)
+			}
+			if info, ok := ca.(AssertionInfo); !ok || info.SigningAlgorithm() != want {
+				t.Fatalf("%s with %q: %T signs with %v, want %s", kt.Name, alg, ca, info, want)
+			}
+		}
+	}
+	// a copy: changing it changes neither the table nor what the signer accepts
+	types[0].Name, types[0].Algs[0] = "changed", "XX"
+	if again := ClientKeyTypes(); again[0].Name != "RSA" || again[0].Algs[0] != "PS256" {
+		t.Fatalf("ClientKeyTypes shares its table: %+v", again)
 	}
 }
 

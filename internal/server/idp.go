@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -37,14 +38,19 @@ type identityProvider struct {
 	userKey func(string) (string, bool)
 	// diagnose is doctor's check of the IdP.
 	diagnose func(ctx context.Context, now time.Time) []doctor.Result
-	// startWarnings are the warnings that depend on the time, logged at startup and reported by
-	// check; doctor reports the same through diagnose. Nil when there are none.
+	// startWarnings are the warnings logged at startup and reported by check that doctor reports
+	// through diagnose instead, as a result of the IdP class: those that depend on the time, and a
+	// client key algorithm the IdP refuses (#306), unless doctor's probe shows the IdP accepted the
+	// key. Nil when there are none.
 	startWarnings func(now time.Time) []Warning
 	// appTokens verifies app-only tokens for BYWARD_APP_TOKENS (ADR-0022); Entra only, else nil.
 	appTokens apptoken.Verifier
 	// startRefusal, when set, is why the proxy must not start at now (an expired certificate);
 	// serving and check refuse, doctor reports it as a result and revoke-user ignores it.
 	startRefusal func(now time.Time) error
+	// credentialDesc describes the client credential for check and doctor (#306); "" for Entra,
+	// whose doctor checks its credential itself.
+	credentialDesc string
 }
 
 // refusal is ip.startRefusal at now, or nil.
@@ -55,8 +61,8 @@ func (ip *identityProvider) refusal(now time.Time) error {
 	return ip.startRefusal(now)
 }
 
-// timedWarnings is ip.startWarnings at now, or none.
-func (ip *identityProvider) timedWarnings(now time.Time) []Warning {
+// startWarningsAt is ip.startWarnings at now, or none.
+func (ip *identityProvider) startWarningsAt(now time.Time) []Warning {
 	if ip.startWarnings == nil {
 		return nil
 	}
@@ -122,7 +128,7 @@ func newEntraIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect
 
 // newOIDCIdentityProvider is the generic OIDC adapter with the configured preset (ADR-0011 §2).
 func newOIDCIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect string) (*identityProvider, error) {
-	auth, err := oidcClientAuth(cfg)
+	auth, credentialDesc, err := oidcClientAuth(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -134,14 +140,24 @@ func newOIDCIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect 
 	if oidc.Presets[preset].HostedDomains && len(cfg.GateHostedDomains) == 1 {
 		hd = cfg.GateHostedDomains[0] // also the hd hint at Google; the gate list stays the rule (ADR-0015)
 	}
-	p, err := oidc.New(oidc.Config{Preset: preset, Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID, ClientAuth: auth, RedirectURL: redirect,
+	keyAlgSetting := config.Setting{Name: "oidc-client-key-alg"}.Env()
+	p, err := oidc.New(oidc.Config{Preset: preset, Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID, ClientAuth: auth, KeyAlgSetting: keyAlgSetting, RedirectURL: redirect,
 		Scopes: cfg.OIDCScopes, SubjectClaim: cfg.OIDCSubjectClaim, RolesClaim: cfg.OIDCRolesClaim, GroupsClaim: cfg.OIDCGroupsClaim, HostedDomain: hd, AllowLoopbackHTTP: cfg.Dev, HTTPClient: idpHTTP})
 	if err != nil {
 		return nil, fmt.Errorf("oidc settings (BYWARD_OIDC_*): %w", err)
 	}
+	// An algorithm the preset's IdP refuses without advertising it, so only the preset can tell
+	// (#306); signing is unchanged, startup and check warn, and doctor's credential check adds it
+	// (withCredential).
+	var refused *Warning
+	if info, ok := auth.(idp.AssertionInfo); ok && slices.Contains(oidc.Presets[preset].RefusedAssertionAlgs, info.SigningAlgorithm()) {
+		refused = &Warning{Message: "the client key signs with " + info.SigningAlgorithm() + ", which " + oidc.Presets[preset].Label +
+			" refuses for client assertions", Setting: keyAlgSetting, Fix: oidc.RefusedAssertionAdvice(info.SigningAlgorithm(), oidc.Presets[preset])}
+	}
 	ip := &identityProvider{name: cfg.IdP, redirect: redirect, label: oidcLabel(cfg), adapter: p, scope: p.Scope(), gateIdP: gate.Generic, userKey: oidcUserKey,
+		credentialDesc: credentialDesc,
 		diagnose: func(ctx context.Context, _ time.Time) []doctor.Result {
-			return append(diagnoseDiscovery(ctx, p, cfg.OIDCIssuer), p.DiagnoseClient(ctx, oidcDiagnosis(cfg)))
+			return append(diagnoseDiscovery(ctx, p, cfg.OIDCIssuer), withCredential(p.DiagnoseClient(ctx, oidcDiagnosis(cfg)), credentialDesc, refused))
 		}}
 	if oidc.Presets[preset].HostedDomains {
 		ip.gateIdP = gate.Google // the gate's kind for an IdP with hosted domains
@@ -149,7 +165,30 @@ func newOIDCIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect 
 	for _, w := range p.Warnings() {
 		ip.warnings = append(ip.warnings, Warning{Message: w, Setting: "BYWARD_OIDC_SUBJECT_CLAIM", Fix: "use sub, which the IdP never reassigns (ADR-0011 §2)"})
 	}
+	if refused != nil { // doctor reports it through the credential check (withCredential), not twice
+		ip.startWarnings = func(time.Time) []Warning { return []Warning{*refused} }
+	}
 	return ip, nil
+}
+
+// withCredential is doctor's probe of the oidc credential (#288) naming the credential (#306).
+// Unless the probe passed, a key algorithm the preset refuses (refused, nil if none) is added to
+// what the probe found, keeping its own fix: a probe that could not run becomes a warning, and a
+// refused key's fix that already leads with the refusal (naming refused.Setting) is left as it is.
+func withCredential(r doctor.Result, credentialDesc string, refused *Warning) doctor.Result {
+	r.Message += "; the credential: " + credentialDesc
+	if refused == nil || r.Status == doctor.Pass || strings.Contains(r.Fix, refused.Setting) {
+		return r
+	}
+	if r.Status == doctor.Skip {
+		r.Status = doctor.Warn
+	}
+	r.Message += "; " + refused.Message
+	if r.Fix != "" {
+		r.Fix += "; "
+	}
+	r.Fix += refused.Setting + ": " + refused.Fix
+	return r
 }
 
 // oidcUserKey is an oidc subject as an operator gives it to revoke-user: exactly as the IdP sends it
@@ -209,21 +248,38 @@ func oidcDiagnosis(cfg *config.Config) oidc.Diagnosis {
 	return d
 }
 
-// oidcClientAuth is the proxy's credential at an oidc IdP: a client secret, or private_key_jwt with
-// a PEM key. Config refuses neither or both.
-func oidcClientAuth(cfg *config.Config) (idp.ClientAuth, error) {
+// oidcClientAuth is the proxy's credential at an oidc IdP, a client secret or private_key_jwt with a
+// PEM key, and its description for check and doctor, which names no secret. Config refuses neither
+// or both.
+func oidcClientAuth(cfg *config.Config) (idp.ClientAuth, string, error) {
 	if cfg.OIDCClientKey == "" {
-		return idp.ClientSecret(cfg.OIDCClientSecret), nil
+		return idp.ClientSecret(cfg.OIDCClientSecret), "a client secret", nil
 	}
 	key, err := idp.ParsePrivateKey([]byte(cfg.OIDCClientKey))
 	if err != nil {
-		return nil, fmt.Errorf("BYWARD_OIDC_CLIENT_KEY_FILE: %w", err)
+		return nil, "", fmt.Errorf("BYWARD_OIDC_CLIENT_KEY_FILE: %w", err)
 	}
-	auth, err := idp.PrivateKeyJWT(key, nil, cfg.OIDCClientKeyID)
-	if err != nil {
-		return nil, fmt.Errorf("BYWARD_OIDC_CLIENT_KEY_FILE: %w", err)
+	auth, err := idp.PrivateKeyJWTWithAlg(key, nil, cfg.OIDCClientKeyID, cfg.OIDCClientKeyAlg)
+	switch {
+	case errors.Is(err, idp.ErrClientKeyAlg):
+		return nil, "", fmt.Errorf("BYWARD_OIDC_CLIENT_KEY_ALG: %w", err)
+	case err != nil:
+		return nil, "", fmt.Errorf("BYWARD_OIDC_CLIENT_KEY_FILE: %w", err)
 	}
-	return auth, nil
+	info, ok := auth.(idp.AssertionInfo)
+	if !ok {
+		return auth, "private_key_jwt", nil
+	}
+	return auth, describeClientAssertion(info), nil
+}
+
+// describeClientAssertion describes a private_key_jwt credential: its signing algorithm and key ID.
+func describeClientAssertion(info idp.AssertionInfo) string {
+	d := "private_key_jwt signed with " + info.SigningAlgorithm()
+	if info.KeyID() != "" {
+		d += ", key ID " + info.KeyID()
+	}
+	return d
 }
 
 // diagnoseDiscovery is doctor's check of an oidc IdP: discovery, and that its issuer matches

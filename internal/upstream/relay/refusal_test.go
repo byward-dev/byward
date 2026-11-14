@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -79,6 +80,42 @@ func TestUpstreamRefusalBecomesAReadableJSONRPCResponse(t *testing.T) {
 			}
 			if c.wantStatus == 200 && !json.Valid(w.Body.Bytes()) {
 				t.Fatalf("not JSON: %s", w.Body)
+			}
+		})
+	}
+}
+
+// Every 401 or 403 from the upstream is observed once with its status, by every observer, whether
+// it is answered as a JSON-RPC message, accepted, or answered 502; any other status is not a refusal.
+func TestEachUpstreamRefusalIsObservedOnce(t *testing.T) {
+	for _, c := range []struct {
+		name       string
+		upstream   int
+		body       string
+		wantStatus int
+		want       []int
+	}{
+		{"403 on tools/call", 403, toolsCall, 200, []int{403}},
+		{"401 on tools/call", 401, toolsCall, 200, []int{401}},
+		{"403 on a notification", 403, `{"jsonrpc":"2.0","method":"notifications/initialized"}`, 202, []int{403}},
+		{"403 the proxy cannot answer", 403, `hello`, 502, []int{403}},
+		{"404 is no refusal", 404, toolsCall, 404, nil},
+		{"200 is no refusal", 200, toolsCall, 200, nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			up := fakeupstream.New()
+			t.Cleanup(up.Close)
+			up.Handler = func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(c.upstream) }
+			var first, second []int
+			h := relayTo(t, up, "/mcp", WithRefusalObserver(func(status int) { first = append(first, status) }),
+				WithRefusalObserver(func(status int) { second = append(second, status) }))
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest("POST", "/mcp", strings.NewReader(c.body)))
+			if w.Code != c.wantStatus {
+				t.Fatalf("answered %d, want %d", w.Code, c.wantStatus)
+			}
+			if !slices.Equal(first, c.want) || !slices.Equal(second, c.want) {
+				t.Fatalf("observed %v and %v, want %v by each observer", first, second, c.want)
 			}
 		})
 	}

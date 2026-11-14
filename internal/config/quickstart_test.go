@@ -40,7 +40,8 @@ func TestSecretExpiresAtRejectsOtherForms(t *testing.T) {
 }
 
 func TestPublicURLAcceptsHTTPSOrLoopbackAndNamesTheRuleABadOneBreaks(t *testing.T) {
-	for _, raw := range []string{"https://mcp.example.com/mcp", "http://127.0.0.1:8080/mcp", "http://localhost:8080/team/mcp"} {
+	// An IP address, IPv6 included, is a valid host though the host name rule would refuse it (#344).
+	for _, raw := range []string{"https://mcp.example.com/mcp", "http://127.0.0.1:8080/mcp", "http://localhost:8080/team/mcp", "http://[::1]:8080/mcp", "https://[2001:db8::1]/mcp"} {
 		if _, err := ParsePublicURL(raw); err != nil {
 			t.Errorf("%s: %v", raw, err)
 		}

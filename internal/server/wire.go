@@ -64,7 +64,7 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 		w.log(log)
 	}
 	log.Info("IdP", "idp", ip.name, "reason", "register this redirect URI with the IdP app: "+ip.redirect)
-	for _, w := range ip.timedWarnings(time.Now()) {
+	for _, w := range ip.startWarningsAt(time.Now()) {
 		w.log(log)
 	}
 	st, err := wireStore(cfg, log, o.Audit)

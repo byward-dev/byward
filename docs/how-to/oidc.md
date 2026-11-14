@@ -33,7 +33,8 @@ refused) with:
 | `BYWARD_OIDC_ISSUER` | — (`google`: `https://accounts.google.com`) | The issuer, exactly as the IdP's discovery document (`/.well-known/openid-configuration`) states it. `https` only. |
 | `BYWARD_OIDC_CLIENT_ID` | — | The application's client ID. |
 | `BYWARD_OIDC_CLIENT_SECRET_FILE` | — | A file holding the client secret. |
-| `BYWARD_OIDC_CLIENT_KEY_FILE` | — | Instead of a secret: a PEM private key (RSA or EC P-256) for `private_key_jwt`. byward signs with PS256 for an RSA key and ES256 for an EC key, so the IdP's client must accept that algorithm (not RS256). |
+| `BYWARD_OIDC_CLIENT_KEY_FILE` | — | Instead of a secret: a PEM private key (RSA or EC P-256) for `private_key_jwt`. byward signs with `BYWARD_OIDC_CLIENT_KEY_ALG` (by default PS256 for an RSA key, ES256 for an EC key), so the IdP's client must accept that algorithm. |
+| `BYWARD_OIDC_CLIENT_KEY_ALG` | PS256 for an RSA key, ES256 for an EC key | The client assertion's signing algorithm: `PS256` or `RS256` for an RSA key, `ES256` for an EC P-256 key. An algorithm the key cannot sign with refuses to start. Okta refuses PS256: use `RS256` there, or an EC key; with `BYWARD_IDP=okta` and an RSA key on PS256, startup and `check` warn, and `doctor`'s client credential check reports it unless the IdP accepted the key: a refused key fails, its fix leading with the algorithm (on `main`, not in v0.2.0-rc.1). Auth0's discovery listed RS256, RS384 and PS256 but not ES256 (measured 2026-11-13). `byward check` and `doctor` name the algorithm in use. |
 | `BYWARD_OIDC_CLIENT_KEY_ID` | — | The key ID (`kid`) the IdP registered for that key. |
 | `BYWARD_OIDC_SCOPES` | — | Extra scopes, comma-separated, besides `openid` and the preset's. |
 | `BYWARD_OIDC_SUBJECT_CLAIM` | `sub` | The claim that identifies a user. A claim users can change (`email`, `preferred_username`, `upn`, `name`) logs a warning at every start: someone could take over another user's grants by changing it. |
@@ -55,7 +56,7 @@ demand.
 | `BYWARD_IDP` | Issuer | Scopes asked | Notes |
 |---|---|---|---|
 | `google` | `https://accounts.google.com` | `profile email` | Refresh tokens come from `access_type=offline` with `prompt=consent` (see below). `email_verified` may be a string. Step by step: [google.md](google.md). |
-| `okta` | `https://<domain>/oauth2/<server>` | `profile email offline_access` | Only a custom authorization server issues tokens for the proxy; the org server (`https://<domain>`) is refused. With `private_key_jwt`, use an EC key ([#306](https://github.com/byward-dev/byward/issues/306)). Step by step: [okta.md](okta.md). |
+| `okta` | `https://<domain>/oauth2/<server>` | `profile email offline_access` | Only a custom authorization server issues tokens for the proxy; the org server (`https://<domain>`) is refused. With `private_key_jwt`, use `BYWARD_OIDC_CLIENT_KEY_ALG=RS256` or an EC key: Okta refuses PS256. Step by step: [okta.md](okta.md). |
 | `auth0` | `https://<tenant>.auth0.com/` | `profile email offline_access` | The issuer ends with a slash. Auth0 drops custom `roles` and `groups` claims: send roles under a namespaced claim and name it in `BYWARD_OIDC_ROLES_CLAIM`. Step by step: [auth0.md](auth0.md). |
 | `keycloak` | `https://<host>/realms/<realm>` | `profile email` | Enable "Client authentication" on the client. Step by step: [keycloak.md](keycloak.md). |
 | `oidc` | any | `profile email offline_access` | No quirks. |

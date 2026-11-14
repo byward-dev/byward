@@ -45,10 +45,11 @@ var errUpstreamRedirect = errors.New("upstream redirected the request")
 type Option func(*options)
 
 type options struct {
-	inject        []func(context.Context, http.Header)
-	strip         map[string]bool // more headers removed from every inbound request
-	headerTimeout time.Duration
-	proxy         func(*http.Request) (*url.URL, error) // Proxy; tests give their own
+	inject           []func(context.Context, http.Header)
+	strip            map[string]bool // more headers removed from every inbound request
+	headerTimeout    time.Duration
+	proxy            func(*http.Request) (*url.URL, error) // Proxy; tests give their own
+	refusalObservers []func(status int)
 }
 
 // WithInject adds a function that sets headers on every upstream request, after the inbound
@@ -70,6 +71,13 @@ func WithStripped(names ...string) Option {
 	}
 }
 
+// WithRefusalObserver calls observe with the status of every upstream refusal (401 or 403,
+// ADR-0025), once per refused request, however the refusal is answered. observe runs on the
+// request's goroutine, from concurrent requests: it must be safe for concurrent use and not block.
+func WithRefusalObserver(observe func(status int)) Option {
+	return func(o *options) { o.refusalObservers = append(o.refusalObservers, observe) }
+}
+
 // WithResponseHeaderTimeout bounds how long the upstream may take to send its response headers
 // (ADR-0018 §7); a request that waits longer is answered with a timeout error. Zero means no
 // limit. A streamed body is not limited once its headers have arrived.
@@ -85,6 +93,7 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 		f(&o)
 	}
 	t := *target
+	refusalObservers := o.refusalObservers
 	// The target is fixed and Go reads the proxy setting once, so whether the upstream's proxy is
 	// one Go misread is known now; ReverseProxy's own error lines then get the same redaction.
 	via, _ := o.proxy(&http.Request{URL: &t})
@@ -164,6 +173,9 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 			}
 			log.ErrorContext(ctx, "upstream refused the request", "request_id", logging.RequestID(ctx),
 				"status", status, "reason", hint+"; "+string(o))
+			for _, observe := range refusalObservers {
+				observe(status)
+			}
 			if o == outcomeUnanswerable {
 				return errUpstreamRefused
 			}
