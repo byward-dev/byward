@@ -512,7 +512,8 @@ func TestReportAlertCountsAndLogsAnAlert(t *testing.T) {
 		alert  Alert
 		reason string // the fix on the line: the IdP's own hint, else the alert's
 	}{
-		{"wrapped", fmt.Errorf("wrap: %w", &Error{Alert: AlertProtocol}), AlertProtocol, AlertProtocol.Hint()},
+		{"wrapped, with the alert's own fix", fmt.Errorf("wrap: %w", &Error{Alert: AlertProtocol}), AlertProtocol,
+			"the IdP answered against the protocol: check the IdP's endpoints and status"},
 		{"bare, with the IdP's hint", &Error{Alert: AlertCredentialRejected, OperatorHint: "rotate the secret"}, AlertCredentialRejected, "rotate the secret"},
 	} {
 		t.Run(c.name, func(t *testing.T) {

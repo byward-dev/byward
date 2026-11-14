@@ -250,6 +250,8 @@ func TestALineCarriesItsRequestsID(t *testing.T) {
 		"a request's line":     {format: "json", log: func(l *slog.Logger) { l.InfoContext(ctx, "x") }, want: []string{"req-1"}},
 		"through With":         {format: "json", log: func(l *slog.Logger) { l.With("upstream", "u").WarnContext(ctx, "x") }, want: []string{"req-1"}, keeps: `"upstream":"u"`},
 		"an ID the logger has": {format: "json", log: func(l *slog.Logger) { l.With("request_id", "own").InfoContext(ctx, "x") }, want: []string{"own"}},
+		"an ID the logger has, through a later With": {format: "json", log: func(l *slog.Logger) { l.With("request_id", "own").With("upstream", "u").InfoContext(ctx, "x") },
+			want: []string{"own"}, keeps: `"upstream":"u"`},
 		"through LogAttrs":     {format: "json", log: func(l *slog.Logger) { l.LogAttrs(ctx, slog.LevelError, "x") }, want: []string{"req-1"}},
 		"no request":           {format: "json", log: func(l *slog.Logger) { l.InfoContext(context.Background(), "x") }},
 		"no context":           {format: "json", log: func(l *slog.Logger) { l.Info("x") }},

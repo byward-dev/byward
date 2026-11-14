@@ -26,7 +26,7 @@ const panicked = "!PANIC"
 // has to be added here on purpose (invariant: never log tokens, secrets, codes or verifiers).
 var allowed = map[string]bool{
 	slog.TimeKey: true, slog.LevelKey: true, slog.MessageKey: true,
-	"request_id": true, "method": true, "path": true, "status": true, "duration_ms": true,
+	requestIDKey: true, "method": true, "path": true, "status": true, "duration_ms": true,
 	"mcp_method": true, "remote_ip": true, "host": true, "origin": true, "reason": true,
 	// On-Behalf-Of (ADR-0017 §5): where an administrator grants consent; no secret in it.
 	"admin_consent_url": true,
@@ -68,30 +68,30 @@ func New(w io.Writer, format string) *slog.Logger {
 // unless the line already has one, from the record or from the logger's own attributes (With).
 type requestIDHandler struct {
 	slog.Handler
-	own bool // the logger's attributes name a request_id
+	hasOwnID bool // the logger's attributes (With) name a request_id
 }
 
 func (h requestIDHandler) Handle(ctx context.Context, r slog.Record) error {
-	if id := RequestID(ctx); id != "" && !h.own && !hasRequestID(r) {
+	if id := RequestID(ctx); id != "" && !h.hasOwnID && !hasRequestID(r) {
 		r = r.Clone()
-		r.AddAttrs(slog.String("request_id", id))
+		r.AddAttrs(slog.String(requestIDKey, id))
 	}
 	return h.Handler.Handle(ctx, r)
 }
 
 func (h requestIDHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	own := h.own || slices.ContainsFunc(attrs, func(a slog.Attr) bool { return a.Key == "request_id" })
-	return requestIDHandler{h.Handler.WithAttrs(attrs), own}
+	hasOwnID := h.hasOwnID || slices.ContainsFunc(attrs, func(a slog.Attr) bool { return a.Key == requestIDKey })
+	return requestIDHandler{h.Handler.WithAttrs(attrs), hasOwnID}
 }
 
 func (h requestIDHandler) WithGroup(name string) slog.Handler {
-	return requestIDHandler{h.Handler.WithGroup(name), h.own}
+	return requestIDHandler{h.Handler.WithGroup(name), h.hasOwnID}
 }
 
 func hasRequestID(r slog.Record) bool {
 	found := false
 	r.Attrs(func(a slog.Attr) bool {
-		found = a.Key == "request_id"
+		found = a.Key == requestIDKey
 		return !found
 	})
 	return found
@@ -167,6 +167,9 @@ func looksSecret(s string) bool {
 
 type ctxKey struct{}
 
+// requestIDKey is the attribute that names a line's request ID.
+const requestIDKey = "request_id"
+
 // RequestID returns the request ID stored in ctx, or "".
 func RequestID(ctx context.Context) string {
 	id, _ := ctx.Value(ctxKey{}).(string)
@@ -203,7 +206,7 @@ func Middleware(log *slog.Logger, next http.Handler) http.Handler {
 		next.ServeHTTP(rec, r)
 		// The ID is set here, not left to New's handler, so the request line has it whatever
 		// logger it is given.
-		attrs := []any{"request_id", id, "method", r.Method, "path", r.URL.Path, "status", rec.Status(),
+		attrs := []any{requestIDKey, id, "method", r.Method, "path", r.URL.Path, "status", rec.Status(),
 			"duration_ms", time.Since(start).Milliseconds(), "remote_ip", RemoteIP(r)}
 		if m := r.Header.Get("Mcp-Method"); m != "" {
 			attrs = append(attrs, "mcp_method", m)
