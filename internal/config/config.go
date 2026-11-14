@@ -70,8 +70,11 @@ type Config struct {
 	OIDCClientKeyID  string
 	OIDCScopes       []string
 	OIDCSubjectClaim string
-	OIDCName         string
-	KeysDir          string
+	// OIDCRolesClaim and OIDCGroupsClaim are the ID token claims roles and groups are read from;
+	// default `roles` and `groups` for every preset (#286).
+	OIDCRolesClaim, OIDCGroupsClaim string
+	OIDCName                        string
+	KeysDir                         string
 	// The identity assertion for the HTTP upstream (ADR-0016): its signing keys, the header that
 	// carries it and the optional claims it asserts (a subset of AssertionClaimNames).
 	AssertionKeysDir string

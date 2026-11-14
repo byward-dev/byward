@@ -46,6 +46,8 @@ var registry = []Setting{
 	{Name: "oidc-client-key-id", Auth: true, Help: "with an oidc IdP: the key ID (kid) the IdP registered for BYWARD_OIDC_CLIENT_KEY_FILE"},
 	{Name: "oidc-scopes", Auth: true, Help: "with an oidc IdP: comma-separated scopes to request besides openid and the preset's"},
 	{Name: "oidc-subject-claim", Auth: true, Default: "sub", Help: "with an oidc IdP: the claim that identifies a user; one users can change (email, preferred_username, upn, name) logs a warning"},
+	{Name: "oidc-roles-claim", Auth: true, Default: "roles", Help: "with an oidc IdP: the ID token claim the access gate (BYWARD_GATE_ROLES) and the identity assertion read roles from, such as a namespaced https://example.com/roles; the default is roles for every preset (docs/how-to/oidc.md)"},
+	{Name: "oidc-groups-claim", Auth: true, Default: "groups", Help: "with an oidc IdP: the ID token claim the access gate (BYWARD_GATE_GROUPS) and the identity assertion read groups from, such as a namespaced https://example.com/groups; the default is groups for every preset (docs/how-to/oidc.md)"},
 	{Name: "oidc-name", Auth: true, Help: "with an oidc IdP: its name on the consent page; default: the preset's name, or the issuer's host"},
 	{Name: "data-dir", Auth: true, Default: "/var/lib/byward", Help: "data directory, an absolute path; the keys, clients and store settings default to paths in it (ADR-0007 §6, docs/how-to/state.md)"},
 	{Name: "keys-dir", Auth: true, Help: "directory of sealing keys; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md)"},

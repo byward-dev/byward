@@ -117,12 +117,19 @@ func (c *Config) entraIdP(v *Values) []error {
 	return errs
 }
 
+// protocolClaims are ID token claims about the sign-in itself, never a user's roles or groups: the
+// registered claims of RFC 7519 §4.1 and the ID token claims of OpenID Connect Core 1.0 (§2, §3),
+// plus sid, the session ID an IdP adds for logout. amr is an array of strings, so it would
+// otherwise be read as roles without an error.
+var protocolClaims = []string{"iss", "sub", "aud", "azp", "exp", "iat", "nbf", "jti", "nonce", "auth_time", "acr", "amr", "sid", "at_hash", "c_hash"}
+
 // oidcIdP reads the generic OIDC adapter's settings (ADR-0011 §2).
 func (c *Config) oidcIdP(v *Values) []error {
 	var errs []error
 	c.OIDCIssuer, c.OIDCClientID = v.get("oidc-issuer"), v.get("oidc-client-id")
 	c.OIDCClientSecret, c.OIDCClientKey, c.OIDCClientKeyID = v.get("oidc-client-secret"), v.get("oidc-client-key"), v.get("oidc-client-key-id")
 	c.OIDCScopes, c.OIDCSubjectClaim, c.OIDCName = splitList(v.get("oidc-scopes")), v.get("oidc-subject-claim"), v.get("oidc-name")
+	c.OIDCRolesClaim, c.OIDCGroupsClaim = v.get("oidc-roles-claim"), v.get("oidc-groups-claim")
 	if c.OIDCIssuer == "" {
 		c.OIDCIssuer = OIDCDefaultIssuers[c.IdP]
 	}
@@ -151,6 +158,17 @@ func (c *Config) oidcIdP(v *Values) []error {
 	}
 	if strings.TrimSpace(c.OIDCSubjectClaim) == "" {
 		errs = append(errs, errorf("BYWARD_OIDC_SUBJECT_CLAIM: want a claim name, got %q", c.OIDCSubjectClaim))
+	}
+	// A claim name is matched exactly, so a blank or padded one would never match and close the gate.
+	for _, s := range []struct{ env, claim, example string }{{"BYWARD_OIDC_ROLES_CLAIM", c.OIDCRolesClaim, "https://example.com/roles"},
+		{"BYWARD_OIDC_GROUPS_CLAIM", c.OIDCGroupsClaim, "https://example.com/groups"}} {
+		switch {
+		case s.claim == "" || strings.TrimSpace(s.claim) != s.claim:
+			errs = append(errs, errorf("%s: want a claim name such as %s, got %q", s.env, s.example, s.claim))
+		case slices.Contains(protocolClaims, s.claim):
+			// aud holds our client ID, so a gate on it would admit every user of the IdP.
+			errs = append(errs, errorf("%s: %q is a claim of the sign-in itself, not roles or groups; name the claim the IdP sends them in, such as %s", s.env, s.claim, s.example))
+		}
 	}
 	errs = append(errs, checkText("oidc-name", c.OIDCName, 80)...)
 	return errs
