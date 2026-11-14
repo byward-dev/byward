@@ -50,8 +50,8 @@ func TestNoAuthIsRefusedOffLoopback(t *testing.T) {
 }
 
 func TestNoAuthAcceptsLoopbackHostsAndOrigins(t *testing.T) {
-	c, err := loadAnon(t, nil, "BYWARD_ALLOWED_HOSTS=127.0.0.1:8080,localhost,[::1],[::1]:8080", "BYWARD_ALLOWED_ORIGINS=http://localhost:6274", "BYWARD_LISTEN=[::1]:8080", "BYWARD_PUBLIC_URL=http://[::1]:8080/mcp")
-	if err != nil || len(c.AllowedOrigins) != 1 || len(c.AllowedHosts) != 4 {
+	c, err := loadAnon(t, nil, "BYWARD_ALLOWED_HOSTS=127.0.0.1:8080,localhost,[::1],[::1]:8080,::1", "BYWARD_ALLOWED_ORIGINS=http://localhost:6274", "BYWARD_LISTEN=[::1]:8080", "BYWARD_PUBLIC_URL=http://[::1]:8080/mcp")
+	if err != nil || len(c.AllowedOrigins) != 1 || len(c.AllowedHosts) != 5 {
 		t.Fatalf("err=%v origins=%v hosts=%v", err, c.AllowedOrigins, c.AllowedHosts)
 	}
 }
