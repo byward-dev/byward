@@ -47,9 +47,7 @@ func TestUpstreamGetsOnlyAllowlistOperatorEnvAndIdentity(t *testing.T) {
 		id   Identity
 		want []string
 	}{
-		{"without email", alice, nil},
-		{"with opted-in email", Identity{Subject: alice.Subject, Issuer: alice.Issuer, Email: "alice@example.com"},
-			[]string{"BYWARD_EMAIL=alice@example.com"}},
+		{"a user without a principal type", alice, nil},
 		{"a user", Identity{Subject: alice.Subject, Issuer: alice.Issuer, PrincipalType: "user"}, []string{"BYWARD_PRINCIPAL_TYPE=user"}},
 		{"an app-only caller", Identity{Subject: alice.Subject, Issuer: alice.Issuer, PrincipalType: "client"}, []string{"BYWARD_PRINCIPAL_TYPE=client"}},
 	}
@@ -71,6 +69,10 @@ func TestUpstreamGetsOnlyAllowlistOperatorEnvAndIdentity(t *testing.T) {
 			slices.Sort(want)
 			if !slices.Equal(env, want) {
 				t.Fatalf("upstream env =\n%q\nwant\n%q", env, want)
+			}
+			// #330: a stdio process never gets an email (ADR-0016 §6).
+			if slices.ContainsFunc(env, func(e string) bool { return strings.HasPrefix(e, "BYWARD_EMAIL=") }) {
+				t.Fatalf("upstream env carries BYWARD_EMAIL: %q", env)
 			}
 		})
 	}
@@ -450,7 +452,6 @@ func TestGetRequiresAnIdentity(t *testing.T) {
 		"no issuer":             {Subject: "s"},
 		"no subject":            {Issuer: "i"},
 		"NUL in subject":        {Subject: "a\x00b", Issuer: "i"},
-		"NUL in email":          {Subject: "s", Issuer: "i", Email: "a\x00b"},
 		"NUL in principal type": {Subject: "s", Issuer: "i", PrincipalType: "user\x00x"},
 	}
 	for name, id := range cases {

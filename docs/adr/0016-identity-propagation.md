@@ -1,6 +1,6 @@
 # ADR-0016: Identity propagation — an RFC 9068 assertion for the upstream, strip then inject
 
-- Status: Accepted; amended 2026-11-07 (#151, #64), 2026-11-08 (#187, #207)
+- Status: Accepted; amended 2026-11-07 (#151, #64), 2026-11-08 (#187, #207), 2026-11-14 (#330)
 - Date: 2026-11-06
 - Issue: #14 (F13)
 
@@ -42,8 +42,10 @@ expired and wrong-key tokens; FastMCP accepts any `typ`.
    downstream-token header (F14); then set ours and clear any header whose claim is absent.
 5. **Plain identity headers** only behind a flag, documented as safe only when the upstream is reachable
    solely through the proxy.
-6. **stdio:** identity in env at spawn (`BYWARD_SUBJECT` opaque, `BYWARD_ISSUER`, email
-   opt-in); never in arguments; never tokens. Children do not inherit the proxy's environment — only an
+6. **stdio:** identity in env at spawn (`BYWARD_SUBJECT` opaque, `BYWARD_ISSUER`); never in
+   arguments; never tokens. _Amended 2026-11-14 (#330):_ no email. The `email` opt-in of §1 is the
+   assertion's only; a stdio process gets no `BYWARD_EMAIL`, as item 6 of the 2026-11-07 amendment
+   says. Children do not inherit the proxy's environment — only an
    allowlist plus operator-configured env.
 7. **Upstream credential set by the operator:** a static header name and value (secret via `*_FILE`,
    never logged, redacted in the startup config line). If it uses `Authorization`, the assertion moves to
