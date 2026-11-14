@@ -27,20 +27,10 @@ Background: [ADR-0012](../adr/0012-entra-specifics.md) (Entra), [ADR-0008](../ad
   create app registrations. Granting admin consent (optional, step 1.5) needs an administrator. In a
   checkout of this repository, `mise exec -- az` runs the pinned version;
 - `uuidgen` and `openssl` (preinstalled on macOS and most Linux distributions);
-- an HTTP MCP server to protect. To try the proxy first, run the MCP reference server
-  ([`@modelcontextprotocol/server-everything`](https://www.npmjs.com/package/@modelcontextprotocol/server-everything),
-  Streamable HTTP, both protocol eras, no authentication of its own) in a pinned Node container:
-
-  ```sh
-  docker network create byward
-  docker run --rm --network byward --name upstream -p 127.0.0.1:3001:3001 \
-    node:24.22.1-slim@sha256:be8204d4bd327363357f532187b752ff62759c31bedf98e9e18fc08c9cbd605c \
-    npx -y @modelcontextprotocol/server-everything@2.0.0 streamableHttp
-  ```
-
-  Its endpoint is `http://upstream:3001/mcp` for byward in a container on the `byward` network, and
-  `http://127.0.0.1:3001/mcp` for the `byward` binary on the same host. It refuses browser requests
-  with a non-localhost `Origin`; the proxy never forwards `Origin`, so that does not get in the way.
+- an HTTP MCP server to protect. To try the proxy first, run the MCP reference server in a pinned
+  Node container, with the command under "You need" in [run byward](run-byward.md). Its endpoint is
+  `http://upstream:3001/mcp` for byward in a container on the `byward` network, and
+  `http://127.0.0.1:3001/mcp` for the `byward` binary on the same host.
 
 ## 1. Register the Entra app
 
