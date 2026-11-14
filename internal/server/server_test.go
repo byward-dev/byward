@@ -675,8 +675,8 @@ func TestABareIPv6AllowedHostMatchesItsBracketedHostHeaderOnThePublicListener(t 
 	}
 	for host, want := range map[string]bool{"[::1]": true, "[2001:db8::1]": true, "[2001:DB8::1]": true, "[::2]": false} {
 		code, _ := getBody(t, s.Public.Handler, host, "/.well-known/oauth-protected-resource/mcp")
-		if got := code != http.StatusMisdirectedRequest; got != want {
-			t.Errorf("Host %s on the public listener: %d, want it allowed %v", host, code, want)
+		if wantCode := map[bool]int{true: http.StatusOK, false: http.StatusMisdirectedRequest}[want]; code != wantCode {
+			t.Errorf("Host %s on the public listener: %d, want %d", host, code, wantCode)
 		}
 	}
 }

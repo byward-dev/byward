@@ -161,8 +161,11 @@ func asciiHost(host string) error {
 // It refuses any form a Host header cannot carry, since such an entry could never match there.
 // Accepted: host or host:port (a host may be an IPv4 address), [IPv6], [IPv6]:port, or a bare IPv6
 // address taken whole (never as IPv6:port); a port from 1 to 65535 without a sign or leading zero,
-// and no IPv6 zone. The caller has refused non-ASCII already.
+// and no IPv6 zone.
 func normalizeAllowedHost(h string) (string, error) {
+	if err := asciiHost(h); err != nil {
+		return "", err
+	}
 	invalid := fmt.Errorf("%q is not a host[:port]: give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone", h)
 	if strings.ContainsAny(h, "/ ") {
 		return "", invalid
@@ -175,7 +178,7 @@ func normalizeAllowedHost(h string) (string, error) {
 			return "", invalid
 		}
 		v6, isV6, port, hasPort = inner, true, strings.TrimPrefix(rest, ":"), rest != ""
-	case strings.Contains(h, "]"):
+	case strings.ContainsAny(h, "[]"):
 		return "", invalid
 	case strings.Count(h, ":") > 1:
 		v6, isV6, stored = h, true, "["+h+"]"

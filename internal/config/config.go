@@ -244,10 +244,6 @@ func validate(v *Values, container bool) (*Config, error) {
 		errs = append(errs, err)
 	}
 	for _, h := range splitList(v.get("allowed-hosts")) {
-		if err := asciiHost(h); err != nil {
-			errs = append(errs, errorf("BYWARD_ALLOWED_HOSTS: %v", err))
-			continue
-		}
 		n, err := normalizeAllowedHost(h) // #323, #325
 		if err != nil {
 			errs = append(errs, errorf("BYWARD_ALLOWED_HOSTS: %v", err))
