@@ -37,7 +37,8 @@ What each way of adding a CA leaves byward trusting, measured in the image (Go 1
 | `SSL_CERT_FILE=/etc/byward/ca.pem` | yes | yes |
 | One file mounted into the directory: `-v my-ca.pem:/etc/ssl/certs/my-ca.pem:ro` | yes | yes |
 | `SSL_CERT_DIR=/etc/byward/ca:/etc/ssl/certs` (a list that keeps `/etc/ssl/certs`) | yes | yes |
-| `SSL_CERT_DIR=/etc/byward/ca` alone (it replaces `/etc/ssl/certs`) | **no** | yes |
+| `SSL_CERT_DIR=/etc/byward/ca` alone: it replaces the directories, but Go still reads the bundle file `/etc/ssl/certs/ca-certificates.crt` | yes | yes |
+| `SSL_CERT_FILE=/etc/byward/ca.pem` and `SSL_CERT_DIR=/etc/byward/ca`: Go reads only those | **no** | yes |
 | A volume mounted over the whole `/etc/ssl/certs` | **no** | yes |
 | `SSL_CERT_FILE` naming a file that does not exist | yes | **no**, without an error |
 
