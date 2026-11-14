@@ -21,7 +21,7 @@
 - [ ] Public interface (config keys, assertion claims, audit schema, metrics, log fields, image paths) is unchanged, **or** the change is listed as breaking or deprecated
 - [ ] Docs are updated for anything an operator, user or upstream author sees
 
-### Sweeps (on the diff against `origin/main`, each repeated until clean)
+### Sweeps (on the diff against `origin/main`; the tier and rounds are in AGENTS.md)
 
 - [ ] Runtime: changed code run directly, including edge cases (`/sweep-runtime`)
 - [ ] SOLID structure (`/sweep-solid`)

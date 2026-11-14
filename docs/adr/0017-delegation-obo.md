@@ -1,6 +1,6 @@
 # ADR-0017: Delegation — proxy-side Entra On-Behalf-Of in v0.1
 
-- Status: Accepted
+- Status: Accepted; amended 2026-11-06 (release), 2026-11-07, 2026-11-08 (#195, #141)
 - Date: 2026-11-06
 - Issue: #15 (F14)
 
@@ -33,7 +33,8 @@ tested.
 2. **Downstream scopes are configured per upstream;** the assertion is the stored `access_as_user`
    token.
 3. **The downstream token goes in a dedicated header,** stripped from inbound requests (ADR-0016), never
-   in `Authorization`.
+   in `Authorization`. _Amended 2026-11-08 (#195):_ `Authorization` is allowed (see below); with a
+   stdio upstream (#141) the token goes through the token socket instead.
 4. **Cache** keyed by `tid`, `oid` and downstream scopes; in-memory LRU, bounded; TTL = the token's
    `exp` − 60 s, never beyond the stored assertion's `exp`. Downstream tokens are not refreshed — OBO
    runs again. They are never stored or logged.

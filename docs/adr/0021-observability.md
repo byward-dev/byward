@@ -1,6 +1,6 @@
 # ADR-0021: Observability — redacted logs, an audit stream, one request ID, telemetry off by default
 
-- Status: Accepted
+- Status: Accepted; amended 2026-11-06
 - Date: 2026-11-06
 - Issue: #21 (F20)
 

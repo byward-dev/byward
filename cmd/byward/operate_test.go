@@ -201,7 +201,7 @@ func TestInitEntraLeavesAnUnknownUpstreamURLEmpty(t *testing.T) {
 
 func TestHelpListsCheckDoctorAndInit(t *testing.T) {
 	code, stdout, _ := runWith([]string{"--help"})
-	for _, want := range []string{"byward check --offline", "byward doctor [--json]", "byward init entra --tenant <tenant-id>", "4 (proxy), 8 (IdP), 12 (both)"} {
+	for _, want := range []string{"byward check --offline", "byward doctor [--json]", "byward init entra --tenant <tenant-id>", "exit 0, 2 (configuration), 4 (proxy), 8 (IdP) or 12 (both)"} {
 		if code != exitOK || !strings.Contains(stdout, want) {
 			t.Errorf("help lacks %q", want)
 		}

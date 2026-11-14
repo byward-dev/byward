@@ -10,22 +10,25 @@ the key (`private_key_jwt`, `PS256`, `x5t#S256`, per
 [Microsoft's certificate credentials](https://learn.microsoft.com/entra/identity-platform/certificate-credentials)).
 
 byward takes exactly one Entra credential: `BYWARD_ENTRA_CLIENT_SECRET_FILE`,
-`BYWARD_ENTRA_FEDERATED_TOKEN_FILE` or `BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE`.
+`BYWARD_ENTRA_FEDERATED_TOKEN_FILE` ([a federated credential](entra-federated-credential.md)) or
+`BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE`.
 
 ## 1. Make the certificate
 
 **Shortcut:** `byward init entra --credential certificate …` prints the whole app registration
 script with a certificate instead of a secret ([commands](../reference/commands.md#byward-init-entra)).
-It runs the steps below for you.
+It prints the steps below as a script for you to review and run.
 
 By hand, on the machine (or into the secret store) the proxy reads from:
 
 ```sh
-umask 077
-openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes -subj "/CN=byward" \
-  -keyout byward-cert.key -out byward-cert.crt
-cat byward-cert.key byward-cert.crt > entra-client-certificate.pem
-rm byward-cert.key
+(
+  umask 077
+  openssl req -x509 -newkey rsa:2048 -sha256 -days 365 -nodes -subj "/CN=byward" \
+    -keyout byward-cert.key -out byward-cert.crt
+  cat byward-cert.key byward-cert.crt > entra-client-certificate.pem
+  rm byward-cert.key
+)
 ```
 
 - Entra accepts only **RSA** keys; byward refuses an EC key, and an RSA key under 2048 bits.

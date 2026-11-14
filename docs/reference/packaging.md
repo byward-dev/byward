@@ -10,7 +10,7 @@ Decisions: [ADR-0019](../adr/0019-packaging.md). Config: [`.goreleaser.yaml`](..
 | `byward_<version>_<os>_<arch>.tar.gz` | linux amd64/arm64 (supported), darwin amd64/arm64 (development only) | Binary, `LICENSE`, `README.md`, `third_party/` licence texts; a syft SBOM (`.sbom.json`) per archive |
 | `checksums.txt` | — | sha256 of every archive and SBOM; cosign bundle `checksums.txt.sigstore.json`; GitHub build-provenance attestation |
 
-No Windows build in v0.1.
+No Windows build.
 
 ## Image contract (public interface)
 

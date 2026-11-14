@@ -63,7 +63,7 @@ const roles = h === undefined ? [] : h.split(',').map(decodeURIComponent);
 
 ## What byward guarantees
 
-- Every copy of these six headers a client sends is removed first, in any case and with `_` for `-`
+- Every copy of these eight headers a client sends is removed first, in any case and with `_` for `-`
   (`X_Byward_Roles` included). This happens even while the setting is off and without
   authentication, so turning the headers on or off never lets a forged one through.
 - No other setting can use these names: `BYWARD_ASSERTION_HEADER` and

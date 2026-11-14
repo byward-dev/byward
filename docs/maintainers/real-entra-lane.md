@@ -3,7 +3,8 @@
 Every night, `.github/workflows/real-entra.yml` checks byward against a real Entra tenant
 ([ADR-0024](../adr/0024-testing-strategy.md) §1, §12). It stores no secret. GitHub's OIDC token for
 the run is the CI app's federated credential, which byward sends Entra in place of a client secret
-(`BYWARD_ENTRA_FEDERATED_TOKEN_FILE`, [ADR-0012](../adr/0012-entra-specifics.md) §5). The lane never
+(`BYWARD_ENTRA_FEDERATED_TOKEN_FILE`, [ADR-0012](../adr/0012-entra-specifics.md) §5; for operators:
+[use a federated credential](../how-to/entra-federated-credential.md)). The lane never
 blocks a pull request.
 
 ## What it checks
@@ -18,8 +19,8 @@ blocks a pull request.
    - `entra access token`: that token is signed by the tenant, version 2, with `aud` = the app;
    - `entra idtyp claim`: app-only tokens carry `idtyp=app`.
 
-The app-only path end to end (a headless caller's token through the proxy to an upstream) is added
-with #64.
+The app-only path end to end (a headless caller's token through the proxy to an upstream) is not
+covered by the lane yet. App-only tokens shipped with [#64](https://github.com/byward-dev/byward/issues/64); CI tests them against the fake IdP.
 
 The token is masked in the log as soon as it is fetched and kept only in a `0600` file. The lane
 prints only its `iss`, `sub` and `aud`. Without a token the lane fails; there is no other credential

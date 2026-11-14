@@ -21,7 +21,7 @@ decisions behind it are in [ADR-0023](docs/adr/0023-project-governance.md).
 
 The project is licensed under [Apache-2.0](LICENSE). By its section 5, any contribution you
 intentionally submit for inclusion is under the terms of that licence, without extra terms. There is
-**no CLA and no DCO sign-off** in v0.1; do not add `Signed-off-by` lines.
+**no CLA and no DCO sign-off**; do not add `Signed-off-by` lines.
 
 Only submit work you have the right to contribute under Apache-2.0.
 
@@ -29,17 +29,20 @@ Only submit work you have the right to contribute under Apache-2.0.
 
 1. Create a feature branch (in a fork, unless you are a maintainer). Never commit to `main`.
 2. Install [mise](https://mise.jdx.dev), then the tools CI's `check` job uses:
-   `mise install go golangci-lint go:golang.org/x/tools/cmd/goimports actionlint zizmor shellcheck go:github.com/google/go-licenses/v2`. The `azure-cli` pinned in
+   `mise install go golangci-lint go:golang.org/x/tools/cmd/goimports actionlint zizmor shellcheck jq go:github.com/google/go-licenses/v2 go:golang.org/x/vuln/cmd/govulncheck`.
+   `mise run check` needs network access: `govulncheck` queries vuln.go.dev. The `azure-cli` pinned in
    `mise.toml` is an operator tool for Entra setup and real-tenant tests; `mise run check` does not
    need it.
 3. Make the change with tests (see [Test policy](#test-policy)).
 4. Run `mise run fmt`, then **`mise run check`**, which is exactly what CI runs. Run
-   `mise run test:integration` too if you touched integration-tested code (needs Docker).
+   `mise run test:integration` too if you touched integration-tested code (needs Docker): the tests
+   behind `//go:build integration`, in `internal/server` and `internal/store/postgres`.
 5. Commit with a [Conventional Commit](https://www.conventionalcommits.org/en/v1.0.0/) message:
    `feat:`, `fix:`, `docs:`, `chore:`, `test:`. Mark breaking changes with `!` or a
    `BREAKING CHANGE:` footer.
-6. **Review your own diff** against `origin/main` before asking for review, three ways, and repeat
-   each until it finds nothing:
+6. **Review your own diff** against `origin/main` before asking for review, three ways, as many times
+   as the tier for your change says ([AGENTS.md](AGENTS.md#commands): the angles, and at most five
+   rounds, the last re-run clean):
    - **runtime:** run the changed code yourself, including edge cases (empty input, limits, errors);
    - **structure:** check the SOLID structure (one responsibility per type, dependencies on
      interfaces);
@@ -123,4 +126,4 @@ audit schema, metric names, log fields, and the image paths and uid are public i
 - a deprecated item keeps working, with a warning, for at least one minor release before it is
   removed.
 
-Releases follow [docs/how-to/release.md](docs/how-to/release.md).
+Releases follow [docs/maintainers/release.md](docs/maintainers/release.md).

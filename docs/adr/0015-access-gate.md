@@ -1,6 +1,6 @@
 # ADR-0015: Authorization — an access gate at login and refresh, no per-request denials in v0.1
 
-- Status: Accepted
+- Status: Accepted; clarified 2026-11-06, 2026-11-07 (#126); amended 2026-11-06 (slice 1.5), by ADR-0014 (#64) and ADR-0011 (#286)
 - Date: 2026-11-05
 - Issue: #13 (F12)
 
@@ -33,9 +33,14 @@ Nobody ships 403 step-up.
    is issued — never per MCP request. Optional allowlists: tenant (`tid`), required app roles
    (`roles`), groups (opt-in, `ApplicationGroup`; overage denies), email domain with `email_verified`
    (generic IdPs), `hd` (Google).
+   _Amended by ADR-0011 (2026-11-14, #286):_ for an OIDC IdP, roles and groups are read from the
+   claims `BYWARD_OIDC_ROLES_CLAIM` and `BYWARD_OIDC_GROUPS_CLAIM` name (`roles` and `groups` by
+   default).
 2. **Denials:** at login, our error page ("you don't have access — ask your operator"); at refresh,
    `invalid_grant`, so the client signs in again and lands on that page. No 403 is ever used for a
    denial; with a single scope in v0.1 there is no step-up either.
+   _Amended by ADR-0014 (2026-11-07, #64):_ an app-only caller the app gate refuses gets 403 with
+   `insufficient_scope`; proxy tokens still never get a 403.
    _Clarified 2026-11-06 (slice 1.5):_ no MCP response uses 403 for a denial; the browser denial
    page is 403, since MCP clients never parse it and the reasoning above is about MCP responses.
    _Clarified 2026-11-07 (#126):_ a `prompt=none` sign-in gets no page, since its browser may show

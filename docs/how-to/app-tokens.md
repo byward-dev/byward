@@ -111,7 +111,7 @@ hour, so set it per run.
 Every request, since an app has no grant (ADR-0022 §3, §4):
 
 - the signature, from the tenant's keys, with `alg` `RS256` and header `typ` `JWT`;
-- `iss`: the v2 issuer of the configured tenant (with `organizations`, of an allowed tenant), and
+- `iss`: the v2 issuer of the configured tenant, and
   `ver` 2.0; `aud`: the proxy's client ID only;
 - `exp`, `iat` and `nbf`, with 30 seconds of clock skew;
 - `idtyp` is `app` and there is no `scp`, so a user's token is never taken as an app's;

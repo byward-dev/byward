@@ -75,7 +75,7 @@ The opt-in `X-Byward-*` headers that repeat the **identity assertion**'s values,
 _Avoid_: identity header (alone), trusted headers, forwarded user
 
 **App-only token**:
-An **IdP token** that a headless caller (CI job, managed identity, agent) got with its own credential, with no **user** behind it, and sends the MCP endpoint instead of a **proxy token**; accepted only from Entra, opt-in, with a required app role (ADR-0022). Its caller is a client principal.
+An **IdP token** that a headless caller (CI job, managed identity, agent) got with its own credential, with no **user** behind it, and sends the MCP endpoint instead of a **proxy token**; accepted only from Entra, opt-in, with a required app role (ADR-0022). Its caller is a client principal (see **principal type**).
 _Avoid_: service token, machine token, M2M token (alone)
 
 **Upstream credential**:
@@ -91,11 +91,11 @@ An API the **upstream** calls on the **user**'s behalf (e.g. Microsoft Graph); t
 _Avoid_: upstream API, backend
 
 **Downstream token**:
-A token for a **downstream API**, obtained by the proxy On-Behalf-Of the **user** and sent to an HTTP **upstream** in its own header; never stored or logged (ADR-0017).
+A token for a **downstream API**, obtained by the proxy On-Behalf-Of the **user** and sent to an HTTP **upstream** in a configured header, or given to a stdio **upstream process** through its **token socket**; never stored or logged (ADR-0017).
 _Avoid_: OBO token, delegated token
 
 **Access gate**:
-The **operator**'s rule for which **users** may use the proxy at all (tenant, app roles, groups, email domain), checked when a **grant** is created and at every refresh — never per MCP request.
+The **operator**'s rule for which **users** may use the proxy at all (tenant, app roles, groups, email domain, Google's hosted domain `hd`; the roles and groups claims are configurable for an OIDC **IdP**), checked when a **grant** is created and at every refresh — never per MCP request (ADR-0015).
 _Avoid_: policy, ACL, authorization rules (alone)
 
 **Consent**:
@@ -111,8 +111,64 @@ The human who signs in at the **IdP** and on whose behalf the **MCP client** act
 _Avoid_: client, operator
 
 **Operator**:
-The person who deploys and configures the proxy (IdP app, upstream, policy).
+The person who deploys and configures the proxy (IdP app, upstream, access gate).
 _Avoid_: user, admin
+
+**User key**:
+The stable ID of a **user**, or of an app-only caller, at the **IdP**: `tid:oid` for Entra, the subject claim's value for an OIDC IdP. It is `sub` in the **identity assertion** and `user_key` in audit records.
+_Avoid_: user ID (alone), email, username
+
+**Principal type**:
+Who a request acts for: `user`, or `client` for an app-only caller (a client principal, with no **user** behind it); sent as `principal_type` in the **identity assertion** and as `BYWARD_PRINCIPAL_TYPE` to an **upstream process** (ADR-0022 §5).
+_Avoid_: caller type, actor
+
+**Public URL**:
+The MCP endpoint's URL as **MCP clients** reach it (`BYWARD_PUBLIC_URL`); its origin is the **broker**'s issuer, the `iss` of every **identity assertion**.
+_Avoid_: base URL, external URL
+
+**Store**:
+The **broker**'s persistent state: **grants**, codes, refresh-token hashes, revocations, **client registrations**, remembered **consents**, spent logins and client assertions. SQLite by default, PostgreSQL for several replicas; keys never live in it (ADR-0007).
+_Avoid_: database (alone), cache
+
+**Store epoch**:
+A number in the **store** that a restore from an older copy moves on; refresh tokens of **grants** from an older epoch are refused, so their **users** sign in again (ADR-0007 §9).
+_Avoid_: generation, version
+
+**Sealing key**:
+A key from `BYWARD_KEYS_DIR` that seals (AES-256-GCM) **proxy tokens**, codes, stored **IdP tokens** and login and consent state; the key file that sorts last seals, and every key file opens (ADR-0006 §8). Not the key that signs the **identity assertion**.
+_Avoid_: signing key, secret
+
+**Deny list**:
+The in-memory list of revoked **grants** and subject cut-offs that each replica rebuilds from the **store** every 5 s; a **proxy token** it covers is refused, and every token once the list is too stale (ADR-0006 §3).
+_Avoid_: blocklist, revocation cache
+
+**Relaxation**:
+A protection turned off by an explicit setting (development mode, `BYWARD_INSECURE_NO_AUTH`), always logged at startup (security invariant 12).
+_Avoid_: insecure mode (alone), override
+
+**IdP alert**:
+An **IdP** error that will not clear without the **operator**, such as the IdP refusing the **IdP app**'s credential; counted in `byward_idp_alerts_total` and logged once at error level (#204; [observability](docs/reference/observability.md)).
+_Avoid_: IdP error (alone), outage
+
+**Upstream refusal**:
+An **upstream**'s 401 or 403, which refuses the proxy (its **upstream credential** or **identity assertion**), not the **MCP client**: answered as a JSON-RPC response, never as a sign-in challenge (ADR-0025).
+_Avoid_: upstream 403 (alone), auth error
+
+**Token socket**:
+The Unix socket the proxy gives a stdio **upstream process** (`BYWARD_DOWNSTREAM_TOKEN_SOCKET`) to ask for its **user**'s **downstream token**; only that process and its descendants are answered (ADR-0017, #141).
+_Avoid_: token file, credential endpoint
+
+**Internal listener**:
+The second listener (`BYWARD_INTERNAL_LISTEN`, `127.0.0.1:9090` by default) for `/metrics`, `/livez`, `/readyz` and the assertion keys; plain http, never exposed like the public one (ADR-0018 §10).
+_Avoid_: admin port, management API
+
+**SSRF guard**:
+The only way the proxy fetches a URL an **MCP client** supplied (a CIMD document, a client's `jwks_uri`): `https` on port 443, public addresses checked when dialling, no redirects, size and time limits (ADR-0008 §4; `internal/ssrfguard`).
+_Avoid_: URL filter, safe fetcher
+
+**Serving certificate**:
+The **operator**'s TLS certificate and key that byward serves on its public listener when it terminates TLS (`BYWARD_TLS_CERT_FILE`, `BYWARD_TLS_KEY_FILE`); a replaced file is served from the next connection on (ADR-0019 §9 as amended, #183).
+_Avoid_: TLS cert (alone), ingress certificate
 
 ## Flagged ambiguities
 

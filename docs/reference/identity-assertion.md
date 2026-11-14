@@ -31,14 +31,14 @@ Claims:
 |---|---|---|
 | `iss` | yes | byward's issuer: the public URL's origin, e.g. `https://mcp.example.com` |
 | `aud` | yes | `BYWARD_UPSTREAM_URL` exactly as configured, e.g. `http://mcp-upstream.internal:3001/mcp` |
-| `sub` | yes | the user key: `tid:oid` for Entra, stable and opaque; for an app-only caller, its service principal's `tid:oid` |
+| `sub` | yes | the user key: `tid:oid` for Entra, stable and opaque; for an `oidc` IdP, the value of its subject claim (`BYWARD_OIDC_SUBJECT_CLAIM`, `sub` by default); for an app-only caller, its service principal's `tid:oid` |
 | `client_id` | yes | the MCP client's ID at byward (a static ID, a CIMD URL or a DCR ID); for an app-only caller, its Entra application (client) ID |
 | `principal_type` | yes | `user`, or `client` for a headless caller with an [app-only token](../how-to/app-tokens.md): check it before treating `sub` as a person |
 | `iat` | yes | issued at, seconds |
 | `exp` | yes | `iat` + 60 seconds |
 | `jti` | yes | 128 random bits, base64url |
-| `roles` | `roles` opted in (default) | the user's app roles, when they have any |
-| `groups` | `groups` opted in | group IDs; left out under Entra groups overage, or when too many to fit |
+| `roles` | `roles` opted in (default) | the user's roles, when they have any: Entra app roles, or for an `oidc` IdP the ID token claim `BYWARD_OIDC_ROLES_CLAIM` names (`roles` by default) |
+| `groups` | `groups` opted in | the user's groups: Entra group IDs, or for an `oidc` IdP the claim `BYWARD_OIDC_GROUPS_CLAIM` names (`groups` by default); left out under Entra groups overage, or when too many to fit |
 | `email` | `email` opted in, and the IdP verified it or `BYWARD_ASSERTION_UNVERIFIED_EMAIL` is `true` | display only, never for authorization |
 | `email_verified` | exactly when `email` is | `true` when the IdP vouched for the address; `false` when only `BYWARD_ASSERTION_UNVERIFIED_EMAIL` let it through (every Entra email) |
 | `name` | `name` opted in | display only |
@@ -79,7 +79,30 @@ Example (from `internal/assertion/testdata/assertion.golden.json`; `jti` is rand
   `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server`, so a verifier
   that only uses OIDC discovery finds it (see [By discovery](#by-discovery)). The keys verify
   identity assertions only: proxy tokens are opaque `byw_` strings, so an MCP client has nothing
-  to verify with them. With a stdio upstream there is no assertion and no `jwks_uri`.
+  to verify with them. With a stdio upstream there is no assertion and no `jwks_uri`
+  ([below](#stdio-upstream)).
+
+## stdio upstream
+
+A stdio upstream gets no assertion: each user's process is started by the proxy, which sets who it
+acts for in its environment. The process can trust these, since the operator's own variables may not
+start with `BYWARD_`:
+
+| Variable | Value |
+|---|---|
+| `BYWARD_SUBJECT` | the user key, as `sub` above |
+| `BYWARD_ISSUER` | byward's issuer, as `iss` above |
+| `BYWARD_PRINCIPAL_TYPE` | `user`, or `client` for an app-only caller |
+| `BYWARD_DOWNSTREAM_TOKEN_SOCKET` | with On-Behalf-Of on: the socket to ask for the user's downstream token |
+
+The rest of the process's environment, and how sessions map to processes, is in
+[the stdio how-to](../how-to/stdio-upstream.md).
+
+## Without authentication
+
+With `BYWARD_INSECURE_NO_AUTH` ([ADR-0027](../adr/0027-insecure-no-auth.md)) there is no
+identity to assert: an HTTP upstream gets no assertion header, and a stdio process runs as
+`BYWARD_SUBJECT=anonymous` with `BYWARD_ISSUER=urn:byward:no-auth`.
 
 ## Verifying
 
@@ -136,7 +159,9 @@ func verifier(keys jose.JSONWebKeySet, audience string) auth.TokenVerifier {
 // handler = auth.RequireBearerToken(verifier(keys, "http://mcp-upstream.internal:3001/mcp"), nil)(mcpHandler)
 ```
 
-Also check the issuer (`c.Issuer`) when the upstream trusts more than one proxy.
+This is the verifier the contract test runs, so it checks only what the test needs. In your
+upstream, also check the issuer (`Issuer` in `jwt.Expected`, byward's public origin) when it trusts
+more than one proxy, and read `principal_type` before treating `sub` as a person.
 
 ### TypeScript: the MCP TypeScript SDK
 

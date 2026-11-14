@@ -25,8 +25,8 @@ The file does not need the public CAs as well. On Linux, `SSL_CERT_FILE` replace
 *file* Go reads; Go still reads every file in `/etc/ssl/certs`. In the image, that directory holds
 the public bundle (`ca-certificates.crt`), so Entra, Google and other public IdPs keep working.
 
-`byward doctor`'s IdP discovery line checks the result: it passes only if byward trusts the IdP's
-certificate.
+`byward doctor` checks the result. Its "trust store" line says where the roots come from and how
+many there are, and its IdP discovery line passes only if byward trusts the IdP's certificate.
 
 What each way of adding a CA leaves byward trusting, measured in the image (Go 1.27.4,
 `distroless/static-debian13`):
@@ -42,8 +42,9 @@ What each way of adding a CA leaves byward trusting, measured in the image (Go 1
 | A volume mounted over the whole `/etc/ssl/certs` | **no** | yes |
 | `SSL_CERT_FILE` naming a file that does not exist | yes | **no**, without an error |
 
-The last row is why the doctor line matters: Go silently ignores an `SSL_CERT_FILE` it cannot read
-or that holds no certificate.
+Go silently ignores an `SSL_CERT_FILE` it cannot read or that holds no certificate (the last row).
+`byward doctor`'s "trust store" line warns about that file, and about an `SSL_CERT_FILE` other than the
+image's bundle with an `SSL_CERT_DIR` that leaves out `/etc/ssl/certs`.
 
 ## Kubernetes, with trust-manager
 
@@ -105,4 +106,7 @@ changes, restart the Deployment (`kubectl rollout restart`): byward reads the ro
   on whether your distribution keeps its bundle in one of those directories. Adding your CA to the
   system trust store (`update-ca-certificates`, `update-ca-trust`) avoids the question.
 - **macOS:** with either variable set, Go (since 1.27) stops using the system verifier and trusts
-  only the files you name. Add your CA to the keychain instead.
+  only the files you name; an `SSL_CERT_FILE` that exists but cannot be read falls back to the system
+  verifier, unless `SSL_CERT_DIR` yields a certificate.
+  `GODEBUG=x509sslcertoverrideplatform=0` keeps the system verifier and ignores both variables. Add
+  your CA to the keychain instead.

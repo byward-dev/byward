@@ -1,7 +1,7 @@
 # Restrict who can sign in (the access gate)
 
 The access gate decides which users may use the proxy at all. It is checked when a user signs in
-and, once refresh tokens arrive (slice 1.6), at every refresh; never on individual MCP requests. A user the gate turns away sees
+and at every refresh; never on individual MCP requests. A user the gate turns away sees
 "You don't have access to this server. Ask your operator for access." MCP clients never get a 403
 for a user gate decision. Background: [ADR-0015](../adr/0015-access-gate.md).
 
@@ -16,7 +16,7 @@ one entry is enough.
 
 | Setting | Matches | Notes |
 |---|---|---|
-| `BYWARD_GATE_TENANTS` | Entra `tid` | Tenant GUIDs. In single-tenant mode it must include your tenant; a multi-tenant (`organizations`) app always needs it (ADR-0012 §2). |
+| `BYWARD_GATE_TENANTS` | Entra `tid` | Tenant GUIDs. It must include your tenant (byward is single-tenant: `BYWARD_ENTRA_TENANT` is a GUID, ADR-0012 §2). |
 | `BYWARD_GATE_ROLES` | `roles` (an OIDC IdP: the claim named by `BYWARD_OIDC_ROLES_CLAIM`, [OIDC how-to](oidc.md#4-who-may-sign-in)) | App role values, case-sensitive. The user needs at least one. |
 | `BYWARD_GATE_GROUPS` | `groups` (an OIDC IdP: the claim named by `BYWARD_OIDC_GROUPS_CLAIM`) | Entra: group object IDs. An OIDC IdP: the claim's values, exactly (Keycloak sends full paths such as `/byward-users` unless "Full group path" is off). If Entra leaves the groups out because the user is in too many (over 200), the user is denied. |
 | `BYWARD_GATE_EMAIL_DOMAINS` | email domain | Only verified emails, exact domain (no subdomains). OIDC IdPs only ([OIDC how-to](oidc.md)): not available with Entra, whose `email` is not verified. |
@@ -31,8 +31,11 @@ message naming the setting, for example `BYWARD_GATE_TENANTS: "contoso" is not a
 
 - **Single-tenant Entra:** every user of your tenant can sign in, including guests unless you
   restrict them. The proxy starts, and logs a warning at every start.
-- **Google or generic OIDC** (not supported yet; listed so the rule is known): anyone with an account could sign in, so the proxy refuses to start
-  unless `BYWARD_GATE_ALLOW_EMPTY=true`. With that setting it logs a warning at every start.
+- **An OIDC IdP** (Google, Okta, Keycloak, Auth0, generic): anyone with an account could sign in,
+  so the proxy refuses to start unless `BYWARD_GATE_ALLOW_EMPTY=true`. With that setting it logs a
+  warning at every start. What to gate on, per IdP: [Keycloak §2](keycloak.md#2-roles-and-groups-in-the-token),
+  [Okta §4](okta.md#4-who-may-sign-in), [Google §3](google.md#3-who-may-sign-in), and for Auth0 or
+  another IdP the [OIDC how-to §4](oidc.md#4-who-may-sign-in).
 
 ## Entra: recommended setup
 
@@ -48,7 +51,7 @@ message naming the setting, for example `BYWARD_GATE_TENANTS: "contoso" is not a
    (`groupMembershipClaims: ApplicationGroup`), which keeps users well under the overage limit.
    Nested groups do not count.
 
-The gate is read at startup, so a change needs a restart. It then takes effect at each user's next sign-in; with refresh tokens (slice 1.6), at their next
+The gate is read at startup, so a change needs a restart. It then takes effect at each user's next sign-in, or at their next
 refresh, at most one access-token lifetime later. Every denial is an `access_denied` audit event
 ([observability reference](../reference/observability.md)) whose `reason` is the rule that refused
 the user (`tenant`, `role`, `group`, `groups_unavailable`, `email_domain` or `hosted_domain`), with

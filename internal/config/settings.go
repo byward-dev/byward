@@ -37,7 +37,7 @@ var registry = []Setting{
 	{Name: "entra-client-id", Auth: true, Help: "application (client) ID of the IdP app registration"},
 	{Name: "entra-client-secret", Auth: true, Secret: true, Help: "client secret of the IdP app"},
 	{Name: "entra-client-certificate", Auth: true, Secret: true, Help: "instead of a client secret: a PEM file with the IdP app's certificate and its unencrypted RSA private key (2048 bits or more); the certificate must be uploaded to the app registration; recommended for production (ADR-0012 §5, docs/how-to/entra-certificate.md)"},
-	{Name: "entra-federated-token-file", Auth: true, Help: "instead of a client secret: an absolute path to a file holding a federated token (a JWT from another identity provider, such as GitHub Actions or AKS workload identity) that byward sends Entra as its client assertion, re-reading the file for every token request; the app registration needs a matching federated identity credential (ADR-0012 §5, docs/how-to/real-entra-lane.md)"},
+	{Name: "entra-federated-token-file", Auth: true, Help: "instead of a client secret: an absolute path to a file holding a federated token (a JWT from another identity provider, such as GitHub Actions or AKS workload identity) that byward sends Entra as its client assertion, re-reading the file for every token request; the app registration needs a matching federated identity credential (ADR-0012 §5, docs/how-to/entra-federated-credential.md)"},
 	{Name: "entra-client-secret-expires-at", Auth: true, Help: "when the client secret expires, as a date (2027-11-06) or an RFC 3339 time; the proxy warns at startup and doctor warns from 30 days before (ADR-0012 §10)"},
 	{Name: "oidc-issuer", Auth: true, Help: "with an oidc IdP: the issuer URL, exactly as its discovery document states it (https); " + defaultIssuersHelp()},
 	{Name: "oidc-client-id", Auth: true, Help: "with an oidc IdP: the client ID of the proxy's app at the IdP"},
@@ -130,8 +130,24 @@ func reference() string {
 		}
 		fmt.Fprintf(&b, "| `%s` | `%s` | %s | %s |\n", flagName, env, def, s.Help)
 	}
-	b.WriteString("\nActions: `--version [--json]`, `--print-config`, `--help`.\n")
-	b.WriteString("Commands (`check --offline`, `doctor`, `init entra`): [commands reference](commands.md).\n\n")
-	b.WriteString("Exit codes: 0 success, 1 runtime error, 2 configuration error; `doctor` adds 4, 8 and 12.\n")
+	b.WriteString("\nActions: `--version [--json]`, `--print-config`, `--help` ([proxy actions](commands.md#proxy-actions)).\n")
+	b.WriteString("Commands: [commands reference](commands.md).\n\n")
+	b.WriteString("Exit codes: 0 success, 1 runtime error, 2 configuration error; `doctor` adds 4, 8 and 12.\n\n")
+	b.WriteString(otherEnvironment)
 	return b.String()
 }
+
+// otherEnvironment is the reference's list of environment variables that are not settings: read
+// by Go or a library the proxy uses, or set by the proxy for a stdio upstream process.
+const otherEnvironment = `## Other environment variables
+
+These are not settings, so ` + "`--print-config`" + ` does not show them.
+
+| Variable | Read or set by | Meaning |
+|---|---|---|
+| ` + "`OTEL_*`" + ` | the proxy, through the OpenTelemetry SDK | traces, off unless ` + "`OTEL_TRACES_EXPORTER`" + ` is set ([observability](observability.md)) |
+| ` + "`SSL_CERT_FILE`, `SSL_CERT_DIR`" + ` | the proxy, through Go | the CAs it trusts for outbound TLS: the IdP, the upstream, an MCP client's CIMD document and ` + "`jwks_uri`" + `, and the PostgreSQL store when its DSN has no ` + "`sslrootcert`" + ` ([private CA](../how-to/private-ca.md)) |
+| ` + "`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`" + ` | the proxy, through Go | the environment proxy: the relay to an HTTP upstream, IdP calls, doctor's self-probe and trace export go through it ([doctor](commands.md#checks) names it) |
+| ` + "`BYWARD_SUBJECT`, `BYWARD_ISSUER`, `BYWARD_PRINCIPAL_TYPE`" + ` | set by the proxy for a stdio upstream process | who the process acts for ([stdio upstream](../how-to/stdio-upstream.md)) |
+| ` + "`BYWARD_DOWNSTREAM_TOKEN_SOCKET`" + ` | set by the proxy for a stdio upstream process, read by ` + "`byward downstream-token`" + ` | the token socket the process asks for its user's downstream token |
+`

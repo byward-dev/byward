@@ -77,7 +77,7 @@ description = "Identity assertion contract: the TypeScript SDK's requireBearerAu
 run = "sh scripts/assertion/run.sh"
 
 [tasks."test:real-entra"]
-description = "Scheduled real-Entra lane: byward check and doctor against the maintainer's tenant, with GitHub's OIDC token as the federated credential; GitHub Actions only, never part of test:integration (scripts/real-entra/run.sh, docs/how-to/real-entra-lane.md)"
+description = "Scheduled real-Entra lane: byward check and doctor against the maintainer's tenant, with GitHub's OIDC token as the federated credential; GitHub Actions only, never part of test:integration (scripts/real-entra/run.sh, docs/maintainers/real-entra-lane.md)"
 run = "sh scripts/real-entra/run.sh"
 
 [tasks."test:fuzz"]
@@ -85,7 +85,7 @@ description = "Nightly fuzz lane: go test -fuzz for FUZZTIME (default 2m) per ta
 run = "sh scripts/fuzz/run.sh"
 
 [tasks."test:load"]
-description = "Scheduled load test (ADR-0024 §10): the latency the wired proxy adds to MCP requests, against 2 ms p99, and proof that the gate catches 5 ms; results in build/load/results.json (docs/how-to/load-test.md)"
+description = "Scheduled load test (ADR-0024 §10): the latency the wired proxy adds to MCP requests, against 2 ms p99, and proof that the gate catches 5 ms; results in build/load/results.json (docs/maintainers/load-test.md)"
 run = "go test -count=1 -v -timeout 15m -tags=load -run ^TestLoad ./internal/server/"
 extends = "go-test"
 

@@ -1,6 +1,6 @@
 # ADR-0011: IdP adapters — small interface, generic OIDC with presets, Entra on top
 
-- Status: Accepted
+- Status: Accepted; amended by ADR-0026, and 2026-11-14 (#286, #306)
 - Date: 2026-11-05
 - Issue: #10 (F9)
 
@@ -32,10 +32,11 @@ rate-limit them (`oidc/jwks.go`).
    are data: issuer templates, accepted issuers, required scopes, claim quirks (`email_verified` as
    bool or string, optional `hd` check). `subject_claim` defaults to `sub`; setting it to a mutable
    claim (`email`, `preferred_username`, `upn`) logs a startup warning.
+   _Amended 2026-11-14 (#286):_ the roles and groups claims are configurable too (below).
 3. **`internal/idp/entra` builds on the generic adapter** (ADR-0012); its subject key is fixed.
 4. **Client credentials are an injected service** shared by all adapters: client secret from
    `*_FILE`; `private_key_jwt` with a key file; a client assertion read from a file on every call
-   (workload identity). No vendor SDK.
+   (workload identity). No vendor SDK. _Amended 2026-11-14 (#306):_ the signing algorithm (below).
 5. **ID token validation per OIDC Core §3.1.3.7:** exact `iss`; `aud` contains our client ID with no
    untrusted extra audiences; `azp`; `exp`; `iat` within the ADR-0006 skew leeway; `nonce` always sent
    and checked; an algorithm allowlist per IdP (never `HS*` or `none`); signatures always verified,
@@ -58,3 +59,17 @@ rate-limit them (`oidc/jwks.go`).
 - A preset's defaults are public interface: changing one is a breaking change.
 - One adapter test suite runs against the fake IdP's profiles and Keycloak (F21); a real-tenant Entra
   lane is a scheduled extra, not the main gate.
+
+## Amendment 2026-11-14 (#286, #306): claims and the client assertion's algorithm
+
+Recorded after the fact; both shipped in v0.2.
+
+1. **Roles and groups claims (#286):** for an OIDC IdP, the access gate and the identity assertion
+   read roles and groups from the ID token claims `BYWARD_OIDC_ROLES_CLAIM` and
+   `BYWARD_OIDC_GROUPS_CLAIM` name, `roles` and `groups` by default for every preset, so an IdP
+   that sends them in a namespaced claim (`https://example.com/roles`) works. A blank or padded
+   name, or a claim of the sign-in itself such as `aud`, is a configuration error: `aud` holds our
+   client ID, so a gate on it would admit every user of the IdP.
+2. **The client assertion's algorithm (#306):** `private_key_jwt` signs with PS256 for an RSA key and
+   ES256 for an EC P-256 key, never RS256, so the IdP's client must accept that algorithm
+   (`internal/idp/clientauth.go`; [OIDC how-to](../how-to/oidc.md)).

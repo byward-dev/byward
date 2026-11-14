@@ -39,7 +39,7 @@ var commands = map[string]command{
 		run:   checkOffline,
 	},
 	"doctor": {
-		usage: "byward doctor [--json] [-- stdio-upstream-command [args...]]\n      probe the running proxy as MCP clients do, and the IdP app; exit 0, or 4 (proxy), 8 (IdP), 12 (both)",
+		usage: "byward doctor [--json] [-- stdio-upstream-command [args...]]\n      probe the running proxy as MCP clients do, and the IdP app; exit 0, 2 (configuration), 4 (proxy), 8 (IdP) or 12 (both)",
 		run:   runDoctor,
 	},
 	"jwks": {

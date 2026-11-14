@@ -1,6 +1,6 @@
 # ADR-0003: Upstream kinds — HTTP relay; stdio processes never shared between users
 
-- Status: Accepted
+- Status: Accepted; amended by ADR-0025
 - Date: 2026-11-05
 - Issue: #2 (F1)
 
@@ -11,7 +11,7 @@ server is built for exactly one client, and the spec says stdio implementations 
 use OAuth and take credentials from the environment — the proxy is how a stdio server gets
 OAuth at all.
 
-Prior art (source read 2026-11-05, see `docs/research/reference-projects.md`):
+Prior art (source read 2026-11-05, see `docs/archive/research/reference-projects.md`):
 
 - **Shared process, proxy re-serves** (sigbit, sparfenyuk, TBXark): loses sampling,
   elicitation, roots and most notifications; the proxy becomes an MCP implementation.

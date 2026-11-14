@@ -1,6 +1,6 @@
 # ADR-0002: Repository structure optimised for coding agents
 
-- Status: Accepted
+- Status: Accepted; amended 2026-11-14
 - Date: 2026-11-05
 
 ## Context
@@ -18,6 +18,8 @@ names.
    when an area has local rules — as `CLAUDE.md`, which loads on read/write/edit.
 2. **Planning:** decisions in `docs/adr/`; work items in GitHub Issues with milestones;
    `docs/features.md` is an index only.
+   _Amended 2026-11-14:_ the v0.1 features are all decided; `docs/features.md` moved to
+   `docs/archive/` and is no longer updated. GitHub Issues are the only backlog.
 3. **Binary only:** all code in `internal/`, per https://go.dev/doc/modules/layout ("Server
    projects … keep the Go packages implementing the server's logic in the `internal`
    directory"). Packages may be promoted to a public API later without breaking users.
@@ -37,6 +39,9 @@ names.
 8. **Committed `.claude/settings.json`:** format hook + read-mostly allowlist; merges and
    pushes always ask. Project skills (`add-idp-adapter`, …) are written after the second
    adapter exists, not before. `.mcp.json` added once `mise run dev` exists.
+   _Amended 2026-11-14:_ several adapters exist (`internal/idp/*`, `internal/store/*`), and no
+   project skill has been written yet; the review sweeps AGENTS.md names run from skills outside
+   the repository.
 9. **`CONTEXT.md` seeded** with the terms that collide in this domain (client, upstream,
    token, broker).
 10. **License:** Apache-2.0, matching agentgateway, Pomerium, ToolHive, dex, Envoy.
