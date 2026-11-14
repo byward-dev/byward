@@ -1,5 +1,5 @@
 // Package ssrfguard fetches client-supplied URLs (CIMD documents, jwks_uri) so that they can only
-// reach public HTTPS servers (ADR-0008 §4, AGENTS.md "SSRF guard"; quality-lenses invariant 4).
+// reach public HTTPS servers (ADR-0008 §4, AGENTS.md "SSRF guard"; security-posture invariant 4).
 //
 // The address is checked when the connection is dialled, after DNS resolution, so a name that
 // resolves to a private address is refused even if it resolved to a public one a moment earlier

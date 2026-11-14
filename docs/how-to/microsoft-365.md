@@ -117,4 +117,5 @@ Entra can refuse the exchange; the client then gets an answer it can show, never
   `admin_consent_url` opens the consent screen for a tenant administrator.
 - **`interaction_required`**: a Conditional Access policy on Graph (for example multifactor
   authentication for Exchange Online) wants a step the proxy cannot complete. Check the user's
-  sign-in log for the policy; passing its challenge to the client is not supported yet.
+  sign-in log for the policy. The proxy does not pass the policy's challenge on to the client
+  ([ADR-0012 §9](../adr/0012-entra-specifics.md)).

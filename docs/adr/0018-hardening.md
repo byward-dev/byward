@@ -1,6 +1,6 @@
 # ADR-0018: Hardening — Origin and Host checks, bounded HTTP, Rewrite-only proxying
 
-- Status: Accepted; amended 2026-11-06 (#102, #103, #105), 2026-11-07 (#167)
+- Status: Accepted; amended 2026-11-06 (#102, #103, #105), 2026-11-07 (#167), 2026-11-14 (§13)
 - Date: 2026-11-06
 - Issue: #18 (F17)
 
@@ -49,6 +49,8 @@ Clients (runtime, 2026-11-06): Node `fetch` and MCP Inspector CLI 2.14.0 (TypeSc
     (sealed tokens, redirect URIs, CIMD documents, era detection); go-sdk ≥ 1.4.1 if used.
 13. **Security invariants 16–18** are added to `docs/quality-lenses.md`, and `AGENTS.md` requires every
     change to keep the invariants list.
+    _Amended 2026-11-14:_ the invariants list, with its wording, moved to
+    [`docs/security-posture.md`](../security-posture.md#security-invariants); `docs/quality-lenses.md` links to it.
 
 ## Consequences
 
