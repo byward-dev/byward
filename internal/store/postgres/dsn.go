@@ -9,6 +9,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// CheckDSN is what Open checks of the DSN before connecting, for `byward check --offline`: that it
+// parses, and that it asks for verify-full TLS unless allowPlaintext.
+func CheckDSN(dsn string, allowPlaintext bool) error {
+	_, err := parseDSN(dsn, allowPlaintext)
+	return err
+}
+
 // parseDSN parses the DSN as pgx does (PG* environment variables, a service file and ~/.pgpass
 // included) and checks the parsed result, so none of them can weaken TLS.
 //

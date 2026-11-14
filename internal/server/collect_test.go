@@ -15,7 +15,6 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/denylist"
 	"github.com/byward-dev/byward/internal/store"
-	"github.com/byward-dev/byward/internal/store/sqlite"
 )
 
 // The wired server removes expired store rows at startup and while it runs (ADR-0007 §1): a grant
@@ -23,10 +22,10 @@ import (
 // in the bubble.
 func TestTheServerRemovesExpiredRowsWhileItRuns(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		var st *sqlite.Store
+		var st openedStore
 		orig := wireStore
 		t.Cleanup(func() { wireStore = orig })
-		wireStore = func(cfg *config.Config, log *slog.Logger, rec *audit.Log) (*sqlite.Store, error) {
+		wireStore = func(cfg *config.Config, log *slog.Logger, rec *audit.Log) (openedStore, error) {
 			s, err := orig(cfg, log, rec)
 			st = s
 			return s, err
@@ -138,7 +137,7 @@ func TestShutdownLetsACollectionInProgressFinishWithoutLoggingAFailure(t *testin
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			runBackground(ctx, c, denylist.New(noRevocations{}, time.Now), slog.New(slog.NewTextHandler(&logs, nil)))
+			runBackground(ctx, c, denylist.New(noRevocations{}, time.Now), slog.New(slog.NewTextHandler(&logs, nil)), nil)
 		}()
 		<-c.entered
 		stop()

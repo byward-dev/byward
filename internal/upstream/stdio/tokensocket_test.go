@@ -333,8 +333,20 @@ func TestTheSocketClosesAsSoonAsTheProcessIsReapedEvenWhileADescendantHoldsItsPi
 	if isDone(p) {
 		t.Fatal("the process finished before the socket closed, so this test proves nothing")
 	}
-	h.clk.Advance(2 * DefaultKillGrace) // the pipes are force-closed after the grace
+	// The pipes are force-closed a grace after the reap, by a timer the reaper arms after the socket
+	// has closed: wait until it is armed before advancing (#299), or the advance can come first and
+	// the timer then lands past it.
+	eventually(t, "the reaper to arm the force-close timer", func() bool {
+		p.mu.Lock()
+		exited := p.exited // set where the stop timers are stopped, before the force-close is armed
+		p.mu.Unlock()
+		return exited && h.clk.due(DefaultKillGrace)
+	})
+	h.clk.Advance(DefaultKillGrace)
 	waitDone(t, p)
+	if forced := h.log.with("upstream pipes force-closed"); len(forced) != 1 {
+		t.Fatalf("force-close records = %v, want one: the force-close is what ends the process", forced)
+	}
 }
 
 // stranger is a process outside this test's ancestry, as a root that the test asks a socket for.

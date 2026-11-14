@@ -102,6 +102,9 @@ type Config struct {
 	DataDir          string
 	StoreDir         string
 	StoreCounterFile string
+	// StorePostgresDSN selects the PostgreSQL store instead of SQLite (#227): the connection
+	// string, read from its secret file. It holds a password: never log it.
+	StorePostgresDSN string
 	RefreshGrace     time.Duration
 	// Client ID Metadata Documents (slice 2.1, ADR-0008 §4, §8).
 	CIMD                               bool
@@ -151,6 +154,7 @@ var authSettings = []func(*Config, *Values) []error{
 	(*Config).gate,
 	(*Config).appTokens,
 	(*Config).paths,
+	(*Config).storeBackend,
 	(*Config).refreshGrace,
 	(*Config).assertion,
 	(*Config).clientSources,

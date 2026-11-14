@@ -61,6 +61,23 @@ func authEnv(t testing.TB) []string {
 	}
 }
 
+// postgresEnv is authEnv on a PostgreSQL store with the given DSN instead of a SQLite state
+// directory, for the public URL https://mcp.example.com/mcp and the given upstream.
+func postgresEnv(t testing.TB, dsn, upstreamURL string) []string {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "postgres-dsn")
+	if err := os.WriteFile(file, []byte(dsn), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var env []string
+	for _, kv := range authEnv(t) {
+		if !strings.HasPrefix(kv, "BYWARD_STORE_DIR=") {
+			env = append(env, kv)
+		}
+	}
+	return append(env, "BYWARD_STORE_POSTGRES_DSN_FILE="+file, "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+upstreamURL)
+}
+
 // loadConfig loads authenticated-mode settings for publicURL plus extra env entries.
 func loadConfig(t testing.TB, publicURL string, extra ...string) *config.Config {
 	t.Helper()
