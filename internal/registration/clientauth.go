@@ -55,6 +55,10 @@ type clientAuth struct {
 	jti     JTICache
 }
 
+// ID is the client_id; AuthMethods the registered methods, as a copy.
+func (c clientAuth) ID() string                { return c.id }
+func (c clientAuth) AuthMethods() []AuthMethod { return slices.Clone(c.methods) }
+
 func (c clientAuth) String() string {
 	return fmt.Sprintf("registration.clientAuth{id:%s methods:%v}", c.id, c.methods)
 }
