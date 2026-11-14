@@ -5,8 +5,10 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"maps"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -31,16 +33,16 @@ var devReaders = map[string]devReader{
 }
 
 // --dev relaxes nothing that is not logged (#355): only the files above select a .Dev field, each
-// as many times as listed, and each one's relaxation is recorded with --dev. A new reader relaxes something the
-// startup log may not name; decide it in config beside its relaxation instead, as OIDCLoopbackHTTP
-// is. The scan is syntactic, so it also catches Config.Dev reached through a field (w.cfg.Dev) in a
+// as many times as listed, and each one's relaxation is recorded with --dev. A new reader relaxes
+// something the startup log may not name; decide it in config beside its relaxation instead, as
+// OIDCLoopbackHTTP is. The scan is syntactic, so it also catches Config.Dev reached through a field (w.cfg.Dev) in a
 // file that does not import this package.
 func TestOnlyKnownCodeReadsDevelopmentMode(t *testing.T) {
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := map[string]int{}
+	found, named := map[string]int{}, map[string]int{}
 	fset := token.NewFileSet()
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -64,9 +66,15 @@ func TestOnlyKnownCodeReadsDevelopmentMode(t *testing.T) {
 		ast.Inspect(f, func(n ast.Node) bool {
 			if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "Dev" {
 				if _, known := devReaders[rel]; !known {
-					t.Errorf("%s: reads Config.Dev; decide the relaxation in config beside its Relaxations entry (#355)", fset.Position(sel.Pos()))
+					t.Errorf("%s: selects a .Dev field; if it is Config.Dev, decide the relaxation in config beside its Relaxations entry, otherwise list it in devReaders (#355)", fset.Position(sel.Pos()))
 				}
 				found[rel]++
+			}
+			// The setting by name reaches --dev without the field (Values.Effective, v.get).
+			if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+				if name, err := strconv.Unquote(lit.Value); err == nil && (name == "dev" || name == "BYWARD_DEV") {
+					named[rel]++
+				}
 			}
 			return true
 		})
@@ -75,13 +83,20 @@ func TestOnlyKnownCodeReadsDevelopmentMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Only config names the setting: the registry entry, and reading and checking its value.
+	if want := map[string]int{"internal/config/settings.go": 1, "internal/config/config.go": 3}; !maps.Equal(named, want) {
+		t.Errorf("files naming the dev setting %v, want %v: read --dev through Config, decided in config beside its relaxation (#355)", named, want)
+	}
 	c, err := loadDSN(t, []string{"--dev"}, "BYWARD_STORE_POSTGRES_DSN_FILE="+dsnFile)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for rel, r := range devReaders {
-		if found[rel] != r.reads {
+		switch {
+		case found[rel] > r.reads:
 			t.Errorf("%s selects .Dev %d times, want %d: a new reader relaxes what the log may not name; decide it in config beside its relaxation (#355)", rel, found[rel], r.reads)
+		case found[rel] < r.reads:
+			t.Errorf("%s selects .Dev %d times, want %d: lower its count in devReaders, or remove it", rel, found[rel], r.reads)
 		}
 		if r.relaxation != "" && !slices.Contains(c.Relaxations, r.relaxation) {
 			t.Errorf("%s: --dev records no relaxation %q (it records %q)", rel, r.relaxation, c.Relaxations)
