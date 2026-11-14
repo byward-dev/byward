@@ -102,6 +102,8 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"origin with path", "BYWARD_ALLOWED_ORIGINS=https://a.example/path", "BYWARD_ALLOWED_ORIGINS"},
 		{"host with path", "BYWARD_ALLOWED_HOSTS=a.example/x", "BYWARD_ALLOWED_HOSTS"},
 		{"host with space", "BYWARD_ALLOWED_HOSTS=a b", "BYWARD_ALLOWED_HOSTS"},
+		{"bracketed host name", "BYWARD_ALLOWED_HOSTS=[mcp.internal.example]", `BYWARD_ALLOWED_HOSTS: "[mcp.internal.example]" has brackets around something other than an IPv6 address`},
+		{"bracketed IPv4 with a port", "BYWARD_ALLOWED_HOSTS=[127.0.0.1]:8443", `"[127.0.0.1]:8443" has brackets around something other than an IPv6 address`},
 		{"listen without port", "BYWARD_LISTEN=8080", "BYWARD_LISTEN"},
 		{"log format", "BYWARD_LOG_FORMAT=xml", "BYWARD_LOG_FORMAT"},
 		{"two scopes", "BYWARD_SCOPE=a b", "BYWARD_SCOPE"},
@@ -578,9 +580,9 @@ func TestDCRIsOnByDefaultAndTheDenylistTakesCommaSeparatedEntries(t *testing.T) 
 	}
 }
 
-// #319: one reduction of a BYWARD_ALLOWED_HOSTS entry to a host name, for the Host check, the
-// no-auth loopback check and the TLS certificate names.
-func TestHostnameReducesEveryAllowedHostFormToALowerCaseHostName(t *testing.T) {
+// #319: one reduction of a BYWARD_ALLOWED_HOSTS entry or a Host header to a host name, for the
+// internal listener's Host check, the no-auth loopback check and the TLS certificate names.
+func TestAnAllowedHostEntryOrHostHeaderReducesToItsLowerCaseHostName(t *testing.T) {
 	for entry, want := range map[string]string{
 		"mcp.example.com":      "mcp.example.com",
 		"mcp.example.com:8443": "mcp.example.com",

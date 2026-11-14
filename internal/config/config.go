@@ -252,6 +252,12 @@ func validate(v *Values, container bool) (*Config, error) {
 			errs = append(errs, errorf("BYWARD_ALLOWED_HOSTS: %v", err))
 			continue
 		}
+		// Brackets enclose an IPv6 address only: a client never sends [name] or [IPv4] as its Host,
+		// so such an entry could never match a request.
+		if ip, err := netip.ParseAddr(Hostname(h)); strings.HasPrefix(h, "[") && (err != nil || !ip.Is6()) {
+			errs = append(errs, errorf("BYWARD_ALLOWED_HOSTS: %q has brackets around something other than an IPv6 address", h))
+			continue
+		}
 		c.AllowedHosts = append(c.AllowedHosts, strings.ToLower(h))
 	}
 	if c.LogFormat != "json" && c.LogFormat != "text" {
