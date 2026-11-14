@@ -32,6 +32,11 @@ type Config struct {
 	AllowedOrigins         []string
 	AllowedHosts           []string
 	TrustedProxies         []netip.Prefix
+
+	// TLSCertFile and TLSKeyFile serve TLS on the public listener (#183); both "" when it is plain
+	// HTTP, as behind an ingress that terminates TLS.
+	TLSCertFile, TLSKeyFile string
+
 	// OAuthRateLimits is requests per minute per client address, by endpoint name.
 	OAuthRateLimits       map[string]int
 	Scope                 string
@@ -206,6 +211,7 @@ func validate(v *Values, container bool) (*Config, error) {
 		}
 	}
 	errs = append(errs, c.upstream(v)...)
+	errs = append(errs, c.tls(v)...)
 	c.UpstreamHeaderTimeout, err = parseHeaderTimeout(v.get("upstream-header-timeout"))
 	if err != nil {
 		errs = append(errs, err)

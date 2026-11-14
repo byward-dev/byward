@@ -35,7 +35,8 @@ func expiryWarning(cfg *config.Config, now time.Time) (Warning, bool) {
 
 // CheckOffline is `byward check --offline` (ADR-0020 §7): everything the proxy validates at
 // startup that needs no network and writes nothing. It reads the sealing keys and the static
-// clients, validates the IdP and gate settings, and checks the store paths without creating them.
+// clients, validates the IdP and gate settings, checks the store paths without creating them, and
+// checks the TLS certificate as startup does.
 // The error is a configuration error; the warnings are what the proxy would log at startup.
 func CheckOffline(cfg *config.Config) ([]Warning, error) {
 	if err := checkUpstream(cfg); err != nil {
@@ -45,7 +46,12 @@ func CheckOffline(cfg *config.Config) ([]Warning, error) {
 		if err := errors.Join(looseSecretFiles(cfg)...); err != nil {
 			return nil, err
 		}
-		return append(append([]Warning{{Message: "authentication is off (BYWARD_INSECURE_NO_AUTH); only the settings, the secret files and the upstream were checked"}}, offlineHop(cfg)...), redundantStrips(cfg)...), nil
+		pair, err := servableCert(cfg, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		tlsWarnings := servingCertWarnings(cfg, pair, time.Now())
+		return append(append(append([]Warning{{Message: "authentication is off (BYWARD_INSECURE_NO_AUTH); only the settings, the secret files, the TLS certificate and the upstream were checked"}}, tlsWarnings...), offlineHop(cfg)...), redundantStrips(cfg)...), nil
 	}
 	parts, err := loadAuthParts(cfg, nil)
 	if err != nil {
@@ -58,7 +64,12 @@ func CheckOffline(cfg *config.Config) ([]Warning, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append(append(append(append(parts.warnings, storeWarnings...), parts.idp.timedWarnings(time.Now())...), offlineHop(cfg)...), redundantStrips(cfg)...), nil
+	pair, err := servableCert(cfg, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	tlsWarnings := servingCertWarnings(cfg, pair, time.Now())
+	return append(append(append(append(append(parts.warnings, storeWarnings...), parts.idp.timedWarnings(time.Now())...), tlsWarnings...), offlineHop(cfg)...), redundantStrips(cfg)...), nil
 }
 
 // offlineHop is the plain-http upstream warning without the network: only an upstream given as an
@@ -145,6 +156,11 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 		if err := errors.Join(looseSecretFiles(cfg)...); err != nil {
 			return r, err
 		}
+		pair, err := diskCert(cfg)
+		if err != nil {
+			return r, err
+		}
+		r.Checks = append(r.Checks, servingCertChecks(cfg, pair, o.Now())...)
 		for _, w := range redundantStrips(cfg) {
 			r.Checks = append(r.Checks, doctor.Result{Class: doctor.ClassProxy, Name: "configuration", Status: doctor.Warn, Message: w.Message, Fix: warningFix(w)})
 		}
@@ -162,6 +178,11 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	if err := checkStorePaths(cfg); err != nil {
 		return r, err
 	}
+	pair, err := diskCert(cfg)
+	if err != nil {
+		return r, err
+	}
+	r.Checks = append(r.Checks, servingCertChecks(cfg, pair, o.Now())...)
 	r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy))
 	r.Checks = append(r.Checks, upstreamHopResult(ctx, cfg, o.Resolve)...)
 	if cfg.IdentityHeaders && cfg.UpstreamCommand == nil {
