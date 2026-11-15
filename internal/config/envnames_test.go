@@ -9,15 +9,23 @@ import (
 	"testing"
 )
 
-var envName = regexp.MustCompile(`\bBYWARD_[A-Z][A-Z0-9_]*\*?`)
+var (
+	envName = regexp.MustCompile(`\bBYWARD_[A-Z][A-Z0-9_]*\*?`)
+	// settingLiteral is a setting named in code as Setting{Name: "…"}, optionally with its _FILE
+	// variable appended to Env() by hand.
+	settingLiteral = regexp.MustCompile(`Setting\{Name: *"([^"]*)"\}(\.Env\(\) *\+ *"_FILE")?`)
+)
 
 // Setting names written out by hand in messages (errors, warnings, logs) and in the operator docs
 // must name real settings: after a rename or a removed setting, a stale name would point operators
-// at nothing. ADRs are left out: they name planned settings.
+// at nothing. In code that includes Setting{Name: "…"}, whose Env() checks nothing, and a _FILE
+// variable, which only a secret setting has. ADRs are left out: they name planned settings.
 func TestEveryBYWARDNameInTheCodeAndDocsIsASetting(t *testing.T) {
 	known := map[string]bool{}
+	byName := map[string]Setting{}
 	for _, s := range registry {
 		known[s.Env()] = true
+		byName[s.Name] = s
 		if s.Secret {
 			known[s.Env()+"_FILE"] = true
 		}
@@ -37,6 +45,15 @@ func TestEveryBYWARDNameInTheCodeAndDocsIsASetting(t *testing.T) {
 		for _, name := range envName.FindAllString(string(src), -1) {
 			if !known[name] && !extra.MatchString(name) {
 				t.Errorf("%s names %s, which is not a setting", path, name)
+			}
+		}
+		for _, m := range settingLiteral.FindAllStringSubmatch(string(src), -1) {
+			s, ok := byName[m[1]]
+			switch {
+			case !ok:
+				t.Errorf("%s names Setting %q, which is not a setting", path, m[1])
+			case m[2] != "" && !s.Secret:
+				t.Errorf("%s names %s_FILE, but %s is not a secret setting", path, s.Env(), m[1])
 			}
 		}
 	}
