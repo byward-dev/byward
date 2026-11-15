@@ -46,8 +46,9 @@ page views never hide consent decisions, and successful registrations never hide
 IPv6 /64 share one budget, so `suppressed=N` can count drops from addresses other than the record's `remote_ip`.
 Each replica tracks at most 10,000 (source, event, outcome) keys at once: a sender with a larger block, such as an
 IPv6 /48, can fill that table and, while it keeps sending, records with a new key (a new source, or a known source's
-new event or outcome) are dropped. These drops carry no `suppressed=N`, and a key removed to make room loses its
-unreported count; only the metric counts them ([known gap](../security-posture.md#known-gaps)).
+new event or outcome) are dropped. These drops carry no `suppressed=N`, and when a new key finds the table full,
+every key whose minute has ended is removed, together with its unreported `suppressed` count; only the metric counts
+these records ([known gap](../security-posture.md#known-gaps)).
 Metrics count every event, logged or not.
 
 ### Events and OCSF mapping
