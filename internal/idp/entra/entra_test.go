@@ -240,7 +240,7 @@ func TestIssuerMustMatchTokenTenantAndAllowlist(t *testing.T) {
 		"single other tid":  {single, v2(fakeidp.NewGUID(), issuerFor(tid)), false},
 		"iss for other tid": {single, v2(tid, issuerFor(fakeidp.NewGUID())), false},
 		"v1 issuer":         {single, v2(tid, "https://sts.windows.net/"+tid+"/"), false},
-		"template iss":      {multi, v2(tid, organizationsIssuer), false},
+		"template iss":      {multi, v2(tid, Authority+"/{tenantid}/v2.0"), false},
 		"multi ok":          {multi, v2(tid, issuerFor(tid)), true},
 		"multi not allowed": {multi, v2(fakeidp.NewGUID(), issuerFor(tid)), false},
 		"tid not a GUID":    {multi, v2("organizations", issuerFor("organizations")), false},
@@ -607,22 +607,5 @@ func TestAnUnusableClientCredentialAlertsTheOperator(t *testing.T) {
 	var ie *idp.Error
 	if !errors.Is(err, idp.ErrCredential) || !errors.As(err, &ie) || ie.Class != idp.Unavailable || ie.Alert != idp.AlertCredentialUnusable {
 		t.Fatalf("err = %v, want an alerting, unavailable ErrCredential", err)
-	}
-}
-
-// Every Entra endpoint is built by tenantURL from Authority and the tenant, path-escaped, so a
-// tenant value can never change the host or the path the proxy talks to (AGENTS.md: named IdP
-// endpoints are derived from config). A GUID and organizations are unchanged by the escape.
-func TestATenantCanOnlyNameATenantInTheURL(t *testing.T) {
-	const guid = "00000000-0000-0000-0000-000000000001"
-	for tenant, want := range map[string]string{
-		guid:            Authority + "/" + guid + "/v2.0",
-		Organizations:   Authority + "/organizations/v2.0",
-		"x/../common?a": Authority + "/x%2F..%2Fcommon%3Fa/v2.0",
-		"@evil.example": Authority + "/@evil.example/v2.0",
-	} {
-		if got := tenantURL(tenant, "/v2.0"); got != want {
-			t.Errorf("tenantURL(%q) = %q, want %q", tenant, got, want)
-		}
 	}
 }

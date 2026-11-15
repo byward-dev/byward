@@ -156,3 +156,23 @@ func TestAdminConsentURLForTheUsersTenant(t *testing.T) {
 		}
 	}
 }
+
+// The admin-consent URL is the one Entra URL built from a tenant the caller passes and this package
+// does not check is a GUID, so it shows the rule every endpoint follows (tenantURL): the tenant is
+// path-escaped, so it can never change the host or the path the proxy sends the browser to
+// (AGENTS.md: named IdP endpoints are derived from config). A GUID and organizations are unchanged.
+func TestATenantCanOnlyNameATenantInTheAdminConsentURL(t *testing.T) {
+	e := newEnv(t, Config{})
+	const guid = "00000000-0000-0000-0000-000000000001"
+	for tenant, want := range map[string]string{
+		guid:            Authority + "/" + guid + "/v2.0/adminconsent",
+		Organizations:   Authority + "/organizations/v2.0/adminconsent",
+		"x/../common?a": Authority + "/x%2F..%2Fcommon%3Fa/v2.0/adminconsent",
+		"@evil.example": Authority + "/@evil.example/v2.0/adminconsent",
+	} {
+		// The raw string, not url.Parse's decoded Path, which would hide the escape.
+		if got, _, _ := strings.Cut(e.p.AdminConsentURL(tenant, []string{"https://graph.microsoft.com/User.Read"}), "?"); got != want {
+			t.Errorf("AdminConsentURL(%q) = %q, want %q", tenant, got, want)
+		}
+	}
+}
