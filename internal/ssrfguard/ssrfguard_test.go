@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,28 +17,6 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/rawanswer"
 	"github.com/byward-dev/byward/internal/testutil/rerun"
 )
-
-// The guard fetches https URLs with a host and no user information on the default port, given or
-// not; registration checks a client's jwks_uri by the same rule.
-func TestFetchableIsHTTPSOnTheDefaultPort(t *testing.T) {
-	for raw, want := range map[string]bool{
-		"https://app.example/jwks":      true,
-		"https://app.example:443/jwks":  true,
-		"https://app.example:8443/jwks": false,
-		"http://app.example/jwks":       false,
-		"https://u:p@app.example/jwks":  false,
-		"https:///jwks":                 false,
-		"https:app.example/jwks":        false,
-	} {
-		u, err := url.Parse(raw)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := Fetchable(u); got != want {
-			t.Errorf("Fetchable(%s) = %v, want %v", raw, got, want)
-		}
-	}
-}
 
 // The guard refuses before connecting, so these never reach the network.
 func TestNonPublicAddressesAreRefused(t *testing.T) {
@@ -79,7 +56,7 @@ func TestOnlyHTTPSOnTheDefaultPortIsFetched(t *testing.T) {
 	if _, err := f.Get(context.Background(), "https://example.com:443/doc", 1024); err != nil {
 		t.Fatalf("explicit default port: %v", err)
 	}
-	for _, u := range []string{"http://example.com/doc", "https://example.com:8443/doc", "https://user:pw@example.com/doc", "ftp://example.com/doc", "https:///doc", "::"} {
+	for _, u := range []string{"http://example.com/doc", "https://example.com:8443/doc", "https://user:pw@example.com/doc", "ftp://example.com/doc", "https:///doc", "https:example.com/doc", "::"} {
 		t.Run(u, func(t *testing.T) {
 			if _, err := f.Get(context.Background(), u, 1024); !errors.Is(err, ErrRefused) {
 				t.Fatalf("err = %v, want ErrRefused", err)

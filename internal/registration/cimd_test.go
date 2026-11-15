@@ -77,6 +77,18 @@ func TestRealClientDocumentsAreAccepted(t *testing.T) {
 	}
 }
 
+// A jwks_uri on the guard's port, given or not, is kept: the SSRF guard will fetch it.
+func TestAJWKSURIOnPort443IsAccepted(t *testing.T) {
+	for _, uri := range []string{"https://app.example/jwks", "https://app.example:443/jwks"} {
+		t.Run(uri, func(t *testing.T) {
+			m, err := parseCIMD(cimdID, doc(map[string]any{"token_endpoint_auth_method": "private_key_jwt", "jwks_uri": uri}))
+			if err != nil || m.jwksURI != uri {
+				t.Fatalf("err %v, jwks_uri %q; want it accepted as given", err, m.jwksURI)
+			}
+		})
+	}
+}
+
 func doc(fields map[string]any) []byte {
 	d := map[string]any{"client_id": cimdID, "client_name": "App", "redirect_uris": []string{"https://app.example/cb"}}
 	for k, v := range fields {
