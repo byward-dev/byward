@@ -26,6 +26,15 @@ const Authority = "https://login.microsoftonline.com"
 // Organizations is the multi-tenant Tenant value; it needs AllowedTenants.
 const Organizations = "organizations"
 
+// accessAsUser is our own API's scope, on the Application ID URI api://<client ID>: requested at
+// login, required in the access token's scp, and created by the setup script (ADR-0012 §4).
+const accessAsUser = "access_as_user"
+
+// tenantURL is the Entra URL path of tenant (a GUID or Organizations, from config or a token's
+// tid), the one way every endpoint is built from Authority; the tenant is path-escaped, which is a
+// no-op on both forms.
+func tenantURL(tenant, path string) string { return Authority + "/" + url.PathEscape(tenant) + path }
+
 // Config is the Entra adapter's input, as plain values.
 type Config struct {
 	// Tenant is a tenant GUID (default, single tenant) or Organizations.
@@ -100,16 +109,20 @@ func New(cfg Config) (*Provider, error) {
 	return p, nil
 }
 
-func (p *Provider) endpoint(path string) string { return Authority + "/" + p.cfg.Tenant + path }
+func (p *Provider) endpoint(path string) string { return tenantURL(p.cfg.Tenant, path) }
 
 // Scope is the login scope set: OIDC plus our own API scope, whose access token is kept for
 // On-Behalf-Of (ADR-0012 §4).
 func (p *Provider) Scope() string {
-	return "openid profile email offline_access api://" + p.cfg.ClientID + "/access_as_user"
+	return "openid profile email offline_access api://" + p.cfg.ClientID + "/" + accessAsUser
 }
 
 // issuerFor is the v2 issuer of a tenant.
-func issuerFor(tid string) string { return Authority + "/" + tid + "/v2.0" }
+func issuerFor(tid string) string { return tenantURL(tid, "/v2.0") }
+
+// organizationsIssuer is the issuer the multi-tenant (Organizations) discovery document names: a
+// fixed template with Microsoft's {tenantid} placeholder, not a tenant, so it is not escaped.
+const organizationsIssuer = Authority + "/{tenantid}/v2.0"
 
 // Ready fetches the discovery document once and checks its issuer: exact for a tenant, the
 // {tenantid} template for organizations. Logins and refreshes wait for it; errors are not cached.
@@ -128,7 +141,7 @@ func (p *Provider) Ready(ctx context.Context) error {
 	}
 	want := issuerFor(p.cfg.Tenant)
 	if p.cfg.Tenant == Organizations {
-		want = issuerFor("{tenantid}")
+		want = organizationsIssuer
 	}
 	if m.Issuer != want {
 		return &idp.Error{Class: idp.Fatal, Err: fmt.Errorf("entra discovery: issuer %q, want %q", m.Issuer, want)}
@@ -252,7 +265,7 @@ func (p *Provider) token(ctx context.Context, form url.Values) (*idp.TokenRespon
 // tokenAt posts form to the token endpoint of tenant (the configured one, or a user's own for
 // On-Behalf-Of).
 func (p *Provider) tokenAt(ctx context.Context, tenant string, form url.Values) (*idp.TokenResponse, error) {
-	tokenURL := Authority + "/" + tenant + "/oauth2/v2.0/token"
+	tokenURL := tenantURL(tenant, "/oauth2/v2.0/token")
 	if err := p.cfg.ClientAuth.Apply(form, p.cfg.ClientID, tokenURL, p.cfg.Now()); err != nil {
 		return nil, &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialUnusable, Err: fmt.Errorf("%w: %w", idp.ErrCredential, err)}
 	}
@@ -337,16 +350,16 @@ func (p *Provider) identity(ctx context.Context, raw, nonce string) (idp.Identit
 // checkAccessToken makes sure the login returned our own v2 access_as_user token, the OBO
 // assertion (ADR-0012 §4); otherwise the app registration is misconfigured.
 func (p *Provider) checkAccessToken(ctx context.Context, raw string) error {
-	hint := "expose the access_as_user scope on the app registration with requestedAccessTokenVersion 2"
+	hint := "expose the " + accessAsUser + " scope on the app registration with requestedAccessTokenVersion 2"
 	if raw == "" {
-		return &idp.Error{Class: idp.Fatal, OperatorHint: hint, Err: errors.New("entra: no access token for access_as_user")}
+		return &idp.Error{Class: idp.Fatal, OperatorHint: hint, Err: errors.New("entra: no access token for " + accessAsUser)}
 	}
 	claims, err := idp.VerifyJWT(ctx, raw, p.keys, p.rules(""))
 	if err != nil {
 		return idp.TokenCheckError(fmt.Errorf("entra: access token: %w", err), hint)
 	}
-	if !slices.Contains(strings.Fields(idp.StringClaim(claims, "scp")), "access_as_user") {
-		return &idp.Error{Class: idp.Fatal, OperatorHint: hint, Err: errors.New("entra: access token lacks scp access_as_user")}
+	if !slices.Contains(strings.Fields(idp.StringClaim(claims, "scp")), accessAsUser) {
+		return &idp.Error{Class: idp.Fatal, OperatorHint: hint, Err: errors.New("entra: access token lacks scp " + accessAsUser)}
 	}
 	return nil
 }
