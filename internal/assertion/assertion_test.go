@@ -143,7 +143,7 @@ func TestLoadKeysRefusesAWorldWritableKeyFileAlwaysAndAWorldWritableDirectoryUnl
 		{"a world-writable directory is refused", 0o600, 0o707, false, "directory"},
 		{"a world-writable directory on a read-only mount loads", 0o644, 0o777 | os.ModeSticky, true, ""}, // a Kubernetes secret volume's root
 		{"a group- and other-readable file and directory load", 0o644, 0o755, false, ""},
-		{"a group-writable file and directory load", 0o660, 0o770, false, ""}, // this rule is the world bit's alone; the group bit is the check's
+		{"a group-writable file and directory load", 0o660, 0o770, false, ""}, // this rule refuses only the world bit; a group-writable file is the check's to refuse
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := assertionkey.EmptyDir(t)

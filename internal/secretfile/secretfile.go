@@ -1,8 +1,8 @@
 // Package secretfile checks the files secrets are read from, such as the IdP client secret, the TLS
-// key, the assertion keys and static clients' `client_secret_file` (ADR-0018 §11). Check refuses a secret that other users on the host
-// can read; only --dev relaxes it. ReadOnlyFS reports whether a path is on a read-only mount, where
-// Check lets a secret file pass and the key loaders (sealing and assertion keys) let a world-writable
-// key directory pass.
+// key, the assertion keys and static clients' `client_secret_file` (ADR-0018 §11). Check refuses a
+// secret that other users on the host can read; only --dev relaxes it. ReadOnlyFS reports whether a
+// path is on a read-only mount, where Check lets a secret file pass and the key loaders (sealing and
+// assertion keys) let a world-writable key directory pass.
 package secretfile
 
 import (
