@@ -597,15 +597,16 @@ func TestRefreshGraceDefaultsTo30sAndAcceptsItsBounds(t *testing.T) {
 }
 
 func TestInvalidStoreSettingsAreRejected(t *testing.T) {
-	// A relative path in each setting is TestEveryPathSettingRefusesARelativePath's; the rows here pin
-	// which errors a path derived from another one reports.
+	// A relative path in each setting is TestEveryPathSettingRefusesARelativePath's; the first rows here
+	// pin which errors a path derived from another one reports.
 	cases := []struct {
 		name    string
 		env     []string
 		want    string
 		notWant string // "" when anything else may be reported too
 	}{
-		// Every default derives from the data directory, so a relative one is the only error reported.
+		// Every default derives from the data directory, so a relative one is reported, not the paths
+		// derived from it.
 		{"a relative data directory", []string{"BYWARD_DATA_DIR=data"}, "BYWARD_DATA_DIR: want an absolute path", "BYWARD_KEYS_DIR"},
 		// The counter file derived from a relative keys directory is not reported a second time; one the
 		// operator sets is.

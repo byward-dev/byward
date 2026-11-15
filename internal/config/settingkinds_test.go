@@ -16,7 +16,8 @@ import (
 // (env below). A setting read as a boolean behind a condition without being Bool is
 // TestEveryBooleanReadIsOfABoolFlag's.
 func TestBooleanSettingsAreExactlyTheBoolFlags(t *testing.T) {
-	// What a setting needs set beside it for its read to run; every read today runs on the default load.
+	// The whole environment a setting needs for its read to run, as in the path test below (base when
+	// absent); every read today runs on base.
 	env := map[string][]string{}
 	bools := 0
 	for _, s := range registry {
@@ -27,10 +28,18 @@ func TestBooleanSettingsAreExactlyTheBoolFlags(t *testing.T) {
 			bools++
 		}
 		t.Run(s.Name, func(t *testing.T) {
-			_, err := load(t, nil, append(env[s.Name], s.Env()+"=maybe")...)
+			e, ok := env[s.Name]
+			if !ok {
+				e = append([]string{}, base...)
+			}
+			_, _, err := Load(nil, append(e, s.Env()+"=maybe"), baseFiles)
 			want := s.Env() + `: want true or false, got "maybe"`
 			if read := err != nil && strings.Contains(err.Error(), want); read != s.Bool {
-				t.Fatalf("read as a boolean %v, marked Bool %v (err %v); a read the default load does not reach needs its companion setting in env", read, s.Bool, err)
+				hint := "mark it Bool"
+				if s.Bool {
+					hint = "if base does not reach its read, give it the environment that does in env"
+				}
+				t.Fatalf("read as a boolean %v, marked Bool %v (err %v): %s", read, s.Bool, err, hint)
 			}
 			if !s.Bool {
 				return
@@ -50,15 +59,19 @@ func TestBooleanSettingsAreExactlyTheBoolFlags(t *testing.T) {
 }
 
 // Every boolean read in the package's code, whether or not the default load reaches it, is of a
-// Bool setting, and Values.boolean is the only reader (the package parses a boolean in one place): a
-// read behind a condition (a stdio upstream, another IdP), or a second reader with its own message,
-// would escape TestBooleanSettingsAreExactlyTheBoolFlags.
+// Bool setting, and Values.boolean is the one place the package parses a boolean: a read behind a
+// condition (a stdio upstream, another IdP), a second parser with its own message, or a value
+// compared with "true" by hand, would escape
+// TestBooleanSettingsAreExactlyTheBoolFlags. The scan reads source text.
 func TestEveryBooleanReadIsOfABoolFlag(t *testing.T) {
 	byName := map[string]Setting{}
 	for _, s := range registry {
 		byName[s.Name] = s
 	}
 	read := regexp.MustCompile(`\.boolean\("([^"]+)"\)`)
+	parse := regexp.MustCompile(`\bParseBool\(`) // a call, not a mention in a comment
+	// A setting compared with "true" or "false" by hand is a boolean read outside Values.boolean too.
+	compare := regexp.MustCompile(`[!=]=\s*"(true|false)"|"(true|false)"\s*[!=]=`)
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
@@ -72,11 +85,14 @@ func TestEveryBooleanReadIsOfABoolFlag(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if n := strings.Count(string(src), "ParseBool"); n > 0 {
+		if n := len(parse.FindAllString(string(src), -1)); n > 0 {
 			parses += n
 			if f != "registry.go" {
 				t.Errorf("%s parses a boolean outside Values.boolean", f)
 			}
+		}
+		if compare.MatchString(string(src)) {
+			t.Errorf("%s compares a value with true or false by hand; read it with Values.boolean", f)
 		}
 		for _, m := range read.FindAllStringSubmatch(string(src), -1) {
 			reads++
