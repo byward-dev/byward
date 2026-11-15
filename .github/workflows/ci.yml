@@ -30,7 +30,40 @@ jobs:
   # The Go jobs cache Go's build and module caches (and lint golangci-lint's) per job, keyed on the
   # toolchain (mise.toml), the modules (go.sum) and the lint config. The cache-poisoning note at the
   # top covers them: a pull_request run's cache is scoped to its merge ref.
+
+  # Whether the change is docs-only (scripts/ci-docs-only.sh): then the expensive jobs below are
+  # skipped with `if:`, and `test` runs only the Go tests that read the docs. Skipping by `if:`, not
+  # by a `paths` filter: a job skipped by `if:` reports success, while a workflow skipped by a path
+  # filter leaves its required checks pending and blocks the merge
+  # (docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/troubleshooting-required-status-checks).
+  # A push (main, release/**) has no base here, so it always runs everything; so does any run this
+  # job cannot classify, or in which it fails (the jobs use !cancelled(), not success()).
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      docs-only: ${{ steps.classify.outputs.docs-only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the diff needs the merge base of base and head
+          persist-credentials: false
+      # The merge_group fields come from the webhook schema (base_sha, head_sha); no queue run has
+      # been seen yet, so the first one logs what the payload holds.
+      - name: Show the merge group payload's fields
+        if: ${{ github.event_name == 'merge_group' }}
+        env:
+          MERGE_GROUP: ${{ toJSON(github.event.merge_group) }}
+        run: |
+          printf '%s\n' "$MERGE_GROUP" | jq '{base_sha, head_sha, base_ref, head_ref, keys: keys}'
+      - id: classify
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        run: sh scripts/ci-docs-only.sh "$BASE" "$HEAD" | tee -a "$GITHUB_OUTPUT"
+
   fmt-vet:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -54,6 +87,8 @@ jobs:
           MISE_TASK_RUN_AUTO_INSTALL: "false"
 
   lint:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -75,6 +110,8 @@ jobs:
           MISE_TASK_RUN_AUTO_INSTALL: "false"
 
   vuln-licenses:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -98,6 +135,8 @@ jobs:
           MISE_TASK_RUN_AUTO_INSTALL: "false"
 
   test:
+    needs: changes
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -124,7 +163,15 @@ jobs:
             entry=$(printf '%s' "$entry" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
             if [ -n "$entry" ]; then echo "::add-mask::$entry"; fi
           done
-      - run: mise run test
+      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
+        run: mise run test
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
+          BYWARD_FORBIDDEN_IDENTIFIERS: ${{ secrets.BYWARD_FORBIDDEN_IDENTIFIERS }}
+      # A docs-only change: only the Go tests that read the docs (links, generated reference tables,
+      # settings.md, the alert rules, the privacy scan), listed in scripts/test-docs.sh.
+      - if: ${{ needs.changes.outputs.docs-only == 'true' }}
+        run: mise run test:docs
         env:
           MISE_TASK_RUN_AUTO_INSTALL: "false"
           BYWARD_FORBIDDEN_IDENTIFIERS: ${{ secrets.BYWARD_FORBIDDEN_IDENTIFIERS }}
@@ -149,22 +196,32 @@ jobs:
           MISE_TASK_RUN_AUTO_INSTALL: "false"
 
   # The required check (ruleset protect-main): its name must stay `check`. It runs even when a job
-  # above fails or is cancelled, because a skipped required check counts as passed.
+  # above fails or is cancelled, because a skipped required check counts as passed. A skipped part
+  # passes only when `changes` succeeded and said docs-only.
   check:
     if: ${{ always() }}
-    needs: [fmt-vet, lint, vuln-licenses, test, scripts-docs-workflows]
+    needs: [changes, fmt-vet, lint, vuln-licenses, test, scripts-docs-workflows]
     runs-on: ubuntu-latest
     steps:
       - name: Every part of the check passed
         env:
+          CHANGES: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs-only }}
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
+          if [ "$CHANGES" != success ]; then echo "changes ended: $CHANGES"; exit 1; fi
           for r in $RESULTS; do
-            if [ "$r" != success ]; then echo "a check job ended: $r ($RESULTS)"; exit 1; fi
+            case $r in
+              success) ;;
+              skipped) if [ "$DOCS_ONLY" != true ]; then echo "a check job was skipped, but the change is not docs-only ($RESULTS)"; exit 1; fi ;;
+              *) echo "a check job ended: $r ($RESULTS)"; exit 1 ;;
+            esac
           done
 
   # Builds every release artifact exactly as a release would, without signing or publishing (ADR-0019).
   release-snapshot:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -188,6 +245,8 @@ jobs:
 
   # MCP conformance through --insecure-no-auth must equal conformance against the reference server (ADR-0024 §4a).
   conformance:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -212,6 +271,8 @@ jobs:
   # Identity assertion contract: the TypeScript SDK's and FastMCP's verifiers accept the proxy's
   # assertion and refuse a wrong audience, an expired one and another key (ADR-0016 §8).
   assertion:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -227,6 +288,8 @@ jobs:
 
   # Consent and error pages in Chromium: Playwright and axe (ADR-0010, ADR-0024); screenshots kept for review.
   ui:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -250,6 +313,8 @@ jobs:
 
   # Go tests behind the integration build tag, such as the restore drill (ADR-0007 §9, ADR-0024).
   integration-go:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -272,6 +337,8 @@ jobs:
   # The PostgreSQL store on PostgreSQL 15 and 18 in pinned containers with TLS: the conformance
   # suite, the adapter's own tests and two replicas of the wired proxy sharing it (ADR-0007, #227).
   postgres:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs-only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
