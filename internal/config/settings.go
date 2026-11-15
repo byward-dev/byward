@@ -22,6 +22,7 @@ const (
 	GroupAppOnly            Group = "App-only callers"
 	// A setting in GroupHTTPUpstream or GroupStdioUpstream is for that upstream mode only: given with
 	// the other mode, it is refused at load (offModeSettings), so the group is part of validation.
+	// An HTTP-only setting of another group is listed in httpOnly (config_upstream.go).
 	GroupHTTPUpstream     Group = "Upstream: HTTP"
 	GroupStdioUpstream    Group = "Upstream: stdio"
 	GroupIdentity         Group = "Identity to the upstream"

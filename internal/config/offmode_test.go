@@ -25,6 +25,7 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 		{name: "a stdio setting given with its default value", env: []string{"BYWARD_STDIO_MAX_PROCESSES=64"}, want: "BYWARD_STDIO_MAX_PROCESSES " + toStdio},
 		{name: "a stdio setting given as a flag", args: []string{"--stdio-max-processes=5"}, want: "--stdio-max-processes " + toStdio},
 		{name: "the stdio env file", env: []string{"BYWARD_UPSTREAM_ENV_FILE=/run/secrets/upstream-env"}, want: "BYWARD_UPSTREAM_ENV_FILE " + toStdio},
+		{name: "the stdio env file naming an empty file", env: []string{"BYWARD_UPSTREAM_ENV_FILE=/run/secrets/empty"}, want: "BYWARD_UPSTREAM_ENV_FILE " + toStdio},
 		{name: "the stdio env file given as a flag", args: []string{"--upstream-env-file=/run/secrets/upstream-env"}, want: "--upstream-env-file " + toStdio},
 		{name: "the header timeout with stdio", stdio: true, env: []string{"BYWARD_UPSTREAM_HEADER_TIMEOUT=abc"}, want: "BYWARD_UPSTREAM_HEADER_TIMEOUT " + toHTTP},
 		{name: "the strip list with stdio", stdio: true, env: []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X-Api-Url"}, want: "BYWARD_UPSTREAM_STRIP_HEADERS " + toHTTP},
@@ -51,8 +52,11 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 			}
 			files := stdioFiles("KEY=value")
 			_, _, err := Load(tc.args, env, func(p string) ([]byte, error) {
-				if p == credFile {
+				switch p {
+				case credFile:
 					return []byte("k-123"), nil
+				case "/run/secrets/empty":
+					return []byte("\n"), nil
 				}
 				return files(p)
 			})
@@ -63,12 +67,16 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 	}
 }
 
-// Every setting of each upstream group is refused with the other mode, read from the registry, so a
-// setting added to a group, or moved into one, is covered with no test to edit; so is each HTTP-only
-// setting outside the groups. The selectors and the credential, which keep their own errors, are the
-// only exceptions.
-func TestEverySettingOfAnUpstreamGroupIsRefusedWithTheOtherMode(t *testing.T) {
+// Every setting for one upstream mode is refused with the other mode. The upstream groups are read
+// from the registry, so a setting added to one is covered with no test to edit; the HTTP-only
+// settings of other groups are named here. Every other setting of the identity and downstream-token
+// groups must be named as applying to both modes or refusing stdio with its own hint, so a new one
+// fails until someone decides which mode it is for. The selectors and the credential, which keep
+// their own errors, are the only exceptions.
+func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 	skipped := map[string]bool{"upstream-url": true, "upstream-command": true, "upstream-credential": true}
+	httpOnlySettings := map[string]bool{"assertion-keys-dir": true, "assertion-header": true, "assertion-claims": true, "assertion-unverified-email": true}
+	notOffMode := map[string]bool{"obo-scopes": true, "identity-headers": true, "obo-header": true} // both modes; own hints
 	files := func(p string) ([]byte, error) {
 		if p == "/run/secrets/off-mode" {
 			return []byte("X=y"), nil
@@ -77,7 +85,10 @@ func TestEverySettingOfAnUpstreamGroupIsRefusedWithTheOtherMode(t *testing.T) {
 	}
 	n := 0
 	for _, s := range registry {
-		forHTTP := s.Group == GroupHTTPUpstream || httpOnly[s.Name]
+		forHTTP := s.Group == GroupHTTPUpstream || httpOnlySettings[s.Name]
+		if (s.Group == GroupIdentity || s.Group == GroupDownstreamTokens) && !forHTTP && !notOffMode[s.Name] {
+			t.Errorf("%s: say whether it is for an HTTP upstream only (httpOnly) or for both modes", s.Name)
+		}
 		if !forHTTP && s.Group != GroupStdioUpstream || skipped[s.Name] {
 			continue
 		}

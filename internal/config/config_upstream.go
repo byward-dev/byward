@@ -78,7 +78,7 @@ func (c *Config) upstream(v *Values) []error {
 
 // stdioUpstream and httpUpstream say which upstream mode the selectors choose: exactly one of
 // upstream-command and upstream-url, as given, even when its value does not parse. With none or
-// both, no mode is chosen. Every decision that depends on the mode reads these.
+// both, no mode is chosen. Every check in config that depends on the chosen mode reads these.
 func (v *Values) stdioUpstream() bool {
 	return v.get("upstream-command") != "" && v.get("upstream-url") == ""
 }
@@ -87,8 +87,8 @@ func (v *Values) httpUpstream() bool {
 	return v.get("upstream-url") != "" && v.get("upstream-command") == ""
 }
 
-// httpOnly are the settings outside the upstream groups that only an HTTP upstream reads: the
-// identity assertion, which a stdio upstream never gets (ADR-0016 §2, §6). Settings outside the
+// httpOnly are the settings outside the upstream groups that take effect only with an HTTP upstream:
+// the identity assertion, which a stdio upstream never gets (ADR-0016 §2, §6). Settings outside the
 // groups that refuse a stdio upstream with a hint of their own (identity-headers, obo-header,
 // store-postgres-dsn) keep it.
 var httpOnly = map[string]bool{"assertion-keys-dir": true, "assertion-header": true, "assertion-claims": true, "assertion-unverified-email": true}
@@ -96,7 +96,7 @@ var httpOnly = map[string]bool{"assertion-keys-dir": true, "assertion-header": t
 // offModeSettings refuses each setting given for the upstream mode that is off: a stdio upstream's
 // settings with an HTTP upstream, an HTTP upstream's (and the httpOnly ones) with a stdio one. A
 // setting left at its default, or given empty, is never refused: env templates often list every
-// variable empty. The registry's groups say which mode a setting is for. The selectors
+// variable empty. A file named for a secret is given, even when the file is empty. The registry's groups, and httpOnly, say which mode a setting is for. The selectors
 // (upstream-url, upstream-command) keep their own "both set" error, and upstream-credential its own
 // hint (upstreamCredential).
 func offModeSettings(v *Values, stdio bool) []error {
@@ -108,7 +108,7 @@ func offModeSettings(v *Values, stdio bool) []error {
 	for _, val := range v.Effective() {
 		s := val.Setting
 		forOff := s.Group == offGroup || stdio && httpOnly[s.Name]
-		if !forOff || val.Source == SourceDefault || val.Raw == "" || s.Name == "upstream-url" || s.Name == "upstream-command" || s.Name == "upstream-credential" {
+		if !forOff || val.Source == SourceDefault || val.Raw == "" && val.Path == "" || s.Name == "upstream-url" || s.Name == "upstream-command" || s.Name == "upstream-credential" {
 			continue
 		}
 		errs = append(errs, errorf("%s is set, but the upstream is %s: it applies only to %s (%s); remove it", spelled(val), inUse, offMode, offSelector))
