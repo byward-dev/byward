@@ -75,10 +75,9 @@ func TestIntegrationKeycloakSignsAUserInAndRefreshes(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	t.Run("a user with the role signs in and refreshes", func(t *testing.T) {
-		const verifier = testVerifier
-		code := keycloakSignIn(t, public, "alice", http.StatusFound, verifier)
+		code := keycloakSignIn(t, public, "alice", http.StatusFound, testVerifier)
 		tok := tokenRequest(t, public, url.Values{"grant_type": {"authorization_code"}, "code": {code}, "client_id": {"test-app"},
-			"redirect_uri": {"http://127.0.0.1:5555/callback"}, "code_verifier": {verifier}})
+			"redirect_uri": {"http://127.0.0.1:5555/callback"}, "code_verifier": {testVerifier}})
 		if tok["access_token"] == nil || tok["refresh_token"] == nil {
 			t.Fatalf("token response %v, want an access and a refresh token", tok)
 		}

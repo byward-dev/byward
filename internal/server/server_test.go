@@ -618,7 +618,7 @@ func TestNewServesTheBrokerRoutes(t *testing.T) {
 		t.Fatalf("metadata: %d issuer=%q err=%v", res.StatusCode, m.Issuer, err)
 	}
 	// Without PKCE the broker answers itself (no IdP call): a redirect back to the registered client.
-	res = get("/authorize?client_id=test-app&redirect_uri=http%3A%2F%2F127.0.0.1%2Fcallback&response_type=code")
+	res = get("/authorize?" + authorizeQuery(url.Values{"code_challenge": nil, "code_challenge_method": nil}).Encode())
 	loc, _ := url.Parse(res.Header.Get("Location"))
 	if res.StatusCode != http.StatusFound || !strings.HasPrefix(loc.String(), "http://127.0.0.1/callback?") ||
 		loc.Query().Get("error") != "invalid_request" || loc.Query().Get("iss") != "https://mcp.example.com" {

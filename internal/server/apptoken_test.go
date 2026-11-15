@@ -34,7 +34,6 @@ type appProxy struct {
 	public           http.Handler
 	internal         http.Handler
 	cfg              *config.Config
-	env              []string
 	fake             *fakeidp.IdP
 	up               *fakeupstream.Server
 	logs             *logsink.Buffer
@@ -49,7 +48,7 @@ func newAppProxy(t *testing.T, settings func(*appProxy) []string) *appProxy {
 	p.withRole = fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{callerSecret}, AppRoles: map[string][]string{fixtureClientID: {"MCP.Invoke"}}}
 	p.noRole = fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{callerSecret}}
 	p.fake = fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
-		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{"s3cret-entra"}, RedirectURIs: []string{"https://mcp.example.com/callback/entra"}}),
+		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{fixtureSecret}, RedirectURIs: []string{"https://mcp.example.com/callback/entra"}}),
 		fakeidp.WithClient(p.withRole), fakeidp.WithClient(p.noRole))
 	p.withRole, _ = p.fake.Client(p.withRole.ID)
 	p.noRole, _ = p.fake.Client(p.noRole.ID)
@@ -70,9 +69,9 @@ func newAppProxy(t *testing.T, settings func(*appProxy) []string) *appProxy {
 		}
 		return ok
 	})
-	p.env = append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+upstream,
+	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+upstream,
 		"BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=MCP.Invoke")
-	cfg, _, err := config.Load(nil, append(p.env, extra...), os.ReadFile)
+	cfg, _, err := config.Load(nil, append(env, extra...), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}
