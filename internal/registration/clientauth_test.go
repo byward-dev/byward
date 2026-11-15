@@ -2,6 +2,11 @@ package registration
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/ed25519"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +20,8 @@ import (
 	"time"
 
 	"code.dny.dev/ssrf"
+	"github.com/go-jose/go-jose/v4"
+
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/store/memory"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
@@ -305,5 +312,78 @@ func TestAuthMethodsReturnsACopy(t *testing.T) {
 	m[0] = None
 	if got := c.AuthMethods(); !slices.Equal(got, []AuthMethod{ClientSecretBasic, PrivateKeyJWT}) {
 		t.Fatalf("AuthMethods after changing a returned copy = %v; the client's methods changed", got)
+	}
+}
+
+// A client assertion is accepted for the algorithms the broker advertises (AssertionAlgs, its
+// token_endpoint_auth_signing_alg_values_supported) and refused as invalid_client for any other,
+// symmetric (HS256) or asymmetric, so the metadata never advertises what /token refuses, or hides
+// what it accepts.
+func TestAClientAssertionIsAcceptedForTheAdvertisedAlgorithmsOnly(t *testing.T) {
+	if got := AssertionAlgs(); !slices.Equal(got, []string{"RS256", "PS256", "ES256"}) {
+		t.Fatalf("AssertionAlgs() = %v, want [RS256 PS256 ES256] (ADR-0008 §6)", got)
+	}
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p256, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p384, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, edKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jwks, err := json.Marshal(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{
+		{Key: rsaKey.Public(), KeyID: "rsa"}, {Key: p256.Public(), KeyID: "p256"}, {Key: p384.Public(), KeyID: "p384"}, {Key: edKey.Public(), KeyID: "ed"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg, err := LoadStatic("/c.json", files{"/c.json": `{"clients":[{"client_id":"jwt","token_endpoint_auth_method":"private_key_jwt",
+		"redirect_uris":["https://a.example/cb"],"jwks":` + string(jwks) + `}]}`}.read, NewStoreJTICache(memory.New()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := reg.Client(context.Background(), "jwt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		alg string
+		kid string
+		key any
+	}{
+		{"RS256", "rsa", rsaKey}, {"PS256", "rsa", rsaKey}, {"ES256", "p256", p256},
+		{"RS384", "rsa", rsaKey}, {"PS512", "rsa", rsaKey}, {"ES384", "p384", p384}, {"EdDSA", "ed", edKey},
+		{"HS256", "rsa", []byte("a shared secret of at least thirty-two bytes")},
+	} {
+		t.Run(c.alg, func(t *testing.T) {
+			sig, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.SignatureAlgorithm(c.alg), Key: c.key}, (&jose.SignerOptions{}).WithHeader("kid", c.kid))
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload, _ := json.Marshal(map[string]any{"iss": "jwt", "sub": "jwt", "aud": tokenEndpoint, "jti": fakeidp.NewGUID(), "iat": now.Unix(), "exp": now.Add(time.Minute).Unix()})
+			jws, err := sig.Sign(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := jws.CompactSerialize()
+			if err != nil {
+				t.Fatal(err)
+			}
+			form := url.Values{"client_id": {"jwt"}, "client_assertion_type": {clientAssertionType}, "client_assertion": {raw}}
+			err = client.Authenticate(context.Background(), form, http.Header{}, tokenEndpoint, now)
+			switch advertised := slices.Contains(AssertionAlgs(), c.alg); {
+			case advertised && err != nil:
+				t.Fatalf("an advertised algorithm is refused: %v", err)
+			case !advertised && !errors.Is(err, ErrInvalidClient):
+				t.Fatalf("err = %v, want ErrInvalidClient", err)
+			}
+		})
 	}
 }

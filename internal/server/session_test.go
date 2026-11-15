@@ -9,7 +9,6 @@ import (
 	"net/http/httptrace"
 	"net/textproto"
 	"net/url"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -118,11 +117,7 @@ func withBearer(r *http.Request, tok string) *http.Request {
 // upstreamURL for users, and returns its configuration and server.
 func bindingProxy(t *testing.T, upstreamURL string, users twoUsers) (*config.Config, *httptest.Server) {
 	t.Helper()
-	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+upstreamURL+"/mcp")
-	cfg, _, err := config.Load(nil, env, os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+upstreamURL+"/mcp")
 	a, err := buildAuth(cfg, discard, Observability{})
 	if err != nil {
 		t.Fatal(err)

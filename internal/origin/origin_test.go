@@ -1,12 +1,14 @@
 package origin
 
 import (
+	"fmt"
 	"time"
 
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -17,6 +19,18 @@ var ok = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write
 
 func quiet() *audit.Log {
 	return audit.New(slog.New(slog.NewTextHandler(io.Discard, nil)), nil, time.Now)
+}
+
+// preflight is a browser's CORS preflight from origin for a POST, listing requestHeaders as
+// Access-Control-Request-Headers lines.
+func preflight(origin string, requestHeaders ...string) *http.Request {
+	r := httptest.NewRequest("OPTIONS", "/mcp", nil)
+	r.Header.Set("Origin", origin)
+	r.Header.Set("Access-Control-Request-Method", "POST")
+	for _, v := range requestHeaders {
+		r.Header.Add("Access-Control-Request-Headers", v)
+	}
+	return r
 }
 
 func TestHostOutsideAllowlistGets421(t *testing.T) {
@@ -114,9 +128,7 @@ func TestListedOriginGetsCORSAndPreflight(t *testing.T) {
 		reached = true
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
-	r := httptest.NewRequest("OPTIONS", "/mcp", nil)
-	r.Header.Set("Origin", "https://app.example")
-	r.Header.Set("Access-Control-Request-Method", "POST")
+	r := preflight("https://app.example")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusNoContent || reached || w.Header().Get("Access-Control-Allow-Origin") != "https://app.example" ||
@@ -129,6 +141,68 @@ func TestListedOriginGetsCORSAndPreflight(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if !reached || !strings.Contains(w.Header().Get("Access-Control-Expose-Headers"), "WWW-Authenticate") || w.Header().Get("Access-Control-Allow-Origin") != "https://app.example" {
 		t.Fatalf("actual request: headers=%v", w.Header())
+	}
+	// Only a preflight is told the allowed headers, and only its answer varies with the requested ones.
+	if w.Header().Get("Access-Control-Allow-Headers") != "" || !slices.Equal(w.Header().Values("Vary"), []string{"Origin"}) {
+		t.Fatalf("actual request: Access-Control-Allow-Headers %q, Vary %q; want none and [Origin]", w.Header().Get("Access-Control-Allow-Headers"), w.Header().Values("Vary"))
+	}
+}
+
+// A browser MCP client mirrors tool parameters into Mcp-Param-{name} headers (MCP 2026-07-28), a
+// family no fixed Access-Control-Allow-Headers can name: the preflight allows the Mcp-Param-* names
+// it requests that are valid header names within the caps (at most 32 distinct names of at most
+// 128 bytes), beside the fixed list, and no other name it requests.
+func TestAPreflightAllowsOnlyTheValidMcpParamHeadersItRequestsWithinTheCaps(t *testing.T) {
+	// The fixed list a browser MCP client needs, written out: built from the code's constant, a
+	// dropped name would pass unnoticed.
+	const fixed = "Authorization, Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Mcp-Method, Mcp-Name, Last-Event-ID"
+	atCap := "mcp-param-" + strings.Repeat("a", 128-len("mcp-param-")) // 128 bytes
+	many := make([]string, 37)
+	for i := range many {
+		many[i] = fmt.Sprintf("mcp-param-p%03d", i)
+	}
+	for _, tc := range []struct {
+		name      string
+		requested []string // Access-Control-Request-Headers lines
+		want      []string // the names allowed after the fixed list
+	}{
+		{"none requested", nil, nil},
+		{"only fixed headers requested", []string{"authorization,content-type"}, nil},
+		{"one, as a browser sends it", []string{"authorization,content-type,mcp-param-region"}, []string{"mcp-param-region"}},
+		{"several, spaced and on two lines", []string{"Mcp-Param-Region, mcp-param-zone", "mcp-param-tenant"}, []string{"Mcp-Param-Region", "mcp-param-zone", "mcp-param-tenant"}},
+		{"a repeat in another case is listed once, as first sent", []string{"MCP-PARAM-REGION,mcp-param-region"}, []string{"MCP-PARAM-REGION"}},
+		{"another family is never echoed", []string{"x-api-key,cookie,mcp-paramregion,mcp-sessionid,x-mcp-param-region"}, nil},
+		{"the bare prefix is not a parameter", []string{"mcp-param-"}, nil},
+		{"a name that is not a header token", []string{"mcp-param-a b,mcp-param-a\"b,mcp-param-é"}, nil},
+		{"a name at the length cap", []string{atCap}, []string{atCap}},
+		{"a name one byte over the length cap", []string{atCap + "a,mcp-param-ok"}, []string{"mcp-param-ok"}},
+		// Refused names ahead of the list: the cap counts the names allowed, not those requested.
+		{"names past the count cap", []string{"authorization,mcp-param-a b,mcp-param-p000," + strings.Join(many, ",")}, many[:32]},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			Origins(quiet(), []string{"https://app.example"}, ok).ServeHTTP(w, preflight("https://app.example", tc.requested...))
+			want := fixed
+			if len(tc.want) > 0 {
+				want += ", " + strings.Join(tc.want, ", ")
+			}
+			if got := w.Header().Values("Access-Control-Allow-Headers"); w.Code != http.StatusNoContent || len(got) != 1 || got[0] != want {
+				t.Fatalf("status %d, Access-Control-Allow-Headers %q, want 204 and %q", w.Code, got, want)
+			}
+			if got := w.Header().Values("Vary"); !slices.Equal(got, []string{"Origin", "Access-Control-Request-Headers"}) {
+				t.Fatalf("Vary %q, want [Origin Access-Control-Request-Headers]: the answer depends on both", got)
+			}
+		})
+	}
+}
+
+// An origin that is not listed is refused with no CORS answer, whatever Mcp-Param-* names its
+// preflight requests.
+func TestAnUnlistedOriginsPreflightIsRefusedWhateverMcpParamHeadersItRequests(t *testing.T) {
+	w := httptest.NewRecorder()
+	Origins(quiet(), []string{"https://app.example"}, ok).ServeHTTP(w, preflight("https://evil.example", "mcp-param-region"))
+	if w.Code != http.StatusForbidden || w.Header().Get("Access-Control-Allow-Headers") != "" || w.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("status %d, headers %v; want 403 and no CORS", w.Code, w.Header())
 	}
 }
 

@@ -1,7 +1,5 @@
 package config
 
-import "path/filepath"
-
 // tls reads the public listener's certificate and key files (#183): both or neither, absolute
 // paths, and only under an https public URL, which is what clients use.
 func (c *Config) tls(v *Values) []error {
@@ -14,9 +12,9 @@ func (c *Config) tls(v *Values) []error {
 		return []error{errorf("%s and %s: set both or neither", certEnv, keyEnv)}
 	}
 	var errs []error
-	for _, f := range []struct{ env, path string }{{certEnv, c.TLSCertFile}, {keyEnv, c.TLSKeyFile}} {
-		if !filepath.IsAbs(f.path) {
-			errs = append(errs, errorf("%s: want an absolute path, got %q", f.env, f.path))
+	for _, f := range []struct{ setting, path string }{{"tls-cert-file", c.TLSCertFile}, {"tls-key-file", c.TLSKeyFile}} {
+		if err := absolute(f.setting, f.path); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	if c.PublicURL != nil && c.PublicURL.Scheme != "https" {

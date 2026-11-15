@@ -115,6 +115,9 @@ type cimdCall struct {
 
 // NewCIMDRegistry returns a CIMD registry.
 func NewCIMDRegistry(c CIMDConfig) *CIMDRegistry {
+	if c.Observe == nil {
+		c.Observe = func(string) {}
+	}
 	set := func(hosts []string) map[string]bool {
 		m := map[string]bool{}
 		for _, h := range hosts {
@@ -163,7 +166,7 @@ func (r *CIMDRegistry) Client(ctx context.Context, id string) (Client, error) {
 	}
 	if now.Sub(last) < MinCIMDRetry {
 		r.mu.Unlock()
-		r.observe(FetchRateLimited)
+		r.cfg.Observe(FetchRateLimited)
 		if c := stale(e, now); c != nil {
 			return c, nil
 		}
@@ -206,12 +209,6 @@ func (r *CIMDRegistry) lead(ctx context.Context, call *cimdCall, id, host string
 	call.client, call.err = r.fetch(ctx, id, host, now)
 }
 
-func (r *CIMDRegistry) observe(outcome string) {
-	if r.cfg.Observe != nil {
-		r.cfg.Observe(outcome)
-	}
-}
-
 func wait(ctx context.Context, call *cimdCall) (Client, error) {
 	select {
 	case <-call.done:
@@ -239,25 +236,25 @@ func (r *CIMDRegistry) fetch(ctx context.Context, id, host string, now time.Time
 	case r.slots <- struct{}{}:
 		defer func() { <-r.slots }()
 	default:
-		r.observe(FetchBusy)
+		r.cfg.Observe(FetchBusy)
 		return r.staleOr(id, now, fmt.Errorf("%w: too many client metadata fetches in flight", ErrUnavailable))
 	}
 	res, err := r.cfg.Fetch.Get(ctx, id, MaxCIMDDocBytes)
 	if err != nil {
 		if ssrfguard.Transient(err) {
-			r.observe(FetchUnavailable)
+			r.cfg.Observe(FetchUnavailable)
 			return r.staleOr(id, now, fmt.Errorf("%w: %v", ErrUnavailable, err))
 		}
-		r.observe(FetchRefused)
+		r.cfg.Observe(FetchRefused)
 		return nil, r.drop(id, fmt.Errorf("%w: %v", ErrMetadataRefused, err))
 	}
 	meta, err := parseCIMD(id, res.Body)
 	if err != nil {
-		r.observe(FetchInvalid)
+		r.cfg.Observe(FetchInvalid)
 		return nil, r.drop(id, fmt.Errorf("%w: %s: %v", ErrMetadataRefused, host, err))
 	}
 	c := r.build(id, host, meta)
-	r.observe(FetchOK)
+	r.cfg.Observe(FetchOK)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.attempts, id)

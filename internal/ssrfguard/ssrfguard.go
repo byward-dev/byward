@@ -139,7 +139,7 @@ func (f *Fetcher) Get(ctx context.Context, rawURL string, maxBytes int64) (*Resp
 	req.Header.Set("Accept", "application/json")
 	res, err := f.client.Do(req)
 	if err != nil {
-		if errors.Is(err, ssrf.ErrProhibitedIP) || errors.Is(err, ssrf.ErrProhibitedPort) || errors.Is(err, ssrf.ErrProhibitedNetwork) || errors.Is(err, ssrf.ErrInvalidHostPort) {
+		if RefusedAddress(err) { // the dial guard refused the address
 			return nil, fmt.Errorf("%w: %s resolves to a non-public address", ErrRefused, logging.URL(rawURL))
 		}
 		return nil, fmt.Errorf("ssrfguard: %w", logging.URLError(err)) // it names the URL, as logs may show it

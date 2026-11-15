@@ -5,8 +5,8 @@ import (
 	"errors"
 	"net/url"
 	"strings"
-	"time"
 
+	"github.com/byward-dev/byward/internal/downstream"
 	"github.com/byward-dev/byward/internal/idp"
 )
 
@@ -21,23 +21,16 @@ const (
 	interactionOperatorHint = "Conditional Access requires interaction for the downstream API (claims challenge); passing it to the client's next sign-in is not supported yet"
 )
 
-// DownstreamToken is an access token for a downstream API, obtained On-Behalf-Of a user. It is
-// opaque to byward: the downstream API validates it.
-type DownstreamToken struct {
-	AccessToken string
-	ExpiresAt   time.Time
-}
-
 // OnBehalfOf exchanges a user's access_as_user token (the assertion, ADR-0012 §3) for a token for
 // the downstream API's scopes, at the user's own tenant (tid), so multi-tenant apps work too. An
 // Entra error comes back as *idp.Error with its AADSTS Code and OAuth error: CodeConsentRequired
 // and OAuthInteractionNeeded carry operator hints; the claims challenge is never kept.
-func (p *Provider) OnBehalfOf(ctx context.Context, tid, assertion string, scopes []string) (DownstreamToken, error) {
+func (p *Provider) OnBehalfOf(ctx context.Context, tid, assertion string, scopes []string) (downstream.Token, error) {
 	if !idp.IsGUID(tid) || assertion == "" || len(scopes) == 0 {
-		return DownstreamToken{}, &idp.Error{Class: idp.Fatal, Err: errors.New("entra: On-Behalf-Of needs a tenant GUID, an assertion and scopes")}
+		return downstream.Token{}, &idp.Error{Class: idp.Fatal, Err: errors.New("entra: On-Behalf-Of needs a tenant GUID, an assertion and scopes")}
 	}
 	if err := p.Ready(ctx); err != nil {
-		return DownstreamToken{}, err
+		return downstream.Token{}, err
 	}
 	tr, err := p.tokenAt(ctx, tid, url.Values{
 		"grant_type":          {grantJWTBearer},
@@ -55,12 +48,12 @@ func (p *Provider) OnBehalfOf(ctx context.Context, tid, assertion string, scopes
 				ie.OperatorHint = interactionOperatorHint
 			}
 		}
-		return DownstreamToken{}, err
+		return downstream.Token{}, err
 	}
 	if tr.AccessToken == "" || tr.ExpiresIn <= 0 || !strings.EqualFold(tr.TokenType, "Bearer") {
-		return DownstreamToken{}, &idp.Error{Class: idp.Fatal, Err: errors.New("entra: On-Behalf-Of returned no usable bearer token")}
+		return downstream.Token{}, &idp.Error{Class: idp.Fatal, Err: errors.New("entra: On-Behalf-Of returned no usable bearer token")}
 	}
-	return DownstreamToken{AccessToken: tr.AccessToken, ExpiresAt: p.cfg.Now().Add(time.Duration(tr.ExpiresIn) * time.Second)}, nil
+	return downstream.Token{AccessToken: tr.AccessToken, ExpiresAt: tr.Tokens(p.cfg.Now()).Expiry}, nil
 }
 
 // AdminConsentURL is where an administrator of tenant tid grants our app the downstream scopes

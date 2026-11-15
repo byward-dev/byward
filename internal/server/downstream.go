@@ -38,11 +38,7 @@ type downstreamTokens struct {
 
 func newDownstreamTokens(scopes []string, header string, provider *entra.Provider, idpName string, assertion func(context.Context, string) (string, time.Time, error),
 	log *slog.Logger, o Observability) *downstreamTokens {
-	exchange := func(ctx context.Context, tid, assertion string, scopes []string) (downstream.Token, error) {
-		t, err := provider.OnBehalfOf(ctx, tid, assertion, scopes)
-		return downstream.Token{AccessToken: t.AccessToken, ExpiresAt: t.ExpiresAt}, err
-	}
-	exchange = alertingExchange(exchange, idpName, log, o)
+	exchange := alertingExchange(provider.OnBehalfOf, idpName, log, o)
 	res := scopes[0][:strings.LastIndex(scopes[0], "/")]
 	return &downstreamTokens{cache: downstream.New(exchange, scopes, 0, time.Now), header: header, resource: res,
 		assertion: assertion, consentURL: func(tid string) string { return provider.AdminConsentURL(tid, scopes) },
@@ -78,14 +74,14 @@ func (d *downstreamTokens) serve(w http.ResponseWriter, r *http.Request, id reso
 		next.ServeHTTP(w, r)
 		return
 	}
-	tid, oid, keyed := strings.Cut(id.Subject, ":")
+	tid, oid, keyed := entra.SplitUserKey(id.Subject)
 	if !ok || !keyed || id.GrantID == "" {
-		d.refuse(w, r, id, "failed", errors.New("no signed-in Entra user for the request"))
+		d.refuse(w, r, id, downstream.Failed, errors.New("no signed-in Entra user for the request"))
 		return
 	}
 	assertion, expires, err := d.assertion(ctx, id.GrantID)
 	if err != nil {
-		d.refuse(w, r, id, "failed", err)
+		d.refuse(w, r, id, downstream.Failed, err)
 		return
 	}
 	tok, cached, err := d.cache.Token(ctx, downstream.User{TenantID: tid, ObjectID: oid, Assertion: assertion, AssertionExpiresAt: expires})
@@ -97,9 +93,9 @@ func (d *downstreamTokens) serve(w http.ResponseWriter, r *http.Request, id reso
 		return
 	}
 	if cached {
-		d.o.Metrics.Downstream("cached")
+		d.o.Metrics.Downstream(downstream.Cached)
 	} else {
-		d.o.Metrics.Downstream("issued")
+		d.o.Metrics.Downstream(downstream.Issued)
 	}
 	next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, downstreamKey{}, tok.AccessToken)))
 }
@@ -110,13 +106,13 @@ func outcomeOf(err error) string {
 	var ie *idp.Error
 	switch {
 	case errors.As(err, &ie) && ie.Code == entra.CodeConsentRequired:
-		return "consent_required"
+		return downstream.ConsentRequired
 	case errors.As(err, &ie) && ie.OAuth == entra.OAuthInteractionNeeded:
-		return "interaction_required"
+		return downstream.InteractionRequired
 	case idp.ClassOf(err) == idp.Unavailable:
-		return "unavailable"
+		return downstream.Unavailable
 	}
-	return "failed"
+	return downstream.Failed
 }
 
 // alertingExchange counts and logs an exchange error that needs the operator once per exchange, as
@@ -160,8 +156,8 @@ func (d *downstreamTokens) record(ctx context.Context, r *http.Request, id resou
 			attrs = append(attrs, "alert", string(ie.Alert))
 		}
 	}
-	if outcome == "consent_required" {
-		tid, _, _ := strings.Cut(id.Subject, ":")
+	if outcome == downstream.ConsentRequired {
+		tid, _, _ := entra.SplitUserKey(id.Subject)
 		attrs = append(attrs, "admin_consent_url", d.consentURL(tid))
 	}
 	if r == nil {
@@ -179,25 +175,25 @@ func (d *downstreamTokens) record(ctx context.Context, r *http.Request, id resou
 // refreshes IdP tokens outside a request.
 func (d *downstreamTokens) forProcess(ctx context.Context, p stdio.Identity) stdio.DownstreamToken {
 	id := resource.Identity{Subject: p.Subject, PrincipalType: p.PrincipalType, GrantID: p.Grant, ClientID: p.Client}
-	tid, oid, keyed := strings.Cut(id.Subject, ":")
+	tid, oid, keyed := entra.SplitUserKey(id.Subject)
 	if id.PrincipalType == resource.PrincipalClient || !keyed || id.GrantID == "" {
-		d.o.Metrics.Downstream("no_user")
-		return stdio.DownstreamToken{Error: "no_user"}
+		d.o.Metrics.Downstream(downstream.NoUser)
+		return stdio.DownstreamToken{Error: downstream.NoUser}
 	}
 	assertion, expires, err := d.assertion(ctx, id.GrantID)
 	if errors.Is(err, store.ErrNotFound) {
 		// Signed out or revoked since its last request (revocation deletes the grant): routine, not
 		// a refusal to alert on; the user's next request, under a new grant, brings a new token.
-		d.o.Metrics.Downstream("sign_in_expired")
-		return stdio.DownstreamToken{Error: "sign_in_expired"}
+		d.o.Metrics.Downstream(downstream.SignInExpired)
+		return stdio.DownstreamToken{Error: downstream.SignInExpired}
 	}
 	if err != nil {
-		d.record(ctx, nil, id, "failed", err)
-		return stdio.DownstreamToken{Error: "failed"}
+		d.record(ctx, nil, id, downstream.Failed, err)
+		return stdio.DownstreamToken{Error: downstream.Failed}
 	}
 	if !expires.IsZero() && !d.now().Before(expires) {
-		d.o.Metrics.Downstream("sign_in_expired")
-		return stdio.DownstreamToken{Error: "sign_in_expired"}
+		d.o.Metrics.Downstream(downstream.SignInExpired)
+		return stdio.DownstreamToken{Error: downstream.SignInExpired}
 	}
 	tok, cached, err := d.cache.Token(ctx, downstream.User{TenantID: tid, ObjectID: oid, Assertion: assertion, AssertionExpiresAt: expires})
 	if err != nil {
@@ -206,9 +202,9 @@ func (d *downstreamTokens) forProcess(ctx context.Context, p stdio.Identity) std
 		return stdio.DownstreamToken{Error: outcome}
 	}
 	if cached {
-		d.o.Metrics.Downstream("cached")
+		d.o.Metrics.Downstream(downstream.Cached)
 	} else {
-		d.o.Metrics.Downstream("issued")
+		d.o.Metrics.Downstream(downstream.Issued)
 	}
 	return stdio.DownstreamToken{AccessToken: tok.AccessToken, ExpiresAt: tok.ExpiresAt}
 }
@@ -220,11 +216,11 @@ func refusalMessage(outcome, api string) string {
 		api = "the application " + api
 	}
 	switch outcome {
-	case "consent_required":
+	case downstream.ConsentRequired:
 		return "This tool needs an administrator to grant access to " + api + ". Ask your operator."
-	case "interaction_required":
+	case downstream.InteractionRequired:
 		return "Your organisation's access policy requires a step for " + api + " that this app cannot complete. Ask your operator."
-	case "unavailable":
+	case downstream.Unavailable:
 		return "The sign-in service is temporarily unavailable. Try again shortly."
 	}
 	return "The proxy could not get access to " + api + " on your behalf. Ask your operator."

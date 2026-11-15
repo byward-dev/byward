@@ -7,6 +7,8 @@ import (
 	"net/netip"
 	"strings"
 
+	"golang.org/x/net/http/httpguts"
+
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/config"
 )
@@ -66,6 +68,44 @@ const (
 	exposeHeaders = "WWW-Authenticate, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-ID, Retry-After"
 )
 
+// MCP 2026-07-28 (Streamable HTTP, "Custom Headers from Tool Parameters") has a client mirror tool
+// parameters into Mcp-Param-{name} headers, a family Access-Control-Allow-Headers cannot name by
+// prefix. A preflight's own Mcp-Param-* names are allowed instead: each a valid header name with a
+// non-empty suffix, at most maxParamHeaderName bytes, and at most maxParamHeaders distinct names;
+// any other requested name is left out, so the browser refuses it as before.
+const (
+	paramHeaderPrefix  = "mcp-param-"
+	maxParamHeaders    = 32
+	maxParamHeaderName = 128
+)
+
+// paramHeaders are the Mcp-Param-* names a preflight's headers h request
+// (Access-Control-Request-Headers), as allowHeaders' extension: ", " and the names, or "".
+func paramHeaders(h http.Header) string {
+	var names []string
+	seen := map[string]bool{}
+lines:
+	for _, v := range h.Values("Access-Control-Request-Headers") {
+		for n := range strings.SplitSeq(v, ",") {
+			if len(names) == maxParamHeaders {
+				break lines
+			}
+			n = strings.TrimSpace(n)
+			lower := strings.ToLower(n)
+			if len(n) > maxParamHeaderName || !strings.HasPrefix(lower, paramHeaderPrefix) ||
+				len(n) == len(paramHeaderPrefix) || !httpguts.ValidHeaderFieldName(n) || seen[lower] {
+				continue
+			}
+			seen[lower] = true
+			names = append(names, n)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return ", " + strings.Join(names, ", ")
+}
+
 // Origins enforces an exact allowlist of `Origin` values (scheme://host[:port], lower case). A
 // missing Origin passes (non-browser MCP clients send none); multiple Origin headers, `null` or an
 // unlisted value get 403. A listed origin gets CORS headers, and its preflight is answered with 204.
@@ -96,7 +136,8 @@ func Origins(rec *audit.Log, allowed []string, next http.Handler) http.Handler {
 		h.Set("Access-Control-Expose-Headers", exposeHeaders)
 		if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
 			h.Set("Access-Control-Allow-Methods", allowMethods)
-			h.Set("Access-Control-Allow-Headers", allowHeaders)
+			h.Set("Access-Control-Allow-Headers", allowHeaders+paramHeaders(r.Header))
+			h.Add("Vary", "Access-Control-Request-Headers") // the allowed headers depend on it
 			h.Set("Access-Control-Max-Age", "600")
 			w.WriteHeader(http.StatusNoContent)
 			return
