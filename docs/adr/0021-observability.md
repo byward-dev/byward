@@ -61,7 +61,11 @@ Runtime (2026-11-06):
    events, deny-list sync age, store errors. Fixed buckets 0.05–10 s. No user, client or tool labels.
 9. **Traces are off unless `OTEL_TRACES_EXPORTER` is set.** When on, autoexport; an HTTP server span
    that continues an inbound `traceparent` header; `traceparent` injected explicitly toward the
-   upstream; `_meta` never touched; no MCP attributes while they are Development.
+   upstream; `_meta` never touched; no MCP attributes while they are Development. An `OTEL_*` value
+   autoexport refuses (an unknown exporter or OTLP protocol, an `http://` endpoint with a TLS file)
+   stops startup and fails `check --offline`: deliberately stricter than the OpenTelemetry
+   specification's warn-and-ignore, so traces are never silently off when the operator asked for them
+   (amended 2026-11-15, L157).
 10. **Health:** `/livez` = the process; `/readyz` = config, keys and store. The IdP is not part of
     readiness: MCP requests are validated locally (ADR-0014), so an IdP outage must not drain every
     pod; IdP health is in metrics and `doctor`.

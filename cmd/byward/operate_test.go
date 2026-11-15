@@ -8,12 +8,16 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/byward-dev/byward/internal/testutil/assertionkey"
+	"github.com/byward-dev/byward/internal/testutil/testcert"
+	"github.com/go-logr/logr"
+	"go.opentelemetry.io/otel"
 
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/idp/entra"
@@ -82,6 +86,56 @@ func TestCheckOfflinePassesAWorkingSetupWithItsStartupWarnings(t *testing.T) {
 	code, stdout, stderr := runWith([]string{"check", "--offline"}, env...)
 	if code != exitOK || !strings.Contains(stdout, "configuration OK") || !strings.Contains(stdout, "warn  access gate is empty") || stderr != "" {
 		t.Fatalf("code %d stdout %q stderr %q", code, stdout, stderr)
+	}
+}
+
+// L157: check --offline builds the trace exporter as startup does, so each OTEL_* value startup
+// refuses fails check with exit 2 and startup's message (ADR-0021 §9: failing closed); a value the
+// exporter only ignores passes, and its value, which can be a credential, is printed nowhere.
+func TestCheckOfflineRefusesTheOTELSettingsStartupRefuses(t *testing.T) {
+	ca := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(ca, testcert.Root(t), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const secret = "s3cret-token"
+	for _, tc := range []struct {
+		name     string
+		otel     []string
+		code     int
+		inOutput string // in stderr for exit 2, in stdout for exit 0
+	}{
+		{"an unknown exporter", []string{"OTEL_TRACES_EXPORTER=jaeger"}, exitConfig, "OTEL_* tracing settings: unknown exporter"},
+		{"an unknown OTLP protocol", []string{"OTEL_TRACES_EXPORTER=otlp", "OTEL_EXPORTER_OTLP_PROTOCOL=http/json"}, exitConfig, "OTEL_* tracing settings: invalid OTLP protocol"},
+		{"an http:// endpoint with a TLS file", []string{"OTEL_TRACES_EXPORTER=otlp", "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318",
+			"OTEL_EXPORTER_OTLP_CERTIFICATE=" + ca}, exitConfig, "OTEL_* tracing settings: insecure HTTP endpoint cannot use TLS client configuration"},
+		{"a header the exporter ignores", []string{"OTEL_TRACES_EXPORTER=otlp", "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318",
+			"OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer%zz" + secret}, exitOK, "configuration OK"},
+		{"otlp", []string{"OTEL_TRACES_EXPORTER=otlp", "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318"}, exitOK, "configuration OK"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, kv := range os.Environ() { // autoexport reads the process environment: a developer's settings too
+				if k, _, _ := strings.Cut(kv, "="); strings.HasPrefix(k, "OTEL_") {
+					t.Setenv(k, "")
+				}
+			}
+			for _, kv := range tc.otel {
+				k, v, _ := strings.Cut(kv, "=")
+				t.Setenv(k, v)
+			}
+			t.Cleanup(func() { otel.SetLogger(logr.Discard()) }) // NewExporter's logger writes to this test's stderr
+			env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
+			code, stdout, stderr := runWith([]string{"check", "--offline"}, append(env, tc.otel...)...)
+			out := stdout
+			if tc.code != exitOK {
+				out = stderr
+			}
+			if code != tc.code || !strings.Contains(out, tc.inOutput) {
+				t.Fatalf("code %d (want %d)\nstdout %q\nstderr %q\nwant %q", code, tc.code, stdout, stderr, tc.inOutput)
+			}
+			if strings.Contains(stdout+stderr, secret) {
+				t.Fatalf("a setting's value was printed:\nstdout %q\nstderr %q", stdout, stderr)
+			}
+		})
 	}
 }
 

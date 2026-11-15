@@ -10,12 +10,14 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/server"
+	"github.com/byward-dev/byward/internal/tracing"
 )
 
 // checkOffline is `check --offline` (ADR-0020 §7). Without --offline it refuses, so that a future
 // online check never changes what an existing script does.
-func checkOffline(_ context.Context, args, environ []string, stdout, stderr io.Writer) int {
+func checkOffline(ctx context.Context, args, environ []string, stdout, stderr io.Writer) int {
 	flags, upstream := splitAtDashes(args)
 	if !slices.Equal(flags, []string{"--offline"}) {
 		_, _ = fmt.Fprintln(stderr, "byward: usage: byward check --offline [-- stdio-upstream-command [args...]] (for the network checks, run byward doctor)")
@@ -28,6 +30,15 @@ func checkOffline(_ context.Context, args, environ []string, stdout, stderr io.W
 	report, err := server.CheckOfflineReport(cfg)
 	if err != nil {
 		return reportConfigError(stderr, err)
+	}
+	// The trace exporter, as startup builds it (L157): a setting startup refuses fails check too. It
+	// connects to nothing, and is shut down at once.
+	exp, err := tracing.NewExporter(ctx, getenv(environ), logging.New(stderr, cfg.LogFormat))
+	if err != nil {
+		return reportConfigError(stderr, fmt.Errorf("OTEL_* tracing settings: %w", err))
+	}
+	if exp != nil {
+		_ = exp.Shutdown(ctx)
 	}
 	// As the startup log has them (security invariant 12), labelled neutrally: --insecure-no-auth's
 	// are not development mode.

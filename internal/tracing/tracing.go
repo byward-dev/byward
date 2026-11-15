@@ -51,13 +51,12 @@ func Setup(ctx context.Context, getenv func(string) string, version string, log 
 	if getenv("OTEL_TRACES_EXPORTER") == "" {
 		return false, noop, nil
 	}
-	// Both go in first: the exporter reports a setting it rejects through the logger, and the first
-	// handler set is the one OTel's default handler forwards to for good. settingErrors replaces it
-	// only while the SDK reads its own settings.
-	otel.SetLogger(logr.New(otelLog{log}))
+	// The handler goes in before anything can report an error: the first one set is the one OTel's
+	// default handler forwards to for good. settingErrors replaces it only while the SDK reads its
+	// own settings.
 	handler := errorHandler(log, envproxy.SettingMisread())
 	otel.SetErrorHandler(handler)
-	exp, err := autoexport.NewSpanExporter(ctx)
+	exp, err := NewExporter(ctx, getenv, log)
 	if err != nil {
 		return false, noop, err
 	}
@@ -73,6 +72,22 @@ func Setup(ctx context.Context, getenv func(string) string, version string, log 
 	otel.SetTracerProvider(tp)
 	otel.SetTextMapPropagator(propagator)
 	return true, tp.Shutdown, nil
+}
+
+// NewExporter is the trace exporter Setup installs, built as startup builds it, for Setup and for
+// `check --offline` (L157): nil when getenv("OTEL_TRACES_EXPORTER") is unset; otherwise
+// autoexport's exporter from the OTEL_* settings, which connects to nothing until a span is
+// exported. An unknown exporter, an OTLP protocol autoexport does not offer, and an http:// endpoint
+// with a TLS file are errors, so the proxy does not start: deliberately stricter than the OTel
+// specification's warn-and-ignore (ADR-0021 §9). It first installs the redacting logger, a global,
+// since the exporter logs a setting it cannot parse with its value, which can be a credential
+// (#274). The caller shuts the exporter down.
+func NewExporter(ctx context.Context, getenv func(string) string, log *slog.Logger) (sdktrace.SpanExporter, error) {
+	if getenv("OTEL_TRACES_EXPORTER") == "" {
+		return nil, nil
+	}
+	otel.SetLogger(logr.New(otelLog{log}))
+	return autoexport.NewSpanExporter(ctx)
 }
 
 // errorHandler logs OpenTelemetry's errors in place of its default, which prints them to stderr as
