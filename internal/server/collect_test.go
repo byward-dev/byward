@@ -15,6 +15,7 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/denylist"
 	"github.com/byward-dev/byward/internal/store"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 )
 
 // The wired server removes expired store rows at startup and while it runs (ADR-0007 §1): a grant
@@ -101,7 +102,7 @@ func (c *flakyCollector) Collect(ctx context.Context, _ time.Time) error {
 // A failed collection is logged and retried at the next interval.
 func TestAFailedCollectionIsLoggedAndRetried(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		var logs syncBuffer
+		var logs logsink.Buffer
 		c := &flakyCollector{}
 		ctx, stop := context.WithCancel(context.Background())
 		done := make(chan struct{})
@@ -131,7 +132,7 @@ func (noRevocations) Revocations(context.Context) ([]store.Revocation, error) { 
 // closes the store under it; a collection cut short by shutdown is not logged as an error.
 func TestShutdownLetsACollectionInProgressFinishWithoutLoggingAFailure(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		var logs syncBuffer
+		var logs logsink.Buffer
 		c := &flakyCollector{entered: make(chan struct{}), release: make(chan struct{})}
 		ctx, stop := context.WithCancel(context.Background())
 		done := make(chan struct{})

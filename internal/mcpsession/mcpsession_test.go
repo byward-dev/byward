@@ -3,22 +3,19 @@ package mcpsession
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httptrace"
 	"net/textproto"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/testutil/sealingkey"
 	"github.com/byward-dev/byward/internal/token"
 )
 
@@ -37,18 +34,9 @@ func keyDir(t *testing.T, ids ...string) string {
 	t.Helper()
 	dir := t.TempDir()
 	for _, id := range ids {
-		addKey(t, dir, id)
+		sealingkey.Write(t, dir, id)
 	}
 	return dir
-}
-
-func addKey(t *testing.T, dir, id string) {
-	t.Helper()
-	k := make([]byte, token.KeySize)
-	_, _ = rand.Read(k)
-	if err := os.WriteFile(filepath.Join(dir, id), []byte(base64.StdEncoding.EncodeToString(k)), 0o600); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func box(t *testing.T, dir, purpose string, now *time.Time) *token.Box {
@@ -355,7 +343,7 @@ func TestASessionWorksOnAnotherReplicaAndAfterAKeyRotation(t *testing.T) {
 	dir := keyDir(t, "2026-11-01")
 	now := t0
 	id := newProxy(box(t, dir, "mcp-session", &now), upstreamURL, &now, lifetime, &upstream{}).initialize(t, alice)
-	addKey(t, dir, "2026-11-06") // sorts last: the new signing key
+	sealingkey.Write(t, dir, "2026-11-06") // sorts last: the new signing key
 	up := &upstream{}
 	other := newProxy(box(t, dir, "mcp-session", &now), upstreamURL, &now, lifetime, up)
 	if w := other.do(t, http.MethodPost, alice, id); w.Code != http.StatusOK || up.got[0] != upstreamSession {

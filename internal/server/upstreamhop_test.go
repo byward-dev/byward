@@ -207,7 +207,7 @@ func TestCheckOfflineWarnsOfAPlainHTTPUpstreamGivenAsAPublicAddress(t *testing.T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			withResolver(t, resolvesTo("mcp.example.com", "203.0.113.7"))
-			warnings, err := CheckOffline(tc.cfg(t, tc.up))
+			warnings, err := checkOffline(tc.cfg(t, tc.up))
 			if err != nil {
 				t.Fatal(err)
 			}

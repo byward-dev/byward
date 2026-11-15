@@ -3,11 +3,9 @@ package server
 import (
 	"context"
 	"crypto/ecdsa"
-	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/x509"
-	"encoding/pem"
+	"crypto/rsa"
 	"net/url"
 	"slices"
 	"sort"
@@ -117,17 +115,13 @@ func TestTheCallbackPathIsTheIdPsName(t *testing.T) {
 }
 
 // With a PEM key the proxy signs in with private_key_jwt, the assertion carrying
-// BYWARD_OIDC_CLIENT_KEY_ID; keys it cannot sign with name the setting.
+// BYWARD_OIDC_CLIENT_KEY_ID; a key it cannot read, or one it refuses to sign with, names the setting.
 func TestAClientKeySignsInWithItsKeyIDAndAnUnusableOneNamesTheSetting(t *testing.T) {
 	cert := fakeidp.NewCertificate(t)
-	der, err := x509.MarshalPKCS8PrivateKey(cert.Key)
-	if err != nil {
-		t.Fatal(err)
-	}
 	app := fakeidp.Client{ID: fakeidp.NewGUID(), Certificates: []*fakeidp.Certificate{cert}, RedirectURIs: []string{"https://mcp.example.com/callback/oidc"}}
 	fake := fakeidp.New(t, fakeidp.Generic, fakeidp.WithClient(app))
 	ip := fakeIdentityProvider(t, fake, app, "oidc", func(c *config.Config) {
-		c.OIDCClientSecret, c.OIDCClientKey, c.OIDCClientKeyID = "", string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})), cert.ThumbprintSHA256()
+		c.OIDCClientSecret, c.OIDCClientKey, c.OIDCClientKeyID = "", string(fakeidp.PrivateKeyPEM(t, cert.Key)), cert.ThumbprintSHA256()
 	})
 	q := authorizeAt(t, ip)
 	res, err := fake.HTTPClient().Get(fake.AuthorizeURL("") + "?" + q.Encode())
@@ -139,13 +133,18 @@ func TestAClientKeySignsInWithItsKeyIDAndAnUnusableOneNamesTheSetting(t *testing
 		t.Fatalf("code exchange with private_key_jwt: %v", err)
 	}
 
-	p384, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	_, edKey, _ := ed25519.GenerateKey(rand.Reader)
-	for name, key := range map[string]string{"EC P-384": pkcs8PEM(t, p384), "Ed25519": pkcs8PEM(t, edKey), "not PEM": "s3cret"} {
-		c := oidcConfig("keycloak", func(c *config.Config) { c.OIDCClientSecret, c.OIDCClientKey = "", key })
-		if _, err := newIdentityProvider(c, nil); err == nil || !strings.Contains(err.Error(), "BYWARD_OIDC_CLIENT_KEY_FILE") {
-			t.Errorf("%s: %v, want an error naming BYWARD_OIDC_CLIENT_KEY_FILE", name, err)
-		}
+	// One row for each place the server names the setting: a key that does not parse, and one
+	// PrivateKeyJWTWithAlg refuses. The idp tests pin every refusal's own text.
+	for name, tc := range map[string]struct{ key, want string }{
+		"not PEM":  {"s3cret", "BYWARD_OIDC_CLIENT_KEY_FILE: not a PEM private key"},
+		"RSA 1024": {string(fakeidp.PrivateKeyPEM(t, weakRSAKey(t))), "BYWARD_OIDC_CLIENT_KEY_FILE: idp: a 1024-bit RSA key: use at least 2048 bits"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := oidcConfig("keycloak", func(c *config.Config) { c.OIDCClientSecret, c.OIDCClientKey = "", tc.key })
+			if _, err := newIdentityProvider(c, nil); err == nil || err.Error() != tc.want {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -154,7 +153,7 @@ func TestAClientKeySignsInWithItsKeyIDAndAnUnusableOneNamesTheSetting(t *testing
 // doctor's credential check names the credential, and when its probe cannot tell (here: no
 // discovery) the refusal is its warning.
 func TestAnOktaClientKeyOnPS256Warns(t *testing.T) {
-	rsaKey := pkcs8PEM(t, fakeidp.NewCertificate(t).Key)
+	rsaKey := string(fakeidp.PrivateKeyPEM(t, fakeidp.NewCertificate(t).Key))
 	p256, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	const notProbed = "not probed: discovery failed; the credential: "
 	const oktaRefuses = ", which Okta refuses for client assertions"
@@ -167,7 +166,7 @@ func TestAnOktaClientKeyOnPS256Warns(t *testing.T) {
 		{name: "okta, an RSA key by default", preset: "okta", key: rsaKey, warns: true, credential: "private_key_jwt signed with PS256"},
 		{name: "okta, an RSA key with PS256 and a key ID", preset: "okta", key: rsaKey, alg: "PS256", kid: "k1", warns: true, credential: "private_key_jwt signed with PS256, key ID k1"},
 		{name: "okta, an RSA key with RS256 and a key ID", preset: "okta", key: rsaKey, alg: "RS256", kid: "k1", credential: "private_key_jwt signed with RS256, key ID k1"},
-		{name: "okta, an EC key", preset: "okta", key: pkcs8PEM(t, p256), credential: "private_key_jwt signed with ES256"},
+		{name: "okta, an EC key", preset: "okta", key: string(fakeidp.PrivateKeyPEM(t, p256)), credential: "private_key_jwt signed with ES256"},
 		{name: "keycloak, an RSA key by default", preset: "keycloak", key: rsaKey, credential: "private_key_jwt signed with PS256"},
 		{name: "okta, a client secret", preset: "okta", credential: "a client secret"},
 	} {
@@ -211,14 +210,14 @@ func TestAnOktaClientKeyOnPS256Warns(t *testing.T) {
 	}
 }
 
-// pkcs8PEM is key as a PEM PKCS #8 private key, as BYWARD_OIDC_CLIENT_KEY_FILE holds it.
-func pkcs8PEM(t *testing.T, key any) string {
+// weakRSAKey is an RSA key below idp.MinRSABits, which no IdP credential may use.
+func weakRSAKey(t *testing.T) *rsa.PrivateKey {
 	t.Helper()
-	der, err := x509.MarshalPKCS8PrivateKey(key)
+	k, err := rsa.GenerateKey(rand.Reader, 1024) //nolint:gosec // deliberately weak for the test
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
+	return k
 }
 
 // doctor's credential check names the credential; unless its probe passed, a key algorithm the
@@ -273,7 +272,7 @@ func TestDoctorAtOktaTrustsItsProbeOfAPS256Key(t *testing.T) {
 			fake := fakeidp.New(t, fakeidp.Generic, append([]fakeidp.Option{fakeidp.WithTLS(), fakeidp.WithIssuer(issuer), fakeidp.WithClient(app)}, tc.opts...)...)
 			ip, err := newIdentityProvider(oidcConfig("okta", func(c *config.Config) {
 				c.OIDCIssuer, c.OIDCClientID = issuer, app.ID
-				c.OIDCClientSecret, c.OIDCClientKey, c.OIDCClientKeyID = "", pkcs8PEM(t, cert.Key), cert.ThumbprintSHA256()
+				c.OIDCClientSecret, c.OIDCClientKey, c.OIDCClientKeyID = "", string(fakeidp.PrivateKeyPEM(t, cert.Key)), cert.ThumbprintSHA256()
 			}), fake.HTTPClient())
 			if err != nil {
 				t.Fatal(err)
@@ -294,9 +293,9 @@ func TestDoctorAtOktaTrustsItsProbeOfAPS256Key(t *testing.T) {
 // An algorithm the client key cannot sign with refuses to start, naming BYWARD_OIDC_CLIENT_KEY_ALG
 // (#306); the credential each accepted one describes is TestAnOktaClientKeyOnPS256Warns's.
 func TestAClientKeyAlgorithmTheKeyCannotUseRefusesToStart(t *testing.T) {
-	rsaKey := pkcs8PEM(t, fakeidp.NewCertificate(t).Key)
+	rsaKey := string(fakeidp.PrivateKeyPEM(t, fakeidp.NewCertificate(t).Key))
 	p256, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	ecKey := pkcs8PEM(t, p256)
+	ecKey := string(fakeidp.PrivateKeyPEM(t, p256))
 	for name, tc := range map[string]struct{ key, alg string }{
 		"RS256 with an EC key":  {ecKey, "RS256"},
 		"ES256 with an RSA key": {rsaKey, "ES256"},
@@ -312,7 +311,7 @@ func TestAClientKeyAlgorithmTheKeyCannotUseRefusesToStart(t *testing.T) {
 
 // check reports a subject claim users can change, naming the setting.
 func TestCheckReportsAMutableSubjectClaim(t *testing.T) {
-	warnings, err := CheckOffline(loadOIDC(t, "keycloak", "https://sso.example.com/realms/acme", "c", "BYWARD_OIDC_SUBJECT_CLAIM=email"))
+	warnings, err := checkOffline(loadOIDC(t, "keycloak", "https://sso.example.com/realms/acme", "c", "BYWARD_OIDC_SUBJECT_CLAIM=email"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/mcpsession"
 	"github.com/byward-dev/byward/internal/resource"
+	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 	"github.com/byward-dev/byward/internal/token"
 )
 
@@ -35,12 +36,11 @@ func (u twoUsers) Validate(_ context.Context, tok string) (resource.Identity, er
 // Invariant 13 end to end: through Guard, the wired session binding and the relay, a legacy-era
 // session is usable by the user who started it and by no one else.
 func TestALegacySessionIsBoundToTheUserWhoStartedIt(t *testing.T) {
-	var seen []string
-	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = append(seen, r.Header.Get(mcpsession.Header))
+	up := fakeupstream.New()
+	up.Handler = func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set(mcpsession.Header, "upstream-session-1")
 		w.WriteHeader(http.StatusOK)
-	}))
+	}
 	t.Cleanup(up.Close)
 	cfg, srv := bindingProxy(t, up.URL, twoUsers{"tok-alice": "tid:alice", "tok-bob": "tid:bob"})
 	post := func(token, session string) *http.Response {
@@ -80,12 +80,13 @@ func TestALegacySessionIsBoundToTheUserWhoStartedIt(t *testing.T) {
 	if _, err := opensAt(time.Now().Add(broker.GrantLifetime + time.Hour)); err == nil {
 		t.Fatal("the session ID outlives the grant lifetime")
 	}
-	if res := post("tok-alice", id); res.StatusCode != http.StatusOK || seen[len(seen)-1] != "upstream-session-1" {
-		t.Fatalf("the owner's next request: %d, upstream saw %q", res.StatusCode, seen[len(seen)-1])
+	res = post("tok-alice", id)
+	if last, _ := up.Last(); res.StatusCode != http.StatusOK || last.Header.Get(mcpsession.Header) != "upstream-session-1" {
+		t.Fatalf("the owner's next request: %d, upstream saw %q", res.StatusCode, last.Header.Get(mcpsession.Header))
 	}
-	calls := len(seen)
-	if res := post("tok-bob", id); res.StatusCode != http.StatusNotFound || len(seen) != calls {
-		t.Fatalf("another user with that session: %d, upstream calls +%d; want 404 and none", res.StatusCode, len(seen)-calls)
+	calls := len(up.Requests())
+	if res := post("tok-bob", id); res.StatusCode != http.StatusNotFound || len(up.Requests()) != calls {
+		t.Fatalf("another user with that session: %d, upstream calls +%d; want 404 and none", res.StatusCode, len(up.Requests())-calls)
 	}
 }
 

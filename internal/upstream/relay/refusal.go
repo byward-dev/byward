@@ -63,8 +63,9 @@ type rpcRequest struct {
 	method string
 }
 
-// parseRequest reads the captured body as one JSON-RPC request. Batches, truncated bodies, and
-// anything that is not a well-formed request return ok=false; the caller then falls back to 502.
+// parseRequest reads a body as one JSON-RPC request. Batches and anything that is not a
+// well-formed request return ok=false; decide then reports outcomeUnanswerable. A truncated capture
+// can still parse (cut off in trailing whitespace), so decide refuses it before calling this.
 func parseRequest(body []byte) (rpcRequest, bool) {
 	var m struct {
 		JSONRPC string          `json:"jsonrpc"`
@@ -80,15 +81,14 @@ func parseRequest(body []byte) (rpcRequest, bool) {
 	return rpcRequest{id: m.ID, method: m.Method}, true
 }
 
-// validID accepts the JSON-RPC id forms MCP allows: a string or a number (never null).
+// validID reports whether id, a JSON value, is an id MCP allows: a string or an integer literal (no
+// fraction or exponent), never null. The stdio upstream holds the same rule (stdio.validID).
 func validID(id json.RawMessage) bool {
-	var v any
-	if err := json.Unmarshal(id, &v); err != nil {
-		return false
-	}
-	switch v.(type) {
-	case string, float64:
+	switch c := id[0]; {
+	case c == '"':
 		return true
+	case c == '-' || (c >= '0' && c <= '9'):
+		return !bytes.ContainsAny(id, ".eE")
 	}
 	return false
 }
@@ -140,7 +140,8 @@ func rpcAnswer(req rpcRequest, msg string, data any) []byte {
 	return bytes.TrimSuffix(b.Bytes(), []byte("\n"))
 }
 
-// outcome names what translate did, for the operator log.
+// outcome is what the proxy did with a request it answers in its own name: decide's verdict, refined
+// by translate (outcomeRelayed) and answerTimeout (outcomeTimedOut), and named for the operator log.
 type outcome string
 
 const (
@@ -152,39 +153,62 @@ const (
 	outcomeTimedOut      outcome = "request id unknown; 504"
 )
 
+// decide is how the proxy answers a request in its own name, whether after an upstream refusal,
+// after an upstream timeout, or before relaying (Answer), given the request's method and its body as
+// captured (truncated when over captureLimit or unknown):
+//   - anything but POST: outcomeStreamRefused (405);
+//   - a body that is incomplete or not one JSON-RPC request: outcomeUnanswerable (the caller's
+//     fallback status);
+//   - a notification: outcomeNotification (202);
+//   - otherwise outcomeSynthesized, with the request to answer.
+func decide(method string, body []byte, truncated bool) (rpcRequest, outcome) {
+	if method != http.MethodPost {
+		return rpcRequest{}, outcomeStreamRefused
+	}
+	if truncated {
+		return rpcRequest{}, outcomeUnanswerable
+	}
+	req, ok := parseRequest(body)
+	switch {
+	case !ok:
+		return rpcRequest{}, outcomeUnanswerable
+	case req.id == nil:
+		return req, outcomeNotification
+	}
+	return req, outcomeSynthesized
+}
+
 // translate rewrites an upstream refusal in place. It reports outcomeUnanswerable when the
 // response must become a 502 instead.
 func translate(res *http.Response, c *capture) outcome {
 	up, _ := io.ReadAll(io.LimitReader(res.Body, captureLimit+1))
 	_ = res.Body.Close() // always; a refusal body over the bound costs only that connection
-	if res.Request.Method != http.MethodPost {
+	var body []byte
+	truncated := c == nil // without a capture the id is unknown
+	if c != nil {
+		body, truncated = c.snapshot()
+	}
+	req, out := decide(res.Request.Method, body, truncated)
+	switch out {
+	case outcomeStreamRefused:
 		// GET: the spec's "no SSE stream offered"; DELETE: "termination not allowed". Clients treat
 		// both as harmless.
 		replace(res, http.StatusMethodNotAllowed, nil)
 		res.Header.Set("Allow", "POST")
-		return outcomeStreamRefused
-	}
-	if c == nil {
-		return outcomeUnanswerable
-	}
-	body, truncated := c.snapshot()
-	if truncated {
-		return outcomeUnanswerable
-	}
-	req, ok := parseRequest(body)
-	switch {
-	case !ok:
-		return outcomeUnanswerable
-	case req.id == nil:
+	case outcomeNotification:
 		replace(res, http.StatusAccepted, nil)
-		return outcomeNotification
-	case len(up) <= captureLimit && matchingResponse(up, req.id):
-		replace(res, http.StatusOK, up)
-		return outcomeRelayed
-	default:
+	case outcomeSynthesized:
+		if len(up) <= captureLimit && matchingResponse(up, req.id) {
+			replace(res, http.StatusOK, up)
+			return outcomeRelayed
+		}
 		replace(res, http.StatusOK, synthesize(req, res.StatusCode))
-		return outcomeSynthesized
+	case outcomeUnanswerable:
+		// The caller answers 502 (errUpstreamRefused).
+	default:
+		panic("relay: unhandled outcome " + string(out))
 	}
+	return out
 }
 
 func replace(res *http.Response, status int, body []byte) {

@@ -33,7 +33,7 @@ type DownstreamToken struct {
 // Entra error comes back as *idp.Error with its AADSTS Code and OAuth error: CodeConsentRequired
 // and OAuthInteractionNeeded carry operator hints; the claims challenge is never kept.
 func (p *Provider) OnBehalfOf(ctx context.Context, tid, assertion string, scopes []string) (DownstreamToken, error) {
-	if !isGUID(tid) || assertion == "" || len(scopes) == 0 {
+	if !idp.IsGUID(tid) || assertion == "" || len(scopes) == 0 {
 		return DownstreamToken{}, &idp.Error{Class: idp.Fatal, Err: errors.New("entra: On-Behalf-Of needs a tenant GUID, an assertion and scopes")}
 	}
 	if err := p.Ready(ctx); err != nil {

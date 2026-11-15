@@ -79,6 +79,42 @@ func TestATransportErrorThroughAMisreadProxySettingNeverQuotesItsAddress(t *test
 	}
 }
 
+// A request body over its http.MaxBytesReader limit stays the bare *http.MaxBytesError through a
+// misread proxy, so a server can still answer 413; it quotes no address.
+func TestARequestBodyOverItsLimitThroughAMisreadProxyStaysTheBareMaxBytesError(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0") // the proxy Go dials: it reads the request, so the body is sent
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := make(chan struct{})
+	go func() {
+		defer close(read)
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = c.Close() }()
+		if req, err := http.ReadRequest(bufio.NewReader(c)); err == nil {
+			_, _ = io.Copy(io.Discard, req.Body)
+		}
+	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		select {
+		case <-read:
+		case <-time.After(5 * time.Second):
+			t.Error("the proxy never finished reading the request")
+		}
+	})
+	addr := ln.Addr().String()
+	body := http.MaxBytesReader(httptest.NewRecorder(), io.NopCloser(strings.NewReader(strings.Repeat("x", 64))), 1)
+	req, _ := http.NewRequest(http.MethodPost, "http://mcp.upstream.example/mcp", body)
+	_, err = Redact(through(addr + "/pw-secret@egress.example:3128")).RoundTrip(req)
+	if mbe, ok := err.(*http.MaxBytesError); !ok || mbe == nil || strings.Contains(chain(err), addr) { //nolint:errorlint // the bare error is the contract
+		t.Fatalf("error %v (%T); want a bare *http.MaxBytesError that quotes no address", err, err)
+	}
+}
+
 // failingDial is a transport through the proxy setting whose dial to the proxy fails with err.
 func failingDial(setting string, err error) *http.Transport {
 	t := through(setting)
@@ -263,8 +299,8 @@ func (b failingBody) Read([]byte) (int, error) { return 0, b.readErr }
 func (b failingBody) Close() error             { return b.closeErr }
 
 // A body through a misread proxy setting whose read or close fails with an error that quotes the
-// dialled address says only the cause, even when that error wraps an end of body: only the bare
-// io.EOF and io.ErrUnexpectedEOF pass through.
+// dialled address says only the cause, even when that error wraps an end of body: on a read only
+// the bare io.EOF, io.ErrUnexpectedEOF and context errors pass through, and a close never does.
 func TestABodyThatFailsThroughAMisreadProxySettingSaysOnlyTheCause(t *testing.T) {
 	quoting := func(err error) error { return fmt.Errorf("read tcp 127.0.0.1:4711: %w", err) }
 	opErr := &net.OpError{Op: "close", Net: "tcp", Addr: &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 4711}, Err: errors.New("broken pipe")}
@@ -281,6 +317,20 @@ func TestABodyThatFailsThroughAMisreadProxySettingSaysOnlyTheCause(t *testing.T)
 			err := tc.do(redactedBody{tc.body})
 			if !errors.As(err, new(*Error)) || strings.Contains(chain(err), "4711") {
 				t.Fatalf("error %v; want the cause alone", err)
+			}
+		})
+	}
+}
+
+// A response body read through a misread proxy that ends because the request's context did returns the bare
+// context error: ReverseProxy compares it with context.Canceled by identity, so a client that went
+// away is not logged as an upstream error; it quotes nothing.
+func TestAResponseBodyReadEndedByItsContextThroughAMisreadProxyKeepsTheBareContextError(t *testing.T) {
+	for _, want := range []error{context.Canceled, context.DeadlineExceeded} {
+		t.Run(want.Error(), func(t *testing.T) {
+			_, err := redactedBody{failingBody{readErr: want}}.Read(make([]byte, 1))
+			if err != want { //nolint:errorlint // identity is the contract
+				t.Fatalf("read error %v (%T); want the bare %v", err, err, want)
 			}
 		})
 	}

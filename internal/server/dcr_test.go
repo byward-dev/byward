@@ -25,10 +25,7 @@ import (
 // newWired builds the server from env and returns it with the broker configuration it wired.
 func newWired(t *testing.T, env ...string) (*Servers, broker.Config) {
 	t.Helper()
-	var got broker.Config
-	orig := newBroker
-	newBroker = func(c broker.Config) (*broker.Broker, error) { got = c; return orig(c) }
-	t.Cleanup(func() { newBroker = orig })
+	got := captureBroker(t, nil)
 	cfg, _, err := config.Load(nil, gateEnv(t, env...), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +34,7 @@ func newWired(t *testing.T, env ...string) (*Servers, broker.Config) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return srv, got
+	return srv, *got
 }
 
 // registerAt posts a registration to the wired public handler.
@@ -68,12 +65,8 @@ func TestRegisterIssuesUsableClientsOnlyWhenDCRIsOn(t *testing.T) {
 		if c, err := got.Clients.Client(context.Background(), "test-app"); err != nil || c.ID() != "test-app" {
 			t.Fatalf("static client: %v, %v", c, err)
 		}
-		m := httptest.NewRecorder()
-		scrape := httptest.NewRequest("GET", "/metrics", nil)
-		scrape.Host = "127.0.0.1:9090" // the internal listener answers only IP or listed hosts
-		srv.Internal.Handler.ServeHTTP(m, scrape)
-		if !strings.Contains(m.Body.String(), `byward_dcr_registrations_total{outcome="registered"} 1`) {
-			t.Fatalf("registration not counted:\n%s", m.Body)
+		if m := internalMetrics(t, srv.Internal.Handler); !strings.Contains(m, `byward_dcr_registrations_total{outcome="registered"} 1`) {
+			t.Fatalf("registration not counted:\n%s", m)
 		}
 	})
 	t.Run("off", func(t *testing.T) {

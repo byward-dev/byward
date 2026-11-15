@@ -93,12 +93,8 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 	}
 	t := *target
 	refusalObservers := o.refusalObservers
-	// The target is fixed and Go reads the proxy setting once, so whether the upstream's proxy is
-	// one Go misread is known now; ReverseProxy's own error lines then get the same redaction.
-	via, _ := o.proxy(&http.Request{URL: &t})
-	misread := envproxy.Malformed(via)
 	rp := &httputil.ReverseProxy{
-		ErrorLog: stdlog.New(proxyErrorLog{log: log, misread: misread}, "", 0),
+		ErrorLog: stdlog.New(proxyErrorLog{log: log}, "", 0),
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL.Scheme, pr.Out.URL.Host = t.Scheme, t.Host
 			pr.Out.URL.Path, pr.Out.URL.RawPath = t.Path, t.RawPath
@@ -123,7 +119,11 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 				inject(pr.In.Context(), pr.Out.Header)
 			}
 		},
-		Transport: &http.Transport{
+		// Through a proxy whose setting Go misread, any transport error or failed read or close of a
+		// response body that could quote the address Go dialled, part of the proxy's credentials
+		// (invariant 2), says only envproxy.Cause. So neither ErrorHandler's log line nor
+		// ReverseProxy's own (proxyErrorLog) can quote it.
+		Transport: envproxy.Redact(&http.Transport{
 			Proxy:                 o.proxy,
 			DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
 			ForceAttemptHTTP2:     true,
@@ -132,7 +132,7 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: time.Second,
 			ResponseHeaderTimeout: o.headerTimeout,
-		},
+		}),
 		FlushInterval: -1, // MCP responses may stream; never hold bytes back
 		// The proxy owns CORS, HSTS and the auth challenge on the MCP endpoint. An upstream's CORS headers
 		// would duplicate Access-Control-Allow-Origin (browsers reject that), and its
@@ -198,13 +198,7 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 				log.ErrorContext(r.Context(), "upstream did not answer in time", "reason", "no response headers within "+o.headerTimeout.String()+"; "+string(out))
 				return
 			}
-			cause := []any{"error", err}
-			if misread {
-				// The error would quote the address Go dialled, which is part of the proxy's
-				// credentials (invariant 2): name the cause instead.
-				cause = []any{"reason", envproxy.Cause}
-			}
-			log.WarnContext(r.Context(), "upstream error", cause...)
+			log.WarnContext(r.Context(), "upstream error", "error", err)
 			// Never echo upstream internals (invariant 15).
 			http.Error(w, "upstream unavailable", http.StatusBadGateway)
 		},
@@ -312,20 +306,14 @@ func redirectHint(res *http.Response) string {
 	return "the upstream points to " + loc.Scheme + "://" + loc.Host + path + "; if that is its MCP endpoint, set BYWARD_UPSTREAM_URL to it"
 }
 
-// proxyErrorLog takes ReverseProxy's own error lines (a body copy that fails, a flush that fails)
-// into the structured log; with a misread proxy setting it logs the cause in place of the line,
-// which can quote the address Go dialled.
-type proxyErrorLog struct {
-	log     *slog.Logger
-	misread bool
-}
+// proxyErrorLog takes ReverseProxy's own error lines (a failed read during a body copy)
+// into the structured log. A line about the upstream's body through a misread proxy quotes no
+// address: the transport has already redacted the error to envproxy.Cause, or left it one of the
+// bare errors that quote nothing (envproxy's redactedBody).
+type proxyErrorLog struct{ log *slog.Logger }
 
 func (l proxyErrorLog) Write(p []byte) (int, error) {
-	if l.misread {
-		l.log.Warn("upstream error", "reason", envproxy.Cause)
-	} else {
-		l.log.Warn("upstream error", "error", strings.TrimSpace(string(p)))
-	}
+	l.log.Warn("upstream error", "error", strings.TrimSpace(string(p)))
 	return len(p), nil
 }
 

@@ -63,7 +63,6 @@ func serveStalled(t *testing.T, h http.Handler, r *http.Request) *httptest.Respo
 }
 
 func TestStalledUpstreamIsAnsweredAndDropped(t *testing.T) {
-	overCapture := `{"jsonrpc":"2.0","method":"tools/call","params":{"pad":"` + strings.Repeat("x", captureLimit) + `"},"id":1}`
 	cases := []struct {
 		name, method, reqBody string
 		wantStatus            int
@@ -75,9 +74,9 @@ func TestStalledUpstreamIsAnsweredAndDropped(t *testing.T) {
 			`{"error":{"code":-32603,"data":{"upstreamTimeout":true},"message":"` + msgTimeout + `"},"id":"a-1","jsonrpc":"2.0"}`},
 		{"notification: accepted", "POST", `{"jsonrpc":"2.0","method":"notifications/initialized"}`, 202, ""},
 		{"GET stream: no stream offered", "GET", ``, 405, ""},
-		{"batch: id unknown, 504", "POST", `[` + toolsCall + `]`, 504, "upstream did not answer in time"},
-		{"not JSON-RPC: 504", "POST", `hello`, 504, "upstream did not answer in time"},
-		{"body over the capture limit: id unknown, 504", "POST", overCapture, 504, "upstream did not answer in time"},
+		{"not JSON-RPC: id unknown, 504", "POST", `hello`, 504, "upstream did not answer in time"},
+		{"over the capture limit: id unknown, 504", "POST", overCapture, 504, "upstream did not answer in time"},
+		{"over the capture limit, its readable part a whole request: id unknown, 504", "POST", padded, 504, "upstream did not answer in time"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -92,11 +91,17 @@ func TestStalledUpstreamIsAnsweredAndDropped(t *testing.T) {
 			if !strings.Contains(w.Body.String(), c.wantBody) {
 				t.Fatalf("body %q, want %q", w.Body, c.wantBody)
 			}
-			if c.wantStatus == 200 && !json.Valid(w.Body.Bytes()) {
-				t.Fatalf("not JSON: %s", w.Body)
+			if c.wantStatus == 200 && (!json.Valid(w.Body.Bytes()) || w.Header().Get("Content-Type") != "application/json") {
+				t.Fatalf("Content-Type %q, body %s; want JSON", w.Header().Get("Content-Type"), w.Body)
+			}
+			if c.method != "POST" && w.Header().Get("Allow") != "POST" {
+				t.Fatalf("Allow %q, want POST", w.Header().Get("Allow"))
 			}
 			if l := logs.String(); !strings.Contains(l, "upstream did not answer in time") || !strings.Contains(l, "no response headers within 50ms") {
 				t.Errorf("the operator log lacks the timeout and its duration: %q", l)
+			}
+			if l, want := logs.String(), `reason="no response headers within 50ms; request id unknown; 504"`; c.wantStatus == http.StatusGatewayTimeout && !strings.Contains(l, want) {
+				t.Errorf("the operator log %q lacks %s", l, want)
 			}
 			select {
 			case <-dropped:

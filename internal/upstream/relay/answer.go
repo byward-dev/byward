@@ -14,26 +14,25 @@ import (
 //   - a request whose id cannot be read (a batch, an oversized or malformed body): fallback, with
 //     msg as plain text.
 //
-// It reads at most the capture limit of r's body, which has not been relayed yet.
+// It reads at most one byte past the capture limit of r's body, which has not been relayed yet.
 func Answer(w http.ResponseWriter, r *http.Request, msg string, data any, fallback int) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
 	var body []byte
-	if r.Body != nil {
+	if r.Method == http.MethodPost && r.Body != nil {
 		body, _ = io.ReadAll(io.LimitReader(r.Body, captureLimit+1))
 	}
-	req, ok := parseRequest(body)
-	switch {
-	case len(body) > captureLimit || !ok:
+	req, out := decide(r.Method, body, len(body) > captureLimit)
+	switch out {
+	case outcomeStreamRefused:
+		w.Header().Set("Allow", http.MethodPost)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	case outcomeUnanswerable:
 		http.Error(w, msg, fallback)
-		return
-	case req.id == nil:
+	case outcomeNotification:
 		w.WriteHeader(http.StatusAccepted)
-		return
+	case outcomeSynthesized:
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(rpcAnswer(req, msg, data))
+	default:
+		panic("relay: unhandled outcome " + string(out))
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write(rpcAnswer(req, msg, data))
 }

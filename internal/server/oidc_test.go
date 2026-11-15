@@ -18,6 +18,7 @@ import (
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/upstream/stdio"
 )
 
@@ -53,7 +54,7 @@ func TestTheWiredServerSignsInThroughAnOIDCIdP(t *testing.T) {
 	fake := fakeidp.New(t, fakeidp.Generic, fakeidp.WithClient(app))
 	// The fake serves http on loopback, which only development mode accepts for an issuer.
 	cfg := loadOIDC(t, "oidc", fake.Issuer(), app.ID, "BYWARD_OIDC_SCOPES=groups")
-	var logs syncBuffer
+	var logs logsink.Buffer
 	srv, err := New(cfg, slog.New(slog.NewJSONHandler(&logs, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -85,12 +86,8 @@ func TestTheWiredServerSignsInThroughAnOIDCIdP(t *testing.T) {
 	if back.StatusCode != http.StatusFound || !strings.Contains(back.Header.Get("Location"), "code=") {
 		t.Fatalf("callback: %d to %q", back.StatusCode, back.Header.Get("Location"))
 	}
-	scrape := httptest.NewRequest("GET", "/metrics", nil)
-	scrape.Host = "127.0.0.1:9090"
-	m := httptest.NewRecorder()
-	srv.Internal.Handler.ServeHTTP(m, scrape)
-	if !strings.Contains(m.Body.String(), `idp="oidc"`) || strings.Contains(m.Body.String(), `idp="entra"`) {
-		t.Fatalf("IdP metrics not labelled oidc:\n%s", m.Body)
+	if m := internalMetrics(t, srv.Internal.Handler); !strings.Contains(m, `idp="oidc"`) || strings.Contains(m, `idp="entra"`) {
+		t.Fatalf("IdP metrics not labelled oidc:\n%s", m)
 	}
 	// Startup tells the operator the redirect URI to register at the IdP, and nothing secret.
 	if l := logs.String(); !strings.Contains(l, "register this redirect URI with the IdP app: https://mcp.example.com/callback/oidc") || strings.Contains(l, "s3cret") {

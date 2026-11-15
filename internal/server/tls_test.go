@@ -27,6 +27,7 @@ import (
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/servingcert"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/testutil/testcert"
 )
 
@@ -39,14 +40,14 @@ func tlsSettings(t *testing.T, b testcert.Bundle) []string {
 
 // tlsLog is a log sink a test can wait on for a line.
 type tlsLog struct {
-	syncBuffer
+	logsink.Buffer
 	wrote chan struct{} // signalled after each write
 }
 
 func newTLSLog() *tlsLog { return &tlsLog{wrote: make(chan struct{}, 1)} }
 
 func (l *tlsLog) Write(p []byte) (int, error) {
-	n, err := l.syncBuffer.Write(p)
+	n, err := l.Buffer.Write(p)
 	select {
 	case l.wrote <- struct{}{}:
 	default:
@@ -504,7 +505,7 @@ func TestTLSFilesThatCannotBeServedFailStartupCheckAndDoctorAndDevRelaxesOnlyThe
 				if s != nil && s.closeStore != nil {
 					t.Cleanup(func() { _ = s.closeStore() })
 				}
-				_, checkErr := CheckOffline(cfg)
+				_, checkErr := checkOffline(cfg)
 				rep, doctorErr := Doctor(context.Background(), cfg, DoctorOptions{IdP: fakeEntra(t), Proxy: &http.Client{Transport: refuse{}}})
 				errs := map[string]error{"startup": startErr, "check --offline": checkErr, "doctor": doctorErr}
 				if tc.doctorFails {
@@ -549,9 +550,9 @@ func TestACertificateNeedingTheOperatorIsWarnedAboutAtStartupCheckAndDoctor(t *t
 					hosts = []string{mode.host}
 				}
 				cfg := mode.load(t, tlsSettings(t, testcert.Issue(t, testcert.Options{Hosts: hosts, Leaf: testcert.Valid(now, tc.days)}))...)
-				var logs syncBuffer
+				var logs logsink.Buffer
 				started(t, cfg, logging.New(&logs, "json"))
-				warnings, err := CheckOffline(cfg)
+				warnings, err := checkOffline(cfg)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -704,7 +705,7 @@ func TestTheServerErrorLogDropsOnlyATLSHandshakeClosedBeforeItBegan(t *testing.T
 		"http: proxy error: EOF\n": true,
 		"http: Accept error: accept tcp: too many open files; retrying in 5ms\n": true,
 	} {
-		var logs syncBuffer
+		var logs logsink.Buffer
 		if _, err := (serverErrors{logging.New(&logs, "json")}).Write([]byte(line)); err != nil {
 			t.Fatal(err)
 		}

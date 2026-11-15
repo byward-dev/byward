@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/config"
-	"github.com/byward-dev/byward/internal/idp"
-	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/mcpsession"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/testutil/faketokensocket"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/upstream/stdio"
 )
 
@@ -28,21 +28,11 @@ func newStdioOBOEnv(t *testing.T, scopes string, opts ...fakeidp.Option) *oboEnv
 		t.Fatal(err)
 	}
 	app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}, RedirectURIs: []string{oboPublic + "/callback/entra"}}
-	e := &oboEnv{fake: fakeidp.New(t, fakeidp.Entra, append([]fakeidp.Option{fakeidp.WithClient(app)}, opts...)...), logs: &syncBuffer{}}
-	origProvider := newEntraProvider
-	newEntraProvider = func(c entra.Config) (*entra.Provider, error) {
-		c.Tenant, c.ClientID, c.ClientAuth, c.HTTPClient = e.fake.TenantID(), app.ID, idp.ClientSecret("s3cret"), e.fake.HTTPClient()
-		return entra.New(c)
-	}
-	t.Cleanup(func() { newEntraProvider = origProvider })
+	e := &oboEnv{fake: fakeidp.New(t, fakeidp.Entra, append([]fakeidp.Option{fakeidp.WithClient(app)}, opts...)...), logs: &logsink.Buffer{}}
+	useFakeEntra(t, e.fake, app)
 	// Each process's token socket lives under the temporary directory, which a long TMPDIR would
 	// push over the socket path limit (#307).
-	short, err := os.MkdirTemp("/tmp", "bw")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(short) })
-	t.Setenv("TMPDIR", short)
+	t.Setenv("TMPDIR", faketokensocket.Dir(t))
 	settings := append(authEnv(t), "BYWARD_PUBLIC_URL="+oboPublic+"/mcp", "BYWARD_OBO_SCOPES="+scopes)
 	cfg, _, err := config.Load([]string{"--", bin, "-mcp"}, settings, os.ReadFile)
 	if err != nil {
@@ -158,7 +148,7 @@ func TestAStdioRequestWithoutADownstreamTokenIsAnsweredBeforeAnyProcessStarts(t 
 	if status != http.StatusOK || json.Unmarshal([]byte(body), &answer) != nil || answer.Error.Data.Downstream != "consent_required" {
 		t.Fatalf("initialize got %d %s, want the proxy's consent_required answer", status, body)
 	}
-	if !strings.Contains(e.metrics(), "byward_stdio_processes 0") {
+	if !strings.Contains(e.metrics(t), "byward_stdio_processes 0") {
 		t.Fatal("a process started for a request refused for want of a downstream token")
 	}
 	if _, ok := auditRecord(e.logs.String(), "downstream_token_refused"); !ok {

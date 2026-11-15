@@ -96,12 +96,19 @@ func ClientKeyTypes() []ClientKeyType {
 	return out
 }
 
+// MinRSABits is the smallest RSA client key the proxy signs with, at every IdP: Microsoft "highly
+// recommends" 2048 bits for Entra (learn.microsoft.com/entra/identity-platform/howto-create-self-signed-certificate).
+const MinRSABits = 2048
+
 // PrivateKeyJWTWithAlg is PrivateKeyJWT with the signing algorithm chosen: "" for the key type's
-// default, else one of the algorithms ClientKeyTypes lists for it.
+// default, else one of the algorithms ClientKeyTypes lists for it. An RSA key needs MinRSABits.
 func PrivateKeyJWTWithAlg(key crypto.Signer, cert *x509.Certificate, keyID, algName string) (ClientAuth, error) {
 	var kt ClientKeyType
 	switch k := key.Public().(type) {
 	case *rsa.PublicKey:
+		if n := k.N.BitLen(); n < MinRSABits {
+			return nil, fmt.Errorf("idp: a %d-bit RSA key: use at least %d bits", n, MinRSABits)
+		}
 		kt = clientKeyTypes[0]
 	case *ecdsa.PublicKey:
 		if k.Curve.Params().Name != "P-256" {

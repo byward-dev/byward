@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/byward-dev/byward/internal/store/memory"
+	"github.com/byward-dev/byward/internal/testutil/fakeclock"
 )
 
 func TestDenylistEntriesAreCIMDClientIDsOrHostNames(t *testing.T) {
@@ -94,7 +95,7 @@ func TestADeniedCIMDClientIsUnknownWithoutAFetch(t *testing.T) {
 func TestTheChainKeepsTheFirstReasonedRefusal(t *testing.T) {
 	f := &fakeFetch{replies: map[string][]reply{cimdID: {gone()}}}
 	c := newClock()
-	ch := Chain{newReg(f, c, nil, nil), newDCR(brokenClients{}, c.now, 0)}
+	ch := Chain{newReg(f, c, nil, nil), newDCR(brokenClients(), c.Now, 0)}
 	if _, err := ch.Client(context.Background(), cimdID); !errors.Is(err, ErrMetadataRefused) {
 		t.Fatalf("refused document behind the DCR registry: %v, want ErrMetadataRefused", err)
 	}
@@ -102,7 +103,7 @@ func TestTheChainKeepsTheFirstReasonedRefusal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	denied := Chain{newDenyingReg(f, c, deny), newDCR(brokenClients{}, c.now, 0)}
+	denied := Chain{newDenyingReg(f, c, deny), newDCR(brokenClients(), c.Now, 0)}
 	if _, err := denied.Client(context.Background(), cimdID); !errors.Is(err, ErrClientDenied) {
 		t.Fatalf("denied client ID behind the DCR registry: %v, want ErrClientDenied", err)
 	}
@@ -166,8 +167,8 @@ func TestACIMDClientIsDeniedByAnyOfItsRedirectHosts(t *testing.T) {
 }
 
 // newDenyingReg is a CIMD registry fetching through f, with deny as the operator's denylist.
-func newDenyingReg(f *fakeFetch, c *clock, deny *Denylist) *CIMDRegistry {
-	return NewCIMDRegistry(CIMDConfig{Fetch: f, Deny: deny, JTI: NewStoreJTICache(memory.New()), Now: c.now})
+func newDenyingReg(f *fakeFetch, c *fakeclock.Clock, deny *Denylist) *CIMDRegistry {
+	return NewCIMDRegistry(CIMDConfig{Fetch: f, Deny: deny, JTI: NewStoreJTICache(memory.New()), Now: c.Now})
 }
 
 // reasoned is a registry that does not know the client and says why.

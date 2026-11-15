@@ -5,14 +5,8 @@ package pgtest
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/hex"
-	"encoding/pem"
-	"math/big"
 	"net"
 	"net/url"
 	"os"
@@ -23,6 +17,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/byward-dev/byward/internal/testutil/testcert"
 )
 
 // Images are the versions the store is tested on: the oldest it claims (15) and the newest, pinned
@@ -45,7 +41,7 @@ type Server struct {
 }
 
 // Require skips unless BYWARD_POSTGRES=1, and fails when it is set without Docker.
-func Require(t *testing.T) {
+func Require(t testing.TB) {
 	t.Helper()
 	if os.Getenv("BYWARD_POSTGRES") != "1" {
 		t.Skip("set BYWARD_POSTGRES=1 to run the PostgreSQL tests (needs Docker)")
@@ -57,7 +53,7 @@ func Require(t *testing.T) {
 
 // Start runs image with TLS on and returns once it accepts a verify-full connection. The container
 // is removed when the test ends.
-func Start(t *testing.T, image string) *Server {
+func Start(t testing.TB, image string) *Server {
 	t.Helper()
 	dir := t.TempDir()
 	// The container's root reads the files and copies them for the postgres user: world-readable
@@ -65,9 +61,8 @@ func Start(t *testing.T, image string) *Server {
 	if err := os.Chmod(dir, 0o755); err != nil { //nolint:gosec // G302: test certificates the container reads
 		t.Fatal(err)
 	}
-	ca := NewCA(t, "byward test CA")
-	certPEM, keyPEM := ca.Issue(t, "127.0.0.1")
-	for name, data := range map[string][]byte{"ca.pem": ca.CertPEM, "server.crt": certPEM, "server.key": keyPEM} {
+	b := testcert.Issue(t, testcert.Options{Hosts: []string{"127.0.0.1"}, Leaf: testcert.Valid(time.Now(), 1)})
+	for name, data := range map[string][]byte{"ca.pem": b.RootPEM, "server.crt": b.Cert, "server.key": b.Key} {
 		if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil { //nolint:gosec // G306: read by the container
 			t.Fatal(err)
 		}
@@ -126,7 +121,7 @@ func (s *Server) DSN(db string) string {
 }
 
 // NewDatabase creates an empty database, dropped when the test ends, and returns its name.
-func (s *Server) NewDatabase(t *testing.T) string {
+func (s *Server) NewDatabase(t testing.TB) string {
 	t.Helper()
 	name := "t_" + randomHex(t)
 	if _, err := s.Admin.Exec(context.Background(), "CREATE DATABASE "+name); err != nil {
@@ -138,7 +133,7 @@ func (s *Server) NewDatabase(t *testing.T) string {
 
 // Exec runs a command in the container (pg_dump, pg_restore) as the postgres user and returns its
 // standard output; it fails the test on an error.
-func (s *Server) Exec(t *testing.T, stdin []byte, args ...string) []byte {
+func (s *Server) Exec(t testing.TB, stdin []byte, args ...string) []byte {
 	t.Helper()
 	cmd := exec.Command("docker", append([]string{"exec", "-i", "-u", "postgres", s.container}, args...)...) //nolint:gosec // G204: our own container and the test's arguments
 	cmd.Stdin = strings.NewReader(string(stdin))
@@ -151,60 +146,11 @@ func (s *Server) Exec(t *testing.T, stdin []byte, args ...string) []byte {
 	return out
 }
 
-func randomHex(t *testing.T) string {
+func randomHex(t testing.TB) string {
 	t.Helper()
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
 		t.Fatal(err)
 	}
 	return hex.EncodeToString(b)
-}
-
-// CA is a certificate authority made for one test.
-type CA struct {
-	cert    *x509.Certificate
-	key     *ecdsa.PrivateKey
-	CertPEM []byte
-}
-
-// NewCA makes a CA named name, valid from an hour ago for a day.
-func NewCA(t *testing.T, name string) *CA {
-	t.Helper()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: name},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour), IsCA: true, BasicConstraintsValid: true,
-		KeyUsage: x509.KeyUsageCertSign}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cert, err := x509.ParseCertificate(der)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &CA{cert: cert, key: key, CertPEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})}
-}
-
-// Issue makes a server certificate for one IP address and returns it with its key, in PEM.
-func (ca *CA) Issue(t *testing.T, ip string) (certPEM, keyPEM []byte) {
-	t.Helper()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tmpl := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: ip},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(24 * time.Hour), IPAddresses: []net.IP{net.ParseIP(ip)},
-		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca.cert, &key.PublicKey, ca.key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pkcs8, err := x509.MarshalPKCS8PrivateKey(key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8})
 }
