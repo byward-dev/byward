@@ -66,6 +66,11 @@ func warningOf(r doctor.Result, setting string) (w Warning, ok bool) {
 	return Warning{Message: r.Message, Setting: setting, Fix: r.Fix}, true
 }
 
+// result is the warning as doctor reports it, under check c; warningOf is its inverse.
+func (w Warning) result(c doctor.Check) doctor.Result {
+	return c.Result(doctor.Warn, w.Message, warningFix(w))
+}
+
 // configWarnings are the configuration's warnings that startup logs, check prints and doctor
 // reports alike: those of the settings and the store (with authentication, parts not nil) and of the
 // upstream's strip list. The error is the store's configuration error.

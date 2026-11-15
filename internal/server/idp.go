@@ -118,10 +118,13 @@ func newEntraIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect
 			return nil
 		},
 		startRefusal: func(now time.Time) error {
-			if certExpires.IsZero() || now.Before(certExpires) {
+			if certExpires.IsZero() {
 				return nil
 			}
-			return fmt.Errorf("%s: the certificate expired on %s: make and upload a new one (docs/how-to/entra-certificate.md)", diag.CredentialSetting, certExpires.UTC().Format(time.DateOnly))
+			if e := doctor.ExpiryAt(certExpires, now); e.Status == doctor.Fail {
+				return fmt.Errorf("%s: the certificate expired on %s: make and upload a new one (docs/how-to/entra-certificate.md)", diag.CredentialSetting, e.Date)
+			}
+			return nil
 		}}, nil
 }
 
@@ -186,7 +189,7 @@ func withCredential(r doctor.Result, credentialDesc string, refused *Warning) do
 	if r.Fix != "" {
 		r.Fix += "; "
 	}
-	r.Fix += refused.Setting + ": " + refused.Fix
+	r.Fix += warningFix(*refused)
 	return r
 }
 
