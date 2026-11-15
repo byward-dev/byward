@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/envproxy"
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // stripped are removed from every inbound request before anything of ours is set (invariant 16):
@@ -293,18 +294,21 @@ func isRedirect(status int) bool {
 	return status >= 300 && status < 400 && status != http.StatusNotModified
 }
 
-// redirectHint names where the upstream pointed, resolved against the request's URL: its scheme,
-// host and path only, without path parameters, since userinfo, the query, the fragment, an opaque
-// part or a `;jsessionid` could carry a secret.
+// redirectHint names where the upstream pointed, resolved against the request's URL, as logs may
+// show it (logging.URL). A Location without a host names no endpoint to set.
 func redirectHint(res *http.Response) string {
 	loc, err := res.Location()
-	// An @ past the host means credentials with an unescaped /, ? or #, split by the parser.
-	if err != nil || loc.Opaque != "" || loc.Host == "" || strings.ContainsRune(loc.Path+loc.RawQuery+loc.Fragment, '@') {
-		return "the upstream sent no usable Location; check BYWARD_UPSTREAM_URL"
+	if err != nil || loc.Host == "" {
+		return noUsableLocation
 	}
-	path, _, _ := strings.Cut(loc.EscapedPath(), ";") // escaped: a %3B or %2F is part of the path
-	return "the upstream points to " + loc.Scheme + "://" + loc.Host + path + "; if that is its MCP endpoint, set BYWARD_UPSTREAM_URL to it"
+	shown := logging.URL(loc.String())
+	if shown == logging.InvalidURL {
+		return noUsableLocation
+	}
+	return "the upstream points to " + shown + "; if that is its MCP endpoint, set BYWARD_UPSTREAM_URL to it"
 }
+
+const noUsableLocation = "the upstream sent no usable Location; check BYWARD_UPSTREAM_URL"
 
 // proxyErrorLog takes ReverseProxy's own error lines (a failed read during a body copy)
 // into the structured log. A line about the upstream's body through a misread proxy quotes no

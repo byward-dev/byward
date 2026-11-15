@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/store"
 )
 
@@ -65,8 +66,8 @@ func NewDCRRegistry(c DCRConfig) *DCRRegistry {
 }
 
 // Registered is a new registration: the response body (RFC 7591 §3.2.1) and the redirect URIs that
-// were dropped because they fail the redirect policy, without their query, so safe to log
-// (ADR-0009 §8).
+// were dropped because they fail the redirect policy, as logs may show them (logging.URL,
+// ADR-0009 §8).
 type Registered struct {
 	ClientID string
 	Response []byte
@@ -108,7 +109,7 @@ func (r *DCRRegistry) Register(ctx context.Context, body []byte) (*Registered, e
 	}
 	for _, u := range m.redirects {
 		if r.cfg.Deny.DeniesRedirect(u) {
-			return nil, fmt.Errorf("%w: %s returns to a host on the operator's denylist", ErrInvalidRedirectURI, withoutQuery(u))
+			return nil, fmt.Errorf("%w: %s returns to a host on the operator's denylist", ErrInvalidRedirectURI, logging.URL(u))
 		}
 	}
 	now := r.cfg.Now()
@@ -128,7 +129,7 @@ func (r *DCRRegistry) Register(ctx context.Context, body []byte) (*Registered, e
 		return nil, fmt.Errorf("%w: storing a client registration: %v", ErrUnavailable, err)
 	}
 	for i, u := range dropped {
-		dropped[i] = withoutQuery(u)
+		dropped[i] = logging.URL(u)
 	}
 	return &Registered{ClientID: id, Response: stored, Dropped: dropped}, nil
 }
