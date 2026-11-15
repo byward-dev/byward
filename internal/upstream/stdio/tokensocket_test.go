@@ -19,19 +19,9 @@ import (
 	"syscall"
 	"testing"
 	"time"
-)
 
-// shortTempDir is a temporary directory short enough for a socket path inside it: a test's own
-// t.TempDir() on macOS can be longer than the 103 bytes a socket path may have there.
-func shortTempDir(t *testing.T) string {
-	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "bw")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	return dir
-}
+	"github.com/byward-dev/byward/internal/testutil/faketokensocket"
+)
 
 // tokens is a Config.DownstreamToken that hands out tok-1, tok-2, ... and records whom each was for.
 type tokens struct {
@@ -70,7 +60,7 @@ func tokenHarness(t *testing.T, k *tokens) *harness {
 	t.Helper()
 	return newHarness(t, func(c *Config) {
 		c.DownstreamToken = k.answer
-		c.TempDir = shortTempDir(t)
+		c.TempDir = faketokensocket.Dir(t)
 	})
 }
 
@@ -182,7 +172,7 @@ func TestTheSocketIsOursAloneAndGoneWithTheProcess(t *testing.T) {
 // serveFor serves a token socket in a fresh directory for root, answering with k.
 func serveFor(t *testing.T, root int, k *tokens, log *recorder) string {
 	t.Helper()
-	s, err := listenTokenSocket(shortTempDir(t), slog.New(log), func(ctx context.Context) DownstreamToken { return k.answer(ctx, alice) })
+	s, err := listenTokenSocket(faketokensocket.Dir(t), slog.New(log), func(ctx context.Context) DownstreamToken { return k.answer(ctx, alice) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +267,7 @@ func TestAncestryReachesTheRootOrStops(t *testing.T) {
 }
 
 func TestATokenSocketPathTooLongForTheKernelIsRefusedNamingTMPDIR(t *testing.T) {
-	dir := filepath.Join(shortTempDir(t), strings.Repeat("d", 100))
+	dir := filepath.Join(faketokensocket.Dir(t), strings.Repeat("d", 100))
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +277,7 @@ func TestATokenSocketPathTooLongForTheKernelIsRefusedNamingTMPDIR(t *testing.T) 
 }
 
 func TestAnAnswerThatTakesItsWholeTimeStillReachesThePeer(t *testing.T) {
-	s, err := listenTokenSocket(shortTempDir(t), slog.New(&recorder{mu: &sync.Mutex{}, recs: &[]record{}}), func(ctx context.Context) DownstreamToken {
+	s, err := listenTokenSocket(faketokensocket.Dir(t), slog.New(&recorder{mu: &sync.Mutex{}, recs: &[]record{}}), func(ctx context.Context) DownstreamToken {
 		<-ctx.Done() // an exchange that runs to its bound
 		return DownstreamToken{Error: "unavailable"}
 	})
@@ -391,7 +381,7 @@ func TestARefusedPeerThatWritesLateStillReadsTheRefusal(t *testing.T) {
 // A refused peer that never sends a request is answered soon, and the connection closed, so it does
 // not hold the socket for the processes that may ask.
 func TestARefusedPeerThatSendsNothingIsAnsweredSoonAndClosed(t *testing.T) {
-	s, err := listenTokenSocket(shortTempDir(t), slog.New(&recorder{mu: &sync.Mutex{}, recs: &[]record{}}), func(context.Context) DownstreamToken {
+	s, err := listenTokenSocket(faketokensocket.Dir(t), slog.New(&recorder{mu: &sync.Mutex{}, recs: &[]record{}}), func(context.Context) DownstreamToken {
 		t.Error("a refused peer reached the token source")
 		return DownstreamToken{}
 	})

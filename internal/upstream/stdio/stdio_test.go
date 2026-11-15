@@ -20,6 +20,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/byward-dev/byward/internal/testutil/faketokensocket"
 )
 
 func TestRelaysMessagesByteForByte(t *testing.T) {
@@ -177,7 +179,7 @@ func TestTheTokenSocketPathLimitIsThePlatformsOwn(t *testing.T) {
 	// The limit is bind's: a socket of exactly maxSocketPath bytes binds and accepts a connection
 	// (the limit is not above it), and one byte more is refused with EINVAL (it is not below it).
 	// Go's syscall layer refuses that one, from the same sun_path size, before the kernel would.
-	dir := shortTempDir(t)
+	dir := faketokensocket.Dir(t)
 	dir = filepath.Join(dir, strings.Repeat("d", maxSocketPath-len(dir)-len("/")-len("/"+tokenSocketName)))
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)

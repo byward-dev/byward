@@ -21,6 +21,7 @@ import (
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 )
 
 const callerSecret = "caller-secret"
@@ -36,7 +37,7 @@ type appProxy struct {
 	env              []string
 	fake             *fakeidp.IdP
 	up               *fakeupstream.Server
-	logs             *syncBuffer
+	logs             *logsink.Buffer
 	withRole, noRole fakeidp.Client
 }
 
@@ -44,7 +45,7 @@ type appProxy struct {
 // replaces settings (nil: none).
 func newAppProxy(t *testing.T, settings func(*appProxy) []string) *appProxy {
 	t.Helper()
-	p := &appProxy{logs: &syncBuffer{}}
+	p := &appProxy{logs: &logsink.Buffer{}}
 	p.withRole = fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{callerSecret}, AppRoles: map[string][]string{fixtureClientID: {"MCP.Invoke"}}}
 	p.noRole = fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{callerSecret}}
 	p.fake = fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),

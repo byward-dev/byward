@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/byward-dev/byward/internal/testutil/fakeclock"
 )
 
 const (
@@ -266,4 +268,4 @@ func equalJSON(a, b any) bool {
 	return string(ja) == string(jb)
 }
 
-func newClock() *Clock { return NewClock(time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)) }
+func newClock() *fakeclock.Clock { return fakeclock.New(time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)) }

@@ -17,6 +17,7 @@ import (
 	"github.com/byward-dev/byward/internal/metrics"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/store"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/upstream/stdio"
 )
 
@@ -55,7 +56,7 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 			wantError: "failed", wantAudit: true, exchanged: true, wantAlert: "protocol", wantReason: "failed: " + idp.AlertProtocol.Hint()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			logs := &syncBuffer{}
+			logs := &logsink.Buffer{}
 			log := logging.New(logs, "json")
 			var exchanges atomic.Int32
 			exchange := func(_ context.Context, tid, assertion string, _ []string) (downstream.Token, error) {

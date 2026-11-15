@@ -3,7 +3,6 @@ package broker
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -15,8 +14,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -30,7 +27,9 @@ import (
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/testutil/memstore"
+	"github.com/byward-dev/byward/internal/testutil/sealingkey"
 	"github.com/byward-dev/byward/internal/token"
 )
 
@@ -187,35 +186,16 @@ type env struct {
 	fake   *fakeidp.IdP
 	reg    *registry
 	now    time.Time
-	audit  *syncBuffer // the audit stream, JSON lines
-	logs   *syncBuffer // the operator log, JSON lines
-	idpOps []string    // "operation outcome" per IdP call
-	alerts []string    // "operation reason" per IdP alert
-}
-
-// syncBuffer collects the broker's log lines across handler goroutines.
-type syncBuffer struct {
-	mu sync.Mutex
-	b  bytes.Buffer
-}
-
-func (s *syncBuffer) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.Write(p)
-}
-
-func (s *syncBuffer) String() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.String()
+	audit  *logsink.Buffer // the audit stream, JSON lines
+	logs   *logsink.Buffer // the operator log, JSON lines
+	idpOps []string        // "operation outcome" per IdP call
+	alerts []string        // "operation reason" per IdP alert
 }
 
 // keyRing writes one sealing key, k1, into a new directory and loads it.
 func keyRing(t *testing.T) (*token.KeyRing, string) {
 	t.Helper()
-	dir := t.TempDir()
-	addKey(t, dir, "k1")
+	dir := sealingkey.Dir(t)
 	r, err := token.LoadKeyRing(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -223,19 +203,10 @@ func keyRing(t *testing.T) (*token.KeyRing, string) {
 	return r, dir
 }
 
-func addKey(t *testing.T, dir, id string) {
-	t.Helper()
-	k := make([]byte, token.KeySize)
-	_, _ = rand.Read(k)
-	if err := os.WriteFile(filepath.Join(dir, id), []byte(base64.StdEncoding.EncodeToString(k)), 0o600); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // newEnv builds a broker against the fake IdP; opts adjust its Config before New.
 func newEnv(t *testing.T, opts ...func(*Config)) *env {
 	t.Helper()
-	e := &env{now: t0, st: memstore.New(), audit: &syncBuffer{}, logs: &syncBuffer{},
+	e := &env{now: t0, st: memstore.New(), audit: &logsink.Buffer{}, logs: &logsink.Buffer{},
 		reg: &registry{removed: map[string]bool{}, redirect: map[string]string{}}}
 	clock := func() time.Time { return e.now }
 	app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}, RedirectURIs: []string{issuer + "/callback/entra"}}
@@ -1266,11 +1237,7 @@ func TestTheLargestRequestsFitTheLoginCookieAndComeBackUnchanged(t *testing.T) {
 // login cookie (as startLogin sets it, name and attributes included) under 4096 bytes.
 func TestALoginAtTheSizeBoundFitsTheBrowserCookieLimit(t *testing.T) {
 	dir := t.TempDir()
-	k := make([]byte, token.KeySize)
-	_, _ = rand.Read(k)
-	if err := os.WriteFile(filepath.Join(dir, strings.Repeat("k", 64)), []byte(base64.StdEncoding.EncodeToString(k)), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	sealingkey.Write(t, dir, strings.Repeat("k", 64))
 	ring, err := token.LoadKeyRing(dir)
 	if err != nil {
 		t.Fatal(err)

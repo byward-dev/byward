@@ -18,6 +18,7 @@ import (
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/upstream/stdio"
 )
 
@@ -53,7 +54,7 @@ func TestTheWiredServerSignsInThroughAnOIDCIdP(t *testing.T) {
 	fake := fakeidp.New(t, fakeidp.Generic, fakeidp.WithClient(app))
 	// The fake serves http on loopback, which only development mode accepts for an issuer.
 	cfg := loadOIDC(t, "oidc", fake.Issuer(), app.ID, "BYWARD_OIDC_SCOPES=groups")
-	var logs syncBuffer
+	var logs logsink.Buffer
 	srv, err := New(cfg, slog.New(slog.NewJSONHandler(&logs, nil)))
 	if err != nil {
 		t.Fatal(err)

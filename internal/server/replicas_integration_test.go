@@ -15,6 +15,7 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/testutil/pgtest"
 )
 
@@ -99,7 +100,7 @@ func TestIntegrationTwoReplicasShareThePostgreSQLStore(t *testing.T) {
 	t.Run("store new-epoch refuses older refresh tokens on every replica, audited once", func(t *testing.T) {
 		cfg, db, a, b := pair(t)
 		rt := seedSignedInUser(t, a.wired, "g3", time.Now())
-		var logs syncBuffer
+		var logs logsink.Buffer
 		epoch, err := NewEpoch(context.Background(), cfg, logging.New(&logs, "json"))
 		if err != nil || epoch != 2 {
 			t.Fatalf("NewEpoch = %d, %v; want epoch 2", epoch, err)
@@ -157,14 +158,14 @@ func TestIntegrationTwoReplicasShareThePostgreSQLStore(t *testing.T) {
 type replica struct {
 	s     *Servers
 	wired *broker.Config
-	logs  *syncBuffer
+	logs  *logsink.Buffer
 }
 
 // startReplica wires a server on cfg, as one replica starts, and runs its background work until the
 // test ends; its store closes after that.
 func startReplica(t *testing.T, cfg *config.Config) *replica {
 	t.Helper()
-	r := &replica{wired: new(broker.Config), logs: new(syncBuffer)}
+	r := &replica{wired: new(broker.Config), logs: new(logsink.Buffer)}
 	orig := newBroker // swapped for this New only: a second replica must not record into the first's
 	newBroker = func(c broker.Config) (*broker.Broker, error) {
 		c.IdP = refreshingIdP{c.IdP}

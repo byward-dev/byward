@@ -3,8 +3,6 @@ package server
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +29,7 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/assertionkey"
 	"github.com/byward-dev/byward/internal/testutil/clientdocs"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/testutil/sealingkey"
 	"github.com/byward-dev/byward/internal/token"
 )
 
@@ -43,17 +42,12 @@ func authEnv(t testing.TB) []string {
 	t.Helper()
 	dir := t.TempDir()
 	keys := filepath.Join(dir, "keys")
-	if err := os.Mkdir(keys, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	k := make([]byte, 32)
-	_, _ = rand.Read(k)
+	sealingkey.Write(t, keys, "2026-11-06")
 	write := func(p, content string) {
 		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	write(filepath.Join(keys, "2026-11-06"), base64.StdEncoding.EncodeToString(k))
 	write(filepath.Join(dir, "clients.json"), `{"clients":[{"client_id":"test-app","client_name":"Test app","token_endpoint_auth_method":"none","redirect_uris":["http://127.0.0.1/callback"]}]}`)
 	write(filepath.Join(dir, "secret"), "s3cret-entra")
 	return []string{
