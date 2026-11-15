@@ -50,7 +50,8 @@ func newBridge(t *testing.T, edit func(*Config)) *bridgeHarness {
 // emptyValue, given to do as a header value, sends that header present but empty.
 const emptyValue = "\x00empty"
 
-// do sends one request; header holds extra name/value pairs, an empty value meaning none.
+// do sends one request; header holds extra name/value pairs, sent in order (a name given twice is
+// sent twice): "" sends none, emptyValue sends it empty.
 func (b *bridgeHarness) do(t *testing.T, ctx context.Context, method, user, session, body string, header ...string) *http.Response {
 	t.Helper()
 	req, err := http.NewRequestWithContext(ctx, method, b.srv.URL, strings.NewReader(body))
@@ -59,10 +60,10 @@ func (b *bridgeHarness) do(t *testing.T, ctx context.Context, method, user, sess
 	}
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	for i := 0; i+1 < len(header); i += 2 {
-		switch v := header[i+1]; v { // a name given twice is sent twice
-		case "": // sends no header at all
+		switch v := header[i+1]; v {
+		case "":
 		case emptyValue:
-			req.Header[http.CanonicalHeaderKey(header[i])] = append(req.Header.Values(header[i]), "")
+			req.Header.Add(header[i], "")
 		default:
 			req.Header.Add(header[i], v)
 		}
@@ -823,7 +824,7 @@ func TestUpstreamProcessCrashingDuringInitializeIsLoggedAsACrash(t *testing.T) {
 // version this MCP session negotiated (any, when the upstream named none). Another version, or a
 // repeated header whatever its values, gets 400, as the modern path refuses a repeat: an
 // intermediary could read another copy than the bridge.
-func TestProtocolVersionHeaderIs400UnlessItIsOneCopyOfTheNegotiatedVersion(t *testing.T) {
+func TestProtocolVersionHeaderIs400WhenRepeatedOrNamingAnotherVersion(t *testing.T) {
 	for name, tc := range map[string]struct {
 		negotiated string   // the version the upstream's InitializeResult names; "none" leaves it out
 		headers    []string // the values sent, in order; nil sends none
@@ -836,7 +837,7 @@ func TestProtocolVersionHeaderIs400UnlessItIsOneCopyOfTheNegotiatedVersion(t *te
 		"not a version":      {"2025-11-25", []string{"latest"}, "unsupported MCP-Protocol-Version; this MCP session negotiated 2025-11-25"},
 		"the negotiated one when the upstream chose an older version": {"2025-06-18", []string{"2025-06-18"}, ""},
 		"a newer version than the upstream negotiated":                {"2025-06-18", []string{"2025-11-25"}, "unsupported MCP-Protocol-Version; this MCP session negotiated 2025-06-18"},
-		"any header when the upstream named no version":               {"none", []string{"2025-11-25"}, ""},
+		"any one version when the upstream named no version":          {"none", []string{"2025-11-25"}, ""},
 		"the negotiated one twice":                                    {"2025-11-25", []string{"2025-11-25", "2025-11-25"}, "repeated MCP-Protocol-Version"},
 		"the negotiated one, then another":                            {"2025-11-25", []string{"2025-11-25", "2025-03-26"}, "repeated MCP-Protocol-Version"},
 		"another, then the negotiated one":                            {"2025-11-25", []string{"2025-03-26", "2025-11-25"}, "repeated MCP-Protocol-Version"},
