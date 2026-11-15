@@ -42,7 +42,7 @@ func TestBrowserHostOKSaysWhetherABrowserGoesToTheHost(t *testing.T) {
 		"xn--xn--abc-t2a.example": {"xn--xn--abc-t2a.example", false}, // decodes to a label starting xn--
 		"a.xn--xn--abc-t2a":       {"a.xn--xn--abc-t2a", false},
 		"a-xn--b.example":         {"a-xn--b.example", true}, // xn-- inside a label, not at its start
-		"xn-a.example":            {"xn-a.example", true},
+		"xn-a.example":            {"xn-a.example", true},    // starts xn-, not xn--
 		"BÜCHER.example":          {"xn--bcher-kva.example", true},
 		"ｍｙ_app.example":          {"my_app.example", true},
 		"xn--bcher-kva.example":   {"xn--bcher-kva.example", true},
@@ -56,22 +56,22 @@ func TestBrowserHostOKSaysWhetherABrowserGoesToTheHost(t *testing.T) {
 		"a..b.example":            {"a..b.example", false},
 		"\u00ad":                  {"\u00ad", false}, // invisible characters only
 		// A name that is, or maps to, a forbidden domain code point: the browser refuses it.
-		"evil.example\uff20claude.ai": {"evil.example@claude.ai", false},
-		"evil\uff1f.claude.ai":        {"evil?.claude.ai", false},
-		"a\u3000b.claude.ai":          {"a b.claude.ai", false},
-		"a\u2100b.example":            {"aa/cb.example", false},
-		"a<b.claude.ai":               {"a<b.claude.ai", false},
-		"a%62.example":                {"a%62.example", false},
-		"a\uff03b.example":            {"a#b.example", false},
-		"a\uff1ab.example":            {"a:b.example", false},
-		"a\uff1eb.example":            {"a>b.example", false},
-		"a\uff3bb.example":            {"a[b.example", false},
-		"a\uff3cb.example":            {"a\\b.example", false},
-		"a\uff3db.example":            {"a]b.example", false},
-		"a\uff3eb.example":            {"a^b.example", false},
-		"a\uff5cb.example":            {"a|b.example", false},
-		"a\x7fb.example":              {"a\x7fb.example", false}, // DEL
-		"":                            {"", false},
+		"evil\uff20claude.example": {"evil@claude.example", false}, // an example domain: the privacy check reads a@b as an email
+		"evil\uff1f.claude.ai":     {"evil?.claude.ai", false},
+		"a\u3000b.claude.ai":       {"a b.claude.ai", false},
+		"a\u2100b.example":         {"aa/cb.example", false},
+		"a<b.claude.ai":            {"a<b.claude.ai", false},
+		"a%62.example":             {"a%62.example", false},
+		"a\uff03b.example":         {"a#b.example", false},
+		"a\uff1ab.example":         {"a:b.example", false},
+		"a\uff1eb.example":         {"a>b.example", false},
+		"a\uff3bb.example":         {"a[b.example", false},
+		"a\uff3cb.example":         {"a\\b.example", false},
+		"a\uff3db.example":         {"a]b.example", false},
+		"a\uff3eb.example":         {"a^b.example", false},
+		"a\uff5cb.example":         {"a|b.example", false},
+		"a\x7fb.example":           {"a\x7fb.example", false}, // DEL
+		"":                         {"", false},
 	} {
 		if name, ok := BrowserHostOK(host); name != want.name || ok != want.ok {
 			t.Errorf("BrowserHostOK(%q) = %q, %v; want %q, %v", host, name, ok, want.name, want.ok)
