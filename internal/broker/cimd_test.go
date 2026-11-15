@@ -352,8 +352,9 @@ func TestATransientFailureAtTheConsentAnswerIsServiceUnavailable(t *testing.T) {
 // (ADR-0009 §8). Only a DCR client's line names its client ID.
 func TestARefusedCIMDClientIDIsNotLoggedAsSent(t *testing.T) {
 	for name, id := range map[string]string{
-		"a password and a query": "https://alice:hunter2@app.example.com/x.json?token=s3cret",
-		"too long":               "https://app.example.com/" + strings.Repeat("z", 600),
+		"a password": "https://alice:hunter2@app.example.com/x.json",
+		"a query":    "https://app.example.com/x.json?token=s3cret",
+		"too long":   "https://app.example.com/" + strings.Repeat("z", 600),
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t, withCIMD(clientdocs.Serve(t, appDocument())))
