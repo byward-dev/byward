@@ -21,7 +21,7 @@ func within(dir, path string) bool {
 }
 
 // paths resolves the data directory and the paths that default into it: keys, static clients,
-// the store and its restore counter (ADR-0007 §6, §9). No path is relative to the working directory.
+// assertion keys, the store and its restore counter (ADR-0007 §6, §9). No path is relative to the working directory.
 func (c *Config) paths(v *Values) []error {
 	var errs []error
 	c.DataDir = v.get("data-dir")
@@ -50,8 +50,8 @@ func (c *Config) paths(v *Values) []error {
 	}
 	switch err := absolute("store-counter-file", c.StoreCounterFile); {
 	case err != nil:
-		if !filepath.IsAbs(c.KeysDir) && v.get("store-counter-file") == "" {
-			break // derived from a relative keys directory, which is refused above
+		if v.get("store-counter-file") == "" {
+			break // derived from the keys directory, refused above as relative
 		}
 		errs = append(errs, err)
 	case filepath.IsAbs(c.StoreDir) && within(c.StoreDir, c.StoreCounterFile):

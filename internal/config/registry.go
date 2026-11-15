@@ -95,8 +95,8 @@ type Values struct {
 // get returns the raw value of a setting.
 func (v *Values) get(name string) string { return v.byKey[name].Raw }
 
-// boolean reads a true/false setting. Every setting read this way is Bool in the registry, so a bare
-// --name means true (TestEveryBooleanSettingIsABoolFlag).
+// boolean reads a true/false setting. Every setting read this way must be Bool in the registry, so a
+// bare --name means true (TestBooleanSettingsAreExactlyTheBoolFlags).
 func (v *Values) boolean(name string) (bool, error) {
 	b, err := strconv.ParseBool(v.get(name))
 	if err != nil {

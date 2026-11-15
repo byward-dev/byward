@@ -151,10 +151,7 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"listen without port", "BYWARD_LISTEN=8080", "BYWARD_LISTEN"},
 		{"log format", "BYWARD_LOG_FORMAT=xml", "BYWARD_LOG_FORMAT"},
 		{"two scopes", "BYWARD_SCOPE=a b", "BYWARD_SCOPE"},
-		{"dev not a bool", "BYWARD_DEV=maybe", "BYWARD_DEV"},
 		{"documentation not a URL", "BYWARD_RESOURCE_DOCUMENTATION=javascript:x", "BYWARD_RESOURCE_DOCUMENTATION"},
-		{"gate allow-empty not a bool", "BYWARD_GATE_ALLOW_EMPTY=yes", "BYWARD_GATE_ALLOW_EMPTY: want true or false"},
-		{"cimd not a bool", "BYWARD_CIMD=on", "BYWARD_CIMD: want true or false"},
 		{"cimd trusted hosts blank", "BYWARD_CIMD_TRUSTED_HOSTS= ,", "BYWARD_CIMD_TRUSTED_HOSTS is set but lists nothing"},
 		{"cimd allowed hosts blank", "BYWARD_CIMD_ALLOWED_HOSTS=,", "BYWARD_CIMD_ALLOWED_HOSTS is set but lists nothing"},
 		{"cimd host with a scheme", "BYWARD_CIMD_TRUSTED_HOSTS=https://claude.ai", `BYWARD_CIMD_TRUSTED_HOSTS: "https://claude.ai" is not a host name`},
@@ -172,8 +169,6 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"cimd host breaking the rule and without a dot", "BYWARD_CIMD_TRUSTED_HOSTS=a*b", `BYWARD_CIMD_TRUSTED_HOSTS: "a*b" is not a host name such as claude.ai: a host name has only letters`},
 		{"cimd single-label host", "BYWARD_CIMD_TRUSTED_HOSTS=localhost", `BYWARD_CIMD_TRUSTED_HOSTS: "localhost" is not a host name such as claude.ai: give a name with at least one dot`},
 		{"cimd unicode host", "BYWARD_CIMD_TRUSTED_HOSTS=bücher.example", `BYWARD_CIMD_TRUSTED_HOSTS: the host "bücher.example" is not ASCII`},
-		{"dcr not a bool", "BYWARD_DCR=on", "BYWARD_DCR: want true or false"},
-		{"unverified email not a bool", "BYWARD_ASSERTION_UNVERIFIED_EMAIL=yes", "BYWARD_ASSERTION_UNVERIFIED_EMAIL: want true or false"},
 		{"client denylist blank", "BYWARD_CLIENT_DENYLIST= ,", "BYWARD_CLIENT_DENYLIST is set but lists nothing"},
 		{"gate tenants blank", "BYWARD_GATE_TENANTS=,", "BYWARD_GATE_TENANTS is set but lists nothing"},
 		{"gate roles blank", "BYWARD_GATE_ROLES= ,,", "BYWARD_GATE_ROLES is set but lists nothing"},
@@ -602,27 +597,28 @@ func TestRefreshGraceDefaultsTo30sAndAcceptsItsBounds(t *testing.T) {
 }
 
 func TestInvalidStoreSettingsAreRejected(t *testing.T) {
+	// A relative path in each setting is TestEveryPathSettingRefusesARelativePath's.
 	cases := []struct {
-		name string
-		env  []string
-		want string
+		name    string
+		env     []string
+		want    string
+		notWant string // "" when anything else may be reported too
 	}{
-		{"relative data directory", []string{"BYWARD_DATA_DIR=data"}, "BYWARD_DATA_DIR: want an absolute path"},
-		{"relative state directory", []string{"BYWARD_STORE_DIR=state"}, "BYWARD_STORE_DIR: want an absolute path"},
-		{"relative counter file", []string{"BYWARD_STORE_COUNTER_FILE=writes"}, "BYWARD_STORE_COUNTER_FILE: want an absolute path"},
-		{"relative keys directory", []string{"BYWARD_KEYS_DIR=keys"}, `BYWARD_KEYS_DIR: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got "keys"`},
-		{"relative static clients file", []string{"BYWARD_STATIC_CLIENTS_FILE=clients.json"}, `BYWARD_STATIC_CLIENTS_FILE: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got "clients.json"`},
-		{"counter inside the state directory", []string{"BYWARD_STORE_COUNTER_FILE=/var/lib/byward/state/writes"}, "is inside BYWARD_STORE_DIR"},
-		{"keys inside the state directory", []string{"BYWARD_KEYS_DIR=/var/lib/byward/state/keys"}, "keep the keys directory outside the state directory"},
-		{"grace not a duration", []string{"BYWARD_REFRESH_GRACE=soon"}, "BYWARD_REFRESH_GRACE: want a duration"},
-		{"grace negative", []string{"BYWARD_REFRESH_GRACE=-1s"}, "want 0s to 60s"},
-		{"grace over a minute", []string{"BYWARD_REFRESH_GRACE=61s"}, "want 0s to 60s"},
+		// The counter file derived from a relative keys directory is not reported a second time; one the
+		// operator sets is.
+		{"a counter derived from a relative keys directory", []string{"BYWARD_KEYS_DIR=keys"}, "BYWARD_KEYS_DIR: want an absolute path", "BYWARD_STORE_COUNTER_FILE"},
+		{"a relative counter beside a relative keys directory", []string{"BYWARD_KEYS_DIR=keys", "BYWARD_STORE_COUNTER_FILE=writes"}, `BYWARD_STORE_COUNTER_FILE: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got "writes"`, ""},
+		{"counter inside the state directory", []string{"BYWARD_STORE_COUNTER_FILE=/var/lib/byward/state/writes"}, "is inside BYWARD_STORE_DIR", ""},
+		{"keys inside the state directory", []string{"BYWARD_KEYS_DIR=/var/lib/byward/state/keys"}, "keep the keys directory outside the state directory", ""},
+		{"grace not a duration", []string{"BYWARD_REFRESH_GRACE=soon"}, "BYWARD_REFRESH_GRACE: want a duration", ""},
+		{"grace negative", []string{"BYWARD_REFRESH_GRACE=-1s"}, "want 0s to 60s", ""},
+		{"grace over a minute", []string{"BYWARD_REFRESH_GRACE=61s"}, "want 0s to 60s", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := load(t, nil, tc.env...)
-			if !isConfigError(err) || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("want a config error containing %q, got %v", tc.want, err)
+			if !isConfigError(err) || !strings.Contains(err.Error(), tc.want) || (tc.notWant != "" && strings.Contains(err.Error(), tc.notWant)) {
+				t.Fatalf("want a config error containing %q and not %q, got %v", tc.want, tc.notWant, err)
 			}
 		})
 	}

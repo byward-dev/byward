@@ -52,7 +52,6 @@ func TestEntraCredentialSettingsRefuseWhatCannotWork(t *testing.T) {
 		{"neither", withoutSecret(), "BYWARD_ENTRA_CLIENT_SECRET_FILE, BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE or BYWARD_ENTRA_FEDERATED_TOKEN_FILE is required with BYWARD_IDP=entra"},
 		{"both", append(append([]string{}, base...), "BYWARD_ENTRA_FEDERATED_TOKEN_FILE=/run/token"),
 			"BYWARD_ENTRA_CLIENT_SECRET_FILE and BYWARD_ENTRA_FEDERATED_TOKEN_FILE are set together: Entra gets one credential"},
-		{"a relative path", withoutSecret("BYWARD_ENTRA_FEDERATED_TOKEN_FILE=run/token"), "BYWARD_ENTRA_FEDERATED_TOKEN_FILE: want an absolute path"},
 		{"a secret expiry", withoutSecret("BYWARD_ENTRA_FEDERATED_TOKEN_FILE=/run/token", "BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT=2027-11-06"),
 			"BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT has no effect with BYWARD_ENTRA_FEDERATED_TOKEN_FILE"},
 		{"a secret and a certificate", append(append([]string{}, base...), "BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE=/run/secrets/entra"),
