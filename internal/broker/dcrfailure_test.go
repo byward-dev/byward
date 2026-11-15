@@ -26,13 +26,13 @@ func (w clientsChangedBy) Client(ctx context.Context, id string) (registration.C
 	return w.change(c), nil
 }
 
-// anyRefreshToken is a well-formed refresh token the store does not hold: these tests fail before
-// the token is looked up.
+// anyRefreshToken is a well-formed refresh token the store does not hold: the requests these tests
+// send are refused before the token is looked up.
 var anyRefreshToken = token.RefreshPrefix + strings.Repeat("A", 43)
 
-// storeFailureLogged fails t unless the log holds want ERROR records, and no others, for a client
-// registration the store could not read.
-func storeFailureLogged(t *testing.T, e *env, want int) {
+// wantStoreFailuresLogged fails t unless the log holds want ERROR records in all, and no others, for a
+// client registration the store could not read.
+func wantStoreFailuresLogged(t *testing.T, e *env, want int) {
 	t.Helper()
 	var n int
 	for _, rec := range e.logRecords(t, "loading a client registration failed") {
@@ -59,7 +59,7 @@ func TestADCRLookupStoreFailureIsLoggedAndAnsweredAsAStoreOutage(t *testing.T) {
 		!strings.Contains(body["error_description"].(string), "store is unavailable") || res.Header.Get("Retry-After") != retryAfter {
 		t.Fatalf("/token: %d %v Retry-After %q, want 503, the store outage answer and Retry-After %s", res.StatusCode, body, res.Header.Get("Retry-After"), retryAfter)
 	}
-	storeFailureLogged(t, e, 1)
+	wantStoreFailuresLogged(t, e, 1)
 	if recs := e.logRecords(t, metadataUnavailable); len(recs) != 0 {
 		t.Fatalf("/token logged %v, want no client metadata line", recs)
 	}
@@ -68,7 +68,7 @@ func TestADCRLookupStoreFailureIsLoggedAndAnsweredAsAStoreOutage(t *testing.T) {
 	if res := e.do(t, "GET", "/authorize?"+q.Encode(), nil, nil); res.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("/authorize: %d, want 503", res.StatusCode)
 	}
-	storeFailureLogged(t, e, 2) // and one more for /authorize
+	wantStoreFailuresLogged(t, e, 2) // and one more for /authorize
 }
 
 // A DCR client's keys at its jwks_uri fail the same way a CIMD client's do, and the operator sees
