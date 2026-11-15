@@ -4,8 +4,6 @@ package server
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"net/http"
@@ -23,6 +21,7 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/assertionkey"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
+	"github.com/byward-dev/byward/internal/testutil/sealingkey"
 )
 
 // imageReadyTimeout bounds the wait for the container's /readyz: the image is local, so this is the
@@ -65,11 +64,7 @@ func TestIntegrationTheReleaseImageServes(t *testing.T) {
 		}
 		return p
 	}
-	sealing := make([]byte, 32)
-	if _, err := rand.Read(sealing); err != nil {
-		t.Fatal(err)
-	}
-	write(filepath.Join(data, "keys", "2026-11-13"), base64.StdEncoding.EncodeToString(sealing))
+	sealingkey.Write(t, filepath.Join(data, "keys"), "2026-11-13")
 	assertionkey.Write(t, filepath.Join(data, "assertion-keys"), "2026-11-13", false)
 	write(filepath.Join(data, "clients.json"), `{"clients":[{"client_id":"test-app","client_name":"Test app","token_endpoint_auth_method":"none","redirect_uris":["http://127.0.0.1/callback"]}]}`)
 	secret := write(filepath.Join(work, "oidc-client-secret"), "s3cret")

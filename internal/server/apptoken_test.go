@@ -210,10 +210,7 @@ func TestAnAppTokenIsRefusedWhileAppOnlyTokensAreOff(t *testing.T) {
 	tok := fake.AppToken(t, caller.ID, callerSecret, fixtureClientID)
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
-	cfg, _, err := config.Load(nil, append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+up.URL+"/mcp"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+up.URL+"/mcp")
 	s, err := New(cfg, discard)
 	if err != nil {
 		t.Fatal(err)

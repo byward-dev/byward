@@ -8,11 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 
-	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/mcpsession"
 	"github.com/byward-dev/byward/internal/testutil/clientdocs"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
@@ -38,10 +36,7 @@ func TestACIMDClientSignsInAndUsesALegacySession(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}
 	t.Cleanup(up.Close)
-	cfg, _, err := config.Load(nil, append(authEnv(t), "BYWARD_PUBLIC_URL="+public+"/mcp", "BYWARD_UPSTREAM_URL="+up.URL+"/mcp"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, public+"/mcp", "BYWARD_UPSTREAM_URL="+up.URL+"/mcp")
 	a, err := buildAuth(cfg, discard, Observability{})
 	if err != nil {
 		t.Fatal(err)

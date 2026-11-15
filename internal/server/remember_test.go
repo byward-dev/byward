@@ -4,11 +4,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 
-	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
@@ -20,10 +18,7 @@ func TestTheWiredServerRemembersAStaticClientsConsent(t *testing.T) {
 	app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}, RedirectURIs: []string{public + "/callback/entra"}}
 	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithClient(app))
 	useFakeEntra(t, fake, app)
-	cfg, _, err := config.Load(nil, append(authEnv(t), "BYWARD_PUBLIC_URL="+public+"/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, public+"/mcp")
 	srv, err := New(cfg, discard)
 	if err != nil {
 		t.Fatal(err)

@@ -55,14 +55,8 @@ func start(t *testing.T, extraEnv ...string) env {
 	t.Helper()
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
-	cfg, _, err := config.Load(nil, append(authEnv(t), append([]string{
-		"BYWARD_PUBLIC_URL=https://mcp.example.com/mcp",
-		"BYWARD_UPSTREAM_URL=" + up.URL + "/mcp",
-		"BYWARD_ALLOWED_ORIGINS=https://app.example",
-	}, extraEnv...)...), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://mcp.example.com/mcp", append([]string{"BYWARD_UPSTREAM_URL=" + up.URL + "/mcp", "BYWARD_ALLOWED_ORIGINS=https://app.example"},
+		extraEnv...)...)
 	logs := &logsink.Buffer{}
 	log := slog.New(slog.NewJSONHandler(logs, nil))
 	srv := httptest.NewServer(Handler(cfg, log, httpUpstream(cfg, log), acceptGood{}, nil, nil, Observability{Audit: audit.New(log, nil, time.Now)}))
@@ -568,10 +562,7 @@ func TestNewNamesTheSettingAtFault(t *testing.T) {
 // that Run runs it and that it keeps tokens valid); without it every token is refused 30 s after
 // startup.
 func TestNewInAuthModeHandsTheRevocationSyncToRun(t *testing.T) {
-	cfg, _, err := config.Load(nil, append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://mcp.example.com/mcp")
 	s, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -719,10 +710,7 @@ func TestInternalListenerServesProbesAndMetricsAndThePublicOneDoesNot(t *testing
 	}
 	// A public request is timed under its fixed route name.
 	getBody(t, s.Public.Handler, "mcp.example.com", "/mcp")
-	code, body := getBody(t, s.Internal.Handler, "127.0.0.1:9090", "/metrics")
-	if code != 200 {
-		t.Errorf("internal /metrics = %d, want 200", code)
-	}
+	body := internalMetrics(t, s.Internal.Handler)
 	for _, want := range []string{"byward_build_info", `route="/mcp",status_class="4xx"`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("internal /metrics lacks %s (the public request must be timed under its route)", want)
@@ -777,11 +765,7 @@ func (w *listenWatcher) Write(p []byte) (int, error) {
 // listener (probes, metrics) closes only after the public one, so the drain is visible.
 // Shutdown runs RegisterOnShutdown callbacks in goroutines, so each asserts the state it sees.
 func TestRunDrainsReadinessBeforeShutdownAndClosesTheInternalListenerLast(t *testing.T) {
-	cfg, _, err := config.Load(nil, append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp",
-		"BYWARD_LISTEN=127.0.0.1:0", "BYWARD_INTERNAL_LISTEN=127.0.0.1:0"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://m.example/mcp", "BYWARD_LISTEN=127.0.0.1:0", "BYWARD_INTERNAL_LISTEN=127.0.0.1:0")
 	logs := &listenWatcher{listening: make(chan struct{})}
 	log := logging.New(logs, "json")
 	s, err := New(cfg, log)
