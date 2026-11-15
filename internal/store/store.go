@@ -129,7 +129,7 @@ type Grants interface {
 	CreateGrant(ctx context.Context, g Grant) (Grant, error)
 	// Grant returns the grant, or ErrNotFound. It does not check ExpiresAt.
 	Grant(ctx context.Context, id string) (Grant, error)
-	// RevokeGrant deletes the grant with its codes and refresh tokens, and records
+	// RevokeGrant deletes the grant with its code and refresh tokens, and records
 	// Revocation{GrantID: id, Before: at, At: at}. An unknown grant is ErrNotFound and records
 	// nothing.
 	RevokeGrant(ctx context.Context, id string, at time.Time) error
@@ -237,10 +237,9 @@ type RefreshTokens interface {
 	// RotateRefreshToken is one atomic step. If Old is current, it is marked rotated and Next
 	// becomes current. If Old was rotated less than Grace ago and its successor is still current
 	// (a retried refresh whose response was lost), that successor is rotated to Next instead. Any
-	// other reuse revokes the grant as RevokeGrant does at Now (Revocation{GrantID, Before: Now,
-	// At: Now}) and returns ErrReused. Old unknown, idle-expired or from an
-	// older epoch is ErrNotFound; Next for another grant is ErrInvalid; an existing Next hash is
-	// ErrExists.
+	// other reuse revokes Old's grant as RevokeGrant does, with Now as its at, and returns
+	// ErrReused. Old unknown, idle-expired or from an older epoch is ErrNotFound; Next for another
+	// grant is ErrInvalid; an existing Next hash is ErrExists.
 	RotateRefreshToken(ctx context.Context, r RotateRequest) error
 }
 
@@ -257,8 +256,8 @@ type Revocation struct {
 }
 
 // Revocations feeds the in-memory deny list. Revocations are written by Grants.RevokeGrant,
-// Grants.RevokeSubject and Grants.RevokeAll, in the same transaction that deletes the grants they
-// cover.
+// Grants.RevokeSubject, Grants.RevokeAll and a reuse in RefreshTokens.RotateRefreshToken, in the
+// same transaction that deletes the grants they cover.
 type Revocations interface {
 	// Revocations returns every retained revocation, oldest At first (ties in any order). The deny
 	// list is rebuilt from it on each sync: a cursor would miss rows that commit out of At order
