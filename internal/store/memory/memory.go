@@ -434,9 +434,9 @@ func (s *Store) forgetGrantLocked(g store.Grant) {
 	}
 }
 
-// revokeGrantLocked revokes grant g at at, for RevokeGrant and a reused refresh token alike: it
-// goes with its code and refresh tokens, its user's consents to its client are forgotten, and every
-// token issued up to at is refused. Callers hold s.mu.
+// revokeGrantLocked revokes grant g as of at, for RevokeGrant and a reused refresh token alike: the
+// grant goes with its code and refresh tokens, its user's consents to its client are forgotten, and
+// every token issued up to at is refused. Callers hold s.mu.
 func (s *Store) revokeGrantLocked(g store.Grant, at time.Time) {
 	s.deleteGrantLocked(g.ID)
 	s.forgetGrantLocked(g)

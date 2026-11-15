@@ -906,7 +906,8 @@ func reuseRevokesTheGrant(t *testing.T, s store.Store) {
 			must(t, s.PutRefreshToken(ctx, t1))
 			at := t0.Add(time.Minute)
 			must(t, s.RotateRefreshToken(ctx, rotation(t1, refresh(g, 2), at)))
-			return at.Add(grace), s.RotateRefreshToken(ctx, rotation(t1, refresh(g, 3), at.Add(grace)))
+			now := at.Add(grace)
+			return now, s.RotateRefreshToken(ctx, rotation(t1, refresh(g, 3), now))
 		}},
 		{"an older token within the window", func(t *testing.T, s store.Store, g string) (time.Time, error) {
 			t1, t2 := refresh(g, 1), refresh(g, 2)
@@ -914,7 +915,8 @@ func reuseRevokesTheGrant(t *testing.T, s store.Store) {
 			at := t0.Add(time.Minute)
 			must(t, s.RotateRefreshToken(ctx, rotation(t1, t2, at)))
 			must(t, s.RotateRefreshToken(ctx, rotation(t2, refresh(g, 3), at.Add(time.Second))))
-			return at.Add(2 * time.Second), s.RotateRefreshToken(ctx, rotation(t1, refresh(g, 4), at.Add(2*time.Second)))
+			now := at.Add(2 * time.Second)
+			return now, s.RotateRefreshToken(ctx, rotation(t1, refresh(g, 4), now))
 		}},
 		{"with no grace at all", func(t *testing.T, s store.Store, g string) (time.Time, error) {
 			t1 := refresh(g, 1)
@@ -938,10 +940,16 @@ func reuseRevokesTheGrant(t *testing.T, s store.Store) {
 			revs, err := s.Revocations(ctx)
 			must(t, err)
 			// The reuse revokes the grant as RevokeGrant does: every token issued up to the reuse.
-			if !slices.ContainsFunc(revs, func(r store.Revocation) bool {
-				return r.GrantID == g && r.Subject == "" && r.Before.Equal(reusedAt) && r.At.Equal(reusedAt)
-			}) {
-				t.Fatalf("revocations = %+v, want one for %s with Before and At %v", revs, g, reusedAt)
+			// The cases share one store, so only this grant's revocations are counted.
+			want := store.Revocation{GrantID: g, Before: reusedAt, At: reusedAt}
+			var mine []store.Revocation
+			for _, r := range revs {
+				if r.GrantID == g {
+					mine = append(mine, r)
+				}
+			}
+			if len(mine) != 1 || !revEqual(mine[0], want) {
+				t.Fatalf("revocations for %s = %+v, want [%+v]", g, mine, want)
 			}
 		})
 	}

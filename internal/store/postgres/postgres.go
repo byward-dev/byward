@@ -576,9 +576,9 @@ func (s *Store) UseClient(ctx context.Context, id string, now, expires time.Time
 	})
 }
 
-// revokeGrant revokes grant id at at, for RevokeGrant and a reused refresh token alike: its user's
-// consents to its client are forgotten, it goes with its codes and refresh tokens (ON DELETE
-// CASCADE), and every token issued up to at is refused. ErrNotFound when there is no such grant.
+// revokeGrant revokes grant id as of at, for RevokeGrant and a reused refresh token alike: its
+// user's consents to its client are forgotten, the grant goes with its code and refresh tokens (ON
+// DELETE CASCADE), and every token issued up to at is refused. ErrNotFound when there is no such grant.
 func revokeGrant(ctx context.Context, tx pgx.Tx, id string, at time.Time) error {
 	if err := forgetGrant(ctx, tx, id); err != nil {
 		return err

@@ -237,7 +237,8 @@ type RefreshTokens interface {
 	// RotateRefreshToken is one atomic step. If Old is current, it is marked rotated and Next
 	// becomes current. If Old was rotated less than Grace ago and its successor is still current
 	// (a retried refresh whose response was lost), that successor is rotated to Next instead. Any
-	// other reuse revokes the grant and returns ErrReused. Old unknown, idle-expired or from an
+	// other reuse revokes the grant as RevokeGrant does at Now (Revocation{GrantID, Before: Now,
+	// At: Now}) and returns ErrReused. Old unknown, idle-expired or from an
 	// older epoch is ErrNotFound; Next for another grant is ErrInvalid; an existing Next hash is
 	// ErrExists.
 	RotateRefreshToken(ctx context.Context, r RotateRequest) error

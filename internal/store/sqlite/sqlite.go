@@ -708,9 +708,9 @@ func (s *Store) Consent(ctx context.Context, k store.ConsentKey) (store.Consent,
 	return c, nil
 }
 
-// revokeGrant revokes grant id at at, for RevokeGrant and a reused refresh token alike: its user's
-// consents to its client are forgotten, it goes with its codes and refresh tokens (ON DELETE
-// CASCADE), and every token issued up to at is refused. ErrNotFound when there is no such grant.
+// revokeGrant revokes grant id as of at, for RevokeGrant and a reused refresh token alike: its
+// user's consents to its client are forgotten, the grant goes with its code and refresh tokens (ON
+// DELETE CASCADE), and every token issued up to at is refused. ErrNotFound when there is no such grant.
 func revokeGrant(ctx context.Context, tx *sql.Tx, id string, at time.Time) error {
 	if err := forgetGrant(ctx, tx, id); err != nil {
 		return err
@@ -734,7 +734,8 @@ func forgetGrant(ctx context.Context, tx *sql.Tx, grantID string) error {
 	return err
 }
 
-// mustNotExist runs a count query and returns ErrExists when it counts a row, as postgres's does.
+// mustNotExist runs a count query and returns ErrExists when it counts a row; postgres's
+// mustNotExist is its EXISTS-query twin.
 func mustNotExist(ctx context.Context, tx *sql.Tx, query string, arg any) error {
 	var n int
 	if err := tx.QueryRowContext(ctx, query, arg).Scan(&n); err != nil {

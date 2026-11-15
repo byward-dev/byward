@@ -715,3 +715,27 @@ func TestARenewalTooSmallToMatterIsNotWritten(t *testing.T) {
 		t.Fatal("a use extending by minExtension was not written")
 	}
 }
+
+// A reuse whose revocation cannot be written fails the call and rolls back: the grant survives, and
+// the caller never sees ErrReused for a revocation that did not happen.
+func TestAReuseWhoseRevocationFailsReportsTheFailureAndKeepsTheGrant(t *testing.T) {
+	s := openTemp(t)
+	if _, err := s.CreateGrant(ctx, grant("g", "tid:alice")); err != nil {
+		t.Fatal(err)
+	}
+	tok := func(n byte) store.RefreshToken {
+		return store.RefreshToken{Hash: sha256.Sum256([]byte{n}), GrantID: "g", ClientID: "c", CreatedAt: t0, IdleExpiresAt: t0.Add(time.Hour)}
+	}
+	must(t, s.PutRefreshToken(ctx, tok(1)))
+	must(t, s.RotateRefreshToken(ctx, store.RotateRequest{Old: tok(1).Hash, Next: tok(2), Now: t0.Add(time.Minute)}))
+	if _, err := s.db.ExecContext(ctx, "CREATE TRIGGER refuse BEFORE INSERT ON revocations BEGIN SELECT RAISE(ABORT, 'refused'); END"); err != nil {
+		t.Fatal(err)
+	}
+	err := s.RotateRefreshToken(ctx, store.RotateRequest{Old: tok(1).Hash, Next: tok(3), Now: t0.Add(2 * time.Minute)})
+	if err == nil || errors.Is(err, store.ErrReused) {
+		t.Fatalf("reuse with a failing revocation = %v, want the database error", err)
+	}
+	if _, err := s.Grant(ctx, "g"); err != nil {
+		t.Fatalf("grant after the failed reuse: %v, want it kept", err)
+	}
+}
