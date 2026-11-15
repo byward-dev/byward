@@ -158,7 +158,7 @@ func MetadataHandler(m Metadata) http.Handler {
 		panic(err) // static strings only; cannot fail
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cors(w, r)
+		DiscoveryCORS(w, r, "GET, HEAD, OPTIONS")
 		switch r.Method {
 		case http.MethodOptions:
 			w.WriteHeader(http.StatusNoContent)
@@ -173,8 +173,10 @@ func MetadataHandler(m Metadata) http.Handler {
 	})
 }
 
-// cors follows ADR-0013 §6: echo the Origin, no credentials.
-func cors(w http.ResponseWriter, r *http.Request) {
+// DiscoveryCORS is the CORS policy of the discovery and OAuth endpoints (ADR-0013 §6): echo the
+// Origin, no credentials, methods as given. Never for the MCP endpoint, whose CORS allows only the
+// configured origins (package origin).
+func DiscoveryCORS(w http.ResponseWriter, r *http.Request, methods string) {
 	o := r.Header.Get("Origin")
 	if o == "" {
 		return
@@ -182,7 +184,7 @@ func cors(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	h.Set("Access-Control-Allow-Origin", o)
 	h.Add("Vary", "Origin")
-	h.Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+	h.Set("Access-Control-Allow-Methods", methods)
 	h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, MCP-Protocol-Version")
 	h.Set("Access-Control-Expose-Headers", "WWW-Authenticate, Retry-After")
 	h.Set("Access-Control-Max-Age", "3600")

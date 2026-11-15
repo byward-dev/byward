@@ -4,16 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/idp"
-	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/store"
 )
@@ -45,7 +42,7 @@ func (b *Broker) remembers(client registration.Client) bool {
 
 // forcesConsent reports whether the request asks for the page whatever is remembered (OIDC Core
 // 1.0 §3.1.2.1 prompt=consent). Other prompt values are ignored.
-func forcesConsent(prompt string) bool { return slices.Contains(strings.Fields(prompt), "consent") }
+func forcesConsent(prompt string) bool { return slices.Contains(promptValues(prompt), "consent") }
 
 func (b *Broker) consentKey(h hint, l login) store.ConsentKey {
 	return store.ConsentKey{Issuer: h.Issuer, Subject: h.Subject, ClientID: l.ClientID, Redirect: registration.RedirectKey(l.RedirectURI),
@@ -69,7 +66,7 @@ func (b *Broker) remembered(ctx context.Context, h hint, l login, allowsRefresh 
 	}
 	approved := c.Scopes
 	if !c.RecordsLifetime { // from before #287's rule, or an older replica's: offline_access may have been shown as "up to 1 hour" (#363)
-		approved = slices.DeleteFunc(slices.Clone(approved), func(s string) bool { return s == "offline_access" })
+		approved = withoutOffline(approved)
 	}
 	for _, s := range consentScopes(l.Scopes, allowsRefresh) {
 		if !slices.Contains(approved, s) {
@@ -92,7 +89,7 @@ func (b *Broker) skipConsent(r *http.Request, client registration.Client, l *log
 	}
 	ok, err := b.remembered(r.Context(), h, *l, l.Refresh, b.cfg.Now())
 	if err != nil {
-		b.cfg.Log.WarnContext(r.Context(), "checking remembered consent failed; asking", "request_id", logging.RequestID(r.Context()), "error", err.Error())
+		b.cfg.Log.WarnContext(r.Context(), "checking remembered consent failed; asking", "error", err.Error())
 		return false
 	}
 	if ok {
@@ -120,7 +117,7 @@ func (b *Broker) confirmRemembered(ctx context.Context, l login, id idp.Identity
 	// asked again, on a page that still states the lifetime the login started with (#287).
 	ok, err := b.remembered(ctx, hint{Issuer: id.Issuer, Subject: id.Subject}, l, client.AllowsRefresh(), b.cfg.Now())
 	if err != nil {
-		b.cfg.Log.WarnContext(ctx, "checking remembered consent failed", "request_id", logging.RequestID(ctx), "error", err.Error())
+		b.cfg.Log.WarnContext(ctx, "checking remembered consent failed", "error", err.Error())
 		return nil, hintNotRemembered, err
 	}
 	if !ok {
@@ -162,7 +159,7 @@ func (b *Broker) afterGrant(w http.ResponseWriter, r *http.Request, l login, id 
 	if remembered != nil {
 		b.cfg.Audit.Record(r, audit.Event{Name: audit.ConsentRemembered, Outcome: audit.Success, ClientID: l.ClientID,
 			ClientTrust: string(remembered.Trust()), UserKey: id.Subject, GrantID: grantID, IdP: b.cfg.IdPName})
-		b.observeConsent(remembered.Trust(), ConsentOutcomeRemembered)
+		b.cfg.ObserveConsent(string(remembered.Trust()), ConsentOutcomeRemembered)
 		return
 	}
 	b.rememberAllow(w, r, l, id, now)
@@ -173,9 +170,9 @@ func (b *Broker) afterGrant(w http.ResponseWriter, r *http.Request, l login, id 
 // the refresh_token grant), whether or not it was requested (#287). A consent given while the page
 // said "up to 1 hour" so never covers a grant that refreshes.
 func consentScopes(scopes []string, allowsRefresh bool) []string {
-	out := slices.DeleteFunc(slices.Clone(scopes), func(s string) bool { return s == "offline_access" })
+	out := withoutOffline(scopes)
 	if allowsRefresh {
-		out = append(out, "offline_access")
+		out = append(out, offlineAccess)
 	}
 	return out
 }
@@ -191,7 +188,7 @@ func (b *Broker) rememberAllow(w http.ResponseWriter, r *http.Request, l login, 
 	h := hint{Issuer: id.Issuer, Subject: id.Subject}
 	if err := b.cfg.Store.RememberConsent(ctx, store.Consent{Key: b.consentKey(h, l), Scopes: consentScopes(l.Scopes, l.Refresh), RecordsLifetime: true, ApprovedAt: now,
 		ExpiresAt: now.Add(ConsentLifetime)}); err != nil {
-		b.cfg.Log.WarnContext(ctx, "remembering consent failed; the user will be asked again", "request_id", logging.RequestID(ctx), "error", err.Error())
+		b.cfg.Log.WarnContext(ctx, "remembering consent failed; the user will be asked again", "error", err.Error())
 		return
 	}
 	b.setHint(w, h, now)
@@ -200,11 +197,7 @@ func (b *Broker) rememberAllow(w http.ResponseWriter, r *http.Request, l login, 
 // hintCookie is the hint cookie's name; like the binding cookie's it carries the instance ID.
 func (b *Broker) hintCookie() string {
 	sum := sha256.Sum256([]byte(b.cfg.Issuer))
-	name := "byw_hint_" + hex.EncodeToString(sum[:4])
-	if b.cfg.SecureCookies {
-		return "__Host-" + name
-	}
-	return name
+	return b.hostPrefixed("byw_hint_" + hex.EncodeToString(sum[:4]))
 }
 
 func (b *Broker) readHint(r *http.Request) (hint, bool) {
@@ -212,27 +205,19 @@ func (b *Broker) readHint(r *http.Request) (hint, bool) {
 	if err != nil {
 		return hint{}, false
 	}
-	plain, err := b.cfg.ConsentHintBox.Open(c.Value)
 	var h hint
-	if err != nil || json.Unmarshal(plain, &h) != nil { // a hint naming nobody matches no consent
+	if b.cfg.ConsentHintBox.OpenJSON(c.Value, &h) != nil { // a hint naming nobody matches no consent
 		return hint{}, false
 	}
 	return h, true
 }
 
 func (b *Broker) setHint(w http.ResponseWriter, h hint, now time.Time) {
-	plain, _ := json.Marshal(h)
-	sealed, err := b.cfg.ConsentHintBox.Seal(plain, now.Add(ConsentLifetime))
+	sealed, err := b.cfg.ConsentHintBox.SealJSON(h, now.Add(ConsentLifetime))
 	if err != nil {
 		return
 	}
-	//nolint:gosec // G124: Secure is false only in development mode on loopback http (ADR-0010 §10)
-	http.SetCookie(w, &http.Cookie{Name: b.hintCookie(), Value: sealed, Path: "/", MaxAge: int(ConsentLifetime.Seconds()),
-		HttpOnly: true, Secure: b.cfg.SecureCookies, SameSite: http.SameSiteLaxMode})
+	b.setCookie(w, b.hintCookie(), sealed, int(ConsentLifetime.Seconds()))
 }
 
-func (b *Broker) clearHint(w http.ResponseWriter) {
-	//nolint:gosec // G124: as above
-	http.SetCookie(w, &http.Cookie{Name: b.hintCookie(), Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: b.cfg.SecureCookies,
-		SameSite: http.SameSiteLaxMode})
-}
+func (b *Broker) clearHint(w http.ResponseWriter) { b.setCookie(w, b.hintCookie(), "", -1) }

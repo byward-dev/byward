@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/testutil/fakeclock"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
@@ -319,7 +321,7 @@ func TestTokenErrorsMapToADR0012Classes(t *testing.T) {
 			}
 			e.fake.Set(fakeidp.FailToken(fakeidp.GrantRefreshToken, tc.f))
 			reqID := fakeidp.NewGUID()
-			_, _, err = e.p.Refresh(idp.WithRequestID(context.Background(), reqID), tok.RefreshToken)
+			_, _, err = e.p.Refresh(logging.WithRequestID(context.Background(), reqID), tok.RefreshToken)
 			var ie *idp.Error
 			if !errors.As(err, &ie) {
 				t.Fatalf("err = %v", err)
@@ -353,7 +355,7 @@ func TestNonGUIDRequestIDIsNotSent(t *testing.T) {
 	e := newEnv(t, Config{})
 	_, tok, _ := callback(t, e)
 	e.fake.Set(fakeidp.FailToken(fakeidp.GrantRefreshToken, &fakeidp.RefreshTokenExpired))
-	_, _, err := e.p.Refresh(idp.WithRequestID(context.Background(), "not-a-guid"), tok.RefreshToken)
+	_, _, err := e.p.Refresh(logging.WithRequestID(context.Background(), "not-a-guid"), tok.RefreshToken)
 	var ie *idp.Error
 	if !errors.As(err, &ie) || ie.CorrelationID == "not-a-guid" || ie.CorrelationID == "" {
 		t.Fatalf("err = %#v", err)
@@ -468,9 +470,9 @@ func TestConcurrentFirstLoginsWaitForReadiness(t *testing.T) {
 
 // outageEnv is an env on a step clock whose adapter does not back off between JWKS retries, so an
 // outage fails fast.
-func outageEnv(t *testing.T) (*env, *fakeidp.Clock) {
+func outageEnv(t *testing.T) (*env, *fakeclock.Clock) {
 	t.Helper()
-	clock := fakeidp.NewClock(now())
+	clock := fakeclock.New(now())
 	e := newEnv(t, Config{Now: clock.Now}, fakeidp.WithClock(clock.Now))
 	e.p.fetch.Backoff = 0
 	return e, clock

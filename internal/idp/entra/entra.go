@@ -16,6 +16,7 @@ import (
 	"github.com/go-jose/go-jose/v4"
 
 	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // Authority is the only Entra host the adapter talks to; endpoints are derived from it and the
@@ -69,19 +70,19 @@ func New(cfg Config) (*Provider, error) {
 			return nil, errors.New("entra: organizations needs a non-empty tenant allowlist")
 		}
 		for _, t := range cfg.AllowedTenants {
-			if !isGUID(t) {
+			if !idp.IsGUID(t) {
 				return nil, fmt.Errorf("entra: allowed tenant %q is not a GUID", t)
 			}
 			p.allowed[strings.ToLower(t)] = true
 		}
-	case isGUID(cfg.Tenant):
+	case idp.IsGUID(cfg.Tenant):
 		if len(cfg.AllowedTenants) > 0 {
 			return nil, errors.New("entra: a tenant allowlist only applies to organizations")
 		}
 	default:
 		return nil, fmt.Errorf("entra: tenant must be a tenant GUID or %q (common and consumers are not supported)", Organizations)
 	}
-	if !isGUID(cfg.ClientID) {
+	if !idp.IsGUID(cfg.ClientID) {
 		return nil, errors.New("entra: client ID must be the app registration's GUID")
 	}
 	if cfg.ClientAuth == nil {
@@ -256,7 +257,9 @@ func (p *Provider) tokenAt(ctx context.Context, tenant string, form url.Values) 
 		return nil, &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialUnusable, Err: fmt.Errorf("%w: %w", idp.ErrCredential, err)}
 	}
 	header := http.Header{}
-	if id := idp.RequestID(ctx); isGUID(id) {
+	// The request ID the request log carries (logging.Middleware), so Entra's logs correlate with
+	// ours; Entra takes it as client-request-id only in GUID form.
+	if id := logging.RequestID(ctx); idp.IsGUID(id) {
 		header.Set("client-request-id", id)
 	}
 	tr, err := p.fetch.PostToken(ctx, tokenURL, form, header)
@@ -285,7 +288,7 @@ func (p *Provider) rules(nonce string) idp.TokenRules {
 // organizations) and `iss` exactly that tenant's v2 issuer.
 func (p *Provider) checkIssuer(iss string, claims map[string]any) error {
 	tid := strings.ToLower(idp.StringClaim(claims, "tid"))
-	if !isGUID(tid) {
+	if !idp.IsGUID(tid) {
 		return errors.New("entra: token tid is not a GUID")
 	}
 	if p.cfg.Tenant == Organizations {
@@ -311,7 +314,7 @@ func (p *Provider) identity(ctx context.Context, raw, nonce string) (idp.Identit
 	}
 	tid := strings.ToLower(idp.StringClaim(claims, "tid"))
 	oid := strings.ToLower(idp.StringClaim(claims, "oid"))
-	if !isGUID(oid) {
+	if !idp.IsGUID(oid) {
 		return idp.Identity{}, &idp.Error{Class: idp.Fatal, Err: errors.New("entra: ID token oid is not a GUID")}
 	}
 	_, overage := claims["_claim_names"].(map[string]any)
@@ -352,25 +355,8 @@ func (p *Provider) checkAccessToken(ctx context.Context, raw string) error {
 // it) for an operator-typed key, and whether s is one: the portal shows GUIDs in either case.
 func UserKey(s string) (string, bool) {
 	tid, oid, ok := strings.Cut(strings.ToLower(strings.TrimSpace(s)), ":")
-	if !ok || !isGUID(tid) || !isGUID(oid) {
+	if !ok || !idp.IsGUID(tid) || !idp.IsGUID(oid) {
 		return "", false
 	}
 	return tid + ":" + oid, true
-}
-
-func isGUID(s string) bool {
-	if len(s) != 36 {
-		return false
-	}
-	for i, r := range s {
-		switch {
-		case i == 8 || i == 13 || i == 18 || i == 23:
-			if r != '-' {
-				return false
-			}
-		case !strings.ContainsRune("0123456789abcdefABCDEF", r):
-			return false
-		}
-	}
-	return true
 }

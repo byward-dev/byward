@@ -3,6 +3,7 @@ package token
 import (
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -74,6 +75,24 @@ func (b *Box) Open(s string) ([]byte, error) {
 		return nil, errBoxExpired
 	}
 	return plain, nil
+}
+
+// SealJSON seals the JSON encoding of v until expiresAt.
+func (b *Box) SealJSON(v any, expiresAt time.Time) (string, error) {
+	plain, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	return b.Seal(plain, expiresAt)
+}
+
+// OpenJSON opens s as Open does and decodes its JSON into v. The caller checks what v must hold.
+func (b *Box) OpenJSON(s string, v any) error {
+	plain, err := b.Open(s)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(plain, v)
 }
 
 func (b *Box) ad(kid string, exp int64) []byte {

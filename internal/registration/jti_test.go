@@ -4,29 +4,21 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/byward-dev/byward/internal/store/memory"
+	"github.com/byward-dev/byward/internal/testutil/fakeclock"
 )
-
-type clock struct {
-	mu sync.Mutex
-	t  time.Time
-}
-
-func (c *clock) now() time.Time          { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
-func (c *clock) advance(d time.Duration) { c.mu.Lock(); defer c.mu.Unlock(); c.t = c.t.Add(d) }
 
 // An assertion ID is new once, a replay while it lives, and new again once it has expired; expiry
 // is judged at the now the caller passes.
 func TestAnAssertionIDIsSpentUntilItExpires(t *testing.T) {
-	c := &clock{t: now}
+	c := fakeclock.New(now)
 	cache := NewStoreJTICache(memory.New())
 	seen := func(key string, exp time.Duration) bool {
 		t.Helper()
-		s, err := cache.Seen(context.Background(), key, c.now(), c.now().Add(exp))
+		s, err := cache.Seen(context.Background(), key, c.Now(), c.Now().Add(exp))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -38,7 +30,7 @@ func TestAnAssertionIDIsSpentUntilItExpires(t *testing.T) {
 	if seen("b", time.Hour) {
 		t.Fatal("another ID reported as seen")
 	}
-	c.advance(2 * time.Minute)
+	c.Advance(2 * time.Minute)
 	if seen("a", time.Minute) {
 		t.Fatal("an expired ID still blocks its reuse")
 	}

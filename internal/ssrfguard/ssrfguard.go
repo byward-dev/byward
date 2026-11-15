@@ -48,7 +48,8 @@ func (e *StatusError) Error() string {
 }
 
 // Transient reports whether err is worth retrying later (network trouble, a timeout, a 5xx, 408 or
-// 429) as opposed to a definite answer (refused, too large, another 4xx or a redirect).
+// 429) as opposed to a definite answer (refused, too large, another 4xx or a redirect). The status
+// rule is idp.StatusError.Transient's; ssrfguard keeps its own copy because it imports nothing internal.
 func Transient(err error) bool {
 	var se *StatusError
 	switch {

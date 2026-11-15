@@ -29,6 +29,7 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/assertionkey"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/token"
 )
 
@@ -210,7 +211,7 @@ func TestAnHTTPUpstreamWithoutAnAssertionKeyRefusesToStart(t *testing.T) {
 	if _, err := New(cfg, slog.New(slog.DiscardHandler)); !noKey(err) {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := CheckOffline(cfg); !noKey(err) {
+	if _, err := checkOffline(cfg); !noKey(err) {
 		t.Fatalf("check --offline: err = %v", err)
 	}
 }
@@ -325,7 +326,7 @@ func TestTheStartupLogWarnsAboutEmailsForTheIdPInUse(t *testing.T) {
 		}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			logs := &syncBuffer{}
+			logs := &logsink.Buffer{}
 			s, err := New(tc.cfg(t), slog.New(slog.NewJSONHandler(logs, nil)))
 			if err != nil {
 				t.Fatal(err)

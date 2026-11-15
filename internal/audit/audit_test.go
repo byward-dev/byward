@@ -134,11 +134,7 @@ func eventNames(t *testing.T) []string {
 	return names
 }
 
-func TestEveryEventHasASampleAndADocsRow(t *testing.T) {
-	docs, err := os.ReadFile("../../docs/reference/observability.md")
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestEveryEventHasAGoldenSample(t *testing.T) {
 	for _, n := range eventNames(t) {
 		found := false
 		for _, s := range samples {
@@ -146,9 +142,6 @@ func TestEveryEventHasASampleAndADocsRow(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("event %q has no golden sample", n)
-		}
-		if !strings.Contains(string(docs), "| `"+n+"` |") {
-			t.Errorf("event %q has no row in docs/reference/observability.md", n)
 		}
 	}
 }
@@ -261,5 +254,32 @@ func TestAnIPv6SourceIsLimitedByItsSlash64AndLoggedByItsAddress(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
 	if last := lines[len(lines)-1]; !strings.Contains(last, `"remote_ip":"2001:db8:1:3::1"`) || strings.Contains(last, "suppressed") {
 		t.Fatalf("a sender in another /64 was limited too, or charged with the first one's drops:\n%s", buf.String())
+	}
+}
+
+// An audit record carries its request's ID, once, through the proxy's logger (which adds it from the
+// request's context); a record with no request carries none.
+func TestARecordCarriesItsRequestsID(t *testing.T) {
+	r := httptest.NewRequest("POST", "/token", nil)
+	r = r.WithContext(logging.WithRequestID(r.Context(), "req-1"))
+	for name, tc := range map[string]struct {
+		record func(*Log)
+		want   int
+	}{
+		"a request's record":                  {record: func(l *Log) { l.Record(r, Event{Name: TokenIssued, Outcome: Success}) }, want: 1},
+		"an unauthenticated request's record": {record: func(l *Log) { l.RecordUnauthenticated(r, Event{Name: TokenRejected, Outcome: Failure}) }, want: 1},
+		"no request":                          {record: func(l *Log) { l.Record(nil, Event{Name: KeyLoaded, Outcome: Success}) }},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			tc.record(New(logging.New(&buf, "json"), nil, time.Now))
+			if strings.Count(buf.String(), "\n") != 1 {
+				t.Fatalf("want one record: %q", buf.String())
+			}
+			line := buf.String()
+			if strings.Count(line, `"request_id":"req-1"`) != tc.want || strings.Count(line, `"request_id"`) != tc.want {
+				t.Fatalf("want the request ID %d time(s) in one line: %s", tc.want, buf.String())
+			}
+		})
 	}
 }

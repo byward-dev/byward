@@ -10,7 +10,6 @@ import (
 
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/idp"
-	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/token"
@@ -31,8 +30,8 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "unauthorized_client", "this client did not register the refresh_token grant"})
 		return
 	}
-	if res := f.Get("resource"); res != "" && res != b.cfg.Resource.String() {
-		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_target", "this server only issues tokens for " + b.cfg.Resource.String()})
+	if desc, foreign := b.foreignResource(f.Get("resource")); foreign {
+		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_target", desc})
 		return
 	}
 	invalid := tokenError{http.StatusBadRequest, "invalid_grant", "the refresh token is invalid or expired"}
@@ -67,7 +66,7 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 	if !rt.RotatedAt.IsZero() && now.Sub(rt.RotatedAt) >= b.cfg.RefreshGrace {
 		// Clear reuse: revoke without calling the IdP. Retries within the window go on, and the
 		// store decides atomically below.
-		b.revoke(r, client.ID(), rt.GrantID, now, "refresh token reused; grant revoked")
+		b.revoke(r, client.ID(), rt.GrantID, now, reasonRefreshReused)
 		b.tokenFail(w, r, invalid)
 		return
 	}
@@ -102,9 +101,8 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 			IdleExpiresAt: minTime(now.Add(RefreshIdleLifetime), g.ExpiresAt)}})
 	switch {
 	case errors.Is(err, store.ErrReused):
-		b.deny.Add(g.ID) // the store revoked it in the same step
-		b.cfg.Log.WarnContext(ctx, "refresh token reused; grant revoked", "request_id", logging.RequestID(ctx))
-		b.cfg.Audit.Record(r, audit.Event{Name: audit.GrantRevoked, Outcome: audit.Success, Reason: "refresh token reused; grant revoked", ClientID: client.ID(), GrantID: g.ID})
+		b.revoked(r, client.ID(), g.ID, reasonRefreshReused) // the store revoked it in the same step
+		b.cfg.Log.WarnContext(ctx, reasonRefreshReused)
 		b.tokenFail(w, r, invalid)
 		return
 	case errors.Is(err, store.ErrNotFound):
@@ -129,7 +127,7 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 	end := func(why, hint string) ([]byte, assertedClaims, time.Time, tokenError, bool) {
 		b.revoke(r, g.ClientID, g.ID, now, why)
 		if hint != "" {
-			b.cfg.Log.WarnContext(ctx, why, "request_id", logging.RequestID(ctx), "idp", b.cfg.IdPName, "reason", hint)
+			b.cfg.Log.WarnContext(ctx, why, "idp", b.cfg.IdPName, "reason", hint)
 		}
 		return nil, assertedClaims{}, time.Time{}, signInAgain, false
 	}
@@ -139,7 +137,7 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 		return end("the grant holds no usable IdP refresh token; grant revoked", "")
 	}
 	start := time.Now()
-	id, fresh, err := b.cfg.IdP.Refresh(idp.WithRequestID(ctx, logging.RequestID(ctx)), old.RefreshToken)
+	id, fresh, err := b.cfg.IdP.Refresh(ctx, old.RefreshToken)
 	b.observeIdP(ctx, OpRefresh, start, err)
 	if err != nil {
 		var ie *idp.Error
@@ -147,10 +145,10 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 		case errors.As(err, &ie) && ie.Class == idp.SignInAgain:
 			return end("the IdP ended the session; grant revoked", ie.OperatorHint)
 		case errors.As(err, &ie) && ie.Class == idp.Unavailable:
-			b.cfg.Log.WarnContext(ctx, "IdP refresh unavailable", append([]any{"request_id", logging.RequestID(ctx), "error", err}, fixAttr(err)...)...)
+			b.cfg.Log.WarnContext(ctx, "IdP refresh unavailable", append([]any{"error", err}, fixAttr(err)...)...)
 			return nil, assertedClaims{}, time.Time{}, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the identity provider is unavailable; try again"}, false
 		default:
-			b.cfg.Log.ErrorContext(ctx, "IdP refresh failed", append([]any{"request_id", logging.RequestID(ctx), "error", err}, fixAttr(err)...)...)
+			b.cfg.Log.ErrorContext(ctx, "IdP refresh failed", append([]any{"error", err}, fixAttr(err)...)...)
 			return nil, assertedClaims{}, time.Time{}, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not refresh the sign-in"}, false
 		}
 	}
@@ -172,7 +170,7 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 			// A failure to decide is not a denial (the Gate contract): keep the grant and our refresh
 			// token, and the IdP's new tokens, since the IdP may have revoked the ones the grant holds.
 			// That grants nothing: only a refresh reads them, and it runs the gate again.
-			b.cfg.Log.ErrorContext(ctx, "the access gate could not decide on refresh", "request_id", logging.RequestID(ctx), "error", err)
+			b.cfg.Log.ErrorContext(ctx, "the access gate could not decide on refresh", "error", err)
 			// The claims stay as they were: the gate has not approved the new identity.
 			sealed, _ := b.sealIdPTokens(ctx, g, fresh, held.Claims) // nil when sealing fails: nothing to keep
 			return sealed, assertedClaims{}, time.Time{}, failed, false
@@ -196,7 +194,7 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 func (b *Broker) sealIdPTokens(ctx context.Context, g store.Grant, t idp.Tokens, c assertedClaims) ([]byte, error) {
 	sealed, err := b.cfg.IdPTokenBox.Seal(marshalSecrets(t, c), g.ExpiresAt)
 	if err != nil {
-		b.cfg.Log.ErrorContext(ctx, "sealing IdP tokens failed", "request_id", logging.RequestID(ctx), "error", err)
+		b.cfg.Log.ErrorContext(ctx, "sealing IdP tokens failed", "error", err)
 		return nil, err
 	}
 	return []byte(sealed), nil
@@ -215,7 +213,7 @@ func (b *Broker) keepIdPTokens(r *http.Request, grantID string, sealed []byte) {
 	keep, cancel := context.WithTimeout(context.WithoutCancel(ctx), keepIdPTokensTimeout)
 	defer cancel()
 	if err := b.cfg.Store.SetIdPTokens(keep, grantID, sealed); err != nil && !errors.Is(err, store.ErrNotFound) {
-		b.cfg.Log.WarnContext(ctx, "keeping the IdP's new tokens failed", "request_id", logging.RequestID(ctx), "error", err)
+		b.cfg.Log.WarnContext(ctx, "keeping the IdP's new tokens failed", "error", err)
 	}
 }
 
@@ -239,6 +237,10 @@ func narrowScopes(requested string, granted []string) ([]string, bool) {
 type redirectDenier interface {
 	Denied() bool
 }
+
+// reasonRefreshReused is the grant_revoked reason for a refresh token presented again after its
+// rotation, outside the grace window.
+const reasonRefreshReused = "refresh token reused; grant revoked"
 
 // The grant_revoked reasons for a refresh by a refused client.
 const (

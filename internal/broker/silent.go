@@ -8,7 +8,6 @@ import (
 
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/idp"
-	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/registration"
 )
 
@@ -43,7 +42,7 @@ func (b *Broker) authorizeSilently(w http.ResponseWriter, r *http.Request, clien
 	ok, err := b.remembered(r.Context(), h, l, l.Refresh, b.cfg.Now())
 	switch {
 	case err != nil:
-		b.cfg.Log.WarnContext(r.Context(), "checking remembered consent failed", "request_id", logging.RequestID(r.Context()), "error", err.Error())
+		b.cfg.Log.WarnContext(r.Context(), "checking remembered consent failed", "error", err.Error())
 		b.refuseSilently(w, r, client.Trust(), l, "temporarily_unavailable", "the proxy could not check the consent; try again")
 		return
 	case !ok:
@@ -77,6 +76,6 @@ func (b *Broker) refuseSilentIdPFailure(w http.ResponseWriter, r *http.Request, 
 func (b *Broker) refuseSilently(w http.ResponseWriter, r *http.Request, trust registration.TrustLevel, l login, code, desc string) {
 	b.cfg.Audit.Record(r, audit.Event{Name: audit.ConsentSilent, Outcome: audit.Failure, Reason: code, ClientID: l.ClientID,
 		ClientTrust: string(trust), IdP: b.cfg.IdPName})
-	b.observeConsent(trust, ConsentOutcomeSilentRefused)
+	b.cfg.ObserveConsent(string(trust), ConsentOutcomeSilentRefused)
 	b.redirectError(w, r, l.RedirectURI, l.State, code, desc)
 }

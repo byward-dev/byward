@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +17,7 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/store"
+	"github.com/byward-dev/byward/internal/store/storetest"
 )
 
 var (
@@ -473,36 +473,14 @@ func TestCorruptCounterFileFailsOpen(t *testing.T) {
 	}
 }
 
-// An expired spent login or assertion already counts as absent, so storetest cannot see it
-// collected: the row count shows it.
 func TestCollectDropsExpiredSpentRecords(t *testing.T) {
-	for _, tc := range []struct {
-		table string
-		spend func(*Store, [sha256.Size]byte, time.Time, time.Time) error
-	}{
-		{"spent_logins", func(s *Store, h [sha256.Size]byte, now, exp time.Time) error { return s.SpendLogin(ctx, h, now, exp) }},
-		{"spent_assertions", func(s *Store, h [sha256.Size]byte, now, exp time.Time) error {
-			return s.SpendAssertion(ctx, h, now, exp)
-		}},
-	} {
-		t.Run(tc.table, func(t *testing.T) {
-			s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
-			now := fixtureCreated
-			must(t, tc.spend(s, sha256.Sum256([]byte("x")), now, now.Add(time.Minute)))
-			count := func() (n int) {
-				must(t, s.db.QueryRow("SELECT count(*) FROM "+tc.table).Scan(&n))
-				return n
-			}
-			must(t, s.Collect(ctx, now.Add(30*time.Second)))
-			if n := count(); n != 1 {
-				t.Fatalf("before expiry: %d rows, want 1", n)
-			}
-			must(t, s.Collect(ctx, now.Add(time.Minute)))
-			if n := count(); n != 0 {
-				t.Fatalf("at expiry: %d rows, want 0", n)
-			}
-		})
-	}
+	storetest.CollectDropsExpiredSpent(t, func(t *testing.T) (store.Store, func(storetest.Spent) int) {
+		s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
+		return s, func(kind storetest.Spent) (n int) {
+			must(t, s.db.QueryRow("SELECT count(*) FROM "+string(kind)).Scan(&n))
+			return n
+		}
+	})
 }
 
 // Migration fixtures (ADR-0024 §11): one per released schema version, each migrated to the current
@@ -515,30 +493,8 @@ func TestEverySchemaVersionHasAFixture(t *testing.T) {
 	}
 }
 
-// What every fixture holds (testdata/schema/vN.sql) and must still hold after migrating.
-var (
-	fixtureCreated = time.UnixMicro(1793966400000000).UTC()
-	fixtureExpires = time.UnixMicro(4070908800000000).UTC()
-	fixtureGrant   = store.Grant{
-		ID: "fixture-grant", ClientID: "fixture-client", Subject: "tid:fixture", Issuer: "https://idp.example/v2.0",
-		Resource: "https://mcp.example.com/mcp", Scopes: []string{"mcp"}, IdPTokens: []byte("sea"),
-		CreatedAt: fixtureCreated, ExpiresAt: fixtureExpires, Epoch: 1,
-	}
-	fixtureCode = store.PendingCode{
-		GrantID: "fixture-grant", ClientID: "fixture-client", RedirectURI: "http://127.0.0.1:33418/callback",
-		CodeChallenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", Scopes: []string{"mcp"}, ExpiresAt: fixtureExpires,
-	}
-	fixtureRefresh = store.RefreshToken{
-		Hash: sha256.Sum256([]byte("fixture-refresh")), GrantID: "fixture-grant", ClientID: "fixture-client",
-		CreatedAt: fixtureCreated, IdleExpiresAt: fixtureExpires,
-	}
-	fixtureRevocations = []store.Revocation{
-		{GrantID: "fixture-revoked", Before: fixtureCreated, At: fixtureCreated},
-		{Subject: "tid:fixture-revoked-subject", Before: fixtureCreated, At: fixtureCreated.Add(time.Second)},
-	}
-	// From v3: a cut-off for every subject.
-	fixtureRevokeAll = store.Revocation{All: true, Before: fixtureCreated, At: fixtureCreated.Add(2 * time.Second)}
-)
+// The schema version that first holds each part of the migration fixture.
+var fixtureSince = storetest.FixtureSince{RevokeAll: 3, RotatedToken: 2, Client: 4, Consent: 5, SpentLogin: 6, SpentAssertion: 7, MarkedConsents: 8}
 
 func TestFixturesMigrateToTheCurrentSchemaKeepingTheirData(t *testing.T) {
 	want := schemaOf(t, open(t, t.TempDir(), filepath.Join(t.TempDir(), "w")).db)
@@ -556,88 +512,8 @@ func TestFixturesMigrateToTheCurrentSchemaKeepingTheirData(t *testing.T) {
 			if litestream != 1 {
 				t.Fatal("Litestream's table was removed")
 			}
-			if g, err := s.Grant(ctx, fixtureGrant.ID); err != nil || !reflect.DeepEqual(g, fixtureGrant) {
-				t.Fatalf("grant = %+v, %v\nwant %+v", g, err, fixtureGrant)
-			}
-			if r, err := s.RefreshToken(ctx, fixtureRefresh.Hash, fixtureCreated); err != nil || !reflect.DeepEqual(r, fixtureRefresh) {
-				t.Fatalf("refresh token = %+v, %v\nwant %+v", r, err, fixtureRefresh)
-			}
-			wantRevs := fixtureRevocations
-			if v >= 3 {
-				wantRevs = append(slices.Clone(fixtureRevocations), fixtureRevokeAll)
-			}
-			if revs, err := s.Revocations(ctx); err != nil || !reflect.DeepEqual(revs, wantRevs) {
-				t.Fatalf("revocations = %+v, %v\nwant %+v", revs, err, wantRevs)
-			}
-			if c, err := s.ConsumeCode(ctx, fixtureGrant.ID, fixtureCreated); err != nil || !reflect.DeepEqual(c, fixtureCode) {
-				t.Fatalf("code = %+v, %v\nwant %+v", c, err, fixtureCode)
-			}
-			if v >= 2 {
-				checkRotatedFixtureToken(t, s)
-			}
-			if v >= 4 {
-				want := store.Client{ID: "fixture-dcr-client", Metadata: []byte(`{"client_name":"Fixture"}`), CreatedAt: fixtureCreated,
-					UsedAt: fixtureCreated.Add(time.Second), ExpiresAt: fixtureExpires}
-				if got, err := s.Client(ctx, want.ID); err != nil || !reflect.DeepEqual(got, want) {
-					t.Fatalf("client = %+v, %v\nwant %+v", got, err, want)
-				}
-			}
-			if v >= 5 {
-				want := store.Consent{Key: store.ConsentKey{Issuer: "https://idp.example/v2.0", Subject: "tid:fixture", ClientID: "fixture-client",
-					Redirect: "http://127.0.0.1/cb", Resource: "https://mcp.example.com/mcp"}, Scopes: []string{"mcp"}, ApprovedAt: fixtureCreated, ExpiresAt: fixtureExpires}
-				if got, err := s.Consent(ctx, want.Key); err != nil || !reflect.DeepEqual(got, want) {
-					t.Fatalf("consent = %+v, %v\nwant %+v", got, err, want)
-				}
-			}
-			if v >= 6 { // the spent login still refuses a second use
-				if err := s.SpendLogin(ctx, sha256.Sum256([]byte("fixture-login")), fixtureCreated, fixtureExpires); !errors.Is(err, store.ErrConsumed) {
-					t.Fatalf("spending the fixture login: %v, want ErrConsumed", err)
-				}
-			}
-			if v >= 7 { // the spent client assertion still refuses a second use
-				if err := s.SpendAssertion(ctx, sha256.Sum256([]byte("fixture-assertion")), fixtureCreated, fixtureExpires); !errors.Is(err, store.ErrConsumed) {
-					t.Fatalf("spending the fixture assertion: %v, want ErrConsumed", err)
-				}
-			}
-			if v >= 8 {
-				checkMarkedFixtureConsents(t, s)
-			}
+			storetest.CheckFixture(t, s, v, fixtureSince)
 		})
-	}
-}
-
-// checkMarkedFixtureConsents: from v8, the fixture holds a consent marked under the lifetime rule
-// (#363), and one an older binary re-approved after it was marked, which no longer counts as marked.
-func checkMarkedFixtureConsents(t *testing.T, s *Store) {
-	t.Helper()
-	for subject, want := range map[string]bool{"tid:fixture": true, "tid:fixture-reapproved": false} {
-		k := store.ConsentKey{Issuer: "https://idp.example/v2.0", Subject: subject, ClientID: "fixture-client",
-			Redirect: "https://app.example/cb", Resource: "https://mcp.example.com/mcp"}
-		if got, err := s.Consent(ctx, k); err != nil || got.RecordsLifetime != want || !slices.Equal(got.Scopes, []string{"mcp", "offline_access"}) {
-			t.Fatalf("%s's consent = %+v, %v; want RecordsLifetime %v", subject, got, err, want)
-		}
-	}
-}
-
-// checkRotatedFixtureToken: from v2, the fixture holds a token rotated 1 s after creation to
-// fixture-refresh. Its rotation time and its link to the successor must survive migrations: a
-// retry with it inside the grace window must rotate the successor, not count as reuse.
-func checkRotatedFixtureToken(t *testing.T, s *Store) {
-	t.Helper()
-	oldHash := sha256.Sum256([]byte("fixture-refresh-old"))
-	want := store.RefreshToken{Hash: oldHash, GrantID: fixtureGrant.ID, ClientID: "fixture-client",
-		CreatedAt: fixtureCreated, IdleExpiresAt: fixtureExpires, RotatedAt: fixtureCreated.Add(time.Second)}
-	if got, err := s.RefreshToken(ctx, oldHash, fixtureCreated); err != nil || !reflect.DeepEqual(got, want) {
-		t.Fatalf("rotated fixture token = %+v, %v\nwant %+v", got, err, want)
-	}
-	retry := fixtureCreated.Add(2 * time.Second)
-	next := store.RefreshToken{Hash: sha256.Sum256([]byte("fixture-refresh-next")), GrantID: fixtureGrant.ID, ClientID: "fixture-client",
-		CreatedAt: retry, IdleExpiresAt: fixtureExpires}
-	if err := s.RotateRefreshToken(ctx, store.RotateRequest{Old: oldHash, Next: next, Now: retry, Grace: 30 * time.Second}); err != nil {
-		t.Fatalf("retry with the rotated fixture token: %v (its successor link was lost)", err)
-	}
-	if got, err := s.RefreshToken(ctx, fixtureRefresh.Hash, retry); err != nil || !got.RotatedAt.Equal(retry) {
-		t.Fatalf("the successor %+v, %v: want it rotated at %v by the retry", got, err, retry)
 	}
 }
 
@@ -672,8 +548,8 @@ func TestFailedMigrationChangesNothing(t *testing.T) {
 	must(t, db.Close())
 	migrations = saved // the old binary again: it must still open the database and read its data
 	old := open(t, dir, filepath.Join(t.TempDir(), "w2"))
-	if g, err := old.Grant(ctx, fixtureGrant.ID); err != nil || !reflect.DeepEqual(g, fixtureGrant) {
-		t.Fatalf("data after a failed migration = %+v, %v; want %+v", g, err, fixtureGrant)
+	if g, err := old.Grant(ctx, storetest.FixtureGrant.ID); err != nil || !reflect.DeepEqual(g, storetest.FixtureGrant) {
+		t.Fatalf("data after a failed migration = %+v, %v; want %+v", g, err, storetest.FixtureGrant)
 	}
 }
 
@@ -771,13 +647,13 @@ func TestAnOlderBinarysReapprovalUnmarksTheConsent(t *testing.T) {
 		dir := t.TempDir()
 		s := open(t, dir, filepath.Join(t.TempDir(), "writes"))
 		k := store.ConsentKey{Issuer: "https://idp.example/v2.0", Subject: "tid:alice", ClientID: "c", Redirect: "https://app.example/cb", Resource: "https://mcp.example.com/mcp"}
-		must(t, s.RememberConsent(ctx, store.Consent{Key: k, Scopes: []string{"mcp"}, ApprovedAt: fixtureCreated, ExpiresAt: fixtureExpires, RecordsLifetime: true}))
-		reapproved := fixtureCreated.Add(skew)
+		must(t, s.RememberConsent(ctx, store.Consent{Key: k, Scopes: []string{"mcp"}, ApprovedAt: storetest.FixtureCreated, ExpiresAt: storetest.FixtureExpires, RecordsLifetime: true}))
+		reapproved := storetest.FixtureCreated.Add(skew)
 		_, err := rawDB(t, dir).Exec(`INSERT INTO consents (issuer, subject, client_id, redirect, resource, scopes, approved_at, expires_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (issuer, subject, client_id, redirect, resource) DO UPDATE SET
 			scopes = excluded.scopes, approved_at = excluded.approved_at, expires_at = excluded.expires_at`,
-			k.Issuer, k.Subject, k.ClientID, k.Redirect, k.Resource, `["mcp","offline_access"]`, micros(reapproved), micros(fixtureExpires))
+			k.Issuer, k.Subject, k.ClientID, k.Redirect, k.Resource, `["mcp","offline_access"]`, micros(reapproved), micros(storetest.FixtureExpires))
 		must(t, err)
 		if got, err := s.Consent(ctx, k); err != nil || got.RecordsLifetime || !got.ApprovedAt.Equal(reapproved) {
 			t.Fatalf("consent after an older binary's re-approval %v off = %+v, %v; want it unmarked", skew, got, err)

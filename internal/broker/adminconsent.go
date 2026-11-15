@@ -4,8 +4,6 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-
-	"github.com/byward-dev/byward/internal/logging"
 )
 
 // oauthErrorCode is the shape of an OAuth error code; anything else from the query is not logged.
@@ -26,7 +24,7 @@ func (b *Broker) adminConsent(w http.ResponseWriter, r *http.Request, q url.Valu
 			outcome = "error " + e
 		}
 	}
-	b.cfg.Log.InfoContext(ctx, "admin consent redirect received (unverified)", "request_id", logging.RequestID(ctx), "reason", outcome)
+	b.cfg.Log.InfoContext(ctx, "admin consent redirect received (unverified)", "reason", outcome)
 	if outcome != "granted" {
 		b.page(w, r, http.StatusBadRequest, "Administrator consent was not granted",
 			"The permissions were not granted. Try again from the link in the proxy's log, and check the permissions the app asks for.")

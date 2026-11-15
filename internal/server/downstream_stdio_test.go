@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,6 +17,7 @@ import (
 	"github.com/byward-dev/byward/internal/metrics"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/store"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/upstream/stdio"
 )
 
@@ -56,7 +56,7 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 			wantError: "failed", wantAudit: true, exchanged: true, wantAlert: "protocol", wantReason: "failed: " + idp.AlertProtocol.Hint()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			logs := &syncBuffer{}
+			logs := &logsink.Buffer{}
 			log := logging.New(logs, "json")
 			var exchanges atomic.Int32
 			exchange := func(_ context.Context, tid, assertion string, _ []string) (downstream.Token, error) {
@@ -114,16 +114,15 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 			if strings.Contains(logs.String(), "graph-token") || strings.Contains(logs.String(), "idp-token-of") {
 				t.Fatal("a token reached the logs")
 			}
-			scrape := httptest.NewRecorder()
-			d.o.Metrics.Handler().ServeHTTP(scrape, httptest.NewRequest("GET", "/metrics", nil))
+			scraped := scrapeMetrics(t, d.o.Metrics)
 			outcome := tc.wantError
 			if outcome == "" {
 				outcome = "issued"
 			}
-			if !strings.Contains(scrape.Body.String(), `outcome="`+outcome+`"} 1`) {
+			if !strings.Contains(scraped, `outcome="`+outcome+`"} 1`) {
 				t.Fatalf("no downstream metric with outcome %s", outcome)
 			}
-			if tc.wantToken != "" && !strings.Contains(scrape.Body.String(), `outcome="cached"} 1`) {
+			if tc.wantToken != "" && !strings.Contains(scraped, `outcome="cached"} 1`) {
 				t.Fatal("the second ask is not counted as cached")
 			}
 			alertLines := strings.Count(logs.String(), `"msg":"IdP alert: the operator must act"`)
@@ -139,8 +138,8 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 				}
 			} else if alertLines != 1 || !strings.Contains(refusal, `"alert":"`+tc.wantAlert+`"`) ||
 				!strings.Contains(refusal, `"reason":"`+tc.wantReason+`"`) ||
-				!strings.Contains(scrape.Body.String(), `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="`+tc.wantAlert+`"} 1`) {
-				t.Fatalf("want one alert line, %s and reason %q on the refusal line, counted once:\n%s\n%s", tc.wantAlert, tc.wantReason, logs, scrape.Body)
+				!strings.Contains(scraped, `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="`+tc.wantAlert+`"} 1`) {
+				t.Fatalf("want one alert line, %s and reason %q on the refusal line, counted once:\n%s\n%s", tc.wantAlert, tc.wantReason, logs, scraped)
 			}
 		})
 	}

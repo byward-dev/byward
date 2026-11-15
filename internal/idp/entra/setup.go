@@ -6,6 +6,8 @@ import (
 	"strings"
 	"text/template"
 	"time"
+
+	"github.com/byward-dev/byward/internal/idp"
 )
 
 // Setup is the input of the app registration script `byward init entra` prints (ADR-0020 §8).
@@ -48,7 +50,7 @@ const MaxSecretYears = 2
 // straight to SecretFile, then writes EnvFile to byward.env (mode 0600). The secret's end date is the
 // date SecretYears from Now, at most a day early.
 func SetupScript(s Setup) (string, error) {
-	if !isGUID(s.Tenant) {
+	if !idp.IsGUID(s.Tenant) {
 		return "", errors.New("the tenant must be the tenant ID, a GUID (az account show --query tenantId -o tsv)")
 	}
 	if s.SecretYears < 1 || s.SecretYears > MaxSecretYears {

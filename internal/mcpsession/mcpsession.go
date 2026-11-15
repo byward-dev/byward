@@ -9,7 +9,6 @@
 package mcpsession
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -17,7 +16,6 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/audit"
-	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/token"
 )
 
@@ -92,12 +90,8 @@ func (c Config) open(id, user string) (session, reason string) {
 	if !ok {
 		return "", reasonInvalid
 	}
-	plain, err := c.Box.Open(body)
-	if err != nil {
-		return "", reasonInvalid
-	}
 	var b binding
-	if json.Unmarshal(plain, &b) != nil || b.Session == "" {
+	if c.Box.OpenJSON(body, &b) != nil || b.Session == "" {
 		return "", reasonInvalid
 	}
 	switch {
@@ -153,11 +147,10 @@ func (s *sealer) seal() {
 		return
 	}
 	h.Del(Header)
-	plain, _ := json.Marshal(binding{Session: ids[0], User: s.user, Upstream: s.c.Upstream})
-	sealed, err := s.c.Box.Seal(plain, s.c.Now().Add(s.c.Lifetime))
+	sealed, err := s.c.Box.SealJSON(binding{Session: ids[0], User: s.user, Upstream: s.c.Upstream}, s.c.Now().Add(s.c.Lifetime))
 	if err != nil {
 		// Never pass the unbound ID on; without one the client cannot use the session.
-		s.c.Log.ErrorContext(s.r.Context(), "sealing the MCP session ID failed", "request_id", logging.RequestID(s.r.Context()), "error", err)
+		s.c.Log.ErrorContext(s.r.Context(), "sealing the MCP session ID failed", "error", err)
 		return
 	}
 	s.sealed = Prefix + sealed

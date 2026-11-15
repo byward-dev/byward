@@ -2,7 +2,6 @@ package server
 
 import (
 	"fmt"
-	"net/http/httptest"
 	"os"
 	"regexp"
 	"slices"
@@ -41,11 +40,10 @@ func TestTheDocumentedIdPAlertLabelsAreTheExportedOnes(t *testing.T) {
 	}
 	m := metrics.New()
 	m.SeedIdPAlerts("entra", broker.IdPOperations, []string{string(idp.AlertProtocol)}) // a family without series has no HELP line
-	rec := httptest.NewRecorder()
-	m.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
-	help := regexp.MustCompile(`(?m)^# HELP byward_idp_alerts_total .*$`).FindString(rec.Body.String())
+	scraped := scrapeMetrics(t, m)
+	help := regexp.MustCompile(`(?m)^# HELP byward_idp_alerts_total .*$`).FindString(scraped)
 	if help == "" {
-		t.Fatalf("/metrics has no HELP line for byward_idp_alerts_total:\n%s", rec.Body.String())
+		t.Fatalf("/metrics has no HELP line for byward_idp_alerts_total:\n%s", scraped)
 	}
 	for _, l := range labels {
 		if !strings.Contains(help, l) {

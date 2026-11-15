@@ -13,12 +13,15 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/byward-dev/byward/internal/logging"
 )
 
 // sessionHeader is the MCP session header (2025-11-25 transports, Session Management).
 const sessionHeader = "Mcp-Session-Id"
+
+// headerProtocolVersion is the MCP-Protocol-Version header, which both eras read: on every legacy
+// request after initialize it carries the negotiated version; on every modern request it mirrors
+// the body's _meta protocolVersion (checkHeaders).
+const headerProtocolVersion = "MCP-Protocol-Version"
 
 const (
 	// streamBuffer is how many upstream messages wait for one slow HTTP stream; past it a
@@ -199,13 +202,12 @@ func (b *Bridge) delete(w http.ResponseWriter, r *http.Request, id Identity, key
 // process under the caps is in use, else 502.
 func (b *Bridge) startFailed(w http.ResponseWriter, r *http.Request, id Identity, err error) {
 	if errors.Is(err, errBusy) {
-		b.c.Log.WarnContext(r.Context(), "stdio process cap full: every process is in use", "request_id", logging.RequestID(r.Context()),
-			"reason", "process_cap", "user_key", id.Subject)
+		b.c.Log.WarnContext(r.Context(), "stdio process cap full: every process is in use", "reason", "process_cap", "user_key", id.Subject)
 		w.Header().Set("Retry-After", busyRetryAfter)
 		http.Error(w, "upstream busy", http.StatusServiceUnavailable)
 		return
 	}
-	b.c.Log.WarnContext(r.Context(), "cannot start the upstream process", "request_id", logging.RequestID(r.Context()), "error", err)
+	b.c.Log.WarnContext(r.Context(), "cannot start the upstream process", "error", err)
 	http.Error(w, "upstream unavailable", http.StatusBadGateway)
 }
 
@@ -214,7 +216,7 @@ func (b *Bridge) startFailed(w http.ResponseWriter, r *http.Request, id Identity
 func (b *Bridge) start(w http.ResponseWriter, r *http.Request, id Identity) (*session, func()) {
 	key, err := newSessionID()
 	if err != nil {
-		b.c.Log.ErrorContext(r.Context(), "cannot create a session ID", "request_id", logging.RequestID(r.Context()), "error", err)
+		b.c.Log.ErrorContext(r.Context(), "cannot create a session ID", "error", err)
 		http.Error(w, "upstream unavailable", http.StatusBadGateway)
 		return nil, nil
 	}
@@ -254,25 +256,21 @@ func (b *Bridge) session(w http.ResponseWriter, r *http.Request, id Identity, ke
 	if err != nil {
 		if errors.Is(err, ErrUserMismatch) {
 			// The binding in front makes this unreachable; it is checked again where the process is.
-			b.c.Log.WarnContext(r.Context(), "session of another user", "request_id", logging.RequestID(r.Context()),
-				"reason", "session_user_mismatch", "user_key", id.Subject)
+			b.c.Log.WarnContext(r.Context(), "session of another user", "reason", "session_user_mismatch", "user_key", id.Subject)
 		}
 		http.Error(w, "session not found", http.StatusNotFound)
 		return nil, nil
 	}
-	if v := r.Header.Get(protocolVersionHeader); v != "" && !s.speaks(v) {
+	if v := r.Header.Get(headerProtocolVersion); v != "" && !s.speaks(v) {
 		// The upstream never sees headers, so the transport's rule is ours (2025-11-25 transports,
 		// Protocol Version Header): an unsupported version gets 400. No header passes.
 		release()
 		writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest,
-			"Bad Request: unsupported "+protocolVersionHeader+"; this MCP session negotiated "+s.negotiated())
+			"Bad Request: unsupported "+headerProtocolVersion+"; this MCP session negotiated "+s.negotiated())
 		return nil, nil
 	}
 	return s, release
 }
-
-// protocolVersionHeader carries the negotiated version on every request after initialize.
-const protocolVersionHeader = "MCP-Protocol-Version"
 
 // speaks reports whether v is the version this MCP session negotiated. Before one is known (an
 // InitializeResult without it), any version passes: the upstream decides.
@@ -351,7 +349,7 @@ func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id
 				if stop {
 					s.p.stop("initialize_failed")
 				}
-				s.log.WarnContext(r.Context(), "initialize failed: no MCP session", "request_id", logging.RequestID(r.Context()), "reason", reason)
+				s.log.WarnContext(r.Context(), "initialize failed: no MCP session", "reason", reason)
 			}
 		}()
 	}
@@ -497,7 +495,7 @@ func (s *session) sendFailed(w http.ResponseWriter, r *http.Request, err error) 
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
-	s.log.WarnContext(r.Context(), "relaying to the upstream process failed", "request_id", logging.RequestID(r.Context()), "error", err)
+	s.log.WarnContext(r.Context(), "relaying to the upstream process failed", "error", err)
 	http.Error(w, "upstream unavailable", http.StatusBadGateway)
 }
 

@@ -15,9 +15,11 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/audit"
+	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/ratelimit"
 	"github.com/byward-dev/byward/internal/registration"
+	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/token"
 )
@@ -34,15 +36,7 @@ type tokenError struct {
 }
 
 func (b *Broker) token(w http.ResponseWriter, r *http.Request) {
-	cors(w, r, "POST, OPTIONS")
-	switch r.Method {
-	case http.MethodOptions:
-		w.WriteHeader(http.StatusNoContent)
-		return
-	case http.MethodPost:
-	default:
-		w.Header().Set("Allow", "POST, OPTIONS")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !allowPost(w, r) {
 		return
 	}
 	if retry, limited := b.throttled(w, r, ratelimit.Token); limited {
@@ -138,8 +132,8 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if res := f.Get("resource"); res != "" && res != b.cfg.Resource.String() {
-		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_target", "this server only issues tokens for " + b.cfg.Resource.String()})
+	if desc, foreign := b.foreignResource(f.Get("resource")); foreign {
+		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_target", desc})
 		return
 	}
 	claims, err := b.cfg.Sealer.Open(token.Code, f.Get("code"))
@@ -159,7 +153,7 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 		return
 	case err != nil:
 		// An outage is not the client's fault: the code may still be good.
-		b.cfg.Log.ErrorContext(ctx, "redeeming an authorization code failed", "request_id", logging.RequestID(ctx), "error", err)
+		b.cfg.Log.ErrorContext(ctx, "redeeming an authorization code failed", "error", err)
 		b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not redeem the code; try again"})
 		return
 	}
@@ -184,13 +178,13 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 	// that the code is redeemed it lives as long as its tokens can (ADR-0006 §5).
 	// A refresh token needs offline_access in the grant (grantScopes: a client that registered the
 	// refresh_token grant, and an IdP refresh token) and a client that still allows refresh.
-	offline := slices.Contains(pc.Scopes, "offline_access") && client.AllowsRefresh()
+	offline := slices.Contains(pc.Scopes, offlineAccess) && client.AllowsRefresh()
 	expires := now.Add(AccessLifetime)
 	if offline {
 		expires = now.Add(GrantLifetime)
 	}
 	if err := b.cfg.Store.UpdateGrant(ctx, claims.GrantID, expires); err != nil {
-		b.cfg.Log.ErrorContext(ctx, "extending a grant failed", "request_id", logging.RequestID(ctx), "error", err)
+		b.cfg.Log.ErrorContext(ctx, "extending a grant failed", "error", err)
 		b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not issue a token"})
 		return
 	}
@@ -200,18 +194,18 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 		refresh, hash = token.NewRefreshToken()
 		if err := b.cfg.Store.PutRefreshToken(ctx, store.RefreshToken{Hash: hash, GrantID: claims.GrantID, ClientID: client.ID(),
 			CreatedAt: now, IdleExpiresAt: minTime(now.Add(RefreshIdleLifetime), expires)}); err != nil {
-			b.cfg.Log.ErrorContext(ctx, "storing a refresh token failed", "request_id", logging.RequestID(ctx), "error", err)
+			b.cfg.Log.ErrorContext(ctx, "storing a refresh token failed", "error", err)
 			b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not issue a token"})
 			return
 		}
 	}
 	scopes := pc.Scopes
 	if !offline { // the response reports the scope actually granted (RFC 6749 §5.1)
-		scopes = slices.DeleteFunc(slices.Clone(scopes), func(s string) bool { return s == "offline_access" })
+		scopes = withoutOffline(scopes)
 	}
 	asserted, idpExpiry, err := b.grantClaims(ctx, claims.GrantID)
 	if err != nil {
-		b.cfg.Log.ErrorContext(ctx, "reading a grant's identity claims failed", "request_id", logging.RequestID(ctx), "error", err)
+		b.cfg.Log.ErrorContext(ctx, "reading a grant's identity claims failed", "error", err)
 		b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not issue a token"})
 		return
 	}
@@ -247,8 +241,7 @@ func (b *Broker) issue(w http.ResponseWriter, r *http.Request, clientID, grantID
 		if capped := idpExpiry.Add(-IdPTokenMargin); !capped.Before(now.Add(MinCappedLifetime)) {
 			exp = minTime(exp, capped)
 		} else {
-			b.cfg.Log.WarnContext(ctx, "the IdP access token expires within the margin; the access token is not capped to it", "request_id", logging.RequestID(ctx),
-				"idp_token_expires_in", idpExpiry.Sub(now).String(), "margin", IdPTokenMargin.String())
+			b.cfg.Log.WarnContext(ctx, "the IdP access token expires within the margin; the access token is not capped to it", "idp_token_expires_in", idpExpiry.Sub(now).String(), "margin", IdPTokenMargin.String())
 		}
 	}
 	c := token.Claims{GrantID: grantID, Subject: subject, IssuedAt: now, ExpiresAt: exp, ClientID: clientID,
@@ -257,13 +250,12 @@ func (b *Broker) issue(w http.ResponseWriter, r *http.Request, clientID, grantID
 	if errors.Is(err, token.ErrTooLong) && len(c.Groups) > 0 {
 		// Too many groups for a token: assert none rather than fail the sign-in; the upstream then
 		// sees no groups claim, as with Entra's groups overage.
-		b.cfg.Log.WarnContext(ctx, "the user's groups do not fit in an access token; the assertion carries no groups", "request_id", logging.RequestID(ctx),
-			"groups", len(c.Groups), "setting", "BYWARD_ASSERTION_CLAIMS")
+		b.cfg.Log.WarnContext(ctx, "the user's groups do not fit in an access token; the assertion carries no groups", "groups", len(c.Groups), "setting", "BYWARD_ASSERTION_CLAIMS")
 		c.Groups = nil
 		access, err = b.cfg.Sealer.Seal(token.Access, c)
 	}
 	if err != nil {
-		b.cfg.Log.ErrorContext(ctx, "sealing an access token failed", "request_id", logging.RequestID(ctx), "error", err)
+		b.cfg.Log.ErrorContext(ctx, "sealing an access token failed", "error", err)
 		b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not issue a token"})
 		return
 	}
@@ -308,14 +300,21 @@ func assertionSubject(jwt string) string {
 	return c.Sub
 }
 
-// revoke ends a grant (store and deny list) and logs why.
+// revoke ends a grant (store and deny list) and logs why. A store failure is logged: the deny list
+// still ends the grant's access tokens on this replica.
 func (b *Broker) revoke(r *http.Request, clientID, grantID string, now time.Time, why string) {
 	ctx := r.Context()
 	if err := b.cfg.Store.RevokeGrant(ctx, grantID, now); err != nil && !errors.Is(err, store.ErrNotFound) {
-		b.cfg.Log.ErrorContext(ctx, "revoking a grant failed", "request_id", logging.RequestID(ctx), "error", err)
+		b.cfg.Log.ErrorContext(ctx, "revoking a grant failed", "error", err)
 	}
+	b.revoked(r, clientID, grantID, why)
+	b.cfg.Log.WarnContext(ctx, why)
+}
+
+// revoked is the end of every grant revocation, once the store has revoked the grant (or failed to,
+// by the caller's policy): the deny list stops its access tokens now, and the audit stream records why.
+func (b *Broker) revoked(r *http.Request, clientID, grantID, why string) {
 	b.deny.Add(grantID)
-	b.cfg.Log.WarnContext(ctx, why, "request_id", logging.RequestID(ctx))
 	b.cfg.Audit.Record(r, audit.Event{Name: audit.GrantRevoked, Outcome: audit.Success, Reason: why, ClientID: clientID, GrantID: grantID})
 }
 
@@ -324,8 +323,32 @@ func pkceMatches(verifier, challenge string) bool {
 	if len(verifier) < 43 || len(verifier) > 128 || challenge == "" {
 		return false
 	}
-	sum := sha256.Sum256([]byte(verifier))
-	return subtle.ConstantTimeCompare([]byte(base64.RawURLEncoding.EncodeToString(sum[:])), []byte(challenge)) == 1
+	return subtle.ConstantTimeCompare([]byte(idp.CodeChallenge(verifier)), []byte(challenge)) == 1
+}
+
+// allowPost applies the preamble of the POST endpoints (/token, /revoke, /register): the discovery
+// CORS policy, 204 to a preflight, 405 to any method but POST. It reports whether to go on.
+func allowPost(w http.ResponseWriter, r *http.Request) bool {
+	resource.DiscoveryCORS(w, r, "POST, OPTIONS")
+	switch r.Method {
+	case http.MethodPost:
+		return true
+	case http.MethodOptions:
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		w.Header().Set("Allow", "POST, OPTIONS")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+	return false
+}
+
+// foreignResource reports whether res, an RFC 8707 resource parameter, names another resource
+// than ours, with the invalid_target description to send. A missing resource means ours (ADR-0005 §4).
+func (b *Broker) foreignResource(res string) (desc string, foreign bool) {
+	if res == "" || res == b.cfg.Resource.String() {
+		return "", false
+	}
+	return "this server only issues tokens for " + b.cfg.Resource.String(), true
 }
 
 func (b *Broker) tokenFail(w http.ResponseWriter, r *http.Request, e tokenError) {
@@ -358,7 +381,7 @@ const cimdRetryAfter = "60"
 // not spent.
 func (b *Broker) unavailable(w http.ResponseWriter, r *http.Request, what string, err error) {
 	ctx := r.Context()
-	b.cfg.Log.ErrorContext(ctx, what, "request_id", logging.RequestID(ctx), "error", err)
+	b.cfg.Log.ErrorContext(ctx, what, "error", err)
 	w.Header().Set("Retry-After", retryAfter)
 	b.tokenFail(w, r, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the proxy's store is unavailable; try again"})
 }
@@ -373,7 +396,7 @@ type useRecorder interface {
 func (b *Broker) recordUse(ctx context.Context, client registration.Client, now time.Time) {
 	if u, ok := client.(useRecorder); ok {
 		if err := u.RecordUse(ctx, now); err != nil {
-			b.cfg.Log.WarnContext(ctx, "renewing a client registration failed", "request_id", logging.RequestID(ctx), "client_id", client.ID(), "error", err.Error())
+			b.cfg.Log.WarnContext(ctx, "renewing a client registration failed", "client_id", client.ID(), "error", err.Error())
 		}
 	}
 }

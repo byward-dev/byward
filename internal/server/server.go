@@ -144,10 +144,11 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 		w.log(log)
 	}
 	cancel()
-	for _, w := range redundantStrips(cfg) {
-		w.log(log)
-	}
 	if a == nil {
+		warnings, _ := configWarnings(cfg, nil) // with authentication, buildAuth logs them
+		for _, w := range warnings {
+			w.log(log)
+		}
 		h = Handler(cfg, log, up.handler, resource.NoTokens{}, nil, nil, o)
 	} else {
 		register := a.register
@@ -176,6 +177,11 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 	return s, nil
 }
 
+// limitBody bounds an MCP request body to n bytes. Unlike http.MaxBytesHandler it answers 413 at
+// once when Content-Length already says the body is larger, so such a request never takes an
+// admission slot or reaches the upstream. The broker uses http.MaxBytesHandler, so an oversized
+// body there still gets the broker's own error response (OAuth JSON, or the consent error page),
+// not a plain-text 413.
 func limitBody(n int64, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ContentLength > n {
@@ -234,7 +240,7 @@ func recoverer(log *slog.Logger, next http.Handler) http.Handler {
 				if p == http.ErrAbortHandler { //nolint:errorlint // sentinel compared as net/http does
 					panic(p)
 				}
-				log.ErrorContext(r.Context(), "panic", "request_id", logging.RequestID(r.Context()), "panic", fmt.Sprint(p))
+				log.ErrorContext(r.Context(), "panic", "panic", fmt.Sprint(p))
 				http.Error(w, "internal error", http.StatusInternalServerError)
 			}
 		}()

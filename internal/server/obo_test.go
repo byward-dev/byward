@@ -27,6 +27,8 @@ import (
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/upstream/relay"
 )
 
@@ -38,11 +40,11 @@ type oboEnv struct {
 	fake  *fakeidp.IdP
 	proxy *Servers
 	srv   *httptest.Server
-	logs  *syncBuffer
+	logs  *logsink.Buffer
 
+	up         *fakeupstream.Server // the HTTP upstream; nil with a stdio one
 	mu         sync.Mutex
-	headers    []http.Header // what the upstream received
-	refuseWith int           // when set, the status the upstream answers every request with
+	refuseWith int // when set, the status the upstream answers every request with
 }
 
 func newOBOEnv(t *testing.T, scopes string, opts ...fakeidp.Option) *oboEnv {
@@ -54,17 +56,12 @@ func newOBOEnv(t *testing.T, scopes string, opts ...fakeidp.Option) *oboEnv {
 func newOBOEnvWith(t *testing.T, scopes string, env []string, opts ...fakeidp.Option) *oboEnv {
 	t.Helper()
 	app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}, RedirectURIs: []string{oboPublic + "/callback/entra"}}
-	e := &oboEnv{fake: fakeidp.New(t, fakeidp.Entra, append([]fakeidp.Option{fakeidp.WithClient(app)}, opts...)...), logs: &syncBuffer{}}
+	e := &oboEnv{fake: fakeidp.New(t, fakeidp.Entra, append([]fakeidp.Option{fakeidp.WithClient(app)}, opts...)...), logs: &logsink.Buffer{}}
 	// The one Entra provider (sign-in and On-Behalf-Of) reaches the fake through its HTTP client.
-	origProvider := newEntraProvider
-	newEntraProvider = func(c entra.Config) (*entra.Provider, error) {
-		c.Tenant, c.ClientID, c.ClientAuth, c.HTTPClient = e.fake.TenantID(), app.ID, idp.ClientSecret("s3cret"), e.fake.HTTPClient()
-		return entra.New(c)
-	}
-	t.Cleanup(func() { newEntraProvider = origProvider })
-	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	useFakeEntra(t, e.fake, app)
+	e.up = fakeupstream.New()
+	e.up.Handler = func(w http.ResponseWriter, _ *http.Request) {
 		e.mu.Lock()
-		e.headers = append(e.headers, r.Header.Clone())
 		refuseWith := e.refuseWith
 		e.mu.Unlock()
 		if refuseWith != 0 {
@@ -73,9 +70,9 @@ func newOBOEnvWith(t *testing.T, scopes string, env []string, opts ...fakeidp.Op
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{}}`)
-	}))
-	t.Cleanup(up.Close)
-	settings := append(authEnv(t), "BYWARD_PUBLIC_URL="+oboPublic+"/mcp", "BYWARD_UPSTREAM_URL="+up.URL+"/mcp", "BYWARD_OBO_SCOPES="+scopes)
+	}
+	t.Cleanup(e.up.Close)
+	settings := append(authEnv(t), "BYWARD_PUBLIC_URL="+oboPublic+"/mcp", "BYWARD_UPSTREAM_URL="+e.up.URL+"/mcp", "BYWARD_OBO_SCOPES="+scopes)
 	cfg, _, err := config.Load(nil, append(settings, env...), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
@@ -116,12 +113,18 @@ func (e *oboEnv) send(t *testing.T, c *http.Client, method, path string, body io
 }
 
 // metrics scrapes the internal listener.
-func (e *oboEnv) metrics() string {
-	m := httptest.NewRecorder()
-	scrape := httptest.NewRequest("GET", "/metrics", nil)
-	scrape.Host = "127.0.0.1:9090" // the internal listener answers only IP or listed hosts
-	e.proxy.Internal.Handler.ServeHTTP(m, scrape)
-	return m.Body.String()
+func (e *oboEnv) metrics(t *testing.T) string {
+	t.Helper()
+	return internalMetrics(t, e.proxy.Internal.Handler)
+}
+
+// upstreamHeaders is the headers of each request the HTTP upstream received, in order.
+func (e *oboEnv) upstreamHeaders() []http.Header {
+	var h []http.Header
+	for _, r := range e.up.Requests() {
+		h = append(h, r.Header)
+	}
+	return h
 }
 
 var oboFlow = regexp.MustCompile(`name="flow" value="([^"]+)"`)
@@ -197,12 +200,11 @@ func TestUpstreamGetsADownstreamTokenOnBehalfOfTheUser(t *testing.T) {
 			t.Fatalf("MCP request: %d %s", status, body)
 		}
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if len(e.headers) != 2 {
-		t.Fatalf("upstream got %d requests, want 2", len(e.headers))
+	headers := e.upstreamHeaders()
+	if len(headers) != 2 {
+		t.Fatalf("upstream got %d requests, want 2", len(headers))
 	}
-	first := e.headers[0].Values("X-Byward-Downstream-Token")
+	first := headers[0].Values("X-Byward-Downstream-Token")
 	if len(first) != 1 || !strings.HasPrefix(first[0], "Bearer ") || strings.Contains(first[0], "forged") {
 		t.Fatalf("downstream header %q: want our token alone, the client's removed", first)
 	}
@@ -211,7 +213,7 @@ func TestUpstreamGetsADownstreamTokenOnBehalfOfTheUser(t *testing.T) {
 	if claims["aud"] != fakeidp.GraphAppID || claims["scp"] != "User.Read" {
 		t.Fatalf("downstream token aud %v scp %v, want Microsoft Graph User.Read", claims["aud"], claims["scp"])
 	}
-	if second := e.headers[1].Get("X-Byward-Downstream-Token"); second != first[0] {
+	if second := headers[1].Get("X-Byward-Downstream-Token"); second != first[0] {
 		t.Error("the second request got a different token: the cache was not used")
 	}
 	if strings.Contains(e.logs.String(), tok) {
@@ -221,7 +223,7 @@ func TestUpstreamGetsADownstreamTokenOnBehalfOfTheUser(t *testing.T) {
 		t.Errorf("the startup log does not name the downstream API; log: %s", e.logs)
 	}
 	// The identity assertion (ADR-0016) still reaches the upstream beside the downstream token.
-	assertion, isBearer := strings.CutPrefix(e.headers[0].Get("Authorization"), "Bearer ")
+	assertion, isBearer := strings.CutPrefix(headers[0].Get("Authorization"), "Bearer ")
 	if !isBearer || assertion == tok {
 		t.Fatal("the upstream got no identity assertion beside the downstream token")
 	}
@@ -230,7 +232,7 @@ func TestUpstreamGetsADownstreamTokenOnBehalfOfTheUser(t *testing.T) {
 	}
 	// No token passthrough: neither the proxy's access token nor the user's IdP token (the
 	// assertion, scp access_as_user) reaches the upstream.
-	for name, values := range e.headers[0] {
+	for name, values := range headers[0] {
 		for _, v := range values {
 			bearer, isBearer := strings.CutPrefix(v, "Bearer ")
 			if strings.Contains(v, access) || (isBearer && strings.Count(bearer, ".") == 2 && jwtClaims(t, bearer)["scp"] == "access_as_user") {
@@ -238,7 +240,7 @@ func TestUpstreamGetsADownstreamTokenOnBehalfOfTheUser(t *testing.T) {
 			}
 		}
 	}
-	metrics := e.metrics()
+	metrics := e.metrics(t)
 	for _, want := range []string{`byward_downstream_tokens_total{outcome="issued"} 1`, `byward_downstream_tokens_total{outcome="cached"} 1`} {
 		if !strings.Contains(metrics, want) {
 			t.Errorf("metrics lack %s", want)
@@ -281,9 +283,7 @@ func TestDownstreamRefusalsAreAnsweredInTheProxysName(t *testing.T) {
 			if status != http.StatusOK || !strings.Contains(body, c.want) || !json.Valid([]byte(body)) {
 				t.Fatalf("answer %d %s, want 200 with %s", status, body, c.want)
 			}
-			e.mu.Lock()
-			reached := len(e.headers)
-			e.mu.Unlock()
+			reached := len(e.upstreamHeaders())
 			if reached != 0 {
 				t.Fatalf("the upstream got %d requests without a downstream token", reached)
 			}
@@ -305,7 +305,7 @@ func TestDownstreamRefusalsAreAnsweredInTheProxysName(t *testing.T) {
 				t.Error("an admin-consent URL for a refusal consent would not fix")
 			}
 			outcome := strings.TrimSuffix(strings.TrimPrefix(c.auditWant, `"reason":"`), `"`)
-			metrics := e.metrics()
+			metrics := e.metrics(t)
 			if want := `byward_downstream_tokens_total{outcome="` + outcome + `"} 1`; !strings.Contains(metrics, want) {
 				t.Errorf("metrics lack %s", want)
 			}
@@ -321,6 +321,12 @@ func TestDownstreamRefusalsAreAnsweredInTheProxysName(t *testing.T) {
 			nonZero := regexp.MustCompile(`byward_idp_alerts_total\{[^}]*\} [1-9]`).FindAllString(metrics, -1)
 			counted := strings.Contains(metrics, `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="`+c.alert+`"} 1`) && len(nonZero) == 1
 			refusal := regexp.MustCompile(`(?m)^.*"level":"ERROR","msg":"no downstream token for the upstream request.*$`).FindString(logs)
+			// The request's ID reaches Entra as client-request-id and comes back as its correlation_id,
+			// as on the broker's IdP calls (ADR-0021 §2, §7).
+			id := regexp.MustCompile(`"request_id":"([^"]+)"`).FindStringSubmatch(refusal)
+			if id == nil || !strings.Contains(refusal, `"correlation_id":"`+id[1]+`"`) {
+				t.Errorf("the refusal line does not carry the request's ID back as Entra's correlation_id: %s", refusal)
+			}
 			logged := strings.Contains(refusal, `"alert":"`+c.alert+`"`)
 			if c.alert == "" { // the series are exported at 0; none may have counted
 				counted, logged = len(nonZero) > 0, strings.Contains(logs, `"alert":`)
@@ -356,15 +362,14 @@ func TestEachUserGetsTheirOwnDownstreamToken(t *testing.T) {
 			t.Fatalf("MCP request: %d %s", status, body)
 		}
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	headers := e.upstreamHeaders()
 	for i, want := range []string{oids[0], oids[1], oids[0]} {
-		tok := strings.TrimPrefix(e.headers[i].Get("X-Byward-Downstream-Token"), "Bearer ")
+		tok := strings.TrimPrefix(headers[i].Get("X-Byward-Downstream-Token"), "Bearer ")
 		if got := jwtClaims(t, tok)["oid"]; got != want {
 			t.Fatalf("request %d: downstream token for oid %v, want %s", i, got, want)
 		}
 	}
-	metrics := e.metrics()
+	metrics := e.metrics(t)
 	for _, want := range []string{`byward_downstream_tokens_total{outcome="issued"} 2`, `byward_downstream_tokens_total{outcome="cached"} 1`} {
 		if !strings.Contains(metrics, want) {
 			t.Errorf("metrics lack %s", want)
@@ -454,7 +459,7 @@ func TestDownstreamRefusesARequestWithoutAUsableGrant(t *testing.T) {
 func TestAClientGoingAwayIsNotARefusal(t *testing.T) {
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
-	logs := &syncBuffer{}
+	logs := &logsink.Buffer{}
 	d := &downstreamTokens{
 		cache: downstream.New(func(context.Context, string, string, []string) (downstream.Token, error) {
 			<-release
@@ -494,7 +499,7 @@ func TestARefusalThatNeedsTheOperatorNamesTheFix(t *testing.T) {
 		{"no alert", &idp.Error{Class: idp.Unavailable}, "unavailable"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			logs := &syncBuffer{}
+			logs := &logsink.Buffer{}
 			d := &downstreamTokens{
 				cache: downstream.New(func(context.Context, string, string, []string) (downstream.Token, error) {
 					return downstream.Token{}, c.err
@@ -560,12 +565,11 @@ func TestDownstreamHeaderIsStrippedAndTokensUncappedWhenOnBehalfOfIsOff(t *testi
 			if status, body := e.mcp(t, tokens["access_token"].(string), oboToolsCall, h); status != http.StatusOK {
 				t.Fatalf("MCP request: %d %s", status, body)
 			}
-			e.mu.Lock()
-			defer e.mu.Unlock()
-			if len(e.headers) != 1 {
-				t.Fatalf("the upstream got %d requests, want 1", len(e.headers))
+			headers := e.upstreamHeaders()
+			if len(headers) != 1 {
+				t.Fatalf("the upstream got %d requests, want 1", len(headers))
 			}
-			got := e.headers[0]
+			got := headers[0]
 			if v := got.Values("X-Byward-Downstream-Token"); len(v) != 0 {
 				t.Fatalf("the upstream got %q, want no downstream header", v)
 			}
@@ -640,19 +644,18 @@ func TestTheDownstreamTokenCanReplaceAuthorization(t *testing.T) {
 	if status, body := e.mcp(t, access, oboToolsCall, nil); status != http.StatusOK {
 		t.Fatalf("MCP request: %d %s", status, body)
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if len(e.headers) != 1 {
-		t.Fatalf("the upstream got %d requests, want 1", len(e.headers))
+	headers := e.upstreamHeaders()
+	if len(headers) != 1 {
+		t.Fatalf("the upstream got %d requests, want 1", len(headers))
 	}
-	got := e.headers[0].Values("Authorization")
+	got := headers[0].Values("Authorization")
 	if len(got) != 1 || !strings.HasPrefix(got[0], "Bearer ") || strings.Contains(got[0], access) {
 		t.Fatalf("Authorization %q: want exactly one, the downstream token, never the client's", got)
 	}
 	if aud := jwtClaims(t, strings.TrimPrefix(got[0], "Bearer "))["aud"]; aud != fakeidp.GraphAppID {
 		t.Fatalf("Authorization carries a token for %v, want Microsoft Graph", aud)
 	}
-	if !strings.HasPrefix(e.headers[0].Get("X-Byward-Assertion"), "Bearer ") {
+	if !strings.HasPrefix(headers[0].Get("X-Byward-Assertion"), "Bearer ") {
 		t.Fatal("the identity assertion did not reach its own header")
 	}
 }
@@ -661,15 +664,11 @@ func TestTheDownstreamTokenCanReplaceAuthorization(t *testing.T) {
 // app-only caller's, which gets none, carries no Authorization at all; the client's copy is removed
 // either way.
 func TestWithOBOInAuthorizationTheUpstreamGetsTheDownstreamTokenOrNothing(t *testing.T) {
-	var got []http.Header
-	var mu sync.Mutex
-	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		got = append(got, r.Header.Clone())
-		mu.Unlock()
+	up := fakeupstream.New()
+	up.Handler = func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":7,"result":{}}`)
-	}))
+	}
 	t.Cleanup(up.Close)
 	cfg := &config.Config{UpstreamURL: mustURL(t, up.URL+"/mcp"), AssertionHeader: "X-Byward-Assertion", OBOHeader: "Authorization", UpstreamHeaderTimeout: time.Minute}
 	log := slog.New(slog.DiscardHandler)
@@ -692,9 +691,7 @@ func TestWithOBOInAuthorizationTheUpstreamGetsTheDownstreamTokenOrNothing(t *tes
 		{"an app-only caller", resource.Identity{Subject: "tid:app", ClientID: "app", PrincipalType: resource.PrincipalClient}, nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			mu.Lock()
-			got = nil
-			mu.Unlock()
+			before := len(up.Requests())
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { d.serve(w, r, c.id, true, relayTo) }))
 			defer srv.Close()
 			r, err := http.NewRequest("POST", srv.URL+"/mcp", strings.NewReader(oboToolsCall))
@@ -708,12 +705,11 @@ func TestWithOBOInAuthorizationTheUpstreamGetsTheDownstreamTokenOrNothing(t *tes
 				t.Fatal(err)
 			}
 			_ = res.Body.Close()
-			mu.Lock()
-			defer mu.Unlock()
+			got := up.Requests()[before:]
 			if len(got) != 1 {
 				t.Fatalf("the upstream got %d requests, want 1 (serve answered %d)", len(got), res.StatusCode)
 			}
-			if a := got[0].Values("Authorization"); !slices.Equal(a, c.want) {
+			if a := got[0].Header.Values("Authorization"); !slices.Equal(a, c.want) {
 				t.Fatalf("Authorization %q, want %q", a, c.want)
 			}
 		})

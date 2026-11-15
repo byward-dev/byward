@@ -5,10 +5,12 @@ import (
 	"net/url"
 	"testing"
 	"time"
+
+	"github.com/byward-dev/byward/internal/testutil/fakeclock"
 )
 
 // authFixture is an Entra IdP with a confidential client and a resource API, on a fixed clock.
-func authFixture(t *testing.T, c Client) (*fixture, string, *Clock) {
+func authFixture(t *testing.T, c Client) (*fixture, string, *fakeclock.Clock) {
 	t.Helper()
 	clock := newClock()
 	api := Client{ID: NewGUID()}

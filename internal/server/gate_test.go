@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net/http/httptest"
 	"os"
 	"regexp"
 	"strings"
@@ -112,10 +111,9 @@ func TestWiredBrokerGetsTheConfiguredGateAndObservability(t *testing.T) {
 		t.Fatalf("broker wired without its gate, audit log or IdP observation: gate %v, audit %v, IdP %q", got.Gate, got.Audit, got.IdPName)
 	}
 	got.ObserveIdP("callback", "success", time.Millisecond)
-	rec := httptest.NewRecorder()
-	srv.Internal.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "http://127.0.0.1:9090/metrics", nil))
-	if !regexp.MustCompile(`\{[^}]*idp="entra"[^}]*operation="callback"[^}]*outcome="success"`).MatchString(rec.Body.String()) {
-		t.Fatalf("an IdP observation did not reach /metrics as idp=entra, callback, success:\n%s", rec.Body.String())
+	metrics := internalMetrics(t, srv.Internal.Handler)
+	if !regexp.MustCompile(`\{[^}]*idp="entra"[^}]*operation="callback"[^}]*outcome="success"`).MatchString(metrics) {
+		t.Fatalf("an IdP observation did not reach /metrics as idp=entra, callback, success:\n%s", metrics)
 	}
 	if got.ObserveIdPAlert == nil {
 		t.Fatal("broker wired without IdP alert observation")
@@ -124,20 +122,19 @@ func TestWiredBrokerGetsTheConfiguredGateAndObservability(t *testing.T) {
 	// On-Behalf-Of there is no on_behalf_of series.
 	for _, op := range broker.IdPOperations {
 		for _, a := range idp.Alerts {
-			if s := `byward_idp_alerts_total{idp="entra",operation="` + op + `",reason="` + string(a) + `"} 0`; !strings.Contains(rec.Body.String(), s) {
-				t.Errorf("%s is not exported before any alert:\n%s", s, rec.Body.String())
+			if s := `byward_idp_alerts_total{idp="entra",operation="` + op + `",reason="` + string(a) + `"} 0`; !strings.Contains(metrics, s) {
+				t.Errorf("%s is not exported before any alert:\n%s", s, metrics)
 			}
 		}
 	}
-	if strings.Contains(rec.Body.String(), `operation="on_behalf_of"`) {
-		t.Errorf("an on_behalf_of alert series is exported without On-Behalf-Of:\n%s", rec.Body.String())
+	if strings.Contains(metrics, `operation="on_behalf_of"`) {
+		t.Errorf("an on_behalf_of alert series is exported without On-Behalf-Of:\n%s", metrics)
 	}
 	series := `byward_idp_alerts_total{idp="entra",operation="refresh",reason="credential_rejected"} `
 	got.ObserveIdPAlert("refresh", "credential_rejected")
-	rec = httptest.NewRecorder()
-	srv.Internal.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "http://127.0.0.1:9090/metrics", nil))
-	if want := series + "1"; !strings.Contains(rec.Body.String(), want) {
-		t.Fatalf("an IdP alert did not reach /metrics as %s:\n%s", want, rec.Body.String())
+	metrics = internalMetrics(t, srv.Internal.Handler)
+	if want := series + "1"; !strings.Contains(metrics, want) {
+		t.Fatalf("an IdP alert did not reach /metrics as %s:\n%s", want, metrics)
 	}
 	id := idp.Identity{Subject: fixtureTenant + ":x", Claims: map[string]any{"tid": fixtureTenant}}
 	var d broker.Denial

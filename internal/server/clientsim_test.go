@@ -15,10 +15,6 @@ import (
 
 	"github.com/byward-dev/byward/internal/broker"
 	"github.com/byward-dev/byward/internal/config"
-	"github.com/byward-dev/byward/internal/idp"
-	"github.com/byward-dev/byward/internal/idp/entra"
-	"github.com/byward-dev/byward/internal/registration"
-	"github.com/byward-dev/byward/internal/ssrfguard"
 	"github.com/byward-dev/byward/internal/testutil/clientdocs"
 	"github.com/byward-dev/byward/internal/testutil/clientsim"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
@@ -116,22 +112,8 @@ func newSimProxy(t *testing.T, p clientsim.Profile) (clientsim.Env, clientsim.Cr
 		}
 	}
 	served := clientdocs.Serve(t, docs...)
-	origReg, origBroker := newCIMDRegistry, newBroker
-	t.Cleanup(func() { newCIMDRegistry, newBroker = origReg, origBroker })
-	newCIMDRegistry = func(c registration.CIMDConfig) *registration.CIMDRegistry {
-		guard := ssrfguard.New(ssrfguard.Config{RootCAs: served.RootCAs, Dial: served.Dial})
-		c.Fetch, c.KeysClient = guard, guard.HTTPClient()
-		return origReg(c)
-	}
-	newBroker = func(c broker.Config) (*broker.Broker, error) {
-		prov, err := entra.New(entra.Config{Tenant: fake.TenantID(), ClientID: app.ID, ClientAuth: idp.ClientSecret("s3cret"),
-			RedirectURL: public + "/callback/entra", HTTPClient: fake.HTTPClient()})
-		if err != nil {
-			return nil, err
-		}
-		c.IdP, c.IdPScopes = prov, prov.Scope()
-		return origBroker(c)
-	}
+	serveCIMDFrom(t, served)
+	useFakeEntra(t, fake, app)
 
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
