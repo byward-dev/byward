@@ -246,7 +246,7 @@ func (b *Broker) issue(w http.ResponseWriter, r *http.Request, clientID, grantID
 		if capped := idpExpiry.Add(-IdPTokenMargin); !capped.Before(now.Add(MinCappedLifetime)) {
 			exp = minTime(exp, capped)
 		} else {
-			b.cfg.Log.WarnContext(ctx, "the IdP access token expires within the margin; the access token is not capped to it", "idp_token_expires_in", idpExpiry.Sub(now).String(), "margin", IdPTokenMargin.String())
+			b.cfg.Log.WarnContext(ctx, "the IdP access token expires too soon to cap the access token to it (within the margin and the shortest capped lifetime)", "idp_token_expires_in", idpExpiry.Sub(now).String(), "margin", IdPTokenMargin.String())
 		}
 	}
 	c := token.Claims{GrantID: grantID, Subject: subject, IssuedAt: now, ExpiresAt: exp, ClientID: clientID, Claims: resource.Claims(asserted)}

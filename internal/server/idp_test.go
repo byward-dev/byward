@@ -385,8 +385,9 @@ func TestTheDiscoveryFixAsksForHTTPSUnlessTheIssuerIsAnAllowedLoopbackHTTPOne(t 
 	}
 }
 
-// For a production IdP (an https issuer, no --dev relaxation) whose discovery fails, doctor's fix
-// asks for https: the wiring passes config's decision, not a constant.
+// For an https issuer whose discovery fails, doctor's fix asks for https, even under --dev (which
+// loadOIDC sets, and which allows only a loopback http issuer): the wiring passes config's
+// decision, not a constant.
 func TestDoctorAsksForHTTPSWhenAnHTTPSIssuersDiscoveryFails(t *testing.T) {
 	cfg := loadOIDC(t, "oidc", "https://sso.example.com/realms/acme", "c")
 	rep, err := Doctor(context.Background(), cfg, DoctorOptions{IdP: &http.Client{Transport: refuse{}}, Proxy: &http.Client{Transport: refuse{}}})

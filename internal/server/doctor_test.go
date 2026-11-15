@@ -238,7 +238,7 @@ func TestDoctorWithoutAuthListsTheRelaxationsAndChecksOnlyTheUpstreamAndTheTrust
 	last := rep.Checks[len(rep.Checks)-1]
 	if !slices.Equal(names, []string{"configuration", "configuration", "upstream", "trust store", "authentication"}) ||
 		last.Status != doctor.Warn || !strings.Contains(last.Message, "authentication is off") || rep.ExitCode() != 0 {
-		t.Fatalf("checks %v, report %+v, err %v; want the two relaxations, then upstream, trust store and authentication", names, rep, err)
+		t.Fatalf("checks %v, report %+v; want the two relaxations, then upstream, trust store and authentication", names, rep)
 	}
 }
 
@@ -254,12 +254,21 @@ func TestDoctorListsEveryRelaxationAsAWarning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// An oidc IdP whose issuer is http on loopback: its relaxation names the issuer, after a colon.
+	app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}}
+	fake := fakeidp.New(t, fakeidp.Generic, fakeidp.WithClient(app))
+	httpIssuer, err := Doctor(context.Background(), loadOIDC(t, "oidc", fake.Issuer(), app.ID), DoctorOptions{IdP: fake.HTTPClient(), Proxy: &http.Client{Transport: refuse{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	for name, tc := range map[string]struct {
 		rep  doctor.Report
 		want []string
 	}{
 		"with authentication (--dev)":                 {withAuth, []string{"secret file permissions are not checked", "http public URL on loopback"}},
 		"without authentication (--insecure-no-auth)": {noAuth, []string{"http public URL on loopback", "AUTHENTICATION IS OFF: anyone who can reach http://127.0.0.1:8080/mcp can use the upstream, and the upstream receives no identity"}},
+		"with an http IdP issuer on loopback (--dev)": {httpIssuer, []string{"secret file permissions are not checked",
+			"http IdP issuer on loopback (" + fake.Issuer() + "): discovery over http, and the IdP's sign-in page, token endpoint and signing keys over http too where it lists them on loopback"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			// Exactly one warning per relaxation, in config's order, each with the same fix.

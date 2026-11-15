@@ -990,7 +990,7 @@ func TestAccessTokensAreCappedAtTheIdPTokenWhenOnBehalfOfIsOn(t *testing.T) {
 			if got := body["expires_in"].(float64); got != c.want.Seconds() {
 				t.Fatalf("code exchange: expires_in %v, want %v", got, c.want.Seconds())
 			}
-			const notCapped = "the IdP access token expires within the margin"
+			const notCapped = "the IdP access token expires too soon to cap the access token to it"
 			switch logs := e.logs.String(); {
 			case c.warning == "" && strings.Contains(logs, notCapped):
 				t.Fatalf("a not-capped warning where the token was capped or the cap is off: %s", logs)
