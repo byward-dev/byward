@@ -17,6 +17,7 @@ import (
 	"github.com/go-jose/go-jose/v4"
 
 	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // Config is the generic adapter's input, as plain values.
@@ -163,7 +164,7 @@ func (p *Provider) discover(ctx context.Context) (*metadata, error) {
 func checkURL(raw, issuer string, allowLoopbackHTTP bool) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" {
-		return fmt.Errorf("%q is not an absolute URL", raw)
+		return fmt.Errorf("%s is not an absolute URL", logging.URL(raw))
 	}
 	if u.Scheme == "https" {
 		return nil
@@ -172,7 +173,7 @@ func checkURL(raw, issuer string, allowLoopbackHTTP bool) error {
 	if allowLoopbackHTTP && u.Scheme == "http" && iu != nil && iu.Scheme == "http" && loopback(u.Hostname()) && loopback(iu.Hostname()) {
 		return nil
 	}
-	return fmt.Errorf("%q must use https", raw)
+	return fmt.Errorf("%s must use https", logging.URL(raw))
 }
 
 func loopback(host string) bool {

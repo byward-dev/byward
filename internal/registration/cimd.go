@@ -1,9 +1,13 @@
 package registration
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // CIMD limits (ADR-0008 §4; draft-ietf-oauth-client-id-metadata-document-03 §10.11).
@@ -76,8 +80,13 @@ func parseCIMD(id string, body []byte) (*clientMetadata, error) {
 		return nil, err
 	}
 	if d.ClientID != id {
-		return nil, fmt.Errorf("client_id %q does not match the document URL", d.ClientID)
+		return nil, fmt.Errorf("client_id %s does not match the document URL", logging.URL(d.ClientID))
 	}
 	m, _, err := validateMetadata(d, allRedirects)
+	// A refused redirect URI's own message quotes it whole, for the client that sent it; this error
+	// is logged, so it shows the URI as logs may.
+	if re := (*RedirectError)(nil); errors.As(err, &re) {
+		return nil, fmt.Errorf("redirect_uris[%d]: %s", slices.Index(d.RedirectURIs, re.Sent), re.logText())
+	}
 	return m, err
 }

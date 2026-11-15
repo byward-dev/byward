@@ -157,18 +157,11 @@ func TestTheEnvironmentProxyIsIgnored(t *testing.T) {
 	}
 }
 
-func TestAStatusErrorNamesTheURLWithoutItsQuery(t *testing.T) {
-	f := server(t, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusForbidden) }, time.Second)
-	_, err := f.Get(context.Background(), "https://example.com/doc?secret=x", 1024)
-	if err == nil || !strings.Contains(err.Error(), "https://example.com/doc answered HTTP status 403") || strings.Contains(err.Error(), "secret") {
-		t.Fatalf("err = %v", err)
-	}
-}
-
-func TestARefusalNeverCarriesTheQuery(t *testing.T) {
-	_, err := New(Config{}).Get(context.Background(), "https://127.0.0.1/doc?secret=x", 1024)
-	if err == nil || strings.Contains(err.Error(), "secret") {
-		t.Fatalf("err = %v", err)
+// A refusal at dial time (a non-public address) names the URL as logs may show it.
+func TestANonPublicRefusalNamesTheURLWithoutItsQuery(t *testing.T) {
+	_, err := New(Config{}).Get(context.Background(), "https://127.0.0.1/doc?code=SECRET", 1024)
+	if want := "ssrfguard: refused: https://127.0.0.1/doc resolves to a non-public address"; err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
 	}
 }
 
@@ -184,7 +177,8 @@ func TestTheGuardedHTTPClientRefusesPrivateAddresses(t *testing.T) {
 }
 
 // A server that stalls times the fetch out (transient), and the error never carries the query:
-// the HTTP client puts the full request URL in its errors, which the guard drops.
+// the HTTP client puts the full request URL in a fetch error, which the guard shows as logs may
+// (logging.URLError), and a body read error quotes none.
 func TestAStallingServerTimesOutWithoutLeakingTheQuery(t *testing.T) {
 	for name, stall := range map[string]func(http.ResponseWriter, <-chan struct{}){
 		"headers never come": func(_ http.ResponseWriter, release <-chan struct{}) { <-release },
@@ -222,6 +216,31 @@ func TestResponseHeadersAreCappedAtMaxHeaderBytes(t *testing.T) {
 			}, time.Second)
 			if _, err := f.Get(context.Background(), "https://example.com/doc", 1024); (err == nil) != tc.ok {
 				t.Fatalf("err = %v, want ok %v", err, tc.ok)
+			}
+		})
+	}
+}
+
+// A refusal, a status other than 200 and a document over the limit name the URL as logs may show
+// it: no user information, query or fragment.
+func TestGetErrorsNameTheURLWithoutItsSecrets(t *testing.T) {
+	big := func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(strings.Repeat("a", 11))) }
+	forbidden := func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusForbidden) }
+	unreached := func(http.ResponseWriter, *http.Request) {} // the guard refuses before any request
+	for name, tc := range map[string]struct {
+		url  string
+		h    http.HandlerFunc
+		want string
+	}{
+		"not https":         {"http://example.com/doc?code=SECRET#SECRET", unreached, "ssrfguard: refused: http://example.com/doc is not an https URL on port 443"},
+		"user information":  {"https://user:SECRET@example.com/doc", unreached, "ssrfguard: refused: https://example.com/doc is not an https URL on port 443"},
+		"another status":    {"https://example.com/doc?code=SECRET#SECRET", forbidden, "ssrfguard: https://example.com/doc answered HTTP status 403"},
+		"larger than limit": {"https://example.com/doc?code=SECRET#SECRET", big, "ssrfguard: response too large: https://example.com/doc is larger than 10 bytes"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := server(t, tc.h, time.Second).Get(context.Background(), tc.url, 10)
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("err = %v, want %q", err, tc.want)
 			}
 		})
 	}

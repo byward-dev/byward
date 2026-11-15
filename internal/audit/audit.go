@@ -79,12 +79,11 @@ type Log struct {
 	observe Observer
 }
 
-// Unauthenticated events are limited to this many per minute for each source, event and outcome
-// (RecordUnauthenticated).
+// Unauthenticated event limits (RecordUnauthenticated).
 const (
-	unauthBurst   = 10
+	unauthBurst   = 10 // per minute for each source, event and outcome
 	unauthWindow  = time.Minute
-	unauthSources = 10000
+	unauthSources = 10000 // the most (source, event, outcome) keys tracked at once
 )
 
 // New returns an audit log writing through log; observe may be nil.
@@ -107,10 +106,10 @@ func (l *Log) Record(r *http.Request, e Event) {
 
 // RecordUnauthenticated writes e for a request whose sender is not authenticated, limited per
 // source, event and outcome, so frequent events (page views, registrations) never crowd out rarer
-// ones (decisions, refusals); when records were dropped the next one with the same key carries
-// `suppressed=N` (ADR-0021 §5). A source is an address, or an IPv6 sender's /64 as the OAuth rate
-// limit groups it, since it can rotate freely within its own /64; each record still carries the
-// sender's own address.
+// ones (decisions, refusals) while the key table has room; when records were dropped the next one
+// with the same key carries `suppressed=N` (ADR-0021 §5). A source is the sender's address as
+// ratelimit.Key groups it (an IPv6 sender's /64), so senders sharing a /64 share one budget; each
+// record still carries the sender's own address.
 func (l *Log) RecordUnauthenticated(r *http.Request, e Event) {
 	if l == nil {
 		return

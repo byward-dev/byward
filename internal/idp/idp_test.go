@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -369,13 +370,53 @@ func TestFetcherBoundsBodiesAndRefusesRedirects(t *testing.T) {
 	}
 }
 
-func TestFetcherErrorsDoNotLeakQueries(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(404) }))
-	defer srv.Close()
-	var v any
-	err := NewFetcher(nil).GetJSON(context.Background(), srv.URL+"/x?code=SECRETCODE", &v)
-	if err == nil || strings.Contains(err.Error(), "SECRETCODE") {
-		t.Fatalf("err = %v", err)
+// When the IdP cannot be reached, or the endpoint does not even parse, the error a GET or a token
+// POST returns carries no user information or query from the endpoint.
+func TestAnErrorBeforeTheIdPAnswersDoesNotLeakTheEndpointsSecrets(t *testing.T) {
+	// A dialer that always fails: the client's own error, without a port another test could take.
+	unreachable := &http.Client{Transport: &http.Transport{DialContext: func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("connection refused")
+	}}}
+	unparsable := `parse "<invalid URL>": not a URL`
+	for name, tc := range map[string]struct{ endpoint, wantGet, wantPost string }{ // each want is the error's start
+		"unreachable":    {"http://user:SECRET@idp.example/x?code=SECRET", `Get "http://idp.example/x": `, `Post "http://idp.example/x": `},
+		"does not parse": {"http://idp.example/x\x00?code=SECRET", unparsable, unparsable},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := NewFetcher(unreachable)
+			f.Retries = 0
+			var v any
+			getErr := f.GetJSON(context.Background(), tc.endpoint, &v)
+			_, postErr := f.PostToken(context.Background(), tc.endpoint, url.Values{"code": {"c"}}, nil)
+			for method, got := range map[string]struct {
+				err  error
+				want string
+			}{"GET": {getErr, tc.wantGet}, "POST": {postErr, tc.wantPost}} {
+				var ue *url.Error // what callers class a failed exchange by
+				if !errors.As(got.err, &ue) || !strings.HasPrefix(got.err.Error(), got.want) || strings.Contains(got.err.Error(), "SECRET") {
+					t.Errorf("%s: err = %v (%T), want a *url.Error starting %q", method, got.err, got.err, got.want)
+				}
+			}
+		})
+	}
+}
+
+// A GetJSON error names the endpoint without its query, whether the IdP answered with another
+// status or with a body that is not JSON.
+func TestAGetJSONErrorNamesTheEndpointWithoutItsQuery(t *testing.T) {
+	for name, h := range map[string]http.HandlerFunc{
+		"another status":          func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(404) },
+		"a body that is not JSON": func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("not json")) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(h)
+			defer srv.Close()
+			var v any
+			err := NewFetcher(nil).GetJSON(context.Background(), srv.URL+"/x?code=SECRETCODE", &v)
+			if err == nil || strings.Contains(err.Error(), "SECRETCODE") || !strings.Contains(err.Error(), srv.URL+"/x") {
+				t.Fatalf("err = %v, want one naming %s/x without its query", err, srv.URL)
+			}
+		})
 	}
 }
 

@@ -3,7 +3,6 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"net/textproto"
 	"strconv"
 	"strings"
 	"time"
@@ -182,7 +181,7 @@ func stripHeaders(raw string) ([]string, []error) {
 	var out []string
 	var errs []error
 	for _, n := range splitList(raw) {
-		h := textproto.CanonicalMIMEHeaderKey(strings.ReplaceAll(n, "_", "-"))
+		h := CanonicalHeader(n)
 		switch {
 		case strings.ContainsRune(n, '*'):
 			errs = append(errs, errorf("%s: %q: exact names only; list each header of a family by name", env, n))

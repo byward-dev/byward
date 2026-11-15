@@ -40,8 +40,15 @@ or the IdP's `error_description`.
 
 Events from requests whose sender is not authenticated (marked *limited* below) are rate-limited per source address
 (IPv6 grouped by /64, as for the OAuth rate limits), event and outcome: 10 per minute for each, then counted and
-reported as `suppressed=N` on the next record with the same event and outcome from that source. A sender can therefore only crowd out its own records of the same event and
-outcome: consent page views never hide consent decisions, and successful registrations never hide refused ones.
+reported as `suppressed=N` on the next record with the same event and outcome from that source. Until the key
+table below is full, a source can therefore only crowd out its own records of the same event and outcome: consent
+page views never hide consent decisions, and successful registrations never hide refused ones. Senders sharing an
+IPv6 /64 share one budget, so `suppressed=N` can count drops from addresses other than the record's `remote_ip`.
+Each replica tracks at most 10,000 (source, event, outcome) keys at once: a sender with a larger block, such as an
+IPv6 /48, can fill that table and, while it keeps sending, records with a new key (a new source, or a known source's
+new event or outcome) are dropped. These drops carry no `suppressed=N`, and when a new key finds the table full,
+every key whose minute has ended is removed, together with its unreported `suppressed` count; only the metric counts
+these records ([known gap](../security-posture.md#known-gaps)).
 Metrics count every event, logged or not.
 
 ### Events and OCSF mapping

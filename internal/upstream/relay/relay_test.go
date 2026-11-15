@@ -617,12 +617,8 @@ func TestAnUpstreamRedirectGetsTheClientA502AndTheLogWhereItPointed(t *testing.T
 		{"multiple choices", http.StatusMultipleChoices, "https://mcp.internal.example/mcp", "points to https://mcp.internal.example/mcp;"},
 		{"relative", http.StatusPermanentRedirect, "/mcp/", "points to " + up.URL + "/mcp/;"},
 		{"userinfo, query and fragment are dropped", http.StatusFound, "https://user:pw-secret@sso.example/login?code=code-secret#frag-secret", "points to https://sso.example/login;"},
-		{"path parameters are dropped", http.StatusFound, "/cb;jsessionid=sess-secret", "points to " + up.URL + "/cb;"},
-		{"an escaped path is kept as sent", http.StatusFound, "https://mcp.internal.example/a%2Fb%3Bc;x=secret", "points to https://mcp.internal.example/a%2Fb%3Bc;"},
 		{"an opaque Location is not logged", http.StatusFound, "https:tok-secret", "the upstream sent no usable Location"},
-		{"credentials split by a slash are not logged", http.StatusFound, "https://admin:1234/5678@login.example/x", "the upstream sent no usable Location"},
-		{"credentials split by a question mark are not logged", http.StatusFound, "https://admin:1234?5678@login.example/", "the upstream sent no usable Location"},
-		{"credentials split by a hash are not logged", http.StatusFound, "https://admin:1234#5678@login.example/", "the upstream sent no usable Location"},
+		{"a Location logs may not show is not logged", http.StatusFound, "https://admin:1234/5678@login.example/x", "the upstream sent no usable Location"},
 		{"a host-less Location is not logged", http.StatusFound, "file:///etc/x", "the upstream sent no usable Location"},
 		{"without a Location", http.StatusFound, "", "the upstream sent no usable Location"},
 		{"not modified is passed on", http.StatusNotModified, "", ""},
@@ -659,8 +655,8 @@ func TestAnUpstreamRedirectGetsTheClientA502AndTheLogWhereItPointed(t *testing.T
 	}
 }
 
-// An operator-listed header never reaches the upstream in any case or spelling, and every header
-// it does not name, MCP's own among them, still does.
+// An operator-listed header never reaches the upstream in any case or spelling, whichever spelling
+// the operator listed it in, and every header it does not name, MCP's own among them, still does.
 func TestAnOperatorListedHeaderNeverReachesTheUpstreamInAnySpellingAndEveryOtherHeaderStillDoes(t *testing.T) {
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
@@ -669,11 +665,12 @@ func TestAnOperatorListedHeaderNeverReachesTheUpstreamInAnySpellingAndEveryOther
 	r.Header["X-Argocd-Base-Url"] = []string{"https://evil.example"}
 	r.Header["x_argocd_base_url"] = []string{"https://evil.example"}
 	r.Header["TFE_TOKEN"] = []string{"forged"}
+	r.Header["Tfe-Token"] = []string{"forged"} // listed as tfe_token: the - spelling is stripped too
 	kept := []string{"Mcp-Session-Id", "Mcp-Protocol-Version", "Mcp-Method", "Mcp-Name", "Mcp-Param-Region", "X-Argocd-Other"}
 	for _, h := range kept {
 		r.Header.Set(h, "kept")
 	}
-	New(quiet(), u, WithStripped("X-Argocd-Base-Url", "Tfe-Token")).ServeHTTP(httptest.NewRecorder(), r)
+	New(quiet(), u, WithStripped("X-Argocd-Base-Url", "tfe_token")).ServeHTTP(httptest.NewRecorder(), r)
 	got, ok := up.Last()
 	if !ok {
 		t.Fatal("nothing reached the upstream")
