@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-
-	"golang.org/x/net/idna"
 )
 
 // Denylist is the operator's list of refused CIMD clients and redirect hosts (ADR-0008 §9). It
@@ -58,13 +56,8 @@ func (d *Denylist) DeniesRedirect(redirectURI string) bool {
 		return false
 	}
 	h := u.Hostname()
-	return d.hosts[BrowserHost(h)] || d.hosts[foldHost(transitionalIDNA, h)]
+	return d.hosts[BrowserHost(h)] || d.hosts[transitionalHost(h)]
 }
-
-// transitionalIDNA is browserIDNA with transitional mapping, as browsers with IDNA tables before
-// Unicode 15.1 map ẞ and as transitional ones map ß: the redirect host's second fold.
-var transitionalIDNA = idna.New(idna.MapForLookup(), idna.StrictDomainName(false), idna.CheckHyphens(false),
-	idna.BidiRule(), idna.CheckJoiners(true), idna.Transitional(true))
 
 // canonicalCIMD folds the spellings of one CIMD URL that fetch the same document: the host's
 // spelling (BrowserHost), the default port and percent-encoding in the path. A denylist may match more

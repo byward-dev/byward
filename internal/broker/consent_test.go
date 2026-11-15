@@ -191,9 +191,9 @@ func TestTheReturnDestinationIsShownReadablyAndLoopbackIsFlagged(t *testing.T) {
 		{"a Unicode host is shown beside its punycode", "https://bücher.example/cb", "bücher.example (xn--bcher-kva.example)", false},
 		{"a punycode host is shown beside its Unicode", "https://xn--bcher-kva.example/cb", "bücher.example (xn--bcher-kva.example)", false},
 		{"a full-width dot shows the real host", "https://app.example.org\u3002evil.com/cb", "app.example.org\u3002evil.com (app.example.org.evil.com)", false},
-		{"an empty punycode label names no host", "https://xn--.example/cb", "xn--.example", false},
+		{"an empty punycode label is not a valid address", "https://xn--.example/cb", "xn--.example (not a valid address)", false},
 		{"an invisible character alone shows the host once", "https://a\u00adb.example/cb", "ab.example", false},
-		{"a zero-width joiner shows the real host", "https://a\u200db.com/cb", "ab.com (xn--ab-m1t.com)", false},
+		{"a zero-width joiner the browser refuses is not a valid address", "https://a\u200db.com/cb", "ab.com (not a valid address)", false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if got, loopback := returnsTo(c.in); got != c.want || loopback != c.loopback {

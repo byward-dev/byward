@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/registration"
@@ -138,15 +139,19 @@ func returnsTo(redirect string) (string, bool) {
 
 // showHost names a host as the user reads it: a host that is not plain ASCII is shown as written
 // (minus invisible characters) with the ASCII name the browser will really use beside it
-// (registration.BrowserHost, which the denylist matches by too), and an xn-- name with its Unicode
-// spelling beside it (ADR-0010 §4).
+// (registration.BrowserHostOK, which the denylist matches by too), and an xn-- name with its Unicode
+// spelling beside it (ADR-0010 §4). A host the browser refuses is shown as written and marked as not
+// a valid address: the mapping got that far is no destination (xn--claude-.ai decodes to claude.ai),
+// so it is never named as one. A host of invisible characters only names nothing: "?".
 func showHost(host string) string {
-	ascii := registration.BrowserHost(host)
-	// "xn--" decodes to an empty label: there is no real host to name.
-	if ascii == "" || strings.Contains("."+ascii+".", "..") && !strings.Contains("."+host+".", "..") {
-		return displayName(host, "?")
+	ascii, ok := registration.BrowserHostOK(host)
+	if !ok {
+		if shown := displayName(host, ""); shown != "" {
+			return shown + " (not a valid address)"
+		}
+		return "?"
 	}
-	if ascii == strings.TrimSuffix(strings.ToLower(host), ".") { // plain ASCII as written
+	if !strings.ContainsFunc(host, func(r rune) bool { return r >= utf8.RuneSelf }) { // plain ASCII as written
 		if uni, err := idna.Lookup.ToUnicode(ascii); err == nil && uni != ascii {
 			return uni + " (" + ascii + ")"
 		}
@@ -173,10 +178,15 @@ func otherSite(cimdHost, redirect string) bool {
 	return site(cimdHost) != site(u.Hostname())
 }
 
-// site is host's registrable domain, from the name the browser goes to (registration.BrowserHost), so
-// a full-width or Unicode spelling of a CIMD host's site is that site.
+// site is host's registrable domain, from the name the browser goes to (registration.BrowserHostOK),
+// so a full-width or Unicode spelling of a CIMD host's site is that site. A host the browser refuses
+// is compared as written: the mapping it got that far is no site, and must not hide a warning.
 func site(host string) string {
-	host = registration.BrowserHost(host)
+	if ascii, ok := registration.BrowserHostOK(host); ok {
+		host = ascii
+	} else {
+		host = strings.TrimSuffix(strings.ToLower(host), ".")
+	}
 	if net.ParseIP(host) != nil {
 		return host // the public suffix list's default rule would make 203.0.113.7 "113.7"
 	}

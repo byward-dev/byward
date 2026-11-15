@@ -183,6 +183,11 @@ func TestOtherSiteComparesRegistrableDomains(t *testing.T) {
 		{"claude.ai", "https://ｃｌａｕｄｅ.ai/cb", false},
 		{"xn--bcher-kva.example", "https://BÜCHER.example/cb", false},
 		{"claude.ai", "https://ｅｖｉｌ.example/cb", true},
+		{"claude.ai", "https://claude.ai./cb", false},
+		// A host the browser refuses is compared as written, not by the mapping it got that far.
+		{"claude.ai", "https://xn--claude-.ai/cb", true},
+		{"xn--claude-.ai", "https://claude.ai/cb", true},
+		{"claude.ai", "https://login.xn--claude-.ai/cb", true},
 	} {
 		if got := otherSite(c.cimd, c.redirect); got != c.other {
 			t.Errorf("otherSite(%q, %q) = %v, want %v", c.cimd, c.redirect, got, c.other)
@@ -192,14 +197,29 @@ func TestOtherSiteComparesRegistrableDomains(t *testing.T) {
 
 func TestThePublisherIsShownReadably(t *testing.T) {
 	for in, want := range map[string]string{
-		"claude.ai":             "claude.ai",
-		"xn--bcher-kva.example": "bücher.example (xn--bcher-kva.example)",
+		"claude.ai":              "claude.ai",
+		"claude.ai.":             "claude.ai.",
+		"CLAUDE.ai":              "CLAUDE.ai", // shown as written
+		"XN--BCHER-KVA.example":  "bücher.example (xn--bcher-kva.example)",
+		"xn--bcher-kva.example":  "bücher.example (xn--bcher-kva.example)",
+		"xn--bcher-kva.example.": "bücher.example (xn--bcher-kva.example)",
 		// The ASCII name beside is the one the browser goes to: "_" and "--" names map as the browser
 		// maps them, not to a punycode of the full-width spelling.
-		"ｍｙ_app.example":  "ｍｙ_app.example (my_app.example)",
-		"ＡＢ--c.example":   "ＡＢ--c.example (ab--c.example)",
+		"ｍｙ_app.example": "ｍｙ_app.example (my_app.example)",
+		"ＡＢ--c.example":  "ＡＢ--c.example (ab--c.example)",
+		// A Unicode name with "_", where the browser and a plain punycode agree.
 		"bü_cher.example": "bü_cher.example (xn--b_cher-3ya.example)",
-		"xn--.example":    "xn--.example",
+		// A host the browser refuses is marked, never named by the mapping it got that far
+		// (xn--claude-.ai decodes to claude.ai).
+		"xn--claude-.ai":    "xn--claude-.ai (not a valid address)",
+		"bü.xn--claude-.ai": "bü.xn--claude-.ai (not a valid address)",
+		"xn--":              "xn-- (not a valid address)",
+		"xn--.example":      "xn--.example (not a valid address)",
+		"a.xn--":            "a.xn-- (not a valid address)",
+		"a\u200db.example":  "ab.example (not a valid address)",
+		"\u00ad":            "?",
+		"\u200b":            "?",
+		"":                  "?",
 	} {
 		if got := showHost(in); got != want {
 			t.Errorf("showHost(%q) = %q, want %q", in, got, want)
