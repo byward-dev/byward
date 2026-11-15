@@ -13,11 +13,11 @@ func TestTheUpstreamStripListIsReadAsCanonicalHeaderNames(t *testing.T) {
 	if err != nil || len(c.UpstreamStripHeaders) != 0 {
 		t.Fatalf("default %q (%v), want none", c.UpstreamStripHeaders, err)
 	}
-	c, err = load(t, nil, "BYWARD_UPSTREAM_STRIP_HEADERS= x-argocd-base-url, TFE_TOKEN ,,opensearch-url,mcp-params")
+	c, err = load(t, nil, "BYWARD_UPSTREAM_STRIP_HEADERS= x-argocd-base-url, TFE_TOKEN ,,opensearch-url,mcp-params,x-tenant-param-id")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"X-Argocd-Base-Url", "Tfe-Token", "Opensearch-Url", "Mcp-Params"}; !slices.Equal(c.UpstreamStripHeaders, want) {
+	if want := []string{"X-Argocd-Base-Url", "Tfe-Token", "Opensearch-Url", "Mcp-Params", "X-Tenant-Param-Id"}; !slices.Equal(c.UpstreamStripHeaders, want) {
 		t.Fatalf("got %q, want %q", c.UpstreamStripHeaders, want)
 	}
 }
@@ -41,6 +41,8 @@ func TestTheUpstreamStripListRefusesWhatCannotBeStripped(t *testing.T) {
 		{"a pattern", "X-Atlassian-*", `"X-Atlassian-*": exact names only`},
 		{"a pattern inside a name", "X-Atlassian-*-Url", `"X-Atlassian-*-Url": exact names only`},
 		{"a name with a colon", "X-Api-Key:", `"X-Api-Key:" is not a header name`},
+		{"a name with another separator", "X(Url)", `"X(Url)" is not a header name`},
+		{"a name that is not ASCII", "X-Idé", `"X-Idé" is not a header name`},
 		{"the trace context", "traceparent", "Traceparent cannot be stripped"},
 		{"the trace state", "TRACESTATE", "Tracestate cannot be stripped"},
 		{"not a header", "X Api Key", `"X Api Key" is not a header name`},
