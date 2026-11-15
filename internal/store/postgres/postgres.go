@@ -14,7 +14,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -131,8 +130,7 @@ func (s *Store) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, er
 		return store.Grant{}, err
 	}
 	g.Epoch = epoch
-	g.Scopes, g.IdPTokens = slices.Clone(g.Scopes), slices.Clone(g.IdPTokens)
-	return g, nil
+	return g.Clone(), nil
 }
 
 // Grant implements store.Grants.
@@ -154,20 +152,7 @@ func (s *Store) Grant(ctx context.Context, id string) (store.Grant, error) {
 
 // RevokeGrant implements store.Grants.
 func (s *Store) RevokeGrant(ctx context.Context, id string, at time.Time) error {
-	return s.write(ctx, func(tx pgx.Tx) error {
-		if err := forgetGrant(ctx, tx, id); err != nil {
-			return err
-		}
-		tag, err := tx.Exec(ctx, "DELETE FROM grants WHERE id = $1", id)
-		if err != nil {
-			return err
-		}
-		if tag.RowsAffected() == 0 {
-			return store.ErrNotFound
-		}
-		_, err = tx.Exec(ctx, "INSERT INTO revocations (grant_id, subject, before, at) VALUES ($1, '', $2, $2)", id, ts(at))
-		return err
-	})
+	return s.write(ctx, func(tx pgx.Tx) error { return revokeGrant(ctx, tx, id, at) })
 }
 
 // UpdateGrant implements store.Grants.
@@ -352,15 +337,7 @@ func (s *Store) RotateRefreshToken(ctx context.Context, r store.RotateRequest) e
 			err := tx.QueryRow(ctx, "SELECT rotated_at FROM refresh_tokens WHERE hash = $1", successor).Scan(&curRotated)
 			if errors.Is(err, pgx.ErrNoRows) || (err == nil && (curRotated != nil || ts(r.Now).Sub(*rotated) >= r.Grace)) {
 				reused = true
-				if err := forgetGrant(ctx, tx, grantID); err != nil {
-					return err
-				}
-				if _, err := tx.Exec(ctx, "DELETE FROM grants WHERE id = $1", grantID); err != nil {
-					return err
-				}
-				_, err := tx.Exec(ctx, "INSERT INTO revocations (grant_id, subject, before, at) VALUES ($1, '', $2, $2)",
-					grantID, ts(r.Now))
-				return err
+				return revokeGrant(ctx, tx, grantID, r.Now)
 			}
 			if err != nil {
 				return err
@@ -597,6 +574,24 @@ func (s *Store) UseClient(ctx context.Context, id string, now, expires time.Time
 		}
 		return nil
 	})
+}
+
+// revokeGrant revokes grant id at at, for RevokeGrant and a reused refresh token alike: its user's
+// consents to its client are forgotten, it goes with its codes and refresh tokens (ON DELETE
+// CASCADE), and every token issued up to at is refused. ErrNotFound when there is no such grant.
+func revokeGrant(ctx context.Context, tx pgx.Tx, id string, at time.Time) error {
+	if err := forgetGrant(ctx, tx, id); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, "DELETE FROM grants WHERE id = $1", id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return store.ErrNotFound
+	}
+	_, err = tx.Exec(ctx, "INSERT INTO revocations (grant_id, subject, before, at) VALUES ($1, '', $2, $2)", id, ts(at))
+	return err
 }
 
 // forgetGrant deletes the consents of a grant's user and client, before the grant itself goes.

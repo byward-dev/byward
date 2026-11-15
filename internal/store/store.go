@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"slices"
 	"time"
 )
 
@@ -93,6 +94,13 @@ type Grant struct {
 	CreatedAt time.Time
 	ExpiresAt time.Time // absolute lifetime (ADR-0006 §5)
 	Epoch     int64     // ADR-0007 §9; set by the store on create
+}
+
+// Clone is g sharing no slice with the caller, as the stores pass and return grants.
+func (g Grant) Clone() Grant {
+	g.Scopes = slices.Clone(g.Scopes)
+	g.IdPTokens = slices.Clone(g.IdPTokens)
+	return g
 }
 
 // CheckNew is CreateGrant's ErrInvalid rule for a grant about to be stored, which every adapter

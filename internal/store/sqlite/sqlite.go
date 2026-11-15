@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -300,11 +299,8 @@ func (s *Store) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, er
 	}
 	err = s.write(ctx, func(tx *sql.Tx) error {
 		var n int
-		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM grants WHERE id = ?", g.ID).Scan(&n); err != nil {
+		if err := mustNotExist(ctx, tx, "SELECT count(*) FROM grants WHERE id = ?", g.ID); err != nil {
 			return err
-		}
-		if n > 0 {
-			return store.ErrExists
 		}
 		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM revocations WHERE (subject = ? OR scope = 'all') AND before > ?",
 			g.Subject, micros(g.CreatedAt)).Scan(&n); err != nil {
@@ -324,8 +320,7 @@ func (s *Store) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, er
 		return store.Grant{}, err
 	}
 	g.Epoch = s.epoch
-	g.Scopes, g.IdPTokens = slices.Clone(g.Scopes), slices.Clone(g.IdPTokens)
-	return g, nil
+	return g.Clone(), nil
 }
 
 // Grant implements store.Grants.
@@ -354,21 +349,7 @@ func (s *Store) Grant(ctx context.Context, id string) (store.Grant, error) {
 
 // RevokeGrant implements store.Grants.
 func (s *Store) RevokeGrant(ctx context.Context, id string, at time.Time) error {
-	return s.write(ctx, func(tx *sql.Tx) error {
-		if err := forgetGrant(ctx, tx, id); err != nil {
-			return err
-		}
-		res, err := tx.ExecContext(ctx, "DELETE FROM grants WHERE id = ?", id)
-		if err != nil {
-			return err
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			return store.ErrNotFound
-		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO revocations (grant_id, subject, before, at) VALUES (?, '', ?, ?)",
-			id, micros(at), micros(at))
-		return err
-	})
+	return s.write(ctx, func(tx *sql.Tx) error { return revokeGrant(ctx, tx, id, at) })
 }
 
 // UpdateGrant implements store.Grants.
@@ -450,12 +431,8 @@ func (s *Store) PutCode(ctx context.Context, c store.PendingCode) error {
 		if err := mustHaveGrant(ctx, tx, c.GrantID); err != nil {
 			return err
 		}
-		var n int
-		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM codes WHERE grant_id = ?", c.GrantID).Scan(&n); err != nil {
+		if err := mustNotExist(ctx, tx, "SELECT count(*) FROM codes WHERE grant_id = ?", c.GrantID); err != nil {
 			return err
-		}
-		if n > 0 {
-			return store.ErrExists
 		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO codes (grant_id, client_id, redirect_uri, code_challenge, scopes, expires_at)
 			VALUES (?, ?, ?, ?, ?, ?)`, c.GrantID, c.ClientID, c.RedirectURI, c.CodeChallenge, string(scopes), micros(c.ExpiresAt))
@@ -503,12 +480,8 @@ func (s *Store) PutRefreshToken(ctx context.Context, t store.RefreshToken) error
 		if err := mustHaveGrant(ctx, tx, t.GrantID); err != nil {
 			return err
 		}
-		var n int
-		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM refresh_tokens WHERE hash = ?", t.Hash[:]).Scan(&n); err != nil {
+		if err := mustNotExist(ctx, tx, "SELECT count(*) FROM refresh_tokens WHERE hash = ?", t.Hash[:]); err != nil {
 			return err
-		}
-		if n > 0 {
-			return store.ErrExists
 		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO refresh_tokens (hash, grant_id, client_id, created_at, idle_expires_at)
 			VALUES (?, ?, ?, ?, ?)`, t.Hash[:], t.GrantID, t.ClientID, micros(t.CreatedAt), micros(t.IdleExpiresAt))
@@ -559,12 +532,8 @@ func (s *Store) RotateRefreshToken(ctx context.Context, r store.RotateRequest) e
 		if r.Next.GrantID != grantID {
 			return store.ErrInvalid
 		}
-		var n int
-		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM refresh_tokens WHERE hash = ?", r.Next.Hash[:]).Scan(&n); err != nil {
+		if err := mustNotExist(ctx, tx, "SELECT count(*) FROM refresh_tokens WHERE hash = ?", r.Next.Hash[:]); err != nil {
 			return err
-		}
-		if n > 0 {
-			return store.ErrExists
 		}
 		rotating := r.Old[:]
 		if rotated.Valid {
@@ -574,15 +543,7 @@ func (s *Store) RotateRefreshToken(ctx context.Context, r store.RotateRequest) e
 			err := tx.QueryRowContext(ctx, "SELECT rotated_at FROM refresh_tokens WHERE hash = ?", successor).Scan(&curRotated)
 			if errors.Is(err, sql.ErrNoRows) || (err == nil && (curRotated.Valid || r.Now.Sub(fromMicros(rotated.Int64)) >= r.Grace)) {
 				reused = true
-				if err := forgetGrant(ctx, tx, grantID); err != nil {
-					return err
-				}
-				if _, err := tx.ExecContext(ctx, "DELETE FROM grants WHERE id = ?", grantID); err != nil {
-					return err
-				}
-				_, err := tx.ExecContext(ctx, "INSERT INTO revocations (grant_id, subject, before, at) VALUES (?, '', ?, ?)",
-					grantID, micros(r.Now), micros(r.Now))
-				return err
+				return revokeGrant(ctx, tx, grantID, r.Now)
 			}
 			if err != nil {
 				return err
@@ -747,11 +708,42 @@ func (s *Store) Consent(ctx context.Context, k store.ConsentKey) (store.Consent,
 	return c, nil
 }
 
+// revokeGrant revokes grant id at at, for RevokeGrant and a reused refresh token alike: its user's
+// consents to its client are forgotten, it goes with its codes and refresh tokens (ON DELETE
+// CASCADE), and every token issued up to at is refused. ErrNotFound when there is no such grant.
+func revokeGrant(ctx context.Context, tx *sql.Tx, id string, at time.Time) error {
+	if err := forgetGrant(ctx, tx, id); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, "DELETE FROM grants WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return store.ErrNotFound
+	}
+	_, err = tx.ExecContext(ctx, "INSERT INTO revocations (grant_id, subject, before, at) VALUES (?, '', ?, ?)",
+		id, micros(at), micros(at))
+	return err
+}
+
 // forgetGrant deletes the consents of a grant's user and client, before the grant itself goes.
 func forgetGrant(ctx context.Context, tx *sql.Tx, grantID string) error {
 	_, err := tx.ExecContext(ctx, `DELETE FROM consents WHERE (issuer, subject, client_id) IN
 		(SELECT issuer, subject, client_id FROM grants WHERE id = ?)`, grantID)
 	return err
+}
+
+// mustNotExist runs a count query and returns ErrExists when it counts a row, as postgres's does.
+func mustNotExist(ctx context.Context, tx *sql.Tx, query string, arg any) error {
+	var n int
+	if err := tx.QueryRowContext(ctx, query, arg).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return store.ErrExists
+	}
+	return nil
 }
 
 func mustHaveGrant(ctx context.Context, tx *sql.Tx, id string) error {
@@ -817,11 +809,8 @@ func (s *Store) CreateClient(ctx context.Context, c store.Client, max int) error
 	}
 	return s.write(ctx, func(tx *sql.Tx) error {
 		var n int
-		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM clients WHERE id = ?", c.ID).Scan(&n); err != nil {
+		if err := mustNotExist(ctx, tx, "SELECT count(*) FROM clients WHERE id = ?", c.ID); err != nil {
 			return err
-		}
-		if n > 0 {
-			return store.ErrExists
 		}
 		if max > 0 {
 			if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM clients WHERE expires_at > ?", micros(c.CreatedAt)).Scan(&n); err != nil {

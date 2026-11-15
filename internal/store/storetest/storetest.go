@@ -899,24 +899,24 @@ func retryWithinGraceRotatesTheSuccessor(t *testing.T, s store.Store) {
 func reuseRevokesTheGrant(t *testing.T, s store.Store) {
 	cases := []struct {
 		name  string
-		reuse func(t *testing.T, s store.Store, g string) error
+		reuse func(t *testing.T, s store.Store, g string) (time.Time, error) // the reusing call's now
 	}{
-		{"at the end of the grace window", func(t *testing.T, s store.Store, g string) error {
+		{"at the end of the grace window", func(t *testing.T, s store.Store, g string) (time.Time, error) {
 			t1 := refresh(g, 1)
 			must(t, s.PutRefreshToken(ctx, t1))
 			at := t0.Add(time.Minute)
 			must(t, s.RotateRefreshToken(ctx, rotation(t1, refresh(g, 2), at)))
-			return s.RotateRefreshToken(ctx, rotation(t1, refresh(g, 3), at.Add(grace)))
+			return at.Add(grace), s.RotateRefreshToken(ctx, rotation(t1, refresh(g, 3), at.Add(grace)))
 		}},
-		{"an older token within the window", func(t *testing.T, s store.Store, g string) error {
+		{"an older token within the window", func(t *testing.T, s store.Store, g string) (time.Time, error) {
 			t1, t2 := refresh(g, 1), refresh(g, 2)
 			must(t, s.PutRefreshToken(ctx, t1))
 			at := t0.Add(time.Minute)
 			must(t, s.RotateRefreshToken(ctx, rotation(t1, t2, at)))
 			must(t, s.RotateRefreshToken(ctx, rotation(t2, refresh(g, 3), at.Add(time.Second))))
-			return s.RotateRefreshToken(ctx, rotation(t1, refresh(g, 4), at.Add(2*time.Second)))
+			return at.Add(2 * time.Second), s.RotateRefreshToken(ctx, rotation(t1, refresh(g, 4), at.Add(2*time.Second)))
 		}},
-		{"with no grace at all", func(t *testing.T, s store.Store, g string) error {
+		{"with no grace at all", func(t *testing.T, s store.Store, g string) (time.Time, error) {
 			t1 := refresh(g, 1)
 			must(t, s.PutRefreshToken(ctx, t1))
 			at := t0.Add(time.Minute)
@@ -924,20 +924,24 @@ func reuseRevokesTheGrant(t *testing.T, s store.Store) {
 			req.Grace = 0
 			must(t, s.RotateRefreshToken(ctx, req))
 			req.Next = refresh(g, 3)
-			return s.RotateRefreshToken(ctx, req)
+			return at, s.RotateRefreshToken(ctx, req)
 		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			g := "g-" + tc.name // one store for all cases: a grant each
 			mustCreate(t, s, grant(g, "tid:alice"))
-			wantErr(t, "reuse", tc.reuse(t, s, g), store.ErrReused)
-			_, err := s.Grant(ctx, g)
+			reusedAt, err := tc.reuse(t, s, g)
+			wantErr(t, "reuse", err, store.ErrReused)
+			_, err = s.Grant(ctx, g)
 			wantErr(t, "grant after reuse", err, store.ErrNotFound)
 			revs, err := s.Revocations(ctx)
 			must(t, err)
-			if !slices.ContainsFunc(revs, func(r store.Revocation) bool { return r.GrantID == g }) {
-				t.Fatalf("revocations = %+v, want one for %s", revs, g)
+			// The reuse revokes the grant as RevokeGrant does: every token issued up to the reuse.
+			if !slices.ContainsFunc(revs, func(r store.Revocation) bool {
+				return r.GrantID == g && r.Subject == "" && r.Before.Equal(reusedAt) && r.At.Equal(reusedAt)
+			}) {
+				t.Fatalf("revocations = %+v, want one for %s with Before and At %v", revs, g, reusedAt)
 			}
 		})
 	}

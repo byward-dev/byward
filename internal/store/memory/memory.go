@@ -99,10 +99,10 @@ func (s *Store) CreateGrant(_ context.Context, g store.Grant) (store.Grant, erro
 			return store.Grant{}, store.ErrRevoked
 		}
 	}
-	g = cloneGrant(g)
+	g = g.Clone()
 	g.Epoch = epoch
 	s.grants[g.ID] = g
-	return cloneGrant(g), nil
+	return g.Clone(), nil
 }
 
 // Grant implements store.Grants.
@@ -113,7 +113,7 @@ func (s *Store) Grant(_ context.Context, id string) (store.Grant, error) {
 	if !ok {
 		return store.Grant{}, store.ErrNotFound
 	}
-	return cloneGrant(g), nil
+	return g.Clone(), nil
 }
 
 // RevokeGrant implements store.Grants.
@@ -124,9 +124,7 @@ func (s *Store) RevokeGrant(_ context.Context, id string, at time.Time) error {
 	if !ok {
 		return store.ErrNotFound
 	}
-	s.deleteGrantLocked(id)
-	s.forgetGrantLocked(g)
-	s.revs = append(s.revs, store.Revocation{GrantID: id, Before: at, At: at})
+	s.revokeGrantLocked(g, at)
 	return nil
 }
 
@@ -278,9 +276,7 @@ func (s *Store) RotateRefreshToken(_ context.Context, r store.RotateRequest) err
 	if !old.t.RotatedAt.IsZero() {
 		cur, ok := s.tokens[old.successor]
 		if !ok || !cur.t.RotatedAt.IsZero() || r.Now.Sub(old.t.RotatedAt) >= r.Grace {
-			s.deleteGrantLocked(g.ID)
-			s.forgetGrantLocked(g)
-			s.revs = append(s.revs, store.Revocation{GrantID: g.ID, Before: r.Now, At: r.Now})
+			s.revokeGrantLocked(g, r.Now)
 			return store.ErrReused
 		}
 		rotating = cur
@@ -438,6 +434,15 @@ func (s *Store) forgetGrantLocked(g store.Grant) {
 	}
 }
 
+// revokeGrantLocked revokes grant g at at, for RevokeGrant and a reused refresh token alike: it
+// goes with its code and refresh tokens, its user's consents to its client are forgotten, and every
+// token issued up to at is refused. Callers hold s.mu.
+func (s *Store) revokeGrantLocked(g store.Grant, at time.Time) {
+	s.deleteGrantLocked(g.ID)
+	s.forgetGrantLocked(g)
+	s.revs = append(s.revs, store.Revocation{GrantID: g.ID, Before: at, At: at})
+}
+
 // deleteGrantLocked removes a grant with its code and refresh tokens. Callers hold s.mu.
 func (s *Store) deleteGrantLocked(id string) {
 	delete(s.grants, id)
@@ -447,12 +452,6 @@ func (s *Store) deleteGrantLocked(id string) {
 			delete(s.tokens, h)
 		}
 	}
-}
-
-func cloneGrant(g store.Grant) store.Grant {
-	g.Scopes = slices.Clone(g.Scopes)
-	g.IdPTokens = slices.Clone(g.IdPTokens)
-	return g
 }
 
 func cloneCode(c store.PendingCode) store.PendingCode {
