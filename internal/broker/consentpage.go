@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/registration"
-	"golang.org/x/net/idna"
 	"golang.org/x/net/publicsuffix"
 )
 
@@ -124,7 +124,8 @@ func requestedScopes(client []string, idpScopes string) []string {
 // returnsTo names where the browser goes after sign-in. Redirect URIs are validated (ADR-0009):
 // https, or http on a loopback address. A host that is not plain ASCII is shown as written (minus
 // invisible characters) with the ASCII name the browser will really use beside it (ADR-0010 §4),
-// so look-alikes, full-width dots and zero-width joiners show their real spelling.
+// so look-alikes and full-width dots show their real spelling, and a host the browser refuses (a stray
+// zero-width joiner, invalid punycode) is marked as not a valid address.
 func returnsTo(redirect string) (string, bool) {
 	u, err := url.Parse(redirect)
 	if err != nil {
@@ -137,21 +138,22 @@ func returnsTo(redirect string) (string, bool) {
 }
 
 // showHost names a host as the user reads it: a host that is not plain ASCII is shown as written
-// (minus invisible characters) with the ASCII name the browser will really use beside it, and an
-// xn-- name with its Unicode spelling beside it (ADR-0010 §4).
+// (minus invisible characters) with the ASCII name the browser will really use beside it
+// (registration.BrowserHostOK, which the denylist matches by too), and an xn-- name with its Unicode
+// spelling beside it (ADR-0010 §4). A host the browser refuses, or that no DNS name can be (an empty
+// label), is shown as written (minus invisible characters) and marked as not a valid address: the
+// mapping it got that far is no destination (xn--claude-.ai decodes to claude.ai), so it is never
+// named as one. A host of invisible characters only names nothing: "?".
 func showHost(host string) string {
-	ascii, err := idna.Lookup.ToASCII(host)
-	if err != nil {
-		if ascii, err = idna.Punycode.ToASCII(host); err != nil {
-			return displayName(host, "?")
+	ascii, ok := registration.BrowserHostOK(host)
+	if !ok {
+		if shown := displayName(host, ""); shown != "" {
+			return shown + " (not a valid address)"
 		}
+		return "?"
 	}
-	// "xn--" decodes to an empty label: there is no real host to name.
-	if strings.Contains("."+ascii+".", "..") && !strings.Contains("."+host+".", "..") {
-		return displayName(host, "?")
-	}
-	if ascii == strings.ToLower(host) {
-		if uni, err := idna.Lookup.ToUnicode(ascii); err == nil && uni != ascii {
+	if !strings.ContainsFunc(host, func(r rune) bool { return r >= utf8.RuneSelf }) { // plain ASCII as written
+		if uni := registration.BrowserUnicode(ascii); uni != ascii {
 			return uni + " (" + ascii + ")"
 		}
 		return host
@@ -177,8 +179,16 @@ func otherSite(cimdHost, redirect string) bool {
 	return site(cimdHost) != site(u.Hostname())
 }
 
+// site is host's registrable domain, from the name the browser goes to (registration.BrowserHostOK),
+// so a full-width or Unicode spelling of a CIMD host's site is that site. A host the browser refuses
+// is compared as written, lower-cased and without a trailing dot: the mapping it got that far is no
+// site, and must not hide a warning.
 func site(host string) string {
-	host = strings.ToLower(host)
+	if ascii, ok := registration.BrowserHostOK(host); ok {
+		host = ascii
+	} else {
+		host = strings.TrimSuffix(strings.ToLower(host), ".")
+	}
 	if net.ParseIP(host) != nil {
 		return host // the public suffix list's default rule would make 203.0.113.7 "113.7"
 	}

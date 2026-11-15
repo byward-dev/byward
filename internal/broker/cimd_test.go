@@ -179,6 +179,17 @@ func TestOtherSiteComparesRegistrableDomains(t *testing.T) {
 		{"198.51.3.4", "https://203.0.3.4/cb", true}, // the default suffix rule would make both "3.4"
 		{"2001:db8::1", "https://[2001:db8::1]/cb", false},
 		{"claude.ai", "://bad", true},
+		// The site of the name the browser goes to (registration.BrowserHost).
+		{"claude.ai", "https://ｃｌａｕｄｅ.ai/cb", false},
+		{"xn--bcher-kva.example", "https://BÜCHER.example/cb", false},
+		{"claude.ai", "https://ｅｖｉｌ.example/cb", true},
+		{"claude.ai", "https://claude.ai./cb", false},
+		// A host the browser refuses is compared as written, not by the mapping it got that far.
+		{"claude.ai", "https://xn--claude-.ai/cb", true},
+		{"xn--claude-.ai", "https://claude.ai/cb", true},
+		{"claude.ai", "https://login.xn--claude-.ai/cb", true},
+		{"xn--claude-.ai", "https://XN--CLAUDE-.ai/cb", false},  // as written, folding case
+		{"xn--claude-.ai", "https://xn--claude-.ai./cb", false}, // and a trailing dot
 	} {
 		if got := otherSite(c.cimd, c.redirect); got != c.other {
 			t.Errorf("otherSite(%q, %q) = %v, want %v", c.cimd, c.redirect, got, c.other)
@@ -188,8 +199,38 @@ func TestOtherSiteComparesRegistrableDomains(t *testing.T) {
 
 func TestThePublisherIsShownReadably(t *testing.T) {
 	for in, want := range map[string]string{
-		"claude.ai":             "claude.ai",
-		"xn--bcher-kva.example": "bücher.example (xn--bcher-kva.example)",
+		"claude.ai":              "claude.ai",
+		"claude.ai.":             "claude.ai.",
+		"CLAUDE.ai":              "CLAUDE.ai",   // shown as written
+		"2001:db8::1":            "2001:db8::1", // an IPv6 literal
+		"XN--BCHER-KVA.example":  "bücher.example (xn--bcher-kva.example)",
+		"xn--bcher-kva.example":  "bücher.example (xn--bcher-kva.example)",
+		"xn--bcher-kva.example.": "bücher.example (xn--bcher-kva.example)",
+		// The ASCII name beside is the one the browser goes to: "_" and "--" names map as the browser
+		// maps them, not to a punycode of the full-width spelling.
+		"ｍｙ_app.example": "ｍｙ_app.example (my_app.example)",
+		"ＡＢ--c.example":  "ＡＢ--c.example (ab--c.example)",
+		// A Unicode name with "_", where the browser and a plain punycode agree.
+		"bü_cher.example": "bü_cher.example (xn--b_cher-3ya.example)",
+		// An xn-- name the browser goes to shows its Unicode spelling beside it, "_" included.
+		"xn--b_cher-3ya.example": "bü_cher.example (xn--b_cher-3ya.example)",
+		// A host the browser refuses is marked, never named by the mapping it got that far
+		// (xn--claude-.ai decodes to claude.ai).
+		"xn--claude-.ai":          "xn--claude-.ai (not a valid address)",
+		"bü.xn--claude-.ai":       "bü.xn--claude-.ai (not a valid address)",
+		"xn--":                    "xn-- (not a valid address)",
+		"xn--.example":            "xn--.example (not a valid address)",
+		"a.xn--":                  "a.xn-- (not a valid address)",
+		"a\u200db.example":        "ab.example (not a valid address)",
+		"xn--xn--abc-t2a.example": "xn--xn--abc-t2a.example (not a valid address)", // decodes to xn--abcü
+		// It is, or maps to, a forbidden domain code point, so the browser refuses it.
+		"evil.example\uff20claude.ai": "evil.example\uff20claude.ai (not a valid address)",
+		"a\u2100b.example":            "a\u2100b.example (not a valid address)",
+		"a<b.claude.ai":               "a<b.claude.ai (not a valid address)",
+		// No name at all.
+		"\u00ad": "?",
+		"\u200b": "?",
+		"":       "?",
 	} {
 		if got := showHost(in); got != want {
 			t.Errorf("showHost(%q) = %q, want %q", in, got, want)
