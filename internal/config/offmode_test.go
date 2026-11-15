@@ -31,7 +31,7 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 		{name: "the credential header with stdio", stdio: true, env: []string{"BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"}, want: "BYWARD_UPSTREAM_CREDENTIAL_HEADER " + toHTTP},
 		{name: "the URL with stdio keeps its both-set error", stdio: true, env: []string{"BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_UPSTREAM_STRIP_HEADERS=X-A"},
 			want: "BYWARD_UPSTREAM_URL and BYWARD_UPSTREAM_COMMAND are both set: an upstream is either HTTP or stdio"},
-		{name: "the credential with both selectors gets only their error", stdio: true, env: []string{"BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile},
+		{name: "the credential with both selectors gets only the both-set error", stdio: true, env: []string{"BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile},
 			want: "BYWARD_UPSTREAM_URL and BYWARD_UPSTREAM_COMMAND are both set: an upstream is either HTTP or stdio"},
 		{name: "the credential with stdio keeps its hint", stdio: true, env: []string{"BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile},
 			want: "BYWARD_UPSTREAM_CREDENTIAL_FILE is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE"},
@@ -115,7 +115,8 @@ func TestEachModeLoadsBesideTheOtherModesDefaultsAndAnEmptySelector(t *testing.T
 
 // When the mode is unclear, each error says only what is wrong: a command that does not parse still
 // makes the upstream stdio, no upstream at all is only "required", and a malformed URL still selects
-// HTTP. These carry a second error of their own, so the messages are matched in parts.
+// HTTP. Matched in parts, since most carry a second error of their own (the command's or the
+// URL's); the one with no upstream names its whole message.
 func TestAnUnclearUpstreamGivesOnlyItsOwnErrors(t *testing.T) {
 	files := func(p string) ([]byte, error) {
 		if p == credFile {
@@ -135,9 +136,13 @@ func TestAnUnclearUpstreamGivesOnlyItsOwnErrors(t *testing.T) {
 		{"a malformed command keeps the credential's stdio hint",
 			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_UPSTREAM_CREDENTIAL_FILE="+credFile),
 			[]string{"is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE"}, []string{"ASSERTION_HEADER"}},
-		{"no upstream at all is only required",
-			stdioBase("BYWARD_STDIO_MAX_PROCESSES=5"),
-			[]string{"BYWARD_UPSTREAM_URL is required"}, []string{"the upstream is HTTP"}},
+		{"no upstream at all gives only the required error",
+			stdioBase("BYWARD_STDIO_MAX_PROCESSES=5", "BYWARD_UPSTREAM_HEADER_TIMEOUT=abc", "BYWARD_UPSTREAM_STRIP_HEADERS=Host",
+				"BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Key"),
+			[]string{"BYWARD_UPSTREAM_URL is required (or BYWARD_UPSTREAM_COMMAND, or a command after --)"}, []string{"the upstream is HTTP", ";"}},
+		{"a malformed URL still reports the HTTP upstream's own settings",
+			append(append([]string{}, base...), "BYWARD_UPSTREAM_URL=ftp://x", "BYWARD_UPSTREAM_STRIP_HEADERS=Host", "BYWARD_UPSTREAM_HEADER_TIMEOUT=abc"),
+			[]string{"BYWARD_UPSTREAM_URL: want an absolute http(s) URL", "BYWARD_UPSTREAM_STRIP_HEADERS: Host is a header MCP needs", "BYWARD_UPSTREAM_HEADER_TIMEOUT: want a duration"}, nil},
 		{"a malformed URL still refuses the stdio setting beside it",
 			append(append([]string{}, base...), "BYWARD_UPSTREAM_URL=ftp://x", "BYWARD_STDIO_MAX_PROCESSES=5"),
 			[]string{"BYWARD_UPSTREAM_URL: want an absolute http(s) URL", "BYWARD_STDIO_MAX_PROCESSES is set, but the upstream is HTTP"}, nil},

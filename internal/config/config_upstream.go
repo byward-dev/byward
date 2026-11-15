@@ -19,19 +19,22 @@ func (c *Config) upstream(v *Values) []error {
 		errs = offModeSettings(v, raw != "")
 	}
 	if raw == "" {
-		d, err := parseHeaderTimeout(v.get("upstream-header-timeout"))
-		if err != nil {
-			errs = append(errs, err)
+		if v.get("upstream-url") != "" { // the HTTP upstream's own settings, each reported even beside a malformed URL
+			d, err := parseHeaderTimeout(v.get("upstream-header-timeout"))
+			if err != nil {
+				errs = append(errs, err)
+			}
+			c.UpstreamHeaderTimeout = d
+			strip, stripErrs := stripHeaders(v.get("upstream-strip-headers"))
+			c.UpstreamStripHeaders = strip
+			errs = append(errs, stripErrs...)
 		}
-		c.UpstreamHeaderTimeout = d
 		u, err := parseURL("upstream-url", v.get("upstream-url"))
 		if err != nil {
 			return append(errs, errorf("%s (or %s, or a command after --)", err.Error(), cmdEnv))
 		}
 		c.UpstreamURL = u
-		strip, stripErrs := stripHeaders(v.get("upstream-strip-headers"))
-		c.UpstreamStripHeaders = strip
-		return append(errs, stripErrs...)
+		return errs
 	}
 	if v.get("upstream-url") != "" {
 		errs = append(errs, errorf("%s and %s are both set: an upstream is either HTTP or stdio", urlEnv, cmdEnv))
@@ -175,6 +178,9 @@ const maxUpstreamCredential = 4 << 10
 func (c *Config) upstreamCredential(v *Values) []error {
 	fileEnv, hEnv := Setting{Name: "upstream-credential"}.Env()+"_FILE", Setting{Name: "upstream-credential-header"}.Env()
 	val, header := v.byKey["upstream-credential"], v.byKey["upstream-credential-header"]
+	if v.get("upstream-command") == "" && v.get("upstream-url") == "" {
+		return nil // no upstream: upstream's "required" error says enough
+	}
 	if val.Source == SourceDefault {
 		if header.Source != SourceDefault && v.get("upstream-command") == "" { // with stdio: offModeSettings refuses it
 			return []error{errorf("%s is set, but there is no credential: set %s too, or remove it", hEnv, fileEnv)}
