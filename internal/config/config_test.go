@@ -129,6 +129,7 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"origin with user info", "BYWARD_ALLOWED_ORIGINS=https://user@app.example.com", `BYWARD_ALLOWED_ORIGINS: "https://user@app.example.com" is not an origin`},
 		{"origin that is not a URL", "BYWARD_ALLOWED_ORIGINS=https://[::1", `BYWARD_ALLOWED_ORIGINS: "https://[::1" is not an origin`},
 		{"origin ending in a hex label of every hex digit", "BYWARD_ALLOWED_ORIGINS=https://a.0x0123456789abcdef", `BYWARD_ALLOWED_ORIGINS: "https://a.0x0123456789abcdef": "a.0x0123456789abcdef" is not an IPv4 address in dotted decimal`},
+		{"origin ending in a bare 0", "BYWARD_ALLOWED_ORIGINS=https://a.0", `BYWARD_ALLOWED_ORIGINS: "https://a.0": "a.0" is not an IPv4 address in dotted decimal`},
 		{"origin ending in a bare 0x", "BYWARD_ALLOWED_ORIGINS=https://a.0x", `BYWARD_ALLOWED_ORIGINS: "https://a.0x": "a.0x" is not an IPv4 address in dotted decimal`},
 		{"origin ending in a label of every digit", "BYWARD_ALLOWED_ORIGINS=https://a.1234567890", `BYWARD_ALLOWED_ORIGINS: "https://a.1234567890": "a.1234567890" is not an IPv4 address in dotted decimal`},
 		{"origin with a shortened IPv4 address and a port", "BYWARD_ALLOWED_ORIGINS=http://127.1:8080", `BYWARD_ALLOWED_ORIGINS: "http://127.1:8080": "127.1" is not an IPv4 address in dotted decimal`},
@@ -315,6 +316,7 @@ func TestAllowedOriginsAreStoredAsBrowsersSendThem(t *testing.T) {
 		"https://1.example.com":         "https://1.example.com",
 		"https://a.1a":                  "https://a.1a",
 		"https://a.0xzz":                "https://a.0xzz",
+		"https://a.0a":                  "https://a.0a",
 		"http://127.0.0.1:3000":         "http://127.0.0.1:3000",
 		"HTTPS://XN--BCHER-KVA.example": "https://xn--bcher-kva.example",
 	} {
