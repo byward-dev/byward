@@ -264,8 +264,18 @@ func (s *Store) Close() error { return s.db.Close() }
 // one write ahead and the
 // next Open treats the database as restored: users sign in again (fail safe). The single
 // connection and the IMMEDIATE lock order every write, so the mirror follows commit order.
+//
+// ctx ending is not such a failure: a client hanging up, or a shutdown, cancels writes routinely.
+// database/sql rolls a transaction back when its BeginTx context ends, so the transaction runs on
+// a context ctx cannot cancel. ctx still bounds the wait for the connection, fn and the counter
+// update; once the mirror is written, only a failed commit can undo the write.
 func (s *Store) write(ctx context.Context, fn func(*sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("sqlite store: begin: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+	tx, err := conn.BeginTx(context.WithoutCancel(ctx), nil)
 	if err != nil {
 		return fmt.Errorf("sqlite store: begin: %w", err)
 	}
@@ -278,7 +288,12 @@ func (s *Store) write(ctx context.Context, fn func(*sql.Tx) error) error {
 		_ = tx.Rollback()
 		return fmt.Errorf("sqlite store: write counter: %w", err)
 	}
-	if err := writeCounter(s.counterFile, writes); err != nil {
+	// The last point at which ctx can still decide: ended now, nothing is stored.
+	if err := ctx.Err(); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("sqlite store: write: %w", err)
+	}
+	if err := writeMirror(s.counterFile, writes); err != nil {
 		_ = tx.Rollback()
 		return err
 	}

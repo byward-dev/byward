@@ -77,6 +77,10 @@ func readCounter(path string) (int64, bool, error) {
 	return v, true, nil
 }
 
+// writeMirror is writeCounter; tests replace it to act inside a write, between the mirror and the
+// commit.
+var writeMirror = writeCounter
+
 // writeCounter replaces the mirror atomically (temporary file, then rename).
 func writeCounter(path string, v int64) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".counter-*")
