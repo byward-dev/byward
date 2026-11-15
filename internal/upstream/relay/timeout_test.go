@@ -95,7 +95,7 @@ func TestStalledUpstreamIsAnsweredAndDropped(t *testing.T) {
 				t.Fatalf("Content-Type %q, body %s; want JSON", w.Header().Get("Content-Type"), w.Body)
 			}
 			if c.method != "POST" && w.Header().Get("Allow") != "POST" {
-				t.Fatal("405 without Allow: POST")
+				t.Fatalf("Allow %q, want POST", w.Header().Get("Allow"))
 			}
 			if l := logs.String(); !strings.Contains(l, "upstream did not answer in time") || !strings.Contains(l, "no response headers within 50ms") {
 				t.Errorf("the operator log lacks the timeout and its duration: %q", l)

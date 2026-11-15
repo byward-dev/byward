@@ -95,8 +95,8 @@ func TestUpstreamRefusalBecomesAReadableJSONRPCResponse(t *testing.T) {
 			if c.wantStatus == 200 && (!json.Valid(w.Body.Bytes()) || w.Header().Get("Content-Type") != "application/json") {
 				t.Fatalf("Content-Type %q, body %s; want JSON", w.Header().Get("Content-Type"), w.Body)
 			}
-			if c.wantStatus == 405 && w.Header().Get("Allow") != "POST" {
-				t.Fatal("405 without Allow: POST")
+			if c.method != "POST" && w.Header().Get("Allow") != "POST" {
+				t.Fatalf("Allow %q, want POST", w.Header().Get("Allow"))
 			}
 		})
 	}
@@ -171,14 +171,14 @@ func TestAStringOrIntegerIDIsEchoedExactlyAndAnyOtherLeavesTheRequestUnanswerabl
 
 // decide's verdicts, in order: the method first, then a truncated body (even one whose readable part
 // parses), then the request itself.
-func TestDecideAnswersByMethodThenTruncationThenTheRequest(t *testing.T) {
+func TestDecideRulesByMethodThenTruncationThenTheRequest(t *testing.T) {
 	for _, tc := range []struct {
 		name, method, body string
 		truncated          bool
 		want               outcome
 	}{
 		{"GET", "GET", ``, false, outcomeStreamRefused},
-		{"DELETE, even with a request", "DELETE", toolsCall, false, outcomeStreamRefused},
+		{"DELETE, even with a truncated request", "DELETE", toolsCall, true, outcomeStreamRefused},
 		{"a whole request, truncated", "POST", toolsCall, true, outcomeUnanswerable},
 		{"a batch", "POST", `[` + toolsCall + `]`, false, outcomeUnanswerable},
 		{"not JSON-RPC", "POST", `hello`, false, outcomeUnanswerable},
@@ -192,7 +192,7 @@ func TestDecideAnswersByMethodThenTruncationThenTheRequest(t *testing.T) {
 				t.Fatalf("decide = %q, want %q", got, tc.want)
 			}
 			if got == outcomeSynthesized && (req.method != "tools/call" || string(req.id) != "7") {
-				t.Fatalf("request %+v; want tools/call with id 7", req)
+				t.Fatalf("request method %q, id %s; want tools/call with id 7", req.method, req.id)
 			}
 		})
 	}

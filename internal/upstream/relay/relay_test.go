@@ -815,7 +815,7 @@ func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLogAndAWellFormedProxys
 
 // A chunked request body over the server's limit is answered 413 through any proxy: through a misread one
 // too, whose redaction must keep the limit error (it quotes no address) for the relay to see it.
-func TestABodyOverTheLimitIsAnswered413ThroughAMisreadProxyAsThroughAnyOther(t *testing.T) {
+func TestABodyOverTheLimitIsAnswered413WhateverTheProxySetting(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		setting func(addr string) string

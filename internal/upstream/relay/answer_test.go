@@ -44,7 +44,7 @@ func TestAnswerFollowsTheRefusalShapes(t *testing.T) {
 				t.Fatalf("Content-Type %q, body %s; want JSON", w.Header().Get("Content-Type"), w.Body)
 			}
 			if c.method != "POST" && w.Header().Get("Allow") != "POST" {
-				t.Fatal("405 without Allow: POST")
+				t.Fatalf("Allow %q, want POST", w.Header().Get("Allow"))
 			}
 		})
 	}

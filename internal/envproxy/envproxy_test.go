@@ -81,7 +81,7 @@ func TestATransportErrorThroughAMisreadProxySettingNeverQuotesItsAddress(t *test
 
 // A request body over its http.MaxBytesReader limit stays the bare *http.MaxBytesError through a
 // misread proxy, so a server can still answer 413; it quotes no address.
-func TestABodyOverItsLimitThroughAMisreadProxyStaysAMaxBytesError(t *testing.T) {
+func TestABodyOverItsLimitThroughAMisreadProxyStaysTheBareMaxBytesError(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0") // the proxy Go dials: it reads the request, so the body is sent
 	if err != nil {
 		t.Fatal(err)
