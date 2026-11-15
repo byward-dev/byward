@@ -167,9 +167,8 @@ type wiring struct {
 // when its feature is off, and the registry that also registers clients (DCR) as the Registrar.
 var clientSources = []func(*wiring) (registration.Registry, broker.Registrar, error){wireCIMD, wireDCR}
 
-// authFeatures complete auth once the broker is built, in this order (the plain identity headers
-// need the assertion's minter).
-var authFeatures = []func(*wiring, *auth) error{wireAssertion, wireIdentityHeaders, wireOBO}
+// authFeatures complete auth once the broker is built, in this order.
+var authFeatures = []func(*wiring, *auth) error{wireAssertion, wireOBO}
 
 // auditStartup records the keys and static clients the proxy starts with (ADR-0021 §3).
 func auditStartup(rec *audit.Log, ring *token.KeyRing, staticClients []string) {
@@ -204,11 +203,14 @@ var idpHTTPClient *http.Client
 // newBroker is broker.New; tests replace it to see the wired configuration.
 var newBroker = broker.New
 
-// logPaths logs the absolute paths the proxy uses, defaults resolved (ADR-0007 §6); the SQLite
-// store's only when it is the store.
+// logPaths logs the absolute paths the proxy uses, defaults resolved (ADR-0007 §6); the assertion
+// keys' only for an HTTP upstream, and the SQLite store's only when it is the store.
 func logPaths(cfg *config.Config, log *slog.Logger) {
 	paths := []struct{ setting, value string }{
 		{"BYWARD_DATA_DIR", cfg.DataDir}, {"BYWARD_KEYS_DIR", cfg.KeysDir}, {"BYWARD_STATIC_CLIENTS_FILE", cfg.StaticClientsFile},
+	}
+	if cfg.UpstreamCommand == nil { // only an HTTP upstream gets the assertion, so only then are its keys read
+		paths = append(paths, struct{ setting, value string }{"BYWARD_ASSERTION_KEYS_DIR", cfg.AssertionKeysDir})
 	}
 	if cfg.StorePostgresDSN == "" {
 		paths = append(paths, struct{ setting, value string }{"BYWARD_STORE_DIR", cfg.StoreDir},
