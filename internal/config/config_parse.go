@@ -127,7 +127,7 @@ func parseProxies(raw string) ([]netip.Prefix, error) {
 			}
 			p = netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen())
 		case p.Addr().Is4In6() && p.Bits() < 96: // ::ffff:10.0.0.0/8 would mask to ::/8, IPv6 addresses
-			return nil, errorf("BYWARD_TRUSTED_PROXIES: %q is an IPv4-mapped prefix shorter than /96, which covers no IPv4 address; give it as IPv4, e.g. 10.0.0.0/8", item)
+			return nil, errorf("BYWARD_TRUSTED_PROXIES: %q is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)", item)
 		case p.Addr().Is4In6(): // peers are compared unmapped (logging.ClientAddress), as a bare mapped address is here
 			p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
 		}
@@ -148,24 +148,43 @@ func splitList(s string) []string {
 
 // normalizeOrigin returns an origin as browsers send it (browserOrigin), with its host[:port]
 // checked as BYWARD_ALLOWED_HOSTS checks one (normalizeAllowedHost), so an entry that no browser
-// could send is refused, not kept.
+// could send is refused, not kept: browsers write an IPv4 address in dotted decimal (never 127.1 or
+// 0x7f.0.0.1) and an IPv4-mapped IPv6 address in hex (::ffff:7f00:1).
 func normalizeOrigin(o string) (string, error) {
 	u, err := url.Parse(o)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.User != nil {
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Path != "" || strings.ContainsAny(o, "?#") || u.User != nil {
 		return "", fmt.Errorf("%q is not an origin (scheme://host[:port])", o)
 	}
 	if _, err := normalizeAllowedHost(u.Host); err != nil {
-		return "", err
+		return "", fmt.Errorf("%q: %w", o, err)
+	}
+	host := u.Hostname()
+	a, err := netip.ParseAddr(host)
+	switch {
+	case err == nil && a.Is4In6():
+		return "", fmt.Errorf("%q: give the IPv4-mapped address %s as the IPv4 address %s", o, host, a.Unmap())
+	case err != nil && numericLabel(host[strings.LastIndex(host, ".")+1:]):
+		return "", fmt.Errorf("%q: %s is not an IPv4 address in dotted decimal, the only form browsers send", o, host)
 	}
 	return browserOrigin(u), nil
 }
 
+// numericLabel reports whether a host's last label is a number, decimal or 0x hex, which makes a
+// browser read the host as an IPv4 address (WHATWG URL "ends in a number").
+func numericLabel(label string) bool {
+	if l := strings.ToLower(label); strings.HasPrefix(l, "0x") {
+		return strings.Trim(l[2:], "0123456789abcdef") == ""
+	}
+	return label != "" && strings.Trim(label, "0123456789") == ""
+}
+
 // browserOrigin is u's origin as browsers serialize it (RFC 6454 §6.2): scheme://host[:port] in lower
-// case, an IPv6 host in brackets, and no port when it is the scheme's default.
+// case, an IPv6 host in brackets and in its shortest form (RFC 5952), and no port when it is the
+// scheme's default.
 func browserOrigin(u *url.URL) string {
 	host := strings.ToLower(u.Hostname())
-	if strings.Contains(host, ":") {
-		host = "[" + host + "]"
+	if a, err := netip.ParseAddr(host); err == nil && a.Is6() {
+		host = "[" + a.String() + "]"
 	}
 	defaultPort := map[string]string{"http": "80", "https": "443"}[u.Scheme]
 	if p := u.Port(); p != "" && p != defaultPort {

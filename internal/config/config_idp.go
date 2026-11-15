@@ -86,9 +86,9 @@ func (c *Config) entraIdP(v *Values) []error {
 	errs := c.requiredForIdP(v, "entra-tenant", "entra-client-id")
 	secretEnv, tokenEnv := Setting{Name: "entra-client-secret"}.Env()+"_FILE", Setting{Name: "entra-federated-token-file"}.Env()
 	certEnv := Setting{Name: "entra-client-certificate"}.Env() + "_FILE"
+	hasSecret, hasCert := v.given("entra-client-secret"), v.given("entra-client-certificate")
 	var set []string // the Entra app's credentials given: exactly one (ADR-0012 §5)
-	for env, given := range map[string]bool{secretEnv: c.EntraClientSecret != "" || v.fileNamed("entra-client-secret"),
-		tokenEnv: c.EntraFederatedTokenFile != "", certEnv: c.EntraClientCertificate != "" || v.fileNamed("entra-client-certificate")} {
+	for env, given := range map[string]bool{secretEnv: hasSecret, tokenEnv: c.EntraFederatedTokenFile != "", certEnv: hasCert} {
 		if given {
 			set = append(set, env)
 		}
@@ -111,7 +111,7 @@ func (c *Config) entraIdP(v *Values) []error {
 		if v.get("entra-client-secret-expires-at") != "" {
 			errs = append(errs, errorf("%s has no effect with %s: a federated token has no secret to expire; remove it", Setting{Name: "entra-client-secret-expires-at"}.Env(), tokenEnv))
 		}
-	case c.EntraClientCertificate != "" || v.fileNamed("entra-client-certificate"):
+	case hasCert:
 		if v.get("entra-client-secret-expires-at") != "" {
 			errs = append(errs, errorf("%s has no effect with %s: byward reads the certificate's own end date; remove it", Setting{Name: "entra-client-secret-expires-at"}.Env(), certEnv))
 		}
@@ -150,7 +150,7 @@ func (c *Config) oidcIdP(v *Values) []error {
 	}
 	errs = append(errs, c.requiredForIdP(v, "oidc-client-id")...)
 	secret, key := Setting{Name: "oidc-client-secret"}.Env()+"_FILE", Setting{Name: "oidc-client-key"}.Env()+"_FILE"
-	hasSecret, hasKey := c.OIDCClientSecret != "" || v.fileNamed("oidc-client-secret"), c.OIDCClientKey != "" || v.fileNamed("oidc-client-key")
+	hasSecret, hasKey := v.given("oidc-client-secret"), v.given("oidc-client-key")
 	for _, name := range []string{"oidc-client-secret", "oidc-client-key"} {
 		if err := v.emptySecretFile(name); err != nil {
 			errs = append(errs, err)

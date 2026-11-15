@@ -3,12 +3,16 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // base is the Entra quickstart: the only settings an operator must set (ADR-0020 §8).
@@ -110,7 +114,20 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		// Browsers and MCP clients send IDN hosts in ASCII (xn--) form, so a Unicode host never matches.
 		{"unicode public host", "BYWARD_PUBLIC_URL=https://bücher.example/mcp", `BYWARD_PUBLIC_URL: the host "bücher.example" is not ASCII`},
 		{"escaped unicode public host", "BYWARD_PUBLIC_URL=https://b%C3%BCcher.example/mcp", `BYWARD_PUBLIC_URL: the host "bücher.example" is not ASCII`},
-		{"unicode allowed origin", "BYWARD_ALLOWED_ORIGINS=https://bücher.example", `BYWARD_ALLOWED_ORIGINS: the host "bücher.example" is not ASCII`},
+		{"unicode allowed origin", "BYWARD_ALLOWED_ORIGINS=https://bücher.example", `BYWARD_ALLOWED_ORIGINS: "https://bücher.example": the host "bücher.example" is not ASCII`},
+		{"origin with a leading-zero port", "BYWARD_ALLOWED_ORIGINS=https://app.example.com:0443", `BYWARD_ALLOWED_ORIGINS: "https://app.example.com:0443": "app.example.com:0443" is not a host[:port]`},
+		{"origin with a port over 65535", "BYWARD_ALLOWED_ORIGINS=https://app.example.com:99999", `BYWARD_ALLOWED_ORIGINS: "https://app.example.com:99999": "app.example.com:99999" is not a host[:port]`},
+		{"origin with port 0", "BYWARD_ALLOWED_ORIGINS=https://app.example.com:0", `BYWARD_ALLOWED_ORIGINS: "https://app.example.com:0": "app.example.com:0" is not a host[:port]`},
+		{"origin with an empty port", "BYWARD_ALLOWED_ORIGINS=https://app.example.com:", `BYWARD_ALLOWED_ORIGINS: "https://app.example.com:": "app.example.com:" is not a host[:port]`},
+		{"origin with an empty label", "BYWARD_ALLOWED_ORIGINS=https://a..b", `BYWARD_ALLOWED_ORIGINS: "https://a..b": "a..b" is not a host[:port]: a host name`},
+		{"origin with a leading dot", "BYWARD_ALLOWED_ORIGINS=https://.app.example.com", `BYWARD_ALLOWED_ORIGINS: "https://.app.example.com": ".app.example.com" is not a host[:port]: a host name`},
+		{"origin with a trailing dot", "BYWARD_ALLOWED_ORIGINS=https://app.example.com.", `BYWARD_ALLOWED_ORIGINS: "https://app.example.com.": "app.example.com." is not a host[:port]: a host name`},
+		{"origin with an IPv6 zone", "BYWARD_ALLOWED_ORIGINS=https://[fe80::1%25eth0]", `BYWARD_ALLOWED_ORIGINS: "https://[fe80::1%25eth0]": "[fe80::1%eth0]" is not a host[:port]`},
+		{"origin with a shortened IPv4 address", "BYWARD_ALLOWED_ORIGINS=https://127.1", `BYWARD_ALLOWED_ORIGINS: "https://127.1": 127.1 is not an IPv4 address in dotted decimal, the only form browsers send`},
+		{"origin with a hex IPv4 label", "BYWARD_ALLOWED_ORIGINS=https://0x7f.0.0.1", `BYWARD_ALLOWED_ORIGINS: "https://0x7f.0.0.1": 0x7f.0.0.1 is not an IPv4 address in dotted decimal`},
+		{"origin with an IPv4-mapped IPv6 address", "BYWARD_ALLOWED_ORIGINS=https://[::ffff:127.0.0.1]", `BYWARD_ALLOWED_ORIGINS: "https://[::ffff:127.0.0.1]": give the IPv4-mapped address ::ffff:127.0.0.1 as the IPv4 address 127.0.0.1`},
+		{"origin with a fragment", "BYWARD_ALLOWED_ORIGINS=https://app.example.com#", `BYWARD_ALLOWED_ORIGINS: "https://app.example.com#" is not an origin`},
+		{"origin with an empty query", "BYWARD_ALLOWED_ORIGINS=https://app.example.com?", `BYWARD_ALLOWED_ORIGINS: "https://app.example.com?" is not an origin`},
 		{"unicode allowed host", "BYWARD_ALLOWED_HOSTS=bücher.example:8443", `BYWARD_ALLOWED_HOSTS: the host "bücher.example:8443" is not ASCII`},
 		{"credentials", "BYWARD_UPSTREAM_URL=http://u:p@upstream/mcp", "BYWARD_UPSTREAM_URL"},
 		{"origin with path", "BYWARD_ALLOWED_ORIGINS=https://a.example/path", "BYWARD_ALLOWED_ORIGINS"},
@@ -527,20 +544,54 @@ func TestUpstreamHeaderTimeoutDefaultsToFiveMinutesWithinBounds(t *testing.T) {
 	}
 }
 
+// Trusted proxies are CIDRs or addresses, masked; an IPv4-mapped one is the IPv4 prefix it maps,
+// since peers are compared unmapped, and one shorter than /96 maps no IPv4 prefix (masked, it would
+// trust IPv6 addresses), so it is refused.
 func TestTrustedProxiesTakeCIDRsAndAddresses(t *testing.T) {
-	cfg, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES=10.0.0.0/8, 192.0.2.7, 2001:db8::/32, 10.1.2.3/8"), nil)
+	cfg, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES=10.0.0.0/8, 192.0.2.7, 2001:db8::/32, 10.1.2.3/8, ::ffff:10.0.0.5, ::ffff:10.0.0.5/128, ::ffff:172.16.0.0/108, ::ffff:0:0/96"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := fmt.Sprint(cfg.TrustedProxies)
-	if want := "[10.0.0.0/8 192.0.2.7/32 2001:db8::/32 10.0.0.0/8]"; got != want {
-		t.Errorf("trusted proxies = %s, want %s (bare addresses as /32 or /128, prefixes masked)", got, want)
+	if want := "[10.0.0.0/8 192.0.2.7/32 2001:db8::/32 10.0.0.0/8 10.0.0.5/32 10.0.0.5/32 172.16.0.0/12 0.0.0.0/0]"; got != want {
+		t.Errorf("trusted proxies = %s, want %s (bare addresses as /32 or /128, prefixes masked, mapped ones as IPv4)", got, want)
 	}
 	if cfg, _, err := Load(nil, noAuthEnv(), nil); err != nil || len(cfg.TrustedProxies) != 0 {
 		t.Errorf("default trusted proxies = %v (err %v), want none", cfg.TrustedProxies, err)
 	}
-	if _, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES=proxy.internal"), nil); err == nil || !strings.Contains(err.Error(), "BYWARD_TRUSTED_PROXIES") {
-		t.Errorf("a hostname must be rejected with the setting named, got %v", err)
+	for _, tc := range []struct{ name, value, want string }{
+		{"a hostname", "proxy.internal", `BYWARD_TRUSTED_PROXIES: "proxy.internal" is not a CIDR or an IP address`},
+		{"a mapped /8", "::ffff:10.0.0.0/8", `BYWARD_TRUSTED_PROXIES: "::ffff:10.0.0.0/8" is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)`},
+		{"a mapped /95", "::ffff:10.0.0.0/95", `BYWARD_TRUSTED_PROXIES: "::ffff:10.0.0.0/95" is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES="+tc.value), nil); err == nil || err.Error() != tc.want {
+				t.Errorf("err = %v\nwant %s", err, tc.want)
+			}
+		})
+	}
+}
+
+// A mapped trusted-proxy prefix trusts the IPv4 proxies it maps, and no IPv6 peer, where the client
+// address is resolved (logging.ClientAddress).
+func TestAMappedTrustedProxyPrefixTrustsItsIPv4Proxies(t *testing.T) {
+	cfg, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES=::ffff:10.0.0.0/104"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for peer, want := range map[string]string{
+		"10.1.2.3:4000":      "198.51.100.1", // the IPv4 proxy the prefix maps: its X-Forwarded-For counts
+		"[2001:db8::1]:4000": "2001:db8::1",  // not trusted: the header is ignored
+	} {
+		var client string
+		h := logging.ClientAddress(cfg.TrustedProxies, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { client = logging.RemoteIP(r) }))
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = peer
+		r.Header.Set("X-Forwarded-For", "198.51.100.1")
+		h.ServeHTTP(httptest.NewRecorder(), r)
+		if client != want {
+			t.Errorf("peer %s: client %s, want %s", peer, client, want)
+		}
 	}
 }
 

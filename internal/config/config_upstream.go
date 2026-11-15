@@ -109,7 +109,7 @@ func offModeSettings(v *Values, stdio bool) []error {
 	for _, val := range v.Effective() {
 		s := val.Setting
 		forOff := s.Group == offGroup || stdio && httpOnly[s.Name]
-		if !forOff || val.Source == SourceDefault || val.Raw == "" && val.Path == "" || s.Name == "upstream-url" || s.Name == "upstream-command" || s.Name == "upstream-credential" {
+		if !forOff || val.Source == SourceDefault || !val.given() || s.Name == "upstream-url" || s.Name == "upstream-command" || s.Name == "upstream-credential" {
 			continue
 		}
 		errs = append(errs, errorf("%s is set, but the upstream is %s: it applies only to %s (%s); remove it", spelled(val), inUse, offMode, offSelector))

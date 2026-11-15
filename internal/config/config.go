@@ -28,9 +28,13 @@ type Config struct {
 	StdioStreamIdleTimeout time.Duration
 	Listen                 string
 	InternalListen         string // "" when the internal listener is off
-	AllowedOrigins         []string
-	AllowedHosts           []string
-	TrustedProxies         []netip.Prefix
+	// AllowedOrigins are origins as browsers serialize them (browserOrigin), which origin.Origins
+	// compares exactly.
+	AllowedOrigins []string
+	AllowedHosts   []string
+	// TrustedProxies are masked, with IPv4-mapped prefixes unmapped, since logging.ClientAddress
+	// compares unmapped peers.
+	TrustedProxies []netip.Prefix
 
 	// TLSCertFile and TLSKeyFile serve TLS on the public listener (#183); both "" when it is plain
 	// HTTP, as behind an ingress that terminates TLS.

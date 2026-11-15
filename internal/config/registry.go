@@ -95,15 +95,25 @@ type Values struct {
 // get returns the raw value of a setting.
 func (v *Values) get(name string) string { return v.byKey[name].Raw }
 
-// fileNamed reports whether the operator named a file for the secret setting name: a file named for
-// a secret is given, even when the file is empty, so it never falls back to another choice.
-func (v *Values) fileNamed(name string) bool { return v.byKey[name].Path != "" }
+// given reports whether the operator gave the setting: a value, or a file named for a secret, which
+// is given even when it is empty, so it never falls back to another choice. A variable set to nothing
+// is not given, nor is a _FILE variable set to nothing, which names no file: env templates often list
+// every variable empty.
+func (val Value) given() bool { return val.Raw != "" || val.Path != "" }
 
-// emptySecretFile is the error for a secret setting whose named file holds nothing but whitespace,
-// naming the setting as the operator gave it; nil otherwise.
+// given is Value.given for the setting name.
+func (v *Values) given(name string) bool { return v.byKey[name].given() }
+
+// emptySecretFile is the error for a secret setting whose named file holds nothing, or only
+// whitespace, naming the setting as the operator gave it; nil otherwise.
 func (v *Values) emptySecretFile(name string) error {
-	if val := v.byKey[name]; val.Path != "" && strings.TrimSpace(val.Raw) == "" {
+	switch val := v.byKey[name]; {
+	case val.Path == "":
+		return nil
+	case val.Raw == "":
 		return errorf("%s: the file is empty", val.From)
+	case strings.TrimSpace(val.Raw) == "":
+		return errorf("%s: the file holds only whitespace", val.From)
 	}
 	return nil
 }
