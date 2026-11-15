@@ -8,10 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/byward-dev/byward/internal/broker"
 	"github.com/byward-dev/byward/internal/config"
-	"github.com/byward-dev/byward/internal/idp"
-	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
@@ -22,17 +19,7 @@ func TestTheWiredServerRemembersAStaticClientsConsent(t *testing.T) {
 	const public = "https://mcp.example.com"
 	app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}, RedirectURIs: []string{public + "/callback/entra"}}
 	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithClient(app))
-	orig := newBroker
-	t.Cleanup(func() { newBroker = orig })
-	newBroker = func(c broker.Config) (*broker.Broker, error) {
-		prov, err := entra.New(entra.Config{Tenant: fake.TenantID(), ClientID: app.ID, ClientAuth: idp.ClientSecret("s3cret"),
-			RedirectURL: public + "/callback/entra", HTTPClient: fake.HTTPClient()})
-		if err != nil {
-			return nil, err
-		}
-		c.IdP, c.IdPScopes = prov, prov.Scope()
-		return orig(c)
-	}
+	useFakeEntra(t, fake, app)
 	cfg, _, err := config.Load(nil, append(authEnv(t), "BYWARD_PUBLIC_URL="+public+"/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
@@ -76,11 +63,7 @@ func TestTheWiredServerRemembersAStaticClientsConsent(t *testing.T) {
 	if code := b.viaIdP(fake, again); code.StatusCode != http.StatusFound || !strings.Contains(code.Header.Get("Location"), "code=") {
 		t.Fatalf("remembered callback: %d to %q", code.StatusCode, code.Header.Get("Location"))
 	}
-	scrape := httptest.NewRequest("GET", "/metrics", nil)
-	scrape.Host = "127.0.0.1:9090"
-	m := httptest.NewRecorder()
-	srv.Internal.Handler.ServeHTTP(m, scrape)
-	if !strings.Contains(m.Body.String(), `byward_consent_total{outcome="remembered",trust="verified"} 1`) {
-		t.Fatalf("remembered sign-in not counted:\n%s", m.Body)
+	if m := internalMetrics(t, srv.Internal.Handler); !strings.Contains(m, `byward_consent_total{outcome="remembered",trust="verified"} 1`) {
+		t.Fatalf("remembered sign-in not counted:\n%s", m)
 	}
 }

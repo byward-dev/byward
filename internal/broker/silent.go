@@ -76,6 +76,6 @@ func (b *Broker) refuseSilentIdPFailure(w http.ResponseWriter, r *http.Request, 
 func (b *Broker) refuseSilently(w http.ResponseWriter, r *http.Request, trust registration.TrustLevel, l login, code, desc string) {
 	b.cfg.Audit.Record(r, audit.Event{Name: audit.ConsentSilent, Outcome: audit.Failure, Reason: code, ClientID: l.ClientID,
 		ClientTrust: string(trust), IdP: b.cfg.IdPName})
-	b.observeConsent(trust, ConsentOutcomeSilentRefused)
+	b.cfg.ObserveConsent(string(trust), ConsentOutcomeSilentRefused)
 	b.redirectError(w, r, l.RedirectURI, l.State, code, desc)
 }

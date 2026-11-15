@@ -14,7 +14,7 @@ import (
 // identity: the client gets the readable refusal, and the counter rises from its seeded 0.
 func TestAnUpstreamRefusalIsCountedWithTheIdentityAssertion(t *testing.T) {
 	e := newOBOEnv(t, "")
-	if m := e.metrics(); !strings.Contains(m, `byward_upstream_refusals_total{status="403"} 0`) {
+	if m := e.metrics(t); !strings.Contains(m, `byward_upstream_refusals_total{status="403"} 0`) {
 		t.Fatalf("before any refusal, the 403 series is not at 0:\n%s", m)
 	}
 	access := e.signIn(t)["access_token"].(string)
@@ -24,7 +24,7 @@ func TestAnUpstreamRefusalIsCountedWithTheIdentityAssertion(t *testing.T) {
 	if status, body := e.mcp(t, access, oboToolsCall, nil); status != http.StatusOK || !strings.Contains(body, "denied this request") {
 		t.Fatalf("got %d %s, want the readable refusal", status, body)
 	}
-	m := e.metrics()
+	m := e.metrics(t)
 	for _, want := range []string{`byward_upstream_refusals_total{status="403"} 1`, `byward_upstream_refusals_total{status="401"} 0`} {
 		if !strings.Contains(m, want) {
 			t.Errorf("metrics lack %s", want)

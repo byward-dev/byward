@@ -12,7 +12,6 @@ import (
 func TestAnswerFollowsTheRefusalShapes(t *testing.T) {
 	const msg = "This tool needs an administrator to grant access; ask your operator."
 	data := map[string]string{"downstream": "consent_required"}
-	overCapture := `{"jsonrpc":"2.0","method":"tools/call","params":{"pad":"` + strings.Repeat("x", captureLimit) + `"},"id":1}`
 	cases := []struct {
 		name, method, body string
 		wantStatus         int
@@ -24,9 +23,9 @@ func TestAnswerFollowsTheRefusalShapes(t *testing.T) {
 			`{"error":{"code":-32603,"data":{"downstream":"consent_required"},"message":"` + msg + `"},"id":"a-1","jsonrpc":"2.0"}`},
 		{"notification: accepted", "POST", `{"jsonrpc":"2.0","method":"notifications/initialized"}`, 202, ""},
 		{"GET: no stream offered", "GET", ``, 405, ""},
-		{"batch: id unknown, the fallback status", "POST", `[` + toolsCall + `]`, 503, msg},
-		{"not JSON-RPC: the fallback status", "POST", `hello`, 503, msg},
-		{"over the capture limit: the fallback status", "POST", overCapture, 503, msg},
+		{"not JSON-RPC: id unknown, the fallback status", "POST", `hello`, 503, msg},
+		{"over the capture limit: id unknown, the fallback status", "POST", overCapture, 503, msg},
+		{"over the capture limit, its readable part a whole request: id unknown, the fallback status", "POST", padded, 503, msg},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -41,11 +40,11 @@ func TestAnswerFollowsTheRefusalShapes(t *testing.T) {
 			if !strings.Contains(w.Body.String(), c.wantBody) {
 				t.Fatalf("body %q, want %q", w.Body, c.wantBody)
 			}
-			if c.wantStatus == 200 && !json.Valid(w.Body.Bytes()) {
-				t.Fatalf("not JSON: %s", w.Body)
+			if c.wantStatus == 200 && (!json.Valid(w.Body.Bytes()) || w.Header().Get("Content-Type") != "application/json") {
+				t.Fatalf("Content-Type %q, body %s; want JSON", w.Header().Get("Content-Type"), w.Body)
 			}
 			if c.method != "POST" && w.Header().Get("Allow") != "POST" {
-				t.Fatal("405 without Allow: POST")
+				t.Fatalf("Allow %q, want POST", w.Header().Get("Allow"))
 			}
 		})
 	}

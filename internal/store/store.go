@@ -18,8 +18,11 @@ var (
 	ErrConsumed = errors.New("store: already consumed")
 	// ErrExists: a grant ID, a grant's code or a refresh-token hash is already stored.
 	ErrExists = errors.New("store: already exists")
-	// ErrInvalid: a grant without an ID, client, subject or a lifetime, or a subject cut-off
-	// without a subject. An empty subject in a Revocation must never reach the deny list.
+	// ErrInvalid: an argument the contract refuses: a grant, client or consent missing a field or a
+	// lifetime (CheckNew), a spend expiring by now (CheckSpend), an UpdateGrant expiry not after the
+	// grant's creation, empty IdP tokens for SetIdPTokens, a rotation whose next token is for another
+	// grant, or a subject cut-off without a subject. An empty subject in a Revocation must never reach
+	// the deny list.
 	ErrInvalid = errors.New("store: invalid argument")
 	// ErrRevoked: CreateGrant for a subject whose retained cut-off covers the grant (a login that
 	// was in flight when revoke-user ran).
@@ -90,6 +93,15 @@ type Grant struct {
 	CreatedAt time.Time
 	ExpiresAt time.Time // absolute lifetime (ADR-0006 §5)
 	Epoch     int64     // ADR-0007 §9; set by the store on create
+}
+
+// CheckNew is CreateGrant's ErrInvalid rule for a grant about to be stored, which every adapter
+// applies: an empty ID, ClientID or Subject, or an ExpiresAt not after CreatedAt.
+func (g Grant) CheckNew() error {
+	if g.ID == "" || g.ClientID == "" || g.Subject == "" || !g.ExpiresAt.After(g.CreatedAt) {
+		return ErrInvalid
+	}
+	return nil
 }
 
 // Grants stores grants.
@@ -175,6 +187,14 @@ type ClientAssertions interface {
 	SpendAssertion(ctx context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error
 }
 
+// CheckSpend is the ErrInvalid rule of SpendLogin and SpendAssertion: an expiresAt not after now.
+func CheckSpend(now, expiresAt time.Time) error {
+	if !expiresAt.After(now) {
+		return ErrInvalid
+	}
+	return nil
+}
+
 // RefreshToken is a stored refresh token: only its hash (ADR-0006 §4).
 type RefreshToken struct {
 	Hash          [sha256.Size]byte
@@ -247,6 +267,15 @@ type Client struct {
 	ExpiresAt time.Time
 }
 
+// CheckNew is CreateClient's ErrInvalid rule for a client about to be registered: an empty ID or
+// Metadata, a non-zero UsedAt, or an ExpiresAt not after CreatedAt.
+func (c Client) CheckNew() error {
+	if c.ID == "" || len(c.Metadata) == 0 || !c.UsedAt.IsZero() || !c.ExpiresAt.After(c.CreatedAt) {
+		return ErrInvalid
+	}
+	return nil
+}
+
 // Clients are dynamic client registrations, with a sliding expiry (ADR-0008 §3).
 type Clients interface {
 	// CreateClient stores c. An existing ID is ErrExists; an empty ID or Metadata, a non-zero
@@ -284,6 +313,16 @@ type Consent struct {
 	// that rule, or was rewritten by a replica on an older binary during a rolling upgrade, and its
 	// offline_access does not count.
 	RecordsLifetime bool
+}
+
+// CheckNew is RememberConsent's ErrInvalid rule for a consent about to be remembered: an empty key
+// field, no scopes, or an ExpiresAt not after ApprovedAt.
+func (c Consent) CheckNew() error {
+	k := c.Key
+	if k.Issuer == "" || k.Subject == "" || k.ClientID == "" || k.Redirect == "" || k.Resource == "" || len(c.Scopes) == 0 || !c.ExpiresAt.After(c.ApprovedAt) {
+		return ErrInvalid
+	}
+	return nil
 }
 
 // Consents is the remembered-consent registry (ADR-0010 §2-3). Revoking forgets, in the same

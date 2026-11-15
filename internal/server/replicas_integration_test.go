@@ -15,6 +15,7 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/testutil/pgtest"
 )
 
@@ -41,9 +42,14 @@ func TestIntegrationTwoReplicasShareThePostgreSQLStore(t *testing.T) {
 		// The startup log names the database and its TLS, never the DSN's password nor the SQLite paths
 		// it does not use.
 		for _, r := range []*replica{a, b} {
-			if logs := r.logs.String(); !strings.Contains(logs, "tls=verify-full") || strings.Contains(logs, srv.Password) ||
+			logs := r.logs.String()
+			if !strings.Contains(logs, "tls=verify-full") || strings.Contains(logs, srv.Password) ||
 				strings.Contains(logs, "BYWARD_STORE_DIR") || strings.Contains(logs, "BYWARD_STORE_COUNTER_FILE") {
 				t.Fatalf("startup log without the database's TLS, or with the password or a SQLite path:\n%s", logs)
+			}
+			// Startup warns, as check and doctor do, that the keys never live in the store.
+			if n := strings.Count(logs, replicaKeys.Message); n != 1 || !strings.Contains(logs, replicaKeys.Fix) {
+				t.Fatalf("startup logged the replica-keys warning %d times, want once with its fix:\n%s", n, logs)
 			}
 		}
 		return cfg, db, a, b
@@ -94,7 +100,7 @@ func TestIntegrationTwoReplicasShareThePostgreSQLStore(t *testing.T) {
 	t.Run("store new-epoch refuses older refresh tokens on every replica, audited once", func(t *testing.T) {
 		cfg, db, a, b := pair(t)
 		rt := seedSignedInUser(t, a.wired, "g3", time.Now())
-		var logs syncBuffer
+		var logs logsink.Buffer
 		epoch, err := NewEpoch(context.Background(), cfg, logging.New(&logs, "json"))
 		if err != nil || epoch != 2 {
 			t.Fatalf("NewEpoch = %d, %v; want epoch 2", epoch, err)
@@ -152,14 +158,14 @@ func TestIntegrationTwoReplicasShareThePostgreSQLStore(t *testing.T) {
 type replica struct {
 	s     *Servers
 	wired *broker.Config
-	logs  *syncBuffer
+	logs  *logsink.Buffer
 }
 
 // startReplica wires a server on cfg, as one replica starts, and runs its background work until the
 // test ends; its store closes after that.
 func startReplica(t *testing.T, cfg *config.Config) *replica {
 	t.Helper()
-	r := &replica{wired: new(broker.Config), logs: new(syncBuffer)}
+	r := &replica{wired: new(broker.Config), logs: new(logsink.Buffer)}
 	orig := newBroker // swapped for this New only: a second replica must not record into the first's
 	newBroker = func(c broker.Config) (*broker.Broker, error) {
 		c.IdP = refreshingIdP{c.IdP}

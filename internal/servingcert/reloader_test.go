@@ -16,21 +16,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/byward-dev/byward/internal/testutil/fakeclock"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/testutil/testcert"
 )
-
-// clock is an injected time.Now that a test moves.
-type clock struct {
-	mu sync.Mutex
-	t  time.Time
-}
-
-func (c *clock) now() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
-func (c *clock) set(t time.Time) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.t = t
-}
 
 // served is the leaf the reloader answers the next handshake with.
 func served(t *testing.T, r *Reloader) *x509.Certificate {
@@ -57,19 +46,6 @@ func leafOf(t *testing.T, b testcert.Bundle) *x509.Certificate {
 	return c
 }
 
-// syncBuffer is a log sink handshakes on several goroutines may write to.
-type syncBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *syncBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-func (b *syncBuffer) String() string { b.mu.Lock(); defer b.mu.Unlock(); return b.buf.String() }
-
 // othersCanRead stands in for the secret-file check: it refuses a key other users can read.
 func othersCanRead(path string) error {
 	fi, err := os.Stat(path)
@@ -84,10 +60,10 @@ func othersCanRead(path string) error {
 
 // load loads f with the clock c and othersCanRead as the key check. Its logs also record each
 // pair the Served hook is told of, as a "served <serial>" line.
-func load(t *testing.T, f Files, c *clock) (*Reloader, *syncBuffer) {
+func load(t *testing.T, f Files, c *fakeclock.Clock) (*Reloader, *logsink.Buffer) {
 	t.Helper()
-	logs := new(syncBuffer)
-	r, err := Load(f, Options{Now: c.now, Log: slog.New(slog.NewJSONHandler(logs, nil)), CheckKey: othersCanRead,
+	logs := new(logsink.Buffer)
+	r, err := Load(f, Options{Now: c.Now, Log: slog.New(slog.NewJSONHandler(logs, nil)), CheckKey: othersCanRead,
 		Served: func(p *Pair) { _, _ = fmt.Fprintf(logs, "served %s\n", p.chain[0].SerialNumber) }})
 	if err != nil {
 		t.Fatal(err)
@@ -179,7 +155,7 @@ func TestARenewedPairIsServedAtTheNextHandshake(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			first := testcert.Issue(t, testcert.Options{Leaf: testcert.Valid(now, 90)})
 			f, renew := tc.setup(t, first)
-			r, logs := load(t, f, &clock{t: now})
+			r, logs := load(t, f, fakeclock.New(now))
 			if !served(t, r).Equal(leafOf(t, first)) {
 				t.Fatal("the loaded pair is not served")
 			}
@@ -246,7 +222,7 @@ func TestAChangeIsSeenWhenTheModificationTimeStaysTheSame(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v, f := newKubeletVolume(t, first)
-			r, _ := load(t, f, &clock{t: now})
+			r, _ := load(t, f, fakeclock.New(now))
 			second := tc.change(t, f, v)
 			if !served(t, r).Equal(leafOf(t, second)) {
 				t.Fatal("the change is not served")
@@ -325,7 +301,7 @@ func TestAPairThatCannotBeServedKeepsThePreviousOneAndIsLoggedOnce(t *testing.T)
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, first := write(t, testcert.Options{Leaf: testcert.Valid(now, 90)})
-			r, logs := load(t, f, &clock{t: now})
+			r, logs := load(t, f, fakeclock.New(now))
 			tc.break_(t, f, first)
 			for range 3 {
 				if !served(t, r).Equal(leafOf(t, first)) {
@@ -361,7 +337,7 @@ func TestAPairThatCannotBeServedKeepsThePreviousOneAndIsLoggedOnce(t *testing.T)
 func TestConcurrentHandshakesLogAFailedChangeOnce(t *testing.T) {
 	f, first := write(t, testcert.Options{Leaf: testcert.Valid(now, 90)})
 	other := testcert.Issue(t, testcert.Options{Leaf: testcert.Valid(now, 90)})
-	r, logs := load(t, f, &clock{t: now})
+	r, logs := load(t, f, fakeclock.New(now))
 	stop := make(chan struct{})
 	var calls atomic.Int64
 	var wg sync.WaitGroup
@@ -424,7 +400,7 @@ func TestARenewedCertificateNotValidYetIsServedOnceItIs(t *testing.T) {
 		{"with an intermediate starting later", time.Hour, new(2 * time.Hour), 2*time.Hour - leeway},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c := &clock{t: now}
+			c := fakeclock.New(now)
 			f, first := write(t, testcert.Options{Leaf: testcert.Valid(now, 90)})
 			r, logs := load(t, f, c)
 			o := testcert.Options{Leaf: testcert.Validity{NotBefore: now.Add(tc.leaf), NotAfter: now.Add(life)}}
@@ -434,12 +410,12 @@ func TestARenewedCertificateNotValidYetIsServedOnceItIs(t *testing.T) {
 			renewed := testcert.Issue(t, o)
 			replace(t, f, renewed)
 			if tc.servable > 0 {
-				c.set(now.Add(tc.servable - time.Second))
+				c.Set(now.Add(tc.servable - time.Second))
 				if !served(t, r).Equal(leafOf(t, first)) {
 					t.Fatal("served a second before it is servable")
 				}
 			}
-			c.set(now.Add(tc.servable))
+			c.Set(now.Add(tc.servable))
 			for range 3 { // and no reload after
 				if !served(t, r).Equal(leafOf(t, renewed)) {
 					t.Fatal("the renewed certificate is not served once it is servable")
@@ -455,12 +431,12 @@ func TestARenewedCertificateNotValidYetIsServedOnceItIs(t *testing.T) {
 // #183: a pair not valid yet that has expired too by the time it would be served is not served,
 // and its failure is not logged again: the files have not changed.
 func TestAPairThatExpiresBeforeItIsServableIsLoggedOnce(t *testing.T) {
-	c := &clock{t: now}
+	c := fakeclock.New(now)
 	f, first := write(t, testcert.Options{Leaf: testcert.Valid(now, 90)})
 	r, logs := load(t, f, c)
 	replace(t, f, testcert.Issue(t, testcert.Options{Leaf: testcert.Validity{NotBefore: now.Add(time.Hour), NotAfter: now.Add(time.Hour + time.Minute)}}))
 	served(t, r)
-	c.set(now.Add(2 * time.Hour))
+	c.Set(now.Add(2 * time.Hour))
 	for range 2 {
 		if !served(t, r).Equal(leafOf(t, first)) {
 			t.Fatal("served a pair that has expired")
@@ -520,7 +496,7 @@ func TestTheSamePairReloadedIsNotAnnouncedAsNew(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, first := write(t, testcert.Options{Leaf: testcert.Valid(now, 90)})
-			r, logs := load(t, f, &clock{t: now})
+			r, logs := load(t, f, fakeclock.New(now))
 			tc.change(t, f)
 			if !served(t, r).Equal(leafOf(t, first)) {
 				t.Fatal("the pair changed")
@@ -555,7 +531,7 @@ func TestAReloaderWithoutHooksStillServesARenewedPair(t *testing.T) {
 func TestANewIntermediateBehindTheSameLeafIsAnnounced(t *testing.T) {
 	life := testcert.Valid(now, 90)
 	f, first := write(t, testcert.Options{Leaf: life, Intermediate: &life})
-	r, logs := load(t, f, &clock{t: now})
+	r, logs := load(t, f, fakeclock.New(now))
 	// Read does not verify the chain's signatures, so the same leaf can sit in front of another
 	// intermediate.
 	other := testcert.Issue(t, testcert.Options{Leaf: life, Intermediate: &testcert.Validity{NotBefore: life.NotBefore, NotAfter: now.Add(20 * 24 * time.Hour)}})

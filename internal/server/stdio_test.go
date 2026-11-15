@@ -26,6 +26,7 @@ import (
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/mcpsession"
 	"github.com/byward-dev/byward/internal/resource"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/token"
 	"github.com/byward-dev/byward/internal/upstream/stdio"
 )
@@ -56,13 +57,13 @@ func (e *buildError) Error() string {
 
 // stdioProxy serves the fake stdio upstream behind Guard and the wired session binding, as New
 // would, with users alice and bob.
-func stdioProxy(t *testing.T, env ...string) (*httptest.Server, *config.Config, *syncBuffer) {
+func stdioProxy(t *testing.T, env ...string) (*httptest.Server, *config.Config, *logsink.Buffer) {
 	t.Helper()
 	return stdioProxyRunning(t, []string{"-mcp"}, env...)
 }
 
 // stdioProxyRunning is stdioProxy with the fake upstream's flags.
-func stdioProxyRunning(t *testing.T, flags []string, env ...string) (*httptest.Server, *config.Config, *syncBuffer) {
+func stdioProxyRunning(t *testing.T, flags []string, env ...string) (*httptest.Server, *config.Config, *logsink.Buffer) {
 	t.Helper()
 	bin, err := fakeStdio()
 	if err != nil {
@@ -77,7 +78,7 @@ func stdioProxyRunning(t *testing.T, flags []string, env ...string) (*httptest.S
 	if err != nil {
 		t.Fatal(err)
 	}
-	logs := &syncBuffer{}
+	logs := &logsink.Buffer{}
 	log := slog.New(slog.NewJSONHandler(logs, nil))
 	o := Observability{Audit: audit.New(log, nil, time.Now)}
 	up, err := newUpstream(cfg, log, o, nil, nil)
@@ -287,11 +288,7 @@ func TestStdioUpstreamWithoutAuthenticationRunsAsTheAnonymousUserAndStopsWithRun
 		}
 	}
 	gauge := func() string {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
-		req.Host = "127.0.0.1:9090" // the internal listener accepts IP literals and localhost only
-		s.Internal.Handler.ServeHTTP(rec, req)
-		for _, line := range strings.Split(rec.Body.String(), "\n") {
+		for _, line := range strings.Split(internalMetrics(t, s.Internal.Handler), "\n") {
 			if strings.HasPrefix(line, "byward_stdio_processes ") {
 				return line
 			}
@@ -505,7 +502,7 @@ func TestTheStdioUpstreamGetsTheStreamIdleTimeoutAndEachEvictionIsAuditedWithIts
 	if err != nil {
 		t.Fatal(err)
 	}
-	logs := &syncBuffer{}
+	logs := &logsink.Buffer{}
 	log := logging.New(logs, "json") // the production logger: it drops any field it does not allow
 	sc := stdioConfig(cfg, "server", log, Observability{Audit: audit.New(log, nil, time.Now)})
 	if sc.StreamIdleTimeout != 15*time.Minute {

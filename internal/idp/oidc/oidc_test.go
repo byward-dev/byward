@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/testutil/fakeclock"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
@@ -665,7 +666,7 @@ func TestConcurrentFirstLoginsShareDiscovery(t *testing.T) {
 }
 
 func TestRefreshWhileJWKSIsDownIsUnavailable(t *testing.T) {
-	clock := fakeidp.NewClock(now())
+	clock := fakeclock.New(now())
 	e := newEnv(t, Config{Now: clock.Now}, fakeidp.WithClock(clock.Now))
 	e.p.fetch.Backoff = 0 // the outage fails fast instead of sleeping through retries
 	_, tok, err := e.p.Callback(context.Background(), signIn(t, e, login), login)

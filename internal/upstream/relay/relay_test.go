@@ -798,8 +798,8 @@ func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLogAndAWellFormedProxys
 			if w.Code != http.StatusBadGateway || !regexp.MustCompile(`msg="upstream error" .*request_id=[^"\s]+`).MatchString(logs.String()) {
 				t.Fatalf("status %d, log %q; want 502 and the upstream error logged with the request ID", w.Code, logs.String())
 			}
-			if got := strings.Contains(logs.String(), `reason="`+envproxy.Cause+`"`); got != tc.misread {
-				t.Fatalf("log %q names the misread setting: %v, want %v", logs.String(), got, tc.misread)
+			if got := strings.Contains(logs.String(), `error="`+envproxy.Cause+`"`); got != tc.misread {
+				t.Fatalf("log %q names the misread setting's cause: %v, want %v", logs.String(), got, tc.misread)
 			}
 			if !tc.misread && (!strings.Contains(logs.String(), "proxyconnect") || !strings.Contains(logs.String(), addr)) {
 				t.Fatalf("log %q; want the transport error of a well-formed proxy, with the address Go dialled", logs.String())
@@ -808,6 +808,70 @@ func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLogAndAWellFormedProxys
 				if strings.Contains(logs.String(), leak) {
 					t.Fatalf("log %q shows %q", logs.String(), leak)
 				}
+			}
+		})
+	}
+}
+
+// A chunked request body over the server's limit is answered 413 whatever the proxy setting, none
+// included: through a misread one too, whose redaction must keep the limit error (it quotes no
+// address) for the relay to see it.
+func TestABodyOverTheLimitIsAnswered413WhateverTheProxySetting(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		setting func(addr string) string
+	}{
+		{"a misread proxy", func(addr string) string { return addr + "/pw-secret@egress.example:3128" }},
+		{"a well-formed proxy", func(addr string) string { return "http://" + addr }},
+		{"no proxy", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ln, err := net.Listen("tcp", "127.0.0.1:0") // the proxy, or with none the upstream: it reads the request, so the body is sent
+			if err != nil {
+				t.Fatal(err)
+			}
+			read := make(chan struct{})
+			go func() {
+				defer close(read)
+				c, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				defer func() { _ = c.Close() }()
+				if req, err := http.ReadRequest(bufio.NewReader(c)); err == nil {
+					_, _ = io.Copy(io.Discard, req.Body)
+				}
+			}()
+			t.Cleanup(func() {
+				_ = ln.Close()
+				select {
+				case <-read:
+				case <-time.After(5 * time.Second):
+					t.Error("the listener never finished reading the request")
+				}
+			})
+			u, _ := url.Parse("http://" + ln.Addr().String() + "/mcp")
+			proxy := func(*http.Request) (*url.URL, error) { return nil, nil }
+			if tc.setting != nil {
+				u, _ = url.Parse("http://mcp.upstream.example/mcp")
+				pf := (&httpproxy.Config{HTTPProxy: tc.setting(ln.Addr().String())}).ProxyFunc()
+				proxy = func(r *http.Request) (*url.URL, error) { return pf(r.URL) }
+			}
+			var logs bytes.Buffer
+			rl := New(slog.New(slog.NewTextHandler(&logs, nil)), u, withProxy(proxy))
+			limited := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.Body = http.MaxBytesReader(w, r.Body, 16) // as the server's body limit does
+				rl.ServeHTTP(w, r)
+			})
+			r := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(toolsCall))
+			r.ContentLength = -1 // chunked: a declared length over the limit is refused before the relay
+			w := httptest.NewRecorder()
+			limited.ServeHTTP(w, r)
+			if w.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("status %d, want 413; log %q", w.Code, logs.String())
+			}
+			if strings.Contains(logs.String(), ln.Addr().String()) {
+				t.Fatalf("log %q quotes the address Go dialled", logs.String())
 			}
 		})
 	}
@@ -860,7 +924,8 @@ func TestABodyThatBreaksOffReachesTheUpstreamErrorLogAndNeverQuotesAMisreadProxy
 			if !strings.Contains(logs.String(), `level=WARN msg="upstream error"`) {
 				t.Fatalf("log %q; want ReverseProxy's error line in the structured log, as a warning", logs.String())
 			}
-			if tc.misread && (strings.Contains(logs.String(), addr) || !strings.Contains(logs.String(), `reason="`+envproxy.Cause+`"`)) {
+			if tc.misread && (strings.Contains(logs.String(), addr) ||
+				!strings.Contains(logs.String(), `error="httputil: ReverseProxy read error during body copy: `+envproxy.Cause+`"`)) {
 				t.Fatalf("log %q; want the cause, not the address Go dialled", logs.String())
 			}
 			if !tc.misread && (!strings.Contains(logs.String(), `error="httputil: ReverseProxy read error during body copy: `) ||
@@ -886,8 +951,9 @@ func TestTheRelayReadsTheEnvironmentProxyAndNamesAMisreadOnesCause(t *testing.T)
 		if !strings.Contains(got, "STATUS=502") || !strings.Contains(got, `msg="upstream error"`) {
 			t.Fatalf("child output %q; want 502 and the upstream error logged", got)
 		}
-		if strings.Contains(got, `reason="`+envproxy.Cause+`"`) != misread || strings.Contains(got, addr) == misread {
-			t.Fatalf("child output %q; misread %v", got, misread)
+		rerun.CauseOnlyIfMisread(t, got, addr, misread)
+		if strings.Contains(got, `error="`+envproxy.Cause+`"`) != misread {
+			t.Fatalf("child output %q; want the cause as the upstream error only when misread (%v)", got, misread)
 		}
 	})
 }

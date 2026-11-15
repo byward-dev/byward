@@ -1,5 +1,7 @@
 // Package storetest is the conformance suite every store adapter must pass (ADR-0007 §1). An
-// adapter's test calls Run with a constructor for a fresh, empty store.
+// adapter's test calls Run with a constructor for a fresh, empty store. What needs the adapter's
+// own help, its row counts and its migration fixtures, CollectDropsExpiredSpent and CheckFixture
+// check.
 package storetest
 
 import (
@@ -38,7 +40,7 @@ func Run(t *testing.T, newStore func(t *testing.T) store.Store) {
 		{"UnknownGrantIsNotFound", unknownGrantIsNotFound},
 		{"IncompleteGrantsAndCutOffsAreInvalid", incompleteGrantsAndCutOffsAreInvalid},
 		{"StoredValuesAreCopies", storedValuesAreCopies},
-		{"NilScopesComeBackNil", nilScopesComeBackNil},
+		{"NilSlicesComeBackNil", nilSlicesComeBackNil},
 		{"CodeIsConsumedOnce", codeIsConsumedOnce},
 		{"ConcurrentConsumeHasOneWinner", concurrentConsumeHasOneWinner},
 		{"ALoginIsSpentOnceUntilItsExpiry", spentOnceUntilItsExpiry(store.Store.SpendLogin)},
@@ -209,6 +211,10 @@ func incompleteGrantsAndCutOffsAreInvalid(t *testing.T, s store.Store) {
 			edit(&g)
 			_, err := s.CreateGrant(ctx, g)
 			wantErr(t, "CreateGrant", err, store.ErrInvalid)
+			if g.ID != "" {
+				_, err := s.Grant(ctx, g.ID)
+				wantErr(t, "the refused grant", err, store.ErrNotFound)
+			}
 		})
 	}
 	wantErr(t, "RevokeSubject without a subject", s.RevokeSubject(ctx, "", t0, t0), store.ErrInvalid)
@@ -219,12 +225,14 @@ func incompleteGrantsAndCutOffsAreInvalid(t *testing.T, s store.Store) {
 
 // A nil slice is returned as nil, not as an empty one: callers that compare with reflect.DeepEqual
 // or encode JSON (null versus []) see the same value from every adapter.
-func nilScopesComeBackNil(t *testing.T, s store.Store) {
+func nilSlicesComeBackNil(t *testing.T, s store.Store) {
 	g := grant("g1", "tid:alice")
-	g.Scopes = nil
-	mustCreate(t, s, g)
-	if got, err := s.Grant(ctx, "g1"); err != nil || got.Scopes != nil {
-		t.Fatalf("Grant Scopes = %#v (%v), want nil", got.Scopes, err)
+	g.Scopes, g.IdPTokens = nil, nil
+	if created := mustCreate(t, s, g); created.Scopes != nil || created.IdPTokens != nil {
+		t.Fatalf("CreateGrant returned Scopes %#v, IdPTokens %#v; want nil", created.Scopes, created.IdPTokens)
+	}
+	if got, err := s.Grant(ctx, "g1"); err != nil || got.Scopes != nil || got.IdPTokens != nil {
+		t.Fatalf("Grant Scopes %#v, IdPTokens %#v (%v); want nil", got.Scopes, got.IdPTokens, err)
 	}
 	c := pendingCode("g1")
 	c.Scopes = nil
@@ -236,11 +244,18 @@ func nilScopesComeBackNil(t *testing.T, s store.Store) {
 
 func storedValuesAreCopies(t *testing.T, s store.Store) {
 	g := grant("g1", "tid:alice")
-	mustCreate(t, s, g)
+	created := mustCreate(t, s, g)
 	g.Scopes[0], g.IdPTokens[0] = "changed", 'X'
+	if created.Scopes[0] != "mcp" || created.IdPTokens[0] != 's' {
+		t.Fatal("changing the caller's grant after CreateGrant changed the grant it returned")
+	}
 	got, _ := s.Grant(ctx, "g1")
 	if got.Scopes[0] != "mcp" || got.IdPTokens[0] != 's' {
 		t.Fatal("changing the caller's grant after CreateGrant changed the stored one")
+	}
+	created.Scopes[0], created.IdPTokens[0] = "changed", 'X'
+	if stored, _ := s.Grant(ctx, "g1"); stored.Scopes[0] != "mcp" || stored.IdPTokens[0] != 's' {
+		t.Fatal("changing the grant CreateGrant returned changed the stored one")
 	}
 	got.Scopes[0], got.IdPTokens[0] = "changed", 'X'
 	if again, _ := s.Grant(ctx, "g1"); again.Scopes[0] != "mcp" || again.IdPTokens[0] != 's' {
@@ -286,7 +301,11 @@ func spentOnceUntilItsExpiry(spend spendFunc) func(*testing.T, store.Store) {
 		must(t, spend(s, ctx, b, t0, expires))
 		must(t, spend(s, ctx, a, expires, expires.Add(10*time.Minute)))
 		wantErr(t, "spending a renewed record again", spend(s, ctx, a, expires.Add(time.Minute), expires.Add(20*time.Minute)), store.ErrConsumed)
-		wantErr(t, "an expiry not after now", spend(s, ctx, sha256.Sum256([]byte("spent-c")), t0, t0), store.ErrInvalid)
+		c := sha256.Sum256([]byte("spent-c"))
+		wantErr(t, "an expiry not after now", spend(s, ctx, c, t0, t0), store.ErrInvalid)
+		// The refused spend recorded nothing: a spend of c before t0, while a record expiring at t0
+		// would still count, succeeds.
+		must(t, spend(s, ctx, c, t0.Add(-time.Minute), t0.Add(time.Minute)))
 	}
 }
 
@@ -1024,6 +1043,8 @@ func clientIDsAreUniqueAndIncompleteClientsInvalid(t *testing.T, s store.Store) 
 	} {
 		wantErr(t, name, s.CreateClient(ctx, c, 0), store.ErrInvalid)
 	}
+	_, err := s.Client(ctx, "x")
+	wantErr(t, "the refused client", err, store.ErrNotFound)
 }
 
 // Only clients that are still live at the new client's CreatedAt count towards the cap.
@@ -1185,6 +1206,8 @@ func incompleteConsentsAreInvalid(t *testing.T, s store.Store) {
 		change(&c)
 		wantErr(t, name, s.RememberConsent(ctx, c), store.ErrInvalid)
 	}
+	_, err := s.Consent(ctx, consent("g1", "tid:alice", "https://app.example/cb").Key)
+	wantErr(t, "the refused consent", err, store.ErrNotFound)
 }
 
 func revokeSubjectAndRevokeAllForgetConsentsBeforeTheCutOff(t *testing.T, s store.Store) {

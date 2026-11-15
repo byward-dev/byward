@@ -14,6 +14,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -104,8 +105,8 @@ const epochSQL = "(SELECT value FROM meta WHERE key = 'epoch')"
 // CreateGrant implements store.Grants. SERIALIZABLE makes the cut-off check and the insert one
 // step against a concurrent RevokeSubject or RevokeAll on any replica (store.Grants.CreateGrant).
 func (s *Store) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, error) {
-	if g.ID == "" || g.ClientID == "" || g.Subject == "" || !g.ExpiresAt.After(g.CreatedAt) {
-		return store.Grant{}, store.ErrInvalid
+	if err := g.CheckNew(); err != nil {
+		return store.Grant{}, err
 	}
 	var epoch int64
 	err := s.write(ctx, func(tx pgx.Tx) error {
@@ -130,7 +131,7 @@ func (s *Store) CreateGrant(ctx context.Context, g store.Grant) (store.Grant, er
 		return store.Grant{}, err
 	}
 	g.Epoch = epoch
-	g.Scopes, g.IdPTokens = cloneStrings(g.Scopes), cloneBytes(g.IdPTokens)
+	g.Scopes, g.IdPTokens = slices.Clone(g.Scopes), slices.Clone(g.IdPTokens)
 	return g, nil
 }
 
@@ -455,8 +456,8 @@ func (s *Store) Collect(ctx context.Context, now time.Time) error {
 
 // SpendLogin implements store.Logins.
 func (s *Store) SpendLogin(ctx context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
-	if !expiresAt.After(now) {
-		return store.ErrInvalid
+	if err := store.CheckSpend(now, expiresAt); err != nil {
+		return err
 	}
 	return s.write(ctx, func(tx pgx.Tx) error {
 		// One conditional statement (ADR-0007 §2): it inserts, or replaces only an expired record;
@@ -476,8 +477,8 @@ func (s *Store) SpendLogin(ctx context.Context, hash [sha256.Size]byte, now, exp
 
 // SpendAssertion implements store.ClientAssertions, as SpendLogin does for logins.
 func (s *Store) SpendAssertion(ctx context.Context, hash [sha256.Size]byte, now, expiresAt time.Time) error {
-	if !expiresAt.After(now) {
-		return store.ErrInvalid
+	if err := store.CheckSpend(now, expiresAt); err != nil {
+		return err
 	}
 	return s.write(ctx, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `INSERT INTO spent_assertions (hash, expires_at) VALUES ($1, $2)
@@ -495,10 +496,10 @@ func (s *Store) SpendAssertion(ctx context.Context, hash [sha256.Size]byte, now,
 
 // RememberConsent implements store.Consents.
 func (s *Store) RememberConsent(ctx context.Context, c store.Consent) error {
-	k := c.Key
-	if k.Issuer == "" || k.Subject == "" || k.ClientID == "" || k.Redirect == "" || k.Resource == "" || len(c.Scopes) == 0 || !c.ExpiresAt.After(c.ApprovedAt) {
-		return store.ErrInvalid
+	if err := c.CheckNew(); err != nil {
+		return err
 	}
+	k := c.Key
 	var marked *time.Time // records_lifetime_at: see migration v3
 	if c.RecordsLifetime {
 		marked = new(ts(c.ApprovedAt))
@@ -533,8 +534,8 @@ func (s *Store) Consent(ctx context.Context, k store.ConsentKey) (store.Consent,
 // CreateClient implements store.Clients. SERIALIZABLE makes the count and the insert one step, so
 // concurrent registrations on any replica never exceed max.
 func (s *Store) CreateClient(ctx context.Context, c store.Client, max int) error {
-	if c.ID == "" || len(c.Metadata) == 0 || !c.UsedAt.IsZero() || !c.ExpiresAt.After(c.CreatedAt) {
-		return store.ErrInvalid
+	if err := c.CheckNew(); err != nil {
+		return err
 	}
 	return s.write(ctx, func(tx pgx.Tx) error {
 		if err := mustNotExist(ctx, tx, "SELECT EXISTS (SELECT 1 FROM clients WHERE id = $1)", c.ID); err != nil {
@@ -641,18 +642,4 @@ func nilIfEmpty[S ~[]E, E any](s S) S {
 		return nil
 	}
 	return s
-}
-
-func cloneStrings(s []string) []string {
-	if s == nil {
-		return nil
-	}
-	return append([]string{}, s...)
-}
-
-func cloneBytes(b []byte) []byte {
-	if b == nil {
-		return nil
-	}
-	return append([]byte{}, b...)
 }

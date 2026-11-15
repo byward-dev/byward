@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 
+	"github.com/byward-dev/byward/internal/testutil/fakeclock"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
@@ -69,7 +70,7 @@ func (js *jwksServer) hold(t *testing.T) (release func()) {
 	return release
 }
 
-func testClock() *fakeidp.Clock { return fakeidp.NewClock(fixedNow) }
+func testClock() *fakeclock.Clock { return fakeclock.New(fixedNow) }
 
 func noBackoff() *Fetcher {
 	f := NewFetcher(nil)

@@ -12,15 +12,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/byward-dev/byward/internal/broker"
 	"github.com/byward-dev/byward/internal/config"
-	"github.com/byward-dev/byward/internal/idp"
-	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/mcpsession"
-	"github.com/byward-dev/byward/internal/registration"
-	"github.com/byward-dev/byward/internal/ssrfguard"
 	"github.com/byward-dev/byward/internal/testutil/clientdocs"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 )
 
 // The wiring end to end: a CIMD client (claude.ai's published document) signs a user in through the
@@ -33,29 +29,14 @@ func TestACIMDClientSignsInAndUsesALegacySession(t *testing.T) {
 	app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}, RedirectURIs: []string{public + "/callback/entra"}}
 	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithClient(app))
 
-	origReg, origBroker := newCIMDRegistry, newBroker
-	t.Cleanup(func() { newCIMDRegistry, newBroker = origReg, origBroker })
-	newCIMDRegistry = func(c registration.CIMDConfig) *registration.CIMDRegistry {
-		guard := ssrfguard.New(ssrfguard.Config{RootCAs: docs.RootCAs, Dial: docs.Dial})
-		c.Fetch, c.KeysClient = guard, guard.HTTPClient()
-		return origReg(c)
-	}
-	newBroker = func(c broker.Config) (*broker.Broker, error) {
-		prov, err := entra.New(entra.Config{Tenant: fake.TenantID(), ClientID: app.ID, ClientAuth: idp.ClientSecret("s3cret"),
-			RedirectURL: public + "/callback/entra", HTTPClient: fake.HTTPClient()})
-		if err != nil {
-			return nil, err
-		}
-		c.IdP, c.IdPScopes = prov, prov.Scope()
-		return origBroker(c)
-	}
+	serveCIMDFrom(t, docs)
+	useFakeEntra(t, fake, app)
 
-	var upstreamSessions []string
-	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		upstreamSessions = append(upstreamSessions, r.Header.Get(mcpsession.Header))
+	up := fakeupstream.New()
+	up.Handler = func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set(mcpsession.Header, "upstream-session-1")
 		w.WriteHeader(http.StatusOK)
-	}))
+	}
 	t.Cleanup(up.Close)
 	cfg, _, err := config.Load(nil, append(authEnv(t), "BYWARD_PUBLIC_URL="+public+"/mcp", "BYWARD_UPSTREAM_URL="+up.URL+"/mcp"), os.ReadFile)
 	if err != nil {
@@ -95,6 +76,9 @@ func TestACIMDClientSignsInAndUsesALegacySession(t *testing.T) {
 	if back.StatusCode != http.StatusFound || !strings.HasPrefix(ret.String(), doc.Redirect) {
 		t.Fatalf("callback: %d, Location %q", back.StatusCode, back.Header.Get("Location"))
 	}
+	if docs.Hits(doc.ClientID) == 0 {
+		t.Fatal("the sign-in never fetched the client document from the local docs server")
+	}
 	tok := send(http.MethodPost, "/token", url.Values{"grant_type": {"authorization_code"}, "code": {ret.Query().Get("code")},
 		"client_id": {doc.ClientID}, "redirect_uri": {doc.Redirect}, "code_verifier": {verifier}}, nil)
 	var tokens struct {
@@ -125,8 +109,9 @@ func TestACIMDClientSignsInAndUsesALegacySession(t *testing.T) {
 	if first.StatusCode != http.StatusOK || !strings.HasPrefix(id, mcpsession.Prefix) {
 		t.Fatalf("first MCP call: %d, session %q; want a sealed session ID", first.StatusCode, id)
 	}
-	if next := mcp(id); next.StatusCode != http.StatusOK || upstreamSessions[len(upstreamSessions)-1] != "upstream-session-1" {
-		t.Fatalf("the CIMD user's next call: %d, upstream saw %q", next.StatusCode, upstreamSessions[len(upstreamSessions)-1])
+	next := mcp(id)
+	if last, _ := up.Last(); next.StatusCode != http.StatusOK || last.Header.Get(mcpsession.Header) != "upstream-session-1" {
+		t.Fatalf("the CIMD user's next call: %d, upstream saw %q", next.StatusCode, last.Header.Get(mcpsession.Header))
 	}
 }
 

@@ -204,6 +204,7 @@ func (c *Config) secretExpiry(v *Values) []error {
 	return []error{errorf("%s: want a date such as 2027-11-06 or an RFC 3339 time, got %q", Setting{Name: "entra-client-secret-expires-at"}.Env(), raw)}
 }
 
+// isGUID is idp.IsGUID; config keeps its own copy so it does not import idp (and go-jose).
 func isGUID(s string) bool {
 	if len(s) != 36 {
 		return false

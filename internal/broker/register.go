@@ -38,15 +38,7 @@ const registrationRetryAfter = "60"
 // audited rate-limited per source and counted; consent is still asked for every DCR client
 // (MCP security considerations: dynamically registered clients).
 func (b *Broker) register(w http.ResponseWriter, r *http.Request) {
-	cors(w, r, "POST, OPTIONS")
-	switch r.Method {
-	case http.MethodOptions:
-		w.WriteHeader(http.StatusNoContent)
-		return
-	case http.MethodPost:
-	default:
-		w.Header().Set("Allow", "POST, OPTIONS")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !allowPost(w, r) {
 		return
 	}
 	if retry, limited := b.throttled(w, r, ratelimit.Register); limited {
@@ -86,7 +78,7 @@ func (b *Broker) register(w http.ResponseWriter, r *http.Request) {
 		b.cfg.Log.InfoContext(r.Context(), "client registration dropped redirect URIs", "client_id", reg.ClientID, "reason", "fail the redirect policy (ADR-0009): "+strings.Join(reg.Dropped, ", "))
 	}
 	b.cfg.Audit.RecordUnauthenticated(r, audit.Event{Name: audit.ClientRegistered, Outcome: audit.Success, Reason: "dcr", ClientID: reg.ClientID})
-	b.observeRegistration(RegistrationOK)
+	b.cfg.ObserveRegistration(RegistrationOK)
 	h := w.Header()
 	h.Set("Content-Type", "application/json")
 	h.Set("Cache-Control", "no-store")
@@ -98,19 +90,13 @@ func (b *Broker) register(w http.ResponseWriter, r *http.Request) {
 // and counts it.
 func (b *Broker) registrationFailed(w http.ResponseWriter, r *http.Request, outcome string, status int, code, desc string) {
 	b.cfg.Audit.RecordUnauthenticated(r, audit.Event{Name: audit.ClientRegistered, Outcome: audit.Failure, Reason: outcome})
-	b.observeRegistration(outcome)
+	b.cfg.ObserveRegistration(outcome)
 	h := w.Header()
 	h.Set("Content-Type", "application/json")
 	h.Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": code,
 		"error_description": desc + " (reference " + logging.RequestID(r.Context()) + ")"})
-}
-
-func (b *Broker) observeRegistration(outcome string) {
-	if b.cfg.ObserveRegistration != nil {
-		b.cfg.ObserveRegistration(outcome)
-	}
 }
 
 // firstLine is the reason after the error's class, for error_description: the metadata rule

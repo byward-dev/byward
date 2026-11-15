@@ -110,8 +110,7 @@ func newEntraIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect
 		startWarnings: func(now time.Time) []Warning {
 			w, ok := expiryWarning(cfg, now)
 			if !certExpires.IsZero() {
-				r := doctor.CertificateExpiry(diag.CredentialSetting, certExpires, now)
-				w, ok = Warning{Message: r.Message, Setting: diag.CredentialSetting, Fix: r.Fix}, r.Status == doctor.Warn || r.Status == doctor.Fail
+				w, ok = warningOf(doctor.CertificateExpiry(diag.CredentialSetting, certExpires, now), diag.CredentialSetting)
 			}
 			if ok {
 				return []Warning{w}
@@ -231,7 +230,7 @@ func entraClientAuth(cfg *config.Config) (idp.ClientAuth, entra.Diagnosis, time.
 		}
 		auth, err := cert.ClientAuth()
 		if err != nil {
-			return nil, d, time.Time{}, fmt.Errorf("%s: %w", d.CredentialSetting, err)
+			return nil, d, time.Time{}, fmt.Errorf("%s: %w (docs/how-to/entra-certificate.md)", d.CredentialSetting, err)
 		}
 		return auth, d, cert.X509.NotAfter, nil
 	}

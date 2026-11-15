@@ -60,7 +60,12 @@ func buildAuth(cfg *config.Config, log *slog.Logger, o Observability) (_ *auth, 
 	ring, sealer, ip, static, g := parts.ring, parts.sealer, parts.idp, parts.static, parts.gate
 	auditStartup(o.Audit, ring, static.IDs())
 	log.Info("client sources", "static_clients", len(static.IDs()), "cimd", cfg.CIMD, "dcr", cfg.DCR)
-	for _, w := range parts.warnings {
+	// What check and doctor report too, the PostgreSQL store's need for the same keys included.
+	cfgWarnings, err := configWarnings(cfg, parts)
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range cfgWarnings {
 		w.log(log)
 	}
 	log.Info("IdP", "idp", ip.name, "reason", "register this redirect URI with the IdP app: "+ip.redirect)

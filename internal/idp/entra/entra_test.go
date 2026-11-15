@@ -12,6 +12,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/testutil/fakeclock"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
@@ -469,9 +470,9 @@ func TestConcurrentFirstLoginsWaitForReadiness(t *testing.T) {
 
 // outageEnv is an env on a step clock whose adapter does not back off between JWKS retries, so an
 // outage fails fast.
-func outageEnv(t *testing.T) (*env, *fakeidp.Clock) {
+func outageEnv(t *testing.T) (*env, *fakeclock.Clock) {
 	t.Helper()
-	clock := fakeidp.NewClock(now())
+	clock := fakeclock.New(now())
 	e := newEnv(t, Config{Now: clock.Now}, fakeidp.WithClock(clock.Now))
 	e.p.fetch.Backoff = 0
 	return e, clock
