@@ -38,6 +38,12 @@ const (
 	exitConfig  = 2
 )
 
+// configError reports err as a configuration error and returns its exit code, 2.
+func configError(stderr io.Writer, err error) int {
+	_, _ = fmt.Fprintf(stderr, "byward: configuration error: %v\n", err)
+	return exitConfig
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	code := run(ctx, os.Args[1:], os.Environ(), os.Stdout, os.Stderr)
@@ -83,8 +89,7 @@ func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer) 
 	// Traces only when the operator sets OTEL_TRACES_EXPORTER (ADR-0021 §9).
 	tracingOn, stopTracing, err := tracing.Setup(ctx, getenv(environ), buildInfo().Version, log)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "byward: configuration error: OTEL_* tracing settings: %v\n", err)
-		return exitConfig
+		return configError(stderr, fmt.Errorf("OTEL_* tracing settings: %w", err))
 	}
 	defer func() {
 		flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -96,8 +101,7 @@ func run(ctx context.Context, args, environ []string, stdout, stderr io.Writer) 
 	}
 	srv, err := server.New(cfg, log)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "byward: configuration error: %v\n", err)
-		return exitConfig
+		return configError(stderr, err)
 	}
 	if err := server.Run(ctx, srv, log); err != nil {
 		log.Error("stopped", "error", err)

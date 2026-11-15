@@ -87,7 +87,7 @@ func commandHint(args []string) string {
 func operatorLoad(args, environ []string, stderr io.Writer) (*config.Config, bool) {
 	cfg, _, err := config.Load(args, environ, os.ReadFile)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "byward: configuration error: %v\n", err)
+		configError(stderr, err)
 		return nil, false
 	}
 	return cfg, true
