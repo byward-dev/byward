@@ -304,6 +304,15 @@ func serveMCP() {
 				time.Sleep(50 * time.Millisecond)
 				write(message{Method: "notifications/message", Params: json.RawMessage(`{"level":"info"}`)})
 			}()
+		case "answeras": // answers with params.id written as given, as an upstream that re-encodes ids does
+			var p struct {
+				ID json.RawMessage `json:"id"`
+			}
+			_ = json.Unmarshal(m.Params, &p)
+			mu.Lock()
+			_, _ = fmt.Fprintf(out, "{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":\"answered\"}\n", p.ID)
+			_ = out.Flush()
+			mu.Unlock()
 		case "raw":
 			mu.Lock()
 			_, _ = fmt.Fprintf(out, "{\"jsonrpc\":\"2.0\",\r\"id\":%s,\"result\":\"raw\"}\n", m.ID)

@@ -24,6 +24,12 @@ type Box struct {
 
 const boxLabel = "byward box\x00"
 
+// boxVersion is a box's layout: its header byte and part of its associated data. It is the box's
+// own and moves only when the box layout changes, never with the proxy tokens' formatVersion:
+// every grant's IdP tokens, consents, sign-ins in flight and MCP session IDs are stored in boxes,
+// and a bump would make them all unreadable. 2 is the byte every box sealed so far carries.
+const boxVersion = 2
+
 var errBoxExpired = errors.New("token: box expired")
 
 // NewBox binds ring to purpose (a short constant such as "login" or "idp-tokens").
@@ -44,9 +50,9 @@ func (b *Box) Seal(plain []byte, expiresAt time.Time) (string, error) {
 		return "", errBoxExpired
 	}
 	k := b.ring.signing
-	header := append([]byte{formatVersion, byte(len(k.id))}, k.id...) //nolint:gosec // G115: key IDs are at most 64 bytes
-	header = binary.BigEndian.AppendUint64(header, uint64(exp))       //nolint:gosec // G115: checked positive above
-	sealed := k.aead.Seal(header, nil, plain, b.ad(k.id, exp))        //nolint:gosec // G407: random nonce from the AEAD
+	header := append([]byte{boxVersion, byte(len(k.id))}, k.id...) //nolint:gosec // G115: key IDs are at most 64 bytes
+	header = binary.BigEndian.AppendUint64(header, uint64(exp))    //nolint:gosec // G115: checked positive above
+	sealed := k.aead.Seal(header, nil, plain, b.ad(k.id, exp))     //nolint:gosec // G407: random nonce from the AEAD
 	return base64.RawURLEncoding.EncodeToString(sealed), nil
 }
 
@@ -54,7 +60,7 @@ func (b *Box) Seal(plain []byte, expiresAt time.Time) (string, error) {
 // the ring. Every failure looks the same.
 func (b *Box) Open(s string) ([]byte, error) {
 	raw, err := base64.RawURLEncoding.Strict().DecodeString(s)
-	if err != nil || len(raw) < 2 || raw[0] != formatVersion {
+	if err != nil || len(raw) < 2 || raw[0] != boxVersion {
 		return nil, errOpen
 	}
 	n := int(raw[1])
@@ -97,7 +103,7 @@ func (b *Box) OpenJSON(s string, v any) error {
 
 func (b *Box) ad(kid string, exp int64) []byte {
 	a := []byte(boxLabel)
-	a = append(a, formatVersion)
+	a = append(a, boxVersion)
 	a = binary.BigEndian.AppendUint16(a, uint16(len(kid))) //nolint:gosec // G115: at most 64
 	a = append(a, kid...)
 	a = binary.BigEndian.AppendUint64(a, uint64(exp))            //nolint:gosec // G115: positive

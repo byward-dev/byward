@@ -16,6 +16,33 @@ func boxRing(t *testing.T, ids ...string) *KeyRing {
 	return mustRing(t, keyDir(t, files))
 }
 
+// Boxes outlive releases: every grant's IdP tokens, remembered consents, sign-ins in flight and MCP
+// session IDs are stored in them. A box sealed by an earlier build still opens, and a new one starts
+// with the same literal layout byte, 0x02: the box's own version, which a new proxy-token
+// formatVersion (DPoP's cnf claim, say) must not move (L161). The box below was sealed with this
+// test key, which protects nothing.
+func TestABoxSealedByAnEarlierBuildStillOpens(t *testing.T) {
+	const (
+		key    = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="
+		sealed = "AgJrMQAAAAD0hlcAw5RYjIcB06RDHCZDmZ7JsAA-_EuTUYbe2q0JYdO7y87kNVO6tuF4PdX1IzoIlw2wn4RI"
+	)
+	ring := mustRing(t, keyDir(t, map[string]string{"k1": key}))
+	box, err := NewBox(ring, "login", func() time.Time { return time.Unix(1_800_000_000, 0) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := box.Open(sealed); err != nil || string(got) != "sealed by box version 2" {
+		t.Fatalf("Open = %q, %v; want the box an earlier build sealed", got, err)
+	}
+	fresh, err := box.Seal([]byte("x"), time.Unix(1_800_000_600, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := base64.RawURLEncoding.DecodeString(fresh); len(raw) == 0 || raw[0] != 0x02 {
+		t.Fatalf("a new box starts with %#x, want the layout byte 0x02", raw[:1])
+	}
+}
+
 func TestBoxRoundTripAndBindings(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	clock := func() time.Time { return now }
