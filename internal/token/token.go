@@ -23,6 +23,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/byward-dev/byward/internal/resource"
 )
 
 // Type is a sealed token type. It selects the prefix and is part of the associated data, so a
@@ -76,22 +78,25 @@ type Claims struct {
 	Subject   string
 	IssuedAt  time.Time
 	ExpiresAt time.Time
-	// ClientID is required in access tokens; codes leave it, and the claims below, empty.
+	// ClientID is required in access tokens; codes leave it, and the claims, empty.
 	ClientID string
-	// The identity claims asserted to the upstream: whatever of these the operator opted in to.
-	Roles, Groups []string
-	Email, Name   string
-	// EmailVerified: the IdP vouches for Email.
-	EmailVerified bool
+	// Claims are the identity claims asserted to the upstream.
+	resource.Claims
 }
 
 // wireClaims is the sealed JSON; short names keep tokens small.
 type wireClaims struct {
-	GrantID       string   `json:"gid"`
-	Subject       string   `json:"sub"`
-	IssuedAt      int64    `json:"iat"`
-	ExpiresAt     int64    `json:"exp"`
-	ClientID      string   `json:"cid,omitempty"`
+	GrantID   string `json:"gid"`
+	Subject   string `json:"sub"`
+	IssuedAt  int64  `json:"iat"`
+	ExpiresAt int64  `json:"exp"`
+	ClientID  string `json:"cid,omitempty"`
+	wireAsserted
+}
+
+// wireAsserted is resource.Claims as a token seals them; embedded, its fields sit flat in the token's
+// JSON. Same fields, types and order as resource.Claims, which it converts to and from.
+type wireAsserted struct {
 	Roles         []string `json:"rol,omitempty"`
 	Groups        []string `json:"grp,omitempty"`
 	Email         string   `json:"eml,omitempty"`
@@ -137,7 +142,7 @@ func (s *Sealer) Seal(t Type, c Claims) (string, error) {
 		return "", err
 	}
 	plain, err := json.Marshal(wireClaims{GrantID: c.GrantID, Subject: c.Subject, IssuedAt: c.IssuedAt.Unix(), ExpiresAt: c.ExpiresAt.Unix(),
-		ClientID: c.ClientID, Roles: c.Roles, Groups: c.Groups, Email: c.Email, EmailVerified: c.EmailVerified, Name: c.Name})
+		ClientID: c.ClientID, wireAsserted: wireAsserted(c.Claims)})
 	if err != nil {
 		return "", err
 	}
@@ -196,7 +201,7 @@ func (s *Sealer) Open(t Type, tok string) (Claims, error) {
 		return Claims{}, errClaims
 	}
 	c := Claims{GrantID: w.GrantID, Subject: w.Subject, IssuedAt: time.Unix(w.IssuedAt, 0), ExpiresAt: time.Unix(w.ExpiresAt, 0),
-		ClientID: w.ClientID, Roles: w.Roles, Groups: w.Groups, Email: w.Email, EmailVerified: w.EmailVerified, Name: w.Name}
+		ClientID: w.ClientID, Claims: resource.Claims(w.wireAsserted)}
 	if err := c.validate(t); err != nil {
 		return Claims{}, err
 	}
