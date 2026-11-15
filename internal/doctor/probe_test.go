@@ -84,7 +84,7 @@ func (p proxy) handler(origin string) http.Handler {
 		}
 		openIDWithout := p.noOpenIDJWKS && r.URL.Path == "/.well-known/openid-configuration"
 		if p.jwksKey != "" && !p.noJWKSURI && !openIDWithout {
-			doc["jwks_uri"] = origin + "/.well-known/jwks.json"
+			doc["jwks_uri"] = origin + "/.well-known/jwks.json?sig=SECRET" // shown without its query
 			if p.jwksURI != "" {
 				doc["jwks_uri"] = p.jwksURI
 			}
@@ -277,7 +277,7 @@ func TestSelfProbe404NamesTheRoute(t *testing.T) {
 // key, as MCP Toolbox's generic auth does: openid-configuration names byward's issuer and a jwks_uri
 // serving the key (ADR-0016 amendment, #207). Without one, the check is not run.
 func TestSelfProbeFollowsDiscoveryToTheAssertionKey(t *testing.T) {
-	if got := probeSigning(t, proxy{jwksKey: "k1"}, "k1")[keysByDisco]; got.Status != Pass || !strings.Contains(got.Message, "serves the signing key k1") {
+	if got := probeSigning(t, proxy{jwksKey: "k1"}, "k1")[keysByDisco]; got.Status != Pass || !strings.Contains(got.Message, "serves the signing key k1") || strings.Contains(got.Message, "SECRET") {
 		t.Fatalf("healthy: %+v", got)
 	}
 	if _, ran := probe(t, proxy{})[keysByDisco]; ran {
@@ -303,7 +303,7 @@ func TestSelfProbeFollowsDiscoveryToTheAssertionKey(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			got := probeSigning(t, tc.p, "k1")[keysByDisco]
 			if got.Status != Fail || !strings.Contains(got.Message, tc.inMessage) || !strings.Contains(got.Fix, tc.inFix) || strings.Contains(got.Message+got.Fix, "SECRET") {
-				t.Fatalf("%+v\nwant fail, message with %q, fix with %q", got, tc.inMessage, tc.inFix)
+				t.Fatalf("%+v\nwant fail, message with %q, fix with %q, no SECRET", got, tc.inMessage, tc.inFix)
 			}
 		})
 	}

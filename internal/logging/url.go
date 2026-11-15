@@ -52,9 +52,9 @@ func URLError(err error) error {
 	return &url.Error{Op: ue.Op, URL: URL(ue.URL), Err: cause}
 }
 
-// BodyError is err, an error from reading an HTTP response body, without a header or trailer line
-// the transport refused: textproto quotes the whole line, which can hold a cookie or a code. Any
-// other error is left as it is.
+// BodyError is err, an error from reading an HTTP body (an answer's, or a client's request whose
+// trailer the server parsed), without a header or trailer line the transport refused: textproto
+// quotes the whole line, which can hold a cookie or a code. Any other error is left as it is.
 func BodyError(err error) error {
 	if errors.As(err, new(textproto.ProtocolError)) {
 		return errBadHeader
@@ -67,5 +67,5 @@ const badLocation = "failed to parse Location header"
 var (
 	errNotAURL     = errors.New("not a URL")
 	errBadLocation = errors.New(badLocation)
-	errBadHeader   = errors.New("the answer has a malformed header or trailer line")
+	errBadHeader   = errors.New("a malformed header or trailer line")
 )

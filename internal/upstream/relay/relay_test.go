@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/byward-dev/byward/internal/envproxy"
@@ -955,21 +956,6 @@ func TestTheRelayReadsTheEnvironmentProxyAndNamesAMisreadOnesCause(t *testing.T)
 	})
 }
 
-// failingBody yields its bytes, then fails with err, as Go's server does when it refuses a request
-// trailer line at the end of a chunked body.
-type failingBody struct {
-	r   io.Reader
-	err error
-}
-
-func (b failingBody) Read(p []byte) (int, error) {
-	n, err := b.r.Read(p)
-	if err == io.EOF { //nolint:errorlint // io.EOF is returned unwrapped by strings.Reader
-		return n, b.err
-	}
-	return n, err
-}
-
 // A client's request trailer that the server refused fails the relay, and the log names the
 // failure without the line, which the client may have put a token or cookie in.
 func TestAClientsRefusedTrailerIsLoggedWithoutItsLine(t *testing.T) {
@@ -977,7 +963,8 @@ func TestAClientsRefusedTrailerIsLoggedWithoutItsLine(t *testing.T) {
 	t.Cleanup(up.Close)
 	u, _ := url.Parse(up.URL + "/mcp")
 	var logs bytes.Buffer
-	body := failingBody{strings.NewReader("{}"), textproto.ProtocolError(`malformed MIME header: missing colon: "Cookie session=SECRET"`)}
+	// The body ends as Go's server ends it when it refuses a trailer line: a bare textproto.ProtocolError.
+	body := io.MultiReader(strings.NewReader("{}"), iotest.ErrReader(textproto.ProtocolError(`malformed MIME header: missing colon: "Cookie session=SECRET"`)))
 	req := httptest.NewRequest(http.MethodPost, "/mcp", body)
 	rec := httptest.NewRecorder()
 	New(slog.New(slog.NewTextHandler(&logs, nil)), u).ServeHTTP(rec, req)

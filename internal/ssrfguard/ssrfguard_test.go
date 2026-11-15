@@ -238,7 +238,7 @@ func TestGetErrorsNameTheURLWithoutItsSecrets(t *testing.T) {
 		"user information":  {"https://user:SECRET@example.com/doc", unreached, "ssrfguard: refused: https://example.com/doc is not an https URL on port 443"},
 		"another status":    {"https://example.com/doc?code=SECRET#SECRET", forbidden, "ssrfguard: https://example.com/doc answered HTTP status 403"},
 		"larger than limit": {"https://example.com/doc?code=SECRET#SECRET", big, "ssrfguard: response too large: https://example.com/doc is larger than 10 bytes"},
-		"a refused trailer": {"https://example.com/doc?code=SECRET", badTrailer, "ssrfguard: reading https://example.com/doc: the answer has a malformed header or trailer line"},
+		"a refused trailer": {"https://example.com/doc?code=SECRET", badTrailer, "ssrfguard: reading https://example.com/doc: a malformed header or trailer line"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := server(t, tc.h, time.Second).Get(context.Background(), tc.url, 10)

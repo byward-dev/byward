@@ -65,7 +65,7 @@ func TestAClientErrorShowsItsURLAsLogsMay(t *testing.T) {
 		{&url.Error{Op: "Post", URL: "https://idp.example/token?code=SECRET", Err: context.DeadlineExceeded}, `Post "https://idp.example/token": context deadline exceeded`, context.DeadlineExceeded, true},
 		{&url.Error{Op: "parse", URL: "http://admin:SECRET/@idp.example/x", Err: errors.New(`invalid port ":SECRET" after host`)}, `parse "<invalid URL>": not a URL`, errNotAURL, false},
 		{&url.Error{Op: "Get", URL: "https://idp.example/keys", Err: errors.New(`failed to parse Location header "http://x:SECRET/cb?state=SECRET": parse "http://x:SECRET/cb?state=SECRET": invalid port ":SECRET" after host`)}, `Get "https://idp.example/keys": failed to parse Location header`, errBadLocation, false},
-		{&url.Error{Op: "Get", URL: "https://idp.example/keys", Err: fmt.Errorf("net/http: HTTP/1.x transport connection broken: %w", textproto.ProtocolError(`malformed MIME header line: "Set-Cookie: sid=SECRET\x01"`))}, `Get "https://idp.example/keys": the answer has a malformed header or trailer line`, errBadHeader, false},
+		{&url.Error{Op: "Get", URL: "https://idp.example/keys", Err: fmt.Errorf("net/http: HTTP/1.x transport connection broken: %w", textproto.ProtocolError(`malformed MIME header line: "Set-Cookie: sid=SECRET\x01"`))}, `Get "https://idp.example/keys": ` + errBadHeader.Error(), errBadHeader, false},
 	} {
 		err := URLError(tc.err)
 		var ue *url.Error
@@ -98,52 +98,62 @@ func TestARealClientsUnparsableLocationIsNotQuoted(t *testing.T) {
 	}
 }
 
-// Go's transport quotes a whole header or trailer line it refuses, in one of several wordings;
-// none of it reaches the error URLError and BodyError give. Each answer comes over a real
-// connection, so a Go release that stops reporting it as a textproto.ProtocolError fails here, not
-// in a log.
+// Go's transport quotes a whole header line it refuses, in one of three wordings; none of it
+// reaches the error URLError gives. Each answer comes over a real connection, so a Go release that
+// stops reporting it as a textproto.ProtocolError fails here, not in a log.
 func TestARealTransportsRefusedHeaderLineIsNotQuoted(t *testing.T) {
-	for name, tc := range map[string]struct {
-		answer string
-		inBody bool // the line is a trailer: reading the body fails, not the request
-	}{
-		"a header line with a control character":       {answer: "HTTP/1.1 200 OK\r\nSet-Cookie: sid=SECRET\x01\r\nContent-Length: 0\r\n\r\n"},
-		"a header line without a colon":                {answer: "HTTP/1.1 200 OK\r\nSet-Cookie sid=SECRET\r\nContent-Length: 0\r\n\r\n"},
-		"a first header line that starts with a space": {answer: "HTTP/1.1 200 OK\r\n Set-Cookie: sid=SECRET\r\nContent-Length: 0\r\n\r\n"},
-		"a trailer line with a control character":      {answer: rawanswer.RefusedTrailer, inBody: true},
+	for name, answer := range map[string]string{
+		"a header line with a control character":       "HTTP/1.1 200 OK\r\nSet-Cookie: sid=SECRET\x01\r\nContent-Length: 0\r\n\r\n",
+		"a header line without a colon":                "HTTP/1.1 200 OK\r\nSet-Cookie sid=SECRET\r\nContent-Length: 0\r\n\r\n",
+		"a first header line that starts with a space": "HTTP/1.1 200 OK\r\n Set-Cookie: sid=SECRET\r\nContent-Length: 0\r\n\r\n",
 	} {
 		t.Run(name, func(t *testing.T) {
-			srv := httptest.NewServer(rawanswer.Handler(tc.answer))
+			srv := httptest.NewServer(rawanswer.Handler(answer))
 			defer srv.Close()
 			res, err := http.Get(srv.URL + "/keys")
-			want := `Get "` + srv.URL + `/keys": the answer has a malformed header or trailer line`
-			if tc.inBody {
-				if err != nil {
-					t.Fatalf("the request failed before the body: %v", err)
-				}
-				_, err = io.ReadAll(res.Body)
+			if err == nil {
 				_ = res.Body.Close()
-				if err == nil {
-					t.Fatal("reading the body accepted the trailer")
-				}
-				err, want = BodyError(err), "the answer has a malformed header or trailer line"
-			} else {
-				if err == nil {
-					_ = res.Body.Close()
-					t.Fatal("the transport accepted the header line")
-				}
-				err = URLError(err)
+				t.Fatal("the transport accepted the header line")
 			}
-			if err.Error() != want {
-				t.Fatalf("got %q, want %q", err, want)
+			if got, want := URLError(err).Error(), `Get "`+srv.URL+`/keys": `+errBadHeader.Error(); got != want {
+				t.Fatalf("got %q, want %q", got, want)
 			}
 		})
 	}
 }
 
-// BodyError leaves an error that quotes no line as it is: a cut-off body is still io.ErrUnexpectedEOF.
-func TestABodyErrorWithoutARefusedLineIsKept(t *testing.T) {
-	if err := BodyError(io.ErrUnexpectedEOF); err != io.ErrUnexpectedEOF { //nolint:errorlint // identity is the point
-		t.Fatalf("BodyError = %v", err)
+// A trailer line Go's transport refuses fails the body read instead, quoting the whole line;
+// BodyError keeps none of it. The answer comes over a real connection, as above.
+func TestARealTransportsRefusedTrailerLineIsNotQuoted(t *testing.T) {
+	srv := httptest.NewServer(rawanswer.Handler(rawanswer.RefusedTrailer))
+	defer srv.Close()
+	res, err := http.Get(srv.URL + "/keys")
+	if err != nil {
+		t.Fatalf("the request failed before the body: %v", err)
+	}
+	_, err = io.ReadAll(res.Body)
+	_ = res.Body.Close()
+	if err == nil {
+		t.Fatal("reading the body accepted the trailer")
+	}
+	if got := BodyError(err); got != errBadHeader { //nolint:errorlint // the sentinel itself is the contract
+		t.Fatalf("BodyError = %v, want %v", got, errBadHeader)
+	}
+}
+
+// BodyError replaces an error that holds a refused line, bare or wrapped, and leaves any other error,
+// nil included, as it is.
+func TestABodyErrorIsReplacedOnlyWhenItQuotesARefusedLine(t *testing.T) {
+	refused := textproto.ProtocolError(`malformed MIME header line: "X-Sid: SECRET\x01"`)
+	for name, tc := range map[string]struct{ err, want error }{
+		"a bare refused line":    {refused, errBadHeader},
+		"a wrapped refused line": {fmt.Errorf("reading: %w", refused), errBadHeader},
+		"a cut-off body":         {io.ErrUnexpectedEOF, io.ErrUnexpectedEOF},
+		"a cancelled read":       {context.Canceled, context.Canceled},
+		"no error":               {nil, nil},
+	} {
+		if got := BodyError(tc.err); got != tc.want { //nolint:errorlint // identity is the contract
+			t.Errorf("%s: BodyError(%v) = %v, want %v", name, tc.err, got, tc.want)
+		}
 	}
 }

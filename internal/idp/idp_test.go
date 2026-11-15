@@ -661,7 +661,7 @@ func TestARefusedTrailerIsNotQuoted(t *testing.T) {
 	getErr := f.GetJSON(context.Background(), srv.URL+"/x", &v)
 	_, postErr := f.PostToken(context.Background(), srv.URL+"/token", url.Values{"code": {"c"}}, nil)
 	for method, err := range map[string]error{"GET": getErr, "POST": postErr} {
-		if err == nil || strings.Contains(err.Error(), "SECRET") || !strings.Contains(err.Error(), "the answer has a malformed header or trailer line") {
+		if err == nil || strings.Contains(err.Error(), "SECRET") || !strings.Contains(err.Error(), "a malformed header or trailer line") {
 			t.Errorf("%s: err = %v, want the refused line named without its text", method, err)
 		}
 	}
