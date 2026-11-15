@@ -153,6 +153,7 @@ type settings struct {
 	jwksDown      bool
 	jwksEmpty     bool
 	jwksUnusable  bool
+	jwksNotASet   bool
 	tokenFail     map[string]Failure
 	tls           bool // read at New only
 }
@@ -340,9 +341,14 @@ func WithClientAssertionAlgs(algs ...string) Option {
 // responses might.
 func WithEmptyJWKS(on bool) Option { return func(s *settings) { s.jwksEmpty = on } }
 
-// WithUnusableJWK adds to the JWKS a key of a type the proxy cannot use (an X448 OKP key), as an
-// IdP that publishes a new key type beside its signing keys might (RFC 7517 §5).
+// WithUnusableJWK adds to the JWKS two keys the proxy cannot verify a signature with, as an IdP that
+// publishes more than its signing keys might (RFC 7517 §5): an X448 OKP key, which go-jose cannot
+// parse, and an RSA key for encryption (use "enc"), which parses but signs nothing.
 func WithUnusableJWK(on bool) Option { return func(s *settings) { s.jwksUnusable = on } }
+
+// WithJWKSNotAKeySet makes the JWKS endpoint answer 200 with JSON that is not a JWK Set (keys is a
+// string), as a proxy that rewrites responses might.
+func WithJWKSNotAKeySet(on bool) Option { return func(s *settings) { s.jwksNotASet = on } }
 
 // FailAuthorize makes every authorization request redirect back with f; nil clears it.
 func FailAuthorize(f *Failure) Option {

@@ -76,7 +76,8 @@ func TestLogAttrsAreTheIdentifiersTheIdPSent(t *testing.T) {
 		{"all three", Error{Code: 7000215, TraceID: "t", CorrelationID: "c", Description: "AADSTS7000215: secret"},
 			[]any{"idp_error_code", 7000215, "trace_id", "t", "correlation_id", "c"}},
 		{"only a code", Error{Code: 65001}, []any{"idp_error_code", 65001}},
-		{"only trace IDs", Error{OAuth: "interaction_required", TraceID: "t", CorrelationID: "c"}, []any{"trace_id", "t", "correlation_id", "c"}},
+		{"only a trace ID", Error{OAuth: "interaction_required", TraceID: "t"}, []any{"trace_id", "t"}},
+		{"only a correlation ID", Error{CorrelationID: "c"}, []any{"correlation_id", "c"}},
 		{"none", Error{Class: Unavailable, Description: "down"}, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

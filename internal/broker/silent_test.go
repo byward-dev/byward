@@ -193,6 +193,13 @@ func TestPromptNoneAnswersTheIdPsFailureAtTheRedirect(t *testing.T) {
 			if got := e.auditEvents(t, "login")[logins:]; tc.audited == "" && len(got) != 0 || tc.audited != "" && (len(got) != 1 || got[0]["outcome"] != "failure" || got[0]["reason"] != tc.audited) {
 				t.Fatalf("login records %v, want an IdP failure audited as %q", got, tc.audited)
 			}
+			// ADR-0021 §7: none of these IdP errors carries a code or trace IDs, so the sign-in failure
+			// line names none, not a zero or an empty one.
+			for _, unset := range []string{`"idp_error_code":0`, `"trace_id":""`, `"correlation_id":""`} {
+				if strings.Contains(e.logs.String(), unset) {
+					t.Fatalf("the log has %s, a field the IdP did not send: %s", unset, e.logs.String())
+				}
+			}
 			if len(e.st.GrantIDs()) != grants {
 				t.Fatal("a grant was created")
 			}

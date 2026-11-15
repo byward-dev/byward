@@ -1028,7 +1028,8 @@ func TestReusedCodeIsAuditedAsARevocation(t *testing.T) {
 }
 
 // ADR-0021 §2, §7: our request ID reaches Entra as client-request-id, comes back as correlation_id,
-// and the failure is logged with the IdP's error code, trace ID and correlation ID.
+// and the failure is logged with the IdP's error code, trace ID and correlation ID, never its
+// error_description.
 func TestIdPFailureIsAuditedAndCorrelatesWithTheIdP(t *testing.T) {
 	e := newEnv(t)
 	f := fakeidp.InvalidClientSecret // AADSTS7000215; invalid_client counts as unavailable (ADR-0011)
@@ -1041,6 +1042,9 @@ func TestIdPFailureIsAuditedAndCorrelatesWithTheIdP(t *testing.T) {
 		if !strings.Contains(e.logs.String(), want) {
 			t.Errorf("the IdP failure log lacks %s (our request ID must come back as Entra's correlation_id): %s", want, e.logs.String())
 		}
+	}
+	if strings.Contains(e.logs.String(), f.Description) { // ADR-0021 §7: it may carry user identifiers
+		t.Errorf("the IdP's error_description %q reached the log: %s", f.Description, e.logs.String())
 	}
 	if want := "callback unavailable"; len(e.idpOps) != 2 || e.idpOps[1] != want {
 		t.Fatalf("IdP observations = %v, want the callback to be %q", e.idpOps, want)

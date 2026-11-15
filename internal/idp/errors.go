@@ -36,8 +36,8 @@ func (c Class) String() string {
 // unreadable or empty client assertion file, so the request never left the proxy.
 var ErrCredential = errors.New("idp: the client credential could not be made")
 
-// Error is an IdP failure. Error() never includes the IdP's error_description, which may carry
-// user identifiers; Description is kept for operator logs only.
+// Error is an IdP failure. The IdP's error_description may carry user identifiers, so neither
+// Error() nor LogAttrs includes it, and no log line or page shows it (ADR-0021 §7).
 type Error struct {
 	Class Class
 	// OAuth is the RFC 6749 error value, if the IdP sent one.

@@ -83,18 +83,18 @@ func (p *Provider) diagnoseTenant(ctx context.Context, d Diagnosis) doctor.Resul
 // is skipped, not a failure (RFC 7517 §5).
 func (p *Provider) diagnoseKeys(ctx context.Context) doctor.Result {
 	check := doctor.CheckEntraSigningKeys
+	rewritten := "check that the proxy's host reaches " + Authority + " directly, not through a proxy that rewrites responses"
 	var raw json.RawMessage
-	err := p.fetch.GetJSON(ctx, p.endpoint("/discovery/v2.0/keys"), &raw)
-	var set jose.JSONWebKeySet
-	if err == nil {
-		set, err = idp.ParseJWKS(raw)
-	}
-	if err != nil {
+	if err := p.fetch.GetJSON(ctx, p.endpoint("/discovery/v2.0/keys"), &raw); err != nil {
 		return check.Result(doctor.Fail, "cannot fetch the tenant's signing keys: "+err.Error(), reachFix)
+	}
+	set, err := idp.ParseJWKS(raw)
+	if err != nil { // JSON, but not a key set
+		return check.Result(doctor.Fail, "the tenant's key set is not a JWK Set: "+err.Error(), rewritten)
 	}
 	n := idp.SigningKeys(set)
 	if n == 0 {
-		return check.Result(doctor.Fail, "the tenant's key set has no signing key", "check that the proxy's host reaches "+Authority+" directly, not through a proxy that rewrites responses")
+		return check.Result(doctor.Fail, "the tenant's key set has no signing key", rewritten)
 	}
 	return check.Result(doctor.Pass, fmt.Sprintf("the tenant's key set has %d signing key(s)", n), "")
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -39,7 +38,8 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 		wantAudit    bool
 		exchanged    bool // an exchange with Entra ran: never without a user, a grant or a current sign-in
 		wantAlert    string
-		wantReason   string // the refusal line's whole reason, for an alert
+		wantReason   string   // the refusal line's whole reason, for an alert
+		wantIdP      []string // the IdP's identifiers the refusal line must carry (ADR-0021 §7)
 	}{
 		{name: "a signed-in user", wantToken: "graph-token", exchanged: true},
 		{name: "a stored token without an expiry", noExpiry: true, wantToken: "graph-token", exchanged: true},
@@ -48,7 +48,8 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 		{name: "a grant revoked or signed out since", assertionErr: store.ErrNotFound, wantError: "sign_in_expired"},
 		{name: "a grant that cannot be read", assertionErr: errors.New("the store is down"), wantError: "failed", wantAudit: true},
 		{name: "the stored IdP token has expired", expires: now.Add(-time.Second), wantError: "sign_in_expired"},
-		{name: "consent missing", exchangeErr: &idp.Error{Code: entra.CodeConsentRequired}, wantError: "consent_required", wantAudit: true, exchanged: true},
+		{name: "consent missing", exchangeErr: &idp.Error{Code: entra.CodeConsentRequired, TraceID: "trace-1", CorrelationID: "corr-1", Description: "AADSTS65001: for alice@contoso.example"},
+			wantError: "consent_required", wantAudit: true, exchanged: true, wantIdP: []string{`"idp_error_code":65001`, `"trace_id":"trace-1"`, `"correlation_id":"corr-1"`}},
 		{name: "Conditional Access", exchangeErr: &idp.Error{OAuth: entra.OAuthInteractionNeeded}, wantError: "interaction_required", wantAudit: true, exchanged: true},
 		// #204: the proxy's own credential refused needs the operator, for a process's ask as for a request.
 		{name: "the client secret has expired", exchangeErr: &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialRejected, OperatorHint: "AADSTS7000222: renew the secret"},
@@ -149,8 +150,13 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 					t.Fatalf("the refusal line logs %s, a field the IdP did not send: %s", unset, refusal)
 				}
 			}
-			if ie := (*idp.Error)(nil); errors.As(tc.exchangeErr, &ie) && ie.Code != 0 && !strings.Contains(refusal, fmt.Sprintf(`"idp_error_code":%d`, ie.Code)) {
-				t.Fatalf("the refusal line lacks the IdP's error code %d: %s", ie.Code, refusal)
+			if ie := (*idp.Error)(nil); errors.As(tc.exchangeErr, &ie) && ie.Description != "" && strings.Contains(logs.String(), ie.Description) {
+				t.Fatalf("the IdP's error_description reached the log (ADR-0021 §7): %s", logs)
+			}
+			for _, want := range tc.wantIdP {
+				if !strings.Contains(refusal, want) {
+					t.Fatalf("the refusal line lacks %s: %s", want, refusal)
+				}
 			}
 		})
 	}
