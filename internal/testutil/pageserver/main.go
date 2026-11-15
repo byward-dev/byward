@@ -16,7 +16,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/byward-dev/byward/internal/broker"
@@ -24,6 +23,7 @@ import (
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/store/memory"
+	"github.com/byward-dev/byward/internal/testutil/fakeclock"
 	"github.com/byward-dev/byward/internal/token"
 )
 
@@ -57,7 +57,7 @@ func run(addr string) error {
 	if err != nil {
 		return err
 	}
-	clock := &clock{now: time.Now()}
+	clock := fakeclock.New(time.Now()) // the broker's time, moved only by the tests
 	box := func(purpose string) *token.Box { b, _ := token.NewBox(ring, purpose, clock.Now); return b }
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	b, err := broker.New(broker.Config{Issuer: origin, Origin: origin, Resource: resource, Scope: "mcp", IdPName: "entra",
@@ -71,33 +71,22 @@ func run(addr string) error {
 	mux := http.NewServeMux()
 	b.Register(mux)
 	// The browser lane moves time forward here instead of sleeping (POST /test/advance?d=1s).
-	mux.HandleFunc("POST /test/advance", clock.advance)
+	mux.HandleFunc("POST /test/advance", advance(clock))
 	srv := &http.Server{Addr: addr, Handler: logging.Middleware(log, mux), ReadHeaderTimeout: 5 * time.Second}
 	return srv.ListenAndServe()
 }
 
-// clock is the broker's time, moved only by the tests.
-type clock struct {
-	mu  sync.Mutex
-	now time.Time
-}
-
-func (c *clock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.now
-}
-
-func (c *clock) advance(w http.ResponseWriter, r *http.Request) {
-	d, err := time.ParseDuration(r.URL.Query().Get("d"))
-	if err != nil || d <= 0 {
-		http.Error(w, "want d, a positive duration", http.StatusBadRequest)
-		return
+// advance moves the broker's clock forward by the duration in d (POST /test/advance?d=1s).
+func advance(clock *fakeclock.Clock) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		d, err := time.ParseDuration(r.URL.Query().Get("d"))
+		if err != nil || d <= 0 {
+			http.Error(w, "want d, a positive duration", http.StatusBadRequest)
+			return
+		}
+		clock.Advance(d)
+		w.WriteHeader(http.StatusNoContent)
 	}
-	c.mu.Lock()
-	c.now = c.now.Add(d)
-	c.mu.Unlock()
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // stubIdP sends the browser to a local page; the browser lane stops there.

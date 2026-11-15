@@ -135,7 +135,7 @@ func (e *oboEnv) signIn(t *testing.T) map[string]any {
 	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	verifier := "verifier-0123456789-0123456789-0123456789-abc"
 	q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1:7777/callback"}, "response_type": {"code"},
-		"state": {"s"}, "code_challenge": {pkce(verifier)}, "code_challenge_method": {"S256"}, "scope": {"mcp"}}
+		"state": {"s"}, "code_challenge": {fakeidp.CodeChallenge(verifier)}, "code_challenge_method": {"S256"}, "scope": {"mcp"}}
 	page := e.send(t, c, "GET", "/authorize?"+q.Encode(), nil, nil)
 	pageBody := readAll(t, page)
 	flow := oboFlow.FindStringSubmatch(pageBody)
