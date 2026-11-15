@@ -21,13 +21,14 @@ const (
 	interactionOperatorHint = "Conditional Access requires interaction for the downstream API (claims challenge); passing it to the client's next sign-in is not supported yet"
 )
 
-// OnBehalfOf exchanges a user's access_as_user token (the assertion, ADR-0012 §3) for a token for
-// the downstream API's scopes, at the user's own tenant (tid), so multi-tenant apps work too. An
-// Entra error comes back as *idp.Error with its AADSTS Code and OAuth error: CodeConsentRequired
-// and OAuthInteractionNeeded carry operator hints; the claims challenge is never kept.
-func (p *Provider) OnBehalfOf(ctx context.Context, tid, assertion string, scopes []string) (downstream.Token, error) {
-	if !idp.IsGUID(tid) || assertion == "" || len(scopes) == 0 {
-		return downstream.Token{}, &idp.Error{Class: idp.Fatal, Err: errors.New("entra: On-Behalf-Of needs a tenant GUID, an assertion and scopes")}
+// OnBehalfOf exchanges a user's IdP token, our access_as_user token (sent in the request's
+// assertion parameter, ADR-0012 §3), for a token for the downstream API's scopes, at the user's own
+// tenant (tid), so multi-tenant apps work too. An Entra error comes back as *idp.Error with its
+// AADSTS Code and OAuth error: CodeConsentRequired and OAuthInteractionNeeded carry operator hints;
+// the claims challenge is never kept.
+func (p *Provider) OnBehalfOf(ctx context.Context, tid, idpToken string, scopes []string) (downstream.Token, error) {
+	if !idp.IsGUID(tid) || idpToken == "" || len(scopes) == 0 {
+		return downstream.Token{}, &idp.Error{Class: idp.Fatal, Err: errors.New("entra: On-Behalf-Of needs a tenant GUID, an IdP token and scopes")}
 	}
 	if err := p.Ready(ctx); err != nil {
 		return downstream.Token{}, err
@@ -35,7 +36,7 @@ func (p *Provider) OnBehalfOf(ctx context.Context, tid, assertion string, scopes
 	tr, err := p.tokenAt(ctx, tid, url.Values{
 		"grant_type":          {grantJWTBearer},
 		"requested_token_use": {"on_behalf_of"},
-		"assertion":           {assertion},
+		"assertion":           {idpToken},
 		"scope":               {strings.Join(scopes, " ")},
 	})
 	if err != nil {
@@ -64,5 +65,5 @@ func (p *Provider) AdminConsentURL(tid string, scopes []string) string {
 		"scope":        {strings.Join(scopes, " ")},
 		"redirect_uri": {p.cfg.RedirectURL},
 	}
-	return Authority + "/" + url.PathEscape(tid) + "/v2.0/adminconsent?" + q.Encode()
+	return tenantURL(tid, "/v2.0/adminconsent") + "?" + q.Encode()
 }

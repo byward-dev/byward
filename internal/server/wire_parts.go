@@ -173,6 +173,9 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 	}
 	if cfg.UpstreamCommand == nil { // a stdio upstream gets no assertion and no email (ADR-0016 §6)
 		p.warnings = append(p.warnings, emailWarnings(cfg, p.idp.gateIdP == gate.Entra)...)
+		if cfg.IdentityHeaders { // they ride on the assertion (ADR-0016 §5); config refuses them otherwise
+			p.warnings = append(p.warnings, identityHeadersWarning)
+		}
 	}
 	if cfg.AppTokens == "entra" {
 		if p.idp.appTokens == nil {
