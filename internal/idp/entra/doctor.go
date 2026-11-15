@@ -2,6 +2,7 @@ package entra
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -78,10 +79,17 @@ func (p *Provider) diagnoseTenant(ctx context.Context, d Diagnosis) doctor.Resul
 	return check.Result(doctor.Pass, "discovery document found, issuer "+m.Issuer, "")
 }
 
+// diagnoseKeys reads the tenant's key set as sign-in does (idp.ParseJWKS): a key the proxy cannot use
+// is skipped, not a failure (RFC 7517 §5).
 func (p *Provider) diagnoseKeys(ctx context.Context) doctor.Result {
 	check := doctor.CheckEntraSigningKeys
+	var raw json.RawMessage
+	err := p.fetch.GetJSON(ctx, p.endpoint("/discovery/v2.0/keys"), &raw)
 	var set jose.JSONWebKeySet
-	if err := p.fetch.GetJSON(ctx, p.endpoint("/discovery/v2.0/keys"), &set); err != nil {
+	if err == nil {
+		set, err = idp.ParseJWKS(raw)
+	}
+	if err != nil {
 		return check.Result(doctor.Fail, "cannot fetch the tenant's signing keys: "+err.Error(), reachFix)
 	}
 	n := idp.SigningKeys(set)

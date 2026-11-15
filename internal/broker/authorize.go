@@ -516,16 +516,7 @@ func (b *Broker) noteIdPFailure(r *http.Request, clientID string, err error) str
 			msg = ie.UserMessage
 		}
 		reason = "the IdP sign-in failed (" + ie.Class.String() + ")"
-		attrs := append([]any{"error", err}, fixAttr(err)...)
-		if ie.Code != 0 {
-			attrs = append(attrs, "idp_error_code", ie.Code)
-		}
-		if ie.TraceID != "" {
-			attrs = append(attrs, "trace_id", ie.TraceID)
-		}
-		if ie.CorrelationID != "" {
-			attrs = append(attrs, "correlation_id", ie.CorrelationID)
-		}
+		attrs := append(append([]any{"error", err}, fixAttr(err)...), ie.LogAttrs()...)
 		b.cfg.Log.ErrorContext(ctx, "IdP sign-in failed", attrs...)
 	} else {
 		b.cfg.Log.ErrorContext(ctx, "IdP sign-in failed", "error", err)

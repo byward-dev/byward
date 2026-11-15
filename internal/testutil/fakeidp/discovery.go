@@ -75,6 +75,9 @@ func (p *IdP) jwks(w http.ResponseWriter, r *http.Request) {
 		}
 		keys = append(keys, k.jwk(issuer))
 	}
+	if p.cfg.jwksUnusable {
+		keys = append(keys, map[string]any{"kty": "OKP", "crv": "X448", "kid": "unusable", "x": "AAAA"})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"keys": keys})
 }
 

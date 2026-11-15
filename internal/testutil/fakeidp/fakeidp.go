@@ -152,6 +152,7 @@ type settings struct {
 	silentFail    *Failure
 	jwksDown      bool
 	jwksEmpty     bool
+	jwksUnusable  bool
 	tokenFail     map[string]Failure
 	tls           bool // read at New only
 }
@@ -338,6 +339,10 @@ func WithClientAssertionAlgs(algs ...string) Option {
 // WithEmptyJWKS makes the JWKS endpoint answer 200 with no keys, as a proxy that rewrites
 // responses might.
 func WithEmptyJWKS(on bool) Option { return func(s *settings) { s.jwksEmpty = on } }
+
+// WithUnusableJWK adds to the JWKS a key of a type the proxy cannot use (an X448 OKP key), as an
+// IdP that publishes a new key type beside its signing keys might (RFC 7517 §5).
+func WithUnusableJWK(on bool) Option { return func(s *settings) { s.jwksUnusable = on } }
 
 // FailAuthorize makes every authorization request redirect back with f; nil clears it.
 func FailAuthorize(f *Failure) Option {

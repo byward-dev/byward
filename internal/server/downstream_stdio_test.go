@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -140,6 +141,16 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 				!strings.Contains(refusal, `"reason":"`+tc.wantReason+`"`) ||
 				!strings.Contains(scraped, `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="`+tc.wantAlert+`"} 1`) {
 				t.Fatalf("want one alert line, %s and reason %q on the refusal line, counted once:\n%s\n%s", tc.wantAlert, tc.wantReason, logs, scraped)
+			}
+			// ADR-0021 §7: the IdP's error code and trace IDs only when the IdP sent them, as on the
+			// sign-in line; never a zero or an empty value.
+			for _, unset := range []string{`"idp_error_code":0`, `"trace_id":""`, `"correlation_id":""`} {
+				if strings.Contains(refusal, unset) {
+					t.Fatalf("the refusal line logs %s, a field the IdP did not send: %s", unset, refusal)
+				}
+			}
+			if ie := (*idp.Error)(nil); errors.As(tc.exchangeErr, &ie) && ie.Code != 0 && !strings.Contains(refusal, fmt.Sprintf(`"idp_error_code":%d`, ie.Code)) {
+				t.Fatalf("the refusal line lacks the IdP's error code %d: %s", ie.Code, refusal)
 			}
 		})
 	}

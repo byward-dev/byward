@@ -130,6 +130,23 @@ func (e *Error) Fix() string {
 	return e.Alert.Hint()
 }
 
+// LogAttrs are the IdP's own identifiers of e for an operator's log line (ADR-0021 §7): its error
+// code (idp_error_code), trace_id and correlation_id, each only when the IdP sent it. The
+// error_description is never among them.
+func (e *Error) LogAttrs() []any {
+	var attrs []any
+	if e.Code != 0 {
+		attrs = append(attrs, "idp_error_code", e.Code)
+	}
+	if e.TraceID != "" {
+		attrs = append(attrs, "trace_id", e.TraceID)
+	}
+	if e.CorrelationID != "" {
+		attrs = append(attrs, "correlation_id", e.CorrelationID)
+	}
+	return attrs
+}
+
 // ReportAlert reports err when it asks for an IdP alert (#204): count is told the operation and the
 // alert's reason (the alert metric), and log gets the line operators alert on, naming the IdP, the
 // operation, the alert and its fix (docs/reference/observability.md). Any other err is neither

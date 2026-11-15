@@ -155,8 +155,7 @@ func (d *downstreamTokens) record(ctx context.Context, r *http.Request, id resou
 	}
 	attrs := []any{"reason", reason, "error", err}
 	if isIdP {
-		// The IdP's error code and its own trace IDs; never its error_description (ADR-0021 §7).
-		attrs = append(attrs, "idp_error_code", ie.Code, "trace_id", ie.TraceID, "correlation_id", ie.CorrelationID)
+		attrs = append(attrs, ie.LogAttrs()...)
 		if ie.Alert != "" { // the IdP refuses the proxy itself: no user can fix it (#204)
 			attrs = append(attrs, "alert", string(ie.Alert))
 		}
