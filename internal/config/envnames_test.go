@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -11,15 +12,16 @@ import (
 
 var (
 	envName = regexp.MustCompile(`\bBYWARD_[A-Z][A-Z0-9_]*\*?`)
-	// settingLiteral is a setting named in code as Setting{Name: "…"}, optionally with its _FILE
-	// variable appended to Env() by hand.
-	settingLiteral = regexp.MustCompile(`Setting\{Name: *"([^"]*)"\}(\.Env\(\) *\+ *"_FILE")?`)
+	// settingLiteral is a setting named in code as Setting{Name: "…"}, optionally with a suffix
+	// appended to Env() by hand, which may only be a secret setting's _FILE.
+	settingLiteral = regexp.MustCompile(`Setting\{Name: *"([^"]*)"\}(?:\.Env\(\)\s*\+\s*"([^"]*)")?`)
 )
 
-// Setting names written out by hand in messages (errors, warnings, logs) and in the operator docs
-// must name real settings: after a rename or a removed setting, a stale name would point operators
-// at nothing. In code that includes Setting{Name: "…"}, whose Env() checks nothing, and a _FILE
-// variable, which only a secret setting has. ADRs are left out: they name planned settings.
+// Setting names written out by hand in code (messages and environment lookups) and in the operator
+// docs must name real settings: after a rename or a removed setting, a stale name would point
+// operators at nothing or read a variable nobody sets. In code that includes Setting{Name: "…"},
+// whose Env() checks nothing, and a _FILE variable, which only a secret setting has. ADRs are left
+// out: they name planned settings.
 func TestEveryBYWARDNameInTheCodeAndDocsIsASetting(t *testing.T) {
 	known := map[string]bool{}
 	byName := map[string]Setting{}
@@ -36,6 +38,7 @@ func TestEveryBYWARDNameInTheCodeAndDocsIsASetting(t *testing.T) {
 	// (internal/testutil/pgtest), the image build argument, the ENTRA_*, OIDC_*
 	// and APP_* families, the real-Entra lane's repository variables (docs/maintainers/real-entra-lane.md)
 	// and the fixture privacy test's CI secret (ADR-0024 §13).
+	literals := 0
 	extra := regexp.MustCompile(`^BYWARD_(ENTRA_\*|OIDC_\*|APP_\*|SUBJECT|ISSUER|EMAIL|PRINCIPAL_TYPE|DOWNSTREAM_TOKEN_SOCKET|UPDATE_REFERENCE|POSTGRES|IMAGE|CI_ENTRA_TENANT|CI_ENTRA_CLIENT_ID|FORBIDDEN_IDENTIFIERS)$`)
 	check := func(path string) {
 		src, err := os.ReadFile(path) //nolint:gosec // G304: reads this repository's own files
@@ -48,12 +51,9 @@ func TestEveryBYWARDNameInTheCodeAndDocsIsASetting(t *testing.T) {
 			}
 		}
 		for _, m := range settingLiteral.FindAllStringSubmatch(string(src), -1) {
-			s, ok := byName[m[1]]
-			switch {
-			case !ok:
-				t.Errorf("%s names Setting %q, which is not a setting", path, m[1])
-			case m[2] != "" && !s.Secret:
-				t.Errorf("%s names %s_FILE, but %s is not a secret setting", path, s.Env(), m[1])
+			literals++
+			if problem := settingLiteralProblem(byName, m[1], m[2]); problem != "" {
+				t.Errorf("%s %s", path, problem)
 			}
 		}
 	}
@@ -74,5 +74,55 @@ func TestEveryBYWARDNameInTheCodeAndDocsIsASetting(t *testing.T) {
 	walk("../../docs/reference", ".md")
 	for _, f := range []string{"README.md", "SECURITY.md", "CONTRIBUTING.md", "AGENTS.md"} {
 		check("../../" + f)
+	}
+	if literals == 0 { // a pattern that matches nothing would turn the check off unnoticed
+		t.Fatal("no Setting{Name: \"…\"} found in the code")
+	}
+}
+
+// settingLiteralProblem is what is wrong with Setting{Name: name}.Env() + suffix (suffix "" for
+// none), or "".
+func settingLiteralProblem(byName map[string]Setting, name, suffix string) string {
+	s, ok := byName[name]
+	switch {
+	case !ok:
+		return fmt.Sprintf("names Setting %q, which is not a setting", name)
+	case suffix != "" && suffix != "_FILE":
+		return fmt.Sprintf("names %s%s, but a setting's only other variable is _FILE", s.Env(), suffix)
+	case suffix != "" && !s.Secret:
+		return fmt.Sprintf("names %s_FILE, but %s is not a secret setting", s.Env(), name)
+	}
+	return ""
+}
+
+// The guard reads a Setting literal in every form gofmt writes, and refuses an unknown name, a
+// suffix other than _FILE, and _FILE on a setting that is not secret.
+func TestTheSettingLiteralGuardRefusesWhatNoSettingReads(t *testing.T) {
+	for src, want := range map[string][]string{
+		`Setting{Name: "x"}`:                        {"x", ""},
+		`config.Setting{Name: "x"}.Env()`:           {"x", ""},
+		`Setting{Name: "x"}.Env()+"_FILE"`:          {"x", "_FILE"},
+		`Setting{Name: "x"}.Env() + "_FILE"`:        {"x", "_FILE"},
+		"Setting{Name: \"x\"}.Env() +\n\t\"_FILE\"": {"x", "_FILE"},
+		`Setting{Name: "x"}.Env() + "_FILES"`:       {"x", "_FILES"},
+		`Settings{Name: "x"}`:                       nil,
+		`Setting{Name: x}`:                          nil,
+	} {
+		m := settingLiteral.FindStringSubmatch(src)
+		if (want == nil) != (m == nil) || (m != nil && (m[1] != want[0] || m[2] != want[1])) {
+			t.Errorf("%s: matched %q, want %q", src, m, want)
+		}
+	}
+	byName := map[string]Setting{"plain": {Name: "plain"}, "secret": {Name: "secret", Secret: true}}
+	for _, tc := range []struct{ name, suffix, want string }{
+		{"plain", "", ""},
+		{"secret", "_FILE", ""},
+		{"missing", "", `names Setting "missing", which is not a setting`},
+		{"plain", "_FILE", "names BYWARD_PLAIN_FILE, but plain is not a secret setting"},
+		{"secret", "_FILES", "names BYWARD_SECRET_FILES, but a setting's only other variable is _FILE"},
+	} {
+		if got := settingLiteralProblem(byName, tc.name, tc.suffix); got != tc.want {
+			t.Errorf("%s%s: %q, want %q", tc.name, tc.suffix, got, tc.want)
+		}
 	}
 }
