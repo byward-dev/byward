@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
+	"net/http"
 	"net/url"
 	"slices"
 	"sort"
@@ -352,7 +353,7 @@ func TestDoctorChecksAnOIDCIdPsDiscoveryAndClientCredential(t *testing.T) {
 				idpChecks[1].Name != "client credential" || idpChecks[1].Status != tc.credential ||
 				!strings.HasSuffix(idpChecks[1].Message, "; the credential: a client secret") ||
 				!strings.Contains(idpChecks[0].Fix+idpChecks[1].Fix, tc.fix) || strings.Contains(idpChecks[0].Fix, "over https") {
-				t.Fatalf("IdP checks %+v, want discovery %s then the client credential %s, a fix naming %q", idpChecks, tc.discovery, tc.credential, tc.fix)
+				t.Fatalf("IdP checks %+v, want discovery %s then the client credential %s, a fix naming %q and no \"over https\"", idpChecks, tc.discovery, tc.credential, tc.fix)
 			}
 		})
 	}
@@ -382,6 +383,26 @@ func TestTheDiscoveryFixAsksForHTTPSUnlessTheIssuerIsAnAllowedLoopbackHTTPOne(t 
 			}
 		})
 	}
+}
+
+// For a production IdP (an https issuer, no --dev relaxation) whose discovery fails, doctor's fix
+// asks for https: the wiring passes config's decision, not a constant.
+func TestDoctorAsksForHTTPSWhenAnHTTPSIssuersDiscoveryFails(t *testing.T) {
+	cfg := loadOIDC(t, "oidc", "https://sso.example.com/realms/acme", "c")
+	rep, err := Doctor(context.Background(), cfg, DoctorOptions{IdP: &http.Client{Transport: refuse{}}, Proxy: &http.Client{Transport: refuse{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "BYWARD_OIDC_ISSUER: set it exactly as the IdP's discovery document states its issuer, over https"
+	for _, c := range rep.Checks {
+		if c.Class == doctor.ClassIdP && c.Name == "discovery" {
+			if c.Status != doctor.Fail || c.Fix != want {
+				t.Fatalf("discovery %+v; want a failure with the fix %q", c, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("no discovery check in %+v", rep.Checks)
 }
 
 // failingDiscovery is an IdP whose discovery fails.

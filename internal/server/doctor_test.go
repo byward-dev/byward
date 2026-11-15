@@ -236,7 +236,7 @@ func TestDoctorWithoutAuthListsTheRelaxationsAndChecksOnlyTheUpstreamAndTheTrust
 		names = append(names, c.Name)
 	}
 	last := rep.Checks[len(rep.Checks)-1]
-	if err != nil || !slices.Equal(names, []string{"configuration", "configuration", "upstream", "trust store", "authentication"}) ||
+	if !slices.Equal(names, []string{"configuration", "configuration", "upstream", "trust store", "authentication"}) ||
 		last.Status != doctor.Warn || !strings.Contains(last.Message, "authentication is off") || rep.ExitCode() != 0 {
 		t.Fatalf("checks %v, report %+v, err %v; want the two relaxations, then upstream, trust store and authentication", names, rep, err)
 	}
@@ -259,7 +259,7 @@ func TestDoctorListsEveryRelaxationAsAWarning(t *testing.T) {
 		want []string
 	}{
 		"with authentication (--dev)":                 {withAuth, []string{"secret file permissions are not checked", "http public URL on loopback"}},
-		"without authentication (--insecure-no-auth)": {noAuth, []string{"http public URL on loopback", "AUTHENTICATION IS OFF"}},
+		"without authentication (--insecure-no-auth)": {noAuth, []string{"http public URL on loopback", "AUTHENTICATION IS OFF: anyone who can reach http://127.0.0.1:8080/mcp can use the upstream, and the upstream receives no identity"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			// Exactly one warning per relaxation, in config's order, each with the same fix.
@@ -272,7 +272,6 @@ func TestDoctorListsEveryRelaxationAsAWarning(t *testing.T) {
 				if c.Name != "configuration" || c.Status != doctor.Warn || c.Fix != "for trying byward out only: run production without BYWARD_DEV and BYWARD_INSECURE_NO_AUTH" {
 					t.Errorf("relaxation check %+v; want a configuration warning with the relaxation fix", c)
 				}
-				text, _, _ = strings.Cut(text, ":") // AUTHENTICATION IS OFF goes on to name the URL
 				got = append(got, text)
 			}
 			if !slices.Equal(got, tc.want) {

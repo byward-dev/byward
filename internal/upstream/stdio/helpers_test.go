@@ -45,8 +45,9 @@ var (
 )
 
 // proxyEnv is the proxy's own environment as the tests see it: allowlisted variables, among them
-// the three locale variables the upstream-env help names, and variables that must never reach an
-// upstream process: a secret, a cloud credential, and a locale variable not on the list.
+// the locale variables the upstream-env help names (LANG, LC_ALL, LC_CTYPE, LC_MESSAGES), and
+// variables that must never reach an upstream process: a secret, a cloud credential, and a locale
+// variable not on the list.
 var proxyEnv = map[string]string{
 	"PATH":                  "/usr/bin:/bin",
 	"LANG":                  "C.UTF-8",
