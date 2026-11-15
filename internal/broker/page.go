@@ -24,6 +24,13 @@ func pageHeaders(w http.ResponseWriter) {
 	h.Set("X-Content-Type-Options", "nosniff")
 }
 
+// methodNotAllowed answers 405 to a method the endpoint does not serve, with allow, the methods it
+// does, in the Allow header (RFC 9110 §15.5.6).
+func methodNotAllowed(w http.ResponseWriter, allow string) {
+	w.Header().Set("Allow", allow)
+	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+}
+
 // StylesheetPath is where the pages' stylesheet is served.
 const StylesheetPath = "/assets/page.css"
 
@@ -32,8 +39,7 @@ var assets embed.FS
 
 func stylesheet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		methodNotAllowed(w, "GET, HEAD")
 		return
 	}
 	css, _ := assets.ReadFile("page.css")
