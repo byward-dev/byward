@@ -5,17 +5,17 @@ import (
 	"testing"
 )
 
-// The upstream-env help names exactly the locale variables a stdio upstream inherits:
-// upstream/stdio passes LANG, LC_ALL, LC_CTYPE and LC_MESSAGES by name, never every LC_* (L162).
+// The upstream-env help, as byward --help shows it, names the locale variables a stdio upstream
+// inherits, as upstream/stdio passes them: LANG, LC_ALL, LC_CTYPE and LC_MESSAGES by name, not every
+// LC_* (L162). docs/reference/settings.md follows the same text (TestReferenceIsCurrent).
 func TestTheUpstreamEnvHelpNamesTheInheritedLocaleVariables(t *testing.T) {
-	for _, s := range registry {
-		if s.Name != "upstream-env" {
-			continue
-		}
-		if !strings.Contains(s.Help, "LANG, LC_ALL, LC_CTYPE and LC_MESSAGES") || strings.Contains(s.Help, "LC_*") {
-			t.Fatalf("upstream-env help %q; want LANG, LC_ALL, LC_CTYPE and LC_MESSAGES named, and no LC_*", s.Help)
-		}
-		return
+	usage := Usage()
+	_, entry, ok := strings.Cut(usage, "--upstream-env-file")
+	if !ok {
+		t.Fatalf("no --upstream-env-file in the help:\n%s", usage)
 	}
-	t.Fatal("no upstream-env setting")
+	entry, _, _ = strings.Cut(entry, "\n  --")
+	if !strings.Contains(entry, "LANG, LC_ALL, LC_CTYPE and LC_MESSAGES") || strings.Contains(entry, "LC_*") {
+		t.Fatalf("upstream-env help %q; want LANG, LC_ALL, LC_CTYPE and LC_MESSAGES named, and no LC_*", entry)
+	}
 }

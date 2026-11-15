@@ -143,8 +143,11 @@ func newOIDCIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect 
 		hd = cfg.GateHostedDomains[0] // also the hd hint at Google; the gate list stays the rule (ADR-0015)
 	}
 	keyAlgSetting := config.Setting{Name: "oidc-client-key-alg"}.Env()
+	// config's one decision about an http issuer on loopback (#355): the adapter is relaxed by it,
+	// and doctor's discovery fix asks for https only without it.
+	loopbackHTTP := cfg.OIDCLoopbackHTTP
 	p, err := oidc.New(oidc.Config{Preset: preset, Issuer: cfg.OIDCIssuer, ClientID: cfg.OIDCClientID, ClientAuth: auth, KeyAlgSetting: keyAlgSetting, RedirectURL: redirect,
-		Scopes: cfg.OIDCScopes, SubjectClaim: cfg.OIDCSubjectClaim, RolesClaim: cfg.OIDCRolesClaim, GroupsClaim: cfg.OIDCGroupsClaim, HostedDomain: hd, AllowLoopbackHTTP: cfg.OIDCLoopbackHTTP, HTTPClient: idpHTTP})
+		Scopes: cfg.OIDCScopes, SubjectClaim: cfg.OIDCSubjectClaim, RolesClaim: cfg.OIDCRolesClaim, GroupsClaim: cfg.OIDCGroupsClaim, HostedDomain: hd, AllowLoopbackHTTP: loopbackHTTP, HTTPClient: idpHTTP})
 	if err != nil {
 		return nil, fmt.Errorf("oidc settings (BYWARD_OIDC_*): %w", err)
 	}
@@ -159,7 +162,7 @@ func newOIDCIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect 
 	ip := &identityProvider{name: cfg.IdP, redirect: redirect, label: oidcLabel(cfg), adapter: p, scope: p.Scope(), gateIdP: gate.Generic, userKey: oidcUserKey,
 		credentialDesc: credentialDesc,
 		diagnose: func(ctx context.Context, _ time.Time) []doctor.Result {
-			return append(diagnoseDiscovery(ctx, p, cfg.OIDCIssuer), withCredential(p.DiagnoseClient(ctx, oidcDiagnosis(cfg)), credentialDesc, refused))
+			return append(diagnoseDiscovery(ctx, p, cfg.OIDCIssuer, loopbackHTTP), withCredential(p.DiagnoseClient(ctx, oidcDiagnosis(cfg)), credentialDesc, refused))
 		}}
 	if oidc.Presets[preset].HostedDomains {
 		ip.gateIdP = gate.Google // the gate's kind for an IdP with hosted domains
@@ -285,13 +288,14 @@ func describeClientAssertion(info idp.AssertionInfo) string {
 }
 
 // diagnoseDiscovery is doctor's check of an oidc IdP: discovery, and that its issuer matches
-// (ADR-0011 §7).
-func diagnoseDiscovery(ctx context.Context, p idp.Readiness, issuer string) []doctor.Result {
+// (ADR-0011 §7). loopbackHTTP is config's relaxation for an http issuer on loopback under --dev:
+// only then does the fix not ask for https.
+func diagnoseDiscovery(ctx context.Context, p idp.Readiness, issuer string, loopbackHTTP bool) []doctor.Result {
 	r := doctor.CheckDiscovery.NewResult()
 	if err := p.Ready(ctx); err != nil {
 		r.Status, r.Message = doctor.Fail, "the IdP's discovery document at "+issuer+" failed: "+err.Error()
 		r.Fix = "BYWARD_OIDC_ISSUER: set it exactly as the IdP's discovery document states its issuer"
-		if !strings.HasPrefix(issuer, "http://") { // an http issuer is allowed on loopback under --dev only
+		if !loopbackHTTP {
 			r.Fix += ", over https"
 		}
 		return []doctor.Result{r}

@@ -44,11 +44,16 @@ var (
 	carol = Identity{Subject: "tid-1:oid-carol", Issuer: "https://idp.example/tid-1/v2.0"}
 )
 
-// proxyEnv is the proxy's own environment as the tests see it: two allowlisted variables and
-// two that must never reach an upstream process.
+// proxyEnv is the proxy's own environment as the tests see it: allowlisted variables, among them
+// the three locale variables the upstream-env help names, and variables that must never reach an
+// upstream process: a secret, a cloud credential, and a locale variable not on the list.
 var proxyEnv = map[string]string{
 	"PATH":                  "/usr/bin:/bin",
 	"LANG":                  "C.UTF-8",
+	"LC_ALL":                "C.UTF-8",
+	"LC_CTYPE":              "C.UTF-8",
+	"LC_MESSAGES":           "C",
+	"LC_NUMERIC":            "de_DE.UTF-8",
 	"BYWARD_SIGNING_KEY":    "proxy-secret",
 	"AWS_SECRET_ACCESS_KEY": "cloud-secret",
 }

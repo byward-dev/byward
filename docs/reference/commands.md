@@ -75,7 +75,7 @@ fail  idp    entra app and credential: Entra rejected the client secret (AADSTS7
 | `proxy` | trust store | On `main`, not in v0.2.0: where the roots byward trusts for the IdP, an https upstream and client metadata documents (CIMD) come from: `SSL_CERT_FILE` and `SSL_CERT_DIR` (and how many certificates each yields), or the system's default locations, and how many roots Go loaded. A warning when `SSL_CERT_FILE` cannot be read or holds no PEM certificate Go accepts (Go reads nothing from it, without an error, and the warning says what it trusts instead), or when it names a file other than a public bundle and `SSL_CERT_DIR` leaves out the public directories (`/etc/ssl/certs`, `/etc/pki/tls/certs`): Go then reads only those, so the public roots are dropped unless that file holds them. On macOS and Windows either setting replaces the system's verifier, which is a warning too, unless `GODEBUG=x509sslcertoverrideplatform=0` keeps that verifier: both settings are then ignored, a warning when either is set. Each `SSL_CERT_DIR` entry is read as Go reads it: a warning when an entry is not a directory Go can read or holds no PEM certificate Go accepts, or when no entry exists; an entry that does not exist beside others is reported as skipped. The warnings say what Go trusts instead: on macOS and Windows, an entry or file that fails other than by not existing makes Go fall back to the system's verifier when nothing else yields a certificate. See [trust a private CA](../how-to/private-ca.md) |
 | `proxy` | upstream hop | shown only as a warning: the HTTP upstream is `http` and its host resolves to a public address, so the secrets each request carries (the identity assertion, the upstream credential, an On-Behalf-Of token) travel in clear. A host that does not resolve gets no warning. Also logged at startup, and by `check --offline` for an upstream given as an address |
 | `proxy` | identity headers | with `BYWARD_IDENTITY_HEADERS` and an HTTP upstream: the upstream's host resolves only to loopback, private, link-local, shared (CGNAT) or unspecified addresses (a warning when it has a public address or does not resolve). A hint, not a guarantee: doctor sees addresses, not who can reach them |
-| `proxy` | configuration | never fails; one warning per startup warning (an empty access gate, generic consent wording), and with the PostgreSQL store the reminder that every replica needs the same keys |
+| `proxy` | configuration | never fails; one warning per relaxation that `--dev` or `--insecure-no-auth` turned on (`relaxation: …`, as `check --offline` prints it), one per startup warning (an empty access gate, generic consent wording), and with the PostgreSQL store the reminder that every replica needs the same keys |
 | `proxy` | protected resource metadata (path-inserted) | `/.well-known/oauth-protected-resource<path>` answers 200 with `resource` equal to the public URL and our issuer first in `authorization_servers` |
 | `proxy` | protected resource metadata (root) | the same at `/.well-known/oauth-protected-resource` |
 | `proxy` | authorization server metadata (RFC 8414) | `/.well-known/oauth-authorization-server` names our issuer, `authorization_response_iss_parameter_supported: true`, `S256`, and a `revocation_endpoint` |
@@ -102,8 +102,9 @@ with AADSTS501051 unless the app holds a role on itself. Doctor then reports the
 passed, since Entra checked it before refusing, and the access token as a skip, with the
 `az ad app show` command that checks its version by hand.
 
-With `BYWARD_INSECURE_NO_AUTH` there is no discovery and no IdP: doctor runs the TLS certificate,
-`upstream`, `trust store`, `upstream hop` and `configuration` checks, then reports `authentication` as a warning.
+With `BYWARD_INSECURE_NO_AUTH` there is no discovery and no IdP: doctor runs the TLS certificate and
+`configuration` checks (among them its relaxations, `AUTHENTICATION IS OFF` included), then
+`upstream`, `trust store` and `upstream hop`, then reports `authentication` as a warning.
 
 ### Statuses and exit codes
 

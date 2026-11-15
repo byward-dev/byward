@@ -989,6 +989,11 @@ func TestAccessTokensAreCappedAtTheIdPTokenWhenOnBehalfOfIsOn(t *testing.T) {
 			if got := body["expires_in"].(float64); got != c.want.Seconds() {
 				t.Fatalf("code exchange: expires_in %v, want %v", got, c.want.Seconds())
 			}
+			if c.name == "on, IdP token within the margin" { // the operator sees how close it was (L159)
+				if logs := e.logs.String(); !strings.Contains(logs, `"idp_token_expires_in":"30s","margin":"1m0s"`) {
+					t.Fatalf("the within-the-margin warning lost its values: %s", logs)
+				}
+			}
 			e.now = e.now.Add(15 * time.Minute)
 			res, refreshed := e.refresh(t, body["refresh_token"].(string), "")
 			if res.StatusCode != http.StatusOK {
