@@ -493,8 +493,8 @@ func waitForWaiters(t *testing.T, r *CIMDRegistry, n int) {
 	t.Fatalf("%d lookups never joined the fetch", n)
 }
 
-// The fetch is shared, so the request that started it leaving does not fail the others: the
-// document is still fetched and cached.
+// The fetch is shared and detached: the request that started it leaves as soon as its own context
+// ends, like any waiter, while the fetch goes on and serves the others and the cache.
 func TestTheSharedFetchOutlivesTheRequestThatStartedIt(t *testing.T) {
 	f := &fakeFetch{replies: map[string][]reply{cimdID: {ok("max-age=300")}}, gate: make(chan struct{})}
 	r := newReg(f, newClock(), nil, nil)
@@ -506,12 +506,18 @@ func TestTheSharedFetchOutlivesTheRequestThatStartedIt(t *testing.T) {
 	go func() { _, err := r.Client(context.Background(), cimdID); waiter <- err }()
 	waitForWaiters(t, r, 1)
 	cancel()
+	// The fetch is still held at the gate: the lookup that started it returns anyway.
+	select {
+	case err := <-first:
+		if !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("the lookup that started the fetch, after its request ended: %v; want ErrUnavailable", err)
+		}
+	case <-time.After(time.Second): // well under the fake's 5 s gate
+		t.Fatal("the lookup that started the fetch still waits for it after its request ended")
+	}
 	close(f.gate)
 	if err := <-waiter; err != nil {
 		t.Fatalf("waiter: %v", err)
-	}
-	if err := <-first; err != nil {
-		t.Fatalf("the lookup that started the fetch: %v (its request ending must not fail the shared fetch)", err)
 	}
 	if _, err := r.Client(context.Background(), cimdID); err != nil || f.calls.Load() != 1 {
 		t.Fatalf("cached lookup: %v, fetches %d", err, f.calls.Load())
@@ -634,5 +640,59 @@ func TestOnlyARefusedDocumentIsErrMetadataRefused(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// panicFetch panics on every fetch, counting them.
+type panicFetch struct{ calls *atomic.Int32 }
+
+func (f panicFetch) Get(context.Context, string, int64) (*ssrfguard.Response, error) {
+	f.calls.Add(1)
+	panic("fetcher bug")
+}
+
+// The shared fetch runs where no HTTP handler's recover reaches: a panic in it is a fetch failure
+// for the lookup (ErrUnavailable), not the end of the process, and the lookup is not left stuck.
+func TestAPanickingFetchIsAnUnavailableClientNotACrash(t *testing.T) {
+	calls, c := new(atomic.Int32), newClock()
+	r := NewCIMDRegistry(CIMDConfig{Fetch: panicFetch{calls}, JTI: NewStoreJTICache(memory.New()), Now: c.now})
+	if got, err := r.Client(context.Background(), cimdID); !errors.Is(err, ErrUnavailable) || got != nil {
+		t.Fatalf("lookup with a panicking fetch: %v, %v; want no client and ErrUnavailable", got, err)
+	}
+	// The shared fetch was released, so a later lookup fetches again rather than waiting on it.
+	c.advance(MinCIMDRetry)
+	if _, err := r.Client(context.Background(), cimdID); !errors.Is(err, ErrUnavailable) || calls.Load() != 2 {
+		t.Fatalf("lookup after the panic: %v, fetches %d; want ErrUnavailable from a second fetch", err, calls.Load())
+	}
+}
+
+// panicAfter fetches through f until panicking is set, then panics, counting the panics.
+type panicAfter struct {
+	f         *fakeFetch
+	panicking *atomic.Bool
+	panics    *atomic.Int32
+}
+
+func (p panicAfter) Get(ctx context.Context, url string, maxBytes int64) (*ssrfguard.Response, error) {
+	if p.panicking.Load() {
+		p.panics.Add(1)
+		panic("fetcher bug")
+	}
+	return p.f.Get(ctx, url, maxBytes)
+}
+
+// A panicking refetch is a transient failure like any other: a copy inside the stale window still
+// serves, rather than an error for the lookups that happened to share that fetch.
+func TestAPanickingRefetchServesTheStaleCopy(t *testing.T) {
+	f := &fakeFetch{replies: map[string][]reply{cimdID: {ok("max-age=60")}}}
+	panicking, panics, c := new(atomic.Bool), new(atomic.Int32), newClock()
+	r := NewCIMDRegistry(CIMDConfig{Fetch: panicAfter{f, panicking, panics}, JTI: NewStoreJTICache(memory.New()), Now: c.now})
+	if _, err := r.Client(context.Background(), cimdID); err != nil {
+		t.Fatal(err)
+	}
+	c.advance(2 * time.Minute) // expired, inside MaxCIMDStale
+	panicking.Store(true)
+	if got, err := r.Client(context.Background(), cimdID); err != nil || got == nil || got.ID() != cimdID || panics.Load() != 1 {
+		t.Fatalf("lookup whose refetch panics: %v, %v, %d panics; want the stale copy from a refetch that panicked", got, err, panics.Load())
 	}
 }

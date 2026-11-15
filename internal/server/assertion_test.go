@@ -210,7 +210,7 @@ func TestAnHTTPUpstreamWithoutAnAssertionKeyRefusesToStart(t *testing.T) {
 	if _, err := New(cfg, slog.New(slog.DiscardHandler)); !noKey(err) {
 		t.Fatalf("err = %v", err)
 	}
-	if _, err := CheckOffline(cfg); !noKey(err) {
+	if _, err := checkOffline(cfg); !noKey(err) {
 		t.Fatalf("check --offline: err = %v", err)
 	}
 }
