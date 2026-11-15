@@ -14,7 +14,6 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
 	"github.com/byward-dev/byward/internal/logging"
-	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 	"github.com/byward-dev/byward/internal/tracing"
 )
@@ -24,12 +23,8 @@ import (
 func TestAListedHeaderNeverReachesTheUpstreamButTheProxysCredentialStillDoes(t *testing.T) {
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
-	cfg, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=" + up.URL + "/mcp",
-		"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key", "BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credentialFile(t, 0o600),
-		"BYWARD_UPSTREAM_STRIP_HEADERS=x-argocd-base-url,authorization,x_api_key"}, os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadNoAuthConfig(t, up.URL+"/mcp", "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key", "BYWARD_UPSTREAM_CREDENTIAL_FILE="+credentialFile(t, 0o600),
+		"BYWARD_UPSTREAM_STRIP_HEADERS=x-argocd-base-url,authorization,x_api_key")
 	s, err := New(cfg, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
@@ -63,8 +58,7 @@ func TestTheStartupLogNamesARedundantStripEntry(t *testing.T) {
 		redundant []string
 	}{
 		{"without authentication", func(t *testing.T) []string {
-			return []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://10.0.0.7/mcp", "BYWARD_INSECURE_NO_AUTH=true",
-				"BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key", "BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credentialFile(t, 0o600), strip}
+			return noAuthEnv("http://10.0.0.7/mcp", "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key", "BYWARD_UPSTREAM_CREDENTIAL_FILE="+credentialFile(t, 0o600), strip)
 		}, []string{"Authorization", "X-Api-Key"}},
 		{"with authentication", func(t *testing.T) []string {
 			return append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://10.0.0.7/mcp", strip)
@@ -102,8 +96,7 @@ func TestNoHeaderTracingSetsCanBeListed(t *testing.T) {
 		t.Fatal("the propagator sets no header, so this test proves nothing")
 	}
 	for _, f := range tracing.Fields() {
-		_, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://10.0.0.7/mcp",
-			"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_UPSTREAM_STRIP_HEADERS=" + f}, os.ReadFile)
+		_, _, err := config.Load(nil, noAuthEnv("http://10.0.0.7/mcp", "BYWARD_UPSTREAM_STRIP_HEADERS="+f), os.ReadFile)
 		if err == nil || !strings.Contains(err.Error(), "cannot be stripped") {
 			t.Errorf("listing %s: %v, want it refused", f, err)
 		}
@@ -112,13 +105,9 @@ func TestNoHeaderTracingSetsCanBeListed(t *testing.T) {
 
 // doctor and check --offline name a redundant entry as a warning, with and without authentication.
 func TestDoctorAndCheckNameARedundantStripEntry(t *testing.T) {
-	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
-		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{"s3cret-entra"}}))
+	fake := fixtureEntra(t)
 	strip := "BYWARD_UPSTREAM_STRIP_HEADERS=X-Argocd-Base-Url,authorization"
-	noAuth, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://10.0.0.7/mcp", "BYWARD_INSECURE_NO_AUTH=true", strip}, os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	noAuth := loadNoAuthConfig(t, "http://10.0.0.7/mcp", strip)
 	withAuth := loadConfig(t, "https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://10.0.0.7/mcp", strip)
 	for name, cfg := range map[string]*config.Config{"without authentication": noAuth, "with authentication": withAuth} {
 		t.Run(name, func(t *testing.T) {

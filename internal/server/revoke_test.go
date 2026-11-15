@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -128,10 +127,7 @@ func TestRevokeUserRefusesWhatIsNotAUserKeyAndRevokesNobody(t *testing.T) {
 }
 
 func TestRevocationNeedsAuthentication(t *testing.T) {
-	cfg, _, err := config.Load(nil, []string{"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp"}, os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadNoAuthConfig(t, "http://u/mcp")
 	if err := RevokeAll(context.Background(), cfg, discard); err == nil || !strings.Contains(err.Error(), "BYWARD_INSECURE_NO_AUTH") {
 		t.Fatalf("RevokeAll without authentication = %v, want an error naming BYWARD_INSECURE_NO_AUTH", err)
 	}

@@ -58,14 +58,7 @@ func newAsserting(t *testing.T, extra ...string) asserting {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.closeStore() })
-	ring, err := token.LoadKeyRing(cfg.KeysDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sealer, err := token.NewSealer(ring, cfg.PublicURL.String())
-	if err != nil {
-		t.Fatal(err)
-	}
+	sealer := proxySealer(t, cfg)
 	return asserting{cfg: cfg, public: s.Public.Handler, internal: s.Internal.Handler, up: up, sealer: sealer, logs: &logs}
 }
 

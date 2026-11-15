@@ -30,7 +30,6 @@ import (
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 	"github.com/byward-dev/byward/internal/testutil/logsink"
-	"github.com/byward-dev/byward/internal/token"
 )
 
 // goodToken is distinctive so a leak check cannot match ordinary text.
@@ -419,14 +418,7 @@ func TestServerSentEventsStreamThroughTheWholeChain(t *testing.T) {
 func TestNoAuthServesTheUpstreamWithoutMetadataOrChallenge(t *testing.T) {
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
-	cfg, _, err := config.Load(nil, []string{
-		"BYWARD_INSECURE_NO_AUTH=true",
-		"BYWARD_PUBLIC_URL=http://localhost:8080/mcp",
-		"BYWARD_UPSTREAM_URL=" + up.URL + "/mcp",
-	}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadNoAuthConfig(t, up.URL+"/mcp", "BYWARD_PUBLIC_URL=http://localhost:8080/mcp")
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := httptest.NewServer(Handler(cfg, log, httpUpstream(cfg, log), resource.NoTokens{}, nil, nil, Observability{}))
 	t.Cleanup(srv.Close)
@@ -691,15 +683,7 @@ func TestStalledUpstreamIsAnsweredAfterTheConfiguredHeaderTimeout(t *testing.T) 
 		case <-release:
 		}
 	}
-	cfg, _, err := config.Load(nil, []string{
-		"BYWARD_INSECURE_NO_AUTH=true",
-		"BYWARD_PUBLIC_URL=http://localhost:8080/mcp",
-		"BYWARD_UPSTREAM_URL=" + up.URL + "/mcp",
-		"BYWARD_UPSTREAM_HEADER_TIMEOUT=1s",
-	}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadNoAuthConfig(t, up.URL+"/mcp", "BYWARD_PUBLIC_URL=http://localhost:8080/mcp", "BYWARD_UPSTREAM_HEADER_TIMEOUT=1s")
 	s, err := New(cfg, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
@@ -915,10 +899,7 @@ func (p pingStore) Ping(context.Context) error { return p.err }
 // ADR-0021 §10: /readyz is the keys and the store, never the IdP; a store that cannot be reached
 // makes it fail without putting the error in the body.
 func TestReadinessIsKeysAndStoreOnly(t *testing.T) {
-	ring, err := token.LoadKeyRing(loadConfig(t, "https://m.example/mcp").KeysDir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ring := keyRing(t, loadConfig(t, "https://m.example/mcp"))
 	for _, c := range []struct {
 		name     string
 		st       pinger

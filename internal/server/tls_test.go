@@ -112,8 +112,7 @@ var tlsModes = []struct {
 // fakeEntra is an IdP for doctor's checks, so they answer at once.
 func fakeEntra(t *testing.T) *http.Client {
 	t.Helper()
-	return fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
-		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{"s3cret-entra"}})).HTTPClient()
+	return fixtureEntra(t).HTTPClient()
 }
 
 // streamingUpstream answers a tools/call with an event stream of three events, sending each only
@@ -289,12 +288,7 @@ func started(t *testing.T, cfg *config.Config, log *slog.Logger) *Servers {
 // anonymous loads the settings without authentication, on the loopback https URL that mode allows.
 func anonymous(t *testing.T, settings ...string) *config.Config {
 	t.Helper()
-	cfg, _, err := config.Load(nil, append([]string{"BYWARD_PUBLIC_URL=https://localhost:8443/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp",
-		"BYWARD_INSECURE_NO_AUTH=true"}, settings...), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return cfg
+	return loadNoAuthConfig(t, "http://u/mcp", append([]string{"BYWARD_PUBLIC_URL=https://localhost:8443/mcp"}, settings...)...)
 }
 
 // tlsListener is a running proxy serving TLS, with its certificate files.

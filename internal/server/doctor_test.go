@@ -18,8 +18,6 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
-const fixtureClientID = "00000000-0000-0000-0000-000000000002"
-
 func TestCheckOfflineAcceptsAWorkingConfigurationAndWritesNothing(t *testing.T) {
 	cfg := loadConfig(t, "https://mcp.example.com/mcp")
 	warnings, err := checkOffline(cfg)
@@ -106,10 +104,7 @@ func TestCheckOfflineWarnsOfAnExpiringSecret(t *testing.T) {
 }
 
 func TestCheckOfflineWithoutAuthSaysOnlyTheSettingsWereChecked(t *testing.T) {
-	cfg, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_INSECURE_NO_AUTH=true"}, os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadNoAuthConfig(t, "http://u/mcp")
 	if w, err := checkOffline(cfg); err != nil || len(w) != 1 || !strings.Contains(w[0].Message, "authentication is off") {
 		t.Fatalf("warnings %v, err %v", w, err)
 	}
@@ -134,8 +129,7 @@ func runProxy(t *testing.T, extra ...string) running {
 	srv.Config.Handler = s.Public.Handler
 	srv.Start()
 	t.Cleanup(srv.Close)
-	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
-		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{"s3cret-entra"}}))
+	fake := fixtureEntra(t)
 	return running{cfg: cfg, fake: fake}
 }
 
@@ -229,10 +223,7 @@ func TestDoctorNamesTheSettingsInFixes(t *testing.T) {
 }
 
 func TestDoctorWithoutAuthChecksOnlyTheUpstreamAndTheTrustStoreAndWarns(t *testing.T) {
-	cfg, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_INSECURE_NO_AUTH=true"}, os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadNoAuthConfig(t, "http://u/mcp")
 	rep, err := Doctor(context.Background(), cfg, DoctorOptions{Proxy: &http.Client{Transport: refuse{}}})
 	if err != nil || len(rep.Checks) != 3 || rep.Checks[0].Name != "upstream" || rep.Checks[1].Name != "trust store" || rep.Checks[2].Name != "authentication" || rep.Checks[2].Status != doctor.Warn ||
 		!strings.Contains(rep.Checks[2].Message, "authentication is off") || rep.ExitCode() != 0 {
@@ -290,8 +281,7 @@ func TestCheckOfflineAndDoctorCheckAStdioUpstreamWithoutStartingIt(t *testing.T)
 	if _, err := checkOffline(cfg); err != nil {
 		t.Fatalf("check --offline: %v", err)
 	}
-	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
-		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{"s3cret-entra"}}))
+	fake := fixtureEntra(t)
 	rep, err := Doctor(context.Background(), cfg, DoctorOptions{IdP: fake.HTTPClient(), Proxy: &http.Client{Transport: refuse{}}})
 	if err != nil {
 		t.Fatal(err)

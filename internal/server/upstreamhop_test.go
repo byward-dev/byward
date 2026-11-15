@@ -18,7 +18,6 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
 	"github.com/byward-dev/byward/internal/logging"
-	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"golang.org/x/net/http/httpproxy"
 )
 
@@ -63,12 +62,7 @@ func hopConfig(t *testing.T, upstream string, edit func(*config.Config)) *config
 // credential.
 func noAuthHopConfig(t *testing.T, upstream string) *config.Config {
 	t.Helper()
-	cfg, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=" + upstream,
-		"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credentialFile(t, 0o600)}, os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return cfg
+	return loadNoAuthConfig(t, upstream, "BYWARD_UPSTREAM_CREDENTIAL_FILE="+credentialFile(t, 0o600))
 }
 
 // authHopConfig is a configuration with authentication: every request carries the assertion.
@@ -224,8 +218,7 @@ func TestCheckOfflineWarnsOfAPlainHTTPUpstreamGivenAsAPublicAddress(t *testing.T
 // alone, from the setting as Go reads it; a setting whose credentials Go splits, and Go's refusal
 // of HTTP_PROXY under CGI, warn without naming it.
 func TestDoctorNamesTheEnvironmentsProxyWithoutItsCredentials(t *testing.T) {
-	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
-		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{"s3cret-entra"}}))
+	fake := fixtureEntra(t)
 	for _, tc := range []struct {
 		name     string
 		cfg      func(*testing.T, string) *config.Config // nil: without authentication
@@ -286,8 +279,7 @@ func TestDoctorNamesTheEnvironmentsProxyWithoutItsCredentials(t *testing.T) {
 
 // doctor reports the plain-http hop with and without authentication, naming what travels in clear.
 func TestDoctorWarnsOfThePlainHTTPHop(t *testing.T) {
-	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
-		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{"s3cret-entra"}}))
+	fake := fixtureEntra(t)
 	for _, tc := range []struct {
 		name string
 		cfg  *config.Config
