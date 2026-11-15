@@ -61,6 +61,26 @@ const (
 // as invalid_redirect_uri rather than invalid_client_metadata.
 var ErrInvalidRedirectURI = errors.New("invalid redirect URIs")
 
+// metadataMethods are the methods a CIMD or DCR client may register: never a secret (ADR-0008 §2,
+// §5).
+var metadataMethods = []AuthMethod{None, PrivateKeyJWT}
+
+// MetadataAuthMethods are the token endpoint methods a client registered by its metadata may use:
+// what the broker's metadata advertises (ADR-0006 §7: a static client's secret methods are not).
+func MetadataAuthMethods() []string {
+	out := make([]string, len(metadataMethods))
+	for i, m := range metadataMethods {
+		out[i] = string(m)
+	}
+	return out
+}
+
+// grantTypes are the grant types the broker supports; a client's other grant types are dropped.
+var grantTypes = []string{"authorization_code", "refresh_token"}
+
+// GrantTypes are the grant types the broker supports: what /token serves and its metadata advertises.
+func GrantTypes() []string { return slices.Clone(grantTypes) }
+
 // symmetric are the methods based on a shared secret, which a CIMD or DCR client must not use.
 var symmetric = []string{"client_secret_basic", "client_secret_post", "client_secret_jwt"}
 
@@ -114,7 +134,7 @@ func validateMetadata(d metadataDocument, rule redirectRule) (*clientMetadata, [
 	if len(grants) == 0 {
 		grants = []string{"authorization_code"}
 	}
-	for _, g := range []string{"authorization_code", "refresh_token"} {
+	for _, g := range grantTypes {
 		if slices.Contains(grants, g) {
 			m.grants = append(m.grants, g)
 		}
@@ -139,12 +159,12 @@ func validateMetadata(d metadataDocument, rule redirectRule) (*clientMetadata, [
 		switch {
 		case slices.Contains(symmetric, l):
 			return nil, nil, fmt.Errorf("token_endpoint_auth_method: %s uses a shared secret, which this proxy never issues", l)
-		case (l == string(None) || l == string(PrivateKeyJWT)) && !slices.Contains(m.methods, AuthMethod(l)):
+		case slices.Contains(metadataMethods, AuthMethod(l)) && !slices.Contains(m.methods, AuthMethod(l)):
 			m.methods = append(m.methods, AuthMethod(l))
 		}
 	}
 	if len(m.methods) == 0 {
-		return nil, nil, errors.New("token_endpoint_auth_method: none of the listed methods is supported (none, private_key_jwt)")
+		return nil, nil, fmt.Errorf("token_endpoint_auth_method: none of the listed methods is supported (%s)", strings.Join(MetadataAuthMethods(), ", "))
 	}
 
 	switch {

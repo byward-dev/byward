@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/token"
@@ -59,10 +58,7 @@ func TestADenylistEntryNamingAStaticClientStopsTheProxyStarting(t *testing.T) {
 	if err := os.WriteFile(clients, []byte(`{"clients":[{"client_id":"`+id+`","client_name":"Static","token_endpoint_auth_method":"none","redirect_uris":["http://127.0.0.1/callback"]}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, _, err := config.Load(nil, gateEnv(t, "BYWARD_STATIC_CLIENTS_FILE="+clients, "BYWARD_CLIENT_DENYLIST="+id), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://m.example/mcp", "BYWARD_STATIC_CLIENTS_FILE="+clients, "BYWARD_CLIENT_DENYLIST="+id)
 	if _, err := New(cfg, logging.New(io.Discard, "json")); err == nil || !strings.Contains(err.Error(), "BYWARD_CLIENT_DENYLIST") || !strings.Contains(err.Error(), "static client") {
 		t.Fatalf("New with a denylist entry naming a static client: %v, want an error naming BYWARD_CLIENT_DENYLIST and the static client", err)
 	}

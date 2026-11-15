@@ -119,10 +119,7 @@ func TestDoctorAndCheckNameARedundantStripEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	withAuth, _, err := config.Load(nil, append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://10.0.0.7/mcp", strip), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	withAuth := loadConfig(t, "https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://10.0.0.7/mcp", strip)
 	for name, cfg := range map[string]*config.Config{"without authentication": noAuth, "with authentication": withAuth} {
 		t.Run(name, func(t *testing.T) {
 			rep, err := Doctor(context.Background(), cfg, DoctorOptions{IdP: fake.HTTPClient(), Proxy: &http.Client{Transport: refuse{}}})

@@ -41,6 +41,16 @@ const (
 
 var assertionAlgs = []jose.SignatureAlgorithm{jose.RS256, jose.PS256, jose.ES256}
 
+// AssertionAlgs are the algorithms a private_key_jwt client assertion may be signed with (ADR-0008
+// §6): what the broker's metadata advertises as token_endpoint_auth_signing_alg_values_supported.
+func AssertionAlgs() []string {
+	out := make([]string, len(assertionAlgs))
+	for i, a := range assertionAlgs {
+		out[i] = string(a)
+	}
+	return out
+}
+
 func invalid(reason string) error { return fmt.Errorf("%w: %s", ErrInvalidClient, reason) }
 
 // clientAuth is how a registered client authenticates at /token: the methods it registered (one for

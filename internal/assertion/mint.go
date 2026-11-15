@@ -75,9 +75,7 @@ func (m *Minter) Mint(id resource.Identity) (string, error) {
 		return "", errNoIdentity
 	}
 	var jti [16]byte
-	if _, err := rand.Read(jti[:]); err != nil {
-		return "", err
-	}
+	_, _ = rand.Read(jti[:]) // never fails (crypto/rand, Go 1.24+)
 	now := m.now().Truncate(time.Second)
 	var verified *bool
 	if id.Email != "" {

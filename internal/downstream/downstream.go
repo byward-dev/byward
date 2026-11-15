@@ -7,6 +7,8 @@ package downstream
 import (
 	"container/list"
 	"context"
+	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -21,6 +23,22 @@ const ExchangeTimeout = 30 * time.Second
 
 // DefaultMaxEntries bounds the cache; the least recently used entry goes first.
 const DefaultMaxEntries = 10_000
+
+// Outcomes of a request for a downstream token, each a byward_downstream_tokens_total label. The four
+// refusals (ConsentRequired, InteractionRequired, Unavailable, Failed) are also the
+// downstream_token_refused audit reason and the data.downstream of a refused request, and every
+// outcome but Cached and Issued is also a token socket error code (ADR-0029,
+// docs/reference/observability.md), so the strings never change.
+const (
+	Cached              = "cached"               // handed out from the cache
+	Issued              = "issued"               // a new exchange
+	ConsentRequired     = "consent_required"     // the downstream API's permissions are not consented
+	InteractionRequired = "interaction_required" // Conditional Access needs the user
+	Unavailable         = "unavailable"          // the IdP is unavailable: try later
+	Failed              = "failed"               // anything else
+	NoUser              = "no_user"              // no signed-in user to act for, such as an app-only caller
+	SignInExpired       = "sign_in_expired"      // the grant's sign-in has ended: the next request brings a new one
+)
 
 // Token is a downstream API access token; opaque to byward.
 type Token struct {
@@ -108,23 +126,34 @@ func (c *Cache) Token(ctx context.Context, u User) (Token, bool, error) {
 	}
 }
 
-// run performs the exchange for key, caches its token, and wakes every caller waiting for it.
+// errUnfinished is the waiters' error when the exchange ends its goroutine without returning or
+// panicking (runtime.Goexit), so they never get an empty token without an error.
+var errUnfinished = errors.New("downstream: the exchange did not finish")
+
+// run performs the exchange for key, caches its token, and wakes every caller waiting for it. No
+// HTTP handler's recover protects this goroutine, so a panicking exchange becomes the waiters' error
+// instead of ending the process, as the JWKS refetch and the CIMD fetch do.
 func (c *Cache) run(ctx context.Context, key string, u User, cl *call) {
 	ctx, cancel := context.WithTimeout(ctx, ExchangeTimeout)
 	defer cancel()
+	defer func() {
+		if p := recover(); p != nil {
+			cl.token, cl.err = Token{}, fmt.Errorf("downstream: the exchange panicked: %v", p)
+		}
+		c.mu.Lock()
+		delete(c.inFlight, key)
+		if cl.err == nil && c.now().Before(cl.until) {
+			c.add(key, cl.token, cl.until)
+		}
+		c.mu.Unlock()
+		close(cl.done)
+	}()
+	cl.err = errUnfinished // a return or a panic replaces it; runtime.Goexit leaves it
 	cl.token, cl.err = c.exchange(ctx, u.TenantID, u.Assertion, c.scopes)
 	cl.until = cl.token.ExpiresAt.Add(-Margin)
 	if !u.AssertionExpiresAt.IsZero() && u.AssertionExpiresAt.Before(cl.until) { // zero: the IdP gave no expiry
 		cl.until = u.AssertionExpiresAt
 	}
-
-	c.mu.Lock()
-	delete(c.inFlight, key)
-	if cl.err == nil && c.now().Before(cl.until) {
-		c.add(key, cl.token, cl.until)
-	}
-	c.mu.Unlock()
-	close(cl.done)
 }
 
 // Len is the number of cached tokens.
