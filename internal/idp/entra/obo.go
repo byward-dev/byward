@@ -64,5 +64,5 @@ func (p *Provider) AdminConsentURL(tid string, scopes []string) string {
 		"scope":        {strings.Join(scopes, " ")},
 		"redirect_uri": {p.cfg.RedirectURL},
 	}
-	return Authority + "/" + url.PathEscape(tid) + "/v2.0/adminconsent?" + q.Encode()
+	return tenantURL(tid, "/v2.0/adminconsent") + "?" + q.Encode()
 }

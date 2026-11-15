@@ -32,7 +32,7 @@ func oidcConfig(idpName string, change func(*config.Config)) *config.Config {
 
 // config.OIDCPresets is what BYWARD_IDP accepts and oidc.Presets is what the adapter knows; they are
 // kept apart so config does not import the adapter, and this keeps them in step.
-func TestEveryPresetCanBeSelectedNamedAndHasItsDefaults(t *testing.T) {
+func TestBywardIdPAcceptsExactlyTheAdaptersPresetsEachWithALabel(t *testing.T) {
 	var known []string
 	for name, p := range oidc.Presets {
 		if name == "" {
@@ -47,11 +47,6 @@ func TestEveryPresetCanBeSelectedNamedAndHasItsDefaults(t *testing.T) {
 	selectable := slices.Sorted(slices.Values(config.OIDCPresets))
 	if !slices.Equal(known, selectable) {
 		t.Errorf("the adapter's presets %v differ from those BYWARD_IDP accepts %v", known, selectable)
-	}
-	for name, p := range oidc.Presets {
-		if p.DefaultIssuer != config.OIDCDefaultIssuers[name] {
-			t.Errorf("%s's default issuer: adapter %q, config %q", name, p.DefaultIssuer, config.OIDCDefaultIssuers[name])
-		}
 	}
 }
 

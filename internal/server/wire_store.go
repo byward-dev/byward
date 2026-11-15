@@ -118,7 +118,7 @@ func openStore(cfg *config.Config, log *slog.Logger, rec *audit.Log) (openedStor
 	}
 	st, err := sqlite.Open(ctx, sqlite.Options{Dir: cfg.StoreDir, CounterFile: cfg.StoreCounterFile})
 	if err != nil {
-		return nil, fmt.Errorf("BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: %w", err)
+		return nil, fmt.Errorf("BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: %w (see docs/how-to/state.md)", err)
 	}
 	s := st.Startup()
 	switch {
