@@ -105,8 +105,8 @@ func TestADeniedClientRedeemingAnotherClientsCodeIsAWrongBinding(t *testing.T) {
 	code := e.signIn(t, url.Values{"client_id": {owner}, "redirect_uri": {"https://app.example/cb"}, "scope": {"mcp offline_access"}}).Query().Get("code")
 	e.b.cfg.Clients = registration.Chain{e.reg, newDCRFor(e.st, e.cfg.Now, "evil.example")}
 	res, body := e.redeem(t, code, url.Values{"client_id": {denied}, "redirect_uri": {"https://app.example/cb"}})
-	if res.StatusCode != http.StatusBadRequest || body["error"] != "invalid_grant" || !strings.HasPrefix(body["error_description"].(string), "the code was issued to another client") {
-		t.Fatalf("the denied client redeeming another client's code: %d %v, want 400 invalid_grant, issued to another client", res.StatusCode, body)
+	if res.StatusCode != http.StatusBadRequest || body["error"] != "invalid_grant" || !strings.HasPrefix(body["error_description"].(string), "the code was issued to another client") || body["access_token"] != nil {
+		t.Fatalf("the denied client redeeming another client's code: %d %v, want 400 invalid_grant, issued to another client, no token", res.StatusCode, body)
 	}
 	revocations := e.auditEvents(t, "grant_revoked")
 	if len(revocations) != 1 || revocations[0]["reason"] != "authorization code redeemed with the wrong binding; grant revoked" {
