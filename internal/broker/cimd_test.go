@@ -349,12 +349,13 @@ func TestATransientFailureAtTheConsentAnswerIsServiceUnavailable(t *testing.T) {
 }
 
 // A refused CIMD client ID is never logged as sent: it may carry a password, a query or any length
-// (ADR-0009 §8). Only a DCR client's line names its client ID.
+// (ADR-0009 §8). Only a client that was found, whose keys failed, is named on the line.
 func TestARefusedCIMDClientIDIsNotLoggedAsSent(t *testing.T) {
+	longPath := strings.Repeat("z", 600) // past the length limit; none of it may reach the log
 	for name, id := range map[string]string{
 		"a password": "https://alice:hunter2@app.example.com/x.json",
 		"a query":    "https://app.example.com/x.json?token=s3cret",
-		"too long":   "https://app.example.com/" + strings.Repeat("z", 600),
+		"too long":   "https://app.example.com/" + longPath,
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t, withCIMD(clientdocs.Serve(t, appDocument())))
@@ -365,16 +366,16 @@ func TestARefusedCIMDClientIDIsNotLoggedAsSent(t *testing.T) {
 			if len(recs) != 1 || recs[0]["client_id"] != nil {
 				t.Fatalf("logged %v, want one refusal without the client ID", recs)
 			}
-			if logs := e.logs.String(); strings.Contains(logs, "hunter2") || strings.Contains(logs, "s3cret") || strings.Contains(logs, strings.Repeat("z", 513)) {
+			if logs := e.logs.String(); strings.Contains(logs, "hunter2") || strings.Contains(logs, "s3cret") || strings.Contains(logs, longPath) {
 				t.Fatalf("the log repeats the client ID as sent:\n%s", logs)
 			}
 		})
 	}
 }
 
-// Only CIMD refusals are logged, with their reason; an unknown static client ID is ordinary noise.
-// Both lookups end in ErrUnknownClient: only the shape of the client ID differs.
-func TestOnlyCIMDRefusalsAreLoggedWithTheirReason(t *testing.T) {
+// Of the client IDs nobody registered, only a CIMD one is logged, with its reason; an unknown static
+// client ID is ordinary noise. Both lookups end in ErrUnknownClient: only the shape of the ID differs.
+func TestAnUnknownClientIDIsLoggedOnlyForCIMD(t *testing.T) {
 	for name, tc := range map[string]struct {
 		clientID string
 		logged   string // "" means nothing is logged

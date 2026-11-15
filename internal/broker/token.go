@@ -100,7 +100,7 @@ func (b *Broker) authenticateClient(w http.ResponseWriter, r *http.Request, now 
 			b.unavailable(w, r, "loading a client registration failed", err)
 			return nil, false
 		}
-		b.clientLookupFailed(ctx, clientID, err)
+		b.clientLookupFailed(ctx, clientID, nil, err)
 		if errors.Is(err, registration.ErrUnavailable) { // draft -03 §6.1: 503 for a transient failure
 			w.Header().Set("Retry-After", cimdRetryAfter)
 			b.tokenFail(w, r, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the client's metadata could not be fetched"})
@@ -118,13 +118,13 @@ func (b *Broker) authenticateClient(w http.ResponseWriter, r *http.Request, now 
 			return nil, false
 		}
 		if errors.Is(err, registration.ErrUnavailable) { // the client's jwks_uri could not be fetched for now
-			b.clientLookupFailed(ctx, clientID, err)
+			b.clientLookupFailed(ctx, clientID, client, err)
 			w.Header().Set("Retry-After", cimdRetryAfter)
 			b.tokenFail(w, r, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the client's keys could not be fetched"})
 			return nil, false
 		}
 		if errors.Is(err, registration.ErrKeysRefused) { // the client's jwks_uri is unusable, not its assertion
-			b.clientLookupFailed(ctx, clientID, err)
+			b.clientLookupFailed(ctx, clientID, client, err)
 		}
 		b.tokenFail(w, r, tokenError{http.StatusUnauthorized, "invalid_client", "client authentication failed"})
 		return nil, false

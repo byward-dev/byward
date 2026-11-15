@@ -105,7 +105,8 @@ func TestADeniedClientRedeemingAnotherClientsCodeIsAWrongBinding(t *testing.T) {
 	code := e.signIn(t, url.Values{"client_id": {owner}, "redirect_uri": {"https://app.example/cb"}, "scope": {"mcp offline_access"}}).Query().Get("code")
 	e.b.cfg.Clients = registration.Chain{e.reg, newDCRFor(e.st, e.cfg.Now, "evil.example")}
 	res, body := e.redeem(t, code, url.Values{"client_id": {denied}, "redirect_uri": {"https://app.example/cb"}})
-	if res.StatusCode != http.StatusBadRequest || body["error"] != "invalid_grant" || !strings.HasPrefix(body["error_description"].(string), "the code was issued to another client") || body["access_token"] != nil {
+	desc, _ := body["error_description"].(string)
+	if res.StatusCode != http.StatusBadRequest || body["error"] != "invalid_grant" || !strings.HasPrefix(desc, "the code was issued to another client") || body["access_token"] != nil {
 		t.Fatalf("the denied client redeeming another client's code: %d %v, want 400 invalid_grant, issued to another client, no token", res.StatusCode, body)
 	}
 	revocations := e.auditEvents(t, "grant_revoked")
@@ -200,8 +201,9 @@ func TestADeniedAppCannotSignInThroughItsOtherRedirectURI(t *testing.T) {
 		deny(e)
 		res, body := e.redeem(t, code, url.Values{"client_id": {id}, "redirect_uri": {good}})
 		// The answer does not tell the app it was denied, as at refresh.
+		desc, _ := body["error_description"].(string)
 		if res.StatusCode != http.StatusBadRequest || body["error"] != "invalid_grant" || body["access_token"] != nil ||
-			!strings.HasPrefix(body["error_description"].(string), "the authorization code is invalid or expired") {
+			!strings.HasPrefix(desc, "the authorization code is invalid or expired") {
 			t.Fatalf("redeeming after the denial: %d %v, want 400 invalid_grant, invalid or expired, and no token", res.StatusCode, body)
 		}
 		revocations := e.auditEvents(t, "grant_revoked")

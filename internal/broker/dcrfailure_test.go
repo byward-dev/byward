@@ -2,6 +2,7 @@ package broker
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -55,8 +56,9 @@ func TestADCRLookupStoreFailureIsLoggedAndAnsweredAsAStoreOutage(t *testing.T) {
 	e.st.Fail(errStoreDown, "Client")
 
 	res, body := e.refresh(t, anyRefreshToken, id)
+	desc, _ := body["error_description"].(string)
 	if res.StatusCode != http.StatusServiceUnavailable || body["error"] != "temporarily_unavailable" ||
-		!strings.Contains(body["error_description"].(string), "store is unavailable") || res.Header.Get("Retry-After") != retryAfter {
+		!strings.Contains(desc, "store is unavailable") || res.Header.Get("Retry-After") != retryAfter {
 		t.Fatalf("/token: %d %v Retry-After %q, want 503, the store outage answer and Retry-After %s", res.StatusCode, body, res.Header.Get("Retry-After"), retryAfter)
 	}
 	wantStoreFailuresLogged(t, e, 1)
@@ -114,7 +116,7 @@ func TestADCRClientsFailureIsAnsweredAndLoggedAsForCIMD(t *testing.T) {
 					}
 					continue
 				}
-				if len(recs) != 1 || recs[0]["client_id"] != id || !strings.Contains(recs[0]["error"].(string), "jwks_uri answered") {
+				if len(recs) != 1 || recs[0]["client_id"] != id || !strings.Contains(fmt.Sprint(recs[0]["error"]), "jwks_uri answered") {
 					t.Errorf("logged %v, want one %q line naming %s with the jwks_uri cause", recs, msg, id)
 				}
 			}
