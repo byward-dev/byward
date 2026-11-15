@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/audit"
-	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/token"
 )
 
@@ -157,7 +156,7 @@ func (s *sealer) seal() {
 	sealed, err := s.c.Box.Seal(plain, s.c.Now().Add(s.c.Lifetime))
 	if err != nil {
 		// Never pass the unbound ID on; without one the client cannot use the session.
-		s.c.Log.ErrorContext(s.r.Context(), "sealing the MCP session ID failed", "request_id", logging.RequestID(s.r.Context()), "error", err)
+		s.c.Log.ErrorContext(s.r.Context(), "sealing the MCP session ID failed", "error", err)
 		return
 	}
 	s.sealed = Prefix + sealed

@@ -1,8 +1,10 @@
 package idp
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 )
 
@@ -128,13 +130,17 @@ func (e *Error) Fix() string {
 	return e.Alert.Hint()
 }
 
-// AlertOf is the alert reason of err, or "" when err is not an *Error that asks for one.
-func AlertOf(err error) Alert {
+// ReportAlert reports err when it asks for an IdP alert (#204): count is told the operation and the
+// alert's reason (the alert metric), and log gets the line operators alert on, naming the IdP, the
+// operation, the alert and its fix (docs/reference/observability.md). Any other err is neither
+// counted nor logged.
+func ReportAlert(ctx context.Context, log *slog.Logger, idpName, operation string, err error, count func(operation, reason string)) {
 	var e *Error
-	if errors.As(err, &e) {
-		return e.Alert
+	if !errors.As(err, &e) || e.Alert == "" {
+		return
 	}
-	return ""
+	count(operation, string(e.Alert))
+	log.ErrorContext(ctx, "IdP alert: the operator must act", "idp", idpName, "operation", operation, "alert", string(e.Alert), "reason", e.Fix())
 }
 
 // ClassOf returns the class of err, Fatal if err is not an *Error.

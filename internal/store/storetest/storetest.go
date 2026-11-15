@@ -1,5 +1,7 @@
 // Package storetest is the conformance suite every store adapter must pass (ADR-0007 §1). An
-// adapter's test calls Run with a constructor for a fresh, empty store.
+// adapter's test calls Run with a constructor for a fresh, empty store. What needs the adapter's
+// own help, its row counts and its migration fixtures, CollectDropsExpiredSpent and CheckFixture
+// check.
 package storetest
 
 import (

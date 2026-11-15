@@ -12,7 +12,6 @@ import (
 	"github.com/byward-dev/byward/internal/downstream"
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/idp/entra"
-	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/upstream/relay"
@@ -40,7 +39,7 @@ type downstreamTokens struct {
 func newDownstreamTokens(scopes []string, header string, provider *entra.Provider, idpName string, assertion func(context.Context, string) (string, time.Time, error),
 	log *slog.Logger, o Observability) *downstreamTokens {
 	exchange := func(ctx context.Context, tid, assertion string, scopes []string) (downstream.Token, error) {
-		t, err := provider.OnBehalfOf(idp.WithRequestID(ctx, logging.RequestID(ctx)), tid, assertion, scopes)
+		t, err := provider.OnBehalfOf(ctx, tid, assertion, scopes)
 		return downstream.Token{AccessToken: t.AccessToken, ExpiresAt: t.ExpiresAt}, err
 	}
 	exchange = alertingExchange(exchange, idpName, log, o)
@@ -127,13 +126,7 @@ func outcomeOf(err error) string {
 func alertingExchange(exchange downstream.Exchange, idpName string, log *slog.Logger, o Observability) downstream.Exchange {
 	return func(ctx context.Context, tid, assertion string, scopes []string) (downstream.Token, error) {
 		t, err := exchange(ctx, tid, assertion, scopes)
-		if a := idp.AlertOf(err); a != "" {
-			var ie *idp.Error
-			errors.As(err, &ie)
-			o.Metrics.IdPAlert(idpName, opOnBehalfOf, string(a))
-			log.ErrorContext(ctx, "IdP alert: the operator must act", "request_id", logging.RequestID(ctx), "idp", idpName,
-				"operation", opOnBehalfOf, "alert", string(a), "reason", ie.Fix())
-		}
+		idp.ReportAlert(ctx, log, idpName, opOnBehalfOf, err, func(op, reason string) { o.Metrics.IdPAlert(idpName, op, reason) })
 		return t, err
 	}
 }
@@ -160,7 +153,7 @@ func (d *downstreamTokens) record(ctx context.Context, r *http.Request, id resou
 	if isIdP && ie.Fix() != "" {
 		reason = outcome + ": " + ie.Fix()
 	}
-	attrs := []any{"request_id", logging.RequestID(ctx), "reason", reason, "error", err}
+	attrs := []any{"reason", reason, "error", err}
 	if isIdP {
 		// The IdP's error code and its own trace IDs; never its error_description (ADR-0021 §7).
 		attrs = append(attrs, "idp_error_code", ie.Code, "trace_id", ie.TraceID, "correlation_id", ie.CorrelationID)

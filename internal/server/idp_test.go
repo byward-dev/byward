@@ -3,9 +3,9 @@ package server
 import (
 	"context"
 	"crypto/ecdsa"
-	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"net/url"
@@ -117,7 +117,7 @@ func TestTheCallbackPathIsTheIdPsName(t *testing.T) {
 }
 
 // With a PEM key the proxy signs in with private_key_jwt, the assertion carrying
-// BYWARD_OIDC_CLIENT_KEY_ID; keys it cannot sign with name the setting.
+// BYWARD_OIDC_CLIENT_KEY_ID; a key it cannot read, or one it refuses to sign with, names the setting.
 func TestAClientKeySignsInWithItsKeyIDAndAnUnusableOneNamesTheSetting(t *testing.T) {
 	cert := fakeidp.NewCertificate(t)
 	der, err := x509.MarshalPKCS8PrivateKey(cert.Key)
@@ -139,13 +139,18 @@ func TestAClientKeySignsInWithItsKeyIDAndAnUnusableOneNamesTheSetting(t *testing
 		t.Fatalf("code exchange with private_key_jwt: %v", err)
 	}
 
-	p384, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	_, edKey, _ := ed25519.GenerateKey(rand.Reader)
-	for name, key := range map[string]string{"EC P-384": pkcs8PEM(t, p384), "Ed25519": pkcs8PEM(t, edKey), "not PEM": "s3cret"} {
-		c := oidcConfig("keycloak", func(c *config.Config) { c.OIDCClientSecret, c.OIDCClientKey = "", key })
-		if _, err := newIdentityProvider(c, nil); err == nil || !strings.Contains(err.Error(), "BYWARD_OIDC_CLIENT_KEY_FILE") {
-			t.Errorf("%s: %v, want an error naming BYWARD_OIDC_CLIENT_KEY_FILE", name, err)
-		}
+	// One row for each place the server names the setting: a key that does not parse, and one
+	// PrivateKeyJWTWithAlg refuses. The idp tests pin every refusal's own text.
+	for name, tc := range map[string]struct{ key, want string }{
+		"not PEM":  {"s3cret", "BYWARD_OIDC_CLIENT_KEY_FILE: not a PEM private key"},
+		"RSA 1024": {pkcs8PEM(t, weakRSAKey(t)), "BYWARD_OIDC_CLIENT_KEY_FILE: idp: a 1024-bit RSA key: use at least 2048 bits"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := oidcConfig("keycloak", func(c *config.Config) { c.OIDCClientSecret, c.OIDCClientKey = "", tc.key })
+			if _, err := newIdentityProvider(c, nil); err == nil || err.Error() != tc.want {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -209,6 +214,16 @@ func TestAnOktaClientKeyOnPS256Warns(t *testing.T) {
 			}
 		})
 	}
+}
+
+// weakRSAKey is an RSA key below idp.MinRSABits, which no IdP credential may use.
+func weakRSAKey(t *testing.T) *rsa.PrivateKey {
+	t.Helper()
+	k, err := rsa.GenerateKey(rand.Reader, 1024) //nolint:gosec // deliberately weak for the test
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k
 }
 
 // pkcs8PEM is key as a PEM PKCS #8 private key, as BYWARD_OIDC_CLIENT_KEY_FILE holds it.
@@ -312,7 +327,7 @@ func TestAClientKeyAlgorithmTheKeyCannotUseRefusesToStart(t *testing.T) {
 
 // check reports a subject claim users can change, naming the setting.
 func TestCheckReportsAMutableSubjectClaim(t *testing.T) {
-	warnings, err := CheckOffline(loadOIDC(t, "keycloak", "https://sso.example.com/realms/acme", "c", "BYWARD_OIDC_SUBJECT_CLAIM=email"))
+	warnings, err := checkOffline(loadOIDC(t, "keycloak", "https://sso.example.com/realms/acme", "c", "BYWARD_OIDC_SUBJECT_CLAIM=email"))
 	if err != nil {
 		t.Fatal(err)
 	}

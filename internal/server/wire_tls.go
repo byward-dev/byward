@@ -16,9 +16,6 @@ var (
 	tlsKeyEnv  = config.Setting{Name: "tls-key-file"}.Env()
 )
 
-// tlsWarnBefore is how long before the serving certificate expires the operator is warned.
-const tlsWarnBefore = 30 * 24 * time.Hour
-
 func tlsFiles(cfg *config.Config) servingcert.Files {
 	return servingcert.Files{Cert: cfg.TLSCertFile, Key: cfg.TLSKeyFile}
 }
@@ -85,15 +82,16 @@ func servingCertChecks(cfg *config.Config, p *servingcert.Pair, now time.Time) [
 	return []doctor.Result{servingCertExpiry(p, now), servingCertNames(cfg, p)}
 }
 
-// servingCertWarnings are the checks that warn, as startup warnings.
+// servingCertWarnings are the checks that warn, as startup warnings. None fails here: a pair that
+// fails its expiry check is never served, and the names check only warns.
 func servingCertWarnings(cfg *config.Config, p *servingcert.Pair, now time.Time) []Warning {
-	var w []Warning
+	var ws []Warning
 	for _, r := range servingCertChecks(cfg, p, now) {
-		if r.Status == doctor.Warn {
-			w = append(w, Warning{Message: r.Message, Setting: tlsCertEnv, Fix: r.Fix})
+		if w, ok := warningOf(r, tlsCertEnv); ok {
+			ws = append(ws, w)
 		}
 	}
-	return w
+	return ws
 }
 
 // servingCertExpiry is the "TLS certificate expiry" check: it names the chain's certificate that
@@ -103,34 +101,21 @@ func servingCertExpiry(p *servingcert.Pair, now time.Time) doctor.Result {
 	name, notAfter := p.FirstExpiry()
 	err := p.Validity(now)
 	at, notYet := servingcert.ServableAt(err)
-	switch left := notAfter.Sub(now); {
+	switch e := doctor.ExpiryAt(notAfter, now); {
 	case err != nil && notYet:
 		r.Status, r.Message = doctor.Fail, "the TLS certificate files are not valid yet: "+err.Error()
 		r.Fix = "a running proxy serves them from " + at.UTC().Format(time.RFC3339) + " on, and a restart before then fails; replace them if that date is wrong"
 	case err != nil:
 		r.Status, r.Message = doctor.Fail, "the TLS certificate files cannot be served: "+err.Error()
 		r.Fix = "replace both files with a valid pair; a running proxy keeps serving its previous certificate, and a restart fails"
-	case left <= tlsWarnBefore:
-		r.Status, r.Message = doctor.Warn, fmt.Sprintf("%s expires on %s, %s", name, notAfter.UTC().Format(time.DateOnly), inDays(notAfter, now))
+	case e.Status != doctor.Pass: // Fail is Validity's case above
+		r.Status, r.Message = doctor.Warn, name+" expires on "+e.Date+", "+e.In
 		r.Fix = "renew it before then; the proxy serves the renewed files from the next connection on (docs/how-to/tls.md)"
 	default:
 		r.Status = doctor.Pass
-		r.Message = fmt.Sprintf("the TLS certificate is valid until %s, when %s expires", notAfter.UTC().Format(time.DateOnly), name)
+		r.Message = "the TLS certificate is valid until " + e.Date + ", when " + name + " expires"
 	}
 	return r
-}
-
-// inDays says how soon notAfter is from now: under a day, or in calendar days in UTC, the zone its
-// date is given in, so the count agrees with the date.
-func inDays(notAfter, now time.Time) string {
-	if notAfter.Sub(now) < 24*time.Hour {
-		return "in less than a day"
-	}
-	midnight := func(t time.Time) time.Time { return t.UTC().Truncate(24 * time.Hour) }
-	if days := int(midnight(notAfter).Sub(midnight(now)) / (24 * time.Hour)); days != 1 {
-		return fmt.Sprintf("in %d days", days)
-	}
-	return "in 1 day"
 }
 
 // servingCertNames is the "TLS certificate names" check: a warning when the certificate covers

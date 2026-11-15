@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -24,6 +27,7 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
@@ -145,14 +149,40 @@ func TestPrivateKeyJWTAssertion(t *testing.T) {
 	}
 }
 
-func TestPrivateKeyJWTKeyTypes(t *testing.T) {
+// A client key may be an EC P-256 key, or an RSA key of MinRSABits or more with either RSA
+// algorithm; another curve, another key type or a shorter RSA key is refused, saying why.
+func TestOnlyAP256OrMinRSABitsRSAKeyIsAClientKey(t *testing.T) {
 	p256, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if _, err := PrivateKeyJWT(p256, nil, ""); err != nil {
-		t.Errorf("P-256: %v", err)
-	}
 	p384, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	if _, err := PrivateKeyJWT(p384, nil, ""); err == nil {
-		t.Error("P-384 accepted")
+	_, ed, _ := ed25519.GenerateKey(rand.Reader)
+	rsaKey := func(bits int) crypto.Signer {
+		t.Helper()
+		k, err := rsa.GenerateKey(rand.Reader, bits) //nolint:gosec // deliberately weak keys for the test
+		if err != nil {
+			t.Fatal(err)
+		}
+		return k
+	}
+	rsa2048 := rsaKey(2048)
+	for name, tc := range map[string]struct {
+		key     crypto.Signer
+		alg     string
+		wantErr string // "" accepts
+	}{
+		"EC P-256":                {key: p256},
+		"EC P-384":                {key: p384, wantErr: "idp: EC client keys must use P-256"},
+		"Ed25519":                 {key: ed, wantErr: "idp: unsupported client key type ed25519.PublicKey"},
+		"RSA 2048, PS256":         {key: rsa2048, alg: "PS256"},
+		"RSA 2048, RS256":         {key: rsa2048, alg: "RS256"},
+		"RSA 2047, default PS256": {key: rsaKey(2047), wantErr: "idp: a 2047-bit RSA key: use at least 2048 bits"},
+		"RSA 1024, RS256":         {key: rsaKey(1024), alg: "RS256", wantErr: "idp: a 1024-bit RSA key: use at least 2048 bits"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := PrivateKeyJWTWithAlg(tc.key, nil, "", tc.alg)
+			if got := fmt.Sprint(err); (tc.wantErr == "" && err != nil) || (tc.wantErr != "" && got != tc.wantErr) {
+				t.Fatalf("err = %v, want %q", err, tc.wantErr)
+			}
+		})
 	}
 }
 
@@ -278,6 +308,7 @@ func TestGetJSONRetriesOnlyTransientStatuses(t *testing.T) {
 	}{
 		"503 then 200":    {statuses: []int{503, 200}, calls: 2},
 		"429 twice, 200":  {statuses: []int{429, 429, 200}, calls: 3},
+		"408 then 200":    {statuses: []int{408, 200}, calls: 2},
 		"always 500":      {statuses: []int{500, 500, 500, 500}, wantErr: true, calls: 3},
 		"404 not retried": {statuses: []int{404, 200}, wantErr: true, calls: 1},
 	} {
@@ -387,12 +418,6 @@ func TestReadCallback(t *testing.T) {
 	}
 	if _, err := ReadCallback(url.Values{"code": {"c"}}, Login{}, ""); err == nil {
 		t.Error("empty expected state accepted")
-	}
-}
-
-func TestRequestIDRoundTrip(t *testing.T) {
-	if RequestID(context.Background()) != "" || RequestID(WithRequestID(context.Background(), "r")) != "r" {
-		t.Fatal("request ID not carried")
 	}
 }
 
@@ -507,22 +532,78 @@ func TestTheFixIsTheIdPsOwnElseTheAlertsDefault(t *testing.T) {
 	}
 }
 
-// #204: an alert survives wrapping; anything else is no alert.
-func TestAlertOfUnwrapsAndDefaultsToNone(t *testing.T) {
+// #204: an alert, wrapped or not, is counted once and logged on the line operators alert on, with
+// its fix and the request's ID.
+func TestReportAlertCountsAndLogsAnAlert(t *testing.T) {
 	for _, c := range []struct {
-		name string
-		err  error
-		want Alert
+		name   string
+		err    error
+		alert  Alert
+		reason string // the fix on the line: the IdP's own hint, else the alert's
 	}{
-		{"wrapped", fmt.Errorf("wrap: %w", &Error{Alert: AlertProtocol}), AlertProtocol},
-		{"bare", &Error{Alert: AlertCredentialRejected}, AlertCredentialRejected},
-		{"not an IdP error", errors.New("x"), ""},
-		{"nil", nil, ""},
+		{"wrapped, with the alert's own fix", fmt.Errorf("wrap: %w", &Error{Alert: AlertProtocol}), AlertProtocol,
+			"the IdP answered against the protocol: check the IdP's endpoints and status"},
+		{"bare, with the IdP's hint", &Error{Alert: AlertCredentialRejected, OperatorHint: "rotate the secret"}, AlertCredentialRejected, "rotate the secret"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			if got := AlertOf(c.err); got != c.want {
-				t.Errorf("AlertOf(%v) = %q, want %q", c.err, got, c.want)
+			var logs bytes.Buffer
+			var counted []string
+			ctx := logging.WithRequestID(context.Background(), "req-1")
+			ReportAlert(ctx, logging.New(&logs, "json"), "entra", "refresh", c.err, func(op, reason string) { counted = append(counted, op+" "+reason) })
+			if !slices.Equal(counted, []string{"refresh " + string(c.alert)}) {
+				t.Errorf("counted %v, want refresh %s once", counted, c.alert)
+			}
+			var line map[string]any
+			if err := json.Unmarshal(logs.Bytes(), &line); err != nil {
+				t.Fatalf("not one JSON line (%v): %q", err, logs.String())
+			}
+			want := map[string]any{"msg": "IdP alert: the operator must act", "level": "ERROR", "idp": "entra", "operation": "refresh",
+				"alert": string(c.alert), "reason": c.reason, "request_id": "req-1"}
+			for k, v := range want {
+				if line[k] != v {
+					t.Errorf("%s = %v, want %v (line %v)", k, line[k], v, line)
+				}
 			}
 		})
+	}
+}
+
+// Anything that is not an IdP alert is neither counted nor logged.
+func TestReportAlertIgnoresWhatIsNoAlert(t *testing.T) {
+	for name, err := range map[string]error{
+		"an IdP error without an alert": &Error{Class: Unavailable},
+		"not an IdP error":              errors.New("x"),
+		"nil":                           nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var logs bytes.Buffer
+			counted := 0
+			ReportAlert(context.Background(), logging.New(&logs, "json"), "entra", "refresh", err, func(string, string) { counted++ })
+			if counted != 0 || logs.Len() != 0 {
+				t.Fatalf("counted %d and logged %q, want neither", counted, logs.String())
+			}
+		})
+	}
+}
+
+// A GUID is the 36-character form in either case and nothing else: not a tenant name, a GUID one
+// character short or long, one with a dash missing or moved, or one with a non-hex digit.
+func TestOnlyThe36CharacterFormIsAGUID(t *testing.T) {
+	g := fakeidp.NewGUID()
+	for s, want := range map[string]bool{
+		g:                                      true,
+		strings.ToUpper(g):                     true,
+		"D4991BF4-0BFE-4828-9C3A-ABCDEF012345": true, // upper case, whatever g is
+		g[:35]:                                 false,
+		g + "0":                                false,
+		g[:8] + "0" + g[9:]:                    false, // dash missing
+		g[:7] + "-" + g[7:8] + g[9:]:           false, // dash moved one place left
+		"organizations":                        false,
+		"":                                     false,
+		"00000000-0000-0000-0000-00000000000g": false,
+	} {
+		if got := IsGUID(s); got != want {
+			t.Errorf("IsGUID(%q) = %v, want %v", s, got, want)
+		}
 	}
 }

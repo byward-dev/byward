@@ -215,7 +215,7 @@ func lower(in []string, yes bool) []string {
 func guids(what string, in []string) (map[string]bool, error) {
 	out := map[string]bool{}
 	for _, s := range in {
-		if !isGUID(s) {
+		if !idp.IsGUID(s) {
 			return nil, fieldErr(what, "%q is not a GUID", s)
 		}
 		out[strings.ToLower(s)] = true
@@ -258,23 +258,6 @@ func validDomain(d string) bool {
 			if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
 				return false
 			}
-		}
-	}
-	return true
-}
-
-func isGUID(s string) bool {
-	if len(s) != 36 {
-		return false
-	}
-	for i, r := range s {
-		switch {
-		case i == 8 || i == 13 || i == 18 || i == 23:
-			if r != '-' {
-				return false
-			}
-		case !strings.ContainsRune("0123456789abcdefABCDEF", r):
-			return false
 		}
 	}
 	return true
