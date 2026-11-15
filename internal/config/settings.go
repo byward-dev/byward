@@ -20,14 +20,16 @@ const (
 	GroupGate               Group = "Access gate"
 	GroupClientRegistration Group = "Client registration"
 	GroupAppOnly            Group = "App-only callers"
-	GroupHTTPUpstream       Group = "Upstream: HTTP"
-	GroupStdioUpstream      Group = "Upstream: stdio"
-	GroupIdentity           Group = "Identity to the upstream"
-	GroupDownstreamTokens   Group = "Downstream tokens (On-Behalf-Of)"
-	GroupKeysAndStore       Group = "Sealing keys and store"
-	GroupOperations         Group = "Operations"
-	GroupConsent            Group = "Consent page"
-	GroupDevelopment        Group = "Development and trying it out"
+	// A setting in GroupHTTPUpstream or GroupStdioUpstream is for that upstream mode only: given with
+	// the other mode, it is refused at load (offModeSettings), so the group is part of validation.
+	GroupHTTPUpstream     Group = "Upstream: HTTP"
+	GroupStdioUpstream    Group = "Upstream: stdio"
+	GroupIdentity         Group = "Identity to the upstream"
+	GroupDownstreamTokens Group = "Downstream tokens (On-Behalf-Of)"
+	GroupKeysAndStore     Group = "Sealing keys and store"
+	GroupOperations       Group = "Operations"
+	GroupConsent          Group = "Consent page"
+	GroupDevelopment      Group = "Development and trying it out"
 )
 
 var groups = []Group{GroupEndpoint, GroupIdP, GroupEntra, GroupOIDC, GroupGate, GroupClientRegistration, GroupAppOnly,

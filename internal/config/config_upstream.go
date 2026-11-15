@@ -14,7 +14,10 @@ import (
 func (c *Config) upstream(v *Values) []error {
 	urlEnv, cmdEnv, envEnv := Setting{Name: "upstream-url"}.Env(), Setting{Name: "upstream-command"}.Env(), Setting{Name: "upstream-env"}.Env()+"_FILE"
 	raw := v.get("upstream-command")
-	errs := offModeSettings(v, raw != "")
+	var errs []error
+	if (raw != "") != (v.get("upstream-url") != "") { // one mode chosen: with none or both, the "required" or "both set" error says enough
+		errs = offModeSettings(v, raw != "")
+	}
 	if raw == "" {
 		u, err := parseURL("upstream-url", v.get("upstream-url"))
 		if err != nil {
@@ -71,17 +74,17 @@ func (c *Config) upstream(v *Values) []error {
 // (upstream-url, upstream-command) keep their own "both set" error, and upstream-credential its own
 // hint (upstreamCredential).
 func offModeSettings(v *Values, stdio bool) []error {
-	off, mode, other, selector := GroupStdioUpstream, "HTTP", "a stdio upstream", Setting{Name: "upstream-command"}.Env()
+	offGroup, inUse, offMode, offSelector := GroupStdioUpstream, "HTTP", "a stdio upstream", Setting{Name: "upstream-command"}.Env()
 	if stdio {
-		off, mode, other, selector = GroupHTTPUpstream, "stdio", "an HTTP upstream", Setting{Name: "upstream-url"}.Env()
+		offGroup, inUse, offMode, offSelector = GroupHTTPUpstream, "stdio", "an HTTP upstream", Setting{Name: "upstream-url"}.Env()
 	}
 	var errs []error
 	for _, val := range v.Effective() {
 		s := val.Setting
-		if s.Group != off || val.Source == SourceDefault || s.Name == "upstream-url" || s.Name == "upstream-command" || s.Name == "upstream-credential" {
+		if s.Group != offGroup || val.Source == SourceDefault || s.Name == "upstream-url" || s.Name == "upstream-command" || s.Name == "upstream-credential" {
 			continue
 		}
-		errs = append(errs, errorf("%s is set, but the upstream is %s: it applies only to %s (%s); remove it", spelled(val), mode, other, selector))
+		errs = append(errs, errorf("%s is set, but the upstream is %s: it applies only to %s (%s); remove it", spelled(val), inUse, offMode, offSelector))
 	}
 	return errs
 }
@@ -168,12 +171,12 @@ func (c *Config) upstreamCredential(v *Values) []error {
 	fileEnv, hEnv := Setting{Name: "upstream-credential"}.Env()+"_FILE", Setting{Name: "upstream-credential-header"}.Env()
 	val, header := v.byKey["upstream-credential"], v.byKey["upstream-credential-header"]
 	if val.Source == SourceDefault {
-		if header.Source != SourceDefault && c.UpstreamCommand == nil { // with stdio: offModeSettings refuses it
+		if header.Source != SourceDefault && v.get("upstream-command") == "" { // with stdio: offModeSettings refuses it
 			return []error{errorf("%s is set, but there is no credential: set %s too, or remove it", hEnv, fileEnv)}
 		}
 		return nil
 	}
-	if c.UpstreamCommand != nil {
+	if v.get("upstream-command") != "" { // the selector, as offModeSettings reads it, even when the command does not parse
 		return []error{errorf("%s is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE", fileEnv)}
 	}
 	var errs []error

@@ -19,7 +19,7 @@ const envPrefix = "BYWARD_"
 // Setting is one registry entry. Every setting has a flag and an env name.
 type Setting struct {
 	Name    string // flag name, kebab-case; the env name is derived from it
-	Group   Group  // the section of the settings reference it is listed in
+	Group   Group  // the section of the settings reference it is listed in; the two upstream groups also mean "for that mode only" (offModeSettings)
 	Default string
 	Help    string
 	Secret  bool // read only from a file: `<ENV>_FILE` or `--<name>-file`

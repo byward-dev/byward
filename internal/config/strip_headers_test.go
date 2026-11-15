@@ -23,8 +23,8 @@ func TestTheUpstreamStripListIsReadAsCanonicalHeaderNames(t *testing.T) {
 }
 
 // A header MCP needs at the upstream, a header tracing sets, a pattern and a name that is no
-// header are refused, each named; so is the list with a stdio upstream, which gets no request
-// headers.
+// header are refused, each named. With a stdio upstream the list is refused as an off-mode setting
+// (offmode_test.go).
 func TestTheUpstreamStripListRefusesWhatCannotBeStripped(t *testing.T) {
 	for _, tc := range []struct{ name, list, want string }{
 		{"Accept", "accept", "Accept is a header MCP needs"},
@@ -53,9 +53,5 @@ func TestTheUpstreamStripListRefusesWhatCannotBeStripped(t *testing.T) {
 				t.Fatalf("error %v, want %q", err, tc.want)
 			}
 		})
-	}
-	_, _, err := Load(nil, stdioBase(`BYWARD_UPSTREAM_COMMAND=["/usr/bin/server"]`, "BYWARD_UPSTREAM_STRIP_HEADERS=X-Api-Url"), baseFiles)
-	if err == nil || !strings.Contains(err.Error(), "BYWARD_UPSTREAM_STRIP_HEADERS is set, but the upstream is stdio: it applies only to an HTTP upstream (BYWARD_UPSTREAM_URL)") {
-		t.Fatalf("stdio: error %v", err)
 	}
 }

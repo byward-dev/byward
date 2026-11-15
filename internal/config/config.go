@@ -220,9 +220,11 @@ func validate(v *Values, container bool) (*Config, error) {
 	}
 	errs = append(errs, c.upstream(v)...)
 	errs = append(errs, c.tls(v)...)
-	c.UpstreamHeaderTimeout, err = parseHeaderTimeout(v.get("upstream-header-timeout"))
-	if err != nil {
-		errs = append(errs, err)
+	if v.get("upstream-command") == "" { // an HTTP upstream's setting: with stdio, offModeSettings refuses it
+		c.UpstreamHeaderTimeout, err = parseHeaderTimeout(v.get("upstream-header-timeout"))
+		if err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
