@@ -809,7 +809,7 @@ func TestCORSAndMethods(t *testing.T) {
 		{"revoke PUT", "PUT", "/revoke", 405, map[string]string{"Allow": "POST, OPTIONS", "Access-Control-Allow-Origin": origin}},
 		{"authorize POST", "POST", "/authorize", 405, map[string]string{"Allow": "GET", "Access-Control-Allow-Origin": ""}},
 		{"consent GET", "GET", "/consent", 405, map[string]string{"Allow": "POST", "Access-Control-Allow-Origin": ""}},
-		{"stylesheet POST", "POST", StylesheetPath, 405, map[string]string{"Allow": "GET, HEAD"}},
+		{"stylesheet POST", "POST", StylesheetPath, 405, map[string]string{"Allow": "GET, HEAD", "Access-Control-Allow-Origin": ""}},
 	}
 	e := newEnv(t)
 	for _, c := range cases {
