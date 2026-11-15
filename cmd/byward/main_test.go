@@ -311,7 +311,9 @@ func TestStoreNewEpochExits2OnMisuseOrSQLiteAnd1WhenPostgreSQLIsUnreachable(t *t
 // An OTEL_TRACES_EXPORTER that autoexport does not know stops the process as a configuration error,
 // on the last line, after the startup log.
 func TestAnUnknownOTELTracesExporterIsAConfigError(t *testing.T) {
-	// autoexport reads the process environment, and run's getenv the environ it is passed: set both.
+	// Blank the host's OTEL_* so only this test's setting reaches autoexport. autoexport reads the
+	// process environment, while run's getenv reads only the environ it is passed: set the exporter
+	// in both.
 	for _, kv := range os.Environ() {
 		if k, _, _ := strings.Cut(kv, "="); strings.HasPrefix(k, "OTEL_") {
 			t.Setenv(k, "")
