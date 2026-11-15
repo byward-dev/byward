@@ -2,7 +2,6 @@ package config
 
 import (
 	"slices"
-	"strconv"
 	"strings"
 )
 
@@ -18,13 +17,13 @@ func (c *Config) assertion(v *Values) []error {
 		errs = append(errs, err)
 	}
 	ihEnv := Setting{Name: "identity-headers"}.Env()
-	if c.IdentityHeaders, err = strconv.ParseBool(v.get("identity-headers")); err != nil {
-		errs = append(errs, errorf("%s: want true or false, got %q", ihEnv, v.get("identity-headers")))
+	if c.IdentityHeaders, err = v.boolean("identity-headers"); err != nil {
+		errs = append(errs, err)
 	} else if c.IdentityHeaders && c.UpstreamCommand != nil {
 		errs = append(errs, errorf("%s is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)", ihEnv))
 	}
-	if c.AssertionUnverifiedEmail, err = strconv.ParseBool(v.get("assertion-unverified-email")); err != nil {
-		errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "assertion-unverified-email"}.Env(), v.get("assertion-unverified-email")))
+	if c.AssertionUnverifiedEmail, err = v.boolean("assertion-unverified-email"); err != nil {
+		errs = append(errs, err)
 	}
 	cEnv := Setting{Name: "assertion-claims"}.Env()
 	raw := strings.TrimSpace(v.get("assertion-claims"))

@@ -169,7 +169,7 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 		r.Checks = append(r.Checks, servingCertChecks(cfg, pair, o.Now())...)
 		cfgWarnings, _ := configWarnings(cfg, nil)
 		for _, w := range cfgWarnings {
-			r.Checks = append(r.Checks, doctor.CheckConfiguration.Result(doctor.Warn, w.Message, warningFix(w)))
+			r.Checks = append(r.Checks, w.result(doctor.CheckConfiguration))
 		}
 		r.Checks = append(r.Checks, upstreamResult(cfg, o.UpstreamProxy), doctor.TrustStore(trustSettings(), os.ReadFile, doctor.CertDirEntries))
 		r.Checks = append(r.Checks, upstreamHopResult(ctx, cfg, o.Resolve)...)
@@ -195,7 +195,7 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 		r.Checks = append(r.Checks, identityHeadersResult(ctx, cfg.UpstreamURL.Hostname(), o.Resolve))
 	}
 	for _, w := range cfgWarnings {
-		r.Checks = append(r.Checks, doctor.CheckConfiguration.Result(doctor.Warn, w.Message, warningFix(w)))
+		r.Checks = append(r.Checks, w.result(doctor.CheckConfiguration))
 	}
 	target := doctor.Target{Resource: cfg.PublicURL, Issuer: cfg.Issuer(), HostsSetting: config.Setting{Name: "allowed-hosts"}.Env()}
 	if parts.assertionKeys != nil {
@@ -230,11 +230,4 @@ func godebugValue(godebug, key string) string {
 		}
 	}
 	return v
-}
-
-func warningFix(w Warning) string {
-	if w.Setting == "" {
-		return ""
-	}
-	return w.Setting + ": " + w.Fix
 }

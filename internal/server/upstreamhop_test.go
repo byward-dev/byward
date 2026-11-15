@@ -74,11 +74,7 @@ func noAuthHopConfig(t *testing.T, upstream string) *config.Config {
 // authHopConfig is a configuration with authentication: every request carries the assertion.
 func authHopConfig(t *testing.T, upstream string) *config.Config {
 	t.Helper()
-	cfg, _, err := config.Load(nil, append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+upstream), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return cfg
+	return loadConfig(t, "https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+upstream)
 }
 
 // A plain-http upstream at a public address is warned about, naming each secret that travels in
@@ -307,8 +303,10 @@ func TestDoctorWarnsOfThePlainHTTPHop(t *testing.T) {
 				t.Fatal(err)
 			}
 			hop := checkNamed(t, rep, "upstream hop")
-			if hop.Status != doctor.Warn || !strings.Contains(hop.Message, tc.want) || !strings.HasPrefix(hop.Fix, "BYWARD_UPSTREAM_URL: ") {
-				t.Fatalf("upstream hop %+v, want a warning with %q", hop, tc.want)
+			w, ok := plainHTTPUpstream(context.Background(), tc.cfg, resolvesTo("mcp.example.com", "203.0.113.7"))
+			want := doctor.Result{Class: doctor.ClassProxy, Name: "upstream hop", Status: doctor.Warn, Message: w.Message, Fix: "BYWARD_UPSTREAM_URL: " + w.Fix}
+			if !ok || !strings.Contains(hop.Message, tc.want) || hop != want {
+				t.Fatalf("upstream hop %+v\nwant %+v, with %q", hop, want, tc.want)
 			}
 		})
 	}

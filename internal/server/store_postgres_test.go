@@ -150,7 +150,7 @@ func TestDoctorChecksTheConfiguredStore(t *testing.T) {
 			}
 			reminders := 0
 			for _, c := range rep.Checks {
-				if c.Name == "configuration" && c.Status == doctor.Warn && c.Message == replicaKeys.Message && c.Fix == warningFix(replicaKeys) {
+				if c.Name == "configuration" && c.Status == doctor.Warn && c.Message == replicaKeys.Message && c.Fix == "BYWARD_STORE_POSTGRES_DSN_FILE: "+replicaKeys.Fix {
 					reminders++
 				}
 			}

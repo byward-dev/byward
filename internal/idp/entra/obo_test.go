@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
@@ -23,7 +24,7 @@ func signedInAssertion(t *testing.T, e *env) (tid, assertion string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tid, _, _ = strings.Cut(id.Subject, ":")
+	tid, _, _ = SplitUserKey(id.Subject)
 	return tid, tokens.AccessToken
 }
 
@@ -36,8 +37,8 @@ func TestOnBehalfOfReturnsADownstreamToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tok.AccessToken == "" || tok.AccessToken == assertion || !tok.ExpiresAt.After(now()) {
-		t.Fatalf("downstream token %+v: want a new token expiring after now", tok.ExpiresAt)
+	if want := now().Add(time.Hour); tok.AccessToken == "" || tok.AccessToken == assertion || !tok.ExpiresAt.Equal(want) {
+		t.Fatalf("downstream token expiring %v: want a new token expiring at %v (now + the IdP's expires_in)", tok.ExpiresAt, want)
 	}
 }
 

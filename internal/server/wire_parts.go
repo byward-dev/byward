@@ -66,6 +66,21 @@ func warningOf(r doctor.Result, setting string) (w Warning, ok bool) {
 	return Warning{Message: r.Message, Setting: setting, Fix: r.Fix}, true
 }
 
+// result is the warning as doctor reports it, under check c: a Warn whose fix names the setting.
+// warningOf goes the other way.
+func (w Warning) result(c doctor.Check) doctor.Result {
+	return c.Result(doctor.Warn, w.Message, warningFix(w))
+}
+
+// warningFix is the warning's fix naming its setting, as check and doctor show it; empty for a
+// warning without a setting.
+func warningFix(w Warning) string {
+	if w.Setting == "" {
+		return ""
+	}
+	return w.Setting + ": " + w.Fix
+}
+
 // configWarnings are the configuration's warnings that startup logs, check prints and doctor
 // reports alike: those of the settings and the store (with authentication, parts not nil) and of the
 // upstream's strip list. The error is the store's configuration error.
@@ -85,7 +100,7 @@ func (w Warning) String() string {
 	if w.Setting == "" {
 		return w.Message
 	}
-	return w.Message + " (" + w.Setting + ": " + w.Fix + ")"
+	return w.Message + " (" + warningFix(w) + ")"
 }
 
 // loadAuthParts reads the sealing keys and the static clients and validates the IdP and gate

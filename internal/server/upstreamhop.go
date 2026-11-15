@@ -64,5 +64,5 @@ func upstreamHopResult(ctx context.Context, cfg *config.Config, resolve func(con
 	if !ok {
 		return nil
 	}
-	return []doctor.Result{doctor.CheckUpstreamHop.Result(doctor.Warn, w.Message, warningFix(w))}
+	return []doctor.Result{w.result(doctor.CheckUpstreamHop)}
 }

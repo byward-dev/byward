@@ -26,7 +26,7 @@ import (
 // #227): the replay cache lives in the store, not in each process, so a second replica refuses an
 // assertion the first one accepted.
 func TestAClientAssertionAcceptedByOneReplicaIsAReplayOnAnother(t *testing.T) {
-	replayIsRefusedAcrossReplicas(t, gateEnv(t))
+	replayIsRefusedAcrossReplicas(t, append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp"))
 }
 
 // replayIsRefusedAcrossReplicas wires two servers on env's store, with a private_key_jwt client in

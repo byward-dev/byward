@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/mcpsession"
 	"github.com/byward-dev/byward/internal/token"
 )
@@ -178,11 +177,7 @@ func loadProxy(t *testing.T, upstream string, extra time.Duration) (*httptest.Se
 		return nil, errors.New("no IdP in the load test")
 	})}
 	t.Cleanup(func() { idpHTTPClient = orig })
-	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+upstream+"/mcp")
-	cfg, _, err := config.Load(nil, env, os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+upstream+"/mcp")
 	s, err := New(cfg, discard)
 	if err != nil {
 		t.Fatal(err)

@@ -36,8 +36,8 @@ func (c Class) String() string {
 // unreadable or empty client assertion file, so the request never left the proxy.
 var ErrCredential = errors.New("idp: the client credential could not be made")
 
-// Error is an IdP failure. Error() never includes the IdP's error_description, which may carry
-// user identifiers; Description is kept for operator logs only.
+// Error is an IdP failure. The IdP's error_description may carry user identifiers, so neither
+// Error() nor LogAttrs includes it, and no log line or page shows it (ADR-0021 §7).
 type Error struct {
 	Class Class
 	// OAuth is the RFC 6749 error value, if the IdP sent one.
@@ -56,8 +56,10 @@ type Error struct {
 	// default); OperatorHint names the fix.
 	UserMessage  string
 	OperatorHint string
-	Description  string
-	Err          error
+	// Description is the IdP's error_description. Nothing logs or shows it (ADR-0021 §7); it is
+	// kept so tests can assert that.
+	Description string
+	Err         error
 }
 
 func (e *Error) Error() string {
@@ -128,6 +130,23 @@ func (e *Error) Fix() string {
 		return e.OperatorHint
 	}
 	return e.Alert.Hint()
+}
+
+// LogAttrs are the IdP's own identifiers of e for an operator's log line (ADR-0021 §7): its error
+// code (idp_error_code), trace_id and correlation_id, each only when the IdP sent it. The
+// error_description is never among them.
+func (e *Error) LogAttrs() []any {
+	var attrs []any
+	if e.Code != 0 {
+		attrs = append(attrs, "idp_error_code", e.Code)
+	}
+	if e.TraceID != "" {
+		attrs = append(attrs, "trace_id", e.TraceID)
+	}
+	if e.CorrelationID != "" {
+		attrs = append(attrs, "correlation_id", e.CorrelationID)
+	}
+	return attrs
 }
 
 // ReportAlert reports err when it asks for an IdP alert (#204): count is told the operation and the
