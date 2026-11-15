@@ -223,9 +223,8 @@ func TestEntriesTheLoaderSkipsAreNotPermissionChecked(t *testing.T) {
 // file's content is bad too.
 func TestTheChecksRefusalComesBeforeTheFileIsRead(t *testing.T) {
 	dir := keyDir(t, map[string]string{"k1": "not!base64\n"})
-	refused := errors.New("refused by the check")
-	_, err := LoadKeyRing(dir, func(path string) error { return fmt.Errorf("secret file %s: %w", path, refused) })
-	if !errors.Is(err, refused) {
-		t.Fatalf("err = %v, want the check's refusal", err)
+	_, err := LoadKeyRing(dir, func(path string) error { return fmt.Errorf("secret file %s: refused by the check", path) })
+	if err == nil || !strings.Contains(err.Error(), "refused by the check") || strings.Contains(err.Error(), "base64") {
+		t.Fatalf("err = %v, want the check's refusal, not the content error", err)
 	}
 }

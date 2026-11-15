@@ -79,7 +79,7 @@ func TestCheckOfflineFindsWhatStartupWould(t *testing.T) {
 				}
 			}
 			return env
-		}, "BYWARD_KEYS_DIR: "},
+		}, "token: key file: secret file "}, // the permission check under BYWARD_KEYS_DIR, not another key error
 		{"an app-only caller allowlist entry that is not a GUID", func(_ *testing.T, env []string) []string {
 			return append(env, "BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=byward.app", "BYWARD_APP_CLIENT_IDS=my-app")
 		}, `BYWARD_APP_CLIENT_IDS: "my-app" is not a GUID`},
