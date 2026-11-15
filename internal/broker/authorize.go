@@ -514,8 +514,7 @@ func (b *Broker) noteIdPFailure(r *http.Request, clientID string, err error) str
 			msg = ie.UserMessage
 		}
 		reason = "the IdP sign-in failed (" + ie.Class.String() + ")"
-		attrs := append(append([]any{"error", err}, fixAttr(err)...), ie.LogAttrs()...)
-		b.cfg.Log.ErrorContext(ctx, "IdP sign-in failed", attrs...)
+		b.cfg.Log.ErrorContext(ctx, "IdP sign-in failed", append([]any{"error", err}, idpAttrs(err)...)...)
 	} else {
 		b.cfg.Log.ErrorContext(ctx, "IdP sign-in failed", "error", err)
 	}
@@ -523,14 +522,20 @@ func (b *Broker) noteIdPFailure(r *http.Request, clientID string, err error) str
 	return msg
 }
 
-// fixAttr is the log attribute naming the operator's fix for err (idp.Error.Fix: the IdP's hint,
-// else the alert's), or none when there is no fix: a log line never has an empty reason (#315).
-func fixAttr(err error) []any {
+// idpAttrs are the log attributes of an IdP error err for the operator (ADR-0021 §7): its fix as
+// reason (idp.Error.Fix: the IdP's hint, else the alert's), and the IdP's error code, trace ID and
+// correlation ID (idp.Error.LogAttrs), each only when present: a log line never has an empty
+// reason (#315). None for an error that is not an *idp.Error.
+func idpAttrs(err error) []any {
 	var ie *idp.Error
-	if errors.As(err, &ie) && ie.Fix() != "" {
-		return []any{"reason", ie.Fix()}
+	if !errors.As(err, &ie) {
+		return nil
 	}
-	return nil
+	var attrs []any
+	if fix := ie.Fix(); fix != "" {
+		attrs = append(attrs, "reason", fix)
+	}
+	return append(attrs, ie.LogAttrs()...)
 }
 
 // idpFailure explains an IdP error on a page; the rest goes to the log and the audit stream as

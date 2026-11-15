@@ -124,17 +124,18 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]byte, assertedClaims, time.Time, tokenError, bool) {
 	ctx := r.Context()
 	signInAgain := tokenError{http.StatusBadRequest, "invalid_grant", "sign in again"}
-	end := func(why, hint string) ([]byte, assertedClaims, time.Time, tokenError, bool) {
+	// end revokes the grant; attrs, when given, say why on a line of their own with the IdP's name.
+	end := func(why string, attrs ...any) ([]byte, assertedClaims, time.Time, tokenError, bool) {
 		b.revoke(r, g.ClientID, g.ID, now, why)
-		if hint != "" {
-			b.cfg.Log.WarnContext(ctx, why, "idp", b.cfg.IdPName, "reason", hint)
+		if len(attrs) > 0 {
+			b.cfg.Log.WarnContext(ctx, why, append([]any{"idp", b.cfg.IdPName}, attrs...)...)
 		}
 		return nil, assertedClaims{}, time.Time{}, signInAgain, false
 	}
 	held, err := b.openSecrets(g.IdPTokens)
 	old := held.Tokens
 	if err != nil || old.RefreshToken == "" {
-		return end("the grant holds no usable IdP refresh token; grant revoked", "")
+		return end("the grant holds no usable IdP refresh token; grant revoked")
 	}
 	start := time.Now()
 	id, fresh, err := b.cfg.IdP.Refresh(ctx, old.RefreshToken)
@@ -143,12 +144,13 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 		var ie *idp.Error
 		switch {
 		case errors.As(err, &ie) && ie.Class == idp.SignInAgain:
-			return end("the IdP ended the session; grant revoked", ie.OperatorHint)
+			// The IdP's error too, so its code and trace ID show why it ended the session (ADR-0021 §7).
+			return end("the IdP ended the session; grant revoked", append([]any{"error", err}, idpAttrs(err)...)...)
 		case errors.As(err, &ie) && ie.Class == idp.Unavailable:
-			b.cfg.Log.WarnContext(ctx, "IdP refresh unavailable", append([]any{"error", err}, fixAttr(err)...)...)
+			b.cfg.Log.WarnContext(ctx, "IdP refresh unavailable", append([]any{"error", err}, idpAttrs(err)...)...)
 			return nil, assertedClaims{}, time.Time{}, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the identity provider is unavailable; try again"}, false
 		default:
-			b.cfg.Log.ErrorContext(ctx, "IdP refresh failed", append([]any{"error", err}, fixAttr(err)...)...)
+			b.cfg.Log.ErrorContext(ctx, "IdP refresh failed", append([]any{"error", err}, idpAttrs(err)...)...)
 			return nil, assertedClaims{}, time.Time{}, cannotRefresh, false
 		}
 	}
@@ -156,9 +158,9 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 	case id == nil:
 		// The gate is re-run on fresh claims at every refresh (ADR-0015 §1); without them it cannot be.
 		return end("the IdP returned no ID token on refresh; grant revoked",
-			"the IdP must return an ID token on the refresh_token grant (openid scope); see the IdP's how-to")
+			"reason", "the IdP must return an ID token on the refresh_token grant (openid scope); see the IdP's how-to")
 	case id.Subject != g.Subject || id.Issuer != g.Issuer:
-		return end("the IdP returned another user on refresh; grant revoked", "OIDC Core §12.2: sub and iss must not change")
+		return end("the IdP returned another user on refresh; grant revoked", "reason", "OIDC Core §12.2: sub and iss must not change")
 	}
 	if fresh.RefreshToken == "" {
 		fresh.RefreshToken = old.RefreshToken // the IdP kept its refresh token (idp.Refresher)
@@ -176,7 +178,7 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 		}
 		b.cfg.Audit.Record(r, audit.Event{Name: audit.AccessDenied, Outcome: audit.Failure, Reason: d.DeniedRule(),
 			ClientID: g.ClientID, UserKey: id.Subject, IdP: b.cfg.IdPName, GrantID: g.ID})
-		return end("the access gate refused the user on refresh; grant revoked", "")
+		return end("the access gate refused the user on refresh; grant revoked")
 	}
 	asserted := b.cfg.Assert.claimsOf(*id)
 	sealed, err := b.sealIdPTokens(ctx, g, fresh, asserted)
