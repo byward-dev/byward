@@ -19,6 +19,11 @@ func (c *Config) upstream(v *Values) []error {
 		errs = offModeSettings(v, raw != "")
 	}
 	if raw == "" {
+		d, err := parseHeaderTimeout(v.get("upstream-header-timeout"))
+		if err != nil {
+			errs = append(errs, err)
+		}
+		c.UpstreamHeaderTimeout = d
 		u, err := parseURL("upstream-url", v.get("upstream-url"))
 		if err != nil {
 			return append(errs, errorf("%s (or %s, or a command after --)", err.Error(), cmdEnv))
@@ -177,6 +182,9 @@ func (c *Config) upstreamCredential(v *Values) []error {
 		return nil
 	}
 	if v.get("upstream-command") != "" { // the selector, as offModeSettings reads it, even when the command does not parse
+		if v.get("upstream-url") != "" {
+			return nil // both selectors: upstream's "both set" error says enough
+		}
 		return []error{errorf("%s is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE", fileEnv)}
 	}
 	var errs []error
