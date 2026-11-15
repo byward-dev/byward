@@ -113,7 +113,8 @@ func expiredRefusal(cert *fakeidp.Certificate) string {
 		": make and upload a new one (docs/how-to/entra-certificate.md)"
 }
 
-// The proxy refuses to start from the certificate's last instant on, not a moment before.
+// The proxy refuses to start from the instant the certificate expires (its NotAfter) on, not a
+// moment before.
 func TestACertificateRefusesTheStartFromTheInstantItExpires(t *testing.T) {
 	file, cert := certificateFile(t, time.Hour)
 	ip, err := newIdentityProvider(loadCertificateConfig(t, file), nil)
