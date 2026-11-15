@@ -716,8 +716,9 @@ func TestARenewalTooSmallToMatterIsNotWritten(t *testing.T) {
 	}
 }
 
-// A reuse whose revocation cannot be written fails the call and rolls back: the grant survives, and
-// the caller never sees ErrReused for a revocation that did not happen.
+// A reuse whose revocation cannot be written fails the call and rolls back: the grant and its user's
+// consent to its client survive, and the caller never sees ErrReused for a revocation that did not
+// happen.
 func TestAReuseWhoseRevocationFailsReportsTheFailureAndKeepsTheGrant(t *testing.T) {
 	s := openTemp(t)
 	if _, err := s.CreateGrant(ctx, grant("g", "tid:alice")); err != nil {

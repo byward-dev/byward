@@ -633,8 +633,9 @@ func schemaOf(t *testing.T, c *pgx.Conn) []string {
 	return out
 }
 
-// A reuse whose revocation cannot be written fails the call and rolls back: the grant survives, and
-// the caller never sees ErrReused for a revocation that did not happen.
+// A reuse whose revocation cannot be written fails the call and rolls back: the grant and its user's
+// consent to its client survive, and the caller never sees ErrReused for a revocation that did not
+// happen.
 func aReuseWhoseRevocationFailsReportsTheFailureAndKeepsTheGrant(t *testing.T, srv *server) {
 	s, db := srv.open(t)
 	if _, err := s.CreateGrant(ctx, grant("g", "tid:alice")); err != nil {
