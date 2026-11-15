@@ -147,6 +147,20 @@ func TestChecksRunBeforeAuthentication(t *testing.T) {
 	}
 }
 
+// A browser's preflight from an allowed origin is answered by the Origin check, before the method
+// gate and authentication, its Mcp-Param-* names allowed; it never reaches the upstream.
+func TestABrowserPreflightIsAnsweredBeforeAuthenticationWithItsMcpParamHeaders(t *testing.T) {
+	e := start(t)
+	res := e.do(t, "OPTIONS", "/mcp", nil, map[string]string{"Origin": "https://app.example",
+		"Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "authorization,mcp-param-region"})
+	if res.StatusCode != http.StatusNoContent || !strings.HasSuffix(res.Header.Get("Access-Control-Allow-Headers"), ", mcp-param-region") {
+		t.Fatalf("preflight: status %d, Access-Control-Allow-Headers %q; want 204 allowing mcp-param-region", res.StatusCode, res.Header.Get("Access-Control-Allow-Headers"))
+	}
+	if n := len(e.up.Requests()); n != 0 {
+		t.Fatalf("the preflight reached the upstream (%d requests)", n)
+	}
+}
+
 func TestAllowedHostsAccepted(t *testing.T) {
 	e := start(t, "BYWARD_ALLOWED_HOSTS=proxy.internal:8080")
 	r, _ := http.NewRequest("GET", e.srv.URL+"/.well-known/oauth-protected-resource", nil)

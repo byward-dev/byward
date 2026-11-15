@@ -70,25 +70,29 @@ const (
 
 // MCP 2026-07-28 (Streamable HTTP, "Custom Headers from Tool Parameters") has a client mirror tool
 // parameters into Mcp-Param-{name} headers, a family Access-Control-Allow-Headers cannot name by
-// prefix. A preflight's own Mcp-Param-* names are allowed instead: each a valid header name, at most
-// maxParamHeaderName bytes, and at most maxParamHeaders of them; any other requested name is left
-// out, so the browser refuses it as before.
+// prefix. A preflight's own Mcp-Param-* names are allowed instead: each a valid header name with a
+// non-empty suffix, at most maxParamHeaderName bytes, and at most maxParamHeaders distinct names;
+// any other requested name is left out, so the browser refuses it as before.
 const (
 	paramHeaderPrefix  = "mcp-param-"
 	maxParamHeaders    = 32
 	maxParamHeaderName = 128
 )
 
-// paramHeaders are the Mcp-Param-* names a preflight requests (Access-Control-Request-Headers), as
-// allowHeaders' extension: ", " and the names, or "".
-func paramHeaders(r *http.Request) string {
+// paramHeaders are the Mcp-Param-* names a preflight's headers h request
+// (Access-Control-Request-Headers), as allowHeaders' extension: ", " and the names, or "".
+func paramHeaders(h http.Header) string {
 	var names []string
 	seen := map[string]bool{}
-	for _, v := range r.Header.Values("Access-Control-Request-Headers") {
+lines:
+	for _, v := range h.Values("Access-Control-Request-Headers") {
 		for n := range strings.SplitSeq(v, ",") {
+			if len(names) == maxParamHeaders {
+				break lines
+			}
 			n = strings.TrimSpace(n)
 			lower := strings.ToLower(n)
-			if len(names) == maxParamHeaders || len(n) > maxParamHeaderName || !strings.HasPrefix(lower, paramHeaderPrefix) ||
+			if len(n) > maxParamHeaderName || !strings.HasPrefix(lower, paramHeaderPrefix) ||
 				len(n) == len(paramHeaderPrefix) || !httpguts.ValidHeaderFieldName(n) || seen[lower] {
 				continue
 			}
@@ -132,8 +136,8 @@ func Origins(rec *audit.Log, allowed []string, next http.Handler) http.Handler {
 		h.Set("Access-Control-Expose-Headers", exposeHeaders)
 		if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
 			h.Set("Access-Control-Allow-Methods", allowMethods)
-			h.Set("Access-Control-Allow-Headers", allowHeaders+paramHeaders(r))
-			h.Add("Vary", "Access-Control-Request-Headers") // the answer now depends on it
+			h.Set("Access-Control-Allow-Headers", allowHeaders+paramHeaders(r.Header))
+			h.Add("Vary", "Access-Control-Request-Headers") // the allowed headers depend on it
 			h.Set("Access-Control-Max-Age", "600")
 			w.WriteHeader(http.StatusNoContent)
 			return
