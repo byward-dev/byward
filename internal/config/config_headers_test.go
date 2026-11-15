@@ -36,3 +36,49 @@ func TestAReservedHeaderIsRefusedInEitherSpellingByEverySettingThatSetsOne(t *te
 		}
 	}
 }
+
+// Only the reserved families are refused: a header of the operator's own that merely resembles one
+// (no trailing dash, or the family inside another name) loads, canonical, for every setting.
+func TestAHeaderThatOnlyResemblesAReservedOneIsAccepted(t *testing.T) {
+	settings := []struct {
+		env   string
+		extra []string
+		got   func(*Config) string
+	}{
+		{"BYWARD_ASSERTION_HEADER", nil, func(c *Config) string { return c.AssertionHeader }},
+		{"BYWARD_OBO_HEADER", nil, func(c *Config) string { return c.OBOHeader }},
+		{"BYWARD_UPSTREAM_CREDENTIAL_HEADER", []string{"BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile}, func(c *Config) string { return c.UpstreamCredentialHeader }},
+	}
+	for _, s := range settings {
+		for _, name := range []string{"mcp-params", "x-mcp-param-region", "x-tenant-param-id", "x-mcp-method"} {
+			t.Run(s.env+"="+name, func(t *testing.T) {
+				c, err := loadCred(t, nil, "k-123", append(s.extra, s.env+"="+name)...)
+				if want := textproto.CanonicalMIMEHeaderKey(name); err != nil || s.got(c) != want {
+					t.Fatalf("err = %v, want %s loaded as %s", err, name, want)
+				}
+			})
+		}
+	}
+}
+
+// A header name is an RFC 9110 token: a separator or a character outside ASCII is refused by every
+// setting that names a header, not only a space or an empty value.
+func TestAHeaderNameThatIsNotATokenIsRefusedByEverySettingThatSetsOne(t *testing.T) {
+	for _, s := range []struct {
+		env   string
+		extra []string
+	}{
+		{"BYWARD_ASSERTION_HEADER", nil},
+		{"BYWARD_OBO_HEADER", nil},
+		{"BYWARD_UPSTREAM_CREDENTIAL_HEADER", []string{"BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile}},
+	} {
+		for _, name := range []string{"X-Identity:", "X(Identity)", "X/Identity", "X-Idé"} {
+			t.Run(s.env+"="+name, func(t *testing.T) {
+				_, err := loadCred(t, nil, "k-123", append(s.extra, s.env+"="+name)...)
+				if want := s.env + ": want a header name"; err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("err = %v, want %q", err, want)
+				}
+			})
+		}
+	}
+}

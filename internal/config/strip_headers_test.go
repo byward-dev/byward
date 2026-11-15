@@ -41,6 +41,8 @@ func TestTheUpstreamStripListRefusesWhatCannotBeStripped(t *testing.T) {
 		{"a pattern", "X-Atlassian-*", `"X-Atlassian-*": exact names only`},
 		{"a pattern inside a name", "X-Atlassian-*-Url", `"X-Atlassian-*-Url": exact names only`},
 		{"a name with a colon", "X-Api-Key:", `"X-Api-Key:" is not a header name`},
+		{"a name with another separator", "X(Url)", `"X(Url)" is not a header name`},
+		{"a name that is not ASCII", "X-Idé", `"X-Idé" is not a header name`},
 		{"the trace context", "traceparent", "Traceparent cannot be stripped"},
 		{"the trace state", "TRACESTATE", "Tracestate cannot be stripped"},
 		{"not a header", "X Api Key", `"X Api Key" is not a header name`},

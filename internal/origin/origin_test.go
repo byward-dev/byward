@@ -153,8 +153,8 @@ func TestListedOriginGetsCORSAndPreflight(t *testing.T) {
 // it requests that are valid header names within the caps (at most 32 distinct names of at most
 // 128 bytes), beside the fixed list, and no other name it requests.
 func TestAPreflightAllowsOnlyTheValidMcpParamHeadersItRequestsWithinTheCaps(t *testing.T) {
-	// The fixed list a browser MCP client needs, written out: built from the code's constant, a
-	// dropped name would pass unnoticed.
+	// The fixed list a browser MCP client needs, written out: built from the code's list
+	// (config.MCPRequestHeaders), a dropped name would pass unnoticed.
 	const fixed = "Authorization, Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Mcp-Method, Mcp-Name, Last-Event-ID"
 	atCap := "mcp-param-" + strings.Repeat("a", 128-len("mcp-param-")) // 128 bytes
 	many := make([]string, 37)

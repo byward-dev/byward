@@ -16,13 +16,13 @@ var reservedHeaders = withMCPHeaders(map[string]bool{"Host": true, "Cookie": tru
 	"Traceparent": true, "Tracestate": true, "Baggage": true, "Www-Authenticate": true})
 
 // MCPRequestHeaders are the request headers MCP's Streamable HTTP transport defines (2025-11-25 and
-// 2026-07-28), spelled as the spec spells them, and MCPParamPrefix starts the 2026-07-28 family a
-// client mirrors tool parameters into (Mcp-Param-{name}). They are the one list of MCP-owned
-// headers: no upstream header setting may name one (reservedHeaders), the operator may not strip
-// one (mcpHeaders), and a browser's preflight may send them (origin's CORS list).
+// 2026-07-28), spelled as the spec spells them: the one list the header rules check against. No
+// upstream header setting may name one (reservedHeaders), the operator may not strip one
+// (mcpHeaders), and a browser's preflight may send them (origin's CORS list).
 var MCPRequestHeaders = []string{"Mcp-Session-Id", "Mcp-Protocol-Version", "Mcp-Method", "Mcp-Name", "Last-Event-ID"}
 
-// MCPParamPrefix starts the Mcp-Param-{name} headers (MCP 2026-07-28), in canonical form.
+// MCPParamPrefix starts the Mcp-Param-{name} headers a 2026-07-28 client mirrors tool parameters
+// into, in canonical form.
 const MCPParamPrefix = "Mcp-Param-"
 
 // withMCPHeaders adds MCPRequestHeaders, in canonical form, to m and returns it.
