@@ -106,9 +106,9 @@ each have a `*_FILE` setting. An inline secret refuses to start.
 A secret file, the TLS key and each sealing or assertion key must be readable by the proxy's user
 alone: mode `0600` or `0400`, owned by uid 65532. A file on a read-only mount passes this check
 whatever its mode, as on a Kubernetes secret volume (`0644` by default) or a Docker mount with `:ro`.
-Keys on a writable volume do not: a PersistentVolumeClaim with `fsGroup` makes files group-readable,
-and so does a sidecar that writes keys into an `emptyDir` at `0644`. Put the keys on a Secret volume,
-or mount them read-only. No sealing or assertion key file may be world-writable,
+On a writable volume the mode counts: a PersistentVolumeClaim with `fsGroup` makes files
+group-readable, and so does a sidecar that writes keys into an `emptyDir` at `0644`. Put such keys on
+a Secret volume, or mount them read-only. No sealing or assertion key file may be world-writable,
 and neither may its directory unless it is on a read-only mount
 ([sealing keys](sealing-keys.md#the-key-directory)).
 

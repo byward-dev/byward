@@ -24,11 +24,12 @@ before the first start; a missing or empty directory stops startup with an error
 - The proxy refuses to start when the directory is missing, has no key files, or any file is
   unreadable, not 32 bytes of base64, all one byte value, or **world-writable**. The error names the
   file.
-- A key file its group or others can read (such as `0644` or `0640`) is refused too, **unless it is on
-  a read-only mount**, such as a Kubernetes secret volume (mode `0644` by default) or a Docker mount
-  with `:ro`: a sealing key is a secret file like the others. Create keys under `umask 077` as above,
-  or `chmod 600` them, owned by the proxy's user (uid 65532 in the image). `--dev` relaxes this
-  check, not the world-writable rule. `byward check --offline` reports a key it would refuse.
+- A sealing key is a secret file like the others: a key file its group or others can read or write
+  (such as `0644` or `0640`) is refused too, **unless it is on a read-only mount**, such as a
+  Kubernetes secret volume (mode `0644` by default) or a Docker mount with `:ro`. Create keys under
+  `umask 077` as above, or `chmod 600` them, owned by the proxy's user (uid 65532 in the image).
+  `--dev` relaxes this check, not the world-writable rule. `byward check --offline` reports a key it
+  would refuse.
 - A world-writable directory is rejected too, **unless it is on a read-only mount**: a Kubernetes
   secret volume is a read-only tmpfs whose root is mode `1777` (checked on k3s v1.31), and nobody can
   add a key to it.

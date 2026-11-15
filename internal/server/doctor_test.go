@@ -67,6 +67,19 @@ func TestCheckOfflineFindsWhatStartupWould(t *testing.T) {
 			}
 			return env
 		}, "BYWARD_ENTRA_CLIENT_SECRET_FILE: secret file"},
+		{"sealing key readable by other users", func(t *testing.T, env []string) []string {
+			dir := setting(env, "BYWARD_KEYS_DIR")
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) == 0 {
+				t.Fatalf("sealing keys in %s: %v", dir, err)
+			}
+			for _, e := range entries {
+				if err := os.Chmod(filepath.Join(dir, e.Name()), 0o644); err != nil { //nolint:gosec // G302: the mode under test
+					t.Fatal(err)
+				}
+			}
+			return env
+		}, "BYWARD_KEYS_DIR: "},
 		{"an app-only caller allowlist entry that is not a GUID", func(_ *testing.T, env []string) []string {
 			return append(env, "BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=byward.app", "BYWARD_APP_CLIENT_IDS=my-app")
 		}, `BYWARD_APP_CLIENT_IDS: "my-app" is not a GUID`},

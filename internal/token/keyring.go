@@ -104,7 +104,8 @@ func LoadKeyRing(dir string, check func(path string) error) (*KeyRing, error) {
 // readOnlyFS is secretfile.ReadOnlyFS; tests replace it.
 var readOnlyFS = secretfile.ReadOnlyFS
 
-// worldWritable is the permission refused whatever the check allows: anyone could replace the key.
+// worldWritable is refused even when check passes, as under --dev: anyone could replace a key file or
+// add one to the directory.
 func worldWritable(fi os.FileInfo) bool { return fi.Mode().Perm()&0o002 != 0 }
 
 func readKey(path, id string) (*key, error) {
