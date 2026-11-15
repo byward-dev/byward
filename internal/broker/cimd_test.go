@@ -201,7 +201,8 @@ func TestThePublisherIsShownReadably(t *testing.T) {
 	for in, want := range map[string]string{
 		"claude.ai":              "claude.ai",
 		"claude.ai.":             "claude.ai.",
-		"CLAUDE.ai":              "CLAUDE.ai", // shown as written
+		"CLAUDE.ai":              "CLAUDE.ai",   // shown as written
+		"2001:db8::1":            "2001:db8::1", // an IPv6 literal
 		"XN--BCHER-KVA.example":  "bücher.example (xn--bcher-kva.example)",
 		"xn--bcher-kva.example":  "bücher.example (xn--bcher-kva.example)",
 		"xn--bcher-kva.example.": "bücher.example (xn--bcher-kva.example)",
@@ -215,21 +216,21 @@ func TestThePublisherIsShownReadably(t *testing.T) {
 		"xn--b_cher-3ya.example": "bü_cher.example (xn--b_cher-3ya.example)",
 		// A host the browser refuses is marked, never named by the mapping it got that far
 		// (xn--claude-.ai decodes to claude.ai).
-		"xn--claude-.ai":    "xn--claude-.ai (not a valid address)",
-		"bü.xn--claude-.ai": "bü.xn--claude-.ai (not a valid address)",
-		"xn--":              "xn-- (not a valid address)",
-		"xn--.example":      "xn--.example (not a valid address)",
-		"a.xn--":            "a.xn-- (not a valid address)",
-		"a\u200db.example":  "ab.example (not a valid address)",
+		"xn--claude-.ai":          "xn--claude-.ai (not a valid address)",
+		"bü.xn--claude-.ai":       "bü.xn--claude-.ai (not a valid address)",
+		"xn--":                    "xn-- (not a valid address)",
+		"xn--.example":            "xn--.example (not a valid address)",
+		"a.xn--":                  "a.xn-- (not a valid address)",
+		"a\u200db.example":        "ab.example (not a valid address)",
+		"xn--xn--abc-t2a.example": "xn--xn--abc-t2a.example (not a valid address)", // decodes to xn--abcü
 		// It is, or maps to, a forbidden domain code point, so the browser refuses it.
 		"evil.example\uff20claude.ai": "evil.example\uff20claude.ai (not a valid address)",
 		"a\u2100b.example":            "a\u2100b.example (not a valid address)",
 		"a<b.claude.ai":               "a<b.claude.ai (not a valid address)",
-		"2001:db8::1":                 "2001:db8::1", // an IPv6 literal
-		"xn--xn--abc-t2a.example":     "xn--xn--abc-t2a.example (not a valid address)",
-		"\u00ad":                      "?",
-		"\u200b":                      "?",
-		"":                            "?",
+		// No name at all.
+		"\u00ad": "?",
+		"\u200b": "?",
+		"":       "?",
 	} {
 		if got := showHost(in); got != want {
 			t.Errorf("showHost(%q) = %q, want %q", in, got, want)
