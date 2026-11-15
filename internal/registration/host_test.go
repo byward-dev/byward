@@ -60,10 +60,34 @@ func TestBrowserHostOKSaysWhetherABrowserGoesToTheHost(t *testing.T) {
 		"a\u2100b.example":            {"aa/cb.example", false},
 		"a<b.claude.ai":               {"a<b.claude.ai", false},
 		"a%62.example":                {"a%62.example", false},
+		"a\uff03b.example":            {"a#b.example", false},
+		"a\uff1ab.example":            {"a:b.example", false},
+		"a\uff1eb.example":            {"a>b.example", false},
+		"a\uff3bb.example":            {"a[b.example", false},
+		"a\uff3cb.example":            {"a\\b.example", false},
+		"a\uff3db.example":            {"a]b.example", false},
+		"a\uff3eb.example":            {"a^b.example", false},
+		"a\uff5cb.example":            {"a|b.example", false},
+		"a\x7fb.example":              {"a\x7fb.example", false}, // DEL
 		"":                            {"", false},
 	} {
 		if name, ok := BrowserHostOK(host); name != want.name || ok != want.ok {
 			t.Errorf("BrowserHostOK(%q) = %q, %v; want %q, %v", host, name, ok, want.name, want.ok)
+		}
+	}
+}
+
+// BrowserUnicode decodes xn-- labels as a browser does, "_" included, and keeps a name that does not
+// decode.
+func TestBrowserUnicodeDecodesAsABrowserDoes(t *testing.T) {
+	for ascii, want := range map[string]string{
+		"xn--bcher-kva.example":  "b\u00fccher.example",
+		"xn--b_cher-3ya.example": "b\u00fc_cher.example",
+		"app.example":            "app.example",
+		"xn--claude-.ai":         "xn--claude-.ai", // invalid punycode: kept, never claude.ai
+	} {
+		if got := BrowserUnicode(ascii); got != want {
+			t.Errorf("BrowserUnicode(%q) = %q, want %q", ascii, got, want)
 		}
 	}
 }
