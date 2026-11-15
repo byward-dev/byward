@@ -35,7 +35,7 @@ func TestTheWiredServerRemembersAStaticClientsConsent(t *testing.T) {
 	send := b.send
 	authorize := func(port string, cookies []*http.Cookie) *http.Response {
 		q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1:" + port + "/callback"}, "response_type": {"code"},
-			"code_challenge": {pkce("verifier-0123456789-0123456789-0123456789-abc")}, "code_challenge_method": {"S256"}}
+			"code_challenge": {fakeidp.CodeChallenge("verifier-0123456789-0123456789-0123456789-abc")}, "code_challenge_method": {"S256"}}
 		return send(http.MethodGet, "/authorize?"+q.Encode(), nil, cookies)
 	}
 
