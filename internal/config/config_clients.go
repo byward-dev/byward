@@ -28,7 +28,7 @@ func (c *Config) clientSources(v *Values) []error {
 			} else if reason := hostNameReason(host); reason != "" {
 				errs = append(errs, errorf("%s: %q is neither a CIMD client ID (an https URL) nor a host name such as app.example: %s", env, e, reason))
 			} else if endsInANumber(host) {
-				errs = append(errs, errorf("%s: %q is an IP address, which a browser also reaches by other spellings (127.1, 0x7f000001) that no entry can match; deny the app by its CIMD client ID or its redirect host's name", env, e))
+				errs = append(errs, errorf("%s: %q ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match, or none at all; deny the app by its CIMD client ID or its redirect host's name", env, e))
 			}
 		}
 	}
@@ -72,8 +72,9 @@ func hostNameReason(h string) string {
 	return ""
 }
 
-// endsInANumber reports whether a browser parses host as an IPv4 address (WHATWG URL "ends in a
-// number"): its last label is decimal digits, or 0x and hex digits.
+// endsInANumber reports whether a browser reads host as an IPv4 address (WHATWG URL "ends in a
+// number"): its last label is decimal digits, or 0x and hex digits. The parse may then fail (a.0x7f),
+// and the browser refuses the URL.
 func endsInANumber(host string) bool {
 	last := host[strings.LastIndex(host, ".")+1:]
 	if hex, ok := strings.CutPrefix(strings.ToLower(last), "0x"); ok {
