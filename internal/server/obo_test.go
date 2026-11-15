@@ -230,8 +230,8 @@ func TestUpstreamGetsADownstreamTokenOnBehalfOfTheUser(t *testing.T) {
 	if sub, _ := jwtClaims(t, assertion)["sub"].(string); !strings.HasPrefix(sub, e.fake.TenantID()+":") {
 		t.Fatalf("assertion sub %q, want the signed-in user's key in tenant %s", sub, e.fake.TenantID())
 	}
-	// No token passthrough: neither the proxy's access token nor the user's IdP token (the
-	// assertion, scp access_as_user) reaches the upstream.
+	// No token passthrough: neither the proxy's access token nor the user's IdP token (scp
+	// access_as_user) reaches the upstream.
 	for name, values := range headers[0] {
 		for _, v := range values {
 			bearer, isBearer := strings.CutPrefix(v, "Bearer ")
@@ -291,7 +291,8 @@ func TestDownstreamRefusalsAreAnsweredInTheProxysName(t *testing.T) {
 			if !strings.Contains(logs, c.logWant) || !strings.Contains(logs, `"event":"downstream_token_refused"`) || !strings.Contains(logs, c.auditWant) {
 				t.Fatalf("logs lack %s, the audit record or %s:\n%s", c.logWant, c.auditWant, logs)
 			}
-			// No token in the log: not the proxy's access token, nor any JWT (the assertion included).
+			// No token in the log: not the proxy's access token, nor any JWT (the identity assertion
+			// and the IdP token included).
 			if strings.Contains(logs, access) || strings.Contains(logs, "eyJ") {
 				t.Error("a token reached the log")
 			}

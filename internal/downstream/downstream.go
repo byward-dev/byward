@@ -40,7 +40,8 @@ const (
 	SignInExpired       = "sign_in_expired"      // the grant's sign-in has ended: the next request brings a new one
 )
 
-// Token is a downstream API access token; opaque to byward.
+// Token is a downstream API access token; opaque to byward. Keep it plain data: stdio.DownstreamToken
+// embeds it, so a method here (a String, LogValue or MarshalJSON) would be promoted there.
 type Token struct {
 	AccessToken string
 	ExpiresAt   time.Time

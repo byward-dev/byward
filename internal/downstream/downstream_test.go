@@ -67,7 +67,7 @@ func TestTokensAreCachedUntilAMinuteBeforeTheyExpire(t *testing.T) {
 }
 
 // ADR-0017 §4: never beyond the IdP token's expiry, even when the token lives longer.
-func TestTokensAreNotCachedBeyondTheAssertion(t *testing.T) {
+func TestTokensAreNotCachedBeyondTheIdPToken(t *testing.T) {
 	c, f, now := newCache(10*time.Hour, 0)
 	u := user("alice")
 	u.IdPTokenExpiresAt = t0.Add(30 * time.Minute)
@@ -82,7 +82,7 @@ func TestTokensAreNotCachedBeyondTheAssertion(t *testing.T) {
 
 // An IdP token without a known expiry (the IdP sent no expires_in) does not bound the cache, as it
 // does not cap the proxy's access token.
-func TestAnAssertionWithoutAnExpiryDoesNotDisableTheCache(t *testing.T) {
+func TestAnIdPTokenWithoutAnExpiryDoesNotDisableTheCache(t *testing.T) {
 	c, f, _ := newCache(time.Hour, 0)
 	u := user("alice")
 	u.IdPTokenExpiresAt = time.Time{}
