@@ -83,6 +83,24 @@ func TestCheckOfflinePassesAWorkingSetupWithItsStartupWarnings(t *testing.T) {
 	}
 }
 
+// check prints the warning the proxy logs at every start while the plain identity headers are on,
+// as it prints every other startup warning.
+func TestCheckOfflineWarnsThatPlainIdentityHeadersAreOn(t *testing.T) {
+	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
+	for name, tc := range map[string]struct {
+		env  []string
+		want bool
+	}{"off": {env, false}, "on": {append(slices.Clone(env), "BYWARD_IDENTITY_HEADERS=true"), true}} {
+		const warning = "warn  plain identity headers are on (BYWARD_IDENTITY_HEADERS: the upstream gets the user in X-Byward-* headers as well as the assertion; that is safe only when it is reachable through this proxy alone (docs/how-to/plain-identity-headers.md))\n"
+		t.Run(name, func(t *testing.T) {
+			code, stdout, stderr := runWith([]string{"check", "--offline"}, tc.env...)
+			if code != exitOK || stderr != "" || strings.Contains(stdout, warning) != tc.want {
+				t.Fatalf("code %d stdout %q stderr %q, want exit 0, no stderr, the warning with its setting and guide shown: %v", code, stdout, stderr, tc.want)
+			}
+		})
+	}
+}
+
 // check names an oidc IdP's client credential (#306); Entra's has no such line.
 func TestCheckOfflineNamesAnOIDCClientCredential(t *testing.T) {
 	base := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
