@@ -307,8 +307,10 @@ func TestDoctorWarnsOfThePlainHTTPHop(t *testing.T) {
 				t.Fatal(err)
 			}
 			hop := checkNamed(t, rep, "upstream hop")
-			if hop.Status != doctor.Warn || !strings.Contains(hop.Message, tc.want) || !strings.HasPrefix(hop.Fix, "BYWARD_UPSTREAM_URL: ") {
-				t.Fatalf("upstream hop %+v, want a warning with %q", hop, tc.want)
+			w, ok := plainHTTPUpstream(context.Background(), tc.cfg, resolvesTo("mcp.example.com", "203.0.113.7"))
+			want := doctor.Result{Class: doctor.ClassProxy, Name: "upstream hop", Status: doctor.Warn, Message: w.Message, Fix: "BYWARD_UPSTREAM_URL: " + w.Fix}
+			if !ok || !strings.Contains(hop.Message, tc.want) || hop != want {
+				t.Fatalf("upstream hop %+v\nwant %+v, with %q", hop, want, tc.want)
 			}
 		})
 	}

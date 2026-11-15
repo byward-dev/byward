@@ -231,10 +231,3 @@ func godebugValue(godebug, key string) string {
 	}
 	return v
 }
-
-func warningFix(w Warning) string {
-	if w.Setting == "" {
-		return ""
-	}
-	return w.Setting + ": " + w.Fix
-}

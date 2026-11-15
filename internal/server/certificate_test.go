@@ -107,18 +107,53 @@ func TestACertificateCloseToItsEndDateIsWarnedOf(t *testing.T) {
 	}
 }
 
+// expiredRefusal is why the proxy does not start with cert once it has expired.
+func expiredRefusal(cert *fakeidp.Certificate) string {
+	return "BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE: the certificate expired on " + cert.X509.NotAfter.UTC().Format(time.DateOnly) +
+		": make and upload a new one (docs/how-to/entra-certificate.md)"
+}
+
+// The proxy refuses to start from the certificate's last instant on, not a moment before.
+func TestACertificateRefusesTheStartFromTheInstantItExpires(t *testing.T) {
+	file, cert := certificateFile(t, time.Hour)
+	ip, err := newIdentityProvider(loadCertificateConfig(t, file), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	end := cert.X509.NotAfter
+	for _, tc := range []struct {
+		name    string
+		now     time.Time
+		refused bool
+	}{
+		{"a nanosecond before", end.Add(-time.Nanosecond), false},
+		{"at the instant", end, true},
+		{"a day after", end.Add(24 * time.Hour), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ip.refusal(tc.now)
+			if !tc.refused && err != nil {
+				t.Fatalf("refused: %v; want the start allowed", err)
+			}
+			if want := expiredRefusal(cert); tc.refused && (err == nil || err.Error() != want) {
+				t.Fatalf("refusal %v\nwant %q", err, want)
+			}
+		})
+	}
+}
+
 // An expired certificate stops the proxy from starting and fails check, but doctor still runs and
 // reports it, and revoke-user, which needs no credential, still works: when it has expired is when
 // an operator may need them most.
 func TestAnExpiredCertificateRefusesToServeButDoctorAndRevokeUserStillWork(t *testing.T) {
-	file, _ := certificateFile(t, -time.Hour)
+	file, cert := certificateFile(t, -time.Hour)
 	cfg := loadCertificateConfig(t, file)
-	const want = "BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE: the certificate expired on"
-	if _, err := checkOffline(cfg); err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("check: %v, want %q", err, want)
+	want := expiredRefusal(cert)
+	if _, err := checkOffline(cfg); err == nil || err.Error() != want {
+		t.Fatalf("check: %v\nwant %q", err, want)
 	}
-	if _, err := New(cfg, discard); err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("New: %v, want %q", err, want)
+	if _, err := New(cfg, discard); err == nil || err.Error() != want {
+		t.Fatalf("New: %v\nwant %q", err, want)
 	}
 	ip, err := newIdentityProvider(cfg, nil)
 	if err != nil {
