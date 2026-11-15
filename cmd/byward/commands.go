@@ -23,15 +23,15 @@ type command struct {
 
 var commands = map[string]command{
 	"revoke-user": {
-		usage: "byward revoke-user <user key>\n      end one user's access: their grants go, and every proxy refuses their tokens within seconds;\n      works while the proxy runs",
+		usage: "byward revoke-user <user key> [-- stdio-upstream-command [args...]]\n      end one user's access: their grants go, and every proxy refuses their tokens within seconds;\n      works while the proxy runs",
 		run:   revokeUser,
 	},
 	"revoke-all": {
-		usage: "byward revoke-all --yes\n      end every user's access at once (incident response); works while the proxy runs",
+		usage: "byward revoke-all --yes [-- stdio-upstream-command [args...]]\n      end every user's access at once (incident response); works while the proxy runs",
 		run:   revokeAll,
 	},
 	"store": {
-		usage: "byward store new-epoch --yes\n      after restoring the PostgreSQL store (pg_restore, point-in-time recovery): start a new epoch, so refresh tokens\n      from before it stop working and their users sign in again; works while the proxy runs",
+		usage: "byward store new-epoch --yes [-- stdio-upstream-command [args...]]\n      after restoring the PostgreSQL store (pg_restore, point-in-time recovery): start a new epoch, so refresh tokens\n      from before it stop working and their users sign in again; works while the proxy runs",
 		run:   storeCommand,
 	},
 	"check": {
@@ -96,17 +96,21 @@ func operatorLoad(args, environ []string, stderr io.Writer) (*config.Config, boo
 
 // revokeUser is revoke-user (ADR-0006 §9).
 func revokeUser(ctx context.Context, args, environ []string, stdout, stderr io.Writer) int {
-	if len(args) != 1 {
-		_, _ = fmt.Fprintln(stderr, "byward: usage: byward revoke-user <user key>")
+	flags, upstream := splitAtDashes(args)
+	if len(flags) != 1 {
+		_, _ = fmt.Fprintln(stderr, "byward: usage: byward revoke-user <user key> [-- stdio-upstream-command [args...]]")
 		return exitConfig
 	}
-	cfg, ok := operatorLoad(nil, environ, stderr)
+	cfg, ok := operatorLoad(upstream, environ, stderr)
 	if !ok {
 		return exitConfig
 	}
-	key := args[0]
+	key := flags[0]
 	user, err := server.RevokeUser(ctx, cfg, logging.New(stderr, cfg.LogFormat), key)
 	switch {
+	case errors.Is(err, server.ErrNeedsAuthentication):
+		_, _ = fmt.Fprintf(stderr, "byward: revoke-user: %v\n", err)
+		return exitConfig
 	case errors.Is(err, server.ErrNotAUserKey):
 		_, _ = fmt.Fprintf(stderr, "byward: revoke-user %q: %v\n", key, err)
 		return exitConfig
@@ -120,15 +124,20 @@ func revokeUser(ctx context.Context, args, environ []string, stdout, stderr io.W
 
 // revokeAll is revoke-all (ADR-0006 §9); --yes, because it signs every user out.
 func revokeAll(ctx context.Context, args, environ []string, stdout, stderr io.Writer) int {
-	if !slices.Equal(args, []string{"--yes"}) {
-		_, _ = fmt.Fprintln(stderr, "byward: usage: byward revoke-all --yes (signs every user out)")
+	flags, upstream := splitAtDashes(args)
+	if !slices.Equal(flags, []string{"--yes"}) {
+		_, _ = fmt.Fprintln(stderr, "byward: usage: byward revoke-all --yes [-- stdio-upstream-command [args...]] (signs every user out)")
 		return exitConfig
 	}
-	cfg, ok := operatorLoad(nil, environ, stderr)
+	cfg, ok := operatorLoad(upstream, environ, stderr)
 	if !ok {
 		return exitConfig
 	}
-	if err := server.RevokeAll(ctx, cfg, logging.New(stderr, cfg.LogFormat)); err != nil {
+	switch err := server.RevokeAll(ctx, cfg, logging.New(stderr, cfg.LogFormat)); {
+	case errors.Is(err, server.ErrNeedsAuthentication):
+		_, _ = fmt.Fprintf(stderr, "byward: revoke-all: %v\n", err)
+		return exitConfig
+	case err != nil:
 		_, _ = fmt.Fprintf(stderr, "byward: revoke-all failed: %v\n", err)
 		return exitRuntime
 	}
@@ -138,17 +147,18 @@ func revokeAll(ctx context.Context, args, environ []string, stdout, stderr io.Wr
 
 // storeCommand is `store new-epoch --yes` (ADR-0007 §9); --yes, because users sign in again.
 func storeCommand(ctx context.Context, args, environ []string, stdout, stderr io.Writer) int {
-	if !slices.Equal(args, []string{"new-epoch", "--yes"}) {
-		_, _ = fmt.Fprintln(stderr, "byward: usage: byward store new-epoch --yes (refresh tokens from before it stop working)")
+	flags, upstream := splitAtDashes(args)
+	if !slices.Equal(flags, []string{"new-epoch", "--yes"}) {
+		_, _ = fmt.Fprintln(stderr, "byward: usage: byward store new-epoch --yes [-- stdio-upstream-command [args...]] (refresh tokens from before it stop working)")
 		return exitConfig
 	}
-	cfg, ok := operatorLoad(nil, environ, stderr)
+	cfg, ok := operatorLoad(upstream, environ, stderr)
 	if !ok {
 		return exitConfig
 	}
 	epoch, err := server.NewEpoch(ctx, cfg, logging.New(stderr, cfg.LogFormat))
 	switch {
-	case errors.Is(err, server.ErrNewEpochNeedsPostgres):
+	case errors.Is(err, server.ErrNewEpochNeedsPostgres), errors.Is(err, server.ErrNeedsAuthentication):
 		_, _ = fmt.Fprintf(stderr, "byward: store new-epoch: %v\n", err)
 		return exitConfig
 	case err != nil:

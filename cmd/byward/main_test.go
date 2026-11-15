@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -303,6 +304,64 @@ func TestStoreNewEpochExits2OnMisuseOrSQLiteAnd1WhenPostgreSQLIsUnreachable(t *t
 			code, stdout, stderr := runWith(tc.args, env...)
 			if code != tc.code || stdout != "" || !strings.Contains(stderr, tc.inStderr) {
 				t.Fatalf("code %d (want %d), stdout %q, stderr %q (want %q)", code, tc.code, stdout, stderr, tc.inStderr)
+			}
+		})
+	}
+}
+
+// The store commands take a stdio upstream after "--", as the proxy, check and doctor do, and start
+// nothing; a usage mistake before the "--" is still exit 2.
+func TestStoreCommandsTakeAStdioUpstreamAfterDashes(t *testing.T) {
+	user := "00000000-0000-0000-0000-00000000000a:11111111-1111-1111-1111-11111111111a"
+	cases := []struct {
+		name       string
+		args       []string
+		code       int
+		wantStdout string // "" means nothing at all
+		inStderr   string
+	}{
+		{"revoke-user", []string{"revoke-user", user, "--"}, exitOK, "revoked user " + user, `"reason":"operator revoke-user"`},
+		{"revoke-all", []string{"revoke-all", "--yes", "--"}, exitOK, "revoked every user", `"reason":"operator revoke-all"`},
+		{"store new-epoch with SQLite", []string{"store", "new-epoch", "--yes", "--"}, exitConfig, "", "new-epoch is for the PostgreSQL store"},
+		{"revoke-user without a key", []string{"revoke-user", "--"}, exitConfig, "", "usage: byward revoke-user <user key> [-- stdio-upstream-command [args...]]"},
+		{"revoke-all without --yes", []string{"revoke-all", "--"}, exitConfig, "", "usage: byward revoke-all --yes [-- stdio-upstream-command [args...]]"},
+		{"store without --yes", []string{"store", "new-epoch", "--"}, exitConfig, "", "usage: byward store new-epoch --yes [-- stdio-upstream-command [args...]]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			script := filepath.Join(dir, "mcp-server")
+			if err := os.WriteFile(script, []byte("#!/bin/sh\ntouch "+dir+"/ran\n"), 0o700); err != nil { //nolint:gosec // G306: an executable test command
+				t.Fatal(err)
+			}
+			env := slices.DeleteFunc(authEnv(t), func(kv string) bool { return strings.HasPrefix(kv, "BYWARD_ASSERTION_KEYS_DIR=") }) // refused with a stdio upstream
+			env = append(env, "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_DATA_DIR="+dir, "BYWARD_STDIO_MAX_PROCESSES=20")
+			code, stdout, stderr := runWith(append(tc.args, script, "--flag"), env...)
+			okStdout := strings.Contains(stdout, tc.wantStdout) && (tc.wantStdout != "" || stdout == "")
+			if code != tc.code || !okStdout || !strings.Contains(stderr, tc.inStderr) {
+				t.Fatalf("code %d (want %d)\nstdout %q (want %q)\nstderr %q (want %q)", code, tc.code, stdout, tc.wantStdout, stderr, tc.inStderr)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "ran")); err == nil {
+				t.Fatal("the command started the stdio upstream")
+			}
+		})
+	}
+}
+
+// Without authentication there is no store: each store command says so and exits 2, a
+// configuration error, before revoke-user looks for an IdP that is not configured.
+func TestStoreCommandsWithoutAuthenticationAreAConfigurationError(t *testing.T) {
+	env := []string{"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp"}
+	for _, args := range [][]string{
+		{"revoke-user", "00000000-0000-0000-0000-00000000000a:11111111-1111-1111-1111-11111111111a"},
+		{"revoke-all", "--yes"},
+		{"store", "new-epoch", "--yes"},
+	} {
+		t.Run(args[0], func(t *testing.T) {
+			code, stdout, stderr := runWith(args, env...)
+			want := "this command works on the broker's store, which is off with BYWARD_INSECURE_NO_AUTH"
+			if code != exitConfig || stdout != "" || !strings.Contains(stderr, want) {
+				t.Fatalf("code %d (want %d), stdout %q, stderr %q (want %q)", code, exitConfig, stdout, stderr, want)
 			}
 		})
 	}

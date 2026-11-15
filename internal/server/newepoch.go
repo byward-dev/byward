@@ -24,7 +24,7 @@ const reasonNewEpoch = "operator new-epoch"
 // It runs beside running replicas, which adopt the epoch at once. It returns the new epoch.
 func NewEpoch(ctx context.Context, cfg *config.Config, log *slog.Logger) (int64, error) {
 	if cfg.NoAuth {
-		return 0, errors.New("new-epoch needs the broker's store; it is off with BYWARD_INSECURE_NO_AUTH")
+		return 0, ErrNeedsAuthentication
 	}
 	if cfg.StorePostgresDSN == "" {
 		return 0, ErrNewEpochNeedsPostgres
