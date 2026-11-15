@@ -17,8 +17,9 @@ type Denylist struct {
 }
 
 // NewDenylist parses entries: a CIMD client ID (an https URL) or a host name that redirect URIs
-// must not return to. Both match exactly up to spelling: host case, a trailing dot, and for a
-// URL the default port and percent-encoding in the path.
+// must not return to. Both match exactly up to spelling: the host's spelling (canonicalHost: case, a
+// trailing dot, an internationalized or full-width name by its xn-- form), and for a URL the default
+// port and percent-encoding in the path.
 func NewDenylist(entries []string) (*Denylist, error) {
 	d := &Denylist{urls: map[string]bool{}, hosts: map[string]bool{}}
 	for _, e := range entries {
@@ -55,9 +56,10 @@ func (d *Denylist) DeniesRedirect(redirectURI string) bool {
 // canonicalHost folds the spellings of one host into the ASCII name a browser really goes to: case,
 // a trailing dot (app.example. is the same host as app.example), and an internationalized or
 // full-width name, which becomes its xn-- form, so a Unicode spelling of a denied host is denied too.
-// A host browserHost refuses is compared lower-cased.
+// A host browserHost refuses (a joiner out of context, a label mixing directions) is compared by
+// the mapping it got that far, so it matches its own xn-- form: more spellings, never fewer.
 func canonicalHost(h string) string {
-	if ascii, err := browserHost.ToASCII(h); err == nil {
+	if ascii, _ := browserHost.ToASCII(h); ascii != "" {
 		h = ascii
 	} else {
 		h = strings.ToLower(h)
@@ -72,8 +74,8 @@ func canonicalHost(h string) string {
 var browserHost = idna.New(idna.MapForLookup(), idna.StrictDomainName(false), idna.CheckHyphens(false),
 	idna.BidiRule(), idna.CheckJoiners(true), idna.Transitional(false))
 
-// canonicalCIMD folds the spellings of one CIMD URL that fetch the same document: host case, a
-// trailing dot, the default port and percent-encoding in the path. A denylist may match more
+// canonicalCIMD folds the spellings of one CIMD URL that fetch the same document: the host's
+// spelling (canonicalHost), the default port and percent-encoding in the path. A denylist may match more
 // than one spelling, never fewer.
 func canonicalCIMD(id string) string {
 	u, err := url.Parse(id)

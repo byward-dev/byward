@@ -181,6 +181,11 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"client denylist brackets", "BYWARD_CLIENT_DENYLIST=[bad].example", `BYWARD_CLIENT_DENYLIST: "[bad].example" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
 		{"client denylist host with a port", "BYWARD_CLIENT_DENYLIST=app.example:443", `BYWARD_CLIENT_DENYLIST: "app.example:443" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
 		{"client denylist single-label host among good ones", "BYWARD_CLIENT_DENYLIST=app.example,localhost", `BYWARD_CLIENT_DENYLIST: "localhost" is neither a CIMD client ID (an https URL) nor a host name such as app.example: give a name with at least one dot`},
+		{"client denylist https without slashes", "BYWARD_CLIENT_DENYLIST=https:app.example", `BYWARD_CLIENT_DENYLIST: "https:app.example" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
+		// A browser parses a host ending in a number as IPv4, and reaches it by other spellings too.
+		{"client denylist IPv4 address", "BYWARD_CLIENT_DENYLIST=203.0.113.5", `BYWARD_CLIENT_DENYLIST: "203.0.113.5" is an IP address, which a browser also reaches by other spellings`},
+		{"client denylist short IPv4 address", "BYWARD_CLIENT_DENYLIST=127.1", `BYWARD_CLIENT_DENYLIST: "127.1" is an IP address`},
+		{"client denylist hex IPv4 address", "BYWARD_CLIENT_DENYLIST=a.0x7F", `BYWARD_CLIENT_DENYLIST: "a.0x7F" is an IP address`},
 		{"client denylist unicode host", "BYWARD_CLIENT_DENYLIST=bücher.example", `BYWARD_CLIENT_DENYLIST: the host "bücher.example" is not ASCII; give its ASCII (xn--) form`},
 		{"gate tenants blank", "BYWARD_GATE_TENANTS=,", "BYWARD_GATE_TENANTS is set but lists nothing"},
 		{"gate roles blank", "BYWARD_GATE_ROLES= ,,", "BYWARD_GATE_ROLES is set but lists nothing"},
@@ -661,11 +666,17 @@ func TestCIMDHostListsAreNormalizedAndRefusedWhileCIMDIsOff(t *testing.T) {
 // (checked where it is used, internal/registration) or a host name, which may end in a dot.
 func TestDCRIsOnByDefaultAndTheDenylistTakesCommaSeparatedEntries(t *testing.T) {
 	c, err := load(t, nil, "BYWARD_CLIENT_DENYLIST=https://evil.example/client.json, app.example.")
-	if err != nil || !c.DCR || !slices.Equal(c.ClientDenylist, []string{"https://evil.example/client.json", "app.example."}) {
-		t.Fatalf("DCR %v, denylist %q, %v", c.DCR, c.ClientDenylist, err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if c, err = load(t, nil, "BYWARD_DCR=false"); err != nil || c.DCR {
-		t.Fatalf("DCR off: %v, %v", c.DCR, err)
+	if !c.DCR || !slices.Equal(c.ClientDenylist, []string{"https://evil.example/client.json", "app.example."}) {
+		t.Fatalf("DCR %v, denylist %q", c.DCR, c.ClientDenylist)
+	}
+	if c, err = load(t, nil, "BYWARD_DCR=false"); err != nil {
+		t.Fatal(err)
+	}
+	if c.DCR {
+		t.Fatal("DCR on with BYWARD_DCR=false")
 	}
 }
 
