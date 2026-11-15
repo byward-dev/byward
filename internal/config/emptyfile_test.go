@@ -25,8 +25,7 @@ func filesPlusEmptyAndBlank(p string) ([]byte, error) {
 		return []byte(pgDSN), nil
 	case "/run/secrets/oidc":
 		return []byte("s3cret-oidc\n"), nil
-	}
-	if p == "/run/secrets/entra" {
+	case "/run/secrets/entra":
 		return baseFiles(p)
 	}
 	return nil, os.ErrNotExist
@@ -92,9 +91,16 @@ var emptyFileAllowed = map[string]string{
 	"upstream-env": "an empty environment file passes no variables to a stdio upstream; whether to refuse it is open (PR #442)",
 }
 
-// Every secret setting refuses a named file that is empty, so a new one cannot quietly read it as
-// "not set".
+// Every secret setting refuses a named file that is empty, unless emptyFileAllowed says why not, so a
+// new one cannot quietly read it as "not set".
 func TestEverySecretSettingRefusesANamedFileThatIsEmpty(t *testing.T) {
+	for _, names := range []map[string]bool{keysOf(emptyFileContext), keysOf(emptyFileAllowed)} {
+		for name := range names {
+			if s, ok := settingNamed(name); !ok || !s.Secret {
+				t.Errorf("%s is listed for the empty-file rule but is not a secret setting", name)
+			}
+		}
+	}
 	for _, s := range registry {
 		if !s.Secret {
 			continue
@@ -151,6 +157,10 @@ func TestAnInlineSecretUnderDevIsGivenAsAFileIs(t *testing.T) {
 			"give one store, PostgreSQL or a SQLite state directory, not both"},
 		{"an inline certificate with a secret expiry", withoutSecret("BYWARD_DEV=true", "BYWARD_ENTRA_CLIENT_CERTIFICATE=-----BEGIN", "BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT=2027-11-06"),
 			"byward reads the certificate's own end date"},
+		{"an inline Entra secret beside a federated token", withoutSecret("BYWARD_DEV=true", "BYWARD_ENTRA_CLIENT_SECRET=s3cret", "BYWARD_ENTRA_FEDERATED_TOKEN_FILE=/var/run/secrets/azure/tokens/azure-identity-token"),
+			"are set together: Entra gets one credential"},
+		{"an inline OIDC key beside a secret file", append(slices.Clone(oidcBase), "BYWARD_DEV=true", "BYWARD_OIDC_CLIENT_KEY=-----BEGIN"),
+			"are both set; give one of them"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, _, err := Load(nil, tc.env, filesPlusEmptyAndBlank); err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -160,17 +170,19 @@ func TestAnInlineSecretUnderDevIsGivenAsAFileIs(t *testing.T) {
 	}
 }
 
-// BYWARD_ALLOWED_ORIGINS holds origins as browsers send them (RFC 6454 §6.2), so each entry can match a
-// browser's Origin header: the scheme's default port is dropped, as the public URL's origin drops it,
-// and an IPv6 address is in its shortest form. Entries no browser could send are refused
-// (TestInvalidSettingsAreRejectedNamingTheSetting).
-func TestAllowedOriginsAreStoredAsBrowsersSendThem(t *testing.T) {
-	c, err := load(t, nil, "BYWARD_ALLOWED_ORIGINS=https://App.example.com:443, http://app.example.com:80, http://app.example.com:443, https://[2001:DB8:0:0::1]:443, https://app.example.com:8443")
-	if err != nil {
-		t.Fatal(err)
+func keysOf[V any](m map[string]V) map[string]bool {
+	out := map[string]bool{}
+	for k := range m {
+		out[k] = true
 	}
-	want := []string{"https://app.example.com", "http://app.example.com", "http://app.example.com:443", "https://[2001:db8::1]", "https://app.example.com:8443"}
-	if !slices.Equal(c.AllowedOrigins, want) {
-		t.Fatalf("origins %q, want %q", c.AllowedOrigins, want)
+	return out
+}
+
+func settingNamed(name string) (Setting, bool) {
+	for _, s := range registry {
+		if s.Name == name {
+			return s, true
+		}
 	}
+	return Setting{}, false
 }

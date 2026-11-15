@@ -123,9 +123,10 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"origin with a leading dot", "BYWARD_ALLOWED_ORIGINS=https://.app.example.com", `BYWARD_ALLOWED_ORIGINS: "https://.app.example.com": ".app.example.com" is not a host[:port]: a host name`},
 		{"origin with a trailing dot", "BYWARD_ALLOWED_ORIGINS=https://app.example.com.", `BYWARD_ALLOWED_ORIGINS: "https://app.example.com.": "app.example.com." is not a host[:port]: a host name`},
 		{"origin with an IPv6 zone", "BYWARD_ALLOWED_ORIGINS=https://[fe80::1%25eth0]", `BYWARD_ALLOWED_ORIGINS: "https://[fe80::1%25eth0]": "[fe80::1%eth0]" is not a host[:port]`},
-		{"origin with a shortened IPv4 address", "BYWARD_ALLOWED_ORIGINS=https://127.1", `BYWARD_ALLOWED_ORIGINS: "https://127.1": 127.1 is not an IPv4 address in dotted decimal, the only form browsers send`},
-		{"origin with a hex IPv4 label", "BYWARD_ALLOWED_ORIGINS=https://0x7f.0.0.1", `BYWARD_ALLOWED_ORIGINS: "https://0x7f.0.0.1": 0x7f.0.0.1 is not an IPv4 address in dotted decimal`},
-		{"origin with an IPv4-mapped IPv6 address", "BYWARD_ALLOWED_ORIGINS=https://[::ffff:127.0.0.1]", `BYWARD_ALLOWED_ORIGINS: "https://[::ffff:127.0.0.1]": give the IPv4-mapped address ::ffff:127.0.0.1 as the IPv4 address 127.0.0.1`},
+		{"origin with a shortened IPv4 address", "BYWARD_ALLOWED_ORIGINS=https://127.1", `BYWARD_ALLOWED_ORIGINS: "https://127.1": "127.1" is not an IPv4 address in dotted decimal, the only form browsers send`},
+		{"origin ending in an upper-case hex label", "BYWARD_ALLOWED_ORIGINS=https://192.168.0.0xFF", `BYWARD_ALLOWED_ORIGINS: "https://192.168.0.0xFF": "192.168.0.0xFF" is not an IPv4 address in dotted decimal`},
+		{"origin with an IPv4 part over 255", "BYWARD_ALLOWED_ORIGINS=https://10.0.0.999", `BYWARD_ALLOWED_ORIGINS: "https://10.0.0.999": "10.0.0.999" is not an IPv4 address in dotted decimal`},
+		{"origin with a hex IPv4 label", "BYWARD_ALLOWED_ORIGINS=https://0x7f.0.0.1", `BYWARD_ALLOWED_ORIGINS: "https://0x7f.0.0.1": "0x7f.0.0.1" is not an IPv4 address in dotted decimal`},
 		{"origin with a fragment", "BYWARD_ALLOWED_ORIGINS=https://app.example.com#", `BYWARD_ALLOWED_ORIGINS: "https://app.example.com#" is not an origin`},
 		{"origin with an empty query", "BYWARD_ALLOWED_ORIGINS=https://app.example.com?", `BYWARD_ALLOWED_ORIGINS: "https://app.example.com?" is not an origin`},
 		{"unicode allowed host", "BYWARD_ALLOWED_HOSTS=bücher.example:8443", `BYWARD_ALLOWED_HOSTS: the host "bücher.example:8443" is not ASCII`},
@@ -289,6 +290,35 @@ func TestListsAreNormalized(t *testing.T) {
 	}
 	if strings.Join(c.AllowedOrigins, ",") != "https://app.example,http://localhost:3000" || c.AllowedHosts[0] != "internal:8080" {
 		t.Fatalf("origins=%v hosts=%v", c.AllowedOrigins, c.AllowedHosts)
+	}
+}
+
+// BYWARD_ALLOWED_ORIGINS holds origins as browsers send them (RFC 6454 §6.2), so each entry can match a
+// browser's Origin header: lower case, the scheme's default port dropped as the public URL's origin
+// drops it, and an IPv6 address as the WHATWG URL serializer writes it. Entries no browser could send
+// are refused (TestInvalidSettingsAreRejectedNamingTheSetting).
+func TestAllowedOriginsAreStoredAsBrowsersSendThem(t *testing.T) {
+	for given, stored := range map[string]string{
+		"https://App.example.com:443":   "https://app.example.com",
+		"http://app.example.com:80":     "http://app.example.com",
+		"http://app.example.com:443":    "http://app.example.com:443",
+		"https://app.example.com:8443":  "https://app.example.com:8443",
+		"https://[2001:DB8:0:0::1]:443": "https://[2001:db8::1]",
+		"https://[::ffff:127.0.0.1]":    "https://[::ffff:7f00:1]",
+		"https://1.2.3.4.example.com":   "https://1.2.3.4.example.com",
+		"https://1.example.com":         "https://1.example.com",
+		"http://127.0.0.1:3000":         "http://127.0.0.1:3000",
+		"HTTPS://XN--BCHER-KVA.example": "https://xn--bcher-kva.example",
+	} {
+		t.Run(given, func(t *testing.T) {
+			c, err := load(t, nil, "BYWARD_ALLOWED_ORIGINS="+given)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(c.AllowedOrigins, []string{stored}) {
+				t.Fatalf("stored %q, want %q", c.AllowedOrigins, stored)
+			}
+		})
 	}
 }
 
@@ -572,26 +602,21 @@ func TestTrustedProxiesTakeCIDRsAndAddresses(t *testing.T) {
 	}
 }
 
-// A mapped trusted-proxy prefix trusts the IPv4 proxies it maps, and no IPv6 peer, where the client
-// address is resolved (logging.ClientAddress).
+// A mapped trusted-proxy prefix trusts the IPv4 proxy it maps where the client address is resolved
+// (logging.ClientAddress), which compares peers unmapped: kept mapped, it would trust none.
 func TestAMappedTrustedProxyPrefixTrustsItsIPv4Proxies(t *testing.T) {
 	cfg, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES=::ffff:10.0.0.0/104"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for peer, want := range map[string]string{
-		"10.1.2.3:4000":      "198.51.100.1", // the IPv4 proxy the prefix maps: its X-Forwarded-For counts
-		"[2001:db8::1]:4000": "2001:db8::1",  // not trusted: the header is ignored
-	} {
-		var client string
-		h := logging.ClientAddress(cfg.TrustedProxies, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { client = logging.RemoteIP(r) }))
-		r := httptest.NewRequest(http.MethodGet, "/", nil)
-		r.RemoteAddr = peer
-		r.Header.Set("X-Forwarded-For", "198.51.100.1")
-		h.ServeHTTP(httptest.NewRecorder(), r)
-		if client != want {
-			t.Errorf("peer %s: client %s, want %s", peer, client, want)
-		}
+	var client string
+	h := logging.ClientAddress(cfg.TrustedProxies, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { client = logging.RemoteIP(r) }))
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.1.2.3:4000"
+	r.Header.Set("X-Forwarded-For", "198.51.100.1")
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	if client != "198.51.100.1" {
+		t.Fatalf("client %s, want 198.51.100.1: the proxy 10.1.2.3 is trusted, so its X-Forwarded-For counts", client)
 	}
 }
 

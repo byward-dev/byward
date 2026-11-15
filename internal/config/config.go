@@ -29,7 +29,7 @@ type Config struct {
 	Listen                 string
 	InternalListen         string // "" when the internal listener is off
 	// AllowedOrigins are origins as browsers serialize them (browserOrigin), which origin.Origins
-	// compares exactly.
+	// compares with a browser's Origin header in lower case.
 	AllowedOrigins []string
 	AllowedHosts   []string
 	// TrustedProxies are masked, with IPv4-mapped prefixes unmapped, since logging.ClientAddress
