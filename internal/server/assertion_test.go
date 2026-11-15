@@ -204,7 +204,7 @@ func TestAClientCannotSupplyTheAssertionHeader(t *testing.T) {
 
 // Without an assertion key the proxy does not start (ADR-0016 §10), naming the setting.
 func TestAnHTTPUpstreamWithoutAnAssertionKeyRefusesToStart(t *testing.T) {
-	cfg := loadConfig(t, "https://mcp.example.com/mcp", "BYWARD_ASSERTION_KEYS_DIR="+t.TempDir())
+	cfg := loadConfig(t, "https://mcp.example.com/mcp", "BYWARD_ASSERTION_KEYS_DIR="+assertionkey.EmptyDir(t))
 	noKey := func(err error) bool {
 		return err != nil && strings.Contains(err.Error(), "BYWARD_ASSERTION_KEYS_DIR") && strings.Contains(err.Error(), "has no key files")
 	}
@@ -318,7 +318,7 @@ func TestTheStartupLogWarnsAboutEmailsForTheIdPInUse(t *testing.T) {
 		}, "leaves out emails the IdP has not verified"},
 		{"a stdio upstream", func(t *testing.T) *config.Config {
 			cfg, _, err := config.Load([]string{"--", sh}, append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp",
-				"BYWARD_INTERNAL_LISTEN=127.0.0.1:0", "BYWARD_ASSERTION_KEYS_DIR="+t.TempDir(), "BYWARD_ASSERTION_CLAIMS=email"), os.ReadFile)
+				"BYWARD_INTERNAL_LISTEN=127.0.0.1:0", "BYWARD_ASSERTION_KEYS_DIR="+assertionkey.EmptyDir(t), "BYWARD_ASSERTION_CLAIMS=email"), os.ReadFile)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -345,7 +345,7 @@ func TestTheStartupLogWarnsAboutEmailsForTheIdPInUse(t *testing.T) {
 func stdioAuthConfig(t *testing.T, command string) *config.Config {
 	t.Helper()
 	cfg, _, err := config.Load([]string{"--", command}, append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp",
-		"BYWARD_INTERNAL_LISTEN=127.0.0.1:0", "BYWARD_ASSERTION_KEYS_DIR="+t.TempDir()), os.ReadFile)
+		"BYWARD_INTERNAL_LISTEN=127.0.0.1:0", "BYWARD_ASSERTION_KEYS_DIR="+assertionkey.EmptyDir(t)), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}

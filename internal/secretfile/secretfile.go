@@ -1,6 +1,7 @@
 // Package secretfile checks the files secrets are read from: the IdP client secret and static
-// clients' `client_secret_file` (ADR-0018 §11). A secret that other users on the host can read is
-// refused at startup; only --dev relaxes this.
+// clients' `client_secret_file` (ADR-0018 §11). Check refuses a secret that other users on the host
+// can read; only --dev relaxes it. ReadOnlyFS reports whether a path is on a read-only mount, which
+// Check and the key loaders (sealing and assertion keys) all exempt.
 package secretfile
 
 import (

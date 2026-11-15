@@ -116,7 +116,7 @@ func TestWorldWritableKeysAreRejected(t *testing.T) {
 	})
 	t.Run("directory on a read-only mount (Kubernetes secret volume, mode 1777)", func(t *testing.T) {
 		dir := keyDir(t, map[string]string{"k1": randomKey(t)})
-		if err := os.Chmod(dir, 0o1777); err != nil { //nolint:gosec // G302: the Kubernetes mode under test
+		if err := os.Chmod(dir, 0o777|os.ModeSticky); err != nil { //nolint:gosec // G302: the Kubernetes mode under test
 			t.Fatal(err)
 		}
 		prev := readOnlyFS

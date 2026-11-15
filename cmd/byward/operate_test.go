@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/byward-dev/byward/internal/testutil/assertionkey"
+
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/server"
@@ -284,7 +286,7 @@ func TestJWKSRefusesNoKeysOrAnExtraArgument(t *testing.T) {
 		env      []string
 		inStderr []string
 	}{
-		{"no keys", []string{"jwks"}, append(env, "BYWARD_ASSERTION_KEYS_DIR="+t.TempDir()), []string{"BYWARD_ASSERTION_KEYS_DIR", "has no key files"}},
+		{"no keys", []string{"jwks"}, append(env, "BYWARD_ASSERTION_KEYS_DIR="+assertionkey.EmptyDir(t)), []string{"BYWARD_ASSERTION_KEYS_DIR", "has no key files"}},
 		{"extra argument", []string{"jwks", "--out", "x"}, env, []string{"usage: byward jwks"}},
 	} {
 		code, stdout, stderr := runWith(tc.args, tc.env...)

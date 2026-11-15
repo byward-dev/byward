@@ -52,7 +52,7 @@ func verifier(keys jose.JSONWebKeySet, audience string) auth.TokenVerifier {
 
 func TestGoSDKBearerMiddlewareAcceptsTheAssertion(t *testing.T) {
 	const upstream = "http://mcp-upstream.internal:3001/mcp"
-	dir := t.TempDir()
+	dir := assertionkey.EmptyDir(t)
 	assertionkey.Write(t, dir, "k1", false)
 	keys, err := assertion.LoadKeys(dir, func(string) error { return nil })
 	if err != nil {
@@ -92,7 +92,7 @@ func TestGoSDKBearerMiddlewareAcceptsTheAssertion(t *testing.T) {
 	if code := call(mint(upstream, time.Now(), keys)); code != http.StatusOK || seen == nil || seen.UserID != "tid:oid" || seen.Extra["client_id"] != "claude-code" {
 		t.Fatalf("a valid assertion: %d, %+v", code, seen)
 	}
-	otherDir := t.TempDir()
+	otherDir := assertionkey.EmptyDir(t)
 	assertionkey.Write(t, otherDir, "k1", false)
 	other, err := assertion.LoadKeys(otherDir, func(string) error { return nil })
 	if err != nil {

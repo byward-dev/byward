@@ -104,11 +104,14 @@ credential, the stdio upstream's environment file and the PostgreSQL connection 
 each have a `*_FILE` setting. An inline secret refuses to start.
 
 A secret file, the TLS key and each assertion key must be readable by the proxy's user alone:
-mode `0600` or `0400`, owned by uid 65532. A file on a read-only mount passes whatever its mode, as
-on a Kubernetes secret volume (`0644` by default) or a Docker mount with `:ro`. Sealing key files may
-be group- or other-readable, but never world-writable ([sealing keys](sealing-keys.md#the-key-directory)).
+mode `0600` or `0400`, owned by uid 65532. A file on a read-only mount passes this check whatever
+its mode, as on a Kubernetes secret volume (`0644` by default) or a Docker mount with `:ro`. Sealing
+key files may be group- or other-readable. No sealing or assertion key file may be world-writable,
+and neither may its directory unless it is on a read-only mount
+([sealing keys](sealing-keys.md#the-key-directory)).
 
-`--dev` (`BYWARD_DEV`) turns these checks off and accepts inline secrets. Never run production with
+`--dev` (`BYWARD_DEV`) turns the readability check off and accepts inline secrets; it does not relax
+the world-writable rule for keys. Never run production with
 it, nor with `BYWARD_INSECURE_NO_AUTH`: each logs a `development mode relaxation` warning at every
 start.
 
