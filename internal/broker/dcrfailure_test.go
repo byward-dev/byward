@@ -83,11 +83,15 @@ func TestADCRClientsFailureIsAnsweredAndLoggedAsForCIMD(t *testing.T) {
 		logged string // the one line of quiet logged with the jwks_uri cause; "" for none
 	}{
 		"keys refused": {
-			setup:  func(e *env) { e.b.cfg.Clients = clientsChangedBy{e.b.cfg.Clients, func(c registration.Client) registration.Client { return keysBad{c} }} },
+			setup: func(e *env) {
+				e.b.cfg.Clients = clientsChangedBy{e.b.cfg.Clients, func(c registration.Client) registration.Client { return keysBad{c} }}
+			},
 			status: http.StatusUnauthorized, code: "invalid_client", logged: metadataRefused,
 		},
 		"keys unavailable": {
-			setup:  func(e *env) { e.b.cfg.Clients = clientsChangedBy{e.b.cfg.Clients, func(c registration.Client) registration.Client { return keysDown{c} }} },
+			setup: func(e *env) {
+				e.b.cfg.Clients = clientsChangedBy{e.b.cfg.Clients, func(c registration.Client) registration.Client { return keysDown{c} }}
+			},
 			status: http.StatusServiceUnavailable, code: "temporarily_unavailable", logged: metadataUnavailable,
 		},
 		"registration expired": {
