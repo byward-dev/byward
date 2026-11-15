@@ -3,6 +3,7 @@ package relay
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,13 @@ import (
 )
 
 const toolsCall = `{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"ping"}}`
+
+// Bodies over the capture limit: one cut off inside the request, one a whole request whose capture
+// is cut off in the padding after it (it parses, so only the truncation makes its id unknown).
+var (
+	overCapture = `{"jsonrpc":"2.0","method":"tools/call","params":{"pad":"` + strings.Repeat("x", captureLimit) + `"},"id":1}`
+	padded      = toolsCall + strings.Repeat(" ", captureLimit)
+)
 
 // refuse makes the fake upstream answer every request with status and body (and a challenge
 // that must never reach the client).
@@ -49,7 +57,7 @@ func TestUpstreamRefusalBecomesAReadableJSONRPCResponse(t *testing.T) {
 			`"missing role Mcp.Admin"`},
 		{"upstream's JSON-RPC answer past the capture limit is not trusted", 403,
 			`{"jsonrpc":"2.0","id":7,"error":{"code":-32001,"message":"missing role"}}` + strings.Repeat(" ", captureLimit), "POST", toolsCall, 200,
-			`"isError":true`},
+			`{"id":7,"jsonrpc":"2.0","result":{"content":[{"text":"The upstream MCP server denied this request; ask your operator.","type":"text"}],"isError":true}}`},
 		{"upstream's JSON-RPC answer for another id is not trusted", 403, `{"jsonrpc":"2.0","id":8,"error":{"code":-32001,"message":"other"}}`, "POST", toolsCall, 200,
 			`"isError":true`},
 		{"notification: accepted", 403, ``, "POST", `{"jsonrpc":"2.0","method":"notifications/initialized"}`, 202, ""},
@@ -57,9 +65,9 @@ func TestUpstreamRefusalBecomesAReadableJSONRPCResponse(t *testing.T) {
 		{"DELETE: termination not allowed", 403, ``, "DELETE", ``, 405, ""},
 		{"401 on another method names the credential", 401, ``, "POST", `{"jsonrpc":"2.0","id":3,"method":"tools/list"}`, 200,
 			`"data":{"upstreamStatus":401},"message":"The upstream MCP server rejected the proxy's credentials; ask your operator."`},
-		{"batch: id unknown, 502", 403, ``, "POST", `[` + toolsCall + `]`, 502, "upstream refused the proxy"},
-		{"not JSON-RPC: 502", 403, ``, "POST", `hello`, 502, "upstream refused the proxy"},
-		{"null id: 502", 403, ``, "POST", `{"jsonrpc":"2.0","id":null,"method":"tools/call"}`, 502, "upstream refused the proxy"},
+		{"not JSON-RPC: id unknown, 502", 403, ``, "POST", `hello`, 502, "upstream refused the proxy"},
+		{"over the capture limit: id unknown, 502", 403, ``, "POST", overCapture, 502, "upstream refused the proxy"},
+		{"over the capture limit, its readable part a whole request: id unknown, 502", 403, ``, "POST", padded, 502, "upstream refused the proxy"},
 		{"other statuses pass through", 404, `nope`, "POST", toolsCall, 404, "nope"},
 	}
 	for _, c := range cases {
@@ -124,23 +132,9 @@ func TestEachUpstreamRefusalIsObservedOnce(t *testing.T) {
 	}
 }
 
-func TestRefusalWithTruncatedCaptureFallsBackTo502(t *testing.T) {
-	for name, body := range map[string]string{
-		"cut off inside the request":    `{"jsonrpc":"2.0","method":"tools/call","params":{"pad":"` + strings.Repeat("x", captureLimit) + `"},"id":1}`,
-		"cut off after a whole request": toolsCall + strings.Repeat(" ", captureLimit),
-	} {
-		t.Run(name, func(t *testing.T) {
-			w := httptest.NewRecorder()
-			refuse(t, 403, "").ServeHTTP(w, httptest.NewRequest("POST", "/mcp", strings.NewReader(body)))
-			if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "upstream refused the proxy") {
-				t.Fatalf("got %d %q", w.Code, w.Body)
-			}
-		})
-	}
-}
-
-// MCP's id is a string or an integer: those are echoed byte for byte, a large integer and an id
-// written with spaces around it too, and any other value leaves the request unanswerable.
+// MCP's id is a string or an integer: a refused request with one is answered with it, byte for byte
+// (a large integer too, and one written with spaces around it without them), and any other id
+// leaves the request unanswerable, so the refusal becomes a 502.
 func TestAStringOrIntegerIDIsEchoedExactlyAndAnyOtherLeavesTheRequestUnanswerable(t *testing.T) {
 	for _, tc := range []struct {
 		id    string
@@ -151,17 +145,48 @@ func TestAStringOrIntegerIDIsEchoedExactlyAndAnyOtherLeavesTheRequestUnanswerabl
 		{`null`, false}, {`true`, false}, {`{}`, false}, {`[]`, false},
 		{`1.5`, false}, {`-1.5e3`, false}, {`1e3`, false}, {`1E3`, false}, {`7.0`, false},
 	} {
-		t.Run(tc.id, func(t *testing.T) {
-			req, ok := parseRequest([]byte(`{"jsonrpc": "2.0", "method": "m", "id":` + tc.id + `}`))
-			if ok != tc.valid {
-				t.Fatalf("id %s answerable: %v, want %v", tc.id, ok, tc.valid)
-			}
-			if !ok {
+		t.Run(fmt.Sprintf("%s answerable=%v", tc.id, tc.valid), func(t *testing.T) {
+			w := httptest.NewRecorder()
+			body := `{"jsonrpc": "2.0", "method": "m", "id":` + tc.id + `}`
+			refuse(t, 403, "").ServeHTTP(w, httptest.NewRequest("POST", "/mcp", strings.NewReader(body)))
+			if !tc.valid {
+				if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "upstream refused the proxy") {
+					t.Fatalf("id %s: status %d, body %q; want 502, the id unknown", tc.id, w.Code, w.Body)
+				}
 				return
 			}
 			var out struct{ ID json.RawMessage }
-			if err := json.Unmarshal(synthesize(req, 403), &out); err != nil || !bytes.Equal(out.ID, []byte(strings.TrimSpace(tc.id))) {
-				t.Fatalf("id %s echoed as %s (%v)", tc.id, out.ID, err)
+			if err := json.Unmarshal(w.Body.Bytes(), &out); w.Code != http.StatusOK || err != nil || !bytes.Equal(out.ID, []byte(strings.TrimSpace(tc.id))) {
+				t.Fatalf("id %s: status %d, answered with id %s (%v); want 200 and the id as sent", tc.id, w.Code, out.ID, err)
+			}
+		})
+	}
+}
+
+// decide's verdicts, in order: the method first, then a truncated body (even one whose readable part
+// parses), then the request itself.
+func TestDecideAnswersByMethodThenTruncationThenTheRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name, method, body string
+		truncated          bool
+		want               outcome
+	}{
+		{"GET", "GET", ``, false, outcomeStreamRefused},
+		{"DELETE, even with a request", "DELETE", toolsCall, false, outcomeStreamRefused},
+		{"a whole request, truncated", "POST", toolsCall, true, outcomeUnanswerable},
+		{"a batch", "POST", `[` + toolsCall + `]`, false, outcomeUnanswerable},
+		{"not JSON-RPC", "POST", `hello`, false, outcomeUnanswerable},
+		{"no body", "POST", ``, false, outcomeUnanswerable},
+		{"a notification", "POST", `{"jsonrpc":"2.0","method":"notifications/initialized"}`, false, outcomeNotification},
+		{"a request", "POST", toolsCall, false, outcomeSynthesized},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, got := decide(tc.method, []byte(tc.body), tc.truncated)
+			if got != tc.want {
+				t.Fatalf("decide = %q, want %q", got, tc.want)
+			}
+			if got == outcomeSynthesized && (req.method != "tools/call" || string(req.id) != "7") {
+				t.Fatalf("request %+v; want tools/call with id 7", req)
 			}
 		})
 	}

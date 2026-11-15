@@ -32,5 +32,7 @@ func Answer(w http.ResponseWriter, r *http.Request, msg string, data any, fallba
 	case outcomeSynthesized:
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(rpcAnswer(req, msg, data))
+	default:
+		panic("relay: unhandled outcome " + string(out))
 	}
 }

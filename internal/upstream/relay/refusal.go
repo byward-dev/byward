@@ -203,6 +203,10 @@ func translate(res *http.Response, c *capture) outcome {
 			return outcomeRelayed
 		}
 		replace(res, http.StatusOK, synthesize(req, res.StatusCode))
+	case outcomeUnanswerable:
+		// The caller answers 502 (errUpstreamRefused).
+	default:
+		panic("relay: unhandled outcome " + string(out))
 	}
 	return out
 }

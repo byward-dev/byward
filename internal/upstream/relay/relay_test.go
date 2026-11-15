@@ -799,7 +799,7 @@ func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLogAndAWellFormedProxys
 				t.Fatalf("status %d, log %q; want 502 and the upstream error logged with the request ID", w.Code, logs.String())
 			}
 			if got := strings.Contains(logs.String(), `error="`+envproxy.Cause+`"`); got != tc.misread {
-				t.Fatalf("log %q names the misread setting: %v, want %v", logs.String(), got, tc.misread)
+				t.Fatalf("log %q names the misread setting's cause: %v, want %v", logs.String(), got, tc.misread)
 			}
 			if !tc.misread && (!strings.Contains(logs.String(), "proxyconnect") || !strings.Contains(logs.String(), addr)) {
 				t.Fatalf("log %q; want the transport error of a well-formed proxy, with the address Go dialled", logs.String())
@@ -829,8 +829,9 @@ func TestABodyOverTheLimitIsAnswered413ThroughAMisreadProxyAsThroughAnyOther(t *
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() { _ = ln.Close() })
+			read := make(chan struct{})
 			go func() {
+				defer close(read)
 				c, err := ln.Accept()
 				if err != nil {
 					return
@@ -840,6 +841,14 @@ func TestABodyOverTheLimitIsAnswered413ThroughAMisreadProxyAsThroughAnyOther(t *
 					_, _ = io.Copy(io.Discard, req.Body)
 				}
 			}()
+			t.Cleanup(func() {
+				_ = ln.Close()
+				select {
+				case <-read:
+				case <-time.After(5 * time.Second):
+					t.Error("the listener never finished reading the request")
+				}
+			})
 			u, _ := url.Parse("http://" + ln.Addr().String() + "/mcp")
 			proxy := func(*http.Request) (*url.URL, error) { return nil, nil }
 			if tc.setting != nil {
@@ -942,5 +951,8 @@ func TestTheRelayReadsTheEnvironmentProxyAndNamesAMisreadOnesCause(t *testing.T)
 			t.Fatalf("child output %q; want 502 and the upstream error logged", got)
 		}
 		rerun.CauseOnlyIfMisread(t, got, addr, misread)
+		if strings.Contains(got, `error="`+envproxy.Cause+`"`) != misread {
+			t.Fatalf("child output %q; want the cause as the upstream error only when misread (%v)", got, misread)
+		}
 	})
 }

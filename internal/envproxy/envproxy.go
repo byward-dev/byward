@@ -54,10 +54,11 @@ func SettingMisread() bool {
 // Redact returns t, whose errors through a proxy Go misread, judged by t's own Proxy, are replaced
 // by an *Error: a failed round trip, and a read of the response body that fails (a proxy that
 // answers, then resets). A request body over its http.MaxBytesReader limit stays the bare
-// *http.MaxBytesError, which quotes no address, so a server can still answer 413. Any other error,
-// and every response through any other proxy, passes through unchanged. An http.Client cancels a transport it does not know, as this one is, through
-// the request's Cancel channel, so a client timeout reads "request canceled (Client.Timeout …)"
-// instead of "context deadline exceeded (…)", while still answering Timeout and DeadlineExceeded.
+// *http.MaxBytesError, which quotes no address, so a server can still answer 413. Any other
+// error, and every response through any other proxy, passes through unchanged. An http.Client
+// cancels a transport it does not know, as this one is, through the request's Cancel channel, so a
+// client timeout reads "request canceled (Client.Timeout …)" instead of "context deadline exceeded
+// (…)", while still answering Timeout and DeadlineExceeded.
 func Redact(t *http.Transport) http.RoundTripper { return redacting{t} }
 
 type redacting struct{ t *http.Transport }
@@ -84,12 +85,14 @@ func (r redacting) RoundTrip(req *http.Request) (*http.Response, error) {
 func (r redacting) CloseIdleConnections() { r.t.CloseIdleConnections() }
 
 // redactedBody is a response body through a misread proxy: a read error that would quote the
-// address Go dialled says only Cause. io.EOF and io.ErrUnexpectedEOF quote nothing and pass through.
+// address Go dialled says only Cause. io.EOF, io.ErrUnexpectedEOF and the bare context errors quote
+// nothing and pass through as themselves: ReverseProxy compares a body copy's error with
+// context.Canceled by identity, to stay quiet when the client went away.
 type redactedBody struct{ io.ReadCloser }
 
 func (b redactedBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
-	if err == nil || err == io.EOF || err == io.ErrUnexpectedEOF { //nolint:errorlint // both come bare (io.EOF by contract): a wrap could quote the address
+	if err == nil || err == io.EOF || err == io.ErrUnexpectedEOF || err == context.Canceled || err == context.DeadlineExceeded { //nolint:errorlint // only these bare values: a wrap could quote the address
 		return n, err
 	}
 	return n, redact(err)

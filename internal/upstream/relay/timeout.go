@@ -64,6 +64,8 @@ func answerTimeout(ctx context.Context, w http.ResponseWriter, method string) ou
 	case outcomeSynthesized:
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(rpcAnswer(req, msgTimeout, map[string]bool{"upstreamTimeout": true}))
+	default:
+		panic("relay: unhandled outcome " + string(out))
 	}
 	return out
 }

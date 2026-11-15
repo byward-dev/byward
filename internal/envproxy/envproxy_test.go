@@ -86,8 +86,9 @@ func TestABodyOverItsLimitThroughAMisreadProxyStaysAMaxBytesError(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = ln.Close() })
+	read := make(chan struct{})
 	go func() {
+		defer close(read)
 		c, err := ln.Accept()
 		if err != nil {
 			return
@@ -97,13 +98,20 @@ func TestABodyOverItsLimitThroughAMisreadProxyStaysAMaxBytesError(t *testing.T) 
 			_, _ = io.Copy(io.Discard, req.Body)
 		}
 	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		select {
+		case <-read:
+		case <-time.After(5 * time.Second):
+			t.Error("the proxy never finished reading the request")
+		}
+	})
 	addr := ln.Addr().String()
 	body := http.MaxBytesReader(httptest.NewRecorder(), io.NopCloser(strings.NewReader(strings.Repeat("x", 64))), 1)
 	req, _ := http.NewRequest(http.MethodPost, "http://mcp.upstream.example/mcp", body)
 	_, err = Redact(through(addr + "/pw-secret@egress.example:3128")).RoundTrip(req)
-	var mbe *http.MaxBytesError
-	if !errors.As(err, &mbe) || strings.Contains(chain(err), addr) {
-		t.Fatalf("error %v; want a bare *http.MaxBytesError that quotes no address", err)
+	if mbe, ok := err.(*http.MaxBytesError); !ok || mbe == nil || strings.Contains(chain(err), addr) { //nolint:errorlint // the bare error is the contract
+		t.Fatalf("error %v (%T); want a bare *http.MaxBytesError that quotes no address", err, err)
 	}
 }
 
@@ -309,6 +317,20 @@ func TestABodyThatFailsThroughAMisreadProxySettingSaysOnlyTheCause(t *testing.T)
 			err := tc.do(redactedBody{tc.body})
 			if !errors.As(err, new(*Error)) || strings.Contains(chain(err), "4711") {
 				t.Fatalf("error %v; want the cause alone", err)
+			}
+		})
+	}
+}
+
+// A body read through a misread proxy that ends because the request's context did returns the bare
+// context error: ReverseProxy compares it with context.Canceled by identity, so a client that went
+// away is not logged as an upstream error; it quotes nothing.
+func TestABodyReadEndedByItsContextThroughAMisreadProxyKeepsTheBareContextError(t *testing.T) {
+	for _, want := range []error{context.Canceled, context.DeadlineExceeded} {
+		t.Run(want.Error(), func(t *testing.T) {
+			_, err := redactedBody{failingBody{readErr: want}}.Read(make([]byte, 1))
+			if err != want { //nolint:errorlint // identity is the contract
+				t.Fatalf("read error %v (%T); want the bare %v", err, err, want)
 			}
 		})
 	}

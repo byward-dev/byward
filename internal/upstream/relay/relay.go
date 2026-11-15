@@ -119,9 +119,9 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 				inject(pr.In.Context(), pr.Out.Header)
 			}
 		},
-		// Through a proxy whose setting Go misread, every transport error, and every failed read of a
-		// response body, says only envproxy.Cause: it would quote the address Go dialled, which is
-		// part of the proxy's credentials (invariant 2). So no log line below can quote it.
+		// Through a proxy whose setting Go misread, any transport error or failed read of a response
+		// body that could quote the address Go dialled, part of the proxy's credentials (invariant 2),
+		// says only envproxy.Cause. So no log line below can quote it.
 		Transport: envproxy.Redact(&http.Transport{
 			Proxy:                 o.proxy,
 			DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,

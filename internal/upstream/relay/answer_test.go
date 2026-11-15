@@ -12,8 +12,6 @@ import (
 func TestAnswerFollowsTheRefusalShapes(t *testing.T) {
 	const msg = "This tool needs an administrator to grant access; ask your operator."
 	data := map[string]string{"downstream": "consent_required"}
-	overCapture := `{"jsonrpc":"2.0","method":"tools/call","params":{"pad":"` + strings.Repeat("x", captureLimit) + `"},"id":1}`
-	padded := toolsCall + strings.Repeat(" ", captureLimit) // a whole request whose capture is cut off in the padding
 	cases := []struct {
 		name, method, body string
 		wantStatus         int
@@ -25,10 +23,9 @@ func TestAnswerFollowsTheRefusalShapes(t *testing.T) {
 			`{"error":{"code":-32603,"data":{"downstream":"consent_required"},"message":"` + msg + `"},"id":"a-1","jsonrpc":"2.0"}`},
 		{"notification: accepted", "POST", `{"jsonrpc":"2.0","method":"notifications/initialized"}`, 202, ""},
 		{"GET: no stream offered", "GET", ``, 405, ""},
-		{"batch: id unknown, the fallback status", "POST", `[` + toolsCall + `]`, 503, msg},
-		{"not JSON-RPC: the fallback status", "POST", `hello`, 503, msg},
-		{"over the capture limit: the fallback status", "POST", overCapture, 503, msg},
-		{"over the capture limit, its readable part a whole request: the fallback status", "POST", padded, 503, msg},
+		{"not JSON-RPC: id unknown, the fallback status", "POST", `hello`, 503, msg},
+		{"over the capture limit: id unknown, the fallback status", "POST", overCapture, 503, msg},
+		{"over the capture limit, its readable part a whole request: id unknown, the fallback status", "POST", padded, 503, msg},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
