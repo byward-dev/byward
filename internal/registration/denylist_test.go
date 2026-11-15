@@ -72,6 +72,28 @@ func TestADeniedHostMatchesExactlyIgnoringCase(t *testing.T) {
 	}
 }
 
+// An internationalized host is denied in either spelling: the browser goes to its ASCII (xn--) name
+// whichever one a client registers, so a Unicode redirect URI must not get past an xn-- entry.
+func TestADeniedHostMatchesBothSpellingsOfAnInternationalName(t *testing.T) {
+	for entry, redirects := range map[string][]string{
+		"xn--bcher-kva.example": {"https://bücher.example/cb", "https://BÜCHER.example/cb", "https://bücher。example/cb", "https://xn--bcher-kva.example/cb"},
+		"bücher.example":        {"https://xn--bcher-kva.example/cb", "https://bücher.example/cb"},
+	} {
+		d, err := NewDenylist([]string{entry})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, uri := range redirects {
+			if !d.DeniesRedirect(uri) {
+				t.Errorf("entry %q: DeniesRedirect(%q) = false, want true: the same host", entry, uri)
+			}
+		}
+		if d.DeniesRedirect("https://xn--bcher-kvb.example/cb") || d.DeniesRedirect("https://bucher.example/cb") {
+			t.Errorf("entry %q denied another host", entry)
+		}
+	}
+}
+
 // A denied CIMD client is unknown, with the reason for the operator log, before its document is
 // fetched; another document on the same host still resolves.
 func TestADeniedCIMDClientIsUnknownWithoutAFetch(t *testing.T) {

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"golang.org/x/net/idna"
 )
 
 // Denylist is the operator's list of refused CIMD clients and redirect hosts (ADR-0008 §9). It
@@ -50,9 +52,18 @@ func (d *Denylist) DeniesRedirect(redirectURI string) bool {
 	return err == nil && d.hosts[canonicalHost(u.Hostname())]
 }
 
-// canonicalHost folds the spellings of one host: case and a trailing dot (app.example. is the
-// same host as app.example).
-func canonicalHost(h string) string { return strings.TrimSuffix(strings.ToLower(h), ".") }
+// canonicalHost folds the spellings of one host: case, a trailing dot (app.example. is the same
+// host as app.example) and an internationalized name, which becomes the ASCII (xn--) name a browser
+// really goes to (WHATWG URL "domain to ASCII", as the consent page shows it), so a Unicode
+// spelling of a denied host is denied too. A host that has no such name, such as an IP address,
+// is compared lower-cased.
+func canonicalHost(h string) string {
+	h = strings.TrimSuffix(strings.ToLower(h), ".")
+	if ascii, err := idna.Lookup.ToASCII(h); err == nil {
+		return ascii
+	}
+	return h
+}
 
 // canonicalCIMD folds the spellings of one CIMD URL that fetch the same document: host case, a
 // trailing dot, the default port and percent-encoding in the path. A denylist may match more

@@ -657,6 +657,31 @@ func TestDCRIsOnByDefaultAndTheDenylistTakesCommaSeparatedEntries(t *testing.T) 
 	}
 }
 
+// A denylist host entry follows the CIMD host lists' rule (#344), so an entry that could never match
+// a redirect host fails at load instead of denying nothing; a trailing dot names the same host.
+func TestADenylistHostEntryMustBeAHostName(t *testing.T) {
+	for _, entry := range []string{"app.example", "App.Example", "app.example.", "xn--bcher-kva.example", "https://evil.example/client.json"} {
+		if _, err := load(t, nil, "BYWARD_CLIENT_DENYLIST="+entry); err != nil {
+			t.Errorf("%q refused: %v", entry, err)
+		}
+	}
+	for entry, why := range map[string]string{
+		"a..b":           "no empty label",
+		".bad.example":   "no empty label",
+		"bad\tx.example": "only letters, digits",
+		"%62ad.example":  "only letters, digits",
+		"[bad].example":  "only letters, digits",
+		"bad.example:80": "only letters, digits",
+		"localhost":      "at least one dot",
+		"bücher.example": "give its ASCII (xn--) form",
+	} {
+		_, err := load(t, nil, "BYWARD_CLIENT_DENYLIST=app.example,"+entry)
+		if !isConfigError(err) || !strings.Contains(err.Error(), "BYWARD_CLIENT_DENYLIST") || !strings.Contains(err.Error(), why) {
+			t.Errorf("%q: %v, want a configuration error naming BYWARD_CLIENT_DENYLIST and %q", entry, err, why)
+		}
+	}
+}
+
 // #319: one reduction of a BYWARD_ALLOWED_HOSTS entry or a Host header to a host name, for the
 // internal listener's Host check, the no-auth loopback check and the TLS certificate names.
 func TestAnAllowedHostEntryOrHostHeaderReducesToItsLowerCaseHostName(t *testing.T) {
