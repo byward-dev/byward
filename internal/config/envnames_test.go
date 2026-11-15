@@ -12,9 +12,9 @@ import (
 
 var (
 	envName = regexp.MustCompile(`\bBYWARD_[A-Z][A-Z0-9_]*\*?`)
-	// settingLiteral is a setting named in code as Setting{Name: "…"}, optionally with a suffix
-	// appended to Env() by hand, which may only be a secret setting's _FILE.
-	settingLiteral = regexp.MustCompile(`Setting\{Name: *"([^"]*)"\}(?:\.Env\(\)\s*\+\s*"([^"]*)")?`)
+	// settingLiteral is a setting named in code as Setting{Name: "…"}, with any suffix appended to
+	// Env() by hand; settingLiteralProblem says which are wrong.
+	settingLiteral = regexp.MustCompile(`Setting\{Name: *"([^"]*)"\}(?:\.Env\(\)\s*\+\s*["` + "`" + `]([^"` + "`" + `]*)["` + "`" + `])?`)
 )
 
 // Setting names written out by hand in code (messages and environment lookups) and in the operator
@@ -95,9 +95,8 @@ func settingLiteralProblem(byName map[string]Setting, name, suffix string) strin
 	return ""
 }
 
-// The guard reads a Setting literal in every form gofmt writes, and refuses an unknown name, a
-// suffix other than _FILE, and _FILE on a setting that is not secret.
-func TestTheSettingLiteralGuardRefusesWhatNoSettingReads(t *testing.T) {
+// The guard reads a Setting literal, and any suffix after Env(), in every form gofmt writes.
+func TestTheSettingLiteralPatternReadsEveryGofmtForm(t *testing.T) {
 	for src, want := range map[string][]string{
 		`Setting{Name: "x"}`:                        {"x", ""},
 		`config.Setting{Name: "x"}.Env()`:           {"x", ""},
@@ -105,14 +104,20 @@ func TestTheSettingLiteralGuardRefusesWhatNoSettingReads(t *testing.T) {
 		`Setting{Name: "x"}.Env() + "_FILE"`:        {"x", "_FILE"},
 		"Setting{Name: \"x\"}.Env() +\n\t\"_FILE\"": {"x", "_FILE"},
 		`Setting{Name: "x"}.Env() + "_FILES"`:       {"x", "_FILES"},
+		"Setting{Name: \"x\"}.Env() + `_FILE`":      {"x", "_FILE"}, // a raw string
 		`Settings{Name: "x"}`:                       nil,
 		`Setting{Name: x}`:                          nil,
 	} {
 		m := settingLiteral.FindStringSubmatch(src)
 		if (want == nil) != (m == nil) || (m != nil && (m[1] != want[0] || m[2] != want[1])) {
-			t.Errorf("%s: matched %q, want %q", src, m, want)
+			t.Errorf("%q: matched %q, want %q", src, m, want)
 		}
 	}
+}
+
+// The guard refuses an unknown name, a suffix other than _FILE, and _FILE on a setting that is not
+// secret.
+func TestTheSettingLiteralGuardRefusesWhatNoSettingReads(t *testing.T) {
 	byName := map[string]Setting{"plain": {Name: "plain"}, "secret": {Name: "secret", Secret: true}}
 	for _, tc := range []struct{ name, suffix, want string }{
 		{"plain", "", ""},
