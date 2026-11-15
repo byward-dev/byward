@@ -414,21 +414,26 @@ type gateFunc func(context.Context, idp.Identity) error
 func (g gateFunc) Allow(ctx context.Context, id idp.Identity) error { return g(ctx, id) }
 
 func TestRefreshRevokesWhenTheUserNoLongerChecksOut(t *testing.T) {
+	const otherUser = "the IdP returned another user on refresh; grant revoked"
 	cases := []struct {
 		name    string
 		refresh func(g store.Grant) (*idp.Identity, idp.Tokens, error)
 		gate    error
+		// The revocation's one log line, and its reason; none for a gate refusal, which the audit
+		// event names.
+		msg, reason string
 	}{
-		{"no ID token on refresh", func(store.Grant) (*idp.Identity, idp.Tokens, error) { return nil, idp.Tokens{AccessToken: "a"}, nil }, nil},
+		{"no ID token on refresh", func(store.Grant) (*idp.Identity, idp.Tokens, error) { return nil, idp.Tokens{AccessToken: "a"}, nil }, nil,
+			"the IdP returned no ID token on refresh; grant revoked", "the IdP must return an ID token on the refresh_token grant (openid scope); see the IdP's how-to"},
 		{"another subject", func(g store.Grant) (*idp.Identity, idp.Tokens, error) {
 			return &idp.Identity{Subject: g.Subject + "-other", Issuer: g.Issuer}, idp.Tokens{AccessToken: "a"}, nil
-		}, nil},
+		}, nil, otherUser, "OIDC Core §12.2: sub and iss must not change"},
 		{"another issuer", func(g store.Grant) (*idp.Identity, idp.Tokens, error) {
 			return &idp.Identity{Subject: g.Subject, Issuer: "https://elsewhere.example"}, idp.Tokens{AccessToken: "a"}, nil
-		}, nil},
+		}, nil, otherUser, "OIDC Core §12.2: sub and iss must not change"},
 		{"the gate refuses now", func(g store.Grant) (*idp.Identity, idp.Tokens, error) {
 			return &idp.Identity{Subject: g.Subject, Issuer: g.Issuer}, idp.Tokens{AccessToken: "a"}, nil
-		}, denial{}},
+		}, denial{}, "the access gate refused the user on refresh; grant revoked", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -460,6 +465,19 @@ func TestRefreshRevokesWhenTheUserNoLongerChecksOut(t *testing.T) {
 			if tc.gate != nil {
 				e.oneAuditEvent(t, "access_denied", map[string]any{"outcome": "failure", "client_id": clientID,
 					"grant_id": firstGrant(e.st), "user_key": "*", "idp": "entra", "reason": "role"})
+			}
+			var lines []map[string]any
+			for _, line := range strings.Split(strings.TrimSpace(e.logs.String()), "\n") {
+				var rec map[string]any
+				if json.Unmarshal([]byte(line), &rec) == nil && rec["msg"] == tc.msg {
+					lines = append(lines, rec)
+				}
+			}
+			if len(lines) != 1 {
+				t.Fatalf("want one %q line, got %v", tc.msg, lines)
+			}
+			if got := lines[0]["reason"]; tc.reason == "" && got != nil || tc.reason != "" && (got != tc.reason || lines[0]["idp"] != "entra") {
+				t.Errorf("revocation line %v, want reason %q and, with a reason, idp entra", lines[0], tc.reason)
 			}
 		})
 	}
@@ -1079,51 +1097,47 @@ func TestARefreshErrorWithNoFixFailsTheRequestKeepsTheGrantAndRaisesNoAlert(t *t
 	}
 }
 
-// Each refresh failure from the IdP is logged with the IdP's own error code, trace ID and correlation
-// ID as fields (ADR-0021 §7), each only when the IdP sent it, so a query on idp_error_code finds
-// refresh failures as it finds sign-in ones. A session the IdP ended logs its error on the line
-// that says the grant was revoked.
+// Each refresh failure from the IdP is logged with the IdP's error, its fix and its own error code,
+// trace ID and correlation ID as fields (ADR-0021 §7), each only when present, so a query on
+// idp_error_code finds refresh failures as it finds sign-in ones. A session the IdP ended logs all
+// that on its one revocation line.
 func TestARefreshFailureFromTheIdPLogsItsErrorFields(t *testing.T) {
 	for _, c := range []struct {
-		name, msg, level string
-		class            idp.Class
+		name, oauth, msg, level string
+		class                   idp.Class
 	}{
-		{"the IdP ended the session", "the IdP ended the session; grant revoked", "WARN", idp.SignInAgain},
-		{"the IdP is unavailable", "IdP refresh unavailable", "WARN", idp.Unavailable},
-		{"the IdP refused the refresh", "IdP refresh failed", "ERROR", idp.Fatal},
+		{"the IdP ended the session", "invalid_grant", "the IdP ended the session; grant revoked", "WARN", idp.SignInAgain},
+		{"the IdP is unavailable", "temporarily_unavailable", "IdP refresh unavailable", "WARN", idp.Unavailable},
+		{"the IdP failed the refresh", "invalid_client", "IdP refresh failed", "ERROR", idp.Fatal},
 	} {
 		for _, sent := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s, fields sent %v", c.name, sent), func(t *testing.T) {
-				ie := &idp.Error{Class: c.class, OAuth: "invalid_grant", Err: errors.New("refresh refused")}
+				ie := &idp.Error{Class: c.class, OAuth: c.oauth, Err: errors.New("refresh error")}
 				if sent {
-					ie.Code, ie.TraceID, ie.CorrelationID = 70008, "trace-1", "corr-1"
+					ie.Code, ie.TraceID, ie.CorrelationID, ie.OperatorHint = 70008, "trace-1", "corr-1", "hint-1"
 				}
-				var refreshErr error
+				refreshErr := fmt.Errorf("adapter: %w", ie) // wrapped, as an adapter may return it
 				e := newEnv(t, func(cfg *Config) {
-					real := cfg.IdP
-					cfg.IdP = refresherFunc{IdP: real, refresh: func(ctx context.Context, rt string) (*idp.Identity, idp.Tokens, error) {
-						if refreshErr != nil {
-							return nil, idp.Tokens{}, refreshErr
-						}
-						return real.Refresh(ctx, rt)
+					cfg.IdP = refresherFunc{IdP: cfg.IdP, refresh: func(context.Context, string) (*idp.Identity, idp.Tokens, error) {
+						return nil, idp.Tokens{}, refreshErr
 					}}
 				})
-				rt := e.offline(t)["refresh_token"].(string)
-				refreshErr = ie
-				e.refresh(t, rt, "")
+				e.refresh(t, e.offline(t)["refresh_token"].(string), "")
 				logs := e.logs.String()
-				lines := regexp.MustCompile(`(?m)^.*"msg":"`+regexp.QuoteMeta(c.msg)+`".*"error":.*$`).FindAllString(logs, -1)
+				lines := regexp.MustCompile(`(?m)^.*"msg":"`+regexp.QuoteMeta(c.msg)+`".*$`).FindAllString(logs, -1)
 				if len(lines) != 1 {
-					t.Fatalf("want one %q line carrying the IdP's error, got %d:\n%s", c.msg, len(lines), logs)
+					t.Fatalf("want one %q line, got %d:\n%s", c.msg, len(lines), logs)
 				}
 				line := lines[0]
-				fields := []string{`"idp_error_code":70008`, `"trace_id":"trace-1"`, `"correlation_id":"corr-1"`}
-				for _, f := range fields {
+				if want, _ := json.Marshal(refreshErr.Error()); !strings.Contains(line, `"error":`+string(want)) {
+					t.Errorf("the line does not quote the IdP error %s:\n%s", want, line)
+				}
+				for _, f := range []string{`"reason":"hint-1"`, `"idp_error_code":70008`, `"trace_id":"trace-1"`, `"correlation_id":"corr-1"`} {
 					if strings.Contains(line, f) != sent {
 						t.Errorf("field %s present %v, want %v:\n%s", f, !sent, sent, line)
 					}
 				}
-				for _, unset := range []string{`"idp_error_code":0`, `"trace_id":""`, `"correlation_id":""`} {
+				for _, unset := range []string{`"reason":""`, `"idp_error_code":0`, `"trace_id":""`, `"correlation_id":""`} {
 					if strings.Contains(line, unset) {
 						t.Errorf("the line logs an unset field %s:\n%s", unset, line)
 					}

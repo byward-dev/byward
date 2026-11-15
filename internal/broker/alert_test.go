@@ -160,8 +160,12 @@ func TestIdPErrorsThatNeedTheOperatorRaiseAnAlert(t *testing.T) {
 			}
 			// The failure's own line names the same fix (#315: it was empty when only the alert had one).
 			msg := map[string]string{"callback": "IdP sign-in failed", "refresh": "IdP refresh (unavailable|failed)"}[op]
-			if failed := regexp.MustCompile(`(?m)^.*"msg":"` + msg + `".*$`).FindString(logs); !strings.Contains(failed, `"reason":"`+c.fix+`"`) {
+			failed := regexp.MustCompile(`(?m)^.*"msg":"` + msg + `".*$`).FindString(logs)
+			if !strings.Contains(failed, `"reason":"`+c.fix+`"`) {
 				t.Errorf("the %q line's reason is not %q:\n%s", msg, c.fix, logs)
+			}
+			if !strings.Contains(failed, `"error":`) {
+				t.Errorf("the %q line does not quote the error:\n%s", msg, logs)
 			}
 		})
 	}

@@ -304,15 +304,15 @@ func assertionSubject(jwt string) string {
 	return c.Sub
 }
 
-// revoke ends a grant (store and deny list) and logs why. A store failure is logged: the deny list
-// still ends the grant's access tokens on this replica.
-func (b *Broker) revoke(r *http.Request, clientID, grantID string, now time.Time, why string) {
+// revoke ends a grant (store and deny list) and logs why, on one line with attrs. A store failure is
+// logged: the deny list still ends the grant's access tokens on this replica.
+func (b *Broker) revoke(r *http.Request, clientID, grantID string, now time.Time, why string, attrs ...any) {
 	ctx := r.Context()
 	if err := b.cfg.Store.RevokeGrant(ctx, grantID, now); err != nil && !errors.Is(err, store.ErrNotFound) {
 		b.cfg.Log.ErrorContext(ctx, "revoking a grant failed", "error", err)
 	}
 	b.revoked(r, clientID, grantID, why)
-	b.cfg.Log.WarnContext(ctx, why)
+	b.cfg.Log.WarnContext(ctx, why, attrs...)
 }
 
 // revoked is the end of every grant revocation, once the store has revoked the grant (or failed to,

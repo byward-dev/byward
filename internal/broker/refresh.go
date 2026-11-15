@@ -124,12 +124,12 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]byte, assertedClaims, time.Time, tokenError, bool) {
 	ctx := r.Context()
 	signInAgain := tokenError{http.StatusBadRequest, "invalid_grant", "sign in again"}
-	// end revokes the grant; attrs, when given, say why on a line of their own with the IdP's name.
+	// end revokes the grant; revoke logs why, with the IdP's name and attrs when attrs are given.
 	end := func(why string, attrs ...any) ([]byte, assertedClaims, time.Time, tokenError, bool) {
-		b.revoke(r, g.ClientID, g.ID, now, why)
 		if len(attrs) > 0 {
-			b.cfg.Log.WarnContext(ctx, why, append([]any{"idp", b.cfg.IdPName}, attrs...)...)
+			attrs = append([]any{"idp", b.cfg.IdPName}, attrs...)
 		}
+		b.revoke(r, g.ClientID, g.ID, now, why, attrs...)
 		return nil, assertedClaims{}, time.Time{}, signInAgain, false
 	}
 	held, err := b.openSecrets(g.IdPTokens)
@@ -144,7 +144,8 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 		var ie *idp.Error
 		switch {
 		case errors.As(err, &ie) && ie.Class == idp.SignInAgain:
-			// The IdP's error too, so its code and trace ID show why it ended the session (ADR-0021 §7).
+			// The IdP's error too: its code says why, and its trace and correlation IDs find the IdP's
+			// record (ADR-0021 §7).
 			return end("the IdP ended the session; grant revoked", append([]any{"error", err}, idpAttrs(err)...)...)
 		case errors.As(err, &ie) && ie.Class == idp.Unavailable:
 			b.cfg.Log.WarnContext(ctx, "IdP refresh unavailable", append([]any{"error", err}, idpAttrs(err)...)...)

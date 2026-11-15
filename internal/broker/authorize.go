@@ -514,10 +514,8 @@ func (b *Broker) noteIdPFailure(r *http.Request, clientID string, err error) str
 			msg = ie.UserMessage
 		}
 		reason = "the IdP sign-in failed (" + ie.Class.String() + ")"
-		b.cfg.Log.ErrorContext(ctx, "IdP sign-in failed", append([]any{"error", err}, idpAttrs(err)...)...)
-	} else {
-		b.cfg.Log.ErrorContext(ctx, "IdP sign-in failed", "error", err)
 	}
+	b.cfg.Log.ErrorContext(ctx, "IdP sign-in failed", append([]any{"error", err}, idpAttrs(err)...)...)
 	b.cfg.Audit.Record(r, audit.Event{Name: audit.Login, Outcome: audit.Failure, Reason: reason, ClientID: clientID, IdP: b.cfg.IdPName})
 	return msg
 }
