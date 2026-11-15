@@ -20,8 +20,8 @@ func TestTLSFilesAreBothOrNeitherAbsoluteAndNeedAnHTTPSPublicURL(t *testing.T) {
 		{"both", nil, []string{cert, key}, ""},
 		{"only the certificate", nil, []string{cert}, "BYWARD_TLS_CERT_FILE and BYWARD_TLS_KEY_FILE: set both or neither"},
 		{"only the key", nil, []string{key}, "BYWARD_TLS_CERT_FILE and BYWARD_TLS_KEY_FILE: set both or neither"},
-		{"a relative certificate path", nil, []string{"BYWARD_TLS_CERT_FILE=tls.crt", key}, `BYWARD_TLS_CERT_FILE: want an absolute path, got "tls.crt"`},
-		{"a relative key path", nil, []string{cert, "BYWARD_TLS_KEY_FILE=tls.key"}, `BYWARD_TLS_KEY_FILE: want an absolute path, got "tls.key"`},
+		{"a relative certificate path", nil, []string{"BYWARD_TLS_CERT_FILE=tls.crt", key}, `BYWARD_TLS_CERT_FILE: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got "tls.crt"`},
+		{"a relative key path", nil, []string{cert, "BYWARD_TLS_KEY_FILE=tls.key"}, `BYWARD_TLS_KEY_FILE: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got "tls.key"`},
 		{"an http public URL in --dev", []string{"--dev"}, []string{cert, key, "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp"},
 			"BYWARD_TLS_CERT_FILE: TLS on the listener needs an https BYWARD_PUBLIC_URL"},
 	} {

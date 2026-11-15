@@ -3,7 +3,6 @@ package config
 import (
 	"maps"
 	"net/url"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -100,8 +99,8 @@ func (c *Config) entraIdP(v *Values) []error {
 	case len(set) > 1:
 		errs = append(errs, errorf("%s are set together: Entra gets one credential, so keep only one of them", strings.Join(set, " and ")))
 	case c.EntraFederatedTokenFile != "":
-		if !filepath.IsAbs(c.EntraFederatedTokenFile) {
-			errs = append(errs, errorf("%s: want an absolute path, got %q", tokenEnv, c.EntraFederatedTokenFile))
+		if err := absolute("entra-federated-token-file", c.EntraFederatedTokenFile); err != nil {
+			errs = append(errs, err)
 		}
 		if v.get("entra-client-secret-expires-at") != "" {
 			errs = append(errs, errorf("%s has no effect with %s: a federated token has no secret to expire; remove it", Setting{Name: "entra-client-secret-expires-at"}.Env(), tokenEnv))
