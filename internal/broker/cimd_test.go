@@ -350,7 +350,7 @@ func TestATransientFailureAtTheConsentAnswerIsServiceUnavailable(t *testing.T) {
 
 // An invalid CIMD client ID is never logged as sent: it may carry a password, a query or any length
 // (ADR-0009 §8). A valid one is named on the line (TestAnUnknownClientIDIsLoggedOnlyForCIMD).
-func TestARefusedCIMDClientIDIsNotLoggedAsSent(t *testing.T) {
+func TestAnInvalidCIMDClientIDIsNotLoggedAsSent(t *testing.T) {
 	longPath := strings.Repeat("z", 600) // past the length limit; none of it may reach the log
 	for name, id := range map[string]string{
 		"a password": "https://alice:hunter2@app.example.com/x.json",
