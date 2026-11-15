@@ -748,6 +748,35 @@ func TestMetadataAdvertisesTheBroker(t *testing.T) {
 	}
 }
 
+// The metadata advertises the client authentication registration accepts: the assertion
+// algorithms, the methods a CIMD or DCR client may use (at /token and /revoke), and the grant types.
+func TestMetadataAdvertisesTheClientAuthenticationRegistrationAccepts(t *testing.T) {
+	e := newEnv(t)
+	res := e.do(t, "GET", "/.well-known/oauth-authorization-server", nil, nil)
+	var md struct {
+		Algs    []string `json:"token_endpoint_auth_signing_alg_values_supported"`
+		Methods []string `json:"token_endpoint_auth_methods_supported"`
+		Revoke  []string `json:"revocation_endpoint_auth_methods_supported"`
+		Grants  []string `json:"grant_types_supported"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&md); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		field     string
+		got, want []string
+	}{
+		{"token_endpoint_auth_signing_alg_values_supported", md.Algs, registration.AssertionAlgs()},
+		{"token_endpoint_auth_methods_supported", md.Methods, registration.MetadataAuthMethods()},
+		{"revocation_endpoint_auth_methods_supported", md.Revoke, registration.MetadataAuthMethods()},
+		{"grant_types_supported", md.Grants, registration.GrantTypes()},
+	} {
+		if !slices.Equal(c.got, c.want) {
+			t.Errorf("%s = %v, want %v", c.field, c.got, c.want)
+		}
+	}
+}
+
 func TestCORSAndMethods(t *testing.T) {
 	const md, origin = "/.well-known/oauth-authorization-server", "https://app.example"
 	cases := []struct {
