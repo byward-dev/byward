@@ -50,7 +50,7 @@ back; a temporary fetch failure never revokes anything.
 
 A refused app sees "This app is not registered with the proxy". If its document can't be fetched
 for now, the app sees "Try again in a minute", or HTTP 503 with `Retry-After: 60` at `/token` and `/revoke`. The proxy never redirects
-back to the app in either case. Each refusal is logged as a warning, "client metadata refused", with the reason: the document, or
+back to the app in either case. Each refusal is logged as a warning, "client metadata refused", with the client ID and the reason: the document, or
 the keys at a `jwks_uri`, was unacceptable, and `/token` and `/revoke` answer 401 `invalid_client`.
 A temporary failure is logged as "client metadata unavailable" and answered with 503 and
 `Retry-After: 60`: network trouble, a timeout, a 5xx, 408 or 429 while fetching the document or the

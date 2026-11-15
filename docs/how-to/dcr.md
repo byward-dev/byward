@@ -81,4 +81,4 @@ rate-limited per client address. `byward_dcr_registrations_total` counts the sam
 "client registration dropped redirect URIs", with the client ID and the URIs (scheme, host and
 path, never the query). A client whose keys at its `jwks_uri` are refused or cannot be fetched is
 logged as for a CIMD client, "client metadata refused" or "client metadata unavailable", with the
-cause.
+client ID and the cause.
