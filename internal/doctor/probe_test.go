@@ -33,6 +33,9 @@ type proxy struct {
 	noJWKSURI bool   // jwks_uri left out although there is a JWKS
 	jwks404   bool   // jwks_uri named, but nothing served there
 	jwksURI   string // overrides the advertised jwks_uri
+	// jwksMoved advertises a jwks_uri logs may not show (an @ in its query) that redirects to a
+	// relative Location, which resolves only against the jwks_uri as written.
+	jwksMoved bool
 	hugeJWKS  bool
 	// noOpenIDJWKS leaves jwks_uri out of the OpenID document only, keeping it in RFC 8414's.
 	noOpenIDJWKS bool
@@ -88,6 +91,9 @@ func (p proxy) handler(origin string) http.Handler {
 			if p.jwksURI != "" {
 				doc["jwks_uri"] = p.jwksURI
 			}
+			if p.jwksMoved {
+				doc["jwks_uri"] = origin + "/.well-known/jwks.json?u=a@b&sig=SECRET"
+			}
 		}
 		_ = json.NewEncoder(w).Encode(doc)
 	}
@@ -105,6 +111,10 @@ func (p proxy) handler(origin string) http.Handler {
 	mux.HandleFunc("GET /.well-known/jwks.json", func(w http.ResponseWriter, r *http.Request) {
 		if p.jwksKey == "" || p.jwks404 {
 			http.NotFound(w, r)
+			return
+		}
+		if p.jwksMoved {
+			http.Redirect(w, r, "keys?state=SECRET", http.StatusFound)
 			return
 		}
 		if p.hugeJWKS {
@@ -275,7 +285,9 @@ func TestSelfProbe404NamesTheRoute(t *testing.T) {
 
 // With an identity assertion, discovery must lead a verifier that uses nothing else to the signing
 // key, as MCP Toolbox's generic auth does: openid-configuration names byward's issuer and a jwks_uri
-// serving the key (ADR-0016 amendment, #207). Without one, the check is not run.
+// serving the key (ADR-0016 amendment, #207). Without one, the check is not run. What answered may not
+// be the proxy, so every result shows the jwks_uri it named without its query, and a redirect from it
+// resolves against the jwks_uri as written.
 func TestSelfProbeFollowsDiscoveryToTheAssertionKey(t *testing.T) {
 	if got := probeSigning(t, proxy{jwksKey: "k1"}, "k1")[keysByDisco]; got.Status != Pass || !strings.Contains(got.Message, "serves the signing key k1") || strings.Contains(got.Message, "SECRET") {
 		t.Fatalf("healthy: %+v", got)
@@ -297,6 +309,7 @@ func TestSelfProbeFollowsDiscoveryToTheAssertionKey(t *testing.T) {
 		"discovery too large":                  {proxy{jwksKey: "k1", hugeMetadata: true}, "larger than", "pass this path through unchanged"},
 		"the JWKS too large":                   {proxy{jwksKey: "k1", hugeJWKS: true}, "larger than", "pass this path through unchanged"},
 		"jwks_uri only in RFC 8414's document": {proxy{jwksKey: "k1", noOpenIDJWKS: true}, "does not name the issuer", "pass this path through unchanged"},
+		"jwks_uri that redirects":              {proxy{jwksKey: "k1", jwksMoved: true}, "(redirect to http://127.0.0.1:", "pass this path through unchanged"},
 		"jwks_uri unreachable":                 {proxy{jwksKey: "k1", jwksURI: "http://127.0.0.1:1/.well-known/jwks.json"}, "cannot reach http://127.0.0.1:1/.well-known/jwks.json", "start the proxy"},
 		"jwks_uri that does not parse":         {proxy{jwksKey: "k1", jwksURI: "http://admin:SECRET/@x/jwks"}, `cannot reach <invalid URL>: parse "<invalid URL>": not a URL`, "start the proxy"},
 	} {

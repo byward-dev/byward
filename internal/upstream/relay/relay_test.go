@@ -968,7 +968,7 @@ func TestAClientsRefusedTrailerIsLoggedWithoutItsLine(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/mcp", body)
 	rec := httptest.NewRecorder()
 	New(slog.New(slog.NewTextHandler(&logs, nil)), u).ServeHTTP(rec, req)
-	if strings.Contains(logs.String(), "SECRET") || !strings.Contains(logs.String(), "malformed header or trailer line") {
-		t.Fatalf("log %q, want the refused line named without its text", logs.String())
+	if rec.Code != http.StatusBadGateway || strings.Contains(logs.String(), "SECRET") || !strings.Contains(logs.String(), "malformed header or trailer line") {
+		t.Fatalf("status %d, log %q, want 502 and the refused line named without its text", rec.Code, logs.String())
 	}
 }

@@ -136,24 +136,32 @@ func TestARealTransportsRefusedTrailerLineIsNotQuoted(t *testing.T) {
 	if err == nil {
 		t.Fatal("reading the body accepted the trailer")
 	}
-	if got := BodyError(err); got != errBadHeader { //nolint:errorlint // the sentinel itself is the contract
-		t.Fatalf("BodyError = %v, want %v", got, errBadHeader)
+	if got := BodyError(err); got == nil || got.Error() != "a malformed header or trailer line" {
+		t.Fatalf("BodyError = %v, want the refused line named without its text", got)
 	}
 }
 
-// BodyError replaces an error that holds a refused line, bare or wrapped, and leaves any other error,
-// nil included, as it is.
-func TestABodyErrorIsReplacedOnlyWhenItQuotesARefusedLine(t *testing.T) {
+// BodyError replaces an error that holds a refused line, bare or wrapped, with one that names the
+// failure without the line, and returns any other error, nil included, as it is: callers match those
+// with errors.Is.
+func TestABodyErrorIsReplacedOnlyForARefusedLine(t *testing.T) {
 	refused := textproto.ProtocolError(`malformed MIME header line: "X-Sid: SECRET\x01"`)
-	for name, tc := range map[string]struct{ err, want error }{
-		"a bare refused line":    {refused, errBadHeader},
-		"a wrapped refused line": {fmt.Errorf("reading: %w", refused), errBadHeader},
-		"a cut-off body":         {io.ErrUnexpectedEOF, io.ErrUnexpectedEOF},
-		"a cancelled read":       {context.Canceled, context.Canceled},
-		"no error":               {nil, nil},
+	for name, tc := range map[string]struct {
+		err      error
+		replaced bool
+	}{
+		"a bare refused line":    {refused, true},
+		"a wrapped refused line": {fmt.Errorf("reading: %w", refused), true},
+		"a cut-off body":         {io.ErrUnexpectedEOF, false},
+		"a cancelled read":       {context.Canceled, false},
+		"no error":               {nil, false},
 	} {
-		if got := BodyError(tc.err); got != tc.want { //nolint:errorlint // identity is the contract
-			t.Errorf("%s: BodyError(%v) = %v, want %v", name, tc.err, got, tc.want)
+		got := BodyError(tc.err)
+		if tc.replaced && (got == nil || got.Error() != "a malformed header or trailer line") {
+			t.Errorf("%s: BodyError = %v, want the refused line named without its text", name, got)
+		}
+		if !tc.replaced && got != tc.err { //nolint:errorlint // the same error, so errors.Is still matches it
+			t.Errorf("%s: BodyError(%v) = %v, want it unchanged", name, tc.err, got)
 		}
 	}
 }
