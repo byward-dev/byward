@@ -4,8 +4,8 @@
 as the proxy ([settings](settings.md)), so run them with the proxy's configuration;
 `downstream-token` is the exception: it reads only `BYWARD_DOWNSTREAM_TOKEN_SOCKET`. They take no
 setting flags; give settings through the environment. A stdio upstream given on the command line goes
-after `--`, as for the proxy (`byward check --offline -- /usr/local/bin/server --flag`); no command
-starts it. Without authentication (`BYWARD_INSECURE_NO_AUTH`) the broker's store is off, so
+after `--`, as for the proxy (`byward check --offline -- /usr/local/bin/server --flag`); none of
+these commands starts it. Without authentication (`BYWARD_INSECURE_NO_AUTH`) the broker's store is off, so
 revoke-user, revoke-all and store new-epoch exit 2. `byward --help` lists them.
 
 | Command | What it does | Network | Exit codes |

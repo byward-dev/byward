@@ -239,12 +239,7 @@ func TestRevokeCommandsExit2OnMisuse1OnAStoreFailureAndReportTheRevokedUser(t *t
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp")
-			var stateDir string
-			for _, kv := range env {
-				if v, ok := strings.CutPrefix(kv, "BYWARD_STORE_DIR="); ok {
-					stateDir = v
-				}
-			}
+			stateDir := setting(env, "BYWARD_STORE_DIR")
 			if tc.badStore {
 				if err := os.WriteFile(stateDir, nil, 0o600); err != nil {
 					t.Fatal(err)
@@ -311,22 +306,23 @@ func TestStoreNewEpochExits2OnMisuseOrSQLiteAnd1WhenPostgreSQLIsUnreachable(t *t
 
 // revoke-user, revoke-all and store new-epoch take a stdio upstream after "--", as the proxy, check
 // and doctor do, and do not start it (the marker check catches a start that runs before the command
-// returns); a usage mistake before the "--" is still exit 2, with the store untouched.
+// returns); a usage mistake before the "--", or SQLite for new-epoch, is still exit 2, with the
+// store untouched.
 func TestRevokeAndNewEpochTakeAStdioUpstreamAfterDashes(t *testing.T) {
 	user := "00000000-0000-0000-0000-00000000000a:11111111-1111-1111-1111-11111111111a"
 	cases := []struct {
-		name       string
-		args       []string
-		code       int
-		wantStdout string // "" means nothing at all
-		inStderr   string
+		name     string
+		args     []string
+		code     int
+		inStdout string // "" means nothing at all
+		inStderr string
 	}{
 		{"revoke-user revokes the user", []string{"revoke-user", user, "--"}, exitOK, "revoked user " + user, `"reason":"operator revoke-user"`},
 		{"revoke-all revokes every user", []string{"revoke-all", "--yes", "--"}, exitOK, "revoked every user", `"reason":"operator revoke-all"`},
-		{"store new-epoch with SQLite", []string{"store", "new-epoch", "--yes", "--"}, exitConfig, "", "new-epoch is for the PostgreSQL store"},
+		{"store new-epoch refuses SQLite", []string{"store", "new-epoch", "--yes", "--"}, exitConfig, "", "new-epoch is for the PostgreSQL store"},
 		{"revoke-user without a key", []string{"revoke-user", "--"}, exitConfig, "", "usage: byward revoke-user <user key> [-- stdio-upstream-command [args...]]"},
-		{"revoke-all without --yes", []string{"revoke-all", "--"}, exitConfig, "", "usage: byward revoke-all --yes [-- stdio-upstream-command [args...]]"},
-		{"store new-epoch without --yes", []string{"store", "new-epoch", "--"}, exitConfig, "", "usage: byward store new-epoch --yes [-- stdio-upstream-command [args...]]"},
+		{"revoke-all without --yes", []string{"revoke-all", "--"}, exitConfig, "", "byward: usage: byward revoke-all --yes [-- stdio-upstream-command [args...]] (signs every user out)"},
+		{"store new-epoch without --yes", []string{"store", "new-epoch", "--"}, exitConfig, "", "byward: usage: byward store new-epoch --yes [-- stdio-upstream-command [args...]] (refresh tokens from before it stop working)"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -336,17 +332,21 @@ func TestRevokeAndNewEpochTakeAStdioUpstreamAfterDashes(t *testing.T) {
 				t.Fatal(err)
 			}
 			env := slices.DeleteFunc(authEnv(t), func(kv string) bool { return strings.HasPrefix(kv, "BYWARD_ASSERTION_KEYS_DIR=") }) // refused with a stdio upstream
-			env = append(env, "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_DATA_DIR="+dir)
+			env = append(env, "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_DATA_DIR="+dir)                                      // the test's own, so no defaulted path reaches the host's
 			code, stdout, stderr := runWith(append(tc.args, script, "--flag"), env...)
-			okStdout := strings.Contains(stdout, tc.wantStdout) && (tc.wantStdout != "" || stdout == "")
+			okStdout := strings.Contains(stdout, tc.inStdout) && (tc.inStdout != "" || stdout == "")
 			if code != tc.code || !okStdout || !strings.Contains(stderr, tc.inStderr) {
-				t.Fatalf("code %d (want %d)\nstdout %q (want %q)\nstderr %q (want %q)", code, tc.code, stdout, tc.wantStdout, stderr, tc.inStderr)
+				t.Fatalf("code %d (want %d)\nstdout %q (want %q)\nstderr %q (want %q)", code, tc.code, stdout, tc.inStdout, stderr, tc.inStderr)
 			}
 			if _, err := os.Stat(filepath.Join(dir, "ran")); err == nil {
 				t.Fatal("the command started the stdio upstream")
 			}
-			if _, err := os.Stat(setting(env, "BYWARD_STORE_DIR")); tc.code == exitConfig && !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("a refused command touched the store (%v)", err)
+			store := setting(env, "BYWARD_STORE_DIR")
+			switch _, err := os.Stat(store); {
+			case tc.code == exitConfig && !errors.Is(err, os.ErrNotExist):
+				t.Fatalf("a refused command touched the store at %s", store)
+			case tc.code == exitOK && err != nil:
+				t.Fatalf("revoking left no store at %s (%v)", store, err)
 			}
 		})
 	}
