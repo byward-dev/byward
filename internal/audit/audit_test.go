@@ -8,6 +8,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"regexp"
@@ -149,11 +150,8 @@ func TestEveryEventHasAGoldenSample(t *testing.T) {
 // Successful registrations from one source must not hide that source's refused ones: an open
 // /register is an abuse path, and the refusals are what an operator looks for.
 func TestSuccessesNeverHideRefusalsOfTheSameEvent(t *testing.T) {
-	var buf bytes.Buffer
-	now := time.Unix(1_800_000_000, 0)
-	l := New(logging.New(&buf, "json"), nil, func() time.Time { return now })
-	r := httptest.NewRequest("POST", "/register", nil)
-	r.RemoteAddr = "192.0.2.7:1234"
+	l, buf, _ := fixedClockLog(nil)
+	r := from("192.0.2.7:1234")
 	for range unauthBurst + 5 {
 		l.RecordUnauthenticated(r, Event{Name: ClientRegistered, Outcome: Success, Reason: "dcr", ClientID: "dcr-x"})
 	}
@@ -166,17 +164,12 @@ func TestSuccessesNeverHideRefusalsOfTheSameEvent(t *testing.T) {
 // Users behind one NAT share a source address; many page views must not hide their decisions, and
 // one source's flood must not hide another source's records.
 func TestRecordsAreLimitedPerSourceAndEvent(t *testing.T) {
-	var buf bytes.Buffer
-	now := time.Unix(1_800_000_000, 0)
-	l := New(logging.New(&buf, "json"), nil, func() time.Time { return now })
-	nat := httptest.NewRequest("GET", "/authorize", nil)
-	nat.RemoteAddr = "192.0.2.7:1234"
+	l, buf, _ := fixedClockLog(nil)
+	nat := from("192.0.2.7:1234")
 	for range unauthBurst + 5 {
 		l.RecordUnauthenticated(nat, Event{Name: ConsentShown, Outcome: Success, ClientID: "client-1"})
 	}
-	other := httptest.NewRequest("GET", "/authorize", nil)
-	other.RemoteAddr = "198.51.100.9:1"
-	l.RecordUnauthenticated(other, Event{Name: ConsentShown, Outcome: Success, ClientID: "client-1"})
+	l.RecordUnauthenticated(from("198.51.100.9:1"), Event{Name: ConsentShown, Outcome: Success, ClientID: "client-1"})
 	l.RecordUnauthenticated(nat, Event{Name: ConsentDenied, Outcome: Failure, ClientID: "client-1"})
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
 	if n := strings.Count(buf.String(), `"event":"consent_shown","outcome":"success","client_id":"client-1","remote_ip":"192.0.2.7"`); n != unauthBurst {
@@ -198,13 +191,25 @@ func TestRecordsAreLimitedPerSourceAndEvent(t *testing.T) {
 	}
 }
 
+// The event is part of the limit, not only the outcome: a flood of one refusal never hides another
+// refusal from the same source.
+func TestAFloodOfOneEventNeverHidesAnotherWithTheSameOutcome(t *testing.T) {
+	l, buf, _ := fixedClockLog(nil)
+	r := from("192.0.2.7:1234")
+	for range unauthBurst + 5 {
+		l.RecordUnauthenticated(r, Event{Name: HostRejected, Outcome: Failure, Host: "evil.example"})
+	}
+	l.RecordUnauthenticated(r, Event{Name: OriginRejected, Outcome: Failure, Origin: "https://evil.example"})
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if last := lines[len(lines)-1]; !strings.Contains(last, `"event":"origin_rejected"`) || strings.Contains(last, "suppressed") {
+		t.Fatalf("the origin_rejected record is missing or marked suppressed; last line: %s", last)
+	}
+}
+
 func TestUnauthenticatedEventsAreRateLimitedPerSourceAndCountedAnyway(t *testing.T) {
-	var buf bytes.Buffer
 	counted := 0
-	now := time.Unix(1_800_000_000, 0)
-	l := New(logging.New(&buf, "json"), func(string, string) { counted++ }, func() time.Time { return now })
-	r := httptest.NewRequest("GET", "/mcp", nil)
-	r.RemoteAddr = "192.0.2.7:1234"
+	l, buf, now := fixedClockLog(func(string, string) { counted++ })
+	r := from("192.0.2.7:1234")
 	for range unauthBurst + 5 {
 		l.RecordUnauthenticated(r, Event{Name: HostRejected, Outcome: Failure, Host: "evil.example"})
 	}
@@ -214,7 +219,7 @@ func TestUnauthenticatedEventsAreRateLimitedPerSourceAndCountedAnyway(t *testing
 	if counted != unauthBurst+5 {
 		t.Fatalf("observer saw %d events, want %d (suppressed ones count too)", counted, unauthBurst+5)
 	}
-	now = now.Add(unauthWindow)
+	*now = now.Add(unauthWindow)
 	buf.Reset()
 	l.RecordUnauthenticated(r, Event{Name: HostRejected, Outcome: Failure, Host: "evil.example"})
 	if !strings.Contains(buf.String(), `"suppressed":5`) {
@@ -228,33 +233,50 @@ func TestNilLogIsSafeToCall(t *testing.T) {
 	l.RecordUnauthenticated(httptest.NewRequest("GET", "/", nil), Event{Name: HostRejected, Outcome: Failure})
 }
 
-// An IPv6 sender rotating through its own /64 shares one budget, as the OAuth rate limit groups
-// it, so it cannot claim a fresh budget per address or fill the source table; each record still
-// carries the address that sent it, and another /64 keeps its own budget.
+// An IPv6 sender rotating anywhere in its own /64 shares one budget, as the OAuth rate limit groups
+// it, so rotating addresses buys no fresh burst; each record still carries the address that sent
+// it, and another /64, even in the same /48, keeps its own budget.
 func TestAnIPv6SourceIsLimitedByItsSlash64AndLoggedByItsAddress(t *testing.T) {
-	var buf bytes.Buffer
-	now := time.Unix(1_800_000_000, 0)
-	l := New(logging.New(&buf, "json"), nil, func() time.Time { return now })
+	l, buf, _ := fixedClockLog(nil)
+	// The interface ID varies in its top bits, so only a key of /64 or shorter groups them.
+	addr := func(i int) string { return fmt.Sprintf("2001:db8:1:2:%x::1", i+1) }
 	for i := range unauthBurst + 5 {
-		r := httptest.NewRequest("GET", "/", nil)
-		r.RemoteAddr = fmt.Sprintf("[2001:db8:1:2::%x]:1234", i+1)
-		l.RecordUnauthenticated(r, Event{Name: HostRejected, Outcome: Failure, Host: "evil.example"})
+		l.RecordUnauthenticated(from("["+addr(i)+"]:1234"), Event{Name: HostRejected, Outcome: Failure, Host: "evil.example"})
 	}
 	if n := strings.Count(buf.String(), `"event":"host_rejected"`); n != unauthBurst {
-		t.Fatalf("logged %d records from one /64, want %d (its burst)", n, unauthBurst)
+		t.Fatalf("logged %d records from one /64, want %d (its burst):\n%s", n, unauthBurst, buf.String())
 	}
 	for i := range unauthBurst {
-		if want := fmt.Sprintf(`"remote_ip":"2001:db8:1:2::%x"`, i+1); !strings.Contains(buf.String(), want) {
-			t.Errorf("no record carries the sender's own address %s:\n%s", want, buf.String())
+		if want := `"remote_ip":"` + addr(i) + `"`; !strings.Contains(buf.String(), want) {
+			t.Errorf("no record carries the sender's own address %s", want)
 		}
 	}
-	other := httptest.NewRequest("GET", "/", nil)
-	other.RemoteAddr = "[2001:db8:1:3::1]:1234"
-	l.RecordUnauthenticated(other, Event{Name: HostRejected, Outcome: Failure, Host: "evil.example"})
-	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	if last := lines[len(lines)-1]; !strings.Contains(last, `"remote_ip":"2001:db8:1:3::1"`) || strings.Contains(last, "suppressed") {
-		t.Fatalf("a sender in another /64 was limited too, or charged with the first one's drops:\n%s", buf.String())
+	if t.Failed() {
+		t.Log(buf.String())
 	}
+	l.RecordUnauthenticated(from("[2001:db8:1:3::1]:1234"), Event{Name: HostRejected, Outcome: Failure, Host: "evil.example"})
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	last := lines[len(lines)-1]
+	if !strings.Contains(last, `"remote_ip":"2001:db8:1:3::1"`) {
+		t.Fatalf("another /64's record was dropped; last line: %s", last)
+	}
+	if strings.Contains(last, "suppressed") {
+		t.Fatalf("another /64's record carries the first /64's suppressed count: %s", last)
+	}
+}
+
+// fixedClockLog is a JSON audit log on a stopped clock; a test advances the clock through now.
+func fixedClockLog(observe Observer) (l *Log, buf *bytes.Buffer, now *time.Time) {
+	buf, now = new(bytes.Buffer), new(time.Time)
+	*now = time.Unix(1_800_000_000, 0)
+	return New(logging.New(buf, "json"), observe, func() time.Time { return *now }), buf, now
+}
+
+// from is a request from the source address addr; its method and path do not matter to the limit.
+func from(addr string) *http.Request {
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = addr
+	return r
 }
 
 // An audit record carries its request's ID, once, through the proxy's logger (which adds it from the

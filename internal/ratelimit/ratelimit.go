@@ -140,7 +140,8 @@ func (t *table) refill(b *bucket, now time.Time) float64 {
 	return b.tokens
 }
 
-// Key is the address a budget belongs to: the IPv4 address, or the IPv6 /64 (a client can rotate
+// Key groups a client address for every per-address limit, the OAuth budgets and the audit log's
+// limit on unauthenticated events alike: the IPv4 address, or the IPv6 /64 (a client can rotate
 // freely within its own /64). Unparseable values are used as they are.
 func Key(ip string) string {
 	a, err := netip.ParseAddr(ip)

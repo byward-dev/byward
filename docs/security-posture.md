@@ -189,7 +189,7 @@ bounds, but there are no settings for that yet.
 - `/register` is open to anyone who can reach the proxy, so a registration grants nothing by
   itself. Every sign-in by a DCR client shows the consent page and labels the app "Not verified",
   and the access gate still applies.
-- Rate limit: per address, with a burst ([budgets](reference/rate-limits.md#budgets)).
+- Rate limit: per address (IPv6 per /64), with a burst ([budgets](reference/rate-limits.md#budgets)).
 - Cap: 10,000 live registrations; beyond it, 503 with `Retry-After`.
 - A registration never used to redeem a code is deleted after 24 h; a used one expires 90 days
   after its last use.
