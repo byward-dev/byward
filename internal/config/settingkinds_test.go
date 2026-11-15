@@ -2,19 +2,26 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
 
 // A setting is read as a boolean exactly when the registry marks it Bool, and every boolean reads
-// alike: one message for a value that is not true or false, and a bare --name meaning true, as
-// --dev does (without Bool, the flag package would want an argument). Driven by the registry, so a
-// new setting is covered with no edit here.
+// alike: one message for a value that is not true or false, and a bare --name that reads as true,
+// as --dev does (without Bool, the flag package would want an argument). Driven by the registry, so
+// a new setting is covered with no edit here, as far as the default load reads it;
+// TestEveryBooleanReadIsOfABoolFlag covers a read behind a condition.
 func TestBooleanSettingsAreExactlyTheBoolFlags(t *testing.T) {
 	bools := 0
 	for _, s := range registry {
 		if s.Secret {
-			continue // read from a file; never a boolean
+			continue // read from a file; never read as a boolean
+		}
+		if s.Bool {
+			bools++
 		}
 		t.Run(s.Name, func(t *testing.T) {
 			_, err := load(t, nil, s.Env()+"=maybe")
@@ -25,14 +32,54 @@ func TestBooleanSettingsAreExactlyTheBoolFlags(t *testing.T) {
 			if !s.Bool {
 				return
 			}
-			bools++
-			if _, err := load(t, []string{"--" + s.Name}); err != nil && strings.Contains(err.Error(), "needs an argument") {
+			v, err := resolve(registry, []string{"--" + s.Name}, base, baseFiles, nil)
+			if err != nil {
 				t.Fatalf("a bare --%s is refused: %v", s.Name, err)
+			}
+			if b, err := v.boolean(s.Name); err != nil || !b {
+				t.Fatalf("a bare --%s reads as %v (err %v), want true", s.Name, b, err)
 			}
 		})
 	}
 	if bools == 0 {
 		t.Fatal("no boolean setting found")
+	}
+}
+
+// Every boolean read in the package's code, whether or not the default load reaches it, is of a
+// Bool setting, and Values.boolean is the only reader: a read behind a condition (a stdio upstream,
+// another IdP) would escape TestBooleanSettingsAreExactlyTheBoolFlags.
+func TestEveryBooleanReadIsOfABoolFlag(t *testing.T) {
+	byName := map[string]Setting{}
+	for _, s := range registry {
+		byName[s.Name] = s
+	}
+	read := regexp.MustCompile(`\.boolean\("([^"]+)"\)`)
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reads := 0
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(f) //nolint:gosec // G304: reads this package's own files
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f != "registry.go" && strings.Contains(string(src), "ParseBool") {
+			t.Errorf("%s parses a boolean outside Values.boolean", f)
+		}
+		for _, m := range read.FindAllStringSubmatch(string(src), -1) {
+			reads++
+			if s, ok := byName[m[1]]; !ok || !s.Bool {
+				t.Errorf("%s reads %s as a boolean, but the registry does not mark it Bool", f, m[1])
+			}
+		}
+	}
+	if reads == 0 {
+		t.Fatal("no boolean read found: has Values.boolean been renamed?")
 	}
 }
 

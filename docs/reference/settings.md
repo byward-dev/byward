@@ -83,7 +83,7 @@ Precedence: flag > environment > default. Secrets are read only from files.
 
 | Flag | Environment | Default | Description |
 |---|---|---|---|
-| `--static-clients-file` | `BYWARD_STATIC_CLIENTS_FILE` | — | JSON file of pre-registered MCP clients; default: clients.json in the data directory, optional while CIMD or DCR is on; a file you name must exist (docs/reference/static-clients.md) |
+| `--static-clients-file` | `BYWARD_STATIC_CLIENTS_FILE` | — | JSON file of pre-registered MCP clients, an absolute path; default: clients.json in the data directory, optional while CIMD or DCR is on; a file you name must exist (docs/reference/static-clients.md) |
 | `--dcr` | `BYWARD_DCR` | true | accept Dynamic Client Registration at /register (Cursor, Gemini CLI) and advertise it; false turns it off (docs/how-to/dcr.md) |
 | `--client-denylist` | `BYWARD_CLIENT_DENYLIST` | — | comma-separated CIMD client IDs (https URLs) and redirect host names refused for CIMD and DCR clients (docs/how-to/dcr.md) |
 | `--cimd` | `BYWARD_CIMD` | true | accept MCP clients identified by a Client ID Metadata Document URL (Claude, VS Code) and advertise it; false turns it off (docs/how-to/cimd.md) |
@@ -122,7 +122,7 @@ Precedence: flag > environment > default. Secrets are read only from files.
 
 | Flag | Environment | Default | Description |
 |---|---|---|---|
-| `--assertion-keys-dir` | `BYWARD_ASSERTION_KEYS_DIR` | — | directory of the identity assertion's signing keys: PEM ECDSA P-256 files, each name the key ID; the key whose ID sorts last signs; needed with an HTTP upstream; default: assertion-keys in the data directory (docs/how-to/identity-assertion.md) |
+| `--assertion-keys-dir` | `BYWARD_ASSERTION_KEYS_DIR` | — | directory of the identity assertion's signing keys, an absolute path: PEM ECDSA P-256 files, each name the key ID; the key whose ID sorts last signs; needed with an HTTP upstream; default: assertion-keys in the data directory (docs/how-to/identity-assertion.md) |
 | `--assertion-header` | `BYWARD_ASSERTION_HEADER` | Authorization | request header that carries the identity assertion to the HTTP upstream, as Bearer <JWT>; inbound copies are always removed (ADR-0016 §2) |
 | `--identity-headers` | `BYWARD_IDENTITY_HEADERS` | false | also send the HTTP upstream the user in plain headers (X-Byward-Subject, X-Byward-Client-Id, X-Byward-Principal-Type, and X-Byward-Roles, -Groups, -Email, -Email-Verified, -Name for the assertion's claims), percent-encoded; safe only when the upstream is reachable through this proxy alone (ADR-0016 §5, docs/how-to/plain-identity-headers.md) |
 | `--assertion-claims` | `BYWARD_ASSERTION_CLAIMS` | roles | comma-separated optional claims in the identity assertion: roles, groups, email, name; or none (ADR-0016 §1, docs/reference/identity-assertion.md) |
@@ -140,7 +140,7 @@ Precedence: flag > environment > default. Secrets are read only from files.
 | Flag | Environment | Default | Description |
 |---|---|---|---|
 | `--data-dir` | `BYWARD_DATA_DIR` | /var/lib/byward | data directory, an absolute path; the keys, clients and store settings default to paths in it (ADR-0007 §6, docs/how-to/state.md) |
-| `--keys-dir` | `BYWARD_KEYS_DIR` | — | directory of sealing keys; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md) |
+| `--keys-dir` | `BYWARD_KEYS_DIR` | — | directory of sealing keys, an absolute path; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md) |
 | `--store-dir` | `BYWARD_STORE_DIR` | — | state directory of the SQLite store, an absolute path, created with mode 0700; the directory to back up; default: state in the data directory (ADR-0007, docs/how-to/state.md) |
 | `--store-postgres-dsn-file` | `BYWARD_STORE_POSTGRES_DSN_FILE` | — | the PostgreSQL store, for more than one replica of an HTTP upstream: a file holding the connection string (a URL or key=value pairs, pool settings such as pool_max_conns included); setting it selects PostgreSQL 15 or later instead of SQLite; sslmode=verify-full is required outside --dev; never logged (ADR-0007, docs/how-to/postgres.md) |
 | `--store-counter-file` | `BYWARD_STORE_COUNTER_FILE` | — | restore-detection counter file, an absolute path outside the state directory and its backups; default: store-writes next to the keys directory (ADR-0007 §9) |

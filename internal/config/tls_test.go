@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-// #183: the TLS files are both set or neither, by absolute paths, and only with an https public
-// URL: clients use the public URL, so an http one, the --dev loopback one included, would reach a
+// #183: the TLS files are both set or neither, and only with an https public URL (each is an
+// absolute path: TestEveryPathSettingRefusesARelativePath): clients use the public URL, so an http one, the --dev loopback one included, would reach a
 // listener that speaks only TLS. The issuer keeps deriving from the public URL.
-func TestTLSFilesAreBothOrNeitherAbsoluteAndNeedAnHTTPSPublicURL(t *testing.T) {
+func TestTLSFilesAreBothOrNeitherAndNeedAnHTTPSPublicURL(t *testing.T) {
 	const cert, key = "BYWARD_TLS_CERT_FILE=/run/tls/tls.crt", "BYWARD_TLS_KEY_FILE=/run/tls/tls.key"
 	for _, tc := range []struct {
 		name string

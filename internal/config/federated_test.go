@@ -41,8 +41,8 @@ func TestACertificateFileReplacesTheEntraClientSecret(t *testing.T) {
 	}
 }
 
-// Entra gets exactly one credential, named by an absolute path, and no secret expiry without a
-// secret.
+// Entra gets exactly one credential, and no secret expiry without a secret (a credential file's
+// path is absolute: TestEveryPathSettingRefusesARelativePath).
 func TestEntraCredentialSettingsRefuseWhatCannotWork(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
