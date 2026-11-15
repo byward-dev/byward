@@ -127,6 +127,46 @@ func TestLoadKeysSkipsDotfilesAndDirectories(t *testing.T) {
 	}
 }
 
+// The sealing keys' rule (L115): anyone could add or replace a signing key, so a world-writable key
+// file is refused, and a world-writable directory too unless it is on a read-only mount. A check
+// that lets everything through (as under --dev) does not relax it.
+func TestWorldWritableAssertionKeysAreRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		file     os.FileMode // the key file's mode
+		dir      os.FileMode
+		readOnly bool
+		inErr    string // "" means the keys load
+	}{
+		{"a world-writable file", 0o646, 0o700, false, "assertion key file "},
+		{"a world-writable file on a read-only mount", 0o666, 0o700, true, "assertion key file "},
+		{"a world-writable directory", 0o600, 0o707, false, "assertion key directory "},
+		{"a world-writable directory on a read-only mount (Kubernetes secret volume, mode 1777)", 0o644, 0o1777, true, ""},
+		{"group- and other-readable", 0o644, 0o755, false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeKey(t, dir, "k1", false)
+			if err := os.Chmod(filepath.Join(dir, "k1"), tc.file); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(dir, tc.dir); err != nil {
+				t.Fatal(err)
+			}
+			prev := readOnlyFS
+			readOnlyFS = func(p string) bool { return tc.readOnly && p == dir }
+			t.Cleanup(func() { readOnlyFS = prev })
+			_, err := LoadKeys(dir, noCheck)
+			switch {
+			case tc.inErr == "" && err != nil:
+				t.Fatalf("err = %v, want the keys loaded", err)
+			case tc.inErr != "" && (err == nil || !strings.Contains(err.Error(), tc.inErr) || !strings.Contains(err.Error(), " is world-writable")):
+				t.Fatalf("err = %v, want %q naming it world-writable", err, tc.inErr)
+			}
+		})
+	}
+}
+
 func write(t *testing.T, dir, name string, b []byte) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), b, 0o600); err != nil {

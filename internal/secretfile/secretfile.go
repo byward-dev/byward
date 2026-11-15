@@ -8,6 +8,9 @@ import (
 	"os"
 )
 
+// readOnlyFS is ReadOnlyFS; tests replace it.
+var readOnlyFS = ReadOnlyFS
+
 // Check refuses a secret file (symlinks followed) that its group or others can read or write.
 // A file on a read-only mount passes: Kubernetes secret volumes and similar platform mounts are
 // mode 0644 by default, are visible only inside the pod, and cannot be changed from it.

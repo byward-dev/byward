@@ -59,7 +59,8 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) ยง1โ
 - [ ] Create the identity assertion's signing key as in [identity assertion](identity-assertion.md):
       a separate directory, `BYWARD_ASSERTION_KEYS_DIR`, mode `0700`, one PEM P-256 file per key,
       `0600` and owned by the proxy's user. Unlike sealing keys, a key file other users can read is
-      refused, unless it is on a read-only mount.
+      refused, unless it is on a read-only mount. Like them, a world-writable key file or directory
+      is refused, unless the directory is on a read-only mount.
 - [ ] Leave `BYWARD_IDENTITY_HEADERS` off unless the upstream cannot verify a JWT. If you turn it
       on, make sure the upstream is reachable through the proxy alone, and run `byward doctor`
       ([plain identity headers](plain-identity-headers.md)).

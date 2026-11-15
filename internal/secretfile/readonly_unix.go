@@ -8,8 +8,9 @@ import "syscall"
 // package exports neither name.
 const rdonly = 0x1
 
-// readOnlyFS reports whether path is on a file system mounted read-only.
-var readOnlyFS = func(path string) bool {
+// ReadOnlyFS reports whether path is on a file system mounted read-only, where nobody can add or
+// change a file whatever its mode: Kubernetes secret volumes and similar platform mounts.
+func ReadOnlyFS(path string) bool {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(path, &st); err != nil {
 		return false
