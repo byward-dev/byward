@@ -316,3 +316,13 @@ func TestALongRefusalReasonIsCut(t *testing.T) {
 		t.Fatalf("%d, reason of %d characters: %q", res.StatusCode, len(reason), reason)
 	}
 }
+
+// registerDCR registers a DCR client with the given redirect URIs in e and returns its client ID.
+func registerDCR(t *testing.T, e *env, redirects ...string) string {
+	t.Helper()
+	res, reg := e.register(t, `{"client_name":"App","redirect_uris":["`+strings.Join(redirects, `","`)+`"],"grant_types":["authorization_code","refresh_token"]}`)
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("register: %d %v", res.StatusCode, reg)
+	}
+	return reg["client_id"].(string)
+}

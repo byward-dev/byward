@@ -180,17 +180,19 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 func (b *Broker) loadClient(w http.ResponseWriter, r *http.Request, clientID, redirect string) (registration.Client, bool) {
 	ctx := r.Context()
 	client, err := b.cfg.Clients.Client(ctx, clientID)
-	switch {
-	case errors.Is(err, registration.ErrStoreUnavailable): // a DCR registration could not be read
+	if errors.Is(err, registration.ErrStoreUnavailable) { // a DCR registration could not be read: the store, not the client
 		b.cfg.Log.ErrorContext(ctx, "loading a client registration failed", "error", err)
-	case err != nil:
+		b.page(w, r, http.StatusServiceUnavailable, "The proxy could not load this app's details.", "Try again in a minute.")
+		return nil, false
+	}
+	if err != nil {
 		b.clientLookupFailed(ctx, clientID, err)
 	}
 	switch {
 	case errors.Is(err, registration.ErrUnknownClient):
 		b.page(w, r, http.StatusBadRequest, "This app is not registered with the proxy.", "Ask your operator to register the app, or check its client ID.")
 		return nil, false
-	case errors.Is(err, registration.ErrUnavailable), errors.Is(err, registration.ErrStoreUnavailable):
+	case errors.Is(err, registration.ErrUnavailable):
 		b.page(w, r, http.StatusServiceUnavailable, "The proxy could not load this app's details.", "Try again in a minute.")
 		return nil, false
 	case err != nil:

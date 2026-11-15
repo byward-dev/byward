@@ -185,8 +185,9 @@ func TestACIMDClientReturningToADeniedHostIsRefused(t *testing.T) {
 }
 
 // A CIMD client is denied once any one of its registered redirect URIs returns to a denied host
-// (#338), as the broker sees it: a client from the registry, checked with Denied(). A DCR client
-// shares the check; the broker's refresh tests cover both kinds.
+// (#338), as the broker sees it: a client from the registry, checked with Denied(), and refused as
+// denied for every redirect URI it sends, its allowed ones included. A DCR client shares the check;
+// the broker's refresh tests cover both kinds.
 func TestACIMDClientIsDeniedByAnyOfItsRedirectHosts(t *testing.T) {
 	redirects := []string{"https://app.example/cb", "https://second.example/cb"}
 	for name, tc := range map[string]struct {
@@ -215,6 +216,13 @@ func TestACIMDClientIsDeniedByAnyOfItsRedirectHosts(t *testing.T) {
 			}
 			if got := d.Denied(); got != tc.want {
 				t.Fatalf("Denied() = %v, want %v", got, tc.want)
+			}
+			for _, u := range redirects {
+				var re *RedirectError
+				err := cl.RedirectAllowed(u)
+				if denied := errors.As(err, &re) && re.Reason == ReasonDenied; denied != tc.want || (!tc.want && err != nil) {
+					t.Errorf("RedirectAllowed(%s) = %v, want denied %v", u, err, tc.want)
+				}
 			}
 		})
 	}
