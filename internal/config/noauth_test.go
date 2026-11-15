@@ -139,7 +139,7 @@ func TestNoAuthWithHostNetworkingIsRefused(t *testing.T) {
 	})
 }
 
-func TestOriginDropsTheDefaultPort(t *testing.T) {
+func TestOriginIsAsBrowsersSendIt(t *testing.T) {
 	for raw, want := range map[string]string{
 		"https://mcp.example.com:443/mcp":  "https://mcp.example.com",
 		"https://MCP.example.com:8443/mcp": "https://mcp.example.com:8443",

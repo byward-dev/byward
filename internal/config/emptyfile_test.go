@@ -76,7 +76,7 @@ func TestANamedSecretFileThatIsEmptyIsRefusedNotTakenAsUnset(t *testing.T) {
 }
 
 // emptyFileContext is, for each secret setting, a configuration in which config reads it, so that an
-// empty file named for it is checked. A new secret setting must be added here.
+// empty file named for it is checked. A new secret setting must be added here or to emptyFileAllowed.
 var emptyFileContext = map[string]func() []string{
 	"upstream-credential":      func() []string { return slices.Clone(base) },
 	"entra-client-secret":      func() []string { return withoutSecret() },
@@ -93,7 +93,7 @@ var emptyFileAllowed = map[string]string{
 
 // Every secret setting refuses a named file that is empty, unless emptyFileAllowed says why not, so a
 // new one cannot quietly read it as "not set".
-func TestEverySecretSettingRefusesANamedFileThatIsEmpty(t *testing.T) {
+func TestEverySecretSettingRefusesAnEmptyNamedFileOrSaysWhy(t *testing.T) {
 	for _, names := range []map[string]bool{keysOf(emptyFileContext), keysOf(emptyFileAllowed)} {
 		for name := range names {
 			if s, ok := settingNamed(name); !ok || !s.Secret {

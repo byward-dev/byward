@@ -126,6 +126,11 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"origin with a shortened IPv4 address", "BYWARD_ALLOWED_ORIGINS=https://127.1", `BYWARD_ALLOWED_ORIGINS: "https://127.1": "127.1" is not an IPv4 address in dotted decimal, the only form browsers send`},
 		{"origin ending in an upper-case hex label", "BYWARD_ALLOWED_ORIGINS=https://192.168.0.0xFF", `BYWARD_ALLOWED_ORIGINS: "https://192.168.0.0xFF": "192.168.0.0xFF" is not an IPv4 address in dotted decimal`},
 		{"origin with an IPv4 part over 255", "BYWARD_ALLOWED_ORIGINS=https://10.0.0.999", `BYWARD_ALLOWED_ORIGINS: "https://10.0.0.999": "10.0.0.999" is not an IPv4 address in dotted decimal`},
+		{"origin that is not a URL", "BYWARD_ALLOWED_ORIGINS=https://[::1", `BYWARD_ALLOWED_ORIGINS: "https://[::1" is not an origin`},
+		{"origin ending in a hex label with a and b", "BYWARD_ALLOWED_ORIGINS=https://a.0xab", `BYWARD_ALLOWED_ORIGINS: "https://a.0xab": "a.0xab" is not an IPv4 address in dotted decimal`},
+		{"origin ending in a bare 0x", "BYWARD_ALLOWED_ORIGINS=https://a.0x", `BYWARD_ALLOWED_ORIGINS: "https://a.0x": "a.0x" is not an IPv4 address in dotted decimal`},
+		{"origin ending in a label of every digit", "BYWARD_ALLOWED_ORIGINS=https://a.1234567890", `BYWARD_ALLOWED_ORIGINS: "https://a.1234567890": "a.1234567890" is not an IPv4 address in dotted decimal`},
+		{"origin with a shortened IPv4 address and a port", "BYWARD_ALLOWED_ORIGINS=http://127.1:8080", `BYWARD_ALLOWED_ORIGINS: "http://127.1:8080": "127.1" is not an IPv4 address in dotted decimal`},
 		{"origin with a hex IPv4 label", "BYWARD_ALLOWED_ORIGINS=https://0x7f.0.0.1", `BYWARD_ALLOWED_ORIGINS: "https://0x7f.0.0.1": "0x7f.0.0.1" is not an IPv4 address in dotted decimal`},
 		{"origin with a fragment", "BYWARD_ALLOWED_ORIGINS=https://app.example.com#", `BYWARD_ALLOWED_ORIGINS: "https://app.example.com#" is not an origin`},
 		{"origin with an empty query", "BYWARD_ALLOWED_ORIGINS=https://app.example.com?", `BYWARD_ALLOWED_ORIGINS: "https://app.example.com?" is not an origin`},
@@ -307,6 +312,8 @@ func TestAllowedOriginsAreStoredAsBrowsersSendThem(t *testing.T) {
 		"https://[::ffff:127.0.0.1]":    "https://[::ffff:7f00:1]",
 		"https://1.2.3.4.example.com":   "https://1.2.3.4.example.com",
 		"https://1.example.com":         "https://1.example.com",
+		"https://a.1a":                  "https://a.1a",
+		"https://a.0xzz":                "https://a.0xzz",
 		"http://127.0.0.1:3000":         "http://127.0.0.1:3000",
 		"HTTPS://XN--BCHER-KVA.example": "https://xn--bcher-kva.example",
 	} {
@@ -578,13 +585,29 @@ func TestUpstreamHeaderTimeoutDefaultsToFiveMinutesWithinBounds(t *testing.T) {
 // since peers are compared unmapped, and one shorter than /96 maps no IPv4 prefix (masked, it would
 // trust IPv6 addresses), so it is refused.
 func TestTrustedProxiesTakeCIDRsAndAddresses(t *testing.T) {
-	cfg, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES=10.0.0.0/8, 192.0.2.7, 2001:db8::/32, 10.1.2.3/8, ::ffff:10.0.0.5, ::ffff:10.0.0.5/128, ::ffff:172.16.0.0/108, ::ffff:0:0/96"), nil)
+	cfg, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES=10.0.0.0/8, 192.0.2.7, 2001:db8::/32, 10.1.2.3/8"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := fmt.Sprint(cfg.TrustedProxies)
-	if want := "[10.0.0.0/8 192.0.2.7/32 2001:db8::/32 10.0.0.0/8 10.0.0.5/32 10.0.0.5/32 172.16.0.0/12 0.0.0.0/0]"; got != want {
-		t.Errorf("trusted proxies = %s, want %s (bare addresses as /32 or /128, prefixes masked, mapped ones as IPv4)", got, want)
+	if want := "[10.0.0.0/8 192.0.2.7/32 2001:db8::/32 10.0.0.0/8]"; got != want {
+		t.Errorf("trusted proxies = %s, want %s (bare addresses as /32 or /128, prefixes masked)", got, want)
+	}
+	for given, stored := range map[string]string{
+		"::ffff:10.0.0.5":       "10.0.0.5/32",
+		"::ffff:10.0.0.5/128":   "10.0.0.5/32",
+		"::ffff:172.16.0.0/108": "172.16.0.0/12",
+		"::ffff:0:0/96":         "0.0.0.0/0",
+	} {
+		t.Run(given, func(t *testing.T) {
+			cfg, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES="+given), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := fmt.Sprint(cfg.TrustedProxies); got != "["+stored+"]" {
+				t.Errorf("stored %s, want [%s]: a mapped prefix is the IPv4 one it maps", got, stored)
+			}
+		})
 	}
 	if cfg, _, err := Load(nil, noAuthEnv(), nil); err != nil || len(cfg.TrustedProxies) != 0 {
 		t.Errorf("default trusted proxies = %v (err %v), want none", cfg.TrustedProxies, err)

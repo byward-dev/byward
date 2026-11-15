@@ -298,7 +298,7 @@ func validate(v *Values, container bool) (*Config, error) {
 	return c, nil
 }
 
-// Origin is the public URL's origin as browsers send it: lower case, default port dropped.
+// Origin is the public URL's origin as browsers send it (browserOrigin).
 func (c *Config) Origin() string { return browserOrigin(c.PublicURL) }
 
 // Issuer is the broker's issuer, derived once from the public URL: its scheme, host and port.
