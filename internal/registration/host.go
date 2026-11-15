@@ -29,16 +29,17 @@ func BrowserHostOK(host string) (string, bool) {
 		!strings.ContainsFunc(ascii, forbiddenDomainCodePoint)
 }
 
-// forbiddenDomainCodePoint reports whether the WHATWG URL Standard fails a host whose domain to ASCII
-// holds r: a C0 control or space, DEL, or one of # % / : < > ? @ [ \ ] ^ |. UTS #46 without the STD3
+// forbiddenDomainCodePoint reports whether r is a forbidden domain code point, which fails a host in
+// the WHATWG URL Standard once its domain is ASCII: a C0 control or space, DEL, or one of
+// # % / : < > ? @ [ \ ] ^ |. UTS #46 without the STD3
 // rules maps full-width and compatibility forms to these (＠ to @, ℀ to a/c) and reports no error.
 func forbiddenDomainCodePoint(r rune) bool {
 	return r <= ' ' || r == 0x7f || strings.ContainsRune("#%/:<>?@[\\]^|", r)
 }
 
 // BrowserUnicode is the Unicode spelling of a name BrowserHostOK accepted, its xn-- labels decoded
-// as a browser decodes them (an "_" allowed, as the STD3 rules of idna.Lookup do not); the name
-// itself when nothing decodes.
+// as a browser decodes them (an "_" allowed, as the STD3 rules of idna.Lookup do not); the name as
+// given when the decoding reports an error.
 func BrowserUnicode(ascii string) string {
 	if uni, err := browserIDNA.ToUnicode(ascii); err == nil {
 		return uni

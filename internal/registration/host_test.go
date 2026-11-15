@@ -48,7 +48,7 @@ func TestBrowserHostOKSaysWhetherABrowserGoesToTheHost(t *testing.T) {
 		"a.xn--.":               {"a.", false},
 		"a..b.example":          {"a..b.example", false},
 		"\u00ad":                {"\u00ad", false}, // invisible characters only
-		// A name that maps to a forbidden domain code point: the browser refuses it.
+		// A name that is, or maps to, a forbidden domain code point: the browser refuses it.
 		"evil.example\uff20claude.ai": {"evil.example@claude.ai", false},
 		"evil\uff1f.claude.ai":        {"evil?.claude.ai", false},
 		"a\u3000b.claude.ai":          {"a b.claude.ai", false},
