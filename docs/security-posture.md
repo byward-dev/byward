@@ -189,7 +189,7 @@ bounds, but there are no settings for that yet.
 - `/register` is open to anyone who can reach the proxy, so a registration grants nothing by
   itself. Every sign-in by a DCR client shows the consent page and labels the app "Not verified",
   and the access gate still applies.
-- Rate limit: per address, with a burst ([budgets](reference/rate-limits.md#budgets)).
+- Rate limit: per address (IPv6 per /64), with a burst ([budgets](reference/rate-limits.md#budgets)).
 - Cap: 10,000 live registrations; beyond it, 503 with `Retry-After`.
 - A registration never used to redeem a code is deleted after 24 h; a used one expires 90 days
   after its last use.
@@ -288,6 +288,7 @@ the client and redirect URI again. This is accepted behaviour, not a gap: no tok
 |---|---|---|
 | ASVS 5.0.0 10.7.3 (user review and revocation of granted access) | Not met for users. The design leaves it to the operator (`byward revoke-user`, `byward revoke-all`) until a v0.2 "connected apps" page. | ADR-0010 §11; v0.2 |
 | Consent answer table is per replica, in memory, capped at 10,000 | Double-submit protection holds within one process. A full table forgets the newest flow. It matters only with several replicas, on the PostgreSQL store. | No issue (`internal/broker/answers.go`) |
+| The audit log's limit on unauthenticated events tracks at most 10,000 keys per replica | A key is a source (an address, or an IPv6 /64), an event and an outcome. A sender holding a larger block, such as an IPv6 /48 (65,536 /64s), can fill the table within one window and keep it full for as long as it sends from those keys about once a minute; meanwhile records with a new key (a new source, or a known source's new event or outcome) are dropped. Those drops carry no `suppressed=N`, and when a new key finds the table full, every key whose minute has ended is removed, together with its unreported `suppressed` count; only the metric counts these records. | `internal/audit/audit.go`, `internal/logging/limiter.go` |
 | Refresh drops the IdP's new tokens when sealing them fails | Kept when the gate cannot decide or the store fails to rotate (#92); a sealing failure leaves nothing safe to store. Fails closed: an unneeded sign-in with IdPs that revoke rotated refresh tokens. Entra is not affected. | `internal/broker/refresh.go` |
 | A span limit setting that is not a number is printed with its value | `go.opentelemetry.io/auto/sdk` v1.2.1 (`limit.go`), linked in through `go.opentelemetry.io/otel`, reads `OTEL_ATTRIBUTE_COUNT_LIMIT`, `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT` and the `OTEL_SPAN_*`, `OTEL_EVENT_*` and `OTEL_LINK_*` limits when the process starts, even with tracing off. It warns about a non-integer value, value included, through Go's default logger to stderr, before byward can install its own logger. These settings hold numbers; a credential lands there only if pasted into the wrong one. | Upstream: [open-telemetry/opentelemetry-go-instrumentation#3952](https://github.com/open-telemetry/opentelemetry-go-instrumentation/issues/3952); found in #274 |
 | One key ring for every purpose | Access tokens, codes, IdP tokens, login cookies and consent flows are sealed with the same keys, each purpose bound as associated data. ADR-0006 §8 asks for a separate key per purpose. | ADR-0006 §8 (Keys, above) |

@@ -241,9 +241,8 @@ func (b *Bridge) start(w http.ResponseWriter, r *http.Request, id Identity) (*se
 // session finds the live session for key and leases its process with a lease of the given kind
 // (a stream lease for the GET stream). A session that does not exist,
 // has ended or serves another user gets 404, after which the client starts a new one (2025-11-25
-// transports, Session Management rules 3 and 4). A request whose MCP-Protocol-Version names
-// another version than the session negotiated gets 400 (Protocol Version Header). Either way it
-// returns nil, with nothing leased.
+// transports, Session Management rules 3 and 4). A request whose MCP-Protocol-Version the session
+// refuses (versionProblem) gets 400. In each case it returns nil, with nothing leased.
 func (b *Bridge) session(w http.ResponseWriter, r *http.Request, id Identity, key string, kind leaseKind) (*session, func()) {
 	b.mu.Lock()
 	s := b.sessions[key]
@@ -261,15 +260,27 @@ func (b *Bridge) session(w http.ResponseWriter, r *http.Request, id Identity, ke
 		http.Error(w, "session not found", http.StatusNotFound)
 		return nil, nil
 	}
-	if v := r.Header.Get(headerProtocolVersion); v != "" && !s.speaks(v) {
-		// The upstream never sees headers, so the transport's rule is ours (2025-11-25 transports,
-		// Protocol Version Header): an unsupported version gets 400. No header passes.
+	if problem := s.versionProblem(r.Header); problem != "" {
 		release()
-		writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest,
-			"Bad Request: unsupported "+headerProtocolVersion+"; this MCP session negotiated "+s.negotiated())
+		writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest, problem)
 		return nil, nil
 	}
 	return s, release
+}
+
+// versionProblem is why a legacy-era request's MCP-Protocol-Version is refused, or "" if it is not.
+// The upstream never sees headers, so the transport's rule is ours (2025-11-25 transports, Protocol
+// Version Header): an unsupported version is refused, and no header, or an empty one, passes. A
+// repeated header is refused whatever its values, as the modern path's checkHeaders refuses it: an
+// intermediary could read another copy than this check does.
+func (s *session) versionProblem(h http.Header) string {
+	switch vals := h.Values(headerProtocolVersion); {
+	case len(vals) > 1:
+		return "Bad Request: repeated " + headerProtocolVersion
+	case len(vals) == 1 && vals[0] != "" && !s.speaks(vals[0]):
+		return "Bad Request: unsupported " + headerProtocolVersion + "; this MCP session negotiated " + s.negotiated()
+	}
+	return ""
 }
 
 // speaks reports whether v is the version this MCP session negotiated. Before one is known (an
