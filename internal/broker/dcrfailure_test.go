@@ -110,8 +110,8 @@ func TestADCRClientsFailureIsAnsweredAndLoggedAsForCIMD(t *testing.T) {
 					}
 					continue
 				}
-				if len(recs) != 1 || !strings.Contains(recs[0]["error"].(string), "jwks_uri answered") {
-					t.Errorf("logged %v, want one %q line with the jwks_uri cause", recs, msg)
+				if len(recs) != 1 || recs[0]["client_id"] != id || !strings.Contains(recs[0]["error"].(string), "jwks_uri answered") {
+					t.Errorf("logged %v, want one %q line naming %s with the jwks_uri cause", recs, msg, id)
 				}
 			}
 		})

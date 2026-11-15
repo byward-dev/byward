@@ -584,7 +584,8 @@ const (
 // clientLookupFailed tells the operator why a client registered by its metadata was refused or
 // could not be loaded: a Client ID Metadata Document client for any reason, and a DCR client whose
 // keys at its jwks_uri are unusable or could not be fetched, which CIMD and DCR share. The client
-// itself only sees invalid_client or the error page. An unknown or expired static or DCR client ID
+// itself only sees invalid_client or the error page. The line names the client ID, so the operator
+// can deny or revoke that registration. An unknown or expired static or DCR client ID
 // is ordinary noise and is not logged; a static client never fetches keys.
 func (b *Broker) clientLookupFailed(ctx context.Context, clientID string, err error) {
 	if !registration.IsCIMDURL(clientID) && !errors.Is(err, registration.ErrUnavailable) && !errors.Is(err, registration.ErrKeysRefused) {
@@ -594,7 +595,7 @@ func (b *Broker) clientLookupFailed(ctx context.Context, clientID string, err er
 	if errors.Is(err, registration.ErrUnavailable) {
 		msg = metadataUnavailable
 	}
-	b.cfg.Log.WarnContext(ctx, msg, "error", err.Error())
+	b.cfg.Log.WarnContext(ctx, msg, "client_id", clientID, "error", err.Error())
 }
 
 // grantScopes are the scopes a new grant gets: the approved ones but offline_access, which stands for
