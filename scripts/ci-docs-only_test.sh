@@ -48,6 +48,12 @@ trap 'rm -rf "$tmp"' EXIT
   echo a > a.go && git add a.go && git commit -qm base
   git checkout -qb docs && echo b > b.md && git add b.md && git commit -qm docs
   git checkout -q - && git checkout -qb code && echo c > c.go && git add c.go && git commit -qm code
+  # A code file moved into docs/: the same content, so git would see a rename.
+  git checkout -q - && git checkout -qb rename && mkdir -p docs && git mv a.go docs/a.md && git commit -qm rename
+  # A code file deleted alongside a docs change.
+  git checkout -q - && git checkout -qb delete && git rm -q a.go && echo d > d.md && git add d.md && git commit -qm delete
+  # A rename the user's config asks git to detect (and copies too): still both paths.
+  git config diff.renames copies
 ) >/dev/null 2>&1
 diff_case() {
   got=$(cd "$tmp" && sh "$script" "$2" "$3" 2>/dev/null)
@@ -59,6 +65,8 @@ diff_case() {
 base=$(cd "$tmp" && git rev-parse docs~1)
 diff_case diff-docs   "$base" "$(cd "$tmp" && git rev-parse docs)" true
 diff_case diff-code   "$base" "$(cd "$tmp" && git rev-parse code)" false
+diff_case rename-code-to-docs "$base" "$(cd "$tmp" && git rev-parse rename)" false
+diff_case delete-code-with-docs "$base" "$(cd "$tmp" && git rev-parse delete)" false
 diff_case no-base     ""      "$(cd "$tmp" && git rev-parse docs)" false
 diff_case no-head     "$base" ""                                   false
 diff_case unknown-sha "$base" 0000000000000000000000000000000000000000 false

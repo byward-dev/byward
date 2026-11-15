@@ -36,7 +36,9 @@ if [ -z "$base" ] || [ -z "$head" ]; then
   echo docs-only=false
   exit 0
 fi
-if ! files=$(git diff --name-only "$base...$head"); then
+# --no-renames: a rename must list both paths; with rename detection, internal/x/a.go moved to
+# docs/a.md would list only docs/a.md, and a change that deletes code would pass as docs-only.
+if ! files=$(git diff --no-renames --name-only "$base...$head"); then
   echo "ci-docs-only: cannot diff $base...$head: run everything" >&2
   echo docs-only=false
   exit 0
