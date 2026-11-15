@@ -193,7 +193,7 @@ func TestASignInAndMCPCallsWorkOverTheProxysTLS(t *testing.T) {
 
 			const verifier = "verifier-0123456789-0123456789-0123456789-abc"
 			q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1/callback"}, "response_type": {"code"}, "scope": {"mcp"},
-				"code_challenge": {pkce(verifier)}, "code_challenge_method": {"S256"}}
+				"code_challenge": {fakeidp.CodeChallenge(verifier)}, "code_challenge_method": {"S256"}}
 			page := b.send(http.MethodGet, "/authorize?"+q.Encode(), nil, nil)
 			proto("the consent page", page)
 			if page.Header.Get("Strict-Transport-Security") == "" {

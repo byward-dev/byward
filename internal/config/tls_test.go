@@ -5,10 +5,11 @@ import (
 	"testing"
 )
 
-// #183: the TLS files are both set or neither, by absolute paths, and only with an https public
-// URL: clients use the public URL, so an http one, the --dev loopback one included, would reach a
-// listener that speaks only TLS. The issuer keeps deriving from the public URL.
-func TestTLSFilesAreBothOrNeitherAbsoluteAndNeedAnHTTPSPublicURL(t *testing.T) {
+// #183: the TLS files are both set or neither, and only with an https public URL: clients use the
+// public URL, so an http one, the --dev loopback one included, would reach a listener that speaks
+// only TLS. The issuer keeps deriving from the public URL. (Each file's path is absolute:
+// TestEveryPathSettingRefusesARelativePath.)
+func TestTLSFilesAreBothOrNeitherAndNeedAnHTTPSPublicURL(t *testing.T) {
 	const cert, key = "BYWARD_TLS_CERT_FILE=/run/tls/tls.crt", "BYWARD_TLS_KEY_FILE=/run/tls/tls.key"
 	for _, tc := range []struct {
 		name string
@@ -20,8 +21,6 @@ func TestTLSFilesAreBothOrNeitherAbsoluteAndNeedAnHTTPSPublicURL(t *testing.T) {
 		{"both", nil, []string{cert, key}, ""},
 		{"only the certificate", nil, []string{cert}, "BYWARD_TLS_CERT_FILE and BYWARD_TLS_KEY_FILE: set both or neither"},
 		{"only the key", nil, []string{key}, "BYWARD_TLS_CERT_FILE and BYWARD_TLS_KEY_FILE: set both or neither"},
-		{"a relative certificate path", nil, []string{"BYWARD_TLS_CERT_FILE=tls.crt", key}, `BYWARD_TLS_CERT_FILE: want an absolute path, got "tls.crt"`},
-		{"a relative key path", nil, []string{cert, "BYWARD_TLS_KEY_FILE=tls.key"}, `BYWARD_TLS_KEY_FILE: want an absolute path, got "tls.key"`},
 		{"an http public URL in --dev", []string{"--dev"}, []string{cert, key, "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp"},
 			"BYWARD_TLS_CERT_FILE: TLS on the listener needs an https BYWARD_PUBLIC_URL"},
 	} {

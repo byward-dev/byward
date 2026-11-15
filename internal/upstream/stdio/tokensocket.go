@@ -16,6 +16,8 @@ import (
 	"runtime"
 	"syscall"
 	"time"
+
+	"github.com/byward-dev/byward/internal/downstream"
 )
 
 // EnvDownstreamTokenSocket names the Unix socket an upstream process asks for its user's downstream
@@ -31,9 +33,9 @@ const (
 )
 
 // DownstreamToken is a downstream API token for a process's user, or the error code that says why
-// there is none (consent_required, interaction_required, sign_in_expired, no_user, unavailable,
-// failed; as the answer AskDownstreamToken reads, also refused or bad_request). AccessToken is set
-// exactly when Error is empty.
+// there is none (a refusal outcome of package downstream: ConsentRequired, InteractionRequired,
+// SignInExpired, NoUser, Unavailable or Failed; as the answer AskDownstreamToken reads, also
+// TokenRefused or TokenBadRequest). AccessToken is set exactly when Error is empty.
 type DownstreamToken struct {
 	AccessToken string
 	ExpiresAt   time.Time
@@ -173,7 +175,7 @@ func (s *tokenSocket) handle(c *net.UnixConn, root int) {
 	if t.Error != "" || t.AccessToken == "" {
 		code := t.Error
 		if code == "" {
-			code = "failed"
+			code = downstream.Failed
 		}
 		refuse(code)
 		return

@@ -24,8 +24,13 @@ import (
 	"github.com/byward-dev/byward/internal/token"
 )
 
-// grantTypes are the grant types /token serves; metadata and errors list them from here.
-var grantTypes = []string{"authorization_code", "refresh_token"}
+// grantTypes are the grant types /token serves (registration owns the list); metadata and errors
+// list them from here.
+var grantTypes = registration.GrantTypes()
+
+// cannotIssue answers a store or sealing failure after the client authenticated: the code or refresh
+// token may still be good, so it is not the client's fault.
+var cannotIssue = tokenError{http.StatusInternalServerError, "server_error", "the proxy could not issue a token"}
 
 // tokenError is an RFC 6749 §5.2 error. Descriptions are fixed strings plus the request ID, never
 // IdP or store text (ADR-0013 §4, ADR-0021 §2).
@@ -185,7 +190,7 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := b.cfg.Store.UpdateGrant(ctx, claims.GrantID, expires); err != nil {
 		b.cfg.Log.ErrorContext(ctx, "extending a grant failed", "error", err)
-		b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not issue a token"})
+		b.tokenFail(w, r, cannotIssue)
 		return
 	}
 	var refresh string
@@ -195,7 +200,7 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 		if err := b.cfg.Store.PutRefreshToken(ctx, store.RefreshToken{Hash: hash, GrantID: claims.GrantID, ClientID: client.ID(),
 			CreatedAt: now, IdleExpiresAt: minTime(now.Add(RefreshIdleLifetime), expires)}); err != nil {
 			b.cfg.Log.ErrorContext(ctx, "storing a refresh token failed", "error", err)
-			b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not issue a token"})
+			b.tokenFail(w, r, cannotIssue)
 			return
 		}
 	}
@@ -206,7 +211,7 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 	asserted, idpExpiry, err := b.grantClaims(ctx, claims.GrantID)
 	if err != nil {
 		b.cfg.Log.ErrorContext(ctx, "reading a grant's identity claims failed", "error", err)
-		b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not issue a token"})
+		b.tokenFail(w, r, cannotIssue)
 		return
 	}
 	b.recordUse(ctx, client, now)
@@ -244,8 +249,7 @@ func (b *Broker) issue(w http.ResponseWriter, r *http.Request, clientID, grantID
 			b.cfg.Log.WarnContext(ctx, "the IdP access token expires within the margin; the access token is not capped to it", "idp_token_expires_in", idpExpiry.Sub(now).String(), "margin", IdPTokenMargin.String())
 		}
 	}
-	c := token.Claims{GrantID: grantID, Subject: subject, IssuedAt: now, ExpiresAt: exp, ClientID: clientID,
-		Roles: asserted.Roles, Groups: asserted.Groups, Email: asserted.Email, EmailVerified: asserted.EmailVerified, Name: asserted.Name}
+	c := token.Claims{GrantID: grantID, Subject: subject, IssuedAt: now, ExpiresAt: exp, ClientID: clientID, Claims: resource.Claims(asserted)}
 	access, err := b.cfg.Sealer.Seal(token.Access, c)
 	if errors.Is(err, token.ErrTooLong) && len(c.Groups) > 0 {
 		// Too many groups for a token: assert none rather than fail the sign-in; the upstream then
@@ -256,7 +260,7 @@ func (b *Broker) issue(w http.ResponseWriter, r *http.Request, clientID, grantID
 	}
 	if err != nil {
 		b.cfg.Log.ErrorContext(ctx, "sealing an access token failed", "error", err)
-		b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not issue a token"})
+		b.tokenFail(w, r, cannotIssue)
 		return
 	}
 	b.cfg.Audit.Record(r, audit.Event{Name: audit.TokenIssued, Outcome: audit.Success, ClientID: clientID, UserKey: subject, GrantID: grantID})

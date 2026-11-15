@@ -40,15 +40,14 @@ func TestAssertionClaimsAndHeaderAreRead(t *testing.T) {
 
 func TestAssertionSettingsRefuseWhatCannotWork(t *testing.T) {
 	for env, inErr := range map[string]string{
-		"BYWARD_ASSERTION_HEADER=":                      "BYWARD_ASSERTION_HEADER: want a header name",
-		"BYWARD_ASSERTION_HEADER=X Identity":            "BYWARD_ASSERTION_HEADER: want a header name",
-		"BYWARD_ASSERTION_HEADER=Host":                  "Host is a header the proxy, the transport or MCP relies on",
-		"BYWARD_ASSERTION_HEADER=mcp-session-id":        "Mcp-Session-Id is a header",
-		"BYWARD_ASSERTION_HEADER=X-Forwarded-User":      "X-Forwarded-User is a header",
-		"BYWARD_ASSERTION_HEADER=Sec-Fetch-Site":        "Sec-Fetch-Site is a header",
-		"BYWARD_ASSERTION_CLAIMS=roles,phone":           `"phone" is not one of roles, groups, email, name, or none`,
-		"BYWARD_ASSERTION_CLAIMS=,":                     "BYWARD_ASSERTION_CLAIMS is set but lists nothing",
-		"BYWARD_ASSERTION_KEYS_DIR=relative/assertions": "BYWARD_ASSERTION_KEYS_DIR: want an absolute path",
+		"BYWARD_ASSERTION_HEADER=":                 "BYWARD_ASSERTION_HEADER: want a header name",
+		"BYWARD_ASSERTION_HEADER=X Identity":       "BYWARD_ASSERTION_HEADER: want a header name",
+		"BYWARD_ASSERTION_HEADER=Host":             "Host is a header the proxy, the transport or MCP relies on",
+		"BYWARD_ASSERTION_HEADER=mcp-session-id":   "Mcp-Session-Id is a header",
+		"BYWARD_ASSERTION_HEADER=X-Forwarded-User": "X-Forwarded-User is a header",
+		"BYWARD_ASSERTION_HEADER=Sec-Fetch-Site":   "Sec-Fetch-Site is a header",
+		"BYWARD_ASSERTION_CLAIMS=roles,phone":      `"phone" is not one of roles, groups, email, name, or none`,
+		"BYWARD_ASSERTION_CLAIMS=,":                "BYWARD_ASSERTION_CLAIMS is set but lists nothing",
 	} {
 		t.Run(env, func(t *testing.T) {
 			if _, err := load(t, nil, env); err == nil || !strings.Contains(err.Error(), inErr) {
