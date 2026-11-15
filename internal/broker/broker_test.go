@@ -821,19 +821,25 @@ func TestCORSAndMethods(t *testing.T) {
 }
 
 // /token and /revoke read at most 64 KiB of form before they authenticate the client, and a form
-// under that is read in full.
+// of up to that is read in full.
 func TestTokenAndRevokeReadAFormOfUpTo64KiB(t *testing.T) {
 	const unreadable = "the request body is not a valid form"
+	// The fake client and token get past the form: /token refuses the grant, /revoke answers 200.
+	afterTheForm := map[string]int{"/token": http.StatusBadRequest, "/revoke": http.StatusOK}
 	e := newEnv(t)
 	for _, c := range []struct {
 		name    string
-		pad     int
+		over    int // bytes over 64 KiB
 		refused bool
 	}{
-		{"under 64 KiB", 60 << 10, false},
-		{"over 64 KiB", 64 << 10, true},
+		{"exactly 64 KiB", 0, false},
+		{"one byte over 64 KiB", 1, true},
 	} {
-		form := url.Values{"grant_type": {"refresh_token"}, "client_id": {clientID}, "token": {"x"}, "pad": {strings.Repeat("A", c.pad)}}
+		form := url.Values{"grant_type": {"refresh_token"}, "client_id": {clientID}, "token": {"x"}, "pad": {""}}
+		form.Set("pad", strings.Repeat("A", 64<<10-len(form.Encode())+c.over))
+		if n := len(form.Encode()); n != 64<<10+c.over {
+			t.Fatalf("form is %d bytes, want %d", n, 64<<10+c.over)
+		}
 		for _, path := range []string{"/token", "/revoke"} {
 			t.Run(c.name+path, func(t *testing.T) {
 				res := e.do(t, "POST", path, form, nil)
@@ -842,6 +848,8 @@ func TestTokenAndRevokeReadAFormOfUpTo64KiB(t *testing.T) {
 				d, _ := body["error_description"].(string)
 				if c.refused {
 					wantOAuthError(t, res, body, http.StatusBadRequest, "invalid_request")
+				} else if res.StatusCode != afterTheForm[path] {
+					t.Fatalf("%d %q, want %d: the whole form read", res.StatusCode, d, afterTheForm[path])
 				}
 				if strings.HasPrefix(d, unreadable) != c.refused {
 					t.Fatalf("%d %q, want the unreadable-form refusal: %t", res.StatusCode, d, c.refused)
