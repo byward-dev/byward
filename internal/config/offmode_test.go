@@ -42,6 +42,10 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 			want: "BYWARD_UPSTREAM_URL and BYWARD_UPSTREAM_COMMAND are both set: an upstream is either HTTP or stdio"},
 		{name: "the credential with both selectors gets only the both-set error", stdio: true, env: []string{"BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile},
 			want: "BYWARD_UPSTREAM_URL and BYWARD_UPSTREAM_COMMAND are both set: an upstream is either HTTP or stdio"},
+		{name: "the identity headers with stdio keep their own hint", stdio: true, env: []string{"BYWARD_IDENTITY_HEADERS=true"},
+			want: "BYWARD_IDENTITY_HEADERS is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)"},
+		{name: "the On-Behalf-Of header with stdio keeps its own hint", stdio: true, env: []string{"BYWARD_OBO_HEADER=X-Graph-Token"},
+			want: "BYWARD_OBO_HEADER: a stdio upstream gets its downstream token from its token socket (BYWARD_DOWNSTREAM_TOKEN_SOCKET), not a header; leave BYWARD_OBO_HEADER unset"},
 		{name: "the credential with stdio keeps its hint", stdio: true, env: []string{"BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile},
 			want: "BYWARD_UPSTREAM_CREDENTIAL_FILE is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE"},
 	} {
@@ -87,7 +91,7 @@ func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 	for _, s := range registry {
 		forHTTP := s.Group == GroupHTTPUpstream || httpOnlySettings[s.Name]
 		if (s.Group == GroupIdentity || s.Group == GroupDownstreamTokens) && !forHTTP && !notOffMode[s.Name] {
-			t.Errorf("%s: say whether it is for an HTTP upstream only (httpOnly) or for both modes", s.Name)
+			t.Errorf("%s: list it in httpOnly and httpOnlySettings if only an HTTP upstream reads it, else in notOffMode (both modes, or its own stdio hint)", s.Name)
 		}
 		if !forHTTP && s.Group != GroupStdioUpstream || skipped[s.Name] {
 			continue

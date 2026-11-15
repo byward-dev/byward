@@ -96,9 +96,10 @@ var httpOnly = map[string]bool{"assertion-keys-dir": true, "assertion-header": t
 // offModeSettings refuses each setting given for the upstream mode that is off: a stdio upstream's
 // settings with an HTTP upstream, an HTTP upstream's (and the httpOnly ones) with a stdio one. A
 // setting left at its default, or given empty, is never refused: env templates often list every
-// variable empty. A file named for a secret is given, even when the file is empty. The registry's groups, and httpOnly, say which mode a setting is for. The selectors
-// (upstream-url, upstream-command) keep their own "both set" error, and upstream-credential its own
-// hint (upstreamCredential).
+// variable empty. A file named for a secret is given, even when the file is empty. The registry's
+// groups, and httpOnly, say which mode a setting is for. The selectors (upstream-url,
+// upstream-command) keep their own "both set" error, and upstream-credential its own hint
+// (upstreamCredential).
 func offModeSettings(v *Values, stdio bool) []error {
 	offGroup, inUse, offMode, offSelector := GroupStdioUpstream, "HTTP", "a stdio upstream", Setting{Name: "upstream-command"}.Env()
 	if stdio {
