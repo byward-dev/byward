@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -238,12 +239,7 @@ func TestRevokeCommandsExit2OnMisuse1OnAStoreFailureAndReportTheRevokedUser(t *t
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp")
-			var stateDir string
-			for _, kv := range env {
-				if v, ok := strings.CutPrefix(kv, "BYWARD_STORE_DIR="); ok {
-					stateDir = v
-				}
-			}
+			stateDir := setting(env, "BYWARD_STORE_DIR")
 			if tc.badStore {
 				if err := os.WriteFile(stateDir, nil, 0o600); err != nil {
 					t.Fatal(err)
@@ -263,8 +259,8 @@ func TestRevokeCommandsExit2OnMisuse1OnAStoreFailureAndReportTheRevokedUser(t *t
 
 func TestHelpListsTheOperatorCommands(t *testing.T) {
 	code, stdout, _ := runWith([]string{"--help"})
-	if code != exitOK || !strings.Contains(stdout, "byward revoke-user <user key>") || !strings.Contains(stdout, "byward revoke-all --yes") ||
-		!strings.Contains(stdout, "byward store new-epoch --yes") {
+	if code != exitOK || !strings.Contains(stdout, "byward revoke-user <user key> [-- stdio-upstream-command [args...]]") || !strings.Contains(stdout, "byward revoke-all --yes [-- stdio-upstream-command [args...]]") ||
+		!strings.Contains(stdout, "byward store new-epoch --yes [-- stdio-upstream-command [args...]]") {
 		t.Fatalf("code=%d help=%q", code, stdout)
 	}
 }
@@ -303,6 +299,87 @@ func TestStoreNewEpochExits2OnMisuseOrSQLiteAnd1WhenPostgreSQLIsUnreachable(t *t
 			code, stdout, stderr := runWith(tc.args, env...)
 			if code != tc.code || stdout != "" || !strings.Contains(stderr, tc.inStderr) {
 				t.Fatalf("code %d (want %d), stdout %q, stderr %q (want %q)", code, tc.code, stdout, stderr, tc.inStderr)
+			}
+		})
+	}
+}
+
+// revoke-user, revoke-all and store new-epoch take a stdio upstream after "--", as the proxy, check
+// and doctor do, and do not start it (the marker check catches a start that runs before the command
+// returns); a usage mistake before the "--", or SQLite for new-epoch, is still exit 2, with the
+// store untouched.
+func TestRevokeAndNewEpochTakeAStdioUpstreamAfterDashes(t *testing.T) {
+	user := "00000000-0000-0000-0000-00000000000a:11111111-1111-1111-1111-11111111111a"
+	cases := []struct {
+		name     string
+		args     []string
+		code     int
+		inStdout string // "" means nothing at all
+		inStderr string
+	}{
+		{"revoke-user revokes the user", []string{"revoke-user", user, "--"}, exitOK, "revoked user " + user, `"reason":"operator revoke-user"`},
+		{"revoke-all revokes every user", []string{"revoke-all", "--yes", "--"}, exitOK, "revoked every user", `"reason":"operator revoke-all"`},
+		{"store new-epoch refuses SQLite", []string{"store", "new-epoch", "--yes", "--"}, exitConfig, "", "new-epoch is for the PostgreSQL store"},
+		{"revoke-user without a key is a usage error", []string{"revoke-user", "--"}, exitConfig, "", "byward: usage: byward revoke-user <user key> [-- stdio-upstream-command [args...]]"},
+		{"revoke-all without --yes is a usage error", []string{"revoke-all", "--"}, exitConfig, "", "byward: usage: byward revoke-all --yes [-- stdio-upstream-command [args...]] (signs every user out)"},
+		{"store new-epoch without --yes is a usage error", []string{"store", "new-epoch", "--"}, exitConfig, "", "byward: usage: byward store new-epoch --yes [-- stdio-upstream-command [args...]] (refresh tokens from before it stop working)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			script := filepath.Join(dir, "mcp-server")
+			if err := os.WriteFile(script, []byte("#!/bin/sh\ntouch "+dir+"/ran\n"), 0o700); err != nil { //nolint:gosec // G306: an executable test command
+				t.Fatal(err)
+			}
+			env := slices.DeleteFunc(authEnv(t), func(kv string) bool { return strings.HasPrefix(kv, "BYWARD_ASSERTION_KEYS_DIR=") }) // refused with a stdio upstream
+			env = append(env, "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_DATA_DIR="+dir)                                      // the test's own, so no defaulted path reaches the host's
+			code, stdout, stderr := runWith(append(tc.args, script, "--flag"), env...)
+			okStdout := strings.Contains(stdout, tc.inStdout) && (tc.inStdout != "" || stdout == "")
+			if code != tc.code || !okStdout || !strings.Contains(stderr, tc.inStderr) {
+				t.Fatalf("code %d (want %d)\nstdout %q (want %q)\nstderr %q (want %q)", code, tc.code, stdout, tc.inStdout, stderr, tc.inStderr)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "ran")); err == nil {
+				t.Fatal("the command started the stdio upstream")
+			}
+			store := setting(env, "BYWARD_STORE_DIR")
+			switch _, err := os.Stat(store); {
+			case tc.code == exitConfig && !errors.Is(err, os.ErrNotExist):
+				t.Fatalf("a refused command touched the store at %s", store)
+			case tc.code == exitOK && err != nil:
+				t.Fatalf("revoking left no store at %s (%v)", store, err)
+			}
+		})
+	}
+}
+
+// setting is the value env gives name, the last one as config reads it; "" when it gives none.
+func setting(env []string, name string) string {
+	v := ""
+	for _, kv := range env {
+		if s, ok := strings.CutPrefix(kv, name+"="); ok {
+			v = s
+		}
+	}
+	return v
+}
+
+// Without authentication the broker's store is off: revoke-user, revoke-all and store new-epoch say
+// so and exit 2, a configuration error, before revoke-user looks for an IdP that is not configured.
+func TestRevokeAndNewEpochWithoutAuthenticationAreAConfigurationError(t *testing.T) {
+	env := []string{"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp"}
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"revoke-user", []string{"revoke-user", "00000000-0000-0000-0000-00000000000a:11111111-1111-1111-1111-11111111111a"}},
+		{"revoke-all", []string{"revoke-all", "--yes"}},
+		{"store new-epoch", []string{"store", "new-epoch", "--yes"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := runWith(tc.args, env...)
+			want := "byward: " + tc.name + ": the broker's store is off with BYWARD_INSECURE_NO_AUTH, so there is nothing to revoke and no store epoch to start"
+			if code != exitConfig || stdout != "" || !strings.Contains(stderr, want) {
+				t.Fatalf("code %d (want %d), stdout %q, stderr %q (want %q)", code, exitConfig, stdout, stderr, want)
 			}
 		})
 	}

@@ -4,17 +4,18 @@
 as the proxy ([settings](settings.md)), so run them with the proxy's configuration;
 `downstream-token` is the exception: it reads only `BYWARD_DOWNSTREAM_TOKEN_SOCKET`. They take no
 setting flags; give settings through the environment. A stdio upstream given on the command line goes
-after `--`, as for the proxy (`byward check --offline -- /usr/local/bin/server --flag`).
-`byward --help` lists them.
+after `--`, as for the proxy (`byward check --offline -- /usr/local/bin/server --flag`); none of
+these commands starts it. Without authentication (`BYWARD_INSECURE_NO_AUTH`) the broker's store is off, so
+revoke-user, revoke-all and store new-epoch exit 2. `byward --help` lists them.
 
 | Command | What it does | Network | Exit codes |
 |---|---|---|---|
 | `byward check --offline [-- <command>]` | validates the configuration as the proxy does at startup | none | 0, 2 |
 | `byward doctor [--json] [-- <command>]` | probes the running proxy as MCP clients do, and the IdP app | the public URL and the IdP | 0, 2, 4, 8, 12 |
 | `byward init entra --tenant <id>` | prints the `az` commands for the Entra app registration and a minimal env file | none | 0, 2 |
-| `byward revoke-user <user key>` | ends one user's access ([below](#byward-revoke-user)) | the store | 0, 1, 2 |
-| `byward revoke-all --yes` | ends every user's access ([below](#byward-revoke-all)) | the store | 0, 1, 2 |
-| `byward store new-epoch --yes` | after restoring the PostgreSQL store: starts a new store epoch, so refresh tokens from before it are refused ([below](#byward-store-new-epoch)) | the store | 0, 1, 2 |
+| `byward revoke-user <user key> [-- <command>]` | ends one user's access ([below](#byward-revoke-user)) | the store | 0, 1, 2 |
+| `byward revoke-all --yes [-- <command>]` | ends every user's access ([below](#byward-revoke-all)) | the store | 0, 1, 2 |
+| `byward store new-epoch --yes [-- <command>]` | after restoring the PostgreSQL store: starts a new store epoch, so refresh tokens from before it are refused ([below](#byward-store-new-epoch)) | the store | 0, 1, 2 |
 | `byward jwks` | prints the identity assertion's public keys as a JWKS, for an upstream that loads them from a file ([below](#byward-jwks)) | none | 0, 2 |
 | `byward downstream-token [--json]` | run by a stdio upstream process or one of its descendants: prints its user's On-Behalf-Of token from `BYWARD_DOWNSTREAM_TOKEN_SOCKET`, for a server that takes a credential command ([below](#byward-downstream-token)) | the token socket | 0, 1, 2 |
 
@@ -190,7 +191,7 @@ proxy and run `byward doctor`.
 Which command fits which situation: [revoke access](../how-to/revoke-access.md).
 
 ```sh
-byward revoke-user <user key>
+byward revoke-user <user key> [-- <command>]
 ```
 
 Deletes every grant of one user and records a cut-off, so every proxy using the same store refuses
@@ -205,7 +206,7 @@ its next deny-list sync ([where it is recorded](../how-to/revoke-access.md#where
 ## `byward revoke-all`
 
 ```sh
-byward revoke-all --yes
+byward revoke-all --yes [-- <command>]
 ```
 
 The same for every user at once, for incident response: everyone signs in again. `--yes` is required.
@@ -215,7 +216,7 @@ proxy ([where it is recorded](../how-to/revoke-access.md#where-an-operator-revoc
 ## `byward store new-epoch`
 
 ```sh
-byward store new-epoch --yes
+byward store new-epoch --yes [-- <command>]
 ```
 
 For the PostgreSQL store, after a `pg_restore` or a point-in-time recovery: starts a new store epoch,
