@@ -42,7 +42,13 @@ sorts before `k9`, and a new `k10` would never seal.
 
 ## Rotating
 
-1. Add a new key file with a name that sorts after the current one.
+1. Add a new key file with a name that sorts after the current one, readable by the proxy's user
+   alone, and run `byward check --offline`:
+
+   ```sh
+   (umask 077; openssl rand -base64 32 > "/var/lib/byward/keys/$(date -u +%Y-%m-%d)")
+   ```
+
 2. **On several replicas, make sure the new file has reached every replica** (for example, the
    updated secret volume) before restarting any of them. A replica that seals with a key the others
    do not have yet issues tokens they reject.
