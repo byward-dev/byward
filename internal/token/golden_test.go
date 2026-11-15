@@ -1,9 +1,7 @@
 package token
 
 import (
-	"encoding/base64"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -46,22 +44,27 @@ func TestAnAccessTokenSealedByAnEarlierBuildOpensWithItsClaims(t *testing.T) {
 	}
 }
 
-// A new access token seals its claims under the same wire names, so an earlier build (another
-// replica during a rolling upgrade, or a rollback) still opens it.
+// A new access token seals its claims under the same wire names, and leaves out the claims it does
+// not carry, so an earlier build (another replica during a rolling upgrade, or a rollback) still
+// opens it, and a token without claims stays small.
 func TestAccessTokensSealTheirClaimsUnderTheSameWireNames(t *testing.T) {
 	s := goldenSealer(t)
-	tok := mustSeal(t, s, Access, goldenClaims())
-	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(tok, AccessPrefix))
-	if err != nil {
-		t.Fatal(err)
-	}
-	n := int(raw[1])
-	kid := string(raw[2 : 2+n])
-	plain, err := s.ring.signing.aead.Open(nil, nil, raw[2+n:], s.ad(Access, kid))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(plain) != goldenWire {
-		t.Fatalf("sealed JSON\n%s\nwant\n%s", plain, goldenWire)
+	for _, c := range []struct {
+		name   string
+		claims Claims
+		wire   string
+	}{
+		{"every claim", goldenClaims(), goldenWire},
+		{"no claims", claims(), `{"gid":"g-1","sub":"tid-1:oid-1","iat":1793966400,"exp":1793970000,"cid":"client-1"}`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			plain, err := s.openPlain(Access, mustSeal(t, s, Access, c.claims))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(plain) != c.wire {
+				t.Fatalf("sealed JSON\n%s\nwant\n%s", plain, c.wire)
+			}
+		})
 	}
 }

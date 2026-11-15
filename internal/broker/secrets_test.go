@@ -20,7 +20,8 @@ func goldenGrantSecrets() grantSecrets {
 		Claims: assertedClaims{Roles: []string{"byward.user"}, Groups: []string{"g1"}, Email: "alex@contoso.example", EmailVerified: true, Name: "Alex Doe"}}
 }
 
-func TestAGrantBlobWithClaimsReadsTheSameAndIsWrittenTheSame(t *testing.T) {
+// A grant blob stored by an earlier build reads with its IdP tokens and claims.
+func TestAGrantBlobStoredByAnEarlierBuildReadsWithItsClaims(t *testing.T) {
 	got, err := unmarshalSecrets([]byte(goldenSecrets))
 	if err != nil {
 		t.Fatal(err)
@@ -33,7 +34,24 @@ func TestAGrantBlobWithClaimsReadsTheSameAndIsWrittenTheSame(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("read %+v\nwant %+v", got, want)
 	}
-	if b := marshalSecrets(want.Tokens, want.Claims); string(b) != goldenSecrets {
-		t.Fatalf("written\n%s\nwant\n%s", b, goldenSecrets)
+}
+
+// A new grant blob is written in the stored format, leaving out the claims it does not carry, so an
+// earlier build reads it too.
+func TestANewGrantBlobIsWrittenInTheStoredFormat(t *testing.T) {
+	g := goldenGrantSecrets()
+	for _, c := range []struct {
+		name   string
+		claims assertedClaims
+		want   string
+	}{
+		{"every claim", g.Claims, goldenSecrets},
+		{"no claims", assertedClaims{}, `{"v":1,"t":{"IDToken":"id","AccessToken":"at","RefreshToken":"rt","Expiry":"2026-11-06T13:00:00Z"},"c":{}}`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if b := marshalSecrets(g.Tokens, c.claims); string(b) != c.want {
+				t.Fatalf("written\n%s\nwant\n%s", b, c.want)
+			}
+		})
 	}
 }

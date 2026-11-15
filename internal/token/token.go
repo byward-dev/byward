@@ -161,38 +161,9 @@ func (s *Sealer) Seal(t Type, c Claims) (string, error) {
 // claims. ADR-0014 lists the version after the open; reading it first is safe because a changed
 // version fails the open anyway. Open does not check time; Validator does.
 func (s *Sealer) Open(t Type, tok string) (Claims, error) {
-	p := t.prefix()
-	if p == "" {
-		return Claims{}, errWrongType
-	}
-	if len(tok) > MaxLen {
-		return Claims{}, errMalformed
-	}
-	body, ok := strings.CutPrefix(tok, p)
-	if !ok {
-		return Claims{}, errWrongType
-	}
-	raw, err := base64.RawURLEncoding.Strict().DecodeString(body)
-	if err != nil || len(raw) < 2 {
-		return Claims{}, errMalformed
-	}
-	// The version selects the layout, so it is read first; it is also sealed (associated data),
-	// so a changed version fails the open below.
-	if raw[0] != formatVersion {
-		return Claims{}, errVersion
-	}
-	n := int(raw[1])
-	if n == 0 || len(raw) < 2+n {
-		return Claims{}, errMalformed
-	}
-	kid := string(raw[2 : 2+n])
-	k, err := s.ring.lookup(kid)
+	plain, err := s.openPlain(t, tok)
 	if err != nil {
 		return Claims{}, err
-	}
-	plain, err := k.aead.Open(nil, nil, raw[2+n:], s.ad(t, kid))
-	if err != nil {
-		return Claims{}, errOpen
 	}
 	var w wireClaims // decoded strictly: one object, known fields only
 	dec := json.NewDecoder(bytes.NewReader(plain))
@@ -206,6 +177,44 @@ func (s *Sealer) Open(t Type, tok string) (Claims, error) {
 		return Claims{}, err
 	}
 	return c, nil
+}
+
+// openPlain is Open up to the AEAD open: the sealed JSON of a token of type t, before decoding.
+func (s *Sealer) openPlain(t Type, tok string) ([]byte, error) {
+	p := t.prefix()
+	if p == "" {
+		return nil, errWrongType
+	}
+	if len(tok) > MaxLen {
+		return nil, errMalformed
+	}
+	body, ok := strings.CutPrefix(tok, p)
+	if !ok {
+		return nil, errWrongType
+	}
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(body)
+	if err != nil || len(raw) < 2 {
+		return nil, errMalformed
+	}
+	// The version selects the layout, so it is read first; it is also sealed (associated data),
+	// so a changed version fails the open below.
+	if raw[0] != formatVersion {
+		return nil, errVersion
+	}
+	n := int(raw[1])
+	if n == 0 || len(raw) < 2+n {
+		return nil, errMalformed
+	}
+	kid := string(raw[2 : 2+n])
+	k, err := s.ring.lookup(kid)
+	if err != nil {
+		return nil, err
+	}
+	plain, err := k.aead.Open(nil, nil, raw[2+n:], s.ad(t, kid))
+	if err != nil {
+		return nil, errOpen
+	}
+	return plain, nil
 }
 
 // ad is the associated data: everything that must not be swapped between tokens. Fields are

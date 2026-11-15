@@ -39,7 +39,8 @@ type Identity struct {
 // assertion", ADR-0016 §1): whichever of them the operator opted in to. This is their one owner. The
 // formats that store them (the sealed access token, the grant's sealed IdP tokens) keep their own
 // tagged struct with these fields in this order and convert, so a claim added here and not there
-// fails to build.
+// fails to build. Keep it plain data: it is embedded in Identity and token.Claims, so a method here
+// (a MarshalJSON, a String) would be promoted into both.
 type Claims struct {
 	Roles, Groups []string
 	Email         string
