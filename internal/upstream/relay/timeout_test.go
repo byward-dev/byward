@@ -75,8 +75,8 @@ func TestStalledUpstreamIsAnsweredAndDropped(t *testing.T) {
 		{"notification: accepted", "POST", `{"jsonrpc":"2.0","method":"notifications/initialized"}`, 202, ""},
 		{"GET stream: no stream offered", "GET", ``, 405, ""},
 		{"not JSON-RPC: id unknown, 504", "POST", `hello`, 504, "upstream did not answer in time"},
-		{"body over the capture limit: id unknown, 504", "POST", overCapture, 504, "upstream did not answer in time"},
-		{"body over the capture limit, its readable part a whole request: id unknown, 504", "POST", padded, 504, "upstream did not answer in time"},
+		{"over the capture limit: id unknown, 504", "POST", overCapture, 504, "upstream did not answer in time"},
+		{"over the capture limit, its readable part a whole request: id unknown, 504", "POST", padded, 504, "upstream did not answer in time"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -81,7 +81,7 @@ func TestATransportErrorThroughAMisreadProxySettingNeverQuotesItsAddress(t *test
 
 // A request body over its http.MaxBytesReader limit stays the bare *http.MaxBytesError through a
 // misread proxy, so a server can still answer 413; it quotes no address.
-func TestABodyOverItsLimitThroughAMisreadProxyStaysTheBareMaxBytesError(t *testing.T) {
+func TestARequestBodyOverItsLimitThroughAMisreadProxyStaysTheBareMaxBytesError(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0") // the proxy Go dials: it reads the request, so the body is sent
 	if err != nil {
 		t.Fatal(err)
@@ -299,8 +299,8 @@ func (b failingBody) Read([]byte) (int, error) { return 0, b.readErr }
 func (b failingBody) Close() error             { return b.closeErr }
 
 // A body through a misread proxy setting whose read or close fails with an error that quotes the
-// dialled address says only the cause, even when that error wraps an end of body: only the bare
-// io.EOF and io.ErrUnexpectedEOF pass through.
+// dialled address says only the cause, even when that error wraps an end of body: on a read only
+// the bare io.EOF, io.ErrUnexpectedEOF and context errors pass through, and a close never does.
 func TestABodyThatFailsThroughAMisreadProxySettingSaysOnlyTheCause(t *testing.T) {
 	quoting := func(err error) error { return fmt.Errorf("read tcp 127.0.0.1:4711: %w", err) }
 	opErr := &net.OpError{Op: "close", Net: "tcp", Addr: &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 4711}, Err: errors.New("broken pipe")}
