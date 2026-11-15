@@ -21,7 +21,6 @@ import (
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
-	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/testutil/sealingkey"
 	"github.com/byward-dev/byward/internal/token"
 )
@@ -469,13 +468,7 @@ func TestRefreshRevokesWhenTheUserNoLongerChecksOut(t *testing.T) {
 				e.oneAuditEvent(t, "access_denied", map[string]any{"outcome": "failure", "client_id": clientID,
 					"grant_id": firstGrant(e.st), "user_key": "*", "idp": "entra", "reason": "role"})
 			}
-			var lines []map[string]any
-			for _, line := range strings.Split(strings.TrimSpace(e.logs.String()), "\n") {
-				var rec map[string]any
-				if json.Unmarshal([]byte(line), &rec) == nil && rec["msg"] == tc.msg {
-					lines = append(lines, rec)
-				}
-			}
+			lines := e.logLines(t, tc.msg)
 			if len(lines) != 1 {
 				t.Fatalf("want one %q line, got %v", tc.msg, lines)
 			}
@@ -528,13 +521,7 @@ func TestUnusableStoredIdPTokensRevokeTheGrant(t *testing.T) {
 	}
 	// One revocation line, with no reason or IdP: there is no IdP error to name.
 	const msg = "the grant holds no usable IdP refresh token; grant revoked"
-	var lines []map[string]any
-	for _, line := range strings.Split(strings.TrimSpace(e.logs.String()), "\n") {
-		var rec map[string]any
-		if json.Unmarshal([]byte(line), &rec) == nil && rec["msg"] == msg {
-			lines = append(lines, rec)
-		}
-	}
+	lines := e.logLines(t, msg)
 	if len(lines) != 1 || lines[0]["reason"] != nil || lines[0]["idp"] != nil {
 		t.Fatalf("revocation lines %v, want one %q line without reason or idp", lines, msg)
 	}
@@ -969,10 +956,8 @@ func TestASignInThatWouldRefreshButGotNoIdPRefreshTokenWarnsAndGetsNoRefreshToke
 				t.Fatalf("token: %d %v, want a refresh token %v", res.StatusCode, body, tc.fresh)
 			}
 			var warning map[string]any
-			for _, rec := range logsink.Records[map[string]any](t, e.logs.String()) {
-				if rec["msg"] == "the IdP returned no refresh token, so this grant cannot refresh" {
-					warning = rec
-				}
+			if lines := e.logLines(t, "the IdP returned no refresh token, so this grant cannot refresh"); len(lines) > 0 {
+				warning = lines[len(lines)-1]
 			}
 			if (warning != nil) != tc.warn || (warning != nil && (warning["level"] != "WARN" || warning["idp"] != "entra" || warning["client_id"] != clientID)) {
 				t.Fatalf("warning %v, want one naming the IdP: %v", warning, tc.warn)
