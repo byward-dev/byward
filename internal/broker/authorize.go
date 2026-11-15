@@ -587,9 +587,9 @@ const (
 // itself only sees invalid_client or the error page. An unknown or expired static or DCR client ID
 // is ordinary noise and is not logged; a static client never fetches keys.
 //
-// found is the client whose keys failed, nil when the lookup itself failed. Only a found client's
-// ID is on the line, so the operator can deny or revoke it: a client ID as sent may carry a
-// password, a query or any length (ADR-0009 §8), and the error describes it only as validated.
+// found is the client whose keys failed, nil when the lookup itself failed. The line names a found
+// client, or a CIMD client ID that is a valid one, so the operator can deny or revoke it; any other
+// client ID as sent may carry a password, a query or any length (ADR-0009 §8).
 func (b *Broker) clientLookupFailed(ctx context.Context, clientID string, found registration.Client, err error) {
 	if !registration.IsCIMDURL(clientID) && !errors.Is(err, registration.ErrUnavailable) && !errors.Is(err, registration.ErrKeysRefused) {
 		return
@@ -598,11 +598,14 @@ func (b *Broker) clientLookupFailed(ctx context.Context, clientID string, found 
 	if errors.Is(err, registration.ErrUnavailable) {
 		msg = metadataUnavailable
 	}
-	if found == nil {
+	switch {
+	case found != nil:
+		b.cfg.Log.WarnContext(ctx, msg, "client_id", found.ID(), "error", err.Error())
+	case registration.IsCIMDURL(clientID) && registration.ValidateCIMDURL(clientID) == nil:
+		b.cfg.Log.WarnContext(ctx, msg, "client_id", clientID, "error", err.Error())
+	default:
 		b.cfg.Log.WarnContext(ctx, msg, "error", err.Error())
-		return
 	}
-	b.cfg.Log.WarnContext(ctx, msg, "client_id", found.ID(), "error", err.Error())
 }
 
 // grantScopes are the scopes a new grant gets: the approved ones but offline_access, which stands for

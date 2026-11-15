@@ -348,8 +348,8 @@ func TestATransientFailureAtTheConsentAnswerIsServiceUnavailable(t *testing.T) {
 	}
 }
 
-// A refused CIMD client ID is never logged as sent: it may carry a password, a query or any length
-// (ADR-0009 §8). Only a client that was found, whose keys failed, is named on the line.
+// An invalid CIMD client ID is never logged as sent: it may carry a password, a query or any length
+// (ADR-0009 §8). A valid one is named on the line (TestAnUnknownClientIDIsLoggedOnlyForCIMD).
 func TestARefusedCIMDClientIDIsNotLoggedAsSent(t *testing.T) {
 	longPath := strings.Repeat("z", 600) // past the length limit; none of it may reach the log
 	for name, id := range map[string]string{
@@ -373,8 +373,8 @@ func TestARefusedCIMDClientIDIsNotLoggedAsSent(t *testing.T) {
 	}
 }
 
-// Of the client IDs nobody registered, only a CIMD one is logged, with its reason; an unknown static
-// client ID is ordinary noise. Both lookups end in ErrUnknownClient: only the shape of the ID differs.
+// Of the client IDs nobody registered, only a CIMD one is logged, naming it, with its reason; an
+// unknown static client ID is ordinary noise. Both lookups end in ErrUnknownClient: only the shape of the ID differs.
 func TestAnUnknownClientIDIsLoggedOnlyForCIMD(t *testing.T) {
 	for name, tc := range map[string]struct {
 		clientID string
@@ -389,6 +389,9 @@ func TestAnUnknownClientIDIsLoggedOnlyForCIMD(t *testing.T) {
 			logs := e.logs.String()
 			if res.StatusCode != http.StatusBadRequest || strings.Contains(logs, metadataRefused) != (tc.logged != "") || !strings.Contains(logs, tc.logged) {
 				t.Fatalf("status %d, want the log to say %q: %s", res.StatusCode, tc.logged, logs)
+			}
+			if recs := e.logRecords(t, metadataRefused); tc.logged != "" && (len(recs) != 1 || recs[0]["client_id"] != tc.clientID) {
+				t.Fatalf("logged %v, want one refusal naming %s", recs, tc.clientID)
 			}
 		})
 	}
