@@ -95,6 +95,29 @@ type Values struct {
 // get returns the raw value of a setting.
 func (v *Values) get(name string) string { return v.byKey[name].Raw }
 
+// given reports whether the operator gave the setting: a value, or a file named for a secret, which
+// is given even when it is empty, so it never falls back to another choice. A variable set to nothing
+// is not given, nor is a _FILE variable set to nothing, which names no file: env templates often list
+// every variable empty.
+func (val Value) given() bool { return val.Raw != "" || val.Path != "" }
+
+// given is Value.given for the setting name.
+func (v *Values) given(name string) bool { return v.byKey[name].given() }
+
+// emptySecretFile is the error for a secret setting whose named file holds nothing, or only
+// whitespace, naming the setting as the operator gave it; nil otherwise.
+func (v *Values) emptySecretFile(name string) error {
+	switch val := v.byKey[name]; {
+	case val.Path == "":
+		return nil
+	case val.Raw == "":
+		return errorf("%s: the file is empty", val.From)
+	case strings.TrimSpace(val.Raw) == "":
+		return errorf("%s: the file holds only whitespace", val.From)
+	}
+	return nil
+}
+
 // boolean reads a true/false setting. Every setting read this way must be Bool in the registry, so a
 // bare --name means true (TestBooleanSettingsAreExactlyTheBoolFlags, TestEveryBooleanReadIsOfABoolFlag).
 func (v *Values) boolean(name string) (bool, error) {

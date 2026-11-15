@@ -119,12 +119,17 @@ func parseProxies(raw string) ([]netip.Prefix, error) {
 	var out []netip.Prefix
 	for _, item := range splitList(raw) {
 		p, err := netip.ParsePrefix(item)
-		if err != nil {
+		switch {
+		case err != nil:
 			a, aerr := netip.ParseAddr(item)
 			if aerr != nil {
 				return nil, errorf("BYWARD_TRUSTED_PROXIES: %q is not a CIDR or an IP address", item)
 			}
 			p = netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen())
+		case p.Addr().Is4In6() && p.Bits() < 96: // masked, ::ffff:10.0.0.0/8 is ::/8: it would trust IPv6 peers
+			return nil, errorf("BYWARD_TRUSTED_PROXIES: %q is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)", item)
+		case p.Addr().Is4In6(): // peers are compared unmapped (logging.ClientAddress), as a bare mapped address is here
+			p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
 		}
 		out = append(out, p.Masked())
 	}
@@ -141,16 +146,52 @@ func splitList(s string) []string {
 	return out
 }
 
-// normalizeOrigin returns scheme://host[:port] in lower case, the form browsers send.
+// normalizeOrigin returns an origin as browsers send it (browserOrigin), with its host[:port]
+// checked as BYWARD_ALLOWED_HOSTS checks one (normalizeAllowedHost), so an entry that no browser
+// could send is refused, not kept: browsers write an IPv4 address in dotted decimal, never 127.1 or
+// 0x7f.0.0.1 (WHATWG URL host parser).
 func normalizeOrigin(o string) (string, error) {
 	u, err := url.Parse(o)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.User != nil {
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Path != "" || strings.ContainsAny(o, "?#") || u.User != nil {
 		return "", fmt.Errorf("%q is not an origin (scheme://host[:port])", o)
 	}
-	if err := asciiHost(u.Hostname()); err != nil {
-		return "", err
+	if _, err := normalizeAllowedHost(u.Host); err != nil {
+		return "", fmt.Errorf("%q: %w", o, err)
 	}
-	return strings.ToLower(u.Scheme + "://" + u.Host), nil
+	if host := u.Hostname(); numericLabel(host[strings.LastIndex(host, ".")+1:]) {
+		if _, err := netip.ParseAddr(host); err != nil {
+			return "", fmt.Errorf("%q: %q is not an IPv4 address in dotted decimal, the only form browsers send", o, host)
+		}
+	}
+	return browserOrigin(u), nil
+}
+
+// numericLabel reports whether label is a number, decimal or 0x hex; as a host's last label it makes
+// a browser read the host as an IPv4 address (WHATWG URL "ends in a number").
+func numericLabel(label string) bool {
+	if l := strings.ToLower(label); strings.HasPrefix(l, "0x") {
+		return strings.Trim(l[2:], "0123456789abcdef") == ""
+	}
+	return label != "" && strings.Trim(label, "0123456789") == ""
+}
+
+// browserOrigin is u's origin as browsers serialize it (RFC 6454 §6.2): scheme://host[:port] in lower
+// case, an IPv6 host in brackets and in its shortest form, all hex (the WHATWG URL IPv6 serializer:
+// ::ffff:7f00:1, where netip writes ::ffff:127.0.0.1), and no port when it is the scheme's default.
+func browserOrigin(u *url.URL) string {
+	host := strings.ToLower(u.Hostname())
+	switch a, err := netip.ParseAddr(host); {
+	case err == nil && a.Is4In6():
+		b := a.As16()
+		host = fmt.Sprintf("[::ffff:%x:%x]", uint16(b[12])<<8|uint16(b[13]), uint16(b[14])<<8|uint16(b[15]))
+	case err == nil && a.Is6():
+		host = "[" + a.String() + "]"
+	}
+	defaultPort := map[string]string{"http": "80", "https": "443"}[u.Scheme]
+	if p := u.Port(); p != "" && p != defaultPort {
+		host += ":" + p
+	}
+	return u.Scheme + "://" + host
 }
 
 // asciiHost refuses a host with non-ASCII characters. Browsers and MCP clients send an

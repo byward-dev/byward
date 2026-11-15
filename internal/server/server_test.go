@@ -117,6 +117,21 @@ func TestValidTokenIsRelayedWithoutIt(t *testing.T) {
 	}
 }
 
+// An allowed origin given with its scheme's default port admits the Origin header a browser sends
+// for it, which has none (401 is past the origin check, 403 refused there); the forms config stores
+// are TestAllowedOriginsAreStoredAsBrowsersSendThem's.
+func TestAnAllowedOriginAdmitsTheOriginABrowserSends(t *testing.T) {
+	e := start(t, "BYWARD_ALLOWED_ORIGINS=https://App.example.com:443")
+	for origin, want := range map[string]int{
+		"https://app.example.com": 401,
+		"http://app.example.com":  403,
+	} {
+		if res := e.do(t, "POST", "/mcp", nil, map[string]string{"Origin": origin}); res.StatusCode != want {
+			t.Errorf("Origin %s: %d, want %d", origin, res.StatusCode, want)
+		}
+	}
+}
+
 func TestChecksRunBeforeAuthentication(t *testing.T) {
 	e := start(t)
 	// Wrong Origin: 403 even without a token.

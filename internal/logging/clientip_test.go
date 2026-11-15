@@ -22,6 +22,7 @@ func TestClientAddressTrustsForwardedForOnlyFromTrustedProxies(t *testing.T) {
 		{"a broken chain stops at the last trusted hop", "10.1.2.3:4000", []string{"198.51.100.1, garbage, 10.9.9.9"}, "10.9.9.9"},
 		{"IPv6 proxy", "[2001:db8:ffff::1]:4000", []string{"2001:db8:1::5"}, "2001:db8:1::5"},
 		{"mapped IPv4 is unmapped", "10.1.2.3:4000", []string{"::ffff:198.51.100.1"}, "198.51.100.1"},
+		{"a mapped peer is matched unmapped", "[::ffff:10.1.2.3]:4000", []string{"198.51.100.1"}, "198.51.100.1"},
 		{"all hops trusted: the leftmost", "10.1.2.3:4000", []string{"10.5.5.5, 10.6.6.6"}, "10.5.5.5"},
 		{"an entry with a port (Azure Application Gateway)", "10.1.2.3:4000", []string{"198.51.100.1:43210"}, "198.51.100.1"},
 		{"a bracketed IPv6 entry with a port", "10.1.2.3:4000", []string{"[2001:db8:1::5]:443"}, "2001:db8:1::5"},

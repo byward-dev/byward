@@ -139,12 +139,15 @@ func TestNoAuthWithHostNetworkingIsRefused(t *testing.T) {
 	})
 }
 
-func TestOriginDropsTheDefaultPort(t *testing.T) {
+func TestOriginIsAsBrowsersSendIt(t *testing.T) {
 	for raw, want := range map[string]string{
 		"https://mcp.example.com:443/mcp":  "https://mcp.example.com",
 		"https://MCP.example.com:8443/mcp": "https://mcp.example.com:8443",
 		"http://localhost:80/mcp":          "http://localhost",
 		"http://[::1]:8080/mcp":            "http://[::1]:8080",
+		"https://[2001:DB8:0:0::1]/mcp":    "https://[2001:db8::1]",   // IPv6 in its shortest form
+		"https://[::ffff:127.0.0.1]/mcp":   "https://[::ffff:7f00:1]", // IPv4-mapped in hex, as browsers write it
+		"https://[::FFFF:7F00:1]:443/mcp":  "https://[::ffff:7f00:1]",
 	} {
 		if got := (&Config{PublicURL: mustURL(t, raw)}).Origin(); got != want {
 			t.Errorf("%s: got %s want %s", raw, got, want)

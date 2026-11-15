@@ -28,9 +28,13 @@ type Config struct {
 	StdioStreamIdleTimeout time.Duration
 	Listen                 string
 	InternalListen         string // "" when the internal listener is off
-	AllowedOrigins         []string
-	AllowedHosts           []string
-	TrustedProxies         []netip.Prefix
+	// AllowedOrigins are origins as browsers serialize them (browserOrigin), which origin.Origins
+	// compares with a browser's Origin header in lower case.
+	AllowedOrigins []string
+	AllowedHosts   []string
+	// TrustedProxies are masked, with IPv4-mapped prefixes unmapped, since logging.ClientAddress
+	// compares unmapped peers.
+	TrustedProxies []netip.Prefix
 
 	// TLSCertFile and TLSKeyFile serve TLS on the public listener (#183); both "" when it is plain
 	// HTTP, as behind an ingress that terminates TLS.
@@ -294,18 +298,8 @@ func validate(v *Values, container bool) (*Config, error) {
 	return c, nil
 }
 
-// Origin is the public URL's origin as browsers send it: lower case, default port dropped.
-func (c *Config) Origin() string {
-	host := strings.ToLower(c.PublicURL.Hostname())
-	if strings.Contains(host, ":") {
-		host = "[" + host + "]"
-	}
-	defaultPort := map[string]string{"http": "80", "https": "443"}[c.PublicURL.Scheme]
-	if p := c.PublicURL.Port(); p != "" && p != defaultPort {
-		host += ":" + p
-	}
-	return c.PublicURL.Scheme + "://" + host
-}
+// Origin is the public URL's origin as browsers send it (browserOrigin).
+func (c *Config) Origin() string { return browserOrigin(c.PublicURL) }
 
 // Issuer is the broker's issuer, derived once from the public URL: its scheme, host and port.
 func (c *Config) Issuer() string { return c.PublicURL.Scheme + "://" + c.PublicURL.Host }
