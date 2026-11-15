@@ -18,6 +18,7 @@ import (
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/ratelimit"
 	"github.com/byward-dev/byward/internal/registration"
+	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/token"
 )
@@ -42,7 +43,7 @@ func (b *Broker) metadataHandler() http.Handler {
 		// refresh token to any client that registered the refresh_token grant, with or without it
 		// (ADR-0006 §4, amended for #287). It is never in the challenge or the protected resource
 		// metadata, which the spec advises against.
-		"scopes_supported": []string{b.cfg.Scope, "offline_access"},
+		"scopes_supported": SupportedScopes(b.cfg.Scope),
 		"authorization_response_iss_parameter_supported": true,
 		"client_id_metadata_document_supported":          b.cfg.CIMD, // ADR-0008 §1
 	}
@@ -59,7 +60,7 @@ func (b *Broker) metadataHandler() http.Handler {
 		panic(err)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cors(w, r, "GET, HEAD, OPTIONS")
+		resource.DiscoveryCORS(w, r, "GET, HEAD, OPTIONS")
 		switch r.Method {
 		case http.MethodOptions:
 			w.WriteHeader(http.StatusNoContent)
@@ -72,21 +73,6 @@ func (b *Broker) metadataHandler() http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
-}
-
-// cors follows ADR-0013 §6 for discovery and OAuth endpoints: echo the Origin, no credentials.
-func cors(w http.ResponseWriter, r *http.Request, methods string) {
-	o := r.Header.Get("Origin")
-	if o == "" {
-		return
-	}
-	h := w.Header()
-	h.Set("Access-Control-Allow-Origin", o)
-	h.Add("Vary", "Origin")
-	h.Set("Access-Control-Allow-Methods", methods)
-	h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type, MCP-Protocol-Version")
-	h.Set("Access-Control-Expose-Headers", "WWW-Authenticate, Retry-After")
-	h.Set("Access-Control-Max-Age", "3600")
 }
 
 // login is the sealed login-in-progress (ADR-0007 §3), kept in a cookie per IdP state.
@@ -112,11 +98,7 @@ type login struct {
 }
 
 func (b *Broker) cookieName(idpState string) string {
-	name := "byw_login_" + idpState[:16]
-	if b.cfg.SecureCookies {
-		return "__Host-" + name
-	}
-	return name
+	return b.hostPrefixed("byw_login_" + idpState[:16])
 }
 
 // authorize handles the authorization request. A bad client or redirect URI gets an error page,
@@ -166,14 +148,14 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 	case wantsSilent(q.Get("prompt")) && len(promptValues(q.Get("prompt"))) > 1:
 		fail("invalid_request", "prompt=none cannot be combined with other prompt values (OIDC Core 1.0 §3.1.2.1)")
 		return
-	case q.Get("resource") != "" && q.Get("resource") != b.cfg.Resource.String():
-		// A missing resource means ours (ADR-0005 §4).
-		fail("invalid_target", "this server only issues tokens for "+b.cfg.Resource.String())
+	}
+	if desc, foreign := b.foreignResource(q.Get("resource")); foreign {
+		fail("invalid_target", desc)
 		return
 	}
 	scopes, ok := b.scopes(q.Get("scope"))
 	if !ok {
-		fail("invalid_scope", "supported scopes: "+b.cfg.Scope+" offline_access")
+		fail("invalid_scope", "supported scopes: "+strings.Join(SupportedScopes(b.cfg.Scope), " "))
 		return
 	}
 	l := login{ClientID: client.ID(), RedirectURI: redirect, State: q.Get("state"), Challenge: q.Get("code_challenge"),
@@ -254,9 +236,7 @@ func (b *Broker) startLogin(w http.ResponseWriter, r *http.Request, l login, now
 		b.idpFailure(w, r, l.ClientID, err)
 		return
 	}
-	//nolint:gosec // G124: Secure is false only in development mode on loopback http (ADR-0010 §10)
-	http.SetCookie(w, &http.Cookie{Name: b.cookieName(l.IdPState), Value: sealed, Path: "/", MaxAge: int(LoginLifetime.Seconds()),
-		HttpOnly: true, Secure: b.cfg.SecureCookies, SameSite: http.SameSiteLaxMode})
+	b.setCookie(w, b.cookieName(l.IdPState), sealed, int(LoginLifetime.Seconds()))
 	w.Header().Set("Cache-Control", "no-store")
 	// 303: the browser follows the consent form's answer with a GET.
 	http.Redirect(w, r, target, http.StatusSeeOther)
@@ -307,14 +287,27 @@ func validChallenge(c string) bool {
 	return strings.Trim(c, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_") == ""
 }
 
+// OfflineAccess is the scope that stands for a grant's refresh tokens (ADR-0006 §4).
+const OfflineAccess = "offline_access"
+
+// SupportedScopes are the scopes the broker serves with resource scope scope: the metadata's
+// scopes_supported, what /authorize accepts, and what a DCR client may register.
+func SupportedScopes(scope string) []string { return []string{scope, OfflineAccess} }
+
+// withoutOffline returns a copy of scopes without offline_access.
+func withoutOffline(scopes []string) []string {
+	return slices.DeleteFunc(slices.Clone(scopes), func(s string) bool { return s == OfflineAccess })
+}
+
 // scopes returns the requested scopes, defaulting to the resource scope; unknown scopes fail.
 func (b *Broker) scopes(raw string) ([]string, bool) {
 	if strings.TrimSpace(raw) == "" {
 		return []string{b.cfg.Scope}, true
 	}
+	supported := SupportedScopes(b.cfg.Scope)
 	var out []string
 	for _, s := range strings.Fields(raw) {
-		if s != b.cfg.Scope && s != "offline_access" {
+		if !slices.Contains(supported, s) {
 			return nil, false
 		}
 		if !slices.Contains(out, s) {
@@ -475,8 +468,7 @@ func (b *Broker) openLogin(r *http.Request) (l login, c *http.Cookie, badLogin s
 	if err != nil {
 		return login{}, nil, "This sign-in has expired or was started in another browser."
 	}
-	plain, err := b.cfg.LoginBox.Open(c.Value)
-	if err != nil || json.Unmarshal(plain, &l) != nil || l.IdPState != st {
+	if b.cfg.LoginBox.OpenJSON(c.Value, &l) != nil || l.IdPState != st {
 		return login{}, c, "This sign-in has expired."
 	}
 	return l, c, ""
@@ -490,10 +482,7 @@ func (b *Broker) spendLogin(r *http.Request, l login) error {
 }
 
 // expireLogin deletes a login cookie, so the login it holds cannot be used again.
-func (b *Broker) expireLogin(w http.ResponseWriter, c *http.Cookie) {
-	//nolint:gosec // G124: Secure is false only in development mode on loopback http (ADR-0010 §10)
-	http.SetCookie(w, &http.Cookie{Name: c.Name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: b.cfg.SecureCookies, SameSite: http.SameSiteLaxMode})
-}
+func (b *Broker) expireLogin(w http.ResponseWriter, c *http.Cookie) { b.setCookie(w, c.Name, "", -1) }
 
 func withQuery(base string, v url.Values) string {
 	sep := "?"
@@ -616,7 +605,7 @@ func (b *Broker) clientLookupFailed(ctx context.Context, clientID string, err er
 // for refresh tokens shows up here, as a warning for a client that may refresh, not as hourly
 // sign-ins.
 func (b *Broker) grantScopes(ctx context.Context, l login, toks idp.Tokens) []string {
-	scopes := slices.DeleteFunc(slices.Clone(l.Scopes), func(s string) bool { return s == "offline_access" })
+	scopes := withoutOffline(l.Scopes)
 	c, err := b.cfg.Clients.Client(ctx, l.ClientID)
 	if err != nil {
 		b.cfg.Log.WarnContext(ctx, "looking up the client failed, so this grant cannot refresh", "client_id", l.ClientID, "error", err.Error())
@@ -629,5 +618,5 @@ func (b *Broker) grantScopes(ctx context.Context, l login, toks idp.Tokens) []st
 		b.cfg.Log.WarnContext(ctx, "the IdP returned no refresh token, so this grant cannot refresh", "idp", b.cfg.IdPName, "client_id", l.ClientID, "reason", "check that the IdP is asked for refresh tokens; see the IdP's how-to")
 		return scopes
 	}
-	return append(scopes, "offline_access")
+	return append(scopes, OfflineAccess)
 }

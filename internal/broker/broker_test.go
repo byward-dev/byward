@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -775,7 +776,8 @@ func TestMetadataAdvertisesTheBroker(t *testing.T) {
 		res := e.do(t, "GET", p, nil, nil)
 		var m map[string]any
 		_ = json.NewDecoder(res.Body).Decode(&m)
-		if m["issuer"] != issuer || m["token_endpoint"] != issuer+"/token" || m["authorization_response_iss_parameter_supported"] != true {
+		if m["issuer"] != issuer || m["token_endpoint"] != issuer+"/token" || m["authorization_response_iss_parameter_supported"] != true ||
+			fmt.Sprint(m["scopes_supported"]) != "[mcp offline_access]" {
 			t.Fatalf("%s: %v", p, m)
 		}
 	}
@@ -792,6 +794,9 @@ func TestCORSAndMethods(t *testing.T) {
 		{"metadata POST", "POST", md, 405, map[string]string{"Allow": "GET, HEAD, OPTIONS"}},
 		{"metadata HEAD", "HEAD", md, 200, map[string]string{"Access-Control-Allow-Origin": origin}},
 		{"token GET", "GET", "/token", 405, map[string]string{"Allow": "POST, OPTIONS"}},
+		{"token preflight", "OPTIONS", "/token", 204, map[string]string{"Access-Control-Allow-Origin": origin, "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Credentials": ""}},
+		{"revoke preflight", "OPTIONS", "/revoke", 204, map[string]string{"Access-Control-Allow-Origin": origin, "Access-Control-Allow-Methods": "POST, OPTIONS"}},
+		{"revoke PUT", "PUT", "/revoke", 405, map[string]string{"Allow": "POST, OPTIONS", "Access-Control-Allow-Origin": origin}},
 	}
 	e := newEnv(t)
 	for _, c := range cases {
@@ -808,6 +813,28 @@ func TestCORSAndMethods(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestForeignResource(t *testing.T) {
+	ours, _ := url.Parse("https://mcp.example.com/mcp")
+	b := &Broker{cfg: Config{Resource: ours}}
+	for res, want := range map[string]bool{"": false, "https://mcp.example.com/mcp": false, "https://mcp.example.com/mcp/": true,
+		"https://other.example/mcp": true, "https://mcp.example.com": true} {
+		desc, foreign := b.foreignResource(res)
+		if foreign != want || (foreign && desc != "this server only issues tokens for https://mcp.example.com/mcp") {
+			t.Errorf("foreignResource(%q) = %q, %v; want foreign %v", res, desc, foreign, want)
+		}
+	}
+}
+
+func TestWithoutOfflineLeavesItsInputAlone(t *testing.T) {
+	in := []string{OfflineAccess, "mcp", OfflineAccess}
+	if got := withoutOffline(in); !slices.Equal(got, []string{"mcp"}) {
+		t.Fatalf("withoutOffline = %v, want [mcp]", got)
+	}
+	if !slices.Equal(in, []string{OfflineAccess, "mcp", OfflineAccess}) {
+		t.Fatalf("the input changed to %v", in)
 	}
 }
 

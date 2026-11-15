@@ -26,6 +26,6 @@ func wireDCR(w *wiring) (registration.Registry, broker.Registrar, error) {
 		return nil, nil, nil
 	}
 	dcr := registration.NewDCRRegistry(registration.DCRConfig{Store: w.store, KeysClient: w.guard.HTTPClient(), JTI: w.parts.jti, Now: time.Now,
-		Scopes: []string{w.cfg.Scope, "offline_access"}, Deny: w.parts.clientDeny})
+		Scopes: broker.SupportedScopes(w.cfg.Scope), Deny: w.parts.clientDeny})
 	return dcr, dcr, nil
 }

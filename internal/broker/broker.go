@@ -95,7 +95,7 @@ type Config struct {
 	// that only uses OIDC discovery finds the keys (ADR-0016 amendment, #207); "" without assertion
 	// keys (a stdio upstream).
 	JWKSURI string
-	// ObserveRegistration, when set, is told every /register outcome (one of the Registration*).
+	// ObserveRegistration is told every /register outcome (one of the Registration*); nil ignores them.
 	ObserveRegistration func(outcome string)
 	IdP                 IdP
 	Clients             registration.Registry
@@ -107,8 +107,8 @@ type Config struct {
 	// ConsentHintBox seals the remembered-consent hint cookie (ADR-0010 §3); nil asks every client
 	// every time.
 	ConsentHintBox *token.Box
-	// ObserveConsent, when set, is told each consent outcome (shown, granted, denied, remembered)
-	// with the client's trust level, for metrics (ADR-0010 §12).
+	// ObserveConsent is told each consent outcome (shown, granted, denied, remembered) with the
+	// client's trust level, for metrics (ADR-0010 §12); nil ignores them.
 	ObserveConsent func(trust, outcome string)
 	Gate           Gate
 	// Assert selects the optional identity claims access tokens carry for the upstream's
@@ -133,11 +133,11 @@ type Config struct {
 	Audit *audit.Log
 	// Limiter rate-limits the OAuth endpoints per client address (ADR-0018 §8); nil limits nothing.
 	Limiter Limiter
-	// ObserveIdP, when set, is told each IdP call's operation, outcome (success, rejected,
-	// unavailable) and duration, for metrics.
+	// ObserveIdP is told each IdP call's operation, outcome (success, rejected, unavailable) and
+	// duration, for metrics; nil ignores them.
 	ObserveIdP func(operation, outcome string, d time.Duration)
-	// ObserveIdPAlert, when set, is told each IdP error that needs the operator, by operation and
-	// reason (idp.Alert), for metrics.
+	// ObserveIdPAlert is told each IdP error that needs the operator, by operation and reason
+	// (idp.Alert), for metrics; nil ignores them.
 	ObserveIdPAlert func(operation, reason string)
 	Now             func() time.Time
 }
@@ -186,6 +186,12 @@ func New(cfg Config) (*Broker, error) {
 	if cfg.ObserveIdPAlert == nil {
 		cfg.ObserveIdPAlert = func(string, string) {}
 	}
+	if cfg.ObserveConsent == nil {
+		cfg.ObserveConsent = func(string, string) {}
+	}
+	if cfg.ObserveRegistration == nil {
+		cfg.ObserveRegistration = func(string) {}
+	}
 	if cfg.RefreshGrace < 0 || cfg.RefreshGrace > MaxRefreshGrace {
 		return nil, errors.New("broker: the refresh grace window must be between 0 and 60 s")
 	}
@@ -202,13 +208,13 @@ func (b *Broker) Register(mux *http.ServeMux) {
 	mux.Handle("/.well-known/oauth-authorization-server", md)
 	mux.Handle("/.well-known/openid-configuration", md)
 	mux.HandleFunc("/authorize", b.authorize)
-	mux.Handle("/consent", limitBody(16<<10, http.HandlerFunc(b.consent)))
+	mux.Handle("/consent", http.MaxBytesHandler(http.HandlerFunc(b.consent), 16<<10))
 	mux.HandleFunc(StylesheetPath, stylesheet)
 	mux.HandleFunc(b.callbackPath(), b.callback)
-	mux.Handle("/token", limitBody(64<<10, http.HandlerFunc(b.token)))
-	mux.Handle("/revoke", limitBody(64<<10, http.HandlerFunc(b.revokeEndpoint)))
+	mux.Handle("/token", http.MaxBytesHandler(http.HandlerFunc(b.token), 64<<10))
+	mux.Handle("/revoke", http.MaxBytesHandler(http.HandlerFunc(b.revokeEndpoint), 64<<10))
 	if b.cfg.Registrar != nil {
-		mux.Handle("/register", limitBody(64<<10, http.HandlerFunc(b.register)))
+		mux.Handle("/register", http.MaxBytesHandler(http.HandlerFunc(b.register), 64<<10))
 	}
 }
 
@@ -228,13 +234,6 @@ func randomID() string {
 	r := make([]byte, 16)
 	_, _ = rand.Read(r)
 	return hex.EncodeToString(r)
-}
-
-func limitBody(n int64, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, n)
-		next.ServeHTTP(w, r)
-	})
 }
 
 // throttled reports whether r is over endpoint's budget; if so it records the audit event (rate-

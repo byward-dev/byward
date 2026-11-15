@@ -15,9 +15,11 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/audit"
+	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/ratelimit"
 	"github.com/byward-dev/byward/internal/registration"
+	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/token"
 )
@@ -34,15 +36,7 @@ type tokenError struct {
 }
 
 func (b *Broker) token(w http.ResponseWriter, r *http.Request) {
-	cors(w, r, "POST, OPTIONS")
-	switch r.Method {
-	case http.MethodOptions:
-		w.WriteHeader(http.StatusNoContent)
-		return
-	case http.MethodPost:
-	default:
-		w.Header().Set("Allow", "POST, OPTIONS")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !allowPost(w, r) {
 		return
 	}
 	if retry, limited := b.throttled(w, r, ratelimit.Token); limited {
@@ -138,8 +132,8 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if res := f.Get("resource"); res != "" && res != b.cfg.Resource.String() {
-		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_target", "this server only issues tokens for " + b.cfg.Resource.String()})
+	if desc, foreign := b.foreignResource(f.Get("resource")); foreign {
+		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_target", desc})
 		return
 	}
 	claims, err := b.cfg.Sealer.Open(token.Code, f.Get("code"))
@@ -184,7 +178,7 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 	// that the code is redeemed it lives as long as its tokens can (ADR-0006 §5).
 	// A refresh token needs offline_access in the grant (grantScopes: a client that registered the
 	// refresh_token grant, and an IdP refresh token) and a client that still allows refresh.
-	offline := slices.Contains(pc.Scopes, "offline_access") && client.AllowsRefresh()
+	offline := slices.Contains(pc.Scopes, OfflineAccess) && client.AllowsRefresh()
 	expires := now.Add(AccessLifetime)
 	if offline {
 		expires = now.Add(GrantLifetime)
@@ -207,7 +201,7 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 	}
 	scopes := pc.Scopes
 	if !offline { // the response reports the scope actually granted (RFC 6749 §5.1)
-		scopes = slices.DeleteFunc(slices.Clone(scopes), func(s string) bool { return s == "offline_access" })
+		scopes = withoutOffline(scopes)
 	}
 	asserted, idpExpiry, err := b.grantClaims(ctx, claims.GrantID)
 	if err != nil {
@@ -306,14 +300,21 @@ func assertionSubject(jwt string) string {
 	return c.Sub
 }
 
-// revoke ends a grant (store and deny list) and logs why.
+// revoke ends a grant (store and deny list) and logs why. A store failure is logged: the deny list
+// still ends the grant's access tokens on this replica.
 func (b *Broker) revoke(r *http.Request, clientID, grantID string, now time.Time, why string) {
 	ctx := r.Context()
 	if err := b.cfg.Store.RevokeGrant(ctx, grantID, now); err != nil && !errors.Is(err, store.ErrNotFound) {
 		b.cfg.Log.ErrorContext(ctx, "revoking a grant failed", "error", err)
 	}
-	b.deny.Add(grantID)
+	b.revoked(r, clientID, grantID, why)
 	b.cfg.Log.WarnContext(ctx, why)
+}
+
+// revoked is the end of every grant revocation, once the store has revoked the grant (or failed to,
+// by the caller's policy): the deny list stops its access tokens now, and the audit stream records why.
+func (b *Broker) revoked(r *http.Request, clientID, grantID, why string) {
+	b.deny.Add(grantID)
 	b.cfg.Audit.Record(r, audit.Event{Name: audit.GrantRevoked, Outcome: audit.Success, Reason: why, ClientID: clientID, GrantID: grantID})
 }
 
@@ -322,8 +323,32 @@ func pkceMatches(verifier, challenge string) bool {
 	if len(verifier) < 43 || len(verifier) > 128 || challenge == "" {
 		return false
 	}
-	sum := sha256.Sum256([]byte(verifier))
-	return subtle.ConstantTimeCompare([]byte(base64.RawURLEncoding.EncodeToString(sum[:])), []byte(challenge)) == 1
+	return subtle.ConstantTimeCompare([]byte(idp.CodeChallenge(verifier)), []byte(challenge)) == 1
+}
+
+// allowPost applies the preamble of the POST endpoints (/token, /revoke, /register): the discovery
+// CORS policy, 204 to a preflight, 405 to any method but POST. It reports whether to go on.
+func allowPost(w http.ResponseWriter, r *http.Request) bool {
+	resource.DiscoveryCORS(w, r, "POST, OPTIONS")
+	switch r.Method {
+	case http.MethodPost:
+		return true
+	case http.MethodOptions:
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		w.Header().Set("Allow", "POST, OPTIONS")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+	return false
+}
+
+// foreignResource reports whether res, an RFC 8707 resource parameter, names another resource
+// than ours, with the invalid_target description to send. A missing resource means ours (ADR-0005 §4).
+func (b *Broker) foreignResource(res string) (desc string, foreign bool) {
+	if res == "" || res == b.cfg.Resource.String() {
+		return "", false
+	}
+	return "this server only issues tokens for " + b.cfg.Resource.String(), true
 }
 
 func (b *Broker) tokenFail(w http.ResponseWriter, r *http.Request, e tokenError) {

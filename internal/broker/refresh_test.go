@@ -532,6 +532,8 @@ func TestRevokeEitherTokenEndsTheGrant(t *testing.T) {
 			if e.validNow(t, body["access_token"].(string)) {
 				t.Fatal("the access token still validates on this replica before any sync")
 			}
+			e.oneAuditEvent(t, "grant_revoked", map[string]any{"outcome": "success", "client_id": clientID, "grant_id": firstGrant(e.st),
+				"reason": "the client revoked a token (RFC 7009)"})
 			res, failed := e.refresh(t, body["refresh_token"].(string), "")
 			wantOAuthError(t, res, failed, http.StatusBadRequest, "invalid_grant")
 		})
@@ -561,14 +563,21 @@ func TestRevokeAnswers200ForWhatIsNotARevocableToken(t *testing.T) {
 
 func TestRevokeAnswers503WhenRevokingFails(t *testing.T) {
 	e := newEnv(t)
-	rt := e.offline(t)["refresh_token"].(string)
-	e.st.Fail(errStoreDown, "RevokeGrant") // the lookup works, the revocation does not
+	body := e.offline(t)
+	rt := body["refresh_token"].(string)
+	e.valid(t, body["access_token"].(string)) // a fresh list, before the revocation
+	e.st.Fail(errStoreDown, "RevokeGrant")    // the lookup works, the revocation does not
 	res := e.revokeToken(t, rt, clientID)
 	if res.StatusCode != http.StatusServiceUnavailable || res.Header.Get("Retry-After") == "" {
 		t.Fatalf("revoke with a failing store write: %d, want 503 with Retry-After (never a false 200)", res.StatusCode)
 	}
 	if e.grantGone(t, firstGrant(e.st)) {
 		t.Fatal("grant gone although the revocation failed")
+	}
+	// The 503 returns before the deny list and the audit record: nothing claims a revocation.
+	e.noAuditEvent(t, "grant_revoked")
+	if !e.validNow(t, body["access_token"].(string)) {
+		t.Fatal("the deny list ended the grant although the revocation failed")
 	}
 }
 

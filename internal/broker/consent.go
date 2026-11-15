@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -53,11 +52,7 @@ type flow struct {
 // two proxies on one host never read each other's cookie.
 func (b *Broker) bindingCookie() string {
 	sum := sha256.Sum256([]byte(b.cfg.Issuer))
-	name := "byw_consent_" + hex.EncodeToString(sum[:4])
-	if b.cfg.SecureCookies {
-		return "__Host-" + name
-	}
-	return name
+	return b.hostPrefixed("byw_consent_" + hex.EncodeToString(sum[:4]))
 }
 
 func bindingHash(v string) string {
@@ -75,18 +70,15 @@ func (b *Broker) showConsent(w http.ResponseWriter, r *http.Request, client regi
 	}
 	now := b.cfg.Now()
 	f := flow{ID: randomID(), Binding: bindingHash(binding), Shown: now.UnixMilli(), Login: l}
-	plain, _ := json.Marshal(f)
-	sealed, err := b.cfg.ConsentBox.Seal(plain, now.Add(FlowLifetime))
+	sealed, err := b.cfg.ConsentBox.SealJSON(f, now.Add(FlowLifetime))
 	if err != nil {
 		b.serverError(w, r, err)
 		return
 	}
-	//nolint:gosec // G124: Secure is false only in development mode on loopback http (ADR-0010 §10)
-	http.SetCookie(w, &http.Cookie{Name: b.bindingCookie(), Value: binding, Path: "/", MaxAge: int(FlowLifetime.Seconds()),
-		HttpOnly: true, Secure: b.cfg.SecureCookies, SameSite: http.SameSiteLaxMode})
+	b.setCookie(w, b.bindingCookie(), binding, int(FlowLifetime.Seconds()))
 	b.cfg.Audit.RecordUnauthenticated(r, audit.Event{Name: audit.ConsentShown, Outcome: audit.Success, ClientID: client.ID(),
 		ClientTrust: string(client.Trust())})
-	b.observeConsent(client.Trust(), ConsentOutcomeShown)
+	b.cfg.ObserveConsent(string(client.Trust()), ConsentOutcomeShown)
 	b.renderConsent(w, r, http.StatusOK, client, l, sealed, "")
 }
 
@@ -137,7 +129,7 @@ func (b *Broker) consent(w http.ResponseWriter, r *http.Request) {
 		ev.Name, ev.Outcome, ev.Reason = audit.ConsentDenied, audit.Failure, "the user denied the request"
 		if first {
 			b.cfg.Audit.RecordUnauthenticated(r, ev)
-			b.observeConsent(client.Trust(), ConsentOutcomeDenied)
+			b.cfg.ObserveConsent(string(client.Trust()), ConsentOutcomeDenied)
 		}
 		b.redirectError(w, r, l.RedirectURI, l.State, "access_denied", "the user denied the request")
 		return
@@ -145,7 +137,7 @@ func (b *Broker) consent(w http.ResponseWriter, r *http.Request) {
 	ev.Name, ev.Outcome = audit.ConsentGranted, audit.Success
 	if first {
 		b.cfg.Audit.RecordUnauthenticated(r, ev)
-		b.observeConsent(client.Trust(), ConsentOutcomeGranted)
+		b.cfg.ObserveConsent(string(client.Trust()), ConsentOutcomeGranted)
 	}
 	// The IdP state is stored only now, after Allow (ADR-0010 §5).
 	b.startLogin(w, r, l, now)
@@ -175,8 +167,7 @@ func (b *Broker) readAnswer(w http.ResponseWriter, r *http.Request) (f flow, sea
 		return f, "", false, false
 	}
 	sealed = r.PostForm.Get("flow")
-	plain, err := b.cfg.ConsentBox.Open(sealed)
-	if err != nil || json.Unmarshal(plain, &f) != nil {
+	if b.cfg.ConsentBox.OpenJSON(sealed, &f) != nil {
 		b.page(w, r, http.StatusBadRequest, "This consent page has expired.", "Start again from your app.")
 		return f, "", false, false
 	}
@@ -196,10 +187,4 @@ func (b *Broker) fromConsentPage(r *http.Request) bool {
 	}
 	s := r.Header.Get("Sec-Fetch-Site")
 	return s == "" || s == "same-origin"
-}
-
-func (b *Broker) observeConsent(trust registration.TrustLevel, outcome string) {
-	if b.cfg.ObserveConsent != nil {
-		b.cfg.ObserveConsent(string(trust), outcome)
-	}
 }

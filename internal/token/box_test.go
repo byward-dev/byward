@@ -63,6 +63,32 @@ func TestBoxExpiry(t *testing.T) {
 	}
 }
 
+func TestBoxJSONRoundTrip(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	b, _ := NewBox(boxRing(t, "k1"), "login", func() time.Time { return now })
+	type doc struct {
+		A string `json:"a"`
+	}
+	s, err := b.SealJSON(doc{A: "x"}, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got doc
+	if err := b.OpenJSON(s, &got); err != nil || got.A != "x" {
+		t.Fatalf("round trip: %+v %v", got, err)
+	}
+	notJSON, _ := b.Seal([]byte("{"), now.Add(time.Minute))
+	if err := b.OpenJSON(notJSON, &got); err == nil {
+		t.Fatal("opened a box that holds no JSON")
+	}
+	if err := b.OpenJSON("garbage", &got); err == nil {
+		t.Fatal("opened garbage")
+	}
+	if _, err := b.SealJSON(func() {}, now.Add(time.Minute)); err == nil {
+		t.Fatal("sealed a value JSON cannot encode")
+	}
+}
+
 func FuzzBoxOpen(f *testing.F) {
 	fuzzRing = mustRing(f, keyDir(f, map[string]string{"k1": randomKey(f)}))
 	f.Add("")

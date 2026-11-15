@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -53,6 +54,31 @@ func TestMetadataDocument(t *testing.T) {
 	}
 	if _, ok := d["resource_documentation"]; ok {
 		t.Fatal("empty documentation should be omitted")
+	}
+}
+
+// The broker's metadata and POST endpoints share this policy (ADR-0013 §6), so the exact headers are
+// pinned here once: any Origin echoed, never credentials, the caller's methods.
+func TestDiscoveryCORSHeaders(t *testing.T) {
+	r := httptest.NewRequest("OPTIONS", "/token", nil)
+	r.Header.Set("Origin", "https://app.example")
+	w := httptest.NewRecorder()
+	DiscoveryCORS(w, r, "POST, OPTIONS")
+	want := http.Header{
+		"Access-Control-Allow-Origin":   {"https://app.example"},
+		"Vary":                          {"Origin"},
+		"Access-Control-Allow-Methods":  {"POST, OPTIONS"},
+		"Access-Control-Allow-Headers":  {"Authorization, Content-Type, MCP-Protocol-Version"},
+		"Access-Control-Expose-Headers": {"WWW-Authenticate, Retry-After"},
+		"Access-Control-Max-Age":        {"3600"},
+	}
+	if got := w.Header(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("headers = %v, want %v", got, want)
+	}
+	w = httptest.NewRecorder()
+	DiscoveryCORS(w, httptest.NewRequest("OPTIONS", "/token", nil), "POST, OPTIONS")
+	if len(w.Header()) != 0 {
+		t.Fatalf("a request without Origin got CORS headers %v", w.Header())
 	}
 }
 
