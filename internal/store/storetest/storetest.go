@@ -229,8 +229,8 @@ func nilSlicesComeBackNil(t *testing.T, s store.Store) {
 	if created := mustCreate(t, s, g); created.Scopes != nil || created.IdPTokens != nil {
 		t.Fatalf("CreateGrant returned Scopes %#v, IdPTokens %#v; want nil", created.Scopes, created.IdPTokens)
 	}
-	if got, err := s.Grant(ctx, "g1"); err != nil || got.Scopes != nil {
-		t.Fatalf("Grant Scopes = %#v (%v), want nil", got.Scopes, err)
+	if got, err := s.Grant(ctx, "g1"); err != nil || got.Scopes != nil || got.IdPTokens != nil {
+		t.Fatalf("Grant Scopes %#v, IdPTokens %#v (%v); want nil", got.Scopes, got.IdPTokens, err)
 	}
 	c := pendingCode("g1")
 	c.Scopes = nil
@@ -247,13 +247,13 @@ func storedValuesAreCopies(t *testing.T, s store.Store) {
 	if created.Scopes[0] != "mcp" || created.IdPTokens[0] != 's' {
 		t.Fatal("changing the caller's grant after CreateGrant changed the grant it returned")
 	}
-	created.Scopes[0], created.IdPTokens[0] = "changed", 'X'
-	if stored, _ := s.Grant(ctx, "g1"); stored.Scopes[0] != "mcp" || stored.IdPTokens[0] != 's' {
-		t.Fatal("changing the grant CreateGrant returned changed the stored one")
-	}
 	got, _ := s.Grant(ctx, "g1")
 	if got.Scopes[0] != "mcp" || got.IdPTokens[0] != 's' {
 		t.Fatal("changing the caller's grant after CreateGrant changed the stored one")
+	}
+	created.Scopes[0], created.IdPTokens[0] = "changed", 'X'
+	if stored, _ := s.Grant(ctx, "g1"); stored.Scopes[0] != "mcp" || stored.IdPTokens[0] != 's' {
+		t.Fatal("changing the grant CreateGrant returned changed the stored one")
 	}
 	got.Scopes[0], got.IdPTokens[0] = "changed", 'X'
 	if again, _ := s.Grant(ctx, "g1"); again.Scopes[0] != "mcp" || again.IdPTokens[0] != 's' {
