@@ -40,8 +40,8 @@ func TestAnswerFollowsTheRefusalShapes(t *testing.T) {
 			if !strings.Contains(w.Body.String(), c.wantBody) {
 				t.Fatalf("body %q, want %q", w.Body, c.wantBody)
 			}
-			if c.wantStatus == 200 && !json.Valid(w.Body.Bytes()) {
-				t.Fatalf("not JSON: %s", w.Body)
+			if c.wantStatus == 200 && (!json.Valid(w.Body.Bytes()) || w.Header().Get("Content-Type") != "application/json") {
+				t.Fatalf("Content-Type %q, body %s; want JSON", w.Header().Get("Content-Type"), w.Body)
 			}
 			if c.method != "POST" && w.Header().Get("Allow") != "POST" {
 				t.Fatal("405 without Allow: POST")

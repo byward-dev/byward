@@ -40,6 +40,9 @@ func refuse(t *testing.T, status int, body string) http.Handler {
 }
 
 func TestUpstreamRefusalBecomesAReadableJSONRPCResponse(t *testing.T) {
+	// The upstream's own answer, padded to exactly the capture limit: the most that is relayed.
+	answer := `{"jsonrpc":"2.0","id":7,"error":{"code":-32001,"message":"missing role"}}`
+	atLimit := answer + strings.Repeat(" ", captureLimit-len(answer))
 	cases := []struct {
 		name            string
 		upstream        int
@@ -55,8 +58,8 @@ func TestUpstreamRefusalBecomesAReadableJSONRPCResponse(t *testing.T) {
 			`{"error":{"code":-32603,"data":{"upstreamStatus":403},"message":"The upstream MCP server denied this request; ask your operator."},"id":"a-1","jsonrpc":"2.0"}`},
 		{"upstream's own JSON-RPC answer with the same id is relayed", 403, `{"jsonrpc":"2.0","id":7,"error":{"code":-32001,"message":"missing role Mcp.Admin"}}`, "POST", toolsCall, 200,
 			`"missing role Mcp.Admin"`},
-		{"upstream's JSON-RPC answer past the capture limit is not trusted", 403,
-			`{"jsonrpc":"2.0","id":7,"error":{"code":-32001,"message":"missing role"}}` + strings.Repeat(" ", captureLimit), "POST", toolsCall, 200,
+		{"upstream's JSON-RPC answer of exactly the capture limit is relayed", 403, atLimit, "POST", toolsCall, 200, `"missing role"`},
+		{"upstream's JSON-RPC answer past the capture limit is not trusted", 403, atLimit + " ", "POST", toolsCall, 200,
 			`{"id":7,"jsonrpc":"2.0","result":{"content":[{"text":"The upstream MCP server denied this request; ask your operator.","type":"text"}],"isError":true}}`},
 		{"upstream's JSON-RPC answer for another id is not trusted", 403, `{"jsonrpc":"2.0","id":8,"error":{"code":-32001,"message":"other"}}`, "POST", toolsCall, 200,
 			`"isError":true`},
@@ -89,8 +92,11 @@ func TestUpstreamRefusalBecomesAReadableJSONRPCResponse(t *testing.T) {
 			if c.upstream != 404 && w.Header().Get("Mcp-Session-Id") != "" {
 				t.Fatal("headers of a refused response reached the client")
 			}
-			if c.wantStatus == 200 && !json.Valid(w.Body.Bytes()) {
-				t.Fatalf("not JSON: %s", w.Body)
+			if c.wantStatus == 200 && (!json.Valid(w.Body.Bytes()) || w.Header().Get("Content-Type") != "application/json") {
+				t.Fatalf("Content-Type %q, body %s; want JSON", w.Header().Get("Content-Type"), w.Body)
+			}
+			if c.wantStatus == 405 && w.Header().Get("Allow") != "POST" {
+				t.Fatal("405 without Allow: POST")
 			}
 		})
 	}
@@ -140,7 +146,7 @@ func TestAStringOrIntegerIDIsEchoedExactlyAndAnyOtherLeavesTheRequestUnanswerabl
 		id    string
 		valid bool
 	}{
-		{`7`, true}, {`-12`, true}, {`0`, true}, {`12345678901234567890`, true}, {` 7 `, true},
+		{`7`, true}, {`9`, true}, {`-12`, true}, {`0`, true}, {`12345678901234567890`, true}, {` 7 `, true},
 		{`"xé"`, true}, {`"a\"b"`, true}, {`"1.5"`, true},
 		{`null`, false}, {`true`, false}, {`{}`, false}, {`[]`, false},
 		{`1.5`, false}, {`-1.5e3`, false}, {`1e3`, false}, {`1E3`, false}, {`7.0`, false},

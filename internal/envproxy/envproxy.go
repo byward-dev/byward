@@ -72,7 +72,7 @@ func (r redacting) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, err
 	}
 	if mbe := (*http.MaxBytesError)(nil); errors.As(err, &mbe) {
-		return nil, mbe // only the limit; whatever wrapped it is dropped
+		return nil, mbe // only the limit, which quotes nothing
 	}
 	if err != nil {
 		return nil, redact(err)
