@@ -963,7 +963,8 @@ func TestAClientsRefusedTrailerIsLoggedWithoutItsLine(t *testing.T) {
 	t.Cleanup(up.Close)
 	u, _ := url.Parse(up.URL + "/mcp")
 	var logs bytes.Buffer
-	// The body ends as Go's server ends it when it refuses a trailer line: a bare textproto.ProtocolError.
+	// The body ends as Go's server ends it when it refuses a trailer line (pinned over a real connection
+	// by logging's TestARealServersRefusedRequestTrailerIsNotQuoted): a bare textproto.ProtocolError.
 	body := io.MultiReader(strings.NewReader("{}"), iotest.ErrReader(textproto.ProtocolError(`malformed MIME header: missing colon: "Cookie session=SECRET"`)))
 	req := httptest.NewRequest(http.MethodPost, "/mcp", body)
 	rec := httptest.NewRecorder()

@@ -10,7 +10,10 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"net/url"
+	"strings"
 	"testing"
+	"testing/iotest"
+	"time"
 
 	"github.com/byward-dev/byward/internal/testutil/rawanswer"
 )
@@ -133,13 +136,84 @@ func TestARealTransportsRefusedTrailerLineIsNotQuoted(t *testing.T) {
 	}
 	_, err = io.ReadAll(res.Body)
 	_ = res.Body.Close()
-	if err == nil {
-		t.Fatal("reading the body accepted the trailer")
+	if err == nil || !strings.Contains(err.Error(), "SECRET") {
+		t.Fatalf("reading the body = %v, want an error quoting the refused line", err)
 	}
 	if got := BodyError(err); got == nil || got.Error() != "a malformed header or trailer line" {
 		t.Fatalf("BodyError = %v, want the refused line named without its text", got)
 	}
 }
+
+// A request trailer line Go's server refuses fails the handler's body read the same way, quoting the
+// whole line, which a client may have put a token or cookie in; BodyError keeps none of it. The relay
+// logs this error. The request comes over a real connection, as above.
+func TestARealServersRefusedRequestTrailerIsNotQuoted(t *testing.T) {
+	read := make(chan error, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		_, err := io.ReadAll(r.Body)
+		read <- err
+	}))
+	defer srv.Close()
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.Write([]byte("POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\nX-Sid: SECRET\x01\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err = <-read:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the server never read the request body")
+	}
+	if err == nil || !strings.Contains(err.Error(), "SECRET") {
+		t.Fatalf("reading the body = %v, want an error quoting the refused line", err)
+	}
+	if got := BodyError(err); got == nil || got.Error() != "a malformed header or trailer line" {
+		t.Fatalf("BodyError = %v, want the refused line named without its text", got)
+	}
+}
+
+// Go's client keeps only the text of an error that ends in its Client.Timeout, while awaiting the
+// answer (URLError shows it) or reading its body (BodyError does). A refused line in that text is not
+// quoted, and the timeout is kept.
+func TestARefusedLineAtAClientTimeoutIsNotQuoted(t *testing.T) {
+	refused := textproto.ProtocolError(`malformed MIME header line: "Set-Cookie: sid=SECRET\x01"`)
+	// Each fails once the client has cancelled the request for its timeout: for a transport of its own,
+	// the client marks the timeout before it closes Cancel, so it then reports the failure as one.
+	atTimeout := func(r *http.Request) error { <-r.Cancel; return refused } //nolint:staticcheck // Cancel is what the client closes after marking the timeout
+	for name, tc := range map[string]struct {
+		rt   roundTrip
+		show func(error) error
+		want string
+	}{
+		"awaiting the answer": {func(r *http.Request) (*http.Response, error) { return nil, atTimeout(r) }, URLError, `Get "http://idp.example/keys": a malformed header or trailer line`},
+		"reading the body": {func(r *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(iotest.ErrReader(atTimeout(r))), Request: r}, nil
+		}, BodyError, "a malformed header or trailer line"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			res, err := (&http.Client{Timeout: time.Millisecond, Transport: tc.rt}).Get("http://idp.example/keys")
+			if err == nil {
+				_, err = io.ReadAll(res.Body)
+				_ = res.Body.Close()
+			}
+			if err == nil || !strings.Contains(err.Error(), "SECRET") || !strings.Contains(err.Error(), "Client.Timeout") {
+				t.Fatalf("err = %v, want the client's timeout quoting the refused line", err)
+			}
+			got := tc.show(err)
+			var ne net.Error
+			if got.Error() != tc.want || !errors.As(got, &ne) || !ne.Timeout() {
+				t.Errorf("shown = %v (%T), want %q, still a timeout", got, got, tc.want)
+			}
+		})
+	}
+}
+
+type roundTrip func(*http.Request) (*http.Response, error)
+
+func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 // BodyError replaces an error that holds a refused line, bare or wrapped, with one that names the
 // failure without the line, and returns any other error, nil included, as it is: callers match those
@@ -150,18 +224,22 @@ func TestABodyErrorIsReplacedOnlyForARefusedLine(t *testing.T) {
 		err      error
 		replaced bool
 	}{
-		"a bare refused line":    {refused, true},
-		"a wrapped refused line": {fmt.Errorf("reading: %w", refused), true},
-		"a cut-off body":         {io.ErrUnexpectedEOF, false},
-		"a cancelled read":       {context.Canceled, false},
-		"no error":               {nil, false},
+		"a bare refused line":                             {refused, true},
+		"a wrapped refused line":                          {fmt.Errorf("reading: %w", refused), true},
+		"a line without a colon":                          {textproto.ProtocolError(`malformed MIME header: missing colon: "Cookie sid=SECRET"`), true},
+		"a refused line the client kept only the text of": {errors.New(`malformed MIME header line: "X-Sid: SECRET\x01" (Client.Timeout exceeded while awaiting headers)`), true},
+		"a cut-off body":                                  {io.ErrUnexpectedEOF, false},
+		"a cancelled read":                                {context.Canceled, false},
+		"no error":                                        {nil, false},
 	} {
-		got := BodyError(tc.err)
-		if tc.replaced && (got == nil || got.Error() != "a malformed header or trailer line") {
-			t.Errorf("%s: BodyError = %v, want the refused line named without its text", name, got)
-		}
-		if !tc.replaced && got != tc.err { //nolint:errorlint // the same error, so errors.Is still matches it
-			t.Errorf("%s: BodyError(%v) = %v, want it unchanged", name, tc.err, got)
-		}
+		t.Run(name, func(t *testing.T) {
+			got := BodyError(tc.err)
+			if tc.replaced && (got == nil || got.Error() != "a malformed header or trailer line") {
+				t.Errorf("BodyError = %v, want the refused line named without its text", got)
+			}
+			if !tc.replaced && got != tc.err { //nolint:errorlint // the same error, so errors.Is still matches it
+				t.Errorf("BodyError(%v) = %v, want it unchanged", tc.err, got)
+			}
+		})
 	}
 }

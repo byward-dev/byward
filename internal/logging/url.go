@@ -2,6 +2,7 @@ package logging
 
 import (
 	"errors"
+	"net"
 	"net/textproto"
 	"net/url"
 	"strings"
@@ -42,27 +43,38 @@ func URLError(err error) error {
 	if ue.Op == "parse" {
 		return &url.Error{Op: ue.Op, URL: InvalidURL, Err: errNotAURL}
 	}
-	cause := ue.Err
-	switch text := cause.Error(); {
-	case strings.HasPrefix(text, badLocation): // the client quotes a redirect's raw Location
+	cause := BodyError(ue.Err)                         // the transport quotes the whole line it refused, as a body read does
+	if strings.HasPrefix(cause.Error(), badLocation) { // the client quotes a redirect's raw Location
 		cause = errBadLocation
-	case errors.As(cause, new(textproto.ProtocolError)): // the transport quotes the whole line it refused
-		cause = errBadHeader
 	}
 	return &url.Error{Op: ue.Op, URL: URL(ue.URL), Err: cause}
 }
 
 // BodyError is err, an error from reading an HTTP body (an answer's, or a client's request whose
 // trailer the server parsed), without a header or trailer line the transport refused: textproto
-// quotes the whole line, which can hold a cookie or a code. Any other error is left as it is.
+// quotes the whole line, which can hold a cookie or a code. Go's client keeps only the text of an
+// error that ends in its Client.Timeout, so that text is matched too, and the timeout is kept. Any
+// other error is left as it is.
 func BodyError(err error) error {
-	if errors.As(err, new(textproto.ProtocolError)) {
-		return errBadHeader
+	if err == nil || !errors.As(err, new(textproto.ProtocolError)) && !strings.Contains(err.Error(), refusedLine) {
+		return err
 	}
-	return err
+	if ne := net.Error(nil); errors.As(err, &ne) && ne.Timeout() {
+		return timedOut{errBadHeader}
+	}
+	return errBadHeader
 }
 
-const badLocation = "failed to parse Location header"
+const (
+	badLocation = "failed to parse Location header"
+	refusedLine = "malformed MIME header" // all three of textproto's wordings
+)
+
+// timedOut is a replaced error that was a timeout, so callers still class it as one.
+type timedOut struct{ error }
+
+func (timedOut) Timeout() bool   { return true }
+func (timedOut) Temporary() bool { return true }
 
 var (
 	errNotAURL     = errors.New("not a URL")
