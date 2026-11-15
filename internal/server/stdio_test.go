@@ -351,6 +351,9 @@ func TestLooseUpstreamEnvFileRefusesToStartInEveryMode(t *testing.T) {
 	if err := os.WriteFile(envFile, []byte("API_KEY=sk-live\n"), 0o644); err != nil { //nolint:gosec // G306: the loose mode is the point
 		t.Fatal(err)
 	}
+	if err := os.Chmod(envFile, 0o644); err != nil { //nolint:gosec // G302: the mode exactly, whatever the umask
+		t.Fatal(err)
+	}
 	for name, env := range map[string][]string{
 		"authenticated": append(stdioAuthEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp"),
 		"no auth":       {"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_INSECURE_NO_AUTH=true"},

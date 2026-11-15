@@ -318,6 +318,9 @@ func TestCheckOfflineFindsStdioUpstreamMistakes(t *testing.T) {
 			if err := os.WriteFile(envFile, []byte("TOKEN=x\n"), 0o644); err != nil { //nolint:gosec // G306: the loose mode is what the test is about
 				t.Fatal(err)
 			}
+			if err := os.Chmod(envFile, 0o644); err != nil { //nolint:gosec // G302: the mode exactly, whatever the umask
+				t.Fatal(err)
+			}
 			for i, kv := range env {
 				if strings.HasPrefix(kv, "BYWARD_PUBLIC_URL=") {
 					env[i] = "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp"
