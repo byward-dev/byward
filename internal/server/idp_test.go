@@ -32,7 +32,7 @@ func oidcConfig(idpName string, change func(*config.Config)) *config.Config {
 
 // config.OIDCPresets is what BYWARD_IDP accepts and oidc.Presets is what the adapter knows; they are
 // kept apart so config does not import the adapter, and this keeps them in step.
-func TestEveryPresetCanBeSelectedAndHasALabel(t *testing.T) {
+func TestBywardIdPAcceptsExactlyTheAdaptersPresetsEachWithALabel(t *testing.T) {
 	var known []string
 	for name, p := range oidc.Presets {
 		if name == "" {
