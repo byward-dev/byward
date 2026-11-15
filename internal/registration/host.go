@@ -35,8 +35,9 @@ func BrowserHostOK(host string) (string, bool) {
 }
 
 // decodesToXNLabel reports whether a label of ascii still begins with "xn--" once decoded
-// (xn--xn--abc-t2a is xn--abcü), which UTS #46 refuses since Unicode 15.1 when hyphens are not
-// checked, as browsers do; x/net/idna's tables predate that rule.
+// (xn--xn--abc-t2a is xn--abcü). UTS #46 refuses such a label since revision 31 (Unicode 15.1),
+// validity criterion 4, when CheckHyphens is off, as it is in browsers; x/net/idna does not apply
+// that criterion.
 func decodesToXNLabel(ascii string) bool {
 	uni, err := browserIDNA.ToUnicode(ascii)
 	if err != nil {
