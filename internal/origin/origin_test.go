@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -129,6 +130,68 @@ func TestListedOriginGetsCORSAndPreflight(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if !reached || !strings.Contains(w.Header().Get("Access-Control-Expose-Headers"), "WWW-Authenticate") || w.Header().Get("Access-Control-Allow-Origin") != "https://app.example" {
 		t.Fatalf("actual request: headers=%v", w.Header())
+	}
+}
+
+// A browser MCP client mirrors tool parameters into Mcp-Param-{name} headers (MCP 2026-07-28), a
+// family no fixed Access-Control-Allow-Headers can name: the preflight allows exactly the
+// Mcp-Param-* names it requests, valid header names only and within the caps, and nothing else it
+// requests.
+func TestAPreflightAllowsTheMcpParamHeadersItRequestsAndNoOtherName(t *testing.T) {
+	long := "mcp-param-" + strings.Repeat("a", maxParamHeaderName)
+	many := make([]string, maxParamHeaders+5)
+	for i := range many {
+		many[i] = "mcp-param-p" + strings.Repeat("x", i)
+	}
+	for _, tc := range []struct {
+		name      string
+		requested []string // Access-Control-Request-Headers lines
+		want      []string // the names added after allowHeaders
+	}{
+		{"none requested", nil, nil},
+		{"the fixed ones only", []string{"authorization,content-type"}, nil},
+		{"one, as a browser sends it", []string{"authorization,content-type,mcp-param-region"}, []string{"mcp-param-region"}},
+		{"several, spaced and on two lines", []string{"Mcp-Param-Region, mcp-param-zone", "mcp-param-tenant"}, []string{"Mcp-Param-Region", "mcp-param-zone", "mcp-param-tenant"}},
+		{"a repeat is listed once", []string{"mcp-param-region,MCP-PARAM-REGION"}, []string{"mcp-param-region"}},
+		{"another family is never echoed", []string{"x-api-key,cookie,mcp-paramregion,mcp-sessionid"}, nil},
+		{"the bare prefix is not a parameter", []string{"mcp-param-"}, nil},
+		{"a name that is not a header token", []string{"mcp-param-a b,mcp-param-a\"b,mcp-param-é"}, nil},
+		{"a name over the length cap", []string{long + ",mcp-param-ok"}, []string{"mcp-param-ok"}},
+		{"names past the count cap", []string{strings.Join(many, ",")}, many[:maxParamHeaders]},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest("OPTIONS", "/mcp", nil)
+			r.Header.Set("Origin", "https://app.example")
+			r.Header.Set("Access-Control-Request-Method", "POST")
+			for _, v := range tc.requested {
+				r.Header.Add("Access-Control-Request-Headers", v)
+			}
+			w := httptest.NewRecorder()
+			Origins(quiet(), []string{"https://app.example"}, ok).ServeHTTP(w, r)
+			want := allowHeaders
+			if len(tc.want) > 0 {
+				want += ", " + strings.Join(tc.want, ", ")
+			}
+			if got := w.Header().Values("Access-Control-Allow-Headers"); w.Code != http.StatusNoContent || len(got) != 1 || got[0] != want {
+				t.Fatalf("status %d, Access-Control-Allow-Headers %q, want 204 and %q", w.Code, got, want)
+			}
+			if !slices.Contains(w.Header().Values("Vary"), "Access-Control-Request-Headers") {
+				t.Fatalf("Vary %q; the answer depends on Access-Control-Request-Headers", w.Header().Values("Vary"))
+			}
+		})
+	}
+}
+
+// An origin that is not listed gets no CORS answer, whatever Mcp-Param-* names it requests.
+func TestAnUnlistedOriginsPreflightAllowsNoMcpParamHeader(t *testing.T) {
+	r := httptest.NewRequest("OPTIONS", "/mcp", nil)
+	r.Header.Set("Origin", "https://evil.example")
+	r.Header.Set("Access-Control-Request-Method", "POST")
+	r.Header.Set("Access-Control-Request-Headers", "mcp-param-region")
+	w := httptest.NewRecorder()
+	Origins(quiet(), []string{"https://app.example"}, ok).ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden || w.Header().Get("Access-Control-Allow-Headers") != "" || w.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("status %d, headers %v; want 403 and no CORS", w.Code, w.Header())
 	}
 }
 
