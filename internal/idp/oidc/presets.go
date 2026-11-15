@@ -9,11 +9,8 @@ import (
 // Preset is a named set of defaults for the generic adapter (ADR-0011 §2). Presets are data; a
 // change to one is a breaking change.
 type Preset struct {
-	Name string
 	// Label names the IdP on the consent page.
 	Label string
-	// DefaultIssuer is the issuer when the operator gives none; "" means one is required.
-	DefaultIssuer string
 	// HostedDomains: the IdP signs in accounts of hosted domains, named by the hd claim and the hd
 	// hint (Google Workspace), so the gate's hosted-domain list applies.
 	HostedDomains bool
@@ -51,9 +48,7 @@ var Presets = map[string]Preset{
 	// grant could never refresh (developers.google.com, OAuth 2.0 for web server apps, Step 1 and 5,
 	// 2026-11-06).
 	"google": {
-		Name:          "google",
 		Label:         "Google",
-		DefaultIssuer: "https://accounts.google.com",
 		HostedDomains: true,
 		Scopes:        []string{"profile", "email"},
 		AuthParams:    url.Values{"access_type": {"offline"}, "prompt": {"consent"}},
@@ -73,7 +68,6 @@ var Presets = map[string]Preset{
 	// Okta answers a bad client assertion invalid_client 401 and a made-up code with a good one
 	// invalid_grant (measured 2026-11-13).
 	"okta": {
-		Name:               "okta",
 		Label:              "Okta",
 		ClientCheckedFirst: true,
 		Scopes:             []string{"profile", "email", "offline_access"},
@@ -92,7 +86,6 @@ var Presets = map[string]Preset{
 	// A wrong secret is access_denied 401 ("Unauthorized"), a made-up code with the right one
 	// invalid_grant 403 (Free plan, EU tenant, measured 2026-11-13).
 	"auth0": {
-		Name:               "auth0",
 		Label:              "Auth0",
 		ClientCheckedFirst: true,
 		Scopes:             []string{"profile", "email", "offline_access"},
@@ -107,7 +100,6 @@ var Presets = map[string]Preset{
 	// unauthorized_client 401, a wrong key invalid_client 400, and a made-up code with a right one
 	// invalid_grant (26.8.0, measured 2026-11-13; TestIntegrationKeycloakDoctorChecksTheClientCredential).
 	"keycloak": {
-		Name:               "keycloak",
 		Label:              "Keycloak",
 		ClientCheckedFirst: true,
 		Scopes:             []string{"profile", "email"},
