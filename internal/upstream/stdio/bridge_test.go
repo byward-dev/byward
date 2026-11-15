@@ -583,70 +583,81 @@ func TestDuplicateInFlightRequestIDIs400AndLeavesTheFirstRequestRunning(t *testi
 }
 
 // JSON-RPC 2.0 asks a response for the request's id value, not its bytes. An upstream that writes
-// the id back another way (stdlib JSON escaping, -0 as 0) still answers that request, and the client
-// gets the response as the upstream wrote it (L156).
-func TestAResponseAnswersTheRequestWhoseIDHasTheSameValueAnyEncoding(t *testing.T) {
+// the id back another way (stdlib JSON escaping, -0 as 0) still answers that request, the client
+// gets the response as the upstream wrote it, and the id is free again once it is answered (L156).
+func TestAResponseAnswersTheRequestWhoseIDHasTheSameValueHoweverWritten(t *testing.T) {
 	b := newBridge(t, nil)
 	s := b.initialize(t, "alice")
-	for name, tc := range map[string]struct{ sent, answered string }{
-		"minus zero as zero":           {`-0`, `0`},
-		"an escaped e-acute unescaped": {`"\u00e9"`, `"é"`},
-		"an e-acute escaped":           {`"é"`, `"\u00e9"`},
-		"an escaped slash unescaped":   {`"\/x"`, `"/x"`},
-		"a less-than escaped":          {`"a<b"`, `"a\u003cb"`},
-		"an integer past 2^53":         {`9007199254740993`, `9007199254740993`},
+	for _, tc := range []struct{ name, sent, answered string }{
+		{"minus zero as zero", `-0`, `0`},
+		{"an escaped e-acute unescaped", `"\u00e9"`, `"é"`},
+		{"an e-acute escaped", `"é"`, `"\u00e9"`},
+		{"an escaped slash unescaped", `"\/x"`, `"/x"`},
+		{"a less-than escaped", `"a<b"`, `"a\u003cb"`},
+		{"an integer past 2^53, written back as sent", `9007199254740993`, `9007199254740993`},
 	} {
-		t.Run(name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			body := `{"jsonrpc":"2.0","id":` + tc.sent + `,"method":"answeras","params":{"id":` + tc.answered + `}}`
 			want := `{"jsonrpc":"2.0","id":` + tc.answered + `,"result":"answered"}`
 			if got := readEvents(t, b.post(t, "alice", s, body)); len(got) != 1 || got[0] != want {
 				t.Fatalf("got %q, want the upstream's response as it wrote it, %s", got, want)
+			}
+			// The answered request's id is free: the same id, as sent, is accepted again.
+			again := `{"jsonrpc":"2.0","id":` + tc.sent + `,"method":"echo","params":{}}`
+			if res := b.post(t, "alice", s, again); res.StatusCode != http.StatusOK {
+				raw, _ := io.ReadAll(res.Body)
+				t.Fatalf("the same id again: status %d, body %s; want it free once answered", res.StatusCode, raw)
+			} else {
+				readEvents(t, res)
 			}
 		})
 	}
 }
 
 // A response id of another value answers no request, even where a float64 or a type-blind
-// comparison would match: 9007199254740992 is not 9007199254740993, and 1 is not "1".
+// comparison would match: 9007199254740992 is not 9007199254740993, and 1 is not "1". The check
+// is made while the request still waits, so a slow upstream cannot make a wrong match pass.
 func TestAResponseWhoseIDIsAnotherValueAnswersNoRequest(t *testing.T) {
 	b := newBridge(t, nil)
 	s := b.initialize(t, "alice")
-	for name, tc := range map[string]struct{ sent, answered string }{
-		"past 2^53, one apart":    {`9007199254740993`, `9007199254740992`},
-		"a string and an integer": {`"1"`, `1`},
-		"two different strings":   {`"a"`, `"b"`},
+	for _, tc := range []struct{ name, sent, answered string }{
+		{"past 2^53, one apart", `9007199254740993`, `9007199254740992`},
+		{"a string and an integer", `"1"`, `1`},
+		{"two different strings", `"a"`, `"b"`},
 	} {
-		t.Run(name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			before := len(b.log.with("upstream response for no waiting request"))
-			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			body := `{"jsonrpc":"2.0","id":` + tc.sent + `,"method":"answeras","params":{"id":` + tc.answered + `}}`
-			if got := eventsOf(t, b.do(t, ctx, http.MethodPost, "alice", s, body)).all(); len(got) != 0 {
-				t.Fatalf("the request got %q from a response to another id", got)
-			}
-			eventually(t, "the response logged as unrouted", func() bool {
+			e := eventsOf(t, b.do(t, ctx, http.MethodPost, "alice", s, body))
+			eventually(t, "the response logged as unrouted while the request waits", func() bool {
 				return len(b.log.with("upstream response for no waiting request")) == before+1
 			})
+			cancel()
+			if got := e.all(); len(got) != 0 {
+				t.Fatalf("the request got %q from a response to another id", got)
+			}
 		})
 	}
 }
 
 // Two in-flight requests whose ids are one value spelled two ways are one id: the second is 400, as
-// an exact repeat is, so the upstream's one answer cannot go to the wrong request.
-func TestARequestWhoseIDHasTheValueOfAnInFlightOneIs400(t *testing.T) {
+// an exact repeat is, so the upstream's one answer cannot go to the wrong request; the first goes on.
+func TestARequestWhoseIDHasTheValueOfAnInFlightOneIs400AndLeavesTheFirstRunning(t *testing.T) {
 	b := newBridge(t, nil)
 	s := b.initialize(t, "alice")
 	held := eventsOf(t, b.post(t, "alice", s, `{"jsonrpc":"2.0","id":"é","method":"hold"}`))
-	ctx, cancel := context.WithTimeout(context.Background(), guard) // a request let through would stream, not end
+	ctx, cancel := context.WithTimeout(context.Background(), guard) // a response sent to the wrong request would hang it
 	defer cancel()
 	res := b.do(t, ctx, http.MethodPost, "alice", s, `{"jsonrpc":"2.0","id":"\u00e9","method":"echo"}`)
 	raw, _ := io.ReadAll(res.Body)
-	if res.StatusCode != http.StatusBadRequest || rpcErrorCode(t, raw) != codeInvalidRequest {
-		t.Fatalf("status %d, body %s; want 400", res.StatusCode, raw)
+	if res.StatusCode != http.StatusBadRequest || rpcErrorCode(t, raw) != codeInvalidRequest || !strings.Contains(string(raw), "already in flight") {
+		t.Fatalf("status %d, body %s; want 400, a request with this id is already in flight", res.StatusCode, raw)
 	}
 	readEvents(t, b.post(t, "alice", s, `{"jsonrpc":"2.0","id":8,"method":"release"}`))
 	if got := held.all(); len(got) != 1 || got[0] != `{"jsonrpc":"2.0","id":"é","result":"released"}` {
-		t.Fatalf("held request got %q", got)
+		t.Fatalf("the held request got %q, want only its own \"released\" answer", got)
 	}
 }
 

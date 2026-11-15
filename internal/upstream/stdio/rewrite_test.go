@@ -61,6 +61,31 @@ func TestDuplicateKeysOffTheTargetedPathsAreLeftToTheUpstream(t *testing.T) {
 	}
 }
 
+// idKey gives one key per JSON value (L156): equal values however written share it, and different
+// values, or a string and an integer, never do.
+func TestIDKeyIsOneKeyPerValue(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		same bool
+	}{
+		{`-0`, `0`, true},
+		{` 1 `, `1`, true},
+		{`"\u00e9"`, `"é"`, true},
+		{`"\/x"`, `"/x"`, true},
+		{`"a\u003cb"`, `"a<b"`, true},
+		{`-1`, `1`, false},
+		{`10`, `1`, false},
+		{`"0"`, `0`, false},
+		{`"-0"`, `-0`, false},
+		{`"-0"`, `"0"`, false},
+		{`9007199254740993`, `9007199254740992`, false},
+	} {
+		if got := idKey(json.RawMessage(tc.a)) == idKey(json.RawMessage(tc.b)); got != tc.same {
+			t.Errorf("idKey(%s) == idKey(%s): %v, want %v", tc.a, tc.b, got, tc.same)
+		}
+	}
+}
+
 func TestScalarIDAcceptsStringsAndIntegersOnly(t *testing.T) {
 	for raw, ok := range map[string]bool{`"a"`: true, `7`: true, `-3`: true, `1.5`: false, `1e3`: false, `true`: false, `null`: false} {
 		if err := scalarID([]byte(raw)); (err == nil) != ok {

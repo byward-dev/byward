@@ -17,11 +17,12 @@ func boxRing(t *testing.T, ids ...string) *KeyRing {
 }
 
 // Boxes outlive releases: every grant's IdP tokens, remembered consents, sign-ins in flight and MCP
-// session IDs are stored in them. A box sealed by an earlier build still opens, and a new one starts
-// with the same literal layout byte, 0x02: the box's own version, which a new proxy-token
-// formatVersion (DPoP's cnf claim, say) must not move (L161). The box below was sealed with this
-// test key, which protects nothing.
-func TestABoxSealedByAnEarlierBuildStillOpens(t *testing.T) {
+// session IDs are stored in them. A box sealed by an earlier build (v0.2.0 or later) still opens,
+// and a box this build seals carries the layout byte 0x02, so an earlier build (after a rollback)
+// opens it too. It is the box's own version, which a new proxy-token formatVersion (DPoP's cnf
+// claim, say) must not move (L161). The box below was sealed with this test key, which protects
+// nothing.
+func TestABoxSealedByAnEarlierBuildOpensAndANewBoxKeepsItsLayoutByte(t *testing.T) {
 	const (
 		key    = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="
 		sealed = "AgJrMQAAAAD0hlcAw5RYjIcB06RDHCZDmZ7JsAA-_EuTUYbe2q0JYdO7y87kNVO6tuF4PdX1IzoIlw2wn4RI"
@@ -39,7 +40,7 @@ func TestABoxSealedByAnEarlierBuildStillOpens(t *testing.T) {
 		t.Fatal(err)
 	}
 	if raw, _ := base64.RawURLEncoding.DecodeString(fresh); len(raw) == 0 || raw[0] != 0x02 {
-		t.Fatalf("a new box starts with %#x, want the layout byte 0x02", raw[:1])
+		t.Fatalf("a new box starts with %#x; an earlier build opens only 0x02", raw[:1])
 	}
 }
 

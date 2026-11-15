@@ -27,7 +27,8 @@ const boxLabel = "byward box\x00"
 // boxVersion is a box's layout: its header byte and part of its associated data. It is the box's
 // own and moves only when the box layout changes, never with the proxy tokens' formatVersion:
 // every grant's IdP tokens, consents, sign-ins in flight and MCP session IDs are stored in boxes,
-// and a bump would make them all unreadable. 2 is the byte every box sealed so far carries.
+// and a bump would make them all unreadable. 2 is the byte of every box sealed since v0.2.0 (v0.1.x
+// sealed 1, and those boxes stopped opening at the v0.2 upgrade).
 const boxVersion = 2
 
 var errBoxExpired = errors.New("token: box expired")

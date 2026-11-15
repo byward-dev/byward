@@ -184,6 +184,7 @@ type message struct {
 //	release      answers itself and every held request
 //	announce     the result, then a notifications/message after 50 ms (outside any request)
 //	raw          the result, written with a bare CR as whitespace
+//	answeras     the result "answered", under params.id written exactly as given (a re-encoded or another id)
 //	env          the environment as the result
 //	asklater     the result, then a sampling/createMessage request after 50 ms (outside any request)
 //	floodlater   the result, then params.n notifications/message with params.i = 0..n-1 (outside any request)
@@ -304,7 +305,7 @@ func serveMCP() {
 				time.Sleep(50 * time.Millisecond)
 				write(message{Method: "notifications/message", Params: json.RawMessage(`{"level":"info"}`)})
 			}()
-		case "answeras": // answers with params.id written as given, as an upstream that re-encodes ids does
+		case "answeras": // the result under params.id, written as given: a re-encoded id, or another one
 			var p struct {
 				ID json.RawMessage `json:"id"`
 			}
