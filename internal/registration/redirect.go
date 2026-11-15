@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // Redirect URI limits per registration (ADR-0009 §7).
@@ -28,23 +30,33 @@ const (
 )
 
 // RedirectError explains a rejected redirect URI. Error() is for the error page ("registered X,
-// sent Y"); LogValue drops queries, which logs must never record (ADR-0009 §8).
+// sent Y"); LogValue and logText show each URI as logs may, since logs must never record a query
+// (ADR-0009 §8).
 type RedirectError struct {
 	Reason     string
 	Registered []string
 	Sent       string
 }
 
-func (e *RedirectError) Error() string {
+func (e *RedirectError) Error() string { return e.text(func(u string) string { return u }) }
+
+// logText is Error() with every URI as logs may show it, for an error that is logged.
+func (e *RedirectError) logText() string { return e.text(logging.URL) }
+
+func (e *RedirectError) text(show func(string) string) string {
 	if e.Reason == ReasonNotRegistered {
-		return fmt.Sprintf("redirect URI not registered: registered %s, sent %s", strings.Join(e.Registered, ", "), e.Sent)
+		registered := make([]string, len(e.Registered))
+		for i, u := range e.Registered {
+			registered[i] = show(u)
+		}
+		return fmt.Sprintf("redirect URI not registered: registered %s, sent %s", strings.Join(registered, ", "), show(e.Sent))
 	}
-	return fmt.Sprintf("redirect URI %s rejected: %s", e.Sent, reasonText[e.Reason])
+	return fmt.Sprintf("redirect URI %s rejected: %s", show(e.Sent), reasonText[e.Reason])
 }
 
 // LogValue reports the reason and the sent URI's scheme, host and path only.
 func (e *RedirectError) LogValue() slog.Value {
-	return slog.GroupValue(slog.String("reason", e.Reason), slog.String("sent", withoutQuery(e.Sent)))
+	return slog.GroupValue(slog.String("reason", e.Reason), slog.String("sent", logging.URL(e.Sent)))
 }
 
 var reasonText = map[string]string{
@@ -55,15 +67,6 @@ var reasonText = map[string]string{
 	ReasonWildcard:  "must not contain wildcards",
 	ReasonTooLong:   fmt.Sprintf("longer than %d characters", MaxRedirectURILen),
 	ReasonDenied:    "its host is on the operator's denylist",
-}
-
-func withoutQuery(s string) string {
-	u, err := url.Parse(s)
-	if err != nil || u.Scheme == "" {
-		return "<invalid>"
-	}
-	u.User, u.RawQuery, u.ForceQuery, u.Fragment, u.RawFragment = nil, "", false, "", ""
-	return u.String()
 }
 
 // RedirectKey is a redirect URI as a remembered consent compares it (ADR-0010 §3): exact, except

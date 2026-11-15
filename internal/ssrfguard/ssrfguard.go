@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"code.dny.dev/ssrf"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // Limits (ADR-0008 §4).
@@ -37,7 +39,7 @@ var ErrRefused = errors.New("ssrfguard: refused")
 var ErrTooLarge = errors.New("ssrfguard: response too large")
 
 // StatusError is a response other than 200 OK, redirects included (they are never followed). URL
-// is the fetched URL without its query.
+// is the fetched URL as logs may show it (logging.URL).
 type StatusError struct {
 	Code int
 	URL  string
@@ -49,7 +51,8 @@ func (e *StatusError) Error() string {
 
 // Transient reports whether err is worth retrying later (network trouble, a timeout, a 5xx, 408 or
 // 429) as opposed to a definite answer (refused, too large, another 4xx or a redirect). The status
-// rule is idp.StatusError.Transient's; ssrfguard keeps its own copy because it imports nothing internal.
+// rule is idp.StatusError.Transient's; ssrfguard keeps its own copy so it does not depend on idp
+// (and go-jose).
 func Transient(err error) bool {
 	var se *StatusError
 	switch {
@@ -125,51 +128,32 @@ func (f *Fetcher) HTTPClient() *http.Client { return f.client }
 func (f *Fetcher) Get(ctx context.Context, rawURL string, maxBytes int64) (*Response, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || (u.Port() != "" && u.Port() != "443") {
-		return nil, fmt.Errorf("%w: %s is not an https URL on port 443", ErrRefused, redact(rawURL))
+		return nil, fmt.Errorf("%w: %s is not an https URL on port 443", ErrRefused, logging.URL(rawURL))
 	}
 	ctx, cancel := context.WithTimeout(ctx, f.timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrRefused, err)
+		return nil, fmt.Errorf("%w: %v", ErrRefused, logging.URLError(err))
 	}
 	req.Header.Set("Accept", "application/json")
 	res, err := f.client.Do(req)
 	if err != nil {
 		if errors.Is(err, ssrf.ErrProhibitedIP) || errors.Is(err, ssrf.ErrProhibitedPort) || errors.Is(err, ssrf.ErrProhibitedNetwork) || errors.Is(err, ssrf.ErrInvalidHostPort) {
-			return nil, fmt.Errorf("%w: %s resolves to a non-public address", ErrRefused, redact(rawURL))
+			return nil, fmt.Errorf("%w: %s resolves to a non-public address", ErrRefused, logging.URL(rawURL))
 		}
-		return nil, fmt.Errorf("ssrfguard: fetching %s: %w", redact(rawURL), withoutURL(err))
+		return nil, fmt.Errorf("ssrfguard: %w", logging.URLError(err)) // it names the URL, as logs may show it
 	}
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
-		return nil, &StatusError{Code: res.StatusCode, URL: redact(rawURL)}
+		return nil, &StatusError{Code: res.StatusCode, URL: logging.URL(rawURL)}
 	}
 	body, err := io.ReadAll(io.LimitReader(res.Body, maxBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("ssrfguard: reading %s: %w", redact(rawURL), withoutURL(err))
+		return nil, fmt.Errorf("ssrfguard: reading %s: %w", logging.URL(rawURL), err) // a body read error quotes no URL
 	}
 	if int64(len(body)) > maxBytes {
-		return nil, fmt.Errorf("%w: %s is larger than %d bytes", ErrTooLarge, redact(rawURL), maxBytes)
+		return nil, fmt.Errorf("%w: %s is larger than %d bytes", ErrTooLarge, logging.URL(rawURL), maxBytes)
 	}
 	return &Response{Header: res.Header, Body: body}, nil
-}
-
-// withoutURL drops the full request URL the HTTP client puts in its errors (*url.Error), so a
-// query never reaches a log; the cause is kept.
-func withoutURL(err error) error {
-	var ue *url.Error
-	if errors.As(err, &ue) {
-		return ue.Err
-	}
-	return err
-}
-
-// redact keeps scheme, host and path: queries never reach logs (ADR-0009 §8).
-func redact(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return "<invalid URL>"
-	}
-	return u.Scheme + "://" + u.Host + u.EscapedPath()
 }

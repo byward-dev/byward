@@ -568,6 +568,18 @@ func TestDiscoveredEndpointsMustBeHTTPSUnlessALoopbackIssuerRunsInDevelopment(t 
 	}
 }
 
+// A refused discovery endpoint is named as logs may show it: the IdP's document wrote it.
+func TestARefusedEndpointIsNamedAsLogsMay(t *testing.T) {
+	for raw, want := range map[string]string{
+		"http://u:SECRET@idp.example/token?code=SECRET": "http://idp.example/token must use https",
+		"token?code=SECRET":                             "<invalid URL> is not an absolute URL",
+	} {
+		if err := checkURL(raw, "https://idp.example", false); err == nil || err.Error() != want {
+			t.Errorf("checkURL(%q) = %v, want %q", raw, err, want)
+		}
+	}
+}
+
 func asError(err error, target **idp.Error) bool { return errors.As(err, target) }
 
 func TestRefreshWithoutTokenSignsInAgain(t *testing.T) {

@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // Target is what the self-probe expects, from the proxy's configuration.
@@ -76,14 +78,14 @@ type response struct {
 func (p *prober) do(method, target string, body io.Reader, header http.Header) response {
 	req, err := http.NewRequestWithContext(p.ctx, method, target, body)
 	if err != nil {
-		return response{err: err}
+		return response{err: logging.URLError(err)}
 	}
 	for k, v := range header {
 		req.Header[k] = v
 	}
-	resp, err := p.client.Do(req)
+	resp, err := p.client.Do(req) // a redirect's unparsable Location fails here, quoted
 	if err != nil {
-		return response{err: err}
+		return response{err: logging.URLError(err)}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	p.answered = true
@@ -110,7 +112,7 @@ func (p *prober) unexpected(check Check, target string, r response, want int) Re
 	case r.status == http.StatusMisdirectedRequest:
 		res.Fix = "the proxy refused the Host header (421): make the reverse proxy in front of it forward the original Host, or add the Host it sends to " + p.t.HostsSetting
 	case r.status >= 300 && r.status < 400:
-		res.Message += " (redirect to " + r.header.Get("Location") + ")"
+		res.Message += " (redirect to " + redirectTarget(target, r.header.Get("Location")) + ")"
 		res.Fix = "make whatever is in front of the proxy pass this path through unchanged; clients expect the document at this exact URL"
 	case r.status == http.StatusNotFound:
 		res.Fix = "route /.well-known/ on this host to the proxy; it is served by the proxy, not by the upstream"
@@ -275,4 +277,21 @@ func (p *prober) assertionKeys(target string) Result {
 		return check.Result(Fail, doc.JWKSURI+" does not serve the signing key "+p.t.AssertionKeyID+", so verifiers refuse every assertion", "route /.well-known/jwks.json on this host to the proxy, not to the upstream or another service")
 	}
 	return check.Result(Pass, "discovery names "+doc.JWKSURI+", which serves the signing key "+p.t.AssertionKeyID, "")
+}
+
+// redirectTarget is where a redirect points, resolved against target, as logs may show it: a
+// login page's Location can carry state or credentials.
+func redirectTarget(target, location string) string {
+	if location == "" {
+		return "nowhere: no Location"
+	}
+	base, err := url.Parse(target)
+	if err != nil {
+		return logging.URL(location)
+	}
+	loc, err := base.Parse(location)
+	if err != nil {
+		return logging.InvalidURL
+	}
+	return logging.URL(loc.String())
 }
