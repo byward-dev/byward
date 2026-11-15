@@ -597,17 +597,18 @@ func TestRefreshGraceDefaultsTo30sAndAcceptsItsBounds(t *testing.T) {
 }
 
 func TestInvalidStoreSettingsAreRejected(t *testing.T) {
-	// A relative path in each setting is TestEveryPathSettingRefusesARelativePath's.
+	// A relative path in each setting is TestEveryPathSettingRefusesARelativePath's; the rows here pin
+	// which errors a path derived from another one reports.
 	cases := []struct {
 		name    string
 		env     []string
 		want    string
 		notWant string // "" when anything else may be reported too
 	}{
-		// The counter file derived from a relative keys directory is not reported a second time; one the
-		// operator sets is.
 		// Every default derives from the data directory, so a relative one is the only error reported.
 		{"a relative data directory", []string{"BYWARD_DATA_DIR=data"}, "BYWARD_DATA_DIR: want an absolute path", "BYWARD_KEYS_DIR"},
+		// The counter file derived from a relative keys directory is not reported a second time; one the
+		// operator sets is.
 		{"a counter derived from a relative keys directory", []string{"BYWARD_KEYS_DIR=keys"}, "BYWARD_KEYS_DIR: want an absolute path", "BYWARD_STORE_COUNTER_FILE"},
 		{"a relative counter beside a relative keys directory", []string{"BYWARD_KEYS_DIR=keys", "BYWARD_STORE_COUNTER_FILE=writes"}, `BYWARD_STORE_COUNTER_FILE: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got "writes"`, ""},
 		{"counter inside the state directory", []string{"BYWARD_STORE_COUNTER_FILE=/var/lib/byward/state/writes"}, "is inside BYWARD_STORE_DIR", ""},
