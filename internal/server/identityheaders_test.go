@@ -203,8 +203,10 @@ func TestTurningOnPlainIdentityHeadersLogsAWarning(t *testing.T) {
 	}{{"off", nil, false}, {"on", []string{"BYWARD_IDENTITY_HEADERS=true"}, true}} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := newAsserting(t, tc.env...)
-			if got := strings.Contains(a.logs.String(), `level=WARN msg="plain identity headers are on"`); got != tc.want {
-				t.Errorf("warning logged %v", got)
+			logs := a.logs.String()
+			const line = `level=WARN msg="plain identity headers are on" setting=BYWARD_IDENTITY_HEADERS reason="the upstream gets the user in X-Byward-* headers as well as the assertion; that is safe only when it is reachable through this proxy alone (docs/how-to/plain-identity-headers.md)"`
+			if got := strings.Contains(logs, line); got != tc.want {
+				t.Errorf("warning with its setting and guide logged: %v, want %v; logs:\n%s", got, tc.want, logs)
 			}
 		})
 	}

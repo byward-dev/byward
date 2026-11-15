@@ -558,13 +558,6 @@ func TestConsentRejectsAnUnreadableAnswer(t *testing.T) {
 	}
 }
 
-func TestConsentAcceptsOnlyPOST(t *testing.T) {
-	res := newEnv(t).do(t, "GET", "/consent", nil, nil)
-	if res.StatusCode != http.StatusMethodNotAllowed || res.Header.Get("Allow") != "POST" {
-		t.Fatalf("GET /consent: %d, Allow %q", res.StatusCode, res.Header.Get("Allow"))
-	}
-}
-
 func TestTwoConsentPagesInOneBrowserCanEachBeAllowedSeparately(t *testing.T) {
 	e := newEnv(t)
 	first := e.showConsent(t, nil)
@@ -739,7 +732,8 @@ func TestNewRequiresTheConsentSettings(t *testing.T) {
 	}
 }
 
-func TestTheStylesheetIsServedLocallyAndOnlyToGETAndHEAD(t *testing.T) {
+// Other methods get 405 (TestCORSAndMethods).
+func TestTheStylesheetIsServedLocallyToGETAndHEAD(t *testing.T) {
 	e := newEnv(t)
 	res := e.do(t, "GET", StylesheetPath, nil, nil)
 	body, _ := io.ReadAll(res.Body)
@@ -748,9 +742,6 @@ func TestTheStylesheetIsServedLocallyAndOnlyToGETAndHEAD(t *testing.T) {
 	}
 	if res := e.do(t, "HEAD", StylesheetPath, nil, nil); res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "text/css; charset=utf-8" {
 		t.Fatalf("HEAD stylesheet: %d %s", res.StatusCode, res.Header.Get("Content-Type"))
-	}
-	if res := e.do(t, "POST", StylesheetPath, url.Values{}, nil); res.StatusCode != http.StatusMethodNotAllowed || res.Header.Get("Allow") != "GET, HEAD" {
-		t.Fatalf("POST stylesheet: %d, Allow %q", res.StatusCode, res.Header.Get("Allow"))
 	}
 }
 

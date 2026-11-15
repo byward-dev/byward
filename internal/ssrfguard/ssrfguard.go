@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"code.dny.dev/ssrf"
@@ -101,7 +102,7 @@ func New(c Config) *Fetcher {
 	}
 	dial := c.Dial
 	if dial == nil {
-		dial = (&net.Dialer{Timeout: c.Timeout, Control: ssrf.New(ssrf.WithPorts(443)).Safe}).DialContext
+		dial = (&net.Dialer{Timeout: c.Timeout, Control: ssrf.New(ssrf.WithPorts(fetchPort)).Safe}).DialContext
 	}
 	t := &http.Transport{
 		Proxy:                  nil, // an environment proxy would dial on our behalf, past the guard
@@ -123,11 +124,21 @@ func New(c Config) *Fetcher {
 // through idp.Fetcher). The guard applies at dial: only public addresses on port 443.
 func (f *Fetcher) HTTPClient() *http.Client { return f.client }
 
+// fetchPort is the one port the guard fetches from: Fetchable's rule and the dial's. It must stay
+// https's default port, because Fetchable also accepts a URL without one, which dials that port.
+const fetchPort = 443
+
+// Fetchable reports whether u passes the guard's URL rule, checked before any dial: https, with a
+// host and no user information, on port 443, given or not. The dial then checks the address.
+func Fetchable(u *url.URL) bool {
+	return u.Scheme == "https" && u.Host != "" && u.User == nil && (u.Port() == "" || u.Port() == strconv.Itoa(fetchPort))
+}
+
 // Get fetches rawURL and returns its body if the status is 200 and the body is at most maxBytes.
-// Only https URLs on the default port are fetched; userinfo is refused.
+// Only URLs Fetchable accepts are fetched; any other is ErrRefused.
 func (f *Fetcher) Get(ctx context.Context, rawURL string, maxBytes int64) (*Response, error) {
 	u, err := url.Parse(rawURL)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || (u.Port() != "" && u.Port() != "443") {
+	if err != nil || !Fetchable(u) {
 		return nil, fmt.Errorf("%w: %s is not an https URL on port 443", ErrRefused, logging.URL(rawURL))
 	}
 	ctx, cancel := context.WithTimeout(ctx, f.timeout)
