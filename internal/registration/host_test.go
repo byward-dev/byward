@@ -41,6 +41,8 @@ func TestBrowserHostOKSaysWhetherABrowserGoesToTheHost(t *testing.T) {
 		"fe80::1%en0":             {"fe80::1%en0", false},             // a zone: the browser refuses it
 		"xn--xn--abc-t2a.example": {"xn--xn--abc-t2a.example", false}, // decodes to a label starting xn--
 		"a.xn--xn--abc-t2a":       {"a.xn--xn--abc-t2a", false},
+		"a-xn--b.example":         {"a-xn--b.example", true}, // xn-- inside a label, not at its start
+		"xn-a.example":            {"xn-a.example", true},
 		"BÜCHER.example":          {"xn--bcher-kva.example", true},
 		"ｍｙ_app.example":          {"my_app.example", true},
 		"xn--bcher-kva.example":   {"xn--bcher-kva.example", true},
