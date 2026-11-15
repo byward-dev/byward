@@ -297,7 +297,7 @@ func TestTheStartupLogWarnsAboutEmailsForTheIdPInUse(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		cfg  func(t *testing.T) *config.Config
-		want string // "" for no email warning
+		want string
 	}{
 		{"Entra", func(t *testing.T) *config.Config {
 			return loadConfig(t, "https://mcp.example.com/mcp", "BYWARD_ASSERTION_CLAIMS=email")
@@ -314,8 +314,8 @@ func TestTheStartupLogWarnsAboutEmailsForTheIdPInUse(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = s.closeStore() })
 			warned := strings.Contains(logs.String(), `"setting":"BYWARD_ASSERTION_UNVERIFIED_EMAIL"`)
-			if warned != (tc.want != "") || !strings.Contains(logs.String(), tc.want) {
-				t.Fatalf("email warning %v, want %q, in the startup log: %s", warned, tc.want, logs)
+			if !warned || !strings.Contains(logs.String(), tc.want) {
+				t.Fatalf("no email warning %q in the startup log: %s", tc.want, logs)
 			}
 		})
 	}

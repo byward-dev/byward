@@ -75,7 +75,7 @@ func authEnv(t testing.TB) []string {
 
 // stdioAuthEnv is authEnv for a stdio upstream: without the assertion key directory, which config
 // refuses with one (a stdio upstream gets no assertion, ADR-0016 §6). The data directory is the
-// test's own, so the default key directory is empty whatever the host holds.
+// test's own, so no default path reaches the host's.
 func stdioAuthEnv(t testing.TB) []string {
 	t.Helper()
 	env := slices.DeleteFunc(authEnv(t), func(kv string) bool { return strings.HasPrefix(kv, "BYWARD_ASSERTION_KEYS_DIR=") })
