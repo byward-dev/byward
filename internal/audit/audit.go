@@ -79,10 +79,9 @@ type Log struct {
 	observe Observer
 }
 
-// Unauthenticated events are limited to this many per minute for each source, event and outcome
-// (RecordUnauthenticated).
+// Unauthenticated event limits (RecordUnauthenticated).
 const (
-	unauthBurst   = 10
+	unauthBurst   = 10 // per minute for each source, event and outcome
 	unauthWindow  = time.Minute
 	unauthSources = 10000 // the most (source, event, outcome) keys tracked at once
 )

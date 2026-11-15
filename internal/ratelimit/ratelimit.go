@@ -140,9 +140,8 @@ func (t *table) refill(b *bucket, now time.Time) float64 {
 	return b.tokens
 }
 
-// Key groups a client address for every per-address limit, the OAuth budgets and the audit log's
-// limit on unauthenticated events alike: the IPv4 address, or the IPv6 /64 (a client can rotate
-// freely within its own /64). Unparseable values are used as they are.
+// Key is the client address a per-address limit counts against: the IPv4 address, or the IPv6 /64
+// (a client can rotate freely within its own /64). Unparseable values are used as they are.
 func Key(ip string) string {
 	a, err := netip.ParseAddr(ip)
 	if err != nil {
