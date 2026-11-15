@@ -40,7 +40,7 @@ func TestABoxSealedByAnEarlierBuildOpensAndANewBoxKeepsItsLayoutByte(t *testing.
 		t.Fatal(err)
 	}
 	if raw, _ := base64.RawURLEncoding.DecodeString(fresh); len(raw) == 0 || raw[0] != 0x02 {
-		t.Fatalf("a new box starts with %#x; an earlier build opens only 0x02", raw[:1])
+		t.Fatalf("a new box starts with %#x; v0.2.0 and later open only 0x02", raw)
 	}
 }
 
