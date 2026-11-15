@@ -218,8 +218,9 @@ func normalizeAllowedHost(h string) (string, error) {
 const hostNameRule = "a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)"
 
 // validHostName reports whether host is a name a host setting can match on: BYWARD_ALLOWED_HOSTS
-// (#334), BYWARD_PUBLIC_URL's host, BYWARD_CIMD_TRUSTED_HOSTS and BYWARD_CIMD_ALLOWED_HOSTS
-// (#344). Not empty, only RFC 3986's unreserved characters (a DNS name never uses reg-name's
+// (#334), BYWARD_PUBLIC_URL's host, BYWARD_CIMD_TRUSTED_HOSTS, BYWARD_CIMD_ALLOWED_HOSTS (#344) and
+// BYWARD_CLIENT_DENYLIST's host entries (hostNameReason; the denylist strips a trailing dot first,
+// since its matching folds one away). Not empty, only RFC 3986's unreserved characters (a DNS name never uses reg-name's
 // sub-delims or %-escapes, which a Host header or a URL could carry), and no empty label. A trailing dot is refused, not stripped: the setting would
 // match only a client given the absolute name, never the usual one, so it is almost always copied
 // from a DNS zone by mistake.

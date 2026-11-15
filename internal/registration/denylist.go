@@ -52,18 +52,25 @@ func (d *Denylist) DeniesRedirect(redirectURI string) bool {
 	return err == nil && d.hosts[canonicalHost(u.Hostname())]
 }
 
-// canonicalHost folds the spellings of one host: case, a trailing dot (app.example. is the same
-// host as app.example) and an internationalized name, which becomes the ASCII (xn--) name a browser
-// really goes to (WHATWG URL "domain to ASCII", as the consent page shows it), so a Unicode
-// spelling of a denied host is denied too. A host that has no such name, such as an IP address,
-// is compared lower-cased.
+// canonicalHost folds the spellings of one host into the ASCII name a browser really goes to: case,
+// a trailing dot (app.example. is the same host as app.example), and an internationalized or
+// full-width name, which becomes its xn-- form, so a Unicode spelling of a denied host is denied too.
+// A host browserHost refuses is compared lower-cased.
 func canonicalHost(h string) string {
-	h = strings.TrimSuffix(strings.ToLower(h), ".")
-	if ascii, err := idna.Lookup.ToASCII(h); err == nil {
-		return ascii
+	if ascii, err := browserHost.ToASCII(h); err == nil {
+		h = ascii
+	} else {
+		h = strings.ToLower(h)
 	}
-	return h
+	return strings.TrimSuffix(h, ".") // after the mapping: U+3002 and its kin become a dot
 }
+
+// browserHost is the WHATWG URL Standard's "domain to ASCII" with beStrict false, which browsers run
+// on a URL's host: UTS #46 non-transitional mapping with the Bidi and joiner checks, and neither the
+// STD3 rules nor the hyphen check, so a name with "_" or "--" maps as the browser maps it.
+// idna.Lookup is stricter and would leave such a name unmapped.
+var browserHost = idna.New(idna.MapForLookup(), idna.StrictDomainName(false), idna.CheckHyphens(false),
+	idna.BidiRule(), idna.CheckJoiners(true), idna.Transitional(false))
 
 // canonicalCIMD folds the spellings of one CIMD URL that fetch the same document: host case, a
 // trailing dot, the default port and percent-encoding in the path. A denylist may match more

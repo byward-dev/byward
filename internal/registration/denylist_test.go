@@ -72,24 +72,40 @@ func TestADeniedHostMatchesExactlyIgnoringCase(t *testing.T) {
 	}
 }
 
-// An internationalized host is denied in either spelling: the browser goes to its ASCII (xn--) name
-// whichever one a client registers, so a Unicode redirect URI must not get past an xn-- entry.
-func TestADeniedHostMatchesBothSpellingsOfAnInternationalName(t *testing.T) {
-	for entry, redirects := range map[string][]string{
-		"xn--bcher-kva.example": {"https://bücher.example/cb", "https://BÜCHER.example/cb", "https://bücher。example/cb", "https://xn--bcher-kva.example/cb"},
-		"bücher.example":        {"https://xn--bcher-kva.example/cb", "https://bücher.example/cb"},
+// A denied host is denied in every spelling a browser resolves to it: an internationalized name in
+// Unicode or xn-- form, full-width letters and dots, a trailing ideographic full stop. So a client
+// cannot register the Unicode spelling of a host the operator listed in xn-- form, or the reverse.
+func TestADeniedHostMatchesEverySpellingTheBrowserGoesTo(t *testing.T) {
+	for _, c := range []struct {
+		entry, uri string
+		denied     bool
+	}{
+		{"xn--bcher-kva.example", "https://bücher.example/cb", true},
+		{"xn--bcher-kva.example", "https://BÜCHER.example/cb", true},
+		{"xn--bcher-kva.example", "https://bücher。example/cb", true},
+		{"xn--bcher-kva.example", "https://bücher.example。/cb", true},
+		{"bücher.example", "https://xn--bcher-kva.example/cb", true},
+		{"app.example", "https://app.example。/cb", true},
+		{"app.example", "https://ａｐｐ.example/cb", true},
+		{"xn--aib-9dc.example", "https://aİb.example/cb", true}, // UTS #46 maps İ to i̇, not to i
+		// Names idna.Lookup refuses ("_", "--") but a browser maps.
+		{"xn--b_cher-3ya.example", "https://bü_cher.example/cb", true},
+		{"my_app.example", "https://ｍｙ_app.example/cb", true},
+		{"ab--c.example", "https://ＡＢ--c.example/cb", true},
+		// A name the browser refuses (invalid punycode) is compared lower-cased, without a trailing dot.
+		{"xn--zz.example", "https://XN--ZZ.example./cb", true},
+		{"xn--zz.example", "https://xn--zy.example/cb", false},
+		// Other hosts stay apart.
+		{"xn--bcher-kva.example", "https://böcher.example/cb", false},
+		{"xn--bcher-kva.example", "https://bucher.example/cb", false},
+		{"aib.example", "https://aİb.example/cb", false},
 	} {
-		d, err := NewDenylist([]string{entry})
+		d, err := NewDenylist([]string{c.entry})
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, uri := range redirects {
-			if !d.DeniesRedirect(uri) {
-				t.Errorf("entry %q: DeniesRedirect(%q) = false, want true: the same host", entry, uri)
-			}
-		}
-		if d.DeniesRedirect("https://xn--bcher-kvb.example/cb") || d.DeniesRedirect("https://bucher.example/cb") {
-			t.Errorf("entry %q denied another host", entry)
+		if got := d.DeniesRedirect(c.uri); got != c.denied {
+			t.Errorf("entry %q: DeniesRedirect(%q) = %v, want %v", c.entry, c.uri, got, c.denied)
 		}
 	}
 }
