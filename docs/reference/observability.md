@@ -43,7 +43,10 @@ Events from requests whose sender is not authenticated (marked *limited* below) 
 reported as `suppressed=N` on the next record with the same event and outcome from that source. A source can
 therefore only crowd out its own records of the same event and outcome: consent page views never hide consent
 decisions, and successful registrations never hide refused ones. Senders sharing an IPv6 /64 share one budget, so
-`suppressed=N` can count drops from addresses other than the record's `remote_ip`.
+`suppressed=N` can count drops from addresses other than the record's `remote_ip`. Each replica tracks at most
+10,000 sources, events and outcomes at once: a sender with a larger block, such as an IPv6 /48, can fill that table,
+and until its one-minute windows end, records from new sources are dropped
+([known gap](../security-posture.md#known-gaps)).
 Metrics count every event, logged or not.
 
 ### Events and OCSF mapping
