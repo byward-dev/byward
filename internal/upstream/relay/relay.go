@@ -121,7 +121,8 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 		},
 		// Through a proxy whose setting Go misread, any transport error or failed read or close of a
 		// response body that could quote the address Go dialled, part of the proxy's credentials
-		// (invariant 2), says only envproxy.Cause. So no log line below can quote it.
+		// (invariant 2), says only envproxy.Cause. So neither ErrorHandler's log line nor
+		// ReverseProxy's own (proxyErrorLog) can quote it.
 		Transport: envproxy.Redact(&http.Transport{
 			Proxy:                 o.proxy,
 			DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
@@ -305,7 +306,7 @@ func redirectHint(res *http.Response) string {
 	return "the upstream points to " + loc.Scheme + "://" + loc.Host + path + "; if that is its MCP endpoint, set BYWARD_UPSTREAM_URL to it"
 }
 
-// proxyErrorLog takes ReverseProxy's own error lines (a body copy that fails, a flush that fails)
+// proxyErrorLog takes ReverseProxy's own error lines (a failed read during a body copy)
 // into the structured log. A line about the upstream's body through a misread proxy quotes no
 // address: the transport has already redacted the error to envproxy.Cause, or left it one of the
 // bare errors that quote nothing (envproxy's redactedBody).

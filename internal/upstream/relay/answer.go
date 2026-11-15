@@ -14,7 +14,7 @@ import (
 //   - a request whose id cannot be read (a batch, an oversized or malformed body): fallback, with
 //     msg as plain text.
 //
-// It reads at most the capture limit of r's body, which has not been relayed yet.
+// It reads at most one byte past the capture limit of r's body, which has not been relayed yet.
 func Answer(w http.ResponseWriter, r *http.Request, msg string, data any, fallback int) {
 	var body []byte
 	if r.Method == http.MethodPost && r.Body != nil {
