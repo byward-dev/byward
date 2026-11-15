@@ -93,7 +93,7 @@ func TestDiagnoseReportsEachMisconfigurationWithItsFix(t *testing.T) {
 		check     string
 		status    doctor.Status
 		inMessage string
-		// cause, when set, is the end of the underlying error, which the message must show as well.
+		// cause, when set, is the end of the underlying error, which the message must end with.
 		cause    string
 		inFix    string
 		appRoles []string // app-only tokens on with these roles
@@ -161,8 +161,8 @@ func TestDiagnoseReportsEachMisconfigurationWithItsFix(t *testing.T) {
 			d := diagnosis
 			d.AppRoles = tc.appRoles
 			r := diagnose(t, e.p, d)[tc.check]
-			if r.Status != tc.status || !strings.Contains(r.Message, tc.inMessage) || !strings.Contains(r.Message, tc.cause) || !strings.Contains(r.Fix, tc.inFix) {
-				t.Fatalf("%s = %+v\nwant status %s, message with %q and %q, fix with %q", tc.check, r, tc.status, tc.inMessage, tc.cause, tc.inFix)
+			if r.Status != tc.status || !strings.Contains(r.Message, tc.inMessage) || !strings.HasSuffix(r.Message, tc.cause) || !strings.Contains(r.Fix, tc.inFix) {
+				t.Fatalf("%s = %+v\nwant status %s, message with %q ending %q, fix with %q", tc.check, r, tc.status, tc.inMessage, tc.cause, tc.inFix)
 			}
 		})
 	}
