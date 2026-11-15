@@ -73,7 +73,7 @@ func stdioProxyRunning(t *testing.T, flags []string, env ...string) (*httptest.S
 	if err := os.WriteFile(envFile, []byte("FOO=bar\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	all := append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_ENV_FILE="+envFile)
+	all := append(stdioAuthEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_ENV_FILE="+envFile)
 	cfg, _, err := config.Load(append([]string{"--", bin}, flags...), append(all, env...), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
@@ -351,7 +351,7 @@ func TestLooseUpstreamEnvFileRefusesToStartInEveryMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, env := range map[string][]string{
-		"authenticated": append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp"),
+		"authenticated": append(stdioAuthEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp"),
 		"no auth":       {"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_INSECURE_NO_AUTH=true"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -494,7 +494,7 @@ func TestModernEraRequestsRunInTheUsersOwnUpstreamProcessWithNoToken(t *testing.
 }
 
 func TestTheStdioUpstreamGetsTheStreamIdleTimeoutAndEachEvictionIsAuditedWithItsOpenStreams(t *testing.T) {
-	cfg, _, err := config.Load([]string{"--", "/bin/server"}, append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp",
+	cfg, _, err := config.Load([]string{"--", "/bin/server"}, append(stdioAuthEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp",
 		"BYWARD_STDIO_STREAM_IDLE_TIMEOUT=15m"), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)

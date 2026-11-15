@@ -33,7 +33,7 @@ func newStdioOBOEnv(t *testing.T, scopes string, opts ...fakeidp.Option) *oboEnv
 	// Each process's token socket lives under the temporary directory, which a long TMPDIR would
 	// push over the socket path limit (#307).
 	t.Setenv("TMPDIR", faketokensocket.Dir(t))
-	settings := append(authEnv(t), "BYWARD_PUBLIC_URL="+oboPublic+"/mcp", "BYWARD_OBO_SCOPES="+scopes)
+	settings := append(stdioAuthEnv(t), "BYWARD_PUBLIC_URL="+oboPublic+"/mcp", "BYWARD_OBO_SCOPES="+scopes)
 	cfg, _, err := config.Load([]string{"--", bin, "-mcp"}, settings, os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
@@ -66,7 +66,7 @@ func TestOfflineChecksRefuseATempDirTooLongForTheTokenSocketOnlyWithOnBehalfOf(t
 		t.Fatal(err)
 	}
 	load := func(extra ...string) *config.Config {
-		cfg, _, err := config.Load([]string{"--", bin, "-mcp"}, append(authEnv(t), append(extra, "BYWARD_PUBLIC_URL="+oboPublic+"/mcp")...), os.ReadFile)
+		cfg, _, err := config.Load([]string{"--", bin, "-mcp"}, append(stdioAuthEnv(t), append(extra, "BYWARD_PUBLIC_URL="+oboPublic+"/mcp")...), os.ReadFile)
 		if err != nil {
 			t.Fatal(err)
 		}

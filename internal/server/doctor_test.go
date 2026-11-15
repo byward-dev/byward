@@ -273,7 +273,7 @@ func stdioEnv(t *testing.T, base []string) (env []string, marker string) {
 }
 
 func TestCheckOfflineAndDoctorCheckAStdioUpstreamWithoutStartingIt(t *testing.T) {
-	env, marker := stdioEnv(t, authEnv(t))
+	env, marker := stdioEnv(t, stdioAuthEnv(t))
 	cfg, _, err := config.Load(nil, env, os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
@@ -301,7 +301,7 @@ func TestCheckOfflineFindsStdioUpstreamMistakes(t *testing.T) {
 		inErr string
 	}{
 		{"command that does not exist", func(t *testing.T) []string {
-			return append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", `BYWARD_UPSTREAM_COMMAND=["/nonexistent/mcp-server"]`)
+			return append(stdioAuthEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", `BYWARD_UPSTREAM_COMMAND=["/nonexistent/mcp-server"]`)
 		}, "stdio upstream (BYWARD_UPSTREAM_COMMAND, BYWARD_UPSTREAM_ENV_FILE)"},
 		{"env file other users can read, without authentication", func(t *testing.T) []string {
 			env, _ := stdioEnv(t, []string{"BYWARD_INSECURE_NO_AUTH=true"})

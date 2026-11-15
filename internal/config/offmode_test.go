@@ -28,6 +28,11 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 		{name: "the stdio env file given as a flag", args: []string{"--upstream-env-file=/run/secrets/upstream-env"}, want: "--upstream-env-file " + toStdio},
 		{name: "the header timeout with stdio", stdio: true, env: []string{"BYWARD_UPSTREAM_HEADER_TIMEOUT=abc"}, want: "BYWARD_UPSTREAM_HEADER_TIMEOUT " + toHTTP},
 		{name: "the strip list with stdio", stdio: true, env: []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X-Api-Url"}, want: "BYWARD_UPSTREAM_STRIP_HEADERS " + toHTTP},
+		{name: "the assertion header with stdio", stdio: true, env: []string{"BYWARD_ASSERTION_HEADER=X-Byward-Identity"}, want: "BYWARD_ASSERTION_HEADER " + toHTTP},
+		{name: "the assertion claims with stdio", stdio: true, env: []string{"BYWARD_ASSERTION_CLAIMS=email"}, want: "BYWARD_ASSERTION_CLAIMS " + toHTTP},
+		{name: "the unverified-email opt-in with stdio", stdio: true, env: []string{"BYWARD_ASSERTION_UNVERIFIED_EMAIL=true"}, want: "BYWARD_ASSERTION_UNVERIFIED_EMAIL " + toHTTP},
+		{name: "the assertion key directory given as a flag with stdio", stdio: true, args: []string{"--assertion-keys-dir=/etc/byward/assertion-keys"},
+			want: "--assertion-keys-dir " + toHTTP},
 		{name: "the credential header with stdio", stdio: true, env: []string{"BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"}, want: "BYWARD_UPSTREAM_CREDENTIAL_HEADER " + toHTTP},
 		{name: "the URL with stdio keeps its both-set error", stdio: true, env: []string{"BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_UPSTREAM_STRIP_HEADERS=X-A"},
 			want: "BYWARD_UPSTREAM_URL and BYWARD_UPSTREAM_COMMAND are both set: an upstream is either HTTP or stdio"},
@@ -59,8 +64,9 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 }
 
 // Every setting of each upstream group is refused with the other mode, read from the registry, so a
-// setting added to a group, or moved into one, is covered with no test to edit. The selectors and
-// the credential, which keep their own errors, are the only exceptions.
+// setting added to a group, or moved into one, is covered with no test to edit; so is each HTTP-only
+// setting outside the groups. The selectors and the credential, which keep their own errors, are the
+// only exceptions.
 func TestEverySettingOfAnUpstreamGroupIsRefusedWithTheOtherMode(t *testing.T) {
 	skipped := map[string]bool{"upstream-url": true, "upstream-command": true, "upstream-credential": true}
 	files := func(p string) ([]byte, error) {
@@ -71,7 +77,8 @@ func TestEverySettingOfAnUpstreamGroupIsRefusedWithTheOtherMode(t *testing.T) {
 	}
 	n := 0
 	for _, s := range registry {
-		if s.Group != GroupHTTPUpstream && s.Group != GroupStdioUpstream || skipped[s.Name] {
+		forHTTP := s.Group == GroupHTTPUpstream || httpOnly[s.Name]
+		if !forHTTP && s.Group != GroupStdioUpstream || skipped[s.Name] {
 			continue
 		}
 		n++
@@ -81,7 +88,7 @@ func TestEverySettingOfAnUpstreamGroupIsRefusedWithTheOtherMode(t *testing.T) {
 				given = s.Env() + "_FILE=/run/secrets/off-mode"
 			}
 			env, mode := append(append([]string{}, base...), given), "HTTP"
-			if s.Group == GroupHTTPUpstream {
+			if forHTTP {
 				env, mode = stdioBase(`BYWARD_UPSTREAM_COMMAND=["/usr/bin/server"]`, given), "stdio"
 			}
 			_, _, err := Load(nil, env, files)
@@ -90,26 +97,33 @@ func TestEverySettingOfAnUpstreamGroupIsRefusedWithTheOtherMode(t *testing.T) {
 			}
 		})
 	}
-	if n < 7 {
-		t.Fatalf("%d upstream-mode settings checked, want every one (7 today)", n)
+	if n < 11 {
+		t.Fatalf("%d upstream-mode settings checked, want every one (11 today)", n)
 	}
 }
 
-// Configurations that load: each mode with the other's settings at their defaults, and the other
-// mode's selector given empty, which selects nothing and so is no off-mode setting.
-func TestEachModeLoadsBesideTheOtherModesDefaultsAndAnEmptySelector(t *testing.T) {
+// Configurations that load: each mode with the other's settings at their defaults, or given empty,
+// as env templates list every variable; an empty value is not given, so it is no off-mode setting.
+// The other mode's selector given empty selects nothing.
+func TestEachModeLoadsBesideTheOtherModesDefaultsAndEmptyValues(t *testing.T) {
 	command := `BYWARD_UPSTREAM_COMMAND=["/usr/bin/server"]`
 	for _, tc := range []struct {
 		name string
+		args []string
 		env  []string
 	}{
-		{"an HTTP upstream", base},
-		{"a stdio upstream", stdioBase(command)},
-		{"an HTTP upstream with an empty command", append(append([]string{}, base...), "BYWARD_UPSTREAM_COMMAND=")},
-		{"a stdio upstream with an empty URL", stdioBase(command, "BYWARD_UPSTREAM_URL=")},
+		{"an HTTP upstream", nil, base},
+		{"a stdio upstream", nil, stdioBase(command)},
+		{"an HTTP upstream with an empty command", nil, append(append([]string{}, base...), "BYWARD_UPSTREAM_COMMAND=")},
+		{"a stdio upstream with an empty URL", nil, stdioBase(command, "BYWARD_UPSTREAM_URL=")},
+		{"an HTTP upstream with an empty stdio setting", nil, append(append([]string{}, base...), "BYWARD_STDIO_MAX_PROCESSES=")},
+		{"an HTTP upstream with an empty stdio flag", []string{"--stdio-max-processes="}, base},
+		{"a stdio upstream with an empty HTTP setting", nil, stdioBase(command, "BYWARD_UPSTREAM_STRIP_HEADERS=")},
+		{"a stdio upstream with an empty assertion key directory", nil, stdioBase(command, "BYWARD_ASSERTION_KEYS_DIR=")},
+		{"a stdio upstream with empty assertion claims", nil, stdioBase(command, "BYWARD_ASSERTION_CLAIMS=")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, _, err := Load(nil, tc.env, baseFiles); err != nil {
+			if _, _, err := Load(tc.args, tc.env, baseFiles); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -139,9 +153,18 @@ func TestAnUnclearUpstreamGivesOnlyItsOwnErrors(t *testing.T) {
 		{"a malformed command keeps the credential's stdio hint",
 			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_UPSTREAM_CREDENTIAL_FILE="+credFile),
 			[]string{"is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE"}, []string{"ASSERTION_HEADER"}},
+		{"a malformed command still refuses the identity headers",
+			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_IDENTITY_HEADERS=true"),
+			[]string{"BYWARD_IDENTITY_HEADERS is for an HTTP upstream"}, nil},
+		{"a malformed command still refuses the On-Behalf-Of header",
+			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_OBO_HEADER=X-Graph-Token"),
+			[]string{"BYWARD_OBO_HEADER: a stdio upstream gets its downstream token from its token socket"}, nil},
+		{"a malformed command still refuses the PostgreSQL store",
+			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_STORE_POSTGRES_DSN_FILE="+credFile, "BYWARD_STORE_DIR="),
+			[]string{"BYWARD_STORE_POSTGRES_DSN_FILE: the PostgreSQL store is for several replicas"}, nil},
 		{"no upstream at all gives only the required error",
 			stdioBase("BYWARD_STDIO_MAX_PROCESSES=5", "BYWARD_UPSTREAM_HEADER_TIMEOUT=abc", "BYWARD_UPSTREAM_STRIP_HEADERS=Host",
-				"BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Key"),
+				"BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Key", "BYWARD_ASSERTION_HEADER=X-Byward-Identity"),
 			[]string{"BYWARD_UPSTREAM_URL is required (or BYWARD_UPSTREAM_COMMAND, or a command after --)"}, []string{"the upstream is HTTP", ";"}},
 		{"a malformed URL still reports the HTTP upstream's own settings",
 			append(append([]string{}, base...), "BYWARD_UPSTREAM_URL=ftp://x", "BYWARD_UPSTREAM_STRIP_HEADERS=Host", "BYWARD_UPSTREAM_HEADER_TIMEOUT=abc"),

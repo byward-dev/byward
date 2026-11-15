@@ -15,11 +15,11 @@ func (c *Config) upstream(v *Values) []error {
 	urlEnv, cmdEnv, envEnv := Setting{Name: "upstream-url"}.Env(), Setting{Name: "upstream-command"}.Env(), Setting{Name: "upstream-env"}.Env()+"_FILE"
 	raw := v.get("upstream-command")
 	var errs []error
-	if (raw != "") != (v.get("upstream-url") != "") { // one mode chosen: with none or both, the "required" or "both set" error says enough
-		errs = offModeSettings(v, raw != "")
+	if v.httpUpstream() || v.stdioUpstream() { // with none or both, the "required" or "both set" error says enough
+		errs = offModeSettings(v, v.stdioUpstream())
 	}
 	if raw == "" {
-		if v.get("upstream-url") != "" { // the HTTP upstream's own settings, each reported even beside a malformed URL
+		if v.httpUpstream() { // the HTTP upstream's own settings, each reported even beside a malformed URL
 			d, err := parseHeaderTimeout(v.get("upstream-header-timeout"))
 			if err != nil {
 				errs = append(errs, err)
@@ -76,9 +76,27 @@ func (c *Config) upstream(v *Values) []error {
 	return errs
 }
 
+// stdioUpstream and httpUpstream say which upstream mode the selectors choose: exactly one of
+// upstream-command and upstream-url, as given, even when its value does not parse. With none or
+// both, no mode is chosen. Every decision that depends on the mode reads these.
+func (v *Values) stdioUpstream() bool {
+	return v.get("upstream-command") != "" && v.get("upstream-url") == ""
+}
+
+func (v *Values) httpUpstream() bool {
+	return v.get("upstream-url") != "" && v.get("upstream-command") == ""
+}
+
+// httpOnly are the settings outside the upstream groups that only an HTTP upstream reads: the
+// identity assertion, which a stdio upstream never gets (ADR-0016 §2, §6). Settings outside the
+// groups that refuse a stdio upstream with a hint of their own (identity-headers, obo-header,
+// store-postgres-dsn) keep it.
+var httpOnly = map[string]bool{"assertion-keys-dir": true, "assertion-header": true, "assertion-claims": true, "assertion-unverified-email": true}
+
 // offModeSettings refuses each setting given for the upstream mode that is off: a stdio upstream's
-// settings with an HTTP upstream, an HTTP upstream's with a stdio one. A setting left at its default
-// is never refused. The registry's groups say which mode a setting is for. The selectors
+// settings with an HTTP upstream, an HTTP upstream's (and the httpOnly ones) with a stdio one. A
+// setting left at its default, or given empty, is never refused: env templates often list every
+// variable empty. The registry's groups say which mode a setting is for. The selectors
 // (upstream-url, upstream-command) keep their own "both set" error, and upstream-credential its own
 // hint (upstreamCredential).
 func offModeSettings(v *Values, stdio bool) []error {
@@ -89,7 +107,8 @@ func offModeSettings(v *Values, stdio bool) []error {
 	var errs []error
 	for _, val := range v.Effective() {
 		s := val.Setting
-		if s.Group != offGroup || val.Source == SourceDefault || s.Name == "upstream-url" || s.Name == "upstream-command" || s.Name == "upstream-credential" {
+		forOff := s.Group == offGroup || stdio && httpOnly[s.Name]
+		if !forOff || val.Source == SourceDefault || val.Raw == "" || s.Name == "upstream-url" || s.Name == "upstream-command" || s.Name == "upstream-credential" {
 			continue
 		}
 		errs = append(errs, errorf("%s is set, but the upstream is %s: it applies only to %s (%s); remove it", spelled(val), inUse, offMode, offSelector))
@@ -178,20 +197,17 @@ const maxUpstreamCredential = 4 << 10
 func (c *Config) upstreamCredential(v *Values) []error {
 	fileEnv, hEnv := Setting{Name: "upstream-credential"}.Env()+"_FILE", Setting{Name: "upstream-credential-header"}.Env()
 	val, header := v.byKey["upstream-credential"], v.byKey["upstream-credential-header"]
-	if v.get("upstream-command") == "" && v.get("upstream-url") == "" {
-		return nil // no upstream: upstream's "required" error says enough
-	}
-	if val.Source == SourceDefault {
-		if header.Source != SourceDefault && v.get("upstream-command") == "" { // with stdio: offModeSettings refuses it
-			return []error{errorf("%s is set, but there is no credential: set %s too, or remove it", hEnv, fileEnv)}
+	if !v.httpUpstream() { // with stdio the header is an off-mode setting; with no upstream or both, upstream's error says enough
+		if v.stdioUpstream() && val.Source != SourceDefault {
+			return []error{errorf("%s is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE", fileEnv)}
 		}
 		return nil
 	}
-	if v.get("upstream-command") != "" { // the selector, as offModeSettings reads it, even when the command does not parse
-		if v.get("upstream-url") != "" {
-			return nil // both selectors: upstream's "both set" error says enough
+	if val.Source == SourceDefault {
+		if header.Source != SourceDefault {
+			return []error{errorf("%s is set, but there is no credential: set %s too, or remove it", hEnv, fileEnv)}
 		}
-		return []error{errorf("%s is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE", fileEnv)}
+		return nil
 	}
 	var errs []error
 	switch cred := val.Raw; {

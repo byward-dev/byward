@@ -17,7 +17,7 @@ func (c *Config) storeBackend(v *Values) []error {
 	if v.byKey["store-counter-file"].Source != SourceDefault {
 		errs = append(errs, errorf("BYWARD_STORE_POSTGRES_DSN_FILE and BYWARD_STORE_COUNTER_FILE: the counter file belongs to the SQLite store; the PostgreSQL store finds a restore from the database itself (docs/how-to/postgres.md)"))
 	}
-	if c.UpstreamCommand != nil {
+	if v.stdioUpstream() {
 		errs = append(errs, errorf("BYWARD_STORE_POSTGRES_DSN_FILE: the PostgreSQL store is for several replicas, and a stdio upstream's processes live on one (ADR-0007 §4); use the SQLite store"))
 	}
 	if c.Dev {

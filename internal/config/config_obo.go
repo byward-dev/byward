@@ -50,7 +50,7 @@ func (c *Config) onBehalfOf(v *Values) []error {
 	if v.get("obo-scopes") != "" && len(c.OBOScopes) == 0 {
 		errs = append(errs, errorf("%s is set but lists nothing; give scopes, or leave it unset", sEnv))
 	}
-	if c.UpstreamCommand != nil && v.byKey["obo-header"].Source != SourceDefault {
+	if v.stdioUpstream() && v.byKey["obo-header"].Source != SourceDefault {
 		errs = append(errs, errorf("%s: a stdio upstream gets its downstream token from its token socket (BYWARD_DOWNSTREAM_TOKEN_SOCKET), not a header; leave %s unset", hEnv, hEnv))
 	}
 	if len(c.OBOScopes) > 0 && c.IdP != "entra" {

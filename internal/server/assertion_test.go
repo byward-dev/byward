@@ -290,13 +290,9 @@ func TestStartupSaysWhichEmailsTheAssertionLeavesOutOrCarriesUnverified(t *testi
 	}
 }
 
-// The email warning reaches the startup log for the IdP in use, and only with an HTTP upstream: a
-// stdio upstream gets no assertion and no email.
+// The email warning reaches the startup log for the IdP in use. (A stdio upstream gets no assertion,
+// and config refuses the assertion settings with one.)
 func TestTheStartupLogWarnsAboutEmailsForTheIdPInUse(t *testing.T) {
-	sh, err := exec.LookPath("sh")
-	if err != nil {
-		t.Skip("no sh")
-	}
 	fake := fakeidp.New(t, fakeidp.Generic)
 	for _, tc := range []struct {
 		name string
@@ -309,14 +305,6 @@ func TestTheStartupLogWarnsAboutEmailsForTheIdPInUse(t *testing.T) {
 		{"an OIDC IdP", func(t *testing.T) *config.Config {
 			return loadOIDC(t, "oidc", fake.Issuer(), "c", "BYWARD_ASSERTION_CLAIMS=email")
 		}, "leaves out emails the IdP has not verified"},
-		{"a stdio upstream", func(t *testing.T) *config.Config {
-			cfg, _, err := config.Load([]string{"--", sh}, append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp",
-				"BYWARD_INTERNAL_LISTEN=127.0.0.1:0", "BYWARD_ASSERTION_KEYS_DIR="+assertionkey.EmptyDir(t), "BYWARD_ASSERTION_CLAIMS=email"), os.ReadFile)
-			if err != nil {
-				t.Fatal(err)
-			}
-			return cfg
-		}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logs := &logsink.Buffer{}
@@ -333,12 +321,12 @@ func TestTheStartupLogWarnsAboutEmailsForTheIdPInUse(t *testing.T) {
 	}
 }
 
-// stdioAuthConfig is authenticated mode in front of a stdio upstream, with an empty assertion key
+// stdioAuthConfig is authenticated mode in front of a stdio upstream, with no assertion key
 // directory: a stdio upstream gets its identity at spawn, not as an assertion (ADR-0016 §6).
 func stdioAuthConfig(t *testing.T, command string) *config.Config {
 	t.Helper()
-	cfg, _, err := config.Load([]string{"--", command}, append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp",
-		"BYWARD_INTERNAL_LISTEN=127.0.0.1:0", "BYWARD_ASSERTION_KEYS_DIR="+assertionkey.EmptyDir(t)), os.ReadFile)
+	cfg, _, err := config.Load([]string{"--", command}, append(stdioAuthEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp",
+		"BYWARD_INTERNAL_LISTEN=127.0.0.1:0"), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}

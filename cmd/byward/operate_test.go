@@ -267,7 +267,8 @@ func TestCheckOfflineAndDoctorTakeAStdioUpstreamAfterDashes(t *testing.T) {
 		t.Fatal(err)
 	}
 	useFakes(t, refusing{})
-	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp")
+	stdioAuth := slices.DeleteFunc(authEnv(t), func(kv string) bool { return strings.HasPrefix(kv, "BYWARD_ASSERTION_KEYS_DIR=") }) // refused with a stdio upstream
+	env := append(stdioAuth, "BYWARD_PUBLIC_URL=https://m.example/mcp")
 	code, stdout, stderr := runWith([]string{"check", "--offline", "--", script, "--flag"}, env...)
 	if code != exitOK || !strings.Contains(stdout, "configuration OK") {
 		t.Fatalf("check: code %d stdout %q stderr %q", code, stdout, stderr)

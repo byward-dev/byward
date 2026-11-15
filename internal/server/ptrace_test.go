@@ -79,7 +79,7 @@ func TestOnBehalfOfWithAStdioUpstreamAddsThePtraceWarningToTheStartupWarnings(t 
 	orig := hostPtraceWarning
 	t.Cleanup(func() { hostPtraceWarning = orig })
 	hostPtraceWarning = func() *Warning { return &Warning{Message: "the host lets processes read each other"} }
-	cfg, _, err := config.Load([]string{"--", "/bin/server"}, append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp",
+	cfg, _, err := config.Load([]string{"--", "/bin/server"}, append(stdioAuthEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp",
 		"BYWARD_OBO_SCOPES="+graphUserRead), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)

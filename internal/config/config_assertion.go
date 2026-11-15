@@ -19,7 +19,7 @@ func (c *Config) assertion(v *Values) []error {
 	ihEnv := Setting{Name: "identity-headers"}.Env()
 	if c.IdentityHeaders, err = v.boolean("identity-headers"); err != nil {
 		errs = append(errs, err)
-	} else if c.IdentityHeaders && c.UpstreamCommand != nil {
+	} else if c.IdentityHeaders && v.stdioUpstream() {
 		errs = append(errs, errorf("%s is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)", ihEnv))
 	}
 	if c.AssertionUnverifiedEmail, err = v.boolean("assertion-unverified-email"); err != nil {

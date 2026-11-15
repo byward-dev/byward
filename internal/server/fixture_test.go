@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -70,6 +71,13 @@ func authEnv(t testing.TB) []string {
 		"BYWARD_STORE_DIR=" + filepath.Join(dir, "state"), // the counter file defaults to dir/store-writes
 		"BYWARD_ASSERTION_KEYS_DIR=" + assertionkey.Dir(t),
 	}
+}
+
+// stdioAuthEnv is authEnv for a stdio upstream: without the assertion key directory, which config
+// refuses with one (a stdio upstream gets no assertion, ADR-0016 §6).
+func stdioAuthEnv(t testing.TB) []string {
+	t.Helper()
+	return slices.DeleteFunc(authEnv(t), func(kv string) bool { return strings.HasPrefix(kv, "BYWARD_ASSERTION_KEYS_DIR=") })
 }
 
 // postgresEnv is authEnv on a PostgreSQL store with the given DSN instead of a SQLite state
