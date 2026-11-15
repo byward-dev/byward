@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/net/http/httpguts"
 )
 
 // upstream reads the upstream: an HTTP URL or a stdio command, exactly one of them.
@@ -169,10 +171,9 @@ func (c *Config) upstreamCredential(v *Values) []error {
 }
 
 // mcpHeaders are the request headers MCP and its transport need at the upstream, so the operator
-// may not strip them: the 2026-07-28 revision also requires every Mcp-Param-* header to be
-// forwarded.
-var mcpHeaders = map[string]bool{"Accept": true, "Content-Type": true, "Content-Length": true, "Transfer-Encoding": true, "Host": true,
-	"Last-Event-Id": true, "Mcp-Session-Id": true, "Mcp-Protocol-Version": true, "Mcp-Method": true, "Mcp-Name": true}
+// may not strip them: MCPRequestHeaders and the transport's own. The 2026-07-28 revision also
+// requires every Mcp-Param-* header to be forwarded (MCPParamPrefix).
+var mcpHeaders = withMCPHeaders(map[string]bool{"Accept": true, "Content-Type": true, "Content-Length": true, "Transfer-Encoding": true, "Host": true})
 
 // stripHeaders reads BYWARD_UPSTREAM_STRIP_HEADERS: header names, canonical with _ read as -, the
 // way the relay compares them.
@@ -185,9 +186,9 @@ func stripHeaders(raw string) ([]string, []error) {
 		switch {
 		case strings.ContainsRune(n, '*'):
 			errs = append(errs, errorf("%s: %q: exact names only; list each header of a family by name", env, n))
-		case strings.ContainsFunc(n, func(r rune) bool { return !isTokenChar(r) }):
+		case !httpguts.ValidHeaderFieldName(n):
 			errs = append(errs, errorf("%s: %q is not a header name; list exact names, such as X-Argocd-Base-Url", env, n))
-		case mcpHeaders[h] || strings.HasPrefix(h, "Mcp-Param-"):
+		case mcpHeaders[h] || strings.HasPrefix(h, MCPParamPrefix):
 			errs = append(errs, errorf("%s: %s is a header MCP needs at the upstream; remove it from the list", env, h))
 		case h == "Traceparent" || h == "Tracestate":
 			errs = append(errs, errorf("%s: %s cannot be stripped: with tracing on, the proxy sets it from the inbound trace context; remove it from the list", env, h))

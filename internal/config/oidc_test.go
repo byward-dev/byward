@@ -78,7 +78,7 @@ func TestGoogleDefaultsItsIssuer(t *testing.T) {
 	c, err := loadOIDC(t, func(env []string) []string {
 		return with("BYWARD_IDP=google")(without("BYWARD_IDP", "BYWARD_OIDC_ISSUER")(env))
 	})
-	if err != nil || c.OIDCIssuer != OIDCDefaultIssuers["google"] {
+	if err != nil || c.OIDCIssuer != "https://accounts.google.com" {
 		t.Fatalf("google without an issuer: %v, %v", c, err)
 	}
 }
