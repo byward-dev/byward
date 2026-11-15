@@ -3,15 +3,35 @@ package config
 import (
 	"net/textproto"
 	"strings"
+
+	"golang.org/x/net/http/httpguts"
 )
 
 // reservedHeaders may not be set by any upstream header setting (the assertion, upstream
 // credential and On-Behalf-Of headers): the proxy, the transport or the MCP protocol owns them, or
 // they carry forwarding or browser data (ADR-0016 §2, §4; ADR-0018 §6).
-var reservedHeaders = map[string]bool{"Host": true, "Cookie": true, "Set-Cookie": true, "Content-Length": true, "Content-Type": true,
-	"Transfer-Encoding": true, "Connection": true, "Keep-Alive": true, "Upgrade": true, "Te": true, "Trailer": true, "Accept": true,
-	"Accept-Encoding": true, "Forwarded": true, "Origin": true, "Referer": true, "Mcp-Session-Id": true, "Mcp-Protocol-Version": true,
-	"Last-Event-Id": true, "Traceparent": true, "Tracestate": true, "Baggage": true, "Www-Authenticate": true}
+var reservedHeaders = withMCPHeaders(map[string]bool{"Host": true, "Cookie": true, "Set-Cookie": true, "Content-Length": true,
+	"Content-Type": true, "Transfer-Encoding": true, "Connection": true, "Keep-Alive": true, "Upgrade": true, "Te": true,
+	"Trailer": true, "Accept": true, "Accept-Encoding": true, "Forwarded": true, "Origin": true, "Referer": true,
+	"Traceparent": true, "Tracestate": true, "Baggage": true, "Www-Authenticate": true})
+
+// MCPRequestHeaders are the request headers MCP's Streamable HTTP transport defines (2025-11-25 and
+// 2026-07-28), spelled as the spec spells them, and MCPParamPrefix starts the 2026-07-28 family a
+// client mirrors tool parameters into (Mcp-Param-{name}). They are the one list of MCP-owned
+// headers: no upstream header setting may name one (reservedHeaders), the operator may not strip
+// one (mcpHeaders), and a browser's preflight may send them (origin's CORS list).
+var MCPRequestHeaders = []string{"Mcp-Session-Id", "Mcp-Protocol-Version", "Mcp-Method", "Mcp-Name", "Last-Event-ID"}
+
+// MCPParamPrefix starts the Mcp-Param-{name} headers (MCP 2026-07-28), in canonical form.
+const MCPParamPrefix = "Mcp-Param-"
+
+// withMCPHeaders adds MCPRequestHeaders, in canonical form, to m and returns it.
+func withMCPHeaders(m map[string]bool) map[string]bool {
+	for _, h := range MCPRequestHeaders {
+		m[CanonicalHeader(h)] = true
+	}
+	return m
+}
 
 // upstreamHeader reads a setting naming a header the proxy sets on upstream requests: a valid
 // token, and not one the proxy, the transport or MCP relies on. example is a header of the
@@ -21,9 +41,9 @@ func upstreamHeader(v *Values, setting, example string) (string, error) {
 	h := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(v.get(setting)))
 	n := CanonicalHeader(h) // as the upstream may read it: X_Forwarded_For is X-Forwarded-For
 	switch {
-	case h == "" || strings.ContainsFunc(h, func(r rune) bool { return !isTokenChar(r) }):
+	case !httpguts.ValidHeaderFieldName(h):
 		return "", errorf("%s: want a header name such as Authorization or %s, got %q", env, example, v.get(setting))
-	case reservedHeaders[n] || strings.HasPrefix(n, "X-Forwarded-") || strings.HasPrefix(n, "Proxy-") || strings.HasPrefix(n, "Sec-") || strings.HasPrefix(n, "Access-Control-"):
+	case reservedHeaders[n] || strings.HasPrefix(n, "X-Forwarded-") || strings.HasPrefix(n, "Proxy-") || strings.HasPrefix(n, "Sec-") || strings.HasPrefix(n, "Access-Control-") || strings.HasPrefix(n, MCPParamPrefix):
 		return "", errorf("%s: %s is a header the proxy, the transport or MCP relies on; use Authorization or a header of your own such as %s", env, h, example)
 	}
 	return h, nil
@@ -79,9 +99,4 @@ func sameHeader(a, b string) bool {
 // proxy sets, strips or reserves uses it, in config and in the relay alike.
 func CanonicalHeader(name string) string {
 	return textproto.CanonicalMIMEHeaderKey(strings.ReplaceAll(name, "_", "-"))
-}
-
-// isTokenChar reports whether r may appear in an HTTP header name (RFC 9110 §5.6.2).
-func isTokenChar(r rune) bool {
-	return r < 0x7f && (r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("!#$%&'*+-.^_`|~", r))
 }

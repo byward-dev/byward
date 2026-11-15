@@ -17,8 +17,10 @@ func TestAReservedHeaderIsRefusedInEitherSpellingByEverySettingThatSetsOne(t *te
 		{"BYWARD_OBO_HEADER", nil},
 		{"BYWARD_UPSTREAM_CREDENTIAL_HEADER", []string{"BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile}},
 	}
-	// One per family: the reserved names, then each reserved prefix.
-	reserved := []string{"Mcp-Session-Id", "X-Forwarded-For", "Proxy-Authorization", "Sec-Fetch-Mode", "Access-Control-Allow-Origin"}
+	// One per family: the reserved names, MCP's own request headers (all of them: each would replace
+	// the client's at the upstream), then each reserved prefix, Mcp-Param-* (MCP 2026-07-28) included.
+	reserved := []string{"Host", "Mcp-Session-Id", "Mcp-Protocol-Version", "Mcp-Method", "Mcp-Name", "Last-Event-ID",
+		"X-Forwarded-For", "Proxy-Authorization", "Sec-Fetch-Mode", "Access-Control-Allow-Origin", "Mcp-Param-Region"}
 	for _, s := range settings {
 		for _, h := range reserved {
 			for _, name := range []string{h, strings.ReplaceAll(h, "-", "_")} {
