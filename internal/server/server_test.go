@@ -149,8 +149,8 @@ func TestChecksRunBeforeAuthentication(t *testing.T) {
 }
 
 // A browser's preflight from an allowed origin is answered by the Origin check, before the method
-// gate and authentication, its Mcp-Param-* names allowed on top of the fixed ones and nothing else;
-// it never reaches the upstream.
+// gate and authentication, its Mcp-Param-* names allowed on top of the fixed ones and nothing else,
+// the answer varying on Origin and Access-Control-Request-Headers; it never reaches the upstream.
 func TestABrowserPreflightIsAnsweredBeforeAuthenticationWithItsMcpParamHeaders(t *testing.T) {
 	e := start(t)
 	preflight := func(requestHeaders string) *http.Response {
@@ -161,7 +161,8 @@ func TestABrowserPreflightIsAnsweredBeforeAuthenticationWithItsMcpParamHeaders(t
 		}
 		return res
 	}
-	fixed := preflight("authorization").Header.Values("Access-Control-Allow-Headers")
+	// No name requested: the fixed list alone, so a request's names echoed unfiltered cannot hide in it.
+	fixed := preflight("").Header.Values("Access-Control-Allow-Headers")
 	res := preflight("authorization,mcp-param-region")
 	got := res.Header.Values("Access-Control-Allow-Headers")
 	if len(fixed) != 1 || len(got) != 1 || got[0] != fixed[0]+", mcp-param-region" {
