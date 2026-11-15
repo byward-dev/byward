@@ -322,10 +322,10 @@ func TestABodyThatFailsThroughAMisreadProxySettingSaysOnlyTheCause(t *testing.T)
 	}
 }
 
-// A body read through a misread proxy that ends because the request's context did returns the bare
+// A response body read through a misread proxy that ends because the request's context did returns the bare
 // context error: ReverseProxy compares it with context.Canceled by identity, so a client that went
 // away is not logged as an upstream error; it quotes nothing.
-func TestABodyReadEndedByItsContextThroughAMisreadProxyKeepsTheBareContextError(t *testing.T) {
+func TestAResponseBodyReadEndedByItsContextThroughAMisreadProxyKeepsTheBareContextError(t *testing.T) {
 	for _, want := range []error{context.Canceled, context.DeadlineExceeded} {
 		t.Run(want.Error(), func(t *testing.T) {
 			_, err := redactedBody{failingBody{readErr: want}}.Read(make([]byte, 1))

@@ -52,9 +52,9 @@ func SettingMisread() bool {
 }
 
 // Redact returns t, whose errors through a proxy Go misread, judged by t's own Proxy, are replaced
-// by an *Error: a failed round trip, and a failed read or close of the response body (a proxy that
-// answers, then resets), except io.EOF, io.ErrUnexpectedEOF and the bare context errors, which quote
-// nothing (redactedBody). A request body over its http.MaxBytesReader limit stays the bare
+// by an *Error: a failed round trip; a failed read of the response body (a proxy that answers, then
+// resets), except io.EOF, io.ErrUnexpectedEOF and the bare context errors, which quote nothing; and
+// any failed close of it (redactedBody). A request body over its http.MaxBytesReader limit stays the bare
 // *http.MaxBytesError, which quotes no address, so a server can still answer 413. Any other
 // error, and every response through any other proxy, passes through unchanged. An http.Client
 // cancels a transport it does not know, as this one is, through the request's Cancel channel, so a
@@ -85,9 +85,9 @@ func (r redacting) RoundTrip(req *http.Request) (*http.Response, error) {
 // CloseIdleConnections passes through to the transport, as http.Client expects of one.
 func (r redacting) CloseIdleConnections() { r.t.CloseIdleConnections() }
 
-// redactedBody is a response body through a misread proxy: a read error that would quote the
-// address Go dialled says only Cause. io.EOF, io.ErrUnexpectedEOF and the bare context errors quote
-// nothing and pass through as themselves: ReverseProxy compares a body copy's error with
+// redactedBody is a response body through a misread proxy: a read or close error that could quote
+// the address Go dialled says only Cause. On Read, io.EOF, io.ErrUnexpectedEOF and the bare context
+// errors quote nothing and pass through as themselves: ReverseProxy compares a body copy's error with
 // context.Canceled by identity, to stay quiet when the client went away.
 type redactedBody struct{ io.ReadCloser }
 

@@ -163,7 +163,7 @@ func TestAStringOrIntegerIDIsEchoedExactlyAndAnyOtherLeavesTheRequestUnanswerabl
 			}
 			var out struct{ ID json.RawMessage }
 			if err := json.Unmarshal(w.Body.Bytes(), &out); w.Code != http.StatusOK || err != nil || !bytes.Equal(out.ID, []byte(strings.TrimSpace(tc.id))) {
-				t.Fatalf("id %s: status %d, answered with id %s (%v); want 200 and the id as sent", tc.id, w.Code, out.ID, err)
+				t.Fatalf("id %s: status %d, answered with id %s (%v); want 200 and the id as sent, without surrounding spaces", tc.id, w.Code, out.ID, err)
 			}
 		})
 	}
