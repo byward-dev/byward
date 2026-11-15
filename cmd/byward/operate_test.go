@@ -118,7 +118,7 @@ func TestCheckOfflineAndDoctorExit2OnAConfigurationErrorAndCheckNothing(t *testi
 	for _, args := range [][]string{{"check", "--offline"}, {"doctor"}, {"doctor", "--json"}} {
 		code, stdout, stderr := runWith(args, env...)
 		if code != exitConfig || stdout != "" || !strings.HasPrefix(stderr, "byward: configuration error: BYWARD_KEYS_DIR: /nonexistent/keys") ||
-			strings.Count(stderr, "\n") != 1 {
+			strings.Count(stderr, "\n") != 1 || !strings.HasSuffix(stderr, "\n") {
 			t.Fatalf("%v: code %d stdout %q stderr %q; want exit 2, no stdout, and the BYWARD_KEYS_DIR configuration error alone", args, code, stdout, stderr)
 		}
 	}

@@ -52,7 +52,7 @@ func authEnv(t *testing.T) []string {
 		"BYWARD_STORE_DIR=" + filepath.Join(dir, "state"), "BYWARD_ASSERTION_KEYS_DIR=" + assertionkey.Dir(t)}
 }
 
-func TestConfigErrorExitCode(t *testing.T) {
+func TestAnUnknownSettingIsAConfigErrorWithADidYouMeanHint(t *testing.T) {
 	code, _, stderr := runWith(nil, "BYWARD_PUBLC_URL=x")
 	if code != exitConfig || !strings.HasPrefix(stderr, "byward: configuration error: unknown setting BYWARD_PUBLC_URL") ||
 		!strings.Contains(stderr, "did you mean BYWARD_PUBLIC_URL?") {
@@ -308,9 +308,10 @@ func TestStoreNewEpochExits2OnMisuseOrSQLiteAnd1WhenPostgreSQLIsUnreachable(t *t
 	}
 }
 
-// An OTEL_* setting the exporter rejects stops the process as a configuration error, on one line of
-// its own after the startup log.
-func TestAnOTELExporterTheSDKRejectsIsAConfigError(t *testing.T) {
+// An OTEL_TRACES_EXPORTER that autoexport does not know stops the process as a configuration error,
+// on the last line, after the startup log.
+func TestAnUnknownOTELTracesExporterIsAConfigError(t *testing.T) {
+	// autoexport reads the process environment, and run's getenv the environ it is passed: set both.
 	for _, kv := range os.Environ() {
 		if k, _, _ := strings.Cut(kv, "="); strings.HasPrefix(k, "OTEL_") {
 			t.Setenv(k, "")
@@ -323,9 +324,10 @@ func TestAnOTELExporterTheSDKRejectsIsAConfigError(t *testing.T) {
 	})
 	env := append(authEnv(t), serveEnv("https://m.example/mcp", "127.0.0.1:0")...)
 	code, _, stderr := runWith(nil, append(env, "OTEL_TRACES_EXPORTER=bogus")...)
-	const want = "\nbyward: configuration error: OTEL_* tracing settings: "
-	if code != exitConfig || !strings.Contains(stderr, want) || !strings.HasSuffix(stderr, "\n") {
-		t.Fatalf("code=%d stderr=%q; want exit %d and a line starting %q", code, stderr, exitConfig, want[1:])
+	const want = "byward: configuration error: OTEL_* tracing settings: "
+	lines := strings.Split(strings.TrimSuffix(stderr, "\n"), "\n")
+	if code != exitConfig || !strings.HasSuffix(stderr, "\n") || len(lines) < 2 || !strings.HasPrefix(lines[len(lines)-1], want) {
+		t.Fatalf("code=%d stderr=%q; want exit %d and a last line, after the startup log, starting %q", code, stderr, exitConfig, want)
 	}
 }
 
