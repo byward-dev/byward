@@ -82,8 +82,11 @@ func TestAJWKSURIOnPort443IsAccepted(t *testing.T) {
 	for _, uri := range []string{"https://app.example/jwks", "https://app.example:443/jwks"} {
 		t.Run(uri, func(t *testing.T) {
 			m, err := parseCIMD(cimdID, doc(map[string]any{"token_endpoint_auth_method": "private_key_jwt", "jwks_uri": uri}))
-			if err != nil || m.jwksURI != uri {
-				t.Fatalf("err %v, jwks_uri %q; want it accepted as given", err, m.jwksURI)
+			if err != nil {
+				t.Fatalf("refused: %v", err)
+			}
+			if m.jwksURI != uri {
+				t.Fatalf("jwks_uri %q, want %q as given", m.jwksURI, uri)
 			}
 		})
 	}
