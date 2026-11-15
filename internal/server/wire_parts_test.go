@@ -7,8 +7,8 @@ import (
 )
 
 // A warning shows its fix after the setting it names; one without a setting (the access gate's,
-// or doctor's "authentication is off") shows its message alone, with no fix, in check and in
-// doctor.
+// or check --offline's "authentication is off") shows its message alone, with no fix, in check
+// and in doctor.
 func TestAWarningNamesItsSettingInItsFixAndOneWithoutASettingShowsNoFix(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
