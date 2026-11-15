@@ -150,7 +150,7 @@ func (f *Fetcher) Get(ctx context.Context, rawURL string, maxBytes int64) (*Resp
 	}
 	body, err := io.ReadAll(io.LimitReader(res.Body, maxBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("ssrfguard: reading %s: %w", logging.URL(rawURL), err) // a body read error quotes no URL
+		return nil, fmt.Errorf("ssrfguard: reading %s: %w", logging.URL(rawURL), logging.BodyError(err))
 	}
 	if int64(len(body)) > maxBytes {
 		return nil, fmt.Errorf("%w: %s is larger than %d bytes", ErrTooLarge, logging.URL(rawURL), maxBytes)

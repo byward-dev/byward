@@ -648,3 +648,27 @@ func TestOnlyThe36CharacterFormIsAGUID(t *testing.T) {
 		}
 	}
 }
+
+// A body that ends in a trailer line the transport refuses fails a GET and a token POST without
+// quoting that line, which can hold a cookie or a code.
+func TestARefusedTrailerIsNotQuoted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nX-Sid: SECRET\x01\r\n\r\n"))
+	}))
+	defer srv.Close()
+	f := NewFetcher(nil)
+	f.Retries = 0
+	var v any
+	getErr := f.GetJSON(context.Background(), srv.URL+"/x", &v)
+	_, postErr := f.PostToken(context.Background(), srv.URL+"/token", url.Values{"code": {"c"}}, nil)
+	for method, err := range map[string]error{"GET": getErr, "POST": postErr} {
+		if err == nil || strings.Contains(err.Error(), "SECRET") || !strings.Contains(err.Error(), "the answer has a malformed header line") {
+			t.Errorf("%s: err = %v, want the refused line named without its text", method, err)
+		}
+	}
+}

@@ -2,6 +2,7 @@ package logging
 
 import (
 	"errors"
+	"net/textproto"
 	"net/url"
 	"strings"
 )
@@ -45,19 +46,26 @@ func URLError(err error) error {
 	switch text := cause.Error(); {
 	case strings.HasPrefix(text, badLocation): // the client quotes a redirect's raw Location
 		cause = errBadLocation
-	case strings.Contains(text, badHeader): // the transport quotes the whole header line
+	case errors.As(cause, new(textproto.ProtocolError)): // it quotes the whole header line it refused
 		cause = errBadHeader
 	}
 	return &url.Error{Op: ue.Op, URL: URL(ue.URL), Err: cause}
 }
 
-const (
-	badLocation = "failed to parse Location header"
-	badHeader   = "malformed MIME header line"
-)
+// BodyError is err, an error from reading an HTTP response body, without a header or trailer line
+// the transport refused: textproto quotes the whole line, which can hold a cookie or a code. Any
+// other error is left as it is.
+func BodyError(err error) error {
+	if errors.As(err, new(textproto.ProtocolError)) {
+		return errBadHeader
+	}
+	return err
+}
+
+const badLocation = "failed to parse Location header"
 
 var (
 	errNotAURL     = errors.New("not a URL")
 	errBadLocation = errors.New(badLocation)
-	errBadHeader   = errors.New("the answer has a " + badHeader)
+	errBadHeader   = errors.New("the answer has a malformed header line")
 )

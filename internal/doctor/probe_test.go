@@ -25,6 +25,7 @@ type proxy struct {
 	noS256         bool
 	htmlMetadata   bool // every metadata document is an HTML page, as a misrouted ingress serves
 	badLocation    bool // everything redirects to a Location the client cannot parse
+	badTrailer     bool // every answer ends in a trailer line the transport refuses
 	// jwksKey, when set, is the key ID the JWKS serves, and the server metadata names jwks_uri.
 	jwksKey   string
 	noJWKSURI bool   // jwks_uri left out although there is a JWKS
@@ -36,6 +37,16 @@ type proxy struct {
 }
 
 func (p proxy) handler(origin string) http.Handler {
+	if p.badTrailer {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				return
+			}
+			defer func() { _ = conn.Close() }()
+			_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nX-Sid: SECRET\x01\r\n\r\n"))
+		})
+	}
 	if p.badLocation {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Location", "http://admin:SECRET/@login.example/x?state=SECRET")
@@ -292,6 +303,7 @@ func TestSelfProbeFollowsDiscoveryToTheAssertionKey(t *testing.T) {
 		"the JWKS too large":                   {proxy{jwksKey: "k1", hugeJWKS: true}, "larger than", "pass this path through unchanged"},
 		"jwks_uri only in RFC 8414's document": {proxy{jwksKey: "k1", noOpenIDJWKS: true}, "does not name the issuer", "pass this path through unchanged"},
 		"jwks_uri unreachable":                 {proxy{jwksKey: "k1", jwksURI: "http://127.0.0.1:1/.well-known/jwks.json"}, "cannot reach http://127.0.0.1:1/.well-known/jwks.json", "start the proxy"},
+		"jwks_uri that does not parse":         {proxy{jwksKey: "k1", jwksURI: "http://admin:SECRET/@x/jwks"}, `parse "<invalid URL>": not a URL`, "start the proxy"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := probeSigning(t, tc.p, "k1")[keysByDisco]
@@ -340,5 +352,21 @@ func TestAnUnparsableRedirectIsReportedWithoutItsLocation(t *testing.T) {
 	}
 	if !saw {
 		t.Fatalf("no result names the unparsable Location: %+v", results)
+	}
+}
+
+// An answer whose trailer line the transport refuses fails the metadata reads, and no result quotes
+// that line: the transport's own error does.
+func TestARefusedTrailerIsReportedWithoutItsLine(t *testing.T) {
+	results := probe(t, proxy{badTrailer: true})
+	saw := false
+	for check, r := range results {
+		if strings.Contains(r.Message+r.Fix, "SECRET") {
+			t.Errorf("%s = %+v, quotes the trailer", check, r)
+		}
+		saw = saw || strings.Contains(r.Message, "malformed header line")
+	}
+	if !saw {
+		t.Fatalf("no result names the refused trailer: %+v", results)
 	}
 }

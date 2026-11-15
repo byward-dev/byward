@@ -186,7 +186,7 @@ func (r *TokenResponse) OK() bool { return r.Status/100 == 2 && r.Error == "" }
 func readLimited(r io.Reader) ([]byte, error) {
 	body, err := io.ReadAll(io.LimitReader(r, MaxBodyBytes+1))
 	if err != nil {
-		return nil, err
+		return nil, logging.BodyError(err)
 	}
 	if len(body) > MaxBodyBytes {
 		return nil, fmt.Errorf("response body larger than %d bytes", MaxBodyBytes)

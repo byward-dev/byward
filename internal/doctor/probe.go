@@ -92,7 +92,7 @@ func (p *prober) do(method, target string, body io.Reader, header http.Header) r
 	p.misdHost = p.misdHost || resp.StatusCode == http.StatusMisdirectedRequest
 	b, err := io.ReadAll(io.LimitReader(resp.Body, maxMetadata+1))
 	if err != nil {
-		return response{status: resp.StatusCode, err: err}
+		return response{status: resp.StatusCode, err: logging.BodyError(err)}
 	}
 	if len(b) > maxMetadata {
 		return response{status: resp.StatusCode, err: fmt.Errorf("response is larger than %d bytes", maxMetadata)}
