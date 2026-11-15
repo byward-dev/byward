@@ -16,15 +16,24 @@ import (
 func BrowserHost(host string) string { return foldHost(browserIDNA, host) }
 
 // BrowserHostOK is BrowserHost, and whether a browser goes to that host at all: false when the browser
-// refuses the host, or when no DNS name can be it (empty, invisible characters only, an empty label,
-// as an "xn--" label decodes to). Where it is false, BrowserHost is only the mapping it got that far,
+// refuses the host (including a name that is, or maps to, a forbidden domain code point: ＠ maps to @),
+// or when no DNS name can be it (empty, invisible characters only, an empty label, as an "xn--" label
+// decodes to). Where it is false, BrowserHost is only the mapping it got that far,
 // so the consent page must not name it as the destination nor compare sites by it.
 func BrowserHostOK(host string) (string, bool) {
 	ascii, err := browserIDNA.ToASCII(host)
 	if endsInFullStop(host) { // only the host's own trailing dot, not one an empty last label left
 		ascii = strings.TrimSuffix(ascii, ".")
 	}
-	return BrowserHost(host), err == nil && ascii != "" && !strings.Contains("."+ascii+".", "..")
+	return BrowserHost(host), err == nil && ascii != "" && !strings.Contains("."+ascii+".", "..") &&
+		!strings.ContainsFunc(ascii, forbiddenDomainCodePoint)
+}
+
+// forbiddenDomainCodePoint reports whether the WHATWG URL Standard fails a host whose domain to ASCII
+// holds r: a C0 control or space, DEL, or one of # % / : < > ? @ [ \ ] ^ |. UTS #46 without the STD3
+// rules maps full-width and compatibility forms to these (＠ to @, ℀ to a/c) and reports no error.
+func forbiddenDomainCodePoint(r rune) bool {
+	return r <= ' ' || r == 0x7f || strings.ContainsRune("#%/:<>?@[\\]^|", r)
 }
 
 // endsInFullStop reports whether host ends in a full stop, as written: "." or one UTS #46 maps to it.

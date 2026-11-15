@@ -43,7 +43,14 @@ func TestBrowserHostOKSaysWhetherABrowserGoesToTheHost(t *testing.T) {
 		"a.xn--.":               {"a.", false},
 		"a..b.example":          {"a..b.example", false},
 		"\u00ad":                {"\u00ad", false}, // invisible characters only
-		"":                      {"", false},
+		// A name that maps to a forbidden domain code point: the browser refuses it.
+		"evil.example\uff20claude.ai": {"evil.example@claude.ai", false},
+		"evil\uff1f.claude.ai":        {"evil?.claude.ai", false},
+		"a\u3000b.claude.ai":          {"a b.claude.ai", false},
+		"a\u2100b.example":            {"aa/cb.example", false},
+		"a<b.claude.ai":               {"a<b.claude.ai", false},
+		"a%62.example":                {"a%62.example", false},
+		"":                            {"", false},
 	} {
 		if name, ok := BrowserHostOK(host); name != want.name || ok != want.ok {
 			t.Errorf("BrowserHostOK(%q) = %q, %v; want %q, %v", host, name, ok, want.name, want.ok)

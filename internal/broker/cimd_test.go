@@ -217,9 +217,13 @@ func TestThePublisherIsShownReadably(t *testing.T) {
 		"xn--.example":      "xn--.example (not a valid address)",
 		"a.xn--":            "a.xn-- (not a valid address)",
 		"a\u200db.example":  "ab.example (not a valid address)",
-		"\u00ad":            "?",
-		"\u200b":            "?",
-		"":                  "?",
+		// It maps to a forbidden domain code point, so the browser refuses it.
+		"evil.example\uff20claude.ai": "evil.example\uff20claude.ai (not a valid address)",
+		"a\u2100b.example":            "a\u2100b.example (not a valid address)",
+		"a<b.claude.ai":               "a<b.claude.ai (not a valid address)",
+		"\u00ad":                      "?",
+		"\u200b":                      "?",
+		"":                            "?",
 	} {
 		if got := showHost(in); got != want {
 			t.Errorf("showHost(%q) = %q, want %q", in, got, want)
