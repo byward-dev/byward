@@ -3,6 +3,8 @@ package assertion
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/go-jose/go-jose/v4"
 )
@@ -16,16 +18,17 @@ func (k *Keys) JWKS() jose.JSONWebKeySet {
 	return set
 }
 
-// JWKSHandler serves the JWKS at /.well-known/jwks.json (ADR-0016 §3).
+// JWKSHandler serves the JWKS at /.well-known/jwks.json (ADR-0016 §3), cacheable for JWKSCache.
 func (k *Keys) JWKSHandler() http.Handler {
 	body, err := json.Marshal(k.JWKS())
+	cacheControl := "public, max-age=" + strconv.Itoa(int(JWKSCache/time.Second))
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "public, max-age=300")
+		w.Header().Set("Cache-Control", cacheControl)
 		_, _ = w.Write(body)
 	})
 }

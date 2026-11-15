@@ -340,8 +340,7 @@ func allowPost(w http.ResponseWriter, r *http.Request) bool {
 	case http.MethodOptions:
 		w.WriteHeader(http.StatusNoContent)
 	default:
-		w.Header().Set("Allow", "POST, OPTIONS")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		methodNotAllowed(w, "POST, OPTIONS")
 	}
 	return false
 }

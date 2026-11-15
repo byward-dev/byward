@@ -86,8 +86,7 @@ func (b *Broker) showConsent(w http.ResponseWriter, r *http.Request, client regi
 func (b *Broker) consent(w http.ResponseWriter, r *http.Request) {
 	// The method first, as on /authorize and /revoke: a stray GET is a 405, not a spent token.
 	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", "POST")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		methodNotAllowed(w, "POST")
 		return
 	}
 	if retry, limited := b.throttled(w, r, ratelimit.Consent); limited {
