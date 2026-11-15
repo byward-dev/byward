@@ -12,8 +12,7 @@ import (
 // A setting is read as a boolean exactly when the registry marks it Bool, and every boolean reads
 // alike: one message for a value that is not true or false, and a bare --name that reads as true,
 // as --dev does (without Bool, the flag package would want an argument). Driven by the registry, so
-// a new setting is covered with no edit here, unless its read needs a companion setting to run
-// (env below). A setting read as a boolean behind a condition without being Bool is
+// a new setting is covered with no edit here, unless base does not reach its read (env below). A setting read as a boolean behind a condition without being Bool is
 // TestEveryBooleanReadIsOfABoolFlag's.
 func TestBooleanSettingsAreExactlyTheBoolFlags(t *testing.T) {
 	// The whole environment a setting needs for its read to run, as in the path test below (base when
@@ -37,7 +36,7 @@ func TestBooleanSettingsAreExactlyTheBoolFlags(t *testing.T) {
 			if read := err != nil && strings.Contains(err.Error(), want); read != s.Bool {
 				hint := "mark it Bool"
 				if s.Bool {
-					hint = "if base does not reach its read, give it the environment that does in env"
+					hint = "its read gives another message, or base does not reach it (give it the environment that does in env)"
 				}
 				t.Fatalf("read as a boolean %v, marked Bool %v (err %v): %s", read, s.Bool, err, hint)
 			}
@@ -69,8 +68,8 @@ func TestEveryBooleanReadIsOfABoolFlag(t *testing.T) {
 		byName[s.Name] = s
 	}
 	read := regexp.MustCompile(`\.boolean\("([^"]+)"\)`)
-	parse := regexp.MustCompile(`\bParseBool\(`) // a call, not a mention in a comment
-	// A setting compared with "true" or "false" by hand is a boolean read outside Values.boolean too.
+	parse := regexp.MustCompile(`\bParseBool\(`) // a call as written, "ParseBool(": a bare mention passes
+	// Any value compared with "true" or "false" by hand is a boolean read outside Values.boolean too.
 	compare := regexp.MustCompile(`[!=]=\s*"(true|false)"|"(true|false)"\s*[!=]=`)
 	files, err := filepath.Glob("*.go")
 	if err != nil {
@@ -88,7 +87,7 @@ func TestEveryBooleanReadIsOfABoolFlag(t *testing.T) {
 		if n := len(parse.FindAllString(string(src), -1)); n > 0 {
 			parses += n
 			if f != "registry.go" {
-				t.Errorf("%s parses a boolean outside Values.boolean", f)
+				t.Errorf("%s parses a boolean outside registry.go, where Values.boolean lives", f)
 			}
 		}
 		if compare.MatchString(string(src)) {
