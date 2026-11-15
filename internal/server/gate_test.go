@@ -17,11 +17,6 @@ import (
 	"github.com/byward-dev/byward/internal/logging"
 )
 
-func gateEnv(t *testing.T, extra ...string) []string {
-	t.Helper()
-	return append(append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp"), extra...)
-}
-
 // One case per gate list: the error names the exact setting, which proves the wiring maps each
 // list to its own setting. The gate's own rules are tested in internal/gate.
 func TestInvalidGateRefusesToStartNamingTheSetting(t *testing.T) {

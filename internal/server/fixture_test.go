@@ -78,7 +78,8 @@ func postgresEnv(t testing.TB, dsn, upstreamURL string) []string {
 	return append(env, "BYWARD_STORE_POSTGRES_DSN_FILE="+file, "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+upstreamURL)
 }
 
-// loadConfig loads authenticated-mode settings for publicURL plus extra env entries.
+// loadConfig loads authenticated-mode settings for publicURL with the upstream http://u/mcp, plus
+// extra env entries; an extra entry overrides a default one (a later entry wins).
 func loadConfig(t testing.TB, publicURL string, extra ...string) *config.Config {
 	t.Helper()
 	env := append(authEnv(t), "BYWARD_PUBLIC_URL="+publicURL, "BYWARD_UPSTREAM_URL=http://u/mcp")

@@ -55,8 +55,8 @@ func start(t *testing.T, extraEnv ...string) env {
 	t.Helper()
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
-	cfg := loadConfig(t, "https://mcp.example.com/mcp", append([]string{"BYWARD_UPSTREAM_URL=" + up.URL + "/mcp", "BYWARD_ALLOWED_ORIGINS=https://app.example"},
-		extraEnv...)...)
+	extra := append([]string{"BYWARD_UPSTREAM_URL=" + up.URL + "/mcp", "BYWARD_ALLOWED_ORIGINS=https://app.example"}, extraEnv...)
+	cfg := loadConfig(t, "https://mcp.example.com/mcp", extra...)
 	logs := &logsink.Buffer{}
 	log := slog.New(slog.NewJSONHandler(logs, nil))
 	srv := httptest.NewServer(Handler(cfg, log, httpUpstream(cfg, log), acceptGood{}, nil, nil, Observability{Audit: audit.New(log, nil, time.Now)}))
@@ -913,12 +913,8 @@ func TestReadinessIsKeysAndStoreOnly(t *testing.T) {
 // The wired broker shows the consent page with the operator's wording and accepts an answer that
 // carries the public origin: a wrong Origin wiring would refuse every real Allow.
 func TestTheServerShowsTheOperatorsConsentPageAndDenyReturnsToTheApp(t *testing.T) {
-	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp",
+	cfg := loadConfig(t, "https://mcp.example.com/mcp",
 		"BYWARD_OPERATOR_NAME=Contoso IT", "BYWARD_SCOPE_DESCRIPTION=Read your dashboards.", "BYWARD_RESOURCE_NAME=Team dashboards")
-	cfg, _, err := config.Load(nil, env, os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
 	s, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -983,11 +979,7 @@ func TestNewWarnsAboutGenericWordingOnlyWithoutAScopeDescription(t *testing.T) {
 		{"a scope description is quiet", []string{"BYWARD_SCOPE_DESCRIPTION=Read your dashboards."}, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
-			cfg, _, err := config.Load(nil, append(env, c.extra...), os.ReadFile)
-			if err != nil {
-				t.Fatal(err)
-			}
+			cfg := loadConfig(t, "https://mcp.example.com/mcp", c.extra...)
 			logs := &logsink.Buffer{}
 			if _, err := New(cfg, slog.New(slog.NewJSONHandler(logs, nil))); err != nil {
 				t.Fatal(err)
