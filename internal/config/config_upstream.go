@@ -36,8 +36,8 @@ func (c *Config) upstream(v *Values) []error {
 		c.UpstreamURL = u
 		return errs
 	}
-	if v.get("upstream-url") != "" {
-		errs = append(errs, errorf("%s and %s are both set: an upstream is either HTTP or stdio", urlEnv, cmdEnv))
+	if v.get("upstream-url") != "" { // no mode chosen, so neither mode's settings are read
+		return []error{errorf("%s and %s are both set: an upstream is either HTTP or stdio", urlEnv, cmdEnv)}
 	}
 	if v.command != nil {
 		c.UpstreamCommand = append([]string(nil), v.command...)
