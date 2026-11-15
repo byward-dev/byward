@@ -126,23 +126,6 @@ func TestADeniedHostMatchesEverySpellingTheBrowserGoesTo(t *testing.T) {
 	}
 }
 
-// BrowserHost is the ASCII name a browser goes to, the form both the denylist and the consent page
-// compare and show.
-func TestBrowserHostIsTheASCIINameABrowserGoesTo(t *testing.T) {
-	for host, want := range map[string]string{
-		"App.Example.":          "app.example",
-		"BÜCHER.example":        "xn--bcher-kva.example",
-		"ａｐｐ。example":           "app.example",
-		"ｍｙ_app.example":        "my_app.example",
-		"xn--bcher-kva.example": "xn--bcher-kva.example",
-		"127.0.0.1":             "127.0.0.1",
-	} {
-		if got := BrowserHost(host); got != want {
-			t.Errorf("BrowserHost(%q) = %q, want %q", host, got, want)
-		}
-	}
-}
-
 // A denied CIMD client is unknown, with the reason for the operator log, before its document is
 // fetched; another document on the same host still resolves.
 func TestADeniedCIMDClientIsUnknownWithoutAFetch(t *testing.T) {

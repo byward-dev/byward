@@ -179,6 +179,10 @@ func TestOtherSiteComparesRegistrableDomains(t *testing.T) {
 		{"198.51.3.4", "https://203.0.3.4/cb", true}, // the default suffix rule would make both "3.4"
 		{"2001:db8::1", "https://[2001:db8::1]/cb", false},
 		{"claude.ai", "://bad", true},
+		// The site of the name the browser goes to (registration.BrowserHost).
+		{"claude.ai", "https://ｃｌａｕｄｅ.ai/cb", false},
+		{"xn--bcher-kva.example", "https://BÜCHER.example/cb", false},
+		{"claude.ai", "https://ｅｖｉｌ.example/cb", true},
 	} {
 		if got := otherSite(c.cimd, c.redirect); got != c.other {
 			t.Errorf("otherSite(%q, %q) = %v, want %v", c.cimd, c.redirect, got, c.other)
@@ -190,6 +194,12 @@ func TestThePublisherIsShownReadably(t *testing.T) {
 	for in, want := range map[string]string{
 		"claude.ai":             "claude.ai",
 		"xn--bcher-kva.example": "bücher.example (xn--bcher-kva.example)",
+		// The ASCII name beside is the one the browser goes to: "_" and "--" names map as the browser
+		// maps them, not to a punycode of the full-width spelling.
+		"ｍｙ_app.example":  "ｍｙ_app.example (my_app.example)",
+		"ＡＢ--c.example":   "ＡＢ--c.example (ab--c.example)",
+		"bü_cher.example": "bü_cher.example (xn--b_cher-3ya.example)",
+		"xn--.example":    "xn--.example",
 	} {
 		if got := showHost(in); got != want {
 			t.Errorf("showHost(%q) = %q, want %q", in, got, want)

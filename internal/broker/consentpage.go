@@ -137,20 +137,16 @@ func returnsTo(redirect string) (string, bool) {
 }
 
 // showHost names a host as the user reads it: a host that is not plain ASCII is shown as written
-// (minus invisible characters) with the ASCII name the browser will really use beside it, and an
-// xn-- name with its Unicode spelling beside it (ADR-0010 §4).
+// (minus invisible characters) with the ASCII name the browser will really use beside it
+// (registration.BrowserHost, which the denylist matches by too), and an xn-- name with its Unicode
+// spelling beside it (ADR-0010 §4).
 func showHost(host string) string {
-	ascii, err := idna.Lookup.ToASCII(host)
-	if err != nil {
-		if ascii, err = idna.Punycode.ToASCII(host); err != nil {
-			return displayName(host, "?")
-		}
-	}
+	ascii := registration.BrowserHost(host)
 	// "xn--" decodes to an empty label: there is no real host to name.
-	if strings.Contains("."+ascii+".", "..") && !strings.Contains("."+host+".", "..") {
+	if ascii == "" || strings.Contains("."+ascii+".", "..") && !strings.Contains("."+host+".", "..") {
 		return displayName(host, "?")
 	}
-	if ascii == strings.ToLower(host) {
+	if ascii == strings.TrimSuffix(strings.ToLower(host), ".") { // plain ASCII as written
 		if uni, err := idna.Lookup.ToUnicode(ascii); err == nil && uni != ascii {
 			return uni + " (" + ascii + ")"
 		}
@@ -177,8 +173,10 @@ func otherSite(cimdHost, redirect string) bool {
 	return site(cimdHost) != site(u.Hostname())
 }
 
+// site is host's registrable domain, from the name the browser goes to (registration.BrowserHost), so
+// a full-width or Unicode spelling of a CIMD host's site is that site.
 func site(host string) string {
-	host = strings.ToLower(host)
+	host = registration.BrowserHost(host)
 	if net.ParseIP(host) != nil {
 		return host // the public suffix list's default rule would make 203.0.113.7 "113.7"
 	}
