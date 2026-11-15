@@ -820,20 +820,34 @@ func TestCORSAndMethods(t *testing.T) {
 	}
 }
 
-// /token and /revoke read at most 64 KiB of form before they authenticate the client.
-func TestTokenAndRevokeRefuseABodyOver64KiB(t *testing.T) {
+// /token and /revoke read at most 64 KiB of form before they authenticate the client, and a form
+// under that is read in full.
+func TestTokenAndRevokeReadAFormOfUpTo64KiB(t *testing.T) {
+	const unreadable = "the request body is not a valid form"
 	e := newEnv(t)
-	form := url.Values{"grant_type": {"refresh_token"}, "client_id": {clientID}, "token": {"x"}, "pad": {strings.Repeat("A", 64<<10)}}
-	for _, path := range []string{"/token", "/revoke"} {
-		t.Run(path[1:], func(t *testing.T) {
-			res := e.do(t, "POST", path, form, nil)
-			var body map[string]any
-			_ = json.NewDecoder(res.Body).Decode(&body)
-			wantOAuthError(t, res, body, http.StatusBadRequest, "invalid_request")
-			if d, _ := body["error_description"].(string); !strings.HasPrefix(d, "the request body is not a valid form") {
-				t.Fatalf("error_description %q, want the unreadable-form refusal", d)
-			}
-		})
+	for _, c := range []struct {
+		name    string
+		pad     int
+		refused bool
+	}{
+		{"under 64 KiB", 60 << 10, false},
+		{"over 64 KiB", 64 << 10, true},
+	} {
+		form := url.Values{"grant_type": {"refresh_token"}, "client_id": {clientID}, "token": {"x"}, "pad": {strings.Repeat("A", c.pad)}}
+		for _, path := range []string{"/token", "/revoke"} {
+			t.Run(c.name+path, func(t *testing.T) {
+				res := e.do(t, "POST", path, form, nil)
+				var body map[string]any
+				_ = json.NewDecoder(res.Body).Decode(&body)
+				d, _ := body["error_description"].(string)
+				if c.refused {
+					wantOAuthError(t, res, body, http.StatusBadRequest, "invalid_request")
+				}
+				if strings.HasPrefix(d, unreadable) != c.refused {
+					t.Fatalf("%d %q, want the unreadable-form refusal: %t", res.StatusCode, d, c.refused)
+				}
+			})
+		}
 	}
 }
 
