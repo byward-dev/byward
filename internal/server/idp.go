@@ -290,7 +290,10 @@ func diagnoseDiscovery(ctx context.Context, p idp.Readiness, issuer string) []do
 	r := doctor.CheckDiscovery.NewResult()
 	if err := p.Ready(ctx); err != nil {
 		r.Status, r.Message = doctor.Fail, "the IdP's discovery document at "+issuer+" failed: "+err.Error()
-		r.Fix = "BYWARD_OIDC_ISSUER: set it exactly as the IdP's discovery document states its issuer, over https"
+		r.Fix = "BYWARD_OIDC_ISSUER: set it exactly as the IdP's discovery document states its issuer"
+		if !strings.HasPrefix(issuer, "http://") { // an http issuer is allowed on loopback under --dev only
+			r.Fix += ", over https"
+		}
 		return []doctor.Result{r}
 	}
 	r.Status, r.Message = doctor.Pass, "discovery at "+issuer+" matches the configured issuer"

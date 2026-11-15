@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -225,9 +226,49 @@ func TestDoctorNamesTheSettingsInFixes(t *testing.T) {
 func TestDoctorWithoutAuthChecksOnlyTheUpstreamAndTheTrustStoreAndWarns(t *testing.T) {
 	cfg := loadNoAuthConfig(t, "http://u/mcp")
 	rep, err := Doctor(context.Background(), cfg, DoctorOptions{Proxy: &http.Client{Transport: refuse{}}})
-	if err != nil || len(rep.Checks) != 3 || rep.Checks[0].Name != "upstream" || rep.Checks[1].Name != "trust store" || rep.Checks[2].Name != "authentication" || rep.Checks[2].Status != doctor.Warn ||
-		!strings.Contains(rep.Checks[2].Message, "authentication is off") || rep.ExitCode() != 0 {
-		t.Fatalf("report %+v, err %v", rep, err)
+	var names []string
+	for _, c := range rep.Checks {
+		names = append(names, c.Name)
+	}
+	last := rep.Checks[len(rep.Checks)-1]
+	if err != nil || !slices.Equal(names, []string{"configuration", "configuration", "upstream", "trust store", "authentication"}) ||
+		last.Status != doctor.Warn || !strings.Contains(last.Message, "authentication is off") || rep.ExitCode() != 0 {
+		t.Fatalf("checks %v, report %+v, err %v; want the two relaxations, then upstream, trust store and authentication", names, rep, err)
+	}
+}
+
+// doctor lists each relaxation as startup and check do (L158), with and without authentication:
+// its JSON is the monitoring view, which otherwise cannot show that a safety check is off.
+func TestDoctorListsEveryRelaxationAsAWarning(t *testing.T) {
+	r := runProxy(t)
+	withAuth, err := Doctor(context.Background(), r.cfg, DoctorOptions{IdP: r.fake.HTTPClient()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	noAuth, err := Doctor(context.Background(), loadNoAuthConfig(t, "http://u/mcp"), DoctorOptions{Proxy: &http.Client{Transport: refuse{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		rep  doctor.Report
+		want []string
+	}{
+		"with authentication (--dev)":                 {withAuth, []string{"relaxation: secret file permissions are not checked", "relaxation: http public URL on loopback"}},
+		"without authentication (--insecure-no-auth)": {noAuth, []string{"relaxation: http public URL on loopback", "relaxation: AUTHENTICATION IS OFF"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, want := range tc.want {
+				found := false
+				for _, c := range tc.rep.Checks {
+					if c.Name == "configuration" && c.Status == doctor.Warn && strings.HasPrefix(c.Message, want) && strings.Contains(c.Fix, "BYWARD_DEV") {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("no configuration warning %q with a fix naming BYWARD_DEV in %+v", want, tc.rep.Checks)
+				}
+			}
+		})
 	}
 }
 

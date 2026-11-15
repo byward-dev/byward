@@ -49,6 +49,9 @@ var allowed = map[string]bool{
 	"idp_error_code": true, "trace_id": true, "correlation_id": true,
 	// IdP alerts (#204): the IdP call and the bounded reason it needs the operator.
 	"operation": true, "alert": true,
+	// Refresh at the IdP (broker): how long the IdP's tokens have left and the margin byward keeps,
+	// both durations; and how many groups an ID token carried, a count, never the group IDs.
+	"idp_token_expires_in": true, "margin": true, "groups": true,
 	// The public listener's TLS (#183): whether it is on, the certificate files' paths, and the
 	// subject and end of a newly served certificate; never the files' contents.
 	"tls": true, "cert_file": true, "key_file": true, "subject": true, "not_after": true,

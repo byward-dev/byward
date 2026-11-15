@@ -182,6 +182,22 @@ func TestGroupContentsAreDropped(t *testing.T) {
 	}
 }
 
+// The broker's refresh lines keep their values (L159): how long the IdP's tokens have left and the
+// margin, both durations, and the number of groups, a count. None is a credential.
+func TestTheRefreshDiagnosticsAreLogged(t *testing.T) {
+	var buf bytes.Buffer
+	New(&buf, "json").Warn("x", "idp_token_expires_in", "4m0s", "margin", "5m0s", "groups", 3)
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	for k, want := range map[string]any{"idp_token_expires_in": "4m0s", "margin": "5m0s", "groups": float64(3)} {
+		if got[k] != want {
+			t.Errorf("%s = %v, want %v; line %s", k, got[k], want, buf.Bytes())
+		}
+	}
+}
+
 func TestTimeIsUTC(t *testing.T) {
 	var buf bytes.Buffer
 	New(&buf, "json").Info("x")
