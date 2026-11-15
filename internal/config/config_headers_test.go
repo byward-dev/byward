@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net/textproto"
 	"strings"
 	"testing"
 )
@@ -23,8 +24,10 @@ func TestAReservedHeaderIsRefusedInEitherSpellingByEverySettingThatSetsOne(t *te
 			for _, name := range []string{h, strings.ReplaceAll(h, "-", "_")} {
 				t.Run(s.env+"="+name, func(t *testing.T) {
 					_, err := loadCred(t, nil, "k-123", append(s.extra, s.env+"="+name)...)
-					if err == nil || !strings.Contains(err.Error(), s.env+": ") || !strings.Contains(err.Error(), "relies on") {
-						t.Fatalf("err = %v; want %s=%s refused as a header the proxy, the transport or MCP relies on", err, s.env, name)
+					// The operator's own spelling, as config names it back.
+					want := s.env + ": " + textproto.CanonicalMIMEHeaderKey(name) + " is a header the proxy, the transport or MCP relies on"
+					if err == nil || !strings.Contains(err.Error(), want) {
+						t.Fatalf("err = %v, want %q", err, want)
 					}
 				})
 			}
