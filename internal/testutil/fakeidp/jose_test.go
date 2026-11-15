@@ -47,10 +47,10 @@ func TestAudContainsOnlyStringsAndJSONArrays(t *testing.T) {
 	}
 }
 
-// WithUnusableJWK serves, beside the signing key, an X448 key that a strict decode refuses and an RSA
+// WithUnusableJWKs serves, beside the signing key, an X448 key that a strict decode refuses and an RSA
 // key for encryption, the two kinds a JWKS reader must skip (RFC 7517 §5).
 func TestUnusableJWKsAreServedBesideTheSigningKey(t *testing.T) {
-	f := newFixture(t, Entra, WithUnusableJWK(true))
+	f := newFixture(t, Entra, WithUnusableJWKs(true))
 	var uses []string
 	for _, k := range f.jwks(t) {
 		use, _ := k["use"].(string)

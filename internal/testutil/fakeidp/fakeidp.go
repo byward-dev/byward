@@ -341,10 +341,10 @@ func WithClientAssertionAlgs(algs ...string) Option {
 // responses might.
 func WithEmptyJWKS(on bool) Option { return func(s *settings) { s.jwksEmpty = on } }
 
-// WithUnusableJWK adds to the JWKS two keys the proxy cannot verify a signature with, as an IdP that
+// WithUnusableJWKs adds to the JWKS two keys the proxy cannot verify a signature with, as an IdP that
 // publishes more than its signing keys might (RFC 7517 §5): an X448 OKP key, which go-jose cannot
 // parse, and an RSA key for encryption (use "enc"), which parses but signs nothing.
-func WithUnusableJWK(on bool) Option { return func(s *settings) { s.jwksUnusable = on } }
+func WithUnusableJWKs(on bool) Option { return func(s *settings) { s.jwksUnusable = on } }
 
 // WithJWKSNotAKeySet makes the JWKS endpoint answer 200 with JSON that is not a JWK Set (keys is a
 // string), as a proxy that rewrites responses might.

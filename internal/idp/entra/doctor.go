@@ -45,6 +45,7 @@ const (
 	defaultScopeSuffix    = "/.default"
 	accessTokenVersionFix = "set api.requestedAccessTokenVersion to 2 on the app registration (docs/how-to/quickstart-entra.md step 1.2)"
 	reachFix              = "check that the proxy's host can reach " + Authority + " (DNS, firewall, outbound proxy)"
+	rewriteFix            = "check that the proxy's host reaches " + Authority + " directly, not through a proxy that rewrites responses"
 )
 
 // Diagnose is doctor's Entra part (ADR-0012 §10): the tenant's discovery document and issuer, its
@@ -83,18 +84,17 @@ func (p *Provider) diagnoseTenant(ctx context.Context, d Diagnosis) doctor.Resul
 // is skipped, not a failure (RFC 7517 §5).
 func (p *Provider) diagnoseKeys(ctx context.Context) doctor.Result {
 	check := doctor.CheckEntraSigningKeys
-	rewritten := "check that the proxy's host reaches " + Authority + " directly, not through a proxy that rewrites responses"
 	var raw json.RawMessage
 	if err := p.fetch.GetJSON(ctx, p.endpoint("/discovery/v2.0/keys"), &raw); err != nil {
 		return check.Result(doctor.Fail, "cannot fetch the tenant's signing keys: "+err.Error(), reachFix)
 	}
 	set, err := idp.ParseJWKS(raw)
 	if err != nil { // JSON, but not a key set
-		return check.Result(doctor.Fail, "the tenant's key set is not a JWK Set: "+err.Error(), rewritten)
+		return check.Result(doctor.Fail, "the tenant's key set is not a JWK Set: "+err.Error(), rewriteFix)
 	}
 	n := idp.SigningKeys(set)
 	if n == 0 {
-		return check.Result(doctor.Fail, "the tenant's key set has no signing key", rewritten)
+		return check.Result(doctor.Fail, "the tenant's key set has no signing key", rewriteFix)
 	}
 	return check.Result(doctor.Pass, fmt.Sprintf("the tenant's key set has %d signing key(s)", n), "")
 }

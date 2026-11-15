@@ -111,7 +111,7 @@ func TestDiagnoseReportsEachMisconfigurationWithItsFix(t *testing.T) {
 		{name: "key set that is not a JWK Set", opts: []fakeidp.Option{fakeidp.WithJWKSNotAKeySet(true)},
 			check: "entra signing keys", status: doctor.Fail, inMessage: "is not a JWK Set", inFix: "rewrites responses"},
 		// RFC 7517 §5: a key the proxy cannot use is skipped, as at sign-in (idp.ParseJWKS), not a failure.
-		{name: "key set with a key the proxy cannot use", opts: []fakeidp.Option{fakeidp.WithUnusableJWK(true)},
+		{name: "key set with a key the proxy cannot use", opts: []fakeidp.Option{fakeidp.WithUnusableJWKs(true)},
 			check: "entra signing keys", status: doctor.Pass, inMessage: "has 1 signing key"},
 		{name: "client ID of no app", setup: func(t *testing.T, e *env) { rebuild(t, e, func(c *Config) { c.ClientID = fakeidp.NewGUID() }) },
 			check: "entra app and credential", status: doctor.Fail, inMessage: "AADSTS700016", inFix: "set CLIENT_ID_SETTING"},

@@ -56,8 +56,10 @@ type Error struct {
 	// default); OperatorHint names the fix.
 	UserMessage  string
 	OperatorHint string
-	Description  string
-	Err          error
+	// Description is the IdP's error_description. Nothing logs or shows it (ADR-0021 §7); it is
+	// kept so tests can assert that.
+	Description string
+	Err         error
 }
 
 func (e *Error) Error() string {
