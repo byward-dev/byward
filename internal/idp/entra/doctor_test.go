@@ -93,19 +93,23 @@ func TestDiagnoseReportsEachMisconfigurationWithItsFix(t *testing.T) {
 		check     string
 		status    doctor.Status
 		inMessage string
-		inFix     string
-		appRoles  []string // app-only tokens on with these roles
+		// cause, when set, is the end of the underlying error, which the message must show as well.
+		cause    string
+		inFix    string
+		appRoles []string // app-only tokens on with these roles
 	}{
 		{name: "tenant that does not exist", opts: []fakeidp.Option{fakeidp.WithUnknownTenantsRefused(true)},
 			setup: func(t *testing.T, e *env) { rebuild(t, e, func(c *Config) { c.Tenant = fakeidp.NewGUID() }) },
-			check: "entra tenant", status: doctor.Fail, inMessage: "no discovery document", inFix: "set TENANT_SETTING to your tenant ID"},
+			check: "entra tenant", status: doctor.Fail, inMessage: "no discovery document for tenant ",
+			cause: "/v2.0/.well-known/openid-configuration: status 400", inFix: "set TENANT_SETTING to your tenant ID"},
 		{name: "tenant that does not exist, at the token endpoint", opts: []fakeidp.Option{fakeidp.WithUnknownTenantsRefused(true)},
 			setup: func(t *testing.T, e *env) { rebuild(t, e, func(c *Config) { c.Tenant = fakeidp.NewGUID() }) },
 			check: "entra app and credential", status: doctor.Fail, inMessage: "AADSTS90002", inFix: "set TENANT_SETTING"},
 		{name: "discovery names another issuer", opts: []fakeidp.Option{fakeidp.WithAuthority("https://login.example.net")},
 			check: "entra tenant", status: doctor.Fail, inMessage: "names issuer", inFix: "TENANT_SETTING"},
 		{name: "signing keys unavailable", opts: []fakeidp.Option{fakeidp.WithJWKSUnavailable(true)},
-			check: "entra signing keys", status: doctor.Fail, inMessage: "cannot fetch", inFix: "can reach " + Authority},
+			check: "entra signing keys", status: doctor.Fail, inMessage: "cannot fetch the tenant's signing keys: ",
+			cause: "/discovery/v2.0/keys: status 503", inFix: "can reach " + Authority},
 		{name: "key set without a signing key", opts: []fakeidp.Option{fakeidp.WithEmptyJWKS(true)},
 			check: "entra signing keys", status: doctor.Fail, inMessage: "no signing key", inFix: "rewrites responses"},
 		{name: "key set that is not a JWK Set", opts: []fakeidp.Option{fakeidp.WithJWKSNotAKeySet(true)},
@@ -157,8 +161,8 @@ func TestDiagnoseReportsEachMisconfigurationWithItsFix(t *testing.T) {
 			d := diagnosis
 			d.AppRoles = tc.appRoles
 			r := diagnose(t, e.p, d)[tc.check]
-			if r.Status != tc.status || !strings.Contains(r.Message, tc.inMessage) || !strings.Contains(r.Fix, tc.inFix) {
-				t.Fatalf("%s = %+v\nwant status %s, message with %q, fix with %q", tc.check, r, tc.status, tc.inMessage, tc.inFix)
+			if r.Status != tc.status || !strings.Contains(r.Message, tc.inMessage) || !strings.Contains(r.Message, tc.cause) || !strings.Contains(r.Fix, tc.inFix) {
+				t.Fatalf("%s = %+v\nwant status %s, message with %q and %q, fix with %q", tc.check, r, tc.status, tc.inMessage, tc.cause, tc.inFix)
 			}
 		})
 	}
