@@ -3,7 +3,6 @@ package broker
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -296,12 +295,7 @@ func (e *env) doBasic(t *testing.T, path string, body url.Values, user string) *
 
 const verifier = "verifier-0123456789-0123456789-0123456789-abc"
 
-func challengeFor(v string) string {
-	s := sha256.Sum256([]byte(v))
-	return base64.RawURLEncoding.EncodeToString(s[:])
-}
-
-func challenge() string { return challengeFor(verifier) }
+func challenge() string { return fakeidp.CodeChallenge(verifier) }
 
 var titleRE = regexp.MustCompile(`<title>(.*?)</title>`)
 
@@ -754,6 +748,51 @@ func TestMetadataAdvertisesTheBroker(t *testing.T) {
 	}
 }
 
+// The metadata advertises what registration accepts, and only that: the client assertion algorithms,
+// the methods a CIMD or DCR client may use at /token and /revoke (never a secret, ADR-0006 §7), and
+// the grant types.
+func TestMetadataAdvertisesWhatRegistrationAccepts(t *testing.T) {
+	e := newEnv(t)
+	res := e.do(t, "GET", "/.well-known/oauth-authorization-server", nil, nil)
+	var md struct {
+		Algs    []string `json:"token_endpoint_auth_signing_alg_values_supported"`
+		Methods []string `json:"token_endpoint_auth_methods_supported"`
+		Revoke  []string `json:"revocation_endpoint_auth_methods_supported"`
+		Grants  []string `json:"grant_types_supported"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&md); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		field     string
+		got, want []string
+	}{
+		{"token_endpoint_auth_signing_alg_values_supported", md.Algs, []string{"RS256", "PS256", "ES256"}},
+		{"token_endpoint_auth_methods_supported", md.Methods, []string{"none", "private_key_jwt"}},
+		{"revocation_endpoint_auth_methods_supported", md.Revoke, []string{"none", "private_key_jwt"}},
+		{"grant_types_supported", md.Grants, []string{"authorization_code", "refresh_token"}},
+	} {
+		if !slices.Equal(c.got, c.want) {
+			t.Errorf("%s = %v, want %v", c.field, c.got, c.want)
+		}
+	}
+}
+
+// /token serves every grant type registration supports (and the metadata advertises): a grant type
+// added there without a /token handler would be advertised and then refused. Sent without a code or
+// refresh token, each reaches its handler, which refuses it as invalid_grant.
+func TestTokenServesEveryGrantTypeRegistrationSupports(t *testing.T) {
+	e := newEnv(t)
+	for _, g := range registration.GrantTypes() {
+		res := e.do(t, "POST", "/token", url.Values{"grant_type": {g}, "client_id": {clientID}}, nil)
+		var body map[string]any
+		_ = json.NewDecoder(res.Body).Decode(&body)
+		if res.StatusCode != http.StatusBadRequest || body["error"] != "invalid_grant" {
+			t.Errorf("grant_type=%s: %d %v, want 400 invalid_grant from its handler", g, res.StatusCode, body)
+		}
+	}
+}
+
 func TestCORSAndMethods(t *testing.T) {
 	const md, origin = "/.well-known/oauth-authorization-server", "https://app.example"
 	cases := []struct {
@@ -858,7 +897,7 @@ func TestPKCE(t *testing.T) {
 	}
 	for n, want := range map[int]bool{42: false, 43: true, 128: true, 129: false} {
 		v := strings.Repeat("a", n)
-		if got := pkceMatches(v, challengeFor(v)); got != want {
+		if got := pkceMatches(v, fakeidp.CodeChallenge(v)); got != want {
 			t.Errorf("verifier of %d characters: matches=%v, want %v", n, got, want)
 		}
 	}
@@ -892,13 +931,21 @@ func TestFailedBindingAfterConsumeRevokesTheGrant(t *testing.T) {
 	}
 }
 
+// A store outage at any step of a code redemption (spending the code, extending the grant, storing
+// the refresh token) is a server error, not the client's fault.
 func TestStoreOutageAtRedemptionIsAServerError(t *testing.T) {
-	e := newEnv(t)
-	code := e.signIn(t, nil).Query().Get("code")
-	e.st.Fail(errors.New("database is locked"), "ConsumeCode") // code redemption fails like an outage would
-	res, body := e.redeem(t, code, nil)
-	if res.StatusCode != 500 || body["error"] != "server_error" {
-		t.Fatalf("got %d %v", res.StatusCode, body)
+	for _, c := range []struct{ step, method string }{
+		{"spending the code", "ConsumeCode"}, {"extending the grant", "UpdateGrant"}, {"storing the refresh token", "PutRefreshToken"},
+	} {
+		t.Run(c.step, func(t *testing.T) {
+			e := newEnv(t)
+			code := e.signIn(t, url.Values{"scope": {"mcp offline_access"}}).Query().Get("code")
+			e.st.Fail(errors.New("database is locked"), c.method)
+			res, body := e.redeem(t, code, nil)
+			if res.StatusCode != 500 || body["error"] != "server_error" {
+				t.Fatalf("got %d %v", res.StatusCode, body)
+			}
+		})
 	}
 }
 
@@ -1034,7 +1081,8 @@ func TestReusedCodeIsAuditedAsARevocation(t *testing.T) {
 }
 
 // ADR-0021 §2, §7: our request ID reaches Entra as client-request-id, comes back as correlation_id,
-// and the failure is logged with the IdP's error code, trace ID and correlation ID.
+// and the failure is logged with the IdP's error code, trace ID and correlation ID, never its
+// error_description.
 func TestIdPFailureIsAuditedAndCorrelatesWithTheIdP(t *testing.T) {
 	e := newEnv(t)
 	f := fakeidp.InvalidClientSecret // AADSTS7000215; invalid_client counts as unavailable (ADR-0011)
@@ -1047,6 +1095,9 @@ func TestIdPFailureIsAuditedAndCorrelatesWithTheIdP(t *testing.T) {
 		if !strings.Contains(e.logs.String(), want) {
 			t.Errorf("the IdP failure log lacks %s (our request ID must come back as Entra's correlation_id): %s", want, e.logs.String())
 		}
+	}
+	if strings.Contains(e.logs.String(), f.Description) { // ADR-0021 §7: it may carry user identifiers
+		t.Errorf("the IdP's error_description %q reached the log: %s", f.Description, e.logs.String())
 	}
 	if want := "callback unavailable"; len(e.idpOps) != 2 || e.idpOps[1] != want {
 		t.Fatalf("IdP observations = %v, want the callback to be %q", e.idpOps, want)

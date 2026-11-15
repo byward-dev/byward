@@ -60,6 +60,10 @@ func (p *IdP) jwks(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
+	if p.cfg.jwksNotASet {
+		writeJSON(w, http.StatusOK, map[string]any{"keys": "not a key list"})
+		return
+	}
 	issuer := ""
 	if p.profile == Entra {
 		tenant, ok := p.tenantSegment(w, r)
@@ -74,6 +78,11 @@ func (p *IdP) jwks(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		keys = append(keys, k.jwk(issuer))
+	}
+	if p.cfg.jwksUnusable && len(p.keys) > 0 {
+		enc := p.keys[0].jwk(issuer) // a key that parses, but is not for signatures
+		enc["use"], enc["kid"] = "enc", "encryption"
+		keys = append(keys, map[string]any{"kty": "OKP", "crv": "X448", "kid": "unusable", "x": "AAAA"}, enc)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"keys": keys})
 }

@@ -65,6 +65,29 @@ func TestErrorStringOmitsDescription(t *testing.T) {
 	}
 }
 
+// ADR-0021 §7: an operator's log line carries the IdP's error code and trace IDs only when the IdP
+// sent them, and never the error_description.
+func TestLogAttrsAreTheIdentifiersTheIdPSent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  Error
+		want []any
+	}{
+		{"all three", Error{Code: 7000215, TraceID: "t", CorrelationID: "c", Description: "AADSTS7000215: secret"},
+			[]any{"idp_error_code", 7000215, "trace_id", "t", "correlation_id", "c"}},
+		{"only a code", Error{Code: 65001}, []any{"idp_error_code", 65001}},
+		{"only a trace ID", Error{OAuth: "interaction_required", TraceID: "t"}, []any{"trace_id", "t"}},
+		{"only a correlation ID", Error{CorrelationID: "c"}, []any{"correlation_id", "c"}},
+		{"none", Error{Class: Unavailable, Description: "down"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.err.LogAttrs(); !slices.Equal(got, tc.want) {
+				t.Fatalf("LogAttrs() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestClassOfUnwrapsAndDefaultsToFatal(t *testing.T) {
 	if ClassOf(fmt.Errorf("wrap: %w", &Error{Class: SignInAgain})) != SignInAgain || ClassOf(errors.New("x")) != Fatal {
 		t.Error("ClassOf does not unwrap")

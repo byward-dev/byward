@@ -177,6 +177,43 @@ func TestTheGuardedHTTPClientRefusesPrivateAddresses(t *testing.T) {
 	}
 }
 
+// RefusedAddress is the guard refusing an address or port, a definite answer, for an error from Get
+// (ErrRefused) or from HTTPClient (go-ssrf's own error, for an address or a port: a jwks_uri may
+// name any port), and nothing else. The guard refuses before connecting.
+func TestRefusedAddressIsTheGuardsRefusalAlone(t *testing.T) {
+	f := New(Config{})
+	_, fromGet := f.Get(context.Background(), "https://127.0.0.1:8443/doc", 1024)
+	clientGet := func(u string) error {
+		res, err := f.HTTPClient().Get(u)
+		if err == nil {
+			_ = res.Body.Close()
+		}
+		return err
+	}
+	// Each refusal is of the kind its row names: 127.0.0.1:8443 is both, and go-ssrf names the port.
+	port, address := clientGet("https://127.0.0.1:8443/jwks"), clientGet("https://127.0.0.1/jwks")
+	if !errors.Is(port, ssrf.ErrProhibitedPort) || !errors.Is(address, ssrf.ErrProhibitedIP) {
+		t.Fatalf("HTTPClient refusals: port %v, address %v; want go-ssrf's port and address refusals", port, address)
+	}
+	for name, tc := range map[string]struct {
+		err  error
+		want bool
+	}{
+		"Get refusing a URL's port":      {fromGet, true}, // before any dial
+		"HTTPClient refusing a port":     {port, true},
+		"HTTPClient refusing an address": {address, true},
+		"a body over the limit":          {ErrTooLarge, false},
+		"another failure":                {errors.New("connection reset"), false},
+		"no error":                       {nil, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := RefusedAddress(tc.err); got != tc.want {
+				t.Errorf("RefusedAddress(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
 // A server that stalls times the fetch out (transient), and the error never carries the query:
 // the HTTP client puts the full request URL in a fetch error, which the guard shows as logs may
 // (logging.URLError), and a body read error quotes none.

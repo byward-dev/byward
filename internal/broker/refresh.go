@@ -149,7 +149,7 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 			return nil, assertedClaims{}, time.Time{}, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the identity provider is unavailable; try again"}, false
 		default:
 			b.cfg.Log.ErrorContext(ctx, "IdP refresh failed", append([]any{"error", err}, fixAttr(err)...)...)
-			return nil, assertedClaims{}, time.Time{}, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not refresh the sign-in"}, false
+			return nil, assertedClaims{}, time.Time{}, cannotRefresh, false
 		}
 	}
 	switch {
@@ -163,7 +163,6 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 	if fresh.RefreshToken == "" {
 		fresh.RefreshToken = old.RefreshToken // the IdP kept its refresh token (idp.Refresher)
 	}
-	failed := tokenError{http.StatusInternalServerError, "server_error", "the proxy could not refresh the sign-in"}
 	if err := b.cfg.Gate.Allow(ctx, *id); err != nil {
 		var d Denial
 		if !errors.As(err, &d) {
@@ -173,7 +172,7 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 			b.cfg.Log.ErrorContext(ctx, "the access gate could not decide on refresh", "error", err)
 			// The claims stay as they were: the gate has not approved the new identity.
 			sealed, _ := b.sealIdPTokens(ctx, g, fresh, held.Claims) // nil when sealing fails: nothing to keep
-			return sealed, assertedClaims{}, time.Time{}, failed, false
+			return sealed, assertedClaims{}, time.Time{}, cannotRefresh, false
 		}
 		b.cfg.Audit.Record(r, audit.Event{Name: audit.AccessDenied, Outcome: audit.Failure, Reason: d.DeniedRule(),
 			ClientID: g.ClientID, UserKey: id.Subject, IdP: b.cfg.IdPName, GrantID: g.ID})
@@ -184,7 +183,7 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 	if err != nil {
 		// The IdP's new tokens are lost: nothing safe is left to store. With an IdP whose refresh
 		// tokens are single use, the next refresh fails and the user signs in again (#92).
-		return nil, assertedClaims{}, time.Time{}, failed, false
+		return nil, assertedClaims{}, time.Time{}, cannotRefresh, false
 	}
 	return sealed, asserted, fresh.Expiry, tokenError{}, true
 }
@@ -237,6 +236,9 @@ func narrowScopes(requested string, granted []string) ([]string, bool) {
 type redirectDenier interface {
 	Denied() bool
 }
+
+// cannotRefresh answers a refresh that failed on the proxy's side, the IdP's renewal or the gate.
+var cannotRefresh = tokenError{http.StatusInternalServerError, "server_error", "the proxy could not refresh the sign-in"}
 
 // reasonRefreshReused is the grant_revoked reason for a refresh token presented again after its
 // rotation, outside the grace window.

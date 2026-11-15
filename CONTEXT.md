@@ -178,3 +178,12 @@ _Avoid_: TLS cert (alone), ingress certificate
 - The MCP spec says "upstream API" (security considerations, token passthrough) for what we call a
   **downstream API**; in this repo **upstream** is always the MCP server behind the proxy. When
   quoting the spec, keep its words and add the mapping.
+
+- "Assertion" alone means three things; say which. The **identity assertion** is the JWT the proxy
+  signs for an HTTP **upstream**. A client assertion is the RFC 7523 JWT a client authenticates
+  with (`private_key_jwt`): an **MCP client**'s at the **broker**, or the proxy's own at the **IdP**.
+  The On-Behalf-Of request sends the **user**'s **IdP token** in a parameter the protocol names
+  `assertion`; in prose and code it is the IdP token. Keep `assertion` only where a protocol names it.
+
+- "Issuer" alone is the **broker**'s: the origin of `BYWARD_PUBLIC_URL`, the `iss` of every
+  **identity assertion**. The IdP's is the **IdP issuer**, the `iss` of its ID tokens.

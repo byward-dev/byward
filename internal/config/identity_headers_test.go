@@ -16,9 +16,13 @@ func TestPlainIdentityHeadersAreOffUntilSetTrue(t *testing.T) {
 	if c, err = load(t, nil, "BYWARD_IDENTITY_HEADERS=true"); err != nil || !c.IdentityHeaders {
 		t.Fatalf("BYWARD_IDENTITY_HEADERS=true: on %v, err %v", c != nil && c.IdentityHeaders, err)
 	}
+	// A bare flag turns it on, as for every other boolean setting.
+	if c, err = load(t, []string{"--identity-headers"}); err != nil || !c.IdentityHeaders {
+		t.Fatalf("--identity-headers: on %v, err %v", c != nil && c.IdentityHeaders, err)
+	}
 }
 
-// The plain identity headers need an authenticated user and an HTTP upstream, and a boolean.
+// The plain identity headers need an authenticated user and an HTTP upstream.
 func TestPlainIdentityHeadersRefuseWhatCannotWork(t *testing.T) {
 	entra := []string{"BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_ENTRA_TENANT=00000000-0000-0000-0000-000000000001",
 		"BYWARD_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002", "BYWARD_ENTRA_CLIENT_SECRET_FILE=/run/secrets/entra"}
@@ -33,8 +37,6 @@ func TestPlainIdentityHeadersRefuseWhatCannotWork(t *testing.T) {
 			"BYWARD_INSECURE_NO_AUTH cannot be combined with BYWARD_IDENTITY_HEADERS: remove one of them"},
 		{"a stdio upstream", []string{"--", "/usr/local/bin/server"}, append(entra, "BYWARD_IDENTITY_HEADERS=true"),
 			"BYWARD_IDENTITY_HEADERS is for an HTTP upstream; a stdio upstream gets the user in its environment"},
-		{"not a boolean", nil, append(append([]string{}, base...), "BYWARD_IDENTITY_HEADERS=yes please"),
-			"BYWARD_IDENTITY_HEADERS: want true or false, got \"yes please\""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, _, err := Load(tc.args, tc.env, baseFiles); err == nil || !strings.Contains(err.Error(), tc.inErr) {

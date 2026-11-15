@@ -95,6 +95,16 @@ type Values struct {
 // get returns the raw value of a setting.
 func (v *Values) get(name string) string { return v.byKey[name].Raw }
 
+// boolean reads a true/false setting. Every setting read this way must be Bool in the registry, so a
+// bare --name means true (TestBooleanSettingsAreExactlyTheBoolFlags, TestEveryBooleanReadIsOfABoolFlag).
+func (v *Values) boolean(name string) (bool, error) {
+	b, err := strconv.ParseBool(v.get(name))
+	if err != nil {
+		return false, errorf("%s: want true or false, got %q", Setting{Name: name}.Env(), v.get(name))
+	}
+	return b, nil
+}
+
 // Effective lists every setting with its source, in registry order.
 func (v *Values) Effective() []Value {
 	out := make([]Value, 0, len(v.order))

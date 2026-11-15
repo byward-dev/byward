@@ -34,10 +34,10 @@ func (b *Broker) metadataHandler() http.Handler {
 		"grant_types_supported":    grantTypes,
 		"revocation_endpoint":      b.cfg.Issuer + "/revoke",
 		// ADR-0006 §7: like the token endpoint, secret methods are not advertised.
-		"revocation_endpoint_auth_methods_supported":       []string{"none", "private_key_jwt"},
+		"revocation_endpoint_auth_methods_supported":       registration.MetadataAuthMethods(),
 		"code_challenge_methods_supported":                 []string{"S256"},
-		"token_endpoint_auth_methods_supported":            []string{"none", "private_key_jwt"}, // ADR-0008 §1: DCR clients are never offered a secret; configured static secrets still work
-		"token_endpoint_auth_signing_alg_values_supported": []string{"RS256", "PS256", "ES256"},
+		"token_endpoint_auth_methods_supported":            registration.MetadataAuthMethods(), // ADR-0008 §1: DCR clients are never offered a secret; configured static secrets still work
+		"token_endpoint_auth_signing_alg_values_supported": registration.AssertionAlgs(),
 		// offline_access: a client MAY add it when it is listed here (MCP 2026-07-28, Refresh Tokens),
 		// as VS Code (since 1.142), the v2 SDKs and, per its docs, Claude Code do. byward issues a
 		// refresh token to any client that registered the refresh_token grant, with or without it
@@ -516,16 +516,7 @@ func (b *Broker) noteIdPFailure(r *http.Request, clientID string, err error) str
 			msg = ie.UserMessage
 		}
 		reason = "the IdP sign-in failed (" + ie.Class.String() + ")"
-		attrs := append([]any{"error", err}, fixAttr(err)...)
-		if ie.Code != 0 {
-			attrs = append(attrs, "idp_error_code", ie.Code)
-		}
-		if ie.TraceID != "" {
-			attrs = append(attrs, "trace_id", ie.TraceID)
-		}
-		if ie.CorrelationID != "" {
-			attrs = append(attrs, "correlation_id", ie.CorrelationID)
-		}
+		attrs := append(append([]any{"error", err}, fixAttr(err)...), ie.LogAttrs()...)
 		b.cfg.Log.ErrorContext(ctx, "IdP sign-in failed", attrs...)
 	} else {
 		b.cfg.Log.ErrorContext(ctx, "IdP sign-in failed", "error", err)

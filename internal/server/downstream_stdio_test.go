@@ -38,16 +38,19 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 		wantAudit    bool
 		exchanged    bool // an exchange with Entra ran: never without a user, a grant or a current sign-in
 		wantAlert    string
-		wantReason   string // the refusal line's whole reason, for an alert
+		wantReason   string   // the refusal line's whole reason, for an alert
+		wantIdP      []string // the IdP's identifiers the refusal line must carry (ADR-0021 §7)
 	}{
 		{name: "a signed-in user", wantToken: "graph-token", exchanged: true},
 		{name: "a stored token without an expiry", noExpiry: true, wantToken: "graph-token", exchanged: true},
 		{name: "an app-only caller", id: func(i stdio.Identity) stdio.Identity { i.PrincipalType = resource.PrincipalClient; return i }, wantError: "no_user"},
 		{name: "no grant yet", id: func(i stdio.Identity) stdio.Identity { i.Grant = ""; return i }, wantError: "no_user"},
+		{name: "a subject that is not an Entra user key", id: func(i stdio.Identity) stdio.Identity { i.Subject = "no-colon"; return i }, wantError: "no_user"},
 		{name: "a grant revoked or signed out since", assertionErr: store.ErrNotFound, wantError: "sign_in_expired"},
 		{name: "a grant that cannot be read", assertionErr: errors.New("the store is down"), wantError: "failed", wantAudit: true},
 		{name: "the stored IdP token has expired", expires: now.Add(-time.Second), wantError: "sign_in_expired"},
-		{name: "consent missing", exchangeErr: &idp.Error{Code: entra.CodeConsentRequired}, wantError: "consent_required", wantAudit: true, exchanged: true},
+		{name: "consent missing", exchangeErr: &idp.Error{Code: entra.CodeConsentRequired, TraceID: "trace-1", CorrelationID: "corr-1", Description: "AADSTS65001: for alice@contoso.example"},
+			wantError: "consent_required", wantAudit: true, exchanged: true, wantIdP: []string{`"idp_error_code":65001`, `"trace_id":"trace-1"`, `"correlation_id":"corr-1"`}},
 		{name: "Conditional Access", exchangeErr: &idp.Error{OAuth: entra.OAuthInteractionNeeded}, wantError: "interaction_required", wantAudit: true, exchanged: true},
 		// #204: the proxy's own credential refused needs the operator, for a process's ask as for a request.
 		{name: "the client secret has expired", exchangeErr: &idp.Error{Class: idp.Unavailable, Alert: idp.AlertCredentialRejected, OperatorHint: "AADSTS7000222: renew the secret"},
@@ -140,6 +143,21 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 				!strings.Contains(refusal, `"reason":"`+tc.wantReason+`"`) ||
 				!strings.Contains(scraped, `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="`+tc.wantAlert+`"} 1`) {
 				t.Fatalf("want one alert line, %s and reason %q on the refusal line, counted once:\n%s\n%s", tc.wantAlert, tc.wantReason, logs, scraped)
+			}
+			// ADR-0021 §7: the IdP's error code and trace IDs only when the IdP sent them, as on the
+			// sign-in line; never a zero or an empty value.
+			for _, unset := range []string{`"idp_error_code":0`, `"trace_id":""`, `"correlation_id":""`} {
+				if strings.Contains(refusal, unset) {
+					t.Fatalf("the refusal line logs %s, a field the IdP did not send: %s", unset, refusal)
+				}
+			}
+			if ie := (*idp.Error)(nil); errors.As(tc.exchangeErr, &ie) && ie.Description != "" && strings.Contains(logs.String(), ie.Description) {
+				t.Fatalf("the IdP's error_description reached the log (ADR-0021 §7): %s", logs)
+			}
+			for _, want := range tc.wantIdP {
+				if !strings.Contains(refusal, want) {
+					t.Fatalf("the refusal line lacks %s: %s", want, refusal)
+				}
 			}
 		})
 	}

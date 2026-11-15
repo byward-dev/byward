@@ -23,9 +23,9 @@ reason code. Use its `request_id` to find the request's other lines, which name 
 
 | `operation` | Other log line | Audit event |
 |---|---|---|
-| `callback` | `IdP sign-in failed`, with `idp_error_code`, `trace_id` and `correlation_id` | [`login`](../reference/observability.md#events-and-ocsf-mapping), outcome `failure` |
+| `callback` | `IdP sign-in failed`, with `idp_error_code`, `trace_id` and `correlation_id` (each when the IdP sent it) | [`login`](../reference/observability.md#events-and-ocsf-mapping), outcome `failure` |
 | `refresh` | `IdP refresh unavailable` (warn) or `IdP refresh failed` (error); its `error` names the IdP's error and code | [`token_rejected`](../reference/observability.md#events-and-ocsf-mapping), `reason` `temporarily_unavailable` or `server_error` |
-| `on_behalf_of` | the refused request's error line, with `idp_error_code` and `alert` | [`downstream_token_refused`](../reference/observability.md#events-and-ocsf-mapping) |
+| `on_behalf_of` | the error line for the refused request or stdio process's ask, with `alert`, and `idp_error_code`, `trace_id` and `correlation_id` (each when the IdP sent it) | [`downstream_token_refused`](../reference/observability.md#events-and-ocsf-mapping) |
 
 An error in the IdP's callback query never counts: a browser can forge it. Only the token
 endpoint's answer, or the proxy's own credential, raises these alerts.

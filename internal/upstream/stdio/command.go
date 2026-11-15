@@ -48,8 +48,9 @@ type Identity struct {
 	Grant, Client string
 }
 
-// user identifies the principal across IdPs and kinds: a subject is unique only within its issuer,
-// and a user never shares a process with an app.
+// user keys a principal by its principal type, issuer and subject. The issuer is the proxy's own
+// (the broker's, or the fixed one without authentication), never an IdP's; the principal type keeps
+// an app apart from a user, so a user never shares a process with an app.
 func (id Identity) user() string { return id.PrincipalType + "\x00" + id.Issuer + "\x00" + id.Subject }
 
 func (id Identity) validate() error {

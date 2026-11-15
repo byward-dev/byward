@@ -1,7 +1,5 @@
 package config
 
-import "strconv"
-
 // gate reads the access gate's lists (ADR-0015); gate.New validates them when the broker is wired.
 func (c *Config) gate(v *Values) []error {
 	var errs []error
@@ -14,8 +12,8 @@ func (c *Config) gate(v *Values) []error {
 			errs = append(errs, errorf("%s is set but lists nothing; remove it or give at least one entry", Setting{Name: s}.Env()))
 		}
 	}
-	if c.GateAllowEmpty, err = strconv.ParseBool(v.get("gate-allow-empty")); err != nil {
-		errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "gate-allow-empty"}.Env(), v.get("gate-allow-empty")))
+	if c.GateAllowEmpty, err = v.boolean("gate-allow-empty"); err != nil {
+		errs = append(errs, err)
 	}
 	return errs
 }

@@ -1,7 +1,6 @@
 package config
 
 import (
-	"strconv"
 	"strings"
 )
 
@@ -10,16 +9,16 @@ import (
 func (c *Config) clientSources(v *Values) []error {
 	var errs []error
 	var err error
-	if c.DCR, err = strconv.ParseBool(v.get("dcr")); err != nil {
-		errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "dcr"}.Env(), v.get("dcr")))
+	if c.DCR, err = v.boolean("dcr"); err != nil {
+		errs = append(errs, err)
 	}
 	if raw := v.get("client-denylist"); raw != "" {
 		if c.ClientDenylist = splitList(raw); len(c.ClientDenylist) == 0 {
 			errs = append(errs, errorf("%s is set but lists nothing; remove it or give at least one entry", Setting{Name: "client-denylist"}.Env()))
 		}
 	}
-	if c.CIMD, err = strconv.ParseBool(v.get("cimd")); err != nil {
-		errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "cimd"}.Env(), v.get("cimd")))
+	if c.CIMD, err = v.boolean("cimd"); err != nil {
+		errs = append(errs, err)
 	}
 	for _, s := range []struct {
 		name string

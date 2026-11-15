@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/netip"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -187,13 +186,12 @@ func validate(v *Values, container bool) (*Config, error) {
 	// Parsed straight into the field: --dev is read only as Config.Dev, where the guard test counts
 	// every reader (#355).
 	var err error
-	c.Dev, err = strconv.ParseBool(v.get("dev"))
-	if err != nil {
-		errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "dev"}.Env(), v.get("dev")))
+	if c.Dev, err = v.boolean("dev"); err != nil {
+		errs = append(errs, err)
 	}
-	noAuth, err := strconv.ParseBool(v.get("insecure-no-auth"))
+	noAuth, err := v.boolean("insecure-no-auth")
 	if err != nil {
-		errs = append(errs, errorf("%s: want true or false, got %q", Setting{Name: "insecure-no-auth"}.Env(), v.get("insecure-no-auth")))
+		errs = append(errs, err)
 	}
 	c.NoAuth = noAuth
 	if c.Dev {

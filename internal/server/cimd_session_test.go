@@ -1,18 +1,14 @@
 package server
 
 import (
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 
-	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/mcpsession"
 	"github.com/byward-dev/byward/internal/testutil/clientdocs"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
@@ -38,10 +34,7 @@ func TestACIMDClientSignsInAndUsesALegacySession(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}
 	t.Cleanup(up.Close)
-	cfg, _, err := config.Load(nil, append(authEnv(t), "BYWARD_PUBLIC_URL="+public+"/mcp", "BYWARD_UPSTREAM_URL="+up.URL+"/mcp"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, public+"/mcp", "BYWARD_UPSTREAM_URL="+up.URL+"/mcp")
 	a, err := buildAuth(cfg, discard, Observability{})
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +48,7 @@ func TestACIMDClientSignsInAndUsesALegacySession(t *testing.T) {
 
 	verifier := "verifier-0123456789-0123456789-0123456789-abc"
 	q := url.Values{"client_id": {doc.ClientID}, "redirect_uri": {doc.Redirect}, "response_type": {"code"}, "state": {"s"},
-		"code_challenge": {pkce(verifier)}, "code_challenge_method": {"S256"}, "scope": {"mcp"}}
+		"code_challenge": {fakeidp.CodeChallenge(verifier)}, "code_challenge_method": {"S256"}, "scope": {"mcp"}}
 	page := send(http.MethodGet, "/authorize?"+q.Encode(), nil, nil)
 	body := readAll(t, page)
 	if page.StatusCode != http.StatusOK || !strings.Contains(body, "Published by") {
@@ -123,10 +116,4 @@ func readAll(t *testing.T, res *http.Response) string {
 		t.Fatal(err)
 	}
 	return string(b)
-}
-
-// pkce is the S256 code challenge for verifier (RFC 7636 §4.2).
-func pkce(verifier string) string {
-	sum := sha256.Sum256([]byte(verifier))
-	return base64.RawURLEncoding.EncodeToString(sum[:])
 }

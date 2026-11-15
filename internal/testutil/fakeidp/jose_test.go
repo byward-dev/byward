@@ -1,8 +1,12 @@
 package fakeidp
 
 import (
+	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/go-jose/go-jose/v4"
 )
 
 func TestIsGUID(t *testing.T) {
@@ -40,5 +44,28 @@ func TestAudContainsOnlyStringsAndJSONArrays(t *testing.T) {
 		if got := audContains(tc.aud, "a"); got != tc.want {
 			t.Errorf("%s: audContains = %v, want %v", name, got, tc.want)
 		}
+	}
+}
+
+// WithUnusableJWKs serves, beside the signing key, an X448 key that a strict decode refuses and an RSA
+// key for encryption, the two kinds a JWKS reader must skip (RFC 7517 §5).
+func TestUnusableJWKsAreServedBesideTheSigningKey(t *testing.T) {
+	f := newFixture(t, Entra, WithUnusableJWKs(true))
+	var uses []string
+	for _, k := range f.jwks(t) {
+		use, _ := k["use"].(string)
+		uses = append(uses, k["kty"].(string)+":"+use)
+	}
+	if got := strings.Join(uses, " "); got != "RSA:sig OKP: RSA:enc" {
+		t.Fatalf("keys %s, want the signing key, then an OKP key and an RSA encryption key", got)
+	}
+	resp, err := http.Get(f.idp.JWKSURL(f.tenant))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var strict jose.JSONWebKeySet
+	if err := json.NewDecoder(resp.Body).Decode(&strict); err == nil {
+		t.Fatal("a strict decode accepted the set: it holds no key go-jose cannot parse")
 	}
 }

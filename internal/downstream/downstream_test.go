@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -14,7 +15,8 @@ import (
 
 var t0 = time.Unix(1_800_000_000, 0)
 
-// fakeExchange issues numbered tokens valid for life, or fails while fail is set.
+// fakeExchange issues numbered tokens valid for life, or fails while fail is set, still returning a
+// token then, which the cache must not keep.
 type fakeExchange struct {
 	mu     sync.Mutex
 	calls  int
@@ -30,7 +32,7 @@ func (f *fakeExchange) exchange(_ context.Context, tid, _ string, scopes []strin
 	f.calls++
 	f.scopes = scopes
 	if f.fail != nil {
-		return Token{}, f.fail
+		return Token{AccessToken: "beside-an-error", ExpiresAt: f.now.Add(f.life)}, f.fail
 	}
 	return Token{AccessToken: fmt.Sprintf("%s-token-%d", tid, f.calls), ExpiresAt: f.now.Add(f.life)}, nil
 }
@@ -278,4 +280,32 @@ func TestAHangingExchangeTimesOut(t *testing.T) {
 			t.Fatalf("err %v after %v, want the deadline after %v", err, time.Since(start), ExchangeTimeout)
 		}
 	})
+}
+
+// The exchange runs in the cache's own goroutine, which no HTTP handler's recover protects: one that
+// panics, or ends its goroutine without returning, is an error for the requests waiting on it, never
+// the end of the process or an empty token, and the next request exchanges again.
+func TestAnExchangeThatDoesNotReturnIsAnErrorNotACrash(t *testing.T) {
+	for name, end := range map[string]func(){
+		"panics": func() { panic("exchange bug") },
+		"exits":  runtime.Goexit,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var calls atomic.Int32
+			c := New(func(context.Context, string, string, []string) (Token, error) {
+				calls.Add(1)
+				end()
+				return Token{AccessToken: "never"}, nil
+			}, []string{"s"}, 0, func() time.Time { return t0 })
+			for i := range 2 {
+				got, cached, err := c.Token(context.Background(), user("alice"))
+				if err == nil || got != (Token{}) || cached {
+					t.Fatalf("request %d: %+v, cached %v, %v; want an error and no token", i, got, cached, err)
+				}
+			}
+			if calls.Load() != 2 || c.Len() != 0 {
+				t.Fatalf("%d exchanges, %d cached; want 2 (the failed one is not shared with the next) and 0", calls.Load(), c.Len())
+			}
+		})
+	}
 }

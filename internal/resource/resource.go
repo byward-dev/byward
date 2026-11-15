@@ -27,15 +27,27 @@ type Identity struct {
 	// GrantID is the grant the token was issued for; it leads to the user's stored IdP tokens
 	// (On-Behalf-Of, ADR-0017). Never sent to the upstream.
 	GrantID string
-	// The opted-in identity claims, as sealed at the token's issue; an app-only caller's roles.
-	Roles, Groups []string
-	Email, Name   string
-	// EmailVerified: the IdP vouches for Email; false for an email asserted only because the
-	// operator opted in to unverified ones.
-	EmailVerified bool
+	// Claims are the opted-in identity claims, as sealed at the token's issue; an app-only caller's
+	// roles.
+	Claims
 	// Audit, when set, is a record Guard writes on admitting the request: an app-only token's
 	// first use (ADR-0022 §7). It holds no credential.
 	Audit *audit.Event
+}
+
+// Claims are the identity claims asserted about a principal to the upstream (CONTEXT.md "Identity
+// assertion", ADR-0016 §1): whichever of them the operator opted in to. This is their one owner. The
+// formats that store them (the sealed access token, the grant's sealed IdP tokens) keep their own
+// tagged struct with these fields in this order and convert, so a claim added here and not there
+// fails to build. Keep it plain data: it is embedded in Identity and token.Claims, so a method here
+// (a MarshalJSON, a String) would be promoted into both.
+type Claims struct {
+	Roles, Groups []string
+	Email         string
+	// EmailVerified: the IdP vouches for Email; false for an email asserted only because the
+	// operator opted in to unverified ones.
+	EmailVerified bool
+	Name          string
 }
 
 // Principal types (ADR-0016 §1, ADR-0022 §5).
