@@ -779,15 +779,16 @@ func TestMetadataAdvertisesWhatRegistrationAccepts(t *testing.T) {
 }
 
 // /token serves every grant type registration supports (and the metadata advertises): a grant type
-// added there without a /token handler would be advertised and then refused.
+// added there without a /token handler would be advertised and then refused. Sent without a code or
+// refresh token, each reaches its handler, which refuses it as invalid_grant.
 func TestTokenServesEveryGrantTypeRegistrationSupports(t *testing.T) {
 	e := newEnv(t)
 	for _, g := range registration.GrantTypes() {
 		res := e.do(t, "POST", "/token", url.Values{"grant_type": {g}, "client_id": {clientID}}, nil)
 		var body map[string]any
 		_ = json.NewDecoder(res.Body).Decode(&body)
-		if body["error"] == "unsupported_grant_type" {
-			t.Errorf("grant_type=%s: %d %v", g, res.StatusCode, body)
+		if res.StatusCode != http.StatusBadRequest || body["error"] != "invalid_grant" {
+			t.Errorf("grant_type=%s: %d %v, want 400 invalid_grant from its handler", g, res.StatusCode, body)
 		}
 	}
 }
@@ -933,11 +934,13 @@ func TestFailedBindingAfterConsumeRevokesTheGrant(t *testing.T) {
 // A store outage at any step of a code redemption (spending the code, extending the grant, storing
 // the refresh token) is a server error, not the client's fault.
 func TestStoreOutageAtRedemptionIsAServerError(t *testing.T) {
-	for _, method := range []string{"ConsumeCode", "UpdateGrant", "PutRefreshToken"} {
-		t.Run(method, func(t *testing.T) {
+	for _, c := range []struct{ step, method string }{
+		{"spending the code", "ConsumeCode"}, {"extending the grant", "UpdateGrant"}, {"storing the refresh token", "PutRefreshToken"},
+	} {
+		t.Run(c.step, func(t *testing.T) {
 			e := newEnv(t)
 			code := e.signIn(t, url.Values{"scope": {"mcp offline_access"}}).Query().Get("code")
-			e.st.Fail(errors.New("database is locked"), method)
+			e.st.Fail(errors.New("database is locked"), c.method)
 			res, body := e.redeem(t, code, nil)
 			if res.StatusCode != 500 || body["error"] != "server_error" {
 				t.Fatalf("got %d %v", res.StatusCode, body)

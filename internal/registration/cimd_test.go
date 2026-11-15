@@ -206,13 +206,10 @@ func TestANameAtTheLengthLimitIsAccepted(t *testing.T) {
 }
 
 // Every method the broker advertises for CIMD and DCR clients (MetadataAuthMethods) can be
-// registered, and none uses a shared secret, which the proxy never issues (ADR-0008 §2).
-func TestEveryAdvertisedMethodCanBeRegisteredAndNoneIsASecret(t *testing.T) {
+// registered: a secret method, which the proxy never issues (ADR-0008 §2), would be refused here.
+func TestEveryAdvertisedMethodCanBeRegistered(t *testing.T) {
 	for _, method := range MetadataAuthMethods() {
 		t.Run(method, func(t *testing.T) {
-			if slices.Contains(symmetric, method) {
-				t.Fatalf("%s uses a shared secret", method)
-			}
 			fields := map[string]any{"token_endpoint_auth_method": method}
 			if method == string(PrivateKeyJWT) {
 				fields["jwks_uri"] = "https://app.example/jwks.json"
