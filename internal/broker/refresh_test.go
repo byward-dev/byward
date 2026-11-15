@@ -468,7 +468,7 @@ func TestRefreshRevokesWhenTheUserNoLongerChecksOut(t *testing.T) {
 				e.oneAuditEvent(t, "access_denied", map[string]any{"outcome": "failure", "client_id": clientID,
 					"grant_id": firstGrant(e.st), "user_key": "*", "idp": "entra", "reason": "role"})
 			}
-			lines := e.logLines(t, tc.msg)
+			lines := e.logRecords(t, tc.msg)
 			if len(lines) != 1 {
 				t.Fatalf("want one %q line, got %v", tc.msg, lines)
 			}
@@ -521,7 +521,7 @@ func TestUnusableStoredIdPTokensRevokeTheGrant(t *testing.T) {
 	}
 	// One revocation line, with no reason or IdP: there is no IdP error to name.
 	const msg = "the grant holds no usable IdP refresh token; grant revoked"
-	lines := e.logLines(t, msg)
+	lines := e.logRecords(t, msg)
 	if len(lines) != 1 || lines[0]["reason"] != nil || lines[0]["idp"] != nil {
 		t.Fatalf("revocation lines %v, want one %q line without reason or idp", lines, msg)
 	}
@@ -956,7 +956,7 @@ func TestASignInThatWouldRefreshButGotNoIdPRefreshTokenWarnsAndGetsNoRefreshToke
 				t.Fatalf("token: %d %v, want a refresh token %v", res.StatusCode, body, tc.fresh)
 			}
 			var warning map[string]any
-			if lines := e.logLines(t, "the IdP returned no refresh token, so this grant cannot refresh"); len(lines) > 0 {
+			if lines := e.logRecords(t, "the IdP returned no refresh token, so this grant cannot refresh"); len(lines) > 0 {
 				warning = lines[len(lines)-1]
 			}
 			if (warning != nil) != tc.warn || (warning != nil && (warning["level"] != "WARN" || warning["idp"] != "entra" || warning["client_id"] != clientID)) {
@@ -1080,7 +1080,11 @@ func TestARefreshFailureFromTheIdPLogsItsErrorFields(t *testing.T) {
 		{"the IdP failed the refresh", "invalid_request", "IdP refresh failed", "ERROR", idp.Fatal},
 	} {
 		for _, set := range []bool{true, false} {
-			t.Run(fmt.Sprintf("%s, fields and hint set %v", c.name, set), func(t *testing.T) {
+			with := "with error code, trace ID, correlation ID and hint"
+			if !set {
+				with = "with none of them"
+			}
+			t.Run(c.name+", "+with, func(t *testing.T) {
 				ie := &idp.Error{Class: c.class, OAuth: c.oauth, Err: errors.New("refresh error")}
 				if set {
 					ie.Code, ie.TraceID, ie.CorrelationID, ie.OperatorHint = 70008, "trace-1", "corr-1", "hint-1"

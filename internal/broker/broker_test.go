@@ -1001,8 +1001,8 @@ func (e *env) noAuditEvent(t *testing.T, name string) {
 	}
 }
 
-// logLines returns the log records whose msg is msg.
-func (e *env) logLines(t *testing.T, msg string) []map[string]any {
+// logRecords returns the log records whose msg is msg, in log order.
+func (e *env) logRecords(t *testing.T, msg string) []map[string]any {
 	t.Helper()
 	var lines []map[string]any
 	for _, rec := range logsink.Records[map[string]any](t, e.logs.String()) {
