@@ -72,9 +72,11 @@ func TestAWriteCancelledBetweenItsMirrorAndItsCommitIsKeptAndTheNextStartIsNorma
 }
 
 // endsUnseen is a context that ends without database/sql noticing: its Done never closes, so only
-// an explicit Err call sees the end. It stands for a cancellation that lands after the counter update
-// and before the mirror, a window too small to hit on time. It pins that write polls ctx.Err there;
-// a check written as a select on Done would need this fake to close Done instead.
+// an explicit Err call sees the end. The test ends it after fn; the counter update does not notice,
+// so only the ctx.Err poll before the mirror can. It stands for a cancellation that lands after the
+// counter update, a window too small to hit on time, and does not tell a poll placed before the
+// counter update from one after it: both still mean "an error is not stored". A check written as a
+// select on Done would need this fake to close Done instead.
 type endsUnseen struct {
 	context.Context
 	ended atomic.Bool
@@ -109,7 +111,7 @@ func TestAWriteWhoseContextEndsBeforeTheMirrorStoresNothing(t *testing.T) {
 	}
 }
 
-// A context that has already ended stores nothing.
+// A write whose context has already ended stores nothing and reports the end.
 func TestAWriteWithAnEndedContextStoresNothing(t *testing.T) {
 	s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
 	c, cancel := context.WithCancel(ctx)
