@@ -131,7 +131,7 @@ func loadNoAuthConfig(t testing.TB, upstreamURL string, extra ...string) *config
 // keyRing is the sealing-key ring the server under cfg loads.
 func keyRing(t testing.TB, cfg *config.Config) *token.KeyRing {
 	t.Helper()
-	ring, err := token.LoadKeyRing(cfg.KeysDir)
+	ring, err := token.LoadKeyRing(cfg.KeysDir, secretCheck(cfg))
 	if err != nil {
 		t.Fatal(err)
 	}

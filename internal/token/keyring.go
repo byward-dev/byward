@@ -44,8 +44,11 @@ type key struct {
 // LoadKeyRing reads every key file in dir. The file name is the key ID; the content is the
 // standard base64 encoding of KeySize random bytes, for example from
 // `openssl rand -base64 32`. Dotfiles and directories are skipped (Kubernetes secret volumes hold
-// `..data` entries). Any bad file fails the whole load, naming the file.
-func LoadKeyRing(dir string) (*KeyRing, error) {
+// `..data` entries). check is the secret file permission check (ADR-0018 §11), run on each file
+// before it is read: the sealing keys are secret files like any other. A world-writable key file is
+// refused, and so is a world-writable directory unless it is on a read-only mount; --dev relaxes
+// neither. Any bad file fails the whole load, naming the file.
+func LoadKeyRing(dir string, check func(path string) error) (*KeyRing, error) {
 	di, err := os.Stat(dir)
 	if err != nil {
 		return nil, fmt.Errorf("token: key directory: %w", err)
@@ -80,6 +83,9 @@ func LoadKeyRing(dir string) (*KeyRing, error) {
 		if !keyIDPattern.MatchString(name) {
 			return nil, fmt.Errorf("token: key file %s: the name is the key ID and must match %s", path, keyIDPattern)
 		}
+		if err := check(path); err != nil {
+			return nil, fmt.Errorf("token: key file: %w", err)
+		}
 		k, err := readKey(path, name)
 		if err != nil {
 			return nil, err
@@ -98,8 +104,7 @@ func LoadKeyRing(dir string) (*KeyRing, error) {
 // readOnlyFS is secretfile.ReadOnlyFS; tests replace it.
 var readOnlyFS = secretfile.ReadOnlyFS
 
-// worldWritable is the one permission rejected: group- and other-readable files are normal on
-// Kubernetes secret volumes (mode 0644).
+// worldWritable is the permission refused whatever the check allows: anyone could replace the key.
 func worldWritable(fi os.FileInfo) bool { return fi.Mode().Perm()&0o002 != 0 }
 
 func readKey(path, id string) (*key, error) {

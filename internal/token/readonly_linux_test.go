@@ -24,7 +24,7 @@ func TestKeysOnAReadOnlyTmpfsWithMode1777Load(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "k1"), []byte(randomKey(t)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadKeyRing(dir); err == nil || !strings.Contains(err.Error(), "world-writable") {
+	if _, err := LoadKeyRing(dir, noCheck); err == nil || !strings.Contains(err.Error(), "world-writable") {
 		t.Fatalf("writable tmpfs with mode 1777: err = %v, want the world-writable refusal", err)
 	}
 	if err := syscall.Mount("", dir, "", syscall.MS_REMOUNT|syscall.MS_RDONLY, ""); err != nil {

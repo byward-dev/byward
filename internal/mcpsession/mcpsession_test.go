@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/http/httptrace"
 	"net/textproto"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +34,7 @@ var t0 = time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
 // keyDir writes sealing keys named ids into a new directory, as an operator would.
 func keyDir(t *testing.T, ids ...string) string {
 	t.Helper()
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "keys") // made 0700 by Write; a TempDir is world-writable under umask 000
 	for _, id := range ids {
 		sealingkey.Write(t, dir, id)
 	}
@@ -42,7 +43,7 @@ func keyDir(t *testing.T, ids ...string) string {
 
 func box(t *testing.T, dir, purpose string, now *time.Time) *token.Box {
 	t.Helper()
-	ring, err := token.LoadKeyRing(dir)
+	ring, err := token.LoadKeyRing(dir, func(string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}

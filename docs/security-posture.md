@@ -125,8 +125,8 @@ list. Status on `main`:
 - The public URL must be `https`. `http` is allowed only for a loopback host, with `--dev` or
   `--insecure-no-auth`.
 - Secrets are read only from files (`*_FILE`, `--*-file`). An inline secret refuses to start
-  unless `--dev` is set, and so does a secret file (a setting's `*_FILE`, or the TLS key; not a sealing
-  key) its group or others can read, unless it is on a read-only mount.
+  unless `--dev` is set, and so does a secret file (a setting's `*_FILE`, the TLS key, or a sealing or
+  assertion key) its group or others can read, unless it is on a read-only mount.
 - The `Origin` allowlist on the MCP endpoint is empty: only the proxy's own origin and clients that
   send no `Origin` pass. No `X-Forwarded-For` is trusted until you set
   `BYWARD_TRUSTED_PROXIES`.
@@ -277,9 +277,11 @@ the client and redirect URI again. This is accepted behaviour, not a gap: no tok
 **Keys:**
 
 - Keys come from `BYWARD_KEYS_DIR`. The file that sorts last seals; every file opens.
-  A world-writable key file is refused, and so is a world-writable directory unless it is on a
-  read-only mount. The identity assertion's signing keys (`BYWARD_ASSERTION_KEYS_DIR`) follow the
-  same rule; `--dev` relaxes it for neither.
+  A key file its group or others can read is refused unless it is on a read-only mount, as for every
+  secret file; `--dev` relaxes that. A world-writable key file is refused, and so is a world-writable
+  directory unless it is on a read-only mount. The identity assertion's signing keys
+  (`BYWARD_ASSERTION_KEYS_DIR`) follow the same rules; `--dev` relaxes the world-writable rule for
+  neither.
 - One key ring seals access tokens, codes, IdP tokens, login cookies and consent flows. The purpose
   or token type is bound as associated data. ADR-0006 §8 asks for a separate key per purpose; that
   is a follow-up.
