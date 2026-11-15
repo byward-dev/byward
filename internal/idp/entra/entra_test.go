@@ -240,7 +240,7 @@ func TestIssuerMustMatchTokenTenantAndAllowlist(t *testing.T) {
 		"single other tid":  {single, v2(fakeidp.NewGUID(), issuerFor(tid)), false},
 		"iss for other tid": {single, v2(tid, issuerFor(fakeidp.NewGUID())), false},
 		"v1 issuer":         {single, v2(tid, "https://sts.windows.net/"+tid+"/"), false},
-		"template iss":      {multi, v2(tid, issuerFor("{tenantid}")), false},
+		"template iss":      {multi, v2(tid, Authority+"/{tenantid}/v2.0"), false},
 		"multi ok":          {multi, v2(tid, issuerFor(tid)), true},
 		"multi not allowed": {multi, v2(fakeidp.NewGUID(), issuerFor(tid)), false},
 		"tid not a GUID":    {multi, v2("organizations", issuerFor("organizations")), false},

@@ -77,6 +77,7 @@ func SetupScript(s Setup) (string, error) {
 		"Days":        int(s.Now.UTC().AddDate(s.SecretYears, 0, 0).Sub(s.Now.UTC()).Hours() / 24),
 		"UserRole":    UserRole,
 		"AppRole":     AppRole,
+		"Scope":       accessAsUser,
 	})
 	return b.String(), err
 }
@@ -105,7 +106,7 @@ APP_ID=$(az ad app create --display-name byward --sign-in-audience AzureADMyOrg 
   --web-redirect-uris "$REDIRECT_URI" --query appId -o tsv)
 
 # 2. One Microsoft Graph request, since az ad app has no flag for exposed scopes: the Application
-#    ID URI, the access_as_user scope with v2 tokens, an app role for users and one for
+#    ID URI, the {{.Scope}} scope with v2 tokens, an app role for users and one for
 #    applications (app-only callers), and the idtyp claim on access tokens.
 SCOPE_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 USER_ROLE_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
@@ -117,7 +118,7 @@ cat > byward-api.json <<EOF
     "requestedAccessTokenVersion": 2,
     "oauth2PermissionScopes": [{
       "id": "$SCOPE_ID",
-      "value": "access_as_user",
+      "value": "{{.Scope}}",
       "type": "User",
       "isEnabled": true,
       "adminConsentDisplayName": "Use MCP servers behind byward",

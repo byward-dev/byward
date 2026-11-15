@@ -32,8 +32,7 @@ var assets embed.FS
 
 func stylesheet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		w.Header().Set("Allow", "GET, HEAD")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		methodNotAllowed(w, "GET, HEAD")
 		return
 	}
 	css, _ := assets.ReadFile("page.css")

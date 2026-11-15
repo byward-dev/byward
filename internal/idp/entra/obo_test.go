@@ -16,9 +16,9 @@ import (
 
 var graphUserRead = []string{"https://graph.microsoft.com/User.Read"}
 
-// signedInAssertion signs a user in and returns their tenant and access_as_user token, the
-// On-Behalf-Of assertion (ADR-0012 §3).
-func signedInAssertion(t *testing.T, e *env) (tid, assertion string) {
+// signedInIdPToken signs a user in and returns their tenant and access_as_user token, the IdP
+// token On-Behalf-Of presents (ADR-0012 §3).
+func signedInIdPToken(t *testing.T, e *env) (tid, idpToken string) {
 	t.Helper()
 	id, tokens, err := callback(t, e)
 	if err != nil {
@@ -32,12 +32,12 @@ func signedInAssertion(t *testing.T, e *env) (tid, assertion string) {
 // the downstream scopes.
 func TestOnBehalfOfReturnsADownstreamToken(t *testing.T) {
 	e := newEnv(t, Config{})
-	tid, assertion := signedInAssertion(t, e)
-	tok, err := e.p.OnBehalfOf(context.Background(), tid, assertion, graphUserRead)
+	tid, idpToken := signedInIdPToken(t, e)
+	tok, err := e.p.OnBehalfOf(context.Background(), tid, idpToken, graphUserRead)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := now().Add(time.Hour); tok.AccessToken == "" || tok.AccessToken == assertion || !tok.ExpiresAt.Equal(want) {
+	if want := now().Add(time.Hour); tok.AccessToken == "" || tok.AccessToken == idpToken || !tok.ExpiresAt.Equal(want) {
 		t.Fatalf("downstream token expiring %v: want a new token expiring at %v (now + the IdP's expires_in)", tok.ExpiresAt, want)
 	}
 }
@@ -58,9 +58,9 @@ func TestOnBehalfOfErrorsKeepTheirCodeAndHint(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t, Config{})
-			tid, assertion := signedInAssertion(t, e)
+			tid, idpToken := signedInIdPToken(t, e)
 			e.fake.Set(fakeidp.FailToken(fakeidp.GrantJWTBearer, c.failure))
-			_, err := e.p.OnBehalfOf(context.Background(), tid, assertion, graphUserRead)
+			_, err := e.p.OnBehalfOf(context.Background(), tid, idpToken, graphUserRead)
 			var ie *idp.Error
 			if !errors.As(err, &ie) {
 				t.Fatalf("err = %v, want *idp.Error", err)
@@ -79,21 +79,21 @@ func TestOnBehalfOfErrorsKeepTheirCodeAndHint(t *testing.T) {
 // tenant is refused before any request.
 func TestOnBehalfOfRefusesWrongInput(t *testing.T) {
 	e := newEnv(t, Config{})
-	tid, _ := signedInAssertion(t, e)
+	tid, _ := signedInIdPToken(t, e)
 	foreign := e.fake.Mint(map[string]any{"aud": "https://graph.microsoft.com", "tid": tid, "oid": fakeidp.NewGUID(), "iss": issuerFor(tid), "ver": "2.0"})
 	_, err := e.p.OnBehalfOf(context.Background(), tid, foreign, graphUserRead)
 	if ie := (*idp.Error)(nil); !errors.As(err, &ie) || ie.Code != 50013 {
-		t.Fatalf("a foreign assertion: %v, want AADSTS50013", err)
+		t.Fatalf("a foreign IdP token: %v, want AADSTS50013", err)
 	}
 	for name, args := range map[string]struct {
-		tid, assertion string
-		scopes         []string
+		tid, idpToken string
+		scopes        []string
 	}{
 		"tenant not a GUID": {"contoso.example", "x", graphUserRead},
-		"no assertion":      {tid, "", graphUserRead},
+		"no IdP token":      {tid, "", graphUserRead},
 		"no scopes":         {tid, "x", nil},
 	} {
-		if _, err := e.p.OnBehalfOf(context.Background(), args.tid, args.assertion, args.scopes); err == nil || idp.ClassOf(err) != idp.Fatal {
+		if _, err := e.p.OnBehalfOf(context.Background(), args.tid, args.idpToken, args.scopes); err == nil || idp.ClassOf(err) != idp.Fatal {
 			t.Errorf("%s: %v, want a fatal error", name, err)
 		}
 	}
@@ -126,11 +126,11 @@ func TestOnBehalfOfRefusesAnAnswerWithoutABearerToken(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := newEnv(t, Config{})
-			tid, assertion := signedInAssertion(t, e)
+			tid, idpToken := signedInIdPToken(t, e)
 			c := *e.p.fetch.Client
 			c.Transport = oboAnswer{next: c.Transport, body: body}
 			e.p.fetch.Client = &c
-			if tok, err := e.p.OnBehalfOf(context.Background(), tid, assertion, graphUserRead); err == nil || idp.ClassOf(err) != idp.Fatal || tok.AccessToken != "" {
+			if tok, err := e.p.OnBehalfOf(context.Background(), tid, idpToken, graphUserRead); err == nil || idp.ClassOf(err) != idp.Fatal || tok.AccessToken != "" {
 				t.Fatalf("token set %v, err %v; want a fatal error and no token", tok.AccessToken != "", err)
 			}
 		})
@@ -153,6 +153,26 @@ func TestAdminConsentURLForTheUsersTenant(t *testing.T) {
 		"scope": "https://graph.microsoft.com/User.Read https://graph.microsoft.com/Mail.Read"} {
 		if got := q.Get(k); got != want {
 			t.Errorf("%s = %q, want %q", k, got, want)
+		}
+	}
+}
+
+// The admin-consent URL is the one Entra URL built from a tenant the caller passes and this package
+// does not check is a GUID, so it shows the rule every endpoint follows (tenantURL): the tenant is
+// path-escaped, so it can never change the host or the path the proxy sends the browser to
+// (AGENTS.md: named IdP endpoints are derived from config). A GUID and organizations are unchanged.
+func TestATenantCanOnlyNameATenantInTheAdminConsentURL(t *testing.T) {
+	e := newEnv(t, Config{})
+	const guid = "00000000-0000-0000-0000-000000000001"
+	for tenant, want := range map[string]string{
+		guid:            Authority + "/" + guid + "/v2.0/adminconsent",
+		Organizations:   Authority + "/organizations/v2.0/adminconsent",
+		"x/../common?a": Authority + "/x%2F..%2Fcommon%3Fa/v2.0/adminconsent",
+		"@evil.example": Authority + "/@evil.example/v2.0/adminconsent",
+	} {
+		// The raw string, not url.Parse's decoded Path, which would hide the escape.
+		if got, _, _ := strings.Cut(e.p.AdminConsentURL(tenant, []string{"https://graph.microsoft.com/User.Read"}), "?"); got != want {
+			t.Errorf("AdminConsentURL(%q) = %q, want %q", tenant, got, want)
 		}
 	}
 }
