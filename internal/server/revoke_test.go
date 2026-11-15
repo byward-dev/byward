@@ -25,7 +25,7 @@ const (
 // replica holding the store open, so each revocation is a second writer.
 func revokeEnv(t *testing.T) (cfg *config.Config, tokens map[string]string) {
 	t.Helper()
-	env, cfg := storeEnv(t)
+	_, cfg = storeEnv(t)
 	created := time.Now().Add(-time.Minute)
 	tokens = map[string]string{}
 	withStore(t, cfg, func(st *sqlite.Store) {
@@ -35,7 +35,7 @@ func revokeEnv(t *testing.T) (cfg *config.Config, tokens map[string]string) {
 			if _, err := st.CreateGrant(context.Background(), g); err != nil {
 				t.Fatal(err)
 			}
-			tokens[id] = sealAccessFor(t, cfg, env, id, subject, created)
+			tokens[id] = sealAccessFor(t, cfg, id, subject, created)
 		}
 	})
 	running, err := buildAuth(cfg, discard, Observability{})

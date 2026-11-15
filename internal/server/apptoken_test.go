@@ -332,7 +332,7 @@ func TestAnAppCannotResumeAUsersSessionWithTheSameSubject(t *testing.T) {
 	t.Cleanup(up.Close)
 	p := newAppProxy(t, func(*appProxy) []string { return []string{"BYWARD_UPSTREAM_URL=" + up.URL + "/mcp"} })
 	key := fixtureTenant + ":" + p.withRole.ServicePrincipalID
-	user := sealAccessFor(t, p.cfg, p.env, "g1", key, time.Now())
+	user := sealAccessFor(t, p.cfg, "g1", key, time.Now())
 	res, _ := mcpPost(t, p.srv, user, "", initializeBody)
 	session := res.Header.Get(mcpsession.Header)
 	if res.StatusCode != http.StatusOK || session == "" {

@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -23,16 +22,12 @@ import (
 // must sync it before serving and keep it fresh in the background (ADR-0006 §3).
 func TestRevocationListStaysFreshWhileTheServerRuns(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
-		cfg, _, err := config.Load(nil, env, os.ReadFile)
-		if err != nil {
-			t.Fatal(err)
-		}
+		cfg := loadConfig(t, "https://mcp.example.com/mcp")
 		a, err := buildAuth(cfg, discard, Observability{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		access := sealAccess(t, cfg, env, "g")
+		access := sealAccess(t, cfg, "g")
 		if _, err := a.validator.Validate(context.Background(), access); err != nil {
 			t.Fatalf("right after startup: %v (the list must be synced before serving)", err)
 		}
@@ -56,29 +51,16 @@ func TestRevocationListStaysFreshWhileTheServerRuns(t *testing.T) {
 var discard = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // sealAccess seals an access token for grantID with the keys the server under test loads.
-func sealAccess(t *testing.T, cfg *config.Config, env []string, grantID string) string {
+func sealAccess(t *testing.T, cfg *config.Config, grantID string) string {
 	t.Helper()
-	return sealAccessFor(t, cfg, env, grantID, "tid:oid", time.Now())
+	return sealAccessFor(t, cfg, grantID, "tid:oid", time.Now())
 }
 
 // sealAccessFor seals an access token for grantID and subject, issued at iat and valid for an
 // hour from now, with the keys the server under test loads.
-func sealAccessFor(t *testing.T, cfg *config.Config, env []string, grantID, subject string, iat time.Time) string {
+func sealAccessFor(t *testing.T, cfg *config.Config, grantID, subject string, iat time.Time) string {
 	t.Helper()
-	var keysDir string
-	for _, kv := range env {
-		if v, ok := strings.CutPrefix(kv, "BYWARD_KEYS_DIR="); ok {
-			keysDir = v
-		}
-	}
-	ring, err := token.LoadKeyRing(keysDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, err := token.NewSealer(ring, cfg.PublicURL.String())
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := proxySealer(t, cfg)
 	now := time.Now()
 	tok, err := s.Seal(token.Access, token.Claims{GrantID: grantID, Subject: subject, IssuedAt: iat, ExpiresAt: now.Add(time.Hour), ClientID: "test-app"})
 	if err != nil {
