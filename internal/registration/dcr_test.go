@@ -92,6 +92,8 @@ func TestRegistrationsThatBreakTheRulesAreRefused(t *testing.T) {
 		"a JSON array":              {`[]`, ErrInvalidClientMetadata, "not a JSON object (array)"},
 		"a field of the wrong type": {`{"client_name":"App","redirect_uris":"https://app.example/cb"}`, ErrInvalidClientMetadata, "redirect_uris: wrong JSON type (string)"},
 		"private_key_jwt no keys":   {`{` + ok + `,"token_endpoint_auth_method":"private_key_jwt"}`, ErrInvalidClientMetadata, "jwks: required"},
+		// The SSRF guard dials port 443 alone, so such a client could never authenticate.
+		"a jwks_uri on another port": {`{` + ok + `,"token_endpoint_auth_method":"private_key_jwt","jwks_uri":"https://app.example:8443/jwks"}`, ErrInvalidClientMetadata, "jwks_uri: must be an https URL on port 443"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			st := memory.New()

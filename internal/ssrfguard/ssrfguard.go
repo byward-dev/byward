@@ -123,11 +123,18 @@ func New(c Config) *Fetcher {
 // through idp.Fetcher). The guard applies at dial: only public addresses on port 443.
 func (f *Fetcher) HTTPClient() *http.Client { return f.client }
 
+// Fetchable reports whether the guard fetches u at all: https, with a host and no user information,
+// on the default port (the dial refuses any other). A client-supplied URL the proxy will fetch later
+// (a jwks_uri) is refused by this rule when it is registered, not only when it is fetched.
+func Fetchable(u *url.URL) bool {
+	return u.Scheme == "https" && u.Host != "" && u.User == nil && (u.Port() == "" || u.Port() == "443")
+}
+
 // Get fetches rawURL and returns its body if the status is 200 and the body is at most maxBytes.
-// Only https URLs on the default port are fetched; userinfo is refused.
+// Only URLs the guard fetches (Fetchable) are.
 func (f *Fetcher) Get(ctx context.Context, rawURL string, maxBytes int64) (*Response, error) {
 	u, err := url.Parse(rawURL)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || (u.Port() != "" && u.Port() != "443") {
+	if err != nil || !Fetchable(u) {
 		return nil, fmt.Errorf("%w: %s is not an https URL on port 443", ErrRefused, logging.URL(rawURL))
 	}
 	ctx, cancel := context.WithTimeout(ctx, f.timeout)

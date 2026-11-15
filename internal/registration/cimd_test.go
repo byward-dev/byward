@@ -140,6 +140,7 @@ func TestInvalidDocumentsAreRefused(t *testing.T) {
 		"unparsable jwks_uri":                         {doc(map[string]any{"token_endpoint_auth_method": "private_key_jwt", "jwks_uri": "https://app.example/%zz"}), "jwks_uri: must be an https URL"},
 		"jwks_uri with a fragment":                    {doc(map[string]any{"token_endpoint_auth_method": "private_key_jwt", "jwks_uri": "https://app.example/jwks#k"}), "jwks_uri: must be an https URL"},
 		"http jwks_uri":                               {doc(map[string]any{"token_endpoint_auth_method": "private_key_jwt", "jwks_uri": "http://app.example/jwks"}), "jwks_uri: must be an https URL"},
+		"jwks_uri on another port":                    {doc(map[string]any{"token_endpoint_auth_method": "private_key_jwt", "jwks_uri": "https://app.example:8443/jwks"}), "jwks_uri: must be an https URL on port 443"},
 		"inline private key":                          {doc(map[string]any{"token_endpoint_auth_method": "private_key_jwt", "jwks": privateJWKS(t)}), "private key"},
 		"trailing data":                               {append(doc(nil), []byte(` {}`)...), "trailing"},
 		"not an object":                               {[]byte(`["x"]`), "not a JSON object"},
