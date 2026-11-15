@@ -183,7 +183,7 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"client denylist single-label host among good ones", "BYWARD_CLIENT_DENYLIST=app.example,localhost", `BYWARD_CLIENT_DENYLIST: "localhost" is neither a CIMD client ID (an https URL) nor a host name such as app.example: give a name with at least one dot`},
 		{"client denylist https without slashes", "BYWARD_CLIENT_DENYLIST=https:app.example", `BYWARD_CLIENT_DENYLIST: "https:app.example" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
 		// A browser reads a host ending in a number as IPv4, which it reaches by other spellings too.
-		{"client denylist IPv4 address", "BYWARD_CLIENT_DENYLIST=203.0.113.5", `BYWARD_CLIENT_DENYLIST: "203.0.113.5" ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match, or none at all; deny the app by its CIMD client ID or its redirect host's name`},
+		{"client denylist IPv4 address", "BYWARD_CLIENT_DENYLIST=203.0.113.5", `BYWARD_CLIENT_DENYLIST: "203.0.113.5" ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match (127.1 and 0x7f000001 are 127.0.0.1), or none at all; deny the app by its CIMD client ID or its redirect host's name`},
 		{"client denylist short IPv4 address", "BYWARD_CLIENT_DENYLIST=127.1", `BYWARD_CLIENT_DENYLIST: "127.1" ends in a number`},
 		{"client denylist IPv4 address with a trailing dot", "BYWARD_CLIENT_DENYLIST=127.1.", `BYWARD_CLIENT_DENYLIST: "127.1." ends in a number`},
 		{"client denylist hex IPv4 address", "BYWARD_CLIENT_DENYLIST=127.0x1", `BYWARD_CLIENT_DENYLIST: "127.0x1" ends in a number`},
@@ -678,7 +678,8 @@ func TestDCRIsOnByDefaultAndTheDenylistTakesCommaSeparatedEntries(t *testing.T) 
 		t.Fatalf("DCR %v, denylist %q", c.DCR, c.ClientDenylist)
 	}
 	// Names that only look like numbers are host names: hex letters in the last label, digits in
-	// another one or only at its start, 0x followed by a non-hex letter.
+	// another one or only at its start, 0x followed by something other than hex digits only (app.0x7g,
+	// a.0xg, a.0xag).
 	for _, host := range []string{"app.de", "app.cafe", "123.example", "0x7f.example", "app.0x7g", "a.0xg", "a.0xag", "app.1example"} {
 		if _, err := load(t, nil, "BYWARD_CLIENT_DENYLIST="+host); err != nil {
 			t.Errorf("%q refused: %v", host, err)

@@ -74,8 +74,9 @@ func TestADeniedHostMatchesExactlyIgnoringCase(t *testing.T) {
 
 // A denied host is denied in every spelling a browser resolves to it: an internationalized name in
 // Unicode or xn-- form, full-width letters and full stops, a trailing ideographic full stop. So a client
-// cannot register the Unicode spelling of a host the operator listed in xn-- form, or the reverse. A
-// name a browser refuses still matches its own xn-- form; other hosts stay apart.
+// cannot register the Unicode spelling of a host the operator listed in xn-- form, or the reverse. It is
+// also denied as an older or transitional IDNA browser goes to it (faß as fass). A name a browser
+// refuses still matches its own xn-- form; other hosts stay apart.
 func TestADeniedHostMatchesEverySpellingTheBrowserGoesTo(t *testing.T) {
 	for _, c := range []struct {
 		entry, uri string
@@ -94,7 +95,10 @@ func TestADeniedHostMatchesEverySpellingTheBrowserGoesTo(t *testing.T) {
 		// Older or transitional IDNA maps ß and ẞ to ss, and a browser with it goes there: denied too.
 		{"fass.example", "https://faß.example/cb", true},
 		{"fass.example", "https://faẞ.example/cb", true},
-		{"app.example", "https://app．example/cb", true}, // a full-width full stop
+		{"fass.example", "https://faß.example:8443/cb", true}, // the port is not part of the host
+		{"xn--fa-hia.example", "https://faß.example:8443/cb", true},
+		{"faß.example", "https://xn--fa-hia.example/cb", true}, // an entry is kept by its browser fold
+		{"app.example", "https://app．example/cb", true},        // a full-width full stop
 		// Names with "_" or "--", which a browser still maps.
 		{"xn--b_cher-3ya.example", "https://bü_cher.example/cb", true},
 		{"my_app.example", "https://ｍｙ_app.example/cb", true},
@@ -118,6 +122,23 @@ func TestADeniedHostMatchesEverySpellingTheBrowserGoesTo(t *testing.T) {
 		}
 		if got := d.DeniesRedirect(c.uri); got != c.denied {
 			t.Errorf("entry %q: DeniesRedirect(%q) = %v, want %v", c.entry, c.uri, got, c.denied)
+		}
+	}
+}
+
+// BrowserHost is the ASCII name a browser goes to, the form both the denylist and the consent page
+// compare and show.
+func TestBrowserHostIsTheASCIINameABrowserGoesTo(t *testing.T) {
+	for host, want := range map[string]string{
+		"App.Example.":          "app.example",
+		"BÜCHER.example":        "xn--bcher-kva.example",
+		"ａｐｐ。example":           "app.example",
+		"ｍｙ_app.example":        "my_app.example",
+		"xn--bcher-kva.example": "xn--bcher-kva.example",
+		"127.0.0.1":             "127.0.0.1",
+	} {
+		if got := BrowserHost(host); got != want {
+			t.Errorf("BrowserHost(%q) = %q, want %q", host, got, want)
 		}
 	}
 }
