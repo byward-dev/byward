@@ -46,7 +46,7 @@ func URLError(err error) error {
 	switch text := cause.Error(); {
 	case strings.HasPrefix(text, badLocation): // the client quotes a redirect's raw Location
 		cause = errBadLocation
-	case errors.As(cause, new(textproto.ProtocolError)): // it quotes the whole header line it refused
+	case errors.As(cause, new(textproto.ProtocolError)): // the transport quotes the whole line it refused
 		cause = errBadHeader
 	}
 	return &url.Error{Op: ue.Op, URL: URL(ue.URL), Err: cause}
@@ -67,5 +67,5 @@ const badLocation = "failed to parse Location header"
 var (
 	errNotAURL     = errors.New("not a URL")
 	errBadLocation = errors.New(badLocation)
-	errBadHeader   = errors.New("the answer has a malformed header line")
+	errBadHeader   = errors.New("the answer has a malformed header or trailer line")
 )

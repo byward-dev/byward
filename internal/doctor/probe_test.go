@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/byward-dev/byward/internal/testutil/rawanswer"
 )
 
 // proxy is a stand-in for the proxy's discovery; each field breaks one thing.
@@ -38,14 +40,7 @@ type proxy struct {
 
 func (p proxy) handler(origin string) http.Handler {
 	if p.badTrailer {
-		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			conn, _, err := w.(http.Hijacker).Hijack()
-			if err != nil {
-				return
-			}
-			defer func() { _ = conn.Close() }()
-			_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nX-Sid: SECRET\x01\r\n\r\n"))
-		})
+		return rawanswer.Handler(rawanswer.RefusedTrailer)
 	}
 	if p.badLocation {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -303,11 +298,11 @@ func TestSelfProbeFollowsDiscoveryToTheAssertionKey(t *testing.T) {
 		"the JWKS too large":                   {proxy{jwksKey: "k1", hugeJWKS: true}, "larger than", "pass this path through unchanged"},
 		"jwks_uri only in RFC 8414's document": {proxy{jwksKey: "k1", noOpenIDJWKS: true}, "does not name the issuer", "pass this path through unchanged"},
 		"jwks_uri unreachable":                 {proxy{jwksKey: "k1", jwksURI: "http://127.0.0.1:1/.well-known/jwks.json"}, "cannot reach http://127.0.0.1:1/.well-known/jwks.json", "start the proxy"},
-		"jwks_uri that does not parse":         {proxy{jwksKey: "k1", jwksURI: "http://admin:SECRET/@x/jwks"}, `parse "<invalid URL>": not a URL`, "start the proxy"},
+		"jwks_uri that does not parse":         {proxy{jwksKey: "k1", jwksURI: "http://admin:SECRET/@x/jwks"}, `cannot reach <invalid URL>: parse "<invalid URL>": not a URL`, "start the proxy"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := probeSigning(t, tc.p, "k1")[keysByDisco]
-			if got.Status != Fail || !strings.Contains(got.Message, tc.inMessage) || !strings.Contains(got.Fix, tc.inFix) {
+			if got.Status != Fail || !strings.Contains(got.Message, tc.inMessage) || !strings.Contains(got.Fix, tc.inFix) || strings.Contains(got.Message+got.Fix, "SECRET") {
 				t.Fatalf("%+v\nwant fail, message with %q, fix with %q", got, tc.inMessage, tc.inFix)
 			}
 		})
@@ -339,34 +334,29 @@ func TestARedirectTargetIsShownAsLogsMay(t *testing.T) {
 	}
 }
 
-// A redirect to a Location the client cannot parse fails every probe, and no result quotes that
-// Location: the client's own error does, credentials and query included.
-func TestAnUnparsableRedirectIsReportedWithoutItsLocation(t *testing.T) {
-	results := probe(t, proxy{badLocation: true})
-	saw := false
-	for check, r := range results {
-		if strings.Contains(r.Message+r.Fix, "SECRET") {
-			t.Errorf("%s = %+v, quotes the Location", check, r)
-		}
-		saw = saw || strings.Contains(r.Message, "failed to parse Location header")
-	}
-	if !saw {
-		t.Fatalf("no result names the unparsable Location: %+v", results)
-	}
-}
-
-// An answer whose trailer line the transport refuses fails the metadata reads, and no result quotes
-// that line: the transport's own error does.
-func TestARefusedTrailerIsReportedWithoutItsLine(t *testing.T) {
-	results := probe(t, proxy{badTrailer: true})
-	saw := false
-	for check, r := range results {
-		if strings.Contains(r.Message+r.Fix, "SECRET") {
-			t.Errorf("%s = %+v, quotes the trailer", check, r)
-		}
-		saw = saw || strings.Contains(r.Message, "malformed header line")
-	}
-	if !saw {
-		t.Fatalf("no result names the refused trailer: %+v", results)
+// An answer the client refuses, a redirect to a Location it cannot parse or a trailer line it
+// rejects, is reported by name, and no result quotes what the server sent, though the client's
+// own error does.
+func TestAnAnswerTheClientRefusesIsReportedWithoutQuotingIt(t *testing.T) {
+	for name, tc := range map[string]struct {
+		p     proxy
+		names string // what some result's message calls the failure
+	}{
+		"an unparsable Location": {proxy{badLocation: true}, "failed to parse Location header"},
+		"a refused trailer":      {proxy{badTrailer: true}, "malformed header or trailer line"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			results := probe(t, tc.p)
+			saw := false
+			for check, r := range results {
+				if strings.Contains(r.Message+r.Fix, "SECRET") {
+					t.Errorf("%s = %+v, quotes what the server sent", check, r)
+				}
+				saw = saw || strings.Contains(r.Message, tc.names)
+			}
+			if !saw {
+				t.Fatalf("no result names %q: %+v", tc.names, results)
+			}
+		})
 	}
 }

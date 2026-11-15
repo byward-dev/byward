@@ -199,7 +199,8 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 				log.ErrorContext(r.Context(), "upstream did not answer in time", "reason", "no response headers within "+o.headerTimeout.String()+"; "+string(out))
 				return
 			}
-			log.WarnContext(r.Context(), "upstream error", "error", err)
+			// A client's request trailer the server refused fails here too; its line is not logged.
+			log.WarnContext(r.Context(), "upstream error", "error", logging.BodyError(err))
 			// Never echo upstream internals (invariant 15).
 			http.Error(w, "upstream unavailable", http.StatusBadGateway)
 		},

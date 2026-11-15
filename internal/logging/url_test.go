@@ -11,6 +11,8 @@ import (
 	"net/textproto"
 	"net/url"
 	"testing"
+
+	"github.com/byward-dev/byward/internal/testutil/rawanswer"
 )
 
 // A URL is logged as its scheme, host and path: user information, the query, the fragment and path
@@ -63,7 +65,7 @@ func TestAClientErrorShowsItsURLAsLogsMay(t *testing.T) {
 		{&url.Error{Op: "Post", URL: "https://idp.example/token?code=SECRET", Err: context.DeadlineExceeded}, `Post "https://idp.example/token": context deadline exceeded`, context.DeadlineExceeded, true},
 		{&url.Error{Op: "parse", URL: "http://admin:SECRET/@idp.example/x", Err: errors.New(`invalid port ":SECRET" after host`)}, `parse "<invalid URL>": not a URL`, errNotAURL, false},
 		{&url.Error{Op: "Get", URL: "https://idp.example/keys", Err: errors.New(`failed to parse Location header "http://x:SECRET/cb?state=SECRET": parse "http://x:SECRET/cb?state=SECRET": invalid port ":SECRET" after host`)}, `Get "https://idp.example/keys": failed to parse Location header`, errBadLocation, false},
-		{&url.Error{Op: "Get", URL: "https://idp.example/keys", Err: fmt.Errorf("net/http: HTTP/1.x transport connection broken: %w", textproto.ProtocolError(`malformed MIME header line: "Set-Cookie: sid=SECRET\x01"`))}, `Get "https://idp.example/keys": the answer has a malformed header line`, errBadHeader, false},
+		{&url.Error{Op: "Get", URL: "https://idp.example/keys", Err: fmt.Errorf("net/http: HTTP/1.x transport connection broken: %w", textproto.ProtocolError(`malformed MIME header line: "Set-Cookie: sid=SECRET\x01"`))}, `Get "https://idp.example/keys": the answer has a malformed header or trailer line`, errBadHeader, false},
 	} {
 		err := URLError(tc.err)
 		var ue *url.Error
@@ -98,7 +100,8 @@ func TestARealClientsUnparsableLocationIsNotQuoted(t *testing.T) {
 
 // Go's transport quotes a whole header or trailer line it refuses, in one of several wordings;
 // none of it reaches the error URLError and BodyError give. Each answer comes over a real
-// connection, so a Go release that rewords the error fails here, not in a log.
+// connection, so a Go release that stops reporting it as a textproto.ProtocolError fails here, not
+// in a log.
 func TestARealTransportsRefusedHeaderLineIsNotQuoted(t *testing.T) {
 	for name, tc := range map[string]struct {
 		answer string
@@ -107,20 +110,13 @@ func TestARealTransportsRefusedHeaderLineIsNotQuoted(t *testing.T) {
 		"a header line with a control character":       {answer: "HTTP/1.1 200 OK\r\nSet-Cookie: sid=SECRET\x01\r\nContent-Length: 0\r\n\r\n"},
 		"a header line without a colon":                {answer: "HTTP/1.1 200 OK\r\nSet-Cookie sid=SECRET\r\nContent-Length: 0\r\n\r\n"},
 		"a first header line that starts with a space": {answer: "HTTP/1.1 200 OK\r\n Set-Cookie: sid=SECRET\r\nContent-Length: 0\r\n\r\n"},
-		"a trailer line with a control character":      {answer: "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nX-Sid: SECRET\x01\r\n\r\n", inBody: true},
+		"a trailer line with a control character":      {answer: rawanswer.RefusedTrailer, inBody: true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				conn, _, err := w.(http.Hijacker).Hijack()
-				if err != nil {
-					return
-				}
-				defer func() { _ = conn.Close() }()
-				_, _ = conn.Write([]byte(tc.answer))
-			}))
+			srv := httptest.NewServer(rawanswer.Handler(tc.answer))
 			defer srv.Close()
 			res, err := http.Get(srv.URL + "/keys")
-			want := `Get "` + srv.URL + `/keys": the answer has a malformed header line`
+			want := `Get "` + srv.URL + `/keys": the answer has a malformed header or trailer line`
 			if tc.inBody {
 				if err != nil {
 					t.Fatalf("the request failed before the body: %v", err)
@@ -130,7 +126,7 @@ func TestARealTransportsRefusedHeaderLineIsNotQuoted(t *testing.T) {
 				if err == nil {
 					t.Fatal("reading the body accepted the trailer")
 				}
-				err, want = BodyError(err), "the answer has a malformed header line"
+				err, want = BodyError(err), "the answer has a malformed header or trailer line"
 			} else {
 				if err == nil {
 					_ = res.Body.Close()
