@@ -10,13 +10,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/byward-dev/byward/internal/broker"
-	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/go-jose/go-jose/v4"
@@ -26,10 +24,7 @@ import (
 func newWired(t *testing.T, env ...string) (*Servers, broker.Config) {
 	t.Helper()
 	got := captureBroker(t, nil)
-	cfg, _, err := config.Load(nil, gateEnv(t, env...), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://m.example/mcp", env...)
 	srv, err := New(cfg, logging.New(io.Discard, "json"))
 	if err != nil {
 		t.Fatal(err)
@@ -88,10 +83,7 @@ func TestADeniedHostIsRefusedAtRegistration(t *testing.T) {
 
 // A denylist entry that is neither a CIMD client ID nor a host refuses to start, naming the setting.
 func TestABadDenylistEntryRefusesToStartNamingTheSetting(t *testing.T) {
-	cfg, _, err := config.Load(nil, gateEnv(t, "BYWARD_CLIENT_DENYLIST=http://app.example/client.json"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://m.example/mcp", "BYWARD_CLIENT_DENYLIST=http://app.example/client.json")
 	if _, err := New(cfg, logging.New(io.Discard, "json")); err == nil || !strings.Contains(err.Error(), "BYWARD_CLIENT_DENYLIST") {
 		t.Fatalf("New with a bad denylist entry: %v, want an error naming BYWARD_CLIENT_DENYLIST", err)
 	}

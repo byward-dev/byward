@@ -66,7 +66,10 @@ func (p *IdP) token(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func s256(verifier string) string {
+// CodeChallenge is the S256 code challenge for verifier (RFC 7636 §4.2), as a client sends it and
+// the fake checks it. Tests that play the client use it too; it is written apart from the proxy's
+// own (idp.CodeChallenge) on purpose, so the two check each other.
+func CodeChallenge(verifier string) string {
 	sum := sha256.Sum256([]byte(verifier))
 	return b64.EncodeToString(sum[:])
 }
@@ -100,7 +103,7 @@ func (p *IdP) redeemCode(form url.Values, c Client, method string) (map[string]a
 	}
 	verifier := form.Get("code_verifier")
 	if ac.challenge != "" || verifier != "" {
-		if verifier == "" || subtle.ConstantTimeCompare([]byte(s256(verifier)), []byte(ac.challenge)) != 1 {
+		if verifier == "" || subtle.ConstantTimeCompare([]byte(CodeChallenge(verifier)), []byte(ac.challenge)) != 1 {
 			return nil, failure(PKCEMismatch)
 		}
 	}

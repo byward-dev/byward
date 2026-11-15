@@ -7,22 +7,15 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/byward-dev/byward/internal/broker"
-	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/logging"
 )
-
-func gateEnv(t *testing.T, extra ...string) []string {
-	t.Helper()
-	return append(append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp"), extra...)
-}
 
 // One case per gate list: the error names the exact setting, which proves the wiring maps each
 // list to its own setting. The gate's own rules are tested in internal/gate.
@@ -36,10 +29,7 @@ func TestInvalidGateRefusesToStartNamingTheSetting(t *testing.T) {
 	} {
 		name, _, _ := strings.Cut(setting, "=")
 		t.Run(name, func(t *testing.T) {
-			cfg, _, err := config.Load(nil, gateEnv(t, setting), os.ReadFile)
-			if err != nil {
-				t.Fatal(err)
-			}
+			cfg := loadConfig(t, "https://m.example/mcp", setting)
 			if _, err := New(cfg, logging.New(io.Discard, "json")); err == nil || !strings.HasPrefix(err.Error(), name+": ") {
 				t.Fatalf("err = %v, want it to start with %s", err, name)
 			}
@@ -48,11 +38,8 @@ func TestInvalidGateRefusesToStartNamingTheSetting(t *testing.T) {
 }
 
 func TestEveryInvalidGateListIsReported(t *testing.T) {
-	cfg, _, err := config.Load(nil, gateEnv(t, "BYWARD_GATE_GROUPS=mcp-users", "BYWARD_GATE_EMAIL_DOMAINS=contoso.example"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = New(cfg, logging.New(io.Discard, "json"))
+	cfg := loadConfig(t, "https://m.example/mcp", "BYWARD_GATE_GROUPS=mcp-users", "BYWARD_GATE_EMAIL_DOMAINS=contoso.example")
+	_, err := New(cfg, logging.New(io.Discard, "json"))
 	if err == nil || !strings.Contains(err.Error(), "BYWARD_GATE_GROUPS: ") || !strings.Contains(err.Error(), "; BYWARD_GATE_EMAIL_DOMAINS: ") {
 		t.Fatalf("err = %v, want both settings named", err)
 	}
@@ -69,10 +56,7 @@ func TestOnlyAnEmptyGateWarnsAtStartup(t *testing.T) {
 		"own tenant": {extra: []string{"BYWARD_GATE_TENANTS=" + fixtureTenant}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			cfg, _, err := config.Load(nil, gateEnv(t, tc.extra...), os.ReadFile)
-			if err != nil {
-				t.Fatal(err)
-			}
+			cfg := loadConfig(t, "https://m.example/mcp", tc.extra...)
 			var buf bytes.Buffer
 			if _, err := New(cfg, logging.New(&buf, "json")); err != nil {
 				t.Fatal(err)
@@ -99,10 +83,7 @@ func TestOnlyAnEmptyGateWarnsAtStartup(t *testing.T) {
 // to the audit log and IdP observation, which a nil value would silently discard.
 func TestWiredBrokerGetsTheConfiguredGateAndObservability(t *testing.T) {
 	got := captureBroker(t, nil)
-	cfg, _, err := config.Load(nil, gateEnv(t, "BYWARD_GATE_ROLES=MCP.User"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://m.example/mcp", "BYWARD_GATE_ROLES=MCP.User")
 	srv, err := New(cfg, logging.New(io.Discard, "json"))
 	if err != nil {
 		t.Fatal(err)

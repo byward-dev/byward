@@ -4,14 +4,12 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os"
 	"slices"
 	"strings"
 	"testing"
 
 	"code.dny.dev/ssrf"
 
-	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/registration"
 )
@@ -30,10 +28,7 @@ func TestCIMDClientsAreResolvedThroughTheGuardOnlyWhenOn(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := captureBroker(t, nil)
-			cfg, _, err := config.Load(nil, gateEnv(t, tc.env...), os.ReadFile)
-			if err != nil {
-				t.Fatal(err)
-			}
+			cfg := loadConfig(t, "https://m.example/mcp", tc.env...)
 			srv, err := New(cfg, logging.New(io.Discard, "json"))
 			if err != nil {
 				t.Fatal(err)
@@ -66,10 +61,7 @@ func TestTheCIMDHostListsReachTheRegistry(t *testing.T) {
 	origReg := newCIMDRegistry
 	newCIMDRegistry = func(c registration.CIMDConfig) *registration.CIMDRegistry { wired = c; return origReg(c) }
 	t.Cleanup(func() { newCIMDRegistry = origReg })
-	cfg, _, err := config.Load(nil, gateEnv(t, "BYWARD_CIMD_ALLOWED_HOSTS=apps.example.com", "BYWARD_CIMD_TRUSTED_HOSTS=127.0.0.1.nip.example"), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadConfig(t, "https://m.example/mcp", "BYWARD_CIMD_ALLOWED_HOSTS=apps.example.com", "BYWARD_CIMD_TRUSTED_HOSTS=127.0.0.1.nip.example")
 	srv, err := New(cfg, logging.New(io.Discard, "json"))
 	if err != nil {
 		t.Fatal(err)

@@ -544,6 +544,23 @@ func TestUserKeyAcceptsTidOidInAnyCaseAndRefusesTheRest(t *testing.T) {
 	}
 }
 
+// SplitUserKey only splits at the first ':': the GUID check is UserKey's.
+func TestSplitUserKeySplitsAtTheFirstColon(t *testing.T) {
+	for _, tc := range []struct {
+		key, tid, oid string
+		ok            bool
+	}{
+		{"tid:oid", "tid", "oid", true},
+		{"tid:oid:x", "tid", "oid:x", true},
+		{":", "", "", true},
+		{"no colon", "no colon", "", false},
+	} {
+		if tid, oid, ok := SplitUserKey(tc.key); tid != tc.tid || oid != tc.oid || ok != tc.ok {
+			t.Errorf("SplitUserKey(%q) = %q, %q, %v; want %q, %q, %v", tc.key, tid, oid, ok, tc.tid, tc.oid, tc.ok)
+		}
+	}
+}
+
 // Silent sends prompt=none, and wins over SelectAccount: a silent sign-in must never show a page.
 func TestASilentLoginAsksTheIdPWithPromptNoneEvenWhenAccountSelectionIsAsked(t *testing.T) {
 	e := newEnv(t, Config{})

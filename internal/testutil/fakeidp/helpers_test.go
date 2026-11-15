@@ -57,7 +57,7 @@ func (f *fixture) authorize(t *testing.T, params url.Values) *http.Response {
 		"scope":                 {f.loginScopes()},
 		"state":                 {"state-1"},
 		"nonce":                 {"nonce-1"},
-		"code_challenge":        {s256(testVerifier)},
+		"code_challenge":        {CodeChallenge(testVerifier)},
 		"code_challenge_method": {"S256"},
 	}
 	for k, v := range params {
