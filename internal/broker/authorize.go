@@ -574,8 +574,8 @@ func (b *Broker) serverError(w http.ResponseWriter, r *http.Request, err error) 
 	b.page(w, r, http.StatusInternalServerError, "Something went wrong on the proxy.", "Try again; if it keeps failing, tell your operator the reference below.")
 }
 
-// Operator log messages for a CIMD client that was refused, and one whose metadata or keys could
-// not be fetched for now.
+// Operator log messages for a client refused by its metadata (a CIMD document, or a CIMD or DCR
+// client's keys at its jwks_uri), and one whose metadata or keys could not be fetched for now.
 const (
 	metadataRefused     = "client metadata refused"
 	metadataUnavailable = "client metadata unavailable"
