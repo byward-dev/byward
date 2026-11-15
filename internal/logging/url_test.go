@@ -103,7 +103,8 @@ func TestARealClientsUnparsableLocationIsNotQuoted(t *testing.T) {
 
 // Go's transport quotes a whole header line it refuses, in one of three wordings; none of it
 // reaches the error URLError gives. Each answer comes over a real connection, so a Go release that
-// stops reporting it as a textproto.ProtocolError fails here, not in a log.
+// reports the line neither as a textproto.ProtocolError nor in one of these wordings fails here, not
+// in a log.
 func TestARealTransportsRefusedHeaderLineIsNotQuoted(t *testing.T) {
 	for name, answer := range map[string]string{
 		"a header line with a control character":       "HTTP/1.1 200 OK\r\nSet-Cookie: sid=SECRET\x01\r\nContent-Length: 0\r\n\r\n",
@@ -182,16 +183,25 @@ func TestARefusedLineAtAClientTimeoutIsNotQuoted(t *testing.T) {
 	refused := textproto.ProtocolError(`malformed MIME header line: "Set-Cookie: sid=SECRET\x01"`)
 	// Each fails once the client has cancelled the request for its timeout: for a transport of its own,
 	// the client marks the timeout before it closes Cancel, so it then reports the failure as one.
-	atTimeout := func(r *http.Request) error { <-r.Cancel; return refused } //nolint:staticcheck // Cancel is what the client closes after marking the timeout
+	// The body row waits in RoundTrip too, so its body fails on the first read.
+	atTimeout := func(r *http.Request) error {
+		select {
+		case <-r.Cancel: //nolint:staticcheck // Cancel is what the client closes after marking the timeout
+			return refused
+		case <-time.After(10 * time.Second):
+			return errors.New("the client never cancelled the request")
+		}
+	}
 	for name, tc := range map[string]struct {
 		rt   roundTrip
+		path string // where the client says the timeout came
 		show func(error) error
 		want string
 	}{
-		"awaiting the answer": {func(r *http.Request) (*http.Response, error) { return nil, atTimeout(r) }, URLError, `Get "http://idp.example/keys": a malformed header or trailer line`},
+		"awaiting the answer": {func(r *http.Request) (*http.Response, error) { return nil, atTimeout(r) }, "awaiting headers", URLError, `Get "http://idp.example/keys": a malformed header or trailer line`},
 		"reading the body": {func(r *http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(iotest.ErrReader(atTimeout(r))), Request: r}, nil
-		}, BodyError, "a malformed header or trailer line"},
+		}, "reading body", BodyError, "a malformed header or trailer line"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			res, err := (&http.Client{Timeout: time.Millisecond, Transport: tc.rt}).Get("http://idp.example/keys")
@@ -199,8 +209,8 @@ func TestARefusedLineAtAClientTimeoutIsNotQuoted(t *testing.T) {
 				_, err = io.ReadAll(res.Body)
 				_ = res.Body.Close()
 			}
-			if err == nil || !strings.Contains(err.Error(), "SECRET") || !strings.Contains(err.Error(), "Client.Timeout") {
-				t.Fatalf("err = %v, want the client's timeout quoting the refused line", err)
+			if err == nil || !strings.Contains(err.Error(), "SECRET") || !strings.Contains(err.Error(), tc.path) {
+				t.Fatalf("err = %v, want the client's timeout %s, quoting the refused line", err, tc.path)
 			}
 			got := tc.show(err)
 			var ne net.Error
@@ -211,31 +221,46 @@ func TestARefusedLineAtAClientTimeoutIsNotQuoted(t *testing.T) {
 	}
 }
 
+// timeoutText is an error that kept only its text at a client timeout, as Go's client returns it.
+type timeoutText string
+
+func (e timeoutText) Error() string { return string(e) }
+func (timeoutText) Timeout() bool   { return true }
+func (timeoutText) Temporary() bool { return true }
+
 type roundTrip func(*http.Request) (*http.Response, error)
 
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-// BodyError replaces an error that holds a refused line, bare or wrapped, with one that names the
-// failure without the line, and returns any other error, nil included, as it is: callers match those
-// with errors.Is.
+// BodyError replaces an error that holds a refused line, by its type or, once Go's client kept only
+// its text, by any of textproto's wordings, with one that names the failure without the line and is a
+// timeout only if the error was one. It returns any other error, nil included, as it is: callers
+// match those with errors.Is.
 func TestABodyErrorIsReplacedOnlyForARefusedLine(t *testing.T) {
 	refused := textproto.ProtocolError(`malformed MIME header line: "X-Sid: SECRET\x01"`)
 	for name, tc := range map[string]struct {
 		err      error
 		replaced bool
+		timeout  bool // of a replaced error
 	}{
-		"a bare refused line":                             {refused, true},
-		"a wrapped refused line":                          {fmt.Errorf("reading: %w", refused), true},
-		"a line without a colon":                          {textproto.ProtocolError(`malformed MIME header: missing colon: "Cookie sid=SECRET"`), true},
-		"a refused line the client kept only the text of": {errors.New(`malformed MIME header line: "X-Sid: SECRET\x01" (Client.Timeout exceeded while awaiting headers)`), true},
-		"a cut-off body":                                  {io.ErrUnexpectedEOF, false},
-		"a cancelled read":                                {context.Canceled, false},
-		"no error":                                        {nil, false},
+		"a bare refused line":                   {refused, true, false},
+		"a wrapped refused line":                {fmt.Errorf("reading: %w", refused), true, false},
+		"a line without a colon":                {textproto.ProtocolError(`malformed MIME header: missing colon: "Cookie sid=SECRET"`), true, false},
+		"a refused line Go words otherwise":     {textproto.ProtocolError(`refused line: "X-Sid: SECRET"`), true, false},
+		"a refused line in a failed request":    {&url.Error{Op: "Get", URL: "http://idp.example/keys", Err: refused}, true, false},
+		"text only, a control character":        {timeoutText(`malformed MIME header line: "X-Sid: SECRET\x01" (Client.Timeout exceeded while awaiting headers)`), true, true},
+		"text only, without a colon":            {timeoutText(`malformed MIME header: missing colon: "Cookie sid=SECRET" (Client.Timeout or context cancellation while reading body)`), true, true},
+		"text only, a first line after a space": {timeoutText(`malformed MIME header initial line: " Cookie: sid=SECRET" (Client.Timeout exceeded while awaiting headers)`), true, true},
+		"a cut-off body":                        {io.ErrUnexpectedEOF, false, false},
+		"a cancelled read":                      {context.Canceled, false, false},
+		"no error":                              {nil, false, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := BodyError(tc.err)
-			if tc.replaced && (got == nil || got.Error() != "a malformed header or trailer line") {
-				t.Errorf("BodyError = %v, want the refused line named without its text", got)
+			var ne net.Error
+			isTimeout := errors.As(got, &ne) && ne.Timeout() && ne.Temporary() //nolint:staticcheck // Temporary answers as Timeout, as Go's own timeout does
+			if tc.replaced && (got == nil || got.Error() != "a malformed header or trailer line" || isTimeout != tc.timeout) {
+				t.Errorf("BodyError = %v (timeout %v), want the refused line named without its text (timeout %v)", got, isTimeout, tc.timeout)
 			}
 			if !tc.replaced && got != tc.err { //nolint:errorlint // the same error, so errors.Is still matches it
 				t.Errorf("BodyError(%v) = %v, want it unchanged", tc.err, got)
