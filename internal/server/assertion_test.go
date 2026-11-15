@@ -29,6 +29,7 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/assertionkey"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/token"
 )
 
@@ -325,7 +326,7 @@ func TestTheStartupLogWarnsAboutEmailsForTheIdPInUse(t *testing.T) {
 		}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			logs := &syncBuffer{}
+			logs := &logsink.Buffer{}
 			s, err := New(tc.cfg(t), slog.New(slog.NewJSONHandler(logs, nil)))
 			if err != nil {
 				t.Fatal(err)

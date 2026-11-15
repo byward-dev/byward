@@ -15,6 +15,7 @@ import (
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 )
 
 // check is one scripted CheckRestore answer.
@@ -40,7 +41,7 @@ func (s *scriptedChecks) CheckRestore(context.Context) (bool, int64, error) {
 // run of failures, not every five seconds. Fake time in the bubble.
 func TestARestoreFoundWhileRunningIsAuditedOnceAndAFailingCheckIsLoggedOncePerRun(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		var logs syncBuffer
+		var logs logsink.Buffer
 		log := slog.New(slog.NewJSONHandler(&logs, nil))
 		down := errors.New("store down")
 		// Failures, epoch 1, epoch 2 started here, epoch 3 adopted from another replica, a failure.

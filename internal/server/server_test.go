@@ -28,6 +28,7 @@ import (
 	"github.com/byward-dev/byward/internal/metrics"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/token"
 )
 
@@ -46,25 +47,7 @@ func (acceptGood) Validate(_ context.Context, tok string) (resource.Identity, er
 type env struct {
 	srv  *httptest.Server
 	up   *fakeupstream.Server
-	logs *syncBuffer
-}
-
-// syncBuffer is written by the server's goroutines and read by the test.
-type syncBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *syncBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *syncBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
+	logs *logsink.Buffer
 }
 
 // start runs the proxy on a test listener; the public URL's host is set as the request Host.
@@ -80,7 +63,7 @@ func start(t *testing.T, extraEnv ...string) env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	logs := &syncBuffer{}
+	logs := &logsink.Buffer{}
 	log := slog.New(slog.NewJSONHandler(logs, nil))
 	srv := httptest.NewServer(Handler(cfg, log, httpUpstream(cfg, log), acceptGood{}, nil, nil, Observability{Audit: audit.New(log, nil, time.Now)}))
 	t.Cleanup(srv.Close)
@@ -777,13 +760,13 @@ var listenLine = regexp.MustCompile(`"msg":"listening","listen":"([^"]+)"`)
 
 // listenWatcher is a log sink that closes listening when the public listener's address is logged.
 type listenWatcher struct {
-	syncBuffer
+	logsink.Buffer
 	listening chan struct{}
 	once      sync.Once
 }
 
 func (w *listenWatcher) Write(p []byte) (int, error) {
-	n, err := w.syncBuffer.Write(p)
+	n, err := w.Buffer.Write(p)
 	if listenLine.Match(p) {
 		w.once.Do(func() { close(w.listening) })
 	}
@@ -1021,7 +1004,7 @@ func TestNewWarnsAboutGenericWordingOnlyWithoutAScopeDescription(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			logs := &syncBuffer{}
+			logs := &logsink.Buffer{}
 			if _, err := New(cfg, slog.New(slog.NewJSONHandler(logs, nil))); err != nil {
 				t.Fatal(err)
 			}
@@ -1036,7 +1019,7 @@ func TestNewWarnsAboutGenericWordingOnlyWithoutAScopeDescription(t *testing.T) {
 // /authorize budget; from an untrusted peer, X-Forwarded-For cannot buy a fresh budget.
 func TestOAuthRateLimitsKeyOnTheResolvedClientAddress(t *testing.T) {
 	cfg := loadConfig(t, "https://mcp.example.com/mcp", "BYWARD_TRUSTED_PROXIES=10.0.0.0/8", "BYWARD_OAUTH_RATE_LIMITS=authorize=2")
-	logs := &syncBuffer{}
+	logs := &logsink.Buffer{}
 	s, err := New(cfg, logging.New(logs, "json"))
 	if err != nil {
 		t.Fatal(err)

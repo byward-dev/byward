@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/byward-dev/byward/internal/testutil/faketokensocket"
 )
 
 // The client against the real token socket: the kernel's peer check sees this test process as the
@@ -57,32 +58,6 @@ func TestAskingTheTokenSocketGivesTheTokenOrTheErrorCode(t *testing.T) {
 	}
 }
 
-// scriptedSocket answers one connection's request with answer, then closes it, and returns the
-// socket's path and the request it read.
-func scriptedSocket(t *testing.T, answer string) (string, <-chan string) {
-	t.Helper()
-	path := filepath.Join(shortTempDir(t), "token.sock")
-	ln, err := net.Listen("unix", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-	reqs := make(chan string, 1)
-	go func() {
-		c, err := ln.Accept()
-		if err != nil {
-			return
-		}
-		defer func() { _ = c.Close() }()
-		_ = c.SetDeadline(time.Now().Add(guard))
-		b := make([]byte, 64)
-		n, _ := c.Read(b)
-		reqs <- string(b[:n])
-		_, _ = c.Write([]byte(answer))
-	}()
-	return path, reqs
-}
-
 // An answer that is neither a token with its expiry nor an error code alone is an error, and the
 // error never quotes the answer, which may hold a token.
 func TestAnAnswerThatIsNotATokenOrAnErrorCodeIsAnError(t *testing.T) {
@@ -114,17 +89,17 @@ func TestAnAnswerThatIsNotATokenOrAnErrorCodeIsAnError(t *testing.T) {
 		"nothing before close":              {"", io.EOF},
 	} {
 		t.Run(name, func(t *testing.T) {
-			path, reqs := scriptedSocket(t, tc.answer)
+			s := faketokensocket.Scripted(t, tc.answer)
 			ctx, cancel := context.WithTimeout(context.Background(), guard)
 			defer cancel()
-			got, err := AskDownstreamToken(ctx, path)
+			got, err := AskDownstreamToken(ctx, s.Path)
 			if !errors.Is(err, tc.want) || got != (DownstreamToken{}) {
 				t.Fatalf("got %+v, %v; want only the error %v", got, err, tc.want)
 			}
 			if strings.Contains(err.Error(), "secret") {
 				t.Fatalf("the error quotes the answer: %v", err)
 			}
-			if req := <-reqs; req != "{}\n" {
+			if req := <-s.Request; req != "{}\n" {
 				t.Fatalf("request %q, want {} on one line", req)
 			}
 		})
@@ -142,7 +117,7 @@ func answerLine(prefix string, size int) string {
 // errLongAnswer (TestAnAnswerThatIsNotATokenOrAnErrorCodeIsAnError).
 func TestAnAnswerOfExactly64KiBIsReadWhole(t *testing.T) {
 	line := answerLine("eyJ", 64<<10)
-	path, _ := scriptedSocket(t, line)
+	path := faketokensocket.Scripted(t, line).Path
 	ctx, cancel := context.WithTimeout(context.Background(), guard)
 	defer cancel()
 	got, err := AskDownstreamToken(ctx, path)
@@ -169,7 +144,7 @@ func TestEveryByteACodeOrATokenMayHoldComesBack(t *testing.T) {
 		{"a code of a to z and _", `{"error":"abcdefghijklmnopqrstuvwxyz_"}` + "\n", DownstreamToken{Error: "abcdefghijklmnopqrstuvwxyz_"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path, _ := scriptedSocket(t, tc.answer)
+			path := faketokensocket.Scripted(t, tc.answer).Path
 			ctx, cancel := context.WithTimeout(context.Background(), guard)
 			defer cancel()
 			got, err := AskDownstreamToken(ctx, path)
@@ -181,32 +156,10 @@ func TestEveryByteACodeOrATokenMayHoldComesBack(t *testing.T) {
 }
 
 func TestAMissingTokenSocketIsAnError(t *testing.T) {
-	got, err := AskDownstreamToken(context.Background(), filepath.Join(shortTempDir(t), "token.sock"))
+	got, err := AskDownstreamToken(context.Background(), filepath.Join(faketokensocket.Dir(t), "token.sock"))
 	if !errors.Is(err, syscall.ENOENT) || got != (DownstreamToken{}) {
 		t.Fatalf("got %+v, %v; want only the dial error for a socket that is not there", got, err)
 	}
-}
-
-// silentSocket reads one connection's request, then says so on asked and never answers.
-func silentSocket(t *testing.T) (string, <-chan struct{}) {
-	t.Helper()
-	path := filepath.Join(shortTempDir(t), "token.sock")
-	ln, err := net.Listen("unix", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-	asked := make(chan struct{})
-	go func() {
-		c, err := ln.Accept()
-		if err != nil {
-			return
-		}
-		t.Cleanup(func() { _ = c.Close() })
-		_, _ = c.Read(make([]byte, 64))
-		close(asked)
-	}()
-	return path, asked
 }
 
 // askUntilDone runs AskDownstreamToken in the background and returns its error, failing the test
@@ -227,12 +180,12 @@ func askUntilDone(t *testing.T, ctx context.Context, path string, whileWaiting f
 
 // A cancel while the client waits for the answer ends its read with the cancel's own error.
 func TestACancelEndsTheWaitForASilentSocket(t *testing.T) {
-	path, asked := silentSocket(t)
+	s := faketokensocket.Silent(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	err := askUntilDone(t, ctx, path, func() {
+	err := askUntilDone(t, ctx, s.Path, func() {
 		select {
-		case <-asked: // the client has sent its request, so it is in its read
+		case <-s.Request: // the client has sent its request, so it is in its read
 			cancel()
 		case <-time.After(guard):
 			t.Fatal("the socket never got the request")
@@ -245,7 +198,7 @@ func TestACancelEndsTheWaitForASilentSocket(t *testing.T) {
 
 // A deadline ends the wait for a silent socket, wherever the client is, with the deadline's error.
 func TestADeadlineEndsTheWaitForASilentSocket(t *testing.T) {
-	path, _ := silentSocket(t)
+	path := faketokensocket.Silent(t).Path
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	if err := askUntilDone(t, ctx, path, func() {}); !errors.Is(err, context.DeadlineExceeded) {

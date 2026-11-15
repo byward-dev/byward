@@ -39,7 +39,7 @@ func TestRealClientRegistrationsAreAccepted(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			fx := clientdocs.LoadRegistration(t, name)
 			c := newClock()
-			r := newDCR(memory.New(), c.now, 0)
+			r := newDCR(memory.New(), c.Now, 0)
 			reg, err := r.Register(context.Background(), fx.Body)
 			if err != nil {
 				t.Fatal(err)
@@ -51,7 +51,7 @@ func TestRealClientRegistrationsAreAccepted(t *testing.T) {
 			_ = json.Unmarshal(fx.Body, &sent)
 			kept := slices.DeleteFunc(slices.Clone(sent.RedirectURIs), func(u string) bool { return slices.Contains(fx.Dropped, u) })
 			if !strings.HasPrefix(reg.ClientID, DCRIDPrefix) || resp["client_id"] != reg.ClientID || resp["client_secret"] != nil ||
-				resp["client_id_issued_at"] != float64(c.now().Unix()) || resp["token_endpoint_auth_method"] != "none" ||
+				resp["client_id_issued_at"] != float64(c.Now().Unix()) || resp["token_endpoint_auth_method"] != "none" ||
 				!slices.Equal(stringsOf(resp["redirect_uris"]), kept) || !slices.Equal(reg.Dropped, fx.Dropped) {
 				t.Fatalf("response %v, dropped %v", resp, reg.Dropped)
 			}
@@ -95,7 +95,7 @@ func TestRegistrationsThatBreakTheRulesAreRefused(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			st := memory.New()
-			_, err := newDCR(st, newClock().now, 0).Register(context.Background(), []byte(tc.body))
+			_, err := newDCR(st, newClock().Now, 0).Register(context.Background(), []byte(tc.body))
 			if !errors.Is(err, tc.want) || !strings.Contains(err.Error(), tc.text) {
 				t.Fatalf("err = %v, want %v containing %q", err, tc.want, tc.text)
 			}
@@ -106,7 +106,7 @@ func TestRegistrationsThatBreakTheRulesAreRefused(t *testing.T) {
 // The response says what was registered: an omitted method becomes none (no secret is ever
 // issued), unknown scopes are dropped, and a method list (an OIDC field) is ignored.
 func TestARegisteredClientIsPublicWithOnlySupportedScopesAndGrants(t *testing.T) {
-	reg, err := newDCR(memory.New(), newClock().now, 0).Register(context.Background(),
+	reg, err := newDCR(memory.New(), newClock().Now, 0).Register(context.Background(),
 		[]byte(`{"client_name":"App","redirect_uris":["https://app.example/cb"],"scope":"mcp admin offline_access mcp","token_endpoint_auth_methods_supported":["private_key_jwt"]}`))
 	if err != nil {
 		t.Fatal(err)
@@ -119,7 +119,7 @@ func TestARegisteredClientIsPublicWithOnlySupportedScopesAndGrants(t *testing.T)
 }
 
 func TestRegistrationsAreCapped(t *testing.T) {
-	r := newDCR(memory.New(), newClock().now, 1)
+	r := newDCR(memory.New(), newClock().Now, 1)
 	body := []byte(`{"client_name":"App","redirect_uris":["https://app.example/cb"]}`)
 	if _, err := r.Register(context.Background(), body); err != nil {
 		t.Fatal(err)
@@ -137,7 +137,7 @@ func brokenClients() *memstore.Store {
 }
 
 func TestAStoreFailureIsTemporary(t *testing.T) {
-	r := newDCR(brokenClients(), newClock().now, 0)
+	r := newDCR(brokenClients(), newClock().Now, 0)
 	if _, err := r.Register(context.Background(), []byte(`{"client_name":"App","redirect_uris":["https://app.example/cb"]}`)); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("register: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestAStoreFailureIsTemporary(t *testing.T) {
 
 // Static and CIMD client IDs are not looked up in the store.
 func TestClientIDsTheRegistryDidNotIssueAreUnknownEvenWithTheStoreDown(t *testing.T) {
-	r := newDCR(brokenClients(), newClock().now, 0)
+	r := newDCR(brokenClients(), newClock().Now, 0)
 	for _, id := range []string{"static-app", cimdID} {
 		if _, err := r.Client(context.Background(), id); err != ErrUnknownClient {
 			t.Fatalf("%s: %v, want the plain ErrUnknownClient without a store call", id, err)
@@ -236,7 +236,7 @@ func TestRegistrationsSlideAndExpire(t *testing.T) {
 func TestADeniedRedirectHostRefusesTheWholeRegistration(t *testing.T) {
 	deny, _ := NewDenylist([]string{"app.example"})
 	c := newClock()
-	r := NewDCRRegistry(DCRConfig{Store: memory.New(), JTI: NewStoreJTICache(memory.New()), Now: c.now, Deny: deny})
+	r := NewDCRRegistry(DCRConfig{Store: memory.New(), JTI: NewStoreJTICache(memory.New()), Now: c.Now, Deny: deny})
 	_, err := r.Register(context.Background(), []byte(`{"client_name":"App","redirect_uris":["https://ok.example/cb","https://app.example/cb?code=leak"]}`))
 	if !errors.Is(err, ErrInvalidRedirectURI) || !strings.Contains(err.Error(), "https://app.example/cb returns to a host on the operator's denylist") || strings.Contains(err.Error(), "leak") {
 		t.Fatalf("err = %v", err)
@@ -248,17 +248,17 @@ func TestADeniedRedirectHostRefusesTheWholeRegistration(t *testing.T) {
 func TestAStoredRegistrationThatCannotBeUsedIsUnknown(t *testing.T) {
 	c := newClock()
 	for name, rec := range map[string]store.Client{
-		"unreadable":       {Metadata: []byte("{"), ExpiresAt: c.now().Add(time.Hour)},
-		"no longer valid":  {Metadata: []byte(`{"client_name":"App","redirect_uris":["myapp://cb"]}`), ExpiresAt: c.now().Add(time.Hour)},
-		"expiring exactly": {Metadata: []byte(`{"client_name":"App","redirect_uris":["https://app.example/cb"]}`), ExpiresAt: c.now()},
+		"unreadable":       {Metadata: []byte("{"), ExpiresAt: c.Now().Add(time.Hour)},
+		"no longer valid":  {Metadata: []byte(`{"client_name":"App","redirect_uris":["myapp://cb"]}`), ExpiresAt: c.Now().Add(time.Hour)},
+		"expiring exactly": {Metadata: []byte(`{"client_name":"App","redirect_uris":["https://app.example/cb"]}`), ExpiresAt: c.Now()},
 	} {
 		t.Run(name, func(t *testing.T) {
 			st := memory.New()
-			rec.ID, rec.CreatedAt = DCRIDPrefix+"stored", c.now().Add(-time.Hour)
+			rec.ID, rec.CreatedAt = DCRIDPrefix+"stored", c.Now().Add(-time.Hour)
 			if err := st.CreateClient(context.Background(), rec, 10); err != nil {
 				t.Fatal(err)
 			}
-			_, err := newDCR(st, c.now, 0).Client(context.Background(), rec.ID)
+			_, err := newDCR(st, c.Now, 0).Client(context.Background(), rec.ID)
 			if !errors.Is(err, ErrUnknownClient) || errors.Is(err, ErrMetadataRefused) {
 				t.Fatalf("err = %v, want unknown and never refused", err)
 			}
@@ -302,7 +302,7 @@ func tooManyRedirects() string {
 // A client_id in the request never becomes the client's ID: the broker issues one, so nobody can
 // register under a static, CIMD or chosen dcr- ID.
 func TestARequestedClientIDIsIgnored(t *testing.T) {
-	r := newDCR(memory.New(), newClock().now, 0)
+	r := newDCR(memory.New(), newClock().Now, 0)
 	for _, asked := range []string{"https://evil.example/client.json", "static-app", DCRIDPrefix + "mine"} {
 		reg, err := r.Register(context.Background(), []byte(`{"client_id":"`+asked+`","client_name":"App","redirect_uris":["https://app.example/cb"]}`))
 		if err != nil {
@@ -328,7 +328,7 @@ func (c *capSpy) CreateClient(ctx context.Context, cl store.Client, max int) err
 // Without a configured cap, registrations are capped at MaxDCRClients, never unlimited.
 func TestTheDefaultCapIsMaxDCRClients(t *testing.T) {
 	spy := &capSpy{Clients: memory.New()}
-	if _, err := newDCR(spy, newClock().now, 0).Register(context.Background(), []byte(`{"client_name":"App","redirect_uris":["https://app.example/cb"]}`)); err != nil {
+	if _, err := newDCR(spy, newClock().Now, 0).Register(context.Background(), []byte(`{"client_name":"App","redirect_uris":["https://app.example/cb"]}`)); err != nil {
 		t.Fatal(err)
 	}
 	if spy.max != MaxDCRClients {
@@ -348,7 +348,7 @@ func TestRedirectsAreKeptOrReportedAsDropped(t *testing.T) {
 		"a repeat registered once": {`"https://app.example/cb","https://app.example/cb"`, []string{"https://app.example/cb"}, []string{"https://app.example/cb"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			reg, err := newDCR(memory.New(), newClock().now, 0).Register(context.Background(), []byte(`{"client_name":"App","redirect_uris":[`+tc.uris+`]}`))
+			reg, err := newDCR(memory.New(), newClock().Now, 0).Register(context.Background(), []byte(`{"client_name":"App","redirect_uris":[`+tc.uris+`]}`))
 			if err != nil {
 				t.Fatal(err)
 			}

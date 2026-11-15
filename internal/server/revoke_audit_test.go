@@ -14,6 +14,7 @@ import (
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/store"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 )
 
 // grantRevokedRecords is every grant_revoked audit record in a JSON log, each as its fields
@@ -57,7 +58,7 @@ func TestAnOperatorRevocationReachesTheRunningProxysAuditStream(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				cfg, tokens := revokeEnv(t)
-				proxyLog := &syncBuffer{}
+				proxyLog := &logsink.Buffer{}
 				logger := slog.New(slog.NewJSONHandler(proxyLog, nil))
 				proxy, err := buildAuth(cfg, discard, Observability{Audit: audit.New(logger, nil, time.Now)})
 				if err != nil {

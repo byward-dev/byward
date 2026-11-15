@@ -6,19 +6,16 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/byward-dev/byward/internal/testutil/fakeclock"
 )
 
-type clock struct{ t time.Time }
-
-func (c *clock) now() time.Time          { return c.t }
-func (c *clock) advance(d time.Duration) { c.t = c.t.Add(d) }
-
-func newClock() *clock { return &clock{t: time.Unix(1_800_000_000, 0)} }
+func newClock() *fakeclock.Clock { return fakeclock.New(time.Unix(1_800_000_000, 0)) }
 
 func TestABurstOfTheBudgetPassesThenRetryAfterIsExact(t *testing.T) {
 	c := newClock()
 	var limited []string
-	l := New(map[string]int{"authorize": 30}, 100, c.now, func(ep string) { limited = append(limited, ep) })
+	l := New(map[string]int{"authorize": 30}, 100, c.Now, func(ep string) { limited = append(limited, ep) })
 	for i := range 30 {
 		if ok, _ := l.Allow("authorize", "192.0.2.1"); !ok {
 			t.Fatalf("request %d of the 30/min burst was refused", i+1)
@@ -31,7 +28,7 @@ func TestABurstOfTheBudgetPassesThenRetryAfterIsExact(t *testing.T) {
 	if len(limited) != 1 || limited[0] != "authorize" {
 		t.Fatalf("onLimit calls = %v, want one for authorize", limited)
 	}
-	c.advance(2 * time.Second)
+	c.Advance(2 * time.Second)
 	if ok, _ := l.Allow("authorize", "192.0.2.1"); !ok {
 		t.Fatal("after Retry-After the next request must pass")
 	}
@@ -42,7 +39,7 @@ func TestABurstOfTheBudgetPassesThenRetryAfterIsExact(t *testing.T) {
 
 func TestBudgetsArePerAddressAndPerEndpoint(t *testing.T) {
 	c := newClock()
-	l := New(map[string]int{"authorize": 1, "token": 1}, 100, c.now, nil)
+	l := New(map[string]int{"authorize": 1, "token": 1}, 100, c.Now, nil)
 	l.Allow("authorize", "192.0.2.1")
 	if ok, _ := l.Allow("authorize", "192.0.2.2"); !ok {
 		t.Error("another address shares the first one's budget")
@@ -72,7 +69,7 @@ func TestIPv6IsGroupedBy64(t *testing.T) {
 		}
 	}
 	c := newClock()
-	l := New(map[string]int{"token": 1}, 100, c.now, nil)
+	l := New(map[string]int{"token": 1}, 100, c.Now, nil)
 	l.Allow("token", "2001:db8:1:2:aaaa::1")
 	if ok, _ := l.Allow("token", "2001:db8:1:2:bbbb::2"); ok {
 		t.Error("an address in the same /64 got its own budget")
@@ -81,7 +78,7 @@ func TestIPv6IsGroupedBy64(t *testing.T) {
 
 func TestAFullTableSharesOneOverflowBucketUntilIdleBucketsAreDropped(t *testing.T) {
 	c := newClock()
-	l := New(map[string]int{"token": 1}, 2, c.now, nil)
+	l := New(map[string]int{"token": 1}, 2, c.Now, nil)
 	l.Allow("token", "192.0.2.1")
 	l.Allow("token", "192.0.2.2")
 	if ok, _ := l.Allow("token", "192.0.2.3"); !ok {
@@ -91,7 +88,7 @@ func TestAFullTableSharesOneOverflowBucketUntilIdleBucketsAreDropped(t *testing.
 	if ok || retry != time.Minute {
 		t.Fatalf("a second address over the key limit: ok=%v retry=%v, want the shared overflow bucket to refuse with 1m", ok, retry)
 	}
-	c.advance(time.Minute) // every bucket is full again, so idle
+	c.Advance(time.Minute) // every bucket is full again, so idle
 	for _, ip := range []string{"192.0.2.6", "192.0.2.7"} {
 		if ok, _ := l.Allow("token", ip); !ok {
 			t.Fatalf("%s: idle buckets must be dropped so new addresses get their own", ip)
@@ -112,7 +109,7 @@ func TestAFullTableSharesOneOverflowBucketUntilIdleBucketsAreDropped(t *testing.
 // every request scan the table.
 func TestSweepsRunAtMostOncePerSweepEvery(t *testing.T) {
 	c := newClock()
-	l := New(map[string]int{"token": 600}, 2, c.now, nil) // 10 tokens a second
+	l := New(map[string]int{"token": 600}, 2, c.Now, nil) // 10 tokens a second
 	drainOverflow := func() {
 		for ok := true; ok; ok, _ = l.Allow("token", "192.0.2.3") {
 		}
@@ -120,13 +117,13 @@ func TestSweepsRunAtMostOncePerSweepEvery(t *testing.T) {
 	l.Allow("token", "192.0.2.1") // two buckets, each one token short of full
 	l.Allow("token", "192.0.2.2")
 	drainOverflow() // .3 finds the table full: a sweep runs now (nothing idle) and .3 uses the overflow
-	c.advance(200 * time.Millisecond)
+	c.Advance(200 * time.Millisecond)
 	// .1 and .2 are full again (idle), but the last sweep was 200 ms ago.
 	drainOverflow()
 	if ok, _ := l.Allow("token", "192.0.2.4"); ok {
 		t.Fatal("a sweep ran within sweepEvery: .4 got its own bucket instead of the drained overflow")
 	}
-	c.advance(800 * time.Millisecond)
+	c.Advance(800 * time.Millisecond)
 	drainOverflow()
 	if ok, _ := l.Allow("token", "192.0.2.5"); !ok {
 		t.Fatal("after sweepEvery the idle buckets must be swept so .5 gets its own bucket")
@@ -135,10 +132,10 @@ func TestSweepsRunAtMostOncePerSweepEvery(t *testing.T) {
 
 func TestASweepKeepsBucketsThatAreStillInUse(t *testing.T) {
 	c := newClock()
-	l := New(map[string]int{"token": 2}, 1, c.now, nil)
+	l := New(map[string]int{"token": 2}, 1, c.Now, nil)
 	l.Allow("token", "192.0.2.1")
 	l.Allow("token", "192.0.2.1")
-	c.advance(2 * time.Second) // a sweep may run, but .1's bucket has refilled only a little
+	c.Advance(2 * time.Second) // a sweep may run, but .1's bucket has refilled only a little
 	l.Allow("token", "192.0.2.2")
 	if ok, _ := l.Allow("token", "192.0.2.1"); ok {
 		t.Fatal("192.0.2.1's bucket was swept while still empty, handing it a fresh budget")
@@ -148,12 +145,12 @@ func TestASweepKeepsBucketsThatAreStillInUse(t *testing.T) {
 func TestRetryAfterHasNoFloatDrift(t *testing.T) {
 	for _, perMinute := range []int{1, 3, 7, 30, 60, 600} {
 		c := newClock()
-		l := New(map[string]int{"token": perMinute}, 10, c.now, nil)
+		l := New(map[string]int{"token": perMinute}, 10, c.Now, nil)
 		for range perMinute {
 			l.Allow("token", "192.0.2.1")
 		}
 		// Drain in uneven steps so the bucket's float state is not a round number.
-		c.advance(13 * time.Millisecond)
+		c.Advance(13 * time.Millisecond)
 		_, retry := l.Allow("token", "192.0.2.1")
 		want := time.Minute/time.Duration(perMinute) - 13*time.Millisecond
 		if d := retry - want; d < -time.Microsecond || d > time.Microsecond {
@@ -165,7 +162,7 @@ func TestRetryAfterHasNoFloatDrift(t *testing.T) {
 func TestConcurrentRequestsNeverExceedTheBudgets(t *testing.T) {
 	c := newClock()
 	const maxKeys, budget = 10, 3
-	l := New(map[string]int{"token": budget}, maxKeys, c.now, nil)
+	l := New(map[string]int{"token": budget}, maxKeys, c.Now, nil)
 	var wg sync.WaitGroup
 	var allowed atomic.Int32
 	for g := range 50 {
@@ -187,25 +184,12 @@ func TestConcurrentRequestsNeverExceedTheBudgets(t *testing.T) {
 	}
 }
 
-// lockedClock may be advanced while other goroutines read it.
-type lockedClock struct {
-	mu sync.Mutex
-	t  time.Time
-}
-
-func (c *lockedClock) now() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
-func (c *lockedClock) advance(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.t = c.t.Add(d)
-}
-
 // Sweeps, evictions and overflow creation race with requests here; -race must stay quiet and
 // the budget must hold for the time that passed.
 func TestConcurrentRequestsWhileBucketsAreSweptStayWithinBudget(t *testing.T) {
-	c := &lockedClock{t: time.Unix(1_800_000_000, 0)}
+	c := newClock()
 	const maxKeys, budget, rounds = 10, 3, 5
-	l := New(map[string]int{"token": budget}, maxKeys, c.now, nil)
+	l := New(map[string]int{"token": budget}, maxKeys, c.Now, nil)
 	var wg sync.WaitGroup
 	var allowed atomic.Int32
 	for g := range 20 {
@@ -220,7 +204,7 @@ func TestConcurrentRequestsWhileBucketsAreSweptStayWithinBudget(t *testing.T) {
 		}()
 	}
 	for range rounds {
-		c.advance(time.Minute) // each round every bucket refills and may be swept
+		c.Advance(time.Minute) // each round every bucket refills and may be swept
 	}
 	wg.Wait()
 	// Per minute at most maxKeys own buckets plus the overflow bucket can each spend a full budget.
@@ -256,13 +240,13 @@ func TestNilLimiterAllowsEverything(t *testing.T) {
 // idle: a full table still drops it, so a new address gets its own burst, not the drained overflow.
 func TestANewAddressGetsItsWholeRegisterBurstWhenTheTableIsFull(t *testing.T) {
 	c := newClock()
-	l := New(map[string]int{Register: 30}, 2, c.now, nil)
+	l := New(map[string]int{Register: 30}, 2, c.Now, nil)
 	l.Allow(Register, "192.0.2.1")
 	l.Allow(Register, "192.0.2.2")
 	for range 10 {
 		l.Allow(Register, "192.0.2.3") // the overflow bucket, drained
 	}
-	c.advance(3 * time.Second) // the two buckets are back at 10; the overflow has 1.5
+	c.Advance(3 * time.Second) // the two buckets are back at 10; the overflow has 1.5
 	passed := 0
 	for range 10 {
 		if ok, _ := l.Allow(Register, "192.0.2.4"); ok {
@@ -277,7 +261,7 @@ func TestANewAddressGetsItsWholeRegisterBurstWhenTheTableIsFull(t *testing.T) {
 // /register takes at once at most 10 registrations, or its budget if smaller (ADR-0008 §3).
 func TestRegisterTakesABurstOfTenOrItsBudgetIfSmaller(t *testing.T) {
 	for _, tc := range []struct{ budget, burst int }{{30, 10}, {5, 5}} {
-		l := New(map[string]int{Register: tc.budget}, 100, newClock().now, nil)
+		l := New(map[string]int{Register: tc.budget}, 100, newClock().Now, nil)
 		for i := range tc.burst {
 			if ok, _ := l.Allow(Register, "192.0.2.1"); !ok {
 				t.Fatalf("budget %d: registration %d of the burst of %d was refused", tc.budget, i+1, tc.burst)
@@ -292,14 +276,14 @@ func TestRegisterTakesABurstOfTenOrItsBudgetIfSmaller(t *testing.T) {
 // After its burst, /register refills at its budget and never past the burst.
 func TestRegisterRefillsAtItsBudgetUpToItsBurst(t *testing.T) {
 	c := newClock()
-	l := New(map[string]int{Register: 30}, 100, c.now, nil)
+	l := New(map[string]int{Register: 30}, 100, c.Now, nil)
 	for range 10 {
 		l.Allow(Register, "192.0.2.1")
 	}
 	if ok, retry := l.Allow(Register, "192.0.2.1"); ok || retry != 2*time.Second {
 		t.Fatalf("11th registration: ok=%v retryAfter=%v, want refused with 2s (30/min)", ok, retry)
 	}
-	c.advance(time.Hour) // a long pause refills to the burst, not to the budget
+	c.Advance(time.Hour) // a long pause refills to the burst, not to the budget
 	passed := 0
 	for range 30 {
 		if ok, _ := l.Allow(Register, "192.0.2.1"); ok {
@@ -313,7 +297,7 @@ func TestRegisterRefillsAtItsBudgetUpToItsBurst(t *testing.T) {
 
 // Every endpoint other than /register takes its whole per-minute budget at once.
 func TestOtherEndpointsTakeTheirWholeBudgetAtOnce(t *testing.T) {
-	l := New(map[string]int{Token: 30}, 100, newClock().now, nil)
+	l := New(map[string]int{Token: 30}, 100, newClock().Now, nil)
 	for i := range 30 {
 		if ok, _ := l.Allow(Token, "192.0.2.1"); !ok {
 			t.Fatalf("token request %d of its 30/min burst was refused", i+1)

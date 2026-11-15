@@ -3,8 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net"
@@ -19,6 +17,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/testutil/assertionkey"
 	"github.com/byward-dev/byward/internal/testutil/closedport"
+	"github.com/byward-dev/byward/internal/testutil/sealingkey"
 )
 
 // serveEnv is what a test run that serves needs besides auth: the URLs, the public listener and an
@@ -38,15 +37,11 @@ func runWith(args []string, env ...string) (int, string, string) {
 func authEnv(t *testing.T) []string {
 	t.Helper()
 	dir := t.TempDir()
-	keys := filepath.Join(dir, "keys")
-	k := make([]byte, 32)
-	_, _ = rand.Read(k)
+	keys := sealingkey.Dir(t)
 	for p, c := range map[string]string{
-		filepath.Join(keys, "k1"):          base64.StdEncoding.EncodeToString(k),
 		filepath.Join(dir, "clients.json"): `{"clients":[{"client_id":"test-app","client_name":"Test app","token_endpoint_auth_method":"none","redirect_uris":["http://127.0.0.1/callback"]}]}`,
 		filepath.Join(dir, "secret"):       "s3cret-entra",
 	} {
-		_ = os.MkdirAll(filepath.Dir(p), 0o700)
 		if err := os.WriteFile(p, []byte(c), 0o600); err != nil {
 			t.Fatal(err)
 		}

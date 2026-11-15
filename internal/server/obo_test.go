@@ -28,6 +28,7 @@ import (
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/upstream/relay"
 )
 
@@ -39,7 +40,7 @@ type oboEnv struct {
 	fake  *fakeidp.IdP
 	proxy *Servers
 	srv   *httptest.Server
-	logs  *syncBuffer
+	logs  *logsink.Buffer
 
 	up         *fakeupstream.Server // the HTTP upstream; nil with a stdio one
 	mu         sync.Mutex
@@ -55,7 +56,7 @@ func newOBOEnv(t *testing.T, scopes string, opts ...fakeidp.Option) *oboEnv {
 func newOBOEnvWith(t *testing.T, scopes string, env []string, opts ...fakeidp.Option) *oboEnv {
 	t.Helper()
 	app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}, RedirectURIs: []string{oboPublic + "/callback/entra"}}
-	e := &oboEnv{fake: fakeidp.New(t, fakeidp.Entra, append([]fakeidp.Option{fakeidp.WithClient(app)}, opts...)...), logs: &syncBuffer{}}
+	e := &oboEnv{fake: fakeidp.New(t, fakeidp.Entra, append([]fakeidp.Option{fakeidp.WithClient(app)}, opts...)...), logs: &logsink.Buffer{}}
 	// The one Entra provider (sign-in and On-Behalf-Of) reaches the fake through its HTTP client.
 	useFakeEntra(t, e.fake, app)
 	e.up = fakeupstream.New()
@@ -458,7 +459,7 @@ func TestDownstreamRefusesARequestWithoutAUsableGrant(t *testing.T) {
 func TestAClientGoingAwayIsNotARefusal(t *testing.T) {
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
-	logs := &syncBuffer{}
+	logs := &logsink.Buffer{}
 	d := &downstreamTokens{
 		cache: downstream.New(func(context.Context, string, string, []string) (downstream.Token, error) {
 			<-release
@@ -498,7 +499,7 @@ func TestARefusalThatNeedsTheOperatorNamesTheFix(t *testing.T) {
 		{"no alert", &idp.Error{Class: idp.Unavailable}, "unavailable"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			logs := &syncBuffer{}
+			logs := &logsink.Buffer{}
 			d := &downstreamTokens{
 				cache: downstream.New(func(context.Context, string, string, []string) (downstream.Token, error) {
 					return downstream.Token{}, c.err

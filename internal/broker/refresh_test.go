@@ -21,6 +21,7 @@ import (
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/testutil/sealingkey"
 	"github.com/byward-dev/byward/internal/token"
 )
 
@@ -758,7 +759,7 @@ func TestGateFailureOnRefreshKeepsTheGrantAndTheIdPsNewTokens(t *testing.T) {
 func (e *env) rotateKeys(t *testing.T, add, remove []string) {
 	t.Helper()
 	for _, id := range add {
-		addKey(t, e.keyDir, id)
+		sealingkey.Write(t, e.keyDir, id)
 	}
 	for _, id := range remove {
 		if err := os.Remove(filepath.Join(e.keyDir, id)); err != nil {

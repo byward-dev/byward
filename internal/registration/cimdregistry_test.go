@@ -20,6 +20,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/ssrfguard"
 	"github.com/byward-dev/byward/internal/store/memory"
+	"github.com/byward-dev/byward/internal/testutil/fakeclock"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
@@ -72,7 +73,7 @@ func (f *fakeFetch) Get(ctx context.Context, url string, maxBytes int64) (*ssrfg
 	return &ssrfguard.Response{Header: http.Header{"Cache-Control": {r.cache}}, Body: r.body}, nil
 }
 
-func newClock() *clock { return &clock{t: time.Unix(1_800_000_000, 0)} }
+func newClock() *fakeclock.Clock { return fakeclock.New(time.Unix(1_800_000_000, 0)) }
 
 func ok(cache string) reply { return reply{body: doc(nil), cache: cache} }
 func transient() reply {
@@ -80,8 +81,8 @@ func transient() reply {
 }
 func gone() reply       { return reply{err: &ssrfguard.StatusError{Code: http.StatusNotFound}} }
 func invalidDoc() reply { return reply{body: []byte(`{"client_id":"https://other.example/x"}`)} }
-func newReg(f *fakeFetch, c *clock, trusted, allowed []string) *CIMDRegistry {
-	return NewCIMDRegistry(CIMDConfig{Fetch: f, TrustedHosts: trusted, AllowedHosts: allowed, JTI: NewStoreJTICache(memory.New()), Now: c.now})
+func newReg(f *fakeFetch, c *fakeclock.Clock, trusted, allowed []string) *CIMDRegistry {
+	return NewCIMDRegistry(CIMDConfig{Fetch: f, TrustedHosts: trusted, AllowedHosts: allowed, JTI: NewStoreJTICache(memory.New()), Now: c.Now})
 }
 
 // step is one lookup after advancing the clock: whether it fetches and what it answers.
@@ -133,7 +134,7 @@ func TestCIMDCacheFollowsTheDocumentAndTheDraft(t *testing.T) {
 			c := newClock()
 			r := newReg(f, c, nil, nil)
 			for i, s := range tc.steps {
-				c.advance(s.after)
+				c.Advance(s.after)
 				cl, err := r.Client(context.Background(), cimdID)
 				if (s.err == nil) != (err == nil) || (s.err != nil && !errors.Is(err, s.err)) || f.calls.Load() != s.fetches {
 					t.Fatalf("step %d: err = %v (want %v), fetches = %d (want %d)", i, err, s.err, f.calls.Load(), s.fetches)
@@ -364,7 +365,7 @@ func TestFetchOutcomesAreObserved(t *testing.T) {
 	c := newClock()
 	r, outcomes := newObservedReg(f, c)
 	for _, d := range []time.Duration{0, time.Second, MinCIMDRetry, MinCIMDRetry, MinCIMDRetry} {
-		c.advance(d)
+		c.Advance(d)
 		_, _ = r.Client(context.Background(), cimdID)
 	}
 	want := []string{FetchRefused, FetchRateLimited, FetchInvalid, FetchUnavailable, FetchOK}
@@ -465,13 +466,13 @@ func TestTheCacheIsBounded(t *testing.T) {
 	}
 	// Refreshing a cached entry in a full cache replaces it in place and evicts nothing else: ids[2]
 	// expires last, so any other entry would be the victim.
-	c.advance(2*time.Hour + time.Second)
+	c.Advance(2*time.Hour + time.Second)
 	if _, err := r.Client(context.Background(), ids[2]); err != nil || len(r.entries) != MaxCIMDEntries {
 		t.Fatalf("refreshing a cached entry in a full cache: %v, %d entries, want %d", err, len(r.entries), MaxCIMDEntries)
 	}
 	for i := range 2 * MaxCIMDEntries {
 		_, _ = r.Client(context.Background(), fmt.Sprintf("https://app.example/missing%d.json", i))
-		c.advance(MinCIMDRetry / 100)
+		c.Advance(MinCIMDRetry / 100)
 	}
 	if len(r.attempts) > MaxCIMDEntries+1 {
 		t.Fatalf("attempt log holds %d URLs", len(r.attempts))
@@ -534,7 +535,7 @@ func TestABusyRefetchServesTheLastValidCopy(t *testing.T) {
 	if _, err := r.Client(context.Background(), last); err != nil {
 		t.Fatal(err)
 	}
-	c.advance(time.Minute) // expired, inside the stale window
+	c.Advance(time.Minute) // expired, inside the stale window
 	f.gate = make(chan struct{})
 	var wg sync.WaitGroup
 	for _, id := range ids[:MaxCIMDInFlight] {
@@ -572,10 +573,10 @@ func docIDs(f *fakeFetch, n int, cache string) []string {
 }
 
 // newObservedReg is a registry whose fetch outcomes are recorded; outcomes returns them so far.
-func newObservedReg(f *fakeFetch, c *clock) (r *CIMDRegistry, outcomes func() []string) {
+func newObservedReg(f *fakeFetch, c *fakeclock.Clock) (r *CIMDRegistry, outcomes func() []string) {
 	var mu sync.Mutex
 	var got []string
-	r = NewCIMDRegistry(CIMDConfig{Fetch: f, JTI: NewStoreJTICache(memory.New()), Now: c.now,
+	r = NewCIMDRegistry(CIMDConfig{Fetch: f, JTI: NewStoreJTICache(memory.New()), Now: c.Now,
 		Observe: func(o string) { mu.Lock(); got = append(got, o); mu.Unlock() }})
 	return r, func() []string { mu.Lock(); defer mu.Unlock(); return slices.Clone(got) }
 }
@@ -589,7 +590,7 @@ func TestPruningKeepsAttemptsInsideTheRetryGap(t *testing.T) {
 	url := func(i int) string { return fmt.Sprintf("https://app.example/missing%d.json", i) }
 	for i := range MaxCIMDEntries + 2 { // the last insertions prune
 		_, _ = r.Client(context.Background(), url(i))
-		c.advance(MinCIMDRetry / (2 * MaxCIMDEntries))
+		c.Advance(MinCIMDRetry / (2 * MaxCIMDEntries))
 	}
 	n := f.calls.Load()
 	if _, err := r.Client(context.Background(), url(0)); !errors.Is(err, ErrUnknownClient) || f.calls.Load() != n {
@@ -634,7 +635,7 @@ func TestOnlyARefusedDocumentIsErrMetadataRefused(t *testing.T) {
 				t.Fatalf("err = %v, want ErrUnknownClient, refused document %v", err, tc.refused)
 			}
 			if tc.refused { // still a refused document during the retry gap
-				c.advance(time.Second)
+				c.Advance(time.Second)
 				if _, err := r.Client(context.Background(), tc.id); !errors.Is(err, ErrMetadataRefused) {
 					t.Fatalf("during the retry gap: %v", err)
 				}
@@ -655,12 +656,12 @@ func (f panicFetch) Get(context.Context, string, int64) (*ssrfguard.Response, er
 // for the lookup (ErrUnavailable), not the end of the process, and the lookup is not left stuck.
 func TestAPanickingFetchIsAnUnavailableClientNotACrash(t *testing.T) {
 	calls, c := new(atomic.Int32), newClock()
-	r := NewCIMDRegistry(CIMDConfig{Fetch: panicFetch{calls}, JTI: NewStoreJTICache(memory.New()), Now: c.now})
+	r := NewCIMDRegistry(CIMDConfig{Fetch: panicFetch{calls}, JTI: NewStoreJTICache(memory.New()), Now: c.Now})
 	if got, err := r.Client(context.Background(), cimdID); !errors.Is(err, ErrUnavailable) || got != nil {
 		t.Fatalf("lookup with a panicking fetch: %v, %v; want no client and ErrUnavailable", got, err)
 	}
 	// The shared fetch was released, so a later lookup fetches again rather than waiting on it.
-	c.advance(MinCIMDRetry)
+	c.Advance(MinCIMDRetry)
 	if _, err := r.Client(context.Background(), cimdID); !errors.Is(err, ErrUnavailable) || calls.Load() != 2 {
 		t.Fatalf("lookup after the panic: %v, fetches %d; want ErrUnavailable from a second fetch", err, calls.Load())
 	}
@@ -686,11 +687,11 @@ func (p panicAfter) Get(ctx context.Context, url string, maxBytes int64) (*ssrfg
 func TestAPanickingRefetchServesTheStaleCopy(t *testing.T) {
 	f := &fakeFetch{replies: map[string][]reply{cimdID: {ok("max-age=60")}}}
 	panicking, panics, c := new(atomic.Bool), new(atomic.Int32), newClock()
-	r := NewCIMDRegistry(CIMDConfig{Fetch: panicAfter{f, panicking, panics}, JTI: NewStoreJTICache(memory.New()), Now: c.now})
+	r := NewCIMDRegistry(CIMDConfig{Fetch: panicAfter{f, panicking, panics}, JTI: NewStoreJTICache(memory.New()), Now: c.Now})
 	if _, err := r.Client(context.Background(), cimdID); err != nil {
 		t.Fatal(err)
 	}
-	c.advance(2 * time.Minute) // expired, inside MaxCIMDStale
+	c.Advance(2 * time.Minute) // expired, inside MaxCIMDStale
 	panicking.Store(true)
 	if got, err := r.Client(context.Background(), cimdID); err != nil || got == nil || got.ID() != cimdID || panics.Load() != 1 {
 		t.Fatalf("lookup whose refetch panics: %v, %v, %d panics; want the stale copy from a refetch that panicked", got, err, panics.Load())

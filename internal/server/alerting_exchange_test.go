@@ -13,6 +13,7 @@ import (
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/metrics"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 )
 
 // #204: an On-Behalf-Of error that needs the operator is counted and logged once per IdP exchange:
@@ -32,7 +33,7 @@ func TestAnOnBehalfOfAlertIsCountedAndLoggedOncePerExchange(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				logs := &syncBuffer{}
+				logs := &logsink.Buffer{}
 				m := metrics.New()
 				release := make(chan struct{})
 				exchange := alertingExchange(func(context.Context, string, string, []string) (downstream.Token, error) {
