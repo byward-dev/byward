@@ -92,7 +92,7 @@ type registeredDocument struct {
 // Register validates a registration request with the shared metadata rules, keeping the redirect
 // URIs that pass ADR-0009, and stores it. A refusal wraps ErrInvalidRedirectURI or
 // ErrInvalidClientMetadata; a full store is ErrRegistrationsFull; a store failure wraps
-// ErrUnavailable.
+// ErrStoreUnavailable.
 func (r *DCRRegistry) Register(ctx context.Context, body []byte) (*Registered, error) {
 	d, err := decodeMetadata(body)
 	if err != nil {
@@ -126,7 +126,7 @@ func (r *DCRRegistry) Register(ctx context.Context, body []byte) (*Registered, e
 	case errors.Is(err, store.ErrFull):
 		return nil, ErrRegistrationsFull
 	case err != nil:
-		return nil, fmt.Errorf("%w: storing a client registration: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: storing a client registration: %v", ErrStoreUnavailable, err)
 	}
 	for i, u := range dropped {
 		dropped[i] = logging.URL(u)
@@ -147,7 +147,7 @@ func (r *DCRRegistry) supported(scope string) string {
 
 // Client returns a registered client. An unknown, expired or unreadable registration is
 // ErrUnknownClient (never ErrMetadataRefused: nothing was refused); a store failure wraps
-// ErrUnavailable.
+// ErrStoreUnavailable.
 func (r *DCRRegistry) Client(ctx context.Context, id string) (Client, error) {
 	if !strings.HasPrefix(id, DCRIDPrefix) {
 		return nil, ErrUnknownClient
@@ -157,7 +157,7 @@ func (r *DCRRegistry) Client(ctx context.Context, id string) (Client, error) {
 	case errors.Is(err, store.ErrNotFound):
 		return nil, ErrUnknownClient
 	case err != nil:
-		return nil, fmt.Errorf("%w: loading a client registration: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: loading a client registration: %v", ErrStoreUnavailable, err)
 	case !r.cfg.Now().Before(rec.ExpiresAt):
 		return nil, fmt.Errorf("%w: client registration expired", ErrUnknownClient)
 	}

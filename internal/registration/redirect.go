@@ -26,7 +26,7 @@ const (
 	ReasonUserinfo      = "userinfo"
 	ReasonWildcard      = "wildcard"
 	ReasonTooLong       = "too_long"
-	ReasonDenied        = "denied" // the operator's denylist names the redirect host (ADR-0008 §9)
+	ReasonDenied        = "denied" // the operator's denylist names a host the app returns to (ADR-0008 §9)
 )
 
 // RedirectError explains a rejected redirect URI. Error() is for the error page ("registered X,
@@ -66,7 +66,7 @@ var reasonText = map[string]string{
 	ReasonUserinfo:  "must not contain user information",
 	ReasonWildcard:  "must not contain wildcards",
 	ReasonTooLong:   fmt.Sprintf("longer than %d characters", MaxRedirectURILen),
-	ReasonDenied:    "its host is on the operator's denylist",
+	ReasonDenied:    "the app returns to a host on the operator's denylist",
 }
 
 // RedirectKey is a redirect URI as a remembered consent compares it (ADR-0010 §3): exact, except

@@ -180,14 +180,17 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 func (b *Broker) loadClient(w http.ResponseWriter, r *http.Request, clientID, redirect string) (registration.Client, bool) {
 	ctx := r.Context()
 	client, err := b.cfg.Clients.Client(ctx, clientID)
-	if err != nil {
+	switch {
+	case errors.Is(err, registration.ErrStoreUnavailable): // a DCR registration could not be read
+		b.cfg.Log.ErrorContext(ctx, "loading a client registration failed", "error", err)
+	case err != nil:
 		b.clientLookupFailed(ctx, clientID, err)
 	}
 	switch {
 	case errors.Is(err, registration.ErrUnknownClient):
 		b.page(w, r, http.StatusBadRequest, "This app is not registered with the proxy.", "Ask your operator to register the app, or check its client ID.")
 		return nil, false
-	case errors.Is(err, registration.ErrUnavailable):
+	case errors.Is(err, registration.ErrUnavailable), errors.Is(err, registration.ErrStoreUnavailable):
 		b.page(w, r, http.StatusServiceUnavailable, "The proxy could not load this app's details.", "Try again in a minute.")
 		return nil, false
 	case err != nil:
@@ -576,10 +579,13 @@ const (
 	metadataUnavailable = "client metadata unavailable"
 )
 
-// clientLookupFailed tells the operator why a Client ID Metadata Document client was refused; the
-// client itself only sees invalid_client or the error page. Static client IDs are not logged.
+// clientLookupFailed tells the operator why a client registered by its metadata was refused or
+// could not be loaded: a Client ID Metadata Document client for any reason, and a DCR client whose
+// keys at its jwks_uri are unusable or could not be fetched, which CIMD and DCR share. The client
+// itself only sees invalid_client or the error page. An unknown or expired static or DCR client ID
+// is ordinary noise and is not logged; a static client never fetches keys.
 func (b *Broker) clientLookupFailed(ctx context.Context, clientID string, err error) {
-	if !registration.IsCIMDURL(clientID) {
+	if !registration.IsCIMDURL(clientID) && !errors.Is(err, registration.ErrUnavailable) && !errors.Is(err, registration.ErrKeysRefused) {
 		return
 	}
 	msg := metadataRefused

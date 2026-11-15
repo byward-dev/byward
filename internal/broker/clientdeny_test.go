@@ -1,8 +1,10 @@
 package broker
 
 import (
+	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/byward-dev/byward/internal/registration"
@@ -143,4 +145,48 @@ func cimdSignedIn(t *testing.T) signedInClient {
 		}
 		e.b.cfg.Clients = registration.Chain{e.reg, newCIMDFor(srv, deny)}
 	}}
+}
+
+// An app is denied as a whole once any of its redirect hosts is on the denylist (ADR-0008 §9, #338),
+// at every sign-in stage as at refresh: an app registered with https://good.example/cb and
+// https://bad.example/cb, with bad.example denied, cannot sign in through its good redirect URI.
+// The refusal says the app returns to a denied host, never that the sent URI's own host is denied.
+func TestADeniedAppCannotSignInThroughItsOtherRedirectURI(t *testing.T) {
+	const good, bad = "https://good.example/cb", "https://bad.example/cb"
+	deny := func(e *env) { e.b.cfg.Clients = registration.Chain{e.reg, newDCRFor(e.st, e.cfg.Now, "bad.example")} }
+	t.Run("authorize", func(t *testing.T) {
+		e := newEnv(t, withDCR(nil))
+		id := registerDCR(t, e, good, bad)
+		deny(e)
+		q := authorizeQuery(url.Values{"client_id": {id}, "redirect_uri": {good}})
+		res := e.do(t, "GET", "/authorize?"+q.Encode(), nil, nil)
+		page, _ := io.ReadAll(res.Body)
+		if res.StatusCode != http.StatusBadRequest || !strings.Contains(string(page), "returns to a host on the operator") || strings.Contains(string(page), "its host is") {
+			t.Fatalf("/authorize with the good URI: %d\n%s\nwant 400, the app refused for a denied host it returns to", res.StatusCode, page)
+		}
+	})
+	t.Run("consent answer", func(t *testing.T) {
+		e := newEnv(t, withDCR(nil))
+		id := registerDCR(t, e, good, bad)
+		p := e.showConsent(t, url.Values{"client_id": {id}, "redirect_uri": {good}})
+		deny(e)
+		e.now = e.now.Add(ConsentDelay)
+		if res := e.answer(t, p, "allow", nil); res.StatusCode != http.StatusBadRequest {
+			t.Fatalf("Allow after the denial: %d, want 400", res.StatusCode)
+		}
+	})
+	t.Run("code issued before the denial", func(t *testing.T) {
+		e := newEnv(t, withDCR(nil))
+		id := registerDCR(t, e, good, bad)
+		code := e.signIn(t, url.Values{"client_id": {id}, "redirect_uri": {good}, "scope": {"mcp offline_access"}}).Query().Get("code")
+		deny(e)
+		res, body := e.redeem(t, code, url.Values{"client_id": {id}, "redirect_uri": {good}})
+		if res.StatusCode != http.StatusBadRequest || body["error"] != "invalid_grant" || body["access_token"] != nil {
+			t.Fatalf("redeeming after the denial: %d %v, want 400 invalid_grant and no token", res.StatusCode, body)
+		}
+		revocations := e.auditEvents(t, "grant_revoked")
+		if len(revocations) != 1 || revocations[0]["reason"] != "client on the operator's denylist; grant revoked" || revocations[0]["client_id"] != id {
+			t.Fatalf("grant_revoked events %v, want one, with the denylist's reason", revocations)
+		}
+	})
 }

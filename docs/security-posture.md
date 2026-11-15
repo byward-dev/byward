@@ -204,10 +204,13 @@ bounds, but there are no settings for that yet.
 
 **Sign-ins in flight** when a client changes: the client and its redirect URI are checked again at
 consent and at `/token`, but not at the IdP callback, which relies on the sealed login cookie. If
-the operator removes a redirect URI, denies its host, or a DCR registration expires after the user
-answered consent, that sign-in still completes for up to 10 min (the login lifetime): the user is
-returned to the old redirect URI with a code. `/token` then refuses the code, because it checks
-the client and redirect URI again. This is accepted behaviour, not a gap: no token is issued.
+the operator removes a redirect URI, denies a host the app returns to, or a DCR registration
+expires after the user answered consent, that sign-in still completes for up to 10 min (the login
+lifetime): the user is returned to the old redirect URI with a code. `/token` then refuses the
+code, because it checks the client and redirect URI again; for an app the denylist now names, it
+also revokes the grant the code stands for, with the denylist's reason. This is accepted behaviour,
+not a gap: no token is issued. An app is denied as a whole once any of its registered redirect URIs
+returns to a denied host: every sign-in stage refuses it, whichever of its redirect URIs it sends.
 
 **Remembered consent** ([ADR-0010](adr/0010-consent-screen.md) §2–3):
 

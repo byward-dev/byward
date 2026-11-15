@@ -15,6 +15,11 @@ import (
 // `invalid_client` (ADR-0008 §3).
 var ErrUnknownClient = errors.New("registration: unknown client")
 
+// ErrStoreUnavailable means the store could not read or write a client registration (a DCR
+// client's). It is no verdict on the client: the broker answers it as any store failure (ADR-0007
+// §7), not as metadata that could not be fetched.
+var ErrStoreUnavailable = errors.New("registration: the store is unavailable")
+
 // ErrReplayCheckUnavailable means the replay cache could not answer whether a client assertion was
 // already used (the store failed). It is no verdict on the client: /token answers 503, as for any
 // store failure (ADR-0007 §7).
