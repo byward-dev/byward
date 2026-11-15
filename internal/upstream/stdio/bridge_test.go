@@ -47,6 +47,9 @@ func newBridge(t *testing.T, edit func(*Config)) *bridgeHarness {
 	return &bridgeHarness{harness: h, bridge: b, srv: srv}
 }
 
+// emptyValue, given to do as a header value, sends that header present but empty.
+const emptyValue = "\x00empty"
+
 // do sends one request; header holds extra name/value pairs, an empty value meaning none.
 func (b *bridgeHarness) do(t *testing.T, ctx context.Context, method, user, session, body string, header ...string) *http.Response {
 	t.Helper()
@@ -56,8 +59,12 @@ func (b *bridgeHarness) do(t *testing.T, ctx context.Context, method, user, sess
 	}
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	for i := 0; i+1 < len(header); i += 2 {
-		if header[i+1] != "" { // an empty value sends no header at all; a name given twice is sent twice
-			req.Header.Add(header[i], header[i+1])
+		switch v := header[i+1]; v { // a name given twice is sent twice
+		case "": // sends no header at all
+		case emptyValue:
+			req.Header[http.CanonicalHeaderKey(header[i])] = append(req.Header.Values(header[i]), "")
+		default:
+			req.Header.Add(header[i], v)
 		}
 	}
 	if user != "" {
@@ -812,83 +819,65 @@ func TestUpstreamProcessCrashingDuringInitializeIsLoggedAsACrash(t *testing.T) {
 	}
 }
 
-func TestProtocolVersionHeaderOtherThanTheMCPSessionsNegotiatedVersionIs400(t *testing.T) {
+// The MCP-Protocol-Version a legacy-era request may carry: none, an empty one, or one copy of the
+// version this MCP session negotiated (any, when the upstream named none). Another version, or a
+// repeated header whatever its values, gets 400, as the modern path refuses a repeat: an
+// intermediary could read another copy than the bridge.
+func TestProtocolVersionHeaderIs400UnlessItIsOneCopyOfTheNegotiatedVersion(t *testing.T) {
 	for name, tc := range map[string]struct {
-		negotiated string // the version the upstream's InitializeResult names; "none" leaves it out
-		header     string // "" sends none
-		rejected   bool
+		negotiated string   // the version the upstream's InitializeResult names; "none" leaves it out
+		headers    []string // the values sent, in order; nil sends none
+		problem    string   // after "Bad Request: "; "" means accepted
 	}{
-		"absent":             {"2025-11-25", "", false},
-		"the negotiated one": {"2025-11-25", "2025-11-25", false},
-		"another version":    {"2025-11-25", "2025-03-26", true},
-		"not a version":      {"2025-11-25", "latest", true},
-		"the negotiated one when the upstream chose an older version": {"2025-06-18", "2025-06-18", false},
-		"a newer version than the upstream negotiated":                {"2025-06-18", "2025-11-25", true},
-		"any header when the upstream named no version":               {"none", "2025-11-25", false},
+		"absent":             {"2025-11-25", nil, ""},
+		"present but empty":  {"2025-11-25", []string{emptyValue}, ""},
+		"the negotiated one": {"2025-11-25", []string{"2025-11-25"}, ""},
+		"another version":    {"2025-11-25", []string{"2025-03-26"}, "unsupported MCP-Protocol-Version; this MCP session negotiated 2025-11-25"},
+		"not a version":      {"2025-11-25", []string{"latest"}, "unsupported MCP-Protocol-Version; this MCP session negotiated 2025-11-25"},
+		"the negotiated one when the upstream chose an older version": {"2025-06-18", []string{"2025-06-18"}, ""},
+		"a newer version than the upstream negotiated":                {"2025-06-18", []string{"2025-11-25"}, "unsupported MCP-Protocol-Version; this MCP session negotiated 2025-06-18"},
+		"any header when the upstream named no version":               {"none", []string{"2025-11-25"}, ""},
+		"the negotiated one twice":                                    {"2025-11-25", []string{"2025-11-25", "2025-11-25"}, "repeated MCP-Protocol-Version"},
+		"the negotiated one, then another":                            {"2025-11-25", []string{"2025-11-25", "2025-03-26"}, "repeated MCP-Protocol-Version"},
+		"another, then the negotiated one":                            {"2025-11-25", []string{"2025-03-26", "2025-11-25"}, "repeated MCP-Protocol-Version"},
+		"an empty one, then the negotiated one":                       {"2025-11-25", []string{emptyValue, "2025-11-25"}, "repeated MCP-Protocol-Version"},
+		"twice when the upstream named no version":                    {"none", []string{"2025-11-25", "2025-11-25"}, "repeated MCP-Protocol-Version"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			b := newBridge(t, func(c *Config) { c.Command = []string{fakeBin, "-mcp", "-version=" + tc.negotiated} })
 			s := b.initialize(t, "alice")
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel() // ends the GET stream
+			var header []string
+			for _, v := range tc.headers {
+				header = append(header, "MCP-Protocol-Version", v)
+			}
 			for _, m := range []struct {
 				method string
 				ok     int
 			}{{http.MethodPost, http.StatusOK}, {http.MethodGet, http.StatusOK}, {http.MethodDelete, http.StatusNoContent}} {
-				res := b.do(t, ctx, m.method, "alice", s, `{"jsonrpc":"2.0","id":1,"method":"echo","params":{}}`, "MCP-Protocol-Version", tc.header)
+				res := b.do(t, ctx, m.method, "alice", s, `{"jsonrpc":"2.0","id":1,"method":"echo","params":{}}`, header...)
 				want := m.ok
-				if tc.rejected {
+				if tc.problem != "" {
 					want = http.StatusBadRequest
 				}
+				// The status first: a wrongly accepted GET is an open stream, which reading would wait on.
 				if res.StatusCode != want {
 					t.Fatalf("%s: status %d, want %d", m.method, res.StatusCode, want)
 				}
-				if tc.rejected {
+				if tc.problem != "" {
 					body, _ := io.ReadAll(res.Body)
 					if rpcErrorCode(t, body) != codeInvalidRequest || !strings.Contains(string(body), `"id":null`) ||
-						!strings.Contains(string(body), "unsupported MCP-Protocol-Version") || !strings.Contains(string(body), "negotiated "+tc.negotiated) {
-						t.Fatalf("%s: body %s, want a -32600 error with no id that names the header and the negotiated version", m.method, body)
+						!strings.Contains(string(body), `"message":"Bad Request: `+tc.problem+`"`) {
+						t.Fatalf("%s: body %s, want a -32600 error with no id and the message %q", m.method, body, "Bad Request: "+tc.problem)
 					}
 				}
 			}
-			if tc.rejected { // the rejected DELETE left the MCP session as it was
-				if got := readEvents(t, b.post(t, "alice", s, `{"jsonrpc":"2.0","id":2,"method":"echo","params":{}}`)); len(got) != 1 {
-					t.Fatalf("the MCP session after rejected requests got %q", got)
+			if tc.problem != "" { // the refused DELETE left the MCP session as it was
+				got := readEvents(t, b.post(t, "alice", s, `{"jsonrpc":"2.0","id":2,"method":"echo","params":{}}`))
+				if len(got) != 1 || !strings.Contains(got[0], `"id":2`) || !strings.Contains(got[0], `"result"`) {
+					t.Fatalf("the MCP session after refused requests got %q, want the echo's result", got)
 				}
-			}
-		})
-	}
-}
-
-// A repeated MCP-Protocol-Version is refused with 400 whatever its values, the negotiated one
-// included, as the modern path refuses it: an intermediary could read another copy than the bridge.
-func TestARepeatedProtocolVersionHeaderIs400WhateverItsValues(t *testing.T) {
-	for name, tc := range map[string]struct {
-		negotiated    string // "none" leaves it out of the InitializeResult
-		first, second string
-	}{
-		"the negotiated one twice":                 {"2025-11-25", "2025-11-25", "2025-11-25"},
-		"the negotiated one, then another":         {"2025-11-25", "2025-11-25", "2025-03-26"},
-		"another, then the negotiated one":         {"2025-11-25", "2025-03-26", "2025-11-25"},
-		"twice when the upstream named no version": {"none", "2025-11-25", "2025-11-25"},
-	} {
-		t.Run(name, func(t *testing.T) {
-			b := newBridge(t, func(c *Config) { c.Command = []string{fakeBin, "-mcp", "-version=" + tc.negotiated} })
-			s := b.initialize(t, "alice")
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			for _, method := range []string{http.MethodPost, http.MethodGet, http.MethodDelete} {
-				res := b.do(t, ctx, method, "alice", s, `{"jsonrpc":"2.0","id":1,"method":"echo","params":{}}`,
-					"MCP-Protocol-Version", tc.first, "MCP-Protocol-Version", tc.second)
-				body, _ := io.ReadAll(res.Body)
-				if res.StatusCode != http.StatusBadRequest || rpcErrorCode(t, body) != codeInvalidRequest ||
-					!strings.Contains(string(body), "repeated MCP-Protocol-Version") {
-					t.Fatalf("%s: status %d, body %s; want 400 with a -32600 error that names the repeated header", method, res.StatusCode, body)
-				}
-			}
-			// The refused requests left the MCP session and its process as they were.
-			if got := readEvents(t, b.post(t, "alice", s, `{"jsonrpc":"2.0","id":2,"method":"echo","params":{}}`)); len(got) != 1 {
-				t.Fatalf("the MCP session after refused requests got %q", got)
 			}
 		})
 	}
