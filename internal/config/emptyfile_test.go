@@ -88,7 +88,7 @@ var emptyFileContext = map[string]func() []string{
 
 // emptyFileAllowed are the secret settings whose empty file is accepted, and why.
 var emptyFileAllowed = map[string]string{
-	"upstream-env": "an empty environment file passes no variables to a stdio upstream; whether to refuse it is open (PR #442)",
+	"upstream-env": "it is a list of variables for a stdio upstream, and an empty list is legitimate; an empty DSN or credential hides a misconfiguration",
 }
 
 // Every secret setting refuses a named file that is empty, unless emptyFileAllowed says why not, so a
