@@ -245,7 +245,9 @@ func (c *metadataClient) RedirectAllowed(redirectURI string) error {
 	if err := MatchRedirect(c.redirects, redirectURI); err != nil {
 		return err
 	}
-	if c.deny.DeniesRedirect(redirectURI) {
+	// Any registered redirect host, not only the sent URI's: the denylist names every app that
+	// returns to a host (ADR-0008 §9), as refresh (Denied) and DCR registration already apply it.
+	if c.Denied() {
 		return &RedirectError{Reason: ReasonDenied, Registered: c.redirects, Sent: redirectURI}
 	}
 	return nil

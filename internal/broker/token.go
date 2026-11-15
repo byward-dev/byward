@@ -69,7 +69,8 @@ func (b *Broker) token(w http.ResponseWriter, r *http.Request) {
 
 // authenticateClient finds and authenticates the calling client (ADR-0008 §6), for /token and
 // /revoke. On failure it has already answered: 401 invalid_client, or 503 temporarily_unavailable
-// when a CIMD client's metadata could not be fetched for now (draft -03 §6.1).
+// when a client's metadata or keys could not be fetched for now (draft -03 §6.1) or the proxy's
+// store could not read a DCR registration.
 //
 // onRefused, when set, runs before the 401 with the lookup error if the client was definitely
 // refused: its metadata document (registration.ErrMetadataRefused; never for a transient failure,
@@ -95,7 +96,11 @@ func (b *Broker) authenticateClient(w http.ResponseWriter, r *http.Request, now 
 	}
 	client, err := b.cfg.Clients.Client(ctx, clientID)
 	if err != nil {
-		b.clientLookupFailed(ctx, clientID, err)
+		if errors.Is(err, registration.ErrStoreUnavailable) { // a DCR registration could not be read: the store, not the client
+			b.unavailable(w, r, "loading a client registration failed", err)
+			return nil, false
+		}
+		b.clientLookupFailed(ctx, clientID, nil, err)
 		if errors.Is(err, registration.ErrUnavailable) { // draft -03 §6.1: 503 for a transient failure
 			w.Header().Set("Retry-After", cimdRetryAfter)
 			b.tokenFail(w, r, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the client's metadata could not be fetched"})
@@ -113,13 +118,13 @@ func (b *Broker) authenticateClient(w http.ResponseWriter, r *http.Request, now 
 			return nil, false
 		}
 		if errors.Is(err, registration.ErrUnavailable) { // the client's jwks_uri could not be fetched for now
-			b.clientLookupFailed(ctx, clientID, err)
+			b.clientLookupFailed(ctx, clientID, client, err)
 			w.Header().Set("Retry-After", cimdRetryAfter)
 			b.tokenFail(w, r, tokenError{http.StatusServiceUnavailable, "temporarily_unavailable", "the client's keys could not be fetched"})
 			return nil, false
 		}
 		if errors.Is(err, registration.ErrKeysRefused) { // the client's jwks_uri is unusable, not its assertion
-			b.clientLookupFailed(ctx, clientID, err)
+			b.clientLookupFailed(ctx, clientID, client, err)
 		}
 		b.tokenFail(w, r, tokenError{http.StatusUnauthorized, "invalid_client", "client authentication failed"})
 		return nil, false
@@ -160,6 +165,14 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 		// An outage is not the client's fault: the code may still be good.
 		b.cfg.Log.ErrorContext(ctx, "redeeming an authorization code failed", "error", err)
 		b.tokenFail(w, r, tokenError{http.StatusInternalServerError, "server_error", "the proxy could not redeem the code; try again"})
+		return
+	}
+	// The operator denied the app (ADR-0008 §9, #338) after the user signed in: end the grant as a
+	// refresh does, with the denylist's reason, rather than as a misused code. Only the code's own
+	// client: another client's code is a wrong binding below.
+	if d, ok := client.(redirectDenier); ok && pc.ClientID == client.ID() && d.Denied() {
+		b.revoke(r, client.ID(), claims.GrantID, now, reasonClientDenied)
+		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_grant", "the authorization code is invalid or expired"})
 		return
 	}
 	// The code is used up now: any binding failure below means it is being misused, so the grant

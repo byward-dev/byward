@@ -138,13 +138,16 @@ func brokenClients() *memstore.Store {
 	return s
 }
 
-func TestAStoreFailureIsTemporary(t *testing.T) {
+// A store failure is a store outage (ErrStoreUnavailable): never a refusal of the client, and never
+// the CIMD "metadata could not be fetched" (ErrUnavailable), which the broker answers differently.
+func TestAStoreFailureIsAStoreOutageNotARefusal(t *testing.T) {
 	r := newDCR(brokenClients(), newClock().Now, 0)
-	if _, err := r.Register(context.Background(), []byte(`{"client_name":"App","redirect_uris":["https://app.example/cb"]}`)); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("register: %v", err)
-	}
-	if _, err := r.Client(context.Background(), DCRIDPrefix+"x"); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("lookup: %v", err)
+	_, regErr := r.Register(context.Background(), []byte(`{"client_name":"App","redirect_uris":["https://app.example/cb"]}`))
+	_, lookupErr := r.Client(context.Background(), DCRIDPrefix+"x")
+	for name, err := range map[string]error{"register": regErr, "lookup": lookupErr} {
+		if !errors.Is(err, ErrStoreUnavailable) || errors.Is(err, ErrUnavailable) || errors.Is(err, ErrUnknownClient) {
+			t.Errorf("%s: %v, want ErrStoreUnavailable only", name, err)
+		}
 	}
 }
 

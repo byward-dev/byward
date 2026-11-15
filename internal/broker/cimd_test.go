@@ -348,9 +348,34 @@ func TestATransientFailureAtTheConsentAnswerIsServiceUnavailable(t *testing.T) {
 	}
 }
 
-// Only CIMD refusals are logged, with their reason; an unknown static client ID is ordinary noise.
-// Both lookups end in ErrUnknownClient: only the shape of the client ID differs.
-func TestOnlyCIMDRefusalsAreLoggedWithTheirReason(t *testing.T) {
+// An invalid CIMD client ID is never logged as sent: it may carry a password, a query or any length
+// (ADR-0009 §8). A valid one is named on the line (TestAnUnknownClientIDIsLoggedOnlyForCIMD).
+func TestAnInvalidCIMDClientIDIsNotLoggedAsSent(t *testing.T) {
+	longPath := strings.Repeat("z", 600) // past the length limit; not even a part of it may reach the log
+	for name, id := range map[string]string{
+		"a password": "https://alice:hunter2@app.example.com/x.json",
+		"a query":    "https://app.example.com/x.json?token=s3cret",
+		"too long":   "https://app.example.com/" + longPath,
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t, withCIMD(clientdocs.Serve(t, appDocument())))
+			if res := e.do(t, "GET", "/authorize?"+authorizeQuery(url.Values{"client_id": {id}}).Encode(), nil, nil); res.StatusCode != http.StatusBadRequest {
+				t.Fatalf("/authorize: %d, want 400", res.StatusCode)
+			}
+			recs := e.logRecords(t, metadataRefused)
+			if len(recs) != 1 || recs[0]["client_id"] != nil {
+				t.Fatalf("logged %v, want one refusal without the client ID", recs)
+			}
+			if logs := e.logs.String(); strings.Contains(logs, "hunter2") || strings.Contains(logs, "s3cret") || strings.Contains(logs, longPath[:16]) {
+				t.Fatalf("the log repeats the client ID as sent:\n%s", logs)
+			}
+		})
+	}
+}
+
+// Of the client IDs nobody registered, only a CIMD one is logged, naming it, with its reason; an
+// unknown static client ID is ordinary noise. Both lookups end in ErrUnknownClient: only the shape of the ID differs.
+func TestAnUnknownClientIDIsLoggedOnlyForCIMD(t *testing.T) {
 	for name, tc := range map[string]struct {
 		clientID string
 		logged   string // "" means nothing is logged
@@ -364,6 +389,9 @@ func TestOnlyCIMDRefusalsAreLoggedWithTheirReason(t *testing.T) {
 			logs := e.logs.String()
 			if res.StatusCode != http.StatusBadRequest || strings.Contains(logs, metadataRefused) != (tc.logged != "") || !strings.Contains(logs, tc.logged) {
 				t.Fatalf("status %d, want the log to say %q: %s", res.StatusCode, tc.logged, logs)
+			}
+			if recs := e.logRecords(t, metadataRefused); tc.logged != "" && (len(recs) != 1 || recs[0]["client_id"] != tc.clientID) {
+				t.Fatalf("logged %v, want one refusal naming %s", recs, tc.clientID)
 			}
 		})
 	}

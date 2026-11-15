@@ -180,8 +180,13 @@ func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 func (b *Broker) loadClient(w http.ResponseWriter, r *http.Request, clientID, redirect string) (registration.Client, bool) {
 	ctx := r.Context()
 	client, err := b.cfg.Clients.Client(ctx, clientID)
+	if errors.Is(err, registration.ErrStoreUnavailable) { // a DCR registration could not be read: the store, not the client
+		b.cfg.Log.ErrorContext(ctx, "loading a client registration failed", "error", err)
+		b.page(w, r, http.StatusServiceUnavailable, "The proxy could not load this app's details.", "Try again in a minute.")
+		return nil, false
+	}
 	if err != nil {
-		b.clientLookupFailed(ctx, clientID, err)
+		b.clientLookupFailed(ctx, clientID, nil, err)
 	}
 	switch {
 	case errors.Is(err, registration.ErrUnknownClient):
@@ -569,24 +574,38 @@ func (b *Broker) serverError(w http.ResponseWriter, r *http.Request, err error) 
 	b.page(w, r, http.StatusInternalServerError, "Something went wrong on the proxy.", "Try again; if it keeps failing, tell your operator the reference below.")
 }
 
-// Operator log messages for a CIMD client that was refused, and one whose metadata or keys could
-// not be fetched for now.
+// Operator log messages for a client refused by its metadata (a CIMD document, or a CIMD or DCR
+// client's keys at its jwks_uri), and one whose metadata or keys could not be fetched for now.
 const (
 	metadataRefused     = "client metadata refused"
 	metadataUnavailable = "client metadata unavailable"
 )
 
-// clientLookupFailed tells the operator why a Client ID Metadata Document client was refused; the
-// client itself only sees invalid_client or the error page. Static client IDs are not logged.
-func (b *Broker) clientLookupFailed(ctx context.Context, clientID string, err error) {
-	if !registration.IsCIMDURL(clientID) {
+// clientLookupFailed tells the operator why a client registered by its metadata was refused or
+// could not be loaded: a Client ID Metadata Document client for any reason, and a DCR client whose
+// keys at its jwks_uri are unusable or could not be fetched, which CIMD and DCR share. The client
+// itself only sees invalid_client or the error page. An unknown or expired static or DCR client ID
+// is ordinary noise and is not logged; a static client never fetches keys.
+//
+// found is the client whose keys failed, nil when the lookup itself failed. The line names a found
+// client, or a CIMD client ID that is a valid one, so the operator can deny or revoke it; any other
+// client ID as sent may carry a password, a query or any length (ADR-0009 §8).
+func (b *Broker) clientLookupFailed(ctx context.Context, clientID string, found registration.Client, err error) {
+	if !registration.IsCIMDURL(clientID) && !errors.Is(err, registration.ErrUnavailable) && !errors.Is(err, registration.ErrKeysRefused) {
 		return
 	}
 	msg := metadataRefused
 	if errors.Is(err, registration.ErrUnavailable) {
 		msg = metadataUnavailable
 	}
-	b.cfg.Log.WarnContext(ctx, msg, "error", err.Error())
+	switch {
+	case found != nil:
+		b.cfg.Log.WarnContext(ctx, msg, "client_id", found.ID(), "error", err.Error())
+	case registration.IsCIMDURL(clientID) && registration.ValidateCIMDURL(clientID) == nil:
+		b.cfg.Log.WarnContext(ctx, msg, "client_id", clientID, "error", err.Error())
+	default:
+		b.cfg.Log.WarnContext(ctx, msg, "error", err.Error())
+	}
 }
 
 // grantScopes are the scopes a new grant gets: the approved ones but offline_access, which stands for

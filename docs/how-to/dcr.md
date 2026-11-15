@@ -66,7 +66,10 @@ were observed against real Entra on 2026-11-06.
 
 An expired or deleted registration is unknown: the sign-in page says the app is not registered,
 `/token` answers 401 `invalid_client`, and the app registers again.
-A store failure while registering is 503 with `Retry-After: 60`, never a refusal.
+A store failure while registering is 503 with `Retry-After: 60`, never a refusal. A store failure
+while loading a registration at sign-in or `/token` is a store outage, logged at error as "loading a
+client registration failed": the sign-in page answers 503, and `/token` answers 503
+`temporarily_unavailable` with `Retry-After: 5`.
 
 ## Watching it
 
@@ -76,4 +79,6 @@ and reason `dcr`, or outcome `failure` and the reason: `invalid_redirect_uri`,
 rate-limited per client address. `byward_dcr_registrations_total` counts the same outcomes
 ([observability](../reference/observability.md)). Dropped redirect URIs are logged at info as
 "client registration dropped redirect URIs", with the client ID and the URIs (scheme, host and
-path, never the query).
+path, never the query). A client whose keys at its `jwks_uri` are refused or cannot be fetched is
+logged as for a CIMD client, "client metadata refused" or "client metadata unavailable", with the
+client ID and the cause.

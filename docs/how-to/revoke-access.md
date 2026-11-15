@@ -88,7 +88,10 @@ clients are never checked: remove one from the [static clients file](../referenc
 and restart instead. An entry that names a static client stops the proxy from starting. The
 setting's full rules are in [DCR settings](dcr.md#settings).
 
-The denylist stops new registrations and sign-ins, and ends what an app already holds:
+The denylist stops new registrations and sign-ins, and ends what an app already holds. An app
+denied by a host is refused through every one of its redirect URIs, not only the one that returns
+to the denied host; a sign-in under way when the entry is added gets no token, since `/token`
+refuses its code and revokes the grant behind it.
 
 - **Its next refresh** is refused and revokes the grant behind the refresh token: 401
   `invalid_client` for a denied CIMD client ID, 400 `invalid_grant` for an app denied by its
