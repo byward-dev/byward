@@ -54,6 +54,11 @@ func setIdentityHeaders(ctx context.Context, h http.Header) {
 	one(config.HeaderName, id.Name)
 }
 
+// identityHeadersWarning is logged at every start, and reported by check and doctor, while the plain
+// identity headers are on (ADR-0016 §5).
+var identityHeadersWarning = Warning{Message: "plain identity headers are on", Setting: "BYWARD_IDENTITY_HEADERS",
+	Fix: "the upstream gets the user in X-Byward-* headers as well as the assertion; that is safe only when it is reachable through this proxy alone (docs/how-to/plain-identity-headers.md)"}
+
 // percentEncode encodes every UTF-8 byte outside RFC 3986's unreserved set, so no value can carry
 // a comma, a line break or anything else that would change the header; any URL decoder
 // (decodeURIComponent, urllib.parse.unquote) reads it back.
