@@ -69,7 +69,7 @@ func grantFor(id string, at time.Time) store.Grant {
 // The server keeps its state in SQLite in BYWARD_STORE_DIR: a revocation written there
 // before the server starts refuses that grant's tokens after the start.
 func TestServerUsesTheSQLiteStoreInTheStateDirectory(t *testing.T) {
-	env, cfg := storeEnv(t)
+	_, cfg := storeEnv(t)
 	now := time.Now()
 	withStore(t, cfg, func(st *sqlite.Store) {
 		for _, id := range []string{"revoked", "live"} {
@@ -86,10 +86,10 @@ func TestServerUsesTheSQLiteStoreInTheStateDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { stop(t, a) })
-	if _, err := a.validator.Validate(context.Background(), sealAccess(t, cfg, env, "revoked")); err != resource.ErrInvalid {
+	if _, err := a.validator.Validate(context.Background(), sealAccess(t, cfg, "revoked")); err != resource.ErrInvalid {
 		t.Fatalf("token of a grant revoked in the store before the start: %v, want refused", err)
 	}
-	if _, err := a.validator.Validate(context.Background(), sealAccess(t, cfg, env, "live")); err != nil {
+	if _, err := a.validator.Validate(context.Background(), sealAccess(t, cfg, "live")); err != nil {
 		t.Fatalf("token of a live grant: %v", err)
 	}
 }

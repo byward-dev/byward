@@ -37,7 +37,7 @@ func writeKey(t *testing.T, dir, id string, sec1 bool) { assertionkey.Write(t, d
 
 func keys(t *testing.T) (*Keys, string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir := assertionkey.EmptyDir(t)
 	writeKey(t, dir, "2026-01-01", true)
 	writeKey(t, dir, "2026-11-01", false)
 	k, err := LoadKeys(dir, noCheck)
@@ -93,7 +93,7 @@ func TestLoadKeysRefusesWhatCannotSign(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			dir := t.TempDir()
+			dir := assertionkey.EmptyDir(t)
 			tc.setup(t, dir)
 			if _, err := LoadKeys(dir, tc.check); err == nil || !strings.Contains(err.Error(), tc.inErr) {
 				t.Fatalf("err = %v, want %q", err, tc.inErr)
@@ -104,7 +104,7 @@ func TestLoadKeysRefusesWhatCannotSign(t *testing.T) {
 
 // A key file's content never appears in an error: it is a private key.
 func TestLoadKeysErrorsNeverQuoteTheKey(t *testing.T) {
-	dir := t.TempDir()
+	dir := assertionkey.EmptyDir(t)
 	secret := "MHcCAQEEIBsecretsecretsecretsecretsecretsecretsecretsecretoAoGCCqGSM49"
 	write(t, dir, "k1", []byte("-----BEGIN EC PRIVATE KEY-----\n"+secret+"\n-----END EC PRIVATE KEY-----\n"))
 	if _, err := LoadKeys(dir, noCheck); err == nil || strings.Contains(err.Error(), "secretsecret") {
@@ -113,7 +113,7 @@ func TestLoadKeysErrorsNeverQuoteTheKey(t *testing.T) {
 }
 
 func TestLoadKeysSkipsDotfilesAndDirectories(t *testing.T) {
-	dir := t.TempDir()
+	dir := assertionkey.EmptyDir(t)
 	writeKey(t, dir, "k1", false)
 	write(t, dir, ".hidden", []byte("not a key"))
 	if err := os.Mkdir(filepath.Join(dir, "..data"), 0o700); err != nil {
@@ -124,6 +124,53 @@ func TestLoadKeysSkipsDotfilesAndDirectories(t *testing.T) {
 	}
 	if k, err := LoadKeys(dir, noCheck); err != nil || strings.Join(k.KeyIDs(), ",") != "k1" {
 		t.Fatalf("keys %v, err %v", k, err)
+	}
+}
+
+// The sealing keys' rule (L115): anyone could add or replace a signing key, so a world-writable key
+// file is refused, and a world-writable directory too unless it is on a read-only mount. A check
+// that lets everything through (as under --dev) does not relax it.
+func TestLoadKeysRefusesAWorldWritableKeyFileAlwaysAndAWorldWritableDirectoryUnlessReadOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		file     os.FileMode // the key file's mode
+		dir      os.FileMode // the key directory's mode
+		readOnly bool
+		refused  string // "file", "directory", or "" when the keys load
+	}{
+		{"a world-writable file is refused", 0o646, 0o700, false, "file"},
+		{"a world-writable file on a read-only mount is refused", 0o666, 0o700, true, "file"},
+		{"a world-writable directory is refused", 0o600, 0o707, false, "directory"},
+		{"a world-writable directory on a read-only mount loads", 0o644, 0o777 | os.ModeSticky, true, ""}, // a Kubernetes secret volume's root
+		{"a group- and other-readable file and directory load", 0o644, 0o755, false, ""},
+		{"a group-writable file and directory load", 0o660, 0o770, false, ""}, // this rule refuses only the world bit; a group-writable file is the check's to refuse
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := assertionkey.EmptyDir(t)
+			writeKey(t, dir, "k1", false)
+			if err := os.Chmod(filepath.Join(dir, "k1"), tc.file); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(dir, tc.dir); err != nil {
+				t.Fatal(err)
+			}
+			if tc.readOnly { // the other rows run the real check, on a writable temp directory
+				prev := readOnlyFS
+				readOnlyFS = func(p string) bool { return p == dir || filepath.Dir(p) == dir } // the directory and its files
+				t.Cleanup(func() { readOnlyFS = prev })
+			}
+			_, err := LoadKeys(dir, noCheck)
+			want := map[string]string{ // each refusal names the file or directory at fault
+				"file":      "assertion key file " + filepath.Join(dir, "k1") + " is world-writable",
+				"directory": "assertion key directory " + dir + " is world-writable",
+			}[tc.refused]
+			switch {
+			case want == "" && err != nil:
+				t.Fatalf("err = %v, want the keys loaded", err)
+			case want != "" && (err == nil || !strings.Contains(err.Error(), want)):
+				t.Fatalf("err = %v, want %q", err, want)
+			}
+		})
 	}
 }
 
@@ -290,8 +337,7 @@ func TestTheJWKSIsServedCacheable(t *testing.T) {
 // BenchmarkMint is the cost every MCP request to an HTTP upstream pays (ADR-0024 §10; the budget is
 // 2 ms p99 added latency per request).
 func BenchmarkMint(b *testing.B) {
-	dir := b.TempDir()
-	assertionkey.Write(b, dir, "k1", false)
+	dir := assertionkey.Dir(b)
 	k, err := LoadKeys(dir, noCheck)
 	if err != nil {
 		b.Fatal(err)

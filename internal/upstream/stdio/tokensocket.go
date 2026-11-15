@@ -35,11 +35,10 @@ const (
 // DownstreamToken is a downstream API token for a process's user, or the error code that says why
 // there is none (a refusal outcome of package downstream: ConsentRequired, InteractionRequired,
 // SignInExpired, NoUser, Unavailable or Failed; as the answer AskDownstreamToken reads, also
-// TokenRefused or TokenBadRequest). AccessToken is set exactly when Error is empty.
+// TokenRefused or TokenBadRequest). The token (downstream.Token) is set exactly when Error is empty.
 type DownstreamToken struct {
-	AccessToken string
-	ExpiresAt   time.Time
-	Error       string
+	downstream.Token
+	Error string
 }
 
 const (

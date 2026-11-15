@@ -253,6 +253,13 @@ func (b *Broker) throttled(w http.ResponseWriter, r *http.Request, endpoint stri
 	return retry, true
 }
 
+// methodNotAllowed answers 405 to a method the endpoint does not serve, with allow, the methods it
+// does, in the Allow header (RFC 9110 §15.5.6).
+func methodNotAllowed(w http.ResponseWriter, allow string) {
+	w.Header().Set("Allow", allow)
+	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+}
+
 // retrySeconds rounds wait up to whole seconds, at least 1 (RFC 9110 §10.2.3 delay-seconds).
 func retrySeconds(wait time.Duration) int {
 	s := int((wait + time.Second - 1) / time.Second)

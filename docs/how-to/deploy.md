@@ -104,13 +104,15 @@ credential, the stdio upstream's environment file and the PostgreSQL connection 
 each have a `*_FILE` setting. An inline secret refuses to start.
 
 A secret file, the TLS key and each assertion key must be readable by the proxy's user alone:
-mode `0600` or `0400`, owned by uid 65532. A file on a read-only mount passes whatever its mode, as
-on a Kubernetes secret volume (`0644` by default) or a Docker mount with `:ro`. Sealing key files may
-be group- or other-readable, but never world-writable ([sealing keys](sealing-keys.md#the-key-directory)).
+mode `0600` or `0400`, owned by uid 65532. A file on a read-only mount passes this check whatever
+its mode, as on a Kubernetes secret volume (`0644` by default) or a Docker mount with `:ro`. Sealing
+key files may be group- or other-readable. No sealing or assertion key file may be world-writable,
+and neither may its directory unless it is on a read-only mount
+([sealing keys](sealing-keys.md#the-key-directory)).
 
-`--dev` (`BYWARD_DEV`) turns these checks off and accepts inline secrets. Never run production with
-it, nor with `BYWARD_INSECURE_NO_AUTH`: each logs a `development mode relaxation` warning at every
-start.
+`--dev` (`BYWARD_DEV`) turns the permission check off and accepts inline secrets; it does not relax
+the world-writable rule for keys. Never run production with it, nor with `BYWARD_INSECURE_NO_AUTH`:
+each logs a `development mode relaxation` warning at every start.
 
 ### What `--dev` relaxes
 
@@ -119,7 +121,7 @@ This is the whole list. Each relaxation applies only with `--dev`, for trying by
 
 | With `--dev` | Without it | Startup log (`development mode relaxation`) |
 |---|---|---|
-| Secret files' permissions are not checked | A secret file its group or others can read is refused, unless on a read-only mount | `secret file permissions are not checked` |
+| Secret files' permissions are not checked (a world-writable key file, or key directory not on a read-only mount, is still refused) | A secret file its group or others can read is refused, unless on a read-only mount | `secret file permissions are not checked` |
 | Secrets may be given inline, as `BYWARD_<NAME>` instead of `BYWARD_<NAME>_FILE` | An inline secret is refused | `inline secrets accepted: <the settings>` |
 | An http public URL on a loopback host (`http://localhost:8080/mcp`) | The public URL must be https | `http public URL on loopback`; `BYWARD_INSECURE_NO_AUTH` allows it too |
 | An http OIDC issuer on a loopback host, and http endpoints in its discovery document on loopback | The issuer and every endpoint must be https | `http IdP issuer on loopback (<issuer>): …` (on `main`; v0.2.0 does not log it) |

@@ -63,8 +63,7 @@ func TestTheWiredServerSignsInThroughAnOIDCIdP(t *testing.T) {
 	t.Cleanup(h.Close)
 	b := newTestBrowser(t, h.URL, public)
 	send := b.send
-	q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1:5555/callback"}, "response_type": {"code"},
-		"code_challenge": {fakeidp.CodeChallenge("verifier-0123456789-0123456789-0123456789-abc")}, "code_challenge_method": {"S256"}}
+	q := authorizeQuery(url.Values{"redirect_uri": {"http://127.0.0.1:5555/callback"}})
 	page := send(http.MethodGet, "/authorize?"+q.Encode(), nil, nil)
 	body := readAll(t, page)
 	host := strings.TrimPrefix(fake.Issuer(), "http://")
@@ -233,14 +232,12 @@ func signInOIDC(t *testing.T, idp []fakeidp.Option, settings ...string) *oidcSes
 	s.h = httptest.NewServer(s.srv.Public.Handler)
 	t.Cleanup(s.h.Close)
 	s.b = newTestBrowser(t, s.h.URL, public)
-	const verifier = "verifier-0123456789-0123456789-0123456789-abc"
-	q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1/callback"}, "response_type": {"code"}, "scope": {"mcp offline_access"},
-		"code_challenge": {fakeidp.CodeChallenge(verifier)}, "code_challenge_method": {"S256"}}
+	q := authorizeQuery(url.Values{"scope": {"mcp offline_access"}})
 	page := s.b.send(http.MethodGet, "/authorize?"+q.Encode(), nil, nil)
 	back := s.b.viaIdP(s.fake, s.b.allow(page, readAll(t, page)))
 	done, _ := url.Parse(back.Header.Get("Location"))
 	s.tokens(t, url.Values{"grant_type": {"authorization_code"}, "code": {done.Query().Get("code")}, "client_id": {"test-app"},
-		"redirect_uri": {"http://127.0.0.1/callback"}, "code_verifier": {verifier}})
+		"redirect_uri": {"http://127.0.0.1/callback"}, "code_verifier": {testVerifier}})
 	return s
 }
 

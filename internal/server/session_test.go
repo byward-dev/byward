@@ -63,10 +63,7 @@ func TestALegacySessionIsBoundToTheUserWhoStartedIt(t *testing.T) {
 	}
 	// The wiring: sealed with the mcp-session purpose, for alice and this upstream, for the grant
 	// lifetime.
-	ring, err := token.LoadKeyRing(cfg.KeysDir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ring := keyRing(t, cfg)
 	opensAt := func(at time.Time) ([]byte, error) {
 		b, _ := token.NewBox(ring, "mcp-session", func() time.Time { return at })
 		return b.Open(strings.TrimPrefix(id, mcpsession.Prefix))

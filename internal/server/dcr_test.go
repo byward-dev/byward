@@ -81,11 +81,12 @@ func TestADeniedHostIsRefusedAtRegistration(t *testing.T) {
 	}
 }
 
-// A denylist entry that is neither a CIMD client ID nor a host refuses to start, naming the setting.
+// A denylist entry that is not a valid CIMD client ID refuses to start, naming the setting (a host
+// entry that is not a host name is refused earlier, by config).
 func TestABadDenylistEntryRefusesToStartNamingTheSetting(t *testing.T) {
-	cfg := loadConfig(t, "https://m.example/mcp", "BYWARD_CLIENT_DENYLIST=http://app.example/client.json")
-	if _, err := New(cfg, logging.New(io.Discard, "json")); err == nil || !strings.Contains(err.Error(), "BYWARD_CLIENT_DENYLIST") {
-		t.Fatalf("New with a bad denylist entry: %v, want an error naming BYWARD_CLIENT_DENYLIST", err)
+	cfg := loadConfig(t, "https://m.example/mcp", "BYWARD_CLIENT_DENYLIST=https://app.example/client.json?v=1")
+	if _, err := New(cfg, logging.New(io.Discard, "json")); err == nil || !strings.Contains(err.Error(), `BYWARD_CLIENT_DENYLIST: "https://app.example/client.json?v=1"`) {
+		t.Fatalf("New with a bad denylist entry: %v, want an error naming BYWARD_CLIENT_DENYLIST and the entry", err)
 	}
 }
 
