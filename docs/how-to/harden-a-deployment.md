@@ -58,8 +58,8 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) ยง1โ
         file, unless it is on a read-only mount. Use `0600` (or `0400`).
 - [ ] Create the identity assertion's signing key as in [identity assertion](identity-assertion.md):
       a separate directory, `BYWARD_ASSERTION_KEYS_DIR`, mode `0700`, one PEM P-256 file per key,
-      `0600` and owned by the proxy's user. As for sealing keys, a key file other users can read or
-      write is refused unless it is on a read-only mount. A world-writable key file is always refused,
+      `0600` and owned by the proxy's user. As for sealing keys, a key file with any permission for
+      its group or others is refused unless it is on a read-only mount. A world-writable key file is always refused,
       and so is a world-writable directory unless it is on a read-only mount.
 - [ ] Leave `BYWARD_IDENTITY_HEADERS` off unless the upstream cannot verify a JWT. If you turn it
       on, make sure the upstream is reachable through the proxy alone, and run `byward doctor`

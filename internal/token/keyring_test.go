@@ -201,6 +201,22 @@ func TestAKeyFileOthersCanReadFailsTheLoadNamingIt(t *testing.T) {
 	}
 }
 
+// The loader follows a symlinked key file, and so does the check: a link to a key file other users
+// can read is refused, as the file itself would be.
+func TestASymlinkedKeyFileOthersCanReadFailsTheLoad(t *testing.T) {
+	target := filepath.Join(keyDir(t, map[string]string{"real": randomKey(t)}), "real")
+	if err := os.Chmod(target, 0o644); err != nil { //nolint:gosec // G302: the mode under test
+		t.Fatal(err)
+	}
+	dir := keyDir(t, nil)
+	if err := os.Symlink(target, filepath.Join(dir, "k1")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadKeyRing(dir, secretfile.Check); err == nil || !strings.Contains(err.Error(), "has mode 0644") {
+		t.Fatalf("err = %v, want the secret file refusal through the symlink", err)
+	}
+}
+
 // What the loader skips is not a key file, so it is not checked: a loose dotfile or subdirectory in a
 // key directory does not stop the load.
 func TestEntriesTheLoaderSkipsAreNotPermissionChecked(t *testing.T) {
