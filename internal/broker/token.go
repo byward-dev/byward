@@ -178,7 +178,7 @@ func (b *Broker) redeemCode(w http.ResponseWriter, r *http.Request) {
 	// that the code is redeemed it lives as long as its tokens can (ADR-0006 §5).
 	// A refresh token needs offline_access in the grant (grantScopes: a client that registered the
 	// refresh_token grant, and an IdP refresh token) and a client that still allows refresh.
-	offline := slices.Contains(pc.Scopes, OfflineAccess) && client.AllowsRefresh()
+	offline := slices.Contains(pc.Scopes, offlineAccess) && client.AllowsRefresh()
 	expires := now.Add(AccessLifetime)
 	if offline {
 		expires = now.Add(GrantLifetime)

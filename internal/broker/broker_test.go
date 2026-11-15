@@ -790,7 +790,7 @@ func TestCORSAndMethods(t *testing.T) {
 		status             int
 		headers            map[string]string // "" means the header must be absent
 	}{
-		{"metadata preflight", "OPTIONS", md, 204, map[string]string{"Access-Control-Allow-Origin": origin, "Vary": "Origin", "Access-Control-Allow-Credentials": ""}},
+		{"metadata preflight", "OPTIONS", md, 204, map[string]string{"Access-Control-Allow-Origin": origin, "Vary": "Origin", "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS", "Access-Control-Allow-Credentials": ""}},
 		{"metadata POST", "POST", md, 405, map[string]string{"Allow": "GET, HEAD, OPTIONS"}},
 		{"metadata HEAD", "HEAD", md, 200, map[string]string{"Access-Control-Allow-Origin": origin}},
 		{"token GET", "GET", "/token", 405, map[string]string{"Allow": "POST, OPTIONS"}},
@@ -812,6 +812,27 @@ func TestCORSAndMethods(t *testing.T) {
 					t.Errorf("%s = %q, want %q", k, got, want)
 				}
 			}
+			// A 405 ends the request: the endpoint's handler must not run after it.
+			if b, _ := io.ReadAll(res.Body); c.status == http.StatusMethodNotAllowed && string(b) != "method not allowed\n" {
+				t.Errorf("405 body %q, want only the 405's own text", b)
+			}
+		})
+	}
+}
+
+// /token and /revoke read at most 64 KiB of form before they authenticate the client.
+func TestTokenAndRevokeRefuseABodyOver64KiB(t *testing.T) {
+	e := newEnv(t)
+	form := url.Values{"grant_type": {"refresh_token"}, "client_id": {clientID}, "token": {"x"}, "pad": {strings.Repeat("A", 64<<10)}}
+	for _, path := range []string{"/token", "/revoke"} {
+		t.Run(path[1:], func(t *testing.T) {
+			res := e.do(t, "POST", path, form, nil)
+			var body map[string]any
+			_ = json.NewDecoder(res.Body).Decode(&body)
+			wantOAuthError(t, res, body, http.StatusBadRequest, "invalid_request")
+			if d, _ := body["error_description"].(string); !strings.HasPrefix(d, "the request body is not a valid form") {
+				t.Fatalf("error_description %q, want the unreadable-form refusal", d)
+			}
 		})
 	}
 }
@@ -829,11 +850,11 @@ func TestForeignResource(t *testing.T) {
 }
 
 func TestWithoutOfflineLeavesItsInputAlone(t *testing.T) {
-	in := []string{OfflineAccess, "mcp", OfflineAccess}
+	in := []string{offlineAccess, "mcp", offlineAccess}
 	if got := withoutOffline(in); !slices.Equal(got, []string{"mcp"}) {
 		t.Fatalf("withoutOffline = %v, want [mcp]", got)
 	}
-	if !slices.Equal(in, []string{OfflineAccess, "mcp", OfflineAccess}) {
+	if !slices.Equal(in, []string{offlineAccess, "mcp", offlineAccess}) {
 		t.Fatalf("the input changed to %v", in)
 	}
 }

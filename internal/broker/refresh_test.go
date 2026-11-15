@@ -522,7 +522,7 @@ func TestRevokeEitherTokenEndsTheGrant(t *testing.T) {
 		t.Run(which, func(t *testing.T) {
 			e := newEnv(t)
 			body := e.offline(t)
-			e.valid(t, body["access_token"].(string)) // a fresh list, before the revocation
+			e.valid(t, body["access_token"].(string)) // syncs the deny list now, so validNow below sees only this replica's own changes
 			if res := e.revokeToken(t, body[which].(string), clientID); res.StatusCode != http.StatusOK || res.Header.Get("Cache-Control") != "no-store" {
 				t.Fatalf("revoke: %d", res.StatusCode)
 			}
@@ -565,7 +565,7 @@ func TestRevokeAnswers503WhenRevokingFails(t *testing.T) {
 	e := newEnv(t)
 	body := e.offline(t)
 	rt := body["refresh_token"].(string)
-	e.valid(t, body["access_token"].(string)) // a fresh list, before the revocation
+	e.valid(t, body["access_token"].(string)) // syncs the deny list now, so validNow below sees only this replica's own changes
 	e.st.Fail(errStoreDown, "RevokeGrant")    // the lookup works, the revocation does not
 	res := e.revokeToken(t, rt, clientID)
 	if res.StatusCode != http.StatusServiceUnavailable || res.Header.Get("Retry-After") == "" {
@@ -703,6 +703,9 @@ func TestRefreshTokenReuseIsAuditedAsARevocation(t *testing.T) {
 			revoked := e.oneAuditEvent(t, "grant_revoked", map[string]any{"outcome": "success", "client_id": clientID, "grant_id": firstGrant(e.st)})
 			if !strings.Contains(fmt.Sprint(revoked["reason"]), "refresh token reused") {
 				t.Errorf("grant_revoked.reason = %v, want it to say the refresh token was reused", revoked["reason"])
+			}
+			if !strings.Contains(e.logs.String(), "refresh token reused; grant revoked") {
+				t.Errorf("no operator warning for the reuse in the log: %s", e.logs.String())
 			}
 		})
 	}

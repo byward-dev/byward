@@ -287,16 +287,16 @@ func validChallenge(c string) bool {
 	return strings.Trim(c, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_") == ""
 }
 
-// OfflineAccess is the scope that stands for a grant's refresh tokens (ADR-0006 §4).
-const OfflineAccess = "offline_access"
+// offlineAccess is the scope that stands for a grant's refresh tokens (ADR-0006 §4).
+const offlineAccess = "offline_access"
 
 // SupportedScopes are the scopes the broker serves with resource scope scope: the metadata's
 // scopes_supported, what /authorize accepts, and what a DCR client may register.
-func SupportedScopes(scope string) []string { return []string{scope, OfflineAccess} }
+func SupportedScopes(scope string) []string { return []string{scope, offlineAccess} }
 
 // withoutOffline returns a copy of scopes without offline_access.
 func withoutOffline(scopes []string) []string {
-	return slices.DeleteFunc(slices.Clone(scopes), func(s string) bool { return s == OfflineAccess })
+	return slices.DeleteFunc(slices.Clone(scopes), func(s string) bool { return s == offlineAccess })
 }
 
 // scopes returns the requested scopes, defaulting to the resource scope; unknown scopes fail.
@@ -618,5 +618,5 @@ func (b *Broker) grantScopes(ctx context.Context, l login, toks idp.Tokens) []st
 		b.cfg.Log.WarnContext(ctx, "the IdP returned no refresh token, so this grant cannot refresh", "idp", b.cfg.IdPName, "client_id", l.ClientID, "reason", "check that the IdP is asked for refresh tokens; see the IdP's how-to")
 		return scopes
 	}
-	return append(scopes, OfflineAccess)
+	return append(scopes, offlineAccess)
 }

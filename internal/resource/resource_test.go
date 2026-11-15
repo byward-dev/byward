@@ -87,6 +87,7 @@ func TestMetadataCORS(t *testing.T) {
 	r.Header.Set("Origin", "https://app.example")
 	w := serve(MetadataHandler(meta()), r)
 	if w.Code != http.StatusNoContent || w.Header().Get("Access-Control-Allow-Origin") != "https://app.example" ||
+		w.Header().Get("Access-Control-Allow-Methods") != "GET, HEAD, OPTIONS" ||
 		w.Header().Get("Access-Control-Allow-Credentials") != "" || !strings.Contains(w.Header().Get("Access-Control-Expose-Headers"), "WWW-Authenticate") {
 		t.Fatalf("code=%d headers=%v", w.Code, w.Header())
 	}

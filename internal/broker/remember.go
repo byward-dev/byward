@@ -172,7 +172,7 @@ func (b *Broker) afterGrant(w http.ResponseWriter, r *http.Request, l login, id 
 func consentScopes(scopes []string, allowsRefresh bool) []string {
 	out := withoutOffline(scopes)
 	if allowsRefresh {
-		out = append(out, OfflineAccess)
+		out = append(out, offlineAccess)
 	}
 	return out
 }

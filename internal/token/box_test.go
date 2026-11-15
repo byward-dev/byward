@@ -77,7 +77,10 @@ func TestBoxJSONRoundTrip(t *testing.T) {
 	if err := b.OpenJSON(s, &got); err != nil || got.A != "x" {
 		t.Fatalf("round trip: %+v %v", got, err)
 	}
-	notJSON, _ := b.Seal([]byte("{"), now.Add(time.Minute))
+	notJSON, err := b.Seal([]byte("{"), now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := b.OpenJSON(notJSON, &got); err == nil {
 		t.Fatal("opened a box that holds no JSON")
 	}
