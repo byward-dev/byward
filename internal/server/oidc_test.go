@@ -85,12 +85,8 @@ func TestTheWiredServerSignsInThroughAnOIDCIdP(t *testing.T) {
 	if back.StatusCode != http.StatusFound || !strings.Contains(back.Header.Get("Location"), "code=") {
 		t.Fatalf("callback: %d to %q", back.StatusCode, back.Header.Get("Location"))
 	}
-	scrape := httptest.NewRequest("GET", "/metrics", nil)
-	scrape.Host = "127.0.0.1:9090"
-	m := httptest.NewRecorder()
-	srv.Internal.Handler.ServeHTTP(m, scrape)
-	if !strings.Contains(m.Body.String(), `idp="oidc"`) || strings.Contains(m.Body.String(), `idp="entra"`) {
-		t.Fatalf("IdP metrics not labelled oidc:\n%s", m.Body)
+	if m := internalMetrics(t, srv.Internal.Handler); !strings.Contains(m, `idp="oidc"`) || strings.Contains(m, `idp="entra"`) {
+		t.Fatalf("IdP metrics not labelled oidc:\n%s", m)
 	}
 	// Startup tells the operator the redirect URI to register at the IdP, and nothing secret.
 	if l := logs.String(); !strings.Contains(l, "register this redirect URI with the IdP app: https://mcp.example.com/callback/oidc") || strings.Contains(l, "s3cret") {

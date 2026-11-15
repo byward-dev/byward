@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"net/http/httptest"
 	"regexp"
 	"strings"
 	"sync"
@@ -57,10 +56,8 @@ func TestAnOnBehalfOfAlertIsCountedAndLoggedOncePerExchange(t *testing.T) {
 				wg.Wait()
 				synctest.Wait() // the exchange finishes even after its waiters have gone
 				cancel()
-				rec := httptest.NewRecorder()
-				m.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
-				if want := `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="` + string(c.fail.Alert) + `"} 1`; !strings.Contains(rec.Body.String(), want) {
-					t.Errorf("metrics lack %s:\n%s", want, rec.Body.String())
+				if want, got := `byward_idp_alerts_total{idp="entra",operation="on_behalf_of",reason="`+string(c.fail.Alert)+`"} 1`, scrapeMetrics(t, m); !strings.Contains(got, want) {
+					t.Errorf("metrics lack %s:\n%s", want, got)
 				}
 				lines := regexp.MustCompile(`(?m)^.*"msg":"IdP alert: the operator must act".*$`).FindAllString(logs.String(), -1)
 				if len(lines) != 1 {

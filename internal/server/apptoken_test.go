@@ -101,11 +101,7 @@ func (p *appProxy) mcp(t *testing.T, tok string) *http.Response {
 
 func (p *appProxy) metric(t *testing.T, line string) bool {
 	t.Helper()
-	r := httptest.NewRequest(http.MethodGet, "/metrics", nil)
-	r.Host = "127.0.0.1:9090"
-	w := httptest.NewRecorder()
-	p.internal.ServeHTTP(w, r)
-	return strings.Contains(w.Body.String(), line)
+	return strings.Contains(internalMetrics(t, p.internal), line)
 }
 
 // An app with the required role reaches the upstream as a client principal: the assertion is

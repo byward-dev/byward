@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net/http/httptest"
 	"os"
 	"slices"
 	"strings"
@@ -47,9 +46,8 @@ func TestCIMDClientsAreResolvedThroughTheGuardOnlyWhenOn(t *testing.T) {
 			if got.CIMD != tc.on || !errors.Is(err, registration.ErrUnknownClient) || !strings.Contains(err.Error(), wantErr) || (tc.reason == "" && err != registration.ErrUnknownClient) {
 				t.Fatalf("CIMD %v (want %v), lookup error %v", got.CIMD, tc.on, err)
 			}
-			rec := httptest.NewRecorder()
-			srv.Internal.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "http://127.0.0.1:9090/metrics", nil))
-			if counted := strings.Contains(rec.Body.String(), `byward_cimd_fetches_total{outcome="refused"} 1`); counted != tc.on {
+			metrics := internalMetrics(t, srv.Internal.Handler)
+			if counted := strings.Contains(metrics, `byward_cimd_fetches_total{outcome="refused"} 1`); counted != tc.on {
 				t.Fatalf("refused fetch counted: %v, want %v", counted, tc.on)
 			}
 			if c, err := got.Clients.Client(context.Background(), "test-app"); err != nil || c.ID() != "test-app" {
@@ -91,10 +89,9 @@ func TestTheCIMDHostListsReachTheRegistry(t *testing.T) {
 	if !errors.Is(err, registration.ErrUnknownClient) || !strings.Contains(err.Error(), "not allowed") {
 		t.Fatalf("host off the allowlist: %v", err)
 	}
-	rec := httptest.NewRecorder()
-	srv.Internal.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "http://127.0.0.1:9090/metrics", nil))
-	if strings.Contains(rec.Body.String(), "byward_cimd_fetches_total{") {
-		t.Fatalf("a host off the allowlist was fetched:\n%s", rec.Body.String())
+	metrics := internalMetrics(t, srv.Internal.Handler)
+	if strings.Contains(metrics, "byward_cimd_fetches_total{") {
+		t.Fatalf("a host off the allowlist was fetched:\n%s", metrics)
 	}
 	// Trusted hosts count as allowed: this one gets as far as the guard.
 	if _, err := got.Clients.Client(context.Background(), "https://127.0.0.1.nip.example/client.json"); err == nil || strings.Contains(err.Error(), "not allowed") {

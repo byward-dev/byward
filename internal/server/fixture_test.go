@@ -22,10 +22,15 @@ import (
 	"github.com/byward-dev/byward/internal/broker"
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/metrics"
+	"github.com/byward-dev/byward/internal/registration"
+	"github.com/byward-dev/byward/internal/ssrfguard"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/testutil/assertionkey"
+	"github.com/byward-dev/byward/internal/testutil/clientdocs"
+	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/token"
 )
 
@@ -111,6 +116,31 @@ func captureBroker(t testing.TB, wrap func(broker.Config) broker.Config) *broker
 	}
 	t.Cleanup(func() { newBroker = orig })
 	return got
+}
+
+// useFakeEntra points the wired Entra provider at fake, as app with its first secret, until the test
+// ends; the wiring's other settings, its redirect URL among them, stay as configured.
+func useFakeEntra(t testing.TB, fake *fakeidp.IdP, app fakeidp.Client) {
+	t.Helper()
+	orig := newEntraProvider
+	newEntraProvider = func(c entra.Config) (*entra.Provider, error) {
+		c.Tenant, c.ClientID, c.ClientAuth, c.HTTPClient = fake.TenantID(), app.ID, idp.ClientSecret(app.Secrets[0]), fake.HTTPClient()
+		return entra.New(c) // not orig: under a nested use, the innermost fake wins
+	}
+	t.Cleanup(func() { newEntraProvider = orig })
+}
+
+// serveCIMDFrom makes the wired CIMD registry fetch client documents and their keys from served
+// until the test ends.
+func serveCIMDFrom(t testing.TB, served *clientdocs.Server) {
+	t.Helper()
+	orig := newCIMDRegistry
+	newCIMDRegistry = func(c registration.CIMDConfig) *registration.CIMDRegistry {
+		guard := ssrfguard.New(ssrfguard.Config{RootCAs: served.RootCAs, Dial: served.Dial})
+		c.Fetch, c.KeysClient = guard, guard.HTTPClient()
+		return orig(c)
+	}
+	t.Cleanup(func() { newCIMDRegistry = orig })
 }
 
 const (
@@ -226,4 +256,14 @@ func scrapeMetrics(t *testing.T, m *metrics.Metrics) string {
 	rec := httptest.NewRecorder()
 	m.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	return rec.Body.String()
+}
+
+// internalMetrics is what /metrics on the internal listener h shows.
+func internalMetrics(t *testing.T, h http.Handler) string {
+	t.Helper()
+	code, body := getBody(t, h, "127.0.0.1:9090", "/metrics") // the internal listener answers only IP or listed hosts
+	if code != http.StatusOK {
+		t.Fatalf("/metrics on the internal listener: %d %s", code, body)
+	}
+	return body
 }

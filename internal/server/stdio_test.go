@@ -287,11 +287,7 @@ func TestStdioUpstreamWithoutAuthenticationRunsAsTheAnonymousUserAndStopsWithRun
 		}
 	}
 	gauge := func() string {
-		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
-		req.Host = "127.0.0.1:9090" // the internal listener accepts IP literals and localhost only
-		s.Internal.Handler.ServeHTTP(rec, req)
-		for _, line := range strings.Split(rec.Body.String(), "\n") {
+		for _, line := range strings.Split(internalMetrics(t, s.Internal.Handler), "\n") {
 			if strings.HasPrefix(line, "byward_stdio_processes ") {
 				return line
 			}

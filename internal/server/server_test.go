@@ -371,13 +371,8 @@ func TestAdmitCapsRequestsAndStreamsSeparately(t *testing.T) {
 	hold("GET", "", "the first stream")
 	hold("POST", "tools/call", "a request while only a stream slot was taken")
 	hold("POST", "subscriptions/listen", "a subscription while the only request slot was taken")
-	scrape := func() string {
-		rec := httptest.NewRecorder()
-		m.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-		return rec.Body.String()
-	}
 	for _, want := range []string{`byward_upstream_in_flight{kind="request"} 1`, `byward_upstream_in_flight{kind="stream"} 2`} {
-		if got := scrape(); !strings.Contains(got, want) {
+		if got := scrapeMetrics(t, m); !strings.Contains(got, want) {
 			t.Fatalf("metrics lack %s:\n%s", want, got)
 		}
 	}
@@ -392,7 +387,7 @@ func TestAdmitCapsRequestsAndStreamsSeparately(t *testing.T) {
 		}
 	}
 	for _, want := range []string{`byward_upstream_busy_total{kind="request"} 1`, `byward_upstream_busy_total{kind="stream"} 2`} {
-		if got := scrape(); !strings.Contains(got, want) {
+		if got := scrapeMetrics(t, m); !strings.Contains(got, want) {
 			t.Fatalf("metrics lack %s:\n%s", want, got)
 		}
 	}
@@ -659,7 +654,7 @@ func TestInternalListenerAcceptsListedHostsAndAuditsRejections(t *testing.T) {
 	if code, _ := getBody(t, s.Internal.Handler, "rebind.attacker.example:9090", "/metrics"); code != http.StatusMisdirectedRequest {
 		t.Errorf("internal /metrics for a foreign host name = %d, want 421", code)
 	}
-	_, metrics := getBody(t, s.Internal.Handler, "127.0.0.1:9090", "/metrics")
+	metrics := internalMetrics(t, s.Internal.Handler)
 	if !strings.Contains(metrics, `byward_audit_events_total{event="host_rejected",outcome="failure"} 1`) {
 		t.Errorf("the internal listener's rejection must be audited as host_rejected:\n%s", metrics)
 	}
@@ -890,7 +885,7 @@ func TestRejectionsFromOneSourceAreRateLimitedButStillCounted(t *testing.T) {
 	if n := strings.Count(logs.String(), `"event":"host_rejected"`); n != 10 {
 		t.Errorf("logged %d host_rejected records from one source, want the burst of 10", n)
 	}
-	_, metrics := getBody(t, s.Internal.Handler, "127.0.0.1:9090", "/metrics")
+	metrics := internalMetrics(t, s.Internal.Handler)
 	if !strings.Contains(metrics, `byward_audit_events_total{event="host_rejected",outcome="failure"} 15`) {
 		t.Errorf("metrics must count all 15 rejections:\n%s", metrics)
 	}
@@ -906,7 +901,7 @@ func TestRouteLabelsNeverCarryRequestDetails(t *testing.T) {
 	for _, p := range []string{"/mcp?user=alice", "/no-such-route-alice", "/callback/entra?state=alice"} {
 		getBody(t, s.Public.Handler, "mcp.example.com", p)
 	}
-	_, metrics := getBody(t, s.Internal.Handler, "127.0.0.1:9090", "/metrics")
+	metrics := internalMetrics(t, s.Internal.Handler)
 	if strings.Contains(metrics, "alice") {
 		t.Fatalf("a request detail reached a label:\n%s", metrics)
 	}
@@ -1089,7 +1084,7 @@ func TestOAuthRateLimitsKeyOnTheResolvedClientAddress(t *testing.T) {
 	if strings.Contains(logs.String(), `"remote_ip":"3.3.3.3"`) {
 		t.Error("a forwarded address from an untrusted peer reached the log")
 	}
-	_, metrics := getBody(t, s.Internal.Handler, "127.0.0.1:9090", "/metrics")
+	metrics := internalMetrics(t, s.Internal.Handler)
 	if !strings.Contains(metrics, `byward_rate_limited_total{endpoint="authorize"} 3`) {
 		t.Errorf("metrics must count all three refusals:\n%s", metrics)
 	}

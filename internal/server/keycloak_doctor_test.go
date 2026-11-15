@@ -7,11 +7,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/pem"
-	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +19,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
+	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
 // doctor checks the proxy's client credential at a real Keycloak without a user (#288): the right
@@ -90,19 +88,13 @@ func keycloakClientKey(t *testing.T) (keyFile, cert string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "byward-test"},
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pkcs8, err := x509.MarshalPKCS8PrivateKey(key)
-	if err != nil {
-		t.Fatal(err)
+	block, _ := pem.Decode(fakeidp.SelfSignedPEM(t, key, time.Now().Add(time.Hour)))
+	if block == nil {
+		t.Fatal("the self-signed certificate is not PEM")
 	}
 	keyFile = filepath.Join(t.TempDir(), "client-key.pem")
-	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8}), 0o600); err != nil {
+	if err := os.WriteFile(keyFile, fakeidp.PrivateKeyPEM(t, key), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return keyFile, base64.StdEncoding.EncodeToString(der)
+	return keyFile, base64.StdEncoding.EncodeToString(block.Bytes)
 }
