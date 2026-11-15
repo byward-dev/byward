@@ -472,7 +472,7 @@ func TestRefreshRevokesWhenTheUserNoLongerChecksOut(t *testing.T) {
 			if len(lines) != 1 {
 				t.Fatalf("want one %q line, got %v", tc.msg, lines)
 			}
-			if !hasField(lines[0], "reason", tc.reason) || !hasField(lines[0], "idp", tc.idp) {
+			if !fieldIs(lines[0], "reason", tc.reason) || !fieldIs(lines[0], "idp", tc.idp) {
 				t.Errorf("revocation line %v, want reason %v and idp %v (nil: absent)", lines[0], tc.reason, tc.idp)
 			}
 		})
@@ -522,7 +522,7 @@ func TestUnusableStoredIdPTokensRevokeTheGrant(t *testing.T) {
 	// One revocation line, with no reason or IdP: there is no IdP error to name.
 	const msg = "the grant holds no usable IdP refresh token; grant revoked"
 	lines := e.logRecords(t, msg)
-	if len(lines) != 1 || !hasField(lines[0], "reason", nil) || !hasField(lines[0], "idp", nil) {
+	if len(lines) != 1 || !fieldIs(lines[0], "reason", nil) || !fieldIs(lines[0], "idp", nil) {
 		t.Fatalf("revocation lines %v, want one %q line without reason or idp", lines, msg)
 	}
 }
@@ -1107,7 +1107,7 @@ func TestARefreshFailureFromTheIdPLogsItsErrorFields(t *testing.T) {
 					fields = map[string]any{"reason": "hint-1", "idp_error_code": float64(70008), "trace_id": "trace-1", "correlation_id": "corr-1"}
 				}
 				for k, want := range fields {
-					if !hasField(rec, k, want) {
+					if !fieldIs(rec, k, want) {
 						t.Errorf("field %s = %v, want %v (nil: absent): %v", k, rec[k], want, rec)
 					}
 				}
