@@ -588,10 +588,11 @@ func TestDuplicateInFlightRequestIDIs400AndLeavesTheFirstRequestRunning(t *testi
 func TestAResponseAnswersTheRequestWhoseIDHasTheSameValueHoweverWritten(t *testing.T) {
 	b := newBridge(t, nil)
 	s := b.initialize(t, "alice")
+	// Every row has a value of its own, so a row that fails leaves nothing in flight for the next.
 	for _, tc := range []struct{ name, sent, answered string }{
 		{"minus zero as zero", `-0`, `0`},
 		{"an escaped e-acute unescaped", `"\u00e9"`, `"é"`},
-		{"a u-umlaut escaped", `"ü"`, `"\u00fc"`}, // another value than the row above: a failure stays in its row
+		{"a u-umlaut escaped", `"ü"`, `"\u00fc"`},
 		{"an escaped slash unescaped", `"\/x"`, `"/x"`},
 		{"a less-than escaped", `"a<b"`, `"a\u003cb"`},
 		{"an integer past 2^53, written back as sent", `9007199254740993`, `9007199254740993`},

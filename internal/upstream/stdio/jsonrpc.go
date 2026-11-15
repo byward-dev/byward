@@ -127,8 +127,9 @@ func compactID(id json.RawMessage) json.RawMessage {
 // bytes. A string is decoded and re-encoded, so "\u00e9" and "é", "\/x" and "/x", "a<b" and
 // "a\u003cb" match (without HTML escaping, so the key stays readable). An integer (validID allows
 // no fraction or exponent) is its decimal text with -0 as 0, never through float64, which would
-// make 9007199254740993 and 9007199254740992 one key. A string key keeps its quotes, so "1" and 1 stay apart. The key only
-// finds the waiting request: the client gets the upstream's bytes unchanged (ADR-0003 §3).
+// make 9007199254740993 and 9007199254740992 one key. A string key keeps its quotes, so "1" and
+// 1 stay apart. The key only finds the waiting request: the client gets the upstream's bytes
+// unchanged (ADR-0003 §3).
 func idKey(id json.RawMessage) string {
 	c := compactID(id)
 	if len(c) > 0 && c[0] == '"' {

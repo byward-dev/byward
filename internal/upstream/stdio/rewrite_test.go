@@ -82,7 +82,7 @@ func TestIDKeyIsOneKeyPerValue(t *testing.T) {
 	} {
 		ka, kb := idKey(json.RawMessage(tc.a)), idKey(json.RawMessage(tc.b))
 		if got := ka == kb; got != tc.same {
-			t.Errorf("idKey(%s) = %q, idKey(%s) = %q: equal %v, want %v", tc.a, ka, tc.b, kb, got, tc.same)
+			t.Errorf("idKey(%s) = %s, idKey(%s) = %s: equal %v, want %v", tc.a, ka, tc.b, kb, got, tc.same)
 		}
 	}
 }
