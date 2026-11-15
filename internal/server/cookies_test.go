@@ -1,10 +1,7 @@
 package server
 
 import (
-	"os"
 	"testing"
-
-	"github.com/byward-dev/byward/internal/config"
 )
 
 // The broker is wired for __Host- and Secure cookies exactly when the public URL is https; over the
@@ -21,14 +18,11 @@ func TestCookiesAreSecureOnlyOverAnHTTPSPublicURL(t *testing.T) {
 		{"http on loopback with --dev", "http://127.0.0.1:8080/mcp", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			env := append(authEnv(t), "BYWARD_PUBLIC_URL="+tc.publicURL, "BYWARD_UPSTREAM_URL=http://u/mcp")
+			var extra []string
 			if tc.dev {
-				env = append(env, "BYWARD_DEV=true")
+				extra = append(extra, "BYWARD_DEV=true")
 			}
-			cfg, _, err := config.Load(nil, env, os.ReadFile)
-			if err != nil {
-				t.Fatal(err)
-			}
+			cfg := loadConfig(t, tc.publicURL, extra...)
 			got := captureBroker(t, nil)
 			a, err := buildAuth(cfg, discard, Observability{})
 			if err != nil {

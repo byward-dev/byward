@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 )
 
@@ -177,7 +178,7 @@ func keycloakSignIn(t *testing.T, public, user string, want int, verifier string
 	jar, _ := cookiejar.New(nil)
 	c := &http.Client{Jar: jar, Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1:5555/callback"}, "response_type": {"code"},
-		"scope": {"mcp offline_access"}, "code_challenge": {pkce(verifier)}, "code_challenge_method": {"S256"}, "state": {"s"}}
+		"scope": {"mcp offline_access"}, "code_challenge": {fakeidp.CodeChallenge(verifier)}, "code_challenge_method": {"S256"}, "state": {"s"}}
 	page, err := c.Get(public + "/authorize?" + q.Encode()) //nolint:gosec // G107: byward's own loopback address
 	if err != nil {
 		t.Fatal(err)
