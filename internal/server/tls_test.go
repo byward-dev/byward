@@ -190,9 +190,7 @@ func TestASignInAndMCPCallsWorkOverTheProxysTLS(t *testing.T) {
 				}
 			}
 
-			const verifier = "verifier-0123456789-0123456789-0123456789-abc"
-			q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1/callback"}, "response_type": {"code"}, "scope": {"mcp"},
-				"code_challenge": {fakeidp.CodeChallenge(verifier)}, "code_challenge_method": {"S256"}}
+			q := authorizeQuery(url.Values{"scope": {"mcp"}})
 			page := b.send(http.MethodGet, "/authorize?"+q.Encode(), nil, nil)
 			proto("the consent page", page)
 			if page.Header.Get("Strict-Transport-Security") == "" {
@@ -217,7 +215,7 @@ func TestASignInAndMCPCallsWorkOverTheProxysTLS(t *testing.T) {
 				t.Fatalf("the callback sent the browser to %q (%v)", back.Header.Get("Location"), err)
 			}
 			res := b.send(http.MethodPost, "/token", url.Values{"grant_type": {"authorization_code"}, "code": {done.Query().Get("code")},
-				"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1/callback"}, "code_verifier": {verifier}}, nil)
+				"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1/callback"}, "code_verifier": {testVerifier}}, nil)
 			var tokens struct {
 				AccessToken string `json:"access_token"`
 			}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"html"
 	"io"
 	"log/slog"
 	"net/http"
@@ -127,41 +126,27 @@ func (e *oboEnv) upstreamHeaders() []http.Header {
 	return h
 }
 
-var oboFlow = regexp.MustCompile(`name="flow" value="([^"]+)"`)
-
 // signIn runs the sign-in of the static client test-app and returns the token response.
 func (e *oboEnv) signIn(t *testing.T) map[string]any {
 	t.Helper()
-	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	verifier := "verifier-0123456789-0123456789-0123456789-abc"
-	q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1:7777/callback"}, "response_type": {"code"},
-		"state": {"s"}, "code_challenge": {fakeidp.CodeChallenge(verifier)}, "code_challenge_method": {"S256"}, "scope": {"mcp"}}
-	page := e.send(t, c, "GET", "/authorize?"+q.Encode(), nil, nil)
+	b := newTestBrowser(t, e.srv.URL, oboPublic)
+	page := b.send(http.MethodGet, "/authorize?"+authorizeQuery(url.Values{"redirect_uri": {"http://127.0.0.1:7777/callback"},
+		"state": {"s"}, "scope": {"mcp"}}).Encode(), nil, nil)
 	pageBody := readAll(t, page)
-	flow := oboFlow.FindStringSubmatch(pageBody)
-	if page.StatusCode != http.StatusOK || flow == nil {
-		t.Fatalf("consent page: status %d, flow field found %v\n%s", page.StatusCode, flow != nil, pageBody)
+	if page.StatusCode != http.StatusOK {
+		t.Fatalf("consent page: status %d\n%s", page.StatusCode, pageBody)
 	}
-	time.Sleep(broker.ConsentDelay + 100*time.Millisecond) // Allow is accepted only after the delay
-	allow := e.send(t, c, "POST", "/consent", strings.NewReader(url.Values{"flow": {html.UnescapeString(flow[1])}, "action": {"allow"}}.Encode()),
-		http.Header{"Content-Type": {"application/x-www-form-urlencoded"}, "Origin": {oboPublic}, "Sec-Fetch-Site": {"same-origin"}}, page.Cookies()...)
+	allow := b.allow(page, pageBody)
 	if allow.StatusCode != http.StatusSeeOther {
 		t.Fatalf("consent answer: %d %s", allow.StatusCode, readAll(t, allow))
 	}
-	signedIn, err := e.fake.HTTPClient().Get(allow.Header.Get("Location"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = signedIn.Body.Close()
-	cb, _ := url.Parse(signedIn.Header.Get("Location"))
-	back := e.send(t, c, "GET", cb.Path+"?"+cb.RawQuery, nil, nil, allow.Cookies()...)
+	back := b.viaIdP(e.fake, allow)
 	ret, _ := url.Parse(back.Header.Get("Location"))
 	if back.StatusCode != http.StatusFound || ret.Query().Get("code") == "" {
 		t.Fatalf("callback: %d %q", back.StatusCode, back.Header.Get("Location"))
 	}
-	tok := e.send(t, c, "POST", "/token", strings.NewReader(url.Values{"grant_type": {"authorization_code"}, "code": {ret.Query().Get("code")},
-		"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1:7777/callback"}, "code_verifier": {verifier}}.Encode()),
-		http.Header{"Content-Type": {"application/x-www-form-urlencoded"}})
+	tok := b.send(http.MethodPost, "/token", url.Values{"grant_type": {"authorization_code"}, "code": {ret.Query().Get("code")},
+		"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1:7777/callback"}, "code_verifier": {testVerifier}}, nil)
 	var body map[string]any
 	if err := json.NewDecoder(tok.Body).Decode(&body); err != nil || tok.StatusCode != http.StatusOK {
 		t.Fatalf("token: %d %v", tok.StatusCode, err)

@@ -13,6 +13,26 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
+// testVerifier is the PKCE verifier the server tests sign in with; authorizeQuery sends its S256
+// challenge.
+const testVerifier = "verifier-0123456789-0123456789-0123456789-abc"
+
+// authorizeQuery is a valid authorization request from the static client test-app to
+// http://127.0.0.1/callback with testVerifier's challenge; extra overrides a parameter, and a nil
+// value removes it.
+func authorizeQuery(extra url.Values) url.Values {
+	q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1/callback"}, "response_type": {"code"},
+		"code_challenge": {fakeidp.CodeChallenge(testVerifier)}, "code_challenge_method": {"S256"}}
+	for k, v := range extra {
+		if v == nil {
+			delete(q, k)
+		} else {
+			q[k] = v
+		}
+	}
+	return q
+}
+
 // consentFlow finds the sealed flow in the consent page's form.
 var consentFlow = regexp.MustCompile(`name="flow" value="([^"]+)"`)
 

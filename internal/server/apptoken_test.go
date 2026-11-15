@@ -270,8 +270,7 @@ func TestAnAppTokenIsRefusedAtEveryOAuthEndpoint(t *testing.T) {
 		})
 	}
 	t.Run("authorize", func(t *testing.T) {
-		q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1/callback"}, "response_type": {"code"}, "scope": {"mcp"},
-			"code_challenge": {fakeidp.CodeChallenge(strings.Repeat("v", 43))}, "code_challenge_method": {"S256"}}
+		q := authorizeQuery(url.Values{"scope": {"mcp"}, "code_challenge": {fakeidp.CodeChallenge(strings.Repeat("v", 43))}})
 		r, _ := http.NewRequest(http.MethodGet, p.srv.URL+"/authorize?"+q.Encode(), nil)
 		r.Host = "mcp.example.com"
 		r.Header.Set("Authorization", "Bearer "+tok)

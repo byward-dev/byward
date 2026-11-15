@@ -932,8 +932,7 @@ func TestTheServerShowsTheOperatorsConsentPageAndDenyReturnsToTheApp(t *testing.
 	ts := httptest.NewServer(s.Public.Handler)
 	t.Cleanup(ts.Close)
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1/callback"}, "response_type": {"code"},
-		"code_challenge": {strings.Repeat("A", 43)}, "code_challenge_method": {"S256"}, "state": {"s"}}
+	q := authorizeQuery(url.Values{"code_challenge": {strings.Repeat("A", 43)}, "state": {"s"}})
 	r, _ := http.NewRequest("GET", ts.URL+"/authorize?"+q.Encode(), nil)
 	r.Host = "mcp.example.com"
 	res, err := client.Do(r)
@@ -942,7 +941,7 @@ func TestTheServerShowsTheOperatorsConsentPageAndDenyReturnsToTheApp(t *testing.
 	}
 	body, _ := io.ReadAll(res.Body)
 	_ = res.Body.Close()
-	m := regexp.MustCompile(`name="flow" value="([^"]+)"`).FindSubmatch(body)
+	m := consentFlow.FindSubmatch(body)
 	if res.StatusCode != http.StatusOK || m == nil || len(res.Cookies()) != 1 {
 		t.Fatalf("authorize: %d, cookies %v: %s", res.StatusCode, res.Cookies(), body)
 	}
