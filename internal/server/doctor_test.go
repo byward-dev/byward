@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -16,9 +15,8 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 )
-
-const fixtureClientID = "00000000-0000-0000-0000-000000000002"
 
 func TestCheckOfflineAcceptsAWorkingConfigurationAndWritesNothing(t *testing.T) {
 	cfg := loadConfig(t, "https://mcp.example.com/mcp")
@@ -56,9 +54,9 @@ func TestCheckOfflineFindsWhatStartupWould(t *testing.T) {
 		{"a Google-only gate list with Entra", func(_ *testing.T, env []string) []string {
 			return append(env, "BYWARD_GATE_HOSTED_DOMAINS=example.com")
 		}, "BYWARD_GATE_HOSTED_DOMAINS"},
-		{"client denylist entry that is neither a URL nor a host", func(_ *testing.T, env []string) []string {
-			return append(env, "BYWARD_CLIENT_DENYLIST=not a host")
-		}, "BYWARD_CLIENT_DENYLIST: \"not a host\" is neither"},
+		{"client denylist entry that is not a valid CIMD client ID", func(_ *testing.T, env []string) []string {
+			return append(env, "BYWARD_CLIENT_DENYLIST=https://app.example/client.json?v=1")
+		}, `BYWARD_CLIENT_DENYLIST: "https://app.example/client.json?v=1"`},
 		{"secret file readable by other users", func(t *testing.T, env []string) []string {
 			for _, kv := range env {
 				if f, ok := strings.CutPrefix(kv, "BYWARD_ENTRA_CLIENT_SECRET_FILE="); ok {
@@ -106,10 +104,7 @@ func TestCheckOfflineWarnsOfAnExpiringSecret(t *testing.T) {
 }
 
 func TestCheckOfflineWithoutAuthSaysOnlyTheSettingsWereChecked(t *testing.T) {
-	cfg, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_INSECURE_NO_AUTH=true"}, os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadNoAuthConfig(t, "http://u/mcp")
 	if w, err := checkOffline(cfg); err != nil || len(w) != 1 || !strings.Contains(w[0].Message, "authentication is off") {
 		t.Fatalf("warnings %v, err %v", w, err)
 	}
@@ -134,8 +129,7 @@ func runProxy(t *testing.T, extra ...string) running {
 	srv.Config.Handler = s.Public.Handler
 	srv.Start()
 	t.Cleanup(srv.Close)
-	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
-		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{"s3cret-entra"}}))
+	fake := fixtureEntra(t)
 	return running{cfg: cfg, fake: fake}
 }
 
@@ -229,10 +223,7 @@ func TestDoctorNamesTheSettingsInFixes(t *testing.T) {
 }
 
 func TestDoctorWithoutAuthChecksOnlyTheUpstreamAndTheTrustStoreAndWarns(t *testing.T) {
-	cfg, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_INSECURE_NO_AUTH=true"}, os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadNoAuthConfig(t, "http://u/mcp")
 	rep, err := Doctor(context.Background(), cfg, DoctorOptions{Proxy: &http.Client{Transport: refuse{}}})
 	if err != nil || len(rep.Checks) != 3 || rep.Checks[0].Name != "upstream" || rep.Checks[1].Name != "trust store" || rep.Checks[2].Name != "authentication" || rep.Checks[2].Status != doctor.Warn ||
 		!strings.Contains(rep.Checks[2].Message, "authentication is off") || rep.ExitCode() != 0 {
@@ -248,11 +239,7 @@ func TestStartupLogsAnExpiredSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.closeStore() })
-	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
-		var rec struct{ Level, Msg, Setting string }
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			t.Fatal(err)
-		}
+	for _, rec := range logsink.Records[struct{ Level, Msg, Setting string }](t, logs.String()) {
 		if rec.Level == "WARN" && rec.Setting == "BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT" && strings.Contains(rec.Msg, "expired on 2020-01-01") {
 			return
 		}
@@ -290,8 +277,7 @@ func TestCheckOfflineAndDoctorCheckAStdioUpstreamWithoutStartingIt(t *testing.T)
 	if _, err := checkOffline(cfg); err != nil {
 		t.Fatalf("check --offline: %v", err)
 	}
-	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
-		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{"s3cret-entra"}}))
+	fake := fixtureEntra(t)
 	rep, err := Doctor(context.Background(), cfg, DoctorOptions{IdP: fake.HTTPClient(), Proxy: &http.Client{Transport: refuse{}}})
 	if err != nil {
 		t.Fatal(err)

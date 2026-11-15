@@ -170,6 +170,28 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"cimd single-label host", "BYWARD_CIMD_TRUSTED_HOSTS=localhost", `BYWARD_CIMD_TRUSTED_HOSTS: "localhost" is not a host name such as claude.ai: give a name with at least one dot`},
 		{"cimd unicode host", "BYWARD_CIMD_TRUSTED_HOSTS=bücher.example", `BYWARD_CIMD_TRUSTED_HOSTS: the host "bücher.example" is not ASCII`},
 		{"client denylist blank", "BYWARD_CLIENT_DENYLIST= ,", "BYWARD_CLIENT_DENYLIST is set but lists nothing"},
+		// A host entry follows the CIMD host lists' rule (but may end in a dot), so an entry that could never match a
+		// redirect host fails at load instead of denying nothing.
+		{"client denylist http URL", "BYWARD_CLIENT_DENYLIST=http://app.example/client.json", `BYWARD_CLIENT_DENYLIST: "http://app.example/client.json" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
+		{"client denylist double dot", "BYWARD_CLIENT_DENYLIST=a..b", `BYWARD_CLIENT_DENYLIST: "a..b" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
+		{"client denylist leading dot", "BYWARD_CLIENT_DENYLIST=.bad.example", `BYWARD_CLIENT_DENYLIST: ".bad.example" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
+		{"client denylist two trailing dots", "BYWARD_CLIENT_DENYLIST=app.example..", `BYWARD_CLIENT_DENYLIST: "app.example.." is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
+		{"client denylist inner tab", "BYWARD_CLIENT_DENYLIST=bad\tx.example", `BYWARD_CLIENT_DENYLIST: "bad\tx.example" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
+		{"client denylist percent-encoding", "BYWARD_CLIENT_DENYLIST=%62ad.example", `BYWARD_CLIENT_DENYLIST: "%62ad.example" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
+		{"client denylist brackets", "BYWARD_CLIENT_DENYLIST=[bad].example", `BYWARD_CLIENT_DENYLIST: "[bad].example" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
+		{"client denylist host with a port", "BYWARD_CLIENT_DENYLIST=app.example:443", `BYWARD_CLIENT_DENYLIST: "app.example:443" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
+		{"client denylist single-label host among good ones", "BYWARD_CLIENT_DENYLIST=app.example,localhost", `BYWARD_CLIENT_DENYLIST: "localhost" is neither a CIMD client ID (an https URL) nor a host name such as app.example: give a name with at least one dot`},
+		{"client denylist https without slashes", "BYWARD_CLIENT_DENYLIST=https:app.example", `BYWARD_CLIENT_DENYLIST: "https:app.example" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
+		// A browser reads a host ending in a number as IPv4, which it reaches by other spellings too.
+		{"client denylist IPv4 address", "BYWARD_CLIENT_DENYLIST=203.0.113.5", `BYWARD_CLIENT_DENYLIST: "203.0.113.5" ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match (127.1 and 0x7f000001 are 127.0.0.1), or none at all; deny the app by its CIMD client ID or its redirect host's name`},
+		{"client denylist short IPv4 address", "BYWARD_CLIENT_DENYLIST=127.1", `BYWARD_CLIENT_DENYLIST: "127.1" ends in a number`},
+		{"client denylist IPv4 address with a trailing dot", "BYWARD_CLIENT_DENYLIST=127.1.", `BYWARD_CLIENT_DENYLIST: "127.1." ends in a number`},
+		{"client denylist hex IPv4 address", "BYWARD_CLIENT_DENYLIST=127.0x1", `BYWARD_CLIENT_DENYLIST: "127.0x1" ends in a number`},
+		{"client denylist host ending in an empty hex number", "BYWARD_CLIENT_DENYLIST=app.0x", `BYWARD_CLIENT_DENYLIST: "app.0x" ends in a number`},
+		{"client denylist host ending in every hex digit", "BYWARD_CLIENT_DENYLIST=a.0X0123456789abcdefABCDEF", `BYWARD_CLIENT_DENYLIST: "a.0X0123456789abcdefABCDEF" ends in a number`},
+		{"client denylist host ending in every decimal digit", "BYWARD_CLIENT_DENYLIST=a.0123456789", `BYWARD_CLIENT_DENYLIST: "a.0123456789" ends in a number`},
+		{"client denylist unicode host with a trailing dot", "BYWARD_CLIENT_DENYLIST=bücher.example.", `BYWARD_CLIENT_DENYLIST: the host "bücher.example." is not ASCII`},
+		{"client denylist unicode host", "BYWARD_CLIENT_DENYLIST=bücher.example", `BYWARD_CLIENT_DENYLIST: the host "bücher.example" is not ASCII; give its ASCII (xn--) form`},
 		{"gate tenants blank", "BYWARD_GATE_TENANTS=,", "BYWARD_GATE_TENANTS is set but lists nothing"},
 		{"gate roles blank", "BYWARD_GATE_ROLES= ,,", "BYWARD_GATE_ROLES is set but lists nothing"},
 		{"gate groups blank", "BYWARD_GATE_GROUPS= ", "BYWARD_GATE_GROUPS is set but lists nothing"},
@@ -645,15 +667,29 @@ func TestCIMDHostListsAreNormalizedAndRefusedWhileCIMDIsOff(t *testing.T) {
 	}
 }
 
-// DCR is on unless turned off; the denylist takes comma-separated entries (each entry is checked
-// where it is used, internal/registration).
+// DCR is on unless turned off; the denylist takes comma-separated entries, as given: a CIMD client ID
+// (checked where it is used, internal/registration) or a host name, which may end in a dot.
 func TestDCRIsOnByDefaultAndTheDenylistTakesCommaSeparatedEntries(t *testing.T) {
-	c, err := load(t, nil, "BYWARD_CLIENT_DENYLIST=https://evil.example/client.json, app.example")
-	if err != nil || !c.DCR || !slices.Equal(c.ClientDenylist, []string{"https://evil.example/client.json", "app.example"}) {
-		t.Fatalf("DCR %v, denylist %q, %v", c.DCR, c.ClientDenylist, err)
+	c, err := load(t, nil, "BYWARD_CLIENT_DENYLIST=https://evil.example/client.json, app.example.")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if c, err = load(t, nil, "BYWARD_DCR=false"); err != nil || c.DCR {
-		t.Fatalf("DCR off: %v, %v", c.DCR, err)
+	if !c.DCR || !slices.Equal(c.ClientDenylist, []string{"https://evil.example/client.json", "app.example."}) {
+		t.Fatalf("DCR %v, denylist %q", c.DCR, c.ClientDenylist)
+	}
+	// Names that only look like numbers are host names: hex letters in the last label, digits in
+	// another one or only at its start, 0x followed by something other than hex digits only (app.0x7g,
+	// a.0xg, a.0xag).
+	for _, host := range []string{"app.de", "app.cafe", "123.example", "0x7f.example", "app.0x7g", "a.0xg", "a.0xag", "app.1example"} {
+		if _, err := load(t, nil, "BYWARD_CLIENT_DENYLIST="+host); err != nil {
+			t.Errorf("%q refused: %v", host, err)
+		}
+	}
+	if c, err = load(t, nil, "BYWARD_DCR=false"); err != nil {
+		t.Fatal(err)
+	}
+	if c.DCR {
+		t.Fatal("DCR on with BYWARD_DCR=false")
 	}
 }
 
@@ -706,6 +742,7 @@ func TestHostSettingsLoadUnderscoresIDNANamesAndMixedCase(t *testing.T) {
 			"BYWARD_CIMD_TRUSTED_HOSTS=" + host:          func(c *Config) []string { return c.CIMDTrustedHosts },
 			"BYWARD_CIMD_ALLOWED_HOSTS=" + host:          func(c *Config) []string { return c.CIMDAllowedHosts },
 			"BYWARD_ALLOWED_HOSTS=" + host:               func(c *Config) []string { return c.AllowedHosts },
+			"BYWARD_CLIENT_DENYLIST=" + host:             func(c *Config) []string { return c.ClientDenylist },
 		} {
 			t.Run(setting, func(t *testing.T) {
 				c, err := load(t, nil, setting)
@@ -713,8 +750,8 @@ func TestHostSettingsLoadUnderscoresIDNANamesAndMixedCase(t *testing.T) {
 					t.Fatal(err)
 				}
 				want := lower
-				if strings.HasPrefix(setting, "BYWARD_PUBLIC_URL=") {
-					want = host // url.Parse keeps the host as given
+				if strings.HasPrefix(setting, "BYWARD_PUBLIC_URL=") || strings.HasPrefix(setting, "BYWARD_CLIENT_DENYLIST=") {
+					want = host // url.Parse keeps the host as given; the denylist keeps its entries as given
 				}
 				if got := stored(c); !slices.Equal(got, []string{want}) {
 					t.Errorf("stored %v, want [%s]", got, want)

@@ -1005,16 +1005,9 @@ func (e *env) noAuditEvent(t *testing.T, name string) {
 func (e *env) auditEvents(t *testing.T, name string) []map[string]any {
 	t.Helper()
 	var out []map[string]any
-	for _, line := range strings.Split(strings.TrimSpace(e.audit.String()), "\n") {
-		if line == "" {
-			continue
-		}
-		var rec map[string]any
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			t.Fatalf("audit line is not JSON: %s", line)
-		}
+	for _, rec := range logsink.Records[map[string]any](t, e.audit.String()) {
 		if rec["log.type"] != "audit" {
-			t.Fatalf("audit line without log.type=audit: %s", line)
+			t.Fatalf("audit record without log.type=audit: %v", rec)
 		}
 		if rec["event"] == name {
 			out = append(out, rec)

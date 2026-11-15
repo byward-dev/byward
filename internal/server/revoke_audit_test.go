@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"log/slog"
 	"maps"
 	"strings"
@@ -22,13 +21,9 @@ import (
 func grantRevokedRecords(t *testing.T, log string) []map[string]any {
 	t.Helper()
 	var out []map[string]any
-	for _, line := range strings.Split(strings.TrimSpace(log), "\n") {
-		if !strings.Contains(line, `"event":"grant_revoked"`) {
+	for _, rec := range logsink.Records[map[string]any](t, log) {
+		if rec["event"] != "grant_revoked" {
 			continue
-		}
-		var rec map[string]any
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			t.Fatalf("not JSON: %s", line)
 		}
 		delete(rec, "time")
 		out = append(out, rec)

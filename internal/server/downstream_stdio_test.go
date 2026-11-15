@@ -27,27 +27,27 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
 	alice := stdio.Identity{Subject: "tid-1:oid-a", PrincipalType: resource.PrincipalUser, Grant: "grant-a", Client: "client-a"}
 	for _, tc := range []struct {
-		name         string
-		id           func(stdio.Identity) stdio.Identity
-		assertionErr error
-		expires      time.Time // of the stored IdP token; zero is an hour from now
-		noExpiry     bool      // the IdP gave the stored token no expiry: only the token's own counts
-		exchangeErr  error
-		wantToken    string
-		wantError    string
-		wantAudit    bool
-		exchanged    bool // an exchange with Entra ran: never without a user, a grant or a current sign-in
-		wantAlert    string
-		wantReason   string   // the refusal line's whole reason, for an alert
-		wantIdP      []string // the IdP's identifiers the refusal line must carry (ADR-0021 §7)
+		name        string
+		id          func(stdio.Identity) stdio.Identity
+		idpTokenErr error
+		expires     time.Time // of the stored IdP token; zero is an hour from now
+		noExpiry    bool      // the IdP gave the stored token no expiry: only the token's own counts
+		exchangeErr error
+		wantToken   string
+		wantError   string
+		wantAudit   bool
+		exchanged   bool // an exchange with Entra ran: never without a user, a grant or a current sign-in
+		wantAlert   string
+		wantReason  string   // the refusal line's whole reason, for an alert
+		wantIdP     []string // the IdP's identifiers the refusal line must carry (ADR-0021 §7)
 	}{
 		{name: "a signed-in user", wantToken: "graph-token", exchanged: true},
 		{name: "a stored token without an expiry", noExpiry: true, wantToken: "graph-token", exchanged: true},
 		{name: "an app-only caller", id: func(i stdio.Identity) stdio.Identity { i.PrincipalType = resource.PrincipalClient; return i }, wantError: "no_user"},
 		{name: "no grant yet", id: func(i stdio.Identity) stdio.Identity { i.Grant = ""; return i }, wantError: "no_user"},
 		{name: "a subject that is not an Entra user key", id: func(i stdio.Identity) stdio.Identity { i.Subject = "no-colon"; return i }, wantError: "no_user"},
-		{name: "a grant revoked or signed out since", assertionErr: store.ErrNotFound, wantError: "sign_in_expired"},
-		{name: "a grant that cannot be read", assertionErr: errors.New("the store is down"), wantError: "failed", wantAudit: true},
+		{name: "a grant revoked or signed out since", idpTokenErr: store.ErrNotFound, wantError: "sign_in_expired"},
+		{name: "a grant that cannot be read", idpTokenErr: errors.New("the store is down"), wantError: "failed", wantAudit: true},
 		{name: "the stored IdP token has expired", expires: now.Add(-time.Second), wantError: "sign_in_expired"},
 		{name: "consent missing", exchangeErr: &idp.Error{Code: entra.CodeConsentRequired, TraceID: "trace-1", CorrelationID: "corr-1", Description: "AADSTS65001: for alice@contoso.example"},
 			wantError: "consent_required", wantAudit: true, exchanged: true, wantIdP: []string{`"idp_error_code":65001`, `"trace_id":"trace-1"`, `"correlation_id":"corr-1"`}},
@@ -62,10 +62,10 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 			logs := &logsink.Buffer{}
 			log := logging.New(logs, "json")
 			var exchanges atomic.Int32
-			exchange := func(_ context.Context, tid, assertion string, _ []string) (downstream.Token, error) {
+			exchange := func(_ context.Context, tid, idpToken string, _ []string) (downstream.Token, error) {
 				exchanges.Add(1)
-				if tid != "tid-1" || assertion != "idp-token-of-grant-a" {
-					t.Errorf("exchange for tenant %q with assertion %q, want tid-1 and grant-a's stored token", tid, assertion)
+				if tid != "tid-1" || idpToken != "idp-token-of-grant-a" {
+					t.Errorf("exchange for tenant %q with IdP token %q, want tid-1 and grant-a's stored token", tid, idpToken)
 				}
 				return downstream.Token{AccessToken: "graph-token", ExpiresAt: now.Add(time.Hour)}, tc.exchangeErr
 			}
@@ -76,8 +76,8 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 			o := Observability{Audit: audit.New(log, nil, time.Now), Metrics: metrics.New()}
 			d := &downstreamTokens{cache: downstream.New(alertingExchange(exchange, "entra", log, o), []string{graphUserRead}, 0, func() time.Time { return now }),
 				resource: "https://graph.microsoft.com", idp: "entra", log: log, now: func() time.Time { return now }, o: o,
-				assertion: func(_ context.Context, grant string) (string, time.Time, error) {
-					return "idp-token-of-" + grant, expires, tc.assertionErr
+				idpToken: func(_ context.Context, grant string) (string, time.Time, error) {
+					return "idp-token-of-" + grant, expires, tc.idpTokenErr
 				},
 				consentURL: func(string) string { return "https://login.example/adminconsent" }}
 			id := alice
@@ -99,7 +99,7 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 					t.Fatalf("second ask got %q after %d exchanges, want the cached token after 1", again.AccessToken, exchanges.Load())
 				}
 			}
-			line, audited := auditRecord(logs.String(), "downstream_token_refused")
+			line, audited := auditRecord(t, logs.String(), "downstream_token_refused")
 			if audited != tc.wantAudit {
 				t.Fatalf("audited %v, want %v: %s", audited, tc.wantAudit, logs.String())
 			}

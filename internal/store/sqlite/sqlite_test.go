@@ -438,7 +438,7 @@ func must(t *testing.T, err error) {
 }
 
 func TestFirstOpenIsANormalStart(t *testing.T) {
-	s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
+	s := openTemp(t)
 	if got := s.Startup(); got != (Startup{Epoch: 1}) {
 		t.Fatalf("first open: %+v, want a normal start at epoch 1", got)
 	}
@@ -475,7 +475,7 @@ func TestCorruptCounterFileFailsOpen(t *testing.T) {
 
 func TestCollectDropsExpiredSpentRecords(t *testing.T) {
 	storetest.CollectDropsExpiredSpent(t, func(t *testing.T) (store.Store, func(storetest.Spent) int) {
-		s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
+		s := openTemp(t)
 		return s, func(kind storetest.Spent) (n int) {
 			must(t, s.db.QueryRow("SELECT count(*) FROM "+string(kind)).Scan(&n))
 			return n
@@ -497,7 +497,7 @@ func TestEverySchemaVersionHasAFixture(t *testing.T) {
 var fixtureSince = storetest.FixtureSince{RevokeAll: 3, RotatedToken: 2, Client: 4, Consent: 5, SpentLogin: 6, SpentAssertion: 7, MarkedConsents: 8}
 
 func TestFixturesMigrateToTheCurrentSchemaKeepingTheirData(t *testing.T) {
-	want := schemaOf(t, open(t, t.TempDir(), filepath.Join(t.TempDir(), "w")).db)
+	want := schemaOf(t, openTemp(t).db)
 	for v := 1; v <= schemaVersion(); v++ {
 		t.Run(fmt.Sprintf("v%d", v), func(t *testing.T) {
 			dir := t.TempDir()
@@ -662,7 +662,7 @@ func TestAnOlderBinarysReapprovalUnmarksTheConsent(t *testing.T) {
 }
 
 func TestPingAnswersWhileOpenAndFailsAfterClose(t *testing.T) {
-	s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
+	s := openTemp(t)
 	if err := s.Ping(ctx); err != nil {
 		t.Fatalf("Ping on an open store: %v", err)
 	}
@@ -675,7 +675,7 @@ func TestPingAnswersWhileOpenAndFailsAfterClose(t *testing.T) {
 // Only the empty scope and "all" are scopes: the database itself refuses anything else, so no write path can
 // invent a revocation that covers more than it names.
 func TestTheRevocationScopeIsCheckedByTheDatabase(t *testing.T) {
-	s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
+	s := openTemp(t)
 	insert := func(scope string) error {
 		_, err := s.db.Exec("INSERT INTO revocations (grant_id, subject, scope, before, at) VALUES ('', '', ?, 1, 1)", scope)
 		return err
@@ -713,5 +713,37 @@ func TestARenewalTooSmallToMatterIsNotWritten(t *testing.T) {
 	must(t, s.UseClient(ctx, "dcr-a", t0.Add(24*time.Hour), t0.Add(24*time.Hour+90*24*time.Hour), 24*time.Hour))
 	if read() == before {
 		t.Fatal("a use extending by minExtension was not written")
+	}
+}
+
+// A reuse whose revocation cannot be written fails the call and rolls back: the grant and its user's
+// consent to its client survive, and the caller never sees ErrReused for a revocation that did not
+// happen.
+func TestAReuseWhoseRevocationFailsReportsTheFailureAndKeepsTheGrant(t *testing.T) {
+	s := openTemp(t)
+	if _, err := s.CreateGrant(ctx, grant("g", "tid:alice")); err != nil {
+		t.Fatal(err)
+	}
+	tok := func(n byte) store.RefreshToken {
+		return store.RefreshToken{Hash: sha256.Sum256([]byte{n}), GrantID: "g", ClientID: "c", CreatedAt: t0, IdleExpiresAt: t0.Add(time.Hour)}
+	}
+	consent := store.Consent{Key: store.ConsentKey{Issuer: "https://idp.example/v2.0", Subject: "tid:alice", ClientID: "c",
+		Redirect: "http://127.0.0.1/callback", Resource: "https://mcp.example.com/mcp"},
+		Scopes: []string{"mcp"}, ApprovedAt: t0, ExpiresAt: t0.Add(24 * time.Hour)}
+	must(t, s.RememberConsent(ctx, consent))
+	must(t, s.PutRefreshToken(ctx, tok(1)))
+	must(t, s.RotateRefreshToken(ctx, store.RotateRequest{Old: tok(1).Hash, Next: tok(2), Now: t0.Add(time.Minute)}))
+	if _, err := s.db.ExecContext(ctx, "CREATE TRIGGER refuse BEFORE INSERT ON revocations BEGIN SELECT RAISE(ABORT, 'revocation refused by the test'); END"); err != nil {
+		t.Fatal(err)
+	}
+	err := s.RotateRefreshToken(ctx, store.RotateRequest{Old: tok(1).Hash, Next: tok(3), Now: t0.Add(2 * time.Minute)})
+	if err == nil || errors.Is(err, store.ErrReused) || !strings.Contains(err.Error(), "revocation refused by the test") {
+		t.Fatalf("reuse with a failing revocation = %v, want the trigger's refusal", err)
+	}
+	if _, err := s.Grant(ctx, "g"); err != nil {
+		t.Fatalf("grant after the failed reuse: %v, want it kept", err)
+	}
+	if _, err := s.Consent(ctx, consent.Key); err != nil {
+		t.Fatalf("consent after the failed reuse: %v, want it kept", err)
 	}
 }

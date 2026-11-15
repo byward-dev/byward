@@ -17,6 +17,7 @@ import (
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/store/memory"
 	"github.com/byward-dev/byward/internal/testutil/clientdocs"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/testutil/memstore"
 )
 
@@ -190,10 +191,10 @@ func TestDroppedRedirectsAreLoggedAtInfoWithTheClientID(t *testing.T) {
 			if res.StatusCode != http.StatusCreated {
 				t.Fatalf("register: %d %v", res.StatusCode, reg)
 			}
-			var line map[string]any
-			for _, l := range strings.Split(strings.TrimSpace(e.logs.String()), "\n") {
-				if strings.Contains(l, "dropped redirect URIs") {
-					_ = json.Unmarshal([]byte(l), &line)
+			var line map[string]any // the last "dropped redirect URIs" record
+			for _, rec := range logsink.Records[map[string]any](t, e.logs.String()) {
+				if rec["msg"] == "client registration dropped redirect URIs" {
+					line = rec
 				}
 			}
 			reason, _ := line["reason"].(string)

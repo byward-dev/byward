@@ -347,8 +347,8 @@ func (p *Provider) identity(ctx context.Context, raw, nonce string) (idp.Identit
 	}, nil
 }
 
-// checkAccessToken makes sure the login returned our own v2 access_as_user token, the OBO
-// assertion (ADR-0012 §4); otherwise the app registration is misconfigured.
+// checkAccessToken makes sure the login returned our own v2 access_as_user token, the IdP token
+// On-Behalf-Of presents (ADR-0012 §4); otherwise the app registration is misconfigured.
 func (p *Provider) checkAccessToken(ctx context.Context, raw string) error {
 	hint := "expose the " + accessAsUser + " scope on the app registration with requestedAccessTokenVersion 2"
 	if raw == "" {

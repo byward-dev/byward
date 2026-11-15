@@ -195,7 +195,8 @@ bounds, but there are no settings for that yet.
   after its last use.
 - No client secret is ever issued; redirect URIs follow ADR-0009, and failing ones are dropped.
 - The operator's denylist (`BYWARD_CLIENT_DENYLIST`) refuses CIMD client IDs and redirect hosts at
-  registration, `/authorize`, consent and `/token`. A denied app's next refresh revokes its grant.
+  registration, `/authorize`, consent and `/token`; a Unicode redirect host matches its `xn--` form,
+  where the browser goes. A denied app's next refresh revokes its grant.
   A denied CIMD client ID's access tokens are refused at once; those of an app denied by its
   redirect host run out within an hour (#338).
 - Every outcome, refusals included (invalid, rate-limited, capped, store failure), is audited
@@ -276,7 +277,9 @@ the client and redirect URI again. This is accepted behaviour, not a gap: no tok
 **Keys:**
 
 - Keys come from `BYWARD_KEYS_DIR`. The file that sorts last seals; every file opens.
-  World-writable files are refused.
+  A world-writable key file is refused, and so is a world-writable directory unless it is on a
+  read-only mount. The identity assertion's signing keys (`BYWARD_ASSERTION_KEYS_DIR`) follow the
+  same rule; `--dev` relaxes it for neither.
 - One key ring seals access tokens, codes, IdP tokens, login cookies and consent flows. The purpose
   or token type is bound as associated data. ADR-0006 §8 asks for a separate key per purpose; that
   is a follow-up.

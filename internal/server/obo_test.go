@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"html"
 	"io"
 	"log/slog"
 	"net/http"
@@ -127,41 +126,27 @@ func (e *oboEnv) upstreamHeaders() []http.Header {
 	return h
 }
 
-var oboFlow = regexp.MustCompile(`name="flow" value="([^"]+)"`)
-
 // signIn runs the sign-in of the static client test-app and returns the token response.
 func (e *oboEnv) signIn(t *testing.T) map[string]any {
 	t.Helper()
-	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	verifier := "verifier-0123456789-0123456789-0123456789-abc"
-	q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1:7777/callback"}, "response_type": {"code"},
-		"state": {"s"}, "code_challenge": {fakeidp.CodeChallenge(verifier)}, "code_challenge_method": {"S256"}, "scope": {"mcp"}}
-	page := e.send(t, c, "GET", "/authorize?"+q.Encode(), nil, nil)
+	b := newTestBrowser(t, e.srv.URL, oboPublic)
+	page := b.send(http.MethodGet, "/authorize?"+authorizeQuery(url.Values{"redirect_uri": {"http://127.0.0.1:7777/callback"},
+		"state": {"s"}, "scope": {"mcp"}}).Encode(), nil, nil)
 	pageBody := readAll(t, page)
-	flow := oboFlow.FindStringSubmatch(pageBody)
-	if page.StatusCode != http.StatusOK || flow == nil {
-		t.Fatalf("consent page: status %d, flow field found %v\n%s", page.StatusCode, flow != nil, pageBody)
+	if page.StatusCode != http.StatusOK {
+		t.Fatalf("consent page: status %d\n%s", page.StatusCode, pageBody)
 	}
-	time.Sleep(broker.ConsentDelay + 100*time.Millisecond) // Allow is accepted only after the delay
-	allow := e.send(t, c, "POST", "/consent", strings.NewReader(url.Values{"flow": {html.UnescapeString(flow[1])}, "action": {"allow"}}.Encode()),
-		http.Header{"Content-Type": {"application/x-www-form-urlencoded"}, "Origin": {oboPublic}, "Sec-Fetch-Site": {"same-origin"}}, page.Cookies()...)
+	allow := b.allow(page, pageBody)
 	if allow.StatusCode != http.StatusSeeOther {
 		t.Fatalf("consent answer: %d %s", allow.StatusCode, readAll(t, allow))
 	}
-	signedIn, err := e.fake.HTTPClient().Get(allow.Header.Get("Location"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = signedIn.Body.Close()
-	cb, _ := url.Parse(signedIn.Header.Get("Location"))
-	back := e.send(t, c, "GET", cb.Path+"?"+cb.RawQuery, nil, nil, allow.Cookies()...)
+	back := b.viaIdP(e.fake, allow)
 	ret, _ := url.Parse(back.Header.Get("Location"))
 	if back.StatusCode != http.StatusFound || ret.Query().Get("code") == "" {
 		t.Fatalf("callback: %d %q", back.StatusCode, back.Header.Get("Location"))
 	}
-	tok := e.send(t, c, "POST", "/token", strings.NewReader(url.Values{"grant_type": {"authorization_code"}, "code": {ret.Query().Get("code")},
-		"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1:7777/callback"}, "code_verifier": {verifier}}.Encode()),
-		http.Header{"Content-Type": {"application/x-www-form-urlencoded"}})
+	tok := b.send(http.MethodPost, "/token", url.Values{"grant_type": {"authorization_code"}, "code": {ret.Query().Get("code")},
+		"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1:7777/callback"}, "code_verifier": {testVerifier}}, nil)
 	var body map[string]any
 	if err := json.NewDecoder(tok.Body).Decode(&body); err != nil || tok.StatusCode != http.StatusOK {
 		t.Fatalf("token: %d %v", tok.StatusCode, err)
@@ -230,8 +215,8 @@ func TestUpstreamGetsADownstreamTokenOnBehalfOfTheUser(t *testing.T) {
 	if sub, _ := jwtClaims(t, assertion)["sub"].(string); !strings.HasPrefix(sub, e.fake.TenantID()+":") {
 		t.Fatalf("assertion sub %q, want the signed-in user's key in tenant %s", sub, e.fake.TenantID())
 	}
-	// No token passthrough: neither the proxy's access token nor the user's IdP token (the
-	// assertion, scp access_as_user) reaches the upstream.
+	// No token passthrough: neither the proxy's access token nor the user's IdP token (scp
+	// access_as_user) reaches the upstream.
 	for name, values := range headers[0] {
 		for _, v := range values {
 			bearer, isBearer := strings.CutPrefix(v, "Bearer ")
@@ -291,7 +276,8 @@ func TestDownstreamRefusalsAreAnsweredInTheProxysName(t *testing.T) {
 			if !strings.Contains(logs, c.logWant) || !strings.Contains(logs, `"event":"downstream_token_refused"`) || !strings.Contains(logs, c.auditWant) {
 				t.Fatalf("logs lack %s, the audit record or %s:\n%s", c.logWant, c.auditWant, logs)
 			}
-			// No token in the log: not the proxy's access token, nor any JWT (the assertion included).
+			// No token in the log: not the proxy's access token, nor any JWT (the identity assertion
+			// and the IdP token included).
 			if strings.Contains(logs, access) || strings.Contains(logs, "eyJ") {
 				t.Error("a token reached the log")
 			}
@@ -386,7 +372,7 @@ func TestAnAppOnlyCallerIsRelayedWithoutADownstreamToken(t *testing.T) {
 			return downstream.Token{}, nil
 		}, []string{graphUserRead}, 0, time.Now),
 		header: "X-Byward-Downstream-Token", resource: "https://graph.microsoft.com",
-		assertion: func(context.Context, string) (string, time.Time, error) {
+		idpToken: func(context.Context, string) (string, time.Time, error) {
 			t.Error("a stored IdP token looked up for an app-only caller")
 			return "", time.Time{}, nil
 		},
@@ -411,10 +397,10 @@ func TestAnAppOnlyCallerIsRelayedWithoutADownstreamToken(t *testing.T) {
 func TestDownstreamRefusesARequestWithoutAUsableGrant(t *testing.T) {
 	user := resource.Identity{Subject: "tid:oid", GrantID: "g", ClientID: "c"}
 	cases := []struct {
-		name      string
-		id        resource.Identity
-		ok        bool
-		assertion error
+		name        string
+		id          resource.Identity
+		ok          bool
+		idpTokenErr error
 	}{
 		{"no identity", resource.Identity{}, false, nil},
 		{"a subject that is not an Entra user key", resource.Identity{Subject: "nocolon", GrantID: "g"}, true, nil},
@@ -424,15 +410,15 @@ func TestDownstreamRefusesARequestWithoutAUsableGrant(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			exchanges := 0
-			assertionErr := error(nil)
+			idpTokenErr := error(nil)
 			d := &downstreamTokens{
 				cache: downstream.New(func(context.Context, string, string, []string) (downstream.Token, error) {
 					exchanges++
 					return downstream.Token{AccessToken: "t", ExpiresAt: time.Now().Add(time.Hour)}, nil
 				}, []string{graphUserRead}, 0, time.Now),
 				header: "X-Byward-Downstream-Token", resource: "https://graph.microsoft.com",
-				assertion: func(context.Context, string) (string, time.Time, error) {
-					return "assertion", time.Now().Add(time.Hour), assertionErr
+				idpToken: func(context.Context, string) (string, time.Time, error) {
+					return "idp-token", time.Now().Add(time.Hour), idpTokenErr
 				},
 				log: slog.New(slog.DiscardHandler),
 			}
@@ -444,7 +430,7 @@ func TestDownstreamRefusesARequestWithoutAUsableGrant(t *testing.T) {
 				return w
 			}
 			call(user, true) // warm the cache for the user
-			assertionErr = c.assertion
+			idpTokenErr = c.idpTokenErr
 			before := exchanges
 			w := call(c.id, c.ok)
 			if relayed != 1 || exchanges != before || !strings.Contains(w.Body.String(), `"isError":true`) {
@@ -466,8 +452,8 @@ func TestAClientGoingAwayIsNotARefusal(t *testing.T) {
 			return downstream.Token{AccessToken: "t", ExpiresAt: time.Now().Add(time.Hour)}, nil
 		}, []string{graphUserRead}, 0, time.Now),
 		header: "X-Byward-Downstream-Token", resource: "https://graph.microsoft.com",
-		assertion: func(context.Context, string) (string, time.Time, error) {
-			return "assertion", time.Now().Add(time.Hour), nil
+		idpToken: func(context.Context, string) (string, time.Time, error) {
+			return "idp-token", time.Now().Add(time.Hour), nil
 		},
 		log: slog.New(slog.NewJSONHandler(logs, nil)),
 	}
@@ -505,8 +491,8 @@ func TestARefusalThatNeedsTheOperatorNamesTheFix(t *testing.T) {
 					return downstream.Token{}, c.err
 				}, []string{graphUserRead}, 0, time.Now),
 				header: "X-Byward-Downstream-Token", resource: "https://graph.microsoft.com",
-				assertion: func(context.Context, string) (string, time.Time, error) {
-					return "assertion", time.Now().Add(time.Hour), nil
+				idpToken: func(context.Context, string) (string, time.Time, error) {
+					return "idp-token", time.Now().Add(time.Hour), nil
 				},
 				idp: "entra", log: logging.New(logs, "json"),
 			}
@@ -677,8 +663,8 @@ func TestWithOBOInAuthorizationTheUpstreamGetsTheDownstreamTokenOrNothing(t *tes
 			return downstream.Token{AccessToken: "downstream-token", ExpiresAt: time.Now().Add(time.Hour)}, nil
 		}, []string{graphUserRead}, 0, time.Now),
 		header: cfg.OBOHeader, resource: "https://graph.microsoft.com", log: log,
-		assertion: func(context.Context, string) (string, time.Time, error) {
-			return "assertion", time.Now().Add(time.Hour), nil
+		idpToken: func(context.Context, string) (string, time.Time, error) {
+			return "idp-token", time.Now().Add(time.Hour), nil
 		},
 	}
 	relayTo := httpUpstream(cfg, log, relay.WithInject(d.inject))
@@ -728,7 +714,7 @@ func TestRefusalsNameTheDownstreamAPI(t *testing.T) {
 			scopes := []string{c.scope}
 			d := newDownstreamTokens(scopes, "X-Byward-Downstream-Token", nil, "entra",
 				func(context.Context, string) (string, time.Time, error) {
-					return "assertion", time.Now().Add(time.Hour), nil
+					return "idp-token", time.Now().Add(time.Hour), nil
 				},
 				slog.New(slog.DiscardHandler), Observability{})
 			// The exchange fails as Entra does without admin consent (AADSTS65001).

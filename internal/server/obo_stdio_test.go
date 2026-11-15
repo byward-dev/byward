@@ -151,7 +151,7 @@ func TestAStdioRequestWithoutADownstreamTokenIsAnsweredBeforeAnyProcessStarts(t 
 	if !strings.Contains(e.metrics(t), "byward_stdio_processes 0") {
 		t.Fatal("a process started for a request refused for want of a downstream token")
 	}
-	if _, ok := auditRecord(e.logs.String(), "downstream_token_refused"); !ok {
+	if _, ok := auditRecord(t, e.logs.String(), "downstream_token_refused"); !ok {
 		t.Fatal("no downstream_token_refused audit record")
 	}
 }

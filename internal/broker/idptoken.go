@@ -9,8 +9,8 @@ import (
 // ErrNoIdPAccessToken: the grant holds no IdP access token to present On-Behalf-Of.
 var ErrNoIdPAccessToken = errors.New("broker: the grant holds no IdP access token")
 
-// IdPAccessToken returns the grant's stored IdP access token (Entra's access_as_user token, the
-// On-Behalf-Of assertion, ADR-0012 §3) and until when it may be used: its own expiry or the
+// IdPAccessToken returns the grant's stored IdP access token (Entra's access_as_user token, the IdP
+// token On-Behalf-Of presents, ADR-0012 §3) and until when it may be used: its own expiry or the
 // grant's, whichever comes first. The token is sealed in the store; only this broker knows the
 // format.
 func (b *Broker) IdPAccessToken(ctx context.Context, grantID string) (string, time.Time, error) {

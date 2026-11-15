@@ -13,6 +13,7 @@ import (
 	"github.com/go-jose/go-jose/v4"
 
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/testutil/assertionkey"
 )
 
 // setting returns the value of name in env.
@@ -83,6 +84,28 @@ func TestSecretFilesOthersCanReadRefuseToStartOutsideDev(t *testing.T) {
 				_ = s.closeStore()
 			}
 		}
+	}
+}
+
+// --dev relaxes the secret files' readability check, not the assertion keys' world-writable rule
+// (L115): anyone could add a signing key to the directory.
+func TestAWorldWritableAssertionKeyDirectoryRefusesToStartEvenWithDev(t *testing.T) {
+	dir := assertionkey.Dir(t)
+	if err := os.Chmod(dir, 0o707); err != nil { //nolint:gosec // G302: the insecure mode under test
+		t.Fatal(err)
+	}
+	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp",
+		"BYWARD_DEV=true", "BYWARD_ASSERTION_KEYS_DIR="+dir)
+	cfg, _, err := config.Load(nil, env, os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(cfg, slog.New(slog.DiscardHandler))
+	if s != nil && s.closeStore != nil {
+		_ = s.closeStore()
+	}
+	if err == nil || !strings.Contains(err.Error(), "BYWARD_ASSERTION_KEYS_DIR: ") || !strings.Contains(err.Error(), dir+" is world-writable") {
+		t.Fatalf("err = %v, want a refusal naming BYWARD_ASSERTION_KEYS_DIR and the world-writable directory", err)
 	}
 }
 

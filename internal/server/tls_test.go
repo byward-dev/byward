@@ -112,8 +112,7 @@ var tlsModes = []struct {
 // fakeEntra is an IdP for doctor's checks, so they answer at once.
 func fakeEntra(t *testing.T) *http.Client {
 	t.Helper()
-	return fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
-		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{"s3cret-entra"}})).HTTPClient()
+	return fixtureEntra(t).HTTPClient()
 }
 
 // streamingUpstream answers a tools/call with an event stream of three events, sending each only
@@ -191,9 +190,7 @@ func TestASignInAndMCPCallsWorkOverTheProxysTLS(t *testing.T) {
 				}
 			}
 
-			const verifier = "verifier-0123456789-0123456789-0123456789-abc"
-			q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1/callback"}, "response_type": {"code"}, "scope": {"mcp"},
-				"code_challenge": {fakeidp.CodeChallenge(verifier)}, "code_challenge_method": {"S256"}}
+			q := authorizeQuery(url.Values{"scope": {"mcp"}})
 			page := b.send(http.MethodGet, "/authorize?"+q.Encode(), nil, nil)
 			proto("the consent page", page)
 			if page.Header.Get("Strict-Transport-Security") == "" {
@@ -218,7 +215,7 @@ func TestASignInAndMCPCallsWorkOverTheProxysTLS(t *testing.T) {
 				t.Fatalf("the callback sent the browser to %q (%v)", back.Header.Get("Location"), err)
 			}
 			res := b.send(http.MethodPost, "/token", url.Values{"grant_type": {"authorization_code"}, "code": {done.Query().Get("code")},
-				"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1/callback"}, "code_verifier": {verifier}}, nil)
+				"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1/callback"}, "code_verifier": {testVerifier}}, nil)
 			var tokens struct {
 				AccessToken string `json:"access_token"`
 			}
@@ -289,12 +286,7 @@ func started(t *testing.T, cfg *config.Config, log *slog.Logger) *Servers {
 // anonymous loads the settings without authentication, on the loopback https URL that mode allows.
 func anonymous(t *testing.T, settings ...string) *config.Config {
 	t.Helper()
-	cfg, _, err := config.Load(nil, append([]string{"BYWARD_PUBLIC_URL=https://localhost:8443/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp",
-		"BYWARD_INSECURE_NO_AUTH=true"}, settings...), os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return cfg
+	return loadNoAuthConfig(t, "http://u/mcp", append([]string{"BYWARD_PUBLIC_URL=https://localhost:8443/mcp"}, settings...)...)
 }
 
 // tlsListener is a running proxy serving TLS, with its certificate files.

@@ -34,7 +34,6 @@ type appProxy struct {
 	public           http.Handler
 	internal         http.Handler
 	cfg              *config.Config
-	env              []string
 	fake             *fakeidp.IdP
 	up               *fakeupstream.Server
 	logs             *logsink.Buffer
@@ -49,7 +48,7 @@ func newAppProxy(t *testing.T, settings func(*appProxy) []string) *appProxy {
 	p.withRole = fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{callerSecret}, AppRoles: map[string][]string{fixtureClientID: {"MCP.Invoke"}}}
 	p.noRole = fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{callerSecret}}
 	p.fake = fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
-		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{"s3cret-entra"}, RedirectURIs: []string{"https://mcp.example.com/callback/entra"}}),
+		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{fixtureSecret}, RedirectURIs: []string{"https://mcp.example.com/callback/entra"}}),
 		fakeidp.WithClient(p.withRole), fakeidp.WithClient(p.noRole))
 	p.withRole, _ = p.fake.Client(p.withRole.ID)
 	p.noRole, _ = p.fake.Client(p.noRole.ID)
@@ -70,9 +69,9 @@ func newAppProxy(t *testing.T, settings func(*appProxy) []string) *appProxy {
 		}
 		return ok
 	})
-	p.env = append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+upstream,
+	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL="+upstream,
 		"BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=MCP.Invoke")
-	cfg, _, err := config.Load(nil, append(p.env, extra...), os.ReadFile)
+	cfg, _, err := config.Load(nil, append(env, extra...), os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,8 +269,7 @@ func TestAnAppTokenIsRefusedAtEveryOAuthEndpoint(t *testing.T) {
 		})
 	}
 	t.Run("authorize", func(t *testing.T) {
-		q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1/callback"}, "response_type": {"code"}, "scope": {"mcp"},
-			"code_challenge": {fakeidp.CodeChallenge(strings.Repeat("v", 43))}, "code_challenge_method": {"S256"}}
+		q := authorizeQuery(url.Values{"scope": {"mcp"}, "code_challenge": {fakeidp.CodeChallenge(strings.Repeat("v", 43))}})
 		r, _ := http.NewRequest(http.MethodGet, p.srv.URL+"/authorize?"+q.Encode(), nil)
 		r.Host = "mcp.example.com"
 		r.Header.Set("Authorization", "Bearer "+tok)
@@ -333,7 +331,7 @@ func TestAnAppCannotResumeAUsersSessionWithTheSameSubject(t *testing.T) {
 	t.Cleanup(up.Close)
 	p := newAppProxy(t, func(*appProxy) []string { return []string{"BYWARD_UPSTREAM_URL=" + up.URL + "/mcp"} })
 	key := fixtureTenant + ":" + p.withRole.ServicePrincipalID
-	user := sealAccessFor(t, p.cfg, p.env, "g1", key, time.Now())
+	user := sealAccessFor(t, p.cfg, "g1", key, time.Now())
 	res, _ := mcpPost(t, p.srv, user, "", initializeBody)
 	session := res.Header.Get(mcpsession.Header)
 	if res.StatusCode != http.StatusOK || session == "" {
