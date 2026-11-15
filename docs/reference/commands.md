@@ -4,8 +4,9 @@
 as the proxy ([settings](settings.md)), so run them with the proxy's configuration;
 `downstream-token` is the exception: it reads only `BYWARD_DOWNSTREAM_TOKEN_SOCKET`. They take no
 setting flags; give settings through the environment. A stdio upstream given on the command line goes
-after `--`, as for the proxy (`byward check --offline -- /usr/local/bin/server --flag`).
-`byward --help` lists them.
+after `--`, as for the proxy (`byward check --offline -- /usr/local/bin/server --flag`); no command
+starts it. Without authentication (`BYWARD_INSECURE_NO_AUTH`) the broker's store is off, so
+revoke-user, revoke-all and store new-epoch exit 2. `byward --help` lists them.
 
 | Command | What it does | Network | Exit codes |
 |---|---|---|---|
@@ -201,10 +202,6 @@ tenant and object IDs); with an `oidc` IdP, the value of its subject claim (`BYW
 IdP exits 2; a store that cannot be opened or written exits 1. The revocation is audited as
 `grant_revoked` with the reason `operator revoke-user`, by the command and by each running proxy at
 its next deny-list sync ([where it is recorded](../how-to/revoke-access.md#where-an-operator-revocation-is-recorded)).
-
-For a stdio upstream given on the command line, put its command after `--`, as for the proxy; it is
-not started. Without authentication (`BYWARD_INSECURE_NO_AUTH`) there is no store, so revoke-user,
-revoke-all and store new-epoch exit 2.
 
 ## `byward revoke-all`
 

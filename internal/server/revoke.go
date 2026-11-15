@@ -12,9 +12,9 @@ import (
 	"github.com/byward-dev/byward/internal/store"
 )
 
-// ErrNeedsAuthentication is the store commands' answer without authentication: the broker's store
-// is off with BYWARD_INSECURE_NO_AUTH, so there is nothing to revoke or restore. A configuration error.
-var ErrNeedsAuthentication = errors.New("this command works on the broker's store, which is off with BYWARD_INSECURE_NO_AUTH")
+// ErrNeedsAuthentication is RevokeUser's, RevokeAll's and NewEpoch's answer without authentication,
+// a configuration error: the broker's store is off then.
+var ErrNeedsAuthentication = errors.New("the broker's store is off with BYWARD_INSECURE_NO_AUTH, so there is nothing to revoke and no store epoch to start")
 
 // ErrNotAUserKey is RevokeUser's answer to a key that is not a user key of the configured IdP.
 var ErrNotAUserKey = errors.New("not a user key: with Entra, tid:oid, the tenant and object IDs of the user; with an oidc IdP, the value of its subject claim (BYWARD_OIDC_SUBJECT_CLAIM, default sub), as the audit records' user_key shows it")
@@ -67,6 +67,9 @@ func RevokeUser(ctx context.Context, cfg *config.Config, log *slog.Logger, key s
 // RevokeAll is the operator's revoke-all, for incident response: the same as RevokeUser for every
 // user at once. Everyone signs in again.
 func RevokeAll(ctx context.Context, cfg *config.Config, log *slog.Logger) error {
+	if cfg.NoAuth {
+		return ErrNeedsAuthentication
+	}
 	e, _ := operatorRevocationEvent(store.Revocation{All: true})
 	return revoke(ctx, cfg, log, e,
 		func(st store.Grants, now time.Time) error { return st.RevokeAll(ctx, now, now) })
@@ -74,9 +77,6 @@ func RevokeAll(ctx context.Context, cfg *config.Config, log *slog.Logger) error 
 
 // revoke opens the configured store, runs do with the current time, and audits e once it is stored.
 func revoke(ctx context.Context, cfg *config.Config, log *slog.Logger, e audit.Event, do func(store.Grants, time.Time) error) error {
-	if cfg.NoAuth {
-		return ErrNeedsAuthentication
-	}
 	rec := audit.New(log, nil, time.Now)
 	st, err := openStore(cfg, log, rec)
 	if err != nil {
