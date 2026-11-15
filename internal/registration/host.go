@@ -1,6 +1,7 @@
 package registration
 
 import (
+	"net"
 	"strings"
 
 	"golang.org/x/net/idna"
@@ -19,14 +20,34 @@ func BrowserHost(host string) string { return foldHost(browserIDNA, host) }
 // refuses the host (including a name that is, or maps to, a forbidden domain code point: ＠ maps to @),
 // or when no DNS name can be it (empty, invisible characters only, an empty label, as an "xn--" label
 // decodes to). Where it is false, BrowserHost is only the mapping it got that far,
-// so the consent page must not name it as the destination nor compare sites by it.
+// so the consent page must not name it as the destination nor compare sites by it. An IPv6 literal
+// (without its brackets) has no domain to map and is a host the browser goes to.
 func BrowserHostOK(host string) (string, bool) {
+	if strings.Contains(host, ":") && net.ParseIP(host) != nil {
+		return BrowserHost(host), true
+	}
 	ascii, err := browserIDNA.ToASCII(host)
 	if endsInFullStop(host) { // only the host's own trailing dot, not one an empty last label left
 		ascii = strings.TrimSuffix(ascii, ".")
 	}
 	return BrowserHost(host), err == nil && ascii != "" && !strings.Contains("."+ascii+".", "..") &&
-		!strings.ContainsFunc(ascii, forbiddenDomainCodePoint)
+		!strings.ContainsFunc(ascii, forbiddenDomainCodePoint) && !decodesToXNLabel(ascii)
+}
+
+// decodesToXNLabel reports whether a label of ascii still begins with "xn--" once decoded
+// (xn--xn--abc-t2a is xn--abcü), which UTS #46 refuses since Unicode 15.1 when hyphens are not
+// checked, as browsers do; x/net/idna's tables predate that rule.
+func decodesToXNLabel(ascii string) bool {
+	uni, err := browserIDNA.ToUnicode(ascii)
+	if err != nil {
+		return false
+	}
+	for label := range strings.SplitSeq(uni, ".") {
+		if strings.HasPrefix(label, "xn--") {
+			return true
+		}
+	}
+	return false
 }
 
 // forbiddenDomainCodePoint reports whether r is a forbidden domain code point, which fails a host in

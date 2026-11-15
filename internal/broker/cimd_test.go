@@ -225,6 +225,8 @@ func TestThePublisherIsShownReadably(t *testing.T) {
 		"evil.example\uff20claude.ai": "evil.example\uff20claude.ai (not a valid address)",
 		"a\u2100b.example":            "a\u2100b.example (not a valid address)",
 		"a<b.claude.ai":               "a<b.claude.ai (not a valid address)",
+		"2001:db8::1":                 "2001:db8::1", // an IPv6 literal
+		"xn--xn--abc-t2a.example":     "xn--xn--abc-t2a.example (not a valid address)",
 		"\u00ad":                      "?",
 		"\u200b":                      "?",
 		"":                            "?",

@@ -28,26 +28,31 @@ func TestBrowserHostOKSaysWhetherABrowserGoesToTheHost(t *testing.T) {
 		name string
 		ok   bool
 	}{
-		"app.example":           {"app.example", true},
-		"App.Example.":          {"app.example", true},
-		"app.example\u3002":     {"app.example", true}, // the host's own trailing full stop
-		"app.example\uff0e":     {"app.example", true},
-		"app.example\uff61":     {"app.example", true},
-		"\u05d0a.example":       {"xn--a-zhc.example", false}, // a label mixing directions
-		"\u05d0.example":        {"xn--4db.example", true},
-		"XN--":                  {"xn--", false}, // the name is BrowserHost's even when refused
-		"BÜCHER.example":        {"xn--bcher-kva.example", true},
-		"ｍｙ_app.example":        {"my_app.example", true},
-		"xn--bcher-kva.example": {"xn--bcher-kva.example", true},
-		"127.0.0.1":             {"127.0.0.1", true},
-		"xn--claude-.ai":        {"claude.ai", false},          // invalid punycode: the mapping it got that far
-		"a\u200db.example":      {"xn--ab-m1t.example", false}, // a joiner out of context
-		"xn--":                  {"xn--", false},               // an empty label
-		"xn--.example":          {".example", false},
-		"a.xn--":                {"a", false}, // a last label that decodes to nothing
-		"a.xn--.":               {"a.", false},
-		"a..b.example":          {"a..b.example", false},
-		"\u00ad":                {"\u00ad", false}, // invisible characters only
+		"app.example":             {"app.example", true},
+		"App.Example.":            {"app.example", true},
+		"app.example\u3002":       {"app.example", true}, // the host's own trailing full stop
+		"app.example\uff0e":       {"app.example", true},
+		"app.example\uff61":       {"app.example", true},
+		"\u05d0a.example":         {"xn--a-zhc.example", false}, // a label mixing directions
+		"\u05d0.example":          {"xn--4db.example", true},
+		"XN--":                    {"xn--", false},       // the name is BrowserHost's even when refused
+		"2001:DB8::1":             {"2001:db8::1", true}, // an IPv6 literal: no domain to map
+		"::1":                     {"::1", true},
+		"fe80::1%en0":             {"fe80::1%en0", false},             // a zone: the browser refuses it
+		"xn--xn--abc-t2a.example": {"xn--xn--abc-t2a.example", false}, // decodes to a label starting xn--
+		"a.xn--xn--abc-t2a":       {"a.xn--xn--abc-t2a", false},
+		"BÜCHER.example":          {"xn--bcher-kva.example", true},
+		"ｍｙ_app.example":          {"my_app.example", true},
+		"xn--bcher-kva.example":   {"xn--bcher-kva.example", true},
+		"127.0.0.1":               {"127.0.0.1", true},
+		"xn--claude-.ai":          {"claude.ai", false},          // invalid punycode: the mapping it got that far
+		"a\u200db.example":        {"xn--ab-m1t.example", false}, // a joiner out of context
+		"xn--":                    {"xn--", false},               // an empty label
+		"xn--.example":            {".example", false},
+		"a.xn--":                  {"a", false}, // a last label that decodes to nothing
+		"a.xn--.":                 {"a.", false},
+		"a..b.example":            {"a..b.example", false},
+		"\u00ad":                  {"\u00ad", false}, // invisible characters only
 		// A name that is, or maps to, a forbidden domain code point: the browser refuses it.
 		"evil.example\uff20claude.ai": {"evil.example@claude.ai", false},
 		"evil\uff1f.claude.ai":        {"evil?.claude.ai", false},
