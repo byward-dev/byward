@@ -15,7 +15,7 @@ var (
 	envName = regexp.MustCompile(`\bBYWARD_[A-Z][A-Z0-9_]*\*?`)
 	// settingLiteral is a setting named in code as Setting{Name: "…"}, with any string-literal suffix
 	// appended to Env() by hand; settingLiteralProblem says which are wrong.
-	settingLiteral = regexp.MustCompile(`Setting\{Name: *"([^"]*)"\}(?:\.Env\(\)\s*\+\s*(?:"([^"]*)"|\x60([^\x60]*)\x60))?`) // \x60 is a backtick
+	settingLiteral = regexp.MustCompile(`\bSetting\{Name: *"([^"]*)"\}(?:\.Env\(\)\s*\+\s*(?:"([^"]*)"|\x60([^\x60]*)\x60))?`) // \x60 is a backtick
 )
 
 // Setting names written out by hand in code (messages and environment lookups) and in the operator
@@ -111,16 +111,20 @@ func settingLiteralProblem(byName map[string]Setting, name, suffix string) strin
 // as a raw string, and nothing that is not one.
 func TestTheSettingLiteralPatternReadsEveryGofmtForm(t *testing.T) {
 	for src, want := range map[string][]string{
-		`Setting{Name: "x"}`:                        {"x", ""},
-		`config.Setting{Name: "x"}.Env()`:           {"x", ""},
-		`Setting{Name: "x"}.Env()+"_FILE"`:          {"x", "_FILE"},
-		`Setting{Name: "x"}.Env() + "_FILE"`:        {"x", "_FILE"},
-		"Setting{Name: \"x\"}.Env() +\n\t\"_FILE\"": {"x", "_FILE"},
-		`Setting{Name: "x"}.Env() + "_FILES"`:       {"x", "_FILES"},
-		"Setting{Name: \"x\"}.Env() + `_FILE`":      {"x", "_FILE"},   // a raw string
-		"Setting{Name: \"x\"}.Env() + \"_FILE`x\"":  {"x", "_FILE`x"}, // quotes pair: a backtick inside is part of the string
-		`Settings{Name: "x"}`:                       nil,
-		`Setting{Name: x}`:                          nil,
+		`Setting{Name: "x"}`:                         {"x", ""},
+		`config.Setting{Name: "x"}.Env()`:            {"x", ""},
+		`Setting{Name: "x"}.Env()+"_FILE"`:           {"x", "_FILE"},
+		`Setting{Name: "x"}.Env() + "_FILE"`:         {"x", "_FILE"},
+		"Setting{Name: \"x\"}.Env() +\n\t\"_FILE\"":  {"x", "_FILE"},
+		`Setting{Name: "x"}.Env() + "_FILES"`:        {"x", "_FILES"},
+		"Setting{Name: \"x\"}.Env() + `_FILE`":       {"x", "_FILE"},   // a raw string
+		"Setting{Name: \"x\"}.Env() + \"_FILE`x\"":   {"x", "_FILE`x"}, // quotes pair: a backtick inside is part of the string
+		`Settings{Name: "x"}`:                        nil,
+		`MySetting{Name: "x"}`:                       nil,
+		"Setting{Name: \"x\"}.Env() + `_FILE` + `y`": {"x", "_FILE"}, // a suffix ends at its own quote
+		`Setting{Name: "x"}.Env() + "_FILE" + "y"`:   {"x", "_FILE"},
+		`Setting{Name: "x"}, Setting{Name: "y"}`:     {"x", ""},
+		`Setting{Name: x}`:                           nil,
 	} {
 		m := settingLiteral.FindStringSubmatch(src)
 		if (want == nil) != (m == nil) || (m != nil && (m[1] != want[0] || m[2]+m[3] != want[1])) {
@@ -148,11 +152,23 @@ func TestTheSettingLiteralGuardRefusesWhatNoSettingReads(t *testing.T) {
 			t.Errorf("%s%s: %q, want %q", tc.name, tc.suffix, got, tc.want)
 		}
 	}
-	// The guard reads source end to end: each literal, with its suffix, reaches the decision.
-	src := "a := Setting{Name: \"plain\"}.Env() + \"_FILE\"\nb := Setting{Name: \"secret\"}.Env() + \"_FILE\"\nc := Setting{Name: \"missing\"}"
+}
+
+// The guard reads each literal in a file: every one is counted, and each, with its suffix, reaches
+// the decision.
+func TestTheSettingLiteralGuardReadsEachLiteralInSource(t *testing.T) {
+	byName := map[string]Setting{"plain": {Name: "plain"}, "secret": {Name: "secret", Secret: true}}
+	src := "a := Setting{Name: \"plain\"}.Env() + \"_FILE\"\n" +
+		"b := Setting{Name: \"secret\"}.Env() + \"_FILE\"\n" +
+		"c := Setting{Name: \"missing\"}\n" +
+		"d := Setting{Name: \"plain\"}.Env() + `_FILES`" // a raw-string suffix reaches the decision too
 	found, problems := settingLiteralProblems(byName, src)
-	want := []string{"names BYWARD_PLAIN_FILE, but plain is not a secret setting", `names Setting "missing", which is not a setting`}
-	if found != 3 || !slices.Equal(problems, want) {
-		t.Errorf("read %d literals with problems %q, want 3 with %q", found, problems, want)
+	want := []string{
+		"names BYWARD_PLAIN_FILE, but plain is not a secret setting",
+		`names Setting "missing", which is not a setting`,
+		"names BYWARD_PLAIN_FILES, but a setting's only other variable is _FILE",
+	}
+	if found != 4 || !slices.Equal(problems, want) {
+		t.Errorf("read %d literals with problems %q, want 4 with %q", found, problems, want)
 	}
 }
