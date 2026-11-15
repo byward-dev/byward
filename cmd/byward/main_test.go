@@ -320,9 +320,9 @@ func TestRevokeAndNewEpochTakeAStdioUpstreamAfterDashes(t *testing.T) {
 		{"revoke-user revokes the user", []string{"revoke-user", user, "--"}, exitOK, "revoked user " + user, `"reason":"operator revoke-user"`},
 		{"revoke-all revokes every user", []string{"revoke-all", "--yes", "--"}, exitOK, "revoked every user", `"reason":"operator revoke-all"`},
 		{"store new-epoch refuses SQLite", []string{"store", "new-epoch", "--yes", "--"}, exitConfig, "", "new-epoch is for the PostgreSQL store"},
-		{"revoke-user without a key", []string{"revoke-user", "--"}, exitConfig, "", "usage: byward revoke-user <user key> [-- stdio-upstream-command [args...]]"},
-		{"revoke-all without --yes", []string{"revoke-all", "--"}, exitConfig, "", "byward: usage: byward revoke-all --yes [-- stdio-upstream-command [args...]] (signs every user out)"},
-		{"store new-epoch without --yes", []string{"store", "new-epoch", "--"}, exitConfig, "", "byward: usage: byward store new-epoch --yes [-- stdio-upstream-command [args...]] (refresh tokens from before it stop working)"},
+		{"revoke-user without a key is a usage error", []string{"revoke-user", "--"}, exitConfig, "", "byward: usage: byward revoke-user <user key> [-- stdio-upstream-command [args...]]"},
+		{"revoke-all without --yes is a usage error", []string{"revoke-all", "--"}, exitConfig, "", "byward: usage: byward revoke-all --yes [-- stdio-upstream-command [args...]] (signs every user out)"},
+		{"store new-epoch without --yes is a usage error", []string{"store", "new-epoch", "--"}, exitConfig, "", "byward: usage: byward store new-epoch --yes [-- stdio-upstream-command [args...]] (refresh tokens from before it stop working)"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
