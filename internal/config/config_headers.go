@@ -48,8 +48,8 @@ var IdentityHeaderNames = []string{HeaderSubject, HeaderClientID, HeaderPrincipa
 
 // headerClashes refuses two purposes in one header: the identity assertion, the operator's
 // upstream credential, the On-Behalf-Of token and the plain identity headers each have their own
-// (ADR-0016 §4, §5, §7; ADR-0017 §3). The
-// relay reads "_" as "-" (invariant 16), so X_Api_Key and X-Api-Key are one header.
+// (ADR-0016 §4, §5, §7; ADR-0017 §3). Names are compared by CanonicalHeader, so X_Api_Key and
+// X-Api-Key are one header.
 func (c *Config) headerClashes() []error {
 	var errs []error
 	aEnv, cEnv := Setting{Name: "assertion-header"}.Env(), Setting{Name: "upstream-credential-header"}.Env()
@@ -75,8 +75,7 @@ func sameHeader(a, b string) bool {
 // CanonicalHeader is a header name as it reaches the upstream: `_` folded to `-`, because some
 // upstream frameworks read the two alike (invariant 16; the oauth2-proxy CVE-2025-64484 bypass),
 // then canonicalized (textproto.CanonicalMIMEHeaderKey). Every comparison of a header name the
-// proxy sets, strips or reserves uses it: the reserved checks of upstreamHeader, sameHeader,
-// the strip list, and the relay's own strip.
+// proxy sets, strips or reserves uses it, in config and in the relay alike.
 func CanonicalHeader(name string) string {
 	return textproto.CanonicalMIMEHeaderKey(strings.ReplaceAll(name, "_", "-"))
 }

@@ -659,8 +659,8 @@ func TestAnUpstreamRedirectGetsTheClientA502AndTheLogWhereItPointed(t *testing.T
 	}
 }
 
-// An operator-listed header never reaches the upstream in any case or spelling, and every header
-// it does not name, MCP's own among them, still does.
+// An operator-listed header never reaches the upstream in any case or spelling, whichever spelling
+// the operator listed it in, and every header it does not name, MCP's own among them, still does.
 func TestAnOperatorListedHeaderNeverReachesTheUpstreamInAnySpellingAndEveryOtherHeaderStillDoes(t *testing.T) {
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
@@ -669,11 +669,12 @@ func TestAnOperatorListedHeaderNeverReachesTheUpstreamInAnySpellingAndEveryOther
 	r.Header["X-Argocd-Base-Url"] = []string{"https://evil.example"}
 	r.Header["x_argocd_base_url"] = []string{"https://evil.example"}
 	r.Header["TFE_TOKEN"] = []string{"forged"}
+	r.Header["Tfe-Token"] = []string{"forged"} // listed as tfe_token: the - spelling is stripped too
 	kept := []string{"Mcp-Session-Id", "Mcp-Protocol-Version", "Mcp-Method", "Mcp-Name", "Mcp-Param-Region", "X-Argocd-Other"}
 	for _, h := range kept {
 		r.Header.Set(h, "kept")
 	}
-	New(quiet(), u, WithStripped("X-Argocd-Base-Url", "Tfe-Token")).ServeHTTP(httptest.NewRecorder(), r)
+	New(quiet(), u, WithStripped("X-Argocd-Base-Url", "tfe_token")).ServeHTTP(httptest.NewRecorder(), r)
 	got, ok := up.Last()
 	if !ok {
 		t.Fatal("nothing reached the upstream")

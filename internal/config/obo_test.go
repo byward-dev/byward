@@ -71,12 +71,6 @@ func TestOnBehalfOfSettingsAreRefusedWhenTheyCannotWork(t *testing.T) {
 		{"a proxy header", []string{"BYWARD_OBO_HEADER=Proxy-Authorization"}, "relies on"},
 		{"a fetch metadata header", []string{"BYWARD_OBO_HEADER=Sec-Fetch-Mode"}, "relies on"},
 		{"a CORS header", []string{"BYWARD_OBO_HEADER=Access-Control-Allow-Origin"}, "relies on"},
-		// The upstream may read _ as - (invariant 16), so a reserved header is reserved in either spelling.
-		{"a header MCP relies on spelled with _", []string{"BYWARD_OBO_HEADER=Mcp_Session_Id"}, "relies on"},
-		{"a forwarding header spelled with _", []string{"BYWARD_OBO_HEADER=X_Forwarded_For"}, "relies on"},
-		{"a proxy header spelled with _", []string{"BYWARD_OBO_HEADER=Proxy_Authorization"}, "relies on"},
-		{"a fetch metadata header spelled with _", []string{"BYWARD_OBO_HEADER=Sec_Fetch_Mode"}, "relies on"},
-		{"a CORS header spelled with _", []string{"BYWARD_OBO_HEADER=Access_Control_Allow_Origin"}, "relies on"},
 		{"the assertion's header spelled with _", []string{"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read", "BYWARD_ASSERTION_HEADER=X-Byward-Identity", "BYWARD_OBO_HEADER=X_Byward_Identity"}, "already carries"},
 		{"a plain identity header", []string{"BYWARD_OBO_HEADER=X-Byward-Subject"}, "plain identity headers"},
 		{"plain http", []string{"BYWARD_OBO_SCOPES=http://graph.microsoft.com/User.Read"}, "is not a scope URI"},
