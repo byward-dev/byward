@@ -385,25 +385,40 @@ func TestTheDiscoveryFixAsksForHTTPSUnlessTheIssuerIsAnAllowedLoopbackHTTPOne(t 
 	}
 }
 
-// For an https issuer whose discovery fails, doctor's fix asks for https, even under --dev (which
-// loadOIDC sets, and which allows only a loopback http issuer): the wiring passes config's
-// decision, not a constant.
-func TestDoctorAsksForHTTPSWhenAnHTTPSIssuersDiscoveryFails(t *testing.T) {
-	cfg := loadOIDC(t, "oidc", "https://sso.example.com/realms/acme", "c")
-	rep, err := Doctor(context.Background(), cfg, DoctorOptions{IdP: &http.Client{Transport: refuse{}}, Proxy: &http.Client{Transport: refuse{}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	const want = "BYWARD_OIDC_ISSUER: set it exactly as the IdP's discovery document states its issuer, over https"
-	for _, c := range rep.Checks {
-		if c.Class == doctor.ClassIdP && c.Name == "discovery" {
-			if c.Status != doctor.Fail || c.Fix != want {
-				t.Fatalf("discovery %+v; want a failure with the fix %q", c, want)
+// When discovery fails, doctor's fix asks for https unless config allowed the issuer as loopback
+// http, even under --dev (which loadOIDC sets): the wiring passes config's decision, not a
+// constant and not the issuer's spelling, so an HTTP:// loopback issuer is not asked for https.
+func TestDoctorAsksForHTTPSWhenDiscoveryFailsUnlessConfigAllowedTheIssuerAsLoopbackHTTP(t *testing.T) {
+	const fix = "BYWARD_OIDC_ISSUER: set it exactly as the IdP's discovery document states its issuer"
+	for name, tc := range map[string]struct{ issuer, want string }{
+		"an https issuer":                   {"https://sso.example.com/realms/acme", fix + ", over https"},
+		"a loopback issuer in HTTP:// caps": {"HTTP://127.0.0.1:8180/realms/byward", fix},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := loadOIDC(t, "oidc", tc.issuer, "c")
+			rep, err := Doctor(context.Background(), cfg, DoctorOptions{IdP: &http.Client{Transport: notFound{}}, Proxy: &http.Client{Transport: refuse{}}})
+			if err != nil {
+				t.Fatal(err)
 			}
-			return
-		}
+			for _, c := range rep.Checks {
+				if c.Class == doctor.ClassIdP && c.Name == "discovery" {
+					if c.Status != doctor.Fail || c.Fix != tc.want {
+						t.Fatalf("discovery %+v; want a failure with the fix %q", c, tc.want)
+					}
+					return
+				}
+			}
+			t.Fatalf("no discovery check in %+v", rep.Checks)
+		})
 	}
-	t.Fatalf("no discovery check in %+v", rep.Checks)
+}
+
+// notFound answers every request 404, which the IdP fetcher does not retry, so a failing
+// discovery fails at once.
+type notFound struct{}
+
+func (notFound) RoundTrip(r *http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody, Header: http.Header{}, Request: r}, nil
 }
 
 // failingDiscovery is an IdP whose discovery fails.

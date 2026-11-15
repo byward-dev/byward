@@ -225,7 +225,7 @@ func TestDoctorNamesTheSettingsInFixes(t *testing.T) {
 
 // Without authentication, doctor lists the relaxations, checks only the upstream and the trust
 // store, and warns that authentication is off: there is no IdP to check.
-func TestDoctorWithoutAuthListsTheRelaxationsAndChecksOnlyTheUpstreamAndTheTrustStore(t *testing.T) {
+func TestDoctorWithoutAuthListsTheRelaxationsChecksOnlyTheUpstreamAndTheTrustStoreAndWarnsAuthenticationIsOff(t *testing.T) {
 	cfg := loadNoAuthConfig(t, "http://u/mcp")
 	rep, err := Doctor(context.Background(), cfg, DoctorOptions{Proxy: &http.Client{Transport: refuse{}}})
 	if err != nil || len(rep.Checks) == 0 {
@@ -234,6 +234,11 @@ func TestDoctorWithoutAuthListsTheRelaxationsAndChecksOnlyTheUpstreamAndTheTrust
 	var names []string
 	for _, c := range rep.Checks {
 		names = append(names, c.Name)
+	}
+	for _, c := range rep.Checks[:min(2, len(rep.Checks))] {
+		if c.Status != doctor.Warn || !strings.HasPrefix(c.Message, "relaxation: ") {
+			t.Fatalf("check %+v; want the two relaxations first", c)
+		}
 	}
 	last := rep.Checks[len(rep.Checks)-1]
 	if !slices.Equal(names, []string{"configuration", "configuration", "upstream", "trust store", "authentication"}) ||
@@ -254,7 +259,8 @@ func TestDoctorListsEveryRelaxationAsAWarning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// An oidc IdP whose issuer is http on loopback: its relaxation names the issuer, after a colon.
+	// An oidc IdP whose issuer is http on loopback: its relaxation holds colons, in the issuer and
+	// after it, so the warning must carry the whole text, not cut it at the first colon.
 	app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}}
 	fake := fakeidp.New(t, fakeidp.Generic, fakeidp.WithClient(app))
 	httpIssuer, err := Doctor(context.Background(), loadOIDC(t, "oidc", fake.Issuer(), app.ID), DoctorOptions{IdP: fake.HTTPClient(), Proxy: &http.Client{Transport: refuse{}}})
