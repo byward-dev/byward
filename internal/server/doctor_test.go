@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +15,7 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 )
 
 const fixtureClientID = "00000000-0000-0000-0000-000000000002"
@@ -248,11 +248,7 @@ func TestStartupLogsAnExpiredSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.closeStore() })
-	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
-		var rec struct{ Level, Msg, Setting string }
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			t.Fatal(err)
-		}
+	for _, rec := range logsink.Records[struct{ Level, Msg, Setting string }](t, logs.String()) {
 		if rec.Level == "WARN" && rec.Setting == "BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT" && strings.Contains(rec.Msg, "expired on 2020-01-01") {
 			return
 		}

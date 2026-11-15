@@ -5,11 +5,11 @@ package stdio
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 )
 
 // The stderr records must survive the proxy's logging allowlist, and a credential-shaped line from
@@ -28,11 +28,7 @@ func TestStderrRecordsThroughTheProxyLogger(t *testing.T) {
 	waitDone(t, p) // Done waits for the stderr drain
 
 	var lines []map[string]any
-	for _, l := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
-		var rec map[string]any
-		if err := json.Unmarshal([]byte(l), &rec); err != nil {
-			t.Fatalf("not JSON: %q", l)
-		}
+	for _, rec := range logsink.Records[map[string]any](t, buf.String()) {
 		if rec["msg"] == "upstream stderr" {
 			lines = append(lines, rec)
 		}

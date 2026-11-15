@@ -15,6 +15,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/testutil/sealingkey"
 	"github.com/byward-dev/byward/internal/token"
 )
@@ -287,10 +288,10 @@ func TestASessionThatIsNotTheCallersGets404AndNeverReachesTheUpstream(t *testing
 			if e.up.calls != calls {
 				t.Fatal("the request reached the upstream")
 			}
-			var rec map[string]any
-			for _, line := range strings.Split(strings.TrimSpace(e.p.audit.String()), "\n") {
-				if strings.Contains(line, `"event":"session_rejected"`) {
-					_ = json.Unmarshal([]byte(line), &rec)
+			var rec map[string]any // the last session_rejected record
+			for _, r := range logsink.Records[map[string]any](t, e.p.audit.String()) {
+				if r["event"] == "session_rejected" {
+					rec = r
 				}
 			}
 			if rec["outcome"] != "failure" || rec["reason"] != tc.reason || rec["user_key"] != alice {

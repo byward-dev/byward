@@ -204,7 +204,7 @@ func TestEvictionAtTheUserCapIsAuditedAndEndsTheEvictedMCPSession(t *testing.T) 
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if line, ok := auditRecord(logs.String(), "process_evicted"); ok {
+		if line, ok := auditRecord(t, logs.String(), "process_evicted"); ok {
 			if err := json.Unmarshal([]byte(line), &rec); err != nil {
 				t.Fatal(err)
 			}
@@ -236,12 +236,13 @@ func TestMissingStdioCommandFailsStartupNamingTheImagePattern(t *testing.T) {
 	}
 }
 
-// auditRecord returns the first audit record for event in JSON log output.
-func auditRecord(logs, event string) (string, bool) {
-	for _, line := range strings.Split(logs, "\n") {
+// auditRecord returns the first audit record for event in JSON log output, as its JSON line.
+func auditRecord(t testing.TB, logs, event string) (string, bool) {
+	t.Helper()
+	for _, raw := range logsink.Records[json.RawMessage](t, logs) {
 		var r struct{ Event string }
-		if json.Unmarshal([]byte(line), &r) == nil && r.Event == event {
-			return line, true
+		if json.Unmarshal(raw, &r) == nil && r.Event == event {
+			return string(raw), true
 		}
 	}
 	return "", false
@@ -509,7 +510,7 @@ func TestTheStdioUpstreamGetsTheStreamIdleTimeoutAndEachEvictionIsAuditedWithIts
 		t.Fatalf("stream idle timeout %s, want the configured 15m", sc.StreamIdleTimeout)
 	}
 	sc.Evicted(stdio.Eviction{ID: stdio.Identity{Subject: "tid:alice"}, Reason: "upstream_cap", OpenStreams: 2})
-	line, ok := auditRecord(logs.String(), "process_evicted")
+	line, ok := auditRecord(t, logs.String(), "process_evicted")
 	var rec struct {
 		Reason      string
 		UserKey     string `json:"user_key"`

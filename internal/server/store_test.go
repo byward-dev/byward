@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"maps"
@@ -24,6 +23,7 @@ import (
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/store/sqlite"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 )
 
 // storeEnv loads authEnv's configuration; cfg holds the store paths the server will use.
@@ -134,9 +134,8 @@ func TestRestoredStoreIsReportedAtStartup(t *testing.T) {
 		Epoch                  int64
 	}
 	var restored []record
-	for _, line := range strings.Split(strings.TrimSpace(auditLog.String()), "\n") {
-		var r record
-		if json.Unmarshal([]byte(line), &r) == nil && r.Event == "store_restored" {
+	for _, r := range logsink.Records[record](t, auditLog.String()) {
+		if r.Event == "store_restored" {
 			restored = append(restored, r)
 		}
 	}
@@ -263,9 +262,8 @@ func TestStartupLogsTheResolvedPaths(t *testing.T) {
 			}
 			stop(t, a)
 			got := map[string]string{}
-			for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
-				var rec struct{ Msg, Setting, Value string }
-				if json.Unmarshal([]byte(line), &rec) == nil && rec.Msg == "path" {
+			for _, rec := range logsink.Records[struct{ Msg, Setting, Value string }](t, logs.String()) {
+				if rec.Msg == "path" {
 					got[rec.Setting] = rec.Value
 				}
 			}
