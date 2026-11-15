@@ -250,7 +250,11 @@ func TestReadinessFailsWhenTheStoreIsUnavailable(t *testing.T) {
 // keys' only for an HTTP upstream, the one that reads them.
 func TestStartupLogsTheResolvedPaths(t *testing.T) {
 	_, httpCfg := storeEnv(t)
-	for name, cfg := range map[string]*config.Config{"http upstream": httpCfg, "stdio upstream": stdioAuthConfig(t, "/bin/cat")} {
+	for name, tc := range map[string]struct {
+		cfg           *config.Config
+		assertionKeys bool
+	}{"http upstream": {httpCfg, true}, "stdio upstream": {stdioAuthConfig(t, "/bin/cat"), false}} {
+		cfg := tc.cfg
 		t.Run(name, func(t *testing.T) {
 			var logs bytes.Buffer
 			a, err := buildAuth(cfg, slog.New(slog.NewJSONHandler(&logs, nil)), Observability{})
@@ -267,7 +271,7 @@ func TestStartupLogsTheResolvedPaths(t *testing.T) {
 			}
 			want := map[string]string{"BYWARD_DATA_DIR": cfg.DataDir, "BYWARD_KEYS_DIR": cfg.KeysDir,
 				"BYWARD_STATIC_CLIENTS_FILE": cfg.StaticClientsFile, "BYWARD_STORE_DIR": cfg.StoreDir, "BYWARD_STORE_COUNTER_FILE": cfg.StoreCounterFile}
-			if cfg.UpstreamCommand == nil {
+			if tc.assertionKeys {
 				want["BYWARD_ASSERTION_KEYS_DIR"] = cfg.AssertionKeysDir
 			}
 			if !maps.Equal(got, want) {
