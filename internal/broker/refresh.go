@@ -144,8 +144,8 @@ func (b *Broker) refreshIdP(r *http.Request, g store.Grant, now time.Time) ([]by
 		var ie *idp.Error
 		switch {
 		case errors.As(err, &ie) && ie.Class == idp.SignInAgain:
-			// The IdP's error too: its code says why, and its trace and correlation IDs find the IdP's
-			// record (ADR-0021 §7).
+			// Log the IdP's error with the revocation: its code says why, and its trace and correlation
+			// IDs find the IdP's record (ADR-0021 §7).
 			return end("the IdP ended the session; grant revoked", append([]any{"error", err}, idpAttrs(err)...)...)
 		case errors.As(err, &ie) && ie.Class == idp.Unavailable:
 			b.cfg.Log.WarnContext(ctx, "IdP refresh unavailable", append([]any{"error", err}, idpAttrs(err)...)...)

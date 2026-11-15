@@ -2,6 +2,7 @@ package broker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -164,7 +165,7 @@ func TestIdPErrorsThatNeedTheOperatorRaiseAnAlert(t *testing.T) {
 			if !strings.Contains(failed, `"reason":"`+c.fix+`"`) {
 				t.Errorf("the %q line's reason is not %q:\n%s", msg, c.fix, logs)
 			}
-			if !strings.Contains(failed, `"error":`) {
+			if !regexp.MustCompile(`"error":"[^"]+"`).MatchString(failed) {
 				t.Errorf("the %q line does not quote the error:\n%s", msg, logs)
 			}
 		})
@@ -189,5 +190,16 @@ func TestEveryBrokerIdPCallIsExportedFromTheStart(t *testing.T) {
 		if !seen[op] {
 			t.Errorf("IdPOperations lists %q, which no sign-in or refresh observed", op)
 		}
+	}
+}
+
+// A sign-in failure that is not an IdP error (a bug in an adapter) is still logged once, with the
+// error and no reason, since there is no fix to name.
+func TestASignInFailureThatIsNotAnIdPErrorIsLoggedOnce(t *testing.T) {
+	e := newEnv(t)
+	callbackFailingWith(errors.New("plain failure"))(t, e, fakeidp.Failure{})
+	lines := regexp.MustCompile(`(?m)^.*"msg":"IdP sign-in failed".*$`).FindAllString(e.logs.String(), -1)
+	if len(lines) != 1 || !strings.Contains(lines[0], `"error":"plain failure"`) || strings.Contains(lines[0], `"reason":`) {
+		t.Fatalf("sign-in failure lines %q, want one quoting the error, without a reason", lines)
 	}
 }

@@ -414,26 +414,29 @@ type gateFunc func(context.Context, idp.Identity) error
 func (g gateFunc) Allow(ctx context.Context, id idp.Identity) error { return g(ctx, id) }
 
 func TestRefreshRevokesWhenTheUserNoLongerChecksOut(t *testing.T) {
-	const otherUser = "the IdP returned another user on refresh; grant revoked"
+	const otherUserMsg = "the IdP returned another user on refresh; grant revoked"
 	cases := []struct {
 		name    string
 		refresh func(g store.Grant) (*idp.Identity, idp.Tokens, error)
 		gate    error
-		// The revocation's one log line, and its reason; none for a gate refusal, which the audit
-		// event names.
-		msg, reason string
+		// The message of the revocation's one log line, and its reason and idp fields (nil: absent);
+		// a gate refusal has neither, its audit event names the rule.
+		msg         string
+		reason, idp any
 	}{
+		// The gate needs fresh claims at every refresh (ADR-0015 §1), so an IdP that refreshes without
+		// an ID token ends the grant, naming what the IdP must do.
 		{"no ID token on refresh", func(store.Grant) (*idp.Identity, idp.Tokens, error) { return nil, idp.Tokens{AccessToken: "a"}, nil }, nil,
-			"the IdP returned no ID token on refresh; grant revoked", "the IdP must return an ID token on the refresh_token grant (openid scope); see the IdP's how-to"},
+			"the IdP returned no ID token on refresh; grant revoked", "the IdP must return an ID token on the refresh_token grant (openid scope); see the IdP's how-to", "entra"},
 		{"another subject", func(g store.Grant) (*idp.Identity, idp.Tokens, error) {
 			return &idp.Identity{Subject: g.Subject + "-other", Issuer: g.Issuer}, idp.Tokens{AccessToken: "a"}, nil
-		}, nil, otherUser, "OIDC Core §12.2: sub and iss must not change"},
+		}, nil, otherUserMsg, "OIDC Core §12.2: sub and iss must not change", "entra"},
 		{"another issuer", func(g store.Grant) (*idp.Identity, idp.Tokens, error) {
 			return &idp.Identity{Subject: g.Subject, Issuer: "https://elsewhere.example"}, idp.Tokens{AccessToken: "a"}, nil
-		}, nil, otherUser, "OIDC Core §12.2: sub and iss must not change"},
+		}, nil, otherUserMsg, "OIDC Core §12.2: sub and iss must not change", "entra"},
 		{"the gate refuses now", func(g store.Grant) (*idp.Identity, idp.Tokens, error) {
 			return &idp.Identity{Subject: g.Subject, Issuer: g.Issuer}, idp.Tokens{AccessToken: "a"}, nil
-		}, denial{}, "the access gate refused the user on refresh; grant revoked", ""},
+		}, denial{}, "the access gate refused the user on refresh; grant revoked", nil, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -476,8 +479,8 @@ func TestRefreshRevokesWhenTheUserNoLongerChecksOut(t *testing.T) {
 			if len(lines) != 1 {
 				t.Fatalf("want one %q line, got %v", tc.msg, lines)
 			}
-			if got := lines[0]["reason"]; tc.reason == "" && got != nil || tc.reason != "" && (got != tc.reason || lines[0]["idp"] != "entra") {
-				t.Errorf("revocation line %v, want reason %q and, with a reason, idp entra", lines[0], tc.reason)
+			if lines[0]["reason"] != tc.reason || lines[0]["idp"] != tc.idp {
+				t.Errorf("revocation line %v, want reason %v and idp %v", lines[0], tc.reason, tc.idp)
 			}
 		})
 	}
@@ -522,6 +525,18 @@ func TestUnusableStoredIdPTokensRevokeTheGrant(t *testing.T) {
 	wantOAuthError(t, res, body, http.StatusBadRequest, "invalid_grant")
 	if !e.grantGone(t, g.ID) {
 		t.Fatal("a grant whose IdP tokens cannot be opened survived")
+	}
+	// One revocation line, with no reason or IdP: there is no IdP error to name.
+	const msg = "the grant holds no usable IdP refresh token; grant revoked"
+	var lines []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(e.logs.String()), "\n") {
+		var rec map[string]any
+		if json.Unmarshal([]byte(line), &rec) == nil && rec["msg"] == msg {
+			lines = append(lines, rec)
+		}
+	}
+	if len(lines) != 1 || lines[0]["reason"] != nil || lines[0]["idp"] != nil {
+		t.Fatalf("revocation lines %v, want one %q line without reason or idp", lines, msg)
 	}
 }
 
@@ -966,37 +981,6 @@ func TestASignInThatWouldRefreshButGotNoIdPRefreshTokenWarnsAndGetsNoRefreshToke
 	}
 }
 
-// noRefreshIdentity is an IdP whose refresh responses carry no ID token, which OIDC Core §12.2 allows.
-type noRefreshIdentity struct{ IdP }
-
-func (n noRefreshIdentity) Refresh(ctx context.Context, rt string) (*idp.Identity, idp.Tokens, error) {
-	_, toks, err := n.IdP.Refresh(ctx, rt)
-	return nil, toks, err
-}
-
-// The gate needs fresh claims at every refresh (ADR-0015 §1), so an IdP that refreshes without an
-// ID token ends the grant; the warning names the IdP and what it must do.
-func TestARefreshWithoutAnIDTokenEndsTheGrantNamingTheIdP(t *testing.T) {
-	e := newEnv(t, func(c *Config) { c.IdP = noRefreshIdentity{c.IdP} })
-	body := e.offline(t)
-	res, refreshed := e.refresh(t, body["refresh_token"].(string), "")
-	if res.StatusCode != http.StatusBadRequest || refreshed["error"] != "invalid_grant" {
-		t.Fatalf("refresh: %d %v, want invalid_grant", res.StatusCode, refreshed)
-	}
-	if _, err := e.st.Grant(context.Background(), firstGrant(e.st)); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("grant after a refresh without an ID token: %v, want revoked", err)
-	}
-	var warning map[string]any
-	for _, rec := range logsink.Records[map[string]any](t, e.logs.String()) {
-		if rec["msg"] == "the IdP returned no ID token on refresh; grant revoked" {
-			warning = rec
-		}
-	}
-	if warning == nil || warning["idp"] != "entra" || !strings.Contains(fmt.Sprint(warning["reason"]), "ID token on the refresh_token grant") {
-		t.Fatalf("warning %v, want one naming the IdP and the requirement", warning)
-	}
-}
-
 // ADR-0017 amendment 2026-11-07: with On-Behalf-Of on, an access token never outlives the IdP
 // access token it rides on (minus the margin), at the code exchange and at every refresh; without
 // it, the usual hour.
@@ -1108,12 +1092,12 @@ func TestARefreshFailureFromTheIdPLogsItsErrorFields(t *testing.T) {
 	}{
 		{"the IdP ended the session", "invalid_grant", "the IdP ended the session; grant revoked", "WARN", idp.SignInAgain},
 		{"the IdP is unavailable", "temporarily_unavailable", "IdP refresh unavailable", "WARN", idp.Unavailable},
-		{"the IdP failed the refresh", "invalid_client", "IdP refresh failed", "ERROR", idp.Fatal},
+		{"the IdP failed the refresh", "invalid_request", "IdP refresh failed", "ERROR", idp.Fatal},
 	} {
-		for _, sent := range []bool{true, false} {
-			t.Run(fmt.Sprintf("%s, fields sent %v", c.name, sent), func(t *testing.T) {
+		for _, set := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s, fields and hint set %v", c.name, set), func(t *testing.T) {
 				ie := &idp.Error{Class: c.class, OAuth: c.oauth, Err: errors.New("refresh error")}
-				if sent {
+				if set {
 					ie.Code, ie.TraceID, ie.CorrelationID, ie.OperatorHint = 70008, "trace-1", "corr-1", "hint-1"
 				}
 				refreshErr := fmt.Errorf("adapter: %w", ie) // wrapped, as an adapter may return it
@@ -1133,14 +1117,17 @@ func TestARefreshFailureFromTheIdPLogsItsErrorFields(t *testing.T) {
 					t.Errorf("the line does not quote the IdP error %s:\n%s", want, line)
 				}
 				for _, f := range []string{`"reason":"hint-1"`, `"idp_error_code":70008`, `"trace_id":"trace-1"`, `"correlation_id":"corr-1"`} {
-					if strings.Contains(line, f) != sent {
-						t.Errorf("field %s present %v, want %v:\n%s", f, !sent, sent, line)
+					if strings.Contains(line, f) != set {
+						t.Errorf("field %s present %v, want %v:\n%s", f, !set, set, line)
 					}
 				}
 				for _, unset := range []string{`"reason":""`, `"idp_error_code":0`, `"trace_id":""`, `"correlation_id":""`} {
 					if strings.Contains(line, unset) {
 						t.Errorf("the line logs an unset field %s:\n%s", unset, line)
 					}
+				}
+				if c.class == idp.SignInAgain && !strings.Contains(line, `"idp":"entra"`) {
+					t.Errorf("the revocation line does not name the IdP:\n%s", line)
 				}
 				if !strings.Contains(line, `"level":"`+c.level+`"`) {
 					t.Errorf("want level %s:\n%s", c.level, line)
