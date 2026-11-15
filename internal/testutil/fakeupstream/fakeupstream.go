@@ -4,6 +4,7 @@
 package fakeupstream
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -25,7 +26,8 @@ type Server struct {
 	*httptest.Server
 	mu       sync.Mutex
 	requests []Request
-	// Handler, if set, answers instead of the echo (after recording).
+	// Handler, if set, answers instead of the echo, after recording. It reads the request as sent:
+	// its body is restored once recorded.
 	Handler http.HandlerFunc
 }
 
@@ -44,6 +46,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	h := s.Handler
 	s.mu.Unlock()
 	if h != nil {
+		r.Body = io.NopCloser(bytes.NewReader(body))
 		h(w, r)
 		return
 	}

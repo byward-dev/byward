@@ -3,7 +3,6 @@ package broker
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -296,12 +295,7 @@ func (e *env) doBasic(t *testing.T, path string, body url.Values, user string) *
 
 const verifier = "verifier-0123456789-0123456789-0123456789-abc"
 
-func challengeFor(v string) string {
-	s := sha256.Sum256([]byte(v))
-	return base64.RawURLEncoding.EncodeToString(s[:])
-}
-
-func challenge() string { return challengeFor(verifier) }
+func challenge() string { return fakeidp.CodeChallenge(verifier) }
 
 var titleRE = regexp.MustCompile(`<title>(.*?)</title>`)
 
@@ -858,7 +852,7 @@ func TestPKCE(t *testing.T) {
 	}
 	for n, want := range map[int]bool{42: false, 43: true, 128: true, 129: false} {
 		v := strings.Repeat("a", n)
-		if got := pkceMatches(v, challengeFor(v)); got != want {
+		if got := pkceMatches(v, fakeidp.CodeChallenge(v)); got != want {
 			t.Errorf("verifier of %d characters: matches=%v, want %v", n, got, want)
 		}
 	}
