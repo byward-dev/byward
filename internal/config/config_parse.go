@@ -119,12 +119,17 @@ func parseProxies(raw string) ([]netip.Prefix, error) {
 	var out []netip.Prefix
 	for _, item := range splitList(raw) {
 		p, err := netip.ParsePrefix(item)
-		if err != nil {
+		switch {
+		case err != nil:
 			a, aerr := netip.ParseAddr(item)
 			if aerr != nil {
 				return nil, errorf("BYWARD_TRUSTED_PROXIES: %q is not a CIDR or an IP address", item)
 			}
 			p = netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen())
+		case p.Addr().Is4In6() && p.Bits() < 96: // ::ffff:10.0.0.0/8 would mask to ::/8, IPv6 addresses
+			return nil, errorf("BYWARD_TRUSTED_PROXIES: %q is an IPv4-mapped prefix shorter than /96, which covers no IPv4 address; give it as IPv4, e.g. 10.0.0.0/8", item)
+		case p.Addr().Is4In6(): // peers are compared unmapped (logging.ClientAddress), as a bare mapped address is here
+			p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
 		}
 		out = append(out, p.Masked())
 	}
@@ -141,16 +146,32 @@ func splitList(s string) []string {
 	return out
 }
 
-// normalizeOrigin returns scheme://host[:port] in lower case, the form browsers send.
+// normalizeOrigin returns an origin as browsers send it (browserOrigin), with its host[:port]
+// checked as BYWARD_ALLOWED_HOSTS checks one (normalizeAllowedHost), so an entry that no browser
+// could send is refused, not kept.
 func normalizeOrigin(o string) (string, error) {
 	u, err := url.Parse(o)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Path != "" || u.RawQuery != "" || u.User != nil {
 		return "", fmt.Errorf("%q is not an origin (scheme://host[:port])", o)
 	}
-	if err := asciiHost(u.Hostname()); err != nil {
+	if _, err := normalizeAllowedHost(u.Host); err != nil {
 		return "", err
 	}
-	return strings.ToLower(u.Scheme + "://" + u.Host), nil
+	return browserOrigin(u), nil
+}
+
+// browserOrigin is u's origin as browsers serialize it (RFC 6454 §6.2): scheme://host[:port] in lower
+// case, an IPv6 host in brackets, and no port when it is the scheme's default.
+func browserOrigin(u *url.URL) string {
+	host := strings.ToLower(u.Hostname())
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	defaultPort := map[string]string{"http": "80", "https": "443"}[u.Scheme]
+	if p := u.Port(); p != "" && p != defaultPort {
+		host += ":" + p
+	}
+	return u.Scheme + "://" + host
 }
 
 // asciiHost refuses a host with non-ASCII characters. Browsers and MCP clients send an

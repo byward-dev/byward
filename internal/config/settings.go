@@ -52,7 +52,7 @@ var registry = []Setting{
 	{Name: "listen", Group: GroupEndpoint, Default: "127.0.0.1:8080", Help: "address to listen on; public addresses only when configured"},
 	{Name: "tls-cert-file", Group: GroupEndpoint, Help: "serve TLS on the listener: an absolute path to the PEM certificate, followed by any intermediates; with tls-key-file; needs an https public-url; a replaced file is served from the next connection on, with no restart (docs/how-to/tls.md)"},
 	{Name: "tls-key-file", Group: GroupEndpoint, Help: "serve TLS on the listener: an absolute path to the certificate's unencrypted PEM private key, readable by the proxy's user alone or on a read-only mount; with tls-cert-file (docs/how-to/tls.md)"},
-	{Name: "allowed-origins", Group: GroupEndpoint, Help: "comma-separated Origin values allowed on the MCP endpoint (scheme://host[:port]); an internationalized host in its ASCII (xn--) form"},
+	{Name: "allowed-origins", Group: GroupEndpoint, Help: "comma-separated Origin values allowed on the MCP endpoint (scheme://host[:port]); an internationalized host in its ASCII (xn--) form; a default port (:443 for https, :80 for http) is dropped, as browsers never send it"},
 	{Name: "allowed-hosts", Group: GroupEndpoint, Help: "comma-separated extra Host values accepted besides the public URL's host; an internationalized host in its ASCII (xn--) form"},
 	{Name: "scope", Group: GroupEndpoint, Default: "mcp", Help: "the scope advertised in protected resource metadata and 401 challenges"},
 	{Name: "resource-name", Group: GroupEndpoint, Help: "human-readable resource name in protected resource metadata"},

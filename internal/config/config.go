@@ -295,17 +295,7 @@ func validate(v *Values, container bool) (*Config, error) {
 }
 
 // Origin is the public URL's origin as browsers send it: lower case, default port dropped.
-func (c *Config) Origin() string {
-	host := strings.ToLower(c.PublicURL.Hostname())
-	if strings.Contains(host, ":") {
-		host = "[" + host + "]"
-	}
-	defaultPort := map[string]string{"http": "80", "https": "443"}[c.PublicURL.Scheme]
-	if p := c.PublicURL.Port(); p != "" && p != defaultPort {
-		host += ":" + p
-	}
-	return c.PublicURL.Scheme + "://" + host
-}
+func (c *Config) Origin() string { return browserOrigin(c.PublicURL) }
 
 // Issuer is the broker's issuer, derived once from the public URL: its scheme, host and port.
 func (c *Config) Issuer() string { return c.PublicURL.Scheme + "://" + c.PublicURL.Host }

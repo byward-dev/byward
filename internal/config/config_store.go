@@ -1,16 +1,20 @@
 package config
 
 // storeBackend selects the store (ADR-0007 §2, amended for #227): SQLite in the state directory,
-// or PostgreSQL when BYWARD_STORE_POSTGRES_DSN_FILE names a connection string. PostgreSQL is for
+// or PostgreSQL when BYWARD_STORE_POSTGRES_DSN_FILE names a connection string (a file named for it
+// selects PostgreSQL even when empty, and is refused then). PostgreSQL is for
 // several replicas, so it cannot serve a stdio upstream, whose processes live on one replica
 // (ADR-0007 §4); and a state directory or counter file set beside it would be ignored, so that is an
 // error too.
 func (c *Config) storeBackend(v *Values) []error {
 	c.StorePostgresDSN = v.get("store-postgres-dsn")
-	if c.StorePostgresDSN == "" {
+	if !v.fileNamed("store-postgres-dsn") && c.StorePostgresDSN == "" {
 		return nil
 	}
 	var errs []error
+	if err := v.emptySecretFile("store-postgres-dsn"); err != nil { // never SQLite in its place
+		errs = append(errs, err)
+	}
 	if v.byKey["store-dir"].Source != SourceDefault {
 		errs = append(errs, errorf("BYWARD_STORE_POSTGRES_DSN_FILE and BYWARD_STORE_DIR: give one store, PostgreSQL or a SQLite state directory, not both"))
 	}

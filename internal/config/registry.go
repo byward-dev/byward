@@ -95,6 +95,19 @@ type Values struct {
 // get returns the raw value of a setting.
 func (v *Values) get(name string) string { return v.byKey[name].Raw }
 
+// fileNamed reports whether the operator named a file for the secret setting name: a file named for
+// a secret is given, even when the file is empty, so it never falls back to another choice.
+func (v *Values) fileNamed(name string) bool { return v.byKey[name].Path != "" }
+
+// emptySecretFile is the error for a secret setting whose named file holds nothing but whitespace,
+// naming the setting as the operator gave it; nil otherwise.
+func (v *Values) emptySecretFile(name string) error {
+	if val := v.byKey[name]; val.Path != "" && strings.TrimSpace(val.Raw) == "" {
+		return errorf("%s: the file is empty", val.From)
+	}
+	return nil
+}
+
 // boolean reads a true/false setting. Every setting read this way must be Bool in the registry, so a
 // bare --name means true (TestBooleanSettingsAreExactlyTheBoolFlags, TestEveryBooleanReadIsOfABoolFlag).
 func (v *Values) boolean(name string) (bool, error) {
