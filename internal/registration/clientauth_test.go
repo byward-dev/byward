@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -293,5 +294,16 @@ func TestOnlyRetryableKeyFetchFailuresAreTemporary(t *testing.T) {
 				t.Fatalf("keysTransient(%v) = %v, want %v", tc.err, got, tc.transient)
 			}
 		})
+	}
+}
+
+// AuthMethods returns a copy: a caller that changes it cannot change which methods the client may
+// authenticate with (both client types get it from clientAuth).
+func TestAuthMethodsReturnsACopy(t *testing.T) {
+	c := clientAuth{id: "c", methods: []AuthMethod{ClientSecretBasic, PrivateKeyJWT}}
+	m := c.AuthMethods()
+	m[0] = None
+	if got := c.AuthMethods(); !slices.Equal(got, []AuthMethod{ClientSecretBasic, PrivateKeyJWT}) {
+		t.Fatalf("AuthMethods after changing a returned copy = %v; the client's methods changed", got)
 	}
 }

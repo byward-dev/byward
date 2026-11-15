@@ -790,12 +790,12 @@ func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLogAndAWellFormedProxys
 			pf := (&httpproxy.Config{HTTPProxy: tc.setting}).ProxyFunc()
 			u, _ := url.Parse("http://mcp.upstream.example/mcp")
 			var logs bytes.Buffer
-			log := slog.New(slog.NewTextHandler(&logs, nil))
+			log := logging.New(&logs, "text") // the proxy's logger, which adds the request's ID
 			w := httptest.NewRecorder()
 			// Behind the request log, as wired: the line carries the request's ID.
 			logging.Middleware(slog.New(slog.DiscardHandler), New(log, u, withProxy(func(r *http.Request) (*url.URL, error) { return pf(r.URL) }))).
 				ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader("{}")))
-			if w.Code != http.StatusBadGateway || !regexp.MustCompile(`msg="upstream error" request_id=[^"\s]+`).MatchString(logs.String()) {
+			if w.Code != http.StatusBadGateway || !regexp.MustCompile(`msg="upstream error" .*request_id=[^"\s]+`).MatchString(logs.String()) {
 				t.Fatalf("status %d, log %q; want 502 and the upstream error logged with the request ID", w.Code, logs.String())
 			}
 			if got := strings.Contains(logs.String(), `reason="`+envproxy.Cause+`"`); got != tc.misread {

@@ -16,7 +16,6 @@ import (
 
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/idp"
-	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/ratelimit"
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/store"
@@ -230,7 +229,7 @@ func (b *Broker) startLogin(w http.ResponseWriter, r *http.Request, l login, now
 			b.serverError(w, r, err)
 			return
 		}
-		b.cfg.Log.ErrorContext(ctx, "broker error", "request_id", logging.RequestID(ctx), "error", err)
+		b.cfg.Log.ErrorContext(ctx, "broker error", "error", err)
 		b.refuseSilently(w, r, "", l, "server_error", "the proxy could not start the sign-in; try again")
 	}
 	plain, err := encodeLogin(l)
@@ -244,7 +243,7 @@ func (b *Broker) startLogin(w http.ResponseWriter, r *http.Request, l login, now
 		return
 	}
 	start := time.Now()
-	target, err := b.cfg.IdP.AuthCodeURL(idp.WithRequestID(ctx, logging.RequestID(ctx)), idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier, Silent: l.Silent})
+	target, err := b.cfg.IdP.AuthCodeURL(ctx, idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier, Silent: l.Silent})
 	b.observeIdP(ctx, OpAuthorize, start, err)
 	if err != nil && l.Silent { // the IdP is not ready (discovery or keys down)
 		b.noteIdPFailure(r, l.ClientID, err)
@@ -335,7 +334,7 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 		if l, c, badLogin := b.openLogin(r); badLogin == "" && l.Silent {
 			err := b.spendLogin(r, l)
 			if err != nil && !errors.Is(err, store.ErrConsumed) {
-				b.cfg.Log.ErrorContext(r.Context(), "recording a used login failed", "request_id", logging.RequestID(r.Context()), "error", err)
+				b.cfg.Log.ErrorContext(r.Context(), "recording a used login failed", "error", err)
 			}
 			if !errors.Is(err, store.ErrConsumed) { // a replay of a login already used gets the page
 				b.expireLogin(w, c)
@@ -367,7 +366,7 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	if spent != nil { // the store is down: no login goes on unrecorded
 		if l.Silent {
-			b.cfg.Log.ErrorContext(ctx, "recording a used login failed", "request_id", logging.RequestID(ctx), "error", spent)
+			b.cfg.Log.ErrorContext(ctx, "recording a used login failed", "error", spent)
 			b.refuseSilently(w, r, "", l, "temporarily_unavailable", "the proxy could not record the sign-in; try again")
 			return
 		}
@@ -375,7 +374,7 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start := time.Now()
-	id, toks, err := b.cfg.IdP.Callback(idp.WithRequestID(ctx, logging.RequestID(ctx)), q, idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier})
+	id, toks, err := b.cfg.IdP.Callback(ctx, q, idp.Login{State: l.IdPState, Nonce: l.Nonce, CodeVerifier: l.Verifier})
 	b.observeIdP(ctx, OpCallback, start, err)
 	if err != nil {
 		if l.Silent {
@@ -399,7 +398,7 @@ func (b *Broker) callback(w http.ResponseWriter, r *http.Request) {
 			b.serverError(w, r, err)
 			return
 		}
-		b.cfg.Log.ErrorContext(ctx, "broker error", "request_id", logging.RequestID(ctx), "error", err)
+		b.cfg.Log.ErrorContext(ctx, "broker error", "error", err)
 		b.refuseSilently(w, r, "", l, "server_error", "the proxy could not finish the sign-in; try again")
 	}
 	if err := b.cfg.Gate.Allow(ctx, id); err != nil {
@@ -528,7 +527,7 @@ func (b *Broker) noteIdPFailure(r *http.Request, clientID string, err error) str
 			msg = ie.UserMessage
 		}
 		reason = "the IdP sign-in failed (" + ie.Class.String() + ")"
-		attrs := append([]any{"request_id", logging.RequestID(ctx), "error", err}, fixAttr(err)...)
+		attrs := append([]any{"error", err}, fixAttr(err)...)
 		if ie.Code != 0 {
 			attrs = append(attrs, "idp_error_code", ie.Code)
 		}
@@ -540,7 +539,7 @@ func (b *Broker) noteIdPFailure(r *http.Request, clientID string, err error) str
 		}
 		b.cfg.Log.ErrorContext(ctx, "IdP sign-in failed", attrs...)
 	} else {
-		b.cfg.Log.ErrorContext(ctx, "IdP sign-in failed", "request_id", logging.RequestID(ctx), "error", err)
+		b.cfg.Log.ErrorContext(ctx, "IdP sign-in failed", "error", err)
 	}
 	b.cfg.Audit.Record(r, audit.Event{Name: audit.Login, Outcome: audit.Failure, Reason: reason, ClientID: clientID, IdP: b.cfg.IdPName})
 	return msg
@@ -568,15 +567,7 @@ func (b *Broker) idpFailure(w http.ResponseWriter, r *http.Request, clientID str
 // counts the alert and logs it on its own line, which operators alert on (#204).
 func (b *Broker) observeIdP(ctx context.Context, operation string, start time.Time, err error) {
 	b.cfg.ObserveIdP(operation, idpOutcome(err), time.Since(start))
-	alert := idp.AlertOf(err)
-	if alert == "" {
-		return
-	}
-	b.cfg.ObserveIdPAlert(operation, string(alert))
-	var ie *idp.Error
-	errors.As(err, &ie)
-	b.cfg.Log.ErrorContext(ctx, "IdP alert: the operator must act", "request_id", logging.RequestID(ctx), "idp", b.cfg.IdPName,
-		"operation", operation, "alert", string(alert), "reason", ie.Fix())
+	idp.ReportAlert(ctx, b.cfg.Log, b.cfg.IdPName, operation, err, b.cfg.ObserveIdPAlert)
 }
 
 // idpOutcome classifies an IdP call for metrics: success, unavailable (try later) or rejected.
@@ -593,7 +584,7 @@ func idpOutcome(err error) string {
 
 func (b *Broker) serverError(w http.ResponseWriter, r *http.Request, err error) {
 	ctx := r.Context()
-	b.cfg.Log.ErrorContext(ctx, "broker error", "request_id", logging.RequestID(ctx), "error", err)
+	b.cfg.Log.ErrorContext(ctx, "broker error", "error", err)
 	b.page(w, r, http.StatusInternalServerError, "Something went wrong on the proxy.", "Try again; if it keeps failing, tell your operator the reference below.")
 }
 
@@ -614,7 +605,7 @@ func (b *Broker) clientLookupFailed(ctx context.Context, clientID string, err er
 	if errors.Is(err, registration.ErrUnavailable) {
 		msg = metadataUnavailable
 	}
-	b.cfg.Log.WarnContext(ctx, msg, "request_id", logging.RequestID(ctx), "error", err.Error())
+	b.cfg.Log.WarnContext(ctx, msg, "error", err.Error())
 }
 
 // grantScopes are the scopes a new grant gets: the approved ones but offline_access, which stands for
@@ -628,16 +619,14 @@ func (b *Broker) grantScopes(ctx context.Context, l login, toks idp.Tokens) []st
 	scopes := slices.DeleteFunc(slices.Clone(l.Scopes), func(s string) bool { return s == "offline_access" })
 	c, err := b.cfg.Clients.Client(ctx, l.ClientID)
 	if err != nil {
-		b.cfg.Log.WarnContext(ctx, "looking up the client failed, so this grant cannot refresh", "request_id", logging.RequestID(ctx),
-			"client_id", l.ClientID, "error", err.Error())
+		b.cfg.Log.WarnContext(ctx, "looking up the client failed, so this grant cannot refresh", "client_id", l.ClientID, "error", err.Error())
 		return scopes
 	}
 	if !l.Refresh || !c.AllowsRefresh() { // as the page said, and as the client still registers
 		return scopes
 	}
 	if toks.RefreshToken == "" {
-		b.cfg.Log.WarnContext(ctx, "the IdP returned no refresh token, so this grant cannot refresh", "request_id", logging.RequestID(ctx),
-			"idp", b.cfg.IdPName, "client_id", l.ClientID, "reason", "check that the IdP is asked for refresh tokens; see the IdP's how-to")
+		b.cfg.Log.WarnContext(ctx, "the IdP returned no refresh token, so this grant cannot refresh", "idp", b.cfg.IdPName, "client_id", l.ClientID, "reason", "check that the IdP is asked for refresh tokens; see the IdP's how-to")
 		return scopes
 	}
 	return append(scopes, "offline_access")

@@ -53,7 +53,7 @@ func (p *Provider) VerifyApp(ctx context.Context, raw string) (idp.App, error) {
 	// GUIDs in lower case, as user keys are stored (UserKey).
 	tid, oid := strings.ToLower(idp.StringClaim(c, "tid")), strings.ToLower(idp.StringClaim(c, "oid"))
 	azp := strings.ToLower(idp.StringClaim(c, "azp"))
-	if !isGUID(oid) || !isGUID(azp) || !strings.EqualFold(idp.StringClaim(c, "sub"), oid) {
+	if !idp.IsGUID(oid) || !idp.IsGUID(azp) || !strings.EqualFold(idp.StringClaim(c, "sub"), oid) {
 		return idp.App{}, errors.New("entra: app-only token oid, sub or azp is not the service principal's GUID")
 	}
 	roles, err := stringList(c["roles"])

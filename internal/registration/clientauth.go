@@ -55,9 +55,16 @@ type clientAuth struct {
 	jti     JTICache
 }
 
+// ID is the client_id; AuthMethods the registered methods, as a copy.
+func (c clientAuth) ID() string                { return c.id }
+func (c clientAuth) AuthMethods() []AuthMethod { return slices.Clone(c.methods) }
+
+// String never shows the secret: through the promoted Format it is how every client formats.
 func (c clientAuth) String() string {
 	return fmt.Sprintf("registration.clientAuth{id:%s methods:%v}", c.id, c.methods)
 }
+
+// GoString never shows the secret.
 func (c clientAuth) GoString() string { return c.String() }
 
 // Format makes every fmt verb use String, so no verb can reach the secret by reflection.
@@ -158,14 +165,13 @@ func (c *clientAuth) checkAssertion(ctx context.Context, raw, tokenEndpoint stri
 	if err != nil {
 		return invalid("client assertion: " + err.Error())
 	}
-	str := func(k string) string { s, _ := claims[k].(string); return s }
-	if str("iss") != c.id || str("sub") != c.id {
+	if idp.StringClaim(claims, "iss") != c.id || idp.StringClaim(claims, "sub") != c.id {
 		return invalid("client assertion iss and sub must be the client ID")
 	}
 	if !audienceContains(claims["aud"], tokenEndpoint) {
 		return invalid("client assertion aud is not our token endpoint")
 	}
-	exp, ok := numericDate(claims["exp"])
+	exp, ok := idp.TimeClaim(claims, "exp")
 	switch {
 	case !ok:
 		return invalid("client assertion has no exp")
@@ -175,11 +181,11 @@ func (c *clientAuth) checkAssertion(ctx context.Context, raw, tokenEndpoint stri
 		return invalid("client assertion exp is more than 5 minutes ahead")
 	}
 	for _, k := range []string{"nbf", "iat"} {
-		if t, ok := numericDate(claims[k]); ok && t.After(now.Add(AssertionLeeway)) {
+		if t, ok := idp.TimeClaim(claims, k); ok && t.After(now.Add(AssertionLeeway)) {
 			return invalid("client assertion " + k + " is in the future")
 		}
 	}
-	jti := str("jti")
+	jti := idp.StringClaim(claims, "jti")
 	if jti == "" || len(jti) > MaxJTILen {
 		return invalid("client assertion jti missing or too long")
 	}
@@ -206,14 +212,6 @@ func audienceContains(aud any, want string) bool {
 		}
 	}
 	return false
-}
-
-func numericDate(v any) (time.Time, bool) {
-	f, ok := v.(float64)
-	if !ok {
-		return time.Time{}, false
-	}
-	return time.Unix(int64(f), 0), true
 }
 
 // parseClientJWKS parses a client's registered JWK Set: public keys only, RSA at least MinRSABits,
@@ -253,7 +251,7 @@ func keysTransient(err error) bool {
 	var se *idp.StatusError
 	switch {
 	case errors.As(err, &se):
-		return se.Code >= 500 || se.Code == http.StatusRequestTimeout || se.Code == http.StatusTooManyRequests
+		return se.Transient()
 	case ssrfguard.RefusedAddress(err):
 		return false
 	}

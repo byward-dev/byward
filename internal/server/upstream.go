@@ -15,7 +15,6 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
 	"github.com/byward-dev/byward/internal/envproxy"
-	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/tracing"
 	"github.com/byward-dev/byward/internal/upstream/relay"
@@ -239,7 +238,7 @@ func withAssertion(m *assertion.Minter, log *slog.Logger, next http.Handler) htt
 			tok, err = m.Mint(id)
 		}
 		if !ok || err != nil {
-			log.ErrorContext(r.Context(), "the identity assertion could not be minted; request refused", "request_id", logging.RequestID(r.Context()), "error", err)
+			log.ErrorContext(r.Context(), "the identity assertion could not be minted; request refused", "error", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}

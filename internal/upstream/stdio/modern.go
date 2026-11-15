@@ -15,8 +15,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/byward-dev/byward/internal/logging"
 )
 
 // The modern era (2026-07-28): no sessions, every request carries its own metadata, and one
@@ -390,7 +388,7 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, l
 	q := c.register(meta.id.value(msg), token, meta.logs, listen)
 	defer c.unregister(q)
 	if err := c.p.Send(r.Context(), replace(msg, edit{meta.id, []byte(q.proxyID)}, edit{meta.token, []byte(q.proxyTok)})); err != nil {
-		c.log.WarnContext(r.Context(), "relaying to the upstream process failed", "request_id", logging.RequestID(r.Context()), "error", err)
+		c.log.WarnContext(r.Context(), "relaying to the upstream process failed", "error", err)
 		http.Error(w, "upstream unavailable", http.StatusBadGateway)
 		return
 	}

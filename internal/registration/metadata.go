@@ -204,10 +204,8 @@ func newMetadataClient(id string, m *clientMetadata, trust TrustLevel, deny *Den
 	return c
 }
 
-func (c *metadataClient) ID() string                { return c.id }
-func (c *metadataClient) Name() string              { return c.name }
-func (c *metadataClient) Trust() TrustLevel         { return c.trust }
-func (c *metadataClient) AuthMethods() []AuthMethod { return append([]AuthMethod(nil), c.methods...) }
+func (c *metadataClient) Name() string      { return c.name }
+func (c *metadataClient) Trust() TrustLevel { return c.trust }
 
 // AllowsRefresh is true only if the client registered the refresh_token grant (draft -03 §6).
 func (c *metadataClient) AllowsRefresh() bool { return slices.Contains(c.grants, "refresh_token") }

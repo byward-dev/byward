@@ -13,10 +13,6 @@ import (
 	"github.com/byward-dev/byward/internal/idp"
 )
 
-// MinRSABits is the smallest client key accepted: Microsoft "highly recommends" 2048 bits
-// (learn.microsoft.com/entra/identity-platform/howto-create-self-signed-certificate).
-const MinRSABits = 2048
-
 // Certificate is the app's certificate credential (ADR-0012 §5): an RSA key and the certificate
 // uploaded to the app registration for it.
 type Certificate struct {
@@ -26,7 +22,7 @@ type Certificate struct {
 
 // LoadCertificate reads a PEM file holding the private key and its certificate, as byward init
 // entra writes it. The file must hold exactly one unencrypted private key, RSA ("Microsoft Entra
-// ID currently supports only RSA") of at least MinRSABits, and a certificate for that key; other
+// ID currently supports only RSA"), and a certificate for that key; other
 // certificates (a chain) are allowed. Errors never quote the file. Expiry is not checked here: the
 // proxy refuses to start with an expired certificate, while doctor reports it and revoke-user, which
 // needs no credential, still works.
@@ -69,9 +65,6 @@ func LoadCertificate(raw []byte) (*Certificate, error) {
 		}
 		return nil, fmt.Errorf("an %s key: Entra accepts only RSA certificate credentials", kind)
 	}
-	if n := key.N.BitLen(); n < MinRSABits {
-		return nil, fmt.Errorf("a %d-bit RSA key: use at least %d bits", n, MinRSABits)
-	}
 	for _, b := range certs {
 		c, err := x509.ParseCertificate(b.Bytes)
 		if err != nil {
@@ -85,7 +78,8 @@ func LoadCertificate(raw []byte) (*Certificate, error) {
 	return nil, errors.New("no certificate in the file is for its private key")
 }
 
-// ClientAuth is the certificate as Entra's client assertion: PS256 with x5t#S256 (ADR-0012 §5).
+// ClientAuth is the certificate as Entra's client assertion: PS256 with x5t#S256 (ADR-0012 §5). It
+// refuses a key under idp.MinRSABits.
 func (c *Certificate) ClientAuth() (idp.ClientAuth, error) {
 	return idp.PrivateKeyJWT(c.Key, c.X509, "")
 }

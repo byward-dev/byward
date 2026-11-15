@@ -5,16 +5,11 @@ package clientdocs
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"embed"
 	"encoding/json"
 	"maps"
-	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +19,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/byward-dev/byward/internal/testutil/testcert"
 )
 
 //go:embed testdata/*.json testdata/*.headers testdata/dcr/*.json
@@ -135,26 +132,15 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(d.Body)
 }
 
+// certificate issues a certificate for hosts and returns it with a pool trusting its root.
 func certificate(t testing.TB, hosts []string) (tls.Certificate, *x509.CertPool) {
 	t.Helper()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	b := testcert.Issue(t, testcert.Options{Hosts: hosts, Leaf: testcert.Valid(time.Now(), 1)})
+	cert, err := tls.X509KeyPair(b.Cert, b.Key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "clientdocs"}, DNSNames: hosts,
-		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true,
-		KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	leaf, err := x509.ParseCertificate(der)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pool := x509.NewCertPool()
-	pool.AddCert(leaf)
-	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, pool
+	return cert, b.Roots
 }
 
 // Registration is a real client's dynamic registration request (RFC 7591), with a redirect URI the

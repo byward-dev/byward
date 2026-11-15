@@ -90,6 +90,12 @@ func loadConfig(t testing.TB, publicURL string, extra ...string) *config.Config 
 	return cfg
 }
 
+// checkOffline is check --offline's warnings and error for cfg.
+func checkOffline(cfg *config.Config) ([]Warning, error) {
+	r, err := CheckOfflineReport(cfg)
+	return r.Warnings, err
+}
+
 // captureBroker makes the next New or buildAuth record the broker configuration it wires,
 // optionally changed by wrap first, and restores the real constructor when the test ends.
 func captureBroker(t testing.TB, wrap func(broker.Config) broker.Config) *broker.Config {

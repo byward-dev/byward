@@ -15,6 +15,7 @@ import (
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/store/memory"
 	"github.com/byward-dev/byward/internal/testutil/clientdocs"
+	"github.com/byward-dev/byward/internal/testutil/memstore"
 )
 
 func newDCR(st store.Clients, now func() time.Time, max int) *DCRRegistry {
@@ -129,17 +130,14 @@ func TestRegistrationsAreCapped(t *testing.T) {
 }
 
 // A store that fails: registrations and lookups are temporarily unavailable, never refused.
-type brokenClients struct{ store.Clients }
-
-func (brokenClients) CreateClient(context.Context, store.Client, int) error {
-	return errors.New("disk I/O error")
-}
-func (brokenClients) Client(context.Context, string) (store.Client, error) {
-	return store.Client{}, errors.New("disk I/O error")
+func brokenClients() *memstore.Store {
+	s := memstore.New()
+	s.Fail(errors.New("disk I/O error"), "CreateClient", "Client")
+	return s
 }
 
 func TestAStoreFailureIsTemporary(t *testing.T) {
-	r := newDCR(brokenClients{}, newClock().now, 0)
+	r := newDCR(brokenClients(), newClock().now, 0)
 	if _, err := r.Register(context.Background(), []byte(`{"client_name":"App","redirect_uris":["https://app.example/cb"]}`)); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("register: %v", err)
 	}
@@ -150,7 +148,7 @@ func TestAStoreFailureIsTemporary(t *testing.T) {
 
 // Static and CIMD client IDs are not looked up in the store.
 func TestClientIDsTheRegistryDidNotIssueAreUnknownEvenWithTheStoreDown(t *testing.T) {
-	r := newDCR(brokenClients{}, newClock().now, 0)
+	r := newDCR(brokenClients(), newClock().now, 0)
 	for _, id := range []string{"static-app", cimdID} {
 		if _, err := r.Client(context.Background(), id); err != ErrUnknownClient {
 			t.Fatalf("%s: %v, want the plain ErrUnknownClient without a store call", id, err)

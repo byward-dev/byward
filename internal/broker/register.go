@@ -76,15 +76,14 @@ func (b *Broker) register(w http.ResponseWriter, r *http.Request) {
 		b.registrationFailed(w, r, RegistrationFull, http.StatusServiceUnavailable, "temporarily_unavailable", "the proxy is not accepting new registrations now")
 		return
 	case err != nil:
-		b.cfg.Log.ErrorContext(r.Context(), "registering a client failed", "request_id", logging.RequestID(r.Context()), "error", err.Error())
+		b.cfg.Log.ErrorContext(r.Context(), "registering a client failed", "error", err.Error())
 		w.Header().Set("Retry-After", registrationRetryAfter)
 		b.registrationFailed(w, r, RegistrationUnavailable, http.StatusServiceUnavailable, "temporarily_unavailable", "the proxy could not store the registration")
 		return
 	}
 	if len(reg.Dropped) > 0 {
 		// RFC 7591 §3.2.2 lets the server substitute values; the dropped URIs are not an error.
-		b.cfg.Log.InfoContext(r.Context(), "client registration dropped redirect URIs", "request_id", logging.RequestID(r.Context()),
-			"client_id", reg.ClientID, "reason", "fail the redirect policy (ADR-0009): "+strings.Join(reg.Dropped, ", "))
+		b.cfg.Log.InfoContext(r.Context(), "client registration dropped redirect URIs", "client_id", reg.ClientID, "reason", "fail the redirect policy (ADR-0009): "+strings.Join(reg.Dropped, ", "))
 	}
 	b.cfg.Audit.RecordUnauthenticated(r, audit.Event{Name: audit.ClientRegistered, Outcome: audit.Success, Reason: "dcr", ClientID: reg.ClientID})
 	b.observeRegistration(RegistrationOK)

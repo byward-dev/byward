@@ -27,7 +27,8 @@ func rsaKey(t *testing.T, bits int) *rsa.PrivateKey {
 
 // The file byward init entra writes, and each way a file can be unusable: refused at startup with
 // a reason, never quoting the file. Expiry is not this check's: an expired certificate loads, for
-// doctor to report and for revoke-user, which needs no credential.
+// doctor to report and for revoke-user, which needs no credential. Nor is the key's size: the
+// client assertion refuses a short key (idp.MinRSABits).
 func TestACertificateFileIsReadOrRefusedWithItsReason(t *testing.T) {
 	key, other := rsaKey(t, 2048), rsaKey(t, 2048)
 	year := now().Add(365 * 24 * time.Hour)
@@ -36,7 +37,6 @@ func TestACertificateFileIsReadOrRefusedWithItsReason(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	small := rsaKey(t, 1024)
 	_, ed, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +60,6 @@ func TestACertificateFileIsReadOrRefusedWithItsReason(t *testing.T) {
 		"a legacy encrypted key":            {cat(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Headers: map[string]string{"Proc-Type": "4,ENCRYPTED"}, Bytes: []byte{1}}), cert), "encrypted"},
 		"an EC key":                         {cat(fakeidp.PrivateKeyPEM(t, ec), fakeidp.SelfSignedPEM(t, ec, year)), "an EC key: Entra accepts only RSA"},
 		"an Ed25519 key":                    {cat(fakeidp.PrivateKeyPEM(t, ed), fakeidp.SelfSignedPEM(t, ed, year)), "an Ed25519 key: Entra accepts only RSA"},
-		"a 1024-bit key":                    {cat(fakeidp.PrivateKeyPEM(t, small), fakeidp.SelfSignedPEM(t, small, year)), "1024-bit RSA key: use at least 2048"},
 		"a certificate for another key":     {cat(keyPEM, fakeidp.SelfSignedPEM(t, other, year)), "no certificate in the file is for its private key"},
 		"a certificate that does not parse": {cat(keyPEM, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte("x")})), "a certificate does not parse"},
 		"not PEM at all":                    {[]byte("s3cret"), "no PEM private key"},
