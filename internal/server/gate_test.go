@@ -1,10 +1,8 @@
 package server
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"regexp"
@@ -15,6 +13,7 @@ import (
 	"github.com/byward-dev/byward/internal/broker"
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 )
 
 // One case per gate list: the error names the exact setting, which proves the wiring maps each
@@ -62,13 +61,8 @@ func TestOnlyAnEmptyGateWarnsAtStartup(t *testing.T) {
 				t.Fatal(err)
 			}
 			warnings := 0
-			sc := bufio.NewScanner(&buf)
-			for sc.Scan() {
-				var m map[string]any
-				if err := json.Unmarshal(sc.Bytes(), &m); err != nil {
-					t.Fatalf("log line %q: %v", sc.Text(), err)
-				}
-				if msg, _ := m["msg"].(string); m["level"] == "WARN" && strings.HasPrefix(msg, "access gate is empty") {
+			for _, m := range logsink.Records[struct{ Level, Msg string }](t, buf.String()) {
+				if m.Level == "WARN" && strings.HasPrefix(m.Msg, "access gate is empty") {
 					warnings++
 				}
 			}

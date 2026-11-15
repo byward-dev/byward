@@ -30,7 +30,7 @@ func (b *Buffer) String() string {
 	return b.buf.String()
 }
 
-// Records decodes each non-empty line of log, a JSON log, into a T, in order; a line that is not
+// Records decodes each non-blank line of log, a JSON log, into a T, in order; a line that is not
 // JSON fails the test. Callers filter the records and pick the first or last match themselves.
 func Records[T any](t testing.TB, log string) []T {
 	t.Helper()
