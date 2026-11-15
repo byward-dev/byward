@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 // JSON-RPC error codes (JSON-RPC 2.0 §5.1).
@@ -119,6 +120,35 @@ func compactID(id json.RawMessage) json.RawMessage {
 		return id
 	}
 	return b.Bytes()
+}
+
+// idKey is the key the legacy era finds a waiting request by: one key per JSON value, however the
+// upstream encodes it, since JSON-RPC 2.0 §5 asks a response for the same value, not the same
+// bytes. A string is decoded and re-encoded, so "\u00e9" and "é", "\/x" and "/x", "a<b" and
+// "a\u003cb" match (without HTML escaping, so the key stays readable). An integer (validID allows
+// no fraction or exponent) is its decimal text with -0 as 0, never through float64, which would
+// make 9007199254740993 and 9007199254740992 one key. A string key keeps its quotes, so "1" and
+// 1 stay apart. The key only finds the waiting request: the client gets the upstream's bytes
+// unchanged (ADR-0003 §3).
+func idKey(id json.RawMessage) string {
+	c := compactID(id)
+	if len(c) > 0 && c[0] == '"' {
+		var s string
+		if json.Unmarshal(c, &s) != nil { // cannot happen: the id came from a message that decoded
+			return string(c)
+		}
+		var b bytes.Buffer
+		enc := json.NewEncoder(&b)
+		enc.SetEscapeHTML(false)
+		if enc.Encode(s) != nil {
+			return string(c)
+		}
+		return strings.TrimSuffix(b.String(), "\n")
+	}
+	if string(c) == "-0" {
+		return "0"
+	}
+	return string(c)
 }
 
 func rpcError(id json.RawMessage, code int, message string) []byte {

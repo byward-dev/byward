@@ -519,7 +519,7 @@ func (s *session) isEnded() bool {
 func (s *session) addPost(st *stream) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	k := string(st.id)
+	k := idKey(st.id)
 	if s.ended || s.byID[k] != nil {
 		return false
 	}
@@ -544,8 +544,8 @@ func (s *session) dropPost(st *stream) {
 }
 
 func (s *session) removePostLocked(st *stream) {
-	if s.byID[string(st.id)] == st {
-		delete(s.byID, string(st.id))
+	if k := idKey(st.id); s.byID[k] == st {
+		delete(s.byID, k)
 	}
 	for i, p := range s.posts {
 		if p == st {
@@ -634,7 +634,7 @@ func (s *session) route(msg []byte) {
 	}
 	s.mu.Lock()
 	if env.kind() == kindResponse {
-		st := s.byID[string(compactID(env.ID))]
+		st := s.byID[idKey(env.ID)]
 		if st != nil {
 			s.removePostLocked(st)
 		}
