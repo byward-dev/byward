@@ -348,6 +348,29 @@ func TestATransientFailureAtTheConsentAnswerIsServiceUnavailable(t *testing.T) {
 	}
 }
 
+// A refused CIMD client ID is never logged as sent: it may carry a password, a query or any length
+// (ADR-0009 §8). Only a DCR client's line names its client ID.
+func TestARefusedCIMDClientIDIsNotLoggedAsSent(t *testing.T) {
+	for name, id := range map[string]string{
+		"a password and a query": "https://alice:hunter2@app.example.com/x.json?token=s3cret",
+		"too long":               "https://app.example.com/" + strings.Repeat("z", 600),
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t, withCIMD(clientdocs.Serve(t, appDocument())))
+			if res := e.do(t, "GET", "/authorize?"+authorizeQuery(url.Values{"client_id": {id}}).Encode(), nil, nil); res.StatusCode != http.StatusBadRequest {
+				t.Fatalf("/authorize: %d, want 400", res.StatusCode)
+			}
+			recs := e.logRecords(t, metadataRefused)
+			if len(recs) != 1 || recs[0]["client_id"] != nil {
+				t.Fatalf("logged %v, want one refusal without the client ID", recs)
+			}
+			if logs := e.logs.String(); strings.Contains(logs, "hunter2") || strings.Contains(logs, "s3cret") || strings.Contains(logs, strings.Repeat("z", 513)) {
+				t.Fatalf("the log repeats the client ID as sent:\n%s", logs)
+			}
+		})
+	}
+}
+
 // Only CIMD refusals are logged, with their reason; an unknown static client ID is ordinary noise.
 // Both lookups end in ErrUnknownClient: only the shape of the client ID differs.
 func TestOnlyCIMDRefusalsAreLoggedWithTheirReason(t *testing.T) {
