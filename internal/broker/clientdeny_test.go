@@ -199,8 +199,10 @@ func TestADeniedAppCannotSignInThroughItsOtherRedirectURI(t *testing.T) {
 		code := e.signIn(t, url.Values{"client_id": {id}, "redirect_uri": {good}, "scope": {"mcp offline_access"}}).Query().Get("code")
 		deny(e)
 		res, body := e.redeem(t, code, url.Values{"client_id": {id}, "redirect_uri": {good}})
-		if res.StatusCode != http.StatusBadRequest || body["error"] != "invalid_grant" || body["access_token"] != nil {
-			t.Fatalf("redeeming after the denial: %d %v, want 400 invalid_grant and no token", res.StatusCode, body)
+		// The answer does not tell the app it was denied, as at refresh.
+		if res.StatusCode != http.StatusBadRequest || body["error"] != "invalid_grant" || body["access_token"] != nil ||
+			!strings.HasPrefix(body["error_description"].(string), "the authorization code is invalid or expired") {
+			t.Fatalf("redeeming after the denial: %d %v, want 400 invalid_grant, invalid or expired, and no token", res.StatusCode, body)
 		}
 		revocations := e.auditEvents(t, "grant_revoked")
 		if len(revocations) != 1 || revocations[0]["reason"] != "client on the operator's denylist; grant revoked" || revocations[0]["client_id"] != id {
