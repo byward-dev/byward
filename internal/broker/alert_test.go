@@ -198,8 +198,8 @@ func TestEveryBrokerIdPCallIsExportedFromTheStart(t *testing.T) {
 func TestASignInFailureThatIsNotAnIdPErrorIsLoggedOnce(t *testing.T) {
 	e := newEnv(t)
 	callbackFailingWith(errors.New("plain failure"))(t, e, fakeidp.Failure{})
-	lines := regexp.MustCompile(`(?m)^.*"msg":"IdP sign-in failed".*$`).FindAllString(e.logs.String(), -1)
-	if len(lines) != 1 || !strings.Contains(lines[0], `"error":"plain failure"`) || strings.Contains(lines[0], `"reason":`) {
-		t.Fatalf("sign-in failure lines %q, want one quoting the error, without a reason", lines)
+	lines := e.logRecords(t, "IdP sign-in failed")
+	if len(lines) != 1 || lines[0]["error"] != "plain failure" || !hasField(lines[0], "reason", nil) {
+		t.Fatalf("sign-in failure lines %v, want one quoting the error, without a reason", lines)
 	}
 }

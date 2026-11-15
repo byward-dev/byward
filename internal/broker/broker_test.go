@@ -1013,6 +1013,16 @@ func (e *env) logRecords(t *testing.T, msg string) []map[string]any {
 	return lines
 }
 
+// hasField reports whether rec holds key with the value want, or, for a nil want, lacks key: a
+// "key":null in the log is neither.
+func hasField(rec map[string]any, key string, want any) bool {
+	got, ok := rec[key]
+	if want == nil {
+		return !ok
+	}
+	return ok && got == want
+}
+
 // auditEvents returns the audit records with the given event name.
 func (e *env) auditEvents(t *testing.T, name string) []map[string]any {
 	t.Helper()

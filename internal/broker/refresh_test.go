@@ -472,8 +472,8 @@ func TestRefreshRevokesWhenTheUserNoLongerChecksOut(t *testing.T) {
 			if len(lines) != 1 {
 				t.Fatalf("want one %q line, got %v", tc.msg, lines)
 			}
-			if lines[0]["reason"] != tc.reason || lines[0]["idp"] != tc.idp {
-				t.Errorf("revocation line %v, want reason %v and idp %v", lines[0], tc.reason, tc.idp)
+			if !hasField(lines[0], "reason", tc.reason) || !hasField(lines[0], "idp", tc.idp) {
+				t.Errorf("revocation line %v, want reason %v and idp %v (nil: absent)", lines[0], tc.reason, tc.idp)
 			}
 		})
 	}
@@ -522,7 +522,7 @@ func TestUnusableStoredIdPTokensRevokeTheGrant(t *testing.T) {
 	// One revocation line, with no reason or IdP: there is no IdP error to name.
 	const msg = "the grant holds no usable IdP refresh token; grant revoked"
 	lines := e.logRecords(t, msg)
-	if len(lines) != 1 || lines[0]["reason"] != nil || lines[0]["idp"] != nil {
+	if len(lines) != 1 || !hasField(lines[0], "reason", nil) || !hasField(lines[0], "idp", nil) {
 		t.Fatalf("revocation lines %v, want one %q line without reason or idp", lines, msg)
 	}
 }
@@ -955,12 +955,10 @@ func TestASignInThatWouldRefreshButGotNoIdPRefreshTokenWarnsAndGetsNoRefreshToke
 			if res.StatusCode != http.StatusOK || (body["refresh_token"] != nil) != tc.fresh {
 				t.Fatalf("token: %d %v, want a refresh token %v", res.StatusCode, body, tc.fresh)
 			}
-			var warning map[string]any
-			if lines := e.logRecords(t, "the IdP returned no refresh token, so this grant cannot refresh"); len(lines) > 0 {
-				warning = lines[len(lines)-1]
-			}
-			if (warning != nil) != tc.warn || (warning != nil && (warning["level"] != "WARN" || warning["idp"] != "entra" || warning["client_id"] != clientID)) {
-				t.Fatalf("warning %v, want one naming the IdP: %v", warning, tc.warn)
+			lines := e.logRecords(t, "the IdP returned no refresh token, so this grant cannot refresh")
+			if len(lines) > 1 || (len(lines) == 1) != tc.warn ||
+				(tc.warn && (lines[0]["level"] != "WARN" || lines[0]["idp"] != "entra" || lines[0]["client_id"] != clientID)) {
+				t.Fatalf("warnings %v, want one naming the IdP: %v", lines, tc.warn)
 			}
 		})
 	}
@@ -1096,30 +1094,28 @@ func TestARefreshFailureFromTheIdPLogsItsErrorFields(t *testing.T) {
 					}}
 				})
 				e.refresh(t, e.offline(t)["refresh_token"].(string), "")
-				logs := e.logs.String()
-				lines := regexp.MustCompile(`(?m)^.*"msg":"`+regexp.QuoteMeta(c.msg)+`".*$`).FindAllString(logs, -1)
+				lines := e.logRecords(t, c.msg)
 				if len(lines) != 1 {
-					t.Fatalf("want one %q line, got %d:\n%s", c.msg, len(lines), logs)
+					t.Fatalf("want one %q line, got %v", c.msg, lines)
 				}
-				line := lines[0]
-				if want, _ := json.Marshal(refreshErr.Error()); !strings.Contains(line, `"error":`+string(want)) {
-					t.Errorf("the line does not quote the IdP error %s:\n%s", want, line)
+				rec := lines[0]
+				if rec["error"] != refreshErr.Error() {
+					t.Errorf("the line's error is %v, want the IdP error %q", rec["error"], refreshErr.Error())
 				}
-				for _, f := range []string{`"reason":"hint-1"`, `"idp_error_code":70008`, `"trace_id":"trace-1"`, `"correlation_id":"corr-1"`} {
-					if strings.Contains(line, f) != set {
-						t.Errorf("field %s present %v, want %v:\n%s", f, !set, set, line)
+				fields := map[string]any{"reason": nil, "idp_error_code": nil, "trace_id": nil, "correlation_id": nil} // unset: absent
+				if set {
+					fields = map[string]any{"reason": "hint-1", "idp_error_code": float64(70008), "trace_id": "trace-1", "correlation_id": "corr-1"}
+				}
+				for k, want := range fields {
+					if !hasField(rec, k, want) {
+						t.Errorf("field %s = %v, want %v (nil: absent): %v", k, rec[k], want, rec)
 					}
 				}
-				for _, unset := range []string{`"reason":""`, `"idp_error_code":0`, `"trace_id":""`, `"correlation_id":""`} {
-					if strings.Contains(line, unset) {
-						t.Errorf("the line logs an unset field %s:\n%s", unset, line)
-					}
+				if c.class == idp.SignInAgain && rec["idp"] != "entra" {
+					t.Errorf("the revocation line does not name the IdP: %v", rec)
 				}
-				if c.class == idp.SignInAgain && !strings.Contains(line, `"idp":"entra"`) {
-					t.Errorf("the revocation line does not name the IdP:\n%s", line)
-				}
-				if !strings.Contains(line, `"level":"`+c.level+`"`) {
-					t.Errorf("want level %s:\n%s", c.level, line)
+				if rec["level"] != c.level {
+					t.Errorf("level %v, want %s", rec["level"], c.level)
 				}
 			})
 		}
