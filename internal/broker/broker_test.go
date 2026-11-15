@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -746,7 +747,8 @@ func TestMetadataAdvertisesTheBroker(t *testing.T) {
 		res := e.do(t, "GET", p, nil, nil)
 		var m map[string]any
 		_ = json.NewDecoder(res.Body).Decode(&m)
-		if m["issuer"] != issuer || m["token_endpoint"] != issuer+"/token" || m["authorization_response_iss_parameter_supported"] != true {
+		if m["issuer"] != issuer || m["token_endpoint"] != issuer+"/token" || m["authorization_response_iss_parameter_supported"] != true ||
+			fmt.Sprint(m["scopes_supported"]) != "[mcp offline_access]" {
 			t.Fatalf("%s: %v", p, m)
 		}
 	}
@@ -759,10 +761,13 @@ func TestCORSAndMethods(t *testing.T) {
 		status             int
 		headers            map[string]string // "" means the header must be absent
 	}{
-		{"metadata preflight", "OPTIONS", md, 204, map[string]string{"Access-Control-Allow-Origin": origin, "Vary": "Origin", "Access-Control-Allow-Credentials": ""}},
+		{"metadata preflight", "OPTIONS", md, 204, map[string]string{"Access-Control-Allow-Origin": origin, "Vary": "Origin", "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS", "Access-Control-Allow-Credentials": ""}},
 		{"metadata POST", "POST", md, 405, map[string]string{"Allow": "GET, HEAD, OPTIONS"}},
 		{"metadata HEAD", "HEAD", md, 200, map[string]string{"Access-Control-Allow-Origin": origin}},
 		{"token GET", "GET", "/token", 405, map[string]string{"Allow": "POST, OPTIONS"}},
+		{"token preflight", "OPTIONS", "/token", 204, map[string]string{"Access-Control-Allow-Origin": origin, "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Credentials": ""}},
+		{"revoke preflight", "OPTIONS", "/revoke", 204, map[string]string{"Access-Control-Allow-Origin": origin, "Access-Control-Allow-Methods": "POST, OPTIONS"}},
+		{"revoke PUT", "PUT", "/revoke", 405, map[string]string{"Allow": "POST, OPTIONS", "Access-Control-Allow-Origin": origin}},
 	}
 	e := newEnv(t)
 	for _, c := range cases {
@@ -778,7 +783,72 @@ func TestCORSAndMethods(t *testing.T) {
 					t.Errorf("%s = %q, want %q", k, got, want)
 				}
 			}
+			// A 405 ends the request: the endpoint's handler must not run after it.
+			if b, _ := io.ReadAll(res.Body); c.status == http.StatusMethodNotAllowed && string(b) != "method not allowed\n" {
+				t.Errorf("405 body %q, want only the 405's own text", b)
+			}
 		})
+	}
+}
+
+// /token and /revoke read at most 64 KiB of form before they authenticate the client, and a form
+// of up to that is read in full.
+func TestTokenAndRevokeReadAFormOfUpTo64KiB(t *testing.T) {
+	const unreadable = "the request body is not a valid form"
+	// The fake client and token get past the form: /token refuses the grant, /revoke answers 200.
+	afterTheForm := map[string]int{"/token": http.StatusBadRequest, "/revoke": http.StatusOK}
+	e := newEnv(t)
+	for _, c := range []struct {
+		name    string
+		over    int // bytes over 64 KiB
+		refused bool
+	}{
+		{"exactly 64 KiB", 0, false},
+		{"one byte over 64 KiB", 1, true},
+	} {
+		form := url.Values{"grant_type": {"refresh_token"}, "client_id": {clientID}, "token": {"x"}, "pad": {""}}
+		form.Set("pad", strings.Repeat("A", 64<<10-len(form.Encode())+c.over))
+		if n := len(form.Encode()); n != 64<<10+c.over {
+			t.Fatalf("form is %d bytes, want %d", n, 64<<10+c.over)
+		}
+		for _, path := range []string{"/token", "/revoke"} {
+			t.Run(c.name+path, func(t *testing.T) {
+				res := e.do(t, "POST", path, form, nil)
+				var body map[string]any
+				_ = json.NewDecoder(res.Body).Decode(&body)
+				d, _ := body["error_description"].(string)
+				if c.refused {
+					wantOAuthError(t, res, body, http.StatusBadRequest, "invalid_request")
+				} else if res.StatusCode != afterTheForm[path] {
+					t.Fatalf("%d %q, want %d: the whole form read", res.StatusCode, d, afterTheForm[path])
+				}
+				if strings.HasPrefix(d, unreadable) != c.refused {
+					t.Fatalf("%d %q, want the unreadable-form refusal: %t", res.StatusCode, d, c.refused)
+				}
+			})
+		}
+	}
+}
+
+func TestForeignResource(t *testing.T) {
+	ours, _ := url.Parse("https://mcp.example.com/mcp")
+	b := &Broker{cfg: Config{Resource: ours}}
+	for res, want := range map[string]bool{"": false, "https://mcp.example.com/mcp": false, "https://mcp.example.com/mcp/": true,
+		"https://other.example/mcp": true, "https://mcp.example.com": true} {
+		desc, foreign := b.foreignResource(res)
+		if foreign != want || (foreign && desc != "this server only issues tokens for https://mcp.example.com/mcp") {
+			t.Errorf("foreignResource(%q) = %q, %v; want foreign %v", res, desc, foreign, want)
+		}
+	}
+}
+
+func TestWithoutOfflineLeavesItsInputAlone(t *testing.T) {
+	in := []string{offlineAccess, "mcp", offlineAccess}
+	if got := withoutOffline(in); !slices.Equal(got, []string{"mcp"}) {
+		t.Fatalf("withoutOffline = %v, want [mcp]", got)
+	}
+	if !slices.Equal(in, []string{offlineAccess, "mcp", offlineAccess}) {
+		t.Fatalf("the input changed to %v", in)
 	}
 }
 

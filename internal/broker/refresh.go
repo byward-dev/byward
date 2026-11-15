@@ -30,8 +30,8 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "unauthorized_client", "this client did not register the refresh_token grant"})
 		return
 	}
-	if res := f.Get("resource"); res != "" && res != b.cfg.Resource.String() {
-		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_target", "this server only issues tokens for " + b.cfg.Resource.String()})
+	if desc, foreign := b.foreignResource(f.Get("resource")); foreign {
+		b.tokenFail(w, r, tokenError{http.StatusBadRequest, "invalid_target", desc})
 		return
 	}
 	invalid := tokenError{http.StatusBadRequest, "invalid_grant", "the refresh token is invalid or expired"}
@@ -66,7 +66,7 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 	if !rt.RotatedAt.IsZero() && now.Sub(rt.RotatedAt) >= b.cfg.RefreshGrace {
 		// Clear reuse: revoke without calling the IdP. Retries within the window go on, and the
 		// store decides atomically below.
-		b.revoke(r, client.ID(), rt.GrantID, now, "refresh token reused; grant revoked")
+		b.revoke(r, client.ID(), rt.GrantID, now, reasonRefreshReused)
 		b.tokenFail(w, r, invalid)
 		return
 	}
@@ -101,9 +101,8 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 			IdleExpiresAt: minTime(now.Add(RefreshIdleLifetime), g.ExpiresAt)}})
 	switch {
 	case errors.Is(err, store.ErrReused):
-		b.deny.Add(g.ID) // the store revoked it in the same step
-		b.cfg.Log.WarnContext(ctx, "refresh token reused; grant revoked")
-		b.cfg.Audit.Record(r, audit.Event{Name: audit.GrantRevoked, Outcome: audit.Success, Reason: "refresh token reused; grant revoked", ClientID: client.ID(), GrantID: g.ID})
+		b.revoked(r, client.ID(), g.ID, reasonRefreshReused) // the store revoked it in the same step
+		b.cfg.Log.WarnContext(ctx, reasonRefreshReused)
 		b.tokenFail(w, r, invalid)
 		return
 	case errors.Is(err, store.ErrNotFound):
@@ -238,6 +237,10 @@ func narrowScopes(requested string, granted []string) ([]string, bool) {
 type redirectDenier interface {
 	Denied() bool
 }
+
+// reasonRefreshReused is the grant_revoked reason for a refresh token presented again after its
+// rotation, outside the grace window.
+const reasonRefreshReused = "refresh token reused; grant revoked"
 
 // The grant_revoked reasons for a refresh by a refused client.
 const (

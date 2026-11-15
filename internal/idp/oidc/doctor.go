@@ -14,6 +14,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/doctor"
 	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // Diagnosis names the settings doctor's fixes refer to.
@@ -52,9 +53,9 @@ func (p *Provider) DiagnoseClient(ctx context.Context, d Diagnosis) doctor.Resul
 		return check.Result(doctor.Fail, "the proxy cannot make its credential: "+err.Error(), "check "+d.CredentialSetting)
 	case errors.As(err, &netErr) || errors.Is(err, io.ErrUnexpectedEOF) || !errors.As(err, &ie): // no whole answer
 		return check.Result(doctor.Fail, "the IdP's token endpoint did not answer in full: "+err.Error(),
-			"check that the proxy's host reaches "+m.TokenEndpoint+" and gets its whole answer")
+			"check that the proxy's host reaches "+logging.URL(m.TokenEndpoint)+" and gets its whole answer")
 	case ie.OAuth == "":
-		return check.Result(doctor.Fail, "the IdP's token endpoint gave no OAuth answer: "+err.Error(), "check "+m.TokenEndpoint+": it must be the IdP's token endpoint")
+		return check.Result(doctor.Fail, "the IdP's token endpoint gave no OAuth answer: "+err.Error(), "check "+logging.URL(m.TokenEndpoint)+": it must be the IdP's token endpoint")
 	case refusesClient(ie):
 		return check.Result(doctor.Fail, fmt.Sprintf("the IdP refused the client ID or its credential (%s)", answer(ie)), p.credentialFix(d, ie.OAuth == "invalid_client"))
 	case ie.OAuth == "invalid_grant" && ie.Status/100 == 4:

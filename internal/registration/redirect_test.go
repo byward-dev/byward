@@ -119,12 +119,27 @@ func TestRedirectErrorDiagnostics(t *testing.T) {
 		t.Errorf("message = %q", msg)
 	}
 	var re *RedirectError
-	errors.As(err, &re)
+	if !errors.As(err, &re) {
+		t.Fatalf("err = %v, not a *RedirectError", err)
+	}
 	logged := fmt.Sprint(re.LogValue())
 	if strings.Contains(logged, "SECRET") || !strings.Contains(logged, "https://b.example/cb") || !strings.Contains(logged, ReasonNotRegistered) {
 		t.Errorf("log value = %s", logged)
 	}
 	var _ slog.LogValuer = re
+	// User information a client puts in a redirect URI is no more logged than its query.
+	if !errors.As(MatchRedirect([]string{"https://a.example/cb"}, "https://user:SECRET@b.example/cb"), &re) {
+		t.Fatal("user information is not a *RedirectError")
+	}
+	if logged := fmt.Sprint(re.LogValue()); logged != "[reason="+ReasonUserinfo+" sent=https://b.example/cb]" {
+		t.Errorf("log value = %s", logged)
+	} // The text for a logged error shows every URI as logs may, registered ones included.
+	if !errors.As(MatchRedirect([]string{"https://u:SECRET@a.example/cb?k=SECRET"}, "https://b.example/cb?code=SECRET"), &re) {
+		t.Fatal("an unregistered URI is not a *RedirectError")
+	}
+	if got, want := re.logText(), "redirect URI not registered: registered https://a.example/cb, sent https://b.example/cb"; got != want {
+		t.Errorf("logText = %q, want %q", got, want)
+	}
 }
 
 func TestARedirectKeyDropsOnlyALoopbackPort(t *testing.T) {

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/envproxy"
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // Outbound budgets (docs/quality-lenses.md, "Default budgets").
@@ -51,7 +52,8 @@ func NewFetcher(c *http.Client) *Fetcher {
 	return &Fetcher{Client: c, Retries: DefaultRetries, Backoff: 200 * time.Millisecond}
 }
 
-// StatusError is a GetJSON response other than 200 OK; URL has no query.
+// StatusError is a GetJSON response other than 200 OK; URL is the endpoint as logs may show it
+// (logging.URL).
 type StatusError struct {
 	URL  string
 	Code int
@@ -92,12 +94,12 @@ func (f *Fetcher) GetJSON(ctx context.Context, endpoint string, dst any) error {
 func (f *Fetcher) getOnce(ctx context.Context, endpoint string, dst any) (retry bool, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return false, err
+		return false, logging.URLError(err)
 	}
 	req.Header.Set("Accept", "application/json")
 	resp, err := f.Client.Do(req)
 	if err != nil {
-		return ctx.Err() == nil, err
+		return ctx.Err() == nil, logging.URLError(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := readLimited(resp.Body)
@@ -105,11 +107,11 @@ func (f *Fetcher) getOnce(ctx context.Context, endpoint string, dst any) (retry 
 		return false, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		se := &StatusError{URL: redactURL(endpoint), Code: resp.StatusCode}
+		se := &StatusError{URL: logging.URL(endpoint), Code: resp.StatusCode}
 		return se.Transient(), se
 	}
 	if err := json.Unmarshal(body, dst); err != nil {
-		return false, fmt.Errorf("GET %s: %w", redactURL(endpoint), JSONError(err))
+		return false, fmt.Errorf("GET %s: %w", logging.URL(endpoint), JSONError(err))
 	}
 	return false, nil
 }
@@ -148,7 +150,7 @@ func (r *TokenResponse) Tokens(now time.Time) Tokens {
 func (f *Fetcher) PostToken(ctx context.Context, endpoint string, form url.Values, header http.Header) (*TokenResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, err
+		return nil, logging.URLError(err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
@@ -157,7 +159,7 @@ func (f *Fetcher) PostToken(ctx context.Context, endpoint string, form url.Value
 	}
 	resp, err := f.Client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, logging.URLError(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := readLimited(resp.Body)
@@ -190,16 +192,6 @@ func readLimited(r io.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("response body larger than %d bytes", MaxBodyBytes)
 	}
 	return bytes.TrimSpace(body), nil
-}
-
-// redactURL drops the query, which may carry codes or state.
-func redactURL(s string) string {
-	u, err := url.Parse(s)
-	if err != nil {
-		return "<invalid URL>"
-	}
-	u.RawQuery, u.Fragment, u.User = "", "", nil
-	return u.String()
 }
 
 // budget is the longest a GetJSON can take with this Fetcher's timeout, retries and backoff, plus

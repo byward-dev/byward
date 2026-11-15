@@ -151,7 +151,8 @@ func TestOnlyPlainOIDCSaysTheClientBeforeCodeOrderIsAssumed(t *testing.T) {
 	}
 }
 
-// When the probe cannot run or gets no OAuth answer, doctor says so, never a pass.
+// When the probe cannot run or gets no OAuth answer, doctor says so, never a pass, and names the
+// token endpoint as logs may show it.
 func TestDoctorReportsAClientCheckItCouldNotMake(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -167,6 +168,16 @@ func TestDoctorReportsAClientCheckItCouldNotMake(t *testing.T) {
 			"cannot make its credential", "check BYWARD_OIDC_CLIENT_SECRET_FILE", ""},
 		{"the token endpoint is unreachable", func(e *env) { e.ready(t); e.p.fetch.Client = &http.Client{Transport: refused{}} }, doctor.Fail,
 			"did not answer in full", "check that the proxy's host reaches http://", "/token and gets its whole answer"},
+		{"a token endpoint with user information and a query, shown without them", func(e *env) {
+			e.ready(t)
+			e.p.meta.TokenEndpoint = strings.Replace(e.p.meta.TokenEndpoint, "http://", "http://u:LEAKED@", 1) + "?p=LEAKED"
+			e.p.fetch.Client = &http.Client{Transport: refused{}}
+		}, doctor.Fail, "did not answer in full", "check that the proxy's host reaches http://", "/token and gets its whole answer"},
+		{"an answer that is not JSON, from a token endpoint with user information and a query", func(e *env) {
+			e.ready(t)
+			e.p.meta.TokenEndpoint = strings.Replace(e.p.meta.TokenEndpoint, "http://", "http://u:LEAKED@", 1) + "?p=LEAKED"
+			e.p.fetch.Client = &http.Client{Transport: answering{status: 404, body: "<html>not here</html>"}}
+		}, doctor.Fail, "gave no OAuth answer", "it must be the IdP's token endpoint", "/token: it must be the IdP's token endpoint"},
 		{"an answer cut off mid-body", func(e *env) { e.ready(t); e.p.fetch.Client = &http.Client{Transport: cutOff{io.ErrUnexpectedEOF}} }, doctor.Fail,
 			"did not answer in full", "check that the proxy's host reaches http://", "/token and gets its whole answer"},
 		{"an answer that times out mid-body", func(e *env) {
@@ -196,8 +207,8 @@ func TestDoctorReportsAClientCheckItCouldNotMake(t *testing.T) {
 			tc.setup(e)
 			r := e.p.DiagnoseClient(context.Background(), secretDiagnosis)
 			wantResult(t, r, tc.status, tc.message, tc.fix)
-			if !strings.HasSuffix(r.Fix, tc.fixEnd) {
-				t.Fatalf("fix %q; want it to end with %q", r.Fix, tc.fixEnd)
+			if !strings.HasSuffix(r.Fix, tc.fixEnd) || strings.Contains(r.Message+r.Fix, "LEAKED") {
+				t.Fatalf("message %q, fix %q; want the fix to end with %q, the endpoint shown as logs may", r.Message, r.Fix, tc.fixEnd)
 			}
 		})
 	}

@@ -11,12 +11,13 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"net/textproto"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/envproxy"
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // stripped are removed from every inbound request before anything of ours is set (invariant 16):
@@ -65,7 +66,7 @@ func WithInject(inject func(context.Context, http.Header)) Option {
 func WithStripped(names ...string) Option {
 	return func(o *options) {
 		for _, n := range names {
-			o.strip[canonical(n)] = true
+			o.strip[config.CanonicalHeader(n)] = true
 		}
 	}
 }
@@ -293,18 +294,21 @@ func isRedirect(status int) bool {
 	return status >= 300 && status < 400 && status != http.StatusNotModified
 }
 
-// redirectHint names where the upstream pointed, resolved against the request's URL: its scheme,
-// host and path only, without path parameters, since userinfo, the query, the fragment, an opaque
-// part or a `;jsessionid` could carry a secret.
+// redirectHint names where the upstream pointed, resolved against the request's URL, as logs may
+// show it (logging.URL). A Location without a host names no endpoint to set.
 func redirectHint(res *http.Response) string {
 	loc, err := res.Location()
-	// An @ past the host means credentials with an unescaped /, ? or #, split by the parser.
-	if err != nil || loc.Opaque != "" || loc.Host == "" || strings.ContainsRune(loc.Path+loc.RawQuery+loc.Fragment, '@') {
-		return "the upstream sent no usable Location; check BYWARD_UPSTREAM_URL"
+	if err != nil || loc.Host == "" {
+		return noUsableLocation
 	}
-	path, _, _ := strings.Cut(loc.EscapedPath(), ";") // escaped: a %3B or %2F is part of the path
-	return "the upstream points to " + loc.Scheme + "://" + loc.Host + path + "; if that is its MCP endpoint, set BYWARD_UPSTREAM_URL to it"
+	shown := logging.URL(loc.String())
+	if shown == logging.InvalidURL {
+		return noUsableLocation
+	}
+	return "the upstream points to " + shown + "; if that is its MCP endpoint, set BYWARD_UPSTREAM_URL to it"
 }
+
+const noUsableLocation = "the upstream sent no usable Location; check BYWARD_UPSTREAM_URL"
 
 // proxyErrorLog takes ReverseProxy's own error lines (a failed read during a body copy)
 // into the structured log. A line about the upstream's body through a misread proxy quotes no
@@ -337,7 +341,7 @@ func withoutAccessToken(raw string) string {
 
 func strip(h http.Header, extra map[string]bool) {
 	for k := range h {
-		if n := canonical(k); builtIn(n) || extra[n] {
+		if n := config.CanonicalHeader(k); builtIn(n) || extra[n] {
 			delete(h, k)
 		}
 	}
@@ -358,16 +362,11 @@ var hopByHop = map[string]bool{"Connection": true, "Proxy-Connection": true, "Ke
 // as it compares them: by the built-in list, hop-by-hop headers included, or as one of extra (the
 // names given WithStripped).
 func Strips(name string, extra ...string) bool {
-	n := canonical(name)
+	n := config.CanonicalHeader(name)
 	for _, e := range extra {
-		if canonical(e) == n {
+		if config.CanonicalHeader(e) == n {
 			return true
 		}
 	}
 	return builtIn(n)
-}
-
-// canonical is a header name as strip compares it: `_` read as `-`, canonical case.
-func canonical(name string) string {
-	return textproto.CanonicalMIMEHeaderKey(strings.ReplaceAll(name, "_", "-"))
 }

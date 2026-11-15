@@ -24,6 +24,7 @@ type proxy struct {
 	noRevocation   bool
 	noS256         bool
 	htmlMetadata   bool // every metadata document is an HTML page, as a misrouted ingress serves
+	badLocation    bool // everything redirects to a Location the client cannot parse
 	// jwksKey, when set, is the key ID the JWKS serves, and the server metadata names jwks_uri.
 	jwksKey   string
 	noJWKSURI bool   // jwks_uri left out although there is a JWKS
@@ -35,6 +36,12 @@ type proxy struct {
 }
 
 func (p proxy) handler(origin string) http.Handler {
+	if p.badLocation {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Location", "http://admin:SECRET/@login.example/x?state=SECRET")
+			w.WriteHeader(http.StatusFound)
+		})
+	}
 	resource, issuer := origin+"/mcp", origin
 	if p.resource != "" {
 		resource = p.resource
@@ -82,7 +89,7 @@ func (p proxy) handler(origin string) http.Handler {
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", prm)
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", func(w http.ResponseWriter, r *http.Request) {
 		if p.redirectRoot {
-			http.Redirect(w, r, "/elsewhere", http.StatusFound)
+			http.Redirect(w, r, "/elsewhere?state=s", http.StatusFound) // shown without its query
 			return
 		}
 		prm(w, r)
@@ -192,7 +199,7 @@ func TestSelfProbeNamesTheFixForEachMisconfiguration(t *testing.T) {
 		{"another issuer in server metadata", proxy{issuer: "https://other.example"}, asOpenID, "issuer is", "not another server"},
 		{"no iss parameter flag", proxy{noIssParameter: true}, asRFC8414, "authorization_response_iss_parameter_supported", "not another server"},
 		{"no revocation endpoint", proxy{noRevocation: true}, asRFC8414, "revocation_endpoint", "not another server"},
-		{"root metadata redirects", proxy{redirectRoot: true}, prmRoot, "redirect to /elsewhere", "pass this path through unchanged"},
+		{"root metadata redirects, shown without its query", proxy{redirectRoot: true}, prmRoot, "/elsewhere)", "pass this path through unchanged"},
 		{"Host refused", proxy{misdirect: true}, hostHeader, "421", "HOSTS_SETTING"},
 		{"Host refused, on metadata", proxy{misdirect: true}, prmInserted, "answered 421", "HOSTS_SETTING"},
 		{"401 without WWW-Authenticate", proxy{noChallenge: true}, challenge, "no resource_metadata", "WWW-Authenticate"},
@@ -300,5 +307,38 @@ func TestSelfProbeOfAnUnreachableProxyFailsTheDiscoveryCheck(t *testing.T) {
 	got := probeTarget(t, "http://127.0.0.1:1", http.DefaultClient, "k1")[keysByDisco]
 	if got.Status != Fail || !strings.Contains(got.Message, "cannot reach") || !strings.Contains(got.Fix, "start the proxy") {
 		t.Fatalf("%+v", got)
+	}
+}
+
+// A redirect names where it points, resolved against the probed URL, as logs may show it: a login
+// page's Location can carry state or credentials.
+func TestARedirectTargetIsShownAsLogsMay(t *testing.T) {
+	const probed = "https://mcp.example.com/.well-known/x"
+	for name, tc := range map[string]struct{ target, location, want string }{
+		"a relative Location, resolved":                    {probed, "/elsewhere?state=SECRET", "https://mcp.example.com/elsewhere"},
+		"user information and query dropped":               {probed, "https://u:SECRET@login.example/cb?state=SECRET", "https://login.example/cb"},
+		"a Location that does not parse":                   {probed, "http://x/%zz?state=SECRET", "<invalid URL>"},
+		"no Location":                                      {probed, "", "nowhere: no Location"},
+		"a target that does not parse: the Location alone": {"%zz", "https://login.example/cb?state=SECRET", "https://login.example/cb"},
+	} {
+		if got := redirectTarget(tc.target, tc.location); got != tc.want {
+			t.Errorf("%s: redirectTarget(%q, %q) = %q, want %q", name, tc.target, tc.location, got, tc.want)
+		}
+	}
+}
+
+// A redirect to a Location the client cannot parse fails every probe, and no result quotes that
+// Location: the client's own error does, credentials and query included.
+func TestAnUnparsableRedirectIsReportedWithoutItsLocation(t *testing.T) {
+	results := probe(t, proxy{badLocation: true})
+	saw := false
+	for check, r := range results {
+		if strings.Contains(r.Message+r.Fix, "SECRET") {
+			t.Errorf("%s = %+v, quotes the Location", check, r)
+		}
+		saw = saw || strings.Contains(r.Message, "failed to parse Location header")
+	}
+	if !saw {
+		t.Fatalf("no result names the unparsable Location: %+v", results)
 	}
 }

@@ -177,6 +177,11 @@ func New(cfg *config.Config, log *slog.Logger) (*Servers, error) {
 	return s, nil
 }
 
+// limitBody bounds an MCP request body to n bytes. Unlike http.MaxBytesHandler it answers 413 at
+// once when Content-Length already says the body is larger, so such a request never takes an
+// admission slot or reaches the upstream. The broker uses http.MaxBytesHandler, so an oversized
+// body there still gets the broker's own error response (OAuth JSON, or the consent error page),
+// not a plain-text 413.
 func limitBody(n int64, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ContentLength > n {

@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/ratelimit"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/token"
@@ -18,15 +17,7 @@ import (
 // Retry-After, never a false 200. The IdP's tokens are deleted with the grant; revoking them at
 // the IdP is not possible (no adapter has a revocation endpoint), so they simply expire there.
 func (b *Broker) revokeEndpoint(w http.ResponseWriter, r *http.Request) {
-	cors(w, r, "POST, OPTIONS")
-	switch r.Method {
-	case http.MethodOptions:
-		w.WriteHeader(http.StatusNoContent)
-		return
-	case http.MethodPost:
-	default:
-		w.Header().Set("Allow", "POST, OPTIONS")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	if !allowPost(w, r) {
 		return
 	}
 	if retry, limited := b.throttled(w, r, ratelimit.Revoke); limited {
@@ -91,8 +82,7 @@ func (b *Broker) revokeEndpoint(w http.ResponseWriter, r *http.Request) {
 			b.unavailable(w, r, "revoking a grant failed", err)
 			return
 		}
-		b.deny.Add(grantID)
-		b.cfg.Audit.Record(r, audit.Event{Name: audit.GrantRevoked, Outcome: audit.Success, Reason: "the client revoked a token (RFC 7009)", ClientID: client.ID(), GrantID: grantID})
+		b.revoked(r, client.ID(), grantID, "the client revoked a token (RFC 7009)")
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
