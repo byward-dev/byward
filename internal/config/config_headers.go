@@ -5,8 +5,9 @@ import (
 	"strings"
 )
 
-// reservedHeaders may not carry the assertion: the proxy, the transport or the MCP protocol owns
-// them, or they carry forwarding or browser data (ADR-0016 §2, §4; ADR-0018 §6).
+// reservedHeaders may not be set by any upstream header setting (the assertion, upstream
+// credential and On-Behalf-Of headers): the proxy, the transport or the MCP protocol owns them, or
+// they carry forwarding or browser data (ADR-0016 §2, §4; ADR-0018 §6).
 var reservedHeaders = map[string]bool{"Host": true, "Cookie": true, "Set-Cookie": true, "Content-Length": true, "Content-Type": true,
 	"Transfer-Encoding": true, "Connection": true, "Keep-Alive": true, "Upgrade": true, "Te": true, "Trailer": true, "Accept": true,
 	"Accept-Encoding": true, "Forwarded": true, "Origin": true, "Referer": true, "Mcp-Session-Id": true, "Mcp-Protocol-Version": true,
