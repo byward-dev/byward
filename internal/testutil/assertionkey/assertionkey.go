@@ -43,7 +43,19 @@ func Write(t testing.TB, dir, id string, sec1 bool) *ecdsa.PrivateKey {
 // Dir creates a key directory under t.TempDir() holding one key, "k1", and returns it.
 func Dir(t testing.TB) string {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), "assertion-keys")
+	dir := EmptyDir(t)
 	Write(t, dir, "k1", false)
+	return dir
+}
+
+// EmptyDir creates an empty key directory under t.TempDir() and returns it. It is never group- or
+// world-accessible, whatever the umask: t.TempDir() itself is 0777 under umask 000, and the proxy
+// refuses a world-writable key directory.
+func EmptyDir(t testing.TB) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), "assertion-keys")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	return dir
 }

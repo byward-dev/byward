@@ -76,11 +76,7 @@ func TestTheUpstreamGetsTheOperatorCredentialAndTheAssertionNeverTheClientsCopie
 func TestWithoutAuthenticationTheUpstreamGetsOnlyTheOperatorCredential(t *testing.T) {
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
-	cfg, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=" + up.URL + "/mcp",
-		"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credentialFile(t, 0o600)}, os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadNoAuthConfig(t, up.URL+"/mcp", "BYWARD_UPSTREAM_CREDENTIAL_FILE="+credentialFile(t, 0o600))
 	var logs bytes.Buffer
 	s, err := New(cfg, logging.New(&logs, "text"))
 	if err != nil {
@@ -110,7 +106,7 @@ func TestALooseUpstreamCredentialFileRefusesToStart(t *testing.T) {
 	for name, env := range map[string][]string{
 		"authenticated": append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp",
 			"BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key", file),
-		"without authentication": {"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_INSECURE_NO_AUTH=true", file},
+		"without authentication": noAuthEnv("http://u/mcp", file),
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg, _, err := config.Load(nil, env, os.ReadFile)
@@ -127,11 +123,7 @@ func TestALooseUpstreamCredentialFileRefusesToStart(t *testing.T) {
 
 // doctor says a credential is set and where it goes, never what it is.
 func TestDoctorReportsTheUpstreamCredentialWithoutItsValue(t *testing.T) {
-	cfg, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp",
-		"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key", "BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credentialFile(t, 0o600)}, os.ReadFile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadNoAuthConfig(t, "http://u/mcp", "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key", "BYWARD_UPSTREAM_CREDENTIAL_FILE="+credentialFile(t, 0o600))
 	report, err := Doctor(context.Background(), cfg, DoctorOptions{})
 	if err != nil {
 		t.Fatal(err)

@@ -2,5 +2,5 @@
 
 package secretfile
 
-// readOnlyFS is unknown here, so a group- or other-readable secret file is always refused.
-var readOnlyFS = func(string) bool { return false }
+// ReadOnlyFS is unknown here, so no path counts as read-only and every permission rule applies.
+func ReadOnlyFS(string) bool { return false }

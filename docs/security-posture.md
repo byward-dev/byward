@@ -277,7 +277,9 @@ the client and redirect URI again. This is accepted behaviour, not a gap: no tok
 **Keys:**
 
 - Keys come from `BYWARD_KEYS_DIR`. The file that sorts last seals; every file opens.
-  World-writable files are refused.
+  A world-writable key file is refused, and so is a world-writable directory unless it is on a
+  read-only mount. The identity assertion's signing keys (`BYWARD_ASSERTION_KEYS_DIR`) follow the
+  same rule; `--dev` relaxes it for neither.
 - One key ring seals access tokens, codes, IdP tokens, login cookies and consent flows. The purpose
   or token type is bound as associated data. ADR-0006 §8 asks for a separate key per purpose; that
   is a follow-up.

@@ -29,6 +29,9 @@ install -d -m 0700 byward-data/assertion-keys
 - A key file that other users can read is refused, like the client secret file. Make it `0600`
   and owned by the proxy's user, or mount it read-only, as Kubernetes secret volumes are; `--dev`
   relaxes the check.
+- As with the sealing keys, a world-writable key file is refused, and so is a world-writable
+  directory unless it is on a read-only mount (a Kubernetes secret volume's root is mode `1777`);
+  `--dev` relaxes neither.
 - The startup log names the key IDs, never key material.
 
 ## 2. Point the upstream at the public keys

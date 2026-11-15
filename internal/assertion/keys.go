@@ -16,6 +16,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/byward-dev/byward/internal/secretfile"
 )
 
 // maxKeyFile bounds what is read from a key file; a PEM P-256 key is about 250 bytes.
@@ -40,9 +42,19 @@ type signingKey struct {
 // LoadKeys reads every key file in dir: a PEM P-256 private key (PKCS#8 "PRIVATE KEY", or the
 // "EC PRIVATE KEY" that `openssl ecparam -genkey` writes), its file name the key ID. Dotfiles and
 // directories are skipped (Kubernetes secret volumes hold `..data` entries). check is the secret
-// file permission check (ADR-0018 §11), run on each file before it is read. Any bad file fails
-// the whole load, naming the file.
+// file permission check (ADR-0018 §11), run on each file before it is read. As with the sealing
+// keys, a world-writable key file is refused, and so is a world-writable directory unless it is on
+// a read-only mount; --dev relaxes neither. Any bad file fails the whole load, naming the file.
 func LoadKeys(dir string, check func(path string) error) (*Keys, error) {
+	di, err := os.Stat(dir)
+	if err != nil {
+		return nil, fmt.Errorf("assertion key directory: %w", err)
+	}
+	// A Kubernetes secret volume is a read-only tmpfs whose root is mode 1777; nobody can add a
+	// key to it.
+	if worldWritable(di) && !readOnlyFS(dir) {
+		return nil, fmt.Errorf("assertion key directory %s is world-writable; anyone could add a key", dir)
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("assertion key directory: %w", err)
@@ -60,6 +72,9 @@ func LoadKeys(dir string, check func(path string) error) (*Keys, error) {
 		}
 		if fi.IsDir() {
 			continue
+		}
+		if worldWritable(fi) {
+			return nil, fmt.Errorf("assertion key file %s is world-writable", path)
 		}
 		if !keyIDPattern.MatchString(name) {
 			return nil, fmt.Errorf("assertion key file %s: the name is the key ID and must match %s", path, keyIDPattern)
@@ -80,6 +95,12 @@ func LoadKeys(dir string, check func(path string) error) (*Keys, error) {
 	k.signing = k.all[len(k.all)-1]
 	return k, nil
 }
+
+// readOnlyFS is secretfile.ReadOnlyFS; tests replace it.
+var readOnlyFS = secretfile.ReadOnlyFS
+
+// worldWritable is the permission refused whatever the check allows: anyone could replace the key.
+func worldWritable(fi os.FileInfo) bool { return fi.Mode().Perm()&0o002 != 0 }
 
 var errNotP256 = errors.New("want an ECDSA P-256 private key (ES256)")
 

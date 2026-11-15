@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/byward-dev/byward/internal/secretfile"
 )
 
 // KeySize is the length of a sealing key: AES-256.
@@ -92,6 +94,9 @@ func LoadKeyRing(dir string) (*KeyRing, error) {
 	r.signing = r.byID[ids[len(ids)-1]]
 	return r, nil
 }
+
+// readOnlyFS is secretfile.ReadOnlyFS; tests replace it.
+var readOnlyFS = secretfile.ReadOnlyFS
 
 // worldWritable is the one permission rejected: group- and other-readable files are normal on
 // Kubernetes secret volumes (mode 0644).

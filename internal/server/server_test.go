@@ -30,7 +30,6 @@ import (
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 	"github.com/byward-dev/byward/internal/testutil/logsink"
-	"github.com/byward-dev/byward/internal/token"
 )
 
 // goodToken is distinctive so a leak check cannot match ordinary text.
@@ -419,14 +418,7 @@ func TestServerSentEventsStreamThroughTheWholeChain(t *testing.T) {
 func TestNoAuthServesTheUpstreamWithoutMetadataOrChallenge(t *testing.T) {
 	up := fakeupstream.New()
 	t.Cleanup(up.Close)
-	cfg, _, err := config.Load(nil, []string{
-		"BYWARD_INSECURE_NO_AUTH=true",
-		"BYWARD_PUBLIC_URL=http://localhost:8080/mcp",
-		"BYWARD_UPSTREAM_URL=" + up.URL + "/mcp",
-	}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadNoAuthConfig(t, up.URL+"/mcp", "BYWARD_PUBLIC_URL=http://localhost:8080/mcp")
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := httptest.NewServer(Handler(cfg, log, httpUpstream(cfg, log), resource.NoTokens{}, nil, nil, Observability{}))
 	t.Cleanup(srv.Close)
@@ -626,7 +618,7 @@ func TestNewServesTheBrokerRoutes(t *testing.T) {
 		t.Fatalf("metadata: %d issuer=%q err=%v", res.StatusCode, m.Issuer, err)
 	}
 	// Without PKCE the broker answers itself (no IdP call): a redirect back to the registered client.
-	res = get("/authorize?client_id=test-app&redirect_uri=http%3A%2F%2F127.0.0.1%2Fcallback&response_type=code")
+	res = get("/authorize?" + authorizeQuery(url.Values{"code_challenge": nil, "code_challenge_method": nil}).Encode())
 	loc, _ := url.Parse(res.Header.Get("Location"))
 	if res.StatusCode != http.StatusFound || !strings.HasPrefix(loc.String(), "http://127.0.0.1/callback?") ||
 		loc.Query().Get("error") != "invalid_request" || loc.Query().Get("iss") != "https://mcp.example.com" {
@@ -691,15 +683,7 @@ func TestStalledUpstreamIsAnsweredAfterTheConfiguredHeaderTimeout(t *testing.T) 
 		case <-release:
 		}
 	}
-	cfg, _, err := config.Load(nil, []string{
-		"BYWARD_INSECURE_NO_AUTH=true",
-		"BYWARD_PUBLIC_URL=http://localhost:8080/mcp",
-		"BYWARD_UPSTREAM_URL=" + up.URL + "/mcp",
-		"BYWARD_UPSTREAM_HEADER_TIMEOUT=1s",
-	}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	cfg := loadNoAuthConfig(t, up.URL+"/mcp", "BYWARD_PUBLIC_URL=http://localhost:8080/mcp", "BYWARD_UPSTREAM_HEADER_TIMEOUT=1s")
 	s, err := New(cfg, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
@@ -915,10 +899,7 @@ func (p pingStore) Ping(context.Context) error { return p.err }
 // ADR-0021 §10: /readyz is the keys and the store, never the IdP; a store that cannot be reached
 // makes it fail without putting the error in the body.
 func TestReadinessIsKeysAndStoreOnly(t *testing.T) {
-	ring, err := token.LoadKeyRing(loadConfig(t, "https://m.example/mcp").KeysDir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ring := keyRing(t, loadConfig(t, "https://m.example/mcp"))
 	for _, c := range []struct {
 		name     string
 		st       pinger
@@ -951,8 +932,7 @@ func TestTheServerShowsTheOperatorsConsentPageAndDenyReturnsToTheApp(t *testing.
 	ts := httptest.NewServer(s.Public.Handler)
 	t.Cleanup(ts.Close)
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1/callback"}, "response_type": {"code"},
-		"code_challenge": {strings.Repeat("A", 43)}, "code_challenge_method": {"S256"}, "state": {"s"}}
+	q := authorizeQuery(url.Values{"code_challenge": {strings.Repeat("A", 43)}, "state": {"s"}})
 	r, _ := http.NewRequest("GET", ts.URL+"/authorize?"+q.Encode(), nil)
 	r.Host = "mcp.example.com"
 	res, err := client.Do(r)
@@ -961,7 +941,7 @@ func TestTheServerShowsTheOperatorsConsentPageAndDenyReturnsToTheApp(t *testing.
 	}
 	body, _ := io.ReadAll(res.Body)
 	_ = res.Body.Close()
-	m := regexp.MustCompile(`name="flow" value="([^"]+)"`).FindSubmatch(body)
+	m := consentFlow.FindSubmatch(body)
 	if res.StatusCode != http.StatusOK || m == nil || len(res.Cookies()) != 1 {
 		t.Fatalf("authorize: %d, cookies %v: %s", res.StatusCode, res.Cookies(), body)
 	}

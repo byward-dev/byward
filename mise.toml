@@ -118,6 +118,8 @@ run = "mise run test:integration:go"
 
 [tasks.check]
 description = "Everything CI runs without Docker, except the integration-tagged Go tests (`test:integration:go`)"
+# CI runs these tasks as parallel jobs that the required `check` job waits on (.github/workflows/ci.yml):
+# a task added here goes into one of those jobs too.
 depends = ["fmt:check", "vet", "lint", "lint:workflows", "lint:docs", "vuln", "licenses:check", "test", "test:scripts"]
 
 [tasks."licenses:check"]

@@ -12,6 +12,9 @@ on:
     # which publishes, runs with cache: false.
     branches: [main, "release/**"]
   pull_request:
+  # The merge queue: a required check that does not run on merge_group is never reported there,
+  # and the queue fails (docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue).
+  merge_group:
 
 permissions:
   contents: read
@@ -21,7 +24,13 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  check:
+  # `mise run check` split into parallel jobs, each running the same mise tasks (mise.toml
+  # tasks.check lists them); `check` below is the required check and passes only if all of them do.
+  # The jobs install only the tools their tasks need; operator tools such as azure-cli stay out of CI.
+  # The Go jobs cache Go's build and module caches (and lint golangci-lint's) per job, keyed on the
+  # toolchain (mise.toml), the modules (go.sum) and the lint config. The cache-poisoning note at the
+  # top covers them: a pull_request run's cache is scoped to its merge ref.
+  fmt-vet:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -29,8 +38,81 @@ jobs:
           persist-credentials: false
       - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
         with:
-          # Only the tools `check` needs; operator tools such as azure-cli stay out of CI.
-          install_args: go golangci-lint go:golang.org/x/tools/cmd/goimports actionlint zizmor shellcheck jq go:github.com/google/go-licenses/v2 go:golang.org/x/vuln/cmd/govulncheck
+          install_args: go go:golang.org/x/tools/cmd/goimports
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ github.job }}-${{ runner.os }}-${{ hashFiles('mise.toml', 'go.sum') }}
+          restore-keys: go-${{ github.job }}-${{ runner.os }}-
+      - run: mise run fmt:check
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
+      - run: mise run vet
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        with:
+          install_args: go golangci-lint
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+            ~/.cache/golangci-lint
+          key: go-${{ github.job }}-${{ runner.os }}-${{ hashFiles('mise.toml', 'go.sum', '.golangci.yml') }}
+          restore-keys: go-${{ github.job }}-${{ runner.os }}-
+      - run: mise run lint
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
+
+  vuln-licenses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        with:
+          install_args: go go:github.com/google/go-licenses/v2 go:golang.org/x/vuln/cmd/govulncheck
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ github.job }}-${{ runner.os }}-${{ hashFiles('mise.toml', 'go.sum') }}
+          restore-keys: go-${{ github.job }}-${{ runner.os }}-
+      - run: mise run vuln
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
+      - run: mise run licenses:check
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        with:
+          install_args: go
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ github.job }}-${{ runner.os }}-${{ hashFiles('mise.toml', 'go.sum') }}
+          restore-keys: go-${{ github.job }}-${{ runner.os }}-
       # Identifiers and names that must never appear in this repository (ADR-0024 §13): a secret,
       # so it is redacted in the log; each entry is masked too. Fork PRs get no secrets, and the
       # privacy test then checks only email addresses.
@@ -42,10 +124,44 @@ jobs:
             entry=$(printf '%s' "$entry" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
             if [ -n "$entry" ]; then echo "::add-mask::$entry"; fi
           done
-      - run: mise run check
+      - run: mise run test
         env:
           MISE_TASK_RUN_AUTO_INSTALL: "false"
           BYWARD_FORBIDDEN_IDENTIFIERS: ${{ secrets.BYWARD_FORBIDDEN_IDENTIFIERS }}
+
+  scripts-docs-workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+        with:
+          install_args: go jq actionlint zizmor shellcheck
+      - run: mise run test:scripts
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
+      - run: mise run lint:docs
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
+      - run: mise run lint:workflows
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false"
+
+  # The required check (ruleset protect-main): its name must stay `check`. It runs even when a job
+  # above fails or is cancelled, because a skipped required check counts as passed.
+  check:
+    if: ${{ always() }}
+    needs: [fmt-vet, lint, vuln-licenses, test, scripts-docs-workflows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every part of the check passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for r in $RESULTS; do
+            if [ "$r" != success ]; then echo "a check job ended: $r ($RESULTS)"; exit 1; fi
+          done
 
   # Builds every release artifact exactly as a release would, without signing or publishing (ADR-0019).
   release-snapshot:

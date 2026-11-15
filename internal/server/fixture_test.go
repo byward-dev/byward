@@ -33,8 +33,19 @@ import (
 	"github.com/byward-dev/byward/internal/token"
 )
 
-// fixtureTenant is the Entra tenant authEnv configures.
-const fixtureTenant = "00000000-0000-0000-0000-000000000001"
+// The Entra tenant, app and secret authEnv configures and fixtureEntra accepts.
+const (
+	fixtureTenant   = "00000000-0000-0000-0000-000000000001"
+	fixtureClientID = "00000000-0000-0000-0000-000000000002"
+	fixtureSecret   = "s3cret-entra"
+)
+
+// fixtureEntra is a fake Entra tenant that accepts authEnv's app and secret.
+func fixtureEntra(t testing.TB) *fakeidp.IdP {
+	t.Helper()
+	return fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
+		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{fixtureSecret}}))
+}
 
 // authEnv writes a key directory, a static-clients file and an IdP secret into a temp dir and
 // returns the settings that point at them.
@@ -49,10 +60,10 @@ func authEnv(t testing.TB) []string {
 		}
 	}
 	write(filepath.Join(dir, "clients.json"), `{"clients":[{"client_id":"test-app","client_name":"Test app","token_endpoint_auth_method":"none","redirect_uris":["http://127.0.0.1/callback"]}]}`)
-	write(filepath.Join(dir, "secret"), "s3cret-entra")
+	write(filepath.Join(dir, "secret"), fixtureSecret)
 	return []string{
 		"BYWARD_ENTRA_TENANT=" + fixtureTenant,
-		"BYWARD_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002",
+		"BYWARD_ENTRA_CLIENT_ID=" + fixtureClientID,
 		"BYWARD_ENTRA_CLIENT_SECRET_FILE=" + filepath.Join(dir, "secret"),
 		"BYWARD_KEYS_DIR=" + keys,
 		"BYWARD_STATIC_CLIENTS_FILE=" + filepath.Join(dir, "clients.json"),
@@ -88,6 +99,43 @@ func loadConfig(t testing.TB, publicURL string, extra ...string) *config.Config 
 		t.Fatal(err)
 	}
 	return cfg
+}
+
+// noAuthEnv is the settings without authentication for the public URL http://127.0.0.1:8080/mcp
+// and upstreamURL, plus extra entries; an extra entry overrides a default one (a later entry wins).
+func noAuthEnv(upstreamURL string, extra ...string) []string {
+	return append([]string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=" + upstreamURL,
+		"BYWARD_INSECURE_NO_AUTH=true"}, extra...)
+}
+
+// loadNoAuthConfig loads noAuthEnv(upstreamURL, extra...).
+func loadNoAuthConfig(t testing.TB, upstreamURL string, extra ...string) *config.Config {
+	t.Helper()
+	cfg, _, err := config.Load(nil, noAuthEnv(upstreamURL, extra...), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+// keyRing is the sealing-key ring the server under cfg loads.
+func keyRing(t testing.TB, cfg *config.Config) *token.KeyRing {
+	t.Helper()
+	ring, err := token.LoadKeyRing(cfg.KeysDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ring
+}
+
+// proxySealer seals access tokens as the server under cfg does.
+func proxySealer(t testing.TB, cfg *config.Config) *token.Sealer {
+	t.Helper()
+	s, err := token.NewSealer(keyRing(t, cfg), cfg.PublicURL.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }
 
 // checkOffline is check --offline's warnings and error for cfg.

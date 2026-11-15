@@ -122,9 +122,7 @@ func TestIntegrationTheReleaseImageServes(t *testing.T) {
 	}
 
 	b := newTestBrowser(t, base, public)
-	const verifier = "verifier-0123456789-0123456789-0123456789-abc"
-	q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1/callback"}, "response_type": {"code"}, "scope": {"mcp"},
-		"code_challenge": {fakeidp.CodeChallenge(verifier)}, "code_challenge_method": {"S256"}}
+	q := authorizeQuery(url.Values{"scope": {"mcp"}})
 	page := b.send(http.MethodGet, "/authorize?"+q.Encode(), nil, nil)
 	allow := b.allow(page, readAll(t, page))
 	// The proxy reaches the IdP here (discovery, over https), so a trust failure shows as this answer.
@@ -141,7 +139,7 @@ func TestIntegrationTheReleaseImageServes(t *testing.T) {
 	}
 	s := &oidcSession{b: b}
 	s.tokens(t, url.Values{"grant_type": {"authorization_code"}, "code": {done.Query().Get("code")}, "client_id": {"test-app"},
-		"redirect_uri": {"http://127.0.0.1/callback"}, "code_verifier": {verifier}})
+		"redirect_uri": {"http://127.0.0.1/callback"}, "code_verifier": {testVerifier}})
 
 	raw := mcpAssertion(t, base, "mcp.example.com", up, s.access)
 	target, _ := url.Parse(base)

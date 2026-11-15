@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
-	"os"
 	"reflect"
 	"slices"
 	"strconv"
@@ -17,7 +16,6 @@ import (
 
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
-	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 	"github.com/byward-dev/byward/internal/token"
 )
@@ -162,10 +160,7 @@ func TestWithPlainIdentityHeadersOffAClientsCopiesAreStillRemoved(t *testing.T) 
 		"without authentication": func(t *testing.T) http.Header {
 			up := fakeupstream.New()
 			t.Cleanup(up.Close)
-			cfg, _, err := config.Load(nil, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=" + up.URL + "/mcp", "BYWARD_INSECURE_NO_AUTH=true"}, os.ReadFile)
-			if err != nil {
-				t.Fatal(err)
-			}
+			cfg := loadNoAuthConfig(t, up.URL+"/mcp")
 			s, err := New(cfg, discard)
 			if err != nil {
 				t.Fatal(err)
@@ -259,8 +254,7 @@ func TestDoctorPassesOnlyAnUpstreamHostWithNoPublicAddress(t *testing.T) {
 
 // doctor runs the hint only while the plain identity headers are on.
 func TestDoctorChecksTheUpstreamHostOnlyWithPlainIdentityHeadersOn(t *testing.T) {
-	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
-		fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{"s3cret-entra"}}))
+	fake := fixtureEntra(t)
 	// Only the bare host name resolves: a host with its port would not, and warn.
 	private := func(_ context.Context, host string) ([]netip.Addr, error) {
 		if host != "mcp.internal" {

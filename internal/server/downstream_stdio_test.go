@@ -99,7 +99,7 @@ func TestAStdioProcessGetsItsUsersDownstreamTokenOrOnlyTheOutcome(t *testing.T) 
 					t.Fatalf("second ask got %q after %d exchanges, want the cached token after 1", again.AccessToken, exchanges.Load())
 				}
 			}
-			line, audited := auditRecord(logs.String(), "downstream_token_refused")
+			line, audited := auditRecord(t, logs.String(), "downstream_token_refused")
 			if audited != tc.wantAudit {
 				t.Fatalf("audited %v, want %v: %s", audited, tc.wantAudit, logs.String())
 			}

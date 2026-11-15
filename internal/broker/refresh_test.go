@@ -21,6 +21,7 @@ import (
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/testutil/sealingkey"
 	"github.com/byward-dev/byward/internal/token"
 )
@@ -935,9 +936,8 @@ func TestASignInThatWouldRefreshButGotNoIdPRefreshTokenWarnsAndGetsNoRefreshToke
 				t.Fatalf("token: %d %v, want a refresh token %v", res.StatusCode, body, tc.fresh)
 			}
 			var warning map[string]any
-			for _, line := range strings.Split(strings.TrimSpace(e.logs.String()), "\n") {
-				var rec map[string]any
-				if json.Unmarshal([]byte(line), &rec) == nil && rec["msg"] == "the IdP returned no refresh token, so this grant cannot refresh" {
+			for _, rec := range logsink.Records[map[string]any](t, e.logs.String()) {
+				if rec["msg"] == "the IdP returned no refresh token, so this grant cannot refresh" {
 					warning = rec
 				}
 			}
@@ -969,9 +969,8 @@ func TestARefreshWithoutAnIDTokenEndsTheGrantNamingTheIdP(t *testing.T) {
 		t.Fatalf("grant after a refresh without an ID token: %v, want revoked", err)
 	}
 	var warning map[string]any
-	for _, line := range strings.Split(strings.TrimSpace(e.logs.String()), "\n") {
-		var rec map[string]any
-		if json.Unmarshal([]byte(line), &rec) == nil && rec["msg"] == "the IdP returned no ID token on refresh; grant revoked" {
+	for _, rec := range logsink.Records[map[string]any](t, e.logs.String()) {
+		if rec["msg"] == "the IdP returned no ID token on refresh; grant revoked" {
 			warning = rec
 		}
 	}

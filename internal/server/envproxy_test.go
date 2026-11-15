@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/rerun"
 )
 
@@ -15,8 +14,7 @@ import (
 // cause, never the address Go dialled, and the upstream line warns about the setting.
 func TestDoctorsSelfProbeNeverQuotesAMisreadEnvironmentProxyAndTheUpstreamLineWarnsOfIt(t *testing.T) {
 	if rerun.Child() {
-		fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID(fixtureTenant),
-			fakeidp.WithClient(fakeidp.Client{ID: fixtureClientID, Secrets: []string{"s3cret-entra"}}))
+		fake := fixtureEntra(t)
 		rep, err := Doctor(context.Background(), authHopConfig(t, "http://10.0.0.7/mcp"), DoctorOptions{IdP: fake.HTTPClient()})
 		if err != nil {
 			t.Fatal(err)

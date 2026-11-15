@@ -199,14 +199,7 @@ func loadProxy(t *testing.T, upstream string, extra time.Duration) (*httptest.Se
 	srv.Config.Handler = h
 	srv.Start()
 	t.Cleanup(srv.Close)
-	ring, err := token.LoadKeyRing(cfg.KeysDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sealer, err := token.NewSealer(ring, cfg.PublicURL.String())
-	if err != nil {
-		t.Fatal(err)
-	}
+	sealer := proxySealer(t, cfg)
 	tokens := make([]string, loadUsers)
 	now := time.Now()
 	for i := range tokens {

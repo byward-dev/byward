@@ -75,10 +75,9 @@ func TestIntegrationKeycloakSignsAUserInAndRefreshes(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	t.Run("a user with the role signs in and refreshes", func(t *testing.T) {
-		const verifier = "verifier-0123456789-0123456789-0123456789-abc"
-		code := keycloakSignIn(t, public, "alice", http.StatusFound, verifier)
+		code := keycloakSignIn(t, public, "alice", http.StatusFound, testVerifier)
 		tok := tokenRequest(t, public, url.Values{"grant_type": {"authorization_code"}, "code": {code}, "client_id": {"test-app"},
-			"redirect_uri": {"http://127.0.0.1:5555/callback"}, "code_verifier": {verifier}})
+			"redirect_uri": {"http://127.0.0.1:5555/callback"}, "code_verifier": {testVerifier}})
 		if tok["access_token"] == nil || tok["refresh_token"] == nil {
 			t.Fatalf("token response %v, want an access and a refresh token", tok)
 		}
@@ -177,8 +176,8 @@ func keycloakSignIn(t *testing.T, public, user string, want int, verifier string
 	t.Helper()
 	jar, _ := cookiejar.New(nil)
 	c := &http.Client{Jar: jar, Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1:5555/callback"}, "response_type": {"code"},
-		"scope": {"mcp offline_access"}, "code_challenge": {fakeidp.CodeChallenge(verifier)}, "code_challenge_method": {"S256"}, "state": {"s"}}
+	q := authorizeQuery(url.Values{"redirect_uri": {"http://127.0.0.1:5555/callback"}, "scope": {"mcp offline_access"},
+		"code_challenge": {fakeidp.CodeChallenge(verifier)}, "state": {"s"}})
 	page, err := c.Get(public + "/authorize?" + q.Encode()) //nolint:gosec // G107: byward's own loopback address
 	if err != nil {
 		t.Fatal(err)
