@@ -148,7 +148,7 @@ func (c *Cache) run(ctx context.Context, key string, u User, cl *call) {
 		c.mu.Unlock()
 		close(cl.done)
 	}()
-	cl.err = errUnfinished // only a normal return replaces it: runtime.Goexit skips both assignments
+	cl.err = errUnfinished // a return or a panic replaces it; runtime.Goexit leaves it
 	cl.token, cl.err = c.exchange(ctx, u.TenantID, u.Assertion, c.scopes)
 	cl.until = cl.token.ExpiresAt.Add(-Margin)
 	if !u.AssertionExpiresAt.IsZero() && u.AssertionExpiresAt.Before(cl.until) { // zero: the IdP gave no expiry
