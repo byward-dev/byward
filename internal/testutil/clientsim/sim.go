@@ -2,7 +2,6 @@ package clientsim
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"html"
@@ -185,7 +184,7 @@ func authorize(t *testing.T, e Env, p Profile, c Credentials, m metadata, verifi
 	t.Helper()
 	state := randomString(t)
 	q := url.Values{"client_id": {c.ClientID}, "redirect_uri": {p.RedirectURI}, "response_type": {"code"}, "state": {state},
-		"code_challenge": {s256(verifier)}, "code_challenge_method": {"S256"}}
+		"code_challenge": {fakeidp.CodeChallenge(verifier)}, "code_challenge_method": {"S256"}}
 	if s := scope(m); s != "" {
 		q.Set("scope", s)
 	}
@@ -422,9 +421,4 @@ func randomString(t *testing.T) string {
 	b := make([]byte, 32)
 	_, _ = rand.Read(b)
 	return base64.RawURLEncoding.EncodeToString(b)
-}
-
-func s256(v string) string {
-	h := sha256.Sum256([]byte(v))
-	return base64.RawURLEncoding.EncodeToString(h[:])
 }

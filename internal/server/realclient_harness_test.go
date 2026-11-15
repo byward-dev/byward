@@ -25,6 +25,7 @@ import (
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 )
 
 // realClientID is the static client the real open-source clients use: public (no secret), with
@@ -52,9 +53,9 @@ type realClientEnv struct {
 	upstreamURL string
 	proxy       http.Handler
 
-	mu           sync.Mutex
-	upstreamAuth []string // the Authorization header of every request the upstream received
-	echoed       []string // the text of every echo call the upstream answered
+	up     *fakeupstream.Server // records every request the upstream received
+	mu     sync.Mutex
+	echoed []string // the text of every echo call the upstream answered
 }
 
 // requireOneToolCallWithOnlyTheAssertion fails the test unless the upstream itself answered exactly
@@ -65,8 +66,12 @@ type realClientEnv struct {
 func (e *realClientEnv) requireOneToolCallWithOnlyTheAssertion(t *testing.T) {
 	t.Helper()
 	e.mu.Lock()
-	echoed, auth := append([]string(nil), e.echoed...), append([]string(nil), e.upstreamAuth...)
+	echoed := append([]string(nil), e.echoed...)
 	e.mu.Unlock()
+	var auth []string
+	for _, r := range e.up.Requests() {
+		auth = append(auth, r.Header.Get("Authorization"))
+	}
 	if len(echoed) != 1 || echoed[0] != realClientText {
 		t.Fatalf("the upstream answered echo calls %q, want exactly one with %q", echoed, realClientText)
 	}
@@ -92,6 +97,7 @@ func (e *realClientEnv) requireOneToolCallWithOnlyTheAssertion(t *testing.T) {
 // the upstream: a lane where every client passes must not pass with token validation switched off.
 func (e *realClientEnv) requireTokenStillRequired(t *testing.T) {
 	t.Helper()
+	before := len(e.up.Requests())
 	for name, auth := range map[string]string{"no token": "", "a token byward did not issue": "Bearer garbage"} {
 		req, _ := http.NewRequest(http.MethodPost, e.MCPURL, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
 		req.Header.Set("Content-Type", "application/json")
@@ -107,6 +113,9 @@ func (e *realClientEnv) requireTokenStillRequired(t *testing.T) {
 		if res.StatusCode != http.StatusUnauthorized || !strings.Contains(res.Header.Get("WWW-Authenticate"), "resource_metadata") {
 			t.Fatalf("%s: %d %q, want 401 with the resource_metadata challenge", name, res.StatusCode, res.Header.Get("WWW-Authenticate"))
 		}
+	}
+	if n := len(e.up.Requests()) - before; n != 0 {
+		t.Fatalf("%d refused requests reached the upstream, want none", n)
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -148,13 +157,10 @@ func newRealClientEnv(t *testing.T) *realClientEnv {
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: in.Text}}}, nil, nil
 		})
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return upstream }, nil)
-	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		env.mu.Lock()
-		env.upstreamAuth = append(env.upstreamAuth, r.Header.Get("Authorization"))
-		env.mu.Unlock()
-		mcpHandler.ServeHTTP(w, r)
-	}))
+	up := fakeupstream.New()
+	up.Handler = mcpHandler.ServeHTTP // set before the first request
 	t.Cleanup(up.Close)
+	env.up = up
 
 	settings := authEnv(t)
 	clients := setting(settings, "BYWARD_STATIC_CLIENTS_FILE")

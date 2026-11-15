@@ -124,7 +124,7 @@ func TestIntegrationTheReleaseImageServes(t *testing.T) {
 	b := newTestBrowser(t, base, public)
 	const verifier = "verifier-0123456789-0123456789-0123456789-abc"
 	q := url.Values{"client_id": {"test-app"}, "redirect_uri": {"http://127.0.0.1/callback"}, "response_type": {"code"}, "scope": {"mcp"},
-		"code_challenge": {pkce(verifier)}, "code_challenge_method": {"S256"}}
+		"code_challenge": {fakeidp.CodeChallenge(verifier)}, "code_challenge_method": {"S256"}}
 	page := b.send(http.MethodGet, "/authorize?"+q.Encode(), nil, nil)
 	allow := b.allow(page, readAll(t, page))
 	// The proxy reaches the IdP here (discovery, over https), so a trust failure shows as this answer.
