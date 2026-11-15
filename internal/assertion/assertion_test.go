@@ -130,7 +130,7 @@ func TestLoadKeysSkipsDotfilesAndDirectories(t *testing.T) {
 // The sealing keys' rule (L115): anyone could add or replace a signing key, so a world-writable key
 // file is refused, and a world-writable directory too unless it is on a read-only mount. A check
 // that lets everything through (as under --dev) does not relax it.
-func TestLoadKeysRefusesWorldWritableKeysUnlessTheDirectoryIsReadOnly(t *testing.T) {
+func TestLoadKeysRefusesAWorldWritableKeyFileAlwaysAndAWorldWritableDirectoryUnlessReadOnly(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		file     os.FileMode // the key file's mode
@@ -143,7 +143,7 @@ func TestLoadKeysRefusesWorldWritableKeysUnlessTheDirectoryIsReadOnly(t *testing
 		{"a world-writable directory is refused", 0o600, 0o707, false, "directory"},
 		{"a world-writable directory on a read-only mount loads", 0o644, 0o777 | os.ModeSticky, true, ""}, // a Kubernetes secret volume's root
 		{"a group- and other-readable file and directory load", 0o644, 0o755, false, ""},
-		{"a group-writable file and directory load", 0o660, 0o770, false, ""}, // only the world bit is refused here
+		{"a group-writable file and directory load", 0o660, 0o770, false, ""}, // this rule is the world bit's alone; the group bit is the check's
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := assertionkey.EmptyDir(t)
@@ -337,8 +337,7 @@ func TestTheJWKSIsServedCacheable(t *testing.T) {
 // BenchmarkMint is the cost every MCP request to an HTTP upstream pays (ADR-0024 §10; the budget is
 // 2 ms p99 added latency per request).
 func BenchmarkMint(b *testing.B) {
-	dir := b.TempDir()
-	assertionkey.Write(b, dir, "k1", false)
+	dir := assertionkey.Dir(b)
 	k, err := LoadKeys(dir, noCheck)
 	if err != nil {
 		b.Fatal(err)

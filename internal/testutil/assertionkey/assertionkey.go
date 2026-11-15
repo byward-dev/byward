@@ -48,9 +48,9 @@ func Dir(t testing.TB) string {
 	return dir
 }
 
-// EmptyDir creates an empty key directory under t.TempDir() and returns it. Its mode is 0700
-// whatever the umask: t.TempDir() itself is 0777 under umask 000, and the proxy refuses a
-// world-writable key directory.
+// EmptyDir creates an empty key directory under t.TempDir() and returns it. It is never group- or
+// world-accessible, whatever the umask: t.TempDir() itself is 0777 under umask 000, and the proxy
+// refuses a world-writable key directory.
 func EmptyDir(t testing.TB) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "assertion-keys")
