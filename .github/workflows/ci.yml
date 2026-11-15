@@ -32,7 +32,9 @@ jobs:
   # top covers them: a pull_request run's cache is scoped to its merge ref.
 
   # Whether the change is docs-only (scripts/ci-docs-only.sh): then the expensive jobs below are
-  # skipped with `if:`, and `test` runs only the Go tests that read the docs. Skipping by `if:`, not
+  # skipped with `if:`. `test` always runs in full: many Go tests read the docs (links, anchors, the
+  # generated references, settings.md, guides a message names), and Go's test cache re-runs every
+  # test whose opened files or directories changed, so no list of them is kept. Skipping by `if:`, not
   # by a `paths` filter: a job skipped by `if:` reports success, while a workflow skipped by a path
   # filter leaves its required checks pending and blocks the merge
   # (docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/troubleshooting-required-status-checks).
@@ -47,8 +49,8 @@ jobs:
         with:
           fetch-depth: 0 # the diff needs the merge base of base and head
           persist-credentials: false
-      # The merge_group fields come from the webhook schema (base_sha, head_sha); no queue run has
-      # been seen yet, so the first one logs what the payload holds.
+      # The merge_group payload holds base_sha, base_ref, head_sha, head_ref and head_commit (seen in
+      # the queue run of #434); logged so a change in it shows.
       - name: Show the merge group payload's fields
         if: ${{ github.event_name == 'merge_group' }}
         env:
@@ -135,8 +137,6 @@ jobs:
           MISE_TASK_RUN_AUTO_INSTALL: "false"
 
   test:
-    needs: changes
-    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -163,15 +163,7 @@ jobs:
             entry=$(printf '%s' "$entry" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
             if [ -n "$entry" ]; then echo "::add-mask::$entry"; fi
           done
-      - if: ${{ needs.changes.outputs.docs-only != 'true' }}
-        run: mise run test
-        env:
-          MISE_TASK_RUN_AUTO_INSTALL: "false"
-          BYWARD_FORBIDDEN_IDENTIFIERS: ${{ secrets.BYWARD_FORBIDDEN_IDENTIFIERS }}
-      # A docs-only change: only the Go tests that read the docs (links, generated reference tables,
-      # settings.md, the alert rules, the privacy scan), listed in scripts/test-docs.sh.
-      - if: ${{ needs.changes.outputs.docs-only == 'true' }}
-        run: mise run test:docs
+      - run: mise run test
         env:
           MISE_TASK_RUN_AUTO_INSTALL: "false"
           BYWARD_FORBIDDEN_IDENTIFIERS: ${{ secrets.BYWARD_FORBIDDEN_IDENTIFIERS }}

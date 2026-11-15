@@ -60,11 +60,6 @@ description = "Unit tests (with the race detector)"
 run = "go test -race ./..."
 extends = "go-test"
 
-[tasks."test:docs"]
-description = "The Go tests that read the docs (links, generated reference tables, settings.md, alert rules, the privacy scan): what CI runs in place of `test` for a docs-only change (scripts/test-docs.sh)"
-run = "sh scripts/test-docs.sh"
-extends = "go-test"
-
 [tasks."lint:docs"]
 description = "Docs lint: no wording that goes stale, and the one image tag of scripts/docs-image-tag (scripts/docs-lint.sh)"
 run = "sh scripts/docs-lint.sh"
