@@ -45,7 +45,7 @@ func TestAnOnBehalfOfAlertIsCountedAndLoggedOncePerExchange(t *testing.T) {
 				var wg sync.WaitGroup
 				for range c.waiters {
 					wg.Go(func() {
-						_, _, _ = cache.Token(ctx, downstream.User{TenantID: "tid", ObjectID: "oid", Assertion: "a", AssertionExpiresAt: time.Now().Add(time.Hour)})
+						_, _, _ = cache.Token(ctx, downstream.User{TenantID: "tid", ObjectID: "oid", IdPToken: "a", IdPTokenExpiresAt: time.Now().Add(time.Hour)})
 					})
 				}
 				synctest.Wait() // one request in the exchange, the rest waiting on it

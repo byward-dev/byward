@@ -44,7 +44,7 @@ func newCache(life time.Duration, maxEntries int) (*Cache, *fakeExchange, *time.
 }
 
 func user(oid string) User {
-	return User{TenantID: "tid", ObjectID: oid, Assertion: "assertion", AssertionExpiresAt: t0.Add(2 * time.Hour)}
+	return User{TenantID: "tid", ObjectID: oid, IdPToken: "idp-token", IdPTokenExpiresAt: t0.Add(2 * time.Hour)}
 }
 
 // ADR-0017 §4: one exchange per user while the token is valid for more than the margin; at
@@ -66,26 +66,26 @@ func TestTokensAreCachedUntilAMinuteBeforeTheyExpire(t *testing.T) {
 	}
 }
 
-// ADR-0017 §4: never beyond the assertion's expiry, even when the token lives longer.
+// ADR-0017 §4: never beyond the IdP token's expiry, even when the token lives longer.
 func TestTokensAreNotCachedBeyondTheAssertion(t *testing.T) {
 	c, f, now := newCache(10*time.Hour, 0)
 	u := user("alice")
-	u.AssertionExpiresAt = t0.Add(30 * time.Minute)
+	u.IdPTokenExpiresAt = t0.Add(30 * time.Minute)
 	if _, _, err := c.Token(context.Background(), u); err != nil {
 		t.Fatalf("first token: %v", err)
 	}
 	*now = t0.Add(30 * time.Minute)
 	if _, hit, err := c.Token(context.Background(), u); err != nil || hit || f.calls != 2 {
-		t.Fatalf("at the assertion's expiry: err %v, hit %v, %d exchanges, want a new exchange", err, hit, f.calls)
+		t.Fatalf("at the IdP token's expiry: err %v, hit %v, %d exchanges, want a new exchange", err, hit, f.calls)
 	}
 }
 
-// An assertion without a known expiry (the IdP sent no expires_in) does not bound the cache, as it
+// An IdP token without a known expiry (the IdP sent no expires_in) does not bound the cache, as it
 // does not cap the proxy's access token.
 func TestAnAssertionWithoutAnExpiryDoesNotDisableTheCache(t *testing.T) {
 	c, f, _ := newCache(time.Hour, 0)
 	u := user("alice")
-	u.AssertionExpiresAt = time.Time{}
+	u.IdPTokenExpiresAt = time.Time{}
 	for i := range 2 {
 		if _, _, err := c.Token(context.Background(), u); err != nil {
 			t.Fatalf("lookup %d: %v", i, err)
@@ -121,12 +121,12 @@ func TestErrorsAndShortLivedTokensAreNotCached(t *testing.T) {
 }
 
 // Each user has a token of their own: the key is the tenant, the object ID and the scopes, so the
-// same object ID in another tenant is another user, and a renewed assertion is the same user.
+// same object ID in another tenant is another user, and a renewed IdP token is the same user.
 func TestCacheIsPerUser(t *testing.T) {
 	alice := user("alice")
 	otherTenant, renewed := alice, alice
 	otherTenant.TenantID = "other-tid"
-	renewed.Assertion = "renewed-assertion"
+	renewed.IdPToken = "renewed-idp-token"
 	for _, c := range []struct {
 		name      string
 		other     User
@@ -135,7 +135,7 @@ func TestCacheIsPerUser(t *testing.T) {
 	}{
 		{"another object ID", user("bob"), false, 2},
 		{"the same object ID in another tenant", otherTenant, false, 2},
-		{"a renewed assertion", renewed, true, 1},
+		{"a renewed IdP token", renewed, true, 1},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			cache, f, _ := newCache(time.Hour, 0)

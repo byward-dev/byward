@@ -386,7 +386,7 @@ func TestAnAppOnlyCallerIsRelayedWithoutADownstreamToken(t *testing.T) {
 			return downstream.Token{}, nil
 		}, []string{graphUserRead}, 0, time.Now),
 		header: "X-Byward-Downstream-Token", resource: "https://graph.microsoft.com",
-		assertion: func(context.Context, string) (string, time.Time, error) {
+		idpToken: func(context.Context, string) (string, time.Time, error) {
 			t.Error("a stored IdP token looked up for an app-only caller")
 			return "", time.Time{}, nil
 		},
@@ -411,10 +411,10 @@ func TestAnAppOnlyCallerIsRelayedWithoutADownstreamToken(t *testing.T) {
 func TestDownstreamRefusesARequestWithoutAUsableGrant(t *testing.T) {
 	user := resource.Identity{Subject: "tid:oid", GrantID: "g", ClientID: "c"}
 	cases := []struct {
-		name      string
-		id        resource.Identity
-		ok        bool
-		assertion error
+		name        string
+		id          resource.Identity
+		ok          bool
+		idpTokenErr error
 	}{
 		{"no identity", resource.Identity{}, false, nil},
 		{"a subject that is not an Entra user key", resource.Identity{Subject: "nocolon", GrantID: "g"}, true, nil},
@@ -424,15 +424,15 @@ func TestDownstreamRefusesARequestWithoutAUsableGrant(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			exchanges := 0
-			assertionErr := error(nil)
+			idpTokenErr := error(nil)
 			d := &downstreamTokens{
 				cache: downstream.New(func(context.Context, string, string, []string) (downstream.Token, error) {
 					exchanges++
 					return downstream.Token{AccessToken: "t", ExpiresAt: time.Now().Add(time.Hour)}, nil
 				}, []string{graphUserRead}, 0, time.Now),
 				header: "X-Byward-Downstream-Token", resource: "https://graph.microsoft.com",
-				assertion: func(context.Context, string) (string, time.Time, error) {
-					return "assertion", time.Now().Add(time.Hour), assertionErr
+				idpToken: func(context.Context, string) (string, time.Time, error) {
+					return "idp-token", time.Now().Add(time.Hour), idpTokenErr
 				},
 				log: slog.New(slog.DiscardHandler),
 			}
@@ -444,7 +444,7 @@ func TestDownstreamRefusesARequestWithoutAUsableGrant(t *testing.T) {
 				return w
 			}
 			call(user, true) // warm the cache for the user
-			assertionErr = c.assertion
+			idpTokenErr = c.idpTokenErr
 			before := exchanges
 			w := call(c.id, c.ok)
 			if relayed != 1 || exchanges != before || !strings.Contains(w.Body.String(), `"isError":true`) {
@@ -466,8 +466,8 @@ func TestAClientGoingAwayIsNotARefusal(t *testing.T) {
 			return downstream.Token{AccessToken: "t", ExpiresAt: time.Now().Add(time.Hour)}, nil
 		}, []string{graphUserRead}, 0, time.Now),
 		header: "X-Byward-Downstream-Token", resource: "https://graph.microsoft.com",
-		assertion: func(context.Context, string) (string, time.Time, error) {
-			return "assertion", time.Now().Add(time.Hour), nil
+		idpToken: func(context.Context, string) (string, time.Time, error) {
+			return "idp-token", time.Now().Add(time.Hour), nil
 		},
 		log: slog.New(slog.NewJSONHandler(logs, nil)),
 	}
@@ -505,8 +505,8 @@ func TestARefusalThatNeedsTheOperatorNamesTheFix(t *testing.T) {
 					return downstream.Token{}, c.err
 				}, []string{graphUserRead}, 0, time.Now),
 				header: "X-Byward-Downstream-Token", resource: "https://graph.microsoft.com",
-				assertion: func(context.Context, string) (string, time.Time, error) {
-					return "assertion", time.Now().Add(time.Hour), nil
+				idpToken: func(context.Context, string) (string, time.Time, error) {
+					return "idp-token", time.Now().Add(time.Hour), nil
 				},
 				idp: "entra", log: logging.New(logs, "json"),
 			}
@@ -677,8 +677,8 @@ func TestWithOBOInAuthorizationTheUpstreamGetsTheDownstreamTokenOrNothing(t *tes
 			return downstream.Token{AccessToken: "downstream-token", ExpiresAt: time.Now().Add(time.Hour)}, nil
 		}, []string{graphUserRead}, 0, time.Now),
 		header: cfg.OBOHeader, resource: "https://graph.microsoft.com", log: log,
-		assertion: func(context.Context, string) (string, time.Time, error) {
-			return "assertion", time.Now().Add(time.Hour), nil
+		idpToken: func(context.Context, string) (string, time.Time, error) {
+			return "idp-token", time.Now().Add(time.Hour), nil
 		},
 	}
 	relayTo := httpUpstream(cfg, log, relay.WithInject(d.inject))
@@ -728,7 +728,7 @@ func TestRefusalsNameTheDownstreamAPI(t *testing.T) {
 			scopes := []string{c.scope}
 			d := newDownstreamTokens(scopes, "X-Byward-Downstream-Token", nil, "entra",
 				func(context.Context, string) (string, time.Time, error) {
-					return "assertion", time.Now().Add(time.Hour), nil
+					return "idp-token", time.Now().Add(time.Hour), nil
 				},
 				slog.New(slog.DiscardHandler), Observability{})
 			// The exchange fails as Entra does without admin consent (AADSTS65001).
