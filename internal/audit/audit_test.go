@@ -174,10 +174,10 @@ func TestAFloodOfOneEventAndOutcomeNeverHidesAnother(t *testing.T) {
 			lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
 			last := lines[len(lines)-1]
 			if want := `"event":"` + tc.next.Name + `","outcome":"` + tc.next.Outcome + `"`; !strings.Contains(last, want) {
-				t.Fatalf("the %s record was dropped; last line: %s", tc.next.Name, last)
+				t.Fatalf("the %s/%s record was dropped; last line: %s", tc.next.Name, tc.next.Outcome, last)
 			}
 			if strings.Contains(last, "suppressed") {
-				t.Fatalf("the %s record carries the flood's suppressed count: %s", tc.next.Name, last)
+				t.Fatalf("the %s/%s record carries the flood's suppressed count: %s", tc.next.Name, tc.next.Outcome, last)
 			}
 		})
 	}

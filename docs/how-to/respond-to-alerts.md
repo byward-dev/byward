@@ -150,7 +150,7 @@ not counted.
 
 1. Group the records by `remote_ip` and `reason`, an IPv6 `remote_ip` by its /64: that is the
    source these records are rate-limited by, so `suppressed` counts the dropped ones from the whole
-   source, and the metric counts them all.
+   source, of either reason, and the metric counts them all.
 2. With several replicas, compare the key IDs each one loaded: each logs a
    [`key_loaded`](../reference/observability.md#events-and-ocsf-mapping) record per key at startup.
    Give every replica the same key files ([sealing keys](sealing-keys.md#rotating)).
