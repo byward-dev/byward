@@ -14,6 +14,7 @@ import (
 	"unicode"
 
 	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/ssrfguard"
 )
 
 // metadataDocument is client metadata as JSON: a Client ID Metadata Document or an RFC 7591
@@ -171,8 +172,10 @@ func validateMetadata(d metadataDocument, rule redirectRule) (*clientMetadata, [
 	case len(d.JWKS) > 0 && d.JWKSURI != "":
 		return nil, nil, errors.New("jwks, jwks_uri: give one, not both")
 	case d.JWKSURI != "":
-		if u, err := url.Parse(d.JWKSURI); err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Fragment != "" {
-			return nil, nil, errors.New("jwks_uri: must be an https URL")
+		// The SSRF guard's URL rule, so a URL it would never fetch is refused here, not at /token (the
+		// guard checks the address when it fetches).
+		if u, err := url.Parse(d.JWKSURI); err != nil || !ssrfguard.Fetchable(u) || u.Fragment != "" {
+			return nil, nil, errors.New("jwks_uri: must be an https URL on port 443, without user information or a fragment")
 		}
 		m.jwksURI = d.JWKSURI
 	case len(d.JWKS) > 0:

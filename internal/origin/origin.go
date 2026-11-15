@@ -64,9 +64,12 @@ func hostKey(h string) string {
 // origin carries the headers the client must read (the 401 challenge, the session ID).
 const (
 	allowMethods  = "GET, POST, DELETE"
-	allowHeaders  = "Authorization, Content-Type, Accept, Mcp-Session-Id, Mcp-Protocol-Version, Mcp-Method, Mcp-Name, Last-Event-ID"
 	exposeHeaders = "WWW-Authenticate, Mcp-Session-Id, Mcp-Protocol-Version, Last-Event-ID, Retry-After"
 )
+
+// allowHeaders are the request headers a browser MCP client may send: its credential and content
+// headers, and MCP's own (config.MCPRequestHeaders).
+var allowHeaders = "Authorization, Content-Type, Accept, " + strings.Join(config.MCPRequestHeaders, ", ")
 
 // MCP 2026-07-28 (Streamable HTTP, "Custom Headers from Tool Parameters") has a client mirror tool
 // parameters into Mcp-Param-{name} headers, a family Access-Control-Allow-Headers cannot name by
@@ -74,10 +77,12 @@ const (
 // non-empty suffix, at most maxParamHeaderName bytes, and at most maxParamHeaders distinct names;
 // any other requested name is left out, so the browser refuses it as before.
 const (
-	paramHeaderPrefix  = "mcp-param-"
 	maxParamHeaders    = 32
 	maxParamHeaderName = 128
 )
+
+// paramHeaderPrefix is config.MCPParamPrefix in lower case, as a preflight's names are compared.
+var paramHeaderPrefix = strings.ToLower(config.MCPParamPrefix)
 
 // paramHeaders are the Mcp-Param-* names a preflight's headers h request
 // (Access-Control-Request-Headers), as allowHeaders' extension: ", " and the names, or "".
