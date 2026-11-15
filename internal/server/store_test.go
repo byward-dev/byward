@@ -69,7 +69,7 @@ func grantFor(id string, at time.Time) store.Grant {
 // The server keeps its state in SQLite in BYWARD_STORE_DIR: a revocation written there
 // before the server starts refuses that grant's tokens after the start.
 func TestServerUsesTheSQLiteStoreInTheStateDirectory(t *testing.T) {
-	env, cfg := storeEnv(t)
+	_, cfg := storeEnv(t)
 	now := time.Now()
 	withStore(t, cfg, func(st *sqlite.Store) {
 		for _, id := range []string{"revoked", "live"} {
@@ -86,10 +86,10 @@ func TestServerUsesTheSQLiteStoreInTheStateDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { stop(t, a) })
-	if _, err := a.validator.Validate(context.Background(), sealAccess(t, cfg, env, "revoked")); err != resource.ErrInvalid {
+	if _, err := a.validator.Validate(context.Background(), sealAccess(t, cfg, "revoked")); err != resource.ErrInvalid {
 		t.Fatalf("token of a grant revoked in the store before the start: %v, want refused", err)
 	}
-	if _, err := a.validator.Validate(context.Background(), sealAccess(t, cfg, env, "live")); err != nil {
+	if _, err := a.validator.Validate(context.Background(), sealAccess(t, cfg, "live")); err != nil {
 		t.Fatalf("token of a live grant: %v", err)
 	}
 }
@@ -246,27 +246,58 @@ func TestReadinessFailsWhenTheStoreIsUnavailable(t *testing.T) {
 	}
 }
 
-// ADR-0007 §6: the absolute paths in use are logged at startup, defaults resolved.
+// ADR-0007 §6: the absolute paths in use are logged at startup, defaults resolved: the assertion
+// keys' only for an HTTP upstream, the one that reads them.
 func TestStartupLogsTheResolvedPaths(t *testing.T) {
+	_, httpCfg := storeEnv(t)
+	for name, tc := range map[string]struct {
+		cfg           *config.Config
+		assertionKeys bool
+	}{"http upstream": {httpCfg, true}, "stdio upstream": {stdioAuthConfig(t, "/bin/cat"), false}} {
+		cfg := tc.cfg
+		t.Run(name, func(t *testing.T) {
+			var logs bytes.Buffer
+			a, err := buildAuth(cfg, slog.New(slog.NewJSONHandler(&logs, nil)), Observability{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			stop(t, a)
+			got := map[string]string{}
+			for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+				var rec struct{ Msg, Setting, Value string }
+				if json.Unmarshal([]byte(line), &rec) == nil && rec.Msg == "path" {
+					got[rec.Setting] = rec.Value
+				}
+			}
+			want := map[string]string{"BYWARD_DATA_DIR": cfg.DataDir, "BYWARD_KEYS_DIR": cfg.KeysDir,
+				"BYWARD_STATIC_CLIENTS_FILE": cfg.StaticClientsFile, "BYWARD_STORE_DIR": cfg.StoreDir, "BYWARD_STORE_COUNTER_FILE": cfg.StoreCounterFile}
+			if tc.assertionKeys {
+				want["BYWARD_ASSERTION_KEYS_DIR"] = cfg.AssertionKeysDir
+			}
+			if !maps.Equal(got, want) {
+				t.Fatalf("logged paths %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// A SQLite store that cannot be opened names its settings and the guide, as check names them, also
+// where only opening it finds the fault (a database file that is not one, at serve or revoke-user).
+func TestAStoreThatCannotBeOpenedPointsAtTheGuide(t *testing.T) {
 	_, cfg := storeEnv(t)
-	var logs bytes.Buffer
-	a, err := buildAuth(cfg, slog.New(slog.NewJSONHandler(&logs, nil)), Observability{})
-	if err != nil {
+	if err := os.MkdirAll(cfg.StoreDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	stop(t, a)
-	got := map[string]string{}
-	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
-		var rec struct{ Msg, Setting, Value string }
-		if json.Unmarshal([]byte(line), &rec) == nil && rec.Msg == "path" {
-			got[rec.Setting] = rec.Value
-		}
+	if err := os.WriteFile(filepath.Join(cfg.StoreDir, "byward.db"), []byte("not a database"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	want := map[string]string{"BYWARD_DATA_DIR": cfg.DataDir, "BYWARD_KEYS_DIR": cfg.KeysDir,
-		"BYWARD_STATIC_CLIENTS_FILE": cfg.StaticClientsFile, "BYWARD_STORE_DIR": cfg.StoreDir,
-		"BYWARD_STORE_COUNTER_FILE": cfg.StoreCounterFile}
-	if !maps.Equal(got, want) {
-		t.Fatalf("logged paths %v, want %v", got, want)
+	st, err := openStore(cfg, discard, nil)
+	if err == nil {
+		_ = st.Close()
+		t.Fatal("a file that is not a database opened as the store")
+	}
+	if !strings.HasPrefix(err.Error(), "BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: ") || !strings.HasSuffix(err.Error(), " (see docs/how-to/state.md)") {
+		t.Fatalf("err = %v, want it to name the settings and docs/how-to/state.md", err)
 	}
 }
 

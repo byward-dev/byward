@@ -1,6 +1,6 @@
 // Package downstream gets the tokens an upstream needs to call a downstream API on the user's
 // behalf (ADR-0017): one exchange per user and scopes, kept in a bounded in-memory cache until
-// shortly before the token or the assertion it came from expires. Tokens are never stored or
+// shortly before the token or the IdP token it came from expires. Tokens are never stored or
 // logged.
 package downstream
 
@@ -40,22 +40,23 @@ const (
 	SignInExpired       = "sign_in_expired"      // the grant's sign-in has ended: the next request brings a new one
 )
 
-// Token is a downstream API access token; opaque to byward.
+// Token is a downstream API access token; opaque to byward. Keep it plain data: stdio.DownstreamToken
+// embeds it, so a method here (a String, LogValue or MarshalJSON) would be promoted there.
 type Token struct {
 	AccessToken string
 	ExpiresAt   time.Time
 }
 
-// User is whom a token is for: the user key's tenant and object IDs (ADR-0012), and the
-// assertion the exchange presents with its expiry.
+// User is whom a token is for: the user key's tenant and object IDs (ADR-0012), and the user's IdP
+// token the exchange presents (the On-Behalf-Of request's assertion parameter) with its expiry.
 type User struct {
 	TenantID, ObjectID string
-	Assertion          string
-	AssertionExpiresAt time.Time // zero when the IdP gave none: then only the token's own expiry counts
+	IdPToken           string
+	IdPTokenExpiresAt  time.Time // zero when the IdP gave none: then only the token's own expiry counts
 }
 
 // Exchange obtains a token for the scopes on the user's behalf (Entra On-Behalf-Of).
-type Exchange func(ctx context.Context, tenantID, assertion string, scopes []string) (Token, error)
+type Exchange func(ctx context.Context, tenantID, idpToken string, scopes []string) (Token, error)
 
 // Cache hands out downstream tokens for one set of scopes. It is safe for concurrent use;
 // concurrent requests for the same user share one exchange, and errors are never cached.
@@ -96,7 +97,7 @@ func New(exchange Exchange, scopes []string, maxEntries int, now func() time.Tim
 }
 
 // Token returns a token for u, from the cache while it is valid for at least Margin and its
-// assertion has not expired, otherwise from a new exchange. It reports whether it came from the
+// IdP token has not expired, otherwise from a new exchange. It reports whether it came from the
 // cache.
 func (c *Cache) Token(ctx context.Context, u User) (Token, bool, error) {
 	key := u.TenantID + "\x00" + u.ObjectID + "\x00" + strings.Join(c.scopes, " ")
@@ -149,10 +150,10 @@ func (c *Cache) run(ctx context.Context, key string, u User, cl *call) {
 		close(cl.done)
 	}()
 	cl.err = errUnfinished // a return or a panic replaces it; runtime.Goexit leaves it
-	cl.token, cl.err = c.exchange(ctx, u.TenantID, u.Assertion, c.scopes)
+	cl.token, cl.err = c.exchange(ctx, u.TenantID, u.IdPToken, c.scopes)
 	cl.until = cl.token.ExpiresAt.Add(-Margin)
-	if !u.AssertionExpiresAt.IsZero() && u.AssertionExpiresAt.Before(cl.until) { // zero: the IdP gave no expiry
-		cl.until = u.AssertionExpiresAt
+	if !u.IdPTokenExpiresAt.IsZero() && u.IdPTokenExpiresAt.Before(cl.until) { // zero: the IdP gave no expiry
+		cl.until = u.IdPTokenExpiresAt
 	}
 }
 

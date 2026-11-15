@@ -152,10 +152,7 @@ func TestEachStdioMCPSessionIsItsOwnUpstreamProcessBoundToItsUserWithNoTokenOrPr
 	if res.StatusCode != http.StatusOK || !strings.HasPrefix(id, mcpsession.Prefix) {
 		t.Fatalf("initialize: %d, session %q; want a sealed ID", res.StatusCode, id)
 	}
-	ring, err := token.LoadKeyRing(cfg.KeysDir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	ring := keyRing(t, cfg)
 	box, _ := token.NewBox(ring, "mcp-session", nil)
 	plain, err := box.Open(strings.TrimPrefix(id, mcpsession.Prefix))
 	var bound struct{ S, U, X string }

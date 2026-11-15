@@ -13,8 +13,23 @@ func (c *Config) clientSources(v *Values) []error {
 		errs = append(errs, err)
 	}
 	if raw := v.get("client-denylist"); raw != "" {
+		env := Setting{Name: "client-denylist"}.Env()
 		if c.ClientDenylist = splitList(raw); len(c.ClientDenylist) == 0 {
-			errs = append(errs, errorf("%s is set but lists nothing; remove it or give at least one entry", Setting{Name: "client-denylist"}.Env()))
+			errs = append(errs, errorf("%s is set but lists nothing; remove it or give at least one entry", env))
+		}
+		for _, e := range c.ClientDenylist {
+			if strings.HasPrefix(e, "https://") {
+				continue // a CIMD client ID, which registration.NewDenylist checks
+			}
+			// A trailing dot names the same host; registration.BrowserHost folds it away.
+			host := strings.TrimSuffix(e, ".")
+			if err := asciiHost(e); err != nil {
+				errs = append(errs, errorf("%s: %v", env, err))
+			} else if reason := hostNameReason(host); reason != "" {
+				errs = append(errs, errorf("%s: %q is neither a CIMD client ID (an https URL) nor a host name such as app.example: %s", env, e, reason))
+			} else if endsInANumber(host) {
+				errs = append(errs, errorf("%s: %q ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match (127.1 and 0x7f000001 are 127.0.0.1), or none at all; deny the app by its CIMD client ID or its redirect host's name", env, e))
+			}
 		}
 	}
 	if c.CIMD, err = v.boolean("cimd"); err != nil {
@@ -35,13 +50,35 @@ func (c *Config) clientSources(v *Values) []error {
 		for i, h := range *s.dst {
 			if err := asciiHost(h); err != nil {
 				errs = append(errs, errorf("%s: %v", env, err))
-			} else if !validHostName(h) { // #344
-				errs = append(errs, errorf("%s: %q is not a host name such as claude.ai: %s", env, h, hostNameRule))
-			} else if !strings.Contains(h, ".") {
-				errs = append(errs, errorf("%s: %q is not a host name such as claude.ai: give a name with at least one dot", env, h))
+			} else if reason := hostNameReason(h); reason != "" {
+				errs = append(errs, errorf("%s: %q is not a host name such as claude.ai: %s", env, h, reason))
 			}
 			(*s.dst)[i] = strings.ToLower(h)
 		}
 	}
 	return errs
+}
+
+// hostNameReason says why h is not a host name an operator's host list can match on (#344), or ""
+// when it is: validHostName's characters and labels, and at least one dot, since a single label is
+// not a host any client uses. The caller checks asciiHost first, for its own message.
+func hostNameReason(h string) string {
+	switch {
+	case !validHostName(h):
+		return hostNameRule
+	case !strings.Contains(h, "."):
+		return "give a name with at least one dot"
+	}
+	return ""
+}
+
+// endsInANumber reports whether a browser reads host as an IPv4 address (WHATWG URL "ends in a
+// number"): its last label is decimal digits, or 0x and hex digits. The parse may then fail (a.0x7f),
+// and the browser refuses the URL.
+func endsInANumber(host string) bool {
+	last := host[strings.LastIndex(host, ".")+1:]
+	if hex, ok := strings.CutPrefix(strings.ToLower(last), "0x"); ok {
+		return strings.Trim(hex, "0123456789abcdef") == ""
+	}
+	return last != "" && strings.Trim(last, "0123456789") == ""
 }

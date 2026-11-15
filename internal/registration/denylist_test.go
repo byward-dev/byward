@@ -72,6 +72,77 @@ func TestADeniedHostMatchesExactlyIgnoringCase(t *testing.T) {
 	}
 }
 
+// A denied host is denied in every spelling a browser resolves to it: an internationalized name in
+// Unicode or xn-- form, full-width letters and full stops, a trailing ideographic full stop. So a client
+// cannot register the Unicode spelling of a host the operator listed in xn-- form, or the reverse. It is
+// also denied as an older or transitional IDNA browser goes to it (faß as fass). A name a browser
+// refuses still matches its own xn-- form; other hosts stay apart.
+func TestADeniedHostMatchesEverySpellingTheBrowserGoesTo(t *testing.T) {
+	for _, c := range []struct {
+		entry, uri string
+		denied     bool
+	}{
+		{"xn--bcher-kva.example", "https://bücher.example/cb", true},
+		{"xn--bcher-kva.example", "https://BÜCHER.example/cb", true},
+		{"xn--bcher-kva.example", "https://bücher。example/cb", true},
+		{"xn--bcher-kva.example", "https://bücher.example。/cb", true},
+		{"bücher.example", "https://xn--bcher-kva.example/cb", true},
+		{"app.example", "https://app.example。/cb", true},
+		{"app.example", "https://ａｐｐ.example/cb", true},
+		{"xn--aib-9dc.example", "https://aİb.example/cb", true}, // UTS #46 maps İ to i̇, not to i
+		{"xn--fa-hia.example", "https://faß.example/cb", true},  // non-transitional: ß stays ß, as in browsers
+		{"xn--fa-hia.example", "https://faẞ.example/cb", true},  // ẞ maps to ß since Unicode 15.1
+		// Older or transitional IDNA maps ß and ẞ to ss, and a browser with it goes there: denied too.
+		{"fass.example", "https://faß.example/cb", true},
+		{"fass.example", "https://faẞ.example/cb", true},
+		{"fass.example", "https://faß.example:8443/cb", true}, // the port is not part of the host
+		{"xn--fa-hia.example", "https://faß.example:8443/cb", true},
+		{"faß.example", "https://xn--fa-hia.example/cb", true}, // an entry is kept by its browser fold
+		{"app.example", "https://app．example/cb", true},        // a full-width full stop
+		// Names with "_" or "--", which a browser still maps.
+		{"xn--b_cher-3ya.example", "https://bü_cher.example/cb", true},
+		{"my_app.example", "https://ｍｙ_app.example/cb", true},
+		{"ab--c.example", "https://ＡＢ--c.example/cb", true},
+		// A name the browser refuses is compared by the mapping it got that far: its own xn-- form for a
+		// joiner out of context or a label mixing directions, and lower case for invalid punycode (the
+		// mapping lower-cases first).
+		{"xn--ab-m1t.example", "https://a\u200db.example/cb", true},
+		{"xn--a-0hc.example", "https://aא.example/cb", true},
+		{"xn--zz.example", "https://XN--ZZ.example./cb", true},
+		{"xn--zz.example", "https://xn--zy.example/cb", false},
+		// Other hosts stay apart.
+		{"xn--bcher-kva.example", "https://böcher.example/cb", false},
+		{"xn--bcher-kva.example", "https://bucher.example/cb", false},
+		{"aib.example", "https://aİb.example/cb", false},
+	} {
+		d, err := NewDenylist([]string{c.entry})
+		if err != nil {
+			t.Errorf("entry %q: %v", c.entry, err)
+			continue
+		}
+		if got := d.DeniesRedirect(c.uri); got != c.denied {
+			t.Errorf("entry %q: DeniesRedirect(%q) = %v, want %v", c.entry, c.uri, got, c.denied)
+		}
+	}
+}
+
+// BrowserHost is the ASCII name a browser goes to, the form both the denylist and the consent page
+// compare and show.
+func TestBrowserHostIsTheASCIINameABrowserGoesTo(t *testing.T) {
+	for host, want := range map[string]string{
+		"App.Example.":          "app.example",
+		"BÜCHER.example":        "xn--bcher-kva.example",
+		"ａｐｐ。example":           "app.example",
+		"ｍｙ_app.example":        "my_app.example",
+		"xn--bcher-kva.example": "xn--bcher-kva.example",
+		"127.0.0.1":             "127.0.0.1",
+	} {
+		if got := BrowserHost(host); got != want {
+			t.Errorf("BrowserHost(%q) = %q, want %q", host, got, want)
+		}
+	}
+}
+
 // A denied CIMD client is unknown, with the reason for the operator log, before its document is
 // fetched; another document on the same host still resolves.
 func TestADeniedCIMDClientIsUnknownWithoutAFetch(t *testing.T) {

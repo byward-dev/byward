@@ -46,9 +46,7 @@ func TestACIMDClientSignsInAndUsesALegacySession(t *testing.T) {
 	b := newTestBrowser(t, srv.URL, public)
 	send := b.send
 
-	verifier := "verifier-0123456789-0123456789-0123456789-abc"
-	q := url.Values{"client_id": {doc.ClientID}, "redirect_uri": {doc.Redirect}, "response_type": {"code"}, "state": {"s"},
-		"code_challenge": {fakeidp.CodeChallenge(verifier)}, "code_challenge_method": {"S256"}, "scope": {"mcp"}}
+	q := authorizeQuery(url.Values{"client_id": {doc.ClientID}, "redirect_uri": {doc.Redirect}, "state": {"s"}, "scope": {"mcp"}})
 	page := send(http.MethodGet, "/authorize?"+q.Encode(), nil, nil)
 	body := readAll(t, page)
 	if page.StatusCode != http.StatusOK || !strings.Contains(body, "Published by") {
@@ -73,7 +71,7 @@ func TestACIMDClientSignsInAndUsesALegacySession(t *testing.T) {
 		t.Fatal("the sign-in never fetched the client document from the local docs server")
 	}
 	tok := send(http.MethodPost, "/token", url.Values{"grant_type": {"authorization_code"}, "code": {ret.Query().Get("code")},
-		"client_id": {doc.ClientID}, "redirect_uri": {doc.Redirect}, "code_verifier": {verifier}}, nil)
+		"client_id": {doc.ClientID}, "redirect_uri": {doc.Redirect}, "code_verifier": {testVerifier}}, nil)
 	var tokens struct {
 		AccessToken string `json:"access_token"`
 	}

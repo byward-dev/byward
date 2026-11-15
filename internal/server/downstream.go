@@ -26,8 +26,8 @@ type downstreamTokens struct {
 	cache    *downstream.Cache
 	header   string
 	resource string // the downstream API, for messages
-	// assertion returns the grant's stored IdP access token and its expiry.
-	assertion func(ctx context.Context, grantID string) (string, time.Time, error)
+	// idpToken returns the grant's stored IdP access token and its expiry.
+	idpToken func(ctx context.Context, grantID string) (string, time.Time, error)
 	// consentURL is where an administrator of a tenant grants the scopes.
 	consentURL func(tenantID string) string
 	idp        string
@@ -36,12 +36,12 @@ type downstreamTokens struct {
 	now        func() time.Time
 }
 
-func newDownstreamTokens(scopes []string, header string, provider *entra.Provider, idpName string, assertion func(context.Context, string) (string, time.Time, error),
+func newDownstreamTokens(scopes []string, header string, provider *entra.Provider, idpName string, idpToken func(context.Context, string) (string, time.Time, error),
 	log *slog.Logger, o Observability) *downstreamTokens {
 	exchange := alertingExchange(provider.OnBehalfOf, idpName, log, o)
 	res := scopes[0][:strings.LastIndex(scopes[0], "/")]
 	return &downstreamTokens{cache: downstream.New(exchange, scopes, 0, time.Now), header: header, resource: res,
-		assertion: assertion, consentURL: func(tid string) string { return provider.AdminConsentURL(tid, scopes) },
+		idpToken: idpToken, consentURL: func(tid string) string { return provider.AdminConsentURL(tid, scopes) },
 		idp: idpName, log: log, o: o, now: time.Now}
 }
 
@@ -70,7 +70,7 @@ func (d *downstreamTokens) serve(w http.ResponseWriter, r *http.Request, id reso
 	ctx := r.Context()
 	if ok && id.PrincipalType == resource.PrincipalClient {
 		// An app-only caller (ADR-0022) acts for no user, so there is no one to act on behalf of: it is
-		// relayed without a downstream token, and the assertion's principal_type tells the upstream.
+		// relayed without a downstream token, and the identity assertion's principal_type tells the upstream.
 		next.ServeHTTP(w, r)
 		return
 	}
@@ -79,12 +79,12 @@ func (d *downstreamTokens) serve(w http.ResponseWriter, r *http.Request, id reso
 		d.refuse(w, r, id, downstream.Failed, errors.New("no signed-in Entra user for the request"))
 		return
 	}
-	assertion, expires, err := d.assertion(ctx, id.GrantID)
+	idpToken, expires, err := d.idpToken(ctx, id.GrantID)
 	if err != nil {
 		d.refuse(w, r, id, downstream.Failed, err)
 		return
 	}
-	tok, cached, err := d.cache.Token(ctx, downstream.User{TenantID: tid, ObjectID: oid, Assertion: assertion, AssertionExpiresAt: expires})
+	tok, cached, err := d.cache.Token(ctx, downstream.User{TenantID: tid, ObjectID: oid, IdPToken: idpToken, IdPTokenExpiresAt: expires})
 	if err != nil && ctx.Err() != nil {
 		return // the client went away while waiting: nothing was refused and no one is left to answer
 	}
@@ -120,8 +120,8 @@ func outcomeOf(err error) string {
 // finishes it even when they have gone, so neither a count nor its line depends on a waiter (#204).
 // Each refused waiter's own line still carries the alert.
 func alertingExchange(exchange downstream.Exchange, idpName string, log *slog.Logger, o Observability) downstream.Exchange {
-	return func(ctx context.Context, tid, assertion string, scopes []string) (downstream.Token, error) {
-		t, err := exchange(ctx, tid, assertion, scopes)
+	return func(ctx context.Context, tid, idpToken string, scopes []string) (downstream.Token, error) {
+		t, err := exchange(ctx, tid, idpToken, scopes)
 		idp.ReportAlert(ctx, log, idpName, opOnBehalfOf, err, func(op, reason string) { o.Metrics.IdPAlert(idpName, op, reason) })
 		return t, err
 	}
@@ -180,7 +180,7 @@ func (d *downstreamTokens) forProcess(ctx context.Context, p stdio.Identity) std
 		d.o.Metrics.Downstream(downstream.NoUser)
 		return stdio.DownstreamToken{Error: downstream.NoUser}
 	}
-	assertion, expires, err := d.assertion(ctx, id.GrantID)
+	idpToken, expires, err := d.idpToken(ctx, id.GrantID)
 	if errors.Is(err, store.ErrNotFound) {
 		// Signed out or revoked since its last request (revocation deletes the grant): routine, not
 		// a refusal to alert on; the user's next request, under a new grant, brings a new token.
@@ -195,7 +195,7 @@ func (d *downstreamTokens) forProcess(ctx context.Context, p stdio.Identity) std
 		d.o.Metrics.Downstream(downstream.SignInExpired)
 		return stdio.DownstreamToken{Error: downstream.SignInExpired}
 	}
-	tok, cached, err := d.cache.Token(ctx, downstream.User{TenantID: tid, ObjectID: oid, Assertion: assertion, AssertionExpiresAt: expires})
+	tok, cached, err := d.cache.Token(ctx, downstream.User{TenantID: tid, ObjectID: oid, IdPToken: idpToken, IdPTokenExpiresAt: expires})
 	if err != nil {
 		outcome := outcomeOf(err)
 		d.record(ctx, nil, id, outcome, err)
@@ -206,7 +206,7 @@ func (d *downstreamTokens) forProcess(ctx context.Context, p stdio.Identity) std
 	} else {
 		d.o.Metrics.Downstream(downstream.Issued)
 	}
-	return stdio.DownstreamToken{AccessToken: tok.AccessToken, ExpiresAt: tok.ExpiresAt}
+	return stdio.DownstreamToken{Token: tok}
 }
 
 // refusalMessage is what the client is told for a refusal outcome; it names the downstream API and
