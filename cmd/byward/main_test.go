@@ -54,8 +54,9 @@ func authEnv(t *testing.T) []string {
 
 func TestConfigErrorExitCode(t *testing.T) {
 	code, _, stderr := runWith(nil, "BYWARD_PUBLC_URL=x")
-	if code != exitConfig || !strings.Contains(stderr, "did you mean BYWARD_PUBLIC_URL?") {
-		t.Fatalf("code=%d stderr=%q", code, stderr)
+	if code != exitConfig || !strings.HasPrefix(stderr, "byward: configuration error: unknown setting BYWARD_PUBLC_URL") ||
+		!strings.Contains(stderr, "did you mean BYWARD_PUBLIC_URL?") {
+		t.Fatalf("code=%d stderr=%q; want exit %d and the unknown-setting configuration error with its did-you-mean hint", code, stderr, exitConfig)
 	}
 }
 
@@ -74,6 +75,10 @@ func TestLooseSecretFileIsAConfigError(t *testing.T) {
 	code, _, stderr := runWith(nil, env...)
 	if code != exitConfig {
 		t.Fatalf("exit %d, want %d (configuration error); stderr %q", code, exitConfig, stderr)
+	}
+	// The startup log comes first; the error is a line of its own.
+	if want := "\nbyward: configuration error: BYWARD_ENTRA_CLIENT_SECRET_FILE: secret file " + secret + " has mode 0644"; !strings.Contains(stderr, want) {
+		t.Errorf("stderr %q lacks the configuration-error line %q", stderr, want[1:])
 	}
 	for _, want := range []string{secret, "chmod 600", "read-only"} {
 		if !strings.Contains(stderr, want) {
@@ -300,5 +305,37 @@ func TestStoreNewEpochExits2OnMisuseOrSQLiteAnd1WhenPostgreSQLIsUnreachable(t *t
 				t.Fatalf("code %d (want %d), stdout %q, stderr %q (want %q)", code, tc.code, stdout, stderr, tc.inStderr)
 			}
 		})
+	}
+}
+
+// An OTEL_* setting the exporter rejects stops the process as a configuration error, on one line of
+// its own after the startup log.
+func TestAnOTELExporterTheSDKRejectsIsAConfigError(t *testing.T) {
+	for _, kv := range os.Environ() {
+		if k, _, _ := strings.Cut(kv, "="); strings.HasPrefix(k, "OTEL_") {
+			t.Setenv(k, "")
+		}
+	}
+	t.Setenv("OTEL_TRACES_EXPORTER", "bogus")
+	t.Cleanup(func() {
+		otel.SetErrorHandler(otel.ErrorHandlerFunc(func(error) {}))
+		otel.SetLogger(logr.Discard())
+	})
+	env := append(authEnv(t), serveEnv("https://m.example/mcp", "127.0.0.1:0")...)
+	code, _, stderr := runWith(nil, append(env, "OTEL_TRACES_EXPORTER=bogus")...)
+	const want = "\nbyward: configuration error: OTEL_* tracing settings: "
+	if code != exitConfig || !strings.Contains(stderr, want) || !strings.HasSuffix(stderr, "\n") {
+		t.Fatalf("code=%d stderr=%q; want exit %d and a line starting %q", code, stderr, exitConfig, want[1:])
+	}
+}
+
+// A configuration error is one line naming the program, whatever the error says.
+func TestAConfigurationErrorIsOneLineNamingTheProgram(t *testing.T) {
+	var stderr strings.Builder
+	if code := reportConfigError(&stderr, errors.New("BYWARD_X: 100% wrong")); code != exitConfig {
+		t.Errorf("exit %d, want %d", code, exitConfig)
+	}
+	if got, want := stderr.String(), "byward: configuration error: BYWARD_X: 100% wrong\n"; got != want {
+		t.Errorf("stderr %q, want %q", got, want)
 	}
 }

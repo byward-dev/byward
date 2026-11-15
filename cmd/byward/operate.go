@@ -27,7 +27,7 @@ func checkOffline(_ context.Context, args, environ []string, stdout, stderr io.W
 	}
 	report, err := server.CheckOfflineReport(cfg)
 	if err != nil {
-		return configError(stderr, err)
+		return reportConfigError(stderr, err)
 	}
 	// As the startup log has them (security invariant 12), labelled neutrally: --insecure-no-auth's
 	// are not development mode.
@@ -56,7 +56,7 @@ func exportJWKS(_ context.Context, args, environ []string, stdout, stderr io.Wri
 	}
 	set, err := server.ExportJWKS(cfg)
 	if err != nil {
-		return configError(stderr, err)
+		return reportConfigError(stderr, err)
 	}
 	_, _ = fmt.Fprintf(stdout, "%s\n", set)
 	return exitOK
@@ -90,7 +90,7 @@ func runDoctor(ctx context.Context, args, environ []string, stdout, stderr io.Wr
 	}
 	report, err := server.Doctor(ctx, cfg, doctorOptions)
 	if err != nil {
-		return configError(stderr, err)
+		return reportConfigError(stderr, err)
 	}
 	if asJSON {
 		if err := report.WriteJSON(stdout); err != nil {

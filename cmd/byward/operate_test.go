@@ -60,8 +60,8 @@ func TestOperateCommandMisuseExits2WithTheRightCallOnStderr(t *testing.T) {
 		{"init entra without a public URL", []string{"init", "entra", "--tenant", tenant}, nil, "BYWARD_PUBLIC_URL is required (give --public-url)"},
 		{"init entra with an http public URL", []string{"init", "entra", "--tenant", tenant, "--public-url", "http://m.example/mcp"}, nil, "must use https"},
 		{"init entra with a 3-year secret", []string{"init", "entra", "--tenant", tenant, "--public-url", "https://m.example/mcp", "--secret-years", "3"}, nil, "1 to 2 years"},
-		{"check with a bad setting", []string{"check", "--offline"}, []string{"BYWARD_PUBLC_URL=x"}, "configuration error: unknown setting BYWARD_PUBLC_URL"},
-		{"doctor with a bad setting", []string{"doctor"}, []string{"BYWARD_PUBLC_URL=x"}, "configuration error: unknown setting BYWARD_PUBLC_URL"},
+		{"check with a bad setting", []string{"check", "--offline"}, []string{"BYWARD_PUBLC_URL=x"}, "byward: configuration error: unknown setting BYWARD_PUBLC_URL"},
+		{"doctor with a bad setting", []string{"doctor"}, []string{"BYWARD_PUBLC_URL=x"}, "byward: configuration error: unknown setting BYWARD_PUBLC_URL"},
 		{"flags before the command", []string{"--dev", "check", "--offline"}, nil, "to run check, put it first: byward check"},
 		{"init entra with a non-numeric secret lifetime", []string{"init", "entra", "--tenant", tenant, "--secret-years", "abc"}, nil, `invalid value "abc" for flag -secret-years`},
 	}
@@ -117,8 +117,9 @@ func TestCheckOfflineAndDoctorExit2OnAConfigurationErrorAndCheckNothing(t *testi
 	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_KEYS_DIR=/nonexistent/keys")
 	for _, args := range [][]string{{"check", "--offline"}, {"doctor"}, {"doctor", "--json"}} {
 		code, stdout, stderr := runWith(args, env...)
-		if code != exitConfig || stdout != "" || !strings.Contains(stderr, "configuration error: BYWARD_KEYS_DIR: /nonexistent/keys") {
-			t.Fatalf("%v: code %d stdout %q stderr %q", args, code, stdout, stderr)
+		if code != exitConfig || stdout != "" || !strings.HasPrefix(stderr, "byward: configuration error: BYWARD_KEYS_DIR: /nonexistent/keys") ||
+			strings.Count(stderr, "\n") != 1 {
+			t.Fatalf("%v: code %d stdout %q stderr %q; want exit 2, no stdout, and the BYWARD_KEYS_DIR configuration error alone", args, code, stdout, stderr)
 		}
 	}
 }
