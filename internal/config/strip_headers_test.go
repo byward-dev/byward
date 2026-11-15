@@ -13,11 +13,11 @@ func TestTheUpstreamStripListIsReadAsCanonicalHeaderNames(t *testing.T) {
 	if err != nil || len(c.UpstreamStripHeaders) != 0 {
 		t.Fatalf("default %q (%v), want none", c.UpstreamStripHeaders, err)
 	}
-	c, err = load(t, nil, "BYWARD_UPSTREAM_STRIP_HEADERS= x-argocd-base-url, TFE_TOKEN ,,opensearch-url,mcp-params")
+	c, err = load(t, nil, "BYWARD_UPSTREAM_STRIP_HEADERS= x-argocd-base-url, TFE_TOKEN ,,opensearch-url,mcp-params,x-tenant-param-id")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"X-Argocd-Base-Url", "Tfe-Token", "Opensearch-Url", "Mcp-Params"}; !slices.Equal(c.UpstreamStripHeaders, want) {
+	if want := []string{"X-Argocd-Base-Url", "Tfe-Token", "Opensearch-Url", "Mcp-Params", "X-Tenant-Param-Id"}; !slices.Equal(c.UpstreamStripHeaders, want) {
 		t.Fatalf("got %q, want %q", c.UpstreamStripHeaders, want)
 	}
 }
