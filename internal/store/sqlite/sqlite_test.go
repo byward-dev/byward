@@ -438,7 +438,7 @@ func must(t *testing.T, err error) {
 }
 
 func TestFirstOpenIsANormalStart(t *testing.T) {
-	s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
+	s := openTemp(t)
 	if got := s.Startup(); got != (Startup{Epoch: 1}) {
 		t.Fatalf("first open: %+v, want a normal start at epoch 1", got)
 	}
@@ -475,7 +475,7 @@ func TestCorruptCounterFileFailsOpen(t *testing.T) {
 
 func TestCollectDropsExpiredSpentRecords(t *testing.T) {
 	storetest.CollectDropsExpiredSpent(t, func(t *testing.T) (store.Store, func(storetest.Spent) int) {
-		s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
+		s := openTemp(t)
 		return s, func(kind storetest.Spent) (n int) {
 			must(t, s.db.QueryRow("SELECT count(*) FROM "+string(kind)).Scan(&n))
 			return n
@@ -497,7 +497,7 @@ func TestEverySchemaVersionHasAFixture(t *testing.T) {
 var fixtureSince = storetest.FixtureSince{RevokeAll: 3, RotatedToken: 2, Client: 4, Consent: 5, SpentLogin: 6, SpentAssertion: 7, MarkedConsents: 8}
 
 func TestFixturesMigrateToTheCurrentSchemaKeepingTheirData(t *testing.T) {
-	want := schemaOf(t, open(t, t.TempDir(), filepath.Join(t.TempDir(), "w")).db)
+	want := schemaOf(t, openTemp(t).db)
 	for v := 1; v <= schemaVersion(); v++ {
 		t.Run(fmt.Sprintf("v%d", v), func(t *testing.T) {
 			dir := t.TempDir()
@@ -662,7 +662,7 @@ func TestAnOlderBinarysReapprovalUnmarksTheConsent(t *testing.T) {
 }
 
 func TestPingAnswersWhileOpenAndFailsAfterClose(t *testing.T) {
-	s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
+	s := openTemp(t)
 	if err := s.Ping(ctx); err != nil {
 		t.Fatalf("Ping on an open store: %v", err)
 	}
@@ -675,7 +675,7 @@ func TestPingAnswersWhileOpenAndFailsAfterClose(t *testing.T) {
 // Only the empty scope and "all" are scopes: the database itself refuses anything else, so no write path can
 // invent a revocation that covers more than it names.
 func TestTheRevocationScopeIsCheckedByTheDatabase(t *testing.T) {
-	s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
+	s := openTemp(t)
 	insert := func(scope string) error {
 		_, err := s.db.Exec("INSERT INTO revocations (grant_id, subject, scope, before, at) VALUES ('', '', ?, 1, 1)", scope)
 		return err
