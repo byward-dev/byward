@@ -93,8 +93,8 @@ func TestCheckOfflineWarnsThatPlainIdentityHeadersAreOn(t *testing.T) {
 	}{"off": {env, false}, "on": {append(slices.Clone(env), "BYWARD_IDENTITY_HEADERS=true"), true}} {
 		t.Run(name, func(t *testing.T) {
 			code, stdout, stderr := runWith([]string{"check", "--offline"}, tc.env...)
-			if code != exitOK || stderr != "" || strings.Contains(stdout, "warn  plain identity headers are on (BYWARD_IDENTITY_HEADERS: ") != tc.want {
-				t.Fatalf("code %d stdout %q stderr %q, want exit 0 and the warning %v", code, stdout, stderr, tc.want)
+			if code != exitOK || stderr != "" || (strings.Contains(stdout, "warn  plain identity headers are on (BYWARD_IDENTITY_HEADERS: ") && strings.Contains(stdout, "docs/how-to/plain-identity-headers.md")) != tc.want {
+				t.Fatalf("code %d stdout %q stderr %q, want exit 0 and the warning with its guide %v", code, stdout, stderr, tc.want)
 			}
 		})
 	}

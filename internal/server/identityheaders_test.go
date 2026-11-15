@@ -203,8 +203,11 @@ func TestTurningOnPlainIdentityHeadersLogsAWarning(t *testing.T) {
 	}{{"off", nil, false}, {"on", []string{"BYWARD_IDENTITY_HEADERS=true"}, true}} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := newAsserting(t, tc.env...)
-			if got := strings.Contains(a.logs.String(), `level=WARN msg="plain identity headers are on"`); got != tc.want {
-				t.Errorf("warning logged %v", got)
+			logs := a.logs.String()
+			got := strings.Contains(logs, `level=WARN msg="plain identity headers are on" setting=BYWARD_IDENTITY_HEADERS reason=`) &&
+				strings.Contains(logs, "docs/how-to/plain-identity-headers.md")
+			if got != tc.want {
+				t.Errorf("warning with its setting and guide logged %v; logs:\n%s", got, logs)
 			}
 		})
 	}

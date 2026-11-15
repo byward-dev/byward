@@ -247,27 +247,33 @@ func TestReadinessFailsWhenTheStoreIsUnavailable(t *testing.T) {
 }
 
 // ADR-0007 §6: the absolute paths in use are logged at startup, defaults resolved: the assertion
-// keys' too, for an HTTP upstream.
+// keys' only for an HTTP upstream, the one that reads them.
 func TestStartupLogsTheResolvedPaths(t *testing.T) {
-	_, cfg := storeEnv(t)
-	var logs bytes.Buffer
-	a, err := buildAuth(cfg, slog.New(slog.NewJSONHandler(&logs, nil)), Observability{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	stop(t, a)
-	got := map[string]string{}
-	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
-		var rec struct{ Msg, Setting, Value string }
-		if json.Unmarshal([]byte(line), &rec) == nil && rec.Msg == "path" {
-			got[rec.Setting] = rec.Value
-		}
-	}
-	want := map[string]string{"BYWARD_DATA_DIR": cfg.DataDir, "BYWARD_KEYS_DIR": cfg.KeysDir,
-		"BYWARD_STATIC_CLIENTS_FILE": cfg.StaticClientsFile, "BYWARD_ASSERTION_KEYS_DIR": cfg.AssertionKeysDir,
-		"BYWARD_STORE_DIR": cfg.StoreDir, "BYWARD_STORE_COUNTER_FILE": cfg.StoreCounterFile}
-	if !maps.Equal(got, want) {
-		t.Fatalf("logged paths %v, want %v", got, want)
+	_, httpCfg := storeEnv(t)
+	for name, cfg := range map[string]*config.Config{"http upstream": httpCfg, "stdio upstream": stdioAuthConfig(t, "/bin/cat")} {
+		t.Run(name, func(t *testing.T) {
+			var logs bytes.Buffer
+			a, err := buildAuth(cfg, slog.New(slog.NewJSONHandler(&logs, nil)), Observability{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			stop(t, a)
+			got := map[string]string{}
+			for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+				var rec struct{ Msg, Setting, Value string }
+				if json.Unmarshal([]byte(line), &rec) == nil && rec.Msg == "path" {
+					got[rec.Setting] = rec.Value
+				}
+			}
+			want := map[string]string{"BYWARD_DATA_DIR": cfg.DataDir, "BYWARD_KEYS_DIR": cfg.KeysDir,
+				"BYWARD_STATIC_CLIENTS_FILE": cfg.StaticClientsFile, "BYWARD_STORE_DIR": cfg.StoreDir, "BYWARD_STORE_COUNTER_FILE": cfg.StoreCounterFile}
+			if cfg.UpstreamCommand == nil {
+				want["BYWARD_ASSERTION_KEYS_DIR"] = cfg.AssertionKeysDir
+			}
+			if !maps.Equal(got, want) {
+				t.Fatalf("logged paths %v, want %v", got, want)
+			}
+		})
 	}
 }
 

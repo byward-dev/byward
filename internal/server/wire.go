@@ -209,7 +209,7 @@ func logPaths(cfg *config.Config, log *slog.Logger) {
 	paths := []struct{ setting, value string }{
 		{"BYWARD_DATA_DIR", cfg.DataDir}, {"BYWARD_KEYS_DIR", cfg.KeysDir}, {"BYWARD_STATIC_CLIENTS_FILE", cfg.StaticClientsFile},
 	}
-	if cfg.UpstreamCommand == nil { // only an HTTP upstream gets the assertion, so only then are its keys read
+	if cfg.UpstreamCommand == nil {
 		paths = append(paths, struct{ setting, value string }{"BYWARD_ASSERTION_KEYS_DIR", cfg.AssertionKeysDir})
 	}
 	if cfg.StorePostgresDSN == "" {
