@@ -142,3 +142,5 @@ It is off by default.
 | Client certificates (mTLS from the ingress) | Not yet. Restrict who reaches the port with a NetworkPolicy. |
 | PROXY protocol | Not yet. Use `BYWARD_TRUSTED_PROXIES` with `X-Forwarded-For`. |
 | TLS on the internal listener | It binds to loopback or a private address, and it carries no tokens. |
+
+<!-- CI timing measurement for the docs-only PR; never merged -->
