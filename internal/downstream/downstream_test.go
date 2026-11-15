@@ -279,3 +279,23 @@ func TestAHangingExchangeTimesOut(t *testing.T) {
 		}
 	})
 }
+
+// A panicking exchange runs in the cache's own goroutine, which no HTTP handler's recover protects:
+// it is an error for the requests waiting on it, never the end of the process, and the next request
+// exchanges again.
+func TestAPanickingExchangeIsAnErrorNotACrash(t *testing.T) {
+	var calls atomic.Int32
+	c := New(func(context.Context, string, string, []string) (Token, error) {
+		calls.Add(1)
+		panic("exchange bug")
+	}, []string{"s"}, 0, func() time.Time { return t0 })
+	for i := range 2 {
+		got, cached, err := c.Token(context.Background(), user("alice"))
+		if err == nil || got != (Token{}) || cached {
+			t.Fatalf("request %d: %+v, cached %v, %v; want an error and no token", i, got, cached, err)
+		}
+	}
+	if calls.Load() != 2 || c.Len() != 0 {
+		t.Fatalf("%d exchanges, %d cached; want 2 (the failed one is not shared with the next) and 0", calls.Load(), c.Len())
+	}
+}

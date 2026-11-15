@@ -14,6 +14,7 @@ import (
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
+	"github.com/byward-dev/byward/internal/downstream"
 	"github.com/byward-dev/byward/internal/envproxy"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/tracing"
@@ -107,7 +108,7 @@ func checkUpstream(cfg *config.Config) error {
 // offlineDownstreamToken turns the token socket on for checkUpstream, so its path is checked as at
 // startup; checkUpstream starts no process, so nothing asks it.
 func offlineDownstreamToken(context.Context, stdio.Identity) stdio.DownstreamToken {
-	return stdio.DownstreamToken{Error: "unavailable"}
+	return stdio.DownstreamToken{Error: downstream.Unavailable}
 }
 
 // upstreamResult tells doctor's reader which upstream is configured; doctor checks the proxy in front

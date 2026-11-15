@@ -7,6 +7,7 @@ package downstream
 import (
 	"container/list"
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -21,6 +22,21 @@ const ExchangeTimeout = 30 * time.Second
 
 // DefaultMaxEntries bounds the cache; the least recently used entry goes first.
 const DefaultMaxEntries = 10_000
+
+// Outcomes of a request for a downstream token. Each is at once the byward_downstream_tokens_total
+// label, the downstream_token_refused audit reason, the data.downstream of the proxy's answer to a
+// refused request and the token socket's error code (ADR-0029, docs/reference/observability.md), so
+// the strings never change.
+const (
+	Cached              = "cached"               // handed out from the cache
+	Issued              = "issued"               // a new exchange
+	ConsentRequired     = "consent_required"     // the downstream API's permissions are not consented
+	InteractionRequired = "interaction_required" // Conditional Access needs the user
+	Unavailable         = "unavailable"          // the IdP is unavailable: try later
+	Failed              = "failed"               // anything else
+	NoUser              = "no_user"              // an app-only caller acts for no user
+	SignInExpired       = "sign_in_expired"      // the grant's sign-in has ended: the next request brings a new one
+)
 
 // Token is a downstream API access token; opaque to byward.
 type Token struct {
@@ -108,23 +124,29 @@ func (c *Cache) Token(ctx context.Context, u User) (Token, bool, error) {
 	}
 }
 
-// run performs the exchange for key, caches its token, and wakes every caller waiting for it.
+// run performs the exchange for key, caches its token, and wakes every caller waiting for it. No
+// HTTP handler's recover protects this goroutine, so a panicking exchange becomes the waiters' error
+// instead of ending the process, as the JWKS refetch and the CIMD fetch do.
 func (c *Cache) run(ctx context.Context, key string, u User, cl *call) {
 	ctx, cancel := context.WithTimeout(ctx, ExchangeTimeout)
 	defer cancel()
+	defer func() {
+		if p := recover(); p != nil {
+			cl.token, cl.err = Token{}, fmt.Errorf("downstream: the exchange panicked: %v", p)
+		}
+		c.mu.Lock()
+		delete(c.inFlight, key)
+		if cl.err == nil && c.now().Before(cl.until) {
+			c.add(key, cl.token, cl.until)
+		}
+		c.mu.Unlock()
+		close(cl.done)
+	}()
 	cl.token, cl.err = c.exchange(ctx, u.TenantID, u.Assertion, c.scopes)
 	cl.until = cl.token.ExpiresAt.Add(-Margin)
 	if !u.AssertionExpiresAt.IsZero() && u.AssertionExpiresAt.Before(cl.until) { // zero: the IdP gave no expiry
 		cl.until = u.AssertionExpiresAt
 	}
-
-	c.mu.Lock()
-	delete(c.inFlight, key)
-	if cl.err == nil && c.now().Before(cl.until) {
-		c.add(key, cl.token, cl.until)
-	}
-	c.mu.Unlock()
-	close(cl.done)
 }
 
 // Len is the number of cached tokens.
