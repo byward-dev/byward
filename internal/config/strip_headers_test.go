@@ -55,7 +55,7 @@ func TestTheUpstreamStripListRefusesWhatCannotBeStripped(t *testing.T) {
 		})
 	}
 	_, _, err := Load(nil, stdioBase(`BYWARD_UPSTREAM_COMMAND=["/usr/bin/server"]`, "BYWARD_UPSTREAM_STRIP_HEADERS=X-Api-Url"), baseFiles)
-	if err == nil || !strings.Contains(err.Error(), "BYWARD_UPSTREAM_STRIP_HEADERS is set, but a stdio upstream gets no request headers") {
+	if err == nil || !strings.Contains(err.Error(), "BYWARD_UPSTREAM_STRIP_HEADERS is set, but the upstream is stdio: it applies only to an HTTP upstream (BYWARD_UPSTREAM_URL)") {
 		t.Fatalf("stdio: error %v", err)
 	}
 }

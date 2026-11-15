@@ -82,7 +82,7 @@ func TestInvalidStdioSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		"not JSON":                {nil, []string{"BYWARD_UPSTREAM_COMMAND=/bin/x --flag"}, "", "BYWARD_UPSTREAM_COMMAND: want a JSON array"},
 		"empty array":             {nil, []string{"BYWARD_UPSTREAM_COMMAND=[]"}, "", "BYWARD_UPSTREAM_COMMAND: want a JSON array"},
 		"empty program":           {nil, []string{`BYWARD_UPSTREAM_COMMAND=[""]`}, "", "BYWARD_UPSTREAM_COMMAND: want a JSON array"},
-		"env without stdio":       {nil, []string{"BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_UPSTREAM_ENV_FILE=/run/secrets/upstream-env"}, "A=1", "BYWARD_UPSTREAM_ENV_FILE is set, but there is no stdio upstream"},
+		"env without stdio":       {nil, []string{"BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_UPSTREAM_ENV_FILE=/run/secrets/upstream-env"}, "A=1", "BYWARD_UPSTREAM_ENV_FILE is set, but the upstream is HTTP: it applies only to a stdio upstream (BYWARD_UPSTREAM_COMMAND)"},
 		"env file line without =": {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_ENV_FILE=/run/secrets/upstream-env"}, "A=1\nsecret-without-equals", "BYWARD_UPSTREAM_ENV_FILE: line 2: want KEY=VALUE"},
 		"env duplicate":           {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_ENV_FILE=/run/secrets/upstream-env"}, "A=1\nA=2", "line 2: A is set twice"},
 		"inline env":              {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_ENV=A=1"}, "", "secrets must come from a file"},

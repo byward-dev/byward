@@ -14,22 +14,16 @@ import (
 func (c *Config) upstream(v *Values) []error {
 	urlEnv, cmdEnv, envEnv := Setting{Name: "upstream-url"}.Env(), Setting{Name: "upstream-command"}.Env(), Setting{Name: "upstream-env"}.Env()+"_FILE"
 	raw := v.get("upstream-command")
+	errs := offModeSettings(v, raw != "")
 	if raw == "" {
-		if v.get("upstream-env") != "" {
-			return []error{errorf("%s is set, but there is no stdio upstream: set %s too", envEnv, cmdEnv)}
-		}
 		u, err := parseURL("upstream-url", v.get("upstream-url"))
 		if err != nil {
-			return []error{errorf("%s (or %s, or a command after --)", err.Error(), cmdEnv)}
+			return append(errs, errorf("%s (or %s, or a command after --)", err.Error(), cmdEnv))
 		}
 		c.UpstreamURL = u
-		var errs []error
-		c.UpstreamStripHeaders, errs = stripHeaders(v.get("upstream-strip-headers"))
-		return errs
-	}
-	var errs []error
-	if v.get("upstream-strip-headers") != "" {
-		errs = append(errs, errorf("%s is set, but a stdio upstream gets no request headers", Setting{Name: "upstream-strip-headers"}.Env()))
+		strip, stripErrs := stripHeaders(v.get("upstream-strip-headers"))
+		c.UpstreamStripHeaders = strip
+		return append(errs, stripErrs...)
 	}
 	if v.get("upstream-url") != "" {
 		errs = append(errs, errorf("%s and %s are both set: an upstream is either HTTP or stdio", urlEnv, cmdEnv))
@@ -69,6 +63,39 @@ func (c *Config) upstream(v *Values) []error {
 			Setting{Name: "stdio-max-processes"}.Env(), c.StdioMaxProcesses))
 	}
 	return errs
+}
+
+// offModeSettings refuses each setting given for the upstream mode that is off: a stdio upstream's
+// settings with an HTTP upstream, an HTTP upstream's with a stdio one. A setting left at its default
+// is never refused. The registry's groups say which mode a setting is for. The selectors
+// (upstream-url, upstream-command) keep their own "both set" error, and upstream-credential its own
+// hint (upstreamCredential).
+func offModeSettings(v *Values, stdio bool) []error {
+	off, mode, other, selector := GroupStdioUpstream, "HTTP", "a stdio upstream", Setting{Name: "upstream-command"}.Env()
+	if stdio {
+		off, mode, other, selector = GroupHTTPUpstream, "stdio", "an HTTP upstream", Setting{Name: "upstream-url"}.Env()
+	}
+	var errs []error
+	for _, val := range v.Effective() {
+		s := val.Setting
+		if s.Group != off || val.Source == SourceDefault || s.Name == "upstream-url" || s.Name == "upstream-command" || s.Name == "upstream-credential" {
+			continue
+		}
+		errs = append(errs, errorf("%s is set, but the upstream is %s: it applies only to %s (%s); remove it", spelled(val), mode, other, selector))
+	}
+	return errs
+}
+
+// spelled names a setting as the operator gave it: the flag, the file setting or the environment
+// variable.
+func spelled(val Value) string {
+	switch {
+	case val.From != "":
+		return val.From
+	case val.Source == SourceFlag:
+		return "--" + val.Setting.Name
+	}
+	return val.Setting.Env()
 }
 
 // minStreamIdleTimeout is the shortest stdio-stream-idle-timeout other than 0 (off): a stream quiet
@@ -141,7 +168,7 @@ func (c *Config) upstreamCredential(v *Values) []error {
 	fileEnv, hEnv := Setting{Name: "upstream-credential"}.Env()+"_FILE", Setting{Name: "upstream-credential-header"}.Env()
 	val, header := v.byKey["upstream-credential"], v.byKey["upstream-credential-header"]
 	if val.Source == SourceDefault {
-		if header.Source != SourceDefault {
+		if header.Source != SourceDefault && c.UpstreamCommand == nil { // with stdio: offModeSettings refuses it
 			return []error{errorf("%s is set, but there is no credential: set %s too, or remove it", hEnv, fileEnv)}
 		}
 		return nil
