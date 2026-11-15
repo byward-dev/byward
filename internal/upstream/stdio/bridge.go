@@ -261,12 +261,20 @@ func (b *Bridge) session(w http.ResponseWriter, r *http.Request, id Identity, ke
 		http.Error(w, "session not found", http.StatusNotFound)
 		return nil, nil
 	}
-	if v := r.Header.Get(headerProtocolVersion); v != "" && !s.speaks(v) {
-		// The upstream never sees headers, so the transport's rule is ours (2025-11-25 transports,
-		// Protocol Version Header): an unsupported version gets 400. No header passes.
+	// The upstream never sees headers, so the transport's rule is ours (2025-11-25 transports,
+	// Protocol Version Header): an unsupported version gets 400. No header passes. A repeated header
+	// is refused whatever its values, as the modern path's checkHeaders refuses it: an intermediary
+	// could read another copy than this check does.
+	var problem string
+	switch vals := r.Header.Values(headerProtocolVersion); {
+	case len(vals) > 1:
+		problem = "Bad Request: repeated " + headerProtocolVersion
+	case len(vals) == 1 && vals[0] != "" && !s.speaks(vals[0]):
+		problem = "Bad Request: unsupported " + headerProtocolVersion + "; this MCP session negotiated " + s.negotiated()
+	}
+	if problem != "" {
 		release()
-		writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest,
-			"Bad Request: unsupported "+headerProtocolVersion+"; this MCP session negotiated "+s.negotiated())
+		writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest, problem)
 		return nil, nil
 	}
 	return s, release

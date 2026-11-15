@@ -56,8 +56,8 @@ func (b *bridgeHarness) do(t *testing.T, ctx context.Context, method, user, sess
 	}
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	for i := 0; i+1 < len(header); i += 2 {
-		if header[i+1] != "" { // an empty value sends no header at all
-			req.Header.Set(header[i], header[i+1])
+		if header[i+1] != "" { // an empty value sends no header at all; a name given twice is sent twice
+			req.Header.Add(header[i], header[i+1])
 		}
 	}
 	if user != "" {
@@ -855,6 +855,40 @@ func TestProtocolVersionHeaderOtherThanTheMCPSessionsNegotiatedVersionIs400(t *t
 				if got := readEvents(t, b.post(t, "alice", s, `{"jsonrpc":"2.0","id":2,"method":"echo","params":{}}`)); len(got) != 1 {
 					t.Fatalf("the MCP session after rejected requests got %q", got)
 				}
+			}
+		})
+	}
+}
+
+// A repeated MCP-Protocol-Version is refused with 400 whatever its values, the negotiated one
+// included, as the modern path refuses it: an intermediary could read another copy than the bridge.
+func TestARepeatedProtocolVersionHeaderIs400WhateverItsValues(t *testing.T) {
+	for name, tc := range map[string]struct {
+		negotiated    string // "none" leaves it out of the InitializeResult
+		first, second string
+	}{
+		"the negotiated one twice":                 {"2025-11-25", "2025-11-25", "2025-11-25"},
+		"the negotiated one, then another":         {"2025-11-25", "2025-11-25", "2025-03-26"},
+		"another, then the negotiated one":         {"2025-11-25", "2025-03-26", "2025-11-25"},
+		"twice when the upstream named no version": {"none", "2025-11-25", "2025-11-25"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			b := newBridge(t, func(c *Config) { c.Command = []string{fakeBin, "-mcp", "-version=" + tc.negotiated} })
+			s := b.initialize(t, "alice")
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			for _, method := range []string{http.MethodPost, http.MethodGet, http.MethodDelete} {
+				res := b.do(t, ctx, method, "alice", s, `{"jsonrpc":"2.0","id":1,"method":"echo","params":{}}`,
+					"MCP-Protocol-Version", tc.first, "MCP-Protocol-Version", tc.second)
+				body, _ := io.ReadAll(res.Body)
+				if res.StatusCode != http.StatusBadRequest || rpcErrorCode(t, body) != codeInvalidRequest ||
+					!strings.Contains(string(body), "repeated MCP-Protocol-Version") {
+					t.Fatalf("%s: status %d, body %s; want 400 with a -32600 error that names the repeated header", method, res.StatusCode, body)
+				}
+			}
+			// The refused requests left the MCP session and its process as they were.
+			if got := readEvents(t, b.post(t, "alice", s, `{"jsonrpc":"2.0","id":2,"method":"echo","params":{}}`)); len(got) != 1 {
+				t.Fatalf("the MCP session after refused requests got %q", got)
 			}
 		})
 	}
