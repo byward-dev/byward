@@ -107,7 +107,7 @@ func TestDiagnoseReportsEachMisconfigurationWithItsFix(t *testing.T) {
 		{name: "signing keys unavailable", opts: []fakeidp.Option{fakeidp.WithJWKSUnavailable(true)},
 			check: "entra signing keys", status: doctor.Fail, inMessage: "cannot fetch", inFix: "can reach " + Authority},
 		{name: "key set without a signing key", opts: []fakeidp.Option{fakeidp.WithEmptyJWKS(true)},
-			check: "entra signing keys", status: doctor.Fail, inMessage: "no signing key", inFix: Authority},
+			check: "entra signing keys", status: doctor.Fail, inMessage: "no signing key", inFix: "rewrites responses"},
 		{name: "key set that is not a JWK Set", opts: []fakeidp.Option{fakeidp.WithJWKSNotAKeySet(true)},
 			check: "entra signing keys", status: doctor.Fail, inMessage: "is not a JWK Set", inFix: "rewrites responses"},
 		// RFC 7517 §5: a key the proxy cannot use is skipped, as at sign-in (idp.ParseJWKS), not a failure.
