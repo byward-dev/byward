@@ -69,8 +69,7 @@ func (b *Broker) metadataHandler() http.Handler {
 			w.Header().Set("Cache-Control", "max-age=3600")
 			_, _ = w.Write(doc)
 		default:
-			w.Header().Set("Allow", "GET, HEAD, OPTIONS")
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			methodNotAllowed(w, "GET, HEAD, OPTIONS")
 		}
 	})
 }
@@ -105,8 +104,7 @@ func (b *Broker) cookieName(idpState string) string {
 // never a redirect (ADR-0009 §6, ADR-0013 §4); every other error redirects with error, state and iss.
 func (b *Broker) authorize(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		w.Header().Set("Allow", "GET")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		methodNotAllowed(w, "GET")
 		return
 	}
 	q := r.URL.Query()

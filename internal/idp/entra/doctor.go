@@ -72,7 +72,7 @@ func (p *Provider) diagnoseTenant(ctx context.Context, d Diagnosis) doctor.Resul
 	}
 	want := issuerFor(p.cfg.Tenant)
 	if p.cfg.Tenant == Organizations {
-		want = issuerFor("{tenantid}")
+		want = organizationsIssuer
 	}
 	if m.Issuer != want {
 		return check.Result(doctor.Fail, fmt.Sprintf("the discovery document names issuer %q, want %q", m.Issuer, want), fix)
