@@ -3,6 +3,7 @@ package token
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -157,5 +158,21 @@ func TestATokenOfADeniedClientIsInvalid(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+// A valid access token's identity carries the user and every claim sealed in it, for the assertion
+// and the identity headers.
+func TestAValidAccessTokenGivesTheUserAndTheSealedClaims(t *testing.T) {
+	s := newSealer(t)
+	c := goldenClaims()
+	v, err := NewValidator(s, allowAll, nil, func() time.Time { return c.IssuedAt })
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := v.Validate(context.Background(), mustSeal(t, s, Access, c))
+	want := resource.Identity{Subject: c.Subject, ClientID: c.ClientID, PrincipalType: resource.PrincipalUser, GrantID: c.GrantID, Claims: c.Claims}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("Validate: %+v, %v; want %+v", got, err, want)
 	}
 }

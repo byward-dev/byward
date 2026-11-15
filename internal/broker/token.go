@@ -249,8 +249,7 @@ func (b *Broker) issue(w http.ResponseWriter, r *http.Request, clientID, grantID
 			b.cfg.Log.WarnContext(ctx, "the IdP access token expires within the margin; the access token is not capped to it", "idp_token_expires_in", idpExpiry.Sub(now).String(), "margin", IdPTokenMargin.String())
 		}
 	}
-	c := token.Claims{GrantID: grantID, Subject: subject, IssuedAt: now, ExpiresAt: exp, ClientID: clientID,
-		Roles: asserted.Roles, Groups: asserted.Groups, Email: asserted.Email, EmailVerified: asserted.EmailVerified, Name: asserted.Name}
+	c := token.Claims{GrantID: grantID, Subject: subject, IssuedAt: now, ExpiresAt: exp, ClientID: clientID, Claims: resource.Claims(asserted)}
 	access, err := b.cfg.Sealer.Seal(token.Access, c)
 	if errors.Is(err, token.ErrTooLong) && len(c.Groups) > 0 {
 		// Too many groups for a token: assert none rather than fail the sign-in; the upstream then

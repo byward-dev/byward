@@ -354,9 +354,13 @@ func (p *Provider) checkAccessToken(ctx context.Context, raw string) error {
 // UserKey returns the canonical user key ("tid:oid", both GUIDs in lower case, as sign-in stores
 // it) for an operator-typed key, and whether s is one: the portal shows GUIDs in either case.
 func UserKey(s string) (string, bool) {
-	tid, oid, ok := strings.Cut(strings.ToLower(strings.TrimSpace(s)), ":")
+	tid, oid, ok := SplitUserKey(strings.ToLower(strings.TrimSpace(s)))
 	if !ok || !idp.IsGUID(tid) || !idp.IsGUID(oid) {
 		return "", false
 	}
 	return tid + ":" + oid, true
 }
+
+// SplitUserKey splits a user key, tid:oid, into its tenant and object IDs; ok is false when key has
+// no ':'. It checks nothing else: UserKey also requires both to be GUIDs.
+func SplitUserKey(key string) (tid, oid string, ok bool) { return strings.Cut(key, ":") }

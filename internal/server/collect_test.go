@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -31,10 +30,7 @@ func TestTheServerRemovesExpiredRowsWhileItRuns(t *testing.T) {
 			st = s
 			return s, err
 		}
-		cfg, _, err := config.Load(nil, append(authEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp"), os.ReadFile)
-		if err != nil {
-			t.Fatal(err)
-		}
+		cfg := loadConfig(t, "https://mcp.example.com/mcp")
 		a, err := buildAuth(cfg, discard, Observability{})
 		if err != nil {
 			t.Fatal(err)

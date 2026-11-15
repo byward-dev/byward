@@ -17,8 +17,9 @@ type Asserted struct {
 	UnverifiedEmail bool
 }
 
-// assertedClaims are the claims kept with a grant's IdP tokens, sealed at rest, so that /token
-// can seal them into the first access token; every refresh replaces them from the IdP.
+// assertedClaims are resource.Claims as the grant keeps them with its IdP tokens, sealed at rest, so
+// that /token can seal them into the first access token; every refresh replaces them from the IdP.
+// Same fields, types and order as resource.Claims, which they convert to.
 type assertedClaims struct {
 	Roles  []string `json:"rol,omitempty"`
 	Groups []string `json:"grp,omitempty"`
