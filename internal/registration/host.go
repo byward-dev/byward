@@ -15,10 +15,10 @@ import (
 // more spellings, never fewer.
 func BrowserHost(host string) string { return foldHost(browserIDNA, host) }
 
-// BrowserHostOK is BrowserHost, and whether a browser goes to that host at all: false when it refuses
-// the host, or when the host names none (empty, invisible characters only, an empty label, as an
-// "xn--" label decodes to). Where it is false, BrowserHost is only the mapping got that far, so the
-// consent page must not name it as the destination nor compare sites by it.
+// BrowserHostOK is BrowserHost, and whether a browser goes to that host at all: false when the browser
+// refuses the host, or when no DNS name can be it (empty, invisible characters only, an empty label,
+// as an "xn--" label decodes to). Where it is false, BrowserHost is only the mapping it got that far,
+// so the consent page must not name it as the destination nor compare sites by it.
 func BrowserHostOK(host string) (string, bool) {
 	ascii, err := browserIDNA.ToASCII(host)
 	if endsInFullStop(host) { // only the host's own trailing dot, not one an empty last label left
