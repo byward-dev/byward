@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	msqlite "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
+
 	"github.com/byward-dev/byward/internal/store"
 )
 
@@ -39,10 +42,10 @@ func stored(t *testing.T, s *Store, c store.Consent) bool {
 	return err == nil
 }
 
-// A client hanging up, or a shutdown, cancels a write after its mirror is written. The write still
-// commits and says so, and the next start is a normal one: no false restore, no new epoch, and the
-// remembered consents are kept.
-func TestAWriteCancelledAfterItsMirrorCommitsAndTheNextStartIsNormal(t *testing.T) {
+// A client hanging up, or a shutdown, cancels a write between its mirror and its commit. The write
+// is still kept and says so, and the next start is a normal one: no false restore, no new epoch, and
+// the remembered consents are kept.
+func TestAWriteCancelledBetweenItsMirrorAndItsCommitIsKeptAndTheNextStartIsNormal(t *testing.T) {
 	dir, counter := t.TempDir(), filepath.Join(t.TempDir(), "writes")
 	s := open(t, dir, counter)
 	alice, bob := consentOf("tid:alice"), consentOf("tid:bob")
@@ -52,12 +55,15 @@ func TestAWriteCancelledAfterItsMirrorCommitsAndTheNextStartIsNormal(t *testing.
 	if err := s.RememberConsent(c, bob); err != nil {
 		t.Errorf("a write cancelled after its mirror = %v, want it committed", err)
 	}
+	if c.Err() == nil {
+		t.Fatal("the write never reached its mirror: the cancel did not run")
+	}
 	if !stored(t, s, bob) {
 		t.Error("the write cancelled after its mirror is not stored")
 	}
 	must(t, s.Close())
 	again := open(t, dir, counter)
-	if st := again.Startup(); st.Restored || st.Epoch != 1 {
+	if st := again.Startup(); st != (Startup{Epoch: 1}) {
 		t.Fatalf("restart after a cancelled write: %+v, want a normal start at epoch 1", st)
 	}
 	if !stored(t, again, alice) || !stored(t, again, bob) {
@@ -66,8 +72,9 @@ func TestAWriteCancelledAfterItsMirrorCommitsAndTheNextStartIsNormal(t *testing.
 }
 
 // endsUnseen is a context that ends without database/sql noticing: its Done never closes, so only
-// an explicit Err check sees the end. It stands for a cancellation that lands after the counter
-// update and before the mirror, a window too small to hit on time.
+// an explicit Err call sees the end. It stands for a cancellation that lands after the counter update
+// and before the mirror, a window too small to hit on time. It pins that write polls ctx.Err there;
+// a check written as a select on Done would need this fake to close Done instead.
 type endsUnseen struct {
 	context.Context
 	ended atomic.Bool
@@ -80,28 +87,25 @@ func (c *endsUnseen) Err() error {
 	return nil
 }
 
-// A write whose context has ended by the time the mirror would be written stores nothing, writes no
-// mirror and reports the end: an error still means "not stored".
+// A write whose context has ended by the time the mirror would be written stores nothing and reports
+// the end: an error still means "not stored", and the next start is a normal one.
 func TestAWriteWhoseContextEndsBeforeTheMirrorStoresNothing(t *testing.T) {
 	dir, counter := t.TempDir(), filepath.Join(t.TempDir(), "writes")
 	s := open(t, dir, counter)
-	before, _, err := readCounter(counter)
-	must(t, err)
 	c := &endsUnseen{Context: ctx}
-	err = s.write(c, func(tx *sql.Tx) error {
-		c.ended.Store(true) // fn's own statements are done; the counter update follows
-		_, err := tx.ExecContext(ctx, "UPDATE meta SET value = value WHERE key = 'epoch'")
+	err := s.write(c, func(tx *sql.Tx) error {
+		// The write's effect, visible to the next start: a new epoch.
+		_, err := tx.ExecContext(ctx, "UPDATE meta SET value = value + 1 WHERE key = 'epoch'")
+		c.ended.Store(true) // fn is done; the counter update follows and does not see the end
 		return err
 	})
 	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("err = %v, want context.Canceled", err)
+		t.Errorf("err = %v, want context.Canceled", err)
 	}
-	after, _, err := readCounter(counter)
-	must(t, err)
-	var writes int64
-	must(t, s.db.QueryRowContext(ctx, "SELECT value FROM meta WHERE key = 'writes'").Scan(&writes))
-	if after != before || writes != before {
-		t.Fatalf("mirror %d, database %d after the ended write; want both still %d", after, writes, before)
+	must(t, s.Close())
+	// Committed anyway, the epoch is 2; mirrored but not committed, the start is a false restore.
+	if st := open(t, dir, counter).Startup(); st != (Startup{Epoch: 1}) {
+		t.Fatalf("restart after the ended write: %+v, want a normal start at epoch 1", st)
 	}
 }
 
@@ -142,5 +146,30 @@ func TestAWriteWaitingForTheConnectionEndsAtItsDeadline(t *testing.T) {
 	must(t, held.Close())
 	if stored(t, s, bob) {
 		t.Fatal("a write that timed out was stored")
+	}
+}
+
+// A write that cannot begin, because another process holds the database's write lock past the busy
+// timeout, stores nothing and reports the driver's error.
+func TestAWriteThatCannotBeginStoresNothingAndReportsWhy(t *testing.T) {
+	dir := t.TempDir()
+	s := open(t, dir, filepath.Join(t.TempDir(), "writes"))
+	other, err := rawDB(t, dir).Conn(ctx)
+	must(t, err)
+	t.Cleanup(func() { _ = other.Close() })
+	_, err = other.ExecContext(ctx, "BEGIN IMMEDIATE")
+	must(t, err)
+	_, err = s.db.ExecContext(ctx, "PRAGMA busy_timeout = 0") // the store's one connection: fail at once
+	must(t, err)
+	bob := consentOf("tid:bob")
+	err = s.RememberConsent(ctx, bob)
+	var se *msqlite.Error
+	if !errors.As(err, &se) || se.Code()&0xff != sqlite3.SQLITE_BUSY {
+		t.Fatalf("err = %v, want the driver's SQLITE_BUSY", err)
+	}
+	_, err = other.ExecContext(ctx, "ROLLBACK")
+	must(t, err)
+	if stored(t, s, bob) {
+		t.Fatal("a write that could not begin was stored")
 	}
 }
