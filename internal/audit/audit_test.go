@@ -148,7 +148,7 @@ func TestEveryEventHasAGoldenSample(t *testing.T) {
 // A flood of one event and outcome from a source never hides that source's next record of another
 // event or outcome: an open /register is an abuse path whose refusals an operator looks for, users
 // behind one NAT share a source, and one refusal must not mask another.
-func TestAFloodOfOneKeyNeverHidesAnother(t *testing.T) {
+func TestAFloodOfOneEventAndOutcomeNeverHidesAnother(t *testing.T) {
 	for name, tc := range map[string]struct{ flood, next Event }{
 		"successes never hide refusals": {
 			Event{Name: ClientRegistered, Outcome: Success, Reason: "dcr", ClientID: "dcr-x"},
@@ -183,23 +183,32 @@ func TestAFloodOfOneKeyNeverHidesAnother(t *testing.T) {
 	}
 }
 
-// One source's flood never hides another source's records.
+// One source's flood never hides another source's records: another IPv4 address, or another /64
+// in the same /48.
 func TestOneSourcesFloodNeverHidesAnotherSourcesRecords(t *testing.T) {
-	l, buf, _ := stoppedClockLog(nil)
-	for range unauthBurst + 5 {
-		l.RecordUnauthenticated(from("192.0.2.7:1234"), Event{Name: ConsentShown, Outcome: Success, ClientID: "client-1"})
-	}
-	l.RecordUnauthenticated(from("198.51.100.9:1"), Event{Name: ConsentShown, Outcome: Success, ClientID: "client-1"})
-	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	if len(lines) != unauthBurst+1 {
-		t.Fatalf("logged %d records, want %d: %s", len(lines), unauthBurst+1, buf.String())
-	}
-	last := lines[len(lines)-1]
-	if !strings.Contains(last, `"remote_ip":"198.51.100.9"`) {
-		t.Fatalf("the other source's record was dropped; last line: %s", last)
-	}
-	if strings.Contains(last, "suppressed") {
-		t.Fatalf("the other source's record carries the first source's suppressed count: %s", last)
+	for name, tc := range map[string]struct{ flood, other, otherIP string }{
+		"another IPv4 address":        {"192.0.2.7:1234", "198.51.100.9:1", "198.51.100.9"},
+		"another /64 in the same /48": {"[2001:db8:1:2::1]:1234", "[2001:db8:1:3::1]:1234", "2001:db8:1:3::1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			l, buf, _ := stoppedClockLog(nil)
+			e := Event{Name: ConsentShown, Outcome: Success, ClientID: "client-1"}
+			for range unauthBurst + 5 {
+				l.RecordUnauthenticated(from(tc.flood), e)
+			}
+			l.RecordUnauthenticated(from(tc.other), e)
+			lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+			if len(lines) != unauthBurst+1 {
+				t.Fatalf("logged %d records, want %d: %s", len(lines), unauthBurst+1, buf.String())
+			}
+			last := lines[len(lines)-1]
+			if !strings.Contains(last, `"remote_ip":"`+tc.otherIP+`"`) {
+				t.Fatalf("the other source's record was dropped; last line: %s", last)
+			}
+			if strings.Contains(last, "suppressed") {
+				t.Fatalf("the other source's record carries the first source's suppressed count: %s", last)
+			}
+		})
 	}
 }
 
@@ -230,9 +239,10 @@ func TestNilLogIsSafeToCall(t *testing.T) {
 	l.RecordUnauthenticated(httptest.NewRequest("GET", "/", nil), Event{Name: HostRejected, Outcome: Failure})
 }
 
-// An IPv6 sender rotating its interface ID within its own /64 shares one budget, as the OAuth rate limit groups
-// it, so rotating addresses buys no fresh burst; each record still carries the address that sent
-// it, and another /64, even in the same /48, keeps its own budget.
+// An IPv6 sender rotating its interface ID within its own /64 shares one budget, as the OAuth
+// rate limit groups it, so rotating addresses buys no fresh burst; each record still carries the
+// address that sent it. Another /64 keeps its own budget:
+// TestOneSourcesFloodNeverHidesAnotherSourcesRecords.
 func TestAnIPv6SourceIsLimitedByItsSlash64AndLoggedByItsAddress(t *testing.T) {
 	l, buf, _ := stoppedClockLog(nil)
 	// The interface ID varies in its top bits, so only a key of /64 or shorter groups them.
@@ -250,15 +260,6 @@ func TestAnIPv6SourceIsLimitedByItsSlash64AndLoggedByItsAddress(t *testing.T) {
 	}
 	if t.Failed() {
 		t.Log(buf.String())
-	}
-	l.RecordUnauthenticated(from("[2001:db8:1:3::1]:1234"), Event{Name: HostRejected, Outcome: Failure, Host: "evil.example"})
-	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
-	last := lines[len(lines)-1]
-	if !strings.Contains(last, `"remote_ip":"2001:db8:1:3::1"`) {
-		t.Fatalf("another /64's record was dropped; last line: %s", last)
-	}
-	if strings.Contains(last, "suppressed") {
-		t.Fatalf("another /64's record carries the first /64's suppressed count: %s", last)
 	}
 }
 
