@@ -45,6 +45,8 @@ Then, for every deployment:
 - [Give the upstream the proxy's own credential](how-to/upstream-credential.md).
 - [Call a downstream API as the user](how-to/downstream-apis.md) (Entra On-Behalf-Of), and the worked
   example [Microsoft 365 data through Graph](how-to/microsoft-365.md).
+- [mcp-grafana behind byward](how-to/behind-byward/mcp-grafana.md): each user is themselves in
+  Grafana, with their own role.
 
 ### Your MCP clients
 
