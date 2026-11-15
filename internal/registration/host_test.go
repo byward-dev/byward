@@ -31,6 +31,11 @@ func TestBrowserHostOKSaysWhetherABrowserGoesToTheHost(t *testing.T) {
 		"app.example":           {"app.example", true},
 		"App.Example.":          {"app.example", true},
 		"app.example\u3002":     {"app.example", true}, // the host's own trailing full stop
+		"app.example\uff0e":     {"app.example", true},
+		"app.example\uff61":     {"app.example", true},
+		"\u05d0a.example":       {"xn--a-zhc.example", false}, // a label mixing directions
+		"\u05d0.example":        {"xn--4db.example", true},
+		"XN--":                  {"xn--", false}, // the name is BrowserHost's even when refused
 		"BÜCHER.example":        {"xn--bcher-kva.example", true},
 		"ｍｙ_app.example":        {"my_app.example", true},
 		"xn--bcher-kva.example": {"xn--bcher-kva.example", true},

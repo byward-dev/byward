@@ -36,6 +36,16 @@ func forbiddenDomainCodePoint(r rune) bool {
 	return r <= ' ' || r == 0x7f || strings.ContainsRune("#%/:<>?@[\\]^|", r)
 }
 
+// BrowserUnicode is the Unicode spelling of a name BrowserHostOK accepted, its xn-- labels decoded
+// as a browser decodes them (an "_" allowed, as the STD3 rules of idna.Lookup do not); the name
+// itself when nothing decodes.
+func BrowserUnicode(ascii string) string {
+	if uni, err := browserIDNA.ToUnicode(ascii); err == nil {
+		return uni
+	}
+	return ascii
+}
+
 // endsInFullStop reports whether host ends in a full stop, as written: "." or one UTS #46 maps to it.
 func endsInFullStop(host string) bool {
 	return strings.HasSuffix(host, ".") || strings.HasSuffix(host, "\u3002") || strings.HasSuffix(host, "\uff0e") ||

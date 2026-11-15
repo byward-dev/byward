@@ -14,7 +14,6 @@ import (
 
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/registration"
-	"golang.org/x/net/idna"
 	"golang.org/x/net/publicsuffix"
 )
 
@@ -154,7 +153,7 @@ func showHost(host string) string {
 		return "?"
 	}
 	if !strings.ContainsFunc(host, func(r rune) bool { return r >= utf8.RuneSelf }) { // plain ASCII as written
-		if uni, err := idna.Lookup.ToUnicode(ascii); err == nil && uni != ascii {
+		if uni := registration.BrowserUnicode(ascii); uni != ascii {
 			return uni + " (" + ascii + ")"
 		}
 		return host

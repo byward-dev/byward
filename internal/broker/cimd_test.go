@@ -188,6 +188,8 @@ func TestOtherSiteComparesRegistrableDomains(t *testing.T) {
 		{"claude.ai", "https://xn--claude-.ai/cb", true},
 		{"xn--claude-.ai", "https://claude.ai/cb", true},
 		{"claude.ai", "https://login.xn--claude-.ai/cb", true},
+		{"xn--claude-.ai", "https://XN--CLAUDE-.ai/cb", false},  // as written, folding case
+		{"xn--claude-.ai", "https://xn--claude-.ai./cb", false}, // and a trailing dot
 	} {
 		if got := otherSite(c.cimd, c.redirect); got != c.other {
 			t.Errorf("otherSite(%q, %q) = %v, want %v", c.cimd, c.redirect, got, c.other)
@@ -209,6 +211,8 @@ func TestThePublisherIsShownReadably(t *testing.T) {
 		"ＡＢ--c.example":  "ＡＢ--c.example (ab--c.example)",
 		// A Unicode name with "_", where the browser and a plain punycode agree.
 		"bü_cher.example": "bü_cher.example (xn--b_cher-3ya.example)",
+		// An xn-- name the browser goes to shows its Unicode spelling beside it, "_" included.
+		"xn--b_cher-3ya.example": "bü_cher.example (xn--b_cher-3ya.example)",
 		// A host the browser refuses is marked, never named by the mapping it got that far
 		// (xn--claude-.ai decodes to claude.ai).
 		"xn--claude-.ai":    "xn--claude-.ai (not a valid address)",
