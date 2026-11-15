@@ -748,9 +748,10 @@ func TestMetadataAdvertisesTheBroker(t *testing.T) {
 	}
 }
 
-// The metadata advertises the client authentication registration accepts: the assertion
-// algorithms, the methods a CIMD or DCR client may use (at /token and /revoke), and the grant types.
-func TestMetadataAdvertisesTheClientAuthenticationRegistrationAccepts(t *testing.T) {
+// The metadata advertises what registration accepts, and only that: the client assertion algorithms,
+// the methods a CIMD or DCR client may use at /token and /revoke (never a secret, ADR-0006 §7), and
+// the grant types.
+func TestMetadataAdvertisesWhatRegistrationAccepts(t *testing.T) {
 	e := newEnv(t)
 	res := e.do(t, "GET", "/.well-known/oauth-authorization-server", nil, nil)
 	var md struct {
@@ -766,13 +767,27 @@ func TestMetadataAdvertisesTheClientAuthenticationRegistrationAccepts(t *testing
 		field     string
 		got, want []string
 	}{
-		{"token_endpoint_auth_signing_alg_values_supported", md.Algs, registration.AssertionAlgs()},
-		{"token_endpoint_auth_methods_supported", md.Methods, registration.MetadataAuthMethods()},
-		{"revocation_endpoint_auth_methods_supported", md.Revoke, registration.MetadataAuthMethods()},
-		{"grant_types_supported", md.Grants, registration.GrantTypes()},
+		{"token_endpoint_auth_signing_alg_values_supported", md.Algs, []string{"RS256", "PS256", "ES256"}},
+		{"token_endpoint_auth_methods_supported", md.Methods, []string{"none", "private_key_jwt"}},
+		{"revocation_endpoint_auth_methods_supported", md.Revoke, []string{"none", "private_key_jwt"}},
+		{"grant_types_supported", md.Grants, []string{"authorization_code", "refresh_token"}},
 	} {
 		if !slices.Equal(c.got, c.want) {
 			t.Errorf("%s = %v, want %v", c.field, c.got, c.want)
+		}
+	}
+}
+
+// /token serves every grant type registration supports (and the metadata advertises): a grant type
+// added there without a /token handler would be advertised and then refused.
+func TestTokenServesEveryGrantTypeRegistrationSupports(t *testing.T) {
+	e := newEnv(t)
+	for _, g := range registration.GrantTypes() {
+		res := e.do(t, "POST", "/token", url.Values{"grant_type": {g}, "client_id": {clientID}}, nil)
+		var body map[string]any
+		_ = json.NewDecoder(res.Body).Decode(&body)
+		if body["error"] == "unsupported_grant_type" {
+			t.Errorf("grant_type=%s: %d %v", g, res.StatusCode, body)
 		}
 	}
 }
@@ -915,13 +930,19 @@ func TestFailedBindingAfterConsumeRevokesTheGrant(t *testing.T) {
 	}
 }
 
+// A store outage at any step of a code redemption (spending the code, extending the grant, storing
+// the refresh token) is a server error, not the client's fault.
 func TestStoreOutageAtRedemptionIsAServerError(t *testing.T) {
-	e := newEnv(t)
-	code := e.signIn(t, nil).Query().Get("code")
-	e.st.Fail(errors.New("database is locked"), "ConsumeCode") // code redemption fails like an outage would
-	res, body := e.redeem(t, code, nil)
-	if res.StatusCode != 500 || body["error"] != "server_error" {
-		t.Fatalf("got %d %v", res.StatusCode, body)
+	for _, method := range []string{"ConsumeCode", "UpdateGrant", "PutRefreshToken"} {
+		t.Run(method, func(t *testing.T) {
+			e := newEnv(t)
+			code := e.signIn(t, url.Values{"scope": {"mcp offline_access"}}).Query().Get("code")
+			e.st.Fail(errors.New("database is locked"), method)
+			res, body := e.redeem(t, code, nil)
+			if res.StatusCode != 500 || body["error"] != "server_error" {
+				t.Fatalf("got %d %v", res.StatusCode, body)
+			}
+		})
 	}
 }
 
