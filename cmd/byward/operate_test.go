@@ -136,6 +136,10 @@ func TestCheckOfflineBuildsTheTraceExporterAsStartupDoes(t *testing.T) {
 			if strings.Contains(stdout+stderr, secret) {
 				t.Fatalf("a setting's value was printed:\nstdout %q\nstderr %q", stdout, stderr)
 			}
+			// A refusal says why, after byward's prefix (the reason is the library's own text).
+			if _, why, ok := strings.Cut(stderr, "OTEL_* tracing settings: "); ok && strings.TrimSpace(why) == "" {
+				t.Fatalf("the refusal gives no reason: %q", stderr)
+			}
 		})
 	}
 }
