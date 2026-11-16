@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -78,17 +77,7 @@ func TestNewExporterConnectsToNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var accepted atomic.Int32
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			accepted.Add(1)
-			_ = c.Close()
-		}
-	}()
+	defer func() { _ = ln.Close() }()
 	for _, protocol := range []string{"http/protobuf", "grpc"} {
 		t.Run(protocol, func(t *testing.T) {
 			clearOTELEnv(t)
@@ -106,10 +95,21 @@ func TestNewExporterConnectsToNothing(t *testing.T) {
 			}
 		})
 	}
-	// Close the listener first, so the accept loop returns, then read the count: a connection
-	// accepted before the close is counted.
-	_ = ln.Close()
-	if n := accepted.Load(); n != 0 {
+	// Count every connection in the backlog, before closing the listener would discard one the
+	// kernel completed but nothing accepted yet.
+	if err := ln.(*net.TCPListener).SetDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for {
+		c, err := ln.Accept()
+		if err != nil {
+			break
+		}
+		n++
+		_ = c.Close()
+	}
+	if n != 0 {
 		t.Fatalf("building and shutting down the exporter opened %d connections, want none", n)
 	}
 }
