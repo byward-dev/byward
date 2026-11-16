@@ -12,8 +12,8 @@ import (
 	"github.com/byward-dev/byward/internal/secretfile"
 )
 
-// The real read-only check, on a read-only tmpfs with the root and file modes Kubernetes uses. It needs
-// root to mount, so it is skipped elsewhere.
+// The real read-only check, on a read-only tmpfs with the root and file modes Kubernetes uses. It
+// needs root to mount, so it is skipped elsewhere.
 func TestKeysOnAReadOnlyTmpfsWithMode1777Load(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("mounting a tmpfs needs root")

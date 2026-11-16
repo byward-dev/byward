@@ -47,7 +47,7 @@ func TestSecretFilesOthersCanReadRefuseToStartOutsideDev(t *testing.T) {
 		}
 	}
 	both := func(t *testing.T, env []string) { entraSecret(t, env); staticSecret(t, env) }
-	// The sealing keys are secret files too (L163), the most sensitive of them: a sealing key forges any token.
+	// The sealing keys are secret files too (L163): a sealing key forges any token.
 	sealingKey := func(t *testing.T, env []string) {
 		dir := setting(env, "BYWARD_KEYS_DIR")
 		entries, err := os.ReadDir(dir)
