@@ -662,8 +662,8 @@ func TestARequestWhoseIDHasTheValueOfAnInFlightOneIs400AndLeavesTheFirstRunning(
 	}
 }
 
-// Ids that name no character are still distinct values: two lone surrogates, or two bytes that are
-// not UTF-8, which encoding/json would both read as U+FFFD. Each request is relayed and answered
+// Ids that name no character are still distinct values: two lone surrogates, a lone surrogate and
+// U+FFFD itself, or two bytes that are not UTF-8, which encoding/json would all read as U+FFFD. Each request is relayed and answered
 // under its own id, never refused as already in flight (L173).
 func TestRequestsWhoseIDsDecodeToTheSameReplacementCharacterAreEachAnswered(t *testing.T) {
 	for _, tc := range []struct{ name, held, other string }{

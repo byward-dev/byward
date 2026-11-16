@@ -4,10 +4,12 @@ package stdio
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -92,10 +94,14 @@ func TestIDKeyIsOneKeyPerValue(t *testing.T) {
 		{"\"\xff\"", `"\ufffd"`, false},
 		{"\"\xff\"", `"\\xff"`, false},
 		{`"\ud800"`, `"\\ud800"`, false},
+		{`"\udc00\udc00"`, `"\ufffd"`, false},
+		{`"\ud800\ue000"`, `"\ufffd"`, false},
+		{"\"\xef\"", "\"\xef\xbf\xbd\"", false},
 		{"\"\xed\xa0\x80\"", `"\ud800"`, false},
 		// A surrogate pair is the character it encodes, in either case.
 		{`"\ud83d\ude00"`, `"😀"`, true},
 		{`"\uD83D\uDE00"`, `"😀"`, true},
+		// An escaped quote, backslash or control character is the key of its short escape.
 		{`"\u0022\n"`, `"\"\u000a"`, true},
 		{`"\u005c"`, `"\\"`, true},
 	} {
@@ -106,44 +112,82 @@ func TestIDKeyIsOneKeyPerValue(t *testing.T) {
 	}
 }
 
-// FuzzIDKeyIsOneKeyPerString: every way to write a string as JSON (encoding/json with and without
-// HTML escaping, and every character as a \u escape, a surrogate pair past U+FFFF) has one key,
-// and two different strings never share one.
-func FuzzIDKeyIsOneKeyPerString(f *testing.F) {
-	f.Add("é", "e")
-	f.Add("a<b&c", "a<b")
-	f.Add("😀\n\"\\", "\u2028")
-	f.Fuzz(func(t *testing.T, a, b string) {
-		if !utf8.ValidString(a) || !utf8.ValidString(b) {
-			return // invalid UTF-8 has no character to write; TestIDKeyIsOneKeyPerValue covers it
+// FuzzIDKeyIsOneKeyPerValue: two string ids share a key exactly when they are one JSON value, for
+// any input and however the key is spelled (L173). au and bu are any sequences of UTF-16 code units,
+// lone surrogates included, each written as an escape; raw and raw2 are any bytes written as they
+// are, UTF-8 or not. A code-unit sequence is its own value. Raw bytes are the value of their
+// characters when they are UTF-8, and of themselves otherwise. encoding/json's spellings of a valid
+// sequence, with and without HTML escaping, share its key.
+func FuzzIDKeyIsOneKeyPerValue(f *testing.F) {
+	f.Add(unitBytes(0xd800), unitBytes(0xdc00), []byte{0xff}, []byte{0xfe})
+	f.Add(unitBytes(0xd800), unitBytes([]uint16(utf16.Encode([]rune(`\ud800`)))...), []byte{0xed, 0xa0, 0x80}, []byte("\xef\xbf\xbd"))
+	f.Add(unitBytes([]uint16(utf16.Encode([]rune(`\xff`)))...), unitBytes(0xfffd), []byte{0xff}, []byte("xff"))
+	f.Add(unitBytes(0xd83d, 0xde00), unitBytes(0xdc00, 0xdc00), []byte("😀"), []byte("a<b&c"))
+	f.Fuzz(func(t *testing.T, au, bu, raw, raw2 []byte) {
+		a, b := codeUnits(au), codeUnits(bu)
+		ka, kb := idKey(json.RawMessage(escapedUnits(a))), idKey(json.RawMessage(escapedUnits(b)))
+		if (ka == kb) != slices.Equal(a, b) {
+			t.Fatalf("code units %x and %x: keys %q and %q", a, b, ka, kb)
 		}
-		key := idKey(json.RawMessage(escapedEveryCharacter(a)))
-		for _, html := range []bool{true, false} {
-			var buf bytes.Buffer
-			enc := json.NewEncoder(&buf)
-			enc.SetEscapeHTML(html)
-			if err := enc.Encode(a); err != nil {
-				t.Fatal(err)
-			}
-			if k := idKey(bytes.TrimSuffix(buf.Bytes(), []byte("\n"))); k != key {
-				t.Fatalf("%q: key %s written by encoding/json (HTML escaping %v), %s with every character escaped", a, k, html, key)
+		if r := utf16.Decode(a); slices.Equal(utf16.Encode(r), a) { // no lone surrogate: a string Go can hold
+			for _, html := range []bool{true, false} {
+				var buf bytes.Buffer
+				enc := json.NewEncoder(&buf)
+				enc.SetEscapeHTML(html)
+				if err := enc.Encode(string(r)); err != nil {
+					t.Fatal(err)
+				}
+				if k := idKey(bytes.TrimSuffix(buf.Bytes(), []byte("\n"))); k != ka {
+					t.Fatalf("code units %x: key %q written by encoding/json (HTML escaping %v), %q escaped", a, k, html, ka)
+				}
 			}
 		}
-		if other := idKey(json.RawMessage(escapedEveryCharacter(b))); (other == key) != (a == b) {
-			t.Fatalf("%q and %q: keys %s and %s", a, b, key, other)
+		if !plainBytes(raw) || !plainBytes(raw2) {
+			return
+		}
+		kr, kr2 := idKey(json.RawMessage(`"`+string(raw)+`"`)), idKey(json.RawMessage(`"`+string(raw2)+`"`))
+		if (kr == kr2) != bytes.Equal(raw, raw2) {
+			t.Fatalf("raw %x and %x: keys %q and %q", raw, raw2, kr, kr2)
+		}
+		if same := utf8.Valid(raw) && slices.Equal(utf16.Encode([]rune(string(raw))), a); (kr == ka) != same {
+			t.Fatalf("raw %x and code units %x: keys %q and %q, one value %v", raw, a, kr, ka, same)
 		}
 	})
 }
 
-// escapedEveryCharacter is s as a JSON string with every character a \u escape.
-func escapedEveryCharacter(s string) string {
+// codeUnits reads b as big-endian UTF-16 code units; an odd last byte is dropped.
+func codeUnits(b []byte) []uint16 {
+	u := make([]uint16, len(b)/2)
+	for i := range u {
+		u[i] = binary.BigEndian.Uint16(b[2*i:])
+	}
+	return u
+}
+
+// unitBytes is the big-endian bytes of code units u, as codeUnits reads them.
+func unitBytes(u ...uint16) []byte {
+	b := make([]byte, 0, 2*len(u))
+	for _, c := range u {
+		b = binary.BigEndian.AppendUint16(b, c)
+	}
+	return b
+}
+
+// escapedUnits is a JSON string of code units u, each an escape in upper-case hex.
+func escapedUnits(u []uint16) string {
 	var out strings.Builder
 	out.WriteByte('"')
-	for _, u := range utf16.Encode([]rune(s)) {
-		fmt.Fprintf(&out, `\u%04X`, u)
+	for _, c := range u {
+		fmt.Fprintf(&out, `\u%04X`, c)
 	}
 	out.WriteByte('"')
 	return out.String()
+}
+
+// plainBytes reports whether b can stand unescaped inside a JSON string: no quote, backslash or
+// control character (bytes that are not UTF-8 included).
+func plainBytes(b []byte) bool {
+	return !bytes.ContainsFunc(b, func(r rune) bool { return r == '"' || r == '\\' || r < 0x20 })
 }
 
 func TestScalarIDAcceptsStringsAndIntegersOnly(t *testing.T) {

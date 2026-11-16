@@ -128,7 +128,7 @@ func compactID(id json.RawMessage) json.RawMessage {
 
 // idKey is the key the legacy era finds a waiting request by: one key per JSON value, however the
 // upstream encodes it, since JSON-RPC 2.0 §5 asks a response for the same value, not the same
-// bytes. A string is its stringKey, so "é" and "é", "\/x" and "/x", "a<b" and "a<b"
+// bytes. A string is its stringKey, so "\u00e9" and "é", "\/x" and "/x", "a<b" and "a\u003cb"
 // match. An integer (validID allows no fraction or exponent) is its decimal text with -0 as 0,
 // never through float64, which would make 9007199254740993 and 9007199254740992 one key. A string
 // key keeps its quotes, so "1" and 1 stay apart. The key only finds the waiting request: the client
@@ -151,9 +151,9 @@ func idKey(id json.RawMessage) string {
 // character is decoded, and '"', '\' and control characters are escaped as \" \\ \u00XX. What
 // names no character keeps a form of its own instead of becoming U+FFFD, as encoding/json would
 // make it (L173): a lone surrogate escape is \uXXXX in lower-case hex, and a byte that is not
-// UTF-8 is \xXX. No character produces either, since a decoded '\' is written \\. So distinct
-// strings never share a key, while "\uD800" and "\ud800" still do. ok is false when s is not a
-// string literal.
+// UTF-8 is \xXX. No character produces either form, since a decoded '\' is written \\. So distinct
+// strings never share a key, while "\uD800" and "\ud800" still do. ok is false when s lacks
+// its quotes or holds a malformed escape.
 func stringKey(s []byte) (key string, ok bool) {
 	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
 		return "", false
