@@ -243,7 +243,7 @@ func TestDoctorWithoutAuthListsTheRelaxationsChecksOnlyTheUpstreamAndTheTrustSto
 	last := rep.Checks[len(rep.Checks)-1]
 	if !slices.Equal(names, []string{"configuration", "configuration", "upstream", "trust store", "authentication"}) ||
 		last.Status != doctor.Warn || !strings.Contains(last.Message, "authentication is off") || rep.ExitCode() != 0 {
-		t.Fatalf("checks %v, report %+v; want the two relaxations, then upstream, trust store and authentication", names, rep)
+		t.Fatalf("checks %v, report %+v; want the two relaxations, then upstream, trust store and a warning that authentication is off, exit 0", names, rep)
 	}
 }
 

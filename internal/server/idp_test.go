@@ -391,8 +391,8 @@ func TestTheDiscoveryFixAsksForHTTPSUnlessTheIssuerIsAnAllowedLoopbackHTTPOne(t 
 func TestDoctorAsksForHTTPSWhenDiscoveryFailsUnlessConfigAllowedTheIssuerAsLoopbackHTTP(t *testing.T) {
 	const fix = "BYWARD_OIDC_ISSUER: set it exactly as the IdP's discovery document states its issuer"
 	for name, tc := range map[string]struct{ issuer, want string }{
-		"an https issuer":                   {"https://sso.example.com/realms/acme", fix + ", over https"},
-		"a loopback issuer in HTTP:// caps": {"HTTP://127.0.0.1:8180/realms/byward", fix},
+		"an https issuer": {"https://sso.example.com/realms/acme", fix + ", over https"},
+		"a loopback issuer, its scheme in capitals": {"HTTP://127.0.0.1:8180/realms/byward", fix},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := loadOIDC(t, "oidc", tc.issuer, "c")
