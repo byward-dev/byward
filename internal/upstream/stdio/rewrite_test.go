@@ -101,7 +101,13 @@ func TestIDKeyIsOneKeyPerValue(t *testing.T) {
 		// A surrogate pair is the character it encodes, in either case.
 		{`"\ud83d\ude00"`, `"😀"`, true},
 		{`"\uD83D\uDE00"`, `"😀"`, true},
+		{`"\ud800\udc00"`, "\"\U00010000\"", true},
+		{`"\udbff\udfff"`, "\"\U0010FFFF\"", true},
+		{`"\ud800Xudc00"`, `"\ud800\udc00"`, false},
 		// An escaped quote, backslash or control character is the key of its short escape.
+		{`"\b\f\r\t"`, `"\u0008\u000C\u000d\u0009"`, true},
+		{`"\b"`, `"\f"`, false},
+		{`"\r"`, `"\n"`, false},
 		{`"\u0022\n"`, `"\"\u000a"`, true},
 		{`"\u005c"`, `"\\"`, true},
 	} {
