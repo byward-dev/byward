@@ -364,7 +364,7 @@ func TestAnOperatorOpenFindsTheStoreOrCreatesNothing(t *testing.T) {
 		{"a file that is not a database", func(t *testing.T, dir string) string {
 			must(t, os.WriteFile(filepath.Join(dir, fileName), []byte(strings.Repeat("not a database ", 100)), 0o600))
 			return dir
-		}, nil, "file is not a database"},
+		}, nil, "sqlite store: read schema version: file is not a database"}, // the normal open's wording, as at a proxy start
 		{"a store file it cannot write", func(t *testing.T, dir string) string {
 			if os.Geteuid() == 0 {
 				t.Skip("root writes a read-only file")
