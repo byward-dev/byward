@@ -420,7 +420,17 @@ func TestRevokeAndNewEpochTakeAStdioUpstreamAfterDashes(t *testing.T) {
 				t.Fatal(err)
 			}
 			env := slices.DeleteFunc(authEnv(t), func(kv string) bool { return strings.HasPrefix(kv, "BYWARD_ASSERTION_KEYS_DIR=") }) // refused with a stdio upstream
-			env = append(env, "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_DATA_DIR="+dir)                                      // the test's own, so no defaulted path reaches the host's
+			env = append(env, "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_DATA_DIR="+dir,                                      // the test's own, so no defaulted path reaches the host's
+				"BYWARD_STORE_COUNTER_FILE="+filepath.Join(dir, "store-writes"))
+			if tc.code == exitOK { // a revocation needs the store a proxy created (L152)
+				s, err := sqlite.Open(context.Background(), sqlite.Options{Dir: setting(env, "BYWARD_STORE_DIR"), CounterFile: setting(env, "BYWARD_STORE_COUNTER_FILE")})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := s.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
 			code, stdout, stderr := runWith(append(tc.args, script, "--flag"), env...)
 			okStdout := strings.Contains(stdout, tc.inStdout) && (tc.inStdout != "" || stdout == "")
 			if code != tc.code || !okStdout || !strings.Contains(stderr, tc.inStderr) {
@@ -433,8 +443,6 @@ func TestRevokeAndNewEpochTakeAStdioUpstreamAfterDashes(t *testing.T) {
 			switch _, err := os.Stat(store); {
 			case tc.code == exitConfig && !errors.Is(err, os.ErrNotExist):
 				t.Fatalf("a refused command touched the store at %s", store)
-			case tc.code == exitOK && err != nil:
-				t.Fatalf("revoking left no store at %s (%v)", store, err)
 			}
 		})
 	}
