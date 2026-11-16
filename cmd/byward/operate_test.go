@@ -106,6 +106,8 @@ func TestCheckOfflineBuildsTheTraceExporterAsStartupDoes(t *testing.T) {
 		inStdout, inStderr string
 	}{
 		{"an exporter startup refuses", []string{"OTEL_TRACES_EXPORTER=jaeger"}, nil, false, exitConfig, "", "byward: configuration error: OTEL_* tracing settings: "},
+		{"a protocol startup refuses", []string{"OTEL_TRACES_EXPORTER=otlp", "OTEL_EXPORTER_OTLP_PROTOCOL=udp"}, nil, false, exitConfig, "",
+			"byward: configuration error: OTEL_* tracing settings: "},
 		// Startup builds the exporter before it checks the rest, so check reports that refusal first.
 		{"an exporter startup refuses, beside another mistake", []string{"OTEL_TRACES_EXPORTER=jaeger"}, nil, true, exitConfig, "", "OTEL_* tracing settings: "},
 		// The message is otlptrace's wording; the line is in the proxy's log format.
