@@ -662,6 +662,36 @@ func TestARequestWhoseIDHasTheValueOfAnInFlightOneIs400AndLeavesTheFirstRunning(
 	}
 }
 
+// Ids that name no character are still distinct values: two lone surrogates, or two bytes that are
+// not UTF-8, which encoding/json would both read as U+FFFD. Each request is relayed and answered
+// under its own id, never refused as already in flight (L173).
+func TestRequestsWhoseIDsDecodeToTheSameReplacementCharacterAreEachAnswered(t *testing.T) {
+	for _, tc := range []struct{ name, held, other string }{
+		{"two lone surrogates", `"\ud800"`, `"\udc00"`},
+		{"a lone surrogate and U+FFFD", `"\ud800"`, `"\ufffd"`},
+		{"two bytes that are not UTF-8", "\"\xff\"", "\"\xfe\""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newBridge(t, nil)
+			s := b.initialize(t, "alice")
+			held := eventsOf(t, b.post(t, "alice", s, `{"jsonrpc":"2.0","id":`+tc.held+`,"method":"hold"}`))
+			want := `{"jsonrpc":"2.0","id":` + tc.other + `,"result":"answered"}`
+			res := b.post(t, "alice", s, `{"jsonrpc":"2.0","id":`+tc.other+`,"method":"answeras","params":{"id":`+tc.other+`}}`)
+			if res.StatusCode != http.StatusOK {
+				raw, _ := io.ReadAll(res.Body)
+				t.Fatalf("the second id: status %d, body %s; want it relayed beside the first", res.StatusCode, raw)
+			}
+			if got := readEvents(t, res); len(got) != 1 || got[0] != want {
+				t.Fatalf("the second id got %q, want %s", got, want)
+			}
+			readEvents(t, b.post(t, "alice", s, `{"jsonrpc":"2.0","id":8,"method":"release"}`))
+			if got := held.all(); len(got) != 1 || got[0] != `{"jsonrpc":"2.0","id":`+tc.held+`,"result":"released"}` {
+				t.Fatalf("the held request got %q, want only its own \"released\" answer", got)
+			}
+		})
+	}
+}
+
 func TestUserAtTheirCapWithEveryProcessInUseGets503WhileOthersStillStart(t *testing.T) {
 	b := newBridge(t, func(c *Config) { c.MaxPerUser = 1 })
 	s := b.initialize(t, "alice")

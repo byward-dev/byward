@@ -8,7 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
+	"unicode/utf16"
+	"unicode/utf8"
 )
 
 var rewritePaths = []jsonPath{{"id"}, {"params", "_meta", "progressToken"}, {"params", "requestId"}}
@@ -62,7 +65,7 @@ func TestDuplicateKeysOffTheTargetedPathsAreLeftToTheUpstream(t *testing.T) {
 }
 
 // idKey gives one key per JSON value (L156): equal values however written share it, and different
-// values, or a string and an integer, never do.
+// values, or a string and an integer, never do, even where encoding/json would decode both to U+FFFD.
 func TestIDKeyIsOneKeyPerValue(t *testing.T) {
 	for _, tc := range []struct {
 		a, b string
@@ -79,12 +82,68 @@ func TestIDKeyIsOneKeyPerValue(t *testing.T) {
 		{`"-0"`, `-0`, false},
 		{`"-0"`, `"0"`, false},
 		{`9007199254740993`, `9007199254740992`, false},
+		// What names no character keeps a key of its own instead of U+FFFD (L173).
+		{`"\ud800"`, `"\udc00"`, false},
+		{`"\ud800"`, `"\ufffd"`, false},
+		{`"\ud800"`, `"\uD800"`, true},
+		{`"\ud800A"`, `"\ud800\u0041"`, true},
+		{`"\udc00\ud800"`, `"\ud800\udc00"`, false},
+		{"\"\xff\"", "\"\xfe\"", false},
+		{"\"\xff\"", `"\ufffd"`, false},
+		{"\"\xff\"", `"\\xff"`, false},
+		{`"\ud800"`, `"\\ud800"`, false},
+		{"\"\xed\xa0\x80\"", `"\ud800"`, false},
+		// A surrogate pair is the character it encodes, in either case.
+		{`"\ud83d\ude00"`, `"😀"`, true},
+		{`"\uD83D\uDE00"`, `"😀"`, true},
+		{`"\u0022\n"`, `"\"\u000a"`, true},
+		{`"\u005c"`, `"\\"`, true},
 	} {
 		ka, kb := idKey(json.RawMessage(tc.a)), idKey(json.RawMessage(tc.b))
 		if got := ka == kb; got != tc.same {
 			t.Errorf("idKey(%s) = %s, idKey(%s) = %s: equal %v, want %v", tc.a, ka, tc.b, kb, got, tc.same)
 		}
 	}
+}
+
+// FuzzIDKeyIsOneKeyPerString: every way to write a string as JSON (encoding/json with and without
+// HTML escaping, and every character as a \u escape, a surrogate pair past U+FFFF) has one key,
+// and two different strings never share one.
+func FuzzIDKeyIsOneKeyPerString(f *testing.F) {
+	f.Add("é", "e")
+	f.Add("a<b&c", "a<b")
+	f.Add("😀\n\"\\", "\u2028")
+	f.Fuzz(func(t *testing.T, a, b string) {
+		if !utf8.ValidString(a) || !utf8.ValidString(b) {
+			return // invalid UTF-8 has no character to write; TestIDKeyIsOneKeyPerValue covers it
+		}
+		key := idKey(json.RawMessage(escapedEveryCharacter(a)))
+		for _, html := range []bool{true, false} {
+			var buf bytes.Buffer
+			enc := json.NewEncoder(&buf)
+			enc.SetEscapeHTML(html)
+			if err := enc.Encode(a); err != nil {
+				t.Fatal(err)
+			}
+			if k := idKey(bytes.TrimSuffix(buf.Bytes(), []byte("\n"))); k != key {
+				t.Fatalf("%q: key %s written by encoding/json (HTML escaping %v), %s with every character escaped", a, k, html, key)
+			}
+		}
+		if other := idKey(json.RawMessage(escapedEveryCharacter(b))); (other == key) != (a == b) {
+			t.Fatalf("%q and %q: keys %s and %s", a, b, key, other)
+		}
+	})
+}
+
+// escapedEveryCharacter is s as a JSON string with every character a \u escape.
+func escapedEveryCharacter(s string) string {
+	var out strings.Builder
+	out.WriteByte('"')
+	for _, u := range utf16.Encode([]rune(s)) {
+		fmt.Fprintf(&out, `\u%04X`, u)
+	}
+	out.WriteByte('"')
+	return out.String()
 }
 
 func TestScalarIDAcceptsStringsAndIntegersOnly(t *testing.T) {
