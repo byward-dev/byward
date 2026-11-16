@@ -30,8 +30,6 @@ type ConfigError struct{ Err error }
 
 func (e ConfigError) Error() string { return e.Err.Error() }
 
-func (e ConfigError) Unwrap() error { return e.Err }
-
 // Operator revocation reasons on the audit stream (ADR-0006 §9).
 const (
 	reasonRevokeUser = "operator revoke-user"

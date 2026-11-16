@@ -368,7 +368,7 @@ func TestJWKSPrintsThePublicKeysOnly(t *testing.T) {
 
 // `byward jwks` with no key, with an argument it does not take, or without authentication, prints
 // nothing and exits 2.
-func TestJWKSRefusesNoKeysOrAnExtraArgument(t *testing.T) {
+func TestJWKSRefusesNoKeysAnExtraArgumentOrNoAuthentication(t *testing.T) {
 	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
 	for _, tc := range []struct {
 		name     string

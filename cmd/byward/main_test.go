@@ -486,7 +486,7 @@ func TestRevokeAndNewEpochWithoutAuthenticationAreAConfigurationError(t *testing
 // Settings revoke-user cannot build the IdP from (here an Entra certificate file that holds no key)
 // are a configuration error, exit 2, with the line check --offline gives for them, as at startup
 // (ADR-0020 §5, L174); before, revoke-user reported them as a failed revocation, exit 1.
-func TestRevokeUserWithIdPSettingsStartupRefusesIsAConfigurationError(t *testing.T) {
+func TestRevokeUserIsAConfigurationErrorForIdPSettingsStartupRefuses(t *testing.T) {
 	cert := filepath.Join(t.TempDir(), "cert.pem")
 	if err := os.WriteFile(cert, []byte("not a certificate"), 0o600); err != nil {
 		t.Fatal(err)
