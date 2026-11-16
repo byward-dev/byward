@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -196,7 +197,7 @@ type env struct {
 func keyRing(t *testing.T) (*token.KeyRing, string) {
 	t.Helper()
 	dir := sealingkey.Dir(t)
-	r, err := token.LoadKeyRing(dir)
+	r, err := token.LoadKeyRing(dir, func(string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1375,9 +1376,9 @@ func TestTheLargestRequestsFitTheLoginCookieAndComeBackUnchanged(t *testing.T) {
 // The bound itself: a login of exactly maxLoginJSON bytes, sealed with the longest key ID, gives a
 // login cookie (as startLogin sets it, name and attributes included) under 4096 bytes.
 func TestALoginAtTheSizeBoundFitsTheBrowserCookieLimit(t *testing.T) {
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "keys") // made 0700 by Write; a TempDir is world-writable under umask 000
 	sealingkey.Write(t, dir, strings.Repeat("k", 64))
-	ring, err := token.LoadKeyRing(dir)
+	ring, err := token.LoadKeyRing(dir, func(string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}

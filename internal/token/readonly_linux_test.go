@@ -8,10 +8,12 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/byward-dev/byward/internal/secretfile"
 )
 
-// The real read-only check, on a read-only tmpfs with the root mode Kubernetes uses. It needs
-// root to mount, so it is skipped elsewhere.
+// The real read-only check, on a read-only tmpfs with the root and file modes Kubernetes uses. It
+// needs root to mount, so it is skipped elsewhere.
 func TestKeysOnAReadOnlyTmpfsWithMode1777Load(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("mounting a tmpfs needs root")
@@ -24,11 +26,18 @@ func TestKeysOnAReadOnlyTmpfsWithMode1777Load(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "k1"), []byte(randomKey(t)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadKeyRing(dir); err == nil || !strings.Contains(err.Error(), "world-writable") {
+	if err := os.Chmod(filepath.Join(dir, "k1"), 0o644); err != nil { //nolint:gosec // G302: Kubernetes' default secret mode
+		t.Fatal(err)
+	}
+	if _, err := LoadKeyRing(dir, noCheck); err == nil || !strings.Contains(err.Error(), "world-writable") {
 		t.Fatalf("writable tmpfs with mode 1777: err = %v, want the world-writable refusal", err)
 	}
 	if err := syscall.Mount("", dir, "", syscall.MS_REMOUNT|syscall.MS_RDONLY, ""); err != nil {
 		t.Fatalf("remount read-only: %v", err)
 	}
 	mustRing(t, dir)
+	// The production check too: a 0644 key on a read-only mount is not refused (L163).
+	if _, err := LoadKeyRing(dir, secretfile.Check); err != nil {
+		t.Fatalf("0644 key on a read-only tmpfs with the secret file check: %v", err)
+	}
 }

@@ -68,6 +68,19 @@ func TestCheckOfflineFindsWhatStartupWould(t *testing.T) {
 			}
 			return env
 		}, "BYWARD_ENTRA_CLIENT_SECRET_FILE: secret file"},
+		{"sealing key readable by other users", func(t *testing.T, env []string) []string {
+			dir := setting(env, "BYWARD_KEYS_DIR")
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) == 0 {
+				t.Fatalf("sealing keys in %s: %v", dir, err)
+			}
+			for _, e := range entries {
+				if err := os.Chmod(filepath.Join(dir, e.Name()), 0o644); err != nil { //nolint:gosec // G302: the mode under test
+					t.Fatal(err)
+				}
+			}
+			return env
+		}, "has mode 0644"}, // the permission check's refusal, not another key error
 		{"an app-only caller allowlist entry that is not a GUID", func(_ *testing.T, env []string) []string {
 			return append(env, "BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=byward.app", "BYWARD_APP_CLIENT_IDS=my-app")
 		}, `BYWARD_APP_CLIENT_IDS: "my-app" is not a GUID`},
@@ -368,6 +381,9 @@ func TestCheckOfflineFindsStdioUpstreamMistakes(t *testing.T) {
 			env, _ := stdioEnv(t, []string{"BYWARD_INSECURE_NO_AUTH=true"})
 			envFile := filepath.Join(t.TempDir(), "upstream.env")
 			if err := os.WriteFile(envFile, []byte("TOKEN=x\n"), 0o644); err != nil { //nolint:gosec // G306: the loose mode is what the test is about
+				t.Fatal(err)
+			}
+			if err := os.Chmod(envFile, 0o644); err != nil { //nolint:gosec // G302: the mode exactly, whatever the umask
 				t.Fatal(err)
 			}
 			for i, kv := range env {

@@ -799,7 +799,7 @@ func (e *env) rotateKeys(t *testing.T, add, remove []string) {
 			t.Fatal(err)
 		}
 	}
-	ring, err := token.LoadKeyRing(e.keyDir)
+	ring, err := token.LoadKeyRing(e.keyDir, func(string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}

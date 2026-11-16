@@ -4,12 +4,15 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/byward-dev/byward/internal/secretfile"
 )
 
 func randomKey(t testing.TB) string {
@@ -23,6 +26,9 @@ func randomKey(t testing.TB) string {
 func keyDir(t testing.TB, files map[string]string) string {
 	t.Helper()
 	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil { //nolint:gosec // G302: a directory needs x; the mode exactly, whatever the umask
+		t.Fatal(err)
+	}
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
 			t.Fatal(err)
@@ -31,9 +37,12 @@ func keyDir(t testing.TB, files map[string]string) string {
 	return dir
 }
 
+// noCheck is the permission check --dev uses: none.
+func noCheck(string) error { return nil }
+
 func mustRing(t testing.TB, dir string) *KeyRing {
 	t.Helper()
-	r, err := LoadKeyRing(dir)
+	r, err := LoadKeyRing(dir, noCheck)
 	if err != nil {
 		t.Fatalf("LoadKeyRing: %v", err)
 	}
@@ -87,7 +96,7 @@ func TestBadKeyFilesFailTheLoadNamingTheFile(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := keyDir(t, map[string]string{"good": randomKey(t), tc.file: tc.content})
-			_, err := LoadKeyRing(dir)
+			_, err := LoadKeyRing(dir, noCheck)
 			if err == nil || !strings.Contains(err.Error(), filepath.Join(dir, tc.file)) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want one naming %s and saying %q", err, tc.file, tc.want)
 			}
@@ -101,7 +110,7 @@ func TestWorldWritableKeysAreRejected(t *testing.T) {
 		if err := os.Chmod(filepath.Join(dir, "k1"), 0o646); err != nil { //nolint:gosec // G302: the insecure mode under test
 			t.Fatal(err)
 		}
-		if _, err := LoadKeyRing(dir); err == nil || !strings.Contains(err.Error(), "k1 is world-writable") {
+		if _, err := LoadKeyRing(dir, noCheck); err == nil || !strings.Contains(err.Error(), "k1 is world-writable") {
 			t.Fatalf("err = %v", err)
 		}
 	})
@@ -110,7 +119,7 @@ func TestWorldWritableKeysAreRejected(t *testing.T) {
 		if err := os.Chmod(dir, 0o707); err != nil { //nolint:gosec // G302: the insecure mode under test
 			t.Fatal(err)
 		}
-		if _, err := LoadKeyRing(dir); err == nil || !strings.Contains(err.Error(), "world-writable") {
+		if _, err := LoadKeyRing(dir, noCheck); err == nil || !strings.Contains(err.Error(), "world-writable") {
 			t.Fatalf("err = %v", err)
 		}
 	})
@@ -141,7 +150,7 @@ func TestUnreadableKeyFileFailsTheLoad(t *testing.T) {
 	if err := os.Chmod(filepath.Join(dir, "k1"), 0o000); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadKeyRing(dir); !errors.Is(err, fs.ErrPermission) || !strings.Contains(err.Error(), filepath.Join(dir, "k1")) {
+	if _, err := LoadKeyRing(dir, noCheck); !errors.Is(err, fs.ErrPermission) || !strings.Contains(err.Error(), filepath.Join(dir, "k1")) {
 		t.Fatalf("err = %v, want a permission error naming the file", err)
 	}
 }
@@ -151,11 +160,11 @@ func TestMissingOrEmptyKeyDirectoryRefusesToStart(t *testing.T) {
 	if err := os.WriteFile(notADir, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dangling := t.TempDir()
+	dangling := keyDir(t, nil)
 	if err := os.Symlink(filepath.Join(dangling, "absent"), filepath.Join(dangling, "k1")); err != nil {
 		t.Fatal(err)
 	}
-	missing, empty := filepath.Join(t.TempDir(), "absent"), t.TempDir()
+	missing, empty := filepath.Join(t.TempDir(), "absent"), keyDir(t, nil)
 	dotfiles := keyDir(t, map[string]string{".gitkeep": ""})
 	cases := []struct {
 		name, dir, want string // want: the error must contain it
@@ -168,9 +177,70 @@ func TestMissingOrEmptyKeyDirectoryRefusesToStart(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := LoadKeyRing(tc.dir); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, err := LoadKeyRing(tc.dir, noCheck); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want one containing %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// The sealing keys are secret files (L163): with the production check, a key file other users can
+// read refuses the load and the error names that file and its mode, whichever file it is.
+func TestAKeyFileOthersCanReadFailsTheLoadNamingIt(t *testing.T) {
+	for _, loose := range []string{"k1", "k2"} { // the first and the last file read
+		t.Run(loose, func(t *testing.T) {
+			dir := keyDir(t, map[string]string{"k1": randomKey(t), "k2": randomKey(t)})
+			path := filepath.Join(dir, loose)
+			if err := os.Chmod(path, 0o644); err != nil { //nolint:gosec // G302: the mode under test
+				t.Fatal(err)
+			}
+			if _, err := LoadKeyRing(dir, secretfile.Check); err == nil || !strings.Contains(err.Error(), path+" has mode 0644") {
+				t.Fatalf("err = %v, want the secret file refusal naming %s", err, path)
+			}
+		})
+	}
+}
+
+// The loader follows a symlinked key file, and so does the check: a link to a key file other users
+// can read is refused, as the file itself would be.
+func TestASymlinkedKeyFileOthersCanReadFailsTheLoad(t *testing.T) {
+	target := filepath.Join(keyDir(t, map[string]string{"real": randomKey(t)}), "real")
+	if err := os.Chmod(target, 0o644); err != nil { //nolint:gosec // G302: the mode under test
+		t.Fatal(err)
+	}
+	dir := keyDir(t, nil)
+	if err := os.Symlink(target, filepath.Join(dir, "k1")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadKeyRing(dir, secretfile.Check); err == nil || !strings.Contains(err.Error(), "has mode 0644") {
+		t.Fatalf("err = %v, want the secret file refusal through the symlink", err)
+	}
+}
+
+// What the loader skips is not a key file, so it is not checked: a loose dotfile or subdirectory in a
+// key directory does not stop the load.
+func TestEntriesTheLoaderSkipsAreNotPermissionChecked(t *testing.T) {
+	dir := keyDir(t, map[string]string{"k1": randomKey(t), ".gitkeep": ""})
+	if err := os.Chmod(filepath.Join(dir, ".gitkeep"), 0o644); err != nil { //nolint:gosec // G302: the mode under test
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "old"), 0o755); err != nil { //nolint:gosec // G301: the mode under test
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(dir, "old"), 0o755); err != nil { //nolint:gosec // G302: the mode exactly, whatever the umask
+		t.Fatal(err)
+	}
+	if r, err := LoadKeyRing(dir, secretfile.Check); err != nil || !slices.Equal(r.KeyIDs(), []string{"k1"}) {
+		t.Fatalf("LoadKeyRing = %v, want only k1 loaded", err)
+	}
+}
+
+// The check runs before a key file is read, so its refusal is what the operator sees even when the
+// file's content is bad too.
+func TestTheChecksRefusalComesBeforeTheFileIsRead(t *testing.T) {
+	dir := keyDir(t, map[string]string{"k1": "not!base64\n"})
+	_, err := LoadKeyRing(dir, func(path string) error { return fmt.Errorf("secret file %s: refused by the check", path) })
+	if err == nil || !strings.Contains(err.Error(), "refused by the check") || strings.Contains(err.Error(), "base64") {
+		t.Fatalf("err = %v, want the check's refusal, not the content error", err)
 	}
 }

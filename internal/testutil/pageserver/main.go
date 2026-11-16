@@ -48,7 +48,7 @@ func run(addr string) error {
 	if err := os.WriteFile(filepath.Join(dir, "k1"), []byte(base64.StdEncoding.EncodeToString(k)), 0o600); err != nil {
 		return err
 	}
-	ring, err := token.LoadKeyRing(dir)
+	ring, err := token.LoadKeyRing(dir, func(string) error { return nil })
 	if err != nil {
 		return err
 	}

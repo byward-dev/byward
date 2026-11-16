@@ -47,6 +47,19 @@ func TestSecretFilesOthersCanReadRefuseToStartOutsideDev(t *testing.T) {
 		}
 	}
 	both := func(t *testing.T, env []string) { entraSecret(t, env); staticSecret(t, env) }
+	// The sealing keys are secret files too (L163): a sealing key forges any token.
+	sealingKey := func(t *testing.T, env []string) {
+		dir := setting(env, "BYWARD_KEYS_DIR")
+		entries, err := os.ReadDir(dir)
+		if err != nil || len(entries) == 0 {
+			t.Fatalf("sealing keys in %s: %v", dir, err)
+		}
+		for _, e := range entries {
+			if err := os.Chmod(filepath.Join(dir, e.Name()), 0o644); err != nil { //nolint:gosec // G302: the mode under test
+				t.Fatal(err)
+			}
+		}
+	}
 	cases := []struct {
 		name      string
 		loosen    func(*testing.T, []string)
@@ -55,6 +68,7 @@ func TestSecretFilesOthersCanReadRefuseToStartOutsideDev(t *testing.T) {
 		{"Entra client secret", entraSecret, []string{"BYWARD_ENTRA_CLIENT_SECRET_FILE"}},
 		{"static client secret", staticSecret, []string{"client_secret_file"}},
 		{"both at once: one start names every loose file", both, []string{"BYWARD_ENTRA_CLIENT_SECRET_FILE", "client_secret_file"}},
+		{"sealing key", sealingKey, []string{"BYWARD_KEYS_DIR"}},
 	}
 	for _, c := range cases {
 		for _, dev := range []bool{false, true} {

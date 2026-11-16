@@ -23,7 +23,13 @@ before the first start; a missing or empty directory stops startup with an error
   entries there); subdirectories are ignored; symlinks are followed.
 - The proxy refuses to start when the directory is missing, has no key files, or any file is
   unreadable, not 32 bytes of base64, all one byte value, or **world-writable**. The error names the
-  file. Group- and other-readable files are fine (Kubernetes mounts secrets `0644` by default).
+  file.
+- A sealing key is a secret file like the others: a key file with any permission for its group or
+  others (read, write or execute, such as `0644`, `0640` or `0610`) is refused too, **unless it is
+  on a read-only mount**, such as a Kubernetes secret volume (mode `0644` by default) or a Docker
+  mount with `:ro`. Create keys under `umask 077` as above, or `chmod 600` them, owned by the
+  proxy's user (uid 65532 in the image). `--dev` relaxes this check, not the world-writable rule.
+  `byward check --offline` reports a key it would refuse.
 - A world-writable directory is rejected too, **unless it is on a read-only mount**: a Kubernetes
   secret volume is a read-only tmpfs whose root is mode `1777` (checked on k3s v1.31), and nobody can
   add a key to it.
@@ -36,7 +42,14 @@ sorts before `k9`, and a new `k10` would never seal.
 
 ## Rotating
 
-1. Add a new key file with a name that sorts after the current one.
+1. Add a new key file with a name that sorts after the current one, with no permission for its group
+   or others (`0600`), and run `byward check --offline`. The time in the name keeps a key made the
+   same day as the current one from replacing it, and `set -C` refuses to overwrite a file:
+
+   ```sh
+   (umask 077; set -C; openssl rand -base64 32 > "/var/lib/byward/keys/$(date -u +%Y-%m-%dT%H%M%SZ)")
+   ```
+
 2. **On several replicas, make sure the new file has reached every replica** (for example, the
    updated secret volume) before restarting any of them. A replica that seals with a key the others
    do not have yet issues tokens they reject.

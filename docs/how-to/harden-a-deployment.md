@@ -51,16 +51,16 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) §1�
 ## Sealing keys and secret files
 
 - [ ] Create the key directory as in [sealing keys](sealing-keys.md): mode `0700`, one file per key,
-      `openssl rand -base64 32`, owned by the proxy's user (uid 65532 in the image).
+      `(umask 077; openssl rand -base64 32 > …)`, owned by the proxy's user (uid 65532 in the image).
       - The proxy always refuses a world-writable key file, and a world-writable directory unless
         it is on a read-only mount such as a Kubernetes secret volume.
-      - It does **not** refuse group- or other-readable files. Use `0600` (or `0400`) yourself
-        wherever the platform allows.
+      - It refuses a key file with any permission for its group or others, as it does any secret
+        file, unless it is on a read-only mount. Use `0600` (or `0400`).
 - [ ] Create the identity assertion's signing key as in [identity assertion](identity-assertion.md):
       a separate directory, `BYWARD_ASSERTION_KEYS_DIR`, mode `0700`, one PEM P-256 file per key,
-      `0600` and owned by the proxy's user. Unlike sealing keys, a key file other users can read is
-      refused, unless it is on a read-only mount. Like them, a world-writable key file is always
-      refused, and a world-writable directory unless it is on a read-only mount.
+      `0600` and owned by the proxy's user. As for sealing keys, a key file with any permission for
+      its group or others is refused unless it is on a read-only mount. A world-writable key file
+      is always refused, and so is a world-writable directory unless it is on a read-only mount.
 - [ ] Leave `BYWARD_IDENTITY_HEADERS` off unless the upstream cannot verify a JWT. If you turn it
       on, make sure the upstream is reachable through the proxy alone, and run `byward doctor`
       ([plain identity headers](plain-identity-headers.md)).

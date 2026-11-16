@@ -107,7 +107,7 @@ func (w Warning) String() string {
 // settings. Errors name the file or setting at fault. idpHTTP reaches the IdP; nil is the default
 // client (tests give a fake's).
 func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error) {
-	ring, err := token.LoadKeyRing(cfg.KeysDir)
+	ring, err := token.LoadKeyRing(cfg.KeysDir, secretCheck(cfg))
 	if err != nil {
 		// No key generation (ADR-0007 §5): the operator creates the first key.
 		return nil, fmt.Errorf("BYWARD_KEYS_DIR: %s: %w (see docs/how-to/sealing-keys.md)", cfg.KeysDir, err)
