@@ -94,16 +94,22 @@ func TestCheckOfflinePassesAWorkingSetupWithItsStartupWarnings(t *testing.T) {
 // standard error, its value (which can be a credential) nowhere.
 func TestCheckOfflineBuildsTheTraceExporterAsStartupDoes(t *testing.T) {
 	const secret = "s3cret-token"
+	ignoredHeader := []string{"OTEL_TRACES_EXPORTER=otlp", "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318",
+		"OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer%zz" + secret}
 	for _, tc := range []struct {
 		name               string
-		otel               []string
+		otel, byward       []string // the OTEL_* settings; more byward settings
+		looseSecret        bool     // the client secret file is group-readable, which check also refuses
 		code               int
 		inStdout, inStderr string
 	}{
-		{"an exporter startup refuses", []string{"OTEL_TRACES_EXPORTER=jaeger"}, exitConfig, "", "byward: configuration error: OTEL_* tracing settings: "},
-		{"a header the exporter ignores", []string{"OTEL_TRACES_EXPORTER=otlp", "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318",
-			"OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer%zz" + secret}, exitOK, "configuration OK",
-			`"msg":"tracing error","error":"escape header value"`}, // the message is otlptrace's wording
+		{"an exporter startup refuses", []string{"OTEL_TRACES_EXPORTER=jaeger"}, nil, false, exitConfig, "", "byward: configuration error: OTEL_* tracing settings: "},
+		// Startup builds the exporter before it checks the rest, so check reports that refusal first.
+		{"an exporter startup refuses, beside another mistake", []string{"OTEL_TRACES_EXPORTER=jaeger"}, nil, true, exitConfig, "", "OTEL_* tracing settings: "},
+		// The message is otlptrace's wording; the line is in the proxy's log format.
+		{"a header the exporter ignores", ignoredHeader, nil, false, exitOK, "configuration OK", `"msg":"tracing error","error":"escape header value"`},
+		{"a header the exporter ignores, in the text log format", ignoredHeader, []string{"BYWARD_LOG_FORMAT=text"}, false, exitOK, "configuration OK",
+			`msg="tracing error" error="escape header value"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			blankOTELEnv(t)
@@ -113,6 +119,16 @@ func TestCheckOfflineBuildsTheTraceExporterAsStartupDoes(t *testing.T) {
 			}
 			t.Cleanup(func() { otel.SetLogger(logr.Discard()) }) // NewExporter's logger writes to this test's stderr
 			env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
+			env = append(env, tc.byward...)
+			if tc.looseSecret {
+				for _, kv := range env {
+					if f, ok := strings.CutPrefix(kv, "BYWARD_ENTRA_CLIENT_SECRET_FILE="); ok {
+						if err := os.Chmod(f, 0o644); err != nil { //nolint:gosec // G302: a secret file check refuses
+							t.Fatal(err)
+						}
+					}
+				}
+			}
 			code, stdout, stderr := runWith([]string{"check", "--offline"}, append(env, tc.otel...)...)
 			if code != tc.code || !strings.Contains(stdout, tc.inStdout) || !strings.Contains(stderr, tc.inStderr) {
 				t.Fatalf("code %d (want %d)\nstdout %q (want %q)\nstderr %q (want %q)", code, tc.code, stdout, tc.inStdout, stderr, tc.inStderr)
