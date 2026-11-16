@@ -114,6 +114,8 @@ func revokeUser(ctx context.Context, args, environ []string, stdout, stderr io.W
 	case errors.Is(err, server.ErrNotAUserKey):
 		_, _ = fmt.Fprintf(stderr, "byward: revoke-user %q: %v\n", key, err)
 		return exitConfig
+	case errors.As(err, new(server.ConfigError)):
+		return reportConfigError(stderr, err)
 	case err != nil:
 		return storeFailure(stderr, "revoke-user", err)
 	}

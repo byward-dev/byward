@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -24,10 +25,17 @@ func assertionJWKSURI(cfg *config.Config, parts *authParts) string {
 	return strings.TrimSuffix(cfg.Issuer(), "/") + jwksPath
 }
 
+// ErrNoAssertionWithoutAuthentication is ExportJWKS's answer without authentication.
+var ErrNoAssertionWithoutAuthentication = errors.New("with BYWARD_INSECURE_NO_AUTH no identity assertion is sent, so there are no assertion keys to export")
+
 // ExportJWKS is `byward jwks`: the public keys of BYWARD_ASSERTION_KEYS_DIR as a JWKS, for an
 // upstream that loads them from a file instead of fetching them (ADR-0016 §3). Run it again after
-// every key rotation.
+// every key rotation. Without authentication there is no identity assertion, so no keys to export:
+// that is refused before any path is read, as the store commands refuse it (L175).
 func ExportJWKS(cfg *config.Config) ([]byte, error) {
+	if cfg.NoAuth {
+		return nil, ErrNoAssertionWithoutAuthentication
+	}
 	keys, err := assertion.LoadKeys(cfg.AssertionKeysDir, secretCheck(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("BYWARD_ASSERTION_KEYS_DIR: %s: %w (see docs/how-to/identity-assertion.md)", cfg.AssertionKeysDir, err)

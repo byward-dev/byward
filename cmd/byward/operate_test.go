@@ -366,7 +366,8 @@ func TestJWKSPrintsThePublicKeysOnly(t *testing.T) {
 	}
 }
 
-// `byward jwks` with no key, or with an argument it does not take, prints nothing and exits 2.
+// `byward jwks` with no key, with an argument it does not take, or without authentication, prints
+// nothing and exits 2.
 func TestJWKSRefusesNoKeysOrAnExtraArgument(t *testing.T) {
 	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
 	for _, tc := range []struct {
@@ -377,6 +378,11 @@ func TestJWKSRefusesNoKeysOrAnExtraArgument(t *testing.T) {
 	}{
 		{"no keys", []string{"jwks"}, append(env, "BYWARD_ASSERTION_KEYS_DIR="+assertionkey.EmptyDir(t)), []string{"BYWARD_ASSERTION_KEYS_DIR", "has no key files"}},
 		{"extra argument", []string{"jwks", "--out", "x"}, env, []string{"usage: byward jwks"}},
+		// Without authentication no identity assertion is sent: refused as such, not as a key
+		// directory that cannot be read (L175).
+		{"without authentication", []string{"jwks"},
+			[]string{"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp"},
+			[]string{"byward: configuration error: with BYWARD_INSECURE_NO_AUTH no identity assertion is sent, so there are no assertion keys to export\n"}},
 	} {
 		code, stdout, stderr := runWith(tc.args, tc.env...)
 		if code != exitConfig || stdout != "" {
