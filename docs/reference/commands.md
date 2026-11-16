@@ -38,7 +38,15 @@ Checks everything the proxy checks at startup that needs no network and writes n
   is created at startup, and the counter file's directory must exist, it is not created); with
   PostgreSQL, the DSN as startup parses it, including the `sslmode=verify-full` rule, without
   connecting. Nothing is created;
-- with `BYWARD_TLS_CERT_FILE`, the TLS certificate and key: readable, a matching pair, and valid now.
+- with `BYWARD_TLS_CERT_FILE`, the TLS certificate and key: readable, a matching pair, and valid now;
+- with `OTEL_TRACES_EXPORTER` set, the trace exporter as startup builds it from the `OTEL_*` settings:
+  an unknown exporter or OTLP protocol, or, over `http/protobuf` (the default), an insecure endpoint
+  (`http://` or `unix://`, or `OTEL_EXPORTER_OTLP_[TRACES_]INSECURE=true`) with a CA certificate or a
+  client certificate and key, is a configuration error. It connects to
+  nothing, and never prints a setting's value. A value the exporter ignores (a header it cannot
+  parse, a missing CA file) is logged as a `tracing error` on standard error, in the proxy's log
+  format, as at startup, and check still passes; the sampler and resource settings are read only at
+  startup. Run check with the proxy's `OTEL_*` settings.
 
 It prints each relaxation (`warn  relaxation: …`) and the warnings the proxy would log at startup (an
 empty access gate, generic consent wording, a client secret or client certificate that expires within 30 days, a TLS certificate that

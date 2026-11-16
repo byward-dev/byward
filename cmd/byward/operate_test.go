@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -14,6 +15,9 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/testutil/assertionkey"
+	"github.com/byward-dev/byward/internal/tracing"
+	"github.com/go-logr/logr"
+	"go.opentelemetry.io/otel"
 
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/idp/entra"
@@ -82,6 +86,72 @@ func TestCheckOfflinePassesAWorkingSetupWithItsStartupWarnings(t *testing.T) {
 	code, stdout, stderr := runWith([]string{"check", "--offline"}, env...)
 	if code != exitOK || !strings.Contains(stdout, "configuration OK") || !strings.Contains(stdout, "warn  access gate is empty") || stderr != "" {
 		t.Fatalf("code %d stdout %q stderr %q", code, stdout, stderr)
+	}
+}
+
+// L157: check --offline builds the trace exporter as startup does, so an OTEL_* value startup
+// refuses fails check with exit 2 and startup's message (ADR-0021 §9: failing closed; the refusal
+// classes are internal/tracing's TestNewExporterRefusesWhatStartupRefuses). A value the exporter
+// only ignores passes and is logged through the redacting logger: by its message, on check's
+// standard error, its value (which can be a credential) nowhere.
+func TestCheckOfflineBuildsTheTraceExporterAsStartupDoes(t *testing.T) {
+	const secret = "s3cret-token"
+	ignoredHeader := []string{"OTEL_TRACES_EXPORTER=otlp", "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318",
+		"OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer%zz" + secret}
+	for _, tc := range []struct {
+		name               string
+		otel, byward       []string // the OTEL_* settings; more byward settings
+		looseSecret        bool     // the client secret file is group-readable, which check also refuses
+		code               int
+		inStdout, inStderr string
+	}{
+		{"an exporter startup refuses", []string{"OTEL_TRACES_EXPORTER=jaeger"}, nil, false, exitConfig, "", "byward: configuration error: OTEL_* tracing settings: "},
+		{"a protocol startup refuses", []string{"OTEL_TRACES_EXPORTER=otlp", "OTEL_EXPORTER_OTLP_PROTOCOL=udp"}, nil, false, exitConfig, "",
+			"byward: configuration error: OTEL_* tracing settings: "},
+		// Startup builds the exporter before it checks the rest, so check reports that refusal first.
+		{"an exporter startup refuses, beside another mistake", []string{"OTEL_TRACES_EXPORTER=jaeger"}, nil, true, exitConfig, "", "OTEL_* tracing settings: "},
+		// The message is otlptrace's wording; the line is in the proxy's log format.
+		{"a header the exporter ignores", ignoredHeader, nil, false, exitOK, "configuration OK", `"msg":"tracing error","error":"escape header value"`},
+		{"a header the exporter ignores, in the text log format", ignoredHeader, []string{"BYWARD_LOG_FORMAT=text"}, false, exitOK, "configuration OK",
+			`msg="tracing error" error="escape header value"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blankOTELEnv(t)
+			for _, kv := range tc.otel {
+				k, v, _ := strings.Cut(kv, "=")
+				t.Setenv(k, v)
+			}
+			t.Cleanup(func() { otel.SetLogger(logr.Discard()) }) // NewExporter's logger writes to this test's stderr
+			env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
+			env = append(env, tc.byward...)
+			if tc.looseSecret {
+				for _, kv := range env {
+					if f, ok := strings.CutPrefix(kv, "BYWARD_ENTRA_CLIENT_SECRET_FILE="); ok {
+						if err := os.Chmod(f, 0o644); err != nil { //nolint:gosec // G302: a secret file check refuses
+							t.Fatal(err)
+						}
+					}
+				}
+			}
+			code, stdout, stderr := runWith([]string{"check", "--offline"}, append(env, tc.otel...)...)
+			if code != tc.code || !strings.Contains(stdout, tc.inStdout) || !strings.Contains(stderr, tc.inStderr) {
+				t.Fatalf("code %d (want %d)\nstdout %q (want %q)\nstderr %q (want %q)", code, tc.code, stdout, tc.inStdout, stderr, tc.inStderr)
+			}
+			if strings.Contains(stdout+stderr, secret) {
+				t.Fatalf("a setting's value was printed:\nstdout %q\nstderr %q", stdout, stderr)
+			}
+			// A refusal gives the exporter's own reason after byward's prefix: the error
+			// tracing.NewExporter returns for these settings, so no library wording is pinned here.
+			if tc.code == exitConfig {
+				_, want := tracing.NewExporter(context.Background(), os.Getenv, slog.New(slog.DiscardHandler))
+				if want == nil {
+					t.Fatal("tracing.NewExporter accepts these settings; the row expects exit 2")
+				}
+				if !strings.Contains(stderr, "OTEL_* tracing settings: "+want.Error()) {
+					t.Fatalf("stderr %q; want %q after the prefix", stderr, want)
+				}
+			}
+		})
 	}
 }
 
