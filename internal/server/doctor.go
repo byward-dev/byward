@@ -137,6 +137,9 @@ var lookupNetIP = func(ctx context.Context, host string) ([]netip.Addr, error) {
 // probeTimeout bounds one doctor request (the discovery budget in docs/quality-lenses.md).
 const probeTimeout = 10 * time.Second
 
+// relaxationFix is doctor's fix for a relaxation, which only --dev and --insecure-no-auth make.
+const relaxationFix = "for trying byward out only: run production without BYWARD_DEV and BYWARD_INSECURE_NO_AUTH"
+
 // Doctor is `byward doctor` (ADR-0021 §11): the offline checks, a self-probe of the running proxy
 // at its public URL, and the IdP's checks. The error is a configuration error, before any check.
 func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Report, error) {
@@ -168,6 +171,9 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 		}
 		r.Checks = append(r.Checks, servingCertChecks(cfg, pair, o.Now())...)
 		cfgWarnings, _ := configWarnings(cfg, nil)
+		for _, x := range cfg.Relaxations { // as startup and check list them (security invariant 12)
+			r.Checks = append(r.Checks, doctor.CheckConfiguration.Result(doctor.Warn, "relaxation: "+x, relaxationFix))
+		}
 		for _, w := range cfgWarnings {
 			r.Checks = append(r.Checks, w.result(doctor.CheckConfiguration))
 		}
@@ -193,6 +199,9 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	r.Checks = append(r.Checks, upstreamHopResult(ctx, cfg, o.Resolve)...)
 	if cfg.IdentityHeaders && cfg.UpstreamCommand == nil {
 		r.Checks = append(r.Checks, identityHeadersResult(ctx, cfg.UpstreamURL.Hostname(), o.Resolve))
+	}
+	for _, x := range cfg.Relaxations { // as startup and check list them (security invariant 12)
+		r.Checks = append(r.Checks, doctor.CheckConfiguration.Result(doctor.Warn, "relaxation: "+x, relaxationFix))
 	}
 	for _, w := range cfgWarnings {
 		r.Checks = append(r.Checks, w.result(doctor.CheckConfiguration))

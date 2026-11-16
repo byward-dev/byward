@@ -140,8 +140,8 @@ func TestGroupsThatDoNotFitAreLeftOutWithAWarning(t *testing.T) {
 	if c.Groups != nil || !reflect.DeepEqual(c.Roles, []string{"byward.user"}) {
 		t.Fatalf("claims %+v", c)
 	}
-	if !strings.Contains(e.logs.String(), "the user's groups do not fit in an access token") {
-		t.Fatalf("no warning in %s", e.logs.String())
+	if logs := e.logs.String(); !strings.Contains(logs, "the user's groups do not fit in an access token") || !strings.Contains(logs, `"groups":200,"setting":"BYWARD_ASSERTION_CLAIMS"`) {
+		t.Fatalf("no warning naming 200 groups in %s", logs)
 	}
 }
 

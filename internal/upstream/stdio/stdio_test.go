@@ -68,6 +68,7 @@ func TestUpstreamGetsOnlyAllowlistOperatorEnvAndIdentity(t *testing.T) {
 				"BYWARD_ISSUER=" + alice.Issuer,
 				"BYWARD_SUBJECT=" + alice.Subject,
 				"PATH=/usr/bin:/bin",
+				"LC_ALL=C.UTF-8", "LC_CTYPE=C.UTF-8", "LC_MESSAGES=C", // inherited by name; LC_NUMERIC is not
 			}, tc.want...)
 			slices.Sort(env)
 			slices.Sort(want)

@@ -254,12 +254,12 @@ func (b *Broker) issue(w http.ResponseWriter, r *http.Request, clientID, grantID
 	if b.cfg.CapAccessToIdPToken && !idpExpiry.IsZero() {
 		// On-Behalf-Of presents the stored IdP token; an access token that outlived it would reach
 		// the upstream without a downstream token (ADR-0017 amendment 2026-11-07).
-		// An IdP token that ends within the margin is not a cap: the code or refresh token is
+		// An IdP token that ends within the margin plus MinCappedLifetime is not a cap: the code or refresh token is
 		// already spent, so failing here would strand the client; On-Behalf-Of refuses instead.
 		if capped := idpExpiry.Add(-IdPTokenMargin); !capped.Before(now.Add(MinCappedLifetime)) {
 			exp = minTime(exp, capped)
 		} else {
-			b.cfg.Log.WarnContext(ctx, "the IdP access token expires within the margin; the access token is not capped to it", "idp_token_expires_in", idpExpiry.Sub(now).String(), "margin", IdPTokenMargin.String())
+			b.cfg.Log.WarnContext(ctx, "the IdP access token expires too soon to cap the access token to it (within the margin plus the shortest capped lifetime)", "idp_token_expires_in", idpExpiry.Sub(now).String(), "margin", IdPTokenMargin.String())
 		}
 	}
 	c := token.Claims{GrantID: grantID, Subject: subject, IssuedAt: now, ExpiresAt: exp, ClientID: clientID, Claims: resource.Claims(asserted)}

@@ -973,14 +973,15 @@ func TestAccessTokensAreCappedAtTheIdPTokenWhenOnBehalfOfIsOn(t *testing.T) {
 		cap     bool
 		idpLife time.Duration
 		want    time.Duration
+		warning string // the not-capped warning's values at the code exchange (L159); "" for none
 	}{
-		{"on", true, 20 * time.Minute, 20*time.Minute - IdPTokenMargin},
-		{"off", false, 20 * time.Minute, AccessLifetime},
+		{"on", true, 20 * time.Minute, 20*time.Minute - IdPTokenMargin, ""},
+		{"off", false, 20 * time.Minute, AccessLifetime, ""},
 		// Capping at or before now would fail a request whose code or refresh token is spent.
-		{"on, IdP token within the margin", true, 30 * time.Second, AccessLifetime},
+		{"on, IdP token within the margin", true, 30 * time.Second, AccessLifetime, `"idp_token_expires_in":"30s","margin":"1m0s"`},
 		// A cap leaving almost no life would hand out expires_in 0.
-		{"on, IdP token just past the margin", true, IdPTokenMargin + time.Second, AccessLifetime},
-		{"on, the shortest cap", true, IdPTokenMargin + MinCappedLifetime, MinCappedLifetime},
+		{"on, IdP token just past the margin", true, IdPTokenMargin + time.Second, AccessLifetime, `"idp_token_expires_in":"1m1s","margin":"1m0s"`},
+		{"on, the shortest cap", true, IdPTokenMargin + MinCappedLifetime, MinCappedLifetime, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			e := newEnv(t, func(cfg *Config) { cfg.CapAccessToIdPToken = c.cap })
@@ -988,6 +989,13 @@ func TestAccessTokensAreCappedAtTheIdPTokenWhenOnBehalfOfIsOn(t *testing.T) {
 			body := e.offline(t)
 			if got := body["expires_in"].(float64); got != c.want.Seconds() {
 				t.Fatalf("code exchange: expires_in %v, want %v", got, c.want.Seconds())
+			}
+			const notCapped = "the IdP access token expires too soon to cap the access token to it (within the margin plus the shortest capped lifetime)"
+			switch logs := e.logs.String(); {
+			case c.warning == "" && strings.Contains(logs, notCapped):
+				t.Fatalf("a not-capped warning where the token was capped or the cap is off: %s", logs)
+			case c.warning != "" && (!strings.Contains(logs, notCapped) || !strings.Contains(logs, c.warning)):
+				t.Fatalf("want the not-capped warning with %s, so the operator sees how close it was: %s", c.warning, logs)
 			}
 			e.now = e.now.Add(15 * time.Minute)
 			res, refreshed := e.refresh(t, body["refresh_token"].(string), "")

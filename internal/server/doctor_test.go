@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -222,12 +223,76 @@ func TestDoctorNamesTheSettingsInFixes(t *testing.T) {
 	}
 }
 
-func TestDoctorWithoutAuthChecksOnlyTheUpstreamAndTheTrustStoreAndWarns(t *testing.T) {
+// Without authentication, doctor lists the relaxations, checks only the upstream and the trust
+// store, and warns that authentication is off: there is no IdP to check.
+func TestDoctorWithoutAuthListsTheRelaxationsChecksOnlyTheUpstreamAndTheTrustStoreAndWarnsAuthenticationIsOff(t *testing.T) {
 	cfg := loadNoAuthConfig(t, "http://u/mcp")
 	rep, err := Doctor(context.Background(), cfg, DoctorOptions{Proxy: &http.Client{Transport: refuse{}}})
-	if err != nil || len(rep.Checks) != 3 || rep.Checks[0].Name != "upstream" || rep.Checks[1].Name != "trust store" || rep.Checks[2].Name != "authentication" || rep.Checks[2].Status != doctor.Warn ||
-		!strings.Contains(rep.Checks[2].Message, "authentication is off") || rep.ExitCode() != 0 {
+	if err != nil || len(rep.Checks) == 0 {
 		t.Fatalf("report %+v, err %v", rep, err)
+	}
+	var names []string
+	for _, c := range rep.Checks {
+		names = append(names, c.Name)
+	}
+	for _, c := range rep.Checks[:min(2, len(rep.Checks))] {
+		if c.Status != doctor.Warn || !strings.HasPrefix(c.Message, "relaxation: ") {
+			t.Fatalf("check %+v; want the two relaxations first", c)
+		}
+	}
+	last := rep.Checks[len(rep.Checks)-1]
+	if !slices.Equal(names, []string{"configuration", "configuration", "upstream", "trust store", "authentication"}) ||
+		last.Status != doctor.Warn || !strings.Contains(last.Message, "authentication is off") || rep.ExitCode() != 0 {
+		t.Fatalf("checks %v, report %+v; want the two relaxations, then upstream, trust store and a warning that authentication is off, exit 0", names, rep)
+	}
+}
+
+// doctor lists each relaxation as startup and check do (L158), with and without authentication:
+// its JSON is the monitoring view, which otherwise cannot show that a safety check is off.
+func TestDoctorListsEveryRelaxationAsAWarning(t *testing.T) {
+	r := runProxy(t)
+	withAuth, err := Doctor(context.Background(), r.cfg, DoctorOptions{IdP: r.fake.HTTPClient()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	noAuth, err := Doctor(context.Background(), loadNoAuthConfig(t, "http://u/mcp"), DoctorOptions{Proxy: &http.Client{Transport: refuse{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An oidc IdP whose issuer is http on loopback: its relaxation holds colons, in the issuer and
+	// after it, so the warning must carry the whole text, not cut it at the first colon.
+	app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}}
+	fake := fakeidp.New(t, fakeidp.Generic, fakeidp.WithClient(app))
+	httpIssuer, err := Doctor(context.Background(), loadOIDC(t, "oidc", fake.Issuer(), app.ID), DoctorOptions{IdP: fake.HTTPClient(), Proxy: &http.Client{Transport: refuse{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		rep  doctor.Report
+		want []string
+	}{
+		"with authentication (--dev)":                 {withAuth, []string{"secret file permissions are not checked", "http public URL on loopback"}},
+		"without authentication (--insecure-no-auth)": {noAuth, []string{"http public URL on loopback", "AUTHENTICATION IS OFF: anyone who can reach http://127.0.0.1:8080/mcp can use the upstream, and the upstream receives no identity"}},
+		"with an http IdP issuer on loopback (--dev)": {httpIssuer, []string{"secret file permissions are not checked",
+			"http IdP issuer on loopback (" + fake.Issuer() + "): discovery over http, and the IdP's sign-in page, token endpoint and signing keys over http too where it lists them on loopback"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			// Exactly one warning per relaxation, in config's order, each with the same fix.
+			var got []string
+			for _, c := range tc.rep.Checks {
+				text, ok := strings.CutPrefix(c.Message, "relaxation: ")
+				if !ok {
+					continue
+				}
+				if c.Name != "configuration" || c.Status != doctor.Warn || c.Fix != "for trying byward out only: run production without BYWARD_DEV and BYWARD_INSECURE_NO_AUTH" {
+					t.Errorf("relaxation check %+v; want a configuration warning with the relaxation fix", c)
+				}
+				got = append(got, text)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("relaxations %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

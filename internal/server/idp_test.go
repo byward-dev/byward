@@ -6,6 +6,8 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"errors"
+	"net/http"
 	"net/url"
 	"slices"
 	"sort"
@@ -327,7 +329,8 @@ func TestDoctorChecksAnOIDCIdPsDiscoveryAndClientCredential(t *testing.T) {
 		fix                   string
 	}{
 		{"the discovered issuer and the right secret", "", "s3cret", doctor.Pass, doctor.Pass, ""},
-		{"another issuer", "/other", "s3cret", doctor.Fail, doctor.Skip, "BYWARD_OIDC_ISSUER"},
+		// The fake is an http issuer on loopback, allowed under --dev: the fix asks for no https (L158).
+		{"another issuer", "/other", "s3cret", doctor.Fail, doctor.Skip, "BYWARD_OIDC_ISSUER: set it exactly as the IdP's discovery document states its issuer"},
 		{"a secret the IdP does not hold", "", "rotated", doctor.Pass, doctor.Fail, "BYWARD_OIDC_CLIENT_SECRET_FILE"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -349,12 +352,79 @@ func TestDoctorChecksAnOIDCIdPsDiscoveryAndClientCredential(t *testing.T) {
 			if len(idpChecks) != 2 || idpChecks[0].Name != "discovery" || idpChecks[0].Status != tc.discovery ||
 				idpChecks[1].Name != "client credential" || idpChecks[1].Status != tc.credential ||
 				!strings.HasSuffix(idpChecks[1].Message, "; the credential: a client secret") ||
-				!strings.Contains(idpChecks[0].Fix+idpChecks[1].Fix, tc.fix) {
-				t.Fatalf("IdP checks %+v, want discovery %s then the client credential %s, a fix naming %q", idpChecks, tc.discovery, tc.credential, tc.fix)
+				!strings.Contains(idpChecks[0].Fix+idpChecks[1].Fix, tc.fix) || strings.Contains(idpChecks[0].Fix, "over https") {
+				t.Fatalf("IdP checks %+v, want discovery %s then the client credential %s, a fix naming %q and no \"over https\"", idpChecks, tc.discovery, tc.credential, tc.fix)
 			}
 		})
 	}
 }
+
+// doctor's fix for a failed discovery asks for https unless the issuer is the http one that --dev
+// allows on loopback, however its scheme is written (L158): config, not the issuer's spelling,
+// decides that.
+func TestTheDiscoveryFixAsksForHTTPSUnlessTheIssuerIsAnAllowedLoopbackHTTPOne(t *testing.T) {
+	const base = "BYWARD_OIDC_ISSUER: set it exactly as the IdP's discovery document states its issuer"
+	for _, tc := range []struct {
+		name, issuer string
+		loopbackHTTP bool
+		want         string
+	}{
+		{"an https issuer", "https://sso.example.com/realms/acme", false, base + ", over https"},
+		{"an http issuer on loopback under --dev", "http://127.0.0.1:8180/realms/byward", true, base},
+		{"the same, its scheme in capitals", "HTTP://127.0.0.1:8180/realms/byward", true, base},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := diagnoseDiscovery(context.Background(), failingDiscovery{}, tc.issuer, tc.loopbackHTTP)
+			if len(r) != 1 {
+				t.Fatalf("results %+v, want one", r)
+			}
+			if r[0].Fix != tc.want {
+				t.Fatalf("fix %q, want %q", r[0].Fix, tc.want)
+			}
+		})
+	}
+}
+
+// When discovery fails, doctor's fix asks for https unless config allowed the issuer as loopback
+// http, even under --dev (which loadOIDC sets): the wiring passes config's decision, not a
+// constant and not the issuer's spelling, so an HTTP:// loopback issuer is not asked for https.
+func TestDoctorAsksForHTTPSWhenDiscoveryFailsUnlessConfigAllowedTheIssuerAsLoopbackHTTP(t *testing.T) {
+	const fix = "BYWARD_OIDC_ISSUER: set it exactly as the IdP's discovery document states its issuer"
+	for name, tc := range map[string]struct{ issuer, want string }{
+		"an https issuer": {"https://sso.example.com/realms/acme", fix + ", over https"},
+		"a loopback issuer, its scheme in capitals": {"HTTP://127.0.0.1:8180/realms/byward", fix},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := loadOIDC(t, "oidc", tc.issuer, "c")
+			rep, err := Doctor(context.Background(), cfg, DoctorOptions{IdP: &http.Client{Transport: notFound{}}, Proxy: &http.Client{Transport: refuse{}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, c := range rep.Checks {
+				if c.Class == doctor.ClassIdP && c.Name == "discovery" {
+					if c.Status != doctor.Fail || c.Fix != tc.want {
+						t.Fatalf("discovery %+v; want a failure with the fix %q", c, tc.want)
+					}
+					return
+				}
+			}
+			t.Fatalf("no discovery check in %+v", rep.Checks)
+		})
+	}
+}
+
+// notFound answers every request 404, which the IdP fetcher does not retry, so a failing
+// discovery fails at once.
+type notFound struct{}
+
+func (notFound) RoundTrip(r *http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody, Header: http.Header{}, Request: r}, nil
+}
+
+// failingDiscovery is an IdP whose discovery fails.
+type failingDiscovery struct{}
+
+func (failingDiscovery) Ready(context.Context) error { return errors.New("connection refused") }
 
 // doctor's fixes for an oidc client credential name the setting that holds it: the secret file, or
 // the key file with private_key_jwt.

@@ -231,6 +231,7 @@ func TestDevRecordsAnHTTPIdPIssuerOnLoopbackAsARelaxation(t *testing.T) {
 	}{
 		{"localhost over http", "http://localhost:8180/realms/byward", true, true},
 		{"127.0.0.1 over http", "http://127.0.0.1:8180/realms/byward", true, true},
+		{"127.0.0.1 over http, its scheme in capitals", "HTTP://127.0.0.1:8180/realms/byward", true, true}, // a URL's scheme is case-insensitive
 		{"[::1] over http", "http://[::1]:8180/realms/byward", true, true},
 		{"127.0.0.2 over http", "http://127.0.0.2:8180/realms/byward", true, true}, // any loopback address, as the adapter has it
 		{"https", "https://sso.example.com/realms/acme", true, false},
