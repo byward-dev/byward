@@ -60,7 +60,7 @@ func Setup(ctx context.Context, getenv func(string) string, version string, log 
 	if err != nil {
 		return false, noop, err
 	}
-	if autoexport.IsNoneSpanExporter(exp) {
+	if exp == nil || autoexport.IsNoneSpanExporter(exp) {
 		return false, noop, nil
 	}
 	otel.SetErrorHandler(settingErrors(log))
@@ -79,8 +79,9 @@ func Setup(ctx context.Context, getenv func(string) string, version string, log 
 // autoexport's exporter from the OTEL_* settings, which connects to nothing until a span is
 // exported. Any error autoexport returns stops the proxy and fails check, deliberately stricter
 // than the OTel specification's warn-and-ignore (ADR-0021 §9); today that is an unknown exporter,
-// an OTLP protocol autoexport does not offer, or, over http/protobuf, an http:// endpoint with a CA
-// certificate or a client certificate and key. It first installs the redacting logger, a global,
+// an OTLP protocol autoexport does not offer, or, over http/protobuf, an insecure endpoint
+// (http:// or unix://, or OTEL_EXPORTER_OTLP_[TRACES_]INSECURE=true) with a CA certificate or a
+// client certificate and key. It first installs the redacting logger, a global,
 // since the exporter logs a setting it cannot parse with its value, which can be a credential
 // (#274). The caller shuts the exporter down.
 func NewExporter(ctx context.Context, getenv func(string) string, log *slog.Logger) (sdktrace.SpanExporter, error) {
@@ -88,7 +89,11 @@ func NewExporter(ctx context.Context, getenv func(string) string, log *slog.Logg
 		return nil, nil
 	}
 	otel.SetLogger(logr.New(otelLog{log}))
-	return autoexport.NewSpanExporter(ctx)
+	exp, err := autoexport.NewSpanExporter(ctx)
+	if err != nil {
+		return nil, err // not autoexport's typed nil, whose Shutdown would panic
+	}
+	return exp, nil
 }
 
 // errorHandler logs OpenTelemetry's errors in place of its default, which prints them to stderr as

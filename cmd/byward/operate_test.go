@@ -92,7 +92,7 @@ func TestCheckOfflinePassesAWorkingSetupWithItsStartupWarnings(t *testing.T) {
 // classes are internal/tracing's TestNewExporterRefusesWhatStartupRefuses). A value the exporter
 // only ignores passes and is logged through the redacting logger: by its message, on check's
 // standard error, its value (which can be a credential) nowhere.
-func TestCheckOfflineRefusesTheOTELSettingsStartupRefuses(t *testing.T) {
+func TestCheckOfflineBuildsTheTraceExporterAsStartupDoes(t *testing.T) {
 	const secret = "s3cret-token"
 	for _, tc := range []struct {
 		name               string
@@ -102,7 +102,8 @@ func TestCheckOfflineRefusesTheOTELSettingsStartupRefuses(t *testing.T) {
 	}{
 		{"an exporter startup refuses", []string{"OTEL_TRACES_EXPORTER=jaeger"}, exitConfig, "", "byward: configuration error: OTEL_* tracing settings: "},
 		{"a header the exporter ignores", []string{"OTEL_TRACES_EXPORTER=otlp", "OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318",
-			"OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer%zz" + secret}, exitOK, "configuration OK", `"msg":"tracing error","error":"escape header value"`},
+			"OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer%zz" + secret}, exitOK, "configuration OK",
+			`"msg":"tracing error","error":"escape header value"`}, // the message is otlptrace's wording
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			blankOTELEnv(t)
