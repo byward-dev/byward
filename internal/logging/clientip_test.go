@@ -47,6 +47,33 @@ func TestClientAddressTrustsForwardedForOnlyFromTrustedProxies(t *testing.T) {
 	}
 }
 
+// A zoned address names a host only together with an interface, so it never matches a trusted
+// prefix, as a peer or as a forwarded hop. Config refuses link-local entries; this list holds one
+// to show the zone alone decides.
+func TestAZonedAddressIsNeverATrustedProxy(t *testing.T) {
+	trusted := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("fe80::/64")}
+	cases := []struct {
+		name, peer, xff, want string
+	}{
+		{"a zoned peer: header ignored", "[fe80::1%eth0]:4000", "198.51.100.1", "fe80::1%eth0"},
+		{"a zoned hop ends the chain, logged without its zone", "10.1.2.3:4000", "198.51.100.1, fe80::1%eth0", "fe80::1"},
+		{"the same hop without a zone is trusted", "10.1.2.3:4000", "198.51.100.1, fe80::1", "198.51.100.1"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var got string
+			h := ClientAddress(trusted, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got = RemoteIP(r) }))
+			r := httptest.NewRequest("GET", "/", nil)
+			r.RemoteAddr = c.peer
+			r.Header.Set("X-Forwarded-For", c.xff)
+			h.ServeHTTP(httptest.NewRecorder(), r)
+			if got != c.want {
+				t.Fatalf("client address = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 func TestWithoutTrustedProxiesForwardedForIsIgnored(t *testing.T) {
 	var got string
 	h := ClientAddress(nil, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got = RemoteIP(r) }))

@@ -40,7 +40,7 @@ func peer(r *http.Request) string {
 
 func clientIP(trusted []netip.Prefix, r *http.Request) string {
 	p := peer(r)
-	if !isTrusted(trusted, p) {
+	if a, err := netip.ParseAddr(p); err != nil || !isTrusted(trusted, a) {
 		return p
 	}
 	var hops []string
@@ -54,8 +54,8 @@ func clientIP(trusted []netip.Prefix, r *http.Request) string {
 			// A broken chain is not trusted past this point: the last trusted hop is the client.
 			return client
 		}
-		client = a.Unmap().WithZone("").String()
-		if !isTrusted(trusted, client) {
+		client = a.Unmap().WithZone("").String() // logged without the zone; matched with it
+		if !isTrusted(trusted, a) {
 			return client
 		}
 	}
@@ -77,9 +77,11 @@ func parseHop(s string) (netip.Addr, error) {
 	return netip.Addr{}, errors.New("not an address")
 }
 
-func isTrusted(trusted []netip.Prefix, ip string) bool {
-	a, err := netip.ParseAddr(ip)
-	if err != nil {
+// isTrusted reports whether a is a trusted proxy. A zoned address never is: it names a host only
+// together with an interface, which a prefix cannot say (config refuses zones and link-local
+// entries in BYWARD_TRUSTED_PROXIES).
+func isTrusted(trusted []netip.Prefix, a netip.Addr) bool {
+	if a.Zone() != "" {
 		return false
 	}
 	a = a.Unmap()

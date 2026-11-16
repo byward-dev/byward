@@ -586,7 +586,8 @@ func TestUpstreamHeaderTimeoutDefaultsToFiveMinutesWithinBounds(t *testing.T) {
 
 // Trusted proxies are CIDRs or addresses, masked; an IPv4-mapped one is the IPv4 prefix it maps,
 // since peers are compared unmapped, and one shorter than /96 maps no IPv4 prefix (masked, it would
-// trust IPv6 addresses), so it is refused.
+// trust IPv6 addresses), so it is refused. A zone, or an entry inside fe80::/10, is refused: a zoned
+// peer never matches a prefix, so it would trust nothing.
 func TestTrustedProxiesTakeCIDRsAndAddresses(t *testing.T) {
 	cfg, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES=10.0.0.0/8, 192.0.2.7, 2001:db8::/32, 10.1.2.3/8"), nil)
 	if err != nil {
@@ -601,6 +602,11 @@ func TestTrustedProxiesTakeCIDRsAndAddresses(t *testing.T) {
 		"::ffff:10.0.0.5/128":   "10.0.0.5/32",
 		"::ffff:172.16.0.0/108": "172.16.0.0/12",
 		"::ffff:0:0/96":         "0.0.0.0/0",
+		// Around fe80::/10 but not inside it: no zoned (link-local) peer ever matches these.
+		"::/0":           "::/0",
+		"fe00::/9":       "fe00::/9",
+		"fec0::1":        "fec0::1/128",
+		"169.254.0.0/16": "169.254.0.0/16", // IPv4 link-local has no zone
 	} {
 		t.Run(given, func(t *testing.T) {
 			cfg, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES="+given), nil)
@@ -619,6 +625,13 @@ func TestTrustedProxiesTakeCIDRsAndAddresses(t *testing.T) {
 		{"a hostname", "proxy.internal", `BYWARD_TRUSTED_PROXIES: "proxy.internal" is not a CIDR or an IP address`},
 		{"a mapped /8", "::ffff:10.0.0.0/8", `BYWARD_TRUSTED_PROXIES: "::ffff:10.0.0.0/8" is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)`},
 		{"a mapped /95", "::ffff:10.0.0.0/95", `BYWARD_TRUSTED_PROXIES: "::ffff:10.0.0.0/95" is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)`},
+		// Parsed as an address, everything after % is the zone, the prefix length included.
+		{"a prefix with a zone", "fe80::1%eth0/64", `BYWARD_TRUSTED_PROXIES: "fe80::1%eth0/64" has an IPv6 zone: give the CIDR or address without one`},
+		{"an address with a zone", "fe80::1%eth0", `BYWARD_TRUSTED_PROXIES: "fe80::1%eth0" has an IPv6 zone: give the CIDR or address without one`},
+		{"a mapped address with a zone", "::ffff:10.0.0.1%eth0", `BYWARD_TRUSTED_PROXIES: "::ffff:10.0.0.1%eth0" has an IPv6 zone: give the CIDR or address without one`},
+		{"a link-local address", "fe80::1", `BYWARD_TRUSTED_PROXIES: "fe80::1" is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address`},
+		{"the link-local prefix", "fe80::/10", `BYWARD_TRUSTED_PROXIES: "fe80::/10" is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address`},
+		{"the last link-local address", "febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff", `BYWARD_TRUSTED_PROXIES: "febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff" is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES="+tc.value), nil); err == nil || err.Error() != tc.want {

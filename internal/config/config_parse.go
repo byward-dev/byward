@@ -122,8 +122,11 @@ func parseProxies(raw string) ([]netip.Prefix, error) {
 		switch {
 		case err != nil:
 			a, aerr := netip.ParseAddr(item)
-			if aerr != nil {
+			switch {
+			case aerr != nil:
 				return nil, errorf("BYWARD_TRUSTED_PROXIES: %q is not a CIDR or an IP address", item)
+			case a.Zone() != "": // the zone runs to the end, so "fe80::1%eth0/64" would lose its /64
+				return nil, errorf("BYWARD_TRUSTED_PROXIES: %q has an IPv6 zone: give the CIDR or address without one", item)
 			}
 			p = netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen())
 		case p.Addr().Is4In6() && p.Bits() < 96: // masked, ::ffff:10.0.0.0/8 is ::/8: it would trust IPv6 peers
@@ -131,10 +134,17 @@ func parseProxies(raw string) ([]netip.Prefix, error) {
 		case p.Addr().Is4In6(): // peers are compared unmapped (logging.ClientAddress), as a bare mapped address is here
 			p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
 		}
-		out = append(out, p.Masked())
+		if p = p.Masked(); linkLocal.Contains(p.Addr()) && p.Bits() >= linkLocal.Bits() {
+			return nil, errorf("BYWARD_TRUSTED_PROXIES: %q is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address", item)
+		}
+		out = append(out, p)
 	}
 	return out, nil
 }
+
+// linkLocal is IPv6's link-local unicast prefix. A peer in it carries a zone, which no trusted prefix
+// matches (logging.ClientAddress), so an entry inside it would trust nothing.
+var linkLocal = netip.MustParsePrefix("fe80::/10")
 
 func splitList(s string) []string {
 	var out []string
