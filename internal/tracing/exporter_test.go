@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/contrib/exporters/autoexport"
 
@@ -27,7 +28,7 @@ func TestNewExporterRefusesWhatStartupRefuses(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		env     map[string]string
-		refused string // "" when built
+		refused string // "" when built; else autoexport's or otlptracehttp's error text, which a dependency update may reword
 	}{
 		{"an unknown exporter", map[string]string{"OTEL_TRACES_EXPORTER": "jaeger"}, "unknown exporter"},
 		{"a list of exporters", map[string]string{"OTEL_TRACES_EXPORTER": "otlp,console"}, "unknown exporter"},
@@ -37,7 +38,6 @@ func TestNewExporterRefusesWhatStartupRefuses(t *testing.T) {
 			"OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:4318", "OTEL_EXPORTER_OTLP_CERTIFICATE": ca}, "insecure HTTP endpoint cannot use TLS client configuration"},
 		{"the traces protocol wins over the general one", map[string]string{"OTEL_TRACES_EXPORTER": "otlp", "OTEL_EXPORTER_OTLP_PROTOCOL": "udp",
 			"OTEL_EXPORTER_OTLP_TRACES_PROTOCOL": "grpc"}, ""},
-		{"otlp over grpc", map[string]string{"OTEL_TRACES_EXPORTER": "otlp", "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc"}, ""},
 		{"none", map[string]string{"OTEL_TRACES_EXPORTER": "none"}, ""},
 		{"console", map[string]string{"OTEL_TRACES_EXPORTER": "console"}, ""},
 	} {
@@ -97,9 +97,10 @@ func TestNewExporterConnectsToNothing(t *testing.T) {
 			t.Setenv("OTEL_EXPORTER_OTLP_PROTOCOL", protocol)
 			t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://"+ln.Addr().String())
 			exp, err := NewExporter(context.Background(), os.Getenv, slog.New(slog.DiscardHandler))
-			if err != nil || autoexport.IsNoneSpanExporter(exp) {
+			if err != nil || exp == nil || autoexport.IsNoneSpanExporter(exp) {
 				t.Fatalf("NewExporter = %v, %v; want an OTLP exporter", exp, err)
 			}
+			time.Sleep(100 * time.Millisecond) // a connect the build started in the background lands while the listener is open
 			if err := exp.Shutdown(context.Background()); err != nil {
 				t.Fatalf("Shutdown: %v", err)
 			}

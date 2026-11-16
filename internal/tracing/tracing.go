@@ -75,11 +75,12 @@ func Setup(ctx context.Context, getenv func(string) string, version string, log 
 }
 
 // NewExporter is the trace exporter Setup installs, built as startup builds it, for Setup and for
-// `check --offline` (L157): nil when getenv("OTEL_TRACES_EXPORTER") is unset; otherwise
+// `check --offline` (L157): nil when getenv("OTEL_TRACES_EXPORTER") is unset or empty; otherwise
 // autoexport's exporter from the OTEL_* settings, which connects to nothing until a span is
-// exported. An unknown exporter, an OTLP protocol autoexport does not offer, and an http:// endpoint
-// with a TLS file are errors, so the proxy does not start: deliberately stricter than the OTel
-// specification's warn-and-ignore (ADR-0021 §9). It first installs the redacting logger, a global,
+// exported. Any error autoexport returns stops the proxy and fails check, deliberately stricter
+// than the OTel specification's warn-and-ignore (ADR-0021 §9); today that is an unknown exporter,
+// an OTLP protocol autoexport does not offer, or, over http/protobuf, an http:// endpoint with a CA
+// certificate or a client certificate and key. It first installs the redacting logger, a global,
 // since the exporter logs a setting it cannot parse with its value, which can be a credential
 // (#274). The caller shuts the exporter down.
 func NewExporter(ctx context.Context, getenv func(string) string, log *slog.Logger) (sdktrace.SpanExporter, error) {

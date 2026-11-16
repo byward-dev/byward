@@ -27,18 +27,18 @@ func checkOffline(ctx context.Context, args, environ []string, stdout, stderr io
 	if !ok {
 		return exitConfig
 	}
-	report, err := server.CheckOfflineReport(cfg)
-	if err != nil {
-		return reportConfigError(stderr, err)
-	}
-	// The trace exporter, as startup builds it (L157): a setting startup refuses fails check too. It
-	// connects to nothing, and is shut down at once.
+	// The trace exporter, as startup builds it and in startup's order, before the rest (L157): a
+	// setting startup refuses fails check too. It connects to nothing, and is shut down at once.
 	exp, err := tracing.NewExporter(ctx, getenv(environ), logging.New(stderr, cfg.LogFormat))
 	if err != nil {
 		return reportConfigError(stderr, fmt.Errorf("OTEL_* tracing settings: %w", err))
 	}
 	if exp != nil {
 		_ = exp.Shutdown(ctx)
+	}
+	report, err := server.CheckOfflineReport(cfg)
+	if err != nil {
+		return reportConfigError(stderr, err)
 	}
 	// As the startup log has them (security invariant 12), labelled neutrally: --insecure-no-auth's
 	// are not development mode.

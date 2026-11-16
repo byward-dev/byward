@@ -125,8 +125,9 @@ func TestRunStopsOnCancelledContext(t *testing.T) {
 // With tracing on, OpenTelemetry's errors reach the proxy's own log at warn level, not stderr as they
 // are: run hands its logger to the tracing setup.
 func TestATracingErrorReachesTheLogAtWarnLevel(t *testing.T) {
-	for _, kv := range os.Environ() { // autoexport and the proxy judgment read the process environment: a developer's settings too
-		if k, _, _ := strings.Cut(kv, "="); strings.HasPrefix(k, "OTEL_") || strings.HasSuffix(strings.ToUpper(k), "_PROXY") {
+	blankOTELEnv(t)
+	for _, kv := range os.Environ() { // the proxy judgment reads the process environment: a developer's settings too
+		if k, _, _ := strings.Cut(kv, "="); strings.HasSuffix(strings.ToUpper(k), "_PROXY") {
 			t.Setenv(k, "")
 		}
 	}
@@ -314,11 +315,7 @@ func TestAnUnknownOTELTracesExporterIsAConfigError(t *testing.T) {
 	// Blank the host's OTEL_* so only this test's setting reaches autoexport. autoexport reads the
 	// process environment, while run's getenv reads only the environ it is passed: set the exporter
 	// in both.
-	for _, kv := range os.Environ() {
-		if k, _, _ := strings.Cut(kv, "="); strings.HasPrefix(k, "OTEL_") {
-			t.Setenv(k, "")
-		}
-	}
+	blankOTELEnv(t)
 	t.Setenv("OTEL_TRACES_EXPORTER", "bogus")
 	t.Cleanup(func() {
 		otel.SetErrorHandler(otel.ErrorHandlerFunc(func(error) {}))
@@ -341,5 +338,16 @@ func TestAConfigurationErrorIsOneLineNamingTheProgram(t *testing.T) {
 	}
 	if got, want := stderr.String(), "byward: configuration error: BYWARD_X: 100% wrong\n"; got != want {
 		t.Errorf("stderr %q, want %q", got, want)
+	}
+}
+
+// blankOTELEnv blanks every OTEL_* variable for the test: autoexport reads the process environment,
+// a developer's settings too.
+func blankOTELEnv(t *testing.T) {
+	t.Helper()
+	for _, kv := range os.Environ() {
+		if k, _, _ := strings.Cut(kv, "="); strings.HasPrefix(k, "OTEL_") {
+			t.Setenv(k, "")
+		}
 	}
 }
