@@ -137,9 +137,9 @@ func sameSchema(v int) error {
 	case v == 0:
 		return fmt.Errorf("%w: %s holds no byward schema", store.ErrNoStore, fileName)
 	case v > schemaVersion():
-		return fmt.Errorf("%w: the store's v%d, this byward's v%d", store.ErrNewerSchema, v, schemaVersion())
+		return fmt.Errorf("%w: v%d, this byward's v%d", store.ErrNewerSchema, v, schemaVersion())
 	case v < schemaVersion():
-		return fmt.Errorf("%w: the store's v%d, this byward's v%d", store.ErrOlderSchema, v, schemaVersion())
+		return fmt.Errorf("%w: v%d, this byward's v%d", store.ErrOlderSchema, v, schemaVersion())
 	}
 	return nil
 }

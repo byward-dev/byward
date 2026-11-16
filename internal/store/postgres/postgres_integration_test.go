@@ -250,8 +250,8 @@ func anOperatorOpenFindsTheSchemaOrCreatesNothing(t *testing.T, srv *server) {
 			_, err := srv.conn(t, db).Exec(ctx, "CREATE TABLE schema_version (version integer NOT NULL); INSERT INTO schema_version VALUES (0)")
 			must(t, err)
 		}, store.ErrNoStore, "holds no byward schema"},
-		{"an older schema", storeAt(schemaVersion() - 1), store.ErrOlderSchema, fmt.Sprintf("the store's v%d, this byward's v%d", schemaVersion()-1, schemaVersion())},
-		{"a newer schema", storeAt(schemaVersion() + 1), store.ErrNewerSchema, fmt.Sprintf("the store's v%d, this byward's v%d", schemaVersion()+1, schemaVersion())},
+		{"an older schema", storeAt(schemaVersion() - 1), store.ErrOlderSchema, fmt.Sprintf("v%d, this byward's v%d", schemaVersion()-1, schemaVersion())},
+		{"a newer schema", storeAt(schemaVersion() + 1), store.ErrNewerSchema, fmt.Sprintf("v%d, this byward's v%d", schemaVersion()+1, schemaVersion())},
 		{"the store", storeAt(schemaVersion()), nil, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

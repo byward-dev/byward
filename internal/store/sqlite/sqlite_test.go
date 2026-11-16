@@ -373,8 +373,8 @@ func TestAnOperatorOpenFindsTheStoreOrCreatesNothing(t *testing.T) {
 			must(t, os.Chmod(filepath.Join(dir, fileName), 0o444)) //nolint:gosec // G302: a read-only store file
 			return dir
 		}, nil, "permission denied"},
-		{"an older schema", storeAt(schemaVersion() - 1), store.ErrOlderSchema, fmt.Sprintf("the store's v%d, this byward's v%d", schemaVersion()-1, schemaVersion())},
-		{"a newer schema", storeAt(schemaVersion() + 1), store.ErrNewerSchema, fmt.Sprintf("the store's v%d, this byward's v%d", schemaVersion()+1, schemaVersion())},
+		{"an older schema", storeAt(schemaVersion() - 1), store.ErrOlderSchema, fmt.Sprintf("v%d, this byward's v%d", schemaVersion()-1, schemaVersion())},
+		{"a newer schema", storeAt(schemaVersion() + 1), store.ErrNewerSchema, fmt.Sprintf("v%d, this byward's v%d", schemaVersion()+1, schemaVersion())},
 		{"the store", storeAt(schemaVersion()), nil, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

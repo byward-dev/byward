@@ -49,8 +49,7 @@ type Options struct {
 	// MustExist is an operator command's open: the database must already be in Dir with this
 	// binary's schema, or Open fails before it creates the directory, the database or the counter
 	// file: store.ErrNoStore when it is missing or has no schema or Dir is not a directory,
-	// store.ErrOlderSchema or
-	// store.ErrNewerSchema at another version. It never migrates.
+	// store.ErrOlderSchema or store.ErrNewerSchema at another version. It never migrates.
 	MustExist bool
 }
 

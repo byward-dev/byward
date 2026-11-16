@@ -233,7 +233,7 @@ func TestRevokeCommandsExit2OnMisuseOrNoStore1OnAStoreFailureAndNameTheRevokedUs
 		{"revoke-all without --yes", []string{"revoke-all"}, noStore, exitConfig, "", "revoke-all --yes"},
 		{"revoke-all with yes instead of --yes", []string{"revoke-all", "yes"}, noStore, exitConfig, "", "revoke-all --yes"},
 		{"revoke-all with --yes and more", []string{"revoke-all", "--yes", "extra"}, noStore, exitConfig, "", "revoke-all --yes"},
-		{"revoke-user with no store", []string{"revoke-user", user}, noStore, exitConfig, "", ": no byward store there: byward.db is missing"},
+		{"revoke-user with no store", []string{"revoke-user", user}, noStore, exitConfig, "", "no byward store there: byward.db is missing; run the command with the proxy's settings"},
 		{"revoke-all with no store", []string{"revoke-all", "--yes"}, noStore, exitConfig, "", "no byward store there: byward.db is missing; run the command with the proxy's settings"},
 		{"revoke-all with a state directory that is a file", []string{"revoke-all", "--yes"}, stateDirIsAFile, exitConfig, "", "no byward store there: the state directory, or a directory above it, is not a directory"},
 		{"revoke-user with a store that cannot open", []string{"revoke-user", user}, corruptStore, exitRuntime, "", "revoke-user failed"},
@@ -440,9 +440,8 @@ func TestRevokeAndNewEpochTakeAStdioUpstreamAfterDashes(t *testing.T) {
 				t.Fatal("the command started the stdio upstream")
 			}
 			store := setting(env, "BYWARD_STORE_DIR")
-			switch _, err := os.Stat(store); {
-			case tc.code == exitConfig && !errors.Is(err, os.ErrNotExist):
-				t.Fatalf("a refused command touched the store at %s", store)
+			if _, err := os.Stat(store); tc.code == exitConfig && !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("a refused command created the store at %s", store)
 			}
 		})
 	}

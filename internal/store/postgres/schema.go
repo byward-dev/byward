@@ -153,9 +153,9 @@ func current(ctx context.Context, pool *pgxpool.Pool) error {
 	case v == 0:
 		return fmt.Errorf("%w: the database (%s) holds no byward schema", store.ErrNoStore, describe(pool.Config().ConnConfig))
 	case v > schemaVersion():
-		return fmt.Errorf("%w: the store's v%d, this byward's v%d", store.ErrNewerSchema, v, schemaVersion())
+		return fmt.Errorf("%w: v%d, this byward's v%d", store.ErrNewerSchema, v, schemaVersion())
 	case v < schemaVersion():
-		return fmt.Errorf("%w: the store's v%d, this byward's v%d", store.ErrOlderSchema, v, schemaVersion())
+		return fmt.Errorf("%w: v%d, this byward's v%d", store.ErrOlderSchema, v, schemaVersion())
 	}
 	return nil
 }
