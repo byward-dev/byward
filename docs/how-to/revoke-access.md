@@ -28,6 +28,9 @@ working.
 byward revoke-user <user key>
 ```
 
+It prints the store it acted on: check that it is the proxy's. A mistyped setting that points at no
+store is refused with exit code 2, and nothing is created.
+
 It deletes the user's grants and remembered consents and records a cut-off. Their refresh tokens
 stop at once; their access tokens are refused by every proxy using the same store at its next
 revocation-list sync, within seconds. The user key is the `user_key` of the audit stream: with

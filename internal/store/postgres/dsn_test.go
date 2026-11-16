@@ -179,3 +179,16 @@ func TestTheTLSModeNamesHowTheConnectionIsProtected(t *testing.T) {
 		})
 	}
 }
+
+// describe names the database for the startup log, the operator commands' success lines and their
+// refusals: host, port, database and TLS, never the password (L152).
+func TestDescribeNamesTheDatabaseNeverThePassword(t *testing.T) {
+	clearPGEnv(t)
+	cfg, err := parseDSN("postgres://byward:s3cret-pw@db.example:6543/byw?sslmode=verify-full", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := describe(cfg.ConnConfig); got != "host=db.example port=6543 dbname=byw tls=verify-full" || strings.Contains(got, "s3cret") {
+		t.Fatalf("describe = %q; want host, port, database and TLS, never the password", got)
+	}
+}

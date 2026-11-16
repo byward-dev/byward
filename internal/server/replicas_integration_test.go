@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -80,7 +81,7 @@ func TestIntegrationTwoReplicasShareThePostgreSQLStore(t *testing.T) {
 		if code != http.StatusOK || mcpPing(b.s, access) != http.StatusOK {
 			t.Fatalf("before revoke-all: refresh %d %v", code, body)
 		}
-		if err := RevokeAll(context.Background(), cfg, discard); err != nil {
+		if _, err := RevokeAll(context.Background(), cfg, discard); err != nil {
 			t.Fatal(err)
 		}
 		eventually(t, "B refuses every token", func() bool { return mcpPing(b.s, access) == http.StatusUnauthorized })
@@ -101,9 +102,9 @@ func TestIntegrationTwoReplicasShareThePostgreSQLStore(t *testing.T) {
 		cfg, db, a, b := pair(t)
 		rt := seedSignedInUser(t, a.wired, "g3", time.Now())
 		var logs logsink.Buffer
-		epoch, err := NewEpoch(context.Background(), cfg, logging.New(&logs, "json"))
-		if err != nil || epoch != 2 {
-			t.Fatalf("NewEpoch = %d, %v; want epoch 2", epoch, err)
+		epoch, where, err := NewEpoch(context.Background(), cfg, logging.New(&logs, "json"))
+		if err != nil || epoch != 2 || !strings.Contains(where, "dbname="+db) || strings.Contains(where, srv.Password) {
+			t.Fatalf("NewEpoch = %d, %q, %v; want epoch 2 in a store named by its database, never the password", epoch, where, err)
 		}
 		if out := logs.String(); strings.Count(out, `"event":"store_restored"`) != 1 || !strings.Contains(out, `"reason":"operator new-epoch"`) ||
 			!restoreLineNames(out, "dbname="+db) || strings.Contains(out, srv.Password) {
@@ -112,6 +113,26 @@ func TestIntegrationTwoReplicasShareThePostgreSQLStore(t *testing.T) {
 		for _, r := range []*replica{a, b} {
 			if code, body := postRefresh(t, r.s, rt); code != http.StatusBadRequest || body["error"] != "invalid_grant" {
 				t.Fatalf("a refresh token from before new-epoch: %d %v, want 400 invalid_grant", code, body)
+			}
+		}
+	})
+
+	// L152: an operator command on a database without byward's schema (a DSN that reaches the wrong
+	// database) is refused naming the setting and the database, never the password; the adapter's
+	// suite shows it creates nothing there.
+	t.Run("operator commands refuse a database without byward's schema", func(t *testing.T) {
+		db := srv.NewDatabase(t)
+		cfg, _, err := config.Load(nil, pgEnv(t, db), os.ReadFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _, errUser := RevokeUser(context.Background(), cfg, discard, "00000000-0000-0000-0000-00000000000a:11111111-1111-1111-1111-11111111111a")
+		_, errAll := RevokeAll(context.Background(), cfg, discard)
+		_, _, errEpoch := NewEpoch(context.Background(), cfg, discard)
+		for name, err := range map[string]error{"revoke-user": errUser, "revoke-all": errAll, "new-epoch": errEpoch} {
+			if !errors.Is(err, ErrNoStore) || !strings.Contains(err.Error(), "BYWARD_STORE_POSTGRES_DSN_FILE") ||
+				!strings.Contains(err.Error(), "dbname="+db) || strings.Contains(err.Error(), srv.Password) {
+				t.Errorf("%s = %v; want ErrNoStore naming the setting and database %q, never the password", name, err, db)
 			}
 		}
 	})

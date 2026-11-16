@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -111,13 +112,28 @@ func collect(ctx context.Context, st store.Collector, log *slog.Logger) {
 // from an older copy, so the store started a new epoch and refresh tokens from before the restore no
 // longer work; users sign in again.
 func openStore(cfg *config.Config, log *slog.Logger, rec *audit.Log) (openedStore, error) {
+	return openStoreFor(cfg, log, rec, false)
+}
+
+// openExistingStore is openStore for an operator command: the store must already be there with
+// this binary's schema (L152), so a mistyped setting fails with store.ErrNoStore, naming the setting
+// and where it looked, before anything is created, instead of acting on a new empty store. It never
+// migrates.
+func openExistingStore(cfg *config.Config, log *slog.Logger, rec *audit.Log) (openedStore, error) {
+	return openStoreFor(cfg, log, rec, true)
+}
+
+func openStoreFor(cfg *config.Config, log *slog.Logger, rec *audit.Log, mustExist bool) (openedStore, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if cfg.StorePostgresDSN != "" {
-		return openPostgres(ctx, cfg, log)
+		return openPostgres(ctx, cfg, log, mustExist)
 	}
-	st, err := sqlite.Open(ctx, sqlite.Options{Dir: cfg.StoreDir, CounterFile: cfg.StoreCounterFile})
+	st, err := sqlite.Open(ctx, sqlite.Options{Dir: cfg.StoreDir, CounterFile: cfg.StoreCounterFile, MustExist: mustExist})
 	if err != nil {
+		if fix := operatorFix(err); mustExist && fix != "" {
+			return nil, fmt.Errorf("BYWARD_STORE_DIR=%s: %w; %s (see docs/how-to/state.md)", cfg.StoreDir, err, fix)
+		}
 		return nil, fmt.Errorf("BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: %w (see docs/how-to/state.md)", err)
 	}
 	s := st.Startup()
@@ -135,13 +151,39 @@ func openStore(cfg *config.Config, log *slog.Logger, rec *audit.Log) (openedStor
 // openPostgres opens the PostgreSQL store. Development mode accepts a connection without
 // verify-full TLS, which config lists among its relaxations. The log names the database, never the
 // DSN.
-func openPostgres(ctx context.Context, cfg *config.Config, log *slog.Logger) (*postgres.Store, error) {
-	st, err := postgres.Open(ctx, postgres.Options{DSN: cfg.StorePostgresDSN, AllowPlaintext: cfg.Dev})
+func openPostgres(ctx context.Context, cfg *config.Config, log *slog.Logger, mustExist bool) (*postgres.Store, error) {
+	st, err := postgres.Open(ctx, postgres.Options{DSN: cfg.StorePostgresDSN, AllowPlaintext: cfg.Dev, MustExist: mustExist})
 	if err != nil {
+		if fix := operatorFix(err); mustExist && fix != "" {
+			return nil, fmt.Errorf("BYWARD_STORE_POSTGRES_DSN_FILE: %w; %s (see docs/how-to/postgres.md)", err, fix)
+		}
 		return nil, fmt.Errorf("BYWARD_STORE_POSTGRES_DSN_FILE: %w (see docs/how-to/postgres.md)", err)
 	}
 	log.Info("store open", "setting", "BYWARD_STORE_POSTGRES_DSN_FILE", "value", st.Describe()) // the database, never the DSN
 	return st, nil
+}
+
+// operatorFix is the way out of an operator command's refused open (L152), or "" for any other
+// error. Operator commands never migrate.
+func operatorFix(err error) string {
+	switch {
+	case errors.Is(err, store.ErrNoStore):
+		return "run the command with the proxy's settings"
+	case errors.Is(err, store.ErrOlderSchema):
+		return "an operator command never migrates: run it with the proxy's byward version, or start the upgraded proxy first, which migrates"
+	case errors.Is(err, store.ErrNewerSchema):
+		return "run the command with the proxy's byward version"
+	}
+	return ""
+}
+
+// storeName names the store an operator command acted on, for its success line: the state
+// directory, or the database (never the DSN). It picks the store as openStoreFor does.
+func storeName(cfg *config.Config, st openedStore) string {
+	if d, ok := st.(interface{ Describe() string }); ok && cfg.StorePostgresDSN != "" {
+		return "BYWARD_STORE_POSTGRES_DSN_FILE (" + d.Describe() + ")"
+	}
+	return "BYWARD_STORE_DIR=" + cfg.StoreDir
 }
 
 // restoreWatch is watchRestore for a store that checks for restores while running and names its

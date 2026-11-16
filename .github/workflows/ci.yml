@@ -270,7 +270,8 @@ jobs:
           BYWARD_REAL_CLIENTS: "1"
 
   # The PostgreSQL store on PostgreSQL 15 and 18 in pinned containers with TLS: the conformance
-  # suite, the adapter's own tests and two replicas of the wired proxy sharing it (ADR-0007, #227).
+  # suite, the adapter's own tests, two replicas of the wired proxy sharing it (ADR-0007, #227), and
+  # the operator commands on it (L152).
   postgres:
     runs-on: ubuntu-latest
     timeout-minutes: 12

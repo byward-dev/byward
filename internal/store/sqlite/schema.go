@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"github.com/byward-dev/byward/internal/store"
 )
 
 // migrations are forward-only (ADR-0007): migrations[i] takes the schema from version i to i+1.
@@ -116,6 +118,31 @@ var migrations = []string{
 
 // schemaVersion is the schema this binary writes.
 func schemaVersion() int { return len(migrations) }
+
+// current is migrate for an operator command, which never migrates: the schema must be this
+// binary's. Version 0 is a database byward never set up (store.ErrNoStore); another version is
+// store.ErrOlderSchema or store.ErrNewerSchema.
+func current(ctx context.Context, db *sql.DB) error {
+	var v int
+	if err := db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&v); err != nil {
+		return fmt.Errorf("sqlite store: read schema version: %w", err)
+	}
+	return sameSchema(v) // present checked it; another process may have changed it since
+}
+
+// sameSchema refuses, for an operator command, a schema version other than this binary's: 0 is a
+// database byward never set up (store.ErrNoStore).
+func sameSchema(v int) error {
+	switch {
+	case v == 0:
+		return fmt.Errorf("%w: %s holds no byward schema", store.ErrNoStore, fileName)
+	case v > schemaVersion():
+		return fmt.Errorf("%w: v%d, this byward's v%d", store.ErrNewerSchema, v, schemaVersion())
+	case v < schemaVersion():
+		return fmt.Errorf("%w: v%d, this byward's v%d", store.ErrOlderSchema, v, schemaVersion())
+	}
+	return nil
+}
 
 // migrate brings db to SchemaVersion. A newer schema is refused: downgrading needs a backup
 // (ADR-0007 Consequences).
