@@ -106,7 +106,7 @@ func revokeUser(ctx context.Context, args, environ []string, stdout, stderr io.W
 		return exitConfig
 	}
 	key := flags[0]
-	user, err := server.RevokeUser(ctx, cfg, logging.New(stderr, cfg.LogFormat), key)
+	user, where, err := server.RevokeUser(ctx, cfg, logging.New(stderr, cfg.LogFormat), key)
 	switch {
 	case errors.Is(err, server.ErrNeedsAuthentication):
 		_, _ = fmt.Fprintf(stderr, "byward: revoke-user: %v\n", err)
@@ -115,11 +115,21 @@ func revokeUser(ctx context.Context, args, environ []string, stdout, stderr io.W
 		_, _ = fmt.Fprintf(stderr, "byward: revoke-user %q: %v\n", key, err)
 		return exitConfig
 	case err != nil:
-		_, _ = fmt.Fprintf(stderr, "byward: revoke-user failed: %v\n", err)
-		return exitRuntime
+		return storeFailure(stderr, "revoke-user", err)
 	}
-	_, _ = fmt.Fprintf(stdout, "revoked user %s: their grants are gone and their tokens stop working within seconds\n", user)
+	_, _ = fmt.Fprintf(stdout, "revoked user %s in %s: their grants are gone and their tokens stop working within seconds\n", user, where)
 	return exitOK
+}
+
+// storeFailure reports an operator command's failure: exit 2 when the settings point at no store
+// (L152), a configuration mistake; exit 1 for any other.
+func storeFailure(stderr io.Writer, command string, err error) int {
+	if errors.Is(err, server.ErrNoStore) {
+		_, _ = fmt.Fprintf(stderr, "byward: %s: %v\n", command, err)
+		return exitConfig
+	}
+	_, _ = fmt.Fprintf(stderr, "byward: %s failed: %v\n", command, err)
+	return exitRuntime
 }
 
 // revokeAll is revoke-all (ADR-0006 §9); --yes, because it signs every user out.
@@ -133,15 +143,15 @@ func revokeAll(ctx context.Context, args, environ []string, stdout, stderr io.Wr
 	if !ok {
 		return exitConfig
 	}
-	switch err := server.RevokeAll(ctx, cfg, logging.New(stderr, cfg.LogFormat)); {
+	where, err := server.RevokeAll(ctx, cfg, logging.New(stderr, cfg.LogFormat))
+	switch {
 	case errors.Is(err, server.ErrNeedsAuthentication):
 		_, _ = fmt.Fprintf(stderr, "byward: revoke-all: %v\n", err)
 		return exitConfig
 	case err != nil:
-		_, _ = fmt.Fprintf(stderr, "byward: revoke-all failed: %v\n", err)
-		return exitRuntime
+		return storeFailure(stderr, "revoke-all", err)
 	}
-	_, _ = fmt.Fprintln(stdout, "revoked every user: their grants are gone and their tokens stop working within seconds")
+	_, _ = fmt.Fprintf(stdout, "revoked every user in %s: their grants are gone and their tokens stop working within seconds\n", where)
 	return exitOK
 }
 
@@ -156,15 +166,14 @@ func storeCommand(ctx context.Context, args, environ []string, stdout, stderr io
 	if !ok {
 		return exitConfig
 	}
-	epoch, err := server.NewEpoch(ctx, cfg, logging.New(stderr, cfg.LogFormat))
+	epoch, where, err := server.NewEpoch(ctx, cfg, logging.New(stderr, cfg.LogFormat))
 	switch {
 	case errors.Is(err, server.ErrNewEpochNeedsPostgres), errors.Is(err, server.ErrNeedsAuthentication):
 		_, _ = fmt.Fprintf(stderr, "byward: store new-epoch: %v\n", err)
 		return exitConfig
 	case err != nil:
-		_, _ = fmt.Fprintf(stderr, "byward: store new-epoch failed: %v\n", err)
-		return exitRuntime
+		return storeFailure(stderr, "store new-epoch", err)
 	}
-	_, _ = fmt.Fprintf(stdout, "started store epoch %d: refresh tokens from before it stop working, and their users sign in again\n", epoch)
+	_, _ = fmt.Fprintf(stdout, "started store epoch %d in %s: refresh tokens from before it stop working, and their users sign in again\n", epoch, where)
 	return exitOK
 }

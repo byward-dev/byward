@@ -8,9 +8,11 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -56,6 +58,7 @@ func TestIntegrationPostgres(t *testing.T) {
 				{"AConcurrentInsertOfTheSameIDIsErrExists", aConcurrentInsertOfTheSameIDIsErrExists},
 				{"MigrationsRunOneAtATime", migrationsRunOneAtATime},
 				{"NewerSchemaIsRefused", newerSchemaIsRefused},
+				{"AnOperatorOpenFindsTheSchemaOrCreatesNothing", anOperatorOpenFindsTheSchemaOrCreatesNothing},
 				{"FixturesMigrateToTheCurrentSchemaKeepingTheirData", fixturesMigrateToTheCurrentSchemaKeepingTheirData},
 				{"FailedMigrationChangesNothing", failedMigrationChangesNothing},
 				{"AnEpochBumpCountsAtOnceWithoutAReopen", anEpochBumpCountsAtOnceWithoutAReopen},
@@ -203,6 +206,105 @@ func newerSchemaIsRefused(t *testing.T, srv *server) {
 	if err == nil || !strings.Contains(err.Error(), "newer than this binary") {
 		t.Fatalf("err = %v, want the downgrade refusal", err)
 	}
+}
+
+// L152: an operator command's open (MustExist) finds byward's schema at this binary's version, or
+// fails having created and migrated nothing: a database without the schema, or one that does not
+// exist, is store.ErrNoStore naming the database (never the DSN); another version is refused and
+// stays as it was.
+func anOperatorOpenFindsTheSchemaOrCreatesNothing(t *testing.T, srv *server) {
+	// tables lists the database's tables, and schema_version's value when it has one.
+	tables := func(t *testing.T, db string) string {
+		c := srv.conn(t, db)
+		rows, err := c.Query(ctx, "SELECT tablename FROM pg_tables WHERE schemaname = current_schema() ORDER BY tablename")
+		must(t, err)
+		names, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		must(t, err)
+		out := strings.Join(names, ",")
+		if slices.Contains(names, "schema_version") {
+			var v int
+			must(t, c.QueryRow(ctx, "SELECT version FROM schema_version").Scan(&v))
+			out += fmt.Sprintf(" at v%d", v)
+		}
+		return out
+	}
+	storeAt := func(v int) func(*testing.T, string) {
+		return func(t *testing.T, db string) {
+			must(t, srv.openOn(t, db).Close())
+			_, err := srv.conn(t, db).Exec(ctx, "UPDATE schema_version SET version = $1", v)
+			must(t, err)
+		}
+	}
+	for _, tc := range []struct {
+		name    string
+		prepare func(t *testing.T, db string)
+		is      error  // the sentinel the refusal wraps; nil when Open succeeds
+		want    string // in the error; "" when Open succeeds
+	}{
+		{"an empty database", func(*testing.T, string) {}, store.ErrNoStore, "holds no byward schema"},
+		{"another program's tables", func(t *testing.T, db string) {
+			_, err := srv.conn(t, db).Exec(ctx, "CREATE TABLE notes (body text)")
+			must(t, err)
+		}, store.ErrNoStore, "holds no byward schema"},
+		{"schema_version at 0", func(t *testing.T, db string) {
+			_, err := srv.conn(t, db).Exec(ctx, "CREATE TABLE schema_version (version integer NOT NULL); INSERT INTO schema_version VALUES (0)")
+			must(t, err)
+		}, store.ErrNoStore, "holds no byward schema"},
+		{"an older schema", storeAt(schemaVersion() - 1), store.ErrOlderSchema, fmt.Sprintf("the store's v%d, this byward's v%d", schemaVersion()-1, schemaVersion())},
+		{"a newer schema", storeAt(schemaVersion() + 1), store.ErrNewerSchema, fmt.Sprintf("the store's v%d, this byward's v%d", schemaVersion()+1, schemaVersion())},
+		{"the store", storeAt(schemaVersion()), nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := srv.newDatabase(t)
+			tc.prepare(t, db)
+			before := tables(t, db)
+			st, err := Open(bounded(t), Options{DSN: srv.dsn(db), MustExist: true})
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("Open(MustExist) on the store: %v", err)
+				}
+				must(t, st.Close())
+				return
+			}
+			if err == nil {
+				must(t, st.Close())
+				t.Fatal("Open(MustExist) succeeded")
+			}
+			for _, sentinel := range []error{store.ErrNoStore, store.ErrOlderSchema, store.ErrNewerSchema} {
+				if errors.Is(err, sentinel) != (sentinel == tc.is) {
+					t.Fatalf("Open(MustExist) = %v; errors.Is(%v) = %v, want %v", err, sentinel, errors.Is(err, sentinel), sentinel == tc.is)
+				}
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Open(MustExist) = %v; want it to say %q", err, tc.want)
+			}
+			if tc.is == store.ErrNoStore && (!strings.Contains(err.Error(), "host="+srv.Host+" port="+srv.Port+" dbname="+db) || strings.Contains(err.Error(), srv.Password)) {
+				t.Fatalf("Open(MustExist) = %v; want it to name the database, never the password", err)
+			}
+			if after := tables(t, db); after != before {
+				t.Fatalf("the refused open changed the database: %q, then %q", before, after)
+			}
+		})
+	}
+	t.Run("a database that does not exist", func(t *testing.T) {
+		_, err := Open(bounded(t), Options{DSN: srv.dsn("no_such_database"), MustExist: true})
+		if !errors.Is(err, store.ErrNoStore) || !strings.Contains(err.Error(), "host="+srv.Host+" port="+srv.Port+" dbname=no_such_database") ||
+			!strings.Contains(err.Error(), "does not exist") || strings.Contains(err.Error(), srv.Password) {
+			t.Fatalf("Open(MustExist) = %v; want store.ErrNoStore naming the missing database, never the password", err)
+		}
+	})
+	// A connection the server refuses is not a missing store: exit 1 with the real error, not 2.
+	t.Run("a wrong password", func(t *testing.T) {
+		u, err := url.Parse(srv.dsn(srv.newDatabase(t)))
+		must(t, err)
+		u.User = url.UserPassword(u.User.Username(), "not-the-password")
+		_, err = Open(bounded(t), Options{DSN: u.String(), MustExist: true})
+		if err == nil || errors.Is(err, store.ErrNoStore) || errors.Is(err, store.ErrOlderSchema) || errors.Is(err, store.ErrNewerSchema) ||
+			!strings.Contains(err.Error(), "connect or read schema version") || !strings.Contains(err.Error(), "28P01") ||
+			strings.Contains(err.Error(), "not-the-password") {
+			t.Fatalf("Open(MustExist) with a wrong password = %v; want the server's refusal (28P01) as a connection error, no sentinel, without the password", err)
+		}
+	})
 }
 
 // The schema version that first holds each part of the migration fixture.

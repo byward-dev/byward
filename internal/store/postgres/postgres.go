@@ -31,6 +31,10 @@ type Options struct {
 	// AllowPlaintext accepts a DSN without verify-full TLS, for development mode only; the caller
 	// logs it as a relaxation.
 	AllowPlaintext bool
+	// MustExist is an operator command's open: the database must already hold this binary's
+	// schema, or Open fails having created and migrated nothing: store.ErrNoStore when it does not
+	// exist or holds none, store.ErrOlderSchema or store.ErrNewerSchema at another version.
+	MustExist bool
 }
 
 // Store is the PostgreSQL adapter.
@@ -42,7 +46,7 @@ type Store struct {
 var _ store.Store = (*Store)(nil)
 
 // Open parses the DSN, refuses anything but verify-full TLS (unless AllowPlaintext), connects and
-// migrates the schema.
+// migrates the schema, or with MustExist only checks it.
 func Open(ctx context.Context, opts Options) (*Store, error) {
 	cfg, err := parseDSN(opts.DSN, opts.AllowPlaintext)
 	if err != nil {
@@ -52,7 +56,11 @@ func Open(ctx context.Context, opts Options) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("postgres store: %w", err)
 	}
-	if err := migrate(ctx, pool); err != nil {
+	prepare := migrate
+	if opts.MustExist {
+		prepare = current
+	}
+	if err := prepare(ctx, pool); err != nil {
 		pool.Close()
 		return nil, err
 	}
@@ -75,8 +83,10 @@ func (s *Store) Ping(ctx context.Context) error {
 }
 
 // Describe names the database for the startup log: host, port, database and TLS, never the DSN.
-func (s *Store) Describe() string {
-	c := s.pool.Config().ConnConfig
+func (s *Store) Describe() string { return describe(s.pool.Config().ConnConfig) }
+
+// describe names the database c connects to, never the DSN.
+func describe(c *pgx.ConnConfig) string {
 	return fmt.Sprintf("host=%s port=%d dbname=%s tls=%s", c.Host, c.Port, c.Database, tlsMode(&c.Config))
 }
 

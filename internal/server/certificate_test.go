@@ -11,6 +11,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
+	"github.com/byward-dev/byward/internal/store/sqlite"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
@@ -169,7 +170,8 @@ func TestAnExpiredCertificateRefusesToServeButDoctorAndRevokeUserStillWork(t *te
 	if expiry.Status != doctor.Fail {
 		t.Fatalf("doctor's expiry check: %+v", expiry)
 	}
-	if user, err := RevokeUser(context.Background(), cfg, discard, fixtureTenant+":11111111-1111-1111-1111-11111111111a"); err != nil || user == "" {
+	withStore(t, cfg, func(*sqlite.Store) {}) // the store the proxy kept while its certificate was valid
+	if user, _, err := RevokeUser(context.Background(), cfg, discard, fixtureTenant+":11111111-1111-1111-1111-11111111111a"); err != nil || user == "" {
 		t.Fatalf("revoke-user with an expired certificate: %q, %v", user, err)
 	}
 }

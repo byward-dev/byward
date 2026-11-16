@@ -318,6 +318,164 @@ func TestNewerSchemaIsRefused(t *testing.T) {
 	}
 }
 
+// L152: an operator command's open (MustExist) finds the store, or fails having created and written
+// nothing: no state directory, no database file, no change to a file that is there, and the counter
+// file neither created nor rewritten. It never migrates: another schema version is refused and
+// stays as it was.
+func TestAnOperatorOpenFindsTheStoreOrCreatesNothing(t *testing.T) {
+	// storeAt is a store a proxy made, set to schema v, its file mode loosened so that a refused open
+	// that prepared the file (Open sets 0600) shows.
+	storeAt := func(v int) func(*testing.T, string) string {
+		return func(t *testing.T, dir string) string {
+			must(t, open(t, dir, filepath.Join(t.TempDir(), "w")).Close())
+			db := rawDB(t, dir)
+			_, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", v))
+			must(t, err)
+			must(t, db.Close())
+			must(t, os.Chmod(filepath.Join(dir, fileName), 0o644)) //nolint:gosec // G302: a mode Open must not change
+			return dir
+		}
+	}
+	for _, tc := range []struct {
+		name    string
+		prepare func(t *testing.T, dir string) string // the state directory to open
+		is      error                                 // the sentinel the refusal wraps; nil when Open succeeds or for another error
+		want    string                                // in the error; "" when Open succeeds
+	}{
+		{"no state directory", func(t *testing.T, dir string) string { return filepath.Join(dir, "missing") }, store.ErrNoStore, "byward.db is missing"},
+		{"an empty state directory", func(t *testing.T, dir string) string { return dir }, store.ErrNoStore, "byward.db is missing"},
+		{"a state directory that is a file", func(t *testing.T, dir string) string {
+			f := filepath.Join(dir, "file")
+			must(t, os.WriteFile(f, nil, 0o600))
+			return f
+		}, store.ErrNoStore, "the state directory, or a directory above it, is not a directory"},
+		{"an empty database file", func(t *testing.T, dir string) string {
+			must(t, os.WriteFile(filepath.Join(dir, fileName), nil, 0o600))
+			return dir
+		}, store.ErrNoStore, "byward.db holds no byward schema"},
+		{"another program's database", func(t *testing.T, dir string) string {
+			db := rawDB(t, dir)
+			_, err := db.Exec("CREATE TABLE notes (body TEXT); INSERT INTO notes VALUES ('kept')")
+			must(t, err)
+			must(t, db.Close())
+			must(t, os.Chmod(filepath.Join(dir, fileName), 0o600)) // as Open would leave it, so only a content change shows
+			return dir
+		}, store.ErrNoStore, "byward.db holds no byward schema"},
+		{"a file that is not a database", func(t *testing.T, dir string) string {
+			must(t, os.WriteFile(filepath.Join(dir, fileName), []byte(strings.Repeat("not a database ", 100)), 0o600))
+			return dir
+		}, nil, "file is not a database"},
+		{"a store file it cannot write", func(t *testing.T, dir string) string {
+			if os.Geteuid() == 0 {
+				t.Skip("root writes a read-only file")
+			}
+			storeAt(schemaVersion())(t, dir)
+			must(t, os.Chmod(filepath.Join(dir, fileName), 0o444)) //nolint:gosec // G302: a read-only store file
+			return dir
+		}, nil, "permission denied"},
+		{"an older schema", storeAt(schemaVersion() - 1), store.ErrOlderSchema, fmt.Sprintf("the store's v%d, this byward's v%d", schemaVersion()-1, schemaVersion())},
+		{"a newer schema", storeAt(schemaVersion() + 1), store.ErrNewerSchema, fmt.Sprintf("the store's v%d, this byward's v%d", schemaVersion()+1, schemaVersion())},
+		{"the store", storeAt(schemaVersion()), nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := tc.prepare(t, t.TempDir())
+			counter := filepath.Join(t.TempDir(), "writes")
+			must(t, os.WriteFile(counter, []byte("7\n"), 0o600)) // another store's mirror, as beside a mistyped directory
+			before := snapshot(t, dir)
+			s, err := Open(bounded(t), Options{Dir: dir, CounterFile: counter, MustExist: true})
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("Open(MustExist) on the store: %v", err)
+				}
+				must(t, s.Close())
+				return
+			}
+			if err == nil {
+				must(t, s.Close())
+				t.Fatal("Open(MustExist) succeeded")
+			}
+			for _, sentinel := range []error{store.ErrNoStore, store.ErrOlderSchema, store.ErrNewerSchema} {
+				if errors.Is(err, sentinel) != (sentinel == tc.is) {
+					t.Errorf("Open(MustExist) = %v; errors.Is(%v) = %v, want %v", err, sentinel, errors.Is(err, sentinel), sentinel == tc.is)
+				}
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("Open(MustExist) = %v; want it to say %q", err, tc.want)
+			}
+			if after := snapshot(t, dir); after != before {
+				t.Errorf("the state directory changed:\n%s\nthen\n%s", before, after)
+			}
+			if b, err := os.ReadFile(filepath.Clean(counter)); err != nil || string(b) != "7\n" {
+				t.Errorf("the counter file was rewritten: %q (%v)", b, err)
+			}
+		})
+	}
+}
+
+// L152, ADR-0007 §9: an operator command's open finds a restore as the proxy's start does, so its
+// write cannot move the counter mirror back to the restored copy and hide the restore from the next
+// start.
+func TestAnOperatorOpenFindsARestore(t *testing.T) {
+	dir, counter := t.TempDir(), filepath.Join(t.TempDir(), "writes")
+	s := open(t, dir, counter)
+	if _, err := s.CreateGrant(ctx, grant("old", "tid:a")); err != nil {
+		t.Fatal(err)
+	}
+	must(t, s.Close())
+	backup := copyDB(t, dir)
+	s = open(t, dir, counter)
+	if _, err := s.CreateGrant(ctx, grant("after-backup", "tid:a")); err != nil {
+		t.Fatal(err)
+	}
+	must(t, s.Close())
+	restoreDB(t, backup, dir)
+
+	op, err := Open(bounded(t), Options{Dir: dir, CounterFile: counter, MustExist: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !op.Startup().Restored || op.Startup().Epoch != 2 {
+		t.Fatalf("operator open: restored=%v epoch=%d, want the restore found and epoch 2", op.Startup().Restored, op.Startup().Epoch)
+	}
+	must(t, op.RevokeAll(ctx, t0, t0))
+	must(t, op.Close())
+	if next := open(t, dir, counter).Startup(); next.Restored || next.Epoch != 2 {
+		t.Fatalf("the next start: restored=%v epoch=%d, want epoch 2 kept", next.Restored, next.Epoch)
+	}
+}
+
+// snapshot describes path for a before-and-after comparison: missing, a file's size, or a
+// directory's entries with their sizes, modes and contents.
+func snapshot(t *testing.T, path string) string {
+	t.Helper()
+	fi, err := os.Stat(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return "missing"
+	case err != nil:
+		t.Fatal(err)
+	case !fi.IsDir():
+		return fmt.Sprintf("file of %d bytes", fi.Size())
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b strings.Builder
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil {
+			t.Fatal(err)
+		}
+		content, err := os.ReadFile(filepath.Join(path, e.Name())) //nolint:gosec // G304: test files
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(&b, "%s %d %v sha256:%x\n", e.Name(), info.Size(), info.Mode(), sha256.Sum256(content))
+	}
+	return "directory:\n" + b.String()
+}
+
 // ADR-0007 §9: a database restored from an older copy is behind the counter mirror; Open bumps the
 // epoch, refresh tokens from older epochs stop working, and grants made afterwards work.
 func TestRestoredDatabaseStartsANewEpochOnce(t *testing.T) {

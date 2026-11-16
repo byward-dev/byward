@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/byward-dev/byward/internal/store"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -128,6 +130,35 @@ func schemaVersion() int { return len(migrations) }
 // migrateLock is the advisory lock key migrations run under, so replicas starting together migrate
 // one at a time. The bytes spell "byw:migr".
 const migrateLock int64 = 0x6279773a6d696772
+
+// current is migrate for an operator command, which never migrates and creates nothing: the
+// schema must be this binary's. A database that does not exist, or one without schema_version or
+// at version 0, is store.ErrNoStore; another version is store.ErrOlderSchema or
+// store.ErrNewerSchema.
+func current(ctx context.Context, pool *pgxpool.Pool) error {
+	var exists bool
+	if err := pool.QueryRow(ctx, "SELECT to_regclass('schema_version') IS NOT NULL").Scan(&exists); err != nil {
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "3D000" { // invalid_catalog_name
+			return fmt.Errorf("%w: the database (%s) does not exist", store.ErrNoStore, describe(pool.Config().ConnConfig))
+		}
+		return fmt.Errorf("postgres store: connect or read schema version: %w", err) // the first query connects
+	}
+	var v int
+	if exists { // a statement naming a missing table fails at parse time, so ask first
+		if err := pool.QueryRow(ctx, "SELECT coalesce(max(version), 0) FROM schema_version").Scan(&v); err != nil {
+			return fmt.Errorf("postgres store: read schema version: %w", err)
+		}
+	}
+	switch {
+	case v == 0:
+		return fmt.Errorf("%w: the database (%s) holds no byward schema", store.ErrNoStore, describe(pool.Config().ConnConfig))
+	case v > schemaVersion():
+		return fmt.Errorf("%w: the store's v%d, this byward's v%d", store.ErrNewerSchema, v, schemaVersion())
+	case v < schemaVersion():
+		return fmt.Errorf("%w: the store's v%d, this byward's v%d", store.ErrOlderSchema, v, schemaVersion())
+	}
+	return nil
+}
 
 // migrate brings the database to schemaVersion under migrateLock, which it holds on one connection
 // for the whole run. A newer schema is refused: downgrading needs a backup (ADR-0007 Consequences).

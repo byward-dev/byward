@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -73,7 +74,7 @@ func grantGone(t *testing.T, cfg *config.Config, id string) bool {
 func TestRevokeUserEndsOnlyThatUsersAccessBesideARunningProxy(t *testing.T) {
 	cfg, tok := revokeEnv(t)
 	var logs bytes.Buffer
-	user, err := RevokeUser(context.Background(), cfg, slog.New(slog.NewJSONHandler(&logs, nil)), strings.ToUpper(aliceKey))
+	user, _, err := RevokeUser(context.Background(), cfg, slog.New(slog.NewJSONHandler(&logs, nil)), strings.ToUpper(aliceKey))
 	if err != nil || user != aliceKey {
 		t.Fatalf("RevokeUser = %q, %v; want %q", user, err, aliceKey)
 	}
@@ -92,7 +93,7 @@ func TestRevokeUserEndsOnlyThatUsersAccessBesideARunningProxy(t *testing.T) {
 func TestRevokeAllEndsEveryUsersAccessBesideARunningProxy(t *testing.T) {
 	cfg, tok := revokeEnv(t)
 	var logs bytes.Buffer
-	if err := RevokeAll(context.Background(), cfg, slog.New(slog.NewJSONHandler(&logs, nil))); err != nil {
+	if _, err := RevokeAll(context.Background(), cfg, slog.New(slog.NewJSONHandler(&logs, nil))); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"alice", "bob"} {
@@ -108,7 +109,7 @@ func TestRevokeAllEndsEveryUsersAccessBesideARunningProxy(t *testing.T) {
 // A key that is not tid:oid would revoke nobody while looking done (formats: entra.UserKey).
 func TestRevokeUserRefusesWhatIsNotAUserKeyAndRevokesNobody(t *testing.T) {
 	cfg, tok := revokeEnv(t)
-	if _, err := RevokeUser(context.Background(), cfg, discard, "alice@contoso.example"); !errors.Is(err, ErrNotAUserKey) {
+	if _, _, err := RevokeUser(context.Background(), cfg, discard, "alice@contoso.example"); !errors.Is(err, ErrNotAUserKey) {
 		t.Fatalf("RevokeUser(an email) = %v, want ErrNotAUserKey", err)
 	}
 	if !valid(t, cfg, tok["alice"]) {
@@ -126,9 +127,24 @@ func TestRevokeUserRefusesWhatIsNotAUserKeyAndRevokesNobody(t *testing.T) {
 	}
 }
 
+// L152: a revocation whose settings point at no store is refused with ErrNoStore, naming the setting
+// and the directory and the way out, and creates nothing there.
+func TestARevocationWithNoStoreIsRefusedNamingTheSetting(t *testing.T) {
+	_, cfg := storeEnv(t)
+	cfg.StoreDir += "-typo"
+	_, err := RevokeAll(context.Background(), cfg, discard)
+	if !errors.Is(err, ErrNoStore) || !strings.Contains(err.Error(), "BYWARD_STORE_DIR="+cfg.StoreDir+": no byward store there") ||
+		!strings.Contains(err.Error(), "run the command with the proxy's settings") {
+		t.Fatalf("RevokeAll = %v; want ErrNoStore naming BYWARD_STORE_DIR=%s and the fix", err, cfg.StoreDir)
+	}
+	if _, err := os.Stat(cfg.StoreDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the refused revocation created %s (%v)", cfg.StoreDir, err)
+	}
+}
+
 func TestRevocationNeedsAuthentication(t *testing.T) {
 	cfg := loadNoAuthConfig(t, "http://u/mcp")
-	if err := RevokeAll(context.Background(), cfg, discard); err == nil || !strings.Contains(err.Error(), "BYWARD_INSECURE_NO_AUTH") {
+	if _, err := RevokeAll(context.Background(), cfg, discard); err == nil || !strings.Contains(err.Error(), "BYWARD_INSECURE_NO_AUTH") {
 		t.Fatalf("RevokeAll without authentication = %v, want an error naming BYWARD_INSECURE_NO_AUTH", err)
 	}
 }
@@ -139,7 +155,7 @@ func TestAFailedRevocationIsNotAudited(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // the store still opens (on its own deadline); the revocation's write then fails
 	var logs bytes.Buffer
-	if err := RevokeAll(ctx, cfg, slog.New(slog.NewJSONHandler(&logs, nil))); err == nil {
+	if _, err := RevokeAll(ctx, cfg, slog.New(slog.NewJSONHandler(&logs, nil))); err == nil {
 		t.Fatal("RevokeAll with a cancelled context succeeded")
 	}
 	if strings.Contains(logs.String(), `"event":"grant_revoked"`) {
@@ -164,7 +180,7 @@ func TestRevokeUserTakesAnOIDCSubjectAsItIs(t *testing.T) {
 			}
 		}
 	})
-	user, err := RevokeUser(context.Background(), cfg, discard, " f3a1-Alice ")
+	user, _, err := RevokeUser(context.Background(), cfg, discard, " f3a1-Alice ")
 	if err != nil || user != "f3a1-Alice" {
 		t.Fatalf("RevokeUser = %q, %v", user, err)
 	}
@@ -172,7 +188,7 @@ func TestRevokeUserTakesAnOIDCSubjectAsItIs(t *testing.T) {
 		t.Fatal("revoke-user must end exactly the grants of that subject")
 	}
 	for _, key := range []string{"  ", "alice\nbob", "a\x00b"} {
-		if _, err := RevokeUser(context.Background(), cfg, discard, key); !errors.Is(err, ErrNotAUserKey) {
+		if _, _, err := RevokeUser(context.Background(), cfg, discard, key); !errors.Is(err, ErrNotAUserKey) {
 			t.Errorf("RevokeUser(%q) = %v, want ErrNotAUserKey", key, err)
 		}
 	}

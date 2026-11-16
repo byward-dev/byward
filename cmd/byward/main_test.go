@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace/noop"
 
+	"github.com/byward-dev/byward/internal/store/sqlite"
 	"github.com/byward-dev/byward/internal/testutil/assertionkey"
 	"github.com/byward-dev/byward/internal/testutil/closedport"
 	"github.com/byward-dev/byward/internal/testutil/sealingkey"
@@ -213,48 +214,135 @@ func TestNoAuthLogsThatAuthIsOffAndTheNextStep(t *testing.T) {
 	}
 }
 
-// The operator commands: a usage mistake exits 2 with nothing on stdout and the store untouched (not
-// even created); a store that cannot open exits 1; a done revocation names the user and exits 0.
-func TestRevokeCommandsExit2OnMisuse1OnAStoreFailureAndReportTheRevokedUser(t *testing.T) {
+// The operator commands: a usage mistake, or a store that is not there (L152), exits 2 with nothing
+// on stdout and nothing created; a store that cannot open exits 1; a done revocation names the user
+// and the store, and exits 0.
+func TestRevokeCommandsExit2OnMisuseOrNoStore1OnAStoreFailureAndNameTheRevokedUserAndStore(t *testing.T) {
 	user := "00000000-0000-0000-0000-00000000000a:11111111-1111-1111-1111-11111111111a"
 	cases := []struct {
 		name       string
 		args       []string
-		badStore   bool // BYWARD_STORE_DIR names a file, so the store cannot open
+		store      operatorStore
 		code       int
 		wantStdout string // "" means nothing at all
 		inStderr   string
 	}{
-		{"revoke-user without a key", []string{"revoke-user"}, false, exitConfig, "", "usage: byward revoke-user <user key>"},
-		{"revoke-user with two keys", []string{"revoke-user", user, user}, false, exitConfig, "", "usage:"},
-		{"revoke-user with an email", []string{"revoke-user", "alice@contoso.example"}, false, exitConfig, "", "not a user key"},
-		{"revoke-all without --yes", []string{"revoke-all"}, false, exitConfig, "", "revoke-all --yes"},
-		{"revoke-all with yes instead of --yes", []string{"revoke-all", "yes"}, false, exitConfig, "", "revoke-all --yes"},
-		{"revoke-all with --yes and more", []string{"revoke-all", "--yes", "extra"}, false, exitConfig, "", "revoke-all --yes"},
-		{"revoke-user with a store that cannot open", []string{"revoke-user", user}, true, exitRuntime, "", "revoke-user failed"},
-		{"revoke-all with a store that cannot open", []string{"revoke-all", "--yes"}, true, exitRuntime, "", "revoke-all failed"},
-		{"revoke-user", []string{"revoke-user", strings.ToUpper(user)}, false, exitOK, "revoked user " + user, `"reason":"operator revoke-user"`},
-		{"revoke-all", []string{"revoke-all", "--yes"}, false, exitOK, "revoked every user", `"reason":"operator revoke-all"`},
+		{"revoke-user without a key", []string{"revoke-user"}, noStore, exitConfig, "", "usage: byward revoke-user <user key>"},
+		{"revoke-user with two keys", []string{"revoke-user", user, user}, noStore, exitConfig, "", "usage:"},
+		{"revoke-user with an email", []string{"revoke-user", "alice@contoso.example"}, noStore, exitConfig, "", "not a user key"},
+		{"revoke-all without --yes", []string{"revoke-all"}, noStore, exitConfig, "", "revoke-all --yes"},
+		{"revoke-all with yes instead of --yes", []string{"revoke-all", "yes"}, noStore, exitConfig, "", "revoke-all --yes"},
+		{"revoke-all with --yes and more", []string{"revoke-all", "--yes", "extra"}, noStore, exitConfig, "", "revoke-all --yes"},
+		{"revoke-user with no store", []string{"revoke-user", user}, noStore, exitConfig, "", ": no byward store there: byward.db is missing"},
+		{"revoke-all with no store", []string{"revoke-all", "--yes"}, noStore, exitConfig, "", "no byward store there: byward.db is missing; run the command with the proxy's settings"},
+		{"revoke-all with a state directory that is a file", []string{"revoke-all", "--yes"}, stateDirIsAFile, exitConfig, "", "no byward store there: the state directory, or a directory above it, is not a directory"},
+		{"revoke-user with a store that cannot open", []string{"revoke-user", user}, corruptStore, exitRuntime, "", "revoke-user failed"},
+		{"revoke-all with a store that cannot open", []string{"revoke-all", "--yes"}, corruptStore, exitRuntime, "", "revoke-all failed"},
+		{"revoke-user", []string{"revoke-user", strings.ToUpper(user)}, proxysStore, exitOK, "revoked user " + user + " in BYWARD_STORE_DIR=", `"reason":"operator revoke-user"`},
+		{"revoke-all", []string{"revoke-all", "--yes"}, proxysStore, exitOK, "revoked every user in BYWARD_STORE_DIR=", `"reason":"operator revoke-all"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp")
-			stateDir := setting(env, "BYWARD_STORE_DIR")
-			if tc.badStore {
-				if err := os.WriteFile(stateDir, nil, 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
+			env, stateDir, counter := operatorEnv(t, tc.store)
 			code, stdout, stderr := runWith(tc.args, env...)
 			okStdout := strings.Contains(stdout, tc.wantStdout) && (tc.wantStdout != "" || stdout == "")
 			if code != tc.code || !okStdout || !strings.Contains(stderr, tc.inStderr) {
 				t.Fatalf("code %d (want %d)\nstdout %q (want %q)\nstderr %q (want %q)", code, tc.code, stdout, tc.wantStdout, stderr, tc.inStderr)
 			}
-			if _, err := os.Stat(stateDir); tc.code == exitConfig && !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("a usage mistake touched the store (%v)", err)
+			if tc.code == exitOK {
+				if !strings.Contains(stdout, "BYWARD_STORE_DIR="+stateDir) {
+					t.Fatalf("stdout %q does not name the store %s", stdout, stateDir)
+				}
+				return
+			}
+			created := []string{counter}
+			if tc.store == noStore {
+				created = append(created, stateDir)
+			}
+			for _, p := range created {
+				if _, err := os.Stat(p); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("a refused command created %s (%v)", p, err)
+				}
 			}
 		})
 	}
+}
+
+// L152, ADR-0007 §9: a revocation run with a mistyped state directory, beside the real store's
+// counter file, is refused before it writes anything: the real counter file keeps its value, so
+// restore detection is not weakened, and the mistyped directory is not created.
+func TestARevocationWithAMistypedStateDirectoryLeavesTheRealStoreAlone(t *testing.T) {
+	env, stateDir, counter := operatorEnv(t, proxysStore)
+	// A write past the store's first, so the mirror holds a value a new empty store would not write.
+	if code, _, stderr := runWith([]string{"revoke-all", "--yes"}, env...); code != exitOK {
+		t.Fatalf("revoke-all on the real store: %d %s", code, stderr)
+	}
+	before, err := os.ReadFile(filepath.Clean(counter))
+	if err != nil {
+		t.Fatal(err)
+	}
+	typo := stateDir + "-typo"
+	for i, kv := range env {
+		if strings.HasPrefix(kv, "BYWARD_STORE_DIR=") {
+			env[i] = "BYWARD_STORE_DIR=" + typo
+		}
+	}
+	code, stdout, stderr := runWith([]string{"revoke-all", "--yes"}, env...)
+	if code != exitConfig || stdout != "" || !strings.Contains(stderr, "BYWARD_STORE_DIR="+typo+": no byward store there") {
+		t.Fatalf("code %d (want %d), stdout %q, stderr %q", code, exitConfig, stdout, stderr)
+	}
+	if after, err := os.ReadFile(filepath.Clean(counter)); err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("the real counter file changed: %q, then %q (%v)", before, after, err)
+	}
+	if _, err := os.Stat(typo); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the mistyped state directory was created (%v)", err)
+	}
+}
+
+// operatorStore is what the state directory of an operator command's environment holds.
+type operatorStore int
+
+const (
+	noStore         operatorStore = iota // nothing: the directory does not exist
+	stateDirIsAFile                      // the directory's path is a file
+	corruptStore                         // a byward.db that is not a database
+	proxysStore                          // the store a proxy created
+)
+
+// operatorEnv is a proxy's environment for an operator command, with its state directory and
+// counter file (BYWARD_STORE_COUNTER_FILE, outside the directory), the directory holding st.
+func operatorEnv(t *testing.T, st operatorStore) (env []string, stateDir, counter string) {
+	t.Helper()
+	counter = filepath.Join(t.TempDir(), "store-writes")
+	env = append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp",
+		"BYWARD_STORE_COUNTER_FILE="+counter)
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, "BYWARD_STORE_DIR="); ok {
+			stateDir = v
+		}
+	}
+	switch st {
+	case stateDirIsAFile:
+		if err := os.WriteFile(stateDir, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	case corruptStore:
+		if err := os.MkdirAll(stateDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(stateDir, "byward.db"), bytes.Repeat([]byte("not a database "), 100), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	case proxysStore:
+		s, err := sqlite.Open(context.Background(), sqlite.Options{Dir: stateDir, CounterFile: counter})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return env, stateDir, counter
 }
 
 func TestHelpListsTheOperatorCommands(t *testing.T) {

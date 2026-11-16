@@ -203,6 +203,14 @@ IdP exits 2; a store that cannot be opened or written exits 1. The revocation is
 `grant_revoked` with the reason `operator revoke-user`, by the command and by each running proxy at
 its next deny-list sync ([where it is recorded](../how-to/revoke-access.md#where-an-operator-revocation-is-recorded)).
 
+It acts only on the store a proxy already uses, and prints the user and that store (the state
+directory, or the PostgreSQL database, never the DSN). Where the settings point at no byward store (no
+`byward.db` in `BYWARD_STORE_DIR`, or a database that does not exist or has no byward schema), it
+exits 2 naming the setting and where it looked, having created and written nothing: a mistyped
+setting is never taken for a done revocation. It never migrates: a store at another byward version's
+schema exits 1 and is left unchanged. Run the command with the proxy's byward version, or, for an older
+schema, start the upgraded proxy first.
+
 ## `byward revoke-all`
 
 ```sh
@@ -210,7 +218,8 @@ byward revoke-all --yes [-- <command>]
 ```
 
 The same for every user at once, for incident response: everyone signs in again. `--yes` is required.
-Audited as `grant_revoked` with the reason `operator revoke-all`, by the command and by each running
+It finds the store, and names it, as `revoke-user` does: no byward store where the settings point
+exits 2. Audited as `grant_revoked` with the reason `operator revoke-all`, by the command and by each running
 proxy ([where it is recorded](../how-to/revoke-access.md#where-an-operator-revocation-is-recorded)).
 
 ## `byward store new-epoch`
@@ -221,7 +230,9 @@ byward store new-epoch --yes [-- <command>]
 
 For the PostgreSQL store, after a `pg_restore` or a point-in-time recovery: starts a new store epoch,
 so refresh tokens issued before it are refused and their users sign in again, and forgets every
-remembered consent. Running replicas adopt the epoch at once. It prints the new epoch and is audited as
+remembered consent. Running replicas adopt the epoch at once. A database without byward's schema exits
+2, as for `revoke-user`; the command never creates or migrates the schema. It prints the new epoch and
+the database, and is audited as
 `store_restored` with the reason `operator new-epoch`. With the SQLite store it exits 2: SQLite finds a
 restore by itself at startup ([state](../how-to/state.md#restore-detection)). See
 [PostgreSQL](../how-to/postgres.md#backup-and-restore).

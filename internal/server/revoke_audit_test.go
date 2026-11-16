@@ -40,12 +40,12 @@ func TestAnOperatorRevocationReachesTheRunningProxysAuditStream(t *testing.T) {
 		revoke func(t *testing.T, cfg *config.Config, log *slog.Logger)
 	}{
 		{"revoke-user", func(t *testing.T, cfg *config.Config, log *slog.Logger) {
-			if _, err := RevokeUser(context.Background(), cfg, log, aliceKey); err != nil {
+			if _, _, err := RevokeUser(context.Background(), cfg, log, aliceKey); err != nil {
 				t.Fatal(err)
 			}
 		}},
 		{"revoke-all", func(t *testing.T, cfg *config.Config, log *slog.Logger) {
-			if err := RevokeAll(context.Background(), cfg, log); err != nil {
+			if _, err := RevokeAll(context.Background(), cfg, log); err != nil {
 				t.Fatal(err)
 			}
 		}},

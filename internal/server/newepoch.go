@@ -21,25 +21,27 @@ const reasonNewEpoch = "operator new-epoch"
 // NewEpoch is `byward store new-epoch` (ADR-0007 §9, amended for #227): the step after a pg_restore
 // or a point-in-time recovery of the PostgreSQL store. It starts a new epoch, so refresh tokens
 // from before it are refused and their users sign in again, and forgets every remembered consent.
-// It runs beside running replicas, which adopt the epoch at once. It returns the new epoch.
-func NewEpoch(ctx context.Context, cfg *config.Config, log *slog.Logger) (int64, error) {
+// It runs beside running replicas, which adopt the epoch at once. The database must already hold
+// byward's schema (L152): it is never migrated or created. It returns the new epoch and the store it
+// started it in (storeName).
+func NewEpoch(ctx context.Context, cfg *config.Config, log *slog.Logger) (epoch int64, where string, err error) {
 	if cfg.NoAuth {
-		return 0, ErrNeedsAuthentication
+		return 0, "", ErrNeedsAuthentication
 	}
 	if cfg.StorePostgresDSN == "" {
-		return 0, ErrNewEpochNeedsPostgres
+		return 0, "", ErrNewEpochNeedsPostgres
 	}
 	octx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	st, err := openPostgres(octx, cfg, log)
+	st, err := openPostgres(octx, cfg, log, true)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	defer func() { _ = st.Close() }()
-	epoch, err := st.NewEpoch(ctx)
+	epoch, err = st.NewEpoch(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("starting a new epoch: %w", err)
+		return 0, "", fmt.Errorf("starting a new epoch: %w", err)
 	}
 	logRestore(log, audit.New(log, nil, time.Now), epoch, "BYWARD_STORE_POSTGRES_DSN_FILE", st.Describe(), reasonNewEpoch)
-	return epoch, nil
+	return epoch, storeName(cfg, st), nil
 }

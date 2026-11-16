@@ -34,6 +34,13 @@ var (
 	ErrReused = errors.New("store: refresh token reused")
 	// ErrFull: CreateClient found the cap of live client registrations reached (ADR-0008 §3).
 	ErrFull = errors.New("store: client registrations full")
+	// ErrNoStore: an Open that must find an existing store (an operator command's) found none at the
+	// configured place, or one without byward's schema, and created, migrated and wrote nothing.
+	ErrNoStore = errors.New("no byward store there")
+	// ErrOlderSchema and ErrNewerSchema: an Open that must not migrate (an operator command's) found
+	// the store at another binary's schema version, and changed nothing.
+	ErrOlderSchema = errors.New("the store's schema is older than this byward's")
+	ErrNewerSchema = errors.New("the store's schema is newer than this byward's")
 )
 
 // UnusedClientLifetime is how long a dynamically registered client that never redeemed a code is

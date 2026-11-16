@@ -308,7 +308,7 @@ func TestRevokeUserCutsAnAppOffAtOnce(t *testing.T) {
 		t.Fatalf("before revoke-user: %v", err)
 	}
 	key := fixtureTenant + ":" + p.withRole.ServicePrincipalID
-	if user, err := RevokeUser(context.Background(), p.cfg, discard, key); err != nil || user != key {
+	if user, _, err := RevokeUser(context.Background(), p.cfg, discard, key); err != nil || user != key {
 		t.Fatalf("RevokeUser = %q, %v", user, err)
 	}
 	if _, err := replica().validator.Validate(context.Background(), before); !errors.Is(err, resource.ErrInvalid) {
