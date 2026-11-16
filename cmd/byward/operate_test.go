@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/testutil/assertionkey"
+	"github.com/byward-dev/byward/internal/tracing"
 	"github.com/go-logr/logr"
 	"go.opentelemetry.io/otel"
 
@@ -136,9 +138,13 @@ func TestCheckOfflineBuildsTheTraceExporterAsStartupDoes(t *testing.T) {
 			if strings.Contains(stdout+stderr, secret) {
 				t.Fatalf("a setting's value was printed:\nstdout %q\nstderr %q", stdout, stderr)
 			}
-			// A refusal says why, after byward's prefix (the reason is the library's own text).
-			if _, why, ok := strings.Cut(stderr, "OTEL_* tracing settings: "); ok && strings.TrimSpace(why) == "" {
-				t.Fatalf("the refusal gives no reason: %q", stderr)
+			// A refusal gives the exporter's own reason after byward's prefix: the error
+			// tracing.NewExporter returns for these settings, so no library wording is pinned here.
+			if tc.code == exitConfig {
+				_, want := tracing.NewExporter(context.Background(), os.Getenv, slog.New(slog.DiscardHandler))
+				if want == nil || !strings.Contains(stderr, "OTEL_* tracing settings: "+want.Error()) {
+					t.Fatalf("stderr %q; want the exporter's reason %v after the prefix", stderr, want)
+				}
 			}
 		})
 	}

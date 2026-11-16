@@ -16,7 +16,8 @@ import (
 )
 
 // L157, ADR-0021 §9: NewExporter refuses each class of OTEL_* value startup refuses (an unknown
-// exporter, an OTLP protocol autoexport does not offer, an insecure endpoint with a TLS file),
+// exporter, an OTLP protocol autoexport does not offer, an insecure endpoint with a CA certificate
+// or a client certificate and key),
 // deliberately stricter than the OTel specification's warn-and-ignore, and builds the rest. With
 // OTEL_TRACES_EXPORTER unset it builds nothing.
 func TestNewExporterRefusesWhatStartupRefuses(t *testing.T) {
@@ -38,6 +39,9 @@ func TestNewExporterRefusesWhatStartupRefuses(t *testing.T) {
 		{"an https:// endpoint made insecure, with a TLS file", map[string]string{"OTEL_TRACES_EXPORTER": "otlp",
 			"OTEL_EXPORTER_OTLP_ENDPOINT": "https://127.0.0.1:4318", "OTEL_EXPORTER_OTLP_INSECURE": "true", "OTEL_EXPORTER_OTLP_CERTIFICATE": ca},
 			"insecure HTTP endpoint cannot use TLS client configuration"},
+		{"a traces endpoint made insecure, with a traces CA", map[string]string{"OTEL_TRACES_EXPORTER": "otlp",
+			"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "https://127.0.0.1:4318", "OTEL_EXPORTER_OTLP_TRACES_INSECURE": "true",
+			"OTEL_EXPORTER_OTLP_TRACES_CERTIFICATE": ca}, "insecure HTTP endpoint cannot use TLS client configuration"},
 		{"the traces protocol wins over the general one", map[string]string{"OTEL_TRACES_EXPORTER": "otlp", "OTEL_EXPORTER_OTLP_PROTOCOL": "udp",
 			"OTEL_EXPORTER_OTLP_TRACES_PROTOCOL": "grpc"}, ""},
 		{"none", map[string]string{"OTEL_TRACES_EXPORTER": "none"}, ""},
