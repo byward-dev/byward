@@ -16,10 +16,9 @@ import (
 )
 
 // L157, ADR-0021 §9: NewExporter refuses each class of OTEL_* value startup refuses (an unknown
-// exporter, an OTLP protocol autoexport does not offer, an insecure endpoint with a CA certificate
-// or a client certificate and key),
-// deliberately stricter than the OTel specification's warn-and-ignore, and builds the rest. With
-// OTEL_TRACES_EXPORTER unset it builds nothing.
+// exporter, an OTLP protocol autoexport does not offer, an insecure endpoint with a CA certificate or
+// a client certificate and key), deliberately stricter than the OTel specification's warn-and-ignore,
+// and builds the rest. With OTEL_TRACES_EXPORTER unset it builds nothing.
 func TestNewExporterRefusesWhatStartupRefuses(t *testing.T) {
 	ca := filepath.Join(t.TempDir(), "ca.pem")
 	if err := os.WriteFile(ca, testcert.Root(t), 0o600); err != nil {
@@ -34,12 +33,12 @@ func TestNewExporterRefusesWhatStartupRefuses(t *testing.T) {
 		{"a list of exporters", map[string]string{"OTEL_TRACES_EXPORTER": "otlp,console"}, "unknown exporter"},
 		{"an unknown OTLP protocol", map[string]string{"OTEL_TRACES_EXPORTER": "otlp", "OTEL_EXPORTER_OTLP_PROTOCOL": "http/json"}, "invalid OTLP protocol"},
 		{"an unknown traces protocol", map[string]string{"OTEL_TRACES_EXPORTER": "otlp", "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL": "udp"}, "invalid OTLP protocol"},
-		{"an http:// endpoint with a TLS file", map[string]string{"OTEL_TRACES_EXPORTER": "otlp", "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+		{"an http:// endpoint with a CA certificate", map[string]string{"OTEL_TRACES_EXPORTER": "otlp", "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
 			"OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:4318", "OTEL_EXPORTER_OTLP_CERTIFICATE": ca}, "insecure HTTP endpoint cannot use TLS client configuration"},
-		{"an https:// endpoint made insecure, with a TLS file", map[string]string{"OTEL_TRACES_EXPORTER": "otlp",
+		{"an https:// endpoint made insecure, with a CA certificate", map[string]string{"OTEL_TRACES_EXPORTER": "otlp",
 			"OTEL_EXPORTER_OTLP_ENDPOINT": "https://127.0.0.1:4318", "OTEL_EXPORTER_OTLP_INSECURE": "true", "OTEL_EXPORTER_OTLP_CERTIFICATE": ca},
 			"insecure HTTP endpoint cannot use TLS client configuration"},
-		{"a traces endpoint made insecure, with a traces CA", map[string]string{"OTEL_TRACES_EXPORTER": "otlp",
+		{"an https:// traces endpoint made insecure, with a traces CA certificate", map[string]string{"OTEL_TRACES_EXPORTER": "otlp",
 			"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "https://127.0.0.1:4318", "OTEL_EXPORTER_OTLP_TRACES_INSECURE": "true",
 			"OTEL_EXPORTER_OTLP_TRACES_CERTIFICATE": ca}, "insecure HTTP endpoint cannot use TLS client configuration"},
 		{"the traces protocol wins over the general one", map[string]string{"OTEL_TRACES_EXPORTER": "otlp", "OTEL_EXPORTER_OTLP_PROTOCOL": "udp",

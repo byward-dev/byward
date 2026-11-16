@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/assertionkey"
 	"github.com/byward-dev/byward/internal/testutil/closedport"
 	"github.com/byward-dev/byward/internal/testutil/sealingkey"
+	"github.com/byward-dev/byward/internal/tracing"
 )
 
 // serveEnv is what a test run that serves needs besides auth: the URLs, the public listener and an
@@ -323,10 +325,15 @@ func TestAnUnknownOTELTracesExporterIsAConfigError(t *testing.T) {
 	})
 	env := append(authEnv(t), serveEnv("https://m.example/mcp", "127.0.0.1:0")...)
 	code, _, stderr := runWith(nil, append(env, "OTEL_TRACES_EXPORTER=bogus")...)
-	const want = "byward: configuration error: OTEL_* tracing settings: "
+	// The reason is the exporter's own (tracing.NewExporter's error), as check gives it (L157).
+	_, reason := tracing.NewExporter(context.Background(), os.Getenv, slog.New(slog.DiscardHandler))
+	if reason == nil {
+		t.Fatal("tracing.NewExporter accepts OTEL_TRACES_EXPORTER=bogus; the test expects a refusal")
+	}
+	want := "byward: configuration error: OTEL_* tracing settings: " + reason.Error()
 	lines := strings.Split(strings.TrimSuffix(stderr, "\n"), "\n")
-	if code != exitConfig || !strings.HasSuffix(stderr, "\n") || len(lines) < 2 || !strings.HasPrefix(lines[len(lines)-1], want) {
-		t.Fatalf("code=%d stderr=%q; want exit %d and a last line, after the startup log, starting %q", code, stderr, exitConfig, want)
+	if code != exitConfig || !strings.HasSuffix(stderr, "\n") || len(lines) < 2 || lines[len(lines)-1] != want {
+		t.Fatalf("code=%d stderr=%q; want exit %d and a last line, after the startup log, %q", code, stderr, exitConfig, want)
 	}
 }
 

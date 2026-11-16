@@ -142,8 +142,11 @@ func TestCheckOfflineBuildsTheTraceExporterAsStartupDoes(t *testing.T) {
 			// tracing.NewExporter returns for these settings, so no library wording is pinned here.
 			if tc.code == exitConfig {
 				_, want := tracing.NewExporter(context.Background(), os.Getenv, slog.New(slog.DiscardHandler))
-				if want == nil || !strings.Contains(stderr, "OTEL_* tracing settings: "+want.Error()) {
-					t.Fatalf("stderr %q; want the exporter's reason %v after the prefix", stderr, want)
+				if want == nil {
+					t.Fatal("tracing.NewExporter accepts these settings; the row expects exit 2")
+				}
+				if !strings.Contains(stderr, "OTEL_* tracing settings: "+want.Error()) {
+					t.Fatalf("stderr %q; want %q after the prefix", stderr, want)
 				}
 			}
 		})
