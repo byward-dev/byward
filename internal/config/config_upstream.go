@@ -194,7 +194,7 @@ const maxUpstreamCredential = 4 << 10
 
 // upstreamCredential reads the operator's upstream credential (ADR-0016 §7): only for an HTTP
 // upstream, a header value without control characters, in a header that is not the assertion's.
-// Errors name the setting as the operator gave it (spelled), never the value.
+// The credential's errors name it as the operator gave it (spelled), never its value.
 func (c *Config) upstreamCredential(v *Values) []error {
 	fileEnv, hEnv := Setting{Name: "upstream-credential"}.Env()+"_FILE", Setting{Name: "upstream-credential-header"}.Env()
 	val, header := v.byKey["upstream-credential"], v.byKey["upstream-credential-header"]
@@ -212,9 +212,10 @@ func (c *Config) upstreamCredential(v *Values) []error {
 	}
 	var errs []error
 	name := spelled(val) // an inline value, accepted under --dev, has no file to name
+	emptyFile := v.emptySecretFile("upstream-credential")
 	switch cred := val.Raw; {
-	case cred == "" && val.Path != "":
-		errs = append(errs, errorf("%s: the file is empty", name))
+	case emptyFile != nil:
+		errs = append(errs, emptyFile)
 	case cred == "":
 		errs = append(errs, errorf("%s is empty", name))
 	case len(cred) > maxUpstreamCredential:
