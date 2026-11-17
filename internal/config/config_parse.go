@@ -10,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/ratelimit"
 )
 
@@ -79,14 +80,23 @@ func RedirectURL(publicURL *url.URL, idpName string) string {
 	return (&Config{PublicURL: publicURL}).Issuer() + "/callback/" + idpName
 }
 
+// ParseUpstreamURL validates the HTTP upstream's URL as the proxy reads BYWARD_UPSTREAM_URL, as
+// `byward init entra` also needs it.
+func ParseUpstreamURL(raw string) (*url.URL, error) { return parseURL("upstream-url", raw) }
+
+// parseURL validates an absolute http(s) URL setting. Its errors quote the value only as
+// logging.Quote does: never a user name, password, query or fragment (security invariant 2).
 func parseURL(name, raw string) (*url.URL, error) {
 	env := Setting{Name: name}.Env()
 	if raw == "" {
 		return nil, errorf("%s is required", env)
 	}
 	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil {
-		return nil, errorf("%s: want an absolute http(s) URL without credentials, got %q", env, raw)
+	switch {
+	case err == nil && u.User != nil:
+		return nil, errorf("%s: want an absolute http(s) URL without a user name or password, got %s", env, logging.Quote(raw))
+	case err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "":
+		return nil, errorf("%s: want an absolute http(s) URL, got %s", env, logging.Quote(raw))
 	}
 	return u, nil
 }
@@ -124,7 +134,7 @@ func parseProxies(raw string) ([]netip.Prefix, error) {
 		case err != nil:
 			a, aerr := netip.ParseAddr(item)
 			if aerr != nil {
-				return nil, errorf("BYWARD_TRUSTED_PROXIES: %q is not a CIDR or an IP address", item)
+				return nil, errorf("BYWARD_TRUSTED_PROXIES: %s is not a CIDR or an IP address", logging.Quote(item))
 			}
 			// A zone runs to the end of the entry: "fe80::1%eth0/64" is fe80::1 in zone "eth0/64".
 			zoned, a = a.Zone() != "", a.WithZone("").Unmap()
@@ -167,15 +177,20 @@ func splitList(s string) []string {
 // 0x7f.0.0.1 (WHATWG URL host parser).
 func normalizeOrigin(o string) (string, error) {
 	u, err := url.Parse(o)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Path != "" || strings.ContainsAny(o, "?#") || u.User != nil {
-		return "", fmt.Errorf("%q is not an origin (scheme://host[:port])", o)
+	switch {
+	case err == nil && u.User != nil:
+		return "", fmt.Errorf("%s is not an origin (scheme://host[:port]): it has a user name or password", logging.Quote(o))
+	case strings.ContainsAny(o, "?#"):
+		return "", fmt.Errorf("%s is not an origin (scheme://host[:port]): it has a query or a fragment", logging.Quote(o))
+	case err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Path != "":
+		return "", fmt.Errorf("%s is not an origin (scheme://host[:port])", logging.Quote(o))
 	}
 	if _, err := normalizeAllowedHost(u.Host); err != nil {
-		return "", fmt.Errorf("%q: %w", o, err)
+		return "", fmt.Errorf("%s: %w", logging.Quote(o), err)
 	}
 	if host := u.Hostname(); numericLabel(host[strings.LastIndex(host, ".")+1:]) {
 		if _, err := netip.ParseAddr(host); err != nil {
-			return "", fmt.Errorf("%q: %q is not an IPv4 address in dotted decimal, the only form browsers send", o, host)
+			return "", fmt.Errorf("%s: %s is not an IPv4 address in dotted decimal, the only form browsers send", logging.Quote(o), logging.Quote(host))
 		}
 	}
 	return browserOrigin(u), nil
@@ -214,7 +229,11 @@ func browserOrigin(u *url.URL) string {
 // (WHATWG URL "domain to ASCII", RFC 6454 §7.3), so a Unicode host here could never match them.
 func asciiHost(host string) error {
 	if strings.ContainsFunc(host, func(r rune) bool { return r >= 0x80 }) {
-		return fmt.Errorf("the host %q is not ASCII; give its ASCII (xn--) form, which is what browsers and MCP clients send", host)
+		const fix = "give its ASCII (xn--) form, which is what browsers and MCP clients send"
+		if q := logging.Quote(host); q != logging.Hidden {
+			return fmt.Errorf("the host %s is not ASCII; %s", q, fix)
+		}
+		return fmt.Errorf("%s has a host that is not ASCII; %s", logging.Hidden, fix)
 	}
 	return nil
 }
@@ -229,7 +248,7 @@ func normalizeAllowedHost(h string) (string, error) {
 	if err := asciiHost(h); err != nil {
 		return "", err
 	}
-	invalid := fmt.Errorf("%q is not a host[:port]: give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone", h)
+	invalid := fmt.Errorf("%s is not a host[:port]: give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone", logging.Quote(h))
 	if strings.ContainsAny(h, "/ ") {
 		return "", invalid
 	}
@@ -251,7 +270,7 @@ func normalizeAllowedHost(h string) (string, error) {
 			return "", invalid
 		}
 		if !validHostName(host) {
-			return "", fmt.Errorf("%q is not a host[:port]: %s", h, hostNameRule)
+			return "", fmt.Errorf("%s is not a host[:port]: %s", logging.Quote(h), hostNameRule)
 		}
 		port, hasPort = p, ok
 	}

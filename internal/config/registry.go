@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // EnvPrefix starts every environment variable the proxy reads.
@@ -179,7 +181,7 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 		return nil, errorf("%v", err)
 	}
 	if fs.NArg() > 0 {
-		return nil, errorf("unexpected argument %q", fs.Arg(0))
+		return nil, errorf("unexpected argument %s", logging.Quote(fs.Arg(0)))
 	}
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })

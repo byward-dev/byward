@@ -142,6 +142,12 @@ func initIdP(_ context.Context, args, environ []string, stdout, stderr io.Writer
 		_, _ = fmt.Fprintf(stderr, "byward: init %s: %v (give --public-url)\n", args[0], err)
 		return exitConfig
 	}
+	if *upstreamURL != "" { // empty leaves BYWARD_UPSTREAM_URL for the operator to fill in
+		if _, err := config.ParseUpstreamURL(*upstreamURL); err != nil {
+			_, _ = fmt.Fprintf(stderr, "byward: init %s: %v (give --upstream-url)\n", args[0], err)
+			return exitConfig
+		}
+	}
 	script, err := server.InitScript(server.InitOptions{IdP: args[0], Tenant: *tenant, PublicURL: u, UpstreamURL: *upstreamURL,
 		SecretYears: *years, Credential: *credential, Now: time.Now()})
 	if err != nil {

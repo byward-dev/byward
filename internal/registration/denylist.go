@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // Denylist is the operator's list of refused CIMD clients and redirect hosts (ADR-0008 §9). It
@@ -25,7 +27,7 @@ func NewDenylist(entries []string) (*Denylist, error) {
 		switch {
 		case IsCIMDURL(e):
 			if err := ValidateCIMDURL(e); err != nil {
-				return nil, fmt.Errorf("%q: %v", e, err)
+				return nil, fmt.Errorf("%s: %v", logging.Quote(e), err) // never the user information, query or fragment it was refused for
 			}
 			d.urls[canonicalCIMD(e)] = true
 		case e != "" && !strings.ContainsAny(e, "/:@*? ") && strings.Contains(e, "."):

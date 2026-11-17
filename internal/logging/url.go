@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/textproto"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -28,6 +29,24 @@ func URL(raw string) string {
 	}
 	shown := url.URL{Scheme: u.Scheme, Host: u.Host}
 	return scheme + strings.TrimPrefix(shown.String(), u.Scheme) + path
+}
+
+// Hidden stands in for an operator's value that Quote does not show.
+const Hidden = "the value (not shown: it may hold a password)"
+
+// Quote is raw, an operator's setting or list entry, as an error message may quote it (security
+// invariant 2). Text without @, ? or #, which hold a URL's user name and password, query and
+// fragment, is quoted whole. A URL with one of them is shown as URL shows it, marked as shortened;
+// any other text with one of them is Hidden, so a token after a ? in a URL with a mistyped scheme
+// (https:/host?key=…) is never shown either.
+func Quote(raw string) string {
+	if !strings.ContainsAny(raw, "@?#") {
+		return strconv.Quote(raw)
+	}
+	if s := URL(raw); strings.Contains(raw, "://") && s != InvalidURL {
+		return strconv.Quote(s) + " (the rest not shown: it may hold a password)"
+	}
+	return Hidden
 }
 
 // URLError is err, an error the HTTP client returned, with the URL its *url.Error quotes shown as

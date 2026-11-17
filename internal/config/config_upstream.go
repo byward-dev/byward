@@ -29,7 +29,7 @@ func (c *Config) upstream(v *Values) []error {
 			c.UpstreamStripHeaders = strip
 			errs = append(errs, stripErrs...)
 		}
-		u, err := parseURL("upstream-url", v.get("upstream-url"))
+		u, err := ParseUpstreamURL(v.get("upstream-url"))
 		if err != nil {
 			return append(errs, errorf("%s (or %s, or a command after --)", err.Error(), cmdEnv))
 		}

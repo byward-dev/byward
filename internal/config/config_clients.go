@@ -1,7 +1,10 @@
 package config
 
 import (
+	"net/url"
 	"strings"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // clientSources reads the client sources besides the static file: Dynamic Client Registration with
@@ -19,16 +22,28 @@ func (c *Config) clientSources(v *Values) []error {
 		}
 		for _, e := range c.ClientDenylist {
 			if strings.HasPrefix(e, "https://") {
-				continue // a CIMD client ID, which registration.NewDenylist checks
+				// A CIMD client ID, which registration.NewDenylist checks in full. Config refuses here,
+				// before the startup log lists the settings, only the forms that can carry a credential:
+				// a user name or password, a query or fragment, or no URL at all with an @ in it
+				// (security invariant 2). The rest stays registration's rule.
+				switch u, err := url.Parse(e); {
+				case err == nil && u.User != nil:
+					errs = append(errs, errorf("%s: %s is not a CIMD client ID: it has a user name or password", env, logging.Quote(e)))
+				case strings.ContainsAny(e, "?#"):
+					errs = append(errs, errorf("%s: %s is not a CIMD client ID: it has a query or a fragment", env, logging.Quote(e)))
+				case err != nil && strings.Contains(e, "@"):
+					errs = append(errs, errorf("%s: %s is not a CIMD client ID: it is not an absolute URL", env, logging.Quote(e)))
+				}
+				continue
 			}
 			// A trailing dot names the same host; registration.BrowserHost folds it away.
 			host := strings.TrimSuffix(e, ".")
 			if err := asciiHost(e); err != nil {
 				errs = append(errs, errorf("%s: %v", env, err))
 			} else if reason := hostNameReason(host); reason != "" {
-				errs = append(errs, errorf("%s: %q is neither a CIMD client ID (an https URL) nor a host name such as app.example: %s", env, e, reason))
+				errs = append(errs, errorf("%s: %s is neither a CIMD client ID (an https URL) nor a host name such as app.example: %s", env, logging.Quote(e), reason))
 			} else if endsInANumber(host) {
-				errs = append(errs, errorf("%s: %q ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match (127.1 and 0x7f000001 are 127.0.0.1), or none at all; deny the app by its CIMD client ID or its redirect host's name", env, e))
+				errs = append(errs, errorf("%s: %s ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match (127.1 and 0x7f000001 are 127.0.0.1), or none at all; deny the app by its CIMD client ID or its redirect host's name", env, logging.Quote(e)))
 			}
 		}
 	}
@@ -51,7 +66,7 @@ func (c *Config) clientSources(v *Values) []error {
 			if err := asciiHost(h); err != nil {
 				errs = append(errs, errorf("%s: %v", env, err))
 			} else if reason := hostNameReason(h); reason != "" {
-				errs = append(errs, errorf("%s: %q is not a host name such as claude.ai: %s", env, h, reason))
+				errs = append(errs, errorf("%s: %s is not a host name such as claude.ai: %s", env, logging.Quote(h), reason))
 			}
 			(*s.dst)[i] = strings.ToLower(h)
 		}

@@ -10,11 +10,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/byward-dev/byward/internal/broker"
+	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/go-jose/go-jose/v4"
@@ -82,11 +84,35 @@ func TestADeniedHostIsRefusedAtRegistration(t *testing.T) {
 }
 
 // A denylist entry that is not a valid CIMD client ID refuses to start, naming the setting (a host
-// entry that is not a host name is refused earlier, by config).
+// entry that is not a host name, and a CIMD entry that can carry a credential, are refused earlier,
+// by config).
 func TestABadDenylistEntryRefusesToStartNamingTheSetting(t *testing.T) {
-	cfg := loadConfig(t, "https://m.example/mcp", "BYWARD_CLIENT_DENYLIST=https://app.example/client.json?v=1")
-	if _, err := New(cfg, logging.New(io.Discard, "json")); err == nil || !strings.Contains(err.Error(), `BYWARD_CLIENT_DENYLIST: "https://app.example/client.json?v=1"`) {
+	cfg := loadConfig(t, "https://m.example/mcp", "BYWARD_CLIENT_DENYLIST=https://app.example:8443/client.json")
+	if _, err := New(cfg, logging.New(io.Discard, "json")); err == nil || !strings.Contains(err.Error(), `BYWARD_CLIENT_DENYLIST: "https://app.example:8443/client.json": `) {
 		t.Fatalf("New with a bad denylist entry: %v, want an error naming BYWARD_CLIENT_DENYLIST and the entry", err)
+	}
+}
+
+// Config refuses a CIMD denylist entry that can carry a credential before the startup log lists the
+// settings; registration's own rule refuses the same entries, so config's early check never refuses
+// one that registration would take. Both take a legitimate entry with an @ in its path.
+func TestConfigAndRegistrationBothRefuseADenylistEntryWithACredential(t *testing.T) {
+	for _, tc := range []struct {
+		entry   string
+		refused bool
+	}{
+		{"https://user:pw@app.example/c.json", true},
+		{"https://user@app.example/c.json", true},
+		{"https://app.example/c.json?token=pw", true},
+		{"https://app.example/c.json#pw", true},
+		{"https://user:pw@ap p.example/c.json", true},
+		{"https://app.example/u@x.example/c.json", false},
+	} {
+		_, _, cfgErr := config.Load(nil, append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_CLIENT_DENYLIST="+tc.entry), os.ReadFile)
+		_, regErr := registration.NewDenylist([]string{tc.entry})
+		if (cfgErr != nil) != tc.refused || (regErr != nil) != tc.refused {
+			t.Errorf("%s: config %v, registration %v; want both refused = %v", tc.entry, cfgErr, regErr, tc.refused)
+		}
 	}
 }
 
