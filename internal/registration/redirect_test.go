@@ -1,11 +1,13 @@
 package registration
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
-	"fmt"
-	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // Documented client redirect URIs (ADR-0009 Context, 2026-11-05). They are fixtures and
@@ -122,23 +124,40 @@ func TestRedirectErrorDiagnostics(t *testing.T) {
 	if !errors.As(err, &re) {
 		t.Fatalf("err = %v, not a *RedirectError", err)
 	}
-	logged := fmt.Sprint(re.LogValue())
-	if strings.Contains(logged, "SECRET") || !strings.Contains(logged, "https://b.example/cb") || !strings.Contains(logged, ReasonNotRegistered) {
-		t.Errorf("log value = %s", logged)
-	}
-	var _ slog.LogValuer = re
 	// User information a client puts in a redirect URI is no more logged than its query.
 	if !errors.As(MatchRedirect([]string{"https://a.example/cb"}, "https://user:SECRET@b.example/cb"), &re) {
 		t.Fatal("user information is not a *RedirectError")
 	}
-	if logged := fmt.Sprint(re.LogValue()); logged != "[reason="+ReasonUserinfo+" sent=https://b.example/cb]" {
-		t.Errorf("log value = %s", logged)
-	} // The text for a logged error shows every URI as logs may, registered ones included.
+	if got, want := re.logText(), "redirect URI https://b.example/cb rejected: must not contain user information"; got != want {
+		t.Errorf("logText = %q, want %q", got, want)
+	}
+	// The text for a logged error shows every URI as logs may, registered ones included.
 	if !errors.As(MatchRedirect([]string{"https://u:SECRET@a.example/cb?k=SECRET"}, "https://b.example/cb?code=SECRET"), &re) {
 		t.Fatal("an unregistered URI is not a *RedirectError")
 	}
 	if got, want := re.logText(), "redirect URI not registered: registered https://a.example/cb, sent https://b.example/cb"; got != want {
 		t.Errorf("logText = %q, want %q", got, want)
+	}
+}
+
+// A *RedirectError logged as it is, not through logText, still shows each URI as logs may: scheme,
+// host and path, never user information or a query (ADR-0009 §8), through the proxy's own logger.
+func TestADirectlyLoggedRedirectErrorShowsItsURIsAsLogsMay(t *testing.T) {
+	for _, tc := range []struct{ name, sent, want string }{
+		{"user information", "https://user:SECRET@b.example/cb?k=SECRET", "redirect URI https://b.example/cb rejected: must not contain user information"},
+		{"not registered", "https://b.example/cb?code=SECRET", "redirect URI not registered: registered https://a.example/cb, sent https://b.example/cb"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			logging.New(&buf, "json").Warn("refused", "error", MatchRedirect([]string{"https://a.example/cb?k=SECRET"}, tc.sent))
+			var rec map[string]any
+			if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+				t.Fatalf("log line %q: %v", buf.String(), err)
+			}
+			if got := rec["error"]; got != tc.want {
+				t.Errorf("logged error = %v, want %q (line %s)", got, tc.want, buf.String())
+			}
+		})
 	}
 }
 

@@ -17,7 +17,7 @@ const (
 	MaxRedirectURILen = 512
 )
 
-// Redirect rejection reasons, for the mismatch metric (ADR-0009 §8).
+// Redirect rejection reasons: a RedirectError's Reason, which picks its message.
 const (
 	ReasonNotRegistered = "not_registered"
 	ReasonMalformed     = "malformed"
@@ -30,7 +30,7 @@ const (
 )
 
 // RedirectError explains a rejected redirect URI. Error() is for the error page ("registered X,
-// sent Y"); LogValue and logText show each URI as logs may, since logs must never record a query
+// sent Y"); logText and LogValue show each URI as logs may, since logs must never record a query
 // (ADR-0009 §8).
 type RedirectError struct {
 	Reason     string
@@ -43,6 +43,11 @@ func (e *RedirectError) Error() string { return e.text(func(u string) string { r
 // logText is Error() with every URI as logs may show it, for an error that is logged.
 func (e *RedirectError) logText() string { return e.text(logging.URL) }
 
+// LogValue is the guard for a RedirectError logged as it is: slog shows logText, not Error(), so
+// each URI shows only its scheme, host and path. A wrapped error is not guarded: flatten it through
+// logText first, as cimd.go does.
+func (e *RedirectError) LogValue() slog.Value { return slog.StringValue(e.logText()) }
+
 func (e *RedirectError) text(show func(string) string) string {
 	if e.Reason == ReasonNotRegistered {
 		registered := make([]string, len(e.Registered))
@@ -52,11 +57,6 @@ func (e *RedirectError) text(show func(string) string) string {
 		return fmt.Sprintf("redirect URI not registered: registered %s, sent %s", strings.Join(registered, ", "), show(e.Sent))
 	}
 	return fmt.Sprintf("redirect URI %s rejected: %s", show(e.Sent), reasonText[e.Reason])
-}
-
-// LogValue reports the reason and the sent URI's scheme, host and path only.
-func (e *RedirectError) LogValue() slog.Value {
-	return slog.GroupValue(slog.String("reason", e.Reason), slog.String("sent", logging.URL(e.Sent)))
 }
 
 var reasonText = map[string]string{

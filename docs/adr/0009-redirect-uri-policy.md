@@ -1,6 +1,6 @@
 # ADR-0009: Redirect URI policy — exact HTTPS, any-port loopback, re-checked at /token
 
-- Status: Accepted; amended by ADR-0010, and 2026-11-06 (DCR)
+- Status: Accepted; amended by ADR-0010, and 2026-11-06 (DCR), 2026-11-17 (diagnostics)
 - Date: 2026-11-05
 - Issue: #9 (F8)
 
@@ -38,7 +38,15 @@ babs allows custom schemes as an opt-in.
 6. **An invalid redirect URI gets an error page, never a redirect** (no open redirector).
 7. **Limits:** at most 10 redirect URIs per registration, 512 characters each (configurable).
 8. **Diagnostics:** errors say "registered X, sent Y"; logs record scheme, host and path, never
-   the query; a mismatch metric by reason.
+   the query; a mismatch metric by reason. _Amended 2026-11-17:_ no metric by reason was built, and
+   none is planned. A refused redirect URI is reported to whoever sent it: the error page at
+   `/authorize`, the OAuth error at `/token` and `/register`. Only DCR counts a refused redirect URI
+   under an outcome of its own, `invalid_redirect_uri` in `byward_dcr_registrations_total`; a CIMD
+   document with a refused redirect URI is one of `byward_cimd_fetches_total`'s `invalid` fetches.
+   `/authorize` logs no line when it refuses the redirect URI it was sent, and `/token` logs the
+   grant's revocation without the URI. Where a refused redirect URI is logged (in a CIMD document,
+   dropped from a DCR registration, or in a redirect error logged as it is), it shows only its
+   scheme, host and path.
 9. **Tests:** matching is a pure function with table-driven tests; every client's documented URIs
    are fixtures and documentation, not presets in code (Claude Code's host changed twice).
 
