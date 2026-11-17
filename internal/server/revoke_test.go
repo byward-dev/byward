@@ -8,12 +8,15 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/byward-dev/byward/internal/broker"
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/store/sqlite"
+	"github.com/byward-dev/byward/internal/token"
 )
 
 const (
@@ -103,6 +106,60 @@ func TestRevokeAllEndsEveryUsersAccessBesideARunningProxy(t *testing.T) {
 	}
 	if out := logs.String(); !strings.Contains(out, `"event":"grant_revoked"`) || !strings.Contains(out, `"reason":"operator revoke-all"`) {
 		t.Fatalf("audit %s: want grant_revoked with operator revoke-all", out)
+	}
+}
+
+// #469: an operator revocation is stored with the time it is made. Collect keeps it for
+// store.RevocationRetention after that time, and for that long another replica's deny list, synced
+// from the store, refuses the tokens it cut off. So at the last valid instant of a token issued at
+// the revocation (its lifetime plus the validator's leeway), after a Collect at that instant, a
+// freshly synced replica must still refuse it. A token the revocation does not cover still passes,
+// so the refusal is the revocation's, not a stale deny list's.
+func TestAnOperatorRevocationOutlivesTheTokensItCutOff(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		revoke func(t *testing.T, cfg *config.Config)
+	}{
+		{"revoke-user", func(t *testing.T, cfg *config.Config) {
+			if _, _, err := RevokeUser(context.Background(), cfg, discard, aliceKey); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"revoke-all", func(t *testing.T, cfg *config.Config) {
+			if _, err := RevokeAll(context.Background(), cfg, discard); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cfg, _ := revokeEnv(t)
+				time.Sleep(45 * time.Second) // off the minute, so a time truncated to it is earlier
+				revoked := sealAccessFor(t, cfg, "alice", aliceKey, time.Now())
+				tc.revoke(t, cfg)
+				time.Sleep(time.Second)
+				uncovered := sealAccessFor(t, cfg, "bob", bobKey, time.Now()) // after even a revoke-all's cut-off
+
+				if valid(t, cfg, revoked) {
+					t.Fatal("a replica synced after the revocation accepts the revoked token")
+				}
+				if !valid(t, cfg, uncovered) {
+					t.Fatal("a replica synced after the revocation refuses a token it does not cover")
+				}
+				time.Sleep(broker.AccessLifetime + token.Leeway - time.Second) // the revoked token's last valid instant
+				withStore(t, cfg, func(st *sqlite.Store) {
+					if err := st.Collect(context.Background(), time.Now()); err != nil {
+						t.Fatal(err)
+					}
+				})
+				if valid(t, cfg, revoked) {
+					t.Fatal("a replica synced after Collect accepts the revoked token within its lifetime: the revocation was collected early")
+				}
+				if !valid(t, cfg, uncovered) {
+					t.Fatal("a replica synced after Collect refuses a token the revocation does not cover")
+				}
+			})
+		})
 	}
 }
 
