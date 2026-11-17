@@ -210,10 +210,11 @@ seconds. The user key is the one the audit records show as `user_key`: with Entr
 tenant and object IDs); with an `oidc` IdP, the value of its subject claim (`BYWARD_OIDC_SUBJECT_CLAIM`,
 `sub` by default). It runs beside a running proxy. A key that is not a user key of the configured
 IdP exits 2, and so do IdP settings it cannot build the IdP from (an Entra certificate or OIDC client
-key file that holds no key), with the configuration error the proxy gives for them at startup. A store
-that is there but cannot be opened or written exits 1. The revocation is audited as
-`grant_revoked` with the reason `operator revoke-user`, by the command and by each running proxy at
-its next deny-list sync ([where it is recorded](../how-to/revoke-access.md#where-an-operator-revocation-is-recorded)).
+key file that holds no key), with the configuration error the proxy gives for them at startup. The
+operator commands check only the settings they use: revoke-user works with an expired IdP credential or
+an empty gate, which serve refuses. A store that is there but cannot be opened or written exits 1. The
+revocation is audited as `grant_revoked` with the reason `operator revoke-user`, by the command and by
+each running proxy at its next deny-list sync ([where it is recorded](../how-to/revoke-access.md#where-an-operator-revocation-is-recorded)).
 
 It acts only on the store a proxy already uses, and prints the user and that store (the state
 directory, or the PostgreSQL database, never the DSN). Where the settings point at no byward store (no
