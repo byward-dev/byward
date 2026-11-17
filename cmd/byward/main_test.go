@@ -483,6 +483,33 @@ func TestRevokeAndNewEpochWithoutAuthenticationAreAConfigurationError(t *testing
 	}
 }
 
+// Settings revoke-user cannot build the IdP from (here an Entra certificate file that holds no key)
+// are a configuration error, exit 2, with the line check --offline gives for them, as at startup
+// (ADR-0020 §5, L174); before, revoke-user reported them as a failed revocation, exit 1.
+func TestRevokeUserIsAConfigurationErrorForIdPSettingsStartupRefuses(t *testing.T) {
+	cert := filepath.Join(t.TempDir(), "cert.pem")
+	if err := os.WriteFile(cert, []byte("not a certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp",
+		"BYWARD_ENTRA_CLIENT_SECRET_FILE=", "BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE="+cert)
+	checkCode, _, checkStderr := runWith([]string{"check", "--offline"}, env...)
+	want := lastLine(checkStderr)
+	if checkCode != exitConfig || !strings.HasPrefix(want, "byward: configuration error: BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE: ") {
+		t.Fatalf("check --offline: code %d, stderr %q; the test expects these settings refused as a configuration error", checkCode, checkStderr)
+	}
+	code, stdout, stderr := runWith([]string{"revoke-user", "00000000-0000-0000-0000-00000000000a:11111111-1111-1111-1111-11111111111a"}, env...)
+	if code != exitConfig || stdout != "" || lastLine(stderr) != want {
+		t.Fatalf("revoke-user: code %d (want %d), stdout %q, stderr %q; want the last line %q", code, exitConfig, stdout, stderr, want)
+	}
+}
+
+// lastLine is the last line of out, without its newline.
+func lastLine(out string) string {
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	return lines[len(lines)-1]
+}
+
 // An OTEL_TRACES_EXPORTER that autoexport does not know stops the process as a configuration error,
 // on the last line, after the startup log.
 func TestAnUnknownOTELTracesExporterIsAConfigError(t *testing.T) {

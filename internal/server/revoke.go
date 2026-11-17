@@ -23,6 +23,13 @@ var ErrNoStore = store.ErrNoStore
 // ErrNotAUserKey is RevokeUser's answer to a key that is not a user key of the configured IdP.
 var ErrNotAUserKey = errors.New("not a user key: with Entra, tid:oid, the tenant and object IDs of the user; with an oidc IdP, the value of its subject claim (BYWARD_OIDC_SUBJECT_CLAIM, default sub), as the audit records' user_key shows it")
 
+// ConfigError is an operator command's answer to settings it cannot build from, such as an IdP
+// credential file that holds no key: the error server.New gives for the same settings, which the
+// command reports as a configuration error, as startup does (ADR-0020 §5).
+type ConfigError struct{ Err error }
+
+func (e ConfigError) Error() string { return e.Err.Error() }
+
 // Operator revocation reasons on the audit stream (ADR-0006 §9).
 const (
 	reasonRevokeUser = "operator revoke-user"
@@ -58,7 +65,7 @@ func RevokeUser(ctx context.Context, cfg *config.Config, log *slog.Logger, key s
 	}
 	ip, err := newIdentityProvider(cfg, nil) // settings only; nothing is fetched
 	if err != nil {
-		return "", "", err
+		return "", "", ConfigError{err} // as server.New reports it at startup (L174)
 	}
 	user, ok := ip.userKey(key)
 	if !ok {

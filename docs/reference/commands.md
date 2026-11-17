@@ -6,7 +6,8 @@ as the proxy ([settings](settings.md)), so run them with the proxy's configurati
 setting flags; give settings through the environment. A stdio upstream given on the command line goes
 after `--`, as for the proxy (`byward check --offline -- /usr/local/bin/server --flag`); none of
 these commands starts it. Without authentication (`BYWARD_INSECURE_NO_AUTH`) the broker's store is off, so
-revoke-user, revoke-all and store new-epoch exit 2. `byward --help` lists them.
+revoke-user, revoke-all and store new-epoch exit 2, and no identity assertion is sent, so jwks exits 2
+too. `byward --help` lists them.
 
 | Command | What it does | Network | Exit codes |
 |---|---|---|---|
@@ -208,9 +209,13 @@ the user's refresh tokens at once and their access tokens at its next deny-list 
 seconds. The user key is the one the audit records show as `user_key`: with Entra, `tid:oid` (the
 tenant and object IDs); with an `oidc` IdP, the value of its subject claim (`BYWARD_OIDC_SUBJECT_CLAIM`,
 `sub` by default). It runs beside a running proxy. A key that is not a user key of the configured
-IdP exits 2; a store that is there but cannot be opened or written exits 1. The revocation is audited as
-`grant_revoked` with the reason `operator revoke-user`, by the command and by each running proxy at
-its next deny-list sync ([where it is recorded](../how-to/revoke-access.md#where-an-operator-revocation-is-recorded)).
+IdP exits 2, and so do IdP settings it cannot build the IdP from (an Entra certificate or OIDC client
+key file that holds no key), with the configuration error the proxy gives for them at startup. It
+builds only what it needs to read the user key, so it still works with an expired Entra certificate
+or, with an `oidc` IdP, an empty [access gate](../how-to/access-gate.md#empty-gate), which the proxy
+and `check --offline` refuse at startup. A store that is there but cannot be opened or written exits 1. The
+revocation is audited as `grant_revoked` with the reason `operator revoke-user`, by the command and by
+each running proxy at its next deny-list sync ([where it is recorded](../how-to/revoke-access.md#where-an-operator-revocation-is-recorded)).
 
 It acts only on the store a proxy already uses, and prints the user and that store (the state
 directory, or the PostgreSQL database, never the DSN). Where the settings point at no byward store (no
