@@ -34,12 +34,12 @@ func TestClientAddressTrustsForwardedForOnlyFromTrustedProxies(t *testing.T) {
 		{"a bracketed IPv6 entry with a port", "10.1.2.3:4000", []string{"[2001:db8:1::5]:443"}, "2001:db8:1::5"},
 		{"a bracketed IPv6 entry", "10.1.2.3:4000", []string{"[2001:db8:1::5]"}, "2001:db8:1::5"},
 		{"an empty entry breaks the chain", "10.1.2.3:4000", []string{"198.51.100.1,, 10.9.9.9"}, "10.9.9.9"},
-		{"a bracketed peer without a port is not an address", "[2001:db8:ffff::1]", []string{"198.51.100.1"}, "[2001:db8:ffff::1]"},
+		{"a bracketed peer without a port: header ignored, logged as written", "[2001:db8:ffff::1]", []string{"198.51.100.1"}, "[2001:db8:ffff::1]"},
 		{"a zoned peer: header ignored", "[fe80::1%eth0]:4000", []string{"198.51.100.1"}, "fe80::1%eth0"},
 		{"a zoned mapped peer: header ignored", "[::ffff:10.1.2.3%eth0]:4000", []string{"198.51.100.1"}, "::ffff:10.1.2.3%eth0"},
 		{"a zoned hop ends the chain, logged without its zone", "10.1.2.3:4000", []string{"198.51.100.1, fe80::1%eth0"}, "fe80::1"},
-		{"a zoned mapped hop ends the chain, logged unmapped", "10.1.2.3:4000", []string{"198.51.100.1, ::ffff:10.9.9.9%eth0"}, "10.9.9.9"},
 		{"the same hop without a zone is trusted", "10.1.2.3:4000", []string{"198.51.100.1, fe80::1"}, "198.51.100.1"},
+		{"a zoned mapped hop ends the chain, logged unmapped", "10.1.2.3:4000", []string{"198.51.100.1, ::ffff:10.9.9.9%eth0"}, "10.9.9.9"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

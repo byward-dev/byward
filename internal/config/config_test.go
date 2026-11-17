@@ -587,8 +587,8 @@ func TestUpstreamHeaderTimeoutDefaultsToFiveMinutesWithinBounds(t *testing.T) {
 // Trusted proxies are CIDRs or addresses, masked; an IPv4-mapped one is the IPv4 prefix it maps,
 // since peers are compared unmapped, and one shorter than /96 maps no IPv4 prefix (masked, it would
 // trust IPv6 addresses), so it is refused. An entry inside fe80::/10 is refused, as it would trust no
-// peer; a zone too, as it swallowed the prefix length and was dropped. Link-local is said first, so
-// removing the zone never leads to the second refusal.
+// peer; a zone too: it was dropped, and it swallowed any prefix length after it. Link-local is said
+// first, so removing the zone never leads to the second refusal.
 func TestTrustedProxiesTakeCIDRsAndAddresses(t *testing.T) {
 	cfg, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES=10.0.0.0/8, 192.0.2.7, 2001:db8::/32, 10.1.2.3/8"), nil)
 	if err != nil {
