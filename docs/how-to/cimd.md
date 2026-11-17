@@ -44,9 +44,10 @@ app.example.com returning to auth.example.com is not flagged).
   - if a refetch fails for a network reason, a timeout, a 5xx, 408 or 429, the last valid copy keeps working for up to 24 hours after it was fetched. Any other 4xx or an invalid document ends it at once;
   - each URL is fetched at most once at a time, and a failing URL at most every 10 seconds.
 
-If an app's document is refused for good when it refreshes (it no longer matches, is invalid or
-gone), the grant behind its refresh token is revoked, so restoring the document does not bring it
-back; a temporary fetch failure never revokes anything.
+If an app's document is refused for good (for example, it no longer matches, is invalid or gone)
+when it refreshes, redeems one of its own codes or sends one of its own tokens to `/revoke`, the
+grant behind that token or code is revoked, so restoring the document does not bring it back; a
+temporary fetch failure never revokes anything.
 
 A refused app sees "This app is not registered with the proxy". If its document can't be fetched
 for now, the app sees "Try again in a minute", or HTTP 503 with `Retry-After: 60` at `/token` and `/revoke`. The proxy never redirects

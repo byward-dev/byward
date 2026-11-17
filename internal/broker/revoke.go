@@ -1,10 +1,12 @@
 package broker
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/byward-dev/byward/internal/ratelimit"
 	"github.com/byward-dev/byward/internal/store"
@@ -12,10 +14,14 @@ import (
 )
 
 // revokeEndpoint is RFC 7009 token revocation (ADR-0006 §7). Revoking either token revokes the
-// grant. Unknown, malformed or already revoked tokens get 200 (RFC 7009 §2.2); a token issued to
-// another client is refused (§2.1) and its grant left alone; a store failure is 503 with
-// Retry-After, never a false 200. The IdP's tokens are deleted with the grant; revoking them at
-// the IdP is not possible (no adapter has a revocation endpoint), so they simply expire there.
+// grant; an expired access token still names its grant, and revoking it ends the grant's refresh
+// tokens, which is what a client revoking "its tokens" wants. Unknown, malformed or already
+// revoked tokens get 200 (RFC 7009 §2.2); a token issued to another client is refused (§2.1) and
+// its grant left alone; for an authenticated client, a store failure is 503 with Retry-After,
+// never a false 200. A client refused at lookup (refusalReason) is 401 invalid_client, and the
+// grant behind its own token still ends (revokeForRefusedRevocation). The IdP's tokens are
+// deleted with the grant; revoking them at the IdP is not possible (no adapter has a revocation
+// endpoint), so they simply expire there.
 func (b *Broker) revokeEndpoint(w http.ResponseWriter, r *http.Request) {
 	if !allowPost(w, r) {
 		return
@@ -30,7 +36,7 @@ func (b *Broker) revokeEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := b.cfg.Now()
-	client, ok := b.authenticateClient(w, r, now, nil)
+	client, ok := b.authenticateClient(w, r, now, b.revokeForRefusedRevocation)
 	if !ok {
 		return
 	}
@@ -40,38 +46,10 @@ func (b *Broker) revokeEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	var grantID, owner string
-	switch {
-	case strings.HasPrefix(tok, token.RefreshPrefix):
-		hash, ok := token.HashRefreshToken(tok)
-		if !ok {
-			break
-		}
-		rt, err := b.cfg.Store.RefreshToken(ctx, hash, now)
-		switch {
-		case errors.Is(err, store.ErrNotFound):
-		case err != nil:
-			b.unavailable(w, r, "looking up a token to revoke failed", err)
-			return
-		default:
-			grantID, owner = rt.GrantID, rt.ClientID
-		}
-	case strings.HasPrefix(tok, token.AccessPrefix):
-		// An expired access token still names its grant; revoking it ends the grant's refresh
-		// tokens, which is what a client revoking "its tokens" wants.
-		claims, err := b.cfg.Sealer.Open(token.Access, tok)
-		if err != nil {
-			break
-		}
-		g, err := b.cfg.Store.Grant(ctx, claims.GrantID)
-		switch {
-		case errors.Is(err, store.ErrNotFound):
-		case err != nil:
-			b.unavailable(w, r, "looking up a token to revoke failed", err)
-			return
-		default:
-			grantID, owner = g.ID, g.ClientID
-		}
+	grantID, owner, err := b.tokenGrant(ctx, tok, now)
+	if err != nil {
+		b.unavailable(w, r, "looking up a token to revoke failed", err)
+		return
 	}
 	if grantID != "" {
 		if owner != client.ID() {
@@ -86,4 +64,45 @@ func (b *Broker) revokeEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
+}
+
+// revokeForRefusedRevocation revokes, with why, the grant behind the token a client refused at
+// lookup (refusalReason) asks to revoke. The answer stays 401 (RFC 7009 §2.1), but the grant ends
+// as the client asked and as a refresh by the same client would end it. Only the token's own
+// client's grant is revoked; a store failure leaves it to the next request.
+func (b *Broker) revokeForRefusedRevocation(r *http.Request, clientID string, now time.Time, why string) {
+	grantID, owner, err := b.tokenGrant(r.Context(), r.PostForm.Get("token"), now)
+	if err != nil || grantID == "" || owner != clientID {
+		return
+	}
+	b.revoke(r, clientID, grantID, now, why)
+}
+
+// tokenGrant is the grant a refresh or access token names, and the client it was issued to. An
+// unknown, malformed or already revoked token names none (empty grantID, nil error); err is a store
+// failure. An expired access token still names its grant.
+func (b *Broker) tokenGrant(ctx context.Context, tok string, now time.Time) (grantID, owner string, err error) {
+	switch {
+	case strings.HasPrefix(tok, token.RefreshPrefix):
+		hash, ok := token.HashRefreshToken(tok)
+		if !ok {
+			return "", "", nil
+		}
+		rt, err := b.cfg.Store.RefreshToken(ctx, hash, now)
+		if errors.Is(err, store.ErrNotFound) {
+			return "", "", nil
+		}
+		return rt.GrantID, rt.ClientID, err
+	case strings.HasPrefix(tok, token.AccessPrefix):
+		claims, err := b.cfg.Sealer.Open(token.Access, tok)
+		if err != nil {
+			return "", "", nil
+		}
+		g, err := b.cfg.Store.Grant(ctx, claims.GrantID)
+		if errors.Is(err, store.ErrNotFound) {
+			return "", "", nil
+		}
+		return g.ID, g.ClientID, err
+	}
+	return "", "", nil
 }
