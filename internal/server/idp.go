@@ -19,6 +19,7 @@ import (
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/idp/oidc"
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // identityProvider is the IdP users sign in with (BYWARD_IDP): its adapter, the name that labels
@@ -293,13 +294,13 @@ func describeClientAssertion(info idp.AssertionInfo) string {
 func diagnoseDiscovery(ctx context.Context, p idp.Readiness, issuer string, loopbackHTTP bool) []doctor.Result {
 	r := doctor.CheckDiscovery.NewResult()
 	if err := p.Ready(ctx); err != nil {
-		r.Status, r.Message = doctor.Fail, "the IdP's discovery document at "+issuer+" failed: "+err.Error()
+		r.Status, r.Message = doctor.Fail, "the IdP's discovery document at "+logging.MarkedURL(issuer)+" failed: "+err.Error()
 		r.Fix = "BYWARD_OIDC_ISSUER: set it exactly as the IdP's discovery document states its issuer"
 		if !loopbackHTTP {
 			r.Fix += ", over https"
 		}
 		return []doctor.Result{r}
 	}
-	r.Status, r.Message = doctor.Pass, "discovery at "+issuer+" matches the configured issuer"
+	r.Status, r.Message = doctor.Pass, "discovery at "+logging.MarkedURL(issuer)+" matches the configured issuer"
 	return []doctor.Result{r}
 }

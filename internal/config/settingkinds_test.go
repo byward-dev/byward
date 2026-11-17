@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -130,7 +129,7 @@ func TestEveryPathSettingRefusesARelativePath(t *testing.T) {
 				e = append([]string{}, base...)
 			}
 			_, _, err := Load(nil, append(e, s.Env()+"=rel"), baseFiles)
-			want := fmt.Sprintf("%s: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got %q", s.Env(), "rel")
+			want := s.Env() + ": want an absolute path (no paths relative to the working directory, ADR-0007 §6), got a relative one"
 			if !isConfigError(err) || !strings.Contains(err.Error(), want) {
 				t.Fatalf("err = %v, want %q", err, want)
 			}

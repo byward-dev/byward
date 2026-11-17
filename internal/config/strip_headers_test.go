@@ -40,12 +40,12 @@ func TestTheUpstreamStripListRefusesWhatCannotBeStripped(t *testing.T) {
 		{"a tool parameter", "X-Ok, mcp-param-region", "Mcp-Param-Region is a header MCP needs"},
 		{"a pattern", "X-Atlassian-*", `"X-Atlassian-*": exact names only`},
 		{"a pattern inside a name", "X-Atlassian-*-Url", `"X-Atlassian-*-Url": exact names only`},
-		{"a name with a colon", "X-Api-Key:", `"X-Api-Key:" is not a header name`},
+		{"a name with a colon", "X-Api-Key:", `"X-Api-Key" (the rest is not shown) is not a header name`},
 		{"a name with another separator", "X(Url)", `"X(Url)" is not a header name`},
 		{"a name that is not ASCII", "X-Idé", `"X-Idé" is not a header name`},
 		{"the trace context", "traceparent", "Traceparent cannot be stripped"},
 		{"the trace state", "TRACESTATE", "Tracestate cannot be stripped"},
-		{"not a header", "X Api Key", `"X Api Key" is not a header name`},
+		{"not a header", "X Api Key", `"X" (the rest is not shown) is not a header name`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := load(t, nil, "BYWARD_UPSTREAM_STRIP_HEADERS="+tc.list)

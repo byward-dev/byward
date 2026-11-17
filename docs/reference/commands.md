@@ -281,5 +281,5 @@ These are flags of the proxy itself (`byward` with no command), read with the sa
 |---|---|---|
 | `byward --help` | prints the settings and the commands | 0 |
 | `byward --version [--json]` | prints the version, the source revision and the Go version; with `--json`, an object with `version`, `revision`, `time`, `modified` (only when set) and `go_version` | 0 |
-| `byward --print-config` | prints every setting as `NAME=value (source)`, the source being `flag`, `env`, `file` or `default`; secrets show as `<redacted>` | 0, 2 |
+| `byward --print-config` | prints every setting as `NAME=value (source)`, the source being `flag`, `env`, `file` or `default`; secrets show as `<redacted>`, a URL setting by its scheme, host and path, with `?…` (or `;…`, `#…`) where a part that can hold an API key is left out, and the stdio upstream's command by its program and the number of arguments | 0, 2 |
 

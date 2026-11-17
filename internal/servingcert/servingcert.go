@@ -12,6 +12,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // leeway is how far in the future a certificate's NotBefore may be and still be served: a freshly
@@ -28,7 +30,9 @@ type Pair struct {
 	chain []*x509.Certificate
 }
 
-// Read reads and parses f. Errors name the file at fault and never quote either file.
+// Read reads and parses f. Errors name the file at fault and never quote either file; a key file
+// that cannot be read is named by its role, not its path, which may be the key itself, pasted where
+// the path belongs (#461).
 func Read(f Files) (*Pair, error) {
 	certPEM, err := os.ReadFile(f.Cert)
 	if err != nil {
@@ -36,7 +40,7 @@ func Read(f Files) (*Pair, error) {
 	}
 	keyPEM, err := os.ReadFile(f.Key)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("the key file: %w", logging.FileError(err))
 	}
 	if encrypted(keyPEM) { // it would fail below with an ASN.1 error that does not say why
 		return nil, fmt.Errorf("%s: the private key is encrypted; give the key unencrypted and protect the file instead", f.Key)

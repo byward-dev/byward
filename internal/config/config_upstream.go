@@ -45,7 +45,8 @@ func (c *Config) upstream(v *Values) []error {
 		c.UpstreamCommand = nil
 	}
 	if len(c.UpstreamCommand) == 0 || c.UpstreamCommand[0] == "" {
-		errs = append(errs, errorf("%s: want a JSON array of strings whose first element is the program, e.g. [\"/usr/local/bin/server\",\"--flag\"], got %q", cmdEnv, raw))
+		// The value is not shown: a command line can carry a token as an argument.
+		errs = append(errs, errorf("%s: want a JSON array of strings whose first element is the program, e.g. [\"/usr/local/bin/server\",\"--flag\"] (the value given is not shown)", cmdEnv))
 	}
 	env, err := parseEnvLines(v.get("upstream-env"))
 	if err != nil {
@@ -250,9 +251,9 @@ func stripHeaders(raw string) ([]string, []error) {
 		h := CanonicalHeader(n)
 		switch {
 		case strings.ContainsRune(n, '*'):
-			errs = append(errs, errorf("%s: %q: exact names only; list each header of a family by name", env, n))
+			errs = append(errs, errorf("%s: %s: exact names only; list each header of a family by name", env, quoteHeaderName(n)))
 		case !httpguts.ValidHeaderFieldName(n):
-			errs = append(errs, errorf("%s: %q is not a header name; list exact names, such as X-Argocd-Base-Url", env, n))
+			errs = append(errs, errorf("%s: %s is not a header name; list exact names, such as X-Argocd-Base-Url", env, quoteHeaderName(n)))
 		case mcpHeaders[h] || strings.HasPrefix(h, MCPParamPrefix):
 			errs = append(errs, errorf("%s: %s is a header MCP needs at the upstream; remove it from the list", env, h))
 		case h == "Traceparent" || h == "Tracestate":

@@ -1,6 +1,7 @@
 // Package logging builds the proxy's slog logger: an allowlist of attribute keys, redaction of
-// bearer-shaped values, UTC timestamps, and a request ID per request (ADR-0021). URL is the one
-// form in which logs and error messages show a URL.
+// bearer-shaped values, UTC timestamps, and a request ID per request (ADR-0021). It also holds how
+// logs and error messages may show what can carry a secret: URL (and MarkedURL for a URL setting)
+// for a URL, Quote for an operator's value, and FileError for a file's error, never its path.
 package logging
 
 import (

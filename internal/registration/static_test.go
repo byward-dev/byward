@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -25,7 +27,7 @@ type files map[string]string
 func (f files) read(p string) ([]byte, error) {
 	s, ok := f[p]
 	if !ok {
-		return nil, fmt.Errorf("open %s: %w", p, fs.ErrNotExist)
+		return nil, &fs.PathError{Op: "open", Path: p, Err: fs.ErrNotExist} // as os.ReadFile, whose path LoadStatic removes
 	}
 	return []byte(s), nil
 }
@@ -117,7 +119,7 @@ func TestLoadStaticRejects(t *testing.T) {
 		"duplicate redirect":  {file: entry(`"client_id":"c","token_endpoint_auth_method":"none","redirect_uris":["https://a.example/cb","https://a.example/cb"]`), wantErr: "c: redirect_uris[1]: duplicate"},
 		"too many redirects":  {file: entry(`"client_id":"c","token_endpoint_auth_method":"none","redirect_uris":[` + manyRedirects(MaxRedirectURIs+1) + `]`), wantErr: "c: redirect_uris: between 1 and"},
 		"secret file missing": {file: entry(`"client_id":"c","token_endpoint_auth_method":"client_secret_post","redirect_uris":["https://a.example/cb"]`), wantErr: "c: client_secret_file: required"},
-		"secret file absent":  {file: entry(`"client_id":"c","token_endpoint_auth_method":"client_secret_post","redirect_uris":["https://a.example/cb"],"client_secret_file":"nope"`), wantErr: "c: client_secret_file: open"},
+		"secret file absent":  {file: entry(`"client_id":"c","token_endpoint_auth_method":"client_secret_post","redirect_uris":["https://a.example/cb"],"client_secret_file":"nope"`), wantErr: "c: client_secret_file: file does not exist"},
 		"short secret": {file: entry(`"client_id":"c","token_endpoint_auth_method":"client_secret_post","redirect_uris":["https://a.example/cb"],"client_secret_file":"s"`),
 			extra: files{"/etc/mcp/s": "short"}, wantErr: "at least 32 bytes"},
 		"secret for none": {file: entry(ok + `,"client_secret_file":"s"`), extra: files{"/etc/mcp/s": goodSecret}, wantErr: "c: client_secret_file: only with"},
@@ -176,7 +178,7 @@ func TestStaticClientsMayBeNoneWhenTheServerAllowsIt(t *testing.T) {
 	const path = "/etc/mcp/clients.json"
 	empty := files{path: `{"clients":[]}`}
 	missingSecret := files{path: `{"clients":[{"client_id":"c","token_endpoint_auth_method":"client_secret_post","redirect_uris":["https://a.example/cb"],"client_secret_file":"nope"}]}`}
-	denied := func(p string) ([]byte, error) { return nil, fmt.Errorf("open %s: %w", p, fs.ErrPermission) }
+	denied := func(p string) ([]byte, error) { return nil, &fs.PathError{Op: "open", Path: p, Err: fs.ErrPermission} }
 	for _, tc := range []struct {
 		name  string
 		read  func(string) ([]byte, error)
@@ -189,7 +191,7 @@ func TestStaticClientsMayBeNoneWhenTheServerAllowsIt(t *testing.T) {
 		{"an absent file loads when it may be missing", files{}.read, []LoadOption{AllowMissingFile()}, ""},
 		{"an absent file is refused when only an empty list is allowed", files{}.read, []LoadOption{AllowNoClients()}, "does not exist"},
 		{"an unreadable file is refused even when it may be missing", denied, []LoadOption{AllowMissingFile()}, "permission denied"},
-		{"an absent secret file is refused even when the clients file may be missing", missingSecret.read, []LoadOption{AllowMissingFile()}, "c: client_secret_file: open"},
+		{"an absent secret file is refused even when the clients file may be missing", missingSecret.read, []LoadOption{AllowMissingFile()}, "c: client_secret_file: file does not exist"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r, err := LoadStatic(path, tc.read, NewStoreJTICache(memory.New()), tc.opts...)
@@ -237,6 +239,30 @@ func TestJSONErrorsNeverQuoteTheInput(t *testing.T) {
 				if strings.Contains(err.Error(), leak) {
 					t.Fatalf("error %q leaks %q", err, leak)
 				}
+			}
+		})
+	}
+}
+
+// #461: a static client's secret or key file that cannot be read is named by its field and the
+// cause, never by its path, which holds the secret itself when one was pasted where the file's name
+// belongs (security invariant 2). The files are read from the disk, as the proxy reads them.
+func TestAStaticClientsUnreadableFileIsNamedWithoutItsPath(t *testing.T) {
+	const pasted = "Xq9-S3CRETPW~value"
+	for _, tc := range []struct{ name, client, want string }{
+		{"client_secret_file", `{"client_id":"app","redirect_uris":["https://app.example/cb"],"token_endpoint_auth_method":"client_secret_basic","client_secret_file":"` + pasted + `"}`,
+			"static clients: app: client_secret_file: no such file or directory"},
+		{"jwks_file", `{"client_id":"app","redirect_uris":["https://app.example/cb"],"token_endpoint_auth_method":"private_key_jwt","jwks_file":"` + pasted + `"}`,
+			"static clients: app: jwks_file: no such file or directory"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "clients.json")
+			if err := os.WriteFile(path, []byte(`{"clients":[`+tc.client+`]}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := LoadStatic(path, os.ReadFile, NewStoreJTICache(memory.New()))
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("err = %v, want %q", err, tc.want)
 			}
 		})
 	}

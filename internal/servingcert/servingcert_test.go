@@ -70,7 +70,7 @@ func TestAnUnreadableOrMismatchedPairIsRefusedNamingTheFileWithoutQuotingTheKey(
 		says  string
 	}{
 		{"no certificate file", Files{Cert: missing, Key: good.Key}, missing, "no such file"},
-		{"no key file", Files{Cert: good.Cert, Key: missing}, missing, "no such file"},
+		{"no key file, named by its role: a key pasted where its path belongs is never shown (#461)", Files{Cert: good.Cert, Key: missing}, "the key file", "no such file"},
 		{"the key of another certificate", Files{Cert: good.Cert, Key: other.Key}, other.Key, "private key does not match public key"},
 		{"no PEM in the certificate file", Files{Cert: garbage, Key: good.Key}, garbage, "failed to find any PEM data"},
 		{"no PEM in the key file", Files{Cert: good.Cert, Key: garbage}, garbage, "failed to find any PEM data"},
@@ -86,6 +86,9 @@ func TestAnUnreadableOrMismatchedPairIsRefusedNamingTheFileWithoutQuotingTheKey(
 			}
 			if !strings.Contains(err.Error(), c.names) || !strings.Contains(err.Error(), c.says) {
 				t.Errorf("the error does not name %s and say %q: %v", c.names, c.says, err)
+			}
+			if c.files.Key == missing && strings.Contains(err.Error(), missing) {
+				t.Errorf("the error names the key file's path: %v", err)
 			}
 			if key, rerr := os.ReadFile(c.files.Key); rerr == nil {
 				for _, line := range strings.Split(string(key), "\n") {

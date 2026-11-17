@@ -14,6 +14,7 @@ import (
 	"unicode"
 
 	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // Static-client file limits.
@@ -90,6 +91,8 @@ func AllowMissingFile() LoadOption {
 
 // WithSecretCheck runs check on each client_secret_file before it is read; the server passes the
 // permission check for secret files (ADR-0018 §11). JWKS files hold public keys and are not checked.
+// Like readFile's, check's error must be a *fs.PathError or name no path (#461), but for a file it
+// found to exist, which is no pasted secret (secretfile.Check's mode error names it).
 func WithSecretCheck(check func(path string) error) LoadOption {
 	return func(o *loadOptions) { o.checkSecret = check }
 }
@@ -97,8 +100,9 @@ func WithSecretCheck(check func(path string) error) LoadOption {
 // LoadStatic reads the static clients file at path. Secret and JWKS file paths inside it are
 // relative to its directory. readFile is the only file access (tests pass a map); for an absent
 // file it must return an error wrapping fs.ErrNotExist, as os.ReadFile does, which AllowMissingFile
-// relies on. jti is the replay cache for private_key_jwt. Errors name the client and field and
-// never contain secrets.
+// relies on, and an error that names a path must be a *fs.PathError, whose path logging.FileError
+// removes for the secret and JWKS files (#461). jti is the replay cache for private_key_jwt. Errors
+// name the client and field and never contain secrets.
 func LoadStatic(path string, readFile func(string) ([]byte, error), jti JTICache, opts ...LoadOption) (*StaticRegistry, error) {
 	o := loadOptions{checkSecret: func(string) error { return nil }}
 	for _, f := range opts {
@@ -212,7 +216,8 @@ func buildClient(e staticEntry, dir string, readFile, readSecret func(string) ([
 		}
 		b, err := readSecret(resolve(dir, e.SecretFile))
 		if err != nil {
-			return nil, fmt.Errorf("client_secret_file: %w", err)
+			// The path is not shown: a secret pasted where its file's path belongs would be (#461).
+			return nil, fmt.Errorf("client_secret_file: %w", logging.FileError(err))
 		}
 		secret := strings.TrimRight(string(b), "\r\n")
 		if len(secret) < MinSecretBytes {
@@ -228,7 +233,7 @@ func buildClient(e staticEntry, dir string, readFile, readSecret func(string) ([
 		case e.JWKSFile != "":
 			b, err := readFile(resolve(dir, e.JWKSFile))
 			if err != nil {
-				return nil, fmt.Errorf("jwks_file: %w", err)
+				return nil, fmt.Errorf("jwks_file: %w", logging.FileError(err))
 			}
 			raw = b
 		case len(e.JWKS) == 0:

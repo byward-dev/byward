@@ -11,7 +11,8 @@ func absolute(setting, path string) error {
 	if filepath.IsAbs(path) {
 		return nil
 	}
-	return errorf("%s: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got %q", Setting{Name: setting}.Env(), path)
+	// The path is not shown: a secret pasted where its file's path belongs would be (#461).
+	return errorf("%s: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got a relative one", Setting{Name: setting}.Env())
 }
 
 // within reports whether path is dir or inside it.

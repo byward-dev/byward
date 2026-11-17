@@ -288,6 +288,10 @@ func TestAQuotedValueNeverShowsAUserInformationQueryOrFragment(t *testing.T) {
 		"user:pw@app.example":           Hidden,
 		"a@b":                           "the value (not shown: it may hold a password)", // its text pinned once, where it is made
 		"app.example#pw":                Hidden,
+		"https://up.example/x;tok=pw":   `"https://up.example/x"` + shortened,
+		"HTTPS://hé.example/;pw":        `"HTTPS://h%C3%A9.example/"` + shortened,
+		"app.example;pw":                `"app.example;pw"`, // no URL, so no path parameters
+		"https://up stream/x;pw":        Hidden,             // a URL URL cannot show
 	} {
 		if got := Quote(raw); got != want {
 			t.Errorf("Quote(%q) = %s, want %s", raw, got, want)

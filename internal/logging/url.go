@@ -36,17 +36,42 @@ const Hidden = "the value (not shown: it may hold a password)"
 
 // Quote is raw, an operator's setting or list entry, as an error message may quote it (security
 // invariant 2). Text without @, ? or #, which hold a URL's user name and password, query and
-// fragment, is quoted whole. A URL with one of them is shown as URL shows it, marked as shortened;
-// any other text with one of them is Hidden, so a token after a ? in a URL with a mistyped scheme
-// (https:/host?key=…) is never shown either.
+// fragment, nor a URL with a ;, which starts its path parameters, is quoted whole. A URL with one of
+// them is shown as URL shows it, marked as shortened; any other text with @, ? or # is Hidden, so a
+// token after a ? in a URL with a mistyped scheme (https:/host?key=…) is never shown either.
 func Quote(raw string) string {
-	if !strings.ContainsAny(raw, "@?#") {
+	isURL := strings.Contains(raw, "://")
+	if !strings.ContainsAny(raw, "@?#") && (!isURL || !strings.Contains(raw, ";")) {
 		return strconv.Quote(raw)
 	}
-	if s := URL(raw); strings.Contains(raw, "://") && s != InvalidURL {
+	if s := URL(raw); isURL && s != InvalidURL {
 		return strconv.Quote(s) + " (the rest not shown: it may hold a password)"
 	}
 	return Hidden
+}
+
+// MarkedURL is raw, a URL setting the proxy uses whole, as a log line or doctor's report may show it
+// (security invariant 2): URL's scheme, host and path, then ";…" when path parameters are left out,
+// "?…" when a query is and "#…" when a fragment is, so the reader can tell the value holds more than
+// is shown. Where URL will not show it (InvalidURL), such as an accepted URL with an @ past its
+// host (which can be a password holding an unescaped / or ?, split from its user name), it is
+// Hidden: the value may be valid, it is only not shown.
+func MarkedURL(raw string) string {
+	shown := URL(raw)
+	if shown == InvalidURL {
+		return Hidden
+	}
+	u, _ := url.Parse(raw) // URL parsed it
+	if strings.Contains(u.EscapedPath(), ";") {
+		shown += ";…"
+	}
+	if u.RawQuery != "" || u.ForceQuery {
+		shown += "?…"
+	}
+	if strings.Contains(raw, "#") { // url.Parse splits at the first #, so any # starts the fragment
+		shown += "#…"
+	}
+	return shown
 }
 
 // URLError is err, an error the HTTP client returned, with the URL its *url.Error quotes shown as

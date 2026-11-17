@@ -9,13 +9,14 @@ import (
 // headerSettings are the settings that name a header the proxy sets on upstream requests (they all
 // go through upstreamHeader), with what each needs to load and the header it loads into.
 var headerSettings = []struct {
-	env   string
-	extra []string
-	got   func(*Config) string
+	env     string
+	extra   []string
+	got     func(*Config) string
+	example string // the operator's own header that its errors suggest
 }{
-	{"BYWARD_ASSERTION_HEADER", nil, func(c *Config) string { return c.AssertionHeader }},
-	{"BYWARD_OBO_HEADER", nil, func(c *Config) string { return c.OBOHeader }},
-	{"BYWARD_UPSTREAM_CREDENTIAL_HEADER", []string{"BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile}, func(c *Config) string { return c.UpstreamCredentialHeader }},
+	{"BYWARD_ASSERTION_HEADER", nil, func(c *Config) string { return c.AssertionHeader }, "X-Byward-Identity"},
+	{"BYWARD_OBO_HEADER", nil, func(c *Config) string { return c.OBOHeader }, "X-Byward-Downstream-Token"},
+	{"BYWARD_UPSTREAM_CREDENTIAL_HEADER", []string{"BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile}, func(c *Config) string { return c.UpstreamCredentialHeader }, "X-Api-Key"},
 }
 
 // The upstream may read _ as - (invariant 16), so every setting naming a header the proxy sets

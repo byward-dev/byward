@@ -1,0 +1,539 @@
+package config
+
+import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
+	"os"
+	"path/filepath"
+	"reflect"
+	"slices"
+	"strconv"
+	"strings"
+	"testing"
+)
+
+// pasted stands for a secret an operator pasted into a setting that is not secret.
+const pasted = "Xq9-S3CRETPW~value"
+
+// readReal is the test base's files, and any other path read from the disk as the proxy reads it,
+// so an error carries the *fs.PathError a real read gives (baseFiles' carries no path).
+func readReal(p string) ([]byte, error) {
+	if p == "/run/secrets/entra" {
+		return baseFiles(p)
+	}
+	return os.ReadFile(p) //nolint:gosec // G304: a test reads the relative path a row gives, which does not exist
+}
+
+// refusedLines loads the test base with env and returns the error's lines; the load must fail.
+func refusedLines(t *testing.T, env ...string) []string {
+	t.Helper()
+	_, _, err := Load(nil, append(append([]string{}, base...), env...), readReal)
+	if !isConfigError(err) {
+		t.Fatalf("err = %v, want a configuration error", err)
+	}
+	return strings.Split(err.Error(), "\n")
+}
+
+// #461, #466 and their siblings: a value config refuses is quoted only as far as it cannot hold the
+// secret an operator pasted where a path, a header name or a command belongs; each message is
+// pinned whole, and the secret appears in no line (security invariant 2).
+func TestARefusedSettingNeverShowsASecretPastedIntoIt(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		env  []string
+		want string
+	}{
+		{"a secret's file, given the secret", []string{"BYWARD_ENTRA_CLIENT_SECRET_FILE=" + pasted},
+			"BYWARD_ENTRA_CLIENT_SECRET_FILE: cannot read secret file: no such file or directory"},
+		{"the PostgreSQL DSN's file, given the DSN", []string{"BYWARD_STORE_POSTGRES_DSN_FILE=postgres://byward:" + pasted + "@db.example/byward"},
+			"BYWARD_STORE_POSTGRES_DSN_FILE: cannot read secret file: no such file or directory"},
+		{"a path setting, given the secret", []string{"BYWARD_TLS_KEY_FILE=" + pasted, "BYWARD_TLS_CERT_FILE=/etc/byward/tls.crt"},
+			"BYWARD_TLS_KEY_FILE: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got a relative one"},
+		{"a header to strip, given a header line", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X-Api-Key: " + pasted},
+			`BYWARD_UPSTREAM_STRIP_HEADERS: "X-Api-Key" (the rest is not shown) is not a header name; list exact names, such as X-Argocd-Base-Url`},
+		{"a header family to strip, given a header line", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X-Api-*: " + pasted},
+			`BYWARD_UPSTREAM_STRIP_HEADERS: "X-Api-*" (the rest is not shown): exact names only; list each header of a family by name`},
+		{"a client denylist URL with its scheme in capitals, which config refuses", []string{"BYWARD_CLIENT_DENYLIST=HTTPS://a.example/x;k=" + pasted},
+			`BYWARD_CLIENT_DENYLIST: "HTTPS://a.example/x;…" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
+		{"a client denylist URL with its scheme in capitals and a host that is not ASCII", []string{"BYWARD_CLIENT_DENYLIST=HTTPS://bücher.example/x;k=" + pasted},
+			`BYWARD_CLIENT_DENYLIST: "HTTPS://b%C3%BCcher.example/x;…" has a host that is not ASCII; give its ASCII (xn--) form, which is what browsers and MCP clients send`},
+		{"a client denylist URL with its scheme in capitals and a password split across its host", []string{"BYWARD_CLIENT_DENYLIST=HTTPS://u:8443/" + pasted + "@a.example/x"},
+			"BYWARD_CLIENT_DENYLIST: the value (not shown: it may hold a password) is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)"},
+		{"an allowed host, given a URL with path parameters", []string{"BYWARD_ALLOWED_HOSTS=https://a.example/x;k=" + pasted},
+			`BYWARD_ALLOWED_HOSTS: "https://a.example/x" (the rest not shown: it may hold a password) is not a host[:port]: give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone`},
+		{"an allowed host, given a URL with path parameters and a host that is not ASCII", []string{"BYWARD_ALLOWED_HOSTS=HTTPS://bücher.example/;" + pasted},
+			`BYWARD_ALLOWED_HOSTS: the host "HTTPS://b%C3%BCcher.example/" (the rest not shown: it may hold a password) is not ASCII; give its ASCII (xn--) form, which is what browsers and MCP clients send`},
+		{"a CIMD allowed host, given a URL with path parameters", []string{"BYWARD_CIMD_ALLOWED_HOSTS=https://a.example/x;k=" + pasted},
+			`BYWARD_CIMD_ALLOWED_HOSTS: "https://a.example/x" (the rest not shown: it may hold a password) is not a host name such as claude.ai: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
+		{"a CIMD trusted host, given a URL with path parameters and a host that is not ASCII", []string{"BYWARD_CIMD_TRUSTED_HOSTS=HTTPS://bücher.example/;" + pasted},
+			`BYWARD_CIMD_TRUSTED_HOSTS: the host "HTTPS://b%C3%BCcher.example/" (the rest not shown: it may hold a password) is not ASCII; give its ASCII (xn--) form, which is what browsers and MCP clients send`},
+		{"an allowed origin, given a URL with path parameters", []string{"BYWARD_ALLOWED_ORIGINS=https://a.example/x;k=" + pasted},
+			`BYWARD_ALLOWED_ORIGINS: "https://a.example/x" (the rest not shown: it may hold a password) is not an origin (scheme://host[:port])`},
+		{"a header to strip whose name holds an @", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X@" + pasted + ": token"},
+			"BYWARD_UPSTREAM_STRIP_HEADERS: the value (not shown: it may hold a password) is not a header name; list exact names, such as X-Argocd-Base-Url"},
+		{"a header to strip with nothing before its colon", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=: " + pasted},
+			"BYWARD_UPSTREAM_STRIP_HEADERS: the value (not shown: it may hold a password) is not a header name; list exact names, such as X-Argocd-Base-Url"},
+		{"a header to strip that holds a query", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X-Key?k=" + pasted},
+			"BYWARD_UPSTREAM_STRIP_HEADERS: the value (not shown: it may hold a password) is not a header name; list exact names, such as X-Argocd-Base-Url"},
+		{"the assertion's header holding a query", []string{"BYWARD_ASSERTION_HEADER=X-Key?k=" + pasted},
+			"BYWARD_ASSERTION_HEADER: want a header name such as Authorization or X-Byward-Identity, got the value (not shown: it may hold a password)"},
+		{"the assertion's header with nothing before its colon", []string{"BYWARD_ASSERTION_HEADER=:" + pasted},
+			"BYWARD_ASSERTION_HEADER: want a header name such as Authorization or X-Byward-Identity, got the value (not shown: it may hold a password)"},
+		{"a stdio command, malformed, with a token argument", []string{"BYWARD_UPSTREAM_URL=", `BYWARD_UPSTREAM_COMMAND=["/usr/local/bin/server","--token","` + pasted + `"`},
+			`BYWARD_UPSTREAM_COMMAND: want a JSON array of strings whose first element is the program, e.g. ["/usr/local/bin/server","--flag"] (the value given is not shown)`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lines := refusedLines(t, tc.env...)
+			if !slices.Contains(lines, tc.want) {
+				t.Errorf("error lines %q, want the line %q", lines, tc.want)
+			}
+			for _, l := range lines {
+				if strings.Contains(l, "S3CRETPW") {
+					t.Errorf("the line %q shows the pasted secret", l)
+				}
+			}
+		})
+	}
+}
+
+// #466: a header line pasted into any setting that names a header the proxy sets (headerSettings)
+// is quoted only up to the first ':' or white space, the would-be name; the message is pinned whole.
+func TestAHeaderLinePastedIntoAHeaderSettingShowsOnlyItsName(t *testing.T) {
+	for _, s := range headerSettings {
+		for _, sep := range []string{": ", "\t"} {
+			t.Run(s.env+strings.ReplaceAll(sep, "\t", "<tab>"), func(t *testing.T) {
+				_, err := loadCred(t, nil, "k-123", append(s.extra, s.env+"=X-Identity"+sep+pasted)...)
+				want := s.env + ": want a header name such as Authorization or " + s.example + `, got "X-Identity" (the rest is not shown)`
+				if err == nil || !slices.Contains(strings.Split(err.Error(), "\n"), want) || strings.Contains(err.Error(), "S3CRETPW") {
+					t.Fatalf("err = %v, want the line %q and never the secret", err, want)
+				}
+			})
+		}
+	}
+}
+
+// #458: a URL setting is shown in the startup log and --print-config as logging.MarkedURL shows it,
+// with a marker for each part left out, while the proxy keeps the whole URL.
+func TestAURLSettingIsShownWithoutItsQueryButUsedWhole(t *testing.T) {
+	c, err := load(t, nil, "BYWARD_UPSTREAM_URL=https://up.example/mcp?api_key="+pasted,
+		"BYWARD_RESOURCE_DOCUMENTATION=https://docs.example/mcp;s="+pasted+"?k="+pasted+"#"+pasted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown := map[string]string{}
+	for _, v := range c.Values.Effective() {
+		shown[v.Setting.Name] = v.Display()
+	}
+	for name, want := range map[string]string{
+		"upstream-url":           "https://up.example/mcp?…",
+		"resource-documentation": "https://docs.example/mcp;…?…#…",
+		"public-url":             "https://mcp.example.com/mcp",
+		"oidc-issuer":            "", // unset: shown empty, as every unset setting is
+	} {
+		if shown[name] != want {
+			t.Errorf("%s is shown as %q, want %q", name, shown[name], want)
+		}
+	}
+	if got := c.UpstreamURL.String(); got != "https://up.example/mcp?api_key="+pasted {
+		t.Errorf("the proxy's upstream URL is %q, want it whole", got)
+	}
+	if c.ResourceDocumentation != "https://docs.example/mcp;s="+pasted+"?k="+pasted+"#"+pasted {
+		t.Errorf("the resource documentation is %q, want it whole", c.ResourceDocumentation)
+	}
+	// The public URL and the issuer refuse a query and a fragment, but take path parameters.
+	c, err = load(t, nil, "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp;s="+pasted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := displayed(c, "public-url"); got != "https://mcp.example.com/mcp;…" || c.PublicURL.String() != "https://mcp.example.com/mcp;s="+pasted {
+		t.Errorf("public-url is shown as %q and used as %q, want https://mcp.example.com/mcp;… and the whole URL", got, c.PublicURL)
+	}
+	c, err = loadOIDC(t, with("BYWARD_OIDC_ISSUER=https://idp.example/realms/acme;k="+pasted))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := displayed(c, "oidc-issuer"); got != "https://idp.example/realms/acme;…" || c.OIDCIssuer != "https://idp.example/realms/acme;k="+pasted {
+		t.Errorf("oidc-issuer is shown as %q and used as %q, want https://idp.example/realms/acme;… and the whole URL", got, c.OIDCIssuer)
+	}
+}
+
+// A URL that config accepts but whose credentials split across its host and path (a password holding
+// an unescaped /) shows as Hidden, never its path: as the OIDC issuer, and as a client denylist entry,
+// whose other entries show as URLs do.
+func TestAURLWithAPasswordSplitAcrossItsHostIsHidden(t *testing.T) {
+	const split = "https://alice:8443/" + pasted + "@idp.example"
+	c, err := loadOIDC(t, with("BYWARD_OIDC_ISSUER="+split))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := displayed(c, "oidc-issuer"); got != "the value (not shown: it may hold a password)" {
+		t.Errorf("oidc-issuer %s is shown as %q", split, got)
+	}
+	c, err = load(t, nil, "BYWARD_CLIENT_DENYLIST="+split+"/c.json, https://app.example/c.json;s="+pasted+", bad.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := displayed(c, "client-denylist"), "the value (not shown: it may hold a password), https://app.example/c.json;…, bad.example"; got != want {
+		t.Errorf("client-denylist is shown as %q, want %q", got, want)
+	}
+}
+
+// displayed is the setting name's value as the startup log and --print-config show it.
+func displayed(c *Config, name string) string {
+	for _, v := range c.Values.Effective() {
+		if v.Setting.Name == name {
+			return v.Display()
+		}
+	}
+	return "(not set)"
+}
+
+// Every URL setting is shown as logging.MarkedURL shows it, whatever it is.
+func TestEveryURLSettingIsShownWithoutTheParts(t *testing.T) {
+	const raw, shown = "https://h.example/p;s=" + pasted + "?k=" + pasted + "#" + pasted, "https://h.example/p;…?…#…"
+	for _, s := range registry {
+		var got, want string
+		switch {
+		case s.URL:
+			got, want = (Value{Setting: s, Raw: raw}).Display(), shown
+		case s.URLs: // each URL entry as a URL, any other as given
+			got, want = (Value{Setting: s, Raw: raw + ", app.example"}).Display(), shown+", app.example"
+		default:
+			continue
+		}
+		if got != want {
+			t.Errorf("%s is shown as %q, want %q", s.Name, got, want)
+		}
+	}
+}
+
+// Every setting config reads as a URL is marked, so a new one cannot print its query: a setting read
+// through parseURL by name must be URL, and every other net/url Parse, ParseRequestURI or JoinPath
+// call in the package (in a function or a package-level var), by its owner and argument, is listed
+// here once with the setting whose value it reads (which must be URL, or URLs for a list) or "" for
+// one that refuses a query, a fragment and path parameters, or reads no setting. A new call fails
+// until it is listed, and so does every read urlReadsOf cannot follow.
+func TestEverySettingReadAsAURLIsMarked(t *testing.T) {
+	byName := map[string]Setting{}
+	for _, s := range registry {
+		byName[s.Name] = s
+	}
+	listed := map[string]string{
+		"parseURL raw":         "",                // the settings read by name, checked below
+		"oidcIdP c.OIDCIssuer": "oidc-issuer",     // URL
+		"clientSources e":      "client-denylist", // URLs
+		"normalizeOrigin o":    "",                // an origin: no path, query or fragment
+		"checkNoAuth o":        "",                // the same origins, again
+	}
+	seen := map[string]int{}
+	named := 0
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		reads, err := urlReadsOf(f, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range reads.unfollowed {
+			t.Errorf("%s: %s", f, p)
+		}
+		for _, name := range reads.named {
+			named++
+			if !byName[name].URL {
+				t.Errorf("%s: reads %s as a URL, but the setting is not marked URL", f, name)
+			}
+		}
+		for _, key := range reads.parsed {
+			seen[key]++
+			switch name, ok := listed[key]; {
+			case !ok:
+				t.Errorf("%s: parses %q with net/url: mark the setting it reads URL (or URLs) and list it here, or list it as one that reads no setting", f, key)
+			case name != "" && !byName[name].URL && !byName[name].URLs:
+				t.Errorf("%s: %q parses %s's value, but the setting is not marked URL or URLs", f, key, name)
+			}
+		}
+	}
+	for key := range listed {
+		if seen[key] != 1 {
+			t.Errorf("%q occurs %d times, want once: list each call", key, seen[key])
+		}
+	}
+	if named < 3 {
+		t.Fatalf("found %d settings read through parseURL, want at least public-url, upstream-url and resource-documentation", named)
+	}
+}
+
+// Each way of reading a URL past the list above is caught by urlReadsOf, and the packages config
+// parses other values with are not taken for a URL.
+func TestEachWayOfReadingAURLIsCaught(t *testing.T) {
+	cases := []struct {
+		name, imports, code string
+		want                urlReads
+	}{
+		{name: "url.Parse is listed by its owner and argument", imports: `"net/url"`, code: `func f() { url.Parse(raw) }`, want: urlReads{parsed: []string{"f raw"}}},
+		{name: "url.ParseRequestURI too", imports: `"net/url"`, code: `func f() { url.ParseRequestURI(raw) }`, want: urlReads{parsed: []string{"f raw"}}},
+		{name: "url.JoinPath too", imports: `"net/url"`, code: `func f() { url.JoinPath(raw, "x") }`, want: urlReads{parsed: []string{"f raw"}}},
+		{name: "in parentheses", imports: `"net/url"`, code: `func f() { (url.Parse)(raw) }`, want: urlReads{parsed: []string{"f raw"}}},
+		{name: "under another import name", imports: `u "net/url"`, code: `func f() { u.Parse(raw) }`, want: urlReads{parsed: []string{"f raw"}}},
+		{name: "in a package-level var", imports: `"net/url"`, code: `var v, _ = url.Parse(raw)`, want: urlReads{parsed: []string{"v raw"}}},
+		{name: "parseURL with a setting name", code: `func f() { parseURL("public-url") }`, want: urlReads{named: []string{"public-url"}}},
+		{name: "url.Parse taken as a value", imports: `"net/url"`, code: `func f() { p := url.Parse; p(raw) }`, want: urlReads{unfollowed: []string{"f takes url.Parse as a value; call it where its argument can be listed"}}},
+		{name: "url.Parse taken as a value in a var", imports: `"net/url"`, code: `var p = url.Parse`, want: urlReads{unfollowed: []string{"p takes url.Parse as a value; call it where its argument can be listed"}}},
+		{name: "parseURL taken as a value", code: `func f() { g := parseURL; g("public-url") }`, want: urlReads{unfollowed: []string{"f takes parseURL as a value; call it where its argument can be listed"}}},
+		{name: "parseURL with a name that is not a literal", code: `func f() { parseURL(name) }`, want: urlReads{unfollowed: []string{"f calls parseURL with a setting name that is not a literal"}}},
+		{name: "a URL's Parse method", code: `func f() { base.Parse(raw) }`, want: urlReads{unfollowed: []string{"f calls base.Parse, a URL method: read the URL with url.Parse, where its argument can be listed"}}},
+		{name: "a URL's JoinPath method", code: `func f() { base.JoinPath(raw) }`, want: urlReads{unfollowed: []string{"f calls base.JoinPath, a URL method: read the URL with url.Parse, where its argument can be listed"}}},
+		{name: "a URL's ResolveReference method", code: `func f() { base.ResolveReference(ref) }`, want: urlReads{unfollowed: []string{"f calls base.ResolveReference, a URL method: read the URL with url.Parse, where its argument can be listed"}}},
+		{name: "a URL's UnmarshalBinary method", code: `func f() { u.UnmarshalBinary(b) }`, want: urlReads{unfollowed: []string{"f calls u.UnmarshalBinary, a URL method: read the URL with url.Parse, where its argument can be listed"}}},
+		{name: "a URL method taken as a value", imports: `"net/url"`, code: `func f() { p := new(url.URL).Parse; p(raw) }`, want: urlReads{unfollowed: []string{"f takes new(url.URL).Parse as a value; call it where its argument can be listed"}}},
+		{name: "a URL method expression", imports: `"net/url"`, code: `func f() { (*url.URL).Parse(base, raw) }`, want: urlReads{unfollowed: []string{"f calls (*url.URL).Parse, a URL method: read the URL with url.Parse, where its argument can be listed"}}},
+		{name: "the other parsers are not URL reads", imports: `"time"; "strconv"; "net"; "net/netip"`, code: `func f() { time.ParseDuration(s); strconv.ParseBool(s); net.ParseIP(s); netip.ParsePrefix(s); fs.Parse(args) }`},
+		{name: "a file that does not import net/url has no url.Parse", code: `func f() { url.Parse(raw) }`, want: urlReads{unfollowed: []string{"f calls url.Parse, a URL method: read the URL with url.Parse, where its argument can be listed"}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			src := "package config\n"
+			if c.imports != "" {
+				src += "import (" + c.imports + ")\n"
+			}
+			got, err := urlReadsOf("x.go", src+c.code+"\n")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("got %+v, want %+v", got, c.want)
+			}
+		})
+	}
+}
+
+// urlReads is what urlReadsOf finds in one file.
+type urlReads struct {
+	named      []string // the settings read through parseURL by name
+	parsed     []string // each net/url Parse, ParseRequestURI or JoinPath call, as its owner and argument
+	unfollowed []string // each read that cannot be listed by its argument, as a message
+}
+
+// urlReadsOf scans the Go file name (its source src, or read from the disk if src is nil) for the
+// URLs it reads, in its functions and package-level vars. A read it cannot follow to a listed
+// argument is unfollowed: url.Parse or parseURL taken as a value, parseURL with a name that is not a
+// literal, or a URL method (Parse*, JoinPath, ResolveReference, UnmarshalBinary) called or taken as a
+// value on anything but the packages config parses other values with (time, netip, net, strconv,
+// and its flag set fs).
+func urlReadsOf(name string, src any) (urlReads, error) {
+	var reads urlReads
+	file, err := parser.ParseFile(token.NewFileSet(), name, src, 0)
+	if err != nil {
+		return reads, err
+	}
+	urlPkg := ""
+	for _, imp := range file.Imports {
+		if imp.Path.Value == `"net/url"` {
+			urlPkg = "url"
+			if imp.Name != nil {
+				urlPkg = imp.Name.Name
+			}
+		}
+	}
+	isParse := func(e ast.Expr) (*ast.SelectorExpr, bool) {
+		sel, ok := e.(*ast.SelectorExpr)
+		if !ok {
+			return nil, false
+		}
+		pkg, ok := sel.X.(*ast.Ident)
+		return sel, ok && urlPkg != "" && pkg.Name == urlPkg && (strings.HasPrefix(sel.Sel.Name, "Parse") || sel.Sel.Name == "JoinPath")
+	}
+	otherParsers := map[string]bool{"time": true, "netip": true, "net": true, "strconv": true, "fs": true}
+	urlMethod := func(e ast.Expr) (*ast.SelectorExpr, bool) {
+		sel, ok := e.(*ast.SelectorExpr)
+		if !ok {
+			return nil, false
+		}
+		switch n := sel.Sel.Name; {
+		case strings.HasPrefix(n, "Parse"), n == "JoinPath", n == "ResolveReference", n == "UnmarshalBinary":
+		default:
+			return nil, false
+		}
+		pkg, ok := sel.X.(*ast.Ident)
+		return sel, !ok || pkg.Name != urlPkg && !otherParsers[pkg.Name]
+	}
+	unfollowed := func(format string, args ...any) {
+		reads.unfollowed = append(reads.unfollowed, fmt.Sprintf(format, args...))
+	}
+	// check walks node, owned by the function or var owner, and lists its URL reads.
+	check := func(owner string, node ast.Node) {
+		called := map[ast.Expr]bool{}
+		var refs []ast.Expr
+		ast.Inspect(node, func(n ast.Node) bool {
+			if sel, ok := isParse(asExpr(n)); ok {
+				refs = append(refs, sel)
+			} else if sel, ok := urlMethod(asExpr(n)); ok {
+				refs = append(refs, sel)
+			}
+			if id, ok := n.(*ast.Ident); ok && id.Name == "parseURL" {
+				refs = append(refs, id)
+			}
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			fun := ast.Unparen(call.Fun)
+			called[fun] = true
+			if _, ok := isParse(fun); !ok {
+				if sel, ok := urlMethod(fun); ok {
+					unfollowed("%s calls %s, a URL method: read the URL with url.Parse, where its argument can be listed", owner, types.ExprString(sel))
+					return true
+				}
+			}
+			if len(call.Args) == 0 {
+				return true
+			}
+			if id, ok := fun.(*ast.Ident); ok && id.Name == "parseURL" {
+				lit, ok := call.Args[0].(*ast.BasicLit)
+				name, err := "", error(nil)
+				if ok {
+					name, err = strconv.Unquote(lit.Value)
+				}
+				if !ok || err != nil {
+					unfollowed("%s calls parseURL with a setting name that is not a literal", owner)
+					return true
+				}
+				reads.named = append(reads.named, name)
+				return true
+			}
+			if _, ok := isParse(fun); ok {
+				reads.parsed = append(reads.parsed, owner+" "+types.ExprString(call.Args[0]))
+			}
+			return true
+		})
+		for _, ref := range refs {
+			if !called[ref] {
+				unfollowed("%s takes %s as a value; call it where its argument can be listed", owner, types.ExprString(ref))
+			}
+		}
+	}
+	for _, d := range file.Decls {
+		switch d := d.(type) {
+		case *ast.FuncDecl:
+			if d.Body != nil {
+				check(d.Name.Name, d.Body)
+			}
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				if vs, ok := spec.(*ast.ValueSpec); ok {
+					check(vs.Names[0].Name, vs)
+				}
+			}
+		}
+	}
+	return reads, nil
+}
+
+// asExpr is n as an expression, or nil.
+func asExpr(n ast.Node) ast.Expr {
+	e, _ := n.(ast.Expr)
+	return e
+}
+
+// The upstream command is shown by its program and how many arguments follow, never the arguments,
+// which can be a token; the proxy runs it whole. Given as JSON or after --, it shows the same.
+func TestTheUpstreamCommandIsShownByItsProgramAndArgumentCount(t *testing.T) {
+	argv := []string{"/usr/local/bin/server", "--token", pasted}
+	for _, tc := range []struct {
+		name string
+		args []string
+		env  string
+	}{
+		{"as JSON", nil, `BYWARD_UPSTREAM_COMMAND=["/usr/local/bin/server","--token","` + pasted + `"]`},
+		{"after --", append([]string{"--"}, argv...), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := []string{"BYWARD_UPSTREAM_URL="}
+			if tc.env != "" {
+				env = append(env, tc.env)
+			}
+			c, _, err := Load(tc.args, append(append([]string{}, base...), env...), baseFiles)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := displayed(c, "upstream-command"); got != "/usr/local/bin/server (2 arguments not shown)" {
+				t.Errorf("the command is shown as %q", got)
+			}
+			if !slices.Equal(c.UpstreamCommand, argv) {
+				t.Errorf("the proxy runs %q, want %q", c.UpstreamCommand, argv)
+			}
+		})
+	}
+	for raw, want := range map[string]string{`["/bin/srv"]`: "/bin/srv", `["/bin/srv","-v"]`: "/bin/srv (1 argument not shown)",
+		`["/bin/a\nB=1","-v"]`:             `"/bin/a\nB=1" (1 argument not shown)`,
+		`["/bin/a\nB=1"]`:                  `"/bin/a\nB=1"`,
+		`["/bin/a\nB=1","-v","-w"]`:        `"/bin/a\nB=1" (2 arguments not shown)`,
+		`["/bin/a\u001b[2J","-v"]`:         `"/bin/a\x1b[2J" (1 argument not shown)`,
+		`["/opt/my server","-v"]`:          "/opt/my server (1 argument not shown)",
+		"[\"/bin/a\u202egnp.exe\",\"-v\"]": `"/bin/a\u202egnp.exe" (1 argument not shown)`, // not printable, yet no control character
+		"[\"/bin/a\u00a0B\",\"-v\"]":       `"/bin/a\u00a0B" (1 argument not shown)`,       // a space, but not one strconv prints
+		"[\"/bin/a\u2028B\",\"-v\"]":       `"/bin/a\u2028B" (1 argument not shown)`,       // a line separator, which some log viewers break on
+		"[\"/bin/a\u007fB\",\"-v\"]":       `"/bin/a\x7fB" (1 argument not shown)`,         // DEL
+		"not JSON":                         "the value (not shown: it may hold a password)"} {
+		if got := (Value{Setting: Setting{Command: true}, Raw: raw}).Display(); got != want {
+			t.Errorf("%s is shown as %q, want %q", raw, got, want)
+		}
+	}
+}
+
+// The settings shown as a URL, as a list of URLs and as a command line are exactly those whose value
+// is one.
+func TestTheURLAndCommandSettingsAreMarked(t *testing.T) {
+	var url, urls, command []string
+	for _, s := range registry {
+		switch {
+		case s.URL:
+			url = append(url, s.Name)
+		case s.URLs:
+			urls = append(urls, s.Name)
+		case s.Command:
+			command = append(command, s.Name)
+		}
+	}
+	for _, c := range []struct {
+		kind      string
+		got, want []string
+	}{
+		{"URL", url, []string{"public-url", "upstream-url", "resource-documentation", "oidc-issuer"}},
+		{"URLs", urls, []string{"client-denylist"}},
+		{"Command", command, []string{"upstream-command"}},
+	} {
+		if !slices.Equal(c.got, c.want) {
+			t.Errorf("%s settings %q, want %q", c.kind, c.got, c.want)
+		}
+	}
+}
+
+// The relaxation lines the startup log, check and doctor print name a URL setting as
+// logging.MarkedURL does too: the --dev loopback issuer, and the public URL without authentication.
+func TestARelaxationLineShowsAURLSettingWithoutItsParts(t *testing.T) {
+	c, err := loadOIDC(t, with("BYWARD_DEV=true", "BYWARD_OIDC_ISSUER=http://127.0.0.1:8180/realms/acme;k="+pasted))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "http IdP issuer on loopback (http://127.0.0.1:8180/realms/acme;…): discovery over http"
+	if !slices.ContainsFunc(c.Relaxations, func(r string) bool { return strings.HasPrefix(r, want) }) || strings.Contains(strings.Join(c.Relaxations, "\n"), "S3CRETPW") {
+		t.Errorf("relaxations %q, want one starting %q and never the secret", c.Relaxations, want)
+	}
+	c, _, err = Load(nil, noAuthEnv("BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp;k="+pasted), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = "AUTHENTICATION IS OFF: anyone who can reach http://127.0.0.1:8080/mcp;… can use the upstream, and the upstream receives no identity"
+	if !slices.Contains(c.Relaxations, want) || strings.Contains(strings.Join(c.Relaxations, "\n"), "S3CRETPW") {
+		t.Errorf("relaxations %q, want %q and never the secret", c.Relaxations, want)
+	}
+}
