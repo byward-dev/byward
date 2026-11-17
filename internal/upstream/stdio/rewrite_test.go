@@ -105,6 +105,9 @@ func TestIDKeyIsOneKeyPerValue(t *testing.T) {
 		{`"\udbff\udfff"`, "\"\U0010FFFF\"", true},
 		{`"\ud800Xudc00"`, `"\ud800\udc00"`, false},
 		// An escaped quote, backslash or control character is the key of its short escape.
+		{`"\"\u00e9"`, `"\u0022é"`, true},
+		{`"\u0001"`, `"\\u0001"`, false},
+		{"\"\xff\"", `"\u00ff"`, false},
 		{`"\b\f\r\t"`, `"\u0008\u000C\u000d\u0009"`, true},
 		{`"\b"`, `"\f"`, false},
 		{`"\r"`, `"\n"`, false},
@@ -126,8 +129,8 @@ func TestIDKeyIsOneKeyPerValue(t *testing.T) {
 // sequence, with and without HTML escaping, share its key.
 func FuzzIDKeyIsOneKeyPerValue(f *testing.F) {
 	f.Add(unitBytes(0xd800), unitBytes(0xdc00), []byte{0xff}, []byte{0xfe})
-	f.Add(unitBytes(0xd800), unitBytes([]uint16(utf16.Encode([]rune(`\ud800`)))...), []byte{0xed, 0xa0, 0x80}, []byte("\xef\xbf\xbd"))
-	f.Add(unitBytes([]uint16(utf16.Encode([]rune(`\xff`)))...), unitBytes(0xfffd), []byte{0xff}, []byte("xff"))
+	f.Add(unitBytes(0xd800), unitBytes(utf16.Encode([]rune(`\ud800`))...), []byte{0xed, 0xa0, 0x80}, []byte("\xef\xbf\xbd"))
+	f.Add(unitBytes(utf16.Encode([]rune(`\xff`))...), unitBytes(0xfffd), []byte{0xff}, []byte("xff"))
 	f.Add(unitBytes(0xd83d, 0xde00), unitBytes(0xdc00, 0xdc00), []byte("😀"), []byte("a<b&c"))
 	f.Fuzz(func(t *testing.T, au, bu, raw, raw2 []byte) {
 		a, b := codeUnits(au), codeUnits(bu)
@@ -191,7 +194,7 @@ func escapedUnits(u []uint16) string {
 }
 
 // plainBytes reports whether b can stand unescaped inside a JSON string: no quote, backslash or
-// control character (bytes that are not UTF-8 included).
+// control character. Bytes that are not UTF-8 may stand as they are.
 func plainBytes(b []byte) bool {
 	return !bytes.ContainsFunc(b, func(r rune) bool { return r == '"' || r == '\\' || r < 0x20 })
 }

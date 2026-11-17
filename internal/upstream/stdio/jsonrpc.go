@@ -148,7 +148,7 @@ func idKey(id json.RawMessage) string {
 }
 
 // stringKey is the JSON string literal s written one way per value. Every escape that names a
-// character is decoded, and '"', '\' and control characters are escaped as \" \\ \u00XX. What
+// character is decoded, and '"', '\' and control characters are escaped as \" \\ \u00xx, in lower-case hex. What
 // names no character keeps a form of its own instead of becoming U+FFFD, as encoding/json would
 // make it (L173): a lone surrogate escape is \uXXXX in lower-case hex, and a byte that is not
 // UTF-8 is \xXX. No character produces either form, since a decoded '\' is written \\. So distinct
