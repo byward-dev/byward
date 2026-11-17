@@ -210,9 +210,10 @@ seconds. The user key is the one the audit records show as `user_key`: with Entr
 tenant and object IDs); with an `oidc` IdP, the value of its subject claim (`BYWARD_OIDC_SUBJECT_CLAIM`,
 `sub` by default). It runs beside a running proxy. A key that is not a user key of the configured
 IdP exits 2, and so do IdP settings it cannot build the IdP from (an Entra certificate or OIDC client
-key file that holds no key), with the configuration error the proxy gives for them at startup. The
-operator commands check only the settings they use: revoke-user works with an expired IdP credential or
-an empty gate, which serve refuses. A store that is there but cannot be opened or written exits 1. The
+key file that holds no key), with the configuration error the proxy gives for them at startup. It
+builds only what it needs to read the user key, so it still works with an expired Entra certificate
+or, with an `oidc` IdP, an empty [access gate](../how-to/access-gate.md#empty-gate), which the proxy
+and `check --offline` refuse at startup. A store that is there but cannot be opened or written exits 1. The
 revocation is audited as `grant_revoked` with the reason `operator revoke-user`, by the command and by
 each running proxy at its next deny-list sync ([where it is recorded](../how-to/revoke-access.md#where-an-operator-revocation-is-recorded)).
 
