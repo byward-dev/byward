@@ -586,8 +586,9 @@ func TestUpstreamHeaderTimeoutDefaultsToFiveMinutesWithinBounds(t *testing.T) {
 
 // Trusted proxies are CIDRs or addresses, masked; an IPv4-mapped one is the IPv4 prefix it maps,
 // since peers are compared unmapped, and one shorter than /96 maps no IPv4 prefix (masked, it would
-// trust IPv6 addresses), so it is refused. A zone, or an entry inside fe80::/10, is refused: a zoned
-// peer never matches a prefix, so it would trust nothing.
+// trust IPv6 addresses), so it is refused. An entry inside fe80::/10 is refused, as it would trust no
+// peer; a zone too, as it swallowed the prefix length and was dropped. Link-local is said first, so
+// removing the zone never leads to the second refusal.
 func TestTrustedProxiesTakeCIDRsAndAddresses(t *testing.T) {
 	cfg, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES=10.0.0.0/8, 192.0.2.7, 2001:db8::/32, 10.1.2.3/8"), nil)
 	if err != nil {
@@ -602,8 +603,9 @@ func TestTrustedProxiesTakeCIDRsAndAddresses(t *testing.T) {
 		"::ffff:10.0.0.5/128":   "10.0.0.5/32",
 		"::ffff:172.16.0.0/108": "172.16.0.0/12",
 		"::ffff:0:0/96":         "0.0.0.0/0",
-		// Around fe80::/10 but not inside it: no zoned (link-local) peer ever matches these.
+		// Around fe80::/10 but not inside it (TestALoadedTrustedProxyListDecidesTheClientAddress).
 		"::/0":           "::/0",
+		"fe80::/9":       "fe80::/9", // starts in fe80::/10 but is wider
 		"fe00::/9":       "fe00::/9",
 		"fec0::1":        "fec0::1/128",
 		"169.254.0.0/16": "169.254.0.0/16", // IPv4 link-local has no zone
@@ -614,7 +616,7 @@ func TestTrustedProxiesTakeCIDRsAndAddresses(t *testing.T) {
 				t.Fatal(err)
 			}
 			if got := fmt.Sprint(cfg.TrustedProxies); got != "["+stored+"]" {
-				t.Errorf("stored %s, want [%s]: a mapped prefix is the IPv4 one it maps", got, stored)
+				t.Errorf("stored %s, want [%s]", got, stored)
 			}
 		})
 	}
@@ -626,12 +628,14 @@ func TestTrustedProxiesTakeCIDRsAndAddresses(t *testing.T) {
 		{"a mapped /8", "::ffff:10.0.0.0/8", `BYWARD_TRUSTED_PROXIES: "::ffff:10.0.0.0/8" is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)`},
 		{"a mapped /95", "::ffff:10.0.0.0/95", `BYWARD_TRUSTED_PROXIES: "::ffff:10.0.0.0/95" is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)`},
 		// Parsed as an address, everything after % is the zone, the prefix length included.
-		{"a prefix with a zone", "fe80::1%eth0/64", `BYWARD_TRUSTED_PROXIES: "fe80::1%eth0/64" has an IPv6 zone: give the CIDR or address without one`},
-		{"an address with a zone", "fe80::1%eth0", `BYWARD_TRUSTED_PROXIES: "fe80::1%eth0" has an IPv6 zone: give the CIDR or address without one`},
-		{"a mapped address with a zone", "::ffff:10.0.0.1%eth0", `BYWARD_TRUSTED_PROXIES: "::ffff:10.0.0.1%eth0" has an IPv6 zone: give the CIDR or address without one`},
-		{"a link-local address", "fe80::1", `BYWARD_TRUSTED_PROXIES: "fe80::1" is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address`},
-		{"the link-local prefix", "fe80::/10", `BYWARD_TRUSTED_PROXIES: "fe80::/10" is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address`},
-		{"the last link-local address", "febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff", `BYWARD_TRUSTED_PROXIES: "febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff" is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address`},
+		{"a zoned prefix", "2001:db8::1%eth0/64", `BYWARD_TRUSTED_PROXIES: "2001:db8::1%eth0/64" has an IPv6 zone: give the proxy's routable address or CIDR, without a zone`},
+		{"a zoned address", "2001:db8::1%eth0", `BYWARD_TRUSTED_PROXIES: "2001:db8::1%eth0" has an IPv6 zone: give the proxy's routable address or CIDR, without a zone`},
+		{"a zoned mapped address", "::ffff:10.0.0.1%eth0", `BYWARD_TRUSTED_PROXIES: "::ffff:10.0.0.1%eth0" has an IPv6 zone: give the proxy's routable address or CIDR, without a zone`},
+		{"a zoned link-local prefix", "fe80::1%eth0/64", `BYWARD_TRUSTED_PROXIES: "fe80::1%eth0/64" is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
+		{"a zoned link-local address", "fe80::1%eth0", `BYWARD_TRUSTED_PROXIES: "fe80::1%eth0" is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
+		{"a link-local address", "fe80::1", `BYWARD_TRUSTED_PROXIES: "fe80::1" is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
+		{"the link-local prefix", "fe80::/10", `BYWARD_TRUSTED_PROXIES: "fe80::/10" is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
+		{"the last link-local address", "febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff", `BYWARD_TRUSTED_PROXIES: "febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff" is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES="+tc.value), nil); err == nil || err.Error() != tc.want {
@@ -641,21 +645,31 @@ func TestTrustedProxiesTakeCIDRsAndAddresses(t *testing.T) {
 	}
 }
 
-// A mapped trusted-proxy prefix trusts the IPv4 proxy it maps where the client address is resolved
-// (logging.ClientAddress), which compares peers unmapped: kept mapped, it would trust none.
-func TestAMappedTrustedProxyPrefixTrustsItsIPv4Proxies(t *testing.T) {
-	cfg, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES=::ffff:10.0.0.0/104"), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var client string
-	h := logging.ClientAddress(cfg.TrustedProxies, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { client = logging.RemoteIP(r) }))
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	r.RemoteAddr = "10.1.2.3:4000"
-	r.Header.Set("X-Forwarded-For", "198.51.100.1")
-	h.ServeHTTP(httptest.NewRecorder(), r)
-	if client != "198.51.100.1" {
-		t.Fatalf("client %s, want 198.51.100.1: the proxy 10.1.2.3 is trusted, so its X-Forwarded-For counts", client)
+// A loaded trusted-proxy list decides the client address where it is resolved
+// (logging.ClientAddress). A mapped prefix trusts the IPv4 proxy it maps: kept mapped, it would trust
+// none, as peers are compared unmapped. ::/0, accepted although it contains fe80::/10, still trusts no
+// link-local peer, which arrives zoned.
+func TestALoadedTrustedProxyListDecidesTheClientAddress(t *testing.T) {
+	for _, tc := range []struct{ name, proxies, peer, want string }{
+		{"a mapped prefix trusts its IPv4 proxy", "::ffff:10.0.0.0/104", "10.1.2.3:4000", "198.51.100.1"},
+		{"::/0 trusts an IPv6 proxy", "::/0", "[2001:db8::1]:4000", "198.51.100.1"},
+		{"::/0 does not trust a zoned link-local proxy", "::/0", "[fe80::1%eth0]:4000", "fe80::1%eth0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES="+tc.proxies), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var client string
+			h := logging.ClientAddress(cfg.TrustedProxies, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { client = logging.RemoteIP(r) }))
+			r := httptest.NewRequest(http.MethodGet, "/", nil)
+			r.RemoteAddr = tc.peer
+			r.Header.Set("X-Forwarded-For", "198.51.100.1")
+			h.ServeHTTP(httptest.NewRecorder(), r)
+			if client != tc.want {
+				t.Fatalf("client %s, want %s (198.51.100.1 when the peer is trusted, else the peer)", client, tc.want)
+			}
+		})
 	}
 }
 
