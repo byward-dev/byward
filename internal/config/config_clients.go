@@ -98,14 +98,3 @@ func hostNameReason(h string) string {
 	}
 	return ""
 }
-
-// endsInANumber reports whether a browser reads host as an IPv4 address (WHATWG URL "ends in a
-// number"): its last label is decimal digits, or 0x and hex digits. The parse may then fail (a.0x7f),
-// and the browser refuses the URL.
-func endsInANumber(host string) bool {
-	last := host[strings.LastIndex(host, ".")+1:]
-	if hex, ok := strings.CutPrefix(strings.ToLower(last), "0x"); ok {
-		return strings.Trim(hex, "0123456789abcdef") == ""
-	}
-	return last != "" && strings.Trim(last, "0123456789") == ""
-}

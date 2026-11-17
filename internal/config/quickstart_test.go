@@ -41,9 +41,11 @@ func TestSecretExpiresAtRejectsOtherForms(t *testing.T) {
 
 func TestPublicURLAcceptsHTTPSOrLoopbackAndNamesTheRuleABadOneBreaks(t *testing.T) {
 	// An IP address, IPv6 included, is a valid host though the host name rule would refuse it (#344),
-	// and any port from 1 to 65535 is accepted (#353).
+	// and any port from 1 to 65535 is accepted (#353). A last label that is not a number (10x) makes a
+	// name.
 	for _, raw := range []string{"https://mcp.example.com/mcp", "http://127.0.0.1:8080/mcp", "http://localhost:8080/team/mcp", "http://[::1]:8080/mcp", "https://[2001:db8::1]/mcp",
-		"https://mcp.example.com:443/mcp", "https://mcp.example.com:8443/mcp", "https://mcp.example.com:1/mcp", "https://mcp.example.com:65535/mcp", "https://[2001:db8::1]:8443/mcp"} {
+		"https://mcp.example.com:443/mcp", "https://mcp.example.com:8443/mcp", "https://mcp.example.com:1/mcp", "https://mcp.example.com:65535/mcp", "https://[2001:db8::1]:8443/mcp",
+		"https://[::ffff:a00:1]/mcp", "https://10.0.0.1/mcp", "https://0.0.0.0/mcp", "https://mcp.example.10x/mcp"} {
 		if _, err := ParsePublicURL(raw); err != nil {
 			t.Errorf("%s: %v", raw, err)
 		}
@@ -56,6 +58,19 @@ func TestPublicURLAcceptsHTTPSOrLoopbackAndNamesTheRuleABadOneBreaks(t *testing.
 		"http://mcp.example.com/mcp":     "must use https",
 		"https://bücher.example/mcp":     `the host "bücher.example" is not ASCII`,
 		"ftp://mcp.example.com/mcp":      "absolute http(s) URL",
+		// A browser rewrites these hosts (10.0.0.1, 8.0.0.1) or refuses them, so a browser sign-in could
+		// never come back to the public URL.
+		"https://10.1/mcp":                       `BYWARD_PUBLIC_URL: "10.1" is not an IPv4 address in dotted decimal, the only form browsers send`,
+		"https://010.0.0.1/mcp":                  `"010.0.0.1" is not an IPv4 address in dotted decimal`,
+		"https://mcp.10/mcp":                     `"mcp.10" is not an IPv4 address in dotted decimal`,
+		"https://mcp.0x0123456789abcdef0123/mcp": `"mcp.0x0123456789abcdef0123" is not an IPv4 address in dotted decimal`, // a hex number too large for 64 bits is still a number
+		// An IPv6 address only as browsers write it, since the public URL is also the issuer and the
+		// resource browser clients compare (#447); the message names that form.
+		"https://[2001:DB8:0:0::1]/mcp":       "BYWARD_PUBLIC_URL: the IPv6 address [2001:DB8:0:0::1] is not in the form browsers write it; write it as [2001:db8::1]",
+		"https://[::ffff:127.0.0.1]:8443/mcp": "the IPv6 address [::ffff:127.0.0.1] is not in the form browsers write it; write it as [::ffff:7f00:1]",
+		"https://[0:0::1]/mcp":                "write it as [::1]",
+		"https://[1:0:0:0:2:0:0:3]/mcp":       "the IPv6 address [1:0:0:0:2:0:0:3] is not in the form browsers write it; write it as [1::2:0:0:3]",
+		"https://[2001:DB8::1]/mcp":           "the IPv6 address [2001:DB8::1] is not in the form browsers write it; write it as [2001:db8::1]",
 	} {
 		if _, err := ParsePublicURL(raw); err == nil || !strings.Contains(err.Error(), inErr) {
 			t.Errorf("%q: err = %v, want %q", raw, err, inErr)
@@ -112,5 +127,18 @@ func TestQuickstartEnvFileKeepsValuesAndExplainsTheEmptyOne(t *testing.T) {
 	}
 	if strings.Count(Quickstart{PublicURL: "x"}.EnvFile(), "EXPIRES_AT") != 0 {
 		t.Fatal("the expiry line is written although no date was given")
+	}
+}
+
+// A public URL's host name keeps its spelling, case included: the issuer is built from it, so
+// changing it would change every deployment's issuer. Only an IP address must be written as
+// browsers write it.
+func TestAPublicURLHostNameKeepsItsSpellingAsTheIssuer(t *testing.T) {
+	c, err := load(t, nil, "BYWARD_PUBLIC_URL=https://MCP.Example.com/mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Issuer(); got != "https://MCP.Example.com" {
+		t.Fatalf("issuer %q, want https://MCP.Example.com as written", got)
 	}
 }

@@ -30,32 +30,40 @@ func TestNoAuthOnLoopbackStartsWithoutDevAndSaysAuthIsOff(t *testing.T) {
 }
 
 func TestNoAuthIsRefusedOffLoopback(t *testing.T) {
-	cases := []struct{ name, env, want string }{
-		{"public URL", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_PUBLIC_URL must be a loopback URL"},
-		{"listen outside a container", "BYWARD_LISTEN=0.0.0.0:8080", "BYWARD_LISTEN must be a loopback address"},
-		{"listen on all interfaces by omission", "BYWARD_LISTEN=:8080", "BYWARD_LISTEN must be a loopback address"},
-		{"listen without port", "BYWARD_LISTEN=0.0.0.0", "BYWARD_LISTEN"},
-		{"listen on all IPv6 interfaces", "BYWARD_LISTEN=[::]:8080", "BYWARD_LISTEN must be a loopback address"},
-		{"extra host", "BYWARD_ALLOWED_HOSTS=proxy.internal:8080", "BYWARD_ALLOWED_HOSTS may only list loopback hosts"},
+	cases := []struct{ name, env, want, notWant string }{
+		{"public URL", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_PUBLIC_URL must be a loopback URL", ""},
+		{"listen outside a container", "BYWARD_LISTEN=0.0.0.0:8080", "BYWARD_LISTEN must be a loopback address", ""},
+		{"listen on all interfaces by omission", "BYWARD_LISTEN=:8080", "BYWARD_LISTEN must be a loopback address", ""},
+		{"listen without port", "BYWARD_LISTEN=0.0.0.0", "BYWARD_LISTEN", ""},
+		{"listen on all IPv6 interfaces", "BYWARD_LISTEN=[::]:8080", "BYWARD_LISTEN must be a loopback address", ""},
+		{"extra host", "BYWARD_ALLOWED_HOSTS=proxy.internal:8080", "BYWARD_ALLOWED_HOSTS may only list loopback hosts", ""},
+		// Named as the operator wrote it, though stored as browsers write it (8.0.0.1).
+		{"extra host spelled in octal", "BYWARD_ALLOWED_HOSTS=010.0.0.1", `BYWARD_ALLOWED_HOSTS may only list loopback hosts, got "010.0.0.1"`, ""},
+		{"two extra hosts, both named", "BYWARD_ALLOWED_HOSTS=proxy.internal,other.internal", `got "proxy.internal"; BYWARD_INSECURE_NO_AUTH: BYWARD_ALLOWED_HOSTS may only list loopback hosts, got "other.internal"`, ""},
 		// Loopback hosts that can match no Host header are refused, not accepted for their host name (#325).
-		{"loopback host with a junk port", "BYWARD_ALLOWED_HOSTS=127.0.0.1:abc", `"127.0.0.1:abc" is not a host[:port]`},
-		{"extra origin", "BYWARD_ALLOWED_ORIGINS=https://app.example", "BYWARD_ALLOWED_ORIGINS may only list loopback origins"},
+		// An entry that does not load gets only its own error, never the loopback one too.
+		{"loopback host with a junk port", "BYWARD_ALLOWED_HOSTS=127.0.0.1:abc", `"127.0.0.1:abc" is not a host[:port]`, "may only list loopback hosts"},
+		{"extra origin", "BYWARD_ALLOWED_ORIGINS=https://app.example", "BYWARD_ALLOWED_ORIGINS may only list loopback origins", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if _, err := loadAnon(t, nil, c.env); !isConfigError(err) || !strings.Contains(err.Error(), c.want) {
+			_, err := loadAnon(t, nil, c.env)
+			if !isConfigError(err) || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("want config error containing %q, got %v", c.want, err)
+			}
+			if c.notWant != "" && strings.Contains(err.Error(), c.notWant) {
+				t.Fatalf("want no %q in the error, got %v", c.notWant, err)
 			}
 		})
 	}
 }
 
 func TestNoAuthAcceptsLoopbackHostsAndOrigins(t *testing.T) {
-	c, err := loadAnon(t, nil, "BYWARD_ALLOWED_HOSTS=127.0.0.1:8080,localhost,[::1],[::1]:8080,::1", "BYWARD_ALLOWED_ORIGINS=http://localhost:6274", "BYWARD_LISTEN=[::1]:8080", "BYWARD_PUBLIC_URL=http://[::1]:8080/mcp")
+	c, err := loadAnon(t, nil, "BYWARD_ALLOWED_HOSTS=127.0.0.1:8080,localhost,[::1],[::1]:8080,::1,127.1", "BYWARD_ALLOWED_ORIGINS=http://localhost:6274", "BYWARD_LISTEN=[::1]:8080", "BYWARD_PUBLIC_URL=http://[::1]:8080/mcp")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.AllowedOrigins) != 1 || len(c.AllowedHosts) != 5 {
+	if len(c.AllowedOrigins) != 1 || len(c.AllowedHosts) != 6 {
 		t.Fatalf("origins=%v hosts=%v", c.AllowedOrigins, c.AllowedHosts)
 	}
 }

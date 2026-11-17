@@ -39,10 +39,13 @@ supply ([Serve TLS at the proxy](tls.md), [ADR-0019](../adr/0019-packaging.md) �
 
 Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) §1–2).
 
-- [ ] **Host:** the public URL's host is always accepted, and `:80` and `:443` are ignored when
-      comparing. If the ingress sends a different `Host`, such as an internal service name, add it to
-      `BYWARD_ALLOWED_HOSTS`. A mismatch gets `421` and a `host_rejected` audit event. Prefer an
-      ingress that passes the original `Host` through, and keep the list short.
+- [ ] **Host:** the public URL's host is always accepted, and one default port (`:443` or `:80`)
+      is ignored when comparing, as a proxy may add `:80`. An IP address matches in any spelling
+      of the same address, as browsers write it: `127.1` is `127.0.0.1`, and an IPv6 address is
+      compared in its shortest form. If the ingress sends a different
+      `Host`, such as an internal service name, add it to `BYWARD_ALLOWED_HOSTS`. A mismatch gets
+      `421` and a `host_rejected` audit event. Prefer an ingress that passes the original `Host`
+      through, and keep the list short.
 - [ ] **Origin:** browser-based MCP clients send an `Origin`. Only the proxy's own origin and exact
       entries in `BYWARD_ALLOWED_ORIGINS` (`scheme://host[:port]`) pass; anything else gets
       `403` and an `origin_rejected` event. Requests without `Origin` (desktop and CLI clients) pass.

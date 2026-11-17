@@ -56,6 +56,71 @@ func TestHostOutsideAllowlistGets421(t *testing.T) {
 	}
 }
 
+// matchesOnly checks that Hosts with listed alone passes every Host header in match and answers 421
+// to every one in refuse.
+func matchesOnly(t *testing.T, listed string, match, refuse []string) {
+	t.Helper()
+	h := Hosts(quiet(), []string{listed}, ok)
+	code := func(host string) int {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.Host = host
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	for _, host := range match {
+		if c := code(host); c != http.StatusNoContent {
+			t.Errorf("Host %q should match %q: got %d", host, listed, c)
+		}
+	}
+	for _, host := range refuse {
+		if c := code(host); c != http.StatusMisdirectedRequest {
+			t.Errorf("Host %q should be refused against %q: got %d", host, listed, c)
+		}
+	}
+}
+
+// A Host header may leave out a default port (:443 or :80) or carry one, either way round from the
+// listed entry, as browsers leave it out and a proxy behind a TLS-terminating load balancer may add
+// :80; only one, once, so a doubled port is another host.
+func TestOneDefaultPortIsIgnoredOnce(t *testing.T) {
+	for _, tc := range []struct {
+		listed        string
+		match, refuse []string
+	}{
+		{"localhost", []string{"localhost", "localhost:443", "localhost:80"}, []string{"localhost:443:443", "localhost:80:443", "localhost:8080"}},
+		{"localhost:443", []string{"localhost", "localhost:443", "localhost:80"}, []string{"localhost:8443"}},
+		{"localhost:80", []string{"localhost", "localhost:443"}, []string{"localhost:80:80"}},
+		{"[::1]", []string{"[::1]:443", "[::1]:80"}, []string{"[::1]:80:443", "[::1]:8080"}},
+	} {
+		t.Run(tc.listed, func(t *testing.T) {
+			matchesOnly(t, tc.listed, tc.match, tc.refuse)
+		})
+	}
+}
+
+// A listed host matches a Host header in any spelling of the same address, as browsers and fetch
+// send the canonical form and Go and Python clients send it as written (#447); both sides are
+// compared canonical, whatever form the list holds. A name matches only itself, even one ending in a
+// number or built from an address (DNS rebinding, invariant 17).
+func TestAListedHostMatchesEverySpellingOfItsAddressAndNoOtherHost(t *testing.T) {
+	for _, tc := range []struct {
+		listed        string
+		match, refuse []string
+	}{
+		{"[2001:DB8:0:0::1]", []string{"[2001:db8::1]", "[2001:DB8::1]", "[2001:db8:0:0:0:0:0:1]"}, []string{"[2001:db8::2]", "2001:db8::1.example"}},
+		{"[::ffff:127.0.0.1]:8443", []string{"[::ffff:7f00:1]:8443", "[::FFFF:127.0.0.1]:8443"}, []string{"[::ffff:7f00:1]", "127.0.0.1:8443"}},
+		{"127.0.0.1:8080", []string{"127.1:8080", "2130706433:8080", "0x7f.0.0.1:8080", "0177.0.0.1:8080"},
+			[]string{"127.0.0.2:8080", "127.0.0.1:8081", "127.0.0.1.evil:8080", "127.0.0.1.5:8080", "127.0.0.1.0:8080", "[127.0.0.1]:8080"}}, // .0 passes the size check, so only the five-part limit refuses it
+		{"0.0.0.0", []string{"0", "0x0.0"}, []string{"4294967296", "18446744073709551616", "0x10000000000000000"}}, // overflow never wraps to 0.0.0.0
+		{"mcp.10", []string{"MCP.10"}, []string{"mcp.0xa", "mcp.010", "0.0.0.10", "10.0.0.0"}},
+	} {
+		t.Run(tc.listed, func(t *testing.T) {
+			matchesOnly(t, tc.listed, tc.match, tc.refuse)
+		})
+	}
+}
+
 func TestInternalListenerAcceptsAddressesAndListedNamesOnly(t *testing.T) {
 	h := InternalHosts(quiet(), []string{"byward-metrics.monitoring.svc:8080"}, ok)
 	cases := map[string]int{
@@ -66,6 +131,8 @@ func TestInternalListenerAcceptsAddressesAndListedNamesOnly(t *testing.T) {
 		"localhost:9090":                     http.StatusNoContent,
 		"LOCALHOST":                          http.StatusNoContent,
 		"byward-metrics.monitoring.svc:9090": http.StatusNoContent, // listed name, any port
+		"127.1:9090":                         http.StatusNoContent, // an IP literal in any spelling
+		"2130706433":                         http.StatusNoContent,
 		"rebind.attacker.example:9090":       http.StatusMisdirectedRequest,
 		"localhost.attacker.example":         http.StatusMisdirectedRequest,
 		"127.0.0.1.nip.io:9090":              http.StatusMisdirectedRequest,

@@ -38,7 +38,7 @@ var groups = []Group{GroupEndpoint, GroupIdP, GroupEntra, GroupOIDC, GroupGate, 
 
 // registry is every setting the proxy reads, in the order the effective configuration is printed.
 var registry = []Setting{
-	{Name: "public-url", URL: true, Group: GroupEndpoint, Help: "public URL of the MCP endpoint exactly as users enter it, e.g. https://mcp.example.com/mcp; an internationalized host in its ASCII (xn--) form"},
+	{Name: "public-url", URL: true, Group: GroupEndpoint, Help: "public URL of the MCP endpoint exactly as users enter it, e.g. https://mcp.example.com/mcp; an internationalized host in its ASCII (xn--) form; an IP address as browsers write it (127.0.0.1, not 127.1; [2001:db8::1], not [2001:DB8:0::1]), since they rewrite any other spelling, and no other host ending in a number (mcp.10), which browsers refuse"},
 	{Name: "upstream-url", URL: true, Group: GroupHTTPUpstream, Help: "URL of the HTTP upstream MCP server; or set a stdio upstream with upstream-command"},
 	{Name: "upstream-header-timeout", Group: GroupHTTPUpstream, Default: "5m", Help: "how long the HTTP upstream may take to send its response headers; a request that waits longer gets a JSON-RPC timeout error, and a streamed response is not limited once its headers arrive; 1s to 1h (ADR-0018 §7)"},
 	{Name: "upstream-credential", Group: GroupHTTPUpstream, Secret: true, Help: "HTTP upstream: a header value the proxy sends with every upstream request, such as an API key the upstream needs from the proxy itself; never the user's or the client's token; read at start, never logged (ADR-0016 §7, docs/how-to/upstream-credential.md)"},
@@ -53,7 +53,7 @@ var registry = []Setting{
 	{Name: "tls-cert-file", Group: GroupEndpoint, Help: "serve TLS on the listener: an absolute path to the PEM certificate, followed by any intermediates; with tls-key-file; needs an https public-url; a replaced file is served from the next connection on, with no restart (docs/how-to/tls.md)"},
 	{Name: "tls-key-file", Group: GroupEndpoint, Help: "serve TLS on the listener: an absolute path to the certificate's unencrypted PEM private key, readable by the proxy's user alone or on a read-only mount; with tls-cert-file (docs/how-to/tls.md)"},
 	{Name: "allowed-origins", Group: GroupEndpoint, Help: "comma-separated Origin values allowed on the MCP endpoint (scheme://host[:port]); an internationalized host in its ASCII (xn--) form; a default port (:443 for https, :80 for http) is dropped, as browsers never send it"},
-	{Name: "allowed-hosts", Group: GroupEndpoint, Help: "comma-separated extra Host values accepted besides the public URL's host; an internationalized host in its ASCII (xn--) form"},
+	{Name: "allowed-hosts", Group: GroupEndpoint, Help: "comma-separated extra Host values accepted besides the public URL's host; an internationalized host in its ASCII (xn--) form; an IP address matches in any spelling of it (127.1 is 127.0.0.1)"},
 	{Name: "scope", Group: GroupEndpoint, Default: "mcp", Help: "the scope advertised in protected resource metadata and 401 challenges"},
 	{Name: "resource-name", Group: GroupEndpoint, Help: "human-readable resource name in protected resource metadata"},
 	{Name: "resource-documentation", URL: true, Group: GroupEndpoint, Help: "documentation URL in protected resource metadata"},
