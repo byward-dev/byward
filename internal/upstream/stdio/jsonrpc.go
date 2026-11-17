@@ -5,8 +5,12 @@ package stdio
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // JSON-RPC error codes (JSON-RPC 2.0 §5.1).
@@ -124,31 +128,104 @@ func compactID(id json.RawMessage) json.RawMessage {
 
 // idKey is the key the legacy era finds a waiting request by: one key per JSON value, however the
 // upstream encodes it, since JSON-RPC 2.0 §5 asks a response for the same value, not the same
-// bytes. A string is decoded and re-encoded, so "\u00e9" and "é", "\/x" and "/x", "a<b" and
-// "a\u003cb" match (without HTML escaping, so the key stays readable). An integer (validID allows
-// no fraction or exponent) is its decimal text with -0 as 0, never through float64, which would
-// make 9007199254740993 and 9007199254740992 one key. A string key keeps its quotes, so "1" and
-// 1 stay apart. The key only finds the waiting request: the client gets the upstream's bytes
-// unchanged (ADR-0003 §3).
+// bytes. A string is its stringKey, so "\u00e9" and "é", "\/x" and "/x", "a<b" and "a\u003cb"
+// match. An integer (validID allows no fraction or exponent) is its decimal text with -0 as 0,
+// never through float64, which would make 9007199254740993 and 9007199254740992 one key. A string
+// key keeps its quotes, so "1" and 1 stay apart. The key only finds the waiting request: the client
+// gets the upstream's bytes unchanged (ADR-0003 §3).
 func idKey(id json.RawMessage) string {
 	c := compactID(id)
 	if len(c) > 0 && c[0] == '"' {
-		var s string
-		if json.Unmarshal(c, &s) != nil { // cannot happen: the id came from a message that decoded
-			return string(c)
+		if k, ok := stringKey(c); ok {
+			return k
 		}
-		var b bytes.Buffer
-		enc := json.NewEncoder(&b)
-		enc.SetEscapeHTML(false)
-		if enc.Encode(s) != nil {
-			return string(c)
-		}
-		return strings.TrimSuffix(b.String(), "\n")
+		return string(c) // cannot happen: the id came from a message that decoded
 	}
 	if string(c) == "-0" {
 		return "0"
 	}
 	return string(c)
+}
+
+// stringKey is the JSON string literal s written one way per value. Every escape that names a
+// character is decoded, and '"', '\' and control characters are escaped as \" \\ \u00xx, in lower-case hex. What
+// names no character keeps a form of its own instead of becoming U+FFFD, as encoding/json would
+// make it (L173): a lone surrogate escape is \uXXXX in lower-case hex, and a byte that is not
+// UTF-8 is \xXX. No character produces either form, since a decoded '\' is written \\. So distinct
+// strings never share a key, while "\uD800" and "\ud800" still do. ok is false when s lacks
+// its quotes or holds a malformed escape.
+func stringKey(s []byte) (key string, ok bool) {
+	if len(s) < 2 || s[0] != '"' || s[len(s)-1] != '"' {
+		return "", false
+	}
+	s = s[1 : len(s)-1]
+	var b strings.Builder
+	b.WriteByte('"')
+	for i := 0; i < len(s); {
+		if s[i] != '\\' {
+			r, n := utf8.DecodeRune(s[i:])
+			if r == utf8.RuneError && n == 1 {
+				fmt.Fprintf(&b, `\x%02x`, s[i])
+			} else {
+				writeKeyRune(&b, r)
+			}
+			i += n
+			continue
+		}
+		if i+1 == len(s) {
+			return "", false
+		}
+		if r, ok := simpleEscapes[s[i+1]]; ok {
+			writeKeyRune(&b, r)
+			i += 2
+			continue
+		}
+		r, ok := hex4(s[i+1:])
+		if !ok {
+			return "", false
+		}
+		i += 6
+		if !utf16.IsSurrogate(r) {
+			writeKeyRune(&b, r)
+			continue
+		}
+		if r < 0xdc00 && i+1 < len(s) && s[i] == '\\' {
+			if lo, ok := hex4(s[i+1:]); ok && lo >= 0xdc00 && lo <= 0xdfff {
+				writeKeyRune(&b, utf16.DecodeRune(r, lo))
+				i += 6
+				continue
+			}
+		}
+		fmt.Fprintf(&b, `\u%04x`, r)
+	}
+	b.WriteByte('"')
+	return b.String(), true
+}
+
+// simpleEscapes are the JSON escapes other than \u, and the character each names.
+var simpleEscapes = map[byte]rune{'"': '"', '\\': '\\', '/': '/', 'b': '\b', 'f': '\f', 'n': '\n', 'r': '\r', 't': '\t'}
+
+// hex4 is the code unit of the \u escape at the start of s ("uXXXX", the backslash already read).
+func hex4(s []byte) (rune, bool) {
+	if len(s) < 5 || s[0] != 'u' {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(string(s[1:5]), 16, 16)
+	return rune(n), err == nil
+}
+
+// writeKeyRune writes r into a string key: '"', '\' and control characters escaped, anything else
+// as it is.
+func writeKeyRune(b *strings.Builder, r rune) {
+	switch {
+	case r == '"' || r == '\\':
+		b.WriteByte('\\')
+		b.WriteRune(r)
+	case r < 0x20:
+		fmt.Fprintf(b, `\u%04x`, r)
+	default:
+		b.WriteRune(r)
+	}
 }
 
 func rpcError(id json.RawMessage, code int, message string) []byte {
