@@ -648,28 +648,126 @@ func TestMetadataAdvertisesRefreshAndRevocation(t *testing.T) {
 	}
 }
 
-// Another replica learns of a revocation through the store: its deny list refuses the grant's
-// access tokens after its next sync.
+// Another replica learns of a grant revocation through the store, and keeps refusing the grant's
+// access tokens for as long as they can be used: its deny list refuses a token after its next sync,
+// and still does at the token's last valid instant (AccessLifetime plus the validator's leeway),
+// after the store's expired rows are collected, while a token of an unrevoked grant issued at the
+// same instant still passes. Collect keeps a revocation for store.RevocationRetention after its
+// stored time, so this holds only if the revocation is stored at about the time it is made, not
+// when the code, token or rotation it reuses was made. Each row therefore revokes a while after
+// those, at the instant the checked access token is issued.
 func TestRevocationReachesAnotherReplicaThroughTheStore(t *testing.T) {
-	e := newEnv(t)
-	body := e.offline(t)
-	other, err := New(e.cfg) // same store, its own deny list
-	if err != nil {
-		t.Fatal(err)
+	// Each row revokes the grant on this replica; syncOther syncs the other replica just before the
+	// revoking request (its deny list goes stale after denylist.MaxStaleness).
+	for name, revoke := range map[string]func(t *testing.T, e *env, syncOther func()) (access string){
+		// Broker.revoke, for the broker's own revocations; the code is redeemed late in its life.
+		"a reused authorization code": func(t *testing.T, e *env, syncOther func()) string {
+			code := e.signIn(t, nil).Query().Get("code")
+			e.now = e.now.Add(CodeLifetime - time.Second)
+			res, tokens := e.redeem(t, code, nil)
+			if res.StatusCode != http.StatusOK || tokens["access_token"] == nil {
+				t.Fatalf("redeeming the code: %d %v, want 200 with an access token", res.StatusCode, tokens)
+			}
+			syncOther()
+			res, body := e.redeem(t, code, nil)
+			wantOAuthError(t, res, body, http.StatusBadRequest, "invalid_grant")
+			return tokens["access_token"].(string)
+		},
+		// Broker.revoke from refresh: the first refresh token is reused a quarter hour after its
+		// rotation; with no grace window the reuse revokes at once.
+		"a reused refresh token": func(t *testing.T, e *env, syncOther func()) string {
+			return afterTwoRefreshes(t, e, syncOther, func(first map[string]any) {
+				res, body := e.refresh(t, first["refresh_token"].(string), "")
+				wantOAuthError(t, res, body, http.StatusBadRequest, "invalid_grant")
+			})
+		},
+		// revokeEndpoint, for the client's own revocation (RFC 7009): the token of the first sign-in,
+		// revoked half an hour later, after two refreshes.
+		"the client revoking an earlier refresh token": func(t *testing.T, e *env, syncOther func()) string {
+			return afterTwoRefreshes(t, e, syncOther, func(first map[string]any) { revokeOwn(t, e, first["refresh_token"]) })
+		},
+		// revokeEndpoint's access-token branch.
+		"the client revoking an earlier access token": func(t *testing.T, e *env, syncOther func()) string {
+			return afterTwoRefreshes(t, e, syncOther, func(first map[string]any) { revokeOwn(t, e, first["access_token"]) })
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			e.now = e.now.Add(45 * time.Second) // off the minute, so a time truncated to it is seen
+			other, err := New(e.cfg)            // same store, its own deny list
+			if err != nil {
+				t.Fatal(err)
+			}
+			syncOther := func() {
+				t.Helper()
+				if err := other.Deny().Sync(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			access := revoke(t, e, syncOther)
+			if revocations := e.auditEvents(t, "grant_revoked"); len(revocations) != 1 {
+				t.Fatalf("grant_revoked events %v, want one", revocations)
+			}
+			// A token of a grant nobody revoked, issued at the same instant: it shows a refusal below
+			// is the revoked grant's, not a stale or otherwise failing deny list.
+			control, err := e.sealer.Seal(token.Access, token.Claims{GrantID: "unrevoked", Subject: "someone", ClientID: clientID,
+				IssuedAt: e.now, ExpiresAt: e.now.Add(AccessLifetime)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			v, err := token.NewValidator(e.sealer, other.Deny(), nil, func() time.Time { return e.now })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := v.Validate(context.Background(), access); err != nil {
+				t.Fatalf("before its sync the other replica already refuses: %v", err)
+			}
+			syncOther()
+			if _, err := v.Validate(context.Background(), access); !errors.Is(err, resource.ErrInvalid) {
+				t.Fatalf("after its sync the other replica: %v, want resource.ErrInvalid (the revoked grant's token refused)", err)
+			}
+			e.now = e.now.Add(AccessLifetime + token.Leeway) // the tokens' last valid instant
+			if err := e.st.Collect(context.Background(), e.now); err != nil {
+				t.Fatal(err)
+			}
+			syncOther()
+			if _, err := v.Validate(context.Background(), access); !errors.Is(err, resource.ErrInvalid) {
+				t.Fatalf("at the token's last valid instant, after Collect, the other replica: %v, want resource.ErrInvalid (the revoked grant's token refused)", err)
+			}
+			if _, err := v.Validate(context.Background(), control); err != nil {
+				t.Fatalf("at the same instant the other replica refuses an unrevoked grant's token: %v, want it accepted", err)
+			}
+		})
 	}
-	if err := other.Deny().Sync(context.Background()); err != nil {
-		t.Fatal(err)
+}
+
+// afterTwoRefreshes signs in, refreshes twice a quarter hour apart (the first refresh rotates the
+// first sign-in's refresh token), syncs the other replica, and has act revoke the grant through the
+// first sign-in's tokens, half an hour after they were issued. It returns the access token the last
+// refresh issued, at that same instant.
+func afterTwoRefreshes(t *testing.T, e *env, syncOther func(), act func(first map[string]any)) string {
+	t.Helper()
+	first := e.offline(t)
+	e.now = e.now.Add(AccessLifetime / 4)
+	res, next := e.refresh(t, first["refresh_token"].(string), "")
+	if res.StatusCode != http.StatusOK || next["refresh_token"] == nil {
+		t.Fatalf("refreshing: %d %v, want 200 with a refresh token", res.StatusCode, next)
 	}
-	e.revokeToken(t, body["refresh_token"].(string), clientID)
-	v, _ := token.NewValidator(e.sealer, other.Deny(), nil, func() time.Time { return e.now })
-	if _, err := v.Validate(context.Background(), body["access_token"].(string)); err != nil {
-		t.Fatalf("before its sync the other replica already refuses: %v", err)
+	e.now = e.now.Add(AccessLifetime / 4)
+	res, tokens := e.refresh(t, next["refresh_token"].(string), "")
+	if res.StatusCode != http.StatusOK || tokens["access_token"] == nil {
+		t.Fatalf("refreshing again: %d %v, want 200 with an access token", res.StatusCode, tokens)
 	}
-	if err := other.Deny().Sync(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := v.Validate(context.Background(), body["access_token"].(string)); !errors.Is(err, resource.ErrInvalid) {
-		t.Fatalf("after its sync the other replica accepts a revoked token: %v", err)
+	syncOther()
+	act(first)
+	return tokens["access_token"].(string)
+}
+
+// revokeOwn asks /revoke, as the client, to revoke tok, and fails unless it answers 200.
+func revokeOwn(t *testing.T, e *env, tok any) {
+	t.Helper()
+	if res := e.revokeToken(t, tok.(string), clientID); res.StatusCode != http.StatusOK {
+		t.Fatalf("/revoke: %d, want 200", res.StatusCode)
 	}
 }
 
