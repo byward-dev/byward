@@ -2,6 +2,7 @@ package config
 
 import (
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/byward-dev/byward/internal/logging"
@@ -38,12 +39,23 @@ func (c *Config) clientSources(v *Values) []error {
 			}
 			// A trailing dot names the same host; registration.BrowserHost folds it away.
 			host := strings.TrimSuffix(e, ".")
-			if err := asciiHost(e); err != nil {
+			// A refused entry is quoted as logging.Quote does; one that is a URL in all but its scheme's
+			// case (HTTPS://…) as MarkedURL shows it, so the message marks with ;… ?… #… what it leaves out.
+			shown := logging.Quote(e)
+			if strings.Contains(e, "://") {
+				if shown = logging.MarkedURL(e); shown != logging.Hidden {
+					shown = strconv.Quote(shown)
+				}
+			}
+			if err := asciiHost(e); err != nil && strings.Contains(e, "://") {
+				// asciiHost's message, with the entry shown as MarkedURL shows it (#458).
+				errs = append(errs, errorf("%s: %s has a host that is not ASCII; give its ASCII (xn--) form, which is what browsers and MCP clients send", env, shown))
+			} else if err != nil {
 				errs = append(errs, errorf("%s: %v", env, err))
 			} else if reason := hostNameReason(host); reason != "" {
-				errs = append(errs, errorf("%s: %s is neither a CIMD client ID (an https URL) nor a host name such as app.example: %s", env, logging.Quote(e), reason))
+				errs = append(errs, errorf("%s: %s is neither a CIMD client ID (an https URL) nor a host name such as app.example: %s", env, shown, reason))
 			} else if endsInANumber(host) {
-				errs = append(errs, errorf("%s: %s ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match (127.1 and 0x7f000001 are 127.0.0.1), or none at all; deny the app by its CIMD client ID or its redirect host's name", env, logging.Quote(e)))
+				errs = append(errs, errorf("%s: %s ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match (127.1 and 0x7f000001 are 127.0.0.1), or none at all; deny the app by its CIMD client ID or its redirect host's name", env, shown))
 			}
 		}
 	}

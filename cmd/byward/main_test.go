@@ -116,6 +116,46 @@ func TestPrintConfigShowsSources(t *testing.T) {
 	}
 }
 
+// #458: --print-config and the startup log's config lines show a URL setting without its query, an
+// API key it may hold, and mark the query as left out; the operators who read a query there now see
+// "?…" (security invariant 2).
+func TestAURLSettingsQueryIsNeverPrintedInTheConfiguration(t *testing.T) {
+	const key = "S3CRET-api-key"
+	env := append(authEnv(t), serveEnv("https://m.example/mcp", "127.0.0.1:0")...)
+	env = append(env, "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp?api_key="+key)
+	code, stdout, stderr := runWith([]string{"--print-config"}, env...)
+	if want := "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp?… (env)\n"; code != exitOK || !strings.Contains(stdout, want) || strings.Contains(stdout+stderr, key) {
+		t.Errorf("--print-config: code %d, stdout %q, stderr %q; want the line %q and never the key", code, stdout, stderr, want)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var out, errb bytes.Buffer
+	run(ctx, nil, env, &out, &errb)
+	if want := `"msg":"config","setting":"BYWARD_UPSTREAM_URL","value":"http://127.0.0.1:9/mcp?…","source":"env"}`; !strings.Contains(errb.String(), want) || strings.Contains(errb.String()+out.String(), key) {
+		t.Errorf("startup log %s; want %s and never the key", errb.String(), want)
+	}
+}
+
+// --print-config and the startup log show the stdio upstream's command by its program and how many
+// arguments follow, never the arguments, one of which can be a token; the release note says so.
+func TestTheUpstreamCommandsArgumentsAreNeverPrintedInTheConfiguration(t *testing.T) {
+	const token = "S3CRET-token"
+	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_LISTEN=127.0.0.1:0", "BYWARD_INTERNAL_LISTEN=127.0.0.1:0",
+		"BYWARD_ASSERTION_KEYS_DIR=") // a stdio upstream takes no assertion keys
+	args := []string{"--", "/bin/cat", "--token", token}
+	code, stdout, stderr := runWith(append([]string{"--print-config"}, args...), env...)
+	if want := "BYWARD_UPSTREAM_COMMAND=/bin/cat (2 arguments not shown) (flag)\n"; code != exitOK || !strings.Contains(stdout, want) || strings.Contains(stdout+stderr, token) {
+		t.Errorf("--print-config: code %d, stdout %q, stderr %q; want the line %q and never the token", code, stdout, stderr, want)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var out, errb bytes.Buffer
+	run(ctx, args, env, &out, &errb)
+	if want := `"msg":"config","setting":"BYWARD_UPSTREAM_COMMAND","value":"/bin/cat (2 arguments not shown)","source":"flag"}`; !strings.Contains(errb.String(), want) || strings.Contains(errb.String()+out.String(), token) {
+		t.Errorf("startup log %s; want %s and never the token", errb.String(), want)
+	}
+}
+
 func TestRunStopsOnCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

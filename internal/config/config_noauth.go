@@ -5,6 +5,8 @@ import (
 	"net"
 	"net/url"
 	"strings"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // inContainer reports whether the proxy runs in a container (Docker or Podman marker file) that
@@ -107,7 +109,7 @@ func checkNoAuth(c *Config, v *Values) []error {
 		}
 	}
 	if len(errs) == 0 {
-		c.Relaxations = append(c.Relaxations, "AUTHENTICATION IS OFF: anyone who can reach "+c.PublicURL.String()+" can use the upstream, and the upstream receives no identity")
+		c.Relaxations = append(c.Relaxations, "AUTHENTICATION IS OFF: anyone who can reach "+logging.MarkedURL(c.PublicURL.String())+" can use the upstream, and the upstream receives no identity")
 	}
 	return errs
 }

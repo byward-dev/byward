@@ -1,6 +1,6 @@
 # ADR-0020: Configuration — flags and env, secrets from files, one registry
 
-- Status: Accepted
+- Status: Accepted; amended 2026-11-17 (#458)
 - Date: 2026-11-06
 - Issue: #19 (F18)
 
@@ -44,6 +44,10 @@ variables.
    - configuration errors exit with their own code, distinct from runtime failures.
 6. **Effective configuration** is logged at startup with each value's source
    (`default|env|flag|file`), secrets as `<redacted>`; `--print-config` prints it and exits.
+   _Amended 2026-11-17 (#458):_ a URL setting is shown by its scheme, host and path, with `;…`, `?…` or
+   `#…` where path parameters, a query or a fragment are left out, as these can hold an API key; the
+   stdio upstream's command is shown by its program and how many arguments follow, as one can be a
+   token. The proxy uses both whole.
 7. **`check --offline`** validates the configuration without network access; `doctor` adds the network
    checks (F20).
 8. **IdP presets by name** (`BYWARD_IDP=entra`). A test keeps the Entra quickstart at five or

@@ -61,8 +61,8 @@ func TestStdioEnvFileValuesAreParsedAndNeverDisplayed(t *testing.T) {
 		if strings.Contains(v.Display(), "sk-live") {
 			t.Fatalf("%s displays a value from the env file: %q", v.Setting.Env(), v.Display())
 		}
-		if v.Setting.Name == "upstream-command" && v.Display() != `"/usr/bin/server"` {
-			t.Fatalf("command displays as %q; arguments stay visible", v.Display())
+		if v.Setting.Name == "upstream-command" && v.Display() != "/usr/bin/server" {
+			t.Fatalf("command displays as %q, want its program", v.Display())
 		}
 	}
 }
