@@ -101,13 +101,15 @@ func TestUpstreamCredentialSettingsRefuseWhatCannotWork(t *testing.T) {
 		{"an empty file", "\n", []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
 			"BYWARD_UPSTREAM_CREDENTIAL_FILE: the file is empty"},
 		{"two lines", "k-123\nk-456", []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
-			"one header value on one line, without control characters"},
+			"BYWARD_UPSTREAM_CREDENTIAL_FILE: the credential must be one header value on one line, without control characters"},
 		{"a DEL character", "k-123\x7f", []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
-			"one header value on one line, without control characters"},
+			"BYWARD_UPSTREAM_CREDENTIAL_FILE: the credential must be one header value on one line, without control characters"},
 		{"surrounding white space", " k-123", []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
-			"the credential starts or ends with white space"},
+			"BYWARD_UPSTREAM_CREDENTIAL_FILE: the credential starts or ends with white space"},
+		{"only white space", " \t \n", []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
+			"BYWARD_UPSTREAM_CREDENTIAL_FILE: the file holds only whitespace"},
 		{"too long", "k-123" + strings.Repeat("k", maxUpstreamCredential-4), []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
-			"the credential is longer than 4096 bytes"},
+			"BYWARD_UPSTREAM_CREDENTIAL_FILE: the credential is longer than 4096 bytes"},
 		{"a credential set inline, not from a file", "", []string{"BYWARD_UPSTREAM_CREDENTIAL=k-123", "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
 			"secrets must come from a file (BYWARD_UPSTREAM_CREDENTIAL_FILE)"},
 	} {
@@ -123,19 +125,71 @@ func TestUpstreamCredentialSettingsRefuseWhatCannotWork(t *testing.T) {
 	}
 }
 
+// Each error names the credential setting as the operator gave it: the env variable, the _FILE
+// variable or the flag. An inline value (accepted only under --dev; refused beside this error without
+// it) has no file, so it is never said to be an empty file.
+func TestUpstreamCredentialErrorsNameTheSettingAsGiven(t *testing.T) {
+	header := "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"
+	long := "k-123" + strings.Repeat("k", maxUpstreamCredential-4)
+	for _, tc := range []struct {
+		name  string
+		args  []string
+		cred  string // the file's content, for the file cases
+		env   []string
+		inErr string
+	}{
+		{"inline, white space", []string{"--dev"}, "", []string{"BYWARD_UPSTREAM_CREDENTIAL= k-123", header},
+			"BYWARD_UPSTREAM_CREDENTIAL: the credential starts or ends with white space"},
+		{"inline, a control character", []string{"--dev"}, "", []string{"BYWARD_UPSTREAM_CREDENTIAL=k-123\x01", header},
+			"BYWARD_UPSTREAM_CREDENTIAL: the credential must be one header value on one line"},
+		{"inline, too long", []string{"--dev"}, "", []string{"BYWARD_UPSTREAM_CREDENTIAL=" + long, header},
+			"BYWARD_UPSTREAM_CREDENTIAL: the credential is longer than 4096 bytes"},
+		{"inline, empty", []string{"--dev"}, "", []string{"BYWARD_UPSTREAM_CREDENTIAL=", header},
+			"BYWARD_UPSTREAM_CREDENTIAL is empty"},
+		{"inline, empty, without --dev", nil, "", []string{"BYWARD_UPSTREAM_CREDENTIAL=", header},
+			"BYWARD_UPSTREAM_CREDENTIAL: secrets must come from a file (BYWARD_UPSTREAM_CREDENTIAL_FILE); BYWARD_UPSTREAM_CREDENTIAL is empty"},
+		{"the flag, white space", []string{"--upstream-credential-file=" + credFile}, " k-123", []string{header},
+			"--upstream-credential-file: the credential starts or ends with white space"},
+		{"the flag, an empty file", []string{"--upstream-credential-file=" + credFile}, "\n", []string{header},
+			"--upstream-credential-file: the file is empty"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := loadCred(t, tc.args, tc.cred, tc.env...)
+			if err == nil || !strings.Contains(err.Error(), tc.inErr) {
+				t.Fatalf("err = %v, want %q", err, tc.inErr)
+			}
+			if strings.Contains(err.Error(), "k-123") {
+				t.Fatalf("the error shows the credential: %v", err)
+			}
+		})
+	}
+}
+
 // A stdio upstream gets its credentials in its environment; this setting would do nothing there.
-func TestTheUpstreamCredentialIsRefusedForAStdioUpstream(t *testing.T) {
+// The refusal names the setting as the operator gave it.
+func TestTheUpstreamCredentialIsRefusedForAStdioUpstreamNamingTheSettingAsGiven(t *testing.T) {
 	env := []string{"BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", "BYWARD_ENTRA_TENANT=00000000-0000-0000-0000-000000000001",
-		"BYWARD_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002", "BYWARD_ENTRA_CLIENT_SECRET_FILE=/run/secrets/entra",
-		"BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile}
+		"BYWARD_ENTRA_CLIENT_ID=00000000-0000-0000-0000-000000000002", "BYWARD_ENTRA_CLIENT_SECRET_FILE=/run/secrets/entra"}
 	files := func(p string) ([]byte, error) {
 		if p == credFile {
 			return []byte("k-123"), nil
 		}
 		return baseFiles(p)
 	}
-	_, _, err := Load([]string{"--", "/usr/local/bin/server"}, env, files)
-	if err == nil || !strings.Contains(err.Error(), "BYWARD_UPSTREAM_CREDENTIAL_FILE is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE") {
-		t.Fatalf("err = %v", err)
+	for _, tc := range []struct {
+		name, given string
+		args        []string
+		named       string
+	}{
+		{"the _FILE variable", "BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile, nil, "BYWARD_UPSTREAM_CREDENTIAL_FILE"},
+		{"inline, under --dev", "BYWARD_UPSTREAM_CREDENTIAL=k-123", []string{"--dev"}, "BYWARD_UPSTREAM_CREDENTIAL"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := Load(append(tc.args, "--", "/usr/local/bin/server"), append(append([]string{}, env...), tc.given), files)
+			want := tc.named + " is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE"
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("err = %v, want %q", err, want)
+			}
+		})
 	}
 }

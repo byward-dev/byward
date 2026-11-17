@@ -97,8 +97,9 @@ func (v *Values) get(name string) string { return v.byKey[name].Raw }
 
 // given reports whether the operator gave the setting: a value, or a file named for a secret, which
 // is given even when it is empty, so it never falls back to another choice. A variable set to nothing
-// is not given, nor is a _FILE variable set to nothing, which names no file: env templates often list
-// every variable empty.
+// is not given here, nor is a _FILE variable set to nothing, which names no file. Other checks may
+// still refuse a variable set to nothing (checkInlineSecrets without --dev; checks that test only
+// Source).
 func (val Value) given() bool { return val.Raw != "" || val.Path != "" }
 
 // given is Value.given for the setting name.

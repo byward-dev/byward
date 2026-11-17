@@ -194,13 +194,13 @@ const maxUpstreamCredential = 4 << 10
 
 // upstreamCredential reads the operator's upstream credential (ADR-0016 §7): only for an HTTP
 // upstream, a header value without control characters, in a header that is not the assertion's.
-// Errors never contain the value.
+// The credential's errors name it as the operator gave it (spelled), never its value.
 func (c *Config) upstreamCredential(v *Values) []error {
 	fileEnv, hEnv := Setting{Name: "upstream-credential"}.Env()+"_FILE", Setting{Name: "upstream-credential-header"}.Env()
 	val, header := v.byKey["upstream-credential"], v.byKey["upstream-credential-header"]
 	if !v.httpUpstream() { // with stdio the header is an off-mode setting; with no upstream or both, upstream's error says enough
 		if v.stdioUpstream() && val.Source != SourceDefault {
-			return []error{errorf("%s is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE", fileEnv)}
+			return []error{errorf("%s is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE", spelled(val))}
 		}
 		return nil
 	}
@@ -211,15 +211,19 @@ func (c *Config) upstreamCredential(v *Values) []error {
 		return nil
 	}
 	var errs []error
+	name := spelled(val) // an inline value, accepted under --dev, has no file to name
+	emptyFile := v.emptySecretFile("upstream-credential")
 	switch cred := val.Raw; {
+	case emptyFile != nil:
+		errs = append(errs, emptyFile)
 	case cred == "":
-		errs = append(errs, errorf("%s: the file is empty", val.From))
+		errs = append(errs, errorf("%s is empty", name))
 	case len(cred) > maxUpstreamCredential:
-		errs = append(errs, errorf("%s: the credential is longer than %d bytes", val.From, maxUpstreamCredential))
+		errs = append(errs, errorf("%s: the credential is longer than %d bytes", name, maxUpstreamCredential))
 	case strings.ContainsFunc(cred, func(r rune) bool { return r != '\t' && (r < 0x20 || r == 0x7f) }):
-		errs = append(errs, errorf("%s: the credential must be one header value on one line, without control characters", val.From))
+		errs = append(errs, errorf("%s: the credential must be one header value on one line, without control characters", name))
 	case cred != strings.TrimSpace(cred):
-		errs = append(errs, errorf("%s: the credential starts or ends with white space", val.From))
+		errs = append(errs, errorf("%s: the credential starts or ends with white space", name))
 	default:
 		c.UpstreamCredential = cred
 	}
