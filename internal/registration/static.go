@@ -192,7 +192,8 @@ func buildClient(e staticEntry, dir string, readFile, readSecret func(string) ([
 		return nil, fmt.Errorf("client_name: at most %d characters, no control characters", MaxClientNameLen)
 	}
 	if err := ValidateRedirects(e.RedirectURIs); err != nil {
-		return nil, err
+		// The operator's stderr at startup and check: the URI as logs may show it (forLog).
+		return nil, forLog(err, e.RedirectURIs)
 	}
 	c := &staticClient{name: name, redirects: e.RedirectURIs,
 		clientAuth: clientAuth{id: e.ClientID, methods: []AuthMethod{e.AuthMethod}, jti: jti}}

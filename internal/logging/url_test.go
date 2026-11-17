@@ -268,3 +268,29 @@ func TestABodyErrorIsReplacedOnlyForARefusedLine(t *testing.T) {
 		})
 	}
 }
+
+// Quote shows an operator's value in an error as safely as a log line shows a URL: whole when it can
+// hold no credential, as URL shows it when it is a URL, and not at all otherwise (L167).
+func TestAQuotedValueNeverShowsAUserInformationQueryOrFragment(t *testing.T) {
+	const shortened = ` (the rest not shown: it may hold a password)`
+	for raw, want := range map[string]string{
+		"https://up.example/x":          `"https://up.example/x"`,
+		"https://[::1":                  `"https://[::1"`,
+		"app.example":                   `"app.example"`,
+		"bücher.example":                `"bücher.example"`,
+		"https://user:pw@up.example/x":  `"https://up.example/x"` + shortened,
+		"https://up.example/x?token=pw": `"https://up.example/x"` + shortened,
+		"https://up.example/x#pw":       `"https://up.example/x"` + shortened,
+		"HTTPS://user:pw@[::1]:8443/x":  `"HTTPS://[::1]:8443/x"` + shortened,
+		"https://user:pw@up stream/x":   Hidden,
+		"https:/up.example/x?token=pw":  Hidden,
+		"up.example/x?token=pw":         Hidden,
+		"user:pw@app.example":           Hidden,
+		"a@b":                           "the value (not shown: it may hold a password)", // its text pinned once, where it is made
+		"app.example#pw":                Hidden,
+	} {
+		if got := Quote(raw); got != want {
+			t.Errorf("Quote(%q) = %s, want %s", raw, got, want)
+		}
+	}
+}

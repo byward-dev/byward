@@ -21,6 +21,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/idp/entra"
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/server"
 	"github.com/byward-dev/byward/internal/testutil/fakeaz"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
@@ -66,6 +67,8 @@ func TestOperateCommandMisuseExits2WithTheRightCallOnStderr(t *testing.T) {
 		{"init entra without a public URL", []string{"init", "entra", "--tenant", tenant}, nil, "BYWARD_PUBLIC_URL is required (give --public-url)"},
 		{"init entra with an http public URL", []string{"init", "entra", "--tenant", tenant, "--public-url", "http://m.example/mcp"}, nil, "must use https"},
 		{"init entra with a 3-year secret", []string{"init", "entra", "--tenant", tenant, "--public-url", "https://m.example/mcp", "--secret-years", "3"}, nil, "1 to 2 years"},
+		{"init entra with an upstream URL the proxy refuses", []string{"init", "entra", "--tenant", tenant, "--public-url", "https://m.example/mcp", "--upstream-url", "ftp://up.example/mcp"}, nil, `BYWARD_UPSTREAM_URL: want an absolute http(s) URL`},
+		{"init entra with an upstream URL from the environment the proxy refuses", []string{"init", "entra", "--tenant", tenant, "--public-url", "https://m.example/mcp"}, []string{"BYWARD_UPSTREAM_URL=up.example/mcp"}, `"up.example/mcp" (give --upstream-url)`},
 		{"check with a bad setting", []string{"check", "--offline"}, []string{"BYWARD_PUBLC_URL=x"}, "byward: configuration error: unknown setting BYWARD_PUBLC_URL"},
 		{"doctor with a bad setting", []string{"doctor"}, []string{"BYWARD_PUBLC_URL=x"}, "byward: configuration error: unknown setting BYWARD_PUBLC_URL"},
 		{"flags before the command", []string{"--dev", "check", "--offline"}, nil, "to run check, put it first: byward check"},
@@ -78,6 +81,88 @@ func TestOperateCommandMisuseExits2WithTheRightCallOnStderr(t *testing.T) {
 				t.Fatalf("code %d stdout %q stderr %q, want exit 2 and %q", code, stdout, stderr, tc.inStderr)
 			}
 		})
+	}
+}
+
+// L167, L176: init refuses a URL with a password in it, as the proxy does, naming the setting, the
+// flag to give and, when the URL parses, its host; it prints the password nowhere: not in its error,
+// and not in a script.
+func TestInitRefusesAURLWithAPasswordWithoutShowingIt(t *testing.T) {
+	const password = "s3cretPW"
+	for name, tc := range map[string]struct {
+		args     []string
+		env      []string
+		inStderr []string
+	}{
+		"public URL": {args: []string{"--public-url", "https://user:" + password + "@m.example/mcp"},
+			inStderr: []string{"BYWARD_PUBLIC_URL: ", `"https://m.example/mcp"`, "(give --public-url)"}},
+		"upstream URL": {args: []string{"--public-url", "https://m.example/mcp", "--upstream-url", "https://user:" + password + "@up.example/mcp"},
+			inStderr: []string{"BYWARD_UPSTREAM_URL: ", `"https://up.example/mcp"`, "(give --upstream-url)"}},
+		"upstream URL from the environment": {args: []string{"--public-url", "https://m.example/mcp"}, env: []string{"BYWARD_UPSTREAM_URL=https://user:" + password + "@up.example/mcp"},
+			inStderr: []string{"BYWARD_UPSTREAM_URL: ", `"https://up.example/mcp"`, "(give --upstream-url)"}},
+		"upstream URL that Go cannot parse": {args: []string{"--public-url", "https://m.example/mcp", "--upstream-url", "ftp://user:" + password + "@up stream/x"},
+			inStderr: []string{"BYWARD_UPSTREAM_URL: ", logging.Hidden, "(give --upstream-url)"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			code, stdout, stderr := runWith(append([]string{"init", "entra", "--tenant", tenant}, tc.args...), tc.env...)
+			if code != exitConfig || stdout != "" || strings.Contains(stderr, password) {
+				t.Fatalf("code %d stdout %q stderr %q, want exit 2, no script, and no password", code, stdout, stderr)
+			}
+			for _, want := range tc.inStderr {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("stderr %q, want %q in it", stderr, want)
+				}
+			}
+		})
+	}
+}
+
+// L167: a URL setting or list entry with a credential in it stops startup, check --offline and doctor
+// with exit 2, naming the setting and showing the URL's host when the URL parses (logging.Hidden when
+// it does not), and the credential is nowhere on their output: load refuses the value before the
+// startup log lists the settings.
+func TestASettingWithACredentialStopsEveryCommandWithoutShowingIt(t *testing.T) {
+	const secret = "s3cretPW"
+	entraEnv := func(t *testing.T) []string { return authEnv(t) }
+	// The OIDC issuer needs an oidc IdP: authEnv's Entra settings out, its secret file reused.
+	oidcEnv := func(t *testing.T) []string {
+		var env []string
+		for _, kv := range authEnv(t) {
+			switch k, v, _ := strings.Cut(kv, "="); {
+			case k == "BYWARD_ENTRA_CLIENT_SECRET_FILE":
+				env = append(env, "BYWARD_OIDC_CLIENT_SECRET_FILE="+v)
+			case !strings.HasPrefix(k, "BYWARD_ENTRA_"):
+				env = append(env, kv)
+			}
+		}
+		return append(env, "BYWARD_IDP=oidc", "BYWARD_OIDC_CLIENT_ID=app", "BYWARD_GATE_ALLOW_EMPTY=true", "BYWARD_DEV=true")
+	}
+	for _, tc := range []struct {
+		setting, shown string
+		base           func(*testing.T) []string
+	}{
+		{"BYWARD_UPSTREAM_URL=https://user:" + secret + "@up.example/mcp", `"https://up.example/mcp"`, entraEnv},
+		{"BYWARD_ALLOWED_ORIGINS=https://app.example?token=" + secret, `"https://app.example"`, entraEnv},
+		{"BYWARD_CLIENT_DENYLIST=https://user:" + secret + "@app.example/c.json", `"https://app.example/c.json"`, entraEnv},
+		{"BYWARD_RESOURCE_DOCUMENTATION=https://user:" + secret + "@docs.example/", `"https://docs.example/"`, entraEnv},
+		{"BYWARD_OIDC_ISSUER=https://user:" + secret + "@idp.example", `"https://idp.example"`, oidcEnv},
+		{"BYWARD_OIDC_ISSUER=https://user:" + secret + "@id p.example", logging.Hidden, oidcEnv},
+	} {
+		name, _, _ := strings.Cut(tc.setting, "=")
+		for _, command := range [][]string{nil, {"check", "--offline"}, {"doctor"}} {
+			// Should a value ever load, startup must still serve nothing: neither listener can open,
+			// and it runs with its context already done, so it returns at once.
+			env := append(tc.base(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp",
+				"BYWARD_LISTEN=192.0.2.1:8080", "BYWARD_INTERNAL_LISTEN=", tc.setting)
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			var out, errb strings.Builder
+			code := run(ctx, command, env, &out, &errb)
+			stdout, stderr := out.String(), errb.String()
+			if code != exitConfig || strings.Contains(stdout+stderr, secret) || !strings.Contains(stderr, name+": ") || !strings.Contains(stderr, tc.shown) {
+				t.Errorf("%q with %s: code %d stdout %q stderr %q, want exit 2, %s and %s named, and no secret", command, tc.setting, code, stdout, stderr, name, tc.shown)
+			}
+		}
 	}
 }
 

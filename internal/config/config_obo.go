@@ -1,6 +1,10 @@
 package config
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/byward-dev/byward/internal/logging"
+)
 
 // oidcScopes are login scopes, never a downstream API's.
 var oidcScopes = map[string]bool{"openid": true, "profile": true, "email": true, "offline_access": true}
@@ -33,18 +37,26 @@ func (c *Config) onBehalfOf(v *Values) []error {
 	sEnv, hEnv := Setting{Name: "obo-scopes"}.Env(), Setting{Name: "obo-header"}.Env()
 	var errs []error
 	c.OBOScopes = strings.Fields(v.get("obo-scopes"))
-	resource := ""
+	// api is how an error may name a scope's API: the API part, or, when the scope holds an @, ? or #,
+	// the whole scope as logging.Quote shows it, since a password holding a / splits at that /.
+	api := func(scope string, i int) string {
+		if strings.ContainsAny(scope, "@?#") {
+			return logging.Quote(scope)
+		}
+		return logging.Quote(scope[:i])
+	}
+	resource, first := "", ""
 	for _, s := range c.OBOScopes {
 		i := scopeSlash(s)
 		switch {
 		case oidcScopes[strings.ToLower(s)]:
 			errs = append(errs, errorf("%s: %s is a sign-in scope, not a downstream API's; give the API's scopes, e.g. https://graph.microsoft.com/User.Read", sEnv, s))
 		case i < 0:
-			errs = append(errs, errorf("%s: %q is not a scope URI such as https://graph.microsoft.com/User.Read, api://<app>/<scope> or <app ID>/<scope>", sEnv, s))
+			errs = append(errs, errorf("%s: %s is not a scope URI such as https://graph.microsoft.com/User.Read, api://<app>/<scope> or <app ID>/<scope>", sEnv, logging.Quote(s)))
 		case resource == "":
-			resource = s[:i]
+			resource, first = s[:i], s
 		case s[:i] != resource:
-			errs = append(errs, errorf("%s: %s and %s are for different APIs; Entra issues a token for one API per request", sEnv, resource, s[:i]))
+			errs = append(errs, errorf("%s: %s and %s are for different APIs; Entra issues a token for one API per request", sEnv, api(first, len(resource)), api(s, i)))
 		}
 	}
 	if v.get("obo-scopes") != "" && len(c.OBOScopes) == 0 {

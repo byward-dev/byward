@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // OIDCPresets are the IdP values that select the generic OIDC adapter with a preset (ADR-0011 §2);
@@ -142,9 +144,23 @@ func (c *Config) oidcIdP(v *Values) []error {
 	if c.OIDCIssuer == "" {
 		errs = append(errs, c.requiredForIdP(v, "oidc-issuer")...)
 	}
-	// --dev lets the oidc adapter use an http issuer on a loopback host, and http endpoints on
-	// loopback with it (AllowLoopbackHTTP); every relaxation is logged (security invariant 12, #355).
-	if u, err := url.Parse(c.OIDCIssuer); c.Dev && err == nil && u.Scheme == "http" && isLoopback(u.Hostname()) {
+	// Refused here, before the startup log lists the settings, and quoted only as logging.Quote does
+	// (security invariant 2): an issuer with a user name or password; one with a query or fragment,
+	// which an issuer never has (OpenID Connect Discovery 1.0 §3, RFC 8414 §2) and which the oidc
+	// adapter accepts on an https issuer, so only this refuses it; and one holding an @ that is no
+	// absolute http(s) URL with a host. An @ in an absolute issuer's path is the IdP's to have. Any
+	// other issuer the adapter judges.
+	issuerEnv := Setting{Name: "oidc-issuer"}.Env()
+	switch u, err := url.Parse(c.OIDCIssuer); {
+	case err == nil && u.User != nil:
+		errs = append(errs, errorf("%s: want the issuer URL without a user name or password, got %s", issuerEnv, logging.Quote(c.OIDCIssuer)))
+	case strings.ContainsAny(c.OIDCIssuer, "?#"):
+		errs = append(errs, errorf("%s: want the issuer URL without a query or fragment, as an issuer has none, got %s", issuerEnv, logging.Quote(c.OIDCIssuer)))
+	case strings.Contains(c.OIDCIssuer, "@") && (err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == ""):
+		errs = append(errs, errorf("%s: want an absolute http(s) URL with a host, got %s", issuerEnv, logging.Quote(c.OIDCIssuer)))
+	case c.Dev && err == nil && u.Scheme == "http" && isLoopback(u.Hostname()):
+		// --dev lets the oidc adapter use an http issuer on a loopback host, and http endpoints on
+		// loopback with it (AllowLoopbackHTTP); every relaxation is logged (security invariant 12, #355).
 		c.OIDCLoopbackHTTP = true
 		c.Relaxations = append(c.Relaxations, "http IdP issuer on loopback ("+c.OIDCIssuer+"): discovery over http, and the IdP's sign-in page, token endpoint and signing keys over http too where it lists them on loopback")
 	}
@@ -178,7 +194,7 @@ func (c *Config) oidcIdP(v *Values) []error {
 	}
 	for _, sc := range c.OIDCScopes {
 		if strings.ContainsAny(sc, " \\\"") {
-			errs = append(errs, errorf("BYWARD_OIDC_SCOPES: %q is not a scope", sc))
+			errs = append(errs, errorf("BYWARD_OIDC_SCOPES: %s is not a scope", logging.Quote(sc)))
 		}
 	}
 	if strings.TrimSpace(c.OIDCSubjectClaim) == "" {

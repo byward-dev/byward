@@ -126,7 +126,7 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"origin with a shortened IPv4 address", "BYWARD_ALLOWED_ORIGINS=https://127.1", `BYWARD_ALLOWED_ORIGINS: "https://127.1": "127.1" is not an IPv4 address in dotted decimal, the only form browsers send`},
 		{"origin ending in an upper-case hex label", "BYWARD_ALLOWED_ORIGINS=https://192.168.0.0xFF", `BYWARD_ALLOWED_ORIGINS: "https://192.168.0.0xFF": "192.168.0.0xFF" is not an IPv4 address in dotted decimal`},
 		{"origin with an IPv4 part over 255", "BYWARD_ALLOWED_ORIGINS=https://10.0.0.999", `BYWARD_ALLOWED_ORIGINS: "https://10.0.0.999": "10.0.0.999" is not an IPv4 address in dotted decimal`},
-		{"origin with user info", "BYWARD_ALLOWED_ORIGINS=https://user@app.example.com", `BYWARD_ALLOWED_ORIGINS: "https://user@app.example.com" is not an origin`},
+		{"origin with user info", "BYWARD_ALLOWED_ORIGINS=https://user@app.example.com", `is not an origin (scheme://host[:port]): it has a user name or password`},
 		{"origin that is not a URL", "BYWARD_ALLOWED_ORIGINS=https://[::1", `BYWARD_ALLOWED_ORIGINS: "https://[::1" is not an origin`},
 		{"origin ending in a hex label of every hex digit", "BYWARD_ALLOWED_ORIGINS=https://a.0x0123456789abcdef", `BYWARD_ALLOWED_ORIGINS: "https://a.0x0123456789abcdef": "a.0x0123456789abcdef" is not an IPv4 address in dotted decimal`},
 		{"origin ending in a bare 0", "BYWARD_ALLOWED_ORIGINS=https://a.0", `BYWARD_ALLOWED_ORIGINS: "https://a.0": "a.0" is not an IPv4 address in dotted decimal`},
@@ -134,10 +134,9 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"origin ending in a label of every digit", "BYWARD_ALLOWED_ORIGINS=https://a.1234567890", `BYWARD_ALLOWED_ORIGINS: "https://a.1234567890": "a.1234567890" is not an IPv4 address in dotted decimal`},
 		{"origin with a shortened IPv4 address and a port", "BYWARD_ALLOWED_ORIGINS=http://127.1:8080", `BYWARD_ALLOWED_ORIGINS: "http://127.1:8080": "127.1" is not an IPv4 address in dotted decimal`},
 		{"origin with a hex IPv4 label", "BYWARD_ALLOWED_ORIGINS=https://0x7f.0.0.1", `BYWARD_ALLOWED_ORIGINS: "https://0x7f.0.0.1": "0x7f.0.0.1" is not an IPv4 address in dotted decimal`},
-		{"origin with a fragment", "BYWARD_ALLOWED_ORIGINS=https://app.example.com#", `BYWARD_ALLOWED_ORIGINS: "https://app.example.com#" is not an origin`},
-		{"origin with an empty query", "BYWARD_ALLOWED_ORIGINS=https://app.example.com?", `BYWARD_ALLOWED_ORIGINS: "https://app.example.com?" is not an origin`},
+		{"origin with a fragment", "BYWARD_ALLOWED_ORIGINS=https://app.example.com#", `is not an origin (scheme://host[:port]): it has a query or a fragment`},
+		{"origin with an empty query", "BYWARD_ALLOWED_ORIGINS=https://app.example.com?", `is not an origin (scheme://host[:port]): it has a query or a fragment`},
 		{"unicode allowed host", "BYWARD_ALLOWED_HOSTS=bücher.example:8443", `BYWARD_ALLOWED_HOSTS: the host "bücher.example:8443" is not ASCII`},
-		{"credentials", "BYWARD_UPSTREAM_URL=http://u:p@upstream/mcp", "BYWARD_UPSTREAM_URL"},
 		{"origin with path", "BYWARD_ALLOWED_ORIGINS=https://a.example/path", "BYWARD_ALLOWED_ORIGINS"},
 		{"host with path", "BYWARD_ALLOWED_HOSTS=a.example/x", `BYWARD_ALLOWED_HOSTS: "a.example/x" is not a host[:port]: give host`},
 		{"host with space", "BYWARD_ALLOWED_HOSTS=a b", `BYWARD_ALLOWED_HOSTS: "a b" is not a host[:port]: give host`},
@@ -147,9 +146,9 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"unclosed bracket", "BYWARD_ALLOWED_HOSTS=[::1", `BYWARD_ALLOWED_HOSTS: "[::1" is not a host[:port]`},
 		{"name with a closing bracket", "BYWARD_ALLOWED_HOSTS=mcp.example]", `BYWARD_ALLOWED_HOSTS: "mcp.example]" is not a host[:port]: give host`},
 		{"name with an opening bracket", "BYWARD_ALLOWED_HOSTS=mcp.example[", `BYWARD_ALLOWED_HOSTS: "mcp.example[" is not a host[:port]: give host`},
-		{"name with user info", "BYWARD_ALLOWED_HOSTS=a@b", `BYWARD_ALLOWED_HOSTS: "a@b" is not a host[:port]: a host name has only letters, digits and - . _ ~`},
-		{"name with a query", "BYWARD_ALLOWED_HOSTS=a?b", `BYWARD_ALLOWED_HOSTS: "a?b" is not a host[:port]: a host name`},
-		{"name with a fragment", "BYWARD_ALLOWED_HOSTS=a#b", `BYWARD_ALLOWED_HOSTS: "a#b" is not a host[:port]: a host name`},
+		{"name with user info", "BYWARD_ALLOWED_HOSTS=a@b", "BYWARD_ALLOWED_HOSTS: " + logging.Hidden + ` is not a host[:port]: a host name has only letters, digits and - . _ ~`},
+		{"name with a query", "BYWARD_ALLOWED_HOSTS=a?b", "BYWARD_ALLOWED_HOSTS: " + logging.Hidden + ` is not a host[:port]: a host name`},
+		{"name with a fragment", "BYWARD_ALLOWED_HOSTS=a#b", "BYWARD_ALLOWED_HOSTS: " + logging.Hidden + ` is not a host[:port]: a host name`},
 		{"name with a backslash", "BYWARD_ALLOWED_HOSTS=a\\b", `BYWARD_ALLOWED_HOSTS: "a\\b" is not a host[:port]: a host name`},
 		{"name with a semicolon", "BYWARD_ALLOWED_HOSTS=a;b", `BYWARD_ALLOWED_HOSTS: "a;b" is not a host[:port]: a host name`},
 		{"name with a tab", "BYWARD_ALLOWED_HOSTS=a\tb", `BYWARD_ALLOWED_HOSTS: "a\tb" is not a host[:port]: a host name`},
@@ -181,10 +180,10 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"cimd allowed hosts blank", "BYWARD_CIMD_ALLOWED_HOSTS=,", "BYWARD_CIMD_ALLOWED_HOSTS is set but lists nothing"},
 		{"cimd host with a scheme", "BYWARD_CIMD_TRUSTED_HOSTS=https://claude.ai", `BYWARD_CIMD_TRUSTED_HOSTS: "https://claude.ai" is not a host name`},
 		{"cimd host with a path", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai/oauth", `BYWARD_CIMD_TRUSTED_HOSTS: "claude.ai/oauth" is not a host name`},
-		{"cimd host with user info", "BYWARD_CIMD_ALLOWED_HOSTS=user@claude.example", `BYWARD_CIMD_ALLOWED_HOSTS: "user@claude.example" is not a host name`},
+		{"cimd host with user info", "BYWARD_CIMD_ALLOWED_HOSTS=user@claude.example", "BYWARD_CIMD_ALLOWED_HOSTS: " + logging.Hidden + ` is not a host name`},
 		// #344: names no client ID can carry, refused as in BYWARD_ALLOWED_HOSTS.
-		{"cimd host with a query", "BYWARD_CIMD_ALLOWED_HOSTS=a?b.example", `BYWARD_CIMD_ALLOWED_HOSTS: "a?b.example" is not a host name such as claude.ai: a host name has only letters`},
-		{"cimd host with a fragment", "BYWARD_CIMD_TRUSTED_HOSTS=a#b.example", `BYWARD_CIMD_TRUSTED_HOSTS: "a#b.example" is not a host name`},
+		{"cimd host with a query", "BYWARD_CIMD_ALLOWED_HOSTS=a?b.example", "BYWARD_CIMD_ALLOWED_HOSTS: " + logging.Hidden + ` is not a host name such as claude.ai: a host name has only letters`},
+		{"cimd host with a fragment", "BYWARD_CIMD_TRUSTED_HOSTS=a#b.example", "BYWARD_CIMD_TRUSTED_HOSTS: " + logging.Hidden + ` is not a host name`},
 		{"cimd host with a semicolon", "BYWARD_CIMD_ALLOWED_HOSTS=a;b.example", `BYWARD_CIMD_ALLOWED_HOSTS: "a;b.example" is not a host name`},
 		{"cimd host with a trailing dot", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai.", `BYWARD_CIMD_TRUSTED_HOSTS: "claude.ai." is not a host name such as claude.ai: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
 		{"cimd host with a space", "BYWARD_CIMD_TRUSTED_HOSTS=claude .ai", `"claude .ai" is not a host name`},
@@ -854,7 +853,7 @@ func TestAnAllowedHostNameRefusesEveryCharacterAHostNameCannotHave(t *testing.T)
 		}
 		for _, entry := range []string{"a" + string(c) + "b", "a" + string(c) + "b:8443"} {
 			_, err := load(t, nil, "BYWARD_ALLOWED_HOSTS="+entry)
-			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%q is not a host[:port]: a host name", entry)) {
+			if err == nil || !strings.Contains(err.Error(), "is not a host[:port]: a host name") {
 				t.Errorf("BYWARD_ALLOWED_HOSTS=%s: %v, want it refused as a host name", entry, err)
 			}
 		}

@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/byward-dev/byward/internal/logging"
 
 	"github.com/byward-dev/byward/internal/store/memory"
 	"github.com/byward-dev/byward/internal/testutil/fakeclock"
@@ -29,6 +32,42 @@ func TestDenylistEntriesAreCIMDClientIDsOrHostNames(t *testing.T) {
 	} {
 		if _, err := NewDenylist([]string{entry}); err == nil || !strings.Contains(err.Error(), why) {
 			t.Errorf("%q: %v, want a refusal mentioning %q", entry, err, why)
+		}
+	}
+}
+
+// A CIMD client ID refused for its user information, query or fragment is named by its scheme, host
+// and path only: the refusal is a startup error, and those parts may hold a credential (security
+// invariant 2). One refused for anything else is named whole when it holds no @, ? or #, and not at
+// all when it does, as logging.Quote decides.
+func TestARefusedDenylistEntryNeverShowsItsUserInformationQueryOrFragment(t *testing.T) {
+	const secret = "s3cretPW"
+	for _, entry := range []string{"https://user:" + secret + "@app.example/c.json", "https://app.example/c.json?token=" + secret,
+		"https://app.example/c.json#" + secret} {
+		_, err := NewDenylist([]string{entry})
+		if err == nil || strings.Contains(err.Error(), secret) || !strings.Contains(err.Error(), `"https://app.example/c.json"`) {
+			t.Errorf("%q: %v, want a refusal naming https://app.example/c.json and not the secret", entry, err)
+		}
+	}
+	for _, entry := range []string{"https://app example/c.json", "https://app.example:abc/c.json"} {
+		if _, err := NewDenylist([]string{entry}); err == nil || !strings.Contains(err.Error(), strconv.Quote(entry)) {
+			t.Errorf("%q: %v, want a refusal naming the entry whole", entry, err)
+		}
+	}
+	if _, err := NewDenylist([]string{"https://app.example:8443/u@x/c.json"}); err == nil || !strings.Contains(err.Error(), logging.Hidden) {
+		t.Errorf("an entry with an @ in its path refused for its port: %v, want it not shown", err)
+	}
+}
+
+// A static client's refused redirect URI is a startup and check error, so it is shown as logs may
+// show it: never its user information, query or fragment (security invariant 2).
+func TestARefusedStaticRedirectURINeverShowsItsCredential(t *testing.T) {
+	const secret = "s3cretPW"
+	for _, uri := range []string{"https://user:" + secret + "@app.example/cb", "https://app.example/cb#" + secret,
+		"http://app.example/cb?token=" + secret} {
+		_, err := load(t, files{"/etc/mcp/clients.json": `{"clients":[{"client_id":"a","token_endpoint_auth_method":"none","redirect_uris":["` + uri + `"]}]}`})
+		if err == nil || strings.Contains(err.Error(), secret) || !strings.Contains(err.Error(), "redirect_uris[0]: redirect URI ") || !strings.Contains(err.Error(), "app.example/cb") {
+			t.Errorf("%s: %v, want it refused, named by scheme, host and path, without the secret", uri, err)
 		}
 	}
 }
