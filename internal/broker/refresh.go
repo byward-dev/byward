@@ -10,7 +10,6 @@ import (
 
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/idp"
-	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/token"
 )
@@ -22,7 +21,7 @@ func (b *Broker) refresh(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	f := r.PostForm
 	now := b.cfg.Now()
-	client, ok := b.authenticateClient(w, r, now, b.revokeForRefusedClient)
+	client, ok := b.authenticateClient(w, r, now, b.revokeForRefusedRefresh)
 	if !ok {
 		return
 	}
@@ -247,22 +246,10 @@ var cannotRefresh = tokenError{http.StatusInternalServerError, "server_error", "
 // rotation, outside the grace window.
 const reasonRefreshReused = "refresh token reused; grant revoked"
 
-// The grant_revoked reasons for a refresh by a refused client.
-const (
-	reasonClientDenied    = "client on the operator's denylist; grant revoked"
-	reasonMetadataRefused = "client metadata no longer valid"
-)
-
-// revokeForRefusedClient revokes the grant behind the refresh token a refused client presents. A
-// CIMD client's metadata that is now definitely refused (its document mismatches, is invalid or
-// gone) revokes it under draft-ietf-oauth-client-id-metadata-document-03 §6.1, so restoring the
-// document cannot revive it; so does a client ID the operator denied (#338). Only a definite
-// refusal gets here; a transient fetch failure never revokes.
-func (b *Broker) revokeForRefusedClient(r *http.Request, clientID string, now time.Time, refusal error) {
-	why := reasonMetadataRefused
-	if errors.Is(refusal, registration.ErrClientDenied) {
-		why = reasonClientDenied
-	}
+// revokeForRefusedRefresh revokes the grant behind the refresh token a client refused at lookup
+// (refusalReason) presents, with why, so restoring the client cannot revive it. Only the token's own
+// client's grant is revoked, under the grant's lock as any refresh.
+func (b *Broker) revokeForRefusedRefresh(r *http.Request, clientID string, now time.Time, why string) {
 	hash, ok := token.HashRefreshToken(r.PostForm.Get("refresh_token"))
 	if !ok {
 		return

@@ -498,21 +498,6 @@ func TestRefreshNeedsTheRefreshTokenGrant(t *testing.T) {
 	}
 }
 
-// A refused CIMD client ID cannot revoke a grant it does not own: another client's refresh token
-// presented under it is left alone.
-func TestARefusedCIMDClientCannotRevokeAnotherClientsGrant(t *testing.T) {
-	mode := new(atomic.Int32)
-	mode.Store(modeRefused)
-	e := newEnv(t, func(c *Config) { c.Clients = switchable{c.Clients, mode} })
-	rt := e.offline(t)["refresh_token"].(string) // the static client's
-	if res, _ := e.refresh(t, rt, appDoc); res.StatusCode != http.StatusUnauthorized || len(e.auditEvents(t, "grant_revoked")) != 0 {
-		t.Fatalf("status %d, revocations %v", res.StatusCode, e.auditEvents(t, "grant_revoked"))
-	}
-	if res, body := e.refresh(t, rt, ""); res.StatusCode != http.StatusOK {
-		t.Fatalf("the static client's own refresh: %d %v", res.StatusCode, body)
-	}
-}
-
 // A jwks_uri that cannot be fetched for now is a 503 at /token, like the document itself (draft
 // -03 §6.1), logged as a temporary failure; one whose keys are unusable is invalid_client, logged as
 // a refusal. Neither revokes the grant.

@@ -393,8 +393,10 @@ func TestStoreOutageAnswers503WithRetryAfter(t *testing.T) {
 	if res.Header.Get("Retry-After") == "" {
 		t.Fatal("503 without Retry-After")
 	}
-	if r := e.revokeToken(t, body["refresh_token"].(string), clientID); r.StatusCode != http.StatusServiceUnavailable || r.Header.Get("Retry-After") == "" {
-		t.Fatalf("revoke during a store outage: %d, want 503 with Retry-After (never a false 200)", r.StatusCode)
+	for _, kind := range []string{"refresh_token", "access_token"} {
+		if r := e.revokeToken(t, body[kind].(string), clientID); r.StatusCode != http.StatusServiceUnavailable || r.Header.Get("Retry-After") == "" {
+			t.Fatalf("revoking the %s during a store outage: %d, want 503 with Retry-After (never a false 200)", kind, r.StatusCode)
+		}
 	}
 }
 
@@ -539,19 +541,28 @@ func TestReuseReportedByTheStoreDeniesAtOnce(t *testing.T) {
 	}
 }
 
+// Revoking either token ends the grant; an expired access token still names its grant.
 func TestRevokeEitherTokenEndsTheGrant(t *testing.T) {
-	for _, which := range []string{"refresh_token", "access_token"} {
-		t.Run(which, func(t *testing.T) {
+	for _, tc := range []struct {
+		name, which string
+		after       time.Duration // how long after the redemption it is revoked
+	}{
+		{"refresh_token", "refresh_token", 0},
+		{"access_token", "access_token", 0},
+		{"expired access_token", "access_token", AccessLifetime + token.Leeway + time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			e := newEnv(t)
 			body := e.offline(t)
-			e.valid(t, body["access_token"].(string)) // syncs the deny list now, so validNow below sees only this replica's own changes
-			if res := e.revokeToken(t, body[which].(string), clientID); res.StatusCode != http.StatusOK || res.Header.Get("Cache-Control") != "no-store" {
-				t.Fatalf("revoke: %d", res.StatusCode)
+			e.now = e.now.Add(tc.after)
+			e.valid(t, body["access_token"].(string)) // syncs the deny list now, so a validNow below sees only this replica's own changes
+			if res := e.revokeToken(t, body[tc.which].(string), clientID); res.StatusCode != http.StatusOK || res.Header.Get("Cache-Control") != "no-store" {
+				t.Fatalf("revoke: %d, Cache-Control %q, want 200 and no-store", res.StatusCode, res.Header.Get("Cache-Control"))
 			}
 			if !e.grantGone(t, firstGrant(e.st)) {
 				t.Fatal("grant survived revocation")
 			}
-			if e.validNow(t, body["access_token"].(string)) {
+			if tc.after < AccessLifetime && e.validNow(t, body["access_token"].(string)) {
 				t.Fatal("the access token still validates on this replica before any sync")
 			}
 			e.oneAuditEvent(t, "grant_revoked", map[string]any{"outcome": "success", "client_id": clientID, "grant_id": firstGrant(e.st),
@@ -564,7 +575,8 @@ func TestRevokeEitherTokenEndsTheGrant(t *testing.T) {
 
 func TestRevokeAnswers200ForWhatIsNotARevocableToken(t *testing.T) {
 	e := newEnv(t)
-	revoked := e.offline(t)["refresh_token"].(string)
+	tokens := e.offline(t)
+	revoked := tokens["refresh_token"].(string)
 	if res := e.revokeToken(t, revoked, clientID); res.StatusCode != http.StatusOK {
 		t.Fatalf("first revoke: %d", res.StatusCode)
 	}
@@ -573,11 +585,54 @@ func TestRevokeAnswers200ForWhatIsNotARevocableToken(t *testing.T) {
 		{"unknown refresh token", token.RefreshPrefix + strings.Repeat("A", 43)},
 		{"malformed access token", token.AccessPrefix + "AAAA"},
 		{"already revoked", revoked},
+		{"access token of a revoked grant", tokens["access_token"].(string)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if res := e.revokeToken(t, tc.tok, clientID); res.StatusCode != http.StatusOK {
 				t.Fatalf("revoke: %d, want 200 (RFC 7009 §2.2)", res.StatusCode)
+			}
+		})
+	}
+}
+
+// A malformed token names no grant, so /revoke answers 200 (RFC 7009 §2.2) even while the store is
+// down: no store read could fail it.
+func TestRevokeAnswers200ForAMalformedTokenEvenWithTheStoreDown(t *testing.T) {
+	e := newEnv(t)
+	e.st.Down(errStoreDown)
+	for _, tok := range []string{token.RefreshPrefix + "AAAA", token.AccessPrefix + "AAAA"} {
+		if res := e.revokeToken(t, tok, clientID); res.StatusCode != http.StatusOK {
+			t.Fatalf("revoking %s with the store down: %d, want 200", tok, res.StatusCode)
+		}
+	}
+}
+
+// A refresh token unused for RefreshIdleLifetime names no grant: /revoke revokes nothing for it,
+// whether the client is found (200) or refused at lookup (401).
+func TestAnIdleExpiredRefreshTokenAtRevokeRevokesNothing(t *testing.T) {
+	found := func(t *testing.T) (e *env, rt, client string, status int) {
+		e = newEnv(t)
+		return e, e.offline(t)["refresh_token"].(string), clientID, http.StatusOK
+	}
+	cases := map[string]func(t *testing.T) (e *env, rt, client string, status int){"a found client": found}
+	for name, newRefusable := range refusals {
+		cases["a client refused at lookup, "+name] = func(t *testing.T) (*env, string, string, int) {
+			c := newRefusable(t)
+			tokens := c.tokens(t, c.signIn(t))
+			c.refuse()
+			return c.e, tokens["refresh_token"].(string), c.d.ClientID, http.StatusUnauthorized
+		}
+	}
+	for name, setUp := range cases {
+		t.Run(name, func(t *testing.T) {
+			e, rt, client, status := setUp(t)
+			e.now = e.now.Add(RefreshIdleLifetime)
+			if res := e.revokeToken(t, rt, client); res.StatusCode != status {
+				t.Fatalf("revoking an idle-expired refresh token: %d, want %d", res.StatusCode, status)
+			}
+			if revocations := e.auditEvents(t, "grant_revoked"); len(revocations) != 0 {
+				t.Fatalf("grant_revoked events %v, want none", revocations)
 			}
 		})
 	}

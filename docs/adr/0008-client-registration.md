@@ -61,7 +61,8 @@ domain; nobody offers operator-trusted hosts.
    URL, which the lookup refuses. A proxy token of a denied CIMD URL is refused at every request,
    an in-memory check. A proxy token of an MCP client denied by its redirect host runs out within
    its lifetime (1 h), since checking the host would need the client's registration on every
-   request.
+   request. _Amended 2026-11-17 (L168):_ a denied CIMD URL's code redemption and its own `/revoke`
+   request end the grant too, as its refresh does, still answered `invalid_client`.
 10. **Consent** is mandatory for DCR and CIMD clients; whether static clients see it, and how
     scopes are worded (operator text per scope), is F7.
 

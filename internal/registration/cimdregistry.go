@@ -23,12 +23,12 @@ var ErrUnavailable = errors.New("registration: client metadata temporarily unava
 
 // ErrMetadataRefused wraps ErrUnknownClient when a client's metadata document was fetched (or its
 // fetch definitely refused) and found unacceptable: not for a disabled CIMD, a host off the
-// allowlist or a malformed client ID, which say nothing about the document. Refresh revokes the
-// grant behind a token only for this (draft -03 §6.1).
+// allowlist or a malformed client ID, which say nothing about the document. It is a definite
+// refusal, unlike ErrUnavailable (draft -03 §6.1).
 var ErrMetadataRefused = fmt.Errorf("%w: client metadata refused", ErrUnknownClient)
 
 // ErrClientDenied wraps ErrUnknownClient when the operator's denylist names the client ID
-// (ADR-0008 §9). Refresh revokes the grant behind a token for this too (#338).
+// (ADR-0008 §9). It is a definite refusal (#338).
 var ErrClientDenied = fmt.Errorf("%w: client on the operator's denylist", ErrUnknownClient)
 
 // CIMD cache rules (ADR-0008 §4; draft -03 §6.1-6.2).
