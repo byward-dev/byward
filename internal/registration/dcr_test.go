@@ -271,6 +271,45 @@ func TestAStoredRegistrationThatCannotBeUsedIsUnknown(t *testing.T) {
 	}
 }
 
+// A stored registration whose redirect URI today's rules refuse is unknown, and the error, which the
+// broker logs (grantScopes), shows that URI as logs may: scheme, host and path, never its user
+// information or query (security invariant 2, #462). Before, the refused URI was quoted whole.
+func TestAStoredRegistrationsLookupErrorShowsItsRefusedRedirectURIWithoutItsUserInformationOrQuery(t *testing.T) {
+	c := newClock()
+	const refused = "alice:pa55word@" // user information, which today's rules refuse
+	for _, tc := range []struct {
+		name string
+		uris []string
+		want string // the error's text for the refused URI
+	}{
+		{"https", []string{"https://" + refused + "app.example/cb?code=s3cret"}, "redirect_uris[0]: redirect URI https://app.example/cb rejected"},
+		{"a custom scheme", []string{"myapp://" + refused + "cb/done?code=s3cret"}, "redirect_uris[0]: redirect URI myapp://cb/done rejected"},
+		{"the second of two", []string{"https://app.example/ok", "https://" + refused + "app.example/cb?code=s3cret"}, "redirect_uris[1]: redirect URI https://app.example/cb rejected"},
+		{"the first of two", []string{"https://" + refused + "app.example/cb?code=s3cret", "https://app.example/ok"}, "redirect_uris[0]: redirect URI https://app.example/cb rejected"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			meta, err := json.Marshal(map[string]any{"client_name": "App", "redirect_uris": tc.uris})
+			if err != nil {
+				t.Fatal(err)
+			}
+			st := memory.New()
+			rec := store.Client{ID: DCRIDPrefix + "stored", Metadata: meta, CreatedAt: c.Now().Add(-time.Hour), ExpiresAt: c.Now().Add(time.Hour)}
+			if err := st.CreateClient(context.Background(), rec, 10); err != nil {
+				t.Fatal(err)
+			}
+			_, err = newDCR(st, c.Now, 0).Client(context.Background(), rec.ID)
+			if !errors.Is(err, ErrUnknownClient) || !strings.Contains(err.Error(), "stored registration: "+tc.want) {
+				t.Fatalf("err = %v; want unknown, with %q", err, tc.want)
+			}
+			for _, secret := range []string{"alice", "pa55word", "s3cret", "code="} {
+				if strings.Contains(err.Error(), secret) {
+					t.Fatalf("err = %v; it quotes %q", err, secret)
+				}
+			}
+		})
+	}
+}
+
 // A client registering inline keys gets them back in the response, and after a lookup its
 // assertions signed with the matching key authenticate it.
 func TestAClientWithInlineKeysAuthenticatesWithThem(t *testing.T) {

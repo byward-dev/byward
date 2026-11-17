@@ -20,6 +20,7 @@ import (
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/store"
+	"github.com/byward-dev/byward/internal/store/memory"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/sealingkey"
 	"github.com/byward-dev/byward/internal/token"
@@ -1163,6 +1164,54 @@ func TestAClientLookupFailureAtTheCallbackGivesNoRefreshAndWarns(t *testing.T) {
 	if !strings.Contains(e.logs.String(), `"msg":"looking up the client failed, so this grant cannot refresh"`) || !strings.Contains(e.logs.String(), `"client_id":"`+clientID+`"`) {
 		t.Fatalf("no warning naming the client:\n%s", e.logs.String())
 	}
+}
+
+// A stored DCR registration whose redirect URI today's rules refuse fails the lookup at the callback.
+// The warning the operator gets shows that URI as logs may, never its user information or query
+// (security invariant 2, #462).
+func TestAStoredRegistrationRefusedAtTheCallbackIsLoggedWithoutItsUserInformationOrQuery(t *testing.T) {
+	clients, at := memory.New(), time.Unix(1_800_000_000, 0) // the registry's clock, apart from the broker's
+	stored := store.Client{ID: registration.DCRIDPrefix + "stored", CreatedAt: at.Add(-time.Hour), ExpiresAt: at.Add(time.Hour),
+		Metadata: []byte(`{"client_name":"App","redirect_uris":["https://alice:pa55word@app.example/cb?code=s3cret"]}`)}
+	if err := clients.CreateClient(context.Background(), stored, 10); err != nil {
+		t.Fatal(err)
+	}
+	dcr := registration.NewDCRRegistry(registration.DCRConfig{Store: clients, JTI: registration.NewStoreJTICache(memory.New()),
+		Now: func() time.Time { return at }, Scopes: []string{"mcp", "offline_access"}})
+	stale := new(atomic.Bool)
+	e := newEnv(t, func(c *Config) { c.Clients = staleWhen{c.Clients, stale, dcr, stored.ID} })
+	ck, cb := e.startLogin(t, url.Values{"scope": {"mcp offline_access"}})
+	stale.Store(true)
+	res := e.do(t, "GET", "/callback/entra?"+cb.RawQuery, nil, []*http.Cookie{ck})
+	stale.Store(false)
+	if res.StatusCode != http.StatusFound {
+		t.Fatalf("callback: %d, want the redirect to the client", res.StatusCode)
+	}
+	logs := e.logs.String()
+	if !strings.Contains(logs, `"msg":"looking up the client failed, so this grant cannot refresh"`) ||
+		!strings.Contains(logs, "redirect URI https://app.example/cb rejected") {
+		t.Fatalf("no warning naming the refused URI as logs may show it:\n%s", logs)
+	}
+	for _, secret := range []string{"alice", "pa55word", "s3cret"} {
+		if strings.Contains(logs, secret) {
+			t.Fatalf("the log quotes %q:\n%s", secret, logs)
+		}
+	}
+}
+
+// staleWhen is the registry; while stale holds, it answers every lookup as dcr answers for id.
+type staleWhen struct {
+	registration.Registry
+	stale *atomic.Bool
+	dcr   *registration.DCRRegistry
+	id    string
+}
+
+func (s staleWhen) Client(ctx context.Context, id string) (registration.Client, error) {
+	if s.stale.Load() {
+		return s.dcr.Client(ctx, s.id)
+	}
+	return s.Registry.Client(ctx, id)
 }
 
 // downWhen is the registry, unreachable while down holds.

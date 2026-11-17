@@ -168,8 +168,8 @@ func (r *DCRRegistry) Client(ctx context.Context, id string) (Client, error) {
 		return nil, fmt.Errorf("%w: stored registration: %v", ErrUnknownClient, err)
 	}
 	m, _, err := validateMetadata(d, allRedirects)
-	if err != nil {
-		return nil, fmt.Errorf("%w: stored registration: %v", ErrUnknownClient, err)
+	if err != nil { // may be logged by callers; never shown to the client
+		return nil, fmt.Errorf("%w: stored registration: %v", ErrUnknownClient, forLog(err, d.RedirectURIs))
 	}
 	return &dcrClient{metadataClient: newMetadataClient(id, m, NotVerified, r.cfg.Deny, r.cfg.KeysClient, r.cfg.JTI, r.cfg.Now), clients: r.cfg.Store}, nil
 }

@@ -106,6 +106,18 @@ func decodeMetadata(body []byte) (metadataDocument, error) {
 	return d, nil
 }
 
+// forLog is validateMetadata's error with every redirect URI as logs may show it (logging.URL), for
+// an error that is logged: a refused redirect URI's own message quotes it whole, user information
+// and query included, for the client that sent it (ADR-0009 §8). uris are the document's redirect
+// URIs. Every other error quotes no value the client chose (at most a fixed name, a limit, an
+// index or a byte offset), and is returned as it is.
+func forLog(err error, uris []string) error {
+	if re := (*RedirectError)(nil); errors.As(err, &re) {
+		return fmt.Errorf("redirect_uris[%d]: %s", slices.Index(uris, re.Sent), re.logText())
+	}
+	return err
+}
+
 // validateMetadata applies the shared client metadata rules (draft -03 §4-6, ADR-0008 §2,
 // ADR-0009). With passingRedirects it also returns the redirect URIs it dropped.
 func validateMetadata(d metadataDocument, rule redirectRule) (*clientMetadata, []string, error) {
