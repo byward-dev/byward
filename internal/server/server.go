@@ -89,7 +89,7 @@ func Handler(cfg *config.Config, log *slog.Logger, up http.Handler, v resource.V
 	rt := routeOf(mux)
 	// recoverer is innermost so a panic still gets its request log line, its 5xx metric and an error
 	// span: the wrappers above see the 500 it writes. An http.ErrAbortHandler is re-panicked to abort
-	// the response, so the wrappers above see no status: it gets no request log line, no request metric
+	// the response, so the wrappers above never finish: it gets no request log line, no request metric
 	// and a span with no status code. The relay logs an upstream body that breaks off mid-copy with the
 	// request's ID instead (#387).
 	// ClientAddress is outermost but for HSTS: every layer below logs and limits by the same
