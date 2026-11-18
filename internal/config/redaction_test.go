@@ -20,9 +20,9 @@ func withOIDC(t *testing.T) func(kv ...string) error {
 	return func(kv ...string) error { _, err := loadOIDC(t, with(kv...)); return err }
 }
 
-// L167: a refused setting never prints a password or token it holds, in its user information, query
-// or fragment, whatever it was refused for, and still names the setting (security invariant 2). The
-// refusal reaches stderr at startup, check and doctor: the container log.
+// L167: a refused setting never prints a password or token it holds, in its user information, path
+// parameters, query or fragment, whatever it was refused for, and still names the setting (security
+// invariant 2). The refusal reaches stderr at startup, check and doctor: the container log.
 func TestARefusedSettingNeverShowsACredentialItHolds(t *testing.T) {
 	const secret = "s3cretPW"
 	urls := []string{
@@ -36,6 +36,7 @@ func TestARefusedSettingNeverShowsACredentialItHolds(t *testing.T) {
 		"https:/up.example/x?token=" + secret, // a mistyped scheme separator
 		"up.example/x?token=" + secret,
 		"up.example/x#" + secret,
+		"https:/up.example/x;k=" + secret, // a mistyped scheme separator and path parameters (#470)
 	}
 	origins := []string{
 		"https://user:" + secret + "@app.example",
@@ -46,9 +47,12 @@ func TestARefusedSettingNeverShowsACredentialItHolds(t *testing.T) {
 		"user:" + secret + "@app.example",
 		"app.example?token=" + secret,
 		"app.example#" + secret,
+		"https:/app.example/x;k=" + secret,   // a mistyped scheme separator and path parameters (#470)
+		"https:://app.example/x;k=" + secret, // a doubled colon before the ://
 	}
 	hosts := []string{"user:" + secret + "@app.example", "user:" + secret + "@app.example:8443",
-		"user:" + secret + "@bücher.example", "https://user:" + secret + "@bücher.example", "app.example?token=" + secret}
+		"user:" + secret + "@bücher.example", "https://user:" + secret + "@bücher.example", "app.example?token=" + secret,
+		"https:/app.example/x;k=" + secret, "HTTPS:/bücher.example/;" + secret, "https:://app.example/x;k=" + secret}
 	denylist := append([]string{"https://user:" + secret + "@app.example/c.json", "https://:" + secret + "@app.example/c.json", "https://app.example/c.json?token=" + secret,
 		"https://app.example/c.json#" + secret, "https://user:" + secret + "@ap p.example/c.json"}, hosts...)
 	issuers := []string{
@@ -71,13 +75,13 @@ func TestARefusedSettingNeverShowsACredentialItHolds(t *testing.T) {
 		"ftp://idp.example/u:" + secret + "@x",
 		"//idp.example/u:" + secret + "@x", // no scheme, though Go finds a host
 	}
-	oidcScopes := []string{"https://user:" + secret + "@api.example/read x"}
+	oidcScopes := []string{"https://user:" + secret + "@api.example/read x", "https:/api.example/r;" + secret + " x"}
 	obo := []string{"https://user:" + secret + "@graph.microsoft.com", "api:" + secret + "@x",
 		"https://graph.microsoft.com/User.Read https://user:" + secret + "@other.example/x",
 		"https://u:" + secret + "@graph.example/User.Read https://other.example/x",
 		"api://app/x https://u:" + secret + "/rest@h.example", // a password holding a /: the API part scopeSlash cuts ends inside the password
-		"https://u:" + secret + "/rest@h.example api://app/x"}
-	proxies := []string{"https://user:" + secret + "@10.0.0.1", "10.0.0.1?token=" + secret}
+		"https://u:" + secret + "/rest@h.example api://app/x", "https:/graph.example/x;" + secret}
+	proxies := []string{"https://user:" + secret + "@10.0.0.1", "10.0.0.1?token=" + secret, "https:/10.0.0.1/;" + secret}
 	for _, tc := range []struct {
 		env    string
 		values []string
