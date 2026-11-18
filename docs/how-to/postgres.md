@@ -4,7 +4,7 @@ The default store is an embedded SQLite database ([state.md](state.md)): one rep
 than one replica of the proxy behind a load balancer, give them a shared PostgreSQL store
 ([ADR-0007](../adr/0007-state-and-storage.md), amended for [#227](https://github.com/byward-dev/byward/issues/227)).
 
-> On `main` only: the PostgreSQL store is in no release yet.
+> Needs byward v0.3.0 or later.
 
 Requirements:
 

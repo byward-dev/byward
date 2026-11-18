@@ -40,7 +40,7 @@ Entra, `tid:oid`; with an OIDC IdP, the value of its subject claim
 `revoke-user` alone does not keep anyone out: a user who still passes the IdP and the gate can sign
 in again. Do both.
 
-It runs while the proxy runs: it writes to the same store, SQLite or PostgreSQL (on `main`).
+It runs while the proxy runs: it writes to the same store, SQLite or PostgreSQL.
 
 | Audit record | When |
 |---|---|
@@ -159,7 +159,7 @@ since then is accepted again until it expires, at most an hour. Run `revoke-user
 again for those users.
 
 The SQLite store finds a restore by itself at startup ([restore detection](state.md#restore-detection)).
-With the PostgreSQL store (on `main`), also run `byward store new-epoch --yes`
+With the PostgreSQL store, also run `byward store new-epoch --yes`
 ([backup and restore](postgres.md#backup-and-restore)): refresh tokens from before the new epoch are
 refused and every remembered consent is forgotten. It runs while the proxy runs, prints the new
 epoch, and is audited as `store_restored` with `reason` `operator new-epoch`. With SQLite it exits 2.

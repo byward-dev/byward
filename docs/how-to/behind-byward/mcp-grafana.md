@@ -17,8 +17,8 @@ byward, each call runs **as the signed-in user, with their Grafana role**:
 
 No On-Behalf-Of and no IdP-specific Grafana setup: Grafana sees only byward's assertion. The IdP
 must put the user's roles in the ID token, as Keycloak (a realm-role mapper) and Entra (app roles)
-do; for another OIDC IdP, name its claim with `BYWARD_OIDC_ROLES_CLAIM` (on `main` only, in no
-release yet; [OIDC](../oidc.md)).
+do; for another OIDC IdP, name its claim with `BYWARD_OIDC_ROLES_CLAIM` (since
+v0.3.0; [OIDC](../oidc.md)).
 **Google cannot:** its ID token has no roles claim
 ([Google](../google.md)), so Grafana can map no role, and with `role_attribute_strict = true` it
 refuses every user. With Google, give users a Grafana role some other way, or use another IdP.

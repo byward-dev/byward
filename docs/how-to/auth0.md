@@ -9,7 +9,7 @@ itself are in [run byward](run-byward.md).
 > domain gate (allowed and refused), refresh, revoke, and a client secret. The role gate through
 > `BYWARD_OIDC_ROLES_CLAIM` was verified on 2026-11-14 with the code on `main`: a user with the role
 > admitted, one without refused, and the role still there after a refresh. `private_key_jwt` was not
-> tested. Use the image `ghcr.io/byward-dev/byward:v0.2.0` or a later release.
+> tested. Use the image `ghcr.io/byward-dev/byward:v0.3.0` or a later release.
 
 ## 1. The application
 
@@ -66,7 +66,7 @@ BYWARD_IDP=auth0
 BYWARD_OIDC_ISSUER=https://<tenant>.auth0.com/
 BYWARD_OIDC_CLIENT_ID=<client id>
 BYWARD_OIDC_CLIENT_SECRET_FILE=/run/secrets/auth0-client-secret
-# on `main`, not in v0.2.0:
+# v0.3.0 and later:
 BYWARD_OIDC_ROLES_CLAIM=https://byward.example.com/roles
 BYWARD_GATE_ROLES=byward.user
 ```
@@ -77,14 +77,14 @@ BYWARD_GATE_ROLES=byward.user
   (`https://<tenant>.<region>.auth0.com/`).
 - The `auth0` preset asks for `openid profile email offline_access`; add others with
   `BYWARD_OIDC_SCOPES`.
-- `BYWARD_OIDC_ROLES_CLAIM` is on `main`, not in v0.2.0. With v0.2.0, gate by email domain
+- `BYWARD_OIDC_ROLES_CLAIM` needs v0.3.0 or later. With v0.2.0, gate by email domain
   (section 4).
 
 ## 4. Who may sign in
 
 An empty access gate refuses to start with an OIDC IdP, so set at least one of:
 
-- `BYWARD_GATE_ROLES` (on `main`, with `BYWARD_OIDC_ROLES_CLAIM` set as above): Auth0 role names,
+- `BYWARD_GATE_ROLES` (since v0.3.0, with `BYWARD_OIDC_ROLES_CLAIM` set as above): Auth0 role names,
   matched exactly against the namespaced claim. A user without one of them gets "You don't have access
   to this server." and the audit records `access_denied` with `reason` `role`. The identity assertion
   and `X-Byward-Roles` carry the same roles. Without `BYWARD_OIDC_ROLES_CLAIM`, byward reads the
@@ -103,15 +103,15 @@ byward signs an RSA key with PS256 by default and an EC key with ES256, so:
 
 - Use an RSA key of 2048 to 4096 bits, not an EC key.
 - Register its public key (PEM) on the application with the algorithm byward signs with: **PS256**,
-  or Auth0's default **RS256** if you set `BYWARD_OIDC_CLIENT_KEY_ALG=RS256` (on `main`, not in
-  v0.2.0).
+  or Auth0's default **RS256** if you set `BYWARD_OIDC_CLIENT_KEY_ALG=RS256` (since
+  v0.3.0).
 - Replace the secret with `BYWARD_OIDC_CLIENT_KEY_FILE` and `BYWARD_OIDC_CLIENT_KEY_ID` (the `kid`
   Auth0 generates for the credential).
 
 ## 6. Check it
 
-- `byward check --offline`, then `byward doctor`: "discovery … matches the configured issuer". On
-  `main`, doctor also checks that Auth0 accepts the client ID and the secret; the doctor in
+- `byward check --offline`, then `byward doctor`: "discovery … matches the configured issuer". Since
+  v0.3.0, doctor also checks that Auth0 accepts the client ID and the secret; the doctor in
   v0.2.0 does not, and a wrong secret shows only at the first sign-in.
 - Sign in from an MCP client ([run byward](run-byward.md#6-connect-a-client)): byward's consent page,
   then Auth0's login page. The user's `sub` looks like `auth0|…`.

@@ -54,7 +54,7 @@ recover once the credential is fixed. New sign-ins fail with an error page until
 **What to do.**
 
 1. Run `byward doctor` where the proxy runs. Its `entra app and credential` check (Entra) or
-   `client credential` check (`oidc`, on `main`) tests the credential and names the setting to fix
+   `client credential` check (`oidc`, since v0.3.0) tests the credential and names the setting to fix
    ([checks](../reference/commands.md#checks)).
 2. Fix the credential:
    - an Entra client secret: create a new one and restart the proxy
@@ -171,7 +171,7 @@ fixed, not settings.
 1. Watch [`byward_upstream_in_flight`](../reference/observability.md#metrics) by `kind`: if it sits
    at the cap, the upstream answers too slowly or the load has grown.
 2. Look at the upstream: slow tool calls hold their slot until they answer.
-3. For more capacity with an HTTP upstream, run more replicas on the PostgreSQL store, on `main`
+3. For more capacity with an HTTP upstream, run more replicas on the PostgreSQL store
    ([PostgreSQL](postgres.md)).
 
 ## Upstream refusals

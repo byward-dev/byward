@@ -20,8 +20,8 @@ Background: [ADR-0012](../adr/0012-entra-specifics.md) (Entra), [ADR-0008](../ad
 
 - a public HTTPS host for the proxy, called `mcp.example.com` below; the MCP endpoint is
   `https://mcp.example.com/mcp`. TLS can end at a reverse proxy, a load balancer or a tunnel in
-  front of byward, or at byward itself with your certificate ([TLS](tls.md), on `main` only so far);
-- the container image `ghcr.io/byward-dev/byward:v0.2.0` or a later release, or the `byward`
+  front of byward, or at byward itself with your certificate ([TLS](tls.md), since v0.3.0);
+- the container image `ghcr.io/byward-dev/byward:v0.3.0` or a later release, or the `byward`
   binary of that release;
 - the Azure CLI (`az`), signed in to your tenant (`az login --tenant <tenant-id>`) as a user who may
   create app registrations. Granting admin consent (optional, step 1.5) needs an administrator. In a
@@ -221,7 +221,7 @@ docker run --rm --network byward -p 8080:8080 --user "$(id -u):$(id -g)" \
   -e BYWARD_ENTRA_CLIENT_ID="$APP_ID" \
   -e BYWARD_ENTRA_CLIENT_SECRET_FILE=/run/secrets/entra-client-secret \
   -e BYWARD_LISTEN=0.0.0.0:8080 \
-  ghcr.io/byward-dev/byward:v0.2.0
+  ghcr.io/byward-dev/byward:v0.3.0
 ```
 
 Or with the binary: export the same five settings plus `BYWARD_DATA_DIR="$PWD/byward-data"` and run

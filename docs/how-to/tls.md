@@ -5,7 +5,7 @@ byward can terminate TLS on its public listener with a certificate you supply
 there is no ACME. Use it to encrypt the hop from your ingress to byward, or to serve clients directly
 from a host with a certificate of its own.
 
-> On `main` only: TLS at the proxy is in no release yet.
+> Needs byward v0.3.0 or later.
 
 You do not need it when the hop from the ingress to byward is private (same host, same pod, or a
 mesh that encrypts it), or on a platform that encrypts it for you ([Azure Container Apps](#azure-container-apps)).
