@@ -686,6 +686,22 @@ func TestABareIPv6AllowedHostMatchesItsBracketedHostHeaderOnThePublicListener(t 
 	}
 }
 
+// #447: the public URL's IPv6 host matches a Host header in any spelling of the address, as a Go
+// client sends what it was given and a browser the canonical form.
+func TestAnIPv6PublicURLMatchesAnySpellingOfItsAddressAndNoOtherHostOnThePublicListener(t *testing.T) {
+	cfg := loadConfig(t, "https://[2001:db8::1]/mcp")
+	s, err := New(cfg, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for host, want := range map[string]int{"[2001:db8::1]": http.StatusOK, "[2001:DB8:0:0::1]": http.StatusOK, "[2001:db8::1]:443": http.StatusOK,
+		"[2001:db8::2]": http.StatusMisdirectedRequest, "evil.example": http.StatusMisdirectedRequest} {
+		if code, _ := getBody(t, s.Public.Handler, host, "/.well-known/oauth-protected-resource/mcp"); code != want {
+			t.Errorf("Host %s on the public listener: %d, want %d", host, code, want)
+		}
+	}
+}
+
 // ADR-0018 §7: BYWARD_UPSTREAM_HEADER_TIMEOUT reaches the relay; a stalled upstream is answered.
 func TestStalledUpstreamIsAnsweredAfterTheConfiguredHeaderTimeout(t *testing.T) {
 	up := fakeupstream.New()

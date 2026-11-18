@@ -13,9 +13,12 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 )
 
-// Hosts allows only the given hosts (host[:port], compared case-insensitively; default ports
-// :80 and :443 are ignored). Mismatches get 421 Misdirected Request and an audit event, rate-limited
-// per source because the sender is not authenticated.
+// Hosts allows only the given hosts (host[:port], compared as config.CanonicalHost writes them:
+// case-insensitively, an IP address in any spelling as browsers serialize it). One default port,
+// :443 or :80, is ignored, once: a proxy behind a TLS-terminating load balancer may send the host
+// with :80 (nginx's $host:$server_port), and a default port on the right host names no other site.
+// Mismatches get 421 Misdirected Request and an audit event, rate-limited per source because the
+// sender is not authenticated.
 func Hosts(rec *audit.Log, allowed []string, next http.Handler) http.Handler {
 	set := map[string]bool{}
 	for _, h := range allowed {
@@ -38,10 +41,10 @@ func Hosts(rec *audit.Log, allowed []string, next http.Handler) http.Handler {
 func InternalHosts(rec *audit.Log, allowed []string, next http.Handler) http.Handler {
 	set := map[string]bool{"localhost": true}
 	for _, h := range allowed {
-		set[config.Hostname(h)] = true
+		set[config.Hostname(h)] = true // config stores IP addresses canonical; any IP literal passes anyway
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name := config.Hostname(r.Host)
+		name := config.Hostname(config.CanonicalHost(r.Host)) // 127.1 is an IP literal too
 		if _, err := netip.ParseAddr(name); err != nil && !set[name] {
 			rec.RecordUnauthenticated(r, audit.Event{Name: audit.HostRejected, Outcome: audit.Failure, Host: r.Host})
 			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
@@ -51,10 +54,15 @@ func InternalHosts(rec *audit.Log, allowed []string, next http.Handler) http.Han
 	})
 }
 
+// hostKey is h as Hosts compares it: config.CanonicalHost (so 127.1 matches 127.0.0.1, and any
+// spelling of an IPv6 address its shortest form), without one default port (:443 or :80), trimmed
+// once, so [::1]:80:443 is not [::1].
 func hostKey(h string) string {
-	h = strings.ToLower(h)
+	h = config.CanonicalHost(h)
 	for _, p := range []string{":443", ":80"} {
-		h = strings.TrimSuffix(h, p)
+		if t, ok := strings.CutSuffix(h, p); ok {
+			return t
+		}
 	}
 	return h
 }

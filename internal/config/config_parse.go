@@ -44,8 +44,9 @@ func checkInlineSecrets(v *Values, dev bool) (relaxation string, err error) {
 // ParsePublicURL validates the public URL of the MCP endpoint, as `byward init entra` also needs it:
 // absolute, an ASCII host[:port] that BYWARD_ALLOWED_HOSTS would accept (normalizeAllowedHost: an IP
 // address or a name following validHostName's rule, a port from 1 to 65535 without a leading zero,
-// no IPv6 zone), a path
-// without a trailing slash, no query or fragment, and https unless the host is loopback (which the
+// no IPv6 zone), no host ending in a number unless it is an IPv4 address in dotted decimal
+// (browserIPv4), an IPv6 address only in the form browsers write it (browserHost), a path without a
+// trailing slash, no query or fragment, and https unless the host is loopback (which the
 // proxy itself accepts only with --dev).
 func ParsePublicURL(raw string) (*url.URL, error) {
 	u, err := parseURL("public-url", raw)
@@ -59,6 +60,13 @@ func ParsePublicURL(raw string) (*url.URL, error) {
 		// host:port joins the public listener's Host allow-list, so it follows BYWARD_ALLOWED_HOSTS'
 		// rules (#344, #353).
 		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: %v", err))
+	} else if err := browserIPv4(u.Hostname()); err != nil {
+		// A browser never sends such a host back, so its sign-in could never finish.
+		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: %v", err))
+	} else if h := u.Hostname(); strings.Contains(h, ":") && "["+h+"]" != browserHost(h) {
+		// The public URL is also the issuer, the resource and the IdP redirect URI, which browser
+		// clients compare with the URL they hold, in the form they write (#447).
+		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: the IPv6 address [%s] is not in the form browsers write it; write it as %s", h, browserHost(h)))
 	}
 	if u.Path == "" || strings.HasSuffix(u.Path, "/") {
 		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://%s/mcp", u.Host))
@@ -172,9 +180,8 @@ func splitList(s string) []string {
 }
 
 // normalizeOrigin returns an origin as browsers send it (browserOrigin), with its host[:port]
-// checked as BYWARD_ALLOWED_HOSTS checks one (normalizeAllowedHost), so an entry that no browser
-// could send is refused, not kept: browsers write an IPv4 address in dotted decimal, never 127.1 or
-// 0x7f.0.0.1 (WHATWG URL host parser).
+// checked as BYWARD_ALLOWED_HOSTS checks one (normalizeAllowedHost), and refused when no browser
+// could send it (browserIPv4).
 func normalizeOrigin(o string) (string, error) {
 	u, err := url.Parse(o)
 	switch {
@@ -188,40 +195,10 @@ func normalizeOrigin(o string) (string, error) {
 	if _, err := normalizeAllowedHost(u.Host); err != nil {
 		return "", fmt.Errorf("%s: %w", logging.Quote(o), err)
 	}
-	if host := u.Hostname(); numericLabel(host[strings.LastIndex(host, ".")+1:]) {
-		if _, err := netip.ParseAddr(host); err != nil {
-			return "", fmt.Errorf("%s: %s is not an IPv4 address in dotted decimal, the only form browsers send", logging.Quote(o), logging.Quote(host))
-		}
+	if err := browserIPv4(u.Hostname()); err != nil {
+		return "", fmt.Errorf("%s: %w", logging.Quote(o), err)
 	}
 	return browserOrigin(u), nil
-}
-
-// numericLabel reports whether label is a number, decimal or 0x hex; as a host's last label it makes
-// a browser read the host as an IPv4 address (WHATWG URL "ends in a number").
-func numericLabel(label string) bool {
-	if l := strings.ToLower(label); strings.HasPrefix(l, "0x") {
-		return strings.Trim(l[2:], "0123456789abcdef") == ""
-	}
-	return label != "" && strings.Trim(label, "0123456789") == ""
-}
-
-// browserOrigin is u's origin as browsers serialize it (RFC 6454 §6.2): scheme://host[:port] in lower
-// case, an IPv6 host in brackets and in its shortest form, all hex (the WHATWG URL IPv6 serializer:
-// ::ffff:7f00:1, where netip writes ::ffff:127.0.0.1), and no port when it is the scheme's default.
-func browserOrigin(u *url.URL) string {
-	host := strings.ToLower(u.Hostname())
-	switch a, err := netip.ParseAddr(host); {
-	case err == nil && a.Is4In6():
-		b := a.As16()
-		host = fmt.Sprintf("[::ffff:%x:%x]", uint16(b[12])<<8|uint16(b[13]), uint16(b[14])<<8|uint16(b[15]))
-	case err == nil && a.Is6():
-		host = "[" + a.String() + "]"
-	}
-	defaultPort := map[string]string{"http": "80", "https": "443"}[u.Scheme]
-	if p := u.Port(); p != "" && p != defaultPort {
-		host += ":" + p
-	}
-	return u.Scheme + "://" + host
 }
 
 // asciiHost refuses a host with non-ASCII characters. Browsers and MCP clients send an
@@ -239,7 +216,9 @@ func asciiHost(host string) error {
 }
 
 // normalizeAllowedHost returns a BYWARD_ALLOWED_HOSTS entry, or BYWARD_PUBLIC_URL's host:port,
-// which joins the same list, as the public listener compares it with a Host header: in lower case, a bare IPv6 address in brackets, as a Host header carries it.
+// which joins the same list, as the public listener compares it with a Host header (CanonicalHost):
+// in lower case, an IPv4 address in dotted decimal (127.1 is 127.0.0.1), and an IPv6 address in
+// brackets in its shortest form.
 // It refuses any form a Host header cannot carry, since such an entry could never match there.
 // Accepted: host or host:port (a host may be an IPv4 address), [IPv6], [IPv6]:port, or a bare IPv6
 // address taken whole (never as IPv6:port); a port from 1 to 65535 without a sign or leading zero,
@@ -286,7 +265,7 @@ func normalizeAllowedHost(h string) (string, error) {
 			return "", invalid
 		}
 	}
-	return strings.ToLower(stored), nil
+	return CanonicalHost(stored), nil
 }
 
 // hostNameRule is what validHostName requires, for the errors of the settings that use it.
