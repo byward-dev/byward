@@ -166,7 +166,7 @@ For Google, Okta, Keycloak, Auth0 or another OpenID Connect IdP ([OIDC how-to](o
       over another user's grants by changing it.
 - [ ] **An ID token on refresh.** The gate is checked again at every refresh, so the IdP must return
       an ID token then; a refresh without one ends the grant ([OIDC how-to](oidc.md)).
-- [ ] Run `byward doctor`: it checks discovery and the issuer, and (on `main`) that the IdP accepts
+- [ ] Run `byward doctor`: it checks discovery and the issuer, and (since v0.3.0) that the IdP accepts
       the client ID and the secret or key.
 
 ## The internal listener
@@ -190,8 +190,8 @@ plus the names in `BYWARD_ALLOWED_HOSTS`; any other name gets `421`, which stops
       `-wal` and `-shm` files), mode 0600 in a 0700 directory ([state](state.md)). Grants, refresh
       tokens and revocations survive a restart; the revocation list is reloaded from the store before
       the proxy serves.
-- [ ] **One replica on SQLite.** For several, use the PostgreSQL store (on `main`,
-      [postgres](postgres.md)); a stdio upstream stays on one replica, and the proxy refuses to start
+- [ ] **One replica on SQLite.** For several, use the PostgreSQL store
+      ([postgres](postgres.md)); a stdio upstream stays on one replica, and the proxy refuses to start
       with a stdio upstream and PostgreSQL. With PostgreSQL:
       - give the connection string as a file (`BYWARD_STORE_POSTGRES_DSN_FILE`, mode `0600`), with
         `sslmode=verify-full`;

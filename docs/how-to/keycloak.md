@@ -7,8 +7,8 @@ The data directory, the keys and starting the proxy are in [run byward](run-bywa
 
 > Verified on 2026-11-13 with Keycloak 26.8.2 and the byward v0.2.0-rc.1 image, over https with a
 > private CA and without `--dev`: sign-in, the role and group gates, refresh, revoke, and both a client
-> secret and `private_key_jwt`. Use the image `ghcr.io/byward-dev/byward:v0.2.0` (the same code
-> as v0.2.0-rc.1) or a later release. The local trial below was run on
+> secret and `private_key_jwt`. Use the image `ghcr.io/byward-dev/byward:v0.3.0` or a later
+> release. The local trial below was run on
 > 2026-11-14 with Keycloak 26.8.2 `start-dev`, both with the v0.2.0-rc.1 release binary
 > (darwin/arm64) and with a build of `main`.
 
@@ -90,12 +90,12 @@ and a host name both your browser and the container resolve.
    ```
 
    The startup log, and `check --offline`, list the relaxations `--dev` applied: secret file
-   permissions, the http public URL and, on `main`, the http IdP issuer. v0.2.0 does not list
+   permissions, the http public URL and, since v0.3.0, the http IdP issuer. v0.2.0 does not list
    the issuer.
-6. **Check it**: in another shell with the same settings, `./byward doctor`. In v0.2.0 doctor
-   checks Keycloak's discovery but not the client secret: a wrong secret shows only at the first
-   sign-in, as byward's "Signing in failed." page and an `IdP alert: the operator must act` log line
-   with `alert` `credential_rejected`. Then sign in with
+6. **Check it**: in another shell with the same settings, `./byward doctor`. It checks Keycloak's
+   discovery and, since v0.3.0, that Keycloak accepts the client ID and the secret. In v0.2.0 a wrong
+   secret shows only at the first sign-in, as byward's "Signing in failed." page and an
+   `IdP alert: the operator must act` log line with `alert` `credential_rejected`. Then sign in with
    [`mcp-check.py`](run-byward.md#without-an-ai-client): `uv run --script mcp-check.py
    http://localhost:8080/mcp`, open the URL it prints, allow on byward's consent page, and sign in as
    `alice`. It prints `echo: Echo: hello through byward`.
@@ -180,7 +180,7 @@ public IdPs and upstreams keep working. Details, Kubernetes and the pitfalls are
 2. **Credentials** tab: **Client Authenticator** = **Signed JWT** (not *Signed JWT - Federated* or
    *Signed JWT with Client Secret*), **Signature algorithm** = the
    algorithm byward signs with: **PS256** for an RSA key by default, **RS256** if you set
-   `BYWARD_OIDC_CLIENT_KEY_ALG=RS256` (on `main`, not in v0.2.0), **ES256** for an EC key. If they differ, Keycloak refuses the
+   `BYWARD_OIDC_CLIENT_KEY_ALG=RS256` (since v0.3.0), **ES256** for an EC key. If they differ, Keycloak refuses the
    sign-in and byward logs an IdP alert, `credential_rejected`. When Keycloak answers with the OAuth
    error `invalid_client`, the alert's fix names the algorithm byward signed with.
 3. **Keys** tab: give Keycloak the public key, as a JWKS URL or by importing it, with a key ID.
@@ -196,7 +196,7 @@ public IdPs and upstreams keep working. Details, Kubernetes and the pitfalls are
 - `byward check --offline`, then `byward doctor`: "discovery … matches the configured issuer", and
   "client credential": Keycloak accepted the client ID and the secret or key. A wrong secret fails
   with `unauthorized_client`, a wrong key with `invalid_client`, each with the setting to fix. (The
-  client credential check is on `main`, not in v0.2.0.)
+  client credential check is new in v0.3.0.)
 - Sign in from an MCP client, or with [`mcp-check.py`](run-byward.md#without-an-ai-client). A user
   without the role or group gets "You don't have access to this server." and the audit has
   `access_denied` with `reason` `role` or `group`. The client receives no error redirect; it waits

@@ -10,11 +10,11 @@ OpenID Connect IdP, with guides for [Okta](docs/how-to/okta.md), [Keycloak](docs
 [Google](docs/how-to/google.md), and Auth0 and the rest through the [generic OIDC guide](docs/how-to/oidc.md).
 One Go binary, configured by environment variables.
 
-> **Latest release: [v0.2.0](https://github.com/byward-dev/byward/releases/tag/v0.2.0)**, the
-> `latest` image tag: Microsoft Entra ID and the OIDC IdPs, On-Behalf-Of and app-only tokens. These
-> docs follow `main`, which is ahead of it: TLS at the proxy and the PostgreSQL store are in no
-> release yet ("on `main`"). The docs for a release are at its tag, for example
-> [v0.2.0](https://github.com/byward-dev/byward/tree/v0.2.0/docs).
+> **Latest release: [v0.3.0](https://github.com/byward-dev/byward/releases/tag/v0.3.0)**, the
+> `latest` image tag: Microsoft Entra ID and the OIDC IdPs, On-Behalf-Of and app-only tokens, TLS
+> at the proxy and the PostgreSQL store. These docs follow `main`; a feature in no release yet
+> says "on `main`". The docs for a release are at its tag, for example
+> [v0.3.0](https://github.com/byward-dev/byward/tree/v0.3.0/docs).
 >
 > byward is pre-1.0 and has not had an independent security audit. Read the
 > [security posture](docs/security-posture.md) before deploying it.
@@ -37,7 +37,7 @@ MCP client ──OAuth 2.1──▶ byward ──sign-in──▶ your IdP (Entr
   domain, as the IdP provides them ([access gate](docs/how-to/access-gate.md)). Refresh tokens rotate with reuse
   detection, and operators can revoke a user or everyone.
 - **Built to run:** SQLite state for one replica, or PostgreSQL for several
-  ([postgres](docs/how-to/postgres.md), on `main`), rate limits on the OAuth endpoints, a structured
+  ([postgres](docs/how-to/postgres.md), since v0.3.0), rate limits on the OAuth endpoints, a structured
   audit stream, Prometheus metrics, and `byward doctor` to check a deployment.
 
 ## Verified clients
@@ -81,14 +81,14 @@ docker run --rm -p 8080:8080 --user "$(id -u):$(id -g)" \
   -e BYWARD_ENTRA_CLIENT_ID="$APP_ID" \
   -e BYWARD_ENTRA_CLIENT_SECRET_FILE=/run/secrets/entra-client-secret \
   -e BYWARD_LISTEN=0.0.0.0:8080 \
-  ghcr.io/byward-dev/byward:v0.2.0
+  ghcr.io/byward-dev/byward:v0.3.0
 ```
 
 `upstream` is your MCP server's address as the container sees it (the quickstart runs both on one
 Docker network).
 
 TLS usually ends at your ingress or reverse proxy; byward can also serve it with your certificate
-([TLS](docs/how-to/tls.md), on `main`). Then work through the
+([TLS](docs/how-to/tls.md), since v0.3.0). Then work through the
 [hardening checklist](docs/how-to/harden-a-deployment.md).
 
 Images and archives are signed with cosign and carry build provenance; how to verify them:

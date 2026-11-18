@@ -5,9 +5,9 @@ authorization code flow with PKCE and validates the ID token per OIDC Core §3.1
 quirks of Google, Okta, Auth0 and Keycloak. Background: [ADR-0011](../adr/0011-idp-adapters.md). One
 IdP per proxy. The data directory, the keys and starting the proxy are in [run byward](run-byward.md).
 
-> Needs byward v0.2.0 or later: the image `ghcr.io/byward-dev/byward:v0.2.0`. v0.1.1 and earlier have
-> no OIDC IdPs.
-> `BYWARD_OIDC_ROLES_CLAIM` and `BYWARD_OIDC_GROUPS_CLAIM` are on `main` only, in no release yet.
+> Needs byward v0.2.0 or later; use the image `ghcr.io/byward-dev/byward:v0.3.0`. v0.1.1 and earlier
+> have no OIDC IdPs.
+> `BYWARD_OIDC_ROLES_CLAIM` and `BYWARD_OIDC_GROUPS_CLAIM` need v0.3.0 or later.
 
 ## 1. Register the proxy at the IdP
 
@@ -33,13 +33,13 @@ refused) with:
 | `BYWARD_OIDC_ISSUER` | — (`google`: `https://accounts.google.com`) | The issuer, exactly as the IdP's discovery document (`/.well-known/openid-configuration`) states it. `https` only. |
 | `BYWARD_OIDC_CLIENT_ID` | — | The application's client ID. |
 | `BYWARD_OIDC_CLIENT_SECRET_FILE` | — | A file holding the client secret. |
-| `BYWARD_OIDC_CLIENT_KEY_FILE` | — | Instead of a secret: a PEM private key (RSA of 2048 bits or more, or EC P-256) for `private_key_jwt`; a shorter RSA key refuses to start (on `main`, not in v0.2.0). byward signs with `BYWARD_OIDC_CLIENT_KEY_ALG` (by default PS256 for an RSA key, ES256 for an EC key), so the IdP's client must accept that algorithm. |
-| `BYWARD_OIDC_CLIENT_KEY_ALG` | PS256 for an RSA key, ES256 for an EC key | The client assertion's signing algorithm: `PS256` or `RS256` for an RSA key, `ES256` for an EC P-256 key. An algorithm the key cannot sign with refuses to start. Okta refuses PS256: use `RS256` there, or an EC key; with `BYWARD_IDP=okta` and an RSA key on PS256, startup and `check` warn, and `doctor`'s client credential check reports it unless the IdP accepted the key: a refused key fails, its fix leading with the algorithm (on `main`, not in v0.2.0). Auth0's discovery listed RS256, RS384 and PS256 but not ES256 (measured 2026-11-13). `byward check` and `doctor` name the algorithm in use. |
+| `BYWARD_OIDC_CLIENT_KEY_FILE` | — | Instead of a secret: a PEM private key (RSA of 2048 bits or more, or EC P-256) for `private_key_jwt`; a shorter RSA key refuses to start (since v0.3.0). byward signs with `BYWARD_OIDC_CLIENT_KEY_ALG` (by default PS256 for an RSA key, ES256 for an EC key), so the IdP's client must accept that algorithm. |
+| `BYWARD_OIDC_CLIENT_KEY_ALG` | PS256 for an RSA key, ES256 for an EC key | The client assertion's signing algorithm: `PS256` or `RS256` for an RSA key, `ES256` for an EC P-256 key. An algorithm the key cannot sign with refuses to start. Okta refuses PS256: use `RS256` there, or an EC key; with `BYWARD_IDP=okta` and an RSA key on PS256, startup and `check` warn, and `doctor`'s client credential check reports it unless the IdP accepted the key: a refused key fails, its fix leading with the algorithm (since v0.3.0). Auth0's discovery listed RS256, RS384 and PS256 but not ES256 (measured 2026-11-13). `byward check` and `doctor` name the algorithm in use. |
 | `BYWARD_OIDC_CLIENT_KEY_ID` | — | The key ID (`kid`) the IdP registered for that key. |
 | `BYWARD_OIDC_SCOPES` | — | Extra scopes, comma-separated, besides `openid` and the preset's. |
 | `BYWARD_OIDC_SUBJECT_CLAIM` | `sub` | The claim that identifies a user. A claim users can change (`email`, `preferred_username`, `upn`, `name`) logs a warning at every start: someone could take over another user's grants by changing it. |
-| `BYWARD_OIDC_ROLES_CLAIM` | `roles` | On `main` only. The ID token claim the access gate (`BYWARD_GATE_ROLES`) and the identity assertion read roles from, for every preset. Name another claim only when the IdP cannot send `roles`, such as Auth0's namespaced `https://<namespace>/roles` ([Auth0](auth0.md#2-roles-in-the-id-token)). |
-| `BYWARD_OIDC_GROUPS_CLAIM` | `groups` | On `main` only. The same for groups (`BYWARD_GATE_GROUPS`). |
+| `BYWARD_OIDC_ROLES_CLAIM` | `roles` | Since v0.3.0. The ID token claim the access gate (`BYWARD_GATE_ROLES`) and the identity assertion read roles from, for every preset. Name another claim only when the IdP cannot send `roles`, such as Auth0's namespaced `https://<namespace>/roles` ([Auth0](auth0.md#2-roles-in-the-id-token)). |
+| `BYWARD_OIDC_GROUPS_CLAIM` | `groups` | Since v0.3.0. The same for groups (`BYWARD_GATE_GROUPS`). |
 | `BYWARD_OIDC_NAME` | the preset's name, or the issuer's host | The IdP's name on the consent page ("You'll sign in with … next"), up to 80 characters. |
 
 Give exactly one of the secret and the key. `BYWARD_ENTRA_*` settings with an OIDC IdP, or
@@ -93,7 +93,7 @@ An OIDC IdP usually lets anyone with an account sign in, so an empty
   them. The integration test checks this against Keycloak 26.8.0
   (`TestIntegrationKeycloakSignsAUserInAndRefreshes`); the manual run in the [Keycloak guide](keycloak.md)
   used 26.8.2.
-- `BYWARD_OIDC_ROLES_CLAIM` and `BYWARD_OIDC_GROUPS_CLAIM` (on `main`) name another claim for an IdP
+- `BYWARD_OIDC_ROLES_CLAIM` and `BYWARD_OIDC_GROUPS_CLAIM` (since v0.3.0) name another claim for an IdP
   that cannot send `roles` or `groups`, such as Auth0
   ([roles in the ID token](auth0.md#2-roles-in-the-id-token)). Either claim must be an array of
   strings; a single string is ignored. Naming a claim about the sign-in itself, such as `aud` or
@@ -106,7 +106,7 @@ An OIDC IdP usually lets anyone with an account sign in, so an empty
 
 `byward check --offline` validates the settings; `byward doctor` fetches discovery and checks that
 its issuer matches, then that the IdP accepts the client ID and the secret or key (it sends a made-up
-authorization code, so no user is needed; this check is on `main`, not in v0.2.0). The
+authorization code, so no user is needed; this check is new in v0.3.0). The
 consent page says "You'll sign in with `<name>` next".
 
 Then connect an MCP client, sign in and call a tool. For Claude Code, as in the

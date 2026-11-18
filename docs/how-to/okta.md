@@ -7,9 +7,9 @@ The data directory, the keys and starting the proxy are in [run byward](run-bywa
 
 > Verified on 2026-11-13 with the byward v0.2.0-rc.1 code and an Okta Integrator Free Plan org: sign-in,
 > the group gate (allowed and refused), refresh, revoke, a client secret, and `private_key_jwt` with an
-> EC key. An RSA key needs `BYWARD_OIDC_CLIENT_KEY_ALG=RS256` (section 5; on `main`, not in v0.2.0),
+> EC key. An RSA key needs `BYWARD_OIDC_CLIENT_KEY_ALG=RS256` (section 5; since v0.3.0),
 > not yet verified against Okta.
-> Use the image `ghcr.io/byward-dev/byward:v0.2.0` or a later release.
+> Use the image `ghcr.io/byward-dev/byward:v0.3.0` or a later release.
 
 ## 1. The app
 
@@ -64,7 +64,7 @@ Use the org's own domain in the issuer (`https://<org>.okta.com/...`), not the a
 
 **Use an EC P-256 key, or an RSA key with RS256.** byward signs EC keys with ES256, which Okta accepts.
 By default it signs RSA keys with PS256, which Okta refuses ("The client_assertion JWT signature
-algorithm is invalid."); with an RSA key, set `BYWARD_OIDC_CLIENT_KEY_ALG=RS256` (on `main`, not in v0.2.0).
+algorithm is invalid."); with an RSA key, set `BYWARD_OIDC_CLIENT_KEY_ALG=RS256` (since v0.3.0).
 
 1. `openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out okta-client.pem`, readable only
    by the proxy's user.
@@ -84,6 +84,6 @@ an IdP alert, `credential_rejected`; an RSA key on PS256 also warns at startup a
 
 `byward check --offline`, then `byward doctor`: "discovery … matches the configured issuer", and
 "client credential": Okta accepted the client ID and the secret or key. A wrong one fails, with the
-setting to fix. (The client credential check is on `main`; the doctor in v0.2.0 does not have
+setting to fix. (The client credential check is new in v0.3.0; the doctor in v0.2.0 does not have
 it, and a wrong secret or key shows at the first sign-in as an IdP alert.) Then sign in from an MCP
 client ([oidc.md](oidc.md#5-check-it)).

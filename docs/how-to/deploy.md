@@ -6,11 +6,11 @@ which ports are public, and how secrets reach the proxy. Start from a working fi
 the checklist behind each choice is [harden a deployment](harden-a-deployment.md).
 
 Items about a feature in no release yet say "(on `main`)". The examples use the image
-`ghcr.io/byward-dev/byward:v0.2.0`.
+`ghcr.io/byward-dev/byward:v0.3.0`.
 
 ## 1. Choose one replica or several
 
-| | One replica on SQLite | Several replicas on PostgreSQL (on `main`) |
+| | One replica on SQLite | Several replicas on PostgreSQL |
 |---|---|---|
 | Store | Embedded SQLite in the data directory, the default ([state](state.md)) | A shared PostgreSQL 15 or later database ([postgres](postgres.md)) |
 | Upstream | HTTP or stdio | HTTP only: the proxy refuses to start with a stdio upstream and PostgreSQL |
@@ -35,7 +35,7 @@ The SQLite store lives inside the proxy process, on that replica's disk, so it s
    to the keys directory ([layouts](state.md#layouts)).
 4. Back up the keys, the static clients file and your settings separately and securely.
 
-## 3. Several replicas on PostgreSQL (on `main`)
+## 3. Several replicas on PostgreSQL
 
 Follow [run several replicas on PostgreSQL](postgres.md). In short:
 
@@ -60,7 +60,7 @@ Follow [run several replicas on PostgreSQL](postgres.md). In short:
   address it reaches, e.g. `0.0.0.0:8080` in a container: the default `127.0.0.1:8080` is reachable
   only from the same host or pod. The hop from the ingress to byward carries bearer tokens: keep it
   on a private network, or encrypt it as below.
-- **At byward itself** (on `main`). Set `BYWARD_TLS_CERT_FILE` and `BYWARD_TLS_KEY_FILE` to a
+- **At byward itself** (since v0.3.0). Set `BYWARD_TLS_CERT_FILE` and `BYWARD_TLS_KEY_FILE` to a
   certificate you supply; byward obtains none itself. Use it to encrypt the hop from the ingress, or
   to serve clients directly. Steps, renewal and cert-manager: [serve TLS at the proxy](tls.md).
 
@@ -101,7 +101,7 @@ The release image runs as uid/gid `65532`, with the state directory `/var/lib/by
 ## 8. Give secrets as files
 
 Secrets are read only from files: the IdP client secret, certificate or key, the upstream
-credential, the stdio upstream's environment file and the PostgreSQL connection string (on `main`)
+credential, the stdio upstream's environment file and the PostgreSQL connection string
 each have a `*_FILE` setting. An inline secret refuses to start.
 
 A secret file, the TLS key and each sealing or assertion key must have no permission for its group
@@ -128,8 +128,8 @@ This is the whole list. Each relaxation applies only with `--dev`, for trying by
 | Secret files' permissions are not checked (a world-writable key file, or key directory not on a read-only mount, is still refused) | A secret file its group or others can read is refused, unless on a read-only mount | `secret file permissions are not checked` |
 | Secrets may be given inline, as `BYWARD_<NAME>` instead of `BYWARD_<NAME>_FILE` | An inline secret is refused | `inline secrets accepted: <the settings>` |
 | An http public URL on a loopback host (`http://localhost:8080/mcp`) | The public URL must be https | `http public URL on loopback`; `BYWARD_INSECURE_NO_AUTH` allows it too |
-| An http OIDC issuer on a loopback host, and http endpoints in its discovery document on loopback | The issuer and every endpoint must be https | `http IdP issuer on loopback (<issuer>): …` (on `main`; v0.2.0 does not log it) |
-| A PostgreSQL connection without `sslmode=verify-full` (on `main`) | `verify-full` is required | `the PostgreSQL store accepts a connection without verify-full TLS` |
+| An http OIDC issuer on a loopback host, and http endpoints in its discovery document on loopback | The issuer and every endpoint must be https | `http IdP issuer on loopback (<issuer>): …` (v0.2.0 does not log it) |
+| A PostgreSQL connection without `sslmode=verify-full` | `verify-full` is required | `the PostgreSQL store accepts a connection without verify-full TLS` |
 
 ## 9. Check the deployment
 
@@ -156,7 +156,7 @@ sudo chown 65532:65532 entra-client-secret && sudo chmod 0600 entra-client-secre
 ```yaml
 services:
   byward:
-    image: ghcr.io/byward-dev/byward:v0.2.0
+    image: ghcr.io/byward-dev/byward:v0.3.0
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"   # only the reverse proxy on this host reaches it
@@ -221,7 +221,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: byward
-          image: ghcr.io/byward-dev/byward:v0.2.0
+          image: ghcr.io/byward-dev/byward:v0.3.0
           env:
             - {name: BYWARD_PUBLIC_URL, value: "https://mcp.example.com/mcp"}
             - {name: BYWARD_UPSTREAM_URL, value: "http://upstream.mcp.svc:3001/mcp"}
@@ -270,9 +270,9 @@ spec:
   snapshotting the whole volume, or give the counter its own small volume.
 - Point your ingress at the `byward` Service, and restrict port 9090 with a NetworkPolicy to the
   kubelet and Prometheus.
-- For several replicas on PostgreSQL (on `main`): drop the PersistentVolumeClaim, the `data` volume
+- For several replicas on PostgreSQL: drop the PersistentVolumeClaim, the `data` volume
   and `BYWARD_STORE_COUNTER_FILE`; mount the connection string from a Secret and set
   `BYWARD_STORE_POSTGRES_DSN_FILE`; raise `replicas` and drop `strategy`. Every replica mounts the
   same key Secrets.
-- For TLS from the ingress to byward (on `main`), mount a cert-manager Secret and set the TLS
+- For TLS from the ingress to byward, mount a cert-manager Secret and set the TLS
   settings ([Kubernetes with cert-manager](tls.md#kubernetes-with-cert-manager)).
