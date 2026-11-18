@@ -45,9 +45,9 @@ func checkInlineSecrets(v *Values, dev bool) (relaxation string, err error) {
 // absolute, an ASCII host[:port] that BYWARD_ALLOWED_HOSTS would accept (normalizeAllowedHost: an IP
 // address or a name following validHostName's rule, a port from 1 to 65535 without a leading zero,
 // no IPv6 zone), no host ending in a number unless it is an IPv4 address in dotted decimal
-// (browserIPv4), an IPv6 address only in the form browsers write it (browserHost), a path without a
-// trailing slash, no query or fragment, and https unless the host is loopback (which the
-// proxy itself accepts only with --dev).
+// (browserIPv4), an IPv6 address or a host name only in the form browsers write it (browserHost: a
+// name in lower case), a path without a trailing slash, no query or fragment, and https unless the
+// host is loopback (which the proxy itself accepts only with --dev).
 func ParsePublicURL(raw string) (*url.URL, error) {
 	u, err := parseURL("public-url", raw)
 	if err != nil {
@@ -67,14 +67,20 @@ func ParsePublicURL(raw string) (*url.URL, error) {
 		// The public URL is also the issuer, the resource and the IdP redirect URI, which browser
 		// clients compare with the URL they hold, in the form they write (#447).
 		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: the IPv6 address [%s] is not in the form browsers write it; write it as %s", h, browserHost(h)))
+	} else if !strings.Contains(h, ":") && h != browserHost(h) {
+		// The same for a host name: a browser lower-cases it, and byward does not rewrite it, since the
+		// IdP's redirect URI is registered as written (#472).
+		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: the host name %s is not in the form browsers write it; write it as %s", h, browserHost(h)))
 	}
 	if u.Path == "" || strings.HasSuffix(u.Path, "/") {
-		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://%s/mcp", u.Host))
+		// The example names the host as browsers write it, as the host rules above ask.
+		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://%s/mcp", CanonicalHost(u.Host)))
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
 		errs = append(errs, "BYWARD_PUBLIC_URL: must not have a query or fragment")
 	}
-	if u.Scheme == "http" && !isLoopback(u.Hostname()) {
+	// LOCALHOST is loopback too; the host name rule above already refuses its spelling.
+	if u.Scheme == "http" && !isLoopback(strings.ToLower(u.Hostname())) {
 		errs = append(errs, "BYWARD_PUBLIC_URL: must use https (http is allowed only for loopback hosts with --dev)")
 	}
 	if len(errs) > 0 {

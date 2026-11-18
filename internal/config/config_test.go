@@ -103,6 +103,9 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"public host empty, with a port", "BYWARD_PUBLIC_URL=https://:8443/mcp", `BYWARD_PUBLIC_URL: give a host, e.g. https://mcp.example.com/mcp`},
 		{"public host with a double dot", "BYWARD_PUBLIC_URL=https://a..b/mcp", `BYWARD_PUBLIC_URL: "a..b" is not a host[:port]: a host name`},
 		{"public host with a wildcard", "BYWARD_PUBLIC_URL=https://a*b/mcp", `BYWARD_PUBLIC_URL: "a*b" is not a host[:port]: a host name`},
+		// A browser lower-cases a host name, and byward does not rewrite it: the issuer and the IdP
+		// redirect URI are built from it as written (#472).
+		{"public host name in upper case", "BYWARD_PUBLIC_URL=https://MCP.Example.com/mcp", "BYWARD_PUBLIC_URL: the host name MCP.Example.com is not in the form browsers write it; write it as mcp.example.com"},
 		// #353: the port and the zone follow BYWARD_ALLOWED_HOSTS' rules too.
 		{"public URL with an empty port", "BYWARD_PUBLIC_URL=https://a.example:/mcp", `BYWARD_PUBLIC_URL: "a.example:" is not a host[:port]: give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone`},
 		{"public URL with a port over 65535", "BYWARD_PUBLIC_URL=https://a.example:65536/mcp", `BYWARD_PUBLIC_URL: "a.example:65536" is not a host[:port]`},
@@ -936,26 +939,30 @@ func TestAnAllowedHostNameRefusesEveryCharacterAHostNameCannotHave(t *testing.T)
 	}
 }
 
-// #344: every host setting that follows the name rule still loads underscores, xn-- names and
-// mixed case, each on its own, stored in lower case where the setting stores it so.
+// #344: every host list that follows the name rule loads underscores, xn-- names and mixed case,
+// each on its own, stored in lower case except in the denylist, which keeps entries as given. The
+// public URL refuses upper case (#472), so it loads only the lower-case names, each as its issuer.
 func TestHostSettingsLoadUnderscoresIDNANamesAndMixedCase(t *testing.T) {
 	for _, host := range []string{"my_svc.example", "xn--bcher-kva.example", "Mixed-Case.Example"} {
 		lower := strings.ToLower(host)
-		for setting, stored := range map[string]func(*Config) []string{
-			"BYWARD_PUBLIC_URL=https://" + host + "/mcp": func(c *Config) []string { return []string{c.PublicURL.Hostname()} },
-			"BYWARD_CIMD_TRUSTED_HOSTS=" + host:          func(c *Config) []string { return c.CIMDTrustedHosts },
-			"BYWARD_CIMD_ALLOWED_HOSTS=" + host:          func(c *Config) []string { return c.CIMDAllowedHosts },
-			"BYWARD_ALLOWED_HOSTS=" + host:               func(c *Config) []string { return c.AllowedHosts },
-			"BYWARD_CLIENT_DENYLIST=" + host:             func(c *Config) []string { return c.ClientDenylist },
-		} {
+		settings := map[string]func(*Config) []string{
+			"BYWARD_CIMD_TRUSTED_HOSTS=" + host: func(c *Config) []string { return c.CIMDTrustedHosts },
+			"BYWARD_CIMD_ALLOWED_HOSTS=" + host: func(c *Config) []string { return c.CIMDAllowedHosts },
+			"BYWARD_ALLOWED_HOSTS=" + host:      func(c *Config) []string { return c.AllowedHosts },
+			"BYWARD_CLIENT_DENYLIST=" + host:    func(c *Config) []string { return c.ClientDenylist },
+		}
+		if host == lower {
+			settings["BYWARD_PUBLIC_URL=https://"+host+"/mcp"] = func(c *Config) []string { return []string{strings.TrimPrefix(c.Issuer(), "https://")} }
+		}
+		for setting, stored := range settings {
 			t.Run(setting, func(t *testing.T) {
 				c, err := load(t, nil, setting)
 				if err != nil {
 					t.Fatal(err)
 				}
 				want := lower
-				if strings.HasPrefix(setting, "BYWARD_PUBLIC_URL=") || strings.HasPrefix(setting, "BYWARD_CLIENT_DENYLIST=") {
-					want = host // url.Parse keeps the host as given; the denylist keeps its entries as given
+				if strings.HasPrefix(setting, "BYWARD_CLIENT_DENYLIST=") {
+					want = host // the denylist keeps its entries as given
 				}
 				if got := stored(c); !slices.Equal(got, []string{want}) {
 					t.Errorf("stored %v, want [%s]", got, want)
