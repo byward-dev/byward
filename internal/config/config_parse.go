@@ -73,8 +73,8 @@ func ParsePublicURL(raw string) (*url.URL, error) {
 		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: the host name %s is not in the form browsers write it; write it as %s", h, browserHost(h)))
 	}
 	if u.Path == "" || strings.HasSuffix(u.Path, "/") {
-		// The example names the host in lower case, as the host name rule above asks.
-		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://%s/mcp", strings.ToLower(u.Host)))
+		// The example names the host as browsers write it, as the host rules above ask.
+		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://%s/mcp", CanonicalHost(u.Host)))
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
 		errs = append(errs, "BYWARD_PUBLIC_URL: must not have a query or fragment")

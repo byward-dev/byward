@@ -76,9 +76,9 @@ func TestPublicURLAcceptsHTTPSOrLoopbackAndNamesTheRuleABadOneBreaks(t *testing.
 			t.Errorf("%q: err = %v, want %q", raw, err, inErr)
 		}
 	}
-	// A host name only in lower case, as browsers write it, for the same reason (#472). The whole error
-	// is pinned: LOCALHOST over http is loopback, so no https error joins it, and another error's
-	// example names the host in lower case.
+	// A host name only in lower case, as browsers write it, since the public URL is also the issuer
+	// browser clients compare (#472). The whole error is pinned: LOCALHOST over http is loopback, so no
+	// https error joins it, and the trailing-slash error's example names the host as browsers write it.
 	for raw, want := range map[string]string{
 		"https://MCP.Example.com/mcp":       "BYWARD_PUBLIC_URL: the host name MCP.Example.com is not in the form browsers write it; write it as mcp.example.com",
 		"https://mcp.example.coM:8443/mcp":  "BYWARD_PUBLIC_URL: the host name mcp.example.coM is not in the form browsers write it; write it as mcp.example.com",
@@ -86,6 +86,10 @@ func TestPublicURLAcceptsHTTPSOrLoopbackAndNamesTheRuleABadOneBreaks(t *testing.
 		"https://xn--Bcher-kva.example/mcp": "BYWARD_PUBLIC_URL: the host name xn--Bcher-kva.example is not in the form browsers write it; write it as xn--bcher-kva.example",
 		"https://MCP.Example.com:8443/mcp/": "BYWARD_PUBLIC_URL: the host name MCP.Example.com is not in the form browsers write it; write it as mcp.example.com; " +
 			"BYWARD_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://mcp.example.com:8443/mcp",
+		"https://127.1:8443/mcp/": `BYWARD_PUBLIC_URL: "127.1" is not an IPv4 address in dotted decimal, the only form browsers send; ` +
+			"BYWARD_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://127.0.0.1:8443/mcp",
+		"https://[0:0::1]/mcp/": "BYWARD_PUBLIC_URL: the IPv6 address [0:0::1] is not in the form browsers write it; write it as [::1]; " +
+			"BYWARD_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://[::1]/mcp",
 	} {
 		if _, err := ParsePublicURL(raw); err == nil || err.Error() != want {
 			t.Errorf("%q: err = %v, want exactly %q", raw, err, want)
