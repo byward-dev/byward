@@ -290,8 +290,36 @@ func TestAQuotedValueNeverShowsAUserInformationQueryOrFragment(t *testing.T) {
 		"app.example#pw":                Hidden,
 		"https://up.example/x;tok=pw":   `"https://up.example/x"` + shortened,
 		"HTTPS://hé.example/;pw":        `"HTTPS://h%C3%A9.example/"` + shortened,
-		"app.example;pw":                `"app.example;pw"`, // no URL, so no path parameters
-		"https://up stream/x;pw":        Hidden,             // a URL URL cannot show
+		"app.example;pw":                `"app.example;pw"`,      // no URL, so no path parameters
+		"https://up stream/x;pw":        Hidden,                  // a URL URL cannot show
+		"https:/up.example/x;tok=pw":    Hidden,                  // a mistyped scheme (#470)
+		"HTTPS:/up.example/;pw":         Hidden,                  // a scheme in capitals
+		"api:/b;pw":                     Hidden,                  // any scheme, not only http(s)
+		"app.example:8443;pw":           `"app.example:8443;pw"`, // a port, not a URL
+		"up.example/x;pw":               `"up.example/x;pw"`,     // a path, not a URL
+		"fd00::/8;10.0.0.0/8":           `"fd00::/8;10.0.0.0/8"`, // an IPv6 prefix, not a URL
+		"x https:/up.example/;pw":       Hidden,                  // a scheme after other text
+		":/up.example/;pw":              Hidden,                  // no scheme at all
+		"pw;https:/":                    Hidden,                  // a :/ at the very end
+		"://up.example/x;tok=pw":        Hidden,                  // a URL with no scheme
+		"https:/up.example/x;tok=pw/y":  Hidden,                  // path parameters in a middle segment
+		"up.example;tok=pw:/x":          Hidden,                  // a ; before the :/
+		"fd00::/8;x:/b;pw":              Hidden,                  // a URL after an IPv6 prefix
+		"https:://up.example/;pw":       Hidden,                  // a doubled colon before the ://
+		"s3:/bucket/x;pw":               Hidden,                  // a scheme ending in a digit
+		"https :/up.example/;pw":        Hidden,                  // a space before the :/
+		"é:/x;pw":                       Hidden,                  // a non-ASCII byte before the :/
+		";pw https:/up.example/x":       Hidden,                  // a ; at the very start
+		"https:/up.example/x;":          Hidden,                  // a ; at the very end
+		":::/x;pw":                      `":::/x;pw"`,            // a :/ right after a : does not count, so this is shown whole
+		"name: a;pw":                    `"name: a;pw"`,          // a : before a byte other than /
+		"::/0;10.0.0.0/8":               `"::/0;10.0.0.0/8"`,     // an IPv6 prefix at the very start
+		"up.example;/x":                 `"up.example;/x"`,       // a ;/, not a :/
+		"x/:/up.example/;pw":            Hidden,                  // a / before the :/
+		"https:/up.example/x":           `"https:/up.example/x"`, // a mistyped scheme, but no ;
+		"a:b:/x;pw":                     Hidden,                  // a : two bytes before the :/
+		"x:/a;pw fd00::/8":              Hidden,                  // an IPv6 prefix after a URL
+		"fd00::/8;fe80::/":              `"fd00::/8;fe80::/"`,    // a ::/ at the very end does not count
 	} {
 		if got := Quote(raw); got != want {
 			t.Errorf("Quote(%q) = %s, want %s", raw, got, want)
