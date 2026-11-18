@@ -95,7 +95,6 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 	t := *target
 	refusalObservers := o.refusalObservers
 	rp := &httputil.ReverseProxy{
-		ErrorLog: stdlog.New(proxyErrorLog{log: log}, "", 0),
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL.Scheme, pr.Out.URL.Host = t.Scheme, t.Host
 			pr.Out.URL.Path, pr.Out.URL.RawPath = t.Path, t.RawPath
@@ -211,7 +210,13 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 		if r.Body != nil && r.Body != http.NoBody {
 			r.Body = teeBody{io.TeeReader(r.Body, c), r.Body}
 		}
-		rp.ServeHTTP(&informational{ResponseWriter: w, ours: w.Header().Clone()}, r.WithContext(traceWrite(context.WithValue(r.Context(), captureKey{}, c))))
+		ctx := traceWrite(context.WithValue(r.Context(), captureKey{}, c))
+		// ReverseProxy's own error lines get no request, so each request has its own copy whose
+		// ErrorLog logs with the request's context, request ID included (#387): a body that breaks
+		// off mid-copy then aborts the response, and no request line is written to tie it to.
+		p := *rp
+		p.ErrorLog = stdlog.New(proxyErrorLog{log: log, ctx: ctx}, "", 0)
+		p.ServeHTTP(&informational{ResponseWriter: w, ours: w.Header().Clone()}, r.WithContext(ctx))
 	})
 }
 
@@ -312,14 +317,17 @@ func redirectHint(res *http.Response) string {
 
 const noUsableLocation = "the upstream sent no usable Location; check BYWARD_UPSTREAM_URL"
 
-// proxyErrorLog takes ReverseProxy's own error lines (a failed read during a body copy)
-// into the structured log. A line about the upstream's body through a misread proxy quotes no
-// address: the transport has already redacted the error to envproxy.Cause, or left it one of the
-// bare errors that quote nothing (envproxy's redactedBody).
-type proxyErrorLog struct{ log *slog.Logger }
+// proxyErrorLog takes ReverseProxy's own error lines (a failed read during a body copy) into the
+// structured log, with the context of the request they are about. A line about the upstream's body
+// through a misread proxy quotes no address: the transport has already redacted the error to
+// envproxy.Cause, or left it one of the bare errors that quote nothing (envproxy's redactedBody).
+type proxyErrorLog struct {
+	log *slog.Logger
+	ctx context.Context
+}
 
 func (l proxyErrorLog) Write(p []byte) (int, error) {
-	l.log.Warn("upstream error", "error", strings.TrimSpace(string(p)))
+	l.log.WarnContext(l.ctx, "upstream error", "error", strings.TrimSpace(string(p)))
 	return len(p), nil
 }
 
