@@ -38,11 +38,13 @@ All tools are pinned in `mise.toml`; `mise run` resolves them, no shell activati
   | Tier | For | Angles |
   |---|---|---|
   | Full | Code behind the security invariants: broker, tokens, IdP, relay, upstream, stdio, logging redaction, security settings | All |
-  | Standard | Other production code | runtime, coverage, quality, names, single responsibility |
+  | Standard | Other production code | runtime, reuse, coverage, quality, names, single responsibility |
   | Tests | Test-only changes | coverage, quality, determinism, data-driven |
   | None | Docs and CI configuration | None; say so in the PR |
 
-- **Angles:** runtime (run the changed code, edge cases included); the five SOLID angles (single
+- **Angles:** runtime (run the changed code, edge cases included); reuse (search `origin/main`, not
+  only the diff, for a function that already does what the diff adds, or a second implementation of
+  a concept `CONTEXT.md` names: use or extend the existing one); the five SOLID angles (single
   responsibility, open/closed, Liskov substitution, interface segregation, dependency inversion);
   the seven test angles (coverage, quality, names, pyramid, determinism, data-driven,
   structure vs behaviour). The `/sweep-*` skills are not in this repository; without them, review

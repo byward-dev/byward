@@ -22,7 +22,7 @@ Several agents often work on this repo at once. These rules keep their work from
   The PR is then merged before the slot moves on.
 - **Generated files are never hand-merged.** `docs/reference/settings.md` conflicts are resolved
   by regenerating it: `BYWARD_UPDATE_REFERENCE=1 go test ./internal/config/`.
-- **Sweeps run as one subagent per angle** (runtime; 5 SOLID; 7 tests) through ordinary subagent
+- **Sweeps run as one subagent per angle** (runtime; reuse; 5 SOLID; 7 tests) through ordinary subagent
   calls. Multi-agent workflow tooling needs the maintainer's explicit opt-in.
 - **A mutation result counts only if the run was real:** the baseline is green with the same
   toolchain (the pinned Go, not an untrusted tool setup that fails before tests run), and the killing
