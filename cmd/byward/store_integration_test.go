@@ -32,22 +32,22 @@ func TestIntegrationOperatorCommandsOnPostgreSQLExit2WithoutTheSchemaAndNameTheD
 		return append(kept, "BYWARD_STORE_POSTGRES_DSN_FILE="+file, "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp")
 	}
 	const user = "00000000-0000-0000-0000-000000000001:11111111-1111-1111-1111-11111111111a"
+	const wayOut = "; run the command with the proxy's settings (see docs/how-to/postgres.md)\n"
 	for _, c := range []struct {
-		name, success string
+		name, command string
+		success       string // the whole success line; {varies} is the database's description
 		args          []string
 	}{
-		{"revoke-user", "revoked user " + user + " in BYWARD_STORE_POSTGRES_DSN_FILE (", []string{"revoke-user", user}},
-		{"revoke-all", "revoked every user in BYWARD_STORE_POSTGRES_DSN_FILE (", []string{"revoke-all", "--yes"}},
-		{"new-epoch", "started store epoch 2 in BYWARD_STORE_POSTGRES_DSN_FILE (", []string{"store", "new-epoch", "--yes"}},
+		{"revoke-user", "revoke-user", "revoked user " + user + " in BYWARD_STORE_POSTGRES_DSN_FILE ({varies})" + revoked, []string{"revoke-user", user}},
+		{"revoke-all", "revoke-all", "revoked every user in BYWARD_STORE_POSTGRES_DSN_FILE ({varies})" + revoked, []string{"revoke-all", "--yes"}},
+		{"new-epoch", "store new-epoch", "started store epoch 2 in BYWARD_STORE_POSTGRES_DSN_FILE ({varies}): refresh tokens from before it stop working, and their users sign in again\n", []string{"store", "new-epoch", "--yes"}},
 	} {
 		t.Run(c.name+" without the schema", func(t *testing.T) {
 			db := srv.NewDatabase(t)
 			code, stdout, stderr := runWith(c.args, env(t, db)...)
-			if code != exitConfig || stdout != "" || !strings.Contains(stderr, "BYWARD_STORE_POSTGRES_DSN_FILE: no byward store there") ||
-				!strings.Contains(stderr, "dbname="+db) || !strings.Contains(stderr, "run the command with the proxy's settings") ||
-				strings.Contains(stderr, srv.Password) {
-				t.Fatalf("code %d (want %d), stdout %q (want none), stderr %q; want it to name BYWARD_STORE_POSTGRES_DSN_FILE, dbname=%s and the way out, never the password",
-					code, exitConfig, stdout, stderr, db)
+			want := "byward: " + c.command + ": BYWARD_STORE_POSTGRES_DSN_FILE: no byward store there: the database ({varies}) holds no byward schema" + wayOut
+			if code != exitConfig || stdout != "" || !outputMatches(stderr, want) || !strings.Contains(stderr, "dbname="+db) || strings.Contains(stderr, srv.Password) {
+				t.Fatalf("code %d (want %d), stdout %q (want none)\nstderr %q\nwant   %q naming dbname=%s, never the password", code, exitConfig, stdout, stderr, want, db)
 			}
 		})
 		t.Run(c.name+" on the store", func(t *testing.T) {
@@ -58,8 +58,8 @@ func TestIntegrationOperatorCommandsOnPostgreSQLExit2WithoutTheSchemaAndNameTheD
 			}
 			_ = st.Close()
 			code, stdout, stderr := runWith(c.args, env(t, db)...)
-			if code != exitOK || !strings.Contains(stdout, c.success) || !strings.Contains(stdout, "dbname="+db) || strings.Contains(stdout, srv.Password) {
-				t.Fatalf("code %d, stdout %q (want %q and dbname=%s), stderr %q", code, stdout, c.success, db, stderr)
+			if code != exitOK || !outputMatches(stdout, c.success) || !strings.Contains(stdout, "dbname="+db) || strings.Contains(stdout, srv.Password) {
+				t.Fatalf("code %d (want %d)\nstdout %q\nwant   %q naming dbname=%s, never the password\nstderr %q", code, exitOK, stdout, c.success, db, stderr)
 			}
 		})
 	}
