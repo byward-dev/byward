@@ -71,6 +71,11 @@ func TestPublicURLAcceptsHTTPSOrLoopbackAndNamesTheRuleABadOneBreaks(t *testing.
 		"https://[0:0::1]/mcp":                "write it as [::1]",
 		"https://[1:0:0:0:2:0:0:3]/mcp":       "the IPv6 address [1:0:0:0:2:0:0:3] is not in the form browsers write it; write it as [1::2:0:0:3]",
 		"https://[2001:DB8::1]/mcp":           "the IPv6 address [2001:DB8::1] is not in the form browsers write it; write it as [2001:db8::1]",
+		// A host name only in lower case, as browsers write it, for the same reason (#472).
+		"https://MCP.Example.com/mcp":       "BYWARD_PUBLIC_URL: the host name MCP.Example.com is not in the form browsers write it; write it as mcp.example.com",
+		"https://mcp.example.coM:8443/mcp":  "BYWARD_PUBLIC_URL: the host name mcp.example.coM is not in the form browsers write it; write it as mcp.example.com",
+		"http://LOCALHOST:8080/mcp":         "BYWARD_PUBLIC_URL: the host name LOCALHOST is not in the form browsers write it; write it as localhost",
+		"https://xn--Bcher-kva.example/mcp": "BYWARD_PUBLIC_URL: the host name xn--Bcher-kva.example is not in the form browsers write it; write it as xn--bcher-kva.example",
 	} {
 		if _, err := ParsePublicURL(raw); err == nil || !strings.Contains(err.Error(), inErr) {
 			t.Errorf("%q: err = %v, want %q", raw, err, inErr)
@@ -130,15 +135,21 @@ func TestQuickstartEnvFileKeepsValuesAndExplainsTheEmptyOne(t *testing.T) {
 	}
 }
 
-// A public URL's host name keeps its spelling, case included: the issuer is built from it, so
-// changing it would change every deployment's issuer. Only an IP address must be written as
-// browsers write it.
-func TestAPublicURLHostNameKeepsItsSpellingAsTheIssuer(t *testing.T) {
+// An upper-case public URL host name is refused, never lower-cased: the issuer and the IdP redirect
+// URI are built from it as written, so a silent rewrite would change them under the operator (#472).
+func TestAnUpperCasePublicURLHostNameStopsLoadingAndIsNotRewritten(t *testing.T) {
 	c, err := load(t, nil, "BYWARD_PUBLIC_URL=https://MCP.Example.com/mcp")
+	if err == nil {
+		t.Fatalf("loaded, issuer %q; want the upper-case host refused", c.Issuer())
+	}
+	if want := "BYWARD_PUBLIC_URL: the host name MCP.Example.com is not in the form browsers write it; write it as mcp.example.com"; !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+	c, err = load(t, nil, "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := c.Issuer(); got != "https://MCP.Example.com" {
-		t.Fatalf("issuer %q, want https://MCP.Example.com as written", got)
+	if got := c.Issuer(); got != "https://mcp.example.com" {
+		t.Fatalf("issuer %q, want https://mcp.example.com", got)
 	}
 }

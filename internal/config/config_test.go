@@ -937,25 +937,29 @@ func TestAnAllowedHostNameRefusesEveryCharacterAHostNameCannotHave(t *testing.T)
 }
 
 // #344: every host setting that follows the name rule still loads underscores, xn-- names and
-// mixed case, each on its own, stored in lower case where the setting stores it so.
+// mixed case, each on its own, stored in lower case where the setting stores it so. The public URL
+// takes a host name in lower case only (#472), so it loads the lower-case ones.
 func TestHostSettingsLoadUnderscoresIDNANamesAndMixedCase(t *testing.T) {
 	for _, host := range []string{"my_svc.example", "xn--bcher-kva.example", "Mixed-Case.Example"} {
 		lower := strings.ToLower(host)
-		for setting, stored := range map[string]func(*Config) []string{
-			"BYWARD_PUBLIC_URL=https://" + host + "/mcp": func(c *Config) []string { return []string{c.PublicURL.Hostname()} },
-			"BYWARD_CIMD_TRUSTED_HOSTS=" + host:          func(c *Config) []string { return c.CIMDTrustedHosts },
-			"BYWARD_CIMD_ALLOWED_HOSTS=" + host:          func(c *Config) []string { return c.CIMDAllowedHosts },
-			"BYWARD_ALLOWED_HOSTS=" + host:               func(c *Config) []string { return c.AllowedHosts },
-			"BYWARD_CLIENT_DENYLIST=" + host:             func(c *Config) []string { return c.ClientDenylist },
-		} {
+		settings := map[string]func(*Config) []string{
+			"BYWARD_CIMD_TRUSTED_HOSTS=" + host: func(c *Config) []string { return c.CIMDTrustedHosts },
+			"BYWARD_CIMD_ALLOWED_HOSTS=" + host: func(c *Config) []string { return c.CIMDAllowedHosts },
+			"BYWARD_ALLOWED_HOSTS=" + host:      func(c *Config) []string { return c.AllowedHosts },
+			"BYWARD_CLIENT_DENYLIST=" + host:    func(c *Config) []string { return c.ClientDenylist },
+		}
+		if host == lower {
+			settings["BYWARD_PUBLIC_URL=https://"+host+"/mcp"] = func(c *Config) []string { return []string{c.PublicURL.Hostname()} }
+		}
+		for setting, stored := range settings {
 			t.Run(setting, func(t *testing.T) {
 				c, err := load(t, nil, setting)
 				if err != nil {
 					t.Fatal(err)
 				}
 				want := lower
-				if strings.HasPrefix(setting, "BYWARD_PUBLIC_URL=") || strings.HasPrefix(setting, "BYWARD_CLIENT_DENYLIST=") {
-					want = host // url.Parse keeps the host as given; the denylist keeps its entries as given
+				if strings.HasPrefix(setting, "BYWARD_CLIENT_DENYLIST=") {
+					want = host // the denylist keeps its entries as given
 				}
 				if got := stored(c); !slices.Equal(got, []string{want}) {
 					t.Errorf("stored %v, want [%s]", got, want)

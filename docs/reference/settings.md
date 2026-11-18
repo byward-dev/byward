@@ -25,7 +25,7 @@ Precedence: flag > environment > default. Secrets are read only from files.
 
 | Flag | Environment | Default | Description |
 |---|---|---|---|
-| `--public-url` | `BYWARD_PUBLIC_URL` | — | public URL of the MCP endpoint exactly as users enter it, e.g. https://mcp.example.com/mcp; an internationalized host in its ASCII (xn--) form; an IP address as browsers write it (127.0.0.1, not 127.1; [2001:db8::1], not [2001:DB8:0::1]), since they rewrite any other spelling, and no other host ending in a number (mcp.10), which browsers refuse |
+| `--public-url` | `BYWARD_PUBLIC_URL` | — | public URL of the MCP endpoint as users enter it, e.g. https://mcp.example.com/mcp, with its host as browsers write it, since they rewrite any other spelling: a host name in lower case (mcp.example.com, not MCP.Example.com); an internationalized host in its ASCII (xn--) form; an IP address as browsers write it (127.0.0.1, not 127.1; [2001:db8::1], not [2001:DB8:0::1]); and no other host ending in a number (mcp.10), which browsers refuse |
 | `--listen` | `BYWARD_LISTEN` | 127.0.0.1:8080 | address to listen on; public addresses only when configured |
 | `--tls-cert-file` | `BYWARD_TLS_CERT_FILE` | — | serve TLS on the listener: an absolute path to the PEM certificate, followed by any intermediates; with tls-key-file; needs an https public-url; a replaced file is served from the next connection on, with no restart (docs/how-to/tls.md) |
 | `--tls-key-file` | `BYWARD_TLS_KEY_FILE` | — | serve TLS on the listener: an absolute path to the certificate's unencrypted PEM private key, readable by the proxy's user alone or on a read-only mount; with tls-cert-file (docs/how-to/tls.md) |
