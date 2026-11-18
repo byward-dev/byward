@@ -3,6 +3,12 @@
 version: 2
 project_name: byward
 
+# A final tag on a release candidate's commit (v0.3.0 beside v0.3.0-rc.2) is released as itself.
+# The default tag sort, -version:refname, puts the -rc tag first; "-" sorts a suffixed tag before
+# the plain one, as git's versionsort.suffix does. A lone -rc tag is still released as the candidate.
+git:
+  prerelease_suffix: "-"
+
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot.{{ .ShortCommit }}"
 
