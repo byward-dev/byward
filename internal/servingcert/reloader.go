@@ -29,8 +29,8 @@ type Reloader struct {
 type Options struct {
 	Now func() time.Time
 	Log *slog.Logger
-	// CheckKey refuses a key file the proxy must not use, such as one other users can read; nil
-	// checks nothing. A replaced key that fails it is not served.
+	// CheckKey refuses a key file the proxy must not use, such as one the secret-file check refuses;
+	// nil checks nothing. A replaced key that fails it is not served.
 	CheckKey func(path string) error
 	// Served is told of each pair served after a change, to warn about it as startup does; nil for
 	// none.

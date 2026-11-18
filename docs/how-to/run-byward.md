@@ -109,9 +109,10 @@ BYWARD_OIDC_CLIENT_SECRET_FILE=/run/secrets/idp-client-secret
 BYWARD_GATE_GROUPS=byward-users
 ```
 
-Secrets are read only from files. A secret file that other users can read is refused at startup
-(outside `--dev`), unless it is on a read-only mount: `chmod 600` it and make the proxy's user its
-owner, or mount it read-only. Everything else has a default: [settings reference](../reference/settings.md).
+Secrets are read only from files. A secret file with any permission for its group or others is
+refused at startup (outside `--dev`), unless it is on a read-only mount: `chmod 600` it and make the
+proxy's user its owner, or mount it read-only. Everything else has a default: [settings
+reference](../reference/settings.md).
 
 ## 4. Start the proxy
 

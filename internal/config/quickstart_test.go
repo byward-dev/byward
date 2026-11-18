@@ -58,12 +58,12 @@ func TestPublicURLAcceptsHTTPSOrLoopbackAndNamesTheRuleABadOneBreaks(t *testing.
 		"http://mcp.example.com/mcp":     "must use https",
 		"https://bücher.example/mcp":     `the host "bücher.example" is not ASCII`,
 		"ftp://mcp.example.com/mcp":      "absolute http(s) URL",
-		// A browser rewrites these hosts (10.0.0.1, 8.0.0.1) or refuses them, so a browser sign-in could
-		// never come back to the public URL.
+		// A browser rewrites these hosts (10.0.0.1, 8.0.0.1) or refuses them (a name ending in a number,
+		// #473), so a browser sign-in could never come back to the public URL.
 		"https://10.1/mcp":                       `BYWARD_PUBLIC_URL: "10.1" is not an IPv4 address in dotted decimal, the only form browsers send`,
-		"https://010.0.0.1/mcp":                  `"010.0.0.1" is not an IPv4 address in dotted decimal`,
-		"https://mcp.10/mcp":                     `"mcp.10" is not an IPv4 address in dotted decimal`,
-		"https://mcp.0x0123456789abcdef0123/mcp": `"mcp.0x0123456789abcdef0123" is not an IPv4 address in dotted decimal`, // a hex number too large for 64 bits is still a number
+		"https://010.0.0.1/mcp":                  `BYWARD_PUBLIC_URL: "010.0.0.1" is not an IPv4 address in dotted decimal, the only form browsers send`,
+		"https://mcp.10/mcp":                     `BYWARD_PUBLIC_URL: "mcp.10" is not an IPv4 address but ends in a number, so browsers refuse it`,
+		"https://mcp.0x0123456789abcdef0123/mcp": `BYWARD_PUBLIC_URL: "mcp.0x0123456789abcdef0123" is not an IPv4 address but ends in a number, so browsers refuse it`, // a hex number too large for 64 bits is still a number
 		// An IPv6 address only as browsers write it, since the public URL is also the issuer and the
 		// resource browser clients compare (#447); the message names that form.
 		"https://[2001:DB8:0:0::1]/mcp":       "BYWARD_PUBLIC_URL: the IPv6 address [2001:DB8:0:0::1] is not in the form browsers write it; write it as [2001:db8::1]",

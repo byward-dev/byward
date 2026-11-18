@@ -114,7 +114,7 @@ func TestALooseUpstreamCredentialFileRefusesToStart(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = New(cfg, slog.New(slog.DiscardHandler))
-			if err == nil || !strings.Contains(err.Error(), "BYWARD_UPSTREAM_CREDENTIAL_FILE: secret file") || !strings.Contains(err.Error(), "so other users can read it") {
+			if err == nil || !strings.Contains(err.Error(), "BYWARD_UPSTREAM_CREDENTIAL_FILE: secret file") || !strings.Contains(err.Error(), "has mode 0644, so other users can access it") {
 				t.Fatalf("New = %v, want the loose credential file refused", err)
 			}
 		})

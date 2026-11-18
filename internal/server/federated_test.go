@@ -149,8 +149,8 @@ func TestALooseFederatedTokenFileRefusesToStartOutsideDevAndAMissingOneAlways(t 
 		prepare func(t *testing.T, path string)
 		inErr   string // "" when the proxy starts
 	}{
-		{"readable by others", false, loosen, "has mode 0644, so other users can read it"},
-		{"readable by others, --dev", true, loosen, ""},
+		{"open to others", false, loosen, "has mode 0644, so other users can access it"},
+		{"open to others, --dev", true, loosen, ""},
 		{"missing", false, removeFile, "no such file or directory"},
 		{"missing, --dev", true, removeFile, "no such file or directory"},
 	} {

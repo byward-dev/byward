@@ -43,10 +43,11 @@ A name mismatch is only a warning: an ingress may verify byward under an interna
 Replace the files; there is no restart. On every new connection byward checks both files, following
 symlinks, and reads them again when either has changed.
 
-- A renewed pair is checked as at startup: a key other users can read is refused (outside `--dev`),
-  and the startup warnings (expiry within 30 days, a name mismatch) are logged for it.
-- A pair that cannot be served is never served: half written, a key that does not match or that other
-  users can read, expired, or not yet valid. byward keeps the previous certificate and logs one warning for that state of the
+- A renewed pair is checked as at startup: a key with any permission for its group or others is
+  refused (outside `--dev`) unless it is on a read-only mount, and the startup warnings (expiry
+  within 30 days, a name mismatch) are logged for it.
+- A pair that cannot be served is never served: half written, a key that does not match or that
+  the secret-file check refuses, expired, or not yet valid. byward keeps the previous certificate and logs one warning for that state of the
   files, naming the files and the error but never their contents. Once the files are fixed, the next
   connection gets them.
 - A certificate whose `NotBefore` is up to 5 minutes ahead of byward's clock is served, so a renewal

@@ -71,10 +71,11 @@ LOG_LEVEL=info
 BYWARD_UPSTREAM_ENV_FILE=/run/secrets/upstream-env
 ```
 
-Like every secret file, it must not be readable by group or others, or the proxy refuses to start
-(ADR-0018 §11; `--dev` relaxes this). The values are never logged; the startup log shows `<redacted>`. Names starting with `BYWARD_` are
-refused, so an upstream can trust that `BYWARD_SUBJECT` comes from the proxy. Use the command for
-non-secret options: its arguments are shown in the startup log.
+Like every secret file, it must give its group and others no permission, unless it is on a
+read-only mount, or the proxy refuses to start (ADR-0018 §11; `--dev` relaxes this). The values are
+never logged; the startup log shows `<redacted>`. Names starting with `BYWARD_` are refused, so an
+upstream can trust that `BYWARD_SUBJECT` comes from the proxy. Use the command for non-secret
+options: its arguments are shown in the startup log.
 
 ## 3. Isolate state between sessions
 

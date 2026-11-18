@@ -26,9 +26,9 @@ install -d -m 0700 byward-data/assertion-keys
 
 - With authentication on and an HTTP upstream, byward refuses to start without a key, naming
   `BYWARD_ASSERTION_KEYS_DIR`. `byward check --offline` reports the same.
-- A key file that other users can read is refused, like the client secret file. Make it `0600`
-  and owned by the proxy's user, or mount it read-only, as Kubernetes secret volumes are; `--dev`
-  relaxes the check.
+- A key file with any permission for its group or others is refused, like the client secret file.
+  Make it `0600` and owned by the proxy's user, or mount it read-only, as Kubernetes secret volumes
+  are; `--dev` relaxes the check.
 - As with the sealing keys, a world-writable key file is refused, and so is a world-writable
   directory unless it is on a read-only mount (a Kubernetes secret volume's root is mode `1777`);
   `--dev` relaxes neither.

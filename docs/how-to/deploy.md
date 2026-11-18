@@ -125,7 +125,7 @@ This is the whole list. Each relaxation applies only with `--dev`, for trying by
 
 | With `--dev` | Without it | Startup log (`development mode relaxation`) |
 |---|---|---|
-| Secret files' permissions are not checked (a world-writable key file, or key directory not on a read-only mount, is still refused) | A secret file its group or others can read is refused, unless on a read-only mount | `secret file permissions are not checked` |
+| Secret files' permissions are not checked (a world-writable key file, or key directory not on a read-only mount, is still refused) | A secret file with any permission for its group or others is refused, unless on a read-only mount | `secret file permissions are not checked` |
 | Secrets may be given inline, as `BYWARD_<NAME>` instead of `BYWARD_<NAME>_FILE` | An inline secret is refused | `inline secrets accepted: <the settings>` |
 | An http public URL on a loopback host (`http://localhost:8080/mcp`) | The public URL must be https | `http public URL on loopback`; `BYWARD_INSECURE_NO_AUTH` allows it too |
 | An http OIDC issuer on a loopback host, and http endpoints in its discovery document on loopback | The issuer and every endpoint must be https | `http IdP issuer on loopback (<issuer>): …` (v0.2.0 does not log it) |
