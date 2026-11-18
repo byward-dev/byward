@@ -115,7 +115,8 @@ func parseIPv4(host string) (netip.Addr, bool) {
 // (::ffff:7f00:1, where netip writes ::ffff:127.0.0.1). Anything else, including a zoned IPv6
 // address, which no URL carries, is only lower-cased: this is the IP-address half of the browser's
 // host serializer. Names are folded (IDNA, a trailing dot) by registration.BrowserHost, for the
-// consent page and the client denylist; config refuses a non-ASCII host instead (asciiHost).
+// consent page and the client denylist; config refuses a non-ASCII host instead (asciiHost), so for
+// the ASCII names config accepts, a name's browser form is its lower case.
 func browserHost(host string) string {
 	host = strings.ToLower(host)
 	switch a, err := netip.ParseAddr(host); {

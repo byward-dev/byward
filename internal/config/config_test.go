@@ -99,6 +99,9 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"http public", "BYWARD_PUBLIC_URL=http://mcp.example.com/mcp", "must use https"},
 		{"http loopback without dev", "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "needs --dev"},
 		// #344: the public host joins the public Host allow-list, so it follows BYWARD_ALLOWED_HOSTS' name rule.
+		// A browser lower-cases a host name, and byward does not rewrite it: the issuer and the IdP
+		// redirect URI are built from it as written (#472).
+		{"public host name in upper case", "BYWARD_PUBLIC_URL=https://MCP.Example.com/mcp", "BYWARD_PUBLIC_URL: the host name MCP.Example.com is not in the form browsers write it; write it as mcp.example.com"},
 		{"public host with a trailing dot", "BYWARD_PUBLIC_URL=https://mcp.example.com./mcp", `BYWARD_PUBLIC_URL: "mcp.example.com." is not a host[:port]: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
 		{"public host empty, with a port", "BYWARD_PUBLIC_URL=https://:8443/mcp", `BYWARD_PUBLIC_URL: give a host, e.g. https://mcp.example.com/mcp`},
 		{"public host with a double dot", "BYWARD_PUBLIC_URL=https://a..b/mcp", `BYWARD_PUBLIC_URL: "a..b" is not a host[:port]: a host name`},
@@ -936,9 +939,9 @@ func TestAnAllowedHostNameRefusesEveryCharacterAHostNameCannotHave(t *testing.T)
 	}
 }
 
-// #344: every host setting that follows the name rule still loads underscores, xn-- names and
-// mixed case, each on its own, stored in lower case where the setting stores it so. The public URL
-// takes a host name in lower case only (#472), so it loads the lower-case ones.
+// #344: every host list that follows the name rule loads underscores, xn-- names and mixed case,
+// each on its own, stored in lower case except in the denylist, which keeps entries as given. The
+// public URL refuses upper case (#472), so it loads only the lower-case names, each as its issuer.
 func TestHostSettingsLoadUnderscoresIDNANamesAndMixedCase(t *testing.T) {
 	for _, host := range []string{"my_svc.example", "xn--bcher-kva.example", "Mixed-Case.Example"} {
 		lower := strings.ToLower(host)
@@ -949,7 +952,7 @@ func TestHostSettingsLoadUnderscoresIDNANamesAndMixedCase(t *testing.T) {
 			"BYWARD_CLIENT_DENYLIST=" + host:    func(c *Config) []string { return c.ClientDenylist },
 		}
 		if host == lower {
-			settings["BYWARD_PUBLIC_URL=https://"+host+"/mcp"] = func(c *Config) []string { return []string{c.PublicURL.Hostname()} }
+			settings["BYWARD_PUBLIC_URL=https://"+host+"/mcp"] = func(c *Config) []string { return []string{strings.TrimPrefix(c.Issuer(), "https://")} }
 		}
 		for setting, stored := range settings {
 			t.Run(setting, func(t *testing.T) {

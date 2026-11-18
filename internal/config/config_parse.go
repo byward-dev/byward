@@ -73,12 +73,14 @@ func ParsePublicURL(raw string) (*url.URL, error) {
 		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: the host name %s is not in the form browsers write it; write it as %s", h, browserHost(h)))
 	}
 	if u.Path == "" || strings.HasSuffix(u.Path, "/") {
-		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://%s/mcp", u.Host))
+		// The example names the host in lower case, as the host name rule above asks.
+		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://%s/mcp", strings.ToLower(u.Host)))
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
 		errs = append(errs, "BYWARD_PUBLIC_URL: must not have a query or fragment")
 	}
-	if u.Scheme == "http" && !isLoopback(u.Hostname()) {
+	// LOCALHOST is loopback too; the host name rule above already refuses its spelling.
+	if u.Scheme == "http" && !isLoopback(strings.ToLower(u.Hostname())) {
 		errs = append(errs, "BYWARD_PUBLIC_URL: must use https (http is allowed only for loopback hosts with --dev)")
 	}
 	if len(errs) > 0 {
