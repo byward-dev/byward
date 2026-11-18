@@ -88,7 +88,9 @@ func Handler(cfg *config.Config, log *slog.Logger, up http.Handler, v resource.V
 	hosts := append([]string{cfg.PublicURL.Host}, cfg.AllowedHosts...)
 	rt := routeOf(mux)
 	// recoverer is innermost so a panic still gets its request log line, its 5xx metric and an error
-	// span: the wrappers above see the 500 it writes.
+	// span: the wrappers above see the 500 it writes. An http.ErrAbortHandler is re-panicked to abort
+	// the response, so it gets no request log line; the relay logs a body that breaks off mid-copy with
+	// the request's ID instead (#387).
 	// ClientAddress is outermost but for HSTS: every layer below logs and limits by the same
 	// resolved address, and every answer, a refusal or a panic's 500 included, carries HSTS.
 	return strictTransport(cfg.PublicURL, logging.ClientAddress(cfg.TrustedProxies, logging.Middleware(log, tracing.Middleware(rt,
