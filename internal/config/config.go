@@ -20,7 +20,9 @@ type Config struct {
 	UpstreamCredential, UpstreamCredentialHeader string
 	// UpstreamStripHeaders are the operator's extra request headers the relay removes, canonical.
 	UpstreamStripHeaders []string
-	// A stdio upstream (ADR-0003): its argv, the operator env of its processes and its caps.
+	// A stdio upstream (ADR-0003): its argv, the operator env of its processes (a secret setting's
+	// values: the proxy puts none in an error or a log, though the upstream's own stderr is logged as
+	// written) and its caps.
 	UpstreamCommand                    []string
 	UpstreamEnv                        map[string]string
 	StdioMaxProcesses, StdioMaxPerUser int

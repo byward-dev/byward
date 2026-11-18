@@ -43,9 +43,11 @@ var (
 
 // Config describes one stdio upstream.
 type Config struct {
-	Name    string            // upstream name, for logs
-	Command []string          // argv; never run through a shell
-	Env     map[string]string // operator env; values may contain SessionDirPlaceholder
+	Name    string   // upstream name, for logs
+	Command []string // argv; never run through a shell
+	// Env is the operator env, treated as secret: the proxy puts none of its values in an error or a
+	// log (security invariant 2). What the upstream itself writes to stderr is logged as written.
+	Env map[string]string // values may contain SessionDirPlaceholder
 
 	IdleTimeout     time.Duration // no stdin or stdout traffic for this long stops the process
 	SpawnTimeout    time.Duration // the exec start must finish within this
@@ -562,7 +564,7 @@ func (m *Manager) spawn(ctx context.Context, id Identity, onExit func(), latest 
 		SysProcAttr: &syscall.SysProcAttr{Setpgid: true},
 	}
 	if err = m.start(cmd); err != nil {
-		return nil, fmt.Errorf("stdio: start %s: %w", m.cmd.name, err)
+		return nil, fmt.Errorf("stdio: start %s: %w", m.cmd.name, m.cmd.startError(err))
 	}
 	_ = inR.Close()
 	_ = outW.Close()

@@ -7,8 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"io/fs"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -208,27 +212,170 @@ func TestTheTokenSocketPathLimitIsThePlatformsOwn(t *testing.T) {
 	_ = c.Close()
 }
 
-func TestMissingCommandNamesTheImagePattern(t *testing.T) {
+func TestAMissingCommandNamesTheImagePatternAndAPATHFromTheUpstreamEnvironmentOnlyByItsCounts(t *testing.T) {
+	const secret = "S3CRET-path-entry"
 	notExec := filepath.Join(t.TempDir(), "server.js")
 	if err := os.WriteFile(notExec, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cases := map[string]string{
-		"not on PATH":    "npx-not-installed",
-		"absent path":    "/nonexistent/bin/uvx",
-		"not executable": notExec,
-		"a directory":    t.TempDir(),
+	dir := t.TempDir()
+	// A program that exists only under a relative PATH entry is not found: only absolute ones are
+	// searched. The working directory is the entry's parent, so the entry does name the program.
+	relDir, _ := newUnstartable(t, "relative-entry")
+	t.Chdir(filepath.Dir(relDir))
+	rel := filepath.Base(relDir)
+	if _, err := os.Stat(filepath.Join(rel, "srv")); err != nil {
+		t.Fatalf("the relative entry does not name the program: %v", err)
 	}
-	for name, argv0 := range cases {
-		t.Run(name, func(t *testing.T) {
-			_, err := New(Config{Command: []string{argv0}, LookupEnv: lookup(proxyEnv)})
+	cases := []struct {
+		name, argv0 string
+		env         map[string]string // the operator env; without a PATH, the proxy's is searched
+		shown       string            // what the message shows for the PATH
+	}{
+		{"not on the proxy's PATH", "npx-not-installed", nil, `PATH "/nonexistent-byward/bin"`},
+		{"an absent path", "/nonexistent/bin/uvx", nil, "not an executable file"},
+		{"a file that is not executable", notExec, nil, "not an executable file"},
+		{"a directory", dir, nil, "not an executable file"},
+		{"an upstream env without a PATH: the proxy's is shown", "npx-not-installed", map[string]string{"API_KEY": secret}, `PATH "/nonexistent-byward/bin"`},
+		{"an upstream PATH of two entries: counted, never shown", "npx-not-installed", map[string]string{"PATH": "/opt/" + secret + "/bin:/opt/" + secret + "/sbin"}, "PATH from the upstream environment, 2 entries not shown; 2 absolute entries searched"},
+		{"an upstream PATH of one entry: counted, never shown", "npx-not-installed", map[string]string{"PATH": "/opt/" + secret + "/bin"}, "PATH from the upstream environment, 1 entry not shown; 1 absolute entry searched"},
+		{"an empty upstream PATH: counted, never shown", "npx-not-installed", map[string]string{"PATH": ""}, "PATH from the upstream environment, 0 entries not shown; 0 absolute entries searched"},
+		{"a relative entry, counted but not searched", "npx-not-installed", map[string]string{"PATH": "relative/" + secret + ":/opt/" + secret}, "PATH from the upstream environment, 2 entries not shown; 1 absolute entry searched"},
+		{"a program only under a relative entry: not found", "srv", map[string]string{"PATH": rel}, "PATH from the upstream environment, 1 entry not shown; 0 absolute entries searched"},
+		{"an empty entry, counted but not searched", "npx-not-installed", map[string]string{"PATH": "/opt/" + secret + "::/bin-" + secret}, "PATH from the upstream environment, 3 entries not shown; 2 absolute entries searched"},
+		{"a command given as a path, with a PATH from the upstream environment: no PATH is searched or shown", "/nonexistent/bin/uvx", map[string]string{"PATH": secret}, "not an executable file"},
+		{"a command given as a relative path, with a PATH from the upstream environment: no PATH is searched or shown", "./missing", map[string]string{"PATH": "/opt/" + secret}, "not an executable file"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := New(Config{Command: []string{tc.argv0}, Env: tc.env, LookupEnv: lookup(map[string]string{"PATH": "/nonexistent-byward/bin"})})
 			if !errors.Is(err, ErrCommandNotFound) {
 				t.Fatalf("err = %v, want ErrCommandNotFound", err)
 			}
-			if !strings.Contains(err.Error(), "COPY --from=ghcr.io/byward-dev/byward:") {
-				t.Fatalf("error %q does not name the COPY --from pattern", err)
+			want := "stdio upstream command not found: " + strconv.Quote(tc.argv0) + " (" + tc.shown + "). The byward image has no node or python runtime: " +
+				"build your own image FROM the runtime and add the proxy with COPY --from=ghcr.io/byward-dev/byward:<version> /usr/local/bin/byward /usr/local/bin/byward"
+			if got := err.Error(); got != want || strings.Contains(got, secret) {
+				t.Fatalf("error:\n%s\nwant:\n%s\nand never %q", got, want, secret)
 			}
 		})
+	}
+}
+
+// newUnstartable writes srv, an executable file that is no program (no #!), so starting it fails
+// with an exec format error, in a directory named name, and returns that directory and srv's path.
+func newUnstartable(t *testing.T, name string) (dir, srv string) {
+	t.Helper()
+	dir = filepath.Join(t.TempDir(), name)
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	srv = filepath.Join(dir, "srv")
+	if err := os.WriteFile(srv, []byte("not a program\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(srv, 0o700); err != nil { //nolint:gosec // G302: an executable, as the test needs
+		t.Fatal(err)
+	}
+	return dir, srv
+}
+
+// The rows with a start func inject errors a real start does not return today; they pin what
+// startError does with each kind of error, should a start return it.
+func TestAProgramThatCannotStartIsShownByItsPathOnlyWhenThatPathIsNotFromTheUpstreamEnvironment(t *testing.T) {
+	const secret = "S3CRET-path-entry"
+	dir, srv := newUnstartable(t, secret)
+	upstream := map[string]string{"PATH": dir}
+	errKept := errors.New("srv: out of processes") // names the program as configured, which is no secret
+	const hidden = "stdio: start srv: the start failed with an error that names the program's path on the PATH from the upstream environment, which is not shown"
+	cases := []struct {
+		name  string
+		argv0 string
+		env   map[string]string     // the operator env
+		proxy string                // the proxy's PATH; empty: none
+		start func(*exec.Cmd) error // nil: the real start
+		want  string
+		cause error // the error still unwraps to it; nil: not checked
+	}{
+		{name: "an exec format error keeps its cause, named as configured", argv0: "srv", env: upstream,
+			want: "stdio: start srv: fork/exec srv (found on the PATH from the upstream environment): exec format error", cause: syscall.ENOEXEC},
+		{name: "a path error whose cause names the path: replaced whole", argv0: "srv", env: upstream,
+			start: func(c *exec.Cmd) error {
+				return &fs.PathError{Op: "fork/exec", Path: c.Path, Err: fmt.Errorf("cannot read %s", c.Path)}
+			},
+			want: hidden, cause: errStartNamesPath},
+		{name: "a path error whose cause names only the PATH entry: replaced whole", argv0: "srv", env: upstream,
+			start: func(c *exec.Cmd) error {
+				return &fs.PathError{Op: "fork/exec", Path: c.Path, Err: fmt.Errorf("cannot search %s", filepath.Dir(c.Path))}
+			},
+			want: hidden, cause: errStartNamesPath},
+		{name: "another start error naming the path: replaced whole", argv0: "srv", env: upstream,
+			start: func(c *exec.Cmd) error { return fmt.Errorf("cannot run %s", c.Path) },
+			want:  hidden, cause: errStartNamesPath},
+		{name: "another start error naming only the PATH entry: replaced whole", argv0: "srv", env: upstream,
+			start: func(c *exec.Cmd) error { return fmt.Errorf("cannot search %s", filepath.Dir(c.Path)) },
+			want:  hidden, cause: errStartNamesPath},
+		{name: "a path error about another file: kept", argv0: "srv", env: upstream,
+			start: func(*exec.Cmd) error { return &fs.PathError{Op: "chdir", Path: "/x", Err: fs.ErrNotExist} },
+			want:  "stdio: start srv: chdir /x: file does not exist", cause: fs.ErrNotExist},
+		{name: "a start error not naming the path: kept", argv0: "srv", env: upstream,
+			start: func(*exec.Cmd) error { return errKept },
+			want:  "stdio: start srv: srv: out of processes", cause: errKept},
+		{name: "found on the proxy's PATH: the path is shown", argv0: "srv", proxy: dir,
+			want: "stdio: start srv: fork/exec " + srv + ": exec format error", cause: syscall.ENOEXEC},
+		{name: "a command given as a path: its path is shown, as configured", argv0: srv, env: map[string]string{"PATH": "/opt/bin"},
+			want: "stdio: start " + srv + ": fork/exec " + srv + ": exec format error", cause: syscall.ENOEXEC},
+		{name: "a command given as a path, with another start error naming it: kept", argv0: srv, env: map[string]string{"PATH": "/opt/bin"},
+			start: func(c *exec.Cmd) error { return fmt.Errorf("cannot run %s: %w", c.Path, errKept) },
+			want:  "stdio: start " + srv + ": cannot run " + srv + ": srv: out of processes", cause: errKept},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, func(c *Config) {
+				c.Command, c.Env, c.LookupEnv = []string{tc.argv0}, tc.env, lookup(map[string]string{"PATH": tc.proxy})
+			})
+			if tc.start != nil {
+				h.m.start = tc.start
+			}
+			_, _, err := h.m.Get(context.Background(), "k", alice)
+			if err == nil {
+				t.Fatal("Get succeeded, want the start to fail")
+			}
+			if got := err.Error(); got != tc.want {
+				t.Fatalf("error:\n%s\nwant:\n%s", got, tc.want)
+			}
+			if tc.cause != nil && !errors.Is(err, tc.cause) {
+				t.Fatalf("error %v does not unwrap to %v", err, tc.cause)
+			}
+		})
+	}
+}
+
+func TestAStartFailureIsLoggedWithoutAPATHEntryFromTheUpstreamEnvironment(t *testing.T) {
+	const secret = "S3CRET-path-entry"
+	dir, _ := newUnstartable(t, secret)
+	b := newBridge(t, func(c *Config) { c.Command, c.Env = []string{"srv"}, map[string]string{"PATH": dir} })
+	res := b.post(t, "alice", "", initialize)
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusBadGateway || string(body) != "upstream unavailable\n" {
+		t.Fatalf("status %d, body %q; want 502 and %q", res.StatusCode, body, "upstream unavailable\n")
+	}
+	recs := b.log.with("cannot start the upstream process")
+	if len(recs) != 1 {
+		t.Fatalf("%d \"cannot start the upstream process\" records, want 1: %v", len(recs), recs)
+	}
+	const want = "stdio: start srv: fork/exec srv (found on the PATH from the upstream environment): exec format error"
+	if got := fmt.Sprint(recs[0].attrs["error"]); got != want {
+		t.Fatalf("logged error:\n%s\nwant:\n%s", got, want)
+	}
+	b.log.mu.Lock()
+	defer b.log.mu.Unlock()
+	for _, r := range *b.log.recs {
+		if strings.Contains(fmt.Sprint(r.msg, r.attrs), secret) {
+			t.Fatalf("a log record shows the PATH entry: %s %v", r.msg, r.attrs)
+		}
 	}
 }
 
