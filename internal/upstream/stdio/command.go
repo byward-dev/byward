@@ -5,9 +5,11 @@ package stdio
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -68,9 +70,12 @@ func (id Identity) validate() error {
 // command is a validated upstream command line.
 type command struct {
 	name string            // argv[0] as configured
-	path string            // resolved executable
+	path string            // resolved executable; when pathHidden, never in an error or a log as it is: see startError
 	args []string          // after argv[0]
 	env  map[string]string // operator env
+	// pathHidden marks a path found on the PATH the operator env sets, whose values are secret:
+	// errors name the program as configured instead (startError).
+	pathHidden bool
 }
 
 func newCommand(argv []string, operatorEnv map[string]string, proxyEnv func(string) (string, bool)) (command, error) {
@@ -93,22 +98,23 @@ func newCommand(argv []string, operatorEnv map[string]string, proxyEnv func(stri
 		}
 	}
 	c := command{name: argv[0], args: argv[1:], env: operatorEnv}
-	p, err := lookPath(argv[0], c.childPath(proxyEnv))
-	if err != nil {
-		return command{}, err
+	path, operatorPath := c.childPath(proxyEnv)
+	p, ok := lookPath(argv[0], path)
+	if !ok {
+		return command{}, notFound(argv[0], path, operatorPath)
 	}
-	c.path = p
+	c.path, c.pathHidden = p, operatorPath && !isPathName(argv[0])
 	return c, nil
 }
 
 // childPath is the PATH the upstream process will see; the command is resolved against it, not
-// against the proxy's PATH.
-func (c command) childPath(proxyEnv func(string) (string, bool)) string {
+// against the proxy's PATH. operator reports that it comes from the operator env.
+func (c command) childPath(proxyEnv func(string) (string, bool)) (path string, operator bool) {
 	if v, ok := c.env["PATH"]; ok {
-		return v
+		return v, true
 	}
 	v, _ := proxyEnv("PATH")
-	return v
+	return v, false
 }
 
 // usesSessionDir reports whether any argument or env value needs a session directory.
@@ -163,24 +169,30 @@ func (c command) environ(proxyEnv func(string) (string, bool), id Identity, sess
 	return env
 }
 
+// isPathName reports whether name is a path (it holds a /), which is used as it is: no PATH is
+// searched for it.
+func isPathName(name string) bool { return strings.Contains(name, "/") }
+
 // lookPath resolves name like a shell would, but against the upstream's PATH and only through
-// absolute PATH entries.
-func lookPath(name, path string) (string, error) {
-	if strings.Contains(name, "/") {
-		if isExecutable(name) {
-			return name, nil
+// absolute PATH entries; ok is false, and resolved empty, when no executable file is found.
+// notFound counts the absolute entries as the ones searched: a change to which entries are
+// searched must change that count too.
+func lookPath(name, path string) (resolved string, ok bool) {
+	if isPathName(name) {
+		if !isExecutable(name) {
+			return "", false
 		}
-		return "", notFound(name, path)
+		return name, true
 	}
 	for _, dir := range filepath.SplitList(path) {
 		if !filepath.IsAbs(dir) {
 			continue
 		}
 		if p := filepath.Join(dir, name); isExecutable(p) {
-			return p, nil
+			return p, true
 		}
 	}
-	return "", notFound(name, path)
+	return "", false
 }
 
 func isExecutable(p string) bool {
@@ -189,10 +201,57 @@ func isExecutable(p string) bool {
 }
 
 // notFound names the image pattern, because the usual cause is a runtime (node, python) that the
-// proxy's image does not contain (ADR-0019 §3).
-func notFound(name, path string) error {
-	return fmt.Errorf("%w: %q (PATH %q). The byward image has no node or python runtime: "+
+// proxy's image does not contain (ADR-0019 §3). A name given as a path shows no PATH, as none is
+// searched. A PATH from the operator env is secret (security invariant 2), so only its entry
+// counts are shown; the proxy's own PATH is shown.
+func notFound(name, path string, operatorPath bool) error {
+	shown := fmt.Sprintf("PATH %q", path)
+	switch {
+	case isPathName(name):
+		shown = "not an executable file"
+	case operatorPath:
+		// Only absolute entries are searched (lookPath), so the count of them says what was, as no
+		// entry is shown; a change to lookPath's search must change this count too.
+		dirs, abs := filepath.SplitList(path), 0
+		for _, d := range dirs {
+			if filepath.IsAbs(d) {
+				abs++
+			}
+		}
+		shown = fmt.Sprintf("PATH from the upstream environment, %s not shown; %s searched", count(len(dirs), "entry", "entries"), count(abs, "absolute entry", "absolute entries"))
+	}
+	return fmt.Errorf("%w: %q (%s). The byward image has no node or python runtime: "+
 		"build your own image FROM the runtime and add the proxy with "+
 		"COPY --from=ghcr.io/byward-dev/byward:<version> /usr/local/bin/byward /usr/local/bin/byward",
-		ErrCommandNotFound, name, path)
+		ErrCommandNotFound, name, shown)
 }
+
+// count is n with its noun: 1 entry, 0 entries.
+func count(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return strconv.Itoa(n) + " " + many
+}
+
+// startError is err, from starting the process, as an error may show it. The start names the
+// resolved path (fork/exec <path>: …), so when that path was found on the operator env's PATH, the
+// program is named as configured instead, and where it was found, keeping the cause (pe.Err; a
+// wrapper around the *fs.PathError is dropped): the returned *fs.PathError's Path is that display
+// name, not a path. Any other error naming the PATH entry the program was found in is replaced
+// whole.
+func (c command) startError(err error) error {
+	if !c.pathHidden {
+		return err
+	}
+	dir := filepath.Dir(c.path) // the PATH entry, cleaned as c.path holds it
+	if pe := (*fs.PathError)(nil); errors.As(err, &pe) && pe.Path == c.path && !strings.Contains(pe.Err.Error(), dir) {
+		return &fs.PathError{Op: pe.Op, Path: c.name + " (found on the PATH from the upstream environment)", Err: pe.Err}
+	}
+	if strings.Contains(err.Error(), dir) {
+		return errStartNamesPath
+	}
+	return err
+}
+
+var errStartNamesPath = errors.New("the start failed with an error that names the program's path on the PATH from the upstream environment, which is not shown")

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -373,10 +374,18 @@ func TestCheckOfflineFindsStdioUpstreamMistakes(t *testing.T) {
 		name  string
 		env   func(t *testing.T) []string
 		inErr string
+		notIn string // never in either error: a secret setting's value
 	}{
 		{"command that does not exist", func(t *testing.T) []string {
 			return append(stdioAuthEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", `BYWARD_UPSTREAM_COMMAND=["/nonexistent/mcp-server"]`)
-		}, "stdio upstream (BYWARD_UPSTREAM_COMMAND, BYWARD_UPSTREAM_ENV_FILE)"},
+		}, "stdio upstream (BYWARD_UPSTREAM_COMMAND, BYWARD_UPSTREAM_ENV_FILE)", ""},
+		{"command not found on the PATH the env file sets: its entries are not shown", func(t *testing.T) []string {
+			envFile := filepath.Join(t.TempDir(), "upstream.env")
+			if err := os.WriteFile(envFile, []byte("PATH=/opt/S3CRET-path-entry/bin\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return append(stdioAuthEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", `BYWARD_UPSTREAM_COMMAND=["mcp-server-missing"]`, "BYWARD_UPSTREAM_ENV_FILE="+envFile)
+		}, `stdio upstream (BYWARD_UPSTREAM_COMMAND, BYWARD_UPSTREAM_ENV_FILE): stdio upstream command not found: "mcp-server-missing" (PATH from the upstream environment`, "S3CRET"},
 		{"env file other users can read, without authentication", func(t *testing.T) []string {
 			env, _ := stdioEnv(t, []string{"BYWARD_INSECURE_NO_AUTH=true"})
 			envFile := filepath.Join(t.TempDir(), "upstream.env")
@@ -392,19 +401,23 @@ func TestCheckOfflineFindsStdioUpstreamMistakes(t *testing.T) {
 				}
 			}
 			return append(env, "BYWARD_UPSTREAM_ENV_FILE="+envFile)
-		}, "BYWARD_UPSTREAM_ENV_FILE: secret file"},
+		}, "BYWARD_UPSTREAM_ENV_FILE: secret file", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			never := "" // for the failure message
+			if tc.notIn != "" {
+				never = fmt.Sprintf(", never %q", tc.notIn)
+			}
 			cfg, _, err := config.Load(nil, tc.env(t), os.ReadFile)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := checkOffline(cfg); err == nil || !strings.Contains(err.Error(), tc.inErr) {
-				t.Fatalf("check --offline: err = %v, want %q", err, tc.inErr)
+			if _, err := checkOffline(cfg); err == nil || !strings.Contains(err.Error(), tc.inErr) || tc.notIn != "" && strings.Contains(err.Error(), tc.notIn) {
+				t.Fatalf("check --offline: err = %v, want %q%s", err, tc.inErr, never)
 			}
-			if _, err := Doctor(context.Background(), cfg, DoctorOptions{IdP: &http.Client{Transport: refuse{}}, Proxy: &http.Client{Transport: refuse{}}}); err == nil || !strings.Contains(err.Error(), tc.inErr) {
-				t.Fatalf("doctor: err = %v, want %q", err, tc.inErr)
+			if _, err := Doctor(context.Background(), cfg, DoctorOptions{IdP: &http.Client{Transport: refuse{}}, Proxy: &http.Client{Transport: refuse{}}}); err == nil || !strings.Contains(err.Error(), tc.inErr) || tc.notIn != "" && strings.Contains(err.Error(), tc.notIn) {
+				t.Fatalf("doctor: err = %v, want %q%s", err, tc.inErr, never)
 			}
 		})
 	}
