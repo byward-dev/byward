@@ -19,6 +19,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"testing/iotest"
 	"time"
@@ -875,52 +876,110 @@ func TestABodyOverTheLimitIsAnswered413WhateverTheProxySetting(t *testing.T) {
 	}
 }
 
-// ReverseProxy's own error lines, such as a body that breaks off mid-copy, reach the structured log:
-// through a proxy whose setting Go misread they name the cause, never the address Go dialled; through
-// a well-formed one they show the line, which quotes that address.
-func TestABodyThatBreaksOffReachesTheUpstreamErrorLogAndNeverQuotesAMisreadProxysAddress(t *testing.T) {
+// ReverseProxy's own error lines, such as a body that breaks off mid-copy, reach the structured log
+// as one warning per request, carrying that request's ID (#387). The relay runs under a server
+// behind logging.Middleware, as wired, where the response is aborted and no request line ties the
+// warning to the request. Two requests at once on one relay each get their own ID. Through a proxy
+// whose setting Go misread the warning names the cause, never the address Go dialled; through a
+// well-formed proxy, or none, it shows ReverseProxy's line, which quotes that address.
+func TestABodyThatBreaksOffLogsOneWarningWithItsRequestsIDAndNeverQuotesAMisreadProxysAddress(t *testing.T) {
+	const requests = 2
 	for _, tc := range []struct {
 		name    string
-		setting func(addr string) string
+		setting func(addr string) string // nil: no proxy, the listener is the upstream
 		misread bool
 	}{
 		{"a misread proxy's address is never quoted", func(addr string) string { return addr + "/pw-secret@egress.example:3128" }, true},
 		{"a well-formed proxy's body copy error is logged", func(addr string) string { return "http://" + addr }, false},
+		{"with no proxy, the upstream's body copy error is logged", nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ln, err := net.Listen("tcp", "127.0.0.1:0") // the "proxy" Go dials: it answers, then resets mid-body
+			ln, err := net.Listen("tcp", "127.0.0.1:0") // the proxy, or with none the upstream: it answers, then resets mid-body
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() { _ = ln.Close() })
+			// The first request to finish closes the listener, so one the relay answers without dialling
+			// fails the test instead of leaving the other waiting for its answer.
+			stop := sync.OnceFunc(func() { _ = ln.Close() })
+			t.Cleanup(stop)
 			go func() {
-				c, err := ln.Accept()
-				if err != nil {
-					return
+				// Every request is in the relay before any body breaks off, so a relay that shared one
+				// error log between requests would log both with the same ID, or none.
+				var conns []net.Conn
+				for len(conns) < requests {
+					c, err := ln.Accept()
+					if err != nil {
+						break // answer the requests already here
+					}
+					// The whole request, body included, before answering: a reset while the transport still
+					// writes the body would fail the round trip instead of the response's body copy (#272).
+					if req, err := http.ReadRequest(bufio.NewReader(c)); err == nil {
+						_, _ = io.Copy(io.Discard, req.Body)
+					}
+					conns = append(conns, c)
 				}
-				// The whole request, body included, before answering: a reset while the transport still
-				// writes the body would fail the round trip instead of the response's body copy (#272).
-				if req, err := http.ReadRequest(bufio.NewReader(c)); err == nil {
-					_, _ = io.Copy(io.Discard, req.Body)
+				for _, c := range conns {
+					_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\npartial")
+					_ = c.(*net.TCPConn).SetLinger(0) // close with a reset, so the read error names the addresses
+					_ = c.Close()
 				}
-				_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\npartial")
-				_ = c.(*net.TCPConn).SetLinger(0) // close with a reset, so the read error names the addresses
-				_ = c.Close()
 			}()
 			addr := ln.Addr().String()
-			pf := (&httpproxy.Config{HTTPProxy: tc.setting(addr)}).ProxyFunc()
-			u, _ := url.Parse("http://mcp.upstream.example/mcp")
-			var logs bytes.Buffer
-			rec := httptest.NewRecorder()
-			New(slog.New(slog.NewTextHandler(&logs, nil)), u, withProxy(func(r *http.Request) (*url.URL, error) { return pf(r.URL) })).
-				ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader("{}")))
-			// The proxy answered, so the error is the body copy's: a failed round trip (#272) would also
-			// log the cause, and pass the misread row for the wrong reason.
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status %d, want the proxy's 200 before its body broke off; log %q", rec.Code, logs.String())
+			u, _ := url.Parse("http://" + addr + "/mcp")
+			proxy := func(*http.Request) (*url.URL, error) { return nil, nil }
+			if tc.setting != nil {
+				u, _ = url.Parse("http://mcp.upstream.example/mcp")
+				pf := (&httpproxy.Config{HTTPProxy: tc.setting(addr)}).ProxyFunc()
+				proxy = func(r *http.Request) (*url.URL, error) { return pf(r.URL) }
 			}
-			if !strings.Contains(logs.String(), `level=WARN msg="upstream error"`) {
-				t.Fatalf("log %q; want ReverseProxy's error line in the structured log, as a warning", logs.String())
+			var logs bytes.Buffer
+			log := logging.New(&logs, "text")
+			srv := httptest.NewServer(logging.Middleware(log, New(log, u, withProxy(proxy))))
+			t.Cleanup(srv.Close)
+			ids := make([]string, requests)
+			var wg sync.WaitGroup
+			for i := range ids {
+				wg.Go(func() {
+					defer stop()
+					// A bound for a relay that hangs, such as one that sends one request at a time, where
+					// neither is answered.
+					ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+					defer cancel()
+					req, _ := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/mcp", strings.NewReader("{}"))
+					res, err := srv.Client().Do(req)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					_, readErr := io.ReadAll(res.Body)
+					_ = res.Body.Close()
+					// The upstream answered, so the error is the body copy's: a failed round trip (#272) would
+					// also log the cause, and pass the misread row for the wrong reason.
+					if res.StatusCode != http.StatusOK || readErr == nil {
+						t.Errorf("status %d, body error %v; want the upstream's 200, then the body cut off", res.StatusCode, readErr)
+					}
+					ids[i] = res.Header.Get("X-Request-Id")
+				})
+			}
+			wg.Wait()
+			srv.Close() // waits for the handlers, so the log is complete
+			if t.Failed() {
+				t.Fatalf("log %q", logs.String())
+			}
+			warnings := regexp.MustCompile(`(?m)^.*msg="upstream error".*$`).FindAllString(logs.String(), -1)
+			if len(warnings) != requests {
+				t.Fatalf("log %q; want one upstream error warning per request", logs.String())
+			}
+			for _, id := range ids {
+				carries := regexp.MustCompile(`(^| )request_id=` + regexp.QuoteMeta(id) + `( |$)`)
+				if n := len(slices.DeleteFunc(slices.Clone(warnings), func(l string) bool { return !carries.MatchString(l) })); id == "" || n != 1 {
+					t.Fatalf("log %q; want the request ID %q the client got in exactly one warning, not %d", logs.String(), id, n)
+				}
+			}
+			for _, l := range warnings {
+				if !strings.Contains(l, "level=WARN ") {
+					t.Fatalf("line %q; want a warning", l)
+				}
 			}
 			if tc.misread && (strings.Contains(logs.String(), addr) ||
 				!strings.Contains(logs.String(), `error="httputil: ReverseProxy read error during body copy: `+envproxy.Cause+`"`)) {
@@ -928,7 +987,7 @@ func TestABodyThatBreaksOffReachesTheUpstreamErrorLogAndNeverQuotesAMisreadProxy
 			}
 			if !tc.misread && (!strings.Contains(logs.String(), `error="httputil: ReverseProxy read error during body copy: `) ||
 				!strings.Contains(logs.String(), addr) || strings.Contains(logs.String(), `\n"`)) {
-				t.Fatalf("log %q; want ReverseProxy's line for a well-formed proxy, with the address Go dialled", logs.String())
+				t.Fatalf("log %q; want ReverseProxy's line, with the address Go dialled", logs.String())
 			}
 		})
 	}
