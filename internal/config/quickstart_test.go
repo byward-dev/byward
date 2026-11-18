@@ -78,7 +78,8 @@ func TestPublicURLAcceptsHTTPSOrLoopbackAndNamesTheRuleABadOneBreaks(t *testing.
 	}
 	// A host name only in lower case, as browsers write it, since the public URL is also the issuer
 	// browser clients compare (#472). The whole error is pinned: LOCALHOST over http is loopback, so no
-	// https error joins it, and the trailing-slash error's example names the host as browsers write it.
+	// https error joins it, and the trailing-slash error's example names the host as browsers write it,
+	// whichever host rule it broke: a name in lower case, IPv4 in dotted decimal, IPv6 in short form.
 	for raw, want := range map[string]string{
 		"https://MCP.Example.com/mcp":       "BYWARD_PUBLIC_URL: the host name MCP.Example.com is not in the form browsers write it; write it as mcp.example.com",
 		"https://mcp.example.coM:8443/mcp":  "BYWARD_PUBLIC_URL: the host name mcp.example.coM is not in the form browsers write it; write it as mcp.example.com",
