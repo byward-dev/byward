@@ -65,8 +65,8 @@ credential setting ([settings](../reference/settings.md)).
 - **On AKS:** byward does not read `AZURE_FEDERATED_TOKEN_FILE` itself. Set byward's setting to the
   path that variable names in the pod. Microsoft notes that this path belongs to the webhook and can
   change; recheck it after an AKS upgrade.
-- **The file must exist at startup**, and other users must not be able to read it, unless it is on
-  a read-only mount. This is the same check as for every secret file, and `--dev` relaxes it.
+- **The file must exist at startup**, even with `--dev`. Like every secret file, it must also give
+  its group and others no permission, unless it is on a read-only mount; `--dev` relaxes that.
   `byward check --offline` reports both problems.
 - **No expiry setting:** `BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT` is refused with a federated token,
   which has no secret to expire.

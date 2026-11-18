@@ -19,8 +19,8 @@ The file holds the exact header value, on one line. A trailing newline is ignore
 (umask 077; printf '%s\n' 'Bearer <the API key>' > byward-data/upstream-credential)
 ```
 
-- Like every secret file, it must not be readable by other users (`0600` or `0400`, owned by the
-  proxy's user), unless it is on a read-only mount such as a Kubernetes secret volume.
+- Like every secret file, it must give its group and others no permission (`0600` or `0400`, owned
+  by the proxy's user), unless it is on a read-only mount such as a Kubernetes secret volume.
 - The value must have no control characters and no leading or trailing spaces, and be at most
   4096 bytes.
 - byward reads it at start. To rotate, replace the file and restart.

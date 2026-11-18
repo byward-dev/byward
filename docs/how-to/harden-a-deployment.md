@@ -93,9 +93,10 @@ Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) ยง1โ
         [static clients file](../reference/static-clients.md);
       - static client secrets must be at least 32 bytes.
 
-      An inline secret refuses to start unless `--dev` is set. So does a secret file that its group
-      or others can read or write (mode `0600` or `0400`, owned by the proxy's user), unless it is
-      on a read-only mount such as a Kubernetes secret volume (default mode `0644`).
+      An inline secret refuses to start unless `--dev` is set. So does a secret file with any
+      permission for its group or others (make it mode `0600` or `0400`, owned by the proxy's
+      user), unless it is on a read-only mount such as a Kubernetes secret volume (default mode
+      `0644`).
       - Docker Compose: use `secrets:` (Compose mounts those read-only) or a volume with `:ro`, e.g.
         `./entra-secret:/run/secrets/entra:ro`. A host file at `0600` owned by your user cannot be
         read by the image's uid 65532, and `chmod 644` without `:ro` is refused.

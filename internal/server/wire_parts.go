@@ -204,8 +204,9 @@ func secretCheck(cfg *config.Config) func(string) error {
 	return secretfile.Check
 }
 
-// looseSecretFiles is one error per secret file other users can read (the TLS key's included),
-// named by its setting, and for the federated token file (read at each request, not at start) one if it is missing.
+// looseSecretFiles is one error per secret file that secretCheck refuses (the TLS key's included),
+// named by its setting, and for the federated token file (read at each request, not at start) one
+// if it is missing.
 func looseSecretFiles(cfg *config.Config) []error {
 	check := secretCheck(cfg)
 	var loose []error

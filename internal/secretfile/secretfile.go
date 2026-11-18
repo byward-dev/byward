@@ -1,8 +1,8 @@
 // Package secretfile checks the files secrets are read from, such as the IdP client secret, the TLS
 // key, the sealing and assertion keys and static clients' `client_secret_file` (ADR-0018 §11). Check
-// refuses a secret that other users on the host can read; only --dev relaxes it. ReadOnlyFS reports
-// whether a path is on a read-only mount, where Check lets a secret file pass and the key loaders
-// (sealing and assertion keys) let a world-writable key directory pass.
+// refuses a secret file with any permission for its group or others; only --dev relaxes it.
+// ReadOnlyFS reports whether a path is on a read-only mount, where Check lets a secret file pass
+// and the key loaders (sealing and assertion keys) let a world-writable key directory pass.
 package secretfile
 
 import (
@@ -13,7 +13,8 @@ import (
 // readOnlyFS is ReadOnlyFS; tests replace it.
 var readOnlyFS = ReadOnlyFS
 
-// Check refuses a secret file (symlinks followed) that its group or others can read or write.
+// Check refuses a secret file (symlinks followed) with any permission for its group or others,
+// execute alone included (#449).
 // A file on a read-only mount passes: Kubernetes secret volumes and similar platform mounts are
 // mode 0644 by default, are visible only inside the pod, and cannot be changed from it.
 func Check(path string) error {
@@ -22,7 +23,7 @@ func Check(path string) error {
 		return err
 	}
 	if perm := fi.Mode().Perm(); perm&0o077 != 0 && !readOnlyFS(path) {
-		return fmt.Errorf("secret file %s has mode %04o, so other users can read it; chmod 600 it and chown it to the proxy's user (uid 65532 in the image), or mount it read-only (e.g. docker run -v ./secret:/run/secrets/x:ro)", path, perm)
+		return fmt.Errorf("secret file %s has mode %04o, so other users can access it; chmod 600 it and chown it to the proxy's user (uid 65532 in the image), or mount it read-only (e.g. docker run -v ./secret:/run/secrets/x:ro)", path, perm)
 	}
 	return nil
 }

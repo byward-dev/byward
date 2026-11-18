@@ -46,24 +46,25 @@ func leafOf(t *testing.T, b testcert.Bundle) *x509.Certificate {
 	return c
 }
 
-// othersCanRead stands in for the secret-file check: it refuses a key other users can read.
-func othersCanRead(path string) error {
+// othersHaveAccess stands in for the secret-file check: it refuses a key with any permission for
+// its group or others.
+func othersHaveAccess(path string) error {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
 	if fi.Mode().Perm()&0o077 != 0 {
-		return fmt.Errorf("%s: other users can read it", path)
+		return fmt.Errorf("%s: other users can access it", path)
 	}
 	return nil
 }
 
-// load loads f with the clock c and othersCanRead as the key check. Its logs also record each
+// load loads f with the clock c and othersHaveAccess as the key check. Its logs also record each
 // pair the Served hook is told of, as a "served <serial>" line.
 func load(t *testing.T, f Files, c *fakeclock.Clock) (*Reloader, *logsink.Buffer) {
 	t.Helper()
 	logs := new(logsink.Buffer)
-	r, err := Load(f, Options{Now: c.Now, Log: slog.New(slog.NewJSONHandler(logs, nil)), CheckKey: othersCanRead,
+	r, err := Load(f, Options{Now: c.Now, Log: slog.New(slog.NewJSONHandler(logs, nil)), CheckKey: othersHaveAccess,
 		Served: func(p *Pair) { _, _ = fmt.Fprintf(logs, "served %s\n", p.chain[0].SerialNumber) }})
 	if err != nil {
 		t.Fatal(err)
@@ -290,7 +291,7 @@ func TestAPairThatCannotBeServedKeepsThePreviousOneAndIsLoggedOnce(t *testing.T)
 			if err := os.Chmod(f.Key, 0o644); err != nil { //nolint:gosec // G302: on purpose
 				t.Fatal(err)
 			}
-		}, "other users can read it", func(t *testing.T, f Files) testcert.Bundle {
+		}, "other users can access it", func(t *testing.T, f Files) testcert.Bundle {
 			times := modTimes(t, f)
 			if err := os.Chmod(f.Key, 0o600); err != nil {
 				t.Fatal(err)
@@ -466,13 +467,13 @@ func TestLoadRefusesAPairItCannotServe(t *testing.T) {
 				t.Fatal(err)
 			}
 			return f
-		}, "other users can read it"},
+		}, "other users can access it"},
 		{"missing files", func(*testing.T) Files {
 			return Files{Cert: "/nonexistent/tls.crt", Key: "/nonexistent/tls.key"}
 		}, "/nonexistent/tls."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Load(tc.files(t), Options{Now: func() time.Time { return now }, Log: slog.New(slog.DiscardHandler), CheckKey: othersCanRead})
+			_, err := Load(tc.files(t), Options{Now: func() time.Time { return now }, Log: slog.New(slog.DiscardHandler), CheckKey: othersHaveAccess})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("load: %v, want an error with %q", err, tc.want)
 			}
