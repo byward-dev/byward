@@ -28,14 +28,20 @@ func assertionJWKSURI(cfg *config.Config, parts *authParts) string {
 // ErrNoIdentityAssertionWithoutAuthentication is ExportJWKS's answer without authentication.
 var ErrNoIdentityAssertionWithoutAuthentication = errors.New("with BYWARD_INSECURE_NO_AUTH no identity assertion is sent, so there are no assertion keys to export")
 
+// ErrNoIdentityAssertionForAStdioUpstream is ExportJWKS's answer with a stdio upstream.
+var ErrNoIdentityAssertionForAStdioUpstream = errors.New("a stdio upstream (BYWARD_UPSTREAM_COMMAND) gets no identity assertion, only HTTP upstreams do, so there are no assertion keys to export")
+
 // ExportJWKS is `byward jwks`: the public keys of BYWARD_ASSERTION_KEYS_DIR as a JWKS, for an
 // upstream that loads them from a file instead of fetching them (ADR-0016 §3). Run it again after
-// every key rotation. Without authentication there is no identity assertion, so no keys to export:
-// that is refused before any path is read, as revoke-user, revoke-all and store new-epoch refuse it
-// (L175).
+// every key rotation. Without authentication, or with a stdio upstream (ADR-0016 §2), there is no
+// identity assertion, so no keys to export: that is refused before any path is read, as
+// revoke-user, revoke-all and store new-epoch refuse it without authentication (L175, #429).
 func ExportJWKS(cfg *config.Config) ([]byte, error) {
-	if cfg.NoAuth {
+	switch {
+	case cfg.NoAuth:
 		return nil, ErrNoIdentityAssertionWithoutAuthentication
+	case cfg.UpstreamCommand != nil:
+		return nil, ErrNoIdentityAssertionForAStdioUpstream
 	}
 	keys, err := assertion.LoadKeys(cfg.AssertionKeysDir, secretCheck(cfg))
 	if err != nil {

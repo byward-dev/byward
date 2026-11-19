@@ -7,7 +7,8 @@ setting flags; give settings through the environment. A stdio upstream given on 
 after `--`, as for the proxy (`byward check --offline -- /usr/local/bin/server --flag`); none of
 these commands starts it. Without authentication (`BYWARD_INSECURE_NO_AUTH`) the broker's store is off, so
 revoke-user, revoke-all and store new-epoch exit 2, and no identity assertion is sent, so jwks exits 2
-too. `byward --help` lists them.
+too. A stdio upstream gets no identity assertion either, so jwks exits 2 with one. `byward --help`
+lists them.
 
 | Command | What it does | Network | Exit codes |
 |---|---|---|---|
@@ -260,7 +261,8 @@ byward jwks > byward-jwks.json
 
 Prints the identity assertion's public keys as a JWKS, for an upstream that loads them from a file
 instead of the JWKS URL. Run it again after every assertion key rotation
-([identity assertion](../how-to/identity-assertion.md)).
+([identity assertion](../how-to/identity-assertion.md)). Only an HTTP upstream gets an identity
+assertion: with a stdio upstream, jwks prints no keys, says why and exits 2.
 
 ## `byward downstream-token`
 

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -183,9 +184,14 @@ func TestTheUpstreamCredentialIsRefusedForAStdioUpstreamNamingTheSettingAsGiven(
 	}{
 		{"the _FILE variable", "BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile, nil, "BYWARD_UPSTREAM_CREDENTIAL_FILE"},
 		{"inline, under --dev", "BYWARD_UPSTREAM_CREDENTIAL=k-123", []string{"--dev"}, "BYWARD_UPSTREAM_CREDENTIAL"},
+		{"the -file flag", "", []string{"--upstream-credential-file", credFile}, "--upstream-credential-file"}, // #429
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := Load(append(tc.args, "--", "/usr/local/bin/server"), append(append([]string{}, env...), tc.given), files)
+			environ := slices.Clone(env)
+			if tc.given != "" {
+				environ = append(environ, tc.given)
+			}
+			_, _, err := Load(append(tc.args, "--", "/usr/local/bin/server"), environ, files)
 			want := tc.named + " is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE"
 			if err == nil || !strings.Contains(err.Error(), want) {
 				t.Fatalf("err = %v, want %q", err, want)

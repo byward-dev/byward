@@ -451,10 +451,16 @@ func TestJWKSPrintsThePublicKeysOnly(t *testing.T) {
 	}
 }
 
-// `byward jwks` with no key, with an argument it does not take, or without authentication, prints
-// nothing and exits 2.
-func TestJWKSRefusesNoKeysAnExtraArgumentOrNoAuthentication(t *testing.T) {
+// `byward jwks` with no key, with an argument it does not take, without authentication or with a
+// stdio upstream, prints nothing and exits 2.
+func TestJWKSRefusesNoKeysAnExtraArgumentNoAuthenticationOrAStdioUpstream(t *testing.T) {
 	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
+	// The stdio row has a key in its default key directory, so a jwks that read it would print it
+	// (#429). An explicit BYWARD_ASSERTION_KEYS_DIR is refused with a stdio upstream.
+	dataDir := t.TempDir()
+	assertionkey.Write(t, dataDir+"/assertion-keys", "k1", false)
+	stdio := append(slices.DeleteFunc(authEnv(t), func(kv string) bool { return strings.HasPrefix(kv, "BYWARD_ASSERTION_KEYS_DIR=") }),
+		"BYWARD_PUBLIC_URL=https://m.example/mcp", `BYWARD_UPSTREAM_COMMAND=["/bin/cat"]`, "BYWARD_DATA_DIR="+dataDir)
 	for _, tc := range []struct {
 		name     string
 		args     []string
@@ -468,6 +474,10 @@ func TestJWKSRefusesNoKeysAnExtraArgumentOrNoAuthentication(t *testing.T) {
 		{"without authentication", []string{"jwks"},
 			[]string{"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp"},
 			[]string{"byward: configuration error: with BYWARD_INSECURE_NO_AUTH no identity assertion is sent, so there are no assertion keys to export\n"}},
+		// A stdio upstream gets no identity assertion (ADR-0016 §2): refused as such, though keys
+		// sit in the default directory.
+		{"stdio upstream", []string{"jwks"}, stdio,
+			[]string{"byward: configuration error: a stdio upstream (BYWARD_UPSTREAM_COMMAND) gets no identity assertion, only HTTP upstreams do, so there are no assertion keys to export\n"}},
 	} {
 		code, stdout, stderr := runWith(tc.args, tc.env...)
 		if code != exitConfig || stdout != "" {
