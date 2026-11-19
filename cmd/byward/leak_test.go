@@ -125,11 +125,8 @@ func TestAnAcceptedValueOfAHidingSettingAppearsInNoCommandsOutput(t *testing.T) 
 			tried[s.Name]++
 			for _, format := range []string{"json", "text"} {
 				for _, c := range commands {
-					ctx, cancel := context.WithCancel(context.Background())
-					cancel()
-					var out, errb strings.Builder
-					code := run(ctx, c.args, withFormat(env, format), &out, &errb)
-					got := out.String() + errb.String()
+					code, stdout, stderr := runDone(c.args, withFormat(env, format)...)
+					got := stdout + stderr
 					if strings.Contains(got, canary) {
 						t.Errorf("%s=%s (%s), %s, log %s: exit %d, the secret is shown:\n%s", s.Env(), form.value, form.name, c.name, format, code, got)
 					}
@@ -226,23 +223,22 @@ func leakContext(s config.Setting) string {
 func leakContexts(t *testing.T, program string) map[string][]string {
 	t.Helper()
 	listen := []string{"BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_LISTEN=192.0.2.1:8080", "BYWARD_INTERNAL_LISTEN="}
-	entra := append(append(authEnv(t), listen...), "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp") // an IP, so startup resolves no name
-	secret := setting(entra, "BYWARD_ENTRA_CLIENT_SECRET_FILE")                                  // the oidc client reuses authEnv's secret file
-	command, _ := json.Marshal([]string{program})                                                // strings always marshal
-	notEntra := without(entra, "BYWARD_ENTRA_")
-	oidcKey := append(slices.Clone(notEntra), "BYWARD_IDP=oidc", "BYWARD_OIDC_ISSUER=https://idp.example", "BYWARD_OIDC_CLIENT_ID=abc",
+	httpServe := append(slices.Clone(listen), "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp") // an IP, so startup resolves no name
+	entra := append(authEnv(t), httpServe...)
+	command, _ := json.Marshal([]string{program}) // strings always marshal
+	oidcBase := append(oidcAuthEnv(t), httpServe...)
+	oidc := append(slices.Clone(oidcBase), "BYWARD_IDP=oidc", "BYWARD_OIDC_ISSUER=https://idp.example", "BYWARD_OIDC_CLIENT_ID=abc",
 		"BYWARD_GATE_ALLOW_EMPTY=true")
 	contexts := map[string][]string{
 		"entra":                         entra,
 		"entra, no secret":              without(entra, "BYWARD_ENTRA_CLIENT_SECRET_FILE="),
 		"entra, no state directory":     without(entra, "BYWARD_STORE_DIR="),
 		"entra, other assertion header": append(slices.Clone(entra), "BYWARD_ASSERTION_HEADER=X-Byward-Identity"),
-		"oidc":                          append(slices.Clone(oidcKey), "BYWARD_OIDC_CLIENT_SECRET_FILE="+secret),
-		"oidc, no secret":               oidcKey,
-		"google": append(slices.Clone(notEntra), "BYWARD_IDP=google", "BYWARD_OIDC_CLIENT_ID=abc", "BYWARD_OIDC_CLIENT_SECRET_FILE="+secret,
-			"BYWARD_GATE_ALLOW_EMPTY=true"),
-		"stdio": append(append(stdioAuthEnv(t), listen...), "BYWARD_UPSTREAM_COMMAND="+string(command)),
-		"app":   append(slices.Clone(entra), "BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=r"),
+		"oidc":                          oidc,
+		"oidc, no secret":               without(oidc, "BYWARD_OIDC_CLIENT_SECRET_FILE="),
+		"google":                        append(slices.Clone(oidcBase), "BYWARD_IDP=google", "BYWARD_OIDC_CLIENT_ID=abc", "BYWARD_GATE_ALLOW_EMPTY=true"),
+		"stdio":                         append(append(stdioAuthEnv(t), listen...), "BYWARD_UPSTREAM_COMMAND="+string(command)),
+		"app":                           append(slices.Clone(entra), "BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=r"),
 	}
 	for name, env := range contexts {
 		if name == "entra, no secret" || name == "oidc, no secret" || name == "entra, no state directory" {

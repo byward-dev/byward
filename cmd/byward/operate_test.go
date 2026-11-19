@@ -124,18 +124,9 @@ func TestInitRefusesAURLWithAPasswordWithoutShowingIt(t *testing.T) {
 func TestASettingWithACredentialStopsEveryCommandWithoutShowingIt(t *testing.T) {
 	const secret = "s3cretPW"
 	entraEnv := func(t *testing.T) []string { return authEnv(t) }
-	// The OIDC issuer needs an oidc IdP: authEnv's Entra settings out, its secret file reused.
+	// The OIDC issuer needs an oidc IdP.
 	oidcEnv := func(t *testing.T) []string {
-		var env []string
-		for _, kv := range authEnv(t) {
-			switch k, v, _ := strings.Cut(kv, "="); {
-			case k == "BYWARD_ENTRA_CLIENT_SECRET_FILE":
-				env = append(env, "BYWARD_OIDC_CLIENT_SECRET_FILE="+v)
-			case !strings.HasPrefix(k, "BYWARD_ENTRA_"):
-				env = append(env, kv)
-			}
-		}
-		return append(env, "BYWARD_IDP=oidc", "BYWARD_OIDC_CLIENT_ID=app", "BYWARD_GATE_ALLOW_EMPTY=true", "BYWARD_DEV=true")
+		return append(oidcAuthEnv(t), "BYWARD_IDP=oidc", "BYWARD_OIDC_CLIENT_ID=app", "BYWARD_GATE_ALLOW_EMPTY=true", "BYWARD_DEV=true")
 	}
 	for _, tc := range []struct {
 		setting, shown string
@@ -154,11 +145,7 @@ func TestASettingWithACredentialStopsEveryCommandWithoutShowingIt(t *testing.T) 
 			// and it runs with its context already done, so it returns at once.
 			env := append(tc.base(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp",
 				"BYWARD_LISTEN=192.0.2.1:8080", "BYWARD_INTERNAL_LISTEN=", tc.setting)
-			ctx, cancel := context.WithCancel(context.Background())
-			cancel()
-			var out, errb strings.Builder
-			code := run(ctx, command, env, &out, &errb)
-			stdout, stderr := out.String(), errb.String()
+			code, stdout, stderr := runDone(command, env...)
 			if code != exitConfig || strings.Contains(stdout+stderr, secret) || !strings.Contains(stderr, name+": ") || !strings.Contains(stderr, tc.shown) {
 				t.Errorf("%q with %s: code %d stdout %q stderr %q, want exit 2, %s and %s named, and no secret", command, tc.setting, code, stdout, stderr, name, tc.shown)
 			}
@@ -260,16 +247,10 @@ func TestCheckOfflineWarnsThatPlainIdentityHeadersAreOn(t *testing.T) {
 
 // check names an oidc IdP's client credential (#306); Entra's has no such line.
 func TestCheckOfflineNamesAnOIDCClientCredential(t *testing.T) {
-	base := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp")
-	var secret string
-	oidcEnv := slices.DeleteFunc(slices.Clone(base), func(kv string) bool {
-		if v, ok := strings.CutPrefix(kv, "BYWARD_ENTRA_CLIENT_SECRET_FILE="); ok {
-			secret = v
-		}
-		return strings.HasPrefix(kv, "BYWARD_ENTRA_")
-	})
-	oidcEnv = append(oidcEnv, "BYWARD_IDP=keycloak", "BYWARD_OIDC_ISSUER=https://sso.example.com/realms/acme", "BYWARD_OIDC_CLIENT_ID=byward",
-		"BYWARD_OIDC_CLIENT_SECRET_FILE="+secret, "BYWARD_GATE_ALLOW_EMPTY=true")
+	urls := []string{"BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp"}
+	base := append(authEnv(t), urls...)
+	oidcEnv := append(append(oidcAuthEnv(t), urls...),
+		"BYWARD_IDP=keycloak", "BYWARD_OIDC_ISSUER=https://sso.example.com/realms/acme", "BYWARD_OIDC_CLIENT_ID=byward", "BYWARD_GATE_ALLOW_EMPTY=true")
 	for name, tc := range map[string]struct {
 		env  []string
 		line string // "" means no credential line

@@ -37,6 +37,16 @@ func runWith(args []string, env ...string) (int, string, string) {
 	return code, out.String(), errb.String()
 }
 
+// runDone is runWith with a context that is already done, so a command that waits on it returns at
+// once: startup stops right after it has started, and serves nothing.
+func runDone(args []string, env ...string) (int, string, string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var out, errb bytes.Buffer
+	code := run(ctx, args, env, &out, &errb)
+	return code, out.String(), errb.String()
+}
+
 // authEnv writes the files authenticated mode needs and returns the settings naming them.
 func authEnv(t *testing.T) []string {
 	t.Helper()
@@ -54,6 +64,16 @@ func authEnv(t *testing.T) []string {
 		"BYWARD_ENTRA_CLIENT_SECRET_FILE=" + filepath.Join(dir, "secret"), "BYWARD_KEYS_DIR=" + keys,
 		"BYWARD_STATIC_CLIENTS_FILE=" + filepath.Join(dir, "clients.json"),
 		"BYWARD_STORE_DIR=" + filepath.Join(dir, "state"), "BYWARD_ASSERTION_KEYS_DIR=" + assertionkey.Dir(t)}
+}
+
+// oidcAuthEnv is authEnv for an oidc IdP: without the Entra settings, and with authEnv's secret file
+// as the client secret. The caller names the IdP, the client ID and, where the IdP needs one, the
+// issuer.
+func oidcAuthEnv(t *testing.T) []string {
+	t.Helper()
+	env := authEnv(t)
+	secret := setting(env, "BYWARD_ENTRA_CLIENT_SECRET_FILE")
+	return append(without(env, "BYWARD_ENTRA_"), "BYWARD_OIDC_CLIENT_SECRET_FILE="+secret)
 }
 
 // stdioAuthEnv is authEnv for a stdio upstream, which refuses the identity assertion's keys directory.
@@ -160,12 +180,9 @@ func TestAValueOfEachHidingShapeIsShownThroughItInPrintConfigAndTheStartupLog(t 
 			if code != exitOK || !strings.Contains(stdout, "\n"+c.line+"\n") || strings.Contains(stdout+stderr, c.hidden) {
 				t.Errorf("--print-config: code %d, stdout %q, stderr %q; want the line %q and never %q", code, stdout, stderr, c.line, c.hidden)
 			}
-			ctx, cancel := context.WithCancel(context.Background())
-			cancel()
-			var out, errb bytes.Buffer
-			run(ctx, c.args, env, &out, &errb)
-			if want := `"msg":"config",` + c.logged; !strings.Contains(errb.String(), want) || strings.Contains(errb.String()+out.String(), c.hidden) {
-				t.Errorf("startup log %s; want %s and never %q", errb.String(), want, c.hidden)
+			_, stdout, stderr = runDone(c.args, env...)
+			if want := `"msg":"config",` + c.logged; !strings.Contains(stderr, want) || strings.Contains(stderr+stdout, c.hidden) {
+				t.Errorf("startup log %s; want %s and never %q", stderr, want, c.hidden)
 			}
 		})
 	}
@@ -198,24 +215,19 @@ func TestAValueWithANewlineCannotForgeASettingsLineInPrintConfigOrTheStartupLog(
 	if want := []string{"BYWARD_ENTRA_CLIENT_SECRET= (default)"}; len(notOwn) > 0 || !slices.Equal(secretLines, want) {
 		t.Errorf("--print-config: lines that are not one setting's own %q; BYWARD_ENTRA_CLIENT_SECRET lines %q, want only %q:\n%s", notOwn, secretLines, want, stdout)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	var out, errb bytes.Buffer
-	if code := run(ctx, nil, env, &out, &errb); code != exitOK {
-		t.Fatalf("startup: code %d, stderr %s", code, errb.String())
+	code, _, stderr = runDone(nil, env...)
+	if code != exitOK {
+		t.Fatalf("startup: code %d, stderr %s", code, stderr)
 	}
-	if want := `"msg":"config","setting":"BYWARD_RESOURCE_NAME","value":"\"x\\nBYWARD_ENTRA_CLIENT_SECRET=<redacted> (file)\"","source":"env"}`; !strings.Contains(errb.String(), want) {
-		t.Errorf("startup log %s; want %s", errb.String(), want)
+	if want := `"msg":"config","setting":"BYWARD_RESOURCE_NAME","value":"\"x\\nBYWARD_ENTRA_CLIENT_SECRET=<redacted> (file)\"","source":"env"}`; !strings.Contains(stderr, want) {
+		t.Errorf("startup log %s; want %s", stderr, want)
 	}
 }
 
 func TestRunStopsOnCancelledContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	var out, errb bytes.Buffer
-	code := run(ctx, nil, append(authEnv(t), serveEnv("https://m.example/mcp", "127.0.0.1:0")...), &out, &errb)
-	if code != exitOK || !strings.Contains(errb.String(), `"msg":"starting"`) {
-		t.Fatalf("code=%d logs=%s", code, errb.String())
+	code, _, logs := runDone(nil, append(authEnv(t), serveEnv("https://m.example/mcp", "127.0.0.1:0")...)...)
+	if code != exitOK || !strings.Contains(logs, `"msg":"starting"`) {
+		t.Fatalf("code=%d logs=%s", code, logs)
 	}
 }
 
@@ -252,38 +264,21 @@ func TestATracingErrorReachesTheLogAtWarnLevel(t *testing.T) {
 }
 
 func TestDevModeLogsEachRelaxation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	var out, errb bytes.Buffer
-	code := run(ctx, []string{"--dev"}, append(authEnv(t), serveEnv("http://127.0.0.1:8080/mcp", "127.0.0.1:0")...), &out, &errb)
-	if logs := errb.String(); code != exitOK || !strings.Contains(logs, `"relaxation":"secret file permissions are not checked"`) || !strings.Contains(logs, `"relaxation":"http public URL on loopback"`) {
-		t.Fatalf("code=%d logs=%s", code, errb.String())
+	code, _, logs := runDone([]string{"--dev"}, append(authEnv(t), serveEnv("http://127.0.0.1:8080/mcp", "127.0.0.1:0")...)...)
+	if code != exitOK || !strings.Contains(logs, `"relaxation":"secret file permissions are not checked"`) || !strings.Contains(logs, `"relaxation":"http public URL on loopback"`) {
+		t.Fatalf("code=%d logs=%s", code, logs)
 	}
 }
 
 // An http IdP issuer on loopback, which --dev accepts, is logged at startup as a relaxation
 // (security invariant 12): #355's acceptance test, end to end from the settings.
 func TestDevModeLogsAnHTTPIdPIssuerOnLoopback(t *testing.T) {
-	dir := t.TempDir()
-	secret := filepath.Join(dir, "oidc-secret")
-	if err := os.WriteFile(secret, []byte("s3cret-oidc"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	const relaxation = "http IdP issuer on loopback (http://localhost:8180/realms/byward)"
-	var env []string
-	for _, kv := range authEnv(t) {
-		if !strings.HasPrefix(kv, "BYWARD_ENTRA_") {
-			env = append(env, kv)
-		}
-	}
-	env = append(env, "BYWARD_IDP=keycloak", "BYWARD_OIDC_ISSUER=http://localhost:8180/realms/byward", "BYWARD_OIDC_CLIENT_ID=byward",
-		"BYWARD_OIDC_CLIENT_SECRET_FILE="+secret, "BYWARD_GATE_ALLOW_EMPTY=true", "BYWARD_DEV=true")
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	var out, errb bytes.Buffer
-	if code := run(ctx, nil, append(env, serveEnv("http://127.0.0.1:8080/mcp", "127.0.0.1:0")...), &out, &errb); code != exitOK ||
-		!strings.Contains(errb.String(), `"msg":"development mode relaxation","relaxation":"`+relaxation) {
-		t.Fatalf("code=%d logs=%s; want the issuer logged as a relaxation", code, errb.String())
+	env := append(oidcAuthEnv(t), "BYWARD_IDP=keycloak", "BYWARD_OIDC_ISSUER=http://localhost:8180/realms/byward", "BYWARD_OIDC_CLIENT_ID=byward",
+		"BYWARD_GATE_ALLOW_EMPTY=true", "BYWARD_DEV=true")
+	if code, _, logs := runDone(nil, append(env, serveEnv("http://127.0.0.1:8080/mcp", "127.0.0.1:0")...)...); code != exitOK ||
+		!strings.Contains(logs, `"msg":"development mode relaxation","relaxation":"`+relaxation) {
+		t.Fatalf("code=%d logs=%s; want the issuer logged as a relaxation", code, logs)
 	}
 }
 
@@ -300,11 +295,7 @@ func TestListenFailureIsARuntimeError(t *testing.T) {
 }
 
 func TestNoAuthLogsThatAuthIsOffAndTheNextStep(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	var out, errb bytes.Buffer
-	code := run(ctx, nil, append([]string{"BYWARD_INSECURE_NO_AUTH=true"}, serveEnv("http://localhost:8080/mcp", "127.0.0.1:0")...), &out, &errb)
-	logs := errb.String()
+	code, _, logs := runDone(nil, append([]string{"BYWARD_INSECURE_NO_AUTH=true"}, serveEnv("http://localhost:8080/mcp", "127.0.0.1:0")...)...)
 	if code != exitOK || !strings.Contains(logs, `"level":"WARN","msg":"development mode relaxation","relaxation":"AUTHENTICATION IS OFF: anyone who can reach http://localhost:8080/mcp`) || !strings.Contains(logs, "to require sign-in") {
 		t.Fatalf("code=%d logs=%s", code, logs)
 	}
