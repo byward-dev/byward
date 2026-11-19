@@ -219,7 +219,7 @@ func (p *Provider) diagnoseToken(ctx context.Context, raw string, d Diagnosis) [
 		// The token is v2 already, so the cause is the issuer or tenant, the audience, or the clock;
 		// the error names which (#504).
 		return []doctor.Result{check.Result(doctor.Fail, "the probe's token fails the proxy's checks: "+err.Error(),
-			"check that "+d.TenantSetting+" and "+d.ClientIDSetting+" name the tenant and the app registration, and that this host's clock is right; the error says which check failed")}
+			"check that this host's clock is right, and that "+d.TenantSetting+" holds the tenant ID and "+d.ClientIDSetting+" the app registration's Application (client) ID; the error says which check failed")}
 	}
 	out := []doctor.Result{check.Result(doctor.Pass, "v2 token for audience "+p.cfg.ClientID+", issuer "+idp.StringClaim(claims, "iss"), "")}
 	if idp.StringClaim(claims, "idtyp") == "app" {

@@ -18,10 +18,6 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
-// tokenChecksFix is the fix for a v2 token the proxy's checks refuse: whatever the cause, it names the
-// tenant and client ID settings and the clock, never the token version (#504).
-const tokenChecksFix = "check that TENANT_SETTING and CLIENT_ID_SETTING name the tenant and the app registration, and that this host's clock is right; the error says which check failed"
-
 var diagnosis = Diagnosis{TenantSetting: "TENANT_SETTING", ClientIDSetting: "CLIENT_ID_SETTING", CredentialKind: CredentialSecret, CredentialSetting: "SECRET_SETTING"}
 
 // diagnose runs Diagnose and indexes the results by check name.
@@ -92,6 +88,9 @@ func TestDiagnoseOfAHealthyAppPassesAndSkipsWhatNeedsGraph(t *testing.T) {
 // One fake-IdP misconfiguration per check (ADR-0024); each failing result names the fix.
 func TestDiagnoseReportsEachMisconfigurationWithItsFix(t *testing.T) {
 	const fixedTenant = "0b5e3c1d-2f4a-4c6b-9d8e-7a1f2b3c4d5e" // a tenant ID the cause can name
+	// The whole fix for a v2 token the proxy's checks refuse: whatever the cause, the clock and the
+	// tenant and client ID settings, and nothing about the token version (#504).
+	const tokenChecksFix = "check that this host's clock is right, and that TENANT_SETTING holds the tenant ID and CLIENT_ID_SETTING the app registration's Application (client) ID; the error says which check failed"
 	cases := []struct {
 		name      string
 		opts      []fakeidp.Option
@@ -102,6 +101,7 @@ func TestDiagnoseReportsEachMisconfigurationWithItsFix(t *testing.T) {
 		// cause, when set, is the end of the underlying error, which the message must end with.
 		cause    string
 		inFix    string
+		fix      string   // when set, the whole fix: nothing may be added to it
 		appRoles []string // app-only tokens on with these roles
 	}{
 		{name: "tenant that does not exist", opts: []fakeidp.Option{fakeidp.WithUnknownTenantsRefused(true)},
@@ -149,16 +149,16 @@ func TestDiagnoseReportsEachMisconfigurationWithItsFix(t *testing.T) {
 			opts:  []fakeidp.Option{fakeidp.WithTenantID(fixedTenant), fakeidp.WithAuthority("https://login.example.net")},
 			check: "entra access token", status: doctor.Fail, inMessage: "the probe's token fails the proxy's checks: ",
 			cause: `entra: issuer "https://login.example.net/` + fixedTenant + `/v2.0" is not the v2 issuer of tenant ` + fixedTenant,
-			inFix: tokenChecksFix},
+			fix:   tokenChecksFix},
 		// A v2 token the proxy's clock reads as expired, or as issued in the future (#504).
 		{name: "v2 token checked by a clock that runs ahead", setup: func(t *testing.T, e *env) {
 			rebuild(t, e, func(c *Config) { c.Now = func() time.Time { return now().Add(3 * time.Hour) } })
 		}, check: "entra access token", status: doctor.Fail, inMessage: "the probe's token fails the proxy's checks: ",
-			cause: "idp: ID token expired", inFix: tokenChecksFix},
+			cause: "idp: ID token expired", fix: tokenChecksFix},
 		{name: "v2 token checked by a clock that runs behind", setup: func(t *testing.T, e *env) {
 			rebuild(t, e, func(c *Config) { c.Now = func() time.Time { return now().Add(-3 * time.Hour) } })
 		}, check: "entra access token", status: doctor.Fail, inMessage: "the probe's token fails the proxy's checks: ",
-			cause: "idp: ID token iat missing or in the future", inFix: tokenChecksFix},
+			cause: "idp: ID token iat missing or in the future", fix: tokenChecksFix},
 		{name: "no idtyp claim", opts: []fakeidp.Option{fakeidp.WithIDTypClaim(false)},
 			check: "entra idtyp claim", status: doctor.Warn, inMessage: "no idtyp=app", inFix: "idtyp optional claim"},
 		{name: "no idtyp claim with app-only tokens on", opts: []fakeidp.Option{fakeidp.WithIDTypClaim(false)}, appRoles: []string{"MCP.Invoke"},
@@ -184,8 +184,9 @@ func TestDiagnoseReportsEachMisconfigurationWithItsFix(t *testing.T) {
 			d := diagnosis
 			d.AppRoles = tc.appRoles
 			r := diagnose(t, e.p, d)[tc.check]
-			if r.Status != tc.status || !strings.Contains(r.Message, tc.inMessage) || !strings.HasSuffix(r.Message, tc.cause) || !strings.Contains(r.Fix, tc.inFix) {
-				t.Fatalf("%s = %+v\nwant status %s, message with %q ending %q, fix with %q", tc.check, r, tc.status, tc.inMessage, tc.cause, tc.inFix)
+			if r.Status != tc.status || !strings.Contains(r.Message, tc.inMessage) || !strings.HasSuffix(r.Message, tc.cause) || !strings.Contains(r.Fix, tc.inFix) ||
+				tc.fix != "" && r.Fix != tc.fix {
+				t.Fatalf("%s = %+v\nwant status %s, message with %q ending %q, fix with %q, the whole fix %q", tc.check, r, tc.status, tc.inMessage, tc.cause, tc.inFix, tc.fix)
 			}
 		})
 	}
