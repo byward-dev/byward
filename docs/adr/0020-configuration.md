@@ -1,6 +1,6 @@
 # ADR-0020: Configuration — flags and env, secrets from files, one registry
 
-- Status: Accepted; amended 2026-11-17 (#458); amended by ADR-0031 (§4, §6)
+- Status: Accepted; amended 2026-11-17 (#458); amended by ADR-0031 (§4, §6), ADR-0032 (§4)
 - Date: 2026-11-06
 - Issue: #19 (F18)
 
@@ -36,7 +36,7 @@ variables.
      redirect URIs, secret file; ADR-0008).
 4. **One registry in code** holds every setting: name, env, flag, default, secret or not, version
    introduced, deprecation. It generates the docs reference, `--help` and `--help-config <KEY>`, and
-   drives validation and redaction. _Amended by ADR-0031._
+   drives validation and redaction. _Amended by ADR-0031._ _Amended by ADR-0032._
 5. **Strict startup:**
    - an unknown `BYWARD_*` variable is an error with a "did you mean" suggestion;
    - a removed key is an error with a docs link;

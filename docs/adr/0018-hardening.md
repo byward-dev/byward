@@ -1,6 +1,6 @@
 # ADR-0018: Hardening — Origin and Host checks, bounded HTTP, Rewrite-only proxying
 
-- Status: Accepted; amended 2026-11-06 (#102, #103, #105), 2026-11-07 (#167), 2026-11-14 (§13)
+- Status: Accepted; amended 2026-11-06 (#102, #103, #105), 2026-11-07 (#167), 2026-11-14 (§13); amended by ADR-0032 (§1–2)
 - Date: 2026-11-06
 - Issue: #18 (F17)
 
@@ -26,9 +26,10 @@ Clients (runtime, 2026-11-06): Node `fetch` and MCP Inspector CLI 2.14.0 (TypeSc
 
 1. **`Origin` on the MCP endpoint, before authentication:** an exact allowlist (scheme, host, port);
    multiple `Origin` headers or `null` get 403; a missing `Origin` passes. The default allowlist is empty,
-   so browser-based clients must be listed.
+   so browser-based clients must be listed. _Amended by ADR-0032._
 2. **`Host`** is validated on every listener against the configured public URL plus operator-configured
    hosts (e.g. the ingress's internal name); a mismatch gets 421 and is logged; `doctor` shows the list.
+   _Amended by ADR-0032._
 3. **Bind `127.0.0.1` by default;** public addresses only when configured.
 4. **`http.Server`:** `ReadHeaderTimeout` 10 s, `ReadTimeout` 30 s, `WriteTimeout` 0 with per-request
    deadlines via `ResponseController` for streams, `IdleTimeout` 120 s, `MaxHeaderBytes` 64 KiB.
@@ -86,6 +87,7 @@ Clients (runtime, 2026-11-06): Node `fetch` and MCP Inspector CLI 2.14.0 (TypeSc
 - **§2 on the internal listener:** `Host` is checked there too. Kubelet probes and Prometheus address a pod by its
   IP, which changes, so the internal listener accepts any IP literal, `localhost`, and the `BYWARD_ALLOWED_HOSTS`
   names (port ignored); other names get 421. A DNS rebinding attack always carries the attacker's own host name.
+  _Amended by ADR-0032._
 - **§5 consent body:** the limit is 16 KiB, not 4 KiB. The consent answer carries the sealed consent flow, which
   holds the whole sign-in state: the login (up to 2,600 bytes of JSON, including the client's `state` of up to
   512 bytes) plus the flow's own fields, then sealed and base64url-encoded (about 4/3 larger). That reaches about

@@ -1,6 +1,6 @@
 # ADR-0008: Client registration — static, CIMD and DCR, strictly validated
 
-- Status: Accepted; amended 2026-11-14 (#338)
+- Status: Accepted; amended 2026-11-14 (#338); amended by ADR-0032 (§4, §8–9)
 - Date: 2026-11-05
 - Issue: #7 (F6)
 
@@ -45,7 +45,7 @@ domain; nobody offers operator-trusted hosts.
 4. **CIMD:** §3 URL rules; the SSRF guard (`code.dny.dev/ssrf`, pinned) covers the document,
    `jwks_uri` and `logo_uri` — https only, no redirects, 5 KB, 5 s; cache per HTTP headers clamped
    to 60 s–24 h; errors never cached, fetches rate-limited per URL; optional host allowlist, off by
-   default. Any failure returns `invalid_client` and never redirects to the client.
+   default. Any failure returns `invalid_client` and never redirects to the client. _Amended by ADR-0032._
 5. **Static clients** from operator config: `none`, `private_key_jwt`, or `client_secret_basic`/
    `post` (static only; secrets via `*_FILE`, constant-time comparison).
 6. **`/token` re-checks** client ID, exact redirect URI, S256 verifier and client
@@ -54,7 +54,7 @@ domain; nobody offers operator-trusted hosts.
 7. **PKCE S256 required**; `plain` or a missing challenge is rejected. No override.
 8. **Client trust level** for consent: verified (CIMD host on the operator's trusted list), domain
    (other CIMD hosts), not verified (DCR). A redirect host different from the CIMD host triggers a
-   warning, never a block; loopback reads "an app on this computer".
+   warning, never a block; loopback reads "an app on this computer". _Amended by ADR-0032._
 9. **Denylist** by CIMD URL or redirect host (a client ID alone is re-registered around).
    _Amended 2026-11-14 (#338):_ a denial also ends what the MCP client already holds. Its next
    refresh is refused and revokes the grant: `invalid_grant`, or `invalid_client` for a denied CIMD
@@ -62,7 +62,8 @@ domain; nobody offers operator-trusted hosts.
    an in-memory check. A proxy token of an MCP client denied by its redirect host runs out within
    its lifetime (1 h), since checking the host would need the client's registration on every
    request. _Amended 2026-11-17 (L168):_ a denied CIMD URL's code redemption and its own `/revoke`
-   request end the grant too, as its refresh does, still answered `invalid_client`.
+   request end the grant too, as its refresh does, still answered `invalid_client`. _Amended by
+   ADR-0032._
 10. **Consent** is mandatory for DCR and CIMD clients; whether static clients see it, and how
     scopes are worded (operator text per scope), is F7.
 

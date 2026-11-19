@@ -15,7 +15,7 @@ ADR itself, with its issue. The last column lists both.
 | [0005](0005-auth-modes-broker-only.md) | Auth modes: broker only (a loopback no-auth mode added by ADR-0027) | F3 | ADR-0027 |
 | [0006](0006-token-model.md) | Token model: minted, sealed proxy tokens with a revocation deny list | F4 | ADR-0007; 2026-11-14 (#287) |
 | [0007](0007-state-and-storage.md) | State and storage: one store interface, embedded SQLite by default | F5 | 2026-11-07 (#150); 2026-11-13 (#227, PostgreSQL); 2026-11-14 (#365, §5: no generated keys) |
-| [0008](0008-client-registration.md) | Client registration: static, CIMD and DCR, strictly validated | F6 | 2026-11-14 (#338) |
+| [0008](0008-client-registration.md) | Client registration: static, CIMD and DCR, strictly validated | F6 | ADR-0032 (§4, §8–9); 2026-11-14 (#338) |
 | [0009](0009-redirect-uri-policy.md) | Redirect URI policy: exact HTTPS, any-port loopback, re-checked at /token | F8 | ADR-0010; 2026-11-06 (DCR); 2026-11-17 (diagnostics) |
 | [0010](0010-consent-screen.md) | Consent screen: before the IdP, per client, remembered only for trusted clients | F7 | 2026-11-06 (#90, slices 1.4, 1.6, 2.1); 2026-11-07 (#126); 2026-11-14 (#287, #363) |
 | [0011](0011-idp-adapters.md) | IdP adapters: small interface, generic OIDC with presets, Entra on top | F9 | ADR-0026; ADR-0030; 2026-11-14 (#286, #306) |
@@ -25,9 +25,9 @@ ADR itself, with its issue. The last column lists both.
 | [0015](0015-access-gate.md) | Authorization: an access gate at login and refresh, no per-request denials | F12 | 2026-11-06 (slice 1.5); 2026-11-07 (#126); ADR-0014 (#64); ADR-0011 (#286) |
 | [0016](0016-identity-propagation.md) | Identity propagation: an RFC 9068 assertion for the upstream, strip then inject | F13 | 2026-11-07 (#151, #64); 2026-11-08 (#187, #207); 2026-11-14 (#330) |
 | [0017](0017-delegation-obo.md) | Delegation: proxy-side Entra On-Behalf-Of (v0.2, amended) | F14 | ADR-0029; 2026-11-06 (release); 2026-11-07 (slice 4.2); 2026-11-08 (#195, #141) |
-| [0018](0018-hardening.md) | Hardening: Origin and Host checks, bounded HTTP, Rewrite-only proxying | F17 | 2026-11-06 (OAuth rate limits; #102, #103, #105); 2026-11-07 (#167); 2026-11-14 (§13, invariants list moved) |
+| [0018](0018-hardening.md) | Hardening: Origin and Host checks, bounded HTTP, Rewrite-only proxying | F17 | ADR-0032 (§1–2); 2026-11-06 (OAuth rate limits; #102, #103, #105); 2026-11-07 (#167); 2026-11-14 (§13, invariants list moved) |
 | [0019](0019-packaging.md) | Packaging: a signed container image and Linux binaries for servers | F19 | 2026-11-13 (#183, TLS) |
-| [0020](0020-configuration.md) | Configuration: flags and env, secrets from files, one registry | F18 | 2026-11-17 (#458, §6); ADR-0031 (§4, §6) |
+| [0020](0020-configuration.md) | Configuration: flags and env, secrets from files, one registry | F18 | 2026-11-17 (#458, §6); ADR-0031 (§4, §6); ADR-0032 (§4) |
 | [0021](0021-observability.md) | Observability: redacted logs, an audit stream, one request ID, telemetry off by default | F20 | 2026-11-06 |
 | [0022](0022-machine-to-machine.md) | Machine-to-machine: accept Entra app-only tokens, opt-in (v0.2, amended) | F15 | 2026-11-06 (release); 2026-11-07 (#64) |
 | [0023](0023-project-governance.md) | Project governance: 0.y.z with a stability contract, Apache-2.0 §5, disclosed AI help | F22 | — |
@@ -39,6 +39,7 @@ ADR itself, with its issue. The last column lists both.
 | [0029](0029-stdio-downstream-token-socket.md) | stdio upstreams get downstream tokens from a token socket | F14 | — |
 | [0030](0030-oidc-roles-groups-claims.md) | Configurable roles and groups claims for OIDC IdPs | F9 | — |
 | [0031](0031-setting-shapes.md) | Setting shapes: display and refusal | F18 | — |
+| [0032](0032-one-host-rule.md) | One host rule: one parser, a rule per setting class, one host-name character set | F17, F18 | — |
 
 ## Writing a new ADR
 
