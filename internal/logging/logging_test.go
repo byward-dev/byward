@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -294,15 +295,46 @@ func TestTheRequestLineCarriesItsIDWithAnyLogger(t *testing.T) {
 	}
 }
 
+// The request line logs the final status, not an informational one: 1xx statuses from 100 to 199
+// precede it, except 101 Switching Protocols, which is final, as any status from 200 up is. The first
+// final status, or a body, fixes it, and a handler that writes neither gets 200. Metrics and server
+// spans read the status through StatusRecorder too.
 func TestInformationalStatusIsNotLoggedAsFinal(t *testing.T) {
-	var buf bytes.Buffer
-	h := Middleware(New(&buf, "json"), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusEarlyHints)
-		w.WriteHeader(http.StatusBadGateway)
-	}))
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
-	if !strings.Contains(buf.String(), `"status":502`) {
-		t.Fatalf("logged %s", buf.String())
+	const body = 0 // in writes: a body write instead of a status
+	for _, c := range []struct {
+		name   string
+		writes []int // what the handler writes, in order: a status, or body
+		want   int   // the final status the request line logs
+	}{
+		{"103 Early Hints, then 502", []int{http.StatusEarlyHints, http.StatusBadGateway}, http.StatusBadGateway},
+		{"101 Switching Protocols is final; a later 500 is ignored", []int{http.StatusSwitchingProtocols, http.StatusInternalServerError}, http.StatusSwitchingProtocols},
+		{"100, the lowest informational, then 404", []int{http.StatusContinue, http.StatusNotFound}, http.StatusNotFound},
+		{"199, the highest informational, then 503", []int{199, http.StatusServiceUnavailable}, http.StatusServiceUnavailable},
+		{"200 is final; a later 500 is ignored", []int{http.StatusOK, http.StatusInternalServerError}, http.StatusOK},
+		{"a body first fixes 200; a later 500 is ignored", []int{body, http.StatusInternalServerError}, http.StatusOK},
+		{"nothing written is 200", nil, http.StatusOK},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				for _, code := range c.writes {
+					if code == body {
+						_, _ = w.Write([]byte("x"))
+						continue
+					}
+					w.WriteHeader(code)
+				}
+			})
+			var buf bytes.Buffer
+			Middleware(New(&buf, "json"), handler).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+			if wantLine := fmt.Sprintf(`"status":%d,`, c.want); !strings.Contains(buf.String(), wantLine) {
+				t.Errorf("request line %s; want %s", buf.String(), wantLine)
+			}
+			rec := NewStatusRecorder(httptest.NewRecorder()) // what metrics and spans read
+			handler.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+			if got := rec.Status(); got != c.want {
+				t.Errorf("StatusRecorder.Status() = %d, want %d", got, c.want)
+			}
+		})
 	}
 }
 
