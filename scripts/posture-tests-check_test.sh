@@ -116,6 +116,16 @@ check "a table before the section is not checked" 0 "# Security posture
 $header
 $row" internal/x/x_test.go "$defines"
 check "a page with CRLF line endings" 0 "$(printf '%s\n' "$head" "$row" | sed 's/$/\r/')" internal/x/x_test.go "$defines"
+check "a name holding Test later is one name" 0 "$head
+$(row_citing TestTheEndOfTheTestReleasesIt)" internal/x/x_test.go "$defines
+func TestTheEndOfTheTestReleasesIt(t *testing.T) {}"
+check "a subheading does not end the section" 1 "$head
+
+### More
+
+$(row_citing TestGone)" internal/x/x_test.go "$defines" 'names TestGone'
+check "a padded number cell is a row" 1 "$head
+|  1  | A token is checked. | \`x.go\` | \`TestGone\` |" internal/x/x_test.go "$defines" 'names TestGone'
 check "a section with no rows" 2 "$head" internal/x/x_test.go "$defines" 'no invariant rows'
 check "a section whose rows name no test" 2 "$head
 | 1 | A token is checked. | \`x.go\` | by hand |" internal/x/x_test.go "$defines" 'name no test'
