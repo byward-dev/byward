@@ -758,6 +758,29 @@ func TestAnUpstreamsStrictTransportSecurityNeverReachesTheClient(t *testing.T) {
 	}
 }
 
+// everyProxySetting is a proxy setting Go misreads, a well-formed one and none, each aimed at the
+// listener at addr; with none (nil) the listener is the upstream.
+var everyProxySetting = []struct {
+	name    string
+	setting func(addr string) string
+}{
+	{"a misread proxy", func(addr string) string { return addr + "/pw-secret@egress.example:3128" }},
+	{"a well-formed proxy", func(addr string) string { return "http://" + addr }},
+	{"no proxy", nil},
+}
+
+// relayTarget is the relay's upstream URL and proxy for a listener at addr: through the proxy
+// setting(addr) to an upstream named mcp.upstream.example, or with a nil setting straight to addr.
+func relayTarget(addr string, setting func(addr string) string) (*url.URL, func(*http.Request) (*url.URL, error)) {
+	if setting == nil {
+		u, _ := url.Parse("http://" + addr + "/mcp")
+		return u, func(*http.Request) (*url.URL, error) { return nil, nil }
+	}
+	u, _ := url.Parse("http://mcp.upstream.example/mcp")
+	pf := (&httpproxy.Config{HTTPProxy: setting(addr)}).ProxyFunc()
+	return u, func(r *http.Request) (*url.URL, error) { return pf(r.URL) }
+}
+
 // withProxy gives the relay a proxy in place of the environment's, which Go reads once per process.
 func withProxy(proxy func(*http.Request) (*url.URL, error)) Option {
 	return func(o *options) { o.proxy = proxy }
@@ -817,23 +840,10 @@ func TestAMisreadProxySettingNeverReachesTheUpstreamErrorLogAndAWellFormedProxys
 // included: through a misread one too, whose redaction must keep the limit error (it quotes no
 // address) for the relay to see it.
 func TestABodyOverTheLimitIsAnswered413WhateverTheProxySetting(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		setting func(addr string) string
-	}{
-		{"a misread proxy", func(addr string) string { return addr + "/pw-secret@egress.example:3128" }},
-		{"a well-formed proxy", func(addr string) string { return "http://" + addr }},
-		{"no proxy", nil},
-	} {
+	for _, tc := range everyProxySetting {
 		t.Run(tc.name, func(t *testing.T) {
 			addr := fakeenvproxy.Start(t, 1, nil).Addr // the proxy, or with none the upstream: it reads the request, so the body is sent
-			u, _ := url.Parse("http://" + addr + "/mcp")
-			proxy := func(*http.Request) (*url.URL, error) { return nil, nil }
-			if tc.setting != nil {
-				u, _ = url.Parse("http://mcp.upstream.example/mcp")
-				pf := (&httpproxy.Config{HTTPProxy: tc.setting(addr)}).ProxyFunc()
-				proxy = func(r *http.Request) (*url.URL, error) { return pf(r.URL) }
-			}
+			u, proxy := relayTarget(addr, tc.setting)
 			var logs bytes.Buffer
 			rl := New(slog.New(slog.NewTextHandler(&logs, nil)), u, withProxy(proxy))
 			limited := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -883,13 +893,7 @@ func TestABodyThatBreaksOffLogsOneWarningWithItsRequestsIDAndNeverQuotesAMisread
 			// fails the test instead of leaving the other waiting for its answer.
 			stop := p.Close
 			addr := p.Addr
-			u, _ := url.Parse("http://" + addr + "/mcp")
-			proxy := func(*http.Request) (*url.URL, error) { return nil, nil }
-			if tc.setting != nil {
-				u, _ = url.Parse("http://mcp.upstream.example/mcp")
-				pf := (&httpproxy.Config{HTTPProxy: tc.setting(addr)}).ProxyFunc()
-				proxy = func(r *http.Request) (*url.URL, error) { return pf(r.URL) }
-			}
+			u, proxy := relayTarget(addr, tc.setting)
 			var logs bytes.Buffer
 			log := logging.New(&logs, "text")
 			srv := httptest.NewServer(logging.Middleware(log, New(log, u, withProxy(proxy))))
@@ -957,14 +961,7 @@ func TestABodyThatBreaksOffLogsOneWarningWithItsRequestsIDAndNeverQuotesAMisread
 // client went away; any other error is logged as an upstream error (#388).
 func TestAClientThatCancelsAStreamLogsNothingWhateverTheProxySetting(t *testing.T) {
 	const event = "data: {}\n\n"
-	for _, tc := range []struct {
-		name    string
-		setting func(addr string) string // nil: no proxy, the listener is the upstream
-	}{
-		{"a misread proxy", func(addr string) string { return addr + "/pw-secret@egress.example:3128" }},
-		{"a well-formed proxy", func(addr string) string { return "http://" + addr }},
-		{"no proxy", nil},
-	} {
+	for _, tc := range everyProxySetting {
 		t.Run(tc.name, func(t *testing.T) {
 			// The proxy, or with none the upstream: it starts a stream, sends one event, then holds the
 			// connection open until the relay closes it, so the relay's body read ends only by the
@@ -974,13 +971,7 @@ func TestAClientThatCancelsAStreamLogsNothingWhateverTheProxySetting(t *testing.
 				_, _ = fmt.Fprintf(c, "%x\r\n%s\r\n", len(event), event)
 				_, _ = io.Copy(io.Discard, c)
 			}).Addr
-			u, _ := url.Parse("http://" + addr + "/mcp")
-			proxy := func(*http.Request) (*url.URL, error) { return nil, nil }
-			if tc.setting != nil {
-				u, _ = url.Parse("http://mcp.upstream.example/mcp")
-				pf := (&httpproxy.Config{HTTPProxy: tc.setting(addr)}).ProxyFunc()
-				proxy = func(r *http.Request) (*url.URL, error) { return pf(r.URL) }
-			}
+			u, proxy := relayTarget(addr, tc.setting)
 			var logs bytes.Buffer
 			log := logging.New(&logs, "text")
 			srv := httptest.NewServer(logging.Middleware(log, New(log, u, withProxy(proxy))))
@@ -1001,8 +992,7 @@ func TestAClientThatCancelsAStreamLogsNothingWhateverTheProxySetting(t *testing.
 			cancel() // the client goes away mid-stream
 			_ = res.Body.Close()
 			srv.Close() // waits for the handler, so the log is complete
-			if strings.Contains(logs.String(), "upstream error") || strings.Contains(logs.String(), "level=WARN") ||
-				strings.Contains(logs.String(), "level=ERROR") || strings.Contains(logs.String(), addr) {
+			if logs.Len() != 0 {
 				t.Fatalf("log %q; want nothing logged for a client that went away", logs.String())
 			}
 		})

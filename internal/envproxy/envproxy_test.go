@@ -260,24 +260,28 @@ func (b failingBody) Read([]byte) (int, error) { return 0, b.readErr }
 func (b failingBody) Close() error             { return b.closeErr }
 
 // A body through a misread proxy setting whose read or close fails with an error that quotes the
-// dialled address says only the cause, even when that error wraps an end of body: on a read only
-// the bare io.EOF, io.ErrUnexpectedEOF and context errors pass through, and a close never does.
+// dialled address says only the cause, even when that error wraps an end of body or a cancellation:
+// on a read only the bare io.EOF, io.ErrUnexpectedEOF and context errors pass through, and a close
+// never does. A wrapped cancellation still answers as context.Canceled (#388).
 func TestABodyThatFailsThroughAMisreadProxySettingSaysOnlyTheCause(t *testing.T) {
 	quoting := func(err error) error { return fmt.Errorf("read tcp 127.0.0.1:4711: %w", err) }
+	read := func(b redactedBody) error { _, err := b.Read(make([]byte, 1)); return err }
 	opErr := &net.OpError{Op: "close", Net: "tcp", Addr: &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 4711}, Err: errors.New("broken pipe")}
 	for _, tc := range []struct {
-		name string
-		do   func(redactedBody) error
-		body failingBody
+		name     string
+		do       func(redactedBody) error
+		body     failingBody
+		canceled bool // the redacted error still answers as context.Canceled
 	}{
-		{"a read that wraps io.EOF", func(b redactedBody) error { _, err := b.Read(make([]byte, 1)); return err }, failingBody{readErr: quoting(io.EOF)}},
-		{"a read that wraps io.ErrUnexpectedEOF", func(b redactedBody) error { _, err := b.Read(make([]byte, 1)); return err }, failingBody{readErr: quoting(io.ErrUnexpectedEOF)}},
-		{"a close", redactedBody.Close, failingBody{closeErr: opErr}},
+		{"a read that wraps io.EOF", read, failingBody{readErr: quoting(io.EOF)}, false},
+		{"a read that wraps io.ErrUnexpectedEOF", read, failingBody{readErr: quoting(io.ErrUnexpectedEOF)}, false},
+		{"a read that wraps context.Canceled", read, failingBody{readErr: quoting(context.Canceled)}, true},
+		{"a close", redactedBody.Close, failingBody{closeErr: opErr}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.do(redactedBody{tc.body})
-			if !errors.As(err, new(*Error)) || strings.Contains(chain(err), "4711") {
-				t.Fatalf("error %v; want the cause alone", err)
+			if !errors.As(err, new(*Error)) || strings.Contains(chain(err), "4711") || errors.Is(err, context.Canceled) != tc.canceled {
+				t.Fatalf("error %v; want the cause alone, answering as context.Canceled: %v", err, tc.canceled)
 			}
 		})
 	}

@@ -38,6 +38,7 @@ func Start(t testing.TB, requests int, answer func(net.Conn)) *Proxy {
 	}
 	var mu sync.Mutex
 	var conns []net.Conn
+	var ended bool // the test has ended: a connection accepted from now on is closed at once
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -48,11 +49,17 @@ func Start(t testing.TB, requests int, answer func(net.Conn)) *Proxy {
 				break // answer the requests already here
 			}
 			mu.Lock()
+			if ended {
+				mu.Unlock()
+				_ = c.Close()
+				break
+			}
 			conns = append(conns, c)
 			mu.Unlock()
 			if req, err := http.ReadRequest(bufio.NewReader(c)); err == nil {
 				_, _ = io.Copy(io.Discard, req.Body)
 			}
+			requestRead()
 			arrived = append(arrived, c)
 		}
 		for _, c := range arrived {
@@ -66,6 +73,7 @@ func Start(t testing.TB, requests int, answer func(net.Conn)) *Proxy {
 	t.Cleanup(func() {
 		p.Close()
 		mu.Lock()
+		ended = true
 		for _, c := range conns {
 			_ = c.Close() // an answer still waiting on its connection returns
 		}
@@ -78,6 +86,9 @@ func Start(t testing.TB, requests int, answer func(net.Conn)) *Proxy {
 	})
 	return p
 }
+
+// requestRead is called after each request is read; a test of this package waits on it.
+var requestRead = func() {}
 
 // Reset closes c with a TCP reset, so the peer's read error names both addresses.
 func Reset(c net.Conn) {
