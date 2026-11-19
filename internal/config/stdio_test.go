@@ -74,7 +74,7 @@ func TestStdioEnvFileValuesAreParsedAndNeverDisplayed(t *testing.T) {
 // Load, for the proxy and the commands that take --, still names both (#499).
 func TestLoadEnvironmentNeverSuggestsACommandAfterDashesWhereLoadDoes(t *testing.T) {
 	for _, tc := range []struct {
-		name, url, environmentOnly, withCommandLine string
+		name, url, withoutDashes, withDashes string
 	}{
 		{"no upstream", "", "BYWARD_UPSTREAM_URL is required (or BYWARD_UPSTREAM_COMMAND)",
 			"BYWARD_UPSTREAM_URL is required (or BYWARD_UPSTREAM_COMMAND, or a command after --)"},
@@ -86,11 +86,11 @@ func TestLoadEnvironmentNeverSuggestsACommandAfterDashesWhereLoadDoes(t *testing
 			if tc.url != "" {
 				env = append(env, tc.url)
 			}
-			if _, err := LoadEnvironment(env, baseFiles); !isConfigError(err) || err.Error() != tc.environmentOnly {
-				t.Errorf("LoadEnvironment: got %v, want the config error %q", err, tc.environmentOnly)
+			if _, err := LoadEnvironment(env, baseFiles); !isConfigError(err) || err.Error() != tc.withoutDashes {
+				t.Errorf("LoadEnvironment: got %v, want the config error %q", err, tc.withoutDashes)
 			}
-			if _, _, err := Load(nil, env, baseFiles); !isConfigError(err) || err.Error() != tc.withCommandLine {
-				t.Errorf("Load: got %v, want the config error %q", err, tc.withCommandLine)
+			if _, _, err := Load(nil, env, baseFiles); !isConfigError(err) || err.Error() != tc.withDashes {
+				t.Errorf("Load: got %v, want the config error %q", err, tc.withDashes)
 			}
 		})
 	}
@@ -108,14 +108,14 @@ func TestLoadEnvironmentLoadsWhatLoadLoadsWithoutArguments(t *testing.T) {
 		check    func(*Config, error) bool
 	}{
 		{"HTTP", base, baseFiles, func(c *Config, err error) bool {
-			return err == nil && c.UpstreamURL.String() == "http://upstream:9000/mcp"
+			return err == nil && c != nil && c.UpstreamURL.String() == "http://upstream:9000/mcp"
 		}},
 		{"stdio", stdioBase(`BYWARD_UPSTREAM_COMMAND=["/usr/bin/server","--flag"]`), baseFiles,
 			func(c *Config, err error) bool {
-				return err == nil && slices.Equal(c.UpstreamCommand, []string{"/usr/bin/server", "--flag"})
+				return err == nil && c != nil && slices.Equal(c.UpstreamCommand, []string{"/usr/bin/server", "--flag"})
 			}},
 		{"no-auth in a container", append(slices.Clone(anon), "BYWARD_LISTEN=0.0.0.0:8080"), fakeHost("/.dockerenv", bridgeNetdev),
-			func(c *Config, err error) bool { return err == nil && c.InContainer }},
+			func(c *Config, err error) bool { return err == nil && c != nil && c.InContainer }},
 		{"an unknown variable", append(slices.Clone(base), "BYWARD_TYPO=x"), baseFiles,
 			func(_ *Config, err error) bool {
 				return isConfigError(err) && strings.HasPrefix(err.Error(), "unknown setting BYWARD_TYPO")
@@ -127,11 +127,45 @@ func TestLoadEnvironmentLoadsWhatLoadLoadsWithoutArguments(t *testing.T) {
 			if !tc.check(got, gotErr) {
 				t.Fatalf("LoadEnvironment: %+v, %v", got, gotErr)
 			}
-			if fmt.Sprint(gotErr) != fmt.Sprint(wantErr) || !reflect.DeepEqual(got, want) {
-				t.Errorf("LoadEnvironment: %+v, %v\nLoad:            %+v, %v", got, gotErr, want, wantErr)
+			if fmt.Sprint(gotErr) != fmt.Sprint(wantErr) {
+				t.Errorf("error: LoadEnvironment %v, Load %v", gotErr, wantErr)
+			}
+			if got == nil || want == nil {
+				if got != want {
+					t.Errorf("Config: LoadEnvironment %v, Load %v", got, want)
+				}
+				return
+			}
+			for _, f := range configDiff(*got, *want) {
+				t.Errorf("Config.%s", f)
 			}
 		})
 	}
+}
+
+// configDiff lists each field of a and b that differs, with both values. A setting in Values is
+// named by itself, so a mismatch reads as the setting, not as two pointer addresses.
+func configDiff(a, b Config) []string {
+	var out []string
+	av, bv := reflect.ValueOf(a), reflect.ValueOf(b)
+	for i := range av.NumField() {
+		name := av.Type().Field(i).Name
+		if name == "Values" {
+			for _, k := range slices.Sorted(maps.Keys(a.Values.byKey)) {
+				if !reflect.DeepEqual(a.Values.byKey[k], b.Values.byKey[k]) {
+					out = append(out, fmt.Sprintf("Values[%s]: %+v vs %+v", k, a.Values.byKey[k], b.Values.byKey[k]))
+				}
+			}
+			if !reflect.DeepEqual(*a.Values, *b.Values) && len(out) == 0 {
+				out = append(out, "Values: the setting order or the command after -- differs")
+			}
+			continue
+		}
+		if !reflect.DeepEqual(av.Field(i).Interface(), bv.Field(i).Interface()) {
+			out = append(out, fmt.Sprintf("%s: %+v vs %+v", name, av.Field(i).Interface(), bv.Field(i).Interface()))
+		}
+	}
+	return out
 }
 
 func TestInvalidStdioSettingsAreRejectedNamingTheSetting(t *testing.T) {

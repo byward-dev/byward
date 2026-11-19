@@ -10,8 +10,8 @@ import (
 	"golang.org/x/net/http/httpguts"
 )
 
-// upstream reads the upstream: an HTTP URL or a stdio command, exactly one of them. With dashes, the
-// command takes a stdio upstream command after --, and the URL's error names that way too.
+// upstream reads the upstream: an HTTP URL or a stdio command, exactly one of them. dashes says the
+// command takes a stdio upstream command after --, so the URL's error names that way too.
 func (c *Config) upstream(v *Values, dashes bool) []error {
 	urlEnv, cmdEnv, envEnv := Setting{Name: "upstream-url"}.Env(), Setting{Name: "upstream-command"}.Env(), Setting{Name: "upstream-env"}.Env()+"_FILE"
 	raw := v.get("upstream-command")
