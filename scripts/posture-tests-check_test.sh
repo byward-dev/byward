@@ -17,9 +17,14 @@ head="# Security posture
 ## Security invariants
 
 $header"
-# A row citing the one test that $defines defines. The backticks are Markdown, not a command.
-# shellcheck disable=SC2016
-row='| 1 | A token is checked. | `x.go` | `TestTheTokenIsChecked` |'
+# row_citing NAME...: invariant 1's row, whose "Tested by" cell cites each NAME in backticks, as the
+# real page does. row cites TestTheTokenIsChecked, a test that $defines defines.
+row_citing() {
+  cell=
+  for n in "$@"; do cell="${cell:+$cell, }\`$n\`"; done
+  printf "| 1 | A token is checked. | \`x.go\` | %s |" "$cell"
+}
+row=$(row_citing TestTheTokenIsChecked)
 
 # check NAME WANT_EXIT POSTURE GOFILE GOCONTENT [WANT_OUTPUT]: a fresh repository whose
 # docs/security-posture.md holds POSTURE and whose GOFILE holds GOCONTENT; the check must exit
@@ -50,26 +55,31 @@ func TestTheTokenIsChecked(t *testing.T) {}
 func FuzzTheParser(f *testing.F) {}'
 
 check "every named test exists" 0 "$head
-| 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked\`, \`FuzzTheParser\` |" internal/x/x_test.go "$defines"
+$(row_citing TestTheTokenIsChecked FuzzTheParser)" internal/x/x_test.go "$defines"
 check "a test that does not exist" 1 "$head
 $row
-| 2 | Nothing leaks. | \`y.go\` | \`TestNothingLeaks\` |" internal/x/x_test.go "$defines" \
-  '^docs/security-posture.md:8: invariant 2 names TestNothingLeaks, which no _test.go defines$'
+| 15 | Nothing leaks. | \`y.go\` | \`TestNothingLeaks\` |" internal/x/x_test.go "$defines" \
+  '^docs/security-posture.md:8: invariant 15 names TestNothingLeaks, which no _test.go defines$'
+# Every missing name is reported, not only the first or the last: one case pins each of two.
+for gone in TestGoneA TestGoneB; do
+  check "every missing name is reported: $gone" 1 "$head
+$(row_citing TestGoneA TestGoneB)" internal/x/x_test.go "$defines" "names $gone,"
+done
 check "a fuzz test that does not exist" 1 "$head
 | 3 | Input is parsed. | \`x.go\` | \`FuzzTheLexer\` |" internal/x/x_test.go "$defines" 'invariant 3 names FuzzTheLexer'
 check "a subtest names its test" 0 "$head
-| 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked/an_expired_one\` |" internal/x/x_test.go "$defines"
+$(row_citing TestTheTokenIsChecked/an_expired_one)" internal/x/x_test.go "$defines"
 check "a later name in a list that does not exist" 1 "$head
-| 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked\`, \`FuzzTheParser\`, \`TestGone\` |" internal/x/x_test.go "$defines" 'invariant 1 names TestGone'
+$(row_citing TestTheTokenIsChecked FuzzTheParser TestGone)" internal/x/x_test.go "$defines" 'invariant 1 names TestGone'
 check "a commented-out test is no test" 1 "$head
-| 1 | A token is checked. | \`x.go\` | \`TestGone\` |" internal/x/x_test.go "$defines
+$(row_citing TestGone)" internal/x/x_test.go "$defines
 // func TestGone(t *testing.T) {}" 'names TestGone'
 check "a name in another cell counts too" 1 "$head
 | 1 | A token is checked, see \`TestGone\`. | \`x.go\` | \`TestTheTokenIsChecked\` |" internal/x/x_test.go "$defines" 'invariant 1 names TestGone'
 check "a test whose name only starts like the cited one" 1 "$head
-| 1 | A token is checked. | \`x.go\` | \`TestTheToken\` |" internal/x/x_test.go "$defines" 'names TestTheToken,'
+$(row_citing TestTheToken)" internal/x/x_test.go "$defines" 'names TestTheToken,'
 check "a method is no test" 1 "$head
-| 1 | A token is checked. | \`x.go\` | \`TestOnAType\` |" internal/x/x_test.go 'package x
+$(row_citing TestOnAType)" internal/x/x_test.go 'package x
 
 func (s suite) TestOnAType(t *testing.T) {}' 'names TestOnAType'
 check "a test in a non-test file is no test" 1 "$head
@@ -105,7 +115,7 @@ check "a heading that only starts like the section" 2 "# Security posture
 
 ## Security invariants, retired
 
-| 1 | A token is checked. | \`x.go\` | \`TestGone\` |" internal/x/x_test.go "$defines" 'no invariant rows'
+$(row_citing TestGone)" internal/x/x_test.go "$defines" 'no invariant rows'
 
 if [ "$failures" -ne 0 ]; then
   echo "posture-tests-check_test: $failures failed"
