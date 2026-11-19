@@ -27,6 +27,7 @@ import (
 	"github.com/byward-dev/byward/internal/envproxy"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/testutil/closedport"
+	"github.com/byward-dev/byward/internal/testutil/fakeenvproxy"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 	"github.com/byward-dev/byward/internal/testutil/rerun"
 	"golang.org/x/net/http/httpproxy"
@@ -825,35 +826,12 @@ func TestABodyOverTheLimitIsAnswered413WhateverTheProxySetting(t *testing.T) {
 		{"no proxy", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ln, err := net.Listen("tcp", "127.0.0.1:0") // the proxy, or with none the upstream: it reads the request, so the body is sent
-			if err != nil {
-				t.Fatal(err)
-			}
-			read := make(chan struct{})
-			go func() {
-				defer close(read)
-				c, err := ln.Accept()
-				if err != nil {
-					return
-				}
-				defer func() { _ = c.Close() }()
-				if req, err := http.ReadRequest(bufio.NewReader(c)); err == nil {
-					_, _ = io.Copy(io.Discard, req.Body)
-				}
-			}()
-			t.Cleanup(func() {
-				_ = ln.Close()
-				select {
-				case <-read:
-				case <-time.After(5 * time.Second):
-					t.Error("the listener never finished reading the request")
-				}
-			})
-			u, _ := url.Parse("http://" + ln.Addr().String() + "/mcp")
+			addr := fakeenvproxy.Start(t, 1, nil).Addr // the proxy, or with none the upstream: it reads the request, so the body is sent
+			u, _ := url.Parse("http://" + addr + "/mcp")
 			proxy := func(*http.Request) (*url.URL, error) { return nil, nil }
 			if tc.setting != nil {
 				u, _ = url.Parse("http://mcp.upstream.example/mcp")
-				pf := (&httpproxy.Config{HTTPProxy: tc.setting(ln.Addr().String())}).ProxyFunc()
+				pf := (&httpproxy.Config{HTTPProxy: tc.setting(addr)}).ProxyFunc()
 				proxy = func(r *http.Request) (*url.URL, error) { return pf(r.URL) }
 			}
 			var logs bytes.Buffer
@@ -869,7 +847,7 @@ func TestABodyOverTheLimitIsAnswered413WhateverTheProxySetting(t *testing.T) {
 			if w.Code != http.StatusRequestEntityTooLarge {
 				t.Fatalf("status %d, want 413; log %q", w.Code, logs.String())
 			}
-			if strings.Contains(logs.String(), ln.Addr().String()) {
+			if strings.Contains(logs.String(), addr) {
 				t.Fatalf("log %q quotes the address Go dialled", logs.String())
 			}
 		})
@@ -894,37 +872,17 @@ func TestABodyThatBreaksOffLogsOneWarningWithItsRequestsIDAndNeverQuotesAMisread
 		{"with no proxy, the upstream's body copy error is logged", nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ln, err := net.Listen("tcp", "127.0.0.1:0") // the proxy, or with none the upstream: it answers, then resets mid-body
-			if err != nil {
-				t.Fatal(err)
-			}
+			// The proxy, or with none the upstream: it answers, then resets mid-body. Every request is in
+			// the relay before any body breaks off, so a relay that shared one error log between requests
+			// would log both with the same ID, or none.
+			p := fakeenvproxy.Start(t, requests, func(c net.Conn) {
+				_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\npartial")
+				fakeenvproxy.Reset(c) // so the read error names the addresses
+			})
 			// The first request to finish closes the listener, so one the relay answers without dialling
 			// fails the test instead of leaving the other waiting for its answer.
-			stop := sync.OnceFunc(func() { _ = ln.Close() })
-			t.Cleanup(stop)
-			go func() {
-				// Every request is in the relay before any body breaks off, so a relay that shared one
-				// error log between requests would log both with the same ID, or none.
-				var conns []net.Conn
-				for len(conns) < requests {
-					c, err := ln.Accept()
-					if err != nil {
-						break // answer the requests already here
-					}
-					// The whole request, body included, before answering: a reset while the transport still
-					// writes the body would fail the round trip instead of the response's body copy (#272).
-					if req, err := http.ReadRequest(bufio.NewReader(c)); err == nil {
-						_, _ = io.Copy(io.Discard, req.Body)
-					}
-					conns = append(conns, c)
-				}
-				for _, c := range conns {
-					_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\npartial")
-					_ = c.(*net.TCPConn).SetLinger(0) // close with a reset, so the read error names the addresses
-					_ = c.Close()
-				}
-			}()
-			addr := ln.Addr().String()
+			stop := p.Close
+			addr := p.Addr
 			u, _ := url.Parse("http://" + addr + "/mcp")
 			proxy := func(*http.Request) (*url.URL, error) { return nil, nil }
 			if tc.setting != nil {
@@ -988,6 +946,64 @@ func TestABodyThatBreaksOffLogsOneWarningWithItsRequestsIDAndNeverQuotesAMisread
 			if !tc.misread && (!strings.Contains(logs.String(), `error="httputil: ReverseProxy read error during body copy: `) ||
 				!strings.Contains(logs.String(), addr) || strings.Contains(logs.String(), `\n"`)) {
 				t.Fatalf("log %q; want ReverseProxy's line, with the address Go dialled", logs.String())
+			}
+		})
+	}
+}
+
+// A client that cancels a stream it is reading logs nothing, whatever the proxy setting: through a
+// misread one too, whose redaction must keep the body read's bare context.Canceled, which quotes no
+// address. ReverseProxy compares that error with context.Canceled by identity to stay quiet when the
+// client went away; any other error is logged as an upstream error (#388).
+func TestAClientThatCancelsAStreamLogsNothingWhateverTheProxySetting(t *testing.T) {
+	const event = "data: {}\n\n"
+	for _, tc := range []struct {
+		name    string
+		setting func(addr string) string // nil: no proxy, the listener is the upstream
+	}{
+		{"a misread proxy", func(addr string) string { return addr + "/pw-secret@egress.example:3128" }},
+		{"a well-formed proxy", func(addr string) string { return "http://" + addr }},
+		{"no proxy", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The proxy, or with none the upstream: it starts a stream, sends one event, then holds the
+			// connection open until the relay closes it, so the relay's body read ends only by the
+			// client's cancellation.
+			addr := fakeenvproxy.Start(t, 1, func(c net.Conn) {
+				_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n")
+				_, _ = fmt.Fprintf(c, "%x\r\n%s\r\n", len(event), event)
+				_, _ = io.Copy(io.Discard, c)
+			}).Addr
+			u, _ := url.Parse("http://" + addr + "/mcp")
+			proxy := func(*http.Request) (*url.URL, error) { return nil, nil }
+			if tc.setting != nil {
+				u, _ = url.Parse("http://mcp.upstream.example/mcp")
+				pf := (&httpproxy.Config{HTTPProxy: tc.setting(addr)}).ProxyFunc()
+				proxy = func(r *http.Request) (*url.URL, error) { return pf(r.URL) }
+			}
+			var logs bytes.Buffer
+			log := logging.New(&logs, "text")
+			srv := httptest.NewServer(logging.Middleware(log, New(log, u, withProxy(proxy))))
+			t.Cleanup(srv.Close)
+			// A bound for a relay that never streams the event, so the test fails instead of hanging.
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/mcp", strings.NewReader("{}"))
+			req.Header.Set("Accept", "text/event-stream")
+			res, err := srv.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			line, err := bufio.NewReader(res.Body).ReadString('\n')
+			if res.StatusCode != http.StatusOK || line != "data: {}\n" {
+				t.Fatalf("status %d, first line %q, error %v; want the stream's first event", res.StatusCode, line, err)
+			}
+			cancel() // the client goes away mid-stream
+			_ = res.Body.Close()
+			srv.Close() // waits for the handler, so the log is complete
+			if strings.Contains(logs.String(), "upstream error") || strings.Contains(logs.String(), "level=WARN") ||
+				strings.Contains(logs.String(), "level=ERROR") || strings.Contains(logs.String(), addr) {
+				t.Fatalf("log %q; want nothing logged for a client that went away", logs.String())
 			}
 		})
 	}

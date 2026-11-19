@@ -1,7 +1,6 @@
 package envproxy
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -17,6 +16,7 @@ import (
 	"golang.org/x/net/http/httpproxy"
 
 	"github.com/byward-dev/byward/internal/testutil/closedport"
+	"github.com/byward-dev/byward/internal/testutil/fakeenvproxy"
 )
 
 // through is a transport whose proxy is setting, read as Go reads the environment.
@@ -82,34 +82,10 @@ func TestATransportErrorThroughAMisreadProxySettingNeverQuotesItsAddress(t *test
 // A request body over its http.MaxBytesReader limit stays the bare *http.MaxBytesError through a
 // misread proxy, so a server can still answer 413; it quotes no address.
 func TestARequestBodyOverItsLimitThroughAMisreadProxyStaysTheBareMaxBytesError(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0") // the proxy Go dials: it reads the request, so the body is sent
-	if err != nil {
-		t.Fatal(err)
-	}
-	read := make(chan struct{})
-	go func() {
-		defer close(read)
-		c, err := ln.Accept()
-		if err != nil {
-			return
-		}
-		defer func() { _ = c.Close() }()
-		if req, err := http.ReadRequest(bufio.NewReader(c)); err == nil {
-			_, _ = io.Copy(io.Discard, req.Body)
-		}
-	}()
-	t.Cleanup(func() {
-		_ = ln.Close()
-		select {
-		case <-read:
-		case <-time.After(5 * time.Second):
-			t.Error("the proxy never finished reading the request")
-		}
-	})
-	addr := ln.Addr().String()
+	addr := fakeenvproxy.Start(t, 1, nil).Addr // the proxy Go dials: it reads the request, so the body is sent
 	body := http.MaxBytesReader(httptest.NewRecorder(), io.NopCloser(strings.NewReader(strings.Repeat("x", 64))), 1)
 	req, _ := http.NewRequest(http.MethodPost, "http://mcp.upstream.example/mcp", body)
-	_, err = Redact(through(addr + "/pw-secret@egress.example:3128")).RoundTrip(req)
+	_, err := Redact(through(addr + "/pw-secret@egress.example:3128")).RoundTrip(req)
 	if mbe, ok := err.(*http.MaxBytesError); !ok || mbe == nil || strings.Contains(chain(err), addr) { //nolint:errorlint // the bare error is the contract
 		t.Fatalf("error %v (%T); want a bare *http.MaxBytesError that quotes no address", err, err)
 	}
@@ -242,32 +218,17 @@ func TestABodyReadThroughAMisreadProxySettingNeverQuotesItsAddressAndOtherwiseEn
 		{"a well-formed setting's read error is its own", func(addr string) string { return "http://" + addr }, false, reset},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ln, err := net.Listen("tcp", "127.0.0.1:0") // the "proxy" Go dials: it answers, then ends the body as the row says
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = ln.Close() })
-			go func() {
-				c, err := ln.Accept()
-				if err != nil {
-					return
-				}
-				// The whole request before answering, so a reset can only hit the response (#272); a GET
-				// has no body today, but a request that gains one must not race the reset.
-				if req, err := http.ReadRequest(bufio.NewReader(c)); err == nil {
-					_, _ = io.Copy(io.Discard, req.Body)
-				}
+			// The "proxy" Go dials: it answers, then ends the body as the row says.
+			addr := fakeenvproxy.Start(t, 1, func(c net.Conn) {
 				length := "1000"
 				if tc.end == whole {
 					length = "7"
 				}
 				_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Length: "+length+"\r\n\r\npartial")
 				if tc.end == reset {
-					_ = c.(*net.TCPConn).SetLinger(0) // close with a reset, so the read error names the addresses
+					fakeenvproxy.Reset(c) // so the read error names the addresses
 				}
-				_ = c.Close()
-			}()
-			addr := ln.Addr().String()
+			}).Addr
 			res, err := (&http.Client{Transport: Redact(through(tc.setting(addr)))}).Get("http://login.example/")
 			if err != nil {
 				t.Fatalf("the proxy answered, but the request failed: %v", err)
