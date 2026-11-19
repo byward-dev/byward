@@ -11,7 +11,7 @@ import (
 )
 
 // upstream reads the upstream: an HTTP URL or a stdio command, exactly one of them. dashes says the
-// command takes a stdio upstream command after --, so the URL's error names that way too.
+// command takes a stdio upstream command after --, so the URL's error also names a command after --.
 func (c *Config) upstream(v *Values, dashes bool) []error {
 	urlEnv, cmdEnv, envEnv := Setting{Name: "upstream-url"}.Env(), Setting{Name: "upstream-command"}.Env(), Setting{Name: "upstream-env"}.Env()+"_FILE"
 	raw := v.get("upstream-command")

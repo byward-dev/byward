@@ -136,34 +136,57 @@ func TestLoadEnvironmentLoadsWhatLoadLoadsWithoutArguments(t *testing.T) {
 				}
 				return
 			}
-			for _, f := range configDiff(*got, *want) {
+			diff := configDiff(*got, *want)
+			for _, f := range diff {
 				t.Errorf("Config.%s", f)
+			}
+			if len(diff) == 0 && !reflect.DeepEqual(*got, *want) { // a backstop, so a broken configDiff cannot hide a drift
+				t.Errorf("Config differs, though configDiff names no field: LoadEnvironment %+v, Load %+v", got, want)
 			}
 		})
 	}
 }
 
-// configDiff lists each field of a and b that differs, with both values. A setting in Values is
-// named by itself, so a mismatch reads as the setting, not as two pointer addresses.
-func configDiff(a, b Config) []string {
+// configDiff lists each field in which LoadEnvironment's Config (got) differs from Load's (want),
+// with both values. A setting in Values is named by itself, whichever side has it, so a mismatch
+// reads as the setting, not as two pointer addresses.
+func configDiff(got, want Config) []string {
 	var out []string
-	av, bv := reflect.ValueOf(a), reflect.ValueOf(b)
-	for i := range av.NumField() {
-		name := av.Type().Field(i).Name
+	gv, wv := reflect.ValueOf(got), reflect.ValueOf(want)
+	for i := range gv.NumField() {
+		name := gv.Type().Field(i).Name
 		if name == "Values" {
-			for _, k := range slices.Sorted(maps.Keys(a.Values.byKey)) {
-				if !reflect.DeepEqual(a.Values.byKey[k], b.Values.byKey[k]) {
-					out = append(out, fmt.Sprintf("Values[%s]: %+v vs %+v", k, a.Values.byKey[k], b.Values.byKey[k]))
-				}
-			}
-			if !reflect.DeepEqual(*a.Values, *b.Values) && len(out) == 0 {
-				out = append(out, "Values: the setting order or the command after -- differs")
-			}
+			out = append(out, valuesDiff(got.Values, want.Values)...)
 			continue
 		}
-		if !reflect.DeepEqual(av.Field(i).Interface(), bv.Field(i).Interface()) {
-			out = append(out, fmt.Sprintf("%s: %+v vs %+v", name, av.Field(i).Interface(), bv.Field(i).Interface()))
+		if g, w := gv.Field(i).Interface(), wv.Field(i).Interface(); !reflect.DeepEqual(g, w) {
+			out = append(out, fmt.Sprintf("%s: LoadEnvironment %+v, Load %+v", name, g, w))
 		}
+	}
+	return out
+}
+
+// valuesDiff is configDiff for the resolved settings: each setting either side has that differs,
+// then the setting order or the command after --, when only those differ.
+func valuesDiff(got, want *Values) []string {
+	if got == nil || want == nil {
+		if got != want {
+			return []string{fmt.Sprintf("Values: LoadEnvironment %v, Load %v", got, want)}
+		}
+		return nil
+	}
+	var out []string
+	keys := slices.AppendSeq(slices.Collect(maps.Keys(got.byKey)), maps.Keys(want.byKey))
+	slices.Sort(keys)
+	for _, k := range slices.Compact(keys) {
+		g, gok := got.byKey[k]
+		w, wok := want.byKey[k]
+		if gok != wok || !reflect.DeepEqual(g, w) {
+			out = append(out, fmt.Sprintf("Values[%s]: LoadEnvironment %+v (present %v), Load %+v (present %v)", k, g, gok, w, wok))
+		}
+	}
+	if len(out) == 0 && !reflect.DeepEqual(*got, *want) {
+		out = append(out, "Values: the setting order or the command after -- differs")
 	}
 	return out
 }
