@@ -86,6 +86,7 @@ func TestDiagnoseOfAHealthyAppPassesAndSkipsWhatNeedsGraph(t *testing.T) {
 
 // One fake-IdP misconfiguration per check (ADR-0024); each failing result names the fix.
 func TestDiagnoseReportsEachMisconfigurationWithItsFix(t *testing.T) {
+	const fixedTenant = "0b5e3c1d-2f4a-4c6b-9d8e-7a1f2b3c4d5e" // a tenant ID the cause can name
 	cases := []struct {
 		name      string
 		opts      []fakeidp.Option
@@ -136,6 +137,14 @@ func TestDiagnoseReportsEachMisconfigurationWithItsFix(t *testing.T) {
 			check: "entra access token", status: doctor.Skip, inMessage: "AADSTS501051", inFix: "requestedAccessTokenVersion"},
 		{name: "v1 access tokens", setup: withClient(func(c *fakeidp.Client) { c.AccessTokenVersion = 1 }),
 			check: "entra access token", status: doctor.Fail, inMessage: `version "1.0"`, inFix: "requestedAccessTokenVersion to 2"},
+		{name: "token signed by a key the tenant does not publish", opts: []fakeidp.Option{fakeidp.WithSignatureMismatch(true)},
+			check: "entra access token", status: doctor.Fail, inMessage: "the probe's token does not verify with the tenant's keys: ",
+			cause: "idp: JWT signature: go-jose/go-jose: error in cryptographic primitive", inFix: "can reach " + Authority},
+		{name: "v2 token from another authority's issuer",
+			opts:  []fakeidp.Option{fakeidp.WithTenantID(fixedTenant), fakeidp.WithAuthority("https://login.example.net")},
+			check: "entra access token", status: doctor.Fail, inMessage: "the probe's token fails the proxy's checks: ",
+			cause: `entra: issuer "https://login.example.net/` + fixedTenant + `/v2.0" is not the v2 issuer of tenant ` + fixedTenant,
+			inFix: "requestedAccessTokenVersion to 2"},
 		{name: "no idtyp claim", opts: []fakeidp.Option{fakeidp.WithIDTypClaim(false)},
 			check: "entra idtyp claim", status: doctor.Warn, inMessage: "no idtyp=app", inFix: "idtyp optional claim"},
 		{name: "no idtyp claim with app-only tokens on", opts: []fakeidp.Option{fakeidp.WithIDTypClaim(false)}, appRoles: []string{"MCP.Invoke"},

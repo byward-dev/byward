@@ -1,6 +1,10 @@
 package fakeidp
 
 import (
+	"crypto"
+	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -67,5 +71,37 @@ func TestUnusableJWKsAreServedBesideTheSigningKey(t *testing.T) {
 	var strict jose.JSONWebKeySet
 	if err := json.NewDecoder(resp.Body).Decode(&strict); err == nil {
 		t.Fatal("a strict decode accepted the set: it holds no key go-jose cannot parse")
+	}
+}
+
+func TestMintedTokensUnderASignatureMismatchDoNotVerifyWithThePublishedKeyUntilSwitchedOff(t *testing.T) {
+	f := newFixture(t, Entra, WithSignatureMismatch(true))
+	claims := map[string]any{"sub": "s"}
+	// verifies checks the token's RS256 signature with the published key its kid names; jwksKey fails
+	// the test when the kid is not published.
+	verifies := func(token string) bool {
+		parts := strings.Split(token, ".")
+		pub := f.jwksKey(t, decodePart(t, parts[0])["kid"].(string))
+		sig, err := base64.RawURLEncoding.DecodeString(parts[2])
+		if err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
+		return rsa.VerifyPKCS1v15(pub, crypto.SHA256, sum[:], sig) == nil
+	}
+	f.idp.RotateKeys(t) // the kid must be the current key's, not the first one's
+	forged, untouched := f.idp.Mint(claims), f.idp.MintWithHeader("RS256", "JWT", claims)
+	if verifies(forged) {
+		t.Fatal("Mint under WithSignatureMismatch(true): the signature verifies with the published key")
+	}
+	if !verifies(untouched) {
+		t.Fatal("MintWithHeader under WithSignatureMismatch(true): the signature does not verify, want it untouched")
+	}
+	if got, want := decodePart(t, strings.Split(forged, ".")[0])["kid"], decodePart(t, strings.Split(untouched, ".")[0])["kid"]; got != want {
+		t.Fatalf("Mint after RotateKeys: kid %v, want the current key's %v", got, want)
+	}
+	f.idp.Set(WithSignatureMismatch(false))
+	if !verifies(f.idp.Mint(claims)) {
+		t.Fatal("Mint after Set(WithSignatureMismatch(false)): the signature does not verify")
 	}
 }

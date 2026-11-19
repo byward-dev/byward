@@ -119,6 +119,7 @@ type IdP struct {
 	mu      sync.Mutex
 	cfg     settings
 	keys    []*signingKey // the last one signs
+	forger  *signingKey   // signs instead under WithSignatureMismatch; made at first use
 	codes   map[string]*authCode
 	refresh map[string]*refreshGrant
 }
@@ -154,6 +155,7 @@ type settings struct {
 	jwksEmpty     bool
 	jwksUnusable  bool
 	jwksNotASet   bool
+	badSignature  bool
 	tokenFail     map[string]Failure
 	tls           bool // read at New only
 }
@@ -350,6 +352,11 @@ func WithUnusableJWKs(on bool) Option { return func(s *settings) { s.jwksUnusabl
 // string), as a proxy that rewrites responses might.
 func WithJWKSNotAKeySet(on bool) Option { return func(s *settings) { s.jwksNotASet = on } }
 
+// WithSignatureMismatch makes every token the fake signs (Mint included, MintWithHeader not) carry
+// the current key's kid but a signature by another key, which the JWKS never lists, so the token
+// does not verify with the published keys.
+func WithSignatureMismatch(on bool) Option { return func(s *settings) { s.badSignature = on } }
+
 // FailAuthorize makes every authorization request redirect back with f; nil clears it.
 func FailAuthorize(f *Failure) Option {
 	return func(s *settings) {
@@ -510,7 +517,18 @@ func (p *IdP) MintWithHeader(alg, typ string, claims map[string]any) string {
 }
 
 func (p *IdP) sign(claims map[string]any) string {
-	return p.keys[len(p.keys)-1].sign(claims)
+	k := p.keys[len(p.keys)-1]
+	if p.cfg.badSignature {
+		if p.forger == nil {
+			f, err := newSigningKey(p.cfg.clock())
+			if err != nil {
+				panic(fmt.Sprintf("fakeidp: signing key: %v", err))
+			}
+			p.forger = f
+		}
+		k = &signingKey{cert: p.forger.cert, kid: k.kid}
+	}
+	return k.sign(claims)
 }
 
 func (p *IdP) routes() http.Handler {
