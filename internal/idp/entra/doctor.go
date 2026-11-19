@@ -216,7 +216,10 @@ func (p *Provider) diagnoseToken(ctx context.Context, raw string, d Diagnosis) [
 		return []doctor.Result{check.Result(doctor.Fail, fmt.Sprintf("Entra issues version %q tokens for the app, the proxy accepts only 2.0", v), accessTokenVersionFix)}
 	}
 	if _, err := idp.VerifyJWT(ctx, raw, p.keys, p.rules("")); err != nil {
-		return []doctor.Result{check.Result(doctor.Fail, "the probe's token fails the proxy's checks: "+err.Error(), accessTokenVersionFix)}
+		// The token is v2 already, so the cause is the issuer or tenant, the audience, or the clock;
+		// the error names which (#504).
+		return []doctor.Result{check.Result(doctor.Fail, "the probe's token fails the proxy's checks: "+err.Error(),
+			"check that "+d.TenantSetting+" and "+d.ClientIDSetting+" name the tenant and the app registration, and that this host's clock is right; the error says which check failed")}
 	}
 	out := []doctor.Result{check.Result(doctor.Pass, "v2 token for audience "+p.cfg.ClientID+", issuer "+idp.StringClaim(claims, "iss"), "")}
 	if idp.StringClaim(claims, "idtyp") == "app" {

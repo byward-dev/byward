@@ -11,11 +11,16 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/byward-dev/byward/internal/doctor"
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
+
+// tokenChecksFix is the fix for a v2 token the proxy's checks refuse: whatever the cause, it names the
+// tenant and client ID settings and the clock, never the token version (#504).
+const tokenChecksFix = "check that TENANT_SETTING and CLIENT_ID_SETTING name the tenant and the app registration, and that this host's clock is right; the error says which check failed"
 
 var diagnosis = Diagnosis{TenantSetting: "TENANT_SETTING", ClientIDSetting: "CLIENT_ID_SETTING", CredentialKind: CredentialSecret, CredentialSetting: "SECRET_SETTING"}
 
@@ -144,7 +149,16 @@ func TestDiagnoseReportsEachMisconfigurationWithItsFix(t *testing.T) {
 			opts:  []fakeidp.Option{fakeidp.WithTenantID(fixedTenant), fakeidp.WithAuthority("https://login.example.net")},
 			check: "entra access token", status: doctor.Fail, inMessage: "the probe's token fails the proxy's checks: ",
 			cause: `entra: issuer "https://login.example.net/` + fixedTenant + `/v2.0" is not the v2 issuer of tenant ` + fixedTenant,
-			inFix: "requestedAccessTokenVersion to 2"},
+			inFix: tokenChecksFix},
+		// A v2 token the proxy's clock reads as expired, or as issued in the future (#504).
+		{name: "v2 token checked by a clock that runs ahead", setup: func(t *testing.T, e *env) {
+			rebuild(t, e, func(c *Config) { c.Now = func() time.Time { return now().Add(3 * time.Hour) } })
+		}, check: "entra access token", status: doctor.Fail, inMessage: "the probe's token fails the proxy's checks: ",
+			cause: "idp: ID token expired", inFix: tokenChecksFix},
+		{name: "v2 token checked by a clock that runs behind", setup: func(t *testing.T, e *env) {
+			rebuild(t, e, func(c *Config) { c.Now = func() time.Time { return now().Add(-3 * time.Hour) } })
+		}, check: "entra access token", status: doctor.Fail, inMessage: "the probe's token fails the proxy's checks: ",
+			cause: "idp: ID token iat missing or in the future", inFix: tokenChecksFix},
 		{name: "no idtyp claim", opts: []fakeidp.Option{fakeidp.WithIDTypClaim(false)},
 			check: "entra idtyp claim", status: doctor.Warn, inMessage: "no idtyp=app", inFix: "idtyp optional claim"},
 		{name: "no idtyp claim with app-only tokens on", opts: []fakeidp.Option{fakeidp.WithIDTypClaim(false)}, appRoles: []string{"MCP.Invoke"},
