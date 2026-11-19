@@ -47,6 +47,8 @@ Then, for every deployment:
   example [Microsoft 365 data through Graph](how-to/microsoft-365.md).
 - [mcp-grafana behind byward](how-to/behind-byward/mcp-grafana.md): each user is themselves in
   Grafana, with their own role.
+- [The MongoDB MCP Server behind byward](how-to/behind-byward/mongodb-mcp.md): every user signs in
+  first, and only byward can reach the server.
 
 ### Your MCP clients
 
