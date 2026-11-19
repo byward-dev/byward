@@ -10,12 +10,16 @@ trap 'rm -rf "$tmp"' EXIT
 failures=0
 
 # The posture page's head and the invariants table's header, as the real page has them.
-head='# Security posture
+header='| # | Invariant | Enforced in | Tested by |
+|---|---|---|---|'
+head="# Security posture
 
 ## Security invariants
 
-| # | Invariant | Enforced in | Tested by |
-|---|---|---|---|'
+$header"
+# A row citing the one test that $defines defines. The backticks are Markdown, not a command.
+# shellcheck disable=SC2016
+row='| 1 | A token is checked. | `x.go` | `TestTheTokenIsChecked` |'
 
 # check NAME WANT_EXIT POSTURE GOFILE GOCONTENT [WANT_OUTPUT]: a fresh repository whose
 # docs/security-posture.md holds POSTURE and whose GOFILE holds GOCONTENT; the check must exit
@@ -48,13 +52,18 @@ func FuzzTheParser(f *testing.F) {}'
 check "every named test exists" 0 "$head
 | 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked\`, \`FuzzTheParser\` |" internal/x/x_test.go "$defines"
 check "a test that does not exist" 1 "$head
-| 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked\` |
+$row
 | 2 | Nothing leaks. | \`y.go\` | \`TestNothingLeaks\` |" internal/x/x_test.go "$defines" \
   '^docs/security-posture.md:8: invariant 2 names TestNothingLeaks, which no _test.go defines$'
 check "a fuzz test that does not exist" 1 "$head
 | 3 | Input is parsed. | \`x.go\` | \`FuzzTheLexer\` |" internal/x/x_test.go "$defines" 'invariant 3 names FuzzTheLexer'
 check "a subtest names its test" 0 "$head
 | 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked/an_expired_one\` |" internal/x/x_test.go "$defines"
+check "a later name in a list that does not exist" 1 "$head
+| 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked\`, \`FuzzTheParser\`, \`TestGone\` |" internal/x/x_test.go "$defines" 'invariant 1 names TestGone'
+check "a commented-out test is no test" 1 "$head
+| 1 | A token is checked. | \`x.go\` | \`TestGone\` |" internal/x/x_test.go "$defines
+// func TestGone(t *testing.T) {}" 'names TestGone'
 check "a name in another cell counts too" 1 "$head
 | 1 | A token is checked, see \`TestGone\`. | \`x.go\` | \`TestTheTokenIsChecked\` |" internal/x/x_test.go "$defines" 'invariant 1 names TestGone'
 check "a test whose name only starts like the cited one" 1 "$head
@@ -64,15 +73,15 @@ check "a method is no test" 1 "$head
 
 func (s suite) TestOnAType(t *testing.T) {}' 'names TestOnAType'
 check "a test in a non-test file is no test" 1 "$head
-| 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked\` |" internal/x/x.go "$defines" 'names TestTheTokenIsChecked'
-check "a worktree's tests do not count" 1 "$head
-| 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked\` |" .claude/worktrees/a/x_test.go "$defines" 'names TestTheTokenIsChecked'
-check "node_modules' tests do not count" 1 "$head
-| 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked\` |" node_modules/a/x_test.go "$defines" 'names TestTheTokenIsChecked'
+$row" internal/x/x.go "$defines" 'names TestTheTokenIsChecked'
+for dir in .git .claude/worktrees node_modules internal/x/testdata; do
+  check "$dir's tests do not count" 1 "$head
+$row" "$dir/a/x_test.go" "$defines" 'names TestTheTokenIsChecked'
+done
 check "words such as Tested and Testing are no test names" 0 "$head
 | 1 | Tested by hand; Testing helps. | \`x.go\` | \`TestTheTokenIsChecked\` |" internal/x/x_test.go "$defines"
 check "another section's table is not checked" 0 "$head
-| 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked\` |
+$row
 
 ## Threats
 
@@ -85,9 +94,9 @@ check "a table before the section is not checked" 0 "# Security posture
 
 ## Security invariants
 
-| # | Invariant | Enforced in | Tested by |
-|---|---|---|---|
-| 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked\` |" internal/x/x_test.go "$defines"
+$header
+$row" internal/x/x_test.go "$defines"
+check "a page with CRLF line endings" 0 "$(printf '%s\n' "$head" "$row" | sed 's/$/\r/')" internal/x/x_test.go "$defines"
 check "a section with no rows" 2 "$head" internal/x/x_test.go "$defines" 'no invariant rows'
 check "a section whose rows name no test" 2 "$head
 | 1 | A token is checked. | \`x.go\` | by hand |" internal/x/x_test.go "$defines" 'name no test'
