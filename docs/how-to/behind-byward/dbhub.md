@@ -6,7 +6,7 @@
 > databases DBHub supports, byward in a container.
 
 [DBHub](https://github.com/bytebase/dbhub) (MIT) lets an MCP client query PostgreSQL, MySQL, SQL
-Server, MariaDB, Oracle, ClickHouse or SQLite. Over HTTP it binds `0.0.0.0` with authentication
+Server, MariaDB, Oracle, SQLite and others. Over HTTP it binds `0.0.0.0` with authentication
 off by default, and its docs tell you to put it behind a reverse proxy or set a bearer token
 (`--auth-token`). That token "answers 'does this request have the secret,' not 'who is this
 user'" (DBHub, *Command-Line Options*).
