@@ -67,6 +67,14 @@ $(row_citing TestGoneA TestGoneB)" internal/x/x_test.go "$defines" "names $gone,
 done
 check "a fuzz test that does not exist" 1 "$head
 | 3 | Input is parsed. | \`x.go\` | \`FuzzTheLexer\` |" internal/x/x_test.go "$defines" 'invariant 3 names FuzzTheLexer'
+# What follows Test or Fuzz may start with an upper-case letter, a digit or an underscore, as in Go.
+check "a test name with an underscore" 0 "$head
+$(row_citing Test_the_token)" internal/x/x_test.go "$defines
+func Test_the_token(t *testing.T) {}"
+check "a test name with an underscore that does not exist" 1 "$head
+$(row_citing Test_gone)" internal/x/x_test.go "$defines" 'names Test_gone,'
+check "a test name with a digit that does not exist" 1 "$head
+$(row_citing Test2FA)" internal/x/x_test.go "$defines" 'names Test2FA,'
 check "a subtest names its test" 0 "$head
 $(row_citing TestTheTokenIsChecked/an_expired_one)" internal/x/x_test.go "$defines"
 check "a later name in a list that does not exist" 1 "$head

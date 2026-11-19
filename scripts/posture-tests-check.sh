@@ -1,6 +1,7 @@
 #!/bin/sh
 # Fails when the security posture's invariants table (docs/security-posture.md, "## Security
 # invariants") names a test that no _test.go in the repository defines: every Test… or Fuzz… name
+# (as Go names them: what follows Test or Fuzz does not start with a lower-case letter)
 # in a row must be a `func` of that name, so a renamed test cannot leave its invariant pointing at
 # nothing (#508). Also fails when the section has no rows or its rows name no test, so a reformatted
 # table cannot pass by checking nothing. Tests under testdata/ (which go test never builds), .claude
@@ -21,7 +22,7 @@ cited=$(awk '
     rows++
     n = $0; sub(/^\| */, "", n); sub(/ *\|.*/, "", n)
     rest = $0
-    while (match(rest, /(Test|Fuzz)[A-Z][A-Za-z0-9_]*/)) {
+    while (match(rest, /(Test|Fuzz)[A-Z0-9_][A-Za-z0-9_]*/)) {
       print NR, n, substr(rest, RSTART, RLENGTH)
       rest = substr(rest, RSTART + RLENGTH)
     }
