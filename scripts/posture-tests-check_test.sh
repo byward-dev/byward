@@ -1,0 +1,105 @@
+#!/bin/sh
+# Table test for posture-tests-check.sh against fixture repositories (no network).
+set -eu
+# A developer's CDPATH makes cd print the directory, which $(cd ... && pwd) would capture.
+unset CDPATH
+here="$(cd "$(dirname "$0")" && pwd)"
+script="$here/posture-tests-check.sh"
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+failures=0
+
+# The posture page's head and the invariants table's header, as the real page has them.
+head='# Security posture
+
+## Security invariants
+
+| # | Invariant | Enforced in | Tested by |
+|---|---|---|---|'
+
+# check NAME WANT_EXIT POSTURE GOFILE GOCONTENT [WANT_OUTPUT]: a fresh repository whose
+# docs/security-posture.md holds POSTURE and whose GOFILE holds GOCONTENT; the check must exit
+# WANT_EXIT, and its output match WANT_OUTPUT (grep -E) when given. An empty POSTURE writes no page.
+check() {
+  name=$1 want_code=$2 posture=$3 gofile=$4 gocontent=$5 want=${6:-}
+  repo="$tmp/repo"
+  rm -rf "$repo"
+  mkdir -p "$repo/docs" "$repo/$(dirname "$gofile")"
+  if [ -n "$posture" ]; then printf '%s\n' "$posture" >"$repo/docs/security-posture.md"; fi
+  printf '%s\n' "$gocontent" >"$repo/$gofile"
+  set +e
+  out=$(sh "$script" "$repo" 2>&1)
+  code=$?
+  set -e
+  ok=1
+  [ "$code" -eq "$want_code" ] || ok=0
+  if [ -n "$want" ]; then printf '%s\n' "$out" | grep -Eq "$want" || ok=0; fi
+  if [ "$ok" -eq 0 ]; then
+    echo "FAIL $name: exit $code (want $want_code), output: $out"
+    failures=$((failures + 1))
+  fi
+}
+
+defines='package x
+
+func TestTheTokenIsChecked(t *testing.T) {}
+func FuzzTheParser(f *testing.F) {}'
+
+check "every named test exists" 0 "$head
+| 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked\`, \`FuzzTheParser\` |" internal/x/x_test.go "$defines"
+check "a test that does not exist" 1 "$head
+| 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked\` |
+| 2 | Nothing leaks. | \`y.go\` | \`TestNothingLeaks\` |" internal/x/x_test.go "$defines" \
+  '^docs/security-posture.md:8: invariant 2 names TestNothingLeaks, which no _test.go defines$'
+check "a fuzz test that does not exist" 1 "$head
+| 3 | Input is parsed. | \`x.go\` | \`FuzzTheLexer\` |" internal/x/x_test.go "$defines" 'invariant 3 names FuzzTheLexer'
+check "a subtest names its test" 0 "$head
+| 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked/an_expired_one\` |" internal/x/x_test.go "$defines"
+check "a name in another cell counts too" 1 "$head
+| 1 | A token is checked, see \`TestGone\`. | \`x.go\` | \`TestTheTokenIsChecked\` |" internal/x/x_test.go "$defines" 'invariant 1 names TestGone'
+check "a test whose name only starts like the cited one" 1 "$head
+| 1 | A token is checked. | \`x.go\` | \`TestTheToken\` |" internal/x/x_test.go "$defines" 'names TestTheToken,'
+check "a method is no test" 1 "$head
+| 1 | A token is checked. | \`x.go\` | \`TestOnAType\` |" internal/x/x_test.go 'package x
+
+func (s suite) TestOnAType(t *testing.T) {}' 'names TestOnAType'
+check "a test in a non-test file is no test" 1 "$head
+| 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked\` |" internal/x/x.go "$defines" 'names TestTheTokenIsChecked'
+check "a worktree's tests do not count" 1 "$head
+| 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked\` |" .claude/worktrees/a/x_test.go "$defines" 'names TestTheTokenIsChecked'
+check "node_modules' tests do not count" 1 "$head
+| 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked\` |" node_modules/a/x_test.go "$defines" 'names TestTheTokenIsChecked'
+check "words such as Tested and Testing are no test names" 0 "$head
+| 1 | Tested by hand; Testing helps. | \`x.go\` | \`TestTheTokenIsChecked\` |" internal/x/x_test.go "$defines"
+check "another section's table is not checked" 0 "$head
+| 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked\` |
+
+## Threats
+
+| 1 | A threat. | \`TestGone\` |" internal/x/x_test.go "$defines"
+check "a table before the section is not checked" 0 "# Security posture
+
+## Threats
+
+| 1 | A threat. | \`TestGone\` |
+
+## Security invariants
+
+| # | Invariant | Enforced in | Tested by |
+|---|---|---|---|
+| 1 | A token is checked. | \`x.go\` | \`TestTheTokenIsChecked\` |" internal/x/x_test.go "$defines"
+check "a section with no rows" 2 "$head" internal/x/x_test.go "$defines" 'no invariant rows'
+check "a section whose rows name no test" 2 "$head
+| 1 | A token is checked. | \`x.go\` | by hand |" internal/x/x_test.go "$defines" 'name no test'
+check "no posture page" 2 "" internal/x/x_test.go "$defines" 'security-posture.md is missing'
+check "a heading that only starts like the section" 2 "# Security posture
+
+## Security invariants, retired
+
+| 1 | A token is checked. | \`x.go\` | \`TestGone\` |" internal/x/x_test.go "$defines" 'no invariant rows'
+
+if [ "$failures" -ne 0 ]; then
+  echo "posture-tests-check_test: $failures failed"
+  exit 1
+fi
+echo "posture-tests-check_test: ok"
