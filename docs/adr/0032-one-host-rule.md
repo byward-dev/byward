@@ -124,9 +124,9 @@ shape's refusal.
 |---|---|---|
 | **P, published** | `BYWARD_PUBLIC_URL` | Refused unless the host and port are written exactly in their canonical form: lower case, no default port, dotted-decimal IPv4, shortest IPv6. The refusal names the canonical form or the address read. Never rewritten. A single label and `localhost` are allowed. |
 | **B, browser-matched** | `BYWARD_ALLOWED_HOSTS`, `BYWARD_ALLOWED_ORIGINS`, the `Host` and `Origin` headers | Both sides parsed and compared in canonical form, ignoring one default port. Case and IPv6 spelling are folded on the setting side. A numeric IPv4 spelling and a name ending in a number are refused, naming what a browser reads. |
-| **S, server-matched names** | `BYWARD_CIMD_TRUSTED_HOSTS`, `BYWARD_CIMD_ALLOWED_HOSTS`, the client denylist's hosts, and the matching at request time | Both sides parsed. A setting must be a name with at least one dot. A trailing dot is folded on both sides, and IDN names are folded (the denylist adds its transitional fold). |
+| **S, server-matched names** | `BYWARD_CIMD_TRUSTED_HOSTS`, `BYWARD_CIMD_ALLOWED_HOSTS`, the client denylist's hosts, and the matching at request time | Both sides parsed. A setting must be a name with at least one dot. A setting's trailing dot stays refused (the denylist strips one, as on `main`); at request time a trailing dot on the host being checked is folded, so it matches the entry without one (A2). IDN names are folded (the denylist adds its transitional fold). |
 | **X, exact identifiers** | Redirect URIs, the OIDC issuer, client IDs, the assertion's `aud` | Not normalized; compared byte for byte. The loopback redirect set stays exact (§5). Only the `--dev` issuer relaxation asks `Parse(…).Loopback()`. |
-| **O, operator addresses** | `BYWARD_UPSTREAM_URL`, `BYWARD_LISTEN`, `BYWARD_INTERNAL_LISTEN`, `BYWARD_TRUSTED_PROXIES`, `X-Forwarded-For` | Left to Go's dialer and netip. Only the no-auth loopback check asks `Parse(…).Loopback()`. |
+| **O, operator addresses** | `BYWARD_UPSTREAM_URL`, `BYWARD_LISTEN`, `BYWARD_INTERNAL_LISTEN`, `BYWARD_TRUSTED_PROXIES`, `X-Forwarded-For` | The host part of `BYWARD_UPSTREAM_URL`, `BYWARD_LISTEN` and `BYWARD_INTERNAL_LISTEN` takes the character rule of §3 (slice 2, #522); otherwise these are left to Go's dialer, and the trusted proxies and `X-Forwarded-For` to netip. Only the no-auth loopback check asks `Parse(…).Loopback()`. |
 
 **Why P is never rewritten.** IdPs and clients compare it exactly (RFC 8414 §3.3, RFC 9728 §3.3),
 a browser client holds the canonical form (WHATWG §3.3, §4.4), and the IdP redirect URI is registered
@@ -135,10 +135,16 @@ as written. A silent rewrite would publish something the operator did not regist
 **Why B folds but refuses a numeric spelling.** byward owns the comparison, so it can normalize both
 sides. `010.0.0.1` read as `8.0.0.1` is not obvious to an operator, so it is refused, not guessed.
 
+**The internal listener** keeps ADR-0018's rule (its 2026-11-06 amendment of §2): any IP literal,
+`localhost` and the `BYWARD_ALLOWED_HOSTS` names, port ignored. Its `Host` header is parsed as
+class B, so those names are compared in canonical form.
+
 ### 3. One set of host-name characters
 
-Every class accepts ASCII letters, digits, `-`, `.` and `_` in a host name, and refuses
-`~ ! $ & ' ( ) * + , ; =` and `%`. An internationalised name is written in its `xn--` form.
+Every host setting in classes P, B, S and O accepts ASCII letters, digits, `-`, `.` and `_` in a
+host name, and refuses `~ ! $ & ' ( ) * + , ; =` and `%`. An internationalised name is written in
+its `xn--` form. Class X is not refused by this set: its identifiers come from clients and the IdP
+and are compared exactly (§2).
 
 - **The refused characters are allowed by RFC 3986 and by browsers** (WHATWG §3.2; `~` and `$`
   parse in Node). No DNS name uses them, and refusing them keeps a pasted secret out of the host:
@@ -152,8 +158,9 @@ Every class accepts ASCII letters, digits, `-`, `.` and `_` in a host name, and 
   - a CIMD document on such a host cannot be fetched over https with a public certificate.
 
   This replaces #486 Q1, which accepted `_` only in classes O and B (#486 Q3).
-- **Residue.** A pasted secret holding only accepted characters, such as `ghp_…`, is a valid host and
-  can appear in `--print-config`. ADR-0031 §2 records this.
+- **Residue.** A pasted secret with no documented prefix that holds only accepted characters, such
+  as `s3cret_tok`, is a valid host and can appear in `--print-config`. ADR-0031 §2 records this gap;
+  a documented prefix such as `ghp_` is refused by ADR-0031 §2's prefix list, not by this set.
 
 ### 4. Behaviour changes against `main`
 
@@ -168,19 +175,20 @@ Every class accepts ASCII letters, digits, `-`, `.` and `_` in a host name, and 
 | R5 | The CIMD lists refuse a numeric IPv4 spelling and a name ending in a number, as the client denylist already does. |
 | R6 | The CIMD lists refuse IP addresses. |
 | R7 | Duplicates after folding (`A.example,a.example`) in the allowed hosts, the origins and the CIMD lists are a warning, not an error. |
-| D4 | A host holding `~ ! $ & ' ( ) * + , ; =` or `%` is refused in every class (§3). |
+| D4 | A host holding `~ ! $ & ' ( ) * + , ; =` or `%` is refused in classes P, B, S and O (§3). |
 
 **Newly accepted or matched:**
 
 | # | Change |
 |---|---|
 | A1 | `Loopback` folds case: `LOCALHOST` is loopback for the `--dev` OIDC issuer, the oidc adapter's http endpoints and the no-auth listen address (#482). The issuer is still compared exactly by the IdP adapter. |
-| A2 | The CIMD trust check folds a trailing dot on both sides, so `https://claude.ai./…` is the trusted `claude.ai`. The document's `client_id` must still equal its URL exactly. |
+| A2 | The CIMD trust check folds a trailing dot on the client ID's host, so `https://claude.ai./…` is the trusted `claude.ai`. A trailing dot in the CIMD lists themselves stays refused. The document's `client_id` must still equal its URL exactly. |
 | A3 | The `Origin` header is canonicalized at request time (`https://127.1`, `https://[0:0::1]`) and matched against the canonical entry. Browsers already send the canonical form. |
 
-**Unchanged on purpose:** redirect URIs and the issuer are compared exactly (§5); the upstream URL and
-the trusted proxies are left to Go's dialer and netip; and a trailing dot in a setting stays refused
-(WHATWG §3.1), except for the denylist's strip.
+**Unchanged on purpose:** redirect URIs and the issuer are compared exactly (§5); apart from the
+character rule on their host part (D4), the upstream URL and the listen addresses are left to Go's
+dialer, and the trusted proxies to netip; and a trailing dot in a setting stays refused (WHATWG §3.1),
+except for the denylist's strip.
 
 ### 5. ADR-0009's loopback redirect set is unchanged
 
@@ -206,9 +214,9 @@ and download paths.
 
 - **Delivery** follows ADR-0031's work, in four slices. Each is a breaking-change PR with its own
   release note:
-  1. `internal/host`, with `Parse`, `Loopback`, the conformance suites and A1. It starts after #511,
-     which rewrites the same parse functions.
-  2. Class P (R2).
+  1. `internal/host`, with `Parse`, `Loopback`, the conformance suites and A1 (#521). It moves code
+     and changes no other behaviour. It starts after #511, which rewrites the same parse functions.
+  2. Class P (R2), and the character rule (D4) on class O's host part (#522).
   3. Class B (R3, R4, R7, A3).
   4. Class S (R5, R6, A2).
 
