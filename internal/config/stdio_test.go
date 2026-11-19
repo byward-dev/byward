@@ -182,7 +182,11 @@ func valuesDiff(got, want *Values) []string {
 		g, gok := got.byKey[k]
 		w, wok := want.byKey[k]
 		if gok != wok || !reflect.DeepEqual(g, w) {
-			out = append(out, fmt.Sprintf("Values[%s]: LoadEnvironment %s, Load %s", k, shownSetting(g, gok), shownSetting(w, wok)))
+			gs, ws := describeSetting(g, gok), describeSetting(w, wok)
+			if gs == ws { // they differ in the registry entry only
+				gs, ws = fmt.Sprintf("%+v", g), fmt.Sprintf("%+v", w)
+			}
+			out = append(out, fmt.Sprintf("Values[%s]: LoadEnvironment %s, Load %s", k, gs, ws))
 		}
 	}
 	if len(out) == 0 && !reflect.DeepEqual(*got, *want) {
@@ -191,13 +195,14 @@ func valuesDiff(got, want *Values) []string {
 	return out
 }
 
-// shownSetting shows what the operator gave for a setting, without its registry entry: the value, where it
-// came from and the file it was read from, or that the setting is absent.
-func shownSetting(v Value, present bool) string {
+// describeSetting shows what the operator gave for a setting, without its registry entry: the value,
+// where it came from, the file it was read from and the flag or variable that named that file, or
+// that the setting is absent.
+func describeSetting(v Value, present bool) string {
 	if !present {
 		return "absent"
 	}
-	return fmt.Sprintf("%q from %v, path %q", v.Raw, v.Source, v.Path)
+	return fmt.Sprintf("%q from %v, path %q named by %q", v.Raw, v.Source, v.Path, v.From)
 }
 
 func TestInvalidStdioSettingsAreRejectedNamingTheSetting(t *testing.T) {
