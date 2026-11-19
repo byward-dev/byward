@@ -147,8 +147,7 @@ func TestAURLSettingsQueryIsNeverPrintedInTheConfiguration(t *testing.T) {
 // arguments follow, never the arguments, one of which can be a token; the release note says so.
 func TestTheUpstreamCommandsArgumentsAreNeverPrintedInTheConfiguration(t *testing.T) {
 	const token = "S3CRET-token"
-	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_LISTEN=127.0.0.1:0", "BYWARD_INTERNAL_LISTEN=127.0.0.1:0",
-		"BYWARD_ASSERTION_KEYS_DIR=") // a stdio upstream takes no assertion keys
+	env := append(stdioAuthEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_LISTEN=127.0.0.1:0", "BYWARD_INTERNAL_LISTEN=127.0.0.1:0")
 	args := []string{"--", "/bin/cat", "--token", token}
 	code, stdout, stderr := runWith(append([]string{"--print-config"}, args...), env...)
 	if want := "BYWARD_UPSTREAM_COMMAND=/bin/cat (2 arguments not shown) (flag)\n"; code != exitOK || !strings.Contains(stdout, want) || strings.Contains(stdout+stderr, token) {

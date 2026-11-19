@@ -462,14 +462,14 @@ func TestJWKSRefusesNoKeysAnExtraArgumentNoAuthenticationOrAStdioUpstream(t *tes
 	stdio := append(stdioAuthEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", `BYWARD_UPSTREAM_COMMAND=["/bin/cat"]`)
 	noAuth := []string{"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp"}
 	const noAuthRefusal = "byward: configuration error: with BYWARD_INSECURE_NO_AUTH no identity assertion is sent, so there are no assertion keys to export\n"
-	const stdioRefusal = "byward: configuration error: with a stdio upstream (BYWARD_UPSTREAM_COMMAND) no identity assertion is sent; only HTTP upstreams get one, so there are no assertion keys to export\n"
+	const stdioRefusal = "byward: configuration error: with a stdio upstream (BYWARD_UPSTREAM_COMMAND) no identity assertion is sent, so there are no assertion keys to export; only an HTTP upstream gets one\n"
 	for _, tc := range []struct {
 		name     string
 		args     []string
 		env      []string
 		inStderr []string
 	}{
-		{"no keys", []string{"jwks"}, append(env, "BYWARD_ASSERTION_KEYS_DIR="+assertionkey.EmptyDir(t)), []string{"BYWARD_ASSERTION_KEYS_DIR", "has no key files"}},
+		{"no keys", []string{"jwks"}, append(slices.Clone(env), "BYWARD_ASSERTION_KEYS_DIR="+assertionkey.EmptyDir(t)), []string{"BYWARD_ASSERTION_KEYS_DIR", "has no key files", "(see docs/how-to/identity-assertion.md)"}},
 		{"extra argument", []string{"jwks", "--out", "x"}, env, []string{"usage: byward jwks"}},
 		// Without authentication no identity assertion is sent: refused as such, not as a key
 		// directory that cannot be read (L175).
