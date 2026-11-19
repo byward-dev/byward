@@ -25,22 +25,18 @@ type Setting struct {
 	Group   Group  // the section of the settings reference it is listed in; the two upstream groups also mean "for that mode only", as does httpOnly (offModeSettings)
 	Default string
 	Help    string
-	Secret  bool // read only from a file: `<ENV>_FILE` or `--<name>-file`
 	Bool    bool
 	// Auth marks settings that configure authentication (IdP, broker); --insecure-no-auth refuses
 	// to start when any of them is set, so a half-configured production setup never runs open.
 	Auth bool
-	// URL marks settings whose value is a URL: the proxy uses it whole, but logs and --print-config
-	// show it as logging.MarkedURL does, since a query can hold an API key (#458); doctor's lines
-	// that name one call MarkedURL themselves.
-	URL bool
-	// URLs marks a list setting whose entries can be URLs: logs and --print-config show each URL
-	// entry as logging.MarkedURL does, and any other entry as given.
-	URLs bool
-	// Command marks the setting whose value is a command line: logs and --print-config show its
-	// program and how many arguments follow, never the arguments, since one can be a token.
-	Command bool
+	// shape decides how the value is shown (ADR-0031 §3); secretShape also means the value is read
+	// only from a file. Every registry entry has one (checkShapes, at init).
+	shape *shape
 }
+
+// Secret reports whether the setting is a secret: read only from a file, `<ENV>_FILE` or
+// `--<name>-file`, and never shown. Its shape decides it.
+func (s Setting) Secret() bool { return s.shape == secretShape }
 
 // Env is the setting's environment variable name.
 func (s Setting) Env() string {
@@ -82,50 +78,19 @@ func (v *Values) SecretFiles() []SecretFile {
 	return out
 }
 
-// Display is the value as it may be logged: secrets are always redacted, a URL (or a URL entry of a
-// list) shows its scheme, host and path with a marker for each part left out (logging.MarkedURL),
-// and a command line its program and how many arguments follow (displayCommand).
+// Display is the value as the startup log and --print-config show it: only through its setting's
+// shape (ADR-0031 §3). An unset value shows as nothing, and the value of a Setting built without a shape
+// (outside the registry, which gives every entry one) as Hidden. Five lines still show a URL
+// setting with logging.MarkedURL directly: the no-auth and --dev loopback-issuer relaxations, and
+// doctor's upstream and discovery lines; #494 moves them to the shape.
 func (v Value) Display() string {
 	switch {
 	case v.Raw == "":
 		return ""
-	case v.Setting.Secret:
-		return "<redacted>"
-	case v.Setting.URL:
-		return logging.MarkedURL(v.Raw)
-	case v.Setting.URLs:
-		entries := splitList(v.Raw)
-		for i, e := range entries {
-			if strings.Contains(e, "://") {
-				entries[i] = logging.MarkedURL(e)
-			}
-		}
-		return strings.Join(entries, ", ")
-	case v.Setting.Command:
-		return displayCommand(v.Raw)
-	}
-	return v.Raw
-}
-
-// displayCommand is a command line given as a JSON array of strings, shown by its program and the
-// number of arguments left out. A value that is not such an array shows as Hidden.
-func displayCommand(raw string) string {
-	var argv []string
-	if json.Unmarshal([]byte(raw), &argv) != nil || len(argv) == 0 {
+	case v.Setting.shape == nil:
 		return logging.Hidden
 	}
-	program := argv[0]
-	if strings.ContainsFunc(program, func(r rune) bool { return !strconv.IsPrint(r) }) { // a newline would start a new line of output
-		program = strconv.Quote(program)
-	}
-	switch n := len(argv) - 1; n {
-	case 0:
-		return program
-	case 1:
-		return program + " (1 argument not shown)"
-	default:
-		return fmt.Sprintf("%s (%d arguments not shown)", program, n)
-	}
+	return v.Setting.shape.display(v.Raw)
 }
 
 // configError is a configuration error; the process exits with its own code for these.
@@ -210,7 +175,7 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 			fs.Var((*boolValue)(flagVals[s.Name]), s.Name, s.Help)
 			continue
 		}
-		if s.Secret {
+		if s.Secret() {
 			fileFlagVals[s.Name] = fs.String(s.Name+"-file", "", "file holding "+s.Help)
 			continue
 		}
@@ -251,15 +216,15 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 	for _, s := range reg {
 		v := Value{Setting: s, Raw: s.Default, Source: SourceDefault}
 		switch {
-		case s.Secret && set[s.Name+"-file"]:
+		case s.Secret() && set[s.Name+"-file"]:
 			raw, err := readSecret(readFile, *fileFlagVals[s.Name], "--"+s.Name+"-file")
 			if err != nil {
 				return nil, err
 			}
 			v.Raw, v.Source, v.Path, v.From = raw, SourceFile, *fileFlagVals[s.Name], "--"+s.Name+"-file"
-		case !s.Secret && set[s.Name]:
+		case !s.Secret() && set[s.Name]:
 			v.Raw, v.Source = *flagVals[s.Name], SourceFlag
-		case s.Secret && env[s.Env()+"_FILE"] != "":
+		case s.Secret() && env[s.Env()+"_FILE"] != "":
 			raw, err := readSecret(readFile, env[s.Env()+"_FILE"], s.Env()+"_FILE")
 			if err != nil {
 				return nil, err
@@ -295,7 +260,7 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 func (v *Values) inlineSecrets() []string {
 	var out []string
 	for _, val := range v.Effective() {
-		if val.Setting.Secret && val.Source == SourceEnv {
+		if val.Setting.Secret() && val.Source == SourceEnv {
 			out = append(out, val.Setting.Env())
 		}
 	}
@@ -325,7 +290,7 @@ func checkUnknownEnv(reg []Setting, env map[string]string) error {
 	known := map[string]bool{}
 	for _, s := range reg {
 		known[s.Env()] = true
-		if s.Secret {
+		if s.Secret() {
 			known[s.Env()+"_FILE"] = true
 		}
 	}

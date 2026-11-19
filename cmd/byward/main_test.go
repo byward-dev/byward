@@ -56,11 +56,15 @@ func authEnv(t *testing.T) []string {
 		"BYWARD_STORE_DIR=" + filepath.Join(dir, "state"), "BYWARD_ASSERTION_KEYS_DIR=" + assertionkey.Dir(t)}
 }
 
-// stdioAuthEnv is authEnv without BYWARD_ASSERTION_KEYS_DIR, which config refuses with a stdio
-// upstream.
+// stdioAuthEnv is authEnv for a stdio upstream, which refuses the identity assertion's keys directory.
 func stdioAuthEnv(t *testing.T) []string {
 	t.Helper()
-	return slices.DeleteFunc(authEnv(t), func(kv string) bool { return strings.HasPrefix(kv, "BYWARD_ASSERTION_KEYS_DIR=") })
+	return without(authEnv(t), "BYWARD_ASSERTION_KEYS_DIR=")
+}
+
+// without is a copy of env without the entries that start with prefix.
+func without(env []string, prefix string) []string {
+	return slices.DeleteFunc(slices.Clone(env), func(kv string) bool { return strings.HasPrefix(kv, prefix) })
 }
 
 func TestAnUnknownSettingIsAConfigErrorWithADidYouMeanHint(t *testing.T) {
@@ -123,42 +127,47 @@ func TestPrintConfigShowsSources(t *testing.T) {
 	}
 }
 
-// #458: --print-config and the startup log's config lines show a URL setting without its query, an
-// API key it may hold, and mark the query as left out; the operators who read a query there now see
-// "?…" (security invariant 2).
-func TestAURLSettingsQueryIsNeverPrintedInTheConfiguration(t *testing.T) {
-	const key = "S3CRET-api-key"
-	env := append(authEnv(t), serveEnv("https://m.example/mcp", "127.0.0.1:0")...)
-	env = append(env, "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp?api_key="+key)
-	code, stdout, stderr := runWith([]string{"--print-config"}, env...)
-	if want := "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp?… (env)\n"; code != exitOK || !strings.Contains(stdout, want) || strings.Contains(stdout+stderr, key) {
-		t.Errorf("--print-config: code %d, stdout %q, stderr %q; want the line %q and never the key", code, stdout, stderr, want)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	var out, errb bytes.Buffer
-	run(ctx, nil, env, &out, &errb)
-	if want := `"msg":"config","setting":"BYWARD_UPSTREAM_URL","value":"http://127.0.0.1:9/mcp?…","source":"env"}`; !strings.Contains(errb.String(), want) || strings.Contains(errb.String()+out.String(), key) {
-		t.Errorf("startup log %s; want %s and never the key", errb.String(), want)
-	}
-}
-
-// --print-config and the startup log show the stdio upstream's command by its program and how many
-// arguments follow, never the arguments, one of which can be a token; the release note says so.
-func TestTheUpstreamCommandsArgumentsAreNeverPrintedInTheConfiguration(t *testing.T) {
-	const token = "S3CRET-token"
-	env := append(stdioAuthEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_LISTEN=127.0.0.1:0", "BYWARD_INTERNAL_LISTEN=127.0.0.1:0")
-	args := []string{"--", "/bin/cat", "--token", token}
-	code, stdout, stderr := runWith(append([]string{"--print-config"}, args...), env...)
-	if want := "BYWARD_UPSTREAM_COMMAND=/bin/cat (2 arguments not shown) (flag)\n"; code != exitOK || !strings.Contains(stdout, want) || strings.Contains(stdout+stderr, token) {
-		t.Errorf("--print-config: code %d, stdout %q, stderr %q; want the line %q and never the token", code, stdout, stderr, want)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	var out, errb bytes.Buffer
-	run(ctx, args, env, &out, &errb)
-	if want := `"msg":"config","setting":"BYWARD_UPSTREAM_COMMAND","value":"/bin/cat (2 arguments not shown)","source":"flag"}`; !strings.Contains(errb.String(), want) || strings.Contains(errb.String()+out.String(), token) {
-		t.Errorf("startup log %s; want %s and never the token", errb.String(), want)
+// --print-config and the startup log show a setting of each shape that hides part or all of a value
+// through that shape, never the part it hides (security invariant 2): a secret as <redacted>; a URL
+// without its query, which can hold an API key (#458), marking it as left out ("?…"), as the operators
+// who read a query there now see; each URL entry of a list as MarkedURL shows it, here its path
+// parameters (";…"); and the stdio upstream's command by its program and how many arguments follow,
+// never the arguments, one of which can be a token, as the release note says. The leak test covers
+// every such setting.
+func TestAValueOfEachHidingShapeIsShownThroughItInPrintConfigAndTheStartupLog(t *testing.T) {
+	serve := serveEnv("https://m.example/mcp", "127.0.0.1:0")
+	for _, c := range []struct {
+		name, hidden string
+		stdio        bool // with a stdio upstream, which takes no assertion keys (stdioAuthEnv) and no upstream URL
+		env, args    []string
+		line, logged string // the --print-config line and the startup log's config record, after "msg":"config",
+	}{
+		{"secret", "s3cret-entra", false, nil, nil,
+			"BYWARD_ENTRA_CLIENT_SECRET=<redacted> (file)", `"setting":"BYWARD_ENTRA_CLIENT_SECRET","value":"<redacted>","source":"file"}`},
+		{"URL", "S3CRET-api-key", false, []string{"BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp?api_key=S3CRET-api-key"}, nil,
+			"BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp?… (env)", `"setting":"BYWARD_UPSTREAM_URL","value":"http://127.0.0.1:9/mcp?…","source":"env"}`},
+		{"URL list", "S3CRET-list", false, []string{"BYWARD_CLIENT_DENYLIST=https://evil.example/c.json;k=S3CRET-list, bad.example"}, nil,
+			"BYWARD_CLIENT_DENYLIST=https://evil.example/c.json;…, bad.example (env)", `"setting":"BYWARD_CLIENT_DENYLIST","value":"https://evil.example/c.json;…, bad.example","source":"env"}`},
+		{"command", "S3CRET-token", true, nil, []string{"--", "/bin/cat", "--token", "S3CRET-token"},
+			"BYWARD_UPSTREAM_COMMAND=/bin/cat (2 arguments not shown) (flag)", `"setting":"BYWARD_UPSTREAM_COMMAND","value":"/bin/cat (2 arguments not shown)","source":"flag"}`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			env := slices.Concat(authEnv(t), serve, c.env) // the row's own settings last, so they win
+			if c.stdio {
+				env = slices.Concat(stdioAuthEnv(t), without(serve, "BYWARD_UPSTREAM_URL="), c.env)
+			}
+			code, stdout, stderr := runWith(append([]string{"--print-config"}, c.args...), env...)
+			if code != exitOK || !strings.Contains(stdout, "\n"+c.line+"\n") || strings.Contains(stdout+stderr, c.hidden) {
+				t.Errorf("--print-config: code %d, stdout %q, stderr %q; want the line %q and never %q", code, stdout, stderr, c.line, c.hidden)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			var out, errb bytes.Buffer
+			run(ctx, c.args, env, &out, &errb)
+			if want := `"msg":"config",` + c.logged; !strings.Contains(errb.String(), want) || strings.Contains(errb.String()+out.String(), c.hidden) {
+				t.Errorf("startup log %s; want %s and never %q", errb.String(), want, c.hidden)
+			}
+		})
 	}
 }
 
@@ -481,8 +490,7 @@ func TestRevokeAndNewEpochTakeAStdioUpstreamAfterDashes(t *testing.T) {
 			if err := os.WriteFile(script, []byte("#!/bin/sh\ntouch "+dir+"/ran\n"), 0o700); err != nil { //nolint:gosec // G306: an executable test command
 				t.Fatal(err)
 			}
-			env := stdioAuthEnv(t)
-			env = append(env, "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_DATA_DIR="+dir, // the test's own, so no defaulted path reaches the host's
+			env := append(stdioAuthEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_DATA_DIR="+dir, // the test's own, so no defaulted path reaches the host's
 				"BYWARD_STORE_COUNTER_FILE="+filepath.Join(dir, "store-writes"))
 			if tc.code == exitOK { // a revocation needs the store a proxy created (L152)
 				s, err := sqlite.Open(context.Background(), sqlite.Options{Dir: setting(env, "BYWARD_STORE_DIR"), CounterFile: setting(env, "BYWARD_STORE_COUNTER_FILE")})

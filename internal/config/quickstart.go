@@ -29,7 +29,7 @@ func (q Quickstart) EnvFile() string {
 		}
 		s := lookup(name)
 		env := s.Env()
-		if s.Secret {
+		if s.Secret() {
 			env += "_FILE"
 		}
 		if values[name] == "" {

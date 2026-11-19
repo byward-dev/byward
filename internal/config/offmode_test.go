@@ -101,7 +101,7 @@ func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 		n++
 		t.Run(s.Name, func(t *testing.T) {
 			given := s.Env() + "=x"
-			if s.Secret {
+			if s.Secret() {
 				given = s.Env() + "_FILE=/run/secrets/off-mode"
 			}
 			env, mode := append(append([]string{}, base...), given), "HTTP"

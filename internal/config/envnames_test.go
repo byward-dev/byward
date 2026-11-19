@@ -30,7 +30,7 @@ func TestEveryBYWARDNameInTheCodeAndDocsIsASetting(t *testing.T) {
 	for _, s := range registry {
 		known[s.Env()] = true
 		byName[s.Name] = s
-		if s.Secret {
+		if s.Secret() {
 			known[s.Env()+"_FILE"] = true
 		}
 	}
@@ -101,7 +101,7 @@ func settingLiteralProblem(byName map[string]Setting, name, suffix string) strin
 		return fmt.Sprintf("names Setting %q, which is not a setting", name)
 	case suffix != "" && suffix != "_FILE":
 		return fmt.Sprintf("names %s%s, but a setting's only other variable is _FILE", s.Env(), suffix)
-	case suffix != "" && !s.Secret:
+	case suffix != "" && !s.Secret():
 		return fmt.Sprintf("names %s_FILE, but %s is not a secret setting", s.Env(), name)
 	}
 	return ""
@@ -140,7 +140,7 @@ func TestTheSettingLiteralPatternReadsEveryGofmtForm(t *testing.T) {
 // The guard refuses an unknown name, a suffix other than _FILE, and _FILE on a setting that is not
 // secret.
 func TestTheSettingLiteralGuardRefusesWhatNoSettingReads(t *testing.T) {
-	byName := map[string]Setting{"plain": {Name: "plain"}, "secret": {Name: "secret", Secret: true}}
+	byName := map[string]Setting{"plain": {Name: "plain"}, "secret": {Name: "secret", shape: secretShape}}
 	for _, tc := range []struct{ name, suffix, want string }{
 		{"plain", "", ""},
 		{"secret", "_FILE", ""},
@@ -157,7 +157,7 @@ func TestTheSettingLiteralGuardRefusesWhatNoSettingReads(t *testing.T) {
 // The guard reads each literal in a file: every one is counted, and each, with its suffix, reaches
 // the decision.
 func TestTheSettingLiteralGuardReadsEachLiteralInSource(t *testing.T) {
-	byName := map[string]Setting{"plain": {Name: "plain"}, "secret": {Name: "secret", Secret: true}}
+	byName := map[string]Setting{"plain": {Name: "plain"}, "secret": {Name: "secret", shape: secretShape}}
 	src := "a := Setting{Name: \"plain\"}.Env() + \"_FILE\"\n" +
 		"b := Setting{Name: \"secret\"}.Env() + \"_FILE\"\n" +
 		"c := Setting{Name: \"missing\"}\n" +

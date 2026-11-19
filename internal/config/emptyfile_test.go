@@ -96,13 +96,13 @@ var emptyFileAllowed = map[string]string{
 func TestEverySecretSettingRefusesAnEmptyNamedFileOrSaysWhy(t *testing.T) {
 	for _, names := range []map[string]bool{keysOf(emptyFileContext), keysOf(emptyFileAllowed)} {
 		for name := range names {
-			if s, ok := settingNamed(name); !ok || !s.Secret {
+			if s, ok := settingNamed(name); !ok || !s.Secret() {
 				t.Errorf("%s is listed for the empty-file rule but is not a secret setting", name)
 			}
 		}
 	}
 	for _, s := range registry {
-		if !s.Secret {
+		if !s.Secret() {
 			continue
 		}
 		if why, ok := emptyFileAllowed[s.Name]; ok {

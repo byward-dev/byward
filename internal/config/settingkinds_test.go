@@ -19,7 +19,7 @@ func TestBooleanSettingsAreExactlyTheBoolFlags(t *testing.T) {
 	env := map[string][]string{}
 	bools := 0
 	for _, s := range registry {
-		if s.Secret {
+		if s.Secret() {
 			continue // read from a file; never read as a boolean
 		}
 		if s.Bool {
@@ -119,7 +119,7 @@ func TestEveryPathSettingRefusesARelativePath(t *testing.T) {
 	}
 	paths := 0
 	for _, s := range registry {
-		if s.Secret || !strings.HasSuffix(s.Name, "-dir") && !strings.HasSuffix(s.Name, "-file") {
+		if s.Secret() || !strings.HasSuffix(s.Name, "-dir") && !strings.HasSuffix(s.Name, "-file") {
 			continue
 		}
 		paths++

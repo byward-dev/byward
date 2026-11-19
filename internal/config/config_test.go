@@ -432,8 +432,8 @@ func TestVersionNeedsNoOtherSettings(t *testing.T) {
 	}
 }
 
-// Secrets are exercised with a test registry: slice 1.1 has no secret settings yet.
-var secretReg = []Setting{{Name: "client-secret", Secret: true, Help: "secret"}}
+// secretReg is a registry of one secret setting, for the tests of reading a secret on its own.
+var secretReg = []Setting{{Name: "client-secret", shape: secretShape, Help: "secret"}}
 
 func files(m map[string]string) readFileFunc {
 	return func(p string) ([]byte, error) {

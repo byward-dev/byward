@@ -200,10 +200,10 @@ func TestEveryURLSettingIsShownWithoutTheParts(t *testing.T) {
 	const raw, shown = "https://h.example/p;s=" + pasted + "?k=" + pasted + "#" + pasted, "https://h.example/p;…?…#…"
 	for _, s := range registry {
 		var got, want string
-		switch {
-		case s.URL:
+		switch s.shape {
+		case urlShape:
 			got, want = (Value{Setting: s, Raw: raw}).Display(), shown
-		case s.URLs: // each URL entry as a URL, any other as given
+		case urlListShape: // each URL entry as a URL, any other as given
 			got, want = (Value{Setting: s, Raw: raw + ", app.example"}).Display(), shown+", app.example"
 		default:
 			continue
@@ -214,13 +214,13 @@ func TestEveryURLSettingIsShownWithoutTheParts(t *testing.T) {
 	}
 }
 
-// Every setting config reads as a URL is marked, so a new one cannot print its query: a setting read
-// through parseURL by name must be URL, and every other net/url Parse, ParseRequestURI or JoinPath
-// call in the package (in a function or a package-level var), by its owner and argument, is listed
-// here once with the setting whose value it reads (which must be URL, or URLs for a list) or "" for
-// one that refuses a query, a fragment and path parameters, or reads no setting. A new call fails
-// until it is listed, and so does every read urlReadsOf cannot follow.
-func TestEverySettingReadAsAURLIsMarked(t *testing.T) {
+// Every setting config reads as a URL has a URL shape, so a new one cannot print its query: a setting
+// read through parseURL by name must have urlShape, and every other net/url Parse, ParseRequestURI or
+// JoinPath call in the package (in a function or a package-level var), by its owner and argument, is
+// listed here once with the setting whose value it reads (which must have urlShape, or urlListShape
+// for a list) or "" for one that refuses a query, a fragment and path parameters, or reads no
+// setting. A new call fails until it is listed, and so does every read urlReadsOf cannot follow.
+func TestEverySettingReadAsAURLHasAURLShape(t *testing.T) {
 	byName := map[string]Setting{}
 	for _, s := range registry {
 		byName[s.Name] = s
@@ -251,17 +251,17 @@ func TestEverySettingReadAsAURLIsMarked(t *testing.T) {
 		}
 		for _, name := range reads.named {
 			named++
-			if !byName[name].URL {
-				t.Errorf("%s: reads %s as a URL, but the setting is not marked URL", f, name)
+			if byName[name].shape != urlShape {
+				t.Errorf("%s: reads %s as a URL, but the setting's shape is not urlShape", f, name)
 			}
 		}
 		for _, key := range reads.parsed {
 			seen[key]++
 			switch name, ok := listed[key]; {
 			case !ok:
-				t.Errorf("%s: parses %q with net/url: mark the setting it reads URL (or URLs) and list it here, or list it as one that reads no setting", f, key)
-			case name != "" && !byName[name].URL && !byName[name].URLs:
-				t.Errorf("%s: %q parses %s's value, but the setting is not marked URL or URLs", f, key, name)
+				t.Errorf("%s: parses %q with net/url: give the setting it reads urlShape (or urlListShape) and list it here, or list it as one that reads no setting", f, key)
+			case name != "" && byName[name].shape != urlShape && byName[name].shape != urlListShape:
+				t.Errorf("%s: %q parses %s's value, but the setting's shape is not urlShape or urlListShape", f, key, name)
 			}
 		}
 	}
@@ -486,37 +486,11 @@ func TestTheUpstreamCommandIsShownByItsProgramAndArgumentCount(t *testing.T) {
 		"[\"/bin/a\u00a0B\",\"-v\"]":       `"/bin/a\u00a0B" (1 argument not shown)`,       // a space, but not one strconv prints
 		"[\"/bin/a\u2028B\",\"-v\"]":       `"/bin/a\u2028B" (1 argument not shown)`,       // a line separator, which some log viewers break on
 		"[\"/bin/a\u007fB\",\"-v\"]":       `"/bin/a\x7fB" (1 argument not shown)`,         // DEL
-		"not JSON":                         "the value (not shown: it may hold a password)"} {
-		if got := (Value{Setting: Setting{Command: true}, Raw: raw}).Display(); got != want {
+		"not JSON":                         "the value (not shown: it may hold a password)",
+		"[]":                               "the value (not shown: it may hold a password)", // no program
+		"null":                             "the value (not shown: it may hold a password)"} {
+		if got := (Value{Setting: Setting{shape: commandShape}, Raw: raw}).Display(); got != want {
 			t.Errorf("%s is shown as %q, want %q", raw, got, want)
-		}
-	}
-}
-
-// The settings shown as a URL, as a list of URLs and as a command line are exactly those whose value
-// is one.
-func TestTheURLAndCommandSettingsAreMarked(t *testing.T) {
-	var url, urls, command []string
-	for _, s := range registry {
-		switch {
-		case s.URL:
-			url = append(url, s.Name)
-		case s.URLs:
-			urls = append(urls, s.Name)
-		case s.Command:
-			command = append(command, s.Name)
-		}
-	}
-	for _, c := range []struct {
-		kind      string
-		got, want []string
-	}{
-		{"URL", url, []string{"public-url", "upstream-url", "resource-documentation", "oidc-issuer"}},
-		{"URLs", urls, []string{"client-denylist"}},
-		{"Command", command, []string{"upstream-command"}},
-	} {
-		if !slices.Equal(c.got, c.want) {
-			t.Errorf("%s settings %q, want %q", c.kind, c.got, c.want)
 		}
 	}
 }
