@@ -34,7 +34,7 @@ case $cited in
 esac
 
 defined=$(find "$root" \( -name .git -o -name .claude -o -name node_modules -o -name testdata \) -prune -o -name '*_test.go' -type f \
-  -exec grep -hoE '^func (Test|Fuzz)[A-Za-z0-9_]+\(' {} + | sed 's/^func //; s/($//' | sort -u)
+  -exec env LC_ALL=C grep -hoE '^func (Test|Fuzz)[A-Za-z0-9_]+\(' {} + | sed 's/^func //; s/($//' | sort -u)
 
 missing=$(printf '%s\n' "$cited" | while read -r line inv name; do
   printf '%s\n' "$defined" | grep -qx "$name" || echo "docs/security-posture.md:$line: invariant $inv names $name, which no _test.go defines"

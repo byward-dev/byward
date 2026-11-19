@@ -67,14 +67,15 @@ $(row_citing TestGoneA TestGoneB)" internal/x/x_test.go "$defines" "names $gone,
 done
 check "a fuzz test that does not exist" 1 "$head
 | 3 | Input is parsed. | \`x.go\` | \`FuzzTheLexer\` |" internal/x/x_test.go "$defines" 'invariant 3 names FuzzTheLexer'
-# What follows Test or Fuzz may start with an upper-case letter, a digit or an underscore, as in Go.
-check "a test name with an underscore" 0 "$head
-$(row_citing Test_the_token)" internal/x/x_test.go "$defines
-func Test_the_token(t *testing.T) {}"
-check "a test name with an underscore that does not exist" 1 "$head
-$(row_citing Test_gone)" internal/x/x_test.go "$defines" 'names Test_gone,'
-check "a test name with a digit that does not exist" 1 "$head
-$(row_citing Test2FA)" internal/x/x_test.go "$defines" 'names Test2FA,'
+# What follows Test or Fuzz may start with an upper-case letter, a digit or an underscore, as in Go,
+# and hold digits later; a name of one letter after the prefix counts too.
+for t in TestA Test_the_token Test2FA9 Fuzz_the_parser Fuzz2x9; do
+  check "a cited $t that exists" 0 "$head
+$(row_citing "$t")" internal/x/x_test.go "$defines
+func $t(t *testing.T) {}"
+  check "a cited ${t}Gone that does not exist" 1 "$head
+$(row_citing "${t}Gone")" internal/x/x_test.go "$defines" "names ${t}Gone,"
+done
 check "a subtest names its test" 0 "$head
 $(row_citing TestTheTokenIsChecked/an_expired_one)" internal/x/x_test.go "$defines"
 check "a later name in a list that does not exist" 1 "$head
@@ -96,8 +97,8 @@ for dir in .git .claude/worktrees node_modules internal/x/testdata; do
   check "$dir's tests do not count" 1 "$head
 $row" "$dir/a/x_test.go" "$defines" 'names TestTheTokenIsChecked'
 done
-check "words such as Tested and Testing are no test names" 0 "$head
-| 1 | Tested by hand; Testing helps. | \`x.go\` | \`TestTheTokenIsChecked\` |" internal/x/x_test.go "$defines"
+check "Tested, Testing, Fuzzy, a lower-case testGone and other kinds of func are no test names" 0 "$head
+| 1 | Tested by hand; Testing helps; Fuzzy edges; testGone, BenchmarkGone and ExampleGone are not cited tests. | \`x.go\` | \`TestTheTokenIsChecked\` |" internal/x/x_test.go "$defines"
 check "another section's table is not checked" 0 "$head
 $row
 
