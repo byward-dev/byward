@@ -60,6 +60,9 @@ func TestAServerSpanIsAnErrorOnlyForA5xx(t *testing.T) {
 			w.WriteHeader(200)
 			w.WriteHeader(500)
 		}, 200, codes.Unset},
+		{"500 then a body, as http.Error writes", func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "boom", 500)
+		}, 500, codes.Error},
 		{"a body then a superfluous 500", func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = io.WriteString(w, "{}")
 			w.WriteHeader(500)
