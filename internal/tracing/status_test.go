@@ -24,6 +24,7 @@ func writes(status int) http.HandlerFunc {
 // code is recorded either way.
 func TestAServerSpanIsAnErrorOnlyForA5xx(t *testing.T) {
 	restoreGlobals(t)
+	clearOTELEnv(t)
 	exp := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exp))
 	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
