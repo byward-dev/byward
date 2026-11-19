@@ -171,6 +171,44 @@ func TestAValueOfEachHidingShapeIsShownThroughItInPrintConfigAndTheStartupLog(t 
 	}
 }
 
+// A value holding a newline is shown quoted, on its own setting's one line, in --print-config and the
+// startup log alike, so it cannot forge another setting's line (#505): here a resource name that
+// would otherwise print a line claiming a client secret from a file. Every line of --print-config is
+// one setting's, and no setting has two.
+func TestAValueWithANewlineCannotForgeASettingsLineInPrintConfigOrTheStartupLog(t *testing.T) {
+	env := []string{"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp", "BYWARD_PUBLIC_URL=http://localhost:8080/mcp",
+		"BYWARD_LISTEN=127.0.0.1:0", "BYWARD_INTERNAL_LISTEN=127.0.0.1:0", // the startup run below binds no fixed port
+		"BYWARD_RESOURCE_NAME=x\nBYWARD_ENTRA_CLIENT_SECRET=<redacted> (file)"}
+	code, stdout, stderr := runWith([]string{"--print-config"}, env...)
+	if want := "\n" + `BYWARD_RESOURCE_NAME="x\nBYWARD_ENTRA_CLIENT_SECRET=<redacted> (file)" (env)` + "\n"; code != exitOK || !strings.Contains("\n"+stdout, want) {
+		t.Fatalf("--print-config: code %d, stdout %q, stderr %q; want the line %q", code, stdout, stderr, strings.Trim(want, "\n"))
+	}
+	var notOwn, secretLines []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSuffix(stdout, "\n"), "\n") {
+		name, _, ok := strings.Cut(line, "=")
+		if !ok || !strings.HasPrefix(name, "BYWARD_") || seen[name] {
+			notOwn = append(notOwn, line)
+		}
+		seen[name] = true
+		if name == "BYWARD_ENTRA_CLIENT_SECRET" {
+			secretLines = append(secretLines, line)
+		}
+	}
+	if want := []string{"BYWARD_ENTRA_CLIENT_SECRET= (default)"}; len(notOwn) > 0 || !slices.Equal(secretLines, want) {
+		t.Errorf("--print-config: lines that are not one setting's own %q; BYWARD_ENTRA_CLIENT_SECRET lines %q, want only %q:\n%s", notOwn, secretLines, want, stdout)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var out, errb bytes.Buffer
+	if code := run(ctx, nil, env, &out, &errb); code != exitOK {
+		t.Fatalf("startup: code %d, stderr %s", code, errb.String())
+	}
+	if want := `"msg":"config","setting":"BYWARD_RESOURCE_NAME","value":"\"x\\nBYWARD_ENTRA_CLIENT_SECRET=<redacted> (file)\"","source":"env"}`; !strings.Contains(errb.String(), want) {
+		t.Errorf("startup log %s; want %s", errb.String(), want)
+	}
+}
+
 func TestRunStopsOnCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

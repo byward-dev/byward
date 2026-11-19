@@ -2,7 +2,10 @@ package config
 
 import (
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // shapeSettings is a shape, its name in messages and the settings that have it.
@@ -101,6 +104,78 @@ func TestEachShapeShowsAnAcceptedValueByItsRule(t *testing.T) {
 	}
 	for name := range examples {
 		t.Errorf("an example names the %s shape, which shapesOfSettings does not list", name)
+	}
+}
+
+// A value a shape shows as given is quoted when it holds a character that is not printable or a byte
+// that is not UTF-8, so it never starts a line of its own in --print-config, where it could forge
+// another setting's line (#505): the as-given shape's whole value and a URL list's entry that is not
+// a URL (the command's program: TestTheUpstreamCommandIsShownByItsProgramAndArgumentCount). A
+// printable value, non-ASCII included, is shown unquoted.
+func TestAValueShownAsGivenIsQuotedWhenItHoldsACharacterThatIsNotPrintableOrAByteThatIsNotUTF8(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		shape *shape
+		raw   string
+		shown string
+	}{
+		{"as given, a newline", asGivenShape, "x\nBYWARD_ENTRA_CLIENT_SECRET=<redacted> (file)", `"x\nBYWARD_ENTRA_CLIENT_SECRET=<redacted> (file)"`},
+		{"as given, a carriage return", asGivenShape, "x\rBYWARD_DEV=true", `"x\rBYWARD_DEV=true"`},
+		{"as given, a terminal escape", asGivenShape, "x\x1b[2K", `"x\x1b[2K"`},
+		{"as given, a tab", asGivenShape, "a\tb", `"a\tb"`},
+		{"as given, DEL", asGivenShape, "a\x7fb", `"a\x7fb"`},
+		{"as given, a C1 control", asGivenShape, "a\u0085b", `"a\u0085b"`},
+		{"as given, a line separator", asGivenShape, "a\u2028b", `"a\u2028b"`},
+		{"as given, a bidi override", asGivenShape, "a\u202eb", `"a\u202eb"`},
+		{"as given, a no-break space", asGivenShape, "a\u00a0b", `"a\u00a0b"`},
+		{"as given, a byte that is not UTF-8", asGivenShape, "a\x9bb", `"a\x9bb"`},
+		{"as given, non-ASCII with a newline", asGivenShape, "Café\nx", `"Café\nx"`},
+		{"as given, printable", asGivenShape, "Contoso IT", "Contoso IT"},
+		{"as given, printable non-ASCII", asGivenShape, "Café Zürich", "Café Zürich"},
+		{"URL list, an entry that is not a URL, with a newline", urlListShape, "https://h.example/x?k=1,bad\nBYWARD_DEV=true", `https://h.example/x?…, "bad\nBYWARD_DEV=true"`},
+		{"URL list, a printable entry that is not a URL", urlListShape, "https://h.example/x,bad.example", "https://h.example/x, bad.example"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := (Value{Setting: Setting{shape: c.shape}, Raw: c.raw}).Display(); got != c.shown {
+				t.Errorf("Display of %q = %q, want %q", c.raw, got, c.shown)
+			}
+		})
+	}
+}
+
+// A URL list shows an entry holding :// as the URL shape does, whatever its scheme's case and whatever
+// it holds: escaped, without its query, or Hidden; never as given, which would show a query's secret
+// or a raw character that is not printable (#458, #505).
+func TestAURLListShowsAnEntryWithASchemeAsAURL(t *testing.T) {
+	for raw, want := range map[string]string{
+		"HTTPS://h.example/x?k=S3CRET":          "HTTPS://h.example/x?…",
+		"https://h.example/a\u2028b,ok.example": "https://h.example/a%E2%80%A8b, ok.example",
+		"https://h.example/x\nBYWARD_DEV=true":  "the value (not shown: it may hold a password)",
+	} {
+		if got := (Value{Setting: Setting{shape: urlListShape}, Raw: raw}).Display(); got != want {
+			t.Errorf("Display of %q = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+// Every setting shows any value, whatever it holds, on one line of printable characters, so no value
+// can start a line of its own in --print-config (#505). A setting whose shape forgets the rule, such
+// as a new shape, fails here.
+func TestEverySettingShowsAnyValueOnOneLineOfPrintableCharacters(t *testing.T) {
+	hostile := []string{
+		"x\nBYWARD_DEV=true", "x\r\nBYWARD_DEV=true", "x\x1b[2K", "a\u2028b", "a\x9bb", "a\tb", "a\x7fb",
+		"a\u202eb", "a\u00a0b", "a\u0085b", "Café\nx",
+		"https://h.example/a\nb", "https://h.example/a\u2028b?k=v", "https://h.example/x,bad\nc",
+		"https://h.example/a%0Ab", "https://a\u0085b.example/",
+		`["/bin/x\nBYWARD_DEV=true","a"]`, `["/bin/x\u2028y"]`, `{"k":"v\nBYWARD_DEV=true"}`,
+	}
+	for _, s := range registry {
+		for _, raw := range hostile {
+			got := Value{Setting: s, Raw: raw}.Display()
+			if !utf8.ValidString(got) || strings.ContainsFunc(got, func(r rune) bool { return !strconv.IsPrint(r) }) {
+				t.Errorf("%s shows %q as %q: not one line of printable characters", s.Name, raw, got)
+			}
+		}
 	}
 }
 

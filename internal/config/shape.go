@@ -13,6 +13,8 @@ import (
 // shape is the kind of value a setting holds, which decides how the value is shown (ADR-0031 §3):
 // display gives an accepted value as the startup log and --print-config show it, and refused gives what
 // a refusal of a value for its form will show of it once refusals go through the shape (#494).
+// display's result is one line of printable characters, whatever the value holds, so a value can
+// never start a line of its own in --print-config (#505).
 // Every registry entry has one, which init checks; build one only with newShape.
 type shape struct {
 	display func(raw string) string
@@ -37,14 +39,15 @@ var (
 	// each part left out, since a query can hold an API key (logging.MarkedURL, #458).
 	urlShape = newShape(logging.MarkedURL, notShown)
 	// urlListShape is a comma-separated list whose entries can be URLs: each URL entry is shown as
-	// urlShape shows it, and any other entry as given.
+	// urlShape shows it, and any other entry as asGivenShape shows it.
 	urlListShape = newShape(displayURLList, notShown)
 	// commandShape is a command line as a JSON array: shown by its program and how many arguments
 	// follow, since an argument can be a token (displayCommand).
 	commandShape = newShape(displayCommand, notShown)
-	// asGivenShape is any other value: shown as given. A setting gets it by a reviewed decision
+	// asGivenShape is any other value: shown as given, quoted when it holds a character that is not
+	// printable (displayAsGiven). A setting gets it by a reviewed decision
 	// (TestTheSettingsOfEachShapeAreExactlyThese).
-	asGivenShape = newShape(func(raw string) string { return raw }, notShown)
+	asGivenShape = newShape(displayAsGiven, notShown)
 )
 
 // notShown is what a refusal of a value for its form will show of it (#494): its length only
@@ -56,13 +59,26 @@ func notShown(raw string) string {
 	return "(1 character, not shown)"
 }
 
+// displayAsGiven is raw as given, or quoted (strconv.Quote) when it holds a character that is not
+// printable, such as a newline, which would start a line of its own in --print-config and could
+// forge another setting's line there (#505), or a byte that is not UTF-8, which the printable test
+// reads as U+FFFD and would let through (a raw 0x9b is a terminal's CSI).
+func displayAsGiven(raw string) string {
+	if !utf8.ValidString(raw) || strings.ContainsFunc(raw, func(r rune) bool { return !strconv.IsPrint(r) }) {
+		return strconv.Quote(raw)
+	}
+	return raw
+}
+
 // displayURLList shows each entry of a comma-separated list that is a URL as logging.MarkedURL does,
-// and any other entry as given.
+// and any other entry as displayAsGiven does.
 func displayURLList(raw string) string {
 	entries := splitList(raw)
 	for i, e := range entries {
 		if strings.Contains(e, "://") {
 			entries[i] = logging.MarkedURL(e)
+		} else {
+			entries[i] = displayAsGiven(e)
 		}
 	}
 	return strings.Join(entries, ", ")
@@ -75,10 +91,7 @@ func displayCommand(raw string) string {
 	if json.Unmarshal([]byte(raw), &argv) != nil || len(argv) == 0 {
 		return logging.Hidden
 	}
-	program := argv[0]
-	if strings.ContainsFunc(program, func(r rune) bool { return !strconv.IsPrint(r) }) { // a newline would start a new line of output
-		program = strconv.Quote(program)
-	}
+	program := displayAsGiven(argv[0])
 	switch n := len(argv) - 1; n {
 	case 0:
 		return program

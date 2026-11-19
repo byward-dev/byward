@@ -67,7 +67,9 @@ func urlLike(raw string) bool {
 // "?…" when a query is and "#…" when a fragment is, so the reader can tell the value holds more than
 // is shown. Where URL will not show it (InvalidURL), such as an accepted URL with an @ past its
 // host (which can be a password holding an unescaped / or ?, split from its user name), it is
-// Hidden: the value may be valid, it is only not shown.
+// Hidden: the value may be valid, it is only not shown. It never holds a character that is not
+// printable: url.Parse refuses an ASCII control character, and the host and path are shown escaped, so it
+// is always one line (#505).
 func MarkedURL(raw string) string {
 	shown := URL(raw)
 	if shown == InvalidURL {

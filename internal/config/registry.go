@@ -79,8 +79,9 @@ func (v *Values) SecretFiles() []SecretFile {
 }
 
 // Display is the value as the startup log and --print-config show it: only through its setting's
-// shape (ADR-0031 §3). An unset value shows as nothing, and the value of a Setting built without a shape
-// (outside the registry, which gives every entry one) as Hidden. Five lines still show a URL
+// shape (ADR-0031 §3), on one line of printable characters, which --print-config relies on (#505).
+// An unset value shows as nothing, and the value of a Setting built without a shape (outside the
+// registry, which gives every entry one) as Hidden. Five lines still show a URL
 // setting with logging.MarkedURL directly: the no-auth and --dev loopback-issuer relaxations, and
 // doctor's upstream and discovery lines; #494 moves them to the shape.
 func (v Value) Display() string {

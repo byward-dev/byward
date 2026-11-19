@@ -26,6 +26,10 @@ func TestAMarkedURLShowsWhatItLeavesOut(t *testing.T) {
 		"https://idp.example/@tenant?k=S3CRET":            Hidden, // an @ past the host: URL shows nothing
 		"https://up.example/mcp#":                         "https://up.example/mcp#…",
 		"https://up.example/mcp?k=a;S3CRET":               "https://up.example/mcp?…",
+		"https://up.example/a\u2028b":                     "https://up.example/a%E2%80%A8b", // #505: never a character that is not printable
+		"https://a\u0085b.example/":                       "https://a%C2%85b.example/",
+		"https://up.example/a\xffb":                       "https://up.example/a%FFb",
+		"https://up.example/\nx":                          Hidden,
 	} {
 		if got := MarkedURL(raw); got != want {
 			t.Errorf("MarkedURL(%q) = %q, want %q", raw, got, want)
