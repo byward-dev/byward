@@ -141,6 +141,9 @@ type Values struct {
 	byKey map[string]Value
 	// command is the stdio upstream's argv given after --; its Value shows it for display only.
 	command []string
+	// noCommandLine is set for a command that takes no command line (LoadEnvironment), so no error
+	// suggests a command after --.
+	noCommandLine bool
 }
 
 // get returns the raw value of a setting.

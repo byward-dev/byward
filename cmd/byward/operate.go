@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -61,9 +62,9 @@ func exportJWKS(_ context.Context, args, environ []string, stdout, stderr io.Wri
 		_, _ = fmt.Fprintln(stderr, "byward: usage: byward jwks (prints the JWKS; redirect it to a file)")
 		return exitConfig
 	}
-	cfg, ok := operatorLoad(nil, environ, stderr)
-	if !ok {
-		return exitConfig
+	cfg, err := config.LoadEnvironment(environ, os.ReadFile) // jwks takes no --, so no error suggests one (#499)
+	if err != nil {
+		return reportConfigError(stderr, err)
 	}
 	set, err := server.ExportJWKS(cfg)
 	if err != nil {

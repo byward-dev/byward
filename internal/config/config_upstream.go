@@ -30,7 +30,10 @@ func (c *Config) upstream(v *Values) []error {
 			errs = append(errs, stripErrs...)
 		}
 		u, err := ParseUpstreamURL(v.get("upstream-url"))
-		if err != nil {
+		switch {
+		case err != nil && v.noCommandLine:
+			return append(errs, errorf("%s (or %s)", err.Error(), cmdEnv))
+		case err != nil:
 			return append(errs, errorf("%s (or %s, or a command after --)", err.Error(), cmdEnv))
 		}
 		c.UpstreamURL = u

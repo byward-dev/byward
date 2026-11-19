@@ -164,6 +164,18 @@ func Load(args, environ []string, readFile readFileFunc) (*Config, Actions, erro
 	return c, act, err
 }
 
+// LoadEnvironment resolves and validates the configuration of a command that takes no command line,
+// such as `byward jwks`: settings come from the environment only, so its errors never suggest a stdio
+// upstream command after -- (#499).
+func LoadEnvironment(environ []string, readFile readFileFunc) (*Config, error) {
+	vals, err := resolve(registry, nil, environ, readFile, nil)
+	if err != nil {
+		return nil, err
+	}
+	vals.noCommandLine = true
+	return validate(vals, inContainer(readFile))
+}
+
 // authSettings validate authenticated mode's settings, in this order; a feature with settings of its
 // own adds its check here.
 var authSettings = []func(*Config, *Values) []error{

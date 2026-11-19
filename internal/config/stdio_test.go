@@ -67,6 +67,60 @@ func TestStdioEnvFileValuesAreParsedAndNeverDisplayed(t *testing.T) {
 	}
 }
 
+// A command that takes no command line loads with LoadEnvironment: a missing or malformed upstream
+// URL names the stdio upstream's variable only, never a command after --, which such a command
+// refuses. Load, for the proxy and the commands that take --, still names both (#499).
+func TestOnlyALoadThatTakesACommandLineSuggestsACommandAfterDashes(t *testing.T) {
+	for _, tc := range []struct {
+		name, url, environmentOnly, withCommandLine string
+	}{
+		{"no upstream", "", "BYWARD_UPSTREAM_URL is required (or BYWARD_UPSTREAM_COMMAND)",
+			"BYWARD_UPSTREAM_URL is required (or BYWARD_UPSTREAM_COMMAND, or a command after --)"},
+		{"a malformed upstream URL", "BYWARD_UPSTREAM_URL=ftp://u/mcp", `BYWARD_UPSTREAM_URL: want an absolute http(s) URL, got "ftp://u/mcp" (or BYWARD_UPSTREAM_COMMAND)`,
+			`BYWARD_UPSTREAM_URL: want an absolute http(s) URL, got "ftp://u/mcp" (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := stdioBase()
+			if tc.url != "" {
+				env = append(env, tc.url)
+			}
+			if _, err := LoadEnvironment(env, baseFiles); !isConfigError(err) || err.Error() != tc.environmentOnly {
+				t.Errorf("LoadEnvironment: got %v, want the config error %q", err, tc.environmentOnly)
+			}
+			if _, _, err := Load(nil, env, baseFiles); !isConfigError(err) || err.Error() != tc.withCommandLine {
+				t.Errorf("Load: got %v, want the config error %q", err, tc.withCommandLine)
+			}
+		})
+	}
+}
+
+// LoadEnvironment loads a valid environment's upstream as Load does without a command line.
+func TestLoadEnvironmentLoadsAnHTTPOrAStdioUpstreamFromTheEnvironment(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		env     []string
+		url     string
+		command []string
+	}{
+		{"HTTP", base, "http://upstream:9000/mcp", nil},
+		{"stdio", stdioBase(`BYWARD_UPSTREAM_COMMAND=["/usr/bin/server","--flag"]`), "", []string{"/usr/bin/server", "--flag"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := LoadEnvironment(tc.env, baseFiles)
+			if err != nil {
+				t.Fatal(err)
+			}
+			url := ""
+			if c.UpstreamURL != nil {
+				url = c.UpstreamURL.String()
+			}
+			if url != tc.url || !slices.Equal(c.UpstreamCommand, tc.command) {
+				t.Errorf("upstream URL %q, command %q; want %q, %q", url, c.UpstreamCommand, tc.url, tc.command)
+			}
+		})
+	}
+}
+
 func TestInvalidStdioSettingsAreRejectedNamingTheSetting(t *testing.T) {
 	for name, tc := range map[string]struct {
 		args    []string

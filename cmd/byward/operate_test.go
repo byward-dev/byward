@@ -522,3 +522,30 @@ func TestCheckOfflinePrintsEachRelaxationFirst(t *testing.T) {
 		})
 	}
 }
+
+// With no upstream, the refusal names a stdio upstream command after -- only for the proxy and the
+// commands that take one; jwks refuses any argument, so it names BYWARD_UPSTREAM_COMMAND only (#499).
+func TestTheNoUpstreamRefusalSuggestsACommandAfterDashesOnlyWhereOneIsTaken(t *testing.T) {
+	const withDashes = "byward: configuration error: BYWARD_UPSTREAM_URL is required (or BYWARD_UPSTREAM_COMMAND, or a command after --)\n"
+	env := append(authEnv(t), "BYWARD_PUBLIC_URL=https://m.example/mcp")
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"jwks", []string{"jwks"}, "byward: configuration error: BYWARD_UPSTREAM_URL is required (or BYWARD_UPSTREAM_COMMAND)\n"},
+		{"the proxy", nil, withDashes},
+		{"check --offline", []string{"check", "--offline"}, withDashes},
+		{"doctor", []string{"doctor"}, withDashes},
+		{"revoke-user", []string{"revoke-user", "u1"}, withDashes},
+		{"revoke-all", []string{"revoke-all", "--yes"}, withDashes},
+		{"store new-epoch", []string{"store", "new-epoch", "--yes"}, withDashes},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := runWith(tc.args, env...)
+			if code != exitConfig || stdout != "" || stderr != tc.want {
+				t.Errorf("code %d, stdout %q, stderr %q; want %d, nothing, %q", code, stdout, stderr, exitConfig, tc.want)
+			}
+		})
+	}
+}
