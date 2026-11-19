@@ -6,7 +6,7 @@ which ports are public, and how secrets reach the proxy. Start from a working fi
 the checklist behind each choice is [harden a deployment](harden-a-deployment.md).
 
 Items about a feature in no release yet say "(on `main`)". The examples use the image
-`ghcr.io/byward-dev/byward:v0.3.0`.
+`ghcr.io/byward-dev/byward:v0.3.1`.
 
 ## 1. Choose one replica or several
 
@@ -156,7 +156,7 @@ sudo chown 65532:65532 entra-client-secret && sudo chmod 0600 entra-client-secre
 ```yaml
 services:
   byward:
-    image: ghcr.io/byward-dev/byward:v0.3.0
+    image: ghcr.io/byward-dev/byward:v0.3.1
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"   # only the reverse proxy on this host reaches it
@@ -221,7 +221,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: byward
-          image: ghcr.io/byward-dev/byward:v0.3.0
+          image: ghcr.io/byward-dev/byward:v0.3.1
           env:
             - {name: BYWARD_PUBLIC_URL, value: "https://mcp.example.com/mcp"}
             - {name: BYWARD_UPSTREAM_URL, value: "http://upstream.mcp.svc:3001/mcp"}

@@ -5,7 +5,7 @@ authorization code flow with PKCE and validates the ID token per OIDC Core §3.1
 quirks of Google, Okta, Auth0 and Keycloak. Background: [ADR-0011](../adr/0011-idp-adapters.md). One
 IdP per proxy. The data directory, the keys and starting the proxy are in [run byward](run-byward.md).
 
-> Needs byward v0.2.0 or later; use the image `ghcr.io/byward-dev/byward:v0.3.0`. v0.1.1 and earlier
+> Needs byward v0.2.0 or later; use the image `ghcr.io/byward-dev/byward:v0.3.1`. v0.1.1 and earlier
 > have no OIDC IdPs.
 > `BYWARD_OIDC_ROLES_CLAIM` and `BYWARD_OIDC_GROUPS_CLAIM` need v0.3.0 or later.
 

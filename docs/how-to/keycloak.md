@@ -7,7 +7,7 @@ The data directory, the keys and starting the proxy are in [run byward](run-bywa
 
 > Verified on 2026-11-13 with Keycloak 26.8.2 and the byward v0.2.0-rc.1 image, over https with a
 > private CA and without `--dev`: sign-in, the role and group gates, refresh, revoke, and both a client
-> secret and `private_key_jwt`. Use the image `ghcr.io/byward-dev/byward:v0.3.0` or a later
+> secret and `private_key_jwt`. Use the image `ghcr.io/byward-dev/byward:v0.3.1` or a later
 > release. The local trial below was run on
 > 2026-11-14 with Keycloak 26.8.2 `start-dev`, both with the v0.2.0-rc.1 release binary
 > (darwin/arm64) and with a build of `main`.

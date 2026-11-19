@@ -16,7 +16,7 @@ IdP; only the IdP's own settings differ, and those come from your IdP guide.
 - a public HTTPS host for the proxy (`mcp.example.com` below). To try byward on one machine first,
   with plain http on `localhost` and `--dev`, follow
   [try it on your machine](keycloak.md#try-it-on-your-machine) in the Keycloak guide;
-- `openssl`, and the image `ghcr.io/byward-dev/byward:v0.3.0` or the `byward` binary of that
+- `openssl`, and the image `ghcr.io/byward-dev/byward:v0.3.1` or the `byward` binary of that
   release ([what a release contains](../reference/packaging.md#what-a-release-contains));
 - an HTTP MCP server to protect. To try the proxy first, run the MCP reference server
   ([`@modelcontextprotocol/server-everything`](https://www.npmjs.com/package/@modelcontextprotocol/server-everything),
@@ -139,7 +139,7 @@ docker run --rm -p 8080:8080 --user "$(id -u):$(id -g)" \
   -v "$PWD/idp-client-secret:/run/secrets/idp-client-secret:ro" \
   --env-file byward.env \
   -e BYWARD_LISTEN=0.0.0.0:8080 \
-  ghcr.io/byward-dev/byward:v0.3.0
+  ghcr.io/byward-dev/byward:v0.3.1
 ```
 
 Mount each secret file read-only, as above. Without `--user`, make the data directory writable by
@@ -150,13 +150,13 @@ to `BYWARD_UPSTREAM_URL`.
 **As a binary.** Download and unpack the release archive, `byward_<version>_<os>_<arch>.tar.gz` (the
 version without its `v`; the darwin archives are for development only), and check it against
 `checksums.txt` ([verifying a release](../reference/packaging.md#verifying-a-release)). For
-v0.3.0 on this machine's OS and architecture (`linux` or `darwin`, `amd64` or `arm64`):
+v0.3.1 on this machine's OS and architecture (`linux` or `darwin`, `amd64` or `arm64`):
 
 ```sh
-V=0.3.0
+V=0.3.1
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
-A=byward_${V}_${OS}_${ARCH}.tar.gz      # e.g. byward_0.3.0_linux_amd64.tar.gz
+A=byward_${V}_${OS}_${ARCH}.tar.gz      # e.g. byward_0.3.1_linux_amd64.tar.gz
 curl -LO https://github.com/byward-dev/byward/releases/download/v$V/$A
 curl -LO https://github.com/byward-dev/byward/releases/download/v$V/checksums.txt
 sha256sum --ignore-missing -c checksums.txt   # macOS: shasum -a 256 --ignore-missing -c checksums.txt
@@ -181,7 +181,7 @@ startup log also says which client sources are active, for example
 - `byward check --offline`, with the same settings, validates them, the keys, the secret files'
   permissions and the clients file without network access
   ([reference](../reference/commands.md#byward-check---offline)). In the container:
-  `docker run --rm … ghcr.io/byward-dev/byward:v0.3.0 check --offline` with the same options.
+  `docker run --rm … ghcr.io/byward-dev/byward:v0.3.1 check --offline` with the same options.
 - `byward doctor`, once the proxy runs, fetches its discovery documents the way MCP clients do and
   checks the IdP app ([checks](../reference/commands.md#checks)). For Entra it checks the tenant,
   the client ID and the credential. For the other IdPs it checks discovery and, since v0.3.0, the

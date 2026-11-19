@@ -6,7 +6,7 @@ The data directory, the keys and starting the proxy are in [run byward](run-bywa
 
 > Verified on 2026-11-13 with the byward v0.2.0-rc.1 code: sign-in, refresh, revoke, and the email-domain
 > gate (allowed and refused). The Workspace domain gate (`BYWARD_GATE_HOSTED_DOMAINS`) was not tested.
-> Use the image `ghcr.io/byward-dev/byward:v0.3.0` or a later release.
+> Use the image `ghcr.io/byward-dev/byward:v0.3.1` or a later release.
 
 ## 1. The OAuth client
 

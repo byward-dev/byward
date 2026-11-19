@@ -9,7 +9,7 @@ itself are in [run byward](run-byward.md).
 > domain gate (allowed and refused), refresh, revoke, and a client secret. The role gate through
 > `BYWARD_OIDC_ROLES_CLAIM` was verified on 2026-11-14 with the code on `main`: a user with the role
 > admitted, one without refused, and the role still there after a refresh. `private_key_jwt` was not
-> tested. Use the image `ghcr.io/byward-dev/byward:v0.3.0` or a later release.
+> tested. Use the image `ghcr.io/byward-dev/byward:v0.3.1` or a later release.
 
 ## 1. The application
 

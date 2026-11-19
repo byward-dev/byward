@@ -10,11 +10,11 @@ OpenID Connect IdP, with guides for [Okta](docs/how-to/okta.md), [Keycloak](docs
 [Google](docs/how-to/google.md), and Auth0 and the rest through the [generic OIDC guide](docs/how-to/oidc.md).
 One Go binary, configured by environment variables.
 
-> **Latest release: [v0.3.0](https://github.com/byward-dev/byward/releases/tag/v0.3.0)**, the
+> **Latest release: [v0.3.1](https://github.com/byward-dev/byward/releases/tag/v0.3.1)**, the
 > `latest` image tag: Microsoft Entra ID and the OIDC IdPs, On-Behalf-Of and app-only tokens, TLS
 > at the proxy and the PostgreSQL store. These docs follow `main`; a feature in no release yet
 > says "on `main`". The docs for a release are at its tag, for example
-> [v0.3.0](https://github.com/byward-dev/byward/tree/v0.3.0/docs).
+> [v0.3.1](https://github.com/byward-dev/byward/tree/v0.3.1/docs).
 >
 > byward is pre-1.0 and has not had an independent security audit. Read the
 > [security posture](docs/security-posture.md) before deploying it.
@@ -81,7 +81,7 @@ docker run --rm -p 8080:8080 --user "$(id -u):$(id -g)" \
   -e BYWARD_ENTRA_CLIENT_ID="$APP_ID" \
   -e BYWARD_ENTRA_CLIENT_SECRET_FILE=/run/secrets/entra-client-secret \
   -e BYWARD_LISTEN=0.0.0.0:8080 \
-  ghcr.io/byward-dev/byward:v0.3.0
+  ghcr.io/byward-dev/byward:v0.3.1
 ```
 
 `upstream` is your MCP server's address as the container sees it (the quickstart runs both on one

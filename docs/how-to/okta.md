@@ -9,7 +9,7 @@ The data directory, the keys and starting the proxy are in [run byward](run-bywa
 > the group gate (allowed and refused), refresh, revoke, a client secret, and `private_key_jwt` with an
 > EC key. An RSA key needs `BYWARD_OIDC_CLIENT_KEY_ALG=RS256` (section 5; since v0.3.0),
 > not yet verified against Okta.
-> Use the image `ghcr.io/byward-dev/byward:v0.3.0` or a later release.
+> Use the image `ghcr.io/byward-dev/byward:v0.3.1` or a later release.
 
 ## 1. The app
 
