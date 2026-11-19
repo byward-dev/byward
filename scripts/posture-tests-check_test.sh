@@ -115,7 +115,8 @@ check "a table before the section is not checked" 0 "# Security posture
 
 $header
 $row" internal/x/x_test.go "$defines"
-check "a page with CRLF line endings" 0 "$(printf '%s\n' "$head" "$row" | sed 's/$/\r/')" internal/x/x_test.go "$defines"
+# awk writes the carriage return the same everywhere; some BSD seds write a literal r for \r.
+check "a page with CRLF line endings" 0 "$(printf '%s\n' "$head" "$row" | awk '{ printf "%s\r\n", $0 }')" internal/x/x_test.go "$defines"
 check "a name holding Test later is one name" 0 "$head
 $(row_citing TestTheEndOfTheTestReleasesIt)" internal/x/x_test.go "$defines
 func TestTheEndOfTheTestReleasesIt(t *testing.T) {}"
