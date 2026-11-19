@@ -250,5 +250,7 @@ func (s *StatusRecorder) Write(b []byte) (int, error) {
 	return s.ResponseWriter.Write(b)
 }
 
-// Unwrap lets http.ResponseController reach the underlying writer (flush, deadlines).
+// Unwrap lets http.ResponseController reach the underlying writer: flush, deadlines, and the relay's
+// full duplex, without which a stream the upstream starts before the request body ends is held back
+// or cut (#527).
 func (s *StatusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }

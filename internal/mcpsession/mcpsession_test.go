@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -364,6 +365,29 @@ func TestStreamingResponsesCanFlushThroughTheBinding(t *testing.T) {
 	w := e.p.do(t, http.MethodGet, alice, "")
 	if flushErr != nil || !w.Flushed || !strings.HasPrefix(w.Header().Get(Header), Prefix) {
 		t.Fatalf("flush error %v, flushed %v, session %q", flushErr, w.Flushed, w.Header().Get(Header))
+	}
+}
+
+// The binding's writer lets the relay keep a request body flowing once the response starts (full
+// duplex), which needs the server's writer behind it: without it, a stream the upstream starts
+// before the request body ends is held back or cut (#527).
+func TestTheBindingLetsTheRelayKeepTheRequestBodyFlowing(t *testing.T) {
+	duplexErr := errors.New("the handler never ran")
+	e := newEnv(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		duplexErr = http.NewResponseController(w).EnableFullDuplex()
+	}))
+	srv := httptest.NewServer(e.p.h) // a real server: a recorder has no full duplex to reach
+	t.Cleanup(srv.Close)
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/mcp", nil)
+	req.Header.Set("X-Test-User", alice)
+	res, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	srv.Close() // waits for the handler
+	if duplexErr != nil {
+		t.Fatalf("full duplex through the binding: %v; want the server's writer reached", duplexErr)
 	}
 }
 

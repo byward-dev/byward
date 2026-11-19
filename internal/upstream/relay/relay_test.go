@@ -993,6 +993,121 @@ func TestABodyThatBreaksOffLogsOneWarningWithItsRequestsIDAndNeverQuotesAMisread
 	}
 }
 
+// An upstream may start its response before the MCP client has sent all of its request body. The
+// body keeps flowing to the upstream, and the response is relayed whole. By default Go's HTTP/1
+// server, once the handler starts its response, drains and closes an unread request body of
+// unknown length, or with less than 256 KiB left (#527):
+// here, where the MCP client sends the rest of its body only once the stream has started, the
+// response then never starts; and where the rest comes while the response starts, the transport's
+// next read of the closed body fails and it closes the upstream connection, cutting the stream with
+// "upstream error … use of closed network connection" (the merge-queue flake's line).
+func TestAStreamTheUpstreamStartsBeforeTheRequestBodyEndsIsRelayedWhole(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	bodies := make(chan string, 1)
+	go func() { // the upstream: answers on the request's headers, then waits for its whole body
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer func() { _ = c.Close() }()
+		req, err := http.ReadRequest(bufio.NewReader(c))
+		if err != nil {
+			bodies <- "no request: " + err.Error()
+			return
+		}
+		_, _ = io.WriteString(c, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n9\r\ndata: 1\n\n\r\n")
+		b, err := io.ReadAll(req.Body)
+		if err != nil {
+			bodies <- "body cut: " + err.Error()
+			return
+		}
+		bodies <- string(b)
+		_, _ = io.WriteString(c, "9\r\ndata: 2\n\n\r\n0\r\n\r\n")
+	}()
+	u, _ := url.Parse("http://" + ln.Addr().String() + "/mcp")
+	var logs bytes.Buffer
+	log := logging.New(&logs, "text")
+	srv := httptest.NewServer(logging.Middleware(log, New(log, u, withProxy(func(*http.Request) (*url.URL, error) { return nil, nil }))))
+	t.Cleanup(srv.Close)
+	c, err := net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	_ = c.SetDeadline(time.Now().Add(10 * time.Second))
+	_, _ = io.WriteString(c, "POST /mcp HTTP/1.1\r\nHost: m.example\r\nAccept: text/event-stream\r\nContent-Type: application/json\r\nContent-Length: 4\r\n\r\n{}")
+	res, err := http.ReadResponse(bufio.NewReader(c), nil)
+	if err != nil {
+		t.Fatalf("no response before the body ended: %v", err)
+	}
+	events := bufio.NewReader(res.Body)
+	if first, err := events.ReadString('\n'); res.StatusCode != http.StatusOK || first != "data: 1\n" {
+		t.Fatalf("status %d, first line %q, error %v; want the stream's first event", res.StatusCode, first, err)
+	}
+	_, _ = io.WriteString(c, "  ") // the rest of the body, once the stream has started
+	rest, err := io.ReadAll(events)
+	if err != nil || string(rest) != "\ndata: 2\n\n" {
+		t.Fatalf("after the first event %q, error %v; want the second event and the stream's end", rest, err)
+	}
+	if got := <-bodies; got != "{}  " {
+		t.Fatalf("the upstream got the body %q; want all of it", got)
+	}
+	srv.Close() // waits for the handler, so the log is complete
+	if l := logs.String(); strings.Count(l, "\n") != 1 || !strings.Contains(l, "level=INFO msg=request ") || !strings.Contains(l, " status=200 ") {
+		t.Fatalf("log %q; want only the request line, with status 200", l)
+	}
+}
+
+// hidingWriter is a writer in front of the relay without Unwrap, which hides the server's from
+// http.ResponseController.
+type hidingWriter struct{ http.ResponseWriter }
+
+// A writer in front of the relay that hides the server's keeps it from keeping the request body
+// flowing (full duplex), which can cut a stream: a byward bug, so the relay logs it as an error, with
+// the request's ID, rather than pass unseen (#527). Over HTTP/2 too, where nothing is cut, since a
+// hiding writer is a bug either way.
+func TestARelayThatCannotKeepTheRequestBodyFlowingLogsAnError(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		proto int // the HTTP major version the server is started with, and must answer with
+	}{{"HTTP/1", 1}, {"HTTP/2", 2}} {
+		t.Run(tc.name, func(t *testing.T) {
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") }))
+			t.Cleanup(up.Close)
+			u, _ := url.Parse(up.URL + "/mcp")
+			var logs bytes.Buffer
+			log := logging.New(&logs, "text")
+			relay := New(log, u, withProxy(func(*http.Request) (*url.URL, error) { return nil, nil }))
+			srv := httptest.NewUnstartedServer(logging.Middleware(log, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				relay.ServeHTTP(hidingWriter{w}, r)
+			})))
+			if tc.proto == 2 {
+				srv.EnableHTTP2 = true
+				srv.StartTLS()
+			} else {
+				srv.Start()
+			}
+			t.Cleanup(srv.Close)
+			res, err := srv.Client().Post(srv.URL+"/mcp", "application/json", strings.NewReader("{}"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = res.Body.Close()
+			if res.ProtoMajor != tc.proto {
+				t.Fatalf("served over HTTP/%d; want HTTP/%d", res.ProtoMajor, tc.proto)
+			}
+			srv.Close() // waits for the handler, so the log is complete
+			if l := logs.String(); !regexp.MustCompile(`level=ERROR msg="relay cannot keep the request body flowing once the response starts" error=.* request_id=\S+`).MatchString(l) {
+				t.Fatalf("log %q; want the relay's error with the request's ID", l)
+			}
+		})
+	}
+}
+
 // The relay, as production builds it, reads the environment's proxy (once per process, so the check
 // runs in a child process): through a setting Go misread, the upstream error names the cause; through
 // a well-formed one it is the transport's own.

@@ -57,6 +57,8 @@ const (
 // Handler builds every route behind the Host check, request logging, metrics, the server span and
 // panic recovery; up is the upstream adapter. register, when not nil, adds the broker's routes, and
 // sessions binds MCP sessions to the user (authenticated mode; both nil without authentication).
+// A middleware that wraps the http.ResponseWriter must give it an Unwrap: flushing a stream and the
+// relay's full duplex (#527) reach the server's writer through it.
 func Handler(cfg *config.Config, log *slog.Logger, up http.Handler, v resource.Validator, register func(*http.ServeMux), sessions func(http.Handler) http.Handler, o Observability) http.Handler {
 	meta := resource.Metadata{Resource: cfg.PublicURL, Issuer: cfg.Issuer(), Scope: cfg.Scope,
 		Name: cfg.ResourceName, Documentation: cfg.ResourceDocumentation}
