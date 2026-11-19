@@ -51,6 +51,15 @@ func TestAServerSpanIsAnErrorOnlyForA5xx(t *testing.T) {
 			w.WriteHeader(http.StatusEarlyHints)
 			w.WriteHeader(500)
 		}, 500, codes.Error},
+		// Once the final status is sent, a later WriteHeader is superfluous and does not count.
+		{"500 then a superfluous 200", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(500)
+			w.WriteHeader(200)
+		}, 500, codes.Error},
+		{"a body then a superfluous 500", func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, "{}")
+			w.WriteHeader(500)
+		}, 200, codes.Unset},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			exp.Reset()
