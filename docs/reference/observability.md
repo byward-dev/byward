@@ -210,6 +210,10 @@ still waiting for the upstream when the proxy shuts down is answered 503 `the pr
 is closed (`Connection: close` over HTTP/1.1, GOAWAY over HTTP/2), so the client can retry. In neither case, nor during a stream that ends either way, is the relay's
 `upstream error` warning logged.
 
+An upstream may start its response before the client has sent all of the request body: the relay keeps sending the
+body, and relays the response whole. The error line `relay cannot keep the request body flowing once the response
+starts` means it could not, and such a response can be held back or cut: it is a byward bug, please report it.
+
 IdP sign-in and refresh failures (the `the IdP ended the session; grant revoked` line among them) and refused On-Behalf-Of exchanges log the IdP's error code (`idp_error_code`, the
 AADSTS number for Entra), `trace_id` and `correlation_id`, each only when the IdP sent it;
 with Entra, `correlation_id` equals our `request_id`, so a user's reference finds both logs.

@@ -136,7 +136,8 @@ func (s *sealer) Write(p []byte) (int, error) {
 	return s.ResponseWriter.Write(p)
 }
 
-// Unwrap lets http.ResponseController reach Flush and deadlines on the real writer (streams).
+// Unwrap lets http.ResponseController reach Flush, deadlines and full duplex on the real writer:
+// streams, and the relay keeping the request body flowing once the response starts (#527).
 func (s *sealer) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 func (s *sealer) seal() {

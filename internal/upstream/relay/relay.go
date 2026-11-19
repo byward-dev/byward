@@ -226,6 +226,7 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 			r.Body = teeBody{io.TeeReader(r.Body, c), r.Body}
 		}
 		ctx := traceWrite(context.WithValue(r.Context(), captureKey{}, c))
+		keepBodyFlowing(w, r, log)
 		// ReverseProxy's own error lines get no request, so each request has its own copy whose
 		// ErrorLog logs with the request's context, request ID included (#387): a body that breaks
 		// off mid-copy then aborts the response, and no request line is written to tie it to.
@@ -233,6 +234,23 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 		p.ErrorLog = stdlog.New(proxyErrorLog{log: log, ctx: ctx}, "", 0)
 		p.ServeHTTP(&informational{ResponseWriter: w, ours: w.Header().Clone()}, r.WithContext(ctx))
 	})
+}
+
+// keepBodyFlowing makes the request body keep flowing to the upstream after the response starts
+// (full duplex). By default an HTTP/1 server, once the handler writes its response, reads the rest
+// of a request body not read to its end, up to 256 KiB, and then closes it (golang/go#15527): a
+// body of unknown length (chunked), or one with less than 256 KiB left. Until that read ends the
+// response waits, so an MCP client that sends the rest of its body only once the stream starts
+// never gets it; once the body is closed, the transport's next read of it fails, and it closes the
+// connection to the upstream, cutting the response the relay is relaying (#527). HTTP/2 is always
+// full duplex, and accepts the call. A net/http server accepts it on either protocol, so a refusal
+// there means a writer in front of the relay hides the server's (no Unwrap): a bug, logged so it
+// cannot pass unseen. A handler called without a server (a test's recorder) has no server to keep
+// the body open.
+func keepBodyFlowing(w http.ResponseWriter, r *http.Request, log *slog.Logger) {
+	if err := http.NewResponseController(w).EnableFullDuplex(); err != nil && r.Context().Value(http.ServerContextKey) != nil {
+		log.ErrorContext(r.Context(), "relay cannot keep the request body flowing once the response starts", "error", err)
+	}
 }
 
 // informationalHeaders are the only headers an upstream's informational (1xx) response may carry to
