@@ -141,14 +141,14 @@ func TestLoadEnvironmentLoadsWhatLoadLoadsWithoutArguments(t *testing.T) {
 				t.Errorf("Config.%s", f)
 			}
 			if len(diff) == 0 && !reflect.DeepEqual(*got, *want) { // a backstop, so a broken configDiff cannot hide a drift
-				t.Errorf("Config differs, though configDiff names no field: LoadEnvironment %+v, Load %+v", got, want)
+				t.Errorf("Config differs, though configDiff names no field: LoadEnvironment %+v %+v, Load %+v %+v", *got, got.Values, *want, want.Values)
 			}
 		})
 	}
 }
 
 // configDiff lists each field in which LoadEnvironment's Config (got) differs from Load's (want),
-// with both values. A setting in Values is named by itself, whichever side has it, so a mismatch
+// with both values. A setting in Values is named by its key, whichever side has it, so a mismatch
 // reads as the setting, not as two pointer addresses.
 func configDiff(got, want Config) []string {
 	var out []string
@@ -171,7 +171,7 @@ func configDiff(got, want Config) []string {
 func valuesDiff(got, want *Values) []string {
 	if got == nil || want == nil {
 		if got != want {
-			return []string{fmt.Sprintf("Values: LoadEnvironment %v, Load %v", got, want)}
+			return []string{fmt.Sprintf("Values: LoadEnvironment nil %v, Load nil %v", got == nil, want == nil)}
 		}
 		return nil
 	}
@@ -182,13 +182,22 @@ func valuesDiff(got, want *Values) []string {
 		g, gok := got.byKey[k]
 		w, wok := want.byKey[k]
 		if gok != wok || !reflect.DeepEqual(g, w) {
-			out = append(out, fmt.Sprintf("Values[%s]: LoadEnvironment %+v (present %v), Load %+v (present %v)", k, g, gok, w, wok))
+			out = append(out, fmt.Sprintf("Values[%s]: LoadEnvironment %s, Load %s", k, shownSetting(g, gok), shownSetting(w, wok)))
 		}
 	}
 	if len(out) == 0 && !reflect.DeepEqual(*got, *want) {
 		out = append(out, "Values: the setting order or the command after -- differs")
 	}
 	return out
+}
+
+// shownSetting shows what the operator gave for a setting, without its registry entry: the value, where it
+// came from and the file it was read from, or that the setting is absent.
+func shownSetting(v Value, present bool) string {
+	if !present {
+		return "absent"
+	}
+	return fmt.Sprintf("%q from %v, path %q", v.Raw, v.Source, v.Path)
 }
 
 func TestInvalidStdioSettingsAreRejectedNamingTheSetting(t *testing.T) {
