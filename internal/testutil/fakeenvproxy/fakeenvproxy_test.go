@@ -134,11 +134,11 @@ func TestTheEndOfTheTestReleasesTheProxy(t *testing.T) {
 		}
 	})
 	t.Run("an answer holding its connection", func(t *testing.T) {
-		awaitRead := onRead(t)
 		returned := make(chan struct{})
 		var client net.Conn
 		start := time.Now()
 		t.Run("proxy", func(t *testing.T) {
+			awaitRead := onRead(t) // on this subtest's t, which the wait may fail
 			p := Start(t, 1, func(c net.Conn) {
 				defer close(returned)
 				_, _ = io.Copy(io.Discard, c) // until the connection closes

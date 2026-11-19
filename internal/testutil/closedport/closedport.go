@@ -34,11 +34,17 @@ func Addr(t testing.TB) string {
 	if err != nil {
 		t.Fatalf("the ephemeral port range: %v", err)
 	}
-	if first <= lowest {
+	return addrIn(t, lowest, first)
+}
+
+// addrIn is Addr for a port in [lo, first): first is where the ephemeral range starts.
+func addrIn(t testing.TB, lo, first int) string {
+	t.Helper()
+	if first <= lo {
 		t.Skipf("no unprivileged port lies below the ephemeral range, which starts at %d", first)
 	}
 	for range 100 {
-		port := lowest + rand.IntN(first-lowest) //nolint:gosec // G404: a test port, not a secret
+		port := lo + rand.IntN(first-lo) //nolint:gosec // G404: a test port, not a secret
 		ln, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 		if err != nil {
 			continue // in use

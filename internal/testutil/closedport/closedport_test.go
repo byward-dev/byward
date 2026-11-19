@@ -2,6 +2,7 @@ package closedport
 
 import (
 	"errors"
+	"math/rand/v2"
 	"net"
 	"strconv"
 	"syscall"
@@ -64,57 +65,84 @@ func TestTheAddressIsBelowTheEphemeralRangeAndRefusesADial(t *testing.T) {
 	}
 }
 
-// With no unprivileged port below the ephemeral range the test is skipped; with one, that port is
-// the address.
-func TestNoGapBelowTheEphemeralRangeSkipsTheTest(t *testing.T) {
-	saved := ephemeralFirst
-	t.Cleanup(func() { ephemeralFirst = saved })
-	only := "127.0.0.1:" + strconv.Itoa(lowest)
+// The address is a port in [lo, first) that refuses a dial: with none in the range the test is
+// skipped, and a port that a listener on every address holds is never it. A loopback bind to that
+// port succeeds on macOS, where the dial would be accepted; on Linux the bind fails already. The
+// ports are random, so overlapping runs of this test do not take each other's.
+func TestTheAddressIsAPortInTheRangeThatRefusesADial(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		first int
-		want  string // "": skipped
+		name string
+		span int  // first - lo
+		held bool // a wildcard listener holds lo
+		want int  // the port as lo+want; -1: skipped
 	}{
-		{"a range that starts at the lowest unprivileged port", lowest, ""},
-		{"a range that starts one above it", lowest + 1, only},
+		{"no port in the range skips the test", 0, false, -1},
+		{"the only free port is the address", 1, false, 0},
+		{"a port a wildcard listener holds is never the address", 2, true, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.want != "" && !refused(only) {
-				t.Skipf("%s is in use on this host", only)
+			lo := freePair(t)
+			if tc.held {
+				w, err := net.Listen("tcp", ":"+strconv.Itoa(lo))
+				if err != nil {
+					t.Skipf("port %d was taken: %v", lo, err)
+				}
+				t.Cleanup(func() { _ = w.Close() })
 			}
-			ephemeralFirst = func() (int, error) { return tc.first, nil }
-			var addr string
-			var skipped bool
-			t.Run("Addr", func(t *testing.T) { // a skip ends only this subtest
-				defer func() { skipped = t.Skipped() }()
-				addr = Addr(t)
-			})
-			if addr != tc.want || skipped != (tc.want == "") {
-				t.Fatalf("address %q, skipped %v; want %q", addr, skipped, tc.want)
+			want := ""
+			if tc.want >= 0 {
+				want = "127.0.0.1:" + strconv.Itoa(lo+tc.want)
+			}
+			for range 20 {
+				var addr string
+				var skipped bool
+				t.Run("addrIn", func(t *testing.T) { // a skip ends only this subtest
+					defer func() { skipped = t.Skipped() }()
+					addr = addrIn(t, lo, lo+tc.span)
+				})
+				if addr != want || skipped != (want == "") {
+					t.Fatalf("address %q, skipped %v; want %q", addr, skipped, want)
+				}
 			}
 		})
 	}
 }
 
-// A port that a listener on every address holds is never the address, though a loopback bind to it
-// succeeds on macOS: a dial to it would be accepted.
-func TestAPortAWildcardListenerHoldsIsNeverTheAddress(t *testing.T) {
-	other := "127.0.0.1:" + strconv.Itoa(lowest+1)
-	if !refused(other) {
-		t.Skipf("%s is in use on this host", other)
-	}
-	w, err := net.Listen("tcp", ":"+strconv.Itoa(lowest))
+// freePair is a random unprivileged port below the ephemeral range such that it and the next both
+// refuse a dial now.
+func freePair(t *testing.T) int {
+	t.Helper()
+	first, err := ephemeralFirst()
 	if err != nil {
-		t.Skipf("port %d is in use on this host: %v", lowest, err)
+		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = w.Close() })
-	saved := ephemeralFirst
-	t.Cleanup(func() { ephemeralFirst = saved })
-	ephemeralFirst = func() (int, error) { return lowest + 2, nil } // ports 1024 and 1025 only
-	for range 20 {
-		if addr := Addr(t); addr != other {
-			t.Fatalf("address %s; want %s, the port no listener holds", addr, other)
+	if first-lowest < 2 {
+		t.Skipf("fewer than two unprivileged ports lie below the ephemeral range, which starts at %d", first)
+	}
+	for range 100 {
+		lo := lowest + rand.IntN(first-lowest-1) //nolint:gosec // G404: a test port, not a secret
+		if refused(addrOf(lo)) && refused(addrOf(lo+1)) {
+			return lo
 		}
+	}
+	t.Skipf("no two free ports below %d", first)
+	return 0
+}
+
+func addrOf(port int) string { return "127.0.0.1:" + strconv.Itoa(port) }
+
+// refused tells a held port from a free one, as Addr must.
+func TestRefusedTellsAHeldPortFromAFreeOne(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	if refused(ln.Addr().String()) {
+		t.Errorf("%s, which a listener holds, counts as refused", ln.Addr())
+	}
+	if free := Addr(t); !refused(free) {
+		t.Errorf("%s, a closed port, does not count as refused", free)
 	}
 }
 
