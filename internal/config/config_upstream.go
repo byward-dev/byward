@@ -10,8 +10,9 @@ import (
 	"golang.org/x/net/http/httpguts"
 )
 
-// upstream reads the upstream: an HTTP URL or a stdio command, exactly one of them.
-func (c *Config) upstream(v *Values) []error {
+// upstream reads the upstream: an HTTP URL or a stdio command, exactly one of them. With dashes, the
+// command takes a stdio upstream command after --, and the URL's error names that way too.
+func (c *Config) upstream(v *Values, dashes bool) []error {
 	urlEnv, cmdEnv, envEnv := Setting{Name: "upstream-url"}.Env(), Setting{Name: "upstream-command"}.Env(), Setting{Name: "upstream-env"}.Env()+"_FILE"
 	raw := v.get("upstream-command")
 	var errs []error
@@ -31,10 +32,10 @@ func (c *Config) upstream(v *Values) []error {
 		}
 		u, err := ParseUpstreamURL(v.get("upstream-url"))
 		switch {
-		case err != nil && v.noCommandLine:
-			return append(errs, errorf("%s (or %s)", err.Error(), cmdEnv))
-		case err != nil:
+		case err != nil && dashes:
 			return append(errs, errorf("%s (or %s, or a command after --)", err.Error(), cmdEnv))
+		case err != nil:
+			return append(errs, errorf("%s (or %s)", err.Error(), cmdEnv))
 		}
 		c.UpstreamURL = u
 		return errs

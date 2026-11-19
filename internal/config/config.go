@@ -160,11 +160,11 @@ func Load(args, environ []string, readFile readFileFunc) (*Config, Actions, erro
 	if act.Version {
 		return nil, act, nil
 	}
-	c, err := validate(vals, inContainer(readFile))
+	c, err := validate(vals, inContainer(readFile), true)
 	return c, act, err
 }
 
-// LoadEnvironment resolves and validates the configuration of a command that takes no command line,
+// LoadEnvironment resolves and validates the configuration of a command that takes no arguments,
 // such as `byward jwks`: settings come from the environment only, so its errors never suggest a stdio
 // upstream command after -- (#499).
 func LoadEnvironment(environ []string, readFile readFileFunc) (*Config, error) {
@@ -172,8 +172,7 @@ func LoadEnvironment(environ []string, readFile readFileFunc) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	vals.noCommandLine = true
-	return validate(vals, inContainer(readFile))
+	return validate(vals, inContainer(readFile), false)
 }
 
 // authSettings validate authenticated mode's settings, in this order; a feature with settings of its
@@ -196,7 +195,9 @@ var dependentAuthSettings = []func(*Config, *Values) []error{
 	(*Config).onBehalfOf,
 }
 
-func validate(v *Values, container bool) (*Config, error) {
+// validate checks the resolved settings. container says byward runs in a container; dashes says the
+// command takes a stdio upstream command after --, so an error may suggest one.
+func validate(v *Values, container, dashes bool) (*Config, error) {
 	c := &Config{Values: v, Listen: v.get("listen"), InternalListen: v.get("internal-listen"), Scope: v.get("scope"),
 		ResourceName: v.get("resource-name"), ResourceDocumentation: v.get("resource-documentation"),
 		LogFormat: v.get("log-format"), InContainer: container}
@@ -236,7 +237,7 @@ func validate(v *Values, container bool) (*Config, error) {
 			}
 		}
 	}
-	errs = append(errs, c.upstream(v)...)
+	errs = append(errs, c.upstream(v, dashes)...)
 	errs = append(errs, c.tls(v)...)
 
 	if _, _, err := net.SplitHostPort(c.Listen); err != nil {

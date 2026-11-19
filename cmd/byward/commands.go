@@ -82,9 +82,9 @@ func commandHint(args []string) string {
 	return ""
 }
 
-// operatorLoad reads the configuration a command that takes a stdio upstream after -- runs with; args
-// is nil, or "--" and a stdio upstream command, as the proxy takes it. A failure is reported on stderr and returns
-// false; the caller exits with exitConfig.
+// operatorLoad reads the configuration a command that takes a stdio upstream after -- runs with;
+// args is nil, or "--" and a stdio upstream command, as the proxy takes it. A failure is reported
+// on stderr and returns false; the caller exits with exitConfig.
 func operatorLoad(args, environ []string, stderr io.Writer) (*config.Config, bool) {
 	cfg, _, err := config.Load(args, environ, os.ReadFile)
 	if err != nil {

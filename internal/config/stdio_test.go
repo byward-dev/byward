@@ -1,8 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"maps"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -67,10 +69,10 @@ func TestStdioEnvFileValuesAreParsedAndNeverDisplayed(t *testing.T) {
 	}
 }
 
-// A command that takes no command line loads with LoadEnvironment: a missing or malformed upstream
-// URL names the stdio upstream's variable only, never a command after --, which such a command
-// refuses. Load, for the proxy and the commands that take --, still names both (#499).
-func TestOnlyALoadThatTakesACommandLineSuggestsACommandAfterDashes(t *testing.T) {
+// A command that takes no arguments loads with LoadEnvironment: a missing or malformed upstream URL
+// names the stdio upstream's variable only, never a command after --, which such a command refuses.
+// Load, for the proxy and the commands that take --, still names both (#499).
+func TestLoadEnvironmentNeverSuggestsACommandAfterDashesWhereLoadDoes(t *testing.T) {
 	for _, tc := range []struct {
 		name, url, environmentOnly, withCommandLine string
 	}{
@@ -94,28 +96,39 @@ func TestOnlyALoadThatTakesACommandLineSuggestsACommandAfterDashes(t *testing.T)
 	}
 }
 
-// LoadEnvironment loads a valid environment's upstream as Load does without a command line.
-func TestLoadEnvironmentLoadsAnHTTPOrAStdioUpstreamFromTheEnvironment(t *testing.T) {
+// LoadEnvironment loads what Load loads without arguments, the whole Config or the same error: an
+// HTTP or a stdio upstream, a container's no-auth relaxation (which needs the host checks), and an
+// unknown variable, refused before any setting is validated. Each row also pins one result, so the
+// two cannot agree on a wrong one.
+func TestLoadEnvironmentLoadsWhatLoadLoadsWithoutArguments(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		env     []string
-		url     string
-		command []string
+		name     string
+		env      []string
+		readFile readFileFunc
+		check    func(*Config, error) bool
 	}{
-		{"HTTP", base, "http://upstream:9000/mcp", nil},
-		{"stdio", stdioBase(`BYWARD_UPSTREAM_COMMAND=["/usr/bin/server","--flag"]`), "", []string{"/usr/bin/server", "--flag"}},
+		{"HTTP", base, baseFiles, func(c *Config, err error) bool {
+			return err == nil && c.UpstreamURL.String() == "http://upstream:9000/mcp"
+		}},
+		{"stdio", stdioBase(`BYWARD_UPSTREAM_COMMAND=["/usr/bin/server","--flag"]`), baseFiles,
+			func(c *Config, err error) bool {
+				return err == nil && slices.Equal(c.UpstreamCommand, []string{"/usr/bin/server", "--flag"})
+			}},
+		{"no-auth in a container", append(slices.Clone(anon), "BYWARD_LISTEN=0.0.0.0:8080"), fakeHost("/.dockerenv", bridgeNetdev),
+			func(c *Config, err error) bool { return err == nil && c.InContainer }},
+		{"an unknown variable", append(slices.Clone(base), "BYWARD_TYPO=x"), baseFiles,
+			func(_ *Config, err error) bool {
+				return isConfigError(err) && strings.HasPrefix(err.Error(), "unknown setting BYWARD_TYPO")
+			}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c, err := LoadEnvironment(tc.env, baseFiles)
-			if err != nil {
-				t.Fatal(err)
+			got, gotErr := LoadEnvironment(tc.env, tc.readFile)
+			want, _, wantErr := Load(nil, tc.env, tc.readFile)
+			if !tc.check(got, gotErr) {
+				t.Fatalf("LoadEnvironment: %+v, %v", got, gotErr)
 			}
-			url := ""
-			if c.UpstreamURL != nil {
-				url = c.UpstreamURL.String()
-			}
-			if url != tc.url || !slices.Equal(c.UpstreamCommand, tc.command) {
-				t.Errorf("upstream URL %q, command %q; want %q, %q", url, c.UpstreamCommand, tc.url, tc.command)
+			if fmt.Sprint(gotErr) != fmt.Sprint(wantErr) || !reflect.DeepEqual(got, want) {
+				t.Errorf("LoadEnvironment: %+v, %v\nLoad:            %+v, %v", got, gotErr, want, wantErr)
 			}
 		})
 	}

@@ -62,7 +62,7 @@ func exportJWKS(_ context.Context, args, environ []string, stdout, stderr io.Wri
 		_, _ = fmt.Fprintln(stderr, "byward: usage: byward jwks (prints the JWKS; redirect it to a file)")
 		return exitConfig
 	}
-	cfg, err := config.LoadEnvironment(environ, os.ReadFile) // jwks takes no --, so no error suggests one (#499)
+	cfg, err := config.LoadEnvironment(environ, os.ReadFile) // jwks takes no --, so no error suggests a command after it (#499)
 	if err != nil {
 		return reportConfigError(stderr, err)
 	}
