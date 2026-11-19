@@ -40,8 +40,8 @@ func TestLinuxsPortRangeIsReadAsItsFirstPort(t *testing.T) {
 	}
 }
 
-// Each address is an unprivileged loopback port below the ephemeral range, and a dial to it is
-// refused at once. The port is random, so many are drawn.
+// Each address is an unprivileged loopback port below the ephemeral range that refuses a dial. The
+// port is random, so many are drawn.
 func TestTheAddressIsBelowTheEphemeralRangeAndRefusesADial(t *testing.T) {
 	first, err := ephemeralFirst()
 	if err != nil {
@@ -51,17 +51,9 @@ func TestTheAddressIsBelowTheEphemeralRangeAndRefusesADial(t *testing.T) {
 		addr := Addr(t)
 		host, p, _ := net.SplitHostPort(addr)
 		port, _ := strconv.Atoi(p)
-		if host != "127.0.0.1" || port < lowest || port >= first {
-			t.Fatalf("address %s; want 127.0.0.1 with a port in [%d, %d)", addr, lowest, first)
+		if host != "127.0.0.1" || port < lowest || port >= first || !refused(addr) {
+			t.Fatalf("address %s; want 127.0.0.1 with a port in [%d, %d) that refuses a dial", addr, lowest, first)
 		}
-	}
-	addr := Addr(t)
-	c, err := net.DialTimeout("tcp", addr, time.Second)
-	if err == nil {
-		_ = c.Close()
-	}
-	if !errors.Is(err, syscall.ECONNREFUSED) {
-		t.Fatalf("a dial to %s: %v; want it refused", addr, err)
 	}
 }
 
@@ -91,7 +83,7 @@ func TestTheAddressIsAPortInTheRangeThatRefusesADial(t *testing.T) {
 			}
 			want := ""
 			if tc.want >= 0 {
-				want = "127.0.0.1:" + strconv.Itoa(lo+tc.want)
+				want = addrOf(lo + tc.want)
 			}
 			for range 20 {
 				var addr string
@@ -140,6 +132,16 @@ func TestRefusedTellsAHeldPortFromAFreeOne(t *testing.T) {
 	defer func() { _ = ln.Close() }()
 	if refused(ln.Addr().String()) {
 		t.Errorf("%s, which a listener holds, counts as refused", ln.Addr())
+	}
+	// A listener on every address: on macOS a loopback bind to its port succeeds, so only the dial
+	// tells it is held; on Linux the bind fails.
+	w, err := net.Listen("tcp", ":0") //nolint:gosec // G102: a wildcard listener is the case under test
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = w.Close() }()
+	if a := addrOf(w.Addr().(*net.TCPAddr).Port); refused(a) {
+		t.Errorf("%s, which a wildcard listener holds, counts as refused", a)
 	}
 	if free := Addr(t); !refused(free) {
 		t.Errorf("%s, a closed port, does not count as refused", free)
