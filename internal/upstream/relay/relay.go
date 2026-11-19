@@ -198,6 +198,21 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 				log.ErrorContext(r.Context(), "upstream did not answer in time", "reason", "no response headers within "+o.headerTimeout.String()+"; "+string(out))
 				return
 			}
+			// A request whose context ended before the upstream answered is not an upstream error, so
+			// it is not logged as one, whatever error the transport saw (#527). The cause tells why:
+			// the proxy shutting down cancels with http.ErrServerClosed while the client is still
+			// there, which gets a 503 it can retry, on a connection that closes; any other end is the
+			// client going away, which records statusClientClosedRequest. A case that must answer or log
+			// even then goes above this check.
+			if r.Context().Err() != nil {
+				if errors.Is(context.Cause(r.Context()), http.ErrServerClosed) {
+					w.Header().Set("Connection", "close")
+					http.Error(w, "the proxy is shutting down", http.StatusServiceUnavailable)
+					return
+				}
+				w.WriteHeader(statusClientClosedRequest)
+				return
+			}
 			// A request trailer the server refused while the relay read the client's body fails here;
 			// its line is not logged.
 			log.WarnContext(r.Context(), "upstream error", "error", logging.BodyError(err))
@@ -317,16 +332,28 @@ func redirectHint(res *http.Response) string {
 
 const noUsableLocation = "the upstream sent no usable Location; check BYWARD_UPSTREAM_URL"
 
+// statusClientClosedRequest is the status a request records when its client went away before the
+// upstream answered: nginx's "client closed request" convention (499). It is never sent: the client
+// is gone. So a client that gave up is not counted as an upstream failure (#527).
+const statusClientClosedRequest = 499
+
 // proxyErrorLog takes ReverseProxy's own error lines (a failed read during a body copy) into the
 // structured log, with the context of the request they are about. A line about the upstream's body
 // through a misread proxy quotes no address: the transport has already redacted the error to
 // envproxy.Cause, or left it one of the bare errors that quote nothing (envproxy's redactedBody).
+// Once the request's context is done, no line is logged: the read failed because the request ended.
 type proxyErrorLog struct {
 	log *slog.Logger
 	ctx context.Context
 }
 
 func (l proxyErrorLog) Write(p []byte) (int, error) {
+	// After the client went away, a failed read of the upstream's body is that, not an upstream
+	// error, whatever error it gave: usually the bare context.Canceled ReverseProxy stays quiet on,
+	// but sometimes the closed connection's own error (#527).
+	if l.ctx.Err() != nil {
+		return len(p), nil
+	}
 	l.log.WarnContext(l.ctx, "upstream error", "error", strings.TrimSpace(string(p)))
 	return len(p), nil
 }

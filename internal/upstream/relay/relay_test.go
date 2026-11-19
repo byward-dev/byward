@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -987,6 +988,146 @@ func TestAClientThatCancelsAStreamLogsNothingWhateverTheProxySetting(t *testing.
 			srv.Close() // waits for the handler, so the log is complete
 			if logs.Len() != 0 {
 				t.Fatalf("log %q; want nothing logged for a client that went away", logs.String())
+			}
+		})
+	}
+}
+
+// A client that goes away before the upstream answers is not an upstream error, whatever the proxy
+// setting: nothing is logged as one, and the request records 499, nginx's "client closed request",
+// so the request log, the metrics and the span do not count an upstream failure (#527). Before #527
+// the relay logged "upstream error" with context canceled and recorded 502.
+func TestAClientThatGoesAwayBeforeTheUpstreamAnswersRecords499AndLogsNoUpstreamErrorWhateverTheProxySetting(t *testing.T) {
+	for _, tc := range everyProxySetting {
+		t.Run(tc.name, func(t *testing.T) {
+			// The proxy, or with none the upstream: it has read the request and holds the connection
+			// without answering until the test ends.
+			arrived, release := make(chan struct{}), make(chan struct{})
+			addr := fakeenvproxy.Start(t, 1, func(net.Conn) { close(arrived); <-release }).Addr
+			t.Cleanup(func() { close(release) })
+			u, proxy := relayTarget(addr, tc.setting)
+			var logs bytes.Buffer
+			log := logging.New(&logs, "text")
+			srv := httptest.NewServer(logging.Middleware(log, New(log, u, withProxy(proxy))))
+			t.Cleanup(srv.Close)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			req, _ := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/mcp", strings.NewReader("{}"))
+			errc := make(chan error, 1)
+			go func() {
+				res, err := srv.Client().Do(req)
+				if err == nil {
+					_ = res.Body.Close()
+				}
+				errc <- err
+			}()
+			select {
+			case <-arrived: // the relay waits for the upstream's headers
+			case <-time.After(10 * time.Second):
+				t.Fatal("the request never reached the upstream")
+			}
+			cancel() // the client goes away before the upstream answers
+			select {
+			case err := <-errc:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("client error %v; want context.Canceled", err)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("the client never returned after it cancelled")
+			}
+			srv.Close() // waits for the handler, so the log is complete
+			if got := logs.String(); strings.Count(got, "\n") != 1 || !strings.Contains(got, "level=INFO msg=request ") ||
+				!strings.Contains(got, " status=499 ") {
+				t.Fatalf("log %q; want only the request line, with status 499", got)
+			}
+		})
+	}
+}
+
+// A request still waiting for the upstream when the proxy shuts down, whose context the server
+// cancels with http.ErrServerClosed while the client is still there, is answered 503 on a connection
+// that closes, so the client can retry, and nothing is logged as an upstream error (#527). Before
+// #527 it was answered 502 and logged.
+func TestARequestWaitingForTheUpstreamWhenTheProxyShutsDownIsAnswered503AndLogsNoUpstreamError(t *testing.T) {
+	arrived, release := make(chan struct{}), make(chan struct{})
+	addr := fakeenvproxy.Start(t, 1, func(net.Conn) { close(arrived); <-release }).Addr
+	t.Cleanup(func() { close(release) })
+	u, proxy := relayTarget(addr, nil)
+	var logs bytes.Buffer
+	log := logging.New(&logs, "text")
+	srv := httptest.NewUnstartedServer(logging.Middleware(log, New(log, u, withProxy(proxy))))
+	base, shutDown := context.WithCancelCause(t.Context())
+	defer shutDown(nil)
+	srv.Config.BaseContext = func(net.Listener) context.Context { return base }
+	srv.Start()
+	t.Cleanup(srv.Close)
+	type answer struct {
+		status int
+		body   string
+		closes bool // Connection: close, which the client takes out of the header into Response.Close
+		err    error
+	}
+	answers := make(chan answer, 1)
+	go func() {
+		res, err := srv.Client().Post(srv.URL+"/mcp", "application/json", strings.NewReader("{}"))
+		if err != nil {
+			answers <- answer{err: err}
+			return
+		}
+		defer func() { _ = res.Body.Close() }()
+		b, err := io.ReadAll(res.Body)
+		answers <- answer{res.StatusCode, string(b), res.Close, err}
+	}()
+	select {
+	case <-arrived:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the request never reached the upstream")
+	}
+	shutDown(http.ErrServerClosed) // as the server does on shutdown (internal/server serve)
+	var got answer
+	select {
+	case got = <-answers:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the client got no answer")
+	}
+	if got.err != nil || got.status != http.StatusServiceUnavailable || got.body != "the proxy is shutting down\n" || !got.closes {
+		t.Fatalf("answer %+v; want 503 %q with Connection: close", got, "the proxy is shutting down\n")
+	}
+	srv.Close() // waits for the handler, so the log is complete
+	if l := logs.String(); strings.Count(l, "\n") != 1 || !strings.Contains(l, "level=INFO msg=request ") || !strings.Contains(l, " status=503 ") {
+		t.Fatalf("log %q; want only the request line, with status 503", l)
+	}
+}
+
+// ReverseProxy's own error line about a failed read of the upstream's body is not logged once the
+// client went away, whatever error the read gave: it has also been seen to get the closed
+// connection's own error (#527), by a stdlib path that was not identified, so this pins the rule
+// here. While the client is still there, the line is logged as an upstream error.
+func TestAnUpstreamBodyReadErrorIsLoggedOnlyWhileTheClientIsThere(t *testing.T) {
+	const line = "httputil: ReverseProxy read error during body copy: read tcp 127.0.0.1:1->127.0.0.1:2: use of closed network connection\n"
+	gone, cancel := context.WithCancel(t.Context())
+	cancel()
+	for _, c := range []struct {
+		name string
+		ctx  context.Context
+		want string
+	}{
+		{"client gone", gone, ""},
+		{"client still there", t.Context(), `level=WARN msg="upstream error" error="httputil: ReverseProxy read error during body copy: read tcp 127.0.0.1:1->127.0.0.1:2: use of closed network connection"` + "\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+				if a.Key == slog.TimeKey {
+					return slog.Attr{}
+				}
+				return a
+			}}))
+			if n, err := (proxyErrorLog{log: log, ctx: c.ctx}).Write([]byte(line)); n != len(line) || err != nil {
+				t.Fatalf("Write = %d, %v; want %d, nil", n, err, len(line))
+			}
+			if logs.String() != c.want {
+				t.Fatalf("log %q; want %q", logs.String(), c.want)
 			}
 		})
 	}

@@ -109,6 +109,59 @@ func TestRunStartsTheBackgroundWorkAndStopsItWithRun(t *testing.T) {
 	}
 }
 
+// Shutting down cancels each request still in flight with http.ErrServerClosed as the cause, so a
+// handler can tell the proxy stopping, while its client is still there, from the client going away
+// (#527: the relay answers the first 503 and records the second as 499).
+func TestShutdownCancelsARequestInFlightWithServerClosedAsTheCause(t *testing.T) {
+	logs := &listenWatcher{listening: make(chan struct{})}
+	inFlight, cause := make(chan struct{}), make(chan error, 1)
+	s := &Servers{Public: &http.Server{Addr: "127.0.0.1:0", ReadHeaderTimeout: time.Second,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			close(inFlight)
+			<-r.Context().Done()
+			cause <- context.Cause(r.Context())
+		})}, Health: health.New(discard)}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- Run(ctx, s, slog.New(slog.NewJSONHandler(logs, nil))) }()
+	select {
+	case <-logs.listening:
+	case err := <-done:
+		t.Fatalf("Run returned before it listened: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run never listened")
+	}
+	addr := listenLine.FindStringSubmatch(logs.String())[1]
+	go func() {
+		if res, err := http.Get("http://" + addr + "/"); err == nil {
+			_ = res.Body.Close()
+		}
+	}()
+	select {
+	case <-inFlight:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the request never reached the handler")
+	}
+	cancel() // the proxy shuts down while the client still waits
+	select {
+	case got := <-cause:
+		if !errors.Is(got, http.ErrServerClosed) {
+			t.Fatalf("the request's cause is %v; want http.ErrServerClosed", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("shutting down never ended the request in flight")
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run never returned after shutting down")
+	}
+}
+
 func TestRunWithAFailedListenStartsNoBackgroundWork(t *testing.T) {
 	busy, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

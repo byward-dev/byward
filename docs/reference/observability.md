@@ -203,6 +203,13 @@ One JSON line per request: `request_id`, `method`, `path` (never the query strin
 `remote_ip`, and the `Mcp-Method` header value as `mcp_method`. Attribute keys are allowlisted; whole header maps,
 bodies, tokens and secrets are never logged, and bearer-shaped values are redacted.
 
+A relayed request whose client went away before the upstream answered records `status` 499, nginx's "client closed
+request". Nothing is sent, since the client is gone. The same status reaches `byward_http_request_duration_seconds`
+(class `4xx`) and the server span, so a client that gave up is not counted as an upstream failure. A relayed request
+still waiting for the upstream when the proxy shuts down is answered 503 `the proxy is shutting down`, and its connection
+is closed (`Connection: close` over HTTP/1.1, GOAWAY over HTTP/2), so the client can retry. In neither case, nor during a stream that ends either way, is the relay's
+`upstream error` warning logged.
+
 IdP sign-in and refresh failures (the `the IdP ended the session; grant revoked` line among them) and refused On-Behalf-Of exchanges log the IdP's error code (`idp_error_code`, the
 AADSTS number for Entra), `trace_id` and `correlation_id`, each only when the IdP sent it;
 with Entra, `correlation_id` equals our `request_id`, so a user's reference finds both logs.
