@@ -152,11 +152,8 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 			return nil, fmt.Errorf("BYWARD_CLIENT_DENYLIST: %q is a static client, which the denylist never refuses; remove it from BYWARD_STATIC_CLIENTS_FILE instead", id)
 		}
 	}
-	if cfg.UpstreamCommand == nil { // only an HTTP upstream gets the assertion (ADR-0016 §2, §6)
-		if p.assertionKeys, err = assertion.LoadKeys(cfg.AssertionKeysDir, secretCheck(cfg)); err != nil {
-			// No key generation (ADR-0007 §5, ADR-0016 §10): the operator creates the first key.
-			return nil, fmt.Errorf("BYWARD_ASSERTION_KEYS_DIR: %s: %w (see docs/how-to/identity-assertion.md)", cfg.AssertionKeysDir, err)
-		}
+	if p.assertionKeys, err = assertionKeys(cfg); err != nil {
+		return nil, err
 	}
 	if p.idp, err = newIdentityProvider(cfg, idpHTTP); err != nil {
 		return nil, err

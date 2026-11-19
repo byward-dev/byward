@@ -7,8 +7,8 @@ setting flags; give settings through the environment. A stdio upstream given on 
 after `--`, as for the proxy (`byward check --offline -- /usr/local/bin/server --flag`); none of
 these commands starts it. Without authentication (`BYWARD_INSECURE_NO_AUTH`) the broker's store is off, so
 revoke-user, revoke-all and store new-epoch exit 2, and no identity assertion is sent, so jwks exits 2
-too. A stdio upstream gets no identity assertion either, so jwks exits 2 with one. `byward --help`
-lists them.
+too. A stdio upstream gets no identity assertion either, so jwks exits 2 with a stdio upstream too.
+`byward --help` lists them.
 
 | Command | What it does | Network | Exit codes |
 |---|---|---|---|
