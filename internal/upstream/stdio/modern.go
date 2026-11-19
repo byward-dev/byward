@@ -15,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/byward-dev/byward/internal/shutdown"
 )
 
 // The modern era (2026-07-28): no sessions, every request carries its own metadata, and one
@@ -225,7 +227,7 @@ type userConn struct {
 	log *slog.Logger
 
 	ids      *atomic.Uint64  // the Bridge's: proxy ids never repeat across userConns
-	draining <-chan struct{} // the Bridge's: closed when byward starts shutting down
+	draining <-chan struct{} // the Bridge's: closed when byward starts shutting down (a request may see shutdown first, as its context's cause)
 
 	mu      sync.Mutex
 	byID    map[string]*modernRequest // by proxy id
@@ -296,7 +298,9 @@ func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity,
 	}
 	if env.kind() == kindNotification {
 		if err := p.Send(r.Context(), msg); err != nil {
-			http.Error(w, "upstream unavailable", http.StatusBadGateway)
+			if !shutdown.AnswerIfEnded(w, r) {
+				http.Error(w, "upstream unavailable", http.StatusBadGateway)
+			}
 			return
 		}
 		w.WriteHeader(http.StatusAccepted)
@@ -388,6 +392,9 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, l
 	q := c.register(meta.id.value(msg), token, meta.logs, listen)
 	defer c.unregister(q)
 	if err := c.p.Send(r.Context(), replace(msg, edit{meta.id, []byte(q.proxyID)}, edit{meta.token, []byte(q.proxyTok)})); err != nil {
+		if shutdown.AnswerIfEnded(w, r) { // the request ended: not a failure of the process
+			return
+		}
 		c.log.WarnContext(r.Context(), "relaying to the upstream process failed", "error", err)
 		http.Error(w, "upstream unavailable", http.StatusBadGateway)
 		return
@@ -442,7 +449,7 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, l
 			drain()
 			return
 		case <-r.Context().Done():
-			if q.listen && closed(c.draining) { // shutdown cancels the request; the listen still ends cleanly
+			if q.listen && shutdown.ShuttingDown(r.Context()) { // shutdown cancels the request; the listen still ends cleanly
 				endListen()
 				return
 			}
@@ -468,16 +475,6 @@ func exitAnswer(q *modernRequest, chosen bool) []byte {
 		return listenComplete(q.id)
 	}
 	return rpcError(q.id, codeInternalError, "upstream process exited")
-}
-
-// closed reports whether ch is closed, without waiting.
-func closed(ch <-chan struct{}) bool {
-	select {
-	case <-ch:
-		return true
-	default:
-		return false
-	}
 }
 
 // listenComplete is the completion result of the subscriptions/listen with id: the subscription is

@@ -13,6 +13,7 @@ import (
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/resource"
+	"github.com/byward-dev/byward/internal/shutdown"
 	"github.com/byward-dev/byward/internal/store"
 	"github.com/byward-dev/byward/internal/upstream/relay"
 	"github.com/byward-dev/byward/internal/upstream/stdio"
@@ -80,13 +81,16 @@ func (d *downstreamTokens) serve(w http.ResponseWriter, r *http.Request, id reso
 		return
 	}
 	idpToken, expires, err := d.idpToken(ctx, id.GrantID)
+	if err != nil && shutdown.AnswerIfEnded(w, r) {
+		return // the request ended while its grant was read: nothing was refused
+	}
 	if err != nil {
 		d.refuse(w, r, id, downstream.Failed, err)
 		return
 	}
 	tok, cached, err := d.cache.Token(ctx, downstream.User{TenantID: tid, ObjectID: oid, IdPToken: idpToken, IdPTokenExpiresAt: expires})
-	if err != nil && ctx.Err() != nil {
-		return // the client went away while waiting: nothing was refused and no one is left to answer
+	if err != nil && shutdown.AnswerIfEnded(w, r) {
+		return // the request ended while waiting (the client went away, or shutdown): nothing was refused
 	}
 	if err != nil {
 		d.refuse(w, r, id, outcomeOf(err), err)

@@ -50,6 +50,43 @@ func newBridge(t *testing.T, edit func(*Config)) *bridgeHarness {
 // emptyValue, given to do as a header value, sends that header present but empty.
 const emptyValue = "\x00empty"
 
+// setHeaders sets a request's header pairs as do sends them ("" sends none, emptyValue sends it
+// empty; a name given twice is sent twice), then its user and, if not "", its MCP session.
+func setHeaders(h http.Header, user, session string, header ...string) {
+	for i := 0; i+1 < len(header); i += 2 {
+		switch v := header[i+1]; v {
+		case "":
+		case emptyValue:
+			h.Add(header[i], "")
+		default:
+			h.Add(header[i], v)
+		}
+	}
+	if user != "" {
+		h.Set(userHeader, user)
+	}
+	if session != "" {
+		h.Set(sessionHeader, session)
+	}
+}
+
+// serve sends one request with ctx straight to the bridge, as do sends it over HTTP, and returns
+// what the bridge answered. A test server's client never hands its context to the handler, so this
+// is how a request carries a cancel cause (the proxy shutting down) to the bridge.
+func (b *bridgeHarness) serve(ctx context.Context, method, user, session, body string, header ...string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	b.bridge.ServeHTTP(w, b.request(ctx, method, user, session, body, header...))
+	return w
+}
+
+// request is the in-process request serve sends.
+func (b *bridgeHarness) request(ctx context.Context, method, user, session, body string, header ...string) *http.Request {
+	r := httptest.NewRequestWithContext(ctx, method, "/", strings.NewReader(body))
+	r.Header.Set("Accept", "application/json, text/event-stream")
+	setHeaders(r.Header, user, session, header...)
+	return r
+}
+
 // do sends one request; header holds extra name/value pairs, sent in order (a name given twice is
 // sent twice): "" sends none, emptyValue sends it empty.
 func (b *bridgeHarness) do(t *testing.T, ctx context.Context, method, user, session, body string, header ...string) *http.Response {
@@ -59,21 +96,7 @@ func (b *bridgeHarness) do(t *testing.T, ctx context.Context, method, user, sess
 		t.Fatal(err)
 	}
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	for i := 0; i+1 < len(header); i += 2 {
-		switch v := header[i+1]; v {
-		case "":
-		case emptyValue:
-			req.Header.Add(header[i], "")
-		default:
-			req.Header.Add(header[i], v)
-		}
-	}
-	if user != "" {
-		req.Header.Set(userHeader, user)
-	}
-	if session != "" {
-		req.Header.Set(sessionHeader, session)
-	}
+	setHeaders(req.Header, user, session, header...)
 	res, err := b.srv.Client().Do(req)
 	if err != nil {
 		t.Fatalf("%s: %v", method, err)

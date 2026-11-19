@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/byward-dev/byward/internal/health"
+	"github.com/byward-dev/byward/internal/shutdown"
 )
 
 // Servers are the public listener and, unless turned off, the internal one for /metrics, /livez
@@ -122,10 +123,10 @@ func serve(ctx context.Context, srv *http.Server, log *slog.Logger, drain, liste
 		return fmt.Errorf("listen: %w", err)
 	}
 	listening()
-	// Requests are cancelled with http.ErrServerClosed as the cause, so a handler can tell the proxy
-	// shutting down from its client going away, whose cause is plain context.Canceled (#527).
-	baseCtx, cancelRequests := context.WithCancelCause(context.WithoutCancel(ctx))
-	defer cancelRequests(http.ErrServerClosed)
+	// Requests are ended as the proxy shutting down, so a handler can tell that from its MCP client
+	// going away (shutdown.AnswerIfEnded, #527).
+	baseCtx, shutDown := shutdown.WithCancel(context.WithoutCancel(ctx))
+	defer shutDown()
 	srv.BaseContext = func(net.Listener) context.Context { return baseCtx }
 	log.Info("listening", "listen", ln.Addr().String(), "tls", srv.TLSConfig != nil)
 
@@ -145,7 +146,7 @@ func serve(ctx context.Context, srv *http.Server, log *slog.Logger, drain, liste
 	drain()
 	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ShutdownTimeout)
 	defer cancel()
-	cancelRequests(http.ErrServerClosed) // ends long-lived streams so Shutdown does not wait for them
+	shutDown() // ends long-lived streams so Shutdown does not wait for them
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}

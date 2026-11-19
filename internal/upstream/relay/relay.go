@@ -18,6 +18,7 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/envproxy"
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/shutdown"
 )
 
 // stripped are removed from every inbound request before anything of ours is set (invariant 16):
@@ -199,18 +200,10 @@ func New(log *slog.Logger, target *url.URL, opts ...Option) http.Handler {
 				return
 			}
 			// A request whose context ended before the upstream answered is not an upstream error, so
-			// it is not logged as one, whatever error the transport saw (#527). The cause tells why:
-			// the proxy shutting down cancels with http.ErrServerClosed while the client is still
-			// there, which gets a 503 it can retry, on a connection that closes; any other end is the
-			// client going away, which records statusClientClosedRequest. A case that must answer or log
-			// even then goes above this check.
-			if r.Context().Err() != nil {
-				if errors.Is(context.Cause(r.Context()), http.ErrServerClosed) {
-					w.Header().Set("Connection", "close")
-					http.Error(w, "the proxy is shutting down", http.StatusServiceUnavailable)
-					return
-				}
-				w.WriteHeader(statusClientClosedRequest)
+			// it is not logged as one, whatever error the transport saw (#527): 503 if the proxy is
+			// shutting down, else 499 for a client that went away (shutdown.AnswerIfEnded). A case that
+			// must answer or log even then goes above this check.
+			if shutdown.AnswerIfEnded(w, r) {
 				return
 			}
 			// A request trailer the server refused while the relay read the client's body fails here;
@@ -349,11 +342,6 @@ func redirectHint(res *http.Response) string {
 }
 
 const noUsableLocation = "the upstream sent no usable Location; check BYWARD_UPSTREAM_URL"
-
-// statusClientClosedRequest is the status a request records when its client went away before the
-// upstream answered: nginx's "client closed request" convention (499). It is never sent: the client
-// is gone. So a client that gave up is not counted as an upstream failure (#527).
-const statusClientClosedRequest = 499
 
 // proxyErrorLog takes ReverseProxy's own error lines (a failed read during a body copy) into the
 // structured log, with the context of the request they are about. A line about the upstream's body

@@ -323,3 +323,8 @@ func internalMetrics(t *testing.T, h http.Handler) string {
 	}
 	return body
 }
+
+// failureLogged reports whether a JSON log holds a line at WARN or ERROR.
+func failureLogged(log string) bool {
+	return strings.Contains(log, `"level":"WARN"`) || strings.Contains(log, `"level":"ERROR"`)
+}

@@ -15,6 +15,7 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/denylist"
 	"github.com/byward-dev/byward/internal/health"
+	"github.com/byward-dev/byward/internal/shutdown"
 	"github.com/byward-dev/byward/internal/token"
 )
 
@@ -109,17 +110,17 @@ func TestRunStartsTheBackgroundWorkAndStopsItWithRun(t *testing.T) {
 	}
 }
 
-// Shutting down cancels each request still in flight with http.ErrServerClosed as the cause, so a
-// handler can tell the proxy stopping, while its client is still there, from the client going away
-// (#527: the relay answers the first 503 and records the second as 499).
-func TestShutdownCancelsARequestInFlightWithServerClosedAsTheCause(t *testing.T) {
+// Shutting down ends each request still in flight as the proxy shutting down (shutdown.ShuttingDown),
+// so a handler can tell the proxy stopping, while its client is still there, from the client going
+// away (#527: the relay answers the first 503 and records the second as 499).
+func TestShutdownEndsEachRequestInFlightAsTheProxyShuttingDown(t *testing.T) {
 	logs := &listenWatcher{listening: make(chan struct{})}
-	inFlight, cause := make(chan struct{}), make(chan error, 1)
+	inFlight, shuttingDown := make(chan struct{}), make(chan bool, 1)
 	s := &Servers{Public: &http.Server{Addr: "127.0.0.1:0", ReadHeaderTimeout: time.Second,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			close(inFlight)
 			<-r.Context().Done()
-			cause <- context.Cause(r.Context())
+			shuttingDown <- shutdown.ShuttingDown(r.Context())
 		})}, Health: health.New(discard)}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -145,9 +146,9 @@ func TestShutdownCancelsARequestInFlightWithServerClosedAsTheCause(t *testing.T)
 	}
 	cancel() // the proxy shuts down while the client still waits
 	select {
-	case got := <-cause:
-		if !errors.Is(got, http.ErrServerClosed) {
-			t.Fatalf("the request's cause is %v; want http.ErrServerClosed", got)
+	case got := <-shuttingDown:
+		if !got {
+			t.Fatal("the request in flight was not ended as the proxy shutting down")
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("shutting down never ended the request in flight")

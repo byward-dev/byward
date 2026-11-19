@@ -209,12 +209,7 @@ func TestAKeepAliveThatCannotBeWrittenCancelsTheListen(t *testing.T) {
 		t.Run(what+" fails", func(t *testing.T) {
 			b := newModernBridge(t, nil)
 			body := modernBody(`"L"`, "subscriptions/listen", "", `"notifications":{"toolsListChanged":true}`)
-			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body)) // its context never ends
-			req.Header.Set(userHeader, "alice")
-			req.Header.Set("Accept", "application/json, text/event-stream")
-			for h := modernHeaders(body); len(h) >= 2; h = h[2:] {
-				req.Header.Set(h[0], h[1])
-			}
+			req := b.request(context.Background(), http.MethodPost, "alice", "", body, modernHeaders(body)...) // its context never ends
 			w := &brokenWriter{header: http.Header{}}
 			done := make(chan struct{})
 			go func() { defer close(done); b.bridge.ServeHTTP(w, req) }()
@@ -238,9 +233,7 @@ func TestAKeepAliveThatCannotBeWrittenEndsTheLegacyGETStream(t *testing.T) {
 		t.Run(what+" fails", func(t *testing.T) {
 			b := newBridge(t, nil)
 			session := b.initialize(t, "alice")
-			req := httptest.NewRequest(http.MethodGet, "/", nil) // its context never ends
-			req.Header.Set(userHeader, "alice")
-			req.Header.Set(sessionHeader, session)
+			req := b.request(context.Background(), http.MethodGet, "alice", session, "") // its context never ends
 			req.Header.Set("Accept", "text/event-stream")
 			w := &brokenWriter{header: http.Header{}, broken: what}
 			done := make(chan struct{})
@@ -310,20 +303,13 @@ var gatedStreams = map[string]func(t *testing.T, ctx context.Context, w http.Res
 	"modern listen": func(t *testing.T, ctx context.Context, w http.ResponseWriter) (*bridgeHarness, func(), func()) {
 		b := newModernBridge(t, nil)
 		body := modernBody(`"L"`, "subscriptions/listen", "", `"notifications":{"toolsListChanged":true}`)
-		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/", strings.NewReader(body))
-		req.Header.Set(userHeader, "alice")
-		req.Header.Set("Accept", "application/json, text/event-stream")
-		for h := modernHeaders(body); len(h) >= 2; h = h[2:] {
-			req.Header.Set(h[0], h[1])
-		}
+		req := b.request(ctx, http.MethodPost, "alice", "", body, modernHeaders(body)...)
 		return b, func() { b.bridge.ServeHTTP(w, req) }, func() {} // its first event is the acknowledgement
 	},
 	"legacy GET": func(t *testing.T, ctx context.Context, w http.ResponseWriter) (*bridgeHarness, func(), func()) {
 		b := newBridge(t, nil)
 		session := b.initialize(t, "alice")
-		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/", nil)
-		req.Header.Set(userHeader, "alice")
-		req.Header.Set(sessionHeader, session)
+		req := b.request(ctx, http.MethodGet, "alice", session, "")
 		req.Header.Set("Accept", "text/event-stream")
 		return b, func() { b.bridge.ServeHTTP(w, req) }, func() {
 			b.post(t, "alice", session, `{"jsonrpc":"2.0","id":1,"method":"announce"}`) // its body closes at cleanup

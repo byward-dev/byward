@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -82,7 +81,7 @@ func TestAStreamTheUpstreamStartsBeforeTheRequestBodyEndsReachesTheMCPClientWhol
 		t.Fatalf("the upstream got the body %q; want all of it", got)
 	}
 	srv.Close() // waits for the handler, so the log is complete
-	if l := logs.String(); strings.Contains(l, `"level":"WARN"`) || strings.Contains(l, `"level":"ERROR"`) {
+	if l := logs.String(); failureLogged(l) {
 		t.Fatalf("log %s; want no warning and no error", l)
 	}
 }

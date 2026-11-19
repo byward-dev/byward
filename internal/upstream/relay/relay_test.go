@@ -27,6 +27,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/envproxy"
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/shutdown"
 	"github.com/byward-dev/byward/internal/testutil/closedport"
 	"github.com/byward-dev/byward/internal/testutil/fakeenvproxy"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
@@ -1044,8 +1045,8 @@ func TestAClientThatGoesAwayBeforeTheUpstreamAnswersRecords499AndLogsNoUpstreamE
 	}
 }
 
-// A request still waiting for the upstream when the proxy shuts down, whose context the server
-// cancels with http.ErrServerClosed while the client is still there, is answered 503 on a connection
+// A request still waiting for the upstream when the proxy shuts down, whose context the server ends
+// through shutdown.WithCancel while the client is still there, is answered 503 on a connection
 // that closes, so the client can retry, and nothing is logged as an upstream error (#527). Before
 // #527 it was answered 502 and logged.
 func TestARequestWaitingForTheUpstreamWhenTheProxyShutsDownIsAnswered503AndLogsNoUpstreamError(t *testing.T) {
@@ -1056,8 +1057,8 @@ func TestARequestWaitingForTheUpstreamWhenTheProxyShutsDownIsAnswered503AndLogsN
 	var logs bytes.Buffer
 	log := logging.New(&logs, "text")
 	srv := httptest.NewUnstartedServer(logging.Middleware(log, New(log, u, withProxy(proxy))))
-	base, shutDown := context.WithCancelCause(t.Context())
-	defer shutDown(nil)
+	base, shutDown := shutdown.WithCancel(t.Context())
+	defer shutDown()
 	srv.Config.BaseContext = func(net.Listener) context.Context { return base }
 	srv.Start()
 	t.Cleanup(srv.Close)
@@ -1083,7 +1084,7 @@ func TestARequestWaitingForTheUpstreamWhenTheProxyShutsDownIsAnswered503AndLogsN
 	case <-time.After(10 * time.Second):
 		t.Fatal("the request never reached the upstream")
 	}
-	shutDown(http.ErrServerClosed) // as the server does on shutdown (internal/server serve)
+	shutDown() // as the server does on shutdown (internal/server Run)
 	var got answer
 	select {
 	case got = <-answers:

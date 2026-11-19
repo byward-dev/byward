@@ -379,12 +379,26 @@ func TestShutdownFailsReadinessAndEndsAnOpenListenWithItsCompletionResultBeforeI
 	}
 }
 
-func shutdownEndsAnOpenListen(t *testing.T, internalListen string) {
+// runningProxy is the proxy runStdio started: its servers, address and log, the cancel that shuts
+// it down, and Run's result once it has.
+type runningProxy struct {
+	s      *Servers
+	addr   string
+	logs   *listenWatcher
+	cancel context.CancelFunc
+	done   <-chan error
+}
+
+// runStdio starts the proxy through New and Run, without authentication and on a free port, in
+// front of the fake stdio upstream run with args, and waits until it listens. internalListen is
+// BYWARD_INTERNAL_LISTEN ("" for none). The test's end cancels it.
+func runStdio(t *testing.T, internalListen string, args ...string) runningProxy {
+	t.Helper()
 	bin, err := fakeStdio()
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, _, err := config.Load([]string{"--", bin, "-modern"}, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp",
+	cfg, _, err := config.Load(append([]string{"--", bin}, args...), []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp",
 		"BYWARD_INSECURE_NO_AUTH=true", "BYWARD_LISTEN=127.0.0.1:0", "BYWARD_INTERNAL_LISTEN=" + internalListen}, os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
@@ -396,7 +410,7 @@ func shutdownEndsAnOpenListen(t *testing.T, internalListen string) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	t.Cleanup(cancel)
 	done := make(chan error, 1)
 	go func() { done <- Run(ctx, s, log) }()
 	select {
@@ -406,9 +420,15 @@ func shutdownEndsAnOpenListen(t *testing.T, internalListen string) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not log its listening address within 5s")
 	}
+	return runningProxy{s, listenLine.FindStringSubmatch(logs.String())[1], logs, cancel, done}
+}
+
+func shutdownEndsAnOpenListen(t *testing.T, internalListen string) {
+	p := runStdio(t, internalListen, "-modern")
+	s, cancel, done := p.s, p.cancel, p.done
 	body := `{"jsonrpc":"2.0","id":"L","method":"subscriptions/listen","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28",` +
 		`"io.modelcontextprotocol/clientCapabilities":{}},"notifications":{"toolsListChanged":true}}}`
-	r, _ := http.NewRequest(http.MethodPost, "http://"+listenLine.FindStringSubmatch(logs.String())[1]+"/mcp", strings.NewReader(body))
+	r, _ := http.NewRequest(http.MethodPost, "http://"+p.addr+"/mcp", strings.NewReader(body))
 	r.Host = "127.0.0.1:8080"
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Accept", "application/json, text/event-stream")
@@ -462,6 +482,64 @@ func shutdownEndsAnOpenListen(t *testing.T, internalListen string) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("Run did not return after cancel")
+	}
+}
+
+// #529, through Run: the proxy shutting down reaches a request to a stdio upstream through every
+// middleware. A legacy initialize its process holds, which Drain does not end, is answered 503 "the
+// proxy is shutting down" on a connection that closes, so its MCP client can retry, and nothing is
+// logged as a failure of the upstream process.
+func TestShutdownAnswersAStdioRequestStillWaitingForItsUpstreamThroughEveryMiddleware(t *testing.T) {
+	p := runStdio(t, "", "-mcp", "-init=hold")
+	logs, cancel, done := p.logs, p.cancel, p.done
+	body := `{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}`
+	r, _ := http.NewRequest(http.MethodPost, "http://"+p.addr+"/mcp", strings.NewReader(body))
+	r.Host = "127.0.0.1:8080"
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Accept", "application/json, text/event-stream")
+	type answer struct {
+		res  *http.Response
+		body string
+		err  error
+	}
+	answered := make(chan answer, 1)
+	go func() {
+		res, err := http.DefaultClient.Do(r)
+		if err != nil {
+			answered <- answer{err: err}
+			return
+		}
+		defer func() { _ = res.Body.Close() }()
+		b, err := io.ReadAll(res.Body)
+		answered <- answer{res, string(b), err}
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(logs.String(), `"line":"holding initialize"`) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the upstream process never held the initialize; logs %s", logs)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel() // the proxy shuts down while the MCP client still waits
+	var a answer
+	select {
+	case a = <-answered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the held initialize was never answered")
+	}
+	if a.err != nil || a.res.StatusCode != http.StatusServiceUnavailable || a.body != "the proxy is shutting down\n" || !a.res.Close {
+		t.Fatalf("answer %v %q (error %v); want 503 %q on a connection that closes", a.res, a.body, a.err, "the proxy is shutting down\n")
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+	if got := logs.String(); failureLogged(got) {
+		t.Fatalf("logged %s; want nothing at WARN or above when the proxy's shutdown ends a request", got)
 	}
 }
 

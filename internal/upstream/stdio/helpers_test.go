@@ -198,6 +198,19 @@ func (r *recorder) WithAttrs(as []slog.Attr) slog.Handler {
 
 func (r *recorder) WithGroup(string) slog.Handler { return r }
 
+// warnings returns the records at WARN or above.
+func (r *recorder) warnings() []record {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []record
+	for _, rec := range *r.recs {
+		if rec.level >= slog.LevelWarn {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
 // with returns the records with message msg.
 func (r *recorder) with(msg string) []record {
 	r.mu.Lock()

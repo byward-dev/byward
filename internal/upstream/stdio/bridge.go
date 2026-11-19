@@ -13,6 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/byward-dev/byward/internal/shutdown"
 )
 
 // sessionHeader is the MCP session header (2025-11-25 transports, Session Management).
@@ -177,6 +179,9 @@ func (b *Bridge) get(w http.ResponseWriter, r *http.Request, id Identity, key st
 		return
 	}
 	defer release()
+	if shutdown.AnswerIfEnded(w, r) { // an ended GET never replaces the session's live GET stream
+		return
+	}
 	s.listen(w, r)
 }
 
@@ -199,12 +204,16 @@ func (b *Bridge) delete(w http.ResponseWriter, r *http.Request, id Identity, key
 }
 
 // startFailed answers a request whose process could not be had: 503 with Retry-After when every
-// process under the caps is in use, else 502.
+// process under the caps is in use; nothing logged for a request that ended while it waited
+// (shutdown.AnswerIfEnded: its client went away, or the proxy is shutting down); else 502.
 func (b *Bridge) startFailed(w http.ResponseWriter, r *http.Request, id Identity, err error) {
 	if errors.Is(err, errBusy) {
 		b.c.Log.WarnContext(r.Context(), "stdio process cap full: every process is in use", "reason", "process_cap", "user_key", id.Subject)
 		w.Header().Set("Retry-After", busyRetryAfter)
 		http.Error(w, "upstream busy", http.StatusServiceUnavailable)
+		return
+	}
+	if shutdown.AnswerIfEnded(w, r) {
 		return
 	}
 	b.c.Log.WarnContext(r.Context(), "cannot start the upstream process", "error", err)
@@ -342,6 +351,10 @@ func newStream(id json.RawMessage) *stream {
 
 func (st *stream) end() { st.once.Do(func() { close(st.done) }) }
 
+// requestEnded is an initialize's reason when its request ended before the answer was written: not a
+// failure of the process, so it is never logged.
+const requestEnded = "request_ended"
+
 // request relays one client request and streams what the upstream sends for it, ending with its
 // response. For the initialize that started the session, nothing is written until the upstream
 // sends something, so an initialize it fails or never answers gets no session ID (2025-11-25
@@ -360,7 +373,12 @@ func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id
 				if stop {
 					s.p.stop("initialize_failed")
 				}
-				s.log.WarnContext(r.Context(), "initialize failed: no MCP session", "reason", reason)
+				// A request that ended (its MCP client went away, or the proxy is shutting down)
+				// is not a failure of the upstream process, so it is not logged as one (#529). Each
+				// way out that sees the request end says so with requestEnded.
+				if reason != requestEnded {
+					s.log.WarnContext(r.Context(), "initialize failed: no MCP session", "reason", reason)
+				}
 			}
 		}()
 	}
@@ -380,8 +398,12 @@ func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id
 	if err := s.p.Send(r.Context(), msg); err != nil {
 		s.dropPost(st)
 		if initialize {
-			reason = "send_failed"
-			http.Error(w, "upstream unavailable", http.StatusBadGateway)
+			if shutdown.AnswerIfEnded(w, r) {
+				reason = requestEnded
+			} else {
+				reason = "send_failed"
+				http.Error(w, "upstream unavailable", http.StatusBadGateway)
+			}
 			return
 		}
 		s.sendFailed(w, r, err)
@@ -458,8 +480,13 @@ func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id
 			return
 		case <-r.Context().Done():
 			// A disconnect is not a cancellation (2025-11-25 transports); the request stays with the
-			// upstream, and its response, when it comes, is dropped.
+			// upstream, and its response, when it comes, is dropped. A request whose stream has not
+			// started still records why it ended (shutdown.AnswerIfEnded); one whose stream has, keeps
+			// the status it sent.
 			s.dropPost(st)
+			if out != nil || shutdown.AnswerIfEnded(w, r) {
+				reason = requestEnded
+			}
 			return
 		}
 	}
@@ -501,9 +528,14 @@ func (s *session) listen(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// sendFailed answers a request whose message could not be sent: 404 if the process has exited,
+// nothing logged for a request that ended (shutdown.AnswerIfEnded), else 502.
 func (s *session) sendFailed(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.Is(err, ErrExited) {
 		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	if shutdown.AnswerIfEnded(w, r) {
 		return
 	}
 	s.log.WarnContext(r.Context(), "relaying to the upstream process failed", "error", err)

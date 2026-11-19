@@ -13,7 +13,9 @@
 // Flag -modern makes it a 2026-07-28 server (see serveModern). Flag -mcp makes it a 2025-11-25
 // JSON-RPC server instead (see serveMCP); with -stubborn as well, it then
 // keeps running after stdin closes, ignoring SIGTERM. Flag -init=error, -init=exit or -init=hold
-// makes initialize fail with a JSON-RPC error, exit the process, or never be answered;
+// makes initialize fail with a JSON-RPC error, exit the process, or never be answered (writing
+// "holding initialize" to stderr once it has read it); -init=block writes "blocking" to stderr and
+// never reads stdin at all; a "hold" request writes "holding" to stderr once it is held;
 // -init=lognerror sends a notifications/message first, then the error; -init=lognhold sends the
 // notification and never answers.
 //
@@ -198,11 +200,16 @@ type message struct {
 // server that ignores unknown requests.
 var silentDiscover bool
 
-// initMode is how serveMCP answers initialize: "" (normally), error, exit or hold. version is the
+// initMode is how serveMCP answers initialize: "" (normally), error, exit, hold, or block (it never
+// reads stdin, so a write to it waits once the pipe is full). version is the
 // protocol version its InitializeResult names (flag -version=; "none" leaves it out).
 var initMode, version = "", "2025-11-25"
 
 func serveMCP() {
+	if initMode == "block" {
+		fmt.Fprintln(os.Stderr, "blocking") // the process has started; stdin is never read
+		hang()
+	}
 	out := bufio.NewWriter(os.Stdout)
 	var mu sync.Mutex
 	write := func(m message) {
@@ -256,6 +263,7 @@ func serveMCP() {
 			case "exit":
 				os.Exit(4)
 			case "hold":
+				fmt.Fprintln(os.Stderr, "holding initialize")
 				continue
 			case "lognhold":
 				write(message{Method: "notifications/message", Params: json.RawMessage(`{"level":"info"}`)})
@@ -293,6 +301,7 @@ func serveMCP() {
 			write(message{ID: id, Method: "sampling/createMessage", Params: json.RawMessage(`{}`)})
 		case "hold":
 			held = append(held, m.ID)
+			fmt.Fprintln(os.Stderr, "holding")
 		case "release":
 			for _, id := range held {
 				result(id, "released")

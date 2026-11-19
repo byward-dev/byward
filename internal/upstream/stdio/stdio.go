@@ -258,12 +258,18 @@ func (m *Manager) leaseKey(ctx context.Context, key string, id Identity, kind le
 }
 
 // lease waits for e's spawn and leases its process for id, whose request it serves next;
-// errNotFound when the spawn failed or the process has exited.
+// errNotFound when the spawn failed or the process has exited. ctx bounds only the wait: a process
+// already started is leased even to a request that has ended, whose Send then refuses it, so that
+// request is answered the same way whenever it ended (#529).
 func (m *Manager) lease(ctx context.Context, key string, e *entry, id Identity, kind leaseKind) (*Process, func(), error) {
 	select {
 	case <-e.ready:
-	case <-ctx.Done():
-		return nil, nil, ctx.Err()
+	default:
+		select {
+		case <-e.ready:
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		}
 	}
 	if e.err != nil {
 		return nil, nil, errNotFound

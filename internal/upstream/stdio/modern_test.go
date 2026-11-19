@@ -95,14 +95,8 @@ func (b *bridgeHarness) fetch(body string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set(userHeader, "alice")
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	h := modernHeaders(body)
-	for i := 0; i+1 < len(h); i += 2 {
-		if h[i+1] != "" {
-			req.Header.Set(h[i], h[i+1])
-		}
-	}
+	setHeaders(req.Header, "alice", "", modernHeaders(body)...)
 	res, err := b.srv.Client().Do(req)
 	if err != nil {
 		return nil, err

@@ -25,6 +25,7 @@ import (
 	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/resource"
+	"github.com/byward-dev/byward/internal/shutdown"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 	"github.com/byward-dev/byward/internal/testutil/logsink"
@@ -440,32 +441,58 @@ func TestDownstreamRefusesARequestWithoutAUsableGrant(t *testing.T) {
 	}
 }
 
-// A client that goes away while its exchange is in flight was not refused: no refusal is logged,
-// audited or answered.
-func TestAClientGoingAwayIsNotARefusal(t *testing.T) {
-	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
-	logs := &logsink.Buffer{}
-	d := &downstreamTokens{
-		cache: downstream.New(func(context.Context, string, string, []string) (downstream.Token, error) {
-			<-release
-			return downstream.Token{AccessToken: "t", ExpiresAt: time.Now().Add(time.Hour)}, nil
-		}, []string{graphUserRead}, 0, time.Now),
-		header: "X-Byward-Downstream-Token", resource: "https://graph.microsoft.com",
-		idpToken: func(context.Context, string) (string, time.Time, error) {
-			return "idp-token", time.Now().Add(time.Hour), nil
-		},
-		log: slog.New(slog.NewJSONHandler(logs, nil)),
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	w := httptest.NewRecorder()
-	r := httptest.NewRequestWithContext(ctx, "POST", "/mcp", strings.NewReader(oboToolsCall))
-	d.serve(w, r, resource.Identity{Subject: "tid:oid", GrantID: "g"}, true, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Error("a cancelled request was relayed")
-	}))
-	if w.Body.Len() != 0 || strings.Contains(logs.String(), "no downstream token") {
-		t.Fatalf("answer %q, logs %s: want neither for a client that went away", w.Body, logs)
+// A request that ends while its downstream token is being obtained, reading its grant or waiting
+// for the IdP, was not refused: no refusal is logged or answered as one. An MCP client that went
+// away records 499, never sent; at shutdown (shutdown.WithCancel) the MCP client, still there, gets
+// 503 on a connection that closes, and can retry (#529).
+func TestARequestThatEndsWhileItsDownstreamTokenIsBeingObtainedIsNotARefusal(t *testing.T) {
+	for _, stage := range []struct {
+		name string
+		// idpToken reads the request's grant for its IdP token, as the store does: an ended request
+		// ends the read.
+		idpToken func(ctx context.Context) (string, time.Time, error)
+	}{
+		{"while its grant is read", func(ctx context.Context) (string, time.Time, error) { return "", time.Time{}, ctx.Err() }},
+		{"while the IdP is asked", func(context.Context) (string, time.Time, error) { return "idp-token", time.Now().Add(time.Hour), nil }},
+	} {
+		for _, c := range []struct {
+			name       string
+			start      func() (context.Context, func())
+			status     int
+			body       string
+			connection string
+		}{
+			{"the MCP client went away", func() (context.Context, func()) { return context.WithCancel(context.Background()) }, 499, "", ""},
+			{"the proxy shuts down", func() (context.Context, func()) { return shutdown.WithCancel(context.Background()) }, http.StatusServiceUnavailable, "the proxy is shutting down\n", "close"},
+		} {
+			t.Run(stage.name+", "+c.name, func(t *testing.T) {
+				release := make(chan struct{})
+				t.Cleanup(func() { close(release) })
+				logs := &logsink.Buffer{}
+				d := &downstreamTokens{
+					cache: downstream.New(func(context.Context, string, string, []string) (downstream.Token, error) {
+						<-release
+						return downstream.Token{AccessToken: "t", ExpiresAt: time.Now().Add(time.Hour)}, nil
+					}, []string{graphUserRead}, 0, time.Now),
+					header: "X-Byward-Downstream-Token", resource: "https://graph.microsoft.com",
+					idpToken: func(ctx context.Context, _ string) (string, time.Time, error) { return stage.idpToken(ctx) },
+					log:      slog.New(slog.NewJSONHandler(logs, nil)),
+				}
+				ctx, end := c.start()
+				end()
+				w := httptest.NewRecorder()
+				r := httptest.NewRequestWithContext(ctx, "POST", "/mcp", strings.NewReader(oboToolsCall))
+				d.serve(w, r, resource.Identity{Subject: "tid:oid", GrantID: "g"}, true, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+					t.Error("a request that ended was relayed")
+				}))
+				if w.Code != c.status || w.Body.String() != c.body || w.Header().Get("Connection") != c.connection {
+					t.Fatalf("answer %d %q, Connection %q; want %d %q, %q", w.Code, w.Body, w.Header().Get("Connection"), c.status, c.body, c.connection)
+				}
+				if got := logs.String(); failureLogged(got) {
+					t.Fatalf("logged %s; want nothing at WARN or above for a request that ended", got)
+				}
+			})
+		}
 	}
 }
 

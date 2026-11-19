@@ -170,6 +170,10 @@ _Avoid_: URL filter, safe fetcher
 The **operator**'s TLS certificate and key that byward serves on its public listener when it terminates TLS (`BYWARD_TLS_CERT_FILE`, `BYWARD_TLS_KEY_FILE`); a replaced file is served from the next connection on (ADR-0019 §9 as amended, #183).
 _Avoid_: TLS cert (alone), ingress certificate
 
+**Shutdown**:
+The proxy stopping. A request still waiting on its **upstream** is answered 503 "the proxy is shutting down" on a connection that closes, so its **MCP client** can retry; an open subscription is ended with its completion result. A request whose **MCP client** went away gets nothing and records 499. Neither is logged as a failure (#527, #529; [observability](docs/reference/observability.md)).
+_Avoid_: stop (alone), drain (alone)
+
 ## Flagged ambiguities
 
 - "Proxy" alone is byward. The HTTP proxy the process environment names is the **environment
