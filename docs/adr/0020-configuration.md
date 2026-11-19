@@ -1,6 +1,6 @@
 # ADR-0020: Configuration — flags and env, secrets from files, one registry
 
-- Status: Accepted; amended 2026-11-17 (#458)
+- Status: Accepted; amended 2026-11-17 (#458); amended by ADR-0031 (§4, §6)
 - Date: 2026-11-06
 - Issue: #19 (F18)
 
@@ -36,7 +36,7 @@ variables.
      redirect URIs, secret file; ADR-0008).
 4. **One registry in code** holds every setting: name, env, flag, default, secret or not, version
    introduced, deprecation. It generates the docs reference, `--help` and `--help-config <KEY>`, and
-   drives validation and redaction.
+   drives validation and redaction. _Amended by ADR-0031._
 5. **Strict startup:**
    - an unknown `BYWARD_*` variable is an error with a "did you mean" suggestion;
    - a removed key is an error with a docs link;
@@ -47,7 +47,7 @@ variables.
    _Amended 2026-11-17 (#458):_ a URL setting is shown by its scheme, host and path, with `;…`, `?…` or
    `#…` where path parameters, a query or a fragment are left out, as these can hold an API key; the
    stdio upstream's command is shown by its program and how many arguments follow, as one can be a
-   token. The proxy uses both whole.
+   token. The proxy uses both whole. _Amended by ADR-0031._
 7. **`check --offline`** validates the configuration without network access; `doctor` adds the network
    checks (F20).
 8. **IdP presets by name** (`BYWARD_IDP=entra`). A test keeps the Entra quickstart at five or

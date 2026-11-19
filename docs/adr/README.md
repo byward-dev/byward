@@ -27,7 +27,7 @@ ADR itself, with its issue. The last column lists both.
 | [0017](0017-delegation-obo.md) | Delegation: proxy-side Entra On-Behalf-Of (v0.2, amended) | F14 | ADR-0029; 2026-11-06 (release); 2026-11-07 (slice 4.2); 2026-11-08 (#195, #141) |
 | [0018](0018-hardening.md) | Hardening: Origin and Host checks, bounded HTTP, Rewrite-only proxying | F17 | 2026-11-06 (OAuth rate limits; #102, #103, #105); 2026-11-07 (#167); 2026-11-14 (§13, invariants list moved) |
 | [0019](0019-packaging.md) | Packaging: a signed container image and Linux binaries for servers | F19 | 2026-11-13 (#183, TLS) |
-| [0020](0020-configuration.md) | Configuration: flags and env, secrets from files, one registry | F18 | — |
+| [0020](0020-configuration.md) | Configuration: flags and env, secrets from files, one registry | F18 | 2026-11-17 (#458, §6); ADR-0031 (§4, §6) |
 | [0021](0021-observability.md) | Observability: redacted logs, an audit stream, one request ID, telemetry off by default | F20 | 2026-11-06 |
 | [0022](0022-machine-to-machine.md) | Machine-to-machine: accept Entra app-only tokens, opt-in (v0.2, amended) | F15 | 2026-11-06 (release); 2026-11-07 (#64) |
 | [0023](0023-project-governance.md) | Project governance: 0.y.z with a stability contract, Apache-2.0 §5, disclosed AI help | F22 | — |
@@ -38,6 +38,7 @@ ADR itself, with its issue. The last column lists both.
 | [0028](0028-product-name-byward.md) | The product is named byward | — | — |
 | [0029](0029-stdio-downstream-token-socket.md) | stdio upstreams get downstream tokens from a token socket | F14 | — |
 | [0030](0030-oidc-roles-groups-claims.md) | Configurable roles and groups claims for OIDC IdPs | F9 | — |
+| [0031](0031-setting-shapes.md) | Setting shapes: display and refusal | F18 | — |
 
 ## Writing a new ADR
 
