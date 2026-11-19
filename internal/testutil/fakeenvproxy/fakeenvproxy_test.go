@@ -12,18 +12,26 @@ import (
 	"time"
 )
 
-// onRead makes requestRead signal on the returned channel for the rest of t.
-func onRead(t *testing.T) <-chan struct{} {
+// onRead makes requestRead signal for the rest of t, and returns a wait for the next request read:
+// it fails t if none is read within 5 s, as when the request failed before the proxy read it.
+func onRead(t *testing.T) func() {
 	read := make(chan struct{}, 8)
 	saved := requestRead
 	requestRead = func() { read <- struct{}{} }
 	t.Cleanup(func() { requestRead = saved }) // registered before Start's, so it runs after the proxy has finished
-	return read
+	return func() {
+		t.Helper()
+		select {
+		case <-read:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the request never reached the proxy")
+		}
+	}
 }
 
 // The proxy answers only once every expected request has arrived, then in the order they came.
 func TestTheProxyAnswersOnceEveryRequestHasArrivedInTheOrderTheyCame(t *testing.T) {
-	read := onRead(t)
+	awaitRead := onRead(t)
 	var mu sync.Mutex
 	var answered int
 	p := Start(t, 2, func(c net.Conn) {
@@ -47,7 +55,7 @@ func TestTheProxyAnswersOnceEveryRequestHasArrivedInTheOrderTheyCame(t *testing.
 		answers <- answer{client, string(b)}
 	}
 	go post("first")
-	<-read // the first request is read: the second comes after it
+	awaitRead() // the first request is read: the second comes after it
 	select {
 	case a := <-answers:
 		t.Fatalf("the first request was answered (%q) before the second arrived", a.body)
@@ -91,7 +99,7 @@ func TestEachRequestIsReadWholeBeforeItIsAnswered(t *testing.T) {
 
 // Close stops the listener: a request already read is answered, and a later dial is refused.
 func TestCloseAnswersTheRequestsAlreadyHereAndRefusesNewOnes(t *testing.T) {
-	read := onRead(t)
+	awaitRead := onRead(t)
 	p := Start(t, 2, func(c net.Conn) {
 		_, _ = io.WriteString(c, "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
 	})
@@ -103,7 +111,7 @@ func TestCloseAnswersTheRequestsAlreadyHereAndRefusesNewOnes(t *testing.T) {
 		}
 		res <- err
 	}()
-	<-read
+	awaitRead()
 	p.Close()
 	p.Close() // a second Close is harmless
 	if err := <-res; err != nil {
@@ -126,7 +134,7 @@ func TestTheEndOfTheTestReleasesTheProxy(t *testing.T) {
 		}
 	})
 	t.Run("an answer holding its connection", func(t *testing.T) {
-		read := onRead(t)
+		awaitRead := onRead(t)
 		returned := make(chan struct{})
 		var client net.Conn
 		start := time.Now()
@@ -142,7 +150,7 @@ func TestTheEndOfTheTestReleasesTheProxy(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, _ = io.WriteString(client, "GET / HTTP/1.1\r\nHost: x\r\n\r\n")
-			<-read
+			awaitRead()
 		}) // the client is still open here: only the proxy's own cleanup can release the answer
 		if client != nil {
 			defer func() { _ = client.Close() }()

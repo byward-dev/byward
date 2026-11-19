@@ -763,10 +763,11 @@ func TestAnUpstreamsStrictTransportSecurityNeverReachesTheClient(t *testing.T) {
 var everyProxySetting = []struct {
 	name    string
 	setting func(addr string) string
+	misread bool
 }{
-	{"a misread proxy", func(addr string) string { return addr + "/pw-secret@egress.example:3128" }},
-	{"a well-formed proxy", func(addr string) string { return "http://" + addr }},
-	{"no proxy", nil},
+	{"a misread proxy", func(addr string) string { return addr + "/pw-secret@egress.example:3128" }, true},
+	{"a well-formed proxy", func(addr string) string { return "http://" + addr }, false},
+	{"no proxy", nil, false},
 }
 
 // relayTarget is the relay's upstream URL and proxy for a listener at addr: through the proxy
@@ -872,15 +873,7 @@ func TestABodyOverTheLimitIsAnswered413WhateverTheProxySetting(t *testing.T) {
 // well-formed proxy, or none, it shows ReverseProxy's line, which quotes that address.
 func TestABodyThatBreaksOffLogsOneWarningWithItsRequestsIDAndNeverQuotesAMisreadProxysAddress(t *testing.T) {
 	const requests = 2
-	for _, tc := range []struct {
-		name    string
-		setting func(addr string) string // nil: no proxy, the listener is the upstream
-		misread bool
-	}{
-		{"a misread proxy's address is never quoted", func(addr string) string { return addr + "/pw-secret@egress.example:3128" }, true},
-		{"a well-formed proxy's body copy error is logged", func(addr string) string { return "http://" + addr }, false},
-		{"with no proxy, the upstream's body copy error is logged", nil, false},
-	} {
+	for _, tc := range everyProxySetting {
 		t.Run(tc.name, func(t *testing.T) {
 			// The proxy, or with none the upstream: it answers, then resets mid-body. Every request is in
 			// the relay before any body breaks off, so a relay that shared one error log between requests

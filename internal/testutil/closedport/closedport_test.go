@@ -69,31 +69,65 @@ func TestTheAddressIsBelowTheEphemeralRangeAndRefusesADial(t *testing.T) {
 func TestNoGapBelowTheEphemeralRangeSkipsTheTest(t *testing.T) {
 	saved := ephemeralFirst
 	t.Cleanup(func() { ephemeralFirst = saved })
+	only := "127.0.0.1:" + strconv.Itoa(lowest)
 	for _, tc := range []struct {
-		name    string
-		first   int
-		skipped bool
+		name  string
+		first int
+		want  string // "": skipped
 	}{
-		{"a range that starts at the lowest unprivileged port", lowest, true},
-		{"a range that starts one above it", lowest + 1, false},
+		{"a range that starts at the lowest unprivileged port", lowest, ""},
+		{"a range that starts one above it", lowest + 1, only},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if !tc.skipped {
-				ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(lowest))
-				if err != nil {
-					t.Skipf("port %d is in use on this host: %v", lowest, err)
-				}
-				_ = ln.Close()
+			if tc.want != "" && !refused(only) {
+				t.Skipf("%s is in use on this host", only)
 			}
 			ephemeralFirst = func() (int, error) { return tc.first, nil }
 			var addr string
-			t.Run("Addr", func(t *testing.T) { addr = Addr(t) }) // a skip ends only this subtest
-			if tc.skipped != (addr == "") {
-				t.Fatalf("address %q; want skipped %v", addr, tc.skipped)
-			}
-			if !tc.skipped && addr != "127.0.0.1:"+strconv.Itoa(lowest) {
-				t.Fatalf("address %q; want the only port below the range, %d", addr, lowest)
+			var skipped bool
+			t.Run("Addr", func(t *testing.T) { // a skip ends only this subtest
+				defer func() { skipped = t.Skipped() }()
+				addr = Addr(t)
+			})
+			if addr != tc.want || skipped != (tc.want == "") {
+				t.Fatalf("address %q, skipped %v; want %q", addr, skipped, tc.want)
 			}
 		})
 	}
+}
+
+// A port that a listener on every address holds is never the address, though a loopback bind to it
+// succeeds on macOS: a dial to it would be accepted.
+func TestAPortAWildcardListenerHoldsIsNeverTheAddress(t *testing.T) {
+	other := "127.0.0.1:" + strconv.Itoa(lowest+1)
+	if !refused(other) {
+		t.Skipf("%s is in use on this host", other)
+	}
+	w, err := net.Listen("tcp", ":"+strconv.Itoa(lowest))
+	if err != nil {
+		t.Skipf("port %d is in use on this host: %v", lowest, err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+	saved := ephemeralFirst
+	t.Cleanup(func() { ephemeralFirst = saved })
+	ephemeralFirst = func() (int, error) { return lowest + 2, nil } // ports 1024 and 1025 only
+	for range 20 {
+		if addr := Addr(t); addr != other {
+			t.Fatalf("address %s; want %s, the port no listener holds", addr, other)
+		}
+	}
+}
+
+// refused reports whether addr is free to bind and a dial to it is refused, as Addr requires.
+func refused(addr string) bool {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return false
+	}
+	_ = ln.Close()
+	c, err := net.DialTimeout("tcp", addr, time.Second)
+	if err == nil {
+		_ = c.Close()
+	}
+	return errors.Is(err, syscall.ECONNREFUSED)
 }
