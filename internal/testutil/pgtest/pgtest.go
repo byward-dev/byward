@@ -1,6 +1,7 @@
-// Package pgtest runs PostgreSQL for tests: a container per pinned image, with TLS on and a
-// certificate from a CA made for the test, so tests connect with sslmode=verify-full as production
-// must (#227). It needs Docker and runs only when BYWARD_POSTGRES=1 (`mise run test:postgres`).
+// Package pgtest is PostgreSQL support for tests. ClearEnv keeps the host's PostgreSQL environment
+// out of any test. Start runs a container per pinned image, with TLS on and a certificate from a CA
+// made for the test, so tests connect with sslmode=verify-full as production must (#227); it needs
+// Docker and runs only when BYWARD_POSTGRES=1 (Require, `mise run test:postgres`).
 package pgtest
 
 import (
@@ -20,6 +21,31 @@ import (
 
 	"github.com/byward-dev/byward/internal/testutil/testcert"
 )
+
+// ClearEnv unsets the PG* variables pgx reads from the process, points its password and service
+// files at files that do not exist, and gives the test an empty home directory, whose .postgresql
+// directory pgx reads a root certificate and a client certificate and key from, for the rest of the
+// test. So the developer's environment cannot change what a test dials or how a DSN parses (#509).
+// It also sets DOCKER_CONFIG to the real ~/.docker, unless it is set and not empty, so the docker
+// CLI that Server.Exec runs keeps the host's context under the empty home. A test sets what it
+// needs afterwards. It uses t.Setenv, so the test cannot run in parallel.
+func ClearEnv(t testing.TB) {
+	t.Helper()
+	for _, kv := range os.Environ() {
+		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "PG") {
+			t.Setenv(name, "")    // restored when the test ends
+			_ = os.Unsetenv(name) // pgx keeps an empty PGSSLCERTMODE and refuses it, so unset, not empty
+		}
+	}
+	t.Setenv("PGPASSFILE", filepath.Join(t.TempDir(), "none"))
+	t.Setenv("PGSERVICEFILE", filepath.Join(t.TempDir(), "none"))
+	if os.Getenv("DOCKER_CONFIG") == "" { // Server.Exec's docker CLI finds its context under HOME
+		if home, err := os.UserHomeDir(); err == nil {
+			t.Setenv("DOCKER_CONFIG", filepath.Join(home, ".docker"))
+		}
+	}
+	t.Setenv("HOME", t.TempDir())
+}
 
 // Images are the versions the store is tested on: the oldest it claims (15) and the newest, pinned
 // by digest. Dependabot does not see Go values: keep each at least 14 days old by Docker Hub's

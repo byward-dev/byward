@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/testutil/pgtest"
 )
 
 // canary stands for the secret in secretForms, the 14 forms of a secret in the #485 leak matrix (the
@@ -65,20 +66,13 @@ func TestAnAcceptedValueOfAHidingSettingAppearsInNoCommandsOutput(t *testing.T) 
 		name string
 		args []string
 	}{{"startup", nil}, {"check --offline", []string{"check", "--offline"}}, {"--print-config", []string{"--print-config"}}, {"doctor", []string{"doctor"}}}
-	// As internal/store/postgres's clearPGEnv: pgx reads the PG* variables, the service file and the
-	// password file from the process, not from the settings, so PGSSLMODE=verify-full on the host
-	// would take the DSN form past its refusal and make startup resolve its host. Without them, and
+	// pgx reads the PG* variables, the service file and the password file from the process, not from
+	// the settings, so PGSSLMODE=verify-full on the host would take the DSN form past its refusal and
+	// make startup resolve its host; pgtest.ClearEnv clears them. Once they are cleared, and
 	// with an upstream given by IP, no cell resolves a name or dials beyond loopback: the resolver
 	// below fails the test on a DNS lookup, and TestMain's doctor clients refuse every request.
-	t.Setenv("PGSSLMODE", "verify-full") // as a host may set it; the scrub below must remove it
-	for _, kv := range os.Environ() {
-		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "PG") {
-			t.Setenv(name, "")
-			_ = os.Unsetenv(name)
-		}
-	}
-	t.Setenv("PGPASSFILE", filepath.Join(t.TempDir(), "none"))
-	t.Setenv("PGSERVICEFILE", filepath.Join(t.TempDir(), "none"))
+	t.Setenv("PGSSLMODE", "verify-full") // as a host may set it; ClearEnv must remove it
+	pgtest.ClearEnv(t)
 	// Any name a cell resolves through DNS fails the test: startup looks names up through
 	// net.DefaultResolver (lookupNetIP), as does anything that dials a name, and a name here would make
 	// real network queries on every host. Doctor's own lookups go to TestMain's resolver, which refuses

@@ -30,6 +30,7 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/assertionkey"
 	"github.com/byward-dev/byward/internal/testutil/clientdocs"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
+	"github.com/byward-dev/byward/internal/testutil/pgtest"
 	"github.com/byward-dev/byward/internal/testutil/sealingkey"
 	"github.com/byward-dev/byward/internal/token"
 )
@@ -83,9 +84,11 @@ func stdioAuthEnv(t testing.TB) []string {
 }
 
 // postgresEnv is authEnv on a PostgreSQL store with the given DSN instead of a SQLite state
-// directory, for the public URL https://mcp.example.com/mcp and the given upstream.
+// directory, for the public URL https://mcp.example.com/mcp and the given upstream. It clears the
+// host's PG* environment for the rest of the test, which pgx would otherwise read (#509).
 func postgresEnv(t testing.TB, dsn, upstreamURL string) []string {
 	t.Helper()
+	pgtest.ClearEnv(t)
 	file := filepath.Join(t.TempDir(), "postgres-dsn")
 	if err := os.WriteFile(file, []byte(dsn), 0o600); err != nil {
 		t.Fatal(err)

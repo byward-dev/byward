@@ -9,22 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/byward-dev/byward/internal/testutil/pgtest"
 	"github.com/byward-dev/byward/internal/testutil/testcert"
 )
-
-// clearPGEnv unsets the PG* variables pgx reads, so the developer's environment cannot change a
-// case; a case sets what it needs afterwards.
-func clearPGEnv(t *testing.T) {
-	t.Helper()
-	for _, kv := range os.Environ() {
-		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "PG") {
-			t.Setenv(name, "")
-			_ = os.Unsetenv(name)
-		}
-	}
-	t.Setenv("PGPASSFILE", filepath.Join(t.TempDir(), "none"))
-	t.Setenv("PGSERVICEFILE", filepath.Join(t.TempDir(), "none"))
-}
 
 const dsnBase = "host=db.example port=5432 user=byward dbname=byward "
 
@@ -100,7 +87,7 @@ func TestDevelopmentModeAcceptsEveryWeakerDSN(t *testing.T) {
 // Open applies the rule before connecting: a plaintext DSN outside development mode fails at once,
 // without a server to connect to.
 func TestOpenRefusesPlaintextOutsideDevelopmentMode(t *testing.T) {
-	clearPGEnv(t)
+	pgtest.ClearEnv(t)
 	_, err := Open(context.Background(), Options{DSN: "host=127.0.0.1 port=1 user=byward sslmode=disable"})
 	if err == nil || !strings.Contains(err.Error(), "sslmode=verify-full") {
 		t.Fatalf("err = %v, want the verify-full refusal", err)
@@ -122,7 +109,7 @@ func TestADSNThatDoesNotParseIsNotQuoted(t *testing.T) {
 		{"an unknown sslmode", "host=db.example password=" + secret + " sslmode=sometimes"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			clearPGEnv(t)
+			pgtest.ClearEnv(t)
 			_, err := parseDSN(tc.dsn, false)
 			if err == nil || !strings.Contains(err.Error(), "does not parse") {
 				t.Fatalf("err = %v, want the parse refusal", err)
@@ -133,7 +120,7 @@ func TestADSNThatDoesNotParseIsNotQuoted(t *testing.T) {
 		})
 	}
 	t.Run("a missing CA file is named", func(t *testing.T) {
-		clearPGEnv(t)
+		pgtest.ClearEnv(t)
 		missing := filepath.Join(t.TempDir(), "no-ca.pem")
 		_, err := parseDSN("host=db.example password="+secret+" sslmode=verify-full sslrootcert="+missing, false)
 		if !errors.Is(err, fs.ErrNotExist) || !strings.Contains(err.Error(), missing) || strings.Contains(err.Error(), secret) {
@@ -145,7 +132,7 @@ func TestADSNThatDoesNotParseIsNotQuoted(t *testing.T) {
 // setEnv clears the PG* variables, then sets env.
 func setEnv(t *testing.T, env map[string]string) {
 	t.Helper()
-	clearPGEnv(t)
+	pgtest.ClearEnv(t)
 	for k, v := range env {
 		t.Setenv(k, v)
 	}
@@ -168,7 +155,7 @@ func TestTheTLSModeNamesHowTheConnectionIsProtected(t *testing.T) {
 		{"verify-full", "verify-full"}, {"require", "unverified"}, {"disable", "off"},
 	} {
 		t.Run(tc.sslmode, func(t *testing.T) {
-			clearPGEnv(t)
+			pgtest.ClearEnv(t)
 			cfg, err := parseDSN("host=db.example user=byward sslmode="+tc.sslmode, true)
 			if err != nil {
 				t.Fatal(err)
@@ -183,7 +170,7 @@ func TestTheTLSModeNamesHowTheConnectionIsProtected(t *testing.T) {
 // describe names the database for the startup log, the operator commands' success lines and their
 // refusals: host, port, database and TLS, never the password (L152).
 func TestDescribeNamesTheDatabaseNeverThePassword(t *testing.T) {
-	clearPGEnv(t)
+	pgtest.ClearEnv(t)
 	cfg, err := parseDSN("postgres://byward:s3cret-pw@db.example:6543/byw?sslmode=verify-full", false)
 	if err != nil {
 		t.Fatal(err)

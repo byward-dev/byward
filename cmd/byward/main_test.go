@@ -20,6 +20,7 @@ import (
 	"github.com/byward-dev/byward/internal/store/sqlite"
 	"github.com/byward-dev/byward/internal/testutil/assertionkey"
 	"github.com/byward-dev/byward/internal/testutil/closedport"
+	"github.com/byward-dev/byward/internal/testutil/pgtest"
 	"github.com/byward-dev/byward/internal/testutil/sealingkey"
 	"github.com/byward-dev/byward/internal/tracing"
 )
@@ -426,6 +427,7 @@ func TestHelpListsTheOperatorCommands(t *testing.T) {
 // with exit 2, as it finds a restore by itself; a PostgreSQL store that cannot be reached exits 1.
 // Stderr is pinned whole (outputMatches).
 func TestStoreNewEpochExits2OnMisuseOrSQLiteAnd1WhenPostgreSQLIsUnreachable(t *testing.T) {
+	pgtest.ClearEnv(t) // a host's PG* environment or ~/.postgresql would change how the DSN parses (#509)
 	cases := []struct {
 		name     string
 		args     []string
