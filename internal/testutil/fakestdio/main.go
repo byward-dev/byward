@@ -21,6 +21,12 @@
 // -init=lognerror sends a notifications/message first, then the error; -init=lognhold sends the
 // notification and never answers.
 //
+// Flag -readn=N writes "waiting" to stderr once it listens for SIGUSR1, reads no stdin until it,
+// then reads exactly N bytes, writes "read N" to stderr, and reads nothing more until a second
+// SIGUSR1: a test fills the stdin pipe first, so the process frees exactly N bytes of it. On the
+// second, it reads the rest of stdin to its end and writes "rest COUNT LAST" to stderr, the count
+// of bytes and the last one quoted, so the test can see what was written after the N.
+//
 // Flag -stubborn keeps running after stdin closes and after SIGTERM, printing "stdin closed" and
 // "got SIGTERM" to stdout when they happen. Mode "sleep" (first
 // argument) blocks forever, ignoring SIGTERM; it is the grandchild.
@@ -30,6 +36,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -53,6 +60,9 @@ func main() {
 	}
 	stubborn, mcp := false, false
 	for _, a := range os.Args[1:] {
+		if v, ok := strings.CutPrefix(a, "-readn="); ok {
+			readN(v)
+		}
 		if v, ok := strings.CutPrefix(a, "-version="); ok {
 			version = v
 			continue
@@ -167,6 +177,38 @@ func main() {
 		reply("stdin closed")
 		hang()
 	}
+}
+
+// readN serves -readn: it waits for SIGUSR1, reads exactly n bytes of stdin, says so on stderr,
+// and reads nothing more until a second SIGUSR1; then it reads stdin to its end and writes
+// "rest COUNT LAST" to stderr.
+func readN(n string) {
+	size, err := strconv.Atoi(n)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "bad -readn:", err)
+		os.Exit(2)
+	}
+	usr1 := make(chan os.Signal, 1)
+	signal.Notify(usr1, syscall.SIGUSR1)
+	fmt.Fprintln(os.Stderr, "waiting") // SIGUSR1's default would end the process before this
+	<-usr1
+	if _, err := io.ReadFull(os.Stdin, make([]byte, size)); err != nil {
+		fmt.Fprintln(os.Stderr, "read:", err)
+		os.Exit(2)
+	}
+	fmt.Fprintln(os.Stderr, "read", size)
+	<-usr1
+	rest, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "read:", err)
+		os.Exit(2)
+	}
+	last := ""
+	if len(rest) > 0 {
+		last = string(rest[len(rest)-1:])
+	}
+	fmt.Fprintf(os.Stderr, "rest %d %q\n", len(rest), last)
+	hang()
 }
 
 // hang blocks forever. A bare select{} would let the runtime's deadlock detector end the
