@@ -18,7 +18,7 @@ type shapeSettings struct {
 // shapesOfSettings names each shape and lists, literally, the settings that have it. Giving a
 // setting another shape, or a new setting any shape, is a reviewed change to this table: shown as
 // given above all, since the leak test lets such a setting show what it accepted
-// (TestAnAcceptedValueOfAHidingSettingAppearsInNoCommandsOutput, cmd/byward). A setting given a new
+// (TestNoCommandShowsAHiddenOrARefusedValue, cmd/byward). A setting given a new
 // shape, such as #486's host rule, leaves the as-given list here.
 var shapesOfSettings = []shapeSettings{
 	{"secret", secretShape, []string{
@@ -98,7 +98,7 @@ func TestEachShapeShowsAnAcceptedValueByItsRule(t *testing.T) {
 			continue
 		}
 		delete(examples, c.name)
-		if got := (Value{Setting: Setting{shape: c.shape}, Raw: e.raw}).Display(); got != e.shown {
+		if got := (Value{Setting: Setting{shape: c.shape}, Given: NewOpaque(e.raw)}).Display(); got != e.shown {
 			t.Errorf("the %s shape shows %q as %q, want %q", c.name, e.raw, got, e.shown)
 		}
 	}
@@ -136,7 +136,7 @@ func TestAValueShownAsGivenIsQuotedWhenItHoldsACharacterThatIsNotPrintableOrAByt
 		{"URL list, a printable entry that is not a URL", urlListShape, "https://h.example/x,bad.example", "https://h.example/x, bad.example"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			if got := (Value{Setting: Setting{shape: c.shape}, Raw: c.raw}).Display(); got != c.shown {
+			if got := (Value{Setting: Setting{shape: c.shape}, Given: NewOpaque(c.raw)}).Display(); got != c.shown {
 				t.Errorf("Display of %q = %q, want %q", c.raw, got, c.shown)
 			}
 		})
@@ -152,7 +152,7 @@ func TestAURLListShowsAnEntryWithASchemeAsAURL(t *testing.T) {
 		"https://h.example/a\u2028b,ok.example": "https://h.example/a%E2%80%A8b, ok.example",
 		"https://h.example/x\nBYWARD_DEV=true":  "the value (not shown: it may hold a password)",
 	} {
-		if got := (Value{Setting: Setting{shape: urlListShape}, Raw: raw}).Display(); got != want {
+		if got := (Value{Setting: Setting{shape: urlListShape}, Given: NewOpaque(raw)}).Display(); got != want {
 			t.Errorf("Display of %q = %q, want %q", raw, got, want)
 		}
 	}
@@ -171,7 +171,7 @@ func TestEverySettingShowsAnyValueOnOneLineOfPrintableCharacters(t *testing.T) {
 	}
 	for _, s := range registry {
 		for _, raw := range hostile {
-			got := Value{Setting: s, Raw: raw}.Display()
+			got := Value{Setting: s, Given: NewOpaque(raw)}.Display()
 			if !utf8.ValidString(got) || strings.ContainsFunc(got, func(r rune) bool { return !strconv.IsPrint(r) }) {
 				t.Errorf("%s shows %q as %q: not one line of printable characters", s.Name, raw, got)
 			}
@@ -181,7 +181,7 @@ func TestEverySettingShowsAnyValueOnOneLineOfPrintableCharacters(t *testing.T) {
 
 // A Setting built without a shape, outside the registry, shows a value as Hidden, never whole.
 func TestAValueOfASettingWithoutAShapeIsHidden(t *testing.T) {
-	if got := (Value{Setting: Setting{Name: "not-in-the-registry"}, Raw: "https://u:S3CRET@h.example/x"}).Display(); got != "the value (not shown: it may hold a password)" {
+	if got := (Value{Setting: Setting{Name: "not-in-the-registry"}, Given: NewOpaque("https://u:S3CRET@h.example/x")}).Display(); got != "the value (not shown: it may hold a password)" {
 		t.Errorf("shown as %q, want it hidden", got)
 	}
 	if got := (Value{Setting: Setting{Name: "not-in-the-registry"}}).Display(); got != "" {

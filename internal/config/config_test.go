@@ -92,133 +92,12 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		name, env, want string
 	}{
 		{"required", "BYWARD_PUBLIC_URL=", "BYWARD_PUBLIC_URL is required"},
-		{"trailing slash", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp/", "BYWARD_PUBLIC_URL"},
-		{"no path", "BYWARD_PUBLIC_URL=https://mcp.example.com", "BYWARD_PUBLIC_URL"},
-		{"query", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp?x=1", "must not have a query or fragment"},
-		{"fragment", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp#f", "must not have a query or fragment"},
-		{"http public", "BYWARD_PUBLIC_URL=http://mcp.example.com/mcp", "must use https"},
 		{"http loopback without dev", "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "needs --dev"},
-		// #344: the public host joins the public Host allow-list, so it follows BYWARD_ALLOWED_HOSTS' name rule.
-		{"public host with a trailing dot", "BYWARD_PUBLIC_URL=https://mcp.example.com./mcp", `BYWARD_PUBLIC_URL: "mcp.example.com." is not a host[:port]: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
-		{"public host empty, with a port", "BYWARD_PUBLIC_URL=https://:8443/mcp", `BYWARD_PUBLIC_URL: give a host, e.g. https://mcp.example.com/mcp`},
-		{"public host with a double dot", "BYWARD_PUBLIC_URL=https://a..b/mcp", `BYWARD_PUBLIC_URL: "a..b" is not a host[:port]: a host name`},
-		{"public host with a wildcard", "BYWARD_PUBLIC_URL=https://a*b/mcp", `BYWARD_PUBLIC_URL: "a*b" is not a host[:port]: a host name`},
-		// A browser lower-cases a host name, and byward does not rewrite it: the issuer and the IdP
-		// redirect URI are built from it as written (#472).
-		{"public host name in upper case", "BYWARD_PUBLIC_URL=https://MCP.Example.com/mcp", "BYWARD_PUBLIC_URL: the host name MCP.Example.com is not in the form browsers write it; write it as mcp.example.com"},
-		// #353: the port and the zone follow BYWARD_ALLOWED_HOSTS' rules too.
-		{"public URL with an empty port", "BYWARD_PUBLIC_URL=https://a.example:/mcp", `BYWARD_PUBLIC_URL: "a.example:" is not a host[:port]: give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone`},
-		{"public URL with a port over 65535", "BYWARD_PUBLIC_URL=https://a.example:65536/mcp", `BYWARD_PUBLIC_URL: "a.example:65536" is not a host[:port]`},
-		{"unicode public host with a port", "BYWARD_PUBLIC_URL=https://bücher.example:8443/mcp", `BYWARD_PUBLIC_URL: the host "bücher.example:8443" is not ASCII`},
-		{"public URL with port 0", "BYWARD_PUBLIC_URL=https://a.example:0/mcp", `BYWARD_PUBLIC_URL: "a.example:0" is not a host[:port]`},
-		{"public URL with a leading-zero port", "BYWARD_PUBLIC_URL=https://a.example:0443/mcp", `BYWARD_PUBLIC_URL: "a.example:0443" is not a host[:port]`},
-		{"public URL with an IPv6 zone", "BYWARD_PUBLIC_URL=https://[fe80::1%25eth0]/mcp", `BYWARD_PUBLIC_URL: "[fe80::1%eth0]" is not a host[:port]: give host`},
-		{"public URL with an IPv6 zone and a port", "BYWARD_PUBLIC_URL=https://[fe80::1%25eth0]:8443/mcp", `BYWARD_PUBLIC_URL: "[fe80::1%eth0]:8443" is not a host[:port]`},
-		// Browsers and MCP clients send IDN hosts in ASCII (xn--) form, so a Unicode host never matches.
-		{"unicode public host", "BYWARD_PUBLIC_URL=https://bücher.example/mcp", `BYWARD_PUBLIC_URL: the host "bücher.example" is not ASCII`},
-		{"escaped unicode public host", "BYWARD_PUBLIC_URL=https://b%C3%BCcher.example/mcp", `BYWARD_PUBLIC_URL: the host "bücher.example" is not ASCII`},
-		{"unicode allowed origin", "BYWARD_ALLOWED_ORIGINS=https://bücher.example", `BYWARD_ALLOWED_ORIGINS: "https://bücher.example": the host "bücher.example" is not ASCII`},
-		{"origin with a leading-zero port", "BYWARD_ALLOWED_ORIGINS=https://app.example.com:0443", `BYWARD_ALLOWED_ORIGINS: "https://app.example.com:0443": "app.example.com:0443" is not a host[:port]`},
-		{"origin with a port over 65535", "BYWARD_ALLOWED_ORIGINS=https://app.example.com:99999", `BYWARD_ALLOWED_ORIGINS: "https://app.example.com:99999": "app.example.com:99999" is not a host[:port]`},
-		{"origin with port 0", "BYWARD_ALLOWED_ORIGINS=https://app.example.com:0", `BYWARD_ALLOWED_ORIGINS: "https://app.example.com:0": "app.example.com:0" is not a host[:port]`},
-		{"origin with an empty port", "BYWARD_ALLOWED_ORIGINS=https://app.example.com:", `BYWARD_ALLOWED_ORIGINS: "https://app.example.com:": "app.example.com:" is not a host[:port]`},
-		{"origin with an empty label", "BYWARD_ALLOWED_ORIGINS=https://a..b", `BYWARD_ALLOWED_ORIGINS: "https://a..b": "a..b" is not a host[:port]: a host name`},
-		{"origin with a leading dot", "BYWARD_ALLOWED_ORIGINS=https://.app.example.com", `BYWARD_ALLOWED_ORIGINS: "https://.app.example.com": ".app.example.com" is not a host[:port]: a host name`},
-		{"origin with a trailing dot", "BYWARD_ALLOWED_ORIGINS=https://app.example.com.", `BYWARD_ALLOWED_ORIGINS: "https://app.example.com.": "app.example.com." is not a host[:port]: a host name`},
-		{"origin with an IPv6 zone", "BYWARD_ALLOWED_ORIGINS=https://[fe80::1%25eth0]", `BYWARD_ALLOWED_ORIGINS: "https://[fe80::1%25eth0]": "[fe80::1%eth0]" is not a host[:port]`},
-		{"origin with a shortened IPv4 address", "BYWARD_ALLOWED_ORIGINS=https://127.1", `BYWARD_ALLOWED_ORIGINS: "https://127.1": "127.1" is not an IPv4 address in dotted decimal, the only form browsers send`},
-		{"origin ending in an upper-case hex label", "BYWARD_ALLOWED_ORIGINS=https://192.168.0.0xFF", `BYWARD_ALLOWED_ORIGINS: "https://192.168.0.0xFF": "192.168.0.0xFF" is not an IPv4 address in dotted decimal`},
-		{"origin with an IPv4 part over 255", "BYWARD_ALLOWED_ORIGINS=https://10.0.0.999", `BYWARD_ALLOWED_ORIGINS: "https://10.0.0.999": "10.0.0.999" is not an IPv4 address but ends in a number, so browsers refuse it`},
-		{"origin with user info", "BYWARD_ALLOWED_ORIGINS=https://user@app.example.com", `is not an origin (scheme://host[:port]): it has a user name or password`},
-		{"origin that is not a URL", "BYWARD_ALLOWED_ORIGINS=https://[::1", `BYWARD_ALLOWED_ORIGINS: "https://[::1" is not an origin`},
-		{"origin ending in a hex label of every hex digit", "BYWARD_ALLOWED_ORIGINS=https://a.0x0123456789abcdef", `BYWARD_ALLOWED_ORIGINS: "https://a.0x0123456789abcdef": "a.0x0123456789abcdef" is not an IPv4 address but ends in a number, so browsers refuse it`},
-		{"origin ending in a bare 0", "BYWARD_ALLOWED_ORIGINS=https://a.0", `BYWARD_ALLOWED_ORIGINS: "https://a.0": "a.0" is not an IPv4 address but ends in a number, so browsers refuse it`},
-		{"origin ending in a bare 0x", "BYWARD_ALLOWED_ORIGINS=https://a.0x", `BYWARD_ALLOWED_ORIGINS: "https://a.0x": "a.0x" is not an IPv4 address but ends in a number, so browsers refuse it`},
-		{"origin ending in a label of every digit", "BYWARD_ALLOWED_ORIGINS=https://a.1234567890", `BYWARD_ALLOWED_ORIGINS: "https://a.1234567890": "a.1234567890" is not an IPv4 address but ends in a number, so browsers refuse it`},
-		{"origin with a shortened IPv4 address and a port", "BYWARD_ALLOWED_ORIGINS=http://127.1:8080", `BYWARD_ALLOWED_ORIGINS: "http://127.1:8080": "127.1" is not an IPv4 address in dotted decimal`},
-		{"origin with a hex IPv4 label", "BYWARD_ALLOWED_ORIGINS=https://0x7f.0.0.1", `BYWARD_ALLOWED_ORIGINS: "https://0x7f.0.0.1": "0x7f.0.0.1" is not an IPv4 address in dotted decimal, the only form browsers send`},
-		{"origin with a fragment", "BYWARD_ALLOWED_ORIGINS=https://app.example.com#", `is not an origin (scheme://host[:port]): it has a query or a fragment`},
-		{"origin with an empty query", "BYWARD_ALLOWED_ORIGINS=https://app.example.com?", `is not an origin (scheme://host[:port]): it has a query or a fragment`},
-		{"unicode allowed host", "BYWARD_ALLOWED_HOSTS=bücher.example:8443", `BYWARD_ALLOWED_HOSTS: the host "bücher.example:8443" is not ASCII`},
-		{"origin with path", "BYWARD_ALLOWED_ORIGINS=https://a.example/path", "BYWARD_ALLOWED_ORIGINS"},
-		{"host with path", "BYWARD_ALLOWED_HOSTS=a.example/x", `BYWARD_ALLOWED_HOSTS: "a.example/x" is not a host[:port]: give host`},
-		{"host with space", "BYWARD_ALLOWED_HOSTS=a b", `BYWARD_ALLOWED_HOSTS: "a b" is not a host[:port]: give host`},
-		{"bracketed host name", "BYWARD_ALLOWED_HOSTS=[mcp.internal.example]", `BYWARD_ALLOWED_HOSTS: "[mcp.internal.example]" is not a host[:port]: give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port`},
-		{"bracketed IPv4 with a port", "BYWARD_ALLOWED_HOSTS=[127.0.0.1]:8443", `BYWARD_ALLOWED_HOSTS: "[127.0.0.1]:8443" is not a host[:port]`},
-		{"IPv6 with a zone", "BYWARD_ALLOWED_HOSTS=[fe80::1%eth0]:8443", `BYWARD_ALLOWED_HOSTS: "[fe80::1%eth0]:8443" is not a host[:port]`},
-		{"unclosed bracket", "BYWARD_ALLOWED_HOSTS=[::1", `BYWARD_ALLOWED_HOSTS: "[::1" is not a host[:port]`},
-		{"name with a closing bracket", "BYWARD_ALLOWED_HOSTS=mcp.example]", `BYWARD_ALLOWED_HOSTS: "mcp.example]" is not a host[:port]: give host`},
-		{"name with an opening bracket", "BYWARD_ALLOWED_HOSTS=mcp.example[", `BYWARD_ALLOWED_HOSTS: "mcp.example[" is not a host[:port]: give host`},
-		{"name with user info", "BYWARD_ALLOWED_HOSTS=a@b", "BYWARD_ALLOWED_HOSTS: " + logging.Hidden + ` is not a host[:port]: a host name has only letters, digits and - . _ ~`},
-		{"name with a query", "BYWARD_ALLOWED_HOSTS=a?b", "BYWARD_ALLOWED_HOSTS: " + logging.Hidden + ` is not a host[:port]: a host name`},
-		{"name with a fragment", "BYWARD_ALLOWED_HOSTS=a#b", "BYWARD_ALLOWED_HOSTS: " + logging.Hidden + ` is not a host[:port]: a host name`},
-		{"name with a backslash", "BYWARD_ALLOWED_HOSTS=a\\b", `BYWARD_ALLOWED_HOSTS: "a\\b" is not a host[:port]: a host name`},
-		{"name with a semicolon", "BYWARD_ALLOWED_HOSTS=a;b", `BYWARD_ALLOWED_HOSTS: "a;b" is not a host[:port]: a host name`},
-		{"name with a tab", "BYWARD_ALLOWED_HOSTS=a\tb", `BYWARD_ALLOWED_HOSTS: "a\tb" is not a host[:port]: a host name`},
-		{"name that is a wildcard", "BYWARD_ALLOWED_HOSTS=*", `BYWARD_ALLOWED_HOSTS: "*" is not a host[:port]: a host name`},
-		{"name with a port and a bad character", "BYWARD_ALLOWED_HOSTS=a*b:8080", `BYWARD_ALLOWED_HOSTS: "a*b:8080" is not a host[:port]: a host name`},
-		{"trailing dot", "BYWARD_ALLOWED_HOSTS=mcp.example.com.", `BYWARD_ALLOWED_HOSTS: "mcp.example.com." is not a host[:port]: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
-		{"trailing dot with a port", "BYWARD_ALLOWED_HOSTS=mcp.example.com.:8443", `BYWARD_ALLOWED_HOSTS: "mcp.example.com.:8443" is not a host[:port]: a host name`},
-		{"leading dot", "BYWARD_ALLOWED_HOSTS=.example.com", `BYWARD_ALLOWED_HOSTS: ".example.com" is not a host[:port]: a host name`},
-		{"double dot", "BYWARD_ALLOWED_HOSTS=mcp..example.com:8443", `BYWARD_ALLOWED_HOSTS: "mcp..example.com:8443" is not a host[:port]: a host name`},
-		{"bracket then an empty port", "BYWARD_ALLOWED_HOSTS=[::1]:", `BYWARD_ALLOWED_HOSTS: "[::1]:" is not a host[:port]`},
-		{"bracket then junk", "BYWARD_ALLOWED_HOSTS=[::1]x", `BYWARD_ALLOWED_HOSTS: "[::1]x" is not a host[:port]`},
-		{"bracket then digits without a colon", "BYWARD_ALLOWED_HOSTS=[::1]8080", `BYWARD_ALLOWED_HOSTS: "[::1]8080" is not a host[:port]`},
-		{"bracket then a junk port", "BYWARD_ALLOWED_HOSTS=[::1]:80a", `BYWARD_ALLOWED_HOSTS: "[::1]:80a" is not a host[:port]`},
-		{"host then an empty port", "BYWARD_ALLOWED_HOSTS=localhost:", `BYWARD_ALLOWED_HOSTS: "localhost:" is not a host[:port]`},
-		{"host then a junk port", "BYWARD_ALLOWED_HOSTS=localhost:abc", `BYWARD_ALLOWED_HOSTS: "localhost:abc" is not a host[:port]`},
-		{"host then a signed port", "BYWARD_ALLOWED_HOSTS=localhost:+80", `BYWARD_ALLOWED_HOSTS: "localhost:+80" is not a host[:port]`},
-		{"port 0", "BYWARD_ALLOWED_HOSTS=localhost:0", `BYWARD_ALLOWED_HOSTS: "localhost:0" is not a host[:port]: give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535`},
-		{"port over 65535", "BYWARD_ALLOWED_HOSTS=localhost:65536", `BYWARD_ALLOWED_HOSTS: "localhost:65536" is not a host[:port]`},
-		{"port with a leading zero", "BYWARD_ALLOWED_HOSTS=localhost:080", `BYWARD_ALLOWED_HOSTS: "localhost:080" is not a host[:port]`},
-		{"bracketed port over 65535", "BYWARD_ALLOWED_HOSTS=[::1]:99999", `BYWARD_ALLOWED_HOSTS: "[::1]:99999" is not a host[:port]`},
-		{"a port without a host", "BYWARD_ALLOWED_HOSTS=:8080", `BYWARD_ALLOWED_HOSTS: ":8080" is not a host[:port]`},
-		{"bare IPv6 with a zone", "BYWARD_ALLOWED_HOSTS=fe80::1%eth0", `BYWARD_ALLOWED_HOSTS: "fe80::1%eth0" is not a host[:port]: give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone`},
-		{"many colons, not IPv6", "BYWARD_ALLOWED_HOSTS=a:b:c", `BYWARD_ALLOWED_HOSTS: "a:b:c" is not a host[:port]`},
-		{"listen without port", "BYWARD_LISTEN=8080", "BYWARD_LISTEN"},
 		{"log format", "BYWARD_LOG_FORMAT=xml", "BYWARD_LOG_FORMAT"},
 		{"two scopes", "BYWARD_SCOPE=a b", "BYWARD_SCOPE"},
-		{"documentation not a URL", "BYWARD_RESOURCE_DOCUMENTATION=javascript:x", "BYWARD_RESOURCE_DOCUMENTATION"},
 		{"cimd trusted hosts blank", "BYWARD_CIMD_TRUSTED_HOSTS= ,", "BYWARD_CIMD_TRUSTED_HOSTS is set but lists nothing"},
 		{"cimd allowed hosts blank", "BYWARD_CIMD_ALLOWED_HOSTS=,", "BYWARD_CIMD_ALLOWED_HOSTS is set but lists nothing"},
-		{"cimd host with a scheme", "BYWARD_CIMD_TRUSTED_HOSTS=https://claude.ai", `BYWARD_CIMD_TRUSTED_HOSTS: "https://claude.ai" is not a host name`},
-		{"cimd host with a path", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai/oauth", `BYWARD_CIMD_TRUSTED_HOSTS: "claude.ai/oauth" is not a host name`},
-		{"cimd host with user info", "BYWARD_CIMD_ALLOWED_HOSTS=user@claude.example", "BYWARD_CIMD_ALLOWED_HOSTS: " + logging.Hidden + ` is not a host name`},
-		// #344: names no client ID can carry, refused as in BYWARD_ALLOWED_HOSTS.
-		{"cimd host with a query", "BYWARD_CIMD_ALLOWED_HOSTS=a?b.example", "BYWARD_CIMD_ALLOWED_HOSTS: " + logging.Hidden + ` is not a host name such as claude.ai: a host name has only letters`},
-		{"cimd host with a fragment", "BYWARD_CIMD_TRUSTED_HOSTS=a#b.example", "BYWARD_CIMD_TRUSTED_HOSTS: " + logging.Hidden + ` is not a host name`},
-		{"cimd host with a semicolon", "BYWARD_CIMD_ALLOWED_HOSTS=a;b.example", `BYWARD_CIMD_ALLOWED_HOSTS: "a;b.example" is not a host name`},
-		{"cimd host with a trailing dot", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai.", `BYWARD_CIMD_TRUSTED_HOSTS: "claude.ai." is not a host name such as claude.ai: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
-		{"cimd host with a space", "BYWARD_CIMD_TRUSTED_HOSTS=claude .ai", `"claude .ai" is not a host name`},
-		{"cimd host with a port", "BYWARD_CIMD_ALLOWED_HOSTS=claude.ai:443", `BYWARD_CIMD_ALLOWED_HOSTS: "claude.ai:443" is not a host name`},
-		{"cimd wildcard host", "BYWARD_CIMD_TRUSTED_HOSTS=*.example.com", `"*.example.com" is not a host name`},
-		// The name rule comes first: "a*b" lacks a dot too, but a dot would not fix it.
-		{"cimd host breaking the rule and without a dot", "BYWARD_CIMD_TRUSTED_HOSTS=a*b", `BYWARD_CIMD_TRUSTED_HOSTS: "a*b" is not a host name such as claude.ai: a host name has only letters`},
-		{"cimd single-label host", "BYWARD_CIMD_TRUSTED_HOSTS=localhost", `BYWARD_CIMD_TRUSTED_HOSTS: "localhost" is not a host name such as claude.ai: give a name with at least one dot`},
-		{"cimd unicode host", "BYWARD_CIMD_TRUSTED_HOSTS=bücher.example", `BYWARD_CIMD_TRUSTED_HOSTS: the host "bücher.example" is not ASCII`},
 		{"client denylist blank", "BYWARD_CLIENT_DENYLIST= ,", "BYWARD_CLIENT_DENYLIST is set but lists nothing"},
-		// A host entry follows the CIMD host lists' rule (but may end in a dot), so an entry that could never match a
-		// redirect host fails at load instead of denying nothing.
-		{"client denylist http URL", "BYWARD_CLIENT_DENYLIST=http://app.example/client.json", `BYWARD_CLIENT_DENYLIST: "http://app.example/client.json" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
-		{"client denylist double dot", "BYWARD_CLIENT_DENYLIST=a..b", `BYWARD_CLIENT_DENYLIST: "a..b" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
-		{"client denylist leading dot", "BYWARD_CLIENT_DENYLIST=.bad.example", `BYWARD_CLIENT_DENYLIST: ".bad.example" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
-		{"client denylist two trailing dots", "BYWARD_CLIENT_DENYLIST=app.example..", `BYWARD_CLIENT_DENYLIST: "app.example.." is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
-		{"client denylist inner tab", "BYWARD_CLIENT_DENYLIST=bad\tx.example", `BYWARD_CLIENT_DENYLIST: "bad\tx.example" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
-		{"client denylist percent-encoding", "BYWARD_CLIENT_DENYLIST=%62ad.example", `BYWARD_CLIENT_DENYLIST: "%62ad.example" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
-		{"client denylist brackets", "BYWARD_CLIENT_DENYLIST=[bad].example", `BYWARD_CLIENT_DENYLIST: "[bad].example" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
-		{"client denylist host with a port", "BYWARD_CLIENT_DENYLIST=app.example:443", `BYWARD_CLIENT_DENYLIST: "app.example:443" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
-		{"client denylist single-label host among good ones", "BYWARD_CLIENT_DENYLIST=app.example,localhost", `BYWARD_CLIENT_DENYLIST: "localhost" is neither a CIMD client ID (an https URL) nor a host name such as app.example: give a name with at least one dot`},
-		{"client denylist https without slashes", "BYWARD_CLIENT_DENYLIST=https:app.example", `BYWARD_CLIENT_DENYLIST: "https:app.example" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters`},
-		// A browser reads a host ending in a number as IPv4, which it reaches by other spellings too.
-		{"client denylist IPv4 address", "BYWARD_CLIENT_DENYLIST=203.0.113.5", `BYWARD_CLIENT_DENYLIST: "203.0.113.5" ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match (127.1 and 0x7f000001 are 127.0.0.1), or none at all; deny the app by its CIMD client ID or its redirect host's name`},
-		{"client denylist short IPv4 address", "BYWARD_CLIENT_DENYLIST=127.1", `BYWARD_CLIENT_DENYLIST: "127.1" ends in a number`},
-		{"client denylist IPv4 address with a trailing dot", "BYWARD_CLIENT_DENYLIST=127.1.", `BYWARD_CLIENT_DENYLIST: "127.1." ends in a number`},
-		{"client denylist hex IPv4 address", "BYWARD_CLIENT_DENYLIST=127.0x1", `BYWARD_CLIENT_DENYLIST: "127.0x1" ends in a number`},
-		{"client denylist host ending in an empty hex number", "BYWARD_CLIENT_DENYLIST=app.0x", `BYWARD_CLIENT_DENYLIST: "app.0x" ends in a number`},
-		{"client denylist host ending in every hex digit", "BYWARD_CLIENT_DENYLIST=a.0X0123456789abcdefABCDEF", `BYWARD_CLIENT_DENYLIST: "a.0X0123456789abcdefABCDEF" ends in a number`},
-		{"client denylist host ending in every decimal digit", "BYWARD_CLIENT_DENYLIST=a.0123456789", `BYWARD_CLIENT_DENYLIST: "a.0123456789" ends in a number`},
-		{"client denylist unicode host with a trailing dot", "BYWARD_CLIENT_DENYLIST=bücher.example.", `BYWARD_CLIENT_DENYLIST: the host "bücher.example." is not ASCII`},
-		{"client denylist unicode host", "BYWARD_CLIENT_DENYLIST=bücher.example", `BYWARD_CLIENT_DENYLIST: the host "bücher.example" is not ASCII; give its ASCII (xn--) form`},
 		{"gate tenants blank", "BYWARD_GATE_TENANTS=,", "BYWARD_GATE_TENANTS is set but lists nothing"},
 		{"gate roles blank", "BYWARD_GATE_ROLES= ,,", "BYWARD_GATE_ROLES is set but lists nothing"},
 		{"gate groups blank", "BYWARD_GATE_GROUPS= ", "BYWARD_GATE_GROUPS is set but lists nothing"},
@@ -235,6 +114,160 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 			_, err := load(t, nil, c.env)
 			if !isConfigError(err) || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("want a config error containing %q, got %v", c.want, err)
+			}
+		})
+	}
+}
+
+// The refusals of the URL and host settings, pinned whole (ADR-0031 §1): each names its setting and
+// why, and a value refused for its form by its place and length, never the value. The texts below are this test's own literals,
+// never the code's constants, so a changed message fails here.
+const (
+	wantPublicURL     = `BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value `
+	wantHosts         = `BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 `
+	wantOrigins       = `BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry 1 of 1 `
+	wantDenylist      = `BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 1 of 1 `
+	wantTrusted       = `BYWARD_CIMD_TRUSTED_HOSTS: want a host name such as claude.ai; got entry 1 of 1 `
+	wantAllowed       = `BYWARD_CIMD_ALLOWED_HOSTS: want a host name such as claude.ai; got entry 1 of 1 `
+	ruleHostName      = `a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`
+	rulePort          = `has a port that is not a number from 1 to 65535 without a sign or leading zero`
+	ruleForms         = `give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone`
+	ruleNotASCII      = `holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send`
+	ruleDenylistIPv4  = `ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match (127.1 and 0x7f000001 are 127.0.0.1), or none at all; deny the app by its CIMD client ID or its redirect host's name`
+	ruleEndsInNumber  = `is not an IPv4 address but ends in a number, so browsers refuse it`
+	ruleDottedDecimal = `is not an IPv4 address in dotted decimal, the only form browsers send; write it as `
+)
+
+func TestAURLOrHostRefusedForItsFormSaysWhereAndWhyNeverWhat(t *testing.T) {
+	cases := []struct {
+		name, env, want string
+	}{
+		{"trailing slash", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp/", `BYWARD_PUBLIC_URL: want the MCP endpoint's path without a trailing slash, e.g. https://mcp.example.com/mcp; got a path that is empty or ends in /: give the endpoint's path, without the trailing slash`},
+		{"no path", "BYWARD_PUBLIC_URL=https://mcp.example.com", `BYWARD_PUBLIC_URL: want the MCP endpoint's path without a trailing slash, e.g. https://mcp.example.com/mcp; got a path that is empty or ends in /: give the endpoint's path, without the trailing slash`},
+		{"origin with path", "BYWARD_ALLOWED_ORIGINS=https://a.example/path", wantOrigins + `(22 characters, not shown): it has a path`},
+		{"documentation not a URL", "BYWARD_RESOURCE_DOCUMENTATION=javascript:x", `BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL; got a value (12 characters, not shown): it has a scheme other than http or https`},
+		{"query", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp?x=1", `BYWARD_PUBLIC_URL: want a URL without a query or fragment; got a query or fragment, not shown: remove it`},
+		{"fragment", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp#f", `BYWARD_PUBLIC_URL: want a URL without a query or fragment; got a query or fragment, not shown: remove it`},
+		{"http public", "BYWARD_PUBLIC_URL=http://mcp.example.com/mcp", `BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev); got http: give https, or a loopback host`},
+		// #344: the public host joins the public Host allow-list, so it follows BYWARD_ALLOWED_HOSTS' name rule.
+		{"public host with a trailing dot", "BYWARD_PUBLIC_URL=https://mcp.example.com./mcp", wantPublicURL + `(28 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
+		{"public host empty, with a port", "BYWARD_PUBLIC_URL=https://:8443/mcp", wantPublicURL + `(17 characters, not shown): it has no host before its port`},
+		{"public host with a double dot", "BYWARD_PUBLIC_URL=https://a..b/mcp", wantPublicURL + `(16 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
+		{"public host with a wildcard", "BYWARD_PUBLIC_URL=https://a*b/mcp", wantPublicURL + `(15 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
+		// A browser lower-cases a host name, and byward does not rewrite it: the issuer and the IdP
+		// redirect URI are built from it as written (#472).
+		{"public host name in upper case", "BYWARD_PUBLIC_URL=https://MCP.Example.com/mcp", `BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it; got a value (27 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do`},
+		// #353: the port and the zone follow BYWARD_ALLOWED_HOSTS' rules too.
+		{"public URL with an empty port", "BYWARD_PUBLIC_URL=https://a.example:/mcp", wantPublicURL + `(22 characters, not shown): its host:port ` + rulePort},
+		{"public URL with a port over 65535", "BYWARD_PUBLIC_URL=https://a.example:65536/mcp", wantPublicURL + `(27 characters, not shown): its host:port ` + rulePort},
+		{"unicode public host with a port", "BYWARD_PUBLIC_URL=https://bücher.example:8443/mcp", wantPublicURL + `(31 characters, not shown): its host:port ` + ruleNotASCII},
+		{"public URL with port 0", "BYWARD_PUBLIC_URL=https://a.example:0/mcp", wantPublicURL + `(23 characters, not shown): its host:port ` + rulePort},
+		{"public URL with a leading-zero port", "BYWARD_PUBLIC_URL=https://a.example:0443/mcp", wantPublicURL + `(26 characters, not shown): its host:port ` + rulePort},
+		{"public URL with an IPv6 zone", "BYWARD_PUBLIC_URL=https://[fe80::1%25eth0]/mcp", wantPublicURL + `(28 characters, not shown): its host:port is not an IPv6 address without a zone; ` + ruleForms},
+		{"public URL with an IPv6 zone and a port", "BYWARD_PUBLIC_URL=https://[fe80::1%25eth0]:8443/mcp", wantPublicURL + `(33 characters, not shown): its host:port is not an IPv6 address without a zone; ` + ruleForms},
+		// Browsers and MCP clients send IDN hosts in ASCII (xn--) form, so a Unicode host never matches.
+		{"unicode public host", "BYWARD_PUBLIC_URL=https://bücher.example/mcp", wantPublicURL + `(26 characters, not shown): its host:port ` + ruleNotASCII},
+		{"escaped unicode public host", "BYWARD_PUBLIC_URL=https://b%C3%BCcher.example/mcp", wantPublicURL + `(31 characters, not shown): its host:port ` + ruleNotASCII},
+		{"unicode allowed origin", "BYWARD_ALLOWED_ORIGINS=https://bücher.example", wantOrigins + `(22 characters, not shown): its host:port ` + ruleNotASCII},
+		{"origin with a leading-zero port", "BYWARD_ALLOWED_ORIGINS=https://app.example.com:0443", wantOrigins + `(28 characters, not shown): its host:port ` + rulePort},
+		{"origin with a port over 65535", "BYWARD_ALLOWED_ORIGINS=https://app.example.com:99999", wantOrigins + `(29 characters, not shown): its host:port ` + rulePort},
+		{"origin with port 0", "BYWARD_ALLOWED_ORIGINS=https://app.example.com:0", wantOrigins + `(25 characters, not shown): its host:port ` + rulePort},
+		{"origin with an empty port", "BYWARD_ALLOWED_ORIGINS=https://app.example.com:", wantOrigins + `(24 characters, not shown): its host:port ` + rulePort},
+		{"origin with an empty label", "BYWARD_ALLOWED_ORIGINS=https://a..b", wantOrigins + `(12 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
+		{"origin with a leading dot", "BYWARD_ALLOWED_ORIGINS=https://.app.example.com", wantOrigins + `(24 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
+		{"origin with a trailing dot", "BYWARD_ALLOWED_ORIGINS=https://app.example.com.", wantOrigins + `(24 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
+		{"origin with an IPv6 zone", "BYWARD_ALLOWED_ORIGINS=https://[fe80::1%25eth0]", wantOrigins + `(24 characters, not shown): its host:port is not an IPv6 address without a zone; ` + ruleForms},
+		{"origin with a shortened IPv4 address", "BYWARD_ALLOWED_ORIGINS=https://127.1", wantOrigins + `(13 characters, not shown): its host ` + ruleDottedDecimal + `127.0.0.1`},
+		{"origin ending in an upper-case hex label", "BYWARD_ALLOWED_ORIGINS=https://192.168.0.0xFF", wantOrigins + `(22 characters, not shown): its host ` + ruleDottedDecimal + `192.168.0.255`},
+		{"origin with an IPv4 part over 255", "BYWARD_ALLOWED_ORIGINS=https://10.0.0.999", wantOrigins + `(18 characters, not shown): its host ` + ruleEndsInNumber},
+		{"origin with user info", "BYWARD_ALLOWED_ORIGINS=https://user@app.example.com", wantOrigins + `(28 characters, not shown): it holds a user name or password`},
+		{"origin that is not a URL", "BYWARD_ALLOWED_ORIGINS=https://[::1", wantOrigins + `(12 characters, not shown): it does not parse as a URL`},
+		{"origin ending in a hex label of every hex digit", "BYWARD_ALLOWED_ORIGINS=https://a.0x0123456789abcdef", wantOrigins + `(28 characters, not shown): its host ` + ruleEndsInNumber},
+		{"origin ending in a bare 0", "BYWARD_ALLOWED_ORIGINS=https://a.0", wantOrigins + `(11 characters, not shown): its host ` + ruleEndsInNumber},
+		{"origin ending in a bare 0x", "BYWARD_ALLOWED_ORIGINS=https://a.0x", wantOrigins + `(12 characters, not shown): its host ` + ruleEndsInNumber},
+		{"origin ending in a label of every digit", "BYWARD_ALLOWED_ORIGINS=https://a.1234567890", wantOrigins + `(20 characters, not shown): its host ` + ruleEndsInNumber},
+		{"origin with a shortened IPv4 address and a port", "BYWARD_ALLOWED_ORIGINS=http://127.1:8080", wantOrigins + `(17 characters, not shown): its host ` + ruleDottedDecimal + `127.0.0.1`},
+		{"origin with a hex IPv4 label", "BYWARD_ALLOWED_ORIGINS=https://0x7f.0.0.1", wantOrigins + `(18 characters, not shown): its host ` + ruleDottedDecimal + `127.0.0.1`},
+		{"origin with a fragment", "BYWARD_ALLOWED_ORIGINS=https://app.example.com#", wantOrigins + `(24 characters, not shown): it has a query or a fragment`},
+		{"origin with an empty query", "BYWARD_ALLOWED_ORIGINS=https://app.example.com?", wantOrigins + `(24 characters, not shown): it has a query or a fragment`},
+		{"unicode allowed host", "BYWARD_ALLOWED_HOSTS=bücher.example:8443", wantHosts + `(19 characters, not shown): it ` + ruleNotASCII},
+		{"host with path", "BYWARD_ALLOWED_HOSTS=a.example/x", wantHosts + `(11 characters, not shown): it holds a "/" or a space; ` + ruleForms},
+		{"host with space", "BYWARD_ALLOWED_HOSTS=a b", wantHosts + `(3 characters, not shown): it holds a "/" or a space; ` + ruleForms},
+		{"bracketed host name", "BYWARD_ALLOWED_HOSTS=[mcp.internal.example]", wantHosts + `(22 characters, not shown): it is not an IPv6 address without a zone; ` + ruleForms},
+		{"bracketed IPv4 with a port", "BYWARD_ALLOWED_HOSTS=[127.0.0.1]:8443", wantHosts + `(16 characters, not shown): it is not an IPv6 address without a zone; ` + ruleForms},
+		{"IPv6 with a zone", "BYWARD_ALLOWED_HOSTS=[fe80::1%eth0]:8443", wantHosts + `(19 characters, not shown): it is not an IPv6 address without a zone; ` + ruleForms},
+		{"unclosed bracket", "BYWARD_ALLOWED_HOSTS=[::1", wantHosts + `(4 characters, not shown): it has brackets that do not enclose an IPv6 address alone; ` + ruleForms},
+		{"name with a closing bracket", "BYWARD_ALLOWED_HOSTS=mcp.example]", wantHosts + `(12 characters, not shown): it has brackets that do not enclose an IPv6 address alone; ` + ruleForms},
+		{"name with an opening bracket", "BYWARD_ALLOWED_HOSTS=mcp.example[", wantHosts + `(12 characters, not shown): it has brackets that do not enclose an IPv6 address alone; ` + ruleForms},
+		{"name with user info", "BYWARD_ALLOWED_HOSTS=a@b", wantHosts + `(3 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"name with a query", "BYWARD_ALLOWED_HOSTS=a?b", wantHosts + `(3 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"name with a fragment", "BYWARD_ALLOWED_HOSTS=a#b", wantHosts + `(3 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"name with a backslash", "BYWARD_ALLOWED_HOSTS=a\\b", wantHosts + `(3 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"name with a semicolon", "BYWARD_ALLOWED_HOSTS=a;b", wantHosts + `(3 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"name with a tab", "BYWARD_ALLOWED_HOSTS=a\tb", wantHosts + `(3 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"name that is a wildcard", "BYWARD_ALLOWED_HOSTS=*", wantHosts + `(1 character, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"name with a port and a bad character", "BYWARD_ALLOWED_HOSTS=a*b:8080", wantHosts + `(8 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"trailing dot", "BYWARD_ALLOWED_HOSTS=mcp.example.com.", wantHosts + `(16 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"trailing dot with a port", "BYWARD_ALLOWED_HOSTS=mcp.example.com.:8443", wantHosts + `(21 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"leading dot", "BYWARD_ALLOWED_HOSTS=.example.com", wantHosts + `(12 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"double dot", "BYWARD_ALLOWED_HOSTS=mcp..example.com:8443", wantHosts + `(21 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"bracket then an empty port", "BYWARD_ALLOWED_HOSTS=[::1]:", wantHosts + `(6 characters, not shown): it ` + rulePort},
+		{"bracket then junk", "BYWARD_ALLOWED_HOSTS=[::1]x", wantHosts + `(6 characters, not shown): it has brackets that do not enclose an IPv6 address alone; ` + ruleForms},
+		{"bracket then digits without a colon", "BYWARD_ALLOWED_HOSTS=[::1]8080", wantHosts + `(9 characters, not shown): it has brackets that do not enclose an IPv6 address alone; ` + ruleForms},
+		{"bracket then a junk port", "BYWARD_ALLOWED_HOSTS=[::1]:80a", wantHosts + `(9 characters, not shown): it ` + rulePort},
+		{"host then an empty port", "BYWARD_ALLOWED_HOSTS=localhost:", wantHosts + `(10 characters, not shown): it ` + rulePort},
+		{"host then a junk port", "BYWARD_ALLOWED_HOSTS=localhost:abc", wantHosts + `(13 characters, not shown): it ` + rulePort},
+		{"host then a signed port", "BYWARD_ALLOWED_HOSTS=localhost:+80", wantHosts + `(13 characters, not shown): it ` + rulePort},
+		{"port 0", "BYWARD_ALLOWED_HOSTS=localhost:0", wantHosts + `(11 characters, not shown): it ` + rulePort},
+		{"port over 65535", "BYWARD_ALLOWED_HOSTS=localhost:65536", wantHosts + `(15 characters, not shown): it ` + rulePort},
+		{"port with a leading zero", "BYWARD_ALLOWED_HOSTS=localhost:080", wantHosts + `(13 characters, not shown): it ` + rulePort},
+		{"bracketed port over 65535", "BYWARD_ALLOWED_HOSTS=[::1]:99999", wantHosts + `(11 characters, not shown): it ` + rulePort},
+		{"a port without a host", "BYWARD_ALLOWED_HOSTS=:8080", wantHosts + `(5 characters, not shown): it has no host before its ":"; ` + ruleForms},
+		{"bare IPv6 with a zone", "BYWARD_ALLOWED_HOSTS=fe80::1%eth0", wantHosts + `(12 characters, not shown): it is not an IPv6 address without a zone; ` + ruleForms},
+		{"many colons, not IPv6", "BYWARD_ALLOWED_HOSTS=a:b:c", wantHosts + `(5 characters, not shown): it is not an IPv6 address without a zone; ` + ruleForms},
+		{"cimd host with a scheme", "BYWARD_CIMD_TRUSTED_HOSTS=https://claude.ai", wantTrusted + `(17 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"cimd host with a path", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai/oauth", wantTrusted + `(15 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"cimd host with user info", "BYWARD_CIMD_ALLOWED_HOSTS=user@claude.example", wantAllowed + `(19 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		// #344: names no client ID can carry, refused as in BYWARD_ALLOWED_HOSTS.
+		{"cimd host with a query", "BYWARD_CIMD_ALLOWED_HOSTS=a?b.example", wantAllowed + `(11 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"cimd host with a fragment", "BYWARD_CIMD_TRUSTED_HOSTS=a#b.example", wantTrusted + `(11 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"cimd host with a semicolon", "BYWARD_CIMD_ALLOWED_HOSTS=a;b.example", wantAllowed + `(11 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"cimd host with a trailing dot", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai.", wantTrusted + `(10 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"cimd host with a space", "BYWARD_CIMD_TRUSTED_HOSTS=claude .ai", wantTrusted + `(10 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"cimd host with a port", "BYWARD_CIMD_ALLOWED_HOSTS=claude.ai:443", wantAllowed + `(13 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"cimd wildcard host", "BYWARD_CIMD_TRUSTED_HOSTS=*.example.com", wantTrusted + `(13 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		// The name rule comes first: "a*b" lacks a dot too, but a dot would not fix it.
+		{"cimd host breaking the rule and without a dot", "BYWARD_CIMD_TRUSTED_HOSTS=a*b", wantTrusted + `(3 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"cimd single-label host", "BYWARD_CIMD_TRUSTED_HOSTS=localhost", wantTrusted + `(9 characters, not shown): it has no dot; give a name with at least one dot`},
+		{"cimd unicode host", "BYWARD_CIMD_TRUSTED_HOSTS=bücher.example", wantTrusted + `(14 characters, not shown): it ` + ruleNotASCII},
+		// A host entry follows the CIMD host lists' rule (but may end in a dot), so an entry that could never match a
+		// redirect host fails at load instead of denying nothing.
+		{"client denylist http URL", "BYWARD_CLIENT_DENYLIST=http://app.example/client.json", wantDenylist + `(30 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"client denylist double dot", "BYWARD_CLIENT_DENYLIST=a..b", wantDenylist + `(4 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"client denylist leading dot", "BYWARD_CLIENT_DENYLIST=.bad.example", wantDenylist + `(12 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"client denylist two trailing dots", "BYWARD_CLIENT_DENYLIST=app.example..", wantDenylist + `(13 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"client denylist inner tab", "BYWARD_CLIENT_DENYLIST=bad\tx.example", wantDenylist + `(13 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"client denylist percent-encoding", "BYWARD_CLIENT_DENYLIST=%62ad.example", wantDenylist + `(13 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"client denylist brackets", "BYWARD_CLIENT_DENYLIST=[bad].example", wantDenylist + `(13 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"client denylist host with a port", "BYWARD_CLIENT_DENYLIST=app.example:443", wantDenylist + `(15 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"client denylist single-label host among good ones", "BYWARD_CLIENT_DENYLIST=app.example,localhost", `BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 2 of 2 (9 characters, not shown): it has no dot; give a name with at least one dot`},
+		{"client denylist https without slashes", "BYWARD_CLIENT_DENYLIST=https:app.example", wantDenylist + `(17 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		// A browser reads a host ending in a number as IPv4, which it reaches by other spellings too.
+		{"client denylist IPv4 address", "BYWARD_CLIENT_DENYLIST=203.0.113.5", wantDenylist + `(11 characters, not shown): it ` + ruleDenylistIPv4},
+		{"client denylist short IPv4 address", "BYWARD_CLIENT_DENYLIST=127.1", wantDenylist + `(5 characters, not shown): it ` + ruleDenylistIPv4},
+		{"client denylist IPv4 address with a trailing dot", "BYWARD_CLIENT_DENYLIST=127.1.", wantDenylist + `(6 characters, not shown): it ` + ruleDenylistIPv4},
+		{"client denylist hex IPv4 address", "BYWARD_CLIENT_DENYLIST=127.0x1", wantDenylist + `(7 characters, not shown): it ` + ruleDenylistIPv4},
+		{"client denylist host ending in an empty hex number", "BYWARD_CLIENT_DENYLIST=app.0x", wantDenylist + `(6 characters, not shown): it ` + ruleDenylistIPv4},
+		{"client denylist host ending in every hex digit", "BYWARD_CLIENT_DENYLIST=a.0X0123456789abcdefABCDEF", wantDenylist + `(26 characters, not shown): it ` + ruleDenylistIPv4},
+		{"client denylist host ending in every decimal digit", "BYWARD_CLIENT_DENYLIST=a.0123456789", wantDenylist + `(12 characters, not shown): it ` + ruleDenylistIPv4},
+		{"client denylist unicode host with a trailing dot", "BYWARD_CLIENT_DENYLIST=bücher.example.", wantDenylist + `(15 characters, not shown): it ` + ruleNotASCII},
+		{"client denylist unicode host", "BYWARD_CLIENT_DENYLIST=bücher.example", wantDenylist + `(14 characters, not shown): it ` + ruleNotASCII},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := load(t, nil, c.env)
+			if !isConfigError(err) || err.Error() != c.want {
+				t.Fatalf("want the config error %q, got %v", c.want, err)
 			}
 		})
 	}
@@ -381,7 +414,7 @@ func TestListsAreNormalized(t *testing.T) {
 // BYWARD_ALLOWED_ORIGINS holds origins as browsers send them (RFC 6454 §6.2), so each entry can match a
 // browser's Origin header: lower case, the scheme's default port dropped as the public URL's origin
 // drops it, and an IPv6 address as the WHATWG URL serializer writes it. Entries no browser could send
-// are refused (TestInvalidSettingsAreRejectedNamingTheSetting).
+// are refused (TestAURLOrHostRefusedForItsFormSaysWhereAndWhyNeverWhat).
 func TestAllowedOriginsAreStoredAsBrowsersSendThem(t *testing.T) {
 	for given, stored := range map[string]string{
 		"https://App.example.com:443":   "https://app.example.com",
@@ -450,15 +483,15 @@ func TestSecretFromEnvFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := v.Effective()[0]
-	if got.Raw != "s3cret" || got.Source != SourceFile || got.Display() != "<redacted>" {
+	if got.Given.raw() != "s3cret" || got.Source != SourceFile || got.Display() != "<redacted>" {
 		t.Fatalf("got %+v display=%q", got, got.Display())
 	}
 }
 
 func TestSecretFromFlagFileBeatsEnvFile(t *testing.T) {
 	v, err := resolve(secretReg, []string{"--client-secret-file", "/a"}, []string{"BYWARD_CLIENT_SECRET_FILE=/b"}, files(map[string]string{"/a": "A", "/b": "B"}), nil)
-	if err != nil || v.get("client-secret") != "A" {
-		t.Fatalf("got %q err=%v", v.get("client-secret"), err)
+	if err != nil || v.byKey["client-secret"].Given.raw() != "A" {
+		t.Fatalf("got %q err=%v", v.byKey["client-secret"].Given.raw(), err)
 	}
 }
 
@@ -702,18 +735,18 @@ func TestTrustedProxiesTakeCIDRsAndAddresses(t *testing.T) {
 		t.Errorf("default trusted proxies = %v (err %v), want none", cfg.TrustedProxies, err)
 	}
 	for _, tc := range []struct{ name, value, want string }{
-		{"a hostname", "proxy.internal", `BYWARD_TRUSTED_PROXIES: "proxy.internal" is not a CIDR or an IP address`},
-		{"a mapped /8", "::ffff:10.0.0.0/8", `BYWARD_TRUSTED_PROXIES: "::ffff:10.0.0.0/8" is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)`},
-		{"a mapped /95", "::ffff:10.0.0.0/95", `BYWARD_TRUSTED_PROXIES: "::ffff:10.0.0.0/95" is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)`},
+		{"a hostname", "proxy.internal", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1 (14 characters, not shown): it is neither a CIDR nor an IP address`},
+		{"a mapped /8, shown as netip writes it", "0:0:0:0:0:FFFF:10.0.0.0/8", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, ::ffff:10.0.0.0/8: it is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)`},
+		{"a mapped /95", "::ffff:10.0.0.0/95", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, ::ffff:10.0.0.0/95: it is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)`},
 		// Parsed as an address, everything after % is the zone, the prefix length included.
-		{"a zoned prefix", "2001:db8::1%eth0/64", `BYWARD_TRUSTED_PROXIES: "2001:db8::1%eth0/64" has an IPv6 zone: give the proxy's routable address or CIDR, without a zone`},
-		{"a zoned address", "2001:db8::1%eth0", `BYWARD_TRUSTED_PROXIES: "2001:db8::1%eth0" has an IPv6 zone: give the proxy's routable address or CIDR, without a zone`},
-		{"a zoned mapped address", "::ffff:10.0.0.1%eth0", `BYWARD_TRUSTED_PROXIES: "::ffff:10.0.0.1%eth0" has an IPv6 zone: give the proxy's routable address or CIDR, without a zone`},
-		{"a zoned link-local prefix", "fe80::1%eth0/64", `BYWARD_TRUSTED_PROXIES: "fe80::1%eth0/64" is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
-		{"a zoned link-local address", "fe80::1%eth0", `BYWARD_TRUSTED_PROXIES: "fe80::1%eth0" is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
-		{"a link-local address", "fe80::1", `BYWARD_TRUSTED_PROXIES: "fe80::1" is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
-		{"the link-local prefix", "fe80::/10", `BYWARD_TRUSTED_PROXIES: "fe80::/10" is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
-		{"the last link-local address", "febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff", `BYWARD_TRUSTED_PROXIES: "febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff" is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
+		{"a zoned prefix", "2001:db8::1%eth0/64", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, 2001:db8::1: it has an IPv6 zone, not shown: give the proxy's routable address or CIDR, without a zone`},
+		{"a zoned address", "2001:db8::1%eth0", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, 2001:db8::1: it has an IPv6 zone, not shown: give the proxy's routable address or CIDR, without a zone`},
+		{"a zoned mapped address", "::ffff:10.0.0.1%eth0", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, 10.0.0.1: it has an IPv6 zone, not shown: give the proxy's routable address or CIDR, without a zone`},
+		{"a zoned link-local prefix", "fe80::1%eth0/64", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, fe80::1/128: it is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
+		{"a zoned link-local address", "fe80::1%eth0", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, fe80::1/128: it is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
+		{"a link-local address", "fe80::1", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, fe80::1/128: it is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
+		{"the link-local prefix", "fe80::/10", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, fe80::/10: it is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
+		{"the last link-local address", "febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128: it is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES="+tc.value), nil); err == nil || err.Error() != tc.want {
@@ -932,7 +965,7 @@ func TestAnAllowedHostNameRefusesEveryCharacterAHostNameCannotHave(t *testing.T)
 		}
 		for _, entry := range []string{"a" + string(c) + "b", "a" + string(c) + "b:8443"} {
 			_, err := load(t, nil, "BYWARD_ALLOWED_HOSTS="+entry)
-			if err == nil || !strings.Contains(err.Error(), "is not a host[:port]: a host name") {
+			if err == nil || !strings.Contains(err.Error(), "): it breaks the host name rule: "+ruleHostName) {
 				t.Errorf("BYWARD_ALLOWED_HOSTS=%s: %v, want it refused as a host name", entry, err)
 			}
 		}

@@ -98,9 +98,9 @@ func TestAnOIDCIdPWithMissingOrConflictingSettingsRefusesToStart(t *testing.T) {
 		"an unknown key algorithm":        {withAKey("BYWARD_OIDC_CLIENT_KEY_ALG=RS384"), `BYWARD_OIDC_CLIENT_KEY_ALG: want PS256 or RS256 (an RSA key) or ES256 (an EC P-256 key), got "RS384"`},
 		"a key algorithm in lower case":   {withAKey("BYWARD_OIDC_CLIENT_KEY_ALG=rs256"), `BYWARD_OIDC_CLIENT_KEY_ALG: want PS256 or RS256 (an RSA key) or ES256 (an EC P-256 key), got "rs256"`},
 		"blank scopes":                    {with("BYWARD_OIDC_SCOPES= ,"), "BYWARD_OIDC_SCOPES is set but lists nothing"},
-		"a scope with a quote":            {with(`BYWARD_OIDC_SCOPES=a"b`), `BYWARD_OIDC_SCOPES: "a\"b" is not a scope`},
-		"a scope with a backslash":        {with(`BYWARD_OIDC_SCOPES=a\b`), `BYWARD_OIDC_SCOPES: "a\\b" is not a scope`},
-		"a scope with a space":            {with("BYWARD_OIDC_SCOPES=a b"), `BYWARD_OIDC_SCOPES: "a b" is not a scope`},
+		"a scope with a quote":            {with(`BYWARD_OIDC_SCOPES=a"b`), `BYWARD_OIDC_SCOPES: want a scope such as openid or email; got entry 1 of 1 (3 characters, not shown): it holds a space, a backslash or a double quote`},
+		"a scope with a backslash":        {with(`BYWARD_OIDC_SCOPES=a\b`), `BYWARD_OIDC_SCOPES: want a scope such as openid or email; got entry 1 of 1 (3 characters, not shown): it holds a space, a backslash or a double quote`},
+		"a scope with a space":            {with("BYWARD_OIDC_SCOPES=a b"), `BYWARD_OIDC_SCOPES: want a scope such as openid or email; got entry 1 of 1 (3 characters, not shown): it holds a space, a backslash or a double quote`},
 		"a blank subject claim":           {with("BYWARD_OIDC_SUBJECT_CLAIM= "), "BYWARD_OIDC_SUBJECT_CLAIM: want a claim name"},
 		"an empty roles claim":            {with("BYWARD_OIDC_ROLES_CLAIM="), `BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles, got ""`},
 		"a padded roles claim":            {with("BYWARD_OIDC_ROLES_CLAIM= roles"), `BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles, got " roles"`},
@@ -222,8 +222,8 @@ func TestAnOIDCClientKeyAlgorithmIsRead(t *testing.T) {
 
 // --dev accepts an http IdP issuer on a loopback host, relaxing the oidc adapter (OIDCLoopbackHTTP)
 // only together with a relaxation, so it is logged at startup (security invariant 12, #355); an
-// https issuer, an issuer of another scheme, an http issuer elsewhere and no --dev relax and record
-// nothing.
+// https issuer, an http issuer elsewhere and no --dev relax and record nothing. (An issuer of another
+// scheme, or one that does not parse, is refused at load: TestARefusedURLIsNeverShownButSaysWhy.)
 func TestDevRecordsAnHTTPIdPIssuerOnLoopbackAsARelaxation(t *testing.T) {
 	for _, tc := range []struct {
 		name, issuer string
@@ -236,11 +236,9 @@ func TestDevRecordsAnHTTPIdPIssuerOnLoopbackAsARelaxation(t *testing.T) {
 		{"127.0.0.2 over http", "http://127.0.0.2:8180/realms/byward", true, true}, // any loopback address, as the adapter has it
 		{"https", "https://sso.example.com/realms/acme", true, false},
 		{"https on localhost", "https://localhost:8443/realms/byward", true, false},
-		{"another scheme on localhost", "ftp://localhost/realms/byward", true, false},
 		{"http on a private address", "http://10.0.0.5:8180/realms/byward", true, false},
 		{"http on a host ending in localhost", "http://evil-localhost:8180/realms/byward", true, false},
 		{"http on a subdomain named localhost", "http://localhost.idp.example/realms/byward", true, false},
-		{"an issuer that does not parse", "http://[::1", true, false}, // the adapter refuses it; config must not panic
 		{"http on another host", "http://sso.example.com/realms/acme", true, false},
 		{"http on localhost without --dev", "http://localhost:8180/realms/byward", false, false},
 	} {

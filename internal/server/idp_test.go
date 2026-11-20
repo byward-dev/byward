@@ -359,22 +359,21 @@ func TestDoctorChecksAnOIDCIdPsDiscoveryAndClientCredential(t *testing.T) {
 	}
 }
 
-// doctor's fix for a failed discovery asks for https unless the issuer is the http one that --dev
-// allows on loopback, however its scheme is written (L158): config, not the issuer's spelling,
-// decides that.
+// doctor's fix for a failed discovery asks for https unless config relaxed the issuer as the http one
+// --dev allows on loopback (L158): config's decision, not the issuer's spelling, which
+// TestDoctorAsksForHTTPSWhenDiscoveryFailsUnlessConfigAllowedTheIssuerAsLoopbackHTTP covers.
 func TestTheDiscoveryFixAsksForHTTPSUnlessTheIssuerIsAnAllowedLoopbackHTTPOne(t *testing.T) {
 	const base = "BYWARD_OIDC_ISSUER: set it exactly as the IdP's discovery document states its issuer"
 	for _, tc := range []struct {
-		name, issuer string
+		name         string
 		loopbackHTTP bool
 		want         string
 	}{
-		{"an https issuer", "https://sso.example.com/realms/acme", false, base + ", over https"},
-		{"an http issuer on loopback under --dev", "http://127.0.0.1:8180/realms/byward", true, base},
-		{"the same, its scheme in capitals", "HTTP://127.0.0.1:8180/realms/byward", true, base},
+		{"an issuer config did not relax", false, base + ", over https"},
+		{"an http issuer on loopback config relaxed under --dev", true, base},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := diagnoseDiscovery(context.Background(), failingDiscovery{}, tc.issuer, tc.loopbackHTTP)
+			r := diagnoseDiscovery(context.Background(), failingDiscovery{}, &config.Config{}, tc.loopbackHTTP)
 			if len(r) != 1 {
 				t.Fatalf("results %+v, want one", r)
 			}

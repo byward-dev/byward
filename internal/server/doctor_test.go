@@ -58,7 +58,7 @@ func TestCheckOfflineFindsWhatStartupWould(t *testing.T) {
 		}, "BYWARD_GATE_HOSTED_DOMAINS"},
 		{"client denylist entry that is not a valid CIMD client ID", func(_ *testing.T, env []string) []string {
 			return append(env, "BYWARD_CLIENT_DENYLIST=https://app.example:8443/client.json")
-		}, `BYWARD_CLIENT_DENYLIST: "https://app.example:8443/client.json": `},
+		}, "BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 1 of 1 (36 characters, not shown): "},
 		{"secret file readable by other users", func(t *testing.T, env []string) []string {
 			for _, kv := range env {
 				if f, ok := strings.CutPrefix(kv, "BYWARD_ENTRA_CLIENT_SECRET_FILE="); ok {

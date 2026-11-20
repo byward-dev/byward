@@ -42,13 +42,3 @@ func (q Quickstart) EnvFile() string {
 	}
 	return b.String()
 }
-
-// lookup is the registry entry of name; it panics on a name the registry lacks, which tests catch.
-func lookup(name string) Setting {
-	for _, s := range registry {
-		if s.Name == name {
-			return s
-		}
-	}
-	panic("config: no setting " + name)
-}

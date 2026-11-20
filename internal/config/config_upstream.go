@@ -30,7 +30,7 @@ func (c *Config) upstream(v *Values, dashes bool) []error {
 			c.UpstreamStripHeaders = strip
 			errs = append(errs, stripErrs...)
 		}
-		u, err := ParseUpstreamURL(v.get("upstream-url"))
+		u, err := parseUpstreamURL(v.value("upstream-url"))
 		switch {
 		case err != nil && dashes:
 			return append(errs, errorf("%s (or %s, or a command after --)", err.Error(), cmdEnv))
@@ -40,7 +40,7 @@ func (c *Config) upstream(v *Values, dashes bool) []error {
 		c.UpstreamURL = u
 		return errs
 	}
-	if v.get("upstream-url") != "" { // no mode chosen, so neither mode's settings are read
+	if !v.empty("upstream-url") { // no mode chosen, so neither mode's settings are read
 		return []error{errorf("%s and %s are both set: an upstream is either HTTP or stdio", urlEnv, cmdEnv)}
 	}
 	if v.command != nil {
@@ -85,11 +85,11 @@ func (c *Config) upstream(v *Values, dashes bool) []error {
 // upstream-command and upstream-url, as given, even when its value does not parse. With none or
 // both, no mode is chosen. Every check in config that depends on the chosen mode reads these.
 func (v *Values) stdioUpstream() bool {
-	return v.get("upstream-command") != "" && v.get("upstream-url") == ""
+	return !v.empty("upstream-command") && v.empty("upstream-url")
 }
 
 func (v *Values) httpUpstream() bool {
-	return v.get("upstream-url") != "" && v.get("upstream-command") == ""
+	return !v.empty("upstream-url") && v.empty("upstream-command")
 }
 
 // httpOnly are the settings outside the upstream groups that take effect only with an HTTP upstream:
@@ -218,7 +218,7 @@ func (c *Config) upstreamCredential(v *Values) []error {
 	var errs []error
 	name := spelled(val) // an inline value, accepted under --dev, has no file to name
 	emptyFile := v.emptySecretFile("upstream-credential")
-	switch cred := val.Raw; {
+	switch cred := val.Given.raw(); {
 	case emptyFile != nil:
 		errs = append(errs, emptyFile)
 	case cred == "":

@@ -1,11 +1,10 @@
 package registration
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
-
-	"github.com/byward-dev/byward/internal/logging"
 )
 
 // Denylist is the operator's list of refused CIMD clients and redirect hosts (ADR-0008 §9). It
@@ -21,23 +20,38 @@ type Denylist struct {
 // trailing dot, a full-width or internationalized name by its ASCII form), and for a URL the default
 // port and percent-encoding in the path. A redirect host also matches by its transitional fold
 // (DeniesRedirect).
+// A refused entry is an *EntryError, which never holds the entry: config formats its refusal
+// (ADR-0031 §1).
 func NewDenylist(entries []string) (*Denylist, error) {
 	d := &Denylist{urls: map[string]bool{}, hosts: map[string]bool{}}
-	for _, e := range entries {
+	for i, e := range entries {
 		switch {
 		case IsCIMDURL(e):
 			if err := ValidateCIMDURL(e); err != nil {
-				return nil, fmt.Errorf("%s: %v", logging.Quote(e), err) // never the user information, query or fragment it was refused for
+				reason := err.Error()
+				if ce := (*cimdURLError)(nil); errors.As(err, &ce) {
+					reason = "it is not a client ID metadata document URL: " + ce.Reason
+				}
+				return nil, &EntryError{Index: i, Reason: reason}
 			}
 			d.urls[canonicalCIMD(e)] = true
 		case e != "" && !strings.ContainsAny(e, "/:@*? ") && strings.Contains(e, "."):
 			d.hosts[BrowserHost(e)] = true
 		default:
-			return nil, fmt.Errorf("%q is neither a CIMD client ID (https URL) nor a host name", e)
+			return nil, &EntryError{Index: i, Reason: "it is neither a CIMD client ID (https URL) nor a host name"}
 		}
 	}
 	return d, nil
 }
+
+// EntryError is a refused denylist entry, by its index in the list and a fixed reason, a clause such as
+// "it is not …": it never holds the entry, which can be a credential pasted in the wrong place.
+type EntryError struct {
+	Index  int
+	Reason string
+}
+
+func (e *EntryError) Error() string { return fmt.Sprintf("entry %d: %s", e.Index+1, e.Reason) }
 
 // DeniesClient reports whether a CIMD client ID is on the list. Any other client ID, such as a
 // static or DCR one, is never denied by ID, even when it looks like a URL.

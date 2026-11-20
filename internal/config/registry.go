@@ -57,7 +57,7 @@ const (
 // Value is a resolved setting.
 type Value struct {
 	Setting Setting
-	Raw     string
+	Given   Opaque // the value as given; only its parser and its shape read the text (Opaque.raw)
 	Source  Source
 	Path    string // the file a SourceFile secret was read from
 	From    string // how that file was named: the flag or the env variable, for error messages
@@ -81,17 +81,35 @@ func (v *Values) SecretFiles() []SecretFile {
 // Display is the value as the startup log and --print-config show it: only through its setting's
 // shape (ADR-0031 §3), on one line of printable characters, which --print-config relies on (#505).
 // An unset value shows as nothing, and the value of a Setting built without a shape (outside the
-// registry, which gives every entry one) as Hidden. Five lines still show a URL
-// setting with logging.MarkedURL directly: the no-auth and --dev loopback-issuer relaxations, and
-// doctor's upstream and discovery lines; #494 moves them to the shape.
+// registry, which gives every entry one) as Hidden.
 func (v Value) Display() string {
 	switch {
-	case v.Raw == "":
+	case v.Given.empty():
 		return ""
 	case v.Setting.shape == nil:
 		return logging.Hidden
 	}
-	return v.Setting.shape.display(v.Raw)
+	return v.Setting.shape.display(v.Given.raw())
+}
+
+// display is the named setting's value as its shape shows it (Value.Display), for a log line that
+// names a setting's value. A setting these Values do not hold, as with a Config built by hand, shows
+// as Hidden, never as nothing.
+func (v *Values) display(name string) string {
+	if !v.holds(name) {
+		return logging.Hidden
+	}
+	return v.byKey[name].Display()
+}
+
+// lookup is the registry entry of name; it panics on a name the registry lacks, which tests catch.
+func lookup(name string) Setting {
+	for _, s := range registry {
+		if s.Name == name {
+			return s
+		}
+	}
+	panic("config: no setting " + name)
 }
 
 // configError is a configuration error; the process exits with its own code for these.
@@ -109,15 +127,65 @@ type Values struct {
 	command []string
 }
 
-// get returns the raw value of a setting.
-func (v *Values) get(name string) string { return v.byKey[name].Raw }
+// get returns the text of a setting in readAsText, one not yet read through its parser of its own. It
+// panics on any other, which every test that loads the setting catches, however the name reaches it.
+func (v *Values) get(name string) string {
+	if !readAsText[name] {
+		panic("config: " + name + " is read through its parser, not get")
+	}
+	return v.byKey[name].Given.raw()
+}
+
+// readAsText are the settings still read as text through get (ADR-0031 §1). The list only shrinks:
+// #512 gives the rest parsers of their own and deletes it, with get.
+var readAsText = map[string]bool{
+	"upstream-header-timeout": true, "upstream-credential-header": true,
+	"upstream-strip-headers": true, "upstream-command": true, "upstream-env": true, "stdio-max-processes": true,
+	"stdio-max-processes-per-user": true, "stdio-stream-idle-timeout": true, "tls-cert-file": true,
+	"tls-key-file": true, "scope": true, "resource-name": true, "log-format": true, "oauth-rate-limits": true,
+	"idp": true, "entra-tenant": true, "entra-client-id": true, "entra-client-secret": true,
+	"entra-client-certificate": true, "entra-federated-token-file": true,
+	"entra-client-secret-expires-at": true, "oidc-client-id": true, "oidc-client-secret": true,
+	"oidc-client-key": true, "oidc-client-key-alg": true, "oidc-client-key-id": true,
+	"oidc-subject-claim": true, "oidc-roles-claim": true, "oidc-groups-claim": true, "oidc-name": true,
+	"data-dir": true, "keys-dir": true, "assertion-keys-dir": true, "assertion-header": true,
+	"identity-headers": true, "obo-header": true, "assertion-claims": true, "assertion-unverified-email": true,
+	"static-clients-file": true, "gate-tenants": true, "gate-roles": true, "gate-groups": true,
+	"gate-email-domains": true, "gate-hosted-domains": true, "dcr": true, "cimd": true, "app-tokens": true,
+	"app-roles": true, "app-client-ids": true, "gate-allow-empty": true, "operator-name": true,
+	"scope-description": true, "store-dir": true, "store-postgres-dsn": true, "store-counter-file": true,
+	"refresh-grace": true, "insecure-no-auth": true, "dev": true,
+}
+
+// value is the named setting's Value, for its parser. It panics on a name these Values do not hold,
+// which every test that loads the setting catches, so a parser never gets a Value without a shape.
+func (v *Values) value(name string) Value {
+	val, ok := v.byKey[name]
+	if !ok {
+		panic("config: no setting " + name)
+	}
+	return val
+}
+
+// holds reports whether these Values hold the named setting: loaded Values hold every one, a Config
+// built by hand none.
+func (v *Values) holds(name string) bool {
+	if v == nil {
+		return false
+	}
+	_, ok := v.byKey[name]
+	return ok
+}
+
+// empty reports whether the named setting's value is empty: unset, or set to nothing.
+func (v *Values) empty(name string) bool { return v.byKey[name].Given.empty() }
 
 // given reports whether the operator gave the setting: a value, or a file named for a secret, which
 // is given even when it is empty, so it never falls back to another choice. A variable set to nothing
 // is not given here, nor is a _FILE variable set to nothing, which names no file. Other checks may
 // still refuse a variable set to nothing (checkInlineSecrets without --dev; checks that test only
 // Source).
-func (val Value) given() bool { return val.Raw != "" || val.Path != "" }
+func (val Value) given() bool { return !val.Given.empty() || val.Path != "" }
 
 // given is Value.given for the setting name.
 func (v *Values) given(name string) bool { return v.byKey[name].given() }
@@ -128,9 +196,9 @@ func (v *Values) emptySecretFile(name string) error {
 	switch val := v.byKey[name]; {
 	case val.Path == "":
 		return nil
-	case val.Raw == "":
+	case val.Given.empty():
 		return errorf("%s: the file is empty", val.From)
-	case strings.TrimSpace(val.Raw) == "":
+	case val.Given.blank():
 		return errorf("%s: the file holds only whitespace", val.From)
 	}
 	return nil
@@ -215,25 +283,25 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 
 	vals := &Values{byKey: map[string]Value{}}
 	for _, s := range reg {
-		v := Value{Setting: s, Raw: s.Default, Source: SourceDefault}
+		v := Value{Setting: s, Given: NewOpaque(s.Default), Source: SourceDefault}
 		switch {
 		case s.Secret() && set[s.Name+"-file"]:
 			raw, err := readSecret(readFile, *fileFlagVals[s.Name], "--"+s.Name+"-file")
 			if err != nil {
 				return nil, err
 			}
-			v.Raw, v.Source, v.Path, v.From = raw, SourceFile, *fileFlagVals[s.Name], "--"+s.Name+"-file"
+			v.Given, v.Source, v.Path, v.From = NewOpaque(raw), SourceFile, *fileFlagVals[s.Name], "--"+s.Name+"-file"
 		case !s.Secret() && set[s.Name]:
-			v.Raw, v.Source = *flagVals[s.Name], SourceFlag
+			v.Given, v.Source = NewOpaque(*flagVals[s.Name]), SourceFlag
 		case s.Secret() && env[s.Env()+"_FILE"] != "":
 			raw, err := readSecret(readFile, env[s.Env()+"_FILE"], s.Env()+"_FILE")
 			if err != nil {
 				return nil, err
 			}
-			v.Raw, v.Source, v.Path, v.From = raw, SourceFile, env[s.Env()+"_FILE"], s.Env()+"_FILE"
+			v.Given, v.Source, v.Path, v.From = NewOpaque(raw), SourceFile, env[s.Env()+"_FILE"], s.Env()+"_FILE"
 		default:
 			if e, ok := env[s.Env()]; ok {
-				v.Raw, v.Source = e, SourceEnv
+				v.Given, v.Source = NewOpaque(e), SourceEnv
 			}
 		}
 		vals.order = append(vals.order, s.Name)
@@ -247,10 +315,10 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 		if len(command) == 0 {
 			return nil, errorf("no command after --")
 		}
-		// Kept as argv for the upstream; Raw holds it as the env form's JSON array, which Display reads
+		// Kept as argv for the upstream; Given holds it as the env form's JSON array, which Display reads
 		// (a []string always marshals).
 		encoded, _ := json.Marshal(command)
-		v.Raw, v.Source = string(encoded), SourceFlag
+		v.Given, v.Source = NewOpaque(string(encoded)), SourceFlag
 		vals.byKey[commandSetting] = v
 		vals.command = command
 	}

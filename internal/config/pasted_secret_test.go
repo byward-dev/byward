@@ -37,7 +37,7 @@ func refusedLines(t *testing.T, env ...string) []string {
 	return strings.Split(err.Error(), "\n")
 }
 
-// #461, #466 and their siblings: a value config refuses is quoted only as far as it cannot hold the
+// #461, #466 and their siblings: a value config refuses is quoted at most as far as it cannot hold the
 // secret an operator pasted where a path, a header name or a command belongs; each message is
 // pinned whole, and the secret appears in no line (security invariant 2).
 func TestARefusedSettingNeverShowsASecretPastedIntoIt(t *testing.T) {
@@ -57,25 +57,25 @@ func TestARefusedSettingNeverShowsASecretPastedIntoIt(t *testing.T) {
 		{"a header family to strip, given a header line", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X-Api-*: " + pasted},
 			`BYWARD_UPSTREAM_STRIP_HEADERS: "X-Api-*" (the rest is not shown): exact names only; list each header of a family by name`},
 		{"a client denylist URL with its scheme in capitals, which config refuses", []string{"BYWARD_CLIENT_DENYLIST=HTTPS://a.example/x;k=" + pasted},
-			`BYWARD_CLIENT_DENYLIST: "HTTPS://a.example/x;…" is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
+			`BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 1 of 1 (40 characters, not shown): it breaks the host name rule: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
 		{"a client denylist URL with its scheme in capitals and a host that is not ASCII", []string{"BYWARD_CLIENT_DENYLIST=HTTPS://bücher.example/x;k=" + pasted},
-			`BYWARD_CLIENT_DENYLIST: "HTTPS://b%C3%BCcher.example/x;…" has a host that is not ASCII; give its ASCII (xn--) form, which is what browsers and MCP clients send`},
+			`BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 1 of 1 (45 characters, not shown): it holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send`},
 		{"a client denylist URL with its scheme in capitals and a password split across its host", []string{"BYWARD_CLIENT_DENYLIST=HTTPS://u:8443/" + pasted + "@a.example/x"},
-			"BYWARD_CLIENT_DENYLIST: the value (not shown: it may hold a password) is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)"},
+			`BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 1 of 1 (45 characters, not shown): it breaks the host name rule: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
 		{"an allowed host, given a URL with path parameters", []string{"BYWARD_ALLOWED_HOSTS=https://a.example/x;k=" + pasted},
-			`BYWARD_ALLOWED_HOSTS: "https://a.example/x" (the rest not shown: it may hold a password) is not a host[:port]: give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone`},
+			`BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (40 characters, not shown): it holds a "/" or a space; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone`},
 		{"an allowed host, given a URL with path parameters and a host that is not ASCII", []string{"BYWARD_ALLOWED_HOSTS=HTTPS://bücher.example/;" + pasted},
-			`BYWARD_ALLOWED_HOSTS: the host "HTTPS://b%C3%BCcher.example/" (the rest not shown: it may hold a password) is not ASCII; give its ASCII (xn--) form, which is what browsers and MCP clients send`},
+			`BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (42 characters, not shown): it holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send`},
 		{"a CIMD allowed host, given a URL with path parameters", []string{"BYWARD_CIMD_ALLOWED_HOSTS=https://a.example/x;k=" + pasted},
-			`BYWARD_CIMD_ALLOWED_HOSTS: "https://a.example/x" (the rest not shown: it may hold a password) is not a host name such as claude.ai: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
+			`BYWARD_CIMD_ALLOWED_HOSTS: want a host name such as claude.ai; got entry 1 of 1 (40 characters, not shown): it breaks the host name rule: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
 		{"a CIMD trusted host, given a URL with path parameters and a host that is not ASCII", []string{"BYWARD_CIMD_TRUSTED_HOSTS=HTTPS://bücher.example/;" + pasted},
-			`BYWARD_CIMD_TRUSTED_HOSTS: the host "HTTPS://b%C3%BCcher.example/" (the rest not shown: it may hold a password) is not ASCII; give its ASCII (xn--) form, which is what browsers and MCP clients send`},
+			`BYWARD_CIMD_TRUSTED_HOSTS: want a host name such as claude.ai; got entry 1 of 1 (42 characters, not shown): it holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send`},
 		{"an allowed origin, given a URL with path parameters", []string{"BYWARD_ALLOWED_ORIGINS=https://a.example/x;k=" + pasted},
-			`BYWARD_ALLOWED_ORIGINS: "https://a.example/x" (the rest not shown: it may hold a password) is not an origin (scheme://host[:port])`},
+			`BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry 1 of 1 (40 characters, not shown): it has a path`},
 		{"an allowed origin, given a URL with a mistyped scheme and path parameters", []string{"BYWARD_ALLOWED_ORIGINS=https:/a.example/x;k=" + pasted},
-			"BYWARD_ALLOWED_ORIGINS: the value (not shown: it may hold a password) is not an origin (scheme://host[:port])"},
+			`BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry 1 of 1 (39 characters, not shown): it has no host`},
 		{"a client denylist URL with a mistyped scheme and path parameters", []string{"BYWARD_CLIENT_DENYLIST=https:/a.example/x;k=" + pasted},
-			"BYWARD_CLIENT_DENYLIST: the value (not shown: it may hold a password) is neither a CIMD client ID (an https URL) nor a host name such as app.example: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)"},
+			`BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 1 of 1 (39 characters, not shown): it breaks the host name rule: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
 		{"a header to strip whose name holds an @", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X@" + pasted + ": token"},
 			"BYWARD_UPSTREAM_STRIP_HEADERS: the value (not shown: it may hold a password) is not a header name; list exact names, such as X-Argocd-Base-Url"},
 		{"a header to strip with nothing before its colon", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=: " + pasted},
@@ -202,9 +202,9 @@ func TestEveryURLSettingIsShownWithoutTheParts(t *testing.T) {
 		var got, want string
 		switch s.shape {
 		case urlShape:
-			got, want = (Value{Setting: s, Raw: raw}).Display(), shown
+			got, want = (Value{Setting: s, Given: NewOpaque(raw)}).Display(), shown
 		case urlListShape: // each URL entry as a URL, any other as given
-			got, want = (Value{Setting: s, Raw: raw + ", app.example"}).Display(), shown+", app.example"
+			got, want = (Value{Setting: s, Given: NewOpaque(raw + ", app.example")}).Display(), shown+", app.example"
 		default:
 			continue
 		}
@@ -226,10 +226,11 @@ func TestEverySettingReadAsAURLHasAURLShape(t *testing.T) {
 		byName[s.Name] = s
 	}
 	listed := map[string]string{
-		"parseURL raw":         "",                // the settings read by name, checked below
+		"parseURLOf raw":       "",                // the settings read by name, checked below
 		"oidcIdP c.OIDCIssuer": "oidc-issuer",     // URL
-		"clientSources e":      "client-denylist", // URLs
-		"normalizeOrigin o":    "",                // an origin: no path, query or fragment
+		"denylistReason e":     "client-denylist", // URLs
+		"parseIssuer raw":      "oidc-issuer",     // URL
+		"parseOrigin o":        "",                // an origin: no path, query or fragment
 		"checkNoAuth o":        "",                // the same origins, again
 	}
 	seen := map[string]int{}
@@ -270,8 +271,8 @@ func TestEverySettingReadAsAURLHasAURLShape(t *testing.T) {
 			t.Errorf("%q occurs %d times, want once: list each call", key, seen[key])
 		}
 	}
-	if named < 3 {
-		t.Fatalf("found %d settings read through parseURL, want at least public-url, upstream-url and resource-documentation", named)
+	if named < 2 { // ParsePublicURL reads public-url through parseURLOf with the registry's own entry
+		t.Fatalf("found %d settings read through parseURL, want at least upstream-url and resource-documentation", named)
 	}
 }
 
@@ -489,7 +490,7 @@ func TestTheUpstreamCommandIsShownByItsProgramAndArgumentCount(t *testing.T) {
 		"not JSON":                         "the value (not shown: it may hold a password)",
 		"[]":                               "the value (not shown: it may hold a password)", // no program
 		"null":                             "the value (not shown: it may hold a password)"} {
-		if got := (Value{Setting: Setting{shape: commandShape}, Raw: raw}).Display(); got != want {
+		if got := (Value{Setting: Setting{shape: commandShape}, Given: NewOpaque(raw)}).Display(); got != want {
 			t.Errorf("%s is shown as %q, want %q", raw, got, want)
 		}
 	}

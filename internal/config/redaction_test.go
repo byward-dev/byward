@@ -3,8 +3,6 @@ package config
 import (
 	"strings"
 	"testing"
-
-	"github.com/byward-dev/byward/internal/logging"
 )
 
 // The loaders a row refuses a value with: the test base, and a working OIDC configuration (whose
@@ -133,39 +131,41 @@ func TestARefusedSettingNeverShowsACredentialItHolds(t *testing.T) {
 	}
 }
 
-// What a refusal still shows, so the operator can find the value: the setting, a URL's scheme, host
-// and path, and config's reason; text holding no credential, whole; a value that is neither, not at
-// all.
-func TestARefusedURLShowsItsSchemeHostAndPathAndWhy(t *testing.T) {
+// A URL or host refused for its form is never shown, in part or whole (ADR-0031 §1): the refusal names
+// the setting, the entry's place and length, and config's reason, so the operator can still find the
+// value and fix it.
+func TestARefusedURLIsNeverShownButSaysWhy(t *testing.T) {
 	for _, tc := range []struct {
 		env  string
 		load func(kv ...string) error
-		want []string
+		want string
 	}{
-		{"BYWARD_UPSTREAM_URL=https://user:pw@up.example/x", withConfig(t), []string{`BYWARD_UPSTREAM_URL: want an absolute http(s) URL without a user name or password, got "https://up.example/x"`}},
-		{"BYWARD_PUBLIC_URL=https://user:pw@mcp.example.com/mcp", withConfig(t), []string{`BYWARD_PUBLIC_URL: want an absolute http(s) URL without a user name or password, got "https://mcp.example.com/mcp"`}},
-		{"BYWARD_UPSTREAM_URL=ftp://up.example/x?k=pw", withConfig(t), []string{`BYWARD_UPSTREAM_URL: want an absolute http(s) URL, got "ftp://up.example/x"`}},
-		{"BYWARD_UPSTREAM_URL=up.example/x", withConfig(t), []string{`BYWARD_UPSTREAM_URL: want an absolute http(s) URL, got "up.example/x"`}},
-		{"BYWARD_UPSTREAM_URL=https://user:pw@up stream/x", withConfig(t), []string{`BYWARD_UPSTREAM_URL: want an absolute http(s) URL, got ` + logging.Hidden}},
-		{"BYWARD_ALLOWED_ORIGINS=https://user:pw@app.example", withConfig(t), []string{`BYWARD_ALLOWED_ORIGINS: "https://app.example"`, `is not an origin (scheme://host[:port]): it has a user name or password`}},
-		{"BYWARD_ALLOWED_ORIGINS=https://app.example?t=pw", withConfig(t), []string{`BYWARD_ALLOWED_ORIGINS: "https://app.example"`, `is not an origin (scheme://host[:port]): it has a query or a fragment`}},
-		{"BYWARD_CLIENT_DENYLIST=https://user:pw@app.example/c.json", withConfig(t), []string{`BYWARD_CLIENT_DENYLIST: "https://app.example/c.json"`, `is not a CIMD client ID: it has a user name or password`}},
-		{"BYWARD_CLIENT_DENYLIST=https://app.example/c.json?v=pw", withConfig(t), []string{`BYWARD_CLIENT_DENYLIST: "https://app.example/c.json"`, `is not a CIMD client ID: it has a query or a fragment`}},
-		{"BYWARD_CLIENT_DENYLIST=https://app.example/%zz@x", withConfig(t), []string{`BYWARD_CLIENT_DENYLIST: ` + logging.Hidden + ` is not a CIMD client ID: it is not an absolute URL`}},
-		{"BYWARD_ALLOWED_HOSTS=ü:pw@app.example", withConfig(t), []string{`BYWARD_ALLOWED_HOSTS: ` + logging.Hidden + ` has a host that is not ASCII`}},
-		{"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read https://user:pw@other.example/x", withConfig(t), []string{`BYWARD_OBO_SCOPES: "https://graph.microsoft.com" and "https://other.example/x"`, `are for different APIs`}},
-		{"BYWARD_OIDC_ISSUER=https://user:pw@idp.example", withOIDC(t), []string{`BYWARD_OIDC_ISSUER: want the issuer URL without a user name or password, got "https://idp.example"`}},
-		{"BYWARD_OIDC_ISSUER=http://user:pw@127.0.0.1:8081", withOIDC(t), []string{`BYWARD_OIDC_ISSUER: want the issuer URL without a user name or password, got "http://127.0.0.1:8081"`}},
-		{"BYWARD_OIDC_ISSUER=https://sso.example.com/realms/acme?k=pw", withOIDC(t), []string{`BYWARD_OIDC_ISSUER: want the issuer URL without a query or fragment, as an issuer has none, got "https://sso.example.com/realms/acme"`}},
-		{"BYWARD_OIDC_ISSUER=https:/user:pw@idp.example", withOIDC(t), []string{`BYWARD_OIDC_ISSUER: want an absolute http(s) URL with a host, got ` + logging.Hidden}},
-		{"BYWARD_OIDC_ISSUER=ftp://idp.example/realms/a@b", withOIDC(t), []string{`BYWARD_OIDC_ISSUER: want an absolute http(s) URL with a host, got ` + logging.Hidden}},
-		{"BYWARD_OBO_SCOPES=User.Read", withConfig(t), []string{`BYWARD_OBO_SCOPES: "User.Read" is not a scope URI`}},
+		{"BYWARD_UPSTREAM_URL=https://user:pw@up.example/x", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (28 characters, not shown): it holds a user name or password (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
+		{"BYWARD_PUBLIC_URL=https://user:pw@mcp.example.com/mcp", withConfig(t), `BYWARD_PUBLIC_URL: want an absolute http(s) URL; got a value (35 characters, not shown): it holds a user name or password`},
+		{"BYWARD_UPSTREAM_URL=ftp://up.example/x?k=pw", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (23 characters, not shown): it has a scheme other than http or https (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
+		{"BYWARD_UPSTREAM_URL=up.example/x", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (12 characters, not shown): it has no scheme such as https:// (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
+		{"BYWARD_UPSTREAM_URL=https://user:pw@up stream/x", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (27 characters, not shown): it does not parse as a URL (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
+		{"BYWARD_ALLOWED_ORIGINS=https://user:pw@app.example", withConfig(t), `BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry 1 of 1 (27 characters, not shown): it holds a user name or password`},
+		{"BYWARD_ALLOWED_ORIGINS=https://app.example?t=pw", withConfig(t), `BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry 1 of 1 (24 characters, not shown): it has a query or a fragment`},
+		{"BYWARD_CLIENT_DENYLIST=https://user:pw@app.example/c.json", withConfig(t), `BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 1 of 1 (34 characters, not shown): it is a CIMD client ID with a user name or password`},
+		{"BYWARD_CLIENT_DENYLIST=https://app.example/c.json?v=pw", withConfig(t), `BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 1 of 1 (31 characters, not shown): it is a CIMD client ID with a query or a fragment`},
+		{"BYWARD_CLIENT_DENYLIST=https://app.example/%zz@x", withConfig(t), `BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 1 of 1 (25 characters, not shown): it is not an absolute URL`},
+		{"BYWARD_ALLOWED_HOSTS=ü:pw@app.example", withConfig(t), `BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (16 characters, not shown): it holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send`},
+		{"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read https://user:pw@other.example/x", withConfig(t), `BYWARD_OBO_SCOPES: want scope URIs of one API such as https://graph.microsoft.com/User.Read, api://<app>/<scope> or <app ID>/<scope>; got entries 1 and 2 of 2: they are for different APIs; Entra issues a token for one API per request`},
+		{"BYWARD_OIDC_ISSUER=https://user:pw@idp.example", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it; got a value (27 characters, not shown): it holds a user name or password`},
+		{"BYWARD_OIDC_ISSUER=http://user:pw@127.0.0.1:8081", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it; got a value (29 characters, not shown): it holds a user name or password`},
+		{"BYWARD_OIDC_ISSUER=https://sso.example.com/realms/acme?k=pw", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it; got a value (40 characters, not shown): it has a query or a fragment, which an issuer never has`},
+		{"BYWARD_OIDC_ISSUER=https:/user:pw@idp.example", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it; got a value (26 characters, not shown): it has no host`},
+		{"BYWARD_OIDC_ISSUER=ftp://idp.example/realms/a@b", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it; got a value (28 characters, not shown): it has a scheme other than http or https`},
+		{"BYWARD_OIDC_ISSUER=https://user:pw@idp.example/?q", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it; got a value (30 characters, not shown): it holds a user name or password`},
+		{"BYWARD_UPSTREAM_URL=https:up.example/x", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (18 characters, not shown): it has no "//" after its scheme (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
+		{"BYWARD_OIDC_ISSUER=https://[::1", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it; got a value (12 characters, not shown): it does not parse as a URL`},
+		{"BYWARD_OIDC_ISSUER=https:/idp.example/realms/pw", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it; got a value (28 characters, not shown): it has no host`},
+		{"BYWARD_OBO_SCOPES=User.Read", withConfig(t), `BYWARD_OBO_SCOPES: want scope URIs of one API such as https://graph.microsoft.com/User.Read, api://<app>/<scope> or <app ID>/<scope>; got entry 1 of 1 (9 characters, not shown): it is not a scope URI`},
 	} {
 		err := tc.load(tc.env)
-		for _, want := range tc.want {
-			if err == nil || !strings.Contains(err.Error(), want) {
-				t.Errorf("%s: %v, want %q", tc.env, err, want)
-			}
+		if err == nil || err.Error() != tc.want || strings.Contains(err.Error(), "pw") {
+			t.Errorf("%s: %v, want %q, and never the password", tc.env, err, tc.want)
 		}
 	}
 }
@@ -187,9 +187,9 @@ func TestParseUpstreamURLAcceptsAnHTTPURLAndRefusesAnyOtherByTheSettingsName(t *
 	}
 	for raw, want := range map[string]string{
 		"":                             "BYWARD_UPSTREAM_URL is required",
-		"ftp://up.example/x":           `BYWARD_UPSTREAM_URL: want an absolute http(s) URL, got "ftp://up.example/x"`,
-		"/mcp":                         `BYWARD_UPSTREAM_URL: want an absolute http(s) URL, got "/mcp"`,
-		"https://user:pw@up.example/x": `BYWARD_UPSTREAM_URL: want an absolute http(s) URL without a user name or password, got "https://up.example/x"`,
+		"ftp://up.example/x":           `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (18 characters, not shown): it has a scheme other than http or https`,
+		"/mcp":                         `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (4 characters, not shown): it has no scheme such as https://`,
+		"https://user:pw@up.example/x": `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (28 characters, not shown): it holds a user name or password`,
 	} {
 		if _, err := ParseUpstreamURL(raw); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("ParseUpstreamURL(%q) = %v, want %q", raw, err, want)

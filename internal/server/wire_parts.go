@@ -145,7 +145,10 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 		return nil, err
 	}
 	if p.clientDeny, err = registration.NewDenylist(cfg.ClientDenylist); err != nil {
-		return nil, fmt.Errorf("BYWARD_CLIENT_DENYLIST: %w", err)
+		if ee := (*registration.EntryError)(nil); errors.As(err, &ee) {
+			return nil, cfg.RefusedDenylistEntry(ee.Index, ee.Reason)
+		}
+		return nil, fmt.Errorf("BYWARD_CLIENT_DENYLIST: %w", err) // defensive: NewDenylist returns only *EntryError
 	}
 	for _, id := range p.static.IDs() {
 		if p.clientDeny.DeniesClient(id) { // the denylist never refuses a static client (#338)

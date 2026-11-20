@@ -35,12 +35,12 @@ type readyDiscovery struct{}
 
 func (readyDiscovery) Ready(context.Context) error { return nil }
 
-// #458: doctor names a URL setting as logs may show it, its query marked as left out, never the API
+// #458: doctor names a URL setting as its shape shows it, its query marked as left out, never the API
 // key a query can hold; the identity assertion's aud is shown the same way (security invariant 2).
-func TestDoctorNamesAURLSettingWithoutItsQuery(t *testing.T) {
+func TestDoctorNamesAURLSettingWithoutTheParts(t *testing.T) {
 	const key = "S3CRET-api-key"
 	t.Run("the upstream", func(t *testing.T) {
-		cfg := &config.Config{UpstreamURL: mustURL(t, "https://up.example/mcp?api_key="+key), AssertionHeader: "Authorization"}
+		cfg := loadConfig(t, "https://mcp.example.com/mcp", "BYWARD_UPSTREAM_URL=https://up.example/mcp?api_key="+key)
 		want := "HTTP upstream https://up.example/mcp?…; doctor checks the proxy in front of it, not the upstream itself; " +
 			"requests carry the identity assertion in Authorization, with aud https://up.example/mcp?…"
 		if got := upstreamResult(cfg, noProxy).Message; got != want {
@@ -57,7 +57,7 @@ func TestDoctorNamesAURLSettingWithoutItsQuery(t *testing.T) {
 		{"discovery that fails", failingDiscovery{}, "the IdP's discovery document at https://idp.example/realms/acme;… failed: connection refused"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := diagnoseDiscovery(context.Background(), tc.p, issuer, false)
+			r := diagnoseDiscovery(context.Background(), tc.p, loadOIDC(t, "oidc", issuer, "app"), false)
 			if len(r) != 1 || r[0].Message != tc.want {
 				t.Errorf("results %+v, want one saying %q", r, tc.want)
 			}

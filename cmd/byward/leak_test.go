@@ -36,12 +36,31 @@ var secretForms = []struct{ name, value string }{
 	{"one slash", "https:/h.example/;tok=LK7CANARY"},
 }
 
-// skippedRefusals is how many setting × form cells config refuses at load for the value's form: each
-// setting is tried in a context where it applies (leakContext). Such a refusal is not a display path,
-// and it can still show the value. A change to it must come from a refusal of a form: a setting
-// refused for its context needs its own context in contextOf (and leakContexts). #494 removes this
-// skip.
-const skippedRefusals = 621
+// hostForm is a secret in a URL's host, which is a valid host name. A URL setting's shape shows an
+// accepted URL's host (ADR-0031 §2 leaves such a value to #495), so the form is checked only where
+// config refuses it: the public URL refuses its upper case.
+var hostForm = struct{ name, value string }{"in the host", "https://LK7CANARY.Example/mcp"}
+
+// notYetRefusing are the settings whose refusals do not yet go through their shape (ADR-0031 §1) and
+// that config refuses some form of, each with how many setting × form cells config refuses at load: each setting is
+// tried in a context where it applies (leakContext), and such a refusal can still show the value, so
+// its cells are skipped. A value config refuses for any other setting is run through every command,
+// as an accepted value of a hiding setting is, and its refusal may show no canary. A setting whose
+// refusal already goes through its shape fails here until it is removed, so the list only shrinks;
+// #512 moves the rest and removes it. A count changes only for a refusal of a form: a setting refused
+// for its context needs its own context in contextOf (and leakContexts).
+var notYetRefusing = map[string]int{
+	"upstream-header-timeout": 15, "upstream-credential-header": 15,
+	"upstream-strip-headers": 14, "upstream-env": 5, "stdio-max-processes": 15,
+	"stdio-max-processes-per-user": 15, "stdio-stream-idle-timeout": 15, "tls-cert-file": 15,
+	"tls-key-file": 15, "scope": 4, "log-format": 15, "oauth-rate-limits": 15, "idp": 15,
+	"entra-tenant": 15, "entra-federated-token-file": 15, "entra-client-secret-expires-at": 15, "oidc-client-key-alg": 15, "oidc-client-key-id": 15,
+	"data-dir": 14,
+	"keys-dir": 14, "assertion-keys-dir": 14, "assertion-header": 14, "identity-headers": 15, "obo-header": 14,
+	"assertion-claims": 15, "assertion-unverified-email": 15, "static-clients-file": 14, "dcr": 15, "cimd": 15,
+	"app-tokens": 15, "gate-allow-empty": 15, "store-dir": 14, "store-counter-file": 14,
+	"refresh-grace": 15, "insecure-no-auth": 15, "dev": 15,
+}
 
 // hidingSettings lists the settings whose shape hides part or all of a value. Each must have cells
 // config accepts, and none of those may show a canary.
@@ -58,10 +77,12 @@ var hidingSettings = []string{"upstream-credential", "upstream-env", "entra-clie
 // cell's output repeats it (TestTheSettingsOfEachShapeAreExactlyThese, internal/config, pins which
 // settings those are); the test only checks that its shape does show it, so a setting whose shape
 // hides a value cannot be left off the list. A secret setting's value is written to the file it is
-// read from. A value config refuses at load is skipped and counted (skippedRefusals). Startup runs
+// read from. A value config refuses at load for a setting not in notYetRefusing is run the same way:
+// every command refuses it, and no output shows a canary. Any other refused value is skipped and
+// counted (notYetRefusing). Startup runs
 // with its context done and a listen address it cannot bind (TEST-NET-1), so it serves nothing;
 // doctor's HTTP clients refuse every request (TestMain).
-func TestAnAcceptedValueOfAHidingSettingAppearsInNoCommandsOutput(t *testing.T) {
+func TestNoCommandShowsAHiddenOrARefusedValue(t *testing.T) {
 	commands := []struct {
 		name string
 		args []string
@@ -89,9 +110,9 @@ func TestAnAcceptedValueOfAHidingSettingAppearsInNoCommandsOutput(t *testing.T) 
 	}
 	contexts := leakContexts(t, program)
 	settings := allSettings(t, contexts["entra"])
-	tried, refused := map[string]int{}, map[string]int{}
+	tried, refused, refusedTried := map[string]int{}, map[string]int{}, map[string]int{}
 	for _, s := range settings {
-		for _, form := range secretForms {
+		for _, form := range append(slices.Clone(secretForms), hostForm) {
 			// The setting's own value comes last, so it wins over the context's and the log format's.
 			env := append(slices.Clone(contexts[leakContext(s)]), "BYWARD_LOG_FORMAT=@format@")
 			if s.Secret() {
@@ -105,38 +126,71 @@ func TestAnAcceptedValueOfAHidingSettingAppearsInNoCommandsOutput(t *testing.T) 
 			}
 			hiding := slices.Contains(hidingSettings, s.Name)
 			if !hiding { // checked whether config accepts the form or not, so a refusal cannot hide a missing entry
-				if shown := (config.Value{Setting: s, Raw: given(s, form.value, program)}).Display(); !strings.Contains(shown, canary) {
+				if shown := (config.Value{Setting: s, Given: config.NewOpaque(given(s, form.value, program))}).Display(); !strings.Contains(shown, canary) {
 					t.Errorf("%s shows %q as %q, hiding it: fix its shape, or add the setting to hidingSettings", s.Env(), form.value, shown)
 				}
 			}
-			if _, _, err := config.Load(nil, withFormat(env, "json"), os.ReadFile); err != nil {
+			_, _, loadErr := config.Load(nil, withFormat(env, "json"), os.ReadFile)
+			_, skipped := notYetRefusing[s.Name]
+			refusing := loadErr != nil && !skipped
+			// A refusal through the setting's shape names the value only by its length.
+			if loadErr != nil && skipped && strings.Contains(loadErr.Error(), s.Env()+": want ") && strings.Contains(loadErr.Error(), " characters, not shown)") {
+				if shows(loadErr.Error()) {
+					t.Errorf("%s refuses %s in its shape's wording but shows the value (%v): refuse it through its shape", s.Env(), form.name, loadErr)
+				} else {
+					t.Errorf("%s refuses %s through its shape (%v): remove it from notYetRefusing", s.Env(), form.name, loadErr)
+				}
+			}
+			switch {
+			case loadErr != nil && !refusing:
 				refused[s.Name]++
 				continue
-			}
-			if !hiding {
+			case refusing:
+				refusedTried[s.Name]++
+			case form == hostForm:
+				continue // an accepted URL shows its host (hostForm)
+			case !hiding:
 				continue
+			default:
+				tried[s.Name]++
 			}
-			tried[s.Name]++
 			for _, format := range []string{"json", "text"} {
 				for _, c := range commands {
 					code, stdout, stderr := runDone(c.args, withFormat(env, format)...)
 					got := stdout + stderr
-					if strings.Contains(got, canary) {
-						t.Errorf("%s=%s (%s), %s, log %s: exit %d, the secret is shown:\n%s", s.Env(), form.value, form.name, c.name, format, code, got)
+					if shows(got) {
+						t.Errorf("%s=%s (%s), %s, log %s: exit %d, a secret is shown:\n%s", s.Env(), form.value, form.name, c.name, format, code, got)
 					}
 					// The DSN form is refused at wiring for its sslmode, so it never dials; a PGSSLMODE left in
 					// the environment would let check --offline pass it.
 					if s.Name == "store-postgres-dsn" && form.name == "DSN key=value" && c.name == "check --offline" && code != exitConfig {
 						t.Errorf("check --offline on %s=%s exits %d, want %d: the host's PG* environment reached the DSN", s.Env(), form.value, code, exitConfig)
 					}
+					// A refused cell is refused by every command, naming the setting, so its output is the refusal.
+					if refusing && (code != exitConfig || !strings.Contains(got, s.Env())) {
+						t.Errorf("%s=%s (%s), %s, log %s: exit %d, want %d naming the setting:\n%s", s.Env(), form.value, form.name, c.name, format, code, exitConfig, got)
+					}
 					// --print-config reaches the setting's display line in every accepted cell, so a context
 					// that broke a command could not pass on its empty output.
-					if c.name == "--print-config" && (code != exitOK || !strings.Contains("\n"+got, "\n"+s.Env()+"=")) {
+					if !refusing && c.name == "--print-config" && (code != exitOK || !strings.Contains("\n"+got, "\n"+s.Env()+"=")) {
 						t.Errorf("%s=%s (%s), --print-config, log %s: exit %d, want the setting's line:\n%s", s.Env(), form.value, form.name, format, code, got)
 					}
 				}
 			}
 		}
+	}
+	for name, want := range notYetRefusing {
+		switch {
+		case !slices.ContainsFunc(settings, func(s config.Setting) bool { return s.Name == name }):
+			t.Errorf("notYetRefusing names %s, which is not a setting", name)
+		case want == 0:
+			t.Errorf("notYetRefusing lists %s with no skipped cell: remove it, so its refusals are checked", name)
+		case refused[name] != want:
+			t.Errorf("config refused %d cells of %s at load, want %d (notYetRefusing): change it only for a refusal of a form, and give a setting refused for its context its own context in contextOf", refused[name], name, want)
+		}
+	}
+	if len(refusedTried) < 14 {
+		t.Errorf("config refused forms of %d settings outside notYetRefusing, want at least the 14 whose refusals go through their shape: %v", len(refusedTried), refusedTried)
 	}
 	for _, name := range hidingSettings {
 		switch {
@@ -146,19 +200,14 @@ func TestAnAcceptedValueOfAHidingSettingAppearsInNoCommandsOutput(t *testing.T) 
 			t.Errorf("config accepted no form for %s, so the test checked nothing of it: give it a context in contextOf (and leakContexts)", name)
 		}
 	}
-	if n := sumOf(refused); n != skippedRefusals {
-		t.Errorf("config refused %d of the %d cells at load, want %d (skippedRefusals): change it only for a refusal of a form, and give a setting refused for its context its own context in contextOf; refused per setting: %v",
-			n, len(settings)*len(secretForms), skippedRefusals, refused)
-	}
+
 }
 
-// sumOf is the sum of counts' values.
-func sumOf(counts map[string]int) int {
-	n := 0
-	for _, c := range counts {
-		n += c
-	}
-	return n
+// shows reports whether output shows the canary, in any case (a refusal could lower-case it), or the
+// contexts' own client secret (authEnv's), which only a reader of another setting could reach.
+func shows(output string) bool {
+	lower := strings.ToLower(output)
+	return strings.Contains(lower, strings.ToLower(canary)) || strings.Contains(lower, "s3cret-entra")
 }
 
 // given is how a value is given to s: as itself, or for the stdio upstream's command as an argument

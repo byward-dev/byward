@@ -37,12 +37,12 @@ func TestNoAuthIsRefusedOffLoopback(t *testing.T) {
 		{"listen without port", "BYWARD_LISTEN=0.0.0.0", "BYWARD_LISTEN", ""},
 		{"listen on all IPv6 interfaces", "BYWARD_LISTEN=[::]:8080", "BYWARD_LISTEN must be a loopback address", ""},
 		{"extra host", "BYWARD_ALLOWED_HOSTS=proxy.internal:8080", "BYWARD_ALLOWED_HOSTS may only list loopback hosts", ""},
-		// Named as the operator wrote it, though stored as browsers write it (8.0.0.1).
-		{"extra host spelled in octal", "BYWARD_ALLOWED_HOSTS=010.0.0.1", `BYWARD_ALLOWED_HOSTS may only list loopback hosts, got "010.0.0.1"`, ""},
+		// Named as stored, as browsers write it (8.0.0.1), never as given (ADR-0031 §1).
+		{"extra host spelled in octal", "BYWARD_ALLOWED_HOSTS=010.0.0.1", `BYWARD_ALLOWED_HOSTS may only list loopback hosts, got "8.0.0.1"`, ""},
 		{"two extra hosts, both named", "BYWARD_ALLOWED_HOSTS=proxy.internal,other.internal", `got "proxy.internal"; BYWARD_INSECURE_NO_AUTH: BYWARD_ALLOWED_HOSTS may only list loopback hosts, got "other.internal"`, ""},
 		// Loopback hosts that can match no Host header are refused, not accepted for their host name (#325).
 		// An entry that does not load gets only its own error, never the loopback one too.
-		{"loopback host with a junk port", "BYWARD_ALLOWED_HOSTS=127.0.0.1:abc", `"127.0.0.1:abc" is not a host[:port]`, "may only list loopback hosts"},
+		{"loopback host with a junk port", "BYWARD_ALLOWED_HOSTS=127.0.0.1:abc", `BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (13 characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero`, "may only list loopback hosts"},
 		{"extra origin", "BYWARD_ALLOWED_ORIGINS=https://app.example", "BYWARD_ALLOWED_ORIGINS may only list loopback origins", ""},
 	}
 	for _, c := range cases {

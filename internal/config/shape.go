@@ -12,9 +12,9 @@ import (
 
 // shape is the kind of value a setting holds, which decides how the value is shown (ADR-0031 §3):
 // display gives an accepted value as the startup log and --print-config show it, and refused gives what
-// a refusal of a value for its form will show of it once refusals go through the shape (#494).
-// display's result is one line of printable characters, whatever the value holds, so a value can
-// never start a line of its own in --print-config (#505).
+// a refusal of a value for its form shows of it (refusedForm). display's result is one line of
+// printable characters, whatever the value holds, so a value can never start a line of its own in
+// --print-config (#505).
 // Every registry entry has one, which init checks; build one only with newShape.
 type shape struct {
 	display func(raw string) string
@@ -50,8 +50,7 @@ var (
 	asGivenShape = newShape(displayAsGiven, notShown)
 )
 
-// notShown is what a refusal of a value for its form will show of it (#494): its length only
-// (ADR-0031 §1).
+// notShown is what a refusal of a value for its form shows of it: its length only (ADR-0031 §1).
 func notShown(raw string) string {
 	if n := utf8.RuneCountInString(raw); n != 1 {
 		return fmt.Sprintf("(%d characters, not shown)", n)

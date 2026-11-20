@@ -6,8 +6,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-
-	"github.com/byward-dev/byward/internal/logging"
 )
 
 // OIDCPresets are the IdP values that select the generic OIDC adapter with a preset (ADR-0011 §2);
@@ -70,7 +68,7 @@ func (c *Config) mixedIdPSettings(v *Values, other string) []error {
 func (c *Config) requiredForIdP(v *Values, names ...string) []error {
 	var errs []error
 	for _, s := range names {
-		if v.get(s) == "" {
+		if v.empty(s) {
 			env := v.byKey[s].Setting.Env()
 			if v.byKey[s].Setting.Secret() {
 				env += "_FILE"
@@ -134,9 +132,16 @@ var protocolClaims = []string{"iss", "sub", "aud", "azp", "exp", "iat", "nbf", "
 // oidcIdP reads the generic OIDC adapter's settings (ADR-0011 §2).
 func (c *Config) oidcIdP(v *Values) []error {
 	var errs []error
-	c.OIDCIssuer, c.OIDCClientID = v.get("oidc-issuer"), v.get("oidc-client-id")
+	issuer, issuerErr := parseIssuer(v.value("oidc-issuer"))
+	if issuerErr != nil {
+		errs = append(errs, issuerErr)
+	}
+	c.OIDCIssuer, c.OIDCClientID = issuer, v.get("oidc-client-id")
 	c.OIDCClientSecret, c.OIDCClientKey, c.OIDCClientKeyID = v.get("oidc-client-secret"), v.get("oidc-client-key"), v.get("oidc-client-key-id")
-	c.OIDCScopes, c.OIDCSubjectClaim, c.OIDCName = splitList(v.get("oidc-scopes")), v.get("oidc-subject-claim"), v.get("oidc-name")
+	c.OIDCSubjectClaim, c.OIDCName = v.get("oidc-subject-claim"), v.get("oidc-name")
+	var scopeErrs []error
+	c.OIDCScopes, scopeErrs = parseOIDCScopes(v.value("oidc-scopes"))
+	errs = append(errs, scopeErrs...)
 	c.OIDCRolesClaim, c.OIDCGroupsClaim = v.get("oidc-roles-claim"), v.get("oidc-groups-claim")
 	if c.OIDCIssuer == "" {
 		c.OIDCIssuer = OIDCDefaultIssuers[c.IdP]
@@ -144,25 +149,11 @@ func (c *Config) oidcIdP(v *Values) []error {
 	if c.OIDCIssuer == "" {
 		errs = append(errs, c.requiredForIdP(v, "oidc-issuer")...)
 	}
-	// Refused here, before the startup log lists the settings, and quoted only as logging.Quote does
-	// (security invariant 2): an issuer with a user name or password; one with a query or fragment,
-	// which an issuer never has (OpenID Connect Discovery 1.0 §3, RFC 8414 §2) and which the oidc
-	// adapter accepts on an https issuer, so only this refuses it; and one holding an @ that is no
-	// absolute http(s) URL with a host. An @ in an absolute issuer's path is the IdP's to have. Any
-	// other issuer the adapter judges.
-	issuerEnv := Setting{Name: "oidc-issuer"}.Env()
-	switch u, err := url.Parse(c.OIDCIssuer); {
-	case err == nil && u.User != nil:
-		errs = append(errs, errorf("%s: want the issuer URL without a user name or password, got %s", issuerEnv, logging.Quote(c.OIDCIssuer)))
-	case strings.ContainsAny(c.OIDCIssuer, "?#"):
-		errs = append(errs, errorf("%s: want the issuer URL without a query or fragment, as an issuer has none, got %s", issuerEnv, logging.Quote(c.OIDCIssuer)))
-	case strings.Contains(c.OIDCIssuer, "@") && (err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == ""):
-		errs = append(errs, errorf("%s: want an absolute http(s) URL with a host, got %s", issuerEnv, logging.Quote(c.OIDCIssuer)))
-	case c.Dev && err == nil && u.Scheme == "http" && isLoopback(u.Hostname()):
+	if u, err := url.Parse(c.OIDCIssuer); issuerErr == nil && c.Dev && err == nil && u.Scheme == "http" && isLoopback(u.Hostname()) {
 		// --dev lets the oidc adapter use an http issuer on a loopback host, and http endpoints on
 		// loopback with it (AllowLoopbackHTTP); every relaxation is logged (security invariant 12, #355).
 		c.OIDCLoopbackHTTP = true
-		c.Relaxations = append(c.Relaxations, "http IdP issuer on loopback ("+logging.MarkedURL(c.OIDCIssuer)+"): discovery over http, and the IdP's sign-in page, token endpoint and signing keys over http too where it lists them on loopback")
+		c.Relaxations = append(c.Relaxations, "http IdP issuer on loopback ("+v.display("oidc-issuer")+"): discovery over http, and the IdP's sign-in page, token endpoint and signing keys over http too where it lists them on loopback")
 	}
 	errs = append(errs, c.requiredForIdP(v, "oidc-client-id")...)
 	secret, key := Setting{Name: "oidc-client-secret"}.Env()+"_FILE", Setting{Name: "oidc-client-key"}.Env()+"_FILE"
@@ -188,14 +179,6 @@ func (c *Config) oidcIdP(v *Values) []error {
 		errs = append(errs, errorf("BYWARD_OIDC_CLIENT_KEY_ALG is set without %s", key))
 	case !slices.Contains([]string{"PS256", "RS256", "ES256"}, c.OIDCClientKeyAlg):
 		errs = append(errs, errorf("BYWARD_OIDC_CLIENT_KEY_ALG: want PS256 or RS256 (an RSA key) or ES256 (an EC P-256 key), got %q", c.OIDCClientKeyAlg))
-	}
-	if raw := v.get("oidc-scopes"); raw != "" && len(c.OIDCScopes) == 0 {
-		errs = append(errs, errorf("BYWARD_OIDC_SCOPES is set but lists nothing; remove it or give at least one scope"))
-	}
-	for _, sc := range c.OIDCScopes {
-		if strings.ContainsAny(sc, " \\\"") {
-			errs = append(errs, errorf("BYWARD_OIDC_SCOPES: %s is not a scope", logging.Quote(sc)))
-		}
 	}
 	if strings.TrimSpace(c.OIDCSubjectClaim) == "" {
 		errs = append(errs, errorf("BYWARD_OIDC_SUBJECT_CLAIM: want a claim name, got %q", c.OIDCSubjectClaim))
@@ -247,4 +230,47 @@ func isGUID(s string) bool {
 		}
 	}
 	return true
+}
+
+// parseIssuer reads BYWARD_OIDC_ISSUER as given; empty means a preset's issuer or none. It refuses,
+// before the startup log lists the settings, every issuer the oidc adapter would refuse for its form,
+// and one with a user name or password, a query or a fragment, which an issuer never has (OpenID
+// Connect Discovery 1.0 §3, RFC 8414 §2) and which the adapter accepts on an https issuer: no absolute
+// http(s) URL with a host. A refused issuer is never shown (ADR-0031 §1), where the adapter's error
+// would show its path. Whether http is allowed (only on loopback, with --dev) stays the adapter's.
+func parseIssuer(val Value) (string, error) {
+	s, raw := val.Setting, val.Given.raw()
+	if raw == "" {
+		return "", nil
+	}
+	const want = "the issuer URL, exactly as the IdP's discovery document states it"
+	u, err := url.Parse(raw)
+	reason := urlReason(u, err)
+	switch {
+	case reason != "":
+		reason = "it " + reason
+	case strings.ContainsAny(raw, "?#"):
+		reason = "it has a query or a fragment, which an issuer never has"
+	}
+	if reason != "" {
+		return "", refusedForm(s, whole, raw, want, reason)
+	}
+	return raw, nil
+}
+
+// parseOIDCScopes reads BYWARD_OIDC_SCOPES: comma-separated scopes, none with a space, a backslash or
+// a double quote. A refused scope is never shown (ADR-0031 §1).
+func parseOIDCScopes(val Value) ([]string, []error) {
+	s, raw := val.Setting, val.Given.raw()
+	list, at := entries(raw)
+	if raw != "" && len(list) == 0 {
+		return nil, []error{errorf("%s is set but lists nothing; remove it or give at least one scope", s.Env())}
+	}
+	var errs []error
+	for i, sc := range list {
+		if strings.ContainsAny(sc, " \\\"") {
+			errs = append(errs, refusedForm(s, at(i), sc, "a scope such as openid or email", "it holds a space, a backslash or a double quote"))
+		}
+	}
+	return list, errs
 }

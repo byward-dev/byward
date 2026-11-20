@@ -16,7 +16,6 @@ import (
 	"github.com/byward-dev/byward/internal/doctor"
 	"github.com/byward-dev/byward/internal/downstream"
 	"github.com/byward-dev/byward/internal/envproxy"
-	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/tracing"
 	"github.com/byward-dev/byward/internal/upstream/relay"
@@ -121,7 +120,7 @@ func offlineDownstreamToken(context.Context, stdio.Identity) stdio.DownstreamTok
 func upstreamResult(cfg *config.Config, proxy func(*http.Request) (*url.URL, error)) doctor.Result {
 	r := doctor.CheckUpstream.Result(doctor.Pass, "", "")
 	if cfg.UpstreamCommand == nil {
-		shown := logging.MarkedURL(cfg.UpstreamURL.String()) // a query can hold an API key (#458)
+		shown := cfg.ShownUpstreamURL() // through its shape: a query can hold an API key (#458)
 		r.Message = "HTTP upstream " + shown + "; doctor checks the proxy in front of it, not the upstream itself"
 		switch via, err := proxy(&http.Request{URL: cfg.UpstreamURL}); {
 		case err != nil: // Go's one refusal: HTTP_PROXY while REQUEST_METHOD is set, as under CGI

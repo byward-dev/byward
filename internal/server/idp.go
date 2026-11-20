@@ -19,7 +19,6 @@ import (
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/idp/oidc"
-	"github.com/byward-dev/byward/internal/logging"
 )
 
 // identityProvider is the IdP users sign in with (BYWARD_IDP): its adapter, the name that labels
@@ -163,7 +162,7 @@ func newOIDCIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect 
 	ip := &identityProvider{name: cfg.IdP, redirect: redirect, label: oidcLabel(cfg), adapter: p, scope: p.Scope(), gateIdP: gate.Generic, userKey: oidcUserKey,
 		credentialDesc: credentialDesc,
 		diagnose: func(ctx context.Context, _ time.Time) []doctor.Result {
-			return append(diagnoseDiscovery(ctx, p, cfg.OIDCIssuer, loopbackHTTP), withCredential(p.DiagnoseClient(ctx, oidcDiagnosis(cfg)), credentialDesc, refused))
+			return append(diagnoseDiscovery(ctx, p, cfg, loopbackHTTP), withCredential(p.DiagnoseClient(ctx, oidcDiagnosis(cfg)), credentialDesc, refused))
 		}}
 	if oidc.Presets[preset].HostedDomains {
 		ip.gateIdP = gate.Google // the gate's kind for an IdP with hosted domains
@@ -288,19 +287,21 @@ func describeClientAssertion(info idp.AssertionInfo) string {
 	return d
 }
 
-// diagnoseDiscovery is doctor's check of an oidc IdP: discovery, and that its issuer matches
-// (ADR-0011 §7). loopbackHTTP is config's relaxation for an http issuer on loopback under --dev:
-// only then does the fix not ask for https.
-func diagnoseDiscovery(ctx context.Context, p idp.Readiness, issuer string, loopbackHTTP bool) []doctor.Result {
+// diagnoseDiscovery is doctor's check of an oidc IdP: discovery, and that cfg's issuer, named through
+// its shape (Config.ShownIssuer), matches (ADR-0011 §7). loopbackHTTP is config's relaxation for an
+// http issuer on loopback under --dev, read once beside the adapter's (#355): only then does the fix
+// not ask for https.
+func diagnoseDiscovery(ctx context.Context, p idp.Readiness, cfg *config.Config, loopbackHTTP bool) []doctor.Result {
+	shown := cfg.ShownIssuer()
 	r := doctor.CheckDiscovery.NewResult()
 	if err := p.Ready(ctx); err != nil {
-		r.Status, r.Message = doctor.Fail, "the IdP's discovery document at "+logging.MarkedURL(issuer)+" failed: "+err.Error()
+		r.Status, r.Message = doctor.Fail, "the IdP's discovery document at "+shown+" failed: "+err.Error()
 		r.Fix = "BYWARD_OIDC_ISSUER: set it exactly as the IdP's discovery document states its issuer"
 		if !loopbackHTTP {
 			r.Fix += ", over https"
 		}
 		return []doctor.Result{r}
 	}
-	r.Status, r.Message = doctor.Pass, "discovery at "+logging.MarkedURL(issuer)+" matches the configured issuer"
+	r.Status, r.Message = doctor.Pass, "discovery at "+shown+" matches the configured issuer"
 	return []doctor.Result{r}
 }

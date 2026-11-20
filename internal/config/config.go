@@ -2,11 +2,12 @@ package config
 
 import (
 	"flag"
-	"net"
 	"net/netip"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // Config is the validated configuration.
@@ -198,9 +199,8 @@ var dependentAuthSettings = []func(*Config, *Values) []error{
 // validate checks the resolved settings. container says byward runs in a container; dashes says the
 // command takes a stdio upstream command after --, so an error may suggest one.
 func validate(v *Values, container, dashes bool) (*Config, error) {
-	c := &Config{Values: v, Listen: v.get("listen"), InternalListen: v.get("internal-listen"), Scope: v.get("scope"),
-		ResourceName: v.get("resource-name"), ResourceDocumentation: v.get("resource-documentation"),
-		LogFormat: v.get("log-format"), InContainer: container}
+	c := &Config{Values: v, Scope: v.get("scope"), ResourceName: v.get("resource-name"), LogFormat: v.get("log-format"),
+		InContainer: container}
 	var errs []error
 	// Parsed straight into the field: --dev is read only as Config.Dev, where the guard test counts
 	// every reader (#355).
@@ -224,7 +224,7 @@ func validate(v *Values, container, dashes bool) (*Config, error) {
 		c.Relaxations = append(c.Relaxations, relaxed)
 	}
 
-	c.PublicURL, err = ParsePublicURL(v.get("public-url"))
+	c.PublicURL, err = parsePublicURL(v.value("public-url"))
 	if err != nil {
 		errs = append(errs, err)
 	} else {
@@ -240,50 +240,37 @@ func validate(v *Values, container, dashes bool) (*Config, error) {
 	errs = append(errs, c.upstream(v, dashes)...)
 	errs = append(errs, c.tls(v)...)
 
-	if _, _, err := net.SplitHostPort(c.Listen); err != nil {
-		errs = append(errs, errorf("BYWARD_LISTEN: want host:port, got %q", c.Listen))
+	if c.Listen, err = parseListen(v.value("listen"), "host:port such as 127.0.0.1:8080"); err != nil {
+		errs = append(errs, err)
 	}
-	if c.InternalListen != "" {
-		if _, _, err := net.SplitHostPort(c.InternalListen); err != nil {
-			errs = append(errs, errorf("BYWARD_INTERNAL_LISTEN: want host:port or empty, got %q", c.InternalListen))
+	if !v.empty("internal-listen") {
+		if c.InternalListen, err = parseListen(v.value("internal-listen"), "host:port such as 127.0.0.1:9090, or empty"); err != nil {
+			errs = append(errs, err)
 		} else if c.InternalListen == c.Listen && !strings.HasSuffix(c.Listen, ":0") {
 			errs = append(errs, errorf("BYWARD_INTERNAL_LISTEN: must differ from BYWARD_LISTEN; metrics and probes never share the public listener"))
 		}
 	}
-	for _, o := range splitList(v.get("allowed-origins")) {
-		n, err := normalizeOrigin(o)
-		if err != nil {
-			errs = append(errs, errorf("BYWARD_ALLOWED_ORIGINS: %v", err))
-			continue
-		}
-		c.AllowedOrigins = append(c.AllowedOrigins, n)
-	}
-	c.TrustedProxies, err = parseProxies(v.get("trusted-proxies"))
-	if err != nil {
+	var originErrs []error
+	c.AllowedOrigins, originErrs = parseOrigins(v.value("allowed-origins"))
+	errs = append(errs, originErrs...)
+	if c.TrustedProxies, err = parseProxies(v.value("trusted-proxies")); err != nil {
 		errs = append(errs, err)
 	}
 	c.OAuthRateLimits, err = parseRateLimits(v.get("oauth-rate-limits"))
 	if err != nil {
 		errs = append(errs, err)
 	}
-	for _, h := range splitList(v.get("allowed-hosts")) {
-		n, err := normalizeAllowedHost(h) // #323, #325
-		if err != nil {
-			errs = append(errs, errorf("BYWARD_ALLOWED_HOSTS: %v", err))
-			continue
-		}
-		c.AllowedHosts = append(c.AllowedHosts, n)
-	}
+	var hostErrs []error
+	c.AllowedHosts, hostErrs = parseAllowedHosts(v.value("allowed-hosts"))
+	errs = append(errs, hostErrs...)
 	if c.LogFormat != "json" && c.LogFormat != "text" {
 		errs = append(errs, errorf("BYWARD_LOG_FORMAT: want json or text, got %q", c.LogFormat))
 	}
 	if c.Scope == "" || strings.ContainsAny(c.Scope, " \"\\") {
 		errs = append(errs, errorf("BYWARD_SCOPE: want one scope token, got %q", c.Scope))
 	}
-	if d := c.ResourceDocumentation; d != "" {
-		if _, err := parseURL("resource-documentation", d); err != nil {
-			errs = append(errs, err)
-		}
+	if c.ResourceDocumentation, err = parseResourceDocumentation(v.value("resource-documentation")); err != nil {
+		errs = append(errs, err)
 	}
 	if c.NoAuth && c.PublicURL != nil {
 		errs = append(errs, checkNoAuth(c, v)...)
@@ -315,6 +302,28 @@ func validate(v *Values, container, dashes bool) (*Config, error) {
 
 // Origin is the public URL's origin as browsers send it (browserOrigin).
 func (c *Config) Origin() string { return browserOrigin(c.PublicURL) }
+
+// ShownUpstreamURL is the HTTP upstream's URL as doctor names it: through BYWARD_UPSTREAM_URL's
+// shape, as the proxy parsed it, not as given (Values.display), so it is the URL the identity
+// assertion's aud names. A Config built by hand, without Values, shows it as Hidden.
+func (c *Config) ShownUpstreamURL() string {
+	if c.Values == nil || c.UpstreamURL == nil {
+		return logging.Hidden
+	}
+	return lookup("upstream-url").shape.display(c.UpstreamURL.String())
+}
+
+// ShownIssuer is the oidc IdP's issuer as doctor names it: through BYWARD_OIDC_ISSUER's shape, or,
+// when that is unset, the preset's own issuer (OIDCDefaultIssuers), which is byward's.
+func (c *Config) ShownIssuer() string {
+	switch {
+	case !c.Values.holds("oidc-issuer"):
+		return logging.Hidden
+	case !c.Values.empty("oidc-issuer"):
+		return c.Values.display("oidc-issuer")
+	}
+	return c.OIDCIssuer
+}
 
 // Issuer is the broker's issuer, derived once from the public URL: its scheme, host and port.
 func (c *Config) Issuer() string { return c.PublicURL.Scheme + "://" + c.PublicURL.Host }

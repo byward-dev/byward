@@ -83,13 +83,14 @@ func TestADeniedHostIsRefusedAtRegistration(t *testing.T) {
 	}
 }
 
-// A denylist entry that is not a valid CIMD client ID refuses to start, naming the setting (a host
-// entry that is not a host name, and a CIMD entry that can carry a credential, are refused earlier,
-// by config).
+// A denylist entry that is not a valid CIMD client ID refuses to start, naming the setting and the
+// entry's place and length, never the entry (a host entry that is not a host name, and a CIMD entry
+// that can carry a credential, are refused earlier, by config). The whole message is pinned: registration
+// gives the reason, config the rest.
 func TestABadDenylistEntryRefusesToStartNamingTheSetting(t *testing.T) {
-	cfg := loadConfig(t, "https://m.example/mcp", "BYWARD_CLIENT_DENYLIST=https://app.example:8443/client.json")
-	if _, err := New(cfg, logging.New(io.Discard, "json")); err == nil || !strings.Contains(err.Error(), `BYWARD_CLIENT_DENYLIST: "https://app.example:8443/client.json": `) {
-		t.Fatalf("New with a bad denylist entry: %v, want an error naming BYWARD_CLIENT_DENYLIST and the entry", err)
+	cfg := loadConfig(t, "https://m.example/mcp", "BYWARD_CLIENT_DENYLIST=good.example, https://app.example:8443/client.json")
+	if _, err := New(cfg, logging.New(io.Discard, "json")); err == nil || err.Error() != "BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 2 of 2 (36 characters, not shown): it is not a client ID metadata document URL: only port 443 is fetched" {
+		t.Fatalf("New with a bad denylist entry: %v, want an error naming BYWARD_CLIENT_DENYLIST and the entry's place", err)
 	}
 }
 

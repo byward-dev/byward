@@ -78,8 +78,8 @@ func TestLoadEnvironmentNeverSuggestsACommandAfterDashesWhereLoadDoes(t *testing
 	}{
 		{"no upstream", "", "BYWARD_UPSTREAM_URL is required (or BYWARD_UPSTREAM_COMMAND)",
 			"BYWARD_UPSTREAM_URL is required (or BYWARD_UPSTREAM_COMMAND, or a command after --)"},
-		{"a malformed upstream URL", "BYWARD_UPSTREAM_URL=ftp://u/mcp", `BYWARD_UPSTREAM_URL: want an absolute http(s) URL, got "ftp://u/mcp" (or BYWARD_UPSTREAM_COMMAND)`,
-			`BYWARD_UPSTREAM_URL: want an absolute http(s) URL, got "ftp://u/mcp" (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
+		{"a malformed upstream URL", "BYWARD_UPSTREAM_URL=ftp://u/mcp", `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (11 characters, not shown): it has a scheme other than http or https (or BYWARD_UPSTREAM_COMMAND)`,
+			`BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (11 characters, not shown): it has a scheme other than http or https (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := stdioBase()
@@ -202,7 +202,7 @@ func describeSetting(v Value, present bool) string {
 	if !present {
 		return "absent"
 	}
-	return fmt.Sprintf("%q from %v, path %q named by %q", v.Raw, v.Source, v.Path, v.From)
+	return fmt.Sprintf("%q from %v, path %q named by %q", v.Given.raw(), v.Source, v.Path, v.From)
 }
 
 func TestInvalidStdioSettingsAreRejectedNamingTheSetting(t *testing.T) {

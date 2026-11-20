@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
+	"slices"
 	"strings"
 	"testing"
-
-	"github.com/byward-dev/byward/internal/logging"
 
 	"github.com/byward-dev/byward/internal/store/memory"
 	"github.com/byward-dev/byward/internal/testutil/fakeclock"
@@ -36,26 +34,27 @@ func TestDenylistEntriesAreCIMDClientIDsOrHostNames(t *testing.T) {
 	}
 }
 
-// A CIMD client ID refused for its user information, query or fragment is named by its scheme, host
-// and path only: the refusal is a startup error, and those parts may hold a credential (security
-// invariant 2). One refused for anything else is named whole when it holds no @, ? or #, and not at
-// all when it does, as logging.Quote decides.
-func TestARefusedDenylistEntryNeverShowsItsUserInformationQueryOrFragment(t *testing.T) {
+// A refused denylist entry is an *EntryError: its place in the list and a fixed reason, never the entry
+// (ADR-0031 §1), which config names by its length (Config.RefusedDenylistEntry).
+func TestARefusedDenylistEntryIsNamedByItsPlaceNeverShown(t *testing.T) {
 	const secret = "s3cretPW"
-	for _, entry := range []string{"https://user:" + secret + "@app.example/c.json", "https://app.example/c.json?token=" + secret,
-		"https://app.example/c.json#" + secret} {
-		_, err := NewDenylist([]string{entry})
-		if err == nil || strings.Contains(err.Error(), secret) || !strings.Contains(err.Error(), `"https://app.example/c.json"`) {
-			t.Errorf("%q: %v, want a refusal naming https://app.example/c.json and not the secret", entry, err)
+	for entry, reason := range map[string]string{
+		"https://user:" + secret + "@app.example/c.json":   "it is not a client ID metadata document URL: must not contain user information",
+		"https://app.example/c.json?token=" + secret:       "it is not a client ID metadata document URL: must not have a query",
+		"https://app.example/c.json#" + secret:             "it is not a client ID metadata document URL: must not have a fragment",
+		"https://app " + secret + ".example/c.json":        "it is not a client ID metadata document URL: must be printable ASCII",
+		"https://app.example:" + secret + "/c.json":        "it is not a client ID metadata document URL: not an absolute URL",
+		"https://app.example:8443/" + secret + "@x/c.json": "it is not a client ID metadata document URL: only port 443 is fetched",
+		"http://" + secret + ".example/c.json":             "it is neither a CIMD client ID (https URL) nor a host name",
+	} {
+		for _, list := range [][]string{{entry, "good.example"}, {"good.example", entry}} {
+			_, err := NewDenylist(list)
+			at := slices.Index(list, entry)
+			var ee *EntryError
+			if !errors.As(err, &ee) || ee.Index != at || ee.Reason != reason || err.Error() != fmt.Sprintf("entry %d: %s", at+1, reason) || strings.Contains(err.Error(), secret) {
+				t.Errorf("%q at %d: %v, want entry %d refused as %q, never the entry", entry, at, err, at+1, reason)
+			}
 		}
-	}
-	for _, entry := range []string{"https://app example/c.json", "https://app.example:abc/c.json"} {
-		if _, err := NewDenylist([]string{entry}); err == nil || !strings.Contains(err.Error(), strconv.Quote(entry)) {
-			t.Errorf("%q: %v, want a refusal naming the entry whole", entry, err)
-		}
-	}
-	if _, err := NewDenylist([]string{"https://app.example:8443/u@x/c.json"}); err == nil || !strings.Contains(err.Error(), logging.Hidden) {
-		t.Errorf("an entry with an @ in its path refused for its port: %v, want it not shown", err)
 	}
 }
 

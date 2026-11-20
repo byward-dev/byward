@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"net"
 	"net/netip"
 	"net/url"
@@ -10,7 +9,6 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/ratelimit"
 )
 
@@ -42,46 +40,56 @@ func checkInlineSecrets(v *Values, dev bool) (relaxation string, err error) {
 }
 
 // ParsePublicURL validates the public URL of the MCP endpoint, as `byward init entra` also needs it:
-// absolute, an ASCII host[:port] that BYWARD_ALLOWED_HOSTS would accept (normalizeAllowedHost: an IP
-// address or a name following validHostName's rule, a port from 1 to 65535 without a leading zero,
-// no IPv6 zone), no host ending in a number unless it is an IPv4 address in dotted decimal
-// (browserIPv4), an IPv6 address or a host name only in the form browsers write it (browserHost: a
-// name in lower case), a path without a trailing slash, no query or fragment, and https unless the
-// host is loopback (which the proxy itself accepts only with --dev).
+// absolute, an ASCII host[:port] that BYWARD_ALLOWED_HOSTS would accept (hostPort: an IP address or a
+// name following validHostName's rule, a port from 1 to 65535 without a leading zero, no IPv6 zone),
+// no host ending in a number unless it is an IPv4 address in dotted decimal (browserIPv4), an IPv6
+// address or a host name only in the form browsers write it (browserHost: a name in lower case), a
+// path without a trailing slash, no query or fragment, and https unless the host is loopback (which
+// the proxy itself accepts only with --dev). A refusal never shows the value as given (ADR-0031 §1),
+// nor its host: a token is a valid host name. It shows an IP address only as browsers would write it.
 func ParsePublicURL(raw string) (*url.URL, error) {
-	u, err := parseURL("public-url", raw)
+	s := lookup("public-url")
+	u, err := parseURLOf(s, raw)
 	if err != nil {
 		return nil, err
 	}
-	var errs []string
+	const want = "the MCP endpoint's URL such as https://mcp.example.com/mcp"
 	if u.Hostname() == "" {
-		errs = append(errs, "BYWARD_PUBLIC_URL: give a host, e.g. https://mcp.example.com/mcp")
-	} else if _, err := normalizeAllowedHost(u.Host); err != nil {
+		return nil, refusedForm(s, whole, raw, want, "it has no host before its port")
+	}
+	if _, reason := hostPort(u.Host); reason != "" {
 		// host:port joins the public listener's Host allow-list, so it follows BYWARD_ALLOWED_HOSTS'
-		// rules (#344, #353).
-		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: %v", err))
-	} else if err := browserIPv4(u.Hostname()); err != nil {
+		// rules (#344, #353). The rest is not checked: the host is not shown, so the URL is not either.
+		return nil, refusedForm(s, whole, raw, want, "its host:port "+reason)
+	}
+	// The host as browsers write it: the public URL is also the issuer, the resource and the IdP
+	// redirect URI, which browser clients compare with the URL they hold, in the form they write.
+	const wantBrowserHost = "the MCP endpoint's URL with its host as browsers write it"
+	var errs []string
+	h := u.Hostname()
+	if reason := browserIPv4(h); reason != "" {
 		// A browser never sends such a host back, so its sign-in could never finish.
-		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: %v", err))
-	} else if h := u.Hostname(); strings.Contains(h, ":") && "["+h+"]" != browserHost(h) {
+		errs = append(errs, refusedForm(s, whole, raw, want, "its host "+reason).Error())
+	} else if bh := browserHost(h); strings.Contains(h, ":") && "["+h+"]" != bh {
 		// The public URL is also the issuer, the resource and the IdP redirect URI, which browser
 		// clients compare with the URL they hold, in the form they write (#447).
-		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: the IPv6 address [%s] is not in the form browsers write it; write it as %s", h, browserHost(h)))
-	} else if !strings.Contains(h, ":") && h != browserHost(h) {
+		errs = append(errs, refusedForm(s, whole, raw, wantBrowserHost, "its IPv6 address is not in the form browsers write it; write it as "+bh).Error())
+	} else if !strings.Contains(h, ":") && h != bh {
 		// The same for a host name: a browser lower-cases it, and byward does not rewrite it, since the
 		// IdP's redirect URI is registered as written (#472).
-		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: the host name %s is not in the form browsers write it; write it as %s", h, browserHost(h)))
+		// The host is not shown, not even in lower case: a token is a valid host name.
+		errs = append(errs, refusedForm(s, whole, raw, wantBrowserHost, "its host name has upper-case letters; write it in lower case, as browsers do").Error())
 	}
 	if u.Path == "" || strings.HasSuffix(u.Path, "/") {
-		// The example names the host as browsers write it, as the host rules above ask.
-		errs = append(errs, fmt.Sprintf("BYWARD_PUBLIC_URL: give the MCP endpoint path without a trailing slash, e.g. https://%s/mcp", CanonicalHost(u.Host)))
+		errs = append(errs, refusedMeaning(s, whole, "a path that is empty or ends in /", "the MCP endpoint's path without a trailing slash, e.g. https://mcp.example.com/mcp",
+			"give the endpoint's path, without the trailing slash").Error())
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
-		errs = append(errs, "BYWARD_PUBLIC_URL: must not have a query or fragment")
+		errs = append(errs, refusedMeaning(s, whole, "a query or fragment, not shown", "a URL without a query or fragment", "remove it").Error())
 	}
 	// LOCALHOST is loopback too; the host name rule above already refuses its spelling.
-	if u.Scheme == "http" && !isLoopback(strings.ToLower(u.Hostname())) {
-		errs = append(errs, "BYWARD_PUBLIC_URL: must use https (http is allowed only for loopback hosts with --dev)")
+	if u.Scheme == "http" && !isLoopback(strings.ToLower(h)) {
+		errs = append(errs, refusedMeaning(s, whole, "http", "https (http only on a loopback host, with --dev)", "give https, or a loopback host").Error())
 	}
 	if len(errs) > 0 {
 		return nil, &configError{msg: strings.Join(errs, "; ")}
@@ -94,25 +102,65 @@ func RedirectURL(publicURL *url.URL, idpName string) string {
 	return (&Config{PublicURL: publicURL}).Issuer() + "/callback/" + idpName
 }
 
+// parsePublicURL reads BYWARD_PUBLIC_URL (ParsePublicURL).
+func parsePublicURL(val Value) (*url.URL, error) { return ParsePublicURL(val.Given.raw()) }
+
+// parseResourceDocumentation reads BYWARD_RESOURCE_DOCUMENTATION: empty, or an absolute http(s) URL.
+func parseResourceDocumentation(val Value) (string, error) {
+	if val.Given.empty() {
+		return "", nil
+	}
+	if _, err := parseURL("resource-documentation", val.Given.raw()); err != nil {
+		return "", err
+	}
+	return val.Given.raw(), nil
+}
+
 // ParseUpstreamURL validates the HTTP upstream's URL as the proxy reads BYWARD_UPSTREAM_URL, as
 // `byward init entra` also needs it.
 func ParseUpstreamURL(raw string) (*url.URL, error) { return parseURL("upstream-url", raw) }
 
-// parseURL validates an absolute http(s) URL setting. Its errors quote the value only as
-// logging.Quote does: never a user name, password, query or fragment (security invariant 2).
-func parseURL(name, raw string) (*url.URL, error) {
-	env := Setting{Name: name}.Env()
+// parseUpstreamURL reads BYWARD_UPSTREAM_URL (ParseUpstreamURL).
+func parseUpstreamURL(val Value) (*url.URL, error) { return ParseUpstreamURL(val.Given.raw()) }
+
+// parseURL validates an absolute http(s) URL setting, name, which has urlShape
+// (TestEverySettingReadAsAURLHasAURLShape). Its refusal goes through the registry entry's shape: name
+// is a literal at each call (that test follows it), and the exported parsers byward init uses have no
+// Values to take a Value from. A URL refused for its form is never shown (ADR-0031 §1), nor is
+// url.Parse's error, which holds the whole value: the refusal gives a fixed reason.
+func parseURL(name, raw string) (*url.URL, error) { return parseURLOf(lookup(name), raw) }
+
+// parseURLOf is parseURL for the setting s.
+func parseURLOf(s Setting, raw string) (*url.URL, error) {
 	if raw == "" {
-		return nil, errorf("%s is required", env)
+		return nil, errorf("%s is required", s.Env())
 	}
 	u, err := url.Parse(raw)
-	switch {
-	case err == nil && u.User != nil:
-		return nil, errorf("%s: want an absolute http(s) URL without a user name or password, got %s", env, logging.Quote(raw))
-	case err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "":
-		return nil, errorf("%s: want an absolute http(s) URL, got %s", env, logging.Quote(raw))
+	if reason := urlReason(u, err); reason != "" {
+		return nil, refusedForm(s, whole, raw, "an absolute http(s) URL", "it "+reason)
 	}
 	return u, nil
+}
+
+// urlReason says why url.Parse's result u (or its error err) is not an absolute http(s) URL with a
+// host and no user name or password, or "" when it is: fixed text completing "it …", never
+// url.Parse's error.
+func urlReason(u *url.URL, err error) string {
+	switch {
+	case err != nil:
+		return "does not parse as a URL"
+	case u.Scheme == "":
+		return "has no scheme such as https://"
+	case u.Scheme != "https" && u.Scheme != "http":
+		return "has a scheme other than http or https"
+	case u.Opaque != "":
+		return `has no "//" after its scheme`
+	case u.Host == "":
+		return "has no host"
+	case u.User != nil:
+		return "holds a user name or password"
+	}
+	return ""
 }
 
 // Bounds of a configured OAuth rate limit (ADR-0018 Consequences: configurable within bounds). There
@@ -139,31 +187,36 @@ func parseRateLimits(raw string) (map[string]int, error) {
 	return out, nil
 }
 
-func parseProxies(raw string) ([]netip.Prefix, error) {
+// parseProxies reads BYWARD_TRUSTED_PROXIES. An entry that is not a CIDR or an IP address is
+// never shown (ADR-0031 §1); one refused for what it names is shown as netip read it, without a zone.
+func parseProxies(val Value) ([]netip.Prefix, error) {
+	s, raw := val.Setting, val.Given.raw()
+	const want = "a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1"
 	var out []netip.Prefix
-	for _, item := range splitList(raw) {
+	list, at := entries(raw)
+	for i, item := range list {
 		zoned := false
 		p, err := netip.ParsePrefix(item)
 		switch {
 		case err != nil:
 			a, aerr := netip.ParseAddr(item)
 			if aerr != nil {
-				return nil, errorf("BYWARD_TRUSTED_PROXIES: %s is not a CIDR or an IP address", logging.Quote(item))
+				return nil, refusedForm(s, at(i), item, want, "it is neither a CIDR nor an IP address")
 			}
 			// A zone runs to the end of the entry: "fe80::1%eth0/64" is fe80::1 in zone "eth0/64".
 			zoned, a = a.Zone() != "", a.WithZone("").Unmap()
 			p = netip.PrefixFrom(a, a.BitLen())
 		case p.Addr().Is4In6() && p.Bits() < 96: // masked, ::ffff:10.0.0.0/8 is ::/8: it would trust IPv6 peers
-			return nil, errorf("BYWARD_TRUSTED_PROXIES: %q is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)", item)
+			return nil, refusedMeaning(s, at(i), p.String(), want, "it is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)")
 		case p.Addr().Is4In6(): // peers are compared unmapped (logging.ClientAddress), as a bare mapped address is here
 			p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
 		}
 		// Link-local first: removing the zone from "fe80::1%eth0" would only meet this refusal.
 		switch p = p.Masked(); {
 		case linkLocal.Contains(p.Addr()) && p.Bits() >= linkLocal.Bits():
-			return nil, errorf("BYWARD_TRUSTED_PROXIES: %q is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR", item)
+			return nil, refusedMeaning(s, at(i), p.String(), want, "it is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR")
 		case zoned:
-			return nil, errorf("BYWARD_TRUSTED_PROXIES: %q has an IPv6 zone: give the proxy's routable address or CIDR, without a zone", item)
+			return nil, refusedMeaning(s, at(i), p.Addr().String(), want, "it has an IPv6 zone, not shown: give the proxy's routable address or CIDR, without a zone")
 		}
 		out = append(out, p)
 	}
@@ -185,93 +238,154 @@ func splitList(s string) []string {
 	return out
 }
 
-// normalizeOrigin returns an origin as browsers send it (browserOrigin), with its host[:port]
-// checked as BYWARD_ALLOWED_HOSTS checks one (normalizeAllowedHost), and refused when no browser
-// could send it (browserIPv4).
-func normalizeOrigin(o string) (string, error) {
-	u, err := url.Parse(o)
-	switch {
-	case err == nil && u.User != nil:
-		return "", fmt.Errorf("%s is not an origin (scheme://host[:port]): it has a user name or password", logging.Quote(o))
-	case strings.ContainsAny(o, "?#"):
-		return "", fmt.Errorf("%s is not an origin (scheme://host[:port]): it has a query or a fragment", logging.Quote(o))
-	case err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Path != "":
-		return "", fmt.Errorf("%s is not an origin (scheme://host[:port])", logging.Quote(o))
-	}
-	if _, err := normalizeAllowedHost(u.Host); err != nil {
-		return "", fmt.Errorf("%s: %w", logging.Quote(o), err)
-	}
-	if err := browserIPv4(u.Hostname()); err != nil {
-		return "", fmt.Errorf("%s: %w", logging.Quote(o), err)
-	}
-	return browserOrigin(u), nil
-}
-
-// asciiHost refuses a host with non-ASCII characters. Browsers and MCP clients send an
-// internationalized host in its ASCII (xn--) form in Host, Origin and every URL they compare
-// (WHATWG URL "domain to ASCII", RFC 6454 §7.3), so a Unicode host here could never match them.
-func asciiHost(host string) error {
-	if strings.ContainsFunc(host, func(r rune) bool { return r >= 0x80 }) {
-		const fix = "give its ASCII (xn--) form, which is what browsers and MCP clients send"
-		if q := logging.Quote(host); q != logging.Hidden {
-			return fmt.Errorf("the host %s is not ASCII; %s", q, fix)
+// parseOrigins reads BYWARD_ALLOWED_ORIGINS: each origin as browsers send it (browserOrigin),
+// with its host[:port] checked as BYWARD_ALLOWED_HOSTS checks one (hostPort), and refused when no
+// browser could send it (browserIPv4). A refused entry is never shown (ADR-0031 §1).
+func parseOrigins(val Value) ([]string, []error) {
+	s, raw := val.Setting, val.Given.raw()
+	const want = "an origin (scheme://host[:port]) such as https://app.example"
+	var out []string
+	var errs []error
+	list, at := entries(raw)
+	for i, o := range list {
+		u, reason := parseOrigin(o)
+		if reason != "" {
+			errs = append(errs, refusedForm(s, at(i), o, want, reason))
+			continue
 		}
-		return fmt.Errorf("%s has a host that is not ASCII; %s", logging.Hidden, fix)
+		out = append(out, browserOrigin(u))
 	}
-	return nil
+	return out, errs
 }
 
-// normalizeAllowedHost returns a BYWARD_ALLOWED_HOSTS entry, or BYWARD_PUBLIC_URL's host:port,
-// which joins the same list, as the public listener compares it with a Host header (CanonicalHost):
-// in lower case, an IPv4 address in dotted decimal (127.1 is 127.0.0.1), and an IPv6 address in
-// brackets in its shortest form.
-// It refuses any form a Host header cannot carry, since such an entry could never match there.
+// parseOrigin is o parsed as an origin a browser sends, or why it is not one, as a clause ("it has
+// a path").
+func parseOrigin(o string) (*url.URL, string) {
+	u, err := url.Parse(o)
+	if reason := urlReason(u, err); reason != "" {
+		return nil, "it " + reason
+	}
+	switch {
+	case strings.ContainsAny(o, "?#"):
+		return nil, "it has a query or a fragment"
+	case u.Path != "":
+		return nil, "it has a path"
+	}
+	if _, reason := hostPort(u.Host); reason != "" {
+		return nil, "its host:port " + reason
+	}
+	if reason := browserIPv4(u.Hostname()); reason != "" {
+		return nil, "its host " + reason
+	}
+	return u, ""
+}
+
+// reasonNotASCII is why a host with a non-ASCII character is refused. Browsers and MCP clients send
+// an internationalized host in its ASCII (xn--) form in Host, Origin and every URL they compare
+// (WHATWG URL "domain to ASCII", RFC 6454 §7.3), so a Unicode host here could never match them.
+const reasonNotASCII = "holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send"
+
+// notASCII reports whether s holds a character that is not ASCII.
+func notASCII(s string) bool { return strings.ContainsFunc(s, func(r rune) bool { return r >= 0x80 }) }
+
+// hostPortForms are the forms a host[:port] may take, for its refusals.
+const hostPortForms = "give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone"
+
+// hostPort is a BYWARD_ALLOWED_HOSTS entry, or BYWARD_PUBLIC_URL's host:port, which joins the same
+// list, as the public listener compares it with a Host header (CanonicalHost): in lower case, an IPv4
+// address in dotted decimal (127.1 is 127.0.0.1), and an IPv6 address in brackets in its shortest
+// form. It refuses any form a Host header cannot carry, since such an entry could never match there,
+// with a fixed reason that completes "it …" and never repeats the entry.
 // Accepted: host or host:port (a host may be an IPv4 address), [IPv6], [IPv6]:port, or a bare IPv6
 // address taken whole (never as IPv6:port); a port from 1 to 65535 without a sign or leading zero,
 // and no IPv6 zone.
-func normalizeAllowedHost(h string) (string, error) {
-	if err := asciiHost(h); err != nil {
-		return "", err
+func hostPort(h string) (stored, reason string) {
+	if notASCII(h) {
+		return "", reasonNotASCII
 	}
-	invalid := fmt.Errorf("%s is not a host[:port]: give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone", logging.Quote(h))
 	if strings.ContainsAny(h, "/ ") {
-		return "", invalid
+		return "", `holds a "/" or a space; ` + hostPortForms
 	}
 	stored, v6, port, isV6, hasPort := h, "", "", false, false
 	switch {
 	case strings.HasPrefix(h, "["):
 		inner, rest, ok := strings.Cut(h[1:], "]")
 		if !ok || (rest != "" && !strings.HasPrefix(rest, ":")) {
-			return "", invalid
+			return "", "has brackets that do not enclose an IPv6 address alone; " + hostPortForms
 		}
 		v6, isV6, port, hasPort = inner, true, strings.TrimPrefix(rest, ":"), rest != ""
 	case strings.ContainsAny(h, "[]"):
-		return "", invalid
+		return "", "has brackets that do not enclose an IPv6 address alone; " + hostPortForms
 	case strings.Count(h, ":") > 1:
 		v6, isV6, stored = h, true, "["+h+"]"
 	default:
 		host, p, ok := strings.Cut(h, ":")
 		if host == "" {
-			return "", invalid
+			return "", `has no host before its ":"; ` + hostPortForms
 		}
 		if !validHostName(host) {
-			return "", fmt.Errorf("%s is not a host[:port]: %s", logging.Quote(h), hostNameRule)
+			return "", "breaks the host name rule: " + hostNameRule
 		}
 		port, hasPort = p, ok
 	}
 	if isV6 {
 		ip, err := netip.ParseAddr(v6)
 		if err != nil || !ip.Is6() || ip.Zone() != "" {
-			return "", invalid
+			return "", "is not an IPv6 address without a zone; " + hostPortForms
 		}
 	}
 	if hasPort {
 		// No sign, no leading zero: "+80", "-1", "0" and "080" all sort below '1'.
 		if n, err := strconv.Atoi(port); err != nil || port[0] < '1' || n > 65535 {
-			return "", invalid
+			return "", "has a port that is not a number from 1 to 65535 without a sign or leading zero"
 		}
 	}
-	return CanonicalHost(stored), nil
+	return CanonicalHost(stored), ""
+}
+
+// parseAllowedHosts reads BYWARD_ALLOWED_HOSTS (#323, #325): each entry as hostPort stores it.
+// A refused entry is never shown (ADR-0031 §1).
+func parseAllowedHosts(val Value) ([]string, []error) {
+	s, raw := val.Setting, val.Given.raw()
+	var out []string
+	var errs []error
+	list, at := entries(raw)
+	for i, h := range list {
+		n, reason := hostPort(h)
+		if reason != "" {
+			errs = append(errs, refusedForm(s, at(i), h, "a host[:port] such as mcp.example.com or 127.0.0.1:8080", "it "+reason))
+			continue
+		}
+		out = append(out, n)
+	}
+	return out, errs
+}
+
+// parseListen reads a listen address setting: host:port, the host empty, an IP address (an IPv6 one
+// may have a zone, as for a link-local address) or a host name (validHostName, one trailing dot
+// allowed), the port a number from 0 to 65535, as net.Listen takes it. A refused address is
+// never shown (ADR-0031 §1): net.Listen's own error would quote it.
+func parseListen(val Value, want string) (string, error) {
+	s, raw := val.Setting, val.Given.raw()
+	host, port, err := net.SplitHostPort(raw)
+	_, ipErr := netip.ParseAddr(host) // an IPv6 address may have a zone, as a link-local one needs
+	var reason string
+	switch {
+	case err != nil:
+		reason = "is not host:port"
+	case host != "" && !validHostName(strings.TrimSuffix(host, ".")) && ipErr != nil:
+		reason = "has a host that is neither an IP address nor a host name"
+	case port == "" || strings.Trim(port, "0123456789") != "":
+		reason = "has a port that is not a number"
+	default:
+		if n, err := strconv.Atoi(port); err != nil || n > 65535 { // too many digits for an int is above too
+			reason = "has a port that is not a number from 0 to 65535"
+		}
+	}
+	if reason != "" {
+		return "", refusedForm(s, whole, raw, want, "it "+reason)
+	}
+	return raw, nil
 }
 
 // hostNameRule is what validHostName requires, for the errors of the settings that use it.

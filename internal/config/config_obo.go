@@ -1,10 +1,6 @@
 package config
 
-import (
-	"strings"
-
-	"github.com/byward-dev/byward/internal/logging"
-)
+import "strings"
 
 // oidcScopes are login scopes, never a downstream API's.
 var oidcScopes = map[string]bool{"openid": true, "profile": true, "email": true, "offline_access": true}
@@ -36,32 +32,9 @@ func scopeSlash(s string) int {
 func (c *Config) onBehalfOf(v *Values) []error {
 	sEnv, hEnv := Setting{Name: "obo-scopes"}.Env(), Setting{Name: "obo-header"}.Env()
 	var errs []error
-	c.OBOScopes = strings.Fields(v.get("obo-scopes"))
-	// api is how an error may name a scope's API: the API part, or, when the scope holds an @, ? or #,
-	// the whole scope as logging.Quote shows it, since a password holding a / splits at that /.
-	api := func(scope string, i int) string {
-		if strings.ContainsAny(scope, "@?#") {
-			return logging.Quote(scope)
-		}
-		return logging.Quote(scope[:i])
-	}
-	resource, first := "", ""
-	for _, s := range c.OBOScopes {
-		i := scopeSlash(s)
-		switch {
-		case oidcScopes[strings.ToLower(s)]:
-			errs = append(errs, errorf("%s: %s is a sign-in scope, not a downstream API's; give the API's scopes, e.g. https://graph.microsoft.com/User.Read", sEnv, s))
-		case i < 0:
-			errs = append(errs, errorf("%s: %s is not a scope URI such as https://graph.microsoft.com/User.Read, api://<app>/<scope> or <app ID>/<scope>", sEnv, logging.Quote(s)))
-		case resource == "":
-			resource, first = s[:i], s
-		case s[:i] != resource:
-			errs = append(errs, errorf("%s: %s and %s are for different APIs; Entra issues a token for one API per request", sEnv, api(first, len(resource)), api(s, i)))
-		}
-	}
-	if v.get("obo-scopes") != "" && len(c.OBOScopes) == 0 {
-		errs = append(errs, errorf("%s is set but lists nothing; give scopes, or leave it unset", sEnv))
-	}
+	var scopeErrs []error
+	c.OBOScopes, scopeErrs = parseOBOScopes(v.value("obo-scopes"))
+	errs = append(errs, scopeErrs...)
 	if v.stdioUpstream() && v.byKey["obo-header"].Source != SourceDefault {
 		errs = append(errs, errorf("%s: a stdio upstream gets its downstream token from its token socket (BYWARD_DOWNSTREAM_TOKEN_SOCKET), not a header; leave %s unset", hEnv, hEnv))
 	}
@@ -83,4 +56,32 @@ func (c *Config) onBehalfOf(v *Values) []error {
 		errs = append(errs, errorf("%s: %s already carries the operator's upstream credential (%s); use a header of its own such as X-Byward-Downstream-Token", hEnv, h, Setting{Name: "upstream-credential-header"}.Env()))
 	}
 	return errs
+}
+
+// parseOBOScopes reads BYWARD_OBO_SCOPES: space-separated full scope URIs of one downstream API. A
+// scope refused for its form is never shown (ADR-0031 §1), and two scopes for different APIs are
+// named by their places in the list.
+func parseOBOScopes(val Value) ([]string, []error) {
+	s, raw := val.Setting, val.Given.raw()
+	const want = "scope URIs of one API such as https://graph.microsoft.com/User.Read, api://<app>/<scope> or <app ID>/<scope>"
+	scopes := strings.Fields(raw)
+	if raw != "" && len(scopes) == 0 {
+		return nil, []error{errorf("%s is set but lists nothing; give scopes, or leave it unset", s.Env())}
+	}
+	var errs []error
+	resource, first := "", 0
+	for i, sc := range scopes {
+		at, j := entry{i, len(scopes)}, scopeSlash(sc)
+		switch {
+		case oidcScopes[strings.ToLower(sc)]:
+			errs = append(errs, refusedMeaning(s, at, strings.ToLower(sc), want, "it is a sign-in scope, not a downstream API's; give the API's scopes, e.g. https://graph.microsoft.com/User.Read"))
+		case j < 0:
+			errs = append(errs, refusedForm(s, at, sc, want, "it is not a scope URI"))
+		case resource == "":
+			resource, first = sc[:j], i
+		case sc[:j] != resource:
+			errs = append(errs, refusedMeaning(s, whole, entry{first, len(scopes)}.and(at), want, "they are for different APIs; Entra issues a token for one API per request"))
+		}
+	}
+	return scopes, errs
 }

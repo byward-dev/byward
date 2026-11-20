@@ -7,28 +7,29 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-
-	"github.com/byward-dev/byward/internal/logging"
 )
 
 // Hosts as browsers write them (WHATWG URL host parser and serializer), for the public listener's
 // Host check and the settings that must match what a browser sends.
 
-// browserIPv4 refuses a host that a browser reads as an IPv4 address (endsInANumber) but that is not
-// one in dotted decimal: the browser rewrites it (127.1 and 0x7f.0.0.1 are 127.0.0.1, 010.0.0.1 is
-// 8.0.0.1, octal) or refuses the URL (mcp.10, 10.0.0.999), so it never sends the host as written.
-// Settings a browser must send back exactly, the public URL and allowed origins, use it.
-func browserIPv4(host string) error {
+// browserIPv4 says why a browser would not send host as written, when it reads host as an IPv4
+// address (endsInANumber) that is not one in dotted decimal: the browser rewrites it (127.1 and
+// 0x7f.0.0.1 are 127.0.0.1, 010.0.0.1 is 8.0.0.1, octal) or refuses the URL (mcp.10, 10.0.0.999). It
+// is "" for any other host. Settings a browser must send back exactly, the public URL and allowed
+// origins, use it. The reason completes "its host …"; it names the address a browser rewrites the
+// host to, as the parser read it, never the host as given.
+func browserIPv4(host string) string {
 	if !endsInANumber(host) {
-		return nil
+		return ""
 	}
 	if _, err := netip.ParseAddr(host); err == nil {
-		return nil // dotted decimal (netip refuses leading zeros, which browsers read as octal), or IPv6
+		return "" // dotted decimal (netip refuses leading zeros, which browsers read as octal), or IPv6
 	}
-	if _, ok := parseIPv4(host); !ok {
-		return fmt.Errorf("%s is not an IPv4 address but ends in a number, so browsers refuse it", logging.Quote(host))
+	a, ok := parseIPv4(host)
+	if !ok {
+		return "is not an IPv4 address but ends in a number, so browsers refuse it"
 	}
-	return fmt.Errorf("%s is not an IPv4 address in dotted decimal, the only form browsers send", logging.Quote(host))
+	return "is not an IPv4 address in dotted decimal, the only form browsers send; write it as " + a.String()
 }
 
 // endsInANumber reports whether a browser reads host as an IPv4 address (WHATWG URL "ends in a
@@ -118,7 +119,7 @@ func parseIPv4(host string) (netip.Addr, bool) {
 // (::ffff:7f00:1, where netip writes ::ffff:127.0.0.1). Anything else, including a zoned IPv6
 // address, which no URL carries, is only lower-cased: this is the IP-address half of the browser's
 // host serializer. Names are folded (IDNA, a trailing dot) by registration.BrowserHost, for the
-// consent page and the client denylist; config refuses a non-ASCII host instead (asciiHost), so for
+// consent page and the client denylist; config refuses a non-ASCII host instead (notASCII), so for
 // the ASCII names config accepts, a name's browser form is its lower case.
 func browserHost(host string) string {
 	host = strings.ToLower(host)
