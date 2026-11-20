@@ -78,6 +78,9 @@ func TestUserAtTheirCapEvictsTheirOwnLeastRecentlyUsedProcess(t *testing.T) {
 	if got := ev.wait(t, 1); len(got) != 1 || got[0] != alice.Subject || ev.reasons[0] != "user_cap" {
 		t.Fatalf("evicted %v for %v, want only alice's process for user_cap", got, ev.reasons)
 	}
+	if stops := h.log.with("stopping upstream process"); len(stops) != 1 || stops[0].attrs["reason"] != "evicted_user_cap" {
+		t.Fatalf("stop records = %v, want one with reason=evicted_user_cap", stops)
+	}
 	if isDone(bob1) || isDone(alice2) {
 		t.Fatal("a process other than alice's least recently used one was stopped")
 	}
@@ -110,6 +113,9 @@ func TestFullUpstreamEvictsTheLeastRecentlyUsedProcessOfAnyUser(t *testing.T) {
 	waitDone(t, bob1)
 	if got := ev.wait(t, 1); got[0] != bob.Subject || ev.reasons[0] != "upstream_cap" {
 		t.Fatalf("evicted %v for %v, want bob's process for upstream_cap", got, ev.reasons)
+	}
+	if stops := h.log.with("stopping upstream process"); len(stops) != 1 || stops[0].attrs["reason"] != "evicted_upstream_cap" {
+		t.Fatalf("stop records = %v, want one with reason=evicted_upstream_cap", stops)
 	}
 	if isDone(alice1) {
 		t.Fatal("alice's own, more recently used process was stopped")

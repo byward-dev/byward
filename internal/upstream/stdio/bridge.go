@@ -375,7 +375,7 @@ func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id
 		defer func() {
 			if !succeeded {
 				if stop {
-					s.p.stop("initialize_failed")
+					s.p.stop(stopInitializeFailed)
 				}
 				// A request that ended (its MCP client went away, or the proxy is shutting down)
 				// is not a failure of the upstream process, so it is not logged as one (#529). Each

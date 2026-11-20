@@ -32,6 +32,26 @@ var (
 
 var newline = []byte{'\n'}
 
+// stopReason is why byward stopped a process: the reason its "stopping upstream process" line
+// logs.
+type stopReason string
+
+// Stop reasons. The observability reference lists them, in this order, under "stdio upstream stop
+// reasons"; a test keeps the two in step.
+const (
+	stopIdle               stopReason = "idle"
+	stopEvictedUserCap     stopReason = "evicted_user_cap"
+	stopEvictedUpstreamCap stopReason = "evicted_upstream_cap"
+	stopClosed             stopReason = "closed"
+	stopShutdown           stopReason = "shutdown"
+	stopInitializeFailed   stopReason = "initialize_failed"
+	stopNotModern          stopReason = "not_modern"
+	stopPartialWrite       stopReason = "partial_write"
+	stopStdinClosed        stopReason = "stdin_closed"
+	stopMessageTooLarge    stopReason = "message_too_large"
+	stopStdoutClosed       stopReason = "stdout_closed"
+)
+
 // Process is one upstream process: newline-delimited JSON-RPC in on stdin and out on stdout,
 // relayed as bytes. Create it with Manager.Get.
 type Process struct {
@@ -87,7 +107,7 @@ func startProcess(cmd *exec.Cmd, stdin, stdout, stderr *os.File, sessionDir stri
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		if p.held == 0 { // checked and stopped under one lock: a lease taken meanwhile keeps the process
-			p.retireLocked("idle")
+			p.retireLocked(stopIdle)
 		}
 	})
 	p.mu.Unlock()
@@ -149,7 +169,7 @@ func (p *Process) Send(ctx context.Context, msg []byte) error {
 		ctxErr := ctx.Err() // read once: returned whenever the request ended, whether or not that cut the write
 		switch {
 		case n > 0:
-			p.stop("partial_write")
+			p.stop(stopPartialWrite)
 		case !errors.Is(err, os.ErrDeadlineExceeded):
 			// Nothing written, and not cut by the deadline the request's end sets (the request may
 			// have ended too): the process closed its stdin, or has just exited and is not reaped
@@ -157,7 +177,7 @@ func (p *Process) Send(ctx context.Context, msg []byte) error {
 			// a crash is still logged as one.
 			p.mu.Lock()
 			if !p.stopping && !p.exited {
-				p.timers = append(p.timers, p.clock.AfterFunc(p.grace, func() { p.stop("stdin_closed") }))
+				p.timers = append(p.timers, p.clock.AfterFunc(p.grace, func() { p.stop(stopStdinClosed) }))
 			}
 			p.mu.Unlock()
 		}
@@ -196,7 +216,7 @@ func (p *Process) lastTraffic() time.Time {
 // retire stops the process by byward's choice: idle, to make room under a cap, at a session's end
 // or at shutdown. Its streams end as ones the server chose to end (a subscriptions/listen gets a
 // completion result), not as after a crash.
-func (p *Process) retire(reason string) {
+func (p *Process) retire(reason stopReason) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.retireLocked(reason)
@@ -204,7 +224,7 @@ func (p *Process) retire(reason string) {
 
 // retireLocked is retire for callers holding p.mu. A process already stopping or exited keeps the
 // reason it had: a fault stays a fault.
-func (p *Process) retireLocked(reason string) {
+func (p *Process) retireLocked(reason stopReason) {
 	if !p.stopping && !p.exited {
 		p.chosen = true
 	}
@@ -242,20 +262,20 @@ func (p *Process) unhold() {
 // stop shuts the process down after a fault (retire is for a stop byward chose), as the MCP stdio
 // transport says: close stdin, wait, then SIGTERM and finally SIGKILL to the whole process group,
 // each after the grace period. It returns at once; Done reports the exit.
-func (p *Process) stop(reason string) {
+func (p *Process) stop(reason stopReason) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.stopLocked(reason)
 }
 
 // stopLocked is stop for callers holding p.mu. Only the first call does anything.
-func (p *Process) stopLocked(reason string) {
+func (p *Process) stopLocked(reason stopReason) {
 	if p.stopping || p.exited {
 		return
 	}
 	p.stopping = true
 	p.idle.Stop()
-	p.log.Info("stopping upstream process", "reason", reason)
+	p.log.Info("stopping upstream process", "reason", string(reason))
 	p.closeStdin()
 	p.timers = append(p.timers, p.clock.AfterFunc(p.grace, func() {
 		p.mu.Lock()
@@ -307,7 +327,7 @@ func (p *Process) readStdout(r io.Reader) {
 		msg, err := readMessage(br, p.maxMsg)
 		if errors.Is(err, errMessageTooLarge) {
 			p.log.Warn("upstream message over the size limit", "reason", "message_too_large")
-			p.stop("message_too_large")
+			p.stop(stopMessageTooLarge)
 			_, _ = io.Copy(io.Discard, br)
 			return
 		}
@@ -322,7 +342,7 @@ func (p *Process) readStdout(r io.Reader) {
 		if err != nil {
 			p.mu.Lock() // before Messages closes, so whoever sees it closed sees the timer armed
 			if !p.stopping && !p.exited {
-				p.timers = append(p.timers, p.clock.AfterFunc(p.grace, func() { p.stop("stdout_closed") }))
+				p.timers = append(p.timers, p.clock.AfterFunc(p.grace, func() { p.stop(stopStdoutClosed) }))
 			}
 			p.mu.Unlock()
 			return

@@ -677,7 +677,7 @@ func TestAnIdleTimeoutStopOrShutdownCountsAsBywardsChoiceButAFaultNeverDoes(t *t
 		}, true},
 		{"a crash", func(_ *testing.T, _ *harness, p *Process) { _ = p.Send(context.Background(), []byte("crash")) }, false},
 		{"a message over the size limit", func(_ *testing.T, _ *harness, p *Process) { _ = p.Send(context.Background(), []byte("123456789")) }, false},
-		{"a fault, then a stop byward chose", func(_ *testing.T, _ *harness, p *Process) { p.stop("partial_write"); p.retire("shutdown") }, false},
+		{"a fault, then a stop byward chose", func(_ *testing.T, _ *harness, p *Process) { p.stop(stopPartialWrite); p.retire(stopShutdown) }, false},
 		{"a closed stdin", func(t *testing.T, h *harness, p *Process) {
 			if got := call(t, p, "closestdin"); got != "closed" {
 				t.Fatalf("got %q, want closed", got)
@@ -693,6 +693,30 @@ func TestAnIdleTimeoutStopOrShutdownCountsAsBywardsChoiceButAFaultNeverDoes(t *t
 			waitDone(t, p)
 			if got := p.endedByChoice(); got != tc.chosen {
 				t.Fatalf("endedByChoice = %v, want %v", got, tc.chosen)
+			}
+		})
+	}
+}
+
+func TestAProcessStoppedAtItsMCPSessionsEndOrAtShutdownLogsWhichOne(t *testing.T) {
+	for _, tc := range []struct {
+		name, reason string
+		end          func(h *harness)
+	}{
+		{"its MCP session's end", "closed", func(h *harness) { h.m.Stop("k") }},
+		{"Shutdown", "shutdown", func(h *harness) {
+			ctx, cancel := context.WithTimeout(context.Background(), guard)
+			defer cancel()
+			_ = h.m.Shutdown(ctx)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, nil)
+			p := h.get(t, "k", alice)
+			tc.end(h)
+			waitDone(t, p)
+			if stops := h.log.with("stopping upstream process"); len(stops) != 1 || stops[0].attrs["reason"] != tc.reason {
+				t.Fatalf("stop records = %v, want one with reason=%s", stops, tc.reason)
 			}
 		})
 	}

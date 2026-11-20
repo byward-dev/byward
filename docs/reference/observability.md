@@ -244,7 +244,8 @@ has exited.
 | `reason` | Why byward stopped the process |
 |---|---|
 | `idle` | No request or stream of its own was open, and it had no traffic, for 30 minutes |
-| `evicted_user_cap`, `evicted_upstream_cap` | It made room for another under `BYWARD_STDIO_MAX_PROCESSES_PER_USER` or `BYWARD_STDIO_MAX_PROCESSES` (audited as `process_evicted`) |
+| `evicted_user_cap` | It made room for another of the same user's processes under `BYWARD_STDIO_MAX_PROCESSES_PER_USER` (audited as `process_evicted`, `reason` `user_cap`) |
+| `evicted_upstream_cap` | It made room for another process under `BYWARD_STDIO_MAX_PROCESSES`; it may be any user's (audited as `process_evicted`, `reason` `upstream_cap`) |
 | `closed` | Its MCP client ended its MCP session (`DELETE`) |
 | `shutdown` | byward is shutting down |
 | `initialize_failed` | An `initialize` on it got no result, so its MCP session never started |

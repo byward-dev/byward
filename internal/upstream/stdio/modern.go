@@ -375,7 +375,7 @@ func (b *Bridge) speaksModern(ctx context.Context, c *userConn) (bool, error) {
 	}
 	if !modern {
 		b.cap.set(false)
-		c.p.stop("not_modern")
+		c.p.stop(stopNotModern)
 		return false, nil
 	}
 	b.cap.set(true)
