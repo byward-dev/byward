@@ -258,6 +258,7 @@ type gatedWriter struct {
 	body    bytes.Buffer
 	flushes int
 	gate    int
+	fail    error // what the gated flush returns once released: nil, or the client gone
 	blocked chan struct{}
 	release chan struct{}
 	once    sync.Once
@@ -287,6 +288,7 @@ func (w *gatedWriter) FlushError() error {
 	if n == w.gate {
 		close(w.blocked)
 		<-w.release
+		return w.fail
 	}
 	return nil
 }

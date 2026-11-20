@@ -4,11 +4,16 @@ package stdio
 
 import (
 	"context"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/byward-dev/byward/internal/shutdown"
 )
@@ -248,6 +253,163 @@ func TestAListenEndedByTheProxyShuttingDownGetsItsCompletionAndOneWhoseMCPClient
 			}
 			eventually(t, "the upstream to see the listen cancelled", func() bool { return len(b.upstreamCancellations(t)) == 1 })
 			b.noFailureLogged(t)
+		})
+	}
+}
+
+// An initialize whose request ends as a write to its stream fails logs no initialize failure: the
+// write failed because its request ended (its MCP client went away, or the proxy is shutting down),
+// not because of the upstream process (#549). Its
+// process is stopped, as for any initialize that does not succeed. The write that fails is the
+// stream's first event: a notification the upstream sends before it holds its answer, or the answer
+// itself, written after the drain finds nothing before it. Either way the one warning is that event,
+// dropped.
+func TestAnInitializeWhoseWriteFailsAsItsRequestEndsLogsNoInitializeFailureAndItsProcessStopped(t *testing.T) {
+	for _, s := range []struct{ name, init, first, want string }{
+		{"a notification first", "-init=lognhold", "the notification", `"method":"notifications/message"`},
+		{"its result", "", "the result", `"result":`},
+	} {
+		for _, e := range endings {
+			t.Run(s.name+", "+e.name, func(t *testing.T) {
+				b := newBridge(t, func(c *Config) {
+					if s.init != "" {
+						c.Command = append(c.Command, s.init)
+					}
+				})
+				w := newGatedWriter(2) // the stream's start, then its first event, whose write fails
+				w.fail = errBrokenPipe
+				ctx, end := e.start()
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					b.bridge.ServeHTTP(w, b.request(ctx, http.MethodPost, "alice", "", initialize))
+				}()
+				select {
+				case <-w.blocked:
+				case <-time.After(guard):
+					t.Fatalf("%s was never written", s.first)
+				}
+				end()
+				w.open()
+				<-done
+				if got := w.written(); !strings.Contains(got, s.want) {
+					t.Fatalf("the failed write was %q; want %s", got, s.first)
+				}
+				var warns []string
+				for _, rec := range b.log.warnings() {
+					warns = append(warns, rec.msg)
+				}
+				if want := []string{"upstream notification dropped"}; !slices.Equal(warns, want) {
+					t.Fatalf("logged %q at WARN or above; want only %q: no initialize failure for a request that ended", warns, want)
+				}
+				if got := b.stops("initialize_failed"); got != 1 {
+					t.Fatalf("%d initialize_failed stops; want its process stopped once", got)
+				}
+			})
+		}
+	}
+}
+
+// A request that ends while its MCP session's process is stopping is answered by how it ended, not
+// 404, which tells its MCP client to start a new session (#552). A stubborn upstream keeps running
+// after DELETE until the kill timers, which the fake clock never fires: the process is stopping for
+// the whole test.
+func TestARequestThatEndsWhileItsMCPSessionsProcessIsStoppingIsAnsweredByHowItEndedAndNeverLoggedAsAFailure(t *testing.T) {
+	for _, m := range []struct{ name, method, body string }{
+		{"notification", http.MethodPost, `{"jsonrpc":"2.0","method":"notifications/initialized"}`},
+		{"request", http.MethodPost, `{"jsonrpc":"2.0","id":2,"method":"echo","params":{}}`},
+		{"GET stream", http.MethodGet, ""},
+	} {
+		for _, e := range endings {
+			t.Run(m.name+", "+e.name, func(t *testing.T) {
+				b := newBridge(t, func(c *Config) { c.Command = []string{fakeBin, "-mcp", "-stubborn"} })
+				sid := b.initialize(t, "alice")
+				if res := b.do(t, context.Background(), http.MethodDelete, "alice", sid, ""); res.StatusCode != http.StatusNoContent {
+					t.Fatalf("DELETE: status %d", res.StatusCode)
+				}
+				ctx, end := e.start()
+				end()
+				e.answered(t, b.serve(ctx, m.method, "alice", sid, m.body))
+				b.noFailureLogged(t)
+				if b.m.Len() != 1 {
+					t.Fatalf("Len = %d: the test needs the process still stopping", b.m.Len())
+				}
+			})
+		}
+	}
+}
+
+// A send that failed is answered by how its request ended, if it ended, with nothing logged, even
+// when its process has exited or is stopping: the process stopping as the request ended is not why
+// it ended (#552). Only a request still live is answered by why the send failed: 404 if its process
+// exited, so its MCP client starts a new session, and 502 with a warning for any other failure.
+func TestAFailedSendIsAnsweredByHowItsRequestEndedBeforeWhyItFailed(t *testing.T) {
+	for _, e := range endings {
+		t.Run(e.name, func(t *testing.T) {
+			log := &recorder{mu: &sync.Mutex{}, recs: &[]record{}}
+			s := &session{log: slog.New(log)}
+			ctx, end := e.start()
+			end()
+			w := httptest.NewRecorder()
+			s.sendFailed(w, httptest.NewRequestWithContext(ctx, http.MethodPost, "/", nil), ErrExited)
+			e.answered(t, w)
+			if got := log.warnings(); len(got) != 0 {
+				t.Fatalf("logged %v; want nothing at WARN or above for a request that ended", got)
+			}
+		})
+	}
+	for _, live := range []struct {
+		name   string
+		err    error
+		status int
+		body   string
+		warns  []string
+	}{
+		// Its MCP client starts a new session.
+		{"a live request whose process exited", ErrExited, http.StatusNotFound, "session not found\n", nil},
+		// The process is still there: a failure of it, logged, and never a 404.
+		{"a live request whose send failed otherwise", errors.New("write |1: broken pipe"), http.StatusBadGateway,
+			"upstream unavailable\n", []string{"relaying to the upstream process failed"}},
+	} {
+		t.Run(live.name, func(t *testing.T) {
+			log := &recorder{mu: &sync.Mutex{}, recs: &[]record{}}
+			s := &session{log: slog.New(log)}
+			w := httptest.NewRecorder()
+			s.sendFailed(w, httptest.NewRequest(http.MethodPost, "/", nil), live.err)
+			var warns []string
+			for _, rec := range log.warnings() {
+				warns = append(warns, rec.msg)
+			}
+			if w.Code != live.status || w.Body.String() != live.body || !slices.Equal(warns, live.warns) {
+				t.Fatalf("answer %d %q, logged %q; want %d %q and %q", w.Code, w.Body, warns, live.status, live.body, live.warns)
+			}
+		})
+	}
+}
+
+// An ended request to another user's MCP session is still that: 404 and the "session of another
+// user" warning, never answered as if it were its own session's request that ended (#552 keeps the
+// user check first).
+func TestAnEndedRequestToAnotherUsersMCPSessionIs404AndWarned(t *testing.T) {
+	for _, e := range endings {
+		t.Run(e.name, func(t *testing.T) {
+			b := newBridge(t, nil)
+			sid := b.initialize(t, "alice")
+			ctx, end := e.start()
+			end()
+			w := b.serve(ctx, http.MethodPost, "bob", sid, `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+			if w.Code != http.StatusNotFound || w.Body.String() != "session not found\n" {
+				t.Fatalf("answer %d %q; want 404 %q", w.Code, w.Body, "session not found\n")
+			}
+			var warned []record
+			for _, rec := range b.log.warnings() {
+				if rec.msg == "session of another user" {
+					warned = append(warned, rec)
+				}
+			}
+			if len(warned) != 1 || warned[0].attrs["reason"] != "session_user_mismatch" {
+				t.Fatalf("logged at WARN or above %v; want the mismatch warned once, reason session_user_mismatch", b.log.warnings())
+			}
 		})
 	}
 }

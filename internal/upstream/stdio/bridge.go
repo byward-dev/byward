@@ -250,7 +250,8 @@ func (b *Bridge) start(w http.ResponseWriter, r *http.Request, id Identity) (*se
 // session finds the live session for key and leases its process with a lease of the given kind
 // (a stream lease for the GET stream). A session that does not exist,
 // has ended or serves another user gets 404, after which the client starts a new one (2025-11-25
-// transports, Session Management rules 3 and 4). A request whose MCP-Protocol-Version the session
+// transports, Session Management rules 3 and 4); a request that has itself ended is answered by how
+// it ended instead (shutdown.AnswerIfEnded, #552). A request whose MCP-Protocol-Version the session
 // refuses (versionProblem) gets 400. In each case it returns nil, with nothing leased.
 func (b *Bridge) session(w http.ResponseWriter, r *http.Request, id Identity, key string, kind leaseKind) (*session, func()) {
 	b.mu.Lock()
@@ -265,6 +266,8 @@ func (b *Bridge) session(w http.ResponseWriter, r *http.Request, id Identity, ke
 		if errors.Is(err, ErrUserMismatch) {
 			// The binding in front makes this unreachable; it is checked again where the process is.
 			b.c.Log.WarnContext(r.Context(), "session of another user", "reason", "session_user_mismatch", "user_key", id.Subject)
+		} else if shutdown.AnswerIfEnded(w, r) { // its process is stopping, and the request ended too
+			return nil, nil
 		}
 		http.Error(w, "session not found", http.StatusNotFound)
 		return nil, nil
@@ -422,11 +425,15 @@ func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id
 	if !initialize {
 		begin()
 	}
-	// send writes m; a message that cannot be written is handled as undeliverable.
+	// send writes m; a message that cannot be written is handled as undeliverable. A write that fails
+	// because the request ended is not a failure of the process, whatever else went wrong (#549).
 	send := func(m []byte) bool {
 		begin()
 		if out.write(m) != nil {
 			s.undeliverable(m, "client_disconnected")
+			if r.Context().Err() != nil {
+				reason = requestEnded
+			}
 			return false
 		}
 		return true
@@ -528,14 +535,15 @@ func (s *session) listen(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// sendFailed answers a request whose message could not be sent: 404 if the process has exited,
-// nothing logged for a request that ended (shutdown.AnswerIfEnded), else 502.
+// sendFailed answers a request whose message could not be sent: a request that ended is answered
+// by how it ended, with nothing logged (shutdown.AnswerIfEnded); else 404 if the process has exited,
+// and 502 otherwise.
 func (s *session) sendFailed(w http.ResponseWriter, r *http.Request, err error) {
-	if errors.Is(err, ErrExited) {
-		http.Error(w, "session not found", http.StatusNotFound)
+	if shutdown.AnswerIfEnded(w, r) { // first: a process stopping as the request ends is not why it ended (#552)
 		return
 	}
-	if shutdown.AnswerIfEnded(w, r) {
+	if errors.Is(err, ErrExited) {
+		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
 	s.log.WarnContext(r.Context(), "relaying to the upstream process failed", "error", err)
