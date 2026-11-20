@@ -41,13 +41,18 @@ func endedBy(ctx context.Context) CutOff {
 }
 
 // StreamEnded records that the response to the request of ctx, its headers already sent, is cut off
-// because the request ended: by the proxy's shutdown or its MCP client going away. A handler that
-// ends such a stream by returning calls it, so the stream is recorded as one that was cut off. A
-// request still live, or one that no wrapper records, is left as it is.
+// without its answer: by the proxy's shutdown (ShutDown), else by its MCP client going away or no
+// longer reading, so that a write to it failed (ClientClosed). A handler that ends such a stream by
+// returning calls it. A stream that ends with its answer, a subscription's completion result
+// included, is not cut off. A request no wrapper records is left as it is.
 func StreamEnded(ctx context.Context) {
 	e, _ := ctx.Value(endingKey{}).(*ending)
-	if e != nil && e.cut == "" {
-		e.cut = endedBy(ctx)
+	if e == nil || e.cut != "" {
+		return
+	}
+	e.cut = ClientClosed
+	if shutdown.ShuttingDown(ctx) {
+		e.cut = ShutDown
 	}
 }
 

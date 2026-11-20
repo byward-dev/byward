@@ -271,6 +271,12 @@ value as `error.type`. The span's status is `Error` only for `upstream_aborted`,
 `shutdown`: a client that leaves, or the proxy stopping, is no failure of the request, as with 499 above. OpenTelemetry's
 HTTP span conventions (their Status section, still in Development) say a 2xx with another error, such as a network error
 on the response body, "MUST be set to `Error`". They also let an instrumentation "that ha[s] additional context about a
-specific request ... use this context to set the span status more precisely", which is what byward does here. The
-connection is then closed, so a client still there sees the stream break off rather than end. A stdio upstream's
-stream that ends the same way is recorded the same way.
+specific request ... use this context to set the span status more precisely", which is what byward does here.
+otelhttp v0.72.0 sets status from the code alone (`internal/semconv/server.go`, `HTTPServer.Status`), and records
+neither status nor metrics for an aborted response (`handler.go` does so after `next.ServeHTTP`, not in a defer). The
+connection is then closed, so a client still there sees the stream break off rather than end.
+
+A stream from a stdio upstream process is recorded the same way when it ends without its answer: `client_closed` when
+its client went away or stopped reading, so that a write failed, and `shutdown` when the proxy's shutdown ended it. A
+`subscriptions/listen` that the proxy ends at shutdown with its completion result has completed, so it has no
+`error_type`.

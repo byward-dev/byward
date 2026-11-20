@@ -72,10 +72,10 @@ func TestObserveRecordsTheStatusSentAndWhyAResponseWasCutOff(t *testing.T) {
 			_, _ = w.Write([]byte("data: one\n\n"))
 			StreamEnded(r.Context())
 		}, http.StatusOK, ShutDown, false},
-		{"StreamEnded for a request still live", live(), func(w http.ResponseWriter, r *http.Request) {
+		{"a stream whose write failed, its request still live", live(), func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte("data: one\n\n"))
 			StreamEnded(r.Context())
-		}, http.StatusOK, "", false},
+		}, http.StatusOK, ClientClosed, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec, p := observe(tc.req, tc.handler)

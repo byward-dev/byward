@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/shutdown"
 )
 
@@ -425,8 +426,9 @@ func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id
 	if !initialize {
 		begin()
 	}
-	// send writes m; a message that cannot be written is handled as undeliverable. A write that fails
-	// because the request ended is not a failure of the process, whatever else went wrong (#549).
+	// send writes m; a message that cannot be written is handled as undeliverable, and the stream,
+	// cut off, is recorded as such (#533). A write that fails because the request ended is not a
+	// failure of the process, whatever else went wrong (#549).
 	send := func(m []byte) bool {
 		begin()
 		if out.write(m) != nil {
@@ -434,6 +436,7 @@ func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id
 			if r.Context().Err() != nil {
 				reason = requestEnded
 			}
+			logging.StreamEnded(r.Context())
 			return false
 		}
 		return true
@@ -489,9 +492,12 @@ func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id
 			// A disconnect is not a cancellation (2025-11-25 transports); the request stays with the
 			// upstream, and its response, when it comes, is dropped. A request whose stream has not
 			// started still records why it ended (shutdown.AnswerIfEnded); one whose stream has, keeps
-			// the status it sent.
+			// the status it sent and is recorded as cut off (#533).
 			s.dropPost(st)
-			if out != nil || shutdown.AnswerIfEnded(w, r) {
+			if out != nil {
+				logging.StreamEnded(r.Context())
+				reason = requestEnded
+			} else if shutdown.AnswerIfEnded(w, r) {
 				reason = requestEnded
 			}
 			return
@@ -501,7 +507,8 @@ func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id
 
 // listen serves the session's GET stream until the client leaves, the session ends or a newer GET
 // replaces it. Each message goes out on one stream only (2025-11-25 transports, Multiple
-// Connections), so the newest GET stream is the one used.
+// Connections), so the newest GET stream is the one used. A stream its client left, or the proxy's
+// shutdown ended, is recorded as cut off (#533).
 func (s *session) listen(w http.ResponseWriter, r *http.Request) {
 	st := newStream(nil)
 	if !s.setListen(st) {
@@ -519,17 +526,20 @@ func (s *session) listen(w http.ResponseWriter, r *http.Request) {
 			q.writing()
 			if sse.write(m) != nil {
 				s.undeliverable(m, "client_disconnected")
+				logging.StreamEnded(r.Context())
 				return
 			}
 			s.refill(st)
 		case <-q.elapsed():
 			q.writing()
 			if sse.keepAlive() != nil {
+				logging.StreamEnded(r.Context())
 				return
 			}
 		case <-st.done:
 			return
 		case <-r.Context().Done():
+			logging.StreamEnded(r.Context())
 			return
 		}
 	}

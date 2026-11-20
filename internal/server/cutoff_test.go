@@ -43,6 +43,18 @@ func spans(t *testing.T) *tracetest.InMemoryExporter {
 	return exp
 }
 
+// requestLines is each request line in a JSON log.
+func requestLines(log string) []map[string]any {
+	var lines []map[string]any
+	for l := range strings.Lines(log) {
+		var v map[string]any
+		if json.Unmarshal([]byte(l), &v) == nil && v["msg"] == "request" {
+			lines = append(lines, v)
+		}
+	}
+	return lines
+}
+
 // requestCounts is each byward_http_request_duration_seconds series' count, by its labels.
 func requestCounts(scrape string) map[string]int {
 	out := map[string]int{}
@@ -139,14 +151,7 @@ func TestAStreamCutOffAfterItsHeadersRecordsTheStatusItSentAndWhyThroughTheWhole
 			// The request line: the one sure sign the handler has ended.
 			var lines []map[string]any
 			for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-				lines = lines[:0]
-				for l := range strings.Lines(logs.String()) {
-					var v map[string]any
-					if json.Unmarshal([]byte(l), &v) == nil && v["msg"] == "request" {
-						lines = append(lines, v)
-					}
-				}
-				if len(lines) > 0 || time.Now().After(deadline) {
+				if lines = requestLines(logs.String()); len(lines) > 0 || time.Now().After(deadline) {
 					break
 				}
 			}

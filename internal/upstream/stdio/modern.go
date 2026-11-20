@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/shutdown"
 )
 
@@ -419,7 +420,12 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, l
 			}
 		}
 	}
-	finish := func(m []byte) { drain(); _ = out.write(m) }
+	finish := func(m []byte) { // an answer that cannot be written leaves the stream cut off (#533)
+		drain()
+		if out.write(m) != nil {
+			logging.StreamEnded(r.Context())
+		}
+	}
 	// endListen ends a listen byward chose to end with its completion result and cancels it upstream.
 	endListen := func() { finish(exitAnswer(q, true)); c.cancel(q) }
 	for {
@@ -427,12 +433,14 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, l
 		case m := <-q.out:
 			silence.writing()
 			if out.write(m) != nil {
+				logging.StreamEnded(r.Context()) // cut off without its answer (#533)
 				c.cancel(q)
 				return
 			}
 		case <-silence.elapsed():
 			silence.writing()
 			if out.keepAlive() != nil { // the client is gone: as for a closed stream
+				logging.StreamEnded(r.Context())
 				c.cancel(q)
 				return
 			}
@@ -452,9 +460,10 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, l
 			return
 		case <-r.Context().Done():
 			if q.listen && shutdown.ShuttingDown(r.Context()) { // shutdown cancels the request; the listen still ends cleanly
-				endListen()
+				endListen() // with its completion result: not cut off (#533)
 				return
 			}
+			logging.StreamEnded(r.Context())
 			c.cancel(q) // closing the stream cancels the request (2026-07-28 transports)
 			return
 		}

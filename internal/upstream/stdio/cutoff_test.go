@@ -1,0 +1,176 @@
+//go:build linux || darwin
+
+package stdio
+
+import (
+	"context"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/byward-dev/byward/internal/logging"
+)
+
+// observed serves req with the bridge through logging.Observe, as the server's wrappers do, on w in
+// the background. Its result waits until the bridge has returned and is what Observe recorded.
+func (b *bridgeHarness) observed(t *testing.T, w http.ResponseWriter, req *http.Request) func() logging.CutOff {
+	t.Helper()
+	var cut logging.CutOff
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		logging.Observe(w, req, b.bridge, func(_ int, c logging.CutOff) { cut = c })
+	}()
+	return func() logging.CutOff {
+		t.Helper()
+		select {
+		case <-done:
+		case <-time.After(guard):
+			t.Fatal("the bridge did not return")
+		}
+		return cut
+	}
+}
+
+// A stream from the upstream process that its request's end cuts off, its headers already sent, is
+// recorded with why (#533): client_closed when its MCP client went away, shutdown when the proxy
+// shut down. A listen the shutdown ends with its completion result has completed, so it is not cut
+// off.
+func TestAStdioStreamEndedByItsRequestIsRecordedAsCutOffUnlessItCompleted(t *testing.T) {
+	for _, stream := range []struct {
+		name string
+		// open starts the bridge and returns the request of a stream that stays open until its
+		// request ends.
+		open func(t *testing.T, b *bridgeHarness, ctx context.Context) *http.Request
+		// modern bridges serve the 2026-07-28 era; the others the legacy one.
+		modern bool
+		// completes: the proxy's shutdown ends it with its completion result.
+		completes bool
+	}{
+		{"a legacy GET stream", func(t *testing.T, b *bridgeHarness, ctx context.Context) *http.Request {
+			return b.request(ctx, http.MethodGet, "alice", b.initialize(t, "alice"), "")
+		}, false, false},
+		{"a legacy POST stream", func(t *testing.T, b *bridgeHarness, ctx context.Context) *http.Request {
+			return b.request(ctx, http.MethodPost, "alice", b.initialize(t, "alice"), `{"jsonrpc":"2.0","id":2,"method":"hold"}`)
+		}, false, false},
+		{"a modern request's stream", func(_ *testing.T, b *bridgeHarness, ctx context.Context) *http.Request {
+			body := modernBody(`"h"`, "hold", "", "")
+			return b.request(ctx, http.MethodPost, "alice", "", body, modernHeaders(body)...)
+		}, true, false},
+		{"a modern subscriptions/listen", func(_ *testing.T, b *bridgeHarness, ctx context.Context) *http.Request {
+			body := modernBody(`"L"`, "subscriptions/listen", "", `"notifications":{"toolsListChanged":true}`)
+			return b.request(ctx, http.MethodPost, "alice", "", body, modernHeaders(body)...)
+		}, true, true},
+	} {
+		for _, e := range endings {
+			t.Run(stream.name+", "+e.name, func(t *testing.T) {
+				b := newBridge(t, nil)
+				if stream.modern {
+					b = newModernBridge(t, nil)
+				}
+				ctx, end := e.start()
+				defer end()
+				w := &brokenWriter{header: http.Header{}}
+				cut := b.observed(t, w, stream.open(t, b, ctx))
+				eventually(t, "the stream to start", w.hasStarted) // after its request reached the upstream
+				if stream.completes {
+					eventually(t, "the acknowledgement", func() bool { return strings.Contains(w.written(), "acknowledged") })
+				}
+				end()
+				want := logging.ClientClosed
+				switch {
+				case e.shutdown && stream.completes:
+					want = ""
+				case e.shutdown:
+					want = logging.ShutDown
+				}
+				if got := cut(); got != want {
+					t.Errorf("recorded as cut off %q; want %q (body %q)", got, want, w.written())
+				}
+			})
+		}
+	}
+}
+
+// A stream whose write to its MCP client fails, its request still live, has lost its client: it is
+// recorded as cut off with client_closed, whatever the write was (#533). A listen that Drain ends
+// with its completion result has completed, so it is not cut off.
+func TestAStdioStreamWhoseWriteFailsIsRecordedAsClientClosedAndADrainedListenIsNot(t *testing.T) {
+	const announce = `{"jsonrpc":"2.0","id":9,"method":"announce"}`
+	modern := func(b *bridgeHarness, body string) *http.Request {
+		return b.request(context.Background(), http.MethodPost, "alice", "", body, modernHeaders(body)...)
+	}
+	listen := modernBody(`"L"`, "subscriptions/listen", "", `"notifications":{"toolsListChanged":true}`)
+	type ender = func(t *testing.T, b *bridgeHarness, w *brokenWriter)
+	for _, tc := range []struct {
+		name   string
+		modern bool
+		// open returns the stream's request, and what ends it once it is open.
+		open func(t *testing.T, b *bridgeHarness) (*http.Request, ender)
+		// acked: the stream is open once its acknowledgement is written.
+		acked bool
+		want  logging.CutOff
+	}{
+		{"a legacy GET stream, a message", false, func(t *testing.T, b *bridgeHarness) (*http.Request, ender) {
+			sid := b.initialize(t, "alice")
+			return b.request(context.Background(), http.MethodGet, "alice", sid, ""), func(t *testing.T, b *bridgeHarness, w *brokenWriter) {
+				w.breakIn("write")
+				readEvents(t, b.post(t, "alice", sid, announce))
+			}
+		}, false, logging.ClientClosed},
+		{"a legacy GET stream, a keep-alive", false, func(t *testing.T, b *bridgeHarness) (*http.Request, ender) {
+			return b.request(context.Background(), http.MethodGet, "alice", b.initialize(t, "alice"), ""), func(_ *testing.T, b *bridgeHarness, w *brokenWriter) {
+				w.breakIn("write")
+				b.clk.Advance(keepAliveInterval)
+			}
+		}, false, logging.ClientClosed},
+		{"a legacy POST stream, its answer", false, func(t *testing.T, b *bridgeHarness) (*http.Request, ender) {
+			sid := b.initialize(t, "alice")
+			return b.request(context.Background(), http.MethodPost, "alice", sid, `{"jsonrpc":"2.0","id":2,"method":"hold"}`), func(t *testing.T, b *bridgeHarness, w *brokenWriter) {
+				b.stderrSaid(t, "holding")
+				w.breakIn("write")
+				readEvents(t, b.post(t, "alice", sid, `{"jsonrpc":"2.0","id":3,"method":"release"}`))
+			}
+		}, false, logging.ClientClosed},
+		{"a modern request's stream, its answer", true, func(_ *testing.T, b *bridgeHarness) (*http.Request, ender) {
+			return modern(b, modernBody(`"h"`, "hold", "", "")), func(t *testing.T, b *bridgeHarness, w *brokenWriter) {
+				w.breakIn("write")
+				readEvents(t, b.modern(t, "alice", modernBody(`2`, "release", "", "")))
+			}
+		}, false, logging.ClientClosed},
+		{"a modern listen, a notification", true, func(_ *testing.T, b *bridgeHarness) (*http.Request, ender) {
+			return modern(b, listen), func(t *testing.T, b *bridgeHarness, w *brokenWriter) {
+				w.breakIn("write")
+				readEvents(t, b.modern(t, "alice", modernBody(`1`, "notify", "", "")))
+			}
+		}, true, logging.ClientClosed},
+		{"a modern listen, a keep-alive", true, func(_ *testing.T, b *bridgeHarness) (*http.Request, ender) {
+			return modern(b, listen), func(_ *testing.T, b *bridgeHarness, w *brokenWriter) {
+				w.breakIn("write")
+				b.clk.Advance(keepAliveInterval)
+			}
+		}, true, logging.ClientClosed},
+		{"a modern listen Drain ends", true, func(_ *testing.T, b *bridgeHarness) (*http.Request, ender) {
+			return modern(b, listen), func(_ *testing.T, b *bridgeHarness, _ *brokenWriter) { b.bridge.Drain() }
+		}, true, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newBridge(t, nil)
+			if tc.modern {
+				b = newModernBridge(t, nil)
+			}
+			req, endIt := tc.open(t, b)
+			w := &brokenWriter{header: http.Header{}}
+			cut := b.observed(t, w, req)
+			eventually(t, "the stream to start", w.hasStarted)
+			if tc.acked {
+				eventually(t, "the acknowledgement", func() bool { return strings.Contains(w.written(), "acknowledged") })
+			}
+			endIt(t, b, w)
+			if got := cut(); got != tc.want {
+				t.Errorf("recorded as cut off %q; want %q (body %q)", got, tc.want, w.written())
+			}
+		})
+	}
+}

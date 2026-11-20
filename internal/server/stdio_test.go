@@ -372,7 +372,7 @@ func TestLooseUpstreamEnvFileRefusesToStartInEveryMode(t *testing.T) {
 
 // #180, through Run: shutting down fails readiness and ends an open subscriptions/listen with its
 // completion result under the client's own id before the stream closes, not by cutting it off
-// (2026-07-28 subscriptions).
+// (2026-07-28 subscriptions). The listen completed, so its request line has no error_type (#533).
 func TestShutdownFailsReadinessAndEndsAnOpenListenWithItsCompletionResultBeforeItsStreamCloses(t *testing.T) {
 	for name, internal := range map[string]string{"with the internal listener": "127.0.0.1:0", "without it": ""} {
 		t.Run(name, func(t *testing.T) { shutdownEndsAnOpenListen(t, internal) })
@@ -482,6 +482,18 @@ func shutdownEndsAnOpenListen(t *testing.T, internalListen string) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("Run did not return after cancel")
+	}
+	var listens []map[string]any
+	for _, l := range requestLines(p.logs.String()) {
+		if l["mcp_method"] == "subscriptions/listen" {
+			listens = append(listens, l)
+		}
+	}
+	if len(listens) != 1 {
+		t.Fatalf("the listen's request lines %v; want one", listens)
+	}
+	if _, cut := listens[0]["error_type"]; listens[0]["status"] != float64(http.StatusOK) || cut {
+		t.Fatalf("the listen's request line %v; want status 200 with no error_type", listens[0])
 	}
 }
 

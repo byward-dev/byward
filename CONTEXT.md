@@ -171,7 +171,7 @@ The **operator**'s TLS certificate and key that byward serves on its public list
 _Avoid_: TLS cert (alone), ingress certificate
 
 **Shutdown**:
-The proxy stopping. A request still waiting on its **upstream** is answered 503 "the proxy is shutting down" on a connection that closes, so its **MCP client** can retry; an open subscription is ended with its completion result. A request whose **MCP client** went away gets nothing and records 499. Neither is logged as a failure (#527, #529; [observability](docs/reference/observability.md)).
+The proxy stopping. A request still waiting on its **upstream** is answered 503 "the proxy is shutting down" on a connection that closes, so its **MCP client** can retry; an open subscription is ended with its completion result. A request whose **MCP client** went away gets nothing and records 499. A stream already started keeps the status it sent and records why it was cut off (`error_type`, #533). Neither is logged as a failure (#527, #529; [observability](docs/reference/observability.md)).
 _Avoid_: stop (alone), drain (alone)
 
 ## Flagged ambiguities
