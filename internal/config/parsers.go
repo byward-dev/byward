@@ -91,3 +91,49 @@ func parseWording(val Value, max int) (string, error) {
 	}
 	return raw, nil
 }
+
+// parseScope reads BYWARD_SCOPE: one scope token (RFC 6749 §3.3), since it is written into a quoted
+// challenge.
+func parseScope(val Value) (string, error) {
+	raw := val.Given.raw()
+	if !isScopeToken(raw) {
+		return "", refusedForm(val.Setting, whole, raw, "one scope token, such as mcp", notScopeToken)
+	}
+	return raw, nil
+}
+
+// isScopeToken reports whether s is a scope token (RFC 6749 §3.3): printable ASCII but a space, a
+// double quote or a backslash, and not empty.
+func isScopeToken(s string) bool {
+	return s != "" && !strings.ContainsFunc(s, func(r rune) bool { return r < 0x21 || r > 0x7e || r == '"' || r == '\\' })
+}
+
+// notScopeToken is the reason a value is not a scope token.
+const notScopeToken = "it has a character a scope token cannot hold: white space, a double quote, a backslash or one that is not printable ASCII"
+
+// parseEntries splits val, a comma-separated list setting, into its entries, each with its place in
+// the list. A value set but naming no entry, such as ",", is refused (listsNothing).
+func parseEntries(val Value) ([]string, func(i int) entry, error) {
+	raw := val.Given.raw()
+	list := splitList(raw)
+	if raw != "" && len(list) == 0 {
+		return nil, nil, listsNothing(val.Setting)
+	}
+	return list, func(i int) entry { return entry{i, len(list)} }, nil
+}
+
+// listsNothing refuses a list setting that is set but names no entry, such as ",": it would read as
+// unset, and a gate list would silently open the gate.
+func listsNothing(s Setting) error {
+	return errorf("%s: want at least one entry; got a list of none", s.Env())
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}

@@ -12,7 +12,7 @@ import (
 // upstream reads the upstream: an HTTP URL or a stdio command, exactly one of them. dashes says the
 // command takes a stdio upstream command after --, so the URL's error also names a command after --.
 func (c *Config) upstream(v *Values, dashes bool) []error {
-	urlEnv, cmdEnv, envEnv := Setting{Name: "upstream-url"}.Env(), Setting{Name: "upstream-command"}.Env(), Setting{Name: "upstream-env"}.Env()+"_FILE"
+	urlEnv, cmdEnv := Setting{Name: "upstream-url"}.Env(), Setting{Name: "upstream-command"}.Env()
 	raw := parseText(v.value("upstream-command"))
 	var errs []error
 	if v.httpUpstream() || v.stdioUpstream() { // with none or both, the "required" or "both set" error says enough
@@ -49,7 +49,7 @@ func (c *Config) upstream(v *Values, dashes bool) []error {
 	c.UpstreamCommand = command
 	env, err := parseEnvLines(parseText(v.value("upstream-env")))
 	if err != nil {
-		errs = append(errs, errorf("%s: want KEY=VALUE lines, each key once; got %v", envEnv, err))
+		errs = append(errs, errorf("%s: want KEY=VALUE lines, each key once; got %v", spelled(v.value("upstream-env")), err)) // as given: the file setting, or inline under --dev
 	}
 	c.UpstreamEnv = env
 	limits := []struct {

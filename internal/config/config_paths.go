@@ -12,7 +12,7 @@ func absolute(setting, path string) error {
 		return nil
 	}
 	// The path is not shown: a secret pasted where its file's path belongs would be (#461).
-	return errorf("%s: want an absolute path (no paths relative to the working directory, ADR-0007 §6); got a relative one", Setting{Name: setting}.Env())
+	return refusedMeaning(lookup(setting), whole, "a relative one", "an absolute path", "no path is relative to the working directory (ADR-0007 §6)")
 }
 
 // within reports whether path is dir or inside it.
@@ -56,7 +56,8 @@ func (c *Config) paths(v *Values) []error {
 		}
 		errs = append(errs, err)
 	case filepath.IsAbs(c.StoreDir) && within(c.StoreDir, c.StoreCounterFile):
-		errs = append(errs, errorf("BYWARD_STORE_COUNTER_FILE: want a path outside BYWARD_STORE_DIR; got one inside it, so a restored backup of the state directory would restore it too and go undetected; keep the keys directory outside the state directory, or set this to a path outside it"))
+		errs = append(errs, refusedMeaning(lookup("store-counter-file"), whole, "one inside it", "a path outside BYWARD_STORE_DIR",
+			"a restored backup of the state directory would restore it too and go undetected; keep the keys directory outside the state directory, or set this to a path outside it"))
 	}
 	return errs
 }

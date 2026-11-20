@@ -30,7 +30,7 @@ func TestOnlyParsersReadARawValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parsers := 0
+	scanned := false // the real files' scan finds a read it must: parseText's
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {
 			continue
@@ -43,14 +43,14 @@ func TestOnlyParsersReadARawValue(t *testing.T) {
 			case r.kind == readRawValue:
 				t.Errorf("%s: %s takes raw as a value: call it, in the setting's parser", r.pos, r.fn)
 			case strings.HasPrefix(r.fn, "parse") || strings.HasPrefix(r.fn, "Parse"):
-				parsers++
+				scanned = scanned || r.fn == "parseText" && f == "parsers.go"
 			case !slices.Contains(rawReaders, r.fn):
 				t.Errorf("%s: %s calls raw: read a setting's text only in its parser, a function named parse…, which never repeats it in a refusal (ADR-0031 §1)", r.pos, r.fn)
 			}
 		}
 	}
-	if parsers < 20 {
-		t.Fatalf("found %d raw calls in parsers, want at least 20: the scan has stopped finding them", parsers)
+	if !scanned {
+		t.Fatal("the scan found no read in parseText (parsers.go): it has stopped finding reads, or parseText has moved")
 	}
 }
 

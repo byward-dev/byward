@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"flag"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -207,8 +209,8 @@ func TestParseUpstreamURLAcceptsAnHTTPURLAndRefusesAnyOtherByTheSettingsName(t *
 
 // #478: a URL whose scheme is mistyped in any of its seven ways, with a token in its path parameters,
 // is refused by each URL and host setting, the OIDC issuer, the trusted proxies, the OBO scopes and the
-// listen addresses, without any of it shown: neither the token nor the host. (BYWARD_OIDC_SCOPES takes
-// any text without white space, a backslash or a double quote: #512.)
+// listen addresses, without any of it shown: neither the token nor the host. (BYWARD_OIDC_SCOPES is left
+// out: a scope token may hold : / and ;, so most of these forms are scopes it accepts.)
 func TestAURLWithAMistypedSchemeIsRefusedWithoutAnyOfItShown(t *testing.T) {
 	forms := []string{"https;//h.example/;tok=", "https//h.example/;tok=", "https: //h.example/;tok=", `https:\h.example/;tok=`,
 		"//h.example/;tok=", "https:h.example/;tok=", "https:/h.example/;tok="}
@@ -234,7 +236,10 @@ func TestAURLWithAMistypedSchemeIsRefusedWithoutAnyOfItShown(t *testing.T) {
 // The flag package's own refusals quote the argument or the value given to a flag; config names
 // them without it (ADR-0031 §1).
 func TestAFlagTheFlagPackageRefusesIsNeverShown(t *testing.T) {
-	version := func(fs *flag.FlagSet) { fs.Bool("version", false, "") }
+	extra := func(fs *flag.FlagSet) {
+		fs.Bool("version", false, "")
+		fs.Func("tries", "", func(string) error { return errors.New("refused") })
+	}
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -243,12 +248,69 @@ func TestAFlagTheFlagPackageRefusesIsNeverShown(t *testing.T) {
 		{"a bad flag syntax", []string{"---upstream-url=https://h.example/x?k=" + canaryText}, "want flags as --name=value; got an argument with a bad flag syntax (48 characters, not shown)"},
 		{"a flag with no name", []string{"--=" + canaryText}, "want flags as --name=value; got an argument with a bad flag syntax (13 characters, not shown)"},
 		{"a value given to an action flag", []string{"--version=" + canaryText}, "--version: want true, false or no value; got a value it does not take (not shown)"},
+		// The value comes before the name in the flag package's error, so it cannot name another flag.
+		{"a value naming another flag", []string{"--version=x for -dev: y"}, "--version: want true, false or no value; got a value it does not take (not shown)"},
+		{"a value a flag of another kind refuses", []string{"--tries=" + canaryText}, "--tries: want a value it takes; got a value it does not take (not shown)"},
+		{"an undefined flag that is a value", []string{"--" + canaryText + "~tok=1"}, "want flags this command takes; got an undefined flag (14 characters, not shown)"},
+		{"an undefined flag", []string{"--tokn=1"}, "flag provided but not defined: -tokn"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := resolve(registry, tc.args, base, baseFiles, version)
+			_, err := resolve(registry, tc.args, base, baseFiles, extra)
 			if !isConfigError(err) || err.Error() != tc.want || holdsCanary(err.Error()) {
 				t.Fatalf("got %v, want the configuration error %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// Every setting's refusal, tried with values that hold a canary in a context where the setting is
+// read, shows no part of the canary in any case, and every line that refuses the setting is in the one
+// format "BYWARD_X: want …; got …" (ADR-0031 §1). Config's own counterpart of cmd/byward's
+// TestNoCommandShowsAHiddenOrARefusedValue, which runs the refused cells through every command. A
+// secret setting is read from a file, which that test writes; a line naming the setting otherwise
+// ("BYWARD_X is set without …") refuses its context, not a value.
+func TestNoRefusalShowsTheValueGiven(t *testing.T) {
+	forms := []string{"https://u:" + canaryText + "@h.example/x", canaryText, "X-Api-Key: " + canaryText, "a " + canaryText,
+		"+" + canaryText, canaryText + "=5", "authorize=" + canaryText, "1" + canaryText, "\"" + canaryText + "\""}
+	type ctx struct {
+		args  []string
+		env   []string
+		files readFileFunc
+	}
+	contextOf := func(s Setting) ctx {
+		switch s.Group {
+		case GroupStdioUpstream:
+			return ctx{[]string{"--", "/bin/x"}, stdioBase(), baseFiles}
+		case GroupOIDC:
+			return ctx{nil, slices.Clone(oidcBase), oidcFiles}
+		case GroupAppOnly:
+			return ctx{nil, append(slices.Clone(base), "BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=r"), baseFiles}
+		}
+		return ctx{nil, slices.Clone(base), baseFiles}
+	}
+	refused := 0
+	for _, s := range registry {
+		if s.Secret() {
+			continue
+		}
+		for _, form := range forms {
+			c := contextOf(s)
+			_, _, err := Load(c.args, append(c.env, s.Env()+"="+form), c.files)
+			if err == nil {
+				continue
+			}
+			refused++
+			if holdsCanary(err.Error()) {
+				t.Errorf("%s=%q: %v, shows the value", s.Env(), form, err)
+			}
+			for _, line := range strings.Split(err.Error(), "\n") {
+				if strings.HasPrefix(line, s.Env()+": ") && (!strings.HasPrefix(line, s.Env()+": want ") || !strings.Contains(line, "; got ")) {
+					t.Errorf("%s=%q: the line %q is outside the one format", s.Env(), form, line)
+				}
+			}
+		}
+	}
+	if refused < 100 {
+		t.Fatalf("%d refusals, want at least 100: the forms stopped reaching the settings' parsers", refused)
 	}
 }

@@ -56,8 +56,9 @@ var hidingSettings = []string{"upstream-credential", "upstream-env", "entra-clie
 // cell's output repeats it (TestTheSettingsOfEachShapeAreExactlyThese, internal/config, pins which
 // settings those are); the test only checks that its shape does show it, so a setting whose shape
 // hides a value cannot be left off the list. A secret setting's value is written to the file it is
-// read from. A value config refuses at load is run the same way: every command refuses it, in the
-// one format "BYWARD_X: want …; got …" (ADR-0031 §1), and no output shows a canary. Startup runs
+// read from. A value config refuses at load is run the same way: config refuses it in the one format
+// "BYWARD_X: want …; got …" (ADR-0031 §1), every command refuses it naming the setting, and no
+// output shows a canary. Startup runs
 // with its context done and a listen address it cannot bind (TEST-NET-1), so it serves nothing;
 // doctor's HTTP clients refuse every request (TestMain).
 func TestNoCommandShowsAHiddenOrARefusedValue(t *testing.T) {
@@ -87,6 +88,11 @@ func TestNoCommandShowsAHiddenOrARefusedValue(t *testing.T) {
 		t.Fatal(err)
 	}
 	contexts := leakContexts(t, program)
+	for _, name := range contextOf { // a context named but not built would run its setting with no settings at all
+		if _, ok := contexts[name]; !ok {
+			t.Fatalf("contextOf names the context %q, which leakContexts does not build", name)
+		}
+	}
 	settings := allSettings(t, contexts["entra"])
 	tried, refusedTried := map[string]int{}, map[string]int{}
 	for _, s := range settings {
@@ -113,6 +119,9 @@ func TestNoCommandShowsAHiddenOrARefusedValue(t *testing.T) {
 			switch {
 			case refusing:
 				refusedTried[s.Name]++
+				if shows(loadErr.Error()) {
+					t.Errorf("%s=%s (%s): config's refusal shows a secret: %v", s.Env(), form.value, form.name, loadErr)
+				}
 				// Every line is a refusal of this setting, in the one format.
 				for _, line := range strings.Split(loadErr.Error(), "\n") {
 					named := strings.HasPrefix(line, s.Env()+": want ") || strings.HasPrefix(line, s.Env()+"_FILE: want ")
@@ -152,7 +161,8 @@ func TestNoCommandShowsAHiddenOrARefusedValue(t *testing.T) {
 			}
 		}
 	}
-	// Every setting but these, which take any text, refuses some form, so its refusal is run through
+	// Every setting but these, for which config refuses none of the forms above, refuses some form, so
+	// its refusal is run through
 	// every command: one that stops refusing, or starts, is named here.
 	acceptsEveryForm := []string{"app-client-ids", "app-roles", "entra-client-certificate", "entra-client-id", "entra-client-secret",
 		"gate-email-domains", "gate-groups", "gate-hosted-domains", "gate-roles", "gate-tenants", "oidc-client-id", "oidc-client-key",

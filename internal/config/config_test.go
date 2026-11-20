@@ -89,6 +89,14 @@ func TestUnknownEnvFarFromAnySettingHasNoSuggestion(t *testing.T) {
 	}
 }
 
+// scopeRefused is BYWARD_SCOPE's refusal of a value of n characters for a character no scope token holds.
+func scopeRefused(n int) string {
+	return "BYWARD_SCOPE: want one scope token, such as mcp; got a value (" + strconv.Itoa(n) + " characters, not shown): " + notScopeTokenText
+}
+
+// notScopeTokenText is the reason, written out: the test pins the literal, never the code's constant.
+const notScopeTokenText = "it has a character a scope token cannot hold: white space, a double quote, a backslash or one that is not printable ASCII"
+
 func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 	cases := []struct {
 		name, env, want string
@@ -96,12 +104,13 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"required", "BYWARD_PUBLIC_URL=", "BYWARD_PUBLIC_URL is required"},
 		{"http loopback without dev", "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "needs --dev"},
 		{"log format", "BYWARD_LOG_FORMAT=xml", "BYWARD_LOG_FORMAT: want json or text; got a value (3 characters, not shown): it is not one of them"},
-		{"two scopes", "BYWARD_SCOPE=a b", "BYWARD_SCOPE: want one scope token, such as mcp; got a value (3 characters, not shown): it has a character a scope token cannot hold: white space, a double quote, a backslash or one that is not printable ASCII"},
-		{"a scope with a tab", "BYWARD_SCOPE=mcp\tx", "BYWARD_SCOPE: want one scope token, such as mcp; got a value (5 characters, not shown): it has a character a scope token cannot hold: white space, a double quote, a backslash or one that is not printable ASCII"},
-		{"a scope that is not ASCII", "BYWARD_SCOPE=mcpü", "BYWARD_SCOPE: want one scope token, such as mcp; got a value (4 characters, not shown): it has a character a scope token cannot hold: white space, a double quote, a backslash or one that is not printable ASCII"},
+		{"two scopes", "BYWARD_SCOPE=a b", scopeRefused(3)},
+		{"a scope with a tab", "BYWARD_SCOPE=mcp\tx", scopeRefused(5)},
+		{"a scope that is not ASCII", "BYWARD_SCOPE=mcpü", scopeRefused(4)},
+		{"a scope with DEL", "BYWARD_SCOPE=mcp\x7f", scopeRefused(4)},
 		{"no scope", "BYWARD_SCOPE=", "BYWARD_SCOPE: want one scope token, such as mcp; got nothing"},
-		{"a scope with a quote", `BYWARD_SCOPE=a"b`, "BYWARD_SCOPE: want one scope token, such as mcp; got a value (3 characters, not shown): it has a character a scope token cannot hold: white space, a double quote, a backslash or one that is not printable ASCII"},
-		{"a scope with a backslash", `BYWARD_SCOPE=a\b`, "BYWARD_SCOPE: want one scope token, such as mcp; got a value (3 characters, not shown): it has a character a scope token cannot hold: white space, a double quote, a backslash or one that is not printable ASCII"},
+		{"a scope with a quote", `BYWARD_SCOPE=a"b`, scopeRefused(3)},
+		{"a scope with a backslash", `BYWARD_SCOPE=a\b`, scopeRefused(3)},
 		{"operator name too long", "BYWARD_OPERATOR_NAME=" + strings.Repeat("é", 81), "BYWARD_OPERATOR_NAME: want text of at most 80 characters, without control or formatting characters; got a value (81 characters, not shown): it is too long"},
 		{"operator name with a newline", "BYWARD_OPERATOR_NAME=a\nb", "BYWARD_OPERATOR_NAME: want text of at most 80 characters, without control or formatting characters; got a value (3 characters, not shown): it has a control or formatting character"},
 		{"operator name with a bidi override", "BYWARD_OPERATOR_NAME=Evil \u202eTI", "BYWARD_OPERATOR_NAME: want text of at most 80 characters, without control or formatting characters; got a value (8 characters, not shown): it has a control or formatting character"},
@@ -886,8 +895,8 @@ func TestInvalidStoreSettingsAreRejected(t *testing.T) {
 		// The counter file derived from a relative keys directory is not reported a second time; one the
 		// operator sets is.
 		{"a counter derived from a relative keys directory", []string{"BYWARD_KEYS_DIR=keys"}, "BYWARD_KEYS_DIR: want an absolute path", "BYWARD_STORE_COUNTER_FILE"},
-		{"a relative counter beside a relative keys directory", []string{"BYWARD_KEYS_DIR=keys", "BYWARD_STORE_COUNTER_FILE=writes"}, `BYWARD_STORE_COUNTER_FILE: want an absolute path (no paths relative to the working directory, ADR-0007 §6); got a relative one`, ""},
-		{"counter inside the state directory", []string{"BYWARD_STORE_COUNTER_FILE=/var/lib/byward/state/writes"}, "BYWARD_STORE_COUNTER_FILE: want a path outside BYWARD_STORE_DIR; got one inside it", ""},
+		{"a relative counter beside a relative keys directory", []string{"BYWARD_KEYS_DIR=keys", "BYWARD_STORE_COUNTER_FILE=writes"}, `BYWARD_STORE_COUNTER_FILE: want an absolute path; got a relative one: no path is relative to the working directory (ADR-0007 §6)`, ""},
+		{"counter inside the state directory", []string{"BYWARD_STORE_COUNTER_FILE=/var/lib/byward/state/writes"}, "BYWARD_STORE_COUNTER_FILE: want a path outside BYWARD_STORE_DIR; got one inside it: a restored backup", ""},
 		{"keys inside the state directory", []string{"BYWARD_KEYS_DIR=/var/lib/byward/state/keys"}, "keep the keys directory outside the state directory", ""},
 		{"grace not a duration", []string{"BYWARD_REFRESH_GRACE=soon"}, "BYWARD_REFRESH_GRACE: want a duration", ""},
 		{"grace negative", []string{"BYWARD_REFRESH_GRACE=-1000ms"}, "BYWARD_REFRESH_GRACE: want a duration from 0s to 60s, such as 30s; got -1s: it is out of range", "-1000ms"},
@@ -1198,44 +1207,12 @@ func TestADenylistEntryRefusedAtWiringIsNamedByItsPlaceAndLength(t *testing.T) {
 	}
 }
 
-// Every list setting refuses a value that names no entry, such as ",": it would read as unset, and a
-// gate list would silently open the gate. OBO scopes, split at white space, take " " as theirs.
-func TestEveryListSettingRefusesAListOfNone(t *testing.T) {
-	app := []string{"BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=r"}
-	for _, tc := range []struct {
-		env    string
-		blanks []string
-		extra  []string
-	}{
-		{"BYWARD_ALLOWED_HOSTS", []string{",", " , "}, nil},
-		{"BYWARD_ALLOWED_ORIGINS", []string{",", " , "}, nil},
-		{"BYWARD_TRUSTED_PROXIES", []string{",", " , "}, nil},
-		{"BYWARD_CIMD_TRUSTED_HOSTS", []string{",", " , "}, nil},
-		{"BYWARD_CIMD_ALLOWED_HOSTS", []string{",", " , "}, nil},
-		{"BYWARD_CLIENT_DENYLIST", []string{",", " , "}, nil},
-		{"BYWARD_GATE_TENANTS", []string{",", " , "}, nil},
-		{"BYWARD_GATE_ROLES", []string{",", " ,, "}, nil},
-		{"BYWARD_GATE_GROUPS", []string{",", " "}, nil},
-		{"BYWARD_GATE_EMAIL_DOMAINS", []string{",", " , "}, nil},
-		{"BYWARD_GATE_HOSTED_DOMAINS", []string{",", " , "}, nil},
-		{"BYWARD_ASSERTION_CLAIMS", []string{",", " , "}, nil},
-		{"BYWARD_UPSTREAM_STRIP_HEADERS", []string{",", " , "}, nil},
-		{"BYWARD_OAUTH_RATE_LIMITS", []string{",", " , "}, nil},
-		{"BYWARD_APP_ROLES", []string{",", " , "}, []string{"BYWARD_APP_TOKENS=entra"}},
-		{"BYWARD_APP_CLIENT_IDS", []string{",", " , "}, app},
-		{"BYWARD_OBO_SCOPES", []string{" ", "\t"}, nil},
-	} {
-		for _, blank := range tc.blanks {
-			t.Run(tc.env+"="+strconv.Quote(blank), func(t *testing.T) {
-				_, err := load(t, nil, append(tc.extra, tc.env+"="+blank)...)
-				if want := tc.env + ": want at least one entry; got a list of none"; !isConfigError(err) || !strings.Contains(err.Error(), want) {
-					t.Fatalf("err = %v, want the refusal %q", err, want)
-				}
-			})
-		}
-	}
-	_, err := loadOIDC(t, with("BYWARD_OIDC_SCOPES= ,"))
-	if want := "BYWARD_OIDC_SCOPES: want at least one entry; got a list of none"; !isConfigError(err) || !strings.Contains(err.Error(), want) {
-		t.Fatalf("BYWARD_OIDC_SCOPES: err = %v, want the refusal %q", err, want)
+// A scope token takes every printable ASCII character but a space, a double quote and a backslash,
+// the ends of the range included.
+func TestAScopeTokenTakesThePrintableASCIIRange(t *testing.T) {
+	const scope = "api://x/!mcp~read"
+	c, err := load(t, nil, "BYWARD_SCOPE="+scope)
+	if err != nil || c.Scope != scope {
+		t.Fatalf("got %v, %v; want the scope %q", c, err, scope)
 	}
 }

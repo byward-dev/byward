@@ -11,17 +11,6 @@ import (
 	"github.com/byward-dev/byward/internal/ratelimit"
 )
 
-// parseScope reads BYWARD_SCOPE: one scope token (RFC 6749 §3.3), printable ASCII without a space, a
-// double quote or a backslash, since it is written into a quoted challenge.
-func parseScope(val Value) (string, error) {
-	raw := val.Given.raw()
-	notToken := func(r rune) bool { return r < 0x21 || r > 0x7e || r == '"' || r == '\\' }
-	if raw == "" || strings.ContainsFunc(raw, notToken) {
-		return "", refusedForm(val.Setting, whole, raw, "one scope token, such as mcp", "it has a character a scope token cannot hold: white space, a double quote, a backslash or one that is not printable ASCII")
-	}
-	return raw, nil
-}
-
 // checkInlineSecrets rejects secrets given directly in env; development mode accepts them and
 // reports the relaxation instead.
 func checkInlineSecrets(v *Values, dev bool) (relaxation string, err error) {
@@ -244,16 +233,6 @@ func parseProxies(val Value) ([]netip.Prefix, error) {
 // never a trusted proxy (logging.ClientAddress), so an entry inside it would trust no peer. A wider
 // entry (::/0, fe80::/9) is accepted: it cannot trust a link-local peer either.
 var linkLocal = netip.MustParsePrefix("fe80::/10")
-
-func splitList(s string) []string {
-	var out []string
-	for _, p := range strings.Split(s, ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
 
 // parseOrigins reads BYWARD_ALLOWED_ORIGINS: each origin as browsers send it (browserOrigin),
 // with its host[:port] checked as BYWARD_ALLOWED_HOSTS checks one (hostPort), and refused when no

@@ -25,12 +25,10 @@ func TestAppOnlyTokenSettingsThatCannotWorkRefuseToStart(t *testing.T) {
 		oidc bool
 		want string
 	}{
-		"no app role":            {env: []string{"BYWARD_APP_TOKENS=entra"}, want: "BYWARD_APP_ROLES is required with BYWARD_APP_TOKENS=entra"},
-		"a blank role list":      {env: []string{"BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES= , "}, want: "BYWARD_APP_ROLES: want at least one entry; got a list of none"},
-		"a blank client ID list": {env: []string{"BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=r", "BYWARD_APP_CLIENT_IDS=,"}, want: "BYWARD_APP_CLIENT_IDS: want at least one entry; got a list of none"},
-		"an unknown value":       {env: []string{"BYWARD_APP_TOKENS=google"}, want: "BYWARD_APP_TOKENS: want off or entra; got a value (6 characters, not shown): it is not one of them"},
-		"roles while off":        {env: []string{"BYWARD_APP_ROLES=r", "BYWARD_APP_CLIENT_IDS=x"}, want: "BYWARD_APP_ROLES, BYWARD_APP_CLIENT_IDS set while BYWARD_APP_TOKENS=off"},
-		"an OIDC IdP":            {env: []string{"BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=r"}, oidc: true, want: "BYWARD_APP_TOKENS=entra cannot be used with BYWARD_IDP=keycloak"},
+		"no app role":      {env: []string{"BYWARD_APP_TOKENS=entra"}, want: "BYWARD_APP_ROLES is required with BYWARD_APP_TOKENS=entra"},
+		"an unknown value": {env: []string{"BYWARD_APP_TOKENS=google"}, want: "BYWARD_APP_TOKENS: want off or entra; got a value (6 characters, not shown): it is not one of them"},
+		"roles while off":  {env: []string{"BYWARD_APP_ROLES=r", "BYWARD_APP_CLIENT_IDS=x"}, want: "BYWARD_APP_ROLES, BYWARD_APP_CLIENT_IDS set while BYWARD_APP_TOKENS=off"},
+		"an OIDC IdP":      {env: []string{"BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=r"}, oidc: true, want: "BYWARD_APP_TOKENS=entra cannot be used with BYWARD_IDP=keycloak"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var err error

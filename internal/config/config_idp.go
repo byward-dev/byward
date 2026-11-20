@@ -305,8 +305,8 @@ func parseOIDCScopes(val Value) ([]string, []error) {
 	}
 	var errs []error
 	for i, sc := range list {
-		if strings.ContainsAny(sc, " \\\"") {
-			errs = append(errs, refusedForm(s, at(i), sc, "a scope such as openid or email", "it holds a space, a backslash or a double quote"))
+		if !isScopeToken(sc) {
+			errs = append(errs, refusedForm(s, at(i), sc, "a scope such as openid or email", notScopeToken))
 		}
 	}
 	return list, errs

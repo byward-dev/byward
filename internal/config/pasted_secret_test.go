@@ -51,7 +51,7 @@ func TestARefusedSettingNeverShowsASecretPastedIntoIt(t *testing.T) {
 		{"the PostgreSQL DSN's file, given the DSN", []string{"BYWARD_STORE_POSTGRES_DSN_FILE=postgres://byward:" + pasted + "@db.example/byward"},
 			"BYWARD_STORE_POSTGRES_DSN_FILE: cannot read secret file: no such file or directory"},
 		{"a path setting, given the secret", []string{"BYWARD_TLS_KEY_FILE=" + pasted, "BYWARD_TLS_CERT_FILE=/etc/byward/tls.crt"},
-			"BYWARD_TLS_KEY_FILE: want an absolute path (no paths relative to the working directory, ADR-0007 §6); got a relative one"},
+			"BYWARD_TLS_KEY_FILE: want an absolute path; got a relative one: no path is relative to the working directory (ADR-0007 §6)"},
 		{"a header to strip, given a header line", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X-Api-Key: " + pasted},
 			"BYWARD_UPSTREAM_STRIP_HEADERS: want exact header names, such as X-Argocd-Base-Url; got entry 1 of 1 (29 characters, not shown): it is not a header name"},
 		{"a header family to strip, given a header line", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X-Api-*: " + pasted},

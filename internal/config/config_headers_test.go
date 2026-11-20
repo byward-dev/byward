@@ -82,14 +82,24 @@ func TestAHeaderNameThatIsNotATokenIsRefusedByEverySettingThatSetsOne(t *testing
 // never shown, since an accepted name can be any token.
 func TestAHeaderClashNeverShowsTheHeader(t *testing.T) {
 	const header = "X-" + canaryText
-	for name, env := range map[string][]string{
-		"the credential and the assertion":         {"BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=" + header, "BYWARD_ASSERTION_HEADER=" + strings.ToLower(header)},
-		"the On-Behalf-Of token and the assertion": {"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read", "BYWARD_OBO_HEADER=" + header, "BYWARD_ASSERTION_HEADER=" + strings.ToLower(header)},
+	obo := "BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read"
+	cred := "BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile
+	for _, tc := range []struct {
+		name string
+		env  []string
+		want string
+	}{
+		{"the credential and the assertion", []string{cred, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=" + header, "BYWARD_ASSERTION_HEADER=" + strings.ToLower(header)},
+			"BYWARD_UPSTREAM_CREDENTIAL_HEADER and BYWARD_ASSERTION_HEADER name the same header, but the credential and the identity assertion never share a header"},
+		{"the On-Behalf-Of token and the assertion", []string{obo, "BYWARD_OBO_HEADER=" + header, "BYWARD_ASSERTION_HEADER=" + strings.ToLower(header)},
+			"BYWARD_OBO_HEADER names the header that already carries the identity assertion (BYWARD_ASSERTION_HEADER)"},
+		{"the On-Behalf-Of token and the credential", []string{obo, cred, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=" + header, "BYWARD_OBO_HEADER=" + strings.ToLower(header)},
+			"BYWARD_OBO_HEADER names the header that already carries the operator's upstream credential (BYWARD_UPSTREAM_CREDENTIAL_HEADER)"},
 	} {
-		t.Run(name, func(t *testing.T) {
-			_, err := loadCred(t, nil, "k-123", env...)
-			if !isConfigError(err) || !strings.Contains(err.Error(), "the same header") && !strings.Contains(err.Error(), "names the header that already carries") || holdsCanary(err.Error()) {
-				t.Fatalf("err = %v, want the clash refused by the settings' names and the header never shown", err)
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := loadCred(t, nil, "k-123", tc.env...)
+			if !isConfigError(err) || !strings.Contains(err.Error(), tc.want) || holdsCanary(err.Error()) {
+				t.Fatalf("err = %v, want %q and the header never shown", err, tc.want)
 			}
 		})
 	}

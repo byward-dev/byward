@@ -8,8 +8,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/byward-dev/byward/internal/logging"
@@ -284,27 +286,54 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 }
 
 // flagError is err, the flag package's refusal of args, without any value it quotes (ADR-0031 §1):
-// "bad flag syntax" quotes the whole argument, and "invalid value" the value given to a flag.
-// A flag that needs an argument, or one that is not defined, is named by its name, as an unknown
+// "bad flag syntax" quotes the whole argument, and an invalid value the value given to a flag. A
+// flag that needs an argument, or one that is not defined, is named by its name, as an unknown
 // environment variable is.
 func flagError(fs *flag.FlagSet, err error) error {
 	msg := err.Error()
-	switch {
-	case strings.HasPrefix(msg, "bad flag syntax: "):
-		return errorf("want flags as --name=value; got an argument with a bad flag syntax %s", notShown(strings.TrimPrefix(msg, "bad flag syntax: ")))
-	case strings.HasPrefix(msg, "invalid boolean value ") || strings.HasPrefix(msg, "invalid value "):
-		name := ""
-		fs.VisitAll(func(f *flag.Flag) {
-			if strings.Contains(msg, " for -"+f.Name+": ") || strings.Contains(msg, " for flag -"+f.Name+": ") {
-				name = f.Name
-			}
-		})
-		if name == "" {
-			return errorf("a flag was given a value it does not take (not shown)")
+	if rest, ok := strings.CutPrefix(msg, "bad flag syntax: "); ok {
+		return errorf("want flags as --name=value; got an argument with a bad flag syntax %s", notShown(rest))
+	}
+	if f := refusedFlag(fs, msg); f != nil {
+		want := "a value it takes"
+		if b, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && b.IsBoolFlag() {
+			want = "true, false or no value"
 		}
-		return errorf("--%s: want true, false or no value; got a value it does not take (not shown)", name)
+		return errorf("--%s: want %s; got a value it does not take (not shown)", f.Name, want)
+	}
+	if strings.HasPrefix(msg, "invalid ") {
+		return errorf("a flag was given a value it does not take (not shown)")
+	}
+	// The flag package names an undefined flag by all its text before =, which can be a value pasted as
+	// an argument: shown only when it reads as a flag's name.
+	if name, ok := strings.CutPrefix(msg, "flag provided but not defined: -"); ok && !flagName.MatchString(name) {
+		return errorf("want flags this command takes; got an undefined flag %s", notShown(name))
 	}
 	return errorf("%v", err)
+}
+
+// flagName is what a flag's name reads as: lower-case letters, digits and dashes.
+var flagName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// refusedFlag is the flag msg, the flag package's "invalid boolean value" or "invalid value" error,
+// names, or nil. The value comes first, quoted, so the name is read after it: a value holding
+// " for -name" cannot name another flag.
+func refusedFlag(fs *flag.FlagSet, msg string) *flag.Flag {
+	for _, prefix := range []string{"invalid boolean value ", "invalid value "} {
+		rest, ok := strings.CutPrefix(msg, prefix)
+		if !ok {
+			continue
+		}
+		quoted, err := strconv.QuotedPrefix(rest)
+		if err != nil {
+			return nil
+		}
+		rest = strings.TrimPrefix(strings.TrimPrefix(rest[len(quoted):], " for flag -"), " for -")
+		if name, _, ok := strings.Cut(rest, ": "); ok {
+			return fs.Lookup(name)
+		}
+	}
+	return nil
 }
 
 // inlineSecrets lists secret settings given directly in env instead of through a file.
