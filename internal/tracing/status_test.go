@@ -94,13 +94,13 @@ func TestAServerSpanIsAnErrorOnlyForA5xxOrAnUpstreamBreakOff(t *testing.T) {
 			_, _ = io.WriteString(w, "{}")
 			w.WriteHeader(500)
 		}, 200, codes.Unset, nil, ""},
-		{"a stream its upstream broke off", streamThenAbort, 200, codes.Error, nil, "upstream_aborted"},
-		{"a stream whose client went away", streamThenAbort, 200, codes.Unset, clientGone, "client_closed"},
-		{"a stream the proxy's shutdown ended", streamThenAbort, 200, codes.Unset, shuttingDown, "shutdown"},
-		{"a 500 whose client went away", func(w http.ResponseWriter, _ *http.Request) {
+		{name: "a stream its upstream broke off", handler: streamThenAbort, status: 200, want: codes.Error, errType: "upstream_aborted"},
+		{name: "a stream whose MCP client went away", handler: streamThenAbort, status: 200, want: codes.Unset, ctx: clientGone, errType: "client_closed"},
+		{name: "a stream the proxy's shutdown ended", handler: streamThenAbort, status: 200, want: codes.Unset, ctx: shuttingDown, errType: "shutdown"},
+		{name: "a 500 whose MCP client went away", handler: func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(500)
 			panic(http.ErrAbortHandler)
-		}, 500, codes.Error, clientGone, "client_closed"},
+		}, status: 500, want: codes.Error, ctx: clientGone, errType: "client_closed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			exp.Reset()
@@ -110,7 +110,8 @@ func TestAServerSpanIsAnErrorOnlyForA5xxOrAnUpstreamBreakOff(t *testing.T) {
 			}
 			func() {
 				defer func() { // a cut-off response's abort goes on to the server
-					if p := recover(); (p != nil) != (tc.errType != "") {
+					p := recover()
+					if aborted := p == http.ErrAbortHandler; aborted != (tc.errType != "") || (p != nil && !aborted) { //nolint:errorlint // sentinel compared as net/http does
 						t.Errorf("panic %v; want http.ErrAbortHandler only for a response cut off", p)
 					}
 				}()

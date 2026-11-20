@@ -484,7 +484,7 @@ func shutdownEndsAnOpenListen(t *testing.T, internalListen string) {
 		t.Fatal("Run did not return after cancel")
 	}
 	var listens []map[string]any
-	for _, l := range requestLines(p.logs.String()) {
+	for _, l := range requestLines(t, p.logs.String()) {
 		if l["mcp_method"] == "subscriptions/listen" {
 			listens = append(listens, l)
 		}

@@ -419,16 +419,15 @@ func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id
 			if initialize {
 				w.Header().Set(sessionHeader, s.key)
 			}
-			started := startSSE(w)
+			started := startSSE(r.Context(), w)
 			out = &started
 		}
 	}
 	if !initialize {
 		begin()
 	}
-	// send writes m; a message that cannot be written is handled as undeliverable, and the stream,
-	// cut off, is recorded as such (#533). A write that fails because the request ended is not a
-	// failure of the process, whatever else went wrong (#549).
+	// send writes m; a message that cannot be written is handled as undeliverable. A write that fails
+	// because the request ended is not a failure of the process, whatever else went wrong (#549).
 	send := func(m []byte) bool {
 		begin()
 		if out.write(m) != nil {
@@ -436,7 +435,6 @@ func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id
 			if r.Context().Err() != nil {
 				reason = requestEnded
 			}
-			logging.StreamEnded(r.Context())
 			return false
 		}
 		return true
@@ -507,8 +505,8 @@ func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id
 
 // listen serves the session's GET stream until the client leaves, the session ends or a newer GET
 // replaces it. Each message goes out on one stream only (2025-11-25 transports, Multiple
-// Connections), so the newest GET stream is the one used. A stream its client left, or the proxy's
-// shutdown ended, is recorded as cut off (#533).
+// Connections), so the newest GET stream is the one used. A stream its request's end cut off is
+// recorded as such (#533), as is one a write to failed (sse).
 func (s *session) listen(w http.ResponseWriter, r *http.Request) {
 	st := newStream(nil)
 	if !s.setListen(st) {
@@ -519,21 +517,19 @@ func (s *session) listen(w http.ResponseWriter, r *http.Request) {
 	// Before the stream starts, so a client that sees it start already has a running timer.
 	q := newQuiet(s.p.clock)
 	defer q.stop()
-	sse := startSSE(w)
+	sse := startSSE(r.Context(), w)
 	for {
 		select {
 		case m := <-st.out:
 			q.writing()
 			if sse.write(m) != nil {
 				s.undeliverable(m, "client_disconnected")
-				logging.StreamEnded(r.Context())
 				return
 			}
 			s.refill(st)
 		case <-q.elapsed():
 			q.writing()
 			if sse.keepAlive() != nil {
-				logging.StreamEnded(r.Context())
 				return
 			}
 		case <-st.done:

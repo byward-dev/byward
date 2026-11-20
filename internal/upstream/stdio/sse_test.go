@@ -16,7 +16,7 @@ import (
 
 func TestAKeepAliveIsAnSSECommentLine(t *testing.T) {
 	rec := httptest.NewRecorder()
-	if err := startSSE(rec).keepAlive(); err != nil {
+	if err := startSSE(context.Background(), rec).keepAlive(); err != nil {
 		t.Fatal(err)
 	}
 	if got := rec.Body.String(); got != ":\r\n" {

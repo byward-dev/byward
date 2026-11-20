@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/shutdown"
 )
 
@@ -28,16 +29,18 @@ type ending struct {
 	status   int
 	body     string
 	shutdown bool // the proxy ended the request: its connection closes, a listen gets its completion
+	// cut is what a stream already started records when the request ends this way (#533).
+	cut logging.CutOff
 }
 
 var endings = []ending{
 	{"the MCP client went away", func() (context.Context, func()) {
 		ctx, cancel := context.WithCancel(context.Background())
 		return ctx, cancel
-	}, 499, "", false},
+	}, 499, "", false, logging.ClientClosed},
 	{"the proxy shuts down", func() (context.Context, func()) {
 		return shutdown.WithCancel(context.Background())
-	}, http.StatusServiceUnavailable, "the proxy is shutting down\n", true},
+	}, http.StatusServiceUnavailable, "the proxy is shutting down\n", true, logging.ShutDown},
 }
 
 // answered fails t unless w is the answer to a request that ended this way.

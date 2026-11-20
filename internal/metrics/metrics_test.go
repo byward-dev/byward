@@ -171,7 +171,7 @@ func TestARequestCutOffAfterItsHeadersIsObservedWithWhy(t *testing.T) {
 		}()
 		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/mcp", nil))
 	}()
-	const want = `byward_http_request_duration_seconds_count{error_type="upstream_aborted",route="mcp",status_class="2xx"} 1`
+	const want = `byward_http_request_duration_seconds_count{error_type="upstream_aborted",route="mcp",status_class="2xx"} 1` + "\n"
 	if out := scrape(t, m); !strings.Contains(out, want) {
 		t.Fatalf("metrics lack %s:\n%s", want, out)
 	}

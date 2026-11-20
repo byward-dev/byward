@@ -298,7 +298,7 @@ func TestTheRequestLineCarriesItsIDWithAnyLogger(t *testing.T) {
 // The request line logs the final status, not an informational one: 1xx statuses from 100 to 199
 // precede it, except 101 Switching Protocols, which is final, as any status from 200 up is. The first
 // final status, or a body, fixes it, and a handler that writes neither gets 200. Metrics and server
-// spans read the status through statusRecorder too.
+// spans record the status Observe gives them, the same one.
 func TestInformationalStatusIsNotLoggedAsFinal(t *testing.T) {
 	const body = 0 // in writes: a body write instead of a status
 	for _, c := range []struct {
@@ -329,10 +329,10 @@ func TestInformationalStatusIsNotLoggedAsFinal(t *testing.T) {
 			if wantLine := fmt.Sprintf(`"status":%d,`, c.want); !strings.Contains(buf.String(), wantLine) {
 				t.Errorf("request line %s; want %s", buf.String(), wantLine)
 			}
-			rec := newStatusRecorder(httptest.NewRecorder()) // what metrics and spans read
-			handler.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
-			if got := rec.Status(); got != c.want {
-				t.Errorf("statusRecorder.Status() = %d, want %d", got, c.want)
+			got := 0 // what metrics and spans record
+			Observe(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil), handler, func(status int, _ CutOff) { got = status })
+			if got != c.want {
+				t.Errorf("Observe recorded status %d, want %d", got, c.want)
 			}
 		})
 	}

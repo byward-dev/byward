@@ -4,9 +4,12 @@ package stdio
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 var (
@@ -21,19 +24,22 @@ var (
 // default), Cloudflare's proxy read timeout (125 s).
 const keepAliveInterval = 15 * time.Second
 
-// sse writes server-sent events, each flushed and bounded by writeTimeout.
+// sse writes server-sent events, each flushed and bounded by writeTimeout. A write that fails has lost
+// its MCP client, so it records the stream of ctx, its request's, as cut off (logging.StreamEnded,
+// #533): whatever the write was, and wherever it was written from.
 type sse struct {
-	w  http.ResponseWriter
-	rc *http.ResponseController
+	w   http.ResponseWriter
+	rc  *http.ResponseController
+	ctx context.Context
 }
 
-func startSSE(w http.ResponseWriter) sse {
+func startSSE(ctx context.Context, w http.ResponseWriter) sse {
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")
 	h.Set("Cache-Control", "no-cache")
 	h.Set("X-Accel-Buffering", "no") // reverse proxies must not buffer a stream (2026-07-28 streamable-http)
 	w.WriteHeader(http.StatusOK)
-	s := sse{w: w, rc: http.NewResponseController(w)}
+	s := sse{w: w, rc: http.NewResponseController(w), ctx: ctx}
 	_ = s.rc.Flush()
 	return s
 }
@@ -42,9 +48,17 @@ func startSSE(w http.ResponseWriter) sse {
 func (s sse) keepAlive() error {
 	_ = s.rc.SetWriteDeadline(time.Now().Add(writeTimeout))
 	if _, err := s.w.Write(comment); err != nil {
-		return err
+		return s.cutOff(err)
 	}
-	return s.rc.Flush()
+	return s.cutOff(s.rc.Flush())
+}
+
+// cutOff records the stream as cut off when err, a write's, is not nil, and returns err.
+func (s sse) cutOff(err error) error {
+	if err != nil {
+		logging.StreamEnded(s.ctx)
+	}
+	return err
 }
 
 // quiet signals once a stream has written nothing for keepAliveInterval. A nil *quiet never
@@ -106,8 +120,8 @@ func (s sse) write(msg []byte) error {
 	_ = s.rc.SetWriteDeadline(time.Now().Add(writeTimeout))
 	for _, part := range [][]byte{eventPrefix, msg, eventEnd} { // buffered by net/http; no copy of msg
 		if _, err := s.w.Write(part); err != nil {
-			return err
+			return s.cutOff(err)
 		}
 	}
-	return s.rc.Flush()
+	return s.cutOff(s.rc.Flush())
 }

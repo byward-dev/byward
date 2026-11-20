@@ -409,8 +409,8 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, l
 		draining = c.draining
 	}
 	defer silence.stop()
-	out := startSSE(w)
-	drain := func() { // what the upstream sent before the end goes out first
+	out := startSSE(r.Context(), w) // a write that fails records the stream as cut off (#533)
+	drain := func() {               // what the upstream sent before the end goes out first
 		for {
 			select {
 			case o := <-q.out:
@@ -420,12 +420,7 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, l
 			}
 		}
 	}
-	finish := func(m []byte) { // an answer that cannot be written leaves the stream cut off (#533)
-		drain()
-		if out.write(m) != nil {
-			logging.StreamEnded(r.Context())
-		}
-	}
+	finish := func(m []byte) { drain(); _ = out.write(m) }
 	// endListen ends a listen byward chose to end with its completion result and cancels it upstream.
 	endListen := func() { finish(exitAnswer(q, true)); c.cancel(q) }
 	for {
@@ -433,14 +428,12 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, l
 		case m := <-q.out:
 			silence.writing()
 			if out.write(m) != nil {
-				logging.StreamEnded(r.Context()) // cut off without its answer (#533)
 				c.cancel(q)
 				return
 			}
 		case <-silence.elapsed():
 			silence.writing()
 			if out.keepAlive() != nil { // the client is gone: as for a closed stream
-				logging.StreamEnded(r.Context())
 				c.cancel(q)
 				return
 			}

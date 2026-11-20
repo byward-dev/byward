@@ -1,7 +1,9 @@
 package logging
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -151,5 +153,34 @@ func TestNestedObserversRecordOneCause(t *testing.T) {
 	}()
 	if inner.cut != UpstreamAborted || outer.cut != UpstreamAborted {
 		t.Errorf("inner %q, outer %q; want both %q", inner.cut, outer.cut, UpstreamAborted)
+	}
+}
+
+// The request line of a response cut off after its headers has the status it sent and why, as
+// error_type; every other request line has no error_type at all (#533).
+func TestARequestLineHasAnErrorTypeOnlyForAResponseCutOff(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		handler http.HandlerFunc
+		status  float64
+		cut     any // the request line's error_type; nil for none
+	}{
+		{"a response that ends", accepted, http.StatusAccepted, nil},
+		{"a stream its upstream broke off", streamThenAbort, http.StatusOK, string(UpstreamAborted)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			func() {
+				defer func() { _ = recover() }() // a cut-off response's abort goes on to the server
+				Middleware(New(&buf, "json"), tc.handler).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/mcp", nil))
+			}()
+			var line map[string]any
+			if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+				t.Fatalf("request line %q: %v", buf.String(), err)
+			}
+			if cut, has := line["error_type"]; line["status"] != tc.status || cut != tc.cut || has != (tc.cut != nil) {
+				t.Errorf("request line %s; want status %v and error_type %v", buf.String(), tc.status, tc.cut)
+			}
+		})
 	}
 }

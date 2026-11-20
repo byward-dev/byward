@@ -3,7 +3,6 @@ package server
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -44,12 +43,12 @@ func spans(t *testing.T) *tracetest.InMemoryExporter {
 }
 
 // requestLines is each request line in a JSON log.
-func requestLines(log string) []map[string]any {
+func requestLines(t *testing.T, log string) []map[string]any {
+	t.Helper()
 	var lines []map[string]any
-	for l := range strings.Lines(log) {
-		var v map[string]any
-		if json.Unmarshal([]byte(l), &v) == nil && v["msg"] == "request" {
-			lines = append(lines, v)
+	for _, rec := range logsink.Records[map[string]any](t, log) {
+		if rec["msg"] == "request" {
+			lines = append(lines, rec)
 		}
 	}
 	return lines
@@ -80,17 +79,19 @@ func TestAStreamCutOffAfterItsHeadersRecordsTheStatusItSentAndWhyThroughTheWhole
 		// ends, or breaks off the connection.
 		upstream func(w http.ResponseWriter, r *http.Request)
 		// cutOff ends the stream once the client has the first event.
-		cutOff    func(res *http.Response, shutDown func())
-		wantError codes.Code
+		cutOff func(res *http.Response, shutDown func())
+		// clientReads: the client is still there to read the rest of the stream, which breaks off.
+		clientReads bool
+		wantError   codes.Code
 	}{
 		{"its MCP client went away", logging.ClientClosed,
 			func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() },
 			func(res *http.Response, _ func()) { _ = res.Body.Close() },
-			codes.Unset},
+			false, codes.Unset},
 		{"the proxy shut down", logging.ShutDown,
 			func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() },
 			func(_ *http.Response, shutDown func()) { shutDown() },
-			codes.Unset},
+			true, codes.Unset},
 		{"its upstream broke off", logging.UpstreamAborted,
 			func(w http.ResponseWriter, _ *http.Request) {
 				c, _, err := http.NewResponseController(w).Hijack()
@@ -99,7 +100,7 @@ func TestAStreamCutOffAfterItsHeadersRecordsTheStatusItSentAndWhyThroughTheWhole
 				}
 			},
 			func(*http.Response, func()) {},
-			codes.Error},
+			true, codes.Error},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			exp := spans(t)
@@ -142,7 +143,7 @@ func TestAStreamCutOffAfterItsHeadersRecordsTheStatusItSentAndWhyThroughTheWhole
 				t.Fatalf("status %d, first event %q, error %v; want the stream's first event", res.StatusCode, first, err)
 			}
 			tc.cutOff(res, shutDown)
-			if tc.cut != logging.ClientClosed { // a client still there sees the stream break off, not end
+			if tc.clientReads { // a client still there sees the stream break off, not end
 				// A stream that never breaks off is closed here instead, so the read fails, not hangs.
 				bound := time.AfterFunc(10*time.Second, func() { _ = res.Body.Close() })
 				_, err := io.Copy(io.Discard, body)
@@ -155,7 +156,7 @@ func TestAStreamCutOffAfterItsHeadersRecordsTheStatusItSentAndWhyThroughTheWhole
 			// The request line: the one sure sign the handler has ended.
 			var lines []map[string]any
 			for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-				if lines = requestLines(logs.String()); len(lines) > 0 || time.Now().After(deadline) {
+				if lines = requestLines(t, logs.String()); len(lines) > 0 || time.Now().After(deadline) {
 					break
 				}
 			}
