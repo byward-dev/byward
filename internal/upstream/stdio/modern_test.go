@@ -6,8 +6,10 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"reflect"
 	"slices"
@@ -239,14 +241,177 @@ func TestLegacyVerdictExpiresAndTheUpstreamIsProbedAgain(t *testing.T) {
 	eventually(t, "a second probe", func() bool { return b.stops("not_modern") == 2 })
 }
 
-func TestUpstreamThatNeverAnswersTheProbeIsLegacy(t *testing.T) {
-	b := newBridge(t, func(c *Config) { c.Command = []string{fakeBin, "-mcp", "-silentdiscover"} })
-	b.bridge.probeTimeout = 50 * time.Millisecond
-	res := b.modern(t, "alice", modernBody(`1`, "tools/list", "", ""))
-	if res.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status %d, want the fallback 400", res.StatusCode)
+// Only a server/discover probe that the process answers, or does not answer in time, decides the
+// upstream's era: answered as a modern server, modern for every user; answered otherwise (the
+// official SDKs answer an unknown request with a JSON-RPC error) or not in time, not modern, that
+// process is stopped (not_modern) and every user gets the fallback 400 until the verdict expires. A
+// probe that cannot be written to the process, or whose process exits before answering, says
+// nothing about the server (#568): the request is answered 502 and logged as a failure, no verdict
+// of either kind is cached and the probe stops nothing, so the next user's process is probed
+// afresh. Before #568 a failed probe of any kind cached the upstream as legacy.
+func TestOnlyAProbeTheProcessAnswersOrLetsTimeOutDecidesTheUpstreamsEra(t *testing.T) {
+	const requests = 2 // alice's: on a live process the second shares the first's probe (the write fails); else a verdict or a new process answers it
+	for _, c := range []struct {
+		name         string
+		command      []string
+		prepare      func(*testing.T, *bridgeHarness) // before the bridge probes alice's process
+		probeTimeout time.Duration                    // longer than guard where the probe is answered, so an unanswered one fails the row
+		alice        int                              // the status of each of alice's requests
+		stopReasons  []string                         // logged, once bob has been answered too: a kept verdict answers him without a probe
+		bob          int                              // the next user's status
+		bobProbes    string                           // then, where bob's process is modern, the probes it answered: 0 if a modern verdict was kept
+		cause        string                           // what the first 502's WARN error says where only the probe says it: not a relayed request's error
+	}{
+		{name: "answered as a modern server", command: []string{fakeBin, "-modern"}, probeTimeout: time.Minute,
+			alice: http.StatusOK, bob: http.StatusOK, bobProbes: "0"},
+		{name: "it cannot be written", command: []string{fakeBin, "-modern"}, prepare: closeStdin,
+			alice: http.StatusBadGateway, bob: http.StatusOK, bobProbes: "1"}, // a failed write reads as any Send's // on this base, nothing stops a process whose write wrote nothing
+		{name: "its process exits before answering", command: []string{fakeBin, "-exitondiscover", "-modern"},
+			alice: http.StatusBadGateway, bob: http.StatusBadGateway, cause: "exited before answering server/discover"}, // each exits: none is stopped
+		{name: "answered Method not found, as the TypeScript and Go SDKs do", command: []string{fakeBin, "-mcp"}, probeTimeout: time.Minute,
+			alice: http.StatusBadRequest, stopReasons: []string{"not_modern"}, bob: http.StatusBadRequest},
+		// The same code path as Method not found: it pins that any error answer is a verdict.
+		{name: "answered Invalid request parameters, as the Python SDK does", command: []string{fakeBin, "-mcp", "-invaliddiscover"}, probeTimeout: time.Minute,
+			alice: http.StatusBadRequest, stopReasons: []string{"not_modern"}, bob: http.StatusBadRequest},
+		{name: "not answered in time", command: []string{fakeBin, "-mcp", "-silentdiscover"}, probeTimeout: 50 * time.Millisecond,
+			alice: http.StatusBadRequest, stopReasons: []string{"not_modern"}, bob: http.StatusBadRequest},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			b := newBridge(t, func(cfg *Config) { cfg.Command = c.command })
+			if c.probeTimeout != 0 {
+				b.bridge.probeTimeout = c.probeTimeout
+			}
+			if c.prepare != nil {
+				c.prepare(t, b)
+			}
+			status := func(user string) int { // bounded: a request that waits on a stopping process fails the row, not the package
+				ctx, cancel := context.WithTimeout(context.Background(), guard)
+				defer cancel()
+				res := b.modernCtx(t, ctx, user, modernBody(`1`, "echo", "", ""))
+				_, _ = io.Copy(io.Discard, res.Body)
+				_ = res.Body.Close()
+				return res.StatusCode
+			}
+			for i := range requests {
+				if got := status("alice"); got != c.alice {
+					t.Fatalf("alice's request %d: status %d, want %d", i+1, got, c.alice)
+				}
+			}
+			failures := b.log.with("relaying to the upstream process failed")
+			want := 0 // each 502 is logged as a failure of the process; a verdict is not
+			if c.alice == http.StatusBadGateway {
+				want = requests
+			}
+			if len(failures) != want {
+				t.Fatalf("%d \"relaying to the upstream process failed\" records, want %d (one per 502): %v", len(failures), want, failures)
+			}
+			for i, rec := range failures {
+				got := fmt.Sprint(rec.attrs["error"])
+				if rec.level != slog.LevelWarn || !strings.Contains(got, ErrExited.Error()) {
+					t.Fatalf("logged at %v with error %q, want WARN with %q", rec.level, got, ErrExited)
+				}
+				// Only the first: a later request may lease the same process after it exited but before
+				// its exit is recorded, on a new userConn whose probe's write then fails instead.
+				if i == 0 && !strings.Contains(got, c.cause) {
+					t.Fatalf("first 502 logged error %q, want the probe's own cause, %q", got, c.cause)
+				}
+			}
+			if got := status("bob"); got != c.bob {
+				t.Fatalf("bob, next: status %d, want %d", got, c.bob)
+			}
+			if c.bobProbes != "" { // a kept modern verdict serves bob without probing his process
+				if _, got := lastResult(t, readEvents(t, b.modern(t, "bob", modernBody(`2`, "discovers", "", "")))); string(got) != c.bobProbes {
+					t.Fatalf("bob's process answered %s probes, want %s", got, c.bobProbes)
+				}
+			}
+			var stopReasons []string
+			for _, rec := range b.log.with("stopping upstream process") {
+				stopReasons = append(stopReasons, fmt.Sprint(rec.attrs["reason"]))
+			}
+			if !slices.Equal(stopReasons, c.stopReasons) {
+				t.Fatalf("stop reasons %v, want %v", stopReasons, c.stopReasons)
+			}
+		})
 	}
-	eventually(t, "the probed process to be stopped", func() bool { return b.stops("not_modern") == 1 })
+}
+
+// closeStdin has alice's modern process close its stdin before the bridge has probed it, so the
+// probe's write fails.
+func closeStdin(t *testing.T, b *bridgeHarness) {
+	t.Helper()
+	p, release := b.lease(t, userProcessKey(alice), alice)
+	defer release()
+	if got := call(t, p, `{"jsonrpc":"2.0","id":1,"method":"closestdin"}`); !strings.Contains(got, `"result":"closed"`) {
+		t.Fatalf("closestdin answered %s", got)
+	}
+}
+
+// A request that has ended, whose probe cannot be written, is answered by how it ended and logged as
+// no failure: the process's own failure is not why the request ended (#568). No verdict is cached,
+// so the next user's process is probed and served.
+func TestAnEndedRequestWhoseProbeCannotBeWrittenIsAnsweredByHowItEnded(t *testing.T) {
+	for _, e := range endings {
+		t.Run(e.name, func(t *testing.T) {
+			b := newModernBridge(t, nil)
+			closeStdin(t, b)
+			ctx, end := e.start()
+			end()
+			body := modernBody(`1`, "echo", "", "")
+			e.answered(t, b.serve(ctx, http.MethodPost, "alice", "", body, modernHeaders(body)...))
+			b.noFailureLogged(t)
+			res := b.modern(t, "bob", body)
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				t.Fatalf("bob, next: status %d, want 200", res.StatusCode)
+			}
+		})
+	}
+}
+
+// What the probe has by the time its wait returns decides it, whichever ready case the wait saw
+// first: an answer the process wrote counts even if it then ended or the deadline came, and a
+// process that ended gives no verdict even at the deadline; only then is it a timeout. Each round
+// readies the cases before the wait, so every round is a fresh draw among them.
+func TestAProbeAnswerOrProcessEndAlreadyThereDecidesOverTheOtherCases(t *testing.T) {
+	modern := []byte(`{"jsonrpc":"2.0","id":"byw-probe","result":{"supportedVersions":["2026-07-28"]}}`)
+	notModern := []byte(`{"jsonrpc":"2.0","id":"byw-probe","error":{"code":-32601,"message":"Method not found"}}`)
+	for _, c := range []struct {
+		name       string
+		answer     []byte // waiting, if any
+		ended      bool   // the process has ended
+		deadline   bool   // the deadline has come
+		wantModern bool
+		wantErr    bool // no verdict (ErrExited)
+	}{
+		{name: "a modern answer, and the process ended", answer: modern, ended: true, wantModern: true},
+		{name: "a modern answer, at the deadline", answer: modern, deadline: true, wantModern: true},
+		{name: "a modern answer, the process ended, at the deadline", answer: modern, ended: true, deadline: true, wantModern: true},
+		{name: "an error answer, and the process ended", answer: notModern, ended: true},
+		{name: "an error answer, the process ended, at the deadline", answer: notModern, ended: true, deadline: true},
+		{name: "the process ended, at the deadline", ended: true, deadline: true, wantErr: true},
+		{name: "the deadline alone", deadline: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			for i := range 64 {
+				uc := &userConn{probe: make(chan []byte, 1), ended: make(chan struct{})}
+				deadline := make(chan struct{})
+				if c.answer != nil {
+					uc.probe <- c.answer
+				}
+				if c.ended {
+					close(uc.ended)
+				}
+				if c.deadline {
+					close(deadline)
+				}
+				modern, err := uc.awaitProbe(deadline)
+				if modern != c.wantModern || (err != nil) != c.wantErr || (err != nil && !errors.Is(err, ErrExited)) {
+					t.Fatalf("round %d: awaitProbe = %v, %v; want modern %v, no verdict %v", i, modern, err, c.wantModern, c.wantErr)
+				}
+			}
+		})
+	}
 }
 
 func TestAmbiguousModernRequestsAreRefusedBeforeAnyProcessStarts(t *testing.T) {
@@ -340,7 +505,7 @@ func TestProxyIDsNeverRepeatAcrossTheUsersUpstreamProcesses(t *testing.T) {
 	// A respawned upstream process gets a new userConn; its ids must not restart where the
 	// previous one's began.
 	b := newModernBridge(t, nil)
-	key := "user:" + alice.user()
+	key := userProcessKey(alice)
 	conn := func() *userConn {
 		t.Helper()
 		readEvents(t, b.modern(t, "alice", modernBody(`1`, "echo", "", "")))
@@ -365,7 +530,7 @@ func TestARespawnedProcessGetsItsOwnUserConn(t *testing.T) {
 	// The map still holds the userConn of the user's previous process: requests for the new process
 	// must not go to it, or no pump would read the new process's output.
 	b := newModernBridge(t, nil)
-	key := "user:" + alice.user()
+	key := userProcessKey(alice)
 	stale := &userConn{p: &Process{}, ended: make(chan struct{})}
 	close(stale.ended)
 	b.bridge.mu.Lock()
@@ -562,7 +727,7 @@ func TestAnEndedProcessesPumpNeverRemovesItsSuccessor(t *testing.T) {
 	// userConn in place, or a second pump could read the new process's output.
 	b := newModernBridge(t, nil)
 	readEvents(t, b.modern(t, "alice", modernBody(`1`, "echo", "", "")))
-	key := "user:" + alice.user()
+	key := userProcessKey(alice)
 	b.bridge.mu.Lock()
 	old := b.bridge.users[key]
 	successor := &userConn{}

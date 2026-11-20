@@ -19,7 +19,9 @@
 // "holding initialize" to stderr once it has read it); -init=block writes "blocking" to stderr and
 // never reads stdin at all; a "hold" request writes "holding" to stderr once it is held;
 // -init=lognerror sends a notifications/message first, then the error; -init=lognhold sends the
-// notification and never answers.
+// notification and never answers. Flag -silentdiscover makes serveMCP never answer server/discover,
+// and -invaliddiscover answer it with -32602;
+// flag -exitondiscover, given before -modern, makes serveModern exit with status 3 on reading it.
 //
 // Flag -stubborn keeps running after stdin closes and after SIGTERM, printing "stdin closed" and
 // "got SIGTERM" to stdout when they happen. Mode "sleep" (first
@@ -71,6 +73,10 @@ func main() {
 			return
 		case "-silentdiscover":
 			silentDiscover = true
+		case "-exitondiscover": // before -modern, which starts serving at once
+			exitOnDiscover = true
+		case "-invaliddiscover":
+			invalidDiscover = true
 		}
 	}
 	if mcp {
@@ -212,6 +218,14 @@ type message struct {
 // server that ignores unknown requests.
 var silentDiscover bool
 
+// invalidDiscover (flag -invaliddiscover) makes serveMCP answer server/discover with JSON-RPC
+// -32602 "Invalid request parameters", as the Python SDK answers any request before initialize.
+var invalidDiscover bool
+
+// exitOnDiscover (flag -exitondiscover, given before -modern) makes serveModern exit with status 3
+// when it reads server/discover, without answering it.
+var exitOnDiscover bool
+
 // initMode is how serveMCP answers initialize: "" (normally), error, exit, hold, or block (it never
 // reads stdin, so a write to it waits once the pipe is full). version is the
 // protocol version its InitializeResult names (flag -version=; "none" leaves it out).
@@ -264,6 +278,10 @@ func serveMCP() {
 			continue
 		}
 		if m.Method == "server/discover" && silentDiscover {
+			continue
+		}
+		if m.Method == "server/discover" && invalidDiscover { // as the Python SDK answers a request before initialize
+			write(message{ID: m.ID, Error: json.RawMessage(`{"code":-32602,"message":"Invalid request parameters"}`)})
 			continue
 		}
 		switch m.Method {
@@ -489,6 +507,9 @@ func serveModern() {
 		go func() {
 			switch m.Method {
 			case "server/discover":
+				if exitOnDiscover {
+					os.Exit(3)
+				}
 				discovers.Add(1)
 				result(id, map[string]any{"resultType": "complete", "supportedVersions": []string{"2026-07-28"},
 					"capabilities": map[string]any{}, "ttlMs": 0, "cacheScope": "public"})

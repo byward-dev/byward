@@ -28,8 +28,8 @@ const (
 	modernVersion = "2026-07-28"
 	// defaultProbeTimeout bounds the server/discover probe; a legacy server may never answer it.
 	defaultProbeTimeout = 10 * time.Second
-	// legacyVerdictTTL is how long "this upstream is not modern" is kept, so one failed probe does
-	// not hold for the life of the proxy.
+	// legacyVerdictTTL is how long "this upstream is not modern" is kept, so one not-modern verdict
+	// does not hold for the life of the proxy.
 	legacyVerdictTTL = 10 * time.Minute
 	// probeID is the id of the proxy's own server/discover.
 	probeID = `"byw-probe"`
@@ -237,6 +237,9 @@ type userConn struct {
 
 	probeOnce sync.Once // concurrent first requests share one probe
 	modern    bool
+	// probeErr is set when the probe gave no verdict: it could not be sent, or the process ended
+	// before answering. Like modern, it is kept for the userConn's life.
+	probeErr error
 }
 
 // modernRequest is one client request in flight on a userConn.
@@ -278,7 +281,7 @@ func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity,
 			return
 		}
 	}
-	key := "user:" + id.user()
+	key := userProcessKey(id)
 	// A subscriptions/listen is a stream lease: its process can be evicted once it has been quiet.
 	listen := env.kind() == kindRequest && env.Method == "subscriptions/listen"
 	kind := requestLease
@@ -292,7 +295,16 @@ func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity,
 	}
 	defer release()
 	c := b.connFor(key, p, id)
-	if !b.speaksModern(r.Context(), c) {
+	modern, err := b.speaksModern(r.Context(), c)
+	if err != nil { // the probe never reached a verdict: a failure of the process, as for any Send
+		if shutdown.AnswerIfEnded(w, r) {
+			return
+		}
+		c.log.WarnContext(r.Context(), "relaying to the upstream process failed", "error", err)
+		http.Error(w, "upstream unavailable", http.StatusBadGateway)
+		return
+	}
+	if !modern {
 		legacyFallback(w)
 		return
 	}
@@ -310,6 +322,9 @@ func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity,
 	}
 	c.request(w, r, msg, listen, meta)
 }
+
+// userProcessKey is the Manager key of a user's modern-era upstream process: one per user.
+func userProcessKey(id Identity) string { return "user:" + id.user() }
 
 // legacyFallback is the answer to a modern request the upstream cannot serve: no modern error
 // code, so a dual-era client falls back to initialize (2026-07-28 transports, backwards
@@ -343,44 +358,85 @@ func (b *Bridge) connFor(key string, p *Process, id Identity) *userConn {
 }
 
 // speaksModern decides the upstream's era: known modern, or probed on this process. A process
-// that fails the probe is stopped; the verdict is kept for legacyVerdictTTL.
-func (b *Bridge) speaksModern(ctx context.Context, c *userConn) bool {
+// that answers the probe as no modern server, or does not answer it in time, is stopped, and that
+// verdict is kept for legacyVerdictTTL. A probe that could not be sent, or whose process ended
+// before answering, says nothing about the era (#568): it returns the error and sets no verdict,
+// so the next process's probe decides. On such an error it stops nothing itself: a process that
+// cannot take the probe can take no request either; until it ends, each request on it fails as
+// the probe did, unless another process's probe has decided the era meanwhile.
+func (b *Bridge) speaksModern(ctx context.Context, c *userConn) (bool, error) {
 	if b.cap.isModern() {
-		return true
+		return true, nil
 	}
-	if !c.probed(ctx, b.probeTimeout) {
+	modern, err := c.probed(ctx, b.probeTimeout)
+	if err != nil {
+		return false, err
+	}
+	if !modern {
 		b.cap.set(false)
 		c.p.stop("not_modern")
-		return false
+		return false, nil
 	}
 	b.cap.set(true)
-	return true
+	return true, nil
 }
 
-// probed asks the process server/discover, once; a DiscoverResult means it speaks the modern era.
-func (c *userConn) probed(ctx context.Context, timeout time.Duration) bool {
-	c.probeOnce.Do(func() { c.modern = c.discover(ctx, timeout) })
-	return c.modern
+// probed asks the process server/discover, once; a DiscoverResult means it speaks the modern era,
+// any other answer or none in time that it does not, and an error is no verdict (discover).
+func (c *userConn) probed(ctx context.Context, timeout time.Duration) (bool, error) {
+	c.probeOnce.Do(func() { c.modern, c.probeErr = c.discover(ctx, timeout) })
+	return c.modern, c.probeErr
 }
 
-func (c *userConn) discover(ctx context.Context, timeout time.Duration) bool {
+// discover sends the probe and awaits it for at most timeout (awaitProbe). A probe that could not be
+// sent, a write the timeout cuts short included, is an error: no verdict.
+func (c *userConn) discover(ctx context.Context, timeout time.Duration) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 	defer cancel()
-	if c.p.Send(ctx, probeRequest) != nil {
-		return false
+	if err := c.p.Send(ctx, probeRequest); err != nil {
+		return false, err
 	}
-	select {
-	case m := <-c.probe:
+	return c.awaitProbe(ctx.Done())
+}
+
+// awaitProbe waits for the probe's answer until the process ends or deadline is closed. An answer
+// is the verdict: modern if it is a DiscoverResult, else not. A process that ended before
+// answering is an error: no verdict. A deadline alone is the verdict not modern.
+func (c *userConn) awaitProbe(deadline <-chan struct{}) (bool, error) {
+	isDiscoverResult := func(m []byte) bool {
 		var res struct {
 			Result struct {
 				SupportedVersions []string `json:"supportedVersions"`
 			} `json:"result"`
 		}
 		return json.Unmarshal(m, &res) == nil && len(res.Result.SupportedVersions) > 0
+	}
+	select {
+	case m := <-c.probe:
+		return isDiscoverResult(m), nil
 	case <-c.ended:
-		return false
-	case <-ctx.Done():
-		return false
+	case <-deadline:
+	}
+	// The process ended, or the deadline came; both may have, with an answer too, and a select
+	// picks among ready cases at random. So, in order: an answer already written still counts, a
+	// process that ended gives no verdict even at the deadline, and only then is it a timeout. An
+	// answer is delivered before the end is signalled, so one that came as the process ended is
+	// read here too.
+	select {
+	case m := <-c.probe:
+		return isDiscoverResult(m), nil
+	default:
+	}
+	select {
+	case <-c.ended:
+		select { // only a race reaches this: an answer delivered between the two checks above
+		case m := <-c.probe:
+			return isDiscoverResult(m), nil
+		default:
+			return false, fmt.Errorf("%w before answering server/discover", ErrExited)
+		}
+	default:
+		return false, nil
 	}
 }
 
