@@ -952,3 +952,38 @@ func TestAModernRequestInFlightKeepsItsProcessBesideAQuietListen(t *testing.T) {
 		t.Fatalf("bob's request past the timeout with alice's request in flight: status %d, want 503", res.StatusCode)
 	}
 }
+
+// A modern message the upstream process cannot take while its request is still live is a failure of
+// the process: it is logged at WARN and answered 502, a notification as a request (#550). On main a
+// notification was answered 502 with nothing logged. The process has closed its stdin but is still
+// running, so byward still leases it and the Send itself fails.
+func TestAModernMessageThatCannotReachItsProcessWhileItsRequestIsLiveIsLoggedAsAFailureAndAnswered502(t *testing.T) {
+	for _, c := range []struct{ name, body string }{
+		{"a notification", modernNotification},
+		{"a request", modernBody(`2`, "echo", "", "")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			b := newModernBridge(t, nil)
+			if _, res := lastResult(t, readEvents(t, b.modern(t, "alice", modernBody(`1`, "closestdin", "", "")))); string(res) != `"closed"` {
+				t.Fatalf("closestdin: result %s, want \"closed\"", res)
+			}
+			res := b.modern(t, "alice", c.body)
+			_ = res.Body.Close()
+			if res.StatusCode != http.StatusBadGateway {
+				t.Fatalf("status %d, want 502", res.StatusCode)
+			}
+			var failures []record
+			for _, rec := range b.log.warnings() {
+				if rec.msg == "relaying to the upstream process failed" {
+					failures = append(failures, rec)
+				}
+			}
+			if len(failures) != 1 {
+				t.Fatalf("logged at WARN or above %v; want one \"relaying to the upstream process failed\"", b.log.warnings())
+			}
+			if got := fmt.Sprint(failures[0].attrs["error"]); !strings.Contains(got, ErrExited.Error()) {
+				t.Fatalf("logged error %q, want the Send's cause, %q", got, ErrExited)
+			}
+		})
+	}
+}

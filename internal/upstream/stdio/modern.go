@@ -298,9 +298,11 @@ func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity,
 	}
 	if env.kind() == kindNotification {
 		if err := p.Send(r.Context(), msg); err != nil {
-			if !shutdown.AnswerIfEnded(w, r) {
-				http.Error(w, "upstream unavailable", http.StatusBadGateway)
+			if shutdown.AnswerIfEnded(w, r) { // the request ended: not a failure of the process
+				return
 			}
+			c.log.WarnContext(r.Context(), "relaying to the upstream process failed", "error", err)
+			http.Error(w, "upstream unavailable", http.StatusBadGateway)
 			return
 		}
 		w.WriteHeader(http.StatusAccepted)

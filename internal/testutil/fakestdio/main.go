@@ -378,6 +378,7 @@ func serveMCP() {
 //	strayresponse  a response with an id nobody sent, then the result
 //	strayprogress  a progress notification for a token nobody sent, then the result
 //	answerexit  the result, then exits at once
+//	closestdin  closes stdin, then the result "closed"; it reads nothing more and keeps running
 //	subscriptions/listen  notifications/subscriptions/acknowledged for it, then no answer
 //	notify      a notifications/tools/list_changed on every open listen, then the result
 //	endlistens  a completion result for every open listen, then its own result
@@ -463,6 +464,13 @@ func serveModern() {
 			held = append(held, m.ID)
 			cmu.Unlock()
 			continue
+		}
+		// Closed here, by stdin's only reader, and before the answer: once it is answered, every write
+		// to stdin fails.
+		if m.Method == "closestdin" {
+			_ = os.Stdin.Close()
+			result(m.ID, "closed")
+			hang()
 		}
 		n++
 		id, k := m.ID, n

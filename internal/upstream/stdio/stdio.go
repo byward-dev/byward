@@ -166,6 +166,7 @@ const (
 // lease: the process is not evicted until release is called. A key bound to another user fails
 // with ErrUserMismatch; a full cap with nothing to evict (nothing idle, nor held only by quiet
 // streams) fails with errBusy. A process that is stopping is waited for, within ctx, and replaced.
+// A ctx that has ended starts no process and evicts none; a running one is still leased to it.
 func (m *Manager) Get(ctx context.Context, key string, id Identity) (p *Process, release func(), err error) {
 	return m.get(ctx, key, id, requestLease)
 }
@@ -183,6 +184,10 @@ func (m *Manager) get(ctx context.Context, key string, id Identity, kind leaseKi
 		}
 		e, ok := m.procs[key]
 		if !ok {
+			if err := ctx.Err(); err != nil { // a request that has ended makes no room: it evicts nobody (#551)
+				m.mu.Unlock()
+				return nil, nil, err
+			}
 			wait, err := m.admitLocked(id)
 			if err != nil {
 				m.mu.Unlock()

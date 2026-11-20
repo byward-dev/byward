@@ -5,6 +5,7 @@ package stdio
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"os/exec"
 	"sync"
@@ -467,5 +468,65 @@ func TestAQuietStreamsProcessIsEvictableOnceQuietForTheTimeoutUnlessTrafficARequ
 				waitDone(t, p)
 			}
 		})
+	}
+}
+
+// A request that has already ended makes no room for itself at the upstream cap: the idle process it
+// would have evicted, another user's, keeps running, and the request is answered by how it ended
+// (#551), whether it would have held its process with a request lease or a stream lease. On main it
+// evicted that process, and only then was refused for having ended.
+func TestARequestThatHasEndedEvictsNoProcessAtTheUpstreamCapAndIsAnsweredByHowItEnded(t *testing.T) {
+	for _, req := range []struct{ name, body string }{
+		{"a request", modernBody(`1`, "echo", "", "")},
+		{"a subscriptions/listen", modernBody(`"L"`, "subscriptions/listen", "", `"notifications":{"toolsListChanged":true}`)},
+	} {
+		for _, e := range endings {
+			t.Run(req.name+", "+e.name, func(t *testing.T) {
+				b := newModernBridge(t, capped(1, 1, nil))
+				// bobs is the one process, bob's: an evicted one has left procs already, under this lock.
+				bobs := func() *Process {
+					t.Helper()
+					b.m.mu.Lock()
+					defer b.m.mu.Unlock()
+					if len(b.m.procs) != 1 {
+						t.Fatalf("%d processes, want only bob's", len(b.m.procs))
+					}
+					for _, en := range b.m.procs {
+						if en.id.Subject != bob.Subject {
+							t.Fatalf("the process is %s's, want bob's", en.id.Subject)
+						}
+						return en.p
+					}
+					return nil
+				}
+				readEvents(t, b.modern(t, "bob", modernBody(`1`, "echo", "", ""))) // bob's process, now idle, fills the cap
+				kept := bobs()
+				ctx, end := e.start()
+				end()
+				e.answered(t, b.serve(ctx, http.MethodPost, "alice", "", req.body, modernHeaders(req.body)...))
+				b.noFailureLogged(t)
+				readEvents(t, b.modern(t, "bob", modernBody(`2`, "echo", "", ""))) // an evicted or stopping process would be replaced
+				if bobs() != kept {
+					t.Fatal("bob's next request was served by a new process, want the one that was idle")
+				}
+			})
+		}
+	}
+}
+
+// A request that has ended still gets a running process's lease, even with both caps full: only
+// starting a process, and evicting one for it, is refused (#529, #551).
+func TestARunningProcessIsStillLeasedToARequestThatHasEnded(t *testing.T) {
+	h := newHarness(t, capped(1, 1, nil))
+	p := h.get(t, "a1", alice)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	got, release, err := h.m.Get(ctx, "a1", alice)
+	if err != nil {
+		t.Fatalf("Get with an ended context for a running process = %v, want its lease", err)
+	}
+	defer release()
+	if got != p {
+		t.Fatal("Get with an ended context leased another process, want the running one")
 	}
 }
