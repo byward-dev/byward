@@ -2,11 +2,15 @@ package server
 
 import (
 	"context"
+	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/doctor"
 	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
 // #461: a secret file the proxy checks at startup, check and doctor, but that cannot be found, is
@@ -63,4 +67,22 @@ func TestDoctorNamesAURLSettingWithoutTheParts(t *testing.T) {
 			}
 		})
 	}
+	// Through the wiring: doctor hands discovery the issuer as its shape shows it, never as given.
+	t.Run("doctor's discovery line", func(t *testing.T) {
+		app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}}
+		fake := fakeidp.New(t, fakeidp.Generic, fakeidp.WithClient(app))
+		rep, err := Doctor(context.Background(), loadOIDC(t, "oidc", fake.Issuer()+"/x;k="+key, app.ID), DoctorOptions{IdP: fake.HTTPClient(), Proxy: &http.Client{Transport: refuse{}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var discovery []doctor.Result
+		for _, r := range rep.Checks {
+			if r.Name == "discovery" {
+				discovery = append(discovery, r)
+			}
+		}
+		if len(discovery) != 1 || !strings.Contains(discovery[0].Message, fake.Issuer()+"/x;…") || strings.Contains(discovery[0].Message+discovery[0].Fix, key) {
+			t.Errorf("discovery %+v, want one naming the issuer as %s/x;… and never its key", discovery, fake.Issuer())
+		}
+	})
 }

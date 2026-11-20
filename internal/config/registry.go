@@ -93,14 +93,9 @@ func (v Value) Display() string {
 }
 
 // display is the named setting's value as its shape shows it (Value.Display), for a log line that
-// names a setting's value. A setting these Values do not hold, as with a Config built by hand, shows
-// as Hidden, never as nothing.
-func (v *Values) display(name string) string {
-	if !v.holds(name) {
-		return logging.Hidden
-	}
-	return v.byKey[name].Display()
-}
+// names a setting's value. Like value, it panics on a name these Values do not hold: a caller outside
+// load checks holds first (Config.ShownIssuer), so a Config built by hand shows as Hidden.
+func (v *Values) display(name string) string { return v.value(name).Display() }
 
 // lookup is the registry entry of name; it panics on a name the registry lacks, which tests catch.
 func lookup(name string) Setting {

@@ -189,18 +189,18 @@ func TestNoCommandShowsAHiddenOrARefusedValue(t *testing.T) {
 			t.Errorf("config refused %d cells of %s at load, want %d (notYetRefusing): change it only for a refusal of a form, and give a setting refused for its context its own context in contextOf", refused[name], name, want)
 		}
 	}
-	// The settings whose refusals go through their shape: one that stops refusing, or a new one, is
-	// seen here, not only in a count.
-	refusing := []string{"allowed-hosts", "allowed-origins", "cimd-allowed-hosts", "cimd-trusted-hosts", "client-denylist", "internal-listen",
+	// The settings outside notYetRefusing that config refuses some form of: one that stops refusing,
+	// or a new one, is seen here, not only in a count.
+	throughShape := []string{"allowed-hosts", "allowed-origins", "cimd-allowed-hosts", "cimd-trusted-hosts", "client-denylist", "internal-listen",
 		"listen", "obo-scopes", "oidc-issuer", "oidc-scopes", "public-url", "resource-documentation", "trusted-proxies", "upstream-url"}
-	for _, name := range refusing {
+	for _, name := range throughShape {
 		if refusedTried[name] == 0 {
 			t.Errorf("config refused no form of %s outside notYetRefusing, want its refusals through its shape tried", name)
 		}
 	}
 	for name := range refusedTried {
-		if !slices.Contains(refusing, name) {
-			t.Errorf("config refused forms of %s, which refusing does not list: add it", name)
+		if !slices.Contains(throughShape, name) {
+			t.Errorf("config refused forms of %s, which throughShape does not list: add it", name)
 		}
 	}
 	for _, name := range hidingSettings {

@@ -166,7 +166,7 @@ func TestOriginIsAsBrowsersSendIt(t *testing.T) {
 
 func TestNoAuthCannotBeCombinedWithAuthSettings(t *testing.T) {
 	// A synthetic registry keeps this test independent of which settings carry Auth.
-	reg := []Setting{{Name: "idp", Auth: true}, {Name: "listen", Default: "x"}}
+	reg := []Setting{{Name: "idp", Auth: true}, {Name: "listen", Default: "x"}, {Name: "allowed-hosts"}, {Name: "allowed-origins"}}
 	v, err := resolve(reg, nil, []string{"BYWARD_IDP=entra"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)

@@ -109,6 +109,3 @@ func TestAnOpaqueValueTellsEmptyAndBlankApartAndCountsCharacters(t *testing.T) {
 		})
 	}
 }
-
-// length is the number of characters notShown counts.
-func length(s string) int { return len([]rune(s)) }

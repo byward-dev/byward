@@ -92,7 +92,7 @@ func checkNoAuth(c *Config, v *Values) []error {
 	default:
 		errs = append(errs, errorf("%s: BYWARD_LISTEN must be a loopback address such as 127.0.0.1:8080 (non-loopback only inside a container with its own network, not --network host)", env))
 	}
-	hosts, origins := lookup("allowed-hosts"), lookup("allowed-origins")
+	hosts, origins := v.value("allowed-hosts").Setting, v.value("allowed-origins").Setting
 	// Named without a place: the stored lists leave out an entry refused for its form, so an index
 	// into them need not be the entry's place in the list given.
 	for _, h := range c.AllowedHosts {

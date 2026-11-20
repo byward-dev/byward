@@ -142,6 +142,9 @@ func parseURLOf(s Setting, raw string) (*url.URL, error) {
 	return u, nil
 }
 
+// isPort reports whether s is a port number as written after a host: digits only, at least one.
+func isPort(s string) bool { return s != "" && strings.Trim(s, "0123456789") == "" }
+
 // urlReason says why url.Parse's result u (or its error err) is not an absolute http(s) URL with a
 // host and no user name or password, or "" when it is: fixed text completing "it …", never
 // url.Parse's error.
@@ -149,8 +152,8 @@ func urlReason(u *url.URL, err error) string {
 	switch {
 	case err != nil:
 		return "does not parse as a URL"
-	case u.Scheme == "", u.Opaque != "" && u.Scheme != "https" && u.Scheme != "http" && strings.Trim(u.Opaque, "0123456789") == "":
-		// url.Parse reads host:port written without a scheme (localhost:9000) as a scheme and an opaque port.
+	case u.Scheme == "", u.Scheme != "https" && u.Scheme != "http" && isPort(strings.SplitN(u.Opaque, "/", 2)[0]):
+		// url.Parse reads host:port written without a scheme (localhost:9000/mcp) as a scheme and an opaque part.
 		return "has no scheme such as https://"
 	case u.Scheme != "https" && u.Scheme != "http":
 		return "has a scheme other than http or https"

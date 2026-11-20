@@ -1043,6 +1043,9 @@ func TestDevelopmentModeChangesOnlyWhatItRecords(t *testing.T) {
 	}
 }
 
+// length is the number of characters notShown counts.
+func length(s string) int { return len([]rune(s)) }
+
 // #494: a listen address is host:port, as net.Listen takes it: the host empty, an IP address (a zoned
 // IPv6 one included) or a host name with one trailing dot at most, and the port a number from 0 to
 // 65535; a service name such as http is refused. A refused one is named by its length and why, never
@@ -1090,13 +1093,14 @@ func TestAnEmptyListenAddressIsRefusedAsNothingGiven(t *testing.T) {
 	}
 }
 
-// A Config built by hand holds no Values, so doctor shows its upstream URL and issuer as Hidden: never
-// as nothing a caller could take for unset, nor as given.
-func TestAConfigWithoutValuesShowsTheUpstreamURLAndIssuerAsHidden(t *testing.T) {
+// Where the Values do not hold the setting, as a Config built by hand has none, doctor shows its
+// upstream URL and issuer as Hidden: never as nothing a caller could take for unset, nor as given.
+func TestValuesThatDoNotHoldTheSettingShowTheUpstreamURLAndIssuerAsHidden(t *testing.T) {
 	for name, got := range map[string]string{
-		"its upstream URL":          (&Config{UpstreamURL: &url.URL{Scheme: "https", Host: "up.example", RawQuery: "k=" + canaryText}}).ShownUpstreamURL(),
-		"its issuer":                (&Config{OIDCIssuer: "https://u:" + canaryText + "@idp.example"}).ShownIssuer(),
-		"Values without the issuer": (&Config{OIDCIssuer: "https://idp.example/x?k=" + canaryText, Values: &Values{}}).ShownIssuer(),
+		"its upstream URL":                (&Config{UpstreamURL: &url.URL{Scheme: "https", Host: "up.example", RawQuery: "k=" + canaryText}}).ShownUpstreamURL(),
+		"Values without the upstream URL": (&Config{UpstreamURL: &url.URL{Scheme: "https", Host: "up.example", RawQuery: "k=" + canaryText}, Values: &Values{}}).ShownUpstreamURL(),
+		"its issuer":                      (&Config{OIDCIssuer: "https://u:" + canaryText + "@idp.example"}).ShownIssuer(),
+		"Values without the issuer":       (&Config{OIDCIssuer: "https://idp.example/x?k=" + canaryText, Values: &Values{}}).ShownIssuer(),
 	} {
 		if got != logging.Hidden {
 			t.Errorf("%s shows %q, want %q", name, got, logging.Hidden)
@@ -1104,8 +1108,9 @@ func TestAConfigWithoutValuesShowsTheUpstreamURLAndIssuerAsHidden(t *testing.T) 
 	}
 }
 
-// Doctor names the upstream URL through its shape, as parsed (the aud).
-func TestTheUpstreamURLIsShownAsParsedThroughItsShape(t *testing.T) {
+// Doctor names the upstream URL through its shape, as parsed (the aud); a stdio upstream has none, so
+// it is Hidden.
+func TestTheUpstreamURLIsShownAsParsedThroughItsShapeOrAsHiddenForAStdioUpstream(t *testing.T) {
 	for _, tc := range []struct {
 		name, want string
 		env        []string
@@ -1147,9 +1152,36 @@ func TestTheIssuerIsShownThroughItsShapeOrAsThePresetsOwn(t *testing.T) {
 
 // Config refuses a client denylist entry that does not parse as a URL only when it holds an @, a form
 // that can carry a credential; any other is left to client registration, which refuses it at wiring.
-func TestADenylistEntryThatDoesNotParseWithoutAnAtIsLeftToRegistration(t *testing.T) {
+func TestADenylistEntryThatDoesNotParseWithoutAnAtIsLoadedAsGivenForRegistration(t *testing.T) {
 	c, err := load(t, nil, "BYWARD_CLIENT_DENYLIST=https://a%zz.example/x")
 	if err != nil || !slices.Equal(c.ClientDenylist, []string{"https://a%zz.example/x"}) {
 		t.Fatalf("got %v, %v; want it loaded as given", c, err)
+	}
+}
+
+// An entry of BYWARD_CLIENT_DENYLIST that client registration refuses at wiring is named by its place
+// and its length in characters, never shown, in the format of every refusal config makes.
+func TestADenylistEntryRefusedAtWiringIsNamedByItsPlaceAndLength(t *testing.T) {
+	const (
+		want   = "BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got "
+		reason = "it is not a client ID metadata document URL: only port 443 is fetched"
+	)
+	for _, tc := range []struct {
+		name, list string
+		index      int
+		want       string
+	}{
+		{"the first entry", "https://app.example:8443/bü-" + canaryText + ".json, good.example", 0, want + "entry 1 of 2 (43 characters, not shown): " + reason},
+		{"the second entry", "good.example, https://app.example:8443/c.json", 1, want + "entry 2 of 2 (31 characters, not shown): " + reason},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := load(t, nil, "BYWARD_CLIENT_DENYLIST="+tc.list)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := c.RefusedDenylistEntry(tc.index, reason); !isConfigError(got) || got.Error() != tc.want {
+				t.Errorf("got %v, want %q", got, tc.want)
+			}
+		})
 	}
 }
