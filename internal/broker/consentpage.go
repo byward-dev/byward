@@ -140,7 +140,7 @@ func returnsTo(redirect string) (string, bool) {
 
 // showHost names a host as the user reads it: a host that is not plain ASCII is shown as written
 // (minus invisible characters) with the ASCII name the browser will really use beside it
-// (registration.BrowserHostOK, which the denylist matches by too), and an xn-- name with its Unicode
+// (host.BrowserNameOK, which the denylist matches by too), and an xn-- name with its Unicode
 // spelling beside it (ADR-0010 §4). A host the browser refuses, or that no DNS name can be (an empty
 // label), is shown as written (minus invisible characters) and marked as not a valid address: the
 // mapping it got that far is no destination (xn--claude-.ai decodes to claude.ai), so it is never

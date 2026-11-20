@@ -20,6 +20,7 @@ func TestParseReadsAHostAsABrowserDoes(t *testing.T) {
 		{"mcp.example.com.", "https", Name, "mcp.example.com.", "", nil}, // not the same host (WHATWG URL §3.1)
 		{"bücher.example", "https", Name, "xn--bcher-kva.example", "", nil},
 		{"XN--BCHER-KVA.example", "https", Name, "xn--bcher-kva.example", "", nil},
+		{"xn--a.example", "https", Name, "xn--a.example", "", nil}, // an ASCII domain is not checked by IDNA
 		{"ａｐｐ.example", "https", Name, "app.example", "", nil},
 		{"my_mcp", "http", Name, "my_mcp", "", nil},
 		{"localhost", "http", Name, "localhost", "", nil},

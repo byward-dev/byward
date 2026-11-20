@@ -45,7 +45,7 @@ var (
 )
 
 // defaultPorts are the special schemes' default ports, which a URL does not carry (WHATWG URL §4.4).
-var defaultPorts = map[string]string{"http": "80", "https": "443", "ws": "80", "wss": "443"}
+var defaultPorts = map[string]string{"ftp": "21", "http": "80", "https": "443", "ws": "80", "wss": "443"}
 
 // Parse reads hostport (host, host:port, [IPv6], [IPv6]:port, or a bare IPv6 address taken whole)
 // as the WHATWG URL host parser does for scheme: a name is folded to its ASCII lower case (IDNA,
@@ -73,8 +73,10 @@ func Parse(hostport, scheme string) (Host, error) {
 	if h == "" {
 		return Host{}, ErrEmpty
 	}
+	// An ASCII domain is only lower-cased, even with xn-- labels; IDNA maps and checks the rest
+	// (WHATWG URL §3.3).
 	name := strings.ToLower(h)
-	if strings.ContainsFunc(h, func(r rune) bool { return r >= 0x80 }) || strings.Contains(name, "xn--") {
+	if strings.ContainsFunc(h, func(r rune) bool { return r >= 0x80 }) {
 		ascii, err := browserIDNA.ToASCII(h)
 		if err != nil || ascii == "" {
 			return Host{}, ErrName

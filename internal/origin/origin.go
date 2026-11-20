@@ -14,7 +14,7 @@ import (
 	"github.com/byward-dev/byward/internal/host"
 )
 
-// Hosts allows only the given hosts (host[:port], compared as config.CanonicalHost writes them:
+// Hosts allows only the given hosts (host[:port], compared as host.Canonical writes them:
 // case-insensitively, an IP address in any spelling as browsers serialize it). One default port,
 // :443 or :80, is ignored, once: a proxy behind a TLS-terminating load balancer may send the host
 // with :80 (nginx's $host:$server_port), and a default port on the right host names no other site.
@@ -55,7 +55,7 @@ func InternalHosts(rec *audit.Log, allowed []string, next http.Handler) http.Han
 	})
 }
 
-// hostKey is h as Hosts compares it: config.CanonicalHost (so 127.1 matches 127.0.0.1, and any
+// hostKey is h as Hosts compares it: host.Canonical (so 127.1 matches 127.0.0.1, and any
 // spelling of an IPv6 address its shortest form), without one default port (:443 or :80), trimmed
 // once, so [::1]:80:443 is not [::1].
 func hostKey(h string) string {

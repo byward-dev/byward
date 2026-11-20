@@ -44,7 +44,7 @@ func checkInlineSecrets(v *Values, dev bool) (relaxation string, err error) {
 // absolute, an ASCII host[:port] that BYWARD_ALLOWED_HOSTS would accept (hostPort: an IP address or a
 // name following validHostName's rule, a port from 1 to 65535 without a leading zero, no IPv6 zone),
 // no host ending in a number unless it is an IPv4 address in dotted decimal (browserIPv4), an IPv6
-// address or a host name only in the form browsers write it (browserHost: a name in lower case), a
+// address or a host name only in the form browsers write it (host.Serialize: a name in lower case), a
 // path without a trailing slash, no query or fragment, and https unless the host is loopback (which
 // the proxy itself accepts only with --dev). A refusal never shows the value as given (ADR-0031 §1),
 // nor its host: a token is a valid host name. It shows an IP address only as browsers would write it.
@@ -297,7 +297,7 @@ func notASCII(s string) bool { return strings.ContainsFunc(s, func(r rune) bool 
 const hostPortForms = "give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone"
 
 // hostPort is a BYWARD_ALLOWED_HOSTS entry, or BYWARD_PUBLIC_URL's host:port, which joins the same
-// list, as the public listener compares it with a Host header (CanonicalHost): in lower case, an IPv4
+// list, as the public listener compares it with a Host header (host.Canonical): in lower case, an IPv4
 // address in dotted decimal (127.1 is 127.0.0.1), and an IPv6 address in brackets in its shortest
 // form. It refuses any form a Host header cannot carry, since such an entry could never match there,
 // with a fixed reason that completes "it …" and never repeats the entry.

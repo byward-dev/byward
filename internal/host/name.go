@@ -9,7 +9,7 @@ import (
 
 // BrowserName is a host name as a browser goes to it, the one owner of that name form (the denylist
 // matches by it; the consent page names it and compares sites by it, through BrowserNameOK); an IP
-// address's browser form is config.CanonicalHost's. It gives the ASCII name, folding case, a
+// address's browser form is Canonical's. It gives the ASCII name, folding case, a
 // trailing dot (app.example. is app.example), full-width letters and full stops, and an
 // internationalized name, which becomes its xn-- labels; so a Unicode spelling of a host compares
 // equal to its xn-- form. A host the browser refuses (a joiner out of context, a label mixing

@@ -316,7 +316,7 @@ func TestAllowedHostsLoadEveryHostHeaderFormAndBracketABareIPv6(t *testing.T) {
 	}
 }
 
-// An allowed host that is an IP address is stored as browsers write it (CanonicalHost), the form the
+// An allowed host that is an IP address is stored as browsers write it (host.Canonical), the form the
 // TLS certificate names check and the no-auth loopback check read (the Host check canonicalises both
 // sides itself, #447). Any other host is only lower-cased, even one ending in a number, which no
 // browser sends but a Go client may.
@@ -338,10 +338,10 @@ func TestAnAllowedHostIsStoredWithItsAddressAsBrowsersWriteItAndANameOnlyInLower
 	}
 }
 
-// CanonicalHost writes a host[:port] as browsers do, whichever spelling it was given in. The
+// host.Canonical writes a host[:port] as browsers do, whichever spelling it was given in. The
 // expected values are what Node 25.1.0's WHATWG URL parser gives for http://<host>/ (checked
 // 2026-11-17); a host it refuses (marked) keeps its spelling, in lower case, since no browser sends it.
-func TestCanonicalHostWritesAnAddressAsBrowsersDoAndAnyOtherHostInLowerCase(t *testing.T) {
+func TestTheHostHeaderFormWritesAnAddressAsBrowsersDoAndAnyOtherHostInLowerCase(t *testing.T) {
 	for given, want := range map[string]string{
 		"10.1":                       "10.0.0.1",
 		"0x0a.0.0.1":                 "10.0.0.1",

@@ -1,0 +1,1287 @@
+[
+  {
+    "input": "http://f:/c",
+    "host": "f"
+  },
+  {
+    "input": "http://f:0/c",
+    "host": "f:0"
+  },
+  {
+    "input": "http://f:00000000000000/c",
+    "host": "f:0"
+  },
+  {
+    "input": "http://f:00000000000000000000080/c",
+    "host": "f"
+  },
+  {
+    "input": "http://f:b/c",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://f:fifty-two/c",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://f:999999/c",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://foo/path;a??e#f#g",
+    "host": "foo"
+  },
+  {
+    "input": "http://foo/abcd?efgh?ijkl",
+    "host": "foo"
+  },
+  {
+    "input": "http://foo/abcd#foo?bar",
+    "host": "foo"
+  },
+  {
+    "input": "http://[1::2]:3:4",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://2001::1",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://2001::1]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://2001::1]:80",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://[2001::1]",
+    "host": "[2001::1]"
+  },
+  {
+    "input": "http://[::127.0.0.1]",
+    "host": "[::7f00:1]"
+  },
+  {
+    "input": "http://[::127.0.0.1.]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://[0:0:0:0:0:0:13.1.68.3]",
+    "host": "[::d01:4403]"
+  },
+  {
+    "input": "http://[2001::1]:80",
+    "host": "[2001::1]"
+  },
+  {
+    "input": "http://example.com/././foo",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/./.foo",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo/.",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo/./",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo/bar/..",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo/bar/../",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo/..bar",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo/bar/../ton",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo/bar/../ton/../../a",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo/../../..",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo/../../../ton",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo/%2e",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo/%2e%2",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo/%2e./%2e%2e/.%2e/%2e.bar",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com////../..",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo/bar//../..",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo/bar//..",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/%20foo",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo%",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo%2",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo%2zbar",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo%2Â©zbar",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo%41%7a",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/foo%00%51",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/(%28:%3A%29)",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/%3A%3a%3C%3c",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/%7Ffp3%3Eju%3Dduvgw%3Dd",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/@asdf%40",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/你好你好",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/‥/foo",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/﻿/foo",
+    "host": "example.com"
+  },
+  {
+    "input": "http://example.com/‮/foo/‭/bar",
+    "host": "example.com"
+  },
+  {
+    "input": "http://www.google.com/foo?bar=baz#",
+    "host": "www.google.com"
+  },
+  {
+    "input": "http://www.google.com",
+    "host": "www.google.com"
+  },
+  {
+    "input": "http://192.0x00A80001",
+    "host": "192.168.0.1"
+  },
+  {
+    "input": "http://www/foo%2Ehtml",
+    "host": "www"
+  },
+  {
+    "input": "http://www/foo/%2E/html",
+    "host": "www"
+  },
+  {
+    "input": "http://foo:80/",
+    "host": "foo"
+  },
+  {
+    "input": "http://foo:81/",
+    "host": "foo:81"
+  },
+  {
+    "input": "http://foo:-80/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://foo:443/",
+    "host": "foo"
+  },
+  {
+    "input": "https://foo:80/",
+    "host": "foo:80"
+  },
+  {
+    "input": "ftp://foo:21/",
+    "host": "foo"
+  },
+  {
+    "input": "ftp://foo:80/",
+    "host": "foo:80"
+  },
+  {
+    "input": "ws://foo:80/",
+    "host": "foo"
+  },
+  {
+    "input": "ws://foo:81/",
+    "host": "foo:81"
+  },
+  {
+    "input": "ws://foo:443/",
+    "host": "foo:443"
+  },
+  {
+    "input": "ws://foo:815/",
+    "host": "foo:815"
+  },
+  {
+    "input": "wss://foo:80/",
+    "host": "foo:80"
+  },
+  {
+    "input": "wss://foo:81/",
+    "host": "foo:81"
+  },
+  {
+    "input": "wss://foo:443/",
+    "host": "foo"
+  },
+  {
+    "input": "wss://foo:815/",
+    "host": "foo:815"
+  },
+  {
+    "input": "https://example.com/aaa/bbb/%2e%2e?query",
+    "host": "example.com"
+  },
+  {
+    "input": "http://www.example2.com",
+    "host": "www.example2.com"
+  },
+  {
+    "input": "http://ExAmPlE.CoM",
+    "host": "example.com"
+  },
+  {
+    "input": "http://[]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://[:]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://GOO 　goo.com",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://GOO​⁠﻿goo.com",
+    "host": "googoo.com"
+  },
+  {
+    "input": "http://www.foo。bar.com",
+    "host": "www.foo.bar.com"
+  },
+  {
+    "input": "http://﷐zyx.com",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://%ef%b7%90zyx.com",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://�",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://%EF%BF%BD",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://x/�?�#�",
+    "host": "x"
+  },
+  {
+    "input": "http://a.b.c.xn--pokxncvks",
+    "host": "a.b.c.xn--pokxncvks"
+  },
+  {
+    "input": "http://10.0.0.xn--pokxncvks",
+    "host": "10.0.0.xn--pokxncvks"
+  },
+  {
+    "input": "http://a.b.c.XN--pokxncvks",
+    "host": "a.b.c.xn--pokxncvks"
+  },
+  {
+    "input": "http://a.b.c.Xn--pokxncvks",
+    "host": "a.b.c.xn--pokxncvks"
+  },
+  {
+    "input": "http://10.0.0.XN--pokxncvks",
+    "host": "10.0.0.xn--pokxncvks"
+  },
+  {
+    "input": "http://10.0.0.xN--pokxncvks",
+    "host": "10.0.0.xn--pokxncvks"
+  },
+  {
+    "input": "http://Ｇｏ.com",
+    "host": "go.com"
+  },
+  {
+    "input": "http://％４１.com",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://%ef%bc%85%ef%bc%94%ef%bc%91.com",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://％００.com",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://%ef%bc%85%ef%bc%90%ef%bc%90.com",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://你好你好",
+    "host": "xn--6qqa088eba"
+  },
+  {
+    "input": "https://faß.ExAmPlE/",
+    "host": "xn--fa-hia.example"
+  },
+  {
+    "input": "http://%zz%66%a.com",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://%25",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://hello%00",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://%30%78%63%30%2e%30%32%35%30.01",
+    "host": "192.168.0.1"
+  },
+  {
+    "input": "http://%30%78%63%30%2e%30%32%35%30.01%2e",
+    "host": "192.168.0.1"
+  },
+  {
+    "input": "http://192.168.0.257",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://%3g%78%63%30%2e%30%32%35%30%2E.01",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://０Ｘｃ０．０２５０．０１",
+    "host": "192.168.0.1"
+  },
+  {
+    "input": "http://./",
+    "host": "."
+  },
+  {
+    "input": "http://../",
+    "host": ".."
+  },
+  {
+    "input": "http://[www.google.com]/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://[google.com]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://[::1.2.3.4x]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://[::1.2.3.]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://[::1.2.]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://[::.1.2]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://[::1.]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://[::.1]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://[::%31]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://%5B::1]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://localhost?q=🔥",
+    "host": "localhost"
+  },
+  {
+    "input": "https://localhost#🔥",
+    "host": "localhost"
+  },
+  {
+    "input": "http://host/?'",
+    "host": "host"
+  },
+  {
+    "input": "http://a%b/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://a\u003cb",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://a\u003eb",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://a[b/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://a]b/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://a^b",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://a|b/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%00st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%01st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%02st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%03st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%04st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%05st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%06st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%07st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%08st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%09st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%0Ast/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%0Bst/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%0Cst/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%0Dst/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%0Est/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%0Fst/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%10st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%11st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%12st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%13st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%14st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%15st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%16st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%17st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%18st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%19st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%1Ast/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%1Bst/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%1Cst/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%1Dst/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%1Est/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%1Fst/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%20st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%23st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%25st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%2Fst/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%3Ast/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%3Cst/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%3Est/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%3Fst/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%40st/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%5Bst/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%5Cst/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%5Dst/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%7Cst/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://ho%7Fst/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://!\"$\u0026'()*+,-.;=_`{}~/",
+    "host": "!\"$\u0026'()*+,-.;=_`{}~"
+  },
+  {
+    "input": "ftp://example.com%80/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "ftp://example.com%A0/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://example.com%80/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://example.com%A0/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "ftp://%e2%98%83",
+    "host": "xn--n3h"
+  },
+  {
+    "input": "https://%e2%98%83",
+    "host": "xn--n3h"
+  },
+  {
+    "input": "http://127.0.0.1:10100/relative_import.html",
+    "host": "127.0.0.1:10100"
+  },
+  {
+    "input": "http://facebook.com/?foo=%7B%22abc%22",
+    "host": "facebook.com"
+  },
+  {
+    "input": "https://localhost:3000/jqueryui@1.2.3",
+    "host": "localhost:3000"
+  },
+  {
+    "input": "http://foo.bar/baz?qux#foo\"bar",
+    "host": "foo.bar"
+  },
+  {
+    "input": "http://foo.bar/baz?qux#foo\u003cbar",
+    "host": "foo.bar"
+  },
+  {
+    "input": "http://foo.bar/baz?qux#foo\u003ebar",
+    "host": "foo.bar"
+  },
+  {
+    "input": "http://foo.bar/baz?qux#foo`bar",
+    "host": "foo.bar"
+  },
+  {
+    "input": "http://1.2.3.4/",
+    "host": "1.2.3.4"
+  },
+  {
+    "input": "http://1.2.3.4./",
+    "host": "1.2.3.4"
+  },
+  {
+    "input": "http://192.168.257",
+    "host": "192.168.1.1"
+  },
+  {
+    "input": "http://192.168.257.",
+    "host": "192.168.1.1"
+  },
+  {
+    "input": "http://192.168.257.com",
+    "host": "192.168.257.com"
+  },
+  {
+    "input": "http://256",
+    "host": "0.0.1.0"
+  },
+  {
+    "input": "http://256.com",
+    "host": "256.com"
+  },
+  {
+    "input": "http://999999999",
+    "host": "59.154.201.255"
+  },
+  {
+    "input": "http://999999999.",
+    "host": "59.154.201.255"
+  },
+  {
+    "input": "http://999999999.com",
+    "host": "999999999.com"
+  },
+  {
+    "input": "http://10000000000",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://10000000000.com",
+    "host": "10000000000.com"
+  },
+  {
+    "input": "http://4294967295",
+    "host": "255.255.255.255"
+  },
+  {
+    "input": "http://4294967296",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://18446744073709551616",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://18446744075840258049",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://0xffffffff",
+    "host": "255.255.255.255"
+  },
+  {
+    "input": "http://0xffffffff1",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://256.256.256.256",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://0x.0x.0",
+    "host": "0.0.0.0"
+  },
+  {
+    "input": "https://0x.0x.0x.0x",
+    "host": "0.0.0.0"
+  },
+  {
+    "input": "https://00.00.00.00",
+    "host": "0.0.0.0"
+  },
+  {
+    "input": "https://0000000000000000000000000000000000000000177.0.0.1",
+    "host": "127.0.0.1"
+  },
+  {
+    "input": "https://0x100000000/test",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://256.0.0.1/test",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://%43%7C/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://[0:1:2:3:4:5:192.0.02.1]/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://[192.0.2.1::]/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://[1:0::]",
+    "host": "[1::]"
+  },
+  {
+    "input": "http://[0:1:2:3:4:5:6:7:8]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://[0::0::0]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://[0:.0]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://[0:0:]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://[0:1:2:3:4:5:6:7.0.0.0.1]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://[0:1.00.0.0.0]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://[0:1.290.0.0.0]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://[0:1.23.23]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://?",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://#",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://f:4294967377/c",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://f:18446744073709551697/c",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://f:340282366920938463463374607431768211537/c",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://0x7f.0.0.0x7g",
+    "host": "0x7f.0.0.0x7g"
+  },
+  {
+    "input": "http://0X7F.0.0.0X7G",
+    "host": "0x7f.0.0.0x7g"
+  },
+  {
+    "input": "http://[::127.0.0.0.1]",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://[0:1:0:1:0:1:0:1]",
+    "host": "[0:1:0:1:0:1:0:1]"
+  },
+  {
+    "input": "http://[1:0:1:0:1:0:1:0]",
+    "host": "[1:0:1:0:1:0:1:0]"
+  },
+  {
+    "input": "http://example.org/test?\"",
+    "host": "example.org"
+  },
+  {
+    "input": "http://example.org/test?#",
+    "host": "example.org"
+  },
+  {
+    "input": "http://example.org/test?\u003c",
+    "host": "example.org"
+  },
+  {
+    "input": "http://example.org/test?\u003e",
+    "host": "example.org"
+  },
+  {
+    "input": "http://example.org/test?⌣",
+    "host": "example.org"
+  },
+  {
+    "input": "http://example.org/test?%23%23",
+    "host": "example.org"
+  },
+  {
+    "input": "http://example.org/test?%GH",
+    "host": "example.org"
+  },
+  {
+    "input": "http://example.org/test?a#%EF",
+    "host": "example.org"
+  },
+  {
+    "input": "http://example.org/test?a#%GH",
+    "host": "example.org"
+  },
+  {
+    "input": "wss://!\"$\u0026'()*+,-.;=_`{}~/",
+    "host": "!\"$\u0026'()*+,-.;=_`{}~"
+  },
+  {
+    "input": "http://1.2.3.4.5",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://1.2.3.4.5.",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://0..0x300/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://0..0x300./",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://256.256.256.256.256",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://256.256.256.256.256.",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://1.2.3.08",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://1.2.3.08.",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://1.2.3.09",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://09.2.3.4",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://09.2.3.4.",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://01.2.3.4.5",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://01.2.3.4.5.",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://0x100.2.3.4",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://0x100.2.3.4.",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://0x1.2.3.4.5",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://0x1.2.3.4.5.",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://foo.1.2.3.4",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://foo.1.2.3.4.",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://foo.2.3.4",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://foo.2.3.4.",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://foo.09",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://foo.09.",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://foo.0x4",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://foo.0x4.",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://foo.09..",
+    "host": "foo.09.."
+  },
+  {
+    "input": "http://0999999999999999999/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://foo.0x",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://foo.0XFfFfFfFfFfFfFfFfFfAcE123",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "http://💩.123/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://￿y",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://x/￿y",
+    "host": "x"
+  },
+  {
+    "input": "https://x/?￿y",
+    "host": "x"
+  },
+  {
+    "input": "https://x/?#￿y",
+    "host": "x"
+  },
+  {
+    "input": "https://example.com/\"quoted\"",
+    "host": "example.com"
+  },
+  {
+    "input": "https://a%C2%ADb/",
+    "host": "ab"
+  },
+  {
+    "input": "https://­/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://%C2%AD/",
+    "host": "",
+    "failure": true
+  },
+  {
+    "input": "https://xn--/",
+    "host": "xn--"
+  }
+]

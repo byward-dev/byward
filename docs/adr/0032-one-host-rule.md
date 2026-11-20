@@ -1,6 +1,6 @@
 # ADR-0032: One host rule
 
-- Status: Accepted
+- Status: Accepted; amended 2026-11-21 (#521)
 - Date: 2026-11-19
 - Issue: #520 (tracker #486); amends ADR-0018 §1–2, ADR-0020 §4 and ADR-0008 §4, §8–9
 
@@ -209,6 +209,14 @@ The slice that builds `internal/host` pins two suites as `testdata`:
 Each mismatch is listed as a known deviation with its reason, and the test fails on a new one. The
 two suites are bumped together when Go's Unicode version moves. The slice checks their file names
 and download paths.
+
+_Amended 2026-11-21 (#521):_ the UTS #46 suite is WPT's `url/resources/IdnaTestV2.json`, not
+Unicode's `IdnaTestV2.txt`. UTS #46 §8 says the Unicode file "only provides test cases for
+UseSTD3ASCIIRules=true", while the WHATWG URL Standard runs with it false (§3.3), and WPT's file is
+its conversion to the cases browsers are tested against. It is pinned at the last WPT commit before
+the file moved to Unicode 18.0.0, to match Go 1.27's 17.0.0 tables; `toascii.json` and
+`urltestdata.json`'s host cases are pinned at the latest. The commits, checksums and deviations are in
+`internal/host/testdata/wpt/README.md`.
 
 ## Consequences
 

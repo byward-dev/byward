@@ -4,7 +4,7 @@ import "testing"
 
 // BrowserName is the ASCII name a browser goes to, the form the denylist compares and the consent
 // page shows beside a Unicode spelling.
-func TestBrowserHostIsTheASCIINameABrowserGoesTo(t *testing.T) {
+func TestBrowserNameIsTheASCIINameABrowserGoesTo(t *testing.T) {
 	for host, want := range map[string]string{
 		"App.Example.":          "app.example",
 		"BÜCHER.example":        "xn--bcher-kva.example",
@@ -23,7 +23,7 @@ func TestBrowserHostIsTheASCIINameABrowserGoesTo(t *testing.T) {
 // BrowserNameOK names a host a browser goes to as the browser does, and tells it from one the
 // browser refuses or that no DNS name can be. For a refused host only the refusal is pinned: its name
 // is the mapping x/net got that far (xn--claude-.ai maps to claude.ai), which no caller may use.
-func TestBrowserHostOKSaysWhetherABrowserGoesToTheHost(t *testing.T) {
+func TestBrowserNameOKSaysWhetherABrowserGoesToTheHost(t *testing.T) {
 	for host, want := range map[string]string{
 		"app.example":           "app.example",
 		"App.Example.":          "app.example",

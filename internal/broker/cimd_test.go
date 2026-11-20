@@ -179,7 +179,7 @@ func TestOtherSiteComparesRegistrableDomains(t *testing.T) {
 		{"198.51.3.4", "https://203.0.3.4/cb", true}, // the default suffix rule would make both "3.4"
 		{"2001:db8::1", "https://[2001:db8::1]/cb", false},
 		{"claude.ai", "://bad", true},
-		// The site of the name the browser goes to (registration.BrowserHost).
+		// The site of the name the browser goes to (host.BrowserName).
 		{"claude.ai", "https://ｃｌａｕｄｅ.ai/cb", false},
 		{"xn--bcher-kva.example", "https://BÜCHER.example/cb", false},
 		{"claude.ai", "https://ｅｖｉｌ.example/cb", true},

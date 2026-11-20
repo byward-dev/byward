@@ -31,7 +31,7 @@ func browserIPv4(h string) string {
 }
 
 // browserOrigin is u's origin as browsers serialize it (RFC 6454 §6.2): scheme://host[:port], the
-// host as browserHost writes it, and no port when it is the scheme's default.
+// host as host.Serialize writes it, and no port when it is the scheme's default.
 func browserOrigin(u *url.URL) string {
 	hp := host.Serialize(u.Hostname())
 	defaultPort := map[string]string{"http": "80", "https": "443"}[u.Scheme]
