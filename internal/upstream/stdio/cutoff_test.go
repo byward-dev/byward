@@ -58,7 +58,7 @@ func TestAStdioStreamEndedByItsRequestIsRecordedAsCutOffUnlessItCompleted(t *tes
 			body := modernBody(`"h"`, "hold", "", "")
 			return b.request(ctx, http.MethodPost, "alice", "", body, modernHeaders(body)...)
 		}, true, false},
-		{"a modern subscriptions/listen", func(_ *testing.T, b *bridgeHarness, ctx context.Context) *http.Request {
+		{"a modern listen", func(_ *testing.T, b *bridgeHarness, ctx context.Context) *http.Request {
 			body := modernBody(`"L"`, "subscriptions/listen", "", `"notifications":{"toolsListChanged":true}`)
 			return b.request(ctx, http.MethodPost, "alice", "", body, modernHeaders(body)...)
 		}, true, true},
@@ -94,15 +94,17 @@ func TestAStdioStreamEndedByItsRequestIsRecordedAsCutOffUnlessItCompleted(t *tes
 }
 
 // A stream whose write to its MCP client fails, its request still live, has lost its client: it is
-// recorded as cut off with client_closed, whatever the write was (#533). A listen that Drain ends
-// with its completion result has completed, so it is not cut off.
-func TestAStdioStreamWhoseWriteFailsIsRecordedAsClientClosedAndADrainedListenIsNot(t *testing.T) {
+// recorded as cut off with client_closed, whatever the write was and wherever it failed (#533). A
+// listen the proxy ends with its completion result has completed, so it is not cut off, unless that
+// result cannot be written.
+func TestAStdioStreamWhoseWriteFailsIsRecordedAsClientClosedAndACompletedListenIsNot(t *testing.T) {
 	const announce = `{"jsonrpc":"2.0","id":9,"method":"announce"}`
 	modern := func(b *bridgeHarness, body string) *http.Request {
 		return b.request(context.Background(), http.MethodPost, "alice", "", body, modernHeaders(body)...)
 	}
 	listen := modernBody(`"L"`, "subscriptions/listen", "", `"notifications":{"toolsListChanged":true}`)
-	type ender = func(t *testing.T, b *bridgeHarness, w *brokenWriter)
+	// An ender ends an open stream; breakIn makes its writer fail, at a write or at a flush.
+	type ender = func(t *testing.T, b *bridgeHarness, w *brokenWriter, breakIn func())
 	for _, tc := range []struct {
 		name   string
 		modern bool
@@ -114,63 +116,96 @@ func TestAStdioStreamWhoseWriteFailsIsRecordedAsClientClosedAndADrainedListenIsN
 	}{
 		{"a legacy GET stream, a message", false, func(t *testing.T, b *bridgeHarness) (*http.Request, ender) {
 			sid := b.initialize(t, "alice")
-			return b.request(context.Background(), http.MethodGet, "alice", sid, ""), func(t *testing.T, b *bridgeHarness, w *brokenWriter) {
-				w.breakIn("write")
+			return b.request(context.Background(), http.MethodGet, "alice", sid, ""), func(t *testing.T, b *bridgeHarness, _ *brokenWriter, breakIn func()) {
+				breakIn()
 				readEvents(t, b.post(t, "alice", sid, announce))
 			}
 		}, false, logging.ClientClosed},
 		{"a legacy GET stream, a keep-alive", false, func(t *testing.T, b *bridgeHarness) (*http.Request, ender) {
-			return b.request(context.Background(), http.MethodGet, "alice", b.initialize(t, "alice"), ""), func(_ *testing.T, b *bridgeHarness, w *brokenWriter) {
-				w.breakIn("write")
+			return b.request(context.Background(), http.MethodGet, "alice", b.initialize(t, "alice"), ""), func(_ *testing.T, b *bridgeHarness, _ *brokenWriter, breakIn func()) {
+				breakIn()
 				b.clk.Advance(keepAliveInterval)
 			}
 		}, false, logging.ClientClosed},
 		{"a legacy POST stream, its answer", false, func(t *testing.T, b *bridgeHarness) (*http.Request, ender) {
 			sid := b.initialize(t, "alice")
-			return b.request(context.Background(), http.MethodPost, "alice", sid, `{"jsonrpc":"2.0","id":2,"method":"hold"}`), func(t *testing.T, b *bridgeHarness, w *brokenWriter) {
+			return b.request(context.Background(), http.MethodPost, "alice", sid, `{"jsonrpc":"2.0","id":2,"method":"hold"}`), func(t *testing.T, b *bridgeHarness, _ *brokenWriter, breakIn func()) {
 				b.stderrSaid(t, "holding")
-				w.breakIn("write")
+				breakIn()
 				readEvents(t, b.post(t, "alice", sid, `{"jsonrpc":"2.0","id":3,"method":"release"}`))
 			}
 		}, false, logging.ClientClosed},
 		{"a modern request's stream, its answer", true, func(_ *testing.T, b *bridgeHarness) (*http.Request, ender) {
-			return modern(b, modernBody(`"h"`, "hold", "", "")), func(t *testing.T, b *bridgeHarness, w *brokenWriter) {
-				w.breakIn("write")
+			return modern(b, modernBody(`"h"`, "hold", "", "")), func(t *testing.T, b *bridgeHarness, _ *brokenWriter, breakIn func()) {
+				breakIn()
 				readEvents(t, b.modern(t, "alice", modernBody(`2`, "release", "", "")))
 			}
 		}, false, logging.ClientClosed},
 		{"a modern listen, a notification", true, func(_ *testing.T, b *bridgeHarness) (*http.Request, ender) {
-			return modern(b, listen), func(t *testing.T, b *bridgeHarness, w *brokenWriter) {
-				w.breakIn("write")
+			return modern(b, listen), func(t *testing.T, b *bridgeHarness, _ *brokenWriter, breakIn func()) {
+				breakIn()
 				readEvents(t, b.modern(t, "alice", modernBody(`1`, "notify", "", "")))
 			}
 		}, true, logging.ClientClosed},
 		{"a modern listen, a keep-alive", true, func(_ *testing.T, b *bridgeHarness) (*http.Request, ender) {
-			return modern(b, listen), func(_ *testing.T, b *bridgeHarness, w *brokenWriter) {
-				w.breakIn("write")
+			return modern(b, listen), func(_ *testing.T, b *bridgeHarness, _ *brokenWriter, breakIn func()) {
+				breakIn()
 				b.clk.Advance(keepAliveInterval)
 			}
 		}, true, logging.ClientClosed},
-		{"a modern listen Drain ends", true, func(_ *testing.T, b *bridgeHarness) (*http.Request, ender) {
-			return modern(b, listen), func(_ *testing.T, b *bridgeHarness, _ *brokenWriter) { b.bridge.Drain() }
+		{"a modern listen ended with its completion result", true, func(_ *testing.T, b *bridgeHarness) (*http.Request, ender) {
+			return modern(b, listen), func(_ *testing.T, b *bridgeHarness, _ *brokenWriter, _ func()) { b.bridge.Drain() }
 		}, true, ""},
+		{"a modern listen ended with its completion result, unwritten", true, func(_ *testing.T, b *bridgeHarness) (*http.Request, ender) {
+			return modern(b, listen), func(_ *testing.T, b *bridgeHarness, _ *brokenWriter, breakIn func()) {
+				breakIn()
+				b.bridge.Drain()
+			}
+		}, true, logging.ClientClosed},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			b := newBridge(t, nil)
-			if tc.modern {
-				b = newModernBridge(t, nil)
-			}
-			req, endIt := tc.open(t, b)
+		for _, what := range failures {
+			t.Run(tc.name+", "+what+" fails", func(t *testing.T) {
+				b := newBridge(t, nil)
+				if tc.modern {
+					b = newModernBridge(t, nil)
+				}
+				req, endIt := tc.open(t, b)
+				w := &brokenWriter{header: http.Header{}}
+				cut := b.observed(t, w, req)
+				eventually(t, "the stream to start", w.hasStarted)
+				if tc.acked {
+					eventually(t, "the acknowledgement", func() bool { return strings.Contains(w.written(), "acknowledged") })
+				}
+				endIt(t, b, w, func() { w.breakIn(what) })
+				if got := cut(); got != tc.want {
+					t.Errorf("recorded as cut off %q; want %q (body %q)", got, tc.want, w.written())
+				}
+			})
+		}
+	}
+}
+
+// An initialize whose stream has started, with a notification the upstream sent before it holds its
+// answer, and whose request then ends, is cut off and logs no initialize failure: it ended because
+// its request did (#533, #549).
+func TestAnInitializeWhoseStreamItsRequestEndsIsCutOffAndLogsNoInitializeFailure(t *testing.T) {
+	for _, e := range endings {
+		t.Run(e.name, func(t *testing.T) {
+			b := newBridge(t, func(c *Config) { c.Command = append(c.Command, "-init=lognhold") })
+			ctx, end := e.start()
+			defer end()
 			w := &brokenWriter{header: http.Header{}}
-			cut := b.observed(t, w, req)
-			eventually(t, "the stream to start", w.hasStarted)
-			if tc.acked {
-				eventually(t, "the acknowledgement", func() bool { return strings.Contains(w.written(), "acknowledged") })
+			cut := b.observed(t, w, b.request(ctx, http.MethodPost, "alice", "", initialize))
+			eventually(t, "the notification", func() bool { return strings.Contains(w.written(), `"method":"notifications/message"`) })
+			end()
+			want := logging.ClientClosed
+			if e.shutdown {
+				want = logging.ShutDown
 			}
-			endIt(t, b, w)
-			if got := cut(); got != tc.want {
-				t.Errorf("recorded as cut off %q; want %q (body %q)", got, tc.want, w.written())
+			if got := cut(); got != want {
+				t.Errorf("recorded as cut off %q; want %q", got, want)
 			}
+			b.noFailureLogged(t)
 		})
 	}
 }

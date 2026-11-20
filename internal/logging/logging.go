@@ -1,7 +1,9 @@
 // Package logging builds the proxy's slog logger: an allowlist of attribute keys, redaction of
 // bearer-shaped values, UTC timestamps, and a request ID per request (ADR-0021). It also holds how
 // logs and error messages may show what can carry a secret: URL (and MarkedURL for a URL setting)
-// for a URL, Quote for an operator's value, and FileError for a file's error, never its path.
+// for a URL, Quote for an operator's value, and FileError for a file's error, never its path. And it
+// observes each request for the request line, the request metric and the server span: the status it
+// sent and, for a response cut off after its headers, why (Observe, CutOff).
 package logging
 
 import (
@@ -227,31 +229,31 @@ func Middleware(log *slog.Logger, next http.Handler) http.Handler {
 	})
 }
 
-// StatusRecorder records the final status a handler writes (200 if it writes none). The request
-// log, metrics and server spans all read the status through it.
-type StatusRecorder struct {
+// statusRecorder records the final status a handler writes (200 if it writes none). The request
+// log, metrics and server spans all read the status through it, by Observe.
+type statusRecorder struct {
 	http.ResponseWriter
 	status      int
 	wroteHeader bool
 }
 
-// NewStatusRecorder wraps w.
-func NewStatusRecorder(w http.ResponseWriter) *StatusRecorder {
-	return &StatusRecorder{ResponseWriter: w, status: http.StatusOK}
+// newStatusRecorder wraps w.
+func newStatusRecorder(w http.ResponseWriter) *statusRecorder {
+	return &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 }
 
 // Status is the final status written so far.
-func (s *StatusRecorder) Status() int { return s.status }
+func (s *statusRecorder) Status() int { return s.status }
 
 // WriteHeader records code. 1xx informational responses (other than 101) precede the final status.
-func (s *StatusRecorder) WriteHeader(code int) {
+func (s *statusRecorder) WriteHeader(code int) {
 	if !s.wroteHeader && (code < 100 || code > 199 || code == http.StatusSwitchingProtocols) {
 		s.status, s.wroteHeader = code, true
 	}
 	s.ResponseWriter.WriteHeader(code)
 }
 
-func (s *StatusRecorder) Write(b []byte) (int, error) {
+func (s *statusRecorder) Write(b []byte) (int, error) {
 	s.wroteHeader = true
 	return s.ResponseWriter.Write(b)
 }
@@ -259,4 +261,4 @@ func (s *StatusRecorder) Write(b []byte) (int, error) {
 // Unwrap lets http.ResponseController reach the underlying writer: flush, deadlines, and the relay's
 // full duplex, without which a stream the upstream starts before the request body ends is held back
 // or cut (#527).
-func (s *StatusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
+func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }

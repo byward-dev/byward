@@ -154,3 +154,25 @@ func TestUpstreamRefusalsAreCountedByStatusFromZero(t *testing.T) {
 		}
 	}
 }
+
+// A response cut off after its headers is observed once, with the status class it sent and why, and
+// the abort goes on to the server (#533). Every other request has an empty error_type.
+func TestARequestCutOffAfterItsHeadersIsObservedWithWhy(t *testing.T) {
+	m := New()
+	h := m.Middleware(func(*http.Request) string { return "mcp" }, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("data: one\n\n"))
+		panic(http.ErrAbortHandler)
+	}))
+	func() {
+		defer func() {
+			if p := recover(); p != http.ErrAbortHandler { //nolint:errorlint // sentinel compared as net/http does
+				t.Errorf("panic %v; want http.ErrAbortHandler to go on to the server", p)
+			}
+		}()
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/mcp", nil))
+	}()
+	const want = `byward_http_request_duration_seconds_count{error_type="upstream_aborted",route="mcp",status_class="2xx"} 1`
+	if out := scrape(t, m); !strings.Contains(out, want) {
+		t.Fatalf("metrics lack %s:\n%s", want, out)
+	}
+}

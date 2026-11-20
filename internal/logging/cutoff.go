@@ -28,13 +28,13 @@ type ending struct{ cut CutOff }
 
 type endingKey struct{}
 
-// endedBy names what ended ctx, a request's context: the proxy's shutdown, else the MCP client going
-// away; "" while it is live. A request's context has no deadline, so any other end is its client's.
+// endedBy names what ended ctx, a request's context, as the shutdown package tells them apart: the
+// proxy's shutdown, or its MCP client going away; "" while it is live, or for any other end.
 func endedBy(ctx context.Context) CutOff {
 	switch {
 	case shutdown.ShuttingDown(ctx):
 		return ShutDown
-	case ctx.Err() != nil:
+	case shutdown.ClientWentAway(ctx):
 		return ClientClosed
 	}
 	return ""
@@ -50,13 +50,12 @@ func StreamEnded(ctx context.Context) {
 	if e == nil || e.cut != "" {
 		return
 	}
-	e.cut = ClientClosed
-	if shutdown.ShuttingDown(ctx) {
-		e.cut = ShutDown
+	if e.cut = endedBy(ctx); e.cut == "" { // a write to the client failed while its request is live
+		e.cut = ClientClosed
 	}
 }
 
-// Observe serves r with next through a StatusRecorder over w, then calls record with the status
+// Observe serves r with next through a statusRecorder over w, then calls record with the status
 // sent and the CutOff (empty unless the response was cut off). A handler that aborts the response
 // with http.ErrAbortHandler, as ReverseProxy does when the upstream's body fails mid-copy, is
 // recorded too: as cut off by the proxy's shutdown, by its MCP client going away, or else by its
@@ -68,7 +67,7 @@ func Observe(w http.ResponseWriter, r *http.Request, next http.Handler, record f
 		e = &ending{}
 		r = r.WithContext(context.WithValue(r.Context(), endingKey{}, e))
 	}
-	rec := NewStatusRecorder(w)
+	rec := newStatusRecorder(w)
 	returned := false
 	defer func() {
 		if returned {
@@ -84,7 +83,7 @@ func Observe(w http.ResponseWriter, r *http.Request, next http.Handler, record f
 		if e.cut == "" {
 			e.cut = endedBy(r.Context())
 		}
-		if e.cut == "" { // the request is live, so its upstream broke off
+		if e.cut == "" { // neither the proxy nor its client ended the request: its upstream broke off
 			e.cut = UpstreamAborted
 		}
 		record(rec.Status(), e.cut)

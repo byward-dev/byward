@@ -143,7 +143,11 @@ func TestAStreamCutOffAfterItsHeadersRecordsTheStatusItSentAndWhyThroughTheWhole
 			}
 			tc.cutOff(res, shutDown)
 			if tc.cut != logging.ClientClosed { // a client still there sees the stream break off, not end
-				if _, err := io.Copy(io.Discard, body); !errors.Is(err, io.ErrUnexpectedEOF) {
+				// A stream that never breaks off is closed here instead, so the read fails, not hangs.
+				bound := time.AfterFunc(10*time.Second, func() { _ = res.Body.Close() })
+				_, err := io.Copy(io.Discard, body)
+				bound.Stop()
+				if !errors.Is(err, io.ErrUnexpectedEOF) {
 					t.Fatalf("the rest of the stream read with error %v; want %v, a stream the server aborted", err, io.ErrUnexpectedEOF)
 				}
 			}

@@ -990,8 +990,9 @@ func TestAClientThatCancelsAStreamLogsOnlyItsCutOffRequestLineWhateverTheProxySe
 			srv.Close() // waits for the handler, so the log is complete
 			// Only the request line, with the status the client got and why it was cut off (#533).
 			lines := strings.Split(strings.TrimSuffix(logs.String(), "\n"), "\n")
-			if len(lines) != 1 || !strings.Contains(lines[0], " level=INFO msg=request ") ||
-				!strings.Contains(lines[0], " status=200 ") || !strings.HasSuffix(lines[0], " error_type=client_closed") {
+			fields := strings.Fields(lines[0])
+			if len(lines) != 1 || !slices.Contains(fields, "level=INFO") || !slices.Contains(fields, "msg=request") ||
+				!slices.Contains(fields, "status=200") || !slices.Contains(fields, "error_type=client_closed") {
 				t.Fatalf("log %q; want only the request line, status 200 with error_type=client_closed, for a client that went away", logs.String())
 			}
 		})

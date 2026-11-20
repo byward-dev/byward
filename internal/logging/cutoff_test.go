@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/byward-dev/byward/internal/shutdown"
 )
@@ -28,9 +29,18 @@ func observe(req *http.Request, h http.HandlerFunc) (rec recorded, panicked any)
 	return rec, nil
 }
 
+// The handlers a request can meet: one that answers, one whose stream its upstream breaks off (as
+// ReverseProxy aborts it), and one that ends its stream by returning.
+func accepted(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusAccepted) }
+
 func streamThenAbort(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte("data: one\n\n"))
 	panic(http.ErrAbortHandler)
+}
+
+func streamThenEnd(w http.ResponseWriter, r *http.Request) {
+	_, _ = w.Write([]byte("data: one\n\n"))
+	StreamEnded(r.Context())
 }
 
 // A response cut off after its headers is recorded with the status it sent and why, then the abort
@@ -47,6 +57,20 @@ func TestObserveRecordsTheStatusSentAndWhyAResponseWasCutOff(t *testing.T) {
 		shutDown()
 		return live().WithContext(ctx)
 	}
+	pastDeadline := func() *http.Request {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
+		t.Cleanup(cancel)
+		return live().WithContext(ctx)
+	}
+	var markedTwice struct {
+		req      *http.Request
+		shutDown func()
+	}
+	{
+		ctx, shutDown := shutdown.WithCancel(context.Background())
+		t.Cleanup(shutDown)
+		markedTwice.req, markedTwice.shutDown = live().WithContext(ctx), shutDown
+	}
 	for _, tc := range []struct {
 		name    string
 		req     *http.Request
@@ -55,25 +79,23 @@ func TestObserveRecordsTheStatusSentAndWhyAResponseWasCutOff(t *testing.T) {
 		cut     CutOff
 		aborted bool
 	}{
-		{"a response that ends", live(), func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusAccepted) }, http.StatusAccepted, "", false},
-		{"a response that ends after its client left", clientGone(), func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusAccepted) }, http.StatusAccepted, "", false},
+		{"a response that ends", live(), accepted, http.StatusAccepted, "", false},
+		{"a response that ends after its client left", clientGone(), accepted, http.StatusAccepted, "", false},
 		{"its upstream broke off", live(), streamThenAbort, http.StatusOK, UpstreamAborted, true},
 		{"its MCP client went away", clientGone(), streamThenAbort, http.StatusOK, ClientClosed, true},
 		{"the proxy shut down", shuttingDown(), streamThenAbort, http.StatusOK, ShutDown, true},
-		{"a 500 then an abort", live(), func(w http.ResponseWriter, _ *http.Request) {
+		// Neither the proxy nor its client ended a request past a deadline, as shutdown tells them apart.
+		{"its upstream broke off, the request past a deadline", pastDeadline(), streamThenAbort, http.StatusOK, UpstreamAborted, true},
+		{"its upstream broke off after a 500", live(), func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 			panic(http.ErrAbortHandler)
 		}, http.StatusInternalServerError, UpstreamAborted, true},
-		{"a stream its handler ends after its client left", clientGone(), func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte("data: one\n\n"))
-			StreamEnded(r.Context())
-		}, http.StatusOK, ClientClosed, false},
-		{"a stream its handler ends at shutdown", shuttingDown(), func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte("data: one\n\n"))
-			StreamEnded(r.Context())
-		}, http.StatusOK, ShutDown, false},
-		{"a stream whose write failed, its request still live", live(), func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte("data: one\n\n"))
+		{"a stream its handler ends after its client left", clientGone(), streamThenEnd, http.StatusOK, ClientClosed, false},
+		{"a stream its handler ends at shutdown", shuttingDown(), streamThenEnd, http.StatusOK, ShutDown, false},
+		{"a stream its handler ends, its request still live (as after a failed write)", live(), streamThenEnd, http.StatusOK, ClientClosed, false},
+		{"a stream marked cut off twice keeps its first cause", markedTwice.req, func(w http.ResponseWriter, r *http.Request) {
+			streamThenEnd(w, r) // a failed write, its request still live
+			markedTwice.shutDown()
 			StreamEnded(r.Context())
 		}, http.StatusOK, ClientClosed, false},
 	} {

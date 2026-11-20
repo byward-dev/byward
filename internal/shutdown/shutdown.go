@@ -28,6 +28,12 @@ func ShuttingDown(ctx context.Context) bool {
 	return errors.Is(context.Cause(ctx), http.ErrServerClosed)
 }
 
+// ClientWentAway reports whether ctx, a request's context, was ended by its MCP client going away:
+// cancelled with no cause of the proxy's. Any other end, a deadline say, is not its client's.
+func ClientWentAway(ctx context.Context) bool {
+	return errors.Is(context.Cause(ctx), context.Canceled)
+}
+
 // AnswerIfEnded answers r if its context was ended by the proxy shutting down or by its MCP client
 // going away, and reports whether it did; the caller then logs nothing as a failure, whatever error
 // the ending gave it (#527). A request ended by shutdown still has its client: it gets 503 "the
@@ -42,7 +48,7 @@ func AnswerIfEnded(w http.ResponseWriter, r *http.Request) bool {
 		w.Header().Set("Connection", "close")
 		http.Error(w, "the proxy is shutting down", http.StatusServiceUnavailable)
 		return true
-	case errors.Is(context.Cause(ctx), context.Canceled):
+	case ClientWentAway(ctx):
 		w.WriteHeader(statusClientClosedRequest)
 		return true
 	}
