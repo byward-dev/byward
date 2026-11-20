@@ -110,7 +110,7 @@ Prometheus text format at `/metrics` on the internal listener. Histogram buckets
 
 | Metric | Type | Labels |
 |---|---|---|
-| `byward_http_request_duration_seconds` | histogram | `route`: the matched route pattern (`/mcp` or your public path, `/authorize`, `/consent`, `/assets/page.css`, `/callback/{idp}`, `/token`, `/revoke`, `/register`, the `/.well-known/…` metadata paths, `GET /.well-known/jwks.json`) or `other`; `status_class` (`2xx` …) |
+| `byward_http_request_duration_seconds` | histogram | `route`: the matched route pattern (`/mcp` or your public path, `/authorize`, `/consent`, `/assets/page.css`, `/callback/{idp}`, `/token`, `/revoke`, `/register`, the `/.well-known/…` metadata paths, `GET /.well-known/jwks.json`) or `other`; `status_class` (`2xx` …); `error_type`, empty unless the response was [cut off after its headers](#a-stream-cut-off-after-its-headers) (`client_closed`, `shutdown`, `upstream_aborted`) |
 | `byward_idp_request_duration_seconds` | histogram | `idp`, `operation` (`authorize`, `callback`, `refresh`), `outcome` (`success`, `rejected`, `unavailable`) |
 | `byward_upstream_in_flight` | gauge | `kind` (`request`, `stream`) |
 | `byward_upstream_busy_total` | counter | `kind`: requests refused with 503 because an admission cap was full |
@@ -184,7 +184,8 @@ standard variables, e.g. `OTEL_TRACES_EXPORTER=otlp`, `OTEL_EXPORTER_OTLP_ENDPOI
   `OTEL_ATTRIBUTE_COUNT_LIMIT` that is not a number is printed to stderr with its value at start, even with tracing
   off.
 - One server span per request, named `<METHOD> <route pattern>` (e.g. `POST /mcp`), continuing an inbound
-  `traceparent` header.
+  `traceparent` header. It records `http.response.status_code`, and its status is `Error` for a 5xx. A response
+  [cut off after its headers](#a-stream-cut-off-after-its-headers) also records why as `error.type`.
 - `traceparent` toward the upstream is our span's; with tracing off an inbound `traceparent` passes through unchanged.
 - The MCP body, including `params._meta`, is never read or changed. A client that puts trace context only in `_meta`
   joins the upstream's trace, not ours.
@@ -253,3 +254,23 @@ has exited.
 | `message_too_large` | It wrote a stdout line over the 64 MiB message limit |
 | `stdout_closed` | It closed its stdout but kept running, for 5 s |
 
+### A stream cut off after its headers
+
+A response whose headers were already sent can still be cut off: usually a stream from the upstream. It is recorded
+with the status it sent (usually 200), never 499, and with why it was cut off, as `error_type`:
+
+| `error_type` | Cause |
+|---|---|
+| `client_closed` | its MCP client went away |
+| `shutdown` | the proxy shut down |
+| `upstream_aborted` | its upstream broke off the body; the relay also logs this as `upstream error` |
+
+It has one request line, with `error_type`; one observation of `byward_http_request_duration_seconds`, whose
+`error_type` label has the same value (and is empty for every other request); and its server span records the same
+value as `error.type`. The span's status is `Error` only for `upstream_aborted`, and stays unset for `client_closed` and
+`shutdown`: a client that leaves, or the proxy stopping, is no failure of the request, as with 499 above. OpenTelemetry's
+HTTP span conventions (their Status section, still in Development) say a 2xx with another error, such as a network error
+on the response body, "MUST be set to `Error`". They also let an instrumentation "that ha[s] additional context about a
+specific request ... use this context to set the span status more precisely", which is what byward does here. The
+connection is then closed, so a client still there sees the stream break off rather than end. A stdio upstream's
+stream that ends the same way is recorded the same way.

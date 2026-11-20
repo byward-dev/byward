@@ -150,7 +150,9 @@ func (l otelLog) Error(_ error, msg string, _ ...any) { l.log.Warn(tracingError,
 func (l otelLog) WithValues(...any) logr.LogSink      { return l }
 func (l otelLog) WithName(string) logr.LogSink        { return l }
 
-// Middleware starts the server span for each request, named by route(r), a fixed set of names.
+// Middleware starts the server span for each request, named by route(r), a fixed set of names. A
+// response cut off after its headers records the status it sent and its cause as error.type
+// (logging.Observe); only one its upstream broke off is an error.
 func Middleware(route func(*http.Request) string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
@@ -158,12 +160,17 @@ func Middleware(route func(*http.Request) string, next http.Handler) http.Handle
 		ctx, span := otel.Tracer(instrumentation).Start(ctx, r.Method+" "+name, trace.WithSpanKind(trace.SpanKindServer),
 			trace.WithAttributes(semconv.HTTPRequestMethodKey.String(r.Method), attribute.String("http.route", name)))
 		defer span.End()
-		rec := logging.NewStatusRecorder(w)
-		next.ServeHTTP(rec, r.WithContext(ctx))
-		span.SetAttributes(semconv.HTTPResponseStatusCode(rec.Status()))
-		if rec.Status() >= 500 {
-			span.SetStatus(codes.Error, "")
-		}
+		logging.Observe(w, r.WithContext(ctx), next, func(status int, cut logging.CutOff) {
+			span.SetAttributes(semconv.HTTPResponseStatusCode(status))
+			if cut != "" {
+				span.SetAttributes(semconv.ErrorTypeKey.String(string(cut)))
+			}
+			// A client that went away, or the proxy's shutdown, is no failure of the request: its
+			// span records why it was cut off but keeps the status unset (#533).
+			if status >= 500 || cut == logging.UpstreamAborted {
+				span.SetStatus(codes.Error, "")
+			}
+		})
 	})
 }
 

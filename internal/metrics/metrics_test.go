@@ -90,7 +90,7 @@ func TestLabelsCarryOnlyFixedValuesAndBucketsAreFixed(t *testing.T) {
 		}
 	}
 	for _, le := range []string{`le="0.05"`, `le="0.1"`, `le="0.25"`, `le="0.5"`, `le="1"`, `le="2.5"`, `le="5"`, `le="10"`, `le="+Inf"`} {
-		if !strings.Contains(out, `byward_http_request_duration_seconds_bucket{route="mcp",status_class="4xx",`+le+`}`) {
+		if !strings.Contains(out, `byward_http_request_duration_seconds_bucket{error_type="",route="mcp",status_class="4xx",`+le+`}`) {
 			t.Fatalf("bucket %s missing: %s", le, out)
 		}
 	}

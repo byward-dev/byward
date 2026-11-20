@@ -950,11 +950,12 @@ func TestABodyThatBreaksOffLogsOneWarningWithItsRequestsIDAndNeverQuotesAMisread
 	}
 }
 
-// A client that cancels a stream it is reading logs nothing, whatever the proxy setting: through a
+// A client that cancels a stream it is reading logs only its request line, cut off with
+// error_type=client_closed (#533), and no failure, whatever the proxy setting: through a
 // misread one too, whose redaction must keep the body read's bare context.Canceled, which quotes no
 // address. ReverseProxy compares that error with context.Canceled by identity to stay quiet when the
 // client went away; any other error is logged as an upstream error (#388).
-func TestAClientThatCancelsAStreamLogsNothingWhateverTheProxySetting(t *testing.T) {
+func TestAClientThatCancelsAStreamLogsOnlyItsCutOffRequestLineWhateverTheProxySetting(t *testing.T) {
 	const event = "data: {}\n\n"
 	for _, tc := range everyProxySetting {
 		t.Run(tc.name, func(t *testing.T) {
@@ -987,8 +988,11 @@ func TestAClientThatCancelsAStreamLogsNothingWhateverTheProxySetting(t *testing.
 			cancel() // the client goes away mid-stream
 			_ = res.Body.Close()
 			srv.Close() // waits for the handler, so the log is complete
-			if logs.Len() != 0 {
-				t.Fatalf("log %q; want nothing logged for a client that went away", logs.String())
+			// Only the request line, with the status the client got and why it was cut off (#533).
+			lines := strings.Split(strings.TrimSuffix(logs.String(), "\n"), "\n")
+			if len(lines) != 1 || !strings.Contains(lines[0], " level=INFO msg=request ") ||
+				!strings.Contains(lines[0], " status=200 ") || !strings.HasSuffix(lines[0], " error_type=client_closed") {
+				t.Fatalf("log %q; want only the request line, status 200 with error_type=client_closed, for a client that went away", logs.String())
 			}
 		})
 	}

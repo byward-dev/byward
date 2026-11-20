@@ -91,9 +91,11 @@ func Handler(cfg *config.Config, log *slog.Logger, up http.Handler, v resource.V
 	rt := routeOf(mux)
 	// recoverer is innermost so a panic still gets its request log line, its 5xx metric and an error
 	// span: the wrappers above see the 500 it writes. An http.ErrAbortHandler is re-panicked to abort
-	// the response, so the wrappers above never finish: it gets no request log line, no request metric
-	// and a span with no status code. The relay logs an upstream body that breaks off mid-copy with the
-	// request's ID instead (#387).
+	// the response, as ReverseProxy does when a stream is cut off after its headers. Each wrapper
+	// above records it before passing the panic on (logging.Observe), so it gets its request line, its
+	// metric and its span, with the status it sent and why it was cut off as error_type (#533); the
+	// server then tears the connection down. The relay also logs an upstream body that breaks off
+	// mid-copy as an upstream error, with the request's ID (#387).
 	// ClientAddress is outermost but for HSTS: every layer below logs and limits by the same
 	// resolved address, and every answer, a refusal or a panic's 500 included, carries HSTS.
 	return strictTransport(cfg.PublicURL, logging.ClientAddress(cfg.TrustedProxies, logging.Middleware(log, tracing.Middleware(rt,

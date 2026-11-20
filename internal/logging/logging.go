@@ -30,6 +30,8 @@ var allowed = map[string]bool{
 	slog.TimeKey: true, slog.LevelKey: true, slog.MessageKey: true,
 	requestIDKey: true, "method": true, "path": true, "status": true, "duration_ms": true,
 	"mcp_method": true, "remote_ip": true, "host": true, "origin": true, "reason": true,
+	// Why a response was cut off after its headers: one of the CutOff causes.
+	"error_type": true,
 	// On-Behalf-Of (ADR-0017 §5): where an administrator grants consent; no secret in it.
 	"admin_consent_url": true,
 	"error":             true, "listen": true, "version": true, "relaxation": true,
@@ -199,8 +201,9 @@ func newRequestID() string {
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
 
-// Middleware gives each request an ID and logs one line per request. The query string is never
-// logged; neither are headers, except the `Mcp-Method` value.
+// Middleware gives each request an ID and logs one line per request, a response cut off after its
+// headers included, with its error_type (Observe). The query string is never logged; neither are
+// headers, except the `Mcp-Method` value.
 func Middleware(log *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -208,16 +211,19 @@ func Middleware(log *slog.Logger, next http.Handler) http.Handler {
 		r = r.WithContext(WithRequestID(r.Context(), id))
 		// Echoed so users and operators can quote it; inbound IDs are not trusted (no trusted proxies yet).
 		w.Header().Set("X-Request-Id", id)
-		rec := NewStatusRecorder(w)
-		next.ServeHTTP(rec, r)
-		// The ID is set here, not left to New's handler, so the request line has it whatever
-		// logger it is given.
-		attrs := []any{requestIDKey, id, "method", r.Method, "path", r.URL.Path, "status", rec.Status(),
-			"duration_ms", time.Since(start).Milliseconds(), "remote_ip", RemoteIP(r)}
-		if m := r.Header.Get("Mcp-Method"); m != "" {
-			attrs = append(attrs, "mcp_method", m)
-		}
-		log.InfoContext(r.Context(), "request", attrs...)
+		Observe(w, r, next, func(status int, cut CutOff) {
+			// The ID is set here, not left to New's handler, so the request line has it whatever
+			// logger it is given.
+			attrs := []any{requestIDKey, id, "method", r.Method, "path", r.URL.Path, "status", status,
+				"duration_ms", time.Since(start).Milliseconds(), "remote_ip", RemoteIP(r)}
+			if m := r.Header.Get("Mcp-Method"); m != "" {
+				attrs = append(attrs, "mcp_method", m)
+			}
+			if cut != "" {
+				attrs = append(attrs, "error_type", string(cut))
+			}
+			log.InfoContext(r.Context(), "request", attrs...)
+		})
 	})
 }
 

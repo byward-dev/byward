@@ -46,7 +46,8 @@ func New() *Metrics {
 	m := &Metrics{
 		reg: prometheus.NewRegistry(),
 		requests: prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "byward_http_request_duration_seconds",
-			Help: "HTTP request duration by route and status class.", Buckets: Buckets}, []string{"route", "status_class"}),
+			Help: "HTTP request duration by route, status class and, for a response cut off after its headers, its cause.", Buckets: Buckets},
+			[]string{"route", "status_class", "error_type"}),
 		idp: prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "byward_idp_request_duration_seconds",
 			Help: "IdP call duration by IdP, operation and outcome (success, rejected, unavailable).", Buckets: Buckets},
 			[]string{"idp", "operation", "outcome"}),
@@ -105,9 +106,9 @@ func (m *Metrics) Middleware(route func(*http.Request) string, next http.Handler
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		rec := logging.NewStatusRecorder(w)
-		next.ServeHTTP(rec, r)
-		m.requests.WithLabelValues(route(r), strconv.Itoa(rec.Status()/100)+"xx").Observe(time.Since(start).Seconds())
+		logging.Observe(w, r, next, func(status int, cut logging.CutOff) {
+			m.requests.WithLabelValues(route(r), strconv.Itoa(status/100)+"xx", string(cut)).Observe(time.Since(start).Seconds())
+		})
 	})
 }
 
