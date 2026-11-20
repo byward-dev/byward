@@ -13,10 +13,10 @@ import (
 	"github.com/byward-dev/byward/internal/logging"
 )
 
-// listenBody is a modern subscriptions/listen under the client id "L"; holdBody a legacy request
-// the upstream holds unanswered until a release.
+// listenBody is a modern subscriptions/listen under the client id "L".
 var listenBody = modernBody(`"L"`, "subscriptions/listen", "", `"notifications":{"toolsListChanged":true}`)
 
+// holdBody is a legacy request the upstream holds unanswered until a release.
 const holdBody = `{"jsonrpc":"2.0","id":2,"method":"hold"}`
 
 // completeResult is in the completion result a listen the proxy ends gets.
@@ -61,18 +61,18 @@ func (b *bridgeHarness) observed(t *testing.T, w http.ResponseWriter, req *http.
 // for a listen (acked), acknowledged.
 func observeStream(t *testing.T, modern, acked bool, open func(*bridgeHarness) *http.Request) (*bridgeHarness, *brokenWriter, func() logging.CutOff) {
 	t.Helper()
-	b := newBridge
+	newHarness := newBridge
 	if modern {
-		b = newModernBridge
+		newHarness = newModernBridge
 	}
-	h := b(t, nil)
+	b := newHarness(t, nil)
 	w := &brokenWriter{header: http.Header{}}
-	cut := h.observed(t, w, open(h))
+	cut := b.observed(t, w, open(b))
 	eventually(t, "the stream to start", w.hasStarted) // after its request reached the upstream
 	if acked {
 		eventually(t, "the acknowledgement", func() bool { return strings.Contains(w.written(), "acknowledged") })
 	}
-	return h, w, cut
+	return b, w, cut
 }
 
 // A stream from the upstream process that its request's end cuts off, its headers already sent, is
@@ -302,7 +302,7 @@ func TestAStdioStreamThatEndsWithoutItsRequestEndingOrAWriteFailingIsNotCutOff(t
 			return b.modernRequest(context.Background(), listenBody), func(t *testing.T, b *bridgeHarness) {
 				readEvents(t, b.modern(t, "alice", modernBody(`1`, "teardown", "", "")))
 			}
-		}, true, ""},
+		}, true, `"notifications/tools/list_changed"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var finish finisher
