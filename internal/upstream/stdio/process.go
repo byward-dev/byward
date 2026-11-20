@@ -130,16 +130,18 @@ func (p *Process) Send(ctx context.Context, msg []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	cancelled := context.AfterFunc(ctx, func() { _ = p.stdin.SetWriteDeadline(time.Unix(1, 0)) })
+	ended := make(chan struct{}) // closed once the request's end has set its deadline
+	stop := context.AfterFunc(ctx, func() { _ = p.stdin.SetWriteDeadline(time.Unix(1, 0)); close(ended) })
 	n, err := p.stdin.Write(msg) // then the newline: no copy of a message up to the body limit
 	if err == nil {
 		var m int
 		m, err = p.stdin.Write(newline)
 		n += m
 	}
-	if !cancelled() {
-		_ = p.stdin.SetWriteDeadline(time.Time{})
+	if !stop() {
+		<-ended // the end may come as the write finishes: its deadline must not outlive this Send (#547)
 	}
+	_ = p.stdin.SetWriteDeadline(time.Time{})
 	if err != nil {
 		if n > 0 {
 			p.stop("partial_write")

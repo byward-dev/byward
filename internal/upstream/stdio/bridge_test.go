@@ -9,9 +9,11 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1045,4 +1047,50 @@ func TestALegacyRequestAwaitingItsAnswerKeepsItsProcessBesideAQuietGETStream(t *
 	if res := b.post(t, "alice", "", initialize); res.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("initialize past the timeout with a request in flight: status %d, want 503", res.StatusCode)
 	}
+}
+
+// An MCP session keeps working after a request to it ends just as its message is written: the next
+// notification, from a request still live, is accepted, not answered 404 as if the session were gone
+// (#547). The ending races the write; each try ends its request after a different number of
+// scheduler yields, so some endings reach the bridge's write whatever the scheduler (under -race
+// too), and correct code passes each one. A try whose ending cut the write short stops the process
+// (partial_write), as a broken frame must, and the next try starts a new MCP session; any other stop
+// is a session wrongly ended, which the next try's 404 catches.
+func TestAnMCPSessionKeepsWorkingAfterARequestToItEndsAsItsMessageIsWritten(t *testing.T) {
+	b := newBridge(t, nil)
+	note := `{"jsonrpc":"2.0","method":"notifications/initialized"}`
+	sid := b.initialize(t, "alice")
+	for i := range 500 {
+		stops := b.stops("partial_write")
+		ctx, cancel := context.WithCancel(context.Background())
+		r := httptest.NewRequestWithContext(ctx, http.MethodPost, "/", strings.NewReader(note))
+		r.Header.Set("Accept", "application/json, text/event-stream")
+		r.Header.Set(userHeader, "alice")
+		r.Header.Set(sessionHeader, sid)
+		go func(wait time.Duration) {
+			for start := time.Now(); time.Since(start) < wait; {
+				runtime.Gosched()
+			}
+			cancel()
+		}(raceWait(i))
+		b.bridge.ServeHTTP(httptest.NewRecorder(), r)
+		if b.stops("partial_write") != stops {
+			sid = b.initialize(t, "alice")
+			continue
+		}
+		if res := b.post(t, "alice", sid, note); res.StatusCode != http.StatusAccepted {
+			t.Fatalf("try %d: a live notification after one whose request ended: status %d; want 202, its MCP session still working", i, res.StatusCode)
+		}
+	}
+}
+
+// raceWait is how long try i of a race waits before it ends its request: none, then from 1µs to
+// about 4ms on a log scale, so some tries land on the window whether the bridge reaches its write
+// in microseconds or, under -race, much later.
+func raceWait(i int) time.Duration {
+	k := i % 49
+	if k == 0 {
+		return 0
+	}
+	return time.Duration(float64(time.Microsecond) * math.Pow(2, float64(k-1)/4))
 }

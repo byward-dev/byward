@@ -718,6 +718,38 @@ func TestIdleTimerFiringDuringStartStopsTheProcess(t *testing.T) {
 	}
 }
 
+// A Send whose context ends as its write finishes leaves the process writable: once that Send has
+// succeeded, the next one, with a context still live, reaches the process. A deadline the ending set
+// after the write was left on stdin, so every later Send failed with an i/o timeout and wedged the
+// MCP session (#547). An end that cuts the write short stops the process (partial_write), as a
+// broken frame must, and nothing else may stop it. The ending races the write, so many tries make
+// the race likely; correct code passes each one.
+func TestASendWhoseContextEndsAsItsWriteFinishesLeavesTheProcessWritable(t *testing.T) {
+	h := newHarness(t, func(c *Config) { c.Command = []string{fakeBin, "-mcp"} })
+	note := []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`) // never answered
+	p := h.get(t, "s1", alice)
+	for i := range 500 {
+		ctx, cancel := context.WithCancel(context.Background())
+		go cancel()
+		err := p.Send(ctx, note)
+		if err != nil {
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("try %d: Send whose context ends = %v; want nil or context.Canceled", i, err)
+			}
+			for _, r := range h.log.with("stopping upstream process") {
+				if r.attrs["reason"] != "partial_write" {
+					t.Fatalf("try %d: Send whose context ends stopped the process with reason %v; want only partial_write", i, r.attrs["reason"])
+				}
+			}
+			p = h.get(t, "s1", alice) // its process may have been stopped: a new one, once it has exited
+			continue
+		}
+		if err := p.Send(context.Background(), note); err != nil {
+			t.Fatalf("try %d: the Send after one that succeeded as its context ended = %v; want it to reach the process", i, err)
+		}
+	}
+}
+
 func TestSendThatTimesOutMidWriteStopsTheProcess(t *testing.T) {
 	h := newHarness(t, nil)
 	p := h.get(t, "s1", alice)
