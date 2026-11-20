@@ -84,7 +84,7 @@ func TestOnlyKnownCodeReadsDevelopmentMode(t *testing.T) {
 			if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "OIDCLoopbackHTTP" {
 				decided[rel]++
 			}
-			// The setting by name reaches --dev without the field (Values.Effective, v.get).
+			// The setting by name reaches --dev without the field (Values.Effective, v.boolean).
 			if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING {
 				if name, err := strconv.Unquote(lit.Value); err == nil && (name == "dev" || name == "BYWARD_DEV") {
 					named[rel]++

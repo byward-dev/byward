@@ -55,11 +55,11 @@ func TestNoOtherSettingMayUseAPlainIdentityHeader(t *testing.T) {
 		inErr string
 	}{
 		{"the assertion, headers off", []string{"BYWARD_ASSERTION_HEADER=X-Byward-Roles"},
-			"BYWARD_ASSERTION_HEADER: X-Byward-Roles is one of the plain identity headers the proxy sets"},
+			"BYWARD_ASSERTION_HEADER: want a header name such as Authorization; got X-Byward-Roles: it is one of the plain identity headers the proxy sets"},
 		{"the assertion, headers on", []string{"BYWARD_IDENTITY_HEADERS=true", "BYWARD_ASSERTION_HEADER=x-byward-subject"},
-			"BYWARD_ASSERTION_HEADER: X-Byward-Subject is one of the plain identity headers"},
+			"BYWARD_ASSERTION_HEADER: want a header name such as Authorization; got X-Byward-Subject: it is one of the plain identity headers the proxy sets"},
 		{"the credential, another spelling", []string{"BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X_Byward_Email"},
-			"BYWARD_UPSTREAM_CREDENTIAL_HEADER: X_byward_email is one of the plain identity headers"},
+			"BYWARD_UPSTREAM_CREDENTIAL_HEADER: want a header name such as Authorization; got X-Byward-Email: it is one of the plain identity headers the proxy sets"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := loadCred(t, nil, "k-123", tc.env...); err == nil || !strings.Contains(err.Error(), tc.inErr) {
@@ -68,7 +68,7 @@ func TestNoOtherSettingMayUseAPlainIdentityHeader(t *testing.T) {
 		})
 	}
 	for _, h := range IdentityHeaderNames { // every one, so a header added later is reserved too
-		if _, err := loadCred(t, nil, "k-123", "BYWARD_ASSERTION_HEADER="+h); err == nil || !strings.Contains(err.Error(), h+" is one of the plain identity headers") {
+		if _, err := loadCred(t, nil, "k-123", "BYWARD_ASSERTION_HEADER="+h); err == nil || !strings.Contains(err.Error(), "got "+h+": it is one of the plain identity headers the proxy sets") {
 			t.Errorf("BYWARD_ASSERTION_HEADER=%s: err = %v, want it refused as a plain identity header", h, err)
 		}
 	}

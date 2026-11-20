@@ -1,6 +1,7 @@
 package config
 
 import (
+	"flag"
 	"strings"
 	"testing"
 )
@@ -182,7 +183,7 @@ func TestARefusedURLIsNeverShownButSaysWhy(t *testing.T) {
 func TestAStrayArgumentNeverShowsACredentialItHolds(t *testing.T) {
 	_, err := load(t, []string{"--upstream-url=", "https://user:s3cretPW@up.example/mcp"})
 	if err == nil || strings.Contains(err.Error(), "s3cretPW") || strings.Contains(err.Error(), "up.example") || !strings.Contains(err.Error(), "got an unexpected argument (36 characters, not shown)") {
-		t.Fatalf("Load = %v, want the stray argument refused and shown without its password", err)
+		t.Fatalf("Load = %v, want the stray argument refused by its length, none of it shown", err)
 	}
 }
 
@@ -227,5 +228,27 @@ func TestAURLWithAMistypedSchemeIsRefusedWithoutAnyOfItShown(t *testing.T) {
 				t.Errorf("%s=%s: %v, want it refused by its length, and neither its token nor its host shown", env, value, err)
 			}
 		}
+	}
+}
+
+// The flag package's own refusals quote the argument or the value given to a flag; config names
+// them without it (ADR-0031 §1).
+func TestAFlagTheFlagPackageRefusesIsNeverShown(t *testing.T) {
+	version := func(fs *flag.FlagSet) { fs.Bool("version", false, "") }
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"a bad flag syntax", []string{"---upstream-url=https://h.example/x?k=" + canaryText}, "want flags as --name=value; got an argument with a bad flag syntax (48 characters, not shown)"},
+		{"a flag with no name", []string{"--=" + canaryText}, "want flags as --name=value; got an argument with a bad flag syntax (13 characters, not shown)"},
+		{"a value given to an action flag", []string{"--version=" + canaryText}, "--version: want true, false or no value; got a value it does not take (not shown)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := resolve(registry, tc.args, base, baseFiles, version)
+			if !isConfigError(err) || err.Error() != tc.want || holdsCanary(err.Error()) {
+				t.Fatalf("got %v, want the configuration error %q", err, tc.want)
+			}
+		})
 	}
 }

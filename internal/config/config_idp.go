@@ -298,10 +298,10 @@ func parseIssuer(val Value) (string, error) {
 // parseOIDCScopes reads BYWARD_OIDC_SCOPES: comma-separated scopes, none with a space, a backslash or
 // a double quote. A refused scope is never shown (ADR-0031 §1).
 func parseOIDCScopes(val Value) ([]string, []error) {
-	s, raw := val.Setting, val.Given.raw()
-	list, at := entries(raw)
-	if raw != "" && len(list) == 0 {
-		return nil, []error{listsNothing(s)}
+	s := val.Setting
+	list, at, err := parseEntries(val)
+	if err != nil {
+		return nil, []error{err}
 	}
 	var errs []error
 	for i, sc := range list {

@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // The parsers of the settings that hold a word, a number, a duration or free text (ADR-0031 §1): each
@@ -36,11 +38,8 @@ func parseWord(val Value, words ...string) (string, error) {
 	return raw, nil
 }
 
-// oneOf lists words as a want: "json or text", "entra, oidc or google".
+// oneOf lists two or more words as a want: "json or text", "entra, oidc or google".
 func oneOf(words []string) string {
-	if len(words) < 2 {
-		return strings.Join(words, "")
-	}
 	return strings.Join(words[:len(words)-1], ", ") + " or " + words[len(words)-1]
 }
 
@@ -75,16 +74,20 @@ func parseWholeNumber(val Value, lo, hi int) (int, error) {
 
 // parseList reads a comma-separated list setting of free text, such as role names: its entries.
 func parseList(val Value) ([]string, error) {
-	raw := val.Given.raw()
-	list := splitList(raw)
-	if raw != "" && len(list) == 0 {
-		return nil, listsNothing(val.Setting)
-	}
-	return list, nil
+	list, _, err := parseEntries(val)
+	return list, err
 }
 
-// listsNothing refuses a list setting that is set but names no entry, such as ",": it would read as
-// unset, and a gate list would silently open the gate.
-func listsNothing(s Setting) error {
-	return errorf("%s: want at least one entry, or leave it unset; got a list of none", s.Env())
+// parseWording reads page wording: no control or format characters (bidi overrides), at most max
+// characters.
+func parseWording(val Value, max int) (string, error) {
+	raw := val.Given.raw()
+	want := fmt.Sprintf("text of at most %d characters, without control or formatting characters", max)
+	switch {
+	case strings.ContainsFunc(raw, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }):
+		return "", refusedForm(val.Setting, whole, raw, want, "it has a control or formatting character")
+	case utf8.RuneCountInString(raw) > max:
+		return "", refusedForm(val.Setting, whole, raw, want, "it is too long")
+	}
+	return raw, nil
 }

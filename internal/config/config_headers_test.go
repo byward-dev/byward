@@ -77,3 +77,20 @@ func TestAHeaderNameThatIsNotATokenIsRefusedByEverySettingThatSetsOne(t *testing
 		}
 	}
 }
+
+// Two header settings that name the same header are refused by their names alone: the header is
+// never shown, since an accepted name can be any token.
+func TestAHeaderClashNeverShowsTheHeader(t *testing.T) {
+	const header = "X-" + canaryText
+	for name, env := range map[string][]string{
+		"the credential and the assertion":         {"BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=" + header, "BYWARD_ASSERTION_HEADER=" + strings.ToLower(header)},
+		"the On-Behalf-Of token and the assertion": {"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read", "BYWARD_OBO_HEADER=" + header, "BYWARD_ASSERTION_HEADER=" + strings.ToLower(header)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := loadCred(t, nil, "k-123", env...)
+			if !isConfigError(err) || !strings.Contains(err.Error(), "the same header") && !strings.Contains(err.Error(), "names the header that already carries") || holdsCanary(err.Error()) {
+				t.Fatalf("err = %v, want the clash refused by the settings' names and the header never shown", err)
+			}
+		})
+	}
+}

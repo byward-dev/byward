@@ -38,9 +38,9 @@ func parseAssertionClaims(val Value) ([]string, []error) {
 		return nil, nil
 	}
 	want := "claims from " + oneOf(AssertionClaimNames) + ", or none"
-	list, at := entries(raw)
-	if raw != "" && len(list) == 0 {
-		return nil, []error{listsNothing(val.Setting)}
+	list, at, err := parseEntries(val)
+	if err != nil {
+		return nil, []error{err}
 	}
 	var out []string
 	var errs []error

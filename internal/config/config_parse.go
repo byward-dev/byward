@@ -7,31 +7,17 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/byward-dev/byward/internal/ratelimit"
 )
 
-// parseWording reads page wording: no control or format characters (bidi overrides), at most max
-// characters.
-func parseWording(val Value, max int) (string, error) {
-	raw := val.Given.raw()
-	want := fmt.Sprintf("text of at most %d characters, without control or formatting characters", max)
-	switch {
-	case strings.ContainsFunc(raw, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }):
-		return "", refusedForm(val.Setting, whole, raw, want, "it has a control or formatting character")
-	case utf8.RuneCountInString(raw) > max:
-		return "", refusedForm(val.Setting, whole, raw, want, "it is too long")
-	}
-	return raw, nil
-}
-
-// parseScope reads BYWARD_SCOPE: one scope token (RFC 6749 §3.3).
+// parseScope reads BYWARD_SCOPE: one scope token (RFC 6749 §3.3), printable ASCII without a space, a
+// double quote or a backslash, since it is written into a quoted challenge.
 func parseScope(val Value) (string, error) {
 	raw := val.Given.raw()
-	if raw == "" || strings.ContainsAny(raw, " \"\\") {
-		return "", refusedForm(val.Setting, whole, raw, "one scope token, such as mcp", "it has white space, a backslash or a double quote")
+	notToken := func(r rune) bool { return r < 0x21 || r > 0x7e || r == '"' || r == '\\' }
+	if raw == "" || strings.ContainsFunc(raw, notToken) {
+		return "", refusedForm(val.Setting, whole, raw, "one scope token, such as mcp", "it has a character a scope token cannot hold: white space, a double quote, a backslash or one that is not printable ASCII")
 	}
 	return raw, nil
 }
@@ -187,10 +173,13 @@ const (
 
 func parseRateLimits(val Value) (map[string]int, []error) {
 	s := val.Setting
-	want := fmt.Sprintf("endpoint=per-minute entries, the endpoint one of %s and the limit a whole number from %d to %d", strings.Join(ratelimit.Endpoints, ", "), minRateLimit, maxRateLimit)
+	want := fmt.Sprintf("endpoint=per-minute entries, the endpoint %s and the limit a whole number from %d to %d", oneOf(ratelimit.Endpoints), minRateLimit, maxRateLimit)
 	out := ratelimit.Defaults()
 	var errs []error
-	list, at := entries(val.Given.raw())
+	list, at, err := parseEntries(val)
+	if err != nil {
+		return nil, []error{err}
+	}
 	for i, item := range list {
 		name, per, ok := strings.Cut(item, "=")
 		name = strings.TrimSpace(name)
@@ -215,10 +204,13 @@ func parseRateLimits(val Value) (map[string]int, []error) {
 // parseProxies reads BYWARD_TRUSTED_PROXIES. An entry that is not a CIDR or an IP address is
 // never shown (ADR-0031 §1); one refused for what it names is shown as netip read it, without a zone.
 func parseProxies(val Value) ([]netip.Prefix, error) {
-	s, raw := val.Setting, val.Given.raw()
+	s := val.Setting
 	const want = "a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1"
 	var out []netip.Prefix
-	list, at := entries(raw)
+	list, at, err := parseEntries(val)
+	if err != nil {
+		return nil, err
+	}
 	for i, item := range list {
 		zoned := false
 		p, err := netip.ParsePrefix(item)
@@ -267,11 +259,14 @@ func splitList(s string) []string {
 // with its host[:port] checked as BYWARD_ALLOWED_HOSTS checks one (hostPort), and refused when no
 // browser could send it (browserIPv4). A refused entry is never shown (ADR-0031 §1).
 func parseOrigins(val Value) ([]string, []error) {
-	s, raw := val.Setting, val.Given.raw()
+	s := val.Setting
 	const want = "an origin (scheme://host[:port]) such as https://app.example"
 	var out []string
 	var errs []error
-	list, at := entries(raw)
+	list, at, err := parseEntries(val)
+	if err != nil {
+		return nil, []error{err}
+	}
 	for i, o := range list {
 		u, reason := parseOrigin(o)
 		if reason != "" {
@@ -371,10 +366,13 @@ func hostPort(h string) (stored, reason string) {
 // parseAllowedHosts reads BYWARD_ALLOWED_HOSTS (#323, #325): each entry as hostPort stores it.
 // A refused entry is never shown (ADR-0031 §1).
 func parseAllowedHosts(val Value) ([]string, []error) {
-	s, raw := val.Setting, val.Given.raw()
+	s := val.Setting
 	var out []string
 	var errs []error
-	list, at := entries(raw)
+	list, at, err := parseEntries(val)
+	if err != nil {
+		return nil, []error{err}
+	}
 	for i, h := range list {
 		n, reason := hostPort(h)
 		if reason != "" {

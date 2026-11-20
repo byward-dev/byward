@@ -91,13 +91,15 @@ func (c *Config) headerClashes() []error {
 	var errs []error
 	aEnv, cEnv := Setting{Name: "assertion-header"}.Env(), Setting{Name: "upstream-credential-header"}.Env()
 	if c.UpstreamCredentialHeader != "" && sameHeader(c.UpstreamCredentialHeader, c.AssertionHeader) {
-		errs = append(errs, errorf("%s and %s are both %s, but the credential and the identity assertion never share a header (ADR-0016 §7): set %s to a header of your own, such as X-Byward-Identity, and verify the assertion there",
-			cEnv, aEnv, c.UpstreamCredentialHeader, aEnv))
+		// The header is not shown: an accepted name can be any token.
+		errs = append(errs, errorf("%s and %s name the same header, but the credential and the identity assertion never share a header (ADR-0016 §7): set %s to a header of your own, such as X-Byward-Identity, and verify the assertion there",
+			cEnv, aEnv, aEnv))
 	}
-	for _, u := range []struct{ env, header string }{{aEnv, c.AssertionHeader}, {cEnv, c.UpstreamCredentialHeader}, {Setting{Name: "obo-header"}.Env(), c.OBOHeader}} {
+	for _, u := range []struct{ name, header string }{{"assertion-header", c.AssertionHeader}, {"upstream-credential-header", c.UpstreamCredentialHeader}, {"obo-header", c.OBOHeader}} {
 		for _, plain := range IdentityHeaderNames {
-			if sameHeader(u.header, plain) {
-				errs = append(errs, errorf("%s: %s is one of the plain identity headers the proxy sets (docs/how-to/plain-identity-headers.md); use another header", u.env, u.header))
+			if sameHeader(u.header, plain) { // shown by the fixed name it matches, never as given
+				errs = append(errs, refusedMeaning(lookup(u.name), whole, plain, "a header name such as Authorization",
+					"it is one of the plain identity headers the proxy sets (docs/how-to/plain-identity-headers.md); use another header"))
 			}
 		}
 	}

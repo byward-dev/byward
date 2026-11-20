@@ -97,7 +97,7 @@ func TestAnOIDCIdPWithMissingOrConflictingSettingsRefusesToStart(t *testing.T) {
 		"a key algorithm with no key":     {with("BYWARD_OIDC_CLIENT_KEY_ALG=RS256"), "BYWARD_OIDC_CLIENT_KEY_ALG is set without BYWARD_OIDC_CLIENT_KEY_FILE"},
 		"an unknown key algorithm":        {withAKey("BYWARD_OIDC_CLIENT_KEY_ALG=RS384"), "BYWARD_OIDC_CLIENT_KEY_ALG: want PS256 or RS256 (an RSA key) or ES256 (an EC P-256 key); got a value (5 characters, not shown): it is not one of them"},
 		"a key algorithm in lower case":   {withAKey("BYWARD_OIDC_CLIENT_KEY_ALG=rs256"), "BYWARD_OIDC_CLIENT_KEY_ALG: want PS256 or RS256 (an RSA key) or ES256 (an EC P-256 key); got a value (5 characters, not shown): it is not one of them"},
-		"blank scopes":                    {with("BYWARD_OIDC_SCOPES= ,"), "BYWARD_OIDC_SCOPES: want at least one entry, or leave it unset; got a list of none"},
+		"blank scopes":                    {with("BYWARD_OIDC_SCOPES= ,"), "BYWARD_OIDC_SCOPES: want at least one entry; got a list of none"},
 		"a scope with a quote":            {with(`BYWARD_OIDC_SCOPES=a"b`), `BYWARD_OIDC_SCOPES: want a scope such as openid or email; got entry 1 of 1 (3 characters, not shown): it holds a space, a backslash or a double quote`},
 		"a scope with a backslash":        {with(`BYWARD_OIDC_SCOPES=a\b`), `BYWARD_OIDC_SCOPES: want a scope such as openid or email; got entry 1 of 1 (3 characters, not shown): it holds a space, a backslash or a double quote`},
 		"a scope with a space":            {with("BYWARD_OIDC_SCOPES=a b"), `BYWARD_OIDC_SCOPES: want a scope such as openid or email; got entry 1 of 1 (3 characters, not shown): it holds a space, a backslash or a double quote`},

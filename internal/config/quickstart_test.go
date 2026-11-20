@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -32,8 +33,9 @@ func TestSecretExpiresAtRejectsOtherForms(t *testing.T) {
 	for _, raw := range []string{"06/11/2027", "next year", "2027-13-01", "1 year"} {
 		t.Run(raw, func(t *testing.T) {
 			_, err := load(t, nil, "BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT="+raw)
-			if err == nil || !strings.Contains(err.Error(), "BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT: want a date such as 2027-11-06") {
-				t.Fatalf("err = %v", err)
+			want := "BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT: want a date such as 2027-11-06 or an RFC 3339 time; got a value (" + strconv.Itoa(len(raw)) + " characters, not shown): it is neither"
+			if !isConfigError(err) || err.Error() != want {
+				t.Fatalf("err = %v, want %q", err, want)
 			}
 		})
 	}

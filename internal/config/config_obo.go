@@ -38,7 +38,7 @@ func (c *Config) onBehalfOf(v *Values) []error {
 	if v.stdioUpstream() && v.byKey["obo-header"].Source != SourceDefault {
 		errs = append(errs, errorf("%s: a stdio upstream gets its downstream token from its token socket (BYWARD_DOWNSTREAM_TOKEN_SOCKET), not a header; leave %s unset", hEnv, hEnv))
 	}
-	if len(c.OBOScopes) > 0 && c.IdP != "entra" {
+	if len(c.OBOScopes) > 0 && c.IdP != "" && c.IdP != "entra" { // a refused IdP has its own error
 		errs = append(errs, errorf("%s: On-Behalf-Of is Entra's; it needs BYWARD_IDP=entra, got %s", sEnv, c.IdP))
 	}
 	h, err := parseHeaderName(v.value("obo-header"), "X-Byward-Downstream-Token")
@@ -50,10 +50,10 @@ func (c *Config) onBehalfOf(v *Values) []error {
 	// the client's own Authorization is always removed before byward sets its headers (#195).
 	switch {
 	case sameHeader(h, c.AssertionHeader):
-		errs = append(errs, errorf("%s: %s already carries the identity assertion (%s); move the assertion to a header of its own such as X-Byward-Assertion, or use another header here such as X-Byward-Downstream-Token",
-			hEnv, h, Setting{Name: "assertion-header"}.Env()))
+		errs = append(errs, errorf("%s names the header that already carries the identity assertion (%s); move the assertion to a header of its own such as X-Byward-Assertion, or use another header here such as X-Byward-Downstream-Token",
+			hEnv, Setting{Name: "assertion-header"}.Env()))
 	case sameHeader(h, c.UpstreamCredentialHeader):
-		errs = append(errs, errorf("%s: %s already carries the operator's upstream credential (%s); use a header of its own such as X-Byward-Downstream-Token", hEnv, h, Setting{Name: "upstream-credential-header"}.Env()))
+		errs = append(errs, errorf("%s names the header that already carries the operator's upstream credential (%s); use a header of its own such as X-Byward-Downstream-Token", hEnv, Setting{Name: "upstream-credential-header"}.Env()))
 	}
 	return errs
 }

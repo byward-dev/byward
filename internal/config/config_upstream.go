@@ -42,15 +42,11 @@ func (c *Config) upstream(v *Values, dashes bool) []error {
 	if !v.empty("upstream-url") { // no mode chosen, so neither mode's settings are read
 		return []error{errorf("%s and %s are both set: an upstream is either HTTP or stdio", urlEnv, cmdEnv)}
 	}
-	if v.command != nil {
-		c.UpstreamCommand = append([]string(nil), v.command...)
-	} else if err := json.Unmarshal([]byte(raw), &c.UpstreamCommand); err != nil {
-		c.UpstreamCommand = nil
+	command, err := parseUpstreamCommand(v.value("upstream-command"), v.command)
+	if err != nil {
+		errs = append(errs, err)
 	}
-	if len(c.UpstreamCommand) == 0 || c.UpstreamCommand[0] == "" {
-		// The value is not shown: a command line can carry a token as an argument.
-		errs = append(errs, errorf("%s: want a JSON array of strings whose first element is the program, e.g. [\"/usr/local/bin/server\",\"--flag\"] (the value given is not shown)", cmdEnv))
-	}
+	c.UpstreamCommand = command
 	env, err := parseEnvLines(parseText(v.value("upstream-env")))
 	if err != nil {
 		errs = append(errs, errorf("%s: want KEY=VALUE lines, each key once; got %v", envEnv, err))
@@ -78,6 +74,22 @@ func (c *Config) upstream(v *Values, dashes bool) []error {
 			Setting{Name: "stdio-max-processes"}.Env(), c.StdioMaxProcesses))
 	}
 	return errs
+}
+
+// parseUpstreamCommand reads BYWARD_UPSTREAM_COMMAND: a JSON array of strings whose first element is
+// the program, or the command given after -- (argv), which resolve holds in the value as such an
+// array too. A refused one is never shown: a command line can carry a token as an argument.
+func parseUpstreamCommand(val Value, argv []string) ([]string, error) {
+	var command []string
+	if argv != nil {
+		command = append([]string(nil), argv...)
+	} else if err := json.Unmarshal([]byte(val.Given.raw()), &command); err != nil {
+		command = nil
+	}
+	if len(command) == 0 || command[0] == "" {
+		return nil, refusedForm(val.Setting, whole, val.Given.raw(), `a JSON array of strings whose first element is the program, such as ["/usr/local/bin/server","--flag"]`, "it is not one")
+	}
+	return command, nil
 }
 
 // stdioUpstream and httpUpstream say which upstream mode the selectors choose: exactly one of
@@ -156,7 +168,7 @@ func parseEnvLines(raw string) (map[string]string, error) {
 		}
 		k, val, ok := strings.Cut(line, "=")
 		if !ok || k == "" || strings.TrimSpace(k) != k {
-			return nil, fmt.Errorf("line %d: want KEY=VALUE", i+1)
+			return nil, fmt.Errorf("line %d: it is not KEY=VALUE", i+1)
 		}
 		if _, dup := env[k]; dup {
 			return nil, fmt.Errorf("line %d: its key is set on an earlier line too", i+1)
@@ -202,17 +214,22 @@ func (c *Config) upstreamCredential(v *Values) []error {
 	var errs []error
 	name := spelled(val) // an inline value, accepted under --dev, has no file to name
 	emptyFile := v.emptySecretFile("upstream-credential")
+	// In the one format, named as the operator gave it: the length only, never the credential.
+	want := fmt.Sprintf("one header value of at most %d bytes on one line, without control characters or white space at either end", maxUpstreamCredential)
+	refused := func(cred, reason string) error {
+		return errorf("%s: want %s; got a value %s: %s", name, want, notShown(cred), reason)
+	}
 	switch cred := parseText(val); {
 	case emptyFile != nil:
 		errs = append(errs, emptyFile)
 	case cred == "":
-		errs = append(errs, errorf("%s is empty", name))
+		errs = append(errs, errorf("%s: want %s; got nothing", name, want))
 	case len(cred) > maxUpstreamCredential:
-		errs = append(errs, errorf("%s: the credential is longer than %d bytes", name, maxUpstreamCredential))
+		errs = append(errs, refused(cred, "it is too long"))
 	case strings.ContainsFunc(cred, func(r rune) bool { return r != '\t' && (r < 0x20 || r == 0x7f) }):
-		errs = append(errs, errorf("%s: the credential must be one header value on one line, without control characters", name))
+		errs = append(errs, refused(cred, "it has a control character or a line break"))
 	case cred != strings.TrimSpace(cred):
-		errs = append(errs, errorf("%s: the credential starts or ends with white space", name))
+		errs = append(errs, refused(cred, "it starts or ends with white space"))
 	default:
 		c.UpstreamCredential = cred
 	}
@@ -229,14 +246,17 @@ func (c *Config) upstreamCredential(v *Values) []error {
 // requires every Mcp-Param-* header to be forwarded (MCPParamPrefix).
 var mcpHeaders = withMCPHeaders(map[string]bool{"Accept": true, "Content-Type": true, "Content-Length": true, "Transfer-Encoding": true, "Host": true})
 
-// stripHeaders reads BYWARD_UPSTREAM_STRIP_HEADERS: header names, canonical with _ read as -, the
+// parseStripHeaders reads BYWARD_UPSTREAM_STRIP_HEADERS: header names, canonical with _ read as -, the
 // way the relay compares them.
 func parseStripHeaders(val Value) ([]string, []error) {
 	const want = "exact header names, such as X-Argocd-Base-Url"
 	s := val.Setting
 	var out []string
 	var errs []error
-	list, at := entries(val.Given.raw())
+	list, at, err := parseEntries(val)
+	if err != nil {
+		return nil, []error{err}
+	}
 	for i, n := range list {
 		h := CanonicalHeader(n)
 		switch {

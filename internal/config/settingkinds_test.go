@@ -57,9 +57,10 @@ func TestBooleanSettingsAreExactlyTheBoolFlags(t *testing.T) {
 }
 
 // Every boolean read in the package's code, whether or not the default load reaches it, is of a
-// Bool setting, and Values.boolean is the one place the package parses a boolean: a read behind a
-// condition (a stdio upstream, another IdP), a second parser with its own message, or a value
-// compared with "true" by hand, would escape
+// Bool setting: every read goes through Values.boolean, the one caller of parseBool, which is the one
+// place the package parses a boolean. A read behind a condition (a stdio upstream, another IdP), a
+// direct call of parseBool, a second parser with its own message, or a value compared with "true" by
+// hand, would escape
 // TestBooleanSettingsAreExactlyTheBoolFlags. The scan reads source text.
 func TestEveryBooleanReadIsOfABoolFlag(t *testing.T) {
 	byName := map[string]Setting{}
@@ -67,14 +68,15 @@ func TestEveryBooleanReadIsOfABoolFlag(t *testing.T) {
 		byName[s.Name] = s
 	}
 	read := regexp.MustCompile(`\.boolean\("([^"]+)"\)`)
-	parse := regexp.MustCompile(`\bParseBool\(`) // a call as written, "ParseBool(": a bare mention passes
+	parse := regexp.MustCompile(`\bParseBool\(`)                                                      // a call as written, "ParseBool(": a bare mention passes
+	parser, declared := regexp.MustCompile(`\bparseBool\(`), regexp.MustCompile(`\bfunc parseBool\(`) // its calls: every mention but its declaration
 	// Any value compared with "true" or "false" by hand is a boolean read outside Values.boolean too.
 	compare := regexp.MustCompile(`[!=]=\s*"(true|false)"|"(true|false)"\s*[!=]=`)
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	reads, parses := 0, 0
+	reads, parses, parserCalls := 0, 0, 0
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {
 			continue
@@ -87,6 +89,12 @@ func TestEveryBooleanReadIsOfABoolFlag(t *testing.T) {
 			parses += n
 			if f != "parsers.go" {
 				t.Errorf("%s parses a boolean outside parsers.go, where parseBool lives", f)
+			}
+		}
+		if n := len(parser.FindAllString(string(src), -1)) - len(declared.FindAllString(string(src), -1)); n > 0 {
+			parserCalls += n
+			if f != "registry.go" {
+				t.Errorf("%s calls parseBool: read a boolean with Values.boolean, so this test sees its setting", f)
 			}
 		}
 		if compare.MatchString(string(src)) {
@@ -102,8 +110,8 @@ func TestEveryBooleanReadIsOfABoolFlag(t *testing.T) {
 	if reads == 0 {
 		t.Fatal("no boolean read found: has Values.boolean been renamed?")
 	}
-	if parses != 1 {
-		t.Errorf("the package parses a boolean in %d places, want 1 (Values.boolean)", parses)
+	if parses != 1 || parserCalls != 1 {
+		t.Errorf("the package parses a boolean in %d places and calls parseBool in %d, want 1 of each (parseBool, called by Values.boolean)", parses, parserCalls)
 	}
 }
 

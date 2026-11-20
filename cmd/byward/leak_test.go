@@ -113,9 +113,12 @@ func TestNoCommandShowsAHiddenOrARefusedValue(t *testing.T) {
 			switch {
 			case refusing:
 				refusedTried[s.Name]++
-				named := strings.Contains(loadErr.Error(), s.Env()+": want ") || strings.Contains(loadErr.Error(), s.Env()+"_FILE: want ")
-				if !named || !strings.Contains(loadErr.Error(), "; got ") {
-					t.Errorf("%s refuses %s outside the one format (%v): refuse it through refusedForm or refusedMeaning", s.Env(), form.name, loadErr)
+				// Every line is a refusal of this setting, in the one format.
+				for _, line := range strings.Split(loadErr.Error(), "\n") {
+					named := strings.HasPrefix(line, s.Env()+": want ") || strings.HasPrefix(line, s.Env()+"_FILE: want ")
+					if !named || !strings.Contains(line, "; got ") {
+						t.Errorf("%s refuses %s with the line %q, outside the one format: refuse it through refusedForm or refusedMeaning", s.Env(), form.name, line)
+					}
 				}
 			case form == hostForm:
 				continue // an accepted URL shows its host (hostForm)
@@ -149,9 +152,19 @@ func TestNoCommandShowsAHiddenOrARefusedValue(t *testing.T) {
 			}
 		}
 	}
-	// Config refuses some form of most settings: fewer would mean the forms stopped reaching them.
-	if len(refusedTried) < 40 {
-		t.Errorf("config refused forms of %d settings, want at least 40: %v", len(refusedTried), refusedTried)
+	// Every setting but these, which take any text, refuses some form, so its refusal is run through
+	// every command: one that stops refusing, or starts, is named here.
+	acceptsEveryForm := []string{"app-client-ids", "app-roles", "entra-client-certificate", "entra-client-id", "entra-client-secret",
+		"gate-email-domains", "gate-groups", "gate-hosted-domains", "gate-roles", "gate-tenants", "oidc-client-id", "oidc-client-key",
+		"oidc-client-key-id", "oidc-client-secret", "oidc-groups-claim", "oidc-name", "oidc-roles-claim", "oidc-subject-claim",
+		"operator-name", "resource-name", "scope-description", "store-postgres-dsn", "upstream-command", "upstream-credential"}
+	for _, s := range settings {
+		switch refuses := refusedTried[s.Name] > 0; {
+		case refuses && slices.Contains(acceptsEveryForm, s.Name):
+			t.Errorf("config refused forms of %s, which acceptsEveryForm lists: remove it, so its refusals stay checked", s.Name)
+		case !refuses && !slices.Contains(acceptsEveryForm, s.Name):
+			t.Errorf("config refused no form of %s, so no refusal of it was checked: give it a context in contextOf, or list it in acceptsEveryForm", s.Name)
+		}
 	}
 	for _, name := range hidingSettings {
 		switch {
@@ -230,8 +243,8 @@ func leakContext(s config.Setting) string {
 // leakContexts is each context's settings: Entra with an HTTP upstream; Entra with a stdio upstream
 // instead (no upstream URL, no assertion keys), whose command is program; Entra with app-only
 // tokens; an oidc IdP; Google; and the variants that leave room for the setting tried in them.
-// Startup in each cannot bind its listener, and config accepts each as it is, apart from the three
-// that need the setting tried in them.
+// Startup in each cannot bind its listener, and config accepts each as it is, apart from those that
+// need the setting tried in them (needsItsSetting).
 func leakContexts(t *testing.T, program string) map[string][]string {
 	t.Helper()
 	listen := []string{"BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_LISTEN=192.0.2.1:8080", "BYWARD_INTERNAL_LISTEN="}
@@ -264,12 +277,12 @@ func leakContexts(t *testing.T, program string) map[string][]string {
 		"stdio":                         append(append(stdioAuthEnv(t), listen...), "BYWARD_UPSTREAM_COMMAND="+string(command)),
 		"app":                           append(slices.Clone(entra), "BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=r"),
 	}
+	// These need the setting tried in them, so config refuses each alone; every other loads as it is.
+	needsItsSetting := map[string]bool{"entra, no secret": true, "oidc, no secret": true,
+		"entra, a TLS key": true, "entra, a TLS certificate": true}
 	for name, env := range contexts {
-		if name == "entra, no secret" || name == "oidc, no secret" || name == "entra, no state directory" || name == "entra, a TLS key" || name == "entra, a TLS certificate" {
-			continue // each needs the setting tried in it, as entra-client-certificate, oidc-client-key, store-postgres-dsn or the other TLS file
-		}
-		if _, _, err := config.Load(nil, env, os.ReadFile); err != nil {
-			t.Fatalf("the %s context is refused: %v", name, err)
+		if _, _, err := config.Load(nil, env, os.ReadFile); (err != nil) != needsItsSetting[name] {
+			t.Fatalf("the %s context: Load = %v, want it refused alone %v", name, err, needsItsSetting[name])
 		}
 	}
 	return contexts

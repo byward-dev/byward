@@ -20,7 +20,8 @@ var rawReaders = []string{
 // refusal that never repeats it, and by its shape's display (ADR-0031 §1): Opaque.raw is called only
 // in a function named parse… or Parse…, or one listed in rawReaders; it is never taken as a value or
 // a method expression, and no file but opaque.go reaches the text behind an Opaque (its field p). raw
-// is unexported, so no other package reads the text at all. The scan is syntactic, so it cannot tell
+// is unexported, so no other package reads the text at all. A free-text setting's parser (parseText)
+// hands the text to its caller, so for such a setting only the leak test shows no refusal repeats it. The scan is syntactic, so it cannot tell
 // which setting a parser reads: a function named parse… that reads another setting's text passes,
 // and review catches it; TestNoCommandShowsAHiddenOrARefusedValue (cmd/byward) checks that no refusal
 // shows it.
@@ -70,7 +71,7 @@ func TestTheRawReadScanFindsEachWayOfReadingAValueAndNothingElse(t *testing.T) {
 		{"raw with an argument counts as a method expression", `func f(x X) { x.raw(1) }`, []rawRead{{fn: "f", kind: readRawValue}}},
 		{"raw as a method expression through a pointer", `func f(o Opaque) { (*Opaque).raw(&o) }`, []rawRead{{fn: "f", kind: readRawValue}}},
 		{"raw called in parentheses", `func f(v Value) { (v.Given.raw)() }`, []rawRead{{fn: "f", kind: readRaw}}},
-		{"a setting's parser is no read", `func f(v *Values) { parseText(v.value("dcr")) }`, nil},
+		{"a call of a setting's parser is no read", `func f(v *Values) { parseText(v.value("dcr")) }`, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

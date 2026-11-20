@@ -24,7 +24,7 @@ func (c *Config) appTokens(v *Values) []error {
 		return nil
 	}
 	var errs []error
-	if c.IdP != "entra" {
+	if c.IdP != "" && c.IdP != "entra" { // a refused IdP has its own error
 		errs = append(errs, errorf("%s=entra cannot be used with %s=%s: app-only tokens are Entra's (ADR-0022 §1); remove it, or set %s=entra", env("app-tokens"), env("idp"), c.IdP, env("idp")))
 	}
 	if c.AppRoles, err = parseList(v.value("app-roles")); err != nil {

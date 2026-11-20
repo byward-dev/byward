@@ -39,13 +39,10 @@ const wantDenylistEntry = "a CIMD client ID (an https URL) or a host name such a
 // parseClientDenylist reads BYWARD_CLIENT_DENYLIST: CIMD client IDs (https URLs) and host names. A
 // refused entry is never shown (ADR-0031 §1).
 func parseClientDenylist(val Value) ([]string, []error) {
-	s, raw := val.Setting, val.Given.raw()
-	if raw == "" {
-		return nil, nil
-	}
-	list, at := entries(raw)
-	if len(list) == 0 {
-		return nil, []error{listsNothing(s)}
+	s := val.Setting
+	list, at, err := parseEntries(val)
+	if err != nil {
+		return nil, []error{err}
 	}
 	var errs []error
 	for i, e := range list {
@@ -96,10 +93,10 @@ func denylistReason(e string) string {
 // parseCIMDHosts reads a CIMD host list (cimd-trusted-hosts, cimd-allowed-hosts): host names, in
 // lower case. A refused entry is never shown (ADR-0031 §1).
 func parseCIMDHosts(val Value) ([]string, []error) {
-	s, raw := val.Setting, val.Given.raw()
-	list, at := entries(raw)
-	if raw != "" && len(list) == 0 {
-		return nil, []error{listsNothing(s)}
+	s := val.Setting
+	list, at, err := parseEntries(val)
+	if err != nil {
+		return nil, []error{err}
 	}
 	var errs []error
 	for i, h := range list {

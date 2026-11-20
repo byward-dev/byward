@@ -37,9 +37,9 @@ func refusedLines(t *testing.T, env ...string) []string {
 	return strings.Split(err.Error(), "\n")
 }
 
-// #461, #466 and their siblings: a value config refuses is quoted at most as far as it cannot hold the
-// secret an operator pasted where a path, a header name or a command belongs; each message is
-// pinned whole, and the secret appears in no line (security invariant 2).
+// #461, #466 and their siblings: a value config refuses is never shown, only its place, its length and
+// a fixed reason, so a secret an operator pasted where a path, a header name, a command or any other
+// value belongs appears in no line; each message is pinned whole (security invariant 2).
 func TestARefusedSettingNeverShowsASecretPastedIntoIt(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -87,7 +87,12 @@ func TestARefusedSettingNeverShowsASecretPastedIntoIt(t *testing.T) {
 		{"the assertion's header with nothing before its colon", []string{"BYWARD_ASSERTION_HEADER=:" + pasted},
 			"BYWARD_ASSERTION_HEADER: want a header name such as Authorization or X-Byward-Identity; got a value (19 characters, not shown): it is not a header name"},
 		{"a stdio command, malformed, with a token argument", []string{"BYWARD_UPSTREAM_URL=", `BYWARD_UPSTREAM_COMMAND=["/usr/local/bin/server","--token","` + pasted + `"`},
-			`BYWARD_UPSTREAM_COMMAND: want a JSON array of strings whose first element is the program, e.g. ["/usr/local/bin/server","--flag"] (the value given is not shown)`},
+			`BYWARD_UPSTREAM_COMMAND: want a JSON array of strings whose first element is the program, such as ["/usr/local/bin/server","--flag"]; got a value (55 characters, not shown): it is not one`},
+		{"the Entra tenant", []string{"BYWARD_ENTRA_TENANT=" + pasted}, "BYWARD_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, Overview, Tenant ID); got a value (18 characters, not shown): it is not a GUID"},
+		{"the client secret's end date", []string{"BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT=" + pasted}, "BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT: want a date such as 2027-11-06 or an RFC 3339 time; got a value (18 characters, not shown): it is neither"},
+		{"the scope", []string{"BYWARD_SCOPE=a " + pasted}, "BYWARD_SCOPE: want one scope token, such as mcp; got a value (20 characters, not shown): it has a character a scope token cannot hold: white space, a double quote, a backslash or one that is not printable ASCII"},
+		{"a rate limit's endpoint", []string{"BYWARD_OAUTH_RATE_LIMITS=" + pasted + "=5"}, "BYWARD_OAUTH_RATE_LIMITS: want endpoint=per-minute entries, the endpoint authorize, consent, callback, token, revoke or register and the limit a whole number from 1 to 10000; got entry 1 of 1 (20 characters, not shown): it is not endpoint=per-minute for one of the endpoints"},
+		{"a rate limit's number", []string{"BYWARD_OAUTH_RATE_LIMITS=authorize=" + pasted}, "BYWARD_OAUTH_RATE_LIMITS: want endpoint=per-minute entries, the endpoint authorize, consent, callback, token, revoke or register and the limit a whole number from 1 to 10000; got entry 1 of 1 (28 characters, not shown): its limit is not a whole number"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			lines := refusedLines(t, tc.env...)
