@@ -678,6 +678,24 @@ func TestAnIdleTimeoutStopOrShutdownCountsAsBywardsChoiceButAFaultNeverDoes(t *t
 		{"a crash", func(_ *testing.T, _ *harness, p *Process) { _ = p.Send(context.Background(), []byte("crash")) }, false},
 		{"a message over the size limit", func(_ *testing.T, _ *harness, p *Process) { _ = p.Send(context.Background(), []byte("123456789")) }, false},
 		{"a fault, then a stop byward chose", func(_ *testing.T, _ *harness, p *Process) { p.stop(stopPartialWrite); p.retire(stopShutdown) }, false},
+		{"a partial write", func(t *testing.T, h *harness, p *Process) { // #573
+			if got := call(t, p, "block"); got != "blocking" {
+				t.Fatalf("block = %q, want blocking", got)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			pipe := 16 * os.Getpagesize() // what a pipe holds by default (Linux); 64 KiB at most on darwin
+			if runtime.GOOS == "darwin" {
+				pipe = 64 << 10
+			}
+			if err := p.Send(ctx, []byte(strings.Repeat("a", 4*pipe))); !errors.Is(err, context.DeadlineExceeded) { // four times that
+				t.Fatalf("Send = %v; want the deadline to cut the write part-way", err)
+			}
+			if stops := h.log.with("stopping upstream process"); len(stops) != 1 || stops[0].attrs["reason"] != "partial_write" {
+				t.Fatalf("stop records = %v; want one partial_write", stops)
+			}
+			h.clk.Advance(DefaultKillGrace) // SIGTERM
+		}, false},
 		{"a closed stdin", func(t *testing.T, h *harness, p *Process) {
 			if got := call(t, p, "closestdin"); got != "closed" {
 				t.Fatalf("got %q, want closed", got)

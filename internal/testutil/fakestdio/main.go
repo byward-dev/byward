@@ -437,6 +437,8 @@ func serveMCP() {
 //	            message = params.tag, then the result {"tag": params.tag}
 //	log         a notifications/message if params._meta carries io.modelcontextprotocol/logLevel,
 //	            then the result {"tag": params.tag}
+//	block       the result "blocking", then never read stdin again: a later write to it fills
+//	            the pipe and blocks
 //	hold        no answer until a later "release"; a notifications/cancelled for it is recorded
 //	release     "released" to every held request, then the result "ok"
 //	cancelled   the request ids notifications/cancelled has named so far
@@ -530,6 +532,10 @@ func serveModern() {
 				cmu.Unlock()
 			}
 			continue
+		}
+		if m.Method == "block" { // here, by stdin's only reader, so nothing reads it after the answer
+			result(m.ID, "blocking")
+			hang()
 		}
 		if m.Method == "hold" { // registered in stdin order, before any later "release" is read
 			cmu.Lock()
