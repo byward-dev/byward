@@ -783,6 +783,95 @@ func TestSendWithACancelledContextWritesNothing(t *testing.T) {
 	}
 }
 
+// A Send whose context ends before its write has written a byte keeps the process: nothing reached
+// stdin, so framing is intact. Only a write cut part-way stops it (partial_write). The fake pauses,
+// its stdin pipe is filled with empty lines, which the fake echoes and byward drops, and the
+// request's context ends only once Send is watching it, so the write is cut with nothing written.
+// Nor does that Send count as traffic: the idle timeout still counts from before it.
+func TestASendWhoseContextEndsBeforeAnyByteIsWrittenKeepsTheProcess(t *testing.T) {
+	h := newHarness(t, nil)
+	p := h.get(t, "s1", alice)
+	if got := call(t, p, "pause"); got != "paused" {
+		t.Fatalf("got %q, want paused", got)
+	}
+	// More than any pipe holds: a write that put any bytes in keeps writing until the pipe is full and
+	// returns only at its deadline; the paused fake reads nothing until it is resumed. A write
+	// reaching its deadline before its first byte (a stalled test) wrote nothing, so it is tried again.
+	for start, filled := time.Now(), 0; filled == 0; {
+		if time.Since(start) > guard {
+			t.Fatal("filling stdin wrote nothing before its deadline every try")
+		}
+		_ = p.stdin.SetWriteDeadline(time.Now().Add(200 * time.Millisecond))
+		n, err := p.stdin.Write(bytes.Repeat(newline, 4<<20))
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Fatalf("filling stdin = %v, want it cut by its deadline with the pipe full", err)
+		}
+		filled += n
+	}
+	_ = p.stdin.SetWriteDeadline(time.Time{})
+
+	before := p.lastTraffic() // the paused fake writes nothing, so only Send could move it
+	h.clk.Advance(time.Second)
+	ctx := newEndsOnceWatched()
+	sent := make(chan error, 1)
+	go func() { sent <- p.Send(ctx, []byte("ping")) }()
+	select {
+	case <-ctx.watched: // Send has checked the context and is watching it: its write comes next
+	case <-time.After(guard):
+		t.Fatal("Send never watched its context")
+	}
+	ctx.end()
+	select {
+	case err := <-sent:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Send whose context ended before a byte was written = %v, want context.Canceled", err)
+		}
+	case <-time.After(guard):
+		t.Fatal("Send whose context ended never returned")
+	}
+	if stops := h.log.with("stopping upstream process"); len(stops) != 0 {
+		t.Fatalf("stop records = %v, want none: nothing reached stdin", stops)
+	}
+	if got := p.lastTraffic(); !got.Equal(before) {
+		t.Fatalf("last traffic = %v after the cut Send, want %v: a write that wrote nothing is no traffic", got, before)
+	}
+
+	if err := syscall.Kill(p.PID(), syscall.SIGUSR1); err != nil {
+		t.Fatalf("resuming the fake: %v", err)
+	}
+	if got := call(t, p, "pong"); got != "pong" {
+		t.Fatalf("next message = %q, want the next Send to reach the process", got)
+	}
+}
+
+// endsOnceWatched is a context that ends only when the test calls end, and reports, on watched,
+// when something first asks for its Done channel: context.AfterFunc does, as Send starts watching.
+type endsOnceWatched struct {
+	context.Context
+	watched, done chan struct{}
+	watchOnce     sync.Once
+}
+
+func newEndsOnceWatched() *endsOnceWatched {
+	return &endsOnceWatched{Context: context.Background(), watched: make(chan struct{}), done: make(chan struct{})}
+}
+
+func (c *endsOnceWatched) Done() <-chan struct{} {
+	c.watchOnce.Do(func() { close(c.watched) })
+	return c.done
+}
+
+func (c *endsOnceWatched) Err() error {
+	select {
+	case <-c.done:
+		return context.Canceled
+	default:
+		return nil
+	}
+}
+
+func (c *endsOnceWatched) end() { close(c.done) }
+
 func TestPipesHeldByAProcessOutsideTheGroupAreClosedAfterTheGrace(t *testing.T) {
 	h := newHarness(t, func(c *Config) { c.Clock, c.KillGrace = realClock{}, 50*time.Millisecond })
 	p := h.get(t, "s1", alice)

@@ -8,6 +8,7 @@
 //	child         start a grandchild in the same process group, print its PID
 //	detach        start a grandchild in its own session (outside the group), print its PID
 //	block         print "blocking", then never read stdin again
+//	pause         print "paused", then read no stdin until SIGUSR1
 //	crash         exit with status 3
 //
 // Flag -modern makes it a 2026-07-28 server (see serveModern). Flag -mcp makes it a 2025-11-25
@@ -143,6 +144,12 @@ func main() {
 		case "block":
 			reply("blocking")
 			hang()
+		case "pause":
+			resume := make(chan os.Signal, 1)
+			signal.Notify(resume, syscall.SIGUSR1) // before the reply, so a signal sent after it is caught
+			reply("paused")
+			<-resume
+			signal.Stop(resume)
 		case "crash":
 			os.Exit(3)
 		default:
