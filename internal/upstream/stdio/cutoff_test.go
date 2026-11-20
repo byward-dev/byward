@@ -227,3 +227,78 @@ func TestAnInitializeEndedByItsRequestAfterItsStreamStartedIsCutOffAndLogsNoInit
 		})
 	}
 }
+
+// A stream that ends without its request ending or a write failing is not cut off, however it ends:
+// with its answer, with the error its process's exit or its session's end gets, by the upstream
+// ending a subscription, or as a GET stream another replaces (#533).
+func TestAStdioStreamThatEndsOtherwiseIsNotCutOff(t *testing.T) {
+	const hold = `{"jsonrpc":"2.0","id":2,"method":"hold"}`
+	modern := func(b *bridgeHarness, body string) *http.Request {
+		return b.request(context.Background(), http.MethodPost, "alice", "", body, modernHeaders(body)...)
+	}
+	deleteSession := func(t *testing.T, b *bridgeHarness, sid string) {
+		t.Helper()
+		if w := b.serve(context.Background(), http.MethodDelete, "alice", sid, ""); w.Code != http.StatusNoContent {
+			t.Fatalf("DELETE: status %d", w.Code)
+		}
+	}
+	listen := modernBody(`"L"`, "subscriptions/listen", "", `"notifications":{"toolsListChanged":true}`)
+	for _, tc := range []struct {
+		name   string
+		modern bool
+		// open returns the stream's request, and what ends it once it is open (nil: it ends itself).
+		open func(t *testing.T, b *bridgeHarness) (*http.Request, func(t *testing.T, b *bridgeHarness))
+		// acked: the stream is open once its acknowledgement is written.
+		acked bool
+	}{
+		{"a legacy POST stream, answered", false, func(t *testing.T, b *bridgeHarness) (*http.Request, func(*testing.T, *bridgeHarness)) {
+			return b.request(context.Background(), http.MethodPost, "alice", b.initialize(t, "alice"), `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`), nil
+		}, false},
+		{"a legacy POST stream, its session ended", false, func(t *testing.T, b *bridgeHarness) (*http.Request, func(*testing.T, *bridgeHarness)) {
+			sid := b.initialize(t, "alice")
+			return b.request(context.Background(), http.MethodPost, "alice", sid, hold), func(t *testing.T, b *bridgeHarness) {
+				b.stderrSaid(t, "holding")
+				deleteSession(t, b, sid)
+			}
+		}, false},
+		{"a legacy GET stream, its session ended", false, func(t *testing.T, b *bridgeHarness) (*http.Request, func(*testing.T, *bridgeHarness)) {
+			sid := b.initialize(t, "alice")
+			return b.request(context.Background(), http.MethodGet, "alice", sid, ""), func(t *testing.T, b *bridgeHarness) { deleteSession(t, b, sid) }
+		}, false},
+		{"a legacy GET stream, replaced by a newer one", false, func(t *testing.T, b *bridgeHarness) (*http.Request, func(*testing.T, *bridgeHarness)) {
+			sid := b.initialize(t, "alice")
+			return b.request(context.Background(), http.MethodGet, "alice", sid, ""), func(t *testing.T, b *bridgeHarness) { b.listen(t, context.Background(), sid) }
+		}, false},
+		{"a modern request's stream, answered", true, func(_ *testing.T, b *bridgeHarness) (*http.Request, func(*testing.T, *bridgeHarness)) {
+			return modern(b, modernBody(`1`, "env", "", "")), nil
+		}, false},
+		{"a modern request's stream, its process exited", true, func(_ *testing.T, b *bridgeHarness) (*http.Request, func(*testing.T, *bridgeHarness)) {
+			return modern(b, modernBody(`1`, "crash", "", "")), nil
+		}, false},
+		{"a modern listen the upstream ended", true, func(_ *testing.T, b *bridgeHarness) (*http.Request, func(*testing.T, *bridgeHarness)) {
+			return modern(b, listen), func(t *testing.T, b *bridgeHarness) {
+				readEvents(t, b.modern(t, "alice", modernBody(`1`, "teardown", "", "")))
+			}
+		}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newBridge(t, nil)
+			if tc.modern {
+				b = newModernBridge(t, nil)
+			}
+			req, endIt := tc.open(t, b)
+			w := &brokenWriter{header: http.Header{}}
+			cut := b.observed(t, w, req)
+			eventually(t, "the stream to start", w.hasStarted)
+			if tc.acked {
+				eventually(t, "the acknowledgement", func() bool { return strings.Contains(w.written(), "acknowledged") })
+			}
+			if endIt != nil {
+				endIt(t, b)
+			}
+			if got := cut(); got != "" {
+				t.Errorf("recorded as cut off %q; want none (body %q)", got, w.written())
+			}
+		})
+	}
+}
