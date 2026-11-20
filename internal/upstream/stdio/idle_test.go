@@ -1,3 +1,5 @@
+//go:build linux || darwin
+
 package stdio
 
 import (
@@ -7,7 +9,7 @@ import (
 )
 
 // A notification gets no reply, so only the Send itself can count as traffic: the -mcp fake
-// ignores notifications/initialized, unlike the echo fake, whose reply would restart the timer.
+// answers no notification, unlike the echo fake, whose reply would restart the timer.
 func TestASendThatGetsNoReplyRestartsTheIdleTimer(t *testing.T) {
 	h := newHarness(t, func(c *Config) { c.Command = []string{fakeBin, "-mcp"} })
 	p := h.get(t, "s1", alice)

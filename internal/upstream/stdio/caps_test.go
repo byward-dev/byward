@@ -419,6 +419,7 @@ func TestAQuietStreamsProcessIsEvictableOnceQuietForTheTimeoutUnlessTrafficARequ
 		name     string
 		timeout  time.Duration
 		traffic  bool // the process exchanges a message after the streams open
+		send     bool // the process is sent a notification, which the -mcp fake never answers
 		request  bool // a request lease is held beside the stream
 		ended    bool // the stream ends, then a request lease is held: the stream must no longer count
 		more     bool // two more streams on the running process, one of which ends: still only streams
@@ -426,6 +427,7 @@ func TestAQuietStreamsProcessIsEvictableOnceQuietForTheTimeoutUnlessTrafficARequ
 	}{
 		{name: "quiet for the timeout is evictable", timeout: streamIdle},
 		{name: "traffic within the timeout keeps it", timeout: streamIdle, traffic: true, wantBusy: true},
+		{name: "a message with no reply within the timeout keeps it", timeout: streamIdle, send: true, wantBusy: true},
 		{name: "a request in flight keeps it", timeout: streamIdle, request: true, wantBusy: true},
 		{name: "0 keeps quiet streams however long", timeout: 0, wantBusy: true},
 		{name: "ended streams no longer count, so a quiet request keeps it", timeout: streamIdle, ended: true, wantBusy: true},
@@ -436,6 +438,9 @@ func TestAQuietStreamsProcessIsEvictableOnceQuietForTheTimeoutUnlessTrafficARequ
 			h := newHarness(t, func(c *Config) {
 				capped(1, 1, nil)(c)
 				c.StreamIdleTimeout = tc.timeout
+				if tc.send {
+					c.Command = []string{fakeBin, "-mcp"}
+				}
 			})
 			p, release := h.stream(t, "a1", alice)
 			if tc.ended {
@@ -456,6 +461,12 @@ func TestAQuietStreamsProcessIsEvictableOnceQuietForTheTimeoutUnlessTrafficARequ
 			if tc.traffic {
 				if answer := call(t, p, "ping"); answer != "ping" {
 					t.Fatalf("the process answered %q, want ping", answer)
+				}
+				h.clk.Advance(time.Second)
+			}
+			if tc.send { // only the Send can count: an answer would record traffic of its own
+				if err := p.Send(context.Background(), []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)); err != nil {
+					t.Fatalf("Send: %v", err)
 				}
 				h.clk.Advance(time.Second)
 			}
