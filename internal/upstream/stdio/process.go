@@ -134,9 +134,7 @@ func (p *Process) Send(ctx context.Context, msg []byte) error {
 	stop := context.AfterFunc(ctx, func() { _ = p.stdin.SetWriteDeadline(time.Unix(1, 0)); close(ended) })
 	n, err := p.stdin.Write(msg) // then the newline: no copy of a message up to the body limit
 	if err == nil {
-		var m int
-		m, err = p.stdin.Write(newline)
-		n += m
+		_, err = p.stdin.Write(newline) // n == len(msg) > 0: without its newline, framing breaks, so the process is stopped below
 	}
 	if !stop() {
 		<-ended // the end may come as the write finishes: its deadline must not outlive this Send (#547)
