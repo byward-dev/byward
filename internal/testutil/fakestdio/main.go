@@ -5,6 +5,7 @@
 //	args          print os.Args[1:] as a JSON array
 //	stderr N      write N lines "line i" to stderr, then print "ok"
 //	stderrlong N  write one N-byte line to stderr, then print "ok"
+//	closestdin    close stdin, print "closed", then hang: a write to the process then fails
 //	child         start a grandchild in the same process group, print its PID
 //	detach        start a grandchild in its own session (outside the group), print its PID
 //	block         print "blocking", then never read stdin again
@@ -121,6 +122,10 @@ func main() {
 			n, _ := strconv.Atoi(arg)
 			fmt.Fprintln(os.Stderr, strings.Repeat("x", n))
 			reply("ok")
+		case "closestdin":
+			_ = os.Stdin.Close()
+			reply("closed")
+			hang()
 		case "child":
 			c := exec.Command(os.Args[0], "sleep")    //nolint:gosec // G204: re-runs this test binary
 			c.Stdout, c.Stderr = os.Stdout, os.Stderr // holds the pipes open while it lives

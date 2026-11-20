@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math"
@@ -784,6 +785,22 @@ func TestARequestOnASessionWhoseProcessHasAlreadyEndedIs502ForInitializeAnd404Ot
 		if failed := log.with("initialize failed: no MCP session"); tc.initialize != (len(failed) == 1 && failed[0].attrs["reason"] == "session_ended") {
 			t.Errorf("initialize %v: logged %v", tc.initialize, failed)
 		}
+	}
+}
+
+func TestARequestOnAnMCPSessionWhoseUpstreamProcessCanNoLongerTakeMessagesIs404AndNotLoggedAsAFailure(t *testing.T) {
+	// White-box: Send wraps ErrExited around a failed write's own error, so the bridge must match it
+	// with errors.Is. A 502 would tell the MCP client the upstream is down, not that its MCP session
+	// ended.
+	log := &recorder{mu: &sync.Mutex{}, recs: &[]record{}}
+	s := &session{log: slog.New(log), byID: map[string]*stream{}}
+	rec := httptest.NewRecorder()
+	s.sendFailed(rec, httptest.NewRequest(http.MethodPost, "/", nil), fmt.Errorf("%w: write |1: broken pipe", ErrExited))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if failed := log.with("relaying to the upstream process failed"); len(failed) != 0 {
+		t.Errorf("logged %v, want no failure: the MCP session ended", failed)
 	}
 }
 
