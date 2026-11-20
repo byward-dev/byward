@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/byward-dev/byward/internal/host"
 )
 
 // Denylist is the operator's list of refused CIMD clients and redirect hosts (ADR-0008 §9). It
@@ -36,7 +38,7 @@ func NewDenylist(entries []string) (*Denylist, error) {
 			}
 			d.urls[canonicalCIMD(e)] = true
 		case e != "" && !strings.ContainsAny(e, "/:@*? ") && strings.Contains(e, "."):
-			d.hosts[BrowserHost(e)] = true
+			d.hosts[host.BrowserName(e)] = true
 		default:
 			return nil, &EntryError{Index: i, Reason: "it is neither a CIMD client ID (https URL) nor a host name"}
 		}
@@ -72,7 +74,7 @@ func (d *Denylist) DeniesRedirect(redirectURI string) bool {
 		return false
 	}
 	h := u.Hostname()
-	return d.hosts[BrowserHost(h)] || d.hosts[transitionalHost(h)]
+	return d.hosts[host.BrowserName(h)] || d.hosts[transitionalHost(h)]
 }
 
 // canonicalCIMD folds the spellings of one CIMD URL that fetch the same document: the host's
@@ -83,5 +85,5 @@ func canonicalCIMD(id string) string {
 	if err != nil {
 		return id
 	}
-	return "https://" + BrowserHost(u.Hostname()) + u.Path
+	return "https://" + host.BrowserName(u.Hostname()) + u.Path
 }

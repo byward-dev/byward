@@ -300,7 +300,7 @@ func TestEachWayOfReadingAURLIsCaught(t *testing.T) {
 		{name: "a URL's UnmarshalBinary method", code: `func f() { u.UnmarshalBinary(b) }`, want: urlReads{unfollowed: []string{"f calls u.UnmarshalBinary, a URL method: read the URL with url.Parse, where its argument can be listed"}}},
 		{name: "a URL method taken as a value", imports: `"net/url"`, code: `func f() { p := new(url.URL).Parse; p(raw) }`, want: urlReads{unfollowed: []string{"f takes new(url.URL).Parse as a value; call it where its argument can be listed"}}},
 		{name: "a URL method expression", imports: `"net/url"`, code: `func f() { (*url.URL).Parse(base, raw) }`, want: urlReads{unfollowed: []string{"f calls (*url.URL).Parse, a URL method: read the URL with url.Parse, where its argument can be listed"}}},
-		{name: "the other parsers are not URL reads", imports: `"time"; "strconv"; "net"; "net/netip"`, code: `func f() { time.ParseDuration(s); strconv.ParseBool(s); net.ParseIP(s); netip.ParsePrefix(s); fs.Parse(args) }`},
+		{name: "the other parsers are not URL reads", imports: `"time"; "strconv"; "net"; "net/netip"`, code: `func f() { time.ParseDuration(s); strconv.ParseBool(s); net.ParseIP(s); netip.ParsePrefix(s); fs.Parse(args); host.ParseIPv4(s); host.Parse(s, "") }`},
 		{name: "a file that does not import net/url has no url.Parse", code: `func f() { url.Parse(raw) }`, want: urlReads{unfollowed: []string{"f calls url.Parse, a URL method: read the URL with url.Parse, where its argument can be listed"}}},
 	}
 	for _, c := range cases {
@@ -332,7 +332,7 @@ type urlReads struct {
 // argument is unfollowed: url.Parse or parseURL taken as a value, parseURL with a name that is not a
 // literal, or a URL method (Parse*, JoinPath, ResolveReference, UnmarshalBinary) called or taken as a
 // value on anything but the packages config parses other values with (time, netip, net, strconv,
-// and its flag set fs).
+// internal/host, and its flag set fs).
 func urlReadsOf(name string, src any) (urlReads, error) {
 	var reads urlReads
 	file, err := parser.ParseFile(token.NewFileSet(), name, src, 0)
@@ -356,7 +356,7 @@ func urlReadsOf(name string, src any) (urlReads, error) {
 		pkg, ok := sel.X.(*ast.Ident)
 		return sel, ok && urlPkg != "" && pkg.Name == urlPkg && (strings.HasPrefix(sel.Sel.Name, "Parse") || sel.Sel.Name == "JoinPath")
 	}
-	otherParsers := map[string]bool{"time": true, "netip": true, "net": true, "strconv": true, "fs": true}
+	otherParsers := map[string]bool{"time": true, "netip": true, "net": true, "strconv": true, "fs": true, "host": true}
 	urlMethod := func(e ast.Expr) (*ast.SelectorExpr, bool) {
 		sel, ok := e.(*ast.SelectorExpr)
 		if !ok {

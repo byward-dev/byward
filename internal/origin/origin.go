@@ -11,6 +11,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/host"
 )
 
 // Hosts allows only the given hosts (host[:port], compared as config.CanonicalHost writes them:
@@ -44,7 +45,7 @@ func InternalHosts(rec *audit.Log, allowed []string, next http.Handler) http.Han
 		set[config.Hostname(h)] = true // config stores IP addresses canonical; any IP literal passes anyway
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name := config.Hostname(config.CanonicalHost(r.Host)) // 127.1 is an IP literal too
+		name := config.Hostname(host.Canonical(r.Host)) // 127.1 is an IP literal too
 		if _, err := netip.ParseAddr(name); err != nil && !set[name] {
 			rec.RecordUnauthenticated(r, audit.Event{Name: audit.HostRejected, Outcome: audit.Failure, Host: r.Host})
 			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
@@ -58,7 +59,7 @@ func InternalHosts(rec *audit.Log, allowed []string, next http.Handler) http.Han
 // spelling of an IPv6 address its shortest form), without one default port (:443 or :80), trimmed
 // once, so [::1]:80:443 is not [::1].
 func hostKey(h string) string {
-	h = config.CanonicalHost(h)
+	h = host.Canonical(h)
 	for _, p := range []string{":443", ":80"} {
 		if t, ok := strings.CutSuffix(h, p); ok {
 			return t

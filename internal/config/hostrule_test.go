@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/byward-dev/byward/internal/host"
 )
 
 // hostProbes are host spellings that the host settings once each read their own way (#486): case,
@@ -44,11 +46,11 @@ func hostRule(h string) string {
 	}
 	fmt.Fprintf(&b, "  cimd list: %q\n", hostNameReason(h))
 	fmt.Fprintf(&b, "  denylist: %q\n", denylistReason(h))
-	fmt.Fprintf(&b, "  host header: %s\n", CanonicalHost(h))
-	fmt.Fprintf(&b, "  hostname: %s, loopback %v\n", Hostname(h), isLoopback(Hostname(h)))
+	fmt.Fprintf(&b, "  host header: %s\n", host.Canonical(h))
+	fmt.Fprintf(&b, "  hostname: %s, loopback %v\n", Hostname(h), host.LoopbackAsWritten(Hostname(h)))
 	// The --dev issuer and the no-auth listen address ask about the host as written, case and all.
 	if u, err := url.Parse("http://" + h); err == nil {
-		fmt.Fprintf(&b, "  loopback as written: %v\n", isLoopback(u.Hostname()))
+		fmt.Fprintf(&b, "  loopback as written: %v\n", host.LoopbackAsWritten(u.Hostname()))
 	}
 	return b.String()
 }

@@ -5,13 +5,15 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/byward-dev/byward/internal/host"
 )
 
 // nameProbes are host names a browser maps (case, a trailing dot, full-width forms, IDN, joiners,
 // transitional letters) or refuses (a forbidden code point, an xn-- label decoding to xn--).
 var nameProbes = []string{
 	"app.example", "APP.Example", "app.example.", "ａｐｐ.example", "app。example", "bücher.example",
-	"xn--bcher-kva.example", "faß.example", "Straẞe.example", "a‍b.example", "my_host.example",
+	"xn--bcher-kva.example", "faß.example", "Straẞe.example", "a\u200db.example", "my_host.example",
 	"a--b.example", "＠.example", "xn--xn--abc-t2a.example", "", "127.0.0.1", "127.1", "::1", "single",
 }
 
@@ -30,8 +32,8 @@ var redirectProbes = []string{
 func TestHostFoldsAndTheLoopbackRedirectSetAreAsPinned(t *testing.T) {
 	var b strings.Builder
 	for _, h := range nameProbes {
-		ascii, ok := BrowserHostOK(h)
-		fmt.Fprintf(&b, "%q\n  browser: %q, goes there %v, unicode %q\n  transitional: %q\n", h, BrowserHost(h), ok, BrowserUnicode(ascii), transitionalHost(h))
+		ascii, ok := host.BrowserNameOK(h)
+		fmt.Fprintf(&b, "%q\n  browser: %q, goes there %v, unicode %q\n  transitional: %q\n", h, host.BrowserName(h), ok, host.BrowserUnicode(ascii), transitionalHost(h))
 	}
 	for _, r := range redirectProbes {
 		fmt.Fprintf(&b, "redirect %s: %v\n", r, ValidateRedirect(r))

@@ -6,6 +6,8 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+
+	"github.com/byward-dev/byward/internal/host"
 )
 
 // inContainer reports whether the proxy runs in a container (Docker or Podman marker file) that
@@ -73,14 +75,14 @@ func virtual(readFile readFileFunc, name string) bool {
 func checkNoAuth(c *Config, v *Values) []error {
 	const env = "BYWARD_INSECURE_NO_AUTH"
 	var errs []error
-	if !isLoopback(c.PublicURL.Hostname()) {
+	if !host.LoopbackAsWritten(c.PublicURL.Hostname()) {
 		errs = append(errs, errorf("%s: BYWARD_PUBLIC_URL must be a loopback URL, e.g. http://localhost:8080/mcp", env))
 	}
-	host, port, err := net.SplitHostPort(c.Listen)
+	listenHost, port, err := net.SplitHostPort(c.Listen)
 	switch {
 	case err != nil:
 		errs = append(errs, errorf("%s: BYWARD_LISTEN must be a loopback host:port such as 127.0.0.1:8080", env))
-	case isLoopback(host):
+	case host.LoopbackAsWritten(listenHost):
 	case c.InContainer:
 		// The host port is the public URL's; the container port is the listen address's.
 		publishPort := c.PublicURL.Port()
@@ -96,18 +98,18 @@ func checkNoAuth(c *Config, v *Values) []error {
 	// Named without a place: the stored lists leave out an entry refused for its form, so an index
 	// into them need not be the entry's place in the list given.
 	for _, h := range c.AllowedHosts {
-		if host := Hostname(h); !isLoopback(host) {
-			errs = append(errs, refusedMeaning(hosts, whole, notLoopback(host),
+		if hn := Hostname(h); !host.LoopbackAsWritten(hn) {
+			errs = append(errs, refusedMeaning(hosts, whole, notLoopback(hn),
 				"only loopback hosts with "+env+", such as localhost:8080", "authentication is off, so only loopback may reach the proxy"))
 		}
 	}
 	for _, o := range c.AllowedOrigins {
-		if u, err := url.Parse(o); err != nil || !isLoopback(u.Hostname()) {
-			host := ""
+		if u, err := url.Parse(o); err != nil || !host.LoopbackAsWritten(u.Hostname()) {
+			shown := ""
 			if err == nil {
-				host = u.Hostname()
+				shown = u.Hostname()
 			}
-			errs = append(errs, refusedMeaning(origins, whole, notLoopback(host),
+			errs = append(errs, refusedMeaning(origins, whole, notLoopback(shown),
 				"only loopback origins with "+env+", such as http://localhost:3000", "authentication is off, so only loopback may reach the proxy"))
 		}
 	}

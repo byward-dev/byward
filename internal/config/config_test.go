@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/byward-dev/byward/internal/host"
+
 	"github.com/byward-dev/byward/internal/logging"
 )
 
@@ -384,8 +386,8 @@ func TestCanonicalHostWritesAnAddressAsBrowsersDoAndAnyOtherHostInLowerCase(t *t
 		"2001:db8::1":                "[2001:db8::1]", // a bare IPv6 address, a Host header form no URL carries: bracketed
 		"[X]":                        "[x]",           // refused
 	} {
-		if got := CanonicalHost(given); got != want {
-			t.Errorf("CanonicalHost(%q) = %q, want %q", given, got, want)
+		if got := host.Canonical(given); got != want {
+			t.Errorf("host.Canonical(%q) = %q, want %q", given, got, want)
 		}
 	}
 }

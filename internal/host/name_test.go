@@ -1,8 +1,8 @@
-package registration
+package host
 
 import "testing"
 
-// BrowserHost is the ASCII name a browser goes to, the form the denylist compares and the consent
+// BrowserName is the ASCII name a browser goes to, the form the denylist compares and the consent
 // page shows beside a Unicode spelling.
 func TestBrowserHostIsTheASCIINameABrowserGoesTo(t *testing.T) {
 	for host, want := range map[string]string{
@@ -14,13 +14,13 @@ func TestBrowserHostIsTheASCIINameABrowserGoesTo(t *testing.T) {
 		"127.0.0.1":             "127.0.0.1",
 		"XN--":                  "xn--", // maps to nothing: kept, lower-cased
 	} {
-		if got := BrowserHost(host); got != want {
-			t.Errorf("BrowserHost(%q) = %q, want %q", host, got, want)
+		if got := BrowserName(host); got != want {
+			t.Errorf("BrowserName(%q) = %q, want %q", host, got, want)
 		}
 	}
 }
 
-// BrowserHostOK names a host a browser goes to as the browser does, and tells it from one the
+// BrowserNameOK names a host a browser goes to as the browser does, and tells it from one the
 // browser refuses or that no DNS name can be. For a refused host only the refusal is pinned: its name
 // is the mapping x/net got that far (xn--claude-.ai maps to claude.ai), which no caller may use.
 func TestBrowserHostOKSaysWhetherABrowserGoesToTheHost(t *testing.T) {
@@ -40,8 +40,8 @@ func TestBrowserHostOKSaysWhetherABrowserGoesToTheHost(t *testing.T) {
 		"2001:DB8::1":           "2001:db8::1", // an IPv6 literal: no domain to map
 		"::1":                   "::1",
 	} {
-		if name, ok := BrowserHostOK(host); name != want || !ok {
-			t.Errorf("BrowserHostOK(%q) = %q, %v; want %q, true", host, name, ok, want)
+		if name, ok := BrowserNameOK(host); name != want || !ok {
+			t.Errorf("BrowserNameOK(%q) = %q, %v; want %q, true", host, name, ok, want)
 		}
 	}
 	for _, host := range []string{
@@ -78,8 +78,8 @@ func TestBrowserHostOKSaysWhetherABrowserGoesToTheHost(t *testing.T) {
 		"a\x01b.example", // a C0 control
 		"a\x7fb.example", // DEL
 	} {
-		if name, ok := BrowserHostOK(host); ok {
-			t.Errorf("BrowserHostOK(%q) = %q, true; want the browser to refuse it", host, name)
+		if name, ok := BrowserNameOK(host); ok {
+			t.Errorf("BrowserNameOK(%q) = %q, true; want the browser to refuse it", host, name)
 		}
 	}
 }

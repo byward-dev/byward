@@ -12,6 +12,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/byward-dev/byward/internal/host"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/registration"
 	"golang.org/x/net/publicsuffix"
@@ -144,21 +145,21 @@ func returnsTo(redirect string) (string, bool) {
 // label), is shown as written (minus invisible characters) and marked as not a valid address: the
 // mapping it got that far is no destination (xn--claude-.ai decodes to claude.ai), so it is never
 // named as one. A host of invisible characters only names nothing: "?".
-func showHost(host string) string {
-	ascii, ok := registration.BrowserHostOK(host)
+func showHost(h string) string {
+	ascii, ok := host.BrowserNameOK(h)
 	if !ok {
-		if shown := displayName(host, ""); shown != "" {
+		if shown := displayName(h, ""); shown != "" {
 			return shown + " (not a valid address)"
 		}
 		return "?"
 	}
-	if !strings.ContainsFunc(host, func(r rune) bool { return r >= utf8.RuneSelf }) { // plain ASCII as written
-		if uni := registration.BrowserUnicode(ascii); uni != ascii {
+	if !strings.ContainsFunc(h, func(r rune) bool { return r >= utf8.RuneSelf }) { // plain ASCII as written
+		if uni := host.BrowserUnicode(ascii); uni != ascii {
 			return uni + " (" + ascii + ")"
 		}
-		return host
+		return h
 	}
-	if shown := displayName(host, "?"); shown != ascii {
+	if shown := displayName(h, "?"); shown != ascii {
 		return shown + " (" + ascii + ")"
 	}
 	return ascii
@@ -179,23 +180,23 @@ func otherSite(cimdHost, redirect string) bool {
 	return site(cimdHost) != site(u.Hostname())
 }
 
-// site is host's registrable domain, from the name the browser goes to (registration.BrowserHostOK),
+// site is host's registrable domain, from the name the browser goes to (host.BrowserNameOK),
 // so a full-width or Unicode spelling of a CIMD host's site is that site. A host the browser refuses
 // is compared as written, lower-cased and without a trailing dot: the mapping it got that far is no
 // site, and must not hide a warning.
-func site(host string) string {
-	if ascii, ok := registration.BrowserHostOK(host); ok {
-		host = ascii
+func site(h string) string {
+	if ascii, ok := host.BrowserNameOK(h); ok {
+		h = ascii
 	} else {
-		host = strings.TrimSuffix(strings.ToLower(host), ".")
+		h = strings.TrimSuffix(strings.ToLower(h), ".")
 	}
-	if net.ParseIP(host) != nil {
-		return host // the public suffix list's default rule would make 203.0.113.7 "113.7"
+	if net.ParseIP(h) != nil {
+		return h // the public suffix list's default rule would make 203.0.113.7 "113.7"
 	}
-	if s, err := publicsuffix.EffectiveTLDPlusOne(host); err == nil {
+	if s, err := publicsuffix.EffectiveTLDPlusOne(h); err == nil {
 		return s
 	}
-	return host
+	return h
 }
 
 var consentTemplate = template.Must(template.New("consent").Parse(`<!doctype html>

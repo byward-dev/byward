@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 
+	"github.com/byward-dev/byward/internal/host"
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/logging"
 )
@@ -170,18 +170,10 @@ func checkURL(raw, issuer string, allowLoopbackHTTP bool) error {
 		return nil
 	}
 	iu, _ := url.Parse(issuer)
-	if allowLoopbackHTTP && u.Scheme == "http" && iu != nil && iu.Scheme == "http" && loopback(u.Hostname()) && loopback(iu.Hostname()) {
+	if allowLoopbackHTTP && u.Scheme == "http" && iu != nil && iu.Scheme == "http" && host.LoopbackAsWritten(u.Hostname()) && host.LoopbackAsWritten(iu.Hostname()) {
 		return nil
 	}
 	return fmt.Errorf("%s must use https", logging.URL(raw))
-}
-
-func loopback(host string) bool {
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 // Scope is the scope parameter sent to the IdP, for the consent page's technical details.

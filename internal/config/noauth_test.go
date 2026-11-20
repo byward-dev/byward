@@ -36,6 +36,7 @@ func TestNoAuthIsRefusedOffLoopback(t *testing.T) {
 		{"listen on all interfaces by omission", "BYWARD_LISTEN=:8080", "BYWARD_LISTEN must be a loopback address", ""},
 		{"listen without port", "BYWARD_LISTEN=0.0.0.0", "BYWARD_LISTEN", ""},
 		{"listen on all IPv6 interfaces", "BYWARD_LISTEN=[::]:8080", "BYWARD_LISTEN must be a loopback address", ""},
+		{"listen on 127.1, not in dotted decimal", "BYWARD_LISTEN=127.1:8080", "BYWARD_LISTEN must be a loopback address", ""},
 		{"extra host", "BYWARD_ALLOWED_HOSTS=proxy.internal:8080", "BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got a host name, not shown: authentication is off, so only loopback may reach the proxy", ""},
 		// An address is named as stored, as browsers write it (8.0.0.1), never as given (ADR-0031 §1).
 		{"extra host spelled in octal", "BYWARD_ALLOWED_HOSTS=010.0.0.1", "BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address 8.0.0.1: authentication is off, so only loopback may reach the proxy", ""},
@@ -208,5 +209,17 @@ func TestNoAuthRefusesANonLoopbackHostOrOriginWithoutItsName(t *testing.T) {
 		if !isConfigError(err) || !strings.Contains(err.Error(), "a host name, not shown: authentication is off") || holdsCanary(err.Error()) {
 			t.Errorf("%s: %v, want it refused without its host name", env, err)
 		}
+	}
+}
+
+// A loopback listen address names localhost in any case (#482, ADR-0032 A1): LOCALHOST:8080 passes
+// the no-auth fence, as localhost:8080 does.
+func TestNoAuthListensOnLocalhostInAnyCase(t *testing.T) {
+	for _, listen := range []string{"localhost:8080", "LOCALHOST:8080", "Localhost:8080"} {
+		t.Run(listen, func(t *testing.T) {
+			if _, err := loadAnon(t, nil, "BYWARD_LISTEN="+listen); err != nil {
+				t.Fatalf("BYWARD_LISTEN=%s: %v; want it accepted as loopback", listen, err)
+			}
+		})
 	}
 }

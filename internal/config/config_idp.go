@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/byward-dev/byward/internal/host"
 )
 
 // OIDCPresets are the IdP values that select the generic OIDC adapter with a preset (ADR-0011 §2);
@@ -149,7 +151,7 @@ func (c *Config) oidcIdP(v *Values) []error {
 	if c.OIDCIssuer == "" {
 		errs = append(errs, c.requiredForIdP(v, "oidc-issuer")...)
 	}
-	if u, err := url.Parse(c.OIDCIssuer); issuerErr == nil && c.Dev && err == nil && u.Scheme == "http" && isLoopback(u.Hostname()) {
+	if u, err := url.Parse(c.OIDCIssuer); issuerErr == nil && c.Dev && err == nil && u.Scheme == "http" && host.LoopbackAsWritten(u.Hostname()) {
 		// --dev lets the oidc adapter use an http issuer on a loopback host, and http endpoints on
 		// loopback with it (AllowLoopbackHTTP); every relaxation is logged (security invariant 12, #355).
 		c.OIDCLoopbackHTTP = true

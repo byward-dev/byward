@@ -47,7 +47,7 @@ LOCALHOST
   denylist: "has no dot; give a name with at least one dot"
   host header: localhost
   hostname: localhost, loopback true
-  loopback as written: false
+  loopback as written: true
 Localhost
   public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it; got a value (21 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do
   public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it; got a value (20 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do
@@ -57,7 +57,7 @@ Localhost
   denylist: "has no dot; give a name with at least one dot"
   host header: localhost
   hostname: localhost, loopback true
-  loopback as written: false
+  loopback as written: true
 127.0.0.1
   public https: 127.0.0.1
   public http: 127.0.0.1

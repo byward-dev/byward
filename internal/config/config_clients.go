@@ -3,6 +3,8 @@ package config
 import (
 	"net/url"
 	"strings"
+
+	"github.com/byward-dev/byward/internal/host"
 )
 
 // clientSources reads the client sources besides the static file: Dynamic Client Registration with
@@ -82,12 +84,12 @@ func denylistReason(e string) string {
 		}
 		return ""
 	}
-	// A trailing dot names the same host; registration.BrowserHost folds it away.
-	host := strings.TrimSuffix(e, ".")
-	if reason := hostNameReason(host); reason != "" { // neither a CIMD client ID nor a host name
+	// A trailing dot names the same host; host.BrowserName folds it away.
+	name := strings.TrimSuffix(e, ".")
+	if reason := hostNameReason(name); reason != "" { // neither a CIMD client ID nor a host name
 		return reason
 	}
-	if endsInANumber(host) {
+	if host.EndsInANumber(name) {
 		return "ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match (127.1 and 0x7f000001 are 127.0.0.1), or none at all; deny the app by its CIMD client ID or its redirect host's name"
 	}
 	return ""

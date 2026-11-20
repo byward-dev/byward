@@ -9,6 +9,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/byward-dev/byward/internal/host"
 	"github.com/byward-dev/byward/internal/ratelimit"
 )
 
@@ -70,7 +71,7 @@ func ParsePublicURL(raw string) (*url.URL, error) {
 	if reason := browserIPv4(h); reason != "" {
 		// A browser never sends such a host back, so its sign-in could never finish.
 		errs = append(errs, refusedForm(s, whole, raw, want, "its host "+reason).Error())
-	} else if bh := browserHost(h); strings.Contains(h, ":") && "["+h+"]" != bh {
+	} else if bh := host.Serialize(h); strings.Contains(h, ":") && "["+h+"]" != bh {
 		// The public URL is also the issuer, the resource and the IdP redirect URI, which browser
 		// clients compare with the URL they hold, in the form they write (#447).
 		errs = append(errs, refusedForm(s, whole, raw, wantBrowserHost, "its IPv6 address is not in the form browsers write it; write it as "+bh).Error())
@@ -88,7 +89,7 @@ func ParsePublicURL(raw string) (*url.URL, error) {
 		errs = append(errs, refusedMeaning(s, whole, "a query or fragment, not shown", "a URL without a query or fragment", "remove it").Error())
 	}
 	// LOCALHOST is loopback too; the host name rule above already refuses its spelling.
-	if u.Scheme == "http" && !isLoopback(strings.ToLower(h)) {
+	if u.Scheme == "http" && !host.LoopbackAsWritten(h) {
 		errs = append(errs, refusedMeaning(s, whole, "http", "https (http only on a loopback host, with --dev)", "give https, or a loopback host").Error())
 	}
 	if len(errs) > 0 {
@@ -344,7 +345,7 @@ func hostPort(h string) (stored, reason string) {
 			return "", "has a port that is not a number from 1 to 65535 without a sign or leading zero"
 		}
 	}
-	return CanonicalHost(stored), ""
+	return host.Canonical(stored), ""
 }
 
 // parseAllowedHosts reads BYWARD_ALLOWED_HOSTS (#323, #325): each entry as hostPort stores it.
@@ -420,12 +421,4 @@ func Hostname(hostport string) string {
 		h = name
 	}
 	return strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(h, "["), "]"))
-}
-
-func isLoopback(host string) bool {
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
