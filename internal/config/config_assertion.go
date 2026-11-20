@@ -13,7 +13,7 @@ var AssertionClaimNames = []string{"roles", "groups", "email", "name"}
 func (c *Config) assertion(v *Values) []error {
 	var errs []error
 	var err error
-	if c.AssertionHeader, err = upstreamHeader(v, "assertion-header", "X-Byward-Identity"); err != nil {
+	if c.AssertionHeader, err = parseHeaderName(v.value("assertion-header"), "X-Byward-Identity"); err != nil {
 		errs = append(errs, err)
 	}
 	ihEnv := Setting{Name: "identity-headers"}.Env()
@@ -25,24 +25,32 @@ func (c *Config) assertion(v *Values) []error {
 	if c.AssertionUnverifiedEmail, err = v.boolean("assertion-unverified-email"); err != nil {
 		errs = append(errs, err)
 	}
-	cEnv := Setting{Name: "assertion-claims"}.Env()
-	raw := strings.TrimSpace(v.get("assertion-claims"))
+	claims, claimErrs := parseAssertionClaims(v.value("assertion-claims"))
+	c.AssertionClaims = claims
+	return append(errs, claimErrs...)
+}
+
+// parseAssertionClaims reads BYWARD_ASSERTION_CLAIMS: claims from AssertionClaimNames, in any case, or
+// none. A refused entry is never shown (ADR-0031 §1).
+func parseAssertionClaims(val Value) ([]string, []error) {
+	raw := strings.TrimSpace(val.Given.raw())
 	if raw == "none" {
-		return errs
+		return nil, nil
 	}
-	seen := map[string]bool{}
-	for _, name := range splitList(raw) {
-		name = strings.ToLower(name)
-		switch {
+	want := "claims from " + oneOf(AssertionClaimNames) + ", or none"
+	list, at := entries(raw)
+	if raw != "" && len(list) == 0 {
+		return nil, []error{listsNothing(val.Setting)}
+	}
+	var out []string
+	var errs []error
+	for i, name := range list {
+		switch name = strings.ToLower(name); {
 		case !slices.Contains(AssertionClaimNames, name):
-			errs = append(errs, errorf("%s: %q is not one of %s, or none", cEnv, name, strings.Join(AssertionClaimNames, ", ")))
-		case !seen[name]:
-			seen[name] = true
-			c.AssertionClaims = append(c.AssertionClaims, name)
+			errs = append(errs, refusedForm(val.Setting, at(i), name, want, "it is not one of them"))
+		case !slices.Contains(out, name):
+			out = append(out, name)
 		}
 	}
-	if raw != "" && len(splitList(raw)) == 0 {
-		errs = append(errs, errorf("%s is set but lists nothing; give claims, or none", cEnv))
-	}
-	return errs
+	return out, errs
 }

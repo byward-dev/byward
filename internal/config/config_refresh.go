@@ -7,12 +7,10 @@ const maxRefreshGrace = 60 * time.Second
 
 // refreshGrace parses the refresh-token grace window (ADR-0006 §4: 0 to 60 s).
 func (c *Config) refreshGrace(v *Values) []error {
-	grace, err := time.ParseDuration(v.get("refresh-grace"))
-	switch {
-	case err != nil:
-		return []error{errorf("BYWARD_REFRESH_GRACE: want a duration such as 30s, got %q", v.get("refresh-grace"))}
-	case grace < 0 || grace > maxRefreshGrace:
-		return []error{errorf("BYWARD_REFRESH_GRACE: want 0s to 60s, got %s", grace)}
+	grace, err := parseDuration(v.value("refresh-grace"), "a duration from 0s to 60s, such as 30s",
+		func(d time.Duration) bool { return d >= 0 && d <= maxRefreshGrace })
+	if err != nil {
+		return []error{err}
 	}
 	c.RefreshGrace = grace
 	return nil

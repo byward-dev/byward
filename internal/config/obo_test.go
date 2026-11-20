@@ -65,7 +65,7 @@ func TestOnBehalfOfSettingsAreRefusedWhenTheyCannotWork(t *testing.T) {
 		{"two APIs, then the first again", []string{"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read api://00000000-0000-0000-0000-0000000000aa/Files.Read https://graph.microsoft.com/Mail.Read"}, "got entries 1 and 2 of 3: they are for different APIs"},
 		{"two APIs after a sign-in scope", []string{"BYWARD_OBO_SCOPES=openid https://graph.microsoft.com/User.Read api://00000000-0000-0000-0000-0000000000aa/Files.Read"}, "got entries 2 and 3 of 3: they are for different APIs"},
 		{"a sign-in scope in another case, named as read", []string{"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read OpenID"}, "got entry 2 of 2, openid: it is a sign-in scope, not a downstream API's"},
-		{"set but empty", []string{"BYWARD_OBO_SCOPES= "}, "lists nothing"},
+		{"set but empty", []string{"BYWARD_OBO_SCOPES= "}, "got a list of none"},
 		{"the assertion's header", []string{"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read", "BYWARD_ASSERTION_HEADER=X-Byward-Identity", "BYWARD_OBO_HEADER=x-byward-identity"}, "already carries"},
 		{"Authorization while the assertion uses it", []string{"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read", "BYWARD_OBO_HEADER=Authorization"}, "already carries the identity assertion"},
 		{"not a header name", []string{"BYWARD_OBO_HEADER=a b"}, "want a header name"},

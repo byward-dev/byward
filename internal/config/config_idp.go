@@ -28,11 +28,11 @@ func defaultIssuersHelp() string {
 // idp reads the IdP: Entra, or the generic OIDC adapter. The two families' settings never mix: a
 // setting of the other family refuses to start, naming it and BYWARD_IDP.
 func (c *Config) idp(v *Values) []error {
-	c.IdP = v.get("idp")
-	oidc := c.IdP == "oidc" || slices.Contains(OIDCPresets, c.IdP)
-	if c.IdP != "entra" && !oidc {
-		return []error{errorf("BYWARD_IDP: want entra, oidc, %s, got %q", strings.Join(OIDCPresets, ", "), c.IdP)}
+	var err error
+	if c.IdP, err = parseWord(v.value("idp"), append([]string{"entra", "oidc"}, OIDCPresets...)...); err != nil {
+		return []error{err}
 	}
+	oidc := c.IdP != "entra"
 	other := "oidc-" // the settings family that must stay unset
 	if oidc {
 		other = "entra-"
@@ -81,9 +81,14 @@ func (c *Config) requiredForIdP(v *Values, names ...string) []error {
 
 // entraIdP reads the Entra settings (ADR-0012).
 func (c *Config) entraIdP(v *Values) []error {
-	c.EntraTenant, c.EntraClientID, c.EntraClientSecret = v.get("entra-tenant"), v.get("entra-client-id"), v.get("entra-client-secret")
-	c.EntraFederatedTokenFile, c.EntraClientCertificate = v.get("entra-federated-token-file"), v.get("entra-client-certificate")
-	errs := c.requiredForIdP(v, "entra-tenant", "entra-client-id")
+	c.EntraClientID, c.EntraClientSecret = parseText(v.value("entra-client-id")), parseText(v.value("entra-client-secret"))
+	c.EntraFederatedTokenFile, c.EntraClientCertificate = parseText(v.value("entra-federated-token-file")), parseText(v.value("entra-client-certificate"))
+	var errs []error
+	var err error
+	if c.EntraTenant, err = parseTenant(v.value("entra-tenant")); err != nil {
+		errs = append(errs, err)
+	}
+	errs = append(errs, c.requiredForIdP(v, "entra-tenant", "entra-client-id")...)
 	secretEnv, tokenEnv := Setting{Name: "entra-client-secret"}.Env()+"_FILE", Setting{Name: "entra-federated-token-file"}.Env()
 	certEnv := Setting{Name: "entra-client-certificate"}.Env() + "_FILE"
 	hasSecret, hasCert := v.given("entra-client-secret"), v.given("entra-client-certificate")
@@ -108,19 +113,27 @@ func (c *Config) entraIdP(v *Values) []error {
 		if err := absolute("entra-federated-token-file", c.EntraFederatedTokenFile); err != nil {
 			errs = append(errs, err)
 		}
-		if v.get("entra-client-secret-expires-at") != "" {
+		if !v.empty("entra-client-secret-expires-at") {
 			errs = append(errs, errorf("%s has no effect with %s: a federated token has no secret to expire; remove it", Setting{Name: "entra-client-secret-expires-at"}.Env(), tokenEnv))
 		}
 	case hasCert:
-		if v.get("entra-client-secret-expires-at") != "" {
+		if !v.empty("entra-client-secret-expires-at") {
 			errs = append(errs, errorf("%s has no effect with %s: byward reads the certificate's own end date; remove it", Setting{Name: "entra-client-secret-expires-at"}.Env(), certEnv))
 		}
 	}
-	errs = append(errs, c.secretExpiry(v)...)
-	if t := c.EntraTenant; t != "" && !isGUID(t) {
-		errs = append(errs, errorf("BYWARD_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000, got %q", t))
+	if c.EntraClientSecretExpiresAt, err = parseSecretExpiry(v.value("entra-client-secret-expires-at")); err != nil {
+		errs = append(errs, err)
 	}
 	return errs
+}
+
+// parseTenant reads BYWARD_ENTRA_TENANT: the tenant ID, a GUID, or nothing (required elsewhere).
+func parseTenant(val Value) (string, error) {
+	raw := val.Given.raw()
+	if raw != "" && !isGUID(raw) {
+		return "", refusedForm(val.Setting, whole, raw, "the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, Overview, Tenant ID)", "it is not a GUID")
+	}
+	return raw, nil
 }
 
 // protocolClaims are ID token claims about the sign-in itself, never a user's roles or groups: the
@@ -136,13 +149,25 @@ func (c *Config) oidcIdP(v *Values) []error {
 	if issuerErr != nil {
 		errs = append(errs, issuerErr)
 	}
-	c.OIDCIssuer, c.OIDCClientID = issuer, v.get("oidc-client-id")
-	c.OIDCClientSecret, c.OIDCClientKey, c.OIDCClientKeyID = v.get("oidc-client-secret"), v.get("oidc-client-key"), v.get("oidc-client-key-id")
-	c.OIDCSubjectClaim, c.OIDCName = v.get("oidc-subject-claim"), v.get("oidc-name")
+	c.OIDCIssuer, c.OIDCClientID = issuer, parseText(v.value("oidc-client-id"))
+	c.OIDCClientSecret, c.OIDCClientKey = parseText(v.value("oidc-client-secret")), parseText(v.value("oidc-client-key"))
+	c.OIDCClientKeyID = parseText(v.value("oidc-client-key-id"))
 	var scopeErrs []error
 	c.OIDCScopes, scopeErrs = parseOIDCScopes(v.value("oidc-scopes"))
 	errs = append(errs, scopeErrs...)
-	c.OIDCRolesClaim, c.OIDCGroupsClaim = v.get("oidc-roles-claim"), v.get("oidc-groups-claim")
+	var err error
+	if c.OIDCSubjectClaim, err = parseClaimName(v.value("oidc-subject-claim"), "sub"); err != nil {
+		errs = append(errs, err)
+	}
+	if c.OIDCRolesClaim, err = parseGateClaimName(v.value("oidc-roles-claim"), "https://example.com/roles"); err != nil {
+		errs = append(errs, err)
+	}
+	if c.OIDCGroupsClaim, err = parseGateClaimName(v.value("oidc-groups-claim"), "https://example.com/groups"); err != nil {
+		errs = append(errs, err)
+	}
+	if c.OIDCName, err = parseWording(v.value("oidc-name"), 80); err != nil {
+		errs = append(errs, err)
+	}
 	if c.OIDCIssuer == "" {
 		c.OIDCIssuer = OIDCDefaultIssuers[c.IdP]
 	}
@@ -173,45 +198,57 @@ func (c *Config) oidcIdP(v *Values) []error {
 	if c.OIDCClientKeyID != "" && !hasKey {
 		errs = append(errs, errorf("BYWARD_OIDC_CLIENT_KEY_ID is set without %s", key))
 	}
-	switch c.OIDCClientKeyAlg = v.get("oidc-client-key-alg"); {
-	case c.OIDCClientKeyAlg == "":
-	case !hasKey:
+	if !v.empty("oidc-client-key-alg") && !hasKey {
 		errs = append(errs, errorf("BYWARD_OIDC_CLIENT_KEY_ALG is set without %s", key))
-	case !slices.Contains([]string{"PS256", "RS256", "ES256"}, c.OIDCClientKeyAlg):
-		errs = append(errs, errorf("BYWARD_OIDC_CLIENT_KEY_ALG: want PS256 or RS256 (an RSA key) or ES256 (an EC P-256 key), got %q", c.OIDCClientKeyAlg))
+	} else if c.OIDCClientKeyAlg, err = parseKeyAlg(v.value("oidc-client-key-alg")); err != nil {
+		errs = append(errs, err)
 	}
-	if strings.TrimSpace(c.OIDCSubjectClaim) == "" {
-		errs = append(errs, errorf("BYWARD_OIDC_SUBJECT_CLAIM: want a claim name, got %q", c.OIDCSubjectClaim))
-	}
-	// A claim name is matched exactly, so a blank or padded one would never match and close the gate.
-	for _, s := range []struct{ env, claim, example string }{{"BYWARD_OIDC_ROLES_CLAIM", c.OIDCRolesClaim, "https://example.com/roles"},
-		{"BYWARD_OIDC_GROUPS_CLAIM", c.OIDCGroupsClaim, "https://example.com/groups"}} {
-		switch {
-		case s.claim == "" || strings.TrimSpace(s.claim) != s.claim:
-			errs = append(errs, errorf("%s: want a claim name such as %s, got %q", s.env, s.example, s.claim))
-		case slices.Contains(protocolClaims, s.claim):
-			// aud holds our client ID, so a gate on it would admit every user of the IdP.
-			errs = append(errs, errorf("%s: %q is a claim of the sign-in itself, not roles or groups; name the claim the IdP sends them in, such as %s", s.env, s.claim, s.example))
-		}
-	}
-	errs = append(errs, checkText("oidc-name", c.OIDCName, 80)...)
 	return errs
 }
 
-// secretExpiry parses the client secret's end date: a date (midnight UTC) or an RFC 3339 time,
-// such as the endDateTime that `az ad app credential list` prints.
-func (c *Config) secretExpiry(v *Values) []error {
-	raw := v.get("entra-client-secret-expires-at")
+// parseKeyAlg reads BYWARD_OIDC_CLIENT_KEY_ALG: PS256, RS256 or ES256, or nothing.
+func parseKeyAlg(val Value) (string, error) {
+	raw := val.Given.raw()
+	if raw != "" && !slices.Contains([]string{"PS256", "RS256", "ES256"}, raw) {
+		return "", refusedForm(val.Setting, whole, raw, "PS256 or RS256 (an RSA key) or ES256 (an EC P-256 key)", "it is not one of them")
+	}
+	return raw, nil
+}
+
+// parseClaimName reads a claim name, matched exactly: a blank or padded one would never match.
+func parseClaimName(val Value, example string) (string, error) {
+	raw := val.Given.raw()
+	if raw == "" || strings.TrimSpace(raw) != raw {
+		return "", refusedForm(val.Setting, whole, raw, "a claim name such as "+example, "it is blank or has white space at an end")
+	}
+	return raw, nil
+}
+
+// parseGateClaimName reads the claim the gate reads roles or groups from: a claim name, and never one
+// of the sign-in itself (protocolClaims), which is shown, since it is one of that fixed list.
+func parseGateClaimName(val Value, example string) (string, error) {
+	name, err := parseClaimName(val, example)
+	if err == nil && slices.Contains(protocolClaims, name) {
+		// aud holds our client ID, so a gate on it would admit every user of the IdP.
+		return "", refusedMeaning(val.Setting, whole, name, "a claim name such as "+example,
+			"it is a claim of the sign-in itself, not roles or groups; name the claim the IdP sends them in")
+	}
+	return name, err
+}
+
+// parseSecretExpiry reads the client secret's end date: a date (midnight UTC) or an RFC 3339 time,
+// such as the endDateTime that `az ad app credential list` prints, or nothing.
+func parseSecretExpiry(val Value) (time.Time, error) {
+	raw := val.Given.raw()
 	if raw == "" {
-		return nil
+		return time.Time{}, nil
 	}
 	for _, layout := range []string{time.DateOnly, time.RFC3339} {
 		if t, err := time.Parse(layout, raw); err == nil {
-			c.EntraClientSecretExpiresAt = t.UTC()
-			return nil
+			return t.UTC(), nil
 		}
 	}
-	return []error{errorf("%s: want a date such as 2027-11-06 or an RFC 3339 time, got %q", Setting{Name: "entra-client-secret-expires-at"}.Env(), raw)}
+	return time.Time{}, refusedForm(val.Setting, whole, raw, "a date such as 2027-11-06 or an RFC 3339 time", "it is neither")
 }
 
 // isGUID is idp.IsGUID; config keeps its own copy so it does not import idp (and go-jose).
@@ -264,7 +301,7 @@ func parseOIDCScopes(val Value) ([]string, []error) {
 	s, raw := val.Setting, val.Given.raw()
 	list, at := entries(raw)
 	if raw != "" && len(list) == 0 {
-		return nil, []error{errorf("%s is set but lists nothing; remove it or give at least one scope", s.Env())}
+		return nil, []error{listsNothing(s)}
 	}
 	var errs []error
 	for i, sc := range list {

@@ -2,7 +2,6 @@ package config
 
 import (
 	"slices"
-	"strings"
 	"testing"
 )
 
@@ -26,31 +25,34 @@ func TestTheUpstreamStripListIsReadAsCanonicalHeaderNames(t *testing.T) {
 // header are refused, each named. With a stdio upstream the list is refused as an off-mode setting
 // (offmode_test.go).
 func TestTheUpstreamStripListRefusesWhatCannotBeStripped(t *testing.T) {
+	const want = "BYWARD_UPSTREAM_STRIP_HEADERS: want exact header names, such as X-Argocd-Base-Url; got "
+	const needed, traced = ": MCP needs it at the upstream; remove it from the list", ": with tracing on, the proxy sets it from the inbound trace context; remove it from the list"
+	// A header MCP or tracing relies on is shown as the upstream reads it; a refused name is never shown.
 	for _, tc := range []struct{ name, list, want string }{
-		{"Accept", "accept", "Accept is a header MCP needs"},
-		{"Content-Type", "Content-Type", "Content-Type is a header MCP needs"},
-		{"Content-Length", "content-length", "Content-Length is a header MCP needs"},
-		{"Transfer-Encoding", "transfer-encoding", "Transfer-Encoding is a header MCP needs"},
-		{"Host", "host", "Host is a header MCP needs"},
-		{"Last-Event-ID", "Last-Event-ID", "Last-Event-Id is a header MCP needs"},
-		{"the session", "mcp_session_id", "Mcp-Session-Id is a header MCP needs"},
-		{"the protocol version", "MCP-Protocol-Version", "Mcp-Protocol-Version is a header MCP needs"},
-		{"the method", "mcp-method", "Mcp-Method is a header MCP needs"},
-		{"the name", "Mcp-Name", "Mcp-Name is a header MCP needs"},
-		{"a tool parameter", "X-Ok, mcp-param-region", "Mcp-Param-Region is a header MCP needs"},
-		{"a pattern", "X-Atlassian-*", `"X-Atlassian-*": exact names only`},
-		{"a pattern inside a name", "X-Atlassian-*-Url", `"X-Atlassian-*-Url": exact names only`},
-		{"a name with a colon", "X-Api-Key:", `"X-Api-Key" (the rest is not shown) is not a header name`},
-		{"a name with another separator", "X(Url)", `"X(Url)" is not a header name`},
-		{"a name that is not ASCII", "X-Idé", `"X-Idé" is not a header name`},
-		{"the trace context", "traceparent", "Traceparent cannot be stripped"},
-		{"the trace state", "TRACESTATE", "Tracestate cannot be stripped"},
-		{"not a header", "X Api Key", `"X" (the rest is not shown) is not a header name`},
+		{"Accept", "accept", "entry 1 of 1, Accept" + needed},
+		{"Content-Type", "Content-Type", "entry 1 of 1, Content-Type" + needed},
+		{"Content-Length", "content-length", "entry 1 of 1, Content-Length" + needed},
+		{"Transfer-Encoding", "transfer-encoding", "entry 1 of 1, Transfer-Encoding" + needed},
+		{"Host", "host", "entry 1 of 1, Host" + needed},
+		{"Last-Event-ID", "Last-Event-ID", "entry 1 of 1, Last-Event-Id" + needed},
+		{"the session", "mcp_session_id", "entry 1 of 1, Mcp-Session-Id" + needed},
+		{"the protocol version", "MCP-Protocol-Version", "entry 1 of 1, Mcp-Protocol-Version" + needed},
+		{"the method", "mcp-method", "entry 1 of 1, Mcp-Method" + needed},
+		{"the name", "Mcp-Name", "entry 1 of 1, Mcp-Name" + needed},
+		{"a tool parameter, by its family", "X-Ok, mcp-param-region", "entry 2 of 2, a header starting Mcp-Param-" + needed},
+		{"a pattern", "X-Atlassian-*", "entry 1 of 1 (13 characters, not shown): it has a *: list each header of a family by name"},
+		{"a pattern inside a name", "X-Atlassian-*-Url", "entry 1 of 1 (17 characters, not shown): it has a *: list each header of a family by name"},
+		{"a name with a colon", "X-Api-Key:", "entry 1 of 1 (10 characters, not shown): it is not a header name"},
+		{"a name with another separator", "X(Url)", "entry 1 of 1 (6 characters, not shown): it is not a header name"},
+		{"a name that is not ASCII", "X-Idé", "entry 1 of 1 (5 characters, not shown): it is not a header name"},
+		{"the trace context", "traceparent", "entry 1 of 1, Traceparent" + traced},
+		{"the trace state", "TRACESTATE", "entry 1 of 1, Tracestate" + traced},
+		{"not a header", "X Api Key", "entry 1 of 1 (9 characters, not shown): it is not a header name"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := load(t, nil, "BYWARD_UPSTREAM_STRIP_HEADERS="+tc.list)
-			if err == nil || !strings.Contains(err.Error(), "BYWARD_UPSTREAM_STRIP_HEADERS: "+tc.want) {
-				t.Fatalf("error %v, want %q", err, tc.want)
+			if err == nil || err.Error() != want+tc.want {
+				t.Fatalf("error %v, want %q", err, want+tc.want)
 			}
 		})
 	}

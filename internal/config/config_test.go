@@ -96,19 +96,19 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"http loopback without dev", "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp", "needs --dev"},
 		{"log format", "BYWARD_LOG_FORMAT=xml", "BYWARD_LOG_FORMAT"},
 		{"two scopes", "BYWARD_SCOPE=a b", "BYWARD_SCOPE"},
-		{"cimd trusted hosts blank", "BYWARD_CIMD_TRUSTED_HOSTS= ,", "BYWARD_CIMD_TRUSTED_HOSTS is set but lists nothing"},
-		{"cimd allowed hosts blank", "BYWARD_CIMD_ALLOWED_HOSTS=,", "BYWARD_CIMD_ALLOWED_HOSTS is set but lists nothing"},
-		{"client denylist blank", "BYWARD_CLIENT_DENYLIST= ,", "BYWARD_CLIENT_DENYLIST is set but lists nothing"},
-		{"gate tenants blank", "BYWARD_GATE_TENANTS=,", "BYWARD_GATE_TENANTS is set but lists nothing"},
-		{"gate roles blank", "BYWARD_GATE_ROLES= ,,", "BYWARD_GATE_ROLES is set but lists nothing"},
-		{"gate groups blank", "BYWARD_GATE_GROUPS= ", "BYWARD_GATE_GROUPS is set but lists nothing"},
-		{"gate email domains blank", "BYWARD_GATE_EMAIL_DOMAINS=,", "BYWARD_GATE_EMAIL_DOMAINS is set but lists nothing"},
-		{"gate hosted domains blank", "BYWARD_GATE_HOSTED_DOMAINS=,", "BYWARD_GATE_HOSTED_DOMAINS is set but lists nothing"},
-		{"operator name too long", "BYWARD_OPERATOR_NAME=" + strings.Repeat("é", 81), "BYWARD_OPERATOR_NAME: at most 80 characters, got 81"},
-		{"operator name with a newline", "BYWARD_OPERATOR_NAME=a\nb", "BYWARD_OPERATOR_NAME: must not contain control or formatting characters"},
-		{"operator name with a bidi override", "BYWARD_OPERATOR_NAME=Evil \u202eTI", "BYWARD_OPERATOR_NAME: must not contain control or formatting characters"},
-		{"scope description with a bidi override", "BYWARD_SCOPE_DESCRIPTION=Read \u202edashboards", "BYWARD_SCOPE_DESCRIPTION: must not contain control or formatting characters"},
-		{"scope description too long", "BYWARD_SCOPE_DESCRIPTION=" + strings.Repeat("x", 201), "BYWARD_SCOPE_DESCRIPTION: at most 200 characters"},
+		{"cimd trusted hosts blank", "BYWARD_CIMD_TRUSTED_HOSTS= ,", "BYWARD_CIMD_TRUSTED_HOSTS: want at least one entry, or leave it unset; got a list of none"},
+		{"cimd allowed hosts blank", "BYWARD_CIMD_ALLOWED_HOSTS=,", "BYWARD_CIMD_ALLOWED_HOSTS: want at least one entry, or leave it unset; got a list of none"},
+		{"client denylist blank", "BYWARD_CLIENT_DENYLIST= ,", "BYWARD_CLIENT_DENYLIST: want at least one entry, or leave it unset; got a list of none"},
+		{"gate tenants blank", "BYWARD_GATE_TENANTS=,", "BYWARD_GATE_TENANTS: want at least one entry, or leave it unset; got a list of none"},
+		{"gate roles blank", "BYWARD_GATE_ROLES= ,,", "BYWARD_GATE_ROLES: want at least one entry, or leave it unset; got a list of none"},
+		{"gate groups blank", "BYWARD_GATE_GROUPS= ", "BYWARD_GATE_GROUPS: want at least one entry, or leave it unset; got a list of none"},
+		{"gate email domains blank", "BYWARD_GATE_EMAIL_DOMAINS=,", "BYWARD_GATE_EMAIL_DOMAINS: want at least one entry, or leave it unset; got a list of none"},
+		{"gate hosted domains blank", "BYWARD_GATE_HOSTED_DOMAINS=,", "BYWARD_GATE_HOSTED_DOMAINS: want at least one entry, or leave it unset; got a list of none"},
+		{"operator name too long", "BYWARD_OPERATOR_NAME=" + strings.Repeat("é", 81), "BYWARD_OPERATOR_NAME: want text of at most 80 characters, without control or formatting characters; got a value (81 characters, not shown): it is too long"},
+		{"operator name with a newline", "BYWARD_OPERATOR_NAME=a\nb", "BYWARD_OPERATOR_NAME: want text of at most 80 characters, without control or formatting characters; got a value (3 characters, not shown): it has a control or formatting character"},
+		{"operator name with a bidi override", "BYWARD_OPERATOR_NAME=Evil \u202eTI", "BYWARD_OPERATOR_NAME: want text of at most 80 characters, without control or formatting characters; got a value (8 characters, not shown): it has a control or formatting character"},
+		{"scope description with a bidi override", "BYWARD_SCOPE_DESCRIPTION=Read \u202edashboards", "BYWARD_SCOPE_DESCRIPTION: want text of at most 200 characters, without control or formatting characters; got a value (16 characters, not shown): it has a control or formatting character"},
+		{"scope description too long", "BYWARD_SCOPE_DESCRIPTION=" + strings.Repeat("x", 201), "BYWARD_SCOPE_DESCRIPTION: want text of at most 200 characters, without control or formatting characters; got a value (201 characters, not shown): it is too long"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -454,8 +454,9 @@ func TestHelpFlagAsksForUsageListingEnvNames(t *testing.T) {
 }
 
 func TestPositionalArgumentIsAConfigError(t *testing.T) {
-	if _, _, err := Load([]string{"extra"}, base, baseFiles); !isConfigError(err) || !strings.Contains(err.Error(), "extra") {
-		t.Fatalf("want config error naming the argument, got %v", err)
+	const want = "want settings as --name=value flags, and the stdio upstream command after --; got an unexpected argument (5 characters, not shown)"
+	if _, _, err := Load([]string{"extra"}, base, baseFiles); !isConfigError(err) || err.Error() != want {
+		t.Fatalf("got %v, want the config error %q", err, want)
 	}
 }
 
@@ -874,12 +875,12 @@ func TestInvalidStoreSettingsAreRejected(t *testing.T) {
 		// The counter file derived from a relative keys directory is not reported a second time; one the
 		// operator sets is.
 		{"a counter derived from a relative keys directory", []string{"BYWARD_KEYS_DIR=keys"}, "BYWARD_KEYS_DIR: want an absolute path", "BYWARD_STORE_COUNTER_FILE"},
-		{"a relative counter beside a relative keys directory", []string{"BYWARD_KEYS_DIR=keys", "BYWARD_STORE_COUNTER_FILE=writes"}, `BYWARD_STORE_COUNTER_FILE: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got a relative one`, ""},
-		{"counter inside the state directory", []string{"BYWARD_STORE_COUNTER_FILE=/var/lib/byward/state/writes"}, "is inside BYWARD_STORE_DIR", ""},
+		{"a relative counter beside a relative keys directory", []string{"BYWARD_KEYS_DIR=keys", "BYWARD_STORE_COUNTER_FILE=writes"}, `BYWARD_STORE_COUNTER_FILE: want an absolute path (no paths relative to the working directory, ADR-0007 §6); got a relative one`, ""},
+		{"counter inside the state directory", []string{"BYWARD_STORE_COUNTER_FILE=/var/lib/byward/state/writes"}, "BYWARD_STORE_COUNTER_FILE: want a path outside BYWARD_STORE_DIR; got one inside it", ""},
 		{"keys inside the state directory", []string{"BYWARD_KEYS_DIR=/var/lib/byward/state/keys"}, "keep the keys directory outside the state directory", ""},
 		{"grace not a duration", []string{"BYWARD_REFRESH_GRACE=soon"}, "BYWARD_REFRESH_GRACE: want a duration", ""},
-		{"grace negative", []string{"BYWARD_REFRESH_GRACE=-1s"}, "want 0s to 60s", ""},
-		{"grace over a minute", []string{"BYWARD_REFRESH_GRACE=61s"}, "want 0s to 60s", ""},
+		{"grace negative", []string{"BYWARD_REFRESH_GRACE=-1s"}, "BYWARD_REFRESH_GRACE: want a duration from 0s to 60s, such as 30s; got ", ""},
+		{"grace over a minute", []string{"BYWARD_REFRESH_GRACE=61s"}, "BYWARD_REFRESH_GRACE: want a duration from 0s to 60s, such as 30s; got ", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -7,7 +7,7 @@ package config
 // (ADR-0007 §4); and a state directory or counter file set beside it would be ignored, so that is an
 // error too.
 func (c *Config) storeBackend(v *Values) []error {
-	c.StorePostgresDSN = v.get("store-postgres-dsn")
+	c.StorePostgresDSN = parseText(v.value("store-postgres-dsn"))
 	if !v.given("store-postgres-dsn") {
 		return nil
 	}

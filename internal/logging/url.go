@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/textproto"
 	"net/url"
-	"strconv"
 	"strings"
 )
 
@@ -31,36 +30,8 @@ func URL(raw string) string {
 	return scheme + strings.TrimPrefix(shown.String(), u.Scheme) + path
 }
 
-// Hidden stands in for an operator's value that Quote does not show.
+// Hidden stands in for an operator's value that is not shown.
 const Hidden = "the value (not shown: it may hold a password)"
-
-// Quote is raw, an operator's setting or list entry, as an error message may quote it (security
-// invariant 2). Text is quoted whole unless it holds an @, ? or #, which hold a URL's user name and
-// password, query and fragment, or a ; in a URL or text that looks like one (urlLike), which starts
-// its path parameters. A URL with one of them is shown as URL shows it, marked as shortened; any other
-// such text is Hidden, so a token after a ? or ; in a URL whose scheme lost a slash (https:/host?key=…
-// or https:/host/;key=…) is never shown either.
-func Quote(raw string) string {
-	isURL := strings.Contains(raw, "://")
-	if !strings.ContainsAny(raw, "@?#") && ((!isURL && !urlLike(raw)) || !strings.Contains(raw, ";")) {
-		return strconv.Quote(raw)
-	}
-	if s := URL(raw); isURL && s != InvalidURL {
-		return strconv.Quote(s) + " (the rest not shown: it may hold a password)"
-	}
-	return Hidden
-}
-
-// urlLike reports whether raw holds a :/, as a URL with a mistyped scheme (https:/host) does
-// (#470). A :/ right after another :, as in the ::/ of an IPv6 prefix (fd00::/8), does not count.
-func urlLike(raw string) bool {
-	for i := range len(raw) - 1 {
-		if raw[i] == ':' && raw[i+1] == '/' && (i == 0 || raw[i-1] != ':') {
-			return true
-		}
-	}
-	return false
-}
 
 // MarkedURL is raw, a URL setting the proxy uses whole, as a log line or doctor's report may show it
 // (security invariant 2): URL's scheme, host and path, then ";…" when path parameters are left out,

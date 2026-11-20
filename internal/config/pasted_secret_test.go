@@ -51,11 +51,11 @@ func TestARefusedSettingNeverShowsASecretPastedIntoIt(t *testing.T) {
 		{"the PostgreSQL DSN's file, given the DSN", []string{"BYWARD_STORE_POSTGRES_DSN_FILE=postgres://byward:" + pasted + "@db.example/byward"},
 			"BYWARD_STORE_POSTGRES_DSN_FILE: cannot read secret file: no such file or directory"},
 		{"a path setting, given the secret", []string{"BYWARD_TLS_KEY_FILE=" + pasted, "BYWARD_TLS_CERT_FILE=/etc/byward/tls.crt"},
-			"BYWARD_TLS_KEY_FILE: want an absolute path (no paths relative to the working directory, ADR-0007 §6), got a relative one"},
+			"BYWARD_TLS_KEY_FILE: want an absolute path (no paths relative to the working directory, ADR-0007 §6); got a relative one"},
 		{"a header to strip, given a header line", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X-Api-Key: " + pasted},
-			`BYWARD_UPSTREAM_STRIP_HEADERS: "X-Api-Key" (the rest is not shown) is not a header name; list exact names, such as X-Argocd-Base-Url`},
+			"BYWARD_UPSTREAM_STRIP_HEADERS: want exact header names, such as X-Argocd-Base-Url; got entry 1 of 1 (29 characters, not shown): it is not a header name"},
 		{"a header family to strip, given a header line", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X-Api-*: " + pasted},
-			`BYWARD_UPSTREAM_STRIP_HEADERS: "X-Api-*" (the rest is not shown): exact names only; list each header of a family by name`},
+			"BYWARD_UPSTREAM_STRIP_HEADERS: want exact header names, such as X-Argocd-Base-Url; got entry 1 of 1 (27 characters, not shown): it has a *: list each header of a family by name"},
 		{"a client denylist URL with its scheme in capitals, which config refuses", []string{"BYWARD_CLIENT_DENYLIST=HTTPS://a.example/x;k=" + pasted},
 			`BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 1 of 1 (40 characters, not shown): it breaks the host name rule: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
 		{"a client denylist URL with its scheme in capitals and a host that is not ASCII", []string{"BYWARD_CLIENT_DENYLIST=HTTPS://bücher.example/x;k=" + pasted},
@@ -77,15 +77,15 @@ func TestARefusedSettingNeverShowsASecretPastedIntoIt(t *testing.T) {
 		{"a client denylist URL with a mistyped scheme and path parameters", []string{"BYWARD_CLIENT_DENYLIST=https:/a.example/x;k=" + pasted},
 			`BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 1 of 1 (39 characters, not shown): it breaks the host name rule: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
 		{"a header to strip whose name holds an @", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X@" + pasted + ": token"},
-			"BYWARD_UPSTREAM_STRIP_HEADERS: the value (not shown: it may hold a password) is not a header name; list exact names, such as X-Argocd-Base-Url"},
+			"BYWARD_UPSTREAM_STRIP_HEADERS: want exact header names, such as X-Argocd-Base-Url; got entry 1 of 1 (27 characters, not shown): it is not a header name"},
 		{"a header to strip with nothing before its colon", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=: " + pasted},
-			"BYWARD_UPSTREAM_STRIP_HEADERS: the value (not shown: it may hold a password) is not a header name; list exact names, such as X-Argocd-Base-Url"},
+			"BYWARD_UPSTREAM_STRIP_HEADERS: want exact header names, such as X-Argocd-Base-Url; got entry 1 of 1 (20 characters, not shown): it is not a header name"},
 		{"a header to strip that holds a query", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X-Key?k=" + pasted},
-			"BYWARD_UPSTREAM_STRIP_HEADERS: the value (not shown: it may hold a password) is not a header name; list exact names, such as X-Argocd-Base-Url"},
+			"BYWARD_UPSTREAM_STRIP_HEADERS: want exact header names, such as X-Argocd-Base-Url; got entry 1 of 1 (26 characters, not shown): it is not a header name"},
 		{"the assertion's header holding a query", []string{"BYWARD_ASSERTION_HEADER=X-Key?k=" + pasted},
-			"BYWARD_ASSERTION_HEADER: want a header name such as Authorization or X-Byward-Identity, got the value (not shown: it may hold a password)"},
+			"BYWARD_ASSERTION_HEADER: want a header name such as Authorization or X-Byward-Identity; got a value (26 characters, not shown): it is not a header name"},
 		{"the assertion's header with nothing before its colon", []string{"BYWARD_ASSERTION_HEADER=:" + pasted},
-			"BYWARD_ASSERTION_HEADER: want a header name such as Authorization or X-Byward-Identity, got the value (not shown: it may hold a password)"},
+			"BYWARD_ASSERTION_HEADER: want a header name such as Authorization or X-Byward-Identity; got a value (19 characters, not shown): it is not a header name"},
 		{"a stdio command, malformed, with a token argument", []string{"BYWARD_UPSTREAM_URL=", `BYWARD_UPSTREAM_COMMAND=["/usr/local/bin/server","--token","` + pasted + `"`},
 			`BYWARD_UPSTREAM_COMMAND: want a JSON array of strings whose first element is the program, e.g. ["/usr/local/bin/server","--flag"] (the value given is not shown)`},
 	} {
@@ -104,13 +104,13 @@ func TestARefusedSettingNeverShowsASecretPastedIntoIt(t *testing.T) {
 }
 
 // #466: a header line pasted into any setting that names a header the proxy sets (headerSettings)
-// is quoted only up to the first ':' or white space, the would-be name; the message is pinned whole.
-func TestAHeaderLinePastedIntoAHeaderSettingShowsOnlyItsName(t *testing.T) {
+// is refused by its length, never shown; the message is pinned whole.
+func TestAHeaderLinePastedIntoAHeaderSettingIsNeverShown(t *testing.T) {
 	for _, s := range headerSettings {
 		for _, sep := range []string{": ", "\t"} {
 			t.Run(s.env+strings.ReplaceAll(sep, "\t", "<tab>"), func(t *testing.T) {
 				_, err := loadCred(t, nil, "k-123", append(s.extra, s.env+"=X-Identity"+sep+pasted)...)
-				want := s.env + ": want a header name such as Authorization or " + s.example + `, got "X-Identity" (the rest is not shown)`
+				want := s.env + ": want a header name such as Authorization or " + s.example + "; got a value (" + strconv.Itoa(len("X-Identity"+sep+pasted)) + " characters, not shown): it is not a header name"
 				if err == nil || !slices.Contains(strings.Split(err.Error(), "\n"), want) || strings.Contains(err.Error(), "S3CRETPW") {
 					t.Fatalf("err = %v, want the line %q and never the secret", err, want)
 				}

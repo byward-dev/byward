@@ -19,7 +19,7 @@ func TestErrorsAreReportedInCheckOrder(t *testing.T) {
 	for _, want := range []string{
 		"BYWARD_OPERATOR_NAME:",             // consent
 		"BYWARD_IDP:",                       // idp
-		"BYWARD_GATE_ROLES is set",          // gate
+		"BYWARD_GATE_ROLES:",                // gate
 		"BYWARD_APP_TOKENS:",                // appTokens
 		"BYWARD_DATA_DIR:",                  // paths
 		"BYWARD_REFRESH_GRACE:",             // refreshGrace

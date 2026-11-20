@@ -41,7 +41,7 @@ func (c *Config) onBehalfOf(v *Values) []error {
 	if len(c.OBOScopes) > 0 && c.IdP != "entra" {
 		errs = append(errs, errorf("%s: On-Behalf-Of is Entra's; it needs BYWARD_IDP=entra, got %s", sEnv, c.IdP))
 	}
-	h, err := upstreamHeader(v, "obo-header", "X-Byward-Downstream-Token")
+	h, err := parseHeaderName(v.value("obo-header"), "X-Byward-Downstream-Token")
 	if err != nil {
 		return append(errs, err)
 	}
@@ -66,7 +66,7 @@ func parseOBOScopes(val Value) ([]string, []error) {
 	const want = "scope URIs of one API such as https://graph.microsoft.com/User.Read, api://<app>/<scope> or <app ID>/<scope>"
 	scopes := strings.Fields(raw)
 	if raw != "" && len(scopes) == 0 {
-		return nil, []error{errorf("%s is set but lists nothing; give scopes, or leave it unset", s.Env())}
+		return nil, []error{listsNothing(s)}
 	}
 	var errs []error
 	resource, first := "", 0

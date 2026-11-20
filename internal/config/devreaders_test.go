@@ -98,8 +98,7 @@ func TestOnlyKnownCodeReadsDevelopmentMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Only config names the setting: the registry entry, and reading it (Values.boolean).
-	// registry.go names it in readAsText, the settings get may read, until #512 (no reader there).
-	checkCounts(t, "names the dev setting", named, map[string]int{"internal/config/settings.go": 1, "internal/config/config.go": 1, "internal/config/registry.go": 1})
+	checkCounts(t, "names the dev setting", named, map[string]int{"internal/config/settings.go": 1, "internal/config/config.go": 1})
 	checkCounts(t, "selects OIDCLoopbackHTTP, --dev under another name,", decided, decidedReaders)
 	devCounts := map[string]int{}
 	for rel, r := range devReaders {

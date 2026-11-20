@@ -3,7 +3,6 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -14,19 +13,19 @@ import (
 // command takes a stdio upstream command after --, so the URL's error also names a command after --.
 func (c *Config) upstream(v *Values, dashes bool) []error {
 	urlEnv, cmdEnv, envEnv := Setting{Name: "upstream-url"}.Env(), Setting{Name: "upstream-command"}.Env(), Setting{Name: "upstream-env"}.Env()+"_FILE"
-	raw := v.get("upstream-command")
+	raw := parseText(v.value("upstream-command"))
 	var errs []error
 	if v.httpUpstream() || v.stdioUpstream() { // with none or both, the "required" or "both set" error says enough
 		errs = offModeSettings(v, v.stdioUpstream())
 	}
 	if raw == "" {
 		if v.httpUpstream() { // the HTTP upstream's own settings, each reported even beside a malformed URL
-			d, err := parseHeaderTimeout(v.get("upstream-header-timeout"))
+			d, err := parseHeaderTimeout(v.value("upstream-header-timeout"))
 			if err != nil {
 				errs = append(errs, err)
 			}
 			c.UpstreamHeaderTimeout = d
-			strip, stripErrs := stripHeaders(v.get("upstream-strip-headers"))
+			strip, stripErrs := parseStripHeaders(v.value("upstream-strip-headers"))
 			c.UpstreamStripHeaders = strip
 			errs = append(errs, stripErrs...)
 		}
@@ -52,9 +51,9 @@ func (c *Config) upstream(v *Values, dashes bool) []error {
 		// The value is not shown: a command line can carry a token as an argument.
 		errs = append(errs, errorf("%s: want a JSON array of strings whose first element is the program, e.g. [\"/usr/local/bin/server\",\"--flag\"] (the value given is not shown)", cmdEnv))
 	}
-	env, err := parseEnvLines(v.get("upstream-env"))
+	env, err := parseEnvLines(parseText(v.value("upstream-env")))
 	if err != nil {
-		errs = append(errs, errorf("%s: %v", envEnv, err))
+		errs = append(errs, errorf("%s: want KEY=VALUE lines, each key once; got %v", envEnv, err))
 	}
 	c.UpstreamEnv = env
 	limits := []struct {
@@ -62,14 +61,14 @@ func (c *Config) upstream(v *Values, dashes bool) []error {
 		dst  *int
 	}{{"stdio-max-processes", &c.StdioMaxProcesses}, {"stdio-max-processes-per-user", &c.StdioMaxPerUser}}
 	for _, l := range limits {
-		n, err := strconv.Atoi(v.get(l.name))
-		if err != nil || n < 1 || n > 10000 {
-			errs = append(errs, errorf("%s: want a whole number from 1 to 10000, got %q", Setting{Name: l.name}.Env(), v.get(l.name)))
+		n, err := parseWholeNumber(v.value(l.name), 1, 10000)
+		if err != nil {
+			errs = append(errs, err)
 			continue
 		}
 		*l.dst = n
 	}
-	d, err := parseStreamIdleTimeout(v.get("stdio-stream-idle-timeout"))
+	d, err := parseStreamIdleTimeout(v.value("stdio-stream-idle-timeout"))
 	if err != nil {
 		errs = append(errs, err)
 	}
@@ -138,18 +137,9 @@ func spelled(val Value) string {
 // for less is not idle.
 const minStreamIdleTimeout = time.Minute
 
-func parseStreamIdleTimeout(raw string) (time.Duration, error) {
-	env := Setting{Name: "stdio-stream-idle-timeout"}.Env()
-	d, err := time.ParseDuration(raw)
-	switch {
-	case raw == "0":
-		return 0, nil
-	case err != nil:
-		return 0, errorf("%s: want a duration such as 10m, or 0 to keep quiet streams, got %q", env, raw)
-	case d != 0 && d < minStreamIdleTimeout: // negative too
-		return 0, errorf("%s: want 0 or at least 1m, got %s", env, d)
-	}
-	return d, nil
+func parseStreamIdleTimeout(val Value) (time.Duration, error) {
+	return parseDuration(val, "a duration of at least 1m such as 10m, or 0 to keep quiet streams",
+		func(d time.Duration) bool { return d == 0 || d >= minStreamIdleTimeout })
 }
 
 // parseEnvLines reads KEY=VALUE lines; blank lines and lines starting with # are skipped. Errors
@@ -169,7 +159,7 @@ func parseEnvLines(raw string) (map[string]string, error) {
 			return nil, fmt.Errorf("line %d: want KEY=VALUE", i+1)
 		}
 		if _, dup := env[k]; dup {
-			return nil, fmt.Errorf("line %d: %s is set twice", i+1, k)
+			return nil, fmt.Errorf("line %d: its key is set on an earlier line too", i+1)
 		}
 		env[k] = val
 	}
@@ -183,15 +173,9 @@ const (
 	maxHeaderTimeout = time.Hour
 )
 
-func parseHeaderTimeout(raw string) (time.Duration, error) {
-	d, err := time.ParseDuration(raw)
-	switch {
-	case err != nil:
-		return 0, errorf("BYWARD_UPSTREAM_HEADER_TIMEOUT: want a duration such as 5m, got %q", raw)
-	case d < minHeaderTimeout || d > maxHeaderTimeout:
-		return 0, errorf("BYWARD_UPSTREAM_HEADER_TIMEOUT: want 1s to 1h, got %s", d)
-	}
-	return d, nil
+func parseHeaderTimeout(val Value) (time.Duration, error) {
+	return parseDuration(val, "a duration from 1s to 1h, such as 5m",
+		func(d time.Duration) bool { return d >= minHeaderTimeout && d <= maxHeaderTimeout })
 }
 
 // maxUpstreamCredential bounds the credential: it travels in a header on every request.
@@ -218,7 +202,7 @@ func (c *Config) upstreamCredential(v *Values) []error {
 	var errs []error
 	name := spelled(val) // an inline value, accepted under --dev, has no file to name
 	emptyFile := v.emptySecretFile("upstream-credential")
-	switch cred := val.Given.raw(); {
+	switch cred := parseText(val); {
 	case emptyFile != nil:
 		errs = append(errs, emptyFile)
 	case cred == "":
@@ -232,7 +216,7 @@ func (c *Config) upstreamCredential(v *Values) []error {
 	default:
 		c.UpstreamCredential = cred
 	}
-	h, err := upstreamHeader(v, "upstream-credential-header", "X-Api-Key")
+	h, err := parseHeaderName(v.value("upstream-credential-header"), "X-Api-Key")
 	if err != nil {
 		return append(errs, err)
 	}
@@ -247,21 +231,25 @@ var mcpHeaders = withMCPHeaders(map[string]bool{"Accept": true, "Content-Type": 
 
 // stripHeaders reads BYWARD_UPSTREAM_STRIP_HEADERS: header names, canonical with _ read as -, the
 // way the relay compares them.
-func stripHeaders(raw string) ([]string, []error) {
-	env := Setting{Name: "upstream-strip-headers"}.Env()
+func parseStripHeaders(val Value) ([]string, []error) {
+	const want = "exact header names, such as X-Argocd-Base-Url"
+	s := val.Setting
 	var out []string
 	var errs []error
-	for _, n := range splitList(raw) {
+	list, at := entries(val.Given.raw())
+	for i, n := range list {
 		h := CanonicalHeader(n)
 		switch {
 		case strings.ContainsRune(n, '*'):
-			errs = append(errs, errorf("%s: %s: exact names only; list each header of a family by name", env, quoteHeaderName(n)))
+			errs = append(errs, refusedForm(s, at(i), n, want, "it has a *: list each header of a family by name"))
 		case !httpguts.ValidHeaderFieldName(n):
-			errs = append(errs, errorf("%s: %s is not a header name; list exact names, such as X-Argocd-Base-Url", env, quoteHeaderName(n)))
-		case mcpHeaders[h] || strings.HasPrefix(h, MCPParamPrefix):
-			errs = append(errs, errorf("%s: %s is a header MCP needs at the upstream; remove it from the list", env, h))
+			errs = append(errs, refusedForm(s, at(i), n, want, "it is not a header name"))
+		case mcpHeaders[h]:
+			errs = append(errs, refusedMeaning(s, at(i), h, want, "MCP needs it at the upstream; remove it from the list"))
+		case strings.HasPrefix(h, MCPParamPrefix):
+			errs = append(errs, refusedMeaning(s, at(i), "a header starting "+MCPParamPrefix, want, "MCP needs it at the upstream; remove it from the list"))
 		case h == "Traceparent" || h == "Tracestate":
-			errs = append(errs, errorf("%s: %s cannot be stripped: with tracing on, the proxy sets it from the inbound trace context; remove it from the list", env, h))
+			errs = append(errs, refusedMeaning(s, at(i), h, want, "with tracing on, the proxy sets it from the inbound trace context; remove it from the list"))
 		default:
 			out = append(out, h)
 		}

@@ -97,7 +97,7 @@ func TestNoHeaderTracingSetsCanBeListed(t *testing.T) {
 	}
 	for _, f := range tracing.Fields() {
 		_, _, err := config.Load(nil, noAuthEnv("http://10.0.0.7/mcp", "BYWARD_UPSTREAM_STRIP_HEADERS="+f), os.ReadFile)
-		if err == nil || !strings.Contains(err.Error(), "cannot be stripped") {
+		if err == nil || !strings.Contains(err.Error(), "with tracing on, the proxy sets it from the inbound trace context") {
 			t.Errorf("listing %s: %v, want it refused", f, err)
 		}
 	}

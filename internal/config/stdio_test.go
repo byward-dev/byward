@@ -220,14 +220,14 @@ func TestInvalidStdioSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		"not JSON":                {nil, []string{"BYWARD_UPSTREAM_COMMAND=/bin/x --flag"}, "", "BYWARD_UPSTREAM_COMMAND: want a JSON array"},
 		"empty array":             {nil, []string{"BYWARD_UPSTREAM_COMMAND=[]"}, "", "BYWARD_UPSTREAM_COMMAND: want a JSON array"},
 		"empty program":           {nil, []string{`BYWARD_UPSTREAM_COMMAND=[""]`}, "", "BYWARD_UPSTREAM_COMMAND: want a JSON array"},
-		"env file line without =": {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_ENV_FILE=/run/secrets/upstream-env"}, "A=1\nsecret-without-equals", "BYWARD_UPSTREAM_ENV_FILE: line 2: want KEY=VALUE"},
-		"env duplicate":           {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_ENV_FILE=/run/secrets/upstream-env"}, "A=1\nA=2", "line 2: A is set twice"},
+		"env file line without =": {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_ENV_FILE=/run/secrets/upstream-env"}, "A=1\nsecret-without-equals", "BYWARD_UPSTREAM_ENV_FILE: want KEY=VALUE lines, each key once; got line 2: want KEY=VALUE"},
+		"env duplicate":           {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_ENV_FILE=/run/secrets/upstream-env"}, "A=1\nA=2", "got line 2: its key is set on an earlier line too"},
 		"inline env":              {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_ENV=A=1"}, "", "secrets must come from a file"},
 		"cap zero":                {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_MAX_PROCESSES=0"}, "", "BYWARD_STDIO_MAX_PROCESSES: want a whole number"},
 		"user cap over total":     {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_MAX_PROCESSES=4", "BYWARD_STDIO_MAX_PROCESSES_PER_USER=5"}, "", "must not exceed BYWARD_STDIO_MAX_PROCESSES"},
-		"stream idle under 1m":    {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_STREAM_IDLE_TIMEOUT=59s"}, "", "BYWARD_STDIO_STREAM_IDLE_TIMEOUT: want 0 or at least 1m"},
-		"stream idle negative":    {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_STREAM_IDLE_TIMEOUT=-10m"}, "", "BYWARD_STDIO_STREAM_IDLE_TIMEOUT: want 0 or at least 1m"},
-		"stream idle no duration": {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_STREAM_IDLE_TIMEOUT=ten"}, "", "BYWARD_STDIO_STREAM_IDLE_TIMEOUT: want a duration such as 10m"},
+		"stream idle under 1m":    {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_STREAM_IDLE_TIMEOUT=59s"}, "", "BYWARD_STDIO_STREAM_IDLE_TIMEOUT: want a duration of at least 1m such as 10m, or 0 to keep quiet streams; got "},
+		"stream idle negative":    {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_STREAM_IDLE_TIMEOUT=-10m"}, "", "BYWARD_STDIO_STREAM_IDLE_TIMEOUT: want a duration of at least 1m such as 10m, or 0 to keep quiet streams; got "},
+		"stream idle no duration": {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_STREAM_IDLE_TIMEOUT=ten"}, "", "BYWARD_STDIO_STREAM_IDLE_TIMEOUT: want a duration of at least 1m such as 10m, or 0 to keep quiet streams; got a value (3 characters, not shown): it is not a duration"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, _, err := Load(tc.args, stdioBase(tc.env...), stdioFiles(tc.envFile))
@@ -271,7 +271,7 @@ func TestEnvFileErrorsNeverShowItsContent(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, _, err := Load([]string{"--", "/bin/x"}, stdioBase("BYWARD_UPSTREAM_ENV_FILE=/run/secrets/upstream-env"), stdioFiles(envFile))
-			if !isConfigError(err) || !strings.Contains(err.Error(), "BYWARD_UPSTREAM_ENV_FILE: line 2") {
+			if !isConfigError(err) || !strings.Contains(err.Error(), "BYWARD_UPSTREAM_ENV_FILE: want KEY=VALUE lines, each key once; got line 2: ") {
 				t.Fatalf("got %v, want a config error naming the setting and line 2", err)
 			}
 			if strings.Contains(err.Error(), "sk-live") {

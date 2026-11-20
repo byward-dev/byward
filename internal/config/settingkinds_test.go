@@ -31,7 +31,7 @@ func TestBooleanSettingsAreExactlyTheBoolFlags(t *testing.T) {
 				e = append([]string{}, base...)
 			}
 			_, _, err := Load(nil, append(e, s.Env()+"=maybe"), baseFiles)
-			want := s.Env() + `: want true or false, got "maybe"`
+			want := s.Env() + ": want true or false; got a value (5 characters, not shown): it is neither true nor false"
 			if read := err != nil && strings.Contains(err.Error(), want); read != s.Bool {
 				hint := "mark it Bool"
 				if s.Bool {
@@ -85,8 +85,8 @@ func TestEveryBooleanReadIsOfABoolFlag(t *testing.T) {
 		}
 		if n := len(parse.FindAllString(string(src), -1)); n > 0 {
 			parses += n
-			if f != "registry.go" {
-				t.Errorf("%s parses a boolean outside registry.go, where Values.boolean lives", f)
+			if f != "parsers.go" {
+				t.Errorf("%s parses a boolean outside parsers.go, where parseBool lives", f)
 			}
 		}
 		if compare.MatchString(string(src)) {
@@ -129,7 +129,7 @@ func TestEveryPathSettingRefusesARelativePath(t *testing.T) {
 				e = append([]string{}, base...)
 			}
 			_, _, err := Load(nil, append(e, s.Env()+"=rel"), baseFiles)
-			want := s.Env() + ": want an absolute path (no paths relative to the working directory, ADR-0007 §6), got a relative one"
+			want := s.Env() + ": want an absolute path (no paths relative to the working directory, ADR-0007 §6); got a relative one"
 			if !isConfigError(err) || !strings.Contains(err.Error(), want) {
 				t.Fatalf("err = %v, want %q", err, want)
 			}

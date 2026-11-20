@@ -88,26 +88,26 @@ func TestAnOIDCIdPWithMissingOrConflictingSettingsRefusesToStart(t *testing.T) {
 		change func([]string) []string
 		want   string
 	}{
-		"an unknown IdP":                  {with("BYWARD_IDP=github"), `BYWARD_IDP: want entra, oidc, google, okta, auth0, keycloak, got "github"`},
+		"an unknown IdP":                  {with("BYWARD_IDP=github"), "BYWARD_IDP: want entra, oidc, google, okta, auth0 or keycloak; got a value (6 characters, not shown): it is not one of them"},
 		"no issuer":                       {without("BYWARD_OIDC_ISSUER"), "BYWARD_OIDC_ISSUER is required with BYWARD_IDP=keycloak"},
 		"no client ID":                    {without("BYWARD_OIDC_CLIENT_ID"), "BYWARD_OIDC_CLIENT_ID is required with BYWARD_IDP=keycloak"},
 		"a public client":                 {without("BYWARD_OIDC_CLIENT_SECRET_FILE"), "BYWARD_OIDC_CLIENT_SECRET_FILE or BYWARD_OIDC_CLIENT_KEY_FILE is required"},
 		"a secret and a key":              {with("BYWARD_OIDC_CLIENT_KEY_FILE=/run/secrets/key.pem"), "are both set; give one of them"},
 		"a key ID with no key":            {with("BYWARD_OIDC_CLIENT_KEY_ID=k1"), "BYWARD_OIDC_CLIENT_KEY_ID is set without BYWARD_OIDC_CLIENT_KEY_FILE"},
 		"a key algorithm with no key":     {with("BYWARD_OIDC_CLIENT_KEY_ALG=RS256"), "BYWARD_OIDC_CLIENT_KEY_ALG is set without BYWARD_OIDC_CLIENT_KEY_FILE"},
-		"an unknown key algorithm":        {withAKey("BYWARD_OIDC_CLIENT_KEY_ALG=RS384"), `BYWARD_OIDC_CLIENT_KEY_ALG: want PS256 or RS256 (an RSA key) or ES256 (an EC P-256 key), got "RS384"`},
-		"a key algorithm in lower case":   {withAKey("BYWARD_OIDC_CLIENT_KEY_ALG=rs256"), `BYWARD_OIDC_CLIENT_KEY_ALG: want PS256 or RS256 (an RSA key) or ES256 (an EC P-256 key), got "rs256"`},
-		"blank scopes":                    {with("BYWARD_OIDC_SCOPES= ,"), "BYWARD_OIDC_SCOPES is set but lists nothing"},
+		"an unknown key algorithm":        {withAKey("BYWARD_OIDC_CLIENT_KEY_ALG=RS384"), "BYWARD_OIDC_CLIENT_KEY_ALG: want PS256 or RS256 (an RSA key) or ES256 (an EC P-256 key); got a value (5 characters, not shown): it is not one of them"},
+		"a key algorithm in lower case":   {withAKey("BYWARD_OIDC_CLIENT_KEY_ALG=rs256"), "BYWARD_OIDC_CLIENT_KEY_ALG: want PS256 or RS256 (an RSA key) or ES256 (an EC P-256 key); got a value (5 characters, not shown): it is not one of them"},
+		"blank scopes":                    {with("BYWARD_OIDC_SCOPES= ,"), "BYWARD_OIDC_SCOPES: want at least one entry, or leave it unset; got a list of none"},
 		"a scope with a quote":            {with(`BYWARD_OIDC_SCOPES=a"b`), `BYWARD_OIDC_SCOPES: want a scope such as openid or email; got entry 1 of 1 (3 characters, not shown): it holds a space, a backslash or a double quote`},
 		"a scope with a backslash":        {with(`BYWARD_OIDC_SCOPES=a\b`), `BYWARD_OIDC_SCOPES: want a scope such as openid or email; got entry 1 of 1 (3 characters, not shown): it holds a space, a backslash or a double quote`},
 		"a scope with a space":            {with("BYWARD_OIDC_SCOPES=a b"), `BYWARD_OIDC_SCOPES: want a scope such as openid or email; got entry 1 of 1 (3 characters, not shown): it holds a space, a backslash or a double quote`},
-		"a blank subject claim":           {with("BYWARD_OIDC_SUBJECT_CLAIM= "), "BYWARD_OIDC_SUBJECT_CLAIM: want a claim name"},
-		"an empty roles claim":            {with("BYWARD_OIDC_ROLES_CLAIM="), `BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles, got ""`},
-		"a padded roles claim":            {with("BYWARD_OIDC_ROLES_CLAIM= roles"), `BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles, got " roles"`},
-		"sub as the groups claim":         {with("BYWARD_OIDC_GROUPS_CLAIM=sub"), `BYWARD_OIDC_GROUPS_CLAIM: "sub" is a claim of the sign-in itself, not roles or groups; name the claim the IdP sends them in, such as https://example.com/groups`},
-		"a roles claim padded at the end": {with("BYWARD_OIDC_ROLES_CLAIM=roles\t"), `BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles, got "roles\t"`},
-		"a blank groups claim":            {with("BYWARD_OIDC_GROUPS_CLAIM= "), `BYWARD_OIDC_GROUPS_CLAIM: want a claim name such as https://example.com/groups, got " "`},
-		"a name too long":                 {with("BYWARD_OIDC_NAME=" + strings.Repeat("n", 81)), "BYWARD_OIDC_NAME"},
+		"a blank subject claim":           {with("BYWARD_OIDC_SUBJECT_CLAIM= "), "BYWARD_OIDC_SUBJECT_CLAIM: want a claim name such as sub; got a value (1 character, not shown): it is blank or has white space at an end"},
+		"an empty roles claim":            {with("BYWARD_OIDC_ROLES_CLAIM="), "BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles; got nothing"},
+		"a padded roles claim":            {with("BYWARD_OIDC_ROLES_CLAIM= roles"), "BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles; got a value (6 characters, not shown): it is blank or has white space at an end"},
+		"sub as the groups claim":         {with("BYWARD_OIDC_GROUPS_CLAIM=sub"), "BYWARD_OIDC_GROUPS_CLAIM: want a claim name such as https://example.com/groups; got sub: it is a claim of the sign-in itself, not roles or groups; name the claim the IdP sends them in"},
+		"a roles claim padded at the end": {with("BYWARD_OIDC_ROLES_CLAIM=roles\t"), "BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles; got a value (6 characters, not shown): it is blank or has white space at an end"},
+		"a blank groups claim":            {with("BYWARD_OIDC_GROUPS_CLAIM= "), "BYWARD_OIDC_GROUPS_CLAIM: want a claim name such as https://example.com/groups; got a value (1 character, not shown): it is blank or has white space at an end"},
+		"a name too long":                 {with("BYWARD_OIDC_NAME=" + strings.Repeat("n", 81)), "BYWARD_OIDC_NAME: want text of at most 80 characters, without control or formatting characters; got a value (81 characters, not shown): it is too long"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := loadOIDC(t, tc.change)
@@ -168,7 +168,7 @@ func TestAClaimOfTheSignInItselfIsRefusedAsTheRolesClaim(t *testing.T) {
 	for _, claim := range []string{"iss", "sub", "aud", "azp", "exp", "iat", "nbf", "jti", "nonce", "auth_time", "acr", "amr", "sid", "at_hash", "c_hash"} {
 		t.Run(claim, func(t *testing.T) {
 			_, err := loadOIDC(t, with("BYWARD_OIDC_ROLES_CLAIM="+claim))
-			if want := `BYWARD_OIDC_ROLES_CLAIM: "` + claim + `" is a claim of the sign-in itself`; !isConfigError(err) || !strings.Contains(err.Error(), want) {
+			if want := "BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles; got " + claim + ": it is a claim of the sign-in itself, not roles or groups; name the claim the IdP sends them in"; !isConfigError(err) || !strings.Contains(err.Error(), want) {
 				t.Fatalf("err = %v, want a configuration error containing %q", err, want)
 			}
 		})

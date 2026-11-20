@@ -199,9 +199,15 @@ var dependentAuthSettings = []func(*Config, *Values) []error{
 // validate checks the resolved settings. container says byward runs in a container; dashes says the
 // command takes a stdio upstream command after --, so an error may suggest one.
 func validate(v *Values, container, dashes bool) (*Config, error) {
-	c := &Config{Values: v, Scope: v.get("scope"), ResourceName: v.get("resource-name"), LogFormat: v.get("log-format"),
-		InContainer: container}
+	c := &Config{Values: v, ResourceName: parseText(v.value("resource-name")), InContainer: container}
 	var errs []error
+	var errWord error
+	if c.LogFormat, errWord = parseWord(v.value("log-format"), "json", "text"); errWord != nil {
+		errs = append(errs, errWord)
+	}
+	if c.Scope, errWord = parseScope(v.value("scope")); errWord != nil {
+		errs = append(errs, errWord)
+	}
 	// Parsed straight into the field: --dev is read only as Config.Dev, where the guard test counts
 	// every reader (#355).
 	var err error
@@ -256,19 +262,12 @@ func validate(v *Values, container, dashes bool) (*Config, error) {
 	if c.TrustedProxies, err = parseProxies(v.value("trusted-proxies")); err != nil {
 		errs = append(errs, err)
 	}
-	c.OAuthRateLimits, err = parseRateLimits(v.get("oauth-rate-limits"))
-	if err != nil {
-		errs = append(errs, err)
-	}
+	var rateErrs []error
+	c.OAuthRateLimits, rateErrs = parseRateLimits(v.value("oauth-rate-limits"))
+	errs = append(errs, rateErrs...)
 	var hostErrs []error
 	c.AllowedHosts, hostErrs = parseAllowedHosts(v.value("allowed-hosts"))
 	errs = append(errs, hostErrs...)
-	if c.LogFormat != "json" && c.LogFormat != "text" {
-		errs = append(errs, errorf("BYWARD_LOG_FORMAT: want json or text, got %q", c.LogFormat))
-	}
-	if c.Scope == "" || strings.ContainsAny(c.Scope, " \"\\") {
-		errs = append(errs, errorf("BYWARD_SCOPE: want one scope token, got %q", c.Scope))
-	}
 	if c.ResourceDocumentation, err = parseResourceDocumentation(v.value("resource-documentation")); err != nil {
 		errs = append(errs, err)
 	}

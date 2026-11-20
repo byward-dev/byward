@@ -41,27 +41,6 @@ var secretForms = []struct{ name, value string }{
 // config refuses it: the public URL refuses its upper case.
 var hostForm = struct{ name, value string }{"in the host", "https://LK7CANARY.Example/mcp"}
 
-// notYetRefusing are the settings whose refusals do not yet go through their shape (ADR-0031 §1) and
-// that config refuses some form of, each with how many setting × form cells config refuses at load: each setting is
-// tried in a context where it applies (leakContext), and such a refusal can still show the value, so
-// its cells are skipped. A value config refuses for any other setting is run through every command,
-// as an accepted value of a hiding setting is, and its refusal may show no canary. A setting whose
-// refusal already goes through its shape fails here until it is removed, so the list only shrinks;
-// #512 moves the rest and removes it. A count changes only for a refusal of a form: a setting refused
-// for its context needs its own context in contextOf (and leakContexts).
-var notYetRefusing = map[string]int{
-	"upstream-header-timeout": 15, "upstream-credential-header": 15,
-	"upstream-strip-headers": 14, "upstream-env": 5, "stdio-max-processes": 15,
-	"stdio-max-processes-per-user": 15, "stdio-stream-idle-timeout": 15, "tls-cert-file": 15,
-	"tls-key-file": 15, "scope": 4, "log-format": 15, "oauth-rate-limits": 15, "idp": 15,
-	"entra-tenant": 15, "entra-federated-token-file": 15, "entra-client-secret-expires-at": 15, "oidc-client-key-alg": 15, "oidc-client-key-id": 15,
-	"data-dir": 14,
-	"keys-dir": 14, "assertion-keys-dir": 14, "assertion-header": 14, "identity-headers": 15, "obo-header": 14,
-	"assertion-claims": 15, "assertion-unverified-email": 15, "static-clients-file": 14, "dcr": 15, "cimd": 15,
-	"app-tokens": 15, "gate-allow-empty": 15, "store-dir": 14, "store-counter-file": 14,
-	"refresh-grace": 15, "insecure-no-auth": 15, "dev": 15,
-}
-
 // hidingSettings lists the settings whose shape hides part or all of a value. Each must have cells
 // config accepts, and none of those may show a canary.
 // client-denylist shows a non-URL entry as given, but config refuses every form here without a :// as a
@@ -77,9 +56,8 @@ var hidingSettings = []string{"upstream-credential", "upstream-env", "entra-clie
 // cell's output repeats it (TestTheSettingsOfEachShapeAreExactlyThese, internal/config, pins which
 // settings those are); the test only checks that its shape does show it, so a setting whose shape
 // hides a value cannot be left off the list. A secret setting's value is written to the file it is
-// read from. A value config refuses at load for a setting not in notYetRefusing is run the same way:
-// every command refuses it, and no output shows a canary. Any other refused value is skipped and
-// counted (notYetRefusing). Startup runs
+// read from. A value config refuses at load is run the same way: every command refuses it, in the
+// one format "BYWARD_X: want …; got …" (ADR-0031 §1), and no output shows a canary. Startup runs
 // with its context done and a listen address it cannot bind (TEST-NET-1), so it serves nothing;
 // doctor's HTTP clients refuse every request (TestMain).
 func TestNoCommandShowsAHiddenOrARefusedValue(t *testing.T) {
@@ -110,7 +88,7 @@ func TestNoCommandShowsAHiddenOrARefusedValue(t *testing.T) {
 	}
 	contexts := leakContexts(t, program)
 	settings := allSettings(t, contexts["entra"])
-	tried, refused, refusedTried := map[string]int{}, map[string]int{}, map[string]int{}
+	tried, refusedTried := map[string]int{}, map[string]int{}
 	for _, s := range settings {
 		for _, form := range append(slices.Clone(secretForms), hostForm) {
 			// The setting's own value comes last, so it wins over the context's and the log format's.
@@ -131,22 +109,14 @@ func TestNoCommandShowsAHiddenOrARefusedValue(t *testing.T) {
 				}
 			}
 			_, _, loadErr := config.Load(nil, withFormat(env, "json"), os.ReadFile)
-			_, skipped := notYetRefusing[s.Name]
-			refusing := loadErr != nil && !skipped
-			// A refusal in the one format, "BYWARD_X: want …; got …", goes through the setting's shape.
-			if loadErr != nil && skipped && strings.Contains(loadErr.Error(), s.Env()+": want ") && strings.Contains(loadErr.Error(), "; got ") {
-				if shows(loadErr.Error()) {
-					t.Errorf("%s refuses %s in its shape's wording but shows the value (%v): refuse it through its shape", s.Env(), form.name, loadErr)
-				} else {
-					t.Errorf("%s refuses %s through its shape (%v): remove it from notYetRefusing", s.Env(), form.name, loadErr)
-				}
-			}
+			refusing := loadErr != nil
 			switch {
-			case loadErr != nil && !refusing:
-				refused[s.Name]++
-				continue
 			case refusing:
 				refusedTried[s.Name]++
+				named := strings.Contains(loadErr.Error(), s.Env()+": want ") || strings.Contains(loadErr.Error(), s.Env()+"_FILE: want ")
+				if !named || !strings.Contains(loadErr.Error(), "; got ") {
+					t.Errorf("%s refuses %s outside the one format (%v): refuse it through refusedForm or refusedMeaning", s.Env(), form.name, loadErr)
+				}
 			case form == hostForm:
 				continue // an accepted URL shows its host (hostForm)
 			case !hiding:
@@ -179,29 +149,9 @@ func TestNoCommandShowsAHiddenOrARefusedValue(t *testing.T) {
 			}
 		}
 	}
-	for name, want := range notYetRefusing {
-		switch {
-		case !slices.ContainsFunc(settings, func(s config.Setting) bool { return s.Name == name }):
-			t.Errorf("notYetRefusing names %s, which is not a setting", name)
-		case want == 0:
-			t.Errorf("notYetRefusing lists %s with no skipped cell: remove it, so its refusals are checked", name)
-		case refused[name] != want:
-			t.Errorf("config refused %d cells of %s at load, want %d (notYetRefusing): change it only for a refusal of a form, and give a setting refused for its context its own context in contextOf", refused[name], name, want)
-		}
-	}
-	// The settings outside notYetRefusing that config refuses some form of: one that stops refusing,
-	// or a new one, is seen here, not only in a count.
-	throughShape := []string{"allowed-hosts", "allowed-origins", "cimd-allowed-hosts", "cimd-trusted-hosts", "client-denylist", "internal-listen",
-		"listen", "obo-scopes", "oidc-issuer", "oidc-scopes", "public-url", "resource-documentation", "trusted-proxies", "upstream-url"}
-	for _, name := range throughShape {
-		if refusedTried[name] == 0 {
-			t.Errorf("config refused no form of %s outside notYetRefusing, want its refusals through its shape tried", name)
-		}
-	}
-	for name := range refusedTried {
-		if !slices.Contains(throughShape, name) {
-			t.Errorf("config refused forms of %s, which throughShape does not list: add it", name)
-		}
+	// Config refuses some form of most settings: fewer would mean the forms stopped reaching them.
+	if len(refusedTried) < 40 {
+		t.Errorf("config refused forms of %d settings, want at least 40: %v", len(refusedTried), refusedTried)
 	}
 	for _, name := range hidingSettings {
 		switch {
@@ -250,6 +200,14 @@ var contextOf = map[string]string{
 	"entra-client-certificate": "entra, no secret",
 	"store-postgres-dsn":       "entra, no state directory",     // one store, not two
 	"upstream-credential":      "entra, other assertion header", // the two share Authorization by default
+	// Each of these is refused for its context alone: a header without a credential, half a TLS pair,
+	// a second Entra credential, a key's settings without the key.
+	"upstream-credential-header": "entra, a credential",
+	"tls-cert-file":              "entra, a TLS key",
+	"tls-key-file":               "entra, a TLS certificate",
+	"entra-federated-token-file": "entra, no secret",
+	"oidc-client-key-alg":        "oidc, a key",
+	"oidc-client-key-id":         "oidc, a key",
 }
 
 // leakContext is the context a setting is tried in: one where it applies, so config refuses a value
@@ -283,8 +241,20 @@ func leakContexts(t *testing.T, program string) map[string][]string {
 	oidcBase := append(oidcAuthEnv(t), httpServe...)
 	oidc := append(slices.Clone(oidcBase), "BYWARD_IDP=oidc", "BYWARD_OIDC_ISSUER=https://idp.example", "BYWARD_OIDC_CLIENT_ID=abc",
 		"BYWARD_GATE_ALLOW_EMPTY=true")
+	dir := t.TempDir()
+	credential, key := filepath.Join(dir, "credential"), filepath.Join(dir, "key.pem")
+	for _, f := range []string{credential, key} {
+		if err := os.WriteFile(f, []byte("k-123"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tls := filepath.Join(dir, "tls")
 	contexts := map[string][]string{
 		"entra":                         entra,
+		"entra, a credential":           append(slices.Clone(entra), "BYWARD_UPSTREAM_CREDENTIAL_FILE="+credential, "BYWARD_ASSERTION_HEADER=X-Byward-Identity"),
+		"entra, a TLS key":              append(slices.Clone(entra), "BYWARD_TLS_KEY_FILE="+tls),
+		"entra, a TLS certificate":      append(slices.Clone(entra), "BYWARD_TLS_CERT_FILE="+tls),
+		"oidc, a key":                   append(without(oidc, "BYWARD_OIDC_CLIENT_SECRET_FILE="), "BYWARD_OIDC_CLIENT_KEY_FILE="+key),
 		"entra, no secret":              without(entra, "BYWARD_ENTRA_CLIENT_SECRET_FILE="),
 		"entra, no state directory":     without(entra, "BYWARD_STORE_DIR="),
 		"entra, other assertion header": append(slices.Clone(entra), "BYWARD_ASSERTION_HEADER=X-Byward-Identity"),
@@ -295,8 +265,8 @@ func leakContexts(t *testing.T, program string) map[string][]string {
 		"app":                           append(slices.Clone(entra), "BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=r"),
 	}
 	for name, env := range contexts {
-		if name == "entra, no secret" || name == "oidc, no secret" || name == "entra, no state directory" {
-			continue // each needs the setting tried in it, as entra-client-certificate, oidc-client-key or store-postgres-dsn
+		if name == "entra, no secret" || name == "oidc, no secret" || name == "entra, no state directory" || name == "entra, a TLS key" || name == "entra, a TLS certificate" {
+			continue // each needs the setting tried in it, as entra-client-certificate, oidc-client-key, store-postgres-dsn or the other TLS file
 		}
 		if _, _, err := config.Load(nil, env, os.ReadFile); err != nil {
 			t.Fatalf("the %s context is refused: %v", name, err)

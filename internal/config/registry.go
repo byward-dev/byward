@@ -10,7 +10,6 @@ import (
 	"io"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/byward-dev/byward/internal/logging"
@@ -122,36 +121,6 @@ type Values struct {
 	command []string
 }
 
-// get returns the text of a setting in readAsText, one not yet read through its parser of its own. It
-// panics on any other, which every test that loads the setting catches, however the name reaches it.
-func (v *Values) get(name string) string {
-	if !readAsText[name] {
-		panic("config: " + name + " is read through its parser, not get")
-	}
-	return v.byKey[name].Given.raw()
-}
-
-// readAsText are the settings still read as text through get (ADR-0031 §1). The list only shrinks:
-// #512 gives the rest parsers of their own and deletes it, with get.
-var readAsText = map[string]bool{
-	"upstream-header-timeout": true, "upstream-credential-header": true,
-	"upstream-strip-headers": true, "upstream-command": true, "upstream-env": true, "stdio-max-processes": true,
-	"stdio-max-processes-per-user": true, "stdio-stream-idle-timeout": true, "tls-cert-file": true,
-	"tls-key-file": true, "scope": true, "resource-name": true, "log-format": true, "oauth-rate-limits": true,
-	"idp": true, "entra-tenant": true, "entra-client-id": true, "entra-client-secret": true,
-	"entra-client-certificate": true, "entra-federated-token-file": true,
-	"entra-client-secret-expires-at": true, "oidc-client-id": true, "oidc-client-secret": true,
-	"oidc-client-key": true, "oidc-client-key-alg": true, "oidc-client-key-id": true,
-	"oidc-subject-claim": true, "oidc-roles-claim": true, "oidc-groups-claim": true, "oidc-name": true,
-	"data-dir": true, "keys-dir": true, "assertion-keys-dir": true, "assertion-header": true,
-	"identity-headers": true, "obo-header": true, "assertion-claims": true, "assertion-unverified-email": true,
-	"static-clients-file": true, "gate-tenants": true, "gate-roles": true, "gate-groups": true,
-	"gate-email-domains": true, "gate-hosted-domains": true, "dcr": true, "cimd": true, "app-tokens": true,
-	"app-roles": true, "app-client-ids": true, "gate-allow-empty": true, "operator-name": true,
-	"scope-description": true, "store-dir": true, "store-postgres-dsn": true, "store-counter-file": true,
-	"refresh-grace": true, "insecure-no-auth": true, "dev": true,
-}
-
 // value is the named setting's Value, for its parser. It panics on a name these Values do not hold,
 // which every test that loads the setting catches, so a parser never gets a Value without a shape.
 func (v *Values) value(name string) Value {
@@ -201,13 +170,7 @@ func (v *Values) emptySecretFile(name string) error {
 
 // boolean reads a true/false setting. Every setting read this way must be Bool in the registry, so a
 // bare --name means true (TestBooleanSettingsAreExactlyTheBoolFlags, TestEveryBooleanReadIsOfABoolFlag).
-func (v *Values) boolean(name string) (bool, error) {
-	b, err := strconv.ParseBool(v.get(name))
-	if err != nil {
-		return false, errorf("%s: want true or false, got %q", Setting{Name: name}.Env(), v.get(name))
-	}
-	return b, nil
-}
+func (v *Values) boolean(name string) (bool, error) { return parseBool(v.value(name)) }
 
 // Effective lists every setting with its source, in registry order.
 func (v *Values) Effective() []Value {
@@ -260,7 +223,7 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 		return nil, errorf("%v", err)
 	}
 	if fs.NArg() > 0 {
-		return nil, errorf("unexpected argument %s", logging.Quote(fs.Arg(0)))
+		return nil, errorf("want settings as --name=value flags, and the stdio upstream command after --; got an unexpected argument %s", notShown(fs.Arg(0)))
 	}
 	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })

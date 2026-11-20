@@ -24,15 +24,20 @@ var headerSettings = []struct {
 func TestAReservedHeaderIsRefusedInEitherSpellingByEverySettingThatSetsOne(t *testing.T) {
 	// One per family: the reserved names, MCP's own request headers (all of them: each would replace
 	// the client's at the upstream), then each reserved prefix, Mcp-Param-* (MCP 2026-07-28) included.
-	reserved := []string{"Host", "Mcp-Session-Id", "Mcp-Protocol-Version", "Mcp-Method", "Mcp-Name", "Last-Event-ID",
-		"X-Forwarded-For", "Proxy-Authorization", "Sec-Fetch-Mode", "Access-Control-Allow-Origin", "Mcp-Param-Region"}
+	// A reserved name is shown as the upstream reads it; a family only by its prefix, since what follows
+	// the prefix is the operator's text.
+	reserved := []struct{ h, shown string }{{"Host", "Host"}, {"Mcp-Session-Id", "Mcp-Session-Id"},
+		{"Mcp-Protocol-Version", "Mcp-Protocol-Version"}, {"Mcp-Method", "Mcp-Method"}, {"Mcp-Name", "Mcp-Name"},
+		{"Last-Event-ID", "Last-Event-Id"}, {"X-Forwarded-For", "a header starting X-Forwarded-"},
+		{"Proxy-Authorization", "a header starting Proxy-"}, {"Sec-Fetch-Mode", "a header starting Sec-"},
+		{"Access-Control-Allow-Origin", "a header starting Access-Control-"}, {"Mcp-Param-Region", "a header starting Mcp-Param-"}}
 	for _, s := range headerSettings {
-		for _, h := range reserved {
-			for _, name := range []string{h, strings.ReplaceAll(h, "-", "_")} {
+		for _, r := range reserved {
+			for _, name := range []string{r.h, strings.ReplaceAll(r.h, "-", "_")} {
 				t.Run(s.env+"="+name, func(t *testing.T) {
 					_, err := loadCred(t, nil, "k-123", append(s.extra, s.env+"="+name)...)
-					// The operator's own spelling, as config names it back.
-					want := s.env + ": " + textproto.CanonicalMIMEHeaderKey(name) + " is a header the proxy, the transport or MCP relies on"
+					want := s.env + ": want a header name such as Authorization or " + s.example + "; got " + r.shown +
+						": the proxy, the transport or MCP relies on it; use Authorization or a header of your own"
 					if err == nil || !strings.Contains(err.Error(), want) {
 						t.Fatalf("err = %v, want %q", err, want)
 					}

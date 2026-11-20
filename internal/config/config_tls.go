@@ -4,7 +4,7 @@ package config
 // paths, and only under an https public URL, which is what clients use.
 func (c *Config) tls(v *Values) []error {
 	certEnv, keyEnv := Setting{Name: "tls-cert-file"}.Env(), Setting{Name: "tls-key-file"}.Env()
-	c.TLSCertFile, c.TLSKeyFile = v.get("tls-cert-file"), v.get("tls-key-file")
+	c.TLSCertFile, c.TLSKeyFile = parseText(v.value("tls-cert-file")), parseText(v.value("tls-key-file"))
 	if c.TLSCertFile == "" && c.TLSKeyFile == "" {
 		return nil
 	}

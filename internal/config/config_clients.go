@@ -45,7 +45,7 @@ func parseClientDenylist(val Value) ([]string, []error) {
 	}
 	list, at := entries(raw)
 	if len(list) == 0 {
-		return nil, []error{errorf("%s is set but lists nothing; remove it or give at least one entry", s.Env())}
+		return nil, []error{listsNothing(s)}
 	}
 	var errs []error
 	for i, e := range list {
@@ -99,7 +99,7 @@ func parseCIMDHosts(val Value) ([]string, []error) {
 	s, raw := val.Setting, val.Given.raw()
 	list, at := entries(raw)
 	if raw != "" && len(list) == 0 {
-		return nil, []error{errorf("%s is set but lists nothing; remove it or give at least one host", s.Env())}
+		return nil, []error{listsNothing(s)}
 	}
 	var errs []error
 	for i, h := range list {

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"net"
 	"net/netip"
 	"net/url"
@@ -12,17 +13,27 @@ import (
 	"github.com/byward-dev/byward/internal/ratelimit"
 )
 
-// checkText limits page wording: no control or format characters (bidi overrides), at most max
+// parseWording reads page wording: no control or format characters (bidi overrides), at most max
 // characters.
-func checkText(name, s string, max int) []error {
-	env := Setting{Name: name}.Env()
-	if strings.ContainsFunc(s, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }) {
-		return []error{errorf("%s: must not contain control or formatting characters", env)}
+func parseWording(val Value, max int) (string, error) {
+	raw := val.Given.raw()
+	want := fmt.Sprintf("text of at most %d characters, without control or formatting characters", max)
+	switch {
+	case strings.ContainsFunc(raw, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }):
+		return "", refusedForm(val.Setting, whole, raw, want, "it has a control or formatting character")
+	case utf8.RuneCountInString(raw) > max:
+		return "", refusedForm(val.Setting, whole, raw, want, "it is too long")
 	}
-	if n := utf8.RuneCountInString(s); n > max {
-		return []error{errorf("%s: at most %d characters, got %d", env, max, n)}
+	return raw, nil
+}
+
+// parseScope reads BYWARD_SCOPE: one scope token (RFC 6749 §3.3).
+func parseScope(val Value) (string, error) {
+	raw := val.Given.raw()
+	if raw == "" || strings.ContainsAny(raw, " \"\\") {
+		return "", refusedForm(val.Setting, whole, raw, "one scope token, such as mcp", "it has white space, a backslash or a double quote")
 	}
-	return nil
+	return raw, nil
 }
 
 // checkInlineSecrets rejects secrets given directly in env; development mode accepts them and
@@ -174,19 +185,29 @@ const (
 	maxRateLimit = 10000
 )
 
-func parseRateLimits(raw string) (map[string]int, error) {
+func parseRateLimits(val Value) (map[string]int, []error) {
+	s := val.Setting
+	want := fmt.Sprintf("endpoint=per-minute entries, the endpoint one of %s and the limit a whole number from %d to %d", strings.Join(ratelimit.Endpoints, ", "), minRateLimit, maxRateLimit)
 	out := ratelimit.Defaults()
-	for _, item := range splitList(raw) {
-		name, val, ok := strings.Cut(item, "=")
+	var errs []error
+	list, at := entries(val.Given.raw())
+	for i, item := range list {
+		name, per, ok := strings.Cut(item, "=")
 		name = strings.TrimSpace(name)
-		if _, known := out[name]; !ok || !known {
-			return nil, errorf("BYWARD_OAUTH_RATE_LIMITS: %q is not endpoint=per-minute for one of %s", item, strings.Join(ratelimit.Endpoints, ", "))
+		n, err := strconv.Atoi(strings.TrimSpace(per))
+		switch _, known := out[name]; {
+		case !ok || !known:
+			errs = append(errs, refusedForm(s, at(i), item, want, "it is not endpoint=per-minute for one of the endpoints"))
+		case err != nil:
+			errs = append(errs, refusedForm(s, at(i), item, want, "its limit is not a whole number"))
+		case n < minRateLimit || n > maxRateLimit:
+			errs = append(errs, refusedMeaning(s, at(i), name+"="+strconv.Itoa(n), want, "the limit is out of range"))
+		default:
+			out[name] = n
 		}
-		n, err := strconv.Atoi(strings.TrimSpace(val))
-		if err != nil || n < minRateLimit || n > maxRateLimit {
-			return nil, errorf("BYWARD_OAUTH_RATE_LIMITS: %s must be a whole number from %d to %d per minute, got %q", name, minRateLimit, maxRateLimit, val)
-		}
-		out[name] = n
+	}
+	if len(errs) > 0 {
+		return nil, errs
 	}
 	return out, nil
 }

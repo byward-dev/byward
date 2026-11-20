@@ -13,7 +13,7 @@ import (
 // (LogValue, which both handlers prefer; the JSON handler never calls String), encoding/json
 // (MarshalJSON) and encoding.TextMarshaler. The text sits behind a pointer, so fmt or json walking a
 // struct that holds an Opaque finds an address, never the text. Only raw returns it, and only a
-// setting's parser, or its shape's display, calls raw (TestOnlyParsersReadARawValueAndGetReadsOnlyTheSettingsInReadAsText); raw is
+// setting's parser, or its shape's display, calls raw (TestOnlyParsersReadARawValue); raw is
 // unexported, so no other package can read the text at all. Hold it by value: through a nil *Opaque,
 // slog's call of LogValue panics.
 type Opaque struct{ p *string }

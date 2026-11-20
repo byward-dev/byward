@@ -3,9 +3,7 @@ package config
 import (
 	"net/textproto"
 	"strings"
-	"unicode"
 
-	"github.com/byward-dev/byward/internal/logging"
 	"golang.org/x/net/http/httpguts"
 )
 
@@ -35,35 +33,36 @@ func withMCPHeaders(m map[string]bool) map[string]bool {
 	return m
 }
 
-// quoteHeaderName is v, a refused header-name value, as an error may quote it: only the text before
-// the first ':' or white space, the would-be name, since the rest of a pasted header line is its
-// value, which can be a token (#466). That name is quoted as logging.Quote does; where Quote hides
-// it, or nothing comes before the separator, the whole value is logging.Hidden.
-func quoteHeaderName(v string) string {
-	i := strings.IndexFunc(v, func(r rune) bool { return r == ':' || unicode.IsSpace(r) })
-	if i < 0 {
-		return logging.Quote(v)
+// parseHeaderName reads a setting naming a header the proxy sets on upstream requests: a valid token,
+// and not one the proxy, the transport or MCP relies on. example is a header of the operator's own to
+// suggest. A refused name is never shown: a value pasted as Name: value holds a token after the name
+// (#466).
+func parseHeaderName(val Value, example string) (string, error) {
+	raw := val.Given.raw()
+	want := "a header name such as Authorization or " + example
+	h := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(raw))
+	if !httpguts.ValidHeaderFieldName(h) {
+		return "", refusedForm(val.Setting, whole, raw, want, "it is not a header name")
 	}
-	if q := logging.Quote(v[:i]); i > 0 && q != logging.Hidden {
-		return q + " (the rest is not shown)"
-	}
-	return logging.Hidden
-}
-
-// upstreamHeader reads a setting naming a header the proxy sets on upstream requests: a valid
-// token, and not one the proxy, the transport or MCP relies on. example is a header of the
-// operator's own to suggest.
-func upstreamHeader(v *Values, setting, example string) (string, error) {
-	env := Setting{Name: setting}.Env()
-	h := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(v.get(setting)))
-	n := CanonicalHeader(h) // as the upstream may read it: X_Forwarded_For is X-Forwarded-For
-	switch {
-	case !httpguts.ValidHeaderFieldName(h):
-		return "", errorf("%s: want a header name such as Authorization or %s, got %s", env, example, quoteHeaderName(v.get(setting)))
-	case reservedHeaders[n] || strings.HasPrefix(n, "X-Forwarded-") || strings.HasPrefix(n, "Proxy-") || strings.HasPrefix(n, "Sec-") || strings.HasPrefix(n, "Access-Control-") || strings.HasPrefix(n, MCPParamPrefix):
-		return "", errorf("%s: %s is a header the proxy, the transport or MCP relies on; use Authorization or a header of your own such as %s", env, h, example)
+	if shown := relied(CanonicalHeader(h)); shown != "" { // as the upstream may read it: X_Forwarded_For is X-Forwarded-For
+		return "", refusedMeaning(val.Setting, whole, shown, want, "the proxy, the transport or MCP relies on it; use Authorization or a header of your own")
 	}
 	return h, nil
+}
+
+// relied is how a refusal names n, a canonical header the proxy, the transport or MCP relies on: by
+// name when it is one of reservedHeaders, by its family otherwise, since what follows a prefix is the
+// operator's text; "" when nothing relies on it.
+func relied(n string) string {
+	if reservedHeaders[n] {
+		return n
+	}
+	for _, p := range []string{"X-Forwarded-", "Proxy-", "Sec-", "Access-Control-", MCPParamPrefix} {
+		if strings.HasPrefix(n, p) {
+			return "a header starting " + p
+		}
+	}
+	return ""
 }
 
 // The plain identity headers (ADR-0016 §5). Their names are fixed, and reserved even while

@@ -177,11 +177,11 @@ func TestARefusedURLIsNeverShownButSaysWhy(t *testing.T) {
 	}
 }
 
-// A stray argument is quoted as a setting is: a value pasted after a space, as in
-// --upstream-url= https://user:pw@host, never shows its password.
+// A stray argument is never shown: a value pasted after a space, as in
+// --upstream-url= https://user:pw@host, is named by its length only.
 func TestAStrayArgumentNeverShowsACredentialItHolds(t *testing.T) {
 	_, err := load(t, []string{"--upstream-url=", "https://user:s3cretPW@up.example/mcp"})
-	if err == nil || strings.Contains(err.Error(), "s3cretPW") || !strings.Contains(err.Error(), `unexpected argument "https://up.example/mcp"`) {
+	if err == nil || strings.Contains(err.Error(), "s3cretPW") || strings.Contains(err.Error(), "up.example") || !strings.Contains(err.Error(), "got an unexpected argument (36 characters, not shown)") {
 		t.Fatalf("Load = %v, want the stray argument refused and shown without its password", err)
 	}
 }
