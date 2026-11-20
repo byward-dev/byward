@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -664,24 +665,31 @@ func TestOversizeStdoutMessageStopsTheProcess(t *testing.T) {
 func TestAnIdleTimeoutStopOrShutdownCountsAsBywardsChoiceButAFaultNeverDoes(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		end    func(h *harness, p *Process)
+		end    func(t *testing.T, h *harness, p *Process)
 		chosen bool
 	}{
-		{"the idle timeout", func(h *harness, _ *Process) { h.clk.Advance(DefaultIdleTimeout) }, true},
-		{"Stop", func(h *harness, _ *Process) { h.m.Stop("k") }, true},
-		{"Shutdown", func(h *harness, _ *Process) {
+		{"the idle timeout", func(_ *testing.T, h *harness, _ *Process) { h.clk.Advance(DefaultIdleTimeout) }, true},
+		{"Stop", func(_ *testing.T, h *harness, _ *Process) { h.m.Stop("k") }, true},
+		{"Shutdown", func(_ *testing.T, h *harness, _ *Process) {
 			ctx, cancel := context.WithTimeout(context.Background(), guard)
 			defer cancel()
 			_ = h.m.Shutdown(ctx)
 		}, true},
-		{"a crash", func(_ *harness, p *Process) { _ = p.Send(context.Background(), []byte("crash")) }, false},
-		{"a message over the size limit", func(_ *harness, p *Process) { _ = p.Send(context.Background(), []byte("123456789")) }, false},
-		{"a fault, then a stop byward chose", func(_ *harness, p *Process) { p.stop("partial_write"); p.retire("shutdown") }, false},
+		{"a crash", func(_ *testing.T, _ *harness, p *Process) { _ = p.Send(context.Background(), []byte("crash")) }, false},
+		{"a message over the size limit", func(_ *testing.T, _ *harness, p *Process) { _ = p.Send(context.Background(), []byte("123456789")) }, false},
+		{"a fault, then a stop byward chose", func(_ *testing.T, _ *harness, p *Process) { p.stop("partial_write"); p.retire("shutdown") }, false},
+		{"a closed stdin", func(t *testing.T, h *harness, p *Process) {
+			if got := call(t, p, "closestdin"); got != "closed" {
+				t.Fatalf("got %q, want closed", got)
+			}
+			_ = p.Send(context.Background(), []byte("ping"))
+			h.clk.Advance(2 * DefaultKillGrace) // the stop, then SIGTERM
+		}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, func(c *Config) { c.MaxMessageBytes = 8 })
 			p := h.get(t, "k", alice)
-			tc.end(h, p)
+			tc.end(t, h, p)
 			waitDone(t, p)
 			if got := p.endedByChoice(); got != tc.chosen {
 				t.Fatalf("endedByChoice = %v, want %v", got, tc.chosen)
@@ -783,6 +791,93 @@ func TestSendWithACancelledContextWritesNothing(t *testing.T) {
 	}
 }
 
+// A write that fails with nothing written, and not because the request ended, means the process
+// can no longer take messages (#562): ErrExited, which the bridge answers 404 "session not found"
+// within an MCP session. The process is stopped once the grace period has passed: one that
+// crashed is reaped by then, so its crash is logged as one.
+func TestSendToAProcessThatClosedItsStdinIsErrExitedAndStopsItAfterTheGrace(t *testing.T) {
+	h := newHarness(t, nil)
+	p := h.get(t, "s1", alice)
+	if got := call(t, p, "closestdin"); got != "closed" {
+		t.Fatalf("got %q, want closed", got)
+	}
+	for range 2 { // a second Send in the grace period fails the same way and changes nothing
+		if err := p.Send(context.Background(), []byte("ping")); !errors.Is(err, ErrExited) {
+			t.Fatalf("Send to a process that closed its stdin = %v, want ErrExited", err)
+		}
+	}
+	const grace = 5 * time.Second // as the stop reasons in docs/reference/observability.md say
+	h.clk.Advance(grace - time.Nanosecond)
+	if stops := h.log.with("stopping upstream process"); len(stops) != 0 {
+		t.Fatalf("stop records = %v, want none within the grace period", stops)
+	}
+	h.clk.Advance(time.Nanosecond)
+	if stops := h.log.with("stopping upstream process"); len(stops) != 1 || stops[0].attrs["reason"] != "stdin_closed" {
+		t.Fatalf("stop records = %v, want one with reason=stdin_closed", stops)
+	}
+	if err := p.Send(context.Background(), []byte("ping")); !errors.Is(err, ErrExited) {
+		t.Fatalf("Send after the stop = %v, want ErrExited", err)
+	}
+}
+
+// A Send's context may end just as its write finds stdin closed: Send returns the context's error,
+// as for any request that ended, but the write did not fail by that end, so the stop is armed.
+func TestASendWhoseContextEndsAsItsWriteFindsStdinClosedStillStopsTheProcess(t *testing.T) {
+	h := newHarness(t, nil)
+	p := h.get(t, "s1", alice)
+	if got := call(t, p, "closestdin"); got != "closed" {
+		t.Fatalf("got %q, want closed", got)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := p.Send(&endsAfterItsFirstCheck{Context: ctx, cancel: cancel}, []byte("ping")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Send whose context ended as its write failed = %v, want context.Canceled", err)
+	}
+	h.clk.Advance(DefaultKillGrace)
+	if stops := h.log.with("stopping upstream process"); len(stops) != 1 || stops[0].attrs["reason"] != "stdin_closed" {
+		t.Fatalf("stop records = %v, want one with reason=stdin_closed", stops)
+	}
+}
+
+// endsAfterItsFirstCheck is a context that is live when Send checks it before writing, and ends
+// when Send next checks it, once the write has failed. Send has stopped watching it by then, so no
+// deadline cuts the write. It relies on Send checking Err once before the write.
+type endsAfterItsFirstCheck struct {
+	context.Context
+	cancel context.CancelFunc
+	checks atomic.Int32
+}
+
+func (c *endsAfterItsFirstCheck) Err() error {
+	if c.checks.Add(1) > 1 {
+		c.cancel()
+	}
+	return c.Context.Err()
+}
+
+// A process whose write failed on a closed stdin, and that then exits within the grace period, is
+// logged as exited unexpectedly, not as stopped by byward: its exit cancels the stop. A process
+// that has just exited, and is not reaped yet, fails a write the same way.
+func TestAProcessThatClosedItsStdinAndExitsWithinTheGraceIsLoggedAsExitedUnexpectedly(t *testing.T) {
+	h := newHarness(t, nil)
+	p := h.get(t, "s1", alice)
+	if got := call(t, p, "closestdin"); got != "closed" {
+		t.Fatalf("got %q, want closed", got)
+	}
+	if err := p.Send(context.Background(), []byte("ping")); !errors.Is(err, ErrExited) {
+		t.Fatalf("Send = %v, want ErrExited", err)
+	}
+	_ = syscall.Kill(p.PID(), syscall.SIGKILL) // it exits within the grace period, after the stop was armed
+	waitDone(t, p)
+	h.clk.Advance(DefaultKillGrace)
+	if stops := h.log.with("stopping upstream process"); len(stops) != 0 {
+		t.Fatalf("stop records = %v, want none: the process exited by itself", stops)
+	}
+	if exits := h.log.with("upstream process exited unexpectedly"); len(exits) != 1 {
+		t.Fatalf("unexpected-exit records = %v, want one", exits)
+	}
+}
+
 // A Send whose context ends before its write has written a byte keeps the process: nothing reached
 // stdin, so framing is intact. Only a write cut part-way stops it (partial_write). The fake pauses,
 // its stdin pipe is filled with empty lines, which the fake echoes and byward drops, and the
@@ -829,6 +924,7 @@ func TestASendWhoseContextEndsBeforeAnyByteIsWrittenKeepsTheProcess(t *testing.T
 	case <-time.After(guard):
 		t.Fatal("Send whose context ended never returned")
 	}
+	h.clk.Advance(DefaultKillGrace) // past the grace a closed stdin gets (#562): the request's end is not one
 	if stops := h.log.with("stopping upstream process"); len(stops) != 0 {
 		t.Fatalf("stop records = %v, want none: nothing reached stdin", stops)
 	}

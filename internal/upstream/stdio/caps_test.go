@@ -133,6 +133,53 @@ func TestProcessInUseIsNeverEvictedSoAFullCapIsBusyUntilItIsReleased(t *testing.
 	}
 }
 
+// A process stopped because it closed its stdin holds its slot only until it exits (#562): the
+// user's next process at their cap is admitted then, not after the idle timeout.
+func TestAProcessStoppedForAClosedStdinFreesItsUsersSlotOnceItExits(t *testing.T) {
+	h := newHarness(t, capped(1, 1, nil))
+	p := h.get(t, "s1", alice)
+	if got := call(t, p, "closestdin"); got != "closed" {
+		t.Fatalf("got %q, want closed", got)
+	}
+	if err := p.Send(context.Background(), []byte("ping")); !errors.Is(err, ErrExited) {
+		t.Fatalf("Send = %v, want ErrExited", err)
+	}
+	h.clk.Advance(DefaultKillGrace) // the stop: before it, a Get at the cap would evict the idle process instead
+	if stops := h.log.with("stopping upstream process"); len(stops) != 1 || stops[0].attrs["reason"] != "stdin_closed" {
+		t.Fatalf("stop records = %v, want one with reason=stdin_closed", stops)
+	}
+
+	short, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	// The stopping process cannot exit before its SIGTERM, which the fake clock holds back.
+	if _, _, err := h.m.Get(short, "s2", alice); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Get at the cap while the stopped process still runs = %v, want DeadlineExceeded", err)
+	}
+
+	type got struct {
+		p   *Process
+		err error
+	}
+	next := make(chan got, 1)
+	go func() {
+		q, release, err := h.m.Get(context.Background(), "s2", alice)
+		if err == nil {
+			release()
+		}
+		next <- got{q, err}
+	}()
+	h.clk.Advance(DefaultKillGrace) // SIGTERM: the fake, hung after closestdin, dies of it
+	waitDone(t, p)
+	select {
+	case g := <-next:
+		if g.err != nil || g.p == p {
+			t.Fatalf("the user's next process = %v (same as the stopped one: %v), want a new process", g.err, g.p == p)
+		}
+	case <-time.After(guard):
+		t.Fatal("the user's next process was not admitted at the cap once the stopped one exited")
+	}
+}
+
 func TestStoppingProcessHoldsItsSlotUntilItHasExited(t *testing.T) {
 	h := newHarness(t, func(c *Config) {
 		c.Command = []string{fakeBin, "-stubborn"} // survives stdin closing and SIGTERM

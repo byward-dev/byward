@@ -230,3 +230,26 @@ IdP's callback query never counts: a browser can forge it, so only the token end
 credential was refused.
 
 Personal data in logs: `user_key` and `remote_ip`. Email and name are never logged.
+
+A stdio upstream process logs `upstream process started` when it starts, `stopping upstream process` with a `reason`
+when byward stops it, and `upstream process exited` with `exit_code` (and `signal`, if a signal ended it) once it is
+gone; one that exits without being stopped logs `upstream process exited unexpectedly` as a warning instead. Each
+line carries `upstream`, `process` (the process ID) and `user_key`. A stop closes the process's stdin, then sends
+SIGTERM and finally SIGKILL to its process group, each after 5 s; the process holds its slot under the caps until it
+has exited.
+
+### stdio upstream stop reasons
+
+| `reason` | Why byward stopped the process |
+|---|---|
+| `idle` | No request or stream of its own was open, and it had no traffic, for 30 minutes |
+| `evicted_user_cap`, `evicted_upstream_cap` | It made room for another under `BYWARD_STDIO_MAX_PROCESSES_PER_USER` or `BYWARD_STDIO_MAX_PROCESSES` (audited as `process_evicted`) |
+| `closed` | Its MCP client ended its MCP session (`DELETE`) |
+| `shutdown` | byward is shutting down |
+| `initialize_failed` | An `initialize` on it got no result, so its MCP session never started |
+| `not_modern` | It did not answer `server/discover` as a 2026-07-28 server |
+| `partial_write` | A message to it was written only in part, which breaks framing: the request ended mid-write, or the write failed |
+| `stdin_closed` | A write to it failed with nothing written, and not because the request's end cut it, and it was still running 5 s later: it closed its stdin, so it can take no more messages. One that exits within the 5 s is logged as exited unexpectedly, not stopped |
+| `message_too_large` | It wrote a stdout line over the 64 MiB message limit |
+| `stdout_closed` | It closed its stdout but kept running, for 5 s |
+

@@ -18,7 +18,10 @@ import (
 )
 
 var (
-	// ErrExited is returned by Send once the upstream process has exited or is stopping.
+	// ErrExited is returned by Send once the upstream process has exited or is stopping, or when a
+	// write to it failed for a reason other than its context while that context is still live.
+	// After a write that failed for a reason other than its context, Send stops the process: at
+	// once if part of the message was written, else after the grace period, unless it exits first.
 	ErrExited = errors.New("stdio: upstream process exited")
 	// ErrInvalidMessage is returned by Send for an empty message or one with an embedded newline,
 	// which would break newline-delimited framing.
@@ -117,7 +120,9 @@ func (p *Process) Err() error {
 }
 
 // Send writes msg and a newline to the process's stdin. ctx bounds the write; a write cut short
-// breaks framing, so the process is then stopped.
+// breaks framing, so the process is then stopped. A process whose write fails with nothing
+// written, and not because ctx's end cut it, can no longer take messages: it is stopped after the
+// grace period, unless it exits first, rather than hold its slot until the idle timeout (#562).
 func (p *Process) Send(ctx context.Context, msg []byte) error {
 	if len(msg) == 0 || bytes.IndexByte(msg, '\n') >= 0 {
 		return ErrInvalidMessage
@@ -141,11 +146,23 @@ func (p *Process) Send(ctx context.Context, msg []byte) error {
 	}
 	_ = p.stdin.SetWriteDeadline(time.Time{})
 	if err != nil {
-		if n > 0 {
+		ctxErr := ctx.Err() // read once: returned whenever the request ended, whether or not that cut the write
+		switch {
+		case n > 0:
 			p.stop("partial_write")
+		case !errors.Is(err, os.ErrDeadlineExceeded):
+			// Nothing written, and not cut by the deadline the request's end sets (the request may
+			// have ended too): the process closed its stdin, or has just exited and is not reaped
+			// yet. As for a closed stdout, the stop waits a grace period, which an exit cancels, so
+			// a crash is still logged as one.
+			p.mu.Lock()
+			if !p.stopping && !p.exited {
+				p.timers = append(p.timers, p.clock.AfterFunc(p.grace, func() { p.stop("stdin_closed") }))
+			}
+			p.mu.Unlock()
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if ctxErr != nil {
+			return ctxErr
 		}
 		return fmt.Errorf("%w: %v", ErrExited, err)
 	}
