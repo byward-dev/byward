@@ -126,16 +126,17 @@ func TestASettingWithACredentialStopsEveryCommandWithoutShowingIt(t *testing.T) 
 	oidcEnv := func(t *testing.T) []string {
 		return append(oidcAuthEnv(t), "BYWARD_IDP=oidc", "BYWARD_OIDC_CLIENT_ID=app", "BYWARD_GATE_ALLOW_EMPTY=true", "BYWARD_DEV=true")
 	}
+	// Each host is one no example text holds, so its absence shows the URL is never shown.
 	for _, tc := range []struct {
-		setting, why string
-		base         func(*testing.T) []string
+		setting, host, why string
+		base               func(*testing.T) []string
 	}{
-		{"BYWARD_UPSTREAM_URL=https://user:" + secret + "@up.example/mcp", "(36 characters, not shown): it holds a user name or password", entraEnv},
-		{"BYWARD_ALLOWED_ORIGINS=https://app.example?token=" + secret, "entry 1 of 1 (34 characters, not shown): it has a query or a fragment", entraEnv},
-		{"BYWARD_CLIENT_DENYLIST=https://user:" + secret + "@app.example/c.json", "entry 1 of 1 (40 characters, not shown): it is a CIMD client ID with a user name or password", entraEnv},
-		{"BYWARD_RESOURCE_DOCUMENTATION=https://user:" + secret + "@docs.example/", "(35 characters, not shown): it holds a user name or password", entraEnv},
-		{"BYWARD_OIDC_ISSUER=https://user:" + secret + "@idp.example", "(33 characters, not shown): it holds a user name or password", oidcEnv},
-		{"BYWARD_OIDC_ISSUER=https://user:" + secret + "@id p.example", "(34 characters, not shown): it does not parse as a URL", oidcEnv},
+		{"BYWARD_UPSTREAM_URL=https://user:" + secret + "@u7.example/mcp", "u7.example", "(36 characters, not shown): it holds a user name or password", entraEnv},
+		{"BYWARD_ALLOWED_ORIGINS=https://a7p.example?token=" + secret, "a7p.example", "entry 1 of 1 (34 characters, not shown): it has a query or a fragment", entraEnv},
+		{"BYWARD_CLIENT_DENYLIST=https://user:" + secret + "@a7p.example/c.json", "a7p.example", "entry 1 of 1 (40 characters, not shown): it is a CIMD client ID with a user name or password", entraEnv},
+		{"BYWARD_RESOURCE_DOCUMENTATION=https://user:" + secret + "@d7cs.example/", "d7cs.example", "(35 characters, not shown): it holds a user name or password", entraEnv},
+		{"BYWARD_OIDC_ISSUER=https://user:" + secret + "@i7p.example", "i7p.example", "(33 characters, not shown): it holds a user name or password", oidcEnv},
+		{"BYWARD_OIDC_ISSUER=https://user:" + secret + "@i7 p.example", "i7 p.example", "(34 characters, not shown): it does not parse as a URL", oidcEnv},
 	} {
 		name, _, _ := strings.Cut(tc.setting, "=")
 		for _, command := range [][]string{nil, {"check", "--offline"}, {"doctor"}} {
@@ -144,8 +145,8 @@ func TestASettingWithACredentialStopsEveryCommandWithoutShowingIt(t *testing.T) 
 			env := append(tc.base(t), "BYWARD_PUBLIC_URL=https://m.example/mcp", "BYWARD_UPSTREAM_URL=http://u/mcp",
 				"BYWARD_LISTEN=192.0.2.1:8080", "BYWARD_INTERNAL_LISTEN=", tc.setting)
 			code, stdout, stderr := runDone(command, env...)
-			if code != exitConfig || strings.Contains(stdout+stderr, secret) || !strings.Contains(stderr, name+": ") || !strings.Contains(stderr, tc.why) {
-				t.Errorf("%q with %s: code %d stdout %q stderr %q, want exit 2, %s named, why (%s), and no secret", command, tc.setting, code, stdout, stderr, name, tc.why)
+			if code != exitConfig || strings.Contains(stdout+stderr, secret) || strings.Contains(stdout+stderr, tc.host) || !strings.Contains(stderr, name+": ") || !strings.Contains(stderr, tc.why) {
+				t.Errorf("%q with %s: code %d stdout %q stderr %q, want exit 2, %s named, why (%s), and neither the secret nor the host", command, tc.setting, code, stdout, stderr, name, tc.why)
 			}
 		}
 	}
@@ -282,7 +283,7 @@ func TestCheckOfflineAndDoctorExit2OnAConfigurationErrorAndCheckNothing(t *testi
 func useFakes(t *testing.T, proxy http.RoundTripper) {
 	t.Helper()
 	fake := fakeidp.New(t, fakeidp.Entra, fakeidp.WithTenantID("00000000-0000-0000-0000-000000000001"),
-		fakeidp.WithClient(fakeidp.Client{ID: "00000000-0000-0000-0000-000000000002", Secrets: []string{"s3cret-entra"}}))
+		fakeidp.WithClient(fakeidp.Client{ID: "00000000-0000-0000-0000-000000000002", Secrets: []string{entraSecret}}))
 	old := doctorOptions // keeps TestMain's resolver and upstream proxy, so no test reaches the network
 	doctorOptions.IdP, doctorOptions.Proxy = fake.HTTPClient(), &http.Client{Transport: proxy}
 	t.Cleanup(func() { doctorOptions = old })

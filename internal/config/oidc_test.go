@@ -276,3 +276,17 @@ func TestDevRecordsAnInlineSecretAsARelaxation(t *testing.T) {
 		t.Fatalf("without --dev: %v, want both inline secrets refused", err)
 	}
 }
+
+// An issuer that loads is kept byte for byte, as the IdP's discovery document states it: never as
+// url.Parse would write it again.
+func TestAnIssuerIsKeptExactlyAsGiven(t *testing.T) {
+	for _, issuer := range []string{"HTTPS://sso.example.com/realms/Acme", "https://sso.example.com/realms/a%20b", "https://sso.example.com:443/realms/acme/"} {
+		c, err := loadOIDC(t, with("BYWARD_OIDC_ISSUER="+issuer))
+		if err != nil {
+			t.Fatalf("%s: %v", issuer, err)
+		}
+		if c.OIDCIssuer != issuer {
+			t.Errorf("%s: kept as %q, want it exactly as given", issuer, c.OIDCIssuer)
+		}
+	}
+}

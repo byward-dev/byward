@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"reflect"
 	"slices"
@@ -1039,5 +1040,116 @@ func TestDevelopmentModeChangesOnlyWhatItRecords(t *testing.T) {
 				t.Fatalf("--dev changed the configuration beyond its relaxations:\nwithout %+v\nwith    %+v", without, with)
 			}
 		})
+	}
+}
+
+// #494: a listen address is host:port, as net.Listen takes it: the host empty, an IP address (a zoned
+// IPv6 one included) or a host name with one trailing dot at most, and the port a number from 0 to
+// 65535; a service name such as http is refused. A refused one is named by its length and why, never
+// shown, so startup's net.Listen error can never quote it.
+func TestAListenAddressIsHostColonANumericPortAndARefusedOneIsNeverShown(t *testing.T) {
+	for _, ok := range []string{"127.0.0.1:8080", ":8080", "[::1]:8080", "localhost:0", "0.0.0.0:65535", "byward.internal:8443",
+		"[fe80::1%lo0]:8080", "byward.internal.:8443", "127.0.0.1:000080"} {
+		for _, name := range []string{"BYWARD_LISTEN", "BYWARD_INTERNAL_LISTEN"} {
+			if _, err := load(t, nil, "BYWARD_LISTEN=127.0.0.1:1", name+"="+ok); err != nil {
+				t.Errorf("%s=%s: %v", name, ok, err)
+			}
+		}
+	}
+	for _, tc := range []struct{ value, why string }{
+		{"8080", "it is not host:port"},
+		{"https://u:" + canaryText + "@h.example/x", "it is not host:port"},
+		{"//h.example/x?k=" + canaryText + ":80", "it has a host that is neither an IP address nor a host name"},
+		{"h.example..:80", "it has a host that is neither an IP address nor a host name"},
+		{"127.0.0.1:" + canaryText, "it has a port that is not a number"},
+		{"127.0.0.1:http", "it has a port that is not a number"},
+		{"127.0.0.1:", "it has a port that is not a number"},
+		{"127.0.0.1:65536", "it has a port that is not a number from 0 to 65535"},
+		{"127.0.0.1:+80", "it has a port that is not a number"},
+		{"127.0.0.1:-1", "it has a port that is not a number"},
+		{"127.0.0.1:99999999999999999999", "it has a port that is not a number from 0 to 65535"},
+	} {
+		for _, s := range []struct{ env, want string }{
+			{"BYWARD_LISTEN", "host:port such as 127.0.0.1:8080"},
+			{"BYWARD_INTERNAL_LISTEN", "host:port such as 127.0.0.1:9090, or empty"},
+		} {
+			want := fmt.Sprintf("%s: want %s; got a value (%d characters, not shown): %s", s.env, s.want, length(tc.value), tc.why)
+			_, err := load(t, nil, s.env+"="+tc.value)
+			if !isConfigError(err) || err.Error() != want || holdsCanary(err.Error()) {
+				t.Errorf("%s=%s: %v, want the error %q and never the value", s.env, tc.value, err, want)
+			}
+		}
+	}
+}
+
+// An empty listen address is refused as nothing given, not as "0 characters".
+func TestAnEmptyListenAddressIsRefusedAsNothingGiven(t *testing.T) {
+	_, err := load(t, nil, "BYWARD_LISTEN=")
+	if want := "BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got nothing"; !isConfigError(err) || err.Error() != want {
+		t.Errorf("BYWARD_LISTEN=: %v, want %q", err, want)
+	}
+}
+
+// A Config built by hand holds no Values, so doctor shows its upstream URL and issuer as Hidden: never
+// as nothing a caller could take for unset, nor as given.
+func TestAConfigWithoutValuesShowsTheUpstreamURLAndIssuerAsHidden(t *testing.T) {
+	for name, got := range map[string]string{
+		"its upstream URL":          (&Config{UpstreamURL: &url.URL{Scheme: "https", Host: "up.example", RawQuery: "k=" + canaryText}}).ShownUpstreamURL(),
+		"its issuer":                (&Config{OIDCIssuer: "https://u:" + canaryText + "@idp.example"}).ShownIssuer(),
+		"Values without the issuer": (&Config{OIDCIssuer: "https://idp.example/x?k=" + canaryText, Values: &Values{}}).ShownIssuer(),
+	} {
+		if got != logging.Hidden {
+			t.Errorf("%s shows %q, want %q", name, got, logging.Hidden)
+		}
+	}
+}
+
+// Doctor names the upstream URL through its shape, as parsed (the aud).
+func TestTheUpstreamURLIsShownAsParsedThroughItsShape(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+		env        []string
+	}{
+		{"its query left out", "https://up.example/mcp?…", []string{"BYWARD_UPSTREAM_URL=HTTPS://up.example/mcp?api_key=" + canaryText}},
+		{"a stdio upstream, which has no URL", logging.Hidden, []string{"BYWARD_UPSTREAM_URL=", `BYWARD_UPSTREAM_COMMAND=["/usr/bin/server"]`}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := load(t, nil, tc.env...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := c.ShownUpstreamURL(); got != tc.want {
+				t.Errorf("shown as %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Doctor names the issuer through its shape as given, or, the setting unset, as the preset's own.
+func TestTheIssuerIsShownThroughItsShapeOrAsThePresetsOwn(t *testing.T) {
+	for _, tc := range []struct{ name, issuer, want string }{
+		{"an issuer set, its path parameters left out", "https://idp.example/realms/a;k=" + canaryText, "https://idp.example/realms/a;…"},
+		{"a preset's own issuer, the setting unset", "", "https://accounts.google.com"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := loadOIDC(t, func(env []string) []string {
+				return with("BYWARD_IDP=google", "BYWARD_OIDC_ISSUER="+tc.issuer)(without("BYWARD_IDP", "BYWARD_OIDC_ISSUER")(env))
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := c.ShownIssuer(); got != tc.want {
+				t.Errorf("shown as %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Config refuses a client denylist entry that does not parse as a URL only when it holds an @, a form
+// that can carry a credential; any other is left to client registration, which refuses it at wiring.
+func TestADenylistEntryThatDoesNotParseWithoutAnAtIsLeftToRegistration(t *testing.T) {
+	c, err := load(t, nil, "BYWARD_CLIENT_DENYLIST=https://a%zz.example/x")
+	if err != nil || !slices.Equal(c.ClientDenylist, []string{"https://a%zz.example/x"}) {
+		t.Fatalf("got %v, %v; want it loaded as given", c, err)
 	}
 }

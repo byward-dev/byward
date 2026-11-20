@@ -50,11 +50,9 @@ func TestPublicURLAcceptsHTTPSOrLoopbackAndNamesTheRuleABadOneBreaks(t *testing.
 			t.Errorf("%s: %v", raw, err)
 		}
 	}
-	if _, err := ParsePublicURL(""); err == nil || err.Error() != "BYWARD_PUBLIC_URL is required" {
-		t.Errorf("an empty public URL: err = %v, want it required", err)
-	}
 	// Each error is pinned whole.
 	for raw, want := range map[string]string{
+		"": "BYWARD_PUBLIC_URL is required",
 		// A browser rewrites these hosts (10.0.0.1, 8.0.0.1) or refuses them (a name ending in a number,
 		// #473), so a browser sign-in could never come back to the public URL.
 		"https://10.1/mcp":                       `BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (16 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 10.0.0.1`,

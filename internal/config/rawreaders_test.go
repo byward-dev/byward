@@ -42,7 +42,7 @@ var byVariable = []string{"boolean", "upstreamHeader", "gate", "paths", "upstrea
 // still read so, so the list only shrinks. raw is unexported, so no other package reads the text at all. The scan is syntactic, so it
 // cannot tell which setting a parser reads: a function named parse… that reads another setting's text
 // passes, and review catches it.
-func TestOnlyParsersReadARawValue(t *testing.T) {
+func TestOnlyParsersReadARawValueAndGetReadsOnlyTheSettingsInReadAsText(t *testing.T) {
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
@@ -262,4 +262,20 @@ func rawReadsOf(t *testing.T, name string, src any) []rawRead {
 		}
 	}
 	return out
+}
+
+// get reads only a setting still read as text (readAsText), and panics on any other: a setting with a
+// parser of its own is never read past it.
+func TestGetPanicsOnASettingReadThroughItsParser(t *testing.T) {
+	c, err := load(t, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		const want = "config: listen is read through its parser, not get"
+		if got := recover(); got != want {
+			t.Errorf("get(listen) panicked with %v, want %q", got, want)
+		}
+	}()
+	c.Values.get("listen")
 }

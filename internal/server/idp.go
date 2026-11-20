@@ -162,7 +162,7 @@ func newOIDCIdentityProvider(cfg *config.Config, idpHTTP *http.Client, redirect 
 	ip := &identityProvider{name: cfg.IdP, redirect: redirect, label: oidcLabel(cfg), adapter: p, scope: p.Scope(), gateIdP: gate.Generic, userKey: oidcUserKey,
 		credentialDesc: credentialDesc,
 		diagnose: func(ctx context.Context, _ time.Time) []doctor.Result {
-			return append(diagnoseDiscovery(ctx, p, cfg, loopbackHTTP), withCredential(p.DiagnoseClient(ctx, oidcDiagnosis(cfg)), credentialDesc, refused))
+			return append(diagnoseDiscovery(ctx, p, cfg.ShownIssuer(), loopbackHTTP), withCredential(p.DiagnoseClient(ctx, oidcDiagnosis(cfg)), credentialDesc, refused))
 		}}
 	if oidc.Presets[preset].HostedDomains {
 		ip.gateIdP = gate.Google // the gate's kind for an IdP with hosted domains
@@ -287,12 +287,12 @@ func describeClientAssertion(info idp.AssertionInfo) string {
 	return d
 }
 
-// diagnoseDiscovery is doctor's check of an oidc IdP: discovery, and that cfg's issuer, named through
-// its shape (Config.ShownIssuer), matches (ADR-0011 §7). loopbackHTTP is config's relaxation for an
+// diagnoseDiscovery is doctor's check of an oidc IdP: discovery, and that config's issuer matches
+// (ADR-0011 §7). shown is that issuer as doctor names it, through its shape (Config.ShownIssuer), never
+// as given. loopbackHTTP is config's relaxation for an
 // http issuer on loopback under --dev, read once beside the adapter's (#355): only then does the fix
 // not ask for https.
-func diagnoseDiscovery(ctx context.Context, p idp.Readiness, cfg *config.Config, loopbackHTTP bool) []doctor.Result {
-	shown := cfg.ShownIssuer()
+func diagnoseDiscovery(ctx context.Context, p idp.Readiness, shown string, loopbackHTTP bool) []doctor.Result {
 	r := doctor.CheckDiscovery.NewResult()
 	if err := p.Ready(ctx); err != nil {
 		r.Status, r.Message = doctor.Fail, "the IdP's discovery document at "+shown+" failed: "+err.Error()

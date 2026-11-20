@@ -307,7 +307,7 @@ func (c *Config) Origin() string { return browserOrigin(c.PublicURL) }
 // shape, as the proxy parsed it, not as given (Values.display), so it is the URL the identity
 // assertion's aud names. A Config built by hand, without Values, shows it as Hidden.
 func (c *Config) ShownUpstreamURL() string {
-	if c.Values == nil || c.UpstreamURL == nil {
+	if !c.Values.holds("upstream-url") || c.UpstreamURL == nil {
 		return logging.Hidden
 	}
 	return lookup("upstream-url").shape.display(c.UpstreamURL.String())

@@ -57,7 +57,7 @@ func TestDoctorNamesAURLSettingWithoutTheParts(t *testing.T) {
 		{"discovery that fails", failingDiscovery{}, "the IdP's discovery document at https://idp.example/realms/acme;… failed: connection refused"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := diagnoseDiscovery(context.Background(), tc.p, loadOIDC(t, "oidc", issuer, "app"), false)
+			r := diagnoseDiscovery(context.Background(), tc.p, loadOIDC(t, "oidc", issuer, "app").ShownIssuer(), false)
 			if len(r) != 1 || r[0].Message != tc.want {
 				t.Errorf("results %+v, want one saying %q", r, tc.want)
 			}

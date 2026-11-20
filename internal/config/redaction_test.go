@@ -142,6 +142,10 @@ func TestARefusedURLIsNeverShownButSaysWhy(t *testing.T) {
 	}{
 		{"BYWARD_UPSTREAM_URL=https://user:pw@up.example/x", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (28 characters, not shown): it holds a user name or password (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
 		{"BYWARD_PUBLIC_URL=https://user:pw@mcp.example.com/mcp", withConfig(t), `BYWARD_PUBLIC_URL: want an absolute http(s) URL; got a value (35 characters, not shown): it holds a user name or password`},
+		// url.Parse reads host:port without a scheme as a scheme and an opaque port: refused as no scheme.
+		{"BYWARD_UPSTREAM_URL=upstream:9000", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (13 characters, not shown): it has no scheme such as https:// (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
+		{"BYWARD_ALLOWED_ORIGINS=localhost:3000", withConfig(t), `BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry 1 of 1 (14 characters, not shown): it has no scheme such as https://`},
+		{"BYWARD_UPSTREAM_URL=mailto:up@up.example", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (20 characters, not shown): it has a scheme other than http or https (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
 		{"BYWARD_UPSTREAM_URL=ftp://up.example/x?k=pw", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (23 characters, not shown): it has a scheme other than http or https (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
 		{"BYWARD_UPSTREAM_URL=up.example/x", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (12 characters, not shown): it has no scheme such as https:// (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
 		{"BYWARD_UPSTREAM_URL=https://user:pw@up stream/x", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (27 characters, not shown): it does not parse as a URL (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
@@ -191,8 +195,34 @@ func TestParseUpstreamURLAcceptsAnHTTPURLAndRefusesAnyOtherByTheSettingsName(t *
 		"/mcp":                         `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (4 characters, not shown): it has no scheme such as https://`,
 		"https://user:pw@up.example/x": `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (28 characters, not shown): it holds a user name or password`,
 	} {
-		if _, err := ParseUpstreamURL(raw); err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("ParseUpstreamURL(%q) = %v, want %q", raw, err, want)
+		if _, err := ParseUpstreamURL(raw); err == nil || err.Error() != want {
+			t.Errorf("ParseUpstreamURL(%q) = %v, want exactly %q", raw, err, want)
+		}
+	}
+}
+
+// #478: a URL whose scheme is mistyped in any of its seven ways, with a token in its path parameters,
+// is refused by each URL and host setting, the OIDC issuer, the trusted proxies, the OBO scopes and the
+// listen addresses, without any of it shown: neither the token nor the host. (BYWARD_OIDC_SCOPES takes
+// any text without white space, a backslash or a double quote: #512.)
+func TestAURLWithAMistypedSchemeIsRefusedWithoutAnyOfItShown(t *testing.T) {
+	forms := []string{"https;//h.example/;tok=", "https//h.example/;tok=", "https: //h.example/;tok=", `https:\h.example/;tok=`,
+		"//h.example/;tok=", "https:h.example/;tok=", "https:/h.example/;tok="}
+	settings := map[string]func(kv ...string) error{"BYWARD_OIDC_ISSUER": withOIDC(t)}
+	for _, env := range []string{"BYWARD_PUBLIC_URL", "BYWARD_UPSTREAM_URL", "BYWARD_RESOURCE_DOCUMENTATION", "BYWARD_ALLOWED_ORIGINS",
+		"BYWARD_ALLOWED_HOSTS", "BYWARD_CLIENT_DENYLIST", "BYWARD_CIMD_TRUSTED_HOSTS", "BYWARD_CIMD_ALLOWED_HOSTS", "BYWARD_TRUSTED_PROXIES",
+		"BYWARD_OBO_SCOPES", "BYWARD_LISTEN", "BYWARD_INTERNAL_LISTEN"} {
+		settings[env] = withConfig(t)
+	}
+	for env, load := range settings {
+		for _, form := range forms {
+			value := form + canaryText
+			err := load(env + "=" + value)
+			// BYWARD_OBO_SCOPES splits at white space, so the form with a space is two refused entries.
+			if !isConfigError(err) || !strings.Contains(err.Error(), env+": want ") || !strings.Contains(err.Error(), " characters, not shown): ") ||
+				holdsCanary(err.Error()) || strings.Contains(err.Error(), "h.example") {
+				t.Errorf("%s=%s: %v, want it refused by its length, and neither its token nor its host shown", env, value, err)
+			}
 		}
 	}
 }

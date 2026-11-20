@@ -36,14 +36,15 @@ func TestNoAuthIsRefusedOffLoopback(t *testing.T) {
 		{"listen on all interfaces by omission", "BYWARD_LISTEN=:8080", "BYWARD_LISTEN must be a loopback address", ""},
 		{"listen without port", "BYWARD_LISTEN=0.0.0.0", "BYWARD_LISTEN", ""},
 		{"listen on all IPv6 interfaces", "BYWARD_LISTEN=[::]:8080", "BYWARD_LISTEN must be a loopback address", ""},
-		{"extra host", "BYWARD_ALLOWED_HOSTS=proxy.internal:8080", "BYWARD_ALLOWED_HOSTS may only list loopback hosts", ""},
-		// Named as stored, as browsers write it (8.0.0.1), never as given (ADR-0031 §1).
-		{"extra host spelled in octal", "BYWARD_ALLOWED_HOSTS=010.0.0.1", `BYWARD_ALLOWED_HOSTS may only list loopback hosts, got "8.0.0.1"`, ""},
-		{"two extra hosts, both named", "BYWARD_ALLOWED_HOSTS=proxy.internal,other.internal", `got "proxy.internal"; BYWARD_INSECURE_NO_AUTH: BYWARD_ALLOWED_HOSTS may only list loopback hosts, got "other.internal"`, ""},
+		{"extra host", "BYWARD_ALLOWED_HOSTS=proxy.internal:8080", "BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got a host name, not shown: authentication is off, so only loopback may reach the proxy", ""},
+		// An address is named as stored, as browsers write it (8.0.0.1), never as given (ADR-0031 §1).
+		{"extra host spelled in octal", "BYWARD_ALLOWED_HOSTS=010.0.0.1", "BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address 8.0.0.1: authentication is off, so only loopback may reach the proxy", ""},
+		{"two extra hosts, each refused", "BYWARD_ALLOWED_HOSTS=proxy.internal,other.internal", "BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got a host name, not shown: authentication is off, so only loopback may reach the proxy; BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got a host name, not shown: authentication is off, so only loopback may reach the proxy", ""},
 		// Loopback hosts that can match no Host header are refused, not accepted for their host name (#325).
 		// An entry that does not load gets only its own error, never the loopback one too.
-		{"loopback host with a junk port", "BYWARD_ALLOWED_HOSTS=127.0.0.1:abc", `BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (13 characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero`, "may only list loopback hosts"},
-		{"extra origin", "BYWARD_ALLOWED_ORIGINS=https://app.example", "BYWARD_ALLOWED_ORIGINS may only list loopback origins", ""},
+		{"loopback host with a junk port", "BYWARD_ALLOWED_HOSTS=127.0.0.1:abc", `BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (13 characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero`, "only loopback hosts"},
+		{"extra origin", "BYWARD_ALLOWED_ORIGINS=https://app.example", "BYWARD_ALLOWED_ORIGINS: want only loopback origins with BYWARD_INSECURE_NO_AUTH, such as http://localhost:3000; got a host name, not shown: authentication is off, so only loopback may reach the proxy", ""},
+		{"extra origin by address", "BYWARD_ALLOWED_ORIGINS=http://10.0.0.1:3000", "BYWARD_ALLOWED_ORIGINS: want only loopback origins with BYWARD_INSECURE_NO_AUTH, such as http://localhost:3000; got the address 10.0.0.1: authentication is off, so only loopback may reach the proxy", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -196,5 +197,16 @@ func TestNoAuthRefusesRealAuthSettings(t *testing.T) {
 	_, err := loadAnon(t, nil, "BYWARD_ENTRA_TENANT=00000000-0000-0000-0000-000000000001")
 	if !isConfigError(err) || !strings.Contains(err.Error(), "cannot be combined with BYWARD_ENTRA_TENANT") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// --insecure-no-auth refuses an allowed host or origin that is not loopback without its host name, in
+// any case, since a token is a valid host name (ADR-0031 §1).
+func TestNoAuthRefusesANonLoopbackHostOrOriginWithoutItsName(t *testing.T) {
+	for _, env := range []string{"BYWARD_ALLOWED_HOSTS=" + canaryText + ".example", "BYWARD_ALLOWED_ORIGINS=https://" + canaryText + ".example"} {
+		_, err := loadAnon(t, nil, env)
+		if !isConfigError(err) || !strings.Contains(err.Error(), "a host name, not shown: authentication is off") || holdsCanary(err.Error()) {
+			t.Errorf("%s: %v, want it refused without its host name", env, err)
+		}
 	}
 }

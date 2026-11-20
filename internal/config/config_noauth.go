@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"strings"
 )
@@ -91,14 +92,23 @@ func checkNoAuth(c *Config, v *Values) []error {
 	default:
 		errs = append(errs, errorf("%s: BYWARD_LISTEN must be a loopback address such as 127.0.0.1:8080 (non-loopback only inside a container with its own network, not --network host)", env))
 	}
-	for _, h := range c.AllowedHosts { // as stored: as the parser read it, never as given
-		if !isLoopback(Hostname(h)) {
-			errs = append(errs, errorf("%s: BYWARD_ALLOWED_HOSTS may only list loopback hosts, got %q", env, h))
+	hosts, origins := lookup("allowed-hosts"), lookup("allowed-origins")
+	// Named without a place: the stored lists leave out an entry refused for its form, so an index
+	// into them need not be the entry's place in the list given.
+	for _, h := range c.AllowedHosts {
+		if host := Hostname(h); !isLoopback(host) {
+			errs = append(errs, refusedMeaning(hosts, whole, notLoopback(host),
+				"only loopback hosts with "+env+", such as localhost:8080", "authentication is off, so only loopback may reach the proxy"))
 		}
 	}
 	for _, o := range c.AllowedOrigins {
 		if u, err := url.Parse(o); err != nil || !isLoopback(u.Hostname()) {
-			errs = append(errs, errorf("%s: BYWARD_ALLOWED_ORIGINS may only list loopback origins, got %q", env, o))
+			host := ""
+			if err == nil {
+				host = u.Hostname()
+			}
+			errs = append(errs, refusedMeaning(origins, whole, notLoopback(host),
+				"only loopback origins with "+env+", such as http://localhost:3000", "authentication is off, so only loopback may reach the proxy"))
 		}
 	}
 	for _, val := range v.Effective() {
@@ -110,4 +120,14 @@ func checkNoAuth(c *Config, v *Values) []error {
 		c.Relaxations = append(c.Relaxations, "AUTHENTICATION IS OFF: anyone who can reach "+v.display("public-url")+" can use the upstream, and the upstream receives no identity")
 	}
 	return errs
+}
+
+// notLoopback is what a no-auth refusal shows of a stored host that is not loopback (ADR-0031 §1): an
+// IP address as netip writes it, which carries nothing but the address, and a host name never, since a
+// token is a valid host name.
+func notLoopback(host string) string {
+	if a, err := netip.ParseAddr(host); err == nil {
+		return "the address " + a.String()
+	}
+	return "a host name, not shown"
 }

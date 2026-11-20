@@ -149,7 +149,8 @@ func urlReason(u *url.URL, err error) string {
 	switch {
 	case err != nil:
 		return "does not parse as a URL"
-	case u.Scheme == "":
+	case u.Scheme == "", u.Opaque != "" && u.Scheme != "https" && u.Scheme != "http" && strings.Trim(u.Opaque, "0123456789") == "":
+		// url.Parse reads host:port written without a scheme (localhost:9000) as a scheme and an opaque port.
 		return "has no scheme such as https://"
 	case u.Scheme != "https" && u.Scheme != "http":
 		return "has a scheme other than http or https"
@@ -392,13 +393,14 @@ func parseListen(val Value, want string) (string, error) {
 const hostNameRule = "a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)"
 
 // validHostName reports whether host is a name a host setting can match on: BYWARD_ALLOWED_HOSTS
-// (#334), BYWARD_PUBLIC_URL's host, BYWARD_CIMD_TRUSTED_HOSTS, BYWARD_CIMD_ALLOWED_HOSTS (#344) and
-// BYWARD_CLIENT_DENYLIST's host entries (through hostNameReason). Not empty, only RFC 3986's
+// (#334), BYWARD_PUBLIC_URL's host, BYWARD_CIMD_TRUSTED_HOSTS, BYWARD_CIMD_ALLOWED_HOSTS (#344),
+// BYWARD_CLIENT_DENYLIST's host entries (through hostNameReason) and the listen addresses' hosts. Not empty, only RFC 3986's
 // unreserved characters (a DNS name never uses reg-name's sub-delims or %-escapes, which a Host
 // header or a URL could carry), and no empty label. A trailing dot is refused, not stripped: the
 // setting would match only a client given the absolute name, never the usual one, so it is almost
-// always copied from a DNS zone by mistake. The client denylist is the exception: clientSources
-// strips one trailing dot first, since the denylist's matching folds it away.
+// always copied from a DNS zone by mistake. Two settings strip one trailing dot first: the client
+// denylist (denylistReason), since its matching folds it away, and the listen addresses (parseListen),
+// since net.Listen takes it.
 func validHostName(host string) bool {
 	return host != "" && strings.Trim(host, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~") == "" &&
 		!strings.HasPrefix(host, ".") && !strings.HasSuffix(host, ".") && !strings.Contains(host, "..")

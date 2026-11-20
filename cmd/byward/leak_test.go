@@ -133,8 +133,8 @@ func TestNoCommandShowsAHiddenOrARefusedValue(t *testing.T) {
 			_, _, loadErr := config.Load(nil, withFormat(env, "json"), os.ReadFile)
 			_, skipped := notYetRefusing[s.Name]
 			refusing := loadErr != nil && !skipped
-			// A refusal through the setting's shape names the value only by its length.
-			if loadErr != nil && skipped && strings.Contains(loadErr.Error(), s.Env()+": want ") && strings.Contains(loadErr.Error(), " characters, not shown)") {
+			// A refusal in the one format, "BYWARD_X: want …; got …", goes through the setting's shape.
+			if loadErr != nil && skipped && strings.Contains(loadErr.Error(), s.Env()+": want ") && strings.Contains(loadErr.Error(), "; got ") {
 				if shows(loadErr.Error()) {
 					t.Errorf("%s refuses %s in its shape's wording but shows the value (%v): refuse it through its shape", s.Env(), form.name, loadErr)
 				} else {
@@ -189,8 +189,19 @@ func TestNoCommandShowsAHiddenOrARefusedValue(t *testing.T) {
 			t.Errorf("config refused %d cells of %s at load, want %d (notYetRefusing): change it only for a refusal of a form, and give a setting refused for its context its own context in contextOf", refused[name], name, want)
 		}
 	}
-	if len(refusedTried) < 14 {
-		t.Errorf("config refused forms of %d settings outside notYetRefusing, want at least the 14 whose refusals go through their shape: %v", len(refusedTried), refusedTried)
+	// The settings whose refusals go through their shape: one that stops refusing, or a new one, is
+	// seen here, not only in a count.
+	refusing := []string{"allowed-hosts", "allowed-origins", "cimd-allowed-hosts", "cimd-trusted-hosts", "client-denylist", "internal-listen",
+		"listen", "obo-scopes", "oidc-issuer", "oidc-scopes", "public-url", "resource-documentation", "trusted-proxies", "upstream-url"}
+	for _, name := range refusing {
+		if refusedTried[name] == 0 {
+			t.Errorf("config refused no form of %s outside notYetRefusing, want its refusals through its shape tried", name)
+		}
+	}
+	for name := range refusedTried {
+		if !slices.Contains(refusing, name) {
+			t.Errorf("config refused forms of %s, which refusing does not list: add it", name)
+		}
 	}
 	for _, name := range hidingSettings {
 		switch {
@@ -207,7 +218,7 @@ func TestNoCommandShowsAHiddenOrARefusedValue(t *testing.T) {
 // contexts' own client secret (authEnv's), which only a reader of another setting could reach.
 func shows(output string) bool {
 	lower := strings.ToLower(output)
-	return strings.Contains(lower, strings.ToLower(canary)) || strings.Contains(lower, "s3cret-entra")
+	return strings.Contains(lower, strings.ToLower(canary)) || strings.Contains(lower, entraSecret)
 }
 
 // given is how a value is given to s: as itself, or for the stdio upstream's command as an argument

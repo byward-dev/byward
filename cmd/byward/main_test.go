@@ -48,6 +48,9 @@ func runDone(args []string, env ...string) (int, string, string) {
 	return code, out.String(), errb.String()
 }
 
+// entraSecret is the Entra client secret authEnv writes; no output may ever hold it.
+const entraSecret = "s3cret-entra"
+
 // authEnv writes the files authenticated mode needs and returns the settings naming them.
 func authEnv(t *testing.T) []string {
 	t.Helper()
@@ -55,7 +58,7 @@ func authEnv(t *testing.T) []string {
 	keys := sealingkey.Dir(t)
 	for p, c := range map[string]string{
 		filepath.Join(dir, "clients.json"): `{"clients":[{"client_id":"test-app","client_name":"Test app","token_endpoint_auth_method":"none","redirect_uris":["http://127.0.0.1/callback"]}]}`,
-		filepath.Join(dir, "secret"):       "s3cret-entra",
+		filepath.Join(dir, "secret"):       entraSecret,
 	} {
 		if err := os.WriteFile(p, []byte(c), 0o600); err != nil {
 			t.Fatal(err)
@@ -163,7 +166,7 @@ func TestAValueOfEachHidingShapeIsShownThroughItInPrintConfigAndTheStartupLog(t 
 		env, args    []string
 		line, logged string // the --print-config line and the startup log's config record, after "msg":"config",
 	}{
-		{"secret", "s3cret-entra", false, nil, nil,
+		{"secret", entraSecret, false, nil, nil,
 			"BYWARD_ENTRA_CLIENT_SECRET=<redacted> (file)", `"setting":"BYWARD_ENTRA_CLIENT_SECRET","value":"<redacted>","source":"file"}`},
 		{"URL", "S3CRET-api-key", false, []string{"BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp?api_key=S3CRET-api-key"}, nil,
 			"BYWARD_UPSTREAM_URL=http://127.0.0.1:9/mcp?… (env)", `"setting":"BYWARD_UPSTREAM_URL","value":"http://127.0.0.1:9/mcp?…","source":"env"}`},
