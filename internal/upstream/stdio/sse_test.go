@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 func TestAKeepAliveIsAnSSECommentLine(t *testing.T) {
@@ -21,6 +23,36 @@ func TestAKeepAliveIsAnSSECommentLine(t *testing.T) {
 	}
 	if got := rec.Body.String(); got != ":\r\n" {
 		t.Fatalf("keep-alive wrote %q, want %q", got, ":\r\n")
+	}
+}
+
+// An event or a keep-alive that cannot be written, at its write or at its flush, records its stream
+// as cut off with client_closed: its MCP client is gone (#533). One that is written records nothing.
+func TestAnSSEWriteThatFailsRecordsItsStreamAsClientClosed(t *testing.T) {
+	for op, do := range map[string]func(sse) error{
+		"an event":     func(s sse) error { return s.write([]byte(`{}`)) },
+		"a keep-alive": sse.keepAlive,
+	} {
+		for _, broken := range append([]string{""}, failures...) {
+			name, want := op+", written", logging.CutOff("")
+			if broken != "" {
+				name, want = op+", its "+broken+" failing", logging.ClientClosed
+			}
+			t.Run(name, func(t *testing.T) {
+				w := &brokenWriter{header: http.Header{}}
+				var got logging.CutOff
+				logging.Observe(w, httptest.NewRequest(http.MethodGet, "/mcp", nil), http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+					s := startSSE(r.Context(), rw)
+					w.breakIn(broken)
+					if err := do(s); (err != nil) != (broken != "") {
+						t.Errorf("error %v; want one only when the writer fails", err)
+					}
+				}), func(_ int, c logging.CutOff) { got = c })
+				if got != want {
+					t.Errorf("recorded as cut off %q; want %q", got, want)
+				}
+			})
+		}
 	}
 }
 

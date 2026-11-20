@@ -160,10 +160,10 @@ func TestNestedObserversRecordOneCause(t *testing.T) {
 // error_type; every other request line has no error_type at all (#533).
 func TestARequestLineHasAnErrorTypeOnlyForAResponseCutOff(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		handler http.HandlerFunc
-		status  float64
-		cut     any // the request line's error_type; nil for none
+		name      string
+		handler   http.HandlerFunc
+		status    float64
+		errorType any // the request line's error_type, as JSON decodes it; nil for none
 	}{
 		{"a response that ends", accepted, http.StatusAccepted, nil},
 		{"a stream its upstream broke off", streamThenAbort, http.StatusOK, string(UpstreamAborted)},
@@ -178,8 +178,8 @@ func TestARequestLineHasAnErrorTypeOnlyForAResponseCutOff(t *testing.T) {
 			if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
 				t.Fatalf("request line %q: %v", buf.String(), err)
 			}
-			if cut, has := line["error_type"]; line["status"] != tc.status || cut != tc.cut || has != (tc.cut != nil) {
-				t.Errorf("request line %s; want status %v and error_type %v", buf.String(), tc.status, tc.cut)
+			if got, has := line["error_type"]; line["status"] != tc.status || got != tc.errorType || has != (tc.errorType != nil) {
+				t.Errorf("request line %s; want status %v and error_type %v", buf.String(), tc.status, tc.errorType)
 			}
 		})
 	}
