@@ -209,7 +209,7 @@ func (c *Config) oidcIdP(v *Values) []error {
 		// A public client would let anyone who knows the client ID start the proxy's flow at the IdP.
 		errs = append(errs, errorf("%s or %s is required with BYWARD_IDP=%s: the proxy is a confidential client", secret, key, c.IdP))
 	case hasSecret && hasKey:
-		errs = append(errs, errorf("%s and %s are both set; give one of them", secret, key))
+		errs = append(errs, bothSet(secret, key))
 	}
 	if c.OIDCClientKeyID != "" && !hasKey {
 		errs = append(errs, errorf("BYWARD_OIDC_CLIENT_KEY_ID is set without %s", key))

@@ -102,7 +102,10 @@ The release image runs as uid/gid `65532`, with the state directory `/var/lib/by
 
 Secrets are read only from files: the IdP client secret, certificate or key, the upstream
 credential, the stdio upstream's environment file and the PostgreSQL connection string
-each have a `*_FILE` setting. An inline secret refuses to start.
+each have a `*_FILE` setting. An inline secret refuses to start unless `--dev` is set; one given
+beside its `*_FILE` or `--*-file` refuses even with `--dev`: byward would not know which you mean.
+A variable set to nothing (`BYWARD_ENTRA_CLIENT_SECRET=`) is as if unset, so an env template that
+lists both is fine.
 
 A secret file, the TLS key and each sealing or assertion key must have no permission for its group
 or others: mode `0600` or `0400`, owned by uid 65532. A file on a read-only mount passes this check
@@ -126,7 +129,7 @@ This is the whole list. Each relaxation applies only with `--dev`, for trying by
 | With `--dev` | Without it | Startup log (`development mode relaxation`) |
 |---|---|---|
 | Secret files' permissions are not checked (a world-writable key file, or key directory not on a read-only mount, is still refused) | A secret file with any permission for its group or others is refused, unless on a read-only mount | `secret file permissions are not checked` |
-| Secrets may be given inline, as `BYWARD_<NAME>` instead of `BYWARD_<NAME>_FILE` | An inline secret is refused | `inline secrets accepted: <the settings>` |
+| Secrets may be given inline, as `BYWARD_<NAME>` instead of (never beside) `BYWARD_<NAME>_FILE` or `--<name>-file` | An inline secret is refused | `inline secrets accepted: <the settings>` |
 | An http public URL on a loopback host (`http://localhost:8080/mcp`) | The public URL must be https | `http public URL on loopback`; `BYWARD_INSECURE_NO_AUTH` allows it too |
 | An http OIDC issuer on a loopback host, and http endpoints in its discovery document on loopback | The issuer and every endpoint must be https | `http IdP issuer on loopback (<issuer>): …` (v0.2.0 does not log it) |
 | A PostgreSQL connection without `sslmode=verify-full` | `verify-full` is required | `the PostgreSQL store accepts a connection without verify-full TLS` |

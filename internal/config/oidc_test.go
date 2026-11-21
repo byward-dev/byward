@@ -92,7 +92,7 @@ func TestAnOIDCIdPWithMissingOrConflictingSettingsRefusesToStart(t *testing.T) {
 		"no issuer":                       {without("BYWARD_OIDC_ISSUER"), "BYWARD_OIDC_ISSUER is required with BYWARD_IDP=keycloak"},
 		"no client ID":                    {without("BYWARD_OIDC_CLIENT_ID"), "BYWARD_OIDC_CLIENT_ID is required with BYWARD_IDP=keycloak"},
 		"a public client":                 {without("BYWARD_OIDC_CLIENT_SECRET_FILE"), "BYWARD_OIDC_CLIENT_SECRET_FILE or BYWARD_OIDC_CLIENT_KEY_FILE is required"},
-		"a secret and a key":              {with("BYWARD_OIDC_CLIENT_KEY_FILE=/run/secrets/key.pem"), "are both set; give one of them"},
+		"a secret and a key":              {with("BYWARD_OIDC_CLIENT_KEY_FILE=/run/secrets/key.pem"), "BYWARD_OIDC_CLIENT_SECRET_FILE and BYWARD_OIDC_CLIENT_KEY_FILE are both set; give one of them"},
 		"a key ID with no key":            {with("BYWARD_OIDC_CLIENT_KEY_ID=k1"), "BYWARD_OIDC_CLIENT_KEY_ID is set without BYWARD_OIDC_CLIENT_KEY_FILE"},
 		"a key algorithm with no key":     {with("BYWARD_OIDC_CLIENT_KEY_ALG=RS256"), "BYWARD_OIDC_CLIENT_KEY_ALG is set without BYWARD_OIDC_CLIENT_KEY_FILE"},
 		"an unknown key algorithm":        {withAKey("BYWARD_OIDC_CLIENT_KEY_ALG=RS384"), "BYWARD_OIDC_CLIENT_KEY_ALG: want PS256 or RS256 (an RSA key) or ES256 (an EC P-256 key); got a value (5 characters, not shown): it is not one of them"},

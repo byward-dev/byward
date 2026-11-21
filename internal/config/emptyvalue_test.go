@@ -88,13 +88,12 @@ func TestResolveKeepsEmptyAsGivenOnlyForASettingThatSaysSo(t *testing.T) {
 	}
 }
 
-// A secret's variable set to nothing beside its _FILE variable loads as the _FILE variable alone:
-// the secret is read from the file, and is no inline secret (which the _FILE variable alone never is).
-// resolve reads the _FILE variable first, so this held before #428 too; it keeps an empty variable
-// harmless when an inline secret beside its file is refused (#590).
+// A secret's variable set to nothing beside its file, the _FILE variable or the --<name>-file flag,
+// loads as the file alone: the secret is read from the file, and is no inline secret. It keeps an
+// empty variable harmless now that an inline secret beside its file is refused (#590).
 func TestASecretSetToNothingBesideItsFileLoadsAsTheFileAlone(t *testing.T) {
 	const path = "/run/secrets/the-file"
-	loaded := 0
+	loaded := map[string]int{} // by how the file is given
 	for _, m := range emptyModes {
 		files := func(p string) ([]byte, error) {
 			if p == path {
@@ -106,17 +105,22 @@ func TestASecretSetToNothingBesideItsFileLoadsAsTheFileAlone(t *testing.T) {
 			if !s.Secret() {
 				continue
 			}
-			fileOnly := append(without(s.Env(), s.Env()+"_FILE")(slices.Clone(m.env)), s.Env()+"_FILE="+path)
-			want, _, wantErr := Load(nil, fileOnly, files)
-			got, _, gotErr := Load(nil, append(slices.Clone(fileOnly), s.Env()+"="), files)
-			loadsAlike(t, m.name+", "+s.Env()+"= with "+s.Env()+"_FILE", got, want, gotErr, wantErr)
-			if gotErr == nil {
-				loaded++
+			unset := without(s.Env(), s.Env()+"_FILE")(slices.Clone(m.env))
+			for _, f := range secretFileForms(s, path) {
+				env := append(slices.Clone(unset), f.env...)
+				want, _, wantErr := Load(f.args, env, files)
+				got, _, gotErr := Load(f.args, append(slices.Clone(env), s.Env()+"="), files)
+				loadsAlike(t, m.name+", "+s.Env()+"= beside "+f.from, got, want, gotErr, wantErr)
+				if gotErr == nil {
+					loaded[f.how]++
+				}
 			}
 		}
 	}
-	if loaded == 0 {
-		t.Fatal("no secret loaded from its file in any mode, so the walk compared only errors")
+	for _, f := range secretFileForms(Setting{}, "") {
+		if loaded[f.how] == 0 {
+			t.Errorf("no secret loaded from a file given as %s in any mode, so those rows compared only errors", f.how)
+		}
 	}
 }
 

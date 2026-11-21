@@ -127,6 +127,8 @@ list. Status on `main`:
 - Secrets are read only from files (`*_FILE`, `--*-file`). An inline secret refuses to start
   unless `--dev` is set, and so does a secret file (a setting's `*_FILE`, the TLS key, or a sealing
   or assertion key) with any permission for its group or others, unless it is on a read-only mount.
+  A secret given inline, not empty, beside its file refuses to start even with `--dev`, naming both settings,
+  never the value (#590).
 - The `Origin` allowlist on the MCP endpoint is empty: only the proxy's own origin and clients that
   send no `Origin` pass. No `X-Forwarded-For` is trusted until you set
   `BYWARD_TRUSTED_PROXIES`.

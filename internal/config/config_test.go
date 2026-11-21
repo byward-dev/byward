@@ -499,6 +499,25 @@ func TestSecretFileNeedsAFileReader(t *testing.T) {
 	}
 }
 
+// A secret file that cannot be read is named as it was given, the _FILE variable or the
+// --<name>-file flag, for every secret setting: never by the other form, which the operator did not set.
+func TestASecretFileThatCannotBeReadIsNamedAsGiven(t *testing.T) {
+	missing := func(string) ([]byte, error) { return nil, os.ErrNotExist }
+	for _, s := range registry {
+		if !s.Secret() {
+			continue
+		}
+		for _, f := range secretFileForms(s, "/run/secrets/x") {
+			_, err := resolve(registry, f.args, f.env, missing, nil)
+			want := f.from + ": want the path of a file holding the secret, such as /run/secrets/" + s.Name +
+				"; got a value (14 characters, not shown): it cannot be read: file does not exist"
+			if !isConfigError(err) || err.Error() != want {
+				t.Errorf("%s: err = %v, want %q", f.from, err, want)
+			}
+		}
+	}
+}
+
 // ADR-0020 §8: the Entra quickstart needs at most five settings, and each of them is required.
 func TestEntraQuickstartNeedsFiveSettings(t *testing.T) {
 	if len(base) > 5 {

@@ -119,6 +119,9 @@ func (e *configError) Error() string { return e.msg }
 
 func errorf(format string, a ...any) error { return &configError{msg: fmt.Sprintf(format, a...)} }
 
+// bothSet is the refusal of two settings, or two forms of one, given where one is wanted.
+func bothSet(a, b string) error { return errorf("%s and %s are both set; give one of them", a, b) }
+
 // Values holds the resolved registry.
 type Values struct {
 	order []string
@@ -196,8 +199,9 @@ const commandSetting = "upstream-command"
 type readFileFunc = func(path string) ([]byte, error)
 
 // resolve applies flags > env > defaults over a registry. extraFlags registers command-line-only
-// flags (actions such as --version) on the same flag set. Inline secrets are rejected unless
-// allowInlineSecrets is set (development mode).
+// flags (actions such as --version) on the same flag set. A secret given inline, not empty, beside
+// its file is refused, in development mode too (#590): the file would win in silence. An inline
+// secret alone is checkInlineSecrets' to refuse.
 func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extraFlags func(*flag.FlagSet)) (*Values, error) {
 	fs := flag.NewFlagSet("byward", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -255,14 +259,21 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 		v := Value{Setting: s, Given: NewOpaque(s.Default), Source: SourceDefault}
 		switch {
 		case s.Secret() && set[s.Name+"-file"]:
-			raw, err := readSecret(readFile, s, *fileFlagVals[s.Name], "--"+s.Name+"-file")
+			from := "--" + s.Name + "-file"
+			if env[s.Env()] != "" { // set to nothing is as if unset (#428)
+				return nil, bothSet(s.Env(), from)
+			}
+			raw, err := readSecret(readFile, s, *fileFlagVals[s.Name], from)
 			if err != nil {
 				return nil, err
 			}
-			v.Given, v.Source, v.Path, v.From = NewOpaque(raw), SourceFile, *fileFlagVals[s.Name], "--"+s.Name+"-file"
+			v.Given, v.Source, v.Path, v.From = NewOpaque(raw), SourceFile, *fileFlagVals[s.Name], from
 		case !s.Secret() && set[s.Name]:
 			v.Given, v.Source = NewOpaque(*flagVals[s.Name]), SourceFlag
 		case s.Secret() && env[s.Env()+"_FILE"] != "":
+			if env[s.Env()] != "" { // set to nothing is as if unset (#428)
+				return nil, bothSet(s.Env(), s.Env()+"_FILE")
+			}
 			raw, err := readSecret(readFile, s, env[s.Env()+"_FILE"], s.Env()+"_FILE")
 			if err != nil {
 				return nil, err

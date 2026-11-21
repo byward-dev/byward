@@ -28,7 +28,9 @@ variables.
 1. **Sources: flags > `BYWARD_*` env > defaults.** Every setting has both a flag and an env
    name. No general config file; lists are comma-separated.
 2. **Secrets only from files:** `*_FILE` env or `--*-file` flags. An inline secret is accepted only
-   with `--dev` and logs a warning.
+   with `--dev` and logs a warning. _Amended 2026-11-21 (#590):_ a secret given inline, not empty,
+   beside its `*_FILE` or `--*-file` is refused, even with `--dev`, naming both settings and never
+   the value: the file would win in silence.
 3. **Structured settings come from files:**
    - signing and sealing keys from a directory, the file name being the key ID (ADR-0007); rotation
      adds a file and restarts;
