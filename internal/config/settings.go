@@ -60,7 +60,7 @@ var registry = []Setting{
 	{Name: "log-format", shape: asGivenShape, Group: GroupOperations, Default: "json", Help: "log format: json or text"},
 	{Name: "trusted-proxies", shape: asGivenShape, Group: GroupOperations, Help: "comma-separated CIDRs or addresses of reverse proxies whose X-Forwarded-For is trusted for the client address (ADR-0018 §6); empty trusts none; an entry with an IPv6 zone, or inside link-local fe80::/10, is refused: such an address names a host only together with an interface"},
 	{Name: "oauth-rate-limits", shape: asGivenShape, Group: GroupOperations, Help: "per-minute limits per client address on OAuth endpoints, e.g. authorize=60,token=120 (ADR-0018 §8); unset endpoints keep their defaults"},
-	{Name: "internal-listen", shape: asGivenShape, Group: GroupOperations, Default: "127.0.0.1:9090", EmptyMeans: "off", Help: "address of the internal listener for /metrics, /livez and /readyz (ADR-0018 §10); empty turns it off"},
+	{Name: "internal-listen", shape: asGivenShape, Group: GroupOperations, Default: "127.0.0.1:9090", EmptyIsGiven: true, Help: "address of the internal listener for /metrics, /livez and /readyz (ADR-0018 §10); empty turns it off"},
 	{Name: "idp", shape: asGivenShape, Group: GroupIdP, Auth: true, Default: "entra", Help: "the IdP users sign in with: entra, or oidc for any OpenID Connect IdP, or one of its presets " + strings.Join(OIDCPresets, ", ") + " (ADR-0011, docs/how-to/oidc.md); the callback path is /callback/<idp>"},
 	{Name: "entra-tenant", shape: asGivenShape, Group: GroupEntra, Auth: true, Help: "Entra tenant ID (a GUID) of the IdP app"},
 	{Name: "entra-client-id", shape: asGivenShape, Group: GroupEntra, Auth: true, Help: "application (client) ID of the IdP app registration"},

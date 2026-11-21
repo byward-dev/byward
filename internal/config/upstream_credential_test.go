@@ -95,6 +95,9 @@ func TestUpstreamCredentialSettingsRefuseWhatCannotWork(t *testing.T) {
 			"BYWARD_UPSTREAM_CREDENTIAL_HEADER and BYWARD_ASSERTION_HEADER name the same header"},
 		{"a header without a credential", "", []string{"BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
 			"BYWARD_UPSTREAM_CREDENTIAL_HEADER is set, but there is no credential: set BYWARD_UPSTREAM_CREDENTIAL_FILE too"},
+		// Set to nothing is as if unset (#428), so the header still has no credential to send.
+		{"a header beside a credential set to nothing", "", []string{"BYWARD_UPSTREAM_CREDENTIAL=", "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
+			"BYWARD_UPSTREAM_CREDENTIAL_HEADER is set, but there is no credential: set BYWARD_UPSTREAM_CREDENTIAL_FILE too"},
 		{"a reserved header", "k-123", []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=Cookie"},
 			"BYWARD_UPSTREAM_CREDENTIAL_HEADER: want a header name such as Authorization or X-Api-Key; got Cookie: the proxy, the transport or MCP relies on it"},
 		{"not a header name", "k-123", []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X Api Key"},
@@ -130,8 +133,8 @@ func TestUpstreamCredentialSettingsRefuseWhatCannotWork(t *testing.T) {
 }
 
 // Each error names the credential setting as the operator gave it: the env variable, the _FILE
-// variable or the flag. An inline value (accepted only under --dev; refused beside this error without
-// it) has no file, so it is never said to be an empty file.
+// variable or the flag. An inline value (accepted only under --dev) has no file, so it is never said
+// to be an empty file.
 func TestUpstreamCredentialErrorsNameTheSettingAsGiven(t *testing.T) {
 	header := "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"
 	long := "k-123" + strings.Repeat("k", maxUpstreamCredential-4)

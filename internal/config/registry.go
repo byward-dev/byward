@@ -29,10 +29,10 @@ type Setting struct {
 	// Auth marks settings that configure authentication (IdP, broker); --insecure-no-auth refuses
 	// to start when any of them is set, so a half-configured production setup never runs open.
 	Auth bool
-	// EmptyMeans is what the setting's variable set to nothing means, for the rare setting that
-	// gives it a meaning of its own. Unset (the rule): set to nothing is as if unset, since env
-	// templates list every variable (#428).
-	EmptyMeans string
+	// EmptyIsGiven keeps the setting's variable set to nothing as given, for the rare setting whose
+	// Help gives empty a meaning of its own. Otherwise (the rule) set to nothing is as if unset, since
+	// env templates list every variable (#428).
+	EmptyIsGiven bool
 	// shape decides how the value is shown (ADR-0031 §3); secretShape also means the value is read
 	// only from a file. Every registry entry has one (checkShapes, at init).
 	shape *shape
@@ -151,7 +151,7 @@ func (v *Values) empty(name string) bool { return v.byKey[name].Given.empty() }
 
 // given reports whether the operator gave the setting: a value, or a file named for a secret, which
 // is given even when it is empty, so it never falls back to another choice. A variable set to nothing
-// never reaches here (resolve takes it as unset, Setting.EmptyMeans), nor does a _FILE variable set to
+// never reaches here (resolve takes it as unset, Setting.EmptyIsGiven), nor does a _FILE variable set to
 // nothing, which names no file; a flag set to nothing is not given here.
 func (val Value) given() bool { return !val.Given.empty() || val.Path != "" }
 
@@ -266,7 +266,7 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 			}
 			v.Given, v.Source, v.Path, v.From = NewOpaque(raw), SourceFile, env[s.Env()+"_FILE"], s.Env()+"_FILE"
 		default:
-			if e, ok := env[s.Env()]; ok && (e != "" || s.EmptyMeans != "") { // set to nothing is as if unset (Setting.EmptyMeans)
+			if e, ok := env[s.Env()]; ok && (e != "" || s.EmptyIsGiven) { // set to nothing is as if unset (Setting.EmptyIsGiven)
 				v.Given, v.Source = NewOpaque(e), SourceEnv
 			}
 		}

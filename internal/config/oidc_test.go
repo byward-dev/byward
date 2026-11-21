@@ -62,13 +62,6 @@ func with(kv ...string) func([]string) []string {
 	return func(env []string) []string { return append(env, kv...) }
 }
 
-// A roles claim set to nothing is as if unset (#428): the default.
-func TestAnOIDCRolesClaimSetToNothingIsTheDefault(t *testing.T) {
-	if c, err := loadOIDC(t, with("BYWARD_OIDC_ROLES_CLAIM=")); err != nil || c.OIDCRolesClaim != "roles" {
-		t.Errorf("BYWARD_OIDC_ROLES_CLAIM=: claim %q, err %v; want the default roles", c.OIDCRolesClaim, err)
-	}
-}
-
 func TestAnOIDCIdPIsReadFromItsSettings(t *testing.T) {
 	c, err := loadOIDC(t, with("BYWARD_OIDC_SCOPES=groups, roles", "BYWARD_OIDC_NAME=Acme SSO"))
 	if err != nil {
