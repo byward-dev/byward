@@ -89,10 +89,10 @@ func TestParseReadsAHostAsABrowserDoes(t *testing.T) {
 }
 
 // A parsed host is loopback by the host a browser reads (127.1 is 127.0.0.1, a full-width localhost
-// is localhost), while LoopbackAsWritten takes a host only in the form Go's dialer reads: ASCII, and
-// as Parse writes it, case aside. Both fold localhost's case (A1, #482). A redirect URI's loopback set
-// is exact instead (ADR-0032 §5).
-func TestLoopbackReadsTheParsedHostButAsWrittenOnlyTheFormGosDialerReads(t *testing.T) {
+// is localhost), while LoopbackAsWritten takes a host only in ASCII and as Parse writes it, case
+// aside. Both fold localhost's case (A1, #482). A redirect URI's loopback set is exact instead
+// (ADR-0032 §5).
+func TestLoopbackReadsTheParsedHostButAsWrittenOnlyTheASCIIFormParseWrites(t *testing.T) {
 	for _, tc := range []struct {
 		host              string
 		parsed, asWritten bool
@@ -106,7 +106,7 @@ func TestLoopbackReadsTheParsedHostButAsWrittenOnlyTheFormGosDialerReads(t *test
 		{"2001:db8::1", false, false},
 		{"[2001:db8::1]", false, false},
 		{"::ffff:10.0.0.1", false, false},
-		// Spellings a browser reads as 127.0.0.1, or as localhost, that Go's dialer does not.
+		// Spellings a browser reads as 127.0.0.1, or as localhost, that are not the form Parse writes.
 		{"127.1", true, false},
 		{"0x7f.0.0.1", true, false},
 		{"0177.0.0.1", true, false},

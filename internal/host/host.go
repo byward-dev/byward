@@ -149,11 +149,12 @@ func (h Host) Loopback() bool {
 	return h.Addr.Unmap().IsLoopback()
 }
 
-// LoopbackAsWritten reports whether h is loopback as an operator wrote it, in the form Go's dialer
-// reads: ASCII only, and a name or an IPv4 address only as Parse writes it, case aside. So localhost
-// counts in any case (A1), but neither 127.1 nor a full-width or IDNA-mapped spelling of localhost
-// does, though Parse reads them as 127.0.0.1 and localhost and Host.Loopback says they are. h has no
-// port, and an IPv6 address no brackets: a host with either is not loopback here.
+// LoopbackAsWritten reports whether h is loopback as an operator wrote it: ASCII only, and a name or
+// an IPv4 address only as Parse writes it, case aside. So localhost counts in any case (A1), but
+// neither 127.1 nor a full-width or IDNA-mapped spelling of localhost does, though Parse reads them
+// as 127.0.0.1 and localhost and Host.Loopback says they are. Resolvers do not agree on those
+// spellings (Go's own refuses them; the system's may reach loopback), so only the form they all read
+// alike counts. h has no port, and an IPv6 address no brackets: a host with either is not loopback.
 func LoopbackAsWritten(h string) bool {
 	if strings.HasPrefix(h, "[") || strings.ContainsFunc(h, func(r rune) bool { return r >= 0x80 }) {
 		return false

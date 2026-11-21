@@ -59,7 +59,7 @@ func TestCanonicalWritesAnAddressAsBrowsersDoAndAnyOtherHostInLowerCase(t *testi
 // Hostname reduces a host[:port], a bracketed IPv6 address included, to its lower-case host name
 // (#319).
 func TestHostnameReducesAHostPortToItsLowerCaseHostName(t *testing.T) {
-	for entry, want := range map[string]string{
+	for hostport, want := range map[string]string{
 		"mcp.example.com":      "mcp.example.com",
 		"mcp.example.com:8443": "mcp.example.com",
 		"MCP.Example.COM:8443": "mcp.example.com",
@@ -70,8 +70,8 @@ func TestHostnameReducesAHostPortToItsLowerCaseHostName(t *testing.T) {
 		"127.0.0.1:8080":       "127.0.0.1",
 		"localhost":            "localhost",
 	} {
-		if got := Hostname(entry); got != want {
-			t.Errorf("Hostname(%q) = %q, want %q", entry, got, want)
+		if got := Hostname(hostport); got != want {
+			t.Errorf("Hostname(%q) = %q, want %q", hostport, got, want)
 		}
 	}
 }
