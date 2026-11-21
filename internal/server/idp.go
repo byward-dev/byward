@@ -229,7 +229,7 @@ func entraClientAuth(cfg *config.Config) (idp.ClientAuth, entra.Diagnosis, time.
 		d.CredentialKind, d.CredentialSetting = entra.CredentialFederated, config.Setting{Name: "entra-federated-token-file"}.Env()
 		return idp.AssertionFile(cfg.EntraFederatedTokenFile), d, time.Time{}, nil
 	case cfg.EntraClientCertificate != "":
-		d.CredentialKind, d.CredentialSetting = entra.CredentialCertificate, config.Setting{Name: "entra-client-certificate"}.Env()+"_FILE"
+		d.CredentialKind, d.CredentialSetting = entra.CredentialCertificate, config.SecretFileEnv("entra-client-certificate")
 		cert, err := entra.LoadCertificate([]byte(cfg.EntraClientCertificate))
 		if err != nil {
 			return nil, d, time.Time{}, fmt.Errorf("%s: %w (docs/how-to/entra-certificate.md)", d.CredentialSetting, err)
@@ -240,15 +240,15 @@ func entraClientAuth(cfg *config.Config) (idp.ClientAuth, entra.Diagnosis, time.
 		}
 		return auth, d, cert.X509.NotAfter, nil
 	}
-	d.CredentialKind, d.CredentialSetting = entra.CredentialSecret, config.Setting{Name: "entra-client-secret"}.Env()+"_FILE"
+	d.CredentialKind, d.CredentialSetting = entra.CredentialSecret, config.SecretFileEnv("entra-client-secret")
 	return idp.ClientSecret(cfg.EntraClientSecret), d, time.Time{}, nil
 }
 
 // oidcDiagnosis names the settings of the oidc client and its credential, for doctor's fixes.
 func oidcDiagnosis(cfg *config.Config) oidc.Diagnosis {
-	d := oidc.Diagnosis{ClientIDSetting: config.Setting{Name: "oidc-client-id"}.Env(), CredentialSetting: config.Setting{Name: "oidc-client-secret"}.Env() + "_FILE"}
+	d := oidc.Diagnosis{ClientIDSetting: config.Setting{Name: "oidc-client-id"}.Env(), CredentialSetting: config.SecretFileEnv("oidc-client-secret")}
 	if cfg.OIDCClientKey != "" {
-		d.CredentialSetting, d.KeyCredential = config.Setting{Name: "oidc-client-key"}.Env()+"_FILE", true
+		d.CredentialSetting, d.KeyCredential = config.SecretFileEnv("oidc-client-key"), true
 	}
 	return d
 }

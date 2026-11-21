@@ -69,7 +69,7 @@ func (c *Config) requiredForIdP(v *Values, names ...string) []error {
 		if v.empty(s) {
 			env := v.byKey[s].Setting.Env()
 			if v.byKey[s].Setting.Secret() {
-				env += "_FILE"
+				env = v.byKey[s].Setting.FileEnv()
 			}
 			errs = append(errs, errorf("%s is required with BYWARD_IDP=%s (or set BYWARD_INSECURE_NO_AUTH to try the proxy without sign-in)", env, c.IdP))
 		}
@@ -90,8 +90,8 @@ func (c *Config) entraIdP(v *Values) []error {
 		errs = append(errs, err)
 	}
 	errs = append(errs, c.requiredForIdP(v, "entra-tenant", "entra-client-id")...)
-	secretEnv, tokenEnv := Setting{Name: "entra-client-secret"}.Env()+"_FILE", Setting{Name: "entra-federated-token-file"}.Env()
-	certEnv := Setting{Name: "entra-client-certificate"}.Env() + "_FILE"
+	secretEnv, tokenEnv := lookup("entra-client-secret").FileEnv(), Setting{Name: "entra-federated-token-file"}.Env()
+	certEnv := lookup("entra-client-certificate").FileEnv()
 	hasSecret, hasCert := v.given("entra-client-secret"), v.given("entra-client-certificate")
 	var set []string // the Entra app's credentials given: exactly one (ADR-0012 §5)
 	for env, given := range map[string]bool{secretEnv: hasSecret, tokenEnv: c.EntraFederatedTokenFile != "", certEnv: hasCert} {
@@ -193,7 +193,7 @@ func (c *Config) oidcIdP(v *Values) []error {
 		c.Relaxations = append(c.Relaxations, "http IdP issuer on loopback ("+v.display("oidc-issuer")+"): discovery over http, and the IdP's sign-in page, token endpoint and signing keys over http too where it lists them on loopback")
 	}
 	errs = append(errs, c.requiredForIdP(v, "oidc-client-id")...)
-	secret, key := Setting{Name: "oidc-client-secret"}.Env()+"_FILE", Setting{Name: "oidc-client-key"}.Env()+"_FILE"
+	secret, key := lookup("oidc-client-secret").FileEnv(), lookup("oidc-client-key").FileEnv()
 	hasSecret, hasKey := v.given("oidc-client-secret"), v.given("oidc-client-key")
 	for _, name := range []string{"oidc-client-secret", "oidc-client-key"} {
 		if err := v.emptySecretFile(name); err != nil {

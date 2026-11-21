@@ -18,13 +18,17 @@ import (
 // reports the relaxation instead.
 func checkInlineSecrets(v *Values, dev bool) (relaxation string, err error) {
 	secrets := v.inlineSecrets()
+	envs := make([]string, len(secrets))
+	for i, s := range secrets {
+		envs[i] = s.Env()
+	}
 	switch {
 	case len(secrets) == 0:
 		return "", nil
 	case !dev:
-		return "", errorf("%s: secrets must come from a file (%s_FILE)", strings.Join(secrets, ", "), secrets[0])
+		return "", errorf("%s: secrets must come from a file (%s)", strings.Join(envs, ", "), secrets[0].FileEnv())
 	default:
-		return "inline secrets accepted: " + strings.Join(secrets, ", "), nil
+		return "inline secrets accepted: " + strings.Join(envs, ", "), nil
 	}
 }
 

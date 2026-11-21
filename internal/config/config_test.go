@@ -456,7 +456,7 @@ func TestInlineSecretIsReported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := v.inlineSecrets(); len(got) != 1 || got[0] != "BYWARD_CLIENT_SECRET" {
+	if got := v.inlineSecrets(); len(got) != 1 || got[0].Env() != "BYWARD_CLIENT_SECRET" {
 		t.Fatalf("inline = %v", got)
 	}
 	if v.Effective()[0].Display() != "<redacted>" {

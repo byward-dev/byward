@@ -58,7 +58,7 @@ func PathVariables() []string {
 		case s.HoldsPath():
 			out = append(out, s.Env())
 		case s.Secret():
-			out = append(out, s.Env()+"_FILE")
+			out = append(out, s.FileEnv())
 		}
 	}
 	return out
@@ -68,6 +68,21 @@ func PathVariables() []string {
 func (s Setting) Env() string {
 	return envPrefix + strings.ToUpper(strings.ReplaceAll(s.Name, "-", "_"))
 }
+
+// FileEnv is a secret's file variable, `<ENV>_FILE`, the one way its secret is given (#506). It panics
+// for a setting that is not a secret, which has none, so a name built for the wrong setting fails the
+// first test that reaches it.
+func (s Setting) FileEnv() string {
+	if !s.Secret() {
+		panic("config: " + s.Name + " is not a secret, so it has no _FILE variable")
+	}
+	return s.Env() + "_FILE"
+}
+
+// SecretFileEnv is the file variable of the registry's secret setting name, for code outside this
+// package that names it in a message. It panics for a name the registry does not hold, or one that is
+// not a secret.
+func SecretFileEnv(name string) string { return lookup(name).FileEnv() }
 
 // Source tells where a value came from.
 type Source string
@@ -290,15 +305,15 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 			v.Given, v.Source, v.Path, v.From = NewOpaque(raw), SourceFile, *fileFlagVals[s.Name], from
 		case !s.Secret() && set[s.Name]:
 			v.Given, v.Source = NewOpaque(*flagVals[s.Name]), SourceFlag
-		case s.Secret() && env[s.Env()+"_FILE"] != "":
+		case s.Secret() && env[s.FileEnv()] != "":
 			if env[s.Env()] != "" { // set to nothing is as if unset (#428)
-				return nil, bothSet(s.Env(), s.Env()+"_FILE")
+				return nil, bothSet(s.Env(), s.FileEnv())
 			}
-			raw, err := readSecret(readFile, s, env[s.Env()+"_FILE"], s.Env()+"_FILE")
+			raw, err := readSecret(readFile, s, env[s.FileEnv()], s.FileEnv())
 			if err != nil {
 				return nil, err
 			}
-			v.Given, v.Source, v.Path, v.From = NewOpaque(raw), SourceFile, env[s.Env()+"_FILE"], s.Env()+"_FILE"
+			v.Given, v.Source, v.Path, v.From = NewOpaque(raw), SourceFile, env[s.FileEnv()], s.FileEnv()
 		default:
 			if e, ok := env[s.Env()]; ok && (e != "" || s.EmptyIsGiven) { // set to nothing is as if unset (Setting.EmptyIsGiven)
 				v.Given, v.Source = NewOpaque(e), SourceEnv
@@ -391,11 +406,11 @@ func refusedFlag(fs *flag.FlagSet, msg string) *flag.Flag {
 }
 
 // inlineSecrets lists secret settings given directly in env instead of through a file.
-func (v *Values) inlineSecrets() []string {
-	var out []string
+func (v *Values) inlineSecrets() []Setting {
+	var out []Setting
 	for _, val := range v.Effective() {
 		if val.Setting.Secret() && val.Source == SourceEnv {
-			out = append(out, val.Setting.Env())
+			out = append(out, val.Setting)
 		}
 	}
 	return out
@@ -432,7 +447,7 @@ func checkUnknownEnv(reg []Setting, env map[string]string) error {
 	for _, s := range reg {
 		known[s.Env()] = true
 		if s.Secret() {
-			known[s.Env()+"_FILE"] = true
+			known[s.FileEnv()] = true
 		}
 	}
 	var unknown []string

@@ -141,7 +141,7 @@ func Usage() string {
 		env := s.Env()
 		if s.Secret() {
 			flagName += "-file"
-			env += "_FILE"
+			env = s.FileEnv()
 		}
 		fmt.Fprintf(&b, "  %s / %s", flagName, env)
 		if s.Default != "" {
@@ -172,7 +172,7 @@ func reference() string {
 			flagName, env := "--"+s.Name, s.Env()
 			if s.Secret() {
 				flagName += "-file"
-				env += "_FILE"
+				env = s.FileEnv()
 			}
 			def := s.Default
 			if def == "" {

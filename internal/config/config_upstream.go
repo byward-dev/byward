@@ -201,7 +201,7 @@ const maxUpstreamCredential = 4 << 10
 // upstream, a header value without control characters, in a header that is not the assertion's.
 // The credential's errors name it as the operator gave it (spelled), never its value.
 func (c *Config) upstreamCredential(v *Values) []error {
-	fileEnv, hEnv := Setting{Name: "upstream-credential"}.Env()+"_FILE", Setting{Name: "upstream-credential-header"}.Env()
+	fileEnv, hEnv := lookup("upstream-credential").FileEnv(), Setting{Name: "upstream-credential-header"}.Env()
 	val, header := v.byKey["upstream-credential"], v.byKey["upstream-credential-header"]
 	if !v.httpUpstream() { // with stdio the header is an off-mode setting; with no upstream or both, upstream's error says enough
 		if v.stdioUpstream() && val.Source != SourceDefault {

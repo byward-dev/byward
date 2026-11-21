@@ -30,7 +30,7 @@ func (q Quickstart) EnvFile() string {
 		s := lookup(name)
 		env := s.Env()
 		if s.Secret() {
-			env += "_FILE"
+			env = s.FileEnv()
 		}
 		if values[name] == "" {
 			fmt.Fprintf(&b, "# %s: %s\n", env, s.Help)
