@@ -690,33 +690,37 @@ func TestSecretFilesNameTheFileEachSecretCameFrom(t *testing.T) {
 }
 
 func TestUpstreamHeaderTimeoutDefaultsToFiveMinutesWithinBounds(t *testing.T) {
+	const refused = "BYWARD_UPSTREAM_HEADER_TIMEOUT: want a duration from 1s to 1h, such as 5m; got "
 	cases := []struct {
-		env     string
-		want    time.Duration
-		wantErr bool
+		env  string
+		want time.Duration
+		err  string // the whole refusal, when refused
 	}{
-		{"", 5 * time.Minute, false},
-		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=1s", time.Second, false},
-		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=1h", time.Hour, false},
-		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=999ms", 0, true},
-		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=61m", 0, true},
-		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=0s", 0, true},
-		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=5", 0, true},
+		{"", 5 * time.Minute, ""},
+		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=1s", time.Second, ""},
+		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=1h", time.Hour, ""},
+		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=999ms", 0, refused + "999ms: it is out of range"},
+		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=61m", 0, refused + "1h1m0s: it is out of range"},
+		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=0s", 0, refused + "0s: it is out of range"},
+		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=3600001ms", 0, refused + "1h0m0.001s: it is out of range"}, // shown as parsed
+		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=5", 0, refused + "a value (1 character, not shown): it is not a duration"},
 	}
 	for _, c := range cases {
-		var env []string
-		if c.env != "" {
-			env = []string{c.env}
-		}
-		cfg, _, err := Load(nil, noAuthEnv(env...), nil)
-		switch {
-		case c.wantErr && (err == nil || !strings.Contains(err.Error(), "BYWARD_UPSTREAM_HEADER_TIMEOUT")):
-			t.Errorf("%q: want an error naming the setting, got %v", c.env, err)
-		case !c.wantErr && err != nil:
-			t.Errorf("%q: %v", c.env, err)
-		case !c.wantErr && cfg.UpstreamHeaderTimeout != c.want:
-			t.Errorf("%q: timeout %s, want %s", c.env, cfg.UpstreamHeaderTimeout, c.want)
-		}
+		t.Run(c.env, func(t *testing.T) {
+			var env []string
+			if c.env != "" {
+				env = []string{c.env}
+			}
+			cfg, _, err := Load(nil, noAuthEnv(env...), nil)
+			switch {
+			case c.err != "" && (!isConfigError(err) || err.Error() != c.err):
+				t.Errorf("got %v, want %q", err, c.err)
+			case c.err == "" && err != nil:
+				t.Errorf("%v", err)
+			case c.err == "" && cfg.UpstreamHeaderTimeout != c.want:
+				t.Errorf("timeout %s, want %s", cfg.UpstreamHeaderTimeout, c.want)
+			}
+		})
 	}
 }
 

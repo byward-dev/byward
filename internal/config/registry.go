@@ -221,7 +221,11 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 		if errors.Is(err, flag.ErrHelp) {
 			return nil, err
 		}
-		return nil, flagError(fs, err)
+		secrets := map[string]bool{}
+		for _, s := range reg {
+			secrets[s.Name] = s.Secret()
+		}
+		return nil, flagError(fs, err, secrets)
 	}
 	if fs.NArg() > 0 {
 		return nil, errorf("want settings as --name=value flags, and the stdio upstream command after --; got an unexpected argument %s", notShown(fs.Arg(0)))
@@ -289,7 +293,7 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 // flag, and an undefined flag all its text before =, which can be a value pasted as an argument. A
 // flag that needs an argument is named, as it is one of the command's own. Any other message the flag
 // package may write is refused without its text, so a new one cannot show a value.
-func flagError(fs *flag.FlagSet, err error) error {
+func flagError(fs *flag.FlagSet, err error, secrets map[string]bool) error {
 	msg := err.Error()
 	if rest, ok := strings.CutPrefix(msg, "bad flag syntax: "); ok {
 		return errorf("want flags as --name=value; got an argument with a bad flag syntax %s", notShown(rest))
@@ -302,7 +306,7 @@ func flagError(fs *flag.FlagSet, err error) error {
 		return errorf("--%s: want %s; got a value it does not take (not shown)", f.Name, want)
 	}
 	if name, ok := strings.CutPrefix(msg, "flag provided but not defined: -"); ok {
-		return errorf("want flags this command takes; got an undefined flag %s%s", notShown(name), flagHint(fs, name))
+		return errorf("want flags this command takes; got an undefined flag %s%s", notShown(name), flagHint(fs, name, secrets))
 	}
 	if strings.HasPrefix(msg, "flag needs an argument: -") {
 		return errorf("%v", err)
@@ -310,12 +314,15 @@ func flagError(fs *flag.FlagSet, err error) error {
 	return errorf("the command line is refused (the flag package's message is not shown)")
 }
 
-// flagHint suggests the command's own flag an undefined one most likely meant, never the text given: a
-// secret's file flag when the name is a secret setting given inline, else the nearest name, only when
-// it is near enough that the operator, who is not shown the name, can trust it.
-func flagHint(fs *flag.FlagSet, name string) string {
-	if fs.Lookup(name+"-file") != nil {
+// flagHint suggests the command's own flag an undefined one most likely meant, never the text given:
+// the name's -file flag, with the reason when the name is a secret's (secrets), else the nearest name,
+// only when it is near enough that the operator, who is not shown the name, can trust it.
+func flagHint(fs *flag.FlagSet, name string, secrets map[string]bool) string {
+	switch {
+	case fs.Lookup(name+"-file") != nil && secrets[name]:
 		return " (secrets come from a file: did you mean --" + name + "-file?)"
+	case fs.Lookup(name+"-file") != nil:
+		return " (did you mean --" + name + "-file?)"
 	}
 	known := map[string]bool{}
 	fs.VisitAll(func(f *flag.Flag) { known[f.Name] = true })

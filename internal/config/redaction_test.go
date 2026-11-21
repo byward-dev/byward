@@ -253,7 +253,12 @@ func TestAFlagTheFlagPackageRefusesNeverShowsTheTextGiven(t *testing.T) {
 		{"a flag that needs an argument", []string{"--scope"}, "flag needs an argument: -scope"},
 		{"a secret given inline as a flag", []string{"--entra-client-secret=" + canaryText}, "want flags this command takes; got an undefined flag (19 characters, not shown) (secrets come from a file: did you mean --entra-client-secret-file?)"},
 		{"a short undefined flag, near no flag enough to name", []string{"--v"}, "want flags this command takes; got an undefined flag (1 character, not shown)"},
-		{"an undefined flag unlike any", []string{"--debug"}, "want flags this command takes; got an undefined flag (5 characters, not shown)"},
+		{"an undefined flag three edits from --dev, too far to name", []string{"--debug"}, "want flags this command takes; got an undefined flag (5 characters, not shown)"},
+		{"an undefined flag one edit too far to name", []string{"--sco"}, "want flags this command takes; got an undefined flag (3 characters, not shown)"},
+		{"a flag two edits from --scope, too far for its length", []string{"--sxopx=1"}, "want flags this command takes; got an undefined flag (5 characters, not shown)"},
+		{"a long flag three edits from one of the command's own", []string{"--pubxxx-url=1"}, "want flags this command takes; got an undefined flag (10 characters, not shown) (did you mean --public-url?)"},
+		// Only a secret given inline is told secrets come from a file; another setting's file flag is a plain hint.
+		{"a path setting without its -file", []string{"--tls-cert=/x"}, "want flags this command takes; got an undefined flag (8 characters, not shown) (did you mean --tls-cert-file?)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, err := Load(tc.args, base, baseFiles)
@@ -361,7 +366,7 @@ func TestAFlagPackageMessageFlagErrorDoesNotKnowShowsNoText(t *testing.T) {
 	const want = "the command line is refused (the flag package's message is not shown)"
 	fs := flag.NewFlagSet("byward", flag.ContinueOnError)
 	for _, msg := range []string{`invalid value "` + canaryText + `" for flag -nosuch: x`, "a new message quoting " + canaryText} {
-		if err := flagError(fs, errors.New(msg)); !isConfigError(err) || err.Error() != want {
+		if err := flagError(fs, errors.New(msg), nil); !isConfigError(err) || err.Error() != want {
 			t.Errorf("flagError(%q) = %v, want %q", msg, err, want)
 		}
 	}
