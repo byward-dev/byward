@@ -295,6 +295,19 @@ func TestASideFileOpenCannotTightenIsNamedWithoutItsPath(t *testing.T) {
 	}
 }
 
+// A write probe that cannot be removed fails Open naming the state directory and the cause, never
+// the path the remove quotes (security invariant 2, #575). probe_darwin_test.go makes the same
+// failure on a real file system.
+func TestAWriteProbeThatCannotBeRemovedFailsOpenWithoutItsPath(t *testing.T) {
+	t.Cleanup(func() { removeProbe = os.Remove })
+	removeProbe = func(name string) error { return &fs.PathError{Op: "remove", Path: name, Err: syscall.EPERM} }
+	dir := t.TempDir()
+	_, err := Open(bounded(t), Options{Dir: dir, CounterFile: filepath.Join(t.TempDir(), "w")})
+	if want := "sqlite store: the state directory: " + syscall.EPERM.Error(); err == nil || err.Error() != want || !errors.Is(err, syscall.EPERM) {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+}
+
 func TestUnwritableStateDirectoryFailsOpen(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root writes anywhere")
@@ -627,25 +640,26 @@ func TestFirstOpenIsANormalStart(t *testing.T) {
 // Regression (runtime sweep): an error from a write means nothing was stored. The mirror is written
 // before the commit, so a counter path that cannot be written rolls the write back; the error names
 // the counter file and the cause, never a path (security invariant 2, #575), though the rename's
-// error quotes two. Both breaks fail the write for root too.
-func TestFailedCounterWriteStoresNothing(t *testing.T) {
+// error quotes two. The first two breaks fail the write for root too; root lists any directory, so
+// the third skips.
+func TestAFailedCounterWriteStoresNothingAndIsNamedWithoutAPath(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		break_ func(t *testing.T, cdir, counter string)
-		// names is what the error names; causes are the system errors the write may fail with, and
+		name    string
+		breakIt func(t *testing.T, cdir, counter string)
+		// named is what the error names; causes are the system errors the write may fail with, and
 		// the error is the name, then that one alone.
-		names  string
+		named  string
 		causes []syscall.Errno
 	}{
 		{"its directory replaced by a file", func(t *testing.T, cdir, _ string) {
 			must(t, os.RemoveAll(cdir))
 			must(t, os.WriteFile(cdir, nil, 0o600))
 		}, "counter file", []syscall.Errno{syscall.ENOTDIR}},
-		// A file cannot replace a directory: EISDIR on Linux, EEXIST on macOS.
+		// os.Rename refuses a directory as its target with EEXIST on every Unix (os/file_unix.go).
 		{"the file replaced by a directory", func(t *testing.T, _, counter string) {
 			must(t, os.Remove(counter))
-			must(t, os.MkdirAll(filepath.Join(counter, "full"), 0o700))
-		}, "counter file", []syscall.Errno{syscall.EISDIR, syscall.EEXIST, syscall.ENOTEMPTY}},
+			must(t, os.Mkdir(counter, 0o700))
+		}, "counter file", []syscall.Errno{syscall.EEXIST}},
 		// The file is replaced, then its directory cannot be opened to sync the rename.
 		{"its directory cannot be listed", func(t *testing.T, cdir, _ string) {
 			if os.Geteuid() == 0 {
@@ -659,11 +673,11 @@ func TestFailedCounterWriteStoresNothing(t *testing.T) {
 			cdir := t.TempDir()
 			counter := filepath.Join(cdir, "writes")
 			s := open(t, t.TempDir(), counter)
-			tc.break_(t, cdir, counter)
+			tc.breakIt(t, cdir, counter)
 			_, err := s.CreateGrant(ctx, grant("g1", "tid:a"))
 			var cause syscall.Errno
-			if !errors.As(err, &cause) || !slices.Contains(tc.causes, cause) || err.Error() != "sqlite store: "+tc.names+": "+cause.Error() || strings.Contains(err.Error(), cdir) {
-				t.Fatalf("CreateGrant = %v, want the %s named and one of %v, alone", err, tc.names, tc.causes)
+			if !errors.As(err, &cause) || !slices.Contains(tc.causes, cause) || err.Error() != "sqlite store: "+tc.named+": "+cause.Error() || strings.Contains(err.Error(), cdir) {
+				t.Fatalf("CreateGrant = %v, want the %s named and one of %v, alone", err, tc.named, tc.causes)
 			}
 			if _, err := s.Grant(ctx, "g1"); !errors.Is(err, store.ErrNotFound) {
 				t.Fatalf("the failed write was stored: %v", err)

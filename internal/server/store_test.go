@@ -138,7 +138,7 @@ func TestRestoredStoreIsReportedAtStartup(t *testing.T) {
 		warned++
 	}
 	if warned != 1 {
-		t.Fatalf("startup log %s: want a store_restore warning with epoch 2 naming the setting alone", logs.String())
+		t.Fatalf("startup log %s: want exactly one store_restore warning, with epoch 2, naming the setting alone", logs.String())
 	}
 	// ADR-0021 §3: the restore is on the audit stream too, which operators ship off the host.
 	type record struct {
@@ -185,7 +185,7 @@ func TestMissingCounterFileIsReportedAtStartup(t *testing.T) {
 		warned++
 	}
 	if warned != 1 {
-		t.Fatalf("startup log %s: want a store_counter_missing warning naming the setting alone", logs.String())
+		t.Fatalf("startup log %s: want exactly one store_counter_missing warning, naming the setting alone", logs.String())
 	}
 }
 

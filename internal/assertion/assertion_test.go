@@ -86,13 +86,13 @@ func TestLoadKeysRefusesWhatCannotSign(t *testing.T) {
 		}, noCheck, `assertion key file "k1": want an ECDSA P-256 private key`},
 		{"a public key", func(t *testing.T, dir string) {
 			write(t, dir, "k1", pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: []byte("x")}))
-		}, noCheck, `PEM block "PUBLIC KEY"`},
-		{"a name that is no key ID", func(t *testing.T, dir string) { writeKey(t, dir, "key one", false) }, noCheck, "the name is the key ID"},
+		}, noCheck, `assertion key file "k1": PEM block "PUBLIC KEY"`},
+		{"a name that is no key ID", func(t *testing.T, dir string) { writeKey(t, dir, "key one", false) }, noCheck, `assertion key file "key one": the name is the key ID`},
 		{"a newline in the name, which cannot start a line of its own (#505)", func(t *testing.T, dir string) { writeKey(t, dir, "k2\nforged", false) }, noCheck,
 			`assertion key file "k2\nforged": `},
 		{"a file the permission check refuses", func(t *testing.T, dir string) { writeKey(t, dir, "k1", false) },
 			func(string) error { return errors.New("secret file has mode 0644") }, `assertion key file "k1": secret file has mode 0644`},
-		{"a file too large", func(t *testing.T, dir string) { write(t, dir, "k1", make([]byte, maxKeyFile+1)) }, noCheck, "larger than"},
+		{"a file too large", func(t *testing.T, dir string) { write(t, dir, "k1", make([]byte, maxKeyFile+1)) }, noCheck, `assertion key file "k1": larger than`},
 		{"a check whose error quotes the path", func(t *testing.T, dir string) { writeKey(t, dir, "k1", false) },
 			func(path string) error { return &fs.PathError{Op: "stat", Path: path, Err: fs.ErrPermission} }, `assertion key file "k1": permission denied`},
 		{"a key directory that is a file", func(t *testing.T, dir string) {

@@ -206,10 +206,10 @@ func TestAKeyFileOthersCanReadFailsTheLoadNamingIt(t *testing.T) {
 
 // A check's error that quotes the key file's path, as an os error does, is shown without it: the
 // file by its key ID and the cause (security invariant 2, #575).
-func TestACheckErrorIsShownWithoutThePath(t *testing.T) {
+func TestAKeyFileChecksErrorIsShownByItsKeyIDWithoutThePath(t *testing.T) {
 	dir := keyDir(t, map[string]string{"k1": randomKey(t)})
 	statDenied := func(path string) error { return &fs.PathError{Op: "stat", Path: path, Err: fs.ErrPermission} }
-	if _, err := LoadKeyRing(dir, statDenied); !errors.Is(err, fs.ErrPermission) || err == nil || err.Error() != `token: key file "k1": permission denied` {
+	if _, err := LoadKeyRing(dir, statDenied); !errors.Is(err, fs.ErrPermission) || err.Error() != `token: key file "k1": permission denied` {
 		t.Fatalf("err = %v, want the key file by its ID and the cause alone", err)
 	}
 }

@@ -837,6 +837,10 @@ func blob(b []byte) any {
 	return b
 }
 
+// removeProbe is os.Remove; tests replace it to fail the write probe's cleanup, which only an
+// append-only directory does on a real file system.
+var removeProbe = os.Remove
+
 // probeWritable fails early, naming the state directory, never its path, when the proxy cannot write
 // its state.
 func probeWritable(dir string) error {
@@ -846,7 +850,7 @@ func probeWritable(dir string) error {
 	}
 	name := f.Name()
 	_ = f.Close()
-	if err := os.Remove(name); err != nil {
+	if err := removeProbe(name); err != nil {
 		return fmt.Errorf("sqlite store: the state directory: %w", logging.FileError(err))
 	}
 	return nil

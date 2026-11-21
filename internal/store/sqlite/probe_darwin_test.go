@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -19,6 +20,13 @@ func TestAWriteProbeThatCannotBeRemovedIsNamedWithoutItsPath(t *testing.T) {
 		t.Skipf("cannot make the directory append-only: %v", err)
 	}
 	t.Cleanup(func() { _ = syscall.Chflags(dir, 0) })
+	// A file system may take the flag without enforcing it.
+	if f, err := os.CreateTemp(dir, "check-*"); err == nil {
+		_ = f.Close()
+		if os.Remove(f.Name()) == nil {
+			t.Skip("the file system does not enforce append-only directories")
+		}
+	}
 	_, err := Open(bounded(t), Options{Dir: dir, CounterFile: filepath.Join(t.TempDir(), "w")})
 	if err == nil || err.Error() != "sqlite store: the state directory: operation not permitted" || strings.Contains(err.Error(), dir) {
 		t.Fatalf("err = %v, want the state directory named by what it is and the cause alone", err)
