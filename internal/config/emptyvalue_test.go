@@ -1,8 +1,6 @@
 package config
 
 import (
-	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -16,34 +14,8 @@ var emptyModes = []struct {
 	files readFileFunc
 }{
 	{"an HTTP upstream", base, baseFiles},
-	{"a stdio upstream", stdioBase(`BYWARD_UPSTREAM_COMMAND=["/usr/bin/server"]`), baseFiles},
-	{"an oidc IdP", oidcBase, oidcSecretFiles},
-}
-
-// oidcSecretFiles serves oidcBase's secret and nothing from the host.
-func oidcSecretFiles(p string) ([]byte, error) {
-	if p == "/run/secrets/oidc" {
-		return oidcFiles(p)
-	}
-	return nil, os.ErrNotExist
-}
-
-// loadsAlike fails t unless the two loads end the same way: the same error, and equal configurations
-// or none.
-func loadsAlike(t *testing.T, what string, got, want *Config, gotErr, wantErr error) {
-	t.Helper()
-	if fmt.Sprint(gotErr) != fmt.Sprint(wantErr) {
-		t.Errorf("%s: err %v, want %v", what, gotErr, wantErr)
-	}
-	if got == nil || want == nil {
-		if got != want {
-			t.Errorf("%s: Config %v, want %v", what, got, want)
-		}
-		return
-	}
-	for _, f := range configDiff(*got, *want) {
-		t.Errorf("%s: Config.%s", what, f)
-	}
+	{"a stdio upstream", stdioBase(stdioCommand), baseFiles},
+	{"an oidc IdP", oidcBase, filesPlusEmptyAndBlank},
 }
 
 // A variable set to nothing is the same as unset, for every setting in each mode (#428): env
@@ -153,8 +125,9 @@ func TestASecretSetToNothingBesideItsFileLoadsAsTheFileAlone(t *testing.T) {
 // what the upstream is told, so it is refused beside a stdio upstream too, as an empty assertion
 // header is.
 func TestAFlagSetToNothingIsRefusedAsGiven(t *testing.T) {
-	stdio := stdioBase(`BYWARD_UPSTREAM_COMMAND=["/usr/bin/server"]`)
+	stdio := stdioBase(stdioCommand)
 	claims := "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got nothing"
+	header := "BYWARD_ASSERTION_HEADER: want a header name such as Authorization or X-Byward-Identity; got nothing"
 	for _, tc := range []struct {
 		flag string
 		env  []string
@@ -165,6 +138,8 @@ func TestAFlagSetToNothingIsRefusedAsGiven(t *testing.T) {
 		{"--data-dir=", base, "BYWARD_DATA_DIR: want an absolute path; got nothing"},
 		{"--assertion-claims=", base, claims},
 		{"--assertion-claims=", stdio, claims},
+		{"--assertion-header=", base, header},
+		{"--assertion-header=", stdio, header},
 	} {
 		if _, _, err := Load([]string{tc.flag}, tc.env, baseFiles); !isConfigError(err) || err.Error() != tc.want {
 			t.Errorf("%s beside %s: %v, want the error %q", tc.flag, tc.env, err, tc.want)

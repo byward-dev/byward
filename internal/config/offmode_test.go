@@ -11,7 +11,6 @@ import (
 func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 	const toStdio = "is set, but the upstream is HTTP: it applies only to a stdio upstream (BYWARD_UPSTREAM_COMMAND); remove it"
 	const toHTTP = "is set, but the upstream is stdio: it applies only to an HTTP upstream (BYWARD_UPSTREAM_URL); remove it"
-	stdioCommand := []string{`BYWARD_UPSTREAM_COMMAND=["/usr/bin/server"]`}
 	for _, tc := range []struct {
 		name  string
 		args  []string
@@ -54,7 +53,7 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			env := append(append([]string{}, base...), tc.env...)
 			if tc.stdio {
-				env = stdioBase(append(stdioCommand, tc.env...)...)
+				env = stdioBase(append([]string{stdioCommand}, tc.env...)...)
 			}
 			files := stdioFiles("KEY=value")
 			_, _, err := Load(tc.args, env, func(p string) ([]byte, error) {
@@ -106,7 +105,7 @@ func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 			}
 			env, mode := append(append([]string{}, base...), given), "HTTP"
 			if forHTTP {
-				env, mode = stdioBase(`BYWARD_UPSTREAM_COMMAND=["/usr/bin/server"]`, given), "stdio"
+				env, mode = stdioBase(stdioCommand, given), "stdio"
 			}
 			_, _, err := Load(nil, env, files)
 			if want := strings.SplitN(given, "=", 2)[0] + " is set, but the upstream is " + mode; !isConfigError(err) || !strings.Contains(err.Error(), want) {
@@ -124,7 +123,7 @@ func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 // The other mode's selector given empty selects nothing. (An empty assertion header or claims flag is
 // refused by its own parser even beside a stdio upstream: TestAFlagSetToNothingIsRefusedAsGiven.)
 func TestEachModeLoadsBesideTheOtherModesDefaultsAndEmptyValues(t *testing.T) {
-	command := `BYWARD_UPSTREAM_COMMAND=["/usr/bin/server"]`
+	command := stdioCommand
 	for _, tc := range []struct {
 		name string
 		args []string

@@ -152,7 +152,8 @@ func (v *Values) empty(name string) bool { return v.byKey[name].Given.empty() }
 // given reports whether the operator gave the setting: a value, or a file named for a secret, which
 // is given even when it is empty, so it never falls back to another choice. A variable set to nothing
 // never reaches here (resolve takes it as unset, Setting.EmptyIsGiven), nor does a _FILE variable set to
-// nothing, which names no file; a flag set to nothing is not given here.
+// nothing, which names no file. A flag set to nothing is not given here, though a check that reads its
+// Source counts it: the other IdP's, the app tokens' and On-Behalf-Of's settings refuse it.
 func (val Value) given() bool { return !val.Given.empty() || val.Path != "" }
 
 // given is Value.given for the setting name.
