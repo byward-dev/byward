@@ -127,22 +127,7 @@ func TestLoadEnvironmentLoadsWhatLoadLoadsWithoutArguments(t *testing.T) {
 			if !tc.check(got, gotErr) {
 				t.Fatalf("LoadEnvironment: %+v, %v", got, gotErr)
 			}
-			if fmt.Sprint(gotErr) != fmt.Sprint(wantErr) {
-				t.Errorf("error: LoadEnvironment %v, Load %v", gotErr, wantErr)
-			}
-			if got == nil || want == nil {
-				if got != want {
-					t.Errorf("Config: LoadEnvironment %v, Load %v", got, want)
-				}
-				return
-			}
-			diff := configDiff(*got, *want)
-			for _, f := range diff {
-				t.Errorf("Config.%s", f)
-			}
-			if len(diff) == 0 && !reflect.DeepEqual(*got, *want) { // a backstop, so a broken configDiff cannot hide a drift
-				t.Errorf("Config differs, though configDiff names no field: LoadEnvironment %+v %+v, Load %+v %+v", *got, got.Values, *want, want.Values)
-			}
+			loadsAlike(t, "LoadEnvironment (got) against Load (want)", got, want, gotErr, wantErr)
 		})
 	}
 }
@@ -162,6 +147,9 @@ func configDiff(got, want Config) []string {
 		if g, w := gv.Field(i).Interface(), wv.Field(i).Interface(); !reflect.DeepEqual(g, w) {
 			out = append(out, fmt.Sprintf("%s: got %+v, want %+v", name, g, w))
 		}
+	}
+	if len(out) == 0 && !reflect.DeepEqual(got, want) { // a backstop, so a field this misses cannot hide a difference
+		out = append(out, fmt.Sprintf("the configuration differs, though no field is named: got %+v %+v, want %+v %+v", got, got.Values, want, want.Values))
 	}
 	return out
 }

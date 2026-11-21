@@ -121,7 +121,8 @@ func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 
 // Configurations that load: each mode with the other's settings at their defaults, or given empty,
 // as env templates list every variable; an empty value is not given, so it is no off-mode setting.
-// The other mode's selector given empty selects nothing.
+// The other mode's selector given empty selects nothing. (An empty assertion header or claims flag is
+// refused by its own parser even beside a stdio upstream: TestAFlagSetToNothingIsRefusedAsGiven.)
 func TestEachModeLoadsBesideTheOtherModesDefaultsAndEmptyValues(t *testing.T) {
 	command := `BYWARD_UPSTREAM_COMMAND=["/usr/bin/server"]`
 	for _, tc := range []struct {

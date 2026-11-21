@@ -1,8 +1,8 @@
 package config
 
 import (
+	"fmt"
 	"os"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -28,30 +28,22 @@ func oidcSecretFiles(p string) ([]byte, error) {
 	return nil, os.ErrNotExist
 }
 
-// loadsAlike fails t unless the two loads end the same way: the same error, or equal configurations.
+// loadsAlike fails t unless the two loads end the same way: the same error, and equal configurations
+// or none.
 func loadsAlike(t *testing.T, what string, got, want *Config, gotErr, wantErr error) {
 	t.Helper()
-	if errText(gotErr) != errText(wantErr) {
+	if fmt.Sprint(gotErr) != fmt.Sprint(wantErr) {
 		t.Errorf("%s: err %v, want %v", what, gotErr, wantErr)
-		return
 	}
 	if got == nil || want == nil {
-		return // both refused alike
+		if got != want {
+			t.Errorf("%s: Config %v, want %v", what, got, want)
+		}
+		return
 	}
-	diff := configDiff(*got, *want)
-	for _, f := range diff {
+	for _, f := range configDiff(*got, *want) {
 		t.Errorf("%s: Config.%s", what, f)
 	}
-	if len(diff) == 0 && !reflect.DeepEqual(*got, *want) { // a backstop, so a broken configDiff cannot hide a difference
-		t.Errorf("%s: the configuration differs, though configDiff names no field", what)
-	}
-}
-
-func errText(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
 }
 
 // A variable set to nothing is the same as unset, for every setting in each mode (#428): env
@@ -126,6 +118,8 @@ func TestResolveKeepsEmptyAsGivenOnlyForASettingThatSaysSo(t *testing.T) {
 
 // A secret's variable set to nothing beside its _FILE variable loads as the _FILE variable alone:
 // the secret is read from the file, and is no inline secret (which the _FILE variable alone never is).
+// resolve reads the _FILE variable first, so this held before #428 too; it keeps an empty variable
+// harmless when an inline secret beside its file is refused (#590).
 func TestASecretSetToNothingBesideItsFileLoadsAsTheFileAlone(t *testing.T) {
 	const path = "/run/secrets/the-file"
 	loaded := 0
@@ -156,16 +150,24 @@ func TestASecretSetToNothingBesideItsFileLoadsAsTheFileAlone(t *testing.T) {
 
 // A flag set to nothing on the command line is deliberate, so it is refused as given, unlike a
 // variable set to nothing (#428). An empty claims flag never quietly means none: that would change
-// what the upstream is told.
+// what the upstream is told, so it is refused beside a stdio upstream too, as an empty assertion
+// header is.
 func TestAFlagSetToNothingIsRefusedAsGiven(t *testing.T) {
-	for _, tc := range []struct{ flag, want string }{
-		{"--listen=", "BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got nothing"},
-		{"--scope=", "BYWARD_SCOPE: want one scope token, such as mcp; got nothing"},
-		{"--data-dir=", "BYWARD_DATA_DIR: want an absolute path; got nothing"},
-		{"--assertion-claims=", "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got nothing"},
+	stdio := stdioBase(`BYWARD_UPSTREAM_COMMAND=["/usr/bin/server"]`)
+	claims := "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got nothing"
+	for _, tc := range []struct {
+		flag string
+		env  []string
+		want string
+	}{
+		{"--listen=", base, "BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got nothing"},
+		{"--scope=", base, "BYWARD_SCOPE: want one scope token, such as mcp; got nothing"},
+		{"--data-dir=", base, "BYWARD_DATA_DIR: want an absolute path; got nothing"},
+		{"--assertion-claims=", base, claims},
+		{"--assertion-claims=", stdio, claims},
 	} {
-		if _, err := load(t, []string{tc.flag}); !isConfigError(err) || err.Error() != tc.want {
-			t.Errorf("%s: %v, want the error %q", tc.flag, err, tc.want)
+		if _, _, err := Load([]string{tc.flag}, tc.env, baseFiles); !isConfigError(err) || err.Error() != tc.want {
+			t.Errorf("%s beside %s: %v, want the error %q", tc.flag, tc.env, err, tc.want)
 		}
 	}
 }
