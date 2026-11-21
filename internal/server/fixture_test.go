@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -31,6 +32,7 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/clientdocs"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/pgtest"
+	"github.com/byward-dev/byward/internal/testutil/rerun"
 	"github.com/byward-dev/byward/internal/testutil/sealingkey"
 	"github.com/byward-dev/byward/internal/token"
 )
@@ -288,6 +290,25 @@ var fakeStdioDir string
 func TestMain(m *testing.M) {
 	lookupNetIP = func(context.Context, string) ([]netip.Addr, error) {
 		return nil, errors.New("the tests resolve no names")
+	}
+	// Doctor's default self-probe dials only loopback addresses, which need no lookup and stay on
+	// this machine (a test's own servers, a closed port): a public URL by name is never resolved,
+	// and nothing outside is reached (#570). The shell's proxy is cleared first: a loopback one would
+	// pass the guard and look the public URL up for us. Go reads it once per process, so this holds
+	// for every request; rerun's children set their own (rerun.ProxyEnv).
+	if !rerun.Child() {
+		for _, k := range []string{"HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy", "NO_PROXY", "no_proxy", "REQUEST_METHOD"} {
+			_ = os.Unsetenv(k)
+		}
+	}
+	dial := dialSelfProbe
+	dialSelfProbe = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if host, _, err := net.SplitHostPort(addr); err == nil {
+			if ip, err := netip.ParseAddr(host); err == nil && ip.IsLoopback() {
+				return dial(ctx, network, addr)
+			}
+		}
+		return nil, fmt.Errorf("the tests dial no names and no address off this machine: %s", addr)
 	}
 	code := m.Run()
 	if fakeStdioDir != "" {

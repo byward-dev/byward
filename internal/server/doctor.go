@@ -134,6 +134,10 @@ var lookupNetIP = func(ctx context.Context, host string) ([]netip.Addr, error) {
 	return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 }
 
+// dialSelfProbe dials for doctor's default self-probe, as http.DefaultTransport does (it resolves the
+// public URL's host too); the package's tests replace it, as they do lookupNetIP (#570).
+var dialSelfProbe = (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+
 // probeTimeout bounds one doctor request (the discovery budget in docs/quality-lenses.md).
 const probeTimeout = 10 * time.Second
 
@@ -148,7 +152,11 @@ func Doctor(ctx context.Context, cfg *config.Config, o DoctorOptions) (doctor.Re
 	}
 	if o.Proxy == nil {
 		// Through a proxy setting Go misread, an error says only envproxy.Cause, never the address.
-		o.Proxy = &http.Client{Timeout: probeTimeout, Transport: envproxy.Redact(http.DefaultTransport.(*http.Transport).Clone())}
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+		tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialSelfProbe(ctx, network, addr)
+		}
+		o.Proxy = &http.Client{Timeout: probeTimeout, Transport: envproxy.Redact(tr)}
 	}
 	if o.Resolve == nil {
 		o.Resolve = lookupNetIP

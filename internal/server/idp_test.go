@@ -336,7 +336,8 @@ func TestDoctorChecksAnOIDCIdPsDiscoveryAndClientCredential(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{tc.secretAtTheIdP}}
 			fake := fakeidp.New(t, fakeidp.Generic, fakeidp.WithClient(app))
-			report, err := Doctor(context.Background(), loadOIDC(t, "oidc", fake.Issuer()+tc.other, app.ID), DoctorOptions{IdP: fake.HTTPClient()})
+			// Its self-probe cannot dial, so the public URL's host is never looked up (#570).
+			report, err := Doctor(context.Background(), loadOIDC(t, "oidc", fake.Issuer()+tc.other, app.ID), DoctorOptions{IdP: fake.HTTPClient(), Proxy: &http.Client{Transport: refuse{}}})
 			if err != nil {
 				t.Fatal(err)
 			}

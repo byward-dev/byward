@@ -41,3 +41,32 @@ func TestDoctorsSelfProbeNeverQuotesAMisreadEnvironmentProxyAndTheUpstreamLineWa
 		}
 	})
 }
+
+// Doctor's default self-probe dials through dialSelfProbe, which the package's tests replace: a
+// public URL by name, or at an address off this machine, is refused before it is looked up or
+// reached, so no test touches the network through it (#570). This fails if doctor dials the default
+// way again, if TestMain stops replacing the dialer, or if the replacement lets more than loopback
+// through.
+func TestDoctorsDefaultSelfProbeDialsThroughTheTestsGuard(t *testing.T) {
+	fake := fixtureEntra(t)
+	for _, public := range []string{"https://mcp.example.com/mcp", "https://10.0.0.7/mcp", "https://[fd00::7]/mcp"} {
+		t.Run(public, func(t *testing.T) {
+			rep, err := Doctor(context.Background(), loadConfig(t, public, "BYWARD_UPSTREAM_URL=http://10.0.0.7/mcp"), DoctorOptions{IdP: fake.HTTPClient()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			probed := false
+			for _, c := range rep.Checks {
+				if strings.Contains(c.Message, "cannot reach "+strings.TrimSuffix(public, "/mcp")) {
+					probed = true
+					if !strings.Contains(c.Message, "the tests dial no names and no address off this machine") {
+						t.Fatalf("self-probe %q; want the tests' guard to have refused the dial", c.Message)
+					}
+				}
+			}
+			if !probed {
+				t.Fatalf("checks %+v; want the self-probe to report the public URL unreachable", rep.Checks)
+			}
+		})
+	}
+}
