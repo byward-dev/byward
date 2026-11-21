@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -157,7 +158,7 @@ func TestAnExpiredCertificateRefusesToServeButDoctorAndRevokeUserStillWork(t *te
 	if _, err := New(cfg, discard); err == nil || err.Error() != want {
 		t.Fatalf("New: %v\nwant %q", err, want)
 	}
-	ip, err := newIdentityProvider(cfg, nil)
+	ip, err := newIdentityProvider(cfg, &http.Client{Transport: refuse{}}) // doctor's online checks reach no IdP (#585)
 	if err != nil {
 		t.Fatalf("the identity provider for doctor: %v", err)
 	}

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"testing"
 
@@ -68,5 +69,19 @@ func TestDoctorsDefaultSelfProbeDialsThroughTheTestsGuard(t *testing.T) {
 				t.Fatalf("checks %+v; want the self-probe to report the public URL unreachable", rep.Checks)
 			}
 		})
+	}
+}
+
+// No DNS query leaves the machine from this package's tests: TestMain makes the default resolver,
+// which every client here uses, the Go one, whose connection to a name server is refused (#585).
+// This fails if the guard is removed. It looks no name up itself, so a run with
+// GODEBUG=netdns=go+2 shows only the lookups some other test makes.
+func TestTheTestsQueryNoNameServer(t *testing.T) {
+	r := net.DefaultResolver
+	if !r.PreferGo || r.Dial == nil {
+		t.Fatalf("default resolver: PreferGo %v, Dial set %v; want the tests' guard", r.PreferGo, r.Dial != nil)
+	}
+	if _, err := r.Dial(context.Background(), "udp", "192.0.2.53:53"); err == nil || !strings.Contains(err.Error(), "the tests query no name server") {
+		t.Fatalf("dial of a name server: %v; want the tests' guard to refuse it", err)
 	}
 }

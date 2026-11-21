@@ -12,6 +12,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/registration"
+	"github.com/byward-dev/byward/internal/ssrfguard"
 )
 
 // With CIMD on, document URLs reach the CIMD registry through the SSRF guard: a loopback URL is
@@ -53,21 +54,25 @@ func TestCIMDClientsAreResolvedThroughTheGuardOnlyWhenOn(t *testing.T) {
 }
 
 // The operator's host lists reach the registry: a host off the allowlist is refused before any
-// fetch (no guard reason, nothing counted), a trusted host is still allowed, and each list lands
-// in its own field; jwks_uri keys go through the guard too.
+// fetch (no guard reason, nothing counted), a trusted host is still allowed as far as the fetch, and
+// each list lands in its own field; jwks_uri keys go through the guard.
 func TestTheCIMDHostListsReachTheRegistry(t *testing.T) {
 	got := captureBroker(t, nil)
 	var wired registration.CIMDConfig
 	origReg := newCIMDRegistry
-	newCIMDRegistry = func(c registration.CIMDConfig) *registration.CIMDRegistry { wired = c; return origReg(c) }
+	newCIMDRegistry = func(c registration.CIMDConfig) *registration.CIMDRegistry {
+		wired = c
+		c.Fetch = refusingFetch{} // a document fetch reaches nothing, not even a lookup of its host (#585)
+		return origReg(c)
+	}
 	t.Cleanup(func() { newCIMDRegistry = origReg })
-	cfg := loadConfig(t, "https://m.example/mcp", "BYWARD_CIMD_ALLOWED_HOSTS=apps.example.com", "BYWARD_CIMD_TRUSTED_HOSTS=127.0.0.1.nip.example")
+	cfg := loadConfig(t, "https://m.example/mcp", "BYWARD_CIMD_ALLOWED_HOSTS=apps.example.com", "BYWARD_CIMD_TRUSTED_HOSTS=trusted.example")
 	srv, err := New(cfg, logging.New(io.Discard, "json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Trust labels need a fetched document, so the lists are checked where they are wired.
-	if !slices.Equal(wired.TrustedHosts, []string{"127.0.0.1.nip.example"}) || !slices.Equal(wired.AllowedHosts, []string{"apps.example.com"}) {
+	if !slices.Equal(wired.TrustedHosts, []string{"trusted.example"}) || !slices.Equal(wired.AllowedHosts, []string{"apps.example.com"}) {
 		t.Fatalf("trusted %v, allowed %v", wired.TrustedHosts, wired.AllowedHosts)
 	}
 	// jwks_uri keys are fetched with the guard's client: a loopback address is refused at dial.
@@ -85,8 +90,15 @@ func TestTheCIMDHostListsReachTheRegistry(t *testing.T) {
 	if strings.Contains(metrics, "byward_cimd_fetches_total{") {
 		t.Fatalf("a host off the allowlist was fetched:\n%s", metrics)
 	}
-	// Trusted hosts count as allowed: this one gets as far as the guard.
-	if _, err := got.Clients.Client(context.Background(), "https://127.0.0.1.nip.example/client.json"); err == nil || strings.Contains(err.Error(), "not allowed") {
+	// Trusted hosts count as allowed: this one gets as far as the fetch.
+	if _, err := got.Clients.Client(context.Background(), "https://trusted.example/client.json"); err == nil || !strings.Contains(err.Error(), "the tests fetch no client documents") {
 		t.Fatalf("trusted host: %v", err)
 	}
+}
+
+// refusingFetch is a CIMD document fetcher that reaches nothing.
+type refusingFetch struct{}
+
+func (refusingFetch) Get(context.Context, string, int64) (*ssrfguard.Response, error) {
+	return nil, errors.New("the tests fetch no client documents")
 }

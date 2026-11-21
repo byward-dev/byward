@@ -310,6 +310,12 @@ func TestMain(m *testing.M) {
 		}
 		return nil, fmt.Errorf("the tests dial no names and no address off this machine: %s", addr)
 	}
+	// No DNS query leaves this machine, whichever client makes it: the Go resolver is used and its
+	// connection to a name server is refused. A name in /etc/hosts (localhost) still resolves (#585).
+	net.DefaultResolver.PreferGo = true
+	net.DefaultResolver.Dial = func(_ context.Context, _, server string) (net.Conn, error) {
+		return nil, fmt.Errorf("the tests query no name server: %s", server)
+	}
 	code := m.Run()
 	if fakeStdioDir != "" {
 		_ = os.RemoveAll(fakeStdioDir)
