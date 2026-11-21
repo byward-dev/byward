@@ -306,7 +306,7 @@ func parseOIDCScopes(val Value) ([]string, []error) {
 	var errs []error
 	for i, sc := range list {
 		if !isScopeToken(sc) {
-			errs = append(errs, refusedForm(s, at(i), sc, "a scope such as openid or email", notScopeToken))
+			errs = append(errs, refusedForm(s, at(i), sc, "a scope such as openid or email", scopeCharsReason))
 		}
 	}
 	return list, errs

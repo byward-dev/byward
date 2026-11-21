@@ -46,6 +46,8 @@ func parseAssertionClaims(val Value) ([]string, []error) {
 	var errs []error
 	for i, name := range list {
 		switch name = strings.ToLower(name); {
+		case name == "none": // a fixed word, so shown
+			errs = append(errs, refusedMeaning(val.Setting, at(i), "none", want, "none stands alone: list claims, or give only none"))
 		case !slices.Contains(AssertionClaimNames, name):
 			errs = append(errs, refusedForm(val.Setting, at(i), name, want, "it is not one of them"))
 		case !slices.Contains(out, name):

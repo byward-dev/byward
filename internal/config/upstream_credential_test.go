@@ -110,7 +110,7 @@ func TestUpstreamCredentialSettingsRefuseWhatCannotWork(t *testing.T) {
 		{"only white space", " \t \n", []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
 			"BYWARD_UPSTREAM_CREDENTIAL_FILE: the file holds only whitespace"},
 		{"too long", "k-123" + strings.Repeat("k", maxUpstreamCredential-4), []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
-			"BYWARD_UPSTREAM_CREDENTIAL_FILE: want one header value of at most 4096 bytes on one line, without control characters or white space at either end; got a value (4097 characters, not shown): it is too long"},
+			"BYWARD_UPSTREAM_CREDENTIAL_FILE: want one header value of at most 4096 bytes on one line, without control characters or white space at either end; got a value (4097 characters, not shown): it is 4097 bytes long"},
 		{"a credential set inline, not from a file", "", []string{"BYWARD_UPSTREAM_CREDENTIAL=k-123", "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
 			"secrets must come from a file (BYWARD_UPSTREAM_CREDENTIAL_FILE)"},
 	} {
@@ -144,7 +144,7 @@ func TestUpstreamCredentialErrorsNameTheSettingAsGiven(t *testing.T) {
 		{"inline, a control character", []string{"--dev"}, "", []string{"BYWARD_UPSTREAM_CREDENTIAL=k-123\x01", header},
 			"BYWARD_UPSTREAM_CREDENTIAL: want one header value of at most 4096 bytes on one line, without control characters or white space at either end; got a value (6 characters, not shown): it has a control character or a line break"},
 		{"inline, too long", []string{"--dev"}, "", []string{"BYWARD_UPSTREAM_CREDENTIAL=" + long, header},
-			"BYWARD_UPSTREAM_CREDENTIAL: want one header value of at most 4096 bytes on one line, without control characters or white space at either end; got a value (4097 characters, not shown): it is too long"},
+			"BYWARD_UPSTREAM_CREDENTIAL: want one header value of at most 4096 bytes on one line, without control characters or white space at either end; got a value (4097 characters, not shown): it is 4097 bytes long"},
 		{"inline, empty", []string{"--dev"}, "", []string{"BYWARD_UPSTREAM_CREDENTIAL=", header},
 			"BYWARD_UPSTREAM_CREDENTIAL: want one header value of at most 4096 bytes on one line, without control characters or white space at either end; got nothing"},
 		{"inline, empty, without --dev", nil, "", []string{"BYWARD_UPSTREAM_CREDENTIAL=", header},

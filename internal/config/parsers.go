@@ -97,7 +97,7 @@ func parseWording(val Value, max int) (string, error) {
 func parseScope(val Value) (string, error) {
 	raw := val.Given.raw()
 	if !isScopeToken(raw) {
-		return "", refusedForm(val.Setting, whole, raw, "one scope token, such as mcp", notScopeToken)
+		return "", refusedForm(val.Setting, whole, raw, "one scope token, such as mcp", scopeCharsReason)
 	}
 	return raw, nil
 }
@@ -108,8 +108,8 @@ func isScopeToken(s string) bool {
 	return s != "" && !strings.ContainsFunc(s, func(r rune) bool { return r < 0x21 || r > 0x7e || r == '"' || r == '\\' })
 }
 
-// notScopeToken is the reason a value is not a scope token.
-const notScopeToken = "it has a character a scope token cannot hold: white space, a double quote, a backslash or one that is not printable ASCII"
+// scopeCharsReason is the reason a value is not a scope token.
+const scopeCharsReason = "it has a character a scope token cannot hold: white space, a double quote, a backslash or one that is not printable ASCII"
 
 // parseEntries splits val, a comma-separated list setting, into its entries, each with its place in
 // the list. A value set but naming no entry, such as ",", is refused (listsNothing).

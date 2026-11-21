@@ -11,6 +11,9 @@ func absolute(setting, path string) error {
 	if filepath.IsAbs(path) {
 		return nil
 	}
+	if path == "" {
+		return refusedForm(lookup(setting), whole, "", "an absolute path", "")
+	}
 	// The path is not shown: a secret pasted where its file's path belongs would be (#461).
 	return refusedMeaning(lookup(setting), whole, "a relative one", "an absolute path", "no path is relative to the working directory (ADR-0007 §6)")
 }

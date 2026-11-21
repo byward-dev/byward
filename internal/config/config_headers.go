@@ -95,10 +95,11 @@ func (c *Config) headerClashes() []error {
 		errs = append(errs, errorf("%s and %s name the same header, but the credential and the identity assertion never share a header (ADR-0016 §7): set %s to a header of your own, such as X-Byward-Identity, and verify the assertion there",
 			cEnv, aEnv, aEnv))
 	}
-	for _, u := range []struct{ name, header string }{{"assertion-header", c.AssertionHeader}, {"upstream-credential-header", c.UpstreamCredentialHeader}, {"obo-header", c.OBOHeader}} {
+	for _, u := range []struct{ name, header, example string }{{"assertion-header", c.AssertionHeader, "X-Byward-Identity"},
+		{"upstream-credential-header", c.UpstreamCredentialHeader, "X-Api-Key"}, {"obo-header", c.OBOHeader, "X-Byward-Downstream-Token"}} {
 		for _, plain := range IdentityHeaderNames {
 			if sameHeader(u.header, plain) { // shown by the fixed name it matches, never as given
-				errs = append(errs, refusedMeaning(lookup(u.name), whole, plain, "a header name such as Authorization",
+				errs = append(errs, refusedMeaning(lookup(u.name), whole, plain, "a header name such as "+u.example,
 					"it is one of the plain identity headers the proxy sets (docs/how-to/plain-identity-headers.md); use another header"))
 			}
 		}

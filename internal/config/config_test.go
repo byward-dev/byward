@@ -91,11 +91,11 @@ func TestUnknownEnvFarFromAnySettingHasNoSuggestion(t *testing.T) {
 
 // scopeRefused is BYWARD_SCOPE's refusal of a value of n characters for a character no scope token holds.
 func scopeRefused(n int) string {
-	return "BYWARD_SCOPE: want one scope token, such as mcp; got a value (" + strconv.Itoa(n) + " characters, not shown): " + notScopeTokenText
+	return "BYWARD_SCOPE: want one scope token, such as mcp; got a value (" + strconv.Itoa(n) + " characters, not shown): " + scopeCharsRefused
 }
 
-// notScopeTokenText is the reason, written out: the test pins the literal, never the code's constant.
-const notScopeTokenText = "it has a character a scope token cannot hold: white space, a double quote, a backslash or one that is not printable ASCII"
+// scopeCharsRefused is the reason, written out: the test pins the literal, never the code's constant.
+const scopeCharsRefused = "it has a character a scope token cannot hold: white space, a double quote, a backslash or one that is not printable ASCII"
 
 func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 	cases := []struct {
@@ -1214,5 +1214,37 @@ func TestAScopeTokenTakesThePrintableASCIIRange(t *testing.T) {
 	c, err := load(t, nil, "BYWARD_SCOPE="+scope)
 	if err != nil || c.Scope != scope {
 		t.Fatalf("got %v, %v; want the scope %q", c, err, scope)
+	}
+}
+
+// A refused IdP brings its own refusal only: the settings that depend on the IdP are not refused
+// for it too, as an IdP of nothing.
+func TestARefusedIdPBringsNoOtherSettingsRefusalOfIt(t *testing.T) {
+	const want = "BYWARD_IDP: want entra, oidc, google, okta, auth0 or keycloak; got a value (5 characters, not shown): it is not one of them"
+	for name, env := range map[string][]string{
+		"app-only tokens": {"BYWARD_IDP=bogus", "BYWARD_APP_TOKENS=entra", "BYWARD_APP_ROLES=r"},
+		"On-Behalf-Of":    {"BYWARD_IDP=bogus", "BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := load(t, nil, env...); !isConfigError(err) || err.Error() != want {
+				t.Fatalf("err = %v, want only %q", err, want)
+			}
+		})
+	}
+}
+
+// An Entra tenant left unset is refused as required, and only so.
+func TestAnUnsetTenantIsRefusedOnlyAsRequired(t *testing.T) {
+	_, err := load(t, nil, "BYWARD_ENTRA_TENANT=")
+	if !isConfigError(err) || !strings.HasPrefix(err.Error(), "BYWARD_ENTRA_TENANT is required") || strings.Contains(err.Error(), "want the tenant ID") {
+		t.Fatalf("err = %v, want only the tenant's required error", err)
+	}
+}
+
+// A path setting given empty is refused as nothing given, not as a relative path.
+func TestAnEmptyPathIsRefusedAsNothingGiven(t *testing.T) {
+	_, err := load(t, nil, "BYWARD_DATA_DIR=")
+	if want := "BYWARD_DATA_DIR: want an absolute path; got nothing"; !isConfigError(err) || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v, want %q", err, want)
 	}
 }
