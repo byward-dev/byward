@@ -60,19 +60,6 @@ func (b *bridgeHarness) noFailureLogged(t *testing.T) {
 	}
 }
 
-// stderrSaid waits until the upstream process has written line to its stderr.
-func (b *bridgeHarness) stderrSaid(t *testing.T, line string) {
-	t.Helper()
-	eventually(t, "the upstream process to write "+line, func() bool {
-		for _, rec := range b.log.with("upstream stderr") {
-			if rec.attrs["line"] == line {
-				return true
-			}
-		}
-		return false
-	})
-}
-
 const modernNotification = `{"jsonrpc":"2.0","method":"notifications/progress","params":{"_meta":{` +
 	`"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`
 
@@ -158,7 +145,7 @@ func TestAnInitializeThatEndsBeforeItIsAnsweredIsAnsweredByHowItEndedAndItsProce
 				ctx, end := e.start()
 				answered := make(chan *httptest.ResponseRecorder, 1)
 				go func() { answered <- b.serve(ctx, http.MethodPost, "alice", "", s.body) }()
-				b.stderrSaid(t, s.said)
+				b.saidOnStderr(t, s.said)
 				end()
 				e.answered(t, <-answered)
 				eventually(t, "the unusable process to be stopped", func() bool { return len(b.log.with("stopping upstream process")) == 1 })
@@ -197,7 +184,7 @@ func TestAStartedStreamKeepsItsStatusAndGetsNothingMoreWhenItsRequestEnds(t *tes
 			go func() {
 				answered <- b.serve(ctx, http.MethodPost, "alice", sid, `{"jsonrpc":"2.0","id":2,"method":"hold"}`)
 			}()
-			b.stderrSaid(t, "holding")
+			b.saidOnStderr(t, "holding")
 			end()
 			w := <-answered
 			if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "text/event-stream" || w.Body.Len() != 0 {

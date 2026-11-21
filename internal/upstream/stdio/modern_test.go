@@ -389,7 +389,7 @@ func TestARequestThatEndsDuringTheProbeDecidesNothing(t *testing.T) {
 			body := modernBody(`1`, "echo", "", "")
 			answered := make(chan *httptest.ResponseRecorder, 1)
 			go func() { answered <- b.serve(ctx, http.MethodPost, "alice", "", body, modernHeaders(body)...) }()
-			b.stderrSaid(t, "holding discover") // the probe is out
+			b.saidOnStderr(t, "holding discover") // the probe is out
 			end()
 			p, release := b.lease(t, userProcessKey(alice), alice)
 			if err := syscall.Kill(p.PID(), syscall.SIGUSR1); err != nil { // the process answers, as a modern server

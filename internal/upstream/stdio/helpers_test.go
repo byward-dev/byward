@@ -90,6 +90,23 @@ func newHarness(t *testing.T, edit func(*Config)) *harness {
 	return h
 }
 
+// saidOnStderr waits until the upstream process has written line to its stderr; on a timeout it
+// fails with every line it did write, which says why (a bad flag, a short read).
+func (h *harness) saidOnStderr(t *testing.T, line string) {
+	t.Helper()
+	var lines []any
+	for end := time.Now().Add(guard); time.Now().Before(end); time.Sleep(5 * time.Millisecond) {
+		lines = lines[:0]
+		for _, rec := range h.log.with("upstream stderr") {
+			if rec.attrs["line"] == line {
+				return
+			}
+			lines = append(lines, rec.attrs["line"])
+		}
+	}
+	t.Fatalf("the upstream process never wrote %q to stderr; it wrote %q", line, lines)
+}
+
 func (h *harness) killAll(t *testing.T) {
 	h.m.mu.Lock()
 	var ps []*Process

@@ -815,7 +815,7 @@ func TestUpstreamProcessCrashingAsItsInitializeIsSentIsLoggedAsACrash(t *testing
 	go func() {
 		answered <- b.serve(context.Background(), http.MethodPost, "alice", "", strings.Replace(initialize, `"params":{`, `"params":{"pad":"`+strings.Repeat("a", 4<<20)+`",`, 1))
 	}()
-	saidOnStderr(t, b.harness, "waiting")
+	b.saidOnStderr(t, "waiting")
 	var started []record // its stderr may be logged before its start is
 	eventually(t, "the process's start to be logged", func() bool {
 		started = b.log.with("upstream process started")
@@ -829,7 +829,7 @@ func TestUpstreamProcessCrashingAsItsInitializeIsSentIsLoggedAsACrash(t *testing
 	if err := syscall.Kill(pid, syscall.SIGUSR2); err != nil {
 		t.Fatal(err)
 	}
-	saidOnStderr(t, b.harness, "closed")
+	b.saidOnStderr(t, "closed")
 	select {
 	case w := <-answered:
 		if w.Code != http.StatusBadGateway {

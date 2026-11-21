@@ -156,7 +156,7 @@ func TestAStdioStreamWhoseWriteFailsIsRecordedAsClientClosed(t *testing.T) {
 		{"a legacy POST stream, its answer", false, func(t *testing.T, b *bridgeHarness) (*http.Request, ender) {
 			sid := b.initialize(t, "alice")
 			return b.request(context.Background(), http.MethodPost, "alice", sid, holdBody), func(t *testing.T, b *bridgeHarness, breakIn func()) {
-				b.stderrSaid(t, "holding")
+				b.saidOnStderr(t, "holding")
 				breakIn()
 				readEvents(t, b.post(t, "alice", sid, release))
 			}
@@ -164,7 +164,7 @@ func TestAStdioStreamWhoseWriteFailsIsRecordedAsClientClosed(t *testing.T) {
 		{"a legacy POST stream, the error its ended session gets", false, func(t *testing.T, b *bridgeHarness) (*http.Request, ender) {
 			sid := b.initialize(t, "alice")
 			return b.request(context.Background(), http.MethodPost, "alice", sid, holdBody), func(t *testing.T, b *bridgeHarness, breakIn func()) {
-				b.stderrSaid(t, "holding")
+				b.saidOnStderr(t, "holding")
 				breakIn()
 				b.endSession(t, sid)
 			}
@@ -242,7 +242,7 @@ func TestAnInitializeEndedByItsRequestBeforeItsStreamStartedIsAnsweredAndNotCutO
 			defer end()
 			w := httptest.NewRecorder()
 			cut := b.observed(t, w, b.request(ctx, http.MethodPost, "alice", "", initialize))
-			b.stderrSaid(t, "holding initialize")
+			b.saidOnStderr(t, "holding initialize")
 			end()
 			if got := cut(); got != "" {
 				t.Errorf("recorded as cut off %q; want none", got)
@@ -277,7 +277,7 @@ func TestAStdioStreamThatEndsWithoutItsRequestEndingOrAWriteFailingIsNotCutOff(t
 		{"a legacy POST stream, its session ended", false, func(t *testing.T, b *bridgeHarness) (*http.Request, finisher) {
 			sid := b.initialize(t, "alice")
 			return b.request(context.Background(), http.MethodPost, "alice", sid, holdBody), func(t *testing.T, b *bridgeHarness) {
-				b.stderrSaid(t, "holding")
+				b.saidOnStderr(t, "holding")
 				b.endSession(t, sid)
 			}
 		}, false, exited},

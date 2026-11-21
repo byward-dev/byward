@@ -55,23 +55,6 @@ func fillStdin(t *testing.T, p *Process) int {
 	return written
 }
 
-// saidOnStderr waits until the upstream process has written line to its stderr; on a timeout it
-// fails with every line it did write, which says why (a bad flag, a short read).
-func saidOnStderr(t *testing.T, h *harness, line string) {
-	t.Helper()
-	var lines []any
-	for end := time.Now().Add(guard); time.Now().Before(end); time.Sleep(5 * time.Millisecond) {
-		lines = lines[:0]
-		for _, rec := range h.log.with("upstream stderr") {
-			if rec.attrs["line"] == line {
-				return
-			}
-			lines = append(lines, rec.attrs["line"])
-		}
-	}
-	t.Fatalf("the upstream process never wrote %q to stderr; it wrote %q", line, lines)
-}
-
 // A Send whose message is written whole but whose newline write is cut by its request's end
 // stops the process for a partial write: without its newline the message breaks framing (#563).
 // The stdin pipe is filled until full, then the process frees exactly the message's size of it,
@@ -95,7 +78,7 @@ func TestASendWhoseNewlineWriteIsCutStopsTheProcessForAPartialWrite(t *testing.T
 	if err := syscall.Kill(p.PID(), syscall.SIGUSR1); err != nil {
 		t.Fatal(err)
 	}
-	saidOnStderr(t, h, fmt.Sprintf("rest %d %q", filled-size+len(msg), "z"))
+	h.saidOnStderr(t, fmt.Sprintf("rest %d %q", filled-size+len(msg), "z"))
 }
 
 // A process that dies after byward writes a message but before its newline is logged as having
@@ -120,7 +103,7 @@ func TestAProcessThatClosesItsStdinBetweenAMessageAndItsNewlineIsStoppedAfterThe
 	if err := syscall.Kill(p.PID(), syscall.SIGUSR2); err != nil {
 		t.Fatal(err)
 	}
-	saidOnStderr(t, h, "closed")
+	h.saidOnStderr(t, "closed")
 	wantSendErrExited(t, sent)
 	if stops := h.log.with("stopping upstream process"); len(stops) != 0 {
 		t.Fatalf("stop records = %v, want none within the grace period", stops)
@@ -139,12 +122,12 @@ func stdinFullButOnePage(t *testing.T) (h *harness, p *Process, size, filled int
 	size = os.Getpagesize()
 	h = newHarness(t, func(c *Config) { c.Command = []string{fakeBin, fmt.Sprintf("-readn=%d", size)} })
 	p = h.get(t, "s1", alice)
-	saidOnStderr(t, h, "waiting") // it listens for SIGUSR1, and reads nothing until it
+	h.saidOnStderr(t, "waiting") // it listens for SIGUSR1, and reads nothing until it
 	filled = fillStdin(t, p)
 	if err := syscall.Kill(p.PID(), syscall.SIGUSR1); err != nil {
 		t.Fatal(err)
 	}
-	saidOnStderr(t, h, fmt.Sprintf("read %d", size))
+	h.saidOnStderr(t, fmt.Sprintf("read %d", size))
 	return h, p, size, filled
 }
 
