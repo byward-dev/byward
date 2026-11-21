@@ -34,10 +34,12 @@ func hostRule(h string) string {
 			fmt.Fprintf(&b, "  public %s: %s\n", scheme, u.Host)
 		}
 	}
+	// An allowed host's host name, and whether the no-auth check reads it as loopback: both read
+	// the entry as stored (hostPort), never as given.
 	if stored, reason := hostPort(h); reason != "" {
 		fmt.Fprintf(&b, "  allowed host: refused: it %s\n", reason)
 	} else {
-		fmt.Fprintf(&b, "  allowed host: %s\n", stored)
+		fmt.Fprintf(&b, "  allowed host: %s, hostname %s, loopback %v\n", stored, host.Hostname(stored), host.LoopbackAsWritten(host.Hostname(stored)))
 	}
 	if u, reason := parseOrigin("https://" + h); reason != "" {
 		fmt.Fprintf(&b, "  origin: refused: %s\n", reason)
@@ -47,7 +49,6 @@ func hostRule(h string) string {
 	fmt.Fprintf(&b, "  cimd list: %q\n", hostNameReason(h))
 	fmt.Fprintf(&b, "  denylist: %q\n", denylistReason(h))
 	fmt.Fprintf(&b, "  host header: %s\n", host.Canonical(h))
-	fmt.Fprintf(&b, "  hostname: %s, loopback %v\n", host.Hostname(h), host.LoopbackAsWritten(host.Hostname(h)))
 	// The --dev issuer and the no-auth listen address ask about the host as written, case and all.
 	if u, err := url.Parse("http://" + h); err == nil {
 		fmt.Fprintf(&b, "  loopback as written: %v\n", host.LoopbackAsWritten(u.Hostname()))
