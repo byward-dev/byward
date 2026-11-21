@@ -95,7 +95,7 @@ func TestEveryStopReasonIsOneOfTheConstants(t *testing.T) {
 	for id, inst := range info.Instances {
 		for i := range inst.TypeArgs.Len() {
 			if types.Identical(inst.TypeArgs.At(i), reason) {
-				t.Errorf("%s: %s is instantiated with stopReason: pass one of the Stop reasons constants instead, as its body could make a reason from a string", fset.Position(id.Pos()), id.Name)
+				t.Errorf("%s: %s is instantiated with stopReason, and its body could make a reason from a string: call a non-generic function, or pass string(r)", fset.Position(id.Pos()), id.Name)
 			}
 		}
 	}
@@ -141,7 +141,7 @@ func stopReasonsBlock(f *ast.File) *ast.GenDecl {
 
 // exportDataImporter imports this package's dependencies from the export data go list builds:
 // about 0.3 s with a warm build cache and 2 s with a cold one, where type-checking them from source
-// takes about ten under -race. go test puts its own toolchain first on PATH, so go list is the go
+// takes about 10 s under -race. go test puts its own toolchain first on PATH, so go list is the go
 // that runs the test.
 func exportDataImporter(t *testing.T, fset *token.FileSet) types.Importer {
 	t.Helper()

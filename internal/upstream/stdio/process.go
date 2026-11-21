@@ -20,8 +20,8 @@ import (
 var (
 	// ErrExited is returned by Send once the upstream process has exited or is stopping, or when a
 	// write to it failed for a reason other than its context while that context is still live.
-	// After a write that failed for a reason other than its context, Send stops the process: at
-	// once if part of the message was written, else after the grace period, unless it exits first.
+	// After a write that failed for a reason other than its context, Send stops the process after
+	// the grace period, unless it exits first.
 	ErrExited = errors.New("stdio: upstream process exited")
 	// ErrInvalidMessage is returned by Send for an empty message or one with an embedded newline,
 	// which would break newline-delimited framing.
@@ -139,10 +139,11 @@ func (p *Process) Err() error {
 	return p.waitErr
 }
 
-// Send writes msg and a newline to the process's stdin. ctx bounds the write; a write cut short
-// breaks framing, so the process is then stopped. A process whose write fails with nothing
-// written, and not because ctx's end cut it, can no longer take messages: it is stopped after the
-// grace period, unless it exits first, rather than hold its slot until the idle timeout (#562).
+// Send writes msg and a newline to the process's stdin. ctx bounds the write; a message whose
+// write ctx's end cuts short breaks framing, so the process is then stopped. A write that fails
+// for another reason means the process's reader is gone: it can take no more messages, so it is
+// stopped after the grace period, unless it exits first, rather than hold its slot until the idle
+// timeout (#562), and a crash is logged as one (#571).
 func (p *Process) Send(ctx context.Context, msg []byte) error {
 	if len(msg) == 0 || bytes.IndexByte(msg, '\n') >= 0 {
 		return ErrInvalidMessage
@@ -159,7 +160,7 @@ func (p *Process) Send(ctx context.Context, msg []byte) error {
 	stop := context.AfterFunc(ctx, func() { _ = p.stdin.SetWriteDeadline(time.Unix(1, 0)); close(ended) })
 	n, err := p.stdin.Write(msg) // then the newline: no copy of a message up to the body limit
 	if err == nil {
-		_, err = p.stdin.Write(newline) // n == len(msg) > 0: without its newline, framing breaks, so the process is stopped below
+		_, err = p.stdin.Write(newline) // n == len(msg) > 0: a newline the request's end cuts breaks framing
 	}
 	if !stop() {
 		<-ended // the end may come as the write finishes: its deadline must not outlive this Send (#547)
@@ -168,13 +169,16 @@ func (p *Process) Send(ctx context.Context, msg []byte) error {
 	if err != nil {
 		ctxErr := ctx.Err() // read once: returned whenever the request ended, whether or not that cut the write
 		switch {
-		case n > 0:
-			p.stop(stopPartialWrite)
-		case !errors.Is(err, os.ErrDeadlineExceeded):
-			// Nothing written, and not cut by the deadline the request's end sets (the request may
-			// have ended too): the process closed its stdin, or has just exited and is not reaped
-			// yet. As for a closed stdout, the stop waits a grace period, which an exit cancels, so
-			// a crash is still logged as one.
+		case errors.Is(err, os.ErrDeadlineExceeded): // the request's end cut the write
+			if n > 0 {
+				p.stop(stopPartialWrite)
+			}
+		default:
+			// Not cut by the request's end (it may have ended too): the process's reader is gone. It
+			// closed its stdin or has just exited and is not reaped yet (or byward is already
+			// stopping it), so framing no longer matters, whether part of the message went out or
+			// not (#571). As for a closed stdout, the stop waits a grace period, which an exit
+			// cancels, so a crash is still logged as one.
 			p.mu.Lock()
 			if !p.stopping && !p.exited {
 				p.timers = append(p.timers, p.clock.AfterFunc(p.grace, func() { p.stop(stopStdinClosed) }))

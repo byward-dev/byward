@@ -894,12 +894,7 @@ func TestAProcessThatClosedItsStdinAndExitsWithinTheGraceIsLoggedAsExitedUnexpec
 	_ = syscall.Kill(p.PID(), syscall.SIGKILL) // it exits within the grace period, after the stop was armed
 	waitDone(t, p)
 	h.clk.Advance(DefaultKillGrace)
-	if stops := h.log.with("stopping upstream process"); len(stops) != 0 {
-		t.Fatalf("stop records = %v, want none: the process exited by itself", stops)
-	}
-	if exits := h.log.with("upstream process exited unexpectedly"); len(exits) != 1 {
-		t.Fatalf("unexpected-exit records = %v, want one", exits)
-	}
+	h.log.wantLoggedAsCrash(t)
 }
 
 // A Send whose context ends before its write has written a byte keeps the process: nothing reached
@@ -1085,9 +1080,7 @@ func TestCrashIsNotLoggedAsAStdoutStop(t *testing.T) {
 	_ = p.Send(context.Background(), []byte("crash"))
 	waitDone(t, p)
 	h.clk.Advance(DefaultKillGrace) // a timer armed at stdout EOF must be gone with the process
-	if len(h.log.with("stopping upstream process")) != 0 || len(h.log.with("upstream process exited unexpectedly")) != 1 {
-		t.Fatal("a crash must be logged as an unexpected exit, not as a stop")
-	}
+	h.log.wantLoggedAsCrash(t)
 }
 
 // An idle timer that fired just before a lease took the process lock finds it held and keeps the

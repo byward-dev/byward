@@ -211,6 +211,18 @@ func (r *recorder) warnings() []record {
 	return out
 }
 
+// wantLoggedAsCrash fails unless the process's end was logged as an unexpected exit, at warn
+// level, and not as a stop byward made.
+func (r *recorder) wantLoggedAsCrash(t *testing.T) {
+	t.Helper()
+	if stops := r.with("stopping upstream process"); len(stops) != 0 {
+		t.Fatalf("stop records = %v, want none: the process crashed", stops)
+	}
+	if exits := r.with("upstream process exited unexpectedly"); len(exits) != 1 || exits[0].level != slog.LevelWarn {
+		t.Fatalf("unexpected-exit records = %v, want one at warn level", exits)
+	}
+}
+
 // with returns the records with message msg.
 func (r *recorder) with(msg string) []record {
 	r.mu.Lock()

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -804,6 +805,69 @@ func TestARequestOnAnMCPSessionWhoseUpstreamProcessCanNoLongerTakeMessagesIs404A
 	}
 }
 
+// A process that crashes as its initialize is sent is logged as having crashed, not as stopped
+// for a failed initialize: Send arms the stop for a process whose reader is gone, and its exit
+// cancels it (#571). The initialize is larger than any pipe holds, and the -readn process reads
+// nothing until a SIGUSR2 closes its stdin, so the write fails, part-way in practice.
+func TestUpstreamProcessCrashingAsItsInitializeIsSentIsLoggedAsACrash(t *testing.T) {
+	b := newBridge(t, func(c *Config) { c.Command = []string{fakeBin, "-readn=1"} })
+	answered := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		answered <- b.serve(context.Background(), http.MethodPost, "alice", "", strings.Replace(initialize, `"params":{`, `"params":{"pad":"`+strings.Repeat("a", 4<<20)+`",`, 1))
+	}()
+	saidOnStderr(t, b.harness, "waiting")
+	var started []record // its stderr may be logged before its start is
+	eventually(t, "the process's start to be logged", func() bool {
+		started = b.log.with("upstream process started")
+		return len(started) == 1
+	})
+	pid64, ok := started[0].attrs["process"].(int64)
+	if !ok {
+		t.Fatalf("start record %v has no process ID", started[0])
+	}
+	pid := int(pid64)
+	if err := syscall.Kill(pid, syscall.SIGUSR2); err != nil {
+		t.Fatal(err)
+	}
+	saidOnStderr(t, b.harness, "closed")
+	select {
+	case w := <-answered:
+		if w.Code != http.StatusBadGateway {
+			t.Fatalf("status %d, want %d", w.Code, http.StatusBadGateway)
+		}
+	case <-time.After(guard):
+		t.Fatal("the initialize was never answered")
+	}
+	if stops := b.log.with("stopping upstream process"); len(stops) != 0 {
+		t.Fatalf("stop records = %v, want none yet: the process may be crashing", stops)
+	}
+	_ = syscall.Kill(pid, syscall.SIGKILL) // it crashes within the grace period
+	eventually(t, "the process to be gone", func() bool { return b.m.Len() == 0 })
+	b.clk.Advance(DefaultKillGrace)
+	b.log.wantLoggedAsCrash(t)
+}
+
+// An initialize whose request's deadline has already passed when it is sent is no crash: Send
+// fails with the deadline, not ErrExited, and the process is stopped at once, as for any
+// initialize that gets no result.
+func TestAnInitializeWhoseRequestPassedItsDeadlineBeforeItIsSentStopsItsProcessAtOnce(t *testing.T) {
+	// White-box: through the bridge, Manager.Get spawns with the same context, so a deadline
+	// already past fails the spawn before any Send. Here Send returns it before writing.
+	h := newHarness(t, nil)
+	p := h.get(t, "s1", alice)
+	s := &session{p: p, log: slog.New(h.log), byID: map[string]*stream{}}
+	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(1, 0))
+	defer cancel()
+	rec := httptest.NewRecorder()
+	s.request(rec, httptest.NewRequest(http.MethodPost, "/", nil).WithContext(ctx), []byte(initialize), json.RawMessage(`0`), true)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status %d, want %d", rec.Code, http.StatusBadGateway)
+	}
+	if stops := h.log.with("stopping upstream process"); len(stops) != 1 || stops[0].attrs["reason"] != "initialize_failed" {
+		t.Fatalf("stop records = %v, want one with reason=initialize_failed", stops)
+	}
+}
+
 func TestOpenGETStreamEndsWhenTheUpstreamProcessExits(t *testing.T) {
 	b := newBridge(t, nil)
 	s := b.initialize(t, "alice")
@@ -968,9 +1032,7 @@ func TestUpstreamProcessCrashingDuringInitializeIsLoggedAsACrash(t *testing.T) {
 		t.Fatalf("status %d, want 502", res.StatusCode)
 	}
 	eventually(t, "the process to be gone", func() bool { return b.m.Len() == 0 })
-	if len(b.log.with("stopping upstream process")) != 0 || len(b.log.with("upstream process exited unexpectedly")) != 1 {
-		t.Fatal("a process that crashed must be logged as an unexpected exit, not as a stop")
-	}
+	b.log.wantLoggedAsCrash(t)
 }
 
 // The MCP-Protocol-Version a legacy-era request may carry: none, an empty one, or one copy of the

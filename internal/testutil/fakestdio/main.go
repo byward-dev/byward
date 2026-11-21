@@ -187,23 +187,34 @@ func main() {
 
 // readN serves -readn: it waits for SIGUSR1, reads exactly n bytes of stdin, says so on stderr,
 // and reads nothing more until a second SIGUSR1; then it reads stdin to its end and writes
-// "rest COUNT LAST" to stderr.
+// "rest COUNT LAST" to stderr. A SIGUSR2 in place of either SIGUSR1 closes stdin unread, writes
+// "closed" to stderr and hangs: a process whose reader is gone while it keeps running.
 func readN(n string) {
 	size, err := strconv.Atoi(n)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "bad -readn:", err)
 		os.Exit(2)
 	}
-	usr1 := make(chan os.Signal, 1)
+	usr1, usr2 := make(chan os.Signal, 1), make(chan os.Signal, 1)
 	signal.Notify(usr1, syscall.SIGUSR1)
-	fmt.Fprintln(os.Stderr, "waiting") // SIGUSR1's default would end the process before this
-	<-usr1
+	signal.Notify(usr2, syscall.SIGUSR2)
+	await := func() { // the next SIGUSR1; a SIGUSR2 closes stdin and hangs instead
+		select {
+		case <-usr1:
+		case <-usr2:
+			_ = os.Stdin.Close()
+			fmt.Fprintln(os.Stderr, "closed")
+			hang()
+		}
+	}
+	fmt.Fprintln(os.Stderr, "waiting") // the signals' defaults would end the process before this
+	await()
 	if _, err := io.ReadFull(os.Stdin, make([]byte, size)); err != nil {
 		fmt.Fprintln(os.Stderr, "read:", err)
 		os.Exit(2)
 	}
 	fmt.Fprintln(os.Stderr, "read", size)
-	<-usr1
+	await()
 	rest, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "read:", err)

@@ -380,7 +380,7 @@ const requestEnded = "request_ended"
 // without a result stops the process, so the ID leads nowhere: the client gets 404 and starts again.
 func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id json.RawMessage, initialize bool) {
 	// For initialize, every way out but a written result stops the process, unless the process is
-	// already ending (stop says so), which keeps a crash logged as a crash.
+	// already ending or Send has armed its stop (stop says so), which keeps a crash logged as a crash.
 	succeeded, stop, reason := false, true, "client_disconnected"
 	if initialize {
 		defer func() {
@@ -417,6 +417,9 @@ func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id
 				reason = requestEnded
 			} else {
 				reason = "send_failed"
+				// Send stops a process that can no longer take messages once the grace period passes,
+				// unless it exits first: a process that crashes at its start stays logged as a crash (#571).
+				stop = !errors.Is(err, ErrExited)
 				http.Error(w, "upstream unavailable", http.StatusBadGateway)
 			}
 			return
@@ -553,8 +556,8 @@ func (s *session) listen(w http.ResponseWriter, r *http.Request) {
 }
 
 // sendFailed answers a request whose message could not be sent: a request that ended is answered
-// by how it ended, with nothing logged (shutdown.AnswerIfEnded); else 404 if the process has exited,
-// and 502 otherwise.
+// by how it ended, with nothing logged (shutdown.AnswerIfEnded); else 404 if the process has exited
+// or can take no more messages (ErrExited), and 502 otherwise.
 func (s *session) sendFailed(w http.ResponseWriter, r *http.Request, err error) {
 	if shutdown.AnswerIfEnded(w, r) { // first: a process stopping as the request ends is not why it ended (#552)
 		return

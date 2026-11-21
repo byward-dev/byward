@@ -250,8 +250,8 @@ has exited.
 | `shutdown` | byward is shutting down |
 | `initialize_failed` | An `initialize` on it got no result, so its MCP session never started |
 | `not_modern` | It did not answer `server/discover` as a 2026-07-28 server |
-| `partial_write` | A message to it was written only in part, which breaks framing: the request ended mid-write, or the write failed |
-| `stdin_closed` | A write to it failed with nothing written, and not because the request's end cut it, and it was still running 5 s later: it closed its stdin, so it can take no more messages. One that exits within the 5 s is logged as exited unexpectedly, not stopped |
+| `partial_write` | A message to it was cut short by its request's end, which breaks framing |
+| `stdin_closed` | A write to it failed, and not because the request's end cut it, and it was still running 5 s later: it closed its stdin, so it can take no more messages. One that exits within the 5 s is logged as exited unexpectedly, not stopped |
 | `message_too_large` | It wrote a stdout line over the 64 MiB message limit |
 | `stdout_closed` | It closed its stdout but kept running, for 5 s |
 
