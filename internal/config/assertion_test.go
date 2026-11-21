@@ -43,7 +43,6 @@ func TestAssertionClaimsAndHeaderAreRead(t *testing.T) {
 
 func TestAssertionSettingsRefuseWhatCannotWork(t *testing.T) {
 	for env, inErr := range map[string]string{
-		"BYWARD_ASSERTION_HEADER=":                 "BYWARD_ASSERTION_HEADER: want a header name",
 		"BYWARD_ASSERTION_HEADER=X Identity":       "BYWARD_ASSERTION_HEADER: want a header name",
 		"BYWARD_ASSERTION_HEADER=Host":             "got Host: the proxy, the transport or MCP relies on it",
 		"BYWARD_ASSERTION_HEADER=mcp-session-id":   "got Mcp-Session-Id: the proxy, the transport or MCP relies on it",

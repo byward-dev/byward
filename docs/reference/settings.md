@@ -3,7 +3,8 @@
 Generated from the settings registry (`internal/config`); do not edit by hand.
 Run `BYWARD_UPDATE_REFERENCE=1 go test ./internal/config/` after changing a setting.
 
-Precedence: flag > environment > default. Secrets are read only from files.
+Precedence: flag > environment > default. Secrets are read only from files. A variable set to
+nothing is the same as unset, unless its setting says what empty means.
 
 - [Endpoint](#endpoint)
 - [IdP](#idp)

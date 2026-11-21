@@ -1041,11 +1041,15 @@ func TestAListenAddressIsHostColonANumericPortAndARefusedOneIsNeverShown(t *test
 	}
 }
 
-// An empty listen address is refused as nothing given, not as "0 characters".
-func TestAnEmptyListenAddressIsRefusedAsNothingGiven(t *testing.T) {
-	_, err := load(t, nil, "BYWARD_LISTEN=")
-	if want := "BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got nothing"; !isConfigError(err) || err.Error() != want {
-		t.Errorf("BYWARD_LISTEN=: %v, want %q", err, want)
+// A listen address set to nothing is as if unset (#428): the default. That is for env templates
+// that list every variable; a flag set to nothing on the command line is deliberate, so it is
+// still refused as given.
+func TestAListenAddressSetToNothingIsTheDefaultInTheEnvironmentAndRefusedAsAFlag(t *testing.T) {
+	if c, err := load(t, nil, "BYWARD_LISTEN="); err != nil || c.Listen != "127.0.0.1:8080" {
+		t.Errorf("BYWARD_LISTEN=: listen %q, err %v; want the default 127.0.0.1:8080", c.Listen, err)
+	}
+	if _, err := load(t, []string{"--listen="}); !isConfigError(err) || !strings.Contains(err.Error(), "BYWARD_LISTEN") {
+		t.Errorf("--listen=: %v, want it refused as given", err)
 	}
 }
 

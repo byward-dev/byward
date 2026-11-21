@@ -62,6 +62,13 @@ func with(kv ...string) func([]string) []string {
 	return func(env []string) []string { return append(env, kv...) }
 }
 
+// A roles claim set to nothing is as if unset (#428): the default.
+func TestAnOIDCRolesClaimSetToNothingIsTheDefault(t *testing.T) {
+	if c, err := loadOIDC(t, with("BYWARD_OIDC_ROLES_CLAIM=")); err != nil || c.OIDCRolesClaim != "roles" {
+		t.Errorf("BYWARD_OIDC_ROLES_CLAIM=: claim %q, err %v; want the default roles", c.OIDCRolesClaim, err)
+	}
+}
+
 func TestAnOIDCIdPIsReadFromItsSettings(t *testing.T) {
 	c, err := loadOIDC(t, with("BYWARD_OIDC_SCOPES=groups, roles", "BYWARD_OIDC_NAME=Acme SSO"))
 	if err != nil {
@@ -102,7 +109,6 @@ func TestAnOIDCIdPWithMissingOrConflictingSettingsRefusesToStart(t *testing.T) {
 		"a scope with a space":            {with("BYWARD_OIDC_SCOPES=a b"), `BYWARD_OIDC_SCOPES: want a scope such as openid or email; got entry 1 of 1 (3 characters, not shown): it has a character a scope token cannot hold: white space, a double quote, a backslash or one that is not printable ASCII`},
 		"a scope with a tab":              {with("BYWARD_OIDC_SCOPES=openid,open\tid"), `BYWARD_OIDC_SCOPES: want a scope such as openid or email; got entry 2 of 2 (7 characters, not shown): it has a character a scope token cannot hold: white space, a double quote, a backslash or one that is not printable ASCII`},
 		"a blank subject claim":           {with("BYWARD_OIDC_SUBJECT_CLAIM= "), "BYWARD_OIDC_SUBJECT_CLAIM: want a claim name such as sub; got a value (1 character, not shown): it is blank or has white space at an end"},
-		"an empty roles claim":            {with("BYWARD_OIDC_ROLES_CLAIM="), "BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles; got nothing"},
 		"a padded roles claim":            {with("BYWARD_OIDC_ROLES_CLAIM= roles"), "BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles; got a value (6 characters, not shown): it is blank or has white space at an end"},
 		"sub as the groups claim":         {with("BYWARD_OIDC_GROUPS_CLAIM=sub"), "BYWARD_OIDC_GROUPS_CLAIM: want a claim name such as https://example.com/groups; got sub: it is a claim of the sign-in itself, not roles or groups; name the claim the IdP sends them in"},
 		"a roles claim padded at the end": {with("BYWARD_OIDC_ROLES_CLAIM=roles\t"), "BYWARD_OIDC_ROLES_CLAIM: want a claim name such as https://example.com/roles; got a value (6 characters, not shown): it is blank or has white space at an end"},
