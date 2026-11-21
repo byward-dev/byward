@@ -319,17 +319,46 @@ func openErr(t *testing.T, dir string) error {
 	return err
 }
 
-// A database file whose close fails is named by its quoted name and the cause, never its path
-// (security invariant 2, #600): only a fault fails the close on a real file system.
-func TestADatabaseFileThatCannotBeClosedIsNamedWithoutItsPath(t *testing.T) {
-	t.Cleanup(func() { closeDatabaseFile = (*os.File).Close })
-	closeDatabaseFile = func(f *os.File) error {
-		_ = f.Close()
-		return &fs.PathError{Op: "close", Path: f.Name(), Err: syscall.EIO}
+// A database file the proxy cannot tighten or close is named by its quoted name and the cause, never
+// its path (security invariant 2, #600): only a fault fails either on a file it just opened.
+func TestADatabaseFileThatCannotBeTightenedOrClosedIsNamedWithoutItsPath(t *testing.T) {
+	t.Cleanup(func() { chmodDatabaseFile, closeDatabaseFile = (*os.File).Chmod, (*os.File).Close })
+	for _, tc := range []struct {
+		name    string
+		breakIt func()
+	}{
+		{"chmod", func() {
+			chmodDatabaseFile = func(f *os.File, _ os.FileMode) error {
+				return &fs.PathError{Op: "chmod", Path: f.Name(), Err: syscall.EIO}
+			}
+		}},
+		{"close", func() {
+			closeDatabaseFile = func(f *os.File) error {
+				_ = f.Close()
+				return &fs.PathError{Op: "close", Path: f.Name(), Err: syscall.EIO}
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			chmodDatabaseFile, closeDatabaseFile = (*os.File).Chmod, (*os.File).Close
+			tc.breakIt()
+			err := openErr(t, t.TempDir())
+			if want := `sqlite store: database file "byward.db": ` + syscall.EIO.Error(); err == nil || err.Error() != want || !errors.Is(err, syscall.EIO) {
+				t.Fatalf("err = %v, want %q", err, want)
+			}
+		})
 	}
-	err := openErr(t, t.TempDir())
-	if want := `sqlite store: database file "byward.db": ` + syscall.EIO.Error(); err == nil || err.Error() != want || !errors.Is(err, syscall.EIO) {
-		t.Fatalf("err = %v, want %q", err, want)
+}
+
+// A database file an operator command cannot stat, such as a symlink loop, is named by its quoted
+// name and the cause, never its path (security invariant 2, #600). present is called directly: the
+// operator-open table's snapshot cannot read a loop.
+func TestADatabaseFileAnOperatorOpenCannotStatIsNamedWithoutItsPath(t *testing.T) {
+	dir := t.TempDir()
+	must(t, os.Symlink(fileName, filepath.Join(dir, fileName)))
+	err := present(bounded(t), filepath.Join(dir, fileName))
+	if want := `sqlite store: database file "byward.db": too many levels of symbolic links`; err == nil || err.Error() != want || strings.Contains(err.Error(), dir) {
+		t.Fatalf("present = %v, want %q", err, want)
 	}
 }
 

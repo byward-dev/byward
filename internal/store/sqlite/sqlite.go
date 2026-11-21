@@ -862,9 +862,12 @@ func databaseFileError(name string, err error) error {
 	return fmt.Errorf("sqlite store: database file %q: %w", name, logging.FileError(err))
 }
 
-// closeDatabaseFile is (*os.File).Close; tests replace it to fail ensureFile's close, which only a
-// fault (such as EIO on a network file system) does on a real file system.
-var closeDatabaseFile = (*os.File).Close
+// chmodDatabaseFile and closeDatabaseFile are (*os.File).Chmod and Close; tests replace them to fail
+// ensureFile's chmod and close, which on a file the proxy just opened only a fault does.
+var (
+	chmodDatabaseFile = (*os.File).Chmod
+	closeDatabaseFile = (*os.File).Close
+)
 
 // ensureFile creates the database file with mode 0600, or tightens an existing one, together with
 // leftover -wal and -shm files. SQLite creates new -wal and -shm files with the database file's
@@ -879,7 +882,7 @@ func ensureFile(path string) error {
 	if err != nil {
 		return databaseFileError(filepath.Base(path), err)
 	}
-	if err := f.Chmod(0o600); err != nil {
+	if err := chmodDatabaseFile(f, 0o600); err != nil {
 		_ = f.Close()
 		return databaseFileError(filepath.Base(path), err)
 	}
