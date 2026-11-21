@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -119,17 +120,75 @@ func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 			if s.Secret() {
 				given = s.Env() + "_FILE=/run/secrets/off-mode"
 			}
-			env, mode := append(append([]string{}, base...), given), "HTTP"
-			if forHTTP {
-				env, mode = stdioBase(stdioCommand, given), "stdio"
-			}
-			_, _, err := Load(nil, env, files)
+			_, _, err := Load(nil, append(slices.Clone(modeEnv), given), files)
 			if want := strings.SplitN(given, "=", 2)[0] + " is set, but the upstream is " + mode; !isConfigError(err) || !strings.Contains(err.Error(), want) {
 				t.Fatalf("err = %v, want a config error containing %q", err, want)
 			}
 		})
 	}
-	if n < 11 {
-		t.Fatalf("%d upstream-mode settings checked, want every one (11 today)", n)
+	if n < 13 {
+		t.Fatalf("%d upstream-mode settings checked, want every one (13 today)", n)
+	}
+}
+
+// When the mode is unclear, each error says only what is wrong: a command that does not parse still
+// makes the upstream stdio, no upstream at all is only "required", and a malformed URL still selects
+// HTTP. Matched in parts, since most carry a second error of their own (the command's or the
+// URL's); the one with no upstream names its whole message.
+func TestAnUnclearUpstreamGivesOnlyItsOwnErrors(t *testing.T) {
+	files := func(p string) ([]byte, error) {
+		if p == credFile {
+			return []byte("k-123"), nil
+		}
+		return baseFiles(p)
+	}
+	for _, tc := range []struct {
+		name     string
+		env      []string
+		contains []string
+		absent   []string
+	}{
+		{"a malformed command still refuses the credential header as off-mode",
+			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Key"),
+			[]string{"BYWARD_UPSTREAM_CREDENTIAL_HEADER is set, but the upstream is stdio"}, []string{"there is no credential"}},
+		{"a malformed command keeps the credential's stdio hint",
+			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_UPSTREAM_CREDENTIAL_FILE="+credFile),
+			[]string{"is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE"}, []string{"ASSERTION_HEADER"}},
+		{"a malformed command still refuses the identity headers",
+			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_IDENTITY_HEADERS=true"),
+			[]string{"BYWARD_IDENTITY_HEADERS is for an HTTP upstream"}, nil},
+		{"a malformed command still refuses the On-Behalf-Of header",
+			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_OBO_HEADER=X-Graph-Token"),
+			[]string{"BYWARD_OBO_HEADER: a stdio upstream gets its downstream token from its token socket"}, nil},
+		{"a malformed command still refuses the PostgreSQL store",
+			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_STORE_POSTGRES_DSN_FILE="+credFile, "BYWARD_STORE_DIR="),
+			[]string{"BYWARD_STORE_POSTGRES_DSN_FILE: the PostgreSQL store is for several replicas"}, nil},
+		{"no upstream at all gives only the required error",
+			stdioBase("BYWARD_STDIO_MAX_PROCESSES=5", "BYWARD_UPSTREAM_HEADER_TIMEOUT=abc", "BYWARD_UPSTREAM_STRIP_HEADERS=Host",
+				"BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Key", "BYWARD_ASSERTION_HEADER=X-Byward-Identity"),
+			[]string{"BYWARD_UPSTREAM_URL is required (or BYWARD_UPSTREAM_COMMAND, or a command after --)"}, []string{"the upstream is HTTP", ";"}},
+		{"a malformed URL still reports the HTTP upstream's own settings",
+			append(append([]string{}, base...), "BYWARD_UPSTREAM_URL=ftp://x", "BYWARD_UPSTREAM_STRIP_HEADERS=Host", "BYWARD_UPSTREAM_HEADER_TIMEOUT=abc"),
+			[]string{"BYWARD_UPSTREAM_URL: want an absolute http(s) URL", "BYWARD_UPSTREAM_STRIP_HEADERS: want exact header names, such as X-Argocd-Base-Url; got entry 1 of 1, Host: MCP needs it at the upstream", "BYWARD_UPSTREAM_HEADER_TIMEOUT: want a duration"}, nil},
+		{"a malformed URL still refuses the stdio setting beside it",
+			append(append([]string{}, base...), "BYWARD_UPSTREAM_URL=ftp://x", "BYWARD_STDIO_MAX_PROCESSES=5"),
+			[]string{"BYWARD_UPSTREAM_URL: want an absolute http(s) URL", "BYWARD_STDIO_MAX_PROCESSES is set, but the upstream is HTTP"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := Load(nil, tc.env, files)
+			if !isConfigError(err) {
+				t.Fatalf("err = %v, want a config error", err)
+			}
+			for _, s := range tc.contains {
+				if !strings.Contains(err.Error(), s) {
+					t.Errorf("err = %v, want it to say %q", err, s)
+				}
+			}
+			for _, s := range tc.absent {
+				if strings.Contains(err.Error(), s) {
+					t.Errorf("err = %v, want nothing about %q", err, s)
+				}
+			}
+		})
 	}
 }
