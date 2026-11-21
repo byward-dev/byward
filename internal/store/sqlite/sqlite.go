@@ -139,7 +139,7 @@ func regularIfPresent(path string, creatable bool) error {
 	case errors.Is(err, os.ErrNotExist):
 		return nil
 	case err != nil:
-		return logging.FileError(err)
+		return err // the caller strips the path
 	case fi.Mode()&os.ModeSymlink != 0:
 		if fi, err = os.Stat(path); err != nil {
 			if creatable && targetDirExists(path) {

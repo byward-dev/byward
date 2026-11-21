@@ -70,13 +70,18 @@ func readCounter(path string) (int64, bool, error) {
 		return 0, false, nil
 	}
 	if err != nil {
-		return 0, false, fmt.Errorf("sqlite store: counter file: %w", logging.FileError(err))
+		return 0, false, counterFileError(err)
 	}
 	v, err := strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
 	if err != nil || v < 0 {
 		return 0, false, errors.New("sqlite store: the counter file is corrupt; remove it to accept the database as it is")
 	}
 	return v, true, nil
+}
+
+// counterFileError names the counter file and the cause, never its path (security invariant 2).
+func counterFileError(err error) error {
+	return fmt.Errorf("sqlite store: counter file: %w", logging.FileError(err))
 }
 
 // writeMirror is writeCounter; tests replace it to act inside a write, between the mirror and the
@@ -87,18 +92,18 @@ var writeMirror = writeCounter
 func writeCounter(path string, v int64) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".counter-*")
 	if err != nil {
-		return fmt.Errorf("sqlite store: counter file: %w", logging.FileError(err))
+		return counterFileError(err)
 	}
 	_, werr := tmp.WriteString(strconv.FormatInt(v, 10) + "\n")
 	serr := tmp.Sync() // a power loss must not leave an empty file, which Open refuses
 	cerr := tmp.Close()
 	if werr != nil || serr != nil || cerr != nil {
 		_ = os.Remove(tmp.Name())
-		return fmt.Errorf("sqlite store: counter file: %w", errors.Join(logging.FileError(werr), logging.FileError(serr), logging.FileError(cerr)))
+		return counterFileError(errors.Join(logging.FileError(werr), logging.FileError(serr), logging.FileError(cerr))) // each stripped: FileError keeps only a join's first cause
 	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		_ = os.Remove(tmp.Name())
-		return fmt.Errorf("sqlite store: counter file: %w", logging.FileError(err))
+		return counterFileError(err)
 	}
 	return syncDir(filepath.Dir(path))
 }

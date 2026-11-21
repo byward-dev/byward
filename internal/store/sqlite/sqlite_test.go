@@ -327,7 +327,7 @@ func TestADatabaseFileThatCannotBeTightenedOrClosedIsNamedWithoutItsPath(t *test
 		name    string
 		breakIt func()
 	}{
-		{"chmod", func() {
+		{"tighten", func() {
 			chmodDatabaseFile = func(f *os.File, _ os.FileMode) error {
 				return &fs.PathError{Op: "chmod", Path: f.Name(), Err: syscall.EIO}
 			}
@@ -351,13 +351,13 @@ func TestADatabaseFileThatCannotBeTightenedOrClosedIsNamedWithoutItsPath(t *test
 }
 
 // A database file an operator command cannot stat, such as a symlink loop, is named by its quoted
-// name and the cause, never its path (security invariant 2, #600). present is called directly: the
-// operator-open table's snapshot cannot read a loop.
+// name and the cause, never its path (security invariant 2, #600). present is called directly: through
+// Open, ensureFile reports the same loop, so a present that missed it would pass.
 func TestADatabaseFileAnOperatorOpenCannotStatIsNamedWithoutItsPath(t *testing.T) {
 	dir := t.TempDir()
 	must(t, os.Symlink(fileName, filepath.Join(dir, fileName)))
 	err := present(bounded(t), filepath.Join(dir, fileName))
-	if want := `sqlite store: database file "byward.db": too many levels of symbolic links`; err == nil || err.Error() != want || strings.Contains(err.Error(), dir) {
+	if want := `sqlite store: database file "byward.db": too many levels of symbolic links`; err == nil || err.Error() != want || !errors.Is(err, syscall.ELOOP) {
 		t.Fatalf("present = %v, want %q", err, want)
 	}
 }
