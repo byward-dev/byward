@@ -27,7 +27,7 @@ type InitOptions struct {
 func InitScript(o InitOptions) (string, error) {
 	if o.IdP != "entra" {
 		// The name is not shown: a value pasted in its place could be a secret (#576).
-		return "", fmt.Errorf("init sets up only an entra IdP; got another name %s; for an oidc IdP see docs/how-to/oidc.md", logging.NotShown(o.IdP))
+		return "", fmt.Errorf("the IdP must be entra; got another name %s; for an oidc IdP see docs/how-to/oidc.md", logging.NotShown(o.IdP))
 	}
 	env := config.Quickstart{PublicURL: "$PUBLIC_URL", Tenant: "$TENANT_ID", ClientID: "$APP_ID",
 		SecretFile: "$SECRET_FILE", SecretExpiresAt: "$SECRET_EXPIRES_AT"}

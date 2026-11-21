@@ -59,7 +59,7 @@ func TestOperateCommandMisuseExits2WithTheRightCallOnStderr(t *testing.T) {
 		{"check with a stdio command but without --offline", []string{"check", "--", "/bin/sh"}, nil, "usage: byward check --offline"},
 		{"doctor with another flag", []string{"doctor", "--yaml"}, nil, "usage: byward doctor [--json]"},
 		{"init without an IdP", []string{"init"}, nil, "init prints the setup of an entra IdP"},
-		{"init for another IdP", []string{"init", "okta", "--tenant", tenant, "--public-url", "https://m.example/mcp"}, nil, `init sets up only an entra IdP; got another name (4 characters, not shown)`},
+		{"init for another IdP", []string{"init", "okta", "--tenant", tenant, "--public-url", "https://m.example/mcp"}, nil, `byward: init: the IdP must be entra; got another name (4 characters, not shown)`},
 		{"init entra without a tenant", []string{"init", "entra"}, nil, "usage: byward init entra --tenant"},
 		{"init entra with an extra argument", []string{"init", "entra", "--tenant", tenant, "now"}, nil, "usage: byward init entra"},
 		{"init entra with a domain as tenant", []string{"init", "entra", "--tenant", "contoso.com", "--public-url", "https://m.example/mcp"}, nil, "tenant must be the tenant ID"},
@@ -71,7 +71,7 @@ func TestOperateCommandMisuseExits2WithTheRightCallOnStderr(t *testing.T) {
 		{"check with a bad setting", []string{"check", "--offline"}, []string{"BYWARD_PUBLC_URL=x"}, "byward: configuration error: unknown setting BYWARD_PUBLC_URL"},
 		{"doctor with a bad setting", []string{"doctor"}, []string{"BYWARD_PUBLC_URL=x"}, "byward: configuration error: unknown setting BYWARD_PUBLC_URL"},
 		{"flags before the command", []string{"--dev", "check", "--offline"}, nil, "to run check, put it first: byward check"},
-		{"init entra with a non-numeric secret lifetime", []string{"init", "entra", "--tenant", tenant, "--public-url", "https://m.example/mcp", "--secret-years", "abc"}, nil, "1 to 2 years"},
+		{"init entra with a non-numeric secret lifetime", []string{"init", "entra", "--tenant", tenant, "--secret-years", "abc"}, nil, "byward: init: --secret-years: want a whole number of years; got a value it does not take (not shown)"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -371,7 +371,52 @@ func TestInitEntraWithACertificateWritesAnEnvFileTheProxyLoads(t *testing.T) {
 	}
 }
 
-func TestInitEntraRefusesAnUnknownCredential(t *testing.T) {
+// init refuses its command line as config refuses its own (#512): it names only its own flags, an
+// argument or undefined flag only by its length, and nothing else from the flag package (#576).
+func TestInitRefusesItsCommandLineNamingOnlyItsOwnFlags(t *testing.T) {
+	const usage = "byward: usage: byward init entra --tenant <tenant-id> [--public-url <url>] [--upstream-url <url>] [--secret-years 1|2] [--credential secret|certificate]\n"
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"a bad flag syntax", []string{"---x"}, usage + "byward: init: want flags as --name=value; got an argument with a bad flag syntax (4 characters, not shown)\n"},
+		{"a flag with no name", []string{"--=x"}, usage + "byward: init: want flags as --name=value; got an argument with a bad flag syntax (4 characters, not shown)\n"},
+		{"an undefined flag", []string{"--nope=1"}, usage + "byward: init: want flags init takes; got an undefined flag (4 characters, not shown)\n"},
+		{"a one-character undefined flag", []string{"-x"}, usage + "byward: init: want flags init takes; got an undefined flag (1 character, not shown)\n"},
+		{"a flag without its value", []string{"--tenant"}, usage + "byward: init: flag needs an argument: -tenant\n"},
+		{"a lifetime that is no number", []string{"--secret-years=two"}, usage + "byward: init: --secret-years: want a whole number of years; got a value it does not take (not shown)\n"},
+		{"-h", []string{"-h"}, usage},
+		{"--help", []string{"--help"}, usage},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := runWith(append([]string{"init", "entra"}, tc.args...))
+			if code != exitConfig || stdout != "" || stderr != tc.want {
+				t.Fatalf("exit %d, stdout %q, stderr %q; want exit 2 and stderr %q", code, stdout, stderr, tc.want)
+			}
+		})
+	}
+	// init's flags are strings, so the flag package refuses no value; were it to, its message is not shown.
+	const want = "the command line is refused (the flag package's message is not shown)"
+	if got := initFlagError(errors.New(`invalid value "LK7CANARY" for flag -x: parse error`)); got != want {
+		t.Fatalf("another flag package error reads %q, want %q", got, want)
+	}
+}
+
+// --secret-years is a number as the flag package reads one, in any base, and 1 when not given.
+func TestInitReadsTheSecretLifetimeInAnyBase(t *testing.T) {
+	for given, want := range map[string]string{"": "--years 1 ", "2": "--years 2 ", "0x2": "--years 2 ", "0b1": "--years 1 ", "0o2": "--years 2 ", "+1": "--years 1 "} {
+		args := []string{"init", "entra", "--tenant", tenant, "--public-url", "https://m.example/mcp"}
+		if given != "" {
+			args = append(args, "--secret-years="+given)
+		}
+		if code, stdout, stderr := runWith(args); code != exitOK || !strings.Contains(stdout, want) {
+			t.Errorf("--secret-years %q: exit %d, stderr %q; want a script with %q", given, code, stderr, want)
+		}
+	}
+}
+
+func TestInitEntraRefusesAnUnknownCredentialWithoutShowingIt(t *testing.T) {
 	if code, _, stderr := runWith([]string{"init", "entra", "--tenant", tenant, "--public-url", "https://flag.example/mcp", "--credential", "password"}); code != exitConfig ||
 		!strings.Contains(stderr, `the credential must be secret or certificate; got another value (8 characters, not shown)`) {
 		t.Fatalf("an unknown credential: %d %q", code, stderr)

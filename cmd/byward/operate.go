@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -133,6 +134,24 @@ func initFlagError(err error) string {
 	return "the command line is refused (the flag package's message is not shown)"
 }
 
+// initFlags are init's flags. Each is a string, read by init, so the flag package never quotes a value
+// it cannot parse (#576).
+type initFlags struct{ tenant, publicURL, upstreamURL, secretYears, credential *string }
+
+// newInitFlags is init's flag set. The URL flags default to their settings in environ.
+func newInitFlags(environ []string) (*flag.FlagSet, initFlags) {
+	env := getenv(environ)
+	fs := flag.NewFlagSet("init", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	return fs, initFlags{
+		tenant:      fs.String("tenant", "", ""),
+		publicURL:   fs.String("public-url", env(config.Setting{Name: "public-url"}.Env()), ""),
+		upstreamURL: fs.String("upstream-url", env(config.Setting{Name: "upstream-url"}.Env()), ""),
+		secretYears: fs.String("secret-years", "1", ""),
+		credential:  fs.String("credential", "secret", ""),
+	}
+}
+
 // initIdP is `init entra` (ADR-0020 §8, ADR-0012 §12): it prints a script of az commands and a
 // minimal env file. It runs nothing, calls no API and never sees a secret.
 func initIdP(_ context.Context, args, environ []string, stdout, stderr io.Writer) int {
@@ -141,40 +160,38 @@ func initIdP(_ context.Context, args, environ []string, stdout, stderr io.Writer
 		_, _ = fmt.Fprintln(stderr, usage+" (init prints the setup of an entra IdP; for an oidc IdP see docs/how-to/oidc.md)")
 		return exitConfig
 	}
-	env := getenv(environ)
-	fs := flag.NewFlagSet("init", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	tenant := fs.String("tenant", "", "")
-	publicURL := fs.String("public-url", env(config.Setting{Name: "public-url"}.Env()), "")
-	upstreamURL := fs.String("upstream-url", env(config.Setting{Name: "upstream-url"}.Env()), "")
-	// A string, read below, so the flag package never quotes a value it cannot parse.
-	years := fs.String("secret-years", "1", "")
-	credential := fs.String("credential", "secret", "")
+	fs, f := newInitFlags(environ)
 	if err := fs.Parse(args[1:]); err != nil {
-		_, _ = fmt.Fprintf(stderr, "%s\nbyward: init: %s\n", usage, initFlagError(err))
+		if errors.Is(err, flag.ErrHelp) {
+			_, _ = fmt.Fprintln(stderr, usage)
+		} else {
+			_, _ = fmt.Fprintf(stderr, "%s\nbyward: init: %s\n", usage, initFlagError(err))
+		}
 		return exitConfig
 	}
-	if fs.NArg() > 0 || *tenant == "" {
+	// Base 0, as the flag package reads a number (0x2 is 2).
+	secretYears, err := strconv.ParseInt(*f.secretYears, 0, 0)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "%s\nbyward: init: --secret-years: want a whole number of years; got a value it does not take (not shown)\n", usage)
+		return exitConfig
+	}
+	if fs.NArg() > 0 || *f.tenant == "" {
 		_, _ = fmt.Fprintln(stderr, usage)
 		return exitConfig
 	}
-	u, err := config.ParsePublicURL(*publicURL)
+	u, err := config.ParsePublicURL(*f.publicURL)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "byward: init: %v (give --public-url)\n", err)
 		return exitConfig
 	}
-	if *upstreamURL != "" { // empty leaves BYWARD_UPSTREAM_URL for the operator to fill in
-		if _, err := config.ParseUpstreamURL(*upstreamURL); err != nil {
+	if *f.upstreamURL != "" { // empty leaves BYWARD_UPSTREAM_URL for the operator to fill in
+		if _, err := config.ParseUpstreamURL(*f.upstreamURL); err != nil {
 			_, _ = fmt.Fprintf(stderr, "byward: init: %v (give --upstream-url)\n", err)
 			return exitConfig
 		}
 	}
-	secretYears, err := strconv.Atoi(*years)
-	if err != nil {
-		secretYears = 0 // refused below as out of range, which never shows the value
-	}
-	script, err := server.InitScript(server.InitOptions{IdP: args[0], Tenant: *tenant, PublicURL: u, UpstreamURL: *upstreamURL,
-		SecretYears: secretYears, Credential: *credential, Now: time.Now()})
+	script, err := server.InitScript(server.InitOptions{IdP: args[0], Tenant: *f.tenant, PublicURL: u, UpstreamURL: *f.upstreamURL,
+		SecretYears: int(secretYears), Credential: *f.credential, Now: time.Now()})
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "byward: init: %v\n", err)
 		return exitConfig

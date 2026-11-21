@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"net"
 	"os"
 	"path/filepath"
@@ -312,35 +313,70 @@ func allSettings(t *testing.T, env []string) []config.Setting {
 	return out
 }
 
-// byward init shows no argument or flag value it was given, in any of the 14 secret forms, wherever it
-// is given: as the IdP's name, as each flag's value, as BYWARD_PUBLIC_URL, as an undefined flag, in a
-// bad flag syntax, or as an extra argument (#576). A refusal names a refused value only by its
-// length, as config does (#512). A value init accepts is printed in the script it writes on stdout,
-// which is the script's purpose, so only a refusal's stdout is checked, and stderr always is.
-func TestInitShowsNoArgumentOrFlagValueItWasGiven(t *testing.T) {
+// byward init shows a value it was given only in the script it prints, which is the script's purpose
+// (#576). Every form of a secret, and a secret in a URL's host, is given in each place: as the IdP's
+// name, alone and with each refusal init makes before it reads the name; as each of init's flags; as
+// BYWARD_PUBLIC_URL and BYWARD_UPSTREAM_URL; as an undefined flag, with and without a value; in a bad
+// flag syntax; and as an extra argument. Each cell must reach its own refusal, which names a refused
+// value only by its length, as config does (#512), or for a URL be accepted, and show the value in no
+// refusal, on stderr or stdout.
+func TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints(t *testing.T) {
+	const usage = "byward: usage: byward init entra"
 	base := []string{"--tenant", tenant, "--public-url", "https://m.example/mcp"}
-	for _, form := range secretForms {
+	entra := func(extra ...string) []string { return append(append([]string{"init", "entra"}, base...), extra...) }
+	// Each of init's flags, by the refusal its value reaches; a URL init accepts is printed.
+	flagRefusals := map[string]struct {
+		want     string
+		accepted bool
+	}{
+		"tenant":       {"the tenant must be the tenant ID", false},
+		"public-url":   {"BYWARD_PUBLIC_URL", true},
+		"upstream-url": {"BYWARD_UPSTREAM_URL", true},
+		"secret-years": {"--secret-years: want a whole number of years; got a value it does not take (not shown)", false},
+		"credential":   {"the credential must be secret or certificate; got another value (", false},
+	}
+	fs, _ := newInitFlags(nil)
+	fs.VisitAll(func(f *flag.Flag) {
+		if _, ok := flagRefusals[f.Name]; !ok {
+			t.Errorf("init's flag --%s has no cell here", f.Name)
+		}
+	})
+	type cell struct {
+		place, want string
+		accepted    bool // a URL init may accept, and print
+		args, env   []string
+	}
+	for _, form := range append(slices.Clone(secretForms), hostForm) {
 		v := form.value
-		for _, cell := range []struct {
-			place string
-			args  []string
-			env   []string
-		}{
-			{"the IdP's name", append([]string{"init", v}, base...), nil},
-			{"--tenant", append(append([]string{"init", "entra"}, base...), "--tenant="+v), nil},
-			{"--public-url", append(append([]string{"init", "entra"}, base...), "--public-url="+v), nil},
-			{"BYWARD_PUBLIC_URL", []string{"init", "entra", "--tenant", tenant}, []string{"BYWARD_PUBLIC_URL=" + v}},
-			{"--upstream-url", append(append([]string{"init", "entra"}, base...), "--upstream-url="+v), nil},
-			{"--secret-years", append(append([]string{"init", "entra"}, base...), "--secret-years="+v), nil},
-			{"--credential", append(append([]string{"init", "entra"}, base...), "--credential="+v), nil},
-			{"an undefined flag", append(append([]string{"init", "entra"}, base...), "--"+v), nil},
-			{"a bad flag syntax", append(append([]string{"init", "entra"}, base...), "---"+v), nil},
-			{"an extra argument", append(append([]string{"init", "entra"}, base...), v), nil},
-		} {
-			t.Run(cell.place+", "+form.name, func(t *testing.T) {
-				code, stdout, stderr := runWith(cell.args, cell.env...)
-				if strings.Contains(stderr, canary) || code != exitOK && strings.Contains(stdout, canary) {
+		cells := []cell{
+			{place: "the IdP's name", want: "the IdP must be entra; got another name (", args: append([]string{"init", v}, base...)},
+			{place: "the IdP's name, with an undefined flag", want: "got an undefined flag (4 characters, not shown)", args: []string{"init", v, "--tenant", tenant, "--nope"}},
+			{place: "the IdP's name, asking for help", want: usage, args: []string{"init", v, "-h"}},
+			{place: "the IdP's name, with a bad lifetime", want: "--secret-years: want", args: append(append([]string{"init", v}, base...), "--secret-years=x")},
+			{place: "the IdP's name, without a public URL", want: "BYWARD_PUBLIC_URL is required", args: []string{"init", v, "--tenant", tenant}},
+			{place: "the IdP's name, with a bad upstream URL", want: "BYWARD_UPSTREAM_URL: want", args: append(append([]string{"init", v}, base...), "--upstream-url=ftp://up.example/mcp")},
+			{place: "BYWARD_PUBLIC_URL", want: "BYWARD_PUBLIC_URL", accepted: true, args: []string{"init", "entra", "--tenant", tenant}, env: []string{"BYWARD_PUBLIC_URL=" + v}},
+			{place: "BYWARD_UPSTREAM_URL", want: "BYWARD_UPSTREAM_URL", accepted: true, args: entra(), env: []string{"BYWARD_UPSTREAM_URL=" + v}},
+			// The flag package ends a flag's name at its first =, so the form is given once with each = replaced.
+			{place: "an undefined flag", want: "got an undefined flag (", args: entra("--" + strings.ReplaceAll(v, "=", "_"))},
+			{place: "an undefined flag with a value", want: "got an undefined flag (", args: entra("--" + v)},
+			{place: "a bad flag syntax", want: "got an argument with a bad flag syntax (", args: entra("---" + v)},
+			{place: "an extra argument", want: usage, args: entra(v)},
+		}
+		for name, r := range flagRefusals {
+			cells = append(cells, cell{place: "--" + name, want: r.want, accepted: r.accepted, args: entra("--" + name + "=" + v)})
+		}
+		for _, c := range cells {
+			t.Run(c.place+", "+form.name, func(t *testing.T) {
+				code, stdout, stderr := runWith(c.args, c.env...)
+				if shows(stderr) || code != exitOK && shows(stdout) {
 					t.Errorf("exit %d; stdout %q, stderr %q show the value given", code, stdout, stderr)
+				}
+				if code == exitOK && c.accepted {
+					return
+				}
+				if code != exitConfig || !strings.Contains(stderr, c.want) {
+					t.Errorf("exit %d, stderr %q; want exit %d and the refusal %q", code, stderr, exitConfig, c.want)
 				}
 			})
 		}
