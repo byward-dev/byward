@@ -266,6 +266,9 @@ func TestAURLRefusedForItsFormSaysWhichPartIsWrong(t *testing.T) {
 		{"no // after the scheme", "https:8443", `it has no "//" after its scheme`},
 		{"a scheme and a path but no host", "https:/up.example/mcp", "it has no host"},
 		{"a user name and password", "https://user:pw@up.example/x", userInfo},
+		// The port is judged last: a URL wrong in more ways is told of the earlier one (#602).
+		{"another scheme and port 0", "ftp://up.example:0/x", "it has a scheme other than http or https"},
+		{"a user name and port 0", "https://user:pw@up.example:0/x", userInfo},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			want := fmt.Sprintf("BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (%d characters, not shown): %s", utf8.RuneCountInString(tc.raw), tc.why)

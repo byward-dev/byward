@@ -144,8 +144,8 @@ func isEscape(s string) bool {
 // isDigits reports whether s is ASCII digits only, at least one: a port or a prefix length as written.
 func isDigits(s string) bool { return s != "" && strings.Trim(s, "0123456789") == "" }
 
-// parseHTTPURL parses raw as an absolute http(s) URL with a host and no user name or password, or says
-// why it is not one: fixed text completing "it …", never url.Parse's error, which quotes the value.
+// parseHTTPURL parses raw as an absolute http(s) URL with a host, no user name or password, and a
+// port, if any, as isPortNumber takes it, or says why it is not one: fixed text completing "it …", never url.Parse's error, which quotes the value.
 // White space, control and invisible formatting characters are refused first: url.Parse accepts a
 // space or a non-ASCII control character in a path (#422), which no URL holds (RFC 3986 §2).
 func parseHTTPURL(raw string) (*url.URL, string) {
@@ -189,7 +189,7 @@ func urlReason(raw string, u *url.URL, err error) string {
 // The listen addresses take 0, which asks the kernel for a port; no URL a client follows does.
 func isPortNumber(port string) bool {
 	n, err := strconv.Atoi(port)
-	return err == nil && port[0] >= '1' && port[0] <= '9' && n <= 65535
+	return err == nil && port[0] >= '1' && n <= 65535 // Atoi took it, so a first byte from '1' is a digit
 }
 
 // portReason is why a host:port, or a URL, is refused for its port.

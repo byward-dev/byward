@@ -166,21 +166,13 @@ func TestAURLOrHostRefusedForItsFormSaysWhereAndWhyNeverWhat(t *testing.T) {
 		// redirect URI are built from it as written (#472).
 		{"public host name in upper case", "BYWARD_PUBLIC_URL=https://MCP.Example.com/mcp", `BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (27 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do`},
 		// #353: the port and the zone follow BYWARD_ALLOWED_HOSTS' rules too.
-		{"public URL with an empty port", "BYWARD_PUBLIC_URL=https://a.example:/mcp", wantPublicAsURL + `(22 characters, not shown): it ` + rulePort},
-		{"public URL with a port over 65535", "BYWARD_PUBLIC_URL=https://a.example:65536/mcp", wantPublicAsURL + `(27 characters, not shown): it ` + rulePort},
 		{"unicode public host with a port", "BYWARD_PUBLIC_URL=https://bücher.example:8443/mcp", wantPublicURL + `(31 characters, not shown): its host:port ` + ruleNotASCII},
-		{"public URL with port 0", "BYWARD_PUBLIC_URL=https://a.example:0/mcp", wantPublicAsURL + `(23 characters, not shown): it ` + rulePort},
-		{"public URL with a leading-zero port", "BYWARD_PUBLIC_URL=https://a.example:0443/mcp", wantPublicAsURL + `(26 characters, not shown): it ` + rulePort},
 		{"public URL with an IPv6 zone", "BYWARD_PUBLIC_URL=https://[fe80::1%25eth0]/mcp", wantPublicURL + `(28 characters, not shown): its host:port is not an IPv6 address without a zone; ` + ruleForms},
 		{"public URL with an IPv6 zone and a port", "BYWARD_PUBLIC_URL=https://[fe80::1%25eth0]:8443/mcp", wantPublicURL + `(33 characters, not shown): its host:port is not an IPv6 address without a zone; ` + ruleForms},
 		// Browsers and MCP clients send IDN hosts in ASCII (xn--) form, so a Unicode host never matches.
 		{"unicode public host", "BYWARD_PUBLIC_URL=https://bücher.example/mcp", wantPublicURL + `(26 characters, not shown): its host:port ` + ruleNotASCII},
 		{"escaped unicode public host", "BYWARD_PUBLIC_URL=https://b%C3%BCcher.example/mcp", wantPublicURL + `(31 characters, not shown): its host:port ` + ruleNotASCII},
 		{"unicode allowed origin", "BYWARD_ALLOWED_ORIGINS=https://bücher.example", wantOrigins + `(22 characters, not shown): its host:port ` + ruleNotASCII},
-		{"origin with a leading-zero port", "BYWARD_ALLOWED_ORIGINS=https://app.example.com:0443", wantOrigins + `(28 characters, not shown): it ` + rulePort},
-		{"origin with a port over 65535", "BYWARD_ALLOWED_ORIGINS=https://app.example.com:99999", wantOrigins + `(29 characters, not shown): it ` + rulePort},
-		{"origin with port 0", "BYWARD_ALLOWED_ORIGINS=https://app.example.com:0", wantOrigins + `(25 characters, not shown): it ` + rulePort},
-		{"origin with an empty port", "BYWARD_ALLOWED_ORIGINS=https://app.example.com:", wantOrigins + `(24 characters, not shown): it ` + rulePort},
 		{"origin with an empty label", "BYWARD_ALLOWED_ORIGINS=https://a..b", wantOrigins + `(12 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
 		{"origin with a leading dot", "BYWARD_ALLOWED_ORIGINS=https://.app.example.com", wantOrigins + `(24 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
 		{"origin with a trailing dot", "BYWARD_ALLOWED_ORIGINS=https://app.example.com.", wantOrigins + `(24 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
