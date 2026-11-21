@@ -1,7 +1,6 @@
 package config
 
 import (
-	"slices"
 	"strings"
 	"testing"
 )
@@ -77,10 +76,12 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 // from the registry, so a setting added to one is covered with no test to edit; the HTTP-only
 // settings of other groups are named here. Every other setting of the identity and downstream-token
 // groups must be named as applying to both modes or refusing stdio with its own hint, so a new one
-// fails until someone decides which mode it is for. The selectors and the credential, which keep
-// their own errors, are the only exceptions.
+// fails until someone decides which mode it is for. Each is refused given a value, and, but for a
+// secret (which takes no flag of its own), as a flag set to nothing, which is deliberate (#596). The
+// credential, which keeps its own hint, is the one exception; the selectors are too for a value, as
+// with both set there is no mode.
 func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
-	skipped := map[string]bool{"upstream-url": true, "upstream-command": true, "upstream-credential": true}
+	skipped := map[string]bool{"upstream-url": true, "upstream-command": true} // given a value: the "both set" error
 	httpOnlySettings := map[string]bool{"assertion-keys-dir": true, "assertion-header": true, "assertion-claims": true, "assertion-unverified-email": true}
 	notOffMode := map[string]bool{"obo-scopes": true, "identity-headers": true, "obo-header": true} // both modes; own hints
 	files := func(p string) ([]byte, error) {
@@ -95,11 +96,25 @@ func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 		if (s.Group == GroupIdentity || s.Group == GroupDownstreamTokens) && !forHTTP && !notOffMode[s.Name] {
 			t.Errorf("%s: list it in httpOnly and httpOnlySettings if only an HTTP upstream reads it, else in notOffMode (both modes, or its own stdio hint)", s.Name)
 		}
-		if !forHTTP && s.Group != GroupStdioUpstream || skipped[s.Name] {
+		if !forHTTP && s.Group != GroupStdioUpstream || s.Name == "upstream-credential" {
 			continue
 		}
 		n++
 		t.Run(s.Name, func(t *testing.T) {
+			modeEnv, mode := append([]string{}, base...), "HTTP"
+			if forHTTP {
+				modeEnv, mode = stdioBase(stdioCommand), "stdio"
+			}
+			if !s.Secret() {
+				flag := "--" + s.Name
+				_, _, err := Load([]string{flag + "="}, modeEnv, files)
+				if want := flag + " is set, but the upstream is " + mode; !isConfigError(err) || !strings.Contains(err.Error(), want) {
+					t.Errorf("%s=: err = %v, want a config error containing %q", flag, err, want)
+				}
+			}
+			if skipped[s.Name] {
+				return
+			}
 			given := s.Env() + "=x"
 			if s.Secret() {
 				given = s.Env() + "_FILE=/run/secrets/off-mode"
@@ -116,125 +131,5 @@ func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 	}
 	if n < 11 {
 		t.Fatalf("%d upstream-mode settings checked, want every one (11 today)", n)
-	}
-}
-
-// Configurations that load: each mode with the other's settings at their defaults, or set to nothing
-// as variables, as env templates list every variable (#428); the other mode's selector set to nothing
-// selects nothing. A flag set to nothing is refused: TestEveryOffCheckRefusesAFlagSetToNothingAndTakesAVariableSetToNothingAsUnset.
-func TestEachModeLoadsBesideTheOtherModesDefaultsAndEmptyValues(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		env  []string
-	}{
-		{"an HTTP upstream", base},
-		{"a stdio upstream", stdioBase(stdioCommand)},
-		{"an HTTP upstream with an empty command", append(append([]string{}, base...), "BYWARD_UPSTREAM_COMMAND=")},
-		{"a stdio upstream with an empty URL", stdioBase(stdioCommand, "BYWARD_UPSTREAM_URL=")},
-		{"an HTTP upstream with an empty stdio setting", append(append([]string{}, base...), "BYWARD_STDIO_MAX_PROCESSES=")},
-		{"a stdio upstream with an empty HTTP setting", stdioBase(stdioCommand, "BYWARD_UPSTREAM_STRIP_HEADERS=")},
-		{"a stdio upstream with an empty assertion key directory", stdioBase(stdioCommand, "BYWARD_ASSERTION_KEYS_DIR=")},
-		{"a stdio upstream with empty assertion claims", stdioBase(stdioCommand, "BYWARD_ASSERTION_CLAIMS=")},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if _, _, err := Load(nil, tc.env, baseFiles); err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-}
-
-// Every check that refuses a family's settings while the family is off refuses one given as a flag
-// set to nothing, which is deliberate, and takes one set to nothing as a variable as unset, as env
-// templates list every variable (#428, #596).
-func TestEveryOffCheckRefusesAFlagSetToNothingAndTakesAVariableSetToNothingAsUnset(t *testing.T) {
-	stdio := stdioBase(stdioCommand)
-	postgres := append(slices.Clone(base), "BYWARD_STORE_POSTGRES_DSN_FILE="+dsnFile)
-	for _, tc := range []struct {
-		check, setting string
-		env            []string
-		want           string
-	}{
-		{"the other IdP family", "oidc-scopes", base, "BYWARD_OIDC_SCOPES cannot be used with BYWARD_IDP=entra"},
-		{"app tokens off", "app-roles", base, "BYWARD_APP_ROLES set while BYWARD_APP_TOKENS=off"},
-		{"On-Behalf-Of's header beside a stdio upstream", "obo-header", stdio, "BYWARD_OBO_HEADER: a stdio upstream gets its downstream token from its token socket"},
-		{"the SQLite store beside PostgreSQL", "store-dir", postgres, "give one store, PostgreSQL or a SQLite state directory, not both"},
-		{"authentication beside --insecure-no-auth", "gate-roles", anon, "BYWARD_INSECURE_NO_AUTH cannot be combined with BYWARD_GATE_ROLES"},
-		{"a stdio setting beside an HTTP upstream", "stdio-max-processes", base, "--stdio-max-processes is set, but the upstream is HTTP: it applies only to a stdio upstream"},
-		{"an HTTP setting beside a stdio upstream", "upstream-header-timeout", stdio, "--upstream-header-timeout is set, but the upstream is stdio: it applies only to an HTTP upstream"},
-		{"an HTTP-only setting beside a stdio upstream", "assertion-claims", stdio, "--assertion-claims is set, but the upstream is stdio: it applies only to an HTTP upstream"},
-		{"the HTTP selector beside a stdio upstream", "upstream-url", stdio, "--upstream-url is set, but the upstream is stdio: it applies only to an HTTP upstream"},
-	} {
-		t.Run(tc.check, func(t *testing.T) {
-			if _, _, err := Load([]string{"--" + tc.setting + "="}, tc.env, filesPlusEmptyAndBlank); !isConfigError(err) || !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("--%s=: %v, want an error containing %q", tc.setting, err, tc.want)
-			}
-			env := Setting{Name: tc.setting}.Env() + "="
-			if _, _, err := Load(nil, append(slices.Clone(tc.env), env), filesPlusEmptyAndBlank); err != nil {
-				t.Errorf("%s: %v, want it unset", env, err)
-			}
-		})
-	}
-}
-
-// When the mode is unclear, each error says only what is wrong: a command that does not parse still
-// makes the upstream stdio, no upstream at all is only "required", and a malformed URL still selects
-// HTTP. Matched in parts, since most carry a second error of their own (the command's or the
-// URL's); the one with no upstream names its whole message.
-func TestAnUnclearUpstreamGivesOnlyItsOwnErrors(t *testing.T) {
-	files := func(p string) ([]byte, error) {
-		if p == credFile {
-			return []byte("k-123"), nil
-		}
-		return baseFiles(p)
-	}
-	for _, tc := range []struct {
-		name     string
-		env      []string
-		contains []string
-		absent   []string
-	}{
-		{"a malformed command still refuses the credential header as off-mode",
-			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Key"),
-			[]string{"BYWARD_UPSTREAM_CREDENTIAL_HEADER is set, but the upstream is stdio"}, []string{"there is no credential"}},
-		{"a malformed command keeps the credential's stdio hint",
-			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_UPSTREAM_CREDENTIAL_FILE="+credFile),
-			[]string{"is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE"}, []string{"ASSERTION_HEADER"}},
-		{"a malformed command still refuses the identity headers",
-			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_IDENTITY_HEADERS=true"),
-			[]string{"BYWARD_IDENTITY_HEADERS is for an HTTP upstream"}, nil},
-		{"a malformed command still refuses the On-Behalf-Of header",
-			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_OBO_HEADER=X-Graph-Token"),
-			[]string{"BYWARD_OBO_HEADER: a stdio upstream gets its downstream token from its token socket"}, nil},
-		{"a malformed command still refuses the PostgreSQL store",
-			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_STORE_POSTGRES_DSN_FILE="+credFile, "BYWARD_STORE_DIR="),
-			[]string{"BYWARD_STORE_POSTGRES_DSN_FILE: the PostgreSQL store is for several replicas"}, nil},
-		{"no upstream at all gives only the required error",
-			stdioBase("BYWARD_STDIO_MAX_PROCESSES=5", "BYWARD_UPSTREAM_HEADER_TIMEOUT=abc", "BYWARD_UPSTREAM_STRIP_HEADERS=Host",
-				"BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Key", "BYWARD_ASSERTION_HEADER=X-Byward-Identity"),
-			[]string{"BYWARD_UPSTREAM_URL is required (or BYWARD_UPSTREAM_COMMAND, or a command after --)"}, []string{"the upstream is HTTP", ";"}},
-		{"a malformed URL still reports the HTTP upstream's own settings",
-			append(append([]string{}, base...), "BYWARD_UPSTREAM_URL=ftp://x", "BYWARD_UPSTREAM_STRIP_HEADERS=Host", "BYWARD_UPSTREAM_HEADER_TIMEOUT=abc"),
-			[]string{"BYWARD_UPSTREAM_URL: want an absolute http(s) URL", "BYWARD_UPSTREAM_STRIP_HEADERS: want exact header names, such as X-Argocd-Base-Url; got entry 1 of 1, Host: MCP needs it at the upstream", "BYWARD_UPSTREAM_HEADER_TIMEOUT: want a duration"}, nil},
-		{"a malformed URL still refuses the stdio setting beside it",
-			append(append([]string{}, base...), "BYWARD_UPSTREAM_URL=ftp://x", "BYWARD_STDIO_MAX_PROCESSES=5"),
-			[]string{"BYWARD_UPSTREAM_URL: want an absolute http(s) URL", "BYWARD_STDIO_MAX_PROCESSES is set, but the upstream is HTTP"}, nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := Load(nil, tc.env, files)
-			if !isConfigError(err) {
-				t.Fatalf("err = %v, want a config error", err)
-			}
-			for _, s := range tc.contains {
-				if !strings.Contains(err.Error(), s) {
-					t.Errorf("err = %v, want it to say %q", err, s)
-				}
-			}
-			for _, s := range tc.absent {
-				if strings.Contains(err.Error(), s) {
-					t.Errorf("err = %v, want nothing about %q", err, s)
-				}
-			}
-		})
 	}
 }

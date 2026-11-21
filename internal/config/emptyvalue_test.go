@@ -144,3 +144,97 @@ func TestAFlagSetToNothingIsRefusedAsGiven(t *testing.T) {
 		}
 	}
 }
+
+// Every check that refuses a family's settings while the family is off refuses one given as a flag
+// set to nothing, which is deliberate, and takes one set to nothing as a variable as unset, as env
+// templates list every variable (#428, #596). One setting each; the upstream mode's check is walked
+// over every setting in TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode.
+func TestEveryOffCheckRefusesAFlagSetToNothingAndTakesAVariableSetToNothingAsUnset(t *testing.T) {
+	stdio := stdioBase(stdioCommand)
+	postgres := append(slices.Clone(base), "BYWARD_STORE_POSTGRES_DSN_FILE="+dsnFile)
+	for _, tc := range []struct {
+		check, setting string
+		env            []string
+		want           string
+	}{
+		{"the other IdP family", "oidc-scopes", base, "BYWARD_OIDC_SCOPES cannot be used with BYWARD_IDP=entra"},
+		{"app tokens off", "app-roles", base, "BYWARD_APP_ROLES set while BYWARD_APP_TOKENS=off"},
+		{"On-Behalf-Of's header beside a stdio upstream", "obo-header", stdio, "BYWARD_OBO_HEADER: a stdio upstream gets its downstream token from its token socket"},
+		{"the SQLite store beside PostgreSQL", "store-dir", postgres, "give one store, PostgreSQL or a SQLite state directory, not both"},
+		{"the SQLite counter file beside PostgreSQL", "store-counter-file", postgres, "BYWARD_STORE_COUNTER_FILE: the counter file belongs to the SQLite store"},
+		{"authentication beside --insecure-no-auth", "gate-roles", anon, "BYWARD_INSECURE_NO_AUTH cannot be combined with BYWARD_GATE_ROLES"},
+		{"a stdio setting beside an HTTP upstream", "stdio-max-processes", base, "--stdio-max-processes is set, but the upstream is HTTP: it applies only to a stdio upstream"},
+	} {
+		t.Run(tc.check, func(t *testing.T) {
+			if _, _, err := Load([]string{"--" + tc.setting + "="}, tc.env, filesPlusEmptyAndBlank); !isConfigError(err) || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("--%s=: %v, want an error containing %q", tc.setting, err, tc.want)
+			}
+			env := Setting{Name: tc.setting}.Env() + "="
+			if _, _, err := Load(nil, append(slices.Clone(tc.env), env), filesPlusEmptyAndBlank); err != nil {
+				t.Errorf("%s: %v, want it unset", env, err)
+			}
+		})
+	}
+}
+
+// When the mode is unclear, each error says only what is wrong: a command that does not parse still
+// makes the upstream stdio, no upstream at all is only "required", and a malformed URL still selects
+// HTTP. Matched in parts, since most carry a second error of their own (the command's or the
+// URL's); the one with no upstream names its whole message.
+func TestAnUnclearUpstreamGivesOnlyItsOwnErrors(t *testing.T) {
+	files := func(p string) ([]byte, error) {
+		if p == credFile {
+			return []byte("k-123"), nil
+		}
+		return baseFiles(p)
+	}
+	for _, tc := range []struct {
+		name     string
+		env      []string
+		contains []string
+		absent   []string
+	}{
+		{"a malformed command still refuses the credential header as off-mode",
+			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Key"),
+			[]string{"BYWARD_UPSTREAM_CREDENTIAL_HEADER is set, but the upstream is stdio"}, []string{"there is no credential"}},
+		{"a malformed command keeps the credential's stdio hint",
+			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_UPSTREAM_CREDENTIAL_FILE="+credFile),
+			[]string{"is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE"}, []string{"ASSERTION_HEADER"}},
+		{"a malformed command still refuses the identity headers",
+			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_IDENTITY_HEADERS=true"),
+			[]string{"BYWARD_IDENTITY_HEADERS is for an HTTP upstream"}, nil},
+		{"a malformed command still refuses the On-Behalf-Of header",
+			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_OBO_HEADER=X-Graph-Token"),
+			[]string{"BYWARD_OBO_HEADER: a stdio upstream gets its downstream token from its token socket"}, nil},
+		{"a malformed command still refuses the PostgreSQL store",
+			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_STORE_POSTGRES_DSN_FILE="+credFile, "BYWARD_STORE_DIR="),
+			[]string{"BYWARD_STORE_POSTGRES_DSN_FILE: the PostgreSQL store is for several replicas"}, nil},
+		{"no upstream at all gives only the required error",
+			stdioBase("BYWARD_STDIO_MAX_PROCESSES=5", "BYWARD_UPSTREAM_HEADER_TIMEOUT=abc", "BYWARD_UPSTREAM_STRIP_HEADERS=Host",
+				"BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Key", "BYWARD_ASSERTION_HEADER=X-Byward-Identity"),
+			[]string{"BYWARD_UPSTREAM_URL is required (or BYWARD_UPSTREAM_COMMAND, or a command after --)"}, []string{"the upstream is HTTP", ";"}},
+		{"a malformed URL still reports the HTTP upstream's own settings",
+			append(append([]string{}, base...), "BYWARD_UPSTREAM_URL=ftp://x", "BYWARD_UPSTREAM_STRIP_HEADERS=Host", "BYWARD_UPSTREAM_HEADER_TIMEOUT=abc"),
+			[]string{"BYWARD_UPSTREAM_URL: want an absolute http(s) URL", "BYWARD_UPSTREAM_STRIP_HEADERS: want exact header names, such as X-Argocd-Base-Url; got entry 1 of 1, Host: MCP needs it at the upstream", "BYWARD_UPSTREAM_HEADER_TIMEOUT: want a duration"}, nil},
+		{"a malformed URL still refuses the stdio setting beside it",
+			append(append([]string{}, base...), "BYWARD_UPSTREAM_URL=ftp://x", "BYWARD_STDIO_MAX_PROCESSES=5"),
+			[]string{"BYWARD_UPSTREAM_URL: want an absolute http(s) URL", "BYWARD_STDIO_MAX_PROCESSES is set, but the upstream is HTTP"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := Load(nil, tc.env, files)
+			if !isConfigError(err) {
+				t.Fatalf("err = %v, want a config error", err)
+			}
+			for _, s := range tc.contains {
+				if !strings.Contains(err.Error(), s) {
+					t.Errorf("err = %v, want it to say %q", err, s)
+				}
+			}
+			for _, s := range tc.absent {
+				if strings.Contains(err.Error(), s) {
+					t.Errorf("err = %v, want nothing about %q", err, s)
+				}
+			}
+		})
+	}
+}
