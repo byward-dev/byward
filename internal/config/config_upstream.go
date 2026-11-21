@@ -115,8 +115,8 @@ var httpOnly = map[string]bool{"assertion-keys-dir": true, "assertion-header": t
 // offModeSettings refuses each setting given for the upstream mode that is off: a stdio upstream's
 // settings with an HTTP upstream, an HTTP upstream's (and the httpOnly ones) with a stdio one. A
 // setting left at its default is never refused, nor a flag set to nothing, which is not given (a
-// variable set to nothing is unset already, resolve); the other families' off checks read Source and
-// refuse it (Value.given). A file named for a secret is given, even when the file is empty. The
+// variable set to nothing is unset already, resolve); the other checks for a family that is off read
+// Source and refuse it (Value.given). A file named for a secret is given, even when the file is empty. The
 // registry's groups, and httpOnly, say which mode a setting is for. The selectors (upstream-url,
 // upstream-command) keep their own "both set" error, and upstream-credential its own hint
 // (upstreamCredential).
