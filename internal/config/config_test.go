@@ -108,7 +108,6 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		{"a scope with a tab", "BYWARD_SCOPE=mcp\tx", scopeRefused(5)},
 		{"a scope that is not ASCII", "BYWARD_SCOPE=mcpü", scopeRefused(4)},
 		{"a scope with DEL", "BYWARD_SCOPE=mcp\x7f", scopeRefused(4)},
-		{"no scope", "BYWARD_SCOPE=", "BYWARD_SCOPE: want one scope token, such as mcp; got nothing"},
 		{"a scope with a quote", `BYWARD_SCOPE=a"b`, scopeRefused(3)},
 		{"a scope with a backslash", `BYWARD_SCOPE=a\b`, scopeRefused(3)},
 		{"operator name too long", "BYWARD_OPERATOR_NAME=" + strings.Repeat("é", 81), "BYWARD_OPERATOR_NAME: want text of at most 80 characters, without control or formatting characters; got a value (81 characters, not shown): it is too long"},
@@ -845,8 +844,6 @@ func TestInvalidStoreSettingsAreRejected(t *testing.T) {
 		// Every default derives from the data directory, so a relative one is reported, not the paths
 		// derived from it.
 		{"a relative data directory", []string{"BYWARD_DATA_DIR=data"}, "BYWARD_DATA_DIR: want an absolute path", "BYWARD_KEYS_DIR"},
-		// The one path setting with no default: given empty, it is refused as nothing given, not as relative.
-		{"an empty data directory", []string{"BYWARD_DATA_DIR="}, "BYWARD_DATA_DIR: want an absolute path; got nothing", "got a relative one"},
 		// The counter file derived from a relative keys directory is not reported a second time; one the
 		// operator sets is.
 		{"a counter derived from a relative keys directory", []string{"BYWARD_KEYS_DIR=keys"}, "BYWARD_KEYS_DIR: want an absolute path", "BYWARD_STORE_COUNTER_FILE"},

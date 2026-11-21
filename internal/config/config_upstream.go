@@ -114,8 +114,9 @@ var httpOnly = map[string]bool{"assertion-keys-dir": true, "assertion-header": t
 
 // offModeSettings refuses each setting given for the upstream mode that is off: a stdio upstream's
 // settings with an HTTP upstream, an HTTP upstream's (and the httpOnly ones) with a stdio one. A
-// setting left at its default, or given empty, is never refused: env templates often list every
-// variable empty. A file named for a secret is given, even when the file is empty. The registry's
+// setting left at its default is never refused, nor a flag set to nothing, which is not given (a
+// variable set to nothing is unset already, resolve). A file named for a secret is given, even when
+// the file is empty. The registry's
 // groups, and httpOnly, say which mode a setting is for. The selectors (upstream-url,
 // upstream-command) keep their own "both set" error, and upstream-credential its own hint
 // (upstreamCredential).
@@ -223,8 +224,6 @@ func (c *Config) upstreamCredential(v *Values) []error {
 	switch cred := parseText(val); {
 	case emptyFile != nil:
 		errs = append(errs, emptyFile)
-	case cred == "":
-		errs = append(errs, refused(cred, ""))
 	case len(cred) > maxUpstreamCredential:
 		errs = append(errs, refused(cred, fmt.Sprintf("it is %d bytes long", len(cred))))
 	case strings.ContainsFunc(cred, func(r rune) bool { return r != '\t' && (r < 0x20 || r == 0x7f) }):

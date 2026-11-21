@@ -31,13 +31,17 @@ func (c *Config) assertion(v *Values) []error {
 }
 
 // parseAssertionClaims reads BYWARD_ASSERTION_CLAIMS: claims from AssertionClaimNames, in any case, or
-// none. A refused entry is never shown (ADR-0031 §1).
+// none. A refused entry is never shown (ADR-0031 §1). A value of nothing, such as --assertion-claims=,
+// is refused, never read as none: what the upstream is told is the operator's to say (#428).
 func parseAssertionClaims(val Value) ([]string, []error) {
 	raw := strings.TrimSpace(val.Given.raw())
 	if raw == "none" {
 		return nil, nil
 	}
 	want := "claims from " + oneOf(AssertionClaimNames) + ", or none"
+	if raw == "" {
+		return nil, []error{refusedForm(val.Setting, whole, val.Given.raw(), want, "it is blank")}
+	}
 	list, at, err := parseEntries(val)
 	if err != nil {
 		return nil, []error{err}

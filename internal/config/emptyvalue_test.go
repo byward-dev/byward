@@ -158,3 +158,18 @@ func TestASecretSetToNothingBesideItsFileLoadsAsTheFileAlone(t *testing.T) {
 		t.Fatal("no secret loaded from its file in any mode, so the walk compared only errors")
 	}
 }
+
+// A flag set to nothing on the command line is deliberate, so it is refused as given, unlike a
+// variable set to nothing (#428). An empty claims flag never quietly means none: that would change
+// what the upstream is told.
+func TestAFlagSetToNothingIsRefusedAsGiven(t *testing.T) {
+	for _, tc := range []struct{ flag, want string }{
+		{"--scope=", "BYWARD_SCOPE: want one scope token, such as mcp; got nothing"},
+		{"--data-dir=", "BYWARD_DATA_DIR: want an absolute path; got nothing"},
+		{"--assertion-claims=", "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got nothing"},
+	} {
+		if _, err := load(t, []string{tc.flag}); !isConfigError(err) || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v, want the error %q", tc.flag, err, tc.want)
+		}
+	}
+}

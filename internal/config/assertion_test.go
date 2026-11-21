@@ -28,6 +28,8 @@ func TestAssertionClaimsAndHeaderAreRead(t *testing.T) {
 		// Padding around either value is trimmed.
 		{[]string{"BYWARD_ASSERTION_CLAIMS= none "}, "Authorization", nil},
 		{[]string{"BYWARD_ASSERTION_HEADER= x-byward-identity "}, "X-Byward-Identity", []string{"roles"}},
+		// Set to nothing is as if unset (#428): the default claims, never none.
+		{[]string{"BYWARD_ASSERTION_CLAIMS="}, "Authorization", []string{"roles"}},
 	} {
 		t.Run(strings.Join(tc.env, " "), func(t *testing.T) {
 			c, err := load(t, nil, tc.env...)
@@ -52,6 +54,7 @@ func TestAssertionSettingsRefuseWhatCannotWork(t *testing.T) {
 		"BYWARD_ASSERTION_CLAIMS=NONE":             "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got entry 1 of 1, none: give none in lower case, with nothing beside it",
 		"BYWARD_ASSERTION_CLAIMS=none,":            "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got entry 1 of 1, none: give none in lower case, with nothing beside it",
 		"BYWARD_ASSERTION_CLAIMS=roles,none":       "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got entry 2 of 2, none: none stands alone: list claims, or give only none",
+		"BYWARD_ASSERTION_CLAIMS= ":                "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got a value (1 character, not shown): it is blank",
 	} {
 		t.Run(env, func(t *testing.T) {
 			if _, err := load(t, nil, env); err == nil || !strings.Contains(err.Error(), inErr) {
