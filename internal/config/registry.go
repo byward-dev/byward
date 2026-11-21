@@ -45,7 +45,8 @@ func (s Setting) Secret() bool { return s.shape == secretShape }
 
 // HoldsPath reports whether the setting's value is a path the proxy reads or writes: a file that
 // cannot be used is named by the setting and the cause, never the path (security invariant 2, #587).
-// Its shape decides it. A secret's file is a path too, given as `<ENV>_FILE` or `--<name>-file`.
+// Its shape decides it. A secret's file is a path too, given as `<ENV>_FILE` or `--<name>-file`,
+// but the secret has the secret shape, so HoldsPath is false for it; PathVariables lists its file.
 func (s Setting) HoldsPath() bool { return s.shape == pathShape }
 
 // PathVariables are the environment variables whose values are paths: each path setting's, and each

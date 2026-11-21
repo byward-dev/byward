@@ -47,14 +47,14 @@ var fileOptionTypes = []string{"servingcert.Files", "sqlite.Options"}
 // The path shape is given to exactly the settings of pathFields, each of whose fields is a string
 // field of Config. shapesOfSettings lists the path settings too; this ties them to their fields.
 func TestThePathSettingsAreTheSettingsOfThePathFields(t *testing.T) {
-	var marked []string
+	var pathShaped []string
 	for _, s := range registry {
 		if s.HoldsPath() {
-			marked = append(marked, s.Name)
+			pathShaped = append(pathShaped, s.Name)
 		}
 	}
-	if want := slices.Sorted(maps.Values(pathFields)); !slices.Equal(slices.Sorted(slices.Values(marked)), want) {
-		t.Fatalf("settings with the path shape = %v, want pathFields' settings %v", slices.Sorted(slices.Values(marked)), want)
+	if want := slices.Sorted(maps.Values(pathFields)); !slices.Equal(slices.Sorted(slices.Values(pathShaped)), want) {
+		t.Fatalf("settings with the path shape = %v, want pathFields' settings %v (and shapesOfSettings' path row)", slices.Sorted(slices.Values(pathShaped)), want)
 	}
 	for _, field := range slices.Sorted(maps.Keys(pathFields)) {
 		if f, ok := reflect.TypeFor[Config]().FieldByName(field); !ok || f.Type.Kind() != reflect.String {
@@ -98,16 +98,15 @@ func TestPathVariablesAreThePathAndSecretFileVariables(t *testing.T) {
 	}
 }
 
-// Every Config field the proxy hands to a file opener, outside this package, holds a path setting:
-// a new path setting, or a new loader for an existing one, is listed in pathFields and given the
-// path shape. The scan is syntactic: it sees a field selected inside a call to one of fileOpeners, or
-// in one of fileOptionTypes' literals, by package name, and matches the field by name, so a field
-// of the same name on another type counts too. It cannot see a field copied into a variable, or
+// scanFileOpeners scans the production code outside this package for the Config string fields
+// selected inside a call to one of fileOpeners, or in one of fileOptionTypes' literals, matched by
+// package name. It returns where it last saw each field and which entries of the two lists matched.
+// The scan is syntactic: it matches fields by name, so a field of the same name on another type
+// counts too, as does a field in a data argument. It cannot see a field copied into a variable, or
 // passed to a function not listed, before it is opened, nor a package imported under another name;
-// the leak test's scenarios cover what the proxy prints then. So that a renamed or moved loader
-// cannot blind it, every entry of fileOpeners and fileOptionTypes must match, and the scan must see
-// every path field but notOpened.
-func TestEveryConfigFieldTheProxyOpensIsAPathSetting(t *testing.T) {
+// TestASettingOrFieldNamedAsAPathIsAPathSetting and the leak test cover those.
+func scanFileOpeners(t *testing.T) (opened map[string]string, matched map[string]bool) {
+	t.Helper()
 	root, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -119,8 +118,7 @@ func TestEveryConfigFieldTheProxyOpensIsAPathSetting(t *testing.T) {
 			stringFields[f.Name] = true
 		}
 	}
-	opened := map[string]string{} // field → where
-	matched := map[string]bool{}  // fileOpeners and fileOptionTypes entries seen
+	opened, matched = map[string]string{}, map[string]bool{}
 	fset := token.NewFileSet()
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -168,9 +166,18 @@ func TestEveryConfigFieldTheProxyOpensIsAPathSetting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return opened, matched
+}
+
+// The scan still sees what it is meant to: each of the project's loaders in fileOpeners (the os
+// package's come and go with ordinary refactors) and each of fileOptionTypes matches somewhere, and
+// every path field but notOpened is seen handed to one. A renamed or moved loader fails here instead
+// of blinding TestEveryConfigFieldTheProxyOpensIsAPathSetting.
+func TestTheFileOpenerScanSeesEveryLoaderAndPathField(t *testing.T) {
+	opened, matched := scanFileOpeners(t)
 	for _, name := range slices.Concat(fileOpeners, fileOptionTypes) {
-		if !matched[name] {
-			t.Errorf("%s: no call or literal in the proxy matches it; a loader was renamed or removed, so update fileOpeners or fileOptionTypes", name)
+		if !matched[name] && !strings.HasPrefix(name, "os.") {
+			t.Errorf("%s: no call or literal in the code the scan reads matches it; a loader was renamed or removed, so update fileOpeners or fileOptionTypes", name)
 		}
 	}
 	for _, field := range slices.Sorted(maps.Keys(pathFields)) {
@@ -178,6 +185,13 @@ func TestEveryConfigFieldTheProxyOpensIsAPathSetting(t *testing.T) {
 			t.Errorf("Config.%s: the scan saw no file opener handed it; a loader was renamed or moved, so update fileOpeners or fileOptionTypes", field)
 		}
 	}
+}
+
+// Every Config field the proxy hands to a file opener, outside this package, holds a path setting
+// (scanFileOpeners): a new path setting, or a new loader for an existing one, is listed in
+// pathFields and given the path shape.
+func TestEveryConfigFieldTheProxyOpensIsAPathSetting(t *testing.T) {
+	opened, _ := scanFileOpeners(t)
 	for _, field := range slices.Sorted(maps.Keys(opened)) {
 		if _, ok := pathFields[field]; !ok {
 			t.Errorf("%s: Config.%s is handed to a file opener but is no path setting; give its setting the path shape and list it in pathFields (#587)", opened[field], field)
@@ -185,8 +199,9 @@ func TestEveryConfigFieldTheProxyOpensIsAPathSetting(t *testing.T) {
 	}
 }
 
-// qualifiedName is a selector as package.Name, such as os.Open or servingcert.Files; "" for anything
-// else (a method, a local function).
+// qualifiedName is a selector on an identifier as ident.Name, such as os.Open or servingcert.Files,
+// read as package.Name since the scan has no types; "" for anything else (a longer chain, a local
+// function).
 func qualifiedName(e ast.Expr) string {
 	if sel, ok := e.(*ast.SelectorExpr); ok {
 		if pkg, ok := sel.X.(*ast.Ident); ok {

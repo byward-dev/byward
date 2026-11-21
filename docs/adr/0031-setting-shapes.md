@@ -1,6 +1,6 @@
 # ADR-0031: Setting shapes: display and refusal
 
-- Status: Accepted
+- Status: Accepted; amended 2026-11-22 (#587)
 - Date: 2026-11-19
 - Issue: #492 (tracker #485); amends ADR-0020 §4 and §6
 
@@ -111,6 +111,13 @@ reported.
    global.
 5. A URL refusal reuses the parsed result instead of parsing again. Whether a value is opaque
    follows from its shape, not from a second list.
+
+_Amended 2026-11-22 (#587):_ a shape's identity also says what kind of value a setting holds.
+`secretShape` means the value is read only from a file (`Secret`). `pathShape` means it is a path the
+proxy reads or writes, and a file there that cannot be used is named by the setting, never the path
+(`HoldsPath`, security invariant 2). `pathShape` displays and refuses as the as-given shape does, so
+startup and `--print-config` show paths as before. A setting thus holds a path or a secret, never
+both, and the path settings are listed literally beside the other shapes'.
 
 Example: the display rule from ADR-0020 §6's amendment of 2026-11-17 (#458) is two shapes.
 

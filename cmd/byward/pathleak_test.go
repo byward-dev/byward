@@ -25,7 +25,10 @@ var refusingCommands = [][]string{nil, {"check", "--offline"}, {"doctor"}, {"doc
 // pathLeakScenario is a file setting set to a path in a canary directory that byward cannot use.
 type pathLeakScenario struct {
 	name string
-	// says are what the error line says, all on that one line: the setting at fault and the cause.
+	// breaks is the variable whose file the scenario makes unusable: says names it, and env sets it.
+	breaks string
+	// says are what the error line says, all on that one line: the setting at fault (with the one it
+	// pairs with, for the TLS and store files) and the cause.
 	says []string
 	// env returns the settings under test, set to paths in dir that fail; a setting set to nothing is
 	// unset (#428).
@@ -34,8 +37,8 @@ type pathLeakScenario struct {
 	commands [][]string
 }
 
-// pathLeakScenarios are the leak test's scenarios; every path setting has at least one
-// (TestEveryPathSettingHasALeakScenario).
+// pathLeakScenarios are the leak test's scenarios; every path variable has at least one that breaks it
+// (TestEveryPathVariableHasALeakScenario).
 func pathLeakScenarios() []pathLeakScenario {
 	tlsPair := func(t *testing.T, dir string, b testcert.Bundle) []string {
 		cert, key := b.Write(t, dir)
@@ -45,35 +48,35 @@ func pathLeakScenarios() []pathLeakScenario {
 		return testcert.Issue(t, testcert.Options{Hosts: []string{"m.example"}, Leaf: testcert.Valid(time.Now(), 90)})
 	}
 	return []pathLeakScenario{
-		{"a missing sealing key directory", []string{"BYWARD_KEYS_DIR: token: key directory: no such file or directory"}, func(_ *testing.T, dir string) []string {
+		{"a missing sealing key directory", "BYWARD_KEYS_DIR", []string{"BYWARD_KEYS_DIR: token: key directory: no such file or directory"}, func(_ *testing.T, dir string) []string {
 			return []string{"BYWARD_KEYS_DIR=" + filepath.Join(dir, "keys")}
 		}, nil},
-		{"a sealing key other users can read", []string{`BYWARD_KEYS_DIR: token: key file "k1": secret file has mode 0644`}, func(t *testing.T, dir string) []string {
+		{"a sealing key other users can read", "BYWARD_KEYS_DIR", []string{`BYWARD_KEYS_DIR: token: key file "k1": secret file has mode 0644`}, func(t *testing.T, dir string) []string {
 			keys := filepath.Join(dir, "keys")
 			sealingkey.Write(t, keys, "k1")
 			chmod(t, filepath.Join(keys, "k1"), 0o644)
 			return []string{"BYWARD_KEYS_DIR=" + keys}
 		}, nil},
-		{"a world-writable sealing key directory", []string{"BYWARD_KEYS_DIR: token: key directory is world-writable"}, func(t *testing.T, dir string) []string {
+		{"a world-writable sealing key directory", "BYWARD_KEYS_DIR", []string{"BYWARD_KEYS_DIR: token: key directory is world-writable"}, func(t *testing.T, dir string) []string {
 			keys := filepath.Join(dir, "keys")
 			sealingkey.Write(t, keys, "k1")
 			chmod(t, keys, 0o707)
 			return []string{"BYWARD_KEYS_DIR=" + keys}
 		}, nil},
-		{"a missing static clients file", []string{"BYWARD_STATIC_CLIENTS_FILE: static clients: no such file or directory"}, func(_ *testing.T, dir string) []string {
+		{"a missing static clients file", "BYWARD_STATIC_CLIENTS_FILE", []string{"BYWARD_STATIC_CLIENTS_FILE: static clients: no such file or directory"}, func(_ *testing.T, dir string) []string {
 			return []string{"BYWARD_STATIC_CLIENTS_FILE=" + filepath.Join(dir, "clients.json")}
 		}, nil},
-		{"a malformed static clients file", []string{"BYWARD_STATIC_CLIENTS_FILE: static clients: not valid JSON: unexpected end of input"}, func(t *testing.T, dir string) []string {
+		{"a malformed static clients file", "BYWARD_STATIC_CLIENTS_FILE", []string{"BYWARD_STATIC_CLIENTS_FILE: static clients: not valid JSON: unexpected end of input"}, func(t *testing.T, dir string) []string {
 			return []string{"BYWARD_STATIC_CLIENTS_FILE=" + writeFile(t, filepath.Join(dir, "clients.json"), `{"clients":`, 0o600)}
 		}, nil},
-		{"a missing assertion key directory", []string{"BYWARD_ASSERTION_KEYS_DIR: assertion key directory: no such file or directory"}, func(_ *testing.T, dir string) []string {
+		{"a missing assertion key directory", "BYWARD_ASSERTION_KEYS_DIR", []string{"BYWARD_ASSERTION_KEYS_DIR: assertion key directory: no such file or directory"}, func(_ *testing.T, dir string) []string {
 			return []string{"BYWARD_ASSERTION_KEYS_DIR=" + filepath.Join(dir, "assertion-keys")}
 		}, nil},
-		{"a state directory that is a file", []string{"BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: sqlite store: the state directory is not a directory"}, func(t *testing.T, dir string) []string {
+		{"a state directory that is a file", "BYWARD_STORE_DIR", []string{"BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: sqlite store: the state directory is not a directory"}, func(t *testing.T, dir string) []string {
 			return []string{"BYWARD_STORE_DIR=" + writeFile(t, filepath.Join(dir, "state"), "", 0o600)}
 		}, nil},
 		// Only opening the store finds it: check --offline and doctor do not write (sqlite.CheckPaths).
-		{"a state directory byward cannot write to", []string{"BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: sqlite store: the state directory is not writable: permission denied"}, func(t *testing.T, dir string) []string {
+		{"a state directory byward cannot write to", "BYWARD_STORE_DIR", []string{"BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: sqlite store: the state directory is not writable: permission denied"}, func(t *testing.T, dir string) []string {
 			skipAsRoot(t)
 			state := filepath.Join(dir, "state")
 			if err := os.Mkdir(state, 0o700); err != nil {
@@ -83,39 +86,39 @@ func pathLeakScenarios() []pathLeakScenario {
 			t.Cleanup(func() { _ = os.Chmod(state, 0o700) }) //nolint:gosec // G302: so TempDir can remove it
 			return []string{"BYWARD_STORE_DIR=" + state}
 		}, [][]string{nil}},
-		{"a corrupt store counter file", []string{"BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: sqlite store: the counter file is corrupt"}, func(t *testing.T, dir string) []string {
+		{"a corrupt store counter file", "BYWARD_STORE_COUNTER_FILE", []string{"BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: sqlite store: the counter file is corrupt"}, func(t *testing.T, dir string) []string {
 			return []string{"BYWARD_STORE_COUNTER_FILE=" + writeFile(t, filepath.Join(dir, "store-writes"), "not a number\n", 0o600)}
 		}, nil},
-		{"a store counter file byward cannot read", []string{"BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: sqlite store: counter file: permission denied"}, func(t *testing.T, dir string) []string {
+		{"a store counter file byward cannot read", "BYWARD_STORE_COUNTER_FILE", []string{"BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: sqlite store: counter file: permission denied"}, func(t *testing.T, dir string) []string {
 			skipAsRoot(t)
 			return []string{"BYWARD_STORE_COUNTER_FILE=" + writeFile(t, filepath.Join(dir, "store-writes"), "1\n", 0o000)}
 		}, nil},
-		{"a client secret file other users can read", []string{"BYWARD_ENTRA_CLIENT_SECRET_FILE: secret file has mode 0644"}, func(t *testing.T, dir string) []string {
+		{"a client secret file other users can read", "BYWARD_ENTRA_CLIENT_SECRET_FILE", []string{"BYWARD_ENTRA_CLIENT_SECRET_FILE: secret file has mode 0644"}, func(t *testing.T, dir string) []string {
 			return []string{"BYWARD_ENTRA_CLIENT_SECRET_FILE=" + writeFile(t, filepath.Join(dir, "secret"), entraSecret, 0o644)}
 		}, nil},
-		{"a missing TLS certificate file", []string{"BYWARD_TLS_CERT_FILE / BYWARD_TLS_KEY_FILE: the certificate file: no such file or directory"}, func(t *testing.T, dir string) []string {
+		{"a missing TLS certificate file", "BYWARD_TLS_CERT_FILE", []string{"BYWARD_TLS_CERT_FILE / BYWARD_TLS_KEY_FILE: the certificate file: no such file or directory"}, func(t *testing.T, dir string) []string {
 			_, key := bundle(t).Write(t, dir)
 			return []string{"BYWARD_TLS_CERT_FILE=" + filepath.Join(dir, "missing.crt"), "BYWARD_TLS_KEY_FILE=" + key}
 		}, nil},
-		{"a TLS key of another certificate", []string{"BYWARD_TLS_CERT_FILE / BYWARD_TLS_KEY_FILE: the certificate and key files: tls: private key does not match public key"}, func(t *testing.T, dir string) []string {
+		{"a TLS key of another certificate", "BYWARD_TLS_KEY_FILE", []string{"BYWARD_TLS_CERT_FILE / BYWARD_TLS_KEY_FILE: the certificate and key files: tls: private key does not match public key"}, func(t *testing.T, dir string) []string {
 			good, other := bundle(t), bundle(t)
 			return tlsPair(t, dir, testcert.Bundle{Cert: good.Cert, Key: other.Key})
 		}, nil},
-		{"an encrypted TLS key", []string{"BYWARD_TLS_CERT_FILE / BYWARD_TLS_KEY_FILE: the key file: the private key is encrypted"}, func(t *testing.T, dir string) []string {
+		{"an encrypted TLS key", "BYWARD_TLS_KEY_FILE", []string{"BYWARD_TLS_CERT_FILE / BYWARD_TLS_KEY_FILE: the key file: the private key is encrypted"}, func(t *testing.T, dir string) []string {
 			encrypted := []byte("-----BEGIN ENCRYPTED PRIVATE KEY-----\nAAAA\n-----END ENCRYPTED PRIVATE KEY-----\n")
 			return tlsPair(t, dir, testcert.Bundle{Cert: bundle(t).Cert, Key: encrypted})
 		}, nil},
-		{"a TLS chain certificate that does not parse", []string{"BYWARD_TLS_CERT_FILE / BYWARD_TLS_KEY_FILE: the certificate file: x509: "}, func(t *testing.T, dir string) []string {
+		{"a TLS chain certificate that does not parse", "BYWARD_TLS_CERT_FILE", []string{"BYWARD_TLS_CERT_FILE / BYWARD_TLS_KEY_FILE: the certificate file: x509: "}, func(t *testing.T, dir string) []string {
 			b := bundle(t)
 			junk := "-----BEGIN CERTIFICATE-----\nanVuaw==\n-----END CERTIFICATE-----\n"
 			return tlsPair(t, dir, testcert.Bundle{Cert: append(b.Cert, junk...), Key: b.Key})
 		}, nil},
 		// Defaults resolve inside the data directory; the first one byward opens names its own setting.
-		{"a missing data directory", []string{"BYWARD_KEYS_DIR: token: key directory: no such file or directory"}, func(_ *testing.T, dir string) []string {
+		{"a missing data directory", "BYWARD_DATA_DIR", []string{"BYWARD_KEYS_DIR: token: key directory: no such file or directory"}, func(_ *testing.T, dir string) []string {
 			return []string{"BYWARD_DATA_DIR=" + filepath.Join(dir, "data"), "BYWARD_KEYS_DIR=", "BYWARD_STATIC_CLIENTS_FILE=",
 				"BYWARD_ASSERTION_KEYS_DIR=", "BYWARD_STORE_DIR=", "BYWARD_STORE_COUNTER_FILE="}
 		}, nil},
-		{"a missing federated token file", []string{"BYWARD_ENTRA_FEDERATED_TOKEN_FILE: no such file or directory"}, func(_ *testing.T, dir string) []string {
+		{"a missing federated token file", "BYWARD_ENTRA_FEDERATED_TOKEN_FILE", []string{"BYWARD_ENTRA_FEDERATED_TOKEN_FILE: no such file or directory"}, func(_ *testing.T, dir string) []string {
 			return []string{"BYWARD_ENTRA_FEDERATED_TOKEN_FILE=" + filepath.Join(dir, "token"), "BYWARD_ENTRA_CLIENT_SECRET_FILE="}
 		}, nil},
 		missingSecretFile("BYWARD_UPSTREAM_CREDENTIAL_FILE", "upstream-credential"),
@@ -127,12 +130,12 @@ func pathLeakScenarios() []pathLeakScenario {
 	}
 }
 
-// missingSecretFile is the scenario of a secret whose file, given as env, is missing; name is the
+// missingSecretFile is the scenario of a secret whose file, given as env, is missing; setting is the
 // secret's setting.
-func missingSecretFile(env, name string) pathLeakScenario {
-	says := []string{env + ": want the path of a file holding the secret, such as /run/secrets/" + name + "; got a value (", "not shown): it cannot be read: no such file or directory"}
-	return pathLeakScenario{"a missing " + name + " file", says, func(_ *testing.T, dir string) []string {
-		return []string{env + "=" + filepath.Join(dir, name)}
+func missingSecretFile(env, setting string) pathLeakScenario {
+	says := []string{env + ": want the path of a file holding the secret, such as /run/secrets/" + setting + "; got a value (", "not shown): it cannot be read: no such file or directory"}
+	return pathLeakScenario{"a missing " + setting + " file", env, says, func(_ *testing.T, dir string) []string {
+		return []string{env + "=" + filepath.Join(dir, setting)}
 	}, nil}
 }
 
@@ -219,29 +222,34 @@ func TestAKeyFileNamedWithANewlineCannotForgeALine(t *testing.T) {
 	}
 }
 
-// Every path setting, and every secret's file, has a scenario in the leak test that breaks it (#587): a
-// new one fails here until it has one. A scenario breaks a variable it sets when what it says names
-// that variable as the setting at fault, so setting a variable to a file that works does not count.
-// The data directory breaks only through the defaults inside it, so its scenario names another
-// setting. A scenario that skips as root covers nothing then.
-func TestEveryPathSettingHasALeakScenario(t *testing.T) {
+// Every path variable (each path setting's, and each secret's file) has a scenario in the leak test
+// that breaks it (#587): a new one fails here until it has one. A scenario breaks the variable it
+// declares in breaks: it must set it, and what it says must name it as the setting at fault, so a
+// variable set to a file that works in another scenario does not count. The data directory breaks only
+// through the defaults inside it, so its scenario names the default that fails instead. A scenario
+// that skips as root covers nothing then.
+func TestEveryPathVariableHasALeakScenario(t *testing.T) {
 	brokenThroughDefaults := []string{"BYWARD_DATA_DIR"}
 	broken := map[string]bool{}
 	for _, tc := range pathLeakScenarios() {
 		t.Run(tc.name, func(t *testing.T) {
-			says := strings.Join(tc.says, " ")
-			for _, kv := range tc.env(t, t.TempDir()) {
-				name, value, _ := strings.Cut(kv, "=")
-				named := strings.Contains(says, name+":") || strings.Contains(says, name+" ")
-				if value != "" && (named || slices.Contains(brokenThroughDefaults, name)) {
-					broken[name] = true
-				}
+			sets := slices.ContainsFunc(tc.env(t, t.TempDir()), func(kv string) bool {
+				value, ok := strings.CutPrefix(kv, tc.breaks+"=")
+				return ok && value != ""
+			})
+			if !sets {
+				t.Fatalf("it breaks %s but does not set it", tc.breaks)
 			}
+			says := " " + strings.Join(tc.says, " ")
+			if named := strings.Contains(says, " "+tc.breaks+":") || strings.Contains(says, " "+tc.breaks+" "); !named && !slices.Contains(brokenThroughDefaults, tc.breaks) {
+				t.Fatalf("it breaks %s but what it says, %q, does not name it", tc.breaks, tc.says)
+			}
+			broken[tc.breaks] = true
 		})
 	}
 	for _, name := range config.PathVariables() {
 		if !broken[name] {
-			t.Errorf("%s holds a path but no scenario in pathLeakScenarios breaks it", name)
+			t.Errorf("%s holds a path but no scenario in pathLeakScenarios breaks it (set breaks: %q in one whose says names it)", name, name)
 		}
 	}
 }

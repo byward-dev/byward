@@ -15,6 +15,8 @@ import (
 // a refusal of a value for its form shows of it (refusedForm). display's result is one line of
 // printable characters, whatever the value holds, so a value can never start a line of its own in
 // --print-config (#505).
+// Its identity also says what kind of value the setting holds: secretShape and pathShape (ADR-0031 §3
+// as amended for #587).
 // Every registry entry has one, which init checks; build one only with newShape.
 type shape struct {
 	display func(raw string) string
