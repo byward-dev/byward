@@ -856,6 +856,10 @@ func probeWritable(dir string) error {
 	return nil
 }
 
+// closeDatabaseFile is (*os.File).Close; tests replace it to fail ensureFile's close, which only a
+// fault (such as EIO on a network file system) does on a real file system.
+var closeDatabaseFile = (*os.File).Close
+
 // ensureFile creates the database file with mode 0600, or tightens an existing one, together with
 // leftover -wal and -shm files. SQLite creates new -wal and -shm files with the database file's
 // mode.
@@ -873,7 +877,10 @@ func ensureFile(path string) error {
 		_ = f.Close()
 		return fmt.Errorf("sqlite store: database file %q: %w", filepath.Base(path), logging.FileError(err))
 	}
-	return f.Close()
+	if err := closeDatabaseFile(f); err != nil {
+		return fmt.Errorf("sqlite store: database file %q: %w", filepath.Base(path), logging.FileError(err))
+	}
+	return nil
 }
 
 // CreateClient implements store.Clients.
