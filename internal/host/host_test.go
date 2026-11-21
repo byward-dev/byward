@@ -103,6 +103,8 @@ func TestLoopbackReadsTheParsedHostButAsWrittenOnlyANameOrIPv4InTheFormParseWrit
 		{"127.0.0.1", true, true},
 		{"127.0.0.2", true, true},
 		// Addresses that are not loopback, whatever their form.
+		{"0.0.0.0", false, false},
+		{"10.0.0.5", false, false},
 		{"2001:db8::1", false, false},
 		{"[2001:db8::1]", false, false},
 		{"::ffff:10.0.0.1", false, false},
@@ -121,8 +123,7 @@ func TestLoopbackReadsTheParsedHostButAsWrittenOnlyANameOrIPv4InTheFormParseWrit
 		{"::ffff:127.0.0.1", true, true},
 		{"0:0:0:0:0:0:0:1", true, true},
 		{"[::1]", true, false}, // as written, a host has no brackets
-		{"0.0.0.0", false, false},
-		{"10.0.0.5", false, false},
+		// Names that are not localhost, and hosts with a port, a zone or nothing.
 		{"localhost.", false, false},
 		{"localhost.idp.example", false, false},
 		{"evil-localhost", false, false},
