@@ -43,9 +43,6 @@ func ParsePublicURL(raw string) (*url.URL, error) {
 		return nil, err
 	}
 	const want = "the MCP endpoint's URL such as " + exampleMCPURL
-	if u.Hostname() == "" {
-		return nil, refusedForm(s, whole, raw, want, "it has no host before its port")
-	}
 	if _, reason := hostPort(u.Host); reason != "" {
 		// host:port joins the public listener's Host allow-list, so it follows BYWARD_ALLOWED_HOSTS'
 		// rules (#344, #353). The rest is not checked: the host is not shown, so the URL is not either.
@@ -177,6 +174,8 @@ func urlReason(raw string, u *url.URL, err error) string {
 		return `has no "//" after its scheme`
 	case u.Host == "":
 		return "has no host"
+	case u.Hostname() == "": // http://:9000/mcp: a port alone, which a dialer reads as this host (#614)
+		return "has no host before its port"
 	case u.User != nil:
 		return "holds a user name or password"
 	case (u.Port() != "" || strings.HasSuffix(u.Host, ":")) && !isPortNumber(u.Port()):

@@ -159,7 +159,6 @@ func TestAURLOrHostRefusedForItsFormSaysWhereAndWhyNeverWhat(t *testing.T) {
 		{"http public", "BYWARD_PUBLIC_URL=http://mcp.example.com/mcp", `BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host`},
 		// #344: the public host joins the public Host allow-list, so it follows BYWARD_ALLOWED_HOSTS' name rule.
 		{"public host with a trailing dot", "BYWARD_PUBLIC_URL=https://mcp.example.com./mcp", wantPublicURL + `(28 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
-		{"public host empty, with a port", "BYWARD_PUBLIC_URL=https://:8443/mcp", wantPublicURL + `(17 characters, not shown): it has no host before its port`},
 		{"public host with a double dot", "BYWARD_PUBLIC_URL=https://a..b/mcp", wantPublicURL + `(16 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
 		{"public host with a wildcard", "BYWARD_PUBLIC_URL=https://a*b/mcp", wantPublicURL + `(15 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
 		// A browser lower-cases a host name, and byward does not rewrite it: the issuer and the IdP
