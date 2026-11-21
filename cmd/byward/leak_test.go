@@ -382,7 +382,7 @@ func TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints(t *testing.T) {
 				if shows(stderr) || code != exitOK && shows(stdout) {
 					t.Errorf("exit %d; stdout %q, stderr %q show the value given", code, stdout, stderr)
 				}
-				if got := processStderr(); got != "" {
+				if got := processStderr(t); got != "" {
 					t.Errorf("init wrote %q to os.Stderr or the log package, want nothing", got)
 				}
 				if code == exitOK && c.accepted {
@@ -397,10 +397,10 @@ func TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints(t *testing.T) {
 }
 
 // redirectStderr sends os.Stderr and the log package (slog's default logger writes through it) to a file
-// until the test ends, and returns a function that reads what was written there since it last read. It
-// swaps variables, not file descriptor 2. No test in this package runs in parallel, so none writes there
-// meanwhile.
-func redirectStderr(t *testing.T) func() string {
+// until the test ends, and returns a function that reads what was written there since it last read, failing
+// the test (or subtest) it is given if it cannot. It swaps variables, not file descriptor 2. No test in
+// this package runs in parallel, so none writes there meanwhile.
+func redirectStderr(t *testing.T) func(*testing.T) string {
 	t.Helper()
 	f, err := os.Create(filepath.Join(t.TempDir(), "stderr"))
 	if err != nil {
@@ -411,7 +411,8 @@ func redirectStderr(t *testing.T) func() string {
 	log.SetOutput(f)
 	t.Cleanup(func() { os.Stderr = saved; log.SetOutput(savedLog); _ = f.Close() })
 	read := 0
-	return func() string {
+	return func(t *testing.T) string {
+		t.Helper()
 		b, err := os.ReadFile(f.Name())
 		if err != nil {
 			t.Fatal(err)
