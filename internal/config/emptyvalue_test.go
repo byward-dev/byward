@@ -122,27 +122,18 @@ func TestASecretSetToNothingBesideItsFileLoadsAsTheFileAlone(t *testing.T) {
 
 // A flag set to nothing on the command line is deliberate, so it is refused as given, unlike a
 // variable set to nothing (#428). An empty claims flag never quietly means none: that would change
-// what the upstream is told, so it is refused beside a stdio upstream too, as an empty assertion
-// header is.
+// what the upstream is told. (A flag set to nothing for a family that is off is refused by that
+// family's check: TestEveryOffCheckRefusesAFlagSetToNothingAndTakesAVariableSetToNothingAsUnset.)
 func TestAFlagSetToNothingIsRefusedAsGiven(t *testing.T) {
-	stdio := stdioBase(stdioCommand)
-	claims := "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got nothing"
-	header := "BYWARD_ASSERTION_HEADER: want a header name such as Authorization or X-Byward-Identity; got nothing"
-	for _, tc := range []struct {
-		flag string
-		env  []string
-		want string
-	}{
-		{"--listen=", base, "BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got nothing"},
-		{"--scope=", base, "BYWARD_SCOPE: want one scope token, such as mcp; got nothing"},
-		{"--data-dir=", base, "BYWARD_DATA_DIR: want an absolute path; got nothing"},
-		{"--assertion-claims=", base, claims},
-		{"--assertion-claims=", stdio, claims},
-		{"--assertion-header=", base, header},
-		{"--assertion-header=", stdio, header},
+	for _, tc := range []struct{ flag, want string }{
+		{"--listen=", "BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got nothing"},
+		{"--scope=", "BYWARD_SCOPE: want one scope token, such as mcp; got nothing"},
+		{"--data-dir=", "BYWARD_DATA_DIR: want an absolute path; got nothing"},
+		{"--assertion-claims=", "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got nothing"},
+		{"--assertion-header=", "BYWARD_ASSERTION_HEADER: want a header name such as Authorization or X-Byward-Identity; got nothing"},
 	} {
-		if _, _, err := Load([]string{tc.flag}, tc.env, baseFiles); !isConfigError(err) || err.Error() != tc.want {
-			t.Errorf("%s beside %s: %v, want the error %q", tc.flag, tc.env, err, tc.want)
+		if _, err := load(t, []string{tc.flag}); !isConfigError(err) || err.Error() != tc.want {
+			t.Errorf("%s: %v, want the error %q", tc.flag, err, tc.want)
 		}
 	}
 }

@@ -114,11 +114,11 @@ var httpOnly = map[string]bool{"assertion-keys-dir": true, "assertion-header": t
 
 // offModeSettings refuses each setting given for the upstream mode that is off: a stdio upstream's
 // settings with an HTTP upstream, an HTTP upstream's (and the httpOnly ones) with a stdio one. A
-// setting left at its default is never refused, nor a flag set to nothing, which is not given (a
-// variable set to nothing is unset already, resolve); the other checks for a family that is off read
-// Source and refuse it (Value.given). A file named for a secret is given, even when the file is empty. The
-// registry's groups, and httpOnly, say which mode a setting is for. The selectors (upstream-url,
-// upstream-command) keep their own "both set" error, and upstream-credential its own hint
+// setting left at its default is never refused; one given is, a flag set to nothing included, as
+// every check for a family that is off does (#596). A variable set to nothing is unset already
+// (resolve), and a file named for a secret is given, even when the file is empty. The registry's
+// groups, and httpOnly, say which mode a setting is for. The other mode's selector reaches here only
+// as a flag set to nothing, as with a value there is no mode; upstream-credential keeps its own hint
 // (upstreamCredential).
 func offModeSettings(v *Values, stdio bool) []error {
 	offGroup, inUse, offMode, offSelector := GroupStdioUpstream, "HTTP", "a stdio upstream", Setting{Name: "upstream-command"}.Env()
@@ -129,7 +129,7 @@ func offModeSettings(v *Values, stdio bool) []error {
 	for _, val := range v.Effective() {
 		s := val.Setting
 		forOff := s.Group == offGroup || stdio && httpOnly[s.Name]
-		if !forOff || val.Source == SourceDefault || !val.given() || s.Name == "upstream-url" || s.Name == "upstream-command" || s.Name == "upstream-credential" {
+		if !forOff || val.Source == SourceDefault || s.Name == "upstream-credential" {
 			continue
 		}
 		errs = append(errs, errorf("%s is set, but the upstream is %s: it applies only to %s (%s); remove it", spelled(val), inUse, offMode, offSelector))

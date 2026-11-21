@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -118,30 +119,59 @@ func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 	}
 }
 
-// Configurations that load: each mode with the other's settings at their defaults, or given empty,
-// as env templates list every variable; an empty value is not given, so it is no off-mode setting.
-// The other mode's selector given empty selects nothing. (An empty assertion header or claims flag is
-// refused by its own parser even beside a stdio upstream: TestAFlagSetToNothingIsRefusedAsGiven.)
+// Configurations that load: each mode with the other's settings at their defaults, or set to nothing
+// as variables, as env templates list every variable (#428); the other mode's selector set to nothing
+// selects nothing. A flag set to nothing is refused: TestEveryOffCheckRefusesAFlagSetToNothingAndTakesAVariableSetToNothingAsUnset.
 func TestEachModeLoadsBesideTheOtherModesDefaultsAndEmptyValues(t *testing.T) {
-	command := stdioCommand
 	for _, tc := range []struct {
 		name string
-		args []string
 		env  []string
 	}{
-		{"an HTTP upstream", nil, base},
-		{"a stdio upstream", nil, stdioBase(command)},
-		{"an HTTP upstream with an empty command", nil, append(append([]string{}, base...), "BYWARD_UPSTREAM_COMMAND=")},
-		{"a stdio upstream with an empty URL", nil, stdioBase(command, "BYWARD_UPSTREAM_URL=")},
-		{"an HTTP upstream with an empty stdio setting", nil, append(append([]string{}, base...), "BYWARD_STDIO_MAX_PROCESSES=")},
-		{"an HTTP upstream with an empty stdio flag", []string{"--stdio-max-processes="}, base},
-		{"a stdio upstream with an empty HTTP setting", nil, stdioBase(command, "BYWARD_UPSTREAM_STRIP_HEADERS=")},
-		{"a stdio upstream with an empty assertion key directory", nil, stdioBase(command, "BYWARD_ASSERTION_KEYS_DIR=")},
-		{"a stdio upstream with empty assertion claims", nil, stdioBase(command, "BYWARD_ASSERTION_CLAIMS=")},
+		{"an HTTP upstream", base},
+		{"a stdio upstream", stdioBase(stdioCommand)},
+		{"an HTTP upstream with an empty command", append(append([]string{}, base...), "BYWARD_UPSTREAM_COMMAND=")},
+		{"a stdio upstream with an empty URL", stdioBase(stdioCommand, "BYWARD_UPSTREAM_URL=")},
+		{"an HTTP upstream with an empty stdio setting", append(append([]string{}, base...), "BYWARD_STDIO_MAX_PROCESSES=")},
+		{"a stdio upstream with an empty HTTP setting", stdioBase(stdioCommand, "BYWARD_UPSTREAM_STRIP_HEADERS=")},
+		{"a stdio upstream with an empty assertion key directory", stdioBase(stdioCommand, "BYWARD_ASSERTION_KEYS_DIR=")},
+		{"a stdio upstream with empty assertion claims", stdioBase(stdioCommand, "BYWARD_ASSERTION_CLAIMS=")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, _, err := Load(tc.args, tc.env, baseFiles); err != nil {
+			if _, _, err := Load(nil, tc.env, baseFiles); err != nil {
 				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// Every check that refuses a family's settings while the family is off refuses one given as a flag
+// set to nothing, which is deliberate, and takes one set to nothing as a variable as unset, as env
+// templates list every variable (#428, #596).
+func TestEveryOffCheckRefusesAFlagSetToNothingAndTakesAVariableSetToNothingAsUnset(t *testing.T) {
+	stdio := stdioBase(stdioCommand)
+	postgres := append(slices.Clone(base), "BYWARD_STORE_POSTGRES_DSN_FILE="+dsnFile)
+	for _, tc := range []struct {
+		check, setting string
+		env            []string
+		want           string
+	}{
+		{"the other IdP family", "oidc-scopes", base, "BYWARD_OIDC_SCOPES cannot be used with BYWARD_IDP=entra"},
+		{"app tokens off", "app-roles", base, "BYWARD_APP_ROLES set while BYWARD_APP_TOKENS=off"},
+		{"On-Behalf-Of's header beside a stdio upstream", "obo-header", stdio, "BYWARD_OBO_HEADER: a stdio upstream gets its downstream token from its token socket"},
+		{"the SQLite store beside PostgreSQL", "store-dir", postgres, "give one store, PostgreSQL or a SQLite state directory, not both"},
+		{"authentication beside --insecure-no-auth", "gate-roles", anon, "BYWARD_INSECURE_NO_AUTH cannot be combined with BYWARD_GATE_ROLES"},
+		{"a stdio setting beside an HTTP upstream", "stdio-max-processes", base, "--stdio-max-processes is set, but the upstream is HTTP: it applies only to a stdio upstream"},
+		{"an HTTP setting beside a stdio upstream", "upstream-header-timeout", stdio, "--upstream-header-timeout is set, but the upstream is stdio: it applies only to an HTTP upstream"},
+		{"an HTTP-only setting beside a stdio upstream", "assertion-claims", stdio, "--assertion-claims is set, but the upstream is stdio: it applies only to an HTTP upstream"},
+		{"the HTTP selector beside a stdio upstream", "upstream-url", stdio, "--upstream-url is set, but the upstream is stdio: it applies only to an HTTP upstream"},
+	} {
+		t.Run(tc.check, func(t *testing.T) {
+			if _, _, err := Load([]string{"--" + tc.setting + "="}, tc.env, filesPlusEmptyAndBlank); !isConfigError(err) || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("--%s=: %v, want an error containing %q", tc.setting, err, tc.want)
+			}
+			env := Setting{Name: tc.setting}.Env() + "="
+			if _, _, err := Load(nil, append(slices.Clone(tc.env), env), filesPlusEmptyAndBlank); err != nil {
+				t.Errorf("%s: %v, want it unset", env, err)
 			}
 		})
 	}
