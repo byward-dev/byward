@@ -3,16 +3,17 @@ package metrics
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/byward-dev/byward/internal/testutil/golden"
 )
 
 // Set BYWARD_UPDATE_GOLDEN=1 to rewrite testdata/names.golden after an intended change.
-const golden = "testdata/names.golden"
+const namesGolden = "testdata/names.golden"
 
 func scrape(t *testing.T, m *Metrics) string {
 	t.Helper()
@@ -66,18 +67,7 @@ func TestMetricNamesMatchTheGoldenFile(t *testing.T) {
 	}
 	sort.Strings(lines)
 	got := strings.Join(lines, "\n") + "\n"
-	if os.Getenv("BYWARD_UPDATE_GOLDEN") == "1" {
-		if err := os.WriteFile(golden, []byte(got), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	want, err := os.ReadFile(golden)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != string(want) {
-		t.Fatalf("metric names changed (public interface, ADR-0023); if intended, rerun with BYWARD_UPDATE_GOLDEN=1 and update docs/reference/observability.md\ngot:\n%s\nwant:\n%s", got, want)
-	}
+	golden.Check(t, namesGolden, got, "the metric names are a public interface (ADR-0023): update docs/reference/observability.md too")
 }
 
 func TestLabelsCarryOnlyFixedValuesAndBucketsAreFixed(t *testing.T) {

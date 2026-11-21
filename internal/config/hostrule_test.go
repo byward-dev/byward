@@ -3,11 +3,11 @@ package config
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/byward-dev/byward/internal/host"
+	"github.com/byward-dev/byward/internal/testutil/golden"
 )
 
 // hostProbes are host spellings that the host settings once each read their own way (#486): case,
@@ -65,35 +65,5 @@ func TestEachHostSettingReadsEachProbeSpellingAsPinned(t *testing.T) {
 	for _, h := range hostProbes {
 		b.WriteString(hostRule(h))
 	}
-	const golden = "testdata/hostrule.golden"
-	if os.Getenv("BYWARD_UPDATE_GOLDEN") == "1" {
-		if err := os.WriteFile(golden, []byte(b.String()), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	want, err := os.ReadFile(golden)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := b.String(); got != string(want) {
-		t.Errorf("the host rule changed at %s; if intended, regenerate with BYWARD_UPDATE_GOLDEN=1 and review the diff", firstDiff(got, string(want)))
-	}
-}
-
-// firstDiff is the first line where got and want differ, numbered from 1, with both versions.
-func firstDiff(got, want string) string {
-	g, w := strings.Split(got, "\n"), strings.Split(want, "\n")
-	for i := 0; i < len(g) || i < len(w); i++ {
-		var gl, wl string
-		if i < len(g) {
-			gl = g[i]
-		}
-		if i < len(w) {
-			wl = w[i]
-		}
-		if gl != wl {
-			return fmt.Sprintf("line %d:\n got: %q\nwant: %q", i+1, gl, wl)
-		}
-	}
-	return "no line differs"
+	golden.Check(t, "testdata/hostrule.golden", b.String(), "the host rule changed")
 }

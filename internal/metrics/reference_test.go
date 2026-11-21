@@ -87,7 +87,7 @@ func TestTheMetricsReferenceIsCurrent(t *testing.T) {
 // metrics.go declares exactly the metrics a scrape exports (testdata/names.golden), so the
 // reference, read from metrics.go, misses none.
 func TestTheDeclaredMetricsAreTheExportedOnes(t *testing.T) {
-	b, err := os.ReadFile(golden)
+	b, err := os.ReadFile(namesGolden)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,6 +98,6 @@ func TestTheDeclaredMetricsAreTheExportedOnes(t *testing.T) {
 	}
 	slices.Sort(declared)
 	if !slices.Equal(declared, exported) {
-		t.Fatalf("metrics.go declares %q, a scrape exports %q (%s)", declared, exported, golden)
+		t.Fatalf("metrics.go declares %q, a scrape exports %q (%s)", declared, exported, namesGolden)
 	}
 }

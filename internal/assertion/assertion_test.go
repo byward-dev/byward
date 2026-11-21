@@ -22,6 +22,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/resource"
 	"github.com/byward-dev/byward/internal/testutil/assertionkey"
+	"github.com/byward-dev/byward/internal/testutil/golden"
 )
 
 const (
@@ -281,16 +282,7 @@ func TestAnAssertionCarriesExactlyTheDocumentedHeaderAndClaims(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.TrimSuffix(buf.String(), "\n")
-	golden := filepath.Join("testdata", "assertion.golden.json")
-	if os.Getenv("BYWARD_UPDATE_GOLDEN") == "1" {
-		if err := os.WriteFile(golden, []byte(got+"\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	want, err := os.ReadFile(golden) //nolint:gosec // G304: the test's own golden file
-	if err != nil || string(want) != string(got)+"\n" {
-		t.Fatalf("%s is stale (BYWARD_UPDATE_GOLDEN=1 regenerates it):\ngot\n%s", golden, got)
-	}
+	golden.Check(t, filepath.Join("testdata", "assertion.golden.json"), got+"\n", "the client assertion's header and claims changed")
 }
 
 // email_verified comes with email and only with it, so the upstream sees whether the IdP vouched

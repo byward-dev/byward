@@ -10,7 +10,6 @@ import (
 	"go/token"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,11 +17,12 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/testutil/golden"
 )
 
 // Set BYWARD_UPDATE_GOLDEN=1 to rewrite testdata/events.golden.jsonl after an intended
 // schema change (and bump SchemaVersion if the change is incompatible).
-const golden = "testdata/events.golden.jsonl"
+const eventsGolden = "testdata/events.golden.jsonl"
 
 var timestamp = regexp.MustCompile(`"time":"[^"]*"`)
 
@@ -74,18 +74,7 @@ func render(t *testing.T) string {
 
 func TestAuditRecordsMatchTheGoldenSchema(t *testing.T) {
 	got := render(t)
-	if os.Getenv("BYWARD_UPDATE_GOLDEN") == "1" {
-		if err := os.WriteFile(golden, []byte(got), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	want, err := os.ReadFile(golden)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != string(want) {
-		t.Fatalf("audit records changed (public interface, ADR-0023); if intended, rerun with BYWARD_UPDATE_GOLDEN=1 and update docs/reference/observability.md\ngot:\n%s\nwant:\n%s", got, want)
-	}
+	golden.Check(t, eventsGolden, got, "the audit records are a public interface (ADR-0023): update docs/reference/observability.md too")
 	for _, line := range strings.Split(strings.TrimSpace(got), "\n") {
 		var rec map[string]any
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
