@@ -43,6 +43,8 @@ func TestParseReadsAHostAsABrowserDoes(t *testing.T) {
 		{"[::1", "https", 0, "", "", ErrBrackets},
 		{"[mcp.example.com]", "https", 0, "", "", ErrBrackets},
 		{"a[b]", "https", 0, "", "", ErrBrackets},
+		{"[::1]8080", "https", 0, "", "", ErrBrackets}, // after "]" comes a port's ":" or nothing
+		{"[::1]x", "https", 0, "", "", ErrBrackets},
 		{"[fe80::1%25eth0]", "https", 0, "", "", ErrIPv6},
 		{"[1.2.3.4::]", "https", 0, "", "", ErrIPv6},
 		{"mcp.example.com:65536", "https", 0, "", "", ErrPort},
@@ -51,6 +53,7 @@ func TestParseReadsAHostAsABrowserDoes(t *testing.T) {
 		{"10.0.0.999", "https", 0, "", "", ErrEndsInANumber},
 		{"a b.example", "https", 0, "", "", ErrName},
 		{"＠.example", "https", 0, "", "", ErrName},
+		{"\u0080.example", "https", 0, "", "", ErrName}, // the first code point past ASCII goes to IDNA, which refuses this one
 	} {
 		t.Run(tc.hostport+" for "+tc.scheme, func(t *testing.T) {
 			h, err := Parse(tc.hostport, tc.scheme)

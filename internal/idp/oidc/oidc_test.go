@@ -554,6 +554,7 @@ func TestDiscoveredEndpointsMustBeHTTPSUnlessALoopbackIssuerRunsInDevelopment(t 
 		{"LOCALHOST http of a LOCALHOST issuer in development (#482)", "http://LOCALHOST:9000/token", "http://LOCALHOST:9000", true, true},
 		// Loopback only as Go's dialer reads it: not 127.1, nor a full-width localhost.
 		{"127.1 http for a loopback issuer in development", "http://127.1/token", "http://127.0.0.1:9000", true, false},
+		{"loopback http for an http issuer elsewhere in development", "http://127.0.0.1:9000/token", "http://idp.example", true, false},
 		{"full-width localhost http of a full-width issuer in development", "http://ｌｏｃａｌｈｏｓｔ:9000/token", "http://ｌｏｃａｌｈｏｓｔ:9000", true, false},
 		// The issuer decides the relaxation config logs (#355): an https issuer gets no http endpoint.
 		{"loopback http for a loopback https issuer in development", "http://127.0.0.1/token", "https://localhost:8443", true, false},
