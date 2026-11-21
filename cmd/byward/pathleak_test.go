@@ -148,6 +148,9 @@ func missingSecretFile(env, setting string) pathLeakScenario {
 func TestAFileThatCannotBeUsedIsNamedByItsSettingNeverItsPath(t *testing.T) {
 	for _, tc := range pathLeakScenarios() {
 		t.Run(tc.name, func(t *testing.T) {
+			if len(tc.says) == 0 {
+				t.Fatal("it says nothing")
+			}
 			dir := filepath.Join(t.TempDir(), pathCanary)
 			if err := os.Mkdir(dir, 0o700); err != nil {
 				t.Fatal(err)
@@ -174,7 +177,7 @@ func TestAFileThatCannotBeUsedIsNamedByItsSettingNeverItsPath(t *testing.T) {
 					if strings.Contains(line, pathCanary) {
 						t.Errorf("%v: a line shows the path: %q", args, line)
 					}
-					// The setting at fault starts the error, after reportConfigError's prefix (ADR-0020 §5).
+					// The setting at fault starts the error, after reportConfigError's prefix.
 					said = said || strings.HasPrefix(line, "byward: configuration error: "+tc.says[0]) && containsAll(line, tc.says)
 				}
 				if !said {
@@ -182,22 +185,36 @@ func TestAFileThatCannotBeUsedIsNamedByItsSettingNeverItsPath(t *testing.T) {
 				}
 			}
 			// The refusal is about the file: with the canary directory unsearchable, or gone, what it says goes
-			// away (a missing file turns to "permission denied", one it cannot read to "no such file"). A line
+			// away (a missing file turns to "permission denied", one it cannot use to "no such file"). A line
 			// that stays in both refuses the value, where it points or what it is set with, before any file is
 			// opened, and shows nothing of how a file that cannot be used is named. Root searches any directory.
 			if os.Geteuid() != 0 {
-				stillSays := func() bool {
+				stillSays := func(how string) bool { // a path shown is a leak here too, whatever the cause
 					_, stdout, stderr := runDone(commands[0], env...)
-					return slices.ContainsFunc(strings.Split(stdout+stderr, "\n"), func(line string) bool { return !isListing(line) && containsAll(line, tc.says) })
+					says := false
+					for _, line := range strings.Split(stdout+stderr, "\n") {
+						if isListing(line) {
+							continue
+						}
+						if strings.Contains(line, pathCanary) {
+							t.Errorf("%v: with the canary directory %s, a line shows the path: %q", commands[0], how, line)
+						}
+						says = says || containsAll(line, tc.says)
+					}
+					return says
 				}
 				t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // G302: so TempDir can remove it, should a check stop the test
 				chmod(t, dir, 0)
-				unsearchable := stillSays()
+				saidUnsearchable := stillSays("unsearchable")
 				chmod(t, dir, 0o700)
 				if err := os.Rename(dir, dir+"-gone"); err != nil {
 					t.Fatal(err)
 				}
-				if unsearchable && stillSays() {
+				saidGone := saidUnsearchable && stillSays("gone")
+				if err := os.Rename(dir+"-gone", dir); err != nil { // back, for the cleanups env registered in it
+					t.Fatal(err)
+				}
+				if saidGone {
 					t.Errorf("%v: still says %q with the canary directory unsearchable and with it gone: the refusal is not about the file", commands[0], tc.says)
 				}
 			}
@@ -264,7 +281,8 @@ func TestEveryPathVariableHasALeakScenario(t *testing.T) {
 				t.Fatal(err)
 			}
 			value := "" // the last one wins, as in the leak test
-			for _, kv := range tc.env(t, dir) {
+			env := tc.env(t, dir)
+			for _, kv := range env {
 				if v, ok := strings.CutPrefix(kv, tc.breaks+"="); ok {
 					value = v
 				}
@@ -281,9 +299,17 @@ func TestEveryPathVariableHasALeakScenario(t *testing.T) {
 			atFault, _, found := strings.Cut(tc.says[0], ": ")
 			if !found {
 				t.Fatalf("what it says first, %q, names no setting at fault before a \": \"", tc.says[0])
-			} // "BYWARD_X", or a pair "BYWARD_X / BYWARD_Y" as server's TLS and store errors name it
-			if !slices.Contains(strings.Split(atFault, " / "), tc.breaks) && !slices.Contains(brokenThroughDefaults, tc.breaks) {
+			}
+			named := strings.Split(atFault, " / ") // "BYWARD_X", or a pair "BYWARD_X / BYWARD_Y" as server's TLS and store errors name it
+			if !slices.Contains(named, tc.breaks) && !slices.Contains(brokenThroughDefaults, tc.breaks) {
 				t.Fatalf("it breaks %q but what it says, %q, is not about it: says must start with it as the setting at fault, before the first \": \"", tc.breaks, tc.says)
+			}
+			// Another file in the canary directory, read first, would fail under the leak test's perturbations
+			// too and could stand in for a refusal that is not about breaks' file.
+			for _, kv := range env {
+				if name, v, _ := strings.Cut(kv, "="); strings.HasPrefix(v, dir+string(filepath.Separator)) && name != tc.breaks && !slices.Contains(named, name) {
+					t.Fatalf("it also sets %s to a path in the canary directory: put it outside, or name it with %s", name, tc.breaks)
+				}
 			}
 			broken[tc.breaks] = true
 		})

@@ -32,7 +32,7 @@ func readContextOf(s Setting) readContext {
 	case "upstream-credential-header":
 		return readContext{nil, append(slices.Clone(base), "BYWARD_UPSTREAM_CREDENTIAL_FILE="+credFile), credFiles}
 	case "oidc-client-key-alg", "oidc-client-key-id":
-		return readContext{nil, with("BYWARD_OIDC_CLIENT_KEY_FILE=/run/secrets/key.pem")(without("BYWARD_OIDC_CLIENT_SECRET_FILE")(slices.Clone(oidcBase))), oidcFiles}
+		return readContext{nil, withAKey()(slices.Clone(oidcBase)), oidcFiles}
 	}
 	switch s.Group {
 	case GroupStdioUpstream:
