@@ -1,9 +1,6 @@
 package config
 
-import (
-	"slices"
-	"strings"
-)
+import "slices"
 
 // readContext is a configuration in which a setting is read: the arguments, the environment and the
 // files Load is given.
@@ -13,8 +10,9 @@ type readContext struct {
 	files readFileFunc
 }
 
-// readContextOf is a context where s is read: its group's, and for some settings the settings they
-// need beside them, so a test of s reaches its parser and its checks. Its env is a fresh copy.
+// readContextOf is a context where s is read: its group's base and, for some settings, what they need
+// beside them (a companion setting, or the command not given after --), so a test of s reaches its
+// parser and its checks. Its env is a fresh copy.
 func readContextOf(s Setting) readContext {
 	credFiles := func(p string) ([]byte, error) {
 		if p == credFile {
@@ -22,7 +20,6 @@ func readContextOf(s Setting) readContext {
 		}
 		return baseFiles(p)
 	}
-	withoutOIDCSecret := slices.DeleteFunc(slices.Clone(oidcBase), func(kv string) bool { return strings.HasPrefix(kv, "BYWARD_OIDC_CLIENT_SECRET_FILE=") })
 	switch s.Name {
 	case "upstream-command": // given as itself, not after --
 		return readContext{nil, stdioBase(), baseFiles}
@@ -35,7 +32,7 @@ func readContextOf(s Setting) readContext {
 	case "upstream-credential-header":
 		return readContext{nil, append(slices.Clone(base), "BYWARD_UPSTREAM_CREDENTIAL_FILE="+credFile), credFiles}
 	case "oidc-client-key-alg", "oidc-client-key-id":
-		return readContext{nil, append(withoutOIDCSecret, "BYWARD_OIDC_CLIENT_KEY_FILE=/run/secrets/key.pem"), oidcFiles}
+		return readContext{nil, with("BYWARD_OIDC_CLIENT_KEY_FILE=/run/secrets/key.pem")(without("BYWARD_OIDC_CLIENT_SECRET_FILE")(slices.Clone(oidcBase))), oidcFiles}
 	}
 	switch s.Group {
 	case GroupStdioUpstream:

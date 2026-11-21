@@ -25,16 +25,17 @@ var refusingCommands = [][]string{nil, {"check", "--offline"}, {"doctor"}, {"doc
 // pathLeakScenario is a file setting set to a path in a canary directory that byward cannot use.
 type pathLeakScenario struct {
 	name string
-	// breaks is the variable whose file the scenario makes unusable: env sets it, and says names it
-	// (but for the data directory, which breaks through the defaults inside it).
+	// breaks is the variable whose file the scenario makes unusable: env sets it to a path in the
+	// canary directory, and says starts with it as the setting at fault (but for the data directory,
+	// which breaks through the defaults inside it).
 	breaks string
 	// says are what the error line says, all on that one line: the setting at fault (with the one it
-	// pairs with, for the TLS and store files) and the cause.
+	// pairs with, for the TLS and store files) and the cause. The first starts the error.
 	says []string
 	// env returns the settings under test, set to paths in dir that fail; a setting set to nothing is
 	// unset (#428).
 	env func(t *testing.T, dir string) []string
-	// commands are the commands that refuse it; nil for refusingCommands.
+	// commands are the commands that refuse it; nil or empty for refusingCommands.
 	commands [][]string
 }
 
@@ -157,7 +158,7 @@ func TestAFileThatCannotBeUsedIsNamedByItsSettingNeverItsPath(t *testing.T) {
 				env = append(without(env, name+"="), kv)
 			}
 			commands := tc.commands
-			if commands == nil {
+			if len(commands) == 0 { // an empty list would test nothing
 				commands = refusingCommands
 			}
 			for _, args := range commands {
@@ -173,10 +174,31 @@ func TestAFileThatCannotBeUsedIsNamedByItsSettingNeverItsPath(t *testing.T) {
 					if strings.Contains(line, pathCanary) {
 						t.Errorf("%v: a line shows the path: %q", args, line)
 					}
-					said = said || containsAll(line, tc.says)
+					// The setting at fault starts the error, after reportConfigError's prefix (ADR-0020 §5).
+					said = said || strings.HasPrefix(line, "byward: configuration error: "+tc.says[0]) && containsAll(line, tc.says)
 				}
 				if !said {
 					t.Errorf("%v: no line says %q; stdout %q stderr %q", args, tc.says, stdout, stderr)
+				}
+			}
+			// The refusal is about the file: with the canary directory unsearchable, or gone, what it says goes
+			// away (a missing file turns to "permission denied", one it cannot read to "no such file"). A line
+			// that stays in both refuses the value, where it points or what it is set with, before any file is
+			// opened, and shows nothing of how a file that cannot be used is named. Root searches any directory.
+			if os.Geteuid() != 0 {
+				stillSays := func() bool {
+					_, stdout, stderr := runDone(commands[0], env...)
+					return slices.ContainsFunc(strings.Split(stdout+stderr, "\n"), func(line string) bool { return !isListing(line) && containsAll(line, tc.says) })
+				}
+				t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // G302: so TempDir can remove it, should a check stop the test
+				chmod(t, dir, 0)
+				unsearchable := stillSays()
+				chmod(t, dir, 0o700)
+				if err := os.Rename(dir, dir+"-gone"); err != nil {
+					t.Fatal(err)
+				}
+				if unsearchable && stillSays() {
+					t.Errorf("%v: still says %q with the canary directory unsearchable and with it gone: the refusal is not about the file", commands[0], tc.says)
 				}
 			}
 		})
@@ -225,17 +247,18 @@ func TestAKeyFileNamedWithANewlineCannotForgeALine(t *testing.T) {
 
 // Every path variable (each path setting's, and each secret's file) has a scenario in the leak test
 // that breaks it (#587): a new one fails here until it has one. A scenario breaks the variable it
-// declares in breaks: it must set it to a path in the canary directory, where the leak test looks for
-// a path shown, and the line it says must start with it as the setting at fault (alone, or in the
-// pair the TLS and store files are named by). So neither a variable set to a file that works in
-// another scenario nor a line that merely mentions it counts. The data directory breaks only through
-// the defaults inside it, so its scenario names the default that fails instead. A scenario that skips
-// as root covers nothing then.
+// declares in breaks: it sets it to a path in the canary directory, where the leak test looks for a
+// path shown, and what it says starts with it as the setting at fault, before the first ": " (alone,
+// or in the pair the TLS and store files are named by). So neither a variable set to a file that
+// works in another scenario nor a line that merely mentions it counts. The data directory breaks only
+// through the defaults inside it, so its scenario names the default that fails instead. A scenario
+// that skips as root covers nothing then.
 func TestEveryPathVariableHasALeakScenario(t *testing.T) {
 	brokenThroughDefaults := []string{"BYWARD_DATA_DIR"}
 	broken := map[string]bool{}
 	for _, tc := range pathLeakScenarios() {
 		t.Run(tc.name, func(t *testing.T) {
+			// The canary directory as TestAFileThatCannotBeUsedIsNamedByItsSettingNeverItsPath makes it.
 			dir := filepath.Join(t.TempDir(), pathCanary)
 			if err := os.Mkdir(dir, 0o700); err != nil {
 				t.Fatal(err)
@@ -246,19 +269,28 @@ func TestEveryPathVariableHasALeakScenario(t *testing.T) {
 					value = v
 				}
 			}
-			if tc.breaks == "" || !strings.HasPrefix(value, dir+string(filepath.Separator)) {
+			if tc.breaks == "" {
+				t.Fatal("it declares no variable it breaks: set breaks")
+			}
+			if !strings.HasPrefix(value, dir+string(filepath.Separator)) {
 				t.Fatalf("it breaks %q but does not set it to a path in the canary directory, where the leak test looks: %q", tc.breaks, value)
 			}
-			subject, _, _ := strings.Cut(tc.says[0], ": ") // "BYWARD_X" or a pair, "BYWARD_X / BYWARD_Y"
-			if !slices.Contains(strings.Split(subject, " / "), tc.breaks) && !slices.Contains(brokenThroughDefaults, tc.breaks) {
-				t.Fatalf("it breaks %q but what it says, %q, is not about it: its line must start with it as the setting at fault", tc.breaks, tc.says)
+			if len(tc.says) == 0 {
+				t.Fatal("it says nothing")
+			}
+			atFault, _, found := strings.Cut(tc.says[0], ": ")
+			if !found {
+				t.Fatalf("what it says first, %q, names no setting at fault before a \": \"", tc.says[0])
+			} // "BYWARD_X", or a pair "BYWARD_X / BYWARD_Y" as server's TLS and store errors name it
+			if !slices.Contains(strings.Split(atFault, " / "), tc.breaks) && !slices.Contains(brokenThroughDefaults, tc.breaks) {
+				t.Fatalf("it breaks %q but what it says, %q, is not about it: says must start with it as the setting at fault, before the first \": \"", tc.breaks, tc.says)
 			}
 			broken[tc.breaks] = true
 		})
 	}
 	for _, name := range config.PathVariables() {
 		if !broken[name] {
-			t.Errorf("%s holds a path but no scenario in pathLeakScenarios breaks it (set breaks: %q in one whose says names it)", name, name)
+			t.Errorf("%s holds a path but no scenario in pathLeakScenarios breaks it (set breaks: %q in one whose says starts with it)", name, name)
 		}
 	}
 }

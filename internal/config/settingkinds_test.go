@@ -144,8 +144,9 @@ const relativePathRefusal = ": want an absolute path, one starting with /; got a
 
 // A setting that refuses a relative path holds a path (#587): every path the proxy reads or writes
 // is checked to be absolute (ADR-0007 §6), so a new path setting left without the path shape fails
-// here whatever its name and whichever loader opens it, as long as absolute() checks it. Each is tried where it is read
-// (readContextOf): a setting that needs another beside it is seen once readContextOf gives it that.
+// here whatever its name and whichever loader opens it, as long as absolute() checks it. Each is
+// tried where it is read (readContextOf): a setting that needs another beside it is seen once
+// readContextOf gives it that.
 func TestASettingThatRefusesARelativePathHoldsAPath(t *testing.T) {
 	for _, s := range registry {
 		if s.Secret() || s.HoldsPath() {

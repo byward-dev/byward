@@ -356,7 +356,8 @@ func TestNoRefusalShowsTheValueGiven(t *testing.T) {
 		"+" + canaryText, canaryText + "=5", "authorize=" + canaryText, "1" + canaryText, "\"" + canaryText + "\""}
 	// The settings config refuses none of these forms for: free text, client IDs, claim and role names,
 	// and the gate and app lists. Every other setting must refuse one in the one format, so the test cannot
-	// pass by no longer reaching its parser.
+	// pass by no longer reaching its parser. Those listed must load with every form, so a context that
+	// stops reaching them fails too.
 	acceptsEveryForm := []string{"app-client-ids", "app-roles", "gate-email-domains", "gate-groups",
 		"gate-hosted-domains", "gate-roles", "gate-tenants", "oidc-client-id", "oidc-client-key-id", "oidc-groups-claim",
 		"oidc-name", "oidc-roles-claim", "oidc-subject-claim", "operator-name", "resource-name", "scope-description"}
@@ -371,6 +372,9 @@ func TestNoRefusalShowsTheValueGiven(t *testing.T) {
 			if err == nil {
 				continue
 			}
+			if slices.Contains(acceptsEveryForm, s.Name) { // so a context that does not reach it fails here
+				t.Errorf("%s=%q: %v; acceptsEveryForm lists it, so it must load with any form where it is read (readContextOf)", s.Env(), form, err)
+			}
 			if holdsCanary(err.Error()) {
 				t.Errorf("%s=%q: %v, shows the value", s.Env(), form, err)
 			}
@@ -384,11 +388,8 @@ func TestNoRefusalShowsTheValueGiven(t *testing.T) {
 				}
 			}
 		}
-		switch accepts := slices.Contains(acceptsEveryForm, s.Name); {
-		case inFormat == 0 && !accepts:
-			t.Errorf("%s refused none of the forms in the one format: its parser was not reached; give it a context, or list it in acceptsEveryForm", s.Env())
-		case inFormat > 0 && accepts:
-			t.Errorf("%s refused a form in the one format, but acceptsEveryForm lists it: remove it", s.Env())
+		if inFormat == 0 && !slices.Contains(acceptsEveryForm, s.Name) {
+			t.Errorf("%s refused none of the forms in the one format: its parser was not reached; give it a context in readContextOf, or, if it takes any value, list it in acceptsEveryForm", s.Env())
 		}
 	}
 }
