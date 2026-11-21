@@ -112,13 +112,6 @@ reported.
 5. A URL refusal reuses the parsed result instead of parsing again. Whether a value is opaque
    follows from its shape, not from a second list.
 
-_Amended 2026-11-22 (#587):_ a shape's identity also says what kind of value a setting holds.
-`secretShape` means the value is read only from a file (`Secret`). `pathShape` means it is a path the
-proxy reads or writes, and a file there that cannot be used is named by the setting, never the path
-(`HoldsPath`, security invariant 2). `pathShape` displays and refuses as the as-given shape does, so
-startup and `--print-config` show paths as before. A setting thus holds a path or a secret, never
-both, and the path settings are listed literally beside the other shapes'.
-
 Example: the display rule from ADR-0020 §6's amendment of 2026-11-17 (#458) is two shapes.
 
 - **The URL shape.** A URL setting is shown by its scheme, host and path. `;…`, `?…` or `#…` marks
@@ -127,6 +120,15 @@ Example: the display rule from ADR-0020 §6's amendment of 2026-11-17 (#458) is 
   arguments follow, because an argument can be a token.
 
 The proxy uses both values whole.
+
+_Amended 2026-11-22 (#587):_ a shape's identity also says what kind of value a setting holds.
+`secretShape` means the value is read only from a file (`Secret`). `pathShape` means it is a path the
+proxy reads or writes, and a file there that cannot be used is named by the setting, never the path
+(`HoldsPath`, security invariant 2). `pathShape` displays and refuses as the as-given shape does, so
+startup and `--print-config` show paths as before. A setting has the path shape or the secret shape,
+never both; a secret's file (`<ENV>_FILE`) is still a path variable (`PathVariables`), named by its
+setting when it cannot be read. The path settings are listed literally in `shapesOfSettings`
+(`shape_test.go`), beside the other shapes.
 
 ### 4. Where the rule is written down
 

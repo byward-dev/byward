@@ -103,10 +103,11 @@ func TestPathVariablesAreThePathAndSecretFileVariables(t *testing.T) {
 // package name. It returns where it last saw each field and which entries of the two lists matched.
 // The scan is syntactic: it matches fields by name, so a field of the same name on another type
 // counts too, as does a field in a data argument. It cannot see a field copied into a variable, or
-// passed to a function not listed, before it is opened, nor a package imported under another name;
-// a loader in the scanned file's own package, called unqualified, cannot be listed, so it belongs in its
-// own package;
-// TestASettingOrFieldNamedAsAPathIsAPathSetting and the leak test cover those.
+// passed to a function not listed, before it is opened, nor a package imported under another name,
+// nor a call to a loader in the scanned file's own package, which is unqualified and cannot be listed.
+// TestASettingOrFieldNamedAsAPathIsAPathSetting covers those for a setting named as a path, and
+// TestASettingThatRefusesARelativePathHoldsAPath for one absolute() checks, as ADR-0007 §6 requires of
+// every path; a setting with neither, opened only that way, is not seen. It reads string fields only.
 func scanFileOpeners(t *testing.T) (opened map[string]string, matched map[string]bool) {
 	t.Helper()
 	root, err := filepath.Abs("../..")
@@ -179,7 +180,7 @@ func TestTheFileOpenerScanSeesEveryLoaderAndPathField(t *testing.T) {
 	opened, matched := scanFileOpeners(t)
 	for _, name := range slices.Concat(fileOpeners, fileOptionTypes) {
 		if !matched[name] && !strings.HasPrefix(name, "os.") {
-			t.Errorf("%s: no call or literal in the code the scan reads matches it; a loader was renamed or removed, so update fileOpeners or fileOptionTypes", name)
+			t.Errorf("%s: no call or literal in the code the scan reads matches it; a loader or option type was renamed or removed, so update fileOpeners or fileOptionTypes", name)
 		}
 	}
 	for _, field := range slices.Sorted(maps.Keys(pathFields)) {
