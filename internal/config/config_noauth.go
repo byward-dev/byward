@@ -87,7 +87,7 @@ func checkNoAuth(c *Config, v *Values) []error {
 		// The host port is the public URL's; the container port is the listen address's.
 		publishPort := c.PublicURL.Port()
 		if publishPort == "" {
-			publishPort = map[string]string{"http": "80", "https": "443"}[c.PublicURL.Scheme]
+			publishPort = host.DefaultPort(c.PublicURL.Scheme)
 		}
 		c.Relaxations = append(c.Relaxations, fmt.Sprintf(
 			"listening on %s inside a container: publish the port on loopback only, e.g. docker run -p 127.0.0.1:%s:%s; anyone who can reach the published port can use the upstream", c.Listen, publishPort, port))

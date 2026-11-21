@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/byward-dev/byward/internal/host"
 )
 
 func TestSecretExpiresAtAcceptsADateOrRFC3339(t *testing.T) {
@@ -43,13 +45,21 @@ func TestSecretExpiresAtRejectsOtherForms(t *testing.T) {
 
 func TestPublicURLAcceptsHTTPSOrLoopbackAndNamesTheRuleABadOneBreaks(t *testing.T) {
 	// An IP address, IPv6 included, is a valid host though the host name rule would refuse it (#344),
-	// and any port from 1 to 65535 is accepted (#353). A last label that is not a number (10x) makes a
-	// name.
+	// and any port from 1 to 65535 is accepted (#353) but the scheme's default (#484), which http's 443
+	// and https's 80 are not. A last label that is not a number (10x) makes a name; "_" is a host name
+	// character (ADR-0032 §3).
 	for _, raw := range []string{"https://mcp.example.com/mcp", "http://127.0.0.1:8080/mcp", "http://localhost:8080/team/mcp", "http://[::1]:8080/mcp", "https://[2001:db8::1]/mcp",
-		"https://mcp.example.com:443/mcp", "https://mcp.example.com:8443/mcp", "https://mcp.example.com:1/mcp", "https://mcp.example.com:65535/mcp", "https://[2001:db8::1]:8443/mcp",
+		"http://localhost:443/mcp", "https://mcp.example.com:80/mcp", "https://my_mcp.example/mcp", "https://mcp.example.com:8443/mcp", "https://mcp.example.com:1/mcp", "https://mcp.example.com:65535/mcp", "https://[2001:db8::1]:8443/mcp",
 		"https://[::ffff:a00:1]/mcp", "https://10.0.0.1/mcp", "https://0.0.0.0/mcp", "https://mcp.example.10x/mcp"} {
-		if _, err := ParsePublicURL(raw); err != nil {
+		u, err := ParsePublicURL(raw)
+		if err != nil {
 			t.Errorf("%s: %v", raw, err)
+			continue
+		}
+		// Class P (ADR-0032 §2): an accepted public URL's host and port are already in the form
+		// internal/host gives them, the form browsers write, since byward never rewrites it.
+		if h, err := host.Parse(u.Host, u.Scheme); err != nil || h.String() != u.Host {
+			t.Errorf("%s: accepted, but its host and port read as %q, %v", raw, h.String(), err)
 		}
 	}
 	// Each error is pinned whole.
@@ -57,8 +67,30 @@ func TestPublicURLAcceptsHTTPSOrLoopbackAndNamesTheRuleABadOneBreaks(t *testing.
 		"": "BYWARD_PUBLIC_URL is required",
 		// A browser rewrites these hosts (10.0.0.1, 8.0.0.1) or refuses them (a name ending in a number,
 		// #473), so a browser sign-in could never come back to the public URL.
-		"https://10.1/mcp":                       `BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (16 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 10.0.0.1`,
-		"https://010.0.0.1/mcp":                  `BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (21 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 8.0.0.1`,
+		"https://10.1/mcp":      `BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (16 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 10.0.0.1`,
+		"https://010.0.0.1/mcp": `BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (21 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 8.0.0.1, reading a part with a leading 0 as octal`,
+		// The address browsers read is named, not given as the form to write: 010.0.0.1 was likely meant
+		// as 10.0.0.1 (#480).
+		"https://10.010.0.1:8443/mcp": `BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (27 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 10.8.0.1, reading a part with a leading 0 as octal`,
+		"https://0x7f.0.0.1/mcp":      `BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (22 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1`,
+		"https://0X7f.0.0.1/mcp":      `BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (22 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1`,
+		// A scheme's default port, which browsers drop from the URL they hold, so the issuer and resource
+		// would not match theirs (#484). It is refused, not dropped: the IdP redirect URI is registered as
+		// written.
+		"https://mcp.example.com:443/mcp": `BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its port as browsers write it, such as https://mcp.example.com/mcp; got a value (31 characters, not shown): its port 443 is https's default, which browsers drop; write the URL without :443`,
+		"http://localhost:80/mcp":         `BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its port as browsers write it, such as https://mcp.example.com/mcp; got a value (23 characters, not shown): its port 80 is http's default, which browsers drop; write the URL without :80`,
+		"https://[::1]:443/mcp":           `BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its port as browsers write it, such as https://mcp.example.com/mcp; got a value (21 characters, not shown): its port 443 is https's default, which browsers drop; write the URL without :443`,
+		// The default port's refusal joins those after it.
+		"https://mcp.example.com:443/mcp/": `BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its port as browsers write it, such as https://mcp.example.com/mcp; got a value (32 characters, not shown): its port 443 is https's default, which browsers drop; write the URL without :443; BYWARD_PUBLIC_URL: want the MCP endpoint's path without a trailing slash, such as https://mcp.example.com/mcp; got a path that is empty or ends in /: give the endpoint's path, without the trailing slash`,
+		// The URL rule refuses first, so the default port's own refusal never joins its reasons (#605,
+		// #522): a port out of range, the default port written with a leading zero, and a URL with a
+		// user name on the default port each get the URL rule's reason alone.
+		"https://mcp.example.com:99999/mcp": `BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (33 characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero`,
+		"https://mcp.example.com:0443/mcp":  `BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (32 characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero`,
+		"https://u@mcp.example.com:443/mcp": `BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (33 characters, not shown): it holds a user name or password`,
+		// An IPv6 zone that ends in a dot is refused as a zone, not as a host name's empty label.
+		"https://[fe80::1%25a.]/mcp":             `BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (26 characters, not shown): its host:port is not an IPv6 address without a zone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone`,
+		"https://MCP.example.com:443/mcp":        `BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (31 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do; BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its port as browsers write it, such as https://mcp.example.com/mcp; got a value (31 characters, not shown): its port 443 is https's default, which browsers drop; write the URL without :443`,
 		"https://mcp.10/mcp":                     `BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (18 characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it`,
 		"https://mcp.0x0123456789abcdef0123/mcp": `BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (38 characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it`,
 		// An IPv6 address only as browsers write it, since the public URL is also the issuer and the
@@ -77,7 +109,7 @@ func TestPublicURLAcceptsHTTPSOrLoopbackAndNamesTheRuleABadOneBreaks(t *testing.
 		"https://xn--Bcher-kva.example/mcp": `BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (33 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do`,
 		// The trailing-slash error's example is fixed, whichever host rule the URL broke.
 		"https://MCP.Example.com:8443/mcp/": `BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (33 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do; BYWARD_PUBLIC_URL: want the MCP endpoint's path without a trailing slash, such as https://mcp.example.com/mcp; got a path that is empty or ends in /: give the endpoint's path, without the trailing slash`,
-		"https://127.1:8443/mcp/":           `BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (23 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 127.0.0.1; BYWARD_PUBLIC_URL: want the MCP endpoint's path without a trailing slash, such as https://mcp.example.com/mcp; got a path that is empty or ends in /: give the endpoint's path, without the trailing slash`,
+		"https://127.1:8443/mcp/":           `BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (23 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1; BYWARD_PUBLIC_URL: want the MCP endpoint's path without a trailing slash, such as https://mcp.example.com/mcp; got a path that is empty or ends in /: give the endpoint's path, without the trailing slash`,
 		"https://[0:0::1]/mcp/":             `BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (21 characters, not shown): its IPv6 address is not in the form browsers write it; write it as [::1]; BYWARD_PUBLIC_URL: want the MCP endpoint's path without a trailing slash, such as https://mcp.example.com/mcp; got a path that is empty or ends in /: give the endpoint's path, without the trailing slash`,
 		// The other rules.
 		"https://bücher.example/mcp":     `BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (26 characters, not shown): its host:port holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send`,

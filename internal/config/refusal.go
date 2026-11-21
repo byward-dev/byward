@@ -12,9 +12,9 @@ var whole = entry{}
 // refusedForm is the refusal of raw, s's value or one of its entries, for its form (ADR-0031 §1), in
 // the one format "<setting>: want …; got …": what s wants, where the value is, what s's shape shows of
 // a refused value (its length) and the parser's reason, a clause such as "it has no host". want and
-// reason are the parser's fixed text: nothing from the value may reach them, but for an IP address the
-// parser rewrote, as browsers write it ("write it as 127.0.0.1"), which carries nothing but the
-// address. An empty value is refused as nothing given.
+// reason are the parser's fixed text: nothing from the value may reach them, but for an IP address as
+// a browser reads or writes it ("browsers read it as 127.0.0.1", "write it as [::1]"), which carries
+// nothing but the address. An empty value is refused as nothing given.
 func refusedForm(s Setting, at entry, raw, want, reason string) error {
 	return refusedFormAs(s.Env(), s, at, raw, want, reason)
 }

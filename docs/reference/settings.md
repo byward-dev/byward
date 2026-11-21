@@ -28,8 +28,8 @@ the cause, never by its path.
 
 | Flag | Environment | Default | Description |
 |---|---|---|---|
-| `--public-url` | `BYWARD_PUBLIC_URL` | — | public URL of the MCP endpoint as users enter it, e.g. https://mcp.example.com/mcp, with its host as browsers write it, since they rewrite any other spelling: a host name in lower case (mcp.example.com, not MCP.Example.com); an internationalized host in its ASCII (xn--) form; an IP address as browsers write it (127.0.0.1, not 127.1; [2001:db8::1], not [2001:DB8:0::1]); and no other host ending in a number (mcp.10), which browsers refuse |
-| `--listen` | `BYWARD_LISTEN` | 127.0.0.1:8080 | address to listen on; public addresses only when configured |
+| `--public-url` | `BYWARD_PUBLIC_URL` | — | public URL of the MCP endpoint as users enter it, e.g. https://mcp.example.com/mcp, with its host as browsers write it, since they rewrite any other spelling: a host name in lower case (mcp.example.com, not MCP.Example.com); an internationalized host in its ASCII (xn--) form; an IP address as browsers write it (127.0.0.1, not 127.1; [2001:db8::1], not [2001:DB8:0::1]); no other host ending in a number (mcp.10), which browsers refuse; a host name of letters, digits, - . and _ only; and no default port (https://mcp.example.com, not https://mcp.example.com:443), which browsers drop |
+| `--listen` | `BYWARD_LISTEN` | 127.0.0.1:8080 | address to listen on, as host:port, a host name of letters, digits, - . and _ only; public addresses only when configured |
 | `--tls-cert-file` | `BYWARD_TLS_CERT_FILE` | — | serve TLS on the listener: an absolute path to the PEM certificate, followed by any intermediates; with tls-key-file; needs an https public-url; a replaced file is served from the next connection on, with no restart (docs/how-to/tls.md) *(path)* |
 | `--tls-key-file` | `BYWARD_TLS_KEY_FILE` | — | serve TLS on the listener: an absolute path to the certificate's unencrypted PEM private key, with no permission for its group or others, or on a read-only mount; with tls-cert-file (docs/how-to/tls.md) *(path)* |
 | `--allowed-origins` | `BYWARD_ALLOWED_ORIGINS` | — | comma-separated Origin values allowed on the MCP endpoint (scheme://host[:port]); an internationalized host in its ASCII (xn--) form; a default port (:443 for https, :80 for http) is dropped, as browsers never send it |
@@ -105,7 +105,7 @@ the cause, never by its path.
 
 | Flag | Environment | Default | Description |
 |---|---|---|---|
-| `--upstream-url` | `BYWARD_UPSTREAM_URL` | — | URL of the HTTP upstream MCP server; or set a stdio upstream with upstream-command |
+| `--upstream-url` | `BYWARD_UPSTREAM_URL` | — | URL of the HTTP upstream MCP server, its host name of letters, digits, - . and _ only; or set a stdio upstream with upstream-command |
 | `--upstream-header-timeout` | `BYWARD_UPSTREAM_HEADER_TIMEOUT` | 5m | how long the HTTP upstream may take to send its response headers; a request that waits longer gets a JSON-RPC timeout error, and a streamed response is not limited once its headers arrive; 1s to 1h (ADR-0018 §7) |
 | `--upstream-credential-file` | `BYWARD_UPSTREAM_CREDENTIAL_FILE` | — | HTTP upstream: a header value the proxy sends with every upstream request, such as an API key the upstream needs from the proxy itself; never the user's or the client's token; read at start, never logged (ADR-0016 §7, docs/how-to/upstream-credential.md) |
 | `--upstream-credential-header` | `BYWARD_UPSTREAM_CREDENTIAL_HEADER` | Authorization | the header that carries upstream-credential; inbound copies are always removed; it never shares a header with the identity assertion, so with Authorization here set assertion-header to another header (ADR-0016 §7) |
@@ -155,7 +155,7 @@ the cause, never by its path.
 | `--log-format` | `BYWARD_LOG_FORMAT` | json | log format: json or text |
 | `--trusted-proxies` | `BYWARD_TRUSTED_PROXIES` | — | comma-separated CIDRs or addresses of reverse proxies whose X-Forwarded-For is trusted for the client address (ADR-0018 §6); empty trusts none; an entry with an IPv6 zone, or inside link-local fe80::/10, is refused: such an address names a host only together with an interface |
 | `--oauth-rate-limits` | `BYWARD_OAUTH_RATE_LIMITS` | — | per-minute limits per client address on OAuth endpoints, e.g. authorize=60,token=120 (ADR-0018 §8); unset endpoints keep their defaults |
-| `--internal-listen` | `BYWARD_INTERNAL_LISTEN` | 127.0.0.1:9090 | address of the internal listener for /metrics, /livez and /readyz (ADR-0018 §10); empty turns it off |
+| `--internal-listen` | `BYWARD_INTERNAL_LISTEN` | 127.0.0.1:9090 | address of the internal listener for /metrics, /livez and /readyz (ADR-0018 §10), as host:port, a host name of letters, digits, - . and _ only; empty turns it off |
 | `--refresh-grace` | `BYWARD_REFRESH_GRACE` | 30s | how long a just-rotated refresh token is still accepted, for a client retrying a lost response; 0s to 60s (ADR-0006 §4) |
 
 ## Consent page

@@ -132,6 +132,8 @@ func TestInvalidSettingsAreRejectedNamingTheSetting(t *testing.T) {
 const (
 	wantPublicURL     = `BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value `
 	wantPublicAsURL   = `BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value `
+	wantUpstreamURL   = `BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value `
+	orUpstreamCommand = ` (or BYWARD_UPSTREAM_COMMAND, or a command after --)`
 	wantHosts         = `BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 `
 	wantOrigins       = `BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry 1 of 1 `
 	wantDenylist      = `BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 1 of 1 `
@@ -143,7 +145,10 @@ const (
 	ruleNotASCII      = `holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send`
 	ruleDenylistIPv4  = `ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match (127.1 and 0x7f000001 are 127.0.0.1), or none at all; deny the app by its CIMD client ID or its redirect host's name`
 	ruleEndsInNumber  = `is not an IPv4 address but ends in a number, so browsers refuse it`
-	ruleDottedDecimal = `is not an IPv4 address in dotted decimal, the only form browsers send; write it as `
+	ruleDottedDecimal = `is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as `
+	ruleNameChar      = "has a character no host name holds at position "
+	ruleEmptyLabel    = `its host name has an empty label (a leading, double or trailing dot); drop the extra dot`
+	ruleNameChars     = `; a host name has only letters, digits, - . and _`
 )
 
 func TestAURLOrHostRefusedForItsFormSaysWhereAndWhyNeverWhat(t *testing.T) {
@@ -157,10 +162,24 @@ func TestAURLOrHostRefusedForItsFormSaysWhereAndWhyNeverWhat(t *testing.T) {
 		{"query", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp?x=1", `BYWARD_PUBLIC_URL: want a URL without a query or fragment, such as https://mcp.example.com/mcp; got a query or fragment, not shown: remove it`},
 		{"fragment", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp#f", `BYWARD_PUBLIC_URL: want a URL without a query or fragment, such as https://mcp.example.com/mcp; got a query or fragment, not shown: remove it`},
 		{"http public", "BYWARD_PUBLIC_URL=http://mcp.example.com/mcp", `BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host`},
-		// #344: the public host joins the public Host allow-list, so it follows BYWARD_ALLOWED_HOSTS' name rule.
-		{"public host with a trailing dot", "BYWARD_PUBLIC_URL=https://mcp.example.com./mcp", wantPublicURL + `(28 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
-		{"public host with a double dot", "BYWARD_PUBLIC_URL=https://a..b/mcp", wantPublicURL + `(16 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
-		{"public host with a wildcard", "BYWARD_PUBLIC_URL=https://a*b/mcp", wantPublicURL + `(15 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
+		// #344: the public host joins the public Host allow-list, so it must be a host name with no empty
+		// label; its reasons are its own, since BYWARD_ALLOWED_HOSTS' rule still allows "~" (#523).
+		{"public host with a trailing dot", "BYWARD_PUBLIC_URL=https://mcp.example.com./mcp", wantPublicURL + `(28 characters, not shown): ` + ruleEmptyLabel},
+		{"public host with a double dot", "BYWARD_PUBLIC_URL=https://a..b/mcp", wantPublicURL + `(16 characters, not shown): ` + ruleEmptyLabel},
+		{"public host with a leading dot", "BYWARD_PUBLIC_URL=https://.mcp.example.com/mcp", wantPublicURL + `(28 characters, not shown): ` + ruleEmptyLabel},
+		// A character no host name holds, beyond RFC 3986's sub-delimiters: the class P and O host name
+		// is an allow-list (ADR-0032 §3).
+		{"public host with a double quote", `BYWARD_PUBLIC_URL=https://se"kr/mcp`, wantPublicURL + `(17 characters, not shown): its host ` + ruleNameChar + `3` + ruleNameChars},
+		// A character RFC 3986 and browsers allow in a host but no DNS name holds (ADR-0032 §3, D4): its
+		// place is named, never the character.
+		{"public host with a wildcard", "BYWARD_PUBLIC_URL=https://a*b/mcp", wantPublicURL + `(15 characters, not shown): its host ` + ruleNameChar + `2` + ruleNameChars},
+		{"public host with a tilde", "BYWARD_PUBLIC_URL=https://s3cret~tok.example/mcp", wantPublicURL + `(30 characters, not shown): its host ` + ruleNameChar + `7` + ruleNameChars},
+		// The upstream's host too, which url.Parse and Go's dialer would take (ADR-0032 §3, D4).
+		{"upstream host with a tilde", "BYWARD_UPSTREAM_URL=http://s3cret~tok:8000/mcp", wantUpstreamURL + `(26 characters, not shown): its host ` + ruleNameChar + `7` + ruleNameChars + orUpstreamCommand},
+		{"upstream host with a dollar sign", "BYWARD_UPSTREAM_URL=http://my$mcp:8000/mcp", wantUpstreamURL + `(22 characters, not shown): its host ` + ruleNameChar + `3` + ruleNameChars + orUpstreamCommand},
+		{"upstream host with a sub-delimiter after a valid label", "BYWARD_UPSTREAM_URL=http://mcp.a=b/mcp", wantUpstreamURL + `(18 characters, not shown): its host ` + ruleNameChar + `6` + ruleNameChars + orUpstreamCommand},
+		{"upstream host with a less-than sign", "BYWARD_UPSTREAM_URL=http://se<kr/mcp", wantUpstreamURL + `(16 characters, not shown): its host ` + ruleNameChar + `3` + ruleNameChars + orUpstreamCommand},
+		{"upstream host not in ASCII", "BYWARD_UPSTREAM_URL=http://ésekr:8000/mcp", wantUpstreamURL + `(21 characters, not shown): its host ` + ruleNotASCII + orUpstreamCommand},
 		// A browser lower-cases a host name, and byward does not rewrite it: the issuer and the IdP
 		// redirect URI are built from it as written (#472).
 		{"public host name in upper case", "BYWARD_PUBLIC_URL=https://MCP.Example.com/mcp", `BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (27 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do`},
@@ -1120,12 +1139,13 @@ func TestDevelopmentModeChangesOnlyWhatItRecords(t *testing.T) {
 func length(s string) int { return len([]rune(s)) }
 
 // #494: a listen address is host:port, as net.Listen takes it: the host empty, an IP address (a zoned
-// IPv6 one included) or a host name with one trailing dot at most, and the port a number from 0 to
+// IPv6 one included, its zone any interface name) or a host name of letters, digits, - . and _ only
+// (ADR-0032 §3) with one trailing dot at most, and the port a number from 0 to
 // 65535; a service name such as http is refused. A refused one is named by its length and why, never
 // shown, so startup's net.Listen error can never quote it.
 func TestAListenAddressIsHostColonANumericPortAndARefusedOneIsNeverShown(t *testing.T) {
 	for _, ok := range []string{"127.0.0.1:8080", ":8080", "[::1]:8080", "localhost:0", "0.0.0.0:65535", "byward.internal:8443",
-		"[fe80::1%lo0]:8080", "byward.internal.:8443", "127.0.0.1:000080"} {
+		"[fe80::1%lo0]:8080", "[fe80::1%ü]:8080", "byward.internal.:8443", "127.0.0.1:000080", "my_byward:8080"} {
 		for _, name := range []string{"BYWARD_LISTEN", "BYWARD_INTERNAL_LISTEN"} {
 			if _, err := load(t, nil, "BYWARD_LISTEN=127.0.0.1:1", name+"="+ok); err != nil {
 				t.Errorf("%s=%s: %v", name, ok, err)
@@ -1135,8 +1155,15 @@ func TestAListenAddressIsHostColonANumericPortAndARefusedOneIsNeverShown(t *test
 	for _, tc := range []struct{ value, why string }{
 		{"8080", "it is not host:port"},
 		{"https://u:" + canaryText + "@h.example/x", "it is not host:port"},
-		{"//h.example/x?k=" + canaryText + ":80", "it has a host that is neither an IP address nor a host name"},
+		{"//h.example/x?k=" + canaryText + ":80", "its host " + ruleNameChar + "1" + ruleNameChars},
 		{"h.example..:80", "it has a host that is neither an IP address nor a host name"},
+		{"[::g]:80", "it has a host that is neither an IP address nor a host name"}, // no name, so no character place
+		// "~" is a host character in RFC 3986 that no DNS name holds (ADR-0032 §3, D4).
+		{"s3cret~" + canaryText + ":80", "its host " + ruleNameChar + "7" + ruleNameChars},
+		{"my$byward:80", "its host " + ruleNameChar + "3" + ruleNameChars},
+		// The host is read before the port, so a bad host is named even beside a bad port.
+		{"s3cret~" + canaryText + ":http", "its host " + ruleNameChar + "7" + ruleNameChars},
+		{"bÿward:80", "its host " + ruleNotASCII},
 		{"127.0.0.1:" + canaryText, "it has a port that is not a number"},
 		{"127.0.0.1:http", "it has a port that is not a number"},
 		{"127.0.0.1:", "it has a port that is not a number"},

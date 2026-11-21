@@ -199,6 +199,10 @@ func TestParseUpstreamURLTakesAnHTTPURLAndRequiresOne(t *testing.T) {
 		"http://u:9000/mcp%20X":         "u:9000",
 		"http://[2001:db8::1]:9000/mcp": "[2001:db8::1]:9000",
 		"https://up.example/m%C3%A9":    "up.example",
+		// "_" is a host name character (ADR-0032 §3), as a Compose service name holds it, and an IPv6
+		// zone's "%" is the address's, not a name's.
+		"http://my_mcp:8000/mcp":           "my_mcp:8000",
+		"http://[fe80::1%25eth0]:9000/mcp": "[fe80::1%eth0]:9000",
 	} {
 		u, err := ParseUpstreamURL(raw)
 		if err != nil {
@@ -208,6 +212,15 @@ func TestParseUpstreamURLTakesAnHTTPURLAndRequiresOne(t *testing.T) {
 		if u.Host != host || u.String() != raw {
 			t.Errorf("ParseUpstreamURL(%q) = %v; want it taken as given, with the host %s", raw, u, host)
 		}
+	}
+	// An IPv6 zone is the address's, so a non-ASCII interface name passes the host name rule; url.String
+	// re-escapes it, so only the host is compared.
+	if u, err := ParseUpstreamURL("http://[fe80::1%25ü]:9000/mcp"); err != nil || u.Host != "[fe80::1%ü]:9000" {
+		t.Errorf("an upstream with a non-ASCII IPv6 zone: %v, %v; want it taken, with the host [fe80::1%%ü]:9000", u, err)
+	}
+	// An empty host before a port is refused by the URL rule before the host name rule reads it (#614).
+	if _, err := ParseUpstreamURL("http://:9000/mcp"); err == nil || err.Error() != "BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (16 characters, not shown): it has no host before its port" {
+		t.Errorf("an upstream with an empty host: %v, want it refused as having no host", err)
 	}
 	if _, err := ParseUpstreamURL(""); err == nil || err.Error() != "BYWARD_UPSTREAM_URL is required" {
 		t.Errorf("ParseUpstreamURL(\"\") = %v, want exactly %q", err, "BYWARD_UPSTREAM_URL is required")

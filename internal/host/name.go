@@ -29,7 +29,7 @@ func BrowserNameOK(host string) (string, bool) {
 	if endsInFullStop(host) { // only the host's own trailing dot, not one an empty last label left
 		ascii = strings.TrimSuffix(ascii, ".")
 	}
-	return BrowserName(host), err == nil && ascii != "" && !strings.Contains("."+ascii+".", "..") &&
+	return BrowserName(host), err == nil && ascii != "" && !HasEmptyLabel(ascii) &&
 		!strings.ContainsFunc(ascii, forbiddenDomainCodePoint) && !decodesToXNLabel(ascii)
 }
 

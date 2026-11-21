@@ -49,6 +49,38 @@ var (
 // defaultPorts are the special schemes' default ports, which a URL does not carry (WHATWG URL §4.4).
 var defaultPorts = map[string]string{"ftp": "21", "http": "80", "https": "443", "ws": "80", "wss": "443"}
 
+// DefaultPort is scheme's default port, which browsers drop when they write a URL (WHATWG URL §4.4),
+// or "" for a scheme without one.
+func DefaultPort(scheme string) string { return defaultPorts[scheme] }
+
+// NameChars are the characters of a host name byward accepts (ADR-0032 §3): ASCII letters, digits,
+// "-", "." and "_". RFC 3986 allows more in a host (~ ! $ & ' ( ) * + , ; =, and browsers all of
+// them), but no DNS name holds one, and a host with one is often a pasted secret.
+const NameChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._"
+
+// BadNameChar is the place of the first character of name that is not in NameChars, counted from
+// 1, or 0 when there is none, or when name is an IP address, whose IPv6 zone may hold a "%" that is
+// the address's, not a name's. Every character before it is ASCII, since a non-ASCII one is not in
+// NameChars, so the place is the same in bytes and in characters. It never returns the character,
+// which a secret may be.
+func BadNameChar(name string) int {
+	if _, err := netip.ParseAddr(name); err == nil {
+		return 0
+	}
+	for i := 0; i < len(name); i++ {
+		if strings.IndexByte(NameChars, name[i]) < 0 {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// HasEmptyLabel reports whether name has an empty label: it starts or ends with a dot, or holds two
+// in a row. A trailing dot names the root, so example.com. is not example.com (WHATWG URL §3.1).
+func HasEmptyLabel(name string) bool {
+	return strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".") || strings.Contains(name, "..")
+}
+
 // Parse reads hostport (host, host:port, [IPv6], [IPv6]:port, or a bare IPv6 address taken whole)
 // as the WHATWG URL host parser does for scheme: a name is folded to its ASCII lower case (IDNA,
 // as browsers map it), a host that ends in a number is read as an IPv4 address (127.1 is 127.0.0.1)

@@ -121,12 +121,11 @@ func TestNoAuthInAContainerMayListenOnAllInterfacesWithAWarning(t *testing.T) {
 }
 
 func TestNoAuthInAContainerHintUsesTheSchemesDefaultPort(t *testing.T) {
-	c, err := loadAnon(t, fakeHost("/.dockerenv", bridgeNetdev), "BYWARD_LISTEN=0.0.0.0:8443", "BYWARD_PUBLIC_URL=https://localhost/mcp")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(strings.Join(c.Relaxations, "|"), "docker run -p 127.0.0.1:443:8443") {
-		t.Fatalf("relaxations=%v", c.Relaxations)
+	for public, publish := range map[string]string{"https://localhost/mcp": "443", "http://localhost/mcp": "80"} {
+		c, err := loadAnon(t, fakeHost("/.dockerenv", bridgeNetdev), "BYWARD_LISTEN=0.0.0.0:8443", "BYWARD_PUBLIC_URL="+public)
+		if err != nil || !strings.Contains(strings.Join(c.Relaxations, "|"), "docker run -p 127.0.0.1:"+publish+":8443") {
+			t.Errorf("%s: err=%v relaxations=%v, want the hint to publish port %s", public, err, c.Relaxations, publish)
+		}
 	}
 }
 

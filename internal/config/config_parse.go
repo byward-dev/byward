@@ -35,10 +35,13 @@ func checkInlineSecrets(v *Values, dev bool) (relaxation string, err error) {
 // ParsePublicURL validates the public URL of the MCP endpoint, as `byward init entra` also needs it:
 // absolute, an ASCII host[:port] that BYWARD_ALLOWED_HOSTS would accept (hostPort: an IP address or a
 // name following validHostName's rule, a port from 1 to 65535 without a leading zero, no IPv6 zone),
-// no host ending in a number unless it is an IPv4 address in dotted decimal (browserIPv4), an IPv6
-// address or a host name only in the form browsers write it (host.Serialize: a name in lower case), a
-// path without a trailing slash, no query or fragment, and https unless the host is loopback (which
-// the proxy itself accepts only with --dev). A refusal never shows the value as given (ADR-0031 §1),
+// a host name of letters, digits, - . and _ only (nameCharReason, ADR-0032 §3), no host ending
+// in a number unless it is an IPv4 address in dotted decimal (browserIPv4), an IPv6 address or a host
+// name only in the form browsers write it (host.Serialize: a name in lower case), no port that is the
+// scheme's default (browsers drop it, ADR-0032 R2), a path without a trailing slash, no query or
+// fragment, and https unless the host is loopback (which the proxy itself accepts only with --dev).
+// It is never rewritten into that form: it is also the IdP redirect URI, registered as written
+// (ADR-0032 §2, class P). A refusal never shows the value as given (ADR-0031 §1),
 // nor its host: a token is a valid host name. It shows an IP address only as browsers would write it.
 func ParsePublicURL(raw string) (*url.URL, error) {
 	s := lookup("public-url")
@@ -47,6 +50,16 @@ func ParsePublicURL(raw string) (*url.URL, error) {
 		return nil, err
 	}
 	const want = "the MCP endpoint's URL such as " + exampleMCPURL
+	if h := u.Hostname(); !notASCII(h) { // hostPort refuses a non-ASCII host, naming its host:port
+		if reason := nameCharReason(h); reason != "" {
+			return nil, refusedForm(s, whole, raw, want, "its host "+reason)
+		}
+		if _, err := netip.ParseAddr(h); err != nil && host.HasEmptyLabel(h) { // an IPv6 zone may end in a dot
+			// The rest of the host name rule: hostPort's own reason would list a "~", which classes B
+			// and S still take until slices 3 and 4 (#523, #524).
+			return nil, refusedForm(s, whole, raw, want, "its host name has an empty label (a leading, double or trailing dot); drop the extra dot")
+		}
+	}
 	if _, reason := hostPort(u.Host); reason != "" {
 		// host:port joins the public listener's Host allow-list, so it follows BYWARD_ALLOWED_HOSTS'
 		// rules (#344, #353). The rest is not checked: the host is not shown, so the URL is not either.
@@ -69,6 +82,12 @@ func ParsePublicURL(raw string) (*url.URL, error) {
 		// IdP's redirect URI is registered as written (#472).
 		// The host is not shown, not even in lower case: a token is a valid host name.
 		errs = append(errs, refusedForm(s, whole, raw, wantBrowserHost, "its host name has upper-case letters; write it in lower case, as browsers do").Error())
+	}
+	if p := u.Port(); p != "" && p == host.DefaultPort(u.Scheme) {
+		// Browsers drop a scheme's default port when they write a URL (WHATWG URL §4.4), so a browser
+		// client would hold the issuer and resource without it (#484).
+		errs = append(errs, refusedForm(s, whole, raw, "the MCP endpoint's URL with its port as browsers write it, such as "+exampleMCPURL,
+			"its port "+p+" is "+u.Scheme+"'s default, which browsers drop; write the URL without :"+p).Error())
 	}
 	if u.Path == "" || strings.HasSuffix(u.Path, "/") {
 		errs = append(errs, refusedMeaning(s, whole, "a path that is empty or ends in /", "the MCP endpoint's path without a trailing slash, such as "+exampleMCPURL,
@@ -107,9 +126,18 @@ func parseResourceDocumentation(val Value) (string, error) {
 }
 
 // ParseUpstreamURL validates the HTTP upstream's URL as the proxy reads BYWARD_UPSTREAM_URL, as
-// `byward init entra` also needs it.
+// `byward init entra` also needs it: an absolute http(s) URL whose host name has letters, digits, - .
+// and _ only (nameCharReason, ADR-0032 §3); the rest of the host is left to Go's dialer.
 func ParseUpstreamURL(raw string) (*url.URL, error) {
-	return parseURL("upstream-url", "http://127.0.0.1:9000/mcp", raw)
+	const example = "http://127.0.0.1:9000/mcp"
+	u, err := parseURL("upstream-url", example, raw)
+	if err != nil {
+		return nil, err
+	}
+	if reason := nameCharReason(u.Hostname()); reason != "" {
+		return nil, refusedForm(lookup("upstream-url"), whole, raw, "an absolute http(s) URL such as "+example, "its host "+reason)
+	}
+	return u, nil
 }
 
 // parseUpstreamURL reads BYWARD_UPSTREAM_URL (ParseUpstreamURL).
@@ -467,27 +495,34 @@ func parseAllowedHosts(val Value) ([]string, []error) {
 
 // parseListen reads a listen address setting: host:port, the host empty, an IP address (an IPv6 one
 // may have a zone, as for a link-local address) or a host name (validHostName, one trailing dot
-// allowed), the port a number from 0 to 65535, as net.Listen takes it. A refused address is
+// allowed, and letters, digits, - . and _ only: nameCharReason, ADR-0032 §3), the port a
+// number from 0 to 65535, as net.Listen takes it. A refused address is
 // never shown (ADR-0031 §1): net.Listen's own error would quote it.
 func parseListen(val Value, want string) (string, error) {
 	s, raw := val.Setting, val.Given.raw()
 	host, port, err := net.SplitHostPort(raw)
 	_, ipErr := netip.ParseAddr(host) // an IPv6 address may have a zone, as a link-local one needs
+	nameReason := ""
+	if !strings.Contains(host, ":") { // an IPv6 host is no name; a bad one is neither, below
+		nameReason = nameCharReason(host)
+	}
 	var reason string
 	switch {
 	case err != nil:
-		reason = "is not host:port"
+		reason = "it is not host:port"
+	case nameReason != "":
+		reason = "its host " + nameReason
 	case host != "" && !validHostName(strings.TrimSuffix(host, ".")) && ipErr != nil:
-		reason = "has a host that is neither an IP address nor a host name"
+		reason = "it has a host that is neither an IP address nor a host name"
 	case !isDigits(port):
-		reason = "has a port that is not a number"
+		reason = "it has a port that is not a number"
 	default:
 		if n, err := strconv.Atoi(port); err != nil || n > 65535 { // too many digits for an int is above too
-			reason = "has a port that is not a number from 0 to 65535"
+			reason = "it has a port that is not a number from 0 to 65535"
 		}
 	}
 	if reason != "" {
-		return "", refusedForm(s, whole, raw, want, "it "+reason)
+		return "", refusedForm(s, whole, raw, want, reason)
 	}
 	return raw, nil
 }
@@ -504,7 +539,8 @@ const hostNameRule = "a host name has only letters, digits and - . _ ~, and no e
 // always copied from a DNS zone by mistake. Two settings strip one trailing dot first: the client
 // denylist (denylistReason), since its matching folds it away, and the listen addresses (parseListen),
 // since net.Listen takes it.
-func validHostName(host string) bool {
-	return host != "" && strings.Trim(host, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~") == "" &&
-		!strings.HasPrefix(host, ".") && !strings.HasSuffix(host, ".") && !strings.Contains(host, "..")
+func validHostName(name string) bool {
+	// "~" is ADR-0032 §3's host name characters' one extra here, which classes B and S keep until
+	// slices 3 and 4 (#523, #524); the public URL and the operator addresses refuse it first.
+	return name != "" && strings.Trim(name, host.NameChars+"~") == "" && !host.HasEmptyLabel(name)
 }

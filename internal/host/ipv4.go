@@ -27,6 +27,17 @@ func EndsInANumber(host string) bool {
 	return ok
 }
 
+// ReadsOctal reports whether a browser reads a number of host, a host that EndsInANumber, as octal:
+// a part with a leading 0 that is not a 0x or 0X prefix (010 is 8), as ipv4Number reads it.
+func ReadsOctal(host string) bool {
+	for p := range strings.SplitSeq(host, ".") {
+		if len(p) > 1 && p[0] == '0' && p[1] != 'x' && p[1] != 'X' {
+			return true
+		}
+	}
+	return false
+}
+
 // ipv4Number is the WHATWG URL IPv4 number parser: decimal, 0x hex, or octal with a leading 0; an
 // empty number after its prefix is 0.
 func ipv4Number(s string) (uint64, bool) {

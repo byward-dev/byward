@@ -45,7 +45,9 @@ func TestEveryURLSettingRefusesAPortWithNoHost(t *testing.T) {
 // TestABadDenylistEntryRefusesToStartNamingTheSetting.)
 func TestEveryURLSettingTakesAPortFrom1To65535Only(t *testing.T) {
 	for _, s := range urlSettings {
-		for _, p := range []struct{ name, port string }{{"no port", ""}, {"port 1", ":1"}, {"port 443", ":443"}, {"port 65535", ":65535"}} {
+		// A middle port that is no scheme's default: the public URL refuses its scheme's default port
+		// (#522, pinned in TestPublicURLAcceptsHTTPSOrLoopbackAndNamesTheRuleABadOneBreaks).
+		for _, p := range []struct{ name, port string }{{"no port", ""}, {"port 1", ":1"}, {"port 8443", ":8443"}, {"port 65535", ":65535"}} {
 			t.Run(s.env+" takes "+p.name, func(t *testing.T) {
 				if err := s.load(t)(s.env + "=" + fmt.Sprintf(s.url, p.port)); err != nil {
 					t.Fatalf("%v; want it taken", err)

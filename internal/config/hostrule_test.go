@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"testing"
@@ -21,9 +22,10 @@ var hostProbes = []string{
 	"mcp.example.com:443", "mcp.example.com:8443", "[::1]:8080", "localhost:80",
 }
 
-// hostRule is what each host setting makes of h: the public URL (https and http), an allowed host,
-// an origin, a CIMD list entry, a client denylist entry, the Host header form the public listener
-// compares, and whether the host is loopback, by its host name and as written.
+// hostRule is what each host setting makes of h: the public URL (https and http), the upstream URL
+// and a listen address, an allowed host, an origin, a CIMD list entry, a client denylist entry, the
+// Host header form the public listener compares, and whether the host is loopback, by its host name
+// and as written.
 func hostRule(h string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", h)
@@ -33,6 +35,22 @@ func hostRule(h string) string {
 		} else {
 			fmt.Fprintf(&b, "  public %s: %s\n", scheme, u.Host)
 		}
+	}
+	// The operator addresses (class O, ADR-0032 §2): their host names hold only §3's characters, and
+	// the rest of the upstream's host is left to Go's dialer; a listen address gets port 80 if h has none.
+	if u, err := ParseUpstreamURL("http://" + h + "/mcp"); err != nil {
+		fmt.Fprintf(&b, "  upstream: refused: %v\n", err)
+	} else {
+		fmt.Fprintf(&b, "  upstream: %s\n", u.Host)
+	}
+	listen := h
+	if _, _, err := net.SplitHostPort(h); err != nil {
+		listen = net.JoinHostPort(strings.TrimSuffix(strings.TrimPrefix(h, "["), "]"), "80")
+	}
+	if got, err := parseListen(Value{Setting: lookup("listen"), Given: NewOpaque(listen)}, "host:port such as 127.0.0.1:8080"); err != nil {
+		fmt.Fprintf(&b, "  listen: refused: %v\n", err)
+	} else {
+		fmt.Fprintf(&b, "  listen: %s\n", got)
 	}
 	// An allowed host's host name, and whether the no-auth check reads it as loopback: both read
 	// the entry as stored (hostPort), never as given.

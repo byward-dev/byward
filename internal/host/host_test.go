@@ -143,3 +143,56 @@ func TestLoopbackReadsTheParsedHostButAsWrittenOnlyANameOrIPv4InTheFormParseWrit
 		})
 	}
 }
+
+// A host name holds only letters, digits, "-", "." and "_" (ADR-0032 §3): BadNameChar
+// names the place of the first other character, counted in characters, and none in an IP address.
+func TestBadNameCharNamesThePlaceOfTheFirstCharacterNoHostNameHolds(t *testing.T) {
+	for name, want := range map[string]int{
+		"mcp.example.com": 0, "my_mcp": 0, "a-b.c": 0, "": 0, "MCP.Example": 0,
+		"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._": 0, // every one of them
+		"127.0.0.1": 0, "::1": 0, "fe80::1%eth0": 0, // an address, and an IPv6 zone's "%"
+		"s3cret~tok": 7, "a!b": 2, "a$b": 2, "a&b": 2, "a'b": 2, "a(b": 2, "a)b": 2, "a*b": 2, "a+b": 2,
+		"a,b": 2, "a;b": 2, "a=b": 2, "a%b": 2, `a"b`: 2, "a<b": 2, "a b": 2, "a/b": 2,
+		"bü~x": 2, "ü": 1, // a non-ASCII character is itself the first one no host name holds
+		"bx~ü": 3, // ASCII before it
+	} {
+		if got := BadNameChar(name); got != want {
+			t.Errorf("BadNameChar(%q) = %d, want %d", name, got, want)
+		}
+	}
+}
+
+// DefaultPort is the port browsers drop from a URL of each special scheme, and none for others.
+func TestDefaultPortIsTheOneBrowsersDrop(t *testing.T) {
+	for scheme, want := range map[string]string{"https": "443", "http": "80", "wss": "443", "ws": "80", "ftp": "21", "file": "", "": ""} {
+		if got := DefaultPort(scheme); got != want {
+			t.Errorf("DefaultPort(%q) = %q, want %q", scheme, got, want)
+		}
+	}
+}
+
+// ReadsOctal says whether a browser reads a part of an IPv4 host with a leading 0 as octal, and not
+// a 0x or 0X prefix or a lone 0.
+func TestReadsOctalIsALeadingZeroThatIsNoHexPrefix(t *testing.T) {
+	for h, want := range map[string]bool{
+		"010.0.0.1": true, "10.010.0.1": true, "00.0.0.1": true, "0.0.0.010": true,
+		"10.0.0.1": false, "0.0.0.0": false, "0x7f.0.0.1": false, "0X7F.0.0.1": false, "127.1": false, "0x.0.0.1": false,
+	} {
+		if got := ReadsOctal(h); got != want {
+			t.Errorf("ReadsOctal(%q) = %v, want %v", h, got, want)
+		}
+	}
+}
+
+// A name has an empty label when it starts or ends with a dot or holds two in a row; a host name
+// never does (a trailing dot names the root, a different host to a browser, WHATWG URL §3.1).
+func TestHasEmptyLabelIsALeadingDoubleOrTrailingDot(t *testing.T) {
+	for name, want := range map[string]bool{
+		".a.example": true, "a..example": true, "a.example.": true, ".": true, "..": true,
+		"a.example": false, "a": false, "": false, "127.0.0.1": false,
+	} {
+		if got := HasEmptyLabel(name); got != want {
+			t.Errorf("HasEmptyLabel(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
