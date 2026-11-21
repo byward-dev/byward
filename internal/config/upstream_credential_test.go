@@ -109,6 +109,9 @@ func TestUpstreamCredentialSettingsRefuseWhatCannotWork(t *testing.T) {
 			"BYWARD_UPSTREAM_CREDENTIAL_FILE: want one header value of at most 4096 bytes on one line, without control characters or white space at either end; got a value (6 characters, not shown): it starts or ends with white space"},
 		{"only white space", " \t \n", []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
 			"BYWARD_UPSTREAM_CREDENTIAL_FILE: the file holds only whitespace"},
+		// The limit counts bytes: 2049 two-byte characters are over it, shown by their number.
+		{"too long in bytes, not characters", strings.Repeat("é", 2049), []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
+			"BYWARD_UPSTREAM_CREDENTIAL_FILE: want one header value of at most 4096 bytes on one line, without control characters or white space at either end; got a value (2049 characters, not shown): it is 4098 bytes long"},
 		{"too long", "k-123" + strings.Repeat("k", maxUpstreamCredential-4), []string{file, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
 			"BYWARD_UPSTREAM_CREDENTIAL_FILE: want one header value of at most 4096 bytes on one line, without control characters or white space at either end; got a value (4097 characters, not shown): it is 4097 bytes long"},
 		{"a credential set inline, not from a file", "", []string{"BYWARD_UPSTREAM_CREDENTIAL=k-123", "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"},
@@ -194,5 +197,14 @@ func TestTheUpstreamCredentialIsRefusedForAStdioUpstreamNamingTheSettingAsGiven(
 				t.Fatalf("err = %v, want %q", err, want)
 			}
 		})
+	}
+}
+
+// A credential of exactly the limit, 4096 bytes, is taken.
+func TestAnUpstreamCredentialOfTheLimitIsTaken(t *testing.T) {
+	cred := strings.Repeat("k", maxUpstreamCredential)
+	c, err := loadCred(t, nil, cred, "BYWARD_UPSTREAM_CREDENTIAL_FILE="+credFile, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key")
+	if err != nil || c.UpstreamCredential != cred {
+		t.Fatalf("err = %v, want the credential of %d bytes taken", err, maxUpstreamCredential)
 	}
 }

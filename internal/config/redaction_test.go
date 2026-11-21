@@ -351,3 +351,14 @@ func TestNoRefusalShowsTheValueGiven(t *testing.T) {
 		}
 	}
 }
+
+// A message of the flag package flagError does not know, as a later Go could write, is refused
+// without its text: the fallback fails closed.
+func TestAFlagPackageMessageFlagErrorDoesNotKnowShowsNoText(t *testing.T) {
+	fs := flag.NewFlagSet("byward", flag.ContinueOnError)
+	for _, msg := range []string{`invalid value "` + canaryText + `" for flag -nosuch: x`, "a new message quoting " + canaryText} {
+		if err := flagError(fs, errors.New(msg)); !isConfigError(err) || holdsCanary(err.Error()) {
+			t.Errorf("flagError(%q) = %v, want a configuration error without the text", msg, err)
+		}
+	}
+}

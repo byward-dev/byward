@@ -25,6 +25,9 @@ func TestAssertionClaimsAndHeaderAreRead(t *testing.T) {
 		{[]string{"BYWARD_ASSERTION_CLAIMS=none"}, "Authorization", nil},
 		{[]string{"BYWARD_ASSERTION_CLAIMS=Email, roles,groups,name,roles"}, "Authorization", []string{"email", "roles", "groups", "name"}},
 		{[]string{"BYWARD_ASSERTION_HEADER=x-byward-identity"}, "X-Byward-Identity", []string{"roles"}},
+		// Padding around either value is trimmed.
+		{[]string{"BYWARD_ASSERTION_CLAIMS= none "}, "Authorization", nil},
+		{[]string{"BYWARD_ASSERTION_HEADER= x-byward-identity "}, "X-Byward-Identity", []string{"roles"}},
 	} {
 		t.Run(strings.Join(tc.env, " "), func(t *testing.T) {
 			c, err := load(t, nil, tc.env...)

@@ -58,6 +58,8 @@ func TestNoOtherSettingMayUseAPlainIdentityHeader(t *testing.T) {
 			"BYWARD_ASSERTION_HEADER: want a header name such as Authorization or X-Byward-Identity; got X-Byward-Roles: it is one of the plain identity headers the proxy sets"},
 		{"the assertion, headers on", []string{"BYWARD_IDENTITY_HEADERS=true", "BYWARD_ASSERTION_HEADER=x-byward-subject"},
 			"BYWARD_ASSERTION_HEADER: want a header name such as Authorization or X-Byward-Identity; got X-Byward-Subject: it is one of the plain identity headers the proxy sets"},
+		{"the On-Behalf-Of header", []string{"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read", "BYWARD_OBO_HEADER=X-Byward-Roles"},
+			"BYWARD_OBO_HEADER: want a header name such as Authorization or X-Byward-Downstream-Token; got X-Byward-Roles: it is one of the plain identity headers the proxy sets"},
 		{"the credential, another spelling", []string{"BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X_Byward_Email"},
 			"BYWARD_UPSTREAM_CREDENTIAL_HEADER: want a header name such as Authorization or X-Api-Key; got X-Byward-Email: it is one of the plain identity headers the proxy sets"},
 	} {
