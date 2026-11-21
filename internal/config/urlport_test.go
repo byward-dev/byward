@@ -11,7 +11,8 @@ import (
 // first request, at OIDC discovery, or never. A refused port is never shown. (The allowed hosts:
 // TestAURLOrHostRefusedForItsFormSaysWhereAndWhyNeverWhat; the listen addresses, which take 0:
 // TestAListenAddressIsHostColonANumericPortAndARefusedOneIsNeverShown; the client denylist, whose
-// CIMD client IDs take port 443 only, refused at wiring: TestADenylistEntryRefusedAtWiringIsNamedByItsPlaceAndLength.)
+// CIMD client IDs take port 443 only, refused at startup: internal/server's
+// TestABadDenylistEntryRefusesToStartNamingTheSetting.)
 func TestEveryURLSettingTakesAPortFrom1To65535Only(t *testing.T) {
 	for _, s := range []struct {
 		env, url, got, after string // got: the refusal up to its length; after: what follows the reason

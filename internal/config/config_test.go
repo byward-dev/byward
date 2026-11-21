@@ -166,10 +166,10 @@ func TestAURLOrHostRefusedForItsFormSaysWhereAndWhyNeverWhat(t *testing.T) {
 		// redirect URI are built from it as written (#472).
 		{"public host name in upper case", "BYWARD_PUBLIC_URL=https://MCP.Example.com/mcp", `BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (27 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do`},
 		// #353: the zone follows BYWARD_ALLOWED_HOSTS' rule too (the port: TestEveryURLSettingTakesAPortFrom1To65535Only).
-		{"unicode public host with a port", "BYWARD_PUBLIC_URL=https://bücher.example:8443/mcp", wantPublicURL + `(31 characters, not shown): its host:port ` + ruleNotASCII},
 		{"public URL with an IPv6 zone", "BYWARD_PUBLIC_URL=https://[fe80::1%25eth0]/mcp", wantPublicURL + `(28 characters, not shown): its host:port is not an IPv6 address without a zone; ` + ruleForms},
 		{"public URL with an IPv6 zone and a port", "BYWARD_PUBLIC_URL=https://[fe80::1%25eth0]:8443/mcp", wantPublicURL + `(33 characters, not shown): its host:port is not an IPv6 address without a zone; ` + ruleForms},
 		// Browsers and MCP clients send IDN hosts in ASCII (xn--) form, so a Unicode host never matches.
+		{"unicode public host with a port", "BYWARD_PUBLIC_URL=https://bücher.example:8443/mcp", wantPublicURL + `(31 characters, not shown): its host:port ` + ruleNotASCII},
 		{"unicode public host", "BYWARD_PUBLIC_URL=https://bücher.example/mcp", wantPublicURL + `(26 characters, not shown): its host:port ` + ruleNotASCII},
 		{"escaped unicode public host", "BYWARD_PUBLIC_URL=https://b%C3%BCcher.example/mcp", wantPublicURL + `(31 characters, not shown): its host:port ` + ruleNotASCII},
 		{"unicode allowed origin", "BYWARD_ALLOWED_ORIGINS=https://bücher.example", wantOrigins + `(22 characters, not shown): its host:port ` + ruleNotASCII},
