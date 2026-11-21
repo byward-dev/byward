@@ -740,9 +740,10 @@ func TestAFailedCounterWriteStoresNothingAndIsNamedWithoutAPath(t *testing.T) {
 	}
 }
 
-// A counter write whose temporary file cannot be synced or closed stores nothing, and the error names
-// the counter file and each cause, never a path (security invariant 2, #600): only a fault fails
-// either, and both failing joins two errors, each stripped of its path.
+// A counter write whose temporary file cannot be synced or closed stores nothing and leaves no
+// temporary file, and the error names the counter file and each cause, never a path (security
+// invariant 2, #600): only a fault fails either, and both failing joins two errors, each stripped of
+// its path.
 func TestACounterFileThatCannotBeSyncedOrClosedIsNamedWithoutItsPath(t *testing.T) {
 	t.Cleanup(func() { syncCounterFile, closeCounterFile = (*os.File).Sync, (*os.File).Close })
 	failSync := func() {
@@ -765,7 +766,8 @@ func TestACounterFileThatCannotBeSyncedOrClosedIsNamedWithoutItsPath(t *testing.
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			syncCounterFile, closeCounterFile = (*os.File).Sync, (*os.File).Close
-			s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
+			cdir := t.TempDir()
+			s := open(t, t.TempDir(), filepath.Join(cdir, "writes"))
 			for _, b := range tc.breakIt {
 				b()
 			}
@@ -775,6 +777,11 @@ func TestACounterFileThatCannotBeSyncedOrClosedIsNamedWithoutItsPath(t *testing.
 			}
 			if _, err := s.Grant(ctx, "g1"); !errors.Is(err, store.ErrNotFound) {
 				t.Fatalf("the failed write was stored: %v", err)
+			}
+			entries, err := os.ReadDir(cdir)
+			must(t, err)
+			if len(entries) != 1 || entries[0].Name() != "writes" {
+				t.Fatalf("the counter directory holds %v, want only the counter file", entries)
 			}
 		})
 	}
