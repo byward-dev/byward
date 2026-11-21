@@ -119,12 +119,6 @@ func TestEveryBooleanReadIsOfABoolFlag(t *testing.T) {
 // working directory, with one message (ADR-0007 §6). Driven by the registry, so a new path setting
 // is covered with no edit here, unless it needs a companion setting to reach its check.
 func TestEveryPathSettingRefusesARelativePath(t *testing.T) {
-	// What each setting needs set beside it for its own check to run.
-	env := map[string][]string{
-		"tls-cert-file":              append(append([]string{}, base...), "BYWARD_TLS_KEY_FILE=/run/tls/tls.key"),
-		"tls-key-file":               append(append([]string{}, base...), "BYWARD_TLS_CERT_FILE=/run/tls/tls.crt"),
-		"entra-federated-token-file": withoutSecret(),
-	}
 	paths := 0
 	for _, s := range registry {
 		if !s.HoldsPath() {
@@ -132,12 +126,8 @@ func TestEveryPathSettingRefusesARelativePath(t *testing.T) {
 		}
 		paths++
 		t.Run(s.Name, func(t *testing.T) {
-			e, ok := env[s.Name]
-			if !ok {
-				e = append([]string{}, base...)
-			}
-			_, _, err := Load(nil, append(e, s.Env()+"=rel"), baseFiles)
-			want := s.Env() + ": want an absolute path, one starting with /; got a relative one: no path is relative to the working directory (ADR-0007 §6)"
+			_, _, err := Load(nil, append(relativePathEnv(s), s.Env()+"=rel"), baseFiles)
+			want := s.Env() + relativePathRefusal
 			if !isConfigError(err) || !strings.Contains(err.Error(), want) {
 				t.Fatalf("err = %v, want %q", err, want)
 			}
@@ -145,5 +135,38 @@ func TestEveryPathSettingRefusesARelativePath(t *testing.T) {
 	}
 	if paths == 0 {
 		t.Fatal("no path setting found")
+	}
+}
+
+// relativePathRefusal is what follows a path setting's variable when it is given a relative path.
+const relativePathRefusal = ": want an absolute path, one starting with /; got a relative one: no path is relative to the working directory (ADR-0007 §6)"
+
+// relativePathEnv is the base configuration with what s needs set beside it for its relative-path
+// check to run.
+func relativePathEnv(s Setting) []string {
+	switch s.Name {
+	case "tls-cert-file":
+		return append(append([]string{}, base...), "BYWARD_TLS_KEY_FILE=/run/tls/tls.key")
+	case "tls-key-file":
+		return append(append([]string{}, base...), "BYWARD_TLS_CERT_FILE=/run/tls/tls.crt")
+	case "entra-federated-token-file":
+		return withoutSecret()
+	}
+	return append([]string{}, base...)
+}
+
+// A setting that refuses a relative path holds a path (#587): every path the proxy reads or writes
+// is checked to be absolute (ADR-0007 §6), so a new path setting left without the path shape fails
+// here whatever its name and whichever loader opens it. One that needs a companion setting to reach
+// its check is seen only once relativePathEnv gives it one.
+func TestASettingThatRefusesARelativePathHoldsAPath(t *testing.T) {
+	for _, s := range registry {
+		if s.Secret() || s.HoldsPath() {
+			continue
+		}
+		_, _, err := Load(nil, append(relativePathEnv(s), s.Env()+"=rel"), baseFiles)
+		if err != nil && strings.Contains(err.Error(), s.Env()+relativePathRefusal) {
+			t.Errorf("%s refuses a relative path but does not have the path shape (#587)", s.Name)
+		}
 	}
 }

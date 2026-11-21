@@ -104,6 +104,8 @@ func TestPathVariablesAreThePathAndSecretFileVariables(t *testing.T) {
 // The scan is syntactic: it matches fields by name, so a field of the same name on another type
 // counts too, as does a field in a data argument. It cannot see a field copied into a variable, or
 // passed to a function not listed, before it is opened, nor a package imported under another name;
+// a loader in the scanned file's own package, called unqualified, cannot be listed, so it belongs in its
+// own package;
 // TestASettingOrFieldNamedAsAPathIsAPathSetting and the leak test cover those.
 func scanFileOpeners(t *testing.T) (opened map[string]string, matched map[string]bool) {
 	t.Helper()
@@ -182,7 +184,7 @@ func TestTheFileOpenerScanSeesEveryLoaderAndPathField(t *testing.T) {
 	}
 	for _, field := range slices.Sorted(maps.Keys(pathFields)) {
 		if _, ok := opened[field]; !ok && !slices.Contains(notOpened, field) {
-			t.Errorf("Config.%s: the scan saw no file opener handed it; a loader was renamed or moved, so update fileOpeners or fileOptionTypes", field)
+			t.Errorf("Config.%s: no listed file opener is handed it; add its loader, new or renamed, to fileOpeners or fileOptionTypes", field)
 		}
 	}
 }
