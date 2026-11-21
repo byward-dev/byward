@@ -92,9 +92,14 @@ func TestAHeaderClashNeverShowsTheHeader(t *testing.T) {
 		{"the credential and the assertion", []string{cred, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=" + header, "BYWARD_ASSERTION_HEADER=" + strings.ToLower(header)},
 			"BYWARD_UPSTREAM_CREDENTIAL_HEADER and BYWARD_ASSERTION_HEADER name the same header, but the credential and the identity assertion never share a header (ADR-0016 §7): set BYWARD_ASSERTION_HEADER to a header of your own, such as X-Byward-Identity, and verify the assertion there"},
 		{"the On-Behalf-Of token and the assertion", []string{obo, "BYWARD_OBO_HEADER=" + header, "BYWARD_ASSERTION_HEADER=" + strings.ToLower(header)},
-			"BYWARD_OBO_HEADER names the header that already carries the identity assertion (BYWARD_ASSERTION_HEADER); move the assertion to a header of its own such as X-Byward-Identity, or use another header here such as X-Byward-Downstream-Token"},
+			"BYWARD_OBO_HEADER names the header that already carries the identity assertion (BYWARD_ASSERTION_HEADER); move the assertion to a header of its own, such as X-Byward-Identity, or use another header here, such as X-Byward-Downstream-Token"},
 		{"the On-Behalf-Of token and the credential", []string{obo, cred, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=" + header, "BYWARD_OBO_HEADER=" + strings.ToLower(header)},
-			"BYWARD_OBO_HEADER names the header that already carries the operator's upstream credential (BYWARD_UPSTREAM_CREDENTIAL_HEADER); use a header of its own such as X-Byward-Downstream-Token"},
+			"BYWARD_OBO_HEADER names the header that already carries the operator's upstream credential (BYWARD_UPSTREAM_CREDENTIAL_HEADER); use a header of its own, such as X-Byward-Downstream-Token"},
+		// The example is left out where it is the very header that clashes.
+		{"the On-Behalf-Of token and the assertion, on the assertion's example", []string{obo, "BYWARD_OBO_HEADER=X-Byward-Identity", "BYWARD_ASSERTION_HEADER=X-Byward-Identity"},
+			"BYWARD_OBO_HEADER names the header that already carries the identity assertion (BYWARD_ASSERTION_HEADER); move the assertion to a header of its own, or use another header here, such as X-Byward-Downstream-Token"},
+		{"the credential and the assertion, on the assertion's example", []string{cred, "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Byward-Identity", "BYWARD_ASSERTION_HEADER=X-Byward-Identity"},
+			"BYWARD_UPSTREAM_CREDENTIAL_HEADER and BYWARD_ASSERTION_HEADER name the same header, but the credential and the identity assertion never share a header (ADR-0016 §7): set BYWARD_ASSERTION_HEADER to a header of your own, and verify the assertion there"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := loadCred(t, nil, "k-123", tc.env...)

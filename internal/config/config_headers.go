@@ -99,6 +99,15 @@ const (
 // IdentityHeaderNames are the plain identity headers.
 var IdentityHeaderNames = []string{HeaderSubject, HeaderClientID, HeaderPrincipalType, HeaderRoles, HeaderGroups, HeaderEmail, HeaderEmailVerified, HeaderName}
 
+// suchAs is ", such as <example>", the header setting name's example, for a clash's advice, or nothing
+// when the example is the very header that clashes (clashing), which the advice would point back at.
+func suchAs(name, clashing string) string {
+	if example := headerExamples[name]; !sameHeader(example, clashing) {
+		return ", such as " + example
+	}
+	return ""
+}
+
 // headerClashes refuses two purposes in one header: the identity assertion, the operator's
 // upstream credential, the On-Behalf-Of token and the plain identity headers each have their own
 // (ADR-0016 §4, §5, §7; ADR-0017 §3). Names are compared by CanonicalHeader, so X_Api_Key and
@@ -108,8 +117,8 @@ func (c *Config) headerClashes() []error {
 	aEnv, cEnv := Setting{Name: "assertion-header"}.Env(), Setting{Name: "upstream-credential-header"}.Env()
 	if c.UpstreamCredentialHeader != "" && sameHeader(c.UpstreamCredentialHeader, c.AssertionHeader) {
 		// The header is not shown: an accepted name can be any token.
-		errs = append(errs, errorf("%s and %s name the same header, but the credential and the identity assertion never share a header (ADR-0016 §7): set %s to a header of your own, such as %s, and verify the assertion there",
-			cEnv, aEnv, aEnv, headerExamples["assertion-header"]))
+		errs = append(errs, errorf("%s and %s name the same header, but the credential and the identity assertion never share a header (ADR-0016 §7): set %s to a header of your own%s, and verify the assertion there",
+			cEnv, aEnv, aEnv, suchAs("assertion-header", c.AssertionHeader)))
 	}
 	for _, u := range []struct{ name, header string }{{"assertion-header", c.AssertionHeader},
 		{"upstream-credential-header", c.UpstreamCredentialHeader}, {"obo-header", c.OBOHeader}} {

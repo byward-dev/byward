@@ -50,10 +50,10 @@ func (c *Config) onBehalfOf(v *Values) []error {
 	// the client's own Authorization is always removed before byward sets its headers (#195).
 	switch {
 	case sameHeader(h, c.AssertionHeader):
-		errs = append(errs, errorf("%s names the header that already carries the identity assertion (%s); move the assertion to a header of its own such as %s, or use another header here such as %s",
-			hEnv, Setting{Name: "assertion-header"}.Env(), headerExamples["assertion-header"], headerExamples["obo-header"]))
+		errs = append(errs, errorf("%s names the header that already carries the identity assertion (%s); move the assertion to a header of its own%s, or use another header here%s",
+			hEnv, Setting{Name: "assertion-header"}.Env(), suchAs("assertion-header", h), suchAs("obo-header", h)))
 	case sameHeader(h, c.UpstreamCredentialHeader):
-		errs = append(errs, errorf("%s names the header that already carries the operator's upstream credential (%s); use a header of its own such as %s", hEnv, Setting{Name: "upstream-credential-header"}.Env(), headerExamples["obo-header"]))
+		errs = append(errs, errorf("%s names the header that already carries the operator's upstream credential (%s); use a header of its own%s", hEnv, Setting{Name: "upstream-credential-header"}.Env(), suchAs("obo-header", h)))
 	}
 	return errs
 }
