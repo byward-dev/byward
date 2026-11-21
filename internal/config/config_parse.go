@@ -145,7 +145,8 @@ func isEscape(s string) bool {
 func isDigits(s string) bool { return s != "" && strings.Trim(s, "0123456789") == "" }
 
 // parseHTTPURL parses raw as an absolute http(s) URL with a host, no user name or password, and a
-// port, if any, as isPortNumber takes it, or says why it is not one: fixed text completing "it …", never url.Parse's error, which quotes the value.
+// port, if any, as isPortNumber takes it, or says why it is not one: fixed text completing "it …",
+// never url.Parse's error, which quotes the value.
 // White space, control and invisible formatting characters are refused first: url.Parse accepts a
 // space or a non-ASCII control character in a path (#422), which no URL holds (RFC 3986 §2).
 func parseHTTPURL(raw string) (*url.URL, string) {

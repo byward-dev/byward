@@ -10,7 +10,8 @@ import (
 // url.Parse checks only that a port is digits, so :0, :08080 and :99999 parsed, and failed only at the
 // first request, at OIDC discovery, or never. A refused port is never shown. (The allowed hosts:
 // TestAURLOrHostRefusedForItsFormSaysWhereAndWhyNeverWhat; the listen addresses, which take 0:
-// TestAListenAddressIsHostColonANumericPortAndARefusedOneIsNeverShown.)
+// TestAListenAddressIsHostColonANumericPortAndARefusedOneIsNeverShown; the client denylist, whose
+// CIMD client IDs take port 443 only, refused at wiring: TestADenylistEntryRefusedAtWiringIsNamedByItsPlaceAndLength.)
 func TestEveryURLSettingTakesAPortFrom1To65535Only(t *testing.T) {
 	for _, s := range []struct {
 		env, url, got, after string // got: the refusal up to its length; after: what follows the reason
