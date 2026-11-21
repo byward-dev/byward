@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // Setup is the input of the app registration script `byward init entra` prints (ADR-0020 §8).
@@ -59,7 +60,7 @@ func SetupScript(s Setup) (string, error) {
 	switch s.Credential {
 	case "", CredentialSecret, CredentialCertificate:
 	default:
-		return "", fmt.Errorf("the credential must be %s or %s, not %q", CredentialSecret, CredentialCertificate, s.Credential)
+		return "", fmt.Errorf("the credential must be %s or %s; got another value %s", CredentialSecret, CredentialCertificate, logging.NotShown(s.Credential))
 	}
 	var b strings.Builder
 	err := setupTemplate.Execute(&b, map[string]any{

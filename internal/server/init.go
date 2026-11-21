@@ -7,6 +7,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/idp/entra"
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // InitOptions is the input of `byward init <idp>`.
@@ -25,7 +26,8 @@ type InitOptions struct {
 // commands, ending in the minimal env file. Only Entra has one so far.
 func InitScript(o InitOptions) (string, error) {
 	if o.IdP != "entra" {
-		return "", fmt.Errorf("init sets up only an entra IdP, not %q; for an oidc IdP see docs/how-to/oidc.md", o.IdP)
+		// The name is not shown: a value pasted in its place could be a secret (#576).
+		return "", fmt.Errorf("init sets up only an entra IdP; got another name %s; for an oidc IdP see docs/how-to/oidc.md", logging.NotShown(o.IdP))
 	}
 	env := config.Quickstart{PublicURL: "$PUBLIC_URL", Tenant: "$TENANT_ID", ClientID: "$APP_ID",
 		SecretFile: "$SECRET_FILE", SecretExpiresAt: "$SECRET_EXPIRES_AT"}

@@ -59,7 +59,7 @@ func TestOperateCommandMisuseExits2WithTheRightCallOnStderr(t *testing.T) {
 		{"check with a stdio command but without --offline", []string{"check", "--", "/bin/sh"}, nil, "usage: byward check --offline"},
 		{"doctor with another flag", []string{"doctor", "--yaml"}, nil, "usage: byward doctor [--json]"},
 		{"init without an IdP", []string{"init"}, nil, "init prints the setup of an entra IdP"},
-		{"init for another IdP", []string{"init", "okta", "--tenant", tenant, "--public-url", "https://m.example/mcp"}, nil, `init sets up only an entra IdP, not "okta"`},
+		{"init for another IdP", []string{"init", "okta", "--tenant", tenant, "--public-url", "https://m.example/mcp"}, nil, `init sets up only an entra IdP; got another name (4 characters, not shown)`},
 		{"init entra without a tenant", []string{"init", "entra"}, nil, "usage: byward init entra --tenant"},
 		{"init entra with an extra argument", []string{"init", "entra", "--tenant", tenant, "now"}, nil, "usage: byward init entra"},
 		{"init entra with a domain as tenant", []string{"init", "entra", "--tenant", "contoso.com", "--public-url", "https://m.example/mcp"}, nil, "tenant must be the tenant ID"},
@@ -71,7 +71,7 @@ func TestOperateCommandMisuseExits2WithTheRightCallOnStderr(t *testing.T) {
 		{"check with a bad setting", []string{"check", "--offline"}, []string{"BYWARD_PUBLC_URL=x"}, "byward: configuration error: unknown setting BYWARD_PUBLC_URL"},
 		{"doctor with a bad setting", []string{"doctor"}, []string{"BYWARD_PUBLC_URL=x"}, "byward: configuration error: unknown setting BYWARD_PUBLC_URL"},
 		{"flags before the command", []string{"--dev", "check", "--offline"}, nil, "to run check, put it first: byward check"},
-		{"init entra with a non-numeric secret lifetime", []string{"init", "entra", "--tenant", tenant, "--secret-years", "abc"}, nil, `invalid value "abc" for flag -secret-years`},
+		{"init entra with a non-numeric secret lifetime", []string{"init", "entra", "--tenant", tenant, "--public-url", "https://m.example/mcp", "--secret-years", "abc"}, nil, "1 to 2 years"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -373,7 +373,7 @@ func TestInitEntraWithACertificateWritesAnEnvFileTheProxyLoads(t *testing.T) {
 
 func TestInitEntraRefusesAnUnknownCredential(t *testing.T) {
 	if code, _, stderr := runWith([]string{"init", "entra", "--tenant", tenant, "--public-url", "https://flag.example/mcp", "--credential", "password"}); code != exitConfig ||
-		!strings.Contains(stderr, `the credential must be secret or certificate, not "password"`) {
+		!strings.Contains(stderr, `the credential must be secret or certificate; got another value (8 characters, not shown)`) {
 		t.Fatalf("an unknown credential: %d %q", code, stderr)
 	}
 }

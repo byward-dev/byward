@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -114,6 +115,24 @@ func runDoctor(ctx context.Context, args, environ []string, stdout, stderr io.Wr
 	return report.ExitCode()
 }
 
+// initFlagError is the flag package's error for init's command line with nothing given in it (#576),
+// as config maps its own (#512): an argument or flag name only by its length, and a flag that needs a
+// value named, since it is one of init's own. init's flags are strings, so the flag package never
+// refuses a value. Any other message is refused without its text, so a new one cannot show a value.
+func initFlagError(err error) string {
+	msg := err.Error()
+	if rest, ok := strings.CutPrefix(msg, "bad flag syntax: "); ok {
+		return "want flags as --name=value; got an argument with a bad flag syntax " + logging.NotShown(rest)
+	}
+	if name, ok := strings.CutPrefix(msg, "flag provided but not defined: -"); ok {
+		return "want flags init takes; got an undefined flag " + logging.NotShown(name)
+	}
+	if strings.HasPrefix(msg, "flag needs an argument: -") {
+		return msg
+	}
+	return "the command line is refused (the flag package's message is not shown)"
+}
+
 // initIdP is `init entra` (ADR-0020 §8, ADR-0012 §12): it prints a script of az commands and a
 // minimal env file. It runs nothing, calls no API and never sees a secret.
 func initIdP(_ context.Context, args, environ []string, stdout, stderr io.Writer) int {
@@ -128,10 +147,11 @@ func initIdP(_ context.Context, args, environ []string, stdout, stderr io.Writer
 	tenant := fs.String("tenant", "", "")
 	publicURL := fs.String("public-url", env(config.Setting{Name: "public-url"}.Env()), "")
 	upstreamURL := fs.String("upstream-url", env(config.Setting{Name: "upstream-url"}.Env()), "")
-	years := fs.Int("secret-years", 1, "")
+	// A string, read below, so the flag package never quotes a value it cannot parse.
+	years := fs.String("secret-years", "1", "")
 	credential := fs.String("credential", "secret", "")
 	if err := fs.Parse(args[1:]); err != nil {
-		_, _ = fmt.Fprintf(stderr, "%s\nbyward: init %s: %v\n", usage, args[0], err)
+		_, _ = fmt.Fprintf(stderr, "%s\nbyward: init: %s\n", usage, initFlagError(err))
 		return exitConfig
 	}
 	if fs.NArg() > 0 || *tenant == "" {
@@ -140,19 +160,23 @@ func initIdP(_ context.Context, args, environ []string, stdout, stderr io.Writer
 	}
 	u, err := config.ParsePublicURL(*publicURL)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "byward: init %s: %v (give --public-url)\n", args[0], err)
+		_, _ = fmt.Fprintf(stderr, "byward: init: %v (give --public-url)\n", err)
 		return exitConfig
 	}
 	if *upstreamURL != "" { // empty leaves BYWARD_UPSTREAM_URL for the operator to fill in
 		if _, err := config.ParseUpstreamURL(*upstreamURL); err != nil {
-			_, _ = fmt.Fprintf(stderr, "byward: init %s: %v (give --upstream-url)\n", args[0], err)
+			_, _ = fmt.Fprintf(stderr, "byward: init: %v (give --upstream-url)\n", err)
 			return exitConfig
 		}
 	}
-	script, err := server.InitScript(server.InitOptions{IdP: args[0], Tenant: *tenant, PublicURL: u, UpstreamURL: *upstreamURL,
-		SecretYears: *years, Credential: *credential, Now: time.Now()})
+	secretYears, err := strconv.Atoi(*years)
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "byward: init %s: %v\n", args[0], err)
+		secretYears = 0 // refused below as out of range, which never shows the value
+	}
+	script, err := server.InitScript(server.InitOptions{IdP: args[0], Tenant: *tenant, PublicURL: u, UpstreamURL: *upstreamURL,
+		SecretYears: secretYears, Credential: *credential, Now: time.Now()})
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "byward: init: %v\n", err)
 		return exitConfig
 	}
 	_, _ = io.WriteString(stdout, script)

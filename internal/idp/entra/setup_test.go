@@ -142,7 +142,7 @@ func TestSetupScriptRefusesBadInput(t *testing.T) {
 		{"tenant is common", func(s *Setup) { s.Tenant = "common" }, "tenant ID"},
 		{"secret for 0 years", func(s *Setup) { s.SecretYears = 0 }, "1 to 2 years"},
 		{"secret for 3 years", func(s *Setup) { s.SecretYears = 3 }, "1 to 2 years"},
-		{"an unknown credential", func(s *Setup) { s.Credential = "password" }, `the credential must be secret or certificate, not "password"`},
+		{"an unknown credential", func(s *Setup) { s.Credential = "password" }, `the credential must be secret or certificate; got another value (8 characters, not shown)`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

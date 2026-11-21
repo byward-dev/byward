@@ -311,3 +311,38 @@ func allSettings(t *testing.T, env []string) []config.Setting {
 	}
 	return out
 }
+
+// byward init shows no argument or flag value it was given, in any of the 14 secret forms, wherever it
+// is given: as the IdP's name, as each flag's value, as BYWARD_PUBLIC_URL, as an undefined flag, in a
+// bad flag syntax, or as an extra argument (#576). A refusal names a refused value only by its
+// length, as config does (#512). A value init accepts is printed in the script it writes on stdout,
+// which is the script's purpose, so only a refusal's stdout is checked, and stderr always is.
+func TestInitShowsNoArgumentOrFlagValueItWasGiven(t *testing.T) {
+	base := []string{"--tenant", tenant, "--public-url", "https://m.example/mcp"}
+	for _, form := range secretForms {
+		v := form.value
+		for _, cell := range []struct {
+			place string
+			args  []string
+			env   []string
+		}{
+			{"the IdP's name", append([]string{"init", v}, base...), nil},
+			{"--tenant", append(append([]string{"init", "entra"}, base...), "--tenant="+v), nil},
+			{"--public-url", append(append([]string{"init", "entra"}, base...), "--public-url="+v), nil},
+			{"BYWARD_PUBLIC_URL", []string{"init", "entra", "--tenant", tenant}, []string{"BYWARD_PUBLIC_URL=" + v}},
+			{"--upstream-url", append(append([]string{"init", "entra"}, base...), "--upstream-url="+v), nil},
+			{"--secret-years", append(append([]string{"init", "entra"}, base...), "--secret-years="+v), nil},
+			{"--credential", append(append([]string{"init", "entra"}, base...), "--credential="+v), nil},
+			{"an undefined flag", append(append([]string{"init", "entra"}, base...), "--"+v), nil},
+			{"a bad flag syntax", append(append([]string{"init", "entra"}, base...), "---"+v), nil},
+			{"an extra argument", append(append([]string{"init", "entra"}, base...), v), nil},
+		} {
+			t.Run(cell.place+", "+form.name, func(t *testing.T) {
+				code, stdout, stderr := runWith(cell.args, cell.env...)
+				if strings.Contains(stderr, canary) || code != exitOK && strings.Contains(stdout, canary) {
+					t.Errorf("exit %d; stdout %q, stderr %q show the value given", code, stdout, stderr)
+				}
+			})
+		}
+	}
+}

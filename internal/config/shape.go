@@ -51,12 +51,7 @@ var (
 )
 
 // notShown is what a refusal of a value for its form shows of it: its length only (ADR-0031 §1).
-func notShown(raw string) string {
-	if n := utf8.RuneCountInString(raw); n != 1 {
-		return fmt.Sprintf("(%d characters, not shown)", n)
-	}
-	return "(1 character, not shown)"
-}
+func notShown(raw string) string { return logging.NotShown(raw) }
 
 // displayAsGiven is raw as given, or quoted (strconv.Quote) when it holds a character that is not
 // printable, such as a newline, which would start a line of its own in --print-config and could
