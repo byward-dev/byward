@@ -21,7 +21,9 @@
 // -init=lognerror sends a notifications/message first, then the error; -init=lognhold sends the
 // notification and never answers. Flag -silentdiscover makes serveMCP never answer server/discover,
 // and -invaliddiscover answer it with -32602;
-// flag -exitondiscover, given before -modern, makes serveModern exit with status 3 on reading it.
+// flag -exitondiscover, given before -modern, makes serveModern exit with status 3 on reading it,
+// and -holddiscover, also before -modern, answer it only on SIGUSR1 (writing "holding discover" to
+// stderr once it has read it).
 //
 // Flag -readn=N writes "waiting" to stderr once it listens for SIGUSR1, reads no stdin until it,
 // then reads exactly N bytes, writes "read N" to stderr, and reads nothing more until a second
@@ -85,6 +87,9 @@ func main() {
 			silentDiscover = true
 		case "-exitondiscover": // before -modern, which starts serving at once
 			exitOnDiscover = true
+		case "-holddiscover": // before -modern, as -exitondiscover
+			holdDiscover = make(chan os.Signal, 1)
+			signal.Notify(holdDiscover, syscall.SIGUSR1)
 		case "-invaliddiscover":
 			invalidDiscover = true
 		}
@@ -263,6 +268,10 @@ var silentDiscover bool
 // invalidDiscover (flag -invaliddiscover) makes serveMCP answer server/discover with JSON-RPC
 // -32602 "Invalid request parameters", as the Python SDK answers any request before initialize.
 var invalidDiscover bool
+
+// holdDiscover (flag -holddiscover, given before -modern) makes serveModern write "holding
+// discover" to stderr once it has read server/discover, then answer it only on SIGUSR1.
+var holdDiscover chan os.Signal
 
 // exitOnDiscover (flag -exitondiscover, given before -modern) makes serveModern exit with status 3
 // when it reads server/discover, without answering it.
@@ -551,6 +560,10 @@ func serveModern() {
 			case "server/discover":
 				if exitOnDiscover {
 					os.Exit(3)
+				}
+				if holdDiscover != nil {
+					fmt.Fprintln(os.Stderr, "holding discover")
+					<-holdDiscover
 				}
 				discovers.Add(1)
 				result(id, map[string]any{"resultType": "complete", "supportedVersions": []string{"2026-07-28"},

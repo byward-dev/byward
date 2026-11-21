@@ -11,10 +11,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -369,13 +371,58 @@ func TestAnEndedRequestWhoseProbeCannotBeWrittenIsAnsweredByHowItEnded(t *testin
 	}
 }
 
+// A request that ends while its process's server/discover probe is out, by its MCP client going
+// away or by the proxy shutting down, decides nothing about the server by ending: the probe still
+// waits for its answer, bounded only by its own timeout, and that answer decides (#578). Had the
+// request's end ended the probe, it would have read as a probe not answered in time, cached the
+// upstream as legacy for every user and stopped the process as not_modern. The fake holds its
+// answer until the test has ended the request.
+func TestARequestThatEndsDuringTheProbeDecidesNothing(t *testing.T) {
+	for _, e := range endings {
+		t.Run(e.name, func(t *testing.T) {
+			b := newBridge(t, func(c *Config) { c.Command = []string{fakeBin, "-holddiscover", "-modern"} })
+			b.bridge.probeTimeout = time.Minute // longer than guard: no stall reads as the probe's timeout
+			ctx, end := e.start()
+			body := modernBody(`1`, "echo", "", "")
+			answered := make(chan *httptest.ResponseRecorder, 1)
+			go func() { answered <- b.serve(ctx, http.MethodPost, "alice", "", body, modernHeaders(body)...) }()
+			b.stderrSaid(t, "holding discover") // the probe is out
+			end()
+			p, release := b.lease(t, userProcessKey(alice), alice)
+			if err := syscall.Kill(p.PID(), syscall.SIGUSR1); err != nil { // the process answers, as a modern server
+				t.Fatalf("releasing the probe's answer: %v", err)
+			}
+			release()
+			select {
+			case w := <-answered:
+				e.answered(t, w)
+			case <-time.After(guard):
+				t.Fatal("alice's request was never answered")
+			}
+			b.noFailureLogged(t)
+			if n := b.stops("not_modern"); n != 0 {
+				t.Fatalf("%d not_modern stops, want none", n)
+			}
+			bobCtx, cancel := context.WithTimeout(context.Background(), guard) // a probe of bob's process would hold
+			defer cancel()
+			if res := b.modernCtx(t, bobCtx, "bob", body); res.StatusCode != http.StatusOK {
+				t.Fatalf("bob, next: status %d, want 200 from the modern verdict alice's probe found", res.StatusCode)
+			}
+		})
+	}
+}
+
 // What the probe has by the time its wait returns decides it, whichever ready case the wait saw
 // first: an answer the process wrote counts even if it then ended or the deadline came, and a
 // process that ended gives no verdict even at the deadline; only then is it a timeout. Each round
-// readies the cases before the wait, so every round is a fresh draw among them.
+// readies the cases before the wait, so every round is a fresh draw among them. An answer that is
+// no DiscoverResult, valid JSON of another shape say, is not modern.
 func TestAProbeAnswerOrProcessEndAlreadyThereDecidesOverTheOtherCases(t *testing.T) {
 	modern := []byte(`{"jsonrpc":"2.0","id":"byw-probe","result":{"supportedVersions":["2026-07-28"]}}`)
 	notModern := []byte(`{"jsonrpc":"2.0","id":"byw-probe","error":{"code":-32601,"message":"Method not found"}}`)
+	notAResult := func(result string) []byte { // valid JSON, not a DiscoverResult
+		return []byte(`{"jsonrpc":"2.0","id":"byw-probe","result":` + result + `}`)
+	}
 	for _, c := range []struct {
 		name       string
 		answer     []byte // waiting, if any
@@ -391,6 +438,9 @@ func TestAProbeAnswerOrProcessEndAlreadyThereDecidesOverTheOtherCases(t *testing
 		{name: "an error answer, the process ended, at the deadline", answer: notModern, ended: true, deadline: true},
 		{name: "the process ended, at the deadline", ended: true, deadline: true, wantErr: true},
 		{name: "the deadline alone", deadline: true},
+		{name: "a result that is no DiscoverResult", answer: notAResult(`"ok"`)},
+		{name: "a DiscoverResult with no versions", answer: notAResult(`{"supportedVersions":[]}`)},
+		{name: "a DiscoverResult with a version that is no string", answer: notAResult(`{"supportedVersions":["2026-07-28",1]}`)},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			for i := range 64 {
