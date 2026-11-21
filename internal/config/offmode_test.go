@@ -91,7 +91,7 @@ func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 		}
 		return baseFiles(p)
 	}
-	n := 0
+	n, flags := 0, 0
 	for _, s := range registry {
 		forHTTP := s.Group == GroupHTTPUpstream || httpOnlySettings[s.Name]
 		if (s.Group == GroupIdentity || s.Group == GroupDownstreamTokens) && !forHTTP && !notOffMode[s.Name] {
@@ -107,6 +107,7 @@ func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 				modeEnv, mode = stdioBase(stdioCommand), "stdio"
 			}
 			if !s.Secret() {
+				flags++
 				flag := "--" + s.Name
 				_, _, err := Load([]string{flag + "="}, modeEnv, files)
 				if want := flag + " is set, but the upstream is " + mode; !isConfigError(err) || !strings.Contains(err.Error(), want) {
@@ -126,8 +127,8 @@ func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 			}
 		})
 	}
-	if n < 13 {
-		t.Fatalf("%d upstream-mode settings checked, want every one (13 today)", n)
+	if n < 13 || flags < 12 {
+		t.Fatalf("%d upstream-mode settings checked, %d as a flag set to nothing; want every one (13 today, 12 but the secret upstream-env)", n, flags)
 	}
 }
 

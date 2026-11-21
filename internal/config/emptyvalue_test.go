@@ -126,8 +126,10 @@ func TestASecretSetToNothingBesideItsFileLoadsAsTheFileAlone(t *testing.T) {
 
 // A flag set to nothing on the command line is deliberate, so it is refused as given, unlike a
 // variable set to nothing (#428). An empty claims flag never quietly means none: that would change
-// what the upstream is told. (A flag set to nothing for a family that is off is refused by that
-// family's check: TestEveryOffCheckRefusesAFlagSetToNothingAndTakesAVariableSetToNothingAsUnset.)
+// what the upstream is told. An empty credential header flag is given too, so with no credential it
+// is refused as a header with nothing to send. (A flag set to nothing for a family that is off is
+// refused by that family's check:
+// TestEveryOffCheckRefusesAFlagSetToNothingAndTakesAVariableSetToNothingAsUnset.)
 func TestAFlagSetToNothingIsRefusedAsGiven(t *testing.T) {
 	for _, tc := range []struct{ flag, want string }{
 		{"--listen=", "BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got nothing"},
