@@ -83,11 +83,14 @@ func (c *Config) requiredForIdP(v *Values, names ...string) []error {
 
 // entraIdP reads the Entra settings (ADR-0012).
 func (c *Config) entraIdP(v *Values) []error {
-	c.EntraClientID, c.EntraClientSecret = parseText(v.value("entra-client-id")), parseText(v.value("entra-client-secret"))
+	c.EntraClientSecret = parseText(v.value("entra-client-secret"))
 	c.EntraFederatedTokenFile, c.EntraClientCertificate = parseText(v.value("entra-federated-token-file")), parseText(v.value("entra-client-certificate"))
 	var errs []error
 	var err error
 	if c.EntraTenant, err = parseTenant(v.value("entra-tenant")); err != nil {
+		errs = append(errs, err)
+	}
+	if c.EntraClientID, err = parseEntraClientID(v.value("entra-client-id")); err != nil {
 		errs = append(errs, err)
 	}
 	errs = append(errs, c.requiredForIdP(v, "entra-tenant", "entra-client-id")...)
@@ -134,6 +137,17 @@ func parseTenant(val Value) (string, error) {
 	raw := val.Given.raw()
 	if raw != "" && !isGUID(raw) {
 		return "", refusedForm(val.Setting, whole, raw, "the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, Overview, Tenant ID)", "it is not a GUID")
+	}
+	return raw, nil
+}
+
+// parseEntraClientID reads BYWARD_ENTRA_CLIENT_ID: empty (refused as missing by requiredForIdP) or
+// the app registration's GUID, which the Entra adapter also requires. A value refused here is never
+// shown: a client secret pasted in its place is the likely mistake.
+func parseEntraClientID(val Value) (string, error) {
+	raw := val.Given.raw()
+	if raw != "" && !isGUID(raw) {
+		return "", refusedForm(val.Setting, whole, raw, "the application (client) ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, App registrations, your app, Overview, Application (client) ID)", "it is not a GUID")
 	}
 	return raw, nil
 }
@@ -276,23 +290,24 @@ func isGUID(s string) bool {
 // and one with a user name or password, a query or a fragment, which an issuer never has (OpenID
 // Connect Discovery 1.0 §3, RFC 8414 §2) and which the adapter accepts on an https issuer: no absolute
 // http(s) URL with a host. A refused issuer is never shown (ADR-0031 §1), where the adapter's error
-// would show its path. Whether http is allowed (only on loopback, with --dev) stays the adapter's.
+// would show its path. An http issuer off loopback, which the adapter always refuses, is refused here
+// as the parser read it, by its scheme alone; whether http on loopback is allowed (only with --dev)
+// stays the adapter's.
 func parseIssuer(val Value) (string, error) {
 	s, raw := val.Setting, val.Given.raw()
 	if raw == "" {
 		return "", nil
 	}
-	const want = "the issuer URL, exactly as the IdP's discovery document states it"
-	u, err := url.Parse(raw)
-	reason := urlReason(u, err)
-	switch {
-	case reason != "":
-		reason = "it " + reason
-	case strings.ContainsAny(raw, "?#"):
+	const want = "the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp"
+	u, reason := parseHTTPURL(raw)
+	if reason == "" && strings.ContainsAny(raw, "?#") {
 		reason = "it has a query or a fragment, which an issuer never has"
 	}
 	if reason != "" {
 		return "", refusedForm(s, whole, raw, want, reason)
+	}
+	if u.Scheme == "http" && !host.LoopbackAsWritten(u.Hostname()) { // the adapter's own rule (oidc.checkURL)
+		return "", refusedMeaning(s, whole, "http on a host that is not loopback", want, "give https; an issuer is http only on a loopback host, with --dev")
 	}
 	return raw, nil
 }

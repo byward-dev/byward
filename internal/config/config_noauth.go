@@ -50,7 +50,7 @@ func ownNetwork(readFile readFileFunc) bool {
 		if placeholders[name] {
 			continue
 		}
-		if rest, isEth := strings.CutPrefix(name, "eth"); isEth && rest != "" && strings.Trim(rest, "0123456789") == "" && virtual(readFile, name) {
+		if rest, isEth := strings.CutPrefix(name, "eth"); isEth && isDigits(rest) && virtual(readFile, name) {
 			continue
 		}
 		return false

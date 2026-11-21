@@ -221,8 +221,9 @@ func TestAnOIDCClientKeyAlgorithmIsRead(t *testing.T) {
 
 // --dev accepts an http IdP issuer on a loopback host, relaxing the oidc adapter (OIDCLoopbackHTTP)
 // only together with a relaxation, so it is logged at startup (security invariant 12, #355); an
-// https issuer, an http issuer elsewhere and no --dev relax and record nothing. (An issuer of another
-// scheme, or one that does not parse, is refused at load: TestARefusedURLIsNeverShownButSaysWhy.)
+// https issuer, and http on loopback without --dev, relax and record nothing. (An http issuer
+// elsewhere is refused at load: TestAnHTTPIssuerOffLoopbackIsRefusedAtLoad; so is one of another
+// scheme, or one that does not parse: TestARefusedURLIsNeverShownButSaysWhy.)
 func TestDevRecordsAnHTTPIdPIssuerOnLoopbackAsARelaxation(t *testing.T) {
 	for _, tc := range []struct {
 		name, issuer string
@@ -234,14 +235,8 @@ func TestDevRecordsAnHTTPIdPIssuerOnLoopbackAsARelaxation(t *testing.T) {
 		{"[::1] over http", "http://[::1]:8180/realms/byward", true, true},
 		{"127.0.0.2 over http", "http://127.0.0.2:8180/realms/byward", true, true},        // any loopback address, as the adapter has it
 		{"LOCALHOST over http (#482)", "http://LOCALHOST:8180/realms/byward", true, true}, // a host name in any case
-		{"127.1 over http, not in dotted decimal", "http://127.1:8180/realms/byward", true, false},
-		{"full-width localhost over http", "http://ｌｏｃａｌｈｏｓｔ:8180/realms/byward", true, false}, // localhost only in ASCII, as Parse writes it
 		{"https", "https://sso.example.com/realms/acme", true, false},
 		{"https on localhost", "https://localhost:8443/realms/byward", true, false},
-		{"http on a private address", "http://10.0.0.5:8180/realms/byward", true, false},
-		{"http on a host ending in localhost", "http://evil-localhost:8180/realms/byward", true, false},
-		{"http on a subdomain named localhost", "http://localhost.idp.example/realms/byward", true, false},
-		{"http on another host", "http://sso.example.com/realms/acme", true, false},
 		{"http on localhost without --dev", "http://localhost:8180/realms/byward", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -258,6 +253,32 @@ func TestDevRecordsAnHTTPIdPIssuerOnLoopbackAsARelaxation(t *testing.T) {
 				t.Fatalf("relaxations %q, adapter relaxed %v; want listed and relaxed = %v (%q)", c.Relaxations, c.OIDCLoopbackHTTP, tc.want, want)
 			}
 		})
+	}
+}
+
+// An http issuer on a host that is not loopback is refused at load, with --dev or without, as the oidc
+// adapter would refuse it at startup: by its scheme alone, the URL not shown.
+func TestAnHTTPIssuerOffLoopbackIsRefusedAtLoad(t *testing.T) {
+	const refusal = "BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got http on a host that is not loopback: give https; an issuer is http only on a loopback host, with --dev"
+	for _, tc := range []struct{ name, issuer string }{
+		{"a private address", "http://10.0.0.5:8180/realms/byward"},
+		{"a host ending in localhost", "http://evil-localhost:8180/realms/byward"},
+		{"a subdomain named localhost", "http://localhost.idp.example/realms/byward"},
+		{"another host", "http://sso.example.com/realms/acme"},
+		{"localhost with a trailing dot", "http://localhost.:8180/realms/byward"}, // loopback only as written (#579)
+		{"127.1, not in dotted decimal", "http://127.1:8180/realms/byward"},
+		{"full-width localhost", "http://ｌｏｃａｌｈｏｓｔ:8180/realms/byward"}, // localhost only in ASCII, as Parse writes it
+	} {
+		for _, dev := range []string{"BYWARD_DEV=true", "BYWARD_DEV=false"} {
+			t.Run(tc.name+", "+dev, func(t *testing.T) {
+				_, err := loadOIDC(t, func(env []string) []string {
+					return with("BYWARD_OIDC_ISSUER="+tc.issuer, dev)(without("BYWARD_OIDC_ISSUER")(env))
+				})
+				if !isConfigError(err) || err.Error() != refusal {
+					t.Fatalf("err = %v\nwant %s", err, refusal)
+				}
+			})
+		}
 	}
 }
 

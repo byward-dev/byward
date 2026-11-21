@@ -99,12 +99,12 @@ func TestInitRefusesAURLWithAPasswordWithoutShowingIt(t *testing.T) {
 			inStderr: []string{"BYWARD_UPSTREAM_URL: ", "(36 characters, not shown): it holds a user name or password (give --upstream-url)"}},
 		"upstream URL from the environment": {args: []string{"--public-url", "https://m.example/mcp"}, env: []string{"BYWARD_UPSTREAM_URL=https://user:" + password + "@up.example/mcp"},
 			inStderr: []string{"BYWARD_UPSTREAM_URL: ", "(36 characters, not shown): it holds a user name or password (give --upstream-url)"}},
-		"upstream URL that Go cannot parse": {args: []string{"--public-url", "https://m.example/mcp", "--upstream-url", "ftp://user:" + password + "@up stream/x"},
-			inStderr: []string{"BYWARD_UPSTREAM_URL: ", "(31 characters, not shown): it does not parse as a URL (give --upstream-url)"}},
+		"upstream URL with a broken % escape": {args: []string{"--public-url", "https://m.example/mcp", "--upstream-url", "ftp://user:" + password + "@up%zzstream/x"},
+			inStderr: []string{"BYWARD_UPSTREAM_URL: ", "(33 characters, not shown): it has a \"%\" not followed by two hexadecimal digits (give --upstream-url)"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			code, stdout, stderr := runWith(append([]string{"init", "entra", "--tenant", tenant}, tc.args...), tc.env...)
-			if code != exitConfig || stdout != "" || strings.Contains(stderr, password) || strings.Contains(stderr, "m.example") || strings.Contains(stderr, "up stream") {
+			if code != exitConfig || stdout != "" || strings.Contains(stderr, password) || strings.Contains(stderr, "m.example") || strings.Contains(stderr, "up.example") || strings.Contains(stderr, "zzstream") {
 				t.Fatalf("code %d stdout %q stderr %q, want exit 2, no script, and neither the password nor the URL", code, stdout, stderr)
 			}
 			for _, want := range tc.inStderr {
@@ -136,7 +136,7 @@ func TestASettingWithACredentialStopsEveryCommandWithoutShowingIt(t *testing.T) 
 		{"BYWARD_CLIENT_DENYLIST=https://user:" + secret + "@a7p.example/c.json", "a7p.example", "entry 1 of 1 (40 characters, not shown): it is a CIMD client ID with a user name or password", entraEnv},
 		{"BYWARD_RESOURCE_DOCUMENTATION=https://user:" + secret + "@d7cs.example/", "d7cs.example", "(35 characters, not shown): it holds a user name or password", entraEnv},
 		{"BYWARD_OIDC_ISSUER=https://user:" + secret + "@i7p.example", "i7p.example", "(33 characters, not shown): it holds a user name or password", oidcEnv},
-		{"BYWARD_OIDC_ISSUER=https://user:" + secret + "@i7 p.example", "i7 p.example", "(34 characters, not shown): it does not parse as a URL", oidcEnv},
+		{"BYWARD_OIDC_ISSUER=https://user:" + secret + "@i7 p.example", "i7 p.example", "(34 characters, not shown): it has white space, which a URL cannot hold; write a space in a path as %20", oidcEnv},
 	} {
 		name, _, _ := strings.Cut(tc.setting, "=")
 		for _, command := range [][]string{nil, {"check", "--offline"}, {"doctor"}} {

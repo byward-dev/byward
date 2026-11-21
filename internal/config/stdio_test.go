@@ -79,8 +79,8 @@ func TestLoadEnvironmentNeverSuggestsACommandAfterDashesWhereLoadDoes(t *testing
 	}{
 		{"no upstream", "", "BYWARD_UPSTREAM_URL is required (or BYWARD_UPSTREAM_COMMAND)",
 			"BYWARD_UPSTREAM_URL is required (or BYWARD_UPSTREAM_COMMAND, or a command after --)"},
-		{"a malformed upstream URL", "BYWARD_UPSTREAM_URL=ftp://u/mcp", `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (11 characters, not shown): it has a scheme other than http or https (or BYWARD_UPSTREAM_COMMAND)`,
-			`BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (11 characters, not shown): it has a scheme other than http or https (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
+		{"a malformed upstream URL", "BYWARD_UPSTREAM_URL=ftp://u/mcp", `BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (11 characters, not shown): it has a scheme other than http or https (or BYWARD_UPSTREAM_COMMAND)`,
+			`BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (11 characters, not shown): it has a scheme other than http or https (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := stdioBase()

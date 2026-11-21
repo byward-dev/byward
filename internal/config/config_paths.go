@@ -12,11 +12,14 @@ func absolute(setting, path string) error {
 		return nil
 	}
 	if path == "" {
-		return refusedForm(lookup(setting), whole, "", "an absolute path", "")
+		return refusedForm(lookup(setting), whole, "", wantAbsolutePath, "")
 	}
 	// The path is not shown: a secret pasted where its file's path belongs would be (#461).
-	return refusedMeaning(lookup(setting), whole, "a relative one", "an absolute path", "no path is relative to the working directory (ADR-0007 §6)")
+	return refusedMeaning(lookup(setting), whole, "a relative one", wantAbsolutePath, "no path is relative to the working directory (ADR-0007 §6)")
 }
+
+// wantAbsolutePath is what a path setting takes.
+const wantAbsolutePath = "an absolute path, one starting with /"
 
 // within reports whether path is dir or inside it.
 func within(dir, path string) bool {

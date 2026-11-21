@@ -44,7 +44,7 @@ func TestTheUpstreamStripListRefusesWhatCannotBeStripped(t *testing.T) {
 		{"a tool parameter, by its family", "X-Ok, mcp-param-region", "entry 2 of 2, a header starting Mcp-Param-" + needed},
 		{"a pattern", "X-Atlassian-*", "entry 1 of 1 (13 characters, not shown): it has a *: list each header of a family by name"},
 		{"a pattern inside a name", "X-Atlassian-*-Url", "entry 1 of 1 (17 characters, not shown): it has a *: list each header of a family by name"},
-		{"a name with a colon", "X-Api-Key:", "entry 1 of 1 (10 characters, not shown): it is not a header name"},
+		{"a name with a colon", "X-Api-Key:", `entry 1 of 1 (10 characters, not shown): it holds a ":", as a header line does: give only the header's name, the part before the ":"`},
 		{"a name with another separator", "X(Url)", "entry 1 of 1 (6 characters, not shown): it is not a header name"},
 		{"a name that is not ASCII", "X-Idé", "entry 1 of 1 (5 characters, not shown): it is not a header name"},
 		{"the trace context", "traceparent", "entry 1 of 1, Traceparent" + traced},

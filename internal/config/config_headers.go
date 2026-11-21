@@ -57,7 +57,10 @@ func parseHeaderName(val Value) (string, error) {
 	raw := val.Given.raw()
 	want := headerNameWant(val.Setting.Name)
 	h := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(raw))
-	if !httpguts.ValidHeaderFieldName(h) {
+	switch {
+	case strings.Contains(raw, ":"):
+		return "", refusedForm(val.Setting, whole, raw, want, headerLineReason)
+	case !httpguts.ValidHeaderFieldName(h):
 		return "", refusedForm(val.Setting, whole, raw, want, "it is not a header name")
 	}
 	if shown := relied(CanonicalHeader(h)); shown != "" { // as the upstream may read it: X_Forwarded_For is X-Forwarded-For
@@ -65,6 +68,10 @@ func parseHeaderName(val Value) (string, error) {
 	}
 	return h, nil
 }
+
+// headerLineReason is why a header name holding a ":" is refused: it is a header line, Name: value,
+// pasted whole, and what follows the name is often a credential (#466).
+const headerLineReason = `it holds a ":", as a header line does: give only the header's name, the part before the ":"`
 
 // relied is how a refusal names n, a canonical header the proxy, the transport or MCP relies on: by
 // name when it is one of reservedHeaders, by its family otherwise, since what follows a prefix is the

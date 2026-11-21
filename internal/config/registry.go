@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -254,7 +255,7 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 		v := Value{Setting: s, Given: NewOpaque(s.Default), Source: SourceDefault}
 		switch {
 		case s.Secret() && set[s.Name+"-file"]:
-			raw, err := readSecret(readFile, *fileFlagVals[s.Name], "--"+s.Name+"-file")
+			raw, err := readSecret(readFile, s, *fileFlagVals[s.Name], "--"+s.Name+"-file")
 			if err != nil {
 				return nil, err
 			}
@@ -262,7 +263,7 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 		case !s.Secret() && set[s.Name]:
 			v.Given, v.Source = NewOpaque(*flagVals[s.Name]), SourceFlag
 		case s.Secret() && env[s.Env()+"_FILE"] != "":
-			raw, err := readSecret(readFile, env[s.Env()+"_FILE"], s.Env()+"_FILE")
+			raw, err := readSecret(readFile, s, env[s.Env()+"_FILE"], s.Env()+"_FILE")
 			if err != nil {
 				return nil, err
 			}
@@ -376,14 +377,21 @@ func (b *boolValue) String() string     { return string(*b) }
 func (b *boolValue) Set(s string) error { *b = boolValue(s); return nil }
 func (b *boolValue) IsBoolFlag() bool   { return true }
 
-func readSecret(readFile readFileFunc, path, from string) (string, error) {
+// readSecret reads the secret setting s from the file at path, given as from: its _FILE
+// variable or its -file flag.
+func readSecret(readFile readFileFunc, s Setting, path, from string) (string, error) {
 	if readFile == nil {
 		return "", errorf("%s: secret files are not available", from)
 	}
 	b, err := readFile(path)
 	if err != nil {
-		// The path is not shown: a secret pasted where its file's path belongs would be (#461).
-		return "", errorf("%s: cannot read secret file: %v", from, logging.FileError(err))
+		// The path is not shown: a secret pasted where its file's path belongs would be (#461). A
+		// relative one is read from the working directory, which a secret pasted there always is.
+		reason := fmt.Sprintf("it cannot be read: %v", logging.FileError(err))
+		if !filepath.IsAbs(path) {
+			reason += "; it is a relative path, read from the working directory"
+		}
+		return "", refusedFormAs(from, s, whole, path, "the path of a file holding the secret, such as /run/secrets/"+s.Name, reason)
 	}
 	return strings.TrimRight(string(b), "\r\n"), nil
 }

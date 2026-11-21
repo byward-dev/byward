@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/byward-dev/byward/internal/host"
 	"github.com/byward-dev/byward/internal/ratelimit"
@@ -37,11 +38,11 @@ func checkInlineSecrets(v *Values, dev bool) (relaxation string, err error) {
 // nor its host: a token is a valid host name. It shows an IP address only as browsers would write it.
 func ParsePublicURL(raw string) (*url.URL, error) {
 	s := lookup("public-url")
-	u, err := parseURLOf(s, raw)
+	u, err := parseURL("public-url", exampleMCPURL, raw)
 	if err != nil {
 		return nil, err
 	}
-	const want = "the MCP endpoint's URL such as https://mcp.example.com/mcp"
+	const want = "the MCP endpoint's URL such as " + exampleMCPURL
 	if u.Hostname() == "" {
 		return nil, refusedForm(s, whole, raw, want, "it has no host before its port")
 	}
@@ -52,7 +53,7 @@ func ParsePublicURL(raw string) (*url.URL, error) {
 	}
 	// The host as browsers write it: the public URL is also the issuer, the resource and the IdP
 	// redirect URI, which browser clients compare with the URL they hold, in the form they write.
-	const wantBrowserHost = "the MCP endpoint's URL with its host as browsers write it"
+	const wantBrowserHost = "the MCP endpoint's URL with its host as browsers write it, such as " + exampleMCPURL
 	var errs []string
 	h := u.Hostname()
 	if reason := browserIPv4(h); reason != "" {
@@ -69,15 +70,15 @@ func ParsePublicURL(raw string) (*url.URL, error) {
 		errs = append(errs, refusedForm(s, whole, raw, wantBrowserHost, "its host name has upper-case letters; write it in lower case, as browsers do").Error())
 	}
 	if u.Path == "" || strings.HasSuffix(u.Path, "/") {
-		errs = append(errs, refusedMeaning(s, whole, "a path that is empty or ends in /", "the MCP endpoint's path without a trailing slash, e.g. https://mcp.example.com/mcp",
+		errs = append(errs, refusedMeaning(s, whole, "a path that is empty or ends in /", "the MCP endpoint's path without a trailing slash, such as "+exampleMCPURL,
 			"give the endpoint's path, without the trailing slash").Error())
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
-		errs = append(errs, refusedMeaning(s, whole, "a query or fragment, not shown", "a URL without a query or fragment", "remove it").Error())
+		errs = append(errs, refusedMeaning(s, whole, "a query or fragment, not shown", "a URL without a query or fragment, such as "+exampleMCPURL, "remove it").Error())
 	}
 	// LOCALHOST is loopback too; the host name rule above already refuses its spelling.
 	if u.Scheme == "http" && !host.LoopbackAsWritten(h) {
-		errs = append(errs, refusedMeaning(s, whole, "http", "https (http only on a loopback host, with --dev)", "give https, or a loopback host").Error())
+		errs = append(errs, refusedMeaning(s, whole, "http", "https (http only on a loopback host, with --dev), such as "+exampleMCPURL, "give https, or a loopback host").Error())
 	}
 	if len(errs) > 0 {
 		return nil, &configError{msg: strings.Join(errs, "; ")}
@@ -98,7 +99,7 @@ func parseResourceDocumentation(val Value) (string, error) {
 	if val.Given.empty() {
 		return "", nil
 	}
-	if _, err := parseURL("resource-documentation", val.Given.raw()); err != nil {
+	if _, err := parseURL("resource-documentation", "https://docs.example.com/mcp", val.Given.raw()); err != nil {
 		return "", err
 	}
 	return val.Given.raw(), nil
@@ -106,7 +107,9 @@ func parseResourceDocumentation(val Value) (string, error) {
 
 // ParseUpstreamURL validates the HTTP upstream's URL as the proxy reads BYWARD_UPSTREAM_URL, as
 // `byward init entra` also needs it.
-func ParseUpstreamURL(raw string) (*url.URL, error) { return parseURL("upstream-url", raw) }
+func ParseUpstreamURL(raw string) (*url.URL, error) {
+	return parseURL("upstream-url", "http://127.0.0.1:9000/mcp", raw)
+}
 
 // parseUpstreamURL reads BYWARD_UPSTREAM_URL (ParseUpstreamURL).
 func parseUpstreamURL(val Value) (*url.URL, error) { return ParseUpstreamURL(val.Given.raw()) }
@@ -115,32 +118,56 @@ func parseUpstreamURL(val Value) (*url.URL, error) { return ParseUpstreamURL(val
 // (TestEverySettingReadAsAURLHasAURLShape). Its refusal goes through the registry entry's shape: name
 // is a literal at each call (that test follows it), and the exported parsers byward init uses have no
 // Values to take a Value from. A URL refused for its form is never shown (ADR-0031 §1), nor is
-// url.Parse's error, which holds the whole value: the refusal gives a fixed reason.
-func parseURL(name, raw string) (*url.URL, error) { return parseURLOf(lookup(name), raw) }
-
-// parseURLOf is parseURL for the setting s.
-func parseURLOf(s Setting, raw string) (*url.URL, error) {
+// url.Parse's error, which holds the whole value: the refusal gives a fixed reason and example, a URL
+// of the kind of page the setting names.
+func parseURL(name, example, raw string) (*url.URL, error) {
+	s := lookup(name)
 	if raw == "" {
 		return nil, errorf("%s is required", s.Env())
 	}
-	u, err := url.Parse(raw)
-	if reason := urlReason(u, err); reason != "" {
-		return nil, refusedForm(s, whole, raw, "an absolute http(s) URL", "it "+reason)
+	u, reason := parseHTTPURL(raw)
+	if reason != "" {
+		return nil, refusedForm(s, whole, raw, "an absolute http(s) URL such as "+example, reason)
 	}
 	return u, nil
 }
 
-// isPort reports whether s is a port number as written after a host: digits only, at least one.
-func isPort(s string) bool { return s != "" && strings.Trim(s, "0123456789") == "" }
+// exampleMCPURL is the example of an MCP endpoint's URL that refusals give.
+const exampleMCPURL = "https://mcp.example.com/mcp"
 
-// urlReason says why url.Parse's result u (or its error err) is not an absolute http(s) URL with a
-// host and no user name or password, or "" when it is: fixed text completing "it …", never
-// url.Parse's error.
-func urlReason(u *url.URL, err error) string {
+// isEscape reports whether s is a well-formed %-escape: "%" and two hexadecimal digits.
+func isEscape(s string) bool {
+	_, err := url.PathUnescape(s) // a path segment's unescaping refuses only a malformed escape
+	return len(s) == 3 && s[0] == '%' && err == nil
+}
+
+// isDigits reports whether s is ASCII digits only, at least one: a port or a prefix length as written.
+func isDigits(s string) bool { return s != "" && strings.Trim(s, "0123456789") == "" }
+
+// parseHTTPURL parses raw as an absolute http(s) URL with a host and no user name or password, or says
+// why it is not one: fixed text completing "it …", never url.Parse's error, which quotes the value.
+// White space, control and invisible formatting characters are refused first: url.Parse accepts a
+// space or a non-ASCII control character in a path (#422), which no URL holds (RFC 3986 §2).
+func parseHTTPURL(raw string) (*url.URL, string) {
+	u, err := url.Parse(raw)
+	if reason := urlReason(raw, u, err); reason != "" {
+		return nil, "it " + reason
+	}
+	return u, ""
+}
+
+// urlReason is parseHTTPURL's reason, without its "it", for raw and url.Parse's result.
+func urlReason(raw string, u *url.URL, err error) string {
 	switch {
+	case strings.ContainsFunc(raw, unicode.IsSpace):
+		return "has white space, which a URL cannot hold; write a space in a path as %20"
+	case strings.ContainsFunc(raw, unicode.IsControl):
+		return "has a control character, which a URL cannot hold"
+	case strings.ContainsFunc(raw, func(r rune) bool { return unicode.Is(unicode.Cf, r) }):
+		return "has an invisible formatting character, such as a zero-width space, which a URL cannot hold"
 	case err != nil:
-		return "does not parse as a URL"
-	case u.Scheme == "", u.Scheme != "https" && u.Scheme != "http" && isPort(strings.SplitN(u.Opaque, "/", 2)[0]):
+		return urlParseReason(err)
+	case u.Scheme == "", u.Scheme != "https" && u.Scheme != "http" && isDigits(strings.SplitN(u.Opaque, "/", 2)[0]):
 		// url.Parse reads host:port written without a scheme (localhost:9000/mcp) as a scheme and an opaque part.
 		return "has no scheme such as https://"
 	case u.Scheme != "https" && u.Scheme != "http":
@@ -155,6 +182,40 @@ func urlReason(u *url.URL, err error) string {
 	return ""
 }
 
+// urlParseReason says why url.Parse refused a value, by its error, as a clause completing "it …".
+// The errors of net/url are read by type, or by their fixed text before any quoted part; one not
+// named here gets a general reason. An EscapeError holds the escape url.Parse refused, which is read
+// (never shown) to tell a malformed one from a host's %-escape of an ASCII character, which url.Parse
+// refuses too; a malformed escape elsewhere, such as in a query, which url.Parse does not check, plays
+// no part.
+func urlParseReason(err error) string {
+	var escape url.EscapeError
+	var host url.InvalidHostError
+	switch inner := errors.Unwrap(err); {
+	case errors.As(err, &escape) && !isEscape(string(escape)):
+		return `has a "%" not followed by two hexadecimal digits`
+	case errors.As(err, &escape): // url.Parse refuses a host's %-escape of an ASCII character too
+		return "has a %-escape in its host, which a host name cannot hold"
+	case errors.As(err, &host):
+		return "has a character a host cannot hold"
+	case inner == nil:
+	case inner.Error() == "missing protocol scheme", inner.Error() == "first path segment in URL cannot contain colon":
+		// The second is url.Parse's error for 127.0.0.1:9000/mcp: a "scheme" cannot start with a digit.
+		return "has no scheme such as https://"
+	case strings.HasPrefix(inner.Error(), `invalid port ":`):
+		return "has a port that is not a number"
+	case strings.HasPrefix(inner.Error(), "invalid port "): // after [IPv6], anything but :port
+		return `has text after the "]" of its IPv6 address that is not a ":" and a port`
+	case inner.Error() == "missing ']' in host":
+		return `has a "[" in its host without its "]"`
+	case inner.Error() == "invalid IP-literal", strings.HasPrefix(inner.Error(), "invalid host: "):
+		return "has a host in brackets that is not an IPv6 address"
+	case inner.Error() == "net/url: invalid userinfo":
+		return "holds a user name or password"
+	}
+	return "does not parse as a URL"
+}
+
 // Bounds of a configured OAuth rate limit (ADR-0018 Consequences: configurable within bounds). There
 // is no off switch.
 const (
@@ -164,7 +225,8 @@ const (
 
 func parseRateLimits(val Value) (map[string]int, []error) {
 	s := val.Setting
-	want := fmt.Sprintf("endpoint=per-minute entries, the endpoint %s and the limit a whole number from %d to %d", oneOf(ratelimit.Endpoints), minRateLimit, maxRateLimit)
+	want := fmt.Sprintf("endpoint=per-minute entries such as %s=%d, the endpoint %s and the limit a whole number from %d to %d",
+		ratelimit.Token, ratelimit.Defaults()[ratelimit.Token], oneOf(ratelimit.Endpoints), minRateLimit, maxRateLimit)
 	out := ratelimit.Defaults()
 	var errs []error
 	list, at, err := parseEntries(val)
@@ -211,7 +273,7 @@ func parseProxies(val Value) ([]netip.Prefix, error) {
 		case err != nil:
 			a, aerr := netip.ParseAddr(item)
 			if aerr != nil {
-				return nil, refusedForm(s, at(i), item, want, "it is neither a CIDR nor an IP address")
+				return nil, refusedForm(s, at(i), item, want, cidrReason(item))
 			}
 			// A zone runs to the end of the entry: "fe80::1%eth0/64" is fe80::1 in zone "eth0/64".
 			zoned, a = a.Zone() != "", a.WithZone("").Unmap()
@@ -231,6 +293,26 @@ func parseProxies(val Value) ([]netip.Prefix, error) {
 		out = append(out, p)
 	}
 	return out, nil
+}
+
+// cidrReason says why item, neither a CIDR nor an IP address, is not one, as a clause that never
+// quotes it: by the part that fails, the address or the prefix length after its "/".
+func cidrReason(item string) string {
+	addr, bits, ok := strings.Cut(item, "/")
+	a, err := netip.ParseAddr(addr)
+	switch {
+	case !ok:
+		return "it is neither a CIDR nor an IP address"
+	case err != nil:
+		return `its address, before the "/", is not an IP address`
+	case !isDigits(bits):
+		return `its prefix length, after the "/", is not a whole number`
+	case len(bits) > 1 && bits[0] == '0':
+		return "its prefix length has a leading zero"
+	case a.Is4(): // what ParsePrefix leaves to refuse: a length longer than the address
+		return "its prefix length is longer than /32, the length of an IPv4 address"
+	}
+	return "its prefix length is longer than /128, the length of an IPv6 address"
 }
 
 // linkLocal is IPv6's link-local unicast prefix. A peer in it carries a zone, and a zoned address is
@@ -264,9 +346,9 @@ func parseOrigins(val Value) ([]string, []error) {
 // parseOrigin is o parsed as an origin a browser sends, or why it is not one, as a clause ("it has
 // a path").
 func parseOrigin(o string) (*url.URL, string) {
-	u, err := url.Parse(o)
-	if reason := urlReason(u, err); reason != "" {
-		return nil, "it " + reason
+	u, reason := parseHTTPURL(o)
+	if reason != "" {
+		return nil, reason
 	}
 	switch {
 	case strings.ContainsAny(o, "?#"):
@@ -381,7 +463,7 @@ func parseListen(val Value, want string) (string, error) {
 		reason = "is not host:port"
 	case host != "" && !validHostName(strings.TrimSuffix(host, ".")) && ipErr != nil:
 		reason = "has a host that is neither an IP address nor a host name"
-	case port == "" || strings.Trim(port, "0123456789") != "":
+	case !isDigits(port):
 		reason = "has a port that is not a number"
 	default:
 		if n, err := strconv.Atoi(port); err != nil || n > 65535 { // too many digits for an int is above too

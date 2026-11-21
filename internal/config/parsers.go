@@ -53,11 +53,27 @@ func parseDuration(val Value, want string, fits func(time.Duration) bool) (time.
 	d, err := time.ParseDuration(raw)
 	switch {
 	case err != nil:
-		return 0, refusedForm(val.Setting, whole, raw, want, "it is not a duration")
+		return 0, refusedForm(val.Setting, whole, raw, want, durationReason(err))
 	case !fits(d):
 		return 0, refusedMeaning(val.Setting, whole, d.String(), want, "it is out of range")
 	}
 	return d, nil
+}
+
+// durationUnits are the units a duration takes, as a refusal lists them.
+const durationUnits = "ns, us, ms, s, m or h"
+
+// durationReason says why time.ParseDuration refused a value, from its error, as a clause that never
+// quotes the value. The error's type is unexported, so its message is read: only its fixed start,
+// before the quoted value.
+func durationReason(err error) string {
+	switch msg := err.Error(); {
+	case strings.HasPrefix(msg, "time: missing unit"):
+		return "it has a number without a unit; give one of " + durationUnits
+	case strings.HasPrefix(msg, "time: unknown unit"):
+		return "it has a unit that is not one of " + durationUnits
+	}
+	return "it is not a duration"
 }
 
 // parseWholeNumber reads a whole number from lo to hi. One out of range is shown as the parser read it.

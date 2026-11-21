@@ -131,6 +131,9 @@ func TestNoAuthWithHostNetworkingIsRefused(t *testing.T) {
 		"docker --network host":             hostNetdev,
 		"interfaces cannot be read":         "",
 		"an unknown interface (e.g. wlan0)": netdevHeader + "    lo: 0\n  eth0: 0\n wlan0: 0\n",
+		"a VLAN sub-interface, eth0.100":    netdevHeader + "    lo: 0\n  eth0: 0\neth0.100: 0\n",
+		"eth with no number":                netdevHeader + "    lo: 0\n  eth0: 0\n   eth: 0\n",
+		"ethernet0":                         netdevHeader + "    lo: 0\n  eth0: 0\nethernet0: 0\n",
 	}
 	for name, netdev := range cases {
 		t.Run(name, func(t *testing.T) {

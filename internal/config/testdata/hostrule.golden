@@ -1,6 +1,6 @@
 mcp.example.com
   public https: mcp.example.com
-  public http: refused: BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev); got http: give https, or a loopback host
+  public http: refused: BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   allowed host: mcp.example.com, hostname mcp.example.com, loopback false
   origin: https://mcp.example.com
   cimd list: ""
@@ -8,8 +8,8 @@ mcp.example.com
   host header: mcp.example.com
   loopback as written: false
 MCP.Example.com
-  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it; got a value (27 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do
-  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it; got a value (26 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev); got http: give https, or a loopback host
+  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (27 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do
+  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (26 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   allowed host: mcp.example.com, hostname mcp.example.com, loopback false
   origin: https://mcp.example.com
   cimd list: ""
@@ -35,8 +35,8 @@ localhost
   host header: localhost
   loopback as written: true
 LOCALHOST
-  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it; got a value (21 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do
-  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it; got a value (20 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do
+  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (21 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do
+  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (20 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do
   allowed host: localhost, hostname localhost, loopback true
   origin: https://localhost
   cimd list: "has no dot; give a name with at least one dot"
@@ -44,8 +44,8 @@ LOCALHOST
   host header: localhost
   loopback as written: true
 Localhost
-  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it; got a value (21 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do
-  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it; got a value (20 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do
+  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (21 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do
+  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (20 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do
   allowed host: localhost, hostname localhost, loopback true
   origin: https://localhost
   cimd list: "has no dot; give a name with at least one dot"
@@ -72,7 +72,7 @@ Localhost
   loopback as written: true
 127.1
   public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (17 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 127.0.0.1
-  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (16 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 127.0.0.1; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev); got http: give https, or a loopback host
+  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (16 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 127.0.0.1; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   allowed host: 127.0.0.1, hostname 127.0.0.1, loopback true
   origin: refused: its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 127.0.0.1
   cimd list: ""
@@ -81,7 +81,7 @@ Localhost
   loopback as written: false
 0x7f.0.0.1
   public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (22 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 127.0.0.1
-  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (21 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 127.0.0.1; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev); got http: give https, or a loopback host
+  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (21 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 127.0.0.1; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   allowed host: 127.0.0.1, hostname 127.0.0.1, loopback true
   origin: refused: its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 127.0.0.1
   cimd list: ""
@@ -90,7 +90,7 @@ Localhost
   loopback as written: false
 010.0.0.1
   public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (21 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 8.0.0.1
-  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (20 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 8.0.0.1; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev); got http: give https, or a loopback host
+  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (20 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 8.0.0.1; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   allowed host: 8.0.0.1, hostname 8.0.0.1, loopback false
   origin: refused: its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 8.0.0.1
   cimd list: ""
@@ -99,7 +99,7 @@ Localhost
   loopback as written: false
 2130706433
   public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (22 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 127.0.0.1
-  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (21 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 127.0.0.1; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev); got http: give https, or a loopback host
+  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (21 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 127.0.0.1; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   allowed host: 127.0.0.1, hostname 127.0.0.1, loopback true
   origin: refused: its host is not an IPv4 address in dotted decimal, the only form browsers send; write it as 127.0.0.1
   cimd list: "has no dot; give a name with at least one dot"
@@ -108,7 +108,7 @@ Localhost
   loopback as written: false
 0.0.0.0
   public https: 0.0.0.0
-  public http: refused: BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev); got http: give https, or a loopback host
+  public http: refused: BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   allowed host: 0.0.0.0, hostname 0.0.0.0, loopback false
   origin: https://0.0.0.0
   cimd list: ""
@@ -117,7 +117,7 @@ Localhost
   loopback as written: false
 mcp.10
   public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (18 characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it
-  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (17 characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev); got http: give https, or a loopback host
+  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (17 characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   allowed host: mcp.10, hostname mcp.10, loopback false
   origin: refused: its host is not an IPv4 address but ends in a number, so browsers refuse it
   cimd list: ""
@@ -126,7 +126,7 @@ mcp.10
   loopback as written: false
 10.0.0.999
   public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (22 characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it
-  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (21 characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev); got http: give https, or a loopback host
+  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (21 characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   allowed host: 10.0.0.999, hostname 10.0.0.999, loopback false
   origin: refused: its host is not an IPv4 address but ends in a number, so browsers refuse it
   cimd list: ""
@@ -143,8 +143,8 @@ mcp.10
   host header: [::1]
   loopback as written: true
 [0:0::1]
-  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it; got a value (20 characters, not shown): its IPv6 address is not in the form browsers write it; write it as [::1]
-  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it; got a value (19 characters, not shown): its IPv6 address is not in the form browsers write it; write it as [::1]
+  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (20 characters, not shown): its IPv6 address is not in the form browsers write it; write it as [::1]
+  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (19 characters, not shown): its IPv6 address is not in the form browsers write it; write it as [::1]
   allowed host: [::1], hostname ::1, loopback true
   origin: https://[::1]
   cimd list: "breaks the host name rule: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)"
@@ -152,8 +152,8 @@ mcp.10
   host header: [::1]
   loopback as written: true
 [2001:DB8::1]
-  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it; got a value (25 characters, not shown): its IPv6 address is not in the form browsers write it; write it as [2001:db8::1]
-  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it; got a value (24 characters, not shown): its IPv6 address is not in the form browsers write it; write it as [2001:db8::1]; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev); got http: give https, or a loopback host
+  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (25 characters, not shown): its IPv6 address is not in the form browsers write it; write it as [2001:db8::1]
+  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (24 characters, not shown): its IPv6 address is not in the form browsers write it; write it as [2001:db8::1]; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   allowed host: [2001:db8::1], hostname 2001:db8::1, loopback false
   origin: https://[2001:db8::1]
   cimd list: "breaks the host name rule: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)"
@@ -161,8 +161,8 @@ mcp.10
   host header: [2001:db8::1]
   loopback as written: false
 [::ffff:127.0.0.1]
-  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it; got a value (30 characters, not shown): its IPv6 address is not in the form browsers write it; write it as [::ffff:7f00:1]
-  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it; got a value (29 characters, not shown): its IPv6 address is not in the form browsers write it; write it as [::ffff:7f00:1]
+  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (30 characters, not shown): its IPv6 address is not in the form browsers write it; write it as [::ffff:7f00:1]
+  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (29 characters, not shown): its IPv6 address is not in the form browsers write it; write it as [::ffff:7f00:1]
   allowed host: [::ffff:7f00:1], hostname ::ffff:7f00:1, loopback true
   origin: https://[::ffff:7f00:1]
   cimd list: "breaks the host name rule: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)"
@@ -180,7 +180,7 @@ mcp.10
   loopback as written: false
 xn--bcher-kva.example
   public https: xn--bcher-kva.example
-  public http: refused: BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev); got http: give https, or a loopback host
+  public http: refused: BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   allowed host: xn--bcher-kva.example, hostname xn--bcher-kva.example, loopback false
   origin: https://xn--bcher-kva.example
   cimd list: ""
@@ -198,7 +198,7 @@ bücher.example
   loopback as written: false
 my_host.example
   public https: my_host.example
-  public http: refused: BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev); got http: give https, or a loopback host
+  public http: refused: BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   allowed host: my_host.example, hostname my_host.example, loopback false
   origin: https://my_host.example
   cimd list: ""
@@ -207,7 +207,7 @@ my_host.example
   loopback as written: false
 my_mcp
   public https: my_mcp
-  public http: refused: BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev); got http: give https, or a loopback host
+  public http: refused: BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   allowed host: my_mcp, hostname my_mcp, loopback false
   origin: https://my_mcp
   cimd list: "has no dot; give a name with at least one dot"
@@ -215,8 +215,8 @@ my_mcp
   host header: my_mcp
   loopback as written: false
 S3CRET~tok
-  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it; got a value (22 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do
-  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it; got a value (21 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev); got http: give https, or a loopback host
+  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (22 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do
+  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (21 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   allowed host: s3cret~tok, hostname s3cret~tok, loopback false
   origin: https://s3cret~tok
   cimd list: "has no dot; give a name with at least one dot"
@@ -225,7 +225,7 @@ S3CRET~tok
   loopback as written: false
 single
   public https: single
-  public http: refused: BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev); got http: give https, or a loopback host
+  public http: refused: BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   allowed host: single, hostname single, loopback false
   origin: https://single
   cimd list: "has no dot; give a name with at least one dot"
@@ -243,7 +243,7 @@ a..b
   loopback as written: false
 mcp.example.com:443
   public https: mcp.example.com:443
-  public http: refused: BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev); got http: give https, or a loopback host
+  public http: refused: BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   allowed host: mcp.example.com:443, hostname mcp.example.com, loopback false
   origin: https://mcp.example.com
   cimd list: "breaks the host name rule: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)"
@@ -252,7 +252,7 @@ mcp.example.com:443
   loopback as written: false
 mcp.example.com:8443
   public https: mcp.example.com:8443
-  public http: refused: BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev); got http: give https, or a loopback host
+  public http: refused: BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   allowed host: mcp.example.com:8443, hostname mcp.example.com, loopback false
   origin: https://mcp.example.com:8443
   cimd list: "breaks the host name rule: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)"

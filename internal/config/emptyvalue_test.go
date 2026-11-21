@@ -135,7 +135,10 @@ func TestAFlagSetToNothingIsRefusedAsGiven(t *testing.T) {
 	}{
 		{"--listen=", base, "BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got nothing"},
 		{"--scope=", base, "BYWARD_SCOPE: want one scope token, such as mcp; got nothing"},
-		{"--data-dir=", base, "BYWARD_DATA_DIR: want an absolute path; got nothing"},
+		{"--data-dir=", base, "BYWARD_DATA_DIR: want an absolute path, one starting with /; got nothing"},
+		{"--store-postgres-dsn-file=", base, "--store-postgres-dsn-file: want the path of a file holding the secret, such as /run/secrets/store-postgres-dsn; got nothing"},
+		// The flag wins over BYWARD_ENTRA_CLIENT_SECRET_FILE, which base sets, and is still refused.
+		{"--entra-client-secret-file=", base, "--entra-client-secret-file: want the path of a file holding the secret, such as /run/secrets/entra-client-secret; got nothing"},
 		{"--assertion-claims=", base, claims},
 		{"--assertion-claims=", stdio, claims},
 		{"--assertion-header=", base, header},

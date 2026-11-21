@@ -3,9 +3,11 @@ package config
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // The loaders a row refuses a value with: the test base, and a working OIDC configuration (whose
@@ -124,7 +126,6 @@ func TestARefusedSettingNeverShowsACredentialItHolds(t *testing.T) {
 	}{
 		{withOIDC(t), []string{"BYWARD_DEV=true", "BYWARD_OIDC_ISSUER=http://127.0.0.1:8081"}},
 		{withOIDC(t), []string{"BYWARD_OIDC_ISSUER=https://sso.example.com/realms/a@b"}},
-		{withOIDC(t), []string{"BYWARD_OIDC_ISSUER=http://sso.example.com/realms/a@b"}},
 		{withOIDC(t), []string{"BYWARD_DEV=true", "BYWARD_OIDC_ISSUER=http://127.0.0.1:8081/realms/a@b"}},
 		{withConfig(t), []string{"BYWARD_CLIENT_DENYLIST=https://app.example/u@x.example/c.json"}},
 	} {
@@ -143,18 +144,18 @@ func TestARefusedURLIsNeverShownButSaysWhy(t *testing.T) {
 		load func(kv ...string) error
 		want string
 	}{
-		{"BYWARD_UPSTREAM_URL=https://user:pw@up.example/x", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (28 characters, not shown): it holds a user name or password (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
-		{"BYWARD_PUBLIC_URL=https://user:pw@mcp.example.com/mcp", withConfig(t), `BYWARD_PUBLIC_URL: want an absolute http(s) URL; got a value (35 characters, not shown): it holds a user name or password`},
+		{"BYWARD_UPSTREAM_URL=https://user:pw@up.example/x", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (28 characters, not shown): it holds a user name or password (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
+		{"BYWARD_PUBLIC_URL=https://user:pw@mcp.example.com/mcp", withConfig(t), `BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (35 characters, not shown): it holds a user name or password`},
 		// url.Parse reads host:port without a scheme as a scheme and an opaque port: refused as no scheme.
-		{"BYWARD_UPSTREAM_URL=upstream:9000", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (13 characters, not shown): it has no scheme such as https:// (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
-		{"BYWARD_UPSTREAM_URL=upstream:9000/mcp", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (17 characters, not shown): it has no scheme such as https:// (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
-		{"BYWARD_UPSTREAM_URL=https:8443", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (10 characters, not shown): it has no "//" after its scheme (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
-		{"BYWARD_UPSTREAM_URL=http:8080", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (9 characters, not shown): it has no "//" after its scheme (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
+		{"BYWARD_UPSTREAM_URL=upstream:9000", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (13 characters, not shown): it has no scheme such as https:// (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
+		{"BYWARD_UPSTREAM_URL=upstream:9000/mcp", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (17 characters, not shown): it has no scheme such as https:// (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
+		{"BYWARD_UPSTREAM_URL=https:8443", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (10 characters, not shown): it has no "//" after its scheme (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
+		{"BYWARD_UPSTREAM_URL=http:8080", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (9 characters, not shown): it has no "//" after its scheme (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
 		{"BYWARD_ALLOWED_ORIGINS=localhost:3000", withConfig(t), `BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry 1 of 1 (14 characters, not shown): it has no scheme such as https://`},
-		{"BYWARD_UPSTREAM_URL=mailto:up@up.example", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (20 characters, not shown): it has a scheme other than http or https (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
-		{"BYWARD_UPSTREAM_URL=ftp://up.example/x?k=pw", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (23 characters, not shown): it has a scheme other than http or https (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
-		{"BYWARD_UPSTREAM_URL=up.example/x", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (12 characters, not shown): it has no scheme such as https:// (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
-		{"BYWARD_UPSTREAM_URL=https://user:pw@up stream/x", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (27 characters, not shown): it does not parse as a URL (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
+		{"BYWARD_UPSTREAM_URL=mailto:up@up.example", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (20 characters, not shown): it has a scheme other than http or https (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
+		{"BYWARD_UPSTREAM_URL=ftp://up.example/x?k=pw", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (23 characters, not shown): it has a scheme other than http or https (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
+		{"BYWARD_UPSTREAM_URL=up.example/x", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (12 characters, not shown): it has no scheme such as https:// (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
+		{"BYWARD_UPSTREAM_URL=https://user:pw@up stream/x", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (27 characters, not shown): it has white space, which a URL cannot hold; write a space in a path as %20 (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
 		{"BYWARD_ALLOWED_ORIGINS=https://user:pw@app.example", withConfig(t), `BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry 1 of 1 (27 characters, not shown): it holds a user name or password`},
 		{"BYWARD_ALLOWED_ORIGINS=https://app.example?t=pw", withConfig(t), `BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry 1 of 1 (24 characters, not shown): it has a query or a fragment`},
 		{"BYWARD_CLIENT_DENYLIST=https://user:pw@app.example/c.json", withConfig(t), `BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 1 of 1 (34 characters, not shown): it is a CIMD client ID with a user name or password`},
@@ -162,15 +163,15 @@ func TestARefusedURLIsNeverShownButSaysWhy(t *testing.T) {
 		{"BYWARD_CLIENT_DENYLIST=https://app.example/%zz@x", withConfig(t), `BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 1 of 1 (25 characters, not shown): it is not an absolute URL`},
 		{"BYWARD_ALLOWED_HOSTS=ü:pw@app.example", withConfig(t), `BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (16 characters, not shown): it holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send`},
 		{"BYWARD_OBO_SCOPES=https://graph.microsoft.com/User.Read https://user:pw@other.example/x", withConfig(t), `BYWARD_OBO_SCOPES: want scope URIs of one API such as https://graph.microsoft.com/User.Read, api://<app>/<scope> or <app ID>/<scope>; got entries 1 and 2 of 2: they are for different APIs; Entra issues a token for one API per request`},
-		{"BYWARD_OIDC_ISSUER=https://user:pw@idp.example", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it; got a value (27 characters, not shown): it holds a user name or password`},
-		{"BYWARD_OIDC_ISSUER=http://user:pw@127.0.0.1:8081", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it; got a value (29 characters, not shown): it holds a user name or password`},
-		{"BYWARD_OIDC_ISSUER=https://sso.example.com/realms/acme?k=pw", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it; got a value (40 characters, not shown): it has a query or a fragment, which an issuer never has`},
-		{"BYWARD_OIDC_ISSUER=https:/user:pw@idp.example", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it; got a value (26 characters, not shown): it has no host`},
-		{"BYWARD_OIDC_ISSUER=ftp://idp.example/realms/a@b", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it; got a value (28 characters, not shown): it has a scheme other than http or https`},
-		{"BYWARD_OIDC_ISSUER=https://user:pw@idp.example/?q", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it; got a value (30 characters, not shown): it holds a user name or password`},
-		{"BYWARD_UPSTREAM_URL=https:up.example/x", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (18 characters, not shown): it has no "//" after its scheme (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
-		{"BYWARD_OIDC_ISSUER=https://[::1", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it; got a value (12 characters, not shown): it does not parse as a URL`},
-		{"BYWARD_OIDC_ISSUER=https:/idp.example/realms/pw", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it; got a value (28 characters, not shown): it has no host`},
+		{"BYWARD_OIDC_ISSUER=https://user:pw@idp.example", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (27 characters, not shown): it holds a user name or password`},
+		{"BYWARD_OIDC_ISSUER=http://user:pw@127.0.0.1:8081", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (29 characters, not shown): it holds a user name or password`},
+		{"BYWARD_OIDC_ISSUER=https://sso.example.com/realms/acme?k=pw", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (40 characters, not shown): it has a query or a fragment, which an issuer never has`},
+		{"BYWARD_OIDC_ISSUER=https:/user:pw@idp.example", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (26 characters, not shown): it has no host`},
+		{"BYWARD_OIDC_ISSUER=ftp://idp.example/realms/a@b", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (28 characters, not shown): it has a scheme other than http or https`},
+		{"BYWARD_OIDC_ISSUER=https://user:pw@idp.example/?q", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (30 characters, not shown): it holds a user name or password`},
+		{"BYWARD_UPSTREAM_URL=https:up.example/x", withConfig(t), `BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (18 characters, not shown): it has no "//" after its scheme (or BYWARD_UPSTREAM_COMMAND, or a command after --)`},
+		{"BYWARD_OIDC_ISSUER=https://[::1", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (12 characters, not shown): it has a "[" in its host without its "]"`},
+		{"BYWARD_OIDC_ISSUER=https:/idp.example/realms/pw", withOIDC(t), `BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (28 characters, not shown): it has no host`},
 		{"BYWARD_OBO_SCOPES=User.Read", withConfig(t), `BYWARD_OBO_SCOPES: want scope URIs of one API such as https://graph.microsoft.com/User.Read, api://<app>/<scope> or <app ID>/<scope>; got entry 1 of 1 (9 characters, not shown): it is not a scope URI`},
 	} {
 		err := tc.load(tc.env)
@@ -189,21 +190,89 @@ func TestAStrayArgumentNeverShowsACredentialItHolds(t *testing.T) {
 	}
 }
 
-// ParseUpstreamURL, for init: an http(s) URL with a host is taken, anything else refused by the name
-// BYWARD_UPSTREAM_URL, as the proxy refuses it.
-func TestParseUpstreamURLAcceptsAnHTTPURLAndRefusesAnyOtherByTheSettingsName(t *testing.T) {
-	if u, err := ParseUpstreamURL("http://127.0.0.1:9000/mcp"); err != nil || u.Host != "127.0.0.1:9000" {
-		t.Fatalf("ParseUpstreamURL = %v, %v", u, err)
-	}
-	for raw, want := range map[string]string{
-		"":                             "BYWARD_UPSTREAM_URL is required",
-		"ftp://up.example/x":           `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (18 characters, not shown): it has a scheme other than http or https`,
-		"/mcp":                         `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (4 characters, not shown): it has no scheme such as https://`,
-		"https://user:pw@up.example/x": `BYWARD_UPSTREAM_URL: want an absolute http(s) URL; got a value (28 characters, not shown): it holds a user name or password`,
+// ParseUpstreamURL, for init: an http(s) URL with a host is taken as given, an escaped space or
+// character included, and an empty one is refused as required. (Its refusals for a URL's form:
+// TestAURLRefusedForItsFormSaysWhichPartIsWrong.)
+func TestParseUpstreamURLTakesAnHTTPURLAndRequiresOne(t *testing.T) {
+	for raw, host := range map[string]string{
+		"http://127.0.0.1:9000/mcp":     "127.0.0.1:9000",
+		"http://u:9000/mcp%20X":         "u:9000",
+		"http://[2001:db8::1]:9000/mcp": "[2001:db8::1]:9000",
+		"https://up.example/m%C3%A9":    "up.example",
 	} {
-		if _, err := ParseUpstreamURL(raw); err == nil || err.Error() != want {
-			t.Errorf("ParseUpstreamURL(%q) = %v, want exactly %q", raw, err, want)
+		if u, err := ParseUpstreamURL(raw); err != nil || u.Host != host || u.String() != raw {
+			t.Errorf("ParseUpstreamURL(%q) = %v, %v; want it taken as given, with the host %s", raw, u, err, host)
 		}
+	}
+	if _, err := ParseUpstreamURL(""); err == nil || err.Error() != "BYWARD_UPSTREAM_URL is required" {
+		t.Errorf("ParseUpstreamURL(\"\") = %v, want exactly %q", err, "BYWARD_UPSTREAM_URL is required")
+	}
+}
+
+// A URL refused for its form says which part is wrong, by url.Parse's error or by what it holds, and
+// never quotes it. White space, control and invisible formatting characters are refused before
+// url.Parse reads the value, which lets a space or a non-ASCII control character through in a path
+// (#422). The rows follow the order the reasons are decided in.
+func TestAURLRefusedForItsFormSaysWhichPartIsWrong(t *testing.T) {
+	const (
+		whiteSpace = "it has white space, which a URL cannot hold; write a space in a path as %20"
+		control    = "it has a control character, which a URL cannot hold"
+		invisible  = "it has an invisible formatting character, such as a zero-width space, which a URL cannot hold"
+		badEscape  = `it has a "%" not followed by two hexadecimal digits`
+		hostEscape = "it has a %-escape in its host, which a host name cannot hold"
+		noScheme   = "it has no scheme such as https://"
+		badPort    = "it has a port that is not a number"
+		notIPv6    = "it has a host in brackets that is not an IPv6 address"
+		userInfo   = "it holds a user name or password"
+	)
+	for _, tc := range []struct{ name, raw, why string }{
+		// What url.Parse lets through, or would refuse with its own error first.
+		{"a space in the path (#422)", "http://u:9000/mcp X", whiteSpace},
+		{"a tab", "http://u:9000/mcp\t", whiteSpace},
+		{"a newline", "http://u:9000/mcp\n", whiteSpace},
+		{"a no-break space", "http://u:9000/mcp\u00a0", whiteSpace},
+		{"an ASCII control character", "http://u:9000/mcp\x00", control},
+		{"a non-ASCII control character", "http://u:9000/mcp\u0080", control},
+		{"a zero-width space", "http://u:9000/m\u200bcp", invisible},
+		{"a byte order mark", "\ufeffhttp://u:9000/mcp", invisible},
+		// url.Parse's errors.
+		{"a bad escape", "http://u:9000/m%zz", badEscape},
+		{"a bad escape at the end", "http://u:9000/m%4", badEscape},
+		{"a bare % at the end", "http://u:9000/m%", badEscape},
+		{"an escape whose first digit is not hex", "http://u:9000/m%z4", badEscape},
+		{"an escape whose second digit is not hex", "http://u:9000/m%4z", badEscape},
+		{"a bad escape after a good one", "http://u:9000/m%41%4", badEscape},
+		{"an escape in the host, in hex digits only", "http://a%41.example/mcp", hostEscape},
+		{"an escape in the host, in lower-case hex", "http://a%6a.example/mcp", hostEscape},
+		{"an escape in the host, in upper-case hex", "http://a%4A.example/mcp", hostEscape},
+		{"an escape in the host, and a good one at the end", "http://a%41.example/m%41", hostEscape},
+		// url.Parse refuses the host's escape and never checks a query's: the reason is the host's.
+		{"an escape in the host, and a bad one in the query", "http://a%41.example/m?x=%zz", hostEscape},
+		{"a character no host holds", "http://u{p:9000/mcp", "it has a character a host cannot hold"},
+		{"a host and port without a scheme", "127.0.0.1:9000/mcp", noScheme},
+		{"only a colon and slashes", "://up.example/mcp", noScheme},
+		{"a port that is not a number", "http://u:90a0/mcp", badPort},
+		{"a port after an IPv6 address that is not a number", "http://[2001:db8::1]:9x/mcp", badPort},
+		{"text after an IPv6 address", "http://[2001:db8::1]x/mcp", `it has text after the "]" of its IPv6 address that is not a ":" and a port`},
+		{"an unclosed bracket", "http://[2001:db8::1/mcp", `it has a "[" in its host without its "]"`},
+		{"an IPv4 address in brackets", "http://[192.0.2.1]/mcp", notIPv6},
+		{"a word in brackets", "http://[up]/mcp", notIPv6},
+		{"a bracket inside a host", "http://up[::1]/mcp", notIPv6},
+		{"a user name with a character a URL cannot hold", "http://u^p@up.example/mcp", userInfo},
+		// What url.Parse takes, but is no absolute http(s) URL.
+		{"a host without a scheme", "up.example/mcp", noScheme},
+		{"a path alone", "/mcp", noScheme},
+		{"another scheme", "ftp://up.example/x", "it has a scheme other than http or https"},
+		{"no // after the scheme", "https:8443", `it has no "//" after its scheme`},
+		{"a scheme and a path but no host", "https:/up.example/mcp", "it has no host"},
+		{"a user name and password", "https://user:pw@up.example/x", userInfo},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want := fmt.Sprintf("BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (%d characters, not shown): %s", utf8.RuneCountInString(tc.raw), tc.why)
+			if _, err := ParseUpstreamURL(tc.raw); err == nil || err.Error() != want {
+				t.Errorf("ParseUpstreamURL(%q) = %v\nwant %s", tc.raw, err, want)
+			}
+		})
 	}
 }
 
@@ -324,7 +393,7 @@ func TestNoRefusalShowsTheValueGiven(t *testing.T) {
 	// The settings config refuses none of these forms for: free text, client IDs, claim and role names,
 	// and the gate and app lists. Every other setting must refuse one in the one format, so the test cannot
 	// pass by no longer reaching its parser.
-	acceptsEveryForm := []string{"app-client-ids", "app-roles", "entra-client-id", "gate-email-domains", "gate-groups",
+	acceptsEveryForm := []string{"app-client-ids", "app-roles", "gate-email-domains", "gate-groups",
 		"gate-hosted-domains", "gate-roles", "gate-tenants", "oidc-client-id", "oidc-client-key-id", "oidc-groups-claim",
 		"oidc-name", "oidc-roles-claim", "oidc-subject-claim", "operator-name", "resource-name", "scope-description"}
 	for _, s := range registry {

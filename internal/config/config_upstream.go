@@ -262,6 +262,8 @@ func parseStripHeaders(val Value) ([]string, []error) {
 		switch {
 		case strings.ContainsRune(n, '*'):
 			errs = append(errs, refusedForm(s, at(i), n, want, "it has a *: list each header of a family by name"))
+		case strings.Contains(n, ":"):
+			errs = append(errs, refusedForm(s, at(i), n, want, headerLineReason))
 		case !httpguts.ValidHeaderFieldName(n):
 			errs = append(errs, refusedForm(s, at(i), n, want, "it is not a header name"))
 		case mcpHeaders[h]:

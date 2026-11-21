@@ -47,13 +47,13 @@ func TestARefusedSettingNeverShowsASecretPastedIntoIt(t *testing.T) {
 		want string
 	}{
 		{"a secret's file, given the secret", []string{"BYWARD_ENTRA_CLIENT_SECRET_FILE=" + pasted},
-			"BYWARD_ENTRA_CLIENT_SECRET_FILE: cannot read secret file: no such file or directory"},
+			"BYWARD_ENTRA_CLIENT_SECRET_FILE: want the path of a file holding the secret, such as /run/secrets/entra-client-secret; got a value (18 characters, not shown): it cannot be read: no such file or directory; it is a relative path, read from the working directory"},
 		{"the PostgreSQL DSN's file, given the DSN", []string{"BYWARD_STORE_POSTGRES_DSN_FILE=postgres://byward:" + pasted + "@db.example/byward"},
-			"BYWARD_STORE_POSTGRES_DSN_FILE: cannot read secret file: no such file or directory"},
+			"BYWARD_STORE_POSTGRES_DSN_FILE: want the path of a file holding the secret, such as /run/secrets/store-postgres-dsn; got a value (54 characters, not shown): it cannot be read: no such file or directory; it is a relative path, read from the working directory"},
 		{"a path setting, given the secret", []string{"BYWARD_TLS_KEY_FILE=" + pasted, "BYWARD_TLS_CERT_FILE=/etc/byward/tls.crt"},
-			"BYWARD_TLS_KEY_FILE: want an absolute path; got a relative one: no path is relative to the working directory (ADR-0007 §6)"},
+			"BYWARD_TLS_KEY_FILE: want an absolute path, one starting with /; got a relative one: no path is relative to the working directory (ADR-0007 §6)"},
 		{"a header to strip, given a header line", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X-Api-Key: " + pasted},
-			"BYWARD_UPSTREAM_STRIP_HEADERS: want exact header names, such as X-Argocd-Base-Url; got entry 1 of 1 (29 characters, not shown): it is not a header name"},
+			"BYWARD_UPSTREAM_STRIP_HEADERS: want exact header names, such as X-Argocd-Base-Url; got entry 1 of 1 (29 characters, not shown): it holds a \":\", as a header line does: give only the header's name, the part before the \":\""},
 		{"a header family to strip, given a header line", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X-Api-*: " + pasted},
 			"BYWARD_UPSTREAM_STRIP_HEADERS: want exact header names, such as X-Argocd-Base-Url; got entry 1 of 1 (27 characters, not shown): it has a *: list each header of a family by name"},
 		{"a client denylist URL with its scheme in capitals, which config refuses", []string{"BYWARD_CLIENT_DENYLIST=HTTPS://a.example/x;k=" + pasted},
@@ -76,23 +76,24 @@ func TestARefusedSettingNeverShowsASecretPastedIntoIt(t *testing.T) {
 			`BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry 1 of 1 (39 characters, not shown): it has no host`},
 		{"a client denylist URL with a mistyped scheme and path parameters", []string{"BYWARD_CLIENT_DENYLIST=https:/a.example/x;k=" + pasted},
 			`BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 1 of 1 (39 characters, not shown): it breaks the host name rule: a host name has only letters, digits and - . _ ~, and no empty label (no leading or double dot; drop a trailing one)`},
-		{"a header to strip whose name holds an @", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X@" + pasted + ": token"},
-			"BYWARD_UPSTREAM_STRIP_HEADERS: want exact header names, such as X-Argocd-Base-Url; got entry 1 of 1 (27 characters, not shown): it is not a header name"},
-		{"a header to strip with nothing before its colon", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=: " + pasted},
+		{"a header to strip whose name holds an @", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X@" + pasted},
 			"BYWARD_UPSTREAM_STRIP_HEADERS: want exact header names, such as X-Argocd-Base-Url; got entry 1 of 1 (20 characters, not shown): it is not a header name"},
+		{"a header to strip with nothing before its colon", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=: " + pasted},
+			"BYWARD_UPSTREAM_STRIP_HEADERS: want exact header names, such as X-Argocd-Base-Url; got entry 1 of 1 (20 characters, not shown): it holds a \":\", as a header line does: give only the header's name, the part before the \":\""},
 		{"a header to strip that holds a query", []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X-Key?k=" + pasted},
 			"BYWARD_UPSTREAM_STRIP_HEADERS: want exact header names, such as X-Argocd-Base-Url; got entry 1 of 1 (26 characters, not shown): it is not a header name"},
 		{"the assertion's header holding a query", []string{"BYWARD_ASSERTION_HEADER=X-Key?k=" + pasted},
 			"BYWARD_ASSERTION_HEADER: want a header name such as Authorization or X-Byward-Identity; got a value (26 characters, not shown): it is not a header name"},
 		{"the assertion's header with nothing before its colon", []string{"BYWARD_ASSERTION_HEADER=:" + pasted},
-			"BYWARD_ASSERTION_HEADER: want a header name such as Authorization or X-Byward-Identity; got a value (19 characters, not shown): it is not a header name"},
+			"BYWARD_ASSERTION_HEADER: want a header name such as Authorization or X-Byward-Identity; got a value (19 characters, not shown): it holds a \":\", as a header line does: give only the header's name, the part before the \":\""},
 		{"a stdio command, malformed, with a token argument", []string{"BYWARD_UPSTREAM_URL=", `BYWARD_UPSTREAM_COMMAND=["/usr/local/bin/server","--token","` + pasted + `"`},
 			`BYWARD_UPSTREAM_COMMAND: want a JSON array of strings whose first element is the program, such as ["/usr/local/bin/server","--flag"]; got a value (55 characters, not shown): it is not one`},
 		{"the Entra tenant", []string{"BYWARD_ENTRA_TENANT=" + pasted}, "BYWARD_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, Overview, Tenant ID); got a value (18 characters, not shown): it is not a GUID"},
+		{"the Entra client ID, given the client secret", []string{"BYWARD_ENTRA_CLIENT_ID=" + pasted}, "BYWARD_ENTRA_CLIENT_ID: want the application (client) ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, App registrations, your app, Overview, Application (client) ID); got a value (18 characters, not shown): it is not a GUID"},
 		{"the client secret's end date", []string{"BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT=" + pasted}, "BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT: want a date such as 2027-11-06 or an RFC 3339 time; got a value (18 characters, not shown): it is neither"},
 		{"the scope", []string{"BYWARD_SCOPE=a " + pasted}, "BYWARD_SCOPE: want one scope token, such as mcp; got a value (20 characters, not shown): it has a character a scope token cannot hold: white space, a double quote, a backslash or one that is not printable ASCII"},
-		{"a rate limit's endpoint", []string{"BYWARD_OAUTH_RATE_LIMITS=" + pasted + "=5"}, "BYWARD_OAUTH_RATE_LIMITS: want endpoint=per-minute entries, the endpoint authorize, consent, callback, token, revoke or register and the limit a whole number from 1 to 10000; got entry 1 of 1 (20 characters, not shown): it is not endpoint=per-minute for one of the endpoints"},
-		{"a rate limit's number", []string{"BYWARD_OAUTH_RATE_LIMITS=authorize=" + pasted}, "BYWARD_OAUTH_RATE_LIMITS: want endpoint=per-minute entries, the endpoint authorize, consent, callback, token, revoke or register and the limit a whole number from 1 to 10000; got entry 1 of 1 (28 characters, not shown): its limit is not a whole number"},
+		{"a rate limit's endpoint", []string{"BYWARD_OAUTH_RATE_LIMITS=" + pasted + "=5"}, "BYWARD_OAUTH_RATE_LIMITS: want endpoint=per-minute entries such as token=60, the endpoint authorize, consent, callback, token, revoke or register and the limit a whole number from 1 to 10000; got entry 1 of 1 (20 characters, not shown): it is not endpoint=per-minute for one of the endpoints"},
+		{"a rate limit's number", []string{"BYWARD_OAUTH_RATE_LIMITS=authorize=" + pasted}, "BYWARD_OAUTH_RATE_LIMITS: want endpoint=per-minute entries such as token=60, the endpoint authorize, consent, callback, token, revoke or register and the limit a whole number from 1 to 10000; got entry 1 of 1 (28 characters, not shown): its limit is not a whole number"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			lines := refusedLines(t, tc.env...)
@@ -108,14 +109,70 @@ func TestARefusedSettingNeverShowsASecretPastedIntoIt(t *testing.T) {
 	}
 }
 
+// A secret's file is read at the path as given, by its _FILE variable or its -file flag, absolute or
+// relative (os.ReadFile reads a relative one from the working directory). A path that cannot be read
+// is refused by its length, never shown, and a relative one is also named as relative; the refusal
+// names the variable or the flag, whichever was given. Each readable path holds its own secret, so a
+// row passes only if its path is the one read.
+func TestASecretFileIsReadWhereItIsGivenAndARefusalNamesHowItWasGiven(t *testing.T) {
+	secrets := map[string]string{"secrets/entra": "relative-secret", "/run/secrets/given": "absolute-secret"}
+	readSecrets := func(p string) ([]byte, error) {
+		if v, ok := secrets[p]; ok {
+			return []byte(v + "\n"), nil
+		}
+		return os.ReadFile(p) //nolint:gosec // G304: a test reads a path that does not exist
+	}
+	env := slices.DeleteFunc(append([]string{}, base...), func(kv string) bool { return strings.HasPrefix(kv, "BYWARD_ENTRA_CLIENT_SECRET_FILE=") })
+	for _, by := range []struct {
+		name string
+		load func(path string) (*Config, error)
+		as   string // how a refusal names it
+	}{
+		{"its _FILE variable", func(path string) (*Config, error) {
+			c, _, err := Load(nil, append(slices.Clone(env), "BYWARD_ENTRA_CLIENT_SECRET_FILE="+path), readSecrets)
+			return c, err
+		}, "BYWARD_ENTRA_CLIENT_SECRET_FILE"},
+		{"its flag", func(path string) (*Config, error) {
+			c, _, err := Load([]string{"--entra-client-secret-file", path}, env, readSecrets)
+			return c, err
+		}, "--entra-client-secret-file"},
+	} {
+		for path, secret := range secrets {
+			t.Run(by.name+", "+path, func(t *testing.T) {
+				c, err := by.load(path)
+				if err != nil {
+					t.Fatalf("err = %v; want %q, the secret at %s", err, secret, path)
+				}
+				if c.EntraClientSecret != secret {
+					t.Fatalf("read %q; want %q, the secret at %s", c.EntraClientSecret, secret, path)
+				}
+			})
+		}
+		for _, tc := range []struct{ name, path, why string }{
+			{"an unreadable relative path", pasted, "(18 characters, not shown): it cannot be read: no such file or directory; it is a relative path, read from the working directory"},
+			{"an unreadable absolute path", "/nonexistent/" + pasted, "(31 characters, not shown): it cannot be read: no such file or directory"},
+		} {
+			t.Run(by.name+", "+tc.name, func(t *testing.T) {
+				want := by.as + ": want the path of a file holding the secret, such as /run/secrets/entra-client-secret; got a value " + tc.why
+				if _, err := by.load(tc.path); !isConfigError(err) || err.Error() != want {
+					t.Fatalf("err = %v\nwant %s", err, want)
+				}
+			})
+		}
+	}
+}
+
 // #466: a header line pasted into any setting that names a header the proxy sets (headerSettings)
 // is refused by its length, never shown; the message is pinned whole.
 func TestAHeaderLinePastedIntoAHeaderSettingIsNeverShown(t *testing.T) {
 	for _, s := range headerSettings {
-		for _, sep := range []string{": ", "\t"} {
-			t.Run(s.env+strings.ReplaceAll(sep, "\t", "<tab>"), func(t *testing.T) {
-				_, err := loadCred(t, nil, "k-123", append(s.extra, s.env+"=X-Identity"+sep+pasted)...)
-				want := s.env + ": want a header name such as Authorization or " + s.example + "; got a value (" + strconv.Itoa(len("X-Identity"+sep+pasted)) + " characters, not shown): it is not a header name"
+		for _, sep := range []struct{ sep, reason string }{
+			{": ", `it holds a ":", as a header line does: give only the header's name, the part before the ":"`},
+			{"\t", "it is not a header name"}, // a tab, unlike a colon, is no header line's
+		} {
+			t.Run(s.env+strings.ReplaceAll(sep.sep, "\t", "<tab>"), func(t *testing.T) {
+				_, err := loadCred(t, nil, "k-123", append(s.extra, s.env+"=X-Identity"+sep.sep+pasted)...)
+				want := s.env + ": want a header name such as Authorization or " + s.example + "; got a value (" + strconv.Itoa(len("X-Identity"+sep.sep+pasted)) + " characters, not shown): " + sep.reason
 				if err == nil || !slices.Contains(strings.Split(err.Error(), "\n"), want) || strings.Contains(err.Error(), "S3CRETPW") {
 					t.Fatalf("err = %v, want the line %q and never the secret", err, want)
 				}
@@ -221,25 +278,28 @@ func TestEveryURLSettingIsShownWithoutTheParts(t *testing.T) {
 
 // Every setting config reads as a URL has a URL shape, so a new one cannot print its query: a setting
 // read through parseURL by name must have urlShape, and every other net/url Parse, ParseRequestURI or
-// JoinPath call in the package (in a function or a package-level var), by its owner and argument, is
+// JoinPath call, and every call of parseHTTPURL (url.Parse with its reason), in the package (in a
+// function or a package-level var), by its owner and argument, is
 // listed here once with the setting whose value it reads (which must have urlShape, or urlListShape
-// for a list) or "" for one that refuses a query, a fragment and path parameters, or reads no
-// setting. A new call fails until it is listed, and so does every read urlReadsOf cannot follow.
+// for a list) or "" for one that refuses a query, a fragment and path parameters, reads no setting,
+// or whose reads are listed or checked by name elsewhere (parseHTTPURL's callers, parseURL's
+// settings). A new call fails until it is listed, and so does every read urlReadsOf cannot follow.
 func TestEverySettingReadAsAURLHasAURLShape(t *testing.T) {
 	byName := map[string]Setting{}
 	for _, s := range registry {
 		byName[s.Name] = s
 	}
 	listed := map[string]string{
-		"parseURLOf raw":       "",                // the settings read by name, checked below
-		"oidcIdP c.OIDCIssuer": "oidc-issuer",     // URL
-		"denylistReason e":     "client-denylist", // URLs
+		"parseHTTPURL raw":     "",                // url.Parse for the three below, which are listed by what they read
+		"parseURL raw":         "",                // the settings read by name, checked below
 		"parseIssuer raw":      "oidc-issuer",     // URL
 		"parseOrigin o":        "",                // an origin: no path, query or fragment
+		"oidcIdP c.OIDCIssuer": "oidc-issuer",     // URL
+		"denylistReason e":     "client-denylist", // URLs
 		"checkNoAuth o":        "",                // the same origins, again
 	}
 	seen := map[string]int{}
-	named := 0
+	named := map[string]bool{}
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
@@ -256,7 +316,7 @@ func TestEverySettingReadAsAURLHasAURLShape(t *testing.T) {
 			t.Errorf("%s: %s", f, p)
 		}
 		for _, name := range reads.named {
-			named++
+			named[name] = true
 			if byName[name].shape != urlShape {
 				t.Errorf("%s: reads %s as a URL, but the setting's shape is not urlShape", f, name)
 			}
@@ -276,8 +336,10 @@ func TestEverySettingReadAsAURLHasAURLShape(t *testing.T) {
 			t.Errorf("%q occurs %d times, want once: list each call", key, seen[key])
 		}
 	}
-	if named < 2 { // ParsePublicURL reads public-url through parseURLOf with the registry's own entry
-		t.Fatalf("found %d settings read through parseURL, want at least upstream-url and resource-documentation", named)
+	for _, name := range []string{"public-url", "upstream-url", "resource-documentation"} {
+		if !named[name] {
+			t.Errorf("found no read of %s through parseURL: the scan has stopped finding reads, or the setting is read another way", name)
+		}
 	}
 }
 
@@ -294,6 +356,8 @@ func TestEachWayOfReadingAURLIsCaught(t *testing.T) {
 		{name: "in parentheses", imports: `"net/url"`, code: `func f() { (url.Parse)(raw) }`, want: urlReads{parsed: []string{"f raw"}}},
 		{name: "under another import name", imports: `u "net/url"`, code: `func f() { u.Parse(raw) }`, want: urlReads{parsed: []string{"f raw"}}},
 		{name: "in a package-level var", imports: `"net/url"`, code: `var v, _ = url.Parse(raw)`, want: urlReads{parsed: []string{"v raw"}}},
+		{name: "parseHTTPURL is listed by its owner and argument", code: `func f() { parseHTTPURL(raw) }`, want: urlReads{parsed: []string{"f raw"}}},
+		{name: "parseHTTPURL taken as a value", code: `func f() { p := parseHTTPURL; p(raw) }`, want: urlReads{unfollowed: []string{"f takes parseHTTPURL as a value; call it where its argument can be listed"}}},
 		{name: "parseURL with a setting name", code: `func f() { parseURL("public-url") }`, want: urlReads{named: []string{"public-url"}}},
 		{name: "url.Parse taken as a value", imports: `"net/url"`, code: `func f() { p := url.Parse; p(raw) }`, want: urlReads{unfollowed: []string{"f takes url.Parse as a value; call it where its argument can be listed"}}},
 		{name: "url.Parse taken as a value in a var", imports: `"net/url"`, code: `var p = url.Parse`, want: urlReads{unfollowed: []string{"p takes url.Parse as a value; call it where its argument can be listed"}}},
@@ -330,16 +394,16 @@ func TestEachWayOfReadingAURLIsCaught(t *testing.T) {
 // urlReads is what urlReadsOf finds in one file.
 type urlReads struct {
 	named      []string // the settings read through parseURL by name
-	parsed     []string // each net/url Parse, ParseRequestURI or JoinPath call, as its owner and argument
+	parsed     []string // each url.Parse, ParseRequestURI, JoinPath or parseHTTPURL call, as its owner and argument
 	unfollowed []string // each read that cannot be listed by its argument, as a message
 }
 
 // urlReadsOf scans the Go file name (its source src, or read from the disk if src is nil) for the
 // URLs it reads, in its functions and package-level vars. A read it cannot follow to a listed
-// argument is unfollowed: url.Parse or parseURL taken as a value, parseURL with a name that is not a
-// literal, or a URL method (Parse*, JoinPath, ResolveReference, UnmarshalBinary) called or taken as a
-// value on anything but the packages config parses other values with (time, netip, net, strconv,
-// internal/host, and its flag set fs).
+// argument is unfollowed: url.Parse, parseURL or parseHTTPURL taken as a value, parseURL with a name
+// that is not a literal, or a URL method (Parse*, JoinPath, ResolveReference, UnmarshalBinary) called
+// or taken as a value on anything but the packages config parses other values with (time, netip,
+// net, strconv, internal/host, and its flag set fs).
 func urlReadsOf(name string, src any) (urlReads, error) {
 	var reads urlReads
 	file, err := parser.ParseFile(token.NewFileSet(), name, src, 0)
@@ -396,7 +460,7 @@ func urlReadsOf(name string, src any) (urlReads, error) {
 			} else if sel, ok := urlMethod(asExpr(n)); ok {
 				refs = append(refs, sel)
 			}
-			if id, ok := n.(*ast.Ident); ok && id.Name == "parseURL" {
+			if id, ok := n.(*ast.Ident); ok && (id.Name == "parseURL" || id.Name == "parseHTTPURL") {
 				refs = append(refs, id)
 			}
 			call, ok := n.(*ast.CallExpr)
@@ -426,6 +490,9 @@ func urlReadsOf(name string, src any) (urlReads, error) {
 				}
 				reads.named = append(reads.named, name)
 				return true
+			}
+			if id, ok := fun.(*ast.Ident); ok && id.Name == "parseHTTPURL" { // url.Parse, with its reason
+				reads.parsed = append(reads.parsed, owner+" "+types.ExprString(call.Args[0]))
 			}
 			if _, ok := isParse(fun); ok {
 				reads.parsed = append(reads.parsed, owner+" "+types.ExprString(call.Args[0]))

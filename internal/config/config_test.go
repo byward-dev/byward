@@ -149,13 +149,13 @@ func TestAURLOrHostRefusedForItsFormSaysWhereAndWhyNeverWhat(t *testing.T) {
 	cases := []struct {
 		name, env, want string
 	}{
-		{"trailing slash", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp/", `BYWARD_PUBLIC_URL: want the MCP endpoint's path without a trailing slash, e.g. https://mcp.example.com/mcp; got a path that is empty or ends in /: give the endpoint's path, without the trailing slash`},
-		{"no path", "BYWARD_PUBLIC_URL=https://mcp.example.com", `BYWARD_PUBLIC_URL: want the MCP endpoint's path without a trailing slash, e.g. https://mcp.example.com/mcp; got a path that is empty or ends in /: give the endpoint's path, without the trailing slash`},
+		{"trailing slash", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp/", `BYWARD_PUBLIC_URL: want the MCP endpoint's path without a trailing slash, such as https://mcp.example.com/mcp; got a path that is empty or ends in /: give the endpoint's path, without the trailing slash`},
+		{"no path", "BYWARD_PUBLIC_URL=https://mcp.example.com", `BYWARD_PUBLIC_URL: want the MCP endpoint's path without a trailing slash, such as https://mcp.example.com/mcp; got a path that is empty or ends in /: give the endpoint's path, without the trailing slash`},
 		{"origin with path", "BYWARD_ALLOWED_ORIGINS=https://a.example/path", wantOrigins + `(22 characters, not shown): it has a path`},
-		{"documentation not a URL", "BYWARD_RESOURCE_DOCUMENTATION=javascript:x", `BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL; got a value (12 characters, not shown): it has a scheme other than http or https`},
-		{"query", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp?x=1", `BYWARD_PUBLIC_URL: want a URL without a query or fragment; got a query or fragment, not shown: remove it`},
-		{"fragment", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp#f", `BYWARD_PUBLIC_URL: want a URL without a query or fragment; got a query or fragment, not shown: remove it`},
-		{"http public", "BYWARD_PUBLIC_URL=http://mcp.example.com/mcp", `BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev); got http: give https, or a loopback host`},
+		{"documentation not a URL", "BYWARD_RESOURCE_DOCUMENTATION=javascript:x", `BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (12 characters, not shown): it has a scheme other than http or https`},
+		{"query", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp?x=1", `BYWARD_PUBLIC_URL: want a URL without a query or fragment, such as https://mcp.example.com/mcp; got a query or fragment, not shown: remove it`},
+		{"fragment", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp#f", `BYWARD_PUBLIC_URL: want a URL without a query or fragment, such as https://mcp.example.com/mcp; got a query or fragment, not shown: remove it`},
+		{"http public", "BYWARD_PUBLIC_URL=http://mcp.example.com/mcp", `BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host`},
 		// #344: the public host joins the public Host allow-list, so it follows BYWARD_ALLOWED_HOSTS' name rule.
 		{"public host with a trailing dot", "BYWARD_PUBLIC_URL=https://mcp.example.com./mcp", wantPublicURL + `(28 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
 		{"public host empty, with a port", "BYWARD_PUBLIC_URL=https://:8443/mcp", wantPublicURL + `(17 characters, not shown): it has no host before its port`},
@@ -163,7 +163,7 @@ func TestAURLOrHostRefusedForItsFormSaysWhereAndWhyNeverWhat(t *testing.T) {
 		{"public host with a wildcard", "BYWARD_PUBLIC_URL=https://a*b/mcp", wantPublicURL + `(15 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
 		// A browser lower-cases a host name, and byward does not rewrite it: the issuer and the IdP
 		// redirect URI are built from it as written (#472).
-		{"public host name in upper case", "BYWARD_PUBLIC_URL=https://MCP.Example.com/mcp", `BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it; got a value (27 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do`},
+		{"public host name in upper case", "BYWARD_PUBLIC_URL=https://MCP.Example.com/mcp", `BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (27 characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do`},
 		// #353: the port and the zone follow BYWARD_ALLOWED_HOSTS' rules too.
 		{"public URL with an empty port", "BYWARD_PUBLIC_URL=https://a.example:/mcp", wantPublicURL + `(22 characters, not shown): its host:port ` + rulePort},
 		{"public URL with a port over 65535", "BYWARD_PUBLIC_URL=https://a.example:65536/mcp", wantPublicURL + `(27 characters, not shown): its host:port ` + rulePort},
@@ -188,7 +188,9 @@ func TestAURLOrHostRefusedForItsFormSaysWhereAndWhyNeverWhat(t *testing.T) {
 		{"origin ending in an upper-case hex label", "BYWARD_ALLOWED_ORIGINS=https://192.168.0.0xFF", wantOrigins + `(22 characters, not shown): its host ` + ruleDottedDecimal + `192.168.0.255`},
 		{"origin with an IPv4 part over 255", "BYWARD_ALLOWED_ORIGINS=https://10.0.0.999", wantOrigins + `(18 characters, not shown): its host ` + ruleEndsInNumber},
 		{"origin with user info", "BYWARD_ALLOWED_ORIGINS=https://user@app.example.com", wantOrigins + `(28 characters, not shown): it holds a user name or password`},
-		{"origin that is not a URL", "BYWARD_ALLOWED_ORIGINS=https://[::1", wantOrigins + `(12 characters, not shown): it does not parse as a URL`},
+		{"origin with an unclosed IPv6 bracket", "BYWARD_ALLOWED_ORIGINS=https://[::1", wantOrigins + `(12 characters, not shown): it has a "[" in its host without its "]"`},
+		{"origin with white space", "BYWARD_ALLOWED_ORIGINS=https://a\u00a0b.example", wantOrigins + `(19 characters, not shown): it has white space, which a URL cannot hold; write a space in a path as %20`},
+		{"origin with a control character", "BYWARD_ALLOWED_ORIGINS=https://a.example\x01", wantOrigins + `(18 characters, not shown): it has a control character, which a URL cannot hold`},
 		{"origin ending in a hex label of every hex digit", "BYWARD_ALLOWED_ORIGINS=https://a.0x0123456789abcdef", wantOrigins + `(28 characters, not shown): its host ` + ruleEndsInNumber},
 		{"origin ending in a bare 0", "BYWARD_ALLOWED_ORIGINS=https://a.0", wantOrigins + `(11 characters, not shown): its host ` + ruleEndsInNumber},
 		{"origin ending in a bare 0x", "BYWARD_ALLOWED_ORIGINS=https://a.0x", wantOrigins + `(12 characters, not shown): its host ` + ruleEndsInNumber},
@@ -514,20 +516,65 @@ func TestEntraQuickstartNeedsFiveSettings(t *testing.T) {
 }
 
 func TestBrokerSettingsAreRequired(t *testing.T) {
-	for _, name := range []string{"BYWARD_ENTRA_TENANT", "BYWARD_ENTRA_CLIENT_ID"} {
-		if _, err := load(t, nil, name+"="); !isConfigError(err) || !strings.Contains(err.Error(), name+" is required") {
-			t.Errorf("%s: %v", name, err)
+	for _, name := range []string{"BYWARD_ENTRA_TENANT", "BYWARD_ENTRA_CLIENT_ID"} { // only that, not also refused as no GUID
+		want := name + " is required with BYWARD_IDP=entra (or set BYWARD_INSECURE_NO_AUTH to try the proxy without sign-in)"
+		if _, err := load(t, nil, name+"="); !isConfigError(err) || err.Error() != want {
+			t.Errorf("%s: %v\nwant %s", name, err, want)
 		}
 	}
 	if _, err := load(t, nil, "BYWARD_ENTRA_CLIENT_SECRET_FILE="); !isConfigError(err) || !strings.Contains(err.Error(), "BYWARD_ENTRA_CLIENT_SECRET_FILE, BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE or BYWARD_ENTRA_FEDERATED_TOKEN_FILE is required") {
 		t.Errorf("secret: %v", err)
 	}
-	if _, err := load(t, nil, "BYWARD_ENTRA_TENANT=contoso.onmicrosoft.com"); !isConfigError(err) || !strings.Contains(err.Error(), "BYWARD_ENTRA_TENANT: want the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, Overview, Tenant ID); got a value (23 characters, not shown): it is not a GUID") {
-		t.Errorf("tenant: %v", err)
-	}
 	c, err := load(t, nil)
 	if err != nil || c.EntraClientSecret != "s3cret-entra" || c.KeysDir == "" {
 		t.Fatalf("c=%+v err=%v", c, err)
+	}
+}
+
+// The Entra tenant and client ID each take a GUID, in either case, as given: whether Entra's audience
+// check takes an upper-case client ID is #514's. Anything else is refused by its length, with where
+// to find the value.
+func TestTheEntraIDsTakeAGUIDInEitherCaseAndRefuseAnythingElse(t *testing.T) {
+	settings := []struct {
+		env, want string
+		got       func(*Config) string
+	}{
+		{"BYWARD_ENTRA_TENANT", "the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, Overview, Tenant ID)",
+			func(c *Config) string { return c.EntraTenant }},
+		{"BYWARD_ENTRA_CLIENT_ID", "the application (client) ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, App registrations, your app, Overview, Application (client) ID)",
+			func(c *Config) string { return c.EntraClientID }},
+	}
+	for _, s := range settings {
+		for _, tc := range []struct{ name, value string }{
+			{"lower case", "0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d"},
+			{"upper case", "0A1B2C3D-4E5F-6A7B-8C9D-0E1F2A3B4C5D"},
+			{"mixed case", "0A1b2C3d-4E5f-6A7b-8C9d-0E1F2a3B4c5D"},
+		} {
+			t.Run(s.env+" "+tc.name, func(t *testing.T) {
+				c, err := load(t, nil, s.env+"="+tc.value)
+				if err != nil {
+					t.Fatalf("%v; want %s taken", err, tc.value)
+				}
+				if got := s.got(c); got != tc.value {
+					t.Fatalf("got %q, want it as given, %q", got, tc.value)
+				}
+			})
+		}
+		for _, tc := range []struct{ name, value string }{
+			{"a domain", "contoso.onmicrosoft.com"},
+			{"one character short", "0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5"},
+			{"one character long", "0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d0"},
+			{"a dash out of place", "0a1b2c3d4-e5f-6a7b-8c9d-0e1f2a3b4c5d"},
+			{"a letter that is not hex", "0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5g"},
+			{"in braces", "{0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c}"},
+		} {
+			t.Run(s.env+" "+tc.name, func(t *testing.T) {
+				want := fmt.Sprintf("%s: want %s; got a value (%d characters, not shown): it is not a GUID", s.env, s.want, len(tc.value))
+				if _, err := load(t, nil, s.env+"="+tc.value); !isConfigError(err) || err.Error() != want {
+					t.Fatalf("err = %v\nwant %s", err, want)
+				}
+			})
+		}
 	}
 }
 
@@ -581,7 +628,7 @@ func TestOAuthRateLimitsDefaultToADR0018AndCanBeRaisedWithinBounds(t *testing.T)
 		t.Errorf("overrides = %v, want authorize 120, token 600 and the other defaults", cfg.OAuthRateLimits)
 	}
 	// An entry refused for its form by its place and length; a limit out of range as parsed.
-	const refused = "BYWARD_OAUTH_RATE_LIMITS: want endpoint=per-minute entries, the endpoint authorize, consent, callback, token, revoke or register and the limit a whole number from 1 to 10000; got entry 1 of 1"
+	const refused = "BYWARD_OAUTH_RATE_LIMITS: want endpoint=per-minute entries such as token=60, the endpoint authorize, consent, callback, token, revoke or register and the limit a whole number from 1 to 10000; got entry 1 of 1"
 	for bad, why := range map[string]string{
 		"metadata=10":                " (11 characters, not shown): it is not endpoint=per-minute for one of the endpoints",
 		"authorize":                  " (9 characters, not shown): it is not endpoint=per-minute for one of the endpoints",
@@ -648,7 +695,6 @@ func TestUpstreamHeaderTimeoutDefaultsToFiveMinutesWithinBounds(t *testing.T) {
 		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=61m", 0, refused + "1h1m0s: it is out of range"},
 		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=0s", 0, refused + "0s: it is out of range"},
 		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=3600001ms", 0, refused + "1h0m0.001s: it is out of range"}, // shown as parsed
-		{"BYWARD_UPSTREAM_HEADER_TIMEOUT=5", 0, refused + "a value (1 character, not shown): it is not a duration"},
 	}
 	for _, c := range cases {
 		t.Run(c.env, func(t *testing.T) {
@@ -673,7 +719,9 @@ func TestUpstreamHeaderTimeoutDefaultsToFiveMinutesWithinBounds(t *testing.T) {
 // since peers are compared unmapped, and one shorter than /96 maps no IPv4 prefix (masked, it would
 // trust IPv6 addresses), so it is refused. An entry inside fe80::/10 is refused, as it would trust no
 // peer; a zone too: it was dropped, and it swallowed any prefix length after it. Link-local is said
-// first, so removing the zone never leads to the second refusal.
+// first, so removing the zone never leads to the second refusal. An entry refused for its form says
+// which part is wrong: the address, or the prefix length (not a whole number, a leading zero, longer
+// than the address).
 func TestTrustedProxiesTakeCIDRsAndAddresses(t *testing.T) {
 	cfg, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES=10.0.0.0/8, 192.0.2.7, 2001:db8::/32, 10.1.2.3/8"), nil)
 	if err != nil {
@@ -708,23 +756,58 @@ func TestTrustedProxiesTakeCIDRsAndAddresses(t *testing.T) {
 	if cfg, _, err := Load(nil, noAuthEnv(), nil); err != nil || len(cfg.TrustedProxies) != 0 {
 		t.Errorf("default trusted proxies = %v (err %v), want none", cfg.TrustedProxies, err)
 	}
+	const refused = "BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1"
 	for _, tc := range []struct{ name, value, want string }{
-		{"a hostname", "proxy.internal", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1 (14 characters, not shown): it is neither a CIDR nor an IP address`},
-		{"a mapped /8, shown as netip writes it", "0:0:0:0:0:FFFF:10.0.0.0/8", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, ::ffff:10.0.0.0/8: it is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)`},
-		{"a mapped /95", "::ffff:10.0.0.0/95", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, ::ffff:10.0.0.0/95: it is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)`},
+		{"a hostname", "proxy.internal", refused + ` (14 characters, not shown): it is neither a CIDR nor an IP address`},
+		{"a CIDR whose address is not one", "10.0.0/8", refused + ` (8 characters, not shown): its address, before the "/", is not an IP address`},
+		{"a CIDR with no prefix length", "10.0.0.0/", refused + ` (9 characters, not shown): its prefix length, after the "/", is not a whole number`},
+		{"a CIDR whose prefix length is a word", "10.0.0.0/x", refused + ` (10 characters, not shown): its prefix length, after the "/", is not a whole number`},
+		{"a prefix length with a leading zero", "10.0.0.0/08", refused + ` (11 characters, not shown): its prefix length has a leading zero`},
+		{"an IPv4 prefix longer than /32", "192.168.1.0/33", refused + ` (14 characters, not shown): its prefix length is longer than /32, the length of an IPv4 address`},
+		{"an IPv4 prefix length past any integer", "10.0.0.0/99999999999999999999", refused + ` (29 characters, not shown): its prefix length is longer than /32, the length of an IPv4 address`},
+		{"an IPv6 prefix longer than /128", "2001:db8::/129", refused + ` (14 characters, not shown): its prefix length is longer than /128, the length of an IPv6 address`},
+		{"a mapped /8, shown as netip writes it", "0:0:0:0:0:FFFF:10.0.0.0/8", refused + `, ::ffff:10.0.0.0/8: it is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)`},
+		{"a mapped /95", "::ffff:10.0.0.0/95", refused + `, ::ffff:10.0.0.0/95: it is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)`},
 		// Parsed as an address, everything after % is the zone, the prefix length included.
-		{"a zoned prefix", "2001:db8::1%eth0/64", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, 2001:db8::1: it has an IPv6 zone, not shown: give the proxy's routable address or CIDR, without a zone`},
-		{"a zoned address", "2001:db8::1%eth0", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, 2001:db8::1: it has an IPv6 zone, not shown: give the proxy's routable address or CIDR, without a zone`},
-		{"a zoned mapped address", "::ffff:10.0.0.1%eth0", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, 10.0.0.1: it has an IPv6 zone, not shown: give the proxy's routable address or CIDR, without a zone`},
-		{"a zoned link-local prefix", "fe80::1%eth0/64", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, fe80::1/128: it is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
-		{"a zoned link-local address", "fe80::1%eth0", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, fe80::1/128: it is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
-		{"a link-local address", "fe80::1", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, fe80::1/128: it is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
-		{"the link-local prefix", "fe80::/10", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, fe80::/10: it is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
-		{"the last link-local address", "febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff", `BYWARD_TRUSTED_PROXIES: want a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1; got entry 1 of 1, febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128: it is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
+		{"a zoned prefix", "2001:db8::1%eth0/64", refused + `, 2001:db8::1: it has an IPv6 zone, not shown: give the proxy's routable address or CIDR, without a zone`},
+		{"a zoned address", "2001:db8::1%eth0", refused + `, 2001:db8::1: it has an IPv6 zone, not shown: give the proxy's routable address or CIDR, without a zone`},
+		{"a zoned mapped address", "::ffff:10.0.0.1%eth0", refused + `, 10.0.0.1: it has an IPv6 zone, not shown: give the proxy's routable address or CIDR, without a zone`},
+		{"a zoned link-local prefix", "fe80::1%eth0/64", refused + `, fe80::1/128: it is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
+		{"a zoned link-local address", "fe80::1%eth0", refused + `, fe80::1/128: it is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
+		{"a link-local address", "fe80::1", refused + `, fe80::1/128: it is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
+		{"the link-local prefix", "fe80::/10", refused + `, fe80::/10: it is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
+		{"the last link-local address", "febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff", refused + `, febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff/128: it is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, _, err := Load(nil, noAuthEnv("BYWARD_TRUSTED_PROXIES="+tc.value), nil); err == nil || err.Error() != tc.want {
 				t.Errorf("err = %v\nwant %s", err, tc.want)
+			}
+		})
+	}
+}
+
+// A duration refused for its form says what is wrong with it, from time.ParseDuration's error, which
+// quotes the value, so is never shown: a number without a unit, a unit it does not take, or neither.
+func TestADurationRefusedForItsFormSaysWhatIsWrong(t *testing.T) {
+	const (
+		refused     = "BYWARD_UPSTREAM_HEADER_TIMEOUT: want a duration from 1s to 1h, such as 5m; got a value "
+		noUnit      = ": it has a number without a unit; give one of ns, us, ms, s, m or h"
+		badUnit     = ": it has a unit that is not one of ns, us, ms, s, m or h"
+		notDuration = ": it is not a duration"
+	)
+	for _, tc := range []struct{ value, want string }{
+		{"5", "(1 character, not shown)" + noUnit},
+		{"1m30", "(4 characters, not shown)" + noUnit},
+		{"1.5", "(3 characters, not shown)" + noUnit},
+		{"10x", "(3 characters, not shown)" + badUnit},
+		{"30sec", "(5 characters, not shown)" + badUnit},
+		{"5 m", "(3 characters, not shown)" + badUnit},
+		{"ten", "(3 characters, not shown)" + notDuration},
+		{"s", "(1 character, not shown)" + notDuration},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			if _, err := load(t, nil, "BYWARD_UPSTREAM_HEADER_TIMEOUT="+tc.value); !isConfigError(err) || err.Error() != refused+tc.want {
+				t.Fatalf("err = %v\nwant %s", err, refused+tc.want)
 			}
 		})
 	}
@@ -847,7 +930,7 @@ func TestInvalidStoreSettingsAreRejected(t *testing.T) {
 		// The counter file derived from a relative keys directory is not reported a second time; one the
 		// operator sets is.
 		{"a counter derived from a relative keys directory", []string{"BYWARD_KEYS_DIR=keys"}, "BYWARD_KEYS_DIR: want an absolute path", "BYWARD_STORE_COUNTER_FILE"},
-		{"a relative counter beside a relative keys directory", []string{"BYWARD_KEYS_DIR=keys", "BYWARD_STORE_COUNTER_FILE=writes"}, `BYWARD_STORE_COUNTER_FILE: want an absolute path; got a relative one: no path is relative to the working directory (ADR-0007 §6)`, ""},
+		{"a relative counter beside a relative keys directory", []string{"BYWARD_KEYS_DIR=keys", "BYWARD_STORE_COUNTER_FILE=writes"}, `BYWARD_STORE_COUNTER_FILE: want an absolute path, one starting with /; got a relative one: no path is relative to the working directory (ADR-0007 §6)`, ""},
 		{"counter inside the state directory", []string{"BYWARD_STORE_COUNTER_FILE=/var/lib/byward/state/writes"}, "BYWARD_STORE_COUNTER_FILE: want a path outside BYWARD_STORE_DIR; got one inside it: a restored backup", ""},
 		{"keys inside the state directory", []string{"BYWARD_KEYS_DIR=/var/lib/byward/state/keys"}, "keep the keys directory outside the state directory", ""},
 		{"grace not a duration", []string{"BYWARD_REFRESH_GRACE=soon"}, "BYWARD_REFRESH_GRACE: want a duration", ""},

@@ -163,7 +163,7 @@ func TestNoCommandShowsAHiddenOrARefusedValue(t *testing.T) {
 	}
 	// Every setting but these, for which config refuses none of the forms above, refuses some form, so
 	// its refusal is run through every command: one that stops refusing, or starts, is named here.
-	acceptsEveryForm := []string{"app-client-ids", "app-roles", "entra-client-certificate", "entra-client-id", "entra-client-secret",
+	acceptsEveryForm := []string{"app-client-ids", "app-roles", "entra-client-certificate", "entra-client-secret",
 		"gate-email-domains", "gate-groups", "gate-hosted-domains", "gate-roles", "gate-tenants", "oidc-client-id", "oidc-client-key",
 		"oidc-client-key-id", "oidc-client-secret", "oidc-groups-claim", "oidc-name", "oidc-roles-claim", "oidc-subject-claim",
 		"operator-name", "resource-name", "scope-description", "store-postgres-dsn", "upstream-command", "upstream-credential"}
