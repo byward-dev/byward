@@ -298,11 +298,7 @@ func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity,
 	c := b.connFor(key, p, id)
 	modern, err := b.speaksModern(r.Context(), c)
 	if err != nil { // the probe never reached a verdict: a failure of the process, as for any Send
-		if shutdown.AnswerIfEnded(w, r) {
-			return
-		}
-		c.log.WarnContext(r.Context(), "relaying to the upstream process failed", "error", err)
-		http.Error(w, "upstream unavailable", http.StatusBadGateway)
+		upstreamFailed(w, r, c.log, relayFailed, err)
 		return
 	}
 	if !modern {
@@ -311,11 +307,7 @@ func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity,
 	}
 	if env.kind() == kindNotification {
 		if err := p.Send(r.Context(), msg); err != nil {
-			if shutdown.AnswerIfEnded(w, r) { // the request ended: not a failure of the process
-				return
-			}
-			c.log.WarnContext(r.Context(), "relaying to the upstream process failed", "error", err)
-			http.Error(w, "upstream unavailable", http.StatusBadGateway)
+			upstreamFailed(w, r, c.log, relayFailed, err)
 			return
 		}
 		w.WriteHeader(http.StatusAccepted)
@@ -451,11 +443,7 @@ func (c *userConn) request(w http.ResponseWriter, r *http.Request, msg []byte, l
 	q := c.register(meta.id.value(msg), token, meta.logs, listen)
 	defer c.unregister(q)
 	if err := c.p.Send(r.Context(), replace(msg, edit{meta.id, []byte(q.proxyID)}, edit{meta.token, []byte(q.proxyTok)})); err != nil {
-		if shutdown.AnswerIfEnded(w, r) { // the request ended: not a failure of the process
-			return
-		}
-		c.log.WarnContext(r.Context(), "relaying to the upstream process failed", "error", err)
-		http.Error(w, "upstream unavailable", http.StatusBadGateway)
+		upstreamFailed(w, r, c.log, relayFailed, err)
 		return
 	}
 	var silence *quiet           // only a listen stream is long-lived enough to need a keep-alive

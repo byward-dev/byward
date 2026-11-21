@@ -310,6 +310,9 @@ func TestOnlyAProbeTheProcessAnswersOrLetsTimeOutDecidesTheUpstreamsEra(t *testi
 				if rec.level != slog.LevelWarn || !strings.Contains(got, ErrExited.Error()) {
 					t.Fatalf("logged at %v with error %q, want WARN with %q", rec.level, got, ErrExited)
 				}
+				if rec.attrs["user_key"] != alice.Subject || rec.attrs["process"] == nil {
+					t.Fatalf("logged with %v; want alice's process and user_key", rec.attrs)
+				}
 				// Only the first: a later request may lease the same process after it exited but before
 				// its exit is recorded, on a new userConn whose probe's write then fails instead.
 				if i == 0 && !strings.Contains(got, c.cause) {
@@ -1148,6 +1151,9 @@ func TestAModernMessageThatCannotReachItsProcessWhileItsRequestIsLiveIsLoggedAsA
 			}
 			if got := fmt.Sprint(failures[0].attrs["error"]); !strings.Contains(got, ErrExited.Error()) {
 				t.Fatalf("logged error %q, want the Send's cause, %q", got, ErrExited)
+			}
+			if attrs := failures[0].attrs; attrs["user_key"] != alice.Subject || attrs["process"] == nil {
+				t.Fatalf("logged with %v; want alice's process and user_key", attrs)
 			}
 		})
 	}

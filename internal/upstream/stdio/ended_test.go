@@ -5,6 +5,7 @@ package stdio
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -385,6 +386,11 @@ func TestAFailedSendIsAnsweredByHowItsRequestEndedBeforeWhyItFailed(t *testing.T
 			}
 			if w.Code != live.status || w.Body.String() != live.body || !slices.Equal(warns, live.warns) {
 				t.Fatalf("answer %d %q, logged %q; want %d %q and %q", w.Code, w.Body, warns, live.status, live.body, live.warns)
+			}
+			for _, rec := range log.warnings() { // the failure is logged with its cause
+				if got := fmt.Sprint(rec.attrs["error"]); got != live.err.Error() {
+					t.Fatalf("logged error %q, want the send's, %q", got, live.err)
+				}
 			}
 		})
 	}

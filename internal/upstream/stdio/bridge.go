@@ -214,10 +214,21 @@ func (b *Bridge) startFailed(w http.ResponseWriter, r *http.Request, id Identity
 		http.Error(w, "upstream busy", http.StatusServiceUnavailable)
 		return
 	}
+	upstreamFailed(w, r, b.c.Log, "cannot start the upstream process", err)
+}
+
+// relayFailed is what a request is logged as when its upstream process failed as byward relayed to
+// it: its message, or the server/discover probe before it, could not be sent or was not answered.
+const relayFailed = "relaying to the upstream process failed"
+
+// upstreamFailed answers a request that failed on its upstream process: by how the request ended,
+// if it did, with nothing logged (shutdown.AnswerIfEnded), as that is not the process's failure;
+// else it logs `what` at WARN with err and answers 502.
+func upstreamFailed(w http.ResponseWriter, r *http.Request, log *slog.Logger, what string, err error) {
 	if shutdown.AnswerIfEnded(w, r) {
 		return
 	}
-	b.c.Log.WarnContext(r.Context(), "cannot start the upstream process", "error", err)
+	log.WarnContext(r.Context(), what, "error", err)
 	http.Error(w, "upstream unavailable", http.StatusBadGateway)
 }
 
@@ -552,8 +563,7 @@ func (s *session) sendFailed(w http.ResponseWriter, r *http.Request, err error) 
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
-	s.log.WarnContext(r.Context(), "relaying to the upstream process failed", "error", err)
-	http.Error(w, "upstream unavailable", http.StatusBadGateway)
+	upstreamFailed(w, r, s.log, relayFailed, err)
 }
 
 func (s *session) isEnded() bool {
