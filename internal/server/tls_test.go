@@ -357,7 +357,10 @@ func TestTheRunningListenerServesARenewedCertificateWithoutARestart(t *testing.T
 				t.Fatal("the renewed certificate is not served at the next connection")
 			}
 			logs := l.logs.waitFor(t, regexp.MustCompile(`(?s)serving a new TLS certificate.*the certificate \(CN=Test Leaf\) expires on`))
-			for _, field := range []string{`"cert_file":"` + l.cert + `"`, `"subject":"CN=Test Leaf"`,
+			if strings.Contains(logs, l.cert) {
+				t.Errorf("the reload shows the certificate file's path (security invariant 2, #575):\n%s", logs)
+			}
+			for _, field := range []string{`"subject":"CN=Test Leaf"`,
 				`"not_after":"` + leaf(t, renewed).NotAfter.UTC().Format(time.RFC3339) + `"`} {
 				if !strings.Contains(logs, field) {
 					t.Errorf("the reload does not log %s:\n%s", field, logs)
@@ -380,8 +383,8 @@ func TestTheRunningListenerRefusesARenewedKeyOtherUsersCanRead(t *testing.T) {
 	if !l.handshake(t, first.Roots, "mcp.example.com").Equal(leaf(t, first)) {
 		t.Fatal("a key other users can read was served")
 	}
-	if logs := l.logs.waitFor(t, regexp.MustCompile(`cannot be served`)); !strings.Contains(logs, "has mode 0644") || !strings.Contains(logs, `"key_file":"`+l.key+`"`) {
-		t.Errorf("the warning does not name the key and say why:\n%s", logs)
+	if logs := l.logs.waitFor(t, regexp.MustCompile(`cannot be served`)); !strings.Contains(logs, "the key file: secret file has mode 0644") || strings.Contains(logs, l.key) {
+		t.Errorf("the warning does not name the key file by its role, never its path, and say why:\n%s", logs)
 	}
 }
 
@@ -473,7 +476,7 @@ func TestTLSFilesThatCannotBeServedFailStartupCheckAndDoctorAndDevRelaxesOnlyThe
 	}{
 		{name: "the key of another certificate", bundle: testcert.Bundle{Cert: good.Cert, Key: other.Key}, want: "BYWARD_TLS_CERT_FILE / BYWARD_TLS_KEY_FILE: "},
 		{name: "an expired certificate", bundle: expired, want: "the certificate (CN=Test Leaf) expired on", doctorFails: true},
-		{name: "no certificate file", bundle: good, missingCert: true, want: "missing.crt"},
+		{name: "no certificate file", bundle: good, missingCert: true, want: "BYWARD_TLS_CERT_FILE / BYWARD_TLS_KEY_FILE: the certificate file: no such file or directory"},
 		{name: "a key other users can read", bundle: good, keyMode: 0o644, want: "BYWARD_TLS_KEY_FILE: secret file"},
 		{name: "a key other users can read is accepted in --dev", bundle: good, keyMode: 0o644, dev: true},
 		{name: "an expired certificate is refused in --dev", bundle: expired, dev: true, want: "the certificate (CN=Test Leaf) expired on", doctorFails: true},

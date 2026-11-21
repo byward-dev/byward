@@ -172,7 +172,8 @@ export BYWARD_DATA_DIR="$PWD/byward-data" BYWARD_OIDC_CLIENT_SECRET_FILE="$PWD/i
 ./byward
 ```
 
-A missing or empty key directory stops startup with a message naming the path and its setting. The
+A missing or empty key directory stops startup with a message naming its setting and the cause,
+never the path. The
 startup log also says which client sources are active, for example
 `msg="client sources" static_clients=0 cimd=true dcr=true`.
 

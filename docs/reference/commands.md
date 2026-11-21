@@ -220,10 +220,10 @@ and `check --offline` refuse at startup. A store that is there but cannot be ope
 revocation is audited as `grant_revoked` with the reason `operator revoke-user`, by the command and by
 each running proxy at its next deny-list sync ([where it is recorded](../how-to/revoke-access.md#where-an-operator-revocation-is-recorded)).
 
-It acts only on the store a proxy already uses, and prints the user and that store (the state
-directory, or the PostgreSQL database, never the DSN). Where the settings point at no byward store (no
+It acts only on the store a proxy already uses, and prints the user and that store (`BYWARD_STORE_DIR`,
+never its path, or the PostgreSQL database, never the DSN). Where the settings point at no byward store (no
 `byward.db` in `BYWARD_STORE_DIR`, or a database that does not exist or holds no byward schema), it
-exits 2 naming the setting and where it looked, having created and written nothing: a mistyped
+exits 2 naming the setting (and, for PostgreSQL, the database), having created and written nothing: a mistyped
 setting is never taken for a done revocation. It never migrates: a store at another byward version's
 schema exits 1 and is left unchanged. Run the command with the proxy's byward version, or, for an older
 schema, start the upgraded proxy first.

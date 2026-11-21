@@ -3,11 +3,14 @@ package servingcert
 import (
 	"bytes"
 	"crypto/tls"
+	"fmt"
 	"log/slog"
 	"os"
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // Reloader serves the certificate in Files and picks up a replaced pair at the next handshake. At
@@ -30,7 +33,8 @@ type Options struct {
 	Now func() time.Time
 	Log *slog.Logger
 	// CheckKey refuses a key file the proxy must not use, such as one the secret-file check refuses;
-	// nil checks nothing. A replaced key that fails it is not served.
+	// nil checks nothing. A replaced key that fails it is not served. Its error must be a
+	// *fs.PathError or name no path (security invariant 2): it is logged when a reload fails.
 	CheckKey func(path string) error
 	// Served is told of each pair served after a change, to warn about it as startup does; nil for
 	// none.
@@ -51,7 +55,7 @@ func Load(f Files, o Options) (*Reloader, error) {
 func (o Options) load(f Files) (*Pair, error) {
 	if o.CheckKey != nil {
 		if err := o.CheckKey(f.Key); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("the key file: %w", logging.FileError(err))
 		}
 	}
 	p, err := Read(f)
@@ -94,7 +98,7 @@ func (r *Reloader) reload(s state) {
 		}
 		if changed {
 			r.o.Log.Warn("the TLS certificate files changed but cannot be served; serving the previous certificate",
-				"cert_file", r.files.Cert, "key_file", r.files.Key, "error", err.Error())
+				"error", err.Error())
 		}
 		return
 	}
@@ -104,7 +108,7 @@ func (r *Reloader) reload(s state) {
 		return
 	}
 	_, notAfter := p.FirstExpiry()
-	r.o.Log.Info("serving a new TLS certificate", "cert_file", r.files.Cert, "subject", p.chain[0].Subject.String(),
+	r.o.Log.Info("serving a new TLS certificate", "subject", p.chain[0].Subject.String(),
 		"not_after", notAfter.UTC().Format(time.RFC3339))
 	if r.o.Served != nil {
 		r.o.Served(p)

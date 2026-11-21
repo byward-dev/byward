@@ -111,7 +111,7 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 	ring, err := token.LoadKeyRing(cfg.KeysDir, secretCheck(cfg))
 	if err != nil {
 		// No key generation (ADR-0007 §5): the operator creates the first key.
-		return nil, fmt.Errorf("BYWARD_KEYS_DIR: %s: %w (see docs/how-to/sealing-keys.md)", cfg.KeysDir, err)
+		return nil, fmt.Errorf("BYWARD_KEYS_DIR: %w (see docs/how-to/sealing-keys.md)", err)
 	}
 	p := &authParts{ring: ring}
 	if p.sealer, err = token.NewSealer(ring, cfg.PublicURL.String()); err != nil {
@@ -139,7 +139,7 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 	}
 	p.static, err = registration.LoadStatic(cfg.StaticClientsFile, os.ReadFile, p.jti, opts...)
 	if err != nil {
-		loose = append(loose, fmt.Errorf("BYWARD_STATIC_CLIENTS_FILE: %s: %w (see docs/reference/static-clients.md)", cfg.StaticClientsFile, err))
+		loose = append(loose, fmt.Errorf("BYWARD_STATIC_CLIENTS_FILE: %w (see docs/reference/static-clients.md)", err))
 	}
 	if err := errors.Join(loose...); err != nil {
 		return nil, err

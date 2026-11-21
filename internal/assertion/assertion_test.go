@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -74,29 +75,56 @@ func TestLoadKeysRefusesWhatCannotSign(t *testing.T) {
 		check func(string) error
 		inErr string
 	}{
-		{"no directory", func(t *testing.T, dir string) { _ = os.Remove(dir) }, noCheck, "assertion key directory"},
+		{"no directory", func(t *testing.T, dir string) { _ = os.Remove(dir) }, noCheck, "assertion key directory: no such file or directory"},
 		{"no key files", func(*testing.T, string) {}, noCheck, "has no key files"},
-		{"not PEM", func(t *testing.T, dir string) { write(t, dir, "k1", []byte("not a key")) }, noCheck, "k1: not PEM; create one with: openssl ecparam"},
+		{"not PEM", func(t *testing.T, dir string) { write(t, dir, "k1", []byte("not a key")) }, noCheck, `assertion key file "k1": not PEM; create one with: openssl ecparam`},
 		{"an RSA key", func(t *testing.T, dir string) {
 			write(t, dir, "k1", pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: rsaDER}))
-		}, noCheck, "k1: want an ECDSA P-256 private key"},
+		}, noCheck, `assertion key file "k1": want an ECDSA P-256 private key`},
 		{"a P-384 key", func(t *testing.T, dir string) {
 			write(t, dir, "k1", pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: p384DER}))
-		}, noCheck, "k1: want an ECDSA P-256 private key"},
+		}, noCheck, `assertion key file "k1": want an ECDSA P-256 private key`},
 		{"a public key", func(t *testing.T, dir string) {
 			write(t, dir, "k1", pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: []byte("x")}))
-		}, noCheck, `PEM block "PUBLIC KEY"`},
-		{"a name that is no key ID", func(t *testing.T, dir string) { writeKey(t, dir, "key one", false) }, noCheck, "the name is the key ID"},
+		}, noCheck, `assertion key file "k1": PEM block "PUBLIC KEY"`},
+		{"a name that is no key ID", func(t *testing.T, dir string) { writeKey(t, dir, "key one", false) }, noCheck, `assertion key file "key one": the name is the key ID`},
+		{"a newline in the name, which cannot start a line of its own (#505)", func(t *testing.T, dir string) { writeKey(t, dir, "k2\nforged", false) }, noCheck,
+			`assertion key file "k2\nforged": `},
 		{"a file the permission check refuses", func(t *testing.T, dir string) { writeKey(t, dir, "k1", false) },
-			func(p string) error { return errors.New("secret file " + p + " has mode 0644") }, "assertion key file: secret file"},
-		{"a file too large", func(t *testing.T, dir string) { write(t, dir, "k1", make([]byte, maxKeyFile+1)) }, noCheck, "larger than"},
+			func(string) error { return errors.New("secret file has mode 0644") }, `assertion key file "k1": secret file has mode 0644`},
+		{"a file too large", func(t *testing.T, dir string) { write(t, dir, "k1", make([]byte, maxKeyFile+1)) }, noCheck, `assertion key file "k1": larger than`},
+		{"a check whose error quotes the path", func(t *testing.T, dir string) { writeKey(t, dir, "k1", false) },
+			func(path string) error { return &fs.PathError{Op: "stat", Path: path, Err: fs.ErrPermission} }, `assertion key file "k1": permission denied`},
+		{"a key directory that is a file", func(t *testing.T, dir string) {
+			if err := os.Remove(dir); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(dir, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}, noCheck, "assertion key directory: not a directory"},
+		{"a symlink to nothing", func(t *testing.T, dir string) {
+			if err := os.Symlink(filepath.Join(dir, "absent"), filepath.Join(dir, "k1")); err != nil {
+				t.Fatal(err)
+			}
+		}, noCheck, `assertion key file "k1": no such file or directory`},
+		{"a file it cannot read", func(t *testing.T, dir string) {
+			if os.Geteuid() == 0 {
+				t.Skip("root reads any file")
+			}
+			writeKey(t, dir, "k1", false)
+			if err := os.Chmod(filepath.Join(dir, "k1"), 0o000); err != nil {
+				t.Fatal(err)
+			}
+		}, noCheck, `assertion key file "k1": permission denied`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := assertionkey.EmptyDir(t)
 			tc.setup(t, dir)
-			if _, err := LoadKeys(dir, tc.check); err == nil || !strings.Contains(err.Error(), tc.inErr) {
-				t.Fatalf("err = %v, want %q", err, tc.inErr)
+			// The file by its name, the key ID, never the directory's path (security invariant 2, #575).
+			if _, err := LoadKeys(dir, tc.check); err == nil || !strings.Contains(err.Error(), tc.inErr) || strings.Contains(err.Error(), dir) {
+				t.Fatalf("err = %v, want %q, without the directory", err, tc.inErr)
 			}
 		})
 	}
@@ -161,14 +189,14 @@ func TestLoadKeysRefusesAWorldWritableKeyFileAlwaysAndAWorldWritableDirectoryUnl
 			}
 			_, err := LoadKeys(dir, noCheck)
 			want := map[string]string{ // each refusal names the file or directory at fault
-				"file":      "assertion key file " + filepath.Join(dir, "k1") + " is world-writable",
-				"directory": "assertion key directory " + dir + " is world-writable",
+				"file":      `assertion key file "k1" is world-writable`,
+				"directory": "assertion key directory is world-writable",
 			}[tc.refused]
 			switch {
 			case want == "" && err != nil:
 				t.Fatalf("err = %v, want the keys loaded", err)
-			case want != "" && (err == nil || !strings.Contains(err.Error(), want)):
-				t.Fatalf("err = %v, want %q", err, want)
+			case want != "" && (err == nil || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), dir)):
+				t.Fatalf("err = %v, want %q, without the directory", err, want)
 			}
 		})
 	}

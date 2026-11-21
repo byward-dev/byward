@@ -225,8 +225,8 @@ docker run --rm --network byward -p 8080:8080 --user "$(id -u):$(id -g)" \
 ```
 
 Or with the binary: export the same five settings plus `BYWARD_DATA_DIR="$PWD/byward-data"` and run
-`byward`. A missing or empty key directory stops startup with a message naming the path and the
-setting that moves it. The clients file is optional while CIMD or DCR is on, as it is by default;
+`byward`. A missing or empty key directory stops startup with a message naming the setting that
+moves it and the cause, never the path. The clients file is optional while CIMD or DCR is on, as it is by default;
 a `BYWARD_STATIC_CLIENTS_FILE` you set must exist. The startup log says which client sources are
 active, for example `msg="client sources" static_clients=0 cimd=true dcr=true`.
 `BYWARD_UPSTREAM_URL` must be reachable from where byward runs (from inside the container, `127.0.0.1` is the container itself). Put your TLS

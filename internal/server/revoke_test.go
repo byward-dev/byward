@@ -77,9 +77,10 @@ func grantGone(t *testing.T, cfg *config.Config, id string) bool {
 func TestRevokeUserEndsOnlyThatUsersAccessBesideARunningProxy(t *testing.T) {
 	cfg, tok := revokeEnv(t)
 	var logs bytes.Buffer
-	user, _, err := RevokeUser(context.Background(), cfg, slog.New(slog.NewJSONHandler(&logs, nil)), strings.ToUpper(aliceKey))
-	if err != nil || user != aliceKey {
-		t.Fatalf("RevokeUser = %q, %v; want %q", user, err, aliceKey)
+	user, name, err := RevokeUser(context.Background(), cfg, slog.New(slog.NewJSONHandler(&logs, nil)), strings.ToUpper(aliceKey))
+	// The store by its setting, never its path (security invariant 2, #575).
+	if err != nil || user != aliceKey || name != "BYWARD_STORE_DIR" {
+		t.Fatalf("RevokeUser = %q, %q, %v; want %q in BYWARD_STORE_DIR", user, name, err, aliceKey)
 	}
 	if valid(t, cfg, tok["alice"]) || !grantGone(t, cfg, "alice") {
 		t.Fatal("alice's token is still accepted or her grant survived")
@@ -93,11 +94,18 @@ func TestRevokeUserEndsOnlyThatUsersAccessBesideARunningProxy(t *testing.T) {
 	}
 }
 
+// revoke-all ends every user's access beside a running proxy and names the store by its setting,
+// never its path.
 func TestRevokeAllEndsEveryUsersAccessBesideARunningProxy(t *testing.T) {
 	cfg, tok := revokeEnv(t)
 	var logs bytes.Buffer
-	if _, err := RevokeAll(context.Background(), cfg, slog.New(slog.NewJSONHandler(&logs, nil))); err != nil {
-		t.Fatal(err)
+	if name, err := RevokeAll(context.Background(), cfg, slog.New(slog.NewJSONHandler(&logs, nil))); err != nil || name != "BYWARD_STORE_DIR" {
+		t.Fatalf("RevokeAll = %q, %v; want BYWARD_STORE_DIR", name, err)
+	}
+	// An operator command prints no listing of the configuration, so no line of it shows the store's
+	// path (security invariant 2, #575).
+	if strings.Contains(logs.String(), cfg.StoreDir) || strings.Contains(logs.String(), cfg.StoreCounterFile) {
+		t.Errorf("the command's log shows a store path:\n%s", logs.String())
 	}
 	for _, id := range []string{"alice", "bob"} {
 		if valid(t, cfg, tok[id]) || !grantGone(t, cfg, id) {
@@ -184,15 +192,15 @@ func TestRevokeUserRefusesWhatIsNotAUserKeyAndRevokesNobody(t *testing.T) {
 	}
 }
 
-// L152: a revocation whose settings point at no store is refused with ErrNoStore, naming the setting
-// and the directory and the way out, and creates nothing there.
+// L152: a revocation whose settings point at no store is refused with ErrNoStore, naming the setting,
+// never the directory's path (security invariant 2, #575), and the way out, and creates nothing there.
 func TestARevocationWithNoStoreIsRefusedNamingTheSetting(t *testing.T) {
 	_, cfg := storeEnv(t)
 	cfg.StoreDir += "-typo"
 	_, err := RevokeAll(context.Background(), cfg, discard)
-	if !errors.Is(err, ErrNoStore) || !strings.Contains(err.Error(), "BYWARD_STORE_DIR="+cfg.StoreDir+": no byward store there") ||
+	if !errors.Is(err, ErrNoStore) || !strings.HasPrefix(err.Error(), "BYWARD_STORE_DIR: no byward store there") || strings.Contains(err.Error(), cfg.StoreDir) ||
 		!strings.Contains(err.Error(), "run the command with the proxy's settings") {
-		t.Fatalf("RevokeAll = %v; want ErrNoStore naming BYWARD_STORE_DIR=%s and the fix", err, cfg.StoreDir)
+		t.Fatalf("RevokeAll = %v; want ErrNoStore naming BYWARD_STORE_DIR, without its path, and the fix", err)
 	}
 	if _, err := os.Stat(cfg.StoreDir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the refused revocation created %s (%v)", cfg.StoreDir, err)

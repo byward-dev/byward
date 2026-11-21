@@ -99,7 +99,8 @@ func TestAnUnknownSettingIsAConfigErrorWithADidYouMeanHint(t *testing.T) {
 	}
 }
 
-// A loose secret file stops the process as a configuration error, telling the operator the fix.
+// A loose secret file stops the process as a configuration error naming the setting, never the path,
+// and telling the operator the fix.
 func TestLooseSecretFileIsAConfigError(t *testing.T) {
 	env := append(authEnv(t), serveEnv("https://m.example/mcp", "127.0.0.1:0")...)
 	var secret string
@@ -115,14 +116,19 @@ func TestLooseSecretFileIsAConfigError(t *testing.T) {
 	if code != exitConfig {
 		t.Fatalf("exit %d, want %d (configuration error); stderr %q", code, exitConfig, stderr)
 	}
-	// The startup log comes first; the error is a line of its own.
-	if want := "\nbyward: configuration error: BYWARD_ENTRA_CLIENT_SECRET_FILE: secret file " + secret + " has mode 0644"; !strings.Contains(stderr, want) {
-		t.Errorf("stderr %q lacks the configuration-error line %q", stderr, want[1:])
+	// The startup log comes first; the error is a line of its own, naming the setting and the mode,
+	// never the path (security invariant 2, #575).
+	line := stderr[strings.LastIndex(stderr, "\nbyward: configuration error: ")+1:]
+	if !strings.HasPrefix(line, "byward: configuration error: BYWARD_ENTRA_CLIENT_SECRET_FILE: secret file has mode 0644") {
+		t.Errorf("stderr %q lacks the configuration-error line", stderr)
 	}
-	for _, want := range []string{secret, "chmod 600", "read-only"} {
-		if !strings.Contains(stderr, want) {
-			t.Errorf("stderr %q lacks %q", stderr, want)
+	for _, want := range []string{"chmod 600", "read-only"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("configuration-error line %q lacks %q", line, want)
 		}
+	}
+	if strings.Contains(line, secret) {
+		t.Errorf("configuration-error line %q shows the secret file's path", line)
 	}
 }
 
@@ -318,8 +324,8 @@ func TestRevokeCommandsExit2OnMisuseOrNoStore1OnAStoreFailureAndNameTheRevokedUs
 		args   []string
 		store  operatorStore
 		code   int
-		stdout string // the whole stdout; {store} is the state directory
-		stderr string // the whole stderr of a command that is not done, {store} as for stdout; "" for a done one
+		stdout string // the whole stdout: the store by its setting, never its path (#575)
+		stderr string // the whole stderr of a command that is not done; "" for a done one
 	}{
 		{"revoke-user without a key", []string{"revoke-user"}, noStore, exitConfig, "", revokeUserUsage},
 		{"revoke-user with two keys", []string{"revoke-user", user, user}, noStore, exitConfig, "", revokeUserUsage},
@@ -327,27 +333,27 @@ func TestRevokeCommandsExit2OnMisuseOrNoStore1OnAStoreFailureAndNameTheRevokedUs
 		{"revoke-all without --yes", []string{"revoke-all"}, noStore, exitConfig, "", revokeAllUsage},
 		{"revoke-all with yes instead of --yes", []string{"revoke-all", "yes"}, noStore, exitConfig, "", revokeAllUsage},
 		{"revoke-all with --yes and more", []string{"revoke-all", "--yes", "extra"}, noStore, exitConfig, "", revokeAllUsage},
-		{"revoke-user with no store", []string{"revoke-user", user}, noStore, exitConfig, "", "byward: revoke-user: BYWARD_STORE_DIR={store}" + storeMissing},
-		{"revoke-all with no store", []string{"revoke-all", "--yes"}, noStore, exitConfig, "", "byward: revoke-all: BYWARD_STORE_DIR={store}" + storeMissing},
-		{"revoke-user with a state directory that is a file", []string{"revoke-user", user}, stateDirIsAFile, exitConfig, "", "byward: revoke-user: BYWARD_STORE_DIR={store}" + stateDirNotADir},
-		{"revoke-all with a state directory that is a file", []string{"revoke-all", "--yes"}, stateDirIsAFile, exitConfig, "", "byward: revoke-all: BYWARD_STORE_DIR={store}" + stateDirNotADir},
+		{"revoke-user with no store", []string{"revoke-user", user}, noStore, exitConfig, "", "byward: revoke-user: BYWARD_STORE_DIR" + storeMissing},
+		{"revoke-all with no store", []string{"revoke-all", "--yes"}, noStore, exitConfig, "", "byward: revoke-all: BYWARD_STORE_DIR" + storeMissing},
+		{"revoke-user with a state directory that is a file", []string{"revoke-user", user}, stateDirIsAFile, exitConfig, "", "byward: revoke-user: BYWARD_STORE_DIR" + stateDirNotADir},
+		{"revoke-all with a state directory that is a file", []string{"revoke-all", "--yes"}, stateDirIsAFile, exitConfig, "", "byward: revoke-all: BYWARD_STORE_DIR" + stateDirNotADir},
 		{"revoke-user with a store that cannot open", []string{"revoke-user", user}, corruptStore, exitRuntime, "", "byward: revoke-user failed: " + storeCannotOpen},
 		{"revoke-all with a store that cannot open", []string{"revoke-all", "--yes"}, corruptStore, exitRuntime, "", "byward: revoke-all failed: " + storeCannotOpen},
-		{"revoke-user", []string{"revoke-user", strings.ToUpper(user)}, proxysStore, exitOK, "revoked user " + user + " in BYWARD_STORE_DIR={store}" + revoked, ""},
-		{"revoke-all", []string{"revoke-all", "--yes"}, proxysStore, exitOK, "revoked every user in BYWARD_STORE_DIR={store}" + revoked, ""},
+		{"revoke-user", []string{"revoke-user", strings.ToUpper(user)}, proxysStore, exitOK, "revoked user " + user + " in BYWARD_STORE_DIR" + revoked, ""},
+		{"revoke-all", []string{"revoke-all", "--yes"}, proxysStore, exitOK, "revoked every user in BYWARD_STORE_DIR" + revoked, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			env, stateDir, counter := operatorEnv(t, tc.store)
 			code, stdout, stderr := runWith(tc.args, env...)
-			wantStdout := strings.ReplaceAll(tc.stdout, "{store}", stateDir)
+			wantStdout := tc.stdout
 			var wantStderr string
 			var okStderr bool
 			if tc.code == exitOK {
 				wantStderr = `"reason":"operator ` + tc.args[0] + `"`
 				okStderr = strings.Contains(stderr, wantStderr)
 			} else {
-				wantStderr = strings.ReplaceAll(tc.stderr, "{store}", stateDir)
+				wantStderr = tc.stderr
 				okStderr = outputMatches(stderr, wantStderr)
 			}
 			if code != tc.code || stdout != wantStdout || !okStderr {
@@ -389,7 +395,7 @@ func TestARevocationWithAMistypedStateDirectoryLeavesTheRealStoreAlone(t *testin
 		}
 	}
 	code, stdout, stderr := runWith([]string{"revoke-all", "--yes"}, env...)
-	want := "byward: revoke-all: BYWARD_STORE_DIR=" + typo + storeMissing
+	want := "byward: revoke-all: BYWARD_STORE_DIR" + storeMissing // the setting, never the path (#575)
 	if code != exitConfig || stdout != "" || stderr != want {
 		t.Fatalf("code %d (want %d), stdout %q, stderr %q (want %q)", code, exitConfig, stdout, stderr, want)
 	}
@@ -507,11 +513,11 @@ func TestRevokeAndNewEpochTakeAStdioUpstreamAfterDashes(t *testing.T) {
 		name   string
 		args   []string
 		code   int
-		stdout string // the whole stdout; {store} is the state directory
+		stdout string // the whole stdout: the store by its setting, never its path (#575)
 		stderr string // the whole stderr of a command that is not done; "" for a done one
 	}{
-		{"revoke-user revokes the user", []string{"revoke-user", user, "--"}, exitOK, "revoked user " + user + " in BYWARD_STORE_DIR={store}" + revoked, ""},
-		{"revoke-all revokes every user", []string{"revoke-all", "--yes", "--"}, exitOK, "revoked every user in BYWARD_STORE_DIR={store}" + revoked, ""},
+		{"revoke-user revokes the user", []string{"revoke-user", user, "--"}, exitOK, "revoked user " + user + " in BYWARD_STORE_DIR" + revoked, ""},
+		{"revoke-all revokes every user", []string{"revoke-all", "--yes", "--"}, exitOK, "revoked every user in BYWARD_STORE_DIR" + revoked, ""},
 		{"store new-epoch refuses SQLite", []string{"store", "new-epoch", "--yes", "--"}, exitConfig, "", newEpochNeedsPostgres},
 		{"revoke-user without a key is a usage error", []string{"revoke-user", "--"}, exitConfig, "", revokeUserUsage},
 		{"revoke-all without --yes is a usage error", []string{"revoke-all", "--"}, exitConfig, "", revokeAllUsage},
@@ -536,7 +542,7 @@ func TestRevokeAndNewEpochTakeAStdioUpstreamAfterDashes(t *testing.T) {
 				}
 			}
 			code, stdout, stderr := runWith(append(tc.args, script, "--flag"), env...)
-			wantStdout := strings.ReplaceAll(tc.stdout, "{store}", setting(env, "BYWARD_STORE_DIR"))
+			wantStdout := tc.stdout
 			wantStderr := tc.stderr
 			var okStderr bool
 			if tc.code == exitOK { // a done command's stderr is its audit log, which must name the command
@@ -565,7 +571,7 @@ const (
 	revokeAllUsage        = "byward: usage: byward revoke-all --yes [-- stdio-upstream-command [args...]] (signs every user out)\n"
 	newEpochUsage         = "byward: usage: byward store new-epoch --yes [-- stdio-upstream-command [args...]] (refresh tokens from before it stop working)\n"
 	newEpochNeedsPostgres = "byward: store new-epoch: new-epoch is for the PostgreSQL store (BYWARD_STORE_POSTGRES_DSN_FILE); the SQLite store finds a restore at startup from BYWARD_STORE_COUNTER_FILE (docs/how-to/state.md)\n"
-	// storeMissing follows "BYWARD_STORE_DIR=<dir>" when the state directory holds no store.
+	// storeMissing follows "BYWARD_STORE_DIR" when the state directory holds no store.
 	storeMissing = ": no byward store there: byward.db is missing; run the command with the proxy's settings (see docs/how-to/state.md)\n"
 	// revoked ends a revocation's success line, after the store's name.
 	revoked = ": their grants are gone and their tokens stop working within seconds\n"

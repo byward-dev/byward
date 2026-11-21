@@ -19,6 +19,8 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 const clientAssertionType = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
@@ -175,7 +177,7 @@ func AssertionFile(path string) ClientAuth { return assertionFile{path} }
 func (a assertionFile) Apply(form url.Values, clientID, _ string, _ time.Time) error {
 	b, err := os.ReadFile(a.path)
 	if err != nil {
-		return fmt.Errorf("idp: read client assertion file: %w", err)
+		return fmt.Errorf("idp: read client assertion file: %w", logging.FileError(err))
 	}
 	assertion := strings.TrimSpace(string(b))
 	if assertion == "" {
