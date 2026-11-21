@@ -60,7 +60,7 @@ func TestEveryListSettingRefusesAListOfNone(t *testing.T) {
 // backslash: each is taken, by BYWARD_SCOPE and by each entry of BYWARD_OIDC_SCOPES, and every other
 // character is refused, ends of the range and controls included.
 func TestAScopeTokenIsThePrintableASCIIButSpaceQuoteAndBackslash(t *testing.T) {
-	const reason = "it has a character a scope token cannot hold: white space, a double quote, a backslash or one that is not printable ASCII"
+	reason := scopeCharsRefused // the literal reason, pinned once
 	for r := rune(0); r <= 0x80; r++ {
 		taken := r >= 0x21 && r <= 0x7e && r != '"' && r != '\\'
 		scope := "a" + string(r) + "b" // inside, as a list trims an entry's white space

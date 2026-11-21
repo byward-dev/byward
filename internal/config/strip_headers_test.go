@@ -22,13 +22,14 @@ func TestTheUpstreamStripListIsReadAsCanonicalHeaderNames(t *testing.T) {
 }
 
 // A header MCP needs at the upstream, a header tracing sets, a pattern and a name that is no
-// header are refused: a header MCP or tracing relies on by its name, a pattern or a name that is no
+// header are refused: a header MCP or tracing relies on by its name (a family by its prefix), a pattern or a name that is no
 // header by its place and length. With a stdio upstream the list is refused as an off-mode setting
 // (offmode_test.go).
 func TestTheUpstreamStripListRefusesWhatCannotBeStripped(t *testing.T) {
 	const want = "BYWARD_UPSTREAM_STRIP_HEADERS: want exact header names, such as X-Argocd-Base-Url; got "
 	const needed, traced = ": MCP needs it at the upstream; remove it from the list", ": with tracing on, the proxy sets it from the inbound trace context; remove it from the list"
-	// A header MCP or tracing relies on is shown as the upstream reads it; a refused name is never shown.
+	// A header MCP or tracing relies on is shown as the upstream reads it (a family by its prefix); a
+	// refused name is never shown.
 	for _, tc := range []struct{ name, list, want string }{
 		{"Accept", "accept", "entry 1 of 1, Accept" + needed},
 		{"Content-Type", "Content-Type", "entry 1 of 1, Content-Type" + needed},

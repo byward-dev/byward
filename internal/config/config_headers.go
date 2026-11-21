@@ -39,9 +39,14 @@ var headerExamples = map[string]string{ //nolint:gosec // G101: header names an 
 	"assertion-header": "X-Byward-Identity", "upstream-credential-header": "X-Api-Key",
 	"obo-header": "X-Byward-Downstream-Token"}
 
-// headerNameWant is what the header setting name wants, in every refusal of it.
+// headerNameWant is what the header setting name wants, in every refusal of it. It panics on a setting
+// without an example, which every test that loads the setting catches.
 func headerNameWant(name string) string {
-	return "a header name such as Authorization or " + headerExamples[name]
+	example, ok := headerExamples[name]
+	if !ok {
+		panic("config: no header example for " + name)
+	}
+	return "a header name such as Authorization or " + example
 }
 
 // parseHeaderName reads a setting naming a header the proxy sets on upstream requests: a valid token,
@@ -103,8 +108,8 @@ func (c *Config) headerClashes() []error {
 	aEnv, cEnv := Setting{Name: "assertion-header"}.Env(), Setting{Name: "upstream-credential-header"}.Env()
 	if c.UpstreamCredentialHeader != "" && sameHeader(c.UpstreamCredentialHeader, c.AssertionHeader) {
 		// The header is not shown: an accepted name can be any token.
-		errs = append(errs, errorf("%s and %s name the same header, but the credential and the identity assertion never share a header (ADR-0016 §7): set %s to a header of your own, such as X-Byward-Identity, and verify the assertion there",
-			cEnv, aEnv, aEnv))
+		errs = append(errs, errorf("%s and %s name the same header, but the credential and the identity assertion never share a header (ADR-0016 §7): set %s to a header of your own, such as %s, and verify the assertion there",
+			cEnv, aEnv, aEnv, headerExamples["assertion-header"]))
 	}
 	for _, u := range []struct{ name, header string }{{"assertion-header", c.AssertionHeader},
 		{"upstream-credential-header", c.UpstreamCredentialHeader}, {"obo-header", c.OBOHeader}} {

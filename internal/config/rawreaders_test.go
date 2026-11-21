@@ -43,14 +43,14 @@ func TestOnlyParsersReadARawValue(t *testing.T) {
 			case r.kind == readRawValue:
 				t.Errorf("%s: %s takes raw as a value: call it, in the setting's parser", r.pos, r.fn)
 			case strings.HasPrefix(r.fn, "parse") || strings.HasPrefix(r.fn, "Parse"):
-				scanned = scanned || r.fn == "parseText" && f == "parsers.go"
+				scanned = scanned || r.fn == "parseText"
 			case !slices.Contains(rawReaders, r.fn):
 				t.Errorf("%s: %s calls raw: read a setting's text only in its parser, a function named parse…, which never repeats it in a refusal (ADR-0031 §1)", r.pos, r.fn)
 			}
 		}
 	}
 	if !scanned {
-		t.Fatal("the scan found no read in parseText (parsers.go): it has stopped finding reads, or parseText has moved")
+		t.Fatal("the scan found no read in parseText: it has stopped finding reads, or parseText is renamed")
 	}
 }
 

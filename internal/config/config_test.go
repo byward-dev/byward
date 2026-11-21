@@ -895,6 +895,8 @@ func TestInvalidStoreSettingsAreRejected(t *testing.T) {
 		// Every default derives from the data directory, so a relative one is reported, not the paths
 		// derived from it.
 		{"a relative data directory", []string{"BYWARD_DATA_DIR=data"}, "BYWARD_DATA_DIR: want an absolute path", "BYWARD_KEYS_DIR"},
+		// The one path setting with no default: given empty, it is refused as nothing given, not as relative.
+		{"an empty data directory", []string{"BYWARD_DATA_DIR="}, "BYWARD_DATA_DIR: want an absolute path; got nothing", "got a relative one"},
 		// The counter file derived from a relative keys directory is not reported a second time; one the
 		// operator sets is.
 		{"a counter derived from a relative keys directory", []string{"BYWARD_KEYS_DIR=keys"}, "BYWARD_KEYS_DIR: want an absolute path", "BYWARD_STORE_COUNTER_FILE"},
@@ -1231,13 +1233,5 @@ func TestAnUnsetTenantIsRefusedOnlyAsRequired(t *testing.T) {
 	_, err := load(t, nil, "BYWARD_ENTRA_TENANT=")
 	if !isConfigError(err) || !strings.HasPrefix(err.Error(), "BYWARD_ENTRA_TENANT is required") || strings.Contains(err.Error(), "want the tenant ID") {
 		t.Fatalf("err = %v, want only the tenant's required error", err)
-	}
-}
-
-// A path setting given empty is refused as nothing given, not as a relative path.
-func TestAnEmptyPathIsRefusedAsNothingGiven(t *testing.T) {
-	_, err := load(t, nil, "BYWARD_DATA_DIR=")
-	if want := "BYWARD_DATA_DIR: want an absolute path; got nothing"; !isConfigError(err) || !strings.Contains(err.Error(), want) {
-		t.Fatalf("err = %v, want %q", err, want)
 	}
 }

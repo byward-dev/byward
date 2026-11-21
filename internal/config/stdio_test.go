@@ -212,23 +212,24 @@ func TestInvalidStdioSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		envFile string
 		want    string
 	}{
-		"no upstream":               {nil, nil, "", "BYWARD_UPSTREAM_URL is required (or BYWARD_UPSTREAM_COMMAND, or a command after --)"},
-		"URL and command":           {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_URL=http://u/mcp"}, "", "both set"},
-		"flag and --":               {[]string{"--upstream-command", `["/bin/x"]`, "--", "/bin/y"}, nil, "", "either after -- or with --upstream-command"},
-		"environment and --":        {[]string{"--", "/bin/y"}, []string{`BYWARD_UPSTREAM_COMMAND=["/bin/x"]`}, "", "either after -- or with --upstream-command / BYWARD_UPSTREAM_COMMAND"},
-		"not JSON":                  {nil, []string{"BYWARD_UPSTREAM_COMMAND=/bin/x --flag"}, "", "BYWARD_UPSTREAM_COMMAND: want a JSON array of strings whose first element is the program, such as [\"/usr/local/bin/server\",\"--flag\"]; got a value (13 characters, not shown): it is not one"},
-		"empty array":               {nil, []string{"BYWARD_UPSTREAM_COMMAND=[]"}, "", "BYWARD_UPSTREAM_COMMAND: want a JSON array of strings whose first element is the program, such as [\"/usr/local/bin/server\",\"--flag\"]; got a value (2 characters, not shown): it is not one"},
-		"empty program":             {nil, []string{`BYWARD_UPSTREAM_COMMAND=[""]`}, "", "BYWARD_UPSTREAM_COMMAND: want a JSON array of strings whose first element is the program, such as [\"/usr/local/bin/server\",\"--flag\"]; got a value (4 characters, not shown): it is not one"},
-		"env file line without =":   {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_ENV_FILE=/run/secrets/upstream-env"}, "A=1\nsecret-without-equals", "BYWARD_UPSTREAM_ENV_FILE: want KEY=VALUE lines, each key once; got line 2: it is not KEY=VALUE"},
-		"env duplicate":             {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_ENV_FILE=/run/secrets/upstream-env"}, "A=1\nA=2", "got line 2: its key is set on an earlier line too"},
-		"inline env":                {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_ENV=A=1"}, "", "secrets must come from a file"},
-		"cap zero":                  {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_MAX_PROCESSES=0"}, "", "BYWARD_STDIO_MAX_PROCESSES: want a whole number from 1 to 10000; got 0: it is out of range"},
-		"cap over, shown as parsed": {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_MAX_PROCESSES=010001"}, "", "BYWARD_STDIO_MAX_PROCESSES: want a whole number from 1 to 10000; got 10001: it is out of range"},
-		"cap not a number":          {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_MAX_PROCESSES=many"}, "", "BYWARD_STDIO_MAX_PROCESSES: want a whole number from 1 to 10000; got a value (4 characters, not shown): it is not a whole number"},
-		"user cap over total":       {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_MAX_PROCESSES=4", "BYWARD_STDIO_MAX_PROCESSES_PER_USER=5"}, "", "must not exceed BYWARD_STDIO_MAX_PROCESSES"},
-		"stream idle under 1m":      {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_STREAM_IDLE_TIMEOUT=59s"}, "", "BYWARD_STDIO_STREAM_IDLE_TIMEOUT: want a duration of at least 1m such as 10m, or 0 to keep quiet streams; got 59s: it is out of range"},
-		"stream idle negative":      {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_STREAM_IDLE_TIMEOUT=-600s"}, "", "BYWARD_STDIO_STREAM_IDLE_TIMEOUT: want a duration of at least 1m such as 10m, or 0 to keep quiet streams; got -10m0s: it is out of range"},
-		"stream idle no duration":   {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_STREAM_IDLE_TIMEOUT=ten"}, "", "BYWARD_STDIO_STREAM_IDLE_TIMEOUT: want a duration of at least 1m such as 10m, or 0 to keep quiet streams; got a value (3 characters, not shown): it is not a duration"},
+		"no upstream":                {nil, nil, "", "BYWARD_UPSTREAM_URL is required (or BYWARD_UPSTREAM_COMMAND, or a command after --)"},
+		"URL and command":            {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_URL=http://u/mcp"}, "", "both set"},
+		"flag and --":                {[]string{"--upstream-command", `["/bin/x"]`, "--", "/bin/y"}, nil, "", "either after -- or with --upstream-command"},
+		"environment and --":         {[]string{"--", "/bin/y"}, []string{`BYWARD_UPSTREAM_COMMAND=["/bin/x"]`}, "", "either after -- or with --upstream-command / BYWARD_UPSTREAM_COMMAND"},
+		"not JSON":                   {nil, []string{"BYWARD_UPSTREAM_COMMAND=/bin/x --flag"}, "", "BYWARD_UPSTREAM_COMMAND: want a JSON array of strings whose first element is the program, such as [\"/usr/local/bin/server\",\"--flag\"]; got a value (13 characters, not shown): it is not one"},
+		"empty array":                {nil, []string{"BYWARD_UPSTREAM_COMMAND=[]"}, "", "BYWARD_UPSTREAM_COMMAND: want a JSON array of strings whose first element is the program, such as [\"/usr/local/bin/server\",\"--flag\"]; got a value (2 characters, not shown): it is not one"},
+		"empty program":              {nil, []string{`BYWARD_UPSTREAM_COMMAND=[""]`}, "", "BYWARD_UPSTREAM_COMMAND: want a JSON array of strings whose first element is the program, such as [\"/usr/local/bin/server\",\"--flag\"]; got a value (4 characters, not shown): it is not one"},
+		"env file line without =":    {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_ENV_FILE=/run/secrets/upstream-env"}, "A=1\nsecret-without-equals", "BYWARD_UPSTREAM_ENV_FILE: want KEY=VALUE lines, each key once; got line 2: it is not KEY=VALUE"},
+		"env duplicate":              {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_ENV_FILE=/run/secrets/upstream-env"}, "A=1\nA=2", "got line 2: its key is set on an earlier line too"},
+		"inline env":                 {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_ENV=A=1"}, "", "secrets must come from a file"},
+		"cap zero":                   {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_MAX_PROCESSES=0"}, "", "BYWARD_STDIO_MAX_PROCESSES: want a whole number from 1 to 10000; got 0: it is out of range"},
+		"cap over, shown as parsed":  {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_MAX_PROCESSES=010001"}, "", "BYWARD_STDIO_MAX_PROCESSES: want a whole number from 1 to 10000; got 10001: it is out of range"},
+		"cap too large for a number": {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_MAX_PROCESSES=99999999999999999999"}, "", "BYWARD_STDIO_MAX_PROCESSES: want a whole number from 1 to 10000; got a value (20 characters, not shown): it is out of range"},
+		"cap not a number":           {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_MAX_PROCESSES=many"}, "", "BYWARD_STDIO_MAX_PROCESSES: want a whole number from 1 to 10000; got a value (4 characters, not shown): it is not a whole number"},
+		"user cap over total":        {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_MAX_PROCESSES=4", "BYWARD_STDIO_MAX_PROCESSES_PER_USER=5"}, "", "must not exceed BYWARD_STDIO_MAX_PROCESSES"},
+		"stream idle under 1m":       {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_STREAM_IDLE_TIMEOUT=59s"}, "", "BYWARD_STDIO_STREAM_IDLE_TIMEOUT: want a duration of at least 1m such as 10m, or 0 to keep quiet streams; got 59s: it is out of range"},
+		"stream idle negative":       {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_STREAM_IDLE_TIMEOUT=-600s"}, "", "BYWARD_STDIO_STREAM_IDLE_TIMEOUT: want a duration of at least 1m such as 10m, or 0 to keep quiet streams; got -10m0s: it is out of range"},
+		"stream idle no duration":    {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_STREAM_IDLE_TIMEOUT=ten"}, "", "BYWARD_STDIO_STREAM_IDLE_TIMEOUT: want a duration of at least 1m such as 10m, or 0 to keep quiet streams; got a value (3 characters, not shown): it is not a duration"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, _, err := Load(tc.args, stdioBase(tc.env...), stdioFiles(tc.envFile))
@@ -262,14 +263,6 @@ func TestACommandAfterDoubleDashWithoutAProgramIsRefused(t *testing.T) {
 				t.Fatalf("got %v, want the config error %q", err, tc.want)
 			}
 		})
-	}
-}
-
-// A process cap too large for a number is refused as out of range, by its length.
-func TestAProcessCapTooLargeForANumberIsOutOfRange(t *testing.T) {
-	const want = "BYWARD_STDIO_MAX_PROCESSES: want a whole number from 1 to 10000; got a value (20 characters, not shown): it is out of range"
-	if _, _, err := Load([]string{"--", "/bin/x"}, stdioBase("BYWARD_STDIO_MAX_PROCESSES=99999999999999999999"), baseFiles); !isConfigError(err) || !strings.Contains(err.Error(), want) {
-		t.Fatalf("got %v, want %q", err, want)
 	}
 }
 

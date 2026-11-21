@@ -22,7 +22,7 @@ func TestSecretExpiresAtAcceptsADateOrRFC3339(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !c.EntraClientSecretExpiresAt.Equal(tc.want) {
+			if got := c.EntraClientSecretExpiresAt; !got.Equal(tc.want) || got.Location() != time.UTC {
 				t.Fatalf("expires %v, want %v", c.EntraClientSecretExpiresAt, tc.want)
 			}
 		})

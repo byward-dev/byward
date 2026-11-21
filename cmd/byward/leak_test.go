@@ -251,7 +251,8 @@ func leakContext(s config.Setting) string {
 
 // leakContexts is each context's settings: Entra with an HTTP upstream; Entra with a stdio upstream
 // instead (no upstream URL, no assertion keys), whose command is program; Entra with app-only
-// tokens; an oidc IdP; Google; and the variants that leave room for the setting tried in them.
+// tokens; an oidc IdP; Google; and the variants that leave room for, or supply the partner of, the
+// setting tried in them.
 // Startup in each cannot bind its listener, and config accepts each as it is, apart from those that
 // need the setting tried in them (needsItsSetting).
 func leakContexts(t *testing.T, program string) map[string][]string {

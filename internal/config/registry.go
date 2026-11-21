@@ -301,22 +301,28 @@ func flagError(fs *flag.FlagSet, err error) error {
 		}
 		return errorf("--%s: want %s; got a value it does not take (not shown)", f.Name, want)
 	}
-	if strings.HasPrefix(msg, "invalid ") {
-		return errorf("a flag was given a value it does not take (not shown)")
-	}
 	if name, ok := strings.CutPrefix(msg, "flag provided but not defined: -"); ok {
-		known := map[string]bool{}
-		fs.VisitAll(func(f *flag.Flag) { known[f.Name] = true })
-		hint := ""
-		if s := suggest(strings.TrimPrefix(name, "-"), known); s != "" { // the command's own flag, never the text given
-			hint = " (did you mean --" + s + "?)"
-		}
-		return errorf("want flags this command takes; got an undefined flag %s%s", notShown(name), hint)
+		return errorf("want flags this command takes; got an undefined flag %s%s", notShown(name), flagHint(fs, name))
 	}
 	if strings.HasPrefix(msg, "flag needs an argument: -") {
 		return errorf("%v", err)
 	}
 	return errorf("the command line is refused (the flag package's message is not shown)")
+}
+
+// flagHint suggests the command's own flag an undefined one most likely meant, never the text given: a
+// secret's file flag when the name is a secret setting given inline, else the nearest name, only when
+// it is near enough that the operator, who is not shown the name, can trust it.
+func flagHint(fs *flag.FlagSet, name string) string {
+	if fs.Lookup(name+"-file") != nil {
+		return " (secrets come from a file: did you mean --" + name + "-file?)"
+	}
+	known := map[string]bool{}
+	fs.VisitAll(func(f *flag.Flag) { known[f.Name] = true })
+	if s := suggest(name, known); s != "" && distance(name, s) <= len(name)/3 {
+		return " (did you mean --" + s + "?)"
+	}
+	return ""
 }
 
 // refusedFlag is the flag msg, the flag package's "invalid boolean value" or "invalid value" error,

@@ -7,7 +7,7 @@ import (
 )
 
 // headerSettings are the settings that name a header the proxy sets on upstream requests (they all
-// go through upstreamHeader), with what each needs to load and the header it loads into.
+// go through parseHeaderName), with what each needs to load and the header it loads into.
 var headerSettings = []struct {
 	env     string
 	extra   []string

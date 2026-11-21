@@ -251,6 +251,9 @@ func TestAFlagTheFlagPackageRefusesNeverShowsTheTextGiven(t *testing.T) {
 		{"an undefined flag in lower case", []string{"--" + strings.ToLower(canaryText)}, "want flags this command takes; got an undefined flag (10 characters, not shown)"},
 		{"an undefined flag near one of the command's own", []string{"--scop=1"}, "want flags this command takes; got an undefined flag (4 characters, not shown) (did you mean --scope?)"},
 		{"a flag that needs an argument", []string{"--scope"}, "flag needs an argument: -scope"},
+		{"a secret given inline as a flag", []string{"--entra-client-secret=" + canaryText}, "want flags this command takes; got an undefined flag (19 characters, not shown) (secrets come from a file: did you mean --entra-client-secret-file?)"},
+		{"a short undefined flag, near no flag enough to name", []string{"--v"}, "want flags this command takes; got an undefined flag (1 character, not shown)"},
+		{"an undefined flag unlike any", []string{"--debug"}, "want flags this command takes; got an undefined flag (5 characters, not shown)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, err := Load(tc.args, base, baseFiles)
@@ -269,7 +272,7 @@ func TestAFlagTheFlagPackageRefusesNeverShowsTheTextGiven(t *testing.T) {
 }
 
 // Every setting's refusal, tried with values that hold a canary in a context where the setting is
-// read, shows no part of the canary in any case, and every line that refuses the setting is in the one
+// read, never shows the canary, in any case, and every line that refuses the setting is in the one
 // format "BYWARD_X: want …; got …" (ADR-0031 §1). Config's own counterpart of cmd/byward's
 // TestNoCommandShowsAHiddenOrARefusedValue, which runs the refused cells through every command. A
 // secret setting is read from a file, which that test writes; a line naming the setting otherwise
@@ -313,8 +316,8 @@ func TestNoRefusalShowsTheValueGiven(t *testing.T) {
 		}
 		return ctx{nil, slices.Clone(base), baseFiles}
 	}
-	// The settings config refuses none of these forms for: free text, claim and role names, and the
-	// gate and app lists. Every other setting must refuse one in the one format, so the test cannot
+	// The settings config refuses none of these forms for: free text, client IDs, claim and role names,
+	// and the gate and app lists. Every other setting must refuse one in the one format, so the test cannot
 	// pass by no longer reaching its parser.
 	acceptsEveryForm := []string{"app-client-ids", "app-roles", "entra-client-id", "gate-email-domains", "gate-groups",
 		"gate-hosted-domains", "gate-roles", "gate-tenants", "oidc-client-id", "oidc-client-key-id", "oidc-groups-claim",
@@ -352,13 +355,14 @@ func TestNoRefusalShowsTheValueGiven(t *testing.T) {
 	}
 }
 
-// A message of the flag package flagError does not know, as a later Go could write, is refused
-// without its text: the fallback fails closed.
+// A message of the flag package flagError does not know, as a later Go could write, or an invalid value
+// for a flag the set does not define, is refused without its text: the fallback fails closed.
 func TestAFlagPackageMessageFlagErrorDoesNotKnowShowsNoText(t *testing.T) {
+	const want = "the command line is refused (the flag package's message is not shown)"
 	fs := flag.NewFlagSet("byward", flag.ContinueOnError)
 	for _, msg := range []string{`invalid value "` + canaryText + `" for flag -nosuch: x`, "a new message quoting " + canaryText} {
-		if err := flagError(fs, errors.New(msg)); !isConfigError(err) || holdsCanary(err.Error()) {
-			t.Errorf("flagError(%q) = %v, want a configuration error without the text", msg, err)
+		if err := flagError(fs, errors.New(msg)); !isConfigError(err) || err.Error() != want {
+			t.Errorf("flagError(%q) = %v, want %q", msg, err, want)
 		}
 	}
 }
