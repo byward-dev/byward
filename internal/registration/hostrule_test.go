@@ -38,5 +38,5 @@ func TestHostFoldsAndTheLoopbackRedirectSetAreAsPinned(t *testing.T) {
 	for _, r := range redirectProbes {
 		fmt.Fprintf(&b, "redirect %s: %v\n", r, ValidateRedirect(r))
 	}
-	golden.Check(t, "testdata/hostrule.golden", b.String(), "a host fold or the loopback redirect set changed")
+	golden.Check(t, "testdata/hostrule.golden", b.String(), "the file pins the browser and transitional host folds and the loopback redirect set (ADR-0032)")
 }

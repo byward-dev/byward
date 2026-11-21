@@ -281,8 +281,7 @@ func TestAnAssertionCarriesExactlyTheDocumentedHeaderAndClaims(t *testing.T) {
 	if err := enc.Encode(map[string]any{"header": map[string]any{"alg": h.Algorithm, "kid": h.KeyID, "typ": h.ExtraHeaders["typ"]}, "claims": c}); err != nil {
 		t.Fatal(err)
 	}
-	got := strings.TrimSuffix(buf.String(), "\n")
-	golden.Check(t, filepath.Join("testdata", "assertion.golden.json"), got+"\n", "the client assertion's header and claims changed")
+	golden.Check(t, filepath.Join("testdata", "assertion.golden.json"), buf.String(), "the identity assertion's header and claims are a public interface (ADR-0016): claims are only ever added, and an intended change also updates the example in docs/reference/identity-assertion.md")
 }
 
 // email_verified comes with email and only with it, so the upstream sees whether the IdP vouched
