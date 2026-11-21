@@ -133,13 +133,14 @@ func CheckPaths(opts Options) error {
 
 // regularIfPresent refuses an entry at path that is not a regular file, or a symlink to nothing;
 // with creatable, a symlink to a missing file in an existing directory passes, as O_CREATE makes it.
+// Its Lstat error is returned as it is, path included: CheckPaths, its caller, strips it.
 func regularIfPresent(path string, creatable bool) error {
 	fi, err := os.Lstat(path)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		return nil
 	case err != nil:
-		return err // the caller strips the path
+		return err
 	case fi.Mode()&os.ModeSymlink != 0:
 		if fi, err = os.Stat(path); err != nil {
 			if creatable && targetDirExists(path) {

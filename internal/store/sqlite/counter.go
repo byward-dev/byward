@@ -79,10 +79,18 @@ func readCounter(path string) (int64, bool, error) {
 	return v, true, nil
 }
 
-// counterFileError names the counter file and the cause, never its path (security invariant 2).
+// counterFileError names the counter file by its role and the cause, never its path
+// (security invariant 2).
 func counterFileError(err error) error {
 	return fmt.Errorf("sqlite store: counter file: %w", logging.FileError(err))
 }
+
+// syncCounterFile and closeCounterFile are (*os.File).Sync and Close; tests replace them to fail
+// writeCounter's sync and close of the temporary file, which only a fault does.
+var (
+	syncCounterFile  = (*os.File).Sync
+	closeCounterFile = (*os.File).Close
+)
 
 // writeMirror is writeCounter; tests replace it to act inside a write, between the mirror and the
 // commit.
@@ -95,11 +103,12 @@ func writeCounter(path string, v int64) error {
 		return counterFileError(err)
 	}
 	_, werr := tmp.WriteString(strconv.FormatInt(v, 10) + "\n")
-	serr := tmp.Sync() // a power loss must not leave an empty file, which Open refuses
-	cerr := tmp.Close()
+	serr := syncCounterFile(tmp) // a power loss must not leave an empty file, which Open refuses
+	cerr := closeCounterFile(tmp)
 	if werr != nil || serr != nil || cerr != nil {
 		_ = os.Remove(tmp.Name())
-		return counterFileError(errors.Join(logging.FileError(werr), logging.FileError(serr), logging.FileError(cerr))) // each stripped: FileError keeps only a join's first cause
+		// Each is stripped: FileError of a join keeps only its first path error's cause.
+		return counterFileError(errors.Join(logging.FileError(werr), logging.FileError(serr), logging.FileError(cerr)))
 	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		_ = os.Remove(tmp.Name())

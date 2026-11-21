@@ -740,6 +740,46 @@ func TestAFailedCounterWriteStoresNothingAndIsNamedWithoutAPath(t *testing.T) {
 	}
 }
 
+// A counter write whose temporary file cannot be synced or closed stores nothing, and the error names
+// the counter file and each cause, never a path (security invariant 2, #600): only a fault fails
+// either, and both failing joins two errors, each stripped of its path.
+func TestACounterFileThatCannotBeSyncedOrClosedIsNamedWithoutItsPath(t *testing.T) {
+	t.Cleanup(func() { syncCounterFile, closeCounterFile = (*os.File).Sync, (*os.File).Close })
+	failSync := func() {
+		syncCounterFile = func(f *os.File) error { return &fs.PathError{Op: "sync", Path: f.Name(), Err: syscall.EIO} }
+	}
+	failClose := func() {
+		closeCounterFile = func(f *os.File) error {
+			_ = f.Close()
+			return &fs.PathError{Op: "close", Path: f.Name(), Err: syscall.EIO}
+		}
+	}
+	for _, tc := range []struct {
+		name    string
+		breakIt []func()
+		want    string
+	}{
+		{"sync", []func(){failSync}, "sqlite store: counter file: input/output error"},
+		{"close", []func(){failClose}, "sqlite store: counter file: input/output error"},
+		{"both", []func(){failSync, failClose}, "sqlite store: counter file: input/output error\ninput/output error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			syncCounterFile, closeCounterFile = (*os.File).Sync, (*os.File).Close
+			s := open(t, t.TempDir(), filepath.Join(t.TempDir(), "writes"))
+			for _, b := range tc.breakIt {
+				b()
+			}
+			_, err := s.CreateGrant(ctx, grant("g1", "tid:a"))
+			if err == nil || err.Error() != tc.want || !errors.Is(err, syscall.EIO) {
+				t.Fatalf("CreateGrant = %q, want %q", err, tc.want)
+			}
+			if _, err := s.Grant(ctx, "g1"); !errors.Is(err, store.ErrNotFound) {
+				t.Fatalf("the failed write was stored: %v", err)
+			}
+		})
+	}
+}
+
 func TestCorruptCounterFileFailsOpen(t *testing.T) {
 	for name, content := range map[string]string{"not a number": "not a number", "negative": "-1", "empty": ""} {
 		t.Run(name, func(t *testing.T) {
