@@ -161,12 +161,12 @@ func TestEveryOffCheckRefusesAFlagSetToNothingAndTakesAVariableSetToNothingAsUns
 		env            []string
 		want           string
 	}{
-		{"the other IdP family", "oidc-scopes", base, "BYWARD_OIDC_SCOPES cannot be used with BYWARD_IDP=entra"},
-		{"app tokens off", "app-roles", base, "BYWARD_APP_ROLES set while BYWARD_APP_TOKENS=off"},
-		{"On-Behalf-Of's header beside a stdio upstream", "obo-header", stdio, "BYWARD_OBO_HEADER: a stdio upstream gets its downstream token from its token socket"},
+		{"the other IdP family", "oidc-scopes", base, "--oidc-scopes cannot be used with BYWARD_IDP=entra"},
+		{"app tokens off", "app-roles", base, "--app-roles set while BYWARD_APP_TOKENS=off"},
+		{"On-Behalf-Of's header beside a stdio upstream", "obo-header", stdio, "--obo-header: a stdio upstream gets its downstream token from its token socket"},
 		{"the SQLite store beside PostgreSQL", "store-dir", postgres, "give one store, PostgreSQL or a SQLite state directory, not both"},
-		{"the SQLite counter file beside PostgreSQL", "store-counter-file", postgres, "BYWARD_STORE_COUNTER_FILE: the counter file belongs to the SQLite store"},
-		{"authentication beside --insecure-no-auth", "gate-roles", anon, "BYWARD_INSECURE_NO_AUTH cannot be combined with BYWARD_GATE_ROLES"},
+		{"the SQLite counter file beside PostgreSQL", "store-counter-file", postgres, "--store-counter-file: the counter file belongs to the SQLite store"},
+		{"authentication beside --insecure-no-auth", "gate-roles", anon, "BYWARD_INSECURE_NO_AUTH cannot be combined with --gate-roles"},
 		{"a stdio setting beside an HTTP upstream", "stdio-max-processes", base, "--stdio-max-processes is set, but the upstream is HTTP: it applies only to a stdio upstream"},
 	} {
 		t.Run(tc.check, func(t *testing.T) {
