@@ -65,5 +65,5 @@ func TestEachHostSettingReadsEachProbeSpellingAsPinned(t *testing.T) {
 	for _, h := range hostProbes {
 		b.WriteString(hostRule(h))
 	}
-	golden.Check(t, "testdata/hostrule.golden", b.String(), "the file pins how each host setting reads each probe spelling (ADR-0032); an intended change is also recorded in ADR-0032 §4")
+	golden.Check(t, "testdata/hostrule.golden", b.String(), "the file pins how each host setting reads each probe spelling (ADR-0032); a change to how a setting reads a host needs a dated amendment to ADR-0032 (docs/adr/README.md), a reworded refusal does not")
 }

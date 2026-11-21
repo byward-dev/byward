@@ -28,7 +28,8 @@ var redirectProbes = []string{
 // The browser's fold of a host name, the denylist's transitional fold, and the loopback redirect
 // set are pinned in testdata/hostrule.golden, so a change to any of them shows as a diff. Moving the
 // browser fold into one parser (#521, ADR-0032 slice 1) changed none of them. Regenerate with
-// BYWARD_UPDATE_GOLDEN=1, and review the diff.
+// BYWARD_UPDATE_GOLDEN=1, and review the diff; a loopback redirect URI that flips between accepted and
+// refused is a bug, since the set stays the exact literals (ADR-0032 §5).
 func TestHostFoldsAndTheLoopbackRedirectSetAreAsPinned(t *testing.T) {
 	var b strings.Builder
 	for _, h := range nameProbes {
@@ -38,5 +39,5 @@ func TestHostFoldsAndTheLoopbackRedirectSetAreAsPinned(t *testing.T) {
 	for _, r := range redirectProbes {
 		fmt.Fprintf(&b, "redirect %s: %v\n", r, ValidateRedirect(r))
 	}
-	golden.Check(t, "testdata/hostrule.golden", b.String(), "the file pins the browser and transitional host folds (ADR-0032) and the loopback redirect set, which stays the exact literals (ADR-0032 §5, ADR-0009 §2): a changed redirect line is a bug, not a regeneration")
+	golden.Check(t, "testdata/hostrule.golden", b.String(), "the file pins the browser and transitional host folds (ADR-0032) and the loopback redirect set, which stays the exact literals (ADR-0032 §5, ADR-0009 §2): a loopback redirect URI that flips between accepted and refused is a bug, not a regeneration")
 }
