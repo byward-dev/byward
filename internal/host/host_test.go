@@ -89,10 +89,10 @@ func TestParseReadsAHostAsABrowserDoes(t *testing.T) {
 }
 
 // A parsed host is loopback by the host a browser reads (127.1 is 127.0.0.1, a full-width localhost
-// is localhost), while LoopbackAsWritten takes a host only in ASCII and as Parse writes it, case
-// aside. Both fold localhost's case (A1, #482). A redirect URI's loopback set is exact instead
-// (ADR-0032 §5).
-func TestLoopbackReadsTheParsedHostButAsWrittenOnlyTheASCIIFormParseWrites(t *testing.T) {
+// is localhost), while LoopbackAsWritten takes a name or an IPv4 address only in ASCII and as Parse
+// writes it, case aside, and an IPv6 address in any form but without brackets. Both fold localhost's
+// case (A1, #482). A redirect URI's loopback set is exact instead (ADR-0032 §5).
+func TestLoopbackReadsTheParsedHostButAsWrittenOnlyANameOrIPv4InTheFormParseWrites(t *testing.T) {
 	for _, tc := range []struct {
 		host              string
 		parsed, asWritten bool
@@ -116,8 +116,10 @@ func TestLoopbackReadsTheParsedHostButAsWrittenOnlyTheASCIIFormParseWrites(t *te
 		{"localhoſt", true, false},
 		{"local\u00adhost", true, false},
 		{"LOCALHOST\u200b", true, false},
+		// An IPv6 address counts in any form, but not in brackets.
 		{"::1", true, true},
 		{"::ffff:127.0.0.1", true, true},
+		{"0:0:0:0:0:0:0:1", true, true},
 		{"[::1]", true, false}, // as written, a host has no brackets
 		{"0.0.0.0", false, false},
 		{"10.0.0.5", false, false},

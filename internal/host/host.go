@@ -153,7 +153,7 @@ func (h Host) Loopback() bool {
 // an IPv4 address only as Parse writes it, case aside. So localhost counts in any case (A1), but
 // neither 127.1 nor a full-width or IDNA-mapped spelling of localhost does, though Parse reads them
 // as 127.0.0.1 and localhost and Host.Loopback says they are. Resolvers do not agree on those
-// spellings (Go's own refuses them; the system's may reach loopback), so only the form they all read
+// spellings (Go's own does not read them as addresses and may send them to DNS; the system's may reach loopback), so only the form they all read
 // alike counts. h has no port, and an IPv6 address no brackets: a host with either is not loopback.
 func LoopbackAsWritten(h string) bool {
 	if strings.HasPrefix(h, "[") || strings.ContainsFunc(h, func(r rune) bool { return r >= 0x80 }) {
