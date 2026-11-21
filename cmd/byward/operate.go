@@ -116,11 +116,11 @@ func runDoctor(ctx context.Context, args, environ []string, stdout, stderr io.Wr
 	return report.ExitCode()
 }
 
-// initFlagError is the flag package's error for init's command line with nothing given in it (#576),
+// initFlagRefusal is the text init prints for the flag package's error, with nothing given in it (#576),
 // as config maps its own (#512): an argument or flag name only by its length, and a flag that needs a
 // value named, since it is one of init's own. init's flags are strings, so the flag package never
 // refuses a value. Any other message is refused without its text, so a new one cannot show a value.
-func initFlagError(err error) string {
+func initFlagRefusal(err error) string {
 	msg := err.Error()
 	if rest, ok := strings.CutPrefix(msg, "bad flag syntax: "); ok {
 		return "want flags as --name=value; got an argument with a bad flag syntax " + logging.NotShown(rest)
@@ -165,7 +165,7 @@ func initIdP(_ context.Context, args, environ []string, stdout, stderr io.Writer
 		if errors.Is(err, flag.ErrHelp) {
 			_, _ = fmt.Fprintln(stderr, usage)
 		} else {
-			_, _ = fmt.Fprintf(stderr, "%s\nbyward: init: %s\n", usage, initFlagError(err))
+			_, _ = fmt.Fprintf(stderr, "%s\nbyward: init: %s\n", usage, initFlagRefusal(err))
 		}
 		return exitConfig
 	}

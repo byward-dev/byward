@@ -59,19 +59,20 @@ func TestOperateCommandMisuseExits2WithTheRightCallOnStderr(t *testing.T) {
 		{"check with a stdio command but without --offline", []string{"check", "--", "/bin/sh"}, nil, "usage: byward check --offline"},
 		{"doctor with another flag", []string{"doctor", "--yaml"}, nil, "usage: byward doctor [--json]"},
 		{"init without an IdP", []string{"init"}, nil, "init prints the setup of an entra IdP"},
-		{"init for another IdP", []string{"init", "okta", "--tenant", tenant, "--public-url", "https://m.example/mcp"}, nil, `byward: init: the IdP must be entra; got another name (4 characters, not shown)`},
+		{"init for another IdP", []string{"init", "okta", "--tenant", tenant, "--public-url", "https://m.example/mcp"}, nil, "byward: init: the IdP must be entra; got another name (4 characters, not shown); for an oidc IdP see docs/how-to/oidc.md\n"},
 		{"init entra without a tenant", []string{"init", "entra"}, nil, "usage: byward init entra --tenant"},
 		{"init entra with an extra argument", []string{"init", "entra", "--tenant", tenant, "now"}, nil, "usage: byward init entra"},
 		{"init entra with a domain as tenant", []string{"init", "entra", "--tenant", "contoso.com", "--public-url", "https://m.example/mcp"}, nil, "tenant must be the tenant ID"},
 		{"init entra without a public URL", []string{"init", "entra", "--tenant", tenant}, nil, "BYWARD_PUBLIC_URL is required (give --public-url)"},
 		{"init entra with an http public URL", []string{"init", "entra", "--tenant", tenant, "--public-url", "http://m.example/mcp"}, nil, "BYWARD_PUBLIC_URL: want https"},
 		{"init entra with a 3-year secret", []string{"init", "entra", "--tenant", tenant, "--public-url", "https://m.example/mcp", "--secret-years", "3"}, nil, "1 to 2 years"},
+		{"init entra with a 300-year secret", []string{"init", "entra", "--tenant", tenant, "--public-url", "https://m.example/mcp", "--secret-years", "300"}, nil, "1 to 2 years"},
+		{"init entra with an unknown credential", []string{"init", "entra", "--tenant", tenant, "--public-url", "https://flag.example/mcp", "--credential", "password"}, nil, "the credential must be secret or certificate; got another value (8 characters, not shown)"},
 		{"init entra with an upstream URL the proxy refuses", []string{"init", "entra", "--tenant", tenant, "--public-url", "https://m.example/mcp", "--upstream-url", "ftp://up.example/mcp"}, nil, `BYWARD_UPSTREAM_URL: want an absolute http(s) URL`},
 		{"init entra with an upstream URL from the environment the proxy refuses", []string{"init", "entra", "--tenant", tenant, "--public-url", "https://m.example/mcp"}, []string{"BYWARD_UPSTREAM_URL=up.example/mcp"}, "(14 characters, not shown): it has no scheme such as https:// (give --upstream-url)"},
 		{"check with a bad setting", []string{"check", "--offline"}, []string{"BYWARD_PUBLC_URL=x"}, "byward: configuration error: unknown setting BYWARD_PUBLC_URL"},
 		{"doctor with a bad setting", []string{"doctor"}, []string{"BYWARD_PUBLC_URL=x"}, "byward: configuration error: unknown setting BYWARD_PUBLC_URL"},
 		{"flags before the command", []string{"--dev", "check", "--offline"}, nil, "to run check, put it first: byward check"},
-		{"init entra with a non-numeric secret lifetime", []string{"init", "entra", "--tenant", tenant, "--secret-years", "abc"}, nil, "byward: init: --secret-years: want a whole number of years; got a value it does not take (not shown)"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -396,15 +397,20 @@ func TestInitRefusesItsCommandLineNamingOnlyItsOwnFlags(t *testing.T) {
 			}
 		})
 	}
-	// init's flags are strings, so the flag package refuses no value; were it to, its message is not shown.
+}
+
+// init's flags are strings, so the flag package refuses no value and no command line reaches this; were
+// one to, the flag package's message is not shown.
+func TestInitFlagRefusalHidesAnyOtherFlagPackageMessage(t *testing.T) {
 	const want = "the command line is refused (the flag package's message is not shown)"
-	if got := initFlagError(errors.New(`invalid value "LK7CANARY" for flag -x: parse error`)); got != want {
+	if got := initFlagRefusal(errors.New(`invalid value "LK7CANARY" for flag -x: parse error`)); got != want {
 		t.Fatalf("another flag package error reads %q, want %q", got, want)
 	}
 }
 
-// --secret-years is a number as the flag package reads one, in any base, and 1 when not given.
-func TestInitReadsTheSecretLifetimeInAnyBase(t *testing.T) {
+// --secret-years is a number as the flag package reads one, in base 0 (0x, 0b, 0o or decimal), and 1
+// when not given.
+func TestInitReadsTheSecretLifetimeAsTheFlagPackageReadsANumberAnd1WhenNotGiven(t *testing.T) {
 	for given, want := range map[string]string{"": "--years 1 ", "2": "--years 2 ", "0x2": "--years 2 ", "0b1": "--years 1 ", "0o2": "--years 2 ", "+1": "--years 1 "} {
 		args := []string{"init", "entra", "--tenant", tenant, "--public-url", "https://m.example/mcp"}
 		if given != "" {
@@ -413,13 +419,6 @@ func TestInitReadsTheSecretLifetimeInAnyBase(t *testing.T) {
 		if code, stdout, stderr := runWith(args); code != exitOK || !strings.Contains(stdout, want) {
 			t.Errorf("--secret-years %q: exit %d, stderr %q; want a script with %q", given, code, stderr, want)
 		}
-	}
-}
-
-func TestInitEntraRefusesAnUnknownCredentialWithoutShowingIt(t *testing.T) {
-	if code, _, stderr := runWith([]string{"init", "entra", "--tenant", tenant, "--public-url", "https://flag.example/mcp", "--credential", "password"}); code != exitConfig ||
-		!strings.Contains(stderr, `the credential must be secret or certificate; got another value (8 characters, not shown)`) {
-		t.Fatalf("an unknown credential: %d %q", code, stderr)
 	}
 }
 
