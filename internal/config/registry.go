@@ -34,10 +34,6 @@ type Setting struct {
 	// Help gives empty a meaning of its own. Otherwise (the rule) set to nothing is as if unset, since
 	// env templates list every variable (#428).
 	EmptyIsGiven bool
-	// Path marks a setting whose value is a path the proxy reads or writes: a file that cannot be
-	// used is named by the setting and the cause, never the path (security invariant 2, #587). A
-	// secret's file is a path too, given as `<ENV>_FILE` or `--<name>-file`; PathSettings lists both.
-	Path bool
 	// shape decides how the value is shown (ADR-0031 §3); secretShape also means the value is read
 	// only from a file. Every registry entry has one (checkShapes, at init).
 	shape *shape
@@ -47,13 +43,18 @@ type Setting struct {
 // `--<name>-file`, and never shown. Its shape decides it.
 func (s Setting) Secret() bool { return s.shape == secretShape }
 
-// PathSettings are the environment variables whose values are paths: each Path setting's, and each
+// HoldsPath reports whether the setting's value is a path the proxy reads or writes: a file that
+// cannot be used is named by the setting and the cause, never the path (security invariant 2, #587).
+// Its shape decides it. A secret's file is a path too, given as `<ENV>_FILE` or `--<name>-file`.
+func (s Setting) HoldsPath() bool { return s.shape == pathShape }
+
+// PathVariables are the environment variables whose values are paths: each path setting's, and each
 // secret's `<ENV>_FILE` (security invariant 2, #587). A test requires a leak-test scenario for each.
-func PathSettings() []string {
+func PathVariables() []string {
 	var out []string
 	for _, s := range registry {
 		switch {
-		case s.Path:
+		case s.HoldsPath():
 			out = append(out, s.Env())
 		case s.Secret():
 			out = append(out, s.Env()+"_FILE")

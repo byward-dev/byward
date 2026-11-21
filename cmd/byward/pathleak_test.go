@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -117,25 +118,22 @@ func pathLeakScenarios() []pathLeakScenario {
 		{"a missing federated token file", []string{"BYWARD_ENTRA_FEDERATED_TOKEN_FILE: no such file or directory"}, func(_ *testing.T, dir string) []string {
 			return []string{"BYWARD_ENTRA_FEDERATED_TOKEN_FILE=" + filepath.Join(dir, "token"), "BYWARD_ENTRA_CLIENT_SECRET_FILE="}
 		}, nil},
-		{"a missing upstream-credential file", []string{"BYWARD_UPSTREAM_CREDENTIAL_FILE: want the path of a file holding the secret, such as /run/secrets/upstream-credential; got a value (", "not shown): it cannot be read: no such file or directory"}, func(_ *testing.T, dir string) []string {
-			return []string{"BYWARD_UPSTREAM_CREDENTIAL_FILE=" + filepath.Join(dir, "upstream-credential")}
-		}, nil},
-		{"a missing upstream-env file", []string{"BYWARD_UPSTREAM_ENV_FILE: want the path of a file holding the secret, such as /run/secrets/upstream-env; got a value (", "not shown): it cannot be read: no such file or directory"}, func(_ *testing.T, dir string) []string {
-			return []string{"BYWARD_UPSTREAM_ENV_FILE=" + filepath.Join(dir, "upstream-env")}
-		}, nil},
-		{"a missing entra-client-certificate file", []string{"BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE: want the path of a file holding the secret, such as /run/secrets/entra-client-certificate; got a value (", "not shown): it cannot be read: no such file or directory"}, func(_ *testing.T, dir string) []string {
-			return []string{"BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE=" + filepath.Join(dir, "entra-client-certificate")}
-		}, nil},
-		{"a missing oidc-client-secret file", []string{"BYWARD_OIDC_CLIENT_SECRET_FILE: want the path of a file holding the secret, such as /run/secrets/oidc-client-secret; got a value (", "not shown): it cannot be read: no such file or directory"}, func(_ *testing.T, dir string) []string {
-			return []string{"BYWARD_OIDC_CLIENT_SECRET_FILE=" + filepath.Join(dir, "oidc-client-secret")}
-		}, nil},
-		{"a missing oidc-client-key file", []string{"BYWARD_OIDC_CLIENT_KEY_FILE: want the path of a file holding the secret, such as /run/secrets/oidc-client-key; got a value (", "not shown): it cannot be read: no such file or directory"}, func(_ *testing.T, dir string) []string {
-			return []string{"BYWARD_OIDC_CLIENT_KEY_FILE=" + filepath.Join(dir, "oidc-client-key")}
-		}, nil},
-		{"a missing store-postgres-dsn file", []string{"BYWARD_STORE_POSTGRES_DSN_FILE: want the path of a file holding the secret, such as /run/secrets/store-postgres-dsn; got a value (", "not shown): it cannot be read: no such file or directory"}, func(_ *testing.T, dir string) []string {
-			return []string{"BYWARD_STORE_POSTGRES_DSN_FILE=" + filepath.Join(dir, "store-postgres-dsn")}
-		}, nil},
+		missingSecretFile("BYWARD_UPSTREAM_CREDENTIAL_FILE", "upstream-credential"),
+		missingSecretFile("BYWARD_UPSTREAM_ENV_FILE", "upstream-env"),
+		missingSecretFile("BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE", "entra-client-certificate"),
+		missingSecretFile("BYWARD_OIDC_CLIENT_SECRET_FILE", "oidc-client-secret"),
+		missingSecretFile("BYWARD_OIDC_CLIENT_KEY_FILE", "oidc-client-key"),
+		missingSecretFile("BYWARD_STORE_POSTGRES_DSN_FILE", "store-postgres-dsn"),
 	}
+}
+
+// missingSecretFile is the scenario of a secret whose file, given as env, is missing; name is the
+// secret's setting.
+func missingSecretFile(env, name string) pathLeakScenario {
+	says := []string{env + ": want the path of a file holding the secret, such as /run/secrets/" + name + "; got a value (", "not shown): it cannot be read: no such file or directory"}
+	return pathLeakScenario{"a missing " + name + " file", says, func(_ *testing.T, dir string) []string {
+		return []string{env + "=" + filepath.Join(dir, name)}
+	}, nil}
 }
 
 // A file setting whose file cannot be used is named by its setting and cause, never its path, in
@@ -221,26 +219,29 @@ func TestAKeyFileNamedWithANewlineCannotForgeALine(t *testing.T) {
 	}
 }
 
-// Every path setting, and every secret's file, has a scenario in the leak test (#587): a new one
-// fails here until it has one.
+// Every path setting, and every secret's file, has a scenario in the leak test that breaks it (#587): a
+// new one fails here until it has one. A scenario breaks a variable it sets when what it says names
+// that variable as the setting at fault, so setting a variable to a file that works does not count.
+// The data directory breaks only through the defaults inside it, so its scenario names another
+// setting. A scenario that skips as root covers nothing then.
 func TestEveryPathSettingHasALeakScenario(t *testing.T) {
-	covered := map[string]bool{}
+	brokenThroughDefaults := []string{"BYWARD_DATA_DIR"}
+	broken := map[string]bool{}
 	for _, tc := range pathLeakScenarios() {
 		t.Run(tc.name, func(t *testing.T) {
+			says := strings.Join(tc.says, " ")
 			for _, kv := range tc.env(t, t.TempDir()) {
-				if name, value, _ := strings.Cut(kv, "="); value != "" {
-					covered[name] = true
+				name, value, _ := strings.Cut(kv, "=")
+				named := strings.Contains(says, name+":") || strings.Contains(says, name+" ")
+				if value != "" && (named || slices.Contains(brokenThroughDefaults, name)) {
+					broken[name] = true
 				}
 			}
 		})
 	}
-	settings := config.PathSettings()
-	if len(settings) == 0 {
-		t.Fatal("config lists no path settings")
-	}
-	for _, name := range settings {
-		if !covered[name] {
-			t.Errorf("%s holds a path but no scenario in pathLeakScenarios sets it", name)
+	for _, name := range config.PathVariables() {
+		if !broken[name] {
+			t.Errorf("%s holds a path but no scenario in pathLeakScenarios breaks it", name)
 		}
 	}
 }

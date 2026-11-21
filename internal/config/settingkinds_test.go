@@ -115,7 +115,7 @@ func TestEveryBooleanReadIsOfABoolFlag(t *testing.T) {
 	}
 }
 
-// Every path setting (a non-secret setting named *-dir or *-file) refuses a path relative to the
+// Every path setting (one with the path shape) refuses a path relative to the
 // working directory, with one message (ADR-0007 §6). Driven by the registry, so a new path setting
 // is covered with no edit here, unless it needs a companion setting to reach its check.
 func TestEveryPathSettingRefusesARelativePath(t *testing.T) {
@@ -127,7 +127,7 @@ func TestEveryPathSettingRefusesARelativePath(t *testing.T) {
 	}
 	paths := 0
 	for _, s := range registry {
-		if s.Secret() || !strings.HasSuffix(s.Name, "-dir") && !strings.HasSuffix(s.Name, "-file") {
+		if !s.HoldsPath() {
 			continue
 		}
 		paths++
