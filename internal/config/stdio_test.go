@@ -147,8 +147,8 @@ func TestLoadEnvironmentLoadsWhatLoadLoadsWithoutArguments(t *testing.T) {
 	}
 }
 
-// configDiff lists each field in which LoadEnvironment's Config (got) differs from Load's (want),
-// with both values. A setting in Values is named by its key, whichever side has it, so a mismatch
+// configDiff lists each field in which Config got differs from want, such as LoadEnvironment's from
+// Load's, with both values. A setting in Values is named by its key, whichever side has it, so a mismatch
 // reads as the setting, not as two pointer addresses.
 func configDiff(got, want Config) []string {
 	var out []string
@@ -160,7 +160,7 @@ func configDiff(got, want Config) []string {
 			continue
 		}
 		if g, w := gv.Field(i).Interface(), wv.Field(i).Interface(); !reflect.DeepEqual(g, w) {
-			out = append(out, fmt.Sprintf("%s: LoadEnvironment %+v, Load %+v", name, g, w))
+			out = append(out, fmt.Sprintf("%s: got %+v, want %+v", name, g, w))
 		}
 	}
 	return out
@@ -171,7 +171,7 @@ func configDiff(got, want Config) []string {
 func valuesDiff(got, want *Values) []string {
 	if got == nil || want == nil {
 		if got != want {
-			return []string{fmt.Sprintf("Values: LoadEnvironment nil %v, Load nil %v", got == nil, want == nil)}
+			return []string{fmt.Sprintf("Values: got nil %v, want nil %v", got == nil, want == nil)}
 		}
 		return nil
 	}
@@ -186,7 +186,7 @@ func valuesDiff(got, want *Values) []string {
 			if gs == ws { // they differ in the registry entry only
 				gs, ws = fmt.Sprintf("%+v", g), fmt.Sprintf("%+v", w)
 			}
-			out = append(out, fmt.Sprintf("Values[%s]: LoadEnvironment %s, Load %s", k, gs, ws))
+			out = append(out, fmt.Sprintf("Values[%s]: got %s, want %s", k, gs, ws))
 		}
 	}
 	if len(out) == 0 && !reflect.DeepEqual(*got, *want) {

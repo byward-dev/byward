@@ -1,8 +1,7 @@
 package config
 
 import (
-	"errors"
-	"fmt"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -18,7 +17,15 @@ var emptyModes = []struct {
 }{
 	{"an HTTP upstream", base, baseFiles},
 	{"a stdio upstream", stdioBase(`BYWARD_UPSTREAM_COMMAND=["/usr/bin/server"]`), baseFiles},
-	{"an oidc IdP", oidcBase, oidcFiles},
+	{"an oidc IdP", oidcBase, oidcSecretFiles},
+}
+
+// oidcSecretFiles serves oidcBase's secret and nothing from the host.
+func oidcSecretFiles(p string) ([]byte, error) {
+	if p == "/run/secrets/oidc" {
+		return oidcFiles(p)
+	}
+	return nil, os.ErrNotExist
 }
 
 // loadsAlike fails t unless the two loads end the same way: the same error, or equal configurations.
@@ -28,8 +35,15 @@ func loadsAlike(t *testing.T, what string, got, want *Config, gotErr, wantErr er
 		t.Errorf("%s: err %v, want %v", what, gotErr, wantErr)
 		return
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("%s: the configuration differs in %v", what, fieldsThatDiffer(got, want))
+	if got == nil || want == nil {
+		return // both refused alike
+	}
+	diff := configDiff(*got, *want)
+	for _, f := range diff {
+		t.Errorf("%s: Config.%s", what, f)
+	}
+	if len(diff) == 0 && !reflect.DeepEqual(*got, *want) { // a backstop, so a broken configDiff cannot hide a difference
+		t.Errorf("%s: the configuration differs, though configDiff names no field", what)
 	}
 }
 
@@ -40,39 +54,20 @@ func errText(err error) string {
 	return err.Error()
 }
 
-// fieldsThatDiffer names the Config fields where a and b differ.
-func fieldsThatDiffer(a, b *Config) []string {
-	if a == nil || b == nil {
-		return []string{fmt.Sprintf("one is nil (%v, %v)", a == nil, b == nil)}
-	}
-	va, vb := reflect.ValueOf(*a), reflect.ValueOf(*b)
-	var out []string
-	for i := range va.NumField() {
-		if !reflect.DeepEqual(va.Field(i).Interface(), vb.Field(i).Interface()) {
-			out = append(out, va.Type().Field(i).Name)
-		}
-	}
-	return out
-}
-
-// withoutVar drops env's entries for the variable name.
-func withoutVar(env []string, name string) []string {
-	return slices.DeleteFunc(slices.Clone(env), func(kv string) bool { return strings.HasPrefix(kv, name+"=") })
-}
-
 // A variable set to nothing is the same as unset, for every setting in each mode (#428): env
-// templates list every variable, often empty. A setting the mode needs is still required. A
-// setting that keeps empty as given says so in EmptyIsGiven, and is pinned below.
+// templates list every variable, often empty. A setting the mode needs is still required. The
+// internal listener, where empty turns it off, is the one exception, pinned below; the walk names it
+// rather than reading EmptyIsGiven, so a setting given that field by mistake fails here.
 func TestEverySettingSetToNothingLoadsAsIfUnset(t *testing.T) {
 	for _, m := range emptyModes {
 		if _, _, err := Load(nil, m.env, m.files); err != nil {
 			t.Fatalf("%s: %v", m.name, err)
 		}
 		for _, s := range registry {
-			if s.EmptyIsGiven {
+			if s.Name == "internal-listen" {
 				continue
 			}
-			unset := withoutVar(m.env, s.Env())
+			unset := without(s.Env())(slices.Clone(m.env))
 			want, _, wantErr := Load(nil, unset, m.files)
 			got, _, gotErr := Load(nil, append(slices.Clone(unset), s.Env()+"="), m.files)
 			loadsAlike(t, m.name+", "+s.Env()+"=", got, want, gotErr, wantErr)
@@ -92,6 +87,10 @@ func TestOnlyTheInternalListenerKeepsEmptyAsGiven(t *testing.T) {
 	if want := []string{"internal-listen"}; !slices.Equal(got, want) {
 		t.Fatalf("settings keeping empty as given = %v, want %v", got, want)
 	}
+}
+
+// The internal listener set to nothing is off.
+func TestTheInternalListenerSetToNothingIsOff(t *testing.T) {
 	c, err := load(t, nil, "BYWARD_INTERNAL_LISTEN=")
 	if err != nil {
 		t.Fatalf("BYWARD_INTERNAL_LISTEN=: %v, want the internal listener off", err)
@@ -126,7 +125,7 @@ func TestResolveKeepsEmptyAsGivenOnlyForASettingThatSaysSo(t *testing.T) {
 }
 
 // A secret's variable set to nothing beside its _FILE variable loads as the _FILE variable alone:
-// the secret is read from the file, and is no inline secret.
+// the secret is read from the file, and is no inline secret (which the _FILE variable alone never is).
 func TestASecretSetToNothingBesideItsFileLoadsAsTheFileAlone(t *testing.T) {
 	const path = "/run/secrets/the-file"
 	loaded := 0
@@ -141,14 +140,10 @@ func TestASecretSetToNothingBesideItsFileLoadsAsTheFileAlone(t *testing.T) {
 			if !s.Secret() {
 				continue
 			}
-			fileOnly := append(withoutVar(withoutVar(m.env, s.Env()), s.Env()+"_FILE"), s.Env()+"_FILE="+path)
+			fileOnly := append(without(s.Env(), s.Env()+"_FILE")(slices.Clone(m.env)), s.Env()+"_FILE="+path)
 			want, _, wantErr := Load(nil, fileOnly, files)
 			got, _, gotErr := Load(nil, append(slices.Clone(fileOnly), s.Env()+"="), files)
 			loadsAlike(t, m.name+", "+s.Env()+"= with "+s.Env()+"_FILE", got, want, gotErr, wantErr)
-			var ce *configError
-			if gotErr != nil && errors.As(gotErr, &ce) && strings.Contains(gotErr.Error(), "secrets must come from a file") {
-				t.Errorf("%s, %s= with %s_FILE: %v, want no inline secret", m.name, s.Env(), s.Env(), gotErr)
-			}
 			if gotErr == nil {
 				loaded++
 			}
@@ -164,11 +159,12 @@ func TestASecretSetToNothingBesideItsFileLoadsAsTheFileAlone(t *testing.T) {
 // what the upstream is told.
 func TestAFlagSetToNothingIsRefusedAsGiven(t *testing.T) {
 	for _, tc := range []struct{ flag, want string }{
+		{"--listen=", "BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got nothing"},
 		{"--scope=", "BYWARD_SCOPE: want one scope token, such as mcp; got nothing"},
 		{"--data-dir=", "BYWARD_DATA_DIR: want an absolute path; got nothing"},
 		{"--assertion-claims=", "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got nothing"},
 	} {
-		if _, err := load(t, []string{tc.flag}); !isConfigError(err) || !strings.Contains(err.Error(), tc.want) {
+		if _, err := load(t, []string{tc.flag}); !isConfigError(err) || err.Error() != tc.want {
 			t.Errorf("%s: %v, want the error %q", tc.flag, err, tc.want)
 		}
 	}

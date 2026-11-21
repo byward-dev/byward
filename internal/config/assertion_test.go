@@ -54,7 +54,7 @@ func TestAssertionSettingsRefuseWhatCannotWork(t *testing.T) {
 		"BYWARD_ASSERTION_CLAIMS=NONE":             "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got entry 1 of 1, none: give none in lower case, with nothing beside it",
 		"BYWARD_ASSERTION_CLAIMS=none,":            "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got entry 1 of 1, none: give none in lower case, with nothing beside it",
 		"BYWARD_ASSERTION_CLAIMS=roles,none":       "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got entry 2 of 2, none: none stands alone: list claims, or give only none",
-		"BYWARD_ASSERTION_CLAIMS= ":                "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got a value (1 character, not shown): it is blank",
+		"BYWARD_ASSERTION_CLAIMS= ":                "BYWARD_ASSERTION_CLAIMS: want at least one entry; got a list of none",
 	} {
 		t.Run(env, func(t *testing.T) {
 			if _, err := load(t, nil, env); err == nil || !strings.Contains(err.Error(), inErr) {

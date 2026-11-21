@@ -39,8 +39,8 @@ func parseAssertionClaims(val Value) ([]string, []error) {
 		return nil, nil
 	}
 	want := "claims from " + oneOf(AssertionClaimNames) + ", or none"
-	if raw == "" {
-		return nil, []error{refusedForm(val.Setting, whole, val.Given.raw(), want, "it is blank")}
+	if val.Given.raw() == "" { // a blank value is refused below, as a list of none
+		return nil, []error{refusedForm(val.Setting, whole, "", want, "")}
 	}
 	list, at, err := parseEntries(val)
 	if err != nil {

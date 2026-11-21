@@ -133,8 +133,7 @@ func TestUpstreamCredentialSettingsRefuseWhatCannotWork(t *testing.T) {
 }
 
 // Each error names the credential setting as the operator gave it: the env variable, the _FILE
-// variable or the flag. An inline value (accepted only under --dev) has no file, so it is never said
-// to be an empty file.
+// variable or the flag; an inline value is accepted only under --dev.
 func TestUpstreamCredentialErrorsNameTheSettingAsGiven(t *testing.T) {
 	header := "BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"
 	long := "k-123" + strings.Repeat("k", maxUpstreamCredential-4)
