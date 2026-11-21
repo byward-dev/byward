@@ -26,7 +26,7 @@ func TestAWriteProbeThatCannotBeRemovedIsNamedWithoutItsPath(t *testing.T) {
 			t.Skip("the file system does not enforce append-only directories")
 		}
 	}
-	err := openFails(t, dir)
+	err := openErr(t, dir)
 	if err == nil || err.Error() != "sqlite store: the state directory: operation not permitted" || strings.Contains(err.Error(), dir) {
 		t.Fatalf("err = %v, want the state directory named by what it is and the cause alone", err)
 	}

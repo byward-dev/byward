@@ -287,7 +287,7 @@ func TestASideFileOpenCannotTightenIsNamedWithoutItsPath(t *testing.T) {
 		t.Run(side, func(t *testing.T) {
 			dir := t.TempDir()
 			must(t, os.Symlink(side, filepath.Join(dir, side)))
-			err := openFails(t, dir)
+			err := openErr(t, dir)
 			if want := `sqlite store: database file "` + side + `": too many levels of symbolic links`; err == nil || err.Error() != want {
 				t.Fatalf("err = %v, want %q", err, want)
 			}
@@ -302,15 +302,15 @@ func TestAWriteProbeThatCannotBeRemovedFailsOpenWithoutItsPath(t *testing.T) {
 	t.Cleanup(func() { removeProbe = os.Remove })
 	removeProbe = func(name string) error { return &fs.PathError{Op: "remove", Path: name, Err: syscall.EPERM} }
 	dir := t.TempDir()
-	err := openFails(t, dir)
+	err := openErr(t, dir)
 	if want := "sqlite store: the state directory: " + syscall.EPERM.Error(); err == nil || err.Error() != want || !errors.Is(err, syscall.EPERM) {
 		t.Fatalf("err = %v, want %q", err, want)
 	}
 }
 
-// openFails opens a store in dir, its counter file elsewhere, where the test expects Open to fail,
+// openErr opens a store in dir, its counter file elsewhere, where the test expects Open to fail,
 // and returns Open's error; a store that opens anyway is closed.
-func openFails(t *testing.T, dir string) error {
+func openErr(t *testing.T, dir string) error {
 	t.Helper()
 	s, err := Open(bounded(t), Options{Dir: dir, CounterFile: filepath.Join(t.TempDir(), "w")})
 	if err == nil {
@@ -320,14 +320,14 @@ func openFails(t *testing.T, dir string) error {
 }
 
 // A database file whose close fails is named by its quoted name and the cause, never its path
-// (security invariant 2, #600): only a fault does it on a real file system.
+// (security invariant 2, #600): only a fault fails the close on a real file system.
 func TestADatabaseFileThatCannotBeClosedIsNamedWithoutItsPath(t *testing.T) {
 	t.Cleanup(func() { closeDatabaseFile = (*os.File).Close })
 	closeDatabaseFile = func(f *os.File) error {
 		_ = f.Close()
 		return &fs.PathError{Op: "close", Path: f.Name(), Err: syscall.EIO}
 	}
-	err := openFails(t, t.TempDir())
+	err := openErr(t, t.TempDir())
 	if want := `sqlite store: database file "byward.db": ` + syscall.EIO.Error(); err == nil || err.Error() != want || !errors.Is(err, syscall.EIO) {
 		t.Fatalf("err = %v, want %q", err, want)
 	}
@@ -342,7 +342,7 @@ func TestUnwritableStateDirectoryFailsOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // G302: directory mode, restored for cleanup
-	err := openFails(t, dir)
+	err := openErr(t, dir)
 	if err == nil || err.Error() != "sqlite store: the state directory is not writable: permission denied" || !errors.Is(err, fs.ErrPermission) {
 		t.Fatalf("err = %v, want the state directory named unwritable, by what it is, never its path", err)
 	}
@@ -371,7 +371,7 @@ func TestNewerSchemaIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	must(t, db.Close())
-	err := openFails(t, dir)
+	err := openErr(t, dir)
 	if err == nil || !strings.Contains(err.Error(), "newer than this binary") {
 		t.Fatalf("err = %v, want the downgrade refusal", err)
 	}
@@ -779,7 +779,7 @@ func TestFailedMigrationChangesNothing(t *testing.T) {
 	migrations = append(append([]string{}, saved...), "CREATE TABLE half_done (a); UPDATE grants SET subject = 'x'; SELECT * FROM no_such_table;")
 	t.Cleanup(func() { migrations = saved })
 
-	err := openFails(t, dir)
+	err := openErr(t, dir)
 	if err == nil {
 		t.Fatal("Open succeeded although a migration fails")
 	}

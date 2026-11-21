@@ -102,7 +102,7 @@ func CheckPaths(opts Options) error {
 			// Open creates the database through a symlink whose target's directory exists (O_CREATE);
 			// SQLite does not do that for its WAL and SHM files.
 			if err := regularIfPresent(f, name == fileName); err != nil {
-				return fmt.Errorf("sqlite store: database file %q: %w", name, err)
+				return databaseFileError(name, err)
 			}
 		}
 	case errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR):
@@ -274,7 +274,7 @@ func present(ctx context.Context, path string) error {
 	case errors.Is(err, syscall.ENOTDIR):
 		return fmt.Errorf("%w: the state directory, or a directory above it, is not a directory", store.ErrNoStore)
 	case err != nil:
-		return fmt.Errorf("sqlite store: database file %q: %w", fileName, logging.FileError(err))
+		return databaseFileError(fileName, err)
 	}
 	// SQLite would create a WAL database's side files beside a file it cannot write, and could not
 	// remove them; the open that follows reports such a file.
@@ -856,6 +856,12 @@ func probeWritable(dir string) error {
 	return nil
 }
 
+// databaseFileError names the database file, or one of its side files, by name and the cause, never
+// its path (security invariant 2).
+func databaseFileError(name string, err error) error {
+	return fmt.Errorf("sqlite store: database file %q: %w", name, logging.FileError(err))
+}
+
 // closeDatabaseFile is (*os.File).Close; tests replace it to fail ensureFile's close, which only a
 // fault (such as EIO on a network file system) does on a real file system.
 var closeDatabaseFile = (*os.File).Close
@@ -866,19 +872,19 @@ var closeDatabaseFile = (*os.File).Close
 func ensureFile(path string) error {
 	for _, side := range []string{path + "-wal", path + "-shm"} {
 		if err := os.Chmod(side, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("sqlite store: database file %q: %w", filepath.Base(side), logging.FileError(err))
+			return databaseFileError(filepath.Base(side), err)
 		}
 	}
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600) //nolint:gosec // G304: the operator's state directory
 	if err != nil {
-		return fmt.Errorf("sqlite store: database file %q: %w", filepath.Base(path), logging.FileError(err))
+		return databaseFileError(filepath.Base(path), err)
 	}
 	if err := f.Chmod(0o600); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("sqlite store: database file %q: %w", filepath.Base(path), logging.FileError(err))
+		return databaseFileError(filepath.Base(path), err)
 	}
 	if err := closeDatabaseFile(f); err != nil {
-		return fmt.Errorf("sqlite store: database file %q: %w", filepath.Base(path), logging.FileError(err))
+		return databaseFileError(filepath.Base(path), err)
 	}
 	return nil
 }
