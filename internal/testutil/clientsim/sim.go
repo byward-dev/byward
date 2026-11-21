@@ -202,13 +202,14 @@ func authorize(t *testing.T, e Env, p Profile, c Credentials, m metadata, verifi
 	if page.StatusCode != http.StatusOK || flow == nil {
 		t.Fatalf("%s: /authorize answered %d without a consent page: %.300s", p.Client, page.StatusCode, body)
 	}
-	time.Sleep(e.ConsentDelay + 100*time.Millisecond) // the user reads the page; Allow works only after the delay
-	allow := e.form(t, "/consent", url.Values{"flow": {html.UnescapeString(flow[1])}, "action": {"allow"}}, page.Cookies(),
-		http.Header{"Origin": {e.Public}, "Sec-Fetch-Site": {"same-origin"}})
-	_ = allow.Body.Close()
-	if allow.StatusCode != http.StatusSeeOther {
-		t.Fatalf("%s: consent Allow answered %d", p.Client, allow.StatusCode)
+	allow, err := AnswerAllow(e.ConsentDelay, func() (*http.Response, error) { // the user reads the page first
+		return e.form(t, "/consent", url.Values{"flow": {html.UnescapeString(flow[1])}, "action": {"allow"}}, page.Cookies(),
+			http.Header{"Origin": {e.Public}, "Sec-Fetch-Site": {"same-origin"}}), nil
+	})
+	if err != nil {
+		t.Fatalf("%s: %v", p.Client, err)
 	}
+	_ = allow.Body.Close()
 	idp, err := e.Browser(allow.Header.Get("Location"))
 	if err != nil {
 		t.Fatal(err)

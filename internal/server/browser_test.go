@@ -3,6 +3,7 @@ package server
 import (
 	"html"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"regexp"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/broker"
+	"github.com/byward-dev/byward/internal/testutil/clientsim"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
 
@@ -85,13 +87,55 @@ func (b *testBrowser) viaIdP(fake *fakeidp.IdP, res *http.Response) *http.Respon
 	return b.send(http.MethodGet, cb.Path+"?"+cb.RawQuery, nil, res.Cookies())
 }
 
-// allow answers the consent page (its body, already read) with Allow, after the consent delay.
+// allow answers the consent page (its body, already read) with Allow, after the consent delay, and
+// returns the answer: a 303 to the IdP.
 func (b *testBrowser) allow(page *http.Response, body string) *http.Response {
 	b.t.Helper()
 	flow := consentFlow.FindStringSubmatch(body)
 	if flow == nil {
 		b.t.Fatalf("no consent form: %s", body)
 	}
-	time.Sleep(broker.ConsentDelay + 100*time.Millisecond) // Allow is accepted only after the delay
-	return b.send(http.MethodPost, "/consent", url.Values{"flow": {html.UnescapeString(flow[1])}, "action": {"allow"}}, page.Cookies())
+	res, err := clientsim.AnswerAllow(broker.ConsentDelay, func() (*http.Response, error) {
+		return b.send(http.MethodPost, "/consent", url.Values{"flow": {html.UnescapeString(flow[1])}, "action": {"allow"}}, page.Cookies()), nil
+	})
+	if err != nil {
+		b.t.Fatal(err)
+	}
+	return res
+}
+
+// An Allow sent before the consent delay gets the consent page again with clientsim.ConsentTooSoon,
+// and clientsim.AnswerAllow, on that real page, waits out the delay and sends Allow again, which the
+// broker then accepts: if the broker's words change, this fails, not a retry nobody sees (#598).
+func TestAnAllowBeforeTheDelayIsShownThePageAgainAndAcceptedWhenSentAgain(t *testing.T) {
+	const public = "https://mcp.example.com"
+	app := fakeidp.Client{ID: fakeidp.NewGUID(), Secrets: []string{"s3cret"}, RedirectURIs: []string{public + "/callback/entra"}}
+	useFakeEntra(t, fakeidp.New(t, fakeidp.Entra, fakeidp.WithClient(app)), app)
+	srv, err := New(loadConfig(t, public+"/mcp"), discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := httptest.NewServer(srv.Public.Handler)
+	t.Cleanup(h.Close)
+	b := newTestBrowser(t, h.URL, public)
+	page := b.send(http.MethodGet, "/authorize?"+authorizeQuery(nil).Encode(), nil, nil)
+	body := readAll(t, page)
+	flow := consentFlow.FindStringSubmatch(body)
+	if page.StatusCode != http.StatusOK || flow == nil {
+		t.Fatalf("authorize: %d, want the consent page: %.300s", page.StatusCode, body)
+	}
+	var answers []int
+	// A delay of -100ms sends the first Allow at once, too soon; the second waits out the delay itself.
+	res, err := clientsim.AnswerAllow(-100*time.Millisecond, func() (*http.Response, error) {
+		if len(answers) == 1 {
+			time.Sleep(broker.ConsentDelay)
+		}
+		res := b.send(http.MethodPost, "/consent", url.Values{"flow": {html.UnescapeString(flow[1])}, "action": {"allow"}}, page.Cookies())
+		answers = append(answers, res.StatusCode)
+		return res, nil
+	})
+	if err != nil || len(answers) != 2 || answers[0] != http.StatusOK {
+		t.Fatalf("answers %v, %v; want the page again (200), then the redirect to the IdP", answers, err)
+	}
+	_ = res.Body.Close()
 }

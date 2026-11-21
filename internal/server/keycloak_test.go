@@ -187,10 +187,9 @@ func keycloakSignIn(t *testing.T, public, user string, want int, verifier string
 		t.Fatalf("consent page: %d, want the page naming Keycloak: %s", page.StatusCode, body)
 	}
 	b := &testBrowser{t: t, base: public, public: public, c: c} // with this sign-in's cookie jar
-	toKeycloak, err := redirect("consent answer", http.StatusSeeOther)(b.allow(page, body), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	allowed := b.allow(page, body)
+	_ = allowed.Body.Close()
+	toKeycloak := allowed.Header.Get("Location")
 	login, err := c.Get(toKeycloak) //nolint:gosec // G107: the Keycloak authorization URL byward built from its discovery
 	if err != nil {
 		t.Fatal(err)

@@ -24,6 +24,7 @@ import (
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/idp/entra"
+	"github.com/byward-dev/byward/internal/testutil/clientsim"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 	"github.com/byward-dev/byward/internal/testutil/fakeupstream"
 )
@@ -209,16 +210,19 @@ func (e *realClientEnv) browse(authorize string) (string, error) {
 	if page.StatusCode != http.StatusOK || flow == nil {
 		return "", fmt.Errorf("consent page: %d %s", page.StatusCode, body)
 	}
-	time.Sleep(broker.ConsentDelay + 100*time.Millisecond) // Allow is accepted only after the delay
 	form := url.Values{"flow": {html.UnescapeString(string(flow[1]))}, "action": {"allow"}}
-	req, _ := http.NewRequest(http.MethodPost, e.public+"/consent", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Origin", e.public)
-	req.Header.Set("Sec-Fetch-Site", "same-origin")
-	toIdP, err := redirect("consent answer", http.StatusSeeOther)(c.Do(req))
+	allowed, err := clientsim.AnswerAllow(broker.ConsentDelay, func() (*http.Response, error) {
+		req, _ := http.NewRequest(http.MethodPost, e.public+"/consent", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", e.public)
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		return c.Do(req)
+	})
 	if err != nil {
 		return "", err
 	}
+	_ = allowed.Body.Close()
+	toIdP := allowed.Header.Get("Location")
 	toCallback, err := redirect("IdP sign-in", http.StatusFound)(e.fake.HTTPClient().Get(toIdP))
 	if err != nil {
 		return "", err
