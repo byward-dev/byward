@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -319,9 +320,9 @@ func allSettings(t *testing.T, env []string) []config.Setting {
 // BYWARD_PUBLIC_URL and BYWARD_UPSTREAM_URL, alone and with an undefined flag; as an undefined flag,
 // with and without a value; in a bad flag syntax; and as an extra argument. Each cell must reach its
 // own refusal, which names a refused value only by its length, as config does (#512), or for a URL be
-// accepted, and show the value in no refusal, on stderr or stdout. Nothing reaches the process's own
-// stderr either, where the flag package writes unless told otherwise, defaults from the environment
-// included.
+// accepted, and show the value in no refusal, on stderr or stdout. Nothing reaches os.Stderr or the log
+// package either: the flag package writes to os.Stderr unless told otherwise, defaults from the
+// environment included.
 func TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints(t *testing.T) {
 	const usage = "byward: usage: byward init entra --tenant <tenant-id> [--public-url <url>] [--upstream-url <url>] [--secret-years 1|2] [--credential secret|certificate]\n"
 	processStderr := redirectStderr(t)
@@ -376,10 +377,13 @@ func TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints(t *testing.T) {
 			cells = append(cells, cell{place: "--" + name, want: r.want, accepted: r.accepted, args: entra("--" + name + "=" + v)})
 		}
 		for _, c := range cells {
-			t.Run(c.place+", "+form.name, func(t *testing.T) {
+			t.Run(c.place+"/"+form.name, func(t *testing.T) {
 				code, stdout, stderr := runWith(c.args, c.env...)
 				if shows(stderr) || code != exitOK && shows(stdout) {
 					t.Errorf("exit %d; stdout %q, stderr %q show the value given", code, stdout, stderr)
+				}
+				if got := processStderr(); got != "" {
+					t.Errorf("init wrote %q to os.Stderr or the log package, want nothing", got)
 				}
 				if code == exitOK && c.accepted {
 					return
@@ -390,27 +394,30 @@ func TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints(t *testing.T) {
 			})
 		}
 	}
-	if got := processStderr(); got != "" {
-		t.Errorf("init wrote %q to the process's stderr, want nothing", got)
-	}
 }
 
-// redirectStderr sends the process's stderr to a file until the test ends, and returns a function that
-// reads what was written to it. No test in this package runs in parallel, so none writes there meanwhile.
+// redirectStderr sends os.Stderr and the log package (slog's default logger writes through it) to a file
+// until the test ends, and returns a function that reads what was written there since it last read. It
+// swaps variables, not file descriptor 2. No test in this package runs in parallel, so none writes there
+// meanwhile.
 func redirectStderr(t *testing.T) func() string {
 	t.Helper()
 	f, err := os.Create(filepath.Join(t.TempDir(), "stderr"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	saved := os.Stderr
+	saved, savedLog := os.Stderr, log.Writer()
 	os.Stderr = f
-	t.Cleanup(func() { os.Stderr = saved; _ = f.Close() })
+	log.SetOutput(f)
+	t.Cleanup(func() { os.Stderr = saved; log.SetOutput(savedLog); _ = f.Close() })
+	read := 0
 	return func() string {
 		b, err := os.ReadFile(f.Name())
 		if err != nil {
 			t.Fatal(err)
 		}
-		return string(b)
+		got := string(b[read:])
+		read = len(b)
+		return got
 	}
 }

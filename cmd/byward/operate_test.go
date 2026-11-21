@@ -408,8 +408,7 @@ func TestInitFlagRefusalHidesAnyOtherFlagPackageMessage(t *testing.T) {
 	}
 }
 
-// --secret-years is a number as the flag package reads one, in base 0 (0x, 0b, 0o or decimal), and 1
-// when not given.
+// --secret-years is a number as the flag package reads one, and 1 when not given.
 func TestInitReadsTheSecretLifetimeAsTheFlagPackageReadsANumberAnd1WhenNotGiven(t *testing.T) {
 	for given, want := range map[string]string{"": "--years 1 ", "2": "--years 2 ", "0x2": "--years 2 ", "0b1": "--years 1 ", "0o2": "--years 2 ", "+1": "--years 1 "} {
 		args := []string{"init", "entra", "--tenant", tenant, "--public-url", "https://m.example/mcp"}
