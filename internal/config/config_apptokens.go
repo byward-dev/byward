@@ -15,7 +15,7 @@ func (c *Config) appTokens(v *Values) []error {
 		var set []string
 		for _, n := range []string{"app-roles", "app-client-ids"} {
 			if v.byKey[n].Source != SourceDefault {
-				set = append(set, env(n))
+				set = append(set, spelled(v.byKey[n]))
 			}
 		}
 		if len(set) > 0 {

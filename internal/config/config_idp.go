@@ -52,11 +52,7 @@ func (c *Config) mixedIdPSettings(v *Values, other string) []error {
 	var mixed []string
 	for _, n := range v.order {
 		if val := v.byKey[n]; strings.HasPrefix(n, other) && val.Source != SourceDefault {
-			name := val.Setting.Env()
-			if val.From != "" {
-				name = val.From // the env variable or flag the operator used, with its _FILE or -file suffix
-			}
-			mixed = append(mixed, name)
+			mixed = append(mixed, spelled(val))
 		}
 	}
 	if len(mixed) == 0 {
