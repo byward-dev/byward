@@ -1,6 +1,9 @@
 package host
 
 import (
+	"fmt"
+	"net/netip"
+	"strings"
 	"testing"
 )
 
@@ -55,7 +58,7 @@ func TestParseReadsAHostAsABrowserDoes(t *testing.T) {
 		{"＠.example", "https", 0, "", "", ErrName},
 		{"\u0080.example", "https", 0, "", "", ErrName}, // the first code point past ASCII goes to IDNA, which refuses this one
 	} {
-		t.Run(tc.hostport+" for "+tc.scheme, func(t *testing.T) {
+		t.Run(fmt.Sprintf("%q for %s", tc.hostport, tc.scheme), func(t *testing.T) {
 			h, err := Parse(tc.hostport, tc.scheme)
 			if err != tc.err { //nolint:errorlint // the fixed reason itself, never one wrapping or quoting the input (ADR-0031 §1)
 				t.Fatalf("Parse error %v; want exactly %v", err, tc.err)
@@ -65,6 +68,14 @@ func TestParseReadsAHostAsABrowserDoes(t *testing.T) {
 			}
 			if h.Kind != tc.kind || h.Canonical != tc.canonical || h.Port != tc.port {
 				t.Errorf("Parse = kind %v, %q, port %q; want kind %v, %q, port %q", h.Kind, h.Canonical, h.Port, tc.kind, tc.canonical, tc.port)
+			}
+			// A name has no address; an IP host's address is the one its canonical form names.
+			var addr netip.Addr
+			if tc.kind != Name {
+				addr = netip.MustParseAddr(strings.Trim(tc.canonical, "[]"))
+			}
+			if h.Addr != addr {
+				t.Errorf("Addr = %v; want %v", h.Addr, addr)
 			}
 			want := tc.canonical
 			if tc.port != "" {
@@ -91,6 +102,10 @@ func TestLoopbackReadsTheParsedHostButAsWrittenOnlyTheFormGosDialerReads(t *test
 		{"Localhost", true, true},
 		{"127.0.0.1", true, true},
 		{"127.0.0.2", true, true},
+		// Addresses that are not loopback, whatever their form.
+		{"2001:db8::1", false, false},
+		{"[2001:db8::1]", false, false},
+		{"::ffff:10.0.0.1", false, false},
 		// Spellings a browser reads as 127.0.0.1, or as localhost, that Go's dialer does not.
 		{"127.1", true, false},
 		{"0x7f.0.0.1", true, false},
@@ -114,7 +129,7 @@ func TestLoopbackReadsTheParsedHostButAsWrittenOnlyTheFormGosDialerReads(t *test
 		{"fe80::1%eth0", false, false},
 		{"", false, false},
 	} {
-		t.Run(tc.host, func(t *testing.T) {
+		t.Run(fmt.Sprintf("%q", tc.host), func(t *testing.T) {
 			h, err := Parse(tc.host, "http")
 			if got := err == nil && h.Loopback(); got != tc.parsed {
 				t.Errorf("Parse(%q).Loopback() = %v (error %v); want %v", tc.host, got, err, tc.parsed)
