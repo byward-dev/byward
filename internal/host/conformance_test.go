@@ -12,15 +12,27 @@ import (
 // tables; toascii.json; and the host of each special-scheme URL in urltestdata.json, kept in
 // urltestdata-hosts.json (ADR-0032 §6).
 
-// deviations are the suite cases Parse reads differently from a browser, on purpose, with why.
-var deviations = map[string]string{
-	"http://2001::1":                           "Parse takes a bare IPv6 address whole, as BYWARD_ALLOWED_HOSTS gives one; a URL must bracket it",
-	"http://%30%78%63%30%2e%30%32%35%30.01":    percentEncoded,
-	"http://%30%78%63%30%2e%30%32%35%30.01%2e": percentEncoded,
-	"ftp://%e2%98%83":                          percentEncoded,
-	"https://%e2%98%83":                        percentEncoded,
-	"https://a%C2%ADb/":                        percentEncoded,
+// deviation is a suite case Parse reads differently from a browser, on purpose: why, and what Parse
+// reads instead (the host it writes, or the reason it refuses the host).
+type deviation struct {
+	why  string
+	host string
+	err  error
 }
+
+// deviations are the suite cases Parse reads differently from a browser, by their input.
+var deviations = map[string]deviation{
+	"http://2001::1":                           {why: "Parse takes a bare IPv6 address whole, as BYWARD_ALLOWED_HOSTS gives one; a URL must bracket it", host: "[2001::1]"},
+	"http://%30%78%63%30%2e%30%32%35%30.01":    {why: percentEncoded, err: ErrName},
+	"http://%30%78%63%30%2e%30%32%35%30.01%2e": {why: percentEncoded, err: ErrName},
+	"ftp://%e2%98%83":                          {why: percentEncoded, err: ErrName},
+	"https://%e2%98%83":                        {why: percentEncoded, err: ErrName},
+	"https://a%C2%ADb/":                        {why: percentEncoded, err: ErrName},
+}
+
+// suiteSizes are the number of cases each suite holds, so a refresh that truncates or reshapes a
+// file fails instead of testing less.
+var suiteSizes = map[string]int{"IdnaTestV2.json": 2670, "toascii.json": 87, "urltestdata-hosts.json": 284}
 
 // percentEncoded is why Parse refuses a percent-encoded host that the URL parser decodes first: no
 // setting or header byward reads carries one (ADR-0032 §3 refuses "%" in a host).
@@ -43,7 +55,10 @@ func hostSuite(t *testing.T, file string) []suiteCase {
 			Input  string  `json:"input"`
 			Output *string `json:"output"`
 		}
-		if json.Unmarshal(r, &c) != nil || c.Input == "" {
+		if err := json.Unmarshal(r, &c); err != nil {
+			t.Fatalf("%s: an entry that is not a host case: %v", file, err)
+		}
+		if c.Input == "" {
 			continue
 		}
 		sc := suiteCase{name: c.Input, hostport: c.Input, scheme: "https", failure: c.Output == nil}
@@ -82,10 +97,11 @@ func urlSuite(t *testing.T) []suiteCase {
 	return cases
 }
 
-// urltestdata-hosts.json is derived from WPT's urltestdata.json: the entries whose authority urlHost
-// can cut out, which leaves out every URL with userinfo. Run with BYWARD_WPT_URLTESTDATA set to a
-// downloaded urltestdata.json to regenerate it (testdata/wpt/README.md).
-func TestTheURLHostSuiteIsDerivedFromURLTestData(t *testing.T) {
+// TestRegenerateTheURLHostSuiteFromURLTestData writes urltestdata-hosts.json from WPT's
+// urltestdata.json: the entries whose authority urlHost can cut out, which leaves out every URL with
+// userinfo. It checks nothing: it runs only with BYWARD_WPT_URLTESTDATA set to the absolute path of
+// a downloaded urltestdata.json (testdata/wpt/README.md).
+func TestRegenerateTheURLHostSuiteFromURLTestData(t *testing.T) {
 	src := os.Getenv("BYWARD_WPT_URLTESTDATA")
 	if src == "" {
 		t.Skip("BYWARD_WPT_URLTESTDATA is not set; nothing to regenerate")
@@ -171,16 +187,19 @@ func TestParseAgreesWithTheWPTHostSuites(t *testing.T) {
 	}
 	deviated := map[string]bool{}
 	for file, cases := range suites {
-		if len(cases) == 0 {
-			t.Errorf("%s: no cases read", file)
+		if len(cases) != suiteSizes[file] {
+			t.Errorf("%s: %d cases read, want %d (testdata/wpt/README.md)", file, len(cases), suiteSizes[file])
 		}
 		for _, c := range cases {
 			h, err := Parse(c.hostport, c.scheme)
 			agrees := err == nil && !c.failure && h.String() == c.want || err != nil && c.failure
-			if _, listed := deviations[c.name]; listed {
+			if d, listed := deviations[c.name]; listed {
 				deviated[c.name] = true
 				if agrees {
 					t.Errorf("%s %q is listed as a deviation, but Parse now reads it as a browser does; drop it from the list", file, c.name)
+				}
+				if err != d.err || err == nil && h.String() != d.host { //nolint:errorlint // the fixed reason itself
+					t.Errorf("%s %q: Parse reads it as %q (error %v); the deviation says %q (error %v)", file, c.name, h.String(), err, d.host, d.err)
 				}
 				continue
 			}

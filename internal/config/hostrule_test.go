@@ -47,7 +47,7 @@ func hostRule(h string) string {
 	fmt.Fprintf(&b, "  cimd list: %q\n", hostNameReason(h))
 	fmt.Fprintf(&b, "  denylist: %q\n", denylistReason(h))
 	fmt.Fprintf(&b, "  host header: %s\n", host.Canonical(h))
-	fmt.Fprintf(&b, "  hostname: %s, loopback %v\n", Hostname(h), host.LoopbackAsWritten(Hostname(h)))
+	fmt.Fprintf(&b, "  hostname: %s, loopback %v\n", host.Hostname(h), host.LoopbackAsWritten(host.Hostname(h)))
 	// The --dev issuer and the no-auth listen address ask about the host as written, case and all.
 	if u, err := url.Parse("http://" + h); err == nil {
 		fmt.Fprintf(&b, "  loopback as written: %v\n", host.LoopbackAsWritten(u.Hostname()))
@@ -56,9 +56,9 @@ func hostRule(h string) string {
 }
 
 // The host rule of every host setting, for each probe spelling, is pinned in
-// testdata/hostrule.golden. Moving the rule into one parser (#521, ADR-0032 slice 1) changes only
-// A1, LOCALHOST as loopback (#482); every other line is the same. Regenerate with
-// BYWARD_UPDATE_GOLDEN=1, and review the diff.
+// testdata/hostrule.golden, so a change to any setting's reading of a host shows as a diff. When the
+// rule moved into one parser (#521, ADR-0032 slice 1), only A1 changed: LOCALHOST as loopback (#482).
+// Regenerate with BYWARD_UPDATE_GOLDEN=1, and review the diff.
 func TestEachHostSettingReadsEachProbeSpellingAsPinned(t *testing.T) {
 	var b strings.Builder
 	for _, h := range hostProbes {
@@ -75,6 +75,24 @@ func TestEachHostSettingReadsEachProbeSpellingAsPinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := b.String(); got != string(want) {
-		t.Errorf("the host rule changed; if intended, regenerate with BYWARD_UPDATE_GOLDEN=1 and review the diff\ngot:\n%s", got)
+		t.Errorf("the host rule changed at %s; if intended, regenerate with BYWARD_UPDATE_GOLDEN=1 and review the diff", firstDiff(got, string(want)))
 	}
+}
+
+// firstDiff is the first line where got and want differ, numbered from 1, with both versions.
+func firstDiff(got, want string) string {
+	g, w := strings.Split(got, "\n"), strings.Split(want, "\n")
+	for i := 0; i < len(g) || i < len(w); i++ {
+		var gl, wl string
+		if i < len(g) {
+			gl = g[i]
+		}
+		if i < len(w) {
+			wl = w[i]
+		}
+		if gl != wl {
+			return fmt.Sprintf("line %d:\n got: %q\nwant: %q", i+1, gl, wl)
+		}
+	}
+	return "no line differs"
 }

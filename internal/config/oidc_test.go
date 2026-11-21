@@ -236,6 +236,7 @@ func TestDevRecordsAnHTTPIdPIssuerOnLoopbackAsARelaxation(t *testing.T) {
 		{"127.0.0.2 over http", "http://127.0.0.2:8180/realms/byward", true, true},        // any loopback address, as the adapter has it
 		{"LOCALHOST over http (#482)", "http://LOCALHOST:8180/realms/byward", true, true}, // a host name in any case
 		{"127.1 over http, not in dotted decimal", "http://127.1:8180/realms/byward", true, false},
+		{"full-width localhost over http", "http://ｌｏｃａｌｈｏｓｔ:8180/realms/byward", true, false}, // localhost only as Go's dialer reads it
 		{"https", "https://sso.example.com/realms/acme", true, false},
 		{"https on localhost", "https://localhost:8443/realms/byward", true, false},
 		{"http on a private address", "http://10.0.0.5:8180/realms/byward", true, false},

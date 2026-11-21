@@ -18,7 +18,7 @@ type Denylist struct {
 }
 
 // NewDenylist parses entries: a CIMD client ID (an https URL) or a host name that redirect URIs
-// must not return to. Both match exactly up to spelling: the host's spelling (BrowserHost: case, a
+// must not return to. Both match exactly up to spelling: the host's spelling (host.BrowserName: case, a
 // trailing dot, a full-width or internationalized name by its ASCII form), and for a URL the default
 // port and percent-encoding in the path. A redirect host also matches by its transitional fold
 // (DeniesRedirect).
@@ -78,7 +78,7 @@ func (d *Denylist) DeniesRedirect(redirectURI string) bool {
 }
 
 // canonicalCIMD folds the spellings of one CIMD URL that fetch the same document: the host's
-// spelling (BrowserHost), the default port and percent-encoding in the path. A denylist may match more
+// spelling (host.BrowserName), the default port and percent-encoding in the path. A denylist may match more
 // than one spelling, never fewer.
 func canonicalCIMD(id string) string {
 	u, err := url.Parse(id)

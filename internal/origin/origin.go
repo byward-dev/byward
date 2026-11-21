@@ -42,10 +42,10 @@ func Hosts(rec *audit.Log, allowed []string, next http.Handler) http.Handler {
 func InternalHosts(rec *audit.Log, allowed []string, next http.Handler) http.Handler {
 	set := map[string]bool{"localhost": true}
 	for _, h := range allowed {
-		set[config.Hostname(h)] = true // config stores IP addresses canonical; any IP literal passes anyway
+		set[host.Hostname(h)] = true // config stores IP addresses canonical; any IP literal passes anyway
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name := config.Hostname(host.Canonical(r.Host)) // 127.1 is an IP literal too
+		name := host.Hostname(host.Canonical(r.Host)) // 127.1 is an IP literal too
 		if _, err := netip.ParseAddr(name); err != nil && !set[name] {
 			rec.RecordUnauthenticated(r, audit.Event{Name: audit.HostRejected, Outcome: audit.Failure, Host: r.Host})
 			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)

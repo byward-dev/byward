@@ -26,9 +26,9 @@ var redirectProbes = []string{
 }
 
 // The browser's fold of a host name, the denylist's transitional fold, and the loopback redirect
-// set are pinned in testdata/hostrule.golden. Moving the browser fold into one parser (#521,
-// ADR-0032 slice 1) changes none of them. Regenerate with BYWARD_UPDATE_GOLDEN=1, and review the
-// diff.
+// set are pinned in testdata/hostrule.golden, so a change to any of them shows as a diff. Moving the
+// browser fold into one parser (#521, ADR-0032 slice 1) changed none of them. Regenerate with
+// BYWARD_UPDATE_GOLDEN=1, and review the diff.
 func TestHostFoldsAndTheLoopbackRedirectSetAreAsPinned(t *testing.T) {
 	var b strings.Builder
 	for _, h := range nameProbes {
@@ -49,6 +49,24 @@ func TestHostFoldsAndTheLoopbackRedirectSetAreAsPinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := b.String(); got != string(want) {
-		t.Errorf("a host fold or the loopback redirect set changed; if intended, regenerate with BYWARD_UPDATE_GOLDEN=1 and review the diff\ngot:\n%s", got)
+		t.Errorf("a host fold or the loopback redirect set changed at %s; if intended, regenerate with BYWARD_UPDATE_GOLDEN=1 and review the diff", firstDiff(got, string(want)))
 	}
+}
+
+// firstDiff is the first line where got and want differ, numbered from 1, with both versions.
+func firstDiff(got, want string) string {
+	g, w := strings.Split(got, "\n"), strings.Split(want, "\n")
+	for i := 0; i < len(g) || i < len(w); i++ {
+		var gl, wl string
+		if i < len(g) {
+			gl = g[i]
+		}
+		if i < len(w) {
+			wl = w[i]
+		}
+		if gl != wl {
+			return fmt.Sprintf("line %d:\n got: %q\nwant: %q", i+1, gl, wl)
+		}
+	}
+	return "no line differs"
 }

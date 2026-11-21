@@ -1,7 +1,6 @@
 package host
 
 import (
-	"errors"
 	"testing"
 )
 
@@ -55,8 +54,8 @@ func TestParseReadsAHostAsABrowserDoes(t *testing.T) {
 	} {
 		t.Run(tc.hostport+" for "+tc.scheme, func(t *testing.T) {
 			h, err := Parse(tc.hostport, tc.scheme)
-			if !errors.Is(err, tc.err) {
-				t.Fatalf("Parse error %v; want %v", err, tc.err)
+			if err != tc.err { //nolint:errorlint // the fixed reason itself, never one wrapping or quoting the input (ADR-0031 §1)
+				t.Fatalf("Parse error %v; want exactly %v", err, tc.err)
 			}
 			if err != nil {
 				return
@@ -64,17 +63,22 @@ func TestParseReadsAHostAsABrowserDoes(t *testing.T) {
 			if h.Kind != tc.kind || h.Canonical != tc.canonical || h.Port != tc.port {
 				t.Errorf("Parse = kind %v, %q, port %q; want kind %v, %q, port %q", h.Kind, h.Canonical, h.Port, tc.kind, tc.canonical, tc.port)
 			}
-			if want := tc.canonical; tc.port != "" && h.String() != want+":"+tc.port || tc.port == "" && h.String() != want {
-				t.Errorf("String() = %q; want the canonical host and its port", h.String())
+			want := tc.canonical
+			if tc.port != "" {
+				want += ":" + tc.port
+			}
+			if h.String() != want {
+				t.Errorf("String() = %q; want %q", h.String(), want)
 			}
 		})
 	}
 }
 
-// A parsed host is loopback by the address a browser reads (127.1 is 127.0.0.1), while
-// LoopbackAsWritten takes an IPv4 address only in dotted decimal, the form Go's dialer reads. Both
-// fold localhost's case (A1, #482). A redirect URI's loopback set is exact instead (ADR-0032 §5).
-func TestLoopbackParsedAndAsWritten(t *testing.T) {
+// A parsed host is loopback by the host a browser reads (127.1 is 127.0.0.1, a full-width localhost
+// is localhost), while LoopbackAsWritten takes a host only in the form Go's dialer reads: ASCII, and
+// as Parse writes it, case aside. Both fold localhost's case (A1, #482). A redirect URI's loopback set
+// is exact instead (ADR-0032 §5).
+func TestLoopbackReadsTheParsedHostButAsWrittenOnlyTheFormGosDialerReads(t *testing.T) {
 	for _, tc := range []struct {
 		host              string
 		parsed, asWritten bool
@@ -84,7 +88,16 @@ func TestLoopbackParsedAndAsWritten(t *testing.T) {
 		{"Localhost", true, true},
 		{"127.0.0.1", true, true},
 		{"127.0.0.2", true, true},
-		{"127.1", true, false}, // the two differ here only
+		// Spellings a browser reads as 127.0.0.1, or as localhost, that Go's dialer does not.
+		{"127.1", true, false},
+		{"0x7f.0.0.1", true, false},
+		{"0177.0.0.1", true, false},
+		{"2130706433", true, false},
+		{"127.000.000.001", true, false},
+		{"ｌｏｃａｌｈｏｓｔ", true, false},
+		{"localhoſt", true, false},
+		{"local\u00adhost", true, false},
+		{"LOCALHOST\u200b", true, false},
 		{"::1", true, true},
 		{"::ffff:127.0.0.1", true, true},
 		{"[::1]", true, false}, // as written, a host has no brackets
@@ -94,6 +107,7 @@ func TestLoopbackParsedAndAsWritten(t *testing.T) {
 		{"localhost.idp.example", false, false},
 		{"evil-localhost", false, false},
 		{"localhost:80", true, false}, // as written, a host has no port
+		{"localhost:", true, false},
 		{"fe80::1%eth0", false, false},
 		{"", false, false},
 	} {

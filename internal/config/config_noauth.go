@@ -98,7 +98,7 @@ func checkNoAuth(c *Config, v *Values) []error {
 	// Named without a place: the stored lists leave out an entry refused for its form, so an index
 	// into them need not be the entry's place in the list given.
 	for _, h := range c.AllowedHosts {
-		if hn := Hostname(h); !host.LoopbackAsWritten(hn) {
+		if hn := host.Hostname(h); !host.LoopbackAsWritten(hn) {
 			errs = append(errs, refusedMeaning(hosts, whole, notLoopback(hn),
 				"only loopback hosts with "+env+", such as localhost:8080", "authentication is off, so only loopback may reach the proxy"))
 		}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/doctor"
+	"github.com/byward-dev/byward/internal/host"
 	"github.com/byward-dev/byward/internal/servingcert"
 )
 
@@ -125,7 +126,7 @@ func servingCertNames(cfg *config.Config, p *servingcert.Pair) doctor.Result {
 	r := doctor.CheckTLSCertificateNames.NewResult()
 	hosts := []string{cfg.PublicURL.Hostname()}
 	for _, h := range cfg.AllowedHosts {
-		hosts = append(hosts, config.Hostname(h))
+		hosts = append(hosts, host.Hostname(h))
 	}
 	for _, h := range hosts {
 		if p.Covers(h) {

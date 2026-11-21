@@ -25,7 +25,7 @@ func browserIPv4(h string) string {
 	}
 	a, ok := host.ParseIPv4(h)
 	if !ok {
-		return "is not an IPv4 address but ends in a number, so browsers refuse it"
+		return host.ErrEndsInANumber.Error()
 	}
 	return "is not an IPv4 address in dotted decimal, the only form browsers send; write it as " + a.String()
 }

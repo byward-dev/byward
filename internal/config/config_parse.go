@@ -409,16 +409,3 @@ func validHostName(host string) bool {
 	return host != "" && strings.Trim(host, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~") == "" &&
 		!strings.HasPrefix(host, ".") && !strings.HasSuffix(host, ".") && !strings.Contains(host, "..")
 }
-
-// Hostname is a host as BYWARD_ALLOWED_HOSTS lists it or a Host header carries it (host,
-// host:port, [v6], [v6]:port or a bare v6 address) reduced to its host name: no port, no
-// brackets, in lower case. The internal listener's Host check, the no-auth loopback check and
-// doctor's TLS certificate names use it, so they agree; the public listener's Host check compares
-// host:port instead (origin.Hosts).
-func Hostname(hostport string) string {
-	h := hostport
-	if name, _, err := net.SplitHostPort(h); err == nil {
-		h = name
-	}
-	return strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(h, "["), "]"))
-}

@@ -7,6 +7,7 @@ package host
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -34,7 +35,8 @@ type Host struct {
 	Port string
 }
 
-// The reasons Parse refuses a host[:port]. None quotes the input.
+// The reasons Parse refuses a host[:port]. None quotes the input. They are exported for the setting
+// classes of ADR-0032 §2, which refuse through them (slices 2 to 4).
 var (
 	ErrEmpty         = errors.New("has no host")
 	ErrBrackets      = errors.New("has brackets that do not enclose an IPv6 address alone")
@@ -147,23 +149,30 @@ func (h Host) Loopback() bool {
 	return h.Addr.Unmap().IsLoopback()
 }
 
-// LoopbackAsWritten reports whether h is loopback as an operator wrote it: dotted-decimal IPv4 only,
-// the form Go's dialer reads, so 127.1 is not loopback here, though Parse reads it as 127.0.0.1 and
-// Host.Loopback says it is. h is a host name or an IP address with no port, and an IPv6 address
-// without brackets (a bracketed one is not loopback). Otherwise it is Host.Loopback: localhost in
-// any case (A1), 127.0.0.0/8 or ::1.
-func LoopbackAsWritten(host string) bool {
-	if strings.HasPrefix(host, "[") {
+// LoopbackAsWritten reports whether h is loopback as an operator wrote it, in the form Go's dialer
+// reads: ASCII only, and a name or an IPv4 address only as Parse writes it, case aside. So localhost
+// counts in any case (A1), but neither 127.1 nor a full-width or IDNA-mapped spelling of localhost
+// does, though Parse reads them as 127.0.0.1 and localhost and Host.Loopback says they are. h has no
+// port, and an IPv6 address no brackets: a host with either is not loopback here.
+func LoopbackAsWritten(h string) bool {
+	if strings.HasPrefix(h, "[") || strings.ContainsFunc(h, func(r rune) bool { return r >= 0x80 }) {
 		return false
 	}
-	h, err := Parse(host, "")
-	if err != nil || h.Port != "" {
+	p, err := Parse(h, "")
+	if err != nil || p.Port != "" || p.Kind != IPv6 && !strings.EqualFold(p.Canonical, h) {
 		return false
 	}
-	if h.Kind == IPv4 && h.Canonical != host {
-		return false
+	return p.Loopback()
+}
+
+// Hostname is hostport (host, host:port, [IPv6], [IPv6]:port or a bare IPv6 address) reduced to its
+// host name: no port, no brackets, in lower case.
+func Hostname(hostport string) string {
+	h := hostport
+	if name, _, err := net.SplitHostPort(h); err == nil {
+		h = name
 	}
-	return h.Loopback()
+	return strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(h, "["), "]"))
 }
 
 // Serialize is a host name (no port, no brackets) as browsers serialize it (WHATWG URL host
@@ -171,9 +180,7 @@ func LoopbackAsWritten(host string) bool {
 // (127.1, 0x7f.0.0.1, 2130706433); an IPv6 address in brackets, in its shortest form and all hex
 // (::ffff:7f00:1, where netip writes ::ffff:127.0.0.1). Anything else, including a zoned IPv6
 // address, which no URL carries, is only lower-cased: this is the IP-address half of the browser's
-// host serializer. Names are folded (IDNA, a trailing dot) by BrowserName, for the consent page and
-// the client denylist; config refuses a non-ASCII host instead, so for the ASCII names config
-// accepts, a name's browser form is its lower case.
+// host serializer. Names are folded (IDNA, a trailing dot) by BrowserName.
 func Serialize(host string) string {
 	host = strings.ToLower(host)
 	switch a, err := netip.ParseAddr(host); {
@@ -191,11 +198,10 @@ func Serialize(host string) string {
 	return host
 }
 
-// Canonical is a host[:port] (as a Host header carries it, or as BYWARD_ALLOWED_HOSTS and the
-// public URL give it: host, host:port, [IPv6], [IPv6]:port or a bare IPv6 address) with its host as
-// browsers serialize it (Serialize) and its port kept. The public listener compares Host headers in
-// this form (origin.Hosts), so a client that sends the host as written (Go, Python) and one that
-// sends it as a browser does (fetch; curl rewrites most spellings) both match an entry however it is spelled.
+// Canonical is a host[:port] (host, host:port, [IPv6], [IPv6]:port or a bare IPv6 address) with its
+// host as browsers serialize it (Serialize) and its port kept as written, so a host sent as written
+// (Go, Python) and one sent as a browser writes it (fetch; curl rewrites most spellings) compare
+// equal however it is spelled.
 func Canonical(hostport string) string {
 	host, port := hostport, ""
 	switch {

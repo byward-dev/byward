@@ -41,7 +41,8 @@ UTS #46's own file is not pinned: it "only provides test cases for UseSTD3ASCIIR
 ## Deviations
 
 `TestParseAgreesWithTheWPTHostSuites` lists each case `host.Parse` reads differently, with its
-reason, and fails on a new one:
+reason and what `Parse` reads instead, and fails on a new one. It also pins each file's case count
+(2670, 87 and 284), so a refresh that truncates a file fails:
 
 - a bare IPv6 address (`http://2001::1`): `Parse` takes it whole, as `BYWARD_ALLOWED_HOSTS` gives one;
 - percent-encoded hosts (5 cases): the URL parser decodes them first; `Parse` does not, since no
@@ -53,6 +54,7 @@ reason, and fails on a new one:
    For `IdnaTestV2.json`, pick the commit whose Unicode version matches Go's `x/net/idna` tables.
 2. Download each file from `https://raw.githubusercontent.com/web-platform-tests/wpt/<commit>/url/resources/<file>`,
    and `LICENSE.md` from the repository root. Regenerate `urltestdata-hosts.json` from the downloaded
-   `urltestdata.json`: `BYWARD_WPT_URLTESTDATA=<its path> go test -run TestTheURLHostSuiteIsDerivedFromURLTestData ./internal/host/`.
+   `urltestdata.json`: `BYWARD_WPT_URLTESTDATA=<its absolute path> go test -run TestRegenerateTheURLHostSuiteFromURLTestData ./internal/host/`
+   (the path is read from the package directory).
 3. Update the table above (commit, date, `shasum -a 256`), run `go test ./internal/host/`, and review
    each new mismatch: fix `Parse`, or list it as a deviation with its reason.

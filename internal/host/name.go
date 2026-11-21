@@ -7,21 +7,19 @@ import (
 	"golang.org/x/net/idna"
 )
 
-// BrowserName is a host name as a browser goes to it, the one owner of that name form (the denylist
-// matches by it; the consent page names it and compares sites by it, through BrowserNameOK); an IP
-// address's browser form is Canonical's. It gives the ASCII name, folding case, a
+// BrowserName is a host name as a browser goes to it; an IP address's browser form is Canonical's.
+// It gives the ASCII name, folding case, a
 // trailing dot (app.example. is app.example), full-width letters and full stops, and an
 // internationalized name, which becomes its xn-- labels; so a Unicode spelling of a host compares
 // equal to its xn-- form. A host the browser refuses (a joiner out of context, a label mixing
-// directions, invalid punycode) is the mapping it got that far, so a denylist entry still matches it:
-// more spellings, never fewer.
+// directions, invalid punycode) is the mapping it got that far: more spellings, never fewer.
 func BrowserName(host string) string { return Fold(browserIDNA, host) }
 
 // BrowserNameOK is BrowserName, and whether a browser goes to that host at all: false when the browser
 // refuses the host (including a name that is, or maps to, a forbidden domain code point: ＠ maps to @),
 // or when no DNS name can be it (empty, invisible characters only, an empty label, as an "xn--" label
-// decodes to). Where it is false, BrowserName is only the mapping it got that far,
-// so the consent page must not name it as the destination nor compare sites by it. An IPv6 literal
+// decodes to). Where it is false, BrowserName is only the mapping it got that far, which names no
+// host a browser goes to. An IPv6 literal
 // (without its brackets) has no domain to map and is a host the browser goes to.
 func BrowserNameOK(host string) (string, bool) {
 	if strings.Contains(host, ":") && net.ParseIP(host) != nil {
@@ -91,12 +89,11 @@ func Fold(p *idna.Profile, h string) string {
 // browserIDNA is the WHATWG URL Standard's "domain to ASCII" with beStrict false, which browsers run
 // on a URL's host: UTS #46 non-transitional mapping with the Bidi and joiner checks, and neither the
 // STD3 rules nor the hyphen check (idna.Lookup applies both and reports an error on a name with "_"
-// or "--", which browsers map). transitionalIDNA is the same with transitional mapping, as browsers
-// with IDNA tables before Unicode 15.1 map ẞ and as transitional ones map ß.
+// or "--", which browsers map).
 var browserIDNA = Profile(false)
 
-// Profile is the browser's IDNA profile, with transitional mapping or without. The client denylist's
-// transitional fold uses it too (ADR-0032 §1).
+// Profile is the browser's IDNA profile, with transitional mapping or without: with it, as browsers
+// with IDNA tables before Unicode 15.1 map ẞ and as transitional ones map ß.
 func Profile(transitional bool) *idna.Profile {
 	return idna.New(idna.MapForLookup(), idna.StrictDomainName(false), idna.CheckHyphens(false),
 		idna.BidiRule(), idna.CheckJoiners(true), idna.Transitional(transitional))
