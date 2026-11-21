@@ -52,8 +52,12 @@ func TestAFileErrorLeavesOutThePath(t *testing.T) {
 	if wrapped := FileError(fmt.Errorf("reading: %w", err)); wrapped.Error() != "no such file or directory" {
 		t.Errorf("FileError of a wrapped path error = %v, want the cause alone", wrapped)
 	}
-	if other := errors.New("not a path error"); FileError(other) != other {
-		t.Errorf("FileError changed an error that is not a *fs.PathError")
+	renamed := os.Rename(filepath.Join(t.TempDir(), pasted), filepath.Join(t.TempDir(), pasted+"2"))
+	if got := FileError(fmt.Errorf("renaming: %w", renamed)); got.Error() != "no such file or directory" || !errors.Is(got, fs.ErrNotExist) {
+		t.Errorf("FileError of a wrapped rename error = %v, want the cause alone, still fs.ErrNotExist", got)
+	}
+	if other := errors.New("not a path or link error"); FileError(other) != other {
+		t.Errorf("FileError changed an error that is neither a *fs.PathError nor an *os.LinkError")
 	}
 	if FileError(nil) != nil {
 		t.Errorf("FileError(nil) is not nil")

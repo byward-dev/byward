@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -92,13 +93,15 @@ func TestBadKeyFilesFailTheLoadNamingTheFile(t *testing.T) {
 		{"too large", "k1", strings.Repeat("A", maxKeyFile+1), "too large"},
 		{"bad key ID", "key one", randomKey(t), "must match"},
 		{"key ID over 64 characters", strings.Repeat("k", 65), randomKey(t), "must match"},
+		{"a newline in the name, which cannot start a line of its own (#505)", "k2\nforged", randomKey(t), "must match"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := keyDir(t, map[string]string{"good": randomKey(t), tc.file: tc.content})
 			_, err := LoadKeyRing(dir, noCheck)
-			if err == nil || !strings.Contains(err.Error(), filepath.Join(dir, tc.file)) || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("err = %v, want one naming %s and saying %q", err, tc.file, tc.want)
+			// The file by its name, the key ID, never its path (security invariant 2, #575).
+			if err == nil || !strings.Contains(err.Error(), "key file "+strconv.Quote(tc.file)) || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), dir) {
+				t.Fatalf("err = %v, want one naming %q, saying %q and without the directory", err, tc.file, tc.want)
 			}
 		})
 	}
@@ -110,7 +113,7 @@ func TestWorldWritableKeysAreRejected(t *testing.T) {
 		if err := os.Chmod(filepath.Join(dir, "k1"), 0o646); err != nil { //nolint:gosec // G302: the insecure mode under test
 			t.Fatal(err)
 		}
-		if _, err := LoadKeyRing(dir, noCheck); err == nil || !strings.Contains(err.Error(), "k1 is world-writable") {
+		if _, err := LoadKeyRing(dir, noCheck); err == nil || !strings.Contains(err.Error(), `key file "k1" is world-writable`) || strings.Contains(err.Error(), dir) {
 			t.Fatalf("err = %v", err)
 		}
 	})
@@ -119,7 +122,7 @@ func TestWorldWritableKeysAreRejected(t *testing.T) {
 		if err := os.Chmod(dir, 0o707); err != nil { //nolint:gosec // G302: the insecure mode under test
 			t.Fatal(err)
 		}
-		if _, err := LoadKeyRing(dir, noCheck); err == nil || !strings.Contains(err.Error(), "world-writable") {
+		if _, err := LoadKeyRing(dir, noCheck); err == nil || !strings.Contains(err.Error(), "key directory is world-writable") || strings.Contains(err.Error(), dir) {
 			t.Fatalf("err = %v", err)
 		}
 	})
@@ -150,8 +153,8 @@ func TestUnreadableKeyFileFailsTheLoad(t *testing.T) {
 	if err := os.Chmod(filepath.Join(dir, "k1"), 0o000); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadKeyRing(dir, noCheck); !errors.Is(err, fs.ErrPermission) || !strings.Contains(err.Error(), filepath.Join(dir, "k1")) {
-		t.Fatalf("err = %v, want a permission error naming the file", err)
+	if _, err := LoadKeyRing(dir, noCheck); !errors.Is(err, fs.ErrPermission) || err.Error() != `token: key file "k1": permission denied` {
+		t.Fatalf("err = %v, want a permission error naming the file by its key ID alone", err)
 	}
 }
 
@@ -167,18 +170,18 @@ func TestMissingOrEmptyKeyDirectoryRefusesToStart(t *testing.T) {
 	missing, empty := filepath.Join(t.TempDir(), "absent"), keyDir(t, nil)
 	dotfiles := keyDir(t, map[string]string{".gitkeep": ""})
 	cases := []struct {
-		name, dir, want string // want: the error must contain it
+		name, dir, want string // want: the whole error
 	}{
-		{"not a directory", notADir, notADir + ": not a directory"},
-		{"dangling symlink", dangling, "key file " + filepath.Join(dangling, "k1")},
-		{"missing", missing, "key directory: stat " + missing},
-		{"empty", empty, "key directory " + empty + " has no key files"},
-		{"only dotfiles", dotfiles, "key directory " + dotfiles + " has no key files"},
+		{"not a directory", notADir, "token: key directory: not a directory"},
+		{"dangling symlink", dangling, `token: key file "k1": no such file or directory`},
+		{"missing", missing, "token: key directory: no such file or directory"},
+		{"empty", empty, "token: key directory has no key files"},
+		{"only dotfiles", dotfiles, "token: key directory has no key files"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := LoadKeyRing(tc.dir, noCheck); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("err = %v, want one containing %q", err, tc.want)
+			if _, err := LoadKeyRing(tc.dir, noCheck); err == nil || err.Error() != tc.want {
+				t.Fatalf("err = %v, want %q, without the directory", err, tc.want)
 			}
 		})
 	}
@@ -194,10 +197,20 @@ func TestAKeyFileOthersCanReadFailsTheLoadNamingIt(t *testing.T) {
 			if err := os.Chmod(path, 0o644); err != nil { //nolint:gosec // G302: the mode under test
 				t.Fatal(err)
 			}
-			if _, err := LoadKeyRing(dir, secretfile.Check); err == nil || !strings.Contains(err.Error(), path+" has mode 0644") {
-				t.Fatalf("err = %v, want the secret file refusal naming %s", err, path)
+			if _, err := LoadKeyRing(dir, secretfile.Check); err == nil || !strings.Contains(err.Error(), "key file "+strconv.Quote(loose)+": secret file has mode 0644") || strings.Contains(err.Error(), dir) {
+				t.Fatalf("err = %v, want the secret file refusal naming %q, without the directory", err, loose)
 			}
 		})
+	}
+}
+
+// A check's error that quotes the key file's path, as an os error does, is shown without it: the
+// file by its key ID and the cause (security invariant 2, #575).
+func TestACheckErrorIsShownWithoutThePath(t *testing.T) {
+	dir := keyDir(t, map[string]string{"k1": randomKey(t)})
+	statDenied := func(path string) error { return &fs.PathError{Op: "stat", Path: path, Err: fs.ErrPermission} }
+	if _, err := LoadKeyRing(dir, statDenied); !errors.Is(err, fs.ErrPermission) || err == nil || err.Error() != `token: key file "k1": permission denied` {
+		t.Fatalf("err = %v, want the key file by its ID and the cause alone", err)
 	}
 }
 

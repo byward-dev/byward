@@ -559,19 +559,36 @@ func TestStaticClientsAreOptionalOnlyWhenAppsCanRegister(t *testing.T) {
 	}
 }
 
+// A file setting refused at wiring is named by its setting and the cause, never its path (security
+// invariant 2, #575): the path may hold a secret pasted where it belongs.
 func TestNewNamesTheSettingAtFault(t *testing.T) {
+	missing := func(t *testing.T) string { return filepath.Join(t.TempDir(), "absent") }
 	cases := []struct {
-		name, setting, doc string
-		value              func(t *testing.T) string
+		name, setting, want string
+		value               func(t *testing.T) string
 	}{
-		{"empty keys dir", "BYWARD_KEYS_DIR", "docs/how-to/sealing-keys.md", func(t *testing.T) string { return t.TempDir() }},
-		{"malformed clients file", "BYWARD_STATIC_CLIENTS_FILE", "docs/reference/static-clients.md", func(t *testing.T) string {
-			p := filepath.Join(t.TempDir(), "clients.json")
-			if err := os.WriteFile(p, []byte(`{"clients":`), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			return p
-		}},
+		{"empty keys dir", "BYWARD_KEYS_DIR", "BYWARD_KEYS_DIR: token: key directory has no key files (see docs/how-to/sealing-keys.md)",
+			func(t *testing.T) string { // 0700 whatever the umask: t.TempDir() is 0777 under umask 000
+				d := filepath.Join(t.TempDir(), "keys")
+				if err := os.Mkdir(d, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				return d
+			}},
+		{"missing keys dir", "BYWARD_KEYS_DIR", "BYWARD_KEYS_DIR: token: key directory: no such file or directory (see docs/how-to/sealing-keys.md)", missing},
+		{"malformed clients file", "BYWARD_STATIC_CLIENTS_FILE",
+			"BYWARD_STATIC_CLIENTS_FILE: static clients: not valid JSON: unexpected end of input (see docs/reference/static-clients.md)",
+			func(t *testing.T) string {
+				p := filepath.Join(t.TempDir(), "clients.json")
+				if err := os.WriteFile(p, []byte(`{"clients":`), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				return p
+			}},
+		{"missing clients file", "BYWARD_STATIC_CLIENTS_FILE",
+			"BYWARD_STATIC_CLIENTS_FILE: static clients: no such file or directory (see docs/reference/static-clients.md)", missing},
+		{"missing assertion keys dir", "BYWARD_ASSERTION_KEYS_DIR",
+			"BYWARD_ASSERTION_KEYS_DIR: assertion key directory: no such file or directory (see docs/how-to/identity-assertion.md)", missing},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -587,8 +604,8 @@ func TestNewNamesTheSettingAtFault(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
-			if err == nil || !strings.HasPrefix(err.Error(), c.setting+":") || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), c.doc) {
-				t.Fatalf("err = %v, want it to start with %q and name %s and %s", err, c.setting+":", path, c.doc)
+			if err == nil || err.Error() != c.want {
+				t.Fatalf("err = %v, want %q", err, c.want)
 			}
 		})
 	}

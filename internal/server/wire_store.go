@@ -57,7 +57,7 @@ const restoreCheckEvery = 5 * time.Second
 // watchRestore runs rc.CheckRestore every restoreCheckEvery until ctx ends. The replica that starts
 // the new epoch logs and audits it, as a restore found at startup is; a failure is logged once until
 // a check succeeds again.
-// setting and value name the store in the log, as for a restore found at startup.
+// setting and value name the PostgreSQL store and its database in the log.
 func watchRestore(ctx context.Context, rc restoreChecker, log *slog.Logger, rec *audit.Log, setting, value string) {
 	t := time.NewTicker(restoreCheckEvery)
 	defer t.Stop()
@@ -83,10 +83,14 @@ func watchRestore(ctx context.Context, rc restoreChecker, log *slog.Logger, rec 
 }
 
 // logRestore reports a new epoch started for a restore: a warning for the operator, and the
-// store_restored audit event.
+// store_restored audit event. value, when not empty, names the store's database; a store named by
+// its setting alone passes "".
 func logRestore(log *slog.Logger, rec *audit.Log, epoch int64, setting, value, reason string) {
-	log.Warn("store restored from an older copy: a new epoch started, refresh tokens issued before the restore are refused and their users sign in again",
-		"reason", "store_restore", "epoch", epoch, "setting", setting, "value", value)
+	attrs := []any{"reason", "store_restore", "epoch", epoch, "setting", setting}
+	if value != "" {
+		attrs = append(attrs, "value", value)
+	}
+	log.Warn("store restored from an older copy: a new epoch started, refresh tokens issued before the restore are refused and their users sign in again", attrs...)
 	rec.Record(nil, audit.Event{Name: audit.StoreRestored, Outcome: audit.Success, Reason: reason, Epoch: epoch})
 }
 
@@ -117,8 +121,8 @@ func openStore(cfg *config.Config, log *slog.Logger, rec *audit.Log) (openedStor
 
 // openExistingStore is openStore for an operator command: the store must already be there with
 // this binary's schema (L152), so a mistyped setting fails with store.ErrNoStore, naming the setting
-// and where it looked, before anything is created, instead of acting on a new empty store. It never
-// migrates.
+// (and, for PostgreSQL, the database), before anything is created, instead of acting on a new empty
+// store. It never migrates.
 func openExistingStore(cfg *config.Config, log *slog.Logger, rec *audit.Log) (openedStore, error) {
 	return openStoreFor(cfg, log, rec, true)
 }
@@ -132,19 +136,22 @@ func openStoreFor(cfg *config.Config, log *slog.Logger, rec *audit.Log, mustExis
 	st, err := sqlite.Open(ctx, sqlite.Options{Dir: cfg.StoreDir, CounterFile: cfg.StoreCounterFile, MustExist: mustExist})
 	if err != nil {
 		if fix := operatorFix(err); mustExist && fix != "" {
-			return nil, fmt.Errorf("BYWARD_STORE_DIR=%s: %w; %s (see docs/how-to/state.md)", cfg.StoreDir, err, fix)
+			return nil, fmt.Errorf("BYWARD_STORE_DIR: %w; %s (see docs/how-to/state.md)", err, fix)
 		}
 		return nil, fmt.Errorf("BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: %w (see docs/how-to/state.md)", err)
 	}
 	s := st.Startup()
 	switch {
 	case s.Restored:
-		logRestore(log, rec, s.Epoch, "BYWARD_STORE_DIR", cfg.StoreDir, "restored from an older copy")
+		// By its setting alone, never its path (security invariant 2, #575).
+		logRestore(log, rec, s.Epoch, "BYWARD_STORE_DIR", "", "restored from an older copy")
 	case s.CounterMissing:
 		log.Warn("store counter file missing: a restore of the state directory could not be detected at this start",
-			"reason", "store_counter_missing", "setting", "BYWARD_STORE_COUNTER_FILE", "value", cfg.StoreCounterFile)
+			"reason", "store_counter_missing", "setting", "BYWARD_STORE_COUNTER_FILE")
 	}
-	log.Info("store open", "setting", "BYWARD_STORE_DIR", "value", cfg.StoreDir, "epoch", s.Epoch)
+	// The SQLite store by its setting, never its path (security invariant 2, #575): startup's listing
+	// shows the paths, and an operator command prints no listing.
+	log.Info("store open", "setting", "BYWARD_STORE_DIR", "epoch", s.Epoch)
 	return st, nil
 }
 
@@ -177,13 +184,14 @@ func operatorFix(err error) string {
 	return ""
 }
 
-// storeName names the store an operator command acted on, for its success line: the state
-// directory, or the database (never the DSN). It picks the store as openStoreFor does.
+// storeName names the store an operator command acted on, for its success line: the SQLite store by
+// its setting, never the state directory's path (security invariant 2), the PostgreSQL store by its
+// database, never the DSN. It picks the store as openStoreFor does.
 func storeName(cfg *config.Config, st openedStore) string {
 	if d, ok := st.(interface{ Describe() string }); ok && cfg.StorePostgresDSN != "" {
 		return "BYWARD_STORE_POSTGRES_DSN_FILE (" + d.Describe() + ")"
 	}
-	return "BYWARD_STORE_DIR=" + cfg.StoreDir
+	return "BYWARD_STORE_DIR"
 }
 
 // restoreWatch is watchRestore for a store that checks for restores while running and names its

@@ -138,11 +138,11 @@ func TestCheckPathsRefusesWhatOpenWouldFailOn(t *testing.T) {
 		}},
 		{"state directory is a file", func(l layout) (Options, string) {
 			f := l.file("", "file")
-			return Options{Dir: f, CounterFile: l.path("c")}, "state directory " + f + " is not a directory"
+			return Options{Dir: f, CounterFile: l.path("c")}, "the state directory is not a directory"
 		}},
 		{"state directory below a file", func(l layout) (Options, string) {
 			f := l.file("", "file")
-			return Options{Dir: filepath.Join(f, "state"), CounterFile: l.path("c")}, f + " is not a directory"
+			return Options{Dir: filepath.Join(f, "state"), CounterFile: l.path("c")}, "the state directory cannot be created: it, or a directory above it, is not a directory"
 		}},
 		{"state directory is a dangling symlink", func(l layout) (Options, string) {
 			return Options{Dir: l.link(l.path("nowhere"), "dangling"), CounterFile: l.path("c")}, "symlink to nothing"
@@ -151,51 +151,80 @@ func TestCheckPathsRefusesWhatOpenWouldFailOn(t *testing.T) {
 			d := l.link(l.path("nowhere"), "dangling")
 			return Options{Dir: filepath.Join(d, "state"), CounterFile: filepath.Join(d, "c")}, "symlink to nothing"
 		}},
+		{"state directory is a symlink loop", func(l layout) (Options, string) {
+			return Options{Dir: l.link("loop", "loop"), CounterFile: l.path("c")}, "sqlite store: state directory: too many levels of symbolic links"
+		}},
+		{"state directory byward cannot search", func(l layout) (Options, string) {
+			if os.Geteuid() == 0 {
+				l.t.Skip("root searches any directory")
+			}
+			state := l.dir("state")
+			if err := os.Chmod(state, 0o000); err != nil {
+				l.t.Fatal(err)
+			}
+			l.t.Cleanup(func() { _ = os.Chmod(state, 0o700) }) //nolint:gosec // G302: so TempDir can remove it
+			return Options{Dir: state, CounterFile: l.path("c")}, `sqlite store: database file "byward.db": permission denied`
+		}},
+		{"counter directory is a symlink loop", func(l layout) (Options, string) {
+			return Options{Dir: l.path("state"), CounterFile: filepath.Join(l.link("cloop", "cloop"), "c")}, "sqlite store: counter file directory: too many levels of symbolic links"
+		}},
 		{"counter directory missing", func(l layout) (Options, string) {
 			return Options{Dir: l.path("state"), CounterFile: l.path("missing", "c")}, "does not exist; create it"
 		}},
 		{"counter directory is a file", func(l layout) (Options, string) {
 			f := l.file("", "file")
-			return Options{Dir: l.path("state"), CounterFile: filepath.Join(f, "c")}, "the counter file's directory " + f + " is not a directory"
+			return Options{Dir: l.path("state"), CounterFile: filepath.Join(f, "c")}, "the counter file's directory is not a directory"
 		}},
 		{"counter file is a directory", func(l layout) (Options, string) {
-			return Options{Dir: l.path("state"), CounterFile: l.dir("dir")}, "is not a regular file"
+			return Options{Dir: l.path("state"), CounterFile: l.dir("dir")}, "the counter file is not a regular file"
+		}},
+		{"counter file byward cannot read", func(l layout) (Options, string) {
+			if os.Geteuid() == 0 {
+				l.t.Skip("root reads any file")
+			}
+			c := l.file("1\n", "c")
+			if err := os.Chmod(c, 0o000); err != nil {
+				l.t.Fatal(err)
+			}
+			return Options{Dir: l.path("state"), CounterFile: c}, "sqlite store: counter file: permission denied"
 		}},
 		{"counter file is corrupt", func(l layout) (Options, string) {
-			return Options{Dir: l.path("state"), CounterFile: l.file("not a number\n", "corrupt")}, "is corrupt"
+			return Options{Dir: l.path("state"), CounterFile: l.file("not a number\n", "corrupt")}, "the counter file is corrupt"
 		}},
 		{"database is a directory", func(l layout) (Options, string) {
-			db := l.dir("state", fileName)
-			return Options{Dir: l.path("state"), CounterFile: l.path("c")}, "database file " + db + " is not a regular file"
+			l.dir("state", fileName)
+			return Options{Dir: l.path("state"), CounterFile: l.path("c")}, `database file "byward.db": it is not a regular file`
 		}},
 		{"database is a symlink to nothing", func(l layout) (Options, string) {
 			l.link(l.path("gone", fileName), "state", fileName)
-			return Options{Dir: l.path("state"), CounterFile: l.path("c")}, "byward.db is a symlink to nothing"
+			return Options{Dir: l.path("state"), CounterFile: l.path("c")}, `"byward.db": it is a symlink to nothing`
 		}},
 		{"database is a symlink to itself", func(l layout) (Options, string) {
 			l.link(fileName, "state", fileName)
-			return Options{Dir: l.path("state"), CounterFile: l.path("c")}, "byward.db is a symlink to nothing"
+			return Options{Dir: l.path("state"), CounterFile: l.path("c")}, `"byward.db": it is a symlink to nothing`
 		}},
 		{"database links through a second link to nothing", func(l layout) (Options, string) {
 			l.link("hop", "state", fileName)
 			l.link(l.path("nodir", "x"), "state", "hop")
-			return Options{Dir: l.path("state"), CounterFile: l.path("c")}, "byward.db is a symlink to nothing"
+			return Options{Dir: l.path("state"), CounterFile: l.path("c")}, `"byward.db": it is a symlink to nothing`
 		}},
 		// The target's directory exists, which is enough for the database but not for SQLite's WAL.
 		{"write-ahead log is a symlink to a file not yet created", func(l layout) (Options, string) {
 			l.link(filepath.Join(l.dir("volume"), "wal"), "state", fileName+"-wal")
-			return Options{Dir: l.path("state"), CounterFile: l.path("c")}, "byward.db-wal is a symlink to nothing"
+			return Options{Dir: l.path("state"), CounterFile: l.path("c")}, `"byward.db-wal": it is a symlink to nothing`
 		}},
 		{"write-ahead log is a directory", func(l layout) (Options, string) {
 			l.dir("state", fileName+"-wal")
-			return Options{Dir: l.path("state"), CounterFile: l.path("c")}, "byward.db-wal is not a regular file"
+			return Options{Dir: l.path("state"), CounterFile: l.path("c")}, `"byward.db-wal": it is not a regular file`
 		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			opts, inErr := tc.setup(layout{t: t, root: t.TempDir()})
-			if err := CheckPaths(opts); err == nil || !strings.Contains(err.Error(), inErr) {
-				t.Fatalf("err = %v, want %q", err, inErr)
+			l := layout{t: t, root: t.TempDir()}
+			opts, inErr := tc.setup(l)
+			// Named by what it is, never by its path (security invariant 2, #575).
+			if err := CheckPaths(opts); err == nil || !strings.Contains(err.Error(), inErr) || strings.Contains(err.Error(), l.root) {
+				t.Fatalf("err = %v, want %q, without any path", err, inErr)
 			}
 		})
 	}

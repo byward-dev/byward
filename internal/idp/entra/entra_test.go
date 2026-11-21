@@ -602,10 +602,13 @@ func TestACallbackErrorNeverAlertsTheOperator(t *testing.T) {
 // A credential the proxy cannot make (a missing federated token file) fails before any request, as
 // an ErrCredential that alerts the operator.
 func TestAnUnusableClientCredentialAlertsTheOperator(t *testing.T) {
-	e := newEnv(t, Config{ClientAuth: idp.AssertionFile(t.TempDir() + "/missing-token")})
+	dir := t.TempDir()
+	e := newEnv(t, Config{ClientAuth: idp.AssertionFile(dir + "/missing-token")})
 	_, _, err := e.p.Refresh(context.Background(), "rt")
 	var ie *idp.Error
-	if !errors.Is(err, idp.ErrCredential) || !errors.As(err, &ie) || ie.Class != idp.Unavailable || ie.Alert != idp.AlertCredentialUnusable {
+	// The file by its role, never its path (security invariant 2, #575).
+	if !errors.Is(err, idp.ErrCredential) || !errors.As(err, &ie) || ie.Class != idp.Unavailable || ie.Alert != idp.AlertCredentialUnusable ||
+		strings.Contains(err.Error(), dir) {
 		t.Fatalf("err = %v, want an alerting, unavailable ErrCredential", err)
 	}
 }

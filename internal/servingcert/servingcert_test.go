@@ -40,8 +40,9 @@ func pemFile(t *testing.T, b *pem.Block) string {
 	return p
 }
 
-// A pair that cannot be read or does not match is refused, and the error names the file at fault
-// without quoting the key it read.
+// A pair that cannot be read or does not match is refused, and the error names the file at fault by
+// its role, never its path, which may be a secret pasted where it belongs (security invariant 2,
+// #461, #575), and without quoting the key it read.
 func TestAnUnreadableOrMismatchedPairIsRefusedNamingTheFileWithoutQuotingTheKey(t *testing.T) {
 	good, _ := write(t, testcert.Options{Hosts: []string{"mcp.example.com"}, Leaf: testcert.Valid(now, 90)})
 	other, _ := write(t, testcert.Options{Hosts: []string{"mcp.example.com"}, Leaf: testcert.Valid(now, 90)})
@@ -69,15 +70,15 @@ func TestAnUnreadableOrMismatchedPairIsRefusedNamingTheFileWithoutQuotingTheKey(
 		names string
 		says  string
 	}{
-		{"no certificate file", Files{Cert: missing, Key: good.Key}, missing, "no such file"},
-		{"no key file, named by its role: a key pasted where its path belongs is never shown (#461)", Files{Cert: good.Cert, Key: missing}, "the key file", "no such file"},
-		{"the key of another certificate", Files{Cert: good.Cert, Key: other.Key}, other.Key, "private key does not match public key"},
-		{"no PEM in the certificate file", Files{Cert: garbage, Key: good.Key}, garbage, "failed to find any PEM data"},
-		{"no PEM in the key file", Files{Cert: good.Cert, Key: garbage}, garbage, "failed to find any PEM data"},
-		{"an encrypted PKCS#8 key", Files{Cert: good.Cert, Key: pkcs8}, pkcs8, "the private key is encrypted"},
-		{"an encrypted legacy key", Files{Cert: good.Cert, Key: legacy}, legacy, "the private key is encrypted"},
-		{"an encrypted key after its curve's parameters", Files{Cert: good.Cert, Key: afterParams}, afterParams, "the private key is encrypted"},
-		{"a chain certificate that does not parse", Files{Cert: badChain, Key: good.Key}, badChain, "x509:"},
+		{"no certificate file", Files{Cert: missing, Key: good.Key}, "the certificate file: ", "no such file"},
+		{"no key file", Files{Cert: good.Cert, Key: missing}, "the key file: ", "no such file"},
+		{"the key of another certificate", Files{Cert: good.Cert, Key: other.Key}, "the certificate and key files: ", "private key does not match public key"},
+		{"no PEM in the certificate file", Files{Cert: garbage, Key: good.Key}, "the certificate and key files: ", "failed to find any PEM data in certificate input"},
+		{"no PEM in the key file", Files{Cert: good.Cert, Key: garbage}, "the certificate and key files: ", "failed to find any PEM data in key input"},
+		{"an encrypted PKCS#8 key", Files{Cert: good.Cert, Key: pkcs8}, "the key file: ", "the private key is encrypted"},
+		{"an encrypted legacy key", Files{Cert: good.Cert, Key: legacy}, "the key file: ", "the private key is encrypted"},
+		{"an encrypted key after its curve's parameters", Files{Cert: good.Cert, Key: afterParams}, "the key file: ", "the private key is encrypted"},
+		{"a chain certificate that does not parse", Files{Cert: badChain, Key: good.Key}, "the certificate file: ", "x509:"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := Read(c.files)
@@ -87,8 +88,10 @@ func TestAnUnreadableOrMismatchedPairIsRefusedNamingTheFileWithoutQuotingTheKey(
 			if !strings.Contains(err.Error(), c.names) || !strings.Contains(err.Error(), c.says) {
 				t.Errorf("the error does not name %s and say %q: %v", c.names, c.says, err)
 			}
-			if c.files.Key == missing && strings.Contains(err.Error(), missing) {
-				t.Errorf("the error names the key file's path: %v", err)
+			for _, path := range []string{c.files.Cert, c.files.Key} {
+				if strings.Contains(err.Error(), filepath.Dir(path)) {
+					t.Errorf("the error shows a path: %v", err)
+				}
 			}
 			if key, rerr := os.ReadFile(c.files.Key); rerr == nil {
 				for _, line := range strings.Split(string(key), "\n") {

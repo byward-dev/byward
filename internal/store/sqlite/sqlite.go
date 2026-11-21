@@ -26,6 +26,7 @@ import (
 
 	_ "modernc.org/sqlite" // registers the "sqlite" driver
 
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/store"
 )
 
@@ -94,22 +95,22 @@ func CheckPaths(opts Options) error {
 	}
 	switch fi, err := os.Stat(opts.Dir); {
 	case err == nil && !fi.IsDir():
-		return fmt.Errorf("sqlite store: state directory %s is not a directory", opts.Dir)
+		return errors.New("sqlite store: the state directory is not a directory")
 	case err == nil:
 		for _, name := range []string{fileName, fileName + "-wal", fileName + "-shm"} {
 			f := filepath.Join(opts.Dir, name)
 			// Open creates the database through a symlink whose target's directory exists (O_CREATE);
 			// SQLite does not do that for its WAL and SHM files.
 			if err := regularIfPresent(f, name == fileName); err != nil {
-				return fmt.Errorf("sqlite store: database file %w", err)
+				return fmt.Errorf("sqlite store: database file %q: %w", name, err)
 			}
 		}
 	case errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR):
 		if err := creatable(opts.Dir); err != nil {
-			return fmt.Errorf("sqlite store: state directory %s cannot be created: %w", opts.Dir, err)
+			return fmt.Errorf("sqlite store: the state directory cannot be created: %w", err)
 		}
 	default:
-		return fmt.Errorf("sqlite store: state directory: %w", err)
+		return fmt.Errorf("sqlite store: state directory: %w", logging.FileError(err))
 	}
 	dir := filepath.Dir(opts.CounterFile)
 	fi, err := os.Stat(dir)
@@ -117,14 +118,14 @@ func CheckPaths(opts Options) error {
 	case errors.Is(err, os.ErrNotExist) && within(dir, opts.Dir):
 		// Open's MkdirAll of the state directory creates it first; creatable checked that above.
 	case errors.Is(err, os.ErrNotExist):
-		return fmt.Errorf("sqlite store: the counter file's directory %s does not exist; create it, the store does not", dir)
+		return errors.New("sqlite store: the counter file's directory does not exist; create it, the store does not")
 	case err != nil:
-		return fmt.Errorf("sqlite store: counter file directory: %w", err)
+		return fmt.Errorf("sqlite store: counter file directory: %w", logging.FileError(err))
 	case !fi.IsDir():
-		return fmt.Errorf("sqlite store: the counter file's directory %s is not a directory", dir)
+		return errors.New("sqlite store: the counter file's directory is not a directory")
 	}
 	if fi, err := os.Stat(opts.CounterFile); err == nil && !fi.Mode().IsRegular() {
-		return fmt.Errorf("sqlite store: counter file %s is not a regular file", opts.CounterFile)
+		return errors.New("sqlite store: the counter file is not a regular file")
 	}
 	_, _, err = readCounter(opts.CounterFile)
 	return err
@@ -138,17 +139,17 @@ func regularIfPresent(path string, creatable bool) error {
 	case errors.Is(err, os.ErrNotExist):
 		return nil
 	case err != nil:
-		return err
+		return logging.FileError(err)
 	case fi.Mode()&os.ModeSymlink != 0:
 		if fi, err = os.Stat(path); err != nil {
 			if creatable && targetDirExists(path) {
 				return nil
 			}
-			return fmt.Errorf("%s is a symlink to nothing", path)
+			return errors.New("it is a symlink to nothing")
 		}
 	}
 	if !fi.Mode().IsRegular() {
-		return fmt.Errorf("%s is not a regular file", path)
+		return errors.New("it is not a regular file")
 	}
 	return nil
 }
@@ -193,14 +194,14 @@ func creatable(path string) error {
 			}
 			continue
 		case err != nil:
-			return err
+			return logging.FileError(err)
 		case fi.Mode()&os.ModeSymlink != 0:
 			if fi, err = os.Stat(p); err != nil {
-				return fmt.Errorf("%s is a symlink to nothing", p)
+				return errors.New("it, or a directory above it, is a symlink to nothing")
 			}
 		}
 		if !fi.IsDir() {
-			return fmt.Errorf("%s is not a directory", p)
+			return errors.New("it, or a directory above it, is not a directory")
 		}
 		return nil
 	}
@@ -227,7 +228,7 @@ func Open(ctx context.Context, opts Options) (*Store, error) {
 		}
 	}
 	if err := os.MkdirAll(opts.Dir, 0o700); err != nil {
-		return nil, fmt.Errorf("sqlite store: state directory: %w", err)
+		return nil, fmt.Errorf("sqlite store: state directory: %w", logging.FileError(err))
 	}
 	if err := probeWritable(opts.Dir); err != nil {
 		return nil, err
@@ -242,7 +243,7 @@ func Open(ctx context.Context, opts Options) (*Store, error) {
 		"&_pragma=journal_mode(WAL)&_pragma=synchronous(FULL)&_pragma=foreign_keys(ON)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("sqlite store: open %s: %w", path, err)
+		return nil, fmt.Errorf("sqlite store: open %q: %w", fileName, logging.FileError(err))
 	}
 	db.SetMaxOpenConns(1)
 	s := &Store{db: db, counterFile: opts.CounterFile}
@@ -273,7 +274,7 @@ func present(ctx context.Context, path string) error {
 	case errors.Is(err, syscall.ENOTDIR):
 		return fmt.Errorf("%w: the state directory, or a directory above it, is not a directory", store.ErrNoStore)
 	case err != nil:
-		return fmt.Errorf("sqlite store: %w", err)
+		return fmt.Errorf("sqlite store: database file %q: %w", fileName, logging.FileError(err))
 	}
 	// SQLite would create a WAL database's side files beside a file it cannot write, and could not
 	// remove them; the open that follows reports such a file.
@@ -284,7 +285,7 @@ func present(ctx context.Context, path string) error {
 	_ = f.Close()
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
-		return fmt.Errorf("sqlite store: open %s: %w", path, err)
+		return fmt.Errorf("sqlite store: open %q: %w", fileName, logging.FileError(err))
 	}
 	defer func() { _ = db.Close() }()
 	var v int
@@ -836,15 +837,19 @@ func blob(b []byte) any {
 	return b
 }
 
-// probeWritable fails early, naming the directory, when the proxy cannot write its state.
+// probeWritable fails early, naming the state directory, never its path, when the proxy cannot write
+// its state.
 func probeWritable(dir string) error {
 	f, err := os.CreateTemp(dir, ".write-probe-*")
 	if err != nil {
-		return fmt.Errorf("sqlite store: state directory %s is not writable: %w", dir, err)
+		return fmt.Errorf("sqlite store: the state directory is not writable: %w", logging.FileError(err))
 	}
 	name := f.Name()
 	_ = f.Close()
-	return os.Remove(name)
+	if err := os.Remove(name); err != nil {
+		return fmt.Errorf("sqlite store: the state directory: %w", logging.FileError(err))
+	}
+	return nil
 }
 
 // ensureFile creates the database file with mode 0600, or tightens an existing one, together with
@@ -853,16 +858,16 @@ func probeWritable(dir string) error {
 func ensureFile(path string) error {
 	for _, side := range []string{path + "-wal", path + "-shm"} {
 		if err := os.Chmod(side, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("sqlite store: %s: %w", side, err)
+			return fmt.Errorf("sqlite store: database file %q: %w", filepath.Base(side), logging.FileError(err))
 		}
 	}
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600) //nolint:gosec // G304: the operator's state directory
 	if err != nil {
-		return fmt.Errorf("sqlite store: database file %s: %w", path, err)
+		return fmt.Errorf("sqlite store: database file %q: %w", filepath.Base(path), logging.FileError(err))
 	}
 	if err := f.Chmod(0o600); err != nil {
 		_ = f.Close()
-		return fmt.Errorf("sqlite store: database file %s: %w", path, err)
+		return fmt.Errorf("sqlite store: database file %q: %w", filepath.Base(path), logging.FileError(err))
 	}
 	return f.Close()
 }

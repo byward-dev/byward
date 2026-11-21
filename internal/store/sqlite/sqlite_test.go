@@ -7,12 +7,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -263,14 +266,32 @@ func TestEmptyDirMeansTheDefaultStateDirectory(t *testing.T) {
 	if _, err := os.Stat(DefaultDir); err == nil || os.Geteuid() == 0 {
 		t.Skip("would use the real " + DefaultDir)
 	}
-	_, err := Open(bounded(t), Options{CounterFile: filepath.Join(t.TempDir(), "w")})
+	counter := filepath.Join(t.TempDir(), "w")
+	if opts, err := (Options{CounterFile: counter}).validate(); err != nil || opts.Dir != DefaultDir {
+		t.Fatalf("validate = %+v, %v; want the state directory %s", opts, err, DefaultDir)
+	}
+	_, err := Open(bounded(t), Options{CounterFile: counter})
 	if err == nil {
 		t.Fatal("Open succeeded without a writable default state directory")
 	}
-	// MkdirAll names the first directory it cannot create, which may be a parent of DefaultDir.
-	p := strings.TrimSuffix(pathIn(err.Error()), ":")
-	if !strings.Contains(err.Error(), "state directory") || p == "" || (p != DefaultDir && !strings.HasPrefix(DefaultDir, p+"/")) {
-		t.Fatalf("err = %v, want a state-directory error on (a parent of) %s", err, DefaultDir)
+	// The directory is named by what it is, never by its path (security invariant 2, #575).
+	if !strings.Contains(err.Error(), "sqlite store: state directory: ") || strings.Contains(err.Error(), "/") {
+		t.Fatalf("err = %v, want a state-directory error without a path", err)
+	}
+}
+
+// A side file Open cannot tighten, such as a symlink loop that startup's Open meets before any check,
+// is named by its quoted name, never its path (security invariant 2, #575).
+func TestASideFileOpenCannotTightenIsNamedWithoutItsPath(t *testing.T) {
+	for _, side := range []string{fileName + "-wal", fileName + "-shm"} {
+		t.Run(side, func(t *testing.T) {
+			dir := t.TempDir()
+			must(t, os.Symlink(side, filepath.Join(dir, side)))
+			_, err := Open(bounded(t), Options{Dir: dir, CounterFile: filepath.Join(t.TempDir(), "w")})
+			if want := `sqlite store: database file "` + side + `": too many levels of symbolic links`; err == nil || err.Error() != want {
+				t.Fatalf("err = %v, want %q", err, want)
+			}
+		})
 	}
 }
 
@@ -284,8 +305,8 @@ func TestUnwritableStateDirectoryFailsOpen(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // G302: directory mode, restored for cleanup
 	_, err := Open(bounded(t), Options{Dir: dir, CounterFile: filepath.Join(t.TempDir(), "w")})
-	if err == nil || !strings.Contains(err.Error(), dir+" is not writable") {
-		t.Fatalf("err = %v, want one naming the unwritable directory", err)
+	if err == nil || err.Error() != "sqlite store: the state directory is not writable: permission denied" || !errors.Is(err, fs.ErrPermission) {
+		t.Fatalf("err = %v, want the state directory named unwritable, by what it is, never its path", err)
 	}
 }
 
@@ -372,7 +393,7 @@ func TestAnOperatorOpenFindsTheStoreOrCreatesNothing(t *testing.T) {
 			storeAt(schemaVersion())(t, dir)
 			must(t, os.Chmod(filepath.Join(dir, fileName), 0o444)) //nolint:gosec // G302: a read-only store file
 			return dir
-		}, nil, "permission denied"},
+		}, nil, `sqlite store: database file "byward.db": permission denied`},
 		{"an older schema", storeAt(schemaVersion() - 1), store.ErrOlderSchema, fmt.Sprintf("v%d, this byward's v%d", schemaVersion()-1, schemaVersion())},
 		{"a newer schema", storeAt(schemaVersion() + 1), store.ErrNewerSchema, fmt.Sprintf("v%d, this byward's v%d", schemaVersion()+1, schemaVersion())},
 		{"the store", storeAt(schemaVersion()), nil, ""},
@@ -399,8 +420,9 @@ func TestAnOperatorOpenFindsTheStoreOrCreatesNothing(t *testing.T) {
 					t.Errorf("Open(MustExist) = %v; errors.Is(%v) = %v, want %v", err, sentinel, errors.Is(err, sentinel), sentinel == tc.is)
 				}
 			}
-			if !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("Open(MustExist) = %v; want it to say %q", err, tc.want)
+			// Named by what it is, never by its path (security invariant 2, #575).
+			if !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), dir) || strings.Contains(err.Error(), counter) {
+				t.Errorf("Open(MustExist) = %v; want it to say %q, without any path", err, tc.want)
 			}
 			if after := snapshot(t, dir); after != before {
 				t.Errorf("the state directory changed:\n%s\nthen\n%s", before, after)
@@ -603,18 +625,50 @@ func TestFirstOpenIsANormalStart(t *testing.T) {
 }
 
 // Regression (runtime sweep): an error from a write means nothing was stored. The mirror is written
-// before the commit, so a counter path that cannot be written rolls the write back. Replacing the
-// counter's directory with a file makes the write fail for root too.
+// before the commit, so a counter path that cannot be written rolls the write back; the error names
+// the counter file and the cause, never a path (security invariant 2, #575), though the rename's
+// error quotes two. Both breaks fail the write for root too.
 func TestFailedCounterWriteStoresNothing(t *testing.T) {
-	cdir := t.TempDir()
-	s := open(t, t.TempDir(), filepath.Join(cdir, "writes"))
-	must(t, os.RemoveAll(cdir))
-	must(t, os.WriteFile(cdir, nil, 0o600))
-	if _, err := s.CreateGrant(ctx, grant("g1", "tid:a")); err == nil {
-		t.Fatal("CreateGrant succeeded although the counter file cannot be written")
-	}
-	if _, err := s.Grant(ctx, "g1"); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("the failed write was stored: %v", err)
+	for _, tc := range []struct {
+		name   string
+		break_ func(t *testing.T, cdir, counter string)
+		// names is what the error names; causes are the system errors the write may fail with, and
+		// the error is the name, then that one alone.
+		names  string
+		causes []syscall.Errno
+	}{
+		{"its directory replaced by a file", func(t *testing.T, cdir, _ string) {
+			must(t, os.RemoveAll(cdir))
+			must(t, os.WriteFile(cdir, nil, 0o600))
+		}, "counter file", []syscall.Errno{syscall.ENOTDIR}},
+		// A file cannot replace a directory: EISDIR on Linux, EEXIST on macOS.
+		{"the file replaced by a directory", func(t *testing.T, _, counter string) {
+			must(t, os.Remove(counter))
+			must(t, os.MkdirAll(filepath.Join(counter, "full"), 0o700))
+		}, "counter file", []syscall.Errno{syscall.EISDIR, syscall.EEXIST, syscall.ENOTEMPTY}},
+		// The file is replaced, then its directory cannot be opened to sync the rename.
+		{"its directory cannot be listed", func(t *testing.T, cdir, _ string) {
+			if os.Geteuid() == 0 {
+				t.Skip("root lists any directory")
+			}
+			must(t, os.Chmod(cdir, 0o300))                  //nolint:gosec // G302: write and search, no read, on purpose
+			t.Cleanup(func() { _ = os.Chmod(cdir, 0o700) }) //nolint:gosec // G302: so TempDir can remove it
+		}, "counter directory", []syscall.Errno{syscall.EACCES}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cdir := t.TempDir()
+			counter := filepath.Join(cdir, "writes")
+			s := open(t, t.TempDir(), counter)
+			tc.break_(t, cdir, counter)
+			_, err := s.CreateGrant(ctx, grant("g1", "tid:a"))
+			var cause syscall.Errno
+			if !errors.As(err, &cause) || !slices.Contains(tc.causes, cause) || err.Error() != "sqlite store: "+tc.names+": "+cause.Error() || strings.Contains(err.Error(), cdir) {
+				t.Fatalf("CreateGrant = %v, want the %s named and one of %v, alone", err, tc.names, tc.causes)
+			}
+			if _, err := s.Grant(ctx, "g1"); !errors.Is(err, store.ErrNotFound) {
+				t.Fatalf("the failed write was stored: %v", err)
+			}
+		})
 	}
 }
 
@@ -784,16 +838,6 @@ func copyFile(t *testing.T, from, to string) {
 	if err := dst.Close(); err != nil {
 		t.Fatal(err)
 	}
-}
-
-// pathIn returns the first absolute path in an error message.
-func pathIn(msg string) string {
-	for _, f := range strings.Fields(msg) {
-		if strings.HasPrefix(f, "/") {
-			return f
-		}
-	}
-	return ""
 }
 
 // A replica still on the binary before v8 re-approves a consent with its own statement, which sets

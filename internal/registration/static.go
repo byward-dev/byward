@@ -91,8 +91,8 @@ func AllowMissingFile() LoadOption {
 
 // WithSecretCheck runs check on each client_secret_file before it is read; the server passes the
 // permission check for secret files (ADR-0018 §11). JWKS files hold public keys and are not checked.
-// Like readFile's, check's error must be a *fs.PathError or name no path (#461), but for a file it
-// found to exist, which is no pasted secret (secretfile.Check's mode error names it).
+// Like readFile's, check's error must be a *fs.PathError or name no path (#461, #575);
+// secretfile.Check's names none.
 func WithSecretCheck(check func(path string) error) LoadOption {
 	return func(o *loadOptions) { o.checkSecret = check }
 }
@@ -116,7 +116,7 @@ func LoadStatic(path string, readFile func(string) ([]byte, error), jti JTICache
 	case o.allowNoFile && errors.Is(err, fs.ErrNotExist):
 		return &StaticRegistry{}, nil
 	case err != nil:
-		return nil, fmt.Errorf("static clients: %w", err)
+		return nil, fmt.Errorf("static clients: %w", logging.FileError(err))
 	}
 	readSecret := func(p string) ([]byte, error) {
 		if err := o.checkSecret(p); err != nil {

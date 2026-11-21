@@ -8,7 +8,8 @@ live in the store, and the proxy never generates them.
 
 The proxy reads keys from `BYWARD_KEYS_DIR`, by default `keys` in the data directory:
 `/var/lib/byward/keys` with the default `BYWARD_DATA_DIR`. Create it and the first key
-before the first start; a missing or empty directory stops startup with an error naming the path.
+before the first start; a missing or empty directory stops startup with an error naming the setting
+and the cause, never the path.
 
 - One file per key. **The file name is the key ID**: letters, digits, `.`, `_` and `-`, at most 64
   characters.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/testutil/fakeclock"
 	"github.com/byward-dev/byward/internal/testutil/logsink"
 	"github.com/byward-dev/byward/internal/testutil/testcert"
@@ -51,10 +53,10 @@ func leafOf(t *testing.T, b testcert.Bundle) *x509.Certificate {
 func othersHaveAccess(path string) error {
 	fi, err := os.Stat(path)
 	if err != nil {
-		return err
+		return logging.FileError(err)
 	}
 	if fi.Mode().Perm()&0o077 != 0 {
-		return fmt.Errorf("%s: other users can access it", path)
+		return errors.New("other users can access it")
 	}
 	return nil
 }
@@ -167,6 +169,10 @@ func TestARenewedPairIsServedAtTheNextHandshake(t *testing.T) {
 			}
 			if n := strings.Count(logs.String(), "serving a new TLS certificate"); n != 1 {
 				t.Errorf("logged the reload %d times, want once:\n%s", n, logs)
+			}
+			// The files by their role, never their paths (security invariant 2, #575).
+			if strings.Contains(logs.String(), filepath.Dir(f.Cert)) || strings.Contains(logs.String(), filepath.Dir(f.Key)) {
+				t.Errorf("the reload shows a path:\n%s", logs)
 			}
 			if want := `"not_after":"` + leafOf(t, second).NotAfter.UTC().Format(time.RFC3339) + `"`; !strings.Contains(logs.String(), want) {
 				t.Errorf("the reload does not log %s:\n%s", want, logs)
@@ -285,13 +291,13 @@ func TestAPairThatCannotBeServedKeepsThePreviousOneAndIsLoggedOnce(t *testing.T)
 			if err := os.Remove(f.Key); err != nil {
 				t.Fatal(err)
 			}
-		}, "no such file or directory", nil},
+		}, "the key file: no such file or directory", nil},
 		{"a key other users can read, fixed by chmod", func(t *testing.T, f Files, _ testcert.Bundle) {
 			replace(t, f, other)
 			if err := os.Chmod(f.Key, 0o644); err != nil { //nolint:gosec // G302: on purpose
 				t.Fatal(err)
 			}
-		}, "other users can access it", func(t *testing.T, f Files) testcert.Bundle {
+		}, "the key file: other users can access it", func(t *testing.T, f Files) testcert.Bundle {
 			times := modTimes(t, f)
 			if err := os.Chmod(f.Key, 0o600); err != nil {
 				t.Fatal(err)
@@ -312,8 +318,12 @@ func TestAPairThatCannotBeServedKeepsThePreviousOneAndIsLoggedOnce(t *testing.T)
 			if n := strings.Count(logs.String(), "cannot be served"); n != 1 {
 				t.Fatalf("logged the failure %d times over three handshakes, want once:\n%s", n, logs)
 			}
-			if !strings.Contains(logs.String(), `"error":"`) || !strings.Contains(logs.String(), tc.want) || !strings.Contains(logs.String(), `"cert_file":"`+f.Cert+`"`) {
-				t.Errorf("the warning does not say %q and name the files:\n%s", tc.want, logs)
+			if !strings.Contains(logs.String(), `"error":"`) || !strings.Contains(logs.String(), tc.want) {
+				t.Errorf("the warning does not say %q:\n%s", tc.want, logs)
+			}
+			// The files by their role, never their paths (security invariant 2, #575).
+			if strings.Contains(logs.String(), filepath.Dir(f.Cert)) || strings.Contains(logs.String(), filepath.Dir(f.Key)) {
+				t.Errorf("the warning shows a path:\n%s", logs)
 			}
 			if strings.Contains(logs.String(), "PRIVATE KEY") {
 				t.Errorf("the warning quotes a key:\n%s", logs)
@@ -467,17 +477,33 @@ func TestLoadRefusesAPairItCannotServe(t *testing.T) {
 				t.Fatal(err)
 			}
 			return f
-		}, "other users can access it"},
+		}, "the key file: other users can access it"},
 		{"missing files", func(*testing.T) Files {
 			return Files{Cert: "/nonexistent/tls.crt", Key: "/nonexistent/tls.key"}
-		}, "/nonexistent/tls."},
+		}, "the key file: no such file or directory"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Load(tc.files(t), Options{Now: func() time.Time { return now }, Log: slog.New(slog.DiscardHandler), CheckKey: othersHaveAccess})
+			f := tc.files(t)
+			_, err := Load(f, Options{Now: func() time.Time { return now }, Log: slog.New(slog.DiscardHandler), CheckKey: othersHaveAccess})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("load: %v, want an error with %q", err, tc.want)
 			}
+			// The files by their role, never their paths (security invariant 2, #575).
+			if strings.Contains(err.Error(), filepath.Dir(f.Cert)) || strings.Contains(err.Error(), filepath.Dir(f.Key)) {
+				t.Errorf("load: %v shows a path", err)
+			}
 		})
+	}
+}
+
+// A key check's error that quotes the key file's path, as an os error does, is shown without it:
+// the key file by its role and the cause (security invariant 2, #575).
+func TestAKeyChecksErrorIsShownWithoutThePath(t *testing.T) {
+	f, _ := write(t, testcert.Options{Leaf: testcert.Valid(now, 90)})
+	statKey := func(path string) error { _, err := os.Stat(path + ".absent"); return err }
+	_, err := Load(f, Options{Now: func() time.Time { return now }, Log: slog.New(slog.DiscardHandler), CheckKey: statKey})
+	if err == nil || err.Error() != "the key file: no such file or directory" {
+		t.Fatalf("load: %v, want the key file named by its role and the cause alone", err)
 	}
 }
 

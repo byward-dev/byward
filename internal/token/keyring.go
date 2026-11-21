@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/secretfile"
 )
 
@@ -47,20 +48,21 @@ type key struct {
 // `..data` entries). check is the secret file permission check (ADR-0018 §11), run on each file
 // before it is read: the sealing keys are secret files like any other. A world-writable key file is
 // refused, and so is a world-writable directory unless it is on a read-only mount; --dev relaxes
-// neither. Any bad file fails the whole load, naming the file.
+// neither. Any bad file fails the whole load, naming the file by its key ID, never the directory's
+// path (security invariant 2); check's error must be a *fs.PathError or name no path.
 func LoadKeyRing(dir string, check func(path string) error) (*KeyRing, error) {
 	di, err := os.Stat(dir)
 	if err != nil {
-		return nil, fmt.Errorf("token: key directory: %w", err)
+		return nil, fmt.Errorf("token: key directory: %w", logging.FileError(err))
 	}
 	// Kubernetes mounts secret volumes as a read-only tmpfs whose root is mode 1777, so the mode
 	// alone would reject the most common deployment; on a read-only mount nobody can add a key.
 	if worldWritable(di) && !readOnlyFS(dir) {
-		return nil, fmt.Errorf("token: key directory %s is world-writable; anyone could add a key", dir)
+		return nil, errors.New("token: key directory is world-writable; anyone could add a key")
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("token: key directory: %w", err)
+		return nil, fmt.Errorf("token: key directory: %w", logging.FileError(err))
 	}
 	r := &KeyRing{byID: map[string]*key{}}
 	var ids []string
@@ -72,19 +74,19 @@ func LoadKeyRing(dir string, check func(path string) error) (*KeyRing, error) {
 		path := filepath.Join(dir, name)
 		fi, err := os.Stat(path) // follows symlinks
 		if err != nil {
-			return nil, fmt.Errorf("token: key file %s: %w", path, err)
+			return nil, fmt.Errorf("token: key file %q: %w", name, logging.FileError(err))
 		}
 		if fi.IsDir() {
 			continue
 		}
 		if worldWritable(fi) {
-			return nil, fmt.Errorf("token: key file %s is world-writable", path)
+			return nil, fmt.Errorf("token: key file %q is world-writable", name)
 		}
 		if !keyIDPattern.MatchString(name) {
-			return nil, fmt.Errorf("token: key file %s: the name is the key ID and must match %s", path, keyIDPattern)
+			return nil, fmt.Errorf("token: key file %q: the name is the key ID and must match %s", name, keyIDPattern)
 		}
 		if err := check(path); err != nil {
-			return nil, fmt.Errorf("token: key file: %w", err)
+			return nil, fmt.Errorf("token: key file %q: %w", name, logging.FileError(err))
 		}
 		k, err := readKey(path, name)
 		if err != nil {
@@ -94,7 +96,7 @@ func LoadKeyRing(dir string, check func(path string) error) (*KeyRing, error) {
 		ids = append(ids, name)
 	}
 	if len(ids) == 0 {
-		return nil, fmt.Errorf("token: key directory %s has no key files", dir)
+		return nil, errors.New("token: key directory has no key files")
 	}
 	sort.Strings(ids)
 	r.signing = r.byID[ids[len(ids)-1]]
@@ -111,24 +113,24 @@ func worldWritable(fi os.FileInfo) bool { return fi.Mode().Perm()&0o002 != 0 }
 func readKey(path, id string) (*key, error) {
 	f, err := os.Open(path) //nolint:gosec // G304: the operator's key directory
 	if err != nil {
-		return nil, fmt.Errorf("token: key file %s: %w", path, err)
+		return nil, fmt.Errorf("token: key file %q: %w", id, logging.FileError(err))
 	}
 	defer func() { _ = f.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(f, maxKeyFile+1))
 	if err != nil {
-		return nil, fmt.Errorf("token: key file %s: cannot read: %w", path, err)
+		return nil, fmt.Errorf("token: key file %q: cannot read: %w", id, logging.FileError(err))
 	}
 	material, err := decodeKey(raw)
 	if err != nil {
-		return nil, fmt.Errorf("token: key file %s: %w", path, err)
+		return nil, fmt.Errorf("token: key file %q: %w", id, err)
 	}
 	block, err := aes.NewCipher(material)
 	if err != nil {
-		return nil, fmt.Errorf("token: key file %s: %w", path, err)
+		return nil, fmt.Errorf("token: key file %q: %w", id, err)
 	}
 	aead, err := cipher.NewGCMWithRandomNonce(block)
 	if err != nil {
-		return nil, fmt.Errorf("token: key file %s: %w", path, err)
+		return nil, fmt.Errorf("token: key file %q: %w", id, err)
 	}
 	return &key{id: id, aead: aead}, nil
 }

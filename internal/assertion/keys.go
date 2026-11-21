@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/secretfile"
 )
 
@@ -44,20 +45,22 @@ type signingKey struct {
 // directories are skipped (Kubernetes secret volumes hold `..data` entries). check is the secret
 // file permission check (ADR-0018 §11), run on each file before it is read. As with the sealing
 // keys, a world-writable key file is refused, and so is a world-writable directory unless it is on
-// a read-only mount; --dev relaxes neither. Any bad file fails the whole load, naming the file.
+// a read-only mount; --dev relaxes neither. Any bad file fails the whole load, naming the file by its
+// key ID, never the directory's path (security invariant 2); check's error must be a *fs.PathError
+// or name no path.
 func LoadKeys(dir string, check func(path string) error) (*Keys, error) {
 	di, err := os.Stat(dir)
 	if err != nil {
-		return nil, fmt.Errorf("assertion key directory: %w", err)
+		return nil, fmt.Errorf("assertion key directory: %w", logging.FileError(err))
 	}
 	// A Kubernetes secret volume is a read-only tmpfs whose root is mode 1777; nobody can add a
 	// key to it.
 	if worldWritable(di) && !readOnlyFS(dir) {
-		return nil, fmt.Errorf("assertion key directory %s is world-writable; anyone could add a key", dir)
+		return nil, errors.New("assertion key directory is world-writable; anyone could add a key")
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("assertion key directory: %w", err)
+		return nil, fmt.Errorf("assertion key directory: %w", logging.FileError(err))
 	}
 	k := &Keys{}
 	for _, e := range entries {
@@ -68,28 +71,28 @@ func LoadKeys(dir string, check func(path string) error) (*Keys, error) {
 		path := filepath.Join(dir, name)
 		fi, err := os.Stat(path) // follows symlinks
 		if err != nil {
-			return nil, fmt.Errorf("assertion key file %s: %w", path, err)
+			return nil, fmt.Errorf("assertion key file %q: %w", name, logging.FileError(err))
 		}
 		if fi.IsDir() {
 			continue
 		}
 		if worldWritable(fi) {
-			return nil, fmt.Errorf("assertion key file %s is world-writable", path)
+			return nil, fmt.Errorf("assertion key file %q is world-writable", name)
 		}
 		if !keyIDPattern.MatchString(name) {
-			return nil, fmt.Errorf("assertion key file %s: the name is the key ID and must match %s", path, keyIDPattern)
+			return nil, fmt.Errorf("assertion key file %q: the name is the key ID and must match %s", name, keyIDPattern)
 		}
 		if err := check(path); err != nil {
-			return nil, fmt.Errorf("assertion key file: %w", err)
+			return nil, fmt.Errorf("assertion key file %q: %w", name, logging.FileError(err))
 		}
-		key, err := readKey(path)
+		key, err := readKey(path, name)
 		if err != nil {
 			return nil, err
 		}
 		k.all = append(k.all, &signingKey{id: name, key: key})
 	}
 	if len(k.all) == 0 {
-		return nil, fmt.Errorf("assertion key directory %s has no key files", dir)
+		return nil, errors.New("assertion key directory has no key files")
 	}
 	sort.Slice(k.all, func(i, j int) bool { return k.all[i].id < k.all[j].id })
 	k.signing = k.all[len(k.all)-1]
@@ -104,23 +107,23 @@ func worldWritable(fi os.FileInfo) bool { return fi.Mode().Perm()&0o002 != 0 }
 
 var errNotP256 = errors.New("want an ECDSA P-256 private key (ES256)")
 
-func readKey(path string) (*ecdsa.PrivateKey, error) {
+func readKey(path, name string) (*ecdsa.PrivateKey, error) {
 	f, err := os.Open(path) //nolint:gosec // G304: the operator's key directory
 	if err != nil {
-		return nil, fmt.Errorf("assertion key file %s: %w", path, err)
+		return nil, fmt.Errorf("assertion key file %q: %w", name, logging.FileError(err))
 	}
 	defer func() { _ = f.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(f, maxKeyFile+1))
 	if err != nil {
-		return nil, fmt.Errorf("assertion key file %s: %w", path, err)
+		return nil, fmt.Errorf("assertion key file %q: %w", name, logging.FileError(err))
 	}
 	if len(raw) > maxKeyFile {
-		return nil, fmt.Errorf("assertion key file %s: larger than %d bytes", path, maxKeyFile)
+		return nil, fmt.Errorf("assertion key file %q: larger than %d bytes", name, maxKeyFile)
 	}
 	key, err := parseKey(raw)
 	if err != nil {
 		// The error never quotes the file's content: it is a private key.
-		return nil, fmt.Errorf("assertion key file %s: %w", path, err)
+		return nil, fmt.Errorf("assertion key file %q: %w", name, err)
 	}
 	return key, nil
 }

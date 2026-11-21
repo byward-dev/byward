@@ -61,7 +61,7 @@ func assertionKeys(cfg *config.Config) (*assertion.Keys, error) {
 	keys, err := assertion.LoadKeys(cfg.AssertionKeysDir, secretCheck(cfg))
 	if err != nil {
 		// No key generation (ADR-0007 §5, ADR-0016 §10): the operator creates the first key.
-		return nil, fmt.Errorf("BYWARD_ASSERTION_KEYS_DIR: %s: %w (see docs/how-to/identity-assertion.md)", cfg.AssertionKeysDir, err)
+		return nil, fmt.Errorf("BYWARD_ASSERTION_KEYS_DIR: %w (see docs/how-to/identity-assertion.md)", err)
 	}
 	return keys, nil
 }

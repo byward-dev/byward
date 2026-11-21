@@ -43,8 +43,8 @@ func TestARevocationOnAnotherSchemaVersionNamesTheWayOut(t *testing.T) {
 			}
 			_ = db.Close()
 			_, err = RevokeAll(context.Background(), cfg, discard)
-			if !errors.Is(err, tc.want) || errors.Is(err, ErrNoStore) || !strings.Contains(err.Error(), "BYWARD_STORE_DIR="+cfg.StoreDir) || !strings.Contains(err.Error(), tc.fix) {
-				t.Fatalf("RevokeAll = %v; want %v naming BYWARD_STORE_DIR and %q", err, tc.want, tc.fix)
+			if !errors.Is(err, tc.want) || errors.Is(err, ErrNoStore) || !strings.HasPrefix(err.Error(), "BYWARD_STORE_DIR: ") || strings.Contains(err.Error(), cfg.StoreDir) || !strings.Contains(err.Error(), tc.fix) {
+				t.Fatalf("RevokeAll = %v; want %v naming BYWARD_STORE_DIR, never its path (security invariant 2, #575), and %q", err, tc.want, tc.fix)
 			}
 			if strings.Contains(err.Error(), "backup") {
 				t.Fatalf("RevokeAll = %v; an operator command's way out never mentions a backup", err)

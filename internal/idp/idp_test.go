@@ -320,8 +320,11 @@ func TestAssertionFileIsReadOnEveryCall(t *testing.T) {
 	if err := AssertionFile(path).Apply(url.Values{}, "cid", "aud", fixedNow); err == nil {
 		t.Error("empty assertion file accepted")
 	}
-	if err := AssertionFile(filepath.Join(t.TempDir(), "missing")).Apply(url.Values{}, "cid", "aud", fixedNow); err == nil {
-		t.Error("missing assertion file accepted")
+	// The file by its role, never its path (security invariant 2, #575): it is read on every token
+	// request, so an error lands in the request's log line.
+	if err := AssertionFile(filepath.Join(t.TempDir(), "missing")).Apply(url.Values{}, "cid", "aud", fixedNow); !errors.Is(err, os.ErrNotExist) ||
+		err.Error() != "idp: read client assertion file: no such file or directory" {
+		t.Errorf("missing assertion file: err = %v, want it named by its role alone", err)
 	}
 }
 

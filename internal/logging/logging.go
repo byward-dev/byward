@@ -59,9 +59,9 @@ var allowed = map[string]bool{
 	// left and the margin byward keeps, both durations; and how many groups the identity asserted,
 	// a count, never the group IDs.
 	"idp_token_expires_in": true, "margin": true, "groups": true,
-	// The public listener's TLS (#183): whether it is on, the certificate files' paths, and the
-	// subject and end of a newly served certificate; never the files' contents.
-	"tls": true, "cert_file": true, "key_file": true, "subject": true, "not_after": true,
+	// The public listener's TLS (#183): whether it is on, and the subject and end of a newly served
+	// certificate; never the files' paths (security invariant 2) or contents.
+	"tls": true, "subject": true, "not_after": true,
 }
 
 // New returns a logger writing JSON (or text) to w. A line logged with a request's context (the

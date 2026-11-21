@@ -118,8 +118,8 @@ func TestAWorldWritableAssertionKeyDirectoryRefusesToStartEvenWithDev(t *testing
 	if s != nil && s.closeStore != nil {
 		_ = s.closeStore()
 	}
-	if err == nil || !strings.Contains(err.Error(), "BYWARD_ASSERTION_KEYS_DIR: ") || !strings.Contains(err.Error(), dir+" is world-writable") {
-		t.Fatalf("err = %v, want a refusal naming BYWARD_ASSERTION_KEYS_DIR and the world-writable directory", err)
+	if err == nil || !strings.Contains(err.Error(), "BYWARD_ASSERTION_KEYS_DIR: assertion key directory is world-writable") || strings.Contains(err.Error(), dir) {
+		t.Fatalf("err = %v, want a refusal naming BYWARD_ASSERTION_KEYS_DIR and the world-writable directory, never its path", err)
 	}
 }
 

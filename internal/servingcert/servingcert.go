@@ -30,30 +30,30 @@ type Pair struct {
 	chain []*x509.Certificate
 }
 
-// Read reads and parses f. Errors name the file at fault and never quote either file; a key file
-// that cannot be read is named by its role, not its path, which may be the key itself, pasted where
-// the path belongs (#461).
+// Read reads and parses f. Errors name the file at fault by its role, never its path, which may be a
+// secret pasted where the path belongs (security invariant 2, #461, #575), and never quote either
+// file.
 func Read(f Files) (*Pair, error) {
 	certPEM, err := os.ReadFile(f.Cert)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("the certificate file: %w", logging.FileError(err))
 	}
 	keyPEM, err := os.ReadFile(f.Key)
 	if err != nil {
 		return nil, fmt.Errorf("the key file: %w", logging.FileError(err))
 	}
 	if encrypted(keyPEM) { // it would fail below with an ASN.1 error that does not say why
-		return nil, fmt.Errorf("%s: the private key is encrypted; give the key unencrypted and protect the file instead", f.Key)
+		return nil, errors.New("the key file: the private key is encrypted; give the key unencrypted and protect the file instead")
 	}
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
-		return nil, fmt.Errorf("%s and %s: %w", f.Cert, f.Key, err)
+		return nil, fmt.Errorf("the certificate and key files: %w", err)
 	}
 	p := &Pair{cert: &cert}
 	for _, der := range cert.Certificate {
 		c, err := x509.ParseCertificate(der)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", f.Cert, err)
+			return nil, fmt.Errorf("the certificate file: %w", err)
 		}
 		p.chain = append(p.chain, c)
 	}

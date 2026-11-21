@@ -162,8 +162,9 @@ func TestLoadStaticNeedsJTICacheAndReadableFile(t *testing.T) {
 	if _, err := LoadStatic("/x", files{"/x": `{"clients":[{"client_id":"c","token_endpoint_auth_method":"none","redirect_uris":["https://a.example/cb"]}]}`}.read, nil); err == nil {
 		t.Error("nil jti cache accepted")
 	}
-	if _, err := LoadStatic("/missing", files{}.read, NewStoreJTICache(memory.New())); err == nil {
-		t.Error("missing file accepted")
+	// The file by the caller's name for it, never its path (security invariant 2, #575).
+	if _, err := LoadStatic("/missing", files{}.read, NewStoreJTICache(memory.New())); !errors.Is(err, fs.ErrNotExist) || err.Error() != "static clients: file does not exist" {
+		t.Errorf("missing file: err = %v, want the cause without the path", err)
 	}
 	if _, err := LoadStatic("/missing", files{}.read, nil, AllowMissingFile()); err == nil {
 		t.Error("nil jti cache accepted when the file may be missing")

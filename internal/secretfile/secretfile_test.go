@@ -1,6 +1,8 @@
 package secretfile
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,10 +45,14 @@ func TestSecretFilesOthersCanReachAreRefusedUnlessReadOnly(t *testing.T) {
 			t.Errorf("mode %04o, read-only %v: no error, want one containing %q", c.mode, c.readOnly, c.inErr)
 		}
 		if err != nil {
-			for _, want := range []string{c.inErr, path, "chmod 600", "chown", "65532", "read-only"} {
+			for _, want := range []string{c.inErr, "chmod 600", "chown", "65532", "read-only"} {
 				if !strings.Contains(err.Error(), want) {
-					t.Errorf("mode %04o: error %q lacks %q (the reason, the file and both fixes)", c.mode, err, want)
+					t.Errorf("mode %04o: error %q lacks %q (the reason and both fixes)", c.mode, err, want)
 				}
+			}
+			// The caller names the setting or field; the path never shows (security invariant 2, #575).
+			if strings.Contains(err.Error(), path) {
+				t.Errorf("mode %04o: error %q shows the file's path", c.mode, err)
 			}
 		}
 	}
@@ -87,8 +93,10 @@ func TestSymlinkedSecretIsJudgedByItsTarget(t *testing.T) {
 	}
 }
 
-func TestMissingSecretFileIsAnError(t *testing.T) {
-	if err := Check(filepath.Join(t.TempDir(), "absent")); err == nil {
-		t.Fatal("missing file passed")
+// A missing secret file is refused by its cause alone, never its path (security invariant 2, #575):
+// a TLS key removed while byward runs is logged through it.
+func TestAMissingSecretFileIsNamedByItsCauseNeverItsPath(t *testing.T) {
+	if err := Check(filepath.Join(t.TempDir(), "absent")); !errors.Is(err, fs.ErrNotExist) || err.Error() != "no such file or directory" {
+		t.Fatalf("err = %v, want the cause without the path", err)
 	}
 }

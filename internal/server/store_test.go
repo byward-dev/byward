@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -125,8 +126,19 @@ func TestRestoredStoreIsReportedAtStartup(t *testing.T) {
 		t.Fatal(err)
 	}
 	stop(t, a)
-	if out := logs.String(); !strings.Contains(out, `"reason":"store_restore"`) || !strings.Contains(out, `"epoch":2`) {
-		t.Fatalf("startup log %s: want a store_restore warning with epoch 2", out)
+	// The store by its setting, never its path (security invariant 2, #575).
+	warned := 0 // every such warning must name the setting alone; there is one
+	for _, r := range logsink.Records[map[string]any](t, logs.String()) {
+		if r["reason"] != "store_restore" {
+			continue
+		}
+		if _, hasValue := r["value"]; hasValue || r["setting"] != "BYWARD_STORE_DIR" || r["epoch"] != float64(2) || strings.Contains(fmt.Sprint(r), cfg.StoreDir) {
+			t.Errorf("warning %v: want the setting alone, no value, no path", r)
+		}
+		warned++
+	}
+	if warned != 1 {
+		t.Fatalf("startup log %s: want a store_restore warning with epoch 2 naming the setting alone", logs.String())
 	}
 	// ADR-0021 §3: the restore is on the audit stream too, which operators ship off the host.
 	type record struct {
@@ -161,8 +173,19 @@ func TestMissingCounterFileIsReportedAtStartup(t *testing.T) {
 		t.Fatal(err)
 	}
 	stop(t, a)
-	if out := logs.String(); !strings.Contains(out, `"reason":"store_counter_missing"`) {
-		t.Fatalf("startup log %s: want a store_counter_missing warning", out)
+	// The file by its setting, never its path (security invariant 2, #575).
+	warned := 0 // every such warning must name the setting alone; there is one
+	for _, r := range logsink.Records[map[string]any](t, logs.String()) {
+		if r["reason"] != "store_counter_missing" {
+			continue
+		}
+		if _, hasValue := r["value"]; hasValue || r["setting"] != "BYWARD_STORE_COUNTER_FILE" || strings.Contains(fmt.Sprint(r), cfg.StoreCounterFile) {
+			t.Errorf("warning %v: want the setting alone, no value, no path", r)
+		}
+		warned++
+	}
+	if warned != 1 {
+		t.Fatalf("startup log %s: want a store_counter_missing warning naming the setting alone", logs.String())
 	}
 }
 

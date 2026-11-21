@@ -8,6 +8,8 @@ package secretfile
 import (
 	"fmt"
 	"os"
+
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // readOnlyFS is ReadOnlyFS; tests replace it.
@@ -20,10 +22,10 @@ var readOnlyFS = ReadOnlyFS
 func Check(path string) error {
 	fi, err := os.Stat(path)
 	if err != nil {
-		return err
+		return logging.FileError(err)
 	}
 	if perm := fi.Mode().Perm(); perm&0o077 != 0 && !readOnlyFS(path) {
-		return fmt.Errorf("secret file %s has mode %04o, so other users can access it; chmod 600 it and chown it to the proxy's user (uid 65532 in the image), or mount it read-only (e.g. docker run -v ./secret:/run/secrets/x:ro)", path, perm)
+		return fmt.Errorf("secret file has mode %04o, so other users can access it; chmod 600 it and chown it to the proxy's user (uid 65532 in the image), or mount it read-only (e.g. docker run -v ./secret:/run/secrets/x:ro)", perm)
 	}
 	return nil
 }
