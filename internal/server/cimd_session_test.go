@@ -53,9 +53,6 @@ func TestACIMDClientSignsInAndUsesALegacySession(t *testing.T) {
 		t.Fatalf("consent page: %d %s", page.StatusCode, body)
 	}
 	allow := b.allow(page, body)
-	if allow.StatusCode != http.StatusSeeOther {
-		t.Fatalf("consent answer: %d %s", allow.StatusCode, readAll(t, allow))
-	}
 	idpRes, err := fake.HTTPClient().Get(allow.Header.Get("Location"))
 	if err != nil {
 		t.Fatal(err)

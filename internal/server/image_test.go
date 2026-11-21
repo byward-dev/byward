@@ -125,9 +125,10 @@ func TestIntegrationTheReleaseImageServes(t *testing.T) {
 	q := authorizeQuery(url.Values{"scope": {"mcp"}})
 	page := b.send(http.MethodGet, "/authorize?"+q.Encode(), nil, nil)
 	allow := b.allow(page, readAll(t, page))
-	// The proxy reaches the IdP here (discovery, over https), so a trust failure shows as this answer.
-	if allow.StatusCode != http.StatusSeeOther || !strings.HasPrefix(allow.Header.Get("Location"), idp.Issuer()) {
-		t.Fatalf("consent answer: %d, want a redirect to the IdP at %s", allow.StatusCode, idp.Issuer())
+	// The proxy reaches the IdP here (discovery, over https), so a trust failure fails b.allow; the
+	// redirect it returns must go to this IdP.
+	if !strings.HasPrefix(allow.Header.Get("Location"), idp.Issuer()) {
+		t.Fatalf("consent answer to %q, want a redirect to the IdP at %s", allow.Header.Get("Location"), idp.Issuer())
 	}
 	back := b.viaIdP(idp, allow)
 	done, err := url.Parse(back.Header.Get("Location"))

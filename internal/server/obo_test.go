@@ -138,9 +138,6 @@ func (e *oboEnv) signIn(t *testing.T) map[string]any {
 		t.Fatalf("consent page: status %d\n%s", page.StatusCode, pageBody)
 	}
 	allow := b.allow(page, pageBody)
-	if allow.StatusCode != http.StatusSeeOther {
-		t.Fatalf("consent answer: %d %s", allow.StatusCode, readAll(t, allow))
-	}
 	back := b.viaIdP(e.fake, allow)
 	ret, _ := url.Parse(back.Header.Get("Location"))
 	if back.StatusCode != http.StatusFound || ret.Query().Get("code") == "" {
