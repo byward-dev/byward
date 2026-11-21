@@ -4,7 +4,9 @@ Generated from the settings registry (`internal/config`); do not edit by hand.
 Run `BYWARD_UPDATE_REFERENCE=1 go test ./internal/config/` after changing a setting.
 
 Precedence: flag > environment > default. Secrets are read only from files. A variable set to
-nothing is the same as unset, unless its setting says what empty means.
+nothing is the same as unset, unless its setting says what empty means. A setting marked *(path)*
+holds a path, as does every secret's file: a file that cannot be used is named by its setting and
+the cause, never by its path.
 
 - [Endpoint](#endpoint)
 - [IdP](#idp)
@@ -28,8 +30,8 @@ nothing is the same as unset, unless its setting says what empty means.
 |---|---|---|---|
 | `--public-url` | `BYWARD_PUBLIC_URL` | — | public URL of the MCP endpoint as users enter it, e.g. https://mcp.example.com/mcp, with its host as browsers write it, since they rewrite any other spelling: a host name in lower case (mcp.example.com, not MCP.Example.com); an internationalized host in its ASCII (xn--) form; an IP address as browsers write it (127.0.0.1, not 127.1; [2001:db8::1], not [2001:DB8:0::1]); and no other host ending in a number (mcp.10), which browsers refuse |
 | `--listen` | `BYWARD_LISTEN` | 127.0.0.1:8080 | address to listen on; public addresses only when configured |
-| `--tls-cert-file` | `BYWARD_TLS_CERT_FILE` | — | serve TLS on the listener: an absolute path to the PEM certificate, followed by any intermediates; with tls-key-file; needs an https public-url; a replaced file is served from the next connection on, with no restart (docs/how-to/tls.md) |
-| `--tls-key-file` | `BYWARD_TLS_KEY_FILE` | — | serve TLS on the listener: an absolute path to the certificate's unencrypted PEM private key, with no permission for its group or others, or on a read-only mount; with tls-cert-file (docs/how-to/tls.md) |
+| `--tls-cert-file` | `BYWARD_TLS_CERT_FILE` | — | serve TLS on the listener: an absolute path to the PEM certificate, followed by any intermediates; with tls-key-file; needs an https public-url; a replaced file is served from the next connection on, with no restart (docs/how-to/tls.md) *(path)* |
+| `--tls-key-file` | `BYWARD_TLS_KEY_FILE` | — | serve TLS on the listener: an absolute path to the certificate's unencrypted PEM private key, with no permission for its group or others, or on a read-only mount; with tls-cert-file (docs/how-to/tls.md) *(path)* |
 | `--allowed-origins` | `BYWARD_ALLOWED_ORIGINS` | — | comma-separated Origin values allowed on the MCP endpoint (scheme://host[:port]); an internationalized host in its ASCII (xn--) form; a default port (:443 for https, :80 for http) is dropped, as browsers never send it |
 | `--allowed-hosts` | `BYWARD_ALLOWED_HOSTS` | — | comma-separated extra Host values accepted besides the public URL's host; an internationalized host in its ASCII (xn--) form; an IP address matches in any spelling of it (127.1 is 127.0.0.1) |
 | `--scope` | `BYWARD_SCOPE` | mcp | the scope advertised in protected resource metadata and 401 challenges |
@@ -50,7 +52,7 @@ nothing is the same as unset, unless its setting says what empty means.
 | `--entra-client-id` | `BYWARD_ENTRA_CLIENT_ID` | — | application (client) ID of the IdP app registration |
 | `--entra-client-secret-file` | `BYWARD_ENTRA_CLIENT_SECRET_FILE` | — | client secret of the IdP app |
 | `--entra-client-certificate-file` | `BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE` | — | instead of a client secret: a PEM file with the IdP app's certificate and its unencrypted RSA private key (2048 bits or more); the certificate must be uploaded to the app registration; recommended for production (ADR-0012 §5, docs/how-to/entra-certificate.md) |
-| `--entra-federated-token-file` | `BYWARD_ENTRA_FEDERATED_TOKEN_FILE` | — | instead of a client secret: an absolute path to a file holding a federated token (a JWT from another identity provider, such as GitHub Actions or AKS workload identity) that byward sends Entra as its client assertion, re-reading the file for every token request; the app registration needs a matching federated identity credential (ADR-0012 §5, docs/how-to/entra-federated-credential.md) |
+| `--entra-federated-token-file` | `BYWARD_ENTRA_FEDERATED_TOKEN_FILE` | — | instead of a client secret: an absolute path to a file holding a federated token (a JWT from another identity provider, such as GitHub Actions or AKS workload identity) that byward sends Entra as its client assertion, re-reading the file for every token request; the app registration needs a matching federated identity credential (ADR-0012 §5, docs/how-to/entra-federated-credential.md) *(path)* |
 | `--entra-client-secret-expires-at` | `BYWARD_ENTRA_CLIENT_SECRET_EXPIRES_AT` | — | when the client secret expires, as a date (2027-11-06) or an RFC 3339 time; the proxy warns at startup and doctor warns from 30 days before (ADR-0012 §10) |
 
 ## IdP: OpenID Connect
@@ -84,7 +86,7 @@ nothing is the same as unset, unless its setting says what empty means.
 
 | Flag | Environment | Default | Description |
 |---|---|---|---|
-| `--static-clients-file` | `BYWARD_STATIC_CLIENTS_FILE` | — | JSON file of pre-registered MCP clients, an absolute path; default: clients.json in the data directory, optional while CIMD or DCR is on; a file you name must exist (docs/reference/static-clients.md) |
+| `--static-clients-file` | `BYWARD_STATIC_CLIENTS_FILE` | — | JSON file of pre-registered MCP clients, an absolute path; default: clients.json in the data directory, optional while CIMD or DCR is on; a file you name must exist (docs/reference/static-clients.md) *(path)* |
 | `--dcr` | `BYWARD_DCR` | true | accept Dynamic Client Registration at /register (Cursor, Gemini CLI) and advertise it; false turns it off (docs/how-to/dcr.md) |
 | `--client-denylist` | `BYWARD_CLIENT_DENYLIST` | — | comma-separated CIMD client IDs (https URLs) and redirect host names refused for CIMD and DCR clients (docs/how-to/dcr.md) |
 | `--cimd` | `BYWARD_CIMD` | true | accept MCP clients identified by a Client ID Metadata Document URL (Claude, VS Code) and advertise it; false turns it off (docs/how-to/cimd.md) |
@@ -123,7 +125,7 @@ nothing is the same as unset, unless its setting says what empty means.
 
 | Flag | Environment | Default | Description |
 |---|---|---|---|
-| `--assertion-keys-dir` | `BYWARD_ASSERTION_KEYS_DIR` | — | directory of the identity assertion's signing keys, an absolute path: PEM ECDSA P-256 files, each name the key ID; the key whose ID sorts last signs; needed with an HTTP upstream; default: assertion-keys in the data directory (docs/how-to/identity-assertion.md) |
+| `--assertion-keys-dir` | `BYWARD_ASSERTION_KEYS_DIR` | — | directory of the identity assertion's signing keys, an absolute path: PEM ECDSA P-256 files, each name the key ID; the key whose ID sorts last signs; needed with an HTTP upstream; default: assertion-keys in the data directory (docs/how-to/identity-assertion.md) *(path)* |
 | `--assertion-header` | `BYWARD_ASSERTION_HEADER` | Authorization | request header that carries the identity assertion to the HTTP upstream, as Bearer <JWT>; inbound copies are always removed (ADR-0016 §2) |
 | `--identity-headers` | `BYWARD_IDENTITY_HEADERS` | false | also send the HTTP upstream the user in plain headers (X-Byward-Subject, X-Byward-Client-Id, X-Byward-Principal-Type, and X-Byward-Roles, -Groups, -Email, -Email-Verified, -Name for the assertion's claims), percent-encoded; safe only when the upstream is reachable through this proxy alone (ADR-0016 §5, docs/how-to/plain-identity-headers.md) |
 | `--assertion-claims` | `BYWARD_ASSERTION_CLAIMS` | roles | comma-separated optional claims in the identity assertion: roles, groups, email, name; or none (ADR-0016 §1, docs/reference/identity-assertion.md) |
@@ -140,11 +142,11 @@ nothing is the same as unset, unless its setting says what empty means.
 
 | Flag | Environment | Default | Description |
 |---|---|---|---|
-| `--data-dir` | `BYWARD_DATA_DIR` | /var/lib/byward | data directory, an absolute path; the keys, clients and store settings default to paths in it (ADR-0007 §6, docs/how-to/state.md) |
-| `--keys-dir` | `BYWARD_KEYS_DIR` | — | directory of sealing keys, an absolute path; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md) |
-| `--store-dir` | `BYWARD_STORE_DIR` | — | state directory of the SQLite store, an absolute path, created with mode 0700; the directory to back up; default: state in the data directory (ADR-0007, docs/how-to/state.md) |
+| `--data-dir` | `BYWARD_DATA_DIR` | /var/lib/byward | data directory, an absolute path; the keys, clients and store settings default to paths in it (ADR-0007 §6, docs/how-to/state.md) *(path)* |
+| `--keys-dir` | `BYWARD_KEYS_DIR` | — | directory of sealing keys, an absolute path; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md) *(path)* |
+| `--store-dir` | `BYWARD_STORE_DIR` | — | state directory of the SQLite store, an absolute path, created with mode 0700; the directory to back up; default: state in the data directory (ADR-0007, docs/how-to/state.md) *(path)* |
 | `--store-postgres-dsn-file` | `BYWARD_STORE_POSTGRES_DSN_FILE` | — | the PostgreSQL store, for more than one replica of an HTTP upstream: a file holding the connection string (a URL or key=value pairs, pool settings such as pool_max_conns included); setting it selects PostgreSQL 15 or later instead of SQLite; sslmode=verify-full is required outside --dev; never logged (ADR-0007, docs/how-to/postgres.md) |
-| `--store-counter-file` | `BYWARD_STORE_COUNTER_FILE` | — | restore-detection counter file, an absolute path outside the state directory and its backups; default: store-writes next to the keys directory (ADR-0007 §9) |
+| `--store-counter-file` | `BYWARD_STORE_COUNTER_FILE` | — | restore-detection counter file, an absolute path outside the state directory and its backups; default: store-writes next to the keys directory (ADR-0007 §9) *(path)* |
 
 ## Operations
 
