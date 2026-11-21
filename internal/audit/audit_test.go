@@ -74,7 +74,7 @@ func render(t *testing.T) string {
 
 func TestAuditRecordsMatchTheGoldenSchema(t *testing.T) {
 	got := render(t)
-	golden.Check(t, eventsGolden, got, "the audit records are a public interface (ADR-0023): update docs/reference/observability.md too")
+	golden.Check(t, eventsGolden, got, "the audit records are a public interface (ADR-0023); an intended change also updates docs/reference/observability.md, and bumps SchemaVersion if it is incompatible")
 	for _, line := range strings.Split(strings.TrimSpace(got), "\n") {
 		var rec map[string]any
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {

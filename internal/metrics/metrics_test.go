@@ -67,7 +67,7 @@ func TestMetricNamesMatchTheGoldenFile(t *testing.T) {
 	}
 	sort.Strings(lines)
 	got := strings.Join(lines, "\n") + "\n"
-	golden.Check(t, namesGolden, got, "the metric names are a public interface (ADR-0023): update docs/reference/observability.md too")
+	golden.Check(t, namesGolden, got, "the metric names are a public interface (ADR-0023); an intended change also updates docs/reference/observability.md")
 }
 
 func TestLabelsCarryOnlyFixedValuesAndBucketsAreFixed(t *testing.T) {

@@ -28,13 +28,14 @@ func Check(t testing.TB, path, got, hint string) {
 		t.Fatalf("read the golden file %s: %v (%s=1 writes it)", path, err, UpdateEnv)
 	}
 	if got != string(want) {
-		t.Errorf("%s differs at %s\n%s; if intended, rerun with %s=1 and review the diff", path, FirstDiff(got, string(want)), hint, UpdateEnv)
+		t.Errorf("%s differs at %s\n%s; if intended, rerun with %s=1 and review the diff", path, firstDiff(got, string(want)), hint, UpdateEnv)
 	}
 }
 
-// FirstDiff names the first line where got and want differ, and both versions of it. A line one
-// side lacks reads as "(no line)", so a missing final newline is named too.
-func FirstDiff(got, want string) string {
+// firstDiff names the first line where got and want differ, and both versions of it. Lines keep
+// their newline and are quoted, so a missing final newline is named; a line one side lacks reads as
+// "(no line)".
+func firstDiff(got, want string) string {
 	g, w := strings.SplitAfter(got, "\n"), strings.SplitAfter(want, "\n")
 	for i := 0; i < len(g) || i < len(w); i++ {
 		gl, wl := line(g, i), line(w, i)

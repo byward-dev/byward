@@ -100,13 +100,17 @@ func TestCheckRewritesTheFileUnderTheUpdateVariable(t *testing.T) {
 
 // Only 1 updates: another value compares, as an unset variable does.
 func TestCheckComparesUnderAnyOtherValueOfTheUpdateVariable(t *testing.T) {
-	t.Setenv(golden.UpdateEnv, "true")
-	path := goldenFile(t, "old\n")
-	if r := check(t, path, "new\n", "the hint"); len(r.errors) != 1 {
-		t.Fatalf("errors %q, want the mismatch", r.errors)
-	}
-	if b, _ := os.ReadFile(path); string(b) != "old\n" { //nolint:gosec // G304: the test's own temp file
-		t.Fatalf("the file holds %q, want it unchanged", b)
+	for _, value := range []string{"true", "0", "yes", " 1", "1\n"} {
+		t.Run(fmt.Sprintf("%q", value), func(t *testing.T) {
+			t.Setenv(golden.UpdateEnv, value)
+			path := goldenFile(t, "old\n")
+			if r := check(t, path, "new\n", "the hint"); len(r.errors) != 1 {
+				t.Fatalf("errors %q, want the mismatch", r.errors)
+			}
+			if b, _ := os.ReadFile(path); string(b) != "old\n" { //nolint:gosec // G304: the test's own temp file
+				t.Fatalf("the file holds %q, want it unchanged", b)
+			}
+		})
 	}
 }
 
@@ -116,5 +120,14 @@ func TestCheckStopsWhenTheFileCannotBeRead(t *testing.T) {
 	r := check(t, filepath.Join(t.TempDir(), "missing.golden"), "a\n", "the hint")
 	if len(r.fatals) != 1 || !strings.Contains(r.fatals[0], "BYWARD_UPDATE_GOLDEN=1 writes it") {
 		t.Fatalf("fatals %q, want one naming the update variable", r.fatals)
+	}
+}
+
+// A golden file that cannot be written under the update variable stops the test.
+func TestCheckStopsWhenTheFileCannotBeWritten(t *testing.T) {
+	t.Setenv(golden.UpdateEnv, "1")
+	r := check(t, filepath.Join(t.TempDir(), "no-dir", "x.golden"), "a\n", "the hint")
+	if len(r.fatals) != 1 || !strings.Contains(r.fatals[0], "write the golden file") {
+		t.Fatalf("fatals %q, want one saying the file was not written", r.fatals)
 	}
 }
