@@ -178,9 +178,22 @@ func urlReason(raw string, u *url.URL, err error) string {
 		return "has no host"
 	case u.User != nil:
 		return "holds a user name or password"
+	case (u.Port() != "" || strings.HasSuffix(u.Host, ":")) && !isPortNumber(u.Port()):
+		return portReason
 	}
 	return ""
 }
+
+// isPortNumber reports whether port is a TCP port as a URL may write it: 1 to 65535, no sign, no
+// leading zero (#602). url.Parse checks only that a port is digits, so :0, :08080 and :99999 parse.
+// The listen addresses take 0, which asks the kernel for a port; no URL a client follows does.
+func isPortNumber(port string) bool {
+	n, err := strconv.Atoi(port)
+	return err == nil && port[0] >= '1' && port[0] <= '9' && n <= 65535
+}
+
+// portReason is why a host:port, or a URL, is refused for its port.
+const portReason = "has a port that is not a number from 1 to 65535 without a sign or leading zero"
 
 // urlParseReason says why url.Parse refused a value, by its error, as a clause completing "it …".
 // The errors of net/url are read by type, or by their fixed text before any quoted part; one not
@@ -420,9 +433,8 @@ func hostPort(h string) (stored, reason string) {
 		}
 	}
 	if hasPort {
-		// No sign, no leading zero: "+80", "-1", "0" and "080" all sort below '1'.
-		if n, err := strconv.Atoi(port); err != nil || port[0] < '1' || n > 65535 {
-			return "", "has a port that is not a number from 1 to 65535 without a sign or leading zero"
+		if !isPortNumber(port) {
+			return "", portReason
 		}
 	}
 	return host.Canonical(stored), ""
