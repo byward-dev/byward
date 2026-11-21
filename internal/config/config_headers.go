@@ -33,13 +33,24 @@ func withMCPHeaders(m map[string]bool) map[string]bool {
 	return m
 }
 
+// headerExamples is each header setting's example of a header of the operator's own, which its
+// refusals suggest.
+var headerExamples = map[string]string{ //nolint:gosec // G101: header names an operator may use, not a credential
+	"assertion-header": "X-Byward-Identity", "upstream-credential-header": "X-Api-Key",
+	"obo-header": "X-Byward-Downstream-Token"}
+
+// headerNameWant is what the header setting name wants, in every refusal of it.
+func headerNameWant(name string) string {
+	return "a header name such as Authorization or " + headerExamples[name]
+}
+
 // parseHeaderName reads a setting naming a header the proxy sets on upstream requests: a valid token,
-// and not one the proxy, the transport or MCP relies on. example is a header of the operator's own to
-// suggest. A refused name is never shown: a value pasted as Name: value holds a token after the name
-// (#466).
-func parseHeaderName(val Value, example string) (string, error) {
+// and not one the proxy, the transport or MCP relies on; its refusals suggest the setting's example
+// (headerExamples). A refused name is never shown: a value pasted as Name: value holds a token after
+// the name (#466).
+func parseHeaderName(val Value) (string, error) {
 	raw := val.Given.raw()
-	want := "a header name such as Authorization or " + example
+	want := headerNameWant(val.Setting.Name)
 	h := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(raw))
 	if !httpguts.ValidHeaderFieldName(h) {
 		return "", refusedForm(val.Setting, whole, raw, want, "it is not a header name")
@@ -95,11 +106,11 @@ func (c *Config) headerClashes() []error {
 		errs = append(errs, errorf("%s and %s name the same header, but the credential and the identity assertion never share a header (ADR-0016 §7): set %s to a header of your own, such as X-Byward-Identity, and verify the assertion there",
 			cEnv, aEnv, aEnv))
 	}
-	for _, u := range []struct{ name, header, example string }{{"assertion-header", c.AssertionHeader, "X-Byward-Identity"},
-		{"upstream-credential-header", c.UpstreamCredentialHeader, "X-Api-Key"}, {"obo-header", c.OBOHeader, "X-Byward-Downstream-Token"}} {
+	for _, u := range []struct{ name, header string }{{"assertion-header", c.AssertionHeader},
+		{"upstream-credential-header", c.UpstreamCredentialHeader}, {"obo-header", c.OBOHeader}} {
 		for _, plain := range IdentityHeaderNames {
 			if sameHeader(u.header, plain) { // shown by the fixed name it matches, never as given
-				errs = append(errs, refusedMeaning(lookup(u.name), whole, plain, "a header name such as "+u.example,
+				errs = append(errs, refusedMeaning(lookup(u.name), whole, plain, headerNameWant(u.name),
 					"it is one of the plain identity headers the proxy sets (docs/how-to/plain-identity-headers.md); use another header"))
 			}
 		}

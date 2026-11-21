@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -52,5 +53,37 @@ func TestEveryListSettingRefusesAListOfNone(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// A scope token (RFC 6749 §3.3) is every printable ASCII character but a space, a double quote and a
+// backslash: each is taken, by BYWARD_SCOPE and by each entry of BYWARD_OIDC_SCOPES, and every other
+// character is refused, ends of the range and controls included.
+func TestAScopeTokenIsThePrintableASCIIButSpaceQuoteAndBackslash(t *testing.T) {
+	const reason = "it has a character a scope token cannot hold: white space, a double quote, a backslash or one that is not printable ASCII"
+	for r := rune(0); r <= 0x80; r++ {
+		taken := r >= 0x21 && r <= 0x7e && r != '"' && r != '\\'
+		scope := "a" + string(r) + "b" // inside, as a list trims an entry's white space
+		t.Run(strconv.QuoteRune(r), func(t *testing.T) {
+			c, err := load(t, nil, "BYWARD_SCOPE="+scope)
+			want := "BYWARD_SCOPE: want one scope token, such as mcp; got a value (3 characters, not shown): " + reason
+			switch {
+			case taken && (err != nil || c.Scope != scope):
+				t.Errorf("BYWARD_SCOPE=%q: %v, want it taken", scope, err)
+			case !taken && (!isConfigError(err) || !strings.Contains(err.Error(), want)):
+				t.Errorf("BYWARD_SCOPE=%q: %v, want %q", scope, err, want)
+			}
+			if r == ',' { // a list's separator
+				return
+			}
+			c, err = loadOIDC(t, with("BYWARD_OIDC_SCOPES=openid,"+scope))
+			want = "BYWARD_OIDC_SCOPES: want a scope such as openid or email; got entry 2 of 2 (3 characters, not shown): " + reason
+			switch {
+			case taken && (err != nil || !slices.Contains(c.OIDCScopes, scope)):
+				t.Errorf("BYWARD_OIDC_SCOPES=openid,%q: %v, want it taken", scope, err)
+			case !taken && (!isConfigError(err) || !strings.Contains(err.Error(), want)):
+				t.Errorf("BYWARD_OIDC_SCOPES=openid,%q: %v, want %q", scope, err, want)
+			}
+		})
 	}
 }

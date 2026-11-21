@@ -233,13 +233,10 @@ func TestAURLWithAMistypedSchemeIsRefusedWithoutAnyOfItShown(t *testing.T) {
 	}
 }
 
-// The flag package's own refusals quote the argument or the value given to a flag; config names
-// them without it (ADR-0031 §1).
-func TestAFlagTheFlagPackageRefusesIsNeverShown(t *testing.T) {
-	extra := func(fs *flag.FlagSet) {
-		fs.Bool("version", false, "")
-		fs.Func("tries", "", func(string) error { return errors.New("refused") })
-	}
+// The flag package's own refusals quote the argument, the value given to a flag, or an undefined
+// flag's text; config refuses each without any text given (ADR-0031 §1), through Load, so with the
+// command line byward really parses.
+func TestAFlagTheFlagPackageRefusesNeverShowsTheTextGiven(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -250,16 +247,24 @@ func TestAFlagTheFlagPackageRefusesIsNeverShown(t *testing.T) {
 		{"a value given to an action flag", []string{"--version=" + canaryText}, "--version: want true, false or no value; got a value it does not take (not shown)"},
 		// The value comes before the name in the flag package's error, so it cannot name another flag.
 		{"a value naming another flag", []string{"--version=x for -dev: y"}, "--version: want true, false or no value; got a value it does not take (not shown)"},
-		{"a value a flag of another kind refuses", []string{"--tries=" + canaryText}, "--tries: want a value it takes; got a value it does not take (not shown)"},
 		{"an undefined flag that is a value", []string{"--" + canaryText + "~tok=1"}, "want flags this command takes; got an undefined flag (14 characters, not shown)"},
-		{"an undefined flag", []string{"--tokn=1"}, "flag provided but not defined: -tokn"},
+		{"an undefined flag in lower case", []string{"--" + strings.ToLower(canaryText)}, "want flags this command takes; got an undefined flag (10 characters, not shown)"},
+		{"an undefined flag near one of the command's own", []string{"--scop=1"}, "want flags this command takes; got an undefined flag (4 characters, not shown) (did you mean --scope?)"},
+		{"a flag that needs an argument", []string{"--scope"}, "flag needs an argument: -scope"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := resolve(registry, tc.args, base, baseFiles, extra)
+			_, _, err := Load(tc.args, base, baseFiles)
 			if !isConfigError(err) || err.Error() != tc.want || holdsCanary(err.Error()) {
 				t.Fatalf("got %v, want the configuration error %q", err, tc.want)
 			}
 		})
+	}
+	// No flag byward has refuses a value but the action flags, which are booleans; a flag of another
+	// kind, refusing one, would be named with its own hint, and the value never shown.
+	tries := func(fs *flag.FlagSet) { fs.Func("tries", "", func(string) error { return errors.New("refused") }) }
+	want := "--tries: want a value it takes; got a value it does not take (not shown)"
+	if _, err := resolve(registry, []string{"--tries=" + canaryText}, base, baseFiles, tries); !isConfigError(err) || err.Error() != want {
+		t.Fatalf("got %v, want the configuration error %q", err, want)
 	}
 }
 
@@ -277,7 +282,27 @@ func TestNoRefusalShowsTheValueGiven(t *testing.T) {
 		env   []string
 		files readFileFunc
 	}
+	credFiles := func(p string) ([]byte, error) {
+		if p == credFile {
+			return []byte("k-123"), nil
+		}
+		return baseFiles(p)
+	}
+	withoutOIDCSecret := slices.DeleteFunc(slices.Clone(oidcBase), func(kv string) bool { return strings.HasPrefix(kv, "BYWARD_OIDC_CLIENT_SECRET_FILE=") })
+	// A context where each setting is read: by its group, and for these by the settings it needs beside it.
+	special := map[string]ctx{
+		"upstream-command":           {nil, stdioBase(), baseFiles}, // given as itself, not after --
+		"tls-cert-file":              {nil, append(slices.Clone(base), "BYWARD_TLS_KEY_FILE=/run/tls/tls.key"), baseFiles},
+		"tls-key-file":               {nil, append(slices.Clone(base), "BYWARD_TLS_CERT_FILE=/run/tls/tls.crt"), baseFiles},
+		"entra-federated-token-file": {nil, withoutSecret(), baseFiles},
+		"upstream-credential-header": {nil, append(slices.Clone(base), "BYWARD_UPSTREAM_CREDENTIAL_FILE="+credFile), credFiles},
+		"oidc-client-key-alg":        {nil, append(slices.Clone(withoutOIDCSecret), "BYWARD_OIDC_CLIENT_KEY_FILE=/run/secrets/key.pem"), oidcFiles},
+		"oidc-client-key-id":         {nil, append(slices.Clone(withoutOIDCSecret), "BYWARD_OIDC_CLIENT_KEY_FILE=/run/secrets/key.pem"), oidcFiles},
+	}
 	contextOf := func(s Setting) ctx {
+		if c, ok := special[s.Name]; ok {
+			return ctx{c.args, slices.Clone(c.env), c.files}
+		}
 		switch s.Group {
 		case GroupStdioUpstream:
 			return ctx{[]string{"--", "/bin/x"}, stdioBase(), baseFiles}
@@ -288,29 +313,41 @@ func TestNoRefusalShowsTheValueGiven(t *testing.T) {
 		}
 		return ctx{nil, slices.Clone(base), baseFiles}
 	}
-	refused := 0
+	// The settings config refuses none of these forms for: free text, claim and role names, and the
+	// gate and app lists. Every other setting must refuse one in the one format, so the test cannot
+	// pass by no longer reaching its parser.
+	acceptsEveryForm := []string{"app-client-ids", "app-roles", "entra-client-id", "gate-email-domains", "gate-groups",
+		"gate-hosted-domains", "gate-roles", "gate-tenants", "oidc-client-id", "oidc-client-key-id", "oidc-groups-claim",
+		"oidc-name", "oidc-roles-claim", "oidc-subject-claim", "operator-name", "resource-name", "scope-description"}
 	for _, s := range registry {
 		if s.Secret() {
 			continue
 		}
+		inFormat := 0
 		for _, form := range forms {
 			c := contextOf(s)
 			_, _, err := Load(c.args, append(c.env, s.Env()+"="+form), c.files)
 			if err == nil {
 				continue
 			}
-			refused++
 			if holdsCanary(err.Error()) {
 				t.Errorf("%s=%q: %v, shows the value", s.Env(), form, err)
 			}
 			for _, line := range strings.Split(err.Error(), "\n") {
-				if strings.HasPrefix(line, s.Env()+": ") && (!strings.HasPrefix(line, s.Env()+": want ") || !strings.Contains(line, "; got ")) {
+				switch {
+				case !strings.HasPrefix(line, s.Env()+": "):
+				case !strings.HasPrefix(line, s.Env()+": want ") || !strings.Contains(line, "; got "):
 					t.Errorf("%s=%q: the line %q is outside the one format", s.Env(), form, line)
+				default:
+					inFormat++
 				}
 			}
 		}
-	}
-	if refused < 100 {
-		t.Fatalf("%d refusals, want at least 100: the forms stopped reaching the settings' parsers", refused)
+		switch accepts := slices.Contains(acceptsEveryForm, s.Name); {
+		case inFormat == 0 && !accepts:
+			t.Errorf("%s refused none of the forms in the one format: its parser was not reached; give it a context, or list it in acceptsEveryForm", s.Env())
+		case inFormat > 0 && accepts:
+			t.Errorf("%s refused a form in the one format, but acceptsEveryForm lists it: remove it", s.Env())
+		}
 	}
 }

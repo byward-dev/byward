@@ -16,10 +16,22 @@ var whole = entry{}
 // parser rewrote, as browsers write it ("write it as 127.0.0.1"), which carries nothing but the
 // address. An empty value is refused as nothing given.
 func refusedForm(s Setting, at entry, raw, want, reason string) error {
+	return refusedFormAs(s.Env(), s, at, raw, want, reason)
+}
+
+// refusedFormAs is refusedForm naming the setting as name: as the operator gave it, such as the file
+// setting a secret was read through (spelled).
+func refusedFormAs(name string, s Setting, at entry, raw, want, reason string) error {
 	if raw == "" {
-		return errorf("%s: want %s; got nothing", s.Env(), want)
+		return errorf("%s: want %s; got nothing", name, want)
 	}
-	return errorf("%s: want %s; got %s %s: %s", s.Env(), want, at, s.shape.refused(raw), reason)
+	return errorf("%s: want %s; got %s %s: %s", name, want, at, s.shape.refused(raw), reason)
+}
+
+// listsNothing refuses a list setting that is set but names no entry, such as ",": it would read as
+// unset, and a gate list would silently open the gate.
+func listsNothing(s Setting) error {
+	return errorf("%s: want at least one entry; got a list of none", s.Env())
 }
 
 // refusedMeaning is the refusal of a value that parsed, for its meaning (ADR-0031 §1), in the same

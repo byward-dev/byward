@@ -638,16 +638,19 @@ func TestOAuthRateLimitsDefaultToADR0018AndCanBeRaisedWithinBounds(t *testing.T)
 	// An entry refused for its form by its place and length; a limit out of range as parsed.
 	const refused = "BYWARD_OAUTH_RATE_LIMITS: want endpoint=per-minute entries, the endpoint authorize, consent, callback, token, revoke or register and the limit a whole number from 1 to 10000; got entry 1 of 1"
 	for bad, why := range map[string]string{
-		"metadata=10":         " (11 characters, not shown): it is not endpoint=per-minute for one of the endpoints",
-		"authorize":           " (9 characters, not shown): it is not endpoint=per-minute for one of the endpoints",
-		"authorize=fast":      " (14 characters, not shown): its limit is not a whole number",
-		"authorize=0":         ", authorize=0: the limit is out of range",
-		" authorize = 010001": ", authorize=10001: the limit is out of range",
-		"authorize=-5":        ", authorize=-5: the limit is out of range",
+		"metadata=10":                " (11 characters, not shown): it is not endpoint=per-minute for one of the endpoints",
+		"authorize":                  " (9 characters, not shown): it is not endpoint=per-minute for one of the endpoints",
+		"authorize=fast":             " (14 characters, not shown): its limit is not a whole number",
+		"authorize=0":                ", authorize=0: the limit is out of range",
+		" authorize = 010001":        ", authorize=10001: the limit is out of range",
+		"authorize=-5":               ", authorize=-5: the limit is out of range",
+		"token=99999999999999999999": " (26 characters, not shown): its limit is out of range",
 	} {
-		if _, _, err := Load(nil, noAuthEnv("BYWARD_OAUTH_RATE_LIMITS="+bad), nil); !isConfigError(err) || err.Error() != refused+why {
-			t.Errorf("BYWARD_OAUTH_RATE_LIMITS=%q: got %v, want %q", bad, err, refused+why)
-		}
+		t.Run(strconv.Quote(bad), func(t *testing.T) {
+			if _, _, err := Load(nil, noAuthEnv("BYWARD_OAUTH_RATE_LIMITS="+bad), nil); !isConfigError(err) || err.Error() != refused+why {
+				t.Errorf("got %v, want %q", err, refused+why)
+			}
+		})
 	}
 }
 
@@ -1204,16 +1207,6 @@ func TestADenylistEntryRefusedAtWiringIsNamedByItsPlaceAndLength(t *testing.T) {
 				t.Errorf("got %v, want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-// A scope token takes every printable ASCII character but a space, a double quote and a backslash,
-// the ends of the range included.
-func TestAScopeTokenTakesThePrintableASCIIRange(t *testing.T) {
-	const scope = "api://x/!mcp~read"
-	c, err := load(t, nil, "BYWARD_SCOPE="+scope)
-	if err != nil || c.Scope != scope {
-		t.Fatalf("got %v, %v; want the scope %q", c, err, scope)
 	}
 }
 

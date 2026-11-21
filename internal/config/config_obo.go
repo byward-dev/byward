@@ -41,7 +41,7 @@ func (c *Config) onBehalfOf(v *Values) []error {
 	if len(c.OBOScopes) > 0 && c.IdP != "" && c.IdP != "entra" { // a refused IdP has its own error
 		errs = append(errs, errorf("%s: On-Behalf-Of is Entra's; it needs BYWARD_IDP=entra, got %s", sEnv, c.IdP))
 	}
-	h, err := parseHeaderName(v.value("obo-header"), "X-Byward-Downstream-Token")
+	h, err := parseHeaderName(v.value("obo-header"))
 	if err != nil {
 		return append(errs, err)
 	}

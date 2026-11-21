@@ -87,7 +87,7 @@ func parseUpstreamCommand(val Value, argv []string) ([]string, error) {
 		command = nil
 	}
 	switch {
-	case argv != nil && command[0] == "": // given after --, so named in its own terms: no JSON was typed
+	case argv != nil && (len(command) == 0 || command[0] == ""): // given after --, so named in its own terms: no JSON was typed
 		return nil, errorf("the command after --: want the program first; got an empty program")
 	case len(command) == 0 || command[0] == "":
 		return nil, refusedForm(val.Setting, whole, val.Given.raw(), `a JSON array of strings whose first element is the program, such as ["/usr/local/bin/server","--flag"]`, "it is not one")
@@ -219,14 +219,12 @@ func (c *Config) upstreamCredential(v *Values) []error {
 	emptyFile := v.emptySecretFile("upstream-credential")
 	// In the one format, named as the operator gave it: the length only, never the credential.
 	want := fmt.Sprintf("one header value of at most %d bytes on one line, without control characters or white space at either end", maxUpstreamCredential)
-	refused := func(cred, reason string) error {
-		return errorf("%s: want %s; got a value %s: %s", name, want, notShown(cred), reason)
-	}
+	refused := func(cred, reason string) error { return refusedFormAs(name, val.Setting, whole, cred, want, reason) }
 	switch cred := parseText(val); {
 	case emptyFile != nil:
 		errs = append(errs, emptyFile)
 	case cred == "":
-		errs = append(errs, errorf("%s: want %s; got nothing", name, want))
+		errs = append(errs, refused(cred, ""))
 	case len(cred) > maxUpstreamCredential:
 		errs = append(errs, refused(cred, fmt.Sprintf("it is %d bytes long", len(cred))))
 	case strings.ContainsFunc(cred, func(r rune) bool { return r != '\t' && (r < 0x20 || r == 0x7f) }):
@@ -236,7 +234,7 @@ func (c *Config) upstreamCredential(v *Values) []error {
 	default:
 		c.UpstreamCredential = cred
 	}
-	h, err := parseHeaderName(v.value("upstream-credential-header"), "X-Api-Key")
+	h, err := parseHeaderName(v.value("upstream-credential-header"))
 	if err != nil {
 		return append(errs, err)
 	}

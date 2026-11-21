@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -176,6 +177,8 @@ func parseRateLimits(val Value) (map[string]int, []error) {
 		switch _, known := out[name]; {
 		case !ok || !known:
 			errs = append(errs, refusedForm(s, at(i), item, want, "it is not endpoint=per-minute for one of the endpoints"))
+		case errors.Is(err, strconv.ErrRange):
+			errs = append(errs, refusedForm(s, at(i), item, want, "its limit is out of range"))
 		case err != nil:
 			errs = append(errs, refusedForm(s, at(i), item, want, "its limit is not a whole number"))
 		case n < minRateLimit || n > maxRateLimit:

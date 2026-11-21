@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -285,10 +284,11 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 	return vals, nil
 }
 
-// flagError is err, the flag package's refusal of args, without any value it quotes (ADR-0031 §1):
-// "bad flag syntax" quotes the whole argument, and an invalid value the value given to a flag. A
-// flag that needs an argument, or one that is not defined, is named by its name, as an unknown
-// environment variable is.
+// flagError is err, the flag package's refusal of args, without any text of the operator's
+// (ADR-0031 §1): "bad flag syntax" quotes the whole argument, an invalid value the value given to a
+// flag, and an undefined flag all its text before =, which can be a value pasted as an argument. A
+// flag that needs an argument is named, as it is one of the command's own. Any other message the flag
+// package may write is refused without its text, so a new one cannot show a value.
 func flagError(fs *flag.FlagSet, err error) error {
 	msg := err.Error()
 	if rest, ok := strings.CutPrefix(msg, "bad flag syntax: "); ok {
@@ -304,16 +304,20 @@ func flagError(fs *flag.FlagSet, err error) error {
 	if strings.HasPrefix(msg, "invalid ") {
 		return errorf("a flag was given a value it does not take (not shown)")
 	}
-	// The flag package names an undefined flag by all its text before =, which can be a value pasted as
-	// an argument: shown only when it reads as a flag's name.
-	if name, ok := strings.CutPrefix(msg, "flag provided but not defined: -"); ok && !flagName.MatchString(name) {
-		return errorf("want flags this command takes; got an undefined flag %s", notShown(name))
+	if name, ok := strings.CutPrefix(msg, "flag provided but not defined: -"); ok {
+		known := map[string]bool{}
+		fs.VisitAll(func(f *flag.Flag) { known[f.Name] = true })
+		hint := ""
+		if s := suggest(strings.TrimPrefix(name, "-"), known); s != "" { // the command's own flag, never the text given
+			hint = " (did you mean --" + s + "?)"
+		}
+		return errorf("want flags this command takes; got an undefined flag %s%s", notShown(name), hint)
 	}
-	return errorf("%v", err)
+	if strings.HasPrefix(msg, "flag needs an argument: -") {
+		return errorf("%v", err)
+	}
+	return errorf("the command line is refused (the flag package's message is not shown)")
 }
-
-// flagName is what a flag's name reads as: lower-case letters, digits and dashes.
-var flagName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // refusedFlag is the flag msg, the flag package's "invalid boolean value" or "invalid value" error,
 // names, or nil. The value comes first, quoted, so the name is read after it: a value holding

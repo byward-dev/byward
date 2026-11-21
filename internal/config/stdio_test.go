@@ -216,14 +216,12 @@ func TestInvalidStdioSettingsAreRejectedNamingTheSetting(t *testing.T) {
 		"URL and command":           {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_URL=http://u/mcp"}, "", "both set"},
 		"flag and --":               {[]string{"--upstream-command", `["/bin/x"]`, "--", "/bin/y"}, nil, "", "either after -- or with --upstream-command"},
 		"environment and --":        {[]string{"--", "/bin/y"}, []string{`BYWARD_UPSTREAM_COMMAND=["/bin/x"]`}, "", "either after -- or with --upstream-command / BYWARD_UPSTREAM_COMMAND"},
-		"nothing after --":          {[]string{"--"}, nil, "", "no command after --"},
-		"not JSON":                  {nil, []string{"BYWARD_UPSTREAM_COMMAND=/bin/x --flag"}, "", "BYWARD_UPSTREAM_COMMAND: want a JSON array"},
-		"empty array":               {nil, []string{"BYWARD_UPSTREAM_COMMAND=[]"}, "", "BYWARD_UPSTREAM_COMMAND: want a JSON array"},
-		"empty program":             {nil, []string{`BYWARD_UPSTREAM_COMMAND=[""]`}, "", "BYWARD_UPSTREAM_COMMAND: want a JSON array"},
+		"not JSON":                  {nil, []string{"BYWARD_UPSTREAM_COMMAND=/bin/x --flag"}, "", "BYWARD_UPSTREAM_COMMAND: want a JSON array of strings whose first element is the program, such as [\"/usr/local/bin/server\",\"--flag\"]; got a value (13 characters, not shown): it is not one"},
+		"empty array":               {nil, []string{"BYWARD_UPSTREAM_COMMAND=[]"}, "", "BYWARD_UPSTREAM_COMMAND: want a JSON array of strings whose first element is the program, such as [\"/usr/local/bin/server\",\"--flag\"]; got a value (2 characters, not shown): it is not one"},
+		"empty program":             {nil, []string{`BYWARD_UPSTREAM_COMMAND=[""]`}, "", "BYWARD_UPSTREAM_COMMAND: want a JSON array of strings whose first element is the program, such as [\"/usr/local/bin/server\",\"--flag\"]; got a value (4 characters, not shown): it is not one"},
 		"env file line without =":   {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_ENV_FILE=/run/secrets/upstream-env"}, "A=1\nsecret-without-equals", "BYWARD_UPSTREAM_ENV_FILE: want KEY=VALUE lines, each key once; got line 2: it is not KEY=VALUE"},
 		"env duplicate":             {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_ENV_FILE=/run/secrets/upstream-env"}, "A=1\nA=2", "got line 2: its key is set on an earlier line too"},
 		"inline env":                {[]string{"--", "/bin/x"}, []string{"BYWARD_UPSTREAM_ENV=A=1"}, "", "secrets must come from a file"},
-		"an empty program after --": {[]string{"--", "", "x"}, nil, "", "the command after --: want the program first; got an empty program"},
 		"cap zero":                  {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_MAX_PROCESSES=0"}, "", "BYWARD_STDIO_MAX_PROCESSES: want a whole number from 1 to 10000; got 0: it is out of range"},
 		"cap over, shown as parsed": {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_MAX_PROCESSES=010001"}, "", "BYWARD_STDIO_MAX_PROCESSES: want a whole number from 1 to 10000; got 10001: it is out of range"},
 		"cap not a number":          {[]string{"--", "/bin/x"}, []string{"BYWARD_STDIO_MAX_PROCESSES=many"}, "", "BYWARD_STDIO_MAX_PROCESSES: want a whole number from 1 to 10000; got a value (4 characters, not shown): it is not a whole number"},
@@ -246,6 +244,32 @@ func TestTheProcessCapsTakeTheirBounds(t *testing.T) {
 	c, _, err := Load([]string{"--", "/bin/x"}, stdioBase("BYWARD_STDIO_MAX_PROCESSES=10000", "BYWARD_STDIO_MAX_PROCESSES_PER_USER=1"), baseFiles)
 	if err != nil || c.StdioMaxProcesses != 10000 || c.StdioMaxPerUser != 1 {
 		t.Fatalf("got %v, %v; want the caps 10000 and 1", c, err)
+	}
+}
+
+// A command after -- that is missing or has no program is refused in the command line's own terms: no
+// setting was given, and no JSON typed.
+func TestACommandAfterDoubleDashWithoutAProgramIsRefused(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args []string
+		want string
+	}{
+		"nothing after --":          {[]string{"--"}, "no command after --"},
+		"an empty program after --": {[]string{"--", "", "x"}, "the command after --: want the program first; got an empty program"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := Load(tc.args, stdioBase(), baseFiles); !isConfigError(err) || err.Error() != tc.want {
+				t.Fatalf("got %v, want the config error %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// A process cap too large for a number is refused as out of range, by its length.
+func TestAProcessCapTooLargeForANumberIsOutOfRange(t *testing.T) {
+	const want = "BYWARD_STDIO_MAX_PROCESSES: want a whole number from 1 to 10000; got a value (20 characters, not shown): it is out of range"
+	if _, _, err := Load([]string{"--", "/bin/x"}, stdioBase("BYWARD_STDIO_MAX_PROCESSES=99999999999999999999"), baseFiles); !isConfigError(err) || !strings.Contains(err.Error(), want) {
+		t.Fatalf("got %v, want %q", err, want)
 	}
 }
 

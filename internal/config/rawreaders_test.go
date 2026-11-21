@@ -21,10 +21,10 @@ var rawReaders = []string{
 // in a function named parse… or Parse…, or one listed in rawReaders; it is never taken as a value or
 // a method expression, and no file but opaque.go reaches the text behind an Opaque (its field p). raw
 // is unexported, so no other package reads the text at all. A free-text setting's parser (parseText)
-// hands the text to its caller, so for such a setting only the leak test shows no refusal repeats it. The scan is syntactic, so it cannot tell
-// which setting a parser reads: a function named parse… that reads another setting's text passes,
-// and review catches it; TestNoCommandShowsAHiddenOrARefusedValue (cmd/byward) checks that no refusal
-// shows it.
+// hands the text to its caller, so for such a setting TestNoRefusalShowsTheValueGiven, and the leak
+// test for the settings it cannot reach, show no refusal repeats it. The scan is syntactic, so it
+// cannot tell which setting a parser reads: a function named parse… that reads another setting's
+// text passes, and review catches it.
 func TestOnlyParsersReadARawValue(t *testing.T) {
 	files, err := filepath.Glob("*.go")
 	if err != nil {

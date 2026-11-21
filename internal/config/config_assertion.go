@@ -13,7 +13,7 @@ var AssertionClaimNames = []string{"roles", "groups", "email", "name"}
 func (c *Config) assertion(v *Values) []error {
 	var errs []error
 	var err error
-	if c.AssertionHeader, err = parseHeaderName(v.value("assertion-header"), "X-Byward-Identity"); err != nil {
+	if c.AssertionHeader, err = parseHeaderName(v.value("assertion-header")); err != nil {
 		errs = append(errs, err)
 	}
 	ihEnv := Setting{Name: "identity-headers"}.Env()
@@ -46,6 +46,8 @@ func parseAssertionClaims(val Value) ([]string, []error) {
 	var errs []error
 	for i, name := range list {
 		switch name = strings.ToLower(name); {
+		case name == "none" && len(list) == 1: // none alone, but not as written: in another case, or with a ","
+			errs = append(errs, refusedMeaning(val.Setting, at(i), "none", want, "give none in lower case, with nothing beside it"))
 		case name == "none": // a fixed word, so shown
 			errs = append(errs, refusedMeaning(val.Setting, at(i), "none", want, "none stands alone: list claims, or give only none"))
 		case !slices.Contains(AssertionClaimNames, name):

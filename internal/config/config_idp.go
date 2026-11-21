@@ -32,7 +32,7 @@ func (c *Config) idp(v *Values) []error {
 	if c.IdP, err = parseWord(v.value("idp"), append([]string{"entra", "oidc"}, OIDCPresets...)...); err != nil {
 		return []error{err}
 	}
-	oidc := c.IdP != "entra"
+	oidc := c.IdP == "oidc" || slices.Contains(OIDCPresets, c.IdP)
 	other := "oidc-" // the settings family that must stay unset
 	if oidc {
 		other = "entra-"

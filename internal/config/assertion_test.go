@@ -47,6 +47,8 @@ func TestAssertionSettingsRefuseWhatCannotWork(t *testing.T) {
 		"BYWARD_ASSERTION_HEADER=X-Forwarded-User": "got a header starting X-Forwarded-: the proxy, the transport or MCP relies on it",
 		"BYWARD_ASSERTION_HEADER=Sec-Fetch-Site":   "got a header starting Sec-: the proxy, the transport or MCP relies on it",
 		"BYWARD_ASSERTION_CLAIMS=roles,phone":      "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got entry 2 of 2 (5 characters, not shown): it is not one of them",
+		"BYWARD_ASSERTION_CLAIMS=NONE":             "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got entry 1 of 1, none: give none in lower case, with nothing beside it",
+		"BYWARD_ASSERTION_CLAIMS=none,":            "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got entry 1 of 1, none: give none in lower case, with nothing beside it",
 		"BYWARD_ASSERTION_CLAIMS=roles,none":       "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got entry 2 of 2, none: none stands alone: list claims, or give only none",
 	} {
 		t.Run(env, func(t *testing.T) {

@@ -22,6 +22,7 @@ func (c *Config) appTokens(v *Values) []error {
 			return []error{errorf("%s set while %s=off: they configure app-only callers; set %s=entra, or remove them", strings.Join(set, ", "), env("app-tokens"), env("app-tokens"))}
 		}
 		return nil
+	case "entra":
 	}
 	var errs []error
 	if c.IdP != "" && c.IdP != "entra" { // a refused IdP has its own error

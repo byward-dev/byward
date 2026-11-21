@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -10,9 +11,10 @@ import (
 	"unicode/utf8"
 )
 
-// The parsers of the settings that hold a word, a number, a duration or free text (ADR-0031 §1): each
-// takes the setting's Value and refuses through refusedForm or refusedMeaning, so no refusal shows a
-// value as given.
+// The shared parsers (ADR-0031 §1): of a word, a boolean, a whole number, a duration, free text, page
+// wording and a comma-separated list, and of a scope token, which two settings take. Each takes the
+// setting's Value and refuses through refusedForm or refusedMeaning, so no refusal shows a value as
+// given; a setting's own parser sits in its section's file.
 
 // parseText is a free-text setting's value as given: a name, a path or a secret config takes as it
 // is. A check a caller makes on it refuses through refusedForm, never by quoting it.
@@ -64,6 +66,8 @@ func parseWholeNumber(val Value, lo, hi int) (int, error) {
 	want := fmt.Sprintf("a whole number from %d to %d", lo, hi)
 	n, err := strconv.Atoi(raw)
 	switch {
+	case errors.Is(err, strconv.ErrRange):
+		return 0, refusedForm(val.Setting, whole, raw, want, "it is out of range")
 	case err != nil:
 		return 0, refusedForm(val.Setting, whole, raw, want, "it is not a whole number")
 	case n < lo || n > hi:
@@ -120,12 +124,6 @@ func parseEntries(val Value) ([]string, func(i int) entry, error) {
 		return nil, nil, listsNothing(val.Setting)
 	}
 	return list, func(i int) entry { return entry{i, len(list)} }, nil
-}
-
-// listsNothing refuses a list setting that is set but names no entry, such as ",": it would read as
-// unset, and a gate list would silently open the gate.
-func listsNothing(s Setting) error {
-	return errorf("%s: want at least one entry; got a list of none", s.Env())
 }
 
 func splitList(s string) []string {
