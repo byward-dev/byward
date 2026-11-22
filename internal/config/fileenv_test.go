@@ -41,34 +41,48 @@ func TestAFileVariableOfANonSecretOrUnknownSettingPanics(t *testing.T) {
 	}
 }
 
-// The only "_FILE" suffix in the production code, alone or in a format ("%s_FILE"), is FileEnv's: every
-// other file variable is asked of the registry, never built by hand (#506).
-func TestOnlyFileEnvBuildsAFileVariable(t *testing.T) {
+// A secret's file variable and file flag are asked of the registry, never built by hand (#506): the only
+// string literals in the production code that build one (the "_FILE" or "-file" suffix, alone, leading,
+// or after a format verb) are FileEnv's and FileFlag's, and flagHint's for a path setting whose own
+// name ends in -file (--tls-cert for --tls-cert-file).
+func TestOnlyFileEnvAndFileFlagBuildASecretsFileName(t *testing.T) {
 	var found []string
 	eachProductionGoFile(t, func(rel string, _ *token.FileSet, f *ast.File) {
-		ast.Inspect(f, func(n ast.Node) bool {
-			if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING && buildsAFileVariable(lit.Value) {
-				found = append(found, rel+": "+lit.Value)
+		for _, d := range f.Decls {
+			where := rel
+			if fn, ok := d.(*ast.FuncDecl); ok {
+				where += " " + fn.Name.Name
 			}
-			return true
-		})
+			ast.Inspect(d, func(n ast.Node) bool {
+				if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING && buildsAFileName(lit.Value) {
+					found = append(found, where+": "+lit.Value)
+				}
+				return true
+			})
+		}
 	})
-	if want := []string{`internal/config/registry.go: "_FILE"`}; !slices.Equal(found, want) {
-		t.Fatalf("string literals building a file variable = %q, want only FileEnv's %q", found, want)
+	want := []string{
+		`internal/config/registry.go FileEnv: "_FILE"`,
+		`internal/config/registry.go FileFlag: "-file"`,
+		`internal/config/registry.go flagHint: "-file"`,
+		`internal/config/registry.go flagHint: "-file?)"`,
+	}
+	if !slices.Equal(found, want) {
+		t.Fatalf("string literals building a file variable or flag = %q, want only %q", found, want)
 	}
 }
 
-// fileFormat is a format verb, any flags and index included ("%s", "%[1]q"), followed by _FILE.
-var fileFormat = regexp.MustCompile(`%[^%a-zA-Z]*[a-zA-Z]_FILE`)
+// fileFormat is a format verb, any flags and index included ("%s", "%[1]q"), followed by _FILE or -file.
+var fileFormat = regexp.MustCompile(`%[^%a-zA-Z]*[a-zA-Z](_FILE|-file)`)
 
-// buildsAFileVariable reports whether the string literal lit, as written (quoted or raw), is the _FILE
-// suffix, starts with it, or formats it after a verb.
-func buildsAFileVariable(lit string) bool {
+// buildsAFileName reports whether the string literal lit, as written (quoted or raw), is the _FILE or
+// -file suffix, starts with one, or formats one after a verb.
+func buildsAFileName(lit string) bool {
 	v, err := strconv.Unquote(lit)
 	if err != nil {
 		return false
 	}
-	return strings.HasPrefix(v, "_FILE") || fileFormat.MatchString(v)
+	return strings.HasPrefix(v, "_FILE") || strings.HasPrefix(v, "-file") || fileFormat.MatchString(v)
 }
 
 // --help names each secret by its file flag and file variable, never by its own variable, which
@@ -96,4 +110,18 @@ func TestInlineSecretsAreRefusedWithTheFirstOnesFileVariable(t *testing.T) {
 	if _, err := checkInlineSecrets(v, false); !isConfigError(err) || err.Error() != want {
 		t.Fatalf("got %v, want the configuration error %q", err, want)
 	}
+}
+
+// A secret's file flag is its name with -file; a setting that is not a secret has none, and asking
+// panics (#506).
+func TestASecretsFileFlagIsItsNameWithFile(t *testing.T) {
+	if got := lookup("oidc-client-key").FileFlag(); got != "oidc-client-key-file" {
+		t.Errorf("FileFlag = %q, want oidc-client-key-file", got)
+	}
+	defer func() {
+		if r, want := recover(), "config: listen is not a secret, so it has no -file flag"; r != want {
+			t.Fatalf("recovered %v, want %q", r, want)
+		}
+	}()
+	lookup("listen").FileFlag()
 }

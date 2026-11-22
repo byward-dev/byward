@@ -79,6 +79,16 @@ func (s Setting) FileEnv() string {
 	return s.Env() + "_FILE"
 }
 
+// FileFlag is a secret's file flag, `<name>-file` (given as `--<name>-file`): the flag that names the
+// file its secret is read from, as FileEnv's variable does (#506). It panics for a setting that is not a
+// secret, which has none.
+func (s Setting) FileFlag() string {
+	if !s.Secret() {
+		panic("config: " + s.Name + " is not a secret, so it has no -file flag")
+	}
+	return s.Name + "-file"
+}
+
 // SecretFileEnv is the file variable of the secret setting called name, for code outside this package
 // that names it in a message. It panics when the registry has no such setting, or when it is not a
 // secret.
@@ -258,7 +268,7 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 			continue
 		}
 		if s.Secret() {
-			fileFlagVals[s.Name] = fs.String(s.Name+"-file", "", "file holding "+s.Help)
+			fileFlagVals[s.Name] = fs.String(s.FileFlag(), "", "file holding "+s.Help)
 			continue
 		}
 		flagVals[s.Name] = fs.String(s.Name, "", s.Help)
@@ -275,9 +285,11 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 		if errors.Is(err, flag.ErrHelp) {
 			return nil, err
 		}
-		secrets := map[string]bool{}
+		secrets := map[string]Setting{}
 		for _, s := range reg {
-			secrets[s.Name] = s.Secret()
+			if s.Secret() {
+				secrets[s.Name] = s
+			}
 		}
 		return nil, flagError(fs, err, secrets)
 	}
@@ -302,8 +314,8 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 	for _, s := range reg {
 		v := Value{Setting: s, Given: NewOpaque(s.Default), Source: SourceDefault}
 		switch {
-		case s.Secret() && set[s.Name+"-file"]:
-			from := "--" + s.Name + "-file"
+		case s.Secret() && set[s.FileFlag()]:
+			from := "--" + s.FileFlag()
 			if env[s.Env()] != "" { // set to nothing is as if unset (#428)
 				return nil, bothSet(s.Env(), from)
 			}
@@ -354,7 +366,7 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 // flag, and an undefined flag all its text before =, which can be a value pasted as an argument. A
 // flag that needs an argument is named, as it is one of the command's own. Any other message the flag
 // package may write is refused without its text, so a new one cannot show a value.
-func flagError(fs *flag.FlagSet, err error, secrets map[string]bool) error {
+func flagError(fs *flag.FlagSet, err error, secrets map[string]Setting) error {
 	msg := err.Error()
 	if rest, ok := strings.CutPrefix(msg, "bad flag syntax: "); ok {
 		return errorf("want flags as --name=value; got an argument with a bad flag syntax %s", notShown(rest))
@@ -376,13 +388,14 @@ func flagError(fs *flag.FlagSet, err error, secrets map[string]bool) error {
 }
 
 // flagHint suggests the command's own flag an undefined one most likely meant, never the text given:
-// the name's -file flag, with the reason when the name is a secret's (secrets), else the nearest name,
-// only when it is near enough that the operator, who is not shown the name, can trust it.
-func flagHint(fs *flag.FlagSet, name string, secrets map[string]bool) string {
-	switch {
-	case fs.Lookup(name+"-file") != nil && secrets[name]:
-		return " (secrets come from a file: did you mean --" + name + "-file?)"
-	case fs.Lookup(name+"-file") != nil:
+// a secret's file flag, with the reason, when the name is the secret's own (secrets, by name); the path
+// setting the name lacks only -file of; else the nearest name, only when it is near enough that the
+// operator, who is not shown the name, can trust it.
+func flagHint(fs *flag.FlagSet, name string, secrets map[string]Setting) string {
+	if s, ok := secrets[name]; ok {
+		return " (secrets come from a file: did you mean --" + s.FileFlag() + "?)"
+	}
+	if fs.Lookup(name+"-file") != nil { // a path setting's own name ends in -file, such as tls-cert-file
 		return " (did you mean --" + name + "-file?)"
 	}
 	known := map[string]bool{}

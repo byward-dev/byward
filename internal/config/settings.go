@@ -139,7 +139,7 @@ func Usage() string {
 	for _, s := range registry {
 		flagName, env := "--"+s.Name, s.GivenEnv()
 		if s.Secret() {
-			flagName += "-file"
+			flagName = "--" + s.FileFlag()
 		}
 		fmt.Fprintf(&b, "  %s / %s", flagName, env)
 		if s.Default != "" {
@@ -169,7 +169,7 @@ func reference() string {
 			}
 			flagName, env := "--"+s.Name, s.GivenEnv()
 			if s.Secret() {
-				flagName += "-file"
+				flagName = "--" + s.FileFlag()
 			}
 			def := s.Default
 			if def == "" {
