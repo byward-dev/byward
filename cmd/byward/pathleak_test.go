@@ -317,19 +317,22 @@ func TestEveryPathVariableHasALeakScenario(t *testing.T) {
 			if !slices.Contains(named, tc.breaks) && !slices.Contains(brokenThroughDefaults, tc.breaks) {
 				t.Fatalf("it breaks %q but what it says, %q, is not about it: says must start with it as the setting at fault, before the first \": \"", tc.breaks, tc.says)
 			}
-			// Another file in the canary directory would fail under the leak test's perturbations too and could
-			// stand in for a refusal that is not about breaks' file, even the other half of a pair the line names
-			// (#617): only breaks' file is there.
-			for _, kv := range env {
-				if name, v, _ := strings.Cut(kv, "="); v != "" && inCanary(dir, v) && name != tc.breaks {
-					t.Fatalf("it also sets %s to a path in the canary directory, %q: put it outside, so that only %s's file is perturbed", name, v, tc.breaks)
-				}
-			}
 			// Every path it sets is named with the canary, so a line that shows any of them is a leak the leak
-			// test sees: a companion that works sits beside dir (workingBeside).
+			// test sees. Any other than breaks is a companion that works: a regular file beside dir, not in it
+			// or reached through it (workingBeside). A file in dir, or a link into it, dangling or not, would
+			// fail under the leak test's perturbations too and could stand in for a refusal that is not about
+			// breaks' file, even as the other half of a pair the line names (#617).
 			for _, kv := range env {
-				if name, v, _ := strings.Cut(kv, "="); v != "" && !strings.Contains(v, pathCanary) {
+				name, v, _ := strings.Cut(kv, "=")
+				switch {
+				case v == "":
+				case !strings.Contains(v, pathCanary):
 					t.Fatalf("it sets %s to %q, not named with the canary: a line that shows it would be a leak the leak test misses", name, v)
+				case name == tc.breaks:
+				case inCanary(dir, v):
+					t.Fatalf("it also sets %s to a path in the canary directory, %q: put it beside, so that only %s's file is perturbed", name, v, tc.breaks)
+				case !regularBeside(dir, v):
+					t.Fatalf("it sets %s to %q, not a regular file beside the canary directory (workingBeside): a link into it would be perturbed too", name, v)
 				}
 			}
 			broken[tc.breaks] = true
@@ -347,6 +350,13 @@ func TestEveryPathVariableHasALeakScenario(t *testing.T) {
 // path is a leak the leak test sees too.
 func workingBeside(dir, name string) string {
 	return filepath.Join(filepath.Dir(dir), pathCanary+"-"+name)
+}
+
+// regularBeside reports whether path is a regular file, not a link, directly in dir's parent: out of
+// reach of the leak test's perturbations of dir.
+func regularBeside(dir, path string) bool {
+	fi, err := os.Lstat(path)
+	return err == nil && fi.Mode().IsRegular() && filepath.Dir(filepath.Clean(path)) == filepath.Dir(dir)
 }
 
 // inCanary reports whether path is dir or under it: spelt under it (cleaned), or resolved into it
@@ -433,6 +443,7 @@ func TestInCanaryFindsAPathUnderTheCanaryDirectoryHoweverItIsReached(t *testing.
 		{dir, true},
 		{dir + "/", true},
 		{filepath.Join(dir, "missing", "deep"), true},
+		{filepath.Join(parent, "to-dir", "missing", "deep"), true}, // a missing tail through a symlink: resolved as far as it exists
 		{parent + "/./" + pathCanary + "/state", true},
 		{filepath.Join(parent, "to-dir"), true},
 		{filepath.Join(parent, "to-dir", "state"), true},
