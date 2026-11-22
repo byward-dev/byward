@@ -2,14 +2,10 @@ package config
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"io/fs"
 	"maps"
-	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 	"testing"
 )
 
@@ -49,31 +45,8 @@ var skippedDirs = []string{"testdata", "vendor", "node_modules", "bin", "dist", 
 // instead, as OIDCLoopbackHTTP is. The scan is syntactic, so it also catches Config.Dev reached
 // through a field (w.cfg.Dev) in a file that does not import this package.
 func TestOnlyKnownCodeReadsDevelopmentMode(t *testing.T) {
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
 	found, named, decided := map[string]int{}, map[string]int{}, map[string]int{}
-	fset := token.NewFileSet()
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, _ := filepath.Rel(root, path)
-		rel = filepath.ToSlash(rel)
-		if d.IsDir() {
-			if path != root && (strings.HasPrefix(d.Name(), ".") || slices.Contains(skippedDirs, d.Name())) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
-		if err != nil {
-			return err
-		}
+	eachProductionGoFile(t, func(rel string, fset *token.FileSet, f *ast.File) {
 		ast.Inspect(f, func(n ast.Node) bool {
 			if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "Dev" {
 				if _, known := devReaders[rel]; !known {
@@ -92,11 +65,7 @@ func TestOnlyKnownCodeReadsDevelopmentMode(t *testing.T) {
 			}
 			return true
 		})
-		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	// Only config names the setting: the registry entry, and reading it (Values.boolean).
 	checkCounts(t, "names the dev setting", named, map[string]int{"internal/config/settings.go": 1, "internal/config/config.go": 1})
 	checkCounts(t, "selects OIDCLoopbackHTTP, --dev under another name,", decided, decidedReaders)

@@ -67,10 +67,7 @@ func (c *Config) requiredForIdP(v *Values, names ...string) []error {
 	var errs []error
 	for _, s := range names {
 		if v.empty(s) {
-			env := v.byKey[s].Setting.Env()
-			if v.byKey[s].Setting.Secret() {
-				env = v.byKey[s].Setting.FileEnv()
-			}
+			env := v.byKey[s].Setting.GivenEnv()
 			errs = append(errs, errorf("%s is required with BYWARD_IDP=%s (or set BYWARD_INSECURE_NO_AUTH to try the proxy without sign-in)", env, c.IdP))
 		}
 	}

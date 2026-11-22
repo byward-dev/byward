@@ -2,11 +2,8 @@ package config
 
 import (
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"io/fs"
 	"maps"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -110,10 +107,6 @@ func TestPathVariablesAreThePathAndSecretFileVariables(t *testing.T) {
 // every path; a setting with neither, opened only that way, is not seen. It reads string fields only.
 func scanFileOpeners(t *testing.T) (opened map[string]string, matched map[string]bool) {
 	t.Helper()
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
 	stringFields := map[string]bool{}
 	ct := reflect.TypeFor[Config]()
 	for i := range ct.NumField() {
@@ -122,25 +115,9 @@ func scanFileOpeners(t *testing.T) (opened map[string]string, matched map[string
 		}
 	}
 	opened, matched = map[string]string{}, map[string]bool{}
-	fset := token.NewFileSet()
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, _ := filepath.Rel(root, path)
-		rel = filepath.ToSlash(rel)
-		if d.IsDir() {
-			if path != root && (strings.HasPrefix(d.Name(), ".") || slices.Contains(skippedDirs, d.Name())) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || strings.HasPrefix(rel, "internal/config/") {
-			return nil
-		}
-		f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
-		if err != nil {
-			return err
+	eachProductionGoFile(t, func(rel string, fset *token.FileSet, f *ast.File) {
+		if strings.HasPrefix(rel, "internal/config/") {
+			return
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
 			var args []ast.Expr
@@ -164,11 +141,7 @@ func scanFileOpeners(t *testing.T) (opened map[string]string, matched map[string
 			}
 			return true
 		})
-		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	return opened, matched
 }
 

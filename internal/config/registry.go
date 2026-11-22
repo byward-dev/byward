@@ -69,9 +69,9 @@ func (s Setting) Env() string {
 	return envPrefix + strings.ToUpper(strings.ReplaceAll(s.Name, "-", "_"))
 }
 
-// FileEnv is a secret's file variable, `<ENV>_FILE`, the one way its secret is given (#506). It panics
-// for a setting that is not a secret, which has none, so a name built for the wrong setting fails the
-// first test that reaches it.
+// FileEnv is a secret's file variable, `<ENV>_FILE`: the environment variable that names the file its
+// secret is read from, as the flag `--<name>-file` does (#506). It panics for a setting that is not a
+// secret, which has none, so a name built for the wrong setting fails the first test that reaches it.
 func (s Setting) FileEnv() string {
 	if !s.Secret() {
 		panic("config: " + s.Name + " is not a secret, so it has no _FILE variable")
@@ -79,10 +79,19 @@ func (s Setting) FileEnv() string {
 	return s.Env() + "_FILE"
 }
 
-// SecretFileEnv is the file variable of the registry's secret setting name, for code outside this
-// package that names it in a message. It panics for a name the registry does not hold, or one that is
-// not a secret.
+// SecretFileEnv is the file variable of the secret setting called name, for code outside this package
+// that names it in a message. It panics when the registry has no such setting, or when it is not a
+// secret.
 func SecretFileEnv(name string) string { return lookup(name).FileEnv() }
+
+// GivenEnv is the environment variable an operator sets for the setting: its file variable for a
+// secret, its own for any other.
+func (s Setting) GivenEnv() string {
+	if s.Secret() {
+		return s.FileEnv()
+	}
+	return s.Env()
+}
 
 // Source tells where a value came from.
 type Source string

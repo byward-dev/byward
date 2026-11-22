@@ -31,7 +31,7 @@ func TestEveryBYWARDNameInTheCodeAndDocsIsASetting(t *testing.T) {
 		known[s.Env()] = true
 		byName[s.Name] = s
 		if s.Secret() {
-			known[s.Env()+"_FILE"] = true
+			known[s.FileEnv()] = true
 		}
 	}
 	// Not settings, but fixed names: identity and the token socket the proxy sets for stdio

@@ -28,10 +28,7 @@ func (q Quickstart) EnvFile() string {
 			values[name] = q.CertificateFile
 		}
 		s := lookup(name)
-		env := s.Env()
-		if s.Secret() {
-			env = s.FileEnv()
-		}
+		env := s.GivenEnv()
 		if values[name] == "" {
 			fmt.Fprintf(&b, "# %s: %s\n", env, s.Help)
 		}
