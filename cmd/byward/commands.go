@@ -109,7 +109,7 @@ func revokeUser(ctx context.Context, args, environ []string, stdout, stderr io.W
 	user, where, err := server.RevokeUser(ctx, cfg, logging.New(stderr, cfg.LogFormat), key)
 	switch {
 	case errors.Is(err, server.ErrNotAUserKey):
-		_, _ = fmt.Fprintf(stderr, "byward: revoke-user %q: %v\n", key, err)
+		_, _ = fmt.Fprintf(stderr, "byward: revoke-user %s: %v\n", logging.NotShown(key), err)
 		return exitConfig
 	case errors.As(err, new(server.ConfigError)):
 		return reportConfigError(stderr, err)

@@ -14,6 +14,8 @@ import (
 	"testing"
 
 	"github.com/byward-dev/byward/internal/config"
+	"github.com/byward-dev/byward/internal/logging"
+	"github.com/byward-dev/byward/internal/server"
 	"github.com/byward-dev/byward/internal/testutil/pgtest"
 )
 
@@ -393,6 +395,25 @@ func TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// revoke-user shows no key it was given: a token pasted where the user key belongs is refused, and
+// named by its length, as init names a value it refuses (#594, ADR-0031 §1). Every form of a secret,
+// and a token's three segments, is given as the key; each must reach the refusal and show nothing.
+func TestRevokeUserShowsNoKeyItWasGiven(t *testing.T) {
+	keys := append(slices.Clone(secretForms), struct{ name, value string }{"JWT", "eyJhbGciOiJSUzI1NiJ9." + canary + ".c2lnbmF0dXJl"})
+	for _, key := range keys {
+		t.Run(key.name, func(t *testing.T) {
+			code, stdout, stderr := runWith([]string{"revoke-user", key.value}, append(authEnv(t), serveEnv("https://m.example/mcp", "127.0.0.1:0")...)...)
+			want := "byward: revoke-user " + logging.NotShown(key.value) + ": " + server.ErrNotAUserKey.Error() + "\n"
+			if code != exitConfig || stdout != "" || stderr != want {
+				t.Fatalf("code %d (want %d), stdout %q, stderr %q; want only %q", code, exitConfig, stdout, stderr, want)
+			}
+			if shows(stdout + stderr) {
+				t.Errorf("the key given is shown: stdout %q, stderr %q", stdout, stderr)
+			}
+		})
 	}
 }
 
