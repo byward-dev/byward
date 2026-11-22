@@ -303,8 +303,8 @@ func TestEveryPathVariableHasALeakScenario(t *testing.T) {
 			if tc.breaks == "" {
 				t.Fatal("it declares no variable it breaks: set breaks")
 			}
-			if !inCanary(dir, value) {
-				t.Fatalf("it breaks %q but does not set it to a path in the canary directory, where the leak test looks: %q", tc.breaks, value)
+			if !inCanary(dir, value) || !strings.Contains(value, pathCanary) {
+				t.Fatalf("it breaks %q but does not set it to a path in the canary directory, spelt with it (the leak test looks for %q in what is shown): %q", tc.breaks, pathCanary, value)
 			}
 			if len(tc.says) == 0 {
 				t.Fatal("it says nothing")
@@ -325,6 +325,13 @@ func TestEveryPathVariableHasALeakScenario(t *testing.T) {
 					t.Fatalf("it also sets %s to a path in the canary directory, %q: put it outside, so that only %s's file is perturbed", name, v, tc.breaks)
 				}
 			}
+			// Every path it sets is named with the canary, so a line that shows any of them is a leak the leak
+			// test sees: a companion that works sits beside dir (workingBeside).
+			for _, kv := range env {
+				if name, v, _ := strings.Cut(kv, "="); v != "" && !strings.Contains(v, pathCanary) {
+					t.Fatalf("it sets %s to %q, not named with the canary: a line that shows it would be a leak the leak test misses", name, v)
+				}
+			}
 			broken[tc.breaks] = true
 		})
 	}
@@ -342,23 +349,23 @@ func workingBeside(dir, name string) string {
 	return filepath.Join(filepath.Dir(dir), pathCanary+"-"+name)
 }
 
-// inCanary reports whether path is dir or under it, however it is spelt: cleaned, and through any
-// symlink on the way (resolved as far as path exists).
+// inCanary reports whether path is dir or under it: spelt under it (cleaned), or resolved into it
+// through any symlink on the way, as far as path exists. Both count, for the leak test's perturbations
+// of dir reach a path that goes through it either way.
 func inCanary(dir, path string) bool {
+	under := func(d, p string) bool { return p == d || strings.HasPrefix(p, d+string(filepath.Separator)) }
 	resolve := func(p string) string {
-		p = filepath.Clean(p)
-		for q := p; ; q = filepath.Dir(q) {
+		for q := p; ; q = filepath.Dir(q) { // raw first: EvalSymlinks takes ".." after a symlink as the kernel does
 			if r, err := filepath.EvalSymlinks(q); err == nil {
-				rest, _ := filepath.Rel(q, p)
+				rest, _ := filepath.Rel(filepath.Clean(q), filepath.Clean(p))
 				return filepath.Join(r, rest)
 			}
 			if q == filepath.Dir(q) {
-				return p
+				return filepath.Clean(p)
 			}
 		}
 	}
-	d, p := resolve(dir), resolve(path)
-	return p == d || strings.HasPrefix(p, d+string(filepath.Separator))
+	return under(filepath.Clean(dir), filepath.Clean(path)) || under(resolve(dir), resolve(path))
 }
 
 // containsAll reports whether line holds every one of parts.
@@ -400,4 +407,44 @@ func writeFile(t *testing.T, path, content string, mode os.FileMode) string {
 	}
 	chmod(t, path, mode) // WriteFile's mode passes through the umask
 	return path
+}
+
+// inCanary counts a path as in the canary directory when it is spelt under it or resolves into it,
+// and not when it only shares the directory's name as a prefix (#617).
+func TestInCanaryFindsAPathUnderTheCanaryDirectoryHoweverItIsReached(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, pathCanary)
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(os.MkdirAll(filepath.Join(dir, "sub"), 0o700))
+	writeFile(t, filepath.Join(dir, "state"), "", 0o600)
+	outside := writeFile(t, filepath.Join(parent, "outside"), "", 0o600)
+	must(os.Symlink(dir, filepath.Join(parent, "to-dir")))
+	must(os.Symlink(outside, filepath.Join(dir, "to-outside")))
+	must(os.Symlink(filepath.Join(dir, "sub"), filepath.Join(parent, "to-sub")))
+	for _, tc := range []struct {
+		path string
+		want bool
+	}{
+		{dir, true},
+		{dir + "/", true},
+		{filepath.Join(dir, "missing", "deep"), true},
+		{parent + "/./" + pathCanary + "/state", true},
+		{filepath.Join(parent, "to-dir"), true},
+		{filepath.Join(parent, "to-dir", "state"), true},
+		{filepath.Join(dir, "to-outside"), true},              // spelt under dir: perturbing dir reaches it
+		{filepath.Join(parent, "to-sub") + "/../state", true}, // ".." taken after the symlink, inside dir
+		{workingBeside(dir, "tls.key"), false},
+		{dir + "-gone", false},
+		{outside, false},
+		{"", false},
+	} {
+		if got := inCanary(dir, tc.path); got != tc.want {
+			t.Errorf("inCanary(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
 }
