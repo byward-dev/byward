@@ -42,8 +42,17 @@ type pathLeakScenario struct {
 // pathLeakScenarios are the leak test's scenarios; every path variable has at least one that breaks it
 // (TestEveryPathVariableHasALeakScenario).
 func pathLeakScenarios() []pathLeakScenario {
-	tlsPair := func(t *testing.T, dir string, b testcert.Bundle) []string {
-		cert, key := b.Write(t, dir)
+	// tlsPair writes the pair's file that breaks into the canary directory dir, and the other, which
+	// works, beside it: the leak test's perturbations of dir then reach only the broken half (#617).
+	tlsPair := func(t *testing.T, dir, breaks string, b testcert.Bundle) []string {
+		certDir, keyDir := filepath.Dir(dir), filepath.Dir(dir)
+		if breaks == "BYWARD_TLS_CERT_FILE" {
+			certDir = dir
+		} else {
+			keyDir = dir
+		}
+		cert := writeFile(t, filepath.Join(certDir, "tls.crt"), string(b.Cert), 0o600)
+		key := writeFile(t, filepath.Join(keyDir, "tls.key"), string(b.Key), 0o600)
 		return []string{"BYWARD_TLS_CERT_FILE=" + cert, "BYWARD_TLS_KEY_FILE=" + key}
 	}
 	bundle := func(t *testing.T) testcert.Bundle {
@@ -99,21 +108,21 @@ func pathLeakScenarios() []pathLeakScenario {
 			return []string{"BYWARD_ENTRA_CLIENT_SECRET_FILE=" + writeFile(t, filepath.Join(dir, "secret"), entraSecret, 0o644)}
 		}, nil},
 		{"a missing TLS certificate file", "BYWARD_TLS_CERT_FILE", []string{"BYWARD_TLS_CERT_FILE / BYWARD_TLS_KEY_FILE: the certificate file: no such file or directory"}, func(t *testing.T, dir string) []string {
-			_, key := bundle(t).Write(t, dir)
+			key := writeFile(t, filepath.Join(filepath.Dir(dir), "tls.key"), string(bundle(t).Key), 0o600) // works, beside the canary
 			return []string{"BYWARD_TLS_CERT_FILE=" + filepath.Join(dir, "missing.crt"), "BYWARD_TLS_KEY_FILE=" + key}
 		}, nil},
 		{"a TLS key of another certificate", "BYWARD_TLS_KEY_FILE", []string{"BYWARD_TLS_CERT_FILE / BYWARD_TLS_KEY_FILE: the certificate and key files: tls: private key does not match public key"}, func(t *testing.T, dir string) []string {
 			good, other := bundle(t), bundle(t)
-			return tlsPair(t, dir, testcert.Bundle{Cert: good.Cert, Key: other.Key})
+			return tlsPair(t, dir, "BYWARD_TLS_KEY_FILE", testcert.Bundle{Cert: good.Cert, Key: other.Key})
 		}, nil},
 		{"an encrypted TLS key", "BYWARD_TLS_KEY_FILE", []string{"BYWARD_TLS_CERT_FILE / BYWARD_TLS_KEY_FILE: the key file: the private key is encrypted"}, func(t *testing.T, dir string) []string {
 			encrypted := []byte("-----BEGIN ENCRYPTED PRIVATE KEY-----\nAAAA\n-----END ENCRYPTED PRIVATE KEY-----\n")
-			return tlsPair(t, dir, testcert.Bundle{Cert: bundle(t).Cert, Key: encrypted})
+			return tlsPair(t, dir, "BYWARD_TLS_KEY_FILE", testcert.Bundle{Cert: bundle(t).Cert, Key: encrypted})
 		}, nil},
 		{"a TLS chain certificate that does not parse", "BYWARD_TLS_CERT_FILE", []string{"BYWARD_TLS_CERT_FILE / BYWARD_TLS_KEY_FILE: the certificate file: x509: "}, func(t *testing.T, dir string) []string {
 			b := bundle(t)
 			junk := "-----BEGIN CERTIFICATE-----\nanVuaw==\n-----END CERTIFICATE-----\n"
-			return tlsPair(t, dir, testcert.Bundle{Cert: append(b.Cert, junk...), Key: b.Key})
+			return tlsPair(t, dir, "BYWARD_TLS_CERT_FILE", testcert.Bundle{Cert: append(b.Cert, junk...), Key: b.Key})
 		}, nil},
 		// Defaults resolve inside the data directory; the first one byward opens names its own setting.
 		{"a missing data directory", "BYWARD_DATA_DIR", []string{"BYWARD_KEYS_DIR: token: key directory: no such file or directory"}, func(_ *testing.T, dir string) []string {
@@ -304,11 +313,12 @@ func TestEveryPathVariableHasALeakScenario(t *testing.T) {
 			if !slices.Contains(named, tc.breaks) && !slices.Contains(brokenThroughDefaults, tc.breaks) {
 				t.Fatalf("it breaks %q but what it says, %q, is not about it: says must start with it as the setting at fault, before the first \": \"", tc.breaks, tc.says)
 			}
-			// Another file in the canary directory, read first, would fail under the leak test's perturbations
-			// too and could stand in for a refusal that is not about breaks' file.
+			// Another file in the canary directory would fail under the leak test's perturbations too and could
+			// stand in for a refusal that is not about breaks' file, even the other half of a pair the line names
+			// (#617): only breaks' file is there.
 			for _, kv := range env {
-				if name, v, _ := strings.Cut(kv, "="); strings.HasPrefix(v, dir+string(filepath.Separator)) && name != tc.breaks && !slices.Contains(named, name) {
-					t.Fatalf("it also sets %s to a path in the canary directory: put it outside, or name it with %s", name, tc.breaks)
+				if name, v, _ := strings.Cut(kv, "="); strings.HasPrefix(v, dir+string(filepath.Separator)) && name != tc.breaks {
+					t.Fatalf("it also sets %s to a path in the canary directory: put it outside, so that only %s's file is perturbed", name, tc.breaks)
 				}
 			}
 			broken[tc.breaks] = true
