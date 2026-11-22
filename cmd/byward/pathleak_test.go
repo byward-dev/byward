@@ -332,7 +332,7 @@ func TestEveryPathVariableHasALeakScenario(t *testing.T) {
 				case inCanary(dir, v):
 					t.Fatalf("it also sets %s to a path in the canary directory, %q: put it beside, so that only %s's file is perturbed", name, v, tc.breaks)
 				case !regularBeside(dir, v):
-					t.Fatalf("it sets %s to %q, not a regular file beside the canary directory (workingBeside): a link into it would be perturbed too", name, v)
+					t.Fatalf("it sets %s to %q, not a regular file directly beside the canary directory, spelt clean (workingBeside): a path through it, by a link or \"..\", would be perturbed too", name, v)
 				}
 			}
 			broken[tc.breaks] = true
@@ -352,11 +352,11 @@ func workingBeside(dir, name string) string {
 	return filepath.Join(filepath.Dir(dir), pathCanary+"-"+name)
 }
 
-// regularBeside reports whether path is a regular file, not a link, directly in dir's parent: out of
-// reach of the leak test's perturbations of dir.
+// regularBeside reports whether path is a regular file, not a link, directly in dir's parent and spelt
+// clean: out of reach of the leak test's perturbations of dir, which a ".." through dir would not be.
 func regularBeside(dir, path string) bool {
 	fi, err := os.Lstat(path)
-	return err == nil && fi.Mode().IsRegular() && filepath.Dir(filepath.Clean(path)) == filepath.Dir(dir)
+	return err == nil && fi.Mode().IsRegular() && path == filepath.Clean(path) && filepath.Dir(path) == filepath.Dir(dir)
 }
 
 // inCanary reports whether path is dir or under it: spelt under it (cleaned), or resolved into it
@@ -456,6 +456,50 @@ func TestInCanaryFindsAPathUnderTheCanaryDirectoryHoweverItIsReached(t *testing.
 	} {
 		if got := inCanary(dir, tc.path); got != tc.want {
 			t.Errorf("inCanary(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+}
+
+// regularBeside accepts a companion only as a regular file directly beside the canary directory,
+// spelt clean, so that the leak test's perturbations of the directory cannot reach it (#617).
+func TestRegularBesideAcceptsOnlyARegularFileDirectlyBesideTheCanaryDirectory(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, pathCanary)
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(os.MkdirAll(filepath.Join(parent, "deeper"), 0o700))
+	must(os.Mkdir(dir, 0o700))
+	beside := writeFile(t, workingBeside(dir, "tls.key"), "", 0o600)
+	inside := writeFile(t, filepath.Join(dir, "state"), "", 0o600)
+	writeFile(t, filepath.Join(parent, "deeper", pathCanary+"-x"), "", 0o600)
+	must(os.Symlink(inside, workingBeside(dir, "link")))
+	must(os.Symlink(filepath.Join(dir, "gone"), workingBeside(dir, "dangling")))
+	must(os.Symlink(beside, workingBeside(dir, "to-beside")))
+	must(os.Symlink(dir, filepath.Join(parent, "to-dir")))
+	must(os.Mkdir(workingBeside(dir, "dir"), 0o700))
+	for _, tc := range []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"a regular file beside", beside, true},
+		{"the same, spelt with ./", parent + "/./" + pathCanary + "-tls.key", false},
+		{"the same, spelt through the directory with ..", dir + "/../" + pathCanary + "-tls.key", false},
+		{"the same, spelt through a link to the directory with ..", filepath.Join(parent, "to-dir") + "/../" + pathCanary + "-tls.key", false},
+		{"a link beside into the directory", workingBeside(dir, "link"), false},
+		{"a dangling link beside into the directory", workingBeside(dir, "dangling"), false},
+		{"a link beside to the file beside", workingBeside(dir, "to-beside"), false},
+		{"a directory beside", workingBeside(dir, "dir"), false},
+		{"a file in the directory", inside, false},
+		{"a file one level deeper", filepath.Join(parent, "deeper", pathCanary+"-x"), false},
+		{"a missing path beside", workingBeside(dir, "missing"), false},
+	} {
+		if got := regularBeside(dir, tc.path); got != tc.want {
+			t.Errorf("%s: regularBeside(%q) = %v, want %v", tc.name, tc.path, got, tc.want)
 		}
 	}
 }
