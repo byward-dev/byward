@@ -44,7 +44,8 @@ func TestAFileVariableOfANonSecretOrUnknownSettingPanics(t *testing.T) {
 // A secret's file variable and file flag are asked of the registry, never built by hand (#506): the only
 // string literals in the production code that build one (the "_FILE" or "-file" suffix, alone, leading,
 // or after a format verb) are FileEnv's and FileFlag's, and flagHint's for a path setting whose own
-// name ends in -file (--tls-cert for --tls-cert-file).
+// name ends in -file (--tls-cert for --tls-cert-file). That literal is for a path setting only: a secret's flag
+// comes from FileFlag.
 func TestOnlyFileEnvAndFileFlagBuildASecretsFileName(t *testing.T) {
 	var found []string
 	eachProductionGoFile(t, func(rel string, _ *token.FileSet, f *ast.File) {
@@ -72,8 +73,8 @@ func TestOnlyFileEnvAndFileFlagBuildASecretsFileName(t *testing.T) {
 	}
 }
 
-// fileFormat is a format verb, any flags and index included ("%s", "%[1]q"), followed by _FILE or -file.
-var fileFormat = regexp.MustCompile(`%[^%a-zA-Z]*[a-zA-Z](_FILE|-file)`)
+// fileSuffixAfterVerb is a format verb, any flags and index included ("%s", "%[1]q"), followed by _FILE or -file.
+var fileSuffixAfterVerb = regexp.MustCompile(`%[^%a-zA-Z]*[a-zA-Z](_FILE|-file)`)
 
 // buildsAFileName reports whether the string literal lit, as written (quoted or raw), is the _FILE or
 // -file suffix, starts with one, or formats one after a verb.
@@ -82,7 +83,7 @@ func buildsAFileName(lit string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.HasPrefix(v, "_FILE") || strings.HasPrefix(v, "-file") || fileFormat.MatchString(v)
+	return strings.HasPrefix(v, "_FILE") || strings.HasPrefix(v, "-file") || fileSuffixAfterVerb.MatchString(v)
 }
 
 // --help names each secret by its file flag and file variable, never by its own variable, which
@@ -114,7 +115,7 @@ func TestInlineSecretsAreRefusedWithTheFirstOnesFileVariable(t *testing.T) {
 
 // A secret's file flag is its name with -file; a setting that is not a secret has none, and asking
 // panics (#506).
-func TestASecretsFileFlagIsItsNameWithFile(t *testing.T) {
+func TestASecretsFileFlagIsItsNameWithFileAndANonSecretHasNone(t *testing.T) {
 	if got := lookup("oidc-client-key").FileFlag(); got != "oidc-client-key-file" {
 		t.Errorf("FileFlag = %q, want oidc-client-key-file", got)
 	}

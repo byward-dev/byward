@@ -105,7 +105,7 @@ func TestASecretSetToNothingBesideItsFileLoadsAsTheFileAlone(t *testing.T) {
 			if !s.Secret() {
 				continue
 			}
-			unset := without(s.Env(), s.Env()+"_FILE")(slices.Clone(m.env))
+			unset := without(s.Env(), s.FileEnv())(slices.Clone(m.env))
 			for _, f := range secretFileForms(s, path) {
 				env := append(slices.Clone(unset), f.env...)
 				want, _, wantErr := Load(f.args, env, files)

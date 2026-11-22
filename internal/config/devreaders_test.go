@@ -35,9 +35,6 @@ var decidedReaders = map[string]int{
 	"internal/server/idp.go":        1, // the oidc adapter's AllowLoopbackHTTP
 }
 
-// skippedDirs hold no source of the proxy: test data, and dependency or build output.
-var skippedDirs = []string{"testdata", "vendor", "node_modules", "bin", "dist", "build"}
-
 // --dev relaxes nothing that is not logged (#355): only the files in devReaders select a .Dev
 // field, each as many times as listed, and each one's relaxation is recorded with --dev; only those
 // in decidedReaders select OIDCLoopbackHTTP, and only config names the dev setting. A new reader

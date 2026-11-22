@@ -94,9 +94,10 @@ func (s Setting) FileFlag() string {
 // secret.
 func SecretFileEnv(name string) string { return lookup(name).FileEnv() }
 
-// GivenEnv is the environment variable an operator sets for the setting: its file variable for a
-// secret, its own for any other.
-func (s Setting) GivenEnv() string {
+// OperatorEnv is the environment variable an operator sets for the setting, as --help, the reference
+// and quickstart name it: its file variable for a secret, its own for any other. Value.From is the one
+// a value was actually given by.
+func (s Setting) OperatorEnv() string {
 	if s.Secret() {
 		return s.FileEnv()
 	}
@@ -388,9 +389,9 @@ func flagError(fs *flag.FlagSet, err error, secrets map[string]Setting) error {
 }
 
 // flagHint suggests the command's own flag an undefined one most likely meant, never the text given:
-// a secret's file flag, with the reason, when the name is the secret's own (secrets, by name); the path
-// setting the name lacks only -file of; else the nearest name, only when it is near enough that the
-// operator, who is not shown the name, can trust it.
+// a secret's file flag, with the reason, when the name is the secret's own (secrets, by name); the flag
+// the name is only missing -file from (a path setting such as --tls-cert-file); else the nearest name,
+// only when it is near enough that the operator, who is not shown the name, can trust it.
 func flagHint(fs *flag.FlagSet, name string, secrets map[string]Setting) string {
 	if s, ok := secrets[name]; ok {
 		return " (secrets come from a file: did you mean --" + s.FileFlag() + "?)"
