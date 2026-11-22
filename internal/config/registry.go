@@ -89,11 +89,6 @@ func (s Setting) FileFlag() string {
 	return s.Name + "-file"
 }
 
-// SecretFileEnv is the file variable of the secret setting called name, for code outside this package
-// that names it in a message. It panics when the registry has no such setting, or when it is not a
-// secret.
-func SecretFileEnv(name string) string { return lookup(name).FileEnv() }
-
 // EnvToSet is the environment variable an operator is told to set for the setting: its file variable for
 // a secret, its own for any other. Value.From, by contrast, names the flag or variable a secret's file
 // actually came by.
@@ -217,6 +212,21 @@ func (v *Values) empty(name string) bool { return v.byKey[name].Given.empty() }
 func (v *Values) given(name string) bool {
 	val := v.byKey[name]
 	return !val.Given.empty() || val.Path != ""
+}
+
+// AsGiven names the setting called name as the operator gave it, for a refusal outside this package
+// (#619): the flag or variable that gave it (spelled), so a bad --oidc-client-key-file is not named
+// BYWARD_OIDC_CLIENT_KEY_FILE. A setting not given, or values that are none (a Config built by hand),
+// names the variable to set (EnvToSet). It panics for a name the registry does not hold.
+func (v *Values) AsGiven(name string) string {
+	s := lookup(name)
+	if v == nil {
+		return s.EnvToSet()
+	}
+	if val, ok := v.byKey[name]; ok && val.Source != SourceDefault {
+		return spelled(val)
+	}
+	return s.EnvToSet()
 }
 
 // emptySecretFile is the error for a secret setting whose named file holds nothing, or only

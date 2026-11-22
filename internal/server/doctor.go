@@ -103,7 +103,7 @@ func checkStore(cfg *config.Config) ([]Warning, error) {
 		return nil, nil
 	}
 	if err := postgres.CheckDSN(cfg.StorePostgresDSN, cfg.Dev); err != nil {
-		return nil, fmt.Errorf("BYWARD_STORE_POSTGRES_DSN_FILE: %w (see docs/how-to/postgres.md)", err)
+		return nil, fmt.Errorf("%s: %w (see docs/how-to/postgres.md)", cfg.Values.AsGiven("store-postgres-dsn"), err)
 	}
 	return []Warning{replicaKeys}, nil
 }

@@ -17,8 +17,8 @@ func TestASecretsFileVariableIsItsVariableWithFILE(t *testing.T) {
 		"entra-client-secret": "BYWARD_ENTRA_CLIENT_SECRET_FILE",
 		"upstream-credential": "BYWARD_UPSTREAM_CREDENTIAL_FILE",
 	} {
-		if got := SecretFileEnv(name); got != want {
-			t.Errorf("SecretFileEnv(%q) = %q, want %q", name, got, want)
+		if got := lookup(name).FileEnv(); got != want {
+			t.Errorf("FileEnv of %q = %q, want %q", name, got, want)
 		}
 	}
 }
@@ -36,7 +36,7 @@ func TestAFileVariableOfANonSecretOrUnknownSettingPanics(t *testing.T) {
 					t.Fatalf("recovered %v, want %q", r, tc.want)
 				}
 			}()
-			SecretFileEnv(tc.name)
+			lookup(tc.name).FileEnv()
 		})
 	}
 }

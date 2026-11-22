@@ -162,9 +162,9 @@ func openPostgres(ctx context.Context, cfg *config.Config, log *slog.Logger, mus
 	st, err := postgres.Open(ctx, postgres.Options{DSN: cfg.StorePostgresDSN, AllowPlaintext: cfg.Dev, MustExist: mustExist})
 	if err != nil {
 		if fix := operatorFix(err); mustExist && fix != "" {
-			return nil, fmt.Errorf("BYWARD_STORE_POSTGRES_DSN_FILE: %w; %s (see docs/how-to/postgres.md)", err, fix)
+			return nil, fmt.Errorf("%s: %w; %s (see docs/how-to/postgres.md)", cfg.Values.AsGiven("store-postgres-dsn"), err, fix)
 		}
-		return nil, fmt.Errorf("BYWARD_STORE_POSTGRES_DSN_FILE: %w (see docs/how-to/postgres.md)", err)
+		return nil, fmt.Errorf("%s: %w (see docs/how-to/postgres.md)", cfg.Values.AsGiven("store-postgres-dsn"), err)
 	}
 	log.Info("store open", "setting", "BYWARD_STORE_POSTGRES_DSN_FILE", "value", st.Describe()) // the database, never the DSN
 	return st, nil
