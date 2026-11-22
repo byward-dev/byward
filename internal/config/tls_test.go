@@ -23,6 +23,10 @@ func TestTLSFilesAreBothOrNeitherAndNeedAnHTTPSPublicURL(t *testing.T) {
 		{"only the key", nil, []string{key}, "BYWARD_TLS_CERT_FILE and BYWARD_TLS_KEY_FILE: set both or neither"},
 		{"an http public URL in --dev", []string{"--dev"}, []string{cert, key, "BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp"},
 			"BYWARD_TLS_CERT_FILE: TLS on the listener needs an https BYWARD_PUBLIC_URL"},
+		{"only the certificate, by flag", []string{"--tls-cert-file=/run/tls/tls.crt"}, nil, "--tls-cert-file and BYWARD_TLS_KEY_FILE: set both or neither"},
+		{"only the key, by flag", []string{"--tls-key-file=/run/tls/tls.key"}, nil, "BYWARD_TLS_CERT_FILE and --tls-key-file: set both or neither"},
+		{"an http public URL in --dev, by flag", []string{"--dev", "--tls-cert-file=/run/tls/tls.crt", "--tls-key-file=/run/tls/tls.key"}, []string{"BYWARD_PUBLIC_URL=http://127.0.0.1:8080/mcp"},
+			"--tls-cert-file: TLS on the listener needs an https BYWARD_PUBLIC_URL"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, err := load(t, tc.args, tc.env...)

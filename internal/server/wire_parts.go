@@ -46,7 +46,7 @@ type authParts struct {
 // empty for warnings that come from a package with its own wording (the access gate's).
 type Warning struct {
 	Message string
-	// Setting is the setting at fault, as the operator gave it where the warning knows (#619): a
+	// Setting is the setting at fault, as the operator gave it when the warning names a setting (#619): a
 	// certificate given by flag is named by its flag, in the log too.
 	Setting string
 	Fix     string

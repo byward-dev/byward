@@ -226,9 +226,9 @@ func spelled(val Value) string {
 	return val.Setting.Env()
 }
 
-// NameAsGiven names the setting called name as the operator gave it, for a refusal outside this package
-// (#619): the flag or variable that gave it (spelled), so a bad --oidc-client-key-file is not named
-// BYWARD_OIDC_CLIENT_KEY_FILE. A setting not given, or nil Values (a Config built by hand), names the
+// NameAsGiven names the setting called name as the operator gave it, for any message that
+// names it: a refusal, a warning or a doctor fix (#619). That is the flag or variable that gave it (spelled),
+// so a bad --oidc-client-key-file is not named BYWARD_OIDC_CLIENT_KEY_FILE. A setting left at its default, or nil Values (a Config built by hand), names the
 // variable to set (EnvToSet). It panics for a name the registry does not hold.
 func (v *Values) NameAsGiven(name string) string {
 	s := lookup(name)
