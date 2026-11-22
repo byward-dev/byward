@@ -32,8 +32,8 @@ type pathLeakScenario struct {
 	// says are what the error line says, all on that one line: the setting at fault (with the one it
 	// pairs with, for the TLS and store files) and the cause. The first starts the error.
 	says []string
-	// env returns the settings under test, set to paths in dir that fail; a setting set to nothing is
-	// unset (#428).
+	// env returns the settings under test: breaks set to a path in dir that fails, and any companion it
+	// needs set to one beside dir that works; a setting set to nothing is unset (#428).
 	env func(t *testing.T, dir string) []string
 	// commands are the commands that refuse it; nil or empty for refusingCommands.
 	commands [][]string
@@ -43,16 +43,20 @@ type pathLeakScenario struct {
 // (TestEveryPathVariableHasALeakScenario).
 func pathLeakScenarios() []pathLeakScenario {
 	// tlsPair writes the pair's file that breaks into the canary directory dir, and the other, which
-	// works, beside it: the leak test's perturbations of dir then reach only the broken half (#617).
+	// works, beside it (workingBeside): the leak test's perturbations of dir then reach only the broken
+	// half (#617).
 	tlsPair := func(t *testing.T, dir, breaks string, b testcert.Bundle) []string {
-		certDir, keyDir := filepath.Dir(dir), filepath.Dir(dir)
-		if breaks == "BYWARD_TLS_CERT_FILE" {
-			certDir = dir
-		} else {
-			keyDir = dir
+		cert, key := workingBeside(dir, "tls.crt"), workingBeside(dir, "tls.key")
+		switch breaks {
+		case "BYWARD_TLS_CERT_FILE":
+			cert = filepath.Join(dir, "tls.crt")
+		case "BYWARD_TLS_KEY_FILE":
+			key = filepath.Join(dir, "tls.key")
+		default:
+			t.Fatalf("tlsPair: %q is neither half of the TLS pair", breaks)
 		}
-		cert := writeFile(t, filepath.Join(certDir, "tls.crt"), string(b.Cert), 0o600)
-		key := writeFile(t, filepath.Join(keyDir, "tls.key"), string(b.Key), 0o600)
+		writeFile(t, cert, string(b.Cert), 0o600)
+		writeFile(t, key, string(b.Key), 0o600)
 		return []string{"BYWARD_TLS_CERT_FILE=" + cert, "BYWARD_TLS_KEY_FILE=" + key}
 	}
 	bundle := func(t *testing.T) testcert.Bundle {
@@ -108,7 +112,7 @@ func pathLeakScenarios() []pathLeakScenario {
 			return []string{"BYWARD_ENTRA_CLIENT_SECRET_FILE=" + writeFile(t, filepath.Join(dir, "secret"), entraSecret, 0o644)}
 		}, nil},
 		{"a missing TLS certificate file", "BYWARD_TLS_CERT_FILE", []string{"BYWARD_TLS_CERT_FILE / BYWARD_TLS_KEY_FILE: the certificate file: no such file or directory"}, func(t *testing.T, dir string) []string {
-			key := writeFile(t, filepath.Join(filepath.Dir(dir), "tls.key"), string(bundle(t).Key), 0o600) // works, beside the canary
+			key := writeFile(t, workingBeside(dir, "tls.key"), string(bundle(t).Key), 0o600)
 			return []string{"BYWARD_TLS_CERT_FILE=" + filepath.Join(dir, "missing.crt"), "BYWARD_TLS_KEY_FILE=" + key}
 		}, nil},
 		{"a TLS key of another certificate", "BYWARD_TLS_KEY_FILE", []string{"BYWARD_TLS_CERT_FILE / BYWARD_TLS_KEY_FILE: the certificate and key files: tls: private key does not match public key"}, func(t *testing.T, dir string) []string {
@@ -299,7 +303,7 @@ func TestEveryPathVariableHasALeakScenario(t *testing.T) {
 			if tc.breaks == "" {
 				t.Fatal("it declares no variable it breaks: set breaks")
 			}
-			if !strings.HasPrefix(value, dir+string(filepath.Separator)) {
+			if !inCanary(dir, value) {
 				t.Fatalf("it breaks %q but does not set it to a path in the canary directory, where the leak test looks: %q", tc.breaks, value)
 			}
 			if len(tc.says) == 0 {
@@ -317,8 +321,8 @@ func TestEveryPathVariableHasALeakScenario(t *testing.T) {
 			// stand in for a refusal that is not about breaks' file, even the other half of a pair the line names
 			// (#617): only breaks' file is there.
 			for _, kv := range env {
-				if name, v, _ := strings.Cut(kv, "="); strings.HasPrefix(v, dir+string(filepath.Separator)) && name != tc.breaks {
-					t.Fatalf("it also sets %s to a path in the canary directory: put it outside, so that only %s's file is perturbed", name, tc.breaks)
+				if name, v, _ := strings.Cut(kv, "="); v != "" && inCanary(dir, v) && name != tc.breaks {
+					t.Fatalf("it also sets %s to a path in the canary directory, %q: put it outside, so that only %s's file is perturbed", name, v, tc.breaks)
 				}
 			}
 			broken[tc.breaks] = true
@@ -329,6 +333,32 @@ func TestEveryPathVariableHasALeakScenario(t *testing.T) {
 			t.Errorf("%s holds a path but no scenario in pathLeakScenarios breaks it (set breaks: %q in one whose says starts with it)", name, name)
 		}
 	}
+}
+
+// workingBeside is the path, beside the canary directory dir, of a companion file that works: out of
+// reach of the leak test's perturbations of dir, yet named with the canary, so a line that shows its
+// path is a leak the leak test sees too.
+func workingBeside(dir, name string) string {
+	return filepath.Join(filepath.Dir(dir), pathCanary+"-"+name)
+}
+
+// inCanary reports whether path is dir or under it, however it is spelt: cleaned, and through any
+// symlink on the way (resolved as far as path exists).
+func inCanary(dir, path string) bool {
+	resolve := func(p string) string {
+		p = filepath.Clean(p)
+		for q := p; ; q = filepath.Dir(q) {
+			if r, err := filepath.EvalSymlinks(q); err == nil {
+				rest, _ := filepath.Rel(q, p)
+				return filepath.Join(r, rest)
+			}
+			if q == filepath.Dir(q) {
+				return p
+			}
+		}
+	}
+	d, p := resolve(dir), resolve(path)
+	return p == d || strings.HasPrefix(p, d+string(filepath.Separator))
 }
 
 // containsAll reports whether line holds every one of parts.
