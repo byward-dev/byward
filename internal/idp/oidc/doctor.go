@@ -20,8 +20,8 @@ import (
 // Diagnosis names the settings doctor's fixes refer to.
 type Diagnosis struct {
 	ClientIDSetting string
-	// CredentialSetting is the setting holding the IdP app's secret or private key; KeyCredential
-	// reports which (private_key_jwt).
+	// CredentialSetting is the setting holding the IdP app's secret or private key, as the operator gave
+	// it; KeyCredential reports which (private_key_jwt).
 	CredentialSetting string
 	KeyCredential     bool
 }

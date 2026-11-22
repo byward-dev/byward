@@ -137,18 +137,6 @@ func offModeSettings(v *Values, stdio bool) []error {
 	return errs
 }
 
-// spelled names a setting as the operator gave it: the flag, the file setting or the environment
-// variable.
-func spelled(val Value) string {
-	switch {
-	case val.From != "":
-		return val.From
-	case val.Source == SourceFlag:
-		return "--" + val.Setting.Name
-	}
-	return val.Setting.Env()
-}
-
 // minStreamIdleTimeout is the shortest stdio-stream-idle-timeout other than 0 (off): a stream quiet
 // for less is not idle.
 const minStreamIdleTimeout = time.Minute

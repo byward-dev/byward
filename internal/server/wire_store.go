@@ -136,9 +136,9 @@ func openStoreFor(cfg *config.Config, log *slog.Logger, rec *audit.Log, mustExis
 	st, err := sqlite.Open(ctx, sqlite.Options{Dir: cfg.StoreDir, CounterFile: cfg.StoreCounterFile, MustExist: mustExist})
 	if err != nil {
 		if fix := operatorFix(err); mustExist && fix != "" {
-			return nil, fmt.Errorf("BYWARD_STORE_DIR: %w; %s (see docs/how-to/state.md)", err, fix)
+			return nil, fmt.Errorf("%s: %w; %s (see docs/how-to/state.md)", cfg.Values.NameAsGiven("store-dir"), err, fix)
 		}
-		return nil, fmt.Errorf("BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: %w (see docs/how-to/state.md)", err)
+		return nil, fmt.Errorf("%s / %s: %w (see docs/how-to/state.md)", cfg.Values.NameAsGiven("store-dir"), cfg.Values.NameAsGiven("store-counter-file"), err)
 	}
 	s := st.Startup()
 	switch {
@@ -162,9 +162,9 @@ func openPostgres(ctx context.Context, cfg *config.Config, log *slog.Logger, mus
 	st, err := postgres.Open(ctx, postgres.Options{DSN: cfg.StorePostgresDSN, AllowPlaintext: cfg.Dev, MustExist: mustExist})
 	if err != nil {
 		if fix := operatorFix(err); mustExist && fix != "" {
-			return nil, fmt.Errorf("%s: %w; %s (see docs/how-to/postgres.md)", cfg.Values.AsGiven("store-postgres-dsn"), err, fix)
+			return nil, fmt.Errorf("%s: %w; %s (see docs/how-to/postgres.md)", cfg.Values.NameAsGiven("store-postgres-dsn"), err, fix)
 		}
-		return nil, fmt.Errorf("%s: %w (see docs/how-to/postgres.md)", cfg.Values.AsGiven("store-postgres-dsn"), err)
+		return nil, fmt.Errorf("%s: %w (see docs/how-to/postgres.md)", cfg.Values.NameAsGiven("store-postgres-dsn"), err)
 	}
 	log.Info("store open", "setting", "BYWARD_STORE_POSTGRES_DSN_FILE", "value", st.Describe()) // the database, never the DSN
 	return st, nil

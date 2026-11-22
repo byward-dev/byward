@@ -226,10 +226,10 @@ func entraClientAuth(cfg *config.Config) (idp.ClientAuth, entra.Diagnosis, time.
 		GateRoles: cfg.GateRoles, AppRoles: cfg.AppRoles}
 	switch {
 	case cfg.EntraFederatedTokenFile != "": // re-read on every request, never cached
-		d.CredentialKind, d.CredentialSetting = entra.CredentialFederated, cfg.Values.AsGiven("entra-federated-token-file")
+		d.CredentialKind, d.CredentialSetting = entra.CredentialFederated, cfg.Values.NameAsGiven("entra-federated-token-file")
 		return idp.AssertionFile(cfg.EntraFederatedTokenFile), d, time.Time{}, nil
 	case cfg.EntraClientCertificate != "":
-		d.CredentialKind, d.CredentialSetting = entra.CredentialCertificate, cfg.Values.AsGiven("entra-client-certificate")
+		d.CredentialKind, d.CredentialSetting = entra.CredentialCertificate, cfg.Values.NameAsGiven("entra-client-certificate")
 		cert, err := entra.LoadCertificate([]byte(cfg.EntraClientCertificate))
 		if err != nil {
 			return nil, d, time.Time{}, fmt.Errorf("%s: %w (docs/how-to/entra-certificate.md)", d.CredentialSetting, err)
@@ -240,15 +240,15 @@ func entraClientAuth(cfg *config.Config) (idp.ClientAuth, entra.Diagnosis, time.
 		}
 		return auth, d, cert.X509.NotAfter, nil
 	}
-	d.CredentialKind, d.CredentialSetting = entra.CredentialSecret, cfg.Values.AsGiven("entra-client-secret")
+	d.CredentialKind, d.CredentialSetting = entra.CredentialSecret, cfg.Values.NameAsGiven("entra-client-secret")
 	return idp.ClientSecret(cfg.EntraClientSecret), d, time.Time{}, nil
 }
 
 // oidcDiagnosis names the settings of the oidc client and its credential, for doctor's fixes.
 func oidcDiagnosis(cfg *config.Config) oidc.Diagnosis {
-	d := oidc.Diagnosis{ClientIDSetting: config.Setting{Name: "oidc-client-id"}.Env(), CredentialSetting: cfg.Values.AsGiven("oidc-client-secret")}
+	d := oidc.Diagnosis{ClientIDSetting: config.Setting{Name: "oidc-client-id"}.Env(), CredentialSetting: cfg.Values.NameAsGiven("oidc-client-secret")}
 	if cfg.OIDCClientKey != "" {
-		d.CredentialSetting, d.KeyCredential = cfg.Values.AsGiven("oidc-client-key"), true
+		d.CredentialSetting, d.KeyCredential = cfg.Values.NameAsGiven("oidc-client-key"), true
 	}
 	return d
 }
@@ -262,14 +262,14 @@ func oidcClientAuth(cfg *config.Config) (idp.ClientAuth, string, error) {
 	}
 	key, err := idp.ParsePrivateKey([]byte(cfg.OIDCClientKey))
 	if err != nil {
-		return nil, "", fmt.Errorf("%s: %w", cfg.Values.AsGiven("oidc-client-key"), err)
+		return nil, "", fmt.Errorf("%s: %w", cfg.Values.NameAsGiven("oidc-client-key"), err)
 	}
 	auth, err := idp.PrivateKeyJWTWithAlg(key, nil, cfg.OIDCClientKeyID, cfg.OIDCClientKeyAlg)
 	switch {
 	case errors.Is(err, idp.ErrClientKeyAlg):
-		return nil, "", fmt.Errorf("BYWARD_OIDC_CLIENT_KEY_ALG: %w", err)
+		return nil, "", fmt.Errorf("%s: %w", cfg.Values.NameAsGiven("oidc-client-key-alg"), err)
 	case err != nil:
-		return nil, "", fmt.Errorf("%s: %w", cfg.Values.AsGiven("oidc-client-key"), err)
+		return nil, "", fmt.Errorf("%s: %w", cfg.Values.NameAsGiven("oidc-client-key"), err)
 	}
 	info, ok := auth.(idp.AssertionInfo)
 	if !ok {

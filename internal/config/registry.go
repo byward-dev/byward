@@ -214,11 +214,23 @@ func (v *Values) given(name string) bool {
 	return !val.Given.empty() || val.Path != ""
 }
 
-// AsGiven names the setting called name as the operator gave it, for a refusal outside this package
+// spelled names a setting as the operator gave it: the flag, the file setting or the environment
+// variable.
+func spelled(val Value) string {
+	switch {
+	case val.From != "":
+		return val.From
+	case val.Source == SourceFlag:
+		return "--" + val.Setting.Name
+	}
+	return val.Setting.Env()
+}
+
+// NameAsGiven names the setting called name as the operator gave it, for a refusal outside this package
 // (#619): the flag or variable that gave it (spelled), so a bad --oidc-client-key-file is not named
-// BYWARD_OIDC_CLIENT_KEY_FILE. A setting not given, or values that are none (a Config built by hand),
-// names the variable to set (EnvToSet). It panics for a name the registry does not hold.
-func (v *Values) AsGiven(name string) string {
+// BYWARD_OIDC_CLIENT_KEY_FILE. A setting not given, or nil Values (a Config built by hand), names the
+// variable to set (EnvToSet). It panics for a name the registry does not hold.
+func (v *Values) NameAsGiven(name string) string {
 	s := lookup(name)
 	if v == nil {
 		return s.EnvToSet()

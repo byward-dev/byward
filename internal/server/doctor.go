@@ -98,12 +98,12 @@ func offlineHop(cfg *config.Config) []Warning {
 func checkStore(cfg *config.Config) ([]Warning, error) {
 	if cfg.StorePostgresDSN == "" {
 		if err := sqlite.CheckPaths(sqlite.Options{Dir: cfg.StoreDir, CounterFile: cfg.StoreCounterFile}); err != nil {
-			return nil, fmt.Errorf("BYWARD_STORE_DIR / BYWARD_STORE_COUNTER_FILE: %w (see docs/how-to/state.md)", err)
+			return nil, fmt.Errorf("%s / %s: %w (see docs/how-to/state.md)", cfg.Values.NameAsGiven("store-dir"), cfg.Values.NameAsGiven("store-counter-file"), err)
 		}
 		return nil, nil
 	}
 	if err := postgres.CheckDSN(cfg.StorePostgresDSN, cfg.Dev); err != nil {
-		return nil, fmt.Errorf("%s: %w (see docs/how-to/postgres.md)", cfg.Values.AsGiven("store-postgres-dsn"), err)
+		return nil, fmt.Errorf("%s: %w (see docs/how-to/postgres.md)", cfg.Values.NameAsGiven("store-postgres-dsn"), err)
 	}
 	return []Warning{replicaKeys}, nil
 }

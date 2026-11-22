@@ -12,18 +12,13 @@ import (
 	"github.com/byward-dev/byward/internal/servingcert"
 )
 
-var (
-	tlsCertEnv = config.Setting{Name: "tls-cert-file"}.Env()
-	tlsKeyEnv  = config.Setting{Name: "tls-key-file"}.Env()
-)
-
 func tlsFiles(cfg *config.Config) servingcert.Files {
 	return servingcert.Files{Cert: cfg.TLSCertFile, Key: cfg.TLSKeyFile}
 }
 
-// tlsError names the settings of a pair the proxy cannot serve.
-func tlsError(err error) error {
-	return fmt.Errorf("%s / %s: %w (see docs/how-to/tls.md)", tlsCertEnv, tlsKeyEnv, err)
+// tlsError names the settings of a pair the proxy cannot serve, as the operator gave them (#619).
+func tlsError(cfg *config.Config, err error) error {
+	return fmt.Errorf("%s / %s: %w (see docs/how-to/tls.md)", cfg.Values.NameAsGiven("tls-cert-file"), cfg.Values.NameAsGiven("tls-key-file"), err)
 }
 
 // servingTLS is the public listener's TLS (#183): nil for plain HTTP. It refuses a pair the proxy
@@ -40,7 +35,7 @@ func servingTLS(cfg *config.Config, log *slog.Logger, now func() time.Time) (*tl
 	}
 	r, err := servingcert.Load(tlsFiles(cfg), servingcert.Options{Now: now, Log: log, CheckKey: secretCheck(cfg), Served: warn})
 	if err != nil {
-		return nil, tlsError(err)
+		return nil, tlsError(cfg, err)
 	}
 	warn(r.Current())
 	// Certificates stays empty, so every handshake asks GetCertificate, which reloads changed files.
@@ -55,7 +50,7 @@ func diskCert(cfg *config.Config) (*servingcert.Pair, error) {
 	}
 	p, err := servingcert.Read(tlsFiles(cfg))
 	if err != nil {
-		return nil, tlsError(err)
+		return nil, tlsError(cfg, err)
 	}
 	return p, nil
 }
@@ -68,7 +63,7 @@ func servableCert(cfg *config.Config, now time.Time) (*servingcert.Pair, error) 
 		return nil, err
 	}
 	if err := p.Validity(now); err != nil {
-		return nil, tlsError(err)
+		return nil, tlsError(cfg, err)
 	}
 	return p, nil
 }
@@ -88,7 +83,7 @@ func servingCertChecks(cfg *config.Config, p *servingcert.Pair, now time.Time) [
 func servingCertWarnings(cfg *config.Config, p *servingcert.Pair, now time.Time) []Warning {
 	var ws []Warning
 	for _, r := range servingCertChecks(cfg, p, now) {
-		if w, ok := warningOf(r, tlsCertEnv); ok {
+		if w, ok := warningOf(r, cfg.Values.NameAsGiven("tls-cert-file")); ok {
 			ws = append(ws, w)
 		}
 	}

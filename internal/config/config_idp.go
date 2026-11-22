@@ -93,7 +93,7 @@ func (c *Config) entraIdP(v *Values) []error {
 	var set []string // the Entra app's credentials given: exactly one (ADR-0012 §5)
 	for name, given := range map[string]bool{"entra-client-secret": hasSecret, "entra-federated-token-file": c.EntraFederatedTokenFile != "", "entra-client-certificate": hasCert} {
 		if given {
-			set = append(set, spelled(v.byKey[name])) // as the operator gave it (#619)
+			set = append(set, v.NameAsGiven(name)) // as the operator gave it (#619)
 		}
 	}
 	for _, name := range []string{"entra-client-secret", "entra-client-certificate"} {
@@ -112,11 +112,11 @@ func (c *Config) entraIdP(v *Values) []error {
 			errs = append(errs, err)
 		}
 		if !v.empty("entra-client-secret-expires-at") {
-			errs = append(errs, errorf("%s has no effect with %s: a federated token has no secret to expire; remove it", spelled(v.byKey["entra-client-secret-expires-at"]), spelled(v.byKey["entra-federated-token-file"])))
+			errs = append(errs, errorf("%s has no effect with %s: a federated token has no secret to expire; remove it", v.NameAsGiven("entra-client-secret-expires-at"), v.NameAsGiven("entra-federated-token-file")))
 		}
 	case hasCert:
 		if !v.empty("entra-client-secret-expires-at") {
-			errs = append(errs, errorf("%s has no effect with %s: byward reads the certificate's own end date; remove it", spelled(v.byKey["entra-client-secret-expires-at"]), spelled(v.byKey["entra-client-certificate"])))
+			errs = append(errs, errorf("%s has no effect with %s: byward reads the certificate's own end date; remove it", v.NameAsGiven("entra-client-secret-expires-at"), v.NameAsGiven("entra-client-certificate")))
 		}
 	}
 	if c.EntraClientSecretExpiresAt, err = parseSecretExpiry(v.value("entra-client-secret-expires-at")); err != nil {
@@ -202,13 +202,13 @@ func (c *Config) oidcIdP(v *Values) []error {
 		// A public client would let anyone who knows the client ID start the proxy's flow at the IdP.
 		errs = append(errs, errorf("%s or %s is required with BYWARD_IDP=%s: the proxy is a confidential client", secret, key, c.IdP))
 	case hasSecret && hasKey:
-		errs = append(errs, bothSet(spelled(v.byKey["oidc-client-secret"]), spelled(v.byKey["oidc-client-key"])))
+		errs = append(errs, bothSet(v.NameAsGiven("oidc-client-secret"), v.NameAsGiven("oidc-client-key")))
 	}
 	if c.OIDCClientKeyID != "" && !hasKey {
-		errs = append(errs, errorf("%s is set without %s", spelled(v.byKey["oidc-client-key-id"]), key))
+		errs = append(errs, errorf("%s is set without %s", v.NameAsGiven("oidc-client-key-id"), key))
 	}
 	if !v.empty("oidc-client-key-alg") && !hasKey {
-		errs = append(errs, errorf("%s is set without %s", spelled(v.byKey["oidc-client-key-alg"]), key))
+		errs = append(errs, errorf("%s is set without %s", v.NameAsGiven("oidc-client-key-alg"), key))
 	} else if c.OIDCClientKeyAlg, err = parseKeyAlg(v.value("oidc-client-key-alg")); err != nil {
 		errs = append(errs, err)
 	}
