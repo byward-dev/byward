@@ -94,10 +94,10 @@ func (s Setting) FileFlag() string {
 // secret.
 func SecretFileEnv(name string) string { return lookup(name).FileEnv() }
 
-// OperatorEnv is the environment variable an operator sets for the setting, as --help, the reference
-// and quickstart name it: its file variable for a secret, its own for any other. Value.From is the one
-// a value was actually given by.
-func (s Setting) OperatorEnv() string {
+// EnvToSet is the environment variable an operator is told to set for the setting: its file variable for
+// a secret, its own for any other. Value.From, by contrast, names the flag or variable a secret's file
+// actually came by.
+func (s Setting) EnvToSet() string {
 	if s.Secret() {
 		return s.FileEnv()
 	}
