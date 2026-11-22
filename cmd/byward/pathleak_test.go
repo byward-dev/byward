@@ -168,9 +168,13 @@ func TestAFileThatCannotBeUsedIsNamedByItsSettingNeverItsPath(t *testing.T) {
 			if err := os.Mkdir(dir, 0o700); err != nil {
 				t.Fatal(err)
 			}
+			companions := 0 // settings it sets beside breaks, each to a file that works
 			env := append(authEnv(t), serveEnv("https://m.example/mcp", "127.0.0.1:0")...)
 			for _, kv := range tc.env(t, dir) {
 				name, _, _ := strings.Cut(kv, "=")
+				if v := kv[len(name)+1:]; v != "" && name != tc.breaks {
+					companions++
+				}
 				env = append(without(env, name+"="), kv)
 			}
 			commands := tc.commands
@@ -195,6 +199,17 @@ func TestAFileThatCannotBeUsedIsNamedByItsSettingNeverItsPath(t *testing.T) {
 				}
 				if !said {
 					t.Errorf("%v: no line says %q; stdout %q stderr %q", args, tc.says, stdout, stderr)
+				}
+			}
+			// With a companion, the refusal is about breaks' file, not the companion's: with breaks unset, what
+			// it says goes away. Breaks' file, checked first, would otherwise hide a companion's refusal from the
+			// perturbations below (#617).
+			if companions > 0 {
+				_, stdout, stderr := runDone(commands[0], without(env, tc.breaks+"=")...)
+				for _, line := range strings.Split(stdout+stderr, "\n") {
+					if !isListing(line) && containsAll(line, tc.says) {
+						t.Errorf("%v: still says %q with %s unset: the refusal is not about its file", commands[0], tc.says, tc.breaks)
+					}
 				}
 			}
 			// The refusal is about the file: with the canary directory unsearchable, or gone, what it says goes
