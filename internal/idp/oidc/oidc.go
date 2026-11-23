@@ -166,6 +166,9 @@ func checkURL(raw, issuer string, allowLoopbackHTTP bool) error {
 	if err != nil || u.Host == "" {
 		return fmt.Errorf("%s is not an absolute URL", logging.URL(raw))
 	}
+	if u.Hostname() == "" { // https://:443/token: url.Parse puts the port in u.Host (#625)
+		return fmt.Errorf("%s has no host before its port", logging.URL(raw))
+	}
 	if u.Scheme == "https" {
 		return nil
 	}

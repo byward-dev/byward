@@ -42,6 +42,8 @@ func TestOnlyClientIDURLsMeetingDraftSection3AreAccepted(t *testing.T) {
 		"too long":        "https://app.example/" + strings.Repeat("a", MaxCIMDURLLen-len("https://app.example/")+1),
 		"upper scheme":    "HTTPS://app.example/client",
 		"no host":         "https:///client",
+		"port, no host":   "https://:443/client", // #625
+		"colon, no host":  "https://:/client",
 		"bad escape":      "https://app.example/%zz/client", // fails only in url.Parse
 	} {
 		if err := ValidateCIMDURL(id); err == nil {

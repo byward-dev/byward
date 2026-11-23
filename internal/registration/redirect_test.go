@@ -86,6 +86,7 @@ func TestMatchRedirect(t *testing.T) {
 		{"wildcard", []string{"https://*.example/cb"}, "https://*.example/cb", ReasonWildcard},
 		{"relative", []string{"/cb"}, "/cb", ReasonMalformed},
 		{"opaque", []string{"https:app.example"}, "https:app.example", ReasonMalformed},
+		{"a port with no host", []string{"https://:443/cb"}, "https://:443/cb", ReasonMalformed}, // #625
 		{"too long", []string{"https://app.example/"}, "https://app.example/" + strings.Repeat("a", MaxRedirectURILen), ReasonTooLong},
 		{"empty", []string{"https://app.example/cb"}, "", ReasonMalformed},
 		{"space in path", []string{"https://app.example/c b"}, "https://app.example/c b", ReasonMalformed},

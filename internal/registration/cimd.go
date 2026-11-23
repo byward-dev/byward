@@ -45,6 +45,9 @@ func ValidateCIMDURL(id string) error {
 	if err != nil || u.Host == "" || u.Opaque != "" {
 		return reject("not an absolute URL")
 	}
+	if u.Hostname() == "" { // https://:443/x: url.Parse puts the port in u.Host (#625)
+		return reject("must have a host before its port")
+	}
 	if u.User != nil {
 		return reject("must not contain user information")
 	}

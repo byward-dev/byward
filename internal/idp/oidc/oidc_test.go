@@ -579,6 +579,7 @@ func TestARefusedEndpointIsNamedAsLogsMay(t *testing.T) {
 	for raw, want := range map[string]string{
 		"http://u:SECRET@idp.example/token?code=SECRET": "http://idp.example/token must use https",
 		"token?code=SECRET":                             "<invalid URL> is not an absolute URL",
+		"https://:443/token":                            "https://:443/token has no host before its port", // #625
 	} {
 		if err := checkURL(raw, "https://idp.example", false); err == nil || err.Error() != want {
 			t.Errorf("checkURL(%q) = %v, want %q", raw, err, want)

@@ -109,7 +109,7 @@ func parseRedirect(raw string) (*url.URL, error) {
 		return reject(ReasonMalformed)
 	}
 	u, err := url.Parse(raw)
-	if err != nil || u.Opaque != "" || u.Host == "" || !u.IsAbs() {
+	if err != nil || u.Opaque != "" || u.Hostname() == "" || !u.IsAbs() { // Hostname: https://:443/cb has a port, no host (#625)
 		return reject(ReasonMalformed)
 	}
 	if u.User != nil {

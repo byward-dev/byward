@@ -45,6 +45,7 @@ func TestARefusedDenylistEntryIsNamedByItsPlaceNeverShown(t *testing.T) {
 		"https://app " + secret + ".example/c.json":        "it is not a client ID metadata document URL: must be printable ASCII",
 		"https://app.example:" + secret + "/c.json":        "it is not a client ID metadata document URL: not an absolute URL",
 		"https://app.example:8443/" + secret + "@x/c.json": "it is not a client ID metadata document URL: only port 443 is fetched",
+		"https://:443/" + secret + "/c.json":               "it is not a client ID metadata document URL: must have a host before its port",
 		"http://" + secret + ".example/c.json":             "it is neither a CIMD client ID (https URL) nor a host name",
 	} {
 		for _, list := range [][]string{{entry, "good.example"}, {"good.example", entry}} {
