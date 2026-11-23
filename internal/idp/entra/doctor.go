@@ -20,8 +20,8 @@ type Diagnosis struct {
 	TenantSetting, ClientIDSetting string
 	// CredentialKind is the app's credential, CredentialSecret, CredentialFederated or
 	// CredentialCertificate (ADR-0012 §5), and CredentialSetting the setting that gave it, as the
-	// operator gave it: its file setting, or its inline variable under --dev. Every fix about a credential is chosen by the kind, so none is about another
-	// kind's.
+	// operator gave it: its file setting, or its inline variable under --dev. Every fix about a
+	// credential is chosen by the kind, so none is about another kind's.
 	CredentialKind, CredentialSetting string
 	// GateRoles are the access gate's app roles, which the app registration must define.
 	GateRoles []string
