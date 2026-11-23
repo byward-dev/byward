@@ -75,3 +75,55 @@ func TestNoOtherSettingMayUseAPlainIdentityHeader(t *testing.T) {
 		}
 	}
 }
+
+// Beside a stdio upstream, every setting for an HTTP upstream is refused for any value given, true
+// or false, as a flag or a variable: the HTTP upstream's own group, the identity assertion (httpOnly)
+// and the two with a stdio hint of their own, the plain identity headers and the On-Behalf-Of header.
+// Before #606, BYWARD_IDENTITY_HEADERS=false loaded, since its check read the value, not whether it
+// was given. A variable set to nothing is unset (#428), so each loads that way. The settings are read
+// from the registry, so one added to these groups is covered too; secrets take a file, not true or
+// false, and the URL is the other mode's selector.
+func TestEverySettingForAnHTTPUpstreamIsRefusedBesideStdioForAnyValueGiven(t *testing.T) {
+	ownHint := map[string]string{
+		"identity-headers": "BYWARD_IDENTITY_HEADERS is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)",
+		"obo-header":       "BYWARD_OBO_HEADER: a stdio upstream gets its downstream token from its token socket",
+	}
+	n := 0
+	for _, s := range registry {
+		if s.Secret() || s.Name == "upstream-url" || s.Group != GroupHTTPUpstream && !httpOnly[s.Name] && ownHint[s.Name] == "" {
+			continue
+		}
+		n++
+		for _, value := range []string{"false", "true"} {
+			for _, given := range []struct {
+				how, name string
+				args, env []string
+			}{
+				{"a variable", s.Env(), nil, []string{s.Env() + "=" + value}},
+				{"a flag", "--" + s.Name, []string{"--" + s.Name + "=" + value}, nil},
+			} {
+				t.Run(s.Name+"/"+given.how+"/"+value, func(t *testing.T) {
+					want := given.name + " is set, but the upstream is stdio"
+					if h := ownHint[s.Name]; h != "" {
+						want = h
+						if s.Name == "obo-header" {
+							want = strings.Replace(h, "BYWARD_OBO_HEADER", given.name, 1)
+						}
+					}
+					_, _, err := Load(given.args, stdioBase(append([]string{stdioCommand}, given.env...)...), baseFiles)
+					if !isConfigError(err) || !strings.Contains(err.Error(), want) {
+						t.Fatalf("err = %v, want a config error containing %q", err, want)
+					}
+				})
+			}
+		}
+		t.Run(s.Name+"/a variable set to nothing", func(t *testing.T) {
+			if _, _, err := Load(nil, stdioBase(stdioCommand, s.Env()+"="), baseFiles); err != nil {
+				t.Fatalf("%s= beside stdio: %v, want it to load as unset", s.Env(), err)
+			}
+		})
+	}
+	if n < 9 { // the HTTP upstream's 3, the assertion's 4, and the 2 with a hint of their own, today
+		t.Fatalf("%d settings checked; want every one for an HTTP upstream (9 today)", n)
+	}
+}
