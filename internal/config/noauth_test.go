@@ -198,13 +198,6 @@ func mustURL(t *testing.T, raw string) *url.URL {
 	return u
 }
 
-func TestNoAuthRefusesRealAuthSettings(t *testing.T) {
-	_, err := loadAnon(t, nil, "BYWARD_ENTRA_TENANT=00000000-0000-0000-0000-000000000001")
-	if !isConfigError(err) || !strings.Contains(err.Error(), "cannot be combined with BYWARD_ENTRA_TENANT") {
-		t.Fatalf("got %v", err)
-	}
-}
-
 // --insecure-no-auth refuses an allowed host or origin that is not loopback without its host name, in
 // any case, since a token is a valid host name (ADR-0031 §1).
 func TestNoAuthRefusesANonLoopbackHostOrOriginWithoutItsName(t *testing.T) {
@@ -251,8 +244,8 @@ func TestEveryAuthenticationSettingGivenBesideNoAuthIsRefused(t *testing.T) {
 			given = s.Env() + "_FILE=" + secret
 		}
 		_, _, err := Load(nil, append(slices.Clone(anon), given), files)
-		if want := "BYWARD_INSECURE_NO_AUTH cannot be combined with " + strings.SplitN(given, "=", 2)[0]; !isConfigError(err) || !strings.Contains(err.Error(), want) {
-			t.Errorf("%s: %v, want a config error containing %q", given, err, want)
+		if want := "BYWARD_INSECURE_NO_AUTH cannot be combined with " + strings.SplitN(given, "=", 2)[0] + ": remove one of them"; !isConfigError(err) || err.Error() != want {
+			t.Errorf("%s: %v, want the config error %q", given, err, want)
 		}
 	}
 	if n < 48 {
