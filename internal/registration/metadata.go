@@ -188,7 +188,7 @@ func validateMetadata(d metadataDocument, rule redirectRule) (*clientMetadata, [
 		// The SSRF guard's URL rule, so a URL it would never fetch is refused here, not at /token (the
 		// guard checks the address when it fetches).
 		if u, err := url.Parse(d.JWKSURI); err != nil || !ssrfguard.Fetchable(u) || u.Fragment != "" {
-			return nil, nil, errors.New("jwks_uri: must be an https URL on port 443, without user information or a fragment")
+			return nil, nil, errors.New("jwks_uri: must be an https URL with a host, on port 443, without user information or a fragment")
 		}
 		m.jwksURI = d.JWKSURI
 	case len(d.JWKS) > 0:

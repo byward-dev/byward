@@ -574,13 +574,14 @@ func TestDiscoveredEndpointsMustBeHTTPSUnlessALoopbackIssuerRunsInDevelopment(t 
 	}
 }
 
-// A refused discovery endpoint is named as logs may show it: the IdP's document wrote it.
+// A refused discovery endpoint is named as logs may show it, with why: the IdP's document wrote it.
 func TestARefusedEndpointIsNamedAsLogsMay(t *testing.T) {
 	for raw, want := range map[string]string{
 		"http://u:SECRET@idp.example/token?code=SECRET": "http://idp.example/token must use https",
 		"token?code=SECRET":                             "<invalid URL> is not an absolute URL",
 		"https://:443/token":                            "https://:443/token has no host before its port", // #625
 		"https://:/token":                               "https://:/token has no host before its port",
+		"https://u:SECRET@:443/token?code=SECRET":       "https://:443/token has no host before its port",
 	} {
 		if err := checkURL(raw, "https://idp.example", false); err == nil || err.Error() != want {
 			t.Errorf("checkURL(%q) = %v, want %q", raw, err, want)
@@ -737,8 +738,7 @@ func TestAnHTTPSIssuerOnANonPublicAddressIsDiscovered(t *testing.T) {
 }
 
 // An endpoint the IdP's discovery document lists is held to checkURL's rule: one over plain http, or
-// with a port and no host (#625), makes the provider not ready, fatally, naming the endpoint as logs
-// may show it.
+// with a port and no host (#625), makes the provider not ready, fatally, naming the endpoint.
 func TestADiscoveredEndpointThatBreaksTheRuleMakesTheProviderNotReady(t *testing.T) {
 	for _, bad := range []string{"http://idp.example/token", "https://:443/token"} {
 		t.Run(bad, func(t *testing.T) {

@@ -2,7 +2,7 @@ package registration
 
 import (
 	"encoding/json"
-	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -27,42 +27,33 @@ func TestOnlyClientIDURLsMeetingDraftSection3AreAccepted(t *testing.T) {
 			t.Errorf("%s: %v", ok, err)
 		}
 	}
-	for name, id := range map[string]string{
-		"http":            "http://app.example/client",
-		"no path":         "https://app.example",
-		"root path":       "https://app.example/",
-		"query":           "https://app.example/client?v=1",
-		"fragment":        "https://app.example/client#x",
-		"userinfo":        "https://user@app.example/client",
-		"dot segment":     "https://app.example/a/./client",
-		"dot-dot segment": "https://app.example/a/../client",
-		"escaped dot-dot": "https://app.example/a/%2e%2e/client",
-		"other port":      "https://app.example:8443/client",
-		"unicode host":    "https://bücher.example/client",
-		"space":           "https://app.example/a client",
-		"too long":        "https://app.example/" + strings.Repeat("a", MaxCIMDURLLen-len("https://app.example/")+1),
-		"upper scheme":    "HTTPS://app.example/client",
-		"no host":         "https:///client",
-		"port, no host":   "https://:443/client", // #625
-		"colon, no host":  "https://:/client",
-		"bad escape":      "https://app.example/%zz/client", // fails only in url.Parse
+	// Each refused ID is refused for the rule its row names: a port with no host ahead of the user
+	// information and the port rules, and after the URL is found absolute (#625).
+	for name, tc := range map[string]struct{ id, reason string }{
+		"http":                          {"http://app.example/client", "must start with https://"},
+		"no path":                       {"https://app.example", "must have a path other than /"},
+		"root path":                     {"https://app.example/", "must have a path other than /"},
+		"query":                         {"https://app.example/client?v=1", "must not have a query"},
+		"fragment":                      {"https://app.example/client#x", "must not have a fragment"},
+		"userinfo":                      {"https://user@app.example/client", "must not contain user information"},
+		"dot segment":                   {"https://app.example/a/./client", "must not contain . or .. path segments"},
+		"dot-dot segment":               {"https://app.example/a/../client", "must not contain . or .. path segments"},
+		"escaped dot-dot":               {"https://app.example/a/%2e%2e/client", "must not contain . or .. path segments"},
+		"other port":                    {"https://app.example:8443/client", "only port 443 is fetched"},
+		"unicode host":                  {"https://bücher.example/client", "must be printable ASCII"},
+		"space":                         {"https://app.example/a client", "must be printable ASCII"},
+		"too long":                      {"https://app.example/" + strings.Repeat("a", MaxCIMDURLLen-len("https://app.example/")+1), fmt.Sprintf("longer than %d characters", MaxCIMDURLLen)},
+		"upper scheme":                  {"HTTPS://app.example/client", "must start with https://"},
+		"no host":                       {"https:///client", "not an absolute URL"},
+		"bad escape":                    {"https://app.example/%zz/client", "not an absolute URL"}, // fails only in url.Parse
+		"port, no host":                 {"https://:443/client", "must have a host before its port"},
+		"colon, no host":                {"https://:/client", "must have a host before its port"},
+		"user info and a port, no host": {"https://u@:443/client", "must have a host before its port"},
+		"another port, no host":         {"https://:8443/client", "must have a host before its port"},
 	} {
-		if err := ValidateCIMDURL(id); err == nil {
-			t.Errorf("%s: %q accepted", name, id)
-		}
-	}
-	// A port with no host is refused for that, ahead of the user information and the port rules,
-	// and after the URL is found absolute (#625).
-	for id, reason := range map[string]string{
-		"https://:443/client":   "must have a host before its port",
-		"https://:/client":      "must have a host before its port",
-		"https://u@:443/client": "must have a host before its port",
-		"https://:8443/client":  "must have a host before its port",
-		"https:///client":       "not an absolute URL",
-	} {
-		var ce *cimdURLError
-		if err := ValidateCIMDURL(id); !errors.As(err, &ce) || ce.Reason != reason {
-			t.Errorf("%q: %v, want it refused as %q", id, err, reason)
+		want := "client ID metadata document URL: " + tc.reason
+		if err := ValidateCIMDURL(tc.id); err == nil || err.Error() != want {
+			t.Errorf("%s: ValidateCIMDURL(%q) = %v, want %q", name, tc.id, err, want)
 		}
 	}
 }
@@ -172,7 +163,7 @@ func TestInvalidDocumentsAreRefused(t *testing.T) {
 		"unparsable jwks_uri":                         {doc(map[string]any{"token_endpoint_auth_method": "private_key_jwt", "jwks_uri": "https://app.example/%zz"}), "jwks_uri: must be an https URL"},
 		"jwks_uri with a fragment":                    {doc(map[string]any{"token_endpoint_auth_method": "private_key_jwt", "jwks_uri": "https://app.example/jwks#k"}), "jwks_uri: must be an https URL"},
 		"http jwks_uri":                               {doc(map[string]any{"token_endpoint_auth_method": "private_key_jwt", "jwks_uri": "http://app.example/jwks"}), "jwks_uri: must be an https URL"},
-		"jwks_uri on another port":                    {doc(map[string]any{"token_endpoint_auth_method": "private_key_jwt", "jwks_uri": "https://app.example:8443/jwks"}), "jwks_uri: must be an https URL on port 443"},
+		"jwks_uri on another port":                    {doc(map[string]any{"token_endpoint_auth_method": "private_key_jwt", "jwks_uri": "https://app.example:8443/jwks"}), "jwks_uri: must be an https URL with a host, on port 443"},
 		"inline private key":                          {doc(map[string]any{"token_endpoint_auth_method": "private_key_jwt", "jwks": privateJWKS(t)}), "private key"},
 		"trailing data":                               {append(doc(nil), []byte(` {}`)...), "trailing"},
 		"not an object":                               {[]byte(`["x"]`), "not a JSON object"},
