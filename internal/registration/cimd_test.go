@@ -51,11 +51,18 @@ func TestOnlyClientIDURLsMeetingDraftSection3AreAccepted(t *testing.T) {
 			t.Errorf("%s: %q accepted", name, id)
 		}
 	}
-	// A port with no host is refused for that, not for a neighbouring rule (#625).
-	for _, id := range []string{"https://:443/client", "https://:/client"} {
+	// A port with no host is refused for that, ahead of the user information and the port rules,
+	// and after the URL is found absolute (#625).
+	for id, reason := range map[string]string{
+		"https://:443/client":   "must have a host before its port",
+		"https://:/client":      "must have a host before its port",
+		"https://u@:443/client": "must have a host before its port",
+		"https://:8443/client":  "must have a host before its port",
+		"https:///client":       "not an absolute URL",
+	} {
 		var ce *cimdURLError
-		if err := ValidateCIMDURL(id); !errors.As(err, &ce) || ce.Reason != "must have a host before its port" {
-			t.Errorf("%q: %v, want it refused as having no host before its port", id, err)
+		if err := ValidateCIMDURL(id); !errors.As(err, &ce) || ce.Reason != reason {
+			t.Errorf("%q: %v, want it refused as %q", id, err, reason)
 		}
 	}
 }

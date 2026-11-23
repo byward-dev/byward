@@ -88,6 +88,8 @@ func TestMatchRedirect(t *testing.T) {
 		{"opaque", []string{"https:app.example"}, "https:app.example", ReasonMalformed},
 		{"a port with no host", []string{"https://:443/cb"}, "https://:443/cb", ReasonMalformed}, // #625
 		{"a colon with no host", []string{"https://:/cb"}, "https://:/cb", ReasonMalformed},
+		{"user information and a port with no host", []string{"https://u@:443/cb"}, "https://u@:443/cb", ReasonMalformed},
+		{"http with a port and no host", []string{"http://:80/cb"}, "http://:80/cb", ReasonMalformed},
 		{"too long", []string{"https://app.example/"}, "https://app.example/" + strings.Repeat("a", MaxRedirectURILen), ReasonTooLong},
 		{"empty", []string{"https://app.example/cb"}, "", ReasonMalformed},
 		{"space in path", []string{"https://app.example/c b"}, "https://app.example/c b", ReasonMalformed},
