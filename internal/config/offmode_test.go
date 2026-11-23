@@ -44,6 +44,13 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 			want: "BYWARD_UPSTREAM_URL and BYWARD_UPSTREAM_COMMAND are both set: an upstream is either HTTP or stdio"},
 		{name: "the identity headers with stdio keep their own hint", stdio: true, env: []string{"BYWARD_IDENTITY_HEADERS=true"},
 			want: "BYWARD_IDENTITY_HEADERS is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)"},
+		// Refused for any value given, false too (#606): before, only true was.
+		{name: "the identity headers set false with stdio", stdio: true, env: []string{"BYWARD_IDENTITY_HEADERS=false"},
+			want: "BYWARD_IDENTITY_HEADERS is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)"},
+		{name: "the identity headers set false as a flag with stdio", stdio: true, args: []string{"--identity-headers=false"},
+			want: "BYWARD_IDENTITY_HEADERS is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)"},
+		{name: "malformed identity headers with stdio are named twice", stdio: true, env: []string{"BYWARD_IDENTITY_HEADERS=maybe"},
+			want: "BYWARD_IDENTITY_HEADERS is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md); BYWARD_IDENTITY_HEADERS: want true or false; got a value (5 characters, not shown): it is neither true nor false"},
 		{name: "the On-Behalf-Of header with stdio keeps its own hint", stdio: true, env: []string{"BYWARD_OBO_HEADER=X-Graph-Token"},
 			want: "BYWARD_OBO_HEADER: a stdio upstream gets its downstream token from its token socket (BYWARD_DOWNSTREAM_TOKEN_SOCKET), not a header; leave BYWARD_OBO_HEADER unset"},
 		{name: "the PostgreSQL store with stdio keeps its own hint", stdio: true, env: []string{"BYWARD_STORE_POSTGRES_DSN_FILE=" + credFile},
@@ -118,13 +125,16 @@ func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 			if skipped[s.Name] {
 				return
 			}
-			given := s.Env() + "=x"
+			// Whatever the value: false and true too, as a boolean setting's value is never read here (#606).
+			givens := []string{s.Env() + "=x", s.Env() + "=false", s.Env() + "=true"}
 			if s.Secret() {
-				given = s.Env() + "_FILE=/run/secrets/off-mode"
+				givens = []string{s.Env() + "_FILE=/run/secrets/off-mode"}
 			}
-			_, _, err := Load(nil, append(slices.Clone(modeEnv), given), files)
-			if want := strings.SplitN(given, "=", 2)[0] + " is set, but the upstream is " + mode; !isConfigError(err) || !strings.Contains(err.Error(), want) {
-				t.Fatalf("err = %v, want a config error containing %q", err, want)
+			for _, given := range givens {
+				_, _, err := Load(nil, append(slices.Clone(modeEnv), given), files)
+				if want := strings.SplitN(given, "=", 2)[0] + " is set, but the upstream is " + mode; !isConfigError(err) || !strings.Contains(err.Error(), want) {
+					t.Errorf("%s: err = %v, want a config error containing %q", given, err, want)
+				}
 			}
 		})
 	}
