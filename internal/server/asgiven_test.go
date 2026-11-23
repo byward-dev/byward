@@ -92,6 +92,7 @@ func TestAPathSettingThatCannotBeUsedIsNamedAsGiven(t *testing.T) {
 	}
 	missing := filepath.Join(t.TempDir(), "missing")
 	cert, looseKey := write("x", 0o600), write("x", 0o644)
+	looseToken := write("t", 0o644)
 	badCert, badKey := write("not a certificate", 0o600), write("not a key", 0o600)
 	stateFile, counter := write("", 0o600), filepath.Join(t.TempDir(), "store-writes")
 	otherCert, otherKey := testcert.Issue(t, testcert.Options{Hosts: []string{"other.example.com"}, Leaf: testcert.Valid(time.Now(), 90)}).Write(t, t.TempDir())
@@ -131,6 +132,10 @@ func TestAPathSettingThatCannotBeUsedIsNamedAsGiven(t *testing.T) {
 			"BYWARD_TLS_CERT_FILE: "},
 		{"a serving certificate for another host, by flag", []string{"--tls-cert-file=" + otherCert, "--tls-key-file=" + otherKey}, dropping(authEnv(t)), warns,
 			"--tls-cert-file: "},
+		{"a federated token file others can read, by env", nil, append(dropping(authEnv(t), "BYWARD_ENTRA_CLIENT_SECRET_FILE"), "BYWARD_ENTRA_FEDERATED_TOKEN_FILE="+looseToken), loose,
+			"BYWARD_ENTRA_FEDERATED_TOKEN_FILE: "},
+		{"a federated token file others can read, by flag", []string{"--entra-federated-token-file=" + looseToken}, dropping(authEnv(t), "BYWARD_ENTRA_CLIENT_SECRET_FILE"), loose,
+			"--entra-federated-token-file: "},
 		{"a missing federated token file, by env", nil, append(dropping(authEnv(t), "BYWARD_ENTRA_CLIENT_SECRET_FILE"), "BYWARD_ENTRA_FEDERATED_TOKEN_FILE="+missing), loose,
 			"BYWARD_ENTRA_FEDERATED_TOKEN_FILE: "},
 		{"a missing federated token file, by flag", []string{"--entra-federated-token-file=" + missing}, dropping(authEnv(t), "BYWARD_ENTRA_CLIENT_SECRET_FILE"), loose,
