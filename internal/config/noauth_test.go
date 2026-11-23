@@ -3,6 +3,7 @@ package config
 import (
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -224,5 +225,37 @@ func TestNoAuthListensOnLocalhostInAnyCase(t *testing.T) {
 				t.Fatalf("BYWARD_LISTEN=%s: %v; want it accepted as loopback", listen, err)
 			}
 		})
+	}
+}
+
+// Every authentication setting given beside --insecure-no-auth is refused, so a half-configured
+// production setup never runs open; set to nothing as a variable, it is unset and loads (#428, #597:
+// TestEverySettingSetToNothingLoadsAsIfUnset walks that in its no-authentication mode). The settings
+// are read from the registry, so a new one is covered with no test to edit.
+func TestEveryAuthenticationSettingGivenBesideNoAuthIsRefused(t *testing.T) {
+	const secret = "/run/secrets/an-auth-setting"
+	files := func(p string) ([]byte, error) {
+		if p == secret {
+			return []byte("x\n"), nil
+		}
+		return filesPlusEmptyAndBlank(p)
+	}
+	n := 0
+	for _, s := range registry {
+		if !s.Auth {
+			continue
+		}
+		n++
+		given := s.Env() + "=x"
+		if s.Secret() {
+			given = s.Env() + "_FILE=" + secret
+		}
+		_, _, err := Load(nil, append(slices.Clone(anon), given), files)
+		if want := "BYWARD_INSECURE_NO_AUTH cannot be combined with " + strings.SplitN(given, "=", 2)[0]; !isConfigError(err) || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want a config error containing %q", given, err, want)
+		}
+	}
+	if n < 48 {
+		t.Fatalf("%d authentication settings checked, want every one (48 today)", n)
 	}
 }

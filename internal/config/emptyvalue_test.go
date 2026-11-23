@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// emptyModes are the smallest configurations of each upstream mode and IdP family, for the
-// empty-value walks.
+// emptyModes are the smallest configurations of each upstream mode and IdP family, and of no
+// authentication, for the empty-value walks.
 var emptyModes = []struct {
 	name  string
 	env   []string
@@ -16,6 +16,7 @@ var emptyModes = []struct {
 	{"an HTTP upstream", base, baseFiles},
 	{"a stdio upstream", stdioBase(stdioCommand), baseFiles},
 	{"an oidc IdP", oidcBase, filesPlusEmptyAndBlank},
+	{"no authentication", anon, filesPlusEmptyAndBlank},
 }
 
 // A variable set to nothing is the same as unset, for every setting in each mode (#428): env
