@@ -20,7 +20,7 @@ func (c *Config) assertion(v *Values) []error {
 	// setting given for a family that is off is (#596); a variable set to nothing is unset (#428). The
 	// value is still read, so a malformed one is named too, as for the sibling settings.
 	if v.stdioUpstream() && v.byKey["identity-headers"].Source != SourceDefault {
-		errs = append(errs, errorf("%s is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)", Setting{Name: "identity-headers"}.Env()))
+		errs = append(errs, errorf("%s is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)", spelled(v.byKey["identity-headers"])))
 	}
 	if c.IdentityHeaders, err = v.boolean("identity-headers"); err != nil {
 		errs = append(errs, err)

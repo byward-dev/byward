@@ -47,7 +47,9 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 			want: identityHint},
 		// Refused for any value given, false too (#606): before, only true was.
 		{name: "the plain identity headers set false with stdio", stdio: true, env: []string{"BYWARD_IDENTITY_HEADERS=false"}, want: identityHint},
-		{name: "the plain identity headers set false as a flag with stdio", stdio: true, args: []string{"--identity-headers=false"}, want: identityHint},
+		// Named as given, as the On-Behalf-Of header is.
+		{name: "the plain identity headers set false as a flag with stdio", stdio: true, args: []string{"--identity-headers=false"},
+			want: "--identity-headers is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)"},
 		{name: "malformed plain identity headers with stdio get the refusal and the parse error", stdio: true, env: []string{"BYWARD_IDENTITY_HEADERS=maybe"},
 			want: identityHint + "; BYWARD_IDENTITY_HEADERS: want true or false; got a value (5 characters, not shown): it is neither true nor false"},
 		{name: "the On-Behalf-Of header with stdio keeps its own hint", stdio: true, env: []string{"BYWARD_OBO_HEADER=X-Graph-Token"},
