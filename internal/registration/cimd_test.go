@@ -2,6 +2,7 @@ package registration
 
 import (
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -48,6 +49,13 @@ func TestOnlyClientIDURLsMeetingDraftSection3AreAccepted(t *testing.T) {
 	} {
 		if err := ValidateCIMDURL(id); err == nil {
 			t.Errorf("%s: %q accepted", name, id)
+		}
+	}
+	// A port with no host is refused for that, not for a neighbouring rule (#625).
+	for _, id := range []string{"https://:443/client", "https://:/client"} {
+		var ce *cimdURLError
+		if err := ValidateCIMDURL(id); !errors.As(err, &ce) || ce.Reason != "must have a host before its port" {
+			t.Errorf("%q: %v, want it refused as having no host before its port", id, err)
 		}
 	}
 }

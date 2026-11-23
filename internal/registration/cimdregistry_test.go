@@ -219,7 +219,7 @@ func TestNonCIMDAndInvalidIDsAreNotFetched(t *testing.T) {
 	f := &fakeFetch{}
 	c := newClock()
 	r := newReg(f, c, nil, nil)
-	for _, id := range []string{"static-app", "http://app.example/client", "https://app.example/client?x=1"} {
+	for _, id := range []string{"static-app", "http://app.example/client", "https://app.example/client?x=1", "https://:443/client"} {
 		if _, err := r.Client(context.Background(), id); !errors.Is(err, ErrUnknownClient) {
 			t.Errorf("%s: err = %v", id, err)
 		}

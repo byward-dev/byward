@@ -129,9 +129,10 @@ func (f *Fetcher) HTTPClient() *http.Client { return f.client }
 const fetchPort = 443
 
 // Fetchable reports whether u passes the guard's URL rule, checked before any dial: https, with a
-// host and no user information, on port 443, given or not. The dial then checks the address.
+// host name (not a port alone: url.Parse puts https://:443/x's port in u.Host, #625) and no user
+// information, on port 443, given or not. The dial then checks the address.
 func Fetchable(u *url.URL) bool {
-	return u.Scheme == "https" && u.Host != "" && u.User == nil && (u.Port() == "" || u.Port() == strconv.Itoa(fetchPort))
+	return u.Scheme == "https" && u.Hostname() != "" && u.User == nil && (u.Port() == "" || u.Port() == strconv.Itoa(fetchPort))
 }
 
 // Get fetches rawURL and returns its body if the status is 200 and the body is at most maxBytes.

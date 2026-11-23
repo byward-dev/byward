@@ -56,7 +56,7 @@ func TestOnlyHTTPSOnTheDefaultPortIsFetched(t *testing.T) {
 	if _, err := f.Get(context.Background(), "https://example.com:443/doc", 1024); err != nil {
 		t.Fatalf("explicit default port: %v", err)
 	}
-	for _, u := range []string{"http://example.com/doc", "https://example.com:8443/doc", "https://user:pw@example.com/doc", "ftp://example.com/doc", "https:///doc", "https:example.com/doc", "::"} {
+	for _, u := range []string{"http://example.com/doc", "https://example.com:8443/doc", "https://user:pw@example.com/doc", "ftp://example.com/doc", "https:///doc", "https:example.com/doc", "::", "https://:443/doc", "https://:/doc"} {
 		t.Run(u, func(t *testing.T) {
 			if _, err := f.Get(context.Background(), u, 1024); !errors.Is(err, ErrRefused) {
 				t.Fatalf("err = %v, want ErrRefused", err)
