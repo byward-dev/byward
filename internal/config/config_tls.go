@@ -1,8 +1,8 @@
 package config
 
 // tls reads the public listener's certificate and key files (#183): both or neither, absolute
-// paths, and only under an https public URL, which is what clients use. Each refusal names the files
-// as the operator gave them (#619).
+// paths, and only under an https public URL, which is what clients use. The both-or-neither and https
+// refusals name the files as the operator gave them (#619).
 func (c *Config) tls(v *Values) []error {
 	c.TLSCertFile, c.TLSKeyFile = parseText(v.value("tls-cert-file")), parseText(v.value("tls-key-file"))
 	if c.TLSCertFile == "" && c.TLSKeyFile == "" {

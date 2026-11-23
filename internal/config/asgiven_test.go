@@ -27,19 +27,17 @@ func TestARefusalBetweenSettingsNamesEachGivenOneAsGiven(t *testing.T) {
 			"--oidc-client-key-id is set without BYWARD_OIDC_CLIENT_KEY_FILE"},
 		{"an OIDC key algorithm without a key, by flag", []string{"--oidc-client-key-alg=ES256"}, slices.Clone(oidcBase), oidcFiles,
 			"--oidc-client-key-alg is set without BYWARD_OIDC_CLIENT_KEY_FILE"},
+		{"an inline Entra secret and a certificate, by env", nil, withoutSecret("BYWARD_ENTRA_CLIENT_SECRET=abc", "BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE=/run/secrets/entra"), baseFiles,
+			"BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE and BYWARD_ENTRA_CLIENT_SECRET are set together"},
+		{"an inline OIDC secret and a key, by env", nil, append(slices.Clone(withoutOIDCSecret), "BYWARD_OIDC_CLIENT_SECRET=abc", "BYWARD_OIDC_CLIENT_KEY_FILE=/run/secrets/key.pem"), oidcFiles,
+			"BYWARD_OIDC_CLIENT_SECRET and BYWARD_OIDC_CLIENT_KEY_FILE are both set"},
 		{"two Entra credentials, by env", nil, append(slices.Clone(base), "BYWARD_ENTRA_FEDERATED_TOKEN_FILE=/run/secrets/token"), baseFiles,
 			"BYWARD_ENTRA_CLIENT_SECRET_FILE and BYWARD_ENTRA_FEDERATED_TOKEN_FILE are set together"},
 		{"two Entra credentials, by flag", []string{"--entra-federated-token-file=/run/secrets/token"}, slices.Clone(base), baseFiles,
 			"--entra-federated-token-file and BYWARD_ENTRA_CLIENT_SECRET_FILE are set together"},
 		{"a secret expiry with a federated token, by flag", []string{"--entra-federated-token-file=/run/secrets/token", "--entra-client-secret-expires-at=2030-01-01"}, withoutSecret(), baseFiles,
 			"--entra-client-secret-expires-at has no effect with --entra-federated-token-file"},
-		{"a secret expiry with a certificate, by flag", []string{"--entra-client-certificate-file=/run/secrets/cert", "--entra-client-secret-expires-at=2030-01-01"}, withoutSecret(),
-			func(p string) ([]byte, error) {
-				if p == "/run/secrets/cert" {
-					return []byte("a certificate\n"), nil
-				}
-				return baseFiles(p)
-			},
+		{"a secret expiry with a certificate, by flag", []string{"--entra-client-certificate-file=/run/secrets/entra", "--entra-client-secret-expires-at=2030-01-01"}, withoutSecret(), baseFiles,
 			"--entra-client-secret-expires-at has no effect with --entra-client-certificate-file"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -52,7 +50,7 @@ func TestARefusalBetweenSettingsNamesEachGivenOneAsGiven(t *testing.T) {
 }
 
 // NameAsGiven names a setting as the operator gave it: its file flag or file variable for a secret, its
-// variable to set when it was not given or there are no values, and panics for an unknown name.
+// variable to set when it is left at its default or there are no values, and panics for an unknown name.
 func TestNameAsGivenNamesASettingAsTheOperatorGaveIt(t *testing.T) {
 	withoutOIDCSecret := without("BYWARD_OIDC_CLIENT_SECRET_FILE")(slices.Clone(oidcBase))
 	load := func(args, env []string) *Values {
@@ -70,7 +68,7 @@ func TestNameAsGivenNamesASettingAsTheOperatorGaveIt(t *testing.T) {
 	}{
 		{"by flag", load([]string{"--oidc-client-key-file=/run/secrets/key.pem"}, withoutOIDCSecret), "--oidc-client-key-file"},
 		{"by env", load(nil, append(slices.Clone(withoutOIDCSecret), "BYWARD_OIDC_CLIENT_KEY_FILE=/run/secrets/key.pem")), "BYWARD_OIDC_CLIENT_KEY_FILE"},
-		{"not given", load(nil, slices.Clone(oidcBase)), "BYWARD_OIDC_CLIENT_KEY_FILE"},
+		{"left at its default", load(nil, slices.Clone(oidcBase)), "BYWARD_OIDC_CLIENT_KEY_FILE"},
 		{"no values", nil, "BYWARD_OIDC_CLIENT_KEY_FILE"},
 	} {
 		if got := tc.v.NameAsGiven("oidc-client-key"); got != tc.want {
