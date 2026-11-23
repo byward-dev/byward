@@ -6,9 +6,9 @@ import (
 	"unicode/utf8"
 )
 
-// urlSettings are the settings read as an http(s) URL (parseHTTPURL), each with a URL whose host and
-// port are %s, one with a port and no host, and its refusal up to its length (got) and after its
-// reason (after).
+// urlSettings are the settings read as an http(s) URL (parseHTTPURL), each with a URL whose port is %s
+// (written with its colon), one with a port and no host, and its refusal up to its length (got) and
+// after its reason (after). The client denylist is not one: its CIMD client IDs are registration's.
 var urlSettings = []struct {
 	env, url, noHost, got, after string
 	load                         func(*testing.T) func(kv ...string) error
@@ -21,9 +21,10 @@ var urlSettings = []struct {
 	{"BYWARD_ALLOWED_ORIGINS", "https://app.example.com%s", "https://:8443", wantOrigins, "", withConfig},
 }
 
-// Every URL setting refuses a port with no host before it, such as http://:9000/mcp (#614): a setting
-// names the host it means, where a dialer would read the empty host as this one, and an issuer so
-// written never matches what an IdP publishes. The value is never shown.
+// Every http(s) URL setting refuses a port with no host before it, such as http://:9000/mcp (#614): a
+// setting names the host it means, where a dialer would read the empty host as this one, and an
+// issuer so written never matches what an IdP publishes. The value is never shown. (The order of
+// this reason among the others: TestAURLRefusedForItsFormSaysWhichPartIsWrong.)
 func TestEveryURLSettingRefusesAPortWithNoHost(t *testing.T) {
 	for _, s := range urlSettings {
 		t.Run(s.env, func(t *testing.T) {
