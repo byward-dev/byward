@@ -12,6 +12,7 @@ import (
 func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 	const toStdio = "is set, but the upstream is HTTP: it applies only to a stdio upstream (BYWARD_UPSTREAM_COMMAND); remove it"
 	const toHTTP = "is set, but the upstream is stdio: it applies only to an HTTP upstream (BYWARD_UPSTREAM_URL); remove it"
+	const identityHint = "BYWARD_IDENTITY_HEADERS is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)"
 	for _, tc := range []struct {
 		name  string
 		args  []string
@@ -42,15 +43,13 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 			want: "BYWARD_UPSTREAM_URL and BYWARD_UPSTREAM_COMMAND are both set: an upstream is either HTTP or stdio"},
 		{name: "the credential with both selectors gets only the both-set error", stdio: true, env: []string{"BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile},
 			want: "BYWARD_UPSTREAM_URL and BYWARD_UPSTREAM_COMMAND are both set: an upstream is either HTTP or stdio"},
-		{name: "the identity headers with stdio keep their own hint", stdio: true, env: []string{"BYWARD_IDENTITY_HEADERS=true"},
-			want: "BYWARD_IDENTITY_HEADERS is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)"},
+		{name: "the plain identity headers set true with stdio keep their own hint", stdio: true, env: []string{"BYWARD_IDENTITY_HEADERS=true"},
+			want: identityHint},
 		// Refused for any value given, false too (#606): before, only true was.
-		{name: "the identity headers set false with stdio", stdio: true, env: []string{"BYWARD_IDENTITY_HEADERS=false"},
-			want: "BYWARD_IDENTITY_HEADERS is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)"},
-		{name: "the identity headers set false as a flag with stdio", stdio: true, args: []string{"--identity-headers=false"},
-			want: "BYWARD_IDENTITY_HEADERS is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)"},
-		{name: "malformed identity headers with stdio are named twice", stdio: true, env: []string{"BYWARD_IDENTITY_HEADERS=maybe"},
-			want: "BYWARD_IDENTITY_HEADERS is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md); BYWARD_IDENTITY_HEADERS: want true or false; got a value (5 characters, not shown): it is neither true nor false"},
+		{name: "the plain identity headers set false with stdio", stdio: true, env: []string{"BYWARD_IDENTITY_HEADERS=false"}, want: identityHint},
+		{name: "the plain identity headers set false as a flag with stdio", stdio: true, args: []string{"--identity-headers=false"}, want: identityHint},
+		{name: "malformed plain identity headers with stdio get the refusal and the parse error", stdio: true, env: []string{"BYWARD_IDENTITY_HEADERS=maybe"},
+			want: identityHint + "; BYWARD_IDENTITY_HEADERS: want true or false; got a value (5 characters, not shown): it is neither true nor false"},
 		{name: "the On-Behalf-Of header with stdio keeps its own hint", stdio: true, env: []string{"BYWARD_OBO_HEADER=X-Graph-Token"},
 			want: "BYWARD_OBO_HEADER: a stdio upstream gets its downstream token from its token socket (BYWARD_DOWNSTREAM_TOKEN_SOCKET), not a header; leave BYWARD_OBO_HEADER unset"},
 		{name: "the PostgreSQL store with stdio keeps its own hint", stdio: true, env: []string{"BYWARD_STORE_POSTGRES_DSN_FILE=" + credFile},
@@ -125,7 +124,8 @@ func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 			if skipped[s.Name] {
 				return
 			}
-			// Whatever the value: false and true too, as a boolean setting's value is never read here (#606).
+			// Any value given is refused, false and true too (#606); a malformed boolean may add its parse
+			// error after the refusal, hence Contains.
 			givens := []string{s.Env() + "=x", s.Env() + "=false", s.Env() + "=true"}
 			if s.Secret() {
 				givens = []string{s.Env() + "_FILE=/run/secrets/off-mode"}
@@ -166,7 +166,7 @@ func TestAnUnclearUpstreamGivesOnlyItsOwnErrors(t *testing.T) {
 		{"a malformed command keeps the credential's stdio hint",
 			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_UPSTREAM_CREDENTIAL_FILE="+credFile),
 			[]string{"is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE"}, []string{"ASSERTION_HEADER"}},
-		{"a malformed command still refuses the identity headers",
+		{"a malformed command still refuses the plain identity headers",
 			stdioBase("BYWARD_UPSTREAM_COMMAND=notjson", "BYWARD_IDENTITY_HEADERS=true"),
 			[]string{"BYWARD_IDENTITY_HEADERS is for an HTTP upstream"}, nil},
 		{"a malformed command still refuses the On-Behalf-Of header",
@@ -177,7 +177,7 @@ func TestAnUnclearUpstreamGivesOnlyItsOwnErrors(t *testing.T) {
 			[]string{"BYWARD_STORE_POSTGRES_DSN_FILE: the PostgreSQL store is for several replicas"}, nil},
 		{"no upstream at all gives only the required error",
 			stdioBase("BYWARD_STDIO_MAX_PROCESSES=5", "BYWARD_UPSTREAM_HEADER_TIMEOUT=abc", "BYWARD_UPSTREAM_STRIP_HEADERS=Host",
-				"BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Key", "BYWARD_ASSERTION_HEADER=X-Byward-Identity"),
+				"BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Key", "BYWARD_ASSERTION_HEADER=X-Byward-Identity", "BYWARD_IDENTITY_HEADERS=false"),
 			[]string{"BYWARD_UPSTREAM_URL is required (or BYWARD_UPSTREAM_COMMAND, or a command after --)"}, []string{"the upstream is HTTP", ";"}},
 		{"a malformed URL still reports the HTTP upstream's own settings",
 			append(append([]string{}, base...), "BYWARD_UPSTREAM_URL=ftp://x", "BYWARD_UPSTREAM_STRIP_HEADERS=Host", "BYWARD_UPSTREAM_HEADER_TIMEOUT=abc"),
