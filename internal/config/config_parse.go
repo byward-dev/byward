@@ -254,7 +254,7 @@ func urlParseReason(err error) string {
 	case inner.Error() == "missing ']' in host":
 		return `has a "[" in its host without its "]"`
 	case inner.Error() == "invalid IP-literal", strings.HasPrefix(inner.Error(), "invalid host: "):
-		return "has a host in brackets that is not an IPv6 address"
+		return bracketsReason
 	case inner.Error() == "net/url: invalid userinfo":
 		return "holds a user name or password"
 	}
@@ -441,11 +441,11 @@ func hostPort(h string) (stored, reason string) {
 	case strings.HasPrefix(h, "["):
 		inner, rest, ok := strings.Cut(h[1:], "]")
 		if !ok || (rest != "" && !strings.HasPrefix(rest, ":")) {
-			return "", "has brackets that do not enclose an IPv6 address alone; " + hostPortForms
+			return "", bracketsReason + "; " + hostPortForms
 		}
 		v6, isV6, port, hasPort = inner, true, strings.TrimPrefix(rest, ":"), rest != ""
 	case strings.ContainsAny(h, "[]"):
-		return "", "has brackets that do not enclose an IPv6 address alone; " + hostPortForms
+		return "", bracketsReason + "; " + hostPortForms
 	case strings.Count(h, ":") > 1:
 		v6, isV6, stored = h, true, "["+h+"]"
 	default:
@@ -493,6 +493,31 @@ func parseAllowedHosts(val Value) ([]string, []error) {
 	return out, errs
 }
 
+// zoneReason is why a listen address's IPv6 zone that no interface can be named is refused,
+// completing "it …".
+const zoneReason = "has an IPv6 zone that is not an interface name: 1 to 15 bytes, no white space, control character, / or :"
+
+// interfaceName reports whether zone is a name a network interface can have, by Linux's own rule
+// (dev_valid_name, net/core/dev.c): 1 to 15 bytes (IFNAMSIZ is 16, include/uapi/linux/if.h; macOS's
+// IF_NAMESIZE is 16 too, xnu bsd/net/if.h), not "." or "..", and no "/", ":" or byte the kernel's
+// isspace matches (9 to 13, 32 and 0xA0, lib/ctype.c). Bytes, not characters, as the kernel reads
+// it. It refuses an ASCII control character too, which the kernel would take (#638). Go maps a
+// zone to an interface index through its own interface list and, when no interface has the name,
+// reads it as a number (net/interface.go ipv6ZoneCache.index, Go 1.27.4 lines 244-261): a zone
+// outside this rule can match no interface, so a non-numeric one would be dropped silently, an
+// unscoped bind. A numeric zone, an interface index, passes.
+func interfaceName(zone string) bool {
+	if zone == "" || len(zone) > 15 || zone == "." || zone == ".." {
+		return false
+	}
+	for i := range len(zone) {
+		if b := zone[i]; b == '/' || b == ':' || b == ' ' || b == 0xA0 || b < 0x20 || b == 0x7F {
+			return false
+		}
+	}
+	return true
+}
+
 // bracketsReason is why an address with brackets around anything but an IPv6 address is refused:
 // host.Parse's own reason, read here since parseListen's host variable shadows the package.
 var bracketsReason = host.ErrBrackets.Error()
@@ -503,15 +528,17 @@ var bracketsReason = host.ErrBrackets.Error()
 // number from 0 to 65535, as net.Listen takes it. Brackets enclose an IPv6 address alone (RFC 3986
 // §3.2.2), as host.Parse requires (#629): net.SplitHostPort strips them from a name, an IPv4
 // address or nothing too, so such a value is almost certainly a typo, and []:80 would listen on
-// every interface. A refused address is never shown (ADR-0031 §1): net.Listen's own error would
-// quote it.
+// every interface. An IPv6 zone is a name an interface can have (interfaceName, #638). A refused
+// address is never shown (ADR-0031 §1): net.Listen's own error would quote it.
 func parseListen(val Value, want string) (string, error) {
 	s, raw := val.Setting, val.Given.raw()
 	host, port, err := net.SplitHostPort(raw)
 	_, ipErr := netip.ParseAddr(host) // an IPv6 address may have a zone, as a link-local one needs
-	nameReason := ""
+	nameReason, zone, zoned := "", "", false
 	if !strings.Contains(host, ":") { // an IPv6 host is no name; a bad one is neither, below
 		nameReason = nameCharReason(host)
+	} else {
+		_, zone, zoned = strings.Cut(host, "%")
 	}
 	var reason string
 	switch {
@@ -519,6 +546,8 @@ func parseListen(val Value, want string) (string, error) {
 		reason = "it is not host:port"
 	case strings.HasPrefix(raw, "[") && !strings.Contains(host, ":"):
 		reason = "it " + bracketsReason
+	case zoned && !interfaceName(zone):
+		reason = "it " + zoneReason
 	case nameReason != "":
 		reason = "its host " + nameReason
 	case host != "" && !validHostName(strings.TrimSuffix(host, ".")) && ipErr != nil:

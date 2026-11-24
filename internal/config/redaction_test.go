@@ -240,7 +240,7 @@ func TestAURLRefusedForItsFormSaysWhichPartIsWrong(t *testing.T) {
 		hostEscape = "it has a %-escape in its host, which a host name cannot hold"
 		noScheme   = "it has no scheme such as https://"
 		badPort    = "it has a port that is not a number"
-		notIPv6    = "it has a host in brackets that is not an IPv6 address"
+		notIPv6    = "it has brackets that do not enclose an IPv6 address alone"
 		userInfo   = "it holds a user name or password"
 	)
 	for _, tc := range []struct{ name, raw, why string }{

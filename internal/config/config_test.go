@@ -1192,9 +1192,13 @@ func length(s string) int { return len([]rune(s)) }
 // refused one is named by its length and why, never shown, so startup's net.Listen error can never
 // quote it.
 func TestAListenAddressIsHostColonANumericPortAndARefusedOneIsNeverShown(t *testing.T) {
+	const zoneRule = "has an IPv6 zone that is not an interface name: 1 to 15 bytes, no white space, control character, / or :"
 	for _, ok := range []string{"127.0.0.1:8080", ":8080", "[::1]:8080", "localhost:0", "0.0.0.0:65535", "byward.internal:8443",
 		"[fe80::1%lo0]:8080", "[fe80::1%ü]:8080", "byward.internal.:8443", "127.0.0.1:000080", "my_byward:8080",
-		"[fe80::1%eth0]:80", "[::ffff:127.0.0.1]:80", "[2001:db8:0:0:0:0:0:1]:80"} {
+		"[fe80::1%eth0]:80", "[::ffff:127.0.0.1]:80", "[2001:db8:0:0:0:0:0:1]:80",
+		// A zone is a name an interface can have (#638): Linux's and macOS's, 15 bytes at most, or an
+		// interface index, which Go takes as a number.
+		"[fe80::1%en0]:80", "[fe80::1%utun3]:0", "[fe80::1%bridge100]:0", "[fe80::1%2]:80", "[fe80::1%abcdefghijklmno]:0"} {
 		for _, name := range []string{"BYWARD_LISTEN", "BYWARD_INTERNAL_LISTEN"} {
 			if _, err := load(t, nil, "BYWARD_LISTEN=127.0.0.1:1", name+"="+ok); err != nil {
 				t.Errorf("%s=%s: %v", name, ok, err)
@@ -1230,6 +1234,20 @@ func TestAListenAddressIsHostColonANumericPortAndARefusedOneIsNeverShown(t *test
 		{"[a b]:80", "it has brackets that do not enclose an IPv6 address alone"}, // before the host name characters too
 		{"[1.2.3.4]:http", "it has brackets that do not enclose an IPv6 address alone"},
 		{"[::1]", "it is not host:port"},
+		// A zone no interface can be named, by Linux's rule plus no control character (#638); bytes, as
+		// the kernel reads them, so à (C3 A0) holds its non-breaking space byte, though ü loads.
+		{"[::1%x y]:80", "it " + zoneRule},
+		{"[::1%x\ty]:80", "it " + zoneRule},
+		{"[::1%x\x01y]:80", "it " + zoneRule},
+		{"[::1%x\x7fy]:80", "it " + zoneRule},
+		{"[::1%]:80", "it " + zoneRule},
+		{"[::1%abcdefghijklmnop]:80", "it " + zoneRule},
+		{"[::1%.]:80", "it " + zoneRule},
+		{"[::1%..]:80", "it " + zoneRule},
+		{"[::1%a/b]:80", "it " + zoneRule},
+		{"[::1%a:b]:80", "it " + zoneRule},
+		{"[::1%\u00e0]:80", "it " + zoneRule},
+		{"[::1%" + canaryText + " x]:80", "it " + zoneRule},
 		// A ':' inside the brackets passes them, as host.Parse's rule does; a host that is still no IPv6
 		// address gets the host reason.
 		{"[a:b]:80", "it has a host that is neither an IP address nor a host name"},
