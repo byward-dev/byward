@@ -212,15 +212,15 @@ func (v *Values) holds(name string) bool {
 	return ok
 }
 
-// empty reports whether the named setting's value is empty: unset, or set to nothing.
-func (v *Values) empty(name string) bool { return v.byKey[name].Given.empty() }
+// empty reports whether the named setting's value is empty: unset, or set to nothing. A setting refused
+// for the upstream mode that is off is read as its default, as value reads it (#631).
+func (v *Values) empty(name string) bool { return v.value(name).Given.empty() }
 
 // given reports whether the operator gave the named setting a value, or a file for a secret, which is
 // given even when it is empty, so it never falls back to another choice. A setting refused for the
 // upstream mode that is off is not given here, as value reads it as its default: refused, it is not
-// checked further (#631). A variable set to nothing
-// never reaches here (resolve takes it as unset, Setting.EmptyIsGiven), nor does a _FILE variable set
-// to nothing, which names no file. A flag set to nothing is not given here, though a check that reads
+// checked further (#631). A variable set to nothing never reaches here (resolve takes it as unset,
+// Setting.EmptyIsGiven), nor does a _FILE variable set to nothing, which names no file. A flag set to nothing is not given here, though a check that reads
 // its Source counts it: every check that refuses a family's settings while the family is off does.
 func (v *Values) given(name string) bool {
 	if v.refusedOffMode(name) {
@@ -245,8 +245,8 @@ func spelled(val Value) string {
 // NameAsGiven names the setting called name as the operator gave it, for any message that names it:
 // a refusal, a warning or a doctor fix (#619). That is the flag or variable that gave it (spelled), so
 // a bad --oidc-client-key-file is not named BYWARD_OIDC_CLIENT_KEY_FILE. A setting left at its
-// default, or nil Values (a Config built by hand), names the variable to set (EnvToSet). It panics
-// for a name the registry does not hold.
+// default, or nil Values (a Config built by hand), names the variable to set (EnvToSet), from the
+// Values' own Setting where they hold it. It panics for a name neither they nor the registry hold.
 func (v *Values) NameAsGiven(name string) string {
 	if v == nil {
 		return lookup(name).EnvToSet()
@@ -265,7 +265,7 @@ func (v *Values) NameAsGiven(name string) string {
 // whitespace, naming the setting as the operator gave it; nil otherwise.
 func (v *Values) emptySecretFile(name string) error {
 	switch val := v.byKey[name]; {
-	case val.Path == "":
+	case val.Path == "" || v.refusedOffMode(name): // refused, its file is never read (readSecretFiles)
 		return nil
 	case val.Given.empty():
 		return errorf("%s: the file is empty", val.From)
@@ -489,7 +489,7 @@ func refusedFlag(fs *flag.FlagSet, msg string) *flag.Flag {
 func (v *Values) inlineSecrets() []Setting {
 	var out []Setting
 	for _, val := range v.Effective() {
-		if val.Setting.Secret() && val.Source == SourceEnv {
+		if val.Setting.Secret() && val.Source == SourceEnv && !v.refusedOffMode(val.Setting.Name) { // refused, "remove it" is its one error (#631)
 			out = append(out, val.Setting)
 		}
 	}

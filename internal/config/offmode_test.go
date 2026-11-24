@@ -6,12 +6,21 @@ import (
 	"testing"
 )
 
+// The off-mode refusals, after the setting as given: one for a stdio upstream's setting with an HTTP
+// upstream, one for an HTTP upstream's with a stdio one.
+const (
+	toStdio = "is set, but the upstream is HTTP: it applies only to a stdio upstream (BYWARD_UPSTREAM_COMMAND); remove it"
+	toHTTP  = "is set, but the upstream is stdio: it applies only to an HTTP upstream (BYWARD_UPSTREAM_URL); remove it"
+)
+
+// httpOnlySettings are the settings outside the upstream groups that only an HTTP upstream reads,
+// written out here rather than read from httpOnly, so a change to it fails a test.
+var httpOnlySettings = map[string]bool{"assertion-keys-dir": true, "assertion-header": true, "assertion-claims": true, "assertion-unverified-email": true}
+
 // A setting given for the upstream mode that is off is refused at load, named as the operator gave
 // it, in both directions and however it was given; before, the HTTP upstream's stdio settings were
 // not even parsed (BYWARD_STDIO_MAX_PROCESSES=-5 loaded). The selectors keep their own errors.
 func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
-	const toStdio = "is set, but the upstream is HTTP: it applies only to a stdio upstream (BYWARD_UPSTREAM_COMMAND); remove it"
-	const toHTTP = "is set, but the upstream is stdio: it applies only to an HTTP upstream (BYWARD_UPSTREAM_URL); remove it"
 	const identityHint = " is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)"
 	const postgresHint = ": the PostgreSQL store is for several replicas, and a stdio upstream's processes live on one (ADR-0007 §4); use the SQLite store"
 	const credentialHint = " is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE"
@@ -63,7 +72,7 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 			want: "BYWARD_UPSTREAM_CREDENTIAL_FILE" + credentialHint},
 		// A refused setting is not parsed, nor checked against other settings (#631): "remove it" is its
 		// one error. Before, each of these gave a second error beside the refusal. Each hint by flag, and as
-		// a flag set to nothing, is in TestEverySettingWithAStdioHintIsRefusedWithItBesideStdio.
+		// a flag set to nothing, is in TestEverySettingWithAStdioHintIsRefusedWithOnlyItsHintBesideStdio.
 		{name: "malformed plain identity headers with stdio get only the refusal", stdio: true, env: []string{"BYWARD_IDENTITY_HEADERS=maybe"},
 			want: "BYWARD_IDENTITY_HEADERS" + identityHint},
 		{name: "a malformed On-Behalf-Of header with stdio gets only the refusal", stdio: true, env: []string{"BYWARD_OBO_HEADER=not a header"},
@@ -76,6 +85,12 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 			want: "BYWARD_STORE_POSTGRES_DSN_FILE" + postgresHint},
 		{name: "the PostgreSQL store beside a state directory with stdio gets only the refusal", stdio: true,
 			env: []string{"BYWARD_STORE_POSTGRES_DSN_FILE=" + credFile, "BYWARD_STORE_DIR=/var/lib/byward/state"}, want: "BYWARD_STORE_POSTGRES_DSN_FILE" + postgresHint},
+		{name: "the credential given inline with stdio gets only the refusal, not a file's", stdio: true, env: []string{"BYWARD_UPSTREAM_CREDENTIAL=k-123"},
+			want: "BYWARD_UPSTREAM_CREDENTIAL" + credentialHint},
+		{name: "the credential given inline under --dev with stdio gets only the refusal", stdio: true, args: []string{"--dev"}, env: []string{"BYWARD_UPSTREAM_CREDENTIAL=k-123"},
+			want: "BYWARD_UPSTREAM_CREDENTIAL" + credentialHint},
+		{name: "the PostgreSQL store given inline with stdio gets only the refusal, not a file's", stdio: true, env: []string{"BYWARD_STORE_POSTGRES_DSN=postgres://db/x"},
+			want: "BYWARD_STORE_POSTGRES_DSN" + postgresHint},
 		{name: "the PostgreSQL store beside a counter file with stdio gets only the refusal", stdio: true,
 			env: []string{"BYWARD_STORE_POSTGRES_DSN_FILE=" + credFile, "BYWARD_STORE_COUNTER_FILE=/var/lib/byward/store-writes"}, want: "BYWARD_STORE_POSTGRES_DSN_FILE" + postgresHint},
 	} {
@@ -111,7 +126,6 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 // both set there is no mode.
 func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 	skipped := map[string]bool{"upstream-url": true, "upstream-command": true} // given a value: the "both set" error
-	httpOnlySettings := map[string]bool{"assertion-keys-dir": true, "assertion-header": true, "assertion-claims": true, "assertion-unverified-email": true}
 	bothModes := map[string]bool{"obo-scopes": true}
 	files := func(p string) ([]byte, error) {
 		if p == "/run/secrets/off-mode" {
@@ -125,37 +139,37 @@ func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 		if (s.Group == GroupIdentity || s.Group == GroupDownstreamTokens) && !forHTTP && !bothModes[s.Name] && s.StdioHint == "" {
 			t.Errorf("%s: list it in httpOnly and httpOnlySettings if only an HTTP upstream reads it, give it a StdioHint if it refuses stdio with its own hint, else list it in bothModes", s.Name)
 		}
-		if !forHTTP && s.Group != GroupStdioUpstream || s.StdioHint != "" { // a hinted one: TestEverySettingWithAStdioHintIsRefusedWithItBesideStdio
+		if !forHTTP && s.Group != GroupStdioUpstream || s.StdioHint != "" { // a hinted one: TestEverySettingWithAStdioHintIsRefusedWithOnlyItsHintBesideStdio
 			continue
 		}
 		n++
 		t.Run(s.Name, func(t *testing.T) {
 			ran++
-			modeEnv, mode := append([]string{}, base...), "HTTP"
+			modeEnv, refusal := append([]string{}, base...), toStdio
 			if forHTTP {
-				modeEnv, mode = stdioBase(stdioCommand), "stdio"
+				modeEnv, refusal = stdioBase(stdioCommand), toHTTP
 			}
 			if !s.Secret() {
 				flags++
 				flag := "--" + s.Name
 				_, _, err := Load([]string{flag + "="}, modeEnv, files)
-				if want := flag + " is set, but the upstream is " + mode; !isConfigError(err) || !strings.Contains(err.Error(), want) {
-					t.Errorf("%s=: err = %v, want a config error containing %q", flag, err, want)
+				if want := flag + " " + refusal; !isConfigError(err) || err.Error() != want {
+					t.Errorf("%s=: err = %v, want a config error that is exactly %q", flag, err, want)
 				}
 			}
 			if skipped[s.Name] {
 				return
 			}
-			// Any value given is refused, false and true too (#606); a malformed boolean may add its parse
-			// error after the refusal, hence Contains.
+			// Any value given is refused, false and true too (#606), and is its one error: a refused value is
+			// not parsed (#631).
 			givens := []string{s.Env() + "=x", s.Env() + "=false", s.Env() + "=true"}
 			if s.Secret() {
 				givens = []string{s.Env() + "_FILE=/run/secrets/off-mode"}
 			}
 			for _, given := range givens {
 				_, _, err := Load(nil, append(slices.Clone(modeEnv), given), files)
-				if want := strings.SplitN(given, "=", 2)[0] + " is set, but the upstream is " + mode; !isConfigError(err) || !strings.Contains(err.Error(), want) {
-					t.Errorf("%s: err = %v, want a config error containing %q", given, err, want)
+				if want := strings.SplitN(given, "=", 2)[0] + " " + refusal; !isConfigError(err) || err.Error() != want {
+					t.Errorf("%s: err = %v, want a config error that is exactly %q", given, err, want)
 				}
 			}
 		})

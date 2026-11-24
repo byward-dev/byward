@@ -75,26 +75,35 @@ func TestNameAsGivenNamesASettingAsTheOperatorGaveIt(t *testing.T) {
 			t.Errorf("%s: NameAsGiven = %q, want %q", tc.name, got, tc.want)
 		}
 	}
-	// Values resolved over a registry of their own name its settings from it, given or not: the global
-	// registry, which lookup reads, does not hold them (#631).
-	probe := Setting{Name: "probe-secret", shape: secretShape, Group: GroupKeysAndStore}
-	for _, tc := range []struct {
-		name string
-		args []string
-		want string
-	}{{"another registry's setting left at its default", nil, "BYWARD_PROBE_SECRET_FILE"}, {"another registry's setting given", []string{"--probe-secret-file=/run/secrets/p"}, "--probe-secret-file"}} {
-		v, err := resolve([]Setting{probe}, tc.args, nil, func(string) ([]byte, error) { return []byte("p"), nil }, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := v.NameAsGiven("probe-secret"); got != tc.want {
-			t.Errorf("%s: NameAsGiven = %q, want %q", tc.name, got, tc.want)
-		}
-	}
 	defer func() {
 		if r, want := recover(), "config: no setting oidc-client-keys"; r != want {
 			t.Fatalf("recovered %v, want %q", r, want)
 		}
 	}()
 	(*Values)(nil).NameAsGiven("oidc-client-keys")
+}
+
+// Values resolved over a registry of their own name a setting from it, given or left at its default,
+// and a setting only the global registry holds from that: lookup alone holds neither probe (#631).
+func TestNameAsGivenNamesASettingFromTheRegistryItsValuesWereResolvedOver(t *testing.T) {
+	probe := Setting{Name: "probe-secret", shape: secretShape, Group: GroupKeysAndStore}
+	for _, tc := range []struct {
+		name, setting string
+		args          []string
+		want          string
+	}{
+		{"its own setting left at its default", "probe-secret", nil, "BYWARD_PROBE_SECRET_FILE"},
+		{"its own setting given", "probe-secret", []string{"--probe-secret-file=/run/secrets/p"}, "--probe-secret-file"},
+		{"a setting it does not hold", "public-url", nil, "BYWARD_PUBLIC_URL"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			v, err := resolve([]Setting{probe}, tc.args, nil, func(string) ([]byte, error) { return []byte("p"), nil }, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := v.NameAsGiven(tc.setting); got != tc.want {
+				t.Errorf("NameAsGiven(%q) = %q, want %q", tc.setting, got, tc.want)
+			}
+		})
+	}
 }

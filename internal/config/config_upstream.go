@@ -99,12 +99,16 @@ func parseUpstreamCommand(val Value, argv []string) ([]string, error) {
 // upstream-command and upstream-url, as given, even when its value does not parse. With none or
 // both, no mode is chosen. Every check in config that depends on the chosen mode reads these.
 func (v *Values) stdioUpstream() bool {
-	return !v.empty("upstream-command") && v.empty("upstream-url")
+	return v.selects("upstream-command") && !v.selects("upstream-url")
 }
 
 func (v *Values) httpUpstream() bool {
-	return !v.empty("upstream-url") && v.empty("upstream-command")
+	return v.selects("upstream-url") && !v.selects("upstream-command")
 }
+
+// selects reports whether the upstream selector called name is given a value, read as given: empty
+// reads through refusedOffMode, which reads the mode from here.
+func (v *Values) selects(name string) bool { return !v.byKey[name].Given.empty() }
 
 // httpOnly are the settings outside the upstream groups that take effect only with an HTTP upstream:
 // the identity assertion, which a stdio upstream never gets (ADR-0016 §2, §6). Settings outside the

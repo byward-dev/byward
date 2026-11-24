@@ -229,8 +229,10 @@ func TestNoAuthListensOnLocalhostInAnyCase(t *testing.T) {
 
 // Every authentication setting given beside --insecure-no-auth is refused, so a half-configured
 // production setup never runs open; set to nothing as a variable, it is unset and loads (#428, #597:
-// TestEverySettingSetToNothingLoadsAsIfUnset walks that in its no-authentication mode). The settings
-// are read from the registry, so a new one is covered with no test to edit.
+// TestEverySettingSetToNothingLoadsAsIfUnset walks that in its no-authentication mode). Beside a
+// stdio upstream, one refused for the HTTP upstream is refused only as that, its hint or "remove it"
+// its one error (#631). The settings are read from the registry, so a new one is covered with no
+// test to edit.
 func TestEveryAuthenticationSettingGivenBesideNoAuthIsRefused(t *testing.T) {
 	const secret = "/run/secrets/an-auth-setting"
 	files := func(p string) ([]byte, error) {
@@ -249,9 +251,21 @@ func TestEveryAuthenticationSettingGivenBesideNoAuthIsRefused(t *testing.T) {
 		if s.Secret() {
 			given = s.Env() + "_FILE=" + secret
 		}
-		_, _, err := Load(nil, append(slices.Clone(anon), given), files)
-		if want := "BYWARD_INSECURE_NO_AUTH cannot be combined with " + strings.SplitN(given, "=", 2)[0] + ": remove one of them"; !isConfigError(err) || err.Error() != want {
-			t.Errorf("%s: %v, want the config error %q", given, err, want)
+		name := strings.SplitN(given, "=", 2)[0]
+		combined := "BYWARD_INSECURE_NO_AUTH cannot be combined with " + name + ": remove one of them"
+		if _, _, err := Load(nil, append(slices.Clone(anon), given), files); !isConfigError(err) || err.Error() != combined {
+			t.Errorf("%s: %v, want the config error %q", given, err, combined)
+		}
+		besideStdio := combined
+		switch {
+		case stdioHints[s.Name] != "":
+			besideStdio = hint(s.Name, name)
+		case s.Group == GroupHTTPUpstream || httpOnlySettings[s.Name]:
+			besideStdio = name + " " + toHTTP
+		}
+		anonStdio := append(without("BYWARD_UPSTREAM_URL")(slices.Clone(anon)), stdioCommand, given)
+		if _, _, err := Load(nil, anonStdio, files); !isConfigError(err) || err.Error() != besideStdio {
+			t.Errorf("%s beside stdio: %v, want the config error %q", given, err, besideStdio)
 		}
 	}
 	if n < 48 {
