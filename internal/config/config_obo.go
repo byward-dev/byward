@@ -28,17 +28,13 @@ func scopeSlash(s string) int {
 
 // onBehalfOf reads the On-Behalf-Of settings (ADR-0017): full scope URIs of one downstream API, and
 // a header of its own for an HTTP upstream. A stdio upstream asks a socket for its token instead,
-// so a header set for it would have no effect.
+// so a header set for it would have no effect: its StdioHint refuses it.
 func (c *Config) onBehalfOf(v *Values) []error {
 	sEnv, hEnv := Setting{Name: "obo-scopes"}.Env(), Setting{Name: "obo-header"}.Env()
 	var errs []error
 	var scopeErrs []error
 	c.OBOScopes, scopeErrs = parseOBOScopes(v.value("obo-scopes"))
 	errs = append(errs, scopeErrs...)
-	if v.stdioUpstream() && v.byKey["obo-header"].Source != SourceDefault {
-		name := spelled(v.byKey["obo-header"])
-		errs = append(errs, errorf("%s: a stdio upstream gets its downstream token from its token socket (BYWARD_DOWNSTREAM_TOKEN_SOCKET), not a header; leave %s unset", name, name))
-	}
 	if len(c.OBOScopes) > 0 && c.IdP != "" && c.IdP != "entra" { // a refused IdP has its own error
 		errs = append(errs, errorf("%s: On-Behalf-Of is Entra's; it needs BYWARD_IDP=entra, got %s", sEnv, c.IdP))
 	}

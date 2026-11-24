@@ -8,7 +8,7 @@ package config
 // error too.
 func (c *Config) storeBackend(v *Values) []error {
 	c.StorePostgresDSN = parseText(v.value("store-postgres-dsn"))
-	if !v.given("store-postgres-dsn") {
+	if !v.given("store-postgres-dsn") || v.refusedOffMode("store-postgres-dsn") { // refused beside stdio (StdioHint): not checked further
 		return nil
 	}
 	var errs []error
@@ -20,9 +20,6 @@ func (c *Config) storeBackend(v *Values) []error {
 	}
 	if v.byKey["store-counter-file"].Source != SourceDefault {
 		errs = append(errs, errorf("%s and %s: the counter file belongs to the SQLite store; the PostgreSQL store finds a restore from the database itself (docs/how-to/postgres.md)", spelled(v.byKey["store-postgres-dsn"]), spelled(v.byKey["store-counter-file"])))
-	}
-	if v.stdioUpstream() {
-		errs = append(errs, errorf("%s: the PostgreSQL store is for several replicas, and a stdio upstream's processes live on one (ADR-0007 §4); use the SQLite store", spelled(v.byKey["store-postgres-dsn"])))
 	}
 	if c.Dev {
 		c.Relaxations = append(c.Relaxations, "the PostgreSQL store accepts a connection without verify-full TLS")

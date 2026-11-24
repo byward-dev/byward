@@ -13,6 +13,11 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 	const toStdio = "is set, but the upstream is HTTP: it applies only to a stdio upstream (BYWARD_UPSTREAM_COMMAND); remove it"
 	const toHTTP = "is set, but the upstream is stdio: it applies only to an HTTP upstream (BYWARD_UPSTREAM_URL); remove it"
 	const identityHint = " is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)"
+	const postgresHint = ": the PostgreSQL store is for several replicas, and a stdio upstream's processes live on one (ADR-0007 §4); use the SQLite store"
+	const credentialHint = " is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE"
+	oboHint := func(name string) string {
+		return ": a stdio upstream gets its downstream token from its token socket (BYWARD_DOWNSTREAM_TOKEN_SOCKET), not a header; leave " + name + " unset"
+	}
 	for _, tc := range []struct {
 		name  string
 		args  []string
@@ -50,14 +55,39 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 		// Named as given, as the On-Behalf-Of header is.
 		{name: "the plain identity headers set false as a flag with stdio", stdio: true, args: []string{"--identity-headers=false"},
 			want: "--identity-headers" + identityHint},
-		{name: "malformed plain identity headers with stdio get the refusal and the parse error", stdio: true, env: []string{"BYWARD_IDENTITY_HEADERS=maybe"},
-			want: "BYWARD_IDENTITY_HEADERS" + identityHint + "; BYWARD_IDENTITY_HEADERS: want true or false; got a value (5 characters, not shown): it is neither true nor false"},
 		{name: "the On-Behalf-Of header with stdio keeps its own hint", stdio: true, env: []string{"BYWARD_OBO_HEADER=X-Graph-Token"},
-			want: "BYWARD_OBO_HEADER: a stdio upstream gets its downstream token from its token socket (BYWARD_DOWNSTREAM_TOKEN_SOCKET), not a header; leave BYWARD_OBO_HEADER unset"},
+			want: "BYWARD_OBO_HEADER" + oboHint("BYWARD_OBO_HEADER")},
+		{name: "the On-Behalf-Of header given as a flag with stdio", stdio: true, args: []string{"--obo-header=X-Graph-Token"},
+			want: "--obo-header" + oboHint("--obo-header")},
 		{name: "the PostgreSQL store with stdio keeps its own hint", stdio: true, env: []string{"BYWARD_STORE_POSTGRES_DSN_FILE=" + credFile},
-			want: "BYWARD_STORE_POSTGRES_DSN_FILE: the PostgreSQL store is for several replicas, and a stdio upstream's processes live on one (ADR-0007 §4); use the SQLite store"},
+			want: "BYWARD_STORE_POSTGRES_DSN_FILE" + postgresHint},
+		{name: "the PostgreSQL store given as a flag with stdio", stdio: true, args: []string{"--store-postgres-dsn-file=" + credFile},
+			want: "--store-postgres-dsn-file" + postgresHint},
 		{name: "the credential with stdio keeps its hint", stdio: true, env: []string{"BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile},
-			want: "BYWARD_UPSTREAM_CREDENTIAL_FILE is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE"},
+			want: "BYWARD_UPSTREAM_CREDENTIAL_FILE" + credentialHint},
+		{name: "the credential given as a flag with stdio", stdio: true, args: []string{"--upstream-credential-file=" + credFile},
+			want: "--upstream-credential-file" + credentialHint},
+		// A refused setting is not parsed, nor checked against other settings (#631): "remove it" is its
+		// one error. Before, each of these added a second error after the refusal.
+		{name: "malformed plain identity headers with stdio get only the refusal", stdio: true, env: []string{"BYWARD_IDENTITY_HEADERS=maybe"},
+			want: "BYWARD_IDENTITY_HEADERS" + identityHint},
+		{name: "a malformed On-Behalf-Of header with stdio gets only the refusal", stdio: true, env: []string{"BYWARD_OBO_HEADER=not a header"},
+			want: "BYWARD_OBO_HEADER" + oboHint("BYWARD_OBO_HEADER")},
+		{name: "malformed assertion claims with stdio get only the refusal", stdio: true, env: []string{"BYWARD_ASSERTION_CLAIMS=shoe-size"},
+			want: "BYWARD_ASSERTION_CLAIMS " + toHTTP},
+		{name: "a relative assertion key directory with stdio gets only the refusal", stdio: true, env: []string{"BYWARD_ASSERTION_KEYS_DIR=keys"},
+			want: "BYWARD_ASSERTION_KEYS_DIR " + toHTTP},
+		{name: "an empty PostgreSQL connection file with stdio gets only the refusal", stdio: true, env: []string{"BYWARD_STORE_POSTGRES_DSN_FILE=/run/secrets/empty"},
+			want: "BYWARD_STORE_POSTGRES_DSN_FILE" + postgresHint},
+		{name: "the PostgreSQL store beside a state directory with stdio gets only the refusal", stdio: true,
+			env: []string{"BYWARD_STORE_POSTGRES_DSN_FILE=" + credFile, "BYWARD_STORE_DIR=/var/lib/byward/state"}, want: "BYWARD_STORE_POSTGRES_DSN_FILE" + postgresHint},
+		{name: "the PostgreSQL store beside a counter file with stdio gets only the refusal", stdio: true,
+			env: []string{"BYWARD_STORE_POSTGRES_DSN_FILE=" + credFile, "BYWARD_STORE_COUNTER_FILE=/var/lib/byward/store-writes"}, want: "BYWARD_STORE_POSTGRES_DSN_FILE" + postgresHint},
+		// A flag set to nothing is given, so refused, once (#596).
+		{name: "the On-Behalf-Of header as a flag set to nothing with stdio", stdio: true, args: []string{"--obo-header="},
+			want: "--obo-header" + oboHint("--obo-header")},
+		{name: "the plain identity headers as a flag set to nothing with stdio", stdio: true, args: []string{"--identity-headers="},
+			want: "--identity-headers" + identityHint},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := append(append([]string{}, base...), tc.env...)
@@ -84,15 +114,15 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 // Every setting for one upstream mode is refused with the other mode. The upstream groups are read
 // from the registry, so a setting added to one is covered with no test to edit; the HTTP-only
 // settings of other groups are named here. Every other setting of the identity and downstream-token
-// groups must be named as applying to both modes or refusing stdio with its own hint, so a new one
-// fails until someone decides which mode it is for. Each is refused given a value, and, but for a
-// secret (which takes no flag of its own), as a flag set to nothing, which is deliberate (#596). The
-// credential, which keeps its own hint, is the one exception; the selectors are too for a value, as
-// with both set there is no mode.
+// groups must be named as applying to both modes or have a StdioHint, so a new one fails until
+// someone decides which mode it is for. Each is refused given a value, and, but for a secret (which
+// takes no flag of its own), as a flag set to nothing, which is deliberate (#596). A setting with a
+// StdioHint (the credential) is left to its own test; the selectors are too for a value, as with
+// both set there is no mode.
 func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 	skipped := map[string]bool{"upstream-url": true, "upstream-command": true} // given a value: the "both set" error
 	httpOnlySettings := map[string]bool{"assertion-keys-dir": true, "assertion-header": true, "assertion-claims": true, "assertion-unverified-email": true}
-	notOffMode := map[string]bool{"obo-scopes": true, "identity-headers": true, "obo-header": true} // both modes; own hints
+	bothModes := map[string]bool{"obo-scopes": true}
 	files := func(p string) ([]byte, error) {
 		if p == "/run/secrets/off-mode" {
 			return []byte("X=y"), nil
@@ -102,10 +132,10 @@ func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 	n, ran, flags := 0, 0, 0
 	for _, s := range registry {
 		forHTTP := s.Group == GroupHTTPUpstream || httpOnlySettings[s.Name]
-		if (s.Group == GroupIdentity || s.Group == GroupDownstreamTokens) && !forHTTP && !notOffMode[s.Name] {
-			t.Errorf("%s: list it in httpOnly and httpOnlySettings if only an HTTP upstream reads it, else in notOffMode (both modes, or its own stdio hint)", s.Name)
+		if (s.Group == GroupIdentity || s.Group == GroupDownstreamTokens) && !forHTTP && !bothModes[s.Name] && s.StdioHint == "" {
+			t.Errorf("%s: list it in httpOnly and httpOnlySettings if only an HTTP upstream reads it, give it a StdioHint if it refuses stdio with its own hint, else list it in bothModes", s.Name)
 		}
-		if !forHTTP && s.Group != GroupStdioUpstream || s.Name == "upstream-credential" {
+		if !forHTTP && s.Group != GroupStdioUpstream || s.StdioHint != "" { // a hinted one: TestEverySettingWithAStdioHintIsRefusedWithItBesideStdio
 			continue
 		}
 		n++

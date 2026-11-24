@@ -41,7 +41,8 @@ var registry = []Setting{
 	{Name: "public-url", shape: urlShape, Group: GroupEndpoint, Help: "public URL of the MCP endpoint as users enter it, e.g. https://mcp.example.com/mcp, with its host as browsers write it, since they rewrite any other spelling: a host name in lower case (mcp.example.com, not MCP.Example.com); an internationalized host in its ASCII (xn--) form; an IP address as browsers write it (127.0.0.1, not 127.1; [2001:db8::1], not [2001:DB8:0::1]); and no other host ending in a number (mcp.10), which browsers refuse"},
 	{Name: "upstream-url", shape: urlShape, Group: GroupHTTPUpstream, Help: "URL of the HTTP upstream MCP server; or set a stdio upstream with upstream-command"},
 	{Name: "upstream-header-timeout", shape: asGivenShape, Group: GroupHTTPUpstream, Default: "5m", Help: "how long the HTTP upstream may take to send its response headers; a request that waits longer gets a JSON-RPC timeout error, and a streamed response is not limited once its headers arrive; 1s to 1h (ADR-0018 §7)"},
-	{Name: "upstream-credential", shape: secretShape, Group: GroupHTTPUpstream, Help: "HTTP upstream: a header value the proxy sends with every upstream request, such as an API key the upstream needs from the proxy itself; never the user's or the client's token; read at start, never logged (ADR-0016 §7, docs/how-to/upstream-credential.md)"},
+	{Name: "upstream-credential", shape: secretShape, Group: GroupHTTPUpstream, StdioHint: "%[1]s is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE",
+		Help: "HTTP upstream: a header value the proxy sends with every upstream request, such as an API key the upstream needs from the proxy itself; never the user's or the client's token; read at start, never logged (ADR-0016 §7, docs/how-to/upstream-credential.md)"},
 	{Name: "upstream-credential-header", shape: asGivenShape, Group: GroupHTTPUpstream, Default: "Authorization", Help: "the header that carries upstream-credential; inbound copies are always removed; it never shares a header with the identity assertion, so with Authorization here set assertion-header to another header (ADR-0016 §7)"},
 	{Name: "upstream-strip-headers", shape: asGivenShape, Group: GroupHTTPUpstream, Help: "HTTP upstream: comma-separated request headers removed before every upstream request, besides the built-in ones, compared in any case with _ read as -: the headers an upstream takes its settings or credentials from, such as x-argocd-base-url; exact names only, so list a family such as X-Atlassian-*-Url name by name; MCP's own headers are refused (docs/how-to/harden-a-deployment.md)"},
 	{Name: "upstream-command", shape: commandShape, Group: GroupStdioUpstream, Help: "stdio upstream: the command as a JSON array, e.g. [\"/usr/local/bin/server\",\"--flag\"], never run through a shell; or give it after -- on the command line (docs/how-to/stdio-upstream.md)"},
@@ -83,9 +84,11 @@ var registry = []Setting{
 	{Name: "keys-dir", shape: pathShape, Group: GroupKeysAndStore, Auth: true, Help: "directory of sealing keys, an absolute path; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md)"},
 	{Name: "assertion-keys-dir", shape: pathShape, Group: GroupIdentity, Auth: true, Help: "directory of the identity assertion's signing keys, an absolute path: PEM ECDSA P-256 files, each name the key ID; the key whose ID sorts last signs; needed with an HTTP upstream; default: assertion-keys in the data directory (docs/how-to/identity-assertion.md)"},
 	{Name: "assertion-header", shape: asGivenShape, Group: GroupIdentity, Auth: true, Default: "Authorization", Help: "request header that carries the identity assertion to the HTTP upstream, as Bearer <JWT>; inbound copies are always removed (ADR-0016 §2)"},
-	{Name: "identity-headers", shape: asGivenShape, Group: GroupIdentity, Auth: true, Bool: true, Default: "false", Help: "also send the HTTP upstream the user in plain headers (X-Byward-Subject, X-Byward-Client-Id, X-Byward-Principal-Type, and X-Byward-Roles, -Groups, -Email, -Email-Verified, -Name for the assertion's claims), percent-encoded; safe only when the upstream is reachable through this proxy alone (ADR-0016 §5, docs/how-to/plain-identity-headers.md)"},
+	{Name: "identity-headers", shape: asGivenShape, Group: GroupIdentity, Auth: true, Bool: true, Default: "false", StdioHint: "%[1]s is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)",
+		Help: "also send the HTTP upstream the user in plain headers (X-Byward-Subject, X-Byward-Client-Id, X-Byward-Principal-Type, and X-Byward-Roles, -Groups, -Email, -Email-Verified, -Name for the assertion's claims), percent-encoded; safe only when the upstream is reachable through this proxy alone (ADR-0016 §5, docs/how-to/plain-identity-headers.md)"},
 	{Name: "obo-scopes", shape: asGivenShape, Group: GroupDownstreamTokens, Auth: true, Help: "On-Behalf-Of: space-separated scopes of one downstream API, e.g. https://graph.microsoft.com/User.Read; the HTTP upstream then gets a token for them in BYWARD_OBO_HEADER on every request, a stdio upstream on its token socket (BYWARD_DOWNSTREAM_TOKEN_SOCKET); empty turns it off (ADR-0017, docs/how-to/downstream-apis.md)"},
-	{Name: "obo-header", shape: asGivenShape, Group: GroupDownstreamTokens, Auth: true, Default: "X-Byward-Downstream-Token", Help: "On-Behalf-Of: request header that carries the downstream API token to the HTTP upstream, as Bearer <token>; inbound copies are always removed (ADR-0017 §3); not for a stdio upstream"},
+	{Name: "obo-header", shape: asGivenShape, Group: GroupDownstreamTokens, Auth: true, Default: "X-Byward-Downstream-Token", StdioHint: "%[1]s: a stdio upstream gets its downstream token from its token socket (BYWARD_DOWNSTREAM_TOKEN_SOCKET), not a header; leave %[1]s unset",
+		Help: "On-Behalf-Of: request header that carries the downstream API token to the HTTP upstream, as Bearer <token>; inbound copies are always removed (ADR-0017 §3); not for a stdio upstream"},
 	{Name: "assertion-claims", shape: asGivenShape, Group: GroupIdentity, Auth: true, Default: "roles", Help: "comma-separated optional claims in the identity assertion: roles, groups, email, name; or none (ADR-0016 §1, docs/reference/identity-assertion.md)"},
 	{Name: "assertion-unverified-email", shape: asGivenShape, Group: GroupIdentity, Auth: true, Bool: true, Default: "false", Help: "with email in BYWARD_ASSERTION_CLAIMS: also assert an email the IdP has not verified (Entra never verifies one), marked email_verified false; never authorize on it (docs/how-to/identity-assertion.md)"},
 	{Name: "static-clients-file", shape: pathShape, Group: GroupClientRegistration, Auth: true, Help: "JSON file of pre-registered MCP clients, an absolute path; default: clients.json in the data directory, optional while CIMD or DCR is on; a file you name must exist (docs/reference/static-clients.md)"},
@@ -106,7 +109,8 @@ var registry = []Setting{
 	{Name: "operator-name", shape: asGivenShape, Group: GroupConsent, Auth: true, Help: "who runs this proxy, shown on the consent page, e.g. Contoso IT"},
 	{Name: "scope-description", shape: asGivenShape, Group: GroupConsent, Auth: true, Help: "what the scope lets an app do, in plain words for the consent page, e.g. Read and query your team's dashboards"},
 	{Name: "store-dir", shape: pathShape, Group: GroupKeysAndStore, Auth: true, Help: "state directory of the SQLite store, an absolute path, created with mode 0700; the directory to back up; default: state in the data directory (ADR-0007, docs/how-to/state.md)"},
-	{Name: "store-postgres-dsn", shape: secretShape, Group: GroupKeysAndStore, Auth: true, Help: "the PostgreSQL store, for more than one replica of an HTTP upstream: a file holding the connection string (a URL or key=value pairs, pool settings such as pool_max_conns included); setting it selects PostgreSQL 15 or later instead of SQLite; sslmode=verify-full is required outside --dev; never logged (ADR-0007, docs/how-to/postgres.md)"},
+	{Name: "store-postgres-dsn", shape: secretShape, Group: GroupKeysAndStore, Auth: true, StdioHint: "%[1]s: the PostgreSQL store is for several replicas, and a stdio upstream's processes live on one (ADR-0007 §4); use the SQLite store",
+		Help: "the PostgreSQL store, for more than one replica of an HTTP upstream: a file holding the connection string (a URL or key=value pairs, pool settings such as pool_max_conns included); setting it selects PostgreSQL 15 or later instead of SQLite; sslmode=verify-full is required outside --dev; never logged (ADR-0007, docs/how-to/postgres.md)"},
 	{Name: "store-counter-file", shape: pathShape, Group: GroupKeysAndStore, Auth: true, Help: "restore-detection counter file, an absolute path outside the state directory and its backups; default: store-writes next to the keys directory (ADR-0007 §9)"},
 	{Name: "refresh-grace", shape: asGivenShape, Group: GroupOperations, Auth: true, Default: "30s", Help: "how long a just-rotated refresh token is still accepted, for a client retrying a lost response; 0s to 60s (ADR-0006 §4)"},
 	{Name: "insecure-no-auth", shape: asGivenShape, Group: GroupDevelopment, Bool: true, Default: "false", Help: "no authentication at all, for trying the proxy out and for tests; loopback only (ADR-0027)"},
@@ -115,13 +119,31 @@ var registry = []Setting{
 
 // A registry entry without a shape stops the program at init (ADR-0031 §3): it would show as Hidden,
 // and be read as a setting that is not secret.
-func init() { checkShapes(registry) }
+func init() {
+	checkShapes(registry)
+	checkStdioHints(registry)
+}
 
 // checkShapes panics on a setting of reg that has no shape.
 func checkShapes(reg []Setting) {
 	for _, s := range reg {
 		if s.shape == nil {
 			panic("config: setting " + s.Name + " has no shape")
+		}
+	}
+}
+
+// checkStdioHints panics on a StdioHint of reg that is not fixed text naming the setting: one with
+// no %[1]s, or any other formatting verb, which could show a value; or one on a stdio upstream's
+// setting, which is never refused beside a stdio upstream.
+func checkStdioHints(reg []Setting) {
+	for _, s := range reg {
+		switch rest := strings.ReplaceAll(s.StdioHint, "%[1]s", ""); {
+		case s.StdioHint == "":
+		case s.Group == GroupStdioUpstream:
+			panic("config: setting " + s.Name + " is a stdio upstream's, so it takes no stdio hint")
+		case rest == s.StdioHint || strings.Contains(rest, "%"):
+			panic("config: the stdio hint of " + s.Name + " must name it with %[1]s and have no other verb")
 		}
 	}
 }
