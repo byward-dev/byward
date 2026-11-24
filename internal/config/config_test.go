@@ -1141,11 +1141,14 @@ func length(s string) int { return len([]rune(s)) }
 // #494: a listen address is host:port, as net.Listen takes it: the host empty, an IP address (a zoned
 // IPv6 one included, its zone any interface name) or a host name of letters, digits, - . and _ only
 // (ADR-0032 §3) with one trailing dot at most, and the port a number from 0 to
-// 65535; a service name such as http is refused. A refused one is named by its length and why, never
-// shown, so startup's net.Listen error can never quote it.
+// 65535; a service name such as http is refused. Brackets enclose an IPv6 address alone (#629): around
+// a name, an IPv4 address or nothing they are refused, though net.SplitHostPort would strip them. A
+// refused one is named by its length and why, never shown, so startup's net.Listen error can never
+// quote it.
 func TestAListenAddressIsHostColonANumericPortAndARefusedOneIsNeverShown(t *testing.T) {
 	for _, ok := range []string{"127.0.0.1:8080", ":8080", "[::1]:8080", "localhost:0", "0.0.0.0:65535", "byward.internal:8443",
-		"[fe80::1%lo0]:8080", "[fe80::1%ü]:8080", "byward.internal.:8443", "127.0.0.1:000080", "my_byward:8080"} {
+		"[fe80::1%lo0]:8080", "[fe80::1%ü]:8080", "byward.internal.:8443", "127.0.0.1:000080", "my_byward:8080",
+		"[fe80::1%eth0]:80", "[::ffff:127.0.0.1]:80", "[2001:db8:0:0:0:0:0:1]:80"} {
 		for _, name := range []string{"BYWARD_LISTEN", "BYWARD_INTERNAL_LISTEN"} {
 			if _, err := load(t, nil, "BYWARD_LISTEN=127.0.0.1:1", name+"="+ok); err != nil {
 				t.Errorf("%s=%s: %v", name, ok, err)
@@ -1171,6 +1174,20 @@ func TestAListenAddressIsHostColonANumericPortAndARefusedOneIsNeverShown(t *test
 		{"127.0.0.1:+80", "it has a port that is not a number"},
 		{"127.0.0.1:-1", "it has a port that is not a number"},
 		{"127.0.0.1:99999999999999999999", "it has a port that is not a number from 0 to 65535"},
+		{"[my_mcp]:80", "it has brackets that do not enclose an IPv6 address alone"},
+		{"[a.b.]:80", "it has brackets that do not enclose an IPv6 address alone"},
+		{"[]:80", "it has brackets that do not enclose an IPv6 address alone"},
+		{"[1.2.3.4]:80", "it has brackets that do not enclose an IPv6 address alone"},
+		{"[" + canaryText + "]:80", "it has brackets that do not enclose an IPv6 address alone"},
+		// The brackets reason wins over the host and port reasons, and "is not host:port" wins over it.
+		{"[a..b]:80", "it has brackets that do not enclose an IPv6 address alone"},
+		{"[a b]:80", "it has brackets that do not enclose an IPv6 address alone"}, // before the host name characters too
+		{"[1.2.3.4]:http", "it has brackets that do not enclose an IPv6 address alone"},
+		{"[::1]", "it is not host:port"},
+		// A ':' inside the brackets passes them, as host.Parse's rule does; a host that is still no IPv6
+		// address gets the host reason.
+		{"[a:b]:80", "it has a host that is neither an IP address nor a host name"},
+		{"[::1x]:80", "it has a host that is neither an IP address nor a host name"},
 	} {
 		for _, s := range []struct{ env, want string }{
 			{"BYWARD_LISTEN", "host:port such as 127.0.0.1:8080"},

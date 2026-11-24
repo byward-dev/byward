@@ -493,11 +493,18 @@ func parseAllowedHosts(val Value) ([]string, []error) {
 	return out, errs
 }
 
+// bracketsReason is why an address with brackets around anything but an IPv6 address is refused:
+// host.Parse's own reason, read here since parseListen's host variable shadows the package.
+var bracketsReason = host.ErrBrackets.Error()
+
 // parseListen reads a listen address setting: host:port, the host empty, an IP address (an IPv6 one
 // may have a zone, as for a link-local address) or a host name (validHostName, one trailing dot
 // allowed, and letters, digits, - . and _ only: nameCharReason, ADR-0032 §3), the port a
-// number from 0 to 65535, as net.Listen takes it. A refused address is
-// never shown (ADR-0031 §1): net.Listen's own error would quote it.
+// number from 0 to 65535, as net.Listen takes it. Brackets enclose an IPv6 address alone (RFC 3986
+// §3.2.2), as host.Parse requires (#629): net.SplitHostPort strips them from a name, an IPv4
+// address or nothing too, so such a value is almost certainly a typo, and []:80 would listen on
+// every interface. A refused address is never shown (ADR-0031 §1): net.Listen's own error would
+// quote it.
 func parseListen(val Value, want string) (string, error) {
 	s, raw := val.Setting, val.Given.raw()
 	host, port, err := net.SplitHostPort(raw)
@@ -510,6 +517,8 @@ func parseListen(val Value, want string) (string, error) {
 	switch {
 	case err != nil:
 		reason = "it is not host:port"
+	case strings.HasPrefix(raw, "[") && !strings.Contains(host, ":"):
+		reason = "it " + bracketsReason
 	case nameReason != "":
 		reason = "its host " + nameReason
 	case host != "" && !validHostName(strings.TrimSuffix(host, ".")) && ipErr != nil:
