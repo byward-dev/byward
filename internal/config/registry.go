@@ -216,11 +216,16 @@ func (v *Values) holds(name string) bool {
 func (v *Values) empty(name string) bool { return v.byKey[name].Given.empty() }
 
 // given reports whether the operator gave the named setting a value, or a file for a secret, which is
-// given even when it is empty, so it never falls back to another choice. A variable set to nothing
+// given even when it is empty, so it never falls back to another choice. A setting refused for the
+// upstream mode that is off is not given here, as value reads it as its default: refused, it is not
+// checked further (#631). A variable set to nothing
 // never reaches here (resolve takes it as unset, Setting.EmptyIsGiven), nor does a _FILE variable set
 // to nothing, which names no file. A flag set to nothing is not given here, though a check that reads
 // its Source counts it: every check that refuses a family's settings while the family is off does.
 func (v *Values) given(name string) bool {
+	if v.refusedOffMode(name) {
+		return false
+	}
 	val := v.byKey[name]
 	return !val.Given.empty() || val.Path != ""
 }
@@ -243,12 +248,17 @@ func spelled(val Value) string {
 // default, or nil Values (a Config built by hand), names the variable to set (EnvToSet). It panics
 // for a name the registry does not hold.
 func (v *Values) NameAsGiven(name string) string {
-	if v != nil { // from v first: Values resolved over another registry hold settings lookup does not
-		if val, ok := v.byKey[name]; ok && val.Source != SourceDefault {
-			return spelled(val)
-		}
+	if v == nil {
+		return lookup(name).EnvToSet()
 	}
-	return lookup(name).EnvToSet()
+	val, ok := v.byKey[name]
+	switch { // from v's own Setting: Values resolved over another registry hold settings lookup does not
+	case !ok:
+		return lookup(name).EnvToSet()
+	case val.Source == SourceDefault:
+		return val.Setting.EnvToSet()
+	}
+	return spelled(val)
 }
 
 // emptySecretFile is the error for a secret setting whose named file holds nothing, or only
@@ -352,14 +362,14 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 			if env[s.Env()] != "" { // set to nothing is as if unset (#428)
 				return nil, bothSet(s.Env(), from)
 			}
-			v.Given, v.Source, v.Path, v.From = NewOpaque(""), SourceFile, *fileFlagVals[s.Name], from // read below
+			v.Given, v.Source, v.Path, v.From = NewOpaque(""), SourceFile, *fileFlagVals[s.Name], from // read by readSecretFiles
 		case !s.Secret() && set[s.Name]:
 			v.Given, v.Source = NewOpaque(*flagVals[s.Name]), SourceFlag
 		case s.Secret() && env[s.FileEnv()] != "":
 			if env[s.Env()] != "" { // set to nothing is as if unset (#428)
 				return nil, bothSet(s.Env(), s.FileEnv())
 			}
-			v.Given, v.Source, v.Path, v.From = NewOpaque(""), SourceFile, env[s.FileEnv()], s.FileEnv() // read below
+			v.Given, v.Source, v.Path, v.From = NewOpaque(""), SourceFile, env[s.FileEnv()], s.FileEnv() // read by readSecretFiles
 		default:
 			if e, ok := env[s.Env()]; ok && (e != "" || s.EmptyIsGiven) { // set to nothing is as if unset (Setting.EmptyIsGiven)
 				v.Given, v.Source = NewOpaque(e), SourceEnv
@@ -383,22 +393,30 @@ func resolve(reg []Setting, args, environ []string, readFile readFileFunc, extra
 		vals.byKey[commandSetting] = v
 		vals.command = command
 	}
-	// A secret's file is opened once the upstream mode is known: the file of one refused for the mode
-	// that is off is never opened (#631), so its refusal is its one error. It keeps its Path, and so is
-	// listed by SecretFiles; that is harmless, as Load then fails on the refusal.
-	for _, name := range vals.order {
-		val := vals.byKey[name]
-		if val.Source != SourceFile || vals.refusedOffMode(name) {
+	if err := vals.readSecretFiles(readFile); err != nil {
+		return nil, err
+	}
+	return vals, nil
+}
+
+// readSecretFiles reads each secret given by its file, in registry order, once every setting and a
+// command after -- are resolved, so the upstream mode is known: the file of a secret refused for the
+// mode that is off is never opened (#631), so its refusal is its one error. Such a secret keeps its
+// Path, and so is listed by SecretFiles; that is harmless, as Load then fails on the refusal.
+func (v *Values) readSecretFiles(readFile readFileFunc) error {
+	for _, name := range v.order {
+		val := v.byKey[name]
+		if val.Source != SourceFile || v.refusedOffMode(name) {
 			continue
 		}
 		raw, err := readSecret(readFile, val.Setting, val.Path, val.From)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		val.Given = NewOpaque(raw)
-		vals.byKey[name] = val
+		v.byKey[name] = val
 	}
-	return vals, nil
+	return nil
 }
 
 // flagError is err, the flag package's refusal of args, without any text of the operator's

@@ -57,18 +57,13 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 			want: "--identity-headers" + identityHint},
 		{name: "the On-Behalf-Of header with stdio keeps its own hint", stdio: true, env: []string{"BYWARD_OBO_HEADER=X-Graph-Token"},
 			want: "BYWARD_OBO_HEADER" + oboHint("BYWARD_OBO_HEADER")},
-		{name: "the On-Behalf-Of header given as a flag with stdio", stdio: true, args: []string{"--obo-header=X-Graph-Token"},
-			want: "--obo-header" + oboHint("--obo-header")},
 		{name: "the PostgreSQL store with stdio keeps its own hint", stdio: true, env: []string{"BYWARD_STORE_POSTGRES_DSN_FILE=" + credFile},
 			want: "BYWARD_STORE_POSTGRES_DSN_FILE" + postgresHint},
-		{name: "the PostgreSQL store given as a flag with stdio", stdio: true, args: []string{"--store-postgres-dsn-file=" + credFile},
-			want: "--store-postgres-dsn-file" + postgresHint},
 		{name: "the credential with stdio keeps its hint", stdio: true, env: []string{"BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile},
 			want: "BYWARD_UPSTREAM_CREDENTIAL_FILE" + credentialHint},
-		{name: "the credential given as a flag with stdio", stdio: true, args: []string{"--upstream-credential-file=" + credFile},
-			want: "--upstream-credential-file" + credentialHint},
 		// A refused setting is not parsed, nor checked against other settings (#631): "remove it" is its
-		// one error. Before, each of these added a second error after the refusal.
+		// one error. Before, each of these gave a second error beside the refusal. Each hint by flag, and as
+		// a flag set to nothing, is in TestEverySettingWithAStdioHintIsRefusedWithItBesideStdio.
 		{name: "malformed plain identity headers with stdio get only the refusal", stdio: true, env: []string{"BYWARD_IDENTITY_HEADERS=maybe"},
 			want: "BYWARD_IDENTITY_HEADERS" + identityHint},
 		{name: "a malformed On-Behalf-Of header with stdio gets only the refusal", stdio: true, env: []string{"BYWARD_OBO_HEADER=not a header"},
@@ -83,11 +78,6 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 			env: []string{"BYWARD_STORE_POSTGRES_DSN_FILE=" + credFile, "BYWARD_STORE_DIR=/var/lib/byward/state"}, want: "BYWARD_STORE_POSTGRES_DSN_FILE" + postgresHint},
 		{name: "the PostgreSQL store beside a counter file with stdio gets only the refusal", stdio: true,
 			env: []string{"BYWARD_STORE_POSTGRES_DSN_FILE=" + credFile, "BYWARD_STORE_COUNTER_FILE=/var/lib/byward/store-writes"}, want: "BYWARD_STORE_POSTGRES_DSN_FILE" + postgresHint},
-		// A flag set to nothing is given, so refused, once (#596).
-		{name: "the On-Behalf-Of header as a flag set to nothing with stdio", stdio: true, args: []string{"--obo-header="},
-			want: "--obo-header" + oboHint("--obo-header")},
-		{name: "the plain identity headers as a flag set to nothing with stdio", stdio: true, args: []string{"--identity-headers="},
-			want: "--identity-headers" + identityHint},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := append(append([]string{}, base...), tc.env...)

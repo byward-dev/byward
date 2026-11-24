@@ -114,7 +114,7 @@ func checkNoAuth(c *Config, v *Values) []error {
 		}
 	}
 	for _, val := range v.Effective() {
-		if val.Setting.Auth && val.Source != SourceDefault {
+		if val.Setting.Auth && val.Source != SourceDefault && !v.refusedOffMode(val.Setting.Name) { // refused, "remove it" is its one error (#631)
 			errs = append(errs, errorf("%s cannot be combined with %s: remove one of them", env, spelled(val)))
 		}
 	}

@@ -154,9 +154,12 @@ func missingSecretFile(env, setting string) pathLeakScenario {
 	}, nil}
 }
 
-// besideStdio runs sc with a stdio upstream, given after -- (every value in env must be a canary
-// path), in place of the HTTP one: a stdio upstream's file setting is read only beside one.
+// besideStdio runs sc with a stdio upstream in place of the HTTP one, as a stdio upstream's file
+// setting is read only beside one (#631). The command goes after --, not in BYWARD_UPSTREAM_COMMAND,
+// as the leak test takes any other variable with a value for a path; BYWARD_UPSTREAM_URL set to
+// nothing is unset (#428).
 func besideStdio(sc pathLeakScenario) pathLeakScenario {
+	sc.name += " beside a stdio upstream"
 	env := sc.env
 	sc.env = func(t *testing.T, dir string) []string {
 		return append([]string{"BYWARD_UPSTREAM_URL="}, env(t, dir)...)

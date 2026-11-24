@@ -8,7 +8,7 @@ package config
 // error too.
 func (c *Config) storeBackend(v *Values) []error {
 	c.StorePostgresDSN = parseText(v.value("store-postgres-dsn"))
-	if !v.given("store-postgres-dsn") || v.refusedOffMode("store-postgres-dsn") { // refused beside stdio (StdioHint): not checked further
+	if !v.given("store-postgres-dsn") { // refused beside stdio (StdioHint), it is not given
 		return nil
 	}
 	var errs []error

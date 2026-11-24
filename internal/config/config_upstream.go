@@ -16,7 +16,7 @@ func (c *Config) upstream(v *Values, dashes bool) []error {
 	raw := parseText(v.value("upstream-command"))
 	var errs []error
 	if v.httpUpstream() || v.stdioUpstream() { // with none or both, the "required" or "both set" error says enough
-		errs = offModeSettings(v, v.stdioUpstream())
+		errs = offModeSettings(v)
 	}
 	if raw == "" {
 		if v.httpUpstream() { // the HTTP upstream's own settings, each reported even beside a malformed URL
@@ -137,9 +137,9 @@ func (v *Values) refusedOffMode(name string) bool {
 // named as the operator gave it. Beside a stdio upstream, a setting with a StdioHint gets that hint;
 // every other refusal says which mode the setting is for. The other mode's selector reaches here only
 // as a flag set to nothing, as with a value there is no mode.
-func offModeSettings(v *Values, stdio bool) []error {
+func offModeSettings(v *Values) []error {
 	inUse, offMode, offSelector := "HTTP", "a stdio upstream", Setting{Name: "upstream-command"}.Env()
-	if stdio {
+	if v.stdioUpstream() {
 		inUse, offMode, offSelector = "stdio", "an HTTP upstream", Setting{Name: "upstream-url"}.Env()
 	}
 	var errs []error
@@ -147,7 +147,7 @@ func offModeSettings(v *Values, stdio bool) []error {
 		s := val.Setting
 		switch {
 		case !v.refusedOffMode(s.Name):
-		case stdio && s.StdioHint != "":
+		case s.StdioHint != "": // refused, so beside a stdio upstream: a stdio upstream's setting takes no hint (checkStdioHints)
 			errs = append(errs, errorf(s.StdioHint, v.NameAsGiven(s.Name)))
 		default:
 			errs = append(errs, errorf("%s is set, but the upstream is %s: it applies only to %s (%s); remove it", spelled(val), inUse, offMode, offSelector))
