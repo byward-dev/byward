@@ -210,6 +210,33 @@ func LoopbackAsWritten(h string) bool {
 	return p.Loopback()
 }
 
+// MatchKey is a host[:port] as a Host header is compared with an allowed host (ADR-0032 §2, class
+// B): Canonical (so 127.1 matches 127.0.0.1, and any spelling of an IPv6 address its shortest form),
+// without one default port (:443 or :80), trimmed once, so [::1]:80:443 is not [::1]. Two entries
+// with one MatchKey name the same host.
+func MatchKey(hostport string) string {
+	h := Canonical(hostport)
+	for _, p := range []string{":443", ":80"} {
+		if t, ok := strings.CutSuffix(h, p); ok {
+			return t
+		}
+	}
+	return h
+}
+
+// Origin is scheme://hostport as an Origin header is compared with an allowed origin (ADR-0032 A3):
+// the host and port as Canonical writes them, without the scheme's own default port, so
+// https://127.1:443 is https://127.0.0.1 while http://h:443 keeps its port. It folds only what
+// MatchKey folds for a Host header, nothing a browser never sends. Two origins with one Origin are
+// the same origin.
+func Origin(scheme, hostport string) string {
+	h := Canonical(hostport)
+	if p := DefaultPort(scheme); p != "" {
+		h = strings.TrimSuffix(h, ":"+p)
+	}
+	return scheme + "://" + h
+}
+
 // Hostname is hostport (host, host:port, [IPv6], [IPv6]:port or a bare IPv6 address) reduced to its
 // host name: no port, no brackets, in lower case.
 func Hostname(hostport string) string {

@@ -5,6 +5,7 @@ package origin
 import (
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strings"
 
 	"golang.org/x/net/http/httpguts"
@@ -23,10 +24,10 @@ import (
 func Hosts(rec *audit.Log, allowed []string, next http.Handler) http.Handler {
 	set := map[string]bool{}
 	for _, h := range allowed {
-		set[hostKey(h)] = true
+		set[host.MatchKey(h)] = true
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !set[hostKey(r.Host)] {
+		if !set[host.MatchKey(r.Host)] {
 			rec.RecordUnauthenticated(r, audit.Event{Name: audit.HostRejected, Outcome: audit.Failure, Host: r.Host})
 			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
 			return
@@ -53,19 +54,6 @@ func InternalHosts(rec *audit.Log, allowed []string, next http.Handler) http.Han
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-// hostKey is h as Hosts compares it: host.Canonical (so 127.1 matches 127.0.0.1, and any
-// spelling of an IPv6 address its shortest form), without one default port (:443 or :80), trimmed
-// once, so [::1]:80:443 is not [::1].
-func hostKey(h string) string {
-	h = host.Canonical(h)
-	for _, p := range []string{":443", ":80"} {
-		if t, ok := strings.CutSuffix(h, p); ok {
-			return t
-		}
-	}
-	return h
 }
 
 // CORS for listed origins on the MCP endpoint: browser-based MCP clients send a preflight without
@@ -120,13 +108,22 @@ lines:
 	return ", " + strings.Join(names, ", ")
 }
 
-// Origins enforces an exact allowlist of `Origin` values (scheme://host[:port], lower case). A
-// missing Origin passes (non-browser MCP clients send none); multiple Origin headers, `null` or an
-// unlisted value get 403. A listed origin gets CORS headers, and its preflight is answered with 204.
+// Origins enforces an allowlist of `Origin` values (scheme://host[:port]), compared in the form
+// browsers serialize them (originKey, ADR-0032 A3): https://127.1, https://[0:0::1],
+// https://APP.example and https://app.example:443 match the entry https://127.0.0.1, https://[::1] or
+// https://app.example. That widens nothing for an attacker: this check defends against a browser,
+// which only ever sends the serialized form, so folding a spelling lets no browser through that was
+// not already allowed; and a non-browser client can send any header it likes anyway. A missing Origin
+// passes (non-browser MCP clients send none); multiple Origin headers, `null`, a value that is no bare
+// origin (a path, a trailing slash, user info, a query or a fragment) or an unlisted one get 403. A
+// listed origin gets CORS headers, echoing the Origin exactly as sent, and its preflight is answered
+// with 204.
 func Origins(rec *audit.Log, allowed []string, next http.Handler) http.Handler {
 	set := map[string]bool{}
 	for _, o := range allowed {
-		set[strings.ToLower(o)] = true
+		if k := originKey(o); k != "" {
+			set[k] = true
+		}
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		vals := r.Header.Values("Origin")
@@ -134,7 +131,7 @@ func Origins(rec *audit.Log, allowed []string, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if len(vals) > 1 || !set[strings.ToLower(vals[0])] {
+		if len(vals) > 1 || !set[originKey(vals[0])] {
 			o := vals[0]
 			if len(vals) > 1 {
 				o = "multiple"
@@ -158,4 +155,21 @@ func Origins(rec *audit.Log, allowed []string, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// originKey is o as Origins compares it: host.Origin, the folding ADR-0032 A3 names (case, an IP
+// address's spelling, the scheme's own default port) and nothing a browser never sends (a port with
+// leading zeros, an empty port, a full-width or Unicode name); "" when o is no bare origin
+// (scheme://host[:port] and nothing else), which matches nothing.
+func originKey(o string) string {
+	// The only check for a query or a fragment: originKey reads neither, and url.Parse leaves no trace
+	// of an empty one.
+	if strings.ContainsAny(o, "?#") {
+		return ""
+	}
+	u, err := url.Parse(o)
+	if err != nil || u.Opaque != "" || u.User != nil || u.Path != "" || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+		return ""
+	}
+	return host.Origin(u.Scheme, u.Host)
 }

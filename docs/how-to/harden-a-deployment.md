@@ -40,16 +40,24 @@ supply ([Serve TLS at the proxy](tls.md), [ADR-0019](../adr/0019-packaging.md) �
 Both checks run before authentication ([ADR-0018](../adr/0018-hardening.md) §1–2).
 
 - [ ] **Host:** the public URL's host is always accepted, and one default port (`:443` or `:80`)
-      is ignored when comparing, as a proxy may add `:80`. An IP address matches in any spelling
-      of the same address, as browsers write it: `127.1` is `127.0.0.1`, and an IPv6 address is
-      compared in its shortest form. If the ingress sends a different
-      `Host`, such as an internal service name, add it to `BYWARD_ALLOWED_HOSTS`. A mismatch gets
-      `421` and a `host_rejected` audit event. Prefer an ingress that passes the original `Host`
-      through, and keep the list short.
-- [ ] **Origin:** browser-based MCP clients send an `Origin`. Only the proxy's own origin and exact
-      entries in `BYWARD_ALLOWED_ORIGINS` (`scheme://host[:port]`) pass; anything else gets
-      `403` and an `origin_rejected` event. Requests without `Origin` (desktop and CLI clients) pass.
-      Add only the origins of web clients you use. Never add a wildcard; none is supported.
+      is ignored when comparing, as a proxy may add `:80`. If the ingress sends a different
+      `Host`, such as an internal service name, add it to `BYWARD_ALLOWED_HOSTS`, written as
+      browsers write it: a name of letters, digits, `-`, `.` and `_`, and an IPv4 address in dotted
+      decimal. `127.1`, `010.0.0.1` (which browsers read as `8.0.0.1`) and a name ending in a
+      number such as `mcp.10` are refused, naming what a browser reads. A `Host` header matches in
+      any spelling of the same address: `127.1` is `127.0.0.1`, and an IPv6 address is compared in
+      its shortest form. A mismatch gets `421` and a `host_rejected` audit event. Prefer an ingress
+      that passes the original `Host` through, and keep the list short.
+- [ ] **Origin:** browser-based MCP clients send an `Origin`. Only the proxy's own origin and the
+      entries in `BYWARD_ALLOWED_ORIGINS` (`scheme://host[:port]`, written as browsers write them)
+      pass; anything else gets `403` and an `origin_rejected` event. An `Origin` header matches in
+      any spelling a browser could produce of the same origin (case, an IP address's spelling, the
+      scheme's default port), which lets no other browser through. Requests without `Origin`
+      (desktop and CLI clients) pass. Add only the origins of web clients you use. Never add a
+      wildcard; none is supported.
+- [ ] **Duplicates:** two entries of either list that name the same host or origin once folded, or
+      an entry that is the public URL's own, load with a warning naming their places in the list.
+      Remove the extra one.
 
 ## Sealing keys and secret files
 

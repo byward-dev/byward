@@ -147,9 +147,10 @@ const (
 	ruleEndsInNumber  = `is not an IPv4 address but ends in a number, so browsers refuse it`
 	ruleDottedDecimal = `is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as `
 	ruleNameChar      = "has a character no host name holds at position "
-	ruleEmptyLabel    = `its host name has an empty label (a leading, double or trailing dot); drop the extra dot`
 	ruleNameChars     = `; a host name has only letters, digits, - . and _`
 	ruleZone          = `has an IPv6 zone that is not an interface name: 1 to 15 bytes, not . or .., without white space, a control character, a slash or a colon`
+	ruleLabel         = `has an empty label (a leading, double or trailing dot); drop the extra dot`
+	ruleEdgeHyphen    = `has a label that starts or ends with a hyphen; a label starts and ends with a letter or a digit`
 )
 
 func TestAURLOrHostRefusedForItsFormSaysWhereAndWhyNeverWhat(t *testing.T) {
@@ -163,22 +164,22 @@ func TestAURLOrHostRefusedForItsFormSaysWhereAndWhyNeverWhat(t *testing.T) {
 		{"query", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp?x=1", `BYWARD_PUBLIC_URL: want a URL without a query or fragment, such as https://mcp.example.com/mcp; got a query or fragment, not shown: remove it`},
 		{"fragment", "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp#f", `BYWARD_PUBLIC_URL: want a URL without a query or fragment, such as https://mcp.example.com/mcp; got a query or fragment, not shown: remove it`},
 		{"http public", "BYWARD_PUBLIC_URL=http://mcp.example.com/mcp", `BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host`},
-		// #344: the public host joins the public Host allow-list, so it must be a host name with no empty
-		// label; its reasons are its own, since BYWARD_ALLOWED_HOSTS' rule still allows "~" (#523).
-		{"public host with a trailing dot", "BYWARD_PUBLIC_URL=https://mcp.example.com./mcp", wantPublicURL + `(28 characters, not shown): ` + ruleEmptyLabel},
-		{"public host with a double dot", "BYWARD_PUBLIC_URL=https://a..b/mcp", wantPublicURL + `(16 characters, not shown): ` + ruleEmptyLabel},
-		{"public host with a leading dot", "BYWARD_PUBLIC_URL=https://.mcp.example.com/mcp", wantPublicURL + `(28 characters, not shown): ` + ruleEmptyLabel},
+		// #344: the public host joins the public Host allow-list, so it follows the browser-matched host
+		// name rule BYWARD_ALLOWED_HOSTS does (hostPort, ADR-0032 §3), in the same words.
+		{"public host with a trailing dot", "BYWARD_PUBLIC_URL=https://mcp.example.com./mcp", wantPublicURL + `(28 characters, not shown): its host:port ` + ruleLabel},
+		{"public host with a double dot", "BYWARD_PUBLIC_URL=https://a..b/mcp", wantPublicURL + `(16 characters, not shown): its host:port ` + ruleLabel},
+		{"public host with a leading dot", "BYWARD_PUBLIC_URL=https://.mcp.example.com/mcp", wantPublicURL + `(28 characters, not shown): its host:port ` + ruleLabel},
 		// A character no host name holds, beyond RFC 3986's sub-delimiters: the class P and O host name
 		// is an allow-list (ADR-0032 §3).
-		{"public host with a double quote", `BYWARD_PUBLIC_URL=https://se"kr/mcp`, wantPublicURL + `(17 characters, not shown): its host ` + ruleNameChar + `3` + ruleNameChars},
+		{"public host with a double quote", `BYWARD_PUBLIC_URL=https://se"kr/mcp`, wantPublicURL + `(17 characters, not shown): its host:port ` + ruleNameChar + `3` + ruleNameChars},
 		// A character RFC 3986 and browsers allow in a host but no DNS name holds (ADR-0032 §3, D4): its
 		// place is named, never the character.
-		{"public host with a wildcard", "BYWARD_PUBLIC_URL=https://a*b/mcp", wantPublicURL + `(15 characters, not shown): its host ` + ruleNameChar + `2` + ruleNameChars},
-		{"public host with a tilde", "BYWARD_PUBLIC_URL=https://s3cret~tok.example/mcp", wantPublicURL + `(30 characters, not shown): its host ` + ruleNameChar + `7` + ruleNameChars},
-		{"public host made only of a hyphen", "BYWARD_PUBLIC_URL=https://-/mcp", wantPublicURL + `(13 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
-		{"public host with leading hyphen", "BYWARD_PUBLIC_URL=https://-a.example/mcp", wantPublicURL + `(22 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
-		{"public host with trailing hyphen", "BYWARD_PUBLIC_URL=https://a-.example/mcp", wantPublicURL + `(22 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
-		{"public host with inner label leading hyphen", "BYWARD_PUBLIC_URL=https://a.-b.example/mcp", wantPublicURL + `(24 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
+		{"public host with a wildcard", "BYWARD_PUBLIC_URL=https://a*b/mcp", wantPublicURL + `(15 characters, not shown): its host:port ` + ruleNameChar + `2` + ruleNameChars},
+		{"public host with a tilde", "BYWARD_PUBLIC_URL=https://s3cret~tok.example/mcp", wantPublicURL + `(30 characters, not shown): its host:port ` + ruleNameChar + `7` + ruleNameChars},
+		{"public host made only of a hyphen", "BYWARD_PUBLIC_URL=https://-/mcp", wantPublicURL + `(13 characters, not shown): its host:port ` + ruleEdgeHyphen},
+		{"public host with leading hyphen", "BYWARD_PUBLIC_URL=https://-a.example/mcp", wantPublicURL + `(22 characters, not shown): its host:port ` + ruleEdgeHyphen},
+		{"public host with trailing hyphen", "BYWARD_PUBLIC_URL=https://a-.example/mcp", wantPublicURL + `(22 characters, not shown): its host:port ` + ruleEdgeHyphen},
+		{"public host with inner label leading hyphen", "BYWARD_PUBLIC_URL=https://a.-b.example/mcp", wantPublicURL + `(24 characters, not shown): its host:port ` + ruleEdgeHyphen},
 		// The upstream's host too, which url.Parse and Go's dialer would take (ADR-0032 §3, D4).
 		{"upstream host with a tilde", "BYWARD_UPSTREAM_URL=http://s3cret~tok:8000/mcp", wantUpstreamURL + `(26 characters, not shown): its host ` + ruleNameChar + `7` + ruleNameChars + orUpstreamCommand},
 		{"upstream host with a dollar sign", "BYWARD_UPSTREAM_URL=http://my$mcp:8000/mcp", wantUpstreamURL + `(22 characters, not shown): its host ` + ruleNameChar + `3` + ruleNameChars + orUpstreamCommand},
@@ -196,9 +197,9 @@ func TestAURLOrHostRefusedForItsFormSaysWhereAndWhyNeverWhat(t *testing.T) {
 		{"unicode public host", "BYWARD_PUBLIC_URL=https://bücher.example/mcp", wantPublicURL + `(26 characters, not shown): its host:port ` + ruleNotASCII},
 		{"escaped unicode public host", "BYWARD_PUBLIC_URL=https://b%C3%BCcher.example/mcp", wantPublicURL + `(31 characters, not shown): its host:port ` + ruleNotASCII},
 		{"unicode allowed origin", "BYWARD_ALLOWED_ORIGINS=https://bücher.example", wantOrigins + `(22 characters, not shown): its host:port ` + ruleNotASCII},
-		{"origin with an empty label", "BYWARD_ALLOWED_ORIGINS=https://a..b", wantOrigins + `(12 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
-		{"origin with a leading dot", "BYWARD_ALLOWED_ORIGINS=https://.app.example.com", wantOrigins + `(24 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
-		{"origin with a trailing dot", "BYWARD_ALLOWED_ORIGINS=https://app.example.com.", wantOrigins + `(24 characters, not shown): its host:port breaks the host name rule: ` + ruleHostName},
+		{"origin with an empty label", "BYWARD_ALLOWED_ORIGINS=https://a..b", wantOrigins + `(12 characters, not shown): its host:port ` + ruleLabel},
+		{"origin with a leading dot", "BYWARD_ALLOWED_ORIGINS=https://.app.example.com", wantOrigins + `(24 characters, not shown): its host:port ` + ruleLabel},
+		{"origin with a trailing dot", "BYWARD_ALLOWED_ORIGINS=https://app.example.com.", wantOrigins + `(24 characters, not shown): its host:port ` + ruleLabel},
 		{"origin with an IPv6 zone", "BYWARD_ALLOWED_ORIGINS=https://[fe80::1%25eth0]", wantOrigins + `(24 characters, not shown): its host:port is not an IPv6 address without a zone; ` + ruleForms},
 		{"origin with a shortened IPv4 address", "BYWARD_ALLOWED_ORIGINS=https://127.1", wantOrigins + `(13 characters, not shown): its host ` + ruleDottedDecimal + `127.0.0.1`},
 		{"origin ending in an upper-case hex label", "BYWARD_ALLOWED_ORIGINS=https://192.168.0.0xFF", wantOrigins + `(22 characters, not shown): its host ` + ruleDottedDecimal + `192.168.0.255`},
@@ -226,18 +227,21 @@ func TestAURLOrHostRefusedForItsFormSaysWhereAndWhyNeverWhat(t *testing.T) {
 		{"unclosed bracket", "BYWARD_ALLOWED_HOSTS=[::1", wantHosts + `(4 characters, not shown): it has brackets that do not enclose an IPv6 address alone; ` + ruleForms},
 		{"name with a closing bracket", "BYWARD_ALLOWED_HOSTS=mcp.example]", wantHosts + `(12 characters, not shown): it has brackets that do not enclose an IPv6 address alone; ` + ruleForms},
 		{"name with an opening bracket", "BYWARD_ALLOWED_HOSTS=mcp.example[", wantHosts + `(12 characters, not shown): it has brackets that do not enclose an IPv6 address alone; ` + ruleForms},
-		{"name with user info", "BYWARD_ALLOWED_HOSTS=a@b", wantHosts + `(3 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"name with a query", "BYWARD_ALLOWED_HOSTS=a?b", wantHosts + `(3 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"name with a fragment", "BYWARD_ALLOWED_HOSTS=a#b", wantHosts + `(3 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"name with a backslash", "BYWARD_ALLOWED_HOSTS=a\\b", wantHosts + `(3 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"name with a semicolon", "BYWARD_ALLOWED_HOSTS=a;b", wantHosts + `(3 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"name with a tab", "BYWARD_ALLOWED_HOSTS=a\tb", wantHosts + `(3 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"name that is a wildcard", "BYWARD_ALLOWED_HOSTS=*", wantHosts + `(1 character, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"name with a port and a bad character", "BYWARD_ALLOWED_HOSTS=a*b:8080", wantHosts + `(8 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"trailing dot", "BYWARD_ALLOWED_HOSTS=mcp.example.com.", wantHosts + `(16 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"trailing dot with a port", "BYWARD_ALLOWED_HOSTS=mcp.example.com.:8443", wantHosts + `(21 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"leading dot", "BYWARD_ALLOWED_HOSTS=.example.com", wantHosts + `(12 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"double dot", "BYWARD_ALLOWED_HOSTS=mcp..example.com:8443", wantHosts + `(21 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"name with user info", "BYWARD_ALLOWED_HOSTS=a@b", wantHosts + `(3 characters, not shown): it ` + ruleNameChar + `2` + ruleNameChars},
+		{"name with a query", "BYWARD_ALLOWED_HOSTS=a?b", wantHosts + `(3 characters, not shown): it ` + ruleNameChar + `2` + ruleNameChars},
+		{"name with a fragment", "BYWARD_ALLOWED_HOSTS=a#b", wantHosts + `(3 characters, not shown): it ` + ruleNameChar + `2` + ruleNameChars},
+		{"name with a backslash", "BYWARD_ALLOWED_HOSTS=a\\b", wantHosts + `(3 characters, not shown): it ` + ruleNameChar + `2` + ruleNameChars},
+		{"name with a semicolon", "BYWARD_ALLOWED_HOSTS=a;b", wantHosts + `(3 characters, not shown): it ` + ruleNameChar + `2` + ruleNameChars},
+		{"name with a tab", "BYWARD_ALLOWED_HOSTS=a\tb", wantHosts + `(3 characters, not shown): it ` + ruleNameChar + `2` + ruleNameChars},
+		{"name that is a wildcard", "BYWARD_ALLOWED_HOSTS=*", wantHosts + `(1 character, not shown): it ` + ruleNameChar + `1` + ruleNameChars},
+		{"name with a port and a bad character", "BYWARD_ALLOWED_HOSTS=a*b:8080", wantHosts + `(8 characters, not shown): it ` + ruleNameChar + `2` + ruleNameChars},
+		{"trailing dot", "BYWARD_ALLOWED_HOSTS=mcp.example.com.", wantHosts + `(16 characters, not shown): it ` + ruleLabel},
+		{"trailing dot with a port", "BYWARD_ALLOWED_HOSTS=mcp.example.com.:8443", wantHosts + `(21 characters, not shown): it ` + ruleLabel},
+		{"leading dot", "BYWARD_ALLOWED_HOSTS=.example.com", wantHosts + `(12 characters, not shown): it ` + ruleLabel},
+		{"double dot", "BYWARD_ALLOWED_HOSTS=mcp..example.com:8443", wantHosts + `(21 characters, not shown): it ` + ruleLabel},
+		// A label that starts or ends with a hyphen (#630), in the browser-matched settings' own words.
+		{"allowed host label with a leading hyphen", "BYWARD_ALLOWED_HOSTS=mcp.-a.example:8443", wantHosts + `(19 characters, not shown): it ` + ruleEdgeHyphen},
+		{"origin label with a trailing hyphen", "BYWARD_ALLOWED_ORIGINS=https://app-.example", wantOrigins + `(20 characters, not shown): its host:port ` + ruleEdgeHyphen},
 		{"bracket then an empty port", "BYWARD_ALLOWED_HOSTS=[::1]:", wantHosts + `(6 characters, not shown): it ` + rulePort},
 		{"bracket then junk", "BYWARD_ALLOWED_HOSTS=[::1]x", wantHosts + `(6 characters, not shown): it has brackets that do not enclose an IPv6 address alone; ` + ruleForms},
 		{"bracket then digits without a colon", "BYWARD_ALLOWED_HOSTS=[::1]8080", wantHosts + `(9 characters, not shown): it has brackets that do not enclose an IPv6 address alone; ` + ruleForms},
@@ -330,8 +334,8 @@ func TestDevAllowsLoopbackHTTPAndRecordsIt(t *testing.T) {
 // Every form a Host header carries loads, in lower case, with any port from 1 to 65535, and a bare IPv6 address is
 // stored in brackets, as a Host header carries it, so the public listener can match it (#325).
 func TestAllowedHostsLoadEveryHostHeaderFormAndBracketABareIPv6(t *testing.T) {
-	c, err := load(t, nil, "BYWARD_ALLOWED_HOSTS=a,mcp.example.com,mcp.example.com:9765,10.0.0.5:8080,localhost:1,::1,2001:db8::1,[2001:db8::1],[::1]:65535,my_svc~1,xn--bcher-kva.example,Mixed-Case.Example,abcdefghijklmnopqrstuvwxyz.ABCDEFGHIJKLMNOPQRSTUVWXYZ.0123456789")
-	want := []string{"a", "mcp.example.com", "mcp.example.com:9765", "10.0.0.5:8080", "localhost:1", "[::1]", "[2001:db8::1]", "[2001:db8::1]", "[::1]:65535", "my_svc~1", "xn--bcher-kva.example", "mixed-case.example", "abcdefghijklmnopqrstuvwxyz.abcdefghijklmnopqrstuvwxyz.0123456789"}
+	c, err := load(t, nil, "BYWARD_ALLOWED_HOSTS=a,mcp.example.com,mcp.example.com:9765,10.0.0.5:8080,localhost:1,::1,2001:db8::1,[2001:db8::1],[::1]:65535,my_svc-1,xn--bcher-kva.example,Mixed-Case.Example,0123456789.abcdefghijklmnopqrstuvwxyz.ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	want := []string{"a", "mcp.example.com", "mcp.example.com:9765", "10.0.0.5:8080", "localhost:1", "[::1]", "[2001:db8::1]", "[2001:db8::1]", "[::1]:65535", "my_svc-1", "xn--bcher-kva.example", "mixed-case.example", "0123456789.abcdefghijklmnopqrstuvwxyz.abcdefghijklmnopqrstuvwxyz"}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,15 +344,15 @@ func TestAllowedHostsLoadEveryHostHeaderFormAndBracketABareIPv6(t *testing.T) {
 	}
 }
 
-// An allowed host that is an IP address is stored as browsers write it (host.Canonical), the form the
-// TLS certificate names check and the no-auth loopback check read (the Host check canonicalises both
-// sides itself, #447). Any other host is only lower-cased, even one ending in a number, which no
-// browser sends but a Go client may.
+// An allowed host is stored as browsers write it (ADR-0032 §2, class B): a name in lower case and an
+// IPv6 address in its shortest form, the form the TLS certificate names check and the no-auth loopback
+// check read (the Host check canonicalises both sides itself, #447). An IPv4 address is taken only in
+// dotted decimal, and a name ending in a number not at all (TestAnAllowedHostNotInDottedDecimalOrEndingInANumberIsRefusedSayingWhatABrowserDoes).
 func TestAnAllowedHostIsStoredWithItsAddressAsBrowsersWriteItAndANameOnlyInLowerCase(t *testing.T) {
 	for given, stored := range map[string]string{
-		"127.1:8080":      "127.0.0.1:8080",
-		"2001:DB8:0:0::1": "[2001:db8::1]",
-		"MCP.10":          "mcp.10",
+		"127.0.0.1:8080":       "127.0.0.1:8080",
+		"2001:DB8:0:0::1":      "[2001:db8::1]",
+		"MCP.Example.com:8443": "mcp.example.com:8443",
 	} {
 		t.Run(given, func(t *testing.T) {
 			c, err := load(t, nil, "BYWARD_ALLOWED_HOSTS="+given)
@@ -359,6 +363,26 @@ func TestAnAllowedHostIsStoredWithItsAddressAsBrowsersWriteItAndANameOnlyInLower
 				t.Fatalf("stored %q, want %q", c.AllowedHosts, stored)
 			}
 		})
+	}
+}
+
+// An allowed host a browser reads as an IPv4 address not written in dotted decimal (ADR-0032 R3) is
+// refused, naming the address a browser reads, never rewritten into it (010.0.0.1 may have meant
+// 10.0.0.1, #480); one a browser refuses as a name ending in a number (R4) is refused saying so.
+func TestAnAllowedHostNotInDottedDecimalOrEndingInANumberIsRefusedSayingWhatABrowserDoes(t *testing.T) {
+	for given, why := range map[string]string{
+		"127.1":           ruleDottedDecimal + "127.0.0.1",
+		"127.1:8080":      ruleDottedDecimal + "127.0.0.1",
+		"0x7f.0.0.1":      ruleDottedDecimal + "127.0.0.1",
+		"2130706433":      ruleDottedDecimal + "127.0.0.1",
+		"010.0.0.1":       ruleDottedDecimal + "8.0.0.1, reading a part with a leading 0 as octal",
+		"MCP.10":          ruleEndsInNumber,
+		"10.0.0.999:8443": ruleEndsInNumber,
+	} {
+		want := wantHosts + fmt.Sprintf("(%d characters, not shown): its host ", len(given)) + why
+		if _, err := load(t, nil, "BYWARD_ALLOWED_HOSTS="+given); !isConfigError(err) || err.Error() != want {
+			t.Errorf("BYWARD_ALLOWED_HOSTS=%s: %v\nwant %s", given, err, want)
+		}
 	}
 }
 
@@ -1053,19 +1077,20 @@ func TestDCRIsOnByDefaultAndTheDenylistTakesCommaSeparatedEntries(t *testing.T) 
 	}
 }
 
-// #334: a name with any ASCII character outside RFC 3986's unreserved set (a control character, a sub-delim,
-// a %-escape, "@", "?", "#", "\\" ...) is refused as a host name, with or without a port. ":", the
+// #334, ADR-0032 §3: a name with any ASCII character but letters, digits, "-", "." and "_" (a control
+// character, a sub-delim, "~", a %-escape, "@", "?", "#", "\\" ...) is refused as a host name, with or
+// without a port, naming its place. ":", the
 // brackets, "/" and the space belong to the form check and are covered there; "," separates the
 // list's entries.
 func TestAnAllowedHostNameRefusesEveryCharacterAHostNameCannotHave(t *testing.T) {
-	const unreserved = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+	const nameChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._"
 	for c := byte(1); c < 0x80; c++ {
-		if strings.IndexByte(unreserved+":[]/, ", c) >= 0 {
+		if strings.IndexByte(nameChars+":[]/, ", c) >= 0 {
 			continue
 		}
 		for _, entry := range []string{"a" + string(c) + "b", "a" + string(c) + "b:8443"} {
 			_, err := load(t, nil, "BYWARD_ALLOWED_HOSTS="+entry)
-			if err == nil || !strings.Contains(err.Error(), "): it breaks the host name rule: "+ruleHostName) {
+			if err == nil || !strings.Contains(err.Error(), "): it "+ruleNameChar+"2"+ruleNameChars) {
 				t.Errorf("BYWARD_ALLOWED_HOSTS=%s: %v, want it refused as a host name", entry, err)
 			}
 		}
@@ -1127,9 +1152,10 @@ func TestHostNameRuleRefusesLabelsWithLeadingOrTrailingHyphen(t *testing.T) {
 	}
 
 	settings := []struct{ setting, format, want string }{
-		{"public URL", "BYWARD_PUBLIC_URL=https://%s/mcp", "breaks the host name rule: " + ruleHostName},
-		{"allowed hosts", "BYWARD_ALLOWED_HOSTS=%s", "breaks the host name rule: " + ruleHostName},
-		{"allowed origins", "BYWARD_ALLOWED_ORIGINS=https://%s", "breaks the host name rule: " + ruleHostName},
+		// The browser-matched settings and the public URL give the rule as its own reason (#523).
+		{"public URL", "BYWARD_PUBLIC_URL=https://%s/mcp", ruleEdgeHyphen},
+		{"allowed hosts", "BYWARD_ALLOWED_HOSTS=%s", ruleEdgeHyphen},
+		{"allowed origins", "BYWARD_ALLOWED_ORIGINS=https://%s", ruleEdgeHyphen},
 		{"CIMD trusted hosts", "BYWARD_CIMD_TRUSTED_HOSTS=%s", "breaks the host name rule: " + ruleHostName},
 		{"CIMD allowed hosts", "BYWARD_CIMD_ALLOWED_HOSTS=%s", "breaks the host name rule: " + ruleHostName},
 		{"client denylist", "BYWARD_CLIENT_DENYLIST=%s", "breaks the host name rule: " + ruleHostName},
@@ -1411,5 +1437,49 @@ func TestAnUnsetTenantIsRefusedOnlyAsRequired(t *testing.T) {
 	_, err := load(t, nil, "BYWARD_ENTRA_TENANT=")
 	if !isConfigError(err) || !strings.HasPrefix(err.Error(), "BYWARD_ENTRA_TENANT is required") || strings.Contains(err.Error(), "want the tenant ID") {
 		t.Fatalf("err = %v, want only the tenant's required error", err)
+	}
+}
+
+// The browser-matched lists warn about the entries a browser cannot tell apart, each pair by place and
+// the setting as given, never by value (ADR-0032 R7): folded by case, an IP address's spelling and a
+// default port; a third copy is paired with the first; each entry that is the public URL's own is
+// named once, never also as a pair; distinct entries warn nothing (the startup, check and doctor
+// output: internal/server's TestDuplicateHostsAndOriginsAreAWarningByPlaceAlike).
+func TestDuplicateAllowedHostsAndOriginsWarnByPlace(t *testing.T) {
+	const same, self = "name the same %s once folded (case, an IP address's spelling, a default port)", "is the public URL's %s, which is always allowed"
+	for _, tc := range []struct {
+		name string
+		env  []string
+		want []ListWarning
+	}{
+		{"case, three copies", []string{"BYWARD_ALLOWED_HOSTS=a.example,A.example,a.EXAMPLE"}, []ListWarning{
+			{"BYWARD_ALLOWED_HOSTS", "entries 1 and 2 of 3 " + fmt.Sprintf(same, "host"), "remove one of them"},
+			{"BYWARD_ALLOWED_HOSTS", "entries 1 and 3 of 3 " + fmt.Sprintf(same, "host"), "remove one of them"}}},
+		{"an address with and without a default port", []string{"BYWARD_ALLOWED_HOSTS=127.0.0.1,127.0.0.1:443,[::1],[::1]:80"}, []ListWarning{
+			{"BYWARD_ALLOWED_HOSTS", "entries 1 and 2 of 4 " + fmt.Sprintf(same, "host"), "remove one of them"},
+			{"BYWARD_ALLOWED_HOSTS", "entries 3 and 4 of 4 " + fmt.Sprintf(same, "host"), "remove one of them"}}},
+		{"two entries that are the public URL's own", []string{"BYWARD_ALLOWED_HOSTS=mcp.example.com,MCP.example.com:443"}, []ListWarning{
+			{"BYWARD_ALLOWED_HOSTS", "entry 1 of 2 " + fmt.Sprintf(self, "host"), "remove it"},
+			{"BYWARD_ALLOWED_HOSTS", "entry 2 of 2 " + fmt.Sprintf(self, "host"), "remove it"}}},
+		{"origins by address spelling and default port", []string{"BYWARD_ALLOWED_ORIGINS=https://[::1],https://[::1]:443,https://mcp.example.com"}, []ListWarning{
+			{"BYWARD_ALLOWED_ORIGINS", "entries 1 and 2 of 3 " + fmt.Sprintf(same, "origin"), "remove one of them"},
+			{"BYWARD_ALLOWED_ORIGINS", "entry 3 of 3 " + fmt.Sprintf(self, "origin"), "remove it"}}},
+		{"another scheme is another origin", []string{"BYWARD_ALLOWED_ORIGINS=https://a.example,http://a.example,http://a.example:443"}, nil},
+		{"a pair after a distinct first entry, named by its own places", []string{"BYWARD_ALLOWED_HOSTS=a.example,b.example,B.example"}, []ListWarning{
+			{"BYWARD_ALLOWED_HOSTS", "entries 2 and 3 of 3 " + fmt.Sprintf(same, "host"), "remove one of them"}}},
+		{"the public URL's host with another scheme's default port", []string{"BYWARD_PUBLIC_URL=https://mcp.example.com:80/mcp", "BYWARD_ALLOWED_HOSTS=mcp.example.com"}, []ListWarning{
+			{"BYWARD_ALLOWED_HOSTS", "entry 1 of 1 " + fmt.Sprintf(self, "host"), "remove it"}}},
+		{"distinct entries", []string{"BYWARD_ALLOWED_HOSTS=a.example,a.example:8443,b.example,127.0.0.1,[::1]",
+			"BYWARD_ALLOWED_ORIGINS=https://a.example,http://a.example,https://a.example:8443,https://127.0.0.1"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := load(t, nil, tc.env...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(c.ListWarnings, tc.want) {
+				t.Fatalf("warnings %+v\nwant %+v", c.ListWarnings, tc.want)
+			}
+		})
 	}
 }

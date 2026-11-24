@@ -39,8 +39,11 @@ func TestNoAuthIsRefusedOffLoopback(t *testing.T) {
 		{"listen on all IPv6 interfaces", "BYWARD_LISTEN=[::]:8080", "BYWARD_LISTEN must be a loopback address", ""},
 		{"listen on 127.1, not in dotted decimal", "BYWARD_LISTEN=127.1:8080", "BYWARD_LISTEN must be a loopback address", ""},
 		{"extra host", "BYWARD_ALLOWED_HOSTS=proxy.internal:8080", "BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got a host name, not shown: authentication is off, so only loopback may reach the proxy", ""},
-		// An address is named as stored, as browsers write it (8.0.0.1), never as given (ADR-0031 §1).
-		{"extra host spelled in octal", "BYWARD_ALLOWED_HOSTS=010.0.0.1", "BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address 8.0.0.1: authentication is off, so only loopback may reach the proxy", ""},
+		// An address is named as browsers write it, never as given (ADR-0031 §1); one spelled in octal is
+		// refused for its form first, naming the address browsers read (ADR-0032 R3), and gets no second
+		// refusal.
+		{"extra host by address", "BYWARD_ALLOWED_HOSTS=10.0.0.1", "BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address 10.0.0.1: authentication is off, so only loopback may reach the proxy", ""},
+		{"extra host spelled in octal", "BYWARD_ALLOWED_HOSTS=010.0.0.1", "BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (9 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 8.0.0.1, reading a part with a leading 0 as octal", "only loopback hosts"},
 		{"two extra hosts, each refused", "BYWARD_ALLOWED_HOSTS=proxy.internal,other.internal", "BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got a host name, not shown: authentication is off, so only loopback may reach the proxy; BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got a host name, not shown: authentication is off, so only loopback may reach the proxy", ""},
 		// Loopback hosts that can match no Host header are refused, not accepted for their host name (#325).
 		// An entry that does not load gets only its own error, never the loopback one too.
@@ -62,11 +65,11 @@ func TestNoAuthIsRefusedOffLoopback(t *testing.T) {
 }
 
 func TestNoAuthAcceptsLoopbackHostsAndOrigins(t *testing.T) {
-	c, err := loadAnon(t, nil, "BYWARD_ALLOWED_HOSTS=127.0.0.1:8080,localhost,[::1],[::1]:8080,::1,127.1", "BYWARD_ALLOWED_ORIGINS=http://localhost:6274", "BYWARD_LISTEN=[::1]:8080", "BYWARD_PUBLIC_URL=http://[::1]:8080/mcp")
+	c, err := loadAnon(t, nil, "BYWARD_ALLOWED_HOSTS=127.0.0.1:8080,localhost,[::1],[::1]:8080,::1", "BYWARD_ALLOWED_ORIGINS=http://localhost:6274", "BYWARD_LISTEN=[::1]:8080", "BYWARD_PUBLIC_URL=http://[::1]:8080/mcp")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.AllowedOrigins) != 1 || len(c.AllowedHosts) != 6 {
+	if len(c.AllowedOrigins) != 1 || len(c.AllowedHosts) != 5 {
 		t.Fatalf("origins=%v hosts=%v", c.AllowedOrigins, c.AllowedHosts)
 	}
 }

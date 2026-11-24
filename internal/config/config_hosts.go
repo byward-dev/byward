@@ -39,8 +39,8 @@ func browserIPv4(h string) string {
 // nameCharReason says why name, a host, is refused for a character no host name holds (ADR-0032 §3:
 // only ASCII letters, digits, "-", "." and "_"; an internationalized name in its xn-- form), completing
 // "its host …"; "" when it holds none, or is an IP address (host.BadNameChar), whose IPv6 zone may hold
-// any character. It names the character's place, never the character or the host, which a secret may
-// be.
+// any character. It names the character's place, or says the name is not ASCII; never the character
+// or the host, which a secret may be.
 func nameCharReason(name string) string {
 	place := host.BadNameChar(name)
 	switch {
@@ -52,12 +52,43 @@ func nameCharReason(name string) string {
 	return fmt.Sprintf("has a character no host name holds at position %d; a host name has only letters, digits, - . and _", place)
 }
 
-// browserOrigin is u's origin as browsers serialize it (RFC 6454 §6.2): scheme://host[:port], the
-// host as host.Serialize writes it, and no port when it is the scheme's default.
-func browserOrigin(u *url.URL) string {
-	hp := host.Serialize(u.Hostname())
-	if p := u.Port(); p != "" && p != host.DefaultPort(u.Scheme) {
-		hp += ":" + p
+// browserOrigin is u's origin as browsers serialize it (RFC 6454 §6.2): host.Origin, the form the
+// Origin check compares.
+func browserOrigin(u *url.URL) string { return host.Origin(u.Scheme, u.Host) }
+
+// ListWarning is a warning about entries of a list setting, named by their places in the list,
+// never their values (ADR-0031 §1): its Setting is named as the operator gave it.
+type ListWarning struct{ Setting, Message, Fix string }
+
+// browserListWarnings are the R7 warnings of the browser-matched lists (ADR-0032 §2, class B): their
+// entries keyed as the Host and Origin checks compare them.
+func (c *Config) browserListWarnings() []ListWarning {
+	const folds = "case, an IP address's spelling, a default port"
+	hostKeys := make([]string, len(c.AllowedHosts))
+	for i, h := range c.AllowedHosts {
+		hostKeys[i] = host.MatchKey(h)
 	}
-	return u.Scheme + "://" + hp
+	return append(c.foldedDuplicates("allowed-hosts", "host", folds, hostKeys, host.MatchKey(c.PublicURL.Host)),
+		c.foldedDuplicates("allowed-origins", "origin", folds, c.AllowedOrigins, c.Origin())...)
+}
+
+// foldedDuplicates are the warnings for the list setting name, whose entries are keyed as keys: each
+// later entry with an earlier one's key, and each entry whose key is self, the key of an entry always
+// allowed anyway (the public URL's own). what names the kind of entry ("host", "origin") and folds
+// what the keys fold, in the message.
+func (c *Config) foldedDuplicates(name, what, folds string, keys []string, self string) []ListWarning {
+	var out []ListWarning
+	setting, of := c.Values.NameAsGiven(name), len(keys)
+	first := map[string]int{}
+	for i, k := range keys {
+		switch j, seen := first[k]; {
+		case k == self:
+			out = append(out, ListWarning{setting, fmt.Sprintf("%s is the public URL's %s, which is always allowed", entry{i, of}, what), "remove it"})
+		case seen:
+			out = append(out, ListWarning{setting, fmt.Sprintf("%s name the same %s once folded (%s)", entry{j, of}.and(entry{i, of}), what, folds), "remove one of them"})
+		default:
+			first[k] = i
+		}
+	}
+	return out
 }

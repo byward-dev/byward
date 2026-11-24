@@ -34,8 +34,8 @@ func checkInlineSecrets(v *Values, dev bool) (relaxation string, err error) {
 
 // ParsePublicURL validates the public URL of the MCP endpoint, as `byward init entra` also needs it:
 // absolute, an ASCII host[:port] that BYWARD_ALLOWED_HOSTS would accept (hostPort: an IP address or a
-// name following validHostName's rule, a port from 1 to 65535 without a leading zero, no IPv6 zone),
-// a host name of letters, digits, - . and _ only (nameCharReason, ADR-0032 §3), no host ending
+// name of letters, digits, - . and _ only, no empty label and no label that starts or ends with a
+// hyphen, a port from 1 to 65535 without a leading zero, no IPv6 zone: ADR-0032 §3), no host ending
 // in a number unless it is an IPv4 address in dotted decimal (browserIPv4), an IPv6 address or a host
 // name only in the form browsers write it (host.Serialize: a name in lower case), no port that is the
 // scheme's default (browsers drop it, ADR-0032 R2), a path without a trailing slash, no query or
@@ -50,16 +50,6 @@ func ParsePublicURL(raw string) (*url.URL, error) {
 		return nil, err
 	}
 	const want = "the MCP endpoint's URL such as " + exampleMCPURL
-	if h := u.Hostname(); !notASCII(h) { // hostPort refuses a non-ASCII host, naming its host:port
-		if reason := nameCharReason(h); reason != "" {
-			return nil, refusedForm(s, whole, raw, want, "its host "+reason)
-		}
-		if _, err := netip.ParseAddr(h); err != nil && host.HasEmptyLabel(h) { // an IPv6 zone may end in a dot
-			// The rest of the host name rule: hostPort's own reason would list a "~", which classes B
-			// and S still take until slices 3 and 4 (#523, #524).
-			return nil, refusedForm(s, whole, raw, want, "its host name has an empty label (a leading, double or trailing dot); drop the extra dot")
-		}
-	}
 	if _, reason := hostPort(u.Host); reason != "" {
 		// host:port joins the public listener's Host allow-list, so it follows BYWARD_ALLOWED_HOSTS'
 		// rules (#344, #353). The rest is not checked: the host is not shown, so the URL is not either.
@@ -418,6 +408,14 @@ const reasonNotASCII = "holds a character that is not ASCII; give an internation
 // notASCII reports whether s holds a character that is not ASCII.
 func notASCII(s string) bool { return strings.ContainsFunc(s, func(r rune) bool { return r >= 0x80 }) }
 
+// reasonEmptyLabel is why a host name with an empty label is refused, completing "it …" or "its
+// host:port …": a trailing dot names the root, a different host to a browser (WHATWG URL §3.1).
+const reasonEmptyLabel = "has an empty label (a leading, double or trailing dot); drop the extra dot"
+
+// reasonEdgeHyphen is why a host name with a label that starts or ends with a hyphen is refused,
+// completing "it …" or "its host:port …" (RFC 952, RFC 1123 §2.1; #630).
+const reasonEdgeHyphen = "has a label that starts or ends with a hyphen; a label starts and ends with a letter or a digit"
+
 // hostPortForms are the forms a host[:port] may take, for its refusals.
 const hostPortForms = "give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone"
 
@@ -449,12 +447,20 @@ func hostPort(h string) (stored, reason string) {
 	case strings.Count(h, ":") > 1:
 		v6, isV6, stored = h, true, "["+h+"]"
 	default:
-		host, p, ok := strings.Cut(h, ":")
-		if host == "" {
+		name, p, ok := strings.Cut(h, ":")
+		if name == "" {
 			return "", `has no host before its ":"; ` + hostPortForms
 		}
-		if !validHostName(host) {
-			return "", "breaks the host name rule: " + hostNameRule
+		// The browser-matched host name rule (ADR-0032 §2-3, class B): §3's characters, no empty
+		// label, and no label that starts or ends with a hyphen (#630).
+		if reason := nameCharReason(name); reason != "" {
+			return "", reason
+		}
+		if host.HasEmptyLabel(name) {
+			return "", reasonEmptyLabel
+		}
+		if host.HasEdgeHyphen(name) {
+			return "", reasonEdgeHyphen
 		}
 		port, hasPort = p, ok
 	}
@@ -472,8 +478,10 @@ func hostPort(h string) (stored, reason string) {
 	return host.Canonical(stored), ""
 }
 
-// parseAllowedHosts reads BYWARD_ALLOWED_HOSTS (#323, #325): each entry as hostPort stores it.
-// A refused entry is never shown (ADR-0031 §1).
+// parseAllowedHosts reads BYWARD_ALLOWED_HOSTS (#323, #325): each entry as hostPort stores it,
+// folded as a browser writes it, and refused when a browser reads its host as an IPv4 address it
+// is not written as (127.1, 010.0.0.1: ADR-0032 R3) or refuses it (mcp.10: R4), naming what the
+// browser reads, never rewritten. A refused entry is never shown (ADR-0031 §1).
 func parseAllowedHosts(val Value) ([]string, []error) {
 	s := val.Setting
 	var out []string
@@ -483,9 +491,14 @@ func parseAllowedHosts(val Value) ([]string, []error) {
 		return nil, []error{err}
 	}
 	for i, h := range list {
+		const want = "a host[:port] such as mcp.example.com or 127.0.0.1:8080"
 		n, reason := hostPort(h)
 		if reason != "" {
-			errs = append(errs, refusedForm(s, at(i), h, "a host[:port] such as mcp.example.com or 127.0.0.1:8080", "it "+reason))
+			errs = append(errs, refusedForm(s, at(i), h, want, "it "+reason))
+			continue
+		}
+		if reason := browserIPv4(host.Hostname(h)); reason != "" {
+			errs = append(errs, refusedForm(s, at(i), h, want, "its host "+reason))
 			continue
 		}
 		out = append(out, n)
@@ -576,17 +589,17 @@ func parseListen(val Value, want string) (string, error) {
 // hostNameRule is what validHostName requires, for the errors of the settings that use it.
 const hostNameRule = "a host name has only letters, digits and - . _ ~, no label starts or ends with a hyphen, and no empty label (no leading or double dot; drop a trailing one)"
 
-// validHostName reports whether host is a name a host setting can match on: BYWARD_ALLOWED_HOSTS
-// (#334), BYWARD_PUBLIC_URL's host, BYWARD_CIMD_TRUSTED_HOSTS, BYWARD_CIMD_ALLOWED_HOSTS (#344),
-// BYWARD_CLIENT_DENYLIST's host entries (through hostNameReason) and the listen addresses' hosts. Not empty, only RFC 3986's
-// unreserved characters (a DNS name never uses reg-name's sub-delims or %-escapes, which a Host
+// validHostName reports whether host is a name a host setting can match on: BYWARD_CIMD_TRUSTED_HOSTS,
+// BYWARD_CIMD_ALLOWED_HOSTS (#344), BYWARD_CLIENT_DENYLIST's host entries (through hostNameReason)
+// and the listen addresses' hosts; the browser-matched settings use hostPort's own rule. Not empty,
+// only RFC 3986's unreserved characters (a DNS name never uses reg-name's sub-delims or %-escapes, which a Host
 // header or a URL could carry), and no empty label. A trailing dot is refused, not stripped: the
 // setting would match only a client given the absolute name, never the usual one, so it is almost
 // always copied from a DNS zone by mistake. Two settings strip one trailing dot first: the client
 // denylist (denylistReason), since its matching folds it away, and the listen addresses (parseListen),
 // since net.Listen takes it.
 func validHostName(name string) bool {
-	// "~" is ADR-0032 §3's host name characters' one extra here, which classes B and S keep until
-	// slices 3 and 4 (#523, #524); the public URL and the operator addresses refuse it first.
+	// "~" is ADR-0032 §3's host name characters' one extra here, which class S keeps until slice 4
+	// (#524); the listen addresses refuse it first.
 	return name != "" && strings.Trim(name, host.NameChars+"~") == "" && !host.HasEmptyLabel(name) && !host.HasEdgeHyphen(name)
 }

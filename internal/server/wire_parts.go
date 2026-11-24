@@ -47,7 +47,8 @@ type authParts struct {
 type Warning struct {
 	Message string
 	// Setting is the setting at fault, or empty. A certificate, the serving certificate or the Entra
-	// client certificate, is named as the operator gave it, by its flag too, in the log as well (#619);
+	// client certificate, is named as the operator gave it, by its flag too, in the log as well (#619),
+	// and so is a browser-matched list in its duplicate warnings (config.ListWarning, ADR-0032 R7);
 	// other settings are named by their variable (#623).
 	Setting string
 	Fix     string
@@ -90,13 +91,22 @@ func warningFix(w Warning) string {
 // upstream's strip list. The error is the store's configuration error.
 func configWarnings(cfg *config.Config, parts *authParts) ([]Warning, error) {
 	if parts == nil {
-		return redundantStrips(cfg), nil
+		return append(redundantStrips(cfg), listWarnings(cfg)...), nil
 	}
 	store, err := checkStore(cfg)
 	if err != nil {
 		return nil, err
 	}
-	return append(append(slices.Clone(parts.warnings), store...), redundantStrips(cfg)...), nil
+	return append(append(append(slices.Clone(parts.warnings), store...), redundantStrips(cfg)...), listWarnings(cfg)...), nil
+}
+
+// listWarnings are the browser-matched lists' entries a browser cannot tell apart (ADR-0032 R7).
+func listWarnings(cfg *config.Config) []Warning {
+	var out []Warning
+	for _, w := range cfg.ListWarnings {
+		out = append(out, Warning{Message: w.Message, Setting: w.Setting, Fix: w.Fix})
+	}
+	return out
 }
 
 // String is the warning on one line, for check and doctor.

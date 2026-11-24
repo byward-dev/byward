@@ -208,3 +208,35 @@ func TestHasEdgeHyphenIsALeadingOrTrailingHyphenInAnyLabel(t *testing.T) {
 		}
 	}
 }
+
+// MatchKey is a Host header as the Host check compares it with an allowed host: as Canonical writes
+// it, without one default port, trimmed once; nothing else is folded.
+func TestMatchKeyFoldsCaseAddressSpellingAndOneDefaultPortAndNothingElse(t *testing.T) {
+	for given, want := range map[string]string{
+		"MCP.example:80": "mcp.example", "127.1:443": "127.0.0.1", "[0:0::1]:443": "[::1]", "::1": "[::1]",
+		"[::1]:80:443": "[::1]:80", "mcp.example:8443": "mcp.example:8443",
+		"x:0443": "x:0443", "x:": "x:", "ｘ": "ｘ", "x.": "x.",
+	} {
+		if got := MatchKey(given); got != want {
+			t.Errorf("MatchKey(%q) = %q, want %q", given, got, want)
+		}
+	}
+}
+
+// Origin is an origin as the Origin check compares it (ADR-0032 A3): Canonical's host and port without
+// the scheme's own default port only.
+func TestOriginIsTheCanonicalHostWithoutTheSchemesOwnDefaultPortOnly(t *testing.T) {
+	for _, tc := range []struct{ scheme, hostport, want string }{
+		{"https", "APP.example:443", "https://app.example"},
+		{"https", "127.1", "https://127.0.0.1"},
+		{"https", "[0:0::1]:443", "https://[::1]"},
+		{"http", "plain.example:80", "http://plain.example"},
+		{"https", "app.example:80", "https://app.example:80"},
+		{"http", "plain.example:443", "http://plain.example:443"},
+		{"https", "app.example:0443", "https://app.example:0443"},
+	} {
+		if got := Origin(tc.scheme, tc.hostport); got != tc.want {
+			t.Errorf("Origin(%q, %q) = %q, want %q", tc.scheme, tc.hostport, got, tc.want)
+		}
+	}
+}

@@ -31,8 +31,8 @@ type Config struct {
 	StdioStreamIdleTimeout time.Duration
 	Listen                 string
 	InternalListen         string // "" when the internal listener is off
-	// AllowedOrigins are origins as browsers serialize them (browserOrigin), which origin.Origins
-	// compares with a browser's Origin header in lower case.
+	// AllowedOrigins are origins as browsers serialize them (browserOrigin, host.Origin), the form
+	// origin.Origins compares a browser's Origin header in once folded the same way (ADR-0032 A3).
 	AllowedOrigins []string
 	AllowedHosts   []string
 	// TrustedProxies are masked, with IPv4-mapped prefixes unmapped, since logging.ClientAddress
@@ -135,6 +135,10 @@ type Config struct {
 	InContainer bool
 
 	Values *Values
+	// ListWarnings are the browser-matched lists' entries that a browser cannot tell apart once folded
+	// (ADR-0032 R7): two that name the same host or origin, or one that names the public URL's own,
+	// which is always allowed. They load, as a warning: two spellings of one host do no harm.
+	ListWarnings []ListWarning
 	// Relaxations lists every relaxation in effect (--dev, --insecure-no-auth), for the startup log
 	// and check --offline (security invariant 12).
 	Relaxations []string
@@ -268,6 +272,9 @@ func validate(v *Values, container, dashes bool) (*Config, error) {
 	var hostErrs []error
 	c.AllowedHosts, hostErrs = parseAllowedHosts(v.value("allowed-hosts"))
 	errs = append(errs, hostErrs...)
+	if c.PublicURL != nil { // a refused entry makes validate return no Config, so no place is ever wrong
+		c.ListWarnings = c.browserListWarnings()
+	}
 	if c.ResourceDocumentation, err = parseResourceDocumentation(v.value("resource-documentation")); err != nil {
 		errs = append(errs, err)
 	}

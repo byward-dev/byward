@@ -113,6 +113,7 @@ func TestAListedHostMatchesEverySpellingOfItsAddressAndNoOtherHost(t *testing.T)
 		{"127.0.0.1:8080", []string{"127.1:8080", "2130706433:8080", "0x7f.0.0.1:8080", "0177.0.0.1:8080"},
 			[]string{"127.0.0.2:8080", "127.0.0.1:8081", "127.0.0.1.evil:8080", "127.0.0.1.5:8080", "127.0.0.1.0:8080", "[127.0.0.1]:8080"}}, // .0 passes the size check, so only the five-part limit refuses it
 		{"0.0.0.0", []string{"0", "0x0.0"}, []string{"4294967296", "18446744073709551616", "0x10000000000000000"}}, // overflow never wraps to 0.0.0.0
+		{"127.0.0.2", nil, []string{"127.1", "0x7f.0.0.1", "127.0.0.1"}},                                           // another address, however spelled
 		{"mcp.10", []string{"MCP.10"}, []string{"mcp.0xa", "mcp.010", "0.0.0.10", "10.0.0.0"}},
 	} {
 		t.Run(tc.listed, func(t *testing.T) {
@@ -137,6 +138,15 @@ func TestInternalListenerAcceptsAddressesAndListedNamesOnly(t *testing.T) {
 		"localhost.attacker.example":         http.StatusMisdirectedRequest,
 		"127.0.0.1.nip.io:9090":              http.StatusMisdirectedRequest,
 		"":                                   http.StatusMisdirectedRequest,
+		// The internal listener's rule (ADR-0018 §2): any IP address in any spelling, localhost, and a
+		// listed name in any case on any port (so :080 too); a full-width name, a trailing dot, a name
+		// ending in a number and a non-ASCII name are refused.
+		"BYWARD-METRICS.monitoring.svc":  http.StatusNoContent,
+		"localhost:080":                  http.StatusNoContent,
+		"ｌｏｃａｌｈｏｓｔ":                      http.StatusMisdirectedRequest,
+		"byward-metrics.monitoring.svc.": http.StatusMisdirectedRequest,
+		"mcp.10":                         http.StatusMisdirectedRequest,
+		"bÿward-metrics.monitoring.svc":  http.StatusMisdirectedRequest,
 	}
 	for host, want := range cases {
 		r := httptest.NewRequest("GET", "/metrics", nil)
@@ -322,5 +332,98 @@ func TestAllowedRequestsAreNotAudited(t *testing.T) {
 	Hosts(rec, []string{"mcp.example.com"}, Origins(rec, []string{"https://app.example"}, ok)).ServeHTTP(httptest.NewRecorder(), r)
 	if out.Len() != 0 {
 		t.Fatalf("an allowed request produced audit records: %s", out.String())
+	}
+}
+
+// The Host check folds case, an IP address's spelling and one default port, and nothing more: a
+// default port with leading zeros, an empty port, a sign or an out-of-range port, a full-width or
+// Unicode name and a trailing dot match nothing (#523), so a switch to a wider fold shows here.
+func TestTheHostCheckFoldsCaseAddressSpellingAndOneDefaultPortAndNothingElse(t *testing.T) {
+	for _, tc := range []struct {
+		listed string
+		refuse []string
+	}{
+		{"mcp.example.com", []string{"mcp.example.com:080", "mcp.example.com:0443", "mcp.example.com:00080", "mcp.example.com:", "ｍｃｐ.example.com",
+			"mcp.example.com:+443", "mcp.example.com:99999", "mcp.example.com."}},
+		{"xn--bcher-kva.example", []string{"bücher.example"}},
+	} {
+		t.Run(tc.listed, func(t *testing.T) { matchesOnly(t, tc.listed, nil, tc.refuse) })
+	}
+}
+
+// originCode is Origins' answer to one Origin header against listed.
+func originCode(listed []string, o string) (int, http.Header) {
+	h := Origins(quiet(), listed, ok)
+	r := httptest.NewRequest("POST", "/mcp", nil)
+	r.Header.Set("Origin", o)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w.Code, w.Header()
+}
+
+// An Origin matches its listed entry once folded (ADR-0032 A3): in any case, with an IPv4 or IPv6
+// address in any spelling, and with the scheme's own default port. Anything that is no bare origin, a
+// spelling the fold leaves apart, another scheme's default port or another origin matches nothing.
+func TestAnOriginMatchesItsEntryOnceFoldedAndNothingElse(t *testing.T) {
+	shared := []string{"https://127.0.0.1", "https://[::1]", "https://app.example", "http://plain.example", "https://xn--bcher-kva.example"}
+	for _, tc := range []struct {
+		origin string
+		want   int
+		listed []string // shared when nil
+	}{
+		{"https://127.1", http.StatusNoContent, nil},
+		{"https://0x7f.0.0.1", http.StatusNoContent, nil},
+		{"https://[0:0::1]", http.StatusNoContent, nil},
+		{"https://APP.Example", http.StatusNoContent, nil},
+		{"https://app.example:443", http.StatusNoContent, nil},
+		{"http://plain.example:80", http.StatusNoContent, nil},
+		// No bare origin.
+		{"https://app.example/", http.StatusForbidden, nil},
+		{"https://app.example/mcp", http.StatusForbidden, nil},
+		{"https://u@app.example", http.StatusForbidden, nil},
+		{"https://app.example?x=1", http.StatusForbidden, nil},
+		{"https://app.example?", http.StatusForbidden, nil},
+		{"https://app.example#f", http.StatusForbidden, nil},
+		{"app.example", http.StatusForbidden, nil},
+		// Spellings no browser sends, as the Host check does not fold them either.
+		{"https://app.example:0443", http.StatusForbidden, nil},
+		{"https://app.example:", http.StatusForbidden, nil},
+		{"https://ａｐｐ.example", http.StatusForbidden, nil},
+		{"https://bücher.example", http.StatusForbidden, nil},
+		// Only the scheme's own default port.
+		{"https://app.example:80", http.StatusForbidden, nil},
+		{"http://plain.example:443", http.StatusForbidden, nil},
+		// A spelling of an origin that is not listed.
+		{"https://127.1", http.StatusForbidden, []string{"https://127.0.0.2"}},
+	} {
+		listed := tc.listed
+		if listed == nil {
+			listed = shared
+		}
+		if code, _ := originCode(listed, tc.origin); code != tc.want {
+			t.Errorf("Origin %q against %q: got %d, want %d", tc.origin, listed, code, tc.want)
+		}
+	}
+}
+
+// An allowed entry that is no bare origin matches nothing: not the bare origin it would be without its
+// trailing slash, and never a header that is no origin either (null, a path, another scheme) by sharing
+// its empty key.
+func TestAMalformedAllowedOriginMatchesNoHeader(t *testing.T) {
+	for _, o := range []string{"https://app.example", "null", "https://evil.example/x", "ftp://app.example", "https://"} {
+		if code, _ := originCode([]string{"https://app.example/", "https://", "ftp://app.example"}, o); code != http.StatusForbidden {
+			t.Errorf("Origin %q against malformed entries: got %d, want 403", o, code)
+		}
+	}
+}
+
+// The CORS answer echoes the Origin exactly as the client sent it, never its folded form: a browser
+// compares Access-Control-Allow-Origin with the Origin it sent, byte for byte.
+func TestCORSEchoesTheOriginAsSent(t *testing.T) {
+	for _, o := range []string{"https://127.1", "https://APP.example", "https://app.example:443"} {
+		code, h := originCode([]string{"https://127.0.0.1", "https://app.example"}, o)
+		if code != http.StatusNoContent || h.Get("Access-Control-Allow-Origin") != o {
+			t.Errorf("Origin %q: got %d, Access-Control-Allow-Origin %q; want it echoed as sent", o, code, h.Get("Access-Control-Allow-Origin"))
+		}
 	}
 }

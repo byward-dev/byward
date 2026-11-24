@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -54,10 +55,10 @@ func hostRule(h string) string {
 	}
 	// An allowed host's host name, and whether the no-auth check reads it as loopback: both read
 	// the entry as stored (hostPort), never as given.
-	if stored, reason := hostPort(h); reason != "" {
-		fmt.Fprintf(&b, "  allowed host: refused: it %s\n", reason)
+	if stored, errs := parseAllowedHosts(Value{Setting: lookup("allowed-hosts"), Given: NewOpaque(h)}); len(errs) > 0 {
+		fmt.Fprintf(&b, "  allowed host: refused: %v\n", errors.Join(errs...))
 	} else {
-		fmt.Fprintf(&b, "  allowed host: %s, hostname %s, loopback %v\n", stored, host.Hostname(stored), host.LoopbackAsWritten(host.Hostname(stored)))
+		fmt.Fprintf(&b, "  allowed host: %s, hostname %s, loopback %v\n", stored[0], host.Hostname(stored[0]), host.LoopbackAsWritten(host.Hostname(stored[0])))
 	}
 	if u, reason := parseOrigin("https://" + h); reason != "" {
 		fmt.Fprintf(&b, "  origin: refused: %s\n", reason)
@@ -66,7 +67,7 @@ func hostRule(h string) string {
 	}
 	fmt.Fprintf(&b, "  cimd list: %q\n", hostNameReason(h))
 	fmt.Fprintf(&b, "  denylist: %q\n", denylistReason(h))
-	fmt.Fprintf(&b, "  host header: %s\n", host.Canonical(h))
+	fmt.Fprintf(&b, "  host header: %s\n", host.MatchKey(h))
 	// The --dev issuer and the no-auth listen address ask about the host as written, not lower-cased (LoopbackAsWritten sets its case aside).
 	if u, err := url.Parse("http://" + h); err == nil {
 		fmt.Fprintf(&b, "  loopback as written: %v\n", host.LoopbackAsWritten(u.Hostname()))

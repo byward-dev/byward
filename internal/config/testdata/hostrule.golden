@@ -21,12 +21,12 @@ MCP.Example.com
   host header: mcp.example.com
   loopback as written: false
 mcp.example.com.
-  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (28 characters, not shown): its host name has an empty label (a leading, double or trailing dot); drop the extra dot
-  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (27 characters, not shown): its host name has an empty label (a leading, double or trailing dot); drop the extra dot
+  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (28 characters, not shown): its host:port has an empty label (a leading, double or trailing dot); drop the extra dot
+  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (27 characters, not shown): its host:port has an empty label (a leading, double or trailing dot); drop the extra dot
   upstream: mcp.example.com.
   listen: mcp.example.com.:80
-  allowed host: refused: it breaks the host name rule: a host name has only letters, digits and - . _ ~, no label starts or ends with a hyphen, and no empty label (no leading or double dot; drop a trailing one)
-  origin: refused: its host:port breaks the host name rule: a host name has only letters, digits and - . _ ~, no label starts or ends with a hyphen, and no empty label (no leading or double dot; drop a trailing one)
+  allowed host: refused: BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (16 characters, not shown): it has an empty label (a leading, double or trailing dot); drop the extra dot
+  origin: refused: its host:port has an empty label (a leading, double or trailing dot); drop the extra dot
   cimd list: "breaks the host name rule: a host name has only letters, digits and - . _ ~, no label starts or ends with a hyphen, and no empty label (no leading or double dot; drop a trailing one)"
   denylist: ""
   host header: mcp.example.com.
@@ -91,7 +91,7 @@ Localhost
   public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (16 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   upstream: 127.1
   listen: 127.1:80
-  allowed host: 127.0.0.1, hostname 127.0.0.1, loopback true
+  allowed host: refused: BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (5 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1
   origin: refused: its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1
   cimd list: ""
   denylist: "ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match (127.1 and 0x7f000001 are 127.0.0.1), or none at all; deny the app by its CIMD client ID or its redirect host's name"
@@ -102,7 +102,7 @@ Localhost
   public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (21 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   upstream: 0x7f.0.0.1
   listen: 0x7f.0.0.1:80
-  allowed host: 127.0.0.1, hostname 127.0.0.1, loopback true
+  allowed host: refused: BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (10 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1
   origin: refused: its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1
   cimd list: ""
   denylist: "ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match (127.1 and 0x7f000001 are 127.0.0.1), or none at all; deny the app by its CIMD client ID or its redirect host's name"
@@ -113,7 +113,7 @@ Localhost
   public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (20 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 8.0.0.1, reading a part with a leading 0 as octal; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   upstream: 010.0.0.1
   listen: 010.0.0.1:80
-  allowed host: 8.0.0.1, hostname 8.0.0.1, loopback false
+  allowed host: refused: BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (9 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 8.0.0.1, reading a part with a leading 0 as octal
   origin: refused: its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 8.0.0.1, reading a part with a leading 0 as octal
   cimd list: ""
   denylist: "ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match (127.1 and 0x7f000001 are 127.0.0.1), or none at all; deny the app by its CIMD client ID or its redirect host's name"
@@ -124,7 +124,7 @@ Localhost
   public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (21 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   upstream: 2130706433
   listen: 2130706433:80
-  allowed host: 127.0.0.1, hostname 127.0.0.1, loopback true
+  allowed host: refused: BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (10 characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1
   origin: refused: its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1
   cimd list: "has no dot; give a name with at least one dot"
   denylist: "has no dot; give a name with at least one dot"
@@ -146,7 +146,7 @@ mcp.10
   public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (17 characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   upstream: mcp.10
   listen: mcp.10:80
-  allowed host: mcp.10, hostname mcp.10, loopback false
+  allowed host: refused: BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (6 characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it
   origin: refused: its host is not an IPv4 address but ends in a number, so browsers refuse it
   cimd list: ""
   denylist: "ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match (127.1 and 0x7f000001 are 127.0.0.1), or none at all; deny the app by its CIMD client ID or its redirect host's name"
@@ -157,7 +157,7 @@ mcp.10
   public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (21 characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
   upstream: 10.0.0.999
   listen: 10.0.0.999:80
-  allowed host: 10.0.0.999, hostname 10.0.0.999, loopback false
+  allowed host: refused: BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (10 characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it
   origin: refused: its host is not an IPv4 address but ends in a number, so browsers refuse it
   cimd list: ""
   denylist: "ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match (127.1 and 0x7f000001 are 127.0.0.1), or none at all; deny the app by its CIMD client ID or its redirect host's name"
@@ -212,7 +212,7 @@ mcp.10
   public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (27 characters, not shown): its host:port is not an IPv6 address without a zone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
   upstream: [fe80::1%eth0]
   listen: [fe80::1%25eth0]:80
-  allowed host: refused: it is not an IPv6 address without a zone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
+  allowed host: refused: BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (16 characters, not shown): it is not an IPv6 address without a zone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
   origin: refused: its host:port is not an IPv6 address without a zone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
   cimd list: "breaks the host name rule: a host name has only letters, digits and - . _ ~, no label starts or ends with a hyphen, and no empty label (no leading or double dot; drop a trailing one)"
   denylist: "breaks the host name rule: a host name has only letters, digits and - . _ ~, no label starts or ends with a hyphen, and no empty label (no leading or double dot; drop a trailing one)"
@@ -234,7 +234,7 @@ bücher.example
   public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (25 characters, not shown): its host:port holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
   upstream: refused: BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (25 characters, not shown): its host holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
   listen: refused: BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (17 characters, not shown): its host holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
-  allowed host: refused: it holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
+  allowed host: refused: BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (14 characters, not shown): it holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
   origin: refused: its host:port holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
   cimd list: "holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send"
   denylist: "holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send"
@@ -263,12 +263,12 @@ my_mcp
   host header: my_mcp
   loopback as written: false
 S3CRET~tok
-  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (22 characters, not shown): its host has a character no host name holds at position 7; a host name has only letters, digits, - . and _
-  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (21 characters, not shown): its host has a character no host name holds at position 7; a host name has only letters, digits, - . and _
+  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (22 characters, not shown): its host:port has a character no host name holds at position 7; a host name has only letters, digits, - . and _
+  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (21 characters, not shown): its host:port has a character no host name holds at position 7; a host name has only letters, digits, - . and _
   upstream: refused: BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (21 characters, not shown): its host has a character no host name holds at position 7; a host name has only letters, digits, - . and _
   listen: refused: BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (13 characters, not shown): its host has a character no host name holds at position 7; a host name has only letters, digits, - . and _
-  allowed host: s3cret~tok, hostname s3cret~tok, loopback false
-  origin: https://s3cret~tok
+  allowed host: refused: BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (10 characters, not shown): it has a character no host name holds at position 7; a host name has only letters, digits, - . and _
+  origin: refused: its host:port has a character no host name holds at position 7; a host name has only letters, digits, - . and _
   cimd list: "has no dot; give a name with at least one dot"
   denylist: "has no dot; give a name with at least one dot"
   host header: s3cret~tok
@@ -285,12 +285,12 @@ single
   host header: single
   loopback as written: false
 a..b
-  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (16 characters, not shown): its host name has an empty label (a leading, double or trailing dot); drop the extra dot
-  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (15 characters, not shown): its host name has an empty label (a leading, double or trailing dot); drop the extra dot
+  public https: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (16 characters, not shown): its host:port has an empty label (a leading, double or trailing dot); drop the extra dot
+  public http: refused: BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (15 characters, not shown): its host:port has an empty label (a leading, double or trailing dot); drop the extra dot
   upstream: a..b
   listen: refused: BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (7 characters, not shown): it has a host that is neither an IP address nor a host name
-  allowed host: refused: it breaks the host name rule: a host name has only letters, digits and - . _ ~, no label starts or ends with a hyphen, and no empty label (no leading or double dot; drop a trailing one)
-  origin: refused: its host:port breaks the host name rule: a host name has only letters, digits and - . _ ~, no label starts or ends with a hyphen, and no empty label (no leading or double dot; drop a trailing one)
+  allowed host: refused: BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry 1 of 1 (4 characters, not shown): it has an empty label (a leading, double or trailing dot); drop the extra dot
+  origin: refused: its host:port has an empty label (a leading, double or trailing dot); drop the extra dot
   cimd list: "breaks the host name rule: a host name has only letters, digits and - . _ ~, no label starts or ends with a hyphen, and no empty label (no leading or double dot; drop a trailing one)"
   denylist: "breaks the host name rule: a host name has only letters, digits and - . _ ~, no label starts or ends with a hyphen, and no empty label (no leading or double dot; drop a trailing one)"
   host header: a..b
@@ -304,7 +304,7 @@ mcp.example.com:443
   origin: https://mcp.example.com
   cimd list: "breaks the host name rule: a host name has only letters, digits and - . _ ~, no label starts or ends with a hyphen, and no empty label (no leading or double dot; drop a trailing one)"
   denylist: "breaks the host name rule: a host name has only letters, digits and - . _ ~, no label starts or ends with a hyphen, and no empty label (no leading or double dot; drop a trailing one)"
-  host header: mcp.example.com:443
+  host header: mcp.example.com
   loopback as written: false
 mcp.example.com:8443
   public https: mcp.example.com:8443
@@ -337,5 +337,5 @@ localhost:80
   origin: https://localhost:80
   cimd list: "breaks the host name rule: a host name has only letters, digits and - . _ ~, no label starts or ends with a hyphen, and no empty label (no leading or double dot; drop a trailing one)"
   denylist: "breaks the host name rule: a host name has only letters, digits and - . _ ~, no label starts or ends with a hyphen, and no empty label (no leading or double dot; drop a trailing one)"
-  host header: localhost:80
+  host header: localhost
   loopback as written: true
