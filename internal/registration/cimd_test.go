@@ -27,8 +27,8 @@ func TestOnlyClientIDURLsMeetingDraftSection3AreAccepted(t *testing.T) {
 			t.Errorf("%s: %v", ok, err)
 		}
 	}
-	// Each refused ID is refused for the rule its row names: a port with no host ahead of the user
-	// information and the port rules, and after the URL is found absolute (#625).
+	// Each refused ID is pinned to the full error it returns: a port with no host is refused for that
+	// ahead of the user information and the port rules, and after the URL is found absolute (#625).
 	for name, tc := range map[string]struct{ id, reason string }{
 		"http":                          {"http://app.example/client", "must start with https://"},
 		"no path":                       {"https://app.example", "must have a path other than /"},
@@ -42,6 +42,7 @@ func TestOnlyClientIDURLsMeetingDraftSection3AreAccepted(t *testing.T) {
 		"other port":                    {"https://app.example:8443/client", "only port 443 is fetched"},
 		"unicode host":                  {"https://bücher.example/client", "must be printable ASCII"},
 		"space":                         {"https://app.example/a client", "must be printable ASCII"},
+		"DEL":                           {"https://app.example/a\x7fb", "must be printable ASCII"},
 		"too long":                      {"https://app.example/" + strings.Repeat("a", MaxCIMDURLLen-len("https://app.example/")+1), fmt.Sprintf("longer than %d characters", MaxCIMDURLLen)},
 		"upper scheme":                  {"HTTPS://app.example/client", "must start with https://"},
 		"no host":                       {"https:///client", "not an absolute URL"},
