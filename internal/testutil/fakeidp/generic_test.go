@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+
+	"github.com/byward-dev/byward/internal/testutil/recordtb"
 )
 
 func TestGenericLoginIssuesPlainOIDCTokensWithoutEntraClaims(t *testing.T) {
@@ -92,24 +94,7 @@ func TestUserClaimsOverrideTheProfilesClaims(t *testing.T) {
 }
 
 func TestNewRejectsUnknownProfile(t *testing.T) {
-	ft := &fatalRecorder{TB: t}
-	func() {
-		defer func() {
-			if r := recover(); r != nil && r != "fatal" {
-				panic(r)
-			}
-		}()
-		New(ft, "okta")
-	}()
-	if !ft.failed {
+	if rep := recordtb.Run(t, func(tb testing.TB) { New(tb, "okta") }); len(rep.Fatals) != 1 {
 		t.Fatal("unknown profile accepted")
 	}
 }
-
-type fatalRecorder struct {
-	testing.TB
-	failed bool
-}
-
-func (r *fatalRecorder) Fatalf(string, ...any) { r.failed = true; panic("fatal") }
-func (r *fatalRecorder) Helper()               {}

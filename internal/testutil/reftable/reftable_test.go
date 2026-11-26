@@ -1,13 +1,13 @@
 package reftable
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/byward-dev/byward/internal/testutil/recordtb"
 )
 
 const page = `# Page
@@ -105,28 +105,6 @@ func TestCellsSplitsOutsideCode(t *testing.T) {
 	}
 }
 
-// recorder is a testing.TB that records failures; Fatal ends the goroutine running Sync.
-type recorder struct {
-	testing.TB
-	failures []string
-}
-
-func (r *recorder) Helper() {}
-
-func (r *recorder) Errorf(format string, a ...any) {
-	r.failures = append(r.failures, fmt.Sprintf(format, a...))
-}
-
-func (r *recorder) Fatal(a ...any) {
-	r.failures = append(r.failures, fmt.Sprint(a...))
-	runtime.Goexit()
-}
-
-func (r *recorder) Fatalf(format string, a ...any) {
-	r.Errorf(format, a...)
-	runtime.Goexit()
-}
-
 // runSync runs Sync on a copy of doc and returns its failures and the file afterwards.
 func runSync(t *testing.T, doc string, keys []string, update bool) ([]string, string) {
 	t.Helper()
@@ -139,18 +117,14 @@ func runSync(t *testing.T, doc string, keys []string, update bool) ([]string, st
 		env = "1"
 	}
 	t.Setenv("BYWARD_UPDATE_REFERENCE", env)
-	r := &recorder{TB: t}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		Table{Path: path, Heading: "## Things", Package: "./internal/x/"}.Sync(r, keys, row)
-	}()
-	<-done
+	rep := recordtb.Run(t, func(tb testing.TB) {
+		Table{Path: path, Heading: "## Things", Package: "./internal/x/"}.Sync(tb, keys, row)
+	})
 	b, err := os.ReadFile(path) //nolint:gosec // G304: the test's own temp file
 	if err != nil {
 		t.Fatal(err)
 	}
-	return r.failures, string(b)
+	return slices.Concat(rep.Errors, rep.Fatals), string(b) // in the order reported: a fatal ends Sync
 }
 
 // Sync fails on a stale table and names the package that regenerates it; with

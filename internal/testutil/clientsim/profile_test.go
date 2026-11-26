@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/byward-dev/byward/internal/registration"
 	"github.com/byward-dev/byward/internal/testutil/clientdocs"
+	"github.com/byward-dev/byward/internal/testutil/recordtb"
 )
 
 // A profile is evidence, not a wish list: each one names its version and matrix cell, every fact has
@@ -87,15 +87,6 @@ func TestTheMatrixDocAndTheProfilesNameTheSameSimulatedCells(t *testing.T) {
 	}
 }
 
-// recorder is a testing.TB that records a failure instead of failing the test.
-type recorder struct {
-	testing.TB
-	failed bool
-}
-
-func (r *recorder) Helper()               {}
-func (r *recorder) Fatalf(string, ...any) { r.failed = true; runtime.Goexit() }
-
 // WantNoAuthLoop fails exactly on the answers that would make the client sign in again.
 func TestWantNoAuthLoopFailsOnTheAnswersThatLoopTheClient(t *testing.T) {
 	treats, ignores := Profile{Client: "a", Treats403AsAuthFailure: true}, Profile{Client: "b"}
@@ -111,12 +102,13 @@ func TestWantNoAuthLoopFailsOnTheAnswersThatLoopTheClient(t *testing.T) {
 		{"401 to any client", ignores, http.StatusUnauthorized, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := &recorder{TB: t}
-			done := make(chan struct{})
-			go func() { defer close(done); WantNoAuthLoop(r, tc.p, &http.Response{StatusCode: tc.status}) }()
-			<-done
-			if r.failed != tc.fails {
-				t.Fatalf("failed = %v, want %v", r.failed, tc.fails)
+			rep := recordtb.Run(t, func(tb testing.TB) { WantNoAuthLoop(tb, tc.p, &http.Response{StatusCode: tc.status}) })
+			fatals := 0 // a failing answer is one fatal and no error: the check stops there
+			if tc.fails {
+				fatals = 1
+			}
+			if len(rep.Errors) != 0 || len(rep.Fatals) != fatals {
+				t.Fatalf("errors %q, fatals %q; want no error and %d fatal", rep.Errors, rep.Fatals, fatals)
 			}
 		})
 	}

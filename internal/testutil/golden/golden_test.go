@@ -4,43 +4,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/byward-dev/byward/internal/testutil/golden"
+	"github.com/byward-dev/byward/internal/testutil/recordtb"
 )
 
-// recorder is a testing.TB that keeps what Check reports. Fatalf ends the goroutine, as testing does.
-type recorder struct {
-	testing.TB
-	errors, fatals []string
-}
-
-func (r *recorder) Helper() {}
-
-func (r *recorder) Errorf(format string, args ...any) {
-	r.errors = append(r.errors, fmt.Sprintf(format, args...))
-}
-
-func (r *recorder) Fatalf(format string, args ...any) {
-	r.fatals = append(r.fatals, fmt.Sprintf(format, args...))
-	runtime.Goexit()
-}
-
-// check runs golden.Check against a recorder, on its own goroutine so that Fatalf can end it.
-func check(t *testing.T, path, got, hint string) *recorder {
+// check runs golden.Check under recordtb.Run and returns what it reported.
+func check(t *testing.T, path, got, hint string) recordtb.Report {
 	t.Helper()
-	r := &recorder{TB: t}
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		golden.Check(r, path, got, hint)
-	}()
-	wg.Wait()
-	return r
+	return recordtb.Run(t, func(tb testing.TB) { golden.Check(tb, path, got, hint) })
 }
 
 func goldenFile(t *testing.T, content string) string {
@@ -54,8 +28,8 @@ func goldenFile(t *testing.T, content string) string {
 
 func TestCheckPassesWhenTheOutputMatchesTheFile(t *testing.T) {
 	t.Setenv(golden.UpdateEnv, "")
-	if r := check(t, goldenFile(t, "a\nb\n"), "a\nb\n", "the hint"); len(r.errors)+len(r.fatals) != 0 {
-		t.Fatalf("a match failed: %q %q", r.errors, r.fatals)
+	if r := check(t, goldenFile(t, "a\nb\n"), "a\nb\n", "the hint"); len(r.Errors)+len(r.Fatals) != 0 {
+		t.Fatalf("a match failed: %q %q", r.Errors, r.Fatals)
 	}
 }
 
@@ -75,12 +49,12 @@ func TestCheckNamesTheFirstDifferingLineAndTheHint(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			path := goldenFile(t, tc.want)
 			r := check(t, path, tc.got, "the metric names are a public interface")
-			if len(r.fatals) != 0 || len(r.errors) != 1 {
-				t.Fatalf("errors %q, fatals %q; want one error", r.errors, r.fatals)
+			if len(r.Fatals) != 0 || len(r.Errors) != 1 {
+				t.Fatalf("errors %q, fatals %q; want one error", r.Errors, r.Fatals)
 			}
 			want := path + " differs at " + tc.line + "\nthe metric names are a public interface; if intended, rerun with BYWARD_UPDATE_GOLDEN=1 and review the diff"
-			if r.errors[0] != want {
-				t.Fatalf("error\n%s\nwant\n%s", r.errors[0], want)
+			if r.Errors[0] != want {
+				t.Fatalf("error\n%s\nwant\n%s", r.Errors[0], want)
 			}
 		})
 	}
@@ -90,8 +64,8 @@ func TestCheckNamesTheFirstDifferingLineAndTheHint(t *testing.T) {
 func TestCheckRewritesTheFileUnderTheUpdateVariable(t *testing.T) {
 	t.Setenv(golden.UpdateEnv, "1")
 	path := goldenFile(t, "old\n")
-	if r := check(t, path, "new\n", "the hint"); len(r.errors)+len(r.fatals) != 0 {
-		t.Fatalf("the update failed: %q %q", r.errors, r.fatals)
+	if r := check(t, path, "new\n", "the hint"); len(r.Errors)+len(r.Fatals) != 0 {
+		t.Fatalf("the update failed: %q %q", r.Errors, r.Fatals)
 	}
 	if b, err := os.ReadFile(path); err != nil || string(b) != "new\n" { //nolint:gosec // G304: the test's own temp file
 		t.Fatalf("the file holds %q (%v), want the output", b, err)
@@ -104,8 +78,8 @@ func TestCheckComparesUnderAnyOtherValueOfTheUpdateVariable(t *testing.T) {
 		t.Run(fmt.Sprintf("%q", value), func(t *testing.T) {
 			t.Setenv(golden.UpdateEnv, value)
 			path := goldenFile(t, "old\n")
-			if r := check(t, path, "new\n", "the hint"); len(r.errors) != 1 {
-				t.Fatalf("errors %q, want the mismatch", r.errors)
+			if r := check(t, path, "new\n", "the hint"); len(r.Errors) != 1 {
+				t.Fatalf("errors %q, want the mismatch", r.Errors)
 			}
 			if b, _ := os.ReadFile(path); string(b) != "old\n" { //nolint:gosec // G304: the test's own temp file
 				t.Fatalf("the file holds %q, want it unchanged", b)
@@ -118,8 +92,8 @@ func TestCheckComparesUnderAnyOtherValueOfTheUpdateVariable(t *testing.T) {
 func TestCheckStopsWhenTheFileCannotBeRead(t *testing.T) {
 	t.Setenv(golden.UpdateEnv, "")
 	r := check(t, filepath.Join(t.TempDir(), "missing.golden"), "a\n", "the hint")
-	if len(r.fatals) != 1 || !strings.Contains(r.fatals[0], "BYWARD_UPDATE_GOLDEN=1 writes it") {
-		t.Fatalf("fatals %q, want one naming the update variable", r.fatals)
+	if len(r.Fatals) != 1 || !strings.Contains(r.Fatals[0], "BYWARD_UPDATE_GOLDEN=1 writes it") {
+		t.Fatalf("fatals %q, want one naming the update variable", r.Fatals)
 	}
 }
 
@@ -127,7 +101,7 @@ func TestCheckStopsWhenTheFileCannotBeRead(t *testing.T) {
 func TestCheckStopsWhenTheFileCannotBeWritten(t *testing.T) {
 	t.Setenv(golden.UpdateEnv, "1")
 	r := check(t, filepath.Join(t.TempDir(), "no-dir", "x.golden"), "a\n", "the hint")
-	if len(r.fatals) != 1 || !strings.Contains(r.fatals[0], "write the golden file") {
-		t.Fatalf("fatals %q, want one saying the file was not written", r.fatals)
+	if len(r.Fatals) != 1 || !strings.Contains(r.Fatals[0], "write the golden file") {
+		t.Fatalf("fatals %q, want one saying the file was not written", r.Fatals)
 	}
 }

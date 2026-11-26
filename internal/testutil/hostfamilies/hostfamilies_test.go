@@ -1,15 +1,14 @@
 package hostfamilies
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
+
+	"github.com/byward-dev/byward/internal/testutil/recordtb"
 )
 
 // Every package columns lists has a test that runs its columns, and a decision golden that holds
@@ -71,30 +70,11 @@ func TestEachFamilyHasDistinctInputs(t *testing.T) {
 	}
 }
 
-// recorder is a testing.TB that keeps what a check reports instead of failing. Fatalf ends the
-// goroutine, as testing does, so a check runs on its own goroutine (record).
-type recorder struct {
-	testing.TB
-	errs []string
-}
-
-func (r *recorder) Helper() {}
-func (r *recorder) Errorf(format string, a ...any) {
-	r.errs = append(r.errs, fmt.Sprintf(format, a...))
-}
-func (r *recorder) Fatalf(format string, a ...any) { r.Errorf(format, a...); runtime.Goexit() }
-
-// record runs check against a recorder on its own goroutine and returns what it reported.
+// record runs check under recordtb.Run and returns what it reported, in the order reported: a
+// fatal ends the check.
 func record(t *testing.T, check func(testing.TB)) []string {
-	r := &recorder{TB: t}
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		check(r)
-	}()
-	wg.Wait()
-	return r.errs
+	rep := recordtb.Run(t, check)
+	return slices.Concat(rep.Errors, rep.Fatals)
 }
 
 // The baseline check names each line that differs from the checks' decisions as a widening or a
