@@ -3,10 +3,10 @@
 # which is edited by hand; a denylist's lines there are the inputs it stops. A Go version that reads
 # a URL or an address differently changes these lines: that is a decision change too.
 
-## SSRF guard URL: 427 pass, 18397 refused, of 18824
+## SSRF guard URL: 433 pass, 18619 refused, of 19052
 by family:
   name                     pass    54  refused  1998
-  name edge                pass   125  refused  4207
+  name edge                pass   131  refused  4429
   near miss                pass    36  refused  1332
   idn                      pass    36  refused  1332
   ipv4                     pass    30  refused  1110
@@ -17,12 +17,12 @@ by family:
   invisible                pass    30  refused  1110
   url shape                pass     8  refused    10
 by wrap:
-  bare                     pass   181  refused  2933
-  [h]                      pass    35  refused  3081
-  [h                       pass     9  refused  3105
-  h]                       pass   184  refused  2970
-  [h]]                     pass     8  refused  3146
-  [h]x                     pass     2  refused  3152
+  bare                     pass   184  refused  2968
+  [h]                      pass    35  refused  3119
+  [h                       pass     9  refused  3143
+  h]                       pass   187  refused  3005
+  [h]]                     pass     8  refused  3184
+  [h]x                     pass     2  refused  3190
   scheme in upper case     pass     1  refused     0
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -42,25 +42,25 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass   124  refused   862
-  :                        pass   124  refused   866
-  :443                     pass   124  refused   866
-  :80                      pass     2  refused   988
-  :8080                    pass     2  refused   988
-  :9090                    pass     2  refused   988
-  :65535                   pass     2  refused   988
-  :0                       pass     2  refused   988
-  :65536                   pass     2  refused   988
-  :123456                  pass     2  refused   988
-  :080                     pass     2  refused   988
-  :+80                     pass     2  refused   988
-  :-1                      pass     2  refused   988
-  :0x50                    pass     2  refused   988
-  :8a                      pass     2  refused   988
-  :８０                      pass     2  refused   988
-  :80:80                   pass     2  refused   988
-  :80:443                  pass     2  refused   988
-  :80]                     pass    17  refused   973
+  none                     pass   126  refused   872
+  :                        pass   126  refused   876
+  :443                     pass   126  refused   876
+  :80                      pass     2  refused  1000
+  :8080                    pass     2  refused  1000
+  :9090                    pass     2  refused  1000
+  :65535                   pass     2  refused  1000
+  :0                       pass     2  refused  1000
+  :65536                   pass     2  refused  1000
+  :123456                  pass     2  refused  1000
+  :080                     pass     2  refused  1000
+  :+80                     pass     2  refused  1000
+  :-1                      pass     2  refused  1000
+  :0x50                    pass     2  refused  1000
+  :8a                      pass     2  refused  1000
+  :８０                      pass     2  refused  1000
+  :80:80                   pass     2  refused  1000
+  :80:443                  pass     2  refused  1000
+  :80]                     pass    17  refused   985
   -                        pass     8  refused    10
 refused because:
-  18397  refused before the dial
+  18619  refused before the dial

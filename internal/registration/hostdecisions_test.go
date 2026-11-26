@@ -63,7 +63,7 @@ func TestEveryRegistrationHostCheckDecidesEveryHostFamilyAsPinned(t *testing.T) 
 		return d
 	}
 	clientIDs := deny("https://mcp.example.com/client.json", "https://127.0.0.1/client.json", "https://[::1]/client.json", "https://xn--bcher-kva.example/client.json")
-	redirects := deny("evil.example", "mcp.example.com", "xn--bcher-kva.example", "fass.example", "127.0.0.1") // mcp.example.com is the URL shapes' host; faß.example matches fass.example by the transitional fold
+	redirects := deny("evil.example", "mcp.example.com", "xn--bcher-kva.example", "fass.example") // mcp.example.com is the URL shapes' host; faß.example matches fass.example by the transitional fold
 	ids := hostfamilies.URLProbes("/client.json", "https")
 	redirectURIs := hostfamilies.URLProbes("/cb", "https", "http")
 	redirectReason := func(err error) (bool, string) {

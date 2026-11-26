@@ -209,3 +209,27 @@ func TestRunReadsADenylistsBaselineAsTheInputsItStops(t *testing.T) {
 		})
 	}
 }
+
+// Run checks the residuals against what each check lets through: a residual its check now refuses,
+// as after its issue's fix, is reported, so the fix deletes it.
+func TestRunReportsAResidualItsCheckNoLongerLetsThrough(t *testing.T) {
+	t.Setenv("BYWARD_UPDATE_GOLDEN", "1")
+	t.Chdir(t.TempDir())
+	if err := os.Mkdir("testdata", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"hostdecisions.allowed": "# header\n", "hostdecisions.residuals": "# header\nhost\t\"a\"\t#1\tlet through\n"} {
+		if err := os.WriteFile(filepath.Join("testdata", name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	columns["test/host"] = []string{"host"}
+	defer delete(columns, "test/host")
+	errs := record(t, func(r testing.TB) {
+		Run(r, "test/host", []Column{{Name: "host", Probes: []Probe{{Family: "f", Wrap: "w", Port: "none", Input: "a"}},
+			Judge: func(string) (bool, string) { return false, "refused" }}})
+	})
+	if want := "residual host\t\"a\" (#1): its check no longer lets it through"; len(errs) != 1 || !strings.HasPrefix(errs[0], want) {
+		t.Errorf("reports %q, want one starting %q", errs, want)
+	}
+}
