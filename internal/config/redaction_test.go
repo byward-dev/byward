@@ -240,7 +240,7 @@ func TestAURLRefusedForItsFormSaysWhichPartIsWrong(t *testing.T) {
 		hostEscape = "it has a %-escape in its host, which a host name cannot hold"
 		noScheme   = "it has no scheme such as https://"
 		badPort    = "it has a port that is not a number"
-		notIPv6    = "it has brackets that do not enclose an IPv6 address alone"
+		brackets   = "it has brackets that do not enclose an IPv6 address alone"
 		userInfo   = "it holds a user name or password"
 	)
 	for _, tc := range []struct{ name, raw, why string }{
@@ -273,9 +273,9 @@ func TestAURLRefusedForItsFormSaysWhichPartIsWrong(t *testing.T) {
 		{"a port after an IPv6 address that is not a number", "http://[2001:db8::1]:9x/mcp", badPort},
 		{"text after an IPv6 address", "http://[2001:db8::1]x/mcp", `it has text after the "]" of its IPv6 address that is not a ":" and a port`},
 		{"an unclosed bracket", "http://[2001:db8::1/mcp", `it has a "[" in its host without its "]"`},
-		{"an IPv4 address in brackets", "http://[192.0.2.1]/mcp", notIPv6},
-		{"a word in brackets", "http://[up]/mcp", notIPv6},
-		{"a bracket inside a host", "http://up[::1]/mcp", notIPv6},
+		{"an IPv4 address in brackets", "http://[192.0.2.1]/mcp", brackets},
+		{"a word in brackets", "http://[up]/mcp", brackets},
+		{"a bracket inside a host", "http://up[::1]/mcp", brackets},
 		{"a user name with a character a URL cannot hold", "http://u^p@up.example/mcp", userInfo},
 		// What url.Parse takes, but is no absolute http(s) URL.
 		{"a host without a scheme", "up.example/mcp", noScheme},

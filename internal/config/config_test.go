@@ -220,6 +220,8 @@ func TestAURLOrHostRefusedForItsFormSaysWhereAndWhyNeverWhat(t *testing.T) {
 		{"host with space", "BYWARD_ALLOWED_HOSTS=a b", wantHosts + `(3 characters, not shown): it holds a "/" or a space; ` + ruleForms},
 		{"bracketed host name", "BYWARD_ALLOWED_HOSTS=[mcp.internal.example]", wantHosts + `(22 characters, not shown): it has brackets that do not enclose an IPv6 address alone; ` + ruleForms},
 		{"bracketed IPv4 with a port", "BYWARD_ALLOWED_HOSTS=[127.0.0.1]:8443", wantHosts + `(16 characters, not shown): it has brackets that do not enclose an IPv6 address alone; ` + ruleForms},
+		// One ':' inside passes the brackets, as host.Parse's rule does; the host is then no IPv6 address.
+		{"one colon in brackets", "BYWARD_ALLOWED_HOSTS=[a:b]:8443", wantHosts + `(10 characters, not shown): it is not an IPv6 address without a zone; ` + ruleForms},
 		{"IPv6 with a zone", "BYWARD_ALLOWED_HOSTS=[fe80::1%eth0]:8443", wantHosts + `(19 characters, not shown): it is not an IPv6 address without a zone; ` + ruleForms},
 		{"unclosed bracket", "BYWARD_ALLOWED_HOSTS=[::1", wantHosts + `(4 characters, not shown): it has brackets that do not enclose an IPv6 address alone; ` + ruleForms},
 		{"name with a closing bracket", "BYWARD_ALLOWED_HOSTS=mcp.example]", wantHosts + `(12 characters, not shown): it has brackets that do not enclose an IPv6 address alone; ` + ruleForms},
@@ -1202,7 +1204,7 @@ func TestAListenAddressIsHostColonANumericPortAndARefusedOneIsNeverShown(t *test
 		"[fe80::1%en0]:80", "[fe80::1%utun3]:0", "[fe80::1%bridge100]:0", "[fe80::1%2]:80", "[fe80::1%abcdefghijklmno]:0"} {
 		for _, name := range []string{"BYWARD_LISTEN", "BYWARD_INTERNAL_LISTEN"} {
 			if _, err := load(t, nil, "BYWARD_LISTEN=127.0.0.1:1", name+"="+ok); err != nil {
-				t.Errorf("%s=%s: %v", name, ok, err)
+				t.Errorf("%s=%q: %v", name, ok, err)
 			}
 		}
 	}
@@ -1251,12 +1253,12 @@ func TestAListenAddressIsHostColonANumericPortAndARefusedOneIsNeverShown(t *test
 		{"[::1%x\vy]:80", "it " + ruleZone},
 		{"[::1%x\x1fy]:80", "it " + ruleZone},
 		{"[::1% %a]:80", "it " + ruleZone},
-		// A zone only on an IPv6 address: a '%' on anything else is the host's own fault.
-		{"[zz:zz%a b]:80", "it has a host that is neither an IP address nor a host name"},
-		{"my% x:80", "its host " + ruleNameChar + "3" + ruleNameChars},
 		{"[::1%a:b]:80", "it " + ruleZone},
 		{"[::1%\u00e0]:80", "it " + ruleZone},
 		{"[::1%" + canaryText + " x]:80", "it " + ruleZone},
+		// A zone only on an IPv6 address: a '%' on anything else is the host's own fault.
+		{"[zz:zz%a b]:80", "it has a host that is neither an IP address nor a host name"},
+		{"my% x:80", "its host " + ruleNameChar + "3" + ruleNameChars},
 		// A ':' inside the brackets passes them, as host.Parse's rule does; a host that is still no IPv6
 		// address gets the host reason.
 		{"[a:b]:80", "it has a host that is neither an IP address nor a host name"},
@@ -1269,7 +1271,7 @@ func TestAListenAddressIsHostColonANumericPortAndARefusedOneIsNeverShown(t *test
 			want := fmt.Sprintf("%s: want %s; got a value (%d characters, not shown): %s", s.env, s.want, length(tc.value), tc.why)
 			_, err := load(t, nil, s.env+"="+tc.value)
 			if !isConfigError(err) || err.Error() != want || holdsCanary(err.Error()) {
-				t.Errorf("%s=%s: %v, want the error %q and never the value", s.env, tc.value, err, want)
+				t.Errorf("%s=%q: %v, want the error %q and never the value", s.env, tc.value, err, want)
 			}
 		}
 	}
