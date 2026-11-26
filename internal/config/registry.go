@@ -190,7 +190,7 @@ type Values struct {
 // value is the named setting's Value, for its parser. It panics on a name these Values do not hold,
 // which every test that loads the setting catches, so a parser never gets a Value without a shape. A
 // setting refused for the upstream mode that is off is read as its default: refused, it is not
-// parsed, so "remove it" is its one error (offModeSettings, #631).
+// parsed, so its refusal is its one error (offModeSettings, #631).
 func (v *Values) value(name string) Value {
 	val, ok := v.byKey[name]
 	if !ok {
@@ -220,8 +220,9 @@ func (v *Values) empty(name string) bool { return v.value(name).Given.empty() }
 // given even when it is empty, so it never falls back to another choice. A setting refused for the
 // upstream mode that is off is not given here, as value reads it as its default: refused, it is not
 // checked further (#631). A variable set to nothing never reaches here (resolve takes it as unset,
-// Setting.EmptyIsGiven), nor does a _FILE variable set to nothing, which names no file. A flag set to nothing is not given here, though a check that reads
-// its Source counts it: every check that refuses a family's settings while the family is off does.
+// Setting.EmptyIsGiven), nor does a _FILE variable set to nothing, which names no file. A flag set to
+// nothing is not given here, though a check that reads its Source counts it: every check that refuses
+// a family's settings while the family is off does.
 func (v *Values) given(name string) bool {
 	if v.refusedOffMode(name) {
 		return false
@@ -489,7 +490,7 @@ func refusedFlag(fs *flag.FlagSet, msg string) *flag.Flag {
 func (v *Values) inlineSecrets() []Setting {
 	var out []Setting
 	for _, val := range v.Effective() {
-		if val.Setting.Secret() && val.Source == SourceEnv && !v.refusedOffMode(val.Setting.Name) { // refused, "remove it" is its one error (#631)
+		if val.Setting.Secret() && val.Source == SourceEnv && !v.refusedOffMode(val.Setting.Name) { // refused, its refusal (its hint or "remove it") is its one error (#631)
 			out = append(out, val.Setting)
 		}
 	}

@@ -83,9 +83,10 @@ func TestNameAsGivenNamesASettingAsTheOperatorGaveIt(t *testing.T) {
 	(*Values)(nil).NameAsGiven("oidc-client-keys")
 }
 
-// Values resolved over a registry of their own name a setting from it, given or left at its default,
-// and a setting only the global registry holds from that: lookup alone holds neither probe (#631).
-func TestNameAsGivenNamesASettingFromTheRegistryItsValuesWereResolvedOver(t *testing.T) {
+// Values resolved over a registry of their own name its settings from it, given or left at its
+// default, which the global registry (lookup) does not hold; a setting they do not hold is named from
+// the global registry (#631).
+func TestNameAsGivenNamesASettingFromItsValuesOwnRegistryBeforeTheGlobalOne(t *testing.T) {
 	probe := Setting{Name: "probe-secret", shape: secretShape, Group: GroupKeysAndStore}
 	for _, tc := range []struct {
 		name, setting string
@@ -94,7 +95,7 @@ func TestNameAsGivenNamesASettingFromTheRegistryItsValuesWereResolvedOver(t *tes
 	}{
 		{"its own setting left at its default", "probe-secret", nil, "BYWARD_PROBE_SECRET_FILE"},
 		{"its own setting given", "probe-secret", []string{"--probe-secret-file=/run/secrets/p"}, "--probe-secret-file"},
-		{"a setting it does not hold", "public-url", nil, "BYWARD_PUBLIC_URL"},
+		{"a setting only the global registry holds", "public-url", nil, "BYWARD_PUBLIC_URL"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v, err := resolve([]Setting{probe}, tc.args, nil, func(string) ([]byte, error) { return []byte("p"), nil }, nil)

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -15,8 +16,8 @@ var stdioHints = map[string]string{
 	"store-postgres-dsn":  "NAME: the PostgreSQL store is for several replicas, and a stdio upstream's processes live on one (ADR-0007 §4); use the SQLite store",
 }
 
-// hint is the pinned stdio hint of setting, naming it as given.
-func hint(setting, given string) string {
+// pinnedHint is the pinned stdio hint of setting, naming it as given.
+func pinnedHint(setting, given string) string {
 	return strings.ReplaceAll(stdioHints[setting], "NAME", given)
 }
 
@@ -55,13 +56,7 @@ func TestEverySettingWithAStdioHintIsRefusedWithOnlyItsHintBesideStdio(t *testin
 			t.Errorf("%s: pin its StdioHint's text in stdioHints", s.Name)
 		}
 	}
-	names := slices.Sorted(func(yield func(string) bool) {
-		for name := range stdioHints {
-			if !yield(name) {
-				return
-			}
-		}
-	})
+	names := slices.Sorted(maps.Keys(stdioHints))
 	if len(names) < 4 {
 		t.Fatalf("%d stdio hints pinned, want at least the 4 of today", len(names))
 	}
@@ -76,7 +71,7 @@ func TestEverySettingWithAStdioHintIsRefusedWithOnlyItsHintBesideStdio(t *testin
 		for _, f := range append(givenForms(s, bad), givenForms(s, "")[1]) { // and the flag set to nothing
 			t.Run(name+"/refused/"+strings.Join(append(f.args, f.env...), " "), func(t *testing.T) {
 				_, _, err := Load(f.args, stdioBase(append([]string{stdioCommand}, f.env...)...), failIfOpened(t, missing))
-				if want := hint(name, f.from); !isConfigError(err) || err.Error() != want {
+				if want := pinnedHint(name, f.from); !isConfigError(err) || err.Error() != want {
 					t.Errorf("err = %v, want a config error that is exactly %q", err, want)
 				}
 			})
@@ -200,7 +195,7 @@ func TestASecretsFileIsOpenedOnlyWhenItsSettingIsNotRefused(t *testing.T) {
 			"BYWARD_UPSTREAM_ENV_FILE " + toStdio},
 		{"the stdio env file beside stdio is opened", nil, stdioBase(stdioCommand, "BYWARD_UPSTREAM_ENV_FILE="+missing), []string{missing},
 			readErr("BYWARD_UPSTREAM_ENV_FILE", "upstream-env")},
-		{"beside stdio only the file not refused is opened", nil, stdioBase(stdioCommand, "BYWARD_STORE_POSTGRES_DSN_FILE=/run/secrets/refused", "BYWARD_UPSTREAM_ENV_FILE="+missing),
+		{"beside stdio only the file not refused is opened", nil, stdioBase(stdioCommand, "BYWARD_UPSTREAM_CREDENTIAL_FILE=/run/secrets/refused", "BYWARD_UPSTREAM_ENV_FILE="+missing),
 			[]string{missing}, readErr("BYWARD_UPSTREAM_ENV_FILE", "upstream-env")},
 		{"the first unreadable file in registry order is the one named", nil,
 			append(slices.Clone(base), "BYWARD_ENTRA_CLIENT_SECRET_FILE=/run/secrets/missing-too", "BYWARD_UPSTREAM_CREDENTIAL_FILE="+missing), []string{missing},

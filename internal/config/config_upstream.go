@@ -121,7 +121,8 @@ var httpOnly = map[string]bool{"assertion-keys-dir": true, "assertion-header": t
 // is; one given is, a flag set to nothing included, as every check for a family that is off does
 // (#596). A variable set to nothing is unset already (resolve), and a file named for a secret is
 // given, even when it is not read. With no upstream, or both, there is no mode, so none is. A refused
-// setting is not read (resolve) or parsed (value).
+// setting is not read (resolve) or parsed (value, empty, given, emptySecretFile); a check that reads
+// its Source itself, through byKey or Effective, must skip it too, as checkNoAuth and inlineSecrets do.
 func (v *Values) refusedOffMode(name string) bool {
 	val := v.byKey[name]
 	if val.Source == SourceDefault {

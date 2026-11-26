@@ -259,7 +259,7 @@ func TestEveryAuthenticationSettingGivenBesideNoAuthIsRefused(t *testing.T) {
 		besideStdio := combined
 		switch {
 		case stdioHints[s.Name] != "":
-			besideStdio = hint(s.Name, name)
+			besideStdio = pinnedHint(s.Name, name)
 		case s.Group == GroupHTTPUpstream || httpOnlySettings[s.Name]:
 			besideStdio = name + " " + toHTTP
 		}
