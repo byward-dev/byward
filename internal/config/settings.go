@@ -117,9 +117,10 @@ var registry = []Setting{
 	{Name: "dev", shape: asGivenShape, Group: GroupDevelopment, Bool: true, Default: "false", Help: "development mode: enables the relaxations it logs at startup"},
 }
 
-// httpOnlyRefusal is the StdioHint of a setting outside the upstream groups that only an HTTP upstream
-// reads and needs no hint of its own: the identity assertion's, which a stdio upstream never gets
-// (ADR-0016 §2, §6).
+// httpOnlyRefusal is the refusal, beside a stdio upstream, of a setting only an HTTP upstream reads
+// that needs no hint of its own: the StdioHint of the identity assertion's settings, which a stdio
+// upstream never gets (ADR-0016 §2, §6), and the refusal of an HTTP upstream's setting without a hint
+// (offModeSettings). It names the HTTP upstream's selector as advice (allowedHintVariables).
 const httpOnlyRefusal = "%[1]s is set, but the upstream is stdio: it applies only to an HTTP upstream (BYWARD_UPSTREAM_URL); remove it"
 
 // A registry entry without a shape stops the program at init (ADR-0031 §3): it would show as Hidden,

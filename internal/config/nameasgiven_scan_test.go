@@ -1,9 +1,11 @@
 package config
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
 	"regexp"
 	"slices"
 	"strconv"
@@ -27,7 +29,8 @@ var variableMethods = []string{"Env", "EnvToSet", "FileEnv"}
 
 // variableNamingsOf scans the function bodies of the Go source src (read from file when src is nil)
 // for variableNamings. variables are the names a string literal must not spell. Package-level
-// declarations, such as the registry's help text, are not scanned.
+// declarations, such as the registry's help text, are not scanned; the registry's StdioHints are
+// checked apart (TestAStdioHintNamesAnotherSettingsVariableOnlyAsAllowedAdvice).
 func variableNamingsOf(t *testing.T, file string, src any, variables map[string]bool) []variableNaming {
 	t.Helper()
 	f, err := parser.ParseFile(token.NewFileSet(), file, src, parser.SkipObjectResolution)
@@ -108,6 +111,99 @@ func TestNoRefusalNamesASettingByItsVariableWhateverTheSource(t *testing.T) {
 		if !seen[key] {
 			t.Errorf("%s is allowed a variable from a Setting (it %s), but the scan finds none there: remove it from the list", key, why)
 		}
+	}
+}
+
+// allowedHintVariables are the settings' variables a StdioHint may name, each for its reason: a hint
+// names a second setting by its variable as advice, the variable to set (#633).
+var allowedHintVariables = map[string]string{
+	"BYWARD_UPSTREAM_URL":      "httpOnlyRefusal names the HTTP upstream's selector, the setting the refused one is for",
+	"BYWARD_UPSTREAM_ENV_FILE": "upstream-credential's hint names where a stdio upstream gets its credential instead",
+}
+
+// hintVariables are the settings' variables, of variables, that the StdioHints of reg spell, each
+// with the setting whose hint spells it. The naming scan skips package-level declarations, the
+// registry among them, so the hints are read from the registry here.
+func hintVariables(reg []Setting, variables map[string]bool) map[string][]string {
+	found := map[string][]string{}
+	for _, s := range reg {
+		for _, v := range variableRef.FindAllString(s.StdioHint, -1) {
+			if variables[v] {
+				found[v] = append(found[v], s.Name)
+			}
+		}
+	}
+	return found
+}
+
+// hintVariableProblems are the ways the StdioHints of reg break allowed: a settings' variable a hint
+// names that is not listed, and a listed one that no hint names any more, so the list stays exact.
+func hintVariableProblems(reg []Setting, allowed map[string]string) []string {
+	found := hintVariables(reg, knownVariables(reg))
+	var problems []string
+	for _, v := range slices.Sorted(maps.Keys(found)) {
+		if _, ok := allowed[v]; !ok {
+			problems = append(problems, fmt.Sprintf("the StdioHint of %s names %s: name a setting by its variable in a hint only as advice, and list it in allowedHintVariables with the reason", strings.Join(found[v], ", "), v))
+		}
+	}
+	for _, v := range slices.Sorted(maps.Keys(allowed)) {
+		if len(found[v]) == 0 {
+			problems = append(problems, fmt.Sprintf("%s is allowed in a StdioHint (%s), but no hint names it: remove it from the list", v, allowed[v]))
+		}
+	}
+	return problems
+}
+
+// A StdioHint names another setting by its variable only as advice, the variable to set, and only one
+// listed in allowedHintVariables with its reason (#633): the naming scan cannot see a hint, as the
+// registry is package-level. A listed variable that no hint names any more fails too.
+func TestAStdioHintNamesAnotherSettingsVariableOnlyAsAllowedAdvice(t *testing.T) {
+	for _, p := range hintVariableProblems(registry, allowedHintVariables) {
+		t.Error(p)
+	}
+}
+
+// A hint that names a setting's variable not on the list is refused, and so is a listed variable no
+// hint names; a hint that names only a listed one, or a variable that is no setting's, passes.
+func TestAHintNamingAnUnlistedSettingsVariableIsRefused(t *testing.T) {
+	listen := Setting{Name: "listen", shape: asGivenShape}
+	allowed := map[string]string{"BYWARD_LISTEN": "the probe's advice"}
+	for _, tc := range []struct {
+		name    string
+		hint    string
+		allowed map[string]string
+		want    []string
+	}{
+		{"a listed variable", "%[1]s: set BYWARD_LISTEN instead", allowed, nil},
+		{"a variable that is no setting's", "%[1]s: the stdio process gets BYWARD_SUBJECT", nil, nil},
+		{"an unlisted variable", "%[1]s: set BYWARD_LISTEN instead", nil,
+			[]string{"the StdioHint of probe names BYWARD_LISTEN: name a setting by its variable in a hint only as advice, and list it in allowedHintVariables with the reason"}},
+		{"a listed variable no hint names", "%[1]s is for an HTTP upstream", allowed,
+			[]string{"BYWARD_LISTEN is allowed in a StdioHint (the probe's advice), but no hint names it: remove it from the list"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := []Setting{listen, {Name: "probe", shape: asGivenShape, StdioHint: tc.hint}}
+			if got := hintVariableProblems(reg, tc.allowed); !slices.Equal(got, tc.want) {
+				t.Errorf("problems = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// hintVariables finds a settings' variable a hint spells, and only one: not one that is no setting's,
+// such as a variable the stdio process gets, nor a setting named by %[1]s.
+func TestTheHintScanFindsOnlyTheSettingsVariablesAHintSpells(t *testing.T) {
+	variables := map[string]bool{"BYWARD_LISTEN": true, "BYWARD_UPSTREAM_URL": true}
+	reg := []Setting{
+		{Name: "a", StdioHint: "%[1]s: set BYWARD_LISTEN instead"},
+		{Name: "b", StdioHint: "%[1]s: the stdio process gets BYWARD_SUBJECT"},
+		{Name: "c", StdioHint: "%[1]s is for BYWARD_UPSTREAM_URL and BYWARD_LISTEN"},
+		{Name: "d"},
+	}
+	got := hintVariables(reg, variables)
+	want := map[string][]string{"BYWARD_LISTEN": {"a", "c"}, "BYWARD_UPSTREAM_URL": {"c"}}
+	if len(got) != len(want) || !slices.Equal(got["BYWARD_LISTEN"], want["BYWARD_LISTEN"]) || !slices.Equal(got["BYWARD_UPSTREAM_URL"], want["BYWARD_UPSTREAM_URL"]) {
+		t.Errorf("hintVariables = %v, want %v", got, want)
 	}
 }
 

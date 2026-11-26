@@ -1,6 +1,7 @@
 package config
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -144,25 +145,22 @@ func (v *Values) refusedOffMode(name string) bool {
 }
 
 // offModeSettings refuses each setting given for the upstream mode that is off (refusedOffMode),
-// named as the operator gave it. Beside a stdio upstream, a setting with a StdioHint gets that text;
-// every other refusal says which mode the setting is for, as httpOnlyRefusal does. The other mode's
-// selector reaches here only as a flag set to nothing, as with a value there is no mode.
+// named as the operator gave it. Beside a stdio upstream, a setting gets its StdioHint, or
+// httpOnlyRefusal when it has none; beside an HTTP upstream, a stdio upstream's setting is told it
+// applies only to a stdio upstream. The other mode's selector reaches here only as a flag set to
+// nothing, as with a value there is no mode.
 func offModeSettings(v *Values) []error {
-	// The other mode's selector, not given here, is named as advice: the variable to set (EnvToSet), as
-	// #631's offmode_test pins it.
-	inUse, offMode, offSelector := "HTTP", "a stdio upstream", lookup("upstream-command").EnvToSet()
-	if v.stdioUpstream() {
-		inUse, offMode, offSelector = "stdio", "an HTTP upstream", lookup("upstream-url").EnvToSet()
-	}
+	// With an HTTP upstream, the stdio upstream's selector, not given here, is named as advice: the
+	// variable to set (EnvToSet), as #631's offmode_test pins it.
+	stdio, stdioSelector := v.stdioUpstream(), lookup("upstream-command").EnvToSet()
 	var errs []error
 	for _, val := range v.Effective() {
-		s := val.Setting
-		switch {
+		switch s := val.Setting; {
 		case !v.refusedOffMode(s.Name):
-		case s.StdioHint != "": // refused, so beside a stdio upstream: a stdio upstream's setting takes no hint (checkStdioHints)
-			errs = append(errs, errorf(s.StdioHint, val.nameAsGiven()))
+		case stdio: // an HTTP upstream's setting without a hint of its own is refused as only an HTTP upstream reads it
+			errs = append(errs, errorf(cmp.Or(s.StdioHint, httpOnlyRefusal), val.nameAsGiven()))
 		default:
-			errs = append(errs, errorf("%s is set, but the upstream is %s: it applies only to %s (%s); remove it", val.nameAsGiven(), inUse, offMode, offSelector))
+			errs = append(errs, errorf("%s is set, but the upstream is HTTP: it applies only to a stdio upstream (%s); remove it", val.nameAsGiven(), stdioSelector))
 		}
 	}
 	return errs
