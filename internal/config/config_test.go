@@ -617,45 +617,57 @@ func TestBrokerSettingsAreRequired(t *testing.T) {
 	}
 }
 
-// The Entra tenant and client ID each take a GUID, in either case, as given: whether Entra's audience
-// check takes an upper-case client ID is #514's. Anything else is refused by its length, with where
-// to find the value.
-func TestTheEntraIDsTakeAGUIDInEitherCaseAndRefuseAnythingElse(t *testing.T) {
+// The Entra tenant and client ID each take a GUID; anything else is refused by its length, with where
+// to find the value. The tenant takes either case, since the Entra adapter lower-cases it. The client
+// ID takes lower case only: the ID token's aud is compared with it exactly (#514).
+func TestTheEntraIDsTakeAGUIDAndTheClientIDOnlyInLowerCase(t *testing.T) {
+	const (
+		lower = "0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d"
+		upper = "0A1B2C3D-4E5F-6A7B-8C9D-0E1F2A3B4C5D"
+		mixed = "0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5D"
+	)
+	notGUID := "it is not a GUID"
+	upperCase := "it has upper-case letters; write it in lower case, since the ID token's audience is compared with it exactly"
 	settings := []struct {
 		env, want string
 		got       func(*Config) string
+		taken     []string
 	}{
 		{"BYWARD_ENTRA_TENANT", "the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, Overview, Tenant ID)",
-			func(c *Config) string { return c.EntraTenant }},
-		{"BYWARD_ENTRA_CLIENT_ID", "the application (client) ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, App registrations, your app, Overview, Application (client) ID)",
-			func(c *Config) string { return c.EntraClientID }},
+			func(c *Config) string { return c.EntraTenant }, []string{lower, upper, mixed}},
+		{"BYWARD_ENTRA_CLIENT_ID", "the application (client) ID, a GUID in lower case such as 00000000-0000-0000-0000-000000000000 (Entra admin center, App registrations, your app, Overview, Application (client) ID)",
+			func(c *Config) string { return c.EntraClientID }, []string{lower}},
 	}
 	for _, s := range settings {
-		for _, tc := range []struct{ name, value string }{
-			{"lower case", "0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d"},
-			{"upper case", "0A1B2C3D-4E5F-6A7B-8C9D-0E1F2A3B4C5D"},
-			{"mixed case", "0A1b2C3d-4E5f-6A7b-8C9d-0E1F2a3B4c5D"},
-		} {
-			t.Run(s.env+" "+tc.name, func(t *testing.T) {
-				c, err := load(t, nil, s.env+"="+tc.value)
+		for _, value := range s.taken {
+			t.Run(s.env+" "+value, func(t *testing.T) {
+				c, err := load(t, nil, s.env+"="+value)
 				if err != nil {
-					t.Fatalf("%v; want %s taken", err, tc.value)
+					t.Fatalf("%v; want %s taken", err, value)
 				}
-				if got := s.got(c); got != tc.value {
-					t.Fatalf("got %q, want it as given, %q", got, tc.value)
+				if got := s.got(c); got != value {
+					t.Fatalf("got %q, want it as given, %q", got, value)
 				}
 			})
 		}
-		for _, tc := range []struct{ name, value string }{
-			{"a domain", "contoso.onmicrosoft.com"},
-			{"one character short", "0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5"},
-			{"one character long", "0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d0"},
-			{"a dash out of place", "0a1b2c3d4-e5f-6a7b-8c9d-0e1f2a3b4c5d"},
-			{"a letter that is not hex", "0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5g"},
-			{"in braces", "{0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c}"},
-		} {
+		refused := []struct{ name, value, reason string }{
+			{"a domain", "contoso.onmicrosoft.com", notGUID},
+			{"one character short", "0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5", notGUID},
+			{"one character long", "0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d0", notGUID},
+			{"a dash out of place", "0a1b2c3d4-e5f-6a7b-8c9d-0e1f2a3b4c5d", notGUID},
+			{"a letter that is not hex", "0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5g", notGUID},
+			{"an upper-case letter that is not hex", "0A1B2C3D-4E5F-6A7B-8C9D-0E1F2A3B4C5G", notGUID},
+			{"in braces", "{0a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c}", notGUID},
+		}
+		if s.env == "BYWARD_ENTRA_CLIENT_ID" {
+			refused = append(refused, []struct{ name, value, reason string }{
+				{"upper case", upper, upperCase},
+				{"one upper-case letter", mixed, upperCase},
+			}...)
+		}
+		for _, tc := range refused {
 			t.Run(s.env+" "+tc.name, func(t *testing.T) {
-				want := fmt.Sprintf("%s: want %s; got a value (%d characters, not shown): it is not a GUID", s.env, s.want, len(tc.value))
+				want := fmt.Sprintf("%s: want %s; got a value (%d characters, not shown): %s", s.env, s.want, len(tc.value), tc.reason)
 				if _, err := load(t, nil, s.env+"="+tc.value); !isConfigError(err) || err.Error() != want {
 					t.Fatalf("err = %v\nwant %s", err, want)
 				}

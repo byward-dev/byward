@@ -32,7 +32,7 @@ func TestTheWalkthroughsBrokenConfigurationsSayWhatToFix(t *testing.T) {
 			return append(without(authEnv(t), "BYWARD_ENTRA_CLIENT_ID="), public, upstream,
 				"BYWARD_ENTRA_CLIENT_ID=Zt8Q~fAkEvAlUe.NoT-ReAl_0123456789abcdEF")
 		},
-			`byward: configuration error: BYWARD_ENTRA_CLIENT_ID: want the application (client) ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, App registrations, your app, Overview, Application (client) ID); got a value (40 characters, not shown): it is not a GUID`},
+			`byward: configuration error: BYWARD_ENTRA_CLIENT_ID: want the application (client) ID, a GUID in lower case such as 00000000-0000-0000-0000-000000000000 (Entra admin center, App registrations, your app, Overview, Application (client) ID); got a value (40 characters, not shown): it is not a GUID`},
 		{"02 a header line given as the credential's header", func(t *testing.T) []string {
 			return append(authEnv(t), "BYWARD_PUBLIC_URL=https://tools.example.org/mcp", "BYWARD_UPSTREAM_URL=https://search-api.internal.example.org/mcp",
 				"BYWARD_UPSTREAM_CREDENTIAL_FILE="+credential, "BYWARD_ASSERTION_HEADER=X-Byward-Identity",

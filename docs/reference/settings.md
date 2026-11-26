@@ -49,7 +49,7 @@ the cause, never by its path.
 | Flag | Environment | Default | Description |
 |---|---|---|---|
 | `--entra-tenant` | `BYWARD_ENTRA_TENANT` | — | Entra tenant ID (a GUID) of the IdP app |
-| `--entra-client-id` | `BYWARD_ENTRA_CLIENT_ID` | — | application (client) ID of the IdP app registration |
+| `--entra-client-id` | `BYWARD_ENTRA_CLIENT_ID` | — | application (client) ID of the IdP app registration, a GUID in lower case |
 | `--entra-client-secret-file` | `BYWARD_ENTRA_CLIENT_SECRET_FILE` | — | client secret of the IdP app |
 | `--entra-client-certificate-file` | `BYWARD_ENTRA_CLIENT_CERTIFICATE_FILE` | — | instead of a client secret: a PEM file with the IdP app's certificate and its unencrypted RSA private key (2048 bits or more); the certificate must be uploaded to the app registration; recommended for production (ADR-0012 §5, docs/how-to/entra-certificate.md) |
 | `--entra-federated-token-file` | `BYWARD_ENTRA_FEDERATED_TOKEN_FILE` | — | instead of a client secret: an absolute path to a file holding a federated token (a JWT from another identity provider, such as GitHub Actions or AKS workload identity) that byward sends Entra as its client assertion, re-reading the file for every token request; the app registration needs a matching federated identity credential (ADR-0012 §5, docs/how-to/entra-federated-credential.md) *(path)* |
