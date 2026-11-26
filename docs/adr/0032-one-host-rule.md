@@ -120,14 +120,19 @@ model: one normalization at load, applied to both sides.
 Each class's rule is a setting shape (ADR-0031 §3). It calls `internal/host` and refuses through the
 shape's refusal.
 
-_Amended 2026-11-26 (#656):_ the record of each rule's decisions is the host decision goldens: every check that reads a
-host, each setting of every class here and the Host, Origin, CIMD, denylist and IdP endpoint checks,
-judged on generated input families. Each package that owns a check keeps a summary by family,
-`testdata/hostdecisions.golden`, and the inputs each check passes, `testdata/hostdecisions.allowed`,
-which is edited by hand, so a widening is a reviewed line. What a check passes today but should not is
-listed with its issue in `testdata/hostdecisions.residuals`. The packages are listed in
-`internal/testutil/hostfamilies` (`Columns`). The refusal messages stay in
-`internal/config/testdata/hostrule.golden`.
+_Amended 2026-11-26 (#656):_ the record of each rule's decisions is the host decision goldens: the
+checks that decide on a host name or a host[:port] (each URL and host setting here, the public and
+internal Host checks, the Origin check, the CIMD client ID and allow checks, the client denylist,
+redirect URI validation and the loopback redirect match, the SSRF guard's URL rule, a discovered IdP
+endpoint, what is read as loopback, the `--insecure-no-auth` loopback fence, and the consent page's
+Origin check), judged on generated input families. Each package that owns
+such a check keeps a summary by family, `testdata/hostdecisions.golden`, and the inputs each check
+passes (a denylist: the inputs it stops), `testdata/hostdecisions.allowed`, which is edited by hand, so
+a widening is a reviewed line. What a check passes today but should not is listed with its issue in
+`testdata/hostdecisions.residuals`. `internal/testutil/hostfamilies` lists the packages and their
+checks. Not covered: the trusted proxies and `X-Forwarded-For`, which take IP addresses and
+prefixes; class X's exact identifiers, such as an assertion's `aud`; and the consent page's display of
+a client's site. The refusal messages stay in `internal/config/testdata/hostrule.golden`.
 
 | Class | Settings and comparisons | Rule |
 |---|---|---|

@@ -1,0 +1,44 @@
+# The decision of each check in internal/host that decides on a host, by input family (#656).
+# Generated: BYWARD_UPDATE_GOLDEN=1 rewrites it. The inputs that pass are listed in hostdecisions.allowed,
+# which is edited by hand; a denylist's lines there are the inputs it stops. A config setting's
+# refusal messages are in internal/config/testdata/hostrule.golden. A Go version that reads a URL or an
+# address differently changes these lines: that is a decision change too.
+
+## loopback as written: 84 pass, 6016 refused, of 6100
+by family:
+  name                     pass    20  refused   952
+  name edge                pass     0  refused  1404
+  idn                      pass     0  refused   648
+  ipv4                     pass    20  refused   520
+  ipv4 spelling            pass     0  refused   756
+  ipv6                     pass    22  refused   734
+  ipv4-mapped              pass    22  refused   302
+  zone                     pass     0  refused   700
+by wrap:
+  bare                     pass    44  refused   963
+  [h]                      pass    40  refused   968
+  [h                       pass     0  refused  1007
+  h]                       pass     0  refused  1026
+  [h]]                     pass     0  refused  1026
+  [h]x                     pass     0  refused  1026
+by port:
+  none                     pass    12  refused   325
+  :                        pass     8  refused   331
+  :443                     pass     8  refused   331
+  :80                      pass     8  refused   331
+  :8080                    pass     8  refused   331
+  :9090                    pass     8  refused   331
+  :65535                   pass     8  refused   331
+  :0                       pass     8  refused   331
+  :65536                   pass     8  refused   331
+  :123456                  pass     0  refused   339
+  :080                     pass     8  refused   331
+  :+80                     pass     0  refused   339
+  :-1                      pass     0  refused   339
+  :0x50                    pass     0  refused   339
+  :8a                      pass     0  refused   339
+  :８０                      pass     0  refused   339
+  :80:80                   pass     0  refused   339
+  :80]                     pass     0  refused   339
+refused because:
+   6016  not loopback

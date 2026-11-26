@@ -1,0 +1,64 @@
+# The decision of each check in internal/ssrfguard that decides on a host, by input family (#656).
+# Generated: BYWARD_UPDATE_GOLDEN=1 rewrites it. The inputs that pass are listed in hostdecisions.allowed,
+# which is edited by hand; a denylist's lines there are the inputs it stops. A config setting's
+# refusal messages are in internal/config/testdata/hostrule.golden. A Go version that reads a URL or an
+# address differently changes these lines: that is a decision change too.
+
+## SSRF guard URL: 285 pass, 11932 refused, of 12217
+by family:
+  name                     pass    54  refused  1890
+  name edge                pass    63  refused  2745
+  idn                      pass    36  refused  1260
+  ipv4                     pass    30  refused  1050
+  ipv4 spelling            pass    42  refused  1470
+  ipv6                     pass    27  refused  1485
+  ipv4-mapped              pass    10  refused   638
+  zone                     pass    17  refused  1383
+  url shape                pass     6  refused    11
+by wrap:
+  bare                     pass   111  refused  1903
+  [h]                      pass    35  refused  1981
+  [h                       pass     9  refused  2005
+  h]                       pass   114  refused  1938
+  [h]]                     pass     8  refused  2044
+  [h]x                     pass     2  refused  2050
+  scheme in upper case     pass     1  refused     0
+  user                     pass     0  refused     1
+  user and password        pass     0  refused     1
+  empty user info          pass     0  refused     1
+  query                    pass     1  refused     0
+  empty query              pass     1  refused     0
+  fragment                 pass     1  refused     0
+  no //                    pass     0  refused     1
+  one /                    pass     0  refused     1
+  another scheme           pass     0  refused     1
+  no scheme                pass     0  refused     1
+  zone and user            pass     0  refused     1
+  zone and query           pass     1  refused     0
+  zone in a path           pass     1  refused     0
+  escaped bracket          pass     0  refused     1
+  white space              pass     0  refused     1
+  backslash                pass     0  refused     1
+by port:
+  none                     pass    88  refused   586
+  :                        pass    88  refused   590
+  :443                     pass    88  refused   590
+  :80                      pass     0  refused   678
+  :8080                    pass     0  refused   678
+  :9090                    pass     0  refused   678
+  :65535                   pass     0  refused   678
+  :0                       pass     0  refused   678
+  :65536                   pass     0  refused   678
+  :123456                  pass     0  refused   678
+  :080                     pass     0  refused   678
+  :+80                     pass     0  refused   678
+  :-1                      pass     0  refused   678
+  :0x50                    pass     0  refused   678
+  :8a                      pass     0  refused   678
+  :８０                      pass     0  refused   678
+  :80:80                   pass     0  refused   678
+  :80]                     pass    15  refused   663
+  -                        pass     6  refused    11
+refused because:
+  10214  not a URL
+   1718  not an https URL on port 443

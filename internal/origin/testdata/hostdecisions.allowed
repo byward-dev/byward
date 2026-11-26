@@ -1,18 +1,23 @@
 # The inputs each host check in internal/origin passes, one per line: the column, a tab, and the input as
-# Go quotes it; for a denylist's column, the inputs it stops (#656). Edited by hand, never
-# regenerated: an added line is a widening (a denylist line removed is one), and the PR says why.
-# The test names each line that differs from the checks' decisions.
+# Go quotes it
+# (#656). Edited by hand, never regenerated: an added line widens a check,
+# and the PR says why. The test names each line that differs from the checks' decisions.
+Origin	"HTTPS://mcp.example.com"
 Origin	"http://0177.0.0.1:8080"
 Origin	"http://0x7f.0.0.1:8080"
 Origin	"http://127.0.0.1:8080"
 Origin	"http://127.1:8080"
 Origin	"http://2130706433:8080"
+Origin	"https://MCP.Example.COM"
+Origin	"https://MCP.Example.COM:443"
 Origin	"https://[0:0::1]"
 Origin	"https://[0:0::1]:443"
 Origin	"https://[::1]"
 Origin	"https://[::1]:443"
 Origin	"https://app.example"
 Origin	"https://app.example:443"
+Origin	"https://mcp.example.com"
+Origin	"https://mcp.example.com:443"
 Origin	"https://xn--bcher-kva.example"
 Origin	"https://xn--bcher-kva.example:443"
 internal Host	"0.0.0.0"

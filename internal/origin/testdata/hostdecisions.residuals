@@ -1,6 +1,7 @@
-# Inputs a host check passes today that it should not, each with the issue that decides it (#656):
-# the column, a tab, the input as Go quotes it, a tab, the issue, a tab, why. Each is also in
-# hostdecisions.allowed. The fix deletes it from both, and the test then holds it refused.
+# Inputs a host check lets through today that it should not, each with the issue that decides it
+# (#656): the column, a tab, the input as Go quotes it, a tab, #issue, a tab, why. Each is also in
+# hostdecisions.allowed (a denylist's would be absent from it). The fix deletes the line here and
+# updates hostdecisions.allowed, and the test then holds the input refused.
 internal Host	"::1%lo0"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"::1%lo0:"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all
 internal Host	"::1%lo0:+80"	#652	a zoned IP literal: the internal listener takes any address netip parses, zone and all

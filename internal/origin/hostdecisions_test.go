@@ -1,7 +1,6 @@
 package origin
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -10,14 +9,15 @@ import (
 
 	"github.com/byward-dev/byward/internal/audit"
 	"github.com/byward-dev/byward/internal/testutil/hostfamilies"
+	"github.com/byward-dev/byward/internal/testutil/logsink"
 )
 
-// The lists the decision columns judge against, as config stores them: names in lower case,
-// addresses as browsers write them.
+// The lists the decision columns judge against, fixed: each handler folds its own entries (MatchKey,
+// host.Hostname, the origin key) as it folds a request's.
 var (
 	decisionHosts   = []string{"mcp.example.com", "127.0.0.1:8080", "[::1]:8080", "xn--bcher-kva.example", "[2001:db8::1]"}
 	internalHosts   = []string{"byward-metrics.monitoring.svc:8080"}
-	decisionOrigins = []string{"https://app.example", "http://127.0.0.1:8080", "https://[::1]", "https://xn--bcher-kva.example"}
+	decisionOrigins = []string{"https://app.example", "https://mcp.example.com", "http://127.0.0.1:8080", "https://[::1]", "https://xn--bcher-kva.example"} // mcp.example.com is the URL shapes' host
 )
 
 // The public and internal Host checks and the Origin check decide every host family as pinned in
@@ -33,7 +33,7 @@ func TestEveryHostCheckDecidesEveryHostFamilyAsPinned(t *testing.T) {
 			if w.Code == http.StatusNoContent {
 				return true, ""
 			}
-			if got, ok := audited(out.String(), event, field); !ok || got != in {
+			if got, ok := audited(t, out.String(), event, field); !ok || got != in {
 				t.Errorf("%s refused %q with %d and audited %s as %q (found: %v); want it as sent", name, in, w.Code, field, got, ok)
 			}
 			return false, strconv.Itoa(w.Code)
@@ -49,11 +49,10 @@ func TestEveryHostCheckDecidesEveryHostFamilyAsPinned(t *testing.T) {
 
 // audited is field of the one audit record of event in a JSON audit stream, and whether there was
 // exactly one.
-func audited(stream, event, field string) (string, bool) {
+func audited(t testing.TB, stream, event, field string) (string, bool) {
 	var found []string
-	for _, l := range strings.Split(strings.TrimSpace(stream), "\n") {
-		var rec map[string]any
-		if json.Unmarshal([]byte(l), &rec) != nil || rec["event"] != event {
+	for _, rec := range logsink.Records[map[string]any](t, stream) {
+		if rec["event"] != event {
 			continue
 		}
 		v, _ := rec[field].(string)

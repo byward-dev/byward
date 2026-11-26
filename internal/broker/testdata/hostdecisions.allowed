@@ -1,0 +1,5 @@
+# The inputs each host check in internal/broker passes, one per line: the column, a tab, and the input as
+# Go quotes it
+# (#656). Edited by hand, never regenerated: an added line widens a check,
+# and the PR says why. The test names each line that differs from the checks' decisions.
+consent Origin	"https://mcp.example.com"

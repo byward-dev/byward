@@ -27,6 +27,9 @@ func TestEveryClientHostCheckDecidesEveryHostFamilyAsPinned(t *testing.T) {
 			}
 			// The registry wraps the URL rule's error with %v, so its reason is read from the message;
 			// a host that is not allowed is named in it, and is left out here.
+			if err == nil {
+				return false, "returned a client without fetching it"
+			}
 			msg := err.Error()
 			switch {
 			case err == ErrUnknownClient: //nolint:errorlint // the bare error: no https client ID
@@ -49,19 +52,32 @@ func TestEveryClientHostCheckDecidesEveryHostFamilyAsPinned(t *testing.T) {
 		return d
 	}
 	clientIDs := deny("https://mcp.example.com/client.json", "https://127.0.0.1/client.json", "https://[::1]/client.json", "https://xn--bcher-kva.example/client.json")
-	redirects := deny("evil.example", "xn--bcher-kva.example")
+	redirects := deny("evil.example", "mcp.example.com", "xn--bcher-kva.example", "fass.example") // mcp.example.com is the URL shapes' host; faß.example matches fass.example by the transitional fold
 	ids := hostfamilies.URLProbes("/client.json", "https")
+	redirectURIs := hostfamilies.URLProbes("/cb", "https", "http")
+	redirectReason := func(err error) (bool, string) {
+		var re *RedirectError
+		if errors.As(err, &re) {
+			return false, string(re.Reason)
+		}
+		return err == nil, "refused"
+	}
 	hostfamilies.Run(t, "internal/registration", []hostfamilies.Column{
 		{Name: "CIMD client ID", Probes: ids, Judge: reaches(CIMDConfig{})},
 		{Name: "CIMD allowed host", Probes: ids, Judge: reaches(CIMDConfig{AllowedHosts: []string{"mcp.example.com", "app.example"}, TrustedHosts: []string{"xn--bcher-kva.example"}})},
 		{Name: "denylist entry", Probes: append(hostfamilies.HostProbes(), ids...), Judge: func(in string) (bool, string) {
-			var ee *EntryError
-			if _, err := NewDenylist([]string{in}); errors.As(err, &ee) {
+			_, err := NewDenylist([]string{in})
+			if ee := (*EntryError)(nil); errors.As(err, &ee) {
 				return false, ee.Reason
 			}
-			return true, ""
+			return err == nil, "refused" // the wiring refuses on any error
 		}},
 		{Name: "denylist client ID", Probes: ids, Judge: func(in string) (bool, string) { return !clientIDs.DeniesClient(in), "denied" }, Denies: true},
-		{Name: "denylist redirect", Probes: hostfamilies.URLProbes("/cb", "https", "http"), Judge: func(in string) (bool, string) { return !redirects.DeniesRedirect(in), "denied" }, Denies: true},
+		{Name: "denylist redirect", Probes: redirectURIs, Judge: func(in string) (bool, string) { return !redirects.DeniesRedirect(in), "denied" }, Denies: true},
+		{Name: "redirect URI", Probes: redirectURIs, Judge: func(in string) (bool, string) { return redirectReason(ValidateRedirect(in)) }},
+		// A registered loopback redirect matches the same host on any port (ADR-0009 §2).
+		{Name: "loopback redirect", Probes: hostfamilies.URLProbes("/cb", "http"), Judge: func(in string) (bool, string) {
+			return redirectReason(MatchRedirect([]string{"http://127.0.0.1/cb", "http://localhost/cb", "http://[::1]/cb"}, in))
+		}},
 	})
 }

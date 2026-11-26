@@ -1,9 +1,12 @@
-// Package hostfamilies generates the host inputs that every check reading a host is judged on, and
-// records each check's decisions (#656). Each package that owns a host check runs its columns with
-// Run, which writes a summary golden (testdata/hostdecisions.golden) and fails when an input passes
-// a check without being in the hand-edited baseline (testdata/hostdecisions.allowed), or is in the
-// baseline without passing. Regeneration rewrites the summary only, never the baseline, so a
-// widening is a reviewed edit to the baseline and a narrowing a reviewed deletion from it.
+// Package hostfamilies generates the host inputs that the checks deciding on a host name or a
+// host[:port] are judged on, and records each check's decisions (#656). Each package that owns such a
+// check runs its columns with Run, which writes a summary golden (testdata/hostdecisions.golden) and
+// fails when the inputs a check passes (for a denylist, the inputs it stops) differ from the
+// hand-edited baseline (testdata/hostdecisions.allowed). Regeneration rewrites the summary only, never
+// the baseline, so a widening is a reviewed edit to the baseline and a narrowing a reviewed deletion.
+// Not covered: the trusted proxies and X-Forwarded-For, which take IP addresses and prefixes (netip);
+// exact identifiers such as an assertion's aud, compared byte for byte (ADR-0032 class X); and the
+// consent page's display of a client's site.
 package hostfamilies
 
 import (
@@ -21,18 +24,22 @@ import (
 	"github.com/byward-dev/byward/internal/testutil/golden"
 )
 
-// Columns are the checks that read a host, by the package whose test runs them. Run fails a package
-// whose columns differ from its entry, and TestEveryColumnIsInItsPackagesGolden fails an entry whose
-// golden lacks it. A new check that reads a host gets a column here and in its package's test.
-var Columns = map[string][]string{
+// columns are the checks that read a host, by the package whose test runs them. Run fails a package
+// whose columns differ from its entry, and TestEveryListedPackageRunsAndRecordsItsColumns fails an
+// entry no test of its package runs, or whose golden lacks a column. Nothing finds a new check that
+// reads a host by itself: it gets a column here and in its package's Run call.
+var columns = map[string][]string{
 	"internal/config": {
 		"public-url", "upstream-url", "resource-documentation", "oidc-issuer", "allowed-origins",
 		"allowed-hosts", "cimd-trusted-hosts", "cimd-allowed-hosts", "client-denylist host", "client-denylist client ID",
-		"listen", "internal-listen",
+		"listen", "internal-listen", "no-auth public-url", "no-auth listen", "no-auth allowed-hosts", "no-auth allowed-origins",
 	},
+	"internal/broker":       {"consent Origin"},
 	"internal/origin":       {"public Host", "internal Host", "Origin"},
-	"internal/registration": {"CIMD client ID", "CIMD allowed host", "denylist entry", "denylist client ID", "denylist redirect"},
+	"internal/registration": {"CIMD client ID", "CIMD allowed host", "denylist entry", "denylist client ID", "denylist redirect", "redirect URI", "loopback redirect"},
 	"internal/idp/oidc":     {"IdP endpoint", "IdP endpoint, --dev"},
+	"internal/ssrfguard":    {"SSRF guard URL"},
+	"internal/host":         {"loopback as written"},
 }
 
 // A Probe is one input and the families it belongs to: what the host is, how it is wrapped, and the
@@ -43,14 +50,15 @@ type Probe struct {
 }
 
 // hostBases are the hosts the families start from. Each family has members a check takes and
-// members it refuses, wherever the check takes any.
+// members it refuses, wherever the check takes any. A family whose members can carry a zone or a
+// credential also belongs in config's "client-denylist client ID" filter (hostfamilies.Only).
 var hostBases = []struct {
 	family string
 	hosts  []string
 }{
 	{"name", []string{"mcp.example.com", "MCP.Example.COM", "app.example", "evil.example", "localhost", "LOCALHOST", "byward-metrics.monitoring.svc", "my_mcp", "single"}},
-	{"name edge", []string{"mcp.example.com.", "a..b", ".mcp.example.com", "-a.example", "a-.example", "mcp.10", "10.0.0.999", "a b.example", "a%41.example", "S3CRET~tok", "*", ""}},
-	{"idn", []string{"xn--bcher-kva.example", "bücher.example", "ｍｃｐ.example.com", "b%C3%BCcher.example"}},
+	{"name edge", []string{"mcp.example.com.", "a..b", ".mcp.example.com", "-a.example", "a-.example", "mcp.10", "app.0x", "10.0.0.999", "a b.example", "a%41.example", "S3CRET~tok", "*", ""}},
+	{"idn", []string{"xn--bcher-kva.example", "bücher.example", "ｍｃｐ.example.com", "b%C3%BCcher.example", "faß.example", "faẞ.example"}},
 	{"ipv4", []string{"127.0.0.1", "127.0.0.2", "10.244.1.17", "0.0.0.0", "8.8.8.8"}},
 	{"ipv4 spelling", []string{"127.1", "0x7f.0.0.1", "0177.0.0.1", "2130706433", "010.0.0.1", "127.0.0.1.5", "4294967296"}},
 	{"ipv6", []string{"::1", "0:0::1", "2001:DB8::1", "2001:db8::1", "fd00::17", "fe80::1", "::"}},
@@ -171,7 +179,8 @@ func Only(probes []Probe, families ...string) []Probe {
 
 // A Column is one check: its name, its inputs, and its judgement of one input: whether the input
 // passes the check (is accepted, allowed, or not denied: what a widening would add to), and, when
-// it does not, a reason class that never holds the input.
+// it does not, a reason class that never holds the input. A Judge may also assert what its check
+// does beside deciding, such as what it audits, since it sees each input once.
 type Column struct {
 	Name   string
 	Probes []Probe
@@ -183,24 +192,26 @@ type Column struct {
 
 // Run judges every input of every column, checks the summary against testdata/hostdecisions.golden,
 // and the inputs that pass against testdata/hostdecisions.allowed and testdata/hostdecisions.residuals,
-// both in the package's directory. pkg is the package's directory from the repository root, as
-// Columns names it.
-func Run(t *testing.T, pkg string, cols []Column) {
+// both in the package's directory. A package calls it once, from one test, with every column its
+// entry in columns lists; pkg is the package's directory from the repository root.
+func Run(t testing.TB, pkg string, cols []Column) {
 	t.Helper()
 	names := make([]string, len(cols))
 	for i, c := range cols {
 		names[i] = c.Name
 	}
-	if !slices.Equal(names, Columns[pkg]) {
-		t.Fatalf("%s runs the columns %q; hostfamilies.Columns lists %q for it: list every check that reads a host in both", pkg, names, Columns[pkg])
+	if len(columns[pkg]) == 0 || !slices.Equal(names, columns[pkg]) {
+		t.Fatalf("%s runs the columns %q; hostfamilies lists %q for it: list every check that reads a host in both", pkg, names, columns[pkg])
 	}
 	var summary strings.Builder
-	fmt.Fprintf(&summary, "# The decision of every check in %s that reads a host, by input family (#656).\n", pkg)
+	fmt.Fprintf(&summary, "# The decision of each check in %s that decides on a host, by input family (#656).\n", pkg)
 	summary.WriteString("# Generated: BYWARD_UPDATE_GOLDEN=1 rewrites it. The inputs that pass are listed in hostdecisions.allowed,\n")
-	summary.WriteString("# which is edited by hand; a denylist's lines there are the inputs it stops. The refusal messages per\n")
-	summary.WriteString("# setting are in internal/config/testdata/hostrule.golden.\n")
-	listed := map[string]bool{} // a baseline line, and whether its column is a denylist
-	denies := map[string]bool{}
+	summary.WriteString("# which is edited by hand; a denylist's lines there are the inputs it stops. A config setting's\n")
+	summary.WriteString("# refusal messages are in internal/config/testdata/hostrule.golden. A Go version that reads a URL or an\n")
+	summary.WriteString("# address differently changes these lines: that is a decision change too.\n")
+	given := map[string]bool{}  // the baseline lines the checks give: what each passes, or a denylist stops
+	passes := map[string]bool{} // the lines of the inputs each check lets through, a denylist included
+	denies := map[string]bool{} // whether a column is a denylist
 	for _, c := range cols {
 		denies[c.Name] = c.Denies
 		decisions := make([]decision, 0, len(c.Probes))
@@ -210,14 +221,18 @@ func Run(t *testing.T, pkg string, cols []Column) {
 				reason = ""
 			}
 			if pass != c.Denies {
-				listed[line(c.Name, p.Input)] = true
+				given[line(c.Name, p.Input)] = true
+			}
+			if pass {
+				passes[line(c.Name, p.Input)] = true
 			}
 			decisions = append(decisions, decision{p, pass, reason})
 		}
 		writeColumn(&summary, c.Name, decisions)
 	}
 	golden.Check(t, "testdata/hostdecisions.golden", summary.String(), "the file summarises each host check's decisions (#656); a changed count is a decision that changed, which hostdecisions.allowed must show too")
-	checkBaseline(t, listed, denies)
+	checkBaseline(t, given, denies)
+	checkResiduals(t, passes)
 }
 
 type decision struct {
@@ -289,9 +304,8 @@ func writeColumn(b *strings.Builder, name string, ds []decision) {
 }
 
 // checkBaseline fails each line the checks give that hostdecisions.allowed lacks, and each line it
-// has that the checks no longer give, naming whether that widens or narrows the check; and each
-// residual that is not a line the checks give.
-func checkBaseline(t *testing.T, passing, denies map[string]bool) {
+// has that the checks no longer give, naming whether that widens or narrows the check.
+func checkBaseline(t testing.TB, given, denies map[string]bool) {
 	t.Helper()
 	allowed, err := readLines("testdata/hostdecisions.allowed")
 	if err != nil {
@@ -299,16 +313,21 @@ func checkBaseline(t *testing.T, passing, denies map[string]bool) {
 	}
 	listed := map[string]bool{}
 	for _, l := range allowed {
-		listed[l] = true
+		if _, ok := parseLine(t, "hostdecisions.allowed", l, 2); ok {
+			if listed[l] {
+				t.Errorf("hostdecisions.allowed lists %s twice: delete one", l)
+			}
+			listed[l] = true
+		}
 	}
 	var newly, gone []string
-	for l := range passing {
+	for l := range given {
 		if !listed[l] {
 			newly = append(newly, l)
 		}
 	}
 	for l := range listed {
-		if !passing[l] {
+		if !given[l] {
 			gone = append(gone, l)
 		}
 	}
@@ -327,8 +346,15 @@ func checkBaseline(t *testing.T, passing, denies map[string]bool) {
 		if denies[column(l)] {
 			what = "no longer denied (a widening)"
 		}
-		t.Errorf("%s: %s: in testdata/hostdecisions.allowed; if intended, delete the line (and its residual, if any) and say why in the PR", what, l)
+		t.Errorf("%s: %s: in testdata/hostdecisions.allowed; if intended, delete the line from hostdecisions.allowed (and its residual, if any) and say why in the PR", what, l)
 	}
+}
+
+// checkResiduals fails each line of hostdecisions.residuals that is malformed, listed twice, or
+// names an input its check no longer lets through: its issue has fixed it, and the line is deleted
+// there and from hostdecisions.allowed (for a denylist, the fix adds the input there instead).
+func checkResiduals(t testing.TB, passes map[string]bool) {
+	t.Helper()
 	residuals, err := readLines("testdata/hostdecisions.residuals")
 	if errors.Is(err, os.ErrNotExist) {
 		return
@@ -336,16 +362,43 @@ func checkBaseline(t *testing.T, passing, denies map[string]bool) {
 	if err != nil {
 		t.Fatalf("read the residuals: %v", err)
 	}
+	seen := map[string]bool{}
 	for _, r := range residuals {
-		f := strings.SplitN(r, "\t", 4)
-		if len(f) != 4 || !strings.HasPrefix(f[2], "#") {
-			t.Errorf("residual %q: want column, tab, quoted input, tab, #issue, tab, why", r)
+		f, ok := parseLine(t, "hostdecisions.residuals", r, 4)
+		if !ok {
 			continue
 		}
-		if l := f[0] + "\t" + f[1]; !passing[l] {
-			t.Errorf("residual %s (%s) no longer passes: if %s fixed it, delete it here and in hostdecisions.allowed", l, f[2], f[2])
+		if !issueRef.MatchString(f[2]) || strings.TrimSpace(f[3]) == "" {
+			t.Errorf("hostdecisions.residuals: %q: want column, tab, quoted input, tab, #issue number, tab, why", r)
+			continue
+		}
+		l := f[0] + "\t" + f[1]
+		if seen[l] {
+			t.Errorf("hostdecisions.residuals lists %s twice: delete one", l)
+		}
+		seen[l] = true
+		if !passes[l] {
+			t.Errorf("residual %s (%s): its check no longer lets it through: if %s fixed it, delete the residual, and update hostdecisions.allowed as the test says", l, f[2], f[2])
 		}
 	}
+}
+
+var issueRef = regexp.MustCompile(`^#\d+$`)
+
+// parseLine splits a baseline or residual line into its n tab-separated fields, and fails it unless
+// its input, the second field, is quoted as strconv.Quote quotes it, so that one input has one line.
+func parseLine(t testing.TB, file, l string, n int) ([]string, bool) {
+	t.Helper()
+	f := strings.SplitN(l, "\t", n)
+	if len(f) != n {
+		t.Errorf("%s: %q: want %d tab-separated fields", file, l, n)
+		return nil, false
+	}
+	if in, err := strconv.Unquote(f[1]); err != nil || strconv.Quote(in) != f[1] {
+		t.Errorf("%s: %q: the input must be quoted as strconv.Quote quotes it", file, l)
+		return nil, false
+	}
+	return f, true
 }
 
 // readLines is a file's lines, without blank lines and lines that start with "#".
@@ -364,18 +417,4 @@ func readLines(path string) ([]string, error) {
 		}
 	}
 	return out, s.Err()
-}
-
-var (
-	lengthNote = regexp.MustCompile(`\(\d+ characters?, not shown\)`)
-	entryNote  = regexp.MustCompile(`entry \d+ of \d+`)
-	position   = regexp.MustCompile(`at position \d+`)
-)
-
-// Reason is a refusal's message as a reason class: its value's length, its entry's place and a
-// character's position replaced, so that refusals for one reason count as one class.
-func Reason(msg string) string {
-	msg = lengthNote.ReplaceAllString(msg, "(N characters, not shown)")
-	msg = entryNote.ReplaceAllString(msg, "entry N of N")
-	return position.ReplaceAllString(msg, "at position N")
 }
