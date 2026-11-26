@@ -40,7 +40,14 @@ All tools are pinned in `mise.toml`; `mise run` resolves them, no shell activati
   | Full | Code behind the security invariants: broker, tokens, IdP, relay, upstream, stdio, logging redaction, security settings | All |
   | Standard | Other production code | runtime, reuse, coverage, quality, names, single responsibility |
   | Tests | Test-only changes | coverage, quality, determinism, data-driven |
+  | Pinned | A change whose whole effect a decision golden or a registry walk shows (below) | runtime, coverage; for Full-tier code, also the reviewer reads the golden diff |
   | None | Docs and CI configuration | None; say so in the PR |
+
+- **Pinned:** a decision golden records, per input family, what every check decides. It covers the host
+  checks (#656) and the printing surfaces of secret-shaped values (#657). A registry walk applies one
+  settings rule to every setting (#658). When such a golden or walk shows the whole effect of a
+  change, and its "nothing newly allowed" test passes, the Pinned tier replaces Full or Standard.
+  It runs one round. Any decision the diff newly allows goes back to the code's own tier.
 
 - **Angles:** runtime (run the changed code, edge cases included); reuse (search `origin/main`, not
   only the diff, for a function that already does what the diff adds, or a second implementation of
@@ -52,6 +59,10 @@ All tools are pinned in `mise.toml`; `mise run` resolves them, no shell activati
 - **Rounds:** round 1 runs every angle of the tier. After that, re-run only the angles that had
   findings or whose files a fix touched; the last of those rounds must be clean. Stop after 5
   rounds. Anything still open goes in the PR description or a `ready-for-agent` issue.
+- **Same gap elsewhere:** a finding that another setting, check or surface has the gap the PR fixes
+  doesn't become a new per-instance issue. It goes into that class's golden or walk (#656, #657,
+  #658), or into "Known gaps" in `docs/security-posture.md`. A class with no golden or walk
+  yet gets one class-level issue.
 
 ## Layout rules
 
