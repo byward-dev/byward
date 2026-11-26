@@ -161,11 +161,12 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 		if ee := (*registration.EntryError)(nil); errors.As(err, &ee) {
 			return nil, cfg.RefusedDenylistEntry(ee.Index, ee.Reason)
 		}
-		return nil, fmt.Errorf("BYWARD_CLIENT_DENYLIST: %w", err) // defensive: NewDenylist returns only *EntryError
+		return nil, fmt.Errorf("%s: %w", cfg.Values.NameAsGiven("client-denylist"), err) // defensive: NewDenylist returns only *EntryError
 	}
 	for _, id := range p.static.IDs() {
 		if p.clientDeny.DeniesClient(id) { // the denylist never refuses a static client (#338)
-			return nil, fmt.Errorf("BYWARD_CLIENT_DENYLIST: %q is a static client, which the denylist never refuses; remove it from BYWARD_STATIC_CLIENTS_FILE instead", id)
+			return nil, fmt.Errorf("%s: %q is a static client, which the denylist never refuses; remove it from %s instead",
+				cfg.Values.NameAsGiven("client-denylist"), id, cfg.Values.NameAsGiven("static-clients-file"))
 		}
 	}
 	if p.assertionKeys, err = assertionKeys(cfg); err != nil {
@@ -180,7 +181,7 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 		EmailDomains: cfg.GateEmailDomains, HostedDomains: cfg.GateHostedDomains},
 		gate.Options{IdP: p.idp.gateIdP, Tenant: cfg.EntraTenant, AllowEmpty: cfg.GateAllowEmpty})
 	if err != nil {
-		return nil, gateError(err)
+		return nil, gateError(cfg, err)
 	}
 	for _, w := range gateWarnings {
 		p.warnings = append(p.warnings, Warning{Message: w})
@@ -193,10 +194,10 @@ func loadAuthParts(cfg *config.Config, idpHTTP *http.Client) (*authParts, error)
 	}
 	if cfg.AppTokens == "entra" {
 		if p.idp.appTokens == nil {
-			return nil, errors.New("BYWARD_APP_TOKENS=entra needs BYWARD_IDP=entra")
+			return nil, fmt.Errorf("%s=entra needs %s=entra", cfg.Values.NameAsGiven("app-tokens"), cfg.Values.NameAsGiven("idp")) // defensive: config refuses it first
 		}
 		if p.appGate, err = gate.NewApp(gate.AppRules{Roles: cfg.AppRoles, ClientIDs: cfg.AppClientIDs, Tenants: cfg.GateTenants}); err != nil {
-			return nil, gateError(err)
+			return nil, gateError(cfg, err)
 		}
 	}
 	if w := isolationWarning(cfg, hostPtraceWarning); w != nil {

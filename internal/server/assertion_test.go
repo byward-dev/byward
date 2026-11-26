@@ -363,7 +363,7 @@ func TestAnUpstreamThatFailsToStartClosesTheStore(t *testing.T) {
 		st = s
 		return s, err
 	}
-	if _, err := New(stdioAuthConfig(t, "byward-no-such-command"), slog.New(slog.DiscardHandler)); err == nil || !strings.Contains(err.Error(), "BYWARD_UPSTREAM_COMMAND") {
+	if _, err := New(stdioAuthConfig(t, "byward-no-such-command"), slog.New(slog.DiscardHandler)); err == nil || !strings.HasPrefix(err.Error(), "stdio upstream (the command after --): ") {
 		t.Fatalf("New = %v, want the missing command", err)
 	}
 	if st == nil {

@@ -52,14 +52,14 @@ func (c *Config) mixedIdPSettings(v *Values, other string) []error {
 	var mixed []string
 	for _, n := range v.order {
 		if val := v.byKey[n]; strings.HasPrefix(n, other) && val.Source != SourceDefault {
-			mixed = append(mixed, spelled(val))
+			mixed = append(mixed, val.nameAsGiven())
 		}
 	}
 	if len(mixed) == 0 {
 		return nil
 	}
-	return []error{errorf("%s cannot be used with BYWARD_IDP=%s: they configure the %s IdP; remove them, or set BYWARD_IDP to match",
-		strings.Join(mixed, ", "), c.IdP, strings.TrimSuffix(other, "-"))}
+	return []error{errorf("%s cannot be used with %s=%s: they configure the %s IdP; remove them, or set %s to match",
+		strings.Join(mixed, ", "), v.NameAsGiven("idp"), c.IdP, strings.TrimSuffix(other, "-"), v.NameAsGiven("idp"))}
 }
 
 // requiredForIdP is an error for each named setting left empty.
@@ -67,8 +67,7 @@ func (c *Config) requiredForIdP(v *Values, names ...string) []error {
 	var errs []error
 	for _, s := range names {
 		if v.empty(s) {
-			env := v.byKey[s].Setting.EnvToSet()
-			errs = append(errs, errorf("%s is required with BYWARD_IDP=%s (or set BYWARD_INSECURE_NO_AUTH to try the proxy without sign-in)", env, c.IdP))
+			errs = append(errs, errorf("%s is required with %s=%s (or set %s to try the proxy without sign-in)", v.NameAsGiven(s), v.NameAsGiven("idp"), c.IdP, v.NameAsGiven("insecure-no-auth")))
 		}
 	}
 	return errs
@@ -87,8 +86,6 @@ func (c *Config) entraIdP(v *Values) []error {
 		errs = append(errs, err)
 	}
 	errs = append(errs, c.requiredForIdP(v, "entra-tenant", "entra-client-id")...)
-	secretEnv, tokenEnv := lookup("entra-client-secret").FileEnv(), Setting{Name: "entra-federated-token-file"}.Env()
-	certEnv := lookup("entra-client-certificate").FileEnv()
 	hasSecret, hasCert := v.given("entra-client-secret"), v.given("entra-client-certificate")
 	var set []string // the Entra app's credentials given: exactly one (ADR-0012 §5)
 	for name, given := range map[string]bool{"entra-client-secret": hasSecret, "entra-federated-token-file": c.EntraFederatedTokenFile != "", "entra-client-certificate": hasCert} {
@@ -104,11 +101,12 @@ func (c *Config) entraIdP(v *Values) []error {
 	slices.Sort(set)
 	switch {
 	case len(set) == 0:
-		errs = append(errs, errorf("%s, %s or %s is required with BYWARD_IDP=%s (or set BYWARD_INSECURE_NO_AUTH to try the proxy without sign-in)", secretEnv, certEnv, tokenEnv, c.IdP))
+		errs = append(errs, errorf("%s, %s or %s is required with %s=%s (or set %s to try the proxy without sign-in)", v.NameAsGiven("entra-client-secret"),
+			v.NameAsGiven("entra-client-certificate"), v.NameAsGiven("entra-federated-token-file"), v.NameAsGiven("idp"), c.IdP, v.NameAsGiven("insecure-no-auth")))
 	case len(set) > 1:
 		errs = append(errs, errorf("%s are set together: Entra gets one credential, so keep only one of them", strings.Join(set, " and ")))
 	case c.EntraFederatedTokenFile != "":
-		if err := absolute("entra-federated-token-file", c.EntraFederatedTokenFile); err != nil {
+		if err := absolute(v, "entra-federated-token-file", c.EntraFederatedTokenFile); err != nil {
 			errs = append(errs, err)
 		}
 		if !v.empty("entra-client-secret-expires-at") {
@@ -129,7 +127,7 @@ func (c *Config) entraIdP(v *Values) []error {
 func parseTenant(val Value) (string, error) {
 	raw := val.Given.raw()
 	if raw != "" && !isGUID(raw) {
-		return "", refusedForm(val.Setting, whole, raw, "the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, Overview, Tenant ID)", "it is not a GUID")
+		return "", refusedForm(val, whole, raw, "the tenant ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, Overview, Tenant ID)", "it is not a GUID")
 	}
 	return raw, nil
 }
@@ -140,7 +138,7 @@ func parseTenant(val Value) (string, error) {
 func parseEntraClientID(val Value) (string, error) {
 	raw := val.Given.raw()
 	if raw != "" && !isGUID(raw) {
-		return "", refusedForm(val.Setting, whole, raw, "the application (client) ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, App registrations, your app, Overview, Application (client) ID)", "it is not a GUID")
+		return "", refusedForm(val, whole, raw, "the application (client) ID, a GUID such as 00000000-0000-0000-0000-000000000000 (Entra admin center, App registrations, your app, Overview, Application (client) ID)", "it is not a GUID")
 	}
 	return raw, nil
 }
@@ -190,7 +188,7 @@ func (c *Config) oidcIdP(v *Values) []error {
 		c.Relaxations = append(c.Relaxations, "http IdP issuer on loopback ("+v.display("oidc-issuer")+"): discovery over http, and the IdP's sign-in page, token endpoint and signing keys over http too where it lists them on loopback")
 	}
 	errs = append(errs, c.requiredForIdP(v, "oidc-client-id")...)
-	secret, key := lookup("oidc-client-secret").FileEnv(), lookup("oidc-client-key").FileEnv()
+	secretName, keyName := v.NameAsGiven("oidc-client-secret"), v.NameAsGiven("oidc-client-key") // each named here only when not given: the variable to set
 	hasSecret, hasKey := v.given("oidc-client-secret"), v.given("oidc-client-key")
 	for _, name := range []string{"oidc-client-secret", "oidc-client-key"} {
 		if err := v.emptySecretFile(name); err != nil {
@@ -200,15 +198,15 @@ func (c *Config) oidcIdP(v *Values) []error {
 	switch {
 	case !hasSecret && !hasKey:
 		// A public client would let anyone who knows the client ID start the proxy's flow at the IdP.
-		errs = append(errs, errorf("%s or %s is required with BYWARD_IDP=%s: the proxy is a confidential client", secret, key, c.IdP))
+		errs = append(errs, errorf("%s or %s is required with %s=%s: the proxy is a confidential client", secretName, keyName, v.NameAsGiven("idp"), c.IdP))
 	case hasSecret && hasKey:
 		errs = append(errs, bothSet(v.NameAsGiven("oidc-client-secret"), v.NameAsGiven("oidc-client-key")))
 	}
 	if c.OIDCClientKeyID != "" && !hasKey {
-		errs = append(errs, errorf("%s is set without %s", v.NameAsGiven("oidc-client-key-id"), key))
+		errs = append(errs, errorf("%s is set without %s", v.NameAsGiven("oidc-client-key-id"), keyName))
 	}
 	if !v.empty("oidc-client-key-alg") && !hasKey {
-		errs = append(errs, errorf("%s is set without %s", v.NameAsGiven("oidc-client-key-alg"), key))
+		errs = append(errs, errorf("%s is set without %s", v.NameAsGiven("oidc-client-key-alg"), keyName))
 	} else if c.OIDCClientKeyAlg, err = parseKeyAlg(v.value("oidc-client-key-alg")); err != nil {
 		errs = append(errs, err)
 	}
@@ -219,7 +217,7 @@ func (c *Config) oidcIdP(v *Values) []error {
 func parseKeyAlg(val Value) (string, error) {
 	raw := val.Given.raw()
 	if raw != "" && !slices.Contains([]string{"PS256", "RS256", "ES256"}, raw) {
-		return "", refusedForm(val.Setting, whole, raw, "PS256 or RS256 (an RSA key) or ES256 (an EC P-256 key)", "it is not one of them")
+		return "", refusedForm(val, whole, raw, "PS256 or RS256 (an RSA key) or ES256 (an EC P-256 key)", "it is not one of them")
 	}
 	return raw, nil
 }
@@ -228,7 +226,7 @@ func parseKeyAlg(val Value) (string, error) {
 func parseClaimName(val Value, example string) (string, error) {
 	raw := val.Given.raw()
 	if raw == "" || strings.TrimSpace(raw) != raw {
-		return "", refusedForm(val.Setting, whole, raw, "a claim name such as "+example, "it is blank or has white space at an end")
+		return "", refusedForm(val, whole, raw, "a claim name such as "+example, "it is blank or has white space at an end")
 	}
 	return raw, nil
 }
@@ -239,7 +237,7 @@ func parseGateClaimName(val Value, example string) (string, error) {
 	name, err := parseClaimName(val, example)
 	if err == nil && slices.Contains(protocolClaims, name) {
 		// aud holds our client ID, so a gate on it would admit every user of the IdP.
-		return "", refusedMeaning(val.Setting, whole, name, "a claim name such as "+example,
+		return "", refusedMeaning(val, whole, name, "a claim name such as "+example,
 			"it is a claim of the sign-in itself, not roles or groups; name the claim the IdP sends them in")
 	}
 	return name, err
@@ -257,7 +255,7 @@ func parseSecretExpiry(val Value) (time.Time, error) {
 			return t.UTC(), nil
 		}
 	}
-	return time.Time{}, refusedForm(val.Setting, whole, raw, "a date such as 2027-11-06 or an RFC 3339 time", "it is neither")
+	return time.Time{}, refusedForm(val, whole, raw, "a date such as 2027-11-06 or an RFC 3339 time", "it is neither")
 }
 
 // isGUID is idp.IsGUID; config keeps its own copy so it does not import idp (and go-jose).
@@ -287,7 +285,7 @@ func isGUID(s string) bool {
 // as the parser read it, by its scheme alone; whether http on loopback is allowed (only with --dev)
 // stays the adapter's.
 func parseIssuer(val Value) (string, error) {
-	s, raw := val.Setting, val.Given.raw()
+	raw := val.Given.raw()
 	if raw == "" {
 		return "", nil
 	}
@@ -297,10 +295,10 @@ func parseIssuer(val Value) (string, error) {
 		reason = "it has a query or a fragment, which an issuer never has"
 	}
 	if reason != "" {
-		return "", refusedForm(s, whole, raw, want, reason)
+		return "", refusedForm(val, whole, raw, want, reason)
 	}
 	if u.Scheme == "http" && !host.LoopbackAsWritten(u.Hostname()) { // the adapter's own rule (oidc.checkURL)
-		return "", refusedMeaning(s, whole, "http on a host that is not loopback", want, "give https; an issuer is http only on a loopback host, with --dev")
+		return "", refusedMeaning(val, whole, "http on a host that is not loopback", want, "give https; an issuer is http only on a loopback host, with --dev")
 	}
 	return raw, nil
 }
@@ -308,7 +306,6 @@ func parseIssuer(val Value) (string, error) {
 // parseOIDCScopes reads BYWARD_OIDC_SCOPES: comma-separated scopes, none with a space, a backslash or
 // a double quote. A refused scope is never shown (ADR-0031 §1).
 func parseOIDCScopes(val Value) ([]string, []error) {
-	s := val.Setting
 	list, at, err := parseEntries(val)
 	if err != nil {
 		return nil, []error{err}
@@ -316,7 +313,7 @@ func parseOIDCScopes(val Value) ([]string, []error) {
 	var errs []error
 	for i, sc := range list {
 		if !isScopeToken(sc) {
-			errs = append(errs, refusedForm(s, at(i), sc, "a scope such as openid or email", scopeCharsReason))
+			errs = append(errs, refusedForm(val, at(i), sc, "a scope such as openid or email", scopeCharsReason))
 		}
 	}
 	return list, errs

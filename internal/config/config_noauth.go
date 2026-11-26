@@ -73,15 +73,15 @@ func virtual(readFile readFileFunc, name string) bool {
 // address is loopback unless the proxy runs in a container, the Host and Origin allowlists stay
 // loopback-only, and no authentication setting is present.
 func checkNoAuth(c *Config, v *Values) []error {
-	const env = "BYWARD_INSECURE_NO_AUTH"
+	noAuthName := v.NameAsGiven("insecure-no-auth")
 	var errs []error
 	if !host.LoopbackAsWritten(c.PublicURL.Hostname()) {
-		errs = append(errs, errorf("%s: BYWARD_PUBLIC_URL must be a loopback URL, e.g. http://localhost:8080/mcp", env))
+		errs = append(errs, errorf("%s: %s must be a loopback URL, e.g. http://localhost:8080/mcp", noAuthName, v.NameAsGiven("public-url")))
 	}
 	listenHost, port, err := net.SplitHostPort(c.Listen)
 	switch {
 	case err != nil:
-		errs = append(errs, errorf("%s: BYWARD_LISTEN must be a loopback host:port such as 127.0.0.1:8080", env))
+		errs = append(errs, errorf("%s: %s must be a loopback host:port such as 127.0.0.1:8080", noAuthName, v.NameAsGiven("listen")))
 	case host.LoopbackAsWritten(listenHost):
 	case c.InContainer:
 		// The host port is the public URL's; the container port is the listen address's.
@@ -92,15 +92,15 @@ func checkNoAuth(c *Config, v *Values) []error {
 		c.Relaxations = append(c.Relaxations, fmt.Sprintf(
 			"listening on %s inside a container: publish the port on loopback only, e.g. docker run -p 127.0.0.1:%s:%s; anyone who can reach the published port can use the upstream", c.Listen, publishPort, port))
 	default:
-		errs = append(errs, errorf("%s: BYWARD_LISTEN must be a loopback address such as 127.0.0.1:8080 (non-loopback only inside a container with its own network, not --network host)", env))
+		errs = append(errs, errorf("%s: %s must be a loopback address such as 127.0.0.1:8080 (non-loopback only inside a container with its own network, not --network host)", noAuthName, v.NameAsGiven("listen")))
 	}
-	hosts, origins := v.value("allowed-hosts").Setting, v.value("allowed-origins").Setting
+	hosts, origins := v.value("allowed-hosts"), v.value("allowed-origins")
 	// Named without a place: the stored lists leave out an entry refused for its form, so an index
 	// into them need not be the entry's place in the list given.
 	for _, h := range c.AllowedHosts {
 		if hn := host.Hostname(h); !host.LoopbackAsWritten(hn) {
 			errs = append(errs, refusedMeaning(hosts, whole, notLoopback(hn),
-				"only loopback hosts with "+env+", such as localhost:8080", "authentication is off, so only loopback may reach the proxy"))
+				"only loopback hosts with "+noAuthName+", such as localhost:8080", "authentication is off, so only loopback may reach the proxy"))
 		}
 	}
 	for _, o := range c.AllowedOrigins {
@@ -110,12 +110,12 @@ func checkNoAuth(c *Config, v *Values) []error {
 				shown = u.Hostname()
 			}
 			errs = append(errs, refusedMeaning(origins, whole, notLoopback(shown),
-				"only loopback origins with "+env+", such as http://localhost:3000", "authentication is off, so only loopback may reach the proxy"))
+				"only loopback origins with "+noAuthName+", such as http://localhost:3000", "authentication is off, so only loopback may reach the proxy"))
 		}
 	}
 	for _, val := range v.Effective() {
 		if val.Setting.Auth && val.Source != SourceDefault && !v.refusedOffMode(val.Setting.Name) { // refused, its refusal (its hint or "remove it") is its one error (#631)
-			errs = append(errs, errorf("%s cannot be combined with %s: remove one of them", env, spelled(val)))
+			errs = append(errs, errorf("%s cannot be combined with %s: remove one of them", noAuthName, val.nameAsGiven()))
 		}
 	}
 	if len(errs) == 0 {

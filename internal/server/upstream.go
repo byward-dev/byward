@@ -83,11 +83,21 @@ func newStdioManager(cfg *config.Config, sc stdio.Config) (*stdio.Manager, error
 	m, err := stdio.New(sc)
 	switch {
 	case errors.Is(err, stdio.ErrTempDirTooLong): // its fix is TMPDIR, which it names
-		return nil, fmt.Errorf("stdio upstream (BYWARD_OBO_SCOPES): %w", err)
+		return nil, fmt.Errorf("stdio upstream (%s): %w", cfg.Values.NameAsGiven("obo-scopes"), err)
 	case err != nil:
-		return nil, fmt.Errorf("stdio upstream (BYWARD_UPSTREAM_COMMAND, BYWARD_UPSTREAM_ENV_FILE): %w", err)
+		return nil, fmt.Errorf("stdio upstream (%s): %w", stdioSettingNames(cfg), err)
 	}
 	return m, nil
+}
+
+// stdioSettingNames names the settings the stdio upstream's command is found by, as the operator gave
+// them (#623): the command, and its environment file when one is given with any line, as it can set
+// the PATH the command is looked up on.
+func stdioSettingNames(cfg *config.Config) string {
+	if cfg.UpstreamEnv == nil {
+		return cfg.Values.CommandNameAsGiven()
+	}
+	return cfg.Values.CommandNameAsGiven() + ", " + cfg.Values.NameAsGiven("upstream-env")
 }
 
 // checkUpstream is what check --offline and doctor ask of the upstream without reaching it: a stdio

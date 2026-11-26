@@ -59,12 +59,12 @@ func parseHeaderName(val Value) (string, error) {
 	h := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(raw))
 	switch {
 	case strings.Contains(raw, ":"):
-		return "", refusedForm(val.Setting, whole, raw, want, headerLineReason)
+		return "", refusedForm(val, whole, raw, want, headerLineReason)
 	case !httpguts.ValidHeaderFieldName(h):
-		return "", refusedForm(val.Setting, whole, raw, want, "it is not a header name")
+		return "", refusedForm(val, whole, raw, want, "it is not a header name")
 	}
 	if shown := relied(CanonicalHeader(h)); shown != "" { // as the upstream may read it: X_Forwarded_For is X-Forwarded-For
-		return "", refusedMeaning(val.Setting, whole, shown, want, "the proxy, the transport or MCP relies on it; use Authorization or a header of your own")
+		return "", refusedMeaning(val, whole, shown, want, "the proxy, the transport or MCP relies on it; use Authorization or a header of your own")
 	}
 	return h, nil
 }
@@ -121,17 +121,17 @@ func suchAs(name, clashing string) string {
 // X-Api-Key are one header.
 func (c *Config) headerClashes() []error {
 	var errs []error
-	aEnv, cEnv := Setting{Name: "assertion-header"}.Env(), Setting{Name: "upstream-credential-header"}.Env()
+	assertionHeaderName, credentialHeaderName := c.Values.NameAsGiven("assertion-header"), c.Values.NameAsGiven("upstream-credential-header")
 	if c.UpstreamCredentialHeader != "" && sameHeader(c.UpstreamCredentialHeader, c.AssertionHeader) {
 		// The header is not shown: an accepted name can be any token.
 		errs = append(errs, errorf("%s and %s name the same header, but the credential and the identity assertion never share a header (ADR-0016 §7): set %s to a header of your own%s, and verify the assertion there",
-			cEnv, aEnv, aEnv, suchAs("assertion-header", c.AssertionHeader)))
+			credentialHeaderName, assertionHeaderName, assertionHeaderName, suchAs("assertion-header", c.AssertionHeader)))
 	}
 	for _, u := range []struct{ name, header string }{{"assertion-header", c.AssertionHeader},
 		{"upstream-credential-header", c.UpstreamCredentialHeader}, {"obo-header", c.OBOHeader}} {
 		for _, plain := range IdentityHeaderNames {
 			if sameHeader(u.header, plain) { // shown by the fixed name it matches, never as given
-				errs = append(errs, refusedMeaning(lookup(u.name), whole, plain, headerNameWant(u.name),
+				errs = append(errs, refusedMeaning(c.Values.valueOf(u.name), whole, plain, headerNameWant(u.name),
 					"it is one of the plain identity headers the proxy sets (docs/how-to/plain-identity-headers.md); use another header"))
 			}
 		}

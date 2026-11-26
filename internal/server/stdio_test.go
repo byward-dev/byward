@@ -228,8 +228,8 @@ func TestMissingStdioCommandFailsStartupNamingTheImagePattern(t *testing.T) {
 	}
 	t.Setenv("PATH", "/nonexistent")
 	_, err = New(cfg, slog.New(slog.DiscardHandler))
-	if err == nil || !strings.Contains(err.Error(), "BYWARD_UPSTREAM_COMMAND") || !strings.Contains(err.Error(), "COPY --from=ghcr.io/byward-dev/byward") {
-		t.Fatalf("New = %v, want an error naming the setting and the COPY --from pattern", err)
+	if err == nil || !strings.HasPrefix(err.Error(), "stdio upstream (the command after --): ") || !strings.Contains(err.Error(), "COPY --from=ghcr.io/byward-dev/byward") {
+		t.Fatalf("New = %v, want an error naming the command as given and the COPY --from pattern", err)
 	}
 }
 

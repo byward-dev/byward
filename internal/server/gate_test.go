@@ -5,12 +5,14 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/byward-dev/byward/internal/broker"
+	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/testutil/logsink"
@@ -29,6 +31,22 @@ func TestInvalidGateRefusesToStartNamingTheSetting(t *testing.T) {
 		name, _, _ := strings.Cut(setting, "=")
 		t.Run(name, func(t *testing.T) {
 			cfg := loadConfig(t, "https://m.example/mcp", setting)
+			if _, err := New(cfg, logging.New(io.Discard, "json")); err == nil || !strings.HasPrefix(err.Error(), name+": ") {
+				t.Fatalf("err = %v, want it to start with %s", err, name)
+			}
+		})
+	}
+}
+
+// A gate list given by flag is named by its flag (#623); the variable rows above are its control.
+func TestAnInvalidGateListGivenByFlagIsNamedByItsFlag(t *testing.T) {
+	for _, flag := range []string{"--gate-groups=mcp-users", "--gate-email-domains=contoso.example"} {
+		name, _, _ := strings.Cut(flag, "=")
+		t.Run(name, func(t *testing.T) {
+			cfg, _, err := config.Load([]string{flag}, servedEnv(t), os.ReadFile)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if _, err := New(cfg, logging.New(io.Discard, "json")); err == nil || !strings.HasPrefix(err.Error(), name+": ") {
 				t.Fatalf("err = %v, want it to start with %s", err, name)
 			}
@@ -119,5 +137,20 @@ func TestWiredBrokerGetsTheConfiguredGateAndObservability(t *testing.T) {
 	id.Roles = []string{"MCP.User"}
 	if err := got.Gate.Allow(context.Background(), id); err != nil {
 		t.Fatalf("user with the role: %v", err)
+	}
+}
+
+// Every gate list is named by a setting the registry holds, so naming it in a refusal cannot panic:
+// NameAsGiven panics on an unknown name, and the refusal is the only place it is read.
+func TestEveryGateListIsNamedByARegisteredSetting(t *testing.T) {
+	for field, name := range gateSettings {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("gate list %s: setting %q: %v", field, name, r)
+				}
+			}()
+			(*config.Values)(nil).NameAsGiven(name)
+		}()
 	}
 }

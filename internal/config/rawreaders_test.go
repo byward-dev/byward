@@ -4,7 +4,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -26,15 +25,8 @@ var rawReaders = []string{
 // cannot tell which setting a parser reads: a function named parse… that reads another setting's
 // text passes, and review catches it.
 func TestOnlyParsersReadARawValue(t *testing.T) {
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
 	scanned := false // the real files' scan finds a read it must: parseText's
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
+	for _, f := range packageGoFiles(t) {
 		for _, r := range rawReadsOf(t, f, nil) {
 			switch {
 			case r.kind == readField && f != "opaque.go":

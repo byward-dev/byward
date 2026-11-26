@@ -12,7 +12,7 @@ import (
 // upstream reads the upstream: an HTTP URL or a stdio command, exactly one of them. dashes says the
 // command takes a stdio upstream command after --, so the URL's error also names a command after --.
 func (c *Config) upstream(v *Values, dashes bool) []error {
-	urlEnv, cmdEnv := Setting{Name: "upstream-url"}.Env(), Setting{Name: "upstream-command"}.Env()
+	urlName, commandName := v.NameAsGiven("upstream-url"), v.CommandNameAsGiven()
 	raw := parseText(v.value("upstream-command"))
 	var errs []error
 	if v.httpUpstream() || v.stdioUpstream() { // with none or both, the "required" or "both set" error says enough
@@ -32,15 +32,15 @@ func (c *Config) upstream(v *Values, dashes bool) []error {
 		u, err := parseUpstreamURL(v.value("upstream-url"))
 		switch {
 		case err != nil && dashes:
-			return append(errs, errorf("%s (or %s, or a command after --)", err.Error(), cmdEnv))
+			return append(errs, errorf("%s (or %s, or a command after --)", err.Error(), commandName))
 		case err != nil:
-			return append(errs, errorf("%s (or %s)", err.Error(), cmdEnv))
+			return append(errs, errorf("%s (or %s)", err.Error(), commandName))
 		}
 		c.UpstreamURL = u
 		return errs
 	}
 	if !v.empty("upstream-url") { // no mode chosen, so neither mode's settings are read
-		return []error{errorf("%s and %s are both set: an upstream is either HTTP or stdio", urlEnv, cmdEnv)}
+		return []error{errorf("%s and %s are both set: an upstream is either HTTP or stdio", urlName, commandName)}
 	}
 	command, err := parseUpstreamCommand(v.value("upstream-command"), v.command)
 	if err != nil {
@@ -49,7 +49,7 @@ func (c *Config) upstream(v *Values, dashes bool) []error {
 	c.UpstreamCommand = command
 	env, err := parseEnvLines(parseText(v.value("upstream-env")))
 	if err != nil {
-		errs = append(errs, errorf("%s: want KEY=VALUE lines, each key once; got %v", spelled(v.value("upstream-env")), err)) // as given: the file setting, or inline under --dev
+		errs = append(errs, errorf("%s: want KEY=VALUE lines, each key once; got %v", v.NameAsGiven("upstream-env"), err)) // as given: the file setting, or inline under --dev
 	}
 	c.UpstreamEnv = env
 	limits := []struct {
@@ -70,8 +70,8 @@ func (c *Config) upstream(v *Values, dashes bool) []error {
 	}
 	c.StdioStreamIdleTimeout = d
 	if c.StdioMaxPerUser > c.StdioMaxProcesses && c.StdioMaxProcesses > 0 {
-		errs = append(errs, errorf("%s (%d) must not exceed %s (%d)", Setting{Name: "stdio-max-processes-per-user"}.Env(), c.StdioMaxPerUser,
-			Setting{Name: "stdio-max-processes"}.Env(), c.StdioMaxProcesses))
+		errs = append(errs, errorf("%s (%d) must not exceed %s (%d)", v.NameAsGiven("stdio-max-processes-per-user"), c.StdioMaxPerUser,
+			v.NameAsGiven("stdio-max-processes"), c.StdioMaxProcesses))
 	}
 	return errs
 }
@@ -90,7 +90,7 @@ func parseUpstreamCommand(val Value, argv []string) ([]string, error) {
 	case argv != nil && (len(command) == 0 || command[0] == ""): // given after --, so named in its own terms: no JSON was typed
 		return nil, errorf("the command after --: want the program first; got an empty program")
 	case len(command) == 0 || command[0] == "":
-		return nil, refusedForm(val.Setting, whole, val.Given.raw(), `a JSON array of strings whose first element is the program, such as ["/usr/local/bin/server","--flag"]`, "it is not one")
+		return nil, refusedForm(val, whole, val.Given.raw(), `a JSON array of strings whose first element is the program, such as ["/usr/local/bin/server","--flag"]`, "it is not one")
 	}
 	return command, nil
 }
@@ -109,6 +109,16 @@ func (v *Values) httpUpstream() bool {
 // selects reports whether the upstream selector called name is given a value, read as given: empty
 // reads through refusedOffMode, which reads the mode from here.
 func (v *Values) selects(name string) bool { return !v.byKey[name].Given.empty() }
+
+// CommandNameAsGiven names the stdio upstream's command as the operator gave it:
+// "the command after --", which resolve keeps as if given by flag, or the flag or variable that gave
+// it, or the variable to set when it is not given or there are no Values (NameAsGiven).
+func (v *Values) CommandNameAsGiven() string {
+	if v != nil && v.command != nil {
+		return "the command after --"
+	}
+	return v.NameAsGiven("upstream-command")
+}
 
 // httpOnly are the settings outside the upstream groups that take effect only with an HTTP upstream:
 // the identity assertion, which a stdio upstream never gets (ADR-0016 §2, §6). Settings outside the
@@ -143,9 +153,11 @@ func (v *Values) refusedOffMode(name string) bool {
 // every other refusal says which mode the setting is for. The other mode's selector reaches here only
 // as a flag set to nothing, as with a value there is no mode.
 func offModeSettings(v *Values) []error {
-	inUse, offMode, offSelector := "HTTP", "a stdio upstream", Setting{Name: "upstream-command"}.Env()
+	// The other mode's selector, not given here, is named as advice: the variable to set (EnvToSet), as
+	// #631's offmode_test pins it.
+	inUse, offMode, offSelector := "HTTP", "a stdio upstream", lookup("upstream-command").EnvToSet()
 	if v.stdioUpstream() {
-		inUse, offMode, offSelector = "stdio", "an HTTP upstream", Setting{Name: "upstream-url"}.Env()
+		inUse, offMode, offSelector = "stdio", "an HTTP upstream", lookup("upstream-url").EnvToSet()
 	}
 	var errs []error
 	for _, val := range v.Effective() {
@@ -153,9 +165,9 @@ func offModeSettings(v *Values) []error {
 		switch {
 		case !v.refusedOffMode(s.Name):
 		case s.StdioHint != "": // refused, so beside a stdio upstream: a stdio upstream's setting takes no hint (checkStdioHints)
-			errs = append(errs, errorf(s.StdioHint, v.NameAsGiven(s.Name)))
+			errs = append(errs, errorf(s.StdioHint, val.nameAsGiven()))
 		default:
-			errs = append(errs, errorf("%s is set, but the upstream is %s: it applies only to %s (%s); remove it", spelled(val), inUse, offMode, offSelector))
+			errs = append(errs, errorf("%s is set, but the upstream is %s: it applies only to %s (%s); remove it", val.nameAsGiven(), inUse, offMode, offSelector))
 		}
 	}
 	return errs
@@ -212,25 +224,24 @@ const maxUpstreamCredential = 4 << 10
 // upstreamCredential reads the operator's upstream credential (ADR-0016 §7): only for an HTTP
 // upstream (beside a stdio one, its StdioHint refuses it), a header value without control
 // characters, in a header that is not the assertion's. The credential's errors name it as the
-// operator gave it (spelled), never its value.
+// operator gave it (Value.nameAsGiven), never its value.
 func (c *Config) upstreamCredential(v *Values) []error {
-	fileEnv, hEnv := lookup("upstream-credential").FileEnv(), Setting{Name: "upstream-credential-header"}.Env()
+	credentialName, credentialHeaderName := v.NameAsGiven("upstream-credential"), v.NameAsGiven("upstream-credential-header")
 	val, header := v.byKey["upstream-credential"], v.byKey["upstream-credential-header"]
 	if !v.httpUpstream() { // with stdio both are off-mode settings; with no upstream or both, upstream's error says enough
 		return nil
 	}
 	if val.Source == SourceDefault {
 		if header.Source != SourceDefault {
-			return []error{errorf("%s is set, but there is no credential: set %s too, or remove it", hEnv, fileEnv)}
+			return []error{errorf("%s is set, but there is no credential: set %s too, or remove it", credentialHeaderName, credentialName)}
 		}
 		return nil
 	}
 	var errs []error
-	name := spelled(val) // an inline value, accepted under --dev, has no file to name
 	emptyFile := v.emptySecretFile("upstream-credential")
 	// In the one format, named as the operator gave it: the length only, never the credential.
 	want := fmt.Sprintf("one header value of at most %d bytes on one line, without control characters or white space at either end", maxUpstreamCredential)
-	refused := func(cred, reason string) error { return refusedFormAs(name, val.Setting, whole, cred, want, reason) }
+	refused := func(cred, reason string) error { return refusedForm(val, whole, cred, want, reason) } // an inline value, accepted under --dev, is named by its variable
 	switch cred := parseText(val); {
 	case emptyFile != nil:
 		errs = append(errs, emptyFile)
@@ -260,7 +271,6 @@ var mcpHeaders = withMCPHeaders(map[string]bool{"Accept": true, "Content-Type": 
 // way the relay compares them.
 func parseStripHeaders(val Value) ([]string, []error) {
 	const want = "exact header names, such as X-Argocd-Base-Url"
-	s := val.Setting
 	var out []string
 	var errs []error
 	list, at, err := parseEntries(val)
@@ -271,17 +281,17 @@ func parseStripHeaders(val Value) ([]string, []error) {
 		h := CanonicalHeader(n)
 		switch {
 		case strings.ContainsRune(n, '*'):
-			errs = append(errs, refusedForm(s, at(i), n, want, "it has a *: list each header of a family by name"))
+			errs = append(errs, refusedForm(val, at(i), n, want, "it has a *: list each header of a family by name"))
 		case strings.Contains(n, ":"):
-			errs = append(errs, refusedForm(s, at(i), n, want, headerLineReason))
+			errs = append(errs, refusedForm(val, at(i), n, want, headerLineReason))
 		case !httpguts.ValidHeaderFieldName(n):
-			errs = append(errs, refusedForm(s, at(i), n, want, "it is not a header name"))
+			errs = append(errs, refusedForm(val, at(i), n, want, "it is not a header name"))
 		case mcpHeaders[h]:
-			errs = append(errs, refusedMeaning(s, at(i), h, want, "MCP needs it at the upstream; remove it from the list"))
+			errs = append(errs, refusedMeaning(val, at(i), h, want, "MCP needs it at the upstream; remove it from the list"))
 		case strings.HasPrefix(h, MCPParamPrefix):
-			errs = append(errs, refusedMeaning(s, at(i), "a header starting "+MCPParamPrefix, want, "MCP needs it at the upstream; remove it from the list"))
+			errs = append(errs, refusedMeaning(val, at(i), "a header starting "+MCPParamPrefix, want, "MCP needs it at the upstream; remove it from the list"))
 		case h == "Traceparent" || h == "Tracestate":
-			errs = append(errs, refusedMeaning(s, at(i), h, want, "with tracing on, the proxy sets it from the inbound trace context; remove it from the list"))
+			errs = append(errs, refusedMeaning(val, at(i), h, want, "with tracing on, the proxy sets it from the inbound trace context; remove it from the list"))
 		default:
 			out = append(out, h)
 		}

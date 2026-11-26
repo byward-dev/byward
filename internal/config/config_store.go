@@ -16,10 +16,10 @@ func (c *Config) storeBackend(v *Values) []error {
 		errs = append(errs, err)
 	}
 	if v.byKey["store-dir"].Source != SourceDefault {
-		errs = append(errs, errorf("%s and %s: give one store, PostgreSQL or a SQLite state directory, not both", spelled(v.byKey["store-postgres-dsn"]), spelled(v.byKey["store-dir"])))
+		errs = append(errs, errorf("%s and %s: give one store, PostgreSQL or a SQLite state directory, not both", v.NameAsGiven("store-postgres-dsn"), v.NameAsGiven("store-dir")))
 	}
 	if v.byKey["store-counter-file"].Source != SourceDefault {
-		errs = append(errs, errorf("%s and %s: the counter file belongs to the SQLite store; the PostgreSQL store finds a restore from the database itself (docs/how-to/postgres.md)", spelled(v.byKey["store-postgres-dsn"]), spelled(v.byKey["store-counter-file"])))
+		errs = append(errs, errorf("%s and %s: the counter file belongs to the SQLite store; the PostgreSQL store finds a restore from the database itself (docs/how-to/postgres.md)", v.NameAsGiven("store-postgres-dsn"), v.NameAsGiven("store-counter-file")))
 	}
 	if c.Dev {
 		c.Relaxations = append(c.Relaxations, "the PostgreSQL store accepts a connection without verify-full TLS")

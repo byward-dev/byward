@@ -43,9 +43,15 @@ func checkInlineSecrets(v *Values, dev bool) (relaxation string, err error) {
 // It is never rewritten into that form: it is also the IdP redirect URI, registered as written
 // (ADR-0032 §2, class P). A refusal never shows the value as given (ADR-0031 §1),
 // nor its host: a token is a valid host name. It shows an IP address only as browsers would write it.
+// It names the setting by its variable: its caller (`byward init`) passes only the text.
 func ParsePublicURL(raw string) (*url.URL, error) {
-	s := lookup("public-url")
-	u, err := parseURL("public-url", exampleMCPURL, raw)
+	return parsePublicURL(Value{Setting: lookup("public-url"), Given: NewOpaque(raw)})
+}
+
+// parsePublicURL reads BYWARD_PUBLIC_URL by ParsePublicURL's rules, naming it as the operator gave it.
+func parsePublicURL(val Value) (*url.URL, error) {
+	raw := val.Given.raw()
+	u, err := parseURL("public-url", exampleMCPURL, raw, val.Source)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +59,7 @@ func ParsePublicURL(raw string) (*url.URL, error) {
 	if _, reason := hostPort(u.Host); reason != "" {
 		// host:port joins the public listener's Host allow-list, so it follows BYWARD_ALLOWED_HOSTS'
 		// rules (#344, #353). The rest is not checked: the host is not shown, so the URL is not either.
-		return nil, refusedForm(s, whole, raw, want, "its host:port "+reason)
+		return nil, refusedForm(val, whole, raw, want, "its host:port "+reason)
 	}
 	// The host as browsers write it: the public URL is also the issuer, the resource and the IdP
 	// redirect URI, which browser clients compare with the URL they hold, in the form they write.
@@ -62,33 +68,33 @@ func ParsePublicURL(raw string) (*url.URL, error) {
 	h := u.Hostname()
 	if reason := browserIPv4(h); reason != "" {
 		// A browser never sends such a host back, so its sign-in could never finish.
-		errs = append(errs, refusedForm(s, whole, raw, want, "its host "+reason).Error())
+		errs = append(errs, refusedForm(val, whole, raw, want, "its host "+reason).Error())
 	} else if bh := host.Serialize(h); strings.Contains(h, ":") && "["+h+"]" != bh {
 		// The public URL is also the issuer, the resource and the IdP redirect URI, which browser
 		// clients compare with the URL they hold, in the form they write (#447).
-		errs = append(errs, refusedForm(s, whole, raw, wantBrowserHost, "its IPv6 address is not in the form browsers write it; write it as "+bh).Error())
+		errs = append(errs, refusedForm(val, whole, raw, wantBrowserHost, "its IPv6 address is not in the form browsers write it; write it as "+bh).Error())
 	} else if !strings.Contains(h, ":") && h != bh {
 		// The same for a host name: a browser lower-cases it, and byward does not rewrite it, since the
 		// IdP's redirect URI is registered as written (#472).
 		// The host is not shown, not even in lower case: a token is a valid host name.
-		errs = append(errs, refusedForm(s, whole, raw, wantBrowserHost, "its host name has upper-case letters; write it in lower case, as browsers do").Error())
+		errs = append(errs, refusedForm(val, whole, raw, wantBrowserHost, "its host name has upper-case letters; write it in lower case, as browsers do").Error())
 	}
 	if p := u.Port(); p != "" && p == host.DefaultPort(u.Scheme) {
 		// Browsers drop a scheme's default port when they write a URL (WHATWG URL §4.4), so a browser
 		// client would hold the issuer and resource without it (#484).
-		errs = append(errs, refusedForm(s, whole, raw, "the MCP endpoint's URL with its port as browsers write it, such as "+exampleMCPURL,
+		errs = append(errs, refusedForm(val, whole, raw, "the MCP endpoint's URL with its port as browsers write it, such as "+exampleMCPURL,
 			"its port "+p+" is "+u.Scheme+"'s default, which browsers drop; write the URL without :"+p).Error())
 	}
 	if u.Path == "" || strings.HasSuffix(u.Path, "/") {
-		errs = append(errs, refusedMeaning(s, whole, "a path that is empty or ends in /", "the MCP endpoint's path without a trailing slash, such as "+exampleMCPURL,
+		errs = append(errs, refusedMeaning(val, whole, "a path that is empty or ends in /", "the MCP endpoint's path without a trailing slash, such as "+exampleMCPURL,
 			"give the endpoint's path, without the trailing slash").Error())
 	}
 	if u.RawQuery != "" || u.Fragment != "" {
-		errs = append(errs, refusedMeaning(s, whole, "a query or fragment, not shown", "a URL without a query or fragment, such as "+exampleMCPURL, "remove it").Error())
+		errs = append(errs, refusedMeaning(val, whole, "a query or fragment, not shown", "a URL without a query or fragment, such as "+exampleMCPURL, "remove it").Error())
 	}
 	// LOCALHOST is loopback too; the host name rule above already refuses its spelling.
 	if u.Scheme == "http" && !host.LoopbackAsWritten(h) {
-		errs = append(errs, refusedMeaning(s, whole, "http", "https (http only on a loopback host, with --dev), such as "+exampleMCPURL, "give https, or a loopback host").Error())
+		errs = append(errs, refusedMeaning(val, whole, "http", "https (http only on a loopback host, with --dev), such as "+exampleMCPURL, "give https, or a loopback host").Error())
 	}
 	if len(errs) > 0 {
 		return nil, &configError{msg: strings.Join(errs, "; ")}
@@ -101,15 +107,12 @@ func RedirectURL(publicURL *url.URL, idpName string) string {
 	return (&Config{PublicURL: publicURL}).Issuer() + "/callback/" + idpName
 }
 
-// parsePublicURL reads BYWARD_PUBLIC_URL (ParsePublicURL).
-func parsePublicURL(val Value) (*url.URL, error) { return ParsePublicURL(val.Given.raw()) }
-
 // parseResourceDocumentation reads BYWARD_RESOURCE_DOCUMENTATION: empty, or an absolute http(s) URL.
 func parseResourceDocumentation(val Value) (string, error) {
 	if val.Given.empty() {
 		return "", nil
 	}
-	if _, err := parseURL("resource-documentation", "https://docs.example.com/mcp", val.Given.raw()); err != nil {
+	if _, err := parseURL("resource-documentation", "https://docs.example.com/mcp", val.Given.raw(), val.Source); err != nil {
 		return "", err
 	}
 	return val.Given.raw(), nil
@@ -118,20 +121,24 @@ func parseResourceDocumentation(val Value) (string, error) {
 // ParseUpstreamURL validates the HTTP upstream's URL as the proxy reads BYWARD_UPSTREAM_URL, as
 // `byward init entra` also needs it: an absolute http(s) URL whose host name has letters, digits, - .
 // and _ only (nameCharReason, ADR-0032 §3); the rest of the host is left to Go's dialer.
+// It names the setting by its variable: its caller (`byward init`) passes only the text.
 func ParseUpstreamURL(raw string) (*url.URL, error) {
+	return parseUpstreamURL(Value{Setting: lookup("upstream-url"), Given: NewOpaque(raw)})
+}
+
+// parseUpstreamURL reads BYWARD_UPSTREAM_URL by ParseUpstreamURL's rules, naming it as given.
+func parseUpstreamURL(val Value) (*url.URL, error) {
+	raw := val.Given.raw()
 	const example = "http://127.0.0.1:9000/mcp"
-	u, err := parseURL("upstream-url", example, raw)
+	u, err := parseURL("upstream-url", example, raw, val.Source)
 	if err != nil {
 		return nil, err
 	}
 	if reason := nameCharReason(u.Hostname()); reason != "" {
-		return nil, refusedForm(lookup("upstream-url"), whole, raw, "an absolute http(s) URL such as "+example, "its host "+reason)
+		return nil, refusedForm(val, whole, raw, "an absolute http(s) URL such as "+example, "its host "+reason)
 	}
 	return u, nil
 }
-
-// parseUpstreamURL reads BYWARD_UPSTREAM_URL (ParseUpstreamURL).
-func parseUpstreamURL(val Value) (*url.URL, error) { return ParseUpstreamURL(val.Given.raw()) }
 
 // parseURL validates an absolute http(s) URL setting, name, which has urlShape
 // (TestEverySettingReadAsAURLHasAURLShape). Its refusal goes through the registry entry's shape: name
@@ -139,14 +146,15 @@ func parseUpstreamURL(val Value) (*url.URL, error) { return ParseUpstreamURL(val
 // Values to take a Value from. A URL refused for its form is never shown (ADR-0031 §1), nor is
 // url.Parse's error, which holds the whole value: the refusal gives a fixed reason and example, a URL
 // of the kind of page the setting names.
-func parseURL(name, example, raw string) (*url.URL, error) {
-	s := lookup(name)
+// The refusal names the setting as given from source: no source names its variable.
+func parseURL(name, example, raw string, source Source) (*url.URL, error) {
+	val := Value{Setting: lookup(name), Source: source}
 	if raw == "" {
-		return nil, errorf("%s is required", s.Env())
+		return nil, errorf("%s is required", val.nameAsGiven())
 	}
 	u, reason := parseHTTPURL(raw)
 	if reason != "" {
-		return nil, refusedForm(s, whole, raw, "an absolute http(s) URL such as "+example, reason)
+		return nil, refusedForm(val, whole, raw, "an absolute http(s) URL such as "+example, reason)
 	}
 	return u, nil
 }
@@ -259,7 +267,6 @@ const (
 )
 
 func parseRateLimits(val Value) (map[string]int, []error) {
-	s := val.Setting
 	want := fmt.Sprintf("endpoint=per-minute entries such as %s=%d, the endpoint %s and the limit a whole number from %d to %d",
 		ratelimit.Token, ratelimit.Defaults()[ratelimit.Token], oneOf(ratelimit.Endpoints), minRateLimit, maxRateLimit)
 	out := ratelimit.Defaults()
@@ -274,13 +281,13 @@ func parseRateLimits(val Value) (map[string]int, []error) {
 		n, err := strconv.Atoi(strings.TrimSpace(per))
 		switch _, known := out[name]; {
 		case !ok || !known:
-			errs = append(errs, refusedForm(s, at(i), item, want, "it is not endpoint=per-minute for one of the endpoints"))
+			errs = append(errs, refusedForm(val, at(i), item, want, "it is not endpoint=per-minute for one of the endpoints"))
 		case errors.Is(err, strconv.ErrRange):
-			errs = append(errs, refusedForm(s, at(i), item, want, "its limit is out of range"))
+			errs = append(errs, refusedForm(val, at(i), item, want, "its limit is out of range"))
 		case err != nil:
-			errs = append(errs, refusedForm(s, at(i), item, want, "its limit is not a whole number"))
+			errs = append(errs, refusedForm(val, at(i), item, want, "its limit is not a whole number"))
 		case n < minRateLimit || n > maxRateLimit:
-			errs = append(errs, refusedMeaning(s, at(i), name+"="+strconv.Itoa(n), want, "the limit is out of range"))
+			errs = append(errs, refusedMeaning(val, at(i), name+"="+strconv.Itoa(n), want, "the limit is out of range"))
 		default:
 			out[name] = n
 		}
@@ -294,7 +301,6 @@ func parseRateLimits(val Value) (map[string]int, []error) {
 // parseProxies reads BYWARD_TRUSTED_PROXIES. An entry that is not a CIDR or an IP address is
 // never shown (ADR-0031 §1); one refused for what it names is shown as netip read it, without a zone.
 func parseProxies(val Value) ([]netip.Prefix, error) {
-	s := val.Setting
 	const want = "a CIDR or an IP address such as 10.0.0.0/8 or 192.0.2.1"
 	var out []netip.Prefix
 	list, at, err := parseEntries(val)
@@ -308,22 +314,22 @@ func parseProxies(val Value) ([]netip.Prefix, error) {
 		case err != nil:
 			a, aerr := netip.ParseAddr(item)
 			if aerr != nil {
-				return nil, refusedForm(s, at(i), item, want, cidrReason(item))
+				return nil, refusedForm(val, at(i), item, want, cidrReason(item))
 			}
 			// A zone runs to the end of the entry: "fe80::1%eth0/64" is fe80::1 in zone "eth0/64".
 			zoned, a = a.Zone() != "", a.WithZone("").Unmap()
 			p = netip.PrefixFrom(a, a.BitLen())
 		case p.Addr().Is4In6() && p.Bits() < 96: // masked, ::ffff:10.0.0.0/8 is ::/8: it would trust IPv6 peers
-			return nil, refusedMeaning(s, at(i), p.String(), want, "it is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)")
+			return nil, refusedMeaning(val, at(i), p.String(), want, "it is an IPv4-mapped prefix shorter than /96: it maps no IPv4 prefix and would trust IPv6 addresses; give the IPv4 prefix instead (::ffff:10.0.0.0/104 is 10.0.0.0/8)")
 		case p.Addr().Is4In6(): // peers are compared unmapped (logging.ClientAddress), as a bare mapped address is here
 			p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
 		}
 		// Link-local first: removing the zone from "fe80::1%eth0" would only meet this refusal.
 		switch p = p.Masked(); {
 		case linkLocal.Contains(p.Addr()) && p.Bits() >= linkLocal.Bits():
-			return nil, refusedMeaning(s, at(i), p.String(), want, "it is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR")
+			return nil, refusedMeaning(val, at(i), p.String(), want, "it is link-local: a link-local proxy cannot be trusted, as its address names a host only together with an interface; give the proxy's routable address or CIDR")
 		case zoned:
-			return nil, refusedMeaning(s, at(i), p.Addr().String(), want, "it has an IPv6 zone, not shown: give the proxy's routable address or CIDR, without a zone")
+			return nil, refusedMeaning(val, at(i), p.Addr().String(), want, "it has an IPv6 zone, not shown: give the proxy's routable address or CIDR, without a zone")
 		}
 		out = append(out, p)
 	}
@@ -359,7 +365,6 @@ var linkLocal = netip.MustParsePrefix("fe80::/10")
 // with its host[:port] checked as BYWARD_ALLOWED_HOSTS checks one (hostPort), and refused when no
 // browser could send it (browserIPv4). A refused entry is never shown (ADR-0031 §1).
 func parseOrigins(val Value) ([]string, []error) {
-	s := val.Setting
 	const want = "an origin (scheme://host[:port]) such as https://app.example"
 	var out []string
 	var errs []error
@@ -370,7 +375,7 @@ func parseOrigins(val Value) ([]string, []error) {
 	for i, o := range list {
 		u, reason := parseOrigin(o)
 		if reason != "" {
-			errs = append(errs, refusedForm(s, at(i), o, want, reason))
+			errs = append(errs, refusedForm(val, at(i), o, want, reason))
 			continue
 		}
 		out = append(out, browserOrigin(u))
@@ -483,7 +488,6 @@ func hostPort(h string) (stored, reason string) {
 // is not written as (127.1, 010.0.0.1: ADR-0032 R3) or refuses it (mcp.10: R4), naming what the
 // browser reads, never rewritten. A refused entry is never shown (ADR-0031 §1).
 func parseAllowedHosts(val Value) ([]string, []error) {
-	s := val.Setting
 	var out []string
 	var errs []error
 	list, at, err := parseEntries(val)
@@ -494,11 +498,11 @@ func parseAllowedHosts(val Value) ([]string, []error) {
 		const want = "a host[:port] such as mcp.example.com or 127.0.0.1:8080"
 		n, reason := hostPort(h)
 		if reason != "" {
-			errs = append(errs, refusedForm(s, at(i), h, want, "it "+reason))
+			errs = append(errs, refusedForm(val, at(i), h, want, "it "+reason))
 			continue
 		}
 		if reason := browserIPv4(host.Hostname(h)); reason != "" {
-			errs = append(errs, refusedForm(s, at(i), h, want, "its host "+reason))
+			errs = append(errs, refusedForm(val, at(i), h, want, "its host "+reason))
 			continue
 		}
 		out = append(out, n)
@@ -550,7 +554,7 @@ var ipv6Reason = host.ErrIPv6.Error()
 // every interface. An IPv6 zone is a name an interface can have (validInterfaceName, #638). A refused
 // address is never shown (ADR-0031 §1): net.Listen's own error would quote it.
 func parseListen(val Value, want string) (string, error) {
-	s, raw := val.Setting, val.Given.raw()
+	raw := val.Given.raw()
 	host, port, err := net.SplitHostPort(raw)
 	_, ipErr := netip.ParseAddr(host) // an IPv6 address may have a zone, as a link-local one needs
 	nameReason, zone, zoned := "", "", false
@@ -581,7 +585,7 @@ func parseListen(val Value, want string) (string, error) {
 		}
 	}
 	if reason != "" {
-		return "", refusedForm(s, whole, raw, want, reason)
+		return "", refusedForm(val, whole, raw, want, reason)
 	}
 	return raw, nil
 }

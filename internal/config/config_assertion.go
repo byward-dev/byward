@@ -37,7 +37,7 @@ func parseAssertionClaims(val Value) ([]string, []error) {
 	}
 	want := "claims from " + oneOf(AssertionClaimNames) + ", or none"
 	if val.Given.raw() == "" { // a blank value is refused below, as a list of none
-		return nil, []error{refusedForm(val.Setting, whole, "", want, "")}
+		return nil, []error{refusedForm(val, whole, "", want, "")}
 	}
 	list, at, err := parseEntries(val)
 	if err != nil {
@@ -48,11 +48,11 @@ func parseAssertionClaims(val Value) ([]string, []error) {
 	for i, name := range list {
 		switch name = strings.ToLower(name); {
 		case name == "none" && len(list) == 1: // none alone, but not as written: in another case, or with a ","
-			errs = append(errs, refusedMeaning(val.Setting, at(i), "none", want, "give none in lower case, with nothing beside it"))
+			errs = append(errs, refusedMeaning(val, at(i), "none", want, "give none in lower case, with nothing beside it"))
 		case name == "none": // a fixed word, so shown
-			errs = append(errs, refusedMeaning(val.Setting, at(i), "none", want, "none stands alone: list claims, or give only none"))
+			errs = append(errs, refusedMeaning(val, at(i), "none", want, "none stands alone: list claims, or give only none"))
 		case !slices.Contains(AssertionClaimNames, name):
-			errs = append(errs, refusedForm(val.Setting, at(i), name, want, "it is not one of them"))
+			errs = append(errs, refusedForm(val, at(i), name, want, "it is not one of them"))
 		case !slices.Contains(out, name):
 			out = append(out, name)
 		}

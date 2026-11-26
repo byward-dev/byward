@@ -7,15 +7,15 @@ import (
 
 // absolute refuses a path setting that is relative to the working directory (ADR-0007 §6): every
 // path setting goes through it.
-func absolute(setting, path string) error {
+func absolute(v *Values, setting, path string) error {
 	if filepath.IsAbs(path) {
 		return nil
 	}
 	if path == "" {
-		return refusedForm(lookup(setting), whole, "", wantAbsolutePath, "")
+		return refusedForm(v.valueOf(setting), whole, "", wantAbsolutePath, "")
 	}
 	// The path is not shown: a secret pasted where its file's path belongs would be (#461).
-	return refusedMeaning(lookup(setting), whole, "a relative one", wantAbsolutePath, "no path is relative to the working directory (ADR-0007 §6)")
+	return refusedMeaning(v.valueOf(setting), whole, "a relative one", wantAbsolutePath, "no path is relative to the working directory (ADR-0007 §6)")
 }
 
 // wantAbsolutePath is what a path setting takes.
@@ -32,7 +32,7 @@ func within(dir, path string) bool {
 func (c *Config) paths(v *Values) []error {
 	var errs []error
 	c.DataDir = parseText(v.value("data-dir"))
-	if err := absolute("data-dir", c.DataDir); err != nil {
+	if err := absolute(v, "data-dir", c.DataDir); err != nil {
 		return []error{err} // every default below is derived from it
 	}
 	or := func(name, def string) string {
@@ -46,7 +46,7 @@ func (c *Config) paths(v *Values) []error {
 	c.AssertionKeysDir = or("assertion-keys-dir", "assertion-keys")
 	for _, p := range []struct{ setting, path string }{{"keys-dir", c.KeysDir}, {"static-clients-file", c.StaticClientsFile},
 		{"assertion-keys-dir", c.AssertionKeysDir}, {"store-dir", c.StoreDir}} {
-		if err := absolute(p.setting, p.path); err != nil {
+		if err := absolute(v, p.setting, p.path); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -55,14 +55,14 @@ func (c *Config) paths(v *Values) []error {
 		// Next to the keys: outside the state directory, so a restored backup of it is detected.
 		c.StoreCounterFile = filepath.Join(filepath.Dir(filepath.Clean(c.KeysDir)), "store-writes")
 	}
-	switch err := absolute("store-counter-file", c.StoreCounterFile); {
+	switch err := absolute(v, "store-counter-file", c.StoreCounterFile); {
 	case err != nil:
 		if v.empty("store-counter-file") {
 			break // derived from the keys directory, refused above as relative
 		}
 		errs = append(errs, err)
 	case filepath.IsAbs(c.StoreDir) && within(c.StoreDir, c.StoreCounterFile):
-		errs = append(errs, refusedMeaning(lookup("store-counter-file"), whole, "one inside it", "a path outside BYWARD_STORE_DIR",
+		errs = append(errs, refusedMeaning(v.valueOf("store-counter-file"), whole, "one inside it", "a path outside "+v.NameAsGiven("store-dir"),
 			"a restored backup of the state directory would restore it too and go undetected; keep the keys directory outside the state directory, or set this to a path outside it"))
 	}
 	return errs

@@ -7,7 +7,6 @@ import (
 	"go/token"
 	"go/types"
 	"os"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
@@ -300,14 +299,7 @@ func TestEverySettingReadAsAURLHasAURLShape(t *testing.T) {
 	}
 	seen := map[string]int{}
 	named := map[string]bool{}
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
+	for _, f := range packageGoFiles(t) {
 		reads, err := urlReadsOf(f, nil)
 		if err != nil {
 			t.Fatal(err)

@@ -58,7 +58,8 @@ of them redacts a value that is refused.
   - an example of the right form;
   - for an IdP identifier, where to find it, such as "Entra admin center, Overview, Tenant ID".
 
-  Every message uses one format: `BYWARD_X: want …; got …`.
+  Every message uses one format: `BYWARD_X: want …; got …`. _Amended 2026-11-24 (#623):_ the setting is named
+  as the operator gave it: `--x: want …; got …` for a flag, the file setting for a secret read from a file.
 - **Meaning.** A value refused for its meaning (not loopback, out of range, reserved) parsed, so it
   is shown as the parser read it, not as it was given.
 - **Mechanism.** Every setting's text is held in an opaque type, as the OpenTelemetry Collector's

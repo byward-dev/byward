@@ -126,22 +126,22 @@ func TestASecretSetToNothingBesideItsFileLoadsAsTheFileAlone(t *testing.T) {
 }
 
 // A flag set to nothing on the command line is deliberate, so it is refused as given, unlike a
-// variable set to nothing (#428). An empty claims flag never quietly means none: that would change
-// what the upstream is told. An empty credential header flag is given too, so with no credential it
-// is refused as a header with nothing to send. (A flag set to nothing for a family that is off is
-// refused by that family's check:
+// variable set to nothing (#428), and its refusal names the flag (#623). An empty claims flag never
+// quietly means none: that would change what the upstream is told. An empty credential header flag
+// is given too, so with no credential it is refused as a header with nothing to send. (A flag set to
+// nothing for a family that is off is refused by that family's check:
 // TestEveryOffCheckRefusesAFlagSetToNothingAndTakesAVariableSetToNothingAsUnset.)
 func TestAFlagSetToNothingIsRefusedAsGiven(t *testing.T) {
 	for _, tc := range []struct{ flag, want string }{
-		{"--listen=", "BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got nothing"},
-		{"--scope=", "BYWARD_SCOPE: want one scope token, such as mcp; got nothing"},
-		{"--data-dir=", "BYWARD_DATA_DIR: want an absolute path, one starting with /; got nothing"},
+		{"--listen=", "--listen: want host:port such as 127.0.0.1:8080; got nothing"},
+		{"--scope=", "--scope: want one scope token, such as mcp; got nothing"},
+		{"--data-dir=", "--data-dir: want an absolute path, one starting with /; got nothing"},
 		{"--store-postgres-dsn-file=", "--store-postgres-dsn-file: want the path of a file holding the secret, such as /run/secrets/store-postgres-dsn; got nothing"},
 		// The flag wins over BYWARD_ENTRA_CLIENT_SECRET_FILE, which base sets, and is still refused.
 		{"--entra-client-secret-file=", "--entra-client-secret-file: want the path of a file holding the secret, such as /run/secrets/entra-client-secret; got nothing"},
-		{"--assertion-claims=", "BYWARD_ASSERTION_CLAIMS: want claims from roles, groups, email or name, or none; got nothing"},
-		{"--assertion-header=", "BYWARD_ASSERTION_HEADER: want a header name such as Authorization or X-Byward-Identity; got nothing"},
-		{"--upstream-credential-header=", "BYWARD_UPSTREAM_CREDENTIAL_HEADER is set, but there is no credential: set BYWARD_UPSTREAM_CREDENTIAL_FILE too, or remove it"},
+		{"--assertion-claims=", "--assertion-claims: want claims from roles, groups, email or name, or none; got nothing"},
+		{"--assertion-header=", "--assertion-header: want a header name such as Authorization or X-Byward-Identity; got nothing"},
+		{"--upstream-credential-header=", "--upstream-credential-header is set, but there is no credential: set BYWARD_UPSTREAM_CREDENTIAL_FILE too, or remove it"},
 	} {
 		if _, err := load(t, []string{tc.flag}); !isConfigError(err) || err.Error() != tc.want {
 			t.Errorf("%s: %v, want the error %q", tc.flag, err, tc.want)

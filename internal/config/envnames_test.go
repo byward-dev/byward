@@ -24,15 +24,11 @@ var (
 // whose Env() checks nothing, and a _FILE variable, which only a secret setting has. ADRs are left
 // out: they name planned settings.
 func TestEveryBYWARDNameInTheCodeAndDocsIsASetting(t *testing.T) {
-	known := map[string]bool{}
+	known := knownVariables(registry)
 	byName := map[string]Setting{}
 	literals := 0 // Setting literals seen in the code
 	for _, s := range registry {
-		known[s.Env()] = true
 		byName[s.Name] = s
-		if s.Secret() {
-			known[s.FileEnv()] = true
-		}
 	}
 	// Not settings, but fixed names: identity and the token socket the proxy sets for stdio
 	// upstreams (ADR-0016, ADR-0017), the

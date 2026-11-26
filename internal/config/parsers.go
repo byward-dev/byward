@@ -26,7 +26,7 @@ func parseBool(val Value) (bool, error) {
 	raw := val.Given.raw()
 	b, err := strconv.ParseBool(raw)
 	if err != nil {
-		return false, refusedForm(val.Setting, whole, raw, "true or false", "it is neither true nor false")
+		return false, refusedForm(val, whole, raw, "true or false", "it is neither true nor false")
 	}
 	return b, nil
 }
@@ -35,7 +35,7 @@ func parseBool(val Value) (bool, error) {
 func parseWord(val Value, words ...string) (string, error) {
 	raw := val.Given.raw()
 	if !slices.Contains(words, raw) {
-		return "", refusedForm(val.Setting, whole, raw, oneOf(words), "it is not one of them")
+		return "", refusedForm(val, whole, raw, oneOf(words), "it is not one of them")
 	}
 	return raw, nil
 }
@@ -53,9 +53,9 @@ func parseDuration(val Value, want string, fits func(time.Duration) bool) (time.
 	d, err := time.ParseDuration(raw)
 	switch {
 	case err != nil:
-		return 0, refusedForm(val.Setting, whole, raw, want, durationReason(err))
+		return 0, refusedForm(val, whole, raw, want, durationReason(err))
 	case !fits(d):
-		return 0, refusedMeaning(val.Setting, whole, d.String(), want, "it is out of range")
+		return 0, refusedMeaning(val, whole, d.String(), want, "it is out of range")
 	}
 	return d, nil
 }
@@ -83,11 +83,11 @@ func parseWholeNumber(val Value, lo, hi int) (int, error) {
 	n, err := strconv.Atoi(raw)
 	switch {
 	case errors.Is(err, strconv.ErrRange):
-		return 0, refusedForm(val.Setting, whole, raw, want, "it is out of range")
+		return 0, refusedForm(val, whole, raw, want, "it is out of range")
 	case err != nil:
-		return 0, refusedForm(val.Setting, whole, raw, want, "it is not a whole number")
+		return 0, refusedForm(val, whole, raw, want, "it is not a whole number")
 	case n < lo || n > hi:
-		return 0, refusedMeaning(val.Setting, whole, strconv.Itoa(n), want, "it is out of range")
+		return 0, refusedMeaning(val, whole, strconv.Itoa(n), want, "it is out of range")
 	}
 	return n, nil
 }
@@ -105,9 +105,9 @@ func parseWording(val Value, max int) (string, error) {
 	want := fmt.Sprintf("text of at most %d characters, without control or formatting characters", max)
 	switch {
 	case strings.ContainsFunc(raw, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }):
-		return "", refusedForm(val.Setting, whole, raw, want, "it has a control or formatting character")
+		return "", refusedForm(val, whole, raw, want, "it has a control or formatting character")
 	case utf8.RuneCountInString(raw) > max:
-		return "", refusedForm(val.Setting, whole, raw, want, "it is too long")
+		return "", refusedForm(val, whole, raw, want, "it is too long")
 	}
 	return raw, nil
 }
@@ -117,7 +117,7 @@ func parseWording(val Value, max int) (string, error) {
 func parseScope(val Value) (string, error) {
 	raw := val.Given.raw()
 	if !isScopeToken(raw) {
-		return "", refusedForm(val.Setting, whole, raw, "one scope token, such as mcp", scopeCharsReason)
+		return "", refusedForm(val, whole, raw, "one scope token, such as mcp", scopeCharsReason)
 	}
 	return raw, nil
 }
@@ -137,7 +137,7 @@ func parseEntries(val Value) ([]string, func(i int) entry, error) {
 	raw := val.Given.raw()
 	list := splitList(raw)
 	if raw != "" && len(list) == 0 {
-		return nil, nil, listsNothing(val.Setting)
+		return nil, nil, listsNothing(val)
 	}
 	return list, func(i int) entry { return entry{i, len(list)} }, nil
 }

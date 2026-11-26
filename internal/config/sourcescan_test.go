@@ -14,6 +14,16 @@ import (
 // skippedDirs hold no source of the proxy: test data, and dependency or build output.
 var skippedDirs = []string{"testdata", "vendor", "node_modules", "bin", "dist", "build"}
 
+// packageGoFiles are this package's non-test .go files, which the package's own source scans read.
+func packageGoFiles(t *testing.T) []string {
+	t.Helper()
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return slices.DeleteFunc(files, func(f string) bool { return strings.HasSuffix(f, "_test.go") })
+}
+
 // eachProductionGoFile parses every non-test .go file of the repository, but in dot directories and
 // skippedDirs, and calls visit with its path relative to the repository root (slash-separated) and
 // the file set its positions are in. Test helpers outside _test.go files, as in internal/testutil, are

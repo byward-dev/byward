@@ -202,6 +202,18 @@ func (v *Values) value(name string) Value {
 	return val
 }
 
+// valueOf is the named setting's Value, or, for nil Values (a Config built by hand), one without a
+// source, which Value.nameAsGiven names by the variable to set. It panics for a name the registry
+// does not hold.
+func (v *Values) valueOf(name string) Value {
+	if v != nil {
+		if val, ok := v.byKey[name]; ok {
+			return val
+		}
+	}
+	return Value{Setting: lookup(name)}
+}
+
 // holds reports whether these Values hold the named setting: loaded Values hold every one, a Config
 // built by hand none.
 func (v *Values) holds(name string) bool {
@@ -231,10 +243,17 @@ func (v *Values) given(name string) bool {
 	return !val.Given.empty() || val.Path != ""
 }
 
-// spelled names a setting as the operator gave it: the flag, the file setting or the environment
-// variable.
-func spelled(val Value) string {
+// nameAsGiven names the setting val is a value of as the operator gave it (#619, #623): the file
+// setting a secret was read through, the flag, or the variable. A value left at its default, or one
+// built without a source (an exported parser given only the text, or valueOf for nil Values), names
+// the variable to set (EnvToSet). Every refusal of a setting's value, or of settings together, names
+// it through it, but for a command after -- (its Value, kept as if given by flag, would name
+// --upstream-command: CommandNameAsGiven) and a secret's file refused before its Value exists
+// (refusedFormAs).
+func (val Value) nameAsGiven() string {
 	switch {
+	case val.Source == SourceDefault || val.Source == "":
+		return val.Setting.EnvToSet()
 	case val.From != "":
 		return val.From
 	case val.Source == SourceFlag:
@@ -244,23 +263,12 @@ func spelled(val Value) string {
 }
 
 // NameAsGiven names the setting called name as the operator gave it, for any message that names it:
-// a refusal, a warning or a doctor fix (#619). That is the flag or variable that gave it (spelled), so
-// a bad --oidc-client-key-file is not named BYWARD_OIDC_CLIENT_KEY_FILE. A setting left at its
-// default, or nil Values (a Config built by hand), names the variable to set (EnvToSet), from the
-// Values' own Setting where they hold it. It panics for a name neither they nor the registry hold.
-func (v *Values) NameAsGiven(name string) string {
-	if v == nil {
-		return lookup(name).EnvToSet()
-	}
-	val, ok := v.byKey[name]
-	switch { // from v's own Setting: Values resolved over another registry hold settings lookup does not
-	case !ok:
-		return lookup(name).EnvToSet()
-	case val.Source == SourceDefault:
-		return val.Setting.EnvToSet()
-	}
-	return spelled(val)
-}
+// a refusal, a warning or a doctor fix (#619). That is the file setting, flag or variable that gave
+// it (Value.nameAsGiven), so a bad --oidc-client-key-file is not named BYWARD_OIDC_CLIENT_KEY_FILE.
+// A setting left at its default, or nil Values (a Config built by hand), names the variable to set
+// (EnvToSet), from the Values' own Setting where they hold it (valueOf, #631). It panics for a
+// name neither they nor the registry hold.
+func (v *Values) NameAsGiven(name string) string { return v.valueOf(name).nameAsGiven() }
 
 // emptySecretFile is the error for a secret setting whose named file holds nothing, or only
 // whitespace, naming the setting as the operator gave it; nil otherwise.
@@ -523,7 +531,8 @@ func readSecret(readFile readFileFunc, s Setting, path, from string) (string, er
 	return strings.TrimRight(string(b), "\r\n"), nil
 }
 
-func checkUnknownEnv(reg []Setting, env map[string]string) error {
+// knownVariables are the variables byward reads for reg: each setting's, and a secret's file variable.
+func knownVariables(reg []Setting) map[string]bool {
 	known := map[string]bool{}
 	for _, s := range reg {
 		known[s.Env()] = true
@@ -531,6 +540,11 @@ func checkUnknownEnv(reg []Setting, env map[string]string) error {
 			known[s.FileEnv()] = true
 		}
 	}
+	return known
+}
+
+func checkUnknownEnv(reg []Setting, env map[string]string) error {
+	known := knownVariables(reg)
 	var unknown []string
 	for k := range env {
 		if !known[k] {

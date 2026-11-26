@@ -13,12 +13,12 @@ func (c *Config) tls(v *Values) []error {
 	}
 	var errs []error
 	for _, f := range []struct{ setting, path string }{{"tls-cert-file", c.TLSCertFile}, {"tls-key-file", c.TLSKeyFile}} {
-		if err := absolute(f.setting, f.path); err != nil {
+		if err := absolute(v, f.setting, f.path); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	if c.PublicURL != nil && c.PublicURL.Scheme != "https" {
-		errs = append(errs, errorf("%s: TLS on the listener needs an https BYWARD_PUBLIC_URL; clients use the public URL, so an http one would reach a listener that speaks only TLS", v.NameAsGiven("tls-cert-file")))
+		errs = append(errs, errorf("%s: TLS on the listener needs an https %s; clients use the public URL, so an http one would reach a listener that speaks only TLS", v.NameAsGiven("tls-cert-file"), v.NameAsGiven("public-url")))
 	}
 	return errs
 }

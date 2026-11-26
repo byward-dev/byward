@@ -2,8 +2,8 @@ package config
 
 import (
 	"os"
-	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -76,15 +76,8 @@ func TestEveryBooleanReadIsOfABoolFlag(t *testing.T) {
 	parser, declared := regexp.MustCompile(`\bparseBool\(`), regexp.MustCompile(`\bfunc parseBool\(`) // its calls: every mention but its declaration
 	// Any value compared with "true" or "false" by hand is a boolean read outside Values.boolean too.
 	compare := regexp.MustCompile(`[!=]=\s*"(true|false)"|"(true|false)"\s*[!=]=`)
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
 	reads, parses, parserCalls := 0, 0, 0
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
+	for _, f := range packageGoFiles(t) {
 		src, err := os.ReadFile(f) //nolint:gosec // G304: reads this package's own files
 		if err != nil {
 			t.Fatal(err)
@@ -119,9 +112,10 @@ func TestEveryBooleanReadIsOfABoolFlag(t *testing.T) {
 	}
 }
 
-// Every path setting (one with the path shape) refuses a path relative to the
-// working directory, with one message (ADR-0007 §6). Driven by the registry, so a new path setting
-// is covered with no edit here, unless it needs a companion setting to reach its check.
+// Every path setting (one with the path shape) refuses a path relative to the working directory,
+// with one message (ADR-0007 §6), naming the setting as given, by env or by flag (#623). Driven by
+// the registry, so a new path setting is covered with no edit here, unless it needs a companion
+// setting to reach its check.
 func TestEveryPathSettingRefusesARelativePath(t *testing.T) {
 	paths := 0
 	for _, s := range registry {
@@ -131,10 +125,17 @@ func TestEveryPathSettingRefusesARelativePath(t *testing.T) {
 		paths++
 		t.Run(s.Name, func(t *testing.T) {
 			c := readContextOf(s)
-			_, _, err := Load(c.args, append(c.env, s.Env()+"=rel"), c.files)
-			want := s.Env() + relativePathRefusal
-			if !isConfigError(err) || !strings.Contains(err.Error(), want) {
-				t.Fatalf("err = %v, want %q", err, want)
+			for _, given := range []struct {
+				args, env []string
+				want      string
+			}{
+				{c.args, append(slices.Clone(c.env), s.Env()+"=rel"), s.Env() + relativePathRefusal},
+				{append([]string{"--" + s.Name + "=rel"}, c.args...), c.env, "--" + s.Name + relativePathRefusal},
+			} {
+				_, _, err := Load(given.args, given.env, c.files)
+				if !isConfigError(err) || !strings.Contains(err.Error(), given.want) {
+					t.Errorf("err = %v, want %q", err, given.want)
+				}
 			}
 		})
 	}
@@ -143,7 +144,7 @@ func TestEveryPathSettingRefusesARelativePath(t *testing.T) {
 	}
 }
 
-// relativePathRefusal is what follows a path setting's variable when it is given a relative path.
+// relativePathRefusal is what follows a path setting's name when it is given a relative path.
 const relativePathRefusal = ": want an absolute path, one starting with /; got a relative one: no path is relative to the working directory (ADR-0007 §6)"
 
 // A setting that refuses a relative path holds a path (#587): every path the proxy reads or writes

@@ -241,7 +241,7 @@ func validate(v *Values, container, dashes bool) (*Config, error) {
 		if c.PublicURL.Scheme == "http" {
 			switch {
 			case !c.Dev && !c.NoAuth:
-				errs = append(errs, errorf("BYWARD_PUBLIC_URL: http on loopback needs --dev"))
+				errs = append(errs, errorf("%s: http on loopback needs --dev", v.NameAsGiven("public-url")))
 			default:
 				c.Relaxations = append(c.Relaxations, "http public URL on loopback")
 			}
@@ -257,7 +257,7 @@ func validate(v *Values, container, dashes bool) (*Config, error) {
 		if c.InternalListen, err = parseListen(v.value("internal-listen"), "host:port such as 127.0.0.1:9090, or empty"); err != nil {
 			errs = append(errs, err)
 		} else if c.InternalListen == c.Listen && !strings.HasSuffix(c.Listen, ":0") {
-			errs = append(errs, errorf("BYWARD_INTERNAL_LISTEN: must differ from BYWARD_LISTEN; metrics and probes never share the public listener"))
+			errs = append(errs, errorf("%s: must differ from %s; metrics and probes never share the public listener", v.NameAsGiven("internal-listen"), v.NameAsGiven("listen")))
 		}
 	}
 	var originErrs []error
@@ -282,7 +282,8 @@ func validate(v *Values, container, dashes bool) (*Config, error) {
 		errs = append(errs, checkNoAuth(c, v)...)
 	}
 	if c.NoAuth && v.stdioUpstream() {
-		c.Relaxations = append(c.Relaxations, "stdio upstream without authentication: anyone who can reach the proxy starts upstream processes, bounded only by BYWARD_STDIO_MAX_PROCESSES, and every process runs as the same anonymous user")
+		c.Relaxations = append(c.Relaxations, "stdio upstream without authentication: anyone who can reach the proxy starts upstream processes, bounded only by "+
+			v.NameAsGiven("stdio-max-processes")+", and every process runs as the same anonymous user")
 	}
 	if !c.NoAuth {
 		for _, check := range authSettings {

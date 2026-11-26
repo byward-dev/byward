@@ -378,7 +378,7 @@ func TestCheckOfflineFindsStdioUpstreamMistakes(t *testing.T) {
 	}{
 		{"command that does not exist", func(t *testing.T) []string {
 			return append(stdioAuthEnv(t), "BYWARD_PUBLIC_URL=https://mcp.example.com/mcp", `BYWARD_UPSTREAM_COMMAND=["/nonexistent/mcp-server"]`)
-		}, "stdio upstream (BYWARD_UPSTREAM_COMMAND, BYWARD_UPSTREAM_ENV_FILE)", ""},
+		}, "stdio upstream (BYWARD_UPSTREAM_COMMAND): ", ""}, // no environment file given, so none named (#623)
 		{"command not found on the PATH the env file sets: its entries are not shown", func(t *testing.T) []string {
 			envFile := filepath.Join(t.TempDir(), "upstream.env")
 			if err := os.WriteFile(envFile, []byte("PATH=/opt/S3CRET-path-entry/bin\n"), 0o600); err != nil {

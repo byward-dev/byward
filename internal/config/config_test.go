@@ -1483,3 +1483,15 @@ func TestDuplicateAllowedHostsAndOriginsWarnByPlace(t *testing.T) {
 		})
 	}
 }
+
+// A duplicate warning names the list as the operator gave it (#623): by its flag when given by flag.
+func TestADuplicateAllowedHostGivenByFlagIsNamedByItsFlag(t *testing.T) {
+	c, err := load(t, []string{"--allowed-hosts=a.example,A.example"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ListWarning{{"--allowed-hosts", "entries 1 and 2 of 2 name the same host once folded (case, an IP address's spelling, a default port)", "remove one of them"}}
+	if !slices.Equal(c.ListWarnings, want) {
+		t.Fatalf("warnings %+v\nwant %+v", c.ListWarnings, want)
+	}
+}

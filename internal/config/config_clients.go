@@ -29,7 +29,7 @@ func (c *Config) clientSources(v *Values) []error {
 		*s.dst, hostErrs = parseCIMDHosts(v.value(s.name))
 		errs = append(errs, hostErrs...)
 		if len(*s.dst) > 0 && !c.CIMD {
-			errs = append(errs, errorf("%s has no effect while BYWARD_CIMD is false; remove one of them", Setting{Name: s.name}.Env()))
+			errs = append(errs, errorf("%s has no effect while %s is false; remove one of them", v.NameAsGiven(s.name), v.NameAsGiven("cimd")))
 		}
 	}
 	return errs
@@ -41,7 +41,6 @@ const wantDenylistEntry = "a CIMD client ID (an https URL) or a host name such a
 // parseClientDenylist reads BYWARD_CLIENT_DENYLIST: CIMD client IDs (https URLs) and host names. A
 // refused entry is never shown (ADR-0031 §1).
 func parseClientDenylist(val Value) ([]string, []error) {
-	s := val.Setting
 	list, at, err := parseEntries(val)
 	if err != nil {
 		return nil, []error{err}
@@ -49,7 +48,7 @@ func parseClientDenylist(val Value) ([]string, []error) {
 	var errs []error
 	for i, e := range list {
 		if reason := denylistReason(e); reason != "" {
-			errs = append(errs, refusedForm(s, at(i), e, wantDenylistEntry, "it "+reason))
+			errs = append(errs, refusedForm(val, at(i), e, wantDenylistEntry, "it "+reason))
 		}
 	}
 	return list, errs
@@ -60,7 +59,7 @@ func parseClientDenylist(val Value) ([]string, []error) {
 // length, never shown (ADR-0031 §1), in the format of every refusal config makes. i is an index into
 // c.ClientDenylist, the list registration was given.
 func (c *Config) RefusedDenylistEntry(i int, reason string) error {
-	return refusedForm(lookup("client-denylist"), entry{i, len(c.ClientDenylist)}, c.ClientDenylist[i], wantDenylistEntry, reason)
+	return refusedForm(c.Values.valueOf("client-denylist"), entry{i, len(c.ClientDenylist)}, c.ClientDenylist[i], wantDenylistEntry, reason)
 }
 
 // denylistReason says why config refuses e as a client denylist entry, completing "it …", or "" when
@@ -95,7 +94,6 @@ func denylistReason(e string) string {
 // parseCIMDHosts reads a CIMD host list (cimd-trusted-hosts, cimd-allowed-hosts): host names, in
 // lower case. A refused entry is never shown (ADR-0031 §1).
 func parseCIMDHosts(val Value) ([]string, []error) {
-	s := val.Setting
 	list, at, err := parseEntries(val)
 	if err != nil {
 		return nil, []error{err}
@@ -103,7 +101,7 @@ func parseCIMDHosts(val Value) ([]string, []error) {
 	var errs []error
 	for i, h := range list {
 		if reason := hostNameReason(h); reason != "" {
-			errs = append(errs, refusedForm(s, at(i), h, "a host name such as claude.ai", "it "+reason))
+			errs = append(errs, refusedForm(val, at(i), h, "a host name such as claude.ai", "it "+reason))
 		}
 		list[i] = strings.ToLower(h)
 	}

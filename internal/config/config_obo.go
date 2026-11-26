@@ -30,13 +30,13 @@ func scopeSlash(s string) int {
 // a header of its own for an HTTP upstream. A stdio upstream asks a socket for its token instead,
 // so a header set for it would have no effect: its StdioHint refuses it.
 func (c *Config) onBehalfOf(v *Values) []error {
-	sEnv, hEnv := Setting{Name: "obo-scopes"}.Env(), Setting{Name: "obo-header"}.Env()
+	scopesName, oboHeaderName := v.NameAsGiven("obo-scopes"), v.NameAsGiven("obo-header")
 	var errs []error
 	var scopeErrs []error
 	c.OBOScopes, scopeErrs = parseOBOScopes(v.value("obo-scopes"))
 	errs = append(errs, scopeErrs...)
 	if len(c.OBOScopes) > 0 && c.IdP != "" && c.IdP != "entra" { // a refused IdP has its own error
-		errs = append(errs, errorf("%s: On-Behalf-Of is Entra's; it needs BYWARD_IDP=entra, got %s", sEnv, c.IdP))
+		errs = append(errs, errorf("%s: On-Behalf-Of is Entra's; it needs %s=entra, got %s", scopesName, v.NameAsGiven("idp"), c.IdP))
 	}
 	h, err := parseHeaderName(v.value("obo-header"))
 	if err != nil {
@@ -48,9 +48,9 @@ func (c *Config) onBehalfOf(v *Values) []error {
 	switch {
 	case sameHeader(h, c.AssertionHeader):
 		errs = append(errs, errorf("%s names the header that already carries the identity assertion (%s); move the assertion to a header of its own%s, or use another header here%s",
-			hEnv, Setting{Name: "assertion-header"}.Env(), suchAs("assertion-header", h), suchAs("obo-header", h)))
+			oboHeaderName, v.NameAsGiven("assertion-header"), suchAs("assertion-header", h), suchAs("obo-header", h)))
 	case sameHeader(h, c.UpstreamCredentialHeader):
-		errs = append(errs, errorf("%s names the header that already carries the operator's upstream credential (%s); use a header of its own%s", hEnv, Setting{Name: "upstream-credential-header"}.Env(), suchAs("obo-header", h)))
+		errs = append(errs, errorf("%s names the header that already carries the operator's upstream credential (%s); use a header of its own%s", oboHeaderName, v.NameAsGiven("upstream-credential-header"), suchAs("obo-header", h)))
 	}
 	return errs
 }
@@ -59,11 +59,11 @@ func (c *Config) onBehalfOf(v *Values) []error {
 // scope refused for its form is never shown (ADR-0031 §1), and two scopes for different APIs are
 // named by their places in the list.
 func parseOBOScopes(val Value) ([]string, []error) {
-	s, raw := val.Setting, val.Given.raw()
+	raw := val.Given.raw()
 	const want = "scope URIs of one API such as https://graph.microsoft.com/User.Read, api://<app>/<scope> or <app ID>/<scope>"
 	scopes := strings.Fields(raw)
 	if raw != "" && len(scopes) == 0 {
-		return nil, []error{listsNothing(s)}
+		return nil, []error{listsNothing(val)}
 	}
 	var errs []error
 	resource, first := "", 0
@@ -71,13 +71,13 @@ func parseOBOScopes(val Value) ([]string, []error) {
 		at, j := entry{i, len(scopes)}, scopeSlash(sc)
 		switch {
 		case oidcScopes[strings.ToLower(sc)]:
-			errs = append(errs, refusedMeaning(s, at, strings.ToLower(sc), want, "it is a sign-in scope, not a downstream API's; give the API's scopes, e.g. https://graph.microsoft.com/User.Read"))
+			errs = append(errs, refusedMeaning(val, at, strings.ToLower(sc), want, "it is a sign-in scope, not a downstream API's; give the API's scopes, e.g. https://graph.microsoft.com/User.Read"))
 		case j < 0:
-			errs = append(errs, refusedForm(s, at, sc, want, "it is not a scope URI"))
+			errs = append(errs, refusedForm(val, at, sc, want, "it is not a scope URI"))
 		case resource == "":
 			resource, first = sc[:j], i
 		case sc[:j] != resource:
-			errs = append(errs, refusedMeaning(s, whole, entry{first, len(scopes)}.and(at), want, "they are for different APIs; Entra issues a token for one API per request"))
+			errs = append(errs, refusedMeaning(val, whole, entry{first, len(scopes)}.and(at), want, "they are for different APIs; Entra issues a token for one API per request"))
 		}
 	}
 	return scopes, errs
