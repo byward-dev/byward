@@ -39,7 +39,7 @@ ADR itself, with its issue. The last column lists both.
 | [0029](0029-stdio-downstream-token-socket.md) | stdio upstreams get downstream tokens from a token socket | F14 | — |
 | [0030](0030-oidc-roles-groups-claims.md) | Configurable roles and groups claims for OIDC IdPs | F9 | — |
 | [0031](0031-setting-shapes.md) | Setting shapes: display and refusal | F18 | — |
-| [0032](0032-one-host-rule.md) | One host rule: one parser, a rule per setting class, one host-name character set | F17, F18 | 2026-11-21 (#521, §6) |
+| [0032](0032-one-host-rule.md) | One host rule: one parser, a rule per setting class, one host-name character set | F17, F18 | 2026-11-21 (#521, §6); 2026-11-26 (#524, §2 class S) |
 
 ## Writing a new ADR
 

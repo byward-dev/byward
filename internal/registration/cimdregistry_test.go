@@ -193,6 +193,14 @@ func TestTrustFollowsTheOperatorsHostLists(t *testing.T) {
 		"trusted counts as allowed":        {trusted: []string{"other.example"}, allowed: []string{"app.example"}, id: other, trust: Verified},
 		"a subdomain is another host":      {trusted: []string{"example"}, id: cimdID, trust: Domain},
 		"a parent is not trusted, either":  {trusted: []string{"oauth.app.example"}, id: cimdID, trust: Domain},
+		// A2: one trailing dot on the client ID's host names the same host.
+		"trusted, with a trailing dot":      {trusted: []string{"app.example"}, id: "https://app.example./oauth/client.json", trust: Verified},
+		"allowed, with a trailing dot":      {allowed: []string{"app.example"}, id: "https://app.example./oauth/client.json", trust: Domain},
+		"only one trailing dot is folded":   {trusted: []string{"app.example"}, id: "https://app.example../oauth/client.json", trust: Domain},
+		"two trailing dots are not allowed": {allowed: []string{"app.example"}, id: "https://app.example../oauth/client.json", refused: true},
+		// No IDNA fold: a Unicode host is never the listed xn-- one, which Go's fetcher may not dial.
+		"a Unicode host is not its trusted xn-- form": {trusted: []string{"xn--bcher-kva.example"}, id: "https://b%C3%BCcher.example/oauth/client.json", trust: Domain},
+		"a Unicode host is not its allowed xn-- form": {allowed: []string{"xn--bcher-kva.example"}, id: "https://b%C3%BCcher.example/oauth/client.json", refused: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			otherDoc := doc(map[string]any{"client_id": other})
@@ -208,10 +216,22 @@ func TestTrustFollowsTheOperatorsHostLists(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || cl.Trust() != tc.trust {
-				t.Fatalf("err = %v, trust = %v, want %v", err, cl, tc.trust)
+			if err != nil || cl.Trust() != tc.trust || cl.ID() != tc.id {
+				t.Fatalf("err = %v, client %v: want trust %v and ID %s", err, cl, tc.trust, tc.id)
 			}
 		})
+	}
+}
+
+// A2 folds the trailing dot only for the trust check: the document's client_id must still be its URL
+// exactly, so a document at https://app.example./… naming https://app.example/… is refused (the
+// trust table's "trusted, with a trailing dot" row is the document naming itself).
+func TestATrailingDotClientIDNeedsADocumentNamingItExactly(t *testing.T) {
+	const dotted = "https://app.example./oauth/client.json"
+	f := &fakeFetch{replies: map[string][]reply{dotted: {{body: doc(map[string]any{"client_id": cimdID})}}}}
+	_, err := newReg(f, newClock(), []string{"app.example"}, nil).Client(context.Background(), dotted)
+	if !errors.Is(err, ErrUnknownClient) || !errors.Is(err, ErrMetadataRefused) || !strings.Contains(err.Error(), "does not match the document URL") || f.calls.Load() != 1 {
+		t.Fatalf("err = %v after %d fetches, want the fetched document refused for its client_id", err, f.calls.Load())
 	}
 }
 

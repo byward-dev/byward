@@ -51,6 +51,8 @@ func TestOnlyClientIDURLsMeetingDraftSection3AreAccepted(t *testing.T) {
 		"colon, no host":                {"https://:/client", "must have a host before its port"},
 		"user info and a port, no host": {"https://u@:443/client", "must have a host before its port"},
 		"another port, no host":         {"https://:8443/client", "must have a host before its port"},
+		"a host of one dot":             {"https://./client", "must have a host name"},
+		"a host of dots":                {"https://../client", "must have a host name"},
 	} {
 		want := "client ID metadata document URL: " + tc.reason
 		if err := ValidateCIMDURL(tc.id); err == nil || err.Error() != want {

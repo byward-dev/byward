@@ -50,7 +50,7 @@ func TestEveryParserNamesItsSettingAsGiven(t *testing.T) {
 		"assertion claims with none beside one":                "none stands alone",
 		"an unknown assertion claim":                           "(5 characters, not shown): it is not one of them",
 		"a client denylist entry":                              "it is a CIMD client ID with a user name or password",
-		"a CIMD host":                                          "it breaks the host name rule",
+		"a CIMD host":                                          "it has a character no host name holds at position 2",
 		"a header line":                                        "as a header line does",
 		"a header name with a space":                           "it is not a header name",
 		"a header MCP relies on":                               "the proxy, the transport or MCP relies on it",

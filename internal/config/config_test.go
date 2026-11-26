@@ -139,11 +139,11 @@ const (
 	wantDenylist      = `BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 1 of 1 `
 	wantTrusted       = `BYWARD_CIMD_TRUSTED_HOSTS: want a host name such as claude.ai; got entry 1 of 1 `
 	wantAllowed       = `BYWARD_CIMD_ALLOWED_HOSTS: want a host name such as claude.ai; got entry 1 of 1 `
-	ruleHostName      = `a host name has only letters, digits and - . _ ~, no label starts or ends with a hyphen, and no empty label (no leading or double dot; drop a trailing one)`
 	rulePort          = `has a port that is not a number from 1 to 65535 without a sign or leading zero`
 	ruleForms         = `give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone`
 	ruleNotASCII      = `holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send`
-	ruleDenylistIPv4  = `ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match (127.1 and 0x7f000001 are 127.0.0.1), or none at all; deny the app by its CIMD client ID or its redirect host's name`
+	ruleReadAsIPv4    = `ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1 and 0x7f000001 are 127.0.0.1) that no entry can match, or none at all; give a host name`
+	ruleIPHost        = `is an IP address, which this list never names: an address is also reached by other spellings (127.1 and 0x7f000001 are 127.0.0.1) that no entry can match; give a host name`
 	ruleEndsInNumber  = `is not an IPv4 address but ends in a number, so browsers refuse it`
 	ruleDottedDecimal = `is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as `
 	ruleNameChar      = "has a character no host name holds at position "
@@ -256,42 +256,54 @@ func TestAURLOrHostRefusedForItsFormSaysWhereAndWhyNeverWhat(t *testing.T) {
 		{"a port without a host", "BYWARD_ALLOWED_HOSTS=:8080", wantHosts + `(5 characters, not shown): it has no host before its ":"; ` + ruleForms},
 		{"bare IPv6 with a zone", "BYWARD_ALLOWED_HOSTS=fe80::1%eth0", wantHosts + `(12 characters, not shown): it is not an IPv6 address without a zone; ` + ruleForms},
 		{"many colons, not IPv6", "BYWARD_ALLOWED_HOSTS=a:b:c", wantHosts + `(5 characters, not shown): it is not an IPv6 address without a zone; ` + ruleForms},
-		{"cimd host with a scheme", "BYWARD_CIMD_TRUSTED_HOSTS=https://claude.ai", wantTrusted + `(17 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"cimd host with a path", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai/oauth", wantTrusted + `(15 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"cimd host with user info", "BYWARD_CIMD_ALLOWED_HOSTS=user@claude.example", wantAllowed + `(19 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"cimd host with a scheme", "BYWARD_CIMD_TRUSTED_HOSTS=https://claude.ai", wantTrusted + `(17 characters, not shown): it ` + ruleNameChar + `6` + ruleNameChars},
+		{"cimd host with a path", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai/oauth", wantTrusted + `(15 characters, not shown): it ` + ruleNameChar + `10` + ruleNameChars},
+		{"cimd host with user info", "BYWARD_CIMD_ALLOWED_HOSTS=user@claude.example", wantAllowed + `(19 characters, not shown): it ` + ruleNameChar + `5` + ruleNameChars},
 		// #344: names no client ID can carry, refused as in BYWARD_ALLOWED_HOSTS.
-		{"cimd host with a query", "BYWARD_CIMD_ALLOWED_HOSTS=a?b.example", wantAllowed + `(11 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"cimd host with a fragment", "BYWARD_CIMD_TRUSTED_HOSTS=a#b.example", wantTrusted + `(11 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"cimd host with a semicolon", "BYWARD_CIMD_ALLOWED_HOSTS=a;b.example", wantAllowed + `(11 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"cimd host with a trailing dot", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai.", wantTrusted + `(10 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"cimd host with a space", "BYWARD_CIMD_TRUSTED_HOSTS=claude .ai", wantTrusted + `(10 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"cimd host with a port", "BYWARD_CIMD_ALLOWED_HOSTS=claude.ai:443", wantAllowed + `(13 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"cimd wildcard host", "BYWARD_CIMD_TRUSTED_HOSTS=*.example.com", wantTrusted + `(13 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"cimd host with a query", "BYWARD_CIMD_ALLOWED_HOSTS=a?b.example", wantAllowed + `(11 characters, not shown): it ` + ruleNameChar + `2` + ruleNameChars},
+		{"cimd host with a fragment", "BYWARD_CIMD_TRUSTED_HOSTS=a#b.example", wantTrusted + `(11 characters, not shown): it ` + ruleNameChar + `2` + ruleNameChars},
+		{"cimd host with a semicolon", "BYWARD_CIMD_ALLOWED_HOSTS=a;b.example", wantAllowed + `(11 characters, not shown): it ` + ruleNameChar + `2` + ruleNameChars},
+		{"cimd host with a trailing dot", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai.", wantTrusted + `(10 characters, not shown): it ` + ruleLabel},
+		{"cimd host with a space", "BYWARD_CIMD_TRUSTED_HOSTS=claude .ai", wantTrusted + `(10 characters, not shown): it ` + ruleNameChar + `7` + ruleNameChars},
+		{"cimd host with a port", "BYWARD_CIMD_ALLOWED_HOSTS=claude.ai:443", wantAllowed + `(13 characters, not shown): it ` + ruleNameChar + `10` + ruleNameChars},
+		{"cimd wildcard host", "BYWARD_CIMD_TRUSTED_HOSTS=*.example.com", wantTrusted + `(13 characters, not shown): it ` + ruleNameChar + `1` + ruleNameChars},
 		// The name rule comes first: "a*b" lacks a dot too, but a dot would not fix it.
-		{"cimd host breaking the rule and without a dot", "BYWARD_CIMD_TRUSTED_HOSTS=a*b", wantTrusted + `(3 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"cimd host breaking the rule and without a dot", "BYWARD_CIMD_TRUSTED_HOSTS=a*b", wantTrusted + `(3 characters, not shown): it ` + ruleNameChar + `2` + ruleNameChars},
 		{"cimd single-label host", "BYWARD_CIMD_TRUSTED_HOSTS=localhost", wantTrusted + `(9 characters, not shown): it has no dot; give a name with at least one dot`},
 		{"cimd unicode host", "BYWARD_CIMD_TRUSTED_HOSTS=bücher.example", wantTrusted + `(14 characters, not shown): it ` + ruleNotASCII},
+		// R6 and R5 (#524): an address is reached by spellings no entry matches (hostrule.golden pins the spellings).
+		{"cimd trusted IPv4 address", "BYWARD_CIMD_TRUSTED_HOSTS=203.0.113.5", wantTrusted + `(11 characters, not shown): it ` + ruleIPHost},
+		{"cimd allowed IPv6 address", "BYWARD_CIMD_ALLOWED_HOSTS=::1", wantAllowed + `(3 characters, not shown): it ` + ruleIPHost},
+		{"cimd trusted short IPv4 address", "BYWARD_CIMD_TRUSTED_HOSTS=127.1", wantTrusted + `(5 characters, not shown): it ` + ruleReadAsIPv4},
+		{"cimd allowed host ending in a number", "BYWARD_CIMD_ALLOWED_HOSTS=mcp.10", wantAllowed + `(6 characters, not shown): it ` + ruleReadAsIPv4},
+		// Within the label rule, an empty label is named before an edge hyphen, as for every host
+		// setting (nameReason).
+		{"cimd host with an empty label and an edge hyphen", "BYWARD_CIMD_TRUSTED_HOSTS=-a..b.example", wantTrusted + `(13 characters, not shown): it ` + ruleLabel},
 		// A host entry follows the CIMD host lists' rule (but may end in a dot), so an entry that could never match a
 		// redirect host fails at load instead of denying nothing.
-		{"client denylist http URL", "BYWARD_CLIENT_DENYLIST=http://app.example/client.json", wantDenylist + `(30 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"client denylist double dot", "BYWARD_CLIENT_DENYLIST=a..b", wantDenylist + `(4 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"client denylist leading dot", "BYWARD_CLIENT_DENYLIST=.bad.example", wantDenylist + `(12 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"client denylist two trailing dots", "BYWARD_CLIENT_DENYLIST=app.example..", wantDenylist + `(13 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"client denylist inner tab", "BYWARD_CLIENT_DENYLIST=bad\tx.example", wantDenylist + `(13 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"client denylist percent-encoding", "BYWARD_CLIENT_DENYLIST=%62ad.example", wantDenylist + `(13 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"client denylist brackets", "BYWARD_CLIENT_DENYLIST=[bad].example", wantDenylist + `(13 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		{"client denylist host with a port", "BYWARD_CLIENT_DENYLIST=app.example:443", wantDenylist + `(15 characters, not shown): it breaks the host name rule: ` + ruleHostName},
+		{"client denylist http URL", "BYWARD_CLIENT_DENYLIST=http://app.example/client.json", wantDenylist + `(30 characters, not shown): it ` + ruleNameChar + `5` + ruleNameChars},
+		{"client denylist double dot", "BYWARD_CLIENT_DENYLIST=a..b", wantDenylist + `(4 characters, not shown): it ` + ruleLabel},
+		{"client denylist leading dot", "BYWARD_CLIENT_DENYLIST=.bad.example", wantDenylist + `(12 characters, not shown): it ` + ruleLabel},
+		{"client denylist two trailing dots", "BYWARD_CLIENT_DENYLIST=app.example..", wantDenylist + `(13 characters, not shown): it ` + ruleLabel},
+		{"client denylist inner tab", "BYWARD_CLIENT_DENYLIST=bad\tx.example", wantDenylist + `(13 characters, not shown): it ` + ruleNameChar + `4` + ruleNameChars},
+		{"client denylist percent-encoding", "BYWARD_CLIENT_DENYLIST=%62ad.example", wantDenylist + `(13 characters, not shown): it ` + ruleNameChar + `1` + ruleNameChars},
+		{"client denylist brackets", "BYWARD_CLIENT_DENYLIST=[bad].example", wantDenylist + `(13 characters, not shown): it ` + ruleNameChar + `1` + ruleNameChars},
+		{"client denylist host with a port", "BYWARD_CLIENT_DENYLIST=app.example:443", wantDenylist + `(15 characters, not shown): it ` + ruleNameChar + `12` + ruleNameChars},
 		{"client denylist single-label host among good ones", "BYWARD_CLIENT_DENYLIST=app.example,localhost", `BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry 2 of 2 (9 characters, not shown): it has no dot; give a name with at least one dot`},
-		{"client denylist https without slashes", "BYWARD_CLIENT_DENYLIST=https:app.example", wantDenylist + `(17 characters, not shown): it breaks the host name rule: ` + ruleHostName},
-		// A browser reads a host ending in a number as IPv4, which it reaches by other spellings too.
-		{"client denylist IPv4 address", "BYWARD_CLIENT_DENYLIST=203.0.113.5", wantDenylist + `(11 characters, not shown): it ` + ruleDenylistIPv4},
-		{"client denylist short IPv4 address", "BYWARD_CLIENT_DENYLIST=127.1", wantDenylist + `(5 characters, not shown): it ` + ruleDenylistIPv4},
-		{"client denylist IPv4 address with a trailing dot", "BYWARD_CLIENT_DENYLIST=127.1.", wantDenylist + `(6 characters, not shown): it ` + ruleDenylistIPv4},
-		{"client denylist hex IPv4 address", "BYWARD_CLIENT_DENYLIST=127.0x1", wantDenylist + `(7 characters, not shown): it ` + ruleDenylistIPv4},
-		{"client denylist host ending in an empty hex number", "BYWARD_CLIENT_DENYLIST=app.0x", wantDenylist + `(6 characters, not shown): it ` + ruleDenylistIPv4},
-		{"client denylist host ending in every hex digit", "BYWARD_CLIENT_DENYLIST=a.0X0123456789abcdefABCDEF", wantDenylist + `(26 characters, not shown): it ` + ruleDenylistIPv4},
-		{"client denylist host ending in every decimal digit", "BYWARD_CLIENT_DENYLIST=a.0123456789", wantDenylist + `(12 characters, not shown): it ` + ruleDenylistIPv4},
+		{"client denylist https without slashes", "BYWARD_CLIENT_DENYLIST=https:app.example", wantDenylist + `(17 characters, not shown): it ` + ruleNameChar + `6` + ruleNameChars},
+		// R6 and R5: an IP address, or a name a browser reads as IPv4, is reached by spellings no entry
+		// matches.
+		{"client denylist IPv4 address", "BYWARD_CLIENT_DENYLIST=203.0.113.5", wantDenylist + `(11 characters, not shown): it ` + ruleIPHost},
+		{"client denylist short IPv4 address", "BYWARD_CLIENT_DENYLIST=127.1", wantDenylist + `(5 characters, not shown): it ` + ruleReadAsIPv4},
+		{"client denylist short IPv4 address with a trailing dot", "BYWARD_CLIENT_DENYLIST=127.1.", wantDenylist + `(6 characters, not shown): it ` + ruleReadAsIPv4},
+		{"client denylist hex IPv4 address", "BYWARD_CLIENT_DENYLIST=127.0x1", wantDenylist + `(7 characters, not shown): it ` + ruleReadAsIPv4},
+		{"client denylist host ending in an empty hex number", "BYWARD_CLIENT_DENYLIST=app.0x", wantDenylist + `(6 characters, not shown): it ` + ruleReadAsIPv4},
+		{"client denylist host ending in every hex digit", "BYWARD_CLIENT_DENYLIST=a.0X0123456789abcdefABCDEF", wantDenylist + `(26 characters, not shown): it ` + ruleReadAsIPv4},
+		{"client denylist host ending in every decimal digit", "BYWARD_CLIENT_DENYLIST=a.0123456789", wantDenylist + `(12 characters, not shown): it ` + ruleReadAsIPv4},
 		{"client denylist unicode host with a trailing dot", "BYWARD_CLIENT_DENYLIST=bücher.example.", wantDenylist + `(15 characters, not shown): it ` + ruleNotASCII},
+		{"client denylist URL with an IPv6 zone", "BYWARD_CLIENT_DENYLIST=https://[fe80::1%25eth0]/c.json", wantDenylist + `(31 characters, not shown): it has an IPv6 zone, which a URL cannot carry; give the address without its %zone`},
+		// A pasted credential is named before the zone.
+		{"client denylist URL with a password and an IPv6 zone", "BYWARD_CLIENT_DENYLIST=https://u:p@[fe80::1%25eth0]/c.json", wantDenylist + `(35 characters, not shown): it is a CIMD client ID with a user name or password`},
 		{"client denylist unicode host", "BYWARD_CLIENT_DENYLIST=bücher.example", wantDenylist + `(14 characters, not shown): it ` + ruleNotASCII},
 	}
 	for _, c := range cases {
@@ -1045,9 +1057,18 @@ func TestCIMDHostListsAreNormalizedAndRefusedWhileCIMDIsOff(t *testing.T) {
 	if c.CIMD {
 		t.Fatalf("CIMD off: %v", c.CIMD)
 	}
-	// Host lists with CIMD off would silently do nothing.
-	if _, err := load(t, nil, "BYWARD_CIMD=false", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai"); !isConfigError(err) || !strings.Contains(err.Error(), "no effect while BYWARD_CIMD is false") {
-		t.Fatalf("err = %v", err)
+	// Host lists with CIMD off would silently do nothing; both settings are named as given.
+	for _, tc := range []struct {
+		args []string
+		env  []string
+		want string
+	}{
+		{nil, []string{"BYWARD_CIMD=false", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai"}, "BYWARD_CIMD_TRUSTED_HOSTS has no effect while BYWARD_CIMD is false; remove one of them"},
+		{[]string{"--cimd=false", "--cimd-allowed-hosts", "claude.ai"}, nil, "--cimd-allowed-hosts has no effect while --cimd is false; remove one of them"},
+	} {
+		if _, err := load(t, tc.args, tc.env...); !isConfigError(err) || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%v %v: err = %v, want %q", tc.args, tc.env, err, tc.want)
+		}
 	}
 }
 
@@ -1063,10 +1084,12 @@ func TestDCRIsOnByDefaultAndTheDenylistTakesCommaSeparatedEntries(t *testing.T) 
 	}
 	// Names that only look like numbers are host names: hex letters in the last label, digits in
 	// another one or only at its start, 0x followed by something other than hex digits only (app.0x7g,
-	// a.0xg, a.0xag).
-	for _, host := range []string{"app.de", "app.cafe", "123.example", "0x7f.example", "app.0x7g", "a.0xg", "a.0xag", "app.1example"} {
-		if _, err := load(t, nil, "BYWARD_CLIENT_DENYLIST="+host); err != nil {
-			t.Errorf("%q refused: %v", host, err)
+	// a.0xg, a.0xag). A client ID at an IP address without a zone loads too: IPv4, IPv6 and
+	// IPv4-mapped (only a zone is refused, #644).
+	for _, entry := range []string{"app.de", "app.cafe", "123.example", "0x7f.example", "app.0x7g", "a.0xg", "a.0xag", "app.1example",
+		"https://8.8.8.8/c.json", "https://[2001:db8::1]/c.json", "https://[::ffff:8.8.8.8]/c.json"} {
+		if _, err := load(t, nil, "BYWARD_CLIENT_DENYLIST="+entry); err != nil {
+			t.Errorf("%q refused: %v", entry, err)
 		}
 	}
 	if c, err = load(t, nil, "BYWARD_DCR=false"); err != nil {
@@ -1135,30 +1158,14 @@ func TestHostSettingsLoadUnderscoresIDNANamesAndMixedCase(t *testing.T) {
 // BYWARD_CIMD_ALLOWED_HOSTS, BYWARD_CLIENT_DENYLIST, BYWARD_LISTEN, and BYWARD_INTERNAL_LISTEN).
 func TestHostNameRuleRefusesLabelsWithLeadingOrTrailingHyphen(t *testing.T) {
 	refused := []string{"-", "-a.example", "a-.example", "a.-b.example", "a.b-"}
-	for _, host := range refused {
-		t.Run("validHostName/"+host, func(t *testing.T) {
-			if validHostName(host) {
-				t.Errorf("validHostName(%q) = true, want false", host)
-			}
-		})
-	}
-	accepted := []string{"a-b.example", "xn--bcher-kva.example"}
-	for _, host := range accepted {
-		t.Run("validHostName/"+host, func(t *testing.T) {
-			if !validHostName(host) {
-				t.Errorf("validHostName(%q) = false, want true", host)
-			}
-		})
-	}
-
 	settings := []struct{ setting, format, want string }{
-		// The browser-matched settings and the public URL give the rule as its own reason (#523).
+		// Every host setting but the listen addresses gives the rule as its own reason (#523, #524).
 		{"public URL", "BYWARD_PUBLIC_URL=https://%s/mcp", ruleEdgeHyphen},
 		{"allowed hosts", "BYWARD_ALLOWED_HOSTS=%s", ruleEdgeHyphen},
 		{"allowed origins", "BYWARD_ALLOWED_ORIGINS=https://%s", ruleEdgeHyphen},
-		{"CIMD trusted hosts", "BYWARD_CIMD_TRUSTED_HOSTS=%s", "breaks the host name rule: " + ruleHostName},
-		{"CIMD allowed hosts", "BYWARD_CIMD_ALLOWED_HOSTS=%s", "breaks the host name rule: " + ruleHostName},
-		{"client denylist", "BYWARD_CLIENT_DENYLIST=%s", "breaks the host name rule: " + ruleHostName},
+		{"CIMD trusted hosts", "BYWARD_CIMD_TRUSTED_HOSTS=%s", ruleEdgeHyphen},
+		{"CIMD allowed hosts", "BYWARD_CIMD_ALLOWED_HOSTS=%s", ruleEdgeHyphen},
+		{"client denylist", "BYWARD_CLIENT_DENYLIST=%s", ruleEdgeHyphen},
 		{"listen", "BYWARD_LISTEN=%s:8080", "has a host that is neither an IP address nor a host name"},
 		{"internal listen", "BYWARD_INTERNAL_LISTEN=%s:8081", "has a host that is neither an IP address nor a host name"},
 	}
@@ -1227,7 +1234,9 @@ func TestAListenAddressIsHostColonANumericPortAndARefusedOneIsNeverShown(t *test
 		"[fe80::1%eth0]:80", "[::ffff:127.0.0.1]:80", "[2001:db8:0:0:0:0:0:1]:80",
 		// A zone is a name an interface can have (#638): Linux's and macOS's, 15 bytes at most, or an
 		// interface index, which Go takes as a number.
-		"[fe80::1%en0]:80", "[fe80::1%utun3]:0", "[fe80::1%bridge100]:0", "[fe80::1%2]:80", "[fe80::1%abcdefghijklmno]:0"} {
+		"[fe80::1%en0]:80", "[fe80::1%utun3]:0", "[fe80::1%bridge100]:0", "[fe80::1%2]:80", "[fe80::1%abcdefghijklmno]:0",
+		// A hyphen inside a label and an internationalized name in its xn-- form keep the host name rule.
+		"a-b.example:8080", "xn--bcher-kva.example:8080"} {
 		for _, name := range []string{"BYWARD_LISTEN", "BYWARD_INTERNAL_LISTEN"} {
 			if _, err := load(t, nil, "BYWARD_LISTEN=127.0.0.1:1", name+"="+ok); err != nil {
 				t.Errorf("%s=%q: %v", name, ok, err)
@@ -1239,8 +1248,10 @@ func TestAListenAddressIsHostColonANumericPortAndARefusedOneIsNeverShown(t *test
 		{"https://u:" + canaryText + "@h.example/x", "it is not host:port"},
 		{"//h.example/x?k=" + canaryText + ":80", "its host " + ruleNameChar + "1" + ruleNameChars},
 		{"h.example..:80", "it has a host that is neither an IP address nor a host name"},
+		{".:80", "it has a host that is neither an IP address nor a host name"},     // "." once its trailing dot is stripped
 		{"[::g]:80", "it has a host that is neither an IP address nor a host name"}, // no name, so no character place
-		// "~" is a host character in RFC 3986 that no DNS name holds (ADR-0032 §3, D4).
+		// "~" is a host character in RFC 3986 that no DNS name holds (ADR-0032 §3, D4). validHostName
+		// refuses it too (#524), but the character rule comes first and names its place.
 		{"s3cret~" + canaryText + ":80", "its host " + ruleNameChar + "7" + ruleNameChars},
 		{"my$byward:80", "its host " + ruleNameChar + "3" + ruleNameChars},
 		// The host is read before the port, so a bad host is named even beside a bad port.
@@ -1440,11 +1451,58 @@ func TestAnUnsetTenantIsRefusedOnlyAsRequired(t *testing.T) {
 	}
 }
 
+// The server-matched lists warn about the entries client registration cannot tell apart, by place
+// and the setting as given (ADR-0032 R7): a CIMD list's entries folded by case, the denylist's by the
+// key client registration gives (here a stand-in, strings.ToLower; registration's
+// TestADenylistKeyIsSharedExactlyByEntriesDenyingTheSame pins the real one), and an allowed host that
+// is also trusted, which is always allowed. A denylist host that is also trusted is no duplicate: the
+// lists do different things.
+func TestTheServerMatchedListsWarnAboutEntriesRegistrationCannotTellApart(t *testing.T) {
+	const same, trusted = "name the same %s once folded (%s)", "is also in %s, whose hosts are always allowed"
+	const denyFolds = "case, a trailing dot, an internationalized host by its xn-- form, an IP address's spelling, a default port, percent-encoding in the path"
+	for _, tc := range []struct {
+		name string
+		args []string
+		env  []string
+		want []ListWarning
+	}{
+		{"trusted hosts by case", nil, []string{"BYWARD_CIMD=true", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai,Claude.AI"}, []ListWarning{
+			{"BYWARD_CIMD_TRUSTED_HOSTS", "entries 1 and 2 of 2 " + fmt.Sprintf(same, "host", "case"), "remove one of them"}}},
+		{"allowed hosts by case", nil, []string{"BYWARD_CIMD=true", "BYWARD_CIMD_ALLOWED_HOSTS=a.example,b.example,B.EXAMPLE"}, []ListWarning{
+			{"BYWARD_CIMD_ALLOWED_HOSTS", "entries 2 and 3 of 3 " + fmt.Sprintf(same, "host", "case"), "remove one of them"}}},
+		{"an allowed host that is also trusted", nil, []string{"BYWARD_CIMD=true", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai", "BYWARD_CIMD_ALLOWED_HOSTS=a.example,CLAUDE.ai"}, []ListWarning{
+			{"BYWARD_CIMD_ALLOWED_HOSTS", "entry 2 of 2 " + fmt.Sprintf(trusted, "BYWARD_CIMD_TRUSTED_HOSTS"), "remove it"}}},
+		{"named as given", []string{"--cimd-trusted-hosts", "claude.ai", "--cimd-allowed-hosts", "claude.ai,a.example,A.example"}, []string{"BYWARD_CIMD=true"}, []ListWarning{
+			{"--cimd-allowed-hosts", "entry 1 of 3 " + fmt.Sprintf(trusted, "--cimd-trusted-hosts"), "remove it"},
+			{"--cimd-allowed-hosts", "entries 2 and 3 of 3 " + fmt.Sprintf(same, "host", "case"), "remove one of them"}}},
+		{"denylist entries with one key", nil, []string{"BYWARD_CLIENT_DENYLIST=a.example,B.example,https://c.example/x,b.EXAMPLE,a.example"}, []ListWarning{
+			{"BYWARD_CLIENT_DENYLIST", "entries 2 and 4 of 5 " + fmt.Sprintf(same, "host or client ID", denyFolds), "remove one of them"},
+			{"BYWARD_CLIENT_DENYLIST", "entries 1 and 5 of 5 " + fmt.Sprintf(same, "host or client ID", denyFolds), "remove one of them"}}},
+		{"denylist named as given", []string{"--client-denylist", "a.example,A.example"}, nil, []ListWarning{
+			{"--client-denylist", "entries 1 and 2 of 2 " + fmt.Sprintf(same, "host or client ID", denyFolds), "remove one of them"}}},
+		// Removing every allowed host would empty the list, which allows any host: no "remove it" then.
+		{"allowed hosts that are all trusted", nil, []string{"BYWARD_CIMD=true", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai,vscode.dev", "BYWARD_CIMD_ALLOWED_HOSTS=claude.ai,VSCODE.dev"}, nil},
+		{"a denylist host that is also trusted", nil, []string{"BYWARD_CIMD=true", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai", "BYWARD_CLIENT_DENYLIST=claude.ai"}, nil},
+		{"distinct entries", nil, []string{"BYWARD_CIMD=true", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai,app.claude.ai", "BYWARD_CIMD_ALLOWED_HOSTS=a.example,b.example",
+			"BYWARD_CLIENT_DENYLIST=app.example,https://app.example/c.json"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := load(t, tc.args, tc.env...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := append(c.ListWarnings, c.DenylistWarnings(strings.ToLower)...); !slices.Equal(got, tc.want) {
+				t.Fatalf("warnings %+v\nwant %+v", got, tc.want)
+			}
+		})
+	}
+}
+
 // The browser-matched lists warn about the entries a browser cannot tell apart, each pair by place and
 // the setting as given, never by value (ADR-0032 R7): folded by case, an IP address's spelling and a
 // default port; a third copy is paired with the first; each entry that is the public URL's own is
 // named once, never also as a pair; distinct entries warn nothing (the startup, check and doctor
-// output: internal/server's TestDuplicateHostsAndOriginsAreAWarningByPlaceAlike).
+// output: internal/server's TestDuplicateHostListEntriesAreAWarningByPlaceAlike).
 func TestDuplicateAllowedHostsAndOriginsWarnByPlace(t *testing.T) {
 	const same, self = "name the same %s once folded (case, an IP address's spelling, a default port)", "is the public URL's %s, which is always allowed"
 	for _, tc := range []struct {

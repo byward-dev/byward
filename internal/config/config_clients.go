@@ -1,6 +1,7 @@
 package config
 
 import (
+	"net/netip"
 	"net/url"
 	"strings"
 
@@ -69,10 +70,13 @@ func denylistReason(e string) string {
 		// A CIMD client ID, which registration.NewDenylist checks in full. Config refuses here,
 		// before the startup log lists the settings, only the forms that can carry a credential:
 		// a user name or password, a query or fragment, or no URL at all with an @ in it
-		// (security invariant 2). The rest stays registration's rule.
+		// (security invariant 2), and an IPv6 zone, which no URL carries (#644). The rest stays
+		// registration's rule.
 		switch u, err := url.Parse(e); {
 		case err == nil && u.User != nil:
 			return "is a CIMD client ID with a user name or password"
+		case err == nil && hasZone(u.Hostname()):
+			return zoneInURLReason
 		case strings.ContainsAny(e, "?#"):
 			return "is a CIMD client ID with a query or a fragment"
 		case err != nil && strings.Contains(e, "@"):
@@ -81,14 +85,17 @@ func denylistReason(e string) string {
 		return ""
 	}
 	// A trailing dot names the same host; host.BrowserName folds it away.
-	name := strings.TrimSuffix(e, ".")
-	if reason := hostNameReason(name); reason != "" { // neither a CIMD client ID nor a host name
-		return reason
-	}
-	if host.EndsInANumber(name) {
-		return "ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1, 0x7f000001) that no entry can match (127.1 and 0x7f000001 are 127.0.0.1), or none at all; deny the app by its CIMD client ID or its redirect host's name"
-	}
-	return ""
+	return hostNameReason(strings.TrimSuffix(e, ".")) // neither a CIMD client ID nor a host name, or an address
+}
+
+// zoneInURLReason is why a URL entry is refused for an IPv6 zone, which a URL cannot carry (#644). It
+// is #650's urlZoneReason, under its own name until both have merged.
+const zoneInURLReason = "has an IPv6 zone, which a URL cannot carry; give the address without its %zone"
+
+// hasZone reports whether h, a host without brackets, is an IPv6 address with a zone.
+func hasZone(h string) bool {
+	a, err := netip.ParseAddr(h)
+	return err == nil && a.Zone() != ""
 }
 
 // parseCIMDHosts reads a CIMD host list (cimd-trusted-hosts, cimd-allowed-hosts): host names, in
@@ -108,18 +115,31 @@ func parseCIMDHosts(val Value) ([]string, []error) {
 	return list, errs
 }
 
-// hostNameReason says why h is not a host name an operator's host list can match on (#344), or ""
-// when it is: ASCII (an internationalized name in its xn-- form), validHostName's characters and
-// labels, and at least one dot, since a single label is not a host any client uses. It completes
-// "it …".
+// hostNameReason says why h is not a host name a server-matched host list can match on (ADR-0032
+// §2, class S; #344), or "" when it is. It completes "it …". The name takes the character rule
+// (nameReason: ASCII, an internationalized name in its xn-- form, and the label rule), as the
+// browser-matched settings do. It is not an IP address (R6) and does not end in a number (R5): an
+// address is reached by spellings no entry matches. It has at least one dot, since a single label is
+// not a host any client uses.
 func hostNameReason(h string) string {
+	if reason := nameReason(h); reason != "" {
+		return reason
+	}
+	_, ipErr := netip.ParseAddr(h)
 	switch {
-	case notASCII(h):
-		return reasonNotASCII
-	case !validHostName(h):
-		return "breaks the host name rule: " + hostNameRule
+	case ipErr == nil:
+		return reasonIPHost
+	case host.EndsInANumber(h):
+		return reasonReadAsIPv4
 	case !strings.Contains(h, "."):
 		return "has no dot; give a name with at least one dot"
 	}
 	return ""
 }
+
+// reasonIPHost is why a server-matched host list refuses an IP address (ADR-0032 R6), completing "it …".
+const reasonIPHost = "is an IP address, which this list never names: an address is also reached by other spellings (127.1 and 0x7f000001 are 127.0.0.1) that no entry can match; give a host name"
+
+// reasonReadAsIPv4 is why a server-matched host list refuses a name ending in a number (ADR-0032
+// R5), completing "it …".
+const reasonReadAsIPv4 = "ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1 and 0x7f000001 are 127.0.0.1) that no entry can match, or none at all; give a host name"

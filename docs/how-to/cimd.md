@@ -15,8 +15,22 @@ need no registration. This is on by default, and the proxy advertises it in its 
 | `BYWARD_CIMD_ALLOWED_HOSTS` | — | When set, only these hosts and the trusted ones may publish documents; any other app is refused before its document is fetched. Empty allows any host. |
 
 Hosts are exact, comma-separated ASCII names, with no scheme, port, path or wildcard: letters,
-digits and `- . _ ~` only, at least one dot, and no leading, trailing or double dot. A subdomain is
-a different host. An internationalized host goes in its `xn--` form.
+digits and `- . _` only, at least one dot, no leading, trailing or double dot, and no label that
+starts or ends with a hyphen. A subdomain is a different host. An internationalized host goes in its
+`xn--` form. An IP address (`203.0.113.5`, `::1`) and a name ending in a number (`127.1`,
+`0x7f.0.0.1`, `mcp.10`), which a browser reads as an IPv4 address, are refused at startup: an address
+is reached by other spellings too, which no entry could match.
+
+A client ID's host matches an entry in any letter case and with one trailing dot, so
+`https://claude.ai./…` is the trusted `claude.ai`; the document's `client_id` must still be its URL
+exactly. Nothing else is folded: a client ID whose host is written in Unicode (percent-encoded) never
+matches the entry for its `xn--` form, so it shows as "Identified by its web address", or is refused
+when `BYWARD_CIMD_ALLOWED_HOSTS` is set.
+
+Entries that name the same host (in any letter case), and an allowed host that is also trusted
+(trusted hosts are always allowed), still load, with a warning that names them by their place in the
+list. When every allowed host is also trusted there is no such warning: removing them all would
+empty `BYWARD_CIMD_ALLOWED_HOSTS`, which allows any host.
 
 Any other host's apps show as "Identified by its web address". Every CIMD app's consent page shows
 the host that published its document ("Published by"), and warns when the app returns to an

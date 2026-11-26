@@ -25,8 +25,9 @@ func IsCIMDURL(id string) bool { return strings.HasPrefix(id, "https://") }
 
 // ValidateCIMDURL applies draft -03 §3 to a client ID, compared as written (no normalisation):
 // https, a host, a path other than "/", no userinfo, dot segments, query or fragment. Stricter than
-// the draft: a query is refused (its SHOULD NOT), the host is plain ASCII (clients send IDNs in
-// their xn-- form), and only port 443 is fetched (the SSRF guard).
+// the draft: a query is refused (its SHOULD NOT), the URL is printable ASCII (clients send IDNs in
+// their xn-- form; a percent-encoded Unicode host passes, and cimdHost does not fold it to xn--), the
+// host is not only dots, and only port 443 is fetched (the SSRF guard).
 func ValidateCIMDURL(id string) error {
 	reject := func(r string) error { return &cimdURLError{Reason: r} }
 	switch {
@@ -48,6 +49,9 @@ func ValidateCIMDURL(id string) error {
 	if u.Hostname() == "" { // https://:443/x: url.Parse puts the port in u.Host (#625)
 		return reject("must have a host before its port")
 	}
+	if strings.Trim(u.Hostname(), ".") == "" { // https://./x: no name once cimdHost folds the dot
+		return reject("must have a host name")
+	}
 	if u.User != nil {
 		return reject("must not contain user information")
 	}
@@ -66,10 +70,15 @@ func ValidateCIMDURL(id string) error {
 	return nil
 }
 
-// cimdHost is the lower-cased host of a valid CIMD URL, for trust decisions and display.
+// cimdHost is the host of a valid CIMD URL as the operator's host lists name it, for trust decisions
+// and display: in lower case, without one trailing dot (ADR-0032 A2), since claude.ai. is the host
+// claude.ai is. It folds nothing else, IDNA included: the fetcher's transport maps a Unicode host
+// (%-escapes decoded) with Go's IDNA lookup profile, which refuses names the browser's profile maps
+// ("_", "--") and then dials the name as written, so no one IDNA fold provably names the host fetched.
+// A Unicode host never matches a listed xn-- one: narrower, never wider.
 func cimdHost(id string) string {
 	u, _ := url.Parse(id)
-	return strings.ToLower(u.Hostname())
+	return strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
 }
 
 // parseCIMD validates a document fetched from id (draft -03 §4-6, ADR-0008 §2, ADR-0009): the

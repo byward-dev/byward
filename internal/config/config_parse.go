@@ -417,6 +417,23 @@ func notASCII(s string) bool { return strings.ContainsFunc(s, func(r rune) bool 
 // host:port …": a trailing dot names the root, a different host to a browser (WHATWG URL §3.1).
 const reasonEmptyLabel = "has an empty label (a leading, double or trailing dot); drop the extra dot"
 
+// nameReason says why name, a host, breaks the host name rule (ADR-0032 §3): a character no host name
+// holds (nameCharReason), an empty label, or a label that starts or ends with a hyphen (#630),
+// completing "it …" or "its host:port …"; "" when it keeps the rule, or is an IP address. Every host
+// setting but the upstream URL takes it: the browser-matched ones (hostPort), the server-matched ones
+// (hostNameReason) and the listen addresses (validHostName).
+func nameReason(name string) string {
+	switch reason := nameCharReason(name); {
+	case reason != "":
+		return reason
+	case host.HasEmptyLabel(name):
+		return reasonEmptyLabel
+	case host.HasEdgeHyphen(name):
+		return reasonEdgeHyphen
+	}
+	return ""
+}
+
 // reasonEdgeHyphen is why a host name with a label that starts or ends with a hyphen is refused,
 // completing "it …" or "its host:port …" (RFC 952, RFC 1123 §2.1; #630).
 const reasonEdgeHyphen = "has a label that starts or ends with a hyphen; a label starts and ends with a letter or a digit"
@@ -456,16 +473,8 @@ func hostPort(h string) (stored, reason string) {
 		if name == "" {
 			return "", `has no host before its ":"; ` + hostPortForms
 		}
-		// The browser-matched host name rule (ADR-0032 §2-3, class B): §3's characters, no empty
-		// label, and no label that starts or ends with a hyphen (#630).
-		if reason := nameCharReason(name); reason != "" {
+		if reason := nameReason(name); reason != "" {
 			return "", reason
-		}
-		if host.HasEmptyLabel(name) {
-			return "", reasonEmptyLabel
-		}
-		if host.HasEdgeHyphen(name) {
-			return "", reasonEdgeHyphen
 		}
 		port, hasPort = p, ok
 	}
@@ -557,9 +566,9 @@ func parseListen(val Value, want string) (string, error) {
 	raw := val.Given.raw()
 	host, port, err := net.SplitHostPort(raw)
 	_, ipErr := netip.ParseAddr(host) // an IPv6 address may have a zone, as a link-local one needs
-	nameReason, zone, zoned := "", "", false
+	charReason, zone, zoned := "", "", false
 	if !strings.Contains(host, ":") { // an IPv6 host is no name; a bad one is neither, below
-		nameReason = nameCharReason(host)
+		charReason = nameCharReason(host)
 	} else if addr, z, ok := strings.Cut(host, "%"); ok {
 		if a, err := netip.ParseAddr(addr); err == nil && a.Is6() { // a zone only on an IPv6 address
 			zone, zoned = z, true
@@ -573,8 +582,8 @@ func parseListen(val Value, want string) (string, error) {
 		reason = "it " + bracketsReason
 	case zoned && !validInterfaceName(zone):
 		reason = "it " + zoneReason
-	case nameReason != "":
-		reason = "its host " + nameReason
+	case charReason != "":
+		reason = "its host " + charReason
 	case host != "" && !validHostName(strings.TrimSuffix(host, ".")) && ipErr != nil:
 		reason = "it has a host that is neither an IP address nor a host name"
 	case !isDigits(port):
@@ -590,20 +599,8 @@ func parseListen(val Value, want string) (string, error) {
 	return raw, nil
 }
 
-// hostNameRule is what validHostName requires, for the errors of the settings that use it.
-const hostNameRule = "a host name has only letters, digits and - . _ ~, no label starts or ends with a hyphen, and no empty label (no leading or double dot; drop a trailing one)"
-
-// validHostName reports whether host is a name a host setting can match on: BYWARD_CIMD_TRUSTED_HOSTS,
-// BYWARD_CIMD_ALLOWED_HOSTS (#344), BYWARD_CLIENT_DENYLIST's host entries (through hostNameReason)
-// and the listen addresses' hosts; the browser-matched settings use hostPort's own rule. Not empty,
-// only RFC 3986's unreserved characters (a DNS name never uses reg-name's sub-delims or %-escapes, which a Host
-// header or a URL could carry), and no empty label. A trailing dot is refused, not stripped: the
-// setting would match only a client given the absolute name, never the usual one, so it is almost
-// always copied from a DNS zone by mistake. Two settings strip one trailing dot first: the client
-// denylist (denylistReason), since its matching folds it away, and the listen addresses (parseListen),
-// since net.Listen takes it.
-func validHostName(name string) bool {
-	// "~" is ADR-0032 §3's host name characters' one extra here, which class S keeps until slice 4
-	// (#524); the listen addresses refuse it first.
-	return name != "" && strings.Trim(name, host.NameChars+"~") == "" && !host.HasEmptyLabel(name) && !host.HasEdgeHyphen(name)
-}
+// validHostName reports whether name, a listen address's host (parseListen), is a host name: not
+// empty, and keeping the host name rule (nameReason). An IP address keeps it too, so parseListen asks
+// only of a host that is not one; it strips one trailing dot first, since net.Listen takes it, and
+// refuses a bad character before, naming its place.
+func validHostName(name string) bool { return name != "" && nameReason(name) == "" }

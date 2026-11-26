@@ -1,6 +1,6 @@
 # ADR-0032: One host rule
 
-- Status: Accepted; amended 2026-11-21 (#521)
+- Status: Accepted; amended 2026-11-21 (#521), 2026-11-26 (#524)
 - Date: 2026-11-19
 - Issue: #520 (tracker #486); amends ADR-0018 §1–2, ADR-0020 §4 and ADR-0008 §4, §8–9
 
@@ -127,6 +127,20 @@ shape's refusal.
 | **S, server-matched names** | `BYWARD_CIMD_TRUSTED_HOSTS`, `BYWARD_CIMD_ALLOWED_HOSTS`, the client denylist's hosts, and the matching at request time | Both sides parsed. A setting must be a name with at least one dot. A setting's trailing dot stays refused (the denylist strips one, as on `main`); at request time a trailing dot on the host being checked is folded, so it matches the entry without one (A2). IDN names are folded (the denylist adds its transitional fold). |
 | **X, exact identifiers** | Redirect URIs, the OIDC issuer, client IDs, the assertion's `aud` | Not normalized; compared byte for byte. The loopback redirect set stays exact (§5). Only the `--dev` issuer relaxation asks `Parse(…).Loopback()`. |
 | **O, operator addresses** | `BYWARD_UPSTREAM_URL`, `BYWARD_LISTEN`, `BYWARD_INTERNAL_LISTEN`, `BYWARD_TRUSTED_PROXIES`, `X-Forwarded-For` | The host part of `BYWARD_UPSTREAM_URL`, `BYWARD_LISTEN` and `BYWARD_INTERNAL_LISTEN` takes the character rule of §3 (slice 2, #522); otherwise these are left to Go's dialer, and the trusted proxies and `X-Forwarded-For` to netip. Only the no-auth loopback check asks `Parse(…).Loopback()`. |
+
+_Amended 2026-11-26 (#524):_ "IDN names are folded" in class S means the settings' `xn--` form and the
+denylist's two folds. The CIMD trust and allow check folds case and one trailing dot only, never IDNA.
+Go's transport dials a Unicode host (a percent-encoded one in a client ID) by its own IDNA lookup
+profile (`net/http`'s `idnaASCII`, `idna.Lookup`), which is not the browser's and dials the name as
+written when it fails, so no one fold provably names the host fetched; folding with that profile would
+tie a trust decision to Go's IDNA tables. A Unicode client ID host therefore never matches a listed
+`xn--` one: the check only narrows. The denylist's client ID entries fold an IP address's spelling
+(`host.Serialize`: `https://127.1/…` is `https://127.0.0.1/…`, `[0:0::1]` is `[::1]`; an IPv4-mapped
+address is the IPv4 address it is dialed as, `[::ffff:8.8.8.8]` is `8.8.8.8`), which only
+widens; `ValidateCIMDURL` still accepts a client ID at an IP address, and the SSRF guard refuses a
+private one at fetch. R7's warnings cover the client denylist too, each entry keyed as the denylist
+matches it (`registration.DenylistKey`, which internal/server hands to config's warning), and an
+allowed host that is also trusted, which is always allowed.
 
 **Why P is never rewritten.** IdPs and clients compare it exactly (RFC 8414 §3.3, RFC 9728 §3.3),
 a browser client holds the canonical form (WHATWG §3.3, §4.4), and the IdP redirect URI is registered

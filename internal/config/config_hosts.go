@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/netip"
 	"net/url"
+	"slices"
 
 	"github.com/byward-dev/byward/internal/host"
 )
@@ -68,22 +69,62 @@ func (c *Config) browserListWarnings() []ListWarning {
 	for i, h := range c.AllowedHosts {
 		hostKeys[i] = host.MatchKey(h)
 	}
-	return append(c.foldedDuplicates("allowed-hosts", "host", folds, hostKeys, host.MatchKey(c.PublicURL.Host)),
-		c.foldedDuplicates("allowed-origins", "origin", folds, c.AllowedOrigins, c.Origin())...)
+	return append(c.foldedDuplicates("allowed-hosts", "host", folds, hostKeys, ownedByPublicURL("host", host.MatchKey(c.PublicURL.Host))),
+		c.foldedDuplicates("allowed-origins", "origin", folds, c.AllowedOrigins, ownedByPublicURL("origin", c.Origin()))...)
+}
+
+// serverListWarnings are the R7 warnings of the CIMD lists (ADR-0032 §2, class S): their entries are
+// stored in lower case, as the CIMD registry compares them, and a trusted host is always allowed, so
+// an allowed host that is also trusted is one too many, unless every allowed host is: removing them
+// all would empty the allowed list, which allows any host. The client denylist's are
+// DenylistWarnings.
+func (c *Config) serverListWarnings() []ListWarning {
+	trusted := alwaysAllowed{map[string]bool{}, "is also in " + c.Values.NameAsGiven("cimd-trusted-hosts") + ", whose hosts are always allowed"}
+	for _, h := range c.CIMDTrustedHosts {
+		trusted.keys[h] = true
+	}
+	if !slices.ContainsFunc(c.CIMDAllowedHosts, func(h string) bool { return !trusted.keys[h] }) {
+		trusted = alwaysAllowed{} // the allowed list holds only trusted hosts: it is what closes the gate
+	}
+	return append(c.foldedDuplicates("cimd-trusted-hosts", "host", "case", c.CIMDTrustedHosts, alwaysAllowed{}),
+		c.foldedDuplicates("cimd-allowed-hosts", "host", "case", c.CIMDAllowedHosts, trusted)...)
+}
+
+// DenylistWarnings are the R7 warnings of the client denylist (ADR-0032 R7): its entries with one
+// key, each keyed by key as client registration matches it (registration.DenylistKey), which config
+// does not import.
+func (c *Config) DenylistWarnings(key func(entry string) string) []ListWarning {
+	keys := make([]string, len(c.ClientDenylist))
+	for i, e := range c.ClientDenylist {
+		keys[i] = key(e)
+	}
+	return c.foldedDuplicates("client-denylist", "host or client ID", "case, a trailing dot, an internationalized host by its xn-- form, an IP address's spelling, a default port, percent-encoding in the path", keys, alwaysAllowed{})
+}
+
+// alwaysAllowed are the keys of entries a list need not hold, since they are allowed anyway, and why,
+// completing "entry i of n …".
+type alwaysAllowed struct {
+	keys map[string]bool
+	why  string
+}
+
+// ownedByPublicURL is the alwaysAllowed of the public URL's own host or origin (what), keyed as key.
+func ownedByPublicURL(what, key string) alwaysAllowed {
+	return alwaysAllowed{map[string]bool{key: true}, "is the public URL's " + what + ", which is always allowed"}
 }
 
 // foldedDuplicates are the warnings for the list setting name, whose entries are keyed as keys: each
-// later entry with an earlier one's key, and each entry whose key is self, the key of an entry always
-// allowed anyway (the public URL's own). what names the kind of entry ("host", "origin") and folds
-// what the keys fold, in the message.
-func (c *Config) foldedDuplicates(name, what, folds string, keys []string, self string) []ListWarning {
+// later entry with an earlier one's key, and each entry whose key is in always.keys, which is allowed
+// anyway (always.why says why). what names the kind of entry ("host", "origin", "host or client
+// ID") and folds what the keys fold, in the message.
+func (c *Config) foldedDuplicates(name, what, folds string, keys []string, always alwaysAllowed) []ListWarning {
 	var out []ListWarning
 	setting, of := c.Values.NameAsGiven(name), len(keys)
 	first := map[string]int{}
 	for i, k := range keys {
 		switch j, seen := first[k]; {
-		case k == self:
-			out = append(out, ListWarning{setting, fmt.Sprintf("%s is the public URL's %s, which is always allowed", entry{i, of}, what), "remove it"})
+		case always.keys[k]:
+			out = append(out, ListWarning{setting, fmt.Sprintf("%s %s", entry{i, of}, always.why), "remove it"})
 		case seen:
 			out = append(out, ListWarning{setting, fmt.Sprintf("%s name the same %s once folded (%s)", entry{j, of}.and(entry{i, of}), what, folds), "remove one of them"})
 		default:

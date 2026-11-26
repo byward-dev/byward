@@ -278,3 +278,56 @@ type reasoned string
 func (r reasoned) Client(context.Context, string) (Client, error) {
 	return nil, fmt.Errorf("%w: %s", ErrUnknownClient, string(r))
 }
+
+// Two denylist entries share a key exactly when each denies what the other does, either way round:
+// the key config's duplicate warning compares (ADR-0032 R7). A denylist matches more spellings, never
+// fewer: an IP address in any spelling, an IPv4-mapped one as the IPv4 address it is dialed as. A
+// host and a client ID on that host never share one, nor do two hosts only one of which reaches the
+// other by the transitional fold. Each direction is checked on its own.
+func TestADenylistKeyIsSharedExactlyByEntriesDenyingTheSame(t *testing.T) {
+	denies := func(entry, spelling string) bool {
+		d, err := NewDenylist([]string{entry})
+		if err != nil {
+			t.Fatalf("entry %q: %v", entry, err)
+		}
+		if IsCIMDURL(spelling) {
+			return d.DeniesClient(spelling)
+		}
+		return d.DeniesRedirect("https://" + spelling + "/cb")
+	}
+	for _, c := range []struct {
+		a, b string
+		same bool
+		// aDeniesB is a one-way match: the entry a denies the spelling b, not b a.
+		aDeniesB bool
+	}{
+		{"app.example", "App.Example.", true, false},
+		{"xn--bcher-kva.example", "BÜCHER.example", true, false},
+		{"https://app.example/c.json", "https://App.example.:443/c.json", true, false},
+		{"https://app.example/c.json", "https://app.example/%63.json", true, false},
+		{"https://xn--bcher-kva.example/c.json", "https://b%C3%BCcher.example/c.json", true, false},
+		{"https://127.1/c.json", "https://127.0.0.1/c.json", true, false},
+		{"https://127.0.0.1/c.json", "https://0x7f.0.0.1/c.json", true, false},
+		{"https://127.0.0.1/c.json", "https://127.0.0.1./c.json", true, false},
+		{"https://[0:0::1]/c.json", "https://[::1]/c.json", true, false},
+		{"https://[::1]/c.json", "https://[::1]:443/c.json", true, false},
+		{"https://[::ffff:8.8.8.8]/c.json", "https://8.8.8.8/c.json", true, false},
+		{"https://[::ffff:808:808]/c.json", "https://8.8.8.8/c.json", true, false},
+		{"app.example", "https://app.example/c.json", false, false},
+		{"https://app.example/c.json", "https://app.example/d.json", false, false},
+		{"https://127.0.0.1/c.json", "https://127.0.0.2/c.json", false, false},
+		{"https://[::1]/c.json", "https://[::2]/c.json", false, false},
+		{"app.example", "other.example", false, false},
+		{"fass.example", "faß.example", false, true}, // the transitional fold reaches faß from fass, not back
+	} {
+		if same := DenylistKey(c.a) == DenylistKey(c.b); same != c.same {
+			t.Errorf("DenylistKey(%q) == DenylistKey(%q) is %v, want %v", c.a, c.b, same, c.same)
+		}
+		if got, want := denies(c.a, c.b), c.same || c.aDeniesB; got != want {
+			t.Errorf("entry %q denies %q: %v, want %v (keys %q, %q)", c.a, c.b, got, want, DenylistKey(c.a), DenylistKey(c.b))
+		}
+		if got := denies(c.b, c.a); got != c.same {
+			t.Errorf("entry %q denies %q: %v, want %v (keys %q, %q)", c.b, c.a, got, c.same, DenylistKey(c.b), DenylistKey(c.a))
+		}
+	}
+}

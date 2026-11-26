@@ -48,8 +48,8 @@ type Warning struct {
 	Message string
 	// Setting is the setting at fault, or empty. A certificate, the serving certificate or the Entra
 	// client certificate, is named as the operator gave it, by its flag too, in the log as well (#619),
-	// and so is a browser-matched list in its duplicate warnings (config.ListWarning, ADR-0032 R7);
-	// other settings are named by their variable (#623).
+	// and so is a host list in its duplicate warnings, and a setting a warning names in its message
+	// (config.ListWarning, ADR-0032 R7); other settings are named by their variable (#623).
 	Setting string
 	Fix     string
 }
@@ -100,10 +100,10 @@ func configWarnings(cfg *config.Config, parts *authParts) ([]Warning, error) {
 	return append(append(append(slices.Clone(parts.warnings), store...), redundantStrips(cfg)...), listWarnings(cfg)...), nil
 }
 
-// listWarnings are the browser-matched lists' entries a browser cannot tell apart (ADR-0032 R7).
+// listWarnings are the host lists' entries their checks cannot tell apart once folded (ADR-0032 R7).
 func listWarnings(cfg *config.Config) []Warning {
 	var out []Warning
-	for _, w := range cfg.ListWarnings {
+	for _, w := range append(slices.Clone(cfg.ListWarnings), cfg.DenylistWarnings(registration.DenylistKey)...) {
 		out = append(out, Warning{Message: w.Message, Setting: w.Setting, Fix: w.Fix})
 	}
 	return out

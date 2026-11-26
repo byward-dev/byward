@@ -18,7 +18,7 @@ import (
 var hostProbes = []string{
 	"mcp.example.com", "MCP.Example.com", "mcp.example.com.", "localhost", "LOCALHOST", "Localhost",
 	"127.0.0.1", "127.0.0.2", "127.1", "0x7f.0.0.1", "010.0.0.1", "2130706433", "0.0.0.0",
-	"mcp.10", "10.0.0.999", "[::1]", "[0:0::1]", "[2001:DB8::1]", "[::ffff:127.0.0.1]", "[fe80::1%25eth0]",
+	"mcp.10", "10.0.0.999", "[::1]", "[0:0::1]", "[2001:DB8::1]", "[::ffff:127.0.0.1]", "[fe80::1%25eth0]", "::1", "fe80::1%eth0", "app.0x",
 	"xn--bcher-kva.example", "bücher.example", "my_host.example", "my_mcp", "S3CRET~tok", "single", "a..b",
 	"mcp.example.com:443", "mcp.example.com:8443", "[::1]:8080", "localhost:80",
 }

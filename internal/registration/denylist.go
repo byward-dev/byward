@@ -3,6 +3,7 @@ package registration
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"strings"
 
@@ -18,10 +19,10 @@ type Denylist struct {
 }
 
 // NewDenylist parses entries: a CIMD client ID (an https URL) or a host name that redirect URIs
-// must not return to. Both match exactly up to spelling: the host's spelling (host.BrowserName: case, a
-// trailing dot, a full-width or internationalized name by its ASCII form), and for a URL the default
-// port and percent-encoding in the path. A redirect host also matches by its transitional fold
-// (DeniesRedirect).
+// must not return to. Both match exactly up to spelling (DenylistKey): the host's spelling
+// (host.BrowserName: case, a trailing dot, a full-width or internationalized name by its ASCII form),
+// and for a URL an IP address's spelling, the default port and percent-encoding in the path. A
+// redirect host also matches by its transitional fold (DeniesRedirect).
 // A refused entry is an *EntryError, which never holds the entry: config formats its refusal
 // (ADR-0031 §1).
 func NewDenylist(entries []string) (*Denylist, error) {
@@ -77,13 +78,29 @@ func (d *Denylist) DeniesRedirect(redirectURI string) bool {
 	return d.hosts[host.BrowserName(h)] || d.hosts[transitionalHost(h)]
 }
 
+// DenylistKey is entry as the denylist keys it: a CIMD client ID by canonicalCIMD, a host by its
+// browser fold. Two entries with one key deny the same clients and hosts; config warns about them
+// (ADR-0032 R7). An entry NewDenylist refuses has a key too.
+func DenylistKey(entry string) string {
+	if IsCIMDURL(entry) {
+		return canonicalCIMD(entry)
+	}
+	return host.BrowserName(entry)
+}
+
 // canonicalCIMD folds the spellings of one CIMD URL that fetch the same document: the host's
-// spelling (host.BrowserName), the default port and percent-encoding in the path. A denylist may match more
-// than one spelling, never fewer.
+// spelling (host.BrowserName; an IP address as browsers serialize it, host.Serialize, so 127.1 is
+// 127.0.0.1 and [0:0::1] is [::1]; an IPv4-mapped one as the IPv4 address it is dialed as), the port,
+// which is dropped (ValidateCIMDURL takes 443 only), and percent-encoding in the path. A denylist may
+// match more than one spelling, never fewer.
 func canonicalCIMD(id string) string {
 	u, err := url.Parse(id)
 	if err != nil {
 		return id
 	}
-	return "https://" + host.BrowserName(u.Hostname()) + u.Path
+	h := host.BrowserName(u.Hostname())
+	if a, err := netip.ParseAddr(h); err == nil && a.Is4In6() {
+		h = a.Unmap().String() // [::ffff:8.8.8.8] is dialed as 8.8.8.8
+	}
+	return "https://" + host.Serialize(h) + u.Path
 }

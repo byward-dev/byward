@@ -135,9 +135,11 @@ type Config struct {
 	InContainer bool
 
 	Values *Values
-	// ListWarnings are the browser-matched lists' entries that a browser cannot tell apart once folded
-	// (ADR-0032 R7): two that name the same host or origin, or one that names the public URL's own,
-	// which is always allowed. They load, as a warning: two spellings of one host do no harm.
+	// ListWarnings are the host lists' entries that their check cannot tell apart once folded (ADR-0032
+	// R7): two that name the same host or origin, or one that names a host always allowed anyway (the
+	// public URL's own; a trusted CIMD host in the allowed list). They load, as a warning: two
+	// spellings of one host do no harm. The client denylist's warnings are DenylistWarnings, which
+	// take registration's key.
 	ListWarnings []ListWarning
 	// Relaxations lists every relaxation in effect (--dev, --insecure-no-auth), for the startup log
 	// and check --offline (security invariant 12).
@@ -273,7 +275,7 @@ func validate(v *Values, container, dashes bool) (*Config, error) {
 	c.AllowedHosts, hostErrs = parseAllowedHosts(v.value("allowed-hosts"))
 	errs = append(errs, hostErrs...)
 	if c.PublicURL != nil { // a refused entry makes validate return no Config, so no place is ever wrong
-		c.ListWarnings = c.browserListWarnings()
+		c.ListWarnings = append(c.ListWarnings, c.browserListWarnings()...)
 	}
 	if c.ResourceDocumentation, err = parseResourceDocumentation(v.value("resource-documentation")); err != nil {
 		errs = append(errs, err)
@@ -289,6 +291,7 @@ func validate(v *Values, container, dashes bool) (*Config, error) {
 		for _, check := range authSettings {
 			errs = append(errs, check(c, v)...)
 		}
+		c.ListWarnings = append(c.ListWarnings, c.serverListWarnings()...) // a refused entry makes validate return no Config
 	}
 	errs = append(errs, c.upstreamCredential(v)...)
 	if !c.NoAuth {
