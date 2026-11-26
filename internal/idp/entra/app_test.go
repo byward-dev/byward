@@ -96,6 +96,7 @@ func TestAnAppOnlyTokenFailingAnyCheckIsRefused(t *testing.T) {
 		"a v1 token":                {claims: with("ver", "1.0")},
 		"another audience":          {claims: with("aud", other)},
 		"aud in upper case":         {claims: with("aud", strings.ToUpper(e.client.ID))}, // unlike oid, azp and tid: aud values are case-sensitive (RFC 7519 §4.1.3, #514)
+		"aud array in upper case":   {claims: with("aud", []string{strings.ToUpper(e.client.ID)})},
 		"two audiences":             {claims: with("aud", []string{e.client.ID, other})},
 		"no audience":               {claims: with("aud", nil)},
 		"expired":                   {claims: with("exp", now().Add(-idp.Leeway).Unix()), err: idp.ErrAppTokenExpired},
