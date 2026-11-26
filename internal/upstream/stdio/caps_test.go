@@ -84,7 +84,7 @@ func TestUserAtTheirCapEvictsTheirOwnLeastRecentlyUsedProcess(t *testing.T) {
 	if isDone(bob1) || isDone(alice2) {
 		t.Fatal("a process other than alice's least recently used one was stopped")
 	}
-	if _, _, err := h.m.leaseKey(context.Background(), "a1", alice, requestLease); !errors.Is(err, errNotFound) {
+	if _, err := h.m.leaseKey(context.Background(), "a1", alice, requestLease); !errors.Is(err, errNotFound) {
 		t.Fatalf("Lease of the evicted key = %v, want errNotFound", err)
 	}
 }
@@ -284,16 +284,16 @@ func pidOf(p *Process) any {
 
 func TestLookingUpAProcessNeverStartsOneAndRefusesAnotherUser(t *testing.T) {
 	h := newHarness(t, nil)
-	if _, _, err := h.m.leaseKey(context.Background(), "s1", alice, requestLease); !errors.Is(err, errNotFound) {
+	if _, err := h.m.leaseKey(context.Background(), "s1", alice, requestLease); !errors.Is(err, errNotFound) {
 		t.Fatalf("Lease of an unknown key = %v, want errNotFound", err)
 	}
 	p := h.get(t, "s1", alice)
-	if _, _, err := h.m.leaseKey(context.Background(), "s1", bob, requestLease); !errors.Is(err, ErrUserMismatch) {
+	if _, err := h.m.leaseKey(context.Background(), "s1", bob, requestLease); !errors.Is(err, ErrUserMismatch) {
 		t.Fatalf("Lease by another user = %v, want ErrUserMismatch", err)
 	}
 	h.m.Stop("s1")
 	waitDone(t, p)
-	if _, _, err := h.m.leaseKey(context.Background(), "s1", alice, requestLease); !errors.Is(err, errNotFound) {
+	if _, err := h.m.leaseKey(context.Background(), "s1", alice, requestLease); !errors.Is(err, errNotFound) {
 		t.Fatalf("Lease after exit = %v, want errNotFound", err)
 	}
 	if h.m.Len() != 0 {

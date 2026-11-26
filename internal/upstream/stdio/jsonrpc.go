@@ -246,8 +246,8 @@ func rpcError(id json.RawMessage, code int, message string) []byte {
 	return b
 }
 
-func writeRPCError(w http.ResponseWriter, status int, id json.RawMessage, code int, message string) {
+func writeRPCError(w http.ResponseWriter, id json.RawMessage, code int, message string) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
+	w.WriteHeader(http.StatusBadRequest)
 	_, _ = w.Write(rpcError(id, code, message))
 }

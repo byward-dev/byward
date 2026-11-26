@@ -10,6 +10,7 @@ linters:
     - unused
     - revive
     - gosec
+    - unparam
   settings:
     revive:
       rules:
@@ -25,6 +26,10 @@ linters:
         linters:
           - gosec
         text: "G101"
+      # unparam on test helpers is churn with no bug behind it (#673); production code is linted.
+      - path: _test\.go
+        linters:
+          - unparam
 
 formatters:
   enable:

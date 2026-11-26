@@ -239,27 +239,26 @@ func (m *Manager) get(ctx context.Context, key string, id Identity, kind leaseKi
 	}
 }
 
-// leaseKey returns the live process for key without spawning one, with a lease of the given kind
-// as in get. No
-// process, or one that is stopping, fails with errNotFound; one serving another user with
-// ErrUserMismatch.
-func (m *Manager) leaseKey(ctx context.Context, key string, id Identity, kind leaseKind) (*Process, func(), error) {
+// leaseKey leases the live process for key without spawning one, with a lease of the given kind as in
+// get, and returns its release. No process, or one that is stopping, fails with errNotFound; one
+// serving another user with ErrUserMismatch.
+func (m *Manager) leaseKey(ctx context.Context, key string, id Identity, kind leaseKind) (func(), error) {
 	m.mu.Lock()
 	e, ok := m.procs[key]
 	m.mu.Unlock()
 	if !ok {
-		return nil, nil, errNotFound
+		return nil, errNotFound
 	}
 	if e.id.user() != id.user() {
-		return nil, nil, ErrUserMismatch
+		return nil, ErrUserMismatch
 	}
 	p, release, err := m.lease(ctx, key, e, id, kind)
 	if err == nil && p.isStopping() {
 		// Not in lease: Get would spin on a stopping entry that still holds its key.
 		release()
-		return nil, nil, errNotFound
+		return nil, errNotFound
 	}
-	return p, release, err
+	return release, err
 }
 
 // lease waits for e's spawn and leases its process for id, whose request it serves next;

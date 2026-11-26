@@ -129,7 +129,7 @@ func (b *Bridge) post(w http.ResponseWriter, r *http.Request, id Identity, key s
 	}
 	msg, env, rpcErr := parseMessage(body)
 	if rpcErr != nil {
-		writeRPCError(w, http.StatusBadRequest, nil, rpcErr.code, rpcErr.msg)
+		writeRPCError(w, nil, rpcErr.code, rpcErr.msg)
 		return
 	}
 	var s *session
@@ -139,7 +139,7 @@ func (b *Bridge) post(w http.ResponseWriter, r *http.Request, id Identity, key s
 			b.modernPost(w, r, id, msg, env, meta)
 			return
 		} else if err != nil && looksModern(msg) {
-			writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest, "Invalid Request: "+err.Error())
+			writeRPCError(w, nil, codeInvalidRequest, "Invalid Request: "+err.Error())
 			return
 		}
 	}
@@ -273,7 +273,7 @@ func (b *Bridge) session(w http.ResponseWriter, r *http.Request, id Identity, ke
 		http.Error(w, "session not found", http.StatusNotFound)
 		return nil, nil
 	}
-	_, release, err := b.c.Manager.leaseKey(r.Context(), key, id, kind)
+	release, err := b.c.Manager.leaseKey(r.Context(), key, id, kind)
 	if err != nil {
 		if errors.Is(err, ErrUserMismatch) {
 			// The binding in front makes this unreachable; it is checked again where the process is.
@@ -286,7 +286,7 @@ func (b *Bridge) session(w http.ResponseWriter, r *http.Request, id Identity, ke
 	}
 	if problem := s.versionProblem(r.Header); problem != "" {
 		release()
-		writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest, problem)
+		writeRPCError(w, nil, codeInvalidRequest, problem)
 		return nil, nil
 	}
 	return s, release
@@ -406,7 +406,7 @@ func (s *session) request(w http.ResponseWriter, r *http.Request, msg []byte, id
 		case s.isEnded():
 			http.Error(w, "session not found", http.StatusNotFound)
 		default:
-			writeRPCError(w, http.StatusBadRequest, id, codeInvalidRequest, "a request with this id is already in flight")
+			writeRPCError(w, id, codeInvalidRequest, "a request with this id is already in flight")
 		}
 		return
 	}

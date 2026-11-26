@@ -77,7 +77,7 @@ func durationReason(err error) string {
 }
 
 // parseWholeNumber reads a whole number from lo to hi. One out of range is shown as the parser read it.
-func parseWholeNumber(val Value, lo, hi int) (int, error) {
+func parseWholeNumber(val Value, lo, hi int) (int, error) { //nolint:unparam // the range is the setting's, not the parser's; the stdio caps are its only caller today
 	raw := val.Given.raw()
 	want := fmt.Sprintf("a whole number from %d to %d", lo, hi)
 	n, err := strconv.Atoi(raw)

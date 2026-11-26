@@ -264,7 +264,7 @@ func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity,
 	}
 	switch env.kind() {
 	case kindResponse: // the modern era has no server-to-client requests to answer (MRTR instead)
-		writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest, "Invalid Request: no request awaits a client response")
+		writeRPCError(w, nil, codeInvalidRequest, "Invalid Request: no request awaits a client response")
 		return
 	case kindNotification:
 		if env.Method == "notifications/cancelled" {
@@ -274,11 +274,11 @@ func (b *Bridge) modernPost(w http.ResponseWriter, r *http.Request, id Identity,
 		}
 	case kindRequest:
 		if err := meta.checkRequest(msg); err != nil { // refused before any process starts
-			writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest, "Invalid Request: "+err.Error())
+			writeRPCError(w, nil, codeInvalidRequest, "Invalid Request: "+err.Error())
 			return
 		}
 		if err := checkHeaders(r.Header, env.Method, meta.version, msg); err != nil {
-			writeRPCError(w, http.StatusBadRequest, meta.id.value(msg), codeHeaderMismatch, "Header mismatch: "+err.Error())
+			writeRPCError(w, meta.id.value(msg), codeHeaderMismatch, "Header mismatch: "+err.Error())
 			return
 		}
 	}
@@ -323,7 +323,7 @@ func userProcessKey(id Identity) string { return "user:" + id.user() }
 // code, so a dual-era client falls back to initialize (2026-07-28 transports, backwards
 // compatibility).
 func legacyFallback(w http.ResponseWriter) {
-	writeRPCError(w, http.StatusBadRequest, nil, codeInvalidRequest,
+	writeRPCError(w, nil, codeInvalidRequest,
 		"Bad Request: this server speaks MCP 2025-11-25; start a session with initialize")
 }
 

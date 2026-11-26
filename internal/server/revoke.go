@@ -72,7 +72,7 @@ func RevokeUser(ctx context.Context, cfg *config.Config, log *slog.Logger, key s
 		return "", "", ErrNotAUserKey
 	}
 	e, _ := operatorRevocationEvent(store.Revocation{Subject: user})
-	where, err = revoke(ctx, cfg, log, e,
+	where, err = revoke(cfg, log, e,
 		func(st store.Grants, now time.Time) error { return st.RevokeSubject(ctx, user, now, now) })
 	return user, where, err
 }
@@ -84,13 +84,13 @@ func RevokeAll(ctx context.Context, cfg *config.Config, log *slog.Logger) (where
 		return "", ErrNeedsAuthentication
 	}
 	e, _ := operatorRevocationEvent(store.Revocation{All: true})
-	return revoke(ctx, cfg, log, e,
+	return revoke(cfg, log, e,
 		func(st store.Grants, now time.Time) error { return st.RevokeAll(ctx, now, now) })
 }
 
 // revoke opens the configured store, which must exist (openExistingStore), runs do with the current
 // time, audits e once it is stored, and names the store.
-func revoke(ctx context.Context, cfg *config.Config, log *slog.Logger, e audit.Event, do func(store.Grants, time.Time) error) (string, error) {
+func revoke(cfg *config.Config, log *slog.Logger, e audit.Event, do func(store.Grants, time.Time) error) (string, error) {
 	rec := audit.New(log, nil, time.Now)
 	st, err := openExistingStore(cfg, log, rec)
 	if err != nil {
