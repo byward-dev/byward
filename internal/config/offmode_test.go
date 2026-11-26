@@ -13,10 +13,6 @@ const (
 	toHTTP  = "is set, but the upstream is stdio: it applies only to an HTTP upstream (BYWARD_UPSTREAM_URL); remove it"
 )
 
-// httpOnlySettings are the settings outside the upstream groups that only an HTTP upstream reads,
-// written out here rather than read from httpOnly, so a change to it fails a test.
-var httpOnlySettings = map[string]bool{"assertion-keys-dir": true, "assertion-header": true, "assertion-claims": true, "assertion-unverified-email": true}
-
 // A setting given for the upstream mode that is off is refused at load, named as the operator gave
 // it, in both directions and however it was given; before, the HTTP upstream's stdio settings were
 // not even parsed (BYWARD_STDIO_MAX_PROCESSES=-5 loaded). The selectors keep their own errors.
@@ -44,11 +40,6 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 		{name: "the stdio env file given as a flag", args: []string{"--upstream-env-file=/run/secrets/upstream-env"}, want: "--upstream-env-file " + toStdio},
 		{name: "the header timeout with stdio", stdio: true, env: []string{"BYWARD_UPSTREAM_HEADER_TIMEOUT=abc"}, want: "BYWARD_UPSTREAM_HEADER_TIMEOUT " + toHTTP},
 		{name: "the strip list with stdio", stdio: true, env: []string{"BYWARD_UPSTREAM_STRIP_HEADERS=X-Api-Url"}, want: "BYWARD_UPSTREAM_STRIP_HEADERS " + toHTTP},
-		{name: "the assertion header with stdio", stdio: true, env: []string{"BYWARD_ASSERTION_HEADER=X-Byward-Identity"}, want: "BYWARD_ASSERTION_HEADER " + toHTTP},
-		{name: "the assertion claims with stdio", stdio: true, env: []string{"BYWARD_ASSERTION_CLAIMS=email"}, want: "BYWARD_ASSERTION_CLAIMS " + toHTTP},
-		{name: "the unverified-email opt-in with stdio", stdio: true, env: []string{"BYWARD_ASSERTION_UNVERIFIED_EMAIL=true"}, want: "BYWARD_ASSERTION_UNVERIFIED_EMAIL " + toHTTP},
-		{name: "the assertion key directory given as a flag with stdio", stdio: true, args: []string{"--assertion-keys-dir=/etc/byward/assertion-keys"},
-			want: "--assertion-keys-dir " + toHTTP},
 		{name: "the credential header with stdio", stdio: true, env: []string{"BYWARD_UPSTREAM_CREDENTIAL_HEADER=X-Api-Key"}, want: "BYWARD_UPSTREAM_CREDENTIAL_HEADER " + toHTTP},
 		{name: "the URL with stdio keeps its both-set error", stdio: true, env: []string{"BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_UPSTREAM_STRIP_HEADERS=X-A"},
 			want: "BYWARD_UPSTREAM_URL and BYWARD_UPSTREAM_COMMAND are both set: an upstream is either HTTP or stdio"},
@@ -57,31 +48,26 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 			want: "BYWARD_UPSTREAM_URL and BYWARD_UPSTREAM_COMMAND are both set: an upstream is either HTTP or stdio"},
 		{name: "the credential with both selectors gets only the both-set error", stdio: true, env: []string{"BYWARD_UPSTREAM_URL=http://u/mcp", "BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile},
 			want: "BYWARD_UPSTREAM_URL and BYWARD_UPSTREAM_COMMAND are both set: an upstream is either HTTP or stdio"},
-		{name: "the plain identity headers set true with stdio keep their own hint", stdio: true, env: []string{"BYWARD_IDENTITY_HEADERS=true"},
-			want: "BYWARD_IDENTITY_HEADERS" + identityHint},
-		// Refused for any value given, false too (#606): before, only true was.
-		{name: "the plain identity headers set false with stdio", stdio: true, env: []string{"BYWARD_IDENTITY_HEADERS=false"}, want: "BYWARD_IDENTITY_HEADERS" + identityHint},
-		// Named as given, as the On-Behalf-Of header is.
-		{name: "the plain identity headers set false as a flag with stdio", stdio: true, args: []string{"--identity-headers=false"},
-			want: "--identity-headers" + identityHint},
 		{name: "the On-Behalf-Of header with stdio keeps its own hint", stdio: true, env: []string{"BYWARD_OBO_HEADER=X-Graph-Token"},
 			want: "BYWARD_OBO_HEADER" + oboHint("BYWARD_OBO_HEADER")},
 		{name: "the PostgreSQL store with stdio keeps its own hint", stdio: true, env: []string{"BYWARD_STORE_POSTGRES_DSN_FILE=" + credFile},
 			want: "BYWARD_STORE_POSTGRES_DSN_FILE" + postgresHint},
 		{name: "the credential with stdio keeps its hint", stdio: true, env: []string{"BYWARD_UPSTREAM_CREDENTIAL_FILE=" + credFile},
 			want: "BYWARD_UPSTREAM_CREDENTIAL_FILE" + credentialHint},
+		// The identity assertion's settings with a valid value, which only an HTTP upstream reads
+		// (httpOnlyRefusal); the unverified-email opt-in's rows are in the hint walk.
+		{name: "the assertion header with stdio is refused as HTTP-only", stdio: true, env: []string{"BYWARD_ASSERTION_HEADER=X-Byward-Identity"}, want: "BYWARD_ASSERTION_HEADER " + toHTTP},
+		{name: "the assertion claims with stdio are refused as HTTP-only", stdio: true, env: []string{"BYWARD_ASSERTION_CLAIMS=email"}, want: "BYWARD_ASSERTION_CLAIMS " + toHTTP},
+		{name: "the assertion key directory given as a flag with stdio is refused as HTTP-only", stdio: true, args: []string{"--assertion-keys-dir=/etc/byward/assertion-keys"},
+			want: "--assertion-keys-dir " + toHTTP},
 		// A refused setting is not parsed, nor checked against other settings (#631): "remove it" is its
 		// one error. Before, each of these gave a second error beside the refusal. Each hint by flag, and as
-		// a flag set to nothing, is in TestEverySettingWithAStdioHintIsRefusedWithOnlyItsHintBesideStdio.
+		// a flag set to nothing, is in TestEverySettingWithAStdioHintIsRefusedWithOnlyItsHintBesideStdio,
+		// with a value its parser refuses (the identity assertion's settings included).
 		{name: "malformed plain identity headers with stdio get only the refusal", stdio: true, env: []string{"BYWARD_IDENTITY_HEADERS=maybe"},
 			want: "BYWARD_IDENTITY_HEADERS" + identityHint},
 		{name: "a malformed On-Behalf-Of header with stdio gets only the refusal", stdio: true, env: []string{"BYWARD_OBO_HEADER=not a header"},
 			want: "BYWARD_OBO_HEADER" + oboHint("BYWARD_OBO_HEADER")},
-		// A value the parser refuses, on purpose: the upstream-mode walk's values are not checked to be.
-		{name: "malformed assertion claims with stdio get only the refusal", stdio: true, env: []string{"BYWARD_ASSERTION_CLAIMS=shoe-size"},
-			want: "BYWARD_ASSERTION_CLAIMS " + toHTTP},
-		{name: "a relative assertion key directory with stdio gets only the refusal", stdio: true, env: []string{"BYWARD_ASSERTION_KEYS_DIR=keys"},
-			want: "BYWARD_ASSERTION_KEYS_DIR " + toHTTP},
 		{name: "an empty PostgreSQL connection file with stdio gets only the refusal", stdio: true, env: []string{"BYWARD_STORE_POSTGRES_DSN_FILE=/run/secrets/empty"},
 			want: "BYWARD_STORE_POSTGRES_DSN_FILE" + postgresHint},
 		{name: "the PostgreSQL store beside a state directory with stdio gets only the refusal", stdio: true,
@@ -117,17 +103,14 @@ func TestASettingForTheUpstreamModeThatIsOffIsRefused(t *testing.T) {
 	}
 }
 
-// Every setting for one upstream mode is refused with the other mode. The upstream groups are read
-// from the registry, so a setting added to one is covered with no test to edit; the HTTP-only
-// settings of other groups are named here. Every other setting of the identity and downstream-token
-// groups must be named as applying to both modes or have a StdioHint, so a new one fails until
-// someone decides which mode it is for. Each is refused given a value, and, but for a secret (which
-// takes no flag of its own), as a flag set to nothing, which is deliberate (#596). A setting with a
-// StdioHint (the credential) is left to its own test; the selectors are too for a value, as with
-// both set there is no mode.
-func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
+// Every setting of an upstream group is refused with the other mode. The groups are read from the
+// registry, so a setting added to one is covered with no test to edit. Each is refused given a value,
+// and, but for a secret (which takes no flag of its own), as a flag set to nothing, which is
+// deliberate (#596). A setting of the groups with a StdioHint (the credential) is left to
+// TestEverySettingWithAStdioHintIsRefusedWithOnlyItsHintBesideStdio, which walks the settings outside
+// the groups with one too; the selectors are left out for a value, as with both set there is no mode.
+func TestEverySettingOfAnUpstreamGroupIsRefusedWithTheOtherMode(t *testing.T) {
 	skipped := map[string]bool{"upstream-url": true, "upstream-command": true} // given a value: the "both set" error
-	bothModes := map[string]bool{"obo-scopes": true}
 	files := func(p string) ([]byte, error) {
 		if p == "/run/secrets/off-mode" {
 			return []byte("X=y"), nil
@@ -136,10 +119,7 @@ func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 	}
 	n, ran, flags := 0, 0, 0
 	for _, s := range registry {
-		forHTTP := s.Group == GroupHTTPUpstream || httpOnlySettings[s.Name]
-		if (s.Group == GroupIdentity || s.Group == GroupDownstreamTokens) && !forHTTP && !bothModes[s.Name] && s.StdioHint == "" {
-			t.Errorf("%s: list it in httpOnly and httpOnlySettings if only an HTTP upstream reads it, give it a StdioHint if it refuses stdio with its own hint, else list it in bothModes", s.Name)
-		}
+		forHTTP := s.Group == GroupHTTPUpstream
 		if !forHTTP && s.Group != GroupStdioUpstream || s.StdioHint != "" { // a hinted one: TestEverySettingWithAStdioHintIsRefusedWithOnlyItsHintBesideStdio
 			continue
 		}
@@ -175,8 +155,29 @@ func TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode(t *testing.T) {
 			}
 		})
 	}
-	if ran == n && (n < 13 || flags < 12) { // a -run filter runs only some
-		t.Fatalf("%d upstream-mode settings checked, %d as a flag set to nothing; want every one (13 today, 12 but the secret upstream-env)", n, flags)
+	if ran == n && (n < 9 || flags < 8) { // a -run filter runs only some
+		t.Fatalf("%d upstream-group settings checked, %d as a flag set to nothing; want every one (9 today, 8 but the secret upstream-env)", n, flags)
+	}
+}
+
+// Every setting of the identity and downstream-token groups, which are about the upstream but in
+// neither upstream group, is decided for a mode: it has a StdioHint (only an HTTP upstream reads it,
+// or it refuses a stdio one with a hint of its own) or is named as applying to both, so a new one
+// fails until someone decides which mode it is for.
+func TestEveryIdentityAndDownstreamTokenSettingIsDecidedForAnUpstreamMode(t *testing.T) {
+	bothModes := map[string]bool{"obo-scopes": true}
+	n := 0
+	for _, s := range registry {
+		if s.Group != GroupIdentity && s.Group != GroupDownstreamTokens {
+			continue
+		}
+		n++
+		if !bothModes[s.Name] && s.StdioHint == "" {
+			t.Errorf("%s: give it a StdioHint (httpOnlyRefusal) if only an HTTP upstream reads it, or a hint of its own; else list it in bothModes", s.Name)
+		}
+	}
+	if n < 7 {
+		t.Fatalf("%d identity and downstream-token settings checked, want every one (7 today)", n)
 	}
 }
 

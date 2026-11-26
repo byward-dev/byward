@@ -153,7 +153,8 @@ func TestAFlagSetToNothingIsRefusedAsGiven(t *testing.T) {
 // set to nothing, which is deliberate, and takes one set to nothing as a variable as unset, as env
 // templates list every variable (#428, #596). A setting of each check (both of the SQLite store's
 // beside PostgreSQL, which it checks apart); the upstream mode's check is walked over every setting in
-// TestEverySettingForOneUpstreamModeIsRefusedWithTheOtherMode.
+// TestEverySettingOfAnUpstreamGroupIsRefusedWithTheOtherMode and
+// TestEverySettingWithAStdioHintIsRefusedWithOnlyItsHintBesideStdio.
 func TestEveryOffCheckRefusesAFlagSetToNothingAndTakesAVariableSetToNothingAsUnset(t *testing.T) {
 	stdio := stdioBase(stdioCommand)
 	postgres := append(slices.Clone(base), "BYWARD_STORE_POSTGRES_DSN_FILE="+dsnFile)

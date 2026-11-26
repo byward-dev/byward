@@ -22,7 +22,7 @@ const (
 	GroupAppOnly            Group = "App-only callers"
 	// A setting in GroupHTTPUpstream or GroupStdioUpstream is for that upstream mode only: given with
 	// the other mode, it is refused at load (offModeSettings), so the group is part of validation.
-	// An HTTP-only setting of another group is listed in httpOnly (config_upstream.go).
+	// An HTTP-only setting of another group has a StdioHint (httpOnlyRefusal, or a hint of its own).
 	GroupHTTPUpstream     Group = "Upstream: HTTP"
 	GroupStdioUpstream    Group = "Upstream: stdio"
 	GroupIdentity         Group = "Identity to the upstream"
@@ -82,15 +82,15 @@ var registry = []Setting{
 	{Name: "oidc-name", shape: asGivenShape, Group: GroupOIDC, Auth: true, Help: "with an oidc IdP: its name on the consent page; default: the preset's name, or the issuer's host"},
 	{Name: "data-dir", shape: pathShape, Group: GroupKeysAndStore, Auth: true, Default: "/var/lib/byward", Help: "data directory, an absolute path; the keys, clients and store settings default to paths in it (ADR-0007 §6, docs/how-to/state.md)"},
 	{Name: "keys-dir", shape: pathShape, Group: GroupKeysAndStore, Auth: true, Help: "directory of sealing keys, an absolute path; each file is one key, its name the key ID; default: keys in the data directory (docs/how-to/sealing-keys.md)"},
-	{Name: "assertion-keys-dir", shape: pathShape, Group: GroupIdentity, Auth: true, Help: "directory of the identity assertion's signing keys, an absolute path: PEM ECDSA P-256 files, each name the key ID; the key whose ID sorts last signs; needed with an HTTP upstream; default: assertion-keys in the data directory (docs/how-to/identity-assertion.md)"},
-	{Name: "assertion-header", shape: asGivenShape, Group: GroupIdentity, Auth: true, Default: "Authorization", Help: "request header that carries the identity assertion to the HTTP upstream, as Bearer <JWT>; inbound copies are always removed (ADR-0016 §2)"},
+	{Name: "assertion-keys-dir", shape: pathShape, Group: GroupIdentity, Auth: true, StdioHint: httpOnlyRefusal, Help: "directory of the identity assertion's signing keys, an absolute path: PEM ECDSA P-256 files, each name the key ID; the key whose ID sorts last signs; needed with an HTTP upstream; default: assertion-keys in the data directory (docs/how-to/identity-assertion.md)"},
+	{Name: "assertion-header", shape: asGivenShape, Group: GroupIdentity, Auth: true, Default: "Authorization", StdioHint: httpOnlyRefusal, Help: "request header that carries the identity assertion to the HTTP upstream, as Bearer <JWT>; inbound copies are always removed (ADR-0016 §2)"},
 	{Name: "identity-headers", shape: asGivenShape, Group: GroupIdentity, Auth: true, Bool: true, Default: "false", StdioHint: "%[1]s is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)",
 		Help: "also send the HTTP upstream the user in plain headers (X-Byward-Subject, X-Byward-Client-Id, X-Byward-Principal-Type, and X-Byward-Roles, -Groups, -Email, -Email-Verified, -Name for the assertion's claims), percent-encoded; safe only when the upstream is reachable through this proxy alone (ADR-0016 §5, docs/how-to/plain-identity-headers.md)"},
 	{Name: "obo-scopes", shape: asGivenShape, Group: GroupDownstreamTokens, Auth: true, Help: "On-Behalf-Of: space-separated scopes of one downstream API, e.g. https://graph.microsoft.com/User.Read; the HTTP upstream then gets a token for them in BYWARD_OBO_HEADER on every request, a stdio upstream on its token socket (BYWARD_DOWNSTREAM_TOKEN_SOCKET); empty turns it off (ADR-0017, docs/how-to/downstream-apis.md)"},
 	{Name: "obo-header", shape: asGivenShape, Group: GroupDownstreamTokens, Auth: true, Default: "X-Byward-Downstream-Token", StdioHint: "%[1]s: a stdio upstream gets its downstream token from its token socket (BYWARD_DOWNSTREAM_TOKEN_SOCKET), not a header; leave %[1]s unset",
 		Help: "On-Behalf-Of: request header that carries the downstream API token to the HTTP upstream, as Bearer <token>; inbound copies are always removed (ADR-0017 §3); not for a stdio upstream"},
-	{Name: "assertion-claims", shape: asGivenShape, Group: GroupIdentity, Auth: true, Default: "roles", Help: "comma-separated optional claims in the identity assertion: roles, groups, email, name; or none (ADR-0016 §1, docs/reference/identity-assertion.md)"},
-	{Name: "assertion-unverified-email", shape: asGivenShape, Group: GroupIdentity, Auth: true, Bool: true, Default: "false", Help: "with email in BYWARD_ASSERTION_CLAIMS: also assert an email the IdP has not verified (Entra never verifies one), marked email_verified false; never authorize on it (docs/how-to/identity-assertion.md)"},
+	{Name: "assertion-claims", shape: asGivenShape, Group: GroupIdentity, Auth: true, Default: "roles", StdioHint: httpOnlyRefusal, Help: "comma-separated optional claims in the identity assertion: roles, groups, email, name; or none (ADR-0016 §1, docs/reference/identity-assertion.md)"},
+	{Name: "assertion-unverified-email", shape: asGivenShape, Group: GroupIdentity, Auth: true, Bool: true, Default: "false", StdioHint: httpOnlyRefusal, Help: "with email in BYWARD_ASSERTION_CLAIMS: also assert an email the IdP has not verified (Entra never verifies one), marked email_verified false; never authorize on it (docs/how-to/identity-assertion.md)"},
 	{Name: "static-clients-file", shape: pathShape, Group: GroupClientRegistration, Auth: true, Help: "JSON file of pre-registered MCP clients, an absolute path; default: clients.json in the data directory, optional while CIMD or DCR is on; a file you name must exist (docs/reference/static-clients.md)"},
 	{Name: "gate-tenants", shape: asGivenShape, Group: GroupGate, Auth: true, Help: "access gate: comma-separated Entra tenant IDs allowed to sign in (docs/how-to/access-gate.md)"},
 	{Name: "gate-roles", shape: asGivenShape, Group: GroupGate, Auth: true, Help: "access gate: comma-separated app roles; users need at least one (docs/how-to/access-gate.md)"},
@@ -116,6 +116,11 @@ var registry = []Setting{
 	{Name: "insecure-no-auth", shape: asGivenShape, Group: GroupDevelopment, Bool: true, Default: "false", Help: "no authentication at all, for trying the proxy out and for tests; loopback only (ADR-0027)"},
 	{Name: "dev", shape: asGivenShape, Group: GroupDevelopment, Bool: true, Default: "false", Help: "development mode: enables the relaxations it logs at startup"},
 }
+
+// httpOnlyRefusal is the StdioHint of a setting outside the upstream groups that only an HTTP upstream
+// reads and needs no hint of its own: the identity assertion's, which a stdio upstream never gets
+// (ADR-0016 §2, §6).
+const httpOnlyRefusal = "%[1]s is set, but the upstream is stdio: it applies only to an HTTP upstream (BYWARD_UPSTREAM_URL); remove it"
 
 // A registry entry without a shape stops the program at init (ADR-0031 §3): it would show as Hidden,
 // and be read as a setting that is not secret.

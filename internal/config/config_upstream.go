@@ -120,19 +120,14 @@ func (v *Values) CommandNameAsGiven() string {
 	return v.NameAsGiven("upstream-command")
 }
 
-// httpOnly are the settings outside the upstream groups that take effect only with an HTTP upstream:
-// the identity assertion, which a stdio upstream never gets (ADR-0016 §2, §6). Settings outside the
-// groups that refuse a stdio upstream with a hint of their own have a StdioHint instead.
-var httpOnly = map[string]bool{"assertion-keys-dir": true, "assertion-header": true, "assertion-claims": true, "assertion-unverified-email": true}
-
 // refusedOffMode reports whether the named setting is given for the upstream mode that is off, and so
 // refused (offModeSettings): a stdio upstream's settings with an HTTP upstream; an HTTP upstream's,
-// the httpOnly ones and those with a StdioHint with a stdio one. A setting left at its default never
-// is; one given is, a flag set to nothing included, as every check for a family that is off does
-// (#596). A variable set to nothing is unset already (resolve), and a file named for a secret is
-// given, even when it is not read. With no upstream, or both, there is no mode, so none is. A refused
-// setting is not read (resolve) or parsed (value, empty, given, emptySecretFile); a check that reads
-// its Source itself, through byKey or Effective, must skip it too, as checkNoAuth and inlineSecrets do.
+// and those with a StdioHint, with a stdio one. A setting left at its default never is; one given is,
+// a flag set to nothing included, as every check for a family that is off does (#596). A variable
+// set to nothing is unset already (resolve), and a file named for a secret is given, even when it is
+// not read. With no upstream, or both, there is no mode, so none is. A refused setting is not read
+// (resolve) or parsed (value, empty, given, emptySecretFile); a check that reads its Source itself,
+// through byKey or Effective, must skip it too, as checkNoAuth and inlineSecrets do.
 func (v *Values) refusedOffMode(name string) bool {
 	val := v.byKey[name]
 	if val.Source == SourceDefault {
@@ -143,15 +138,15 @@ func (v *Values) refusedOffMode(name string) bool {
 	case v.httpUpstream():
 		return s.Group == GroupStdioUpstream
 	case v.stdioUpstream():
-		return s.Group == GroupHTTPUpstream || httpOnly[s.Name] || s.StdioHint != ""
+		return s.Group == GroupHTTPUpstream || s.StdioHint != ""
 	}
 	return false
 }
 
 // offModeSettings refuses each setting given for the upstream mode that is off (refusedOffMode),
-// named as the operator gave it. Beside a stdio upstream, a setting with a StdioHint gets that hint;
-// every other refusal says which mode the setting is for. The other mode's selector reaches here only
-// as a flag set to nothing, as with a value there is no mode.
+// named as the operator gave it. Beside a stdio upstream, a setting with a StdioHint gets that text;
+// every other refusal says which mode the setting is for, as httpOnlyRefusal does. The other mode's
+// selector reaches here only as a flag set to nothing, as with a value there is no mode.
 func offModeSettings(v *Values) []error {
 	// The other mode's selector, not given here, is named as advice: the variable to set (EnvToSet), as
 	// #631's offmode_test pins it.

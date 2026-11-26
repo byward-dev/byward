@@ -23,7 +23,7 @@ const envPrefix = "BYWARD_"
 // Setting is one registry entry. Every setting has a flag and an env name.
 type Setting struct {
 	Name    string // flag name, kebab-case; the env name is derived from it
-	Group   Group  // the section of the settings reference it is listed in; the two upstream groups also mean "for that mode only", as does httpOnly (offModeSettings)
+	Group   Group  // the section of the settings reference it is listed in; the two upstream groups also mean "for that mode only", as does a StdioHint (offModeSettings)
 	Default string
 	Help    string
 	Bool    bool
@@ -34,10 +34,12 @@ type Setting struct {
 	// Help gives empty a meaning of its own. Otherwise (the rule) set to nothing is as if unset, since
 	// env templates list every variable (#428).
 	EmptyIsGiven bool
-	// StdioHint is the refusal of the setting beside a stdio upstream, which it has no effect on, for a
-	// setting that is not a stdio upstream's whose refusal says what to use instead (offModeSettings). It
-	// is fixed text, with %[1]s for the setting as the operator gave it and no other verb
-	// (checkStdioHints, at init), so it never shows a value.
+	// StdioHint is the refusal of a setting that is not a stdio upstream's, beside a stdio upstream,
+	// which it has no effect on (offModeSettings): httpOnlyRefusal, or a hint of its own. For a setting
+	// outside the upstream groups it is also what marks it refused (refusedOffMode); an HTTP upstream's
+	// setting is refused for its group, and a hint only gives it other text. It is fixed text, with
+	// %[1]s for the setting as the operator gave it and no other verb (checkStdioHints, at init), so it
+	// never shows a value.
 	StdioHint string
 	// shape decides how the value is shown (ADR-0031 §3); secretShape also means the value is read
 	// only from a file. Every registry entry has one (checkShapes, at init).

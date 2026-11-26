@@ -14,6 +14,11 @@ var stdioHints = map[string]string{
 	"identity-headers":    "NAME is for an HTTP upstream; a stdio upstream gets the user in its environment (BYWARD_SUBJECT, docs/how-to/stdio-upstream.md)",
 	"obo-header":          "NAME: a stdio upstream gets its downstream token from its token socket (BYWARD_DOWNSTREAM_TOKEN_SOCKET), not a header; leave NAME unset",
 	"store-postgres-dsn":  "NAME: the PostgreSQL store is for several replicas, and a stdio upstream's processes live on one (ADR-0007 §4); use the SQLite store",
+	// The identity assertion's settings, which only an HTTP upstream reads (httpOnlyRefusal).
+	"assertion-keys-dir":         "NAME " + toHTTP,
+	"assertion-header":           "NAME " + toHTTP,
+	"assertion-claims":           "NAME " + toHTTP,
+	"assertion-unverified-email": "NAME " + toHTTP,
 }
 
 // pinnedHint is the pinned stdio hint of setting, naming it as given.
@@ -45,10 +50,10 @@ func failIfOpened(t *testing.T, path string) readFileFunc {
 
 // Every setting with a StdioHint is refused beside a stdio upstream with its pinned hint alone, named
 // as given, by its variable and by its flag: given a value its parser refuses, which is not parsed, or
-// for a secret a missing file, which is never opened; and as a flag set to nothing (#596). Its
-// variable set to nothing is unset (#428), so the proxy loads. The cases come from stdioHints, so a
-// hint dropped from the registry fails here, with another error or none; every setting with a
-// StdioHint must be pinned there.
+// for a secret a missing file, which is never opened; a boolean given false or true too (#606); and as
+// a flag set to nothing (#596). Its variable set to nothing is unset (#428), so the proxy loads. The
+// cases come from stdioHints, so a hint dropped from the registry fails here, with another error or
+// none; every setting with a StdioHint must be pinned there.
 func TestEverySettingWithAStdioHintIsRefusedWithOnlyItsHintBesideStdio(t *testing.T) {
 	const missing = "/run/secrets/missing"
 	for _, s := range registry {
@@ -57,8 +62,8 @@ func TestEverySettingWithAStdioHintIsRefusedWithOnlyItsHintBesideStdio(t *testin
 		}
 	}
 	names := slices.Sorted(maps.Keys(stdioHints))
-	if len(names) < 4 {
-		t.Fatalf("%d stdio hints pinned, want at least the 4 of today", len(names))
+	if len(names) < 8 {
+		t.Fatalf("%d stdio hints pinned, want at least the 8 of today", len(names))
 	}
 	for _, name := range names {
 		s := lookup(name)
@@ -68,7 +73,11 @@ func TestEverySettingWithAStdioHintIsRefusedWithOnlyItsHintBesideStdio(t *testin
 		} else if _, _, err := Load(nil, append(slices.Clone(base), s.Env()+"="+bad), baseFiles); !isConfigError(err) {
 			t.Errorf("%s=%s beside HTTP: err = %v, want its parser to refuse it, so the rows below show it is not parsed", s.Env(), bad, err)
 		}
-		for _, f := range append(givenForms(s, bad), givenForms(s, "")[1]) { // and the flag set to nothing
+		refused := append(givenForms(s, bad), givenForms(s, "")[1]) // and the flag set to nothing
+		if s.Bool {                                                 // either value, its default too (#606)
+			refused = append(append(refused, givenForms(s, "false")...), givenForms(s, "true")...)
+		}
+		for _, f := range refused {
 			t.Run(name+"/refused/"+strings.Join(append(f.args, f.env...), " "), func(t *testing.T) {
 				_, _, err := Load(f.args, stdioBase(append([]string{stdioCommand}, f.env...)...), failIfOpened(t, missing))
 				if want := pinnedHint(name, f.from); !isConfigError(err) || err.Error() != want {
@@ -96,7 +105,7 @@ func probeValues(t *testing.T, probe Setting, args, env []string, readFile readF
 	return v
 }
 
-// A setting is refused beside a stdio upstream with its own hint once it has a StdioHint, with no
+// A setting is refused beside a stdio upstream with its StdioHint's text once it has one, with no
 // other code: offModeSettings names it as given, a secret's file is never opened, and a parser written
 // the usual way, through given, empty, value or emptySecretFile, sees it as not given, so adds no
 // error of its own. The probes are in a registry of their own, so the global one is never changed.
@@ -104,6 +113,7 @@ func TestASettingGivenAStdioHintIsRefusedBesideStdioWithNoOtherCode(t *testing.T
 	const missing = "/run/secrets/missing"
 	plain := Setting{Name: "probe-setting", shape: asGivenShape, Group: GroupIdentity, StdioHint: "%[1]s: the probe's hint; leave %[1]s unset"}
 	secret := Setting{Name: "probe-secret", shape: secretShape, Group: GroupKeysAndStore, StdioHint: "%[1]s is the probe secret's"}
+	httpOnly := Setting{Name: "probe-http-only", shape: asGivenShape, Group: GroupIdentity, StdioHint: httpOnlyRefusal}
 	for _, tc := range []struct {
 		name  string
 		probe Setting
@@ -115,6 +125,7 @@ func TestASettingGivenAStdioHintIsRefusedBesideStdioWithNoOtherCode(t *testing.T
 		{"by its flag", plain, []string{"--probe-setting=x"}, nil, "--probe-setting: the probe's hint; leave --probe-setting unset"},
 		{"a secret by its file variable", secret, nil, []string{"BYWARD_PROBE_SECRET_FILE=" + missing}, "BYWARD_PROBE_SECRET_FILE is the probe secret's"},
 		{"a secret by its file flag", secret, []string{"--probe-secret-file=" + missing}, nil, "--probe-secret-file is the probe secret's"},
+		{"one only an HTTP upstream reads", httpOnly, []string{"--probe-http-only=x"}, nil, "--probe-http-only " + toHTTP},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v := probeValues(t, tc.probe, tc.args, tc.env, failIfOpened(t, missing))
