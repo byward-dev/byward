@@ -8,7 +8,6 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/byward-dev/byward/internal/config"
 	"github.com/byward-dev/byward/internal/logging"
@@ -118,10 +117,9 @@ func revokeUser(ctx context.Context, args, environ []string, stdout, stderr io.W
 		return operatorFailure(stderr, "revoke-user", err)
 	}
 	if logging.LooksSecret(user) {
-		// Only a subject claim other than sub takes such a key (#594): it is revoked, as it may be a real
+		// A key shaped like a credential, under any subject claim (#594), is revoked, as it may be a real
 		// user's, but never shown, as it may be a token pasted in its place.
-		n := utf8.RuneCountInString(user)
-		_, _ = fmt.Fprintf(stdout, "revoked user (a key of %d characters that looks like a credential, not shown) in %s: their grants are gone and their tokens stop working within seconds\n", n, where)
+		_, _ = fmt.Fprintf(stdout, "revoked user %s, a key that looks like a credential, in %s: their grants are gone and their tokens stop working within seconds\n", logging.NotShown(user), where)
 		_, _ = fmt.Fprintln(stdout, "if you pasted a token, it revoked nothing: no user has that key")
 		return exitOK
 	}

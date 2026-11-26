@@ -444,22 +444,25 @@ func redirectStderr(t *testing.T) func(*testing.T) string {
 	}
 }
 
-// tokenForms are tokens and credentials pasted where a user key belongs: no IdP issues a sub shaped
-// like them, so revoke-user refuses each under every IdP (#594). One is longer than the 255 ASCII
-// characters OIDC Core 1.0 §2 allows a sub.
-var tokenForms = []struct{ name, value string }{
-	{"a compact JWS", "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhIn0.LK7CANARY"},
-	{"a JWS longer than a sub", "eyJhbGciOiJSUzI1NiJ9." + strings.Repeat("eyJzdWIiOiJhIn0", 16) + ".LK7CANARY"},
-	{"a Bearer credential", "Bearer LK7CANARY"},
+// tokenForms are tokens and credentials pasted where a user key belongs (#594). Entra refuses each,
+// as no tid:oid. Under an oidc IdP keyed on sub, a form within the 255 ASCII characters OIDC Core 1.0
+// §2 allows a sub is a key (subOK), and one longer is refused.
+var tokenForms = []struct {
+	name, value string
+	subOK       bool
+}{
+	{"a compact JWS", "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhIn0.LK7CANARY", true},
+	{"a JWS longer than a sub", "eyJhbGciOiJSUzI1NiJ9." + strings.Repeat("eyJzdWIiOiJhIn0", 16) + ".LK7CANARY", false},
+	{"a Bearer credential", "Bearer LK7CANARY", true},
 }
 
 // The operator commands show no argument they were given and refuse (#594). Every command but
 // revoke-user and init takes only fixed words, so a value after them gets the command's usage line;
 // init has TestInitShowsAValueItWasGivenOnlyInTheScriptItPrints. revoke-user under an oidc IdP keyed on
-// sub takes a key only as OIDC Core allows a sub: a secret form within that rule is accepted (these
-// runs have no store, so none is revoked or shown), any other is refused and named by its length.
-// A token is no user key under either IdP (TestRevokeUserShowsNoKeyItWasGiven covers Entra's other
-// forms). Every command in the commands map has a cell here or names its test. Nothing reaches
+// sub takes a key as OIDC Core allows a sub: every secret form is within that rule, so it is taken
+// (these runs have no store, so none is revoked or shown), and a token form longer than a sub is
+// refused and named by its length. Entra refuses every token form (TestRevokeUserShowsNoKeyItWasGiven
+// covers its other forms). Every command in the commands map has a cell here or names its test. Nothing reaches
 // os.Stderr or the log package.
 func TestOperatorCommandsShowNoArgumentTheyRefuse(t *testing.T) {
 	const (
@@ -479,7 +482,7 @@ func TestOperatorCommandsShowNoArgumentTheyRefuse(t *testing.T) {
 	}
 	type cell struct {
 		place     string
-		want      []string // stderr is exactly one of these
+		want      string // stderr, exactly
 		args, env []string
 	}
 	placed := map[string]bool{}
@@ -494,39 +497,43 @@ func TestOperatorCommandsShowNoArgumentTheyRefuse(t *testing.T) {
 				if got := processStderr(t); got != "" {
 					t.Errorf("wrote %q to os.Stderr or the log package, want nothing", got)
 				}
-				if code != exitConfig || stdout != "" || !slices.Contains(c.want, stderr) {
-					t.Errorf("exit %d, stdout %q, stderr %q; want exit %d and exactly one of %q", code, stdout, stderr, exitConfig, c.want)
+				if code != exitConfig || stdout != "" || stderr != c.want {
+					t.Errorf("exit %d, stdout %q, stderr %q; want exit %d and stderr %q", code, stdout, stderr, exitConfig, c.want)
 				}
 			})
 		}
 	}
-	others := func(v string) []cell {
+	usageCells := func(v string) []cell {
 		return []cell{
-			{"revoke-user, a second key", []string{revokeUserUsage}, []string{"revoke-user", "u1", v}, entraEnv},
-			{"revoke-all", []string{revokeAllUsage}, []string{"revoke-all", v}, entraEnv},
-			{"revoke-all --yes, then a value", []string{revokeAllUsage}, []string{"revoke-all", "--yes", v}, entraEnv},
-			{"store", []string{newEpochUsage}, []string{"store", v}, entraEnv},
-			{"store new-epoch, then a value", []string{newEpochUsage}, []string{"store", "new-epoch", v}, entraEnv},
-			{"store new-epoch --yes, then a value", []string{newEpochUsage}, []string{"store", "new-epoch", "--yes", v}, entraEnv},
-			{"check", []string{checkUsage}, []string{"check", v}, entraEnv},
-			{"check --offline, then a value", []string{checkUsage}, []string{"check", "--offline", v}, entraEnv},
-			{"doctor", []string{doctorUsage}, []string{"doctor", v}, entraEnv},
-			{"doctor --json, then a value", []string{doctorUsage}, []string{"doctor", "--json", v}, entraEnv},
-			{"jwks", []string{jwksUsage}, []string{"jwks", v}, entraEnv},
-			{"downstream-token", []string{downstreamTokenUsage}, []string{"downstream-token", v}, entraEnv},
-			{"downstream-token --json, then a value", []string{downstreamTokenUsage}, []string{"downstream-token", "--json", v}, entraEnv},
+			{"revoke-user, a second key", revokeUserUsage, []string{"revoke-user", "u1", v}, entraEnv},
+			{"revoke-all", revokeAllUsage, []string{"revoke-all", v}, entraEnv},
+			{"revoke-all --yes, then a value", revokeAllUsage, []string{"revoke-all", "--yes", v}, entraEnv},
+			{"store", newEpochUsage, []string{"store", v}, entraEnv},
+			{"store new-epoch, then a value", newEpochUsage, []string{"store", "new-epoch", v}, entraEnv},
+			{"store new-epoch --yes, then a value", newEpochUsage, []string{"store", "new-epoch", "--yes", v}, entraEnv},
+			{"check", checkUsage, []string{"check", v}, entraEnv},
+			{"check --offline, then a value", checkUsage, []string{"check", "--offline", v}, entraEnv},
+			{"doctor", doctorUsage, []string{"doctor", v}, entraEnv},
+			{"doctor --json, then a value", doctorUsage, []string{"doctor", "--json", v}, entraEnv},
+			{"jwks", jwksUsage, []string{"jwks", v}, entraEnv},
+			{"downstream-token", downstreamTokenUsage, []string{"downstream-token", v}, entraEnv},
+			{"downstream-token --json, then a value", downstreamTokenUsage, []string{"downstream-token", "--json", v}, entraEnv},
 		}
 	}
 	for _, form := range append(slices.Clone(secretForms), hostForm) {
 		v := form.value
-		run(t, form.name, append(others(v),
-			cell{"revoke-user, oidc", []string{storeMissingLine, refused(v)}, []string{"revoke-user", v}, oidcEnv}))
+		run(t, form.name, append(usageCells(v),
+			cell{"revoke-user, oidc", storeMissingLine, []string{"revoke-user", v}, oidcEnv}))
 	}
 	for _, form := range tokenForms {
 		v := form.value
-		run(t, form.name, append(others(v),
-			cell{"revoke-user, entra", []string{refused(v)}, []string{"revoke-user", v}, entraEnv},
-			cell{"revoke-user, oidc", []string{refused(v)}, []string{"revoke-user", v}, oidcEnv}))
+		oidcWant := refused(v)
+		if form.subOK {
+			oidcWant = storeMissingLine
+		}
+		run(t, form.name, append(usageCells(v),
+			cell{"revoke-user, entra", refused(v), []string{"revoke-user", v}, entraEnv},
+			cell{"revoke-user, oidc", oidcWant, []string{"revoke-user", v}, oidcEnv}))
 	}
 	for name := range commands {
 		if !placed[name] && coveredElsewhere[name] == "" {

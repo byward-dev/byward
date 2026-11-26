@@ -173,8 +173,10 @@ var jwtShape = regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(?:\.|$)|[A-
 var authScheme = regexp.MustCompile(`(?i)(?:^|[^_])(?:bearer|basic)\s+\S`)
 
 // LooksSecret reports whether s holds something shaped like a credential: a compact JWS or JWE, or an
-// HTTP Bearer or Basic credential. Logs redact such a value, and revoke-user refuses it as a user key
-// (#594), so the one rule decides both.
+// HTTP Bearer or Basic credential. Logs redact such a value, and revoke-user prints such a user key
+// only by its length (#594). It decides how a value is shown, never whether it is accepted: it
+// over-matches by design (names such as "Ann Basic Lee", or eyJohn.Smith), so widening it hides
+// more, but refuses nothing.
 func LooksSecret(s string) bool {
 	return authScheme.MatchString(s) || jwtShape.MatchString(s)
 }

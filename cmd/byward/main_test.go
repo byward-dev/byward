@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -748,19 +747,24 @@ func blankOTELEnv(t *testing.T) {
 	}
 }
 
-// Under a subject claim other than sub, revoke-user revokes a key that looks like a credential, as it
-// may be a real user's ("Ann Basic Lee", an email that reads like a token), but names it only by its
-// length, and says a pasted token revoked nothing; any other key is named in full (#594).
+// revoke-user prints a user key that looks like a credential (logging.LooksSecret) only by its length
+// in characters, under any subject claim, and says a pasted token revoked nothing (#594). Such a key
+// is still revoked: a sub such as eyJohn.Smith, or a name such as "Ann Basic Lee", is a real user's.
+// Any other key is printed as given.
 func TestRevokeUserNamesACredentialShapedKeyOnlyByItsLength(t *testing.T) {
+	const hint = "if you pasted a token, it revoked nothing: no user has that key\n"
 	for _, tc := range []struct {
 		claim, key string
-		hidden     bool
+		hidden     string // the key as the line names it; "" when it is shown in full
 	}{
-		{"name", "Ann Basic Lee", true},
-		{"email", "eyJhbGciOiJSUzI1NiJ9." + canary + ".c2ln", true},
-		{"email", "heyJoe.Smith.Jr@example.com", true},
-		{"email", "jöhn@exämple.com", false},
-		{"name", "José", false},
+		{"sub", "eyJohn.Smith", "(12 characters, not shown)"},
+		{"sub", "eyJhbGciOiJSUzI1NiJ9." + canary + ".c2ln", "(35 characters, not shown)"},
+		{"sub", "f47ac10b-58cc-4372-a567-0e02b2c3d479", ""},
+		{"name", "Ann Basic Lee", "(13 characters, not shown)"},
+		{"name", "Ånn Basic Lee", "(13 characters, not shown)"},
+		{"email", "heyJoe.Smith.Jr@example.com", "(27 characters, not shown)"},
+		{"email", "jöhn@exämple.com", ""},
+		{"name", "José", ""},
 	} {
 		t.Run(tc.claim+"/"+tc.key, func(t *testing.T) {
 			env, _, _ := operatorEnv(t, proxysStore)
@@ -769,14 +773,13 @@ func TestRevokeUserNamesACredentialShapedKeyOnlyByItsLength(t *testing.T) {
 				"BYWARD_GATE_ALLOW_EMPTY=true", "BYWARD_OIDC_SUBJECT_CLAIM="+tc.claim)
 			code, stdout, stderr := runWith([]string{"revoke-user", tc.key}, env...)
 			want := "revoked user " + tc.key + " in BYWARD_STORE_DIR" + revoked
-			if tc.hidden {
-				want = fmt.Sprintf("revoked user (a key of %d characters that looks like a credential, not shown) in BYWARD_STORE_DIR", len([]rune(tc.key))) +
-					revoked + "if you pasted a token, it revoked nothing: no user has that key\n"
+			if tc.hidden != "" {
+				want = "revoked user " + tc.hidden + ", a key that looks like a credential, in BYWARD_STORE_DIR" + revoked + hint
 			}
 			if code != exitOK || stdout != want {
 				t.Fatalf("code %d, stdout %q, stderr %q; want exit 0 and %q", code, stdout, stderr, want)
 			}
-			if tc.hidden && strings.Contains(stdout+stderr, tc.key) {
+			if tc.hidden != "" && strings.Contains(stdout+stderr, tc.key) {
 				t.Errorf("the key is shown: stdout %q, stderr %q", stdout, stderr)
 			}
 		})

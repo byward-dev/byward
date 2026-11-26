@@ -261,41 +261,44 @@ func TestRevokeUserTakesAnOIDCSubjectAsItIs(t *testing.T) {
 	}
 }
 
-// A token given to revoke-user as an oidc sub is refused: no grant is revoked, nothing is audited,
-// and the token is in no log line (#594). A grant whose subject is that very string shows the refusal
-// is not a lookup that found nothing.
-func TestRevokeUserRefusesATokenAsAnOIDCSubAndRevokesNobody(t *testing.T) {
+// A token given to revoke-user as an oidc sub is within the sub rule, so it is taken as a user key
+// (#594): it revokes nobody, as no user signed in with it, and the audit record and every log line
+// name it only as [REDACTED]. A real user's grant beside it stays.
+func TestRevokeUserTakesATokenAsAnOIDCSubRevokesNobodyAndAuditsItRedacted(t *testing.T) {
 	const token = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJMSzdDQU5BUlkifQ.LK7CANARY"
 	cfg := loadOIDC(t, "keycloak", "https://sso.example.com/realms/acme", "c")
 	withStore(t, cfg, func(st *sqlite.Store) {
 		g := grantFor("held", time.Now().Add(-time.Minute))
-		g.Subject = token
+		g.Subject = "f47ac10b-58cc-4372-a567-0e02b2c3d479"
 		if _, err := st.CreateGrant(context.Background(), g); err != nil {
 			t.Fatal(err)
 		}
 	})
-	var logs strings.Builder
-	if _, _, err := RevokeUser(context.Background(), cfg, slog.New(slog.NewJSONHandler(&logs, nil)), token); !errors.Is(err, ErrNotAUserKey) {
-		t.Fatalf("RevokeUser(a token) = %v, want ErrNotAUserKey", err)
+	var logs bytes.Buffer
+	if user, _, err := RevokeUser(context.Background(), cfg, logging.New(&logs, "json"), token); err != nil || user != token {
+		t.Fatalf("RevokeUser(a token) = %q, %v; want it taken as a key", user, err)
 	}
 	if grantGone(t, cfg, "held") {
-		t.Fatal("a refused key revoked a grant")
+		t.Fatal("another user's grant was revoked")
 	}
-	if logs.Len() != 0 {
-		t.Fatalf("a refused key logged or audited: %s", logs.String())
+	if strings.Contains(logs.String(), "LK7CANARY") || !strings.Contains(logs.String(), `"user_key":"[REDACTED]"`) {
+		t.Fatalf("the log shows the token, or does not audit it redacted: %s", logs.String())
 	}
 }
 
-// Under a subject claim other than sub, a user key is whatever the IdP put there (#594): revoke-user
-// revokes it however it is written, so every user sign-in stored stays revocable. Through the real
-// logger, the audit record names a credential-shaped key (logging.LooksSecret, which also matches a
-// name such as "Ann Basic Lee" or an email that happens to read like a token) as [REDACTED], and no
-// other attribute carries any part of it; any other key is named in full.
-func TestRevokeUserRevokesAnyKeyAnotherSubjectClaimHoldsAndAuditsACredentialShapedOneRedacted(t *testing.T) {
+// revoke-user revokes a user key however it is written, under any subject claim, so every user
+// sign-in stored stays revocable (#594). Through the real logger, the audit record names a
+// credential-shaped key (logging.LooksSecret, which also matches a name such as "Ann Basic Lee", a sub
+// such as eyJohn.Smith, or an email that happens to read like a token) as [REDACTED], and no other
+// attribute carries any part of it; any other key is named in full.
+func TestRevokeUserRevokesAKeyUnderAnySubjectClaimAndAuditsACredentialShapedOneRedacted(t *testing.T) {
 	for _, tc := range []struct {
 		claim, key string
 		redacted   bool
 	}{
+		{"sub", "eyJohn.Smith", true},
+		{"sub", "Basic x9Zq", true},
+		{"sub", "f47ac10b-58cc-4372-a567-0e02b2c3d479", false},
 		{"name", "Ann Basic Lee", true},
 		{"email", "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJMSzdDQU5BUlkifQ.LK7CANARY", true},
 		{"email", "heyJoe.Smith.Jr@example.com", true},
