@@ -3,43 +3,44 @@
 # which is edited by hand; a denylist's lines there are the inputs it stops. A Go version that reads
 # a URL or an address differently changes these lines: that is a decision change too.
 
-## loopback as written: 84 pass, 8176 refused, of 8260
+## loopback as written: 84 pass, 9319 refused, of 9403
 by family:
-  name                     pass    20  refused   952
-  name edge                pass     0  refused  1836
-  near miss                pass     0  refused   648
-  idn                      pass     0  refused   648
-  ipv4                     pass    20  refused   520
-  ipv4 spelling            pass     0  refused   864
-  ipv6                     pass    22  refused   734
-  ipv4-mapped              pass    22  refused   302
-  zone                     pass     0  refused  1132
-  invisible                pass     0  refused   540
+  name                     pass    20  refused  1006
+  name edge                pass     0  refused  2166
+  near miss                pass     0  refused   684
+  idn                      pass     0  refused   684
+  ipv4                     pass    20  refused   550
+  ipv4 spelling            pass     0  refused  1026
+  ipv6                     pass    22  refused   776
+  ipv4-mapped              pass    22  refused   320
+  zone                     pass     0  refused  1537
+  invisible                pass     0  refused   570
 by wrap:
-  bare                     pass    44  refused  1323
-  [h]                      pass    40  refused  1328
-  [h                       pass     0  refused  1367
-  h]                       pass     0  refused  1386
-  [h]]                     pass     0  refused  1386
-  [h]x                     pass     0  refused  1386
+  bare                     pass    44  refused  1513
+  [h]                      pass    40  refused  1518
+  [h                       pass     0  refused  1557
+  h]                       pass     0  refused  1577
+  [h]]                     pass     0  refused  1577
+  [h]x                     pass     0  refused  1577
 by port:
-  none                     pass    12  refused   445
-  :                        pass     8  refused   451
-  :443                     pass     8  refused   451
-  :80                      pass     8  refused   451
-  :8080                    pass     8  refused   451
-  :9090                    pass     8  refused   451
-  :65535                   pass     8  refused   451
-  :0                       pass     8  refused   451
-  :65536                   pass     8  refused   451
-  :123456                  pass     0  refused   459
-  :080                     pass     8  refused   451
-  :+80                     pass     0  refused   459
-  :-1                      pass     0  refused   459
-  :0x50                    pass     0  refused   459
-  :8a                      pass     0  refused   459
-  :８０                      pass     0  refused   459
-  :80:80                   pass     0  refused   459
-  :80]                     pass     0  refused   459
+  none                     pass    12  refused   481
+  :                        pass     8  refused   487
+  :443                     pass     8  refused   487
+  :80                      pass     8  refused   487
+  :8080                    pass     8  refused   487
+  :9090                    pass     8  refused   487
+  :65535                   pass     8  refused   487
+  :0                       pass     8  refused   487
+  :65536                   pass     8  refused   487
+  :123456                  pass     0  refused   495
+  :080                     pass     8  refused   487
+  :+80                     pass     0  refused   495
+  :-1                      pass     0  refused   495
+  :0x50                    pass     0  refused   495
+  :8a                      pass     0  refused   495
+  :８０                      pass     0  refused   495
+  :80:80                   pass     0  refused   495
+  :80:443                  pass     0  refused   495
+  :80]                     pass     0  refused   495
 refused because:
-   8176  not loopback
+   9319  not loopback

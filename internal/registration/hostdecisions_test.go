@@ -23,8 +23,8 @@ func (selfDoc) Get(_ context.Context, url string, _ int64) (*ssrfguard.Response,
 // validation, the loopback redirect match and the remembered consent's redirect key decide every
 // host family as pinned in testdata/hostdecisions.golden; testdata/hostdecisions.allowed holds the
 // inputs each passes (a denylist: the inputs it stops), so a check that lets a new form through fails
-// by name (#656). A client ID passes the registry when
-// it reaches the fetch: every check before it took it.
+// by name (#656). In the CIMD client ID and allowed host columns, a client ID passes when it reaches
+// the fetch: every check before it took it.
 func TestEveryRegistrationHostCheckDecidesEveryHostFamilyAsPinned(t *testing.T) {
 	reaches := func(cfg CIMDConfig) func(string) (bool, string) {
 		f := &fakeFetch{}
@@ -99,8 +99,8 @@ func TestEveryRegistrationHostCheckDecidesEveryHostFamilyAsPinned(t *testing.T) 
 		// The token validator and the static-client check ask about any client ID, valid or not, so
 		// this column judges every one, not only those the CIMD rule keeps.
 		{Name: "denylist client ID", Probes: ids, Judge: func(in string) (bool, string) { return !clientIDs.DeniesClient(in), "denied" }, Denies: true},
-		// DCR asks the denylist only about the redirect URIs the redirect rule keeps (dcr.go), so only
-		// those can be stopped.
+		// DCR, a CIMD client's redirect check and refresh ask the denylist only about the redirect URIs
+		// the redirect rule kept, so only those can be stopped.
 		{Name: "denylist redirect", Probes: redirectURIs, Judge: func(in string) (bool, string) {
 			return ValidateRedirect(in) != nil || !redirects.DeniesRedirect(in), "denied"
 		}, Denies: true},
@@ -112,9 +112,9 @@ func TestEveryRegistrationHostCheckDecidesEveryHostFamilyAsPinned(t *testing.T) 
 		}},
 		// A remembered consent compares redirect URIs by RedirectKey, which drops the port of an http
 		// loopback one only: a URI passes when its port is dropped, so a remembered consent covers it
-		// on another port.
+		// on another port. The broker keys only a URI the redirect rule kept.
 		{Name: "consent redirect key", Probes: redirectURIs, Judge: func(in string) (bool, string) {
-			return RedirectKey(in) != in, "compared as written"
+			return ValidateRedirect(in) == nil && RedirectKey(in) != in, "compared as written"
 		}},
 	})
 }

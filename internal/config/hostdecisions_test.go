@@ -69,9 +69,7 @@ func TestEveryHostSettingDecidesEveryHostFamilyAsPinned(t *testing.T) {
 		// Config refuses only a client ID that can carry a credential, or a zone; registration's
 		// "denylist entry" column judges the rest of the URL. So this column judges every client ID
 		// that holds what a credential or a zone is written with, whatever its family.
-		setting("client-denylist", "client-denylist client ID", hostfamilies.Only(hostfamilies.URLProbes("/client.json", "https"), func(p hostfamilies.Probe) bool {
-			return p.Family == "url shape" || strings.ContainsAny(strings.TrimPrefix(p.Input, "https://"), "@?#%")
-		}), list(parseClientDenylist)),
+		setting("client-denylist", "client-denylist client ID", credentialOrZone(hostfamilies.URLProbes("/client.json", "https")), list(parseClientDenylist)),
 		setting("listen", "", hosts, listen("host:port such as 127.0.0.1:8080")),
 		setting("internal-listen", "", hosts, listen("host:port such as 127.0.0.1:9090, or empty")),
 		noAuth("public-url", both),
@@ -106,4 +104,16 @@ func TestAReasonClassCountsTheRefusalsForOneReasonAsOne(t *testing.T) {
 			t.Errorf("reasonClass(%q) = %q, want %q", in, got, want)
 		}
 	}
+}
+
+// credentialOrZone is the client ID probes that hold what a credential or a zone is written with
+// (@ ? # %), whatever their family, and every URL shape.
+func credentialOrZone(probes []hostfamilies.Probe) []hostfamilies.Probe {
+	var out []hostfamilies.Probe
+	for _, p := range probes {
+		if p.Family == "url shape" || strings.ContainsAny(strings.TrimPrefix(p.Input, "https://"), "@?#%") {
+			out = append(out, p)
+		}
+	}
+	return out
 }

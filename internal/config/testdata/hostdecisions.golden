@@ -3,26 +3,26 @@
 # which is edited by hand; a denylist's lines there are the inputs it stops. A Go version that reads
 # a URL or an address differently changes these lines: that is a decision change too.
 
-## public-url: 147 pass, 16391 refused, of 16538
+## public-url: 147 pass, 18677 refused, of 18824
 by family:
-  name                     pass    40  refused  1904
-  name edge                pass     0  refused  3672
-  near miss                pass    30  refused  1266
-  idn                      pass     5  refused  1291
-  ipv4                     pass    35  refused  1045
-  ipv4 spelling            pass     0  refused  1728
-  ipv6                     pass    34  refused  1478
-  ipv4-mapped              pass     0  refused   648
-  zone                     pass     0  refused  2264
-  invisible                pass     0  refused  1080
+  name                     pass    40  refused  2012
+  name edge                pass     0  refused  4332
+  near miss                pass    30  refused  1338
+  idn                      pass     5  refused  1363
+  ipv4                     pass    35  refused  1105
+  ipv4 spelling            pass     0  refused  2052
+  ipv6                     pass    34  refused  1562
+  ipv4-mapped              pass     0  refused   684
+  zone                     pass     0  refused  3074
+  invisible                pass     0  refused  1140
   url shape                pass     3  refused    15
 by wrap:
-  bare                     pass   110  refused  2624
-  [h]                      pass    30  refused  2706
-  [h                       pass     4  refused  2730
-  h]                       pass     0  refused  2772
-  [h]]                     pass     0  refused  2772
-  [h]x                     pass     0  refused  2772
+  bare                     pass   110  refused  3004
+  [h]                      pass    30  refused  3086
+  [h                       pass     4  refused  3110
+  h]                       pass     0  refused  3154
+  [h]]                     pass     0  refused  3154
+  [h]x                     pass     0  refused  3154
   scheme in upper case     pass     1  refused     0
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -42,47 +42,48 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass    28  refused   886
-  :                        pass     0  refused   918
-  :443                     pass     4  refused   914
-  :80                      pass    24  refused   894
-  :8080                    pass    28  refused   890
-  :9090                    pass    28  refused   890
-  :65535                   pass    28  refused   890
-  :0                       pass     0  refused   918
-  :65536                   pass     0  refused   918
-  :123456                  pass     0  refused   918
-  :080                     pass     0  refused   918
-  :+80                     pass     0  refused   918
-  :-1                      pass     0  refused   918
-  :0x50                    pass     0  refused   918
-  :8a                      pass     0  refused   918
-  :８０                      pass     0  refused   918
-  :80:80                   pass     0  refused   918
-  :80]                     pass     4  refused   914
+  none                     pass    28  refused   958
+  :                        pass     0  refused   990
+  :443                     pass     4  refused   986
+  :80                      pass    24  refused   966
+  :8080                    pass    28  refused   962
+  :9090                    pass    28  refused   962
+  :65535                   pass    28  refused   962
+  :0                       pass     0  refused   990
+  :65536                   pass     0  refused   990
+  :123456                  pass     0  refused   990
+  :080                     pass     0  refused   990
+  :+80                     pass     0  refused   990
+  :-1                      pass     0  refused   990
+  :0x50                    pass     0  refused   990
+  :8a                      pass     0  refused   990
+  :８０                      pass     0  refused   990
+  :80:80                   pass     0  refused   990
+  :80:443                  pass     0  refused   990
+  :80]                     pass     4  refused   986
   -                        pass     3  refused    15
 refused because:
-   4427  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a port that is not a number
-   2804  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has brackets that do not enclose an IPv6 address alone
-   2530  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a "[" in its host without its "]"
-   2278  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has text after the "]" of its IPv6 address that is not a ":" and a port
-   1030  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero
-    864  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has an invisible formatting character, such as a zero-width space, which a URL cannot hold
-    504  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host:port has brackets that do not enclose an IPv6 address alone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
-    433  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has white space, which a URL cannot hold; write a space in a path as %20
-    286  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a "%" not followed by two hexadecimal digits
-    216  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a control character, which a URL cannot hold
+   5259  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a port that is not a number
+   2960  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has brackets that do not enclose an IPv6 address alone
+   2822  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a "[" in its host without its "]"
+   2556  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has text after the "]" of its IPv6 address that is not a ":" and a port
+   1090  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero
+    913  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has white space, which a URL cannot hold; write a space in a path as %20
+    912  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has an invisible formatting character, such as a zero-width space, which a URL cannot hold
+    540  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host:port has brackets that do not enclose an IPv6 address alone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
+    338  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a "%" not followed by two hexadecimal digits
+    228  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a control character, which a URL cannot hold
     134  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it holds a user name or password
     120  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host:port holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
     104  BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
      96  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a %-escape in its host, which a host name cannot hold
      84  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has an IPv6 zone, which a URL cannot carry; give the address without its %zone
-     60  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host:port has an empty label (a leading, double or trailing dot); drop the extra dot
-     40  BYWARD_PUBLIC_URL: want the MCP endpoint's path without a trailing slash, such as https://mcp.example.com/mcp; got a path that is empty or ends in /: give the endpoint's path, without the trailing slash; BYWARD_PUBLIC_URL: want a URL without a query or fragment, such as https://mcp.example.com/mcp; got a query or fragment, not shown: remove it
+     84  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host:port has an empty label (a leading, double or trailing dot); drop the extra dot
+     42  BYWARD_PUBLIC_URL: want the MCP endpoint's path without a trailing slash, such as https://mcp.example.com/mcp; got a path that is empty or ends in /: give the endpoint's path, without the trailing slash; BYWARD_PUBLIC_URL: want a URL without a query or fragment, such as https://mcp.example.com/mcp; got a query or fragment, not shown: remove it
+     38  BYWARD_PUBLIC_URL: want the MCP endpoint's path without a trailing slash, such as https://mcp.example.com/mcp; got a path that is empty or ends in /: give the endpoint's path, without the trailing slash; BYWARD_PUBLIC_URL: want a URL without a query or fragment, such as https://mcp.example.com/mcp; got a query or fragment, not shown: remove it; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
      36  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host:port has a character no host name holds at position N; a host name has only letters, digits, - . and _
-     36  BYWARD_PUBLIC_URL: want the MCP endpoint's path without a trailing slash, such as https://mcp.example.com/mcp; got a path that is empty or ends in /: give the endpoint's path, without the trailing slash; BYWARD_PUBLIC_URL: want a URL without a query or fragment, such as https://mcp.example.com/mcp; got a query or fragment, not shown: remove it; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
-     25  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it
-     25  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
+     30  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it
+     30  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
      24  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host:port has a label that starts or ends with a hyphen; a label starts and ends with a letter or a digit
      24  BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its port as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its port 443 is https's default, which browsers drop; write the URL without :443
      20  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has no host before its port
@@ -92,8 +93,8 @@ refused because:
      15  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
      15  BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do
      10  BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its IPv6 address is not in the form browsers write it; write it as [::1]
-      5  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it; BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its port as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its port 443 is https's default, which browsers drop; write the URL without :443
-      5  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it; BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its port as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its port 80 is http's default, which browsers drop; write the URL without :80; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
+      6  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it; BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its port as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its port 443 is https's default, which browsers drop; write the URL without :443
+      6  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it; BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its port as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its port 80 is http's default, which browsers drop; write the URL without :80; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
       5  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1, reading a part with a leading 0 as octal
       5  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1, reading a part with a leading 0 as octal; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
       5  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 8.0.0.1, reading a part with a leading 0 as octal
@@ -132,26 +133,26 @@ refused because:
       1  BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do; BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its port as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its port 80 is http's default, which browsers drop; write the URL without :80
       1  BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do; BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its port as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its port 80 is http's default, which browsers drop; write the URL without :80; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
 
-## upstream-url: 669 pass, 15869 refused, of 16538
+## upstream-url: 709 pass, 18115 refused, of 18824
 by family:
-  name                     pass   108  refused  1836
-  name edge                pass   180  refused  3492
-  near miss                pass    72  refused  1224
-  idn                      pass    12  refused  1284
-  ipv4                     pass    60  refused  1020
-  ipv4 spelling            pass    96  refused  1632
-  ipv6                     pass    96  refused  1416
-  ipv4-mapped              pass    38  refused   610
-  zone                     pass     0  refused  2264
-  invisible                pass     0  refused  1080
+  name                     pass   108  refused  1944
+  name edge                pass   208  refused  4124
+  near miss                pass    72  refused  1296
+  idn                      pass    12  refused  1356
+  ipv4                     pass    60  refused  1080
+  ipv4 spelling            pass   108  refused  1944
+  ipv6                     pass    96  refused  1500
+  ipv4-mapped              pass    38  refused   646
+  zone                     pass     0  refused  3074
+  invisible                pass     0  refused  1140
   url shape                pass     7  refused    11
 by wrap:
-  bare                     pass   492  refused  2242
-  [h]                      pass   120  refused  2616
-  [h                       pass    14  refused  2720
-  h]                       pass    36  refused  2736
-  [h]]                     pass     0  refused  2772
-  [h]x                     pass     0  refused  2772
+  bare                     pass   530  refused  2584
+  [h]                      pass   120  refused  2996
+  [h                       pass    14  refused  3100
+  h]                       pass    38  refused  3116
+  [h]]                     pass     0  refused  3154
+  [h]x                     pass     0  refused  3154
   scheme in upper case     pass     1  refused     0
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -171,36 +172,37 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass   100  refused   814
-  :                        pass     4  refused   914
-  :443                     pass   100  refused   818
-  :80                      pass   100  refused   818
-  :8080                    pass   100  refused   818
-  :9090                    pass   100  refused   818
-  :65535                   pass   100  refused   818
-  :0                       pass     4  refused   914
-  :65536                   pass     4  refused   914
-  :123456                  pass     4  refused   914
-  :080                     pass     4  refused   914
-  :+80                     pass     4  refused   914
-  :-1                      pass     4  refused   914
-  :0x50                    pass     4  refused   914
-  :8a                      pass     4  refused   914
-  :８０                      pass     4  refused   914
-  :80:80                   pass     4  refused   914
-  :80]                     pass    18  refused   900
+  none                     pass   106  refused   880
+  :                        pass     4  refused   986
+  :443                     pass   106  refused   884
+  :80                      pass   106  refused   884
+  :8080                    pass   106  refused   884
+  :9090                    pass   106  refused   884
+  :65535                   pass   106  refused   884
+  :0                       pass     4  refused   986
+  :65536                   pass     4  refused   986
+  :123456                  pass     4  refused   986
+  :080                     pass     4  refused   986
+  :+80                     pass     4  refused   986
+  :-1                      pass     4  refused   986
+  :0x50                    pass     4  refused   986
+  :8a                      pass     4  refused   986
+  :８０                      pass     4  refused   986
+  :80:80                   pass     4  refused   986
+  :80:443                  pass     4  refused   986
+  :80]                     pass    18  refused   972
   -                        pass     7  refused    11
 refused because:
-   4427  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has a port that is not a number
-   2804  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has brackets that do not enclose an IPv6 address alone
-   2530  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has a "[" in its host without its "]"
-   2278  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has text after the "]" of its IPv6 address that is not a ":" and a port
-   1030  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero
-    864  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has an invisible formatting character, such as a zero-width space, which a URL cannot hold
-    540  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): its host has a character no host name holds at position N; a host name has only letters, digits, - . and _
-    433  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has white space, which a URL cannot hold; write a space in a path as %20
-    286  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has a "%" not followed by two hexadecimal digits
-    216  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has a control character, which a URL cannot hold
+   5259  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has a port that is not a number
+   2960  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has brackets that do not enclose an IPv6 address alone
+   2822  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has a "[" in its host without its "]"
+   2556  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has text after the "]" of its IPv6 address that is not a ":" and a port
+   1090  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero
+    913  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has white space, which a URL cannot hold; write a space in a path as %20
+    912  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has an invisible formatting character, such as a zero-width space, which a URL cannot hold
+    576  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): its host has a character no host name holds at position N; a host name has only letters, digits, - . and _
+    338  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has a "%" not followed by two hexadecimal digits
+    228  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has a control character, which a URL cannot hold
     134  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it holds a user name or password
     120  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): its host holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
      96  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has a %-escape in its host, which a host name cannot hold
@@ -211,26 +213,26 @@ refused because:
       1  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has a scheme other than http or https
       1  BYWARD_UPSTREAM_URL: want an absolute http(s) URL such as http://127.0.0.1:9000/mcp; got a value (N characters, not shown): it has no scheme such as https://
 
-## resource-documentation: 668 pass, 7610 refused, of 8278
+## resource-documentation: 706 pass, 8715 refused, of 9421
 by family:
-  name                     pass   108  refused   864
-  name edge                pass   186  refused  1650
-  near miss                pass    72  refused   576
-  idn                      pass    72  refused   576
-  ipv4                     pass    60  refused   480
-  ipv4 spelling            pass    96  refused   768
-  ipv6                     pass    48  refused   708
-  ipv4-mapped              pass    19  refused   305
-  zone                     pass     0  refused  1132
-  invisible                pass     0  refused   540
+  name                     pass   108  refused   918
+  name edge                pass   212  refused  1954
+  near miss                pass    72  refused   612
+  idn                      pass    72  refused   612
+  ipv4                     pass    60  refused   510
+  ipv4 spelling            pass   108  refused   918
+  ipv6                     pass    48  refused   750
+  ipv4-mapped              pass    19  refused   323
+  zone                     pass     0  refused  1537
+  invisible                pass     0  refused   570
   url shape                pass     7  refused    11
 by wrap:
-  bare                     pass   294  refused  1073
-  [h]                      pass    60  refused  1308
-  [h                       pass     7  refused  1360
-  h]                       pass   300  refused  1086
-  [h]]                     pass     0  refused  1386
-  [h]x                     pass     0  refused  1386
+  bare                     pass   313  refused  1244
+  [h]                      pass    60  refused  1498
+  [h                       pass     7  refused  1550
+  h]                       pass   319  refused  1258
+  [h]]                     pass     0  refused  1577
+  [h]x                     pass     0  refused  1577
   scheme in upper case     pass     1  refused     0
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -250,35 +252,36 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass   105  refused   352
-  :                        pass     2  refused   457
-  :443                     pass   105  refused   354
-  :80                      pass   105  refused   354
-  :8080                    pass   105  refused   354
-  :9090                    pass   105  refused   354
-  :65535                   pass   105  refused   354
-  :0                       pass     2  refused   457
-  :65536                   pass     2  refused   457
-  :123456                  pass     2  refused   457
-  :080                     pass     2  refused   457
-  :+80                     pass     2  refused   457
-  :-1                      pass     2  refused   457
-  :0x50                    pass     2  refused   457
-  :8a                      pass     2  refused   457
-  :８０                      pass     2  refused   457
-  :80:80                   pass     2  refused   457
-  :80]                     pass     9  refused   450
+  none                     pass   111  refused   382
+  :                        pass     2  refused   493
+  :443                     pass   111  refused   384
+  :80                      pass   111  refused   384
+  :8080                    pass   111  refused   384
+  :9090                    pass   111  refused   384
+  :65535                   pass   111  refused   384
+  :0                       pass     2  refused   493
+  :65536                   pass     2  refused   493
+  :123456                  pass     2  refused   493
+  :080                     pass     2  refused   493
+  :+80                     pass     2  refused   493
+  :-1                      pass     2  refused   493
+  :0x50                    pass     2  refused   493
+  :8a                      pass     2  refused   493
+  :８０                      pass     2  refused   493
+  :80:80                   pass     2  refused   493
+  :80:443                  pass     2  refused   493
+  :80]                     pass     9  refused   486
   -                        pass     7  refused    11
 refused because:
-   2214  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has a port that is not a number
-   1402  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has brackets that do not enclose an IPv6 address alone
-   1265  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has a "[" in its host without its "]"
-   1139  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has text after the "]" of its IPv6 address that is not a ":" and a port
-    515  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero
-    432  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has an invisible formatting character, such as a zero-width space, which a URL cannot hold
-    217  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has white space, which a URL cannot hold; write a space in a path as %20
-    143  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has a "%" not followed by two hexadecimal digits
-    108  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has a control character, which a URL cannot hold
+   2630  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has a port that is not a number
+   1480  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has brackets that do not enclose an IPv6 address alone
+   1411  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has a "[" in its host without its "]"
+   1278  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has text after the "]" of its IPv6 address that is not a ":" and a port
+    545  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero
+    457  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has white space, which a URL cannot hold; write a space in a path as %20
+    456  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has an invisible formatting character, such as a zero-width space, which a URL cannot hold
+    169  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has a "%" not followed by two hexadecimal digits
+    114  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has a control character, which a URL cannot hold
      68  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it holds a user name or password
      48  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has a %-escape in its host, which a host name cannot hold
      43  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has an IPv6 zone, which a URL cannot carry; give the address without its %zone
@@ -288,26 +291,26 @@ refused because:
       1  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has a scheme other than http or https
       1  BYWARD_RESOURCE_DOCUMENTATION: want an absolute http(s) URL such as https://docs.example.com/mcp; got a value (N characters, not shown): it has no scheme such as https://
 
-## oidc-issuer: 676 pass, 15862 refused, of 16538
+## oidc-issuer: 712 pass, 18112 refused, of 18824
 by family:
-  name                     pass   120  refused  1824
-  name edge                pass   150  refused  3522
-  near miss                pass    72  refused  1224
-  idn                      pass    72  refused  1224
-  ipv4                     pass    72  refused  1008
-  ipv4 spelling            pass    96  refused  1632
-  ipv6                     pass    60  refused  1452
-  ipv4-mapped              pass    31  refused   617
-  zone                     pass     0  refused  2264
-  invisible                pass     0  refused  1080
+  name                     pass   120  refused  1932
+  name edge                pass   174  refused  4158
+  near miss                pass    72  refused  1296
+  idn                      pass    72  refused  1296
+  ipv4                     pass    72  refused  1068
+  ipv4 spelling            pass   108  refused  1944
+  ipv6                     pass    60  refused  1536
+  ipv4-mapped              pass    31  refused   653
+  zone                     pass     0  refused  3074
+  invisible                pass     0  refused  1140
   url shape                pass     3  refused    15
 by wrap:
-  bare                     pass   300  refused  2434
-  [h]                      pass    84  refused  2652
-  [h                       pass     7  refused  2727
-  h]                       pass   282  refused  2490
-  [h]]                     pass     0  refused  2772
-  [h]x                     pass     0  refused  2772
+  bare                     pass   318  refused  2796
+  [h]                      pass    84  refused  3032
+  [h                       pass     7  refused  3107
+  h]                       pass   300  refused  2854
+  [h]]                     pass     0  refused  3154
+  [h]x                     pass     0  refused  3154
   scheme in upper case     pass     1  refused     0
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -327,66 +330,67 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass   111  refused   803
-  :                        pass     0  refused   918
-  :443                     pass   111  refused   807
-  :80                      pass   111  refused   807
-  :8080                    pass   111  refused   807
-  :9090                    pass   111  refused   807
-  :65535                   pass   111  refused   807
-  :0                       pass     0  refused   918
-  :65536                   pass     0  refused   918
-  :123456                  pass     0  refused   918
-  :080                     pass     0  refused   918
-  :+80                     pass     0  refused   918
-  :-1                      pass     0  refused   918
-  :0x50                    pass     0  refused   918
-  :8a                      pass     0  refused   918
-  :８０                      pass     0  refused   918
-  :80:80                   pass     0  refused   918
-  :80]                     pass     7  refused   911
+  none                     pass   117  refused   869
+  :                        pass     0  refused   990
+  :443                     pass   117  refused   873
+  :80                      pass   117  refused   873
+  :8080                    pass   117  refused   873
+  :9090                    pass   117  refused   873
+  :65535                   pass   117  refused   873
+  :0                       pass     0  refused   990
+  :65536                   pass     0  refused   990
+  :123456                  pass     0  refused   990
+  :080                     pass     0  refused   990
+  :+80                     pass     0  refused   990
+  :-1                      pass     0  refused   990
+  :0x50                    pass     0  refused   990
+  :8a                      pass     0  refused   990
+  :８０                      pass     0  refused   990
+  :80:80                   pass     0  refused   990
+  :80:443                  pass     0  refused   990
+  :80]                     pass     7  refused   983
   -                        pass     3  refused    15
 refused because:
-   4427  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has a port that is not a number
-   2804  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has brackets that do not enclose an IPv6 address alone
-   2530  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has a "[" in its host without its "]"
-   2278  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has text after the "]" of its IPv6 address that is not a ":" and a port
-   1030  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero
-    864  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has an invisible formatting character, such as a zero-width space, which a URL cannot hold
-    577  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got http on a host that is not loopback: give https; an issuer is http only on a loopback host, with --dev
-    433  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has white space, which a URL cannot hold; write a space in a path as %20
-    286  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has a "%" not followed by two hexadecimal digits
-    216  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has a control character, which a URL cannot hold
+   5259  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has a port that is not a number
+   2960  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has brackets that do not enclose an IPv6 address alone
+   2822  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has a "[" in its host without its "]"
+   2556  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has text after the "]" of its IPv6 address that is not a ":" and a port
+   1090  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero
+    913  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has white space, which a URL cannot hold; write a space in a path as %20
+    912  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has an invisible formatting character, such as a zero-width space, which a URL cannot hold
+    613  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got http on a host that is not loopback: give https; an issuer is http only on a loopback host, with --dev
+    338  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has a "%" not followed by two hexadecimal digits
+    228  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has a control character, which a URL cannot hold
     134  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it holds a user name or password
      96  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has a %-escape in its host, which a host name cannot hold
      84  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has an IPv6 zone, which a URL cannot carry; give the address without its %zone
-     76  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has a query or a fragment, which an issuer never has
+     80  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has a query or a fragment, which an issuer never has
      20  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has no host before its port
       3  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has no host
       2  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has no "//" after its scheme
       1  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has a scheme other than http or https
       1  BYWARD_OIDC_ISSUER: want the issuer URL, exactly as the IdP's discovery document states it, such as https://idp.example.com/realms/mcp; got a value (N characters, not shown): it has no scheme such as https://
 
-## allowed-origins: 387 pass, 16151 refused, of 16538
+## allowed-origins: 387 pass, 18437 refused, of 18824
 by family:
-  name                     pass   108  refused  1836
-  name edge                pass     0  refused  3672
-  near miss                pass    72  refused  1224
-  idn                      pass    12  refused  1284
-  ipv4                     pass    60  refused  1020
-  ipv4 spelling            pass     0  refused  1728
-  ipv6                     pass    96  refused  1416
-  ipv4-mapped              pass    38  refused   610
-  zone                     pass     0  refused  2264
-  invisible                pass     0  refused  1080
+  name                     pass   108  refused  1944
+  name edge                pass     0  refused  4332
+  near miss                pass    72  refused  1296
+  idn                      pass    12  refused  1356
+  ipv4                     pass    60  refused  1080
+  ipv4 spelling            pass     0  refused  2052
+  ipv6                     pass    96  refused  1500
+  ipv4-mapped              pass    38  refused   646
+  zone                     pass     0  refused  3074
+  invisible                pass     0  refused  1140
   url shape                pass     1  refused    17
 by wrap:
-  bare                     pass   252  refused  2482
-  [h]                      pass   120  refused  2616
-  [h                       pass    14  refused  2720
-  h]                       pass     0  refused  2772
-  [h]]                     pass     0  refused  2772
-  [h]x                     pass     0  refused  2772
+  bare                     pass   252  refused  2862
+  [h]                      pass   120  refused  2996
+  [h                       pass    14  refused  3100
+  h]                       pass     0  refused  3154
+  [h]]                     pass     0  refused  3154
+  [h]x                     pass     0  refused  3154
   scheme in upper case     pass     1  refused     0
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -406,43 +410,44 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass    62  refused   852
-  :                        pass     0  refused   918
-  :443                     pass    62  refused   856
-  :80                      pass    62  refused   856
-  :8080                    pass    62  refused   856
-  :9090                    pass    62  refused   856
-  :65535                   pass    62  refused   856
-  :0                       pass     0  refused   918
-  :65536                   pass     0  refused   918
-  :123456                  pass     0  refused   918
-  :080                     pass     0  refused   918
-  :+80                     pass     0  refused   918
-  :-1                      pass     0  refused   918
-  :0x50                    pass     0  refused   918
-  :8a                      pass     0  refused   918
-  :８０                      pass     0  refused   918
-  :80:80                   pass     0  refused   918
-  :80]                     pass    14  refused   904
+  none                     pass    62  refused   924
+  :                        pass     0  refused   990
+  :443                     pass    62  refused   928
+  :80                      pass    62  refused   928
+  :8080                    pass    62  refused   928
+  :9090                    pass    62  refused   928
+  :65535                   pass    62  refused   928
+  :0                       pass     0  refused   990
+  :65536                   pass     0  refused   990
+  :123456                  pass     0  refused   990
+  :080                     pass     0  refused   990
+  :+80                     pass     0  refused   990
+  :-1                      pass     0  refused   990
+  :0x50                    pass     0  refused   990
+  :8a                      pass     0  refused   990
+  :８０                      pass     0  refused   990
+  :80:80                   pass     0  refused   990
+  :80:443                  pass     0  refused   990
+  :80]                     pass    14  refused   976
   -                        pass     1  refused    17
 refused because:
-   4429  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a port that is not a number
-   2804  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has brackets that do not enclose an IPv6 address alone
-   2532  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a "[" in its host without its "]"
-   2278  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has text after the "]" of its IPv6 address that is not a ":" and a port
-   1030  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero
-    864  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has an invisible formatting character, such as a zero-width space, which a URL cannot hold
-    504  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host:port has brackets that do not enclose an IPv6 address alone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
-    429  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has white space, which a URL cannot hold; write a space in a path as %20
-    286  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a "%" not followed by two hexadecimal digits
-    216  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a control character, which a URL cannot hold
+   5263  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a port that is not a number
+   2960  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has brackets that do not enclose an IPv6 address alone
+   2826  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a "[" in its host without its "]"
+   2556  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has text after the "]" of its IPv6 address that is not a ":" and a port
+   1090  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero
+    912  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has an invisible formatting character, such as a zero-width space, which a URL cannot hold
+    905  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has white space, which a URL cannot hold; write a space in a path as %20
+    540  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host:port has brackets that do not enclose an IPv6 address alone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
+    338  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a "%" not followed by two hexadecimal digits
+    228  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a control character, which a URL cannot hold
     134  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it holds a user name or password
     120  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host:port holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
      96  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a %-escape in its host, which a host name cannot hold
      84  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has an IPv6 zone, which a URL cannot carry; give the address without its %zone
-     76  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a query or a fragment
-     60  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it
-     60  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host:port has an empty label (a leading, double or trailing dot); drop the extra dot
+     84  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host:port has an empty label (a leading, double or trailing dot); drop the extra dot
+     80  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a query or a fragment
+     72  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it
      36  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1
      36  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host:port has a character no host name holds at position N; a host name has only letters, digits, - . and _
      24  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host:port has a label that starts or ends with a hyphen; a label starts and ends with a letter or a digit
@@ -455,213 +460,217 @@ refused because:
       1  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a scheme other than http or https
       1  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has no scheme such as https://
 
-## allowed-hosts: 260 pass, 8000 refused, of 8260
+## allowed-hosts: 267 pass, 9136 refused, of 9403
 by family:
-  name                     pass    54  refused   918
-  name edge                pass     1  refused  1835
-  near miss                pass    36  refused   612
-  idn                      pass     6  refused   642
-  ipv4                     pass    30  refused   510
-  ipv4 spelling            pass     0  refused   864
-  ipv6                     pass   103  refused   653
-  ipv4-mapped              pass    30  refused   294
-  zone                     pass     0  refused  1132
-  invisible                pass     0  refused   540
+  name                     pass    54  refused   972
+  name edge                pass     1  refused  2165
+  near miss                pass    36  refused   648
+  idn                      pass     6  refused   678
+  ipv4                     pass    30  refused   540
+  ipv4 spelling            pass     0  refused  1026
+  ipv6                     pass   109  refused   689
+  ipv4-mapped              pass    31  refused   311
+  zone                     pass     0  refused  1537
+  invisible                pass     0  refused   570
 by wrap:
-  bare                     pass   193  refused  1174
-  [h]                      pass    60  refused  1308
-  [h                       pass     7  refused  1360
-  h]                       pass     0  refused  1386
-  [h]]                     pass     0  refused  1386
-  [h]x                     pass     0  refused  1386
+  bare                     pass   200  refused  1357
+  [h]                      pass    60  refused  1498
+  [h                       pass     7  refused  1550
+  h]                       pass     0  refused  1577
+  [h]]                     pass     0  refused  1577
+  [h]x                     pass     0  refused  1577
 by port:
-  none                     pass    42  refused   415
-  :                        pass     0  refused   459
-  :443                     pass    38  refused   421
-  :80                      pass    38  refused   421
-  :8080                    pass    38  refused   421
-  :9090                    pass    38  refused   421
-  :65535                   pass    31  refused   428
-  :0                       pass     7  refused   452
-  :65536                   pass     0  refused   459
-  :123456                  pass     0  refused   459
-  :080                     pass     7  refused   452
-  :+80                     pass     0  refused   459
-  :-1                      pass     0  refused   459
-  :0x50                    pass     0  refused   459
-  :8a                      pass     7  refused   452
-  :８０                      pass     0  refused   459
-  :80:80                   pass     7  refused   452
-  :80]                     pass     7  refused   452
+  none                     pass    42  refused   451
+  :                        pass     0  refused   495
+  :443                     pass    38  refused   457
+  :80                      pass    38  refused   457
+  :8080                    pass    38  refused   457
+  :9090                    pass    38  refused   457
+  :65535                   pass    31  refused   464
+  :0                       pass     7  refused   488
+  :65536                   pass     0  refused   495
+  :123456                  pass     0  refused   495
+  :080                     pass     7  refused   488
+  :+80                     pass     0  refused   495
+  :-1                      pass     0  refused   495
+  :0x50                    pass     0  refused   495
+  :8a                      pass     7  refused   488
+  :８０                      pass     0  refused   495
+  :80:80                   pass     7  refused   488
+  :80:443                  pass     7  refused   488
+  :80]                     pass     7  refused   488
 refused because:
-   5185  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it has brackets that do not enclose an IPv6 address alone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
-   1377  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
-    461  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it is not an IPv6 address without a zone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
-    389  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero
-    304  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it holds a "/" or a space; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
+   5905  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it has brackets that do not enclose an IPv6 address alone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
+   1573  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
+    608  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it is not an IPv6 address without a zone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
+    408  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero
+    322  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it holds a "/" or a space; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
     105  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it has a character no host name holds at position N; a host name has only letters, digits, - . and _
-     75  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it has an empty label (a leading, double or trailing dot); drop the extra dot
+    105  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it has an empty label (a leading, double or trailing dot); drop the extra dot
+     36  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it
      30  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it has a label that starts or ends with a hyphen; a label starts and ends with a letter or a digit
-     30  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it
      18  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1
      14  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it has no host before its ":"; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
       6  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1, reading a part with a leading 0 as octal
       6  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 8.0.0.1, reading a part with a leading 0 as octal
 
-## cimd-trusted-hosts: 13 pass, 8247 refused, of 8260
+## cimd-trusted-hosts: 13 pass, 9390 refused, of 9403
 by family:
-  name                     pass     5  refused   967
-  name edge                pass     1  refused  1835
-  near miss                pass     6  refused   642
-  idn                      pass     1  refused   647
-  ipv4                     pass     0  refused   540
-  ipv4 spelling            pass     0  refused   864
-  ipv6                     pass     0  refused   756
-  ipv4-mapped              pass     0  refused   324
-  zone                     pass     0  refused  1132
-  invisible                pass     0  refused   540
+  name                     pass     5  refused  1021
+  name edge                pass     1  refused  2165
+  near miss                pass     6  refused   678
+  idn                      pass     1  refused   683
+  ipv4                     pass     0  refused   570
+  ipv4 spelling            pass     0  refused  1026
+  ipv6                     pass     0  refused   798
+  ipv4-mapped              pass     0  refused   342
+  zone                     pass     0  refused  1537
+  invisible                pass     0  refused   570
 by wrap:
-  bare                     pass    13  refused  1354
-  [h]                      pass     0  refused  1368
-  [h                       pass     0  refused  1367
-  h]                       pass     0  refused  1386
-  [h]]                     pass     0  refused  1386
-  [h]x                     pass     0  refused  1386
+  bare                     pass    13  refused  1544
+  [h]                      pass     0  refused  1558
+  [h                       pass     0  refused  1557
+  h]                       pass     0  refused  1577
+  [h]]                     pass     0  refused  1577
+  [h]x                     pass     0  refused  1577
 by port:
-  none                     pass    13  refused   444
-  :                        pass     0  refused   459
-  :443                     pass     0  refused   459
-  :80                      pass     0  refused   459
-  :8080                    pass     0  refused   459
-  :9090                    pass     0  refused   459
-  :65535                   pass     0  refused   459
-  :0                       pass     0  refused   459
-  :65536                   pass     0  refused   459
-  :123456                  pass     0  refused   459
-  :080                     pass     0  refused   459
-  :+80                     pass     0  refused   459
-  :-1                      pass     0  refused   459
-  :0x50                    pass     0  refused   459
-  :8a                      pass     0  refused   459
-  :８０                      pass     0  refused   459
-  :80:80                   pass     0  refused   459
-  :80]                     pass     0  refused   459
+  none                     pass    13  refused   480
+  :                        pass     0  refused   495
+  :443                     pass     0  refused   495
+  :80                      pass     0  refused   495
+  :8080                    pass     0  refused   495
+  :9090                    pass     0  refused   495
+  :65535                   pass     0  refused   495
+  :0                       pass     0  refused   495
+  :65536                   pass     0  refused   495
+  :123456                  pass     0  refused   495
+  :080                     pass     0  refused   495
+  :+80                     pass     0  refused   495
+  :-1                      pass     0  refused   495
+  :0x50                    pass     0  refused   495
+  :8a                      pass     0  refused   495
+  :８０                      pass     0  refused   495
+  :80:80                   pass     0  refused   495
+  :80:443                  pass     0  refused   495
+  :80]                     pass     0  refused   495
 refused because:
-   6423  BYWARD_CIMD_TRUSTED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it has a character no host name holds at position N; a host name has only letters, digits, - . and _
-   1356  BYWARD_CIMD_TRUSTED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
-    411  BYWARD_CIMD_TRUSTED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it is an IP address, which this list never names: an address is also reached by other spellings (127.1 and 0x7f000001 are 127.0.0.1) that no entry can match; give a host name
-     41  BYWARD_CIMD_TRUSTED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it has an empty label (a leading, double or trailing dot); drop the extra dot
-     10  BYWARD_CIMD_TRUSTED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1 and 0x7f000001 are 127.0.0.1) that no entry can match, or none at all; give a host name
+   7266  BYWARD_CIMD_TRUSTED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it has a character no host name holds at position N; a host name has only letters, digits, - . and _
+   1511  BYWARD_CIMD_TRUSTED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
+    550  BYWARD_CIMD_TRUSTED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it is an IP address, which this list never names: an address is also reached by other spellings (127.1 and 0x7f000001 are 127.0.0.1) that no entry can match; give a host name
+     46  BYWARD_CIMD_TRUSTED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it has an empty label (a leading, double or trailing dot); drop the extra dot
+     11  BYWARD_CIMD_TRUSTED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1 and 0x7f000001 are 127.0.0.1) that no entry can match, or none at all; give a host name
       4  BYWARD_CIMD_TRUSTED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it has no dot; give a name with at least one dot
       2  BYWARD_CIMD_TRUSTED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it has a label that starts or ends with a hyphen; a label starts and ends with a letter or a digit
 
-## cimd-allowed-hosts: 13 pass, 8247 refused, of 8260
+## cimd-allowed-hosts: 13 pass, 9390 refused, of 9403
 by family:
-  name                     pass     5  refused   967
-  name edge                pass     1  refused  1835
-  near miss                pass     6  refused   642
-  idn                      pass     1  refused   647
-  ipv4                     pass     0  refused   540
-  ipv4 spelling            pass     0  refused   864
-  ipv6                     pass     0  refused   756
-  ipv4-mapped              pass     0  refused   324
-  zone                     pass     0  refused  1132
-  invisible                pass     0  refused   540
+  name                     pass     5  refused  1021
+  name edge                pass     1  refused  2165
+  near miss                pass     6  refused   678
+  idn                      pass     1  refused   683
+  ipv4                     pass     0  refused   570
+  ipv4 spelling            pass     0  refused  1026
+  ipv6                     pass     0  refused   798
+  ipv4-mapped              pass     0  refused   342
+  zone                     pass     0  refused  1537
+  invisible                pass     0  refused   570
 by wrap:
-  bare                     pass    13  refused  1354
-  [h]                      pass     0  refused  1368
-  [h                       pass     0  refused  1367
-  h]                       pass     0  refused  1386
-  [h]]                     pass     0  refused  1386
-  [h]x                     pass     0  refused  1386
+  bare                     pass    13  refused  1544
+  [h]                      pass     0  refused  1558
+  [h                       pass     0  refused  1557
+  h]                       pass     0  refused  1577
+  [h]]                     pass     0  refused  1577
+  [h]x                     pass     0  refused  1577
 by port:
-  none                     pass    13  refused   444
-  :                        pass     0  refused   459
-  :443                     pass     0  refused   459
-  :80                      pass     0  refused   459
-  :8080                    pass     0  refused   459
-  :9090                    pass     0  refused   459
-  :65535                   pass     0  refused   459
-  :0                       pass     0  refused   459
-  :65536                   pass     0  refused   459
-  :123456                  pass     0  refused   459
-  :080                     pass     0  refused   459
-  :+80                     pass     0  refused   459
-  :-1                      pass     0  refused   459
-  :0x50                    pass     0  refused   459
-  :8a                      pass     0  refused   459
-  :８０                      pass     0  refused   459
-  :80:80                   pass     0  refused   459
-  :80]                     pass     0  refused   459
+  none                     pass    13  refused   480
+  :                        pass     0  refused   495
+  :443                     pass     0  refused   495
+  :80                      pass     0  refused   495
+  :8080                    pass     0  refused   495
+  :9090                    pass     0  refused   495
+  :65535                   pass     0  refused   495
+  :0                       pass     0  refused   495
+  :65536                   pass     0  refused   495
+  :123456                  pass     0  refused   495
+  :080                     pass     0  refused   495
+  :+80                     pass     0  refused   495
+  :-1                      pass     0  refused   495
+  :0x50                    pass     0  refused   495
+  :8a                      pass     0  refused   495
+  :８０                      pass     0  refused   495
+  :80:80                   pass     0  refused   495
+  :80:443                  pass     0  refused   495
+  :80]                     pass     0  refused   495
 refused because:
-   6423  BYWARD_CIMD_ALLOWED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it has a character no host name holds at position N; a host name has only letters, digits, - . and _
-   1356  BYWARD_CIMD_ALLOWED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
-    411  BYWARD_CIMD_ALLOWED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it is an IP address, which this list never names: an address is also reached by other spellings (127.1 and 0x7f000001 are 127.0.0.1) that no entry can match; give a host name
-     41  BYWARD_CIMD_ALLOWED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it has an empty label (a leading, double or trailing dot); drop the extra dot
-     10  BYWARD_CIMD_ALLOWED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1 and 0x7f000001 are 127.0.0.1) that no entry can match, or none at all; give a host name
+   7266  BYWARD_CIMD_ALLOWED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it has a character no host name holds at position N; a host name has only letters, digits, - . and _
+   1511  BYWARD_CIMD_ALLOWED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
+    550  BYWARD_CIMD_ALLOWED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it is an IP address, which this list never names: an address is also reached by other spellings (127.1 and 0x7f000001 are 127.0.0.1) that no entry can match; give a host name
+     46  BYWARD_CIMD_ALLOWED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it has an empty label (a leading, double or trailing dot); drop the extra dot
+     11  BYWARD_CIMD_ALLOWED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1 and 0x7f000001 are 127.0.0.1) that no entry can match, or none at all; give a host name
       4  BYWARD_CIMD_ALLOWED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it has no dot; give a name with at least one dot
       2  BYWARD_CIMD_ALLOWED_HOSTS: want a host name such as claude.ai; got entry N of N (N characters, not shown): it has a label that starts or ends with a hyphen; a label starts and ends with a letter or a digit
 
-## client-denylist host: 14 pass, 8246 refused, of 8260
+## client-denylist host: 14 pass, 9389 refused, of 9403
 by family:
-  name                     pass     5  refused   967
-  name edge                pass     2  refused  1834
-  near miss                pass     6  refused   642
-  idn                      pass     1  refused   647
-  ipv4                     pass     0  refused   540
-  ipv4 spelling            pass     0  refused   864
-  ipv6                     pass     0  refused   756
-  ipv4-mapped              pass     0  refused   324
-  zone                     pass     0  refused  1132
-  invisible                pass     0  refused   540
+  name                     pass     5  refused  1021
+  name edge                pass     2  refused  2164
+  near miss                pass     6  refused   678
+  idn                      pass     1  refused   683
+  ipv4                     pass     0  refused   570
+  ipv4 spelling            pass     0  refused  1026
+  ipv6                     pass     0  refused   798
+  ipv4-mapped              pass     0  refused   342
+  zone                     pass     0  refused  1537
+  invisible                pass     0  refused   570
 by wrap:
-  bare                     pass    14  refused  1353
-  [h]                      pass     0  refused  1368
-  [h                       pass     0  refused  1367
-  h]                       pass     0  refused  1386
-  [h]]                     pass     0  refused  1386
-  [h]x                     pass     0  refused  1386
+  bare                     pass    14  refused  1543
+  [h]                      pass     0  refused  1558
+  [h                       pass     0  refused  1557
+  h]                       pass     0  refused  1577
+  [h]]                     pass     0  refused  1577
+  [h]x                     pass     0  refused  1577
 by port:
-  none                     pass    14  refused   443
-  :                        pass     0  refused   459
-  :443                     pass     0  refused   459
-  :80                      pass     0  refused   459
-  :8080                    pass     0  refused   459
-  :9090                    pass     0  refused   459
-  :65535                   pass     0  refused   459
-  :0                       pass     0  refused   459
-  :65536                   pass     0  refused   459
-  :123456                  pass     0  refused   459
-  :080                     pass     0  refused   459
-  :+80                     pass     0  refused   459
-  :-1                      pass     0  refused   459
-  :0x50                    pass     0  refused   459
-  :8a                      pass     0  refused   459
-  :８０                      pass     0  refused   459
-  :80:80                   pass     0  refused   459
-  :80]                     pass     0  refused   459
+  none                     pass    14  refused   479
+  :                        pass     0  refused   495
+  :443                     pass     0  refused   495
+  :80                      pass     0  refused   495
+  :8080                    pass     0  refused   495
+  :9090                    pass     0  refused   495
+  :65535                   pass     0  refused   495
+  :0                       pass     0  refused   495
+  :65536                   pass     0  refused   495
+  :123456                  pass     0  refused   495
+  :080                     pass     0  refused   495
+  :+80                     pass     0  refused   495
+  :-1                      pass     0  refused   495
+  :0x50                    pass     0  refused   495
+  :8a                      pass     0  refused   495
+  :８０                      pass     0  refused   495
+  :80:80                   pass     0  refused   495
+  :80:443                  pass     0  refused   495
+  :80]                     pass     0  refused   495
 refused because:
-   6423  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it has a character no host name holds at position N; a host name has only letters, digits, - . and _
-   1356  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
-    412  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it is an IP address, which this list never names: an address is also reached by other spellings (127.1 and 0x7f000001 are 127.0.0.1) that no entry can match; give a host name
-     38  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it has an empty label (a leading, double or trailing dot); drop the extra dot
-     10  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1 and 0x7f000001 are 127.0.0.1) that no entry can match, or none at all; give a host name
-      5  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it has no dot; give a name with at least one dot
+   7267  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it has a character no host name holds at position N; a host name has only letters, digits, - . and _
+   1511  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
+    551  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it is an IP address, which this list never names: an address is also reached by other spellings (127.1 and 0x7f000001 are 127.0.0.1) that no entry can match; give a host name
+     41  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it has an empty label (a leading, double or trailing dot); drop the extra dot
+     11  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it ends in a number, so a browser reads it as an IPv4 address: one it also reaches by other spellings (127.1 and 0x7f000001 are 127.0.0.1) that no entry can match, or none at all; give a host name
+      6  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it has no dot; give a name with at least one dot
       2  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it has a label that starts or ends with a hyphen; a label starts and ends with a letter or a digit
 
-## client-denylist client ID: 1311 pass, 271 refused, of 1582
+## client-denylist client ID: 1728 pass, 283 refused, of 2011
 by family:
-  name edge                pass   108  refused   216
-  idn                      pass   108  refused     0
-  zone                     pass  1091  refused    41
+  name edge                pass   114  refused   228
+  idn                      pass   114  refused     0
+  zone                     pass  1496  refused    41
   url shape                pass     4  refused    14
 by wrap:
-  bare                     pass   215  refused    36
-  [h]                      pass   203  refused    49
-  [h                       pass   213  refused    38
-  h]                       pass   234  refused    36
-  [h]]                     pass   210  refused    60
-  [h]x                     pass   232  refused    38
+  bare                     pass   284  refused    38
+  [h]                      pass   272  refused    51
+  [h                       pass   282  refused    40
+  h]                       pass   304  refused    38
+  [h]]                     pass   280  refused    62
+  [h]x                     pass   302  refused    40
   scheme in upper case     pass     0  refused     1
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -681,148 +690,151 @@ by wrap:
   white space              pass     1  refused     0
   backslash                pass     0  refused     1
 by port:
-  none                     pass    70  refused    15
-  :                        pass    72  refused    15
-  :443                     pass    72  refused    15
-  :80                      pass    72  refused    15
-  :8080                    pass    72  refused    15
-  :9090                    pass    72  refused    15
-  :65535                   pass    72  refused    15
-  :0                       pass    72  refused    15
-  :65536                   pass    72  refused    15
-  :123456                  pass    72  refused    15
-  :080                     pass    72  refused    15
-  :+80                     pass    75  refused    12
-  :-1                      pass    75  refused    12
-  :0x50                    pass    75  refused    12
-  :8a                      pass    75  refused    12
-  :８０                      pass    75  refused    12
-  :80:80                   pass    75  refused    12
-  :80]                     pass    67  refused    20
+  none                     pass    88  refused    15
+  :                        pass    90  refused    15
+  :443                     pass    90  refused    15
+  :80                      pass    90  refused    15
+  :8080                    pass    90  refused    15
+  :9090                    pass    90  refused    15
+  :65535                   pass    90  refused    15
+  :0                       pass    90  refused    15
+  :65536                   pass    90  refused    15
+  :123456                  pass    90  refused    15
+  :080                     pass    90  refused    15
+  :+80                     pass    93  refused    12
+  :-1                      pass    93  refused    12
+  :0x50                    pass    93  refused    12
+  :8a                      pass    93  refused    12
+  :８０                      pass    93  refused    12
+  :80:80                   pass    93  refused    12
+  :80:443                  pass    93  refused    12
+  :80]                     pass    85  refused    20
   -                        pass     4  refused    14
 refused because:
-    112  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it is a CIMD client ID with a query or a fragment
-     86  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it is not an absolute URL
+    118  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it is a CIMD client ID with a query or a fragment
+     92  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it is not an absolute URL
      42  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it has an IPv6 zone, which a URL cannot carry; give the address without its %zone
      25  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it is a CIMD client ID with a user name or password
       6  BYWARD_CLIENT_DENYLIST: want a CIMD client ID (an https URL) or a host name such as app.example; got entry N of N (N characters, not shown): it has a character no host name holds at position N; a host name has only letters, digits, - . and _
 
-## listen: 344 pass, 7916 refused, of 8260
+## listen: 351 pass, 9052 refused, of 9403
 by family:
-  name                     pass    63  refused   909
-  name edge                pass    43  refused  1793
-  near miss                pass    42  refused   606
-  idn                      pass     7  refused   641
-  ipv4                     pass    35  refused   505
-  ipv4 spelling            pass    56  refused   808
-  ipv6                     pass    49  refused   707
-  ipv4-mapped              pass    21  refused   303
-  zone                     pass    28  refused  1104
-  invisible                pass     0  refused   540
+  name                     pass    63  refused   963
+  name edge                pass    43  refused  2123
+  near miss                pass    42  refused   642
+  idn                      pass     7  refused   677
+  ipv4                     pass    35  refused   535
+  ipv4 spelling            pass    63  refused   963
+  ipv6                     pass    49  refused   749
+  ipv4-mapped              pass    21  refused   321
+  zone                     pass    28  refused  1509
+  invisible                pass     0  refused   570
 by wrap:
-  bare                     pass   246  refused  1121
-  [h]                      pass    98  refused  1270
-  [h                       pass     0  refused  1367
-  h]                       pass     0  refused  1386
-  [h]]                     pass     0  refused  1386
-  [h]x                     pass     0  refused  1386
+  bare                     pass   253  refused  1304
+  [h]                      pass    98  refused  1460
+  [h                       pass     0  refused  1557
+  h]                       pass     0  refused  1577
+  [h]]                     pass     0  refused  1577
+  [h]x                     pass     0  refused  1577
 by port:
-  none                     pass     1  refused   456
-  :                        pass     0  refused   459
-  :443                     pass    49  refused   410
-  :80                      pass    49  refused   410
-  :8080                    pass    49  refused   410
-  :9090                    pass    49  refused   410
-  :65535                   pass    49  refused   410
-  :0                       pass    49  refused   410
-  :65536                   pass     0  refused   459
-  :123456                  pass     0  refused   459
-  :080                     pass    49  refused   410
-  :+80                     pass     0  refused   459
-  :-1                      pass     0  refused   459
-  :0x50                    pass     0  refused   459
-  :8a                      pass     0  refused   459
-  :８０                      pass     0  refused   459
-  :80:80                   pass     0  refused   459
-  :80]                     pass     0  refused   459
+  none                     pass     1  refused   492
+  :                        pass     0  refused   495
+  :443                     pass    50  refused   445
+  :80                      pass    50  refused   445
+  :8080                    pass    50  refused   445
+  :9090                    pass    50  refused   445
+  :65535                   pass    50  refused   445
+  :0                       pass    50  refused   445
+  :65536                   pass     0  refused   495
+  :123456                  pass     0  refused   495
+  :080                     pass    50  refused   445
+  :+80                     pass     0  refused   495
+  :-1                      pass     0  refused   495
+  :0x50                    pass     0  refused   495
+  :8a                      pass     0  refused   495
+  :８０                      pass     0  refused   495
+  :80:80                   pass     0  refused   495
+  :80:443                  pass     0  refused   495
+  :80]                     pass     0  refused   495
 refused because:
-   6279  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it is not host:port
-    840  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has brackets that do not enclose an IPv6 address alone
-    294  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has a port that is not a number
+   7287  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it is not host:port
+    885  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has brackets that do not enclose an IPv6 address alone
+    300  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has a port that is not a number
+    135  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has an IPv6 zone that is not an interface name: 1 to 15 bytes, not . or .., without white space, a control character, a slash or a colon
     135  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): its host holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
     120  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): its host has a character no host name holds at position N; a host name has only letters, digits, - . and _
-     98  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has a port that is not a number from 0 to 65535
-     90  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has an IPv6 zone that is not an interface name: 1 to 15 bytes, not . or .., without white space, a control character, a slash or a colon
-     60  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has a host that is neither an IP address nor a host name
+    100  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has a port that is not a number from 0 to 65535
+     90  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has a host that is neither an IP address nor a host name
 
-## internal-listen: 344 pass, 7916 refused, of 8260
+## internal-listen: 351 pass, 9052 refused, of 9403
 by family:
-  name                     pass    63  refused   909
-  name edge                pass    43  refused  1793
-  near miss                pass    42  refused   606
-  idn                      pass     7  refused   641
-  ipv4                     pass    35  refused   505
-  ipv4 spelling            pass    56  refused   808
-  ipv6                     pass    49  refused   707
-  ipv4-mapped              pass    21  refused   303
-  zone                     pass    28  refused  1104
-  invisible                pass     0  refused   540
+  name                     pass    63  refused   963
+  name edge                pass    43  refused  2123
+  near miss                pass    42  refused   642
+  idn                      pass     7  refused   677
+  ipv4                     pass    35  refused   535
+  ipv4 spelling            pass    63  refused   963
+  ipv6                     pass    49  refused   749
+  ipv4-mapped              pass    21  refused   321
+  zone                     pass    28  refused  1509
+  invisible                pass     0  refused   570
 by wrap:
-  bare                     pass   246  refused  1121
-  [h]                      pass    98  refused  1270
-  [h                       pass     0  refused  1367
-  h]                       pass     0  refused  1386
-  [h]]                     pass     0  refused  1386
-  [h]x                     pass     0  refused  1386
+  bare                     pass   253  refused  1304
+  [h]                      pass    98  refused  1460
+  [h                       pass     0  refused  1557
+  h]                       pass     0  refused  1577
+  [h]]                     pass     0  refused  1577
+  [h]x                     pass     0  refused  1577
 by port:
-  none                     pass     1  refused   456
-  :                        pass     0  refused   459
-  :443                     pass    49  refused   410
-  :80                      pass    49  refused   410
-  :8080                    pass    49  refused   410
-  :9090                    pass    49  refused   410
-  :65535                   pass    49  refused   410
-  :0                       pass    49  refused   410
-  :65536                   pass     0  refused   459
-  :123456                  pass     0  refused   459
-  :080                     pass    49  refused   410
-  :+80                     pass     0  refused   459
-  :-1                      pass     0  refused   459
-  :0x50                    pass     0  refused   459
-  :8a                      pass     0  refused   459
-  :８０                      pass     0  refused   459
-  :80:80                   pass     0  refused   459
-  :80]                     pass     0  refused   459
+  none                     pass     1  refused   492
+  :                        pass     0  refused   495
+  :443                     pass    50  refused   445
+  :80                      pass    50  refused   445
+  :8080                    pass    50  refused   445
+  :9090                    pass    50  refused   445
+  :65535                   pass    50  refused   445
+  :0                       pass    50  refused   445
+  :65536                   pass     0  refused   495
+  :123456                  pass     0  refused   495
+  :080                     pass    50  refused   445
+  :+80                     pass     0  refused   495
+  :-1                      pass     0  refused   495
+  :0x50                    pass     0  refused   495
+  :8a                      pass     0  refused   495
+  :８０                      pass     0  refused   495
+  :80:80                   pass     0  refused   495
+  :80:443                  pass     0  refused   495
+  :80]                     pass     0  refused   495
 refused because:
-   6279  BYWARD_INTERNAL_LISTEN: want host:port such as 127.0.0.1:9090, or empty; got a value (N characters, not shown): it is not host:port
-    840  BYWARD_INTERNAL_LISTEN: want host:port such as 127.0.0.1:9090, or empty; got a value (N characters, not shown): it has brackets that do not enclose an IPv6 address alone
-    294  BYWARD_INTERNAL_LISTEN: want host:port such as 127.0.0.1:9090, or empty; got a value (N characters, not shown): it has a port that is not a number
+   7287  BYWARD_INTERNAL_LISTEN: want host:port such as 127.0.0.1:9090, or empty; got a value (N characters, not shown): it is not host:port
+    885  BYWARD_INTERNAL_LISTEN: want host:port such as 127.0.0.1:9090, or empty; got a value (N characters, not shown): it has brackets that do not enclose an IPv6 address alone
+    300  BYWARD_INTERNAL_LISTEN: want host:port such as 127.0.0.1:9090, or empty; got a value (N characters, not shown): it has a port that is not a number
+    135  BYWARD_INTERNAL_LISTEN: want host:port such as 127.0.0.1:9090, or empty; got a value (N characters, not shown): it has an IPv6 zone that is not an interface name: 1 to 15 bytes, not . or .., without white space, a control character, a slash or a colon
     135  BYWARD_INTERNAL_LISTEN: want host:port such as 127.0.0.1:9090, or empty; got a value (N characters, not shown): its host holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
     120  BYWARD_INTERNAL_LISTEN: want host:port such as 127.0.0.1:9090, or empty; got a value (N characters, not shown): its host has a character no host name holds at position N; a host name has only letters, digits, - . and _
-     98  BYWARD_INTERNAL_LISTEN: want host:port such as 127.0.0.1:9090, or empty; got a value (N characters, not shown): it has a port that is not a number from 0 to 65535
-     90  BYWARD_INTERNAL_LISTEN: want host:port such as 127.0.0.1:9090, or empty; got a value (N characters, not shown): it has an IPv6 zone that is not an interface name: 1 to 15 bytes, not . or .., without white space, a control character, a slash or a colon
-     60  BYWARD_INTERNAL_LISTEN: want host:port such as 127.0.0.1:9090, or empty; got a value (N characters, not shown): it has a host that is neither an IP address nor a host name
+    100  BYWARD_INTERNAL_LISTEN: want host:port such as 127.0.0.1:9090, or empty; got a value (N characters, not shown): it has a port that is not a number from 0 to 65535
+     90  BYWARD_INTERNAL_LISTEN: want host:port such as 127.0.0.1:9090, or empty; got a value (N characters, not shown): it has a host that is neither an IP address nor a host name
 
-## no-auth public-url: 40 pass, 16498 refused, of 16538
+## no-auth public-url: 40 pass, 18784 refused, of 18824
 by family:
-  name                     pass    10  refused  1934
-  name edge                pass     0  refused  3672
-  near miss                pass     0  refused  1296
-  idn                      pass     0  refused  1296
-  ipv4                     pass    20  refused  1060
-  ipv4 spelling            pass     0  refused  1728
-  ipv6                     pass    10  refused  1502
-  ipv4-mapped              pass     0  refused   648
-  zone                     pass     0  refused  2264
-  invisible                pass     0  refused  1080
+  name                     pass    10  refused  2042
+  name edge                pass     0  refused  4332
+  near miss                pass     0  refused  1368
+  idn                      pass     0  refused  1368
+  ipv4                     pass    20  refused  1120
+  ipv4 spelling            pass     0  refused  2052
+  ipv6                     pass    10  refused  1586
+  ipv4-mapped              pass     0  refused   684
+  zone                     pass     0  refused  3074
+  invisible                pass     0  refused  1140
   url shape                pass     0  refused    18
 by wrap:
-  bare                     pass    30  refused  2704
-  [h]                      pass    10  refused  2726
-  [h                       pass     0  refused  2734
-  h]                       pass     0  refused  2772
-  [h]]                     pass     0  refused  2772
-  [h]x                     pass     0  refused  2772
+  bare                     pass    30  refused  3084
+  [h]                      pass    10  refused  3106
+  [h                       pass     0  refused  3114
+  h]                       pass     0  refused  3154
+  [h]]                     pass     0  refused  3154
+  [h]x                     pass     0  refused  3154
   scheme in upper case     pass     0  refused     1
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -842,48 +854,49 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass     8  refused   906
-  :                        pass     0  refused   918
-  :443                     pass     4  refused   914
-  :80                      pass     4  refused   914
-  :8080                    pass     8  refused   910
-  :9090                    pass     8  refused   910
-  :65535                   pass     8  refused   910
-  :0                       pass     0  refused   918
-  :65536                   pass     0  refused   918
-  :123456                  pass     0  refused   918
-  :080                     pass     0  refused   918
-  :+80                     pass     0  refused   918
-  :-1                      pass     0  refused   918
-  :0x50                    pass     0  refused   918
-  :8a                      pass     0  refused   918
-  :８０                      pass     0  refused   918
-  :80:80                   pass     0  refused   918
-  :80]                     pass     0  refused   918
+  none                     pass     8  refused   978
+  :                        pass     0  refused   990
+  :443                     pass     4  refused   986
+  :80                      pass     4  refused   986
+  :8080                    pass     8  refused   982
+  :9090                    pass     8  refused   982
+  :65535                   pass     8  refused   982
+  :0                       pass     0  refused   990
+  :65536                   pass     0  refused   990
+  :123456                  pass     0  refused   990
+  :080                     pass     0  refused   990
+  :+80                     pass     0  refused   990
+  :-1                      pass     0  refused   990
+  :0x50                    pass     0  refused   990
+  :8a                      pass     0  refused   990
+  :８０                      pass     0  refused   990
+  :80:80                   pass     0  refused   990
+  :80:443                  pass     0  refused   990
+  :80]                     pass     0  refused   990
   -                        pass     0  refused    18
 refused because:
-   4427  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a port that is not a number
-   2804  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has brackets that do not enclose an IPv6 address alone
-   2530  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a "[" in its host without its "]"
-   2278  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has text after the "]" of its IPv6 address that is not a ":" and a port
-   1030  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero
-    864  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has an invisible formatting character, such as a zero-width space, which a URL cannot hold
-    504  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host:port has brackets that do not enclose an IPv6 address alone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
-    433  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has white space, which a URL cannot hold; write a space in a path as %20
-    286  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a "%" not followed by two hexadecimal digits
-    216  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a control character, which a URL cannot hold
+   5259  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a port that is not a number
+   2960  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has brackets that do not enclose an IPv6 address alone
+   2822  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a "[" in its host without its "]"
+   2556  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has text after the "]" of its IPv6 address that is not a ":" and a port
+   1090  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero
+    913  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has white space, which a URL cannot hold; write a space in a path as %20
+    912  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has an invisible formatting character, such as a zero-width space, which a URL cannot hold
+    540  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host:port has brackets that do not enclose an IPv6 address alone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
+    338  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a "%" not followed by two hexadecimal digits
+    228  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a control character, which a URL cannot hold
     134  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it holds a user name or password
     120  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host:port holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
     107  BYWARD_INSECURE_NO_AUTH: BYWARD_PUBLIC_URL must be a loopback URL, e.g. http://localhost:8080/mcp
     104  BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
      96  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has a %-escape in its host, which a host name cannot hold
      84  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has an IPv6 zone, which a URL cannot carry; give the address without its %zone
-     60  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host:port has an empty label (a leading, double or trailing dot); drop the extra dot
-     40  BYWARD_PUBLIC_URL: want the MCP endpoint's path without a trailing slash, such as https://mcp.example.com/mcp; got a path that is empty or ends in /: give the endpoint's path, without the trailing slash; BYWARD_PUBLIC_URL: want a URL without a query or fragment, such as https://mcp.example.com/mcp; got a query or fragment, not shown: remove it
+     84  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host:port has an empty label (a leading, double or trailing dot); drop the extra dot
+     42  BYWARD_PUBLIC_URL: want the MCP endpoint's path without a trailing slash, such as https://mcp.example.com/mcp; got a path that is empty or ends in /: give the endpoint's path, without the trailing slash; BYWARD_PUBLIC_URL: want a URL without a query or fragment, such as https://mcp.example.com/mcp; got a query or fragment, not shown: remove it
+     38  BYWARD_PUBLIC_URL: want the MCP endpoint's path without a trailing slash, such as https://mcp.example.com/mcp; got a path that is empty or ends in /: give the endpoint's path, without the trailing slash; BYWARD_PUBLIC_URL: want a URL without a query or fragment, such as https://mcp.example.com/mcp; got a query or fragment, not shown: remove it; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
      36  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host:port has a character no host name holds at position N; a host name has only letters, digits, - . and _
-     36  BYWARD_PUBLIC_URL: want the MCP endpoint's path without a trailing slash, such as https://mcp.example.com/mcp; got a path that is empty or ends in /: give the endpoint's path, without the trailing slash; BYWARD_PUBLIC_URL: want a URL without a query or fragment, such as https://mcp.example.com/mcp; got a query or fragment, not shown: remove it; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
-     25  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it
-     25  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
+     30  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it
+     30  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
      24  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host:port has a label that starts or ends with a hyphen; a label starts and ends with a letter or a digit
      24  BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its port as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its port 443 is https's default, which browsers drop; write the URL without :443
      20  BYWARD_PUBLIC_URL: want an absolute http(s) URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): it has no host before its port
@@ -893,8 +906,8 @@ refused because:
      15  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
      15  BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do
      10  BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its IPv6 address is not in the form browsers write it; write it as [::1]
-      5  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it; BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its port as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its port 443 is https's default, which browsers drop; write the URL without :443
-      5  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it; BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its port as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its port 80 is http's default, which browsers drop; write the URL without :80; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
+      6  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it; BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its port as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its port 443 is https's default, which browsers drop; write the URL without :443
+      6  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it; BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its port as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its port 80 is http's default, which browsers drop; write the URL without :80; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
       5  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1, reading a part with a leading 0 as octal
       5  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1, reading a part with a leading 0 as octal; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
       5  BYWARD_PUBLIC_URL: want the MCP endpoint's URL such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 8.0.0.1, reading a part with a leading 0 as octal
@@ -933,105 +946,107 @@ refused because:
       1  BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do; BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its port as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its port 80 is http's default, which browsers drop; write the URL without :80
       1  BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its host as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its host name has upper-case letters; write it in lower case, as browsers do; BYWARD_PUBLIC_URL: want the MCP endpoint's URL with its port as browsers write it, such as https://mcp.example.com/mcp; got a value (N characters, not shown): its port 80 is http's default, which browsers drop; write the URL without :80; BYWARD_PUBLIC_URL: want https (http only on a loopback host, with --dev), such as https://mcp.example.com/mcp; got http: give https, or a loopback host
 
-## no-auth listen: 56 pass, 8204 refused, of 8260
+## no-auth listen: 56 pass, 9347 refused, of 9403
 by family:
-  name                     pass    14  refused   958
-  name edge                pass     1  refused  1835
-  near miss                pass     0  refused   648
-  idn                      pass     0  refused   648
-  ipv4                     pass    13  refused   527
-  ipv4 spelling            pass     0  refused   864
-  ipv6                     pass    14  refused   742
-  ipv4-mapped              pass    14  refused   310
-  zone                     pass     0  refused  1132
-  invisible                pass     0  refused   540
+  name                     pass    14  refused  1012
+  name edge                pass     1  refused  2165
+  near miss                pass     0  refused   684
+  idn                      pass     0  refused   684
+  ipv4                     pass    13  refused   557
+  ipv4 spelling            pass     0  refused  1026
+  ipv6                     pass    14  refused   784
+  ipv4-mapped              pass    14  refused   328
+  zone                     pass     0  refused  1537
+  invisible                pass     0  refused   570
 by wrap:
-  bare                     pass    28  refused  1339
-  [h]                      pass    28  refused  1340
-  [h                       pass     0  refused  1367
-  h]                       pass     0  refused  1386
-  [h]]                     pass     0  refused  1386
-  [h]x                     pass     0  refused  1386
+  bare                     pass    28  refused  1529
+  [h]                      pass    28  refused  1530
+  [h                       pass     0  refused  1557
+  h]                       pass     0  refused  1577
+  [h]]                     pass     0  refused  1577
+  [h]x                     pass     0  refused  1577
 by port:
-  none                     pass     1  refused   456
-  :                        pass     0  refused   459
-  :443                     pass     8  refused   451
-  :80                      pass     8  refused   451
-  :8080                    pass     8  refused   451
-  :9090                    pass     7  refused   452
-  :65535                   pass     8  refused   451
-  :0                       pass     8  refused   451
-  :65536                   pass     0  refused   459
-  :123456                  pass     0  refused   459
-  :080                     pass     8  refused   451
-  :+80                     pass     0  refused   459
-  :-1                      pass     0  refused   459
-  :0x50                    pass     0  refused   459
-  :8a                      pass     0  refused   459
-  :８０                      pass     0  refused   459
-  :80:80                   pass     0  refused   459
-  :80]                     pass     0  refused   459
+  none                     pass     1  refused   492
+  :                        pass     0  refused   495
+  :443                     pass     8  refused   487
+  :80                      pass     8  refused   487
+  :8080                    pass     8  refused   487
+  :9090                    pass     7  refused   488
+  :65535                   pass     8  refused   487
+  :0                       pass     8  refused   487
+  :65536                   pass     0  refused   495
+  :123456                  pass     0  refused   495
+  :080                     pass     8  refused   487
+  :+80                     pass     0  refused   495
+  :-1                      pass     0  refused   495
+  :0x50                    pass     0  refused   495
+  :8a                      pass     0  refused   495
+  :８０                      pass     0  refused   495
+  :80:80                   pass     0  refused   495
+  :80:443                  pass     0  refused   495
+  :80]                     pass     0  refused   495
 refused because:
-   6279  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it is not host:port; BYWARD_INSECURE_NO_AUTH: BYWARD_LISTEN must be a loopback host:port such as 127.0.0.1:8080
-    840  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has brackets that do not enclose an IPv6 address alone; BYWARD_INSECURE_NO_AUTH: BYWARD_LISTEN must be a loopback host:port such as 127.0.0.1:8080
-    294  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has a port that is not a number; BYWARD_INSECURE_NO_AUTH: BYWARD_LISTEN must be a loopback host:port such as 127.0.0.1:8080
-    287  BYWARD_INSECURE_NO_AUTH: BYWARD_LISTEN must be a loopback address such as 127.0.0.1:8080 (non-loopback only inside a container with its own network, not --network host)
+   7287  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it is not host:port; BYWARD_INSECURE_NO_AUTH: BYWARD_LISTEN must be a loopback host:port such as 127.0.0.1:8080
+    885  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has brackets that do not enclose an IPv6 address alone; BYWARD_INSECURE_NO_AUTH: BYWARD_LISTEN must be a loopback host:port such as 127.0.0.1:8080
+    300  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has a port that is not a number; BYWARD_INSECURE_NO_AUTH: BYWARD_LISTEN must be a loopback host:port such as 127.0.0.1:8080
+    294  BYWARD_INSECURE_NO_AUTH: BYWARD_LISTEN must be a loopback address such as 127.0.0.1:8080 (non-loopback only inside a container with its own network, not --network host)
+    135  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has an IPv6 zone that is not an interface name: 1 to 15 bytes, not . or .., without white space, a control character, a slash or a colon; BYWARD_INSECURE_NO_AUTH: BYWARD_LISTEN must be a loopback host:port such as 127.0.0.1:8080
     135  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): its host holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send; BYWARD_INSECURE_NO_AUTH: BYWARD_LISTEN must be a loopback host:port such as 127.0.0.1:8080
     120  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): its host has a character no host name holds at position N; a host name has only letters, digits, - . and _; BYWARD_INSECURE_NO_AUTH: BYWARD_LISTEN must be a loopback host:port such as 127.0.0.1:8080
-     98  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has a port that is not a number from 0 to 65535; BYWARD_INSECURE_NO_AUTH: BYWARD_LISTEN must be a loopback host:port such as 127.0.0.1:8080
-     90  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has an IPv6 zone that is not an interface name: 1 to 15 bytes, not . or .., without white space, a control character, a slash or a colon; BYWARD_INSECURE_NO_AUTH: BYWARD_LISTEN must be a loopback host:port such as 127.0.0.1:8080
-     60  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has a host that is neither an IP address nor a host name; BYWARD_INSECURE_NO_AUTH: BYWARD_LISTEN must be a loopback host:port such as 127.0.0.1:8080
+    100  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has a port that is not a number from 0 to 65535; BYWARD_INSECURE_NO_AUTH: BYWARD_LISTEN must be a loopback host:port such as 127.0.0.1:8080
+     90  BYWARD_LISTEN: want host:port such as 127.0.0.1:8080; got a value (N characters, not shown): it has a host that is neither an IP address nor a host name; BYWARD_INSECURE_NO_AUTH: BYWARD_LISTEN must be a loopback host:port such as 127.0.0.1:8080
       1  BYWARD_INTERNAL_LISTEN: must differ from BYWARD_LISTEN; metrics and probes never share the public listener
 
-## no-auth allowed-hosts: 53 pass, 8207 refused, of 8260
+## no-auth allowed-hosts: 53 pass, 9350 refused, of 9403
 by family:
-  name                     pass    12  refused   960
-  name edge                pass     1  refused  1835
-  near miss                pass     0  refused   648
-  idn                      pass     0  refused   648
-  ipv4                     pass    12  refused   528
-  ipv4 spelling            pass     0  refused   864
-  ipv6                     pass    14  refused   742
-  ipv4-mapped              pass    14  refused   310
-  zone                     pass     0  refused  1132
-  invisible                pass     0  refused   540
+  name                     pass    12  refused  1014
+  name edge                pass     1  refused  2165
+  near miss                pass     0  refused   684
+  idn                      pass     0  refused   684
+  ipv4                     pass    12  refused   558
+  ipv4 spelling            pass     0  refused  1026
+  ipv6                     pass    14  refused   784
+  ipv4-mapped              pass    14  refused   328
+  zone                     pass     0  refused  1537
+  invisible                pass     0  refused   570
 by wrap:
-  bare                     pass    29  refused  1338
-  [h]                      pass    24  refused  1344
-  [h                       pass     0  refused  1367
-  h]                       pass     0  refused  1386
-  [h]]                     pass     0  refused  1386
-  [h]x                     pass     0  refused  1386
+  bare                     pass    29  refused  1528
+  [h]                      pass    24  refused  1534
+  [h                       pass     0  refused  1557
+  h]                       pass     0  refused  1577
+  [h]]                     pass     0  refused  1577
+  [h]x                     pass     0  refused  1577
 by port:
-  none                     pass    13  refused   444
-  :                        pass     0  refused   459
-  :443                     pass     8  refused   451
-  :80                      pass     8  refused   451
-  :8080                    pass     8  refused   451
-  :9090                    pass     8  refused   451
-  :65535                   pass     8  refused   451
-  :0                       pass     0  refused   459
-  :65536                   pass     0  refused   459
-  :123456                  pass     0  refused   459
-  :080                     pass     0  refused   459
-  :+80                     pass     0  refused   459
-  :-1                      pass     0  refused   459
-  :0x50                    pass     0  refused   459
-  :8a                      pass     0  refused   459
-  :８０                      pass     0  refused   459
-  :80:80                   pass     0  refused   459
-  :80]                     pass     0  refused   459
+  none                     pass    13  refused   480
+  :                        pass     0  refused   495
+  :443                     pass     8  refused   487
+  :80                      pass     8  refused   487
+  :8080                    pass     8  refused   487
+  :9090                    pass     8  refused   487
+  :65535                   pass     8  refused   487
+  :0                       pass     0  refused   495
+  :65536                   pass     0  refused   495
+  :123456                  pass     0  refused   495
+  :080                     pass     0  refused   495
+  :+80                     pass     0  refused   495
+  :-1                      pass     0  refused   495
+  :0x50                    pass     0  refused   495
+  :8a                      pass     0  refused   495
+  :８０                      pass     0  refused   495
+  :80:80                   pass     0  refused   495
+  :80:443                  pass     0  refused   495
+  :80]                     pass     0  refused   495
 refused because:
-   5185  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it has brackets that do not enclose an IPv6 address alone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
-   1377  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
-    461  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it is not an IPv6 address without a zone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
-    389  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero
-    304  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it holds a "/" or a space; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
+   5905  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it has brackets that do not enclose an IPv6 address alone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
+   1573  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
+    608  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it is not an IPv6 address without a zone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
+    408  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero
+    322  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it holds a "/" or a space; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
     105  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it has a character no host name holds at position N; a host name has only letters, digits, - . and _
+    105  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it has an empty label (a leading, double or trailing dot); drop the extra dot
      84  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got a host name, not shown: authentication is off, so only loopback may reach the proxy
-     75  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it has an empty label (a leading, double or trailing dot); drop the extra dot
+     36  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it
      30  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it has a label that starts or ends with a hyphen; a label starts and ends with a letter or a digit
-     30  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it
      18  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1
      14  BYWARD_ALLOWED_HOSTS: want a host[:port] such as mcp.example.com or 127.0.0.1:8080; got entry N of N (N characters, not shown): it has no host before its ":"; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
      14  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address 2001:db8::1: authentication is off, so only loopback may reach the proxy
@@ -1052,54 +1067,59 @@ refused because:
       2  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address 2001:db8::1:0: authentication is off, so only loopback may reach the proxy
       2  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address 2001:db8::1:443: authentication is off, so only loopback may reach the proxy
       2  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address 2001:db8::1:8080: authentication is off, so only loopback may reach the proxy
+      2  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address 2001:db8::1:80:443: authentication is off, so only loopback may reach the proxy
       2  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address 2001:db8::1:80:80: authentication is off, so only loopback may reach the proxy
       2  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address 2001:db8::1:8a: authentication is off, so only loopback may reach the proxy
       2  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address 2001:db8::1:9090: authentication is off, so only loopback may reach the proxy
       2  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address ::1:0: authentication is off, so only loopback may reach the proxy
       2  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address ::1:443: authentication is off, so only loopback may reach the proxy
       2  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address ::1:8080: authentication is off, so only loopback may reach the proxy
+      2  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address ::1:80:443: authentication is off, so only loopback may reach the proxy
       2  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address ::1:80:80: authentication is off, so only loopback may reach the proxy
       2  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address ::1:8a: authentication is off, so only loopback may reach the proxy
       2  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address ::1:9090: authentication is off, so only loopback may reach the proxy
       1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address ::ffff:7f00:1:0: authentication is off, so only loopback may reach the proxy
       1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address ::ffff:7f00:1:443: authentication is off, so only loopback may reach the proxy
       1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address ::ffff:7f00:1:8080: authentication is off, so only loopback may reach the proxy
+      1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address ::ffff:7f00:1:80:443: authentication is off, so only loopback may reach the proxy
       1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address ::ffff:7f00:1:80:80: authentication is off, so only loopback may reach the proxy
       1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address ::ffff:7f00:1:8a: authentication is off, so only loopback may reach the proxy
       1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address ::ffff:7f00:1:9090: authentication is off, so only loopback may reach the proxy
       1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address fd00::17:0: authentication is off, so only loopback may reach the proxy
       1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address fd00::17:443: authentication is off, so only loopback may reach the proxy
       1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address fd00::17:8080: authentication is off, so only loopback may reach the proxy
+      1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address fd00::17:80:443: authentication is off, so only loopback may reach the proxy
       1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address fd00::17:80:80: authentication is off, so only loopback may reach the proxy
       1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address fd00::17:8a: authentication is off, so only loopback may reach the proxy
       1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address fd00::17:9090: authentication is off, so only loopback may reach the proxy
       1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address fe80::1:0: authentication is off, so only loopback may reach the proxy
       1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address fe80::1:443: authentication is off, so only loopback may reach the proxy
       1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address fe80::1:8080: authentication is off, so only loopback may reach the proxy
+      1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address fe80::1:80:443: authentication is off, so only loopback may reach the proxy
       1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address fe80::1:80:80: authentication is off, so only loopback may reach the proxy
       1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address fe80::1:8a: authentication is off, so only loopback may reach the proxy
       1  BYWARD_ALLOWED_HOSTS: want only loopback hosts with BYWARD_INSECURE_NO_AUTH, such as localhost:8080; got the address fe80::1:9090: authentication is off, so only loopback may reach the proxy
 
-## no-auth allowed-origins: 96 pass, 16442 refused, of 16538
+## no-auth allowed-origins: 96 pass, 18728 refused, of 18824
 by family:
-  name                     pass    24  refused  1920
-  name edge                pass     0  refused  3672
-  near miss                pass     0  refused  1296
-  idn                      pass     0  refused  1296
-  ipv4                     pass    24  refused  1056
-  ipv4 spelling            pass     0  refused  1728
-  ipv6                     pass    24  refused  1488
-  ipv4-mapped              pass    24  refused   624
-  zone                     pass     0  refused  2264
-  invisible                pass     0  refused  1080
+  name                     pass    24  refused  2028
+  name edge                pass     0  refused  4332
+  near miss                pass     0  refused  1368
+  idn                      pass     0  refused  1368
+  ipv4                     pass    24  refused  1116
+  ipv4 spelling            pass     0  refused  2052
+  ipv6                     pass    24  refused  1572
+  ipv4-mapped              pass    24  refused   660
+  zone                     pass     0  refused  3074
+  invisible                pass     0  refused  1140
   url shape                pass     0  refused    18
 by wrap:
-  bare                     pass    48  refused  2686
-  [h]                      pass    48  refused  2688
-  [h                       pass     0  refused  2734
-  h]                       pass     0  refused  2772
-  [h]]                     pass     0  refused  2772
-  [h]x                     pass     0  refused  2772
+  bare                     pass    48  refused  3066
+  [h]                      pass    48  refused  3068
+  [h                       pass     0  refused  3114
+  h]                       pass     0  refused  3154
+  [h]]                     pass     0  refused  3154
+  [h]x                     pass     0  refused  3154
   scheme in upper case     pass     0  refused     1
   user and password        pass     0  refused     1
   empty user info          pass     0  refused     1
@@ -1119,44 +1139,45 @@ by wrap:
   white space              pass     0  refused     1
   backslash                pass     0  refused     1
 by port:
-  none                     pass    16  refused   898
-  :                        pass     0  refused   918
-  :443                     pass    16  refused   902
-  :80                      pass    16  refused   902
-  :8080                    pass    16  refused   902
-  :9090                    pass    16  refused   902
-  :65535                   pass    16  refused   902
-  :0                       pass     0  refused   918
-  :65536                   pass     0  refused   918
-  :123456                  pass     0  refused   918
-  :080                     pass     0  refused   918
-  :+80                     pass     0  refused   918
-  :-1                      pass     0  refused   918
-  :0x50                    pass     0  refused   918
-  :8a                      pass     0  refused   918
-  :８０                      pass     0  refused   918
-  :80:80                   pass     0  refused   918
-  :80]                     pass     0  refused   918
+  none                     pass    16  refused   970
+  :                        pass     0  refused   990
+  :443                     pass    16  refused   974
+  :80                      pass    16  refused   974
+  :8080                    pass    16  refused   974
+  :9090                    pass    16  refused   974
+  :65535                   pass    16  refused   974
+  :0                       pass     0  refused   990
+  :65536                   pass     0  refused   990
+  :123456                  pass     0  refused   990
+  :080                     pass     0  refused   990
+  :+80                     pass     0  refused   990
+  :-1                      pass     0  refused   990
+  :0x50                    pass     0  refused   990
+  :8a                      pass     0  refused   990
+  :８０                      pass     0  refused   990
+  :80:80                   pass     0  refused   990
+  :80:443                  pass     0  refused   990
+  :80]                     pass     0  refused   990
   -                        pass     0  refused    18
 refused because:
-   4429  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a port that is not a number
-   2804  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has brackets that do not enclose an IPv6 address alone
-   2532  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a "[" in its host without its "]"
-   2278  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has text after the "]" of its IPv6 address that is not a ":" and a port
-   1030  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero
-    864  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has an invisible formatting character, such as a zero-width space, which a URL cannot hold
-    504  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host:port has brackets that do not enclose an IPv6 address alone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
-    429  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has white space, which a URL cannot hold; write a space in a path as %20
-    286  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a "%" not followed by two hexadecimal digits
-    216  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a control character, which a URL cannot hold
+   5263  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a port that is not a number
+   2960  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has brackets that do not enclose an IPv6 address alone
+   2826  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a "[" in its host without its "]"
+   2556  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has text after the "]" of its IPv6 address that is not a ":" and a port
+   1090  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a port that is not a number from 1 to 65535 without a sign or leading zero
+    912  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has an invisible formatting character, such as a zero-width space, which a URL cannot hold
+    905  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has white space, which a URL cannot hold; write a space in a path as %20
+    540  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host:port has brackets that do not enclose an IPv6 address alone; give host, host:port, an IPv6 address, [IPv6] or [IPv6]:port, with a port from 1 to 65535 and no IPv6 zone
+    338  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a "%" not followed by two hexadecimal digits
+    228  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a control character, which a URL cannot hold
     169  BYWARD_ALLOWED_ORIGINS: want only loopback origins with BYWARD_INSECURE_NO_AUTH, such as http://localhost:3000; got a host name, not shown: authentication is off, so only loopback may reach the proxy
     134  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it holds a user name or password
     120  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host:port holds a character that is not ASCII; give an internationalized host in its ASCII (xn--) form, which browsers and MCP clients send
      96  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a %-escape in its host, which a host name cannot hold
      84  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has an IPv6 zone, which a URL cannot carry; give the address without its %zone
-     76  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a query or a fragment
-     60  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it
-     60  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host:port has an empty label (a leading, double or trailing dot); drop the extra dot
+     84  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host:port has an empty label (a leading, double or trailing dot); drop the extra dot
+     80  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): it has a query or a fragment
+     72  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host is not an IPv4 address but ends in a number, so browsers refuse it
      36  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host is not an IPv4 address in dotted decimal, the only form browsers send; browsers read it as 127.0.0.1
      36  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host:port has a character no host name holds at position N; a host name has only letters, digits, - . and _
      24  BYWARD_ALLOWED_ORIGINS: want an origin (scheme://host[:port]) such as https://app.example; got entry N of N (N characters, not shown): its host:port has a label that starts or ends with a hyphen; a label starts and ends with a letter or a digit
