@@ -47,6 +47,13 @@ type Setting struct {
 	// (HTTP only) or BothUpstreams (checkClassified, at init), so a new one is decided, never read
 	// beside the wrong upstream.
 	BothUpstreams bool
+	// EnabledBy names the setting that turns on the setting's family, which has no effect while that
+	// setting is off, for a family a walk checks by EnabledBy: "cimd" for the CIMD host lists,
+	// "app-tokens" for the app-only lists (an IdP family and an upstream mode go by Group). The family's
+	// walk over familyOf (clientSources, appTokens) refuses a member in the family's own words once it is
+	// given (a CIMD host list once it holds an entry), so a new member is refused with no other code
+	// (#658). It names one of familyEnablers (checkEnablers, at init).
+	EnabledBy string
 	// shape decides how the value is shown (ADR-0031 §3); secretShape also means the value is read
 	// only from a file. Every registry entry has one (checkShapes, at init).
 	shape *shape
@@ -248,6 +255,18 @@ func (v *Values) holds(name string) bool {
 // empty reports whether the named setting's value is empty: unset, or set to nothing. A setting refused
 // for the upstream mode that is off is read as its default, as value reads it (#631).
 func (v *Values) empty(name string) bool { return v.value(name).Given.empty() }
+
+// familyOf are the settings enabler turns on (EnabledBy), in registry order: the ones that have no
+// effect while it is off (#658).
+func (v *Values) familyOf(enabler string) []string {
+	var family []string
+	for _, n := range v.order {
+		if v.byKey[n].Setting.EnabledBy == enabler {
+			family = append(family, n)
+		}
+	}
+	return family
+}
 
 // given reports whether the operator gave the named setting a value, or a file for a secret, which is
 // given even when it is empty, so it never falls back to another choice. A setting refused for the

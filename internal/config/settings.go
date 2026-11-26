@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -101,11 +102,11 @@ var registry = []Setting{
 	{Name: "dcr", shape: asGivenShape, Group: GroupClientRegistration, Auth: ForAuth, BothUpstreams: true, Bool: true, Default: "true", Help: "accept Dynamic Client Registration at /register (Cursor, Gemini CLI) and advertise it; false turns it off (docs/how-to/dcr.md)"},
 	{Name: "client-denylist", shape: urlListShape, Group: GroupClientRegistration, Auth: ForAuth, BothUpstreams: true, Help: "comma-separated CIMD client IDs (https URLs) and redirect host names refused for CIMD and DCR clients (docs/how-to/dcr.md)"},
 	{Name: "cimd", shape: asGivenShape, Group: GroupClientRegistration, Auth: ForAuth, BothUpstreams: true, Bool: true, Default: "true", Help: "accept MCP clients identified by a Client ID Metadata Document URL (Claude, VS Code) and advertise it; false turns it off (docs/how-to/cimd.md)"},
-	{Name: "cimd-trusted-hosts", shape: asGivenShape, Group: GroupClientRegistration, Auth: ForAuth, BothUpstreams: true, Help: "comma-separated hosts whose client metadata documents you vouch for: their apps show as trusted by you on the consent page (docs/how-to/cimd.md)"},
-	{Name: "cimd-allowed-hosts", shape: asGivenShape, Group: GroupClientRegistration, Auth: ForAuth, BothUpstreams: true, Help: "comma-separated hosts allowed to publish client metadata documents besides the trusted ones; empty allows any host (docs/how-to/cimd.md)"},
+	{Name: "cimd-trusted-hosts", shape: asGivenShape, Group: GroupClientRegistration, Auth: ForAuth, BothUpstreams: true, EnabledBy: "cimd", Help: "comma-separated hosts whose client metadata documents you vouch for: their apps show as trusted by you on the consent page (docs/how-to/cimd.md)"},
+	{Name: "cimd-allowed-hosts", shape: asGivenShape, Group: GroupClientRegistration, Auth: ForAuth, BothUpstreams: true, EnabledBy: "cimd", Help: "comma-separated hosts allowed to publish client metadata documents besides the trusted ones; empty allows any host (docs/how-to/cimd.md)"},
 	{Name: "app-tokens", shape: asGivenShape, Group: GroupAppOnly, Auth: ForAuth, BothUpstreams: true, Default: "off", Help: "accept app-only tokens from headless callers at the MCP endpoint: off, or entra (BYWARD_IDP=entra only; ADR-0022, docs/how-to/app-tokens.md)"},
-	{Name: "app-roles", shape: asGivenShape, Group: GroupAppOnly, Auth: ForAuth, BothUpstreams: true, Help: "with BYWARD_APP_TOKENS=entra, required: comma-separated app roles on the proxy's app; an app-only caller needs at least one (docs/how-to/app-tokens.md)"},
-	{Name: "app-client-ids", shape: asGivenShape, Group: GroupAppOnly, Auth: ForAuth, BothUpstreams: true, Help: "with BYWARD_APP_TOKENS=entra: comma-separated application (client) IDs allowed to call (azp); default: any caller with a role (docs/how-to/app-tokens.md)"},
+	{Name: "app-roles", shape: asGivenShape, Group: GroupAppOnly, Auth: ForAuth, BothUpstreams: true, EnabledBy: "app-tokens", Help: "with BYWARD_APP_TOKENS=entra, required: comma-separated app roles on the proxy's app; an app-only caller needs at least one (docs/how-to/app-tokens.md)"},
+	{Name: "app-client-ids", shape: asGivenShape, Group: GroupAppOnly, Auth: ForAuth, BothUpstreams: true, EnabledBy: "app-tokens", Help: "with BYWARD_APP_TOKENS=entra: comma-separated application (client) IDs allowed to call (azp); default: any caller with a role (docs/how-to/app-tokens.md)"},
 	{Name: "gate-allow-empty", shape: asGivenShape, Group: GroupGate, Auth: ForAuth, BothUpstreams: true, Bool: true, Default: "false", Help: "allow an empty access gate for a Google or generic OIDC IdP (anyone with an account can sign in); no effect with Entra (docs/how-to/access-gate.md)"},
 	{Name: "operator-name", shape: asGivenShape, Group: GroupConsent, Auth: ForAuth, BothUpstreams: true, Help: "who runs this proxy, shown on the consent page, e.g. Contoso IT"},
 	{Name: "scope-description", shape: asGivenShape, Group: GroupConsent, Auth: ForAuth, BothUpstreams: true, Help: "what the scope lets an app do, in plain words for the consent page, e.g. Read and query your team's dashboards"},
@@ -130,6 +131,7 @@ func init() {
 	checkShapes(registry)
 	checkStdioHints(registry)
 	checkClassified(registry)
+	checkEnablers(registry)
 }
 
 // checkShapes panics on a setting of reg that has no shape.
@@ -172,6 +174,21 @@ func checkClassified(reg []Setting) {
 			panic("config: setting " + s.Name + " has a StdioHint and BothUpstreams: give it one of them")
 		case !upstreamGroup && !s.BothUpstreams && s.StdioHint == "":
 			panic("config: setting " + s.Name + " does not say which upstream mode it is for: give it a StdioHint if only an HTTP upstream reads it, or BothUpstreams")
+		}
+	}
+}
+
+// familyEnablers are the settings EnabledBy may name, the families a walk checks by EnabledBy: cimd
+// (the CIMD host lists, clientSources) and app-tokens (the app-only lists, appTokens). An IdP family
+// and an upstream mode go by Group.
+var familyEnablers = []string{"cimd", "app-tokens"}
+
+// checkEnablers panics on a setting of reg whose EnabledBy names none of familyEnablers: no walk would
+// check its family, so it would load while the family is off.
+func checkEnablers(reg []Setting) {
+	for _, s := range reg {
+		if s.EnabledBy != "" && !slices.Contains(familyEnablers, s.EnabledBy) {
+			panic("config: setting " + s.Name + " is EnabledBy " + s.EnabledBy + ", which no family walk checks: give it one of " + strings.Join(familyEnablers, ", "))
 		}
 	}
 }

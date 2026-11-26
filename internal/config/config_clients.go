@@ -22,15 +22,20 @@ func (c *Config) clientSources(v *Values) []error {
 	if c.CIMD, err = v.boolean("cimd"); err != nil {
 		errs = append(errs, err)
 	}
-	for _, s := range []struct {
-		name string
-		dst  *[]string
-	}{{"cimd-trusted-hosts", &c.CIMDTrustedHosts}, {"cimd-allowed-hosts", &c.CIMDAllowedHosts}} {
-		var hostErrs []error
-		*s.dst, hostErrs = parseCIMDHosts(v.value(s.name))
-		errs = append(errs, hostErrs...)
-		if len(*s.dst) > 0 && !c.CIMD {
-			errs = append(errs, errorf("%s has no effect while %s is false; remove one of them", v.NameAsGiven(s.name), v.NameAsGiven("cimd")))
+	// The CIMD family (EnabledBy "cimd"), each member refused while CIMD is false: a host list once it
+	// holds an entry (parsed first, so its entries are known), any other member once given, so a new one
+	// is refused with no edit (#658).
+	lists := map[string]*[]string{"cimd-trusted-hosts": &c.CIMDTrustedHosts, "cimd-allowed-hosts": &c.CIMDAllowedHosts}
+	for _, name := range v.familyOf("cimd") {
+		inEffect := v.given(name)
+		if dst := lists[name]; dst != nil {
+			var hostErrs []error
+			*dst, hostErrs = parseCIMDHosts(v.value(name))
+			errs = append(errs, hostErrs...)
+			inEffect = len(*dst) > 0
+		}
+		if inEffect && !c.CIMD {
+			errs = append(errs, errorf("%s has no effect while %s is false; remove one of them", v.NameAsGiven(name), v.NameAsGiven("cimd")))
 		}
 	}
 	return errs
