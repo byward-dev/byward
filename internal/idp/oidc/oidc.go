@@ -159,17 +159,23 @@ func (p *Provider) discover(ctx context.Context) (*metadata, error) {
 	return p.meta, nil
 }
 
-// checkURL requires https, except, when allowed (development mode), http on a loopback host when
-// the issuer itself is loopback http.
+// checkURL holds a URL the IdP's discovery document names, or the issuer, to the one URL rule every URL
+// setting takes (host.URLReason: no zone, no user information, a port from 1 to 65535, #651), refuses
+// a fragment, and requires https, except, when allowed (development mode), http on a loopback host
+// when the issuer itself is loopback http. A query is kept: RFC 6749 §3.1 and §3.2 let the
+// authorization and token endpoints carry one, and OIDC Discovery §3 lets the userinfo endpoint too.
+// A fragment is refused: RFC 6749 §3.1 and §3.2 forbid one on the authorization and token endpoints;
+// on the userinfo endpoint and the JWKS URI, which those sections do not cover, refusing one is
+// byward's own choice: a fragment is never sent on the wire, so one in an endpoint is a mistake, and
+// one rule for every endpoint is simpler than one each.
 func checkURL(raw, issuer string, allowLoopbackHTTP bool) error {
-	u, err := url.Parse(raw)
-	if err != nil || u.Host == "" {
-		return fmt.Errorf("%s is not an absolute URL", logging.URL(raw))
-	}
-	if u.Hostname() == "" { // https://:443/token: url.Parse puts the port in u.Host (#625)
-		return fmt.Errorf("%s has no host before its port", logging.URL(raw))
-	}
-	if u.Scheme == "https" {
+	u, reason := host.URLReason(raw)
+	switch {
+	case reason != "":
+		return fmt.Errorf("%s %s", logging.URL(raw), reason)
+	case strings.Contains(raw, "#"):
+		return fmt.Errorf("%s has a fragment, which an endpoint never has", logging.URL(raw))
+	case u.Scheme == "https":
 		return nil
 	}
 	iu, _ := url.Parse(issuer)

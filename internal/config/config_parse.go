@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/byward-dev/byward/internal/host"
 	"github.com/byward-dev/byward/internal/ratelimit"
@@ -163,111 +162,25 @@ func parseURL(name, example, raw string, source Source) (*url.URL, error) {
 // exampleMCPURL is the example of an MCP endpoint's URL that refusals give.
 const exampleMCPURL = "https://mcp.example.com/mcp"
 
-// isEscape reports whether s is a well-formed %-escape: "%" and two hexadecimal digits.
-func isEscape(s string) bool {
-	_, err := url.PathUnescape(s) // a path segment's unescaping refuses only a malformed escape
-	return len(s) == 3 && s[0] == '%' && err == nil
-}
-
 // isDigits reports whether s is ASCII digits only, at least one: a port or a prefix length as written.
 func isDigits(s string) bool { return s != "" && strings.Trim(s, "0123456789") == "" }
 
-// parseHTTPURL parses raw as an absolute http(s) URL with a host that is no IPv6 address with a zone
-// (urlZoneReason), no user name or password, and a port, if any, as isPortNumber takes it, or says why
+// parseHTTPURL parses raw as an absolute http(s) URL by the one URL rule (host.URLReason), or says why
 // it is not one: fixed text completing "it …", never url.Parse's error, which quotes the value.
-// White space, control and invisible formatting characters are refused first: url.Parse accepts a
-// space or a non-ASCII control character in a path (#422), which no URL holds (RFC 3986 §2).
 func parseHTTPURL(raw string) (*url.URL, string) {
-	u, err := url.Parse(raw)
-	if reason := urlReason(raw, u, err); reason != "" {
+	u, reason := host.URLReason(raw)
+	if reason != "" {
 		return nil, "it " + reason
 	}
 	return u, ""
 }
 
-// urlReason is parseHTTPURL's reason, without its "it", for raw and url.Parse's result.
-func urlReason(raw string, u *url.URL, err error) string {
-	switch {
-	case strings.ContainsFunc(raw, unicode.IsSpace):
-		return "has white space, which a URL cannot hold; write a space in a path as %20"
-	case strings.ContainsFunc(raw, unicode.IsControl):
-		return "has a control character, which a URL cannot hold"
-	case strings.ContainsFunc(raw, func(r rune) bool { return unicode.Is(unicode.Cf, r) }):
-		return "has an invisible formatting character, such as a zero-width space, which a URL cannot hold"
-	case err != nil:
-		return urlParseReason(err)
-	case u.Scheme == "", u.Scheme != "https" && u.Scheme != "http" && isDigits(strings.SplitN(u.Opaque, "/", 2)[0]):
-		// url.Parse reads host:port written without a scheme (localhost:9000/mcp) as a scheme and an opaque part.
-		return "has no scheme such as https://"
-	case u.Scheme != "https" && u.Scheme != "http":
-		return "has a scheme other than http or https"
-	case u.Opaque != "":
-		return `has no "//" after its scheme`
-	case u.Host == "":
-		return "has no host"
-	case u.Hostname() == "": // http://:9000/mcp: a port alone, which a dialer reads as this host (#614)
-		return "has no host before its port"
-	case host.HasZone(u.Hostname()):
-		return urlZoneReason
-	case u.User != nil:
-		return "holds a user name or password"
-	case (u.Port() != "" || strings.HasSuffix(u.Host, ":")) && !isPortNumber(u.Port()):
-		return portReason
-	}
-	return ""
-}
-
-// urlZoneReason is why a URL setting is refused for an IPv6 zone (#644): a URL cannot carry one (WHATWG
-// URL §3.1 omits zones), so a browser or MCP client following the public URL, the resource documentation
-// or the issuer could not use it, and no browser sends an allowed origin with one; the upstream URL and a
-// CIMD client ID on the client denylist (denylistReason) are held to the same rule. The listen
-// addresses take a zone that names an interface (zoneReason).
-const urlZoneReason = "has an IPv6 zone, which a URL cannot carry; give the address without its %zone"
-
-// isPortNumber reports whether port is a TCP port as a URL may write it: 1 to 65535, no sign, no
-// leading zero (#602). url.Parse checks only that a port is digits, so :0, :08080 and :99999 parse.
-// The listen addresses take 0, which asks the kernel for a port; no URL a client follows does.
-func isPortNumber(port string) bool {
-	n, err := strconv.Atoi(port)
-	return err == nil && port[0] >= '1' && n <= 65535 // Atoi took it, so a first byte from '1' is a digit
-}
-
-// portReason is why a host:port, or a URL, is refused for its port.
-const portReason = "has a port that is not a number from 1 to 65535 without a sign or leading zero"
-
-// urlParseReason says why url.Parse refused a value, by its error, as a clause completing "it …".
-// The errors of net/url are read by type, or by their fixed text before any quoted part; one not
-// named here gets a general reason. An EscapeError holds the escape url.Parse refused, which is read
-// (never shown) to tell a malformed one from a host's %-escape of an ASCII character, which url.Parse
-// refuses too; a malformed escape elsewhere, such as in a query, which url.Parse does not check, plays
-// no part.
-func urlParseReason(err error) string {
-	var escape url.EscapeError
-	var host url.InvalidHostError
-	switch inner := errors.Unwrap(err); {
-	case errors.As(err, &escape) && !isEscape(string(escape)):
-		return `has a "%" not followed by two hexadecimal digits`
-	case errors.As(err, &escape): // url.Parse refuses a host's %-escape of an ASCII character too
-		return "has a %-escape in its host, which a host name cannot hold"
-	case errors.As(err, &host):
-		return "has a character a host cannot hold"
-	case inner == nil:
-	case inner.Error() == "missing protocol scheme", inner.Error() == "first path segment in URL cannot contain colon":
-		// The second is url.Parse's error for 127.0.0.1:9000/mcp: a "scheme" cannot start with a digit.
-		return "has no scheme such as https://"
-	case strings.HasPrefix(inner.Error(), `invalid port ":`):
-		return "has a port that is not a number"
-	case strings.HasPrefix(inner.Error(), "invalid port "): // after [IPv6], anything but :port
-		return `has text after the "]" of its IPv6 address that is not a ":" and a port`
-	case inner.Error() == "missing ']' in host":
-		return `has a "[" in its host without its "]"`
-	case inner.Error() == "invalid IP-literal", strings.HasPrefix(inner.Error(), "invalid host: "):
-		return bracketsReason
-	case inner.Error() == "net/url: invalid userinfo":
-		return "holds a user name or password"
-	}
-	return "does not parse as a URL"
-}
+// urlZoneReason and portReason are host's URL refusals (host.URLReason), named here as config's
+// other reasons are.
+const (
+	urlZoneReason = host.URLZoneReason
+	portReason    = host.PortReason
+)
 
 // Bounds of a configured OAuth rate limit (ADR-0018 Consequences: configurable within bounds). There
 // is no off switch.
@@ -483,7 +396,7 @@ func hostPort(h string) (stored, reason string) {
 			return "", reason
 		}
 	}
-	if p != "" && !isPortNumber(strings.TrimPrefix(p, ":")) {
+	if p != "" && !host.IsPortNumber(strings.TrimPrefix(p, ":")) {
 		return "", portReason
 	}
 	return host.Serialize(name) + p, ""
@@ -543,7 +456,7 @@ func validInterfaceName(zone string) bool {
 }
 
 // bracketsReason is why an address with brackets around anything but an IPv6 address is refused:
-// host.Parse's own reason, shared by hostPort, urlParseReason and parseListen (whose host variable
+// host.Parse's own reason, shared by hostPort, host.URLReason and parseListen (whose host variable
 // shadows the package).
 var bracketsReason = host.ErrBrackets.Error()
 

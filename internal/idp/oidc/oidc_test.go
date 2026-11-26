@@ -3,6 +3,7 @@ package oidc
 import (
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/byward-dev/byward/internal/idp"
+	"github.com/byward-dev/byward/internal/logging"
 	"github.com/byward-dev/byward/internal/testutil/fakeclock"
 	"github.com/byward-dev/byward/internal/testutil/fakeidp"
 )
@@ -565,6 +567,16 @@ func TestDiscoveredEndpointsMustBeHTTPSUnlessALoopbackIssuerRunsInDevelopment(t 
 		{"http on a host ending in localhost for a loopback issuer in development", "http://evil-localhost/token", "http://localhost:9000", true, false},
 		{"http on a subdomain named localhost for a loopback issuer in development", "http://localhost.idp.example/token", "http://localhost:9000", true, false},
 		{"another scheme on loopback for a loopback issuer in development", "ftp://127.0.0.1/token", "http://127.0.0.1:9000", true, false},
+		// The one URL rule every URL setting takes (#651), and a query kept, a fragment refused.
+		{"an IPv6 zone", "https://[fe80::1%25eth0]/token", "https://idp.example", false, false},
+		{"port 0", "https://idp.example:0/token", "https://idp.example", false, false},
+		{"a port over 65535", "https://idp.example:65536/token", "https://idp.example", false, false},
+		{"a port with a leading zero", "https://idp.example:0443/token", "https://idp.example", false, false},
+		{"a user name", "https://u@idp.example/token", "https://idp.example", false, false},
+		{"a zero-width space", "https://idp\u200b.example/token", "https://idp.example", false, false},
+		{"a query, as RFC 6749 lets an endpoint carry", "https://idp.example/authorize?p=b2c_1_signin", "https://idp.example", false, true},
+		{"a fragment", "https://idp.example/token#f", "https://idp.example", false, false},
+		{"an empty fragment", "https://idp.example/token#", "https://idp.example", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := checkURL(tc.raw, tc.issuer, tc.development); (err == nil) != tc.ok {
@@ -577,8 +589,10 @@ func TestDiscoveredEndpointsMustBeHTTPSUnlessALoopbackIssuerRunsInDevelopment(t 
 // A refused discovery endpoint is named as logs may show it, with why: the IdP's document wrote it.
 func TestARefusedEndpointIsNamedAsLogsMay(t *testing.T) {
 	for raw, want := range map[string]string{
-		"http://u:SECRET@idp.example/token?code=SECRET": "http://idp.example/token must use https",
-		"token?code=SECRET":                             "<invalid URL> is not an absolute URL",
+		"http://u:SECRET@idp.example/token?code=SECRET": "http://idp.example/token holds a user name or password",
+		"http://idp.example/token?code=SECRET":          "http://idp.example/token must use https",
+		"token?code=SECRET":                             "<invalid URL> has no scheme such as https://",
+		"https://idp.example/token?code=SECRET#f":       "https://idp.example/token has a fragment, which an endpoint never has",
 		"https://:443/token":                            "https://:443/token has no host before its port", // #625
 		"https://:/token":                               "https://:/token has no host before its port",
 		"https://u:SECRET@:443/token?code=SECRET":       "https://:443/token has no host before its port",
@@ -739,6 +753,32 @@ func TestAnHTTPSIssuerOnANonPublicAddressIsDiscovered(t *testing.T) {
 
 // An endpoint the IdP's discovery document lists is held to checkURL's rule: one over plain http, or
 // with a port and no host (#625), makes the provider not ready, fatally, naming the endpoint.
+// Each endpoint a discovery document names is held to the one URL rule (#651): one with an IPv6 zone
+// is refused at discovery, as a fatal error naming the endpoint as logs may show it.
+func TestADiscoveredEndpointWithAZoneIsRefused(t *testing.T) {
+	const zoned = "https://[fe80::1%25eth0]/x"
+	for _, field := range []string{"authorization_endpoint", "token_endpoint", "jwks_uri"} {
+		t.Run(field, func(t *testing.T) {
+			var srv *httptest.Server
+			srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				doc := map[string]string{"issuer": srv.URL + "/realms/r", "authorization_endpoint": srv.URL + "/realms/r/auth",
+					"token_endpoint": srv.URL + "/realms/r/token", "jwks_uri": srv.URL + "/realms/r/certs"}
+				doc[field] = zoned
+				_ = json.NewEncoder(w).Encode(doc)
+			}))
+			t.Cleanup(srv.Close)
+			p, err := New(Config{Preset: "keycloak", Issuer: srv.URL + "/realms/r", ClientID: "c", RedirectURL: redirect, HTTPClient: srv.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = p.Ready(context.Background())
+			if want := "oidc discovery: endpoint: " + logging.URL(zoned) + " has an IPv6 zone"; idp.ClassOf(err) != idp.Fatal || err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("Ready = %v (class %v), want a fatal refusal containing %q", err, idp.ClassOf(err), want)
+			}
+		})
+	}
+}
+
 func TestADiscoveredEndpointThatBreaksTheRuleMakesTheProviderNotReady(t *testing.T) {
 	for _, bad := range []string{"http://idp.example/token", "https://:443/token"} {
 		t.Run(bad, func(t *testing.T) {

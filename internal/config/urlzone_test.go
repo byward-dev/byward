@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// A URL cannot carry an IPv6 zone (#644): the five URL settings read through urlReason (the public URL,
+// A URL cannot carry an IPv6 zone (#644): the five URL settings read through host.URLReason (the public URL,
 // the upstream URL, the resource documentation, the OIDC issuer and the allowed origins) refuse one
 // with one reason, named as the operator gave it, by env and by flag, and show the value by its length.
 func TestEachURLSettingRefusesAnIPv6ZoneWithOneReason(t *testing.T) {

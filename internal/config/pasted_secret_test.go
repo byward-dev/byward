@@ -345,6 +345,7 @@ func TestEachWayOfReadingAURLIsCaught(t *testing.T) {
 		{name: "url.Parse is listed by its owner and argument", imports: `"net/url"`, code: `func f() { url.Parse(raw) }`, want: urlReads{parsed: []string{"f raw"}}},
 		{name: "url.ParseRequestURI too", imports: `"net/url"`, code: `func f() { url.ParseRequestURI(raw) }`, want: urlReads{parsed: []string{"f raw"}}},
 		{name: "url.JoinPath too", imports: `"net/url"`, code: `func f() { url.JoinPath(raw, "x") }`, want: urlReads{parsed: []string{"f raw"}}},
+		{name: "host.URLReason too, the one URL rule", imports: `"github.com/byward-dev/byward/internal/host"`, code: `func f() { host.URLReason(raw) }`, want: urlReads{parsed: []string{"f raw"}}},
 		{name: "in parentheses", imports: `"net/url"`, code: `func f() { (url.Parse)(raw) }`, want: urlReads{parsed: []string{"f raw"}}},
 		{name: "under another import name", imports: `u "net/url"`, code: `func f() { u.Parse(raw) }`, want: urlReads{parsed: []string{"f raw"}}},
 		{name: "in a package-level var", imports: `"net/url"`, code: `var v, _ = url.Parse(raw)`, want: urlReads{parsed: []string{"v raw"}}},
@@ -423,6 +424,9 @@ func urlReadsOf(name string, src any) (urlReads, error) {
 			return nil, false
 		}
 		pkg, ok := sel.X.(*ast.Ident)
+		if ok && hostPkg != "" && pkg.Name == hostPkg && sel.Sel.Name == "URLReason" { // url.Parse with the one URL rule (#651)
+			return sel, true
+		}
 		return sel, ok && urlPkg != "" && pkg.Name == urlPkg && (strings.HasPrefix(sel.Sel.Name, "Parse") || sel.Sel.Name == "JoinPath")
 	}
 	otherParsers := map[string]bool{"time": true, "netip": true, "net": true, "strconv": true, "fs": true}
