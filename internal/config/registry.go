@@ -35,7 +35,7 @@ type Setting struct {
 	// env templates list every variable (#428).
 	EmptyIsGiven bool
 	// StdioHint is the refusal of the setting beside a stdio upstream, which it has no effect on, for a
-	// setting outside the upstream groups whose refusal says what to use instead (offModeSettings). It
+	// setting that is not a stdio upstream's whose refusal says what to use instead (offModeSettings). It
 	// is fixed text, with %[1]s for the setting as the operator gave it and no other verb
 	// (checkStdioHints, at init), so it never shows a value.
 	StdioHint string

@@ -47,8 +47,8 @@ func failIfOpened(t *testing.T, path string) readFileFunc {
 // as given, by its variable and by its flag: given a value its parser refuses, which is not parsed, or
 // for a secret a missing file, which is never opened; and as a flag set to nothing (#596). Its
 // variable set to nothing is unset (#428), so the proxy loads. The cases come from stdioHints, so a
-// hint dropped from the registry fails as the wrong refusal; every setting with a StdioHint must be
-// pinned there.
+// hint dropped from the registry fails here, with another error or none; every setting with a
+// StdioHint must be pinned there.
 func TestEverySettingWithAStdioHintIsRefusedWithOnlyItsHintBesideStdio(t *testing.T) {
 	const missing = "/run/secrets/missing"
 	for _, s := range registry {
@@ -179,7 +179,7 @@ func TestASecretsFileIsOpenedOnlyWhenItsSettingIsNotRefused(t *testing.T) {
 	readErr := func(env, setting string) string {
 		return env + ": want the path of a file holding the secret, such as /run/secrets/" + setting + "; got a value (20 characters, not shown): it cannot be read: file does not exist"
 	}
-	const postgresHint = "BYWARD_STORE_POSTGRES_DSN_FILE: the PostgreSQL store is for several replicas, and a stdio upstream's processes live on one (ADR-0007 §4); use the SQLite store"
+	postgresHint := pinnedHint("store-postgres-dsn", "BYWARD_STORE_POSTGRES_DSN_FILE")
 	for _, tc := range []struct {
 		name   string
 		args   []string
@@ -190,7 +190,7 @@ func TestASecretsFileIsOpenedOnlyWhenItsSettingIsNotRefused(t *testing.T) {
 		{"the PostgreSQL store's file beside stdio is not opened", nil, stdioBase(stdioCommand, "BYWARD_STORE_POSTGRES_DSN_FILE="+missing), nil, postgresHint},
 		{"the PostgreSQL store's file beside a command after -- is not opened", []string{"--", "/usr/bin/server"}, stdioBase("BYWARD_STORE_POSTGRES_DSN_FILE=" + missing), nil, postgresHint},
 		{"the credential's file beside stdio is not opened", nil, stdioBase(stdioCommand, "BYWARD_UPSTREAM_CREDENTIAL_FILE="+missing), nil,
-			"BYWARD_UPSTREAM_CREDENTIAL_FILE is for an HTTP upstream; give a stdio upstream its credential with BYWARD_UPSTREAM_ENV_FILE"},
+			pinnedHint("upstream-credential", "BYWARD_UPSTREAM_CREDENTIAL_FILE")},
 		{"the stdio env file beside HTTP is not opened", nil, append(slices.Clone(base), "BYWARD_UPSTREAM_ENV_FILE="+missing), nil,
 			"BYWARD_UPSTREAM_ENV_FILE " + toStdio},
 		{"the stdio env file beside stdio is opened", nil, stdioBase(stdioCommand, "BYWARD_UPSTREAM_ENV_FILE="+missing), []string{missing},

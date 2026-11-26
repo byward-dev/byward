@@ -230,8 +230,8 @@ func TestNoAuthListensOnLocalhostInAnyCase(t *testing.T) {
 // Every authentication setting given beside --insecure-no-auth is refused, so a half-configured
 // production setup never runs open; set to nothing as a variable, it is unset and loads (#428, #597:
 // TestEverySettingSetToNothingLoadsAsIfUnset walks that in its no-authentication mode). Beside a
-// stdio upstream, one refused for the HTTP upstream is refused only as that, its hint or "remove it"
-// its one error (#631). The settings are read from the registry, so a new one is covered with no
+// stdio upstream, a setting only an HTTP upstream reads is refused only as that: its hint or "remove
+// it" is its one error (#631). The settings are read from the registry, so a new one is covered with no
 // test to edit.
 func TestEveryAuthenticationSettingGivenBesideNoAuthIsRefused(t *testing.T) {
 	const secret = "/run/secrets/an-auth-setting"
