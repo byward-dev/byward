@@ -117,21 +117,17 @@ func TestEverySettingOfAnUpstreamGroupIsRefusedWithTheOtherMode(t *testing.T) {
 		}
 		return baseFiles(p)
 	}
-	n, ran, flags := 0, 0, 0
 	for _, s := range registry {
 		forHTTP := s.Group == GroupHTTPUpstream
 		if !forHTTP && s.Group != GroupStdioUpstream || s.StdioHint != "" { // a hinted one: TestEverySettingWithAStdioHintIsRefusedWithOnlyItsHintBesideStdio
 			continue
 		}
-		n++
 		t.Run(s.Name, func(t *testing.T) {
-			ran++
 			modeEnv, refusal := append([]string{}, base...), toStdio
 			if forHTTP {
 				modeEnv, refusal = stdioBase(stdioCommand), toHTTP
 			}
 			if !s.Secret() {
-				flags++
 				flag := "--" + s.Name
 				_, _, err := Load([]string{flag + "="}, modeEnv, files)
 				if want := flag + " " + refusal; !isConfigError(err) || err.Error() != want {
@@ -154,30 +150,6 @@ func TestEverySettingOfAnUpstreamGroupIsRefusedWithTheOtherMode(t *testing.T) {
 				}
 			}
 		})
-	}
-	if ran == n && (n < 9 || flags < 8) { // a -run filter runs only some
-		t.Fatalf("%d upstream-group settings checked, %d as a flag set to nothing; want every one (9 today, 8 but the secret upstream-env)", n, flags)
-	}
-}
-
-// Every setting of the identity and downstream-token groups, which are about the upstream but in
-// neither upstream group, is decided for a mode: it has a StdioHint (only an HTTP upstream reads it,
-// or it refuses a stdio one with a hint of its own) or is named as applying to both, so a new one
-// fails until someone decides which mode it is for.
-func TestEveryIdentityAndDownstreamTokenSettingIsDecidedForAnUpstreamMode(t *testing.T) {
-	bothModes := map[string]bool{"obo-scopes": true}
-	n := 0
-	for _, s := range registry {
-		if s.Group != GroupIdentity && s.Group != GroupDownstreamTokens {
-			continue
-		}
-		n++
-		if !bothModes[s.Name] && s.StdioHint == "" {
-			t.Errorf("%s: give it a StdioHint (httpOnlyRefusal) if only an HTTP upstream reads it, or a hint of its own; else list it in bothModes", s.Name)
-		}
-	}
-	if n < 7 {
-		t.Fatalf("%d identity and downstream-token settings checked, want every one (7 today)", n)
 	}
 }
 

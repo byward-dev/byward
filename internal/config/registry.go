@@ -27,9 +27,10 @@ type Setting struct {
 	Default string
 	Help    string
 	Bool    bool
-	// Auth marks settings that configure authentication (IdP, broker); --insecure-no-auth refuses
-	// to start when any of them is set, so a half-configured production setup never runs open.
-	Auth bool
+	// Auth is whether the setting configures authentication (IdP, broker): ForAuth, refused beside
+	// --insecure-no-auth so a half-configured production setup never runs open, or NotForAuth. Every
+	// setting states it (checkClassified, at init), so a new one is decided, never open by default.
+	Auth AuthUse
 	// EmptyIsGiven keeps the setting's variable set to nothing as given, for the rare setting whose
 	// Help gives empty a meaning of its own. Otherwise (the rule) set to nothing is as if unset, since
 	// env templates list every variable (#428).
@@ -41,10 +42,28 @@ type Setting struct {
 	// %[1]s for the setting as the operator gave it and no other verb (checkStdioHints, at init), so it
 	// never shows a value.
 	StdioHint string
+	// BothUpstreams marks a setting outside the upstream groups that applies to an HTTP and a stdio
+	// upstream alike. Every setting outside the upstream groups states its mode one way: a StdioHint
+	// (HTTP only) or BothUpstreams (checkClassified, at init), so a new one is decided, never read
+	// beside the wrong upstream.
+	BothUpstreams bool
 	// shape decides how the value is shown (ADR-0031 §3); secretShape also means the value is read
 	// only from a file. Every registry entry has one (checkShapes, at init).
 	shape *shape
 }
+
+// AuthUse is whether a setting configures authentication. Its zero value states nothing, which
+// checkClassified refuses at init.
+type AuthUse int
+
+const (
+	authUnstated AuthUse = iota
+	// ForAuth: the setting configures authentication; --insecure-no-auth refuses it.
+	ForAuth
+	// NotForAuth: the setting does not configure authentication; it applies with authentication and
+	// without.
+	NotForAuth
+)
 
 // Secret reports whether the setting is a secret: read only from a file, `<ENV>_FILE` or
 // `--<name>-file`, and never shown. Its shape decides it.

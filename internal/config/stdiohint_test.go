@@ -62,9 +62,6 @@ func TestEverySettingWithAStdioHintIsRefusedWithOnlyItsHintBesideStdio(t *testin
 		}
 	}
 	names := slices.Sorted(maps.Keys(stdioHints))
-	if len(names) < 8 {
-		t.Fatalf("%d stdio hints pinned, want at least the 8 of today", len(names))
-	}
 	for _, name := range names {
 		s := lookup(name)
 		bad := "not a value"

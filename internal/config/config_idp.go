@@ -35,23 +35,24 @@ func (c *Config) idp(v *Values) []error {
 		return []error{err}
 	}
 	oidc := c.IdP == "oidc" || slices.Contains(OIDCPresets, c.IdP)
-	other := "oidc-" // the settings family that must stay unset
+	other, otherIdP := GroupOIDC, "oidc" // the other IdP, whose settings must stay unset
 	if oidc {
-		other = "entra-"
+		other, otherIdP = GroupEntra, "entra"
 	}
-	errs := c.mixedIdPSettings(v, other)
+	errs := c.mixedIdPSettings(v, other, otherIdP)
 	if oidc {
 		return append(errs, c.oidcIdP(v)...)
 	}
 	return append(errs, c.entraIdP(v)...)
 }
 
-// mixedIdPSettings refuses settings of the other IdP family (prefix other), named as the operator
-// set them.
-func (c *Config) mixedIdPSettings(v *Values, other string) []error {
+// mixedIdPSettings refuses each given setting of group other, the other IdP's settings, named as the
+// operator gave them; otherIdP names that IdP in the message. Keyed on the group, a new setting of it
+// is refused with no list to edit (#658).
+func (c *Config) mixedIdPSettings(v *Values, other Group, otherIdP string) []error {
 	var mixed []string
 	for _, n := range v.order {
-		if val := v.byKey[n]; strings.HasPrefix(n, other) && val.Source != SourceDefault {
+		if val := v.byKey[n]; val.Setting.Group == other && val.Source != SourceDefault {
 			mixed = append(mixed, val.nameAsGiven())
 		}
 	}
@@ -59,7 +60,7 @@ func (c *Config) mixedIdPSettings(v *Values, other string) []error {
 		return nil
 	}
 	return []error{errorf("%s cannot be used with %s=%s: they configure the %s IdP; remove them, or set %s to match",
-		strings.Join(mixed, ", "), v.NameAsGiven("idp"), c.IdP, strings.TrimSuffix(other, "-"), v.NameAsGiven("idp"))}
+		strings.Join(mixed, ", "), v.NameAsGiven("idp"), c.IdP, otherIdP, v.NameAsGiven("idp"))}
 }
 
 // requiredForIdP is an error for each named setting left empty.
