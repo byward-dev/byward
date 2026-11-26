@@ -157,7 +157,7 @@ func offModeSettings(v *Values) []error {
 	for _, val := range v.Effective() {
 		switch s := val.Setting; {
 		case !v.refusedOffMode(s.Name):
-		case stdio: // an HTTP upstream's setting without a hint of its own is refused as only an HTTP upstream reads it
+		case stdio: // the setting's StdioHint, or httpOnlyRefusal for an HTTP upstream's setting without one
 			errs = append(errs, errorf(cmp.Or(s.StdioHint, httpOnlyRefusal), val.nameAsGiven()))
 		default:
 			errs = append(errs, errorf("%s is set, but the upstream is HTTP: it applies only to a stdio upstream (%s); remove it", val.nameAsGiven(), stdioSelector))
