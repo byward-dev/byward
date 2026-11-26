@@ -111,7 +111,7 @@ func TestSignInRefusesASubjectRevokeUserCouldNotNameAndDoesNotShowIt(t *testing.
 			var ie *idp.Error
 			if !errors.As(err, &ie) || ie.Class != idp.Fatal || strings.Contains(err.Error(), canary) || !strings.Contains(err.Error(), tc.shown+" is not a user key") ||
 				!strings.Contains(err.Error(), "at most 255 printable ASCII characters") {
-				t.Fatalf("err = %v, want a Fatal IdP error naming the %q and \"at most 255 printable ASCII characters\", not the value", err, tc.shown)
+				t.Fatalf("err = %v, want a Fatal IdP error containing %q and %q, without the value", err, tc.shown+" is not a user key", "at most 255 printable ASCII characters")
 			}
 		})
 	}
