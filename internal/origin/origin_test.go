@@ -240,6 +240,16 @@ func TestInternalListenerAcceptsAddressesAndListedNamesOnly(t *testing.T) {
 	}
 }
 
+// An IPv6 address with a zone is refused whatever the allowed list holds: config refuses a zoned
+// entry, and the internal listener does not rely on it (#652).
+func TestTheInternalListenerRefusesAZoneEvenWhenTheListNamesIt(t *testing.T) {
+	w := httptest.NewRecorder()
+	InternalHosts(quiet(), []string{"[fe80::1%eth0]:9090"}, ok).ServeHTTP(w, withHost("[fe80::1%eth0]:9090"))
+	if w.Code != http.StatusMisdirectedRequest {
+		t.Fatalf("a zoned Host the list names: %d, want 421", w.Code)
+	}
+}
+
 func TestOriginOutsideAllowlistGets403(t *testing.T) {
 	h := Origins(quiet(), []string{"https://app.example"}, ok)
 	cases := []struct {
