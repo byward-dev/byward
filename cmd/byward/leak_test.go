@@ -443,3 +443,72 @@ func redirectStderr(t *testing.T) func(*testing.T) string {
 		return got
 	}
 }
+
+// tokenForms are tokens and credentials pasted where a user key belongs: no IdP issues a sub shaped
+// like them, so revoke-user refuses each under every IdP (#594). One is longer than the 255 ASCII
+// characters OIDC Core 1.0 §2 allows a sub.
+var tokenForms = []struct{ name, value string }{
+	{"a compact JWS", "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhIn0.LK7CANARY"},
+	{"a JWS longer than a sub", "eyJhbGciOiJSUzI1NiJ9." + strings.Repeat("eyJzdWIiOiJhIn0", 16) + ".LK7CANARY"},
+	{"a Bearer credential", "Bearer LK7CANARY"},
+}
+
+// The operator commands show no argument they were given and refuse (#594). Every command but
+// revoke-user takes only fixed words, so a value in any position gets its usage line. revoke-user
+// under an oidc IdP takes a key as the IdP sends a sub (TestRevokeUserShowsNoKeyItWasGiven covers
+// Entra): any secret form it could send as a sub is accepted, and may be named as the user it
+// revokes; these runs have no store, so none succeeds and none is shown. A token is no user key
+// under either IdP, and is refused by its length. Nothing reaches os.Stderr or the log package.
+func TestOperatorCommandsShowNoArgumentTheyRefuse(t *testing.T) {
+	processStderr := redirectStderr(t)
+	entraEnv, _, _ := operatorEnv(t, noStore)
+	oidcEnv := append(without(entraEnv, "BYWARD_ENTRA_"), "BYWARD_OIDC_CLIENT_SECRET_FILE="+setting(entraEnv, "BYWARD_ENTRA_CLIENT_SECRET_FILE"),
+		"BYWARD_IDP=keycloak", "BYWARD_OIDC_ISSUER=https://sso.example.com/realms/acme", "BYWARD_OIDC_CLIENT_ID=byward", "BYWARD_GATE_ALLOW_EMPTY=true")
+	const notAUserKey = "byward: revoke-user ("
+	type cell struct {
+		place, want string
+		args, env   []string
+		mayAccept   bool // an oidc IdP may take the value as a subject
+	}
+	run := func(t *testing.T, form string, cells []cell) {
+		for _, c := range cells {
+			t.Run(c.place+"/"+form, func(t *testing.T) {
+				code, stdout, stderr := runWith(c.args, c.env...)
+				if shows(stderr) || shows(stdout) {
+					t.Errorf("exit %d; stdout %q, stderr %q show the value given", code, stdout, stderr)
+				}
+				if got := processStderr(t); got != "" {
+					t.Errorf("wrote %q to os.Stderr or the log package, want nothing", got)
+				}
+				if code != exitConfig || !c.mayAccept && !strings.HasPrefix(stderr, c.want) {
+					t.Errorf("exit %d, stderr %q; want exit %d and %q", code, stderr, exitConfig, c.want)
+				}
+			})
+		}
+	}
+	usage := func(command string) string { return "byward: usage: byward " + command }
+	others := func(v string) []cell {
+		return []cell{
+			{place: "revoke-user, a second key", want: usage("revoke-user"), args: []string{"revoke-user", "u1", v}, env: entraEnv},
+			{place: "revoke-all", want: usage("revoke-all"), args: []string{"revoke-all", v}, env: entraEnv},
+			{place: "revoke-all --yes, then a value", want: usage("revoke-all"), args: []string{"revoke-all", "--yes", v}, env: entraEnv},
+			{place: "store", want: usage("store"), args: []string{"store", v}, env: entraEnv},
+			{place: "store new-epoch --yes, then a value", want: usage("store"), args: []string{"store", "new-epoch", "--yes", v}, env: entraEnv},
+			{place: "check", want: usage("check"), args: []string{"check", v}, env: entraEnv},
+			{place: "doctor", want: usage("doctor"), args: []string{"doctor", v}, env: entraEnv},
+			{place: "jwks", want: usage("jwks"), args: []string{"jwks", v}, env: entraEnv},
+			{place: "downstream-token", want: usage("downstream-token"), args: []string{"downstream-token", v}, env: entraEnv},
+		}
+	}
+	for _, form := range append(slices.Clone(secretForms), hostForm) {
+		v := form.value
+		run(t, form.name, append(others(v),
+			cell{place: "revoke-user, oidc", want: notAUserKey, args: []string{"revoke-user", v}, env: oidcEnv, mayAccept: true}))
+	}
+	for _, form := range tokenForms {
+		v := form.value
+		run(t, form.name, append(others(v),
+			cell{place: "revoke-user, entra", want: notAUserKey, args: []string{"revoke-user", v}, env: entraEnv},
+			cell{place: "revoke-user, oidc", want: notAUserKey, args: []string{"revoke-user", v}, env: oidcEnv}))
+	}
+}

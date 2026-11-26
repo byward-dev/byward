@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/byward-dev/byward/internal/apptoken"
 	"github.com/byward-dev/byward/internal/broker"
@@ -19,6 +18,7 @@ import (
 	"github.com/byward-dev/byward/internal/idp"
 	"github.com/byward-dev/byward/internal/idp/entra"
 	"github.com/byward-dev/byward/internal/idp/oidc"
+	"github.com/byward-dev/byward/internal/logging"
 )
 
 // identityProvider is the IdP users sign in with (BYWARD_IDP): its adapter, the name that labels
@@ -196,11 +196,26 @@ func withCredential(r doctor.Result, credentialDesc string, refused *Warning) do
 	return r
 }
 
+// maxSubject is the longest sub an IdP may send. OIDC Core 1.0 §2: "It MUST NOT exceed 255 ASCII
+// [RFC20] characters in length."
+const maxSubject = 255
+
 // oidcUserKey is an oidc subject as an operator gives it to revoke-user: exactly as the IdP sends it
-// (sub is case-sensitive), trimmed, never empty or with control characters.
+// (sub is case-sensitive), trimmed. It is never empty, longer than maxSubject, or anything but
+// printable ASCII, as OIDC Core allows a sub, and never shaped like a credential (logging.LooksSecret),
+// which no IdP issues as a sub: a token pasted in its place is refused, so it is neither printed nor
+// stored as a revoked subject (#594).
 func oidcUserKey(s string) (string, bool) {
 	s = strings.TrimSpace(s)
-	return s, s != "" && !strings.ContainsFunc(s, unicode.IsControl)
+	if s == "" || len(s) > maxSubject || logging.LooksSecret(s) {
+		return "", false
+	}
+	for i := range len(s) {
+		if s[i] < 0x20 || s[i] > 0x7e {
+			return "", false
+		}
+	}
+	return s, true
 }
 
 // oidcLabel is BYWARD_OIDC_NAME, else the preset's name, else the issuer's host.

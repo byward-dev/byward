@@ -117,7 +117,7 @@ func replace(groups []string, a slog.Attr) slog.Attr {
 	}
 	switch a.Value.Kind() {
 	case slog.KindString:
-		if looksSecret(a.Value.String()) {
+		if LooksSecret(a.Value.String()) {
 			return slog.String(a.Key, redacted)
 		}
 	case slog.KindAny, slog.KindLogValuer:
@@ -132,7 +132,7 @@ func replace(groups []string, a slog.Attr) slog.Attr {
 		default:
 			return slog.Attr{}
 		}
-		if looksSecret(s) {
+		if LooksSecret(s) {
 			s = redacted
 		}
 		return slog.String(a.Key, s)
@@ -172,7 +172,10 @@ var jwtShape = regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*(?:\.|$)|[A-
 // is accepted, because a length floor would let a short credential such as Basic YTpi through.
 var authScheme = regexp.MustCompile(`(?i)(?:^|[^_])(?:bearer|basic)\s+\S`)
 
-func looksSecret(s string) bool {
+// LooksSecret reports whether s holds something shaped like a credential: a compact JWS or JWE, or an
+// HTTP Bearer or Basic credential. Logs redact such a value, and revoke-user refuses it as a user key
+// (#594), so the one rule decides both.
+func LooksSecret(s string) bool {
 	return authScheme.MatchString(s) || jwtShape.MatchString(s)
 }
 
