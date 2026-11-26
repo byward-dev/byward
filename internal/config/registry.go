@@ -256,6 +256,11 @@ func (v *Values) holds(name string) bool {
 // for the upstream mode that is off is read as its default, as value reads it (#631).
 func (v *Values) empty(name string) bool { return v.value(name).Given.empty() }
 
+// isSet reports whether the operator set the named setting at all: a flag set to nothing too, which
+// an off check refuses (#596), though given does not count it; a variable set to nothing is unset
+// (#428). It reads through value, so a setting refused for the upstream mode that is off is not set.
+func (v *Values) isSet(name string) bool { return v.value(name).Source != SourceDefault }
+
 // familyOf are the settings enabler turns on (EnabledBy), in registry order: the ones that have no
 // effect while it is off (#658).
 func (v *Values) familyOf(enabler string) []string {

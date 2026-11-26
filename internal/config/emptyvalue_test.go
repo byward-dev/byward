@@ -151,13 +151,15 @@ func TestAFlagSetToNothingIsRefusedAsGiven(t *testing.T) {
 
 // Every check that refuses a family's settings while the family is off refuses one given as a flag
 // set to nothing, which is deliberate, and takes one set to nothing as a variable as unset, as env
-// templates list every variable (#428, #596). A setting of each check (both of the SQLite store's
-// beside PostgreSQL, which it checks apart); the upstream mode's check is walked over every setting in
-// TestEverySettingOfAnUpstreamGroupIsRefusedWithTheOtherMode and
+// templates list every variable (#428, #596). A setting of each check: both of the SQLite store's
+// beside PostgreSQL, which the store check checks apart, and both CIMD host lists, which the CIMD
+// check counts once they hold an entry or are a flag set to nothing. The upstream mode's check is
+// walked over every setting in TestEverySettingOfAnUpstreamGroupIsRefusedWithTheOtherMode and
 // TestEverySettingWithAStdioHintIsRefusedWithOnlyItsHintBesideStdio.
 func TestEveryOffCheckRefusesAFlagSetToNothingAndTakesAVariableSetToNothingAsUnset(t *testing.T) {
 	stdio := stdioBase(stdioCommand)
 	postgres := append(slices.Clone(base), "BYWARD_STORE_POSTGRES_DSN_FILE="+dsnFile)
+	cimdOff := append(slices.Clone(base), "BYWARD_CIMD=false")
 	for _, tc := range []struct {
 		check, setting string
 		env            []string
@@ -165,6 +167,8 @@ func TestEveryOffCheckRefusesAFlagSetToNothingAndTakesAVariableSetToNothingAsUns
 	}{
 		{"the other IdP family", "oidc-scopes", base, "--oidc-scopes cannot be used with BYWARD_IDP=entra"},
 		{"app tokens off", "app-roles", base, "--app-roles set while BYWARD_APP_TOKENS=off"},
+		{"CIMD off, the trusted hosts", "cimd-trusted-hosts", cimdOff, "--cimd-trusted-hosts has no effect while BYWARD_CIMD is false"},
+		{"CIMD off, the allowed hosts", "cimd-allowed-hosts", cimdOff, "--cimd-allowed-hosts has no effect while BYWARD_CIMD is false"},
 		{"On-Behalf-Of's header beside a stdio upstream", "obo-header", stdio, "--obo-header: a stdio upstream gets its downstream token from its token socket"},
 		{"the plain identity headers beside a stdio upstream", "identity-headers", stdio, "--identity-headers is for an HTTP upstream; a stdio upstream gets the user in its environment"},
 		{"the SQLite store beside PostgreSQL", "store-dir", postgres, "give one store, PostgreSQL or a SQLite state directory, not both"},

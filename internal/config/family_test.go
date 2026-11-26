@@ -1,19 +1,22 @@
 package config
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 )
+
+// probe is a new member of the family enabledBy turns on, which no code names.
+func probe(enabledBy string) Setting {
+	return Setting{Name: "probe-member", shape: asGivenShape, Group: GroupOperations, Auth: ForAuth, BothUpstreams: true, EnabledBy: enabledBy}
+}
 
 // A new member of a family (EnabledBy) is refused once given while its family is off, in the family's
 // own words and with no other code (#658): a probe setting appended to the registry is named beside the
 // family's settings, the CIMD one in its own error, the app-only one joined with the others; left
 // unset, it is not refused.
 func TestANewMemberOfAFamilyIsRefusedOnceGivenWhileItsFamilyIsOff(t *testing.T) {
-	probe := func(enabledBy string) Setting {
-		return Setting{Name: "probe-member", shape: asGivenShape, Group: GroupOperations, Auth: ForAuth, BothUpstreams: true, EnabledBy: enabledBy}
-	}
 	for _, tc := range []struct {
 		name, enabledBy string
 		env             []string
@@ -21,16 +24,16 @@ func TestANewMemberOfAFamilyIsRefusedOnceGivenWhileItsFamilyIsOff(t *testing.T) 
 		want            string
 	}{
 		{"CIMD, a member given", "cimd", []string{"BYWARD_CIMD=false", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai", "BYWARD_PROBE_MEMBER=x"},
-			func(c *Config, v *Values) []error { return c.clientSources(v) },
+			(*Config).clientSources,
 			"BYWARD_CIMD_TRUSTED_HOSTS has no effect while BYWARD_CIMD is false; remove one of them\nBYWARD_PROBE_MEMBER has no effect while BYWARD_CIMD is false; remove one of them"},
 		{"CIMD, a member left unset", "cimd", []string{"BYWARD_CIMD=false", "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai"},
-			func(c *Config, v *Values) []error { return c.clientSources(v) },
+			(*Config).clientSources,
 			"BYWARD_CIMD_TRUSTED_HOSTS has no effect while BYWARD_CIMD is false; remove one of them"},
 		{"app-only, a member given", "app-tokens", []string{"BYWARD_APP_ROLES=r", "BYWARD_PROBE_MEMBER=x"},
-			func(c *Config, v *Values) []error { return c.appTokens(v) },
+			(*Config).appTokens,
 			"BYWARD_APP_ROLES, BYWARD_PROBE_MEMBER set while BYWARD_APP_TOKENS=off: they configure app-only callers; set BYWARD_APP_TOKENS=entra, or remove them"},
 		{"app-only, a member left unset", "app-tokens", []string{"BYWARD_APP_ROLES=r"},
-			func(c *Config, v *Values) []error { return c.appTokens(v) },
+			(*Config).appTokens,
 			"BYWARD_APP_ROLES set while BYWARD_APP_TOKENS=off: they configure app-only callers; set BYWARD_APP_TOKENS=entra, or remove them"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -53,7 +56,9 @@ func TestANewMemberOfAFamilyIsRefusedOnceGivenWhileItsFamilyIsOff(t *testing.T) 
 // A new secret member counts once given, an empty file too: it has no reader of its own to refuse the
 // empty file, so the family's check is what keeps it from loading while the family is off (#658).
 func TestANewSecretMemberGivenAnEmptyFileIsRefusedWhileItsFamilyIsOff(t *testing.T) {
-	reg := append(slices.Clone(registry), Setting{Name: "probe-member", shape: secretShape, Group: GroupOperations, Auth: ForAuth, BothUpstreams: true, EnabledBy: "cimd"})
+	secret := probe("cimd")
+	secret.shape = secretShape
+	reg := append(slices.Clone(registry), secret)
 	empty := func(p string) ([]byte, error) {
 		if p == "/run/secrets/probe-member" {
 			return nil, nil
@@ -70,6 +75,33 @@ func TestANewSecretMemberGivenAnEmptyFileIsRefusedWhileItsFamilyIsOff(t *testing
 	}
 	if want := "BYWARD_PROBE_MEMBER_FILE has no effect while BYWARD_CIMD is false; remove one of them"; strings.Join(got, "\n") != want {
 		t.Errorf("errors:\n%s\nwant:\n%s", strings.Join(got, "\n"), want)
+	}
+}
+
+// A member refused for the upstream mode that is off is not also refused by its family: isSet skips it,
+// as given does, so it gets the upstream mode's one refusal (#631), whatever family it is in.
+func TestAMemberRefusedForTheUpstreamModeThatIsOffIsNotAlsoRefusedByItsFamily(t *testing.T) {
+	for _, tc := range []struct {
+		enabler, off string
+		check        func(c *Config, v *Values) []error
+	}{
+		{"cimd", "BYWARD_CIMD=false", (*Config).clientSources},
+		{"app-tokens", "BYWARD_APP_TOKENS=off", (*Config).appTokens},
+	} {
+		t.Run(tc.enabler, func(t *testing.T) {
+			stdioOnly := probe(tc.enabler)
+			stdioOnly.Group, stdioOnly.BothUpstreams = GroupStdioUpstream, false // beside base's HTTP upstream: refused
+			v, err := resolve(append(slices.Clone(registry), stdioOnly), nil, append(slices.Clone(base), tc.off, "BYWARD_PROBE_MEMBER=x"), baseFiles, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !v.refusedOffMode("probe-member") {
+				t.Fatal("the probe is not refused for the upstream mode that is off, so this test shows nothing")
+			}
+			if errs := tc.check(&Config{}, v); len(errs) != 0 {
+				t.Errorf("%s's check: %v, want none: the upstream mode's refusal is its one error", tc.enabler, errs)
+			}
+		})
 	}
 }
 
@@ -103,38 +135,60 @@ func TestEveryFamilyEnablerTurnsASettingOn(t *testing.T) {
 	}
 }
 
-// Every family enabler has a walk: a new member of each is refused by Load's own path while its family
-// is off, so an enabler added to familyEnablers with no walk fails here (#658). The off value is the
-// test's, and an enabler it does not know fails until it is given one.
-func TestEveryFamilyEnablerRefusesANewMemberWhileItIsOff(t *testing.T) {
+// Every family enabler has a walk: a new member of each, given by its variable or as a flag set to
+// nothing (#596), is refused by Load's own path while its family is off, in the family's words, and its
+// variable set to nothing is unset and loads (#428). An enabler added to familyEnablers with no walk
+// fails here (#658), as does one the test has no off value or refusal for.
+func TestEveryFamilyEnablerRefusesANewMemberWhileItIsOffAndTakesTheMembersVariableSetToNothingAsUnset(t *testing.T) {
 	off := map[string]string{"cimd": "false", "app-tokens": "off"}
+	refusal := map[string]string{"cimd": "%s has no effect while BYWARD_CIMD is false", "app-tokens": "%s set while BYWARD_APP_TOKENS=off"}
 	for _, enabler := range familyEnablers {
 		t.Run(enabler, func(t *testing.T) {
 			value, ok := off[enabler]
-			if !ok {
-				t.Fatalf("give %s's off value here, and a walk that refuses its family while it is off", enabler)
+			if !ok || refusal[enabler] == "" {
+				t.Fatalf("give %s's off value and refusal here, and a walk that refuses its family while it is off", enabler)
 			}
-			reg := append(slices.Clone(registry), Setting{Name: "probe-member", shape: asGivenShape, Group: GroupOperations, Auth: ForAuth, BothUpstreams: true, EnabledBy: enabler})
-			env := append(slices.Clone(base), lookup(enabler).Env()+"="+value, "BYWARD_PROBE_MEMBER=x")
-			v, err := resolve(reg, nil, env, baseFiles, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := validate(v, false, false); !isConfigError(err) || !strings.Contains(err.Error(), "BYWARD_PROBE_MEMBER") {
-				t.Errorf("%s=%s with a new member given: err = %v, want it refused, named", lookup(enabler).Env(), value, err)
+			for _, tc := range []struct {
+				given     string
+				args, env []string
+				named     string // the refused probe, as given; "" when it loads
+			}{
+				{"by its variable", nil, []string{"BYWARD_PROBE_MEMBER=x"}, "BYWARD_PROBE_MEMBER"},
+				{"as a flag set to nothing", []string{"--probe-member="}, nil, "--probe-member"},
+				{"as a variable set to nothing", nil, []string{"BYWARD_PROBE_MEMBER="}, ""},
+			} {
+				env := append(append(slices.Clone(base), lookup(enabler).Env()+"="+value), tc.env...)
+				v, err := resolve(append(slices.Clone(registry), probe(enabler)), tc.args, env, baseFiles, nil)
+				if err != nil {
+					t.Errorf("%s=%s, a member %s: resolve: %v", lookup(enabler).Env(), value, tc.given, err)
+					continue
+				}
+				_, err = validate(v, false, false)
+				if tc.named == "" {
+					if err != nil {
+						t.Errorf("%s=%s, a member %s: err = %v, want it unset, loading", lookup(enabler).Env(), value, tc.given, err)
+					}
+					continue
+				}
+				if want := fmt.Sprintf(refusal[enabler], tc.named); !isConfigError(err) || !strings.Contains(err.Error(), want) {
+					t.Errorf("%s=%s, a member %s: err = %v, want it refused: %q", lookup(enabler).Env(), value, tc.given, err, want)
+				}
 			}
 		})
 	}
 }
 
-// A CIMD host list counts once it holds an entry, not once given: a list of none while CIMD is false
-// is refused for its form alone, never also as having no effect (#658), by its variable and its flag.
+// A CIMD host list counts once it holds an entry or is a flag set to nothing (#596), not merely once
+// given: a list of none ("," or white space alone) while CIMD is false is refused for its form alone,
+// never also as having no effect (#658), by its variable and its flag.
 func TestACIMDHostListOfNoneIsRefusedOnlyForItsForm(t *testing.T) {
 	for _, name := range []string{"cimd-trusted-hosts", "cimd-allowed-hosts"} {
-		for _, f := range givenForms(lookup(name), ",") {
-			_, err := load(t, f.args, append([]string{"BYWARD_CIMD=false"}, f.env...)...)
-			if want := f.from + ": want at least one entry; got a list of none"; !isConfigError(err) || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "no effect") {
-				t.Errorf("%s=, beside BYWARD_CIMD=false: err = %v, want %q and no \"no effect\"", f.from, err, want)
+		for _, none := range []string{",", " "} {
+			for _, f := range givenForms(lookup(name), none) {
+				_, err := load(t, f.args, append([]string{"BYWARD_CIMD=false"}, f.env...)...)
+				if want := f.from + ": want at least one entry; got a list of none"; !isConfigError(err) || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "no effect") {
+					t.Errorf("%s=%q beside BYWARD_CIMD=false: err = %v, want %q and no \"no effect\"", f.from, none, err, want)
+				}
 			}
 		}
 	}

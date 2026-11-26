@@ -14,7 +14,7 @@ func (c *Config) appTokens(v *Values) []error {
 	case "off":
 		var set []string
 		for _, n := range v.familyOf("app-tokens") { // EnabledBy "app-tokens": a new one is refused with no edit (#658)
-			if v.byKey[n].Source != SourceDefault {
+			if v.isSet(n) {
 				set = append(set, named(n))
 			}
 		}
