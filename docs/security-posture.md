@@ -314,9 +314,9 @@ Direct modules (`go.mod`):
 | Module | Version | Purpose |
 |---|---|---|
 | `code.dny.dev/ssrf` | v0.3.0 | The SSRF guard's dial-time address check for client-supplied URLs (`internal/ssrfguard`) |
-| `github.com/go-jose/go-jose/v4` | v4.1.6 | Verifying IdP ID tokens, client assertions and the JWKS. The only JOSE/OIDC library: no go-oidc, no x/oauth2 ([ADR-0026](adr/0026-idp-adapters-go-jose-only.md)). |
+| `github.com/go-jose/go-jose/v4` | v4.1.9 | Verifying IdP ID tokens, client assertions and the JWKS. The only JOSE/OIDC library: no go-oidc, no x/oauth2 ([ADR-0026](adr/0026-idp-adapters-go-jose-only.md)). |
 | `golang.org/x/net` | v0.62.0 | `idna`: shows punycode on the consent page |
-| `modernc.org/sqlite` | v1.61.0 | The pure-Go SQLite store (the default store). |
+| `modernc.org/sqlite` | v1.61.1 | The pure-Go SQLite store (the default store). |
 | `github.com/jackc/pgx/v5` | v5.12.0 | The PostgreSQL store, for several replicas (`internal/store/postgres`) |
 | `golang.org/x/sys` | v0.49.0 | The peer credentials of a stdio process asking the token socket (`internal/upstream/stdio`) |
 | `github.com/go-logr/logr` | v1.4.4 | Routes the tracing SDK's own errors into byward's log (`internal/tracing`) |
