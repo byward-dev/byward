@@ -20,16 +20,17 @@ var emptyModes = []struct {
 }
 
 // A variable set to nothing is the same as unset, for every setting in each mode (#428): env
-// templates list every variable, often empty. A setting the mode needs is still required. The
-// internal listener, where empty turns it off, is the one exception, pinned below; the walk names it
-// rather than reading EmptyIsGiven, so a setting given that field by mistake fails here.
+// templates list every variable, often empty. A setting the mode needs is still required. A setting
+// that keeps empty as given (EmptyIsGiven) is skipped: the internal listener, where empty turns it off,
+// is the one, and TestOnlyTheInternalListenerKeepsEmptyAsGiven pins that set, so a setting given the
+// field by mistake fails there.
 func TestEverySettingSetToNothingLoadsAsIfUnset(t *testing.T) {
 	for _, m := range emptyModes {
-		if _, _, err := Load(nil, m.env, m.files); err != nil {
+		if _, _, err := Load(nil, m.env, m.files); err != nil { // also the Default walk's per-mode check (TestEverySettingsDefaultIsAValueItsParserTakes)
 			t.Fatalf("%s: %v", m.name, err)
 		}
 		for _, s := range registry {
-			if s.Name == "internal-listen" {
+			if s.EmptyIsGiven { // kept as given (TestOnlyTheInternalListenerKeepsEmptyAsGiven)
 				continue
 			}
 			unset := without(s.Env())(slices.Clone(m.env))

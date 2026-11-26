@@ -11,8 +11,8 @@ func TestAssertionSettingsDefaultToAuthorizationWithRolesInTheDataDirectory(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.AssertionHeader != "Authorization" || !slices.Equal(c.AssertionClaims, []string{"roles"}) || c.AssertionKeysDir != "/srv/byward/assertion-keys" {
-		t.Fatalf("header %q claims %v keys %q", c.AssertionHeader, c.AssertionClaims, c.AssertionKeysDir)
+	if c.AssertionHeader != "Authorization" || !slices.Equal(c.AssertionClaims, []string{"roles"}) || c.AssertionKeysDir != "/srv/byward/assertion-keys" || c.AssertionUnverifiedEmail {
+		t.Fatalf("header %q claims %v keys %q unverified email %v", c.AssertionHeader, c.AssertionClaims, c.AssertionKeysDir, c.AssertionUnverifiedEmail)
 	}
 }
 
