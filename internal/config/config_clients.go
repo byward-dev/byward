@@ -19,8 +19,12 @@ func (c *Config) clientSources(v *Values) []error {
 	var denyErrs []error
 	c.ClientDenylist, denyErrs = parseClientDenylist(v.value("client-denylist"))
 	errs = append(errs, denyErrs...)
-	if c.CIMD, err = v.boolean("cimd"); err != nil {
-		errs = append(errs, err)
+	// A BYWARD_CIMD that does not parse is neither on nor off: its parse error is its one error, and a
+	// member of its family given is not also refused as having no effect while it is false, as appTokens
+	// skips its family on an app-tokens that does not parse (#658).
+	var cimdErr error
+	if c.CIMD, cimdErr = v.boolean("cimd"); cimdErr != nil {
+		errs = append(errs, cimdErr)
 	}
 	// The CIMD family (EnabledBy "cimd"), each member refused while CIMD is false once set (isSet): a
 	// flag set to nothing too, as every off check refuses one (#596); a variable set to nothing is unset
@@ -37,7 +41,7 @@ func (c *Config) clientSources(v *Values) []error {
 			errs = append(errs, hostErrs...)
 			counts = len(*dst) > 0 || set && v.empty(name)
 		}
-		if counts && !c.CIMD {
+		if counts && !c.CIMD && cimdErr == nil {
 			errs = append(errs, errorf("%s has no effect while %s is false; remove one of them", v.NameAsGiven(name), v.NameAsGiven("cimd")))
 		}
 	}

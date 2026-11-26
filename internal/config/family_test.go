@@ -105,6 +105,62 @@ func TestAMemberRefusedForTheUpstreamModeThatIsOffIsNotAlsoRefusedByItsFamily(t 
 	}
 }
 
+// An enabler that does not parse is neither on nor off: a member given beside it adds nothing to the
+// enabler's own parse error, never also "has no effect" or "set while … off" (#658), by its variable
+// and as a flag set to nothing.
+func TestAMemberBesideAnEnablerThatDoesNotParseAddsNothingToItsError(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		args, env []string
+		member    string
+	}{
+		{"BYWARD_CIMD=bogus", nil, []string{"BYWARD_CIMD=bogus"}, "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai"},
+		{"--cimd=", []string{"--cimd="}, nil, "BYWARD_CIMD_TRUSTED_HOSTS=claude.ai"},
+		{"BYWARD_APP_TOKENS=bogus", nil, []string{"BYWARD_APP_TOKENS=bogus"}, "BYWARD_APP_ROLES=r"},
+		{"--app-tokens=", []string{"--app-tokens="}, nil, "BYWARD_APP_ROLES=r"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, alone := load(t, tc.args, tc.env...)
+			if !isConfigError(alone) {
+				t.Fatalf("%s alone: err = %v, want its config error", tc.name, alone)
+			}
+			_, beside := load(t, tc.args, append(slices.Clone(tc.env), tc.member)...)
+			if beside == nil || beside.Error() != alone.Error() {
+				t.Errorf("%s with %s: err = %v, want only its parse error %q", tc.name, tc.member, beside, alone)
+			}
+		})
+	}
+}
+
+// A CIMD host list beside a BYWARD_CIMD that does not parse is still parsed: its own form error shows
+// beside the parse error, and only that, never also "has no effect" (#658).
+func TestACIMDHostListBesideACIMDThatDoesNotParseStillGivesItsOwnFormError(t *testing.T) {
+	for _, member := range []string{"BYWARD_CIMD_TRUSTED_HOSTS=https://claude.ai", "BYWARD_CIMD_ALLOWED_HOSTS=https://claude.ai"} { // a URL, not a host name
+		_, own := load(t, nil, member) // beside CIMD at its default, true
+		if !isConfigError(own) {
+			t.Fatalf("%s alone: err = %v, want its form error", member, own)
+		}
+		for _, tc := range []struct {
+			name      string
+			args, env []string
+		}{
+			{"BYWARD_CIMD=bogus", nil, []string{"BYWARD_CIMD=bogus"}},
+			{"--cimd=", []string{"--cimd="}, nil},
+		} {
+			t.Run(tc.name+" "+strings.SplitN(member, "=", 2)[0], func(t *testing.T) {
+				_, alone := load(t, tc.args, tc.env...)
+				if !isConfigError(alone) {
+					t.Fatalf("%s alone: err = %v, want its config error", tc.name, alone)
+				}
+				_, beside := load(t, tc.args, append(slices.Clone(tc.env), member)...)
+				if want := alone.Error() + "; " + own.Error(); beside == nil || beside.Error() != want {
+					t.Errorf("%s with %s: err = %v, want %q", tc.name, member, beside, want)
+				}
+			})
+		}
+	}
+}
+
 // A setting whose EnabledBy names no family enabler stops the program at init, naming it: its family
 // would never be checked, so it would load while the family is off (#658). The real registry passes.
 func TestASettingEnabledByNoFamilyIsRefused(t *testing.T) {
