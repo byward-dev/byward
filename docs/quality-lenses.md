@@ -75,6 +75,7 @@ Sources: ISO/IEC 25010:2023 Safety [secondary] · [CISA Secure by Design [versio
 - What does the **MCP client** get when the IdP is slow, the upstream is down or a stdio child crashes (401 / 503 / JSON-RPC error)?
 - Does every outbound call carry a deadline from the inbound one? Are retries bounded and jittered?
 - Idempotent under client retries (double `/token`, refresh reuse)? Does state survive a restart?
+- Every way a request can end (completes, client gone, upstream or process gone, timeout, shutdown) and every state its work can be in: which cell of the lifecycle matrix (#672) pins each?
 
 Sources: [Google SRE book](https://sre.google/sre-book/)
 
@@ -101,6 +102,8 @@ Sources: [Twelve-Factor](https://12factor.net/) · [K8s probes v1.37](https://ku
 - Testable without Docker via `internal/testutil` fakes and an injected clock?
 - New dependency: version, maintenance, Apache-2.0-compatible license, govulncheck clean? Builds on the last two Go releases?
 - Concepts and code added versus a solo-maintainer budget?
+- Which input class does it read, and which shared rule or parser does it reuse (`internal/host`, the setting shapes, a registry field)? Is the behaviour for unset, set to nothing and empty written on the issue?
+- Which registry walk or decision-golden column fails when a new caller skips the rule? A new rule gets a golden column or walk, not more examples.
 
 Sources: [Go release policy](https://go.dev/doc/devel/release) · [govulncheck v1.9.0](https://go.dev/doc/security/vuln/) · ADR-0002
 
