@@ -45,7 +45,7 @@ by port:
 refused because:
    9492  421
 
-## internal Host: 685 pass, 8832 refused, of 9517
+## internal Host: 320 pass, 9197 refused, of 9517
 by family:
   name                     pass    30  refused   996
   name edge                pass     0  refused  2280
@@ -55,37 +55,37 @@ by family:
   ipv4 spelling            pass    60  refused   966
   ipv6                     pass   137  refused   661
   ipv4-mapped              pass    43  refused   299
-  zone                     pass   365  refused  1172
+  zone                     pass     0  refused  1537
   invisible                pass     0  refused   570
 by wrap:
-  bare                     pass   445  refused  1131
-  [h]                      pass   220  refused  1357
-  [h                       pass    20  refused  1556
+  bare                     pass   213  refused  1363
+  [h]                      pass   100  refused  1477
+  [h                       pass     7  refused  1569
   h]                       pass     0  refused  1596
   [h]]                     pass     0  refused  1596
   [h]x                     pass     0  refused  1596
 by port:
-  none                     pass    57  refused   442
-  :                        pass    49  refused   452
-  :443                     pass    56  refused   445
-  :80                      pass    56  refused   445
-  :8080                    pass    56  refused   445
-  :9090                    pass    56  refused   445
-  :65535                   pass    49  refused   452
-  :0                       pass    56  refused   445
-  :65536                   pass    49  refused   452
-  :123456                  pass    13  refused   488
-  :080                     pass    56  refused   445
-  :+80                     pass    13  refused   488
-  :-1                      pass    13  refused   488
-  :0x50                    pass    13  refused   488
-  :8a                      pass    20  refused   481
-  :８０                      pass    13  refused   488
-  :80:80                   pass    20  refused   481
-  :80:443                  pass    20  refused   481
-  :80]                     pass    20  refused   481
+  none                     pass    34  refused   465
+  :                        pass    24  refused   477
+  :443                     pass    31  refused   470
+  :80                      pass    31  refused   470
+  :8080                    pass    31  refused   470
+  :9090                    pass    31  refused   470
+  :65535                   pass    24  refused   477
+  :0                       pass    31  refused   470
+  :65536                   pass    24  refused   477
+  :123456                  pass     0  refused   501
+  :080                     pass    31  refused   470
+  :+80                     pass     0  refused   501
+  :-1                      pass     0  refused   501
+  :0x50                    pass     0  refused   501
+  :8a                      pass     7  refused   494
+  :８０                      pass     0  refused   501
+  :80:80                   pass     7  refused   494
+  :80:443                  pass     7  refused   494
+  :80]                     pass     7  refused   494
 refused because:
-   8832  421
+   9197  421
 
 ## Origin: 19 pass, 19033 refused, of 19052
 by family:

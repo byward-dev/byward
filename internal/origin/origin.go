@@ -39,8 +39,9 @@ func Hosts(rec *audit.Log, allowed []string, next http.Handler) http.Handler {
 // InternalHosts guards the internal listener (ADR-0018 §2, §10). Kubelet probes and Prometheus
 // address a pod by its IP, which changes, so any IP literal passes, as do `localhost` and the
 // operator's allowed hosts, on any port of up to 5 digits (the listener's port is the operator's
-// choice). A Host header in no shape host.CutHostname takes, or naming no IP address and no allowed
-// host, gets 421. A DNS rebinding attack always arrives with the attacker's own host name, and gets 421.
+// choice). A Host header in no shape host.CutHostname takes, naming an IPv6 address with a zone (no
+// client sends one: a URL cannot carry it, #652), or naming no IP address and no allowed host, gets
+// 421. A DNS rebinding attack always arrives with the attacker's own host name, and gets 421.
 func InternalHosts(rec *audit.Log, allowed []string, next http.Handler) http.Handler {
 	set := map[string]bool{"localhost": true}
 	for _, h := range allowed {
@@ -49,7 +50,7 @@ func InternalHosts(rec *audit.Log, allowed []string, next http.Handler) http.Han
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 127.1 is an IP literal too; a Host that names no host, or a port that is not up to 5 digits, is refused.
 		name, ok := host.CutHostname(host.Canonical(r.Host))
-		if _, err := netip.ParseAddr(name); !ok || err != nil && !set[name] {
+		if _, err := netip.ParseAddr(name); !ok || host.HasZone(name) || err != nil && !set[name] {
 			rec.RecordUnauthenticated(r, audit.Event{Name: audit.HostRejected, Outcome: audit.Failure, Host: r.Host})
 			http.Error(w, "misdirected request", http.StatusMisdirectedRequest)
 			return
